@@ -44,7 +44,7 @@
  */
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import { execFileSync } from 'child_process';
+import { execFile } from 'child_process';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
@@ -237,7 +237,12 @@ const SHAPES: readonly Shape[] = [
   { label: 'unreadable file', raw: manifest({ provider: 'jira' }), chmod000: true, admitted: false },
 ];
 
-describe('tracker key path: TS and shell readers agree on every manifest shape', () => {
+// Concurrent: every row stages its OWN `case-N` devflow directory and reads it
+// through a driver script that is only ever read, so no two rows share a byte.
+// The spawn is asynchronous for the same reason — a synchronous one holds the
+// event loop for its whole duration, so a suite of them runs end to end however
+// it is scheduled.
+describe.concurrent('tracker key path: TS and shell readers agree on every manifest shape', () => {
   let tmpRoot: string;
   let driverPath: string;
 
@@ -253,12 +258,14 @@ describe('tracker key path: TS and shell readers agree on every manifest shape',
   });
 
   /** The shell reader's raw token for one shape on one backend. */
-  function readViaShell(devflowDir: string, backend: 'jq' | 'node'): string {
-    return execFileSync(
-      'bash',
-      [driverPath, HOOKS_DIR, path.join(devflowDir, 'manifest.json'), TRACKER_PROVIDER_KEY_PATH, backend],
-      { stdio: ['ignore', 'pipe', 'pipe'] },
-    ).toString().trim();
+  function readViaShell(devflowDir: string, backend: 'jq' | 'node'): Promise<string> {
+    return new Promise((resolve, reject) => {
+      execFile(
+        'bash',
+        [driverPath, HOOKS_DIR, path.join(devflowDir, 'manifest.json'), TRACKER_PROVIDER_KEY_PATH, backend],
+        (err, stdout) => (err ? reject(err) : resolve(stdout.trim())),
+      );
+    });
   }
 
   function stage(shape: Shape, index: number): string {
@@ -277,7 +284,13 @@ describe('tracker key path: TS and shell readers agree on every manifest shape',
       it(`${shape.label} (${backend} backend) → ${shape.admitted ? 'directive' : 'no directive'}`, async () => {
         const devflowDir = stage(shape, index * 2 + (backend === 'jq' ? 0 : 1));
         try {
-          const token = readViaShell(devflowDir, backend);
+          const token = await readViaShell(devflowDir, backend);
+          // The reader is asynchronous, and a dropped `await` yields a Promise
+          // here. `ADMITTED.includes(<Promise>)` is false — which is the verdict
+          // every REFUSED shape expects, so the rows that make up most of this
+          // table would stay green while exercising nothing (PF-018). tsc never
+          // sees this file, so the type is checked at runtime or not at all.
+          expect(typeof token, 'the shell reader returned a non-string').toBe('string');
           expect(
             ADMITTED.includes(token),
             `the ${backend} backend returned "${token}", which ${ADMITTED.includes(token) ? 'is' : 'is not'} ` +
@@ -316,7 +329,7 @@ describe('tracker key path: TS and shell readers agree on every manifest shape',
     }
   });
 
-  it('the driver really switches backends (PF-045: the precondition is asserted)', () => {
+  it('the driver really switches backends (PF-045: the precondition is asserted)', async () => {
     // The one shape where the two backends are known to produce DIFFERENT tokens
     // for the same bytes: jq errors indexing a string and yields "", node's
     // getNestedField returns undefined and yields the default. If both came back
@@ -325,8 +338,8 @@ describe('tracker key path: TS and shell readers agree on every manifest shape',
     const devflowDir = path.join(tmpRoot, 'backend-probe');
     fs.mkdirSync(devflowDir, { recursive: true });
     fs.writeFileSync(path.join(devflowDir, 'manifest.json'), manifest('jira'));
-    expect(readViaShell(devflowDir, 'jq')).toBe('');
-    expect(readViaShell(devflowDir, 'node')).toBe(DEFAULT_TRACKER_PROVIDER);
+    expect(await readViaShell(devflowDir, 'jq')).toBe('');
+    expect(await readViaShell(devflowDir, 'node')).toBe(DEFAULT_TRACKER_PROVIDER);
   });
 
   it('the hook and this file read the same key path constant', () => {
