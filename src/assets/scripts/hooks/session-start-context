@@ -236,7 +236,9 @@ if [ -f "$TRACKER_SENTINEL" ] && [ ! -f "$TRACKER_CONVENTIONS" ]; then
       # Bounded before the comparison: `[ "$N" -ge 5 ]` on a value past intmax_t
       # prints "integer expression expected" to stderr and takes the FALSE branch,
       # so an absurdly long counter would fail OPEN — uncapped — and leak a shell
-      # error. A count that matters needs one digit, so 7+ is already past the cap.
+      # error. The arm matches SIX digits or more (the earlier arms have already
+      # taken every non-digit), and a count that matters needs one, so anything
+      # reaching here is past the cap by five orders of magnitude.
       dbg "tracker attempt counter out of range — treated as at the cap"
       TRACKER_ATTEMPTS="$TRACKER_ATTEMPTS_MAX"
       ;;
