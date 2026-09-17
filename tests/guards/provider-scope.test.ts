@@ -1,16 +1,26 @@
 /**
- * provider-scope — Phase 2 is GitHub-only, and says so mechanically (P2-S15, AC-2.7).
+ * provider-scope — a provider name appears only where a provider is resolved or
+ * where a provider's own mechanics are stated, and the surface says so
+ * mechanically (P2-S15, AC-2.7, AC-3.12).
  *
- * Four negatives, all from §14.5's standing prohibitions and AC-2.7's amended
- * positive form. Each is a NAMED collector with a known-bad probe that drives it.
+ * Five negatives, all from §14.5's standing prohibitions and AC-2.7's amended
+ * positive form. Each is driven by a NAMED collector with a known-bad probe that
+ * seeds the shape it must report.
  *
  *   1. No Jira/Linear literal outside the resolution preamble and the owning
- *      provider's own mechanics (AC-3.12, ADR-025 per-literal classification).
+ *      provider's own mechanics (AC-3.12, ADR-025 per-literal classification)
+ *      — collectForeignProviderLiterals.
  *   2. No `mcp__` / vendor tool literal, and no user-facing "MCP", in anything a
- *      Git spawn can load.
- *   3. The Git agent declares no `tools:` frontmatter key.
+ *      Git spawn can load — collectVendorTokens.
+ *   3. The Git agent declares no `tools:` frontmatter key — collectFrontmatterKeys.
  *   4. `_mcp.md` is generated ONLY behind its registry gate (AC-2.7 re-scoped in
- *      3a-4, hazard H7) and is named from no generated GitHub mechanics file.
+ *      3a-4, hazard H7) and is named from no generated GitHub mechanics file —
+ *      collectOpsNamingContract for the second half, and INJECTED registries for
+ *      the gate itself, where the probe is a registry with no tool-call provider
+ *      rather than a seeded file.
+ *   5. The `/plan` command promises a tracker issue, not a host issue —
+ *      collectHostIssueLiterals. Collector 1 cannot see this one: `github` is the
+ *      DEFAULT provider, not a foreign token.
  *
  * SCOPE, and why it is a scope rather than a cleverer regex
  * --------------------------------------------------------
@@ -186,6 +196,45 @@ const PROVIDER_OWNED_PATHS: readonly ProviderOwnedPath[] = [
   },
 ];
 
+/**
+ * One foreign-provider token, addressed by name and raised by name when absent.
+ *
+ * `find(...)!` would hand the caller an `undefined` whose only symptom is "cannot
+ * read properties of undefined" at the next `.pattern` read, naming neither the
+ * table nor the token — and an ownership entry pointing at a token nobody
+ * registered is exactly the drift these arms report.
+ */
+function requireForeignToken(name: string): ProviderToken {
+  const found = FOREIGN_PROVIDER_TOKENS.find(t => t.name === name);
+  if (found === undefined) {
+    throw new Error(
+      `"${name}" is not in FOREIGN_PROVIDER_TOKENS (registered: ` +
+      `${FOREIGN_PROVIDER_TOKENS.map(t => t.name).join(', ')}) — an ownership entry naming an ` +
+      `unregistered token exempts a path from a scan that never covered it`,
+    );
+  }
+  return found;
+}
+
+/**
+ * One scanned corpus entry, addressed by path and raised by path when absent.
+ *
+ * The scan roots read the built tree, so a missing entry means a root went empty
+ * or an artifact was never built — a failure that has to name the file, because
+ * "cannot read properties of undefined" is indistinguishable from a logic error.
+ */
+function requireCorpusEntry(corpus: readonly CorpusEntry[], relPath: string): CorpusEntry {
+  const found = corpus.find(e => e.path === relPath);
+  if (found === undefined) {
+    throw new Error(
+      `${relPath} is not in the scanned corpus (${corpus.length} file(s) scanned) — either a scan ` +
+      `root went empty or the artifact was never built, and an unscanned file is an exemption ` +
+      `nobody wrote down`,
+    );
+  }
+  return found;
+}
+
 /** Is `path` owned by `token` — i.e. may it name that provider? */
 function ownsToken(path: string, token: string): boolean {
   return PROVIDER_OWNED_PATHS.some(owned => owned.token === token && path.startsWith(owned.prefix));
@@ -249,10 +298,9 @@ describe('provider-scope: no Jira or Linear literal outside the provider map (§
     // an exemption nobody notices going out of date. If the map ever stops naming
     // the foreign tokens, this fails and the allowlist is deleted, not carried.
     for (const file of PROVIDER_MAP_ALLOWLIST.files) {
-      const entry = corpus.find(e => e.path === file);
-      expect(entry, `${file} missing from corpus`).toBeDefined();
-      const whole = entry!.content;
-      const stripped = stripAllowlistedRegion(entry!);
+      const entry = requireCorpusEntry(corpus, file);
+      const whole = entry.content;
+      const stripped = stripAllowlistedRegion(entry);
       expect(
         stripped.length,
         `${file}: the allowlisted region was not found — the preamble anchors changed`,
@@ -289,7 +337,7 @@ describe('provider-scope: no Jira or Linear literal outside the provider map (§
         matched.length,
         `ownership entry "${owned.prefix}" matched no scanned file — delete it or fix the prefix`,
       ).toBeGreaterThan(0);
-      const token = FOREIGN_PROVIDER_TOKENS.find(t => t.name === owned.token)!;
+      const token = requireForeignToken(owned.token);
       expect(
         matched.some(e => token.pattern.test(e.content)),
         `"${owned.prefix}" is owned by "${owned.token}" but names it nowhere — the entry silences ` +
@@ -580,8 +628,32 @@ describe('provider-scope: the compiled Git agent declares no tools: key', () => 
 // uses would be handed the DEGRADED vocabulary of capabilities it has no analogue
 // for (AC-3.12).
 
+/** The contract's generated basename — the literal a GitHub mechanics file may never name. */
+const MCP_REL_NAME = '_mcp.md';
+
+/** The generated GitHub per-op references, as `[op, text]` pairs a probe can seed. */
+function githubOpReferences(): ReadonlyArray<readonly [string, string]> {
+  return TRACKER_GITHUB_OPS.map(op => [
+    op,
+    readFileSync(path.join(REFS_DIR, 'tracker', 'github', `${op}.md`), 'utf-8'),
+  ] as const);
+}
+
+/**
+ * Named collector: generated GitHub op references that name the tool-call contract.
+ *
+ * Takes the corpus rather than reading it, so the probe below can seed one op and
+ * show the collector reports it — the absence arm alone is equally green for a
+ * collector that recognises nothing (PF-018, PF-064).
+ */
+export function collectOpsNamingContract(
+  refs: ReadonlyArray<readonly [op: string, text: string]>,
+): string[] {
+  return refs.filter(([, text]) => text.includes(MCP_REL_NAME)).map(([op]) => op);
+}
+
 describe('provider-scope: _mcp.md is generated only behind its gate (AC-2.7 re-scoped, H7, D-D)', () => {
-  const MCP_REL = path.join('tracker', '_mcp.md');
+  const MCP_REL = path.join('tracker', MCP_REL_NAME);
 
   it('the contract module IS authored — the gate governs a real document', () => {
     const source = path.join(ROOT, MCP_CONTRACT_MODULE.source);
@@ -657,15 +729,32 @@ describe('provider-scope: _mcp.md is generated only behind its gate (AC-2.7 re-s
     // a github op naming the tool-call contract would make a CLI provider load a
     // document about a transport it never uses, and would hand it the DEGRADED
     // vocabulary of capabilities it has no analogue for.
-    const named: string[] = [];
-    for (const op of TRACKER_GITHUB_OPS) {
-      const file = path.join(REFS_DIR, 'tracker', 'github', `${op}.md`);
-      const text = readFileSync(file, 'utf-8');
-      if (text.includes('_mcp.md')) named.push(op);
-    }
-    expect(named, `ops naming _mcp.md: ${named.join(', ')}`).toEqual([]);
-    expect(TRACKER_GITHUB_OPS.length, 'the op roster is empty — the loop above ran zero times')
-      .toBeGreaterThan(0);
+    const refs = githubOpReferences();
+    expect(
+      collectOpsNamingContract(refs),
+      `ops naming ${MCP_REL_NAME}: ${collectOpsNamingContract(refs).join(', ')}`,
+    ).toEqual([]);
+    expect(
+      refs.length,
+      'the op roster is empty — the collector above ran over nothing (PF-018)',
+    ).toBeGreaterThan(0);
+  });
+
+  it('known-bad probe: the same collector reports a seeded contract reference', () => {
+    // An absence result is a statement about what the matcher can express, never
+    // about the property (PF-064), so the collector is driven over the real corpus
+    // with one op seeded — no committed file is touched to show red.
+    const refs = githubOpReferences();
+    const [first, ...rest] = refs;
+    const seeded: ReadonlyArray<readonly [string, string]> = [
+      [first[0], `${first[1]}\n**Mechanics:** load \`references/tracker/${MCP_REL_NAME}\`.`],
+      ...rest,
+    ];
+    expect(seeded, 'the seed must change the corpus').not.toEqual(refs);
+    expect(
+      collectOpsNamingContract(seeded),
+      'the collector must report the seeded op, or the absence arm above is inert',
+    ).toEqual([first[0]]);
   });
 
   it('the contract module is INSIDE the scanned corpus, so its wording is governed', () => {
@@ -680,7 +769,7 @@ describe('provider-scope: _mcp.md is generated only behind its gate (AC-2.7 re-s
       'the contract module must be scanned by the provider and vendor collectors — an unscanned ' +
       'file is an exemption nobody wrote down',
     ).toContain('src/assets/mds/tracker/_mcp.mds');
-    const entry = corpus.find(e => e.path === 'src/assets/mds/tracker/_mcp.mds')!;
+    const entry = requireCorpusEntry(corpus, 'src/assets/mds/tracker/_mcp.mds');
     expect(collectForeignProviderLiterals([entry]), 'the contract is provider-independent').toEqual([]);
     expect(
       collectVendorTokens([entry]),
@@ -778,7 +867,7 @@ describe('provider-scope: the plan command promises a tracker issue, not a host 
     // The staleness half. If the synopsis ever stops naming the host, the exemption
     // is deleted rather than carried — the failure mode an unnoticed exemption is.
     for (const file of PLAN_COMMAND_PATHS) {
-      const entry = corpus.find(e => e.path === file)!;
+      const entry = requireCorpusEntry(corpus, file);
       expect(
         entry.content.includes(HOST_ISSUE_LITERAL),
         `${file}: the usage synopsis no longer names the host — delete PLAN_USAGE_ALLOWLIST`,

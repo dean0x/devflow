@@ -28,8 +28,11 @@
  * Non-vacuity (mechanic 2, H10): both guards use a synthetic corpus / temp root so that
  * the detection logic is proven live without modifying committed source.
  *
- * Requires a build: the requireBuiltCli GREEN contract test reads the real dist/cli.js, so
- * `npm run build` must run first.
+ * Requires a CURRENT build, not merely a build: requireBuiltCli refuses a dist/cli.js
+ * older than the newest compile input as loudly as an absent one, so the GREEN arm of
+ * the AC-0.16 contract test — the one that resolves against the real ROOT — is this
+ * suite's staleness canary. A "dist/cli.js is STALE" failure here reports the tree,
+ * not this guard: rebuild and re-run.
  */
 
 import { describe, it, expect } from 'vitest';
@@ -296,7 +299,10 @@ describe('requireBuiltCli throw contract (AC-0.16)', () => {
     }
   });
 
-  it('GREEN: resolves to dist/cli.js under the real ROOT when the build artifact exists', () => {
+  it('GREEN: resolves to dist/cli.js under the real ROOT when the build is current', () => {
+    // The staleness canary. requireBuiltCli refuses an artifact older than the
+    // newest compile input as loudly as an absent one, so this arm going red says
+    // the tree needs rebuilding — it is not a claim about the guard.
     const cliPath = requireBuiltCli(ROOT);
     expect(cliPath).toBe(path.join(ROOT, 'dist', 'cli.js'));
     expect(existsSync(cliPath)).toBe(true);

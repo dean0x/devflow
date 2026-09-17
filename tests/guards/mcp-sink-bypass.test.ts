@@ -16,16 +16,17 @@
  * a property of PROSE, and prose has no compiler. This file is its compiler.
  *
  * FIVE CLAIMS, kept separate so no one of them can carry the others (PF-064):
- *   1. CONTRACT — the contract module states all four clauses: the
- *      `{SCRUBBED_BODY}` rule, `D11-OK`, `SECRET-EXPOSED` [DR-01] and the
- *      `<bytes>` verification [DR-06]. Asserted against the SOURCE `.mds`.
+ *   1. CONTRACT — the contract module states every clause in CONTRACT_CLAUSES:
+ *      the `{SCRUBBED_BODY}` rule, `D11-OK`, `SECRET-EXPOSED` and the `SCRUB: N`
+ *      echo that makes it conditional [DR-01], and the `<bytes>` verification
+ *      [DR-06]. Asserted against the SOURCE `.mds`.
  *   2. BYPASS — the bypass matcher is RED on real bypass shapes, proven inline.
  *      Two shapes, because a sink has two spellings: the ARGUMENT form
  *      (`body: X`) and the PROSE form (`the description field carrying X`) that
  *      §14.4's select-by-capability-description rule produces. What the matcher
  *      deliberately cannot express is written down on the collector (PF-064).
- *   3. FORWARD — every posting mechanic that spells a body argument names all
- *      four clauses, and no file in the sink class posts an ungated body. The
+ *   3. FORWARD — every posting mechanic that spells a body argument names every
+ *      clause, and no file in the sink class posts an ungated body. The
  *      corpus is LIVE: a provider mechanics tree exists, so this arm is now
  *      evidence about shipped files rather than about the collector alone.
  *   4. PROBES — the forward collector is driven by seeded mechanics that omit
@@ -104,7 +105,7 @@ function contractSource(): string {
 }
 
 // ---------------------------------------------------------------------------
-// 1. CONTRACT — the four clauses, against the source module
+// 1. CONTRACT — every clause in the registry, against the source module
 // ---------------------------------------------------------------------------
 
 /** One required clause of the tool-call D11 contract, and why it exists. */
@@ -163,7 +164,7 @@ export function collectMissingClauses(text: string): string[] {
 describe('tool-call contract: the source module states every D11 clause [E2]', () => {
   const source = contractSource();
 
-  it('names all four clauses, and the byte check is stated as a REFUSAL not a note', () => {
+  it('names every clause in the registry, and states the byte check as a REFUSAL not a note', () => {
     expect(
       collectMissingClauses(source),
       `the tool-call contract is missing clause(s). Each one is the only statement of a control ` +
