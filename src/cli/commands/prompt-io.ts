@@ -1,10 +1,10 @@
 /**
  * Shared wizard prompt-IO seam for devflow init wizard steps.
  *
- * ADR-019 corollary (one-definition seam): PromptOutcome and WizardPromptIO
- * were byte-identical duplicates across attribution-prompts.ts and
- * compliance-prompts.ts (architecture-03 / consistency-06). They are defined
- * ONCE here and re-used via import.
+ * One-definition seam: PromptOutcome and WizardPromptIO were byte-identical
+ * duplicates across attribution-prompts.ts and compliance-prompts.ts
+ * (architecture-03 / consistency-06). They are defined ONCE here and re-used
+ * via import.
  *
  * D-PROMPT-IO: WizardPromptIO is the base DI seam for all two-action wizard
  * steps (note + boolean select). Modules that add a third prompt extend this

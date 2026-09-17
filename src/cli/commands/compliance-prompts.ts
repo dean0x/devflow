@@ -11,7 +11,7 @@
  * own the cancel idiom (p.cancel + process.exit(0)), keeping try/finally cleanup safe.
  *
  * Shared DI seam (PromptOutcome, WizardPromptIO, clackNote, clackSelect) lives in
- * prompt-io.ts — one definition, both wizard modules import from there (ADR-019).
+ * prompt-io.ts — one definition, both wizard modules import from there.
  */
 
 import * as p from '@clack/prompts';

@@ -193,8 +193,7 @@ describe('agent frontmatter compliance contract', () => {
 // so the dynamic hosts are identified by name prefix, not by output-dir content.
 //
 // Deriving from source (not from compiled output) means this test passes even
-// on a clean checkout before build:mds has run — the only reliable contract
-// (applies ADR-019).
+// on a clean checkout before build:mds has run — the only reliable contract.
 //
 // A dynamic host rename (e.g. dynamic-plan.mds → dynamic-orchestrate.mds)
 // without updating plugins.ts would fail this test, surfacing the drift before

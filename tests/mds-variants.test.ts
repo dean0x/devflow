@@ -317,7 +317,7 @@ describe('resolveOutputDir (host variant)', () => {
 // 3. Result error-union completeness
 // ---------------------------------------------------------------------------
 //
-// A union member that no input can produce is dead code (ADR-003 clause iii).
+// A union member that no input can produce is dead code (ADR-003).
 // The two assertions here are the non-vacuity proof — each declared kind is
 // reached by a concrete input, and no input reaches a kind outside the declared
 // set — and the two probes below prove those assertions can actually go red, in
@@ -662,7 +662,7 @@ describe('VARIANT_MODULES (shipped registry)', () => {
   });
 
   it('carries exactly the provider directories whose modules exist', () => {
-    // ADR-003 clause (iii): a registry entry with no module on disk would be an
+    // ADR-003: a registry entry with no module on disk would be an
     // artifact with no reachable consumer, and the converse — a module on disk with
     // no row — is a file the build refuses. Asserted as a set equality over the
     // provider subdirectories, both directions, rather than as a count: a provider
