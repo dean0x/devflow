@@ -79,12 +79,17 @@ const BUDGET_GIT_MD = 55_750;
  * THE PHASE-3 git.md CEILING [DR-13(b)] — the gate, with BUDGET_GIT_MD above as
  * its declared base.
  *
- * 55_750 + 3_120 = 58_870, measured 58_776 (headroom 94 — the same deliberate
+ * 55_750 + 3_120 = 58_870, measured 58_772 (headroom 98 — the same deliberate
  * thinness Phase 2 chose, so the next content addition must again fund itself).
  * The 3_120 is the MEASURED growth of the preamble block, not an estimate: the
- * portion of git.md OUTSIDE the preamble is byte-identical across this change
- * (52_279 ch before and after), which is why the companion gate below can keep
- * holding that portion to the UNRAISED Phase-2 number.
+ * portion of git.md OUTSIDE the preamble started this change byte-identical
+ * (52_279 ch before and after) and has since been CUT, never grown — the
+ * alignment pass deleted the GitHub rate-limit signal from
+ * `backlink-shipped-issues`' D4 line and spent the 163 characters on a preamble
+ * rule, so the non-preamble portion now measures 52_098 ch. That direction is
+ * what the companion gate below is for: it holds the portion outside the preamble
+ * to the UNRAISED Phase-2 number, and a cut there widens its margin rather than
+ * consuming this ceiling.
  *
  * WHAT THE 3_000 BUYS, line by line. Phase 2's preamble resolved the provider
  * MANIFEST-ONLY and read no configuration file; Phase 3 makes the slot real, and
@@ -201,7 +206,7 @@ const BUDGET_LOADED_SET_P3 = BUDGET_LOADED_SET + (BUDGET_GIT_MD_P3 - BUDGET_GIT_
  * by this phase: no github operation file names the tool-call contract (the
  * re-scoped AC-2.7 arm in tests/guards/provider-scope.test.ts PROVES that rather
  * than assuming it), so `MCP_TERM` stays 0 by construction and the GitHub row keeps
- * its 113 ch of headroom. Folding a provider that DOES load the contract into that
+ * its 117 ch of headroom. Folding a provider that DOES load the contract into that
  * number would have billed every GitHub user for bytes they never receive — the
  * exact defect GAP-02 recorded — and would have done it by raising a ratcheted
  * ceiling, which §14.5 forbids outright.
@@ -211,18 +216,18 @@ const BUDGET_LOADED_SET_P3 = BUDGET_LOADED_SET + (BUDGET_GIT_MD_P3 - BUDGET_GIT_
  * GitHub one cannot absorb theirs.
  *
  * MEASURED, term by term, on this tree:
- *     dist/agents/git.md                             58_776
+ *     dist/agents/git.md                             58_772
  *   + skills/git/SKILL.md                             6_581
  *   + skills/worktree-support/SKILL.md                2_942
- *   = the always-preloaded set                       68_299
+ *   = the always-preloaded set                       68_295
  *   + references/tracker/_mcp.md                      6_402   ← 0 on the GitHub path
  *   + max_op references/tracker/jira/{op}.md          6_087   (backlink-shipped-issues)
  *   + max over jira ops of the one-spawn load         7_821   (setup-task: its own
  *                                                              mechanics + learn-conventions.md)
- *   =                                                88_609
+ *   =                                                88_605
  *
- * Pinned at 88_660 — 51 ch of headroom, tighter than Phase 2's 86 and the Phase-3
- * git.md ceiling's 94, so the next addition to the contract or to a Jira mechanics
+ * Pinned at 88_660 — 55 ch of headroom, tighter than Phase 2's 86 and the Phase-3
+ * git.md ceiling's 98, so the next addition to the contract or to a Jira mechanics
  * file must fund itself with a cut rather than reach for slack. It is deliberately
  * NOT re-derived upward from a later measurement: this gate already went red once
  * during authoring — a 197 ch rewrite of the contract's truncation clause — and the
@@ -251,19 +256,20 @@ const BUDGET_LOADED_SET_JIRA = 88_660;
  * it by raising a ratcheted ceiling.
  *
  * MEASURED, term by term, on this tree:
- *     dist/agents/git.md                             58_776
+ *     dist/agents/git.md                             58_772
  *   + skills/git/SKILL.md                             6_581
  *   + skills/worktree-support/SKILL.md                2_942
- *   = the always-preloaded set                       68_299
+ *   = the always-preloaded set                       68_295
  *   + references/tracker/_mcp.md                      6_402   ← 0 on the GitHub path
- *   + max_op references/tracker/linear/{op}.md        7_679   (backlink-shipped-issues)
+ *   + max_op references/tracker/linear/{op}.md        7_706   (backlink-shipped-issues)
  *   + max over linear ops of the one-spawn load       8_571   (setup-task: its own
  *                                                              mechanics + learn-conventions.md)
- *   =                                                90_951
+ *   =                                                90_974
  *
- * Pinned at 91_000 — 49 ch of headroom, the same deliberate thinness as the Jira
- * row's 51, so the next addition to the contract or to a Linear mechanics file must
- * fund itself with a cut rather than reach for slack.
+ * Pinned at 91_000 — 26 ch of headroom, the thinnest of the three rows and the
+ * binding constraint on any addition to the always-loaded agent: a character added
+ * to git.md is a character added to this row, so the next such addition must fund
+ * itself with a cut rather than reach for slack.
  *
  * WHY THIS PROVIDER'S max_op IS THE LARGEST OF THE THREE, recorded so the number is
  * not read as bloat. `backlink-shipped-issues` is where the dedup LADDER is stated,
@@ -272,7 +278,7 @@ const BUDGET_LOADED_SET_JIRA = 88_660;
  * reader needs in order to not treat rank 4 as a misconfiguration — and the rank-4
  * marker predicate then needs BOTH halves written down, the first-line binding and
  * the second discriminator, because with no author column to compare against the
- * marker is the only evidence a comment is devflow's. That is 2_672 ch more than
+ * marker is the only evidence a comment is devflow's. That is 2_699 ch more than
  * GitHub's largest mechanics file, and it is content rather than slack.
  *
  * A NEW registered `ceilings` entry (`budget-loaded-set-linear`), for the same
@@ -309,7 +315,7 @@ const PRICED_PROVIDERS: Readonly<Record<string, number>> = {
  * KEPT AT 40 THROUGH PHASE 3, and deliberately so. §14.10 [DR-13] proposed
  * raising it to 70 for "the honest number for P3a-S13 + P3a-S14's additions" —
  * the re-derivation says that estimate was wrong in the safe direction: the
- * Phase-3 preamble measures 34 lines against this ceiling of 40. A `<= 70`
+ * Phase-3 preamble measures 37 lines against this ceiling of 40. A `<= 70`
  * assertion would therefore be strictly WEAKER than the one already in place,
  * bought nothing, and cost the one bound that limits how much always-loaded
  * prose the next phase may add. A ceiling is re-derived downward or not at all,
