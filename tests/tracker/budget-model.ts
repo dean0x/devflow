@@ -60,9 +60,10 @@ function measureRequired(label: string, filePath: string): Measurement {
 /**
  * Measure a file that may not exist yet, as a recorded 0 row.
  *
- * Used only for the four-shape table's NAMED rows (learn-conventions.md,
- * publication-gate.md): they are T2 deliverables, and a table that threw on
- * their absence could not record the cost they are about to add. Tolerating
+ * Used only for the four-shape table's NAMED rows — learn-conventions.md,
+ * publication-gate.md and decision-markers.md: each is recorded so its cost is
+ * visible rather than merely deducted from git.md, and a table that threw on
+ * their absence could not record a cost that is about to arrive. Tolerating
  * absence here is not tolerating it in the budget — nothing that gates on a
  * number reads a row through this function.
  */

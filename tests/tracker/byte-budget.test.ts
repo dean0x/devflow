@@ -98,11 +98,11 @@ import {
  * pattern in the same commit; that is the permitted direction for a ceiling, and the
  * manifest guard's probe still proves an INCREMENT would go red.
  *
- * PHASE 3: no longer the live gate — BUDGET_GIT_MD_P3 below is, and this value is
- * the DECLARED BASE it is re-derived from. Kept for that reason rather than out of
- * sentiment: the Phase-3 ceiling is meaningless without the number it moved from,
- * and a reviewer reads the delta rather than a fresh figure. Recorded in the
- * four-shape table as the Phase-2 row.
+ * THE LIVE git.md GATE IS BUDGET_GIT_MD_P3 below; this value is the DECLARED BASE
+ * that one is re-derived from, and it is registered for that reason. A ceiling is
+ * only ever re-derived DOWNWARD, so the base has to stay pinned: the Phase-3
+ * figure is read as a delta from it, and lowering it here would silently lower the
+ * Phase-3 loaded-set gate too. Recorded in the four-shape table as the Phase-2 row.
  */
 const BUDGET_GIT_MD = 55_750;
 
@@ -367,18 +367,17 @@ const PREAMBLE_MAX_LINES = 40;
  * D-LOADED-SET-SCOPE excludes this file from the gate on purpose: it is loaded by
  * `fetch-review-threads`, a NON-tracker op that loaded it long before the split, so
  * it is not a cost the split introduces. ADR-025's amendment is what the exclusion
- * owes in return — the excluded term goes in a RECORDED, non-gating row — and a
- * recorded row with no anchor rots, which is exactly what happened here: the PR body
- * and the feature KB both record 17,259 ch while the file on this branch measures
- * 17,539, drifted 280 ch with nothing tracking it.
+ * owes in return — the excluded term goes in a RECORDED, non-gating row — and THIS
+ * CONSTANT IS THAT ROW'S ANCHOR. Without one the row rots: a figure transcribed into
+ * a PR body or a KNOWLEDGE.md is true when written and silent afterwards, so the
+ * excluded term drifts with nothing tracking it.
  *
- * So this is pinned with `toBe`, never `<=`. It is not a ceiling to stay under; it
- * is the number the file IS. THE ONLY COMMIT THAT MAY CHANGE IT IS THE COMMIT THAT
+ * So it is pinned with `toBe`, never `<=`. It is not a ceiling to stay under; it is
+ * the number the file IS, and no figure is recorded here beside it — the assertion
+ * is the record (PF-057). THE ONLY COMMIT THAT MAY CHANGE IT IS THE COMMIT THAT
  * EDITS github-api.md's BYTES, and that commit re-pins it here in the same change —
- * the treatment GIT_MD_CHARS gets in tests/goldens/github-status-lines.test.ts.
- * Later work on this branch DOES edit that file (batches B20 and B23), so each of
- * those is expected to land a new value here; a red equality pin means "re-measure
- * and re-pin", never "relax the assertion".
+ * the treatment GIT_MD_CHARS gets in tests/goldens/github-status-lines.test.ts. A
+ * red equality pin means "re-measure and re-pin", never "relax the assertion".
  *
  * Measured, never hand-typed:
  *   node -e "console.log(require('fs').readFileSync('src/assets/skills/git/references/github-api.md','utf-8').length)"
