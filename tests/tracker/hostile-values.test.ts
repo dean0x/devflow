@@ -73,20 +73,8 @@ function readGeneratedReference(relPath: string): string {
 // ---------------------------------------------------------------------------
 
 /**
- * The nine payloads. The first seven are verbatim from the register, each
- * targeting a different sink: command substitution (two spellings), flag
- * injection, line injection, size, credential-in-URL, and query-operator escape.
- *
- * THE LAST TWO ARE IDENTITY PAYLOADS, and they are the two the register's shell-
- * and query-shaped rows cannot reach. `## Assignee` admits `none` and `self` and
- * nothing else — §14.3's cell says so in the strongest form, "**never** a literal
- * email address or account identifier" — and `## Required Fields` denies
- * `assignee` beyond `self` by name. Neither prohibition contains a metacharacter,
- * so every payload above is rejected by those two cells for a reason that has
- * nothing to do with what they are actually guarding: an address or an opaque
- * account id is well-formed, harmless-looking, and exactly what an author reaches
- * for when the identify-current-user capability is unavailable. Pinning them is
- * what makes those two cells' rejections load-bearing rather than incidental.
+ * The two identity payloads, named once so the table and the arm that grades them
+ * cannot drift apart.
  *
  * THE accountId SPELLING IS THE COLON-BEARING ONE, deliberately. Atlassian issues
  * both `712020:{uuid}` and a bare 24-hex form, and the bare form is
@@ -98,6 +86,26 @@ function readGeneratedReference(relPath: string): string {
  * form is the real canonical identifier AND is rejected by every cell on its own
  * terms, so it is the honest row.
  */
+const IDENTITY_PAYLOADS = [
+  'alice@example.com',
+  '712020:5b10ac8d-82e0-5b22-cc7d-4ef5aabbccdd',
+] as const;
+
+/**
+ * The nine payloads. The first seven are verbatim from the register, each
+ * targeting a different sink: command substitution (two spellings), flag
+ * injection, line injection, size, credential-in-URL, and query-operator escape.
+ *
+ * THE LAST TWO ARE IDENTITY PAYLOADS, and the cell they exist for is `## Assignee`.
+ * That cell admits `none` and `self` and nothing else, and §14.3 adds a second
+ * prohibition in the strongest form — "**never** a literal email address or account
+ * identifier". A closed set rejects everything outside it, so none of the seven
+ * register payloads ever exercises that second prohibition; an address or an opaque
+ * account id is well-formed, carries no metacharacter, and is exactly what an author
+ * substitutes when the identify-current-user capability is unavailable. The clause is
+ * modelled as a validator KIND below and graded on its own terms, so these two rows
+ * are the cell's own prohibition doing work rather than the closed set doing it again.
+ */
 const HOSTILE_PAYLOADS: ReadonlyArray<readonly [label: string, payload: string]> = [
   ['backtick command substitution', 'PROJ`whoami`'],
   ['dollar command substitution', '$(id)'],
@@ -106,8 +114,8 @@ const HOSTILE_PAYLOADS: ReadonlyArray<readonly [label: string, payload: string]>
   ['500 characters', 'a'.repeat(500)],
   ['userinfo credential in URL', 'https://u:tok@host'],
   ['query operator escape', 'PROJ" OR project != "'],
-  ['literal email address', 'alice@example.com'],
-  ['tracker account identifier', '712020:5b10ac8d-82e0-5b22-cc7d-4ef5aabbccdd'],
+  ['literal email address', IDENTITY_PAYLOADS[0]],
+  ['tracker account identifier', IDENTITY_PAYLOADS[1]],
 ];
 
 // ---------------------------------------------------------------------------
@@ -121,17 +129,67 @@ const HOSTILE_PAYLOADS: ReadonlyArray<readonly [label: string, payload: string]>
  * those sections accept only a value enumerated from the tracker during this run,
  * or only structured filter fields, so no free string is ever admissible. They are
  * modelled as kinds rather than skipped, because "this field admits nothing a
- * scanner could have invented" is the property under test.
+ * scanner could have invented" is the property under test — and it is a property of
+ * the CELL, graded by the arm that reads the kind, never by a rejection reason
+ * pushed for every payload whatever the payload is.
+ *
+ * `deniedShape` is the one prose prohibition in the table with teeth of its own:
+ * `## Assignee`'s "**never** a literal email address or account identifier" names
+ * two shapes that no closed set and no metacharacter denylist describes.
  */
-type ValidatorKind = 'regex' | 'closedSet' | 'denylist' | 'enumerated' | 'structured';
+type ValidatorKind =
+  | 'regex'
+  | 'closedSet'
+  | 'denylist'
+  | 'deniedShape'
+  | 'enumerated'
+  | 'structured';
 
 interface Validator {
+  /** The arm's own text, so a report can name WHICH alternative admitted a value. */
+  readonly source: string;
   readonly kinds: readonly ValidatorKind[];
+  /**
+   * Every anchored form this arm accepts. ALTERNATIVES, never hurdles: `matches A
+   * or B` admits what B admits, and grading it as "rejected, because A failed" is
+   * how a permissive form joins a cell without a single row going red.
+   */
   readonly patterns: readonly RegExp[];
   readonly closedSet: readonly string[];
   readonly denied: readonly string[];
   readonly maxChars: number | null;
 }
+
+/**
+ * The shapes `## Assignee`'s identity clause denies.
+ *
+ * The clause is prose, and prose grades no payload, so it is modelled here as the
+ * two shapes it names. Both are well-formed and metacharacter-free — they are
+ * precisely the values a closed set rejects for the wrong reason and a free-string
+ * arm would wave through.
+ */
+const FORBIDDEN_IDENTITY_SHAPES: readonly RegExp[] = [
+  /^[^\s@]+@[^\s@]+\.[^\s@]+$/,
+  /^[0-9a-f]{6,}:[0-9a-f-]{8,}$/i,
+];
+
+/** The `## Assignee` prohibition, as the schema table spells it. */
+const IDENTITY_DENIAL = /never\*{0,2}\s+a literal email address or account identifier/i;
+
+/** The prefix every identity-shape rejection reason carries. */
+const IDENTITY_REASON = 'matches the denied identity shape';
+
+/**
+ * How a cell spells an ALTERNATIVE arm.
+ *
+ * A cell's clauses are conjunctive by default — `## Reference Rendering` demands
+ * its shape AND its denylist — so a laxening is written as an alternative: "the
+ * enum, or anything matching …". Splitting on that marker is what keeps the grading
+ * honest. Merged into one validator the two arms report the STRICT arm's rejection
+ * for a value the lax arm admits, so "rejected for at least one stated reason" stays
+ * true over exactly the change this file exists to catch (PF-018, PF-064).
+ */
+const ALTERNATIVE_ARM = /;\s*(?=or\s)|\s+OR\s+/;
 
 /** Inline-code spans of a cell: `` `x` `` → x. */
 function codeSpans(cell: string): string[] {
@@ -163,10 +221,10 @@ const METACHAR_NAMES: Readonly<Record<string, string>> = Object.freeze({
 });
 
 /**
- * Named collector: parse one validator cell into the checks it declares.
+ * Named collector: parse one ALTERNATIVE ARM of a validator cell into its checks.
  *
- * Throws rather than returning an empty validator when a cell declares nothing
- * recognisable. A cell that parsed to "no checks" would make every payload row
+ * Throws rather than returning an empty validator when an arm declares nothing
+ * recognisable. An arm that parsed to "no checks" would make every payload row
  * for that field pass vacuously — the precise failure this file exists to make
  * loud, so it must be an error and not a silently permissive default.
  */
@@ -217,6 +275,7 @@ export function parseValidator(cell: string): Validator {
   const maxMatch = /max (\d+) characters/.exec(cell);
   if (maxMatch) maxChars = Number(maxMatch[1]);
 
+  if (IDENTITY_DENIAL.test(cell)) kinds.push('deniedShape');
   if (/enumerated this run/.test(cell)) kinds.push('enumerated');
   if (/structured filter fields only/.test(cell)) kinds.push('structured');
 
@@ -226,19 +285,37 @@ export function parseValidator(cell: string): Validator {
       `would pass vacuously (PF-018). Cell: ${cell}`,
     );
   }
-  return { kinds, patterns, closedSet, denied, maxChars };
+  return { source: cell.trim(), kinds, patterns, closedSet, denied, maxChars };
 }
 
 /**
- * Named collector: reasons the declared validator rejects `value`.
+ * Named collector: a cell's alternative arms, strictest-first as the cell writes them.
  *
- * Returns the empty array when the validator ACCEPTS — so an assertion reads
- * "rejected for at least one stated reason", and the reason is in the message.
+ * One arm for every cell in the shipped table, because every clause in every cell is
+ * conjunctive today. The split exists for the laxening: a value is admitted by the
+ * cell the moment ONE arm admits it, whatever the others demand.
+ */
+export function parseValidatorArms(cell: string): Validator[] {
+  return cell.split(ALTERNATIVE_ARM).map(arm => parseValidator(arm));
+}
+
+/**
+ * Named collector: reasons ONE arm rejects `value`.
+ *
+ * Returns the empty array when the arm ACCEPTS. The checks within an arm are
+ * conjunctive — a value must satisfy the shape AND stay off the denylist — while
+ * the arm's `patterns` are alternatives to each other, so the shape check rejects
+ * only when EVERY form fails.
+ *
+ * `enumerated` and `structured` push nothing: they are properties of the CELL, not
+ * verdicts on a value. A reason pushed for them lands on every payload alike, so
+ * every row carrying one would pass whatever the payload and whatever the row's
+ * other checks said. Those rows are graded by the arm that reads the kind instead.
  */
 export function rejectionReasons(validator: Validator, value: string): string[] {
   const reasons: string[] = [];
-  for (const pattern of validator.patterns) {
-    if (!pattern.test(value)) reasons.push(`fails ${pattern.source}`);
+  if (validator.patterns.length > 0 && !validator.patterns.some(p => p.test(value))) {
+    reasons.push(`fails every form {${validator.patterns.map(p => p.source).join(', ')}}`);
   }
   if (validator.closedSet.length > 0 && !validator.closedSet.includes(value)) {
     reasons.push(`outside the closed set {${validator.closedSet.join(', ')}}`);
@@ -249,12 +326,58 @@ export function rejectionReasons(validator: Validator, value: string): string[] 
   if (validator.maxChars !== null && value.length > validator.maxChars) {
     reasons.push(`longer than ${validator.maxChars} characters`);
   }
-  // Total-rejection kinds: nothing a history scan or a hand edit produces is
-  // admissible, because the admissible set is built from this run's enumeration.
-  if (validator.kinds.includes('enumerated')) reasons.push('not enumerated this run');
-  if (validator.kinds.includes('structured')) reasons.push('not a structured filter field');
+  if (validator.kinds.includes('deniedShape')) {
+    for (const shape of FORBIDDEN_IDENTITY_SHAPES) {
+      if (shape.test(value)) reasons.push(`${IDENTITY_REASON} ${shape.source}`);
+    }
+  }
   return reasons;
 }
+
+/**
+ * Named collector: the arms of a cell that ACCEPT `value`, by their own text.
+ *
+ * Empty ⇒ every arm rejects, which is what a hostile payload must produce. A cell
+ * is as lax as its laxest arm, so one accepting arm is the whole finding.
+ */
+export function collectAcceptingArms(arms: readonly Validator[], value: string): string[] {
+  return arms.filter(arm => rejectionReasons(arm, value).length === 0).map(arm => arm.source);
+}
+
+/** True when an arm states a shape a payload can be graded against. */
+function hasShapeCheck(arm: Validator): boolean {
+  return (
+    arm.patterns.length > 0 ||
+    arm.closedSet.length > 0 ||
+    arm.denied.length > 0 ||
+    arm.maxChars !== null ||
+    arm.kinds.includes('deniedShape')
+  );
+}
+
+/** True when an arm admits NOTHING a hand edit or a history scan could produce. */
+function isTotalRejection(arm: Validator): boolean {
+  return arm.kinds.includes('enumerated') || arm.kinds.includes('structured');
+}
+
+/** A schema row's section heading, backticks and the `→ field` suffix left as written. */
+function sectionOf(row: TrackerSchemaRow): string {
+  return row.section.replace(/`/g, '').trim();
+}
+
+/**
+ * The sections whose cell declares a total rejection and NO shape a payload can be
+ * graded against.
+ *
+ * Pinned, because the split decides which rows the payload table covers: a row that
+ * lost its shape would otherwise slip out of that table and stop grading nine
+ * payloads while the coverage arm above still counted its section (PF-018).
+ */
+const TOTAL_REJECTION_ONLY_SECTIONS: readonly string[] = [
+  '## Iteration Policy',
+  '## Transitions',
+  '## Wave Filter',
+];
 
 // ---------------------------------------------------------------------------
 // tracker.md fields × payloads
@@ -284,60 +407,109 @@ describe('hostile values: tracker.md fields (AC-3.7, register row 22)', () => {
     expect(new Set(HOSTILE_PAYLOADS.map(([, p]) => p)).size, 'payloads must be distinct').toBe(9);
   });
 
-  it('the two identity payloads reach the two cells the shell-shaped rows cannot', () => {
-    // Non-vacuity for the rows themselves, and it is the point of adding them: the
-    // seven register payloads are all rejected by `## Assignee` and
-    // `## Required Fields` for the wrong reason — a closed set rejects everything
-    // outside it, so a metacharacter payload never exercises "never a literal email
-    // address or account identifier". These two are well-formed, carry no
-    // metacharacter, and are what an author substitutes when identify-current-user
-    // comes back empty. If either cell ever gained a free-string arm they are the
-    // only payloads here that would notice.
-    const identity = ['alice@example.com', '712020:5b10ac8d-82e0-5b22-cc7d-4ef5aabbccdd'];
-    for (const payload of identity) {
+  it('`## Assignee`\'s identity clause is what refuses the two identity payloads', () => {
+    // Why the last two payload rows exist, asserted rather than narrated. A closed
+    // set rejects everything outside it, so none of the seven register payloads ever
+    // exercises §14.3's second prohibition on this cell — "**never** a literal email
+    // address or account identifier". The clause is therefore modelled as a KIND and
+    // graded on its own terms here: over a copy whose closed set is widened to a free
+    // string, an ordinary name walks in and these two are still refused. Without that
+    // arm the two rows would be two more values the closed set rejects, and the cell's
+    // own prohibition would be graded by nothing at all.
+    //
+    // `## Required Fields` is NOT a second subject: it denies by allowlist, which is
+    // the same reason it rejects every other payload in the table, and the payload
+    // grid below already covers it.
+    const row = rows.find(r => sectionOf(r) === '## Assignee');
+    if (row === undefined) {
+      throw new Error('`## Assignee` has no validator row — the identity payloads have no subject');
+    }
+    const arms = parseValidatorArms(row.validator);
+    for (const payload of IDENTITY_PAYLOADS) {
       expect(
         /[`$;|&\n"'\\]/.test(payload),
         `${JSON.stringify(payload)} must carry NO shell or query metacharacter, or it is just ` +
         `another spelling of a row above`,
       ).toBe(false);
+      expect(
+        arms.flatMap(arm => rejectionReasons(arm, payload)).some(r => r.startsWith(IDENTITY_REASON)),
+        `${JSON.stringify(payload)} must be refused by the identity clause itself, not only by ` +
+        `the closed set that rejects every payload in the table`,
+      ).toBe(true);
     }
-    for (const section of ['## Assignee', '## Required Fields']) {
-      const row = rows.find(r => r.section.replace(/`/g, '').startsWith(section));
-      expect(row, `${section} has no validator row — the identity payloads have no subject`)
-        .toBeDefined();
-      const validator = parseValidator(row!.validator);
-      for (const payload of identity) {
-        expect(
-          rejectionReasons(validator, payload),
-          `${section} must reject ${JSON.stringify(payload)} — §14.3 forbids a literal address ` +
-          `or account identifier there, and an assignee beyond \`self\` by name`,
-        ).not.toEqual([]);
-      }
+
+    // The closed set replaced by a permissive shape — everything the cell still
+    // refuses after that is the identity clause's own work.
+    const widened = parseValidatorArms(
+      row.validator.replace(/enum:[^;]*;/, '`^[A-Za-z0-9@:._-]{1,60}$`;'),
+    );
+    expect(
+      collectAcceptingArms(widened, 'bob'),
+      'the widened copy must admit an ordinary name, or it is not a widening and the arms below ' +
+      'prove nothing',
+    ).not.toEqual([]);
+    for (const payload of IDENTITY_PAYLOADS) {
+      expect(
+        collectAcceptingArms(widened, payload),
+        `${JSON.stringify(payload)} must STILL be refused once the closed set is widened — that ` +
+        `refusal is the identity clause doing the work this row claims for it`,
+      ).toEqual([]);
     }
   });
 
-  it('every declared validator parses to at least one real check', () => {
+  it('every declared validator arm parses to at least one real check', () => {
     for (const row of rows) {
       expect(
-        () => parseValidator(row.validator),
+        () => parseValidatorArms(row.validator),
         `${row.section}: ${row.validator}`,
       ).not.toThrow();
     }
   });
 
-  for (const row of collectTrackerSchemaRows(TRACKER_TEXT)) {
-    describe(row.section, () => {
-      const validator = parseValidator(row.validator);
+  it('which rows the payload grid grades is pinned, both ways (non-vacuity)', () => {
+    // The rows split in two and the split decides coverage. A row whose cell states
+    // a shape is graded against the nine payloads; a row whose cell states only a
+    // total rejection has no shape to grade and is graded by its KIND instead, since
+    // a rejection reason pushed for that kind would grade its payloads against
+    // nothing. Pinning the split means a row that loses its shape is a named failure
+    // here rather than nine assertions that quietly stop existing.
+    const totalOnly = rows
+      .filter(r => !parseValidatorArms(r.validator).some(hasShapeCheck))
+      .map(sectionOf);
+    expect(
+      totalOnly,
+      'the set of rows graded by their total-rejection kind alone is pinned; a row entering or ' +
+      'leaving it changes what the payload grid covers',
+    ).toEqual(TOTAL_REJECTION_ONLY_SECTIONS);
+  });
+
+  for (const row of rows) {
+    const section = sectionOf(row);
+    const arms = parseValidatorArms(row.validator);
+    describe(section, () => {
+      if (!arms.some(hasShapeCheck)) {
+        it('admits nothing a hand edit or a history scan could produce', () => {
+          for (const arm of arms) {
+            expect(
+              isTotalRejection(arm),
+              `${section}: this arm states neither a shape nor a total rejection, so it admits ` +
+              `every payload in the table — including the ones the shell-shaped rows exist for. ` +
+              `Arm: ${arm.source}`,
+            ).toBe(true);
+          }
+        });
+        return;
+      }
 
       for (const [label, payload] of HOSTILE_PAYLOADS) {
         it(`rejects ${label}`, () => {
-          const reasons = rejectionReasons(validator, payload);
+          const accepting = collectAcceptingArms(arms, payload);
           expect(
-            reasons.length,
-            `${row.section} ACCEPTED ${JSON.stringify(payload.slice(0, 60))} — the declared ` +
-            `validator (${row.validator}) admits it. Tighten the validator in the agent's ` +
-            `schema table, not this test.`,
-          ).toBeGreaterThan(0);
+            accepting,
+            `${section} ACCEPTED ${JSON.stringify(payload.slice(0, 60))} under ` +
+            `${accepting.length} of its ${arms.length} alternative arm(s) — a cell is as lax as ` +
+            `its laxest arm. Tighten the validator in the agent's schema table, not this test.`,
+          ).toEqual([]);
         });
       }
     });
@@ -350,6 +522,87 @@ describe('hostile values: tracker.md fields (AC-3.7, register row 22)', () => {
     expect(rejectionReasons(lax, 'PROJ`whoami`'), 'a permissive regex must be caught here').toEqual([]);
     const strict = parseValidator('`^[A-Za-z][A-Za-z0-9_]{0,9}$`');
     expect(rejectionReasons(strict, 'PROJ`whoami`').length).toBeGreaterThan(0);
+  });
+
+  it('known-bad probe: an alternative arm that admits a payload is reported, however strict the rest', () => {
+    // The laxening a single merged validator cannot see: the strict arm still
+    // supplies a rejection reason, so "rejected for at least one stated reason" stays
+    // true while the cell now admits the value.
+    const strict = parseValidatorArms('enum: `none` \\| `self`');
+    expect(strict, 'the strict cell must parse to ONE arm').toHaveLength(1);
+    expect(collectAcceptingArms(strict, 'PROJ`whoami`'), 'and must refuse the payload').toEqual([]);
+
+    const laxened = parseValidatorArms('enum: `none` \\| `self`; or `^.*$`');
+    expect(laxened, 'the alternative must parse to TWO arms, or the split is a no-op').toHaveLength(2);
+    expect(
+      collectAcceptingArms(laxened, 'PROJ`whoami`'),
+      'the free-string arm must be reported as accepting, with the strict arm still in the cell',
+    ).not.toEqual([]);
+
+    // The same laxening on a SHIPPED cell, so the arm is proven over the real table
+    // and not only over a hand-written one. `## Reference Rendering` is the cell that
+    // carries both a shape and a denylist, so it is the one with the most rejection
+    // reasons left standing to mask an alternative that admits everything.
+    const live = rows.find(r => sectionOf(r) === '## Reference Rendering');
+    if (live === undefined) {
+      throw new Error('`## Reference Rendering` has no validator row — this probe has no subject');
+    }
+    expect(
+      collectAcceptingArms(parseValidatorArms(live.validator), 'PROJ`whoami`'),
+      'the shipped cell must refuse the payload',
+    ).toEqual([]);
+    expect(
+      collectAcceptingArms(parseValidatorArms(`${live.validator}; or \`^.*$\``), 'PROJ`whoami`'),
+      'and with one permissive alternative added it must ACCEPT — the shape and the denylist go ' +
+      'on supplying reasons, which is what a merged grading mistakes for a rejection',
+    ).not.toEqual([]);
+  });
+
+  it('known-bad probe: a second form in one arm is an ALTERNATIVE, not a second hurdle', () => {
+    // `matches A or B` admits what B admits. Grading it as "rejected, because A
+    // failed" is how a permissive form joins a cell without a row going red.
+    const alternatives = parseValidator('`^[A-Za-z]{1,9}$` \\| `^.*$`');
+    expect(alternatives.patterns, 'both forms must parse').toHaveLength(2);
+    expect(
+      rejectionReasons(alternatives, 'PROJ`whoami`'),
+      'a value the permissive form admits is admitted by the arm',
+    ).toEqual([]);
+  });
+
+  it('known-bad probe: laxening the `## Issue Types` shape is reported, its total-rejection kind aside', () => {
+    // The row carries `enumerated` as well as its shape, and pushing a reason for
+    // that kind made all nine of its payload rows pass whatever the shape said. This
+    // drives the SHIPPED cell with its shape replaced and requires a payload to walk
+    // straight in.
+    const row = rows.find(r => sectionOf(r) === '## Issue Types');
+    if (row === undefined) {
+      throw new Error('`## Issue Types` has no validator row — this probe has no subject');
+    }
+    expect(
+      collectAcceptingArms(parseValidatorArms(row.validator), 'PROJ`whoami`'),
+      'the shipped shape must refuse the payload',
+    ).toEqual([]);
+    const laxened = row.validator.replace(/`\^[^`]*\$`/, '`^.*$`');
+    expect(laxened, 'the laxening seed must change the cell').not.toBe(row.validator);
+    expect(
+      collectAcceptingArms(parseValidatorArms(laxened), 'PROJ`whoami`'),
+      'with its shape laxened the row must ACCEPT — otherwise it is graded by something other ' +
+      'than the shape it declares, and laxening that shape costs nothing',
+    ).not.toEqual([]);
+  });
+
+  it('known-bad probe: the identity clause is read off the cell, not assumed', () => {
+    // The kind has to come from the prohibition's own words, or `deniedShape` is a
+    // check this file applies to cells that never declared it.
+    expect(parseValidator('enum: `none` \\| `self`').kinds).not.toContain('deniedShape');
+    const declared = parseValidator(
+      'enum: `none` \\| `self`; **never** a literal email address or account identifier',
+    );
+    expect(declared.kinds, 'the clause as the table spells it must be read').toContain('deniedShape');
+    expect(
+      rejectionReasons(declared, IDENTITY_PAYLOADS[0]).some(r => r.startsWith(IDENTITY_REASON)),
+      'and it must be the clause, not the closed set, that names the refusal',
+    ).toBe(true);
   });
 
   it('known-bad probe: an unparseable validator cell throws instead of admitting everything', () => {
@@ -377,8 +630,15 @@ describe('hostile values: tracker.md fields (AC-3.7, register row 22)', () => {
   it('known-bad probe: each validator kind is exercised by at least one live row', () => {
     // A kind no row uses is dead parser surface; a kind the parser cannot see is a
     // validator this file silently ignores. Both directions are checked.
-    const live = new Set(rows.flatMap(r => parseValidator(r.validator).kinds));
-    for (const kind of ['regex', 'closedSet', 'denylist', 'enumerated', 'structured'] as const) {
+    const live = new Set(rows.flatMap(r => parseValidatorArms(r.validator).flatMap(a => a.kinds)));
+    for (const kind of [
+      'regex',
+      'closedSet',
+      'denylist',
+      'deniedShape',
+      'enumerated',
+      'structured',
+    ] as const) {
       expect(live, `no schema row declares a '${kind}' validator — parser surface with no subject`).toContain(kind);
     }
   });
