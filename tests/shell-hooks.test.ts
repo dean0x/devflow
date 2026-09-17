@@ -6,6 +6,7 @@ import * as os from 'os';
 import * as net from 'net';
 import { HANDOFF_TEMPLATE, REMINDER_TEMPLATE } from './fixtures/ambient-templates.js';
 import { buildRoutingConfigJson } from '../src/core/proxy-state.js';
+import { TRACKER_ATTEMPTS_MAX } from '../src/core/tracker.js';
 import {
   DEVFLOW_GITIGNORE_BLOCK,
   DEVFLOW_GITIGNORE_BLOCK_WITHOUT_CLAUDEIGNORE,
@@ -2083,8 +2084,6 @@ describe('session-start-context: tracker setup directive (Section 3)', () => {
   const CONTEXT_HOOK = path.join(HOOKS_DIR, 'session-start-context');
   const HOOK_SOURCE = fs.readFileSync(CONTEXT_HOOK, 'utf-8');
 
-  /** OD-14. Spelled here as well as in the hook; the two are asserted equal below. */
-  const TRACKER_ATTEMPTS_MAX = 5;
   /**
    * The hook's own staleness literal for `.tracker.processing`. Deliberately NOT
    * Learning's 900: a shared constant would make a change to one feature silently
@@ -2108,6 +2107,11 @@ describe('session-start-context: tracker setup directive (Section 3)', () => {
 
   beforeEach(() => {
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-ctx-tracker-'));
+    // A `.git` marker, because Section 3 is gated on the project root being
+    // inside a repository. An empty directory is enough for df_has_git_marker's
+    // `-e` walk and is NOT a repository to `git rev-parse`, so df_resolve_root
+    // still takes its non-git fallback and PROJECT_ROOT is the cwd, unchanged.
+    fs.mkdirSync(path.join(tmpDir, '.git'));
     homeDir = fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-ctx-tracker-home-'));
     fs.mkdirSync(path.join(homeDir, '.devflow', 'logs'), { recursive: true });
   });
@@ -2540,8 +2544,14 @@ describe('session-start-context: tracker setup directive (Section 3)', () => {
     expect(emittedNothing(run().stdout)).toBe(true);
   });
 
-  it('the cap literal in the hook matches the number asserted here', () => {
+  it("the hook's cap literal is the exported TRACKER_ATTEMPTS_MAX (OD-14)", () => {
+    // One authority: src/core/tracker.ts exports the number, and the hook spells
+    // it as a shell literal because it cannot import (PF-013). Every case above
+    // is driven by the exported constant, so this is the comparison that stops
+    // them all from agreeing with each other about a cap the hook never enforced.
     expect(HOOK_SOURCE).toContain(`TRACKER_ATTEMPTS_MAX=${TRACKER_ATTEMPTS_MAX}`);
+    // Non-vacuity: the match is exact-literal, so a neighbouring cap must not satisfy it.
+    expect(HOOK_SOURCE).not.toContain(`TRACKER_ATTEMPTS_MAX=${TRACKER_ATTEMPTS_MAX + 1}`);
   });
 
   /**
@@ -2819,12 +2829,114 @@ describe('session-start-context: tracker setup directive (Section 3)', () => {
     expect(fs.existsSync(attemptsOf(homeDir))).toBe(false);
   });
 
-  it('the directive is still emitted in a non-git directory (EC-19)', () => {
-    // Section 3 is presence-gated on the sentinel, not on a git marker: the
-    // tracker is a machine-level setting and the conventions file is global.
-    expect(fs.existsSync(path.join(tmpDir, '.git'))).toBe(false);
+  // ---------------------------------------------------------------------------
+  // The git-repo precondition
+  // ---------------------------------------------------------------------------
+  //
+  // The Tracker agent refuses to infer from history outside a real project root,
+  // and it writes ~/.devflow/tracker.md exactly once, create-exclusive. A session
+  // started outside a checkout would therefore fix this machine's conventions at
+  // `# UNRESOLVED:` for every repo-derived section — permanently, since there is
+  // no second write — while spending one of the five attempts on evidence that
+  // does not exist. The gate waits for a session that has the evidence.
+
+  /**
+   * Named collector: the nearest ancestor of `dir` (inclusive) carrying a `.git`
+   * entry, or null.
+   *
+   * Mirrors df_has_git_marker's bounded upward walk, so a fixture that happens to
+   * sit inside somebody's checkout is reported as a broken fixture instead of
+   * passing vacuously (PF-018).
+   */
+  function nearestGitMarker(dir: string): string | null {
+    let d = dir;
+    for (let i = 0; i < 64; i++) {
+      if (fs.existsSync(path.join(d, '.git'))) return d;
+      const parent = path.dirname(d);
+      if (parent === d) return null;
+      d = parent;
+    }
+    return null;
+  }
+
+  it('known-bad probe: the marker collector finds a seeded marker and misses a bare dir', () => {
+    const bare = fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-ctx-tracker-probe-'));
+    try {
+      expect(nearestGitMarker(bare)).toBeNull();
+      fs.mkdirSync(path.join(bare, '.git'));
+      expect(nearestGitMarker(bare)).toBe(bare);
+      const nested = path.join(bare, 'a', 'b');
+      fs.mkdirSync(nested, { recursive: true });
+      expect(nearestGitMarker(nested)).toBe(bare);
+    } finally {
+      fs.rmSync(bare, { recursive: true, force: true });
+    }
+  });
+
+  it('no directive outside a git repository, and no attempt is burned', () => {
+    const nonRepo = fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-ctx-tracker-nogit-'));
+    try {
+      expect(nearestGitMarker(nonRepo), 'the fixture sits inside a checkout').toBeNull();
+      seedTracker(homeDir, { provider: 'jira' });
+
+      const { stdout, exitCode } = run(sessionStart(nonRepo));
+      expect(exitCode).toBe(0);
+      expect(emittedNothing(stdout)).toBe(true);
+      // The gate precedes the increment, so the cap is not spent on a session
+      // that could never have produced conventions.
+      expect(fs.existsSync(attemptsOf(homeDir))).toBe(false);
+    } finally {
+      fs.rmSync(nonRepo, { recursive: true, force: true });
+    }
+  });
+
+  it('non-vacuity: the same fixture with a .git marker emits and burns one attempt', () => {
+    const repo = fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-ctx-tracker-git-'));
+    try {
+      fs.mkdirSync(path.join(repo, '.git'));
+      seedTracker(homeDir, { provider: 'jira' });
+
+      expect(contextOf(run(sessionStart(repo)).stdout)).toContain(BANNER);
+      expect(fs.readFileSync(attemptsOf(homeDir), 'utf-8').trim()).toBe('1');
+    } finally {
+      fs.rmSync(repo, { recursive: true, force: true });
+    }
+  });
+
+  it('the marker is inherited from an ancestor — a subdirectory of a checkout qualifies', () => {
+    // df_has_git_marker walks up, so the gate must not demand `.git` in the
+    // session's own directory; a session started in packages/app is inside the repo.
+    const nested = path.join(tmpDir, 'packages', 'app');
+    fs.mkdirSync(nested, { recursive: true });
     seedTracker(homeDir, { provider: 'jira' });
-    expect(contextOf(run().stdout)).toContain(BANNER);
+    expect(contextOf(run(sessionStart(nested)).stdout)).toContain(BANNER);
+  });
+
+  it('the git gate is the shared marker helper, never a git fork', () => {
+    // Section 3 runs on the SessionStart critical path. `git rev-parse` would be
+    // a fork per qualifying session to answer a question a bounded walk of `-e`
+    // tests answers with no subprocess at all.
+    const sectionAt = HOOK_SOURCE.indexOf('# --- Section 3:');
+    expect(sectionAt, 'Section 3 not found in the hook source').toBeGreaterThan(-1);
+    const section = HOOK_SOURCE.slice(sectionAt);
+    expect(section).toContain('df_has_git_marker "$PROJECT_ROOT"');
+    expect(section).not.toMatch(/\bgit\s+(-C|rev-parse|status)\b/);
+  });
+
+  it('git-marker is reached only inside the sentinel gate — the GitHub path pays nothing for it', () => {
+    // [DR-10]: a GitHub user pays one stat and zero forks. Sourcing the helper is
+    // a file read, so every mention of it must sit BEHIND the sentinel, not above.
+    const gateAt = HOOK_SOURCE.indexOf('if [ -f "$TRACKER_SENTINEL"');
+    expect(gateAt, 'the sentinel gate was renamed').toBeGreaterThan(-1);
+    const mentions: number[] = [];
+    for (const m of HOOK_SOURCE.matchAll(/git-marker/g)) {
+      if (m.index !== undefined) mentions.push(m.index);
+    }
+    expect(mentions.length, 'the hook never names git-marker').toBeGreaterThan(0);
+    for (const at of mentions) {
+      expect(at, `git-marker is named at index ${at}, ahead of the sentinel gate`)
+        .toBeGreaterThan(gateAt);
+    }
   });
 
   it('HOME unset: no directive, no writes, empty stdout (EC-10)', () => {
