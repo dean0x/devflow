@@ -9,6 +9,8 @@
  *   - rearmTrackerInference: idempotent-when-absent / removes-when-present / never throws [DR-22]
  *   - applyTrackerSentinel: written when provider != github, removed when it is [DR-10]
  *   - renameStaleTrackerConventions: the provider-change transition (P3a-S15 / AC-3.20)
+ *   - TRACKER_CONVENTIONS_BACKUP_NAMES: every backup the rename can write, so uninstall
+ *     can classify the whole set as user content (OD-15)
  *   - TRACKER_PROVIDER_KEY_PATH: the shared TS<->shell manifest key path constant
  *   - TRACKER_ATTEMPTS_MAX: the inference cap, cross-pinned against the hook literal
  *
@@ -34,12 +36,15 @@ import {
   TRACKER_ENABLED_FILE,
   TRACKER_CLAIM_FILE,
   TRACKER_ATTEMPTS_MAX,
+  TRACKER_CONVENTIONS_BACKUP_NAMES,
   parseTrackerId,
   normalizeTrackerFeature,
   describeTrackerValue,
   trackerConventionsPath,
   trackerAttemptsPath,
   trackerEnabledSentinelPath,
+  trackerConventionsBackupName,
+  trackerConventionsBackupPath,
   rearmTrackerInference,
   applyTrackerSentinel,
   renameStaleTrackerConventions,
@@ -359,6 +364,41 @@ describe('tracker file lifecycle', () => {
     const missing = path.join(devflowDir, 'absent-dir');
     const transition = await renameStaleTrackerConventions(missing, 'jira', 'github');
     expect(['none', 'failed']).toContain(transition.kind);
+  });
+
+  // ── TRACKER_CONVENTIONS_BACKUP_NAMES (the uninstall classification set, OD-15) ──
+
+  it('carries one backup basename per registry provider, in registry order', () => {
+    expect(TRACKER_CONVENTIONS_BACKUP_NAMES).toEqual(
+      TRACKER_PROVIDER_IDS.map(id => `${TRACKER_CONVENTIONS_FILE}.${id}.bak`),
+    );
+    // PF-018 non-vacuity: a registry that shrank to nothing would make the set
+    // empty and every containment assertion below pass without guarding anything.
+    expect(TRACKER_CONVENTIONS_BACKUP_NAMES.length).toBe(TRACKER_PROVIDER_IDS.length);
+    expect(TRACKER_CONVENTIONS_BACKUP_NAMES.length).toBeGreaterThan(0);
+  });
+
+  it('derives the backup path from the backup basename and the devflow dir', () => {
+    for (const id of TRACKER_PROVIDER_IDS) {
+      expect(trackerConventionsBackupPath(devflowDir, id))
+        .toBe(path.join(devflowDir, trackerConventionsBackupName(id)));
+    }
+  });
+
+  it('names every file the rename can actually write', async () => {
+    // The completeness cross-pin: uninstall classifies the NAMES, the rename
+    // creates the FILES. A drift between the two is a file holding the user's
+    // inferred site and project key that no uninstall list accounts for.
+    for (const previous of TRACKER_PROVIDER_IDS) {
+      await fs.writeFile(trackerConventionsPath(devflowDir), `provider: ${previous}\n`, 'utf-8');
+      const resolved: TrackerProvider = previous === 'github' ? 'jira' : 'github';
+
+      const transition = await renameStaleTrackerConventions(devflowDir, previous, resolved);
+
+      expect(transition.kind, `expected a rename for ${previous} -> ${resolved}`).toBe('renamed');
+      if (transition.kind !== 'renamed') continue;
+      expect(TRACKER_CONVENTIONS_BACKUP_NAMES).toContain(path.basename(transition.to));
+    }
   });
 });
 

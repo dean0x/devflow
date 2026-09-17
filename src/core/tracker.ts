@@ -116,13 +116,18 @@ export const TRACKER_PROVIDER_KEY_PATH = 'features.tracker.provider';
 // Artifact basenames — one spelling for every TypeScript reader
 //
 // NOT the only spelling in the repository, and a rename that assumes it is will
-// miss three places these names are hardcoded because they cannot import from
-// here (PF-013): the SessionStart hook's Section 3 (shell), the Tracker agent's
-// prompt (prose), and uninstall.ts's artifact list, which spells every
+// miss three places these names are hardcoded (PF-013): the SessionStart hook's
+// Section 3 (shell) and the Tracker agent's prompt (prose), neither of which can
+// import from here, and uninstall.ts's install-artifact list, which spells every
 // ~/.devflow entry as a literal the way its siblings do. Each is cross-pinned
 // against these constants by tests — shell-hooks, tracker-agent, uninstall-logic
 // and core/tracker — so the spellings cannot drift silently, but they do have to
 // move together.
+//
+// The conventions-backup set is the exception, and deliberately so: its members
+// are one-per-provider, so uninstall imports TRACKER_CONVENTIONS_BACKUP_NAMES
+// rather than listing them — a literal list there would fall behind the registry
+// the day a fourth provider lands, leaving an unclassified file behind.
 // ---------------------------------------------------------------------------
 
 /** `~/.devflow/tracker.md` — the inferred conventions file (USER CONTENT on uninstall). */
@@ -267,10 +272,33 @@ export function trackerEnabledSentinelPath(devflowDir: string): string {
   return path.join(devflowDir, TRACKER_ENABLED_FILE);
 }
 
+/** `tracker.md.{provider}.bak` — the basename a stale conventions file lands under. */
+export function trackerConventionsBackupName(previous: TrackerProvider): string {
+  return `${TRACKER_CONVENTIONS_FILE}.${previous}.bak`;
+}
+
 /** `{devflowDir}/tracker.md.{provider}.bak` — where a stale conventions file lands. */
 export function trackerConventionsBackupPath(devflowDir: string, previous: TrackerProvider): string {
-  return path.join(devflowDir, `${TRACKER_CONVENTIONS_FILE}.${previous}.bak`);
+  return path.join(devflowDir, trackerConventionsBackupName(previous));
 }
+
+/**
+ * Every backup basename a provider change can leave behind, in registry order.
+ *
+ * D-TRACKER-BACKUP-SET [OD-15]: a backup holds exactly what `tracker.md` held —
+ * the user's inferred site and project key — so uninstall classifies the whole
+ * set as USER CONTENT beside `tracker.md`, never as install artifacts (@D8 in
+ * src/cli/commands/uninstall.ts keeps the two lists disjoint).
+ *
+ * Derived from `TRACKER_PROVIDER_IDS` rather than spelled out, so a fourth
+ * provider is classified the moment it joins the registry instead of leaving a
+ * file that survives an uninstall reporting `~/.devflow` swept. `github` is in
+ * the set: a hand-written `tracker.md` is moved aside on a github→jira change
+ * too, and `renameStaleTrackerConventions` takes `previous` from the whole
+ * domain.
+ */
+export const TRACKER_CONVENTIONS_BACKUP_NAMES: readonly string[] =
+  TRACKER_PROVIDER_IDS.map(id => trackerConventionsBackupName(id));
 
 // ---------------------------------------------------------------------------
 // Exported functions — file lifecycle
