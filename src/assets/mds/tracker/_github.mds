@@ -283,6 +283,8 @@ node "${DEVFLOW_DIR:-$HOME/.devflow}/scripts/redact-secrets.cjs" "$DEVFLOW_BODY_
 
 ### Process
 
+**Ref pre-flight (the always-loaded entry gate, instantiated for this provider).** Every entry of `SHIPPED_ISSUES` must satisfy `^#?[1-9][0-9]\{0,8\}$`, anchored at both ends — this provider's reference grammar is what the entry gate's shape requirement means here, and the anchored form is what keeps a reference out of the commands below. **Drop** every entry that fails and report it as `TRACEABILITY: DEGRADED (issue reference "\{ref\}" does not match github reference grammar)`. If every entry is dropped, emit `TRACEABILITY: DEGRADED (no parseable refs for provider \{p\})`, post nothing, and **never report the status as `COMPLETE`**.
+
 **Setup (once, before the loop):** Fetch viewer login: `gh api user --jq '.login'` → store as VIEWER_LOGIN
 
 Then, per issue, within the operation's ≤50 bound:

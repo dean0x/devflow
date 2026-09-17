@@ -91,8 +91,8 @@ Create `DEVFLOW_NOTES_RAW`/`DEVFLOW_NOTES` the same way.
 | `ensure-pr-ready` | Pre-flight for /review: commit, push, create PR | `WORKTREE_PATH` (optional), `PR_DESCRIPTION_GUIDANCE` (optional), `COMPLIANCE` (optional) |
 | `validate-branch` | Pre-flight for /resolve: check branch state | `WORKTREE_PATH` (optional) |
 | `setup-task` | Create feature branch and optionally fetch/create issue | `BASE_BRANCH`, `ISSUE_INPUT` (optional), `TASK_DESCRIPTION` (optional), `COMPLIANCE` (optional), `PLAN_ARTIFACT_PATH` (optional) |
-| `fetch-issue` | Fetch GitHub issue for implementation | `ISSUE_INPUT` (number or search term) |
-| `fetch-issues-batch` | Fetch multiple GitHub issues for multi-issue planning | `ISSUE_REFS` |
+| `fetch-issue` | Fetch tracker issue for implementation | `ISSUE_INPUT` (number or search term) |
+| `fetch-issues-batch` | Fetch multiple tracker issues for multi-issue planning | `ISSUE_REFS` |
 | `post-review-summary` | Post consolidated review-summary comment per review run (D7) | `PR_NUMBER`, `REVIEW_SUMMARY_PATH`, `CYCLE_NUMBER`, `REVIEW_TIMESTAMP`, `WORKTREE_PATH` (optional), `REVIEW_PUBLICATION` (optional) |
 | `manage-debt` | Update tech debt backlog with pre-existing issues | `REVIEW_DIR`, `TIMESTAMP`, `WORKTREE_PATH` (optional) |
 | `check-ci-status` | Check CI/PR check status for a branch | `PR_NUMBER` (optional), `WORKTREE_PATH` (optional) |
@@ -104,7 +104,7 @@ Create `DEVFLOW_NOTES_RAW`/`DEVFLOW_NOTES` the same way.
 | `post-resolution-summary` | Post resolution-summary.md as single PR comment with marker dedup (D8) | `PR_NUMBER`, `RESOLUTION_SUMMARY_PATH`, `WORKTREE_PATH` (optional), `REVIEW_PUBLICATION` (optional) |
 | `check-merge-readiness` | Report-only: unresolved threads + review decision + CI status (D6) | `PR_NUMBER`, `WORKTREE_PATH` (optional) |
 | `backlink-shipped-issues` | Comment shipped marker on issues (marker-deduped, ≤50 issues) | `SHIPPED_ISSUES`, `VERSION`, `WORKTREE_PATH` (optional) |
-| `ensure-traceable-issue` | Create or enrich a GitHub issue from the D3 template (D5) | `TASK_DESCRIPTION` (optional), `ISSUE_INPUT` (optional), `INITIAL_REQUEST` (optional), `REQUIREMENTS` (optional), `LABELS` (optional), `PLAN_ARTIFACT_PATH` (optional), `WORKTREE_PATH` (optional) |
+| `ensure-traceable-issue` | Create or enrich a tracker issue from the D3 template (D5) | `TASK_DESCRIPTION` (optional), `ISSUE_INPUT` (optional), `INITIAL_REQUEST` (optional), `REQUIREMENTS` (optional), `LABELS` (optional), `PLAN_ARTIFACT_PATH` (optional), `WORKTREE_PATH` (optional) |
 | `post-wave-report` | Post wave completion summary as a tracking-issue comment (marker-deduped) | `TRACKING_ISSUE`, `WAVE_REPORT_PATH`, `WAVE_ID`, `WORKTREE_PATH` (optional) |
 
 **Decision Marker Legend:**
@@ -316,7 +316,7 @@ Neutralise any `</untrusted-issue-body>` in the fetched body before wrapping it 
 
 ## Operation: fetch-issues-batch
 
-Fetch multiple GitHub issues for multi-issue planning flows.
+Fetch multiple tracker issues for multi-issue planning flows.
 
 **Input:** `ISSUE_REFS` - Space-separated issue references (e.g., "12 15 18"); process at most 50 — if more are provided, process the first 50 and report `TRUNCATED (\{n\} not processed)`
 
@@ -809,10 +809,9 @@ Comment a shipped marker on each issue when a version ships. Marker-deduped: exa
 **Mechanics:** load this operation's provider reference.
 
 0. Validate inputs before any remote call — `VERSION` must match semver `X.Y.Z` (optionally
-   `v`-prefixed) and every entry of `SHIPPED_ISSUES` must be digits only. Drop any entry
-   that does not; if `VERSION` fails, emit `TRACEABILITY: DEGRADED (malformed version)` and
-   return without commenting. Both values are interpolated into commands below, so neither
-   may carry shell metacharacters.
+   `v`-prefixed) and every `SHIPPED_ISSUES` entry the resolved provider's anchored reference
+   grammar, stated and enforced by its mechanics. Drop any entry that fails; if `VERSION`
+   fails, emit `TRACEABILITY: DEGRADED (malformed version)` and return without commenting.
 
    Normalize VERSION: strip any leading `v` to get BARE_VERSION (e.g. `v1.2.3` → `1.2.3`,
    `1.2.3` → `1.2.3`). All marker composition and comment text below use `v\{BARE_VERSION\}` —
@@ -837,7 +836,7 @@ For each issue number in `SHIPPED_ISSUES` (sequentially, ≤50 in list order, 1s
 
 ## Operation: ensure-traceable-issue
 
-Create or enrich a GitHub issue using the D3 issue template. Returns the issue number for downstream use (branch naming, PR linking).
+Create or enrich a tracker issue using the D3 issue template. Returns the issue reference for downstream use (branch naming, PR linking).
 
 **Input:** `TASK_DESCRIPTION` (optional), `ISSUE_INPUT` (optional), `INITIAL_REQUEST` (optional), `REQUIREMENTS` (optional), `LABELS` (optional), `PLAN_ARTIFACT_PATH` (optional), `WORKTREE_PATH` (optional)
 

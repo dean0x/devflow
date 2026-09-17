@@ -738,4 +738,75 @@ export const CONTAINMENT_EXEMPTIONS: readonly ContainmentExemption[] = [
       'digit-run `case`, whose unreadable-probe arm sets the stop reason that the post-loop ' +
       'THROTTLED report names alongside the count of items never attempted.',
   },
+
+  // -------------------------------------------------------------------------
+  // #325. Provider-neutralisation of the tracker operations' always-loaded
+  // wording. Phase 2 reserved this decision for Phase 3 because it could not be
+  // taken with one provider registered: a cell reading "Fetch GitHub issue" was
+  // simply true. With three providers it is false for two of them, in a table
+  // and in three op descriptions that every Git spawn preloads regardless of
+  // which tracker resolved. Each entry below is a REWRITE, not a move — the
+  // words changed — which is exactly what CONTAINMENT_EXEMPTIONS is for.
+  // -------------------------------------------------------------------------
+  {
+    file: 'git-agent.md',
+    startLine: 68,
+    endLine: 69,
+    rationale:
+      '#325. The `## Operations` table\'s two fetch rows read "Fetch GitHub issue" and "Fetch ' +
+      'multiple GitHub issues" in a provider-blind, always-loaded position. Both are tracker ' +
+      'operations whose provider is resolved per spawn, so the cells are wrong for jira and ' +
+      'linear and right for one of three. Rewritten to "tracker issue(s)" — the vocabulary the ' +
+      'phase artifact uses — with nothing else in either row touched.',
+  },
+  {
+    file: 'git-agent.md',
+    startLine: 81,
+    endLine: 81,
+    rationale:
+      '#325. The same defect in `ensure-traceable-issue`\'s table cell: "Create or enrich a ' +
+      'GitHub issue from the D3 template". The D3 template is provider-independent (each ' +
+      'provider\'s mechanics state how it is attached), so only the provider name was wrong. ' +
+      'Rewritten to "a tracker issue"; the D5 marker and the whole parameter column are ' +
+      'byte-unchanged.',
+  },
+  {
+    file: 'git-agent.md',
+    startLine: 310,
+    endLine: 310,
+    rationale:
+      '#325. `fetch-issues-batch`\'s own one-line description, the op-body twin of the table ' +
+      'cell above. Left alone it would have contradicted the cell it duplicates — the table ' +
+      'saying "tracker issues" and the operation two hundred lines later saying "GitHub ' +
+      'issues" — which is a worse end state than either wording alone. Same one-word rewrite.',
+  },
+  {
+    file: 'git-agent.md',
+    startLine: 890,
+    endLine: 890,
+    rationale:
+      '#325. `ensure-traceable-issue`\'s own description, the twin of its table cell. Two words ' +
+      'changed: "GitHub issue" to "tracker issue", and "the issue number" to "the issue ' +
+      'reference" — under a non-github provider what the operation returns is a key, and ' +
+      '§14.1 fixes ISSUE_REF as the provider-canonical rendered form. The spawn-key ' +
+      '`ISSUE_NUMBER` is untouched everywhere (§14.5 keeps it at all 14 sites); this is prose.',
+  },
+  {
+    file: 'git-agent.md',
+    startLine: 850,
+    endLine: 853,
+    rationale:
+      '#325. `backlink-shipped-issues` step 0 required every `SHIPPED_ISSUES` entry to be ' +
+      '"digits only" — a GitHub SHAPE in a provider-blind, always-loaded position, which made ' +
+      'the operation unreachable under jira and linear (every `PROJ-1` dropped, and the step ' +
+      'is the entry gate). The step now defers to the resolved provider\'s anchored reference ' +
+      'grammar, stated and enforced by that provider\'s mechanics, and the github grammar ' +
+      '`^#?[1-9][0-9]{0,8}$` moved INTO the github reference with the same drop rule and the ' +
+      'canonical per-ref DEGRADED reason — so the gate is not weakened, it is relocated to ' +
+      'where enforcement lives. The metacharacter rationale went with it: all three provider ' +
+      'mechanics now say the anchored form is what keeps a reference out of a query or a ' +
+      'command, and git.md\'s input contract already states the shape-gate-at-the-sink rule ' +
+      'once, so restating it here was the duplication GAP-37 forbids. Net effect on the ' +
+      'always-loaded file is 33 characters SHORTER.',
+  },
 ];

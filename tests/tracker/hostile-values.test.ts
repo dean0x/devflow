@@ -13,21 +13,35 @@
  * is the authority. Adding a schema field without a validator therefore fails
  * this file rather than silently escaping it.
  *
- * SCOPE AT THIS SUBTASK (3a-2). Two of the four arms named for this file have no
- * subject yet, and an empty `describe` asserts nothing while reading as coverage:
- *   - `refs per provider` (register row 25) needs the per-provider anchored
- *     `ref_grammar` defines — those land with `_jira.mds` (3b) and `_linear.mds` (3c).
- *   - `JQL/filter fields` (§14.9 constraint 10) needs a provider module that
- *     builds a query — same two subtasks.
- * Both are written against their modules in 3b/3c, in the commit that creates the
- * thing they constrain (ADR-025). The provider-token arm (register row 21) is NOT
- * duplicated here either: `tests/core/tracker.test.ts` already drives the 13-payload
- * table through `parseTrackerId`, the single owner of provider parsing, and a second
- * copy of that table is the divergence it exists to prevent.
+ * SCOPE. All four arms named for this file now have subjects, and the last two
+ * arrived with the change that gave them one:
+ *   - `refs per provider` (register row 25) needed the per-provider anchored
+ *     `ref_grammar`, and needed it for EVERY provider. Two of the three landed with
+ *     their mechanics modules; GitHub's landed in the commit that neutralised
+ *     `backlink-shipped-issues`' always-loaded entry gate, which is what moved the
+ *     github grammar out of the provider-blind step and into the github mechanics.
+ *     Until then the github column had no grammar to drive payloads through, and a
+ *     table over two of three providers is register row 25 with a hole in it.
+ *   - `JQL/filter fields` (§14.9 constraint 10) needed a provider module that
+ *     builds a query, which both tool-call providers now do.
+ * Each was written in the commit that created the thing it constrains (ADR-025).
+ * The provider-token arm (register row 21) is NOT duplicated here:
+ * `tests/core/tracker.test.ts` already drives the 13-payload table through
+ * `parseTrackerId`, the single owner of provider parsing, and a second copy of that
+ * table is the divergence it exists to prevent.
  */
 
 import { describe, it, expect } from 'vitest';
 
+import { existsSync, readFileSync } from 'fs';
+import * as path from 'path';
+
+import { compiledSkillRefsDir } from '../../src/core/assets.js';
+import {
+  MCP_BACKED_PROVIDER_SUBDIRS,
+  TRACKER_OPS,
+  VARIANT_MODULES,
+} from '../../src/core/mds-variants.js';
 import {
   TRACKER_SCHEMA_SECTIONS,
   collectTrackerSchemaRows,
@@ -36,6 +50,23 @@ import {
 } from '../helpers.js';
 
 const TRACKER_TEXT = resolveAgentSource('tracker').content;
+
+/**
+ * A generated per-op reference, read fail-loud.
+ *
+ * Never ENOENT-tolerant: a grammar table graded against an absent tree reports no
+ * violations, which is the shape of a guard that is not a guard (PF-018, R3).
+ */
+function readGeneratedReference(relPath: string): string {
+  const abs = path.join(compiledSkillRefsDir(), ...relPath.split('/'));
+  if (!existsSync(abs)) {
+    throw new Error(
+      `${relPath} is absent at ${abs} — run \`npm run build\` first (this guard reads compiled ` +
+      `reference files and cannot be skipped)`,
+    );
+  }
+  return readFileSync(abs, 'utf-8');
+}
 
 // ---------------------------------------------------------------------------
 // The payload table (non-vacuity register row 22)
@@ -325,5 +356,296 @@ describe('hostile values: the agent declares no second provider parser (§14.9 c
       occurrences,
       'the provenance-blind shape-gating rule must be stated exactly once',
     ).toBe(1);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// refs per provider (§14.1, non-vacuity register row 25)
+// ---------------------------------------------------------------------------
+//
+// GAP-18's core claim: the ref pre-flight IS the injection guard for an
+// interpolated reference, so relaxing it per provider is a SECURITY change and
+// not a formatting one. The grammars are therefore pinned from §14.1 and driven
+// against the register's payload table — and each pinned form is separately
+// asserted to appear VERBATIM in that provider's own shipped mechanics, so the
+// table cannot drift away from the artifact it claims to describe (PF-018).
+//
+// Pinned rather than parsed out of the modules: a scan for "the anchored regexes
+// in this file" cannot tell a reference grammar from the site-URL shape gate that
+// sits beside it, and a table graded against whatever it happened to find proves
+// nothing about what §14.1 fixed.
+
+/** One provider's anchored reference grammar, as §14.1 fixes it. */
+interface ProviderRefGrammar {
+  readonly provider: string;
+  /** Every anchored form a reference may satisfy — alternation between forms, never inside one. */
+  readonly forms: readonly string[];
+  /** Whether the provider normalises to ASCII upper before matching. */
+  readonly asciiUpper: boolean;
+  /** References that must be ACCEPTED, so the grammar is not rejecting everything. */
+  readonly accepts: readonly string[];
+}
+
+const PROVIDER_REF_GRAMMARS: readonly ProviderRefGrammar[] = [
+  {
+    provider: 'github',
+    forms: ['^#?[1-9][0-9]{0,8}$'],
+    asciiUpper: false,
+    accepts: ['42', '#42', '123456789'],
+  },
+  {
+    provider: 'jira',
+    forms: ['^[A-Z][A-Z0-9_]{1,9}-[1-9][0-9]{0,8}$'],
+    asciiUpper: false,
+    accepts: ['PROJ-1', 'A_B-12', 'ABCDEFGHIJ-999999999'],
+  },
+  {
+    provider: 'linear',
+    forms: [
+      '^[A-Z][A-Z0-9]{0,9}-[1-9][0-9]{0,8}$',
+      '^[0-9A-F]{8}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{12}$',
+    ],
+    asciiUpper: true,
+    accepts: ['TEAM-123', 'team-123', '3f2504e0-4f89-11d3-9a0c-0305e82c3301'],
+  },
+];
+
+/**
+ * Register row 25's payloads. Each targets a different sink: shell separators,
+ * command substitution, flag injection in both spellings, traversal, size, a
+ * zero-numbered key (the off-by-one an unanchored digit class admits), and
+ * whitespace.
+ */
+const HOSTILE_REFS: ReadonlyArray<readonly [label: string, ref: string]> = [
+  ['shell separator', '1; id'],
+  ['command substitution', '$(id)'],
+  ['long-flag injection', '--repo x'],
+  ['short-flag injection', '-R x'],
+  ['path traversal', '../x'],
+  ['300 characters', 'A'.repeat(300)],
+  ['zero-numbered key', 'PROJ-0'],
+  ['whitespace', ' '],
+];
+
+/** The grammar as the mechanics state it: normalise if the provider says so, then match. */
+function refAccepted(grammar: ProviderRefGrammar, ref: string): boolean {
+  const candidate = grammar.asciiUpper ? ref.replace(/[a-z]/g, c => c.toUpperCase()) : ref;
+  return grammar.forms.some(form => new RegExp(form).test(candidate));
+}
+
+describe('hostile values: refs per provider (GAP-18, register row 25)', () => {
+  it('the table covers every registered provider and every payload (non-vacuity)', () => {
+    const registered = VARIANT_MODULES
+      .filter(mod => mod.kind === 'fanout' && mod.subdir.startsWith('tracker/'))
+      .map(mod => mod.subdir.slice('tracker/'.length))
+      .sort();
+    expect(
+      PROVIDER_REF_GRAMMARS.map(g => g.provider).sort(),
+      'a provider with no grammar row is a provider whose ref pre-flight this file never drives',
+    ).toEqual(registered);
+    expect(HOSTILE_REFS).toHaveLength(8);
+    expect(new Set(HOSTILE_REFS.map(([, r]) => r)).size, 'payloads must be distinct').toBe(8);
+  });
+
+  it('every pinned grammar appears verbatim in that provider\'s own shipped mechanics', () => {
+    // The two-sided half. Without it the table is a restatement of §14.1 that the
+    // artifact is free to diverge from, which is the shape PF-018 names.
+    for (const grammar of PROVIDER_REF_GRAMMARS) {
+      const tree = TRACKER_OPS
+        .map(op => readGeneratedReference(`tracker/${grammar.provider}/${op}.md`))
+        .join('\n');
+      for (const form of grammar.forms) {
+        expect(
+          tree,
+          `${grammar.provider}: the anchored form ${form} appears nowhere in its generated ` +
+          `mechanics — a grammar the mechanics do not state is a gate the agent cannot apply, ` +
+          `and the always-loaded entry gate defers to exactly this`,
+        ).toContain(form);
+      }
+      if (grammar.asciiUpper) {
+        expect(
+          tree,
+          `${grammar.provider}: the normalisation its grammar depends on must be stated too`,
+        ).toMatch(/ASCII-upper/);
+      }
+    }
+  });
+
+  for (const grammar of PROVIDER_REF_GRAMMARS) {
+    describe(`${grammar.provider} ref_grammar`, () => {
+      for (const [label, ref] of HOSTILE_REFS) {
+        it(`rejects ${label}`, () => {
+          expect(
+            refAccepted(grammar, ref),
+            `${grammar.provider} ACCEPTED ${JSON.stringify(ref.slice(0, 40))} — the anchored form ` +
+            `is what keeps a reference out of a query and out of a command (GAP-18). Tighten the ` +
+            `grammar in the provider's mechanics, not this test.`,
+          ).toBe(false);
+        });
+      }
+
+      it('accepts the shapes it exists to admit', () => {
+        for (const ref of grammar.accepts) {
+          expect(
+            refAccepted(grammar, ref),
+            `${grammar.provider} must accept ${JSON.stringify(ref)} — a grammar that rejects ` +
+            `everything passes every row above while making the operation unreachable`,
+          ).toBe(true);
+        }
+        expect(grammar.accepts.length, 'the accepted corpus is empty (PF-018)').toBeGreaterThan(0);
+      });
+    });
+  }
+
+  it('known-bad probe: an unanchored grammar admits what every anchored one rejects', () => {
+    // Why §14.1 says "never `^A|B$`", driven through the same predicate. The
+    // alternation binds looser than the anchors, so the left branch is anchored at
+    // the start only and the right at the end only — and `1; id` walks straight in.
+    const unanchored: ProviderRefGrammar = {
+      provider: 'probe',
+      forms: ['^[A-Z][A-Z0-9]{0,9}-[1-9][0-9]{0,8}|[0-9A-F]{8}$'],
+      asciiUpper: true,
+      accepts: [],
+    };
+    const admitted = HOSTILE_REFS.filter(([, ref]) => refAccepted(unanchored, ref)).map(([l]) => l);
+    expect(
+      admitted,
+      'an unanchored alternation must admit at least one hostile payload, or this probe proves ' +
+      'nothing about why both forms are anchored separately',
+    ).not.toEqual([]);
+    // …and the shipped forms reject the same payload, so the difference is the anchors.
+    for (const grammar of PROVIDER_REF_GRAMMARS) {
+      for (const [, ref] of HOSTILE_REFS) {
+        expect(refAccepted(grammar, ref), `${grammar.provider} must reject ${JSON.stringify(ref)}`)
+          .toBe(false);
+      }
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// JQL / filter fields (§14.9 constraint 10)
+// ---------------------------------------------------------------------------
+//
+// Constraint 10 is an ORDERED rule, and the order is the whole content: escape
+// `\` first and then `"`, because the other order escapes the backslash the second
+// pass just inserted and leaves the quote live. Then DROP anything still carrying
+// a metacharacter — repair is forbidden, because a repaired value is one nobody
+// can predict.
+//
+// Modelled here exactly as the modules write it, the same device
+// `resolveProviderAsSpecified` uses for the preamble's normalisation in
+// tests/tracker/byte-budget.test.ts: what can be asserted mechanically about a
+// prompt is that the rule AS WRITTEN drops every hostile payload, that both
+// tool-call providers state it, and that the stated ORDER is the one that works.
+
+/** Every provider whose mechanics compose a query rather than a CLI invocation. */
+function queryBuildingProviders(): string[] {
+  return VARIANT_MODULES
+    .filter(mod => (MCP_BACKED_PROVIDER_SUBDIRS as readonly string[]).includes(mod.subdir))
+    .map(mod => mod.subdir.slice('tracker/'.length));
+}
+
+/**
+ * The four characters that can break OUT of a quoted string literal, and therefore
+ * the module's drop set. Named so the arms below say which claim they are making:
+ * a value is dropped because it could end the literal, not because it looks hostile.
+ */
+const QUERY_BREAKOUT_CHARS = /["\\\n`]/;
+
+/**
+ * The escape-then-drop rule, LITERALLY as the modules state it. Returns null when
+ * the value is DROPPED.
+ *
+ * The drop test runs on the ESCAPED string, with no un-escaping cleverness, which
+ * is what the rule says and is stricter than it first looks: every `"` escapes to
+ * `\\"`, which still carries a `"`, so a value containing a quote is dropped
+ * whatever the escape did. The escape is therefore defence in depth for a value
+ * that somehow reached the sink unchecked, and the drop is the control. Modelling
+ * it as "escape, then decide whether the escape worked" would have been a model of
+ * a rule nobody wrote.
+ */
+function escapeThenDrop(value: string): string | null {
+  const escaped = value.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+  return QUERY_BREAKOUT_CHARS.test(escaped) ? null : escaped;
+}
+
+/** The FORBIDDEN order, kept as a named counterexample rather than as prose. */
+function escapeReversed(value: string): string {
+  return value.replace(/"/g, '\\"').replace(/\\/g, '\\\\');
+}
+
+describe('hostile values: JQL/filter fields (§14.9 constraint 10)', () => {
+  it('both tool-call providers state the rule, in one place each', () => {
+    const providers = queryBuildingProviders();
+    expect(providers.length, 'no query-building provider is registered (PF-018)').toBeGreaterThan(1);
+    for (const provider of providers) {
+      const tree = TRACKER_OPS
+        .map(op => readGeneratedReference(`tracker/${provider}/${op}.md`))
+        .join('\n');
+      expect(tree, `${provider}: structured filter arguments must be preferred`)
+        .toContain('structured filter argument');
+      expect(
+        tree,
+        `${provider}: a caller value may reach a query only as a quoted string literal — never ` +
+        `in field, operator or ordering position, which is where a quote break becomes a ` +
+        `different question`,
+      ).toContain('quoted string literal');
+      expect(tree, `${provider}: the escape ORDER is part of the rule`)
+        .toContain('Escape `\\` first and then `"`');
+      expect(tree, `${provider}: and the bound every query carries`).toContain('≤50');
+    }
+  });
+
+  it('the rule DROPS every payload that could break out of a quoted literal', () => {
+    // Scoped to the breakout set on purpose, and the scope is the claim. A QUERY
+    // sink is not a shell: `$(id)` and `--body-file=/etc/passwd` inside a quoted
+    // string literal are inert TEXT, and dropping them would cost search results
+    // while protecting nothing. What must never survive is a character that can END
+    // the literal, because that is what turns a value into a different question —
+    // which is why the rule's own drop set is exactly those four and why the
+    // value-position rule asserted above is the other half of the same control.
+    const breakout = HOSTILE_PAYLOADS.filter(([, p]) => QUERY_BREAKOUT_CHARS.test(p));
+    expect(
+      breakout.map(([l]) => l),
+      'the payload table must contain at least one breakout payload, or this arm is vacuous',
+    ).toEqual(['backtick command substitution', 'line injection', 'query operator escape']);
+    const survived = breakout
+      .filter(([, p]) => escapeThenDrop(p) !== null)
+      .map(([l, p]) => `${l}: ${JSON.stringify(p.slice(0, 40))}`);
+    expect(
+      survived,
+      `payload(s) that could end a quoted literal and still reached the query. Repair is ` +
+      `forbidden precisely because a repaired value is unpredictable — dropping one costs a ` +
+      `search result, repairing one costs the query:\n  ${survived.join('\n  ')}`,
+    ).toEqual([]);
+  });
+
+  it('a value with no breakout character survives, as a value', () => {
+    // Without this the arm above is satisfied by a rule that drops everything, which
+    // would make every structured search unreachable rather than safe. The
+    // non-breakout payloads are listed among them deliberately: they survive the
+    // drop and are contained by POSITION instead, which is the rule the arm above
+    // asserts each provider states.
+    for (const benign of ['Tech Debt Backlog', 'fix login bug', 'PROJ-12 follow-up', '$(id)']) {
+      expect(escapeThenDrop(benign), `${JSON.stringify(benign)} must survive`).toBe(benign);
+    }
+  });
+
+  it('known-bad probe: the reversed escape order leaves a live quote', () => {
+    // The reason the order is stated at all. Escaping the quote first inserts a
+    // backslash that the backslash pass then doubles, so the quote ends up preceded
+    // by an EVEN number of backslashes — which closes the string literal.
+    const payload = 'PROJ" OR project != "';
+    const reversed = escapeReversed(payload);
+    expect(
+      /(^|[^\\])(\\\\)*"/.test(reversed),
+      'the reversed order must leave an unescaped quote, or the stated order is arbitrary',
+    ).toBe(true);
+    // …and the stated order drops this payload rather than shipping it either way.
+    expect(
+      escapeThenDrop(payload),
+      'the stated order must DROP a value that still carries a quote after escaping',
+    ).toBeNull();
   });
 });
