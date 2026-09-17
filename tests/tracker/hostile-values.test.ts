@@ -118,6 +118,17 @@ const HOSTILE_PAYLOADS: ReadonlyArray<readonly [label: string, payload: string]>
   ['tracker account identifier', IDENTITY_PAYLOADS[1]],
 ];
 
+/**
+ * The floor the payload table must clear, registered as `min-hostile-payloads` in
+ * tests/fixtures/numeric-floors.json.
+ *
+ * A floor and not the table's length: the grid below grades every payload against
+ * every schema cell, so a row added to the table widens the evidence and must not
+ * cost a suite failure — while a row REMOVED shrinks the sinks the grid covers
+ * with nothing else reporting it.
+ */
+const MIN_HOSTILE_PAYLOADS = 9;
+
 // ---------------------------------------------------------------------------
 // Validator extraction — one parser, driven by the guard and by its probes
 // ---------------------------------------------------------------------------
@@ -402,9 +413,22 @@ describe('hostile values: tracker.md fields (AC-3.7, register row 22)', () => {
     ).toBeGreaterThan(expected.length);
   });
 
-  it('the payload table still has all nine rows (non-vacuity)', () => {
-    expect(HOSTILE_PAYLOADS).toHaveLength(9);
-    expect(new Set(HOSTILE_PAYLOADS.map(([, p]) => p)).size, 'payloads must be distinct').toBe(9);
+  it('the payload table clears its floor and carries no repeat (non-vacuity)', () => {
+    // A FLOOR, not an equality. The grid above grades every payload against every
+    // cell, so a tenth payload strictly widens the evidence — and an equality would
+    // make adding one fail the suite, which is the ratchet inverted (the manifest's
+    // own header: floors rise and never fall).
+    expect(
+      HOSTILE_PAYLOADS.length,
+      'the payload table is below its floor — the grid above grades whatever is in it, so a ' +
+      'shrunken table is a green suite over fewer sinks (PF-018)',
+    ).toBeGreaterThanOrEqual(MIN_HOSTILE_PAYLOADS);
+    // Distinctness is asserted as a RELATION to the table's own length rather than
+    // to the floor: a repeat then goes red at any table size.
+    expect(
+      new Set(HOSTILE_PAYLOADS.map(([, p]) => p)).size,
+      'payloads must be distinct — a repeated row inflates the count without widening the grid',
+    ).toBe(HOSTILE_PAYLOADS.length);
   });
 
   it('`## Assignee`\'s identity clause is what refuses the two identity payloads', () => {
@@ -742,6 +766,16 @@ const HOSTILE_REFS: ReadonlyArray<readonly [label: string, ref: string]> = [
   ['whitespace', ' '],
 ];
 
+/**
+ * The floor the hostile-ref table must clear, registered as `min-hostile-refs` in
+ * tests/fixtures/numeric-floors.json.
+ *
+ * Same reasoning as the payload floor: every pinned grammar is driven over the
+ * whole table, so a row added widens the corpus for every provider at once and a
+ * row removed silently narrows it.
+ */
+const MIN_HOSTILE_REFS = 8;
+
 /** The grammar as the mechanics state it: normalise if the provider says so, then match. */
 function refAccepted(grammar: ProviderRefGrammar, ref: string): boolean {
   const candidate = grammar.asciiUpper ? ref.replace(/[a-z]/g, c => c.toUpperCase()) : ref;
@@ -758,8 +792,15 @@ describe('hostile values: refs per provider (GAP-18, register row 25)', () => {
       PROVIDER_REF_GRAMMARS.map(g => g.provider).sort(),
       'a provider with no grammar row is a provider whose ref pre-flight this file never drives',
     ).toEqual(registered);
-    expect(HOSTILE_REFS).toHaveLength(8);
-    expect(new Set(HOSTILE_REFS.map(([, r]) => r)).size, 'payloads must be distinct').toBe(8);
+    expect(
+      HOSTILE_REFS.length,
+      'the hostile-ref table is below its floor — every grammar below is driven over whatever is ' +
+      'in it, so a shrunken table is a green suite over fewer shapes (PF-018)',
+    ).toBeGreaterThanOrEqual(MIN_HOSTILE_REFS);
+    expect(
+      new Set(HOSTILE_REFS.map(([, r]) => r)).size,
+      'refs must be distinct — a repeated row inflates the count without widening the corpus',
+    ).toBe(HOSTILE_REFS.length);
   });
 
   it('every pinned grammar appears verbatim in that provider\'s own shipped mechanics', () => {

@@ -49,6 +49,7 @@ import {
   VARIANT_MODULES,
   generatedReferenceManifest,
   mcpContractIsGenerated,
+  type VariantModule,
 } from '../../src/core/mds-variants.js';
 import {
   PER_ITEM_FETCH_SHAPES,
@@ -59,6 +60,7 @@ import {
   type ProviderCorpus,
   type ProviderRefVocabulary,
 } from '../helpers.js';
+import { MIN_REFERENCE_CHARS } from './reference-floor.js';
 
 // ---------------------------------------------------------------------------
 // Sources and generated files
@@ -121,27 +123,42 @@ function unescapeMds(source: string): string {
 // 1. Registration — the gate this module opens, and the roster it shares
 // ---------------------------------------------------------------------------
 
+/**
+ * One registry row, addressed by its source path and raised by name when absent.
+ *
+ * `find(...)!` would hand the arm an `undefined` that surfaces as "cannot read
+ * properties of undefined" a line later, naming neither the registry nor the
+ * module that left it — and a module leaving the registry is precisely what these
+ * arms exist to report.
+ */
+function requireVariantModule(source: string): VariantModule {
+  const found = VARIANT_MODULES.find(m => m.source === source);
+  if (found === undefined) {
+    throw new Error(
+      `${source} is not in VARIANT_MODULES (registered: ` +
+      `${VARIANT_MODULES.map(m => m.source).join(', ')}). An unregistered reference module is ` +
+      `refused by the build with a message naming the registry — the emitted filenames come from ` +
+      `the op roster, so there is nothing to fall back to.`,
+    );
+  }
+  return found;
+}
+
 describe('jira module: registration and the contract gate it opens', () => {
   it('is registered against tracker/jira and shares the op roster with GitHub', () => {
-    const jira = VARIANT_MODULES.find(m => m.source === JIRA_MODULE);
-    expect(
-      jira,
-      `${JIRA_MODULE} is not in VARIANT_MODULES. An unregistered reference module is refused by ` +
-      `the build with a message naming the registry — the emitted filenames come from the op ` +
-      `roster, so there is nothing to fall back to.`,
-    ).toBeDefined();
-    expect(jira!.subdir, 'the provider sub-directory decides the gate').toBe(JIRA_SUBDIR);
-    expect(jira!.kind, 'a provider module fans out one file per op').toBe('fanout');
+    const jira = requireVariantModule(JIRA_MODULE);
+    expect(jira.subdir, 'the provider sub-directory decides the gate').toBe(JIRA_SUBDIR);
+    expect(jira.kind, 'a provider module fans out one file per op').toBe('fanout');
     // STRUCTURAL file-set parity: both rows read the SAME exported roster, so a
     // provider cannot acquire or lose an op without moving every provider with it.
     // Asserted by identity, not by set equality — set equality over two hand-listed
     // rosters is the drift this arrangement removes.
-    const github = VARIANT_MODULES.find(m => m.source === GITHUB_MODULE)!;
+    const github = requireVariantModule(GITHUB_MODULE);
     expect(
-      jira!.ops,
+      jira.ops,
       'both provider rows must read one roster — file-set parity is then a compile-time property',
     ).toBe(github.ops);
-    expect(jira!.ops, 'and that roster is TRACKER_OPS').toBe(TRACKER_OPS);
+    expect(jira.ops, 'and that roster is TRACKER_OPS').toBe(TRACKER_OPS);
   });
 
   it('opening the gate generates the tool-call contract, and the manifest carries it', () => {
@@ -217,13 +234,16 @@ export function collectDefineBodies(source: string): Map<string, string> {
 }
 
 /**
- * The floor a define's body must clear, shared with the generated-reference floor.
+ * The floor a define's BODY must clear — the generated-reference floor, one step
+ * upstream, and deliberately the same number.
  *
- * Read from the containment suite's constant rather than re-spelled: the two
- * measure the same thing one step apart — a define that kept its heading and lost
- * its body compiles into exactly the reference that floor exists to catch.
+ * An alias rather than a second constant: a define that kept its heading and lost
+ * its body compiles into exactly the reference `MIN_REFERENCE_CHARS` exists to
+ * catch, so the two cannot be allowed to drift apart. The alias exists only to
+ * name the subject at the source-side sites, where the thing measured is an `.mds`
+ * define and not a generated file.
  */
-const MIN_DEFINE_CHARS = 80;
+const MIN_DEFINE_CHARS = MIN_REFERENCE_CHARS;
 
 /** A registered provider module: the sub-directory it is registered for, and its source. */
 interface ProviderModule {
@@ -681,7 +701,7 @@ describe('jira module: the generated per-op references', () => {
         content.split('\n')[0],
         `${jiraRel(op)}: line 1 must be this op's anchor`,
       ).toBe(`## Operation: ${op}`);
-      expect(content.length, `${jiraRel(op)} is thin`).toBeGreaterThanOrEqual(MIN_DEFINE_CHARS);
+      expect(content.length, `${jiraRel(op)} is thin`).toBeGreaterThanOrEqual(MIN_REFERENCE_CHARS);
     }
   });
 
@@ -726,8 +746,8 @@ const JIRA_LITERALS: readonly ProviderLiteral[] = [
   {
     literal: 'Retry-After',
     present: true,
-    why: 'Jira\'s only backpressure signal, and it is reactive: honoured verbatim, never ' +
-      'shortened, STOP on 429',
+    why: 'Jira\'s only backpressure signal, and it is reactive: reported, never slept on, ' +
+      'STOP on 429',
   },
   {
     literal: '60000',
@@ -934,7 +954,10 @@ describe('jira module: marker dedup (AC-3.14, GAP-20)', () => {
         `${jiraRel(op)}: must own the ${kind} marker namespace`,
       ).toContain(kind);
     }
-    expect(MARKER_NAMESPACES.length, 'the namespace table is empty (PF-018)').toBe(3);
+    expect(
+      MARKER_NAMESPACES.length,
+      'the namespace table is empty, so the loop above ran zero times (PF-018)',
+    ).toBeGreaterThanOrEqual(3);
   });
 
   it('no marker namespace leaks into an op that does not own it', () => {

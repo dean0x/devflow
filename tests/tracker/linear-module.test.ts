@@ -57,6 +57,7 @@ import {
   VARIANT_MODULES,
   generatedReferenceManifest,
   mcpContractIsGenerated,
+  type VariantModule,
 } from '../../src/core/mds-variants.js';
 import {
   ROOT,
@@ -66,6 +67,7 @@ import {
   type ProviderCorpus,
   type ProviderRefVocabulary,
 } from '../helpers.js';
+import { MIN_REFERENCE_CHARS } from './reference-floor.js';
 
 // ---------------------------------------------------------------------------
 // Sources and generated files
@@ -134,26 +136,41 @@ function unescapeMds(source: string): string {
 // 1. Registration — the third provider, on the shared roster
 // ---------------------------------------------------------------------------
 
+/**
+ * One registry row, addressed by its source path and raised by name when absent.
+ *
+ * `find(...)!` would hand the arm an `undefined` that surfaces as "cannot read
+ * properties of undefined" a line later, naming neither the registry nor the
+ * module that left it — and a module leaving the registry is precisely what these
+ * arms exist to report.
+ */
+function requireVariantModule(source: string): VariantModule {
+  const found = VARIANT_MODULES.find(m => m.source === source);
+  if (found === undefined) {
+    throw new Error(
+      `${source} is not in VARIANT_MODULES (registered: ` +
+      `${VARIANT_MODULES.map(m => m.source).join(', ')}). An unregistered reference module is ` +
+      `refused by the build with a message naming the registry — the emitted filenames come from ` +
+      `the op roster, so there is nothing to fall back to.`,
+    );
+  }
+  return found;
+}
+
 describe('linear module: registration and the roster it shares', () => {
   it('is registered against tracker/linear and shares the op roster with the other providers', () => {
-    const linear = VARIANT_MODULES.find(m => m.source === LINEAR_MODULE);
-    expect(
-      linear,
-      `${LINEAR_MODULE} is not in VARIANT_MODULES. An unregistered reference module is refused by ` +
-      `the build with a message naming the registry — the emitted filenames come from the op ` +
-      `roster, so there is nothing to fall back to.`,
-    ).toBeDefined();
-    expect(linear!.subdir, 'the provider sub-directory decides the gate').toBe(LINEAR_SUBDIR);
-    expect(linear!.kind, 'a provider module fans out one file per op').toBe('fanout');
+    const linear = requireVariantModule(LINEAR_MODULE);
+    expect(linear.subdir, 'the provider sub-directory decides the gate').toBe(LINEAR_SUBDIR);
+    expect(linear.kind, 'a provider module fans out one file per op').toBe('fanout');
     // STRUCTURAL file-set parity, for the third time: every provider row reads the
     // SAME exported roster, so a provider cannot acquire or lose an op without
     // moving every provider with it. Asserted by identity against BOTH siblings —
     // a roster shared with one and not the other is the asymmetry parity forbids.
-    const github = VARIANT_MODULES.find(m => m.source === GITHUB_MODULE)!;
-    const jira = VARIANT_MODULES.find(m => m.source === JIRA_MODULE)!;
-    expect(linear!.ops, 'the roster is TRACKER_OPS, by identity').toBe(TRACKER_OPS);
-    expect(linear!.ops, 'and the same object the GitHub row reads').toBe(github.ops);
-    expect(linear!.ops, 'and the same object the Jira row reads').toBe(jira.ops);
+    const github = requireVariantModule(GITHUB_MODULE);
+    const jira = requireVariantModule(JIRA_MODULE);
+    expect(linear.ops, 'the roster is TRACKER_OPS, by identity').toBe(TRACKER_OPS);
+    expect(linear.ops, 'and the same object the GitHub row reads').toBe(github.ops);
+    expect(linear.ops, 'and the same object the Jira row reads').toBe(jira.ops);
   });
 
   it('is an MCP-backed provider, so it loads the tool-call contract', () => {
@@ -184,9 +201,6 @@ describe('linear module: registration and the roster it shares', () => {
 // ---------------------------------------------------------------------------
 // 2. Generated-file shape
 // ---------------------------------------------------------------------------
-
-/** The floor a generated reference must clear — the containment suite's constant. */
-const MIN_REFERENCE_CHARS = 80;
 
 describe('linear module: the generated per-op references', () => {
   it('every op has a generated Linear reference opening with its own anchor on line 1', () => {
@@ -303,7 +317,10 @@ describe('linear module: marker namespaces (AC-3.14, GAP-20)', () => {
         `${linearRel(op)}: must own the ${kind} marker namespace`,
       ).toContain(kind);
     }
-    expect(MARKER_NAMESPACES.length, 'the namespace table is empty (PF-018)').toBe(3);
+    expect(
+      MARKER_NAMESPACES.length,
+      'the namespace table is empty, so the loop above ran zero times (PF-018)',
+    ).toBeGreaterThanOrEqual(3);
   });
 
   it('no marker namespace leaks into an op that does not own it', () => {
@@ -505,7 +522,11 @@ describe('linear module: the anchored ref grammar and its UUID alternative (§14
       `hostile ref(s) accepted by the grammar this module states: ${accepted.join(', ')}. The ` +
       `anchored form is what keeps a ref out of a query and out of a command`,
     ).toEqual([]);
-    expect(HOSTILE_REFS.length, 'the hostile corpus is empty (PF-018)').toBe(11);
+    expect(
+      HOSTILE_REFS.length,
+      'the hostile corpus is too thin to discriminate — the filter above would be empty for a ' +
+      'grammar that accepted everything (PF-018)',
+    ).toBeGreaterThanOrEqual(11);
   });
 
   it('the mechanics state that an anchor binds the whole STRING, so a newline fails', () => {

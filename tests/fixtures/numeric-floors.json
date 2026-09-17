@@ -201,6 +201,22 @@
       "occurrences": 1,
       "sourceFile": "tests/tracker/reference-structure.test.ts",
       "description": "Column-0 `## ` lines the live generated reference tree must carry INSIDE a code fence, so the PF-063 structure guard's absence assertion is exercised against real fenced headings rather than a corpus that has none. Today: manage-debt.md's `## Items` (1) plus ensure-traceable-issue.md's heredoc and D3-template headings (6). Lowering it re-admits a corpus in which fence-awareness is proven only by the synthetic probes in tests/guards/agent-source-resolver.test.ts."
+    },
+    {
+      "id": "min-hostile-payloads",
+      "floor": 9,
+      "pattern": "const MIN_HOSTILE_PAYLOADS = 9;",
+      "occurrences": 1,
+      "sourceFile": "tests/tracker/hostile-values.test.ts",
+      "description": "Rows HOSTILE_PAYLOADS must carry — seven register payloads, each targeting a different sink (command substitution in two spellings, flag injection, line injection, size, credential-in-URL, query-operator escape), plus the two identity payloads that are the only rows exercising `## Assignee`'s second prohibition. Registered as a FLOOR because the payload grid grades every row against every schema cell: a row ADDED widens the evidence and must never cost a suite failure, while a row REMOVED narrows the sinks the grid covers with nothing else reporting it. Spelled as an exact count it was the ratchet inverted — adding a payload, the thing a reviewer most wants a contributor to do, failed the suite."
+    },
+    {
+      "id": "min-hostile-refs",
+      "floor": 8,
+      "pattern": "const MIN_HOSTILE_REFS = 8;",
+      "occurrences": 1,
+      "sourceFile": "tests/tracker/hostile-values.test.ts",
+      "description": "Rows HOSTILE_REFS must carry — shell separator, command substitution, both flag-injection spellings, path traversal, size, the zero-numbered key an unanchored digit class admits, and whitespace. Every pinned §14.1 grammar in PROVIDER_REF_GRAMMARS is driven over the whole table, so one row added widens the corpus for every provider at once and one removed silently narrows it for all of them. A FLOOR for the same reason as min-hostile-payloads."
     }
   ],
   "ceilings": [
