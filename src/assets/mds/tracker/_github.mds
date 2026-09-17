@@ -13,8 +13,8 @@ The op roster is the SAME exported list the other provider modules read, so
 file-set parity across providers is a compile-time property rather than an
 assertion: a provider cannot gain or lose an operation without every provider
 moving with it. Define-set parity — one `@define` per op, named identically
-across modules — is what the cross-provider parity scan in `tests/tracker/jira-module.test.ts`
-asserts over all three, because a define name is visible to no type.
+across modules — is what the `cross-provider define-set parity` scan asserts
+over all three, because a define name is visible to no type.
 
 Each section states what the Git agent loads it for. An operation's contract —
 its `**Input:**`, its `**Output:**` template and its `**Degradation (D4):**`
