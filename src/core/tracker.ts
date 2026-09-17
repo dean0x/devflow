@@ -113,7 +113,16 @@ export const DEFAULT_TRACKER_PROVIDER: TrackerProvider = 'github';
 export const TRACKER_PROVIDER_KEY_PATH = 'features.tracker.provider';
 
 // ---------------------------------------------------------------------------
-// Artifact basenames — one spelling, shared by every writer and remover
+// Artifact basenames — one spelling for every TypeScript reader
+//
+// NOT the only spelling in the repository, and a rename that assumes it is will
+// miss three places these names are hardcoded because they cannot import from
+// here (PF-013): the SessionStart hook's Section 3 (shell), the Tracker agent's
+// prompt (prose), and uninstall.ts's artifact list, which spells every
+// ~/.devflow entry as a literal the way its siblings do. Each is cross-pinned
+// against these constants by tests — shell-hooks, tracker-agent, uninstall-logic
+// and core/tracker — so the spellings cannot drift silently, but they do have to
+// move together.
 // ---------------------------------------------------------------------------
 
 /** `~/.devflow/tracker.md` — the inferred conventions file (USER CONTENT on uninstall). */
