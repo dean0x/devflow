@@ -174,9 +174,19 @@ const PROVIDER_LITERALS: readonly ProviderLiteral[] = [
     literal: 'Retry-After',
     present: ['jira'],
     why:
-      'Jira\'s only backpressure signal, and it is reactive: honoured verbatim, never shortened, ' +
-      'STOP on 429. GitHub has the pre-emptive count instead and Linear signals through an error ' +
+      'Jira\'s only backpressure signal, and it is reactive: reported, never slept on, STOP on ' +
+      '429. GitHub has the pre-emptive count instead and Linear signals through an error ' +
       'body, so a second provider naming this header would be honouring a value it never receives',
+  },
+  {
+    literal: 'never slept on',
+    present: ['jira'],
+    why:
+      'the disambiguation the one DURATION-shaped backpressure signal needs. "STOP the fan-out" ' +
+      'beside a value an agent could wait out reads as a contradiction, and a `Retry-After` can ' +
+      'outlast the spawn — an agent that slept on one is killed before it reports the throttle ' +
+      'at all. The other two providers hand the agent no waitable value, so the clause would be ' +
+      'answering a question their signals never ask',
   },
   {
     literal: 'RATELIMITED',
@@ -286,6 +296,20 @@ describe('provider literals: the cross-provider matrix (AC-3.13, GAP-13)', () =>
       collectLiteralViolations('seed', 'cap 32767; a 400 RATELIMITED stops the fan-out', 'linear', PROVIDER_LITERALS),
       'a correct Linear row must be silent',
     ).toEqual([]);
+
+    // …and the duration clause in both directions. A Jira row that names the header
+    // while dropping "never slept on" is exactly the ambiguity the clause resolves:
+    // STOP beside a waitable value, with nothing saying which wins.
+    expect(
+      collectLiteralViolations('seed', 'cap 32767; Retry-After on a 429 stops the fan-out', 'jira', PROVIDER_LITERALS)
+        .map(v => v.split(' — ')[0]),
+      'a Jira row naming the header but dropping the do-not-sleep clause must be reported',
+    ).toEqual(['seed: missing "never slept on"']);
+    expect(
+      collectLiteralViolations('seed', 'cap 32767; a 400 RATELIMITED stops the fan-out; never slept on', 'linear', PROVIDER_LITERALS)
+        .map(v => v.split(' — ')[0]),
+      'a provider whose signal hands the agent no waitable value must not carry the clause',
+    ).toEqual(['seed: forbidden "never slept on"']);
   });
 });
 

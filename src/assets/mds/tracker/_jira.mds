@@ -202,7 +202,7 @@ Load when the resolved tracker provider is `jira` and the operation is `backlink
 
 The D4 degradation contract and the D11 comment-sink scrub state the rules; what they leave to the provider is the SIGNAL. These are this provider's.
 
-- **Backpressure is REACTIVE ONLY.** The signal is a `Retry-After` value on a 429. Honour it **verbatim** — never shorten it, never reissue before it elapses — and **STOP** the fan-out on a 429 rather than waiting out the window item by item, because continuing to issue requests into one extends the penalty.
+- **Backpressure is REACTIVE ONLY.** The signal is a `Retry-After` value on a 429. It is **reported, never slept on** — the value can outlast the spawn, and an agent asleep in one is killed before it reports anything. **STOP** the fan-out on a 429 rather than waiting out the window item by item, because continuing to issue requests into one extends the penalty.
 - **There is no pre-emptive rung.** This provider publishes no remaining-request count, so there is no threshold at which the inter-item delay rises. A rung keyed on one would never engage, and a module that stated one would read as coverage while providing none.
 - **Unavailability:** the *add comment* or *list comments with authors* capability absent or denied — D4's "no remote" condition on this provider.
 
