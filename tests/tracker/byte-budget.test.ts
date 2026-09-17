@@ -114,7 +114,7 @@ const BUDGET_GIT_MD = 55_750;
  * would have reduced it — a cross-cutting reference RECORDED but not gated — is
  * the one classification these clauses cannot honestly take. A mismatch guard
  * that decides whether a tracker call happens is a containment control, and
- * PF-027 is precisely the rule that a containment control is never a file the
+ * PF-058 is precisely the rule that a containment control is never a file the
  * spawn might not have loaded.
  *
  * Registered as a NEW `ceilings` entry (`budget-git-md-p3`). It is the ONLY new

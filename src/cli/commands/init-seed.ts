@@ -97,8 +97,8 @@ export function resolveSeedFeatures(
   projectConfig: FeatureConfig | null,
 ): FeatureSeed {
   // ambient/hud/rules/proxy/compliance/tracker: manifest is the source; fall back to registry defaults.
-  // proxy, compliance and tracker follow the manifest group (like ambient) per
-  // ADR-001 — NOT config.json-gated. The tracker selection is machine-wide.
+  // proxy, compliance and tracker follow the manifest group (like ambient) —
+  // NOT config.json-gated. The tracker selection is machine-wide.
   const ambient = manifest?.features.ambient ?? FEATURE_DEFAULTS.ambient;
   const hud = manifest?.features.hud ?? FEATURE_DEFAULTS.hud;
   const rules = manifest?.features.rules ?? FEATURE_DEFAULTS.rules;

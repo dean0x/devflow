@@ -9,7 +9,7 @@
  * (flag, no prompt) and the non-TTY fallback preserve their promptless contracts.
  * Applies PF-014: runTrackerStep never calls process.exit() or throws — callers
  * own the cancel idiom (p.cancel + process.exit(0)), keeping try/finally safe.
- * Applies ADR-019: the shared DI seam (PromptOutcome, WizardPromptIO, clackNote,
+ * Applies ADR-019's one-definition-seam corollary: the shared DI seam (PromptOutcome, WizardPromptIO, clackNote,
  * clackSelect) is imported from prompt-io.ts — never re-declared here.
  *
  * D-TRACKER-GATE: this step copies COMPLIANCE's gate, not ATTRIBUTION's.
@@ -208,7 +208,7 @@ export async function runTrackerStep(opts: {
 
   return {
     kind: 'resolved',
-    // Fresh object — never alias the seed (PF-014).
+    // Fresh object — never alias the seed the caller still holds.
     state: { provider },
     messages: [
       provider === DEFAULT_TRACKER_PROVIDER

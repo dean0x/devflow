@@ -370,7 +370,7 @@ describe('AC-3.16: the tracker configuration file has exactly ONE reader', () =>
     expect(
       collectTrackerFileReaders(corpus),
       'a command reads the tracker configuration file. Commands are orchestrators: they pass ' +
-      'inputs to agents and never read a learned file themselves (ADR-007, AC-3.18)',
+      'inputs to agents; the tracker configuration file has exactly one reader (AC-3.18)',
     ).toEqual([]);
   });
 

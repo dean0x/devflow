@@ -304,7 +304,7 @@ describe('bypass regex: red on every shape that posts an ungated body', () => {
     // The bypass regex, applied to the corpus rather than only to seeds. Until a
     // provider mechanics tree existed there was nothing to apply it to; now there
     // is, and a control that only ever runs against its own known-bad samples is
-    // a control nobody is subject to (PF-027).
+    // a control nobody is subject to (PF-064).
     const corpus = postingMechanicCorpus();
     expect(corpus.length, 'empty sink class — run `npm run build`').toBeGreaterThan(0);
     const sites = collectBypassSites(corpus);
