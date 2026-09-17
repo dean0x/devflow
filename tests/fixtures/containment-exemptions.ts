@@ -846,4 +846,29 @@ export const CONTAINMENT_EXEMPTIONS: readonly ContainmentExemption[] = [
       'among them "never report the status as `COMPLETE` while issues went unprocessed", which ' +
       'is the release-facing half of the same gate and was deliberately left alone.',
   },
+
+  // ── #325, alignment pass: the last GitHub signal in a tracker op's D4 line ──
+  {
+    file: 'git-agent.md',
+    startLine: 846,
+    endLine: 846,
+    rationale:
+      '#325, alignment pass (M4). The same operation\'s `**Degradation (D4):**` line named ' +
+      'GitHub\'s rate-limit SIGNAL — a 403/429 rate-limit response or `X-RateLimit-Remaining` ' +
+      '< 10 — in a provider-blind, always-loaded position. Under jira and linear the winning ' +
+      'contract therefore keyed the full-STOP rung on a header neither provider ever sends, ' +
+      'while those providers\' own mechanics say there is no pre-emptive rung at all: a rung ' +
+      'that can never engage reads as coverage and is none. The sentence is DELETED rather ' +
+      'than reworded because both of its halves already exist provider-neutrally and deleting ' +
+      'it leaves the end state rather than a pointer restating an always-loaded rule. `:28` ' +
+      'states the rung itself ("A provider-signalled secondary rate limit … STOP the current ' +
+      'fan-out operation immediately; report remaining items as `THROTTLED ({n} not ' +
+      'processed)`") and defers the signal to "the resolved provider\'s reference"; `:31` names ' +
+      'this operation as one of D4\'s two batch ops; and `### Provider signals (GitHub)` in ' +
+      'the github mechanics holds both thresholds, which is where the 850-853 entry above ' +
+      'already relocated this operation\'s reference grammar. A third restatement in the op ' +
+      'body was the duplication GAP-37 forbids. The unavailability rung and the 4xx/5xx rungs ' +
+      'on this line are byte-unchanged; net effect on the always-loaded file is 163 characters ' +
+      'SHORTER, which is what funded the `## Tracker input contract` rendering rule (M2).',
+  },
 ];

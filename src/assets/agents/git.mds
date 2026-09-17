@@ -802,7 +802,7 @@ Comment a shipped marker on each issue when a version ships. Marker-deduped: exa
 
 `SHIPPED_ISSUES`: space-separated or newline-separated list of issue references.
 
-**Degradation (D4):** No remote / `gh` unauthenticated → `TRACEABILITY: DEGRADED (\{reason\})`, warn, return. Secondary rate limit (403/429 rate-limit response or `X-RateLimit-Remaining` < 10) → stop immediately, report remaining issues as `THROTTLED (\{n\} not processed)`. Other 4xx on an issue → DEGRADED for that issue, continue. 5xx → 1 retry; still 5xx → DEGRADED for that issue, continue.
+**Degradation (D4):** No remote / `gh` unauthenticated → `TRACEABILITY: DEGRADED (\{reason\})`, warn, return. Other 4xx on an issue → DEGRADED for that issue, continue. 5xx → 1 retry; still 5xx → DEGRADED for that issue, continue.
 
 **Process:**
 
