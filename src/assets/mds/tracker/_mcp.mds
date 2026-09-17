@@ -37,6 +37,71 @@ line outside a fence terminates this file's section for every guard that reads i
 through `extractOpSectionFromCorpus`, and everything under it becomes invisible
 while the bytes stay on disk (PF-063).
 
+TWO ROLES, AND THE SECOND ONE IS EMITTED NOWHERE. `@define tool_call_contract()`
+below is the artifact: it becomes `tracker/_mcp.md` and is read once per spawn.
+The defines after it are authoring-only — they expand into the provider modules
+that import them and are emitted from here not at all. They are the single home
+for a provider-independent rule that each provider's per-operation file must
+nevertheless CARRY, and exactly two kinds qualify:
+
+- a rule a guard REQUIRES every posting mechanic to spell for itself. The D11
+  clauses are mandated per file by `tests/guards/mcp-sink-bypass.test.ts`, whose
+  whole subject is that a tool-call sink has no shell operator to chain on, so
+  relocating them into the contract would make that guard unsatisfiable.
+- a rule that governs exactly ONE operation. The contract is billed once per
+  SPAWN and a per-operation file once per OPERATION, so a one-operation rule
+  hoisted into the contract charges every spawn that never runs it.
+
+Anything else that is the same for every provider belongs in the contract above,
+stated once and NAMED by the operations — never restated by them. And a rule that
+differs per provider belongs in that provider's module: the comment-body cap does
+not live here, because the CLI provider's is a different number.
+
+@define posting_gate_head(scope, compose_tail = ""):
+### Posting gate
+
+`references/tracker/_mcp.md` governs {scope}; this operation names its steps and restates none of its rules.
+
+1. Compose this post's own content into `$DEVFLOW_BODY_RAW` — a fresh `mktemp` per invocation.{compose_tail}
+2. Run `node "$\{DEVFLOW_DIR:-$HOME/.devflow\}/scripts/redact-secrets.cjs" --emit "$DEVFLOW_BODY_RAW"`.
+3. Require a `D11-OK` line; verify `<bytes>` against the received body's byte length; echo `SCRUB: N [type:count,…]`; and when N > 0 also emit `SECRET-EXPOSED (rotate \{type\} credential — the source file still holds it)`.
+@end
+
+@define query_safety():
+### Query safety
+
+Caller-supplied prose reaches the tracker as a QUERY here and nowhere else in this provider's mechanics, so the rule is stated here once.
+
+- **Prefer a structured filter argument.** Compose a query string only when no structured filter argument can express the predicate; a structured argument cannot be re-parsed into a different question.
+- A caller-supplied value may appear **only as a quoted string literal**, and only in value position — never as a field name, never as an operator, never in an ordering clause. A value that decides the SHAPE of a query is a value that can become a different query.
+- Escape `\` first and then `"`. The other order escapes the backslash the second pass just inserted and leaves the quote live.
+- After escaping, **drop** any value still carrying `"`, `\`, a newline or a backtick. Repair is forbidden: a repaired value is one nobody can predict, and dropping it costs a search result while repairing it costs the query.
+- Every query carries the `≤50` result bound and reports what it could not return as `TRUNCATED (\{n\} not processed)`.
+@end
+
+@define shipped_marker_rule(marker_suffix = ""):
+**The marker is the comment's FIRST LINE and nothing else.** This provider's comment format has no HTML-comment node, so the marker is visible prose — line 1 is exactly `devflow:shipped v\{BARE_VERSION\}{marker_suffix}`. Match line 1 for equality — a marker on any later line **does not suppress**, because a marker at line 5 of a third-party comment is quoted text, not a devflow post, and a substring search over the whole comment is precisely how a quoter acquires the power to silence a release note.
+@end
+
+@define marker_namespace():
+The namespace is **per comment kind**: this operation owns `devflow:shipped` and no other. A single global marker would make the three kinds mutually suppress — one kind's comment satisfying another kind's dedup predicate — so each operation owns its own namespace and callers pass inputs only.
+@end
+
+@define aggregate_call_budget(rung_cost):
+**Aggregate call budget [DR-09] — the fallback's ceiling.** {rung_cost} The op-level cost is therefore a PRODUCT, and it is bounded: `≤50` items × `≤2` pages = **`≤100`** marker calls. Exceeding the budget ⇒ stop and report the remainder as `TRUNCATED (\{n\} not processed)`.
+@end
+
+@define ref_preflight_tail():
+If every entry is dropped, emit `TRACEABILITY: DEGRADED (no parseable refs for provider \{p\})`, post nothing, and **never report the status as `COMPLETE`** — a `COMPLETE` over zero processed issues is the report a release believes.
+@end
+
+@export posting_gate_head
+@export query_safety
+@export shipped_marker_rule
+@export marker_namespace
+@export aggregate_call_budget
+@export ref_preflight_tail
+
 @define tool_call_contract():
 ## Tracker tool-call contract
 

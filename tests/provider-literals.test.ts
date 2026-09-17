@@ -594,3 +594,233 @@ describe('provider literals: the corpus is real (PF-018)', () => {
     }
   });
 });
+
+// ---------------------------------------------------------------------------
+// Shared provider-independent rules: ONE authoring owner
+// ---------------------------------------------------------------------------
+//
+// The rows above pin what DIFFERS between providers. This block pins the
+// opposite half: a rule that is the same for every tool-call provider is
+// AUTHORED once and expanded into each of them, so the two copies a reader sees
+// in the generated tree cannot drift from each other.
+//
+// WHY THE RULES ARE EXPANDED AND NOT HOISTED INTO THE CONTRACT. `tracker/_mcp.md`
+// is read once per SPAWN and a per-operation mechanics file once per OPERATION,
+// and two things forbid the hoist that would otherwise be the tidier answer:
+//
+//   - the D11 clauses are MANDATED per posting mechanic by
+//     tests/guards/mcp-sink-bypass.test.ts. A tool-call sink has no shell
+//     operator between the scrub and the post, so each file has to spell the gate
+//     it is using; a contract that owned those sentences alone would make that
+//     guard unsatisfiable.
+//   - `### Query safety` governs the single operation that composes a query, so
+//     stated in the contract it would be charged to every spawn that never runs
+//     that operation.
+//
+// So the rule is emitted per provider ON PURPOSE, and what this block asserts is
+// that there is still exactly one place it is WRITTEN. `emitted` is a byte-exact
+// fragment of the expansion, deliberately shorter than the rule: these files are
+// priced against the per-provider ceilings in tests/tracker/byte-budget.test.ts,
+// so pinning a whole paragraph would make the ceiling and the guard contradict
+// each other on the next condensing pass.
+
+/** One rule authored once and expanded into every tool-call provider. */
+interface SharedRule {
+  /** The `@define` that owns it, declared in SHARED_AUTHORING_MODULE and nowhere else. */
+  readonly define: string;
+  /** A byte-exact fragment of the expansion, as a GENERATED file spells it. */
+  readonly emitted: string;
+  readonly why: string;
+}
+
+/** The module that owns every rule below. */
+const SHARED_AUTHORING_MODULE = 'src/assets/mds/tracker/_mcp.mds';
+
+const SHARED_RULES: readonly SharedRule[] = [
+  {
+    define: 'posting_gate_head',
+    emitted: '; this operation names its steps and restates none of its rules.',
+    why:
+      'the D11 posting sequence. It is restated per mechanic because the sink-bypass guard ' +
+      'requires every file to name the clauses that make the placeholder a gate — so the one ' +
+      'thing that can still be centralised is the AUTHORING, and a second author is a second ' +
+      'reading of which field of the framing line is the byte count',
+  },
+  {
+    define: 'query_safety',
+    emitted:
+      'Caller-supplied prose reaches the tracker as a QUERY here and nowhere else in this ' +
+      "provider's mechanics, so the rule is stated here once.",
+    why:
+      'the query-composition rules, whose own first sentence says the rule is stated ONCE. Two ' +
+      'authors make that sentence false in the only file a reader can check it against, and the ' +
+      'escape-order clause is a quoting control: one copy edited is one provider that escapes ' +
+      'the quote before the backslash',
+  },
+  {
+    define: 'shipped_marker_rule',
+    emitted: "**The marker is the comment's FIRST LINE and nothing else.**",
+    why:
+      'the dedup predicate. A copy that relaxed to a substring search over the whole comment ' +
+      'would hand any quoter the power to suppress a release back-link on that provider alone',
+  },
+  {
+    define: 'marker_namespace',
+    emitted: 'The namespace is **per comment kind**: this operation owns `devflow:shipped` and no other.',
+    why:
+      'the namespace rule that keeps the three comment kinds from suppressing one another. It ' +
+      'is a property of the marker vocabulary, not of any provider',
+  },
+  {
+    define: 'aggregate_call_budget',
+    emitted: "**Aggregate call budget [DR-09] — the fallback's ceiling.**",
+    why:
+      "[DR-09]'s product bound. The rung that lands differs per provider and is passed in; the " +
+      'bound and the truncation report do not, and a second copy is a second ceiling',
+  },
+  {
+    define: 'ref_preflight_tail',
+    emitted: '— a `COMPLETE` over zero processed issues is the report a release believes.',
+    why:
+      'the never-COMPLETE clause on an empty admitted set. It is the sentence that stops a ' +
+      'release reporting success over zero processed issues, and it is the same sentence ' +
+      'whatever grammar dropped the entries',
+  },
+];
+
+/**
+ * Collapse MDS prose brace escapes so a source and a generated file spell one
+ * literal one way. Only the brace pair — a general unescape would rewrite
+ * backslashes that appear in no artifact.
+ */
+function unescapeMds(source: string): string {
+  return source.replace(/\\\{/g, '{').replace(/\\\}/g, '}');
+}
+
+/** The tool-call providers — the ones that import the shared authoring module. */
+const TOOL_CALL_PROVIDERS = PROVIDERS.filter(
+  p => (MCP_BACKED_PROVIDER_SUBDIRS as readonly string[]).includes(p.subdir),
+);
+
+/** Named collector: corpus entries that spell a shared rule themselves. */
+export function collectSecondAuthors(
+  emitted: string,
+  corpus: readonly { readonly label: string; readonly text: string }[],
+): string[] {
+  return corpus.filter(e => unescapeMds(e.text).includes(emitted)).map(e => e.label);
+}
+
+describe('shared provider-independent rules have exactly one author', () => {
+  const authoring = unescapeMds(readSource(SHARED_AUTHORING_MODULE));
+  const providerSources = TOOL_CALL_PROVIDERS.map(p => ({ label: p.source, text: readSource(p.source) }));
+
+  it('the registry and the corpus it ranges over are both real (PF-018)', () => {
+    expect(SHARED_RULES.length, 'an empty registry asserts nothing').toBeGreaterThan(0);
+    for (const rule of SHARED_RULES) {
+      expect(rule.why.trim().length, `${rule.define}: a row without a reason is a grep`)
+        .toBeGreaterThan(0);
+      expect(rule.emitted.length, `${rule.define}: an empty fragment matches everything`)
+        .toBeGreaterThan(0);
+    }
+    expect(
+      TOOL_CALL_PROVIDERS.map(p => p.token).sort(),
+      'the shared rules are shared BETWEEN providers, and with one column there is nothing to ' +
+      'share with — the arms below would all pass over a single module',
+    ).toEqual(['jira', 'linear']);
+  });
+
+  it('every shared rule is declared in the authoring module and in no provider module', () => {
+    const problems: string[] = [];
+    for (const rule of SHARED_RULES) {
+      const declaration = `@define ${rule.define}(`;
+      const declared = authoring.split(declaration).length - 1;
+      if (declared !== 1) {
+        problems.push(`${SHARED_AUTHORING_MODULE}: declares ${rule.define} ${declared} time(s), want 1`);
+      }
+      for (const entry of providerSources) {
+        if (entry.text.includes(declaration)) {
+          problems.push(`${entry.label}: re-declares ${rule.define}`);
+        }
+      }
+    }
+    expect(
+      problems,
+      `shared-rule declaration problem(s). One author means one \`@define\`:\n  ${problems.join('\n  ')}`,
+    ).toEqual([]);
+  });
+
+  it('no provider module re-inlines a rule it is supposed to invoke', () => {
+    const second: string[] = [];
+    for (const rule of SHARED_RULES) {
+      for (const label of collectSecondAuthors(rule.emitted, providerSources)) {
+        second.push(`${label}: spells ${rule.define} itself — ${rule.why}`);
+      }
+    }
+    expect(
+      second,
+      `a provider module writes a shared rule out instead of invoking it. That is the state this ` +
+      `registry exists to leave: the text is identical on the day it is pasted and diverges on ` +
+      `the first edit, and nothing downstream can tell you which copy is the ` +
+      `intended one:\n  ${second.join('\n  ')}`,
+    ).toEqual([]);
+  });
+
+  it('every tool-call provider imports the authoring module and invokes every rule', () => {
+    const missing: string[] = [];
+    for (const entry of providerSources) {
+      if (!entry.text.includes('from "./_mcp.mds"')) {
+        missing.push(`${entry.label}: imports nothing from the authoring module`);
+      }
+      for (const rule of SHARED_RULES) {
+        if (!entry.text.includes(`{${rule.define}(`)) {
+          missing.push(`${entry.label}: never invokes ${rule.define}`);
+        }
+      }
+    }
+    expect(
+      missing,
+      `a tool-call provider is not using the shared author. A rule nobody invokes is a rule that ` +
+      `will be written out again:\n  ${missing.join('\n  ')}`,
+    ).toEqual([]);
+  });
+
+  it('and the rule reaches every tool-call provider\'s GENERATED tree', () => {
+    // The half the source arms cannot see: an import that compiled to nothing
+    // would satisfy every assertion above while shipping a mechanics file with the
+    // rule missing.
+    const absent: string[] = [];
+    for (const provider of TOOL_CALL_PROVIDERS) {
+      const tree = providerTree(provider);
+      for (const rule of SHARED_RULES) {
+        if (!tree.includes(rule.emitted)) absent.push(`${provider.subdir}/**: no ${rule.define}`);
+      }
+    }
+    expect(
+      absent,
+      `a shared rule never reached a provider's emitted mechanics:\n  ${absent.join('\n  ')}`,
+    ).toEqual([]);
+  });
+
+  it('known-bad probe: the same collector reports a re-inlined copy', () => {
+    // Driven over the REAL provider sources plus one seeded entry, so a collector
+    // that had stopped reporting takes this red with the arm above.
+    for (const rule of SHARED_RULES) {
+      expect(
+        collectSecondAuthors(rule.emitted, [
+          ...providerSources,
+          { label: 'seed/_probe.mds', text: `prelude\n${rule.emitted}\ntail\n` },
+        ]),
+        `a seeded second author of ${rule.define} must be reported`,
+      ).toEqual(['seed/_probe.mds']);
+      // …and the escaped spelling is the same literal: a module writes `\{` in
+      // prose where the generated file writes `{`, so a collector reading only one
+      // of the two is inert against exactly the corpus it scans.
+      expect(
+        collectSecondAuthors(rule.emitted, [
+          { label: 'seed/_escaped.mds', text: rule.emitted.replace(/\{/g, '\\{').replace(/\}/g, '\\}') },
+        ]),
+        `the escaped spelling of ${rule.define} must be reported too`,
+      ).toEqual(['seed/_escaped.mds']);
+    }
+  });
+});

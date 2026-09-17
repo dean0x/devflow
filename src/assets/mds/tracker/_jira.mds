@@ -1,6 +1,8 @@
 ---
 output-dir: dist/skills/git/references
 ---
+@import { posting_gate_head, query_safety, shipped_marker_rule, marker_namespace, aggregate_call_budget, ref_preflight_tail } from "./_mcp.mds"
+
 Jira tracker mechanics for the `devflow:git` skill.
 
 One section per tracker operation. The build emits each section as its own file
@@ -20,6 +22,16 @@ Each section states what the Git agent loads it for. An operation's contract —
 its `**Input:**`, its `**Output:**` template and its `**Degradation (D4):**`
 clause — is never restated here: that is the agent's, and a second copy outside
 the single-authority corpus is the divergence this split exists to prevent.
+
+The provider-independent rules the sections below carry are IMPORTED rather than
+written here: `posting_gate_head`, `query_safety`, `shipped_marker_rule`,
+`marker_namespace`, `aggregate_call_budget` and `ref_preflight_tail` are authored
+once in `_mcp.mds` and expand in place. They are expanded per operation instead of
+being hoisted into the emitted contract for two reasons stated at their
+definitions — the sink-bypass guard requires every posting mechanic to spell the
+D11 clauses for itself, and a rule governing one operation stated in the contract
+is charged to every spawn that never runs it. A copy of one of them written out
+here again is what `tests/provider-literals.test.ts` reports.
 
 Registering this module is also what OPENS the generation gate on
 `tracker/_mcp.md`: the tool-call contract is emitted only while a provider that
@@ -125,13 +137,7 @@ Over `32767` characters the rolling item is closed and a successor is created, e
 3. Post a back-link on the predecessor naming the successor's key, then close the predecessor.
 4. A failure anywhere reports and stops without returning non-zero: the predecessor is still open, so the caller's item lands there rather than being dropped.
 
-### Posting gate
-
-`references/tracker/_mcp.md` governs every write below; this operation names its steps and restates none of its rules.
-
-1. Compose this post's own content into `$DEVFLOW_BODY_RAW` — a fresh `mktemp` per invocation. `$DEVFLOW_BODY_RAW` is the scrubber's input and nothing else ever reads it.
-2. Run `node "$\{DEVFLOW_DIR:-$HOME/.devflow\}/scripts/redact-secrets.cjs" --emit "$DEVFLOW_BODY_RAW"`.
-3. Require a `D11-OK` line; verify `<bytes>` against the received body's byte length; echo `SCRUB: N [type:count,…]`; and when N > 0 also emit `SECRET-EXPOSED (rotate \{type\} credential — the source file still holds it)`.
+{posting_gate_head("every write below", " `$DEVFLOW_BODY_RAW` is the scrubber's input and nothing else ever reads it.")}
 4. Post through the *update description* capability with arguments (issue key, description: \{SCRUBBED_BODY\}).
 5. Over the `32767` cap after redaction, truncate in **preservation order** — the first line, then the status and DEGRADED lines, then the pointer sentence; the untrusted middle is what gets cut — and end with `NOTE: body exceeded the 32767-character cap after redaction — truncated/stub posted`.
 @end
@@ -193,19 +199,19 @@ The rungs differ only in what they can observe; the marker PREDICATE and the pol
 3. **First-line marker with an author filter.** Resolve `accountId` from the *identify current user* capability — **hoisted once per spawn at Setup, never inside the loop** — then read the issue's comments through the *list comments with authors* capability and match only comments that account authored.
 4. **Post with a warning.** The *identify current user* capability absent or denied ⇒ `TRACEABILITY: DEGRADED (dedup unavailable — duplicate possible)` and **post anyway**. A duplicate comment is worse than no comment only if nobody is told.
 
-**The marker is the comment's FIRST LINE and nothing else.** This provider's comment format has no HTML-comment node, so the marker is visible prose — line 1 is exactly `devflow:shipped v\{BARE_VERSION\}`. Match line 1 for equality — a marker on any later line **does not suppress**, because a marker at line 5 of a third-party comment is quoted text, not a devflow post, and a substring search over the whole comment is precisely how a quoter acquires the power to silence a release note.
+{shipped_marker_rule()}
 
-The namespace is **per comment kind**: this operation owns `devflow:shipped` and no other. A single global marker would make the three kinds mutually suppress — one kind's comment satisfying another kind's dedup predicate — so each operation owns its own namespace and callers pass inputs only.
+{marker_namespace()}
 
 ### Process
 
 **Setup (once, before the loop):** resolve the capability set, the current-user `accountId` from the *identify current user* capability, and the dedup rung. `## Dedup Strategy` may be read as a **hint that only narrows the probe order** — the live probe is the sole authority for which rung is reached and for the DEGRADED reason.
 
-**Ref pre-flight (the always-loaded entry gate, instantiated for this provider).** Every entry of `SHIPPED_ISSUES` must satisfy `^[A-Z][A-Z0-9_]\{1,9\}-[1-9][0-9]\{0,8\}$`, anchored at both ends — this provider's grammar is what the entry gate's shape requirement means here, and the anchored form is what keeps a ref out of a query or a command. **Drop** every entry that fails and report it as `TRACEABILITY: DEGRADED (issue reference "\{ref\}" does not match jira reference grammar)`. If every entry is dropped, emit `TRACEABILITY: DEGRADED (no parseable refs for provider \{p\})`, post nothing, and **never report the status as `COMPLETE`** — a `COMPLETE` over zero processed issues is the report a release believes.
+**Ref pre-flight (the always-loaded entry gate, instantiated for this provider).** Every entry of `SHIPPED_ISSUES` must satisfy `^[A-Z][A-Z0-9_]\{1,9\}-[1-9][0-9]\{0,8\}$`, anchored at both ends — this provider's grammar is what the entry gate's shape requirement means here, and the anchored form is what keeps a ref out of a query or a command. **Drop** every entry that fails and report it as `TRACEABILITY: DEGRADED (issue reference "\{ref\}" does not match jira reference grammar)`. {ref_preflight_tail()}
 
 **Hoist first where the provider allows it — the numbered path below is the FALLBACK.** One bounded *list by filter* read over the ≤50 keys per operation, markers matched in memory: one read instead of a hundred.
 
-**Aggregate call budget [DR-09] — the fallback's ceiling.** Rung 3 is this provider's default landing rung, and there each item's marker check is a paged comment listing rather than one call. The op-level cost is therefore a PRODUCT, and it is bounded: `≤50` items × `≤2` pages = **`≤100`** marker calls. Exceeding the budget ⇒ stop and report the remainder as `TRUNCATED (\{n\} not processed)`.
+{aggregate_call_budget("Rung 3 is this provider's default landing rung, and there each item's marker check is a paged comment listing rather than one call.")}
 
 For each issue the hoist did not answer, within the operation's `≤50` bound:
 
@@ -214,13 +220,7 @@ For each issue the hoist did not answer, within the operation's `≤50` bound:
 3. Compose the two-line comment — line 1 the marker, line 2 `This was shipped in v\{BARE_VERSION\}.` — and post it through `### Posting gate` below.
 4. Wait 1s between issues.
 
-### Posting gate
-
-`references/tracker/_mcp.md` governs the write; this operation names its steps and restates none of its rules.
-
-1. Compose this post's own content into `$DEVFLOW_BODY_RAW` — a fresh `mktemp` per invocation.
-2. Run `node "$\{DEVFLOW_DIR:-$HOME/.devflow\}/scripts/redact-secrets.cjs" --emit "$DEVFLOW_BODY_RAW"`.
-3. Require a `D11-OK` line; verify `<bytes>` against the received body's byte length; echo `SCRUB: N [type:count,…]`; and when N > 0 also emit `SECRET-EXPOSED (rotate \{type\} credential — the source file still holds it)`.
+{posting_gate_head("the write")}
 4. Post through the *add comment* capability with arguments (issue key, body: \{SCRUBBED_BODY\}).
 @end
 
@@ -251,23 +251,9 @@ Inlining it instead would flatten a structured document into a wall of plain tex
 
 Over the `32767`-character cap after redaction, truncate in **preservation order** — line 1 the marker, then the status and DEGRADED lines, then the pointer sentence; the untrusted middle is what gets cut — and end with `NOTE: body exceeded the 32767-character cap after redaction — truncated/stub posted`. The pointer sentence is the last thing to go because it is the only line that still leads somewhere.
 
-### Query safety
+{query_safety()}
 
-Caller-supplied prose reaches the tracker as a QUERY here and nowhere else in this provider's mechanics, so the rule is stated here once.
-
-- **Prefer a structured filter argument.** Compose a query string only when no structured filter argument can express the predicate; a structured argument cannot be re-parsed into a different question.
-- A caller-supplied value may appear **only as a quoted string literal**, and only in value position — never as a field name, never as an operator, never in an ordering clause. A value that decides the SHAPE of a query is a value that can become a different query.
-- Escape `\` first and then `"`. The other order escapes the backslash the second pass just inserted and leaves the quote live.
-- After escaping, **drop** any value still carrying `"`, `\`, a newline or a backtick. Repair is forbidden: a repaired value is one nobody can predict, and dropping it costs a search result while repairing it costs the query.
-- Every query carries the `≤50` result bound and reports what it could not return as `TRUNCATED (\{n\} not processed)`.
-
-### Posting gate
-
-`references/tracker/_mcp.md` governs every write below; this operation names its steps and restates none of its rules.
-
-1. Compose this post's own content into `$DEVFLOW_BODY_RAW` — a fresh `mktemp` per invocation.
-2. Run `node "$\{DEVFLOW_DIR:-$HOME/.devflow\}/scripts/redact-secrets.cjs" --emit "$DEVFLOW_BODY_RAW"`.
-3. Require a `D11-OK` line; verify `<bytes>` against the received body's byte length; echo `SCRUB: N [type:count,…]`; and when N > 0 also emit `SECRET-EXPOSED (rotate \{type\} credential — the source file still holds it)`.
+{posting_gate_head("every write below")}
 4. Post through the *add comment* capability with arguments (issue key, body: \{SCRUBBED_BODY\}), or on a new issue through the *create issue* capability with the description field carrying the same gated value.
 
 ### Traceability Issue Template (D3)
@@ -298,13 +284,7 @@ Load when the resolved tracker provider is `jira` and the operation is `post-wav
 3. Compose the comment: line 1 the marker `devflow:wave \{WAVE_ID\}`, then the contents of `WAVE_REPORT_PATH`. Cap the composed content at `32767` characters; over the cap, truncate in **preservation order** — the marker, then the status and DEGRADED lines, then the pointer sentence — and end with `…truncated — full report in the local wave artifact \{WAVE_REPORT_PATH\} (not committed; ask the author)`.
 4. Post it through `### Posting gate` below.
 
-### Posting gate
-
-`references/tracker/_mcp.md` governs the write; this operation names its steps and restates none of its rules.
-
-1. Compose this post's own content into `$DEVFLOW_BODY_RAW` — a fresh `mktemp` per invocation.
-2. Run `node "$\{DEVFLOW_DIR:-$HOME/.devflow\}/scripts/redact-secrets.cjs" --emit "$DEVFLOW_BODY_RAW"`.
-3. Require a `D11-OK` line; verify `<bytes>` against the received body's byte length; echo `SCRUB: N [type:count,…]`; and when N > 0 also emit `SECRET-EXPOSED (rotate \{type\} credential — the source file still holds it)`.
+{posting_gate_head("the write")}
 4. Post through the *add comment* capability with arguments (issue key, body: \{SCRUBBED_BODY\}).
 @end
 

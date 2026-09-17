@@ -740,20 +740,26 @@ describe('linear module: tool calls only — no HTTP, no CLI, no credential read
 // ---------------------------------------------------------------------------
 
 describe('linear module: query safety and the cross-cutting rules it invokes', () => {
-  const source = unescapeMds(readSource(LINEAR_MODULE));
+  // REPOINTED, per-literal, when `### Query safety` moved into the shared
+  // authoring module `_mcp.mds` (ADR-025): the rule is no longer text this
+  // module's source spells, so the source is no longer where it can be read. It
+  // is read where it is GUARANTEED to appear instead — the one operation that
+  // composes a query, in this provider's emitted mechanics — which is also the
+  // side a spawn reads, and the side the sibling arm below already reads.
+  const querySafety = unescapeMds(readGenerated(linearRel('ensure-traceable-issue')));
 
   it('structured filter fields are preferred and a built query is value-quoted only', () => {
-    expect(source, 'structured filter arguments first (§14.9-10)')
+    expect(querySafety, 'structured filter arguments first (§14.9-10)')
       .toContain('structured filter argument');
     expect(
-      source,
+      querySafety,
       'a value may only ever reach a query as a quoted string literal — never in field, ' +
       'operator or ordering position, which is where a quote break becomes a different question',
     ).toContain('quoted string literal');
-    expect(source, 'escape order is part of the rule: backslash first, then quote')
+    expect(querySafety, 'escape order is part of the rule: backslash first, then quote')
       .toContain('Escape `\\` first and then `"`');
     expect(
-      source,
+      querySafety,
       'and anything still carrying a metacharacter after escaping is DROPPED, never repaired',
     ).toMatch(/drop|reject/i);
   });
