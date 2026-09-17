@@ -66,7 +66,7 @@ not live here, because the CLI provider's is a different number.
 
 1. Compose this post's own content into `$DEVFLOW_BODY_RAW` — a fresh `mktemp` per invocation, under D11's removal `trap`.{compose_tail}
 2. Run `node "$\{DEVFLOW_DIR:-$HOME/.devflow\}/scripts/redact-secrets.cjs" --emit "$DEVFLOW_BODY_RAW"`.
-3. Require a `D11-OK` line; verify `<bytes>` against the received body's byte length; echo `SCRUB: N [type:count,…]`; and when N > 0 also emit `SECRET-EXPOSED (rotate \{type\} credential — the source file still holds it)`.
+3. Require line 1 to be `D11-OK`; verify `<bytes>` against the received body's byte length; echo `SCRUB: N [type:count,…]`; and when N > 0 also emit `SECRET-EXPOSED (rotate \{type\} credential — the source file still holds it)`.
 @end
 
 @define query_safety():
@@ -185,10 +185,10 @@ D11-OK <nonce> <sha256> <bytes> <n> [type:count,…]
 Everything after line 1 is `\{SCRUBBED_BODY\}`.
 
 **Every posting mechanic spells the body argument `\{SCRUBBED_BODY\}`, and the only
-bytes that may fill it are the bytes after a `D11-OK` line in the IMMEDIATELY
-PRECEDING Bash result.** Then, in order:
+bytes that may fill it are the bytes after LINE 1 of the IMMEDIATELY PRECEDING
+Bash result.** Then, in order:
 
-1. **No `D11-OK` line** → **DO NOT POST**; emit `TRACEABILITY: DEGRADED
+1. **Line 1 is not `D11-OK`** → **DO NOT POST**; emit `TRACEABILITY: DEGRADED
    (redaction unavailable)` for that item and continue per D4. A `D11-FAIL
    \{reason\}` line is this case, not a different one.
 2. **Verify `<bytes>`.** Before posting, confirm the received body's byte length

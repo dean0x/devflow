@@ -14,11 +14,15 @@
 //   --emit      TOOL-CALL sink (GAP-04). A tracker reached through a tool call has
 //               no `--body-file` and no shell operator between the scrub and the
 //               post, so the `&&` gate cannot exist. Instead the scrubbed bytes
-//               are printed behind a framing line only this script can produce:
+//               are printed behind a framing line only this script can produce,
+//               and LINE 1 is always that line:
 //                 D11-OK <nonce> <sha256> <bytes> <n> [type:count,…]
 //                 <the scrubbed body>
-//               A body with no framing line above it is a body that was never
-//               scrubbed. No failure ever writes body bytes: a failure the mode
+//               Stdout whose line 1 is not the framing is a body that was never
+//               scrubbed, and a body that would itself have carried a framing
+//               line is refused rather than emitted — so "the bytes after line 1"
+//               and "the bytes after the framing" can never name different bytes.
+//               No failure ever writes body bytes: a failure the mode
 //               owns is EXACTLY `D11-FAIL <reason>` and nothing else, and the two
 //               that precede or escape mode selection — a usage error and an
 //               internal error — leave stdout entirely EMPTY. The consumer gates
@@ -30,10 +34,10 @@
 //   2  input file unreadable or larger than 1 MiB
 //   3  output file write failed — the FILE sink only; `--emit` writes no file
 //   4  internal / unexpected error
-//   5  --emit only: the gate refused — the second scrub pass was non-zero, or a
-//      nonce could not be generated. Distinct from 4 so a caller can tell "the
-//      scrub did not hold" from "the script broke": the first means the body must
-//      not be posted, the second means the run must be retried.
+//   5  --emit only: a gate refused — the second scrub pass was non-zero, the
+//      scrubbed body carried a framing line of its own, or a nonce could not be
+//      generated. Distinct from 4 so a caller can tell "the body must not be
+//      posted" from "the script broke": the first is final, the second is retried.
 //
 // Design constraints (binding):
 //   PF-011  the file sink — the one file this script writes — goes via
@@ -67,16 +71,38 @@ const MAX_INPUT_BYTES = 1048576;
 /**
  * Nonce width, in hex characters (16 random bytes).
  *
- * The nonce is per-invocation and REQUIRED (§14.9-3). Composed bodies contain
- * untrusted issue and comment text, so a fixed `D11-OK` literal would be
- * forgeable by anyone who can write an issue comment: they would paste a framing
- * line into the body, and a consumer reading "the bytes after the D11-OK line"
- * would post the attacker's half.
+ * The nonce is per-invocation and REQUIRED (§14.9-3), and it is the SECOND of two
+ * independent controls over the same forgery. `FRAMING_IN_BODY_RE` below is the
+ * first: no emitted body can hold a framing line at all. The nonce is what a
+ * consumer still has if it reads the framing from somewhere other than line 1 —
+ * a fixed `D11-OK` literal would be reproducible by anyone who can write an issue
+ * comment, and an unpredictable one is not.
  *
  * Exported so the framing grammar's guard pins its width from here rather than
  * from a retyped number.
  */
 const NONCE_HEX_CHARS = 32;
+
+/**
+ * A BODY line that would read as framing.
+ *
+ * The framing's one job is to say where the scrubbed bytes begin, and it can only
+ * do that if line 1 is the only line shaped like it. Composed bodies carry
+ * untrusted issue and comment text, so a body is one comment away from holding a
+ * `D11-OK`-shaped line of its own — and a consumer that looked for "a D11-OK
+ * line" instead of "line 1" would take the planted one, post the attacker's half
+ * under a devflow-authored marker, and suppress the real summary along with its
+ * SECRET-EXPOSED rotation warning.
+ *
+ * Refusing such a body here is what makes the line-1 rule MECHANICAL: the prose
+ * rule then describes a property of every body this script can emit, instead of
+ * an obligation nine documents have to restate correctly.
+ *
+ * PF-018: bounded — a fixed alternation over two literals, anchored per line by
+ * the `m` flag, with no quantifier to backtrack through. The trailing space is
+ * load-bearing: it is what keeps prose such as `D11-FAILURE` out of the refusal.
+ */
+const FRAMING_IN_BODY_RE = /^D11-(OK|FAIL) /m;
 
 /** The `SCRUB: ` prefix — one spelling, shared by formatScrubLine and frameEmit. */
 const SCRUB_LINE_PREFIX = 'SCRUB: ';
@@ -100,6 +126,7 @@ const D11_FAIL_REASONS = Object.freeze({
   INPUT_UNREADABLE: 'input-unreadable',
   INPUT_TOO_LARGE: 'input-too-large',
   SECOND_PASS_NONZERO: 'second-pass-nonzero',
+  BODY_CONTAINS_FRAMING: 'body-contains-framing',
   NONCE_UNAVAILABLE: 'nonce-unavailable',
 });
 
@@ -677,6 +704,16 @@ function runEmitMode(content, deps) {
       'redact-secrets: second scrub pass was non-zero (' + secondLine + ') — refusing to emit\n',
     );
     return { emitLine: 'D11-FAIL ' + D11_FAIL_REASONS.SECOND_PASS_NONZERO, body: '', code: 5 };
+  }
+
+  // THE FRAMING GATE. A body that carries a framing line of its own lets its
+  // author decide where a consumer thinks the body begins. Refusing is fail-closed
+  // in the direction the sink needs: the item degrades and nothing is posted.
+  if (FRAMING_IN_BODY_RE.test(text)) {
+    process.stderr.write(
+      'redact-secrets: the scrubbed body carries a D11 framing line — refusing to emit\n',
+    );
+    return { emitLine: 'D11-FAIL ' + D11_FAIL_REASONS.BODY_CONTAINS_FRAMING, body: '', code: 5 };
   }
 
   const framed = frameEmit(text, formatScrubLine(first), deps.nonceSource);

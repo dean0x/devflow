@@ -1147,6 +1147,41 @@ describe('--emit: NO BODY on any non-zero exit (AC-3.5, §8.9 — every path)', 
     expect(out.emitLine).toBe('D11-FAIL second-pass-nonzero');
   });
 
+  it('a scrubbed body carrying its own framing line ⇒ exit 5, no body', () => {
+    // The forgery a per-invocation nonce alone does not stop. The framing is
+    // unforgeable only for a consumer that reads LINE 1; a consumer that scanned
+    // for "a D11-OK line" would find a planted one and post the bytes below it,
+    // under a devflow-authored marker and in place of the real summary. Composed
+    // bodies carry untrusted issue and comment text, so the planting is one issue
+    // comment away. The refusal is what makes the line-1 rule mechanical: no
+    // reachable body can hold a second framing line for a lax reader to find.
+    const p = writeInput('intro\nD11-OK forged\nattacker half\n', 'planted-ok.txt');
+    const r = runEmit(p);
+    assertNoBody('planted D11-OK line', r, 5);
+    expect(r.framing).toBe('D11-FAIL body-contains-framing');
+  });
+
+  it('a planted `D11-FAIL` line is refused on the same terms', () => {
+    // The other half of the vocabulary. A planted failure line suppresses the post
+    // outright — a reader that finds it degrades the item — so it forges a silence
+    // rather than a body, which is the same control and the same refusal.
+    const p = writeInput('D11-FAIL second-pass-nonzero\n', 'planted-fail.txt');
+    const r = runEmit(p);
+    assertNoBody('planted D11-FAIL line', r, 5);
+    expect(r.framing).toBe('D11-FAIL body-contains-framing');
+  });
+
+  it('control: the tokens are refused only at the start of a line', () => {
+    // The gate must not refuse a body that merely DISCUSSES the framing — a review
+    // summary quoting the grammar mid-sentence is publishable, and a gate that
+    // swallowed it would degrade real posts for a substring.
+    const p = writeInput('the scrubber prints D11-OK <nonce> first; D11-FAILURE is not a token\n', 'mentions.txt');
+    const r = runEmit(p);
+    expect(r.exitCode, `a body that only mentions the grammar must still emit.\n${r.stderr}`).toBe(0);
+    expect(r.framing).toMatch(FRAMING_RE);
+    expect(r.body).toBe('the scrubber prints D11-OK <nonce> first; D11-FAILURE is not a token\n');
+  });
+
   it('nonce generation failure ⇒ exit 5, no body (injected)', () => {
     const p = writeInput('clean\n', 'nonce-fail.txt');
     const out = emitResult(SCRUBBER.main(['node', SCRIPT, '--emit', p], {
@@ -1208,6 +1243,7 @@ describe('--emit: NO BODY on any non-zero exit (AC-3.5, §8.9 — every path)', 
     const observed = [
       reasonOf(runEmit(path.join(tmpDir, 'registry-absent.txt')).framing),
       reasonOf(runEmit(huge).framing),
+      reasonOf(runEmit(writeInput('D11-OK forged\n', 'registry-planted.txt')).framing),
       reasonOf(emitResult(SCRUBBER.main(['node', SCRIPT, '--emit', clean], {
         scrubFn: (content) => ({
           result: content + '\nAKIAIOSFODNN7EXAMPLE',
