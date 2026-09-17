@@ -551,7 +551,7 @@ Collect release evidence — commit list and shipped issue numbers since the las
 {git log --oneline output, ≤100 entries}
 
 ### SHIPPED_ISSUES
-{space-separated issue numbers, ≤50}
+{space-separated issue references, ≤50}
 
 ### Status: READY | DEGRADED ({reason})
 ```
@@ -797,7 +797,7 @@ Comment a shipped marker on each issue when a version ships. Marker-deduped: exa
 
 **Input:** `SHIPPED_ISSUES`, `VERSION`, `WORKTREE_PATH` (optional)
 
-`SHIPPED_ISSUES`: space-separated or newline-separated list of issue numbers.
+`SHIPPED_ISSUES`: space-separated or newline-separated list of issue references.
 
 **Degradation (D4):** No remote / `gh` unauthenticated → `TRACEABILITY: DEGRADED ({reason})`, warn, return. Secondary rate limit (403/429 rate-limit response or `X-RateLimit-Remaining` < 10) → stop immediately, report remaining issues as `THROTTLED ({n} not processed)`. Other 4xx on an issue → DEGRADED for that issue, continue. 5xx → 1 retry; still 5xx → DEGRADED for that issue, continue.
 
@@ -814,7 +814,7 @@ Comment a shipped marker on each issue when a version ships. Marker-deduped: exa
    `1.2.3` → `1.2.3`). All marker composition and comment text below use `v{BARE_VERSION}` —
    this prevents `vv1.2.3` double-prefix when VERSION arrives already `v`-prefixed.
 
-For each issue number in `SHIPPED_ISSUES` (sequentially, ≤50 in list order, 1s between operations). If the list contains more than 50 entries, process the first 50 and report the remainder as `TRUNCATED ({n} not processed)` — never report the status as `COMPLETE` while issues went unprocessed.
+For each issue reference in `SHIPPED_ISSUES` (sequentially, ≤50 in list order, 1s between operations). If the list contains more than 50 entries, process the first 50 and report the remainder as `TRUNCATED ({n} not processed)` — never report the status as `COMPLETE` while issues went unprocessed.
 
 **Output:**
 ```markdown
