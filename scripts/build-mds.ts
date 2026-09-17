@@ -418,8 +418,6 @@ interface DiscoveryResult {
 function discoverHosts(): DiscoveryResult {
   const hosts: HostEntry[] = [];
   const deferred: string[] = [];
-  // The registry as it stands for THIS build, gates applied. Resolved once so
-  // every host is measured against the same answer.
   // The gated modules this registry does not generate, from the one owner that
   // answers that question (src/core/mds-variants.ts). Computed once so every
   // walked file is measured against the same answer.
