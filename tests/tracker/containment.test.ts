@@ -714,6 +714,231 @@ describe('shared-literal registry — one authority per normative sentence [DR-1
 });
 
 // ---------------------------------------------------------------------------
+// 5b. The tool-call contract's OWN shared-literal registry [DR-19] — P3c-S6
+// ---------------------------------------------------------------------------
+//
+// The three cross-cutting documents above have a fourth sibling in the same
+// position: `tracker/_mcp.md`, the provider-independent tool-call contract. Its
+// load chain is one-directional and its own prose says so — a per-operation
+// mechanics file may INVOKE a rule here and never restate its substance, and on
+// any conflict the contract wins.
+//
+// A SEPARATE registry rather than rows added to SHARED_LITERAL_REGISTRY, and the
+// separation is not tidiness: that registry's ownership arm asserts its owners are
+// exactly GIT_CROSS_CUTTING_DOCS, and the contract is a different module KIND with
+// a different gate. Folding it in would have meant relaxing that arm to admit a
+// fourth owner — the blanket widening ADR-025 forbids — instead of classifying the
+// case.
+//
+// WHAT IS AND IS NOT A REGISTRY ENTRY, because the distinction is the whole design.
+// The contract mandates literals every posting mechanic MUST name: `D11-OK`,
+// `<bytes>`, `SCRUB: N […]`, `SECRET-EXPOSED (…)`. Those are not restatements —
+// tests/guards/mcp-sink-bypass.test.ts REQUIRES them per provider, and a registry
+// that forbade them would fight that guard. What may not be restated is the
+// contract's own statement of a RULE: where the gated bytes come from, what the
+// framing line consists of, which transformations are forbidden, the capability
+// table's rows, and how a tool is selected. A provider file reproducing one of
+// those has acquired a second authority on it, and the second one varies per
+// provider — which is exactly the defect the three documents above were built to
+// remove, one level down. Twenty per-op provider files authored against a contract
+// they are told to "name, not restate" will restate it.
+
+interface McpSharedLiteral {
+  /** The normative sentence, byte-exact as the generated contract spells it. */
+  readonly sentence: string;
+  /** Why this sentence is the contract's to state — an entry without one is a grep. */
+  readonly justification: string;
+}
+
+export const MCP_SHARED_LITERAL_REGISTRY: readonly McpSharedLiteral[] = [
+  {
+    sentence: 'D11-OK <nonce> <sha256> <bytes> <n> [type:count,…]',
+    justification:
+      'The framing line\'s COMPOSITION [DR-01]. A provider restating the field order would fix ' +
+      'its own reading of which field is the byte count, and [DR-06]\'s check reads that field ' +
+      'by position — a mechanic verifying the wrong field passes a truncated body.',
+  },
+  {
+    sentence: 'Everything after line 1 is `{SCRUBBED_BODY}`.',
+    justification:
+      'The definition of where the gated bytes come from. It is the sentence that makes the ' +
+      'placeholder mean anything, and a provider restating it is a provider that could redefine ' +
+      'it — the bytes behind the placeholder are obtainable only from behind a framing line the ' +
+      'scrubber alone can produce.',
+  },
+  {
+    sentence: '**NO re-encoding. NO base64. NO chunking. NO summarisation. NO reflowing.**',
+    justification:
+      'The transformation prohibition. Restated per provider it becomes negotiable the first time ' +
+      'one copy is edited to admit the wrapper that provider happens to need, and a body scrubbed ' +
+      'and then re-encoded is a body whose scrub no longer holds.',
+  },
+  {
+    sentence: '**Select by capability DESCRIPTION, never by tool name.**',
+    justification:
+      'The selection rule the whole capability vocabulary rests on. A provider restating it is a ' +
+      'provider one edit away from naming tool names instead, which binds the mechanics to one ' +
+      'server and one version — and the DEGRADED reason vocabulary is derived from the capability ' +
+      'table, so a provider selecting by tool name degrades on names nobody can grep for.',
+  },
+  {
+    sentence: '| fetch by key | `no tracker tool for fetch by key` |',
+    justification:
+      'A capability-table ROW. The prose form (`DEGRADED (no tracker tool for fetch by key)`) is ' +
+      'what a provider emits and is required of it; the TABLE is the contract\'s, and a provider ' +
+      'reproducing it would be a second definition of the closed capability vocabulary — the ' +
+      'triplication GAP-37 forbids.',
+  },
+];
+
+/** The generated tool-call contract, read fail-loud. */
+function contractFile(): string {
+  return requireFile('tool-call contract', path.join(REFS_DIR, 'tracker', '_mcp.md'));
+}
+
+describe('tool-call contract: one authority per normative sentence [DR-19]', () => {
+  it('the gate is open, so this arm has a subject in both halves', () => {
+    // The contract is generated only while a provider that needs it is registered,
+    // and so is the provider tree the negative arm walks. Both halves vanish
+    // together, so asserting the gate is open is what distinguishes "no
+    // restatements" from "nothing to restate" (PF-018).
+    expect(
+      generatedReferenceManifest(),
+      'the contract must be in the manifest — with the gate shut there is no contract to protect ' +
+      'and no provider tree to protect it from',
+    ).toContain('tracker/_mcp.md');
+    expect(
+      MCP_SHARED_LITERAL_REGISTRY.length,
+      'an empty registry makes both arms below pass by checking nothing (PF-018)',
+    ).toBeGreaterThan(0);
+    expect(
+      MCP_SHARED_LITERAL_REGISTRY.filter(e => e.justification.trim().length < MIN_RATIONALE_CHARS)
+        .map(e => e.sentence),
+      'a registry entry with no justification is a grep, not a rule',
+    ).toEqual([]);
+  });
+
+  it('positive arm: every registry sentence is in the contract, and in nothing else', () => {
+    // Scoped over the contract PLUS the three cross-cutting documents: a sentence
+    // that had migrated into one of those would have two homes just as surely as
+    // one that migrated into a provider file, and the sibling registry above would
+    // not see it because it only knows its own sentences.
+    const corpus = [
+      { label: 'tracker/_mcp.md', content: contractFile() },
+      ...[...crossCuttingFiles()].map(([label, content]) => ({ label, content })),
+    ];
+    const problems: string[] = [];
+    for (const entry of MCP_SHARED_LITERAL_REGISTRY) {
+      const owners = collectRestatements(entry.sentence, corpus);
+      if (owners.length !== 1 || owners[0] !== 'tracker/_mcp.md') {
+        problems.push(
+          `${JSON.stringify(entry.sentence.slice(0, 60))} → expected [tracker/_mcp.md], found ` +
+          `[${owners.join(', ')}]`,
+        );
+      }
+    }
+    expect(
+      problems,
+      `tool-call contract ownership problems:\n  ${problems.join('\n  ')}`,
+    ).toEqual([]);
+  });
+
+  it('negative arm: no registry sentence is restated in any provider mechanics file', () => {
+    // The corpus walks `tracker/` and then EXCLUDES the contract itself: it is the
+    // owner, so including it would report every entry as a restatement of itself.
+    const providers = providerReferenceCorpus().filter(e => e.label !== 'tracker/_mcp.md');
+    expect(
+      providers.length,
+      'no provider reference was read — the negative arm would be vacuous',
+    ).toBeGreaterThanOrEqual(TRACKER_GITHUB_OPS.length);
+    // Provenance, not a count: the arm must reach every registered provider's
+    // directory, including the ones whose mechanics actually name the contract.
+    for (const mod of VARIANT_MODULES.filter(m => m.subdir.startsWith('tracker/'))) {
+      expect(
+        providers.some(entry => entry.label.startsWith(`${mod.subdir}/`)),
+        `the contract's negative arm never read ${mod.subdir}/ — a provider mechanics tree outside ` +
+        `this corpus is a tree that may restate the contract freely`,
+      ).toBe(true);
+    }
+
+    const restatements: string[] = [];
+    for (const entry of MCP_SHARED_LITERAL_REGISTRY) {
+      for (const file of collectRestatements(entry.sentence, providers)) {
+        restatements.push(`${file}: ${JSON.stringify(entry.sentence.slice(0, 60))}`);
+      }
+    }
+    expect(
+      restatements,
+      'a provider mechanics file restates a sentence the tool-call contract owns. The load chain ' +
+      'is one-directional — a per-operation file may INVOKE a rule and never restate its ' +
+      'substance — and on any conflict the contract wins, which only means anything while there ' +
+      `is one copy to conflict with:\n  ${restatements.join('\n  ')}`,
+    ).toEqual([]);
+  });
+
+  it('the arm does NOT forbid the literals every posting mechanic must name', () => {
+    // The other direction of the same rule, and the one that keeps this registry
+    // from fighting tests/guards/mcp-sink-bypass.test.ts. Those literals are
+    // MANDATED per provider; a registry that swept them up would make the two
+    // guards unsatisfiable together, and the one that would be "fixed" is this one.
+    const mandated = ['D11-OK', '<bytes>', 'SCRUB: N', 'SECRET-EXPOSED'];
+    for (const literal of mandated) {
+      expect(
+        MCP_SHARED_LITERAL_REGISTRY.some(e => e.sentence === literal),
+        `"${literal}" must NOT be a registry entry — every posting mechanic is required to name it`,
+      ).toBe(false);
+    }
+    const posting = providerReferenceCorpus().filter(
+      e => e.label !== 'tracker/_mcp.md' && e.content.includes('{SCRUBBED_BODY}'),
+    );
+    expect(
+      posting.length,
+      'no posting mechanic was read, so this arm proves nothing about the mandated literals',
+    ).toBeGreaterThan(0);
+    for (const entry of posting) {
+      for (const literal of mandated) {
+        expect(entry.content, `${entry.label} must still name ${literal}`).toContain(literal);
+      }
+    }
+  });
+
+  it('known-bad probe: a seeded restatement of the {SCRUBBED_BODY} rule is reported', () => {
+    // [DR-19]'s named known-bad, verbatim in intent. Driven through the SAME
+    // collector the negative arm uses, over the real provider corpus plus one
+    // seeded file, so a collector that had stopped reporting takes this red too.
+    const rule = MCP_SHARED_LITERAL_REGISTRY.find(
+      e => e.sentence === 'Everything after line 1 is `{SCRUBBED_BODY}`.',
+    )!;
+    const seeded = [
+      ...providerReferenceCorpus().filter(e => e.label !== 'tracker/_mcp.md'),
+      {
+        label: 'tracker/linear/probe.md',
+        content: [
+          '## Operation: probe',
+          'Run the scrubber with `--emit` and read the framing line.',
+          rule.sentence,
+          'Post through the *add comment* capability.',
+        ].join('\n'),
+      },
+    ];
+    expect(
+      collectRestatements(rule.sentence, seeded),
+      'the collector must see the contract\'s own rule restated inside a provider file — ' +
+      'otherwise the negative arm is inert against the one shape [DR-19] names',
+    ).toEqual(['tracker/linear/probe.md']);
+    // …and every other registry entry stays unreported over the same seeded corpus,
+    // so the probe proves the collector discriminates rather than matching anything.
+    for (const entry of MCP_SHARED_LITERAL_REGISTRY) {
+      if (entry.sentence === rule.sentence) continue;
+      expect(
+        collectRestatements(entry.sentence, seeded),
+        `"${entry.sentence.slice(0, 40)}" was not seeded and must not be reported`,
+      ).toEqual([]);
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
 // 6. AC-2.7 (positive form) — every generated reference is reachable on the gh path
 // ---------------------------------------------------------------------------
 //
