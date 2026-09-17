@@ -100,6 +100,25 @@ export function collectWriteSideCommands(content: string): string[] {
 }
 
 /**
+ * Lines naming the interactive-question primitive.
+ *
+ * Plan §3.3 deleted the question step outright: this agent runs from a
+ * SessionStart hook's directive, where there is no human turn to answer a
+ * prompt, and §14.2 retired `interactive setup required — run /plan in an
+ * interactive session` for exactly that reason ("the phrasing promises a prompt
+ * that never comes"). A question here would not merely be unreachable — it would
+ * hang a background spawn holding the claim file, and the claim-file lifecycle's
+ * recovery path treats a held claim as a live agent, so nothing would reclaim it
+ * until the staleness bound expired.
+ */
+export function collectQuestionPrimitives(content: string): string[] {
+  return content
+    .split('\n')
+    .filter(l => /\bAskUserQuestion\b/.test(l))
+    .map(l => l.trim());
+}
+
+/**
  * Foreign provider literals. `src/assets/agents/` is inside
  * provider-scope.test.ts's PROVIDER_SCAN_ROOTS with an allowlist confined to the
  * Git agent's resolution preamble, so this agent must name no provider at all.
@@ -218,11 +237,31 @@ describe('Tracker agent read-only boundary (§14.9 constraint 12, EC-69)', () =>
     expect(collectWriteSideCommands(TRACKER_TEXT)).toEqual([]);
   });
 
-  it('known-bad probe: both collectors report seeded violations', () => {
+  it('names no interactive-question primitive (§3.3)', () => {
+    expect(
+      collectQuestionPrimitives(TRACKER_TEXT),
+      'the agent runs from a SessionStart directive, where no human turn exists to answer a ' +
+      'prompt. A question would hang a background spawn that is holding the claim file, and the ' +
+      'lifecycle reads a held claim as a live agent — so nothing reclaims it until the staleness ' +
+      'bound expires. §14.2 retired the DEGRADED reason that promised such a prompt',
+    ).toEqual([]);
+  });
+
+  it('known-bad probe: all three collectors report seeded violations', () => {
     expect(collectDelegationLiterals('Spawn Agent(subagent_type="Code") next.\n')).toHaveLength(1);
     expect(collectWriteSideCommands('Then git commit -- tracker.md and gh issue create.\n')).toHaveLength(1);
+    expect(
+      collectQuestionPrimitives('If the key is ambiguous, use AskUserQuestion to confirm it.\n'),
+      'the question collector must fire on the primitive it exists for',
+    ).toHaveLength(1);
     // The matcher must not fire on the read-side git the bounded scan legitimately uses.
     expect(collectWriteSideCommands('Run git log --oneline to sample history.\n')).toEqual([]);
+    // …nor on prose that merely discusses asking. The rule is about the TOOL.
+    expect(
+      collectQuestionPrimitives('Never ask the user; mark ambiguity with the sentinel instead.\n'),
+      'prose about asking is not the primitive — reporting it sends the next reader to narrow ' +
+      'the guard instead of to read the hit (PF-064)',
+    ).toEqual([]);
   });
 
   it('names no foreign provider literal (PF-023, ADR-003)', () => {
