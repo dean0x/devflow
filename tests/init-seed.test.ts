@@ -13,10 +13,11 @@ import {
   FEATURE_DEFAULTS,
   type FeatureSeed,
 } from '../src/cli/commands/init-seed.js';
+import { resolveTrackerInitState } from '../src/cli/commands/init.js';
 import { DEVFLOW_PLUGINS } from '../src/core/plugins.js';
 import { FLAG_REGISTRY, readViewMode, type ClaudeCodeFlag, type FlagsRecord } from '../src/core/flags.js';
 import { type ManifestData } from '../src/core/manifest.js';
-import { type TrackerProvider } from '../src/core/tracker.js';
+import { TRACKER_PROVIDER_IDS, parseTrackerId, type TrackerProvider } from '../src/core/tracker.js';
 
 // ── Test fixtures ─────────────────────────────────────────────────────────────
 
@@ -885,6 +886,89 @@ describe('tracker seeding', () => {
   });
 });
 
+// ── resolveTrackerInitState — the --tracker boundary ──────────────────────────
+//
+// The whole gate between `--tracker <id>` on the command line and a machine-wide
+// provider change: init calls it before any prompt and exits on a rejection.
+//
+// Driven by CALLING it. The lifecycle assertions below are source-level because
+// Commander's `.action()` body is not unit-reachable, but this function is
+// exported and pure, so a source-level stand-in here would be counting a call
+// site whose behaviour is directly observable (PF-018).
+
+describe('resolveTrackerInitState', () => {
+  /**
+   * Named collector: the rejection message, or a loud throw.
+   *
+   * The three-state return makes `result.error` unreachable without narrowing,
+   * and a `!` would turn "the parser accepted a value it must reject" into a
+   * TypeError several frames later instead of a sentence naming the input.
+   */
+  function rejectionFor(option: string): string {
+    const result = resolveTrackerInitState(option);
+    if (result === undefined || result.ok) {
+      throw new Error(
+        `--tracker ${JSON.stringify(option)} must be rejected at the boundary, got ` +
+        `${JSON.stringify(result)} — an accepted near-miss installs mechanics for a ` +
+        'tracker the user did not name',
+      );
+    }
+    return result.error;
+  }
+
+  it('returns undefined when the option was not supplied — no override', () => {
+    expect(resolveTrackerInitState(undefined)).toBeUndefined();
+  });
+
+  it('accepts every registry ID and yields that provider, never a default', () => {
+    // Ranged over the registry rather than spot-checked: a fourth provider is
+    // covered the day it joins, and a parser that collapsed everything to the
+    // default would fail on the first non-default row instead of slipping past
+    // a test that only ever asked about github.
+    expect(
+      TRACKER_PROVIDER_IDS.length,
+      'a one-ID registry would make the loop below unable to tell a real parse from a default',
+    ).toBeGreaterThan(1);
+    for (const id of TRACKER_PROVIDER_IDS) {
+      expect(resolveTrackerInitState(id)).toEqual({ ok: true, value: { provider: id } });
+    }
+  });
+
+  it('--tracker github is a real override, not an absent one (decision D-E)', () => {
+    // There is no --no-tracker: github IS the off position, so it has to arrive
+    // as an override. Reporting "no option supplied" here would let a prior jira
+    // selection survive the very flag that asked for github.
+    expect(resolveTrackerInitState('github')).toEqual({ ok: true, value: { provider: 'github' } });
+  });
+
+  it('rejects a near-miss and passes the strict parser\'s message through unrepaired', () => {
+    // The message is compared against the parser's own rather than re-typed, so
+    // this row pins the DELEGATION. The parser's hostile table is its own
+    // (tests/core/tracker.test.ts) — a second copy here would prove the copy.
+    const parsed = parseTrackerId('jira-cloud');
+    expect(parsed.ok, 'the probe input must be one the parser rejects').toBe(false);
+    expect(rejectionFor('jira-cloud')).toBe(parsed.ok ? '' : parsed.error);
+    expect(rejectionFor('jira-cloud')).toContain('jira-cloud');
+  });
+
+  it('rejects the byte-inexact spellings of a valid ID', () => {
+    // Reject, never repair: each of these is one keystroke from `jira`, and
+    // repairing any of them would silently select a provider the user's shell
+    // did not actually pass.
+    for (const hostile of ['JIRA', 'jira ', ' jira', '']) {
+      expect(rejectionFor(hostile)).toMatch(/tracker provider ID/);
+    }
+  });
+
+  it('a non-string option is read as "not supplied" rather than parsed', () => {
+    // Commander types `--tracker <id>` as required-value, so this is the
+    // defensive arm: whatever else reaches it, the function never hands a
+    // non-string to the parser and never invents a provider from one.
+    expect(resolveTrackerInitState(true as unknown as string)).toBeUndefined();
+    expect(resolveTrackerInitState(null as unknown as string)).toBeUndefined();
+  });
+});
+
 // ── init.ts tracker lifecycle call sites ──────────────────────────────────────
 //
 // [DR-22] / [DR-10] / P3a-S15: the attempt counter, the presence sentinel and the
@@ -945,6 +1029,49 @@ describe('init.ts tracker lifecycle call sites', () => {
     // preserves the prior provider verbatim and therefore owes no convergence.
     // A third write in init.ts would reopen the gap this seam closes.
     expect((source.match(/await writeManifest\(/g) ?? []).length).toBe(1);
+  });
+
+  /**
+   * Named collector: the `shouldRunTrackerStep({...})` call, verbatim.
+   *
+   * Throws rather than returning null — every assertion below reads this call,
+   * so a renamed predicate would otherwise leave them examining an empty string
+   * and passing (PF-018).
+   */
+  function trackerGateCall(source: string): string {
+    const call = /shouldRunTrackerStep\(\{[\s\S]*?\}\)/.exec(source);
+    if (call === null) {
+      throw new Error(
+        'the shouldRunTrackerStep call is not findable in init.ts — the gate assertions ' +
+        'below would each be reading nothing',
+      );
+    }
+    return call[0];
+  }
+
+  /** Named collector: the `mode` argument line of a gate call, trimmed, or null. */
+  function gateModeArgument(call: string): string | null {
+    return call.split('\n').map(l => l.trim()).find(l => /^mode\s*[,:]/.test(l)) ?? null;
+  }
+
+  it('hands the gate the caller\'s mode, never a literal (PF-029)', async () => {
+    const source = await fs.readFile(INIT_SOURCE, 'utf-8');
+    const call = trackerGateCall(source);
+
+    // runTrackerStepAt takes `mode` and must forward THAT. A literal collapses
+    // the gate table to one row: `mode: 'advanced'` returns true on every TTY,
+    // so a user who reached the Setup-mode prompt and chose Recommended is asked
+    // a tracker question the Recommended contract says they never see — and the
+    // 'recommended' call site still reads correctly, so nothing at the call site
+    // shows it.
+    expect(gateModeArgument(call)).toBe('mode,');
+
+    // Known-bad probe: the same collector over a copy whose gate hardcodes the
+    // mode reports the literal, so the assertion above is a statement about the
+    // shipped call rather than about a shape the collector cannot express.
+    const wounded = call.replace('mode,', "mode: 'advanced',");
+    expect(wounded, 'the mutation must change the call, or it is not this mutation').not.toBe(call);
+    expect(gateModeArgument(wounded)).toBe("mode: 'advanced',");
   });
 
   it('gates both wizard paths on the one shared shouldRunTrackerStep predicate', async () => {
