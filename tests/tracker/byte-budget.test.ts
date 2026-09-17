@@ -82,16 +82,18 @@ const BUDGET_GIT_MD = 55_750;
  * 55_750 + 3_120 = 58_870, measured 58_782 (headroom 88 — the same deliberate
  * thinness Phase 2 chose, so the next content addition must again fund itself).
  * The 3_120 is the MEASURED growth of the preamble block, not an estimate: the
- * portion of git.md OUTSIDE the preamble started this change byte-identical
- * (52_279 ch before and after) and has since been CUT, never grown — the
- * alignment pass deleted the GitHub rate-limit signal from
- * `backlink-shipped-issues`' D4 line and spent the 163 characters on a preamble
- * rule, so the non-preamble portion now measures 52_098 ch. That direction is
- * what the companion gate below is for: it holds the portion outside the preamble
- * to the UNRAISED Phase-2 number, and a cut there widens its margin rather than
- * consuming this ceiling.
+ * portion of git.md OUTSIDE the preamble has only ever been CUT on this branch,
+ * never grown — the alignment pass deleted the GitHub rate-limit signal from
+ * `backlink-shipped-issues`' D4 line and spent what that recovered on a preamble
+ * rule. That direction is what the companion gate below is for: it holds the
+ * portion outside the preamble to the UNRAISED Phase-2 number, and a cut there
+ * widens its margin rather than consuming this ceiling. No per-pass
+ * decomposition of that portion is recorded here — three successive
+ * re-derivations of those components disagreed (PF-057), so re-run this file for
+ * the current figures: the ceilings are the assertion, the printed table is the
+ * record.
  *
- * WHAT THE 3_000 BUYS, line by line. Phase 2's preamble resolved the provider
+ * WHAT THE REVISION BUYS, line by line. Phase 2's preamble resolved the provider
  * MANIFEST-ONLY and read no configuration file; Phase 3 makes the slot real, and
  * every clause below is a control with no mechanical backstop anywhere else:
  *   + the four-step resolution order (per-repo key → ref grammar → manifest → github)
@@ -226,13 +228,13 @@ const BUDGET_LOADED_SET_P3 = BUDGET_LOADED_SET + (BUDGET_GIT_MD_P3 - BUDGET_GIT_
  *                                                              mechanics + learn-conventions.md)
  *   =                                                88_615
  *
- * Pinned at 88_660 — 45 ch of headroom, tighter than Phase 2's 86 and the Phase-3
- * git.md ceiling's 88, so the next addition to the contract or to a Jira mechanics
- * file must fund itself with a cut rather than reach for slack. It is deliberately
+ * Pinned at 88_660 — 45 ch of headroom, tighter than either git.md ceiling's, so
+ * the next addition to the contract or to a Jira mechanics file must fund itself
+ * with a cut rather than reach for slack. It is deliberately
  * NOT re-derived upward from a later measurement: this gate already went red once
- * during authoring — a 197 ch rewrite of the contract's truncation clause — and the
- * response was to condense the clause back to 47 ch of growth, which is the
- * response the message below prescribes.
+ * during authoring, on a rewrite of the contract's truncation clause, and the
+ * response was to condense the clause rather than move this number — the response
+ * the message below prescribes.
  *
  * A NEW registered `ceilings` entry (`budget-loaded-set-jira`), not a computed
  * value: unlike the GitHub row — which moves only by the git.md revision and is
@@ -278,8 +280,9 @@ const BUDGET_LOADED_SET_JIRA = 88_660;
  * reader needs in order to not treat rank 4 as a misconfiguration — and the rank-4
  * marker predicate then needs BOTH halves written down, the first-line binding and
  * the second discriminator, because with no author column to compare against the
- * marker is the only evidence a comment is devflow's. That is 2_699 ch more than
- * GitHub's largest mechanics file, and it is content rather than slack.
+ * marker is the only evidence a comment is devflow's. That is what makes this
+ * provider's `max_op` the largest of the three in the printed table, and it is
+ * content rather than slack.
  *
  * A NEW registered `ceilings` entry (`budget-loaded-set-linear`), for the same
  * reason the Jira row is one: this row's growth is mostly content with no earlier
@@ -751,16 +754,14 @@ function preambleBlock(content: string): string {
 // EVERY MARGIN QUOTED OFF THIS TABLE NAMES ITS DENOMINATOR. That is why two
 // percentage columns are printed: `vs shape 1` divides by the always-loaded
 // preloaded set, `vs shape 2` divides by the shipped per-op loaded set. A bare
-// "+31%" is unreproducible — it could be either, and the two differ by more than a
-// factor of two. (A previous revision of this comment said "+31% to +41%" and the
-// feature KB said "+3.3% → +8.0% → +30.3%"; neither named a denominator and neither
-// matched the rows.)
+// percentage is unreproducible — it could be either, and the two differ by more than
+// a factor of two. (An earlier revision of this comment and the feature KB each
+// quoted margins with no denominator named, and neither matched the rows.)
 //
 // The disqualifying comparison is shape 3 against SHAPE 2, because shape 2 is what
-// shipped. At HEAD bf4b3f9 the printed rows are shape 3 = 88,302 ch against shape 2
-// = 77,719 ch — +13.6% on the worst-case tracker spawn (and +35.5% vs shape 1's
-// 65,187 ch, against shape 2's own +19.2%). Read those off a run; do not quote these
-// figures forward — they move whenever git.md or a reference does.
+// shipped. Read both percentage columns off a run rather than quoting figures
+// forward from prose: they move whenever git.md or a reference does, and the table
+// printed below is the record.
 //
 // Shape 4 is identical to shape 2 in Phase 2 (MCP_TERM = 0, AC-2.7): the saving it
 // was projected to net exists only once an MCP-backed provider module does.
