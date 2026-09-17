@@ -19,7 +19,11 @@
  *   1. CONTRACT — the contract module states all four clauses: the
  *      `{SCRUBBED_BODY}` rule, `D11-OK`, `SECRET-EXPOSED` [DR-01] and the
  *      `<bytes>` verification [DR-06]. Asserted against the SOURCE `.mds`.
- *   2. BYPASS — the bypass regex is RED on real bypass shapes, proven inline.
+ *   2. BYPASS — the bypass matcher is RED on real bypass shapes, proven inline.
+ *      Two shapes, because a sink has two spellings: the ARGUMENT form
+ *      (`body: X`) and the PROSE form (`the description field carrying X`) that
+ *      §14.4's select-by-capability-description rule produces. What the matcher
+ *      deliberately cannot express is written down on the collector (PF-064).
  *   3. FORWARD — every posting mechanic that spells a body argument names all
  *      four clauses, and no file in the sink class posts an ungated body. The
  *      corpus is LIVE: a provider mechanics tree exists, so this arm is now
@@ -232,33 +236,147 @@ describe('tool-call contract: the source module states every D11 clause [E2]', (
 // ---------------------------------------------------------------------------
 
 /**
- * A body-shaped argument assigned anything other than the gated placeholder.
+ * The vocabulary a tracker tool call uses for the field carrying user-visible
+ * text. Shared by both shapes below so one field name cannot be gated in the
+ * argument spelling and ungated in the prose one.
+ */
+const BODY_FIELDS = 'body|description|content|text|markdown|adf|comment[_-]?body';
+
+/**
+ * A body-shaped ARGUMENT assigned anything other than the gated placeholder.
  *
- * The alternation is the vocabulary a tracker tool call actually uses for the
- * field that carries user-visible text. The negative lookahead is the whole
- * guard: the ONLY accepted right-hand side is `{SCRUBBED_BODY}`, so a raw
- * variable, a heredoc, a composed string and a file path are all reported without
- * the guard having to enumerate them.
+ * The negative lookahead is the whole guard: the ONLY accepted right-hand side is
+ * `{SCRUBBED_BODY}`, so a raw variable, a heredoc, a composed string and a file
+ * path are all reported without the guard having to enumerate them.
  *
  * Constructed per call — a shared `g`-flagged object carries `lastIndex` between
  * callers and would skip matches depending on call order.
  */
 function bypassPattern(): RegExp {
-  return /\b(?:body|description|content|text|markdown|adf|comment[_-]?body)\s*[:=]\s*(?!\{SCRUBBED_BODY\})\S/gi;
+  return new RegExp(`\\b(?:${BODY_FIELDS})\\s*[:=]\\s*(?!\\{SCRUBBED_BODY\\})\\S`, 'gi');
 }
 
-/** Named collector: bypass sites, as `{path}:{line}: {text}`. */
+/**
+ * The same sink written as PROSE: `the description field carrying X`.
+ *
+ * This shape has no `key: value` form for the argument matcher to see, and it is
+ * not a hypothetical spelling — it is what the contract's own doctrine produces.
+ * §14.4 requires a mechanic to select a capability by DESCRIPTION and never by
+ * tool name, so a compliant author writes a sentence rather than a call, and the
+ * body argument arrives inside that sentence. Both shipped
+ * `ensure-traceable-issue` mechanics already carry one. A matcher that reads only
+ * the argument form is therefore inert against exactly the shape this repo's
+ * rules steer authors towards — PF-064's matcher claim, failing on the wording
+ * the contract mandates.
+ *
+ * The right-hand side is captured rather than rejected outright, because one
+ * non-placeholder spelling is legitimate: see GATED_ANAPHOR.
+ */
+function prosePattern(): RegExp {
+  return new RegExp(
+    `\\b(?:${BODY_FIELDS})\\s+field\\s+(?:carrying|holding|containing|bearing|set to)\\s+` +
+    `(?!\\{SCRUBBED_BODY\\})([^\\s.;][^.;]*)`,
+    'gi',
+  );
+}
+
+/**
+ * The one non-placeholder right-hand side a prose sink may use: a back-reference
+ * to the gated value already named earlier in the sentence.
+ *
+ * Admitted ONLY when `{SCRUBBED_BODY}` is spelled on the same line, which is what
+ * makes it a reference rather than a promise. `…the description field carrying
+ * the same gated value` on a line that never names the placeholder is a dangling
+ * anaphor — it reads as gated and instructs nothing — so it is reported.
+ */
+const GATED_ANAPHOR = /^the same gated value\b/i;
+
+/**
+ * Named collector: bypass sites, as `{path}:{line}: {text}`.
+ *
+ * DELIBERATE NON-GOALS, written down rather than inferred from a green run
+ * (PF-064). This matcher reads ONE LINE at a time and ONE named field per match,
+ * so it cannot express:
+ *   - a body composed across several lines and referenced later by a variable
+ *     the mechanic introduced (`$BODY` assigned in step 2, posted in step 5);
+ *   - a field named by a synonym outside BODY_FIELDS (`summary`, `note`,
+ *     `payload`) — widening the vocabulary is the fix, not a smarter matcher;
+ *   - an indirect reference with no field word at all ("post the value from
+ *     step 3"), which has no syntactic handle to key on.
+ * The forward arm below is the control that covers what this one cannot: it
+ * demands every clause that makes the placeholder a gate, per FILE, so a mechanic
+ * evading this matcher still has to state the gate it is evading.
+ */
 export function collectBypassSites(corpus: readonly CorpusEntry[]): string[] {
   const sites: string[] = [];
   for (const entry of corpus) {
     const lines = unescapeMds(entry.content).split('\n');
     for (let i = 0; i < lines.length; i++) {
-      if (bypassPattern().test(lines[i])) {
-        sites.push(`${entry.path}:${i + 1}: ${lines[i].trim().slice(0, 100)}`);
+      const line = lines[i];
+      const report = (): void => {
+        sites.push(`${entry.path}:${i + 1}: ${line.trim().slice(0, 100)}`);
+      };
+      if (bypassPattern().test(line)) {
+        report();
+        continue;
+      }
+      for (const match of line.matchAll(prosePattern())) {
+        if (GATED_ANAPHOR.test(match[1].trim()) && line.includes('{SCRUBBED_BODY}')) continue;
+        report();
+        break;
       }
     }
   }
   return sites;
+}
+
+/**
+ * A posting verb, in either spelling an author reaches for.
+ *
+ * NO TRAILING boundary, deliberately: real tool names are compound
+ * (`addCommentToJiraIssue`, `createCommentOnIssue`), so `\badd[_-]?comment\b`
+ * matches `addComment` and then fails on the `T` that follows — inert against
+ * every actual tool name. The leading `\b` stays, so `my_add_comment_helper` is
+ * still matched on its own token and an arbitrary substring is not.
+ *
+ * A SPACE is admitted in the separator class alongside `_` and `-`, because the
+ * contract's own rule is to select by capability DESCRIPTION rather than by tool
+ * name — so a compliant mechanics file writes *add comment*, not `addComment`.
+ * With only `[_-]?` this matched every tool name and no capability description,
+ * i.e. it was inert against exactly the corpus the contract mandates.
+ */
+const POSTING_VERBS = /\b(?:create[_\- ]?comment|add[_\- ]?comment|post[_\- ]?comment|update[_\- ]?description|edit[_\- ]?comment)/i;
+
+/**
+ * A reference to the raw, unscrubbed body file.
+ *
+ * TRAILING boundary only. `\bRAW\b` cannot match `$DEVFLOW_BODY_RAW`: the
+ * underscore before `RAW` is a word character, so there is no word boundary there
+ * — and the variable the raw body actually travels in is exactly that spelling. A
+ * leading `\b` would make this silently inert against the one name it exists to
+ * catch.
+ */
+const RAW_REF = /RAW\b/;
+
+/**
+ * Named collector: lines where a posting verb shares a line with the raw body.
+ *
+ * The conjunction of the two patterns is the predicate, and it is named here so
+ * the live assertion and its known-bad probe drive the SAME one. Inline, the
+ * probe re-spelled `POSTING_VERBS.test(l) && RAW_REF.test(l)` over literals —
+ * which proves the copy fires, not the guard. The conjunction is also what keeps
+ * the widened verb class from reporting ordinary prose about adding comments.
+ */
+export function collectRawRefOnPostingLine(corpus: readonly CorpusEntry[]): string[] {
+  const offenders: string[] = [];
+  for (const entry of corpus) {
+    for (const [i, line] of unescapeMds(entry.content).split('\n').entries()) {
+      if (POSTING_VERBS.test(line) && RAW_REF.test(line)) {
+        offenders.push(`${entry.path}:${i + 1}: ${line.trim().slice(0, 100)}`);
+      }
+    }
+  }
+  return offenders;
 }
 
 describe('bypass regex: red on every shape that posts an ungated body', () => {
@@ -271,6 +389,16 @@ describe('bypass regex: red on every shape that posts an ungated body', () => {
     'markdown = <<EOF',
     'adf: renderAdf($RAW)',
     'text: summarise($DEVFLOW_BODY)',
+    // The PROSE shape — no `key: value` anywhere in it, so the argument matcher
+    // alone is blind to every one of these. This is the spelling §14.4's
+    // select-by-capability-description rule produces, and both shipped
+    // `ensure-traceable-issue` mechanics are written in it.
+    'or on a new issue through the *create issue* capability with the description field carrying $DEVFLOW_BODY_RAW.',
+    'Open the issue with the body field holding the composed markdown.',
+    'Use the *update description* capability with the description field set to $RAW.',
+    // A DANGLING anaphor: it reads as gated, but the line never names the value
+    // it claims to reuse, so the mechanic instructs nothing.
+    'On a new issue, use the description field carrying the same gated value.',
   ];
 
   it('every known-bad bypass shape is reported', () => {
@@ -292,6 +420,12 @@ describe('bypass regex: red on every shape that posts an ungated body', () => {
       'create_comment(body: {SCRUBBED_BODY})',
       'addCommentToIssue(body: \\{SCRUBBED_BODY\\})',
       'description: {SCRUBBED_BODY}',
+      // The prose shape, gated the two ways it can be: by naming the placeholder,
+      // and by referring back to one the same line already named.
+      'with the description field carrying {SCRUBBED_BODY}',
+      'Post through the *add comment* capability with arguments (issue key, body: ' +
+      '\\{SCRUBBED_BODY\\}), or on a new issue through the *create issue* capability with the ' +
+      'description field carrying the same gated value.',
     ]) {
       expect(
         collectBypassSites([{ path: 'seed.md', content: line }]),
@@ -329,49 +463,44 @@ describe('bypass regex: red on every shape that posts an ungated body', () => {
     // A second, independent control on the same failure: even a mechanic whose
     // body argument is spelled correctly must not mention the raw file on the
     // posting line, because that is where a "just in case" fallback gets written.
-    // NO TRAILING boundary on the verb either, and for the same class of reason:
-    // real tool names are compound (`addCommentToJiraIssue`,
-    // `createCommentOnIssue`), so `\badd[_-]?comment\b` matches `addComment` and
-    // then fails on the `T` that follows — inert against every actual tool name.
-    // The leading `\b` stays, so `my_add_comment_helper` is still matched on its
-    // own token and an arbitrary substring is not.
-    //
-    // A SPACE is admitted in the separator class alongside `_` and `-`, because
-    // the contract's own rule is to select by capability DESCRIPTION rather than
-    // by tool name — so a compliant mechanics file writes *add comment*, not
-    // `addComment`. With only `[_-]?` this predicate matched every tool name and
-    // no capability description, i.e. it was inert against exactly the corpus the
-    // contract mandates. The conjunction with `RAW\b` on the SAME line is what
-    // keeps the widening from reporting ordinary prose about adding comments.
-    const POSTING_VERBS = /\b(?:create[_\- ]?comment|add[_\- ]?comment|post[_\- ]?comment|update[_\- ]?description|edit[_\- ]?comment)/i;
-    // TRAILING boundary only. `\bRAW\b` cannot match `$DEVFLOW_BODY_RAW`: the
-    // underscore before `RAW` is a word character, so there is no word boundary
-    // there — and the variable the raw body actually travels in is exactly that
-    // spelling. A leading `\b` would have made this predicate silently inert
-    // against the one name it exists to catch.
-    const RAW_REF = /RAW\b/;
-    const offenders: string[] = [];
-    for (const entry of postingMechanicCorpus()) {
-      for (const [i, line] of unescapeMds(entry.content).split('\n').entries()) {
-        if (POSTING_VERBS.test(line) && RAW_REF.test(line)) {
-          offenders.push(`${entry.path}:${i + 1}: ${line.trim().slice(0, 100)}`);
-        }
-      }
-    }
+    const corpus = postingMechanicCorpus();
+    expect(
+      corpus.length,
+      'empty sink class — run `npm run build`. This arm is an emptiness claim like its sibling, ' +
+      'so a corpus of zero files satisfies it while the probe below still passes: the predicate ' +
+      'would be proven live over ground nothing ever read (PF-018)',
+    ).toBeGreaterThan(0);
+
+    const offenders = collectRawRefOnPostingLine(corpus);
     expect(offenders, `posting verb sharing a line with RAW:\n  ${offenders.join('\n  ')}`).toEqual([]);
-    // Known-bad, inline: driven over the tool-name spelling, the capability
-    // spelling the contract actually mandates, and both spellings of the raw
-    // reference.
+
+    // Known-bad, driven through the SAME collector rather than by re-spelling the
+    // conjunction over literals: a probe that re-implements the predicate proves
+    // the copy is live, not the guard. Covers the tool-name spelling, the
+    // capability spelling the contract actually mandates, and both spellings of
+    // the raw reference.
     for (const line of [
       'create_comment(body: $DEVFLOW_BODY_RAW)',
       'addCommentToJiraIssue(body: "$RAW")',
       'Post through the *add comment* capability with $DEVFLOW_BODY_RAW.',
       'Fall back to the *update description* capability reading $RAW directly.',
     ]) {
-      expect(POSTING_VERBS.test(line) && RAW_REF.test(line), `"${line}" must be caught`).toBe(true);
+      expect(
+        collectRawRefOnPostingLine([{ path: 'seed.md', content: line }]),
+        `"${line}" must be caught`,
+      ).toEqual([`seed.md:1: ${line}`]);
     }
-    // …and does NOT fire on a gated line that never mentions the raw body.
-    expect(RAW_REF.test('create_comment(body: {SCRUBBED_BODY})')).toBe(false);
+    // …and does NOT fire on a gated line that never mentions the raw body, nor on
+    // prose about adding comments that names no raw file.
+    for (const line of [
+      'create_comment(body: {SCRUBBED_BODY})',
+      'Post through the *add comment* capability with arguments (issue key, body: {SCRUBBED_BODY}).',
+    ]) {
+      expect(
+        collectRawRefOnPostingLine([{ path: 'seed.md', content: line }]),
+        `"${line}" is gated and must not be reported`,
+      ).toEqual([]);
+    }
   });
 });
 
