@@ -45,7 +45,13 @@ import {
   TRACKER_OPS,
   VARIANT_MODULES,
 } from '../src/core/mds-variants.js';
-import { PER_ITEM_FETCH_SHAPES, ROOT, collectPerItemFetchVerbs } from './helpers.js';
+import {
+  PER_ITEM_FETCH_SHAPES,
+  ROOT,
+  collectPerItemFetchVerbs,
+  extractOpSectionFromCorpus,
+  resolveAgentSource,
+} from './helpers.js';
 
 // ---------------------------------------------------------------------------
 // The providers, read from the registry rather than listed
@@ -344,6 +350,189 @@ describe('provider literals: fetch-issues-batch is one query on every provider [
       'the op anchor line must not be reported — the plural is not the singular',
     ).toEqual([]);
     expect(PER_ITEM_FETCH_SHAPES.length, 'the shape table is empty (PF-018)').toBeGreaterThan(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// backlink-shipped-issues, read as a FILE (GAP-18, M1/M4)
+// ---------------------------------------------------------------------------
+//
+// WHY A PER-FILE ARM WHEN THE MATRIX ABOVE ALREADY SCANS THE TREE. The matrix
+// concatenates each provider's ten op files, which is the right corpus for "does
+// this provider state its own signal and no other provider's". It cannot say
+// WHICH file states it, and for this one operation the file is the claim:
+//
+//   - `X-RateLimit-Remaining` is the D4 full-STOP signal for the only tracker
+//     fan-out on the GitHub path. It used to be restated on this operation's
+//     `**Degradation (D4):**` line in the always-loaded agent, where every spawn
+//     read a GitHub header whatever provider it had resolved — and neither
+//     tool-call provider publishes a pre-emptive remaining count, so the rung
+//     could not engage for two of three providers. That line now defers to the
+//     always-loaded contract, which names "the resolved provider's reference" as
+//     the place the signal lives. THIS is that reference, so the threshold
+//     drifting into a sibling op file would leave the contract pointing at a file
+//     that does not carry it — and the tree-level pin would stay green.
+//   - the `#` strip is a shell-injection control, not a style note (GAP-18). The
+//     pre-flight admits `^#?[1-9][0-9]{0,8}$`, so `#42` is an ADMITTED entry, and
+//     this file is the one that interpolates the entry into `gh issue view
+//     {number}` and `gh issue comment {number}`. A `#` at word start opens a shell
+//     comment, so the un-normalised spelling truncates the command at the
+//     reference — the op would stop back-linking silently rather than fail. On
+//     main the digits-only gate in the agent made this unreachable; moving the
+//     grammar here widened the admitted set by one normalised form, and the
+//     normalisation is what the wider grammar owes.
+//
+// Every claim is a row with its reason, and the probe below removes each row's own
+// sentence from a copy of the file and drives the same collector over it — so a
+// row whose pattern has stopped matching the shipped wording cannot pass quietly.
+
+/** One sentence a generated reference owes, and the shape that recognises it. */
+interface FileClaim {
+  readonly label: string;
+  readonly pattern: RegExp;
+  readonly why: string;
+}
+
+const GITHUB_BACKLINK_FILE = 'tracker/github/backlink-shipped-issues.md';
+
+const GITHUB_BACKLINK_CLAIMS: readonly FileClaim[] = [
+  {
+    label: 'the normalisation happens once, before the loop',
+    pattern: /normalise once, before the loop, never inside it/,
+    why:
+      'a strip performed inside the per-issue loop is a strip an author can forget on one of the ' +
+      'two commands; the pre-flight is the single place every entry passes through',
+  },
+  {
+    label: 'exactly one leading `#`, and only the stripped digits are interpolated',
+    pattern: /strip \*\*exactly one\*\* leading `#`[\s\S]{0,140}?interpolate only the stripped digits/,
+    why:
+      'GAP-18: the pre-flight IS the shell-injection guard for an interpolated ref. "Exactly one" ' +
+      'is the bound — a greedy strip would silently accept `##42` — and naming the stripped form ' +
+      'as the only one that reaches a command is what makes the gate cover the interpolation',
+  },
+  {
+    label: 'the shell-comment reason the strip exists for',
+    pattern: /`#` at word start opens a shell comment/,
+    why:
+      'without the reason the sentence reads as cosmetic normalisation and the next condensing ' +
+      'pass deletes it. The failure it prevents is silent: a truncated `gh` command back-links ' +
+      'nothing and reports no error',
+  },
+  {
+    label: 'the anchored github reference grammar the strip normalises for',
+    pattern: /\^#\?\[1-9]\[0-9]\{0,8}\$/,
+    why:
+      '§14.1 fixes this provider\'s grammar, anchored at both ends. The `#?` is why a ' +
+      'normalisation is owed at all: an anchored digits-only grammar would need none',
+  },
+  {
+    label: "GitHub's full-STOP rate-limit threshold",
+    pattern: /`X-RateLimit-Remaining` header < 10/,
+    why:
+      'D4 says STOP rather than wait, and the always-loaded contract defers the signal to this ' +
+      'reference. Stated anywhere else, the contract points at a file that does not carry it',
+  },
+];
+
+/** Named collector: claims the text does not make. */
+export function collectMissingFileClaims(
+  label: string,
+  text: string,
+  claims: readonly FileClaim[],
+): string[] {
+  return claims
+    .filter(claim => !claim.pattern.test(text))
+    .map(claim => `${label}: missing ${claim.label} — ${claim.why}`);
+}
+
+describe('provider literals: the github backlink reference, per file (GAP-18)', () => {
+  it('states the strip-one-`#` normalisation before it interpolates, and its own STOP threshold', () => {
+    const violations = collectMissingFileClaims(
+      GITHUB_BACKLINK_FILE,
+      readGenerated(GITHUB_BACKLINK_FILE),
+      GITHUB_BACKLINK_CLAIMS,
+    );
+    expect(
+      violations,
+      `the github backlink reference is missing sentence(s) it owes:\n  ${violations.join('\n  ')}`,
+    ).toEqual([]);
+  });
+
+  it('known-bad probe: each claim, deleted from a copy, is reported by the same collector', () => {
+    // Mechanic (b): the bad shape is built inside this `it` from the shipped bytes,
+    // so no committed file is touched to show red. Per ROW rather than once, because
+    // a table is only as good as the shapes it can be SHOWN to express (PF-018) —
+    // and a row whose pattern drifted off the shipped wording would otherwise sit
+    // here matching nothing while the main arm passed on the other four.
+    const pristine = readGenerated(GITHUB_BACKLINK_FILE);
+    expect(
+      collectMissingFileClaims('pristine', pristine, GITHUB_BACKLINK_CLAIMS),
+      'the collector must be silent on the shipped file, or the probe below proves nothing',
+    ).toEqual([]);
+
+    for (const claim of GITHUB_BACKLINK_CLAIMS) {
+      const wounded = pristine.replace(claim.pattern, '');
+      expect(
+        wounded,
+        `the pattern for "${claim.label}" matched nothing in the shipped file, so deleting it was ` +
+        `a no-op and the row cannot be shown live`,
+      ).not.toBe(pristine);
+      expect(
+        collectMissingFileClaims('wounded', wounded, GITHUB_BACKLINK_CLAIMS)
+          .map(v => v.split(' — ')[0]),
+        `removing "${claim.label}" must be reported by the same collector`,
+      ).toContain(`wounded: missing ${claim.label}`);
+    }
+    expect(GITHUB_BACKLINK_CLAIMS.length, 'the claim table is empty (PF-018)').toBeGreaterThan(0);
+  });
+
+  it('the STOP threshold is stated on the github path ONLY, per file and in the agent', () => {
+    // The absence half, narrowed from the tree to the file — and extended to the
+    // always-loaded agent's own section for this op, which is where the misalignment
+    // actually lived. `resolve-review-threads` keeps both thresholds in git.md: PR
+    // review threads are hosted on GitHub under every provider, so that clause is a
+    // GitHub fact stated in the right place. Scoping to the op section is what lets
+    // this arm forbid the literal for THIS op without forbidding it for that one.
+    const toolCall = PROVIDERS.filter(
+      p => (MCP_BACKED_PROVIDER_SUBDIRS as readonly string[]).includes(p.subdir),
+    );
+    expect(toolCall.length, 'no tool-call provider is registered').toBeGreaterThan(0);
+    for (const provider of toolCall) {
+      const rel = `${provider.subdir}/backlink-shipped-issues.md`;
+      expect(
+        readGenerated(rel),
+        `${rel} names a pre-emptive remaining count this provider never sends — a rung keyed on ` +
+        `it can never engage, which reads as coverage and is none`,
+      ).not.toContain('X-RateLimit-Remaining');
+    }
+
+    const git = resolveAgentSource('git');
+    const { content: section } = extractOpSectionFromCorpus(
+      [{ path: git.path, content: git.content }],
+      'backlink-shipped-issues',
+      { mode: 'sole' },
+    );
+    expect(
+      section.length,
+      'the op section measured 0 characters — the absence assertion below would pass by reading ' +
+      'nothing',
+    ).toBeGreaterThan(0);
+    expect(
+      section,
+      `${git.path}: this operation's always-loaded section names GitHub's rate-limit header. ` +
+      `Every spawn loads it whatever provider it resolved, and two of three providers publish no ` +
+      `such count — the signal belongs in ${GITHUB_BACKLINK_FILE}, which the always-loaded D4 ` +
+      `contract already defers to`,
+    ).not.toContain('X-RateLimit-Remaining');
+    // …and the control: the literal IS still in the agent, on the op whose GitHub
+    // hosting is unconditional. An absence arm that would also pass on an agent
+    // scrubbed of the threshold entirely is not measuring a relocation.
+    expect(
+      git.content,
+      'resolve-review-threads must keep both thresholds — deleting them everywhere would satisfy ' +
+      'the arm above while disabling backpressure',
+    ).toContain('`X-RateLimit-Remaining` < 10');
   });
 });
 
