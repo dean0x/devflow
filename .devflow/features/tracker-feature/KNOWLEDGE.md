@@ -270,18 +270,18 @@ Measured on the 3a tree:
 
 | | Phase 2 | Phase 3a | Phase 3c | Alignment pass |
 |---|---|---|---|---|
-| `git.md` chars | 55,664 | 58,776 | 58,751 | **58,772** |
+| `git.md` chars | 55,664 | 58,776 | 58,751 | **58,782** |
 | `git.md` **outside** the preamble | 52,279 | 52,279 — byte-identical | 52,254 | **52,098** |
-| preamble chars / lines | 3,385 / 29 | 6,497 / 34 | 6,497 / 34 | **6,674 / 37** |
-| worst-case tracker spawn, GitHub path (shape 2) | 77,719 | 80,831 | 80,806 | **80,827** |
+| preamble chars / lines | 3,385 / 29 | 6,497 / 34 | 6,497 / 34 | **6,684 / 37** |
+| worst-case tracker spawn, GitHub path (shape 2) | 77,719 | 80,831 | 80,806 | **80,837** |
 
-The 3c column moves DOWNWARD because #325's neutralisation of the tracker ops' wording deleted a duplicated sentence: the always-loaded file got smaller while gaining a provider. The alignment column moves back UP by 21 ch, and how it was paid for is the point: the M2 rendering rule cost 187 ch of always-loaded preamble and the M4 cut recovered 163 of them by deleting `backlink-shipped-issues`' restatement of the D4 rate-limit rung. **`BUDGET_GIT_MD_P3` stays at 58,870** (headroom **98**) — a ceiling is re-derived downward or not at all, and nothing about these changes earns a lower one.
+The 3c column moves DOWNWARD because #325's neutralisation of the tracker ops' wording deleted a duplicated sentence: the always-loaded file got smaller while gaining a provider. The alignment column moves back UP by 31 ch, and how it was paid for is the point: the M2 rendering rule and the M4 cut that funded it net +21 — 187 ch of always-loaded preamble against 163 recovered by deleting `backlink-shipped-issues`' restatement of the D4 rate-limit rung — and the second alignment pass's issue-ref scoping added the remaining 10, one word inside an existing bullet. **`BUDGET_GIT_MD_P3` stays at 58,870** (headroom **88**) — a ceiling is re-derived downward or not at all, and nothing about these changes earns a lower one.
 
-**Re-measure before spending, and read the LINEAR row, not this one.** Four figures in this section had drifted by the time the alignment pass measured them (git.md by 9 ch, Linear's `max_op` by 27, both provider sums with them), which is why the pass re-derived every "measured"/"headroom" number in `byte-budget.test.ts` and `numeric-floors.json` from the printed table. And the binding constraint is no longer the `git.md` ceiling's 98 ch: it is the **Linear loaded-set row's 26**, because that row contains `git.md`. A character added to the always-loaded agent is a character added to all four gates, and the smallest margin decides.
+**Re-measure before spending, and read the LINEAR row, not this one.** Four figures in this section had drifted by the time the alignment pass measured them (git.md by 9 ch, Linear's `max_op` by 27, both provider sums with them), which is why the pass re-derived every "measured"/"headroom" number in `byte-budget.test.ts` and `numeric-floors.json` from the printed table. And the binding constraint is no longer the `git.md` ceiling's 88 ch: it is the **Linear loaded-set row's 16**, because that row contains `git.md`. A character added to the always-loaded agent is a character added to all four gates, and the smallest margin decides.
 
 ```ts
 const BUDGET_GIT_MD      = 55_750;   // Phase-2 base, UNRAISED — still the live gate OUTSIDE the preamble
-const BUDGET_GIT_MD_P3   = 58_870;   // = 55_750 + measured 3_120 preamble growth; headroom 98
+const BUDGET_GIT_MD_P3   = 58_870;   // = 55_750 + measured 3_120 preamble growth; headroom 88
 const PREAMBLE_CHARS_P2  =  3_385;   // measured at e66ef30
 const PREAMBLE_MAX_LINES =     40;   // UNCHANGED — the ≤70 raise was NOT taken
 const BUDGET_LOADED_SET_P3 = BUDGET_LOADED_SET + (BUDGET_GIT_MD_P3 - BUDGET_GIT_MD);  // computed = 80_944
@@ -292,7 +292,7 @@ Four properties, each of which a future subtask will be tempted to break:
 - **The ≤70-line preamble ceiling was NOT added.** §14.10 called 70 "the honest number"; the re-derivation says **34**. A `<= 70` assertion would be strictly *weaker* than the `<= 40` already in place. **It was not added in 3b, 3c or the alignment pass either** — it would be a raise wearing a new name. The preamble is now **37** lines: three of the forty are left, and the next always-loaded rule either fits in one line or replaces one.
 - **The P3 revision is spendable on the preamble ONLY, mechanically.** A companion gate asserts `chars(git.md) − chars(preamble) <= BUDGET_GIT_MD − PREAMBLE_CHARS_P2` (= 52,365, measured **52,098** — **267** ch of headroom). **Text added to an operation section still funds itself against Phase 2's number**; the neutralisation and then the alignment pass's M4 cut both went the other way, which is why that margin grew from Phase 2's 86 to 267.
 - **`BUDGET_LOADED_SET_P3` is computed, never typed** — no literal, so it is unregisterable and unwalkable. `budget-git-md-p3` is the single ratcheted number governing both gates. §14.10 says "only the `git.md` component is further revised", but `BUDGET_LOADED_SET` is `PRELOADED` at Phase 0 and `PRELOADED` *contains* `git.md`, so the plan's arithmetic cannot hold both; deriving the loaded-set ceiling from the git.md revision is the resolution that does not misclassify a containment control as an optional load. [DR-13(c)]'s `_resolution.md` escape was **measured and rejected**: moving text into a per-op-summed reference is **NET ZERO** on that gate.
-- **★ `_mcp.md` is billed at 0 on the GitHub row and priced PER PROVIDER elsewhere — shipped in 3b.** `MCP_TERM = 0` on the GitHub-scoped row **by construction**, because no github op file names `_mcp.md`; the re-scoped AC-2.7 guard proves it and a byte-budget arm re-proves it beside the gate. Each MCP-backed provider therefore gets its OWN loaded-set row and its OWN new ceiling entry derived from the printed table, and **no existing ceiling was raised**: the GitHub row still measures 80,831 ≤ 80,944. See each `## Provider:` section's loaded-set table for the numbers and `budget-loaded-set-jira` / `budget-loaded-set-linear` for the entries. A named arm fails any registered MCP-backed provider that has no ceiling of its own — it is what made 3c's ceiling land in the commit that registered the provider rather than after it — and the two per-provider gates are generated from one `PRICED_PROVIDERS` table, so a fourth provider adds a row rather than a copied pair of `it`s.
+- **★ `_mcp.md` is billed at 0 on the GitHub row and priced PER PROVIDER elsewhere — shipped in 3b.** `MCP_TERM = 0` on the GitHub-scoped row **by construction**, because no github op file names `_mcp.md`; the re-scoped AC-2.7 guard proves it and a byte-budget arm re-proves it beside the gate. Each MCP-backed provider therefore gets its OWN loaded-set row and its OWN new ceiling entry derived from the printed table, and **no existing ceiling was raised**: the GitHub row still measures 80,837 ≤ 80,944. See each `## Provider:` section's loaded-set table for the numbers and `budget-loaded-set-jira` / `budget-loaded-set-linear` for the entries. A named arm fails any registered MCP-backed provider that has no ceiling of its own — it is what made 3c's ceiling land in the commit that registered the provider rather than after it — and the two per-provider gates are generated from one `PRICED_PROVIDERS` table, so a fourth provider adds a row rather than a copied pair of `it`s.
 
 ## Component Interactions
 
@@ -401,19 +401,19 @@ Four ops post (`manage-debt`, `backlink-shipped-issues`, `ensure-traceable-issue
 
 ### The Jira loaded-set row
 
-Measured at the 3b boundary, and printed by `tests/tracker/byte-budget.test.ts`'s shape table:
+Re-measured after the second alignment pass, and printed by `tests/tracker/byte-budget.test.ts`'s shape table:
 
 | Term | ch |
 |---|---|
-| always-preloaded set (`git.md` 58,751 + git `SKILL.md` 6,581 + worktree-support 2,942) | 68,274 |
+| always-preloaded set (`git.md` 58,782 + git `SKILL.md` 6,581 + worktree-support 2,942) | 68,305 |
 | `references/tracker/_mcp.md` — **0 on the GitHub path**, per-spawn here | 6,402 |
 | `max_op` `tracker/jira/{op}.md` (`backlink-shipped-issues`) | 6,087 |
 | max over jira ops of the one-spawn load (`setup-task` + `learn-conventions.md`) | 7,821 |
-| **worst-case Jira spawn** | **88,584** |
+| **worst-case Jira spawn** | **88,615** |
 
-*(Measured 88,609 at the 3b boundary; the preloaded set shrank by 25 ch in #325, so this row moved with it. Headroom 76, not the 51 it had.)*
+*(Measured 88,609 at the 3b boundary; the preloaded set then shrank by 25 ch in #325 and grew by 31 across the two alignment passes, so this row moved with it each time. Headroom 45, not the 51 it had.)*
 
-`BUDGET_LOADED_SET_JIRA = 88_660` — headroom **51**, a NEW registered ceiling (`budget-loaded-set-jira`), never a raise of an existing one. The GitHub row is **unchanged at 80,831 ≤ 80,944**: `MCP_TERM` stays 0 there **by construction**, because no github op file names the contract, and a byte-budget arm re-proves that beside the AC-2.7 guard. A companion arm holds the delta over the GitHub ceiling to what this provider actually adds, so the number cannot be set freely, and a third arm fails any registered MCP-backed provider that has no ceiling of its own — which is what made Linear's ceiling land in the commit that registered it.
+`BUDGET_LOADED_SET_JIRA = 88_660` — headroom **45**, a NEW registered ceiling (`budget-loaded-set-jira`), never a raise of an existing one. The GitHub row is **unchanged at 80,837 ≤ 80,944**: `MCP_TERM` stays 0 there **by construction**, because no github op file names the contract, and a byte-budget arm re-proves that beside the AC-2.7 guard. A companion arm holds the delta over the GitHub ceiling to what this provider actually adds, so the number cannot be set freely, and a third arm fails any registered MCP-backed provider that has no ceiling of its own — which is what made Linear's ceiling land in the commit that registered it.
 
 **The gate went red once during authoring** and the response is the precedent: a 197-character rewrite of the contract's truncation clause breached it, and the clause was condensed back to 47 characters of growth rather than the ceiling being moved.
 
@@ -473,19 +473,19 @@ The always-loaded entry gate in `backlink-shipped-issues` step 0 now defers to t
 
 | Term | ch |
 |---|---|
-| always-preloaded set (`git.md` 58,772 + git `SKILL.md` 6,581 + worktree-support 2,942) | 68,295 |
+| always-preloaded set (`git.md` 58,782 + git `SKILL.md` 6,581 + worktree-support 2,942) | 68,305 |
 | `references/tracker/_mcp.md` — **0 on the GitHub path**, per-spawn here | 6,402 |
 | `max_op` `tracker/linear/{op}.md` (`backlink-shipped-issues`) | 7,706 |
 | max over linear ops of the one-spawn load (`setup-task` + `learn-conventions.md`) | 8,571 |
-| **worst-case Linear spawn** | **90,974** |
+| **worst-case Linear spawn** | **90,984** |
 
-`BUDGET_LOADED_SET_LINEAR = 91_000` — headroom **26** after the alignment pass, a NEW registered ceiling (`budget-loaded-set-linear`), never a raise. **★ This is the thinnest of the four gates and therefore the one that binds.** It contains `git.md`, so every character added to the always-loaded agent is charged here as well as to its own ceiling — and the `git.md` ceiling's 98 ch of apparent slack is unspendable while this row has 26. Check this number, not that one, before adding always-loaded text. **This provider's `max_op` is the largest of the three by 2,699 ch over GitHub's, and that is content rather than slack:** `backlink-shipped-issues` is where the ladder is stated, three of its four rungs need their unavailability explained (or the next reader treats rank 4 as a misconfiguration), and the marker predicate needs both halves written down. The two per-provider gates are now generated from one `PRICED_PROVIDERS` table, so a fourth provider adds a row rather than a copied pair of `it`s.
+`BUDGET_LOADED_SET_LINEAR = 91_000` — headroom **16** after the second alignment pass, a NEW registered ceiling (`budget-loaded-set-linear`), never a raise. **★ This is the thinnest of the four gates and therefore the one that binds.** It contains `git.md`, so every character added to the always-loaded agent is charged here as well as to its own ceiling — and the `git.md` ceiling's 88 ch of apparent slack is unspendable while this row has 16. Check this number, not that one, before adding always-loaded text. **This provider's `max_op` is the largest of the three by 2,699 ch over GitHub's, and that is content rather than slack:** `backlink-shipped-issues` is where the ladder is stated, three of its four rungs need their unavailability explained (or the next reader treats rank 4 as a misconfiguration), and the marker predicate needs both halves written down. The two per-provider gates are now generated from one `PRICED_PROVIDERS` table, so a fourth provider adds a row rather than a copied pair of `it`s.
 
 ### `## Known Unknowns` — and why it is module-level prose
 
 The section lives **above the first section marker** in `_linear.mds`, which the build emits **nowhere**. That is not a filing preference: a column-0 `## ` inside a generated reference terminates its operation section for every guard reading it through `extractOpSectionFromCorpus`, so everything below would go silently invisible while the bytes stayed on disk (PF-063). A guard asserts the heading is above the first marker AND absent from all ten generated files. The user-facing copy is `docs/cli-reference.md`'s `### Known Unknowns — Linear`, which carries the rank-4 statement in plain words.
 
-**GAP-48 — the optional per-op capability-attestation line (P3a-S14) is DEFERRED, not shipped.** It would have made the author-filter and no-HTTP-fallback controls auditable in the artifact rather than only assertable in prose. It is not shipped because it has **no reachable consumer at the 3c boundary** — nothing reads a per-run attestation line — and **no budget headroom**: it is always-loaded text, and the binding Linear loaded-set row has 26 ch. Owner **dean0x**; revisit with **#342** (the prompt-diet pass), which is where always-loaded bytes get freed rather than borrowed. Recorded here so its absence reads as a decision rather than an omission.
+**GAP-48 — the optional per-op capability-attestation line (P3a-S14) is DEFERRED, not shipped.** It would have made the author-filter and no-HTTP-fallback controls auditable in the artifact rather than only assertable in prose. It is not shipped because it has **no reachable consumer at the 3c boundary** — nothing reads a per-run attestation line — and **no budget headroom**: it is always-loaded text, and the binding Linear loaded-set row has 16 ch. Owner **dean0x**; revisit with **#342** (the prompt-diet pass), which is where always-loaded bytes get freed rather than borrowed. Recorded here so its absence reads as a decision rather than an omission.
 
 Contents: the borrowed `32767`, the rank-4 reality, and **issue #343** as the owner and artifact — named from the module so a measurement lands in one change rather than being hunted for. `tests/provider-literals.test.ts` is the other place the borrowed value is pinned, and the issue names both.
 
