@@ -50,6 +50,13 @@ is therefore emitted nowhere.
 
 ## Known Unknowns
 
+<!-- twin: docs/cli-reference.md § Known Unknowns — Linear -->
+The same two facts are stated for users in `docs/cli-reference.md` under
+`### Known Unknowns — Linear`, and the two have to move together: a measurement
+that lands here and not there leaves the user-facing page quoting a borrowed
+number as though it were measured. The marker above is what makes the pair
+greppable from either side.
+
 Two facts this module ships are INHERITED rather than measured, and both are
 written down here because a borrowed number presented as a measurement is worse
 than an honest gap.
