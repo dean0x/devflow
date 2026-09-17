@@ -194,6 +194,37 @@ const RETIRED_LITERALS: ReadonlyArray<RetiredEntry> = [
     removedFrom: '§14.2 canonical DEGRADED reason table (retired synonym)',
     justification: `Retired DEGRADED synonym — ${why}. The canonical table admits one reason per condition.`,
   })),
+
+  // -------------------------------------------------------------------------
+  // Phase-3 denylist (AC-3.10). §14.2's three retired status headings.
+  //
+  // AC-3.10's wording is exact: the denylist GROWS by the phase's retired
+  // literals; never a new grep. These three arrived in a second list inside
+  // tests/tracker/schema-scope.test.ts — which is a new grep, and a weaker one:
+  // that corpus is `dist/agents/git.md` ∪ `dist/skills/git/references/**` ∪ the
+  // two command trees. This corpus is a strict superset of all four AND reaches
+  // `src/assets/agents/`, `src/assets/skills/`, `src/assets/mds/`, `docs/` and
+  // the root prose — which is exactly where a retired heading survives a sweep by
+  // being restated in documentation rather than in an op body (PF-025, the
+  // Phase-1 lesson). The narrower list is deleted rather than kept alongside: it
+  // asserted no property this does not, and two lists is how one goes stale.
+  //
+  // `.devflow/features/*/KNOWLEDGE.md` stays out of the corpus (see the note
+  // above buildCorpus), so the knowledge bases may keep recording what these
+  // headings were and why they went.
+  // -------------------------------------------------------------------------
+  ...([
+    ['## Tracker Discovery', 'the discovery report of a question step §3.3 deleted'],
+    ['## Tracker Learned', 'the confirmation half of the same step'],
+    ['## Tracker Learning Required', 'the prompt half — it promised an interactive setup that never comes'],
+  ] as const).map(([literal, why]): RetiredEntry => ({
+    literal,
+    phase: '3',
+    removedFrom: '§14.2 retired status headings — no op emits them',
+    justification:
+      `Retired status heading — ${why}. A heading with no emitter is residue; a heading an op ` +
+      `still emits is a user-visible section describing a flow that no longer exists.`,
+  })),
 ];
 
 // ---------------------------------------------------------------------------

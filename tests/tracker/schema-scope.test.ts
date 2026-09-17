@@ -559,34 +559,7 @@ describe('AC-3.18: no HTTP fallback and no credential read in the Git spawn surf
 });
 
 // ---------------------------------------------------------------------------
-// 5. Retired headings — no op emits them
-// ---------------------------------------------------------------------------
-
-const RETIRED_HEADINGS: readonly string[] = [
-  '## Tracker Discovery',
-  '## Tracker Learned',
-  '## Tracker Learning Required',
-];
-
-describe('retired tracker headings appear nowhere (§14.2)', () => {
-  it('no op and no reference emits any of the three', () => {
-    // All three belonged to a question step that this phase deleted (§3.3). A
-    // heading with no emitter is residue; a heading an op still emits would be a
-    // user-visible section describing a flow that no longer exists.
-    const corpus = [...gitAgentSinkCorpus(), ...commandCorpus()];
-    const offenders: string[] = [];
-    for (const entry of corpus) {
-      for (const heading of RETIRED_HEADINGS) {
-        if (entry.content.includes(heading)) offenders.push(`${entry.path}: ${heading}`);
-      }
-    }
-    expect(offenders, `retired heading(s):\n  ${offenders.join('\n  ')}`).toEqual([]);
-    expect(RETIRED_HEADINGS.length, 'the retired list is empty (PF-018)').toBe(3);
-  });
-});
-
-// ---------------------------------------------------------------------------
-// 6. [DR-04] The DEGRADED literal registry — BOTH directions
+// 5. [DR-04] The DEGRADED literal registry — BOTH directions
 // ---------------------------------------------------------------------------
 //
 // A one-directional literal registry is the same shape as the defect Phase 0
