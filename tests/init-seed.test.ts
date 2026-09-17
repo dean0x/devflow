@@ -388,6 +388,12 @@ describe('resolveInitSeed', () => {
 // ── applyCliToggles ───────────────────────────────────────────────────────────
 
 describe('applyCliToggles', () => {
+  // Every FeatureSeed key is present. An incomplete fixture annotated
+  // `: FeatureSeed` is a TS2739 that nothing in this repo reports (PF-069:
+  // tests/ is outside the typechecked project and vitest only transpiles), and
+  // at runtime the missing keys come back as `undefined`, which `toEqual`
+  // treats as equal to absent — so the manifest-group arms would pass
+  // vacuously (PF-018).
   const base: FeatureSeed = {
     ambient: true,
     memory: true,
@@ -396,11 +402,15 @@ describe('applyCliToggles', () => {
     learning: true,
     rules: true,
     proxy: false,
+    compliance: { enabled: false, frameworks: [] },
+    tracker: { provider: 'github' },
   };
 
   it('empty toggles → base unchanged', () => {
     const result = applyCliToggles(base, {});
-    expect(result).toEqual(base);
+    // toStrictEqual, not toEqual: a key dropped from the result must fail here
+    // rather than compare equal to the base's defined value.
+    expect(result).toStrictEqual(base);
   });
 
   it('undefined per-key → base value preserved', () => {
@@ -419,18 +429,57 @@ describe('applyCliToggles', () => {
   });
 
   it('explicit true overrides base false', () => {
-    const allFalse: FeatureSeed = { ambient: false, memory: false, hud: false, knowledge: false, learning: false, rules: false, proxy: false };
+    const allFalse: FeatureSeed = {
+      ambient: false, memory: false, hud: false, knowledge: false,
+      learning: false, rules: false, proxy: false,
+      compliance: { enabled: false, frameworks: [] },
+      tracker: { provider: 'jira' },
+    };
     const result = applyCliToggles(allFalse, { ambient: true, knowledge: true });
     expect(result.ambient).toBe(true);
     expect(result.knowledge).toBe(true);
     expect(result.memory).toBe(false); // untouched
     expect(result.rules).toBe(false);  // untouched
+    expect(result.tracker).toStrictEqual({ provider: 'jira' }); // untouched
   });
 
   it('immutable: base object is not mutated', () => {
     const original = { ...base };
     applyCliToggles(base, { ambient: false });
-    expect(base).toEqual(original);
+    expect(base).toStrictEqual(original);
+  });
+
+  // The precedence rule the Recommended path relies on when it calls
+  // applyCliToggles with `tracker: cliTrackerOverride ?? wizardTracker`:
+  // applyCliToggles supplies the third arm (the seed), so the composed rule is
+  // cliOverride ?? wizardResult ?? seed. Both arms of the seam are asserted
+  // here — an explicit toggle must win, an absent one must preserve.
+
+  it('explicit tracker toggle wins over the base seed', () => {
+    const seeded: FeatureSeed = { ...base, tracker: { provider: 'github' } };
+    const result = applyCliToggles(seeded, { tracker: { provider: 'linear' } });
+    expect(result.tracker).toStrictEqual({ provider: 'linear' });
+    // Not the same object as the toggle's seed-side sibling.
+    expect(result.tracker).not.toBe(seeded.tracker);
+  });
+
+  it('absent tracker toggle preserves the base seed provider', () => {
+    const seeded: FeatureSeed = { ...base, tracker: { provider: 'linear' } };
+    const result = applyCliToggles(seeded, { ambient: false });
+    expect(result.tracker).toStrictEqual({ provider: 'linear' });
+    // Known-bad probe for the vacuity this fixture completion closes: the key
+    // must be present, not merely undefined-equals-absent.
+    expect(Object.keys(result)).toContain('tracker');
+    expect(result.tracker).toBeDefined();
+  });
+
+  it('explicit compliance toggle wins while tracker stays on the seed', () => {
+    const seeded: FeatureSeed = { ...base, tracker: { provider: 'jira' } };
+    const result = applyCliToggles(seeded, {
+      compliance: { enabled: true, frameworks: ['gdpr'] },
+    });
+    expect(result.compliance).toStrictEqual({ enabled: true, frameworks: ['gdpr'] });
+    expect(result.tracker).toStrictEqual({ provider: 'jira' });
   });
 });
 
