@@ -334,7 +334,15 @@ beforeAll(() => {
 
   // Scan all compiled commands for Git and Code fences.
   keysPassedByOp = new Map()
-  fencesScanned = new Map([['Git', 0], ['Code', 0]])
+  // 'Tracker' is a CEILING of zero, not a floor like the other two (plan §8.4):
+  // the Tracker agent is spawned by the SessionStart hook's directive, never by a
+  // command, so a `Agent(subagent_type="Tracker")` fence anywhere in dist/commands
+  // would mean a second spawn site for an agent whose whole claim-file lifecycle
+  // assumes one. Because the claim is a ceiling, its counter is incremented BEFORE
+  // the recipe-fence skip below while Git's and Code's are incremented after — a
+  // language-tagged recipe is legitimately excluded from a parseability floor, but
+  // a Tracker spawn hidden in one would still be a Tracker spawn.
+  fencesScanned = new Map([['Git', 0], ['Code', 0], ['Tracker', 0]])
   gitFencesMentioningOperation = 0
   gitFencesOpMatched = 0
   recipeFencesSkipped = 0
@@ -342,6 +350,9 @@ beforeAll(() => {
   for (const entry of corpusEntries) {
     const fences = parseFences(entry.content)
     for (const fence of fences) {
+      if (isAgentBlock(fence, 'Tracker')) {
+        fencesScanned.set('Tracker', fencesScanned.get('Tracker')! + 1)
+      }
       if (isRecipeFence(fence)) {
         if (isAgentBlock(fence, 'Git') || isAgentBlock(fence, 'Code')) recipeFencesSkipped++
         continue
@@ -379,6 +390,36 @@ describe('non-vacuity: per-agent-type fence counts', () => {
       fencesScanned.get('Code'),
       `No Code agent fences found in DIST_FILES — the per-type non-vacuity check would pass vacuously (PF-018)`,
     ).toBeGreaterThan(0)
+  })
+
+  it('NO Tracker agent fence is scanned — it is never a command-spawned type (§8.4)', () => {
+    expect(
+      fencesScanned.get('Tracker'),
+      `${fencesScanned.get('Tracker')} command fence(s) spawn the Tracker agent. It is spawned by ` +
+      'the SessionStart hook\'s directive and by nothing else: a command-side spawn would be a ' +
+      'second site racing the same claim file, and the loser of that race exits silently — so the ' +
+      'symptom is a missing tracker configuration, not an error',
+    ).toBe(0)
+  })
+
+  it('known-bad probe: the same predicate DOES fire on a seeded Tracker fence', () => {
+    // Mechanic (b). Without this, the ceiling above is satisfied by a predicate
+    // that recognises nothing — the difference between "no command spawns Tracker"
+    // and "nothing can see a Tracker spawn" is invisible in a green log (PF-018).
+    // Both spawn spellings isAgentBlock accepts are seeded, and the recipe form
+    // too, because the counter above is deliberately read before the recipe skip.
+    for (const seeded of [
+      'Agent(subagent_type="Tracker")',
+      'agentType: "Tracker"',
+      '```js\nAgent(subagent_type="Tracker")\n```',
+    ]) {
+      expect(
+        isAgentBlock(seeded, 'Tracker'),
+        `the predicate must recognise ${JSON.stringify(seeded.slice(0, 40))} as a Tracker spawn`,
+      ).toBe(true)
+    }
+    // …and the control: a sibling agent's fence is not a Tracker fence.
+    expect(isAgentBlock('Agent(subagent_type="Git")', 'Tracker')).toBe(false)
   })
 
   it('recipe fences are excluded and the exclusion arm is live', () => {
