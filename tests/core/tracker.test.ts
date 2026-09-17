@@ -312,6 +312,47 @@ describe('describeTrackerValue', () => {
     expect(hasLoneSurrogate(rendered)).toBe(false);
     expect([...rendered]).toHaveLength(41);
   });
+
+  // ── the never-throws contract, at the sink that has to honour it (PF-014) ───
+  //
+  // The module header promises nothing here throws. This is the display sink
+  // every rejected value passes through, and `raw.replace` on a non-string makes
+  // that promise false one deleted caller-side guard away.
+
+  it('never throws on a value the type says cannot reach it', () => {
+    const NON_STRINGS: Array<[label: string, value: unknown]> = [
+      ['undefined', undefined],
+      ['null', null],
+      ['a number', 7],
+      ['a boolean', false],
+      ['an object', {}],
+      ['an array', ['jira']],
+      ['a symbol', Symbol('jira')],
+      ['a null-prototype object', Object.create(null)],
+      ['an object whose toString throws', { toString() { throw new Error('boom'); } }],
+    ];
+    expect(NON_STRINGS.length).toBe(9);
+    for (const [label, value] of NON_STRINGS) {
+      expect(() => describeTrackerValue(value), `${label} must not throw`).not.toThrow();
+    }
+  });
+
+  it('renders a non-string by its type, never by asking the value what it is', () => {
+    // Naming the type keeps the render total: `String(raw)` would hand control to
+    // a caller-supplied toString, which is both a throw path and an echo path.
+    expect(describeTrackerValue(undefined)).toBe('<undefined>');
+    expect(describeTrackerValue(null)).toBe('<null>');
+    expect(describeTrackerValue(7)).toBe('<number>');
+    expect(describeTrackerValue({ toString: () => '[31mowned' })).toBe('<object>');
+  });
+
+  it('parseTrackerId reports a non-string instead of throwing', () => {
+    // The caller-side guard this depends on is one edit from being gone; the
+    // parser's own contract is that it always returns a Result.
+    const result = parseTrackerId(undefined as unknown as string);
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error).toContain('<undefined>');
+  });
 });
 
 // ── normalizeTrackerFeature — tolerant sink (ADR-014 self-heal) ───────────────

@@ -214,8 +214,17 @@ export function isTrackerProvider(value: unknown): value is TrackerProvider {
  * third-party input at a display sink: control characters (terminal escapes,
  * BEL, newlines) are replaced and the value is truncated. Used by
  * `parseTrackerId`'s error text and by `devflow tracker --status`.
+ *
+ * Takes `unknown`, and a non-string renders as its TYPE: the module's
+ * never-throws contract (PF-014) has to hold for what reaches this sink, not
+ * only for what the signature says does — `devflow tracker --status` reads
+ * `tracker.md`'s hand-editable frontmatter, and a caller-side guard is one edit
+ * from being gone. Naming the type also keeps the render total, where `String()`
+ * would hand control to a caller-supplied `toString` — itself both a throw path
+ * and an echo path this function exists to close.
  */
-export function describeTrackerValue(raw: string): string {
+export function describeTrackerValue(raw: unknown): string {
+  if (typeof raw !== 'string') return `<${raw === null ? 'null' : typeof raw}>`;
   // The class is written with ESCAPES, never literal control bytes. A raw NUL
   // makes grep classify this whole file as binary — it prints "Binary file
   // matches" and skips the lines — so every grep-based sweep over src/core/
