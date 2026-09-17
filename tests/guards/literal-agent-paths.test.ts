@@ -1,9 +1,12 @@
 /**
  * Literal-agent-path guard (AC-0.7, P0-S17) and dist-throw contract tests (AC-0.16).
  *
- * AC-0.7 / P0-S17 — no new test file contains a literal `src/assets/agents/` path
- * outside the documented src-fallback sites. Scanning tests/seams/**, tests/goldens/**,
- * and tests/guards/** catches regressions before they accumulate.
+ * AC-0.7 / P0-S17 — no new test file reaches a single agent's source by any route
+ * but `resolveAgentSource`. Two shapes are read: a literal `src/assets/agents/`
+ * path, and `agentsDir()` composed with one agent's `.md` filename, which contains
+ * no literal and so read past the first rule while doing the same thing. Scanning
+ * tests/seams/**, tests/goldens/**, and tests/guards/** catches regressions before
+ * they accumulate.
  *
  * EXCEPTION / OUT-OF-SCOPE DOCUMENTATION (files not scanned or explicitly excluded):
  *   tests/helpers.ts — resolveAgentSource names the fallback tree in its doc comment;
@@ -57,9 +60,40 @@ interface CorpusEntry {
 }
 
 /**
- * Scan a corpus of file content for `src/assets/agents/` string literals.
+ * Composing a single agent's `.md` path onto `agentsDir()`.
+ *
+ * The SECOND way to bypass the resolver, and the one the literal ban leaves open:
+ * `path.join(agentsDir(ROOT), 'tracker.md')` contains no literal at all, so it
+ * reads past this guard while doing exactly what the guard forbids — pinning the
+ * `src/` copy of one agent instead of asking `resolveAgentSource` for whichever
+ * copy the installer would prefer. Harmless while `dist/agents/` holds one agent;
+ * the day a second agent becomes an MDS generator host, a reader composing its
+ * path by hand asserts the UNCOMPILED file while its sibling suite asserts the
+ * compiled one, and a two-sided seam compares two artifacts while staying green.
+ *
+ * Narrow on purpose, because `agentsDir()` has legitimate callers this must not
+ * report: passing the DIRECTORY to a walker or a parity compare (dist-agents),
+ * asserting the resolver's own ordering (agent-source-precedence), and composing
+ * an `.mds` GENERATOR HOST path, which `resolveAgentSource` cannot resolve — it
+ * reads `.md` only. So the shape required is `agentsDir(` on the line together
+ * with a quoted string that ends in `.md` and has a non-empty basename:
+ * `'tracker.md'` and `` `${name}.md` `` match; `'.md'` in an extension list and
+ * `'git.mds'` do not.
+ *
+ * DELIBERATE NON-GOAL (PF-064): composition split across lines — `const dir =
+ * agentsDir()` on one line and `path.join(dir, 'x.md')` on another — is not read.
+ * Tracking the alias would report the directory-walking callers above, which are
+ * the majority and are correct. The single-line shape is the one an author
+ * actually writes, and it is what both real instances looked like.
+ */
+const AGENTS_DIR_CALL = /\bagentsDir\s*\(/;
+const AGENT_MD_FILENAME = /(['"`])[^'"`]*[^'"`./]\.md\1/;
+
+/**
+ * Scan a corpus of file content for resolver bypasses: `src/assets/agents/`
+ * string literals, and `agentsDir()` composed with a single agent `.md` filename.
  * Returns a list of violation descriptions. Used by both the live scan and the
- * non-vacuity probe — same function, not an inline re-implementation.
+ * non-vacuity probes — same function, not an inline re-implementation.
  */
 function collectLiteralAgentPathViolations(corpus: CorpusEntry[]): string[] {
   const LITERAL = 'src/assets/agents/';
@@ -69,7 +103,9 @@ function collectLiteralAgentPathViolations(corpus: CorpusEntry[]): string[] {
     // Comment lines (// and * prefixed after trimming) contain the literal for
     // documentation purposes only — they are not file-reading code (AC-0.7 intent).
     let charOffset = 0;
+    let lineNo = 0;
     for (const line of content.split('\n')) {
+      lineNo += 1;
       const trimmed = line.trimStart();
       if (!trimmed.startsWith('//') && !trimmed.startsWith('*')) {
         let searchFrom = 0;
@@ -80,6 +116,12 @@ function collectLiteralAgentPathViolations(corpus: CorpusEntry[]): string[] {
           const snippet = content.slice(absIdx, absIdx + LITERAL.length + 40).replace(/\n/g, '\\n');
           violations.push(`${relPath}: literal '${LITERAL}' at char ${absIdx} — snippet: '${snippet}…'`);
           searchFrom = idx + LITERAL.length;
+        }
+        if (AGENTS_DIR_CALL.test(line) && AGENT_MD_FILENAME.test(line)) {
+          violations.push(
+            `${relPath}:${lineNo}: agentsDir() composed with an agent .md filename — ` +
+            `snippet: '${line.trim().slice(0, 80)}'`,
+          );
         }
       }
       charOffset += line.length + 1; // +1 for the \n separator
@@ -167,6 +209,47 @@ describe('literal-agent-path guard: no src/assets/agents/ literals in new test f
       violations.length,
       'non-vacuity: the guard logic must flag a synthetic file containing src/assets/agents/',
     ).toBeGreaterThan(0);
+  });
+
+  it('known-bad probe: agentsDir() composed with an agent .md filename is caught', () => {
+    // The second bypass shape, driven through the SAME collector. Both spellings
+    // an author reaches for: a quoted filename and a template one.
+    for (const content of [
+      "const p = path.join(agentsDir(ROOT), 'tracker.md');\n",
+      'const p = path.join(agentsDir(), `${name}.md`);\n',
+      "const p = join(agentsDir(ROOT), \"git.md\");\n",
+    ]) {
+      expect(
+        collectLiteralAgentPathViolations([{ relPath: 'tests/seams/synthetic-compose.ts', content }]),
+        `resolver bypass by composition must be flagged: ${content.trim()}`,
+      ).not.toEqual([]);
+    }
+  });
+
+  it('the composition rule does NOT report the legitimate agentsDir() callers', () => {
+    // Discrimination, not just detection. These are the shapes the live scan
+    // actually holds; a rule that reported them would be reverted rather than
+    // obeyed, and the bypass it exists to catch would come back with it.
+    for (const content of [
+      // A directory passed to a walker or a parity compare.
+      'const parity = collectAgentParity(agentsDir(), compiledAgentsDir());\n',
+      'const dir = agentsDir();\n',
+      // The resolver's own ordering, asserted.
+      'expect(agentSourceDirs()).toEqual([compiledAgentsDir(), agentsDir()]);\n',
+      // An extension list that merely contains the string '.md'.
+      "{ label: SRC, dir: agentsDir(ROOT), exts: ['.md', '.mds'] },\n",
+      // An .mds GENERATOR HOST — resolveAgentSource resolves .md only, so composing
+      // this path is the correct way to reach it.
+      "const gitSource = path.join(agentsDir(ROOT), 'git.mds');\n",
+      'content: readFileSync(path.join(agentsDir(), `${name}.mds`), \'utf-8\'),\n',
+      // A comment naming the shape is documentation, not resolution.
+      "// dir comes from agentsDir(), never from a literal 'tracker.md' path\n",
+    ]) {
+      expect(
+        collectLiteralAgentPathViolations([{ relPath: 'tests/guards/synthetic-ok.ts', content }]),
+        `legitimate agentsDir() use must not be reported: ${content.trim()}`,
+      ).toEqual([]);
+    }
   });
 });
 

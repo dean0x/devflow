@@ -23,8 +23,9 @@
  *      token-env read anywhere in `git.md ∪ generated references`.
  *   5. THE DEGRADED LITERAL REGISTRY, BOTH DIRECTIONS [DR-04] — §14.2's table
  *      pinned as a literal array, every live row emitted by a named site, no
- *      un-registered `DEGRADED (` in a generated reference, and every retired
- *      synonym absent.
+ *      un-registered `DEGRADED (` anywhere in the sink class (the always-loaded
+ *      agent included, behind a named exemption registry rather than a corpus
+ *      filter), and every retired synonym absent.
  *   6. THE READER'S RENDERING RULE (AC-3.11, §14.1) — the always-loaded contract
  *      block states that a rendered ref is never `#`-prefixed under a non-github
  *      provider, and names the Output templates' `#` as github's rendering. The
@@ -37,10 +38,10 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { readFileSync, existsSync } from 'fs';
+import { readFileSync } from 'fs';
 import * as path from 'path';
 
-import { agentsDir, commandsDir, compiledSkillRefsDir, skillsDir } from '../../src/core/assets.js';
+import { commandsDir, compiledSkillRefsDir, skillsDir } from '../../src/core/assets.js';
 import { TRACKER_GITHUB_OPS, VARIANT_MODULES } from '../../src/core/mds-variants.js';
 import {
   ROOT,
@@ -61,17 +62,18 @@ import {
 const GIT_AGENT = resolveAgentSource('git');
 const GIT_MD = GIT_AGENT.content;
 
-/** The Tracker agent — the WRITER side. Fail-loud; never a skip. */
-function trackerAgent(): string {
-  const p = path.join(agentsDir(ROOT), 'tracker.md');
-  if (!existsSync(p)) {
-    throw new Error(
-      `${p} is absent — the writer half of the schema is the Tracker agent's template (3a-2). ` +
-      `Without it this file asserts one side of a two-sided contract.`,
-    );
-  }
-  return readFileSync(p, 'utf-8');
-}
+/**
+ * The Tracker agent — the WRITER side. Fail-loud; never a skip.
+ *
+ * Resolved through `resolveAgentSource`, the one owner of the dist-first policy,
+ * exactly as the reader half above is. A hand-built `agentsDir()` path reads the
+ * `src/` copy unconditionally: the day `tracker` becomes an MDS generator host,
+ * this WRITER half would assert the UNCOMPILED file while tests/tracker-agent.test.ts
+ * asserts the compiled one, and the two-sided seam would be comparing two
+ * different artifacts while staying green. The resolver also owns the fail-loud
+ * message, which names both candidate paths and the build step.
+ */
+const TRACKER_MD = resolveAgentSource('tracker').content;
 
 const PREAMBLE_CONTRACT_HEADING = '## Tracker input contract';
 
@@ -115,7 +117,7 @@ function commandCorpus(): CorpusEntry[] {
 // ---------------------------------------------------------------------------
 
 describe('schema table: every section has a scope and a documented absent⇒default', () => {
-  const rows = collectTrackerSchemaRows(trackerAgent());
+  const rows = collectTrackerSchemaRows(TRACKER_MD);
 
   it('the table is parsed and covers every schema section (non-vacuity first)', () => {
     expect(
@@ -183,7 +185,7 @@ export function collectContractHeadings(block: string): string[] {
 
 describe('[DR-21] writer ↔ reader heading equality, both directions', () => {
   const writerHeadings = (() => {
-    const template = collectTrackerTemplate(trackerAgent());
+    const template = collectTrackerTemplate(TRACKER_MD);
     expect(
       template,
       'the Tracker agent\'s tagged template fence was not found — addressed by its info string, ' +
@@ -730,6 +732,40 @@ const PRE_PHASE3_REASONS: readonly string[] = [
 ];
 
 /**
+ * DEGRADED reasons the always-loaded agent emits for its pre-Phase-3 GitHub
+ * operations, which §14.2's table does not range over.
+ *
+ * WHY THIS LIST EXISTS AT ALL. The reverse arm below used to drop `git.md` from
+ * its corpus outright — `.filter(e => e.path !== GIT_AGENT.path)` — which exempted
+ * the single largest emitter of DEGRADED reasons in the tree from the "every
+ * emitted reason is registered" sweep. The retired-reason arm beside it reads
+ * git.md, so the two directions disagreed about their own subject, and the four
+ * DEGRADED reasons this phase added to git.md were registered by review alone.
+ *
+ * Written in the same register as PRE_PHASE3_REASONS and for the same reason: a
+ * prohibition and its exemption registry are ONE authority (PF-067). An exemption
+ * that lives in a `.filter` predicate is invisible to anyone reading the rule, and
+ * a reader who greps only the rule finds a violation the arm silently permits.
+ *
+ * Each entry is a github-op status literal that predates §14.2 and whose scope the
+ * canonical table does not claim: the rate-limit backoff, the no-PR branch of the
+ * review-comment ops, the two 5xx retry ceilings, and the release version parse.
+ * The arm below asserts every entry is genuinely emitted, so this cannot become a
+ * dumping ground — an entry parked here that nothing emits goes red, exactly as it
+ * does for PRE_PHASE3_REASONS.
+ *
+ * ACTION FOR THE PHASE: these rows belong in §14.2 or in a github-scoped table of
+ * their own. Either is an appendix decision, not this subtask's.
+ */
+const GIT_AGENT_LEGACY_REASONS: readonly string[] = [
+  'rate limited',
+  'no PR',
+  '5xx on post-review-summary',
+  '5xx on post-resolution-summary',
+  'malformed version',
+];
+
+/**
  * §14.2 rows with no emitting site yet.
  *
  * EMPTY from Phase 3b: the tool-call contract and the first provider mechanics
@@ -791,6 +827,36 @@ const PHASE3_STATUS_LINES: readonly string[] = [
 export function collectDegradedReasons(text: string): string[] {
   return [...text.matchAll(/DEGRADED \(([^)]*(?:\([^)]*\)[^)]*)*)\)/g)]
     .map(m => m[1].replace(/\s+/g, ' ').trim());
+}
+
+/** The D4 contract's own placeholder, in both MDS spellings. Not a reason. */
+const REASON_PLACEHOLDERS: readonly string[] = ['{reason}', '\\{reason\\}'];
+
+/**
+ * Named collector: every `DEGRADED (…)` reason in a corpus that no registry
+ * admits.
+ *
+ * The three exemption registries are consulted HERE, beside the prohibition, so
+ * the rule and its exceptions are one authority (PF-067) instead of a rule in an
+ * `it` and an exception buried in a corpus `.filter`.
+ *
+ * `GIT_AGENT_LEGACY_REASONS` is scoped to the agent file itself rather than
+ * applied corpus-wide: those literals are github-op wording that predates §14.2,
+ * and a generated provider reference reaching for one of them is a new reason in
+ * an old spelling — which is exactly what the arm exists to report.
+ */
+export function collectUnregisteredReasons(corpus: readonly CorpusEntry[]): string[] {
+  const unregistered: string[] = [];
+  for (const entry of corpus) {
+    for (const reason of collectDegradedReasons(entry.content)) {
+      if (REASON_PLACEHOLDERS.includes(reason)) continue;
+      if (CANONICAL_REASONS.some(canonical => reasonSpellings(canonical).includes(reason))) continue;
+      if (PRE_PHASE3_REASONS.includes(reason)) continue;
+      if (entry.path === GIT_AGENT.path && GIT_AGENT_LEGACY_REASONS.includes(reason)) continue;
+      unregistered.push(`${entry.path}: "${reason}"`);
+    }
+  }
+  return unregistered;
 }
 
 describe('[DR-04] DEGRADED literal registry: forward direction', () => {
@@ -912,25 +978,84 @@ describe('[DR-04] DEGRADED literal registry: forward direction', () => {
 });
 
 describe('[DR-04] DEGRADED literal registry: reverse direction', () => {
-  it('no generated reference emits a reason outside the canonical table', () => {
-    const refs = gitAgentSinkCorpus().filter(e => e.path !== GIT_AGENT.path);
-    expect(refs.length, 'the generated reference corpus is empty — run `npm run build`')
-      .toBeGreaterThan(0);
-    const unregistered: string[] = [];
-    for (const entry of refs) {
-      for (const reason of collectDegradedReasons(entry.content)) {
-        // `{reason}` is the D4 contract's own placeholder, not a reason.
-        if (reason === '{reason}' || reason === '\\{reason\\}') continue;
-        if (CANONICAL_REASONS.some(canonical => reasonSpellings(canonical).includes(reason))) continue;
-        if (PRE_PHASE3_REASONS.includes(reason)) continue;
-        unregistered.push(`${entry.path}: "${reason}"`);
-      }
-    }
+  it('no file in the sink class emits a reason outside the canonical table', () => {
+    // The WHOLE sink class, git.md included. The agent file is the largest emitter
+    // of DEGRADED reasons in the tree and is always loaded, so exempting it left
+    // this direction blind to the one file most likely to grow a new reason — and
+    // it gained four in this phase. Its pre-§14.2 github-op literals are carried by
+    // the named registry instead, where they are visible and falsifiable.
+    const corpus = gitAgentSinkCorpus();
+    expect(corpus.length, 'the sink-class corpus is empty — run `npm run build`').toBeGreaterThan(0);
+    expect(
+      corpus.some(e => e.path === GIT_AGENT.path),
+      'the always-loaded agent is not in the corpus — this direction would again skip the file ' +
+      'carrying the most reasons',
+    ).toBe(true);
+    expect(
+      corpus.some(e => e.path !== GIT_AGENT.path),
+      'no generated reference is in the corpus — run `npm run build`',
+    ).toBe(true);
+
+    const unregistered = collectUnregisteredReasons(corpus);
     expect(
       unregistered,
-      `generated reference(s) emit a DEGRADED reason that is not in §14.2's table. Three ` +
+      `file(s) in the sink class emit a DEGRADED reason that is not in §14.2's table. Three ` +
       `spellings of one condition is what GAP-13 recorded: an agent emitting one and a guard ` +
       `pinning another is a degradation nobody can grep for:\n  ${unregistered.join('\n  ')}`,
+    ).toEqual([]);
+  });
+
+  it('every legacy exemption is really emitted, and is really scoped to the agent file', () => {
+    // The exemption half of the same authority. An entry nothing emits is a
+    // permanently-open hole that reads as documentation, and an exemption that
+    // applied corpus-wide would let a generated reference adopt a legacy spelling
+    // silently — so both properties are asserted, not assumed.
+    const gitOnly = gitAgentSinkCorpus().filter(e => e.path === GIT_AGENT.path);
+    const emitted = new Set(gitOnly.flatMap(e => collectDegradedReasons(e.content)));
+    const unemitted = GIT_AGENT_LEGACY_REASONS.filter(reason => !emitted.has(reason));
+    expect(
+      unemitted,
+      `legacy exemption(s) the agent no longer emits. Delete the entry — an exemption for a reason ` +
+      `nothing writes is a hole held open for nothing:\n  ${unemitted.join('\n  ')}`,
+    ).toEqual([]);
+    expect(
+      GIT_AGENT_LEGACY_REASONS.length,
+      'the legacy list is empty — then the exemption branch below is dead and the probe proves ' +
+      'nothing (PF-018)',
+    ).toBeGreaterThan(0);
+
+    // Scope probe: the same literal, in a generated reference, IS reported.
+    const seeded: CorpusEntry = {
+      path: 'dist/skills/git/references/tracker/jira/comment.md',
+      content: `On failure emit \`TRACEABILITY: DEGRADED (${GIT_AGENT_LEGACY_REASONS[0]})\`.`,
+    };
+    expect(
+      collectUnregisteredReasons([seeded]),
+      'the legacy exemption is scoped to the agent file; a provider reference reaching for the ' +
+      'same wording is a new reason in an old spelling',
+    ).toEqual([`${seeded.path}: "${GIT_AGENT_LEGACY_REASONS[0]}"`]);
+  });
+
+  it('known-bad probe: a new unregistered reason in the agent file is reported', () => {
+    // Drives collectUnregisteredReasons over a COPY of the shipped agent with one
+    // reason appended — the mutation the live arm exists to catch, and the one that
+    // passed silently while git.md was filtered out of the corpus. Built from the
+    // shipped bytes so a collector that had stopped reading the agent is reported
+    // here rather than staying green over a corpus it never entered.
+    const seededReason = 'a reason no table registers — seeded probe';
+    const wounded: CorpusEntry = {
+      path: GIT_AGENT.path,
+      content: `${GIT_MD}\n\nOn failure emit \`TRACEABILITY: DEGRADED (${seededReason})\`.\n`,
+    };
+    expect(
+      collectUnregisteredReasons([wounded]),
+      'appending an unregistered reason to the agent must be reported — otherwise the reverse ' +
+      'direction is green about a file it never reads',
+    ).toEqual([`${GIT_AGENT.path}: "${seededReason}"`]);
+    expect(
+      collectUnregisteredReasons([{ path: GIT_AGENT.path, content: GIT_MD }]),
+      'and the shipped agent, unmodified, must be silent — or the probe above proves only that ' +
+      'the collector reports everything',
     ).toEqual([]);
   });
 
