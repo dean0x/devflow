@@ -895,4 +895,24 @@ export const CONTAINMENT_EXEMPTIONS: readonly ContainmentExemption[] = [
       'reason — and `tests/guards/mcp-sink-bypass.test.ts` claim 5 now pins each property of the ' +
       'removal with a known-bad probe per property.',
   },
+
+  // ── #325, resolve pass: the last host-named issue in an op input contract ──
+  {
+    file: 'git-agent.md',
+    startLine: 933,
+    endLine: 933,
+    rationale:
+      'regression-04. `post-wave-report` is a TRACKER operation — both tool-call providers ' +
+      'generate mechanics for it — so its `TRACKING_ISSUE` input does not take a GitHub issue ' +
+      'NUMBER. Under jira and linear the value is a key such as `PROJ-42`, and a contract that ' +
+      'calls it a number in an always-loaded position describes a shape those providers never ' +
+      'produce. Reworded to "tracker issue reference for the parent tracking issue", which is ' +
+      'the vocabulary `ensure-traceable-issue` and `backlink-shipped-issues` already use for ' +
+      'the same value (`:803`, `:839`). Nothing is dropped: the input, its name and its role as ' +
+      'the parent tracking issue all survive; only the provider-bound noun is replaced. The ' +
+      'user-facing half of the same defect lived in the plan command, which asked "create or ' +
+      'enrich a GitHub issue for this plan?" immediately before spawning ensure-traceable-issue ' +
+      '— that command is outside this baseline, and `tests/guards/provider-scope.test.ts` now ' +
+      'pins it over both the authored and the compiled form.',
+  },
 ];
