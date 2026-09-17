@@ -980,3 +980,105 @@ describe('the comment-body cap renders one value at every emitted site', () => {
     ).toEqual([]);
   });
 });
+
+// ---------------------------------------------------------------------------
+// fetch-issue, read as a FILE: the numeric branch is gated before it interpolates
+// ---------------------------------------------------------------------------
+//
+// WHY A SECOND PER-FILE ARM. `fetch-issue` and `backlink-shipped-issues` admit the
+// same references on the same provider, and both interpolate what they admit. The
+// backlink arm above pins the grammar where the fan-out reads it; this one pins it
+// where the single lookup does. Before it existed the two ops disagreed about the
+// ADMITTED SET while sharing a sink shape: the backlink pre-flight required
+// `^#?[1-9][0-9]{0,8}$`, and the lookup said "if numeric, fetch directly" — a
+// predicate with no anchors, which `12\n; rm -rf .` satisfies on its first line.
+// The sink is quoted, so this was defense in depth rather than an open hole; a
+// security gate is not deferred on the grounds that the sink happens to be quoted.
+//
+// Rows pin TOKENS, never sentences, for the reason the backlink table states at
+// length: these references are priced against the per-provider loaded-set ceilings,
+// so a condensing pass over this prose is expected rather than hypothetical.
+
+const GITHUB_FETCH_FILE = 'tracker/github/fetch-issue.md';
+
+const GITHUB_FETCH_CLAIMS: readonly FileClaim[] = [
+  {
+    label: 'the anchored grammar the numeric branch is gated on',
+    pattern: /\^#\?\[1-9]\[0-9]\{0,8}\$/,
+    why:
+      'without anchors the branch is "does this start with a digit", which admits a newline and ' +
+      'everything after it. The sibling op admits exactly this set, and two ops that interpolate ' +
+      'the same input must admit the same set',
+  },
+  {
+    label: 'only the stripped digits are interpolated',
+    pattern: /[Ii]nterpolate only the digits/,
+    why:
+      'the grammar admits `#42` as well as `42`, so the gate covers the parse and not the command ' +
+      'unless the stripped form is named as the only one that travels onward',
+  },
+  {
+    label: 'a rejected value is a search term, not a malformed number',
+    pattern: /SEARCH TERM/,
+    why:
+      'the operation has a second path, and saying which one a rejected value takes is what stops ' +
+      '"drop it" being read as "degrade the whole op". A gate with no stated else-branch invites ' +
+      'the author of the next revision to invent one',
+  },
+];
+
+describe('provider literals: the github fetch-issue reference, per file', () => {
+  it('gates the numeric branch on the anchored grammar before it interpolates', () => {
+    const violations = collectMissingFileClaims(
+      GITHUB_FETCH_FILE,
+      readGenerated(GITHUB_FETCH_FILE),
+      GITHUB_FETCH_CLAIMS,
+    );
+    expect(
+      violations,
+      `the github fetch-issue reference is missing claim(s) it owes:\n  ${violations.join('\n  ')}`,
+    ).toEqual([]);
+  });
+
+  it('known-bad probe: each claim, deleted from a copy, is reported by the same collector', () => {
+    const pristine = readGenerated(GITHUB_FETCH_FILE);
+    expect(
+      collectMissingFileClaims('pristine', pristine, GITHUB_FETCH_CLAIMS),
+      'the collector must be silent on the shipped file, or the probe below proves nothing',
+    ).toEqual([]);
+
+    for (const claim of GITHUB_FETCH_CLAIMS) {
+      const wounded = pristine.replace(claim.pattern, '');
+      expect(
+        wounded,
+        `the pattern for "${claim.label}" matched nothing in the shipped file, so deleting it was ` +
+        'a no-op and the row cannot be shown live',
+      ).not.toBe(pristine);
+      expect(
+        collectMissingFileClaims('wounded', wounded, GITHUB_FETCH_CLAIMS)
+          .map(v => v.split(' — ')[0]),
+        `removing "${claim.label}" must be reported by the same collector`,
+      ).toContain(`wounded: missing ${claim.label}`);
+    }
+    expect(GITHUB_FETCH_CLAIMS.length, 'the claim table is empty (PF-018)').toBeGreaterThan(0);
+  });
+
+  it('known-bad probe: the pre-regression wording — an unanchored numeric branch — goes red', () => {
+    // Not a synthetic shape: this is the sentence the file shipped before the gate,
+    // driven through the same collector. A table that only ever reports a row it
+    // deleted itself cannot say it would have caught the defect it was written for.
+    const unanchored = readGenerated(GITHUB_FETCH_FILE)
+      .replace(/^1b\. .*$/m, '1b. If numeric, fetch directly; if text, search and select.');
+    expect(unanchored, 'the pre-flight step was not found, so the probe rewrote nothing')
+      .not.toBe(readGenerated(GITHUB_FETCH_FILE));
+    expect(
+      collectMissingFileClaims(GITHUB_FETCH_FILE, unanchored, GITHUB_FETCH_CLAIMS)
+        .map(v => v.split(' — ')[0]),
+      'an unanchored numeric branch must be reported on every row the gate is made of',
+    ).toEqual([
+      `${GITHUB_FETCH_FILE}: missing the anchored grammar the numeric branch is gated on`,
+      `${GITHUB_FETCH_FILE}: missing only the stripped digits are interpolated`,
+      `${GITHUB_FETCH_FILE}: missing a rejected value is a search term, not a malformed number`,
+    ]);
+  });
+});
