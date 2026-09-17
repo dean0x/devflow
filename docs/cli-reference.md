@@ -166,6 +166,15 @@ Background inference is capped at **5** attempts per machine, counted in `~/.dev
 
 Deleting `~/.devflow/.tracker.attempts` by hand has the same effect.
 
+### Known Unknowns — Linear
+
+Two facts behind Linear traceability are **inherited rather than measured**, and devflow states them instead of presenting a guess as a measurement.
+
+- **The comment-body cap is borrowed.** Devflow truncates a Linear comment at 32,767 characters — the cap it uses for Jira. Linear publishes no cap that devflow has measured. Borrowed too generously, a long post is rejected at the tracker and degrades with a reason; borrowed too strictly, a body that would have fit is truncated with a pointer to the local artifact. Either way nothing is lost silently.
+- **A duplicate back-link is possible.** On a stock Linear workspace devflow cannot ask the tracker which account it is, so it cannot tell its own comments from anyone else's — the lowest rung of its dedup ladder, rank 4. It therefore **posts with a warning** rather than staying silent: every run emits `TRACEABILITY: DEGRADED (dedup unavailable — duplicate possible)`, and each comment carries a first-line marker plus the devflow project URL so a later run can recognise it. A missing release back-link is worse than a second one you were told about.
+
+Both are tracked in [issue #343](https://github.com/dean0x/devflow/issues/343), which names the two files the borrowed values live in so a measurement lands in one change.
+
 ## Rules
 
 ```bash
