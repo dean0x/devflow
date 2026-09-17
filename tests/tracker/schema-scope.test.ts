@@ -14,8 +14,9 @@
  *   1. SCHEMA TABLE — every section has a scope and an absent⇒default, no blank
  *      cells, read out of the agent's own table.
  *   2. HEADINGS, BOTH DIRECTIONS [DR-21] — writer ↔ reader set equality with a
- *      distinct why-message per direction, and `>= 11` sections so neither
- *      direction is vacuous.
+ *      distinct why-message per direction, over a floor counted in DISTINCT
+ *      headings so neither direction is vacuous and neither is satisfied by a
+ *      repeat standing in for a dropped section.
  *   3. ADR-007 THREE-WAY SWEEP (AC-3.16) — the configuration file is read in
  *      exactly ONE place. No op section, no generated reference, no command
  *      source and no `dist/commands/*.md` reads it.
@@ -199,22 +200,28 @@ describe('[DR-21] writer ↔ reader heading equality, both directions', () => {
   })();
   const readerHeadings = collectContractHeadings(preambleContractBlock());
 
-  it('non-vacuity: both sides carry at least 11 sections', () => {
+  it('non-vacuity: both sides carry at least as many DISTINCT sections as the oracle', () => {
     // The floor is what makes the two directions below discriminating: two empty
     // sets are equal, and a collector that returned nothing would agree with
     // another collector that returned nothing.
+    //
+    // Counted DISTINCT, because a raw count carries slack: the reader block
+    // legitimately spells `## Reference Rendering` twice, so a list that dropped
+    // one heading and repeated another would clear a raw floor while describing a
+    // schema one section short. The oracle's own size needs no floor here — it is
+    // fixed at exactly TRACKER_SCHEMA_SECTION_COUNT distinct headings at the
+    // oracle's construction, and tests/tracker/schema-oracle.test.ts is what makes
+    // that check falsifiable.
+    const writerDistinct = new Set(writerHeadings).size;
+    const readerDistinct = new Set(readerHeadings).size;
     expect(
-      TRACKER_SCHEMA_SECTIONS.length,
-      'the shared oracle lists fewer than 11 sections — §14.3 fixes eleven',
-    ).toBeGreaterThanOrEqual(11);
-    expect(
-      writerHeadings.length,
-      `the WRITER template lists ${writerHeadings.length} heading(s); at least ` +
+      writerDistinct,
+      `the WRITER template lists ${writerDistinct} distinct heading(s); at least ` +
       `${TRACKER_SCHEMA_SECTIONS.length} are required`,
     ).toBeGreaterThanOrEqual(TRACKER_SCHEMA_SECTIONS.length);
     expect(
-      readerHeadings.length,
-      `the READER contract block names ${readerHeadings.length} heading(s); at least ` +
+      readerDistinct,
+      `the READER contract block names ${readerDistinct} distinct heading(s); at least ` +
       `${TRACKER_SCHEMA_SECTIONS.length} are required`,
     ).toBeGreaterThanOrEqual(TRACKER_SCHEMA_SECTIONS.length);
   });

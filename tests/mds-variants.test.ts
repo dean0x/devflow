@@ -19,7 +19,9 @@
  *      the refusals that keep a hostile op name or subdir out of the destination.
  *   5. splitVariantSections — bidirectional op-set parity plus the empty-section
  *      arm neither direction of that parity can see.
- *   6. The shipped registry — GitHub-only, pointing at a real source path.
+ *   6. The shipped registry — every provider directory it names has a module on
+ *      disk and every module on disk has a row, each pointing at a real source
+ *      path under src/assets/mds/.
  *
  * Hostile inputs pinned here are the same ones scripts/build-mds.ts must reject
  * at build time (see tests/build-mds-generator-hosts.test.ts for the subprocess
@@ -673,7 +675,13 @@ describe('VARIANT_MODULES (shipped registry)', () => {
       .filter(subdir => subdir.startsWith('tracker/'));
     expect(providerSubdirs).toEqual(['tracker/github', 'tracker/jira', 'tracker/linear']);
     for (const subdir of providerSubdirs) {
-      const mod = VARIANT_MODULES.find(m => m.subdir === subdir)!;
+      const mod = VARIANT_MODULES.find(m => m.subdir === subdir);
+      if (mod === undefined) {
+        throw new Error(
+          `no VARIANT_MODULES row for ${subdir}, which the list above was derived from — a ` +
+          `lookup that cannot fail has failed, so this arm has no subject`,
+        );
+      }
       expect(
         existsSync(path.join(ROOT, mod.source)),
         `${mod.source} is registered for ${subdir} but is not on disk`,
@@ -686,23 +694,21 @@ describe('VARIANT_MODULES (shipped registry)', () => {
 // 7. The tool-call contract module's generation gate (P3a-S12, hazard H7, C5)
 // ---------------------------------------------------------------------------
 //
-// `src/assets/mds/tracker/_mcp.mds` is AUTHORED in Phase 3a and GENERATED only
-// once a provider whose mechanics need it is registered. The two are separate
-// events on purpose:
+// `src/assets/mds/tracker/_mcp.mds` is AUTHORED unconditionally and GENERATED only
+// while a provider whose mechanics need it is registered. The two are separate
+// events on purpose: authoring costs nobody anything, while generating for a
+// registry of CLI-only providers bills every one of their users for a reference
+// nothing they can reach ever loads (GAP-02, AC-2.7 re-scoped).
 //
-//   - Authoring it in 3a is required: its first runtime consumer is a Jira per-op
-//     mechanics file that lands in 3b, and prefix-shippability clause (iii) is
-//     read PER PHASE (decision D-D), so a contract with no consumer until later
-//     in the same phase is fine.
-//   - Generating it in 3a is NOT: Phase 2's own AC-2.7 guard asserts the file's
-//     absence after a GitHub-only build, and every GitHub user would otherwise be
-//     billed for a reference nothing they can reach ever loads (GAP-02).
+// So the gate is DERIVED, not declared: a boolean on the module would be a flag
+// someone flips out of step with the registry, while "is a provider that needs it
+// registered?" is a fact about the registry that registering a provider module
+// makes true, with no second edit anywhere.
 //
-// So the gate has to be DERIVED, not declared: a boolean on the module would be a
-// flag someone flips, while "is a provider that needs it registered?" is a fact
-// about the registry that 3b makes true by adding its own module and nothing else.
-// A registry-derived gate also means the arm is provable NOW, against an injected
-// registry, rather than discovered when 3b turns it on.
+// Being registry-derived is also what makes both arms provable from one place:
+// each is asserted against an INJECTED registry — the shut arm over a registry
+// with every tool-call provider removed, the open arm over one synthetic provider
+// per gated sub-directory — so neither depends on which providers happen to ship.
 
 describe('the tool-call contract module is gated on a provider that needs it', () => {
   /**
@@ -902,11 +908,13 @@ describe('the tool-call contract module is gated on a provider that needs it', (
     ).not.toContain('tracker/_mcp.md');
   });
 
-  it('★ the emitted filename is provable NOW, not discovered in 3b', () => {
+  it('★ the emitted filename is proven against the module, not against the gate state', () => {
     // The landmine this arm exists to defuse: `_mcp` fails validateOutputName's
-    // leading-character rule, so a registry row alone would have expanded fine
-    // today (the row is absent) and refused with `invalid-op-name` the moment 3b
-    // opened the gate — a build break planted one subtask ahead.
+    // leading-character rule, so a registry row alone expands fine while the gate
+    // is shut and refuses with `invalid-op-name` the moment a registered provider
+    // opens it — a build break that surfaces one registry edit away from its
+    // cause. Asserted against the module directly, so the gate's state is not
+    // what decides whether the name rule was ever exercised.
     expect(validateOutputName('_mcp').ok, 'the general name rule still refuses a leading underscore')
       .toBe(false);
     const expansion = expandVariants([MCP_CONTRACT_MODULE]);

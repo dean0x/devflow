@@ -524,9 +524,9 @@ export const MCP_CONTRACT_MODULE = {
 /**
  * Does this registry contain a provider that needs the tool-call contract?
  *
- * The whole gate, in one derived predicate: 3b registers its provider module and
- * the contract starts being generated, with no second edit anywhere and no
- * declaration to keep in step.
+ * The whole gate, in one derived predicate: registering a provider module in an
+ * MCP-backed sub-directory is what starts the contract being generated, with no
+ * second edit anywhere and no declaration to keep in step.
  */
 export function mcpContractIsGenerated(
   modules: readonly VariantModule[] = VARIANT_MODULES,

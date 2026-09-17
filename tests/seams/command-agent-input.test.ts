@@ -343,6 +343,17 @@ beforeAll(() => {
   // language-tagged recipe is legitimately excluded from a parseability floor, but
   // a Tracker spawn hidden in one would still be a Tracker spawn.
   fencesScanned = new Map([['Git', 0], ['Code', 0], ['Tracker', 0]])
+  /** Count one fence for `agent`, refusing a key the counter map never declared. */
+  const bumpFence = (agent: string): void => {
+    const seen = fencesScanned.get(agent)
+    if (seen === undefined) {
+      throw new Error(
+        `no fence counter for "${agent}" (counted: ${[...fencesScanned.keys()].join(', ')}) — ` +
+        `an uncounted agent type is a spawn class the non-vacuity arms never see`,
+      )
+    }
+    fencesScanned.set(agent, seen + 1)
+  }
   gitFencesMentioningOperation = 0
   gitFencesOpMatched = 0
   recipeFencesSkipped = 0
@@ -351,14 +362,14 @@ beforeAll(() => {
     const fences = parseFences(entry.content)
     for (const fence of fences) {
       if (isAgentBlock(fence, 'Tracker')) {
-        fencesScanned.set('Tracker', fencesScanned.get('Tracker')! + 1)
+        bumpFence('Tracker')
       }
       if (isRecipeFence(fence)) {
         if (isAgentBlock(fence, 'Git') || isAgentBlock(fence, 'Code')) recipeFencesSkipped++
         continue
       }
       if (isAgentBlock(fence, 'Git')) {
-        fencesScanned.set('Git', fencesScanned.get('Git')! + 1)
+        bumpFence('Git')
         if (fence.includes('OPERATION:')) gitFencesMentioningOperation++
 
         const harvested = harvestFence(fence)
@@ -369,7 +380,7 @@ beforeAll(() => {
         for (const k of harvested.keys) existing.add(k)
         keysPassedByOp.set(harvested.op, existing)
       } else if (isAgentBlock(fence, 'Code')) {
-        fencesScanned.set('Code', fencesScanned.get('Code')! + 1)
+        bumpFence('Code')
       }
     }
   }
@@ -526,6 +537,37 @@ describe('forward: every KEY: passed is declared in **Input:**', () => {
   //
   // Harvested through harvestFence/forwardViolationsFor — the same parser the
   // live scan uses — so the proof tracks the guard rather than shadowing it.
+  /**
+   * A fence the live parser MUST parse, raised by name when it does not.
+   *
+   * `harvestFence(...)!` would hand the arm a `null` that surfaces as "cannot read
+   * properties of null" at the next `.op`, saying nothing about which fence the
+   * parser stopped recognising — and a parser that stopped recognising the sample
+   * is exactly how a known-bad proof goes quietly inert (PF-018).
+   */
+  const requireHarvest = (fence: string, label: string): { op: string; keys: Set<string> } => {
+    const harvested = harvestFence(fence)
+    if (harvested === null) {
+      throw new Error(
+        `the live parser did not parse ${label}, so the proof below is testing a shape the ` +
+        `guard cannot see`,
+      )
+    }
+    return harvested
+  }
+
+  /** The `git.md` section for `op`, raised by op name when the corpus does not hold it. */
+  const requireOpSection = (op: string): string => {
+    const section = opSectionMap.get(op)
+    if (section === undefined) {
+      throw new Error(
+        `op '${op}' has no section in the git.md corpus (${opSectionMap.size} op(s) parsed) — ` +
+        `this arm has no subject to compare the harvested keys against`,
+      )
+    }
+    return section
+  }
+
   const KNOWN_BAD_FENCE =
     '```\n' +
     'Agent(subagent_type="Git"):\n' +
@@ -546,11 +588,10 @@ describe('forward: every KEY: passed is declared in **Input:**', () => {
   })
 
   it('known-bad sample: pre-A1 debug.mds fence produces exactly one violation (ISSUE)', () => {
-    const harvested = harvestFence(KNOWN_BAD_FENCE)!
-    const section = opSectionMap.get(harvested.op)
-    expect(section, `op '${harvested.op}' must be in the map for the RED proof to work`).toBeTruthy()
+    const harvested = requireHarvest(KNOWN_BAD_FENCE, 'the pre-A1 debug.mds fence')
+    const section = requireOpSection(harvested.op)
 
-    const violations = forwardViolationsFor(section!, harvested.keys)
+    const violations = forwardViolationsFor(section, harvested.keys)
 
     expect(
       violations,
@@ -566,8 +607,8 @@ describe('forward: every KEY: passed is declared in **Input:**', () => {
       'ISSUE: {issue number}',
       'ISSUE_INPUT: {issue reference}',
     )
-    const harvested = harvestFence(FIXED_FENCE)!
-    const section = opSectionMap.get(harvested.op)!
+    const harvested = requireHarvest(FIXED_FENCE, 'the post-A1 debug.mds fence')
+    const section = requireOpSection(harvested.op)
     expect(
       forwardViolationsFor(section, harvested.keys),
       'the post-A1 fence must be clean — ISSUE_INPUT is declared in fetch-issue **Input:**',
