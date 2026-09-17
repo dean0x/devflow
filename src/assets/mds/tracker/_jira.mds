@@ -1,7 +1,7 @@
 ---
 output-dir: dist/skills/git/references
 ---
-@import { posting_gate_head, query_safety, shipped_marker_rule, marker_namespace, aggregate_call_budget, ref_preflight_tail } from "./_mcp.mds"
+@import { posting_gate_head, query_safety, shipped_marker_rule, marker_namespace, aggregate_call_budget, reference_rendering_gate, ref_preflight_tail } from "./_mcp.mds"
 
 Jira tracker mechanics for the `devflow:git` skill.
 
@@ -25,13 +25,14 @@ the single-authority corpus is the divergence this split exists to prevent.
 
 The provider-independent rules the sections below carry are IMPORTED rather than
 written here: `posting_gate_head`, `query_safety`, `shipped_marker_rule`,
-`marker_namespace`, `aggregate_call_budget` and `ref_preflight_tail` are authored
-once in `_mcp.mds` and expand in place. They are expanded per operation instead of
-being hoisted into the emitted contract for two reasons stated at their
-definitions — the sink-bypass guard requires every posting mechanic to spell the
-D11 clauses for itself, and a rule governing one operation stated in the contract
-is charged to every spawn that never runs it. A copy of one of them written out
-here again is what `tests/provider-literals.test.ts` reports.
+`marker_namespace`, `aggregate_call_budget`, `reference_rendering_gate` and
+`ref_preflight_tail` are authored once in `_mcp.mds` and expand in place. They are
+expanded per operation instead of being hoisted into the emitted contract for two
+reasons stated at their definitions — the sink-bypass guard requires every posting
+mechanic to spell the D11 clauses for itself, and a rule governing a minority of
+the operations, stated in the contract, is charged to every spawn that runs none
+of them. A copy of one of them written out here again is what
+`tests/provider-literals.test.ts` reports.
 
 The generation gate on `tracker/_mcp.md` is held open by ANY registered provider
 that reaches its tracker through a tool call, and this module is one of them —
@@ -168,7 +169,9 @@ Inside step 5 (compose release notes):
 
    - If `SHIPPED_ISSUES` is provided: append a `## Closed Issues` section rendering each entry through `## Reference Rendering` — **first ≤50 issues** (the same bound `backlink-shipped-issues` applies); if truncated, add a final `…and \{n\} more issues` line (D4 degrade if enrichment fails).
    - Pre-flight the list against `^[A-Z][A-Z0-9_]\{1,9\}-[1-9][0-9]\{0,8\}$` and drop what fails, reporting each as `TRACEABILITY: DEGRADED (issue reference "\{ref\}" does not match jira reference grammar)`. Every entry dropped ⇒ `TRACEABILITY: DEGRADED (no parseable refs for provider \{p\})` and the section is omitted rather than rendered empty.
-   - `## Reference Rendering` absent, or its token discarded by the read-site shape gate ⇒ render the key itself on its own line, and record the discard under `### Substitutions`.
+   - `## Reference Rendering` absent, or its token discarded by the gate below ⇒ render the key itself on its own line, and record the discard under `### Substitutions`.
+
+{reference_rendering_gate()}
 @end
 
 @define gather_release_evidence():
@@ -315,9 +318,11 @@ Load when the resolved tracker provider is `jira` and the operation is `ensure-p
    b. Otherwise fall back to the branch name pattern `\{type\}/\{KEY\}-\{slug\}`: extract the segment matching `^[A-Z][A-Z0-9_]\{1,9\}-[1-9][0-9]\{0,8\}$` and verify it with the *fetch by key* capability. If the call fails, or the issue is not open, **skip silently** — never render a link for an unverified key. Branch names can carry a token that merely looks like a key, and the existence check is the guard.
    c. The *fetch by key* capability absent or denied ⇒ `TRACEABILITY: DEGRADED (no tracker tool for fetch by key)` and skip the section; the PR is never blocked on it.
 
-   Render the line through `## Reference Rendering`. **This provider has no closing-reference magic** — a reference in a PR body does not transition or close anything here, and claiming otherwise in the rendered text would promise an effect that never happens; closing is a `## Transitions` matter and `gather-release-evidence` reports the absence as `TRACEABILITY: DEGRADED (unsupported by jira)`. `## Reference Rendering` absent, or its token discarded by the read-site shape gate ⇒ render the key on its own line under the section heading, and record the discard under `### Substitutions`.
+   Render the line through `## Reference Rendering`. **This provider has no closing-reference magic** — a reference in a PR body does not transition or close anything here, and claiming otherwise in the rendered text would promise an effect that never happens; closing is a `## Transitions` matter and `gather-release-evidence` reports the absence as `TRACEABILITY: DEGRADED (unsupported by jira)`. `## Reference Rendering` absent, or its token discarded by the gate below ⇒ render the key on its own line under the section heading, and record the discard under `### Substitutions`.
 
    If no verified issue key is discoverable, skip silently. A failure while updating the PR body emits `TRACEABILITY: DEGRADED (\{reason\})` and continues — a failed Related Issues update never blocks the PR.
+
+{reference_rendering_gate()}
 @end
 
 <!-- op: setup-task -->

@@ -42,7 +42,11 @@ import { readFileSync } from 'fs';
 import * as path from 'path';
 
 import { commandsDir, compiledSkillRefsDir, skillsDir } from '../../src/core/assets.js';
-import { TRACKER_GITHUB_OPS, VARIANT_MODULES } from '../../src/core/mds-variants.js';
+import {
+  MCP_BACKED_PROVIDER_SUBDIRS,
+  TRACKER_GITHUB_OPS,
+  VARIANT_MODULES,
+} from '../../src/core/mds-variants.js';
 import {
   ROOT,
   TRACKER_SCHEMA_SECTIONS,
@@ -1203,5 +1207,182 @@ describe('the reader block states the non-github rendering rule (AC-3.11, §14.1
       ).toContain(`wounded: missing ${clause.label}`);
     }
     expect(RENDERING_CLAUSES.length, 'the clause table is empty (PF-018)').toBeGreaterThan(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 7. The read-site shape gate for `## Reference Rendering` (security-02)
+// ---------------------------------------------------------------------------
+//
+// `## Reference Rendering`'s token is not a display preference: it is
+// interpolated into a branch name and into a PR body. `~/.devflow/tracker.md` is
+// hand-editable, machine-wide and written by an LLM, so a token that violates the
+// writer's own schema row is a NORMAL outcome rather than an attack — prose is not
+// prevention (PF-060) — and the gate therefore has to exist on the side that does
+// the interpolating. A mechanics file naming "the read-site shape gate" while the
+// shape is stated only in the Tracker agent, which the Git agent never loads, is a
+// control asserted and not implemented (PF-058/PF-023).
+//
+// The oracle is declared HERE and each side is compared to it, never to the other:
+// two sides that had both lost the denylist would agree with each other perfectly.
+// The two sides spell the same denylist differently — the writer's table column
+// names the characters in words, the reader's prose shows them — so each member
+// carries both spellings and neither can be satisfied by the other's.
+
+/** The anchored shape both sides owe, byte-for-byte. */
+const RENDER_TOKEN_SHAPE = '^[A-Za-z0-9 #{}/_.-]{1,60}$';
+
+/** One denied metacharacter, in the spelling each side uses for it. */
+interface DeniedMetachar {
+  readonly label: string;
+  readonly writer: RegExp;
+  readonly reader: RegExp;
+}
+
+const RENDER_TOKEN_DENYLIST: readonly DeniedMetachar[] = [
+  { label: 'backtick', writer: /backtick/, reader: /backtick/ },
+  { label: 'dollar', writer: /dollar/, reader: /`\$`/ },
+  { label: 'double quote', writer: /double-quote/, reader: /`"`/ },
+  { label: 'backslash', writer: /backslash/, reader: /`\\`/ },
+  { label: 'semicolon', writer: /semicolon/, reader: /`;`/ },
+  { label: 'newline', writer: /newline/, reader: /newline/ },
+];
+
+/**
+ * The generated references that RENDER a `## Reference Rendering` token.
+ *
+ * Identified by the discard record they owe — a `### Substitutions` row — rather
+ * than by a list of filenames or by the gate's own wording. A filename list rots
+ * silently when an operation is added; keying on the gate's wording would make the
+ * arm circular, green whenever the sentence is present and blind whenever it is
+ * rephrased. `setup-task` names the section but substitutes no token, so it is
+ * correctly not in this set.
+ */
+function renderSiteReferences(): CorpusEntry[] {
+  const refs = compiledSkillRefsDir();
+  return walkFiles(path.join(refs, 'tracker'), f => f.endsWith('.md'))
+    .map(file => ({ path: path.relative(refs, file), content: readFileSync(file, 'utf-8') }))
+    .filter(entry => entry.content.includes('### Substitutions'));
+}
+
+/** Named collector: parts of the gate a READ SITE does not state. */
+export function collectMissingReadSiteGate(label: string, text: string): string[] {
+  const missing: string[] = [];
+  if (!text.includes(RENDER_TOKEN_SHAPE)) {
+    missing.push(`${label}: the anchored shape ${RENDER_TOKEN_SHAPE}`);
+  }
+  for (const m of RENDER_TOKEN_DENYLIST) {
+    if (!m.reader.test(text)) missing.push(`${label}: the denied ${m.label}`);
+  }
+  if (!/[Dd]iscard, never repair/.test(text)) {
+    missing.push(`${label}: discard-never-repair — a repaired token is unpredictable`);
+  }
+  if (!text.includes('### Substitutions')) {
+    missing.push(`${label}: the \`### Substitutions\` record a discard owes`);
+  }
+  return missing;
+}
+
+/** Named collector: parts of the gate the WRITER's schema row does not state. */
+export function collectMissingWriterGate(validator: string): string[] {
+  const missing: string[] = [];
+  if (!validator.includes(RENDER_TOKEN_SHAPE)) {
+    missing.push(`the anchored shape ${RENDER_TOKEN_SHAPE}`);
+  }
+  for (const m of RENDER_TOKEN_DENYLIST) {
+    if (!m.writer.test(validator)) missing.push(`the denied ${m.label}`);
+  }
+  return missing;
+}
+
+describe('the read site carries the `## Reference Rendering` gate it names (security-02)', () => {
+  const RENDERING_SECTION = '`## Reference Rendering`';
+
+  it('non-vacuity: the render sites are the two token-substituting ops, per tool-call provider', () => {
+    const sites = renderSiteReferences().map(e => e.path).sort();
+    // Named, not counted: a count is satisfied by any four files, and the claim is
+    // about WHICH operations interpolate the token. Derived from the registry's
+    // provider list so a provider registered later joins by construction.
+    const expected = (MCP_BACKED_PROVIDER_SUBDIRS as readonly string[])
+      .flatMap(subdir => [`${subdir}/create-release.md`, `${subdir}/ensure-pr-ready.md`])
+      .map(rel => rel.split('/').join(path.sep))
+      .sort();
+    expect(expected.length, 'no tool-call provider is registered (PF-018)').toBeGreaterThan(0);
+    expect(
+      sites,
+      'the set of references that record a `### Substitutions` discard changed. An operation ' +
+      'that renders the token without recording a discard is the silent half of this gate; one ' +
+      'that dropped out of the set is a render site nothing below reads',
+    ).toEqual(expected);
+  });
+
+  it('every render site states the shape, the denylist, the discard rule and the record', () => {
+    const violations = renderSiteReferences()
+      .flatMap(entry => collectMissingReadSiteGate(entry.path, entry.content));
+    expect(
+      violations,
+      'a read site names the gate without stating it, so the token reaches a branch name and a ' +
+      `PR body ungated:\n  ${violations.join('\n  ')}`,
+    ).toEqual([]);
+  });
+
+  it('the WRITER states the same shape and the same denylist — compared to the oracle, not to the reader', () => {
+    const row = collectTrackerSchemaRows(TRACKER_MD).find(r => r.section === RENDERING_SECTION);
+    expect(
+      row,
+      `the Tracker agent's schema table has no ${RENDERING_SECTION} row, so the writer half of ` +
+      'this seam would pass by comparing nothing',
+    ).toBeDefined();
+    const missing = collectMissingWriterGate(row?.validator ?? '');
+    expect(
+      missing,
+      `the writer's ${RENDERING_SECTION} shape gate is missing:\n  ${missing.join('\n  ')}`,
+    ).toEqual([]);
+  });
+
+  it('known-bad probe: each part, removed from a copy, is reported by the same collector', () => {
+    // Built from the shipped bytes inside this `it`, per PART, so a predicate that
+    // drifted off the shipped wording cannot sit here matching nothing (PF-018).
+    const site = renderSiteReferences()[0];
+    expect(site, 'no render site to probe').toBeDefined();
+    const pristine = site.content;
+    expect(
+      collectMissingReadSiteGate('pristine', pristine),
+      'the collector must be silent on a shipped render site, or the probe proves nothing',
+    ).toEqual([]);
+
+    const wounds: ReadonlyArray<{ fragment: string; reports: string }> = [
+      { fragment: RENDER_TOKEN_SHAPE, reports: `the anchored shape ${RENDER_TOKEN_SHAPE}` },
+      { fragment: 'backtick', reports: 'the denied backtick' },
+      { fragment: '`$`', reports: 'the denied dollar' },
+      { fragment: '`"`', reports: 'the denied double quote' },
+      { fragment: '`\\`', reports: 'the denied backslash' },
+      { fragment: '`;`', reports: 'the denied semicolon' },
+      { fragment: 'newline', reports: 'the denied newline' },
+      { fragment: 'Discard, never repair', reports: 'discard-never-repair' },
+      { fragment: '### Substitutions', reports: '`### Substitutions`' },
+    ];
+    for (const { fragment, reports } of wounds) {
+      const wounded = pristine.split(fragment).join('');
+      expect(wounded, `removing ${JSON.stringify(fragment)} changed nothing — the probe is inert`)
+        .not.toBe(pristine);
+      expect(
+        collectMissingReadSiteGate('wounded', wounded).join('\n'),
+        `removing ${JSON.stringify(fragment)} must be reported by the same collector`,
+      ).toContain(reports);
+    }
+
+    // …and the writer side, driven through its own collector for the same reason.
+    const row = collectTrackerSchemaRows(TRACKER_MD).find(r => r.section === RENDERING_SECTION);
+    const validator = row?.validator ?? '';
+    expect(collectMissingWriterGate(validator), 'the shipped row must be clean').toEqual([]);
+    expect(
+      collectMissingWriterGate(validator.split(RENDER_TOKEN_SHAPE).join('')),
+      'a writer row that lost the anchored shape must be reported',
+    ).toContain(`the anchored shape ${RENDER_TOKEN_SHAPE}`);
+    expect(
+      collectMissingWriterGate(validator.split('semicolon').join('')),
+      'a writer row that lost a denylist member must be reported',
+    ).toContain('the denied semicolon');
   });
 });
