@@ -9,6 +9,9 @@
  *   - rearmTrackerInference: idempotent-when-absent / removes-when-present / never throws [DR-22]
  *   - applyTrackerSentinel: written when provider != github, removed when it is [DR-10]
  *   - renameStaleTrackerConventions: the provider-change transition (P3a-S15 / AC-3.20)
+ *   - the reported-failure arm of all three lifecycle owners, each driven by a
+ *     deterministic obstruction, so the warn-never-abort posture (PF-009) is
+ *     exercised rather than asserted about
  *   - TRACKER_CONVENTIONS_BACKUP_NAMES: every backup the rename can write, so uninstall
  *     can classify the whole set as user content (OD-15)
  *   - TRACKER_PROVIDER_KEY_PATH: the shared TS<->shell manifest key path constant
@@ -441,6 +444,22 @@ describe('tracker file lifecycle', () => {
     expect(result.ok).toBe(true);
   });
 
+  it('rearmTrackerInference reports a removal it cannot make, and never throws', async () => {
+    // The failure arm, driven rather than asserted about: `force` swallows an
+    // absent file but not a DIRECTORY sitting where the counter file belongs, so
+    // the rm rejects. Without this the whole warn-never-abort posture (PF-009) is
+    // untested for this owner.
+    await fs.mkdir(trackerAttemptsPath(devflowDir));
+
+    const result = await rearmTrackerInference(devflowDir);
+
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error).toContain('attempt counter');
+    // The obstruction is reported, never removed behind the user's back.
+    await expect(fs.access(trackerAttemptsPath(devflowDir))).resolves.toBeUndefined();
+  });
+
   // ── applyTrackerSentinel [DR-10] ───────────────────────────────────────────
 
   it('applyTrackerSentinel writes a zero-byte sentinel for a non-github provider', async () => {
@@ -476,6 +495,23 @@ describe('tracker file lifecycle', () => {
     const result = await applyTrackerSentinel(fresh, 'jira');
     expect(result.ok).toBe(true);
     await expect(fs.access(path.join(fresh, '.tracker.enabled'))).resolves.toBeUndefined();
+  });
+
+  it('applyTrackerSentinel reports a sentinel it cannot write, and never throws', async () => {
+    // The failure arm, driven rather than asserted about: a devflow dir whose
+    // parent is a FILE cannot be created (ENOTDIR), so the write rejects. Without
+    // this the warn-never-abort posture (PF-009) is untested for this owner.
+    const blocker = path.join(devflowDir, 'not-a-dir');
+    await fs.writeFile(blocker, '', 'utf-8');
+
+    const result = await applyTrackerSentinel(path.join(blocker, 'devflow'), 'jira');
+
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error).toContain('tracker sentinel');
+    // Non-vacuity: the same call against a writable dir succeeds, so the failure
+    // above is the blocked parent and not a helper that never writes anything.
+    expect((await applyTrackerSentinel(devflowDir, 'jira')).ok).toBe(true);
   });
 
   // ── renameStaleTrackerConventions (P3a-S15 / AC-3.20) ──────────────────────
