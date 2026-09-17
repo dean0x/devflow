@@ -673,9 +673,116 @@ describe('adversarial backtracking budget', () => {
 
 const NODE_REQUIRE = createRequire(import.meta.url);
 
+// ---------------------------------------------------------------------------
+// The .cjs seam
+//
+// redact-secrets.cjs is plain CommonJS, and this tree sits outside every
+// tsconfig the project runs (PF-069), so the interface below is the ONLY shape
+// authority for the module's exports on this side. It is transcribed from the
+// module's own JSDoc — open that before changing anything here, because a shape
+// invented on this side is a fixture the runtime rejects (PF-043).
+// ---------------------------------------------------------------------------
+
+/** A per-slug redaction count map. */
+type ScrubCounts = Readonly<Record<string, number>>;
+
+/** `scrub()` — the scrubbed text, and what it replaced. */
+interface ScrubResult {
+  readonly result: string;
+  readonly counts: ScrubCounts;
+}
+
+/** `scrubTwice()` — the first pass's text, and both passes' counts. */
+interface ScrubTwiceResult {
+  readonly text: string;
+  readonly first: ScrubCounts;
+  readonly second: ScrubCounts;
+}
+
+/** `frameEmit()`'s success arm. */
+interface FrameEmitOk {
+  readonly emitLine: string;
+  readonly body: string;
+  readonly error?: undefined;
+}
+
+/** `frameEmit()`'s refusal arm — no framing line is produced at all. */
+interface FrameEmitErr {
+  readonly emitLine?: undefined;
+  readonly body?: undefined;
+  readonly error: string;
+}
+
+type FrameEmitResult = FrameEmitOk | FrameEmitErr;
+
+/** `parseArgs()` — tagged on `kind`, never on field presence. */
+type ParsedArgs =
+  | { readonly kind: 'emit'; readonly inputPath: string }
+  | { readonly kind: 'file'; readonly inputPath: string; readonly outputPath: string }
+  | { readonly kind: 'usage'; readonly usage: string };
+
+/** `main()`'s emit-mode return: the framing, the body, and the exit code. */
+interface MainEmitResult {
+  readonly emitLine: string;
+  readonly body: string;
+  readonly code: number;
+}
+
+/** `main()` — an exit code, the file mode's SCRUB line, or the emit triple. */
+type MainResult = number | { readonly scrubLine: string } | MainEmitResult;
+
+/**
+ * Injected only by tests, to reach the two arms no fixture can.
+ *
+ * `nonceSource` is `() => unknown` because that is what the script validates: it
+ * type-checks the value it gets back and refuses anything that is not 32 hex
+ * characters, so a source declared to return `string` would describe a contract
+ * narrower than the one the code implements — and every malformed-nonce fixture
+ * would need a cast to reach the check it exists to prove.
+ */
+interface MainDeps {
+  readonly scrubFn?: (content: string) => ScrubResult;
+  readonly nonceSource?: () => unknown;
+}
+
+/** The module's exported surface [DR-14]. */
+interface RedactScrubber {
+  readonly NONCE_HEX_CHARS: number;
+  readonly ZERO_SCRUB_LINE: string;
+  readonly D11_FAIL_REASONS: readonly string[];
+  shouldSkip(candidate: string): boolean;
+  scrub(content: string): ScrubResult;
+  formatScrubLine(counts: ScrubCounts): string;
+  parseArgs(argv: readonly string[]): ParsedArgs;
+  scrubTwice(content: string, scrubFn?: (content: string) => ScrubResult): ScrubTwiceResult;
+  frameEmit(scrubbed: string, scrubLine: string, nonceSource?: () => unknown): FrameEmitResult;
+  main(argv: readonly string[], deps?: MainDeps): MainResult;
+}
+
 /** The script's exported pure helpers. Required once — the module is idempotent. */
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-const SCRUBBER: any = NODE_REQUIRE(SCRIPT);
+const SCRUBBER = NODE_REQUIRE(SCRIPT) as RedactScrubber;
+
+/**
+ * frameEmit's success arm, or a test failure naming the refusal.
+ *
+ * The refusal arm carries no `emitLine`, so without narrowing every success-path
+ * assertion reads `string | undefined` — and the shortest way to silence that is
+ * the strongest available cast, applied to the exact value being probed.
+ */
+function framedOk(framed: FrameEmitResult): FrameEmitOk {
+  if (framed.error !== undefined) {
+    throw new Error(`frameEmit refused where the assertion requires a framing: ${framed.error}`);
+  }
+  return framed;
+}
+
+/** main()'s emit triple, or a test failure — the other two arms return other shapes. */
+function emitResult(result: MainResult): MainEmitResult {
+  if (typeof result === 'number' || !('code' in result)) {
+    throw new Error(`main() returned a non-emit result: ${JSON.stringify(result)}`);
+  }
+  return result;
+}
 
 interface EmitResult {
   /** stdout line 1 — the framing, without its newline. */
@@ -835,7 +942,7 @@ describe('--emit: scrubTwice — the gate [DR-14]', () => {
 describe('--emit: frameEmit — nonce, digest, byte count and the first-pass payload [DR-01]', () => {
   it('embeds formatScrubLine’s payload rather than re-spelling the count text', () => {
     const scrubLine = SCRUBBER.formatScrubLine({ 'aws-key': 2, 'api-key': 1 });
-    const framed = SCRUBBER.frameEmit('body bytes', scrubLine);
+    const framed = framedOk(SCRUBBER.frameEmit('body bytes', scrubLine));
     expect(framed.emitLine).toMatch(FRAMING_RE);
     expect(
       framed.emitLine.endsWith('3 [aws-key:2,api-key:1]'),
@@ -851,7 +958,7 @@ describe('--emit: frameEmit — nonce, digest, byte count and the first-pass pay
     // harness-truncated Bash result. A character count would be wrong for exactly
     // the multi-byte bodies a Jira description carries.
     const body = 'héllo — ✓';
-    const framed = SCRUBBER.frameEmit(body, 'SCRUB: 0 []');
+    const framed = framedOk(SCRUBBER.frameEmit(body, 'SCRUB: 0 []'));
     const bytes = Number(framed.emitLine.split(' ')[3]);
     expect(bytes).toBe(Buffer.byteLength(body, 'utf8'));
     expect(bytes, 'a character count would understate a multi-byte body').not.toBe(body.length);
@@ -859,7 +966,7 @@ describe('--emit: frameEmit — nonce, digest, byte count and the first-pass pay
 
   it('the digest is sha256 of the body', () => {
     const body = 'deterministic body\n';
-    const framed = SCRUBBER.frameEmit(body, 'SCRUB: 0 []');
+    const framed = framedOk(SCRUBBER.frameEmit(body, 'SCRUB: 0 []'));
     expect(framed.emitLine.split(' ')[2]).toBe(
       createHash('sha256').update(body, 'utf8').digest('hex'),
     );
@@ -868,8 +975,20 @@ describe('--emit: frameEmit — nonce, digest, byte count and the first-pass pay
   it('a malformed or throwing nonce source is refused, never framed', () => {
     // Injected rather than mocked: this is the one failure arm no fixture and no
     // subprocess can reach, and an unreachable arm is an unasserted arm.
-    for (const bad of [() => { throw new Error('entropy pool empty'); }, () => 'NOTHEX', () => '', () => 42]) {
-      const framed = SCRUBBER.frameEmit('body', 'SCRUB: 0 []', bad as never);
+    //
+    // Every source below is passed UNCAST. `nonceSource` is declared `() => unknown`
+    // because the script validates what it gets back, so the wrong-typed sources are
+    // exactly the inputs the check exists for — a cast here would suppress the one
+    // check the assertion is probing.
+    const BAD_SOURCES: ReadonlyArray<() => unknown> = [
+      () => { throw new Error('entropy pool empty'); },
+      () => 'NOTHEX',
+      () => '',
+      () => 42,
+    ];
+    expect(BAD_SOURCES.length, 'the nonce-source corpus must be non-empty (PF-018)').toBeGreaterThan(0);
+    for (const bad of BAD_SOURCES) {
+      const framed = SCRUBBER.frameEmit('body', 'SCRUB: 0 []', bad);
       expect(framed.emitLine, `nonce source ${String(bad)} must not produce a framing`).toBeUndefined();
       expect(framed.error, 'the refusal must name itself').toContain('nonce');
     }
@@ -998,7 +1117,7 @@ describe('--emit: NO BODY on any non-zero exit (AC-3.5, §8.9 — every path)', 
       result: content + '\nAKIAIOSFODNN7EXAMPLE',
       counts: { 'aws-key': 1 },
     });
-    const out = SCRUBBER.main(['node', SCRIPT, '--emit', p], { scrubFn: hostile });
+    const out = emitResult(SCRUBBER.main(['node', SCRIPT, '--emit', p], { scrubFn: hostile }));
     expect(out.code, 'a second pass that still finds a secret is exit 5').toBe(5);
     expect(out.body, 'no body may accompany a failed gate').toBe('');
     expect(out.emitLine).toBe('D11-FAIL second-pass-nonzero');
@@ -1006,9 +1125,9 @@ describe('--emit: NO BODY on any non-zero exit (AC-3.5, §8.9 — every path)', 
 
   it('nonce generation failure ⇒ exit 5, no body (injected)', () => {
     const p = writeInput('clean\n', 'nonce-fail.txt');
-    const out = SCRUBBER.main(['node', SCRIPT, '--emit', p], {
+    const out = emitResult(SCRUBBER.main(['node', SCRIPT, '--emit', p], {
       nonceSource: () => { throw new Error('entropy pool empty'); },
-    });
+    }));
     expect(out.code).toBe(5);
     expect(out.body).toBe('');
     expect(out.emitLine).toBe('D11-FAIL nonce-unavailable');
@@ -1017,11 +1136,11 @@ describe('--emit: NO BODY on any non-zero exit (AC-3.5, §8.9 — every path)', 
   it('every D11-FAIL reason is a bare token — no path, no secret, no prose', () => {
     // stdout is read back by an agent and pasted into reports; a reason carrying a
     // tmpdir path or input bytes would travel with it.
-    for (const reason of SCRUBBER.D11_FAIL_REASONS as readonly string[]) {
+    for (const reason of SCRUBBER.D11_FAIL_REASONS) {
       expect(reason, `"${reason}" must be a bare lowercase token`).toMatch(/^[a-z][a-z-]{2,39}$/);
     }
     expect(
-      (SCRUBBER.D11_FAIL_REASONS as readonly string[]).length,
+      SCRUBBER.D11_FAIL_REASONS.length,
       'the reason registry must be non-empty',
     ).toBeGreaterThanOrEqual(4);
   });
