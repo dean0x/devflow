@@ -225,7 +225,7 @@ re-derived per repository at call time, so the value here is a last resort.
 | `## Assignee` | global-safe | `none` | enum: `none` \| `self`; `self` requires identify-current-user and degrades with it; **never** a literal email address or account identifier |
 | `## Tech Debt` | global-safe | `single rolling item` | enum: `single rolling item` |
 | `## Wave Filter` | repo-derived | `tracker not configured` | structured filter fields only; no free-text query field is permitted |
-| `## Reference Rendering` | global-safe | the resolved provider's documented default | `^[A-Za-z0-9 #{}/_.-]{1,60}$`; denylist: backtick \| dollar \| double-quote \| backslash \| semicolon \| newline; a discard ⇒ default + a `### Substitutions` row |
+| `## Reference Rendering` | global-safe | the resolved provider's documented default | `^[A-Za-z0-9 #{}/_.-]{1,60}$`; denylist: backtick \| dollar \| double-quote \| backslash \| semicolon \| newline; a discard ⇒ default + a `### Substitutions` row ; **never write `# UNRESOLVED:` here** — an unresolved rendering is the resolved provider's documented default, which its mechanics state and the reader applies |
 | `## Dedup Strategy` | global-safe | probe live | enum: `entity-property` \| `comment-edit-in-place` \| `authored-marker` \| `post-with-warning` — the reader's ladder rungs, strongest evidence first — recorded with its probe evidence |
 
 `### Substitutions` carries no value and has no sink gate — it is report-only,

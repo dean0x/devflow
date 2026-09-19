@@ -336,6 +336,31 @@ export const MCP_SHARED_LITERAL_REGISTRY: readonly McpSharedLiteral[] = [
 ];
 
 /**
+ * Reference Rendering is SPLIT, not owned outright, so it is registered here as a
+ * shape rather than as a sentence.
+ *
+ * The RULE — what an absent section, an absent file and a discarded token fall
+ * back to — lives in `_mcp.mds`'s `reference_rendering_gate` define, which is an
+ * authoring-only define that EXPANDS into each provider's gate sites. Its single
+ * authorship is therefore `provider-literals`' SHARED_RULES question ("declared in
+ * the authoring module and in no provider module"), not this file's registry,
+ * which is about sentences the EMITTED contract owns. Registering it above would
+ * have failed both arms correctly: the sentence really is in every provider file,
+ * because that is what the define is for.
+ *
+ * The VALUE is each provider's. It has to be, and `provider-scope` is why: a
+ * provider-keyed table inside the contract would put `jira` and `linear` literals
+ * in a file that guard scans and no provider owns.
+ *
+ * Before the split there was no value at all. `## Reference Rendering` had no
+ * probe, no documented default and no way to be filled, so every jira and linear
+ * run wrote `# UNRESOLVED:` into it and `ensure-pr-ready` and `create-release`
+ * emitted DEGRADED forever after. A rule with no value is not a rule.
+ */
+const RENDERING_RULE_SENTENCE = 'falls back to **the resolved provider\'s** documented default';
+const RENDERING_DEFAULT_SHAPE = /documented default is `Refs \{[A-Z]+\}-\{n\}`/;
+
+/**
  * One registry entry, addressed by its sentence and raised by name when absent.
  *
  * `find(...)!` would hand the probe below an `undefined` that surfaces as "cannot
@@ -604,5 +629,166 @@ describe('the project-key alphabet has one authority, quoted identically by all 
       collectKeyAlphabets(`one ${KEY_ALPHABET} and one ^[A-Za-z][A-Za-z0-9_]{0,9}$`).length,
       'and must report TWO distinct alphabets in a text that states two',
     ).toBe(2);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 4. Reference Rendering — the rule is the contract's, the value is the provider's
+// ---------------------------------------------------------------------------
+
+describe('Reference Rendering: rule once in the contract, value once per provider', () => {
+  const providers = VARIANT_MODULES
+    .filter(mod => mod.subdir.startsWith('tracker/') && mod.subdir !== 'tracker/github')
+    .map(mod => mod.subdir.slice('tracker/'.length));
+
+  it('this arm has providers to range over', () => {
+    expect(providers.length, 'no tool-call provider registered — both arms are vacuous')
+      .toBeGreaterThan(0);
+  });
+
+  it('the fallback rule is keyed on THE RESOLVED PROVIDER, and is authored once', () => {
+    const source = requireFile(
+      'authoring module',
+      path.join(path.resolve(import.meta.dirname, '../..'), 'src', 'assets', 'mds', 'tracker', '_mcp.mds'),
+    );
+    expect(
+      source,
+      'the lookup key is the load-bearing part. Keyed on "the resolved provider" it is the ' +
+      'provider the preamble resolved; keyed on "this file\'s provider" a hand-edited frontmatter ' +
+      'would route around the mismatch guard and pick the rendering of a tracker nobody resolved',
+    ).toContain(RENDERING_RULE_SENTENCE);
+    expect(
+      source.split(RENDERING_RULE_SENTENCE).length - 1,
+      'the rule is authored ONCE, in the define that expands into every gate site',
+    ).toBe(1);
+
+    // …and it reaches every provider's gate sites, which is what the define is for.
+    for (const provider of providers) {
+      const dir = path.join(REFS_DIR, 'tracker', provider);
+      const carrying = walkFiles(dir, f => f.endsWith('.md'), 1)
+        .filter(f => requireFile('generated reference', f).includes(RENDERING_RULE_SENTENCE));
+      expect(
+        carrying.length,
+        `${provider} carries the Reference Rendering rule at no site — the gate would then route ` +
+        'to nothing and the section is unfillable again',
+      ).toBeGreaterThan(0);
+    }
+  });
+
+  it('each provider states exactly one default value, and the contract states none', () => {
+    for (const provider of providers) {
+      const dir = path.join(REFS_DIR, 'tracker', provider);
+      const stated = new Set<string>();
+      let sites = 0;
+      for (const file of walkFiles(dir, f => f.endsWith('.md'), 1)) {
+        for (const match of requireFile('generated reference', file).matchAll(
+          new RegExp(RENDERING_DEFAULT_SHAPE, 'g'),
+        )) {
+          stated.add(match[0]);
+          sites += 1;
+        }
+      }
+      expect(
+        sites,
+        `${provider} states its Reference Rendering default at no site. Without a value the rule ` +
+        'in the contract falls back to nothing, `## Reference Rendering` is unfillable, and every ' +
+        'spawn emits DEGRADED for a section that was never going to resolve',
+      ).toBeGreaterThan(0);
+      expect(
+        [...stated],
+        `${provider} states MORE THAN ONE Reference Rendering default. A value repeated per site ` +
+        'is a value that can drift at one of them while a presence-only check stays green',
+      ).toHaveLength(1);
+    }
+
+    expect(
+      RENDERING_DEFAULT_SHAPE.test(contractFile()),
+      'the contract must state NO default value. A provider-keyed value here would put a provider ' +
+      'literal in a file `provider-scope` scans and no provider owns, and would make the contract ' +
+      'the third authority on a rendering it only has a rule about',
+    ).toBe(false);
+  });
+
+  it('known-bad probe: the default shape discriminates', () => {
+    expect(RENDERING_DEFAULT_SHAPE.test('documented default is `Refs {KEY}-{n}`')).toBe(true);
+    expect(
+      RENDERING_DEFAULT_SHAPE.test('documented default is `#{n}`'),
+      'the github rendering is not a tool-call provider default — a shape that matched it would ' +
+      'report the wrong value as present',
+    ).toBe(false);
+    expect(
+      RENDERING_DEFAULT_SHAPE.test('the documented default'),
+      'a prose mention with no value must not satisfy the presence arm',
+    ).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 5. The rendering gate's outcome is a DEFAULT, never a degradation
+// ---------------------------------------------------------------------------
+//
+// The shape gate and the metachar denylist are asserted elsewhere, over the whole
+// validator table. The claim HERE is the one the split exists for: whatever the
+// gate discards, the read site has somewhere to go. A hostile token, an absent
+// section and an absent file must all converge on the provider's documented
+// default and record a `### Substitutions` row — and none of the three may reach
+// for a DEGRADED reason, because a rendering that degrades permanently is the
+// defect this commit closes rather than a safety property.
+
+describe('Reference Rendering: a discarded token yields the default, never a DEGRADED', () => {
+  const HOSTILE_TOKEN = 'pr-link: $(whoami)';
+
+  it('the gate names discard-and-default and the Substitutions record, for every provider', () => {
+    const providers = VARIANT_MODULES
+      .filter(mod => mod.subdir.startsWith('tracker/') && mod.subdir !== 'tracker/github')
+      .map(mod => mod.subdir.slice('tracker/'.length));
+    expect(providers.length, 'no tool-call provider registered').toBeGreaterThan(0);
+
+    for (const provider of providers) {
+      const sites = walkFiles(path.join(REFS_DIR, 'tracker', provider), f => f.endsWith('.md'), 1)
+        .map(f => ({ rel: path.relative(REFS_DIR, f).split(path.sep).join('/'), body: requireFile('generated reference', f) }))
+        .filter(e => e.body.includes(RENDERING_RULE_SENTENCE));
+
+      for (const { rel, body } of sites) {
+        // `$` is on the gate's own denylist, so the hostile token is discarded by
+        // the stated rule rather than by anything this test invents.
+        expect(
+          body,
+          `${rel}: the gate must deny the metacharacter that makes ${JSON.stringify(HOSTILE_TOKEN)} ` +
+          'a command substitution rather than a rendering',
+        ).toMatch(/a `\$`/);
+        expect(
+          body,
+          `${rel}: discard, never repair — a repaired token is one nobody can predict`,
+        ).toContain('**Discard, never repair**');
+        expect(
+          body,
+          `${rel}: a discard must be recorded, or the user sees the default and never learns why`,
+        ).toContain('`### Substitutions` row');
+        expect(
+          body.includes('DEGRADED (tracker.md required fields incomplete'),
+          `${rel}: the rendering gate must NOT route a discard to the incomplete-fields ` +
+          'degradation. That is the permanent-DEGRADED loop the documented default replaces: ' +
+          'the section was unfillable, so every run degraded for a field that was never ' +
+          'going to resolve',
+        ).toBe(false);
+      }
+    }
+  });
+
+  it('and the writer is told never to sentinel the row the reader has a default for', () => {
+    const tracker = requireFile(
+      'tracker agent',
+      path.join(path.resolve(import.meta.dirname, '../..'), 'src', 'assets', 'agents', 'tracker.md'),
+    );
+    const row = tracker.split('\n').filter(l => l.startsWith('| `## Reference Rendering` |'));
+    expect(row, 'the schema row must exist — otherwise this arm has no subject').toHaveLength(1);
+    expect(
+      row[0],
+      'the writer must be told not to write `# UNRESOLVED:` here. The reader treats that sentinel ' +
+      'as "the writer looked and could not tell" and degrades on it; for this row the honest ' +
+      'answer is the resolved provider\'s documented default, which is why the two sides have to ' +
+      'agree in the same commit',
+    ).toContain('never write `# UNRESOLVED:` here');
   });
 });

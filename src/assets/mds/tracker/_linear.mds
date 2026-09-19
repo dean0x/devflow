@@ -96,6 +96,10 @@ drift at one of them while every other site and a presence-only guard stay green
 32767
 @end
 
+@define pr_link_default():
+Refs \{REF\}-\{n\}
+@end
+
 @define setup_task():
 ## Operation: setup-task
 
@@ -211,6 +215,8 @@ Inside step 5 (compose release notes):
    - `## Reference Rendering` absent, or its token discarded by the gate below ⇒ render the reference itself on its own line, and record the discard under `### Substitutions`.
 
 {reference_rendering_gate()}
+
+**This provider's documented default is `{pr_link_default()}`.** It is stated here because it is a provider fact, and the gate above is what routes to it: a section that is absent, a file that is absent and a token the gate discarded all render this, and none of them is a degradation.
 @end
 
 @define gather_release_evidence():
@@ -362,6 +368,8 @@ Load when the resolved tracker provider is `linear` and the operation is `ensure
    If no verified issue reference is discoverable, skip silently. A failure while updating the PR body emits `TRACEABILITY: DEGRADED (\{reason\})` and continues — a failed Related Issues update never blocks the PR.
 
 {reference_rendering_gate()}
+
+**This provider's documented default is `{pr_link_default()}`.** It is stated here because it is a provider fact, and the gate above is what routes to it: a section that is absent, a file that is absent and a token the gate discarded all render this, and none of them is a degradation.
 @end
 
 <!-- op: setup-task -->

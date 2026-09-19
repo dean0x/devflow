@@ -413,6 +413,17 @@ const MODULE_DEFINES: readonly ModuleDefine[] = [
       'them while every other site and a presence-only guard stay green, and the truncation ' +
       'floor derives from it — so the number has one owner per module and every site invokes it',
   },
+  {
+    name: 'pr_link_default',
+    providers: ['jira', 'linear'],
+    bodyShape: /^Refs \\\{[A-Z]+\\\}-\\\{n\\\}$/,
+    why:
+      'the documented Reference Rendering default. A provider FACT, like the cap beside it: the ' +
+      'rule that routes to it is the tool-call contract\'s and is provider-independent, but the ' +
+      'value cannot be — a provider-keyed table inside the contract would put provider literals ' +
+      'in a file provider-scope scans and no provider owns. Owned by the two tool-call providers ' +
+      'on purpose: github renders `#{n}` and needs no fallback, because its section is never read.',
+  },
 ];
 
 /** The registered non-operation define names. */
