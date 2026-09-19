@@ -1,34 +1,28 @@
 /**
- * Retired-wording guard (P0-S22, AC-0.14, GAP-32).
+ * Retired-wording guard (GAP-32).
  *
- * One shared grep guard with a denylist of retired literals — grows once per phase;
- * never a new grep; never emptied. Adding a new retired literal goes into
- * RETIRED_LITERALS, not into a new describe block.
+ * ONE shared grep over ONE denylist. A literal deliberately removed from the
+ * shipping assets, the compiled output or the repo's own prose is registered in
+ * RETIRED_LITERALS with the file it left and the reason it went, and the guard
+ * refuses to let it back in. Retiring a literal means adding a row here — never a
+ * new describe block, and never a second list somewhere else: two lists is how one
+ * goes stale, and the narrower one is always the one that stays green.
  *
- * Phase-0 retired literals:
- *   - ISSUE_NUMBERS    (renamed → ISSUE_REFS in A1)
- *   - ISSUE: {issue    (renamed → ISSUE_INPUT: in A1)
- *   - close milestone  (deleted from release.md in A1, AC-0.14)
- *   - may pre-fetch    (removed from _wave.mds in A1)
- *   - issue-first gate (removed from implement.mds in A1; "step 1c" self-reference stays valid in git.md)
+ * A widened corpus only raises detection when the VOCABULARY widens with it. Two
+ * documentation literals once survived a sweep purely by being spelled differently
+ * in files the corpus already scanned (PF-025), so the response to residue found
+ * outside the shipping assets is to widen the corpus and register the spelling —
+ * never to loosen the denylist to fit what is there (R2).
  *
- * Phase-1 retired literals:
- *   - no generated copies anywhere         (falsified by dist/agents/git.md; CLAUDE.md restated, GAP-53)
- *   - The only intermediate build step     (docs/reference/file-organization.md — dist/agents/ is a second one)
- *   - No build step distributes agents     (docs/reference/agent-design.md — a generator host is compiled first)
+ * Non-vacuity: denylist size and corpus size are both asserted, and a seeded
+ * retired literal in a synthetic file fails the guard — proven inline, without
+ * touching committed source.
  *
- * A widened corpus only raises detection when the vocabulary widens with it: the two
- * Phase-1 doc literals above survived the CLAUDE.md sweep purely by being spelled
- * differently, in files the corpus already scanned (PF-025).
- *
- * Non-vacuity: denylist size and corpus size are both asserted.
- * Known-bad sample (mechanic 2, H10): a seeded retired literal in a synthetic file
- * fails the guard — proven inline without touching committed source.
- *
- * Denylist entry format:
- *   { literal, phase, file, justification }
- * "file" is the dist/commands/*.md or src/assets/ path that contained the literal
- * before the A1 fix; it is recorded for traceability, not enforced dynamically.
+ * Entry format: `{ literal, removedFrom, justification, pattern?, scope? }`.
+ * `removedFrom` records where the literal used to live — traceability, not a
+ * dynamic constraint. `scope` narrows an entry to the trees it is retired FROM;
+ * `pattern` replaces the substring test for residue whose spellings cannot be
+ * enumerated in advance.
  */
 
 import { describe, it, expect } from 'vitest';
@@ -38,11 +32,10 @@ import * as path from 'path';
 const ROOT = path.resolve(import.meta.dirname, '../..');
 
 // ---------------------------------------------------------------------------
-// Phase-0 denylist of retired literals — grows once per phase; never a new grep; never emptied
+// The denylist — grows as literals are retired; never a new grep; never emptied
 // ---------------------------------------------------------------------------
 interface RetiredEntry {
   literal: string;
-  phase: string;
   removedFrom: string;
   justification: string;
   /**
@@ -50,8 +43,8 @@ interface RetiredEntry {
    * replaces the `literal` substring test and `literal` becomes the entry's
    * human-readable name in the failure message.
    *
-   * Reserved for residue whose members are not enumerable in advance — a phase
-   * label is minted by whoever writes the next phase, so a fixed list would go
+   * Reserved for residue whose members are not enumerable in advance — a wave
+   * coordinate is minted by whoever writes the next wave, so a fixed list would go
    * stale the moment it mattered. Everything with a knowable spelling stays a
    * literal, individually classified (applies ADR-025).
    */
@@ -61,7 +54,7 @@ interface RetiredEntry {
    * them (`dist/commands/`, `src/assets/skills/git/`, …). Absent means the whole
    * corpus.
    *
-   * Phase 2 needed this: `gh issue` is RETIRED from the command layer and
+   * `gh issue` is the case that needs it: RETIRED from the command layer and
    * LEGITIMATE in `git.md` and its generated references — those files are the
    * mechanics. A denylist without scopes could only express the weaker of the two
    * rules, and the weaker one is the one that forbids nothing where it matters.
@@ -72,31 +65,26 @@ interface RetiredEntry {
 const RETIRED_LITERALS: ReadonlyArray<RetiredEntry> = [
   {
     literal: 'ISSUE_NUMBERS',
-    phase: '0',
     removedFrom: 'src/assets/agents/git.md, src/assets/commands/plan.mds',
     justification: 'Renamed to ISSUE_REFS in A1 (AC-0.11)',
   },
   {
     literal: 'ISSUE: {issue',
-    phase: '0',
     removedFrom: 'src/assets/commands/debug.mds',
     justification: 'Renamed to ISSUE_INPUT: {issue reference} in A1 (debug.mds spawn key fix)',
   },
   {
     literal: 'close milestone',
-    phase: '0',
     removedFrom: 'src/assets/commands/release.md',
     justification: 'Untruthful claim deleted from release.md in A1 (AC-0.14)',
   },
   {
     literal: 'may pre-fetch',
-    phase: '0',
     removedFrom: 'src/assets/commands/_partials/_wave.mds',
     justification: 'Weakened "may" replaced with mandatory pre-fetch in A1',
   },
   {
     literal: 'issue-first gate',
-    phase: '0',
     removedFrom: 'src/assets/commands/implement.mds',
     justification:
       '"issue-first gate in step 1c" was the stale cross-reference in implement.mds pointing to ' +
@@ -106,7 +94,6 @@ const RETIRED_LITERALS: ReadonlyArray<RetiredEntry> = [
   },
   {
     literal: 'no generated copies anywhere',
-    phase: '1',
     removedFrom: 'CLAUDE.md',
     justification:
       'The Build System section claimed src/assets/{skills,agents,rules}/ were the single source ' +
@@ -116,7 +103,6 @@ const RETIRED_LITERALS: ReadonlyArray<RetiredEntry> = [
   },
   {
     literal: 'The only intermediate build step',
-    phase: '1',
     removedFrom: 'docs/reference/file-organization.md',
     justification:
       'The Asset Distribution section named compiling .mds command sources to dist/commands/ as the ' +
@@ -127,7 +113,6 @@ const RETIRED_LITERALS: ReadonlyArray<RetiredEntry> = [
   },
   {
     literal: 'No build step distributes agents',
-    phase: '1',
     removedFrom: 'docs/reference/agent-design.md',
     justification:
       'agent-design.md asserted src/assets/agents/ was the single source of truth for every agent and ' +
@@ -137,13 +122,12 @@ const RETIRED_LITERALS: ReadonlyArray<RetiredEntry> = [
   },
 
   // -------------------------------------------------------------------------
-  // Phase-2 denylist (AC-2.8, §14.9). Four scoped literals plus §14.2's retired
-  // DEGRADED synonyms. The denylist grows by the phase's retired literals; it is
-  // never a new grep and never emptied.
+  // SCOPED literals — retired from one tree, legitimate in another. Each names
+  // the trees it is forbidden in, because a repo-wide entry for any of these
+  // would be a grep rather than a rule.
   // -------------------------------------------------------------------------
   {
     literal: 'gh issue',
-    phase: '2',
     removedFrom: 'src/assets/commands/**.mds (the command layer)',
     scope: ['dist/commands/'],
     justification:
@@ -154,18 +138,16 @@ const RETIRED_LITERALS: ReadonlyArray<RetiredEntry> = [
   },
   {
     literal: 'sleep 60',
-    phase: '2',
     removedFrom: 'src/assets/skills/git/SKILL.md:196, references/github-api.md:20 and :467',
     scope: ['src/assets/skills/git/', 'dist/agents/git.md', 'dist/skills/git/references/'],
     justification:
       'GAP-25. Sleeping out an active secondary rate limit extends the provider\'s penalty window, ' +
-      'which is why D4 says STOP. Three sites held it and all three were rewritten in P2-S7/P2-S8; ' +
+      'which is why D4 says STOP. Three sites held it and all three were rewritten; ' +
       'scoped to the files a Git spawn preloads or can load, because an unrelated example elsewhere ' +
       'is not a second rate-limit policy in the agent\'s context.',
   },
   {
     literal: '<!-- devflow:',
-    phase: '2',
     removedFrom: 'src/assets/commands/dynamic-build.mds and code-review.mds',
     scope: ['dist/commands/'],
     justification:
@@ -176,16 +158,15 @@ const RETIRED_LITERALS: ReadonlyArray<RetiredEntry> = [
   },
   {
     literal: '{issue}',
-    phase: '2',
     removedFrom: 'src/assets/skills/docs-framework/SKILL.md:45, :106, :144',
     scope: ['src/assets/skills/docs-framework/SKILL.md'],
     justification:
-      'P2-S11 replaced the GitHub-bound placeholder with the provider-neutral {ISSUE_ID}. Scoped to ' +
+      'The GitHub-bound placeholder was replaced by the provider-neutral {ISSUE_ID}. Scoped to ' +
       'the one file: `{issue}` is an ordinary template token elsewhere and a repo-wide entry would ' +
       'be a grep rather than a rule.',
   },
 
-  // §14.2's retired DEGRADED synonyms. Unscoped — a DEGRADED reason is user-visible
+  // Retired DEGRADED synonyms. Unscoped — a DEGRADED reason is user-visible
   // wherever it is written, and the canonical table admits exactly one spelling per
   // condition (GAP-13: thirteen reasons with three synonyms for one condition is how
   // a caller ends up matching on a string no op emits).
@@ -201,37 +182,33 @@ const RETIRED_LITERALS: ReadonlyArray<RetiredEntry> = [
     ['delete .devflow/tracker.md and re-learn', 'superseded; the file is never the remedy'],
   ] as const).map(([literal, why]): RetiredEntry => ({
     literal,
-    phase: '2',
-    removedFrom: '§14.2 canonical DEGRADED reason table (retired synonym)',
+    removedFrom: 'the canonical DEGRADED reason table (retired synonym)',
     justification: `Retired DEGRADED synonym — ${why}. The canonical table admits one reason per condition.`,
   })),
 
   // -------------------------------------------------------------------------
-  // Phase-3 denylist (AC-3.10). §14.2's three retired status headings.
+  // Retired status headings — three sections no operation emits any more.
   //
-  // AC-3.10's wording is exact: the denylist GROWS by the phase's retired
-  // literals; never a new grep. These three arrived in a second list inside
-  // tests/tracker/schema-scope.test.ts — which is a new grep, and a weaker one:
+  // They belong here rather than in a list of their own. A second list inside
+  // tests/tracker/schema-scope.test.ts would be a new grep, and a weaker one:
   // that corpus is `dist/agents/git.md` ∪ `dist/skills/git/references/**` ∪ the
   // two command trees. This corpus is a strict superset of all four AND reaches
   // `src/assets/agents/`, `src/assets/skills/`, `src/assets/mds/`, `docs/` and
   // the root prose — which is exactly where a retired heading survives a sweep by
-  // being restated in documentation rather than in an op body (PF-025, the
-  // Phase-1 lesson). The narrower list is deleted rather than kept alongside: it
-  // asserted no property this does not, and two lists is how one goes stale.
+  // being restated in documentation rather than in an op body (PF-025). One list,
+  // because two lists is how one goes stale.
   //
   // `.devflow/features/*/KNOWLEDGE.md` stays out of the corpus (see the note
   // above buildCorpus), so the knowledge bases may keep recording what these
   // headings were and why they went.
   // -------------------------------------------------------------------------
   ...([
-    ['## Tracker Discovery', 'the discovery report of a question step §3.3 deleted'],
+    ['## Tracker Discovery', 'the discovery report of a question step that no longer exists'],
     ['## Tracker Learned', 'the confirmation half of the same step'],
     ['## Tracker Learning Required', 'the prompt half — it promised an interactive setup that never comes'],
   ] as const).map(([literal, why]): RetiredEntry => ({
     literal,
-    phase: '3',
-    removedFrom: '§14.2 retired status headings — no op emits them',
+    removedFrom: 'the canonical status-heading set — no op emits them',
     justification:
       `Retired status heading — ${why}. A heading with no emitter is residue; a heading an op ` +
       `still emits is a user-visible section describing a flow that no longer exists.`,
@@ -253,7 +230,6 @@ const RETIRED_LITERALS: ReadonlyArray<RetiredEntry> = [
   {
     literal: 'P{n}-S{n} phase labels',
     pattern: /P[0-9][a-z]?-S[0-9]+/,
-    phase: '4',
     removedFrom:
       'src/core/{tracker,mds-variants,feature-config}.ts, src/cli/commands/{init,tracker}.ts, ' +
       'src/targets/claude-code/installer.ts, src/assets/scripts/redact-secrets.cjs',
@@ -351,7 +327,7 @@ function collectRetiredLiteralViolations(
         : content.includes(entry.literal);
       if (hit) {
         violations.push(
-          `${relPath}: contains retired literal "${entry.literal}" (phase ${entry.phase}; removed from ${entry.removedFrom})`,
+          `${relPath}: contains retired literal "${entry.literal}" (removed from ${entry.removedFrom})`,
         );
       }
     }
@@ -363,7 +339,7 @@ function collectRetiredLiteralViolations(
 // Guard
 // ---------------------------------------------------------------------------
 
-describe('retired-wording guard — denylist of retired literals (P0-S22, GAP-32)', () => {
+describe('retired-wording guard — denylist of retired literals (GAP-32)', () => {
   it('denylist is non-empty and each entry carries a justification (non-vacuity)', () => {
     expect(
       RETIRED_LITERALS.length,

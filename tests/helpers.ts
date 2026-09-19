@@ -1056,10 +1056,11 @@ export function loadGolden(name: string): string {
 // DERIVATION test in tests/goldens/github-status-lines.test.ts: the `--unfreeze
 // --out-dir` case re-derives the whole fixture from the live tree on every run
 // and compares it byte-for-byte, and the inputs it derives from are themselves
-// frozen (git.md by the git-agent.md golden; the generated references by the
-// containment oracle's 101bda7 baselines). A FUTURE extractor rewrite inherits
-// the Phase-0 obligation unchanged, with the baseline tree being the re-capture
-// commit rather than b6928e5.
+// pinned (git.md by the git-agent.md golden; the generated references by their
+// committed `.mds` sources, which the build reproduces deterministically). A
+// FUTURE extractor rewrite inherits that obligation unchanged: re-derive, compare
+// byte-for-byte, and re-capture the fixture only under its own explicit
+// authorisation.
 
 /**
  * Generated skill references the status-line corpus samples.
