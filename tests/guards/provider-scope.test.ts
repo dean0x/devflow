@@ -1,15 +1,26 @@
 /**
- * provider-scope — Phase 2 is GitHub-only, and says so mechanically (P2-S15, AC-2.7).
+ * provider-scope — a provider name appears only where a provider is resolved or
+ * where a provider's own mechanics are stated, and the surface says so
+ * mechanically (P2-S15, AC-2.7, AC-3.12).
  *
- * Four negatives, all from §14.5's standing prohibitions and AC-2.7's amended
- * positive form. Each is a NAMED collector with a known-bad probe that drives it.
+ * Five negatives, all from §14.5's standing prohibitions and AC-2.7's amended
+ * positive form. Each is driven by a NAMED collector with a known-bad probe that
+ * seeds the shape it must report.
  *
- *   1. No Jira/Linear literal outside the ONE allowlisted site.
+ *   1. No Jira/Linear literal outside the resolution preamble and the owning
+ *      provider's own mechanics (AC-3.12, ADR-025 per-literal classification)
+ *      — collectForeignProviderLiterals.
  *   2. No `mcp__` / vendor tool literal, and no user-facing "MCP", in anything a
- *      Git spawn can load.
- *   3. The Git agent declares no `tools:` frontmatter key.
- *   4. `_mcp.md` does not exist after a GitHub-only build and is named from no
- *      generated GitHub mechanics file.
+ *      Git spawn can load — collectVendorTokens.
+ *   3. The Git agent declares no `tools:` frontmatter key — collectFrontmatterKeys.
+ *   4. `_mcp.md` is generated ONLY behind its registry gate (AC-2.7 re-scoped in
+ *      3a-4, hazard H7) and is named from no generated GitHub mechanics file —
+ *      collectOpsNamingContract for the second half, and INJECTED registries for
+ *      the gate itself, where the probe is a registry with no tool-call provider
+ *      rather than a seeded file.
+ *   5. The `/plan` command promises a tracker issue, not a host issue —
+ *      collectHostIssueLiterals. Collector 1 cannot see this one: `github` is the
+ *      DEFAULT provider, not a foreign token.
  *
  * SCOPE, and why it is a scope rather than a cleverer regex
  * --------------------------------------------------------
@@ -31,7 +42,16 @@ import { existsSync, readFileSync } from 'fs';
 import * as path from 'path';
 
 import { agentsDir, commandsDir, compiledAgentsDir, compiledSkillRefsDir, skillsDir } from '../../src/core/assets.js';
-import { TRACKER_GITHUB_OPS } from '../../src/core/mds-variants.js';
+import {
+  TRACKER_GITHUB_OPS,
+  TRACKER_OPS,
+  MCP_BACKED_PROVIDER_SUBDIRS,
+  MCP_CONTRACT_MODULE,
+  VARIANT_MODULES,
+  generatedReferenceManifest,
+  mcpContractIsGenerated,
+  resolveVariantModules,
+} from '../../src/core/mds-variants.js';
 import { resolveAgentSource, splitFrontmatter, walkFiles, ROOT, type CorpusEntry } from '../helpers.js';
 
 const DIST_COMMANDS = path.join(ROOT, 'dist', 'commands');
@@ -111,6 +131,115 @@ const FOREIGN_PROVIDER_TOKENS: readonly ProviderToken[] = [
   { name: 'linear', pattern: /\blinear\b/i },
 ];
 
+/**
+ * `PROVIDER_OWNED_PATHS` — the files that ARE a provider, and the ONE token each
+ * may name.
+ *
+ * ADR-025 applied literally: the case is classified, and the widening is the
+ * narrowest one that admits it. A provider's own mechanics module cannot state
+ * mechanics without naming its provider — that is what the file IS — but it has
+ * no business naming a DIFFERENT one, so ownership is per (path prefix, token)
+ * rather than per file. `_jira.mds` naming `linear` is still a violation, and so
+ * is any file outside these prefixes naming either.
+ *
+ * Why a prefix and not an exact path: one source module fans out into ten
+ * generated files whose names come from the op roster, so listing them would be a
+ * second roster to keep in step. The prefix is the unit the build emits and the
+ * installer converges (D-OVERLAY-FLAT-UNIT), which is the same unit ownership
+ * should be expressed in.
+ *
+ * This is deliberately NOT the mechanism `PROVIDER_MAP_ALLOWLIST` uses. That one
+ * exempts a BLOCK inside a file that must otherwise stay clean (the resolution
+ * preamble, PF-023's single convergence point); this one says a whole file belongs
+ * to a provider. Folding them together would let a provider module quietly acquire
+ * the preamble's exemption, or the agent acquire a provider's.
+ */
+interface ProviderOwnedPath {
+  /** POSIX path prefix, as `scanCorpus` labels entries. */
+  readonly prefix: string;
+  /** The single token this path may name. */
+  readonly token: string;
+  readonly justification: string;
+}
+
+const PROVIDER_OWNED_PATHS: readonly ProviderOwnedPath[] = [
+  {
+    prefix: 'src/assets/mds/tracker/_jira.mds',
+    token: 'jira',
+    justification:
+      'the Jira mechanics module. Its sections state which provider the Git agent loads them for, ' +
+      'and a mechanics file that cannot name its provider cannot state that.',
+  },
+  {
+    prefix: 'dist/skills/git/references/tracker/jira/',
+    token: 'jira',
+    justification:
+      'the generated Jira per-op references — the emitted form of the module above. Scanned, not ' +
+      'exempted: only the one token is admitted, so a Linear literal here is still reported.',
+  },
+  {
+    prefix: 'src/assets/mds/tracker/_linear.mds',
+    token: 'linear',
+    justification:
+      'the Linear mechanics module. Its sections state which provider the Git agent loads them ' +
+      'for, and a mechanics file that cannot name its provider cannot state that. Its ' +
+      '`## Known Unknowns` prose names the provider too — the rank-4 statement is about this ' +
+      'provider specifically, and a rank stated without its subject is unreadable.',
+  },
+  {
+    prefix: 'dist/skills/git/references/tracker/linear/',
+    token: 'linear',
+    justification:
+      'the generated Linear per-op references — the emitted form of the module above. Scanned, ' +
+      'not exempted: only the one token is admitted, so a Jira literal here is still reported, ' +
+      'which is the half of ADR-025 that keeps the narrow widening narrow.',
+  },
+];
+
+/**
+ * One foreign-provider token, addressed by name and raised by name when absent.
+ *
+ * `find(...)!` would hand the caller an `undefined` whose only symptom is "cannot
+ * read properties of undefined" at the next `.pattern` read, naming neither the
+ * table nor the token — and an ownership entry pointing at a token nobody
+ * registered is exactly the drift these arms report.
+ */
+function requireForeignToken(name: string): ProviderToken {
+  const found = FOREIGN_PROVIDER_TOKENS.find(t => t.name === name);
+  if (found === undefined) {
+    throw new Error(
+      `"${name}" is not in FOREIGN_PROVIDER_TOKENS (registered: ` +
+      `${FOREIGN_PROVIDER_TOKENS.map(t => t.name).join(', ')}) — an ownership entry naming an ` +
+      `unregistered token exempts a path from a scan that never covered it`,
+    );
+  }
+  return found;
+}
+
+/**
+ * One scanned corpus entry, addressed by path and raised by path when absent.
+ *
+ * The scan roots read the built tree, so a missing entry means a root went empty
+ * or an artifact was never built — a failure that has to name the file, because
+ * "cannot read properties of undefined" is indistinguishable from a logic error.
+ */
+function requireCorpusEntry(corpus: readonly CorpusEntry[], relPath: string): CorpusEntry {
+  const found = corpus.find(e => e.path === relPath);
+  if (found === undefined) {
+    throw new Error(
+      `${relPath} is not in the scanned corpus (${corpus.length} file(s) scanned) — either a scan ` +
+      `root went empty or the artifact was never built, and an unscanned file is an exemption ` +
+      `nobody wrote down`,
+    );
+  }
+  return found;
+}
+
+/** Is `path` owned by `token` — i.e. may it name that provider? */
+function ownsToken(path: string, token: string): boolean {
+  return PROVIDER_OWNED_PATHS.some(owned => owned.token === token && path.startsWith(owned.prefix));
+}
+
 /** Remove the allowlisted preamble block from an allowlisted file; identity elsewhere. */
 function stripAllowlistedRegion(entry: CorpusEntry): string {
   if (!PROVIDER_MAP_ALLOWLIST.files.includes(entry.path as never)) return entry.content;
@@ -122,7 +251,10 @@ function stripAllowlistedRegion(entry: CorpusEntry): string {
     : entry.content.slice(0, start) + entry.content.slice(end);
 }
 
-/** Named collector: foreign-provider literals outside the allowlisted preamble. */
+/**
+ * Named collector: foreign-provider literals outside the allowlisted preamble and
+ * outside the provider's own owned paths.
+ */
 export function collectForeignProviderLiterals(corpus: CorpusEntry[]): string[] {
   const violations: string[] = [];
   for (const entry of corpus) {
@@ -130,6 +262,7 @@ export function collectForeignProviderLiterals(corpus: CorpusEntry[]): string[] 
     const lines = text.split('\n');
     for (let i = 0; i < lines.length; i++) {
       for (const token of FOREIGN_PROVIDER_TOKENS) {
+        if (ownsToken(entry.path, token.name)) continue;
         if (token.pattern.test(lines[i])) {
           violations.push(`${entry.path}: "${token.name}" — ${lines[i].trim().slice(0, 90)}`);
         }
@@ -165,10 +298,9 @@ describe('provider-scope: no Jira or Linear literal outside the provider map (§
     // an exemption nobody notices going out of date. If the map ever stops naming
     // the foreign tokens, this fails and the allowlist is deleted, not carried.
     for (const file of PROVIDER_MAP_ALLOWLIST.files) {
-      const entry = corpus.find(e => e.path === file);
-      expect(entry, `${file} missing from corpus`).toBeDefined();
-      const whole = entry!.content;
-      const stripped = stripAllowlistedRegion(entry!);
+      const entry = requireCorpusEntry(corpus, file);
+      const whole = entry.content;
+      const stripped = stripAllowlistedRegion(entry);
       expect(
         stripped.length,
         `${file}: the allowlisted region was not found — the preamble anchors changed`,
@@ -187,10 +319,118 @@ describe('provider-scope: no Jira or Linear literal outside the provider map (§
     const violations = collectForeignProviderLiterals(corpus);
     expect(
       violations,
-      `Phase 2 is GitHub-only. A Jira or Linear literal outside the provider map is either a ` +
-      `second resolution site or Phase-3 work landing early (ADR-003: nothing exists solely for ` +
-      `a later phase):\n  ${violations.join('\n  ')}`,
+      `A Jira or Linear literal outside the resolution preamble and outside the owning provider's ` +
+      `own mechanics is either a second resolution site (PF-023) or a provider name leaking into ` +
+      `provider-neutral text:\n  ${violations.join('\n  ')}`,
     ).toEqual([]);
+  });
+
+  it('every owned path is real, scanned, and actually names its token', () => {
+    // An ownership entry that matches nothing is an exemption nobody notices going
+    // out of date — the failure mode the inline-body exclusion list taught. Each
+    // entry must reach at least one scanned file, and that file must genuinely
+    // carry the token, or the entry is deleted rather than carried.
+    expect(PROVIDER_OWNED_PATHS.length, 'the ownership table is empty (PF-018)').toBeGreaterThan(0);
+    for (const owned of PROVIDER_OWNED_PATHS) {
+      const matched = corpus.filter(e => e.path.startsWith(owned.prefix));
+      expect(
+        matched.length,
+        `ownership entry "${owned.prefix}" matched no scanned file — delete it or fix the prefix`,
+      ).toBeGreaterThan(0);
+      const token = requireForeignToken(owned.token);
+      expect(
+        matched.some(e => token.pattern.test(e.content)),
+        `"${owned.prefix}" is owned by "${owned.token}" but names it nowhere — the entry silences ` +
+        `nothing and must be removed`,
+      ).toBe(true);
+      expect(owned.justification.trim().length, 'an entry with no justification is a grep')
+        .toBeGreaterThan(0);
+    }
+  });
+
+  it('AC-3.12: the provider-neutral scopes hold no provider literal, each arm named', () => {
+    // AC-3.12 spelled as the scopes it names, so each one is asserted by itself
+    // rather than inferred from an aggregate empty list. An arm that stopped being
+    // reached would otherwise pass silently while contributing nothing.
+    const FORBIDDEN_SCOPES: readonly string[] = [
+      'dist/agents/git.md',
+      'dist/commands/',
+      'dist/skills/git/references/tracker/github/',
+      `${SRC_AGENTS_LABEL}/`,
+      'src/assets/commands/',
+    ];
+    for (const scope of FORBIDDEN_SCOPES) {
+      const inScope = corpus.filter(e => e.path.startsWith(scope));
+      expect(
+        inScope.length,
+        `AC-3.12 scope "${scope}" reached no file — the arm is vacuous`,
+      ).toBeGreaterThan(0);
+      for (const entry of inScope) {
+        expect(
+          ownsToken(entry.path, 'jira') || ownsToken(entry.path, 'linear'),
+          `"${entry.path}" is inside an AC-3.12 forbidden scope AND owned by a provider — the two ` +
+          `tables contradict each other`,
+        ).toBe(false);
+      }
+      expect(
+        collectForeignProviderLiterals(inScope),
+        `AC-3.12: no provider literal may appear in ${scope}`,
+      ).toEqual([]);
+    }
+  });
+
+  it('known-bad probe: a seeded provider literal is reported in every AC-3.12 scope', () => {
+    // One seed per forbidden scope, driven through the live collector. Without this
+    // the per-scope empties above are equally green for an over-eager ownership
+    // prefix that swallowed the whole corpus.
+    const seeds: readonly CorpusEntry[] = [
+      { path: 'dist/agents/git.md', content: 'After the preamble, load the jira mechanics.\n' },
+      { path: 'dist/commands/seed.md', content: 'Pick a Linear team before planning.\n' },
+      {
+        path: 'dist/skills/git/references/tracker/github/seed.md',
+        content: 'If the tracker is Jira, fall back to the label map.\n',
+      },
+      { path: `${SRC_AGENTS_LABEL}/seed.md`, content: 'Resolve the jira project key.\n' },
+      { path: 'src/assets/commands/seed.mds', content: 'Ask which Linear team owns the ticket.\n' },
+    ];
+    expect(
+      collectForeignProviderLiterals([...seeds]).map(v => v.split(':')[0]),
+      'every forbidden scope must be reported by the same collector the live arms use',
+    ).toEqual(seeds.map(seed => seed.path));
+  });
+
+  it('known-bad probe: EVERY owned path may name ITS token and no other', () => {
+    // The half ADR-025 is about. Ownership is per (path, token), so the Jira module
+    // naming Linear is still a violation — the narrow widening did not become a
+    // blanket one.
+    //
+    // Driven over EVERY entry, not over PROVIDER_OWNED_PATHS[0]. Probing one member
+    // of a table the live arms range over stops discriminating the moment the table
+    // grows: the uncovered regression is an over-broad ROW — say
+    // `{prefix: '…/_linear.mds', token: 'jira'}` added to silence a leak — which
+    // satisfies the iterating arm above (the leak is why the row was added) while
+    // no probe ever asks it the foreign-token half. Indexing [0] also silently
+    // assumed which provider sits first in the table.
+    for (const owned of PROVIDER_OWNED_PATHS) {
+      expect(
+        collectForeignProviderLiterals([
+          { path: owned.prefix, content: `Resolve the ${owned.token} project key.\n` },
+        ]),
+        `${owned.prefix} must be allowed to name "${owned.token}"`,
+      ).toEqual([]);
+
+      const foreign = FOREIGN_PROVIDER_TOKENS.filter(t => t.name !== owned.token);
+      expect(foreign.length, 'a single-token registry cannot express the "no other" half')
+        .toBeGreaterThan(0);
+      for (const token of foreign) {
+        expect(
+          collectForeignProviderLiterals([
+            { path: owned.prefix, content: `Fall back to the ${token.name} team filter.\n` },
+          ]).map(v => v.split(' — ')[0]),
+          `${owned.prefix} must NOT be allowed to name "${token.name}"`,
+        ).toEqual([`${owned.prefix}: "${token.name}"`]);
+      }
+    }
   });
 
   it('known-bad probe: a seeded foreign literal is reported by the same collector', () => {
@@ -367,35 +607,317 @@ describe('provider-scope: the compiled Git agent declares no tools: key', () => 
 });
 
 // ---------------------------------------------------------------------------
-// 4. AC-2.7 — `_mcp.md` is not generated in Phase 2 and is named from nowhere
+// 4. AC-2.7, RE-SCOPED in 3a-4 (hazard H7, decision D-D)
 // ---------------------------------------------------------------------------
+//
+// Phase 2's form was *"no `_mcp.md` exists after a GitHub-only build"*, and it
+// would have failed the instant Phase 3 authored the module — which is why the
+// re-scope is a named step (P3a-S12) rather than a discovery. The re-scoped form:
+//
+//     `_mcp.md` is GENERATED ONLY when a provider that needs it is registered,
+//     and is never NAMED from any github op file.
+//
+// Both halves are asserted, and the first one has now flipped: a provider that
+// reaches its tracker through a tool call IS registered, so the file exists. That
+// is not a relaxation of AC-2.7 — the claim was never "the file is absent", it was
+// "the file tracks its consumers", and the arms below pin BOTH directions of that:
+// the gate is open for the shipped registry, and shut for a registry with no such
+// provider, so a GitHub-only install still carries nothing it cannot reach
+// (GAP-02). The SECOND half does not move at all: no github op file may name the
+// contract, because a CLI provider loading a document about a transport it never
+// uses would be handed the DEGRADED vocabulary of capabilities it has no analogue
+// for (AC-3.12).
 
-describe('provider-scope: no _mcp.md after a GitHub-only build (AC-2.7, D-D)', () => {
-  it('references/tracker/_mcp.md does not exist', () => {
-    const mcp = path.join(REFS_DIR, 'tracker', '_mcp.md');
+/** The contract's generated basename — the literal a GitHub mechanics file may never name. */
+const MCP_REL_NAME = '_mcp.md';
+
+/** The generated GitHub per-op references, as `[op, text]` pairs a probe can seed. */
+function githubOpReferences(): ReadonlyArray<readonly [string, string]> {
+  return TRACKER_GITHUB_OPS.map(op => [
+    op,
+    readFileSync(path.join(REFS_DIR, 'tracker', 'github', `${op}.md`), 'utf-8'),
+  ] as const);
+}
+
+/**
+ * Named collector: generated GitHub op references that name the tool-call contract.
+ *
+ * Takes the corpus rather than reading it, so the probe below can seed one op and
+ * show the collector reports it — the absence arm alone is equally green for a
+ * collector that recognises nothing (PF-018, PF-064).
+ */
+export function collectOpsNamingContract(
+  refs: ReadonlyArray<readonly [op: string, text: string]>,
+): string[] {
+  return refs.filter(([, text]) => text.includes(MCP_REL_NAME)).map(([op]) => op);
+}
+
+describe('provider-scope: _mcp.md is generated only behind its gate (AC-2.7 re-scoped, H7, D-D)', () => {
+  const MCP_REL = path.join('tracker', MCP_REL_NAME);
+
+  it('the contract module IS authored — the gate governs a real document', () => {
+    const source = path.join(ROOT, MCP_CONTRACT_MODULE.source);
+    expect(
+      existsSync(source),
+      `${MCP_CONTRACT_MODULE.source} is absent. AC-2.7's re-scoped form asserts a GATE; with no ` +
+      `module on disk it would instead be asserting that 3a-4 never happened.`,
+    ).toBe(true);
+    expect(
+      readFileSync(source, 'utf-8').length,
+      'the contract module is empty — a zero-byte contract passes every containment assertion',
+    ).toBeGreaterThan(0);
+  });
+
+  it('references/tracker/_mcp.md IS generated on this tree (the gate is open)', () => {
+    expect(
+      mcpContractIsGenerated(),
+      'the shipped registry must open the gate: a registered provider reaches its tracker through ' +
+      'a tool call and its mechanics NAME this contract, so a shut gate would ship ten references ' +
+      'pointing at a file the install does not carry',
+    ).toBe(true);
+    const mcp = path.join(REFS_DIR, MCP_REL);
     expect(
       existsSync(mcp),
-      `${mcp} exists. Clause (iii) is read PER PHASE: no MCP-backed provider module exists in ` +
-      `Phase 2, so the file would have no reachable consumer (ADR-003). It lands in 3a.`,
-    ).toBe(false);
-    // Non-vacuity: the directory it would live in IS present and populated, so the
-    // absence above is an absence and not a missing build.
-    expect(
-      existsSync(path.join(REFS_DIR, 'tracker', 'github')),
-      'the GitHub mechanics directory is absent — run `npm run build`; the _mcp.md assertion ' +
-      'would otherwise pass on an unbuilt tree',
+      `${mcp} is absent while the gate is open — run \`npm run build\`; the provider mechanics ` +
+      `name this file and would take the \`tracker mechanics unavailable\` path as normal.`,
     ).toBe(true);
+    expect(
+      generatedReferenceManifest(),
+      'the installer converges to this manifest, so the contract must be named in it or it never ' +
+      'reaches a machine',
+    ).toContain('tracker/_mcp.md');
+  });
+
+  it('absence arm: the gate SHUTS for a registry with no tool-call provider', () => {
+    // The direction that keeps it a gate rather than a constant. Without this,
+    // AC-2.7's original reason (GAP-02 — a GitHub user billed for a reference
+    // nothing they can reach loads) would have no assertion behind it at all now
+    // that the shipped registry is on the other side of the gate.
+    const gated: readonly string[] = MCP_BACKED_PROVIDER_SUBDIRS;
+    const cliOnly = VARIANT_MODULES.filter(mod => !gated.includes(mod.subdir));
+    expect(
+      cliOnly.length,
+      'the CLI-only probe registry must still hold a module, and must differ from the shipped one',
+    ).toBeGreaterThan(0);
+    expect(cliOnly.length).toBeLessThan(VARIANT_MODULES.length);
+    expect(mcpContractIsGenerated(cliOnly)).toBe(false);
+    expect(
+      resolveVariantModules(cliOnly).map(m => m.source),
+      'a shut gate must append nothing',
+    ).not.toContain(MCP_CONTRACT_MODULE.source);
+
+    // …and the presence arm, on an injected registry rather than on the shipped
+    // one, so both directions are provable from one place.
+    const withProvider = [
+      ...cliOnly,
+      {
+        source: 'src/assets/mds/tracker/_probe.mds',
+        subdir: MCP_BACKED_PROVIDER_SUBDIRS[0],
+        kind: 'fanout' as const,
+        ops: TRACKER_OPS,
+      },
+    ];
+    expect(mcpContractIsGenerated(withProvider)).toBe(true);
+    expect(
+      resolveVariantModules(withProvider).map(m => m.source),
+      'opening the gate must add the contract module and nothing else',
+    ).toContain(MCP_CONTRACT_MODULE.source);
   });
 
   it("no generated GitHub mechanics file names '_mcp.md'", () => {
-    const named: string[] = [];
-    for (const op of TRACKER_GITHUB_OPS) {
-      const file = path.join(REFS_DIR, 'tracker', 'github', `${op}.md`);
-      const text = readFileSync(file, 'utf-8');
-      if (text.includes('_mcp.md')) named.push(op);
+    // The second half of the re-scoped form, and the half that does NOT relax:
+    // a github op naming the tool-call contract would make a CLI provider load a
+    // document about a transport it never uses, and would hand it the DEGRADED
+    // vocabulary of capabilities it has no analogue for.
+    const refs = githubOpReferences();
+    expect(
+      collectOpsNamingContract(refs),
+      `ops naming ${MCP_REL_NAME}: ${collectOpsNamingContract(refs).join(', ')}`,
+    ).toEqual([]);
+    expect(
+      refs.length,
+      'the op roster is empty — the collector above ran over nothing (PF-018)',
+    ).toBeGreaterThan(0);
+  });
+
+  it('known-bad probe: the same collector reports a seeded contract reference', () => {
+    // An absence result is a statement about what the matcher can express, never
+    // about the property (PF-064), so the collector is driven over the real corpus
+    // with one op seeded — no committed file is touched to show red.
+    const refs = githubOpReferences();
+    const [first, ...rest] = refs;
+    const seeded: ReadonlyArray<readonly [string, string]> = [
+      [first[0], `${first[1]}\n**Mechanics:** load \`references/tracker/${MCP_REL_NAME}\`.`],
+      ...rest,
+    ];
+    expect(seeded, 'the seed must change the corpus').not.toEqual(refs);
+    expect(
+      collectOpsNamingContract(seeded),
+      'the collector must report the seeded op, or the absence arm above is inert',
+    ).toEqual([first[0]]);
+  });
+
+  it('the contract module is INSIDE the scanned corpus, so its wording is governed', () => {
+    // The module names no provider and no transport, and that is only meaningful
+    // while the scan can see it: an exemption was deliberately NOT taken here
+    // (ADR-025 — classify the case, and this case did not need widening), so the
+    // guard must prove the file is in scope rather than out of it.
+    const corpus = scanCorpus();
+    const scanned = corpus.map(e => e.path);
+    expect(
+      scanned,
+      'the contract module must be scanned by the provider and vendor collectors — an unscanned ' +
+      'file is an exemption nobody wrote down',
+    ).toContain('src/assets/mds/tracker/_mcp.mds');
+    const entry = requireCorpusEntry(corpus, 'src/assets/mds/tracker/_mcp.mds');
+    expect(collectForeignProviderLiterals([entry]), 'the contract is provider-independent').toEqual([]);
+    expect(
+      collectVendorTokens([entry]),
+      'the contract states its rules in terms of CAPABILITIES, not transport: no vendor tool ' +
+      'literal and no transport acronym, so no allowlist entry is needed for it',
+    ).toEqual([]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 5. The plan command's traceable-issue path names no HOST
+// ---------------------------------------------------------------------------
+
+/**
+ * Collector 1 above cannot see this one. `github` is not a FOREIGN token — it is
+ * the default provider — so a `GitHub issue` literal in a provider-neutral
+ * sentence passes every arm of the Jira/Linear scan while saying the same wrong
+ * thing to a Jira user: `/plan` asks "create a GitHub issue for this plan?" and
+ * then spawns `ensure-traceable-issue`, whose mechanics create a Jira one.
+ *
+ * The scope is the plan command, source and compiled, because that is where the
+ * prompt the user answers lives. Widening it to every command is the right
+ * response to the literal turning up elsewhere; loosening the token is not.
+ */
+const PLAN_COMMAND_ARTIFACTS: readonly { readonly path: string; readonly file: string }[] = [
+  { path: 'src/assets/commands/plan.mds', file: path.join(ROOT, 'src', 'assets', 'commands', 'plan.mds') },
+  { path: 'dist/commands/plan.md', file: path.join(DIST_COMMANDS, 'plan.md') },
+];
+
+const PLAN_COMMAND_PATHS: readonly string[] = PLAN_COMMAND_ARTIFACTS.map(a => a.path);
+
+/**
+ * The authored host and its compiled form, read directly.
+ *
+ * Both are needed and neither substitutes for the other: the `.mds` is what an
+ * author edits, and the `.md` is what a session loads. A pin on one alone is
+ * satisfied by a literal the other still carries.
+ */
+function planCorpus(): CorpusEntry[] {
+  return PLAN_COMMAND_ARTIFACTS.map(a => ({ path: a.path, content: readFileSync(a.file, 'utf-8') }));
+}
+
+/**
+ * `PLAN_USAGE_ALLOWLIST` — the usage synopsis, and nothing else.
+ *
+ * The synopsis annotates a literal `#42` argument, and `#42` IS GitHub's issue
+ * grammar: naming the host there tells the reader which provider the example is
+ * written for rather than promising them that provider. Every other site is a
+ * sentence about what the operation DOES, which is provider-independent.
+ *
+ * A region rather than a line, for the reason `PROVIDER_MAP_ALLOWLIST` is one: a
+ * line-scoped exemption goes stale on a rewrap.
+ */
+const PLAN_USAGE_ALLOWLIST = { from: '## Usage', to: '## Input' } as const;
+
+/** The host literal the traceable-issue path must not carry. */
+const HOST_ISSUE_LITERAL = 'GitHub issue';
+
+/** Everything outside the usage synopsis. */
+function stripPlanUsage(content: string): string {
+  const start = content.indexOf(PLAN_USAGE_ALLOWLIST.from);
+  if (start === -1) return content;
+  const end = content.indexOf(PLAN_USAGE_ALLOWLIST.to, start);
+  return end === -1 ? content.slice(0, start) : content.slice(0, start) + content.slice(end);
+}
+
+/** Named collector: host-issue literals outside the plan command's usage synopsis. */
+export function collectHostIssueLiterals(corpus: CorpusEntry[]): string[] {
+  const violations: string[] = [];
+  for (const entry of corpus) {
+    if (!PLAN_COMMAND_PATHS.includes(entry.path)) continue;
+    for (const line of stripPlanUsage(entry.content).split('\n')) {
+      if (line.includes(HOST_ISSUE_LITERAL)) {
+        violations.push(`${entry.path}: ${line.trim().slice(0, 90)}`);
+      }
     }
-    expect(named, `ops naming _mcp.md: ${named.join(', ')}`).toEqual([]);
-    expect(TRACKER_GITHUB_OPS.length, 'the op roster is empty — the loop above ran zero times')
-      .toBeGreaterThan(0);
+  }
+  return violations;
+}
+
+describe('provider-scope: the plan command promises a tracker issue, not a host issue', () => {
+  const corpus = planCorpus();
+
+  it('both plan artifacts are scanned and non-empty', () => {
+    expect(corpus.map(e => e.path)).toEqual(PLAN_COMMAND_PATHS);
+    for (const entry of corpus) {
+      expect(
+        entry.content.length,
+        `${entry.path} is empty — a guard over nothing forbids nothing; run \`npm run build:mds\``,
+      ).toBeGreaterThan(0);
+    }
+  });
+
+  it('the usage allowlist is still needed: the synopsis really does carry the literal', () => {
+    // The staleness half. If the synopsis ever stops naming the host, the exemption
+    // is deleted rather than carried — the failure mode an unnoticed exemption is.
+    for (const file of PLAN_COMMAND_PATHS) {
+      const entry = requireCorpusEntry(corpus, file);
+      expect(
+        entry.content.includes(HOST_ISSUE_LITERAL),
+        `${file}: the usage synopsis no longer names the host — delete PLAN_USAGE_ALLOWLIST`,
+      ).toBe(true);
+      expect(
+        stripPlanUsage(entry.content).length,
+        `${file}: the usage region was not found — the synopsis anchors changed`,
+      ).toBeLessThan(entry.content.length);
+    }
+  });
+
+  it('no host-issue literal on the traceable-issue path, in source or compiled form', () => {
+    const violations = collectHostIssueLiterals(corpus);
+    expect(
+      violations,
+      `The plan command asks the user about, and describes, the issue \`ensure-traceable-issue\` ` +
+      `creates — and that operation resolves its provider at spawn time. Naming the host here ` +
+      `promises a Jira or Linear user an issue they will not get:\n  ${violations.join('\n  ')}`,
+    ).toEqual([]);
+  });
+
+  it('known-bad probe: the same collector reports a seeded literal, and spares the synopsis', () => {
+    const seededOutside: CorpusEntry[] = PLAN_COMMAND_PATHS.map(p => ({
+      path: p,
+      content: `## Usage\n/plan #42 (GitHub issue)\n## Input\nCreate or enrich a GitHub issue?\n`,
+    }));
+    expect(
+      collectHostIssueLiterals(seededOutside),
+      'a literal below the synopsis must be reported in both artifacts',
+    ).toEqual(PLAN_COMMAND_PATHS.map(p => `${p}: Create or enrich a GitHub issue?`));
+
+    expect(
+      collectHostIssueLiterals([
+        { path: PLAN_COMMAND_PATHS[0], content: '## Usage\n/plan #42 (GitHub issue)\n## Input\nok\n' },
+      ]),
+      'the synopsis is the exemption, so a literal inside it must be silent',
+    ).toEqual([]);
+
+    expect(
+      collectHostIssueLiterals([{ path: 'dist/commands/implement.md', content: 'a GitHub issue\n' }]),
+      'the collector is scoped to the plan command — another command is not its business',
+    ).toEqual([]);
+
+    // …and over the REAL bytes, so the live arm's silence is evidence about this
+    // command's current text rather than about a synopsis-shaped fixture.
+    expect(
+      collectHostIssueLiterals(
+        planCorpus().map(e => ({ ...e, content: `${e.content}\nCreate or enrich a GitHub issue?\n` })),
+      ),
+      'a regression appended to the shipped bytes must be reported in both artifacts',
+    ).toEqual(PLAN_COMMAND_PATHS.map(p => `${p}: Create or enrich a GitHub issue?`));
   });
 });

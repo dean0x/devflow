@@ -49,7 +49,7 @@ devflow/
 │       │   │   └── references/
 │       │   ├── software-design/
 │       │   └── ...
-│       ├── agents/                   # 16 agents — hand-authored .md, plus MDS generator hosts (.mds → dist/agents/)
+│       ├── agents/                   # 17 agents — hand-authored .md, plus MDS generator hosts (.mds → dist/agents/)
 │       │   ├── git.mds                 # MDS generator host → dist/agents/git.md
 │       │   ├── synthesize.md
 │       │   ├── code.md
@@ -177,7 +177,7 @@ Assets live once in `src/assets/` and install to the user's `~/.claude/` — no 
 
 ### Agents
 
-All 16 agents (`git`, `synthesize`, `skim`, `simplify`, `code`, `review`, `triage`, `evaluate`, `test`, `scrutinize`, `validate`, `design`, `knowledge`, `research`, `diagnose`, `learning`) are shared, and every source lives in `src/assets/agents/`. Fifteen are hand-authored `.md` files that install verbatim. `git` is an `.mds` generator host, compiled to `dist/agents/git.md` by `npm run build:mds`.
+All 17 agents (`git`, `synthesize`, `skim`, `simplify`, `code`, `review`, `triage`, `evaluate`, `test`, `scrutinize`, `validate`, `design`, `knowledge`, `research`, `diagnose`, `learning`, `tracker`) are shared, and every source lives in `src/assets/agents/`. Sixteen are hand-authored `.md` files that install verbatim. `git` is an `.mds` generator host, compiled to `dist/agents/git.md` by `npm run build:mds`.
 
 The installer resolves each declared agent over `agentSourceDirs()` in `src/core/assets.ts` — `dist/agents/`, then `src/assets/agents/` — and copies the first hit, so a compiled artifact supersedes a hand-authored file of the same name. When neither directory has the agent, the install throws naming both candidate paths and `npm run build:mds` rather than silently skipping it. `npm run build:cli` alone (TypeScript) does not produce installable agents; `npm run build` runs both steps.
 

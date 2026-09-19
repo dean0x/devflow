@@ -381,7 +381,7 @@ interface ForbiddenConstruct {
  * Phase 2 splits the Git agent into a contract layer plus generated per-provider
  * references, which is where variant expansion, conditionals and templated file
  * naming belong. Pinning their absence now means their arrival is a reviewed
- * change rather than something that accreted through Phase 1 (clause iii).
+ * change rather than something that accreted through Phase 1.
  *
  * Each construct is matched by an ANCHORED regex, never a bare substring. The
  * corpus deliberately includes src/core/mds-variants.ts and scripts/build-mds.ts

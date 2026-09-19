@@ -53,7 +53,7 @@ This is the **orchestrated flow** — you stay in the loop between every step. W
 
 **Ambient orchestration.** Your main session becomes the tech lead: a charter injected at session start turns it into a pure orchestrator that delegates work to specialized agents and keeps only judgment mainline. Plan-mode handoffs auto-run `/implement`. Init and forget.
 
-**A staffed agent roster.** 16 specialized agents with explicit model assignments — Opus for analysis, Sonnet for execution, Haiku for I/O. Reassign any agent's model with `devflow agents`, including GPT models through external model routing (`devflow proxy`).
+**A staffed agent roster.** 17 specialized agents with explicit model assignments — Opus for analysis, Sonnet for execution, Haiku for I/O. Reassign any agent's model with `devflow agents`, including GPT models through external model routing (`devflow proxy`).
 
 **Up to 20 parallel Review agents.** Security, architecture, performance, complexity, consistency, regression, testing, and more. Each produces findings with severity, confidence scoring, and concrete fixes. Conditional Review agents activate when relevant (TypeScript for `.ts` files, database for schema changes, compliance when regulated surface detected in the diff). Every finding gets validated and resolved automatically.
 
@@ -70,6 +70,8 @@ This is the **orchestrated flow** — you stay in the loop between every step. W
 **Skill shadowing.** Override any built-in skill with your own version. Drop a file into `~/.devflow/skills/{name}/` and the installer uses yours instead of the default — same activation, your rules.
 
 **Compliance built in.** Six regulatory frameworks — GDPR, HIPAA, PCI DSS, SOC 2, ISO 27001, SOX — composed into a review skill and an always-on rule for exactly the frameworks you select. Compliance reviews activate automatically when a diff touches regulated surface. `devflow compliance --enable`.
+
+**Your issue tracker, not just GitHub.** Pick the tracker your team actually uses — GitHub, Jira, or Linear — at `devflow init`, with `devflow init --tracker <id>`, or later with `devflow tracker --set <id>`. On a non-GitHub tracker a background agent learns your conventions once (project key, issue types, required fields, workflow transitions, how a reference renders) and writes them to `~/.devflow/tracker.md`, so traceability speaks your tracker's vocabulary instead of assuming `#123`. That file is yours: hand-editable, kept across an uninstall, and refused rather than silently trusted if it no longer matches your selected provider. **GitHub is the default and GitHub users see no change** — no prompt, no new file, no altered byte.
 
 **Full lifecycle.** Beyond the core flow: `/explore` maps a codebase into knowledge bases, `/research` runs multi-type research with trust-aware synthesis, `/debug` investigates with competing hypotheses in parallel, `/bug-analysis` hunts bugs before review, `/self-review` runs Simplify + Scrutinize quality passes, and `/release` ships with learned configuration.
 

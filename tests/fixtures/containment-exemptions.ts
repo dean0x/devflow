@@ -217,12 +217,16 @@ export const CONTAINMENT_EXEMPTIONS: readonly ContainmentExemption[] = [
     startLine: 715,
     endLine: 715,
     rationale:
-      'resolve-review-threads D4 clause, EXTENDED not cut. `:28` defers the backpressure rung to ' +
-      '"the resolved provider\'s reference", but D4 names TWO batch ops and only ' +
-      'backlink-shipped-issues has a generated reference — so a resolve-review-threads spawn ' +
-      'could never learn the rung and the 1s → 3s escalation was unimplementable for it. The ' +
-      'rung is stated here, on the line that already names `X-RateLimit-Remaining` < 10 for the ' +
-      'same op, so no new provider surface is introduced. Every pre-split byte is retained.',
+      'resolve-review-threads D4 clause, CUT to its op-specific arms. Both GitHub rate-limit ' +
+      'signals — the `X-RateLimit-Remaining` < 10 STOP and the < 50 backpressure rung — left ' +
+      'this line; what stays is the no-PR arm, the 4xx arm and the 5xx retry, which are this ' +
+      'op\'s own. `:25` and `:28` already hold the STOP rule and the 1s → 3s bound ' +
+      'provider-neutrally, and the thresholds they defer to now live in the `devflow:git` ' +
+      'skill\'s `references/github-api.md`, which SKILL.md\'s always-loaded throttling row ' +
+      'names — so the batch op that has no generated tracker reference can still reach both. ' +
+      'This makes resolve-review-threads state its rate limiting exactly as its sibling ' +
+      'backlink-shipped-issues does: one policy in the contract, one threshold in a GitHub ' +
+      'reference, and no restatement in always-loaded text.',
   },
   {
     file: 'git-agent.md',
@@ -737,5 +741,178 @@ export const CONTAINMENT_EXEMPTIONS: readonly ContainmentExemption[] = [
       'iteration away from deciding whether to keep fanning out. Same fallback and same ' +
       'digit-run `case`, whose unreadable-probe arm sets the stop reason that the post-loop ' +
       'THROTTLED report names alongside the count of items never attempted.',
+  },
+
+  // -------------------------------------------------------------------------
+  // #325. Provider-neutralisation of the tracker operations' always-loaded
+  // wording. Phase 2 reserved this decision for Phase 3 because it could not be
+  // taken with one provider registered: a cell reading "Fetch GitHub issue" was
+  // simply true. With three providers it is false for two of them, in a table
+  // and in three op descriptions that every Git spawn preloads regardless of
+  // which tracker resolved. Each entry below is a REWRITE, not a move — the
+  // words changed — which is exactly what CONTAINMENT_EXEMPTIONS is for.
+  // -------------------------------------------------------------------------
+  {
+    file: 'git-agent.md',
+    startLine: 68,
+    endLine: 69,
+    rationale:
+      '#325. The `## Operations` table\'s two fetch rows read "Fetch GitHub issue" and "Fetch ' +
+      'multiple GitHub issues" in a provider-blind, always-loaded position. Both are tracker ' +
+      'operations whose provider is resolved per spawn, so the cells are wrong for jira and ' +
+      'linear and right for one of three. Rewritten to "tracker issue(s)" — the vocabulary the ' +
+      'phase artifact uses — with nothing else in either row touched.',
+  },
+  {
+    file: 'git-agent.md',
+    startLine: 81,
+    endLine: 81,
+    rationale:
+      '#325. The same defect in `ensure-traceable-issue`\'s table cell: "Create or enrich a ' +
+      'GitHub issue from the D3 template". The D3 template is provider-independent (each ' +
+      'provider\'s mechanics state how it is attached), so only the provider name was wrong. ' +
+      'Rewritten to "a tracker issue"; the D5 marker and the whole parameter column are ' +
+      'byte-unchanged.',
+  },
+  {
+    file: 'git-agent.md',
+    startLine: 310,
+    endLine: 310,
+    rationale:
+      '#325. `fetch-issues-batch`\'s own one-line description, the op-body twin of the table ' +
+      'cell above. Left alone it would have contradicted the cell it duplicates — the table ' +
+      'saying "tracker issues" and the operation two hundred lines later saying "GitHub ' +
+      'issues" — which is a worse end state than either wording alone. Same one-word rewrite.',
+  },
+  {
+    file: 'git-agent.md',
+    startLine: 890,
+    endLine: 890,
+    rationale:
+      '#325. `ensure-traceable-issue`\'s own description, the twin of its table cell. Two words ' +
+      'changed: "GitHub issue" to "tracker issue", and "the issue number" to "the issue ' +
+      'reference" — under a non-github provider what the operation returns is a key, and ' +
+      '§14.1 fixes ISSUE_REF as the provider-canonical rendered form. The spawn-key ' +
+      '`ISSUE_NUMBER` is untouched everywhere (§14.5 keeps it at all 14 sites); this is prose.',
+  },
+  {
+    file: 'git-agent.md',
+    startLine: 850,
+    endLine: 853,
+    rationale:
+      '#325. `backlink-shipped-issues` step 0 required every `SHIPPED_ISSUES` entry to be ' +
+      '"digits only" — a GitHub SHAPE in a provider-blind, always-loaded position, which made ' +
+      'the operation unreachable under jira and linear (every `PROJ-1` dropped, and the step ' +
+      'is the entry gate). The step now defers to the resolved provider\'s anchored reference ' +
+      'grammar, stated and enforced by that provider\'s mechanics, and the github grammar ' +
+      '`^#?[1-9][0-9]{0,8}$` moved INTO the github reference with the same drop rule and the ' +
+      'canonical per-ref DEGRADED reason — so the gate is not weakened, it is relocated to ' +
+      'where enforcement lives. The metacharacter rationale went with it: all three provider ' +
+      'mechanics now say the anchored form is what keeps a reference out of a query or a ' +
+      'command, and git.md\'s input contract already states the shape-gate-at-the-sink rule ' +
+      'once, so restating it here was the duplication GAP-37 forbids. Net effect on the ' +
+      'always-loaded file is 33 characters SHORTER.',
+  },
+  {
+    file: 'git-agent.md',
+    startLine: 555,
+    endLine: 555,
+    rationale:
+      '#325, Scrutinize pass. `gather-release-evidence`\'s `### SHIPPED_ISSUES` output template ' +
+      '— the PRODUCER instruction for the list the two entries below consume. It asked for ' +
+      '"issue numbers" in a provider-blind, always-loaded position, so under jira or linear it ' +
+      'asked the agent to EMIT a shape the resolved provider does not use, while the consuming ' +
+      'operation\'s step 0 had already been rewritten to validate entries against that ' +
+      'provider\'s own anchored grammar (the 850-853 entry). One word, "numbers" to ' +
+      '"references", matching §14.1\'s ISSUE_REF vocabulary and the `ensure-traceable-issue` ' +
+      'entry above. The `≤50` bound and the separator wording are byte-unchanged.',
+  },
+  {
+    file: 'git-agent.md',
+    startLine: 844,
+    endLine: 844,
+    rationale:
+      '#325, Scrutinize pass. `backlink-shipped-issues`\'s input-contract line, which sat four ' +
+      'lines above the step-0 gate the 850-853 entry relocated: the gate now defers to the ' +
+      'resolved provider\'s anchored grammar while the contract immediately above it still ' +
+      'called the entries "numbers" — the same file contradicting itself within one operation. ' +
+      'Same one-word rewrite; both separator spellings and the `SHIPPED_ISSUES` parameter name ' +
+      'are byte-unchanged.',
+  },
+  {
+    file: 'git-agent.md',
+    startLine: 861,
+    endLine: 861,
+    rationale:
+      '#325, Scrutinize pass. The same operation\'s loop header, "For each issue number in ' +
+      '`SHIPPED_ISSUES`". Under jira and linear the iteration is over keys, not numbers. The ' +
+      'rest of the line is byte-unchanged, the ≤50 cap and the TRUNCATED clause included — ' +
+      'among them "never report the status as `COMPLETE` while issues went unprocessed", which ' +
+      'is the release-facing half of the same gate and was deliberately left alone.',
+  },
+
+  // ── #325, alignment pass: the last GitHub signal in a tracker op's D4 line ──
+  {
+    file: 'git-agent.md',
+    startLine: 846,
+    endLine: 846,
+    rationale:
+      '#325, alignment pass (M4). The same operation\'s `**Degradation (D4):**` line named ' +
+      'GitHub\'s rate-limit SIGNAL — a 403/429 rate-limit response or `X-RateLimit-Remaining` ' +
+      '< 10 — in a provider-blind, always-loaded position. Under jira and linear the winning ' +
+      'contract therefore keyed the full-STOP rung on a header neither provider ever sends, ' +
+      'while those providers\' own mechanics say there is no pre-emptive rung at all: a rung ' +
+      'that can never engage reads as coverage and is none. The sentence is DELETED rather ' +
+      'than reworded because both of its halves already exist provider-neutrally and deleting ' +
+      'it leaves the end state rather than a pointer restating an always-loaded rule. `:28` ' +
+      'states the rung itself ("A provider-signalled secondary rate limit … STOP the current ' +
+      'fan-out operation immediately; report remaining items as `THROTTLED ({n} not ' +
+      'processed)`") and defers the signal to "the resolved provider\'s reference"; `:31` names ' +
+      'this operation as one of D4\'s two batch ops; and `### Provider signals (GitHub)` in ' +
+      'the github mechanics holds both thresholds, which is where the 850-853 entry above ' +
+      'already relocated this operation\'s reference grammar. A third restatement in the op ' +
+      'body was the duplication GAP-37 forbids. The unavailability rung and the 4xx/5xx rungs ' +
+      'on this line are byte-unchanged; net effect on the always-loaded file is 163 characters ' +
+      'SHORTER, which is what funded the `## Tracker input contract` rendering rule (M2).',
+  },
+
+  // ── #325, resolve pass: the D11 staging files gain a lifetime ──────────────
+  {
+    file: 'git-agent.md',
+    startLine: 59,
+    endLine: 59,
+    rationale:
+      'security-01/security-08. The D11 temp-file sentence stated CREATION and nothing else, so ' +
+      'the four staging files it names were created per invocation and removed on no path — and ' +
+      '`$DEVFLOW_BODY_RAW` holds precisely the bytes the scrub exists to delete, which makes the ' +
+      'staging area a second sink with no gate over it (PF-066). The line is MERGED with the ' +
+      '`DEVFLOW_NOTES_RAW`/`DEVFLOW_NOTES` sentence that followed it, so all four names are ' +
+      'stated once, and extended with the removal: a `trap` armed before the first `mktemp`, a ' +
+      'plain `rm` because the permission layer these recipes run under refuses the flagged form, ' +
+      'and the gate status captured ahead of the removals so a cleanup cannot report the ' +
+      'scrubber\'s refusal as success. Every clause of the pre-split line survives in the merged ' +
+      'one — both `$(mktemp)` assignments, "never a fixed path", and the parallel-worktrees ' +
+      'reason — and `tests/guards/mcp-sink-bypass.test.ts` claim 5 now pins each property of the ' +
+      'removal with a known-bad probe per property.',
+  },
+
+  // ── #325, resolve pass: the last host-named issue in an op input contract ──
+  {
+    file: 'git-agent.md',
+    startLine: 933,
+    endLine: 933,
+    rationale:
+      'regression-04. `post-wave-report` is a TRACKER operation — both tool-call providers ' +
+      'generate mechanics for it — so its `TRACKING_ISSUE` input does not take a GitHub issue ' +
+      'NUMBER. Under jira and linear the value is a key such as `PROJ-42`, and a contract that ' +
+      'calls it a number in an always-loaded position describes a shape those providers never ' +
+      'produce. Reworded to "tracker issue reference for the parent tracking issue", which is ' +
+      'the vocabulary `ensure-traceable-issue` and `backlink-shipped-issues` already use for ' +
+      'the same value (`:803`, `:839`). Nothing is dropped: the input, its name and its role as ' +
+      'the parent tracking issue all survive; only the provider-bound noun is replaced. The ' +
+      'user-facing half of the same defect lived in the plan command, which asked "create or ' +
+      'enrich a GitHub issue for this plan?" immediately before spawning ensure-traceable-issue ' +
+      '— that command is outside this baseline, and `tests/guards/provider-scope.test.ts` now ' +
+      'pins it over both the authored and the compiled form.',
   },
 ];

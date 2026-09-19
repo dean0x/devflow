@@ -18,6 +18,11 @@ import { removeContextHook } from './context.js';
 import { applyProxyTeardownToSettings } from './proxy.js';
 import { readProxyState, proxyJsonExists } from '../../core/proxy-state.js';
 import { hudCacheDir } from '../../core/cache.js';
+import {
+  TRACKER_CONVENTIONS_FILE,
+  TRACKER_CONVENTIONS_BACKUP_NAMES,
+  TRACKER_STAGED_PREFIX,
+} from '../../core/tracker.js';
 import { revertExternalAgents } from '../../core/agent-models.js';
 import type { Settings } from '../../targets/claude-code/hooks.js';
 import { detectShell, getProfilePath } from '../../core/safe-delete.js';
@@ -201,22 +206,79 @@ export function resolveDevflowDirCleanup(opts: {
   return 'prompt';
 }
 
+/** One user-authored path under `devflowDir` that a full cleanup would delete. */
+export interface UserContentEntry {
+  /** Path relative to `devflowDir` — the key the @D8 disjointness check intersects. */
+  relPath: string;
+  /** Directories count as present only when non-empty. */
+  isDir?: boolean;
+  /** Label rendered in the confirmation prompt. */
+  label: string;
+}
+
 /**
- * Enumerate user-authored content in devflowDir that would be deleted by a
- * full cleanup of the directory.
+ * Single source of truth for user-authored content under `devflowDir`.
  *
- * Checks for items that exist on disk and are worth backing up:
- *   devflowDir/skills/              — skill shadow overrides (user-maintained)
- *   devflowDir/rules/               — rule shadow overrides (user-maintained)
- *   devflowDir/preference-profile.md — dynamic-plan preference profile
- *   devflowDir/learning.json         — global learning agent tuning config
- *   devflowDir/hud.json              — HUD enable/disable preference and display config
+ * The counterpart to `installArtifactPaths`: together the two lists describe
+ * every Devflow-created entry in `~/.devflow`, and they never overlap (@D8).
+ * Membership here means "survives every path but a confirmed full-dir rm";
+ * membership there means "removed on decline, cancel, non-interactive and
+ * --keep-docs alike".
  *
  * NOT listed here: agent-models.json — reclassified as an INSTALL ARTIFACT (AC-P1-F4).
  * Stale per-agent model overrides silently re-apply to renamed/deleted agents on reinstall,
  * so it must be cleaned up by removeDevFlowInstallArtifacts, not preserved behind a confirm gate.
  *
- * Returns labels for each item that actually exists. Empty array means nothing
+ * @param devflowDir - Absolute path to ~/.devflow (labels quote the shadow dirs).
+ */
+export function userContentPaths(devflowDir: string): ReadonlyArray<UserContentEntry> {
+  return [
+    // Skill shadow overrides (~/.devflow/skills/{name}/)
+    { relPath: 'skills', isDir: true, label: `skill shadows (${path.join(devflowDir, 'skills')})` },
+    // Rule shadow overrides (~/.devflow/rules/{name}.md)
+    { relPath: 'rules', isDir: true, label: `rule shadows (${path.join(devflowDir, 'rules')})` },
+    // preference-profile.md — user-curated decision-preference profile
+    { relPath: 'preference-profile.md', label: 'preference-profile.md' },
+    // tracker.md — the inferred, hand-editable issue-tracker conventions file.
+    //
+    // USER CONTENT (OD-15), classified the same way as preference-profile.md above
+    // rather than as an install artifact like agent-models.json, because it is
+    // inferred ONCE per machine and then hand-editable: absence is the trigger that
+    // re-runs inference, so deleting it on every decline/cancel/--keep-docs path
+    // would silently discard work the user may have corrected by hand.
+    //
+    // REVERSAL CONDITION, recorded: this classification is CONDITIONAL on the
+    // provider-mismatch guard shipping. agent-models.json was reclassified to an
+    // artifact precisely because stale overrides re-apply *silently*; "silently" is
+    // the load-bearing word. A stale tracker.md whose frontmatter provider
+    // disagrees with the resolved provider produces
+    // `TRACEABILITY: DEGRADED (tracker configuration mismatch)` and no tracker
+    // call — that is what removes the silence. If that guard is ever dropped,
+    // reclassify tracker.md to an install artifact IN THE SAME CHANGE, otherwise a
+    // silently-authoritative stale file survives uninstall.
+    { relPath: TRACKER_CONVENTIONS_FILE, label: `${TRACKER_CONVENTIONS_FILE} (issue tracker conventions)` },
+    // tracker.md.{provider}.bak — what renameStaleTrackerConventions leaves behind
+    // on a provider change. Same inferred content as tracker.md (the user's site
+    // and project key), so the same classification: named by the confirm prompt,
+    // kept by every artifacts-only pass. The names come from the registry, so a
+    // fourth provider is covered the day it lands.
+    ...TRACKER_CONVENTIONS_BACKUP_NAMES.map(name => ({
+      relPath: name,
+      label: `${name} (previous issue tracker conventions)`,
+    })),
+    // learning.json — global learning agent tuning config
+    { relPath: 'learning.json', label: 'learning.json' },
+    // hud.json — user HUD enable/disable preference and display config
+    { relPath: 'hud.json', label: 'hud.json (HUD configuration)' },
+  ];
+}
+
+/**
+ * Enumerate user-authored content in devflowDir that would be deleted by a
+ * full cleanup of the directory.
+ *
+ * Walks `userContentPaths` and returns the label of every entry that exists on
+ * disk — a directory counts only when it is non-empty. Empty array means nothing
  * user-authored is present in the directory.
  *
  * Pure I/O — no side effects, no output, fully testable.
@@ -227,41 +289,69 @@ export function resolveDevflowDirCleanup(opts: {
 export async function enumerateUserDevFlowContent(devflowDir: string): Promise<string[]> {
   const items: string[] = [];
 
-  // Skill shadow overrides (~/.devflow/skills/{name}/)
-  try {
-    const entries = await fs.readdir(path.join(devflowDir, 'skills'));
-    if (entries.length > 0) {
-      items.push(`skill shadows (${path.join(devflowDir, 'skills')})`);
-    }
-  } catch { /* dir absent or unreadable */ }
-
-  // Rule shadow overrides (~/.devflow/rules/{name}.md)
-  try {
-    const entries = await fs.readdir(path.join(devflowDir, 'rules'));
-    if (entries.length > 0) {
-      items.push(`rule shadows (${path.join(devflowDir, 'rules')})`);
-    }
-  } catch { /* dir absent or unreadable */ }
-
-  // preference-profile.md — user-curated decision-preference profile
-  try {
-    await fs.access(path.join(devflowDir, 'preference-profile.md'));
-    items.push('preference-profile.md');
-  } catch { /* absent */ }
-
-  // learning.json — global learning agent tuning config
-  try {
-    await fs.access(path.join(devflowDir, 'learning.json'));
-    items.push('learning.json');
-  } catch { /* absent */ }
-
-  // hud.json — user HUD enable/disable preference and display config
-  try {
-    await fs.access(path.join(devflowDir, 'hud.json'));
-    items.push('hud.json (HUD configuration)');
-  } catch { /* absent */ }
+  for (const entry of userContentPaths(devflowDir)) {
+    const fullPath = path.join(devflowDir, entry.relPath);
+    try {
+      if (entry.isDir) {
+        const children = await fs.readdir(fullPath);
+        if (children.length === 0) continue;
+      } else {
+        await fs.access(fullPath);
+      }
+      items.push(entry.label);
+    } catch { /* absent or unreadable */ }
+  }
 
   return items;
+}
+
+/** One Devflow-owned install artifact under `devflowDir`. */
+export interface InstallArtifactEntry {
+  /** Path relative to `devflowDir` — or, when `isPrefix`, a basename prefix. */
+  relPath: string;
+  /** Directories are removed recursively. */
+  isDir?: boolean;
+  /**
+   * `relPath` is a basename PREFIX matching every direct child of `devflowDir`
+   * that starts with it, not a path. For artifacts written under a per-run
+   * `mktemp` name, where the set of paths exists only on disk.
+   */
+  isPrefix?: boolean;
+}
+
+/**
+ * Expand `installArtifactPaths` against real disk.
+ *
+ * Exact entries pass through untouched; a prefix entry becomes one entry per
+ * matching direct child of `devflowDir`. This is the ONE place a prefix turns
+ * into paths, so the removal loop and the dry-run preview cannot disagree about
+ * what a prefix covers. An unreadable or absent `devflowDir` yields the exact
+ * entries alone — absent is the ordinary case here, never an error.
+ */
+export async function resolveInstallArtifactPaths(
+  devflowDir: string,
+): Promise<ReadonlyArray<{ relPath: string; isDir?: boolean }>> {
+  const resolved: Array<{ relPath: string; isDir?: boolean }> = [];
+  let children: string[] | null = null;
+
+  for (const entry of installArtifactPaths(devflowDir)) {
+    if (entry.isPrefix !== true) {
+      resolved.push({ relPath: entry.relPath, isDir: entry.isDir });
+      continue;
+    }
+    if (children === null) {
+      try {
+        children = await fs.readdir(devflowDir);
+      } catch {
+        children = [];
+      }
+    }
+    for (const child of children) {
+      if (child.startsWith(entry.relPath)) resolved.push({ relPath: child, isDir: entry.isDir });
+    }
+  }
+
+  return resolved;
 }
 
 /**
@@ -273,13 +363,22 @@ export async function enumerateUserDevFlowContent(devflowDir: string): Promise<s
  * lets callers (dry-run display, tests) enumerate the artifact set without
  * duplicating the list.
  *
- * @D8 Nothing returned here may overlap with the items enumerated by
- * `enumerateUserDevFlowContent` — the disjointness invariant is tested by test 9f
- * and enforced by keeping both lists in one place.
+ * @D8 Nothing returned here may overlap with `userContentPaths` — the two lists
+ * are the whole of what Devflow puts in `~/.devflow`, and a name in both is
+ * deleted whatever the user answers to the full-wipe prompt. Checked two ways:
+ * mechanically, by intersecting the `relPath` sets of the two functions and
+ * checking no user path falls UNDER a prefix entry (so an entry added to either
+ * list is covered the day it lands), and behaviourally, by test 9f — every
+ * enumerated user item survives an artifact-only removal.
+ *
+ * Entries marked `isPrefix` name a FAMILY of per-invocation basenames rather
+ * than one path; `resolveInstallArtifactPaths` is what turns them into paths.
+ * Every consumer goes through that resolver, so a prefix entry is never treated
+ * as a literal filename.
  *
  * @param devflowDir - Absolute path to ~/.devflow (used to resolve cache dir).
  */
-export function installArtifactPaths(devflowDir: string): ReadonlyArray<{ relPath: string; isDir?: boolean }> {
+export function installArtifactPaths(devflowDir: string): ReadonlyArray<InstallArtifactEntry> {
   return [
     // migration run-state — removed so migrations re-run cleanly on reinstall
     { relPath: 'migrations.json' },
@@ -295,6 +394,20 @@ export function installArtifactPaths(devflowDir: string): ReadonlyArray<{ relPat
     { relPath: 'proxy-routing.json' },
     { relPath: 'proxy.pid' },
     { relPath: '.proxy-spawn.lock', isDir: true },
+    // tracker runtime artifacts — the Tracker agent's atomic claim file, its
+    // inference attempt counter, and the provider presence sentinel the
+    // SessionStart hook stats. All three are machine state with no user-authored
+    // content, so they go on this list; `tracker.md` beside them and the
+    // `tracker.md.{provider}.bak` a provider change leaves are USER CONTENT
+    // (OD-15) and are deliberately NOT here (@D8: the two lists stay disjoint).
+    { relPath: '.tracker.processing' },
+    { relPath: '.tracker.attempts' },
+    { relPath: '.tracker.enabled' },
+    // The agent's scrubbed staging file, one per invocation under a mktemp name
+    // it removes from a trap — a SIGKILL outruns the trap and leaves it behind.
+    // A prefix, because the names exist only on disk. Content is a scrubbed copy
+    // that was never placed, so it is machine state like the three above.
+    { relPath: TRACKER_STAGED_PREFIX, isPrefix: true },
     // per-project hook logs (logs/{project-slug}/) AND global logs — remove the
     // whole logs/ tree; covers proxy.log, debug logs, and any project-slug dirs.
     { relPath: 'logs', isDir: true },
@@ -317,7 +430,8 @@ export function installArtifactPaths(devflowDir: string): ReadonlyArray<{ relPat
  * @D8 Nothing enumerated by enumerateUserDevFlowContent may appear in this list.
  * This function runs on the decline, cancel, non-interactive AND --keep-docs paths,
  * so an entry here is deleted even when the user answers "no" to the full wipe.
- * User-authored state (skill/rule shadows, preference-profile.md, learning.json,
+ * User-authored state (everything in `userContentPaths`: skill/rule shadows,
+ * preference-profile.md, tracker.md and its provider backups, learning.json,
  * hud.json) is removed only by the confirmed full-dir rm.
  * agent-models.json is an INSTALL ARTIFACT (stale per-agent overrides silently
  * re-apply to renamed/deleted agents on reinstall — AC-P1-F4) and therefore
@@ -350,8 +464,10 @@ export async function removeDevFlowInstallArtifacts(devflowDir: string, verbose:
     }
   } catch { /* proxy.pid absent or unreadable — non-fatal */ }
 
-  // All install artifacts removed non-fatally (avoids PF-009).
-  for (const artifact of installArtifactPaths(devflowDir)) {
+  // All install artifacts removed non-fatally (avoids PF-009). Resolved against
+  // disk first, so a per-run staging basename is a real path by the time the
+  // containment guard below sees it.
+  for (const artifact of await resolveInstallArtifactPaths(devflowDir)) {
     const fullPath = path.join(devflowDir, artifact.relPath);
     // Containment invariant: every artifact must resolve to a path STRICTLY inside
     // devflowDir. A derived relPath that ever collapsed to '' or '..' would turn the
@@ -467,7 +583,7 @@ export async function enumerateDryRunExtras(claudeDir: string, devflowDir: strin
   //    Guard with fs.access so files that never existed don't pollute the preview.
   //    (F7: previously pushed unconditionally, inflating the dry-run list with
   //    paths that were never on disk.)
-  for (const artifact of installArtifactPaths(devflowDir)) {
+  for (const artifact of await resolveInstallArtifactPaths(devflowDir)) {
     const fullPath = path.join(devflowDir, artifact.relPath);
     try {
       await fs.access(fullPath);

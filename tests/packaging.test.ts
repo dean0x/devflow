@@ -33,7 +33,10 @@ import {
   MDS_REFERENCE_MODULES,
   MDS_PARTIALS,
 } from './fixtures/mds-manifest.js';
-import { generatedReferenceManifest } from '../src/core/mds-variants.js';
+import {
+  GATED_REFERENCE_MODULE_SOURCES,
+  generatedReferenceManifest,
+} from '../src/core/mds-variants.js';
 
 const ROOT = path.resolve(import.meta.dirname, '..');
 
@@ -506,7 +509,7 @@ describe('Guard 6 (tarball contents): npm pack --dry-run output excludes source 
    */
   const EXPECTED_SHIPPED_MDS =
     MDS_COMMAND_HOSTS.length + MDS_PARTIALS.length + MDS_GENERATOR_HOSTS.length +
-    MDS_REFERENCE_MODULES.length; // 13 + 11 + 1 + 2
+    MDS_REFERENCE_MODULES.length;
 
   it(`tarball ships all ${EXPECTED_SHIPPED_MDS} src/assets/**/*.mds generator sources (D-A(a))`, () => {
     const files = getPackFiles();
@@ -534,6 +537,23 @@ describe('Guard 6 (tarball contents): npm pack --dry-run output excludes source 
     for (const source of MDS_REFERENCE_MODULES) {
       expect(shippedMds, `${source} must ship`).toContain(source);
     }
+    // A GATED module ships whether or not this build generates anything from it.
+    // Its gate is a property of the registry, not of the tarball: a published
+    // package whose registry later opens the gate must be able to compile the
+    // source, and this is the one class the `files[]`-wholesale behaviour could
+    // silently drop without any generated-file assertion noticing, because in the
+    // shut state it generates none.
+    for (const source of GATED_REFERENCE_MODULE_SOURCES) {
+      expect(
+        shippedMds,
+        `${source} is gate-controlled, not optional — it must ship in either gate state`,
+      ).toContain(source);
+    }
+    expect(
+      GATED_REFERENCE_MODULE_SOURCES.length,
+      'the gated roster is empty — the loop above asserts nothing (PF-064: an absence-based ' +
+      'roster needs a presence arm)',
+    ).toBeGreaterThan(0);
   });
 
   /**
@@ -570,7 +590,7 @@ describe('Guard 6 (tarball contents): npm pack --dry-run output excludes source 
     expect(
       manifest.length,
       'a manifest short enough to enumerate by hand makes this assertion vacuous',
-    ).toBeGreaterThanOrEqual(13);
+    ).toBeGreaterThanOrEqual(34);
 
     expect(
       collectMissingPackedReferences(files, manifest),

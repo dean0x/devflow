@@ -52,6 +52,7 @@ import {
   CONTAINMENT_EXEMPTIONS,
   type ContainmentExemption,
 } from '../fixtures/containment-exemptions.js';
+import { MIN_REFERENCE_CHARS } from './reference-floor.js';
 
 // ---------------------------------------------------------------------------
 // Fail-loud reads
@@ -407,15 +408,6 @@ function generatedTrackerFiles(): Map<string, string> {
   return found;
 }
 
-/**
- * Minimum characters a generated reference must carry.
- *
- * A zero-byte file is already refused by splitVariantSections' empty-section arm;
- * this floor catches the next shape up — a file that kept its heading and lost its
- * body, which compiles and ships and reads downstream as "mechanics unavailable".
- */
-const MIN_REFERENCE_CHARS = 80;
-
 describe('containment: structural parity — every op has a file and every file has an op', () => {
   const files = generatedTrackerFiles();
 
@@ -677,6 +669,16 @@ describe('shared-literal registry — one authority per normative sentence [DR-1
       providers.length,
       'no provider reference was read — the negative arm would be vacuous',
     ).toBeGreaterThanOrEqual(TRACKER_GITHUB_OPS.length);
+    // Provenance, not just a count: the corpus walks `tracker/`, so it must reach
+    // EVERY registered provider's directory and the contract beside them. A count
+    // alone is met by one provider's files twice over.
+    for (const mod of VARIANT_MODULES.filter(m => m.subdir.startsWith('tracker/'))) {
+      expect(
+        providers.some(entry => entry.label.startsWith(`${mod.subdir}/`)),
+        `the shared-literal negative arm never read ${mod.subdir}/ — a provider mechanics tree ` +
+        `outside this corpus is a tree that may restate a single-authority sentence freely`,
+      ).toBe(true);
+    }
 
     const restatements: string[] = [];
     for (const entry of SHARED_LITERAL_REGISTRY) {
@@ -700,6 +702,249 @@ describe('shared-literal registry — one authority per normative sentence [DR-1
       collectRestatements(SHARED_LITERAL_REGISTRY[0].sentence, seeded),
       'the collector must see a restatement in a provider file — otherwise the negative arm is inert',
     ).toEqual(['tracker/github/probe.md']);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 5b. The tool-call contract's OWN shared-literal registry [DR-19] — P3c-S6
+// ---------------------------------------------------------------------------
+//
+// The three cross-cutting documents above have a fourth sibling in the same
+// position: `tracker/_mcp.md`, the provider-independent tool-call contract. Its
+// load chain is one-directional and its own prose says so — a per-operation
+// mechanics file may INVOKE a rule here and never restate its substance, and on
+// any conflict the contract wins.
+//
+// A SEPARATE registry rather than rows added to SHARED_LITERAL_REGISTRY, and the
+// separation is not tidiness: that registry's ownership arm asserts its owners are
+// exactly GIT_CROSS_CUTTING_DOCS, and the contract is a different module KIND with
+// a different gate. Folding it in would have meant relaxing that arm to admit a
+// fourth owner — the blanket widening ADR-025 forbids — instead of classifying the
+// case.
+//
+// WHAT IS AND IS NOT A REGISTRY ENTRY, because the distinction is the whole design.
+// The contract mandates literals every posting mechanic MUST name: `D11-OK`,
+// `<bytes>`, `SCRUB: N […]`, `SECRET-EXPOSED (…)`. Those are not restatements —
+// tests/guards/mcp-sink-bypass.test.ts REQUIRES them per provider, and a registry
+// that forbade them would fight that guard. What may not be restated is the
+// contract's own statement of a RULE: where the gated bytes come from, what the
+// framing line consists of, which transformations are forbidden, the capability
+// table's rows, and how a tool is selected. A provider file reproducing one of
+// those has acquired a second authority on it, and the second one varies per
+// provider — which is exactly the defect the three documents above were built to
+// remove, one level down. Twenty per-op provider files authored against a contract
+// they are told to "name, not restate" will restate it.
+
+interface McpSharedLiteral {
+  /** The normative sentence, byte-exact as the generated contract spells it. */
+  readonly sentence: string;
+  /** Why this sentence is the contract's to state — an entry without one is a grep. */
+  readonly justification: string;
+}
+
+export const MCP_SHARED_LITERAL_REGISTRY: readonly McpSharedLiteral[] = [
+  {
+    sentence: 'D11-OK <nonce> <sha256> <bytes> <n> [type:count,…]',
+    justification:
+      'The framing line\'s COMPOSITION [DR-01]. A provider restating the field order would fix ' +
+      'its own reading of which field is the byte count, and [DR-06]\'s check reads that field ' +
+      'by position — a mechanic verifying the wrong field passes a truncated body.',
+  },
+  {
+    sentence: 'Everything after line 1 is `{SCRUBBED_BODY}`.',
+    justification:
+      'The definition of where the gated bytes come from. It is the sentence that makes the ' +
+      'placeholder mean anything, and a provider restating it is a provider that could redefine ' +
+      'it — the bytes behind the placeholder are obtainable only from behind a framing line the ' +
+      'scrubber alone can produce.',
+  },
+  {
+    sentence: '**NO re-encoding. NO base64. NO chunking. NO summarisation. NO reflowing.**',
+    justification:
+      'The transformation prohibition. Restated per provider it becomes negotiable the first time ' +
+      'one copy is edited to admit the wrapper that provider happens to need, and a body scrubbed ' +
+      'and then re-encoded is a body whose scrub no longer holds.',
+  },
+  {
+    sentence: '**Select by capability DESCRIPTION, never by tool name.**',
+    justification:
+      'The selection rule the whole capability vocabulary rests on. A provider restating it is a ' +
+      'provider one edit away from naming tool names instead, which binds the mechanics to one ' +
+      'server and one version — and the DEGRADED reason vocabulary is derived from the capability ' +
+      'table, so a provider selecting by tool name degrades on names nobody can grep for.',
+  },
+  {
+    sentence: '| fetch by key | `no tracker tool for fetch by key` |',
+    justification:
+      'A capability-table ROW. The prose form (`DEGRADED (no tracker tool for fetch by key)`) is ' +
+      'what a provider emits and is required of it; the TABLE is the contract\'s, and a provider ' +
+      'reproducing it would be a second definition of the closed capability vocabulary — the ' +
+      'triplication GAP-37 forbids.',
+  },
+];
+
+/**
+ * One registry entry, addressed by its sentence and raised by name when absent.
+ *
+ * `find(...)!` would hand the probe below an `undefined` that surfaces as "cannot
+ * read properties of undefined" one line later, naming neither the registry nor
+ * the sentence that left it — and the sentence leaving the registry is exactly the
+ * change this probe exists to notice.
+ */
+function requireRegistryEntry(sentence: string): McpSharedLiteral {
+  const found = MCP_SHARED_LITERAL_REGISTRY.find(e => e.sentence === sentence);
+  if (found === undefined) {
+    throw new Error(
+      `MCP_SHARED_LITERAL_REGISTRY holds no entry for ${JSON.stringify(sentence)} (registered: ` +
+      `${MCP_SHARED_LITERAL_REGISTRY.map(e => JSON.stringify(e.sentence)).join(', ')}) — ` +
+      `this arm has no subject`,
+    );
+  }
+  return found;
+}
+
+/** The generated tool-call contract, read fail-loud. */
+function contractFile(): string {
+  return requireFile('tool-call contract', path.join(REFS_DIR, 'tracker', '_mcp.md'));
+}
+
+describe('tool-call contract: one authority per normative sentence [DR-19]', () => {
+  it('the gate is open, so this arm has a subject in both halves', () => {
+    // The contract is generated only while a provider that needs it is registered,
+    // and so is the provider tree the negative arm walks. Both halves vanish
+    // together, so asserting the gate is open is what distinguishes "no
+    // restatements" from "nothing to restate" (PF-018).
+    expect(
+      generatedReferenceManifest(),
+      'the contract must be in the manifest — with the gate shut there is no contract to protect ' +
+      'and no provider tree to protect it from',
+    ).toContain('tracker/_mcp.md');
+    expect(
+      MCP_SHARED_LITERAL_REGISTRY.length,
+      'an empty registry makes both arms below pass by checking nothing (PF-018)',
+    ).toBeGreaterThan(0);
+    expect(
+      MCP_SHARED_LITERAL_REGISTRY.filter(e => e.justification.trim().length < MIN_RATIONALE_CHARS)
+        .map(e => e.sentence),
+      'a registry entry with no justification is a grep, not a rule',
+    ).toEqual([]);
+  });
+
+  it('positive arm: every registry sentence is in the contract, and in nothing else', () => {
+    // Scoped over the contract PLUS the three cross-cutting documents: a sentence
+    // that had migrated into one of those would have two homes just as surely as
+    // one that migrated into a provider file, and the sibling registry above would
+    // not see it because it only knows its own sentences.
+    const corpus = [
+      { label: 'tracker/_mcp.md', content: contractFile() },
+      ...[...crossCuttingFiles()].map(([label, content]) => ({ label, content })),
+    ];
+    const problems: string[] = [];
+    for (const entry of MCP_SHARED_LITERAL_REGISTRY) {
+      const owners = collectRestatements(entry.sentence, corpus);
+      if (owners.length !== 1 || owners[0] !== 'tracker/_mcp.md') {
+        problems.push(
+          `${JSON.stringify(entry.sentence.slice(0, 60))} → expected [tracker/_mcp.md], found ` +
+          `[${owners.join(', ')}]`,
+        );
+      }
+    }
+    expect(
+      problems,
+      `tool-call contract ownership problems:\n  ${problems.join('\n  ')}`,
+    ).toEqual([]);
+  });
+
+  it('negative arm: no registry sentence is restated in any provider mechanics file', () => {
+    // The corpus walks `tracker/` and then EXCLUDES the contract itself: it is the
+    // owner, so including it would report every entry as a restatement of itself.
+    const providers = providerReferenceCorpus().filter(e => e.label !== 'tracker/_mcp.md');
+    expect(
+      providers.length,
+      'no provider reference was read — the negative arm would be vacuous',
+    ).toBeGreaterThanOrEqual(TRACKER_GITHUB_OPS.length);
+    // Provenance, not a count: the arm must reach every registered provider's
+    // directory, including the ones whose mechanics actually name the contract.
+    for (const mod of VARIANT_MODULES.filter(m => m.subdir.startsWith('tracker/'))) {
+      expect(
+        providers.some(entry => entry.label.startsWith(`${mod.subdir}/`)),
+        `the contract's negative arm never read ${mod.subdir}/ — a provider mechanics tree outside ` +
+        `this corpus is a tree that may restate the contract freely`,
+      ).toBe(true);
+    }
+
+    const restatements: string[] = [];
+    for (const entry of MCP_SHARED_LITERAL_REGISTRY) {
+      for (const file of collectRestatements(entry.sentence, providers)) {
+        restatements.push(`${file}: ${JSON.stringify(entry.sentence.slice(0, 60))}`);
+      }
+    }
+    expect(
+      restatements,
+      'a provider mechanics file restates a sentence the tool-call contract owns. The load chain ' +
+      'is one-directional — a per-operation file may INVOKE a rule and never restate its ' +
+      'substance — and on any conflict the contract wins, which only means anything while there ' +
+      `is one copy to conflict with:\n  ${restatements.join('\n  ')}`,
+    ).toEqual([]);
+  });
+
+  it('the arm does NOT forbid the literals every posting mechanic must name', () => {
+    // The other direction of the same rule, and the one that keeps this registry
+    // from fighting tests/guards/mcp-sink-bypass.test.ts. Those literals are
+    // MANDATED per provider; a registry that swept them up would make the two
+    // guards unsatisfiable together, and the one that would be "fixed" is this one.
+    const mandated = ['D11-OK', '<bytes>', 'SCRUB: N', 'SECRET-EXPOSED'];
+    for (const literal of mandated) {
+      expect(
+        MCP_SHARED_LITERAL_REGISTRY.some(e => e.sentence === literal),
+        `"${literal}" must NOT be a registry entry — every posting mechanic is required to name it`,
+      ).toBe(false);
+    }
+    const posting = providerReferenceCorpus().filter(
+      e => e.label !== 'tracker/_mcp.md' && e.content.includes('{SCRUBBED_BODY}'),
+    );
+    expect(
+      posting.length,
+      'no posting mechanic was read, so this arm proves nothing about the mandated literals',
+    ).toBeGreaterThan(0);
+    for (const entry of posting) {
+      for (const literal of mandated) {
+        expect(entry.content, `${entry.label} must still name ${literal}`).toContain(literal);
+      }
+    }
+  });
+
+  it('known-bad probe: a seeded restatement of the {SCRUBBED_BODY} rule is reported', () => {
+    // [DR-19]'s named known-bad, verbatim in intent. Driven through the SAME
+    // collector the negative arm uses, over the real provider corpus plus one
+    // seeded file, so a collector that had stopped reporting takes this red too.
+    const rule = requireRegistryEntry('Everything after line 1 is `{SCRUBBED_BODY}`.');
+    const seeded = [
+      ...providerReferenceCorpus().filter(e => e.label !== 'tracker/_mcp.md'),
+      {
+        label: 'tracker/linear/probe.md',
+        content: [
+          '## Operation: probe',
+          'Run the scrubber with `--emit` and read the framing line.',
+          rule.sentence,
+          'Post through the *add comment* capability.',
+        ].join('\n'),
+      },
+    ];
+    expect(
+      collectRestatements(rule.sentence, seeded),
+      'the collector must see the contract\'s own rule restated inside a provider file — ' +
+      'otherwise the negative arm is inert against the one shape [DR-19] names',
+    ).toEqual(['tracker/linear/probe.md']);
+    // …and every other registry entry stays unreported over the same seeded corpus,
+    // so the probe proves the collector discriminates rather than matching anything.
+    for (const entry of MCP_SHARED_LITERAL_REGISTRY) {
+      if (entry.sentence === rule.sentence) continue;
+      expect(
+        collectRestatements(entry.sentence, seeded),
+        `"${entry.sentence.slice(0, 40)}" was not seeded and must not be reported`,
+      ).toEqual([]);
+    }
   });
 });
 
@@ -733,6 +978,57 @@ const LOAD_INSTRUCTION_TEMPLATE = 'references/tracker/{provider}/{op}.md';
 function reachablePaths(template: string, provider: string, ops: readonly string[]): string[] {
   return ops.map(op => template.replace('{provider}', provider).replace('{op}', op)
     .replace('references/', ''));
+}
+
+/**
+ * Every path the ONE templated load instruction can reach, across every provider
+ * the registry carries.
+ *
+ * The template is `{provider}`-parameterised, so reachability is too: the
+ * instruction the preamble states can compose a path for any provider named in the
+ * preamble's own static map, and the build emits a directory per registered
+ * provider module. Instantiating for `github` alone was correct while GitHub was
+ * the only provider and became a claim about a phase rather than about the
+ * instruction the moment a second one registered.
+ *
+ * The provider tokens come from the module registry — the same place the emitted
+ * directories come from — so the two halves of the both-directions check below
+ * cannot disagree about which providers exist. What keeps that from being a
+ * tautology is the OTHER half: the instruction itself is read out of the compiled
+ * agent (the arm above asserts there is exactly one such line and that it carries
+ * both placeholders), so a preamble that dropped a provider from its map, or
+ * hard-coded one, still fails.
+ */
+function providerReachablePaths(template: string): string[] {
+  return VARIANT_MODULES
+    .filter(mod => mod.subdir.startsWith('tracker/'))
+    .flatMap(mod => reachablePaths(template, mod.subdir.slice('tracker/'.length), mod.ops));
+}
+
+/**
+ * The tool-call CONTRACT document's own reachability rule — a third kind, matching
+ * its third module kind.
+ *
+ * A `fanout` file is reachable by instantiating the template; a `named` document is
+ * reachable because the agent spells its path; the contract is reachable because
+ * its DECLARED CONSUMERS name it — the per-operation mechanics of the providers
+ * that reach their tracker through a tool call. That is not a weaker rule than the
+ * other two, it is the same rule applied to the file's actual naming site: the
+ * contract is deliberately NOT named from the always-loaded preamble (which would
+ * be a second `references/tracker/` naming line, and the single-naming-line
+ * assertion above forbids exactly that) and is deliberately NOT named from any
+ * github op file (AC-3.12 — a CLI provider must not load a document about a
+ * transport it never uses).
+ *
+ * Reads the generated tree rather than a list: "some shipped mechanics file names
+ * it" is the property, and a hand-listed namer would drift from the files.
+ */
+function contractIsNamedByAConsumer(): boolean {
+  const contract = 'tracker/_mcp.md';
+  if (!generatedReferenceManifest().includes(contract)) return false;
+  return walkFiles(path.join(REFS_DIR, 'tracker'), f => f.endsWith('.md'))
+    .filter(file => path.basename(file) !== '_mcp.md')
+    .some(file => requireFile('generated reference', file).includes(contract));
 }
 
 /**
@@ -779,12 +1075,16 @@ describe('containment: every generated GitHub reference is reachable on the gh p
     // in neither "is it named" nor "is it emitted". A cross-cutting document that
     // lost its one naming line was exactly as invisible here as an orphan file.
     const reachable = new Set([
-      ...reachablePaths(LOAD_INSTRUCTION_TEMPLATE, 'github', TRACKER_GITHUB_OPS),
+      // The 'fanout' module kind, for every registered provider: reachable ⇔
+      // instantiating the preamble's single templated instruction yields the path.
+      ...providerReachablePaths(LOAD_INSTRUCTION_TEMPLATE),
       // The 'named' module kind: reachable ⇔ the compiled agent spells the path
       // out literally. Read out of the agent, never restated here (PF-018).
       ...[...collectLiteralReferenceNames(agent.content)].filter(rel =>
         (GIT_CROSS_CUTTING_DOCS as readonly string[]).includes(path.basename(rel, '.md')),
       ),
+      // The 'contract' module kind: reachable ⇔ a shipped consumer names it.
+      ...(contractIsNamedByAConsumer() ? ['tracker/_mcp.md'] : []),
     ]);
 
     const emitted = walkFiles(REFS_DIR, f => f.endsWith('.md'))
@@ -817,10 +1117,26 @@ describe('containment: every generated GitHub reference is reachable on the gh p
   it('the reachability check is non-vacuous on both sides', () => {
     expect(TRACKER_GITHUB_OPS.length, 'empty op roster').toBeGreaterThanOrEqual(MIN_VARIANT_PAIRS);
     expect(GIT_CROSS_CUTTING_DOCS.length, 'empty cross-cutting roster').toBeGreaterThan(0);
+    const providers = VARIANT_MODULES.filter(mod => mod.subdir.startsWith('tracker/'));
+    expect(providers.length, 'no provider module registered').toBeGreaterThan(0);
+    expect(
+      providerReachablePaths(LOAD_INSTRUCTION_TEMPLATE).length,
+      'the template reached no provider path — the per-provider arm is inert',
+    ).toBe(providers.reduce((n, mod) => n + mod.ops.length, 0));
     expect(
       walkFiles(REFS_DIR, f => f.endsWith('.md')).length,
       'no generated reference files at all — run `npm run build`',
-    ).toBeGreaterThanOrEqual(TRACKER_GITHUB_OPS.length + GIT_CROSS_CUTTING_DOCS.length);
+    ).toBeGreaterThanOrEqual(
+      providers.reduce((n, mod) => n + mod.ops.length, 0) + GIT_CROSS_CUTTING_DOCS.length,
+    );
+    // The contract's own rule, asserted rather than assumed: it is in the manifest
+    // AND some shipped mechanics file names it. Either half alone would let an
+    // unreachable contract ship (ADR-003) or a named one go missing.
+    expect(
+      contractIsNamedByAConsumer(),
+      'the tool-call contract is in the manifest but no provider mechanics file names it — it ' +
+      'would be installed on every machine of every user of that provider and read by nothing',
+    ).toBe(generatedReferenceManifest().includes('tracker/_mcp.md'));
   });
 
   it('known-bad probe: an emitted file outside the registry is reported as unreachable', () => {
@@ -854,10 +1170,11 @@ describe('containment: every generated GitHub reference is reachable on the gh p
 
     // …and the same set difference the live check computes now reports it.
     const reachable = new Set([
-      ...reachablePaths(LOAD_INSTRUCTION_TEMPLATE, 'github', TRACKER_GITHUB_OPS),
+      ...providerReachablePaths(LOAD_INSTRUCTION_TEMPLATE),
       ...[...namedInStripped].filter(rel =>
         (GIT_CROSS_CUTTING_DOCS as readonly string[]).includes(path.basename(rel, '.md')),
       ),
+      ...(contractIsNamedByAConsumer() ? ['tracker/_mcp.md'] : []),
     ]);
     expect(generatedReferenceManifest().filter(rel => !reachable.has(rel))).toEqual([target]);
   });

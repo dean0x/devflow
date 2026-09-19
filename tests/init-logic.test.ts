@@ -13,7 +13,22 @@ import {
   formatSweepSummary,
   resolveComplianceInitState,
   formatComplianceSummary,
+  persistManifestThenConvergeTracker,
+  buildTrackerLifecycleIO,
+  trackerOverrideMessage,
+  type TrackerLifecycleIO,
 } from '../src/cli/commands/init.js';
+import { formatTrackerSummary } from '../src/cli/commands/tracker-prompts.js';
+import { TRACKER_PROVIDER_IDS } from '../src/core/tracker.js';
+import { writeManifest, type ManifestData } from '../src/core/manifest.js';
+import {
+  applyTrackerSentinel,
+  rearmTrackerInference,
+  renameStaleTrackerConventions,
+  type TrackerProvider,
+  type TrackerResult,
+  type TrackerTransition,
+} from '../src/core/tracker.js';
 import { parsePluginSelection } from '../src/core/plugins.js';
 import { getManagedSettingsPath } from '../src/targets/claude-code/claude-paths.js';
 import {
@@ -1815,3 +1830,285 @@ describe('formatComplianceSummary', () => {
   })
 })
 
+
+// ── persistManifestThenConvergeTracker ───────────────────────────────────────
+
+/**
+ * PF-015 seam: the manifest write and the three tracker file-lifecycle owners
+ * are one unit whose ORDER is the invariant. These tests drive the shipped
+ * function — the ordering under test lives inside it, so nothing here
+ * reconstructs a sequence (the failure mode PF-015 records for
+ * tests/init-proxy.test.ts:115).
+ *
+ * Non-vacuity: every "converges nothing" assertion has a known-good twin on the
+ * same recorder that shows all four operations firing, so an IO seam that
+ * stopped being called could not pass both.
+ */
+describe('persistManifestThenConvergeTracker', () => {
+  function makeManifestData(provider: TrackerProvider): ManifestData {
+    return {
+      version: '2.0.0',
+      plugins: ['devflow-implement'],
+      scope: 'user',
+      knownPlugins: ['devflow-implement'],
+      features: {
+        ambient: true,
+        memory: true,
+        hud: true,
+        knowledge: true,
+        learning: true,
+        rules: true,
+        flags: {},
+        security: 'user',
+        proxy: false,
+        compliance: { enabled: false, frameworks: [] },
+        tracker: { provider },
+      },
+      installedAt: '2026-01-01T00:00:00.000Z',
+      updatedAt: '2026-01-02T00:00:00.000Z',
+    }
+  }
+
+  /**
+   * Recorder IO. Every call appends a labelled entry, so assertions read the
+   * real call ORDER rather than a per-step boolean.
+   */
+  function makeRecorder(opts: {
+    writeError?: Error;
+    transition?: TrackerTransition;
+    rearm?: TrackerResult<void>;
+    sentinel?: TrackerResult<void>;
+  } = {}) {
+    const calls: string[] = []
+    const io: TrackerLifecycleIO = {
+      writeManifest: async (_dir, data) => {
+        calls.push(`write:${data.features.tracker.provider}`)
+        if (opts.writeError) throw opts.writeError
+      },
+      renameStaleConventions: async (_dir, previous, resolved) => {
+        calls.push(`rename:${previous ?? 'none'}->${resolved}`)
+        return opts.transition ?? { kind: 'none' }
+      },
+      rearmInference: async () => {
+        calls.push('rearm')
+        return opts.rearm ?? { ok: true, value: undefined }
+      },
+      applySentinel: async (_dir, provider) => {
+        calls.push(`sentinel:${provider}`)
+        return opts.sentinel ?? { ok: true, value: undefined }
+      },
+    }
+    return { calls, io }
+  }
+
+  it('a failed manifest write converges NOTHING — no rename, no re-arm, no sentinel', async () => {
+    // github -> jira with the write failing: converging first would leave a
+    // sentinel on disk for a provider the manifest never records.
+    const { calls, io } = makeRecorder({ writeError: new Error('ENOSPC: no space left on device') })
+
+    const outcome = await persistManifestThenConvergeTracker({
+      devflowDir: '/tmp/devflow-not-touched',
+      manifestData: makeManifestData('jira'),
+      previousProvider: 'github',
+      io,
+    })
+
+    expect(calls).toEqual(['write:jira'])
+    expect(outcome.manifestWritten).toBe(false)
+    expect(outcome.converged).toBe(false)
+    expect(outcome.messages.some(m => m.level === 'warn' && m.text.includes('ENOSPC'))).toBe(true)
+    // The user is told the selection did not stick, and how to retry.
+    expect(outcome.messages.some(m => m.level === 'warn' && m.text.includes('jira'))).toBe(true)
+  })
+
+  it('a failed manifest write leaves a jira->github downgrade unconverged', async () => {
+    // The other direction of the same asymmetry: converging first would remove
+    // the sentinel and rename tracker.md to .bak while the manifest still says jira.
+    const { calls, io } = makeRecorder({ writeError: new Error('EACCES: permission denied') })
+
+    const outcome = await persistManifestThenConvergeTracker({
+      devflowDir: '/tmp/devflow-not-touched',
+      manifestData: makeManifestData('github'),
+      previousProvider: 'jira',
+      io,
+    })
+
+    expect(calls).toEqual(['write:github'])
+    expect(outcome.manifestWritten).toBe(false)
+    expect(outcome.converged).toBe(false)
+  })
+
+  it('a successful manifest write converges all three owners, write first', async () => {
+    const { calls, io } = makeRecorder()
+
+    const outcome = await persistManifestThenConvergeTracker({
+      devflowDir: '/tmp/devflow',
+      manifestData: makeManifestData('jira'),
+      previousProvider: 'github',
+      io,
+    })
+
+    expect(outcome.manifestWritten).toBe(true)
+    expect(outcome.converged).toBe(true)
+    // Write is strictly first; the rename is strictly ahead of the two
+    // independent owners, which may complete in either order.
+    expect(calls[0]).toBe('write:jira')
+    expect(calls[1]).toBe('rename:github->jira')
+    expect(calls.slice(2).sort()).toEqual(['rearm', 'sentinel:jira'])
+    expect(calls).toHaveLength(4)
+  })
+
+  it('converges the provider the manifest persisted, not the previous one', async () => {
+    const { calls, io } = makeRecorder()
+
+    await persistManifestThenConvergeTracker({
+      devflowDir: '/tmp/devflow',
+      manifestData: makeManifestData('linear'),
+      previousProvider: 'jira',
+      io,
+    })
+
+    expect(calls).toContain('sentinel:linear')
+    expect(calls).toContain('rename:jira->linear')
+  })
+
+  it('--reset shape: prior jira with a resolved github still fires the stale rename', async () => {
+    const { calls, io } = makeRecorder({
+      transition: { kind: 'renamed', from: '/d/tracker.md', to: '/d/tracker.md.jira.bak', previous: 'jira' },
+    })
+
+    const outcome = await persistManifestThenConvergeTracker({
+      devflowDir: '/d',
+      manifestData: makeManifestData('github'),
+      previousProvider: 'jira',
+      io,
+    })
+
+    expect(calls[1]).toBe('rename:jira->github')
+    expect(calls).toContain('sentinel:github')
+    const renamedMsg = outcome.messages.find(m => m.level === 'info')
+    expect(renamedMsg?.text).toContain('/d/tracker.md.jira.bak')
+    expect(renamedMsg?.text).toContain('jira')
+  })
+
+  it('a fresh install (no previous provider) converges without a rename transition', async () => {
+    const { calls, io } = makeRecorder()
+
+    const outcome = await persistManifestThenConvergeTracker({
+      devflowDir: '/tmp/devflow',
+      manifestData: makeManifestData('github'),
+      previousProvider: undefined,
+      io,
+    })
+
+    expect(calls[1]).toBe('rename:none->github')
+    expect(outcome.messages).toEqual([])
+  })
+
+  it('owner failures warn without aborting — convergence still reported', async () => {
+    const { io } = makeRecorder({
+      transition: { kind: 'failed', error: 'Could not move the previous jira conventions aside' },
+      rearm: { ok: false, error: 'Could not reset the tracker attempt counter' },
+      sentinel: { ok: false, error: 'Could not update the tracker sentinel' },
+    })
+
+    const outcome = await persistManifestThenConvergeTracker({
+      devflowDir: '/tmp/devflow',
+      manifestData: makeManifestData('jira'),
+      previousProvider: 'github',
+      io,
+    })
+
+    expect(outcome.manifestWritten).toBe(true)
+    expect(outcome.converged).toBe(true)
+    expect(outcome.messages.map(m => m.level)).toEqual(['warn', 'warn', 'warn'])
+    expect(outcome.messages.map(m => m.text)).toEqual([
+      'Could not move the previous jira conventions aside',
+      'Could not reset the tracker attempt counter',
+      'Could not update the tracker sentinel',
+    ])
+  })
+})
+
+describe('buildTrackerLifecycleIO', () => {
+  it('binds each of the four single-owner operations exactly once', () => {
+    const io = buildTrackerLifecycleIO()
+    expect(io.writeManifest).toBe(writeManifest)
+    expect(io.renameStaleConventions).toBe(renameStaleTrackerConventions)
+    expect(io.rearmInference).toBe(rearmTrackerInference)
+    expect(io.applySentinel).toBe(applyTrackerSentinel)
+  })
+})
+
+// ── trackerOverrideMessage + the Advanced --tracker arm (PF-029) ─────────────
+//
+// `devflow init --advanced --tracker jira` changes the machine-wide provider
+// through the CLI-override arm, which the wizard gate declines to prompt for.
+// The Advanced path prints no end-of-wizard summary, so without a line of its
+// own that arm is a machine-state change with nothing on screen — the
+// invisible-step failure PF-029 records, reached from the flag side.
+
+describe('trackerOverrideMessage', () => {
+  it('names the provider a --tracker override applied', () => {
+    expect(trackerOverrideMessage('jira')).toEqual({ level: 'success', text: 'Tracker: jira' })
+  })
+
+  it('marks the default, so "I chose this" reads differently from "nobody chose"', () => {
+    expect(trackerOverrideMessage('github')).toEqual({ level: 'info', text: 'Tracker: github (default)' })
+  })
+
+  it('spells the summary the way every other tracker surface does', () => {
+    // One formatter behind the Recommended summary row, the wizard step's note
+    // header and this line — not three hand-copied spellings (avoids PF-013).
+    expect(TRACKER_PROVIDER_IDS.length).toBeGreaterThan(0)
+    for (const id of TRACKER_PROVIDER_IDS) {
+      expect(trackerOverrideMessage(id).text).toBe(`Tracker: ${formatTrackerSummary(id)}`)
+    }
+  })
+})
+
+describe('init.ts structural guard — the Advanced --tracker arm emits its outcome line', () => {
+  const INIT_SOURCE = path.resolve(import.meta.dirname, '../src/cli/commands/init.ts')
+  const ADVANCED_ANCHOR = '// ── Advanced path: full interactive flow ──'
+  const ARM_ANCHOR = '} else if (cliTrackerOverride !== undefined) {'
+
+  /**
+   * Named collector: the body of the Advanced path's `--tracker` override arm,
+   * from its `} else if` through the brace that closes it.
+   *
+   * Scoped to the arm, not the file: `trackerOverrideMessage` appearing anywhere
+   * in a 2,400-line init.ts says nothing about whether THIS arm emits anything.
+   * `null` when the arm is absent — reported, never passed off as nothing to check.
+   */
+  function overrideArmBody(source: string): string | null {
+    const advanced = source.indexOf(ADVANCED_ANCHOR)
+    if (advanced === -1) return null
+    const start = source.indexOf(ARM_ANCHOR, advanced)
+    if (start === -1) return null
+    const end = source.indexOf('\n      }', start)
+    if (end === -1) return null
+    return source.slice(start, end)
+  }
+
+  it('the arm renders the line — it is the selection\'s only surface on that path', async () => {
+    const source = await fs.readFile(INIT_SOURCE, 'utf-8')
+    const arm = overrideArmBody(source)
+    expect(arm, 'the Advanced --tracker override arm must be findable').not.toBeNull()
+    expect(arm).toContain('trackerProvider = cliTrackerOverride.provider')
+    expect(arm).toContain('trackerOverrideMessage')
+    expect(arm).toMatch(/p\.log\.(success|info)/)
+  })
+
+  it('known-bad probe: the collector reports a silent arm and a missing one', () => {
+    // The assertion above is evidence only while this collector can fail.
+    const silent =
+      `${ADVANCED_ANCHOR}\n` +
+      `      ${ARM_ANCHOR}\n` +
+      '        trackerProvider = cliTrackerOverride.provider;\n' +
+      '      }\n'
+    expect(overrideArmBody(silent)).toContain('trackerProvider = cliTrackerOverride.provider')
+    expect(overrideArmBody(silent)).not.toContain('trackerOverrideMessage')
+    expect(overrideArmBody('// no advanced path here')).toBeNull()
+    expect(overrideArmBody(`${ADVANCED_ANCHOR}\n// but no override arm`)).toBeNull()
+  })
+})

@@ -5,6 +5,37 @@ import * as os from 'os';
 import { exec } from 'child_process';
 import { addMemoryHooks, removeMemoryHooks, hasMemoryHooks, countMemoryHooks, cleanQueueFiles, hasMemoryDir, filterProjectsWithMemory } from '../src/cli/commands/memory.js';
 
+/**
+ * Seed a temp HOME that stands in for `~/.devflow`.
+ *
+ * Both hook-integration describes below spawn hooks that source `hook-log-init`,
+ * which calls `devflow_log_dir` and so `mkdir -p "$HOME/.devflow/logs/<slug>"`
+ * unconditionally; `session-start-context` additionally reads user-scope state —
+ * the global learning.json, and the tracker manifest and its `.tracker.enabled`
+ * sentinel — out of `${DEVFLOW_DIR:-$HOME/.devflow}`. Every invocation therefore
+ * passes an explicit HOME, so no assertion here writes to, or is decided by, the
+ * developer's real machine (PF-060).
+ *
+ * SEEDED, never empty (PF-018): the log directory the hook actually writes into
+ * is created, so a green run means the hook reached its gates rather than
+ * tripping over a missing path.
+ */
+async function mkTmpHome(): Promise<string> {
+  const home = await fs.mkdtemp(path.join(os.tmpdir(), 'devflow-hook-home-'));
+  await fs.mkdir(path.join(home, '.devflow', 'logs'), { recursive: true });
+  return home;
+}
+
+/**
+ * Hook environment: an explicit HOME and DEVFLOW_DIR on every invocation.
+ *
+ * `''` is treated as unset by `${DEVFLOW_DIR:-…}`, so this both neutralises a
+ * DEVFLOW_DIR exported in the developer's shell and exercises the fallback.
+ */
+function hookEnv(home: string): NodeJS.ProcessEnv {
+  return { ...process.env, HOME: home, DEVFLOW_DIR: '' };
+}
+
 describe('addMemoryHooks', () => {
   it('adds all 3 memory hook types to empty settings', () => {
     const result = addMemoryHooks('{}', '/home/user/.devflow');
@@ -495,11 +526,13 @@ describe('removeMemoryHooks accepts parsed Settings', () => {
 
 describe('session-start-memory hook integration', () => {
   let tmpDir: string;
+  let tmpHome: string;
   const hookPath = path.resolve(__dirname, '..', 'src', 'assets', 'scripts', 'hooks', 'session-start-memory');
 
+  /** Run the hook against the seeded temp HOME. Never the developer's own. */
   function runHook(cwd: string): Promise<string> {
     return new Promise((resolve, reject) => {
-      const child = exec(`bash "${hookPath}"`, { timeout: 5000 }, (err, stdout, stderr) => {
+      const child = exec(`bash "${hookPath}"`, { timeout: 5000, env: hookEnv(tmpHome) }, (err, stdout, stderr) => {
         if (err) return reject(new Error(`Hook failed: ${err.message}\nstderr: ${stderr}`));
         resolve(stdout);
       });
@@ -510,11 +543,13 @@ describe('session-start-memory hook integration', () => {
 
   beforeEach(async () => {
     tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'devflow-hook-test-'));
+    tmpHome = await mkTmpHome();
     await fs.mkdir(path.join(tmpDir, '.devflow', 'learning'), { recursive: true });
   });
 
   afterEach(async () => {
     await fs.rm(tmpDir, { recursive: true, force: true });
+    await fs.rm(tmpHome, { recursive: true, force: true });
   });
 
   it('does not include PROJECT DECISIONS section (decisions TL;DR moved to session-start-context)', async () => {
@@ -540,11 +575,13 @@ describe('session-start-memory hook integration', () => {
 
 describe('session-start-context hook integration', () => {
   let tmpDir: string;
+  let tmpHome: string;
   const hookPath = path.resolve(__dirname, '..', 'src', 'assets', 'scripts', 'hooks', 'session-start-context');
 
+  /** Run the hook against the seeded temp HOME. Never the developer's own. */
   function runHook(cwd: string): Promise<string> {
     return new Promise((resolve, reject) => {
-      const child = exec(`bash "${hookPath}"`, { timeout: 5000 }, (err, stdout, stderr) => {
+      const child = exec(`bash "${hookPath}"`, { timeout: 5000, env: hookEnv(tmpHome) }, (err, stdout, stderr) => {
         if (err) return reject(new Error(`Hook failed: ${err.message}\nstderr: ${stderr}`));
         resolve(stdout);
       });
@@ -555,11 +592,13 @@ describe('session-start-context hook integration', () => {
 
   beforeEach(async () => {
     tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'devflow-context-hook-test-'));
+    tmpHome = await mkTmpHome();
     await fs.mkdir(path.join(tmpDir, '.devflow', 'learning'), { recursive: true });
   });
 
   afterEach(async () => {
     await fs.rm(tmpDir, { recursive: true, force: true });
+    await fs.rm(tmpHome, { recursive: true, force: true });
   });
 
   it('injects PROJECT DECISIONS TL;DR from decisions files', async () => {

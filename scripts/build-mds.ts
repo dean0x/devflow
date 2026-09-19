@@ -101,7 +101,8 @@ import {
   splitVariantSections,
   AGENTS_OUTPUT_DIR,
   SKILL_REFS_OUTPUT_DIR,
-  VARIANT_MODULES,
+  resolveVariantModules,
+  deferredReferenceModuleSources,
   type HostVariant,
   type OutputDirError,
   type OutputNameError,
@@ -384,6 +385,19 @@ interface DiscoveryResult {
   hosts: HostEntry[];
   /** Total .mds files seen, including partials (files without output-dir:). */
   totalCount: number;
+  /**
+   * Reference modules that declare an output directory but whose registry row is
+   * GATED SHUT this build — repo-relative source paths, for the printed line.
+   *
+   * A third bucket rather than a silent skip and rather than a refusal. Silent
+   * would make an authored-but-ungenerated contract indistinguishable from one
+   * the build cannot see; a refusal is what the un-gated path already does and is
+   * wrong here, because "registered as gated, gate closed" is a legitimate state
+   * the plan mandates (P3a-S12) rather than an authoring mistake. Counting them
+   * as PARTIALS would have been the worst of the three: a partial is a file with
+   * no output-dir:, and these declare one.
+   */
+  deferred: string[];
 }
 
 /**
@@ -402,9 +416,24 @@ interface DiscoveryResult {
  */
 function discoverHosts(): DiscoveryResult {
   const hosts: HostEntry[] = [];
+  const deferred: string[] = [];
+  // The gated modules this registry does not generate, from the one owner that
+  // answers that question (src/core/mds-variants.ts). Computed once so every
+  // walked file is measured against the same answer.
+  const gatedShut = new Set(deferredReferenceModuleSources());
   let totalCount = 0;
   for (const file of walkMds(ROOT)) {
     totalCount++;
+    const rel = path.relative(ROOT, file).split(path.sep).join("/");
+    // A reference module the registry knows about but whose gate is shut this
+    // build is DEFERRED at discovery, before it can become a HostEntry. Deciding
+    // it here rather than in the plan pass keeps HostPlan's arms describing only
+    // hosts that will be written, so no downstream dispatch grows a "planned but
+    // not emitted" case it would have to carry forever.
+    if (gatedShut.has(rel)) {
+      deferred.push(rel);
+      continue;
+    }
     const text = fs.readFileSync(file, "utf-8");
     const block = frontmatterBlock(text);
     if (!block) continue;
@@ -429,7 +458,7 @@ function discoverHosts(): DiscoveryResult {
       outputName: outputName === null ? null : outputName.trim(),
     });
   }
-  return { hosts, totalCount };
+  return { hosts, totalCount, deferred };
 }
 
 /**
@@ -585,10 +614,23 @@ function destsOf(plan: HostPlan): readonly string[] {
   return plan.variant === "skill-refs" ? plan.outputs.map(o => o.dest) : [plan.dest];
 }
 
+/**
+ * The registry this build resolves reference modules against: the shipped
+ * registry plus whatever the generation gate opens, from the one owner that
+ * answers that question (src/core/mds-variants.ts).
+ *
+ * Resolved once at module load, because the gate is a predicate over a module
+ * constant: every lookup in a single build run is measured against the same
+ * roster, and the plan pass reads one shared registry rather than a fresh copy
+ * per walked host. discoverHosts() computes its gated-shut set once for the
+ * same reason.
+ */
+const RESOLVED_MODULES = resolveVariantModules();
+
 /** The reference module registered for this host's source path, or null. */
 function referenceModuleFor(host: HostEntry): VariantModule | null {
   const rel = path.relative(ROOT, host.file).split(path.sep).join("/");
-  return VARIANT_MODULES.find(m => m.source === rel) ?? null;
+  return RESOLVED_MODULES.find(m => m.source === rel) ?? null;
 }
 
 /**
@@ -894,7 +936,7 @@ async function main(): Promise<void> {
   // Initialize the MDS compiler (required before any compile/check call).
   await init();
 
-  const { hosts, totalCount } = discoverHosts();
+  const { hosts, totalCount, deferred } = discoverHosts();
 
   if (hosts.length === 0) {
     console.error(
@@ -905,8 +947,16 @@ async function main(): Promise<void> {
     process.exit(1);
   }
 
-  const partialCount = totalCount - hosts.length;
+  // Deferred modules are subtracted explicitly: they DO declare an output-dir:,
+  // so folding them into the partial count would print a number that contradicts
+  // the line's own parenthetical and move a manifest-pinned count for a reason
+  // that is not a roster change.
+  const partialCount = totalCount - hosts.length - deferred.length;
   console.log(`  ${partialCount} partial(s) skipped (no output-dir:)`);
+  console.log(`  ${deferred.length} reference module(s) deferred (generation gated)`);
+  for (const rel of deferred) {
+    console.log(`    deferred: ${rel} (no registered provider needs it yet)`);
+  }
   console.log(`  ${hosts.length} host(s) to compile:\n`);
 
   const outcomes: CompileOutcome[] = [];

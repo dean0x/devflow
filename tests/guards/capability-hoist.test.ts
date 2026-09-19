@@ -306,13 +306,14 @@ describe('capability-hoist: no capability probe runs inside a loop [DR-11]', () 
       'unreadable, and the guard is scanning only the agent. Run `npm run build`.',
     ).toBeGreaterThan(0);
 
-    // 29 = 18 from git.md + 11 from the generated tree, measured on this branch.
-    // Registered as `capability-hoist-block-floor`; the literal is spelled here so a
-    // decrement is visible at the assertion, not only in the manifest.
+    // 49 = 18 from git.md + 31 from the generated tree (three providers × ten per-op
+    // references, plus learn-conventions.md), measured on this branch. Registered as
+    // `capability-hoist-block-floor`; the literal is spelled here so a decrement is
+    // visible at the assertion, not only in the manifest.
     expect(
       blocks.length,
       'too few process blocks to be scanning both git.md and the generated references',
-    ).toBeGreaterThanOrEqual(29);
+    ).toBeGreaterThanOrEqual(49);
 
     expect(LOOP_MARKERS.length, 'LOOP_MARKERS must be non-empty').toBeGreaterThan(0);
     expect(PROBE_MARKERS.length, 'PROBE_MARKERS must be non-empty').toBeGreaterThan(0);

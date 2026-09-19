@@ -28,6 +28,7 @@ import { type FeatureConfig } from '../../core/feature-config.js';
 import { type ManifestData } from '../../core/manifest.js';
 import { partitionSelectablePlugins, type PluginDefinition } from '../../core/plugins.js';
 import { type ComplianceFeatureState } from '../../core/compliance.js';
+import { DEFAULT_TRACKER_PROVIDER, type TrackerFeatureState } from '../../core/tracker.js';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -46,6 +47,12 @@ export interface FeatureSeed {
    * Default: {enabled:false, frameworks:[]} — compliance is opt-in, never auto-enabled.
    */
   compliance: ComplianceFeatureState;
+  /**
+   * Issue tracker provider seed — seeded from the manifest (manifest-group, like
+   * proxy and compliance). Default: {provider:'github'} — the silent default, so
+   * every existing install and every GitHub user is unaffected.
+   */
+  tracker: TrackerFeatureState;
 }
 
 /** Registry defaults — all features enabled except proxy (advanced-only, off by default). */
@@ -58,6 +65,7 @@ export const FEATURE_DEFAULTS: FeatureSeed = {
   rules: true,
   proxy: false,
   compliance: { enabled: false, frameworks: [] },
+  tracker: { provider: DEFAULT_TRACKER_PROVIDER },
 };
 
 /** The complete initial state passed from the hoisted-reads block to init prompts. */
@@ -88,8 +96,9 @@ export function resolveSeedFeatures(
   manifest: ManifestData | null,
   projectConfig: FeatureConfig | null,
 ): FeatureSeed {
-  // ambient/hud/rules/proxy/compliance: manifest is the source; fall back to registry defaults.
-  // proxy and compliance follow the manifest group (like ambient) per ADR-001 — NOT config.json-gated.
+  // ambient/hud/rules/proxy/compliance/tracker: manifest is the source; fall back to registry defaults.
+  // proxy, compliance and tracker follow the manifest group (like ambient) —
+  // NOT config.json-gated. The tracker selection is machine-wide.
   const ambient = manifest?.features.ambient ?? FEATURE_DEFAULTS.ambient;
   const hud = manifest?.features.hud ?? FEATURE_DEFAULTS.hud;
   const rules = manifest?.features.rules ?? FEATURE_DEFAULTS.rules;
@@ -99,6 +108,11 @@ export function resolveSeedFeatures(
   // the module-level default by reference — downstream mutation would corrupt it process-wide.
   const rawCompliance = manifest?.features.compliance ?? FEATURE_DEFAULTS.compliance;
   const compliance = { ...rawCompliance, frameworks: [...rawCompliance.frameworks] };
+  // Same defensive spread, same reason: `?? FEATURE_DEFAULTS.tracker` alone would
+  // return the module-level default BY REFERENCE and downstream mutation would
+  // corrupt it process-wide.
+  const rawTracker = manifest?.features.tracker ?? FEATURE_DEFAULTS.tracker;
+  const tracker = { ...rawTracker };
 
   // memory/learning/knowledge: projectConfig wins whenever present (ADR-001).
   // Helper eliminates the repeated projectConfig !== null ternary pattern.
@@ -111,7 +125,7 @@ export function resolveSeedFeatures(
   const knowledge = fromConfig('knowledge');
   const learning = fromConfig('learning');
 
-  return { ambient, memory, hud, knowledge, learning, rules, proxy, compliance };
+  return { ambient, memory, hud, knowledge, learning, rules, proxy, compliance, tracker };
 }
 
 /**
@@ -365,5 +379,6 @@ export function applyCliToggles(
     rules: toggles.rules ?? base.rules,
     proxy: toggles.proxy ?? base.proxy,
     compliance: toggles.compliance ?? base.compliance,
+    tracker: toggles.tracker ?? base.tracker,
   };
 }

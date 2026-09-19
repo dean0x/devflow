@@ -225,7 +225,7 @@ describe('ISSUE_PR_LINK forwarding — every Code spawn site carries the sibling
       'drops the value on the floor and the PR body silently recomposes the link (GAP-15):\n  ' +
       collectUnforwardedSites(payloads).join('\n  '),
     ).toEqual([])
-  })
+  }, 20_000) // pays for the memoised committed-tree build: ~3.7s alone, headroom for suite contention.
 
   it('known-bad probe: a fence that loses the sibling key is reported by the same collector', async () => {
     const { root } = await buildCommittedTree()

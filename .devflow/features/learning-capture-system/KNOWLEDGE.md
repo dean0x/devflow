@@ -1,11 +1,12 @@
 ---
 feature: learning-capture-system
 name: Learning & Capture System
-description: "Use when modifying capture hooks (capture-prompt/capture-turn/capture-question), the learning or memory pending-turns queues, the Learning agent (src/assets/agents/learning.md), the session-start-context learning directive, the feature-config toggles, the learning tuning config, the decisions content files (decisions.md/pitfalls.md/index.md) or their ledger ops, or the devflow learning CLI. Keywords: capture-prompt, capture-turn, capture-question, queue-append, pending-turns, memory-worker, Learning agent, learning directive, LEARNING MAINTENANCE, DEVFLOW_BG_UPDATER, learning-lock, queue_read_gates, decisions_load, DECISIONS_CONTEXT, feature-config, config.json, learning.json, decisions-ledger, assign-anchor, retire-anchor, refresh-anchor, render-decisions, staged-write CAS, WORKING-MEMORY.md.new, segmentDetails, amendments, is-hex-sha, verify_and_swap, compute_commits_since_note, divergence guard, isSafeRawBody."
+description: "Use when modifying capture hooks (capture-prompt/capture-turn/capture-question), the learning or memory pending-turns queues, the Learning agent (src/assets/agents/learning.md), the session-start-context learning or tracker-setup directives, the feature-config toggles (including the per-repo tracker override), the learning tuning config, the decisions content files (decisions.md/pitfalls.md/index.md) or their ledger ops, or the devflow learning CLI. Keywords: capture-prompt, capture-turn, capture-question, queue-append, pending-turns, memory-worker, Learning agent, learning directive, LEARNING MAINTENANCE, TRACKER SETUP, TRACKER_PROCESSING_STALE_SECS, TRACKER_PROVIDER_KEY_PATH, tracker-section-max-chars, .tracker.attempts, .tracker.enabled, .tracker.processing, hookEnv, DEVFLOW_BG_UPDATER, learning-lock, queue_read_gates, decisions_load, DECISIONS_CONTEXT, feature-config, config.json, learning.json, decisions-ledger, assign-anchor, retire-anchor, refresh-anchor, render-decisions, staged-write CAS, WORKING-MEMORY.md.new, segmentDetails, amendments, is-hex-sha, verify_and_swap, compute_commits_since_note, divergence guard, isSafeRawBody."
 category: architecture
 directories:
   - src/assets/scripts/hooks
   - src/assets/agents/learning.md
+  - src/assets/agents/tracker.md
   - src/cli/commands/learning.ts
   - src/cli/commands/memory.ts
   - src/core/feature-config.ts
@@ -15,7 +16,7 @@ directories:
   - src/hud/components/learning-counts.ts
   - src/assets/commands/_partials
 created: 2026-07-15
-updated: 2026-08-30
+updated: 2026-09-17
 ---
 
 # Learning & Capture System
@@ -32,6 +33,11 @@ queue has pending turns. Scripts capture and trigger only; the Learning agent do
 decision/pitfall detection by reading and editing the data files directly via its own tool
 access. There are no marker files, no deterministic detection thresholds, and no per-session
 JSON state on the learning side.
+
+`session-start-context` also carries a second, independent directive — `--- TRACKER SETUP ---` —
+sharing the injection shape (silent spawn, an identical silence-clause frame) but gating
+issue-tracker provider inference and spawning the `Tracker` agent. This KB documents the shared
+hook-plumbing shape only; `tracker-feature` owns provider selection and the Tracker agent's schema.
 
 The content produced by the Learning agent — `decisions.md`, `pitfalls.md`, `decisions-ledger.jsonl`,
 `decisions-log.jsonl`, and `index.md` — **deliberately keeps its "decisions" naming** even
@@ -58,6 +64,14 @@ Feature toggles and tuning config live in separate files:
 (`model: "opus"`, `debug: false`). The bash hook replicates this chain directly so it needs
 no subprocess for TS evaluation.
 
+`.devflow/config.json` also carries an optional `tracker` key — a per-repo provider override,
+not a boolean toggle (`BooleanFeature`'s mapped type uses `-?` to exclude it, applies ADR-011).
+The raw string round-trips through `coerceConfig` byte-for-byte, never coerced or repaired —
+`updateFeature`'s read-modify-write over the whole file would otherwise delete a user's override
+on any unrelated toggle flip. `parseTrackerOverride` (routes through the same `parseTrackerId`
+the CLI boundary uses) is the only sanctioned reader and returns `{absent | valid | invalid}`,
+where `absent` ≠ `github` — see `tracker-feature` KB for the Git agent's resolution order.
+
 ### Capture Hook Protocol
 
 All three capture hooks enforce in order: (1) **re-entrancy guard**
@@ -82,6 +96,36 @@ Model is resolved bash-side (project `learning.json` → global → `"opus"` def
 mandatory `case "$LEARNING_MODEL" in opus|sonnet|haiku)` allowlist before interpolation —
 `learning.json` is user-controlled; a newline-injected value must not reach `additionalContext`.
 The emitted directive uses `subagent_type="Learning"` and `run_in_background: true`.
+
+### Section 3: Tracker Setup Directive
+
+A second, independent directive — `--- TRACKER SETUP ---` — shares the hook and the injection
+shape (silent spawn, `run_in_background: true`, an identical silence-clause frame) but gates a
+different feature and spawns the `Tracker` agent. It is NOT gated by the `learning` toggle.
+
+**Gate order is cheapest-first**: 0) `.tracker.enabled` sentinel present AND `tracker.md`
+absent (1–2 `stat`, 0 forks — proven, under provider `github`, to fork ZERO subprocesses by a
+PATH-shim differential test owned by `tracker-feature`); 1) attempt cap via `read` (0 forks);
+2) `source` ∈ {`startup`, `clear`} (1 fork); 3) claim-file freshness (0–2 forks); 4) provider
+allowlist `jira|linear`, never `!= github` (1 fork).
+
+**`.tracker.attempts` is one decimal-integer line and nothing else** (PF-062). Absent/malformed
+→ 0, self-healed; 6+ digits → treated as already at `TRACKER_ATTEMPTS_MAX=5` (OD-14), because a
+naive `-ge` comparison on an out-of-range value fails OPEN. [DR-02]: the hook increments on
+EMISSION, so a crashed agent still burns an attempt; the agent deletes the counter only on a
+successful write.
+
+`TRACKER_PROVIDER_KEY_PATH` (`features.tracker.provider`) must literally match
+`src/core/tracker.ts`'s exported constant — pinned in `tests/seams/tracker-key-path.test.ts`,
+which forces the node json-parse backend via `_HAS_JQ=false` rather than editing `PATH` (avoids
+PF-045). `TRACKER_PROCESSING_STALE_SECS=600` is its own literal, deliberately not shared with
+Learning's 900s; `tests/seams/tracker-claim-staleness.test.ts` is the only place the hook's
+literal and the Tracker agent's stated `**600 seconds**` bound are compared.
+
+`TRACKER_DEVFLOW_DIR="${DEVFLOW_DIR:-$HOME/.devflow}"` is captured ABOVE the project-scoped
+`DEVFLOW_DIR` reassignment Sections 1–2 use, because Section 3's files are user-scope; Section
+2's global `learning.json` read still hardcodes `$HOME/.devflow` (a known divergence). Capped at
+`tracker-section-max-chars` = 800, a ceiling in `tests/fixtures/numeric-floors.json`.
 
 ### Learning Agent
 
@@ -158,12 +202,23 @@ Creates the `.devflow/learning/` tree on first run — no pre-init needed.
 `process.exit` skips `finally` and leaks the lock. The outer `catch` in `if (require.main ===
 module)` prints `json-helper error: <message>` and exits 1.
 
+### Tracker Agent
+
+`src/assets/agents/tracker.md` (`model: sonnet`, no `tools:` key) is the second hook-spawned
+background agent — the same claim/heartbeat/consume-then-delete shape as the Learning agent,
+its own 600s bound, and its own files (`.tracker.processing`, `.tracker.attempts`). A
+write-less exit increments `.tracker.attempts` BEFORE deleting the claim file; a successful
+write deletes the counter instead, and the claim file is always deleted last, via `unlink`
+(PF-003). The write itself is scrub-gated through `redact-secrets.cjs` and create-exclusive
+(`umask 077` + `noclobber` + `chmod 600`) — schema, domain rules, and the write-chain detail
+are owned by the `tracker-feature` KB (see Related).
+
 ### decisions-format.cjs
 
 Shared pure formatting helpers (single source of truth for byte-compatible output strings):
 
 - **`segmentDetails(detailsStr, keys)`**: anchored-key parser (case-insensitive; segments split
-  on `;`; non-matching segments are continuations). **`LINE_TERMINATORS`** (`/[\r\n  ]/g`)
+  on `;`; non-matching segments are continuations). **`LINE_TERMINATORS`** (`/[\r\n  ]/g`)
   covers the full JS LineTerminator set; values are collapsed at five sites (segmentDetails ×2,
   `amendmentToString` ×3) to guard the single-line field contract. **Recovery pass** (PF-044):
   after the anchored loop, any unset key is searched with an unanchored regex for legacy rows
@@ -309,6 +364,7 @@ agents must not "fix" the naming mismatch.
 
 - **Skipping the model allowlist in `session-start-context`**: always apply
   `case "$LEARNING_MODEL" in opus|sonnet|haiku)` before interpolating into `additionalContext`.
+  The tracker directive applies the identical discipline to `TRACKER_MODEL`.
 
 - **Adding throttle or lock on the learning directive side**: queue emptiness is the natural
   gate; a live `.processing` already suppresses the directive.
@@ -319,10 +375,20 @@ agents must not "fix" the naming mismatch.
 - **Running more than 10 `refresh-anchor` calls per run**: at most 10 anchors per run,
   batched into a single variadic call. Stop at the cap; the next run continues.
 
+- **Consuming `config.tracker` (the raw field) directly**: always go through
+  `parseTrackerOverride`, not a hand-rolled check — the raw field is intentionally unvalidated
+  for round-trip preservation.
+
+- **Simulating a missing shell tool by subtracting it from `PATH`** in a hook test:
+  platform-dependent. Force a backend via a variable override (`_HAS_JQ=false`) instead, as
+  `tests/seams/tracker-key-path.test.ts` does (avoids PF-045).
+
 ## Gotchas
 
 - **900s staleness threshold is shared**: `session-start-context` and the Learning agent
-  both use it. If one changes, both must change — divergence is silent.
+  both use it. If one changes, both must change — divergence is silent. `TRACKER_PROCESSING_STALE_SECS=600`
+  is deliberately a SEPARATE literal from this 900s — a shared constant would let a change to
+  either feature silently reclassify the other's live runs as crashed.
 
 - **`decisions` legacy key wins over `learning` in `coerceConfig`**: older configs with
   `"decisions": false` override `"learning": true`. Intentional but confusing.
@@ -370,6 +436,18 @@ agents must not "fix" the naming mismatch.
 - **json_extract_cwd_field SOH delimiter**: split with `$'\001'` in bash. Both jq and the
   node fallback must emit `\x01` — the node fallback uses `String.fromCharCode(1)`.
 
+- **Section 3 is not gated by the `learning` feature toggle**: a user who disabled learning
+  did not disable their issue tracker.
+
+- **Every `session-start-context` test seeds a temp `$HOME` and passes an explicit empty
+  `DEVFLOW_DIR`** (`hookEnv()` / `trackerEnv()`) — a developer's real exported values must
+  never decide a hook-test assertion. `.tracker.attempts` / `.tracker.processing` are
+  user-scope (`~/.devflow/`), unlike the learning queue's project-scoped files.
+
+- **A shell command-rewrite hook can silently truncate a `cat`/`head` read of a `.devflow`
+  data file**, announced only on stderr — exactness-critical reads of decisions/pitfalls/tracker
+  files need the Read tool, not a shell command (PF-035).
+
 ## Key Files
 
 | File | Purpose |
@@ -380,22 +458,24 @@ agents must not "fix" the naming mismatch.
 | `src/assets/scripts/hooks/queue-append` | Shared JSONL append + overflow truncation + queue_read_gates |
 | `src/assets/scripts/hooks/learning-lock` | mkdir-based lock (30s stale-break) |
 | `src/assets/scripts/hooks/is-hex-sha` | Pure-shell hex-SHA check helper; sourced by three memory hooks with different min/max bounds |
-| `src/assets/scripts/hooks/session-start-context` | Emits learning directive + TL;DR decisions header |
+| `src/assets/scripts/hooks/session-start-context` | Learning directive (Section 2) + tracker-setup directive (Section 3) + TL;DR decisions header |
 | `src/assets/scripts/hooks/background-memory-update` | Detached worker: compute_commits_since_note, verify_and_swap, CAS, WORKING-MEMORY.md |
 | `src/assets/scripts/hooks/pre-compact-memory` | PreCompact: backup.json + noclobber-atomic WORKING-MEMORY.md bootstrap |
 | `src/assets/scripts/hooks/session-start-memory` | SessionStart: 3-state memory header + State-C refresh-failing |
 | `src/assets/scripts/hooks/json-parse` | JSON helpers including json_extract_cwd_field (SOH delimiter) |
 | `src/assets/agents/learning.md` | Learning agent spec (claim, detect, curate, unlink) |
+| `src/assets/agents/tracker.md` | Tracker agent spec (claim, probe, infer, scrub-gated write, finish) — schema/domain owned by `tracker-feature` KB |
 | `src/assets/scripts/hooks/json-helper.cjs` | Four ledger ops: assign-anchor, retire-anchor, refresh-anchor, rotate-observations; withDecisionsLock, serializeLedger |
 | `src/assets/scripts/hooks/lib/decisions-format.cjs` | segmentDetails (anchored + recovery pass), amendmentToString, isSafeRawBody, toLedgerRow, LINE_TERMINATORS, buildIndexContent |
 | `src/assets/scripts/hooks/lib/render-decisions.cjs` | Pure renderer — decisions.md, pitfalls.md, index.md from ledger rows |
-| `src/core/feature-config.ts` | `.devflow/config.json` read/write; `decisions`→`learning` coalesce |
+| `src/core/feature-config.ts` | `.devflow/config.json` read/write; `decisions`→`learning` coalesce; per-repo `tracker` override (`parseTrackerOverride`) |
 | `src/core/learning-tuning-config.ts` | Tuning config merge (project → global → defaults) |
 | `src/core/project-paths.ts` | Path construction — single source of truth for all `.devflow/` paths |
 | `src/cli/commands/learning.ts` | `devflow learning` CLI |
 | `src/hud/components/learning-counts.ts` | HUD counts from `decisions-ledger.jsonl` |
 | `src/assets/commands/_partials/_decisions.mds` | `decisions_load()` macro (plain file Read per ADR-007) |
 | `src/assets/scripts/hooks/decisions-usage-scan.cjs` | Citation counter (D29 grep-first gate) |
+| `tests/seams/tracker-key-path.test.ts`, `tests/seams/tracker-claim-staleness.test.ts` | Pin `TRACKER_PROVIDER_KEY_PATH` parity and the shared claim-staleness bound between the hook and the Tracker agent |
 | `tests/helpers/poll-for-terminal-line.ts` | Bounded log-file poll; 4 000 ms × 3 attempts = 12 s total bound (avoids PF-018 duplicated retry loops) |
 
 ## Related
@@ -408,8 +488,13 @@ agents must not "fix" the naming mismatch.
 - **PF-040** — pointer-vs-citation gate for missing-path signals in decisions/evidence
 - **ADR-001** — config-only gates; `decisions` legacy key coalesces to `learning`
 - **ADR-007** — `index.md` consumption via plain Read; no subprocess
+- **ADR-011** — `.devflow/config.json` is the neutral, feature-agnostic home for multi-feature toggles (not nested under `learning/`); the same rationale places the per-repo `tracker` override there
 - **PF-003** — use `unlink` not `rm -f` for the agent's final act
 - **PF-014** — throw inside lock scopes, never `process.exit()`; precondition asserts in `refresh-anchor`
 - **PF-013** — parent directory of lock dir created before acquire (`withDecisionsLock`)
+- **PF-045** — simulating a missing shell tool via `PATH` subtraction is platform-dependent; `tests/seams/tracker-key-path.test.ts` avoids it with a backend variable-switch override
+- **PF-062** — document the shape of any file that gates a suppressing action, and keep absent and malformed distinct from a value; the `.tracker.attempts` parse follows this directly (cited in the hook's own comment)
+- **PF-035** — a shell rewrite hook can silently substitute a lossy view for a literal file read; the load-bearing surface is exactly the Learning/Tracker agents' direct `.devflow` data-file consumption
 - `.devflow/features/feature-knowledge-system/KNOWLEDGE.md` — Knowledge agent write-back pattern (parallel write-through system)
 - `.devflow/features/ambient-orchestrator/KNOWLEDGE.md` — Ambient orchestrator that also uses `session-start-context` for charter injection
+- `.devflow/features/tracker-feature/KNOWLEDGE.md` — owns the tracker feature's full story (provider selection, the Tracker agent's schema/domain, the Git agent's reader-side preamble); this KB owns only the hook plumbing and the directive pattern shared with Section 2

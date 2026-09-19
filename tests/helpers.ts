@@ -1,8 +1,9 @@
-import { readFileSync, readdirSync, existsSync, promises as fsp } from 'fs'
+import { readFileSync, readdirSync, existsSync, statSync, promises as fsp } from 'fs'
 import * as os from 'os'
 import * as path from 'path'
 import { spawnSync } from 'child_process'
 import { type ManifestData } from '../src/core/manifest.js'
+import { DEFAULT_TRACKER_PROVIDER } from '../src/core/tracker.js'
 import { getAllAgentNames } from '../src/core/plugins.js'
 import { agentSourceDirs, compiledSkillRefsDir } from '../src/core/assets.js'
 import { MAX_REFERENCE_SWEEP_DEPTH } from '../src/core/reference-sweep.js'
@@ -49,11 +50,58 @@ export function requireDistFile(name: string, root: string = ROOT): string {
   }
 }
 
+/** One compile input and when it was last written. */
+interface CompileInput {
+  readonly file: string
+  readonly mtimeMs: number
+}
+
+/**
+ * Named collector: the most recently modified source `tsc` compiles into `dist/`.
+ *
+ * The input set is tsconfig.json's — `src/**` minus the `src/assets` tree, which
+ * is copied and never compiled — restated here as an extension filter plus that
+ * one exclusion rather than parsed out of the config. The scan is a CURRENCY
+ * check, not a build: over-reading a file tsc ignores can only report a stale
+ * dist one edit early, while under-reading one it compiles is the exact failure
+ * this exists to prevent, so the filter errs wide.
+ *
+ * Returns null when the tree holds no compile input at all, which the caller
+ * separates into "this root is not a source tree" and "the scan went empty".
+ */
+function newestCompileInput(srcDir: string): CompileInput | null {
+  const excluded = path.join(srcDir, 'assets') + path.sep
+  const files = walkFiles(
+    srcDir,
+    file => (file.endsWith('.ts') || file.endsWith('.json')) && !file.startsWith(excluded),
+  )
+  let newest: CompileInput | null = null
+  for (const file of files) {
+    const { mtimeMs } = statSync(file)
+    if (newest === null || mtimeMs > newest.mtimeMs) newest = { file, mtimeMs }
+  }
+  return newest
+}
+
 /**
  * Resolve the compiled CLI entrypoint and return its absolute path.
- * Throws — does NOT skip — when absent. A guard that silently skips on a
+ * Throws — does NOT skip — when absent OR STALE. A guard that silently skips on a
  * missing build artifact is not a guard: a skipped subprocess-CLI test proves
  * nothing about the CLI, and a SKIP mark reads as "fine" in a CI log.
+ *
+ * EXISTENCE IS NOT CURRENCY. This is the gate on the only executable coverage of
+ * a `devflow` action BODY, and a `dist/cli.js` older than the sources it was
+ * compiled from certifies a build nobody is shipping — PF-018's first mechanism
+ * in its quietest form, where the target exists but is not the one under review.
+ * So the artifact is compared against the newest compile input and a stale one
+ * fails LOUD, naming the build step, exactly as an absent one does.
+ *
+ * WHY MTIME AND NOT A CONTENT STAMP. The build writes no stamp (`npm run build`
+ * is `rm -rf dist && tsc && build-mds`), and mtime is sound for both orderings
+ * that actually occur: CI checks out, then builds into a freshly removed `dist/`,
+ * so every artifact is newer than every source; locally an edit after a build is
+ * precisely the state this reports. There is no cached-`dist/` restore step in
+ * either workflow that could invert the two.
  *
  * @param root - Repository root to resolve paths against (default: ROOT).
  *   Pass a temp-dir root in tests to verify throw behaviour without touching the real dist.
@@ -64,6 +112,30 @@ export function requireBuiltCli(root: string = ROOT): string {
     throw new Error(
       'dist/cli.js is absent — run `npm run build` first\n' +
       '  (this guard spawns the compiled CLI as a subprocess and cannot be skipped)',
+    )
+  }
+
+  const srcDir = path.join(root, 'src')
+  const newest = newestCompileInput(srcDir)
+  if (newest === null) {
+    // A hermetic temp root carries a `dist/` and no sources; there is nothing for
+    // it to be stale against, and the absence arm above is the only claim it can
+    // make. A root that HAS a `src/` and yields no compile input is a scan that
+    // went empty, which would make every currency check below vacuous (PF-018).
+    if (!existsSync(srcDir)) return cliPath
+    throw new Error(
+      `${srcDir} exists but holds no .ts/.json compile input — the currency check below ` +
+      'would pass by reading nothing, which is the vacuous-guard shape it exists to refuse',
+    )
+  }
+
+  const builtMs = statSync(cliPath).mtimeMs
+  if (builtMs < newest.mtimeMs) {
+    throw new Error(
+      'dist/cli.js is STALE — run `npm run build` first\n' +
+      `  ${path.relative(root, newest.file)} was modified after the CLI was compiled\n` +
+      '  (this guard spawns the compiled CLI as a subprocess: a stale artifact certifies\n' +
+      '   a build nobody is shipping, so it cannot be skipped and must not be tolerated)',
     )
   }
   return cliPath
@@ -675,6 +747,224 @@ export function collectTrackerNamingLines(content: string): string[] {
   return content.split('\n').filter(line => line.includes('references/tracker/'))
 }
 
+// ── Per-item fetch collector ([DR-08]) ───────────────────────────────────────
+//
+// §14.4 fixes `fetch_batch` as a SINGLE-QUERY capability for every provider, and
+// [DR-08] states the negative that keeps it one: no per-item fetch verb may appear
+// in any provider's `fetch-issues-batch` reference. The claim is made twice by
+// design — once per provider inside that provider's own suite, once across every
+// provider in tests/provider-literals.test.ts — so the shape table lives HERE
+// rather than in either of them. Two copies of the table would be two authorities
+// on what a per-item fetch looks like, which is the divergence [DR-19] forbids one
+// level down; and a test file cannot import another test file's export without
+// re-registering its suites.
+
+/**
+ * Shapes that betray a per-item fetch inside a `fetch-issues-batch` reference.
+ *
+ * Two classes, and both are needed. A TOOL-NAME verb (`getJiraIssue`, `get_issue`)
+ * is what an author reaches for when writing against a server's catalogue; a
+ * CAPABILITY name (`fetch by key`) is what an author reaches for when writing
+ * against this repo's own capability-first doctrine. §14.4's [DR-08] row names
+ * both — "`getJiraIssue`, `get_issue`, or any single-key fetch capability" — and a
+ * table covering only the first would be inert against the module this repo's own
+ * rules steer an author towards writing.
+ *
+ * `fetch-issue` — the single-issue OPERATION's own name — is in the table for the
+ * same reason, and it is the shape that actually caught something: "request the
+ * same projection `fetch-issue` requests" was a harmless cross-reference in a first
+ * draft, but "call `fetch-issue` for each key" is the per-item loop written in
+ * devflow's own vocabulary, and no regex can tell those two apart. A batch
+ * reference therefore names the sibling op by DESCRIPTION rather than by name,
+ * which costs one word and leaves the table unambiguous.
+ *
+ * Every entry carries a trailing `\b`, which is what keeps the op anchor line
+ * `## Operation: fetch-issues-batch` out of the results: the `s` after `issue` is
+ * a word character, so the plural is not the singular.
+ */
+export const PER_ITEM_FETCH_SHAPES: readonly RegExp[] = [
+  /\bget[_-]?jira[_-]?issue\b/i,
+  /\bget[_-]?issue\b/i,
+  /\bfetch[_-]?issue\b/i,
+  /\bfetch by key\b/i,
+]
+
+/** Named collector: per-item fetch shapes in a batch reference, as `{line}: {match}`. */
+export function collectPerItemFetchVerbs(text: string): string[] {
+  const found: string[] = []
+  for (const [i, line] of text.split('\n').entries()) {
+    for (const shape of PER_ITEM_FETCH_SHAPES) {
+      const match = shape.exec(line)
+      if (match !== null) found.push(`${i + 1}: ${match[0]}`)
+    }
+  }
+  return found
+}
+
+// ── ~/.devflow/tracker.md schema parsers (§14.3) ──────────────────────────────
+//
+// The schema has a WRITER (the Tracker agent's embedded template, 3a-2) and a
+// READER (the Git-agent preamble, 3a-4) — conflict C12. The two-sided equality
+// test between them cannot catch drift in its own oracle, so the heading list
+// and the parsers live here, once, and every suite binds to these.
+
+/** Info string of the fence inside the Tracker agent that holds the template. */
+export const TRACKER_TEMPLATE_FENCE_TAG = 'tracker-md-template'
+
+/**
+ * How many sections §14.3 fixes.
+ *
+ * A separate literal so the list below is checked against a NUMBER rather than
+ * against its own length. A drop-one edit that also decrements this constant is
+ * a deliberate schema change; one that does not is the accident the oracle
+ * refuses at import.
+ */
+export const TRACKER_SCHEMA_SECTION_COUNT = 11
+
+/**
+ * Named collector: the ways a candidate §14.3 heading list fails to be an oracle.
+ *
+ * Three mutation classes, each reported by name:
+ *   - DUPLICATE — the same heading twice. A duplicate inflates every length
+ *     comparison while the schema it describes has shrunk, which is how a
+ *     `>= 11` floor accepts a ten-section list.
+ *   - SHORT — fewer distinct headings than §14.3 fixes (drop-one).
+ *   - LONG — more (add-one).
+ *
+ * WHAT A CLEAN RESULT DOES NOT COVER, recorded beside the rule rather than left
+ * to be inferred (PF-064). A heading RENAMED here, in the Tracker agent's
+ * template and in the Git-agent's reader block, all in one commit, is well
+ * formed and passes. That is a declared NON-GOAL, not an oversight: §14.3 is a
+ * design artifact under `.devflow/docs/design/`, which is gitignored, so no
+ * committed file can arbitrate a synchronized rename. This list is a THIRD PARTY
+ * to the writer and the reader — it catches a schema that silently SHRINKS, and
+ * it is silent about one that is consistently re-spelled.
+ */
+export function collectSchemaOracleDefects(sections: readonly string[]): string[] {
+  const defects: string[] = []
+  const distinct = new Set<string>()
+  for (const section of sections) {
+    if (distinct.has(section)) defects.push(`duplicate heading: ${section}`)
+    distinct.add(section)
+  }
+  if (distinct.size !== TRACKER_SCHEMA_SECTION_COUNT) {
+    defects.push(
+      `${distinct.size} distinct heading(s); §14.3 fixes ${TRACKER_SCHEMA_SECTION_COUNT}`,
+    )
+  }
+  return defects
+}
+
+/**
+ * Check the §14.3 list's shape, then freeze it — or throw naming the defect.
+ *
+ * Fail-loud at import, on the same reasoning as `requireBuiltCli` above: every
+ * tracker-schema guard in the suite binds to this list, so a list that has
+ * quietly lost a section makes each of them compare against the wrong contract
+ * while staying green. A helper may throw, so it throws.
+ *
+ * Exported so the throw itself can be driven over a mutated list, rather than
+ * only the predicate behind it: a guard whose reporting arm has never been shown
+ * to fire is a guard nobody has seen work.
+ */
+export function requireSchemaOracle(sections: readonly string[]): readonly string[] {
+  const defects = collectSchemaOracleDefects(sections)
+  if (defects.length > 0) {
+    throw new Error(
+      'TRACKER_SCHEMA_SECTIONS is not a usable oracle — every tracker-schema guard binds ' +
+      'to it, so each would compare against a contract §14.3 does not state:\n  ' +
+      defects.join('\n  '),
+    )
+  }
+  return Object.freeze(sections)
+}
+
+/**
+ * The `~/.devflow/tracker.md` section headings, in order, verbatim from §14.3.
+ *
+ * `## Project` carries two values (site and key) and is therefore ONE heading
+ * with two validator rows — §14.3's table splits the rows, not the section.
+ * `learned:` is deliberately absent from the frontmatter set below: it has no
+ * stated consumer, and an unread key is residue (ADR-003).
+ *
+ * Its SHAPE is settled here, once, at import: exactly
+ * `TRACKER_SCHEMA_SECTION_COUNT` distinct headings, no repeats. A consumer
+ * therefore compares against this list rather than re-deriving a floor of its
+ * own — a floor that counts duplicates is satisfied by a list that has dropped
+ * one section and repeated another. `tests/tracker/schema-oracle.test.ts` drives
+ * `collectSchemaOracleDefects` over each of those mutations, so the check above
+ * is shown live rather than assumed.
+ */
+export const TRACKER_SCHEMA_SECTIONS: readonly string[] = requireSchemaOracle([
+  '## Project',
+  '## Issue Types',
+  '## Required Fields',
+  '## Iteration Policy',
+  '## Transitions',
+  '## Assignee',
+  '## Tech Debt',
+  '## Wave Filter',
+  '## Reference Rendering',
+  '## Dedup Strategy',
+  '### Substitutions',
+])
+
+/** Frontmatter keys of the written file (§14.3). */
+export const TRACKER_SCHEMA_FRONTMATTER_KEYS: readonly string[] = ['provider', 'inferred-from']
+
+/**
+ * Named collector: the tagged template fence's inner text, or null.
+ *
+ * Addressed by its info string rather than by position — "the first fence"
+ * silently re-points at whatever fence an edit happens to put first.
+ */
+export function collectTrackerTemplate(content: string): string | null {
+  const re = new RegExp('```' + TRACKER_TEMPLATE_FENCE_TAG + '\\n([\\s\\S]*?)```', 'm')
+  return re.exec(content)?.[1] ?? null
+}
+
+/** Named collector: `##`/`###` headings inside the template, in document order. */
+export function collectTrackerTemplateHeadings(template: string): string[] {
+  return template
+    .split('\n')
+    .filter(l => /^#{2,3} \S/.test(l))
+    .map(l => l.trim())
+}
+
+/** One row of the agent's schema/validator table. */
+export interface TrackerSchemaRow {
+  readonly section: string
+  readonly scope: string
+  readonly absent: string
+  readonly validator: string
+}
+
+/**
+ * Named collector: rows of the schema/validator table, one per value-bearing
+ * schema field.
+ *
+ * Splits on UNESCAPED pipes only, so a validator cell may spell an alternation
+ * (`enum: \`none\` \| \`self\``) without the row parsing as six cells. The
+ * hostile-value suite drives the `validator` cells this returns, so the table in
+ * the agent is the single authority for what a value must look like — a second
+ * copy of the shapes inside the test would prove the copy, not the agent
+ * (PF-018).
+ */
+export function collectTrackerSchemaRows(content: string): TrackerSchemaRow[] {
+  const rows: TrackerSchemaRow[] = []
+  for (const line of content.split('\n')) {
+    if (!line.startsWith('| `## ')) continue
+    const cells = line
+      .replace(/^\|/, '')
+      .replace(/\|$/, '')
+      .split(/(?<!\\)\|/)
+      .map(c => c.trim())
+    if (cells.length !== 4) continue
+    rows.push({ section: cells[0], scope: cells[1], absent: cells[2], validator: cells[3] })
+  }
+  return rows
+}
+
 // ── Fence parsing helpers ─────────────────────────────────────────────────────
 //
 // These mirror registry-integrity.test.ts:449-456 verbatim (the repo's
@@ -1083,6 +1373,7 @@ export function makeManifest(overrides: Partial<ManifestData> = {}): ManifestDat
       rules: true,
       proxy: false,
       compliance: { enabled: false, frameworks: [] },
+      tracker: { provider: DEFAULT_TRACKER_PROVIDER },
       flags: { tui: true, lsp: true, 'tool-search': true },
     },
     installedAt: '2026-01-01T00:00:00.000Z',
@@ -1129,4 +1420,221 @@ export function splitFrontmatter(text: string): FrontmatterSplit | null {
   const match = /^---\r?\n([\s\S]*?)\r?\n---\r?\n/.exec(text)
   if (!match) return null
   return { block: match[0], inner: match[1], body: text.slice(match[0].length) }
+}
+
+// ── Tool-call provider mechanics claims (AC-3.3, AC-3.11, §14.3) ──────────────
+//
+// WHY HERE AND NOT IN EITHER PROVIDER SUITE. Each of these sentences is a claim
+// made per provider, so it needs a per-provider arm — and the claim is the SAME
+// claim for every tool-call provider, so a copy in each suite is two authorities
+// on one contract. The [DR-08] table above moved here for exactly this reason;
+// these follow it.
+//
+// WHAT THEY PIN, AND WHY PROSE ALONE WAS NOT ENOUGH.
+//
+//   AC-3.3 — "provider jira with no Jira MCP ⇒ a named DEGRADED at each tracker
+//   op, branch and PR still created, `Tracked (pending)` with the reason, NEVER a
+//   GitHub issue as fallback". All three clauses shipped as prose in both modules
+//   and no test contained any of the three strings, so the whole criterion rested
+//   on nobody condensing the paragraph. The GitHub-fallback clause is the one
+//   that matters most: silently opening an issue on a tracker the user does not
+//   use is worse than an honest gap, and it is the single most plausible thing an
+//   author reaches for when a capability probe comes back empty.
+//
+//   AC-3.11 — the branch shape `{type}/{KEY}-{slug}` with the type EXACT-matched
+//   against `## Issue Types`. The always-loaded agent deliberately does not
+//   restate this (the byte budget refuses a second copy, and GAP-37 forbids one),
+//   so each provider's own setup-task mechanics is the only statement of it and
+//   the only place it can be pinned.
+//
+//   §14.3 — a discarded `## Reference Rendering` token degrades to the documented
+//   default AND records the discard under `### Substitutions`. Both halves or
+//   neither: a default with no record is a silent substitution, and a record with
+//   no default is a report about nothing.
+//
+// The reference VOCABULARY differs per provider by design — jira renders a `KEY`,
+// linear a `REF` — so the two spellings are parameters of the table rather than
+// two tables. Nothing else varies: these clauses are contract text.
+//
+// EVERY ROW PINS A TOKEN, NEVER A SENTENCE — and that is a standing rule, not a
+// style note. These generated mechanics are priced against the per-provider
+// loaded-set ceilings in tests/tracker/byte-budget.test.ts, of which
+// `budget-loaded-set-linear` is the thinnest and therefore the binding one, so a
+// condensing pass over this prose is an expected event rather than a hypothetical.
+// A row that pins a whole sentence makes the two forces contradict each other: the
+// ceiling demands the sentence be shortened and the guard forbids it from changing,
+// and the guard loses in the only way that matters — it goes RED reporting a clause
+// that is still present, because the rewrite moved a comma. That is PF-057's
+// mistake one level down: pinning where a sentence happens to break.
+//
+// So each row's shape recognises the SHORTEST phrase that carries its claim, and a
+// requirement whose halves must co-occur is written as SEVERAL rows over the same
+// op list rather than as one ordered regex bridging between phrases. The property
+// asserted is membership per operation file; adjacency inside one sentence is not
+// the property, and a bridge with a hand-picked width has no contract behind it.
+//
+// A token that can begin a sentence spells its first letter as `[Xx]`, because the
+// copy-edit these rows are written to survive — splitting one comma-spliced sentence
+// into two — CAPITALISES the word it promotes to the front. A case-sensitive token
+// would go red on exactly the rewrite the byte ceiling is asking for. The tolerance
+// is one letter and no more: `### Substitutions` is a heading name, and a wholesale
+// `/i` would admit a heading that does not exist.
+
+/** The reference vocabulary one tool-call provider's mechanics use. */
+export interface ProviderRefVocabulary {
+  /** Branch-token placeholder in `{type}/{TOKEN}-{slug}` — `KEY` on jira, `REF` on linear. */
+  readonly refToken: string
+  /** How the mechanics name a bare reference in prose — `key` on jira, `reference` on linear. */
+  readonly refNoun: string
+}
+
+/** One token a tool-call provider's mechanics owe, and where it must appear. */
+export interface ProviderMechanicsClaim {
+  /** Short name, used in the failure message and by the per-row probe. */
+  readonly label: string
+  /** The acceptance criterion this clause is the mechanical half of. */
+  readonly criterion: string
+  /**
+   * Generated op references that must EACH state the clause — at least one.
+   *
+   * A non-empty tuple, not `readonly string[]`: the collector below ranges over
+   * this list, so an empty one would report nothing while reading not one byte
+   * of any provider's mechanics — a row that can never fail (PF-018). The type
+   * refuses to spell it rather than a branch having to notice it.
+   */
+  readonly ops: readonly [string, ...string[]]
+  /** The shape that recognises the clause, built from the provider's vocabulary. */
+  readonly pattern: (vocab: ProviderRefVocabulary) => RegExp
+  readonly why: string
+}
+
+export const TOOL_CALL_MECHANICS_CLAIMS: readonly ProviderMechanicsClaim[] = [
+  {
+    label: '`Tracked (pending)` carries the reason when the capability is missing',
+    criterion: 'AC-3.3',
+    ops: ['setup-task', 'ensure-traceable-issue'],
+    pattern: () => /`Tracked \(pending\)`/,
+    why:
+      'the traceability field has to say SOMETHING, and "pending with a reason" is the only ' +
+      'honest value: a blank field reads as "no issue was wanted" and a fabricated one reads as ' +
+      'an issue that exists. Both operations reach this state, so both must name the value',
+  },
+  {
+    label: 'the branch is still cut and the PR is still opened',
+    criterion: 'AC-3.3',
+    ops: ['setup-task'],
+    pattern: () => /\*\*The branch is still cut and the PR is still opened\*\*/,
+    why:
+      'D4\'s whole promise is that a traceability gap never aborts the caller\'s workflow. Without ' +
+      'this clause an author reading "the capability is absent ⇒ DEGRADED" has no instruction to ' +
+      'continue, and the natural reading of a DEGRADED precondition is to stop',
+  },
+  {
+    label: 'never a GitHub issue as a fallback',
+    criterion: 'AC-3.3',
+    ops: ['setup-task'],
+    pattern: () => /\*\*NEVER create a GitHub issue as a fallback\*\*/,
+    why:
+      'the single most plausible improvisation when a tracker capability comes back empty, and the ' +
+      'worst: a different tracker is not a degraded version of this one, and a stray issue on a ' +
+      'system the user does not watch is worse than an honest gap',
+  },
+  {
+    label: 'the same prohibition on the issue-creating operation',
+    criterion: 'AC-3.3',
+    ops: ['ensure-traceable-issue'],
+    pattern: () => /never creates a GitHub issue instead/,
+    why:
+      'setup-task delegates creation here, so a prohibition stated only there is a prohibition the ' +
+      'operation that actually creates issues never reads',
+  },
+  {
+    label: 'the branch shape is `{type}/{TOKEN}-{slug}`',
+    criterion: 'AC-3.11',
+    ops: ['setup-task'],
+    pattern: v => new RegExp(`\\{type\\}/\\{${v.refToken}\\}-\\{slug\\}`),
+    why:
+      'the requester\'s own journey. The always-loaded agent does not restate the shape — the byte ' +
+      'budget refuses a second copy and GAP-37 forbids one — so this file is its only statement',
+  },
+  {
+    label: 'the type comes from `## Issue Types` by exact match',
+    criterion: 'AC-3.11',
+    ops: ['setup-task'],
+    pattern: () => /`## Issue Types` by \*\*exact match\*\*/,
+    why:
+      'an inferred type is a value the tracker never enumerated, so the create call fails at the ' +
+      'far end or, worse, succeeds against a type that means something else in that project',
+  },
+  // §14.3's discarded-token rule, as THREE token rows over the two operations
+  // that render a reference — see the token-vs-sentence note above the table.
+  {
+    label: 'the fallback renders the reference itself',
+    criterion: '§14.3',
+    ops: ['ensure-pr-ready', 'create-release'],
+    pattern: v => new RegExp(`[Rr]ender the ${v.refNoun}\\b`),
+    why:
+      'the DEFAULT half. Without it a discarded token leaves the operation with no instruction for ' +
+      'what to emit, and the natural reading of "the token was discarded" is to emit nothing',
+  },
+  {
+    label: 'the fallback reference goes on its own line',
+    criterion: '§14.3',
+    ops: ['ensure-pr-ready', 'create-release'],
+    pattern: () => /on its own line/,
+    why:
+      'the documented shape of that default. A reference folded into surrounding prose is a ' +
+      'reference the tracker\'s own link detection may never see, which is the failure the section ' +
+      'was configured to avoid in the first place',
+  },
+  {
+    label: 'the discard is recorded under `### Substitutions`',
+    criterion: '§14.3',
+    ops: ['ensure-pr-ready', 'create-release'],
+    pattern: () => /[Rr]ecord the discard under `### Substitutions`/,
+    why:
+      'the RECORD half — both halves or neither. A default with no record is a silent substitution: ' +
+      'the user sees a reference they did not configure and nothing says why',
+  },
+]
+
+/**
+ * One provider's generated mechanics corpus, as the claim collector reads it.
+ *
+ * All three members describe the SAME provider, so they travel as one value: a
+ * label, a vocabulary and a reader bundled as one object rather than positional
+ * arguments a call site could reorder silently.
+ *
+ * `read` is injected so the caller keeps its own fail-loud reader — every provider
+ * suite already has one with a build hint, and a second reader here would be a
+ * second place ENOENT tolerance could creep in.
+ */
+export interface ProviderCorpus {
+  /** The provider's reference sub-directory, which prefixes every reported line. */
+  readonly label: string
+  /** The vocabulary each claim's shape is built from. */
+  readonly vocab: ProviderRefVocabulary
+  /** One op's generated reference. */
+  readonly read: (op: string) => string
+}
+
+/**
+ * Named collector: claims a tool-call provider's generated mechanics do not make.
+ */
+export function collectMissingMechanicsClaims(
+  corpus: ProviderCorpus,
+  claims: readonly ProviderMechanicsClaim[],
+): string[] {
+  const missing: string[] = []
+  for (const claim of claims) {
+    const pattern = claim.pattern(corpus.vocab)
+    for (const op of claim.ops) {
+      if (!pattern.test(corpus.read(op))) {
+        missing.push(
+          `${corpus.label}/${op}.md [${claim.criterion}]: missing ${claim.label} — ${claim.why}`,
+        )
+      }
+    }
+  }
+  return missing
 }

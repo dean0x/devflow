@@ -28,6 +28,7 @@ import * as path from 'path';
 import {
   installViaFileCopy,
   overlayGeneratedReferences,
+  planOverlayUnits,
   promoteUnitStagingTree,
   type OverlayFailure,
   type OverlayUnit,
@@ -145,10 +146,94 @@ describe('generated reference manifest (bidirectional registry doctrine)', () =>
     expect(
       manifest.length,
       'a manifest short enough to enumerate by hand makes every convergence assertion vacuous',
-    ).toBeGreaterThanOrEqual(13);
+    ).toBeGreaterThanOrEqual(34);
     expect(manifest).toContain('tracker/github/setup-task.md');
     expect(manifest).toContain('decision-markers.md');
     expect(manifest.filter(p => p.startsWith('tracker/github/')).length).toBeGreaterThanOrEqual(10);
+    // The THIRD shape, and the one whose mis-bucketing was a release blocker: a file
+    // landing directly in `tracker/`, beside the provider directories rather than
+    // inside one. It is a flat set in a subdirectory, not a provider
+    // (D-OVERLAY-PROVIDER-SHAPE), and the manifest is where that shape first appears.
+    expect(
+      manifest.filter(p => p.startsWith('tracker/') && p.split('/').length === 2),
+      'no manifest entry lands directly in tracker/ — the unit shape that is neither a provider ' +
+      'directory nor a references-root document is unrepresented, and the arms below that cover ' +
+      'it are testing nothing',
+    ).toEqual(['tracker/_mcp.md']);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// D-OVERLAY-PROVIDER-SHAPE — which KIND of unit a manifest directory becomes
+// ---------------------------------------------------------------------------
+
+describe('overlay unit classification (D-OVERLAY-PROVIDER-SHAPE)', () => {
+  /**
+   * The rule this one replaced: bucket by directory part, then call any non-empty
+   * directory part a provider directory.
+   *
+   * It is here as the known-bad probe. No arm that reads the INSTALLED tree discriminates
+   * the two rules — the directory parts sort `'' < tracker < tracker/{provider}`, so a
+   * mis-bucketed whole-subtree rename of `tracker/` runs BEFORE the provider units promote
+   * back into it and every file is present at the end either way — so the classification
+   * is the observation that separates them, and an arm asserting it is only a regression
+   * guard if the two rules really disagree on the input it uses (avoids PF-018).
+   */
+  function shapeBlindKind(subdir: string): OverlayUnit['kind'] {
+    return subdir === '' ? 'cross-cutting' : 'provider';
+  }
+
+  it('buckets a file landing directly in tracker/ as the flat set there, never as a provider', () => {
+    const units = planOverlayUnits([
+      'decision-markers.md',
+      'tracker/_mcp.md',
+      'tracker/github/setup-task.md',
+    ]);
+
+    expect(units).toEqual([
+      { kind: 'cross-cutting', dir: '', files: ['decision-markers.md'] },
+      { kind: 'cross-cutting', dir: 'tracker', files: ['tracker/_mcp.md'] },
+      { kind: 'provider', subdir: 'tracker/github', files: ['tracker/github/setup-task.md'] },
+    ]);
+
+    // `tracker` is the one directory part the two rules disagree on, which is what makes
+    // the assertion above discriminate the defect rather than restate a shape both rules
+    // get right. Under the replaced rule that unit is a provider directory, and its atomic
+    // swap is a rename of `tracker/` ITSELF over every provider directory beside it.
+    expect(
+      shapeBlindKind('tracker'),
+      'the replaced rule must really classify this differently, or the arm above proves nothing',
+    ).toBe('provider');
+    expect(shapeBlindKind('tracker/github'), 'the two rules must still agree here').toBe('provider');
+    expect(shapeBlindKind(''), 'the two rules must still agree here').toBe('cross-cutting');
+  });
+
+  it('classifies the REAL manifest the same way — tracker/ flat, each provider its own unit', async () => {
+    const units = planOverlayUnits(await requireBuiltReferences());
+
+    // The synthetic manifest above states the contract; this pins it to the shapes the
+    // build actually emits, so neither arm can pass on a shape nothing produces (PF-043).
+    expect(
+      units.flatMap(u => (u.kind === 'cross-cutting' && u.dir === 'tracker' ? [u.files] : [])),
+      'the real manifest carries no flat set in tracker/ — the shape under test is absent',
+    ).toEqual([['tracker/_mcp.md']]);
+
+    const flatDirs = units.flatMap(u => (u.kind === 'cross-cutting' ? [u.dir] : []));
+    expect(flatDirs, 'the references root is a flat set too').toContain('');
+
+    const providerSubdirs = units.flatMap(u => (u.kind === 'provider' ? [u.subdir] : []));
+    expect(
+      providerSubdirs.length,
+      'no provider unit at all — the discriminating half of this arm would be vacuous',
+    ).toBeGreaterThanOrEqual(1);
+    for (const subdir of providerSubdirs) {
+      expect(
+        subdir.split('/'),
+        `${subdir} is a provider unit but is not a tracker/{provider} directory`,
+      ).toHaveLength(2);
+      expect(subdir.startsWith('tracker/'), `${subdir} must live under tracker/`).toBe(true);
+    }
+    expect(providerSubdirs, 'tracker/ itself is never a provider unit').not.toContain('tracker');
   });
 });
 
@@ -216,29 +301,52 @@ describe('reference overlay through installViaFileCopy (AC-2.4a)', () => {
     ).toBe(sentinel);
 
     // … and the canonical mechanics still land. This is the release-blocker half.
-    for (const rel of manifest.filter(p => p.startsWith('tracker/github/'))) {
+    //
+    // Scoped to EVERY manifest entry under `tracker/`, not only the github ones. The
+    // narrower loop passed while a file landing directly in `tracker/` was bucketed as
+    // a provider directory named `tracker` — a unit whose atomic swap renames the whole
+    // subtree over the provider directories beside it (D-OVERLAY-PROVIDER-SHAPE). The
+    // github files survived that by promotion order alone, so a github-only loop is
+    // green for a manifest shape the overlay cannot install.
+    const trackerRefs = manifest.filter(p => p.startsWith('tracker/'));
+    expect(
+      trackerRefs.length,
+      'the manifest carries no tracker reference — run `npm run build`',
+    ).toBeGreaterThan(0);
+    for (const rel of trackerRefs) {
       const installed = await fs.readFile(abs(installedRefs(), rel));
       const generated = await fs.readFile(abs(REAL_REFS, rel));
       expect(installed.equals(generated), `shadowed install must carry ${rel}`).toBe(true);
     }
+    // And the two shapes are both really present, or the widening above proves nothing:
+    // a provider directory and a file landing directly in `tracker/`.
+    expect(
+      trackerRefs.some(rel => rel.split('/').length === 3),
+      'no tracker/{provider}/{op}.md entry — the provider-unit arm is untested here',
+    ).toBe(true);
+    expect(
+      trackerRefs.some(rel => rel.split('/').length === 2),
+      'no file landing directly in tracker/ — the flat-set-in-a-subdirectory arm, the one that ' +
+      'was mis-bucketed as a provider directory, is untested here',
+    ).toBe(true);
     expect([...report.overlaidRefs].sort()).toEqual([...manifest].sort());
   });
 
   it('prunes a shadow-injected file under references/tracker/** (AC-2.4c)', async () => {
     const shadow = path.join(devflowDir, 'skills', 'git');
-    await fs.mkdir(path.join(shadow, 'references', 'tracker', 'jira'), { recursive: true });
+    await fs.mkdir(path.join(shadow, 'references', 'tracker', 'probe-provider'), { recursive: true });
     await fs.writeFile(path.join(shadow, 'SKILL.md'), '# shadowed git\n', 'utf-8');
-    const injected = path.join(shadow, 'references', 'tracker', 'jira', 'comment.md');
+    const injected = path.join(shadow, 'references', 'tracker', 'probe-provider', 'comment.md');
     await fs.writeFile(injected, '# injected mechanics\n', 'utf-8');
 
     const report = await runInstall();
 
     expect(
-      await exists(path.join(installedRefs(), 'tracker', 'jira', 'comment.md')),
+      await exists(path.join(installedRefs(), 'tracker', 'probe-provider', 'comment.md')),
       'a shadow-supplied file that is not in the build manifest must be absent after install',
     ).toBe(false);
     expect(
-      await exists(path.join(installedRefs(), 'tracker', 'jira')),
+      await exists(path.join(installedRefs(), 'tracker', 'probe-provider')),
       'the orphaned provider directory must be removed, not left empty',
     ).toBe(false);
 
@@ -267,7 +375,35 @@ describe('converge-not-merge staged swap (GAP-24)', () => {
   let warnings: string[];
   let manifest: readonly string[];
 
-  const EXTRA_PROVIDER_MANIFEST = ['tracker/jira/comment.md', 'tracker/jira/transition.md'] as const;
+  /**
+   * A provider directory the REAL manifest does not list — the subject of every
+   * stale-prune, atomic-swap and isolation arm below.
+   *
+   * The name is deliberately synthetic. This suite previously used `jira`, which
+   * was a provider nothing registered and then became one: the prune arms inverted
+   * silently from "the orphan is removed" to "the real provider survives", which is
+   * the correct behaviour reported as a failure. `probe-provider` can never be a
+   * real provider, and the guard below asserts that rather than trusting it — so if
+   * a future provider ever claims the name, this fails with a message saying to
+   * pick another instead of quietly testing the opposite property.
+   */
+  const EXTRA_PROVIDER_MANIFEST = ['tracker/probe-provider/comment.md', 'tracker/probe-provider/transition.md'] as const;
+
+  it('the fixture provider is not a real one — the prune arms have a genuine orphan', () => {
+    const real = generatedReferenceManifest();
+    for (const rel of EXTRA_PROVIDER_MANIFEST) {
+      expect(
+        real,
+        `${rel} is in the real generated manifest, so it is NOT an orphan and every arm below ` +
+        `that expects it to be pruned is asserting the opposite of the shipped behaviour. Pick a ` +
+        `fixture provider name no module will ever register.`,
+      ).not.toContain(rel);
+    }
+    expect(
+      real.some(rel => rel.startsWith('tracker/')),
+      'the real manifest carries no provider directory at all — run `npm run build`',
+    ).toBe(true);
+  });
 
   beforeEach(async () => {
     manifest = await requireBuiltReferences();
@@ -293,7 +429,7 @@ describe('converge-not-merge staged swap (GAP-24)', () => {
     });
     expect(first.overlayFailures).toEqual([]);
     expect(
-      await exists(path.join(target, 'tracker', 'jira', 'comment.md')),
+      await exists(path.join(target, 'tracker', 'probe-provider', 'comment.md')),
       'the wide manifest must actually install the extra provider first',
     ).toBe(true);
 
@@ -304,12 +440,12 @@ describe('converge-not-merge staged swap (GAP-24)', () => {
       warn: (m) => warnings.push(m),
     });
 
-    expect(await exists(path.join(target, 'tracker', 'jira'))).toBe(false);
+    expect(await exists(path.join(target, 'tracker', 'probe-provider'))).toBe(false);
     expect(
       second.pruned.scanned,
       'a prune that scanned nothing proves nothing (avoids PF-018)',
     ).toBeGreaterThan(0);
-    expect(second.pruned.removed).toContain('jira');
+    expect(second.pruned.removed).toContain('probe-provider');
     // Positive half: the retained set survived the prune.
     for (const rel of manifest.filter(p => p.startsWith('tracker/github/'))) {
       expect(await exists(abs(target, rel)), `${rel} must survive the prune`).toBe(true);
@@ -344,7 +480,7 @@ describe('converge-not-merge staged swap (GAP-24)', () => {
     await overlayGeneratedReferences({ referencesTarget: target, sourceRoot, manifest });
 
     const files = (await walkTree(target)).filter(p => !p.endsWith('/'));
-    expect(files.length, 'no files installed — the mode assertion would be vacuous').toBeGreaterThanOrEqual(13);
+    expect(files.length, 'no files installed — the mode assertion would be vacuous').toBeGreaterThanOrEqual(34);
     for (const rel of files) {
       const stat = await fs.stat(abs(target, rel));
       expect(stat.mode & 0o777, `${rel} must be normalised to 0644`).toBe(0o644);
@@ -400,6 +536,11 @@ describe('converge-not-merge staged swap (GAP-24)', () => {
         `${staging} must carry this process's id — a shared name is a shared staging tree`,
       ).toContain(String(process.pid));
       // reliability-08. Whatever a crash strands has to land where the prune will find it.
+      // A MIS-BUCKETED unit shows up here too: a file landing directly in `tracker/`
+      // bucketed as a provider directory stages at `{target}/tracker.{token}.tmp`, a
+      // SIBLING of the converged subtree rather than a path inside it. Which kind each
+      // directory classifies as is pinned directly by the D-OVERLAY-PROVIDER-SHAPE arms
+      // above; this one is about where a staging tree lands, whichever kind produced it.
       expect(
         staging.startsWith(trackerRoot + path.sep),
         `${staging} must stage under ${trackerRoot}, the only subtree this module converges`,
@@ -526,7 +667,7 @@ describe('atomic per-unit swap (AC-2.4b, DR-05, risk P2-g)', () => {
 
   beforeEach(async () => {
     manifest = await requireBuiltReferences();
-    wide = [...manifest, 'tracker/jira/comment.md', 'tracker/jira/transition.md'];
+    wide = [...manifest, 'tracker/probe-provider/comment.md', 'tracker/probe-provider/transition.md'];
     sourceRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'devflow-overlay-src-'));
     target = await fs.mkdtemp(path.join(os.tmpdir(), 'devflow-overlay-dst-'));
     await stageSource(sourceRoot, wide);
@@ -536,8 +677,8 @@ describe('atomic per-unit swap (AC-2.4b, DR-05, risk P2-g)', () => {
     // The directory first: a 0o000 parent makes the file chmod below fail with EACCES,
     // and then `rm -r` cannot list it either, which would fail the teardown rather than
     // the test that revoked it.
-    await fs.chmod(abs(sourceRoot, 'tracker/jira'), 0o755).catch(() => undefined);
-    await fs.chmod(abs(sourceRoot, 'tracker/jira/comment.md'), 0o644).catch(() => undefined);
+    await fs.chmod(abs(sourceRoot, 'tracker/probe-provider'), 0o755).catch(() => undefined);
+    await fs.chmod(abs(sourceRoot, 'tracker/probe-provider/comment.md'), 0o644).catch(() => undefined);
     await fs.rm(sourceRoot, { recursive: true, force: true });
     await fs.rm(target, { recursive: true, force: true });
   });
@@ -546,11 +687,11 @@ describe('atomic per-unit swap (AC-2.4b, DR-05, risk P2-g)', () => {
     const first = await overlayGeneratedReferences({ referencesTarget: target, sourceRoot, manifest: wide });
     expect(first.overlayFailures, 'the seeding install must succeed').toEqual([]);
 
-    const jiraBefore = await Promise.all(
-      ['tracker/jira/comment.md', 'tracker/jira/transition.md'].map(rel => fs.readFile(abs(target, rel))),
+    const probeBefore = await Promise.all(
+      ['tracker/probe-provider/comment.md', 'tracker/probe-provider/transition.md'].map(rel => fs.readFile(abs(target, rel))),
     );
 
-    const revoked = await canRevokeRead(abs(sourceRoot, 'tracker/jira/comment.md'));
+    const revoked = await canRevokeRead(abs(sourceRoot, 'tracker/probe-provider/comment.md'));
     if (!revoked) {
       // Running as root, or a filesystem that ignores mode bits: the premise of the
       // test cannot be established, so asserting on it would be theatre. Report it
@@ -567,7 +708,7 @@ describe('atomic per-unit swap (AC-2.4b, DR-05, risk P2-g)', () => {
 
     // 1. the failing unit is named, and the install still succeeds (no throw)
     expect(second.overlayFailures.map(f => f.unit)).toEqual([
-      { kind: 'provider', subdir: 'tracker/jira' },
+      { kind: 'provider', subdir: 'tracker/probe-provider' },
     ]);
     expect(second.overlayFailures[0].error.length).toBeGreaterThan(0);
 
@@ -578,17 +719,17 @@ describe('atomic per-unit swap (AC-2.4b, DR-05, risk P2-g)', () => {
     expect(second.overlayFailures[0].state).toEqual({ kind: 'installed-unchanged' });
 
     // 2. the pre-existing provider tree is byte-unchanged — never a partial promotion
-    const jiraAfter = await Promise.all(
-      ['tracker/jira/comment.md', 'tracker/jira/transition.md'].map(rel => fs.readFile(abs(target, rel))),
+    const probeAfter = await Promise.all(
+      ['tracker/probe-provider/comment.md', 'tracker/probe-provider/transition.md'].map(rel => fs.readFile(abs(target, rel))),
     );
-    expect(jiraAfter[0].equals(jiraBefore[0])).toBe(true);
-    expect(jiraAfter[1].equals(jiraBefore[1])).toBe(true);
+    expect(probeAfter[0].equals(probeBefore[0])).toBe(true);
+    expect(probeAfter[1].equals(probeBefore[1])).toBe(true);
 
     // 3. the healthy unit installed normally (positive outcome)
     const installed = await fs.readFile(abs(target, 'tracker/github/setup-task.md'), 'utf-8');
     expect(installed).toContain('<!-- second pass -->');
     expect(second.overlaidRefs).toContain('tracker/github/setup-task.md');
-    expect(second.overlaidRefs).not.toContain('tracker/jira/comment.md');
+    expect(second.overlaidRefs).not.toContain('tracker/probe-provider/comment.md');
 
     // 4. no staging residue survives a failed unit
     const residue = (await walkTree(target)).filter(p => p.includes('.tmp'));
@@ -599,7 +740,7 @@ describe('atomic per-unit swap (AC-2.4b, DR-05, risk P2-g)', () => {
       overlaidRefs: second.overlaidRefs,
       overlayFailures: second.overlayFailures,
     });
-    expect(lines.some(l => l.level === 'warn' && l.message.includes('jira'))).toBe(true);
+    expect(lines.some(l => l.level === 'warn' && l.message.includes('probe-provider'))).toBe(true);
   });
 
   it('a successful provider swap leaves no .old or .tmp residue behind', async () => {
@@ -622,8 +763,8 @@ describe('atomic per-unit swap (AC-2.4b, DR-05, risk P2-g)', () => {
 
     const unit: OverlayUnit = {
       kind: 'provider',
-      subdir: 'tracker/jira',
-      files: ['tracker/jira/comment.md', 'tracker/jira/transition.md'],
+      subdir: 'tracker/probe-provider',
+      files: ['tracker/probe-provider/comment.md', 'tracker/probe-provider/transition.md'],
     };
     const before = await Promise.all(unit.files.map(rel => fs.readFile(abs(target, rel))));
 
@@ -632,7 +773,7 @@ describe('atomic per-unit swap (AC-2.4b, DR-05, risk P2-g)', () => {
     // promotion cannot survive, because by then it has deleted the only copy. Driving
     // the real promotion step is what makes this a known-bad probe rather than a
     // restatement of the implementation (PF-018).
-    const missingStaging = abs(target, 'tracker/jira') + '.tmp';
+    const missingStaging = abs(target, 'tracker/probe-provider') + '.tmp';
     expect(await exists(missingStaging), 'the staging tree must be absent for this probe').toBe(false);
 
     const promoted = await promoteUnitStagingTree(unit, target, missingStaging);
@@ -663,27 +804,27 @@ describe('atomic per-unit swap (AC-2.4b, DR-05, risk P2-g)', () => {
     // Nothing is installed yet — `target` is a fresh mkdtemp root. Revoking read on the
     // provider's SOURCE directory fails its build before anything is copied, which is the
     // shape a `build:cli`-only tree produces for every unit at once.
-    const jiraSource = abs(sourceRoot, 'tracker/jira');
+    const probeSource = abs(sourceRoot, 'tracker/probe-provider');
     if (typeof process.getuid === 'function' && process.getuid() === 0) { ctx.skip(); return; }
-    await fs.chmod(jiraSource, 0o000);
-    const revoked = await fs.readdir(jiraSource).then(() => false).catch(() => true);
+    await fs.chmod(probeSource, 0o000);
+    const revoked = await fs.readdir(probeSource).then(() => false).catch(() => true);
     if (!revoked) { ctx.skip(); return; }
 
     let result;
     try {
       result = await overlayGeneratedReferences({ referencesTarget: target, sourceRoot, manifest: wide });
     } finally {
-      await fs.chmod(jiraSource, 0o755).catch(() => undefined);
+      await fs.chmod(probeSource, 0o755).catch(() => undefined);
     }
 
     // The distinction the state must carry: this unit is not stale, it is ABSENT.
     expect(result.overlayFailures).toHaveLength(1);
-    expect(result.overlayFailures[0].unit).toEqual({ kind: 'provider', subdir: 'tracker/jira' });
+    expect(result.overlayFailures[0].unit).toEqual({ kind: 'provider', subdir: 'tracker/probe-provider' });
     expect(result.overlayFailures[0].state).toEqual({
       kind: 'not-installed',
-      absent: ['tracker/jira/comment.md', 'tracker/jira/transition.md'],
+      absent: ['tracker/probe-provider/comment.md', 'tracker/probe-provider/transition.md'],
     });
-    for (const rel of ['tracker/jira/comment.md', 'tracker/jira/transition.md']) {
+    for (const rel of ['tracker/probe-provider/comment.md', 'tracker/probe-provider/transition.md']) {
       expect(await exists(abs(target, rel)), `${rel} must really be absent`).toBe(false);
     }
 
@@ -697,7 +838,7 @@ describe('atomic per-unit swap (AC-2.4b, DR-05, risk P2-g)', () => {
       overlaidRefs: result.overlaidRefs,
       overlayFailures: result.overlayFailures,
     }).filter(l => l.level === 'warn');
-    expect(line.message).toContain('tracker/jira');
+    expect(line.message).toContain('tracker/probe-provider');
     expect(line.message).toContain('absent');
     expect(line.message).not.toContain('left unchanged');
   });
@@ -720,7 +861,7 @@ describe('atomic per-unit swap (AC-2.4b, DR-05, risk P2-g)', () => {
     await fs.mkdir(staging, { recursive: true });
     await fs.writeFile(path.join(staging, flat[0]), '# refreshed by this run\n', 'utf-8');
 
-    const unit: OverlayUnit = { kind: 'cross-cutting', files: flat };
+    const unit: OverlayUnit = { kind: 'cross-cutting', dir: '', files: flat };
     const promoted = await promoteUnitStagingTree(unit, target, staging);
 
     expect(promoted.ok, 'a rename over an absent document must be reported').toBe(false);
@@ -741,19 +882,66 @@ describe('atomic per-unit swap (AC-2.4b, DR-05, risk P2-g)', () => {
 
     const [line] = formatOverlaySummary({
       overlaidRefs: [],
-      overlayFailures: [{ unit: { kind: 'cross-cutting' }, state: promoted.state, error: promoted.error }],
+      overlayFailures: [{ unit: { kind: 'cross-cutting', dir: '' }, state: promoted.state, error: promoted.error }],
     });
     expect(line.message).toContain('part new and part old');
     expect(line.message).not.toContain('left unchanged');
+  });
+
+  it('promotes a flat set into its directory even when that directory does not exist yet', async () => {
+    // The two flat directories the registry emits today both exist by the time promotion
+    // runs, for reasons that have nothing to do with the unit landing in them: the
+    // references root is created by overlayGeneratedReferences, and `tracker/` as a side
+    // effect of the flat arm's own staging path. A flat set landing anywhere else has
+    // neither, so the promotion has to create the directory it renames into — the same
+    // thing promoteProviderUnit does for its target's parent.
+    const flatProbeDir = 'shared';
+    expect(
+      generatedReferenceManifest().some(rel => rel.startsWith(`${flatProbeDir}/`)),
+      `${flatProbeDir}/ is a real generated directory now, so it exists before promotion and ` +
+      'this probe no longer drives a missing one. Pick a directory the build does not emit.',
+    ).toBe(false);
+
+    const unit: OverlayUnit = {
+      kind: 'cross-cutting',
+      dir: flatProbeDir,
+      files: [`${flatProbeDir}/glossary.md`, `${flatProbeDir}/decision-markers.md`],
+    };
+    // Spelled where the overlay itself stages a flat set — under the converged subtree,
+    // with a per-run token — so the probe does not preserve a location nothing produces.
+    const staging = path.join(target, 'tracker', `.cross-cutting.${flatProbeDir}.${process.pid}-mkdir.tmp`);
+    await fs.mkdir(staging, { recursive: true });
+    for (const rel of unit.files) {
+      await fs.writeFile(path.join(staging, path.basename(rel)), `# ${rel} from this run\n`, 'utf-8');
+    }
+    expect(
+      await exists(abs(target, flatProbeDir)),
+      'the destination directory must be absent, or this probe drives the path that already works',
+    ).toBe(false);
+
+    const promoted = await promoteUnitStagingTree(unit, target, staging);
+
+    // Proof of RED: without the mkdir the first rename is ENOENT, the promotion is reported
+    // as failed, and not one of the unit's documents reaches the installed skill.
+    expect(
+      promoted.ok,
+      'a flat set must create the directory it renames into rather than depend on another ' +
+      'unit having happened to make it',
+    ).toBe(true);
+    for (const rel of unit.files) {
+      expect(await fs.readFile(abs(target, rel), 'utf-8')).toContain(`# ${rel} from this run`);
+    }
+    // …and it is dropped on the way out, like every other completed promotion.
+    expect(await exists(staging), 'a completed promotion must leave no staging residue').toBe(false);
   });
 
   it('a restore that fails is reported as such, and its recovery copy survives the same run', async () => {
     const seeded = await overlayGeneratedReferences({ referencesTarget: target, sourceRoot, manifest: wide });
     expect(seeded.overlayFailures, 'the seeding install must succeed').toEqual([]);
 
-    const live = abs(target, 'tracker/jira');
+    const live = abs(target, 'tracker/probe-provider');
     const backup = `${live}.old`;
-    const before = await fs.readFile(abs(target, 'tracker/jira/comment.md'));
+    const before = await fs.readFile(abs(target, 'tracker/probe-provider/comment.md'));
 
     // Two renames no filesystem can be coaxed into failing on demand, in this order: the
     // staging rename (so the promotion fails AFTER displacing the unit) and the restore
@@ -762,13 +950,13 @@ describe('atomic per-unit swap (AC-2.4b, DR-05, risk P2-g)', () => {
     // an un-provokable rename failure.
     //
     // Proof of RED: with the restore swallowed by `.catch(() => undefined)` the state is
-    // `installed-unchanged` and the prune then removes `tracker/jira.old` in this very
+    // `installed-unchanged` and the prune then removes `tracker/probe-provider.old` in this very
     // run — the backup-survival and prune-report assertions below both fail.
     const realRename = fs.rename.bind(fs);
     // Matched on the unit's own name rather than a literal staging basename: the staging
-    // directory carries a per-process token (`jira.<pid>-<t36>.tmp`), so a spy keyed to a
-    // fixed `jira.tmp` would silently stop matching and let the promotion succeed.
-    const stagingOrBackup = /(^|[/\\])jira(\..+)?\.(tmp|old)$/;
+    // directory carries a per-process token (`probe-provider.<pid>-<t36>.tmp`), so a spy keyed to a
+    // fixed `probe-provider.tmp` would silently stop matching and let the promotion succeed.
+    const stagingOrBackup = /(^|[/\\])probe-provider(\..+)?\.(tmp|old)$/;
     const renameSpy = vi.spyOn(fs, 'rename').mockImplementation(async (from, to) => {
       if (stagingOrBackup.test(String(from))) {
         throw new Error('EIO: simulated rename failure');
@@ -785,7 +973,7 @@ describe('atomic per-unit swap (AC-2.4b, DR-05, risk P2-g)', () => {
 
     // 1. the failure names the state it actually left: nothing live, a backup to recover from
     expect(result.overlayFailures).toHaveLength(1);
-    expect(result.overlayFailures[0].unit).toEqual({ kind: 'provider', subdir: 'tracker/jira' });
+    expect(result.overlayFailures[0].unit).toEqual({ kind: 'provider', subdir: 'tracker/probe-provider' });
     const state = result.overlayFailures[0].state;
     expect(state.kind).toBe('restore-failed');
     if (state.kind !== 'restore-failed') return;
@@ -820,14 +1008,14 @@ describe('atomic per-unit swap (AC-2.4b, DR-05, risk P2-g)', () => {
 
     // 6. known-bad probe — the exemption is load-bearing, not vacuously satisfied by a
     //    backup the prune would have spared anyway: the SAME prune, over the same root
-    //    with the same manifest, takes `jira.old` with it. Destructive by design, and
+    //    with the same manifest, takes `probe-provider.old` with it. Destructive by design, and
     //    last: it proves what the skipped prune would have done to the recovery copy.
     const trackerPrefix = `${'tracker'}/`;
     const unguarded = await sweepOrphanedReferences(
       path.join(target, 'tracker'),
       new Set(wide.filter(p => p.startsWith(trackerPrefix)).map(p => p.slice(trackerPrefix.length))),
     );
-    expect(unguarded.removed).toContain('jira.old');
+    expect(unguarded.removed).toContain('probe-provider.old');
     expect(await exists(backup), 'the unguarded prune deletes the only surviving copy').toBe(false);
   });
 
@@ -885,15 +1073,15 @@ describe('atomic per-unit swap (AC-2.4b, DR-05, risk P2-g)', () => {
     // unit loop passes the probe above and fails this one: a single unbuilt provider
     // would abort the entire install, which is the blast radius PF-009 exists to keep
     // out of this path. The root is present here; exactly one unit's directory is not.
-    await fs.rm(abs(sourceRoot, 'tracker/jira'), { recursive: true });
+    await fs.rm(abs(sourceRoot, 'tracker/probe-provider'), { recursive: true });
 
     const result = await overlayGeneratedReferences({ referencesTarget: target, sourceRoot, manifest: wide });
 
     expect(result.overlayFailures).toHaveLength(1);
-    expect(result.overlayFailures[0].unit).toEqual({ kind: 'provider', subdir: 'tracker/jira' });
+    expect(result.overlayFailures[0].unit).toEqual({ kind: 'provider', subdir: 'tracker/probe-provider' });
     expect(result.overlayFailures[0].state).toEqual({
       kind: 'not-installed',
-      absent: ['tracker/jira/comment.md', 'tracker/jira/transition.md'],
+      absent: ['tracker/probe-provider/comment.md', 'tracker/probe-provider/transition.md'],
     });
 
     // …and every other unit installed: a degradation, not an abort.
@@ -916,7 +1104,7 @@ describe('formatOverlaySummary render site (PF-015)', () => {
     const lines = formatOverlaySummary({
       overlaidRefs: ['tracker/github/setup-task.md', 'decision-markers.md'],
       overlayFailures: [{
-        unit: { kind: 'provider', subdir: 'tracker/jira' },
+        unit: { kind: 'provider', subdir: 'tracker/probe-provider' },
         state: { kind: 'installed-unchanged' },
         error: 'EACCES: permission denied',
       }],
@@ -927,7 +1115,7 @@ describe('formatOverlaySummary render site (PF-015)', () => {
     expect(info).toHaveLength(1);
     expect(info[0].message).toContain('2');
     expect(warn).toHaveLength(1);
-    expect(warn[0].message).toContain('tracker/jira');
+    expect(warn[0].message).toContain('tracker/probe-provider');
     expect(warn[0].message).toContain('EACCES: permission denied');
 
     // Exhaustive kinds: every emitted line carries a level the render site handles.
@@ -943,17 +1131,17 @@ describe('formatOverlaySummary render site (PF-015)', () => {
   it('renders a different, state-specific sentence for every OverlayFailureState', () => {
     const failures: OverlayFailure[] = [
       {
-        unit: { kind: 'provider', subdir: 'tracker/jira' },
+        unit: { kind: 'provider', subdir: 'tracker/probe-provider' },
         state: { kind: 'installed-unchanged' },
         error: 'EACCES',
       },
       {
-        unit: { kind: 'provider', subdir: 'tracker/jira' },
-        state: { kind: 'not-installed', absent: ['tracker/jira/comment.md'] },
+        unit: { kind: 'provider', subdir: 'tracker/probe-provider' },
+        state: { kind: 'not-installed', absent: ['tracker/probe-provider/comment.md'] },
         error: 'EACCES',
       },
       {
-        unit: { kind: 'cross-cutting' },
+        unit: { kind: 'cross-cutting', dir: '' },
         state: {
           kind: 'partially-refreshed',
           refreshed: ['decision-markers.md'],
@@ -962,8 +1150,8 @@ describe('formatOverlaySummary render site (PF-015)', () => {
         error: 'ENOENT',
       },
       {
-        unit: { kind: 'provider', subdir: 'tracker/jira' },
-        state: { kind: 'restore-failed', recoveryPath: '/refs/tracker/jira.old', restoreError: 'EIO' },
+        unit: { kind: 'provider', subdir: 'tracker/probe-provider' },
+        state: { kind: 'restore-failed', recoveryPath: '/refs/tracker/probe-provider.old', restoreError: 'EIO' },
         error: 'ENOENT',
       },
     ];
@@ -974,10 +1162,10 @@ describe('formatOverlaySummary render site (PF-015)', () => {
     expect(messages).toHaveLength(4);
     expect(new Set(messages).size, 'two states rendering one sentence is the original defect').toBe(4);
     expect(messages[0]).toContain('left unchanged');
-    expect(messages[1]).toContain('tracker/jira/comment.md');
+    expect(messages[1]).toContain('tracker/probe-provider/comment.md');
     expect(messages[2]).toContain('publication-gate.md');
     expect(messages[2]).toContain('the cross-cutting document set');
-    expect(messages[3]).toContain('/refs/tracker/jira.old');
+    expect(messages[3]).toContain('/refs/tracker/probe-provider.old');
     // Only the installed-unchanged state may make the 'left unchanged' claim.
     expect(messages.filter(m => m.includes('left unchanged'))).toHaveLength(1);
   });

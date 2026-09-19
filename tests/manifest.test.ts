@@ -80,7 +80,7 @@ describe('readManifest', () => {
       version: '1.4.0',
       plugins: ['devflow-core-skills', 'devflow-implement'],
       scope: 'user',
-      features: { ambient: true, memory: true, hud: false, knowledge: false, learning: false, rules: true, flags: {}, proxy: false, compliance: { enabled: false, frameworks: [] } },
+      features: { ambient: true, memory: true, hud: false, knowledge: false, learning: false, rules: true, flags: {}, proxy: false, compliance: { enabled: false, frameworks: [] }, tracker: { provider: 'github' } },
       installedAt: '2026-03-01T00:00:00.000Z',
       updatedAt: '2026-03-13T00:00:00.000Z',
     };
@@ -1072,6 +1072,114 @@ describe('compliance feature field', () => {
     const result = await readManifest(tmpDir);
     expect(result).not.toBeNull();
     expect(result!.features.compliance).toEqual({ enabled: true, frameworks: ['gdpr', 'sox'] });
+  });
+});
+
+// ── Tracker feature field (AC-3.21) ───────────────────────────────────────────
+//
+// The load-bearing property is that `features.tracker` is ABSENT-TOLERANT and is
+// NEVER part of the hard-null validation set: a pre-tracker manifest — i.e. every
+// existing install — must keep parsing. A manifest that read as null here would
+// present every existing user with "no prior install", wiping their seeded
+// feature state on the next re-init.
+
+describe('tracker feature field', () => {
+  let tmpDir: string;
+
+  const baseFeatures = {
+    ambient: true, memory: true, hud: false, knowledge: false,
+    learning: false, rules: true, flags: [], proxy: false,
+  };
+
+  const withFeatures = (extra: Record<string, unknown>) => ({
+    version: '2.0.0',
+    plugins: ['devflow-core-skills'],
+    scope: 'user',
+    features: { ...baseFeatures, ...extra },
+    installedAt: '2026-01-01T00:00:00.000Z',
+    updatedAt: '2026-01-01T00:00:00.000Z',
+  });
+
+  beforeEach(async () => {
+    tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'devflow-manifest-tracker-'));
+  });
+
+  afterEach(async () => {
+    await fs.rm(tmpDir, { recursive: true, force: true });
+  });
+
+  it('a manifest with no features.tracker parses and self-heals to {provider:"github"}', async () => {
+    await fs.writeFile(path.join(tmpDir, 'manifest.json'), JSON.stringify(withFeatures({})), 'utf-8');
+    const result = await readManifest(tmpDir);
+    expect(result).not.toBeNull();
+    expect(result!.features.tracker).toEqual({ provider: 'github' });
+  });
+
+  it('features.tracker as a bare string self-heals to {provider:"github"} and NEVER returns null', async () => {
+    await fs.writeFile(
+      path.join(tmpDir, 'manifest.json'),
+      JSON.stringify(withFeatures({ tracker: 'jira' })),
+      'utf-8',
+    );
+    const result = await readManifest(tmpDir);
+    // The AC-3.21 arm that matters: not null, and healed to the default.
+    expect(result).not.toBeNull();
+    expect(result!.features.tracker).toEqual({ provider: 'github' });
+  });
+
+  it('every malformed tracker shape parses non-null and heals to github', async () => {
+    const MALFORMED: Array<[label: string, value: unknown]> = [
+      ['null', null],
+      ['a number', 7],
+      ['an array', ['jira']],
+      ['an empty object', {}],
+      ['an unknown provider', { provider: 'jira-cloud' }],
+      ['an uppercase provider', { provider: 'JIRA' }],
+      ['a null provider', { provider: null }],
+    ];
+    expect(MALFORMED.length).toBe(7);
+
+    for (const [label, value] of MALFORMED) {
+      await fs.writeFile(
+        path.join(tmpDir, 'manifest.json'),
+        JSON.stringify(withFeatures({ tracker: value })),
+        'utf-8',
+      );
+      const result = await readManifest(tmpDir);
+      expect(result, `expected ${label} to parse non-null`).not.toBeNull();
+      expect(result!.features.tracker, `expected ${label} to heal`).toEqual({ provider: 'github' });
+    }
+  });
+
+  it('preserves each valid provider', async () => {
+    for (const provider of ['github', 'jira', 'linear']) {
+      await fs.writeFile(
+        path.join(tmpDir, 'manifest.json'),
+        JSON.stringify(withFeatures({ tracker: { provider } })),
+        'utf-8',
+      );
+      const result = await readManifest(tmpDir);
+      expect(result).not.toBeNull();
+      expect(result!.features.tracker).toEqual({ provider });
+    }
+  });
+
+  it('tracker field round-trips through writeManifest/readManifest', async () => {
+    const data: ManifestData = makeManifest({
+      features: { ...makeManifest().features, tracker: { provider: 'linear' } },
+    });
+    await writeManifest(tmpDir, data);
+    const result = await readManifest(tmpDir);
+    expect(result).not.toBeNull();
+    expect(result!.features.tracker).toEqual({ provider: 'linear' });
+  });
+
+  it('syncManifestFeature("tracker", …) persists a provider change', async () => {
+    await writeManifest(tmpDir, makeManifest());
+    await syncManifestFeature(tmpDir, 'tracker', { provider: 'jira' });
+    const result = await readManifest(tmpDir);
+    expect(result).not.toBeNull();
+    expect(result!.features.tracker).toEqual({ provider: 'jira' });
   });
 });
 

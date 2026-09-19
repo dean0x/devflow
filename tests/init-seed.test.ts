@@ -1,4 +1,7 @@
 import { describe, it, expect } from 'vitest';
+import { promises as fs } from 'fs';
+import * as path from 'path';
+import { fileURLToPath } from 'url';
 import {
   resolveSeedFeatures,
   resolveSeedFlags,
@@ -10,9 +13,11 @@ import {
   FEATURE_DEFAULTS,
   type FeatureSeed,
 } from '../src/cli/commands/init-seed.js';
+import { resolveTrackerInitState } from '../src/cli/commands/init.js';
 import { DEVFLOW_PLUGINS } from '../src/core/plugins.js';
 import { FLAG_REGISTRY, readViewMode, type ClaudeCodeFlag, type FlagsRecord } from '../src/core/flags.js';
 import { type ManifestData } from '../src/core/manifest.js';
+import { TRACKER_PROVIDER_IDS, parseTrackerId, type TrackerProvider } from '../src/core/tracker.js';
 
 // ── Test fixtures ─────────────────────────────────────────────────────────────
 
@@ -78,6 +83,7 @@ describe('resolveSeedFeatures', () => {
       rules: false,
       proxy: false,
       compliance: { enabled: false, frameworks: [] },
+      tracker: { provider: 'github' },
     });
   });
 
@@ -383,6 +389,12 @@ describe('resolveInitSeed', () => {
 // ── applyCliToggles ───────────────────────────────────────────────────────────
 
 describe('applyCliToggles', () => {
+  // Every FeatureSeed key is present. An incomplete fixture annotated
+  // `: FeatureSeed` is a TS2739 that nothing in this repo reports (PF-069:
+  // tests/ is outside the typechecked project and vitest only transpiles), and
+  // at runtime the missing keys come back as `undefined`, which `toEqual`
+  // treats as equal to absent — so the manifest-group arms would pass
+  // vacuously (PF-018).
   const base: FeatureSeed = {
     ambient: true,
     memory: true,
@@ -391,11 +403,15 @@ describe('applyCliToggles', () => {
     learning: true,
     rules: true,
     proxy: false,
+    compliance: { enabled: false, frameworks: [] },
+    tracker: { provider: 'github' },
   };
 
   it('empty toggles → base unchanged', () => {
     const result = applyCliToggles(base, {});
-    expect(result).toEqual(base);
+    // toStrictEqual, not toEqual: a key dropped from the result must fail here
+    // rather than compare equal to the base's defined value.
+    expect(result).toStrictEqual(base);
   });
 
   it('undefined per-key → base value preserved', () => {
@@ -414,18 +430,57 @@ describe('applyCliToggles', () => {
   });
 
   it('explicit true overrides base false', () => {
-    const allFalse: FeatureSeed = { ambient: false, memory: false, hud: false, knowledge: false, learning: false, rules: false, proxy: false };
+    const allFalse: FeatureSeed = {
+      ambient: false, memory: false, hud: false, knowledge: false,
+      learning: false, rules: false, proxy: false,
+      compliance: { enabled: false, frameworks: [] },
+      tracker: { provider: 'jira' },
+    };
     const result = applyCliToggles(allFalse, { ambient: true, knowledge: true });
     expect(result.ambient).toBe(true);
     expect(result.knowledge).toBe(true);
     expect(result.memory).toBe(false); // untouched
     expect(result.rules).toBe(false);  // untouched
+    expect(result.tracker).toStrictEqual({ provider: 'jira' }); // untouched
   });
 
   it('immutable: base object is not mutated', () => {
     const original = { ...base };
     applyCliToggles(base, { ambient: false });
-    expect(base).toEqual(original);
+    expect(base).toStrictEqual(original);
+  });
+
+  // The precedence rule the Recommended path relies on when it calls
+  // applyCliToggles with `tracker: cliTrackerOverride ?? wizardTracker`:
+  // applyCliToggles supplies the third arm (the seed), so the composed rule is
+  // cliOverride ?? wizardResult ?? seed. Both arms of the seam are asserted
+  // here — an explicit toggle must win, an absent one must preserve.
+
+  it('explicit tracker toggle wins over the base seed', () => {
+    const seeded: FeatureSeed = { ...base, tracker: { provider: 'github' } };
+    const result = applyCliToggles(seeded, { tracker: { provider: 'linear' } });
+    expect(result.tracker).toStrictEqual({ provider: 'linear' });
+    // Not the same object as the toggle's seed-side sibling.
+    expect(result.tracker).not.toBe(seeded.tracker);
+  });
+
+  it('absent tracker toggle preserves the base seed provider', () => {
+    const seeded: FeatureSeed = { ...base, tracker: { provider: 'linear' } };
+    const result = applyCliToggles(seeded, { ambient: false });
+    expect(result.tracker).toStrictEqual({ provider: 'linear' });
+    // Known-bad probe for the vacuity this fixture completion closes: the key
+    // must be present, not merely undefined-equals-absent.
+    expect(Object.keys(result)).toContain('tracker');
+    expect(result.tracker).toBeDefined();
+  });
+
+  it('explicit compliance toggle wins while tracker stays on the seed', () => {
+    const seeded: FeatureSeed = { ...base, tracker: { provider: 'jira' } };
+    const result = applyCliToggles(seeded, {
+      compliance: { enabled: true, frameworks: ['gdpr'] },
+    });
+    expect(result.compliance).toStrictEqual({ enabled: true, frameworks: ['gdpr'] });
+    expect(result.tracker).toStrictEqual({ provider: 'jira' });
   });
 });
 
@@ -732,6 +787,302 @@ describe('compliance seeding', () => {
     const manifest = makeComplianceManifest({ enabled: true, frameworks: ['gdpr'] });
     const seed = resolveInitSeed(manifest, null, '{}', DEVFLOW_PLUGINS);
     expect(seed.features.compliance).toEqual({ enabled: true, frameworks: ['gdpr'] });
+  });
+});
+
+// ── tracker seeding ───────────────────────────────────────────────────────────
+
+describe('tracker seeding', () => {
+  /** Manifest fixture with an explicit tracker field. */
+  function makeTrackerManifest(tracker: { provider: TrackerProvider }): ManifestData {
+    return makeManifest({
+      features: {
+        ...makeManifest().features,
+        tracker,
+      },
+    });
+  }
+
+  it('FEATURE_DEFAULTS.tracker is {provider:"github"} — the silent default for every existing install', () => {
+    expect(FEATURE_DEFAULTS.tracker).toEqual({ provider: 'github' });
+  });
+
+  it('fresh install (null manifest) → tracker defaults to github', () => {
+    const result = resolveSeedFeatures(null, null);
+    expect(result.tracker).toEqual({ provider: 'github' });
+  });
+
+  it('manifest.features.tracker=jira → seeded as jira (manifest-group, not config-gated)', () => {
+    const result = resolveSeedFeatures(makeTrackerManifest({ provider: 'jira' }), null);
+    expect(result.tracker).toEqual({ provider: 'jira' });
+  });
+
+  it('projectConfig has no effect on tracker (manifest-gated, not config-gated)', () => {
+    const config = { memory: false, learning: false, knowledge: false, reviewPublication: 'auto' as const };
+    const result = resolveSeedFeatures(null, config);
+    expect(result.tracker).toEqual({ provider: 'github' });
+  });
+
+  it('populated manifest wins over projectConfig', () => {
+    const config = { memory: false, learning: false, knowledge: false, reviewPublication: 'auto' as const };
+    const result = resolveSeedFeatures(makeTrackerManifest({ provider: 'linear' }), config);
+    expect(result.tracker).toEqual({ provider: 'linear' });
+  });
+
+  it('the tracker seed is a defensive copy, never a reference to FEATURE_DEFAULTS.tracker', () => {
+    // Without the spread, `manifest?.features.tracker ?? FEATURE_DEFAULTS.tracker`
+    // hands back the module-level default BY REFERENCE and a downstream mutation
+    // corrupts it process-wide.
+    const result = resolveSeedFeatures(null, null);
+    expect(result.tracker).not.toBe(FEATURE_DEFAULTS.tracker);
+    result.tracker.provider = 'jira';
+    expect(FEATURE_DEFAULTS.tracker).toEqual({ provider: 'github' });
+  });
+
+  it('the tracker seed is a defensive copy, never a reference to the manifest value', () => {
+    const manifest = makeTrackerManifest({ provider: 'jira' });
+    const result = resolveSeedFeatures(manifest, null);
+    expect(result.tracker).not.toBe(manifest.features.tracker);
+  });
+
+  it('--reset (null seedManifest) → tracker falls back to github (AC-3.20 / EC-62)', () => {
+    const manifest = makeTrackerManifest({ provider: 'linear' });
+    const { seedManifest } = resolveResetGatedInputs(true, manifest, null, '{}');
+    const seed = resolveInitSeed(seedManifest, null, '', DEVFLOW_PLUGINS);
+    expect(seed.features.tracker).toEqual({ provider: 'github' });
+  });
+
+  it('--no-reset preserves the existing manifest provider', () => {
+    const manifest = makeTrackerManifest({ provider: 'jira' });
+    const { seedManifest } = resolveResetGatedInputs(false, manifest, null, '{}');
+    const seed = resolveInitSeed(seedManifest, null, '', DEVFLOW_PLUGINS);
+    expect(seed.features.tracker).toEqual({ provider: 'jira' });
+  });
+
+  it('applyCliToggles: --tracker jira overrides the seed', () => {
+    const seed: FeatureSeed = { ...FEATURE_DEFAULTS, tracker: { provider: 'github' } };
+    const result = applyCliToggles(seed, { tracker: { provider: 'jira' } });
+    expect(result.tracker).toEqual({ provider: 'jira' });
+    // Other fields untouched
+    expect(result.ambient).toBe(FEATURE_DEFAULTS.ambient);
+    expect(result.compliance).toEqual(FEATURE_DEFAULTS.compliance);
+  });
+
+  it('applyCliToggles: --tracker github is the off switch (decision D-E, no --no-tracker)', () => {
+    const seed: FeatureSeed = { ...FEATURE_DEFAULTS, tracker: { provider: 'linear' } };
+    const result = applyCliToggles(seed, { tracker: { provider: 'github' } });
+    expect(result.tracker).toEqual({ provider: 'github' });
+  });
+
+  it('applyCliToggles: undefined tracker toggle → seed tracker unchanged', () => {
+    const seed: FeatureSeed = { ...FEATURE_DEFAULTS, tracker: { provider: 'jira' } };
+    const result = applyCliToggles(seed, {});
+    expect(result.tracker).toEqual({ provider: 'jira' });
+  });
+
+  it('resolveInitSeed: tracker included in the features result', () => {
+    const seed = resolveInitSeed(makeTrackerManifest({ provider: 'linear' }), null, '{}', DEVFLOW_PLUGINS);
+    expect(seed.features.tracker).toEqual({ provider: 'linear' });
+  });
+});
+
+// ── resolveTrackerInitState — the --tracker boundary ──────────────────────────
+//
+// The whole gate between `--tracker <id>` on the command line and a machine-wide
+// provider change: init calls it before any prompt and exits on a rejection.
+//
+// Driven by CALLING it. The lifecycle assertions below are source-level because
+// Commander's `.action()` body is not unit-reachable, but this function is
+// exported and pure, so a source-level stand-in here would be counting a call
+// site whose behaviour is directly observable (PF-018).
+
+describe('resolveTrackerInitState', () => {
+  /**
+   * Named collector: the rejection message, or a loud throw.
+   *
+   * The three-state return makes `result.error` unreachable without narrowing,
+   * and a `!` would turn "the parser accepted a value it must reject" into a
+   * TypeError several frames later instead of a sentence naming the input.
+   */
+  function rejectionFor(option: string): string {
+    const result = resolveTrackerInitState(option);
+    if (result === undefined || result.ok) {
+      throw new Error(
+        `--tracker ${JSON.stringify(option)} must be rejected at the boundary, got ` +
+        `${JSON.stringify(result)} — an accepted near-miss installs mechanics for a ` +
+        'tracker the user did not name',
+      );
+    }
+    return result.error;
+  }
+
+  it('returns undefined when the option was not supplied — no override', () => {
+    expect(resolveTrackerInitState(undefined)).toBeUndefined();
+  });
+
+  it('accepts every registry ID and yields that provider, never a default', () => {
+    // Ranged over the registry rather than spot-checked: a fourth provider is
+    // covered the day it joins, and a parser that collapsed everything to the
+    // default would fail on the first non-default row instead of slipping past
+    // a test that only ever asked about github.
+    expect(
+      TRACKER_PROVIDER_IDS.length,
+      'a one-ID registry would make the loop below unable to tell a real parse from a default',
+    ).toBeGreaterThan(1);
+    for (const id of TRACKER_PROVIDER_IDS) {
+      expect(resolveTrackerInitState(id)).toEqual({ ok: true, value: { provider: id } });
+    }
+  });
+
+  it('--tracker github is a real override, not an absent one (decision D-E)', () => {
+    // There is no --no-tracker: github IS the off position, so it has to arrive
+    // as an override. Reporting "no option supplied" here would let a prior jira
+    // selection survive the very flag that asked for github.
+    expect(resolveTrackerInitState('github')).toEqual({ ok: true, value: { provider: 'github' } });
+  });
+
+  it('rejects a near-miss and passes the strict parser\'s message through unrepaired', () => {
+    // The message is compared against the parser's own rather than re-typed, so
+    // this row pins the DELEGATION. The parser's hostile table is its own
+    // (tests/core/tracker.test.ts) — a second copy here would prove the copy.
+    const parsed = parseTrackerId('jira-cloud');
+    expect(parsed.ok, 'the probe input must be one the parser rejects').toBe(false);
+    expect(rejectionFor('jira-cloud')).toBe(parsed.ok ? '' : parsed.error);
+    expect(rejectionFor('jira-cloud')).toContain('jira-cloud');
+  });
+
+  it('rejects the byte-inexact spellings of a valid ID', () => {
+    // Reject, never repair: each of these is one keystroke from `jira`, and
+    // repairing any of them would silently select a provider the user's shell
+    // did not actually pass.
+    for (const hostile of ['JIRA', 'jira ', ' jira', '']) {
+      expect(rejectionFor(hostile)).toMatch(/tracker provider ID/);
+    }
+  });
+
+  it('a non-string option is read as "not supplied" rather than parsed', () => {
+    // Commander types `--tracker <id>` as required-value, so this is the
+    // defensive arm: whatever else reaches it, the function never hands a
+    // non-string to the parser and never invents a provider from one.
+    expect(resolveTrackerInitState(true as unknown as string)).toBeUndefined();
+    expect(resolveTrackerInitState(null as unknown as string)).toBeUndefined();
+  });
+});
+
+// ── init.ts tracker lifecycle call sites ──────────────────────────────────────
+//
+// [DR-22] / [DR-10] / P3a-S15: the attempt counter, the presence sentinel and the
+// stale-conventions rename each have exactly ONE owner in src/core/tracker.ts,
+// and `devflow init` binds each exactly once — into buildTrackerLifecycleIO, the
+// single adapter persistManifestThenConvergeTracker drives. These are
+// source-level assertions because init.ts's Commander `.action()` body is not
+// unit-reachable; they go red if someone inlines an `fs.rm`, duplicates a
+// binding, drops one, or reaches an owner outside the seam.
+//
+// Non-vacuity (PF-018): each "never inlined" assertion is paired with a probe
+// showing the same pattern DOES match src/core/tracker.ts, so a renamed constant
+// can never make the absence check pass by matching nothing anywhere.
+
+describe('init.ts tracker lifecycle call sites', () => {
+  const SRC = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', 'src');
+  const INIT_SOURCE = path.join(SRC, 'cli', 'commands', 'init.ts');
+  const TRACKER_SOURCE = path.join(SRC, 'core', 'tracker.ts');
+
+  it('binds rearmTrackerInference exactly once and never inlines the removal [DR-22]', async () => {
+    const source = await fs.readFile(INIT_SOURCE, 'utf-8');
+    expect((source.match(/rearmInference: rearmTrackerInference,/g) ?? []).length).toBe(1);
+    expect(source).not.toMatch(/\.tracker\.attempts/);
+    // Known-bad probe: the literal exists in the owner module, so the absence
+    // assertion above is a statement about init.ts, not about a dead pattern.
+    expect(await fs.readFile(TRACKER_SOURCE, 'utf-8')).toMatch(/\.tracker\.attempts/);
+  });
+
+  it('binds applyTrackerSentinel exactly once and never inlines the sentinel path [DR-10]', async () => {
+    const source = await fs.readFile(INIT_SOURCE, 'utf-8');
+    expect((source.match(/applySentinel: applyTrackerSentinel,/g) ?? []).length).toBe(1);
+    expect(source).not.toMatch(/\.tracker\.enabled/);
+    expect(await fs.readFile(TRACKER_SOURCE, 'utf-8')).toMatch(/\.tracker\.enabled/);
+  });
+
+  it('binds the provider-change rename transition exactly once (P3a-S15)', async () => {
+    const source = await fs.readFile(INIT_SOURCE, 'utf-8');
+    expect((source.match(/renameStaleConventions: renameStaleTrackerConventions,/g) ?? []).length).toBe(1);
+  });
+
+  it('reaches every owner through the one injected lifecycle seam', async () => {
+    const source = await fs.readFile(INIT_SOURCE, 'utf-8');
+    // Three owner calls in init.ts, each through `io.` — no direct invocation
+    // that would bypass persistManifestThenConvergeTracker's ordering gate.
+    expect((source.match(/\bio\.(rearmInference|applySentinel|renameStaleConventions)\(/g) ?? []).length).toBe(3);
+    expect((source.match(/\b(rearmTrackerInference|applyTrackerSentinel|renameStaleTrackerConventions)\(/g) ?? []).length).toBe(0);
+  });
+
+  it('writes the manifest only inside the tracker lifecycle seam (PF-015)', async () => {
+    const source = await fs.readFile(INIT_SOURCE, 'utf-8');
+    // The ordering invariant — converge only what the manifest persisted — is
+    // only real while the write and the three owners sit in one function, so the
+    // full-install path reaches the writer exclusively through the injected seam.
+    expect((source.match(/\bio\.writeManifest\(/g) ?? []).length).toBe(1);
+    // One definition, one call site.
+    expect((source.match(/persistManifestThenConvergeTracker\(/g) ?? []).length).toBe(2);
+    // Exactly one direct write remains: the --hud-only early return, which
+    // preserves the prior provider verbatim and therefore owes no convergence.
+    // A third write in init.ts would reopen the gap this seam closes.
+    expect((source.match(/await writeManifest\(/g) ?? []).length).toBe(1);
+  });
+
+  /**
+   * Named collector: the `shouldRunTrackerStep({...})` call, verbatim.
+   *
+   * Throws rather than returning null — every assertion below reads this call,
+   * so a renamed predicate would otherwise leave them examining an empty string
+   * and passing (PF-018).
+   */
+  function trackerGateCall(source: string): string {
+    const call = /shouldRunTrackerStep\(\{[\s\S]*?\}\)/.exec(source);
+    if (call === null) {
+      throw new Error(
+        'the shouldRunTrackerStep call is not findable in init.ts — the gate assertions ' +
+        'below would each be reading nothing',
+      );
+    }
+    return call[0];
+  }
+
+  /** Named collector: the `mode` argument line of a gate call, trimmed, or null. */
+  function gateModeArgument(call: string): string | null {
+    return call.split('\n').map(l => l.trim()).find(l => /^mode\s*[,:]/.test(l)) ?? null;
+  }
+
+  it('hands the gate the caller\'s mode, never a literal (PF-029)', async () => {
+    const source = await fs.readFile(INIT_SOURCE, 'utf-8');
+    const call = trackerGateCall(source);
+
+    // runTrackerStepAt takes `mode` and must forward THAT. A literal collapses
+    // the gate table to one row: `mode: 'advanced'` returns true on every TTY,
+    // so a user who reached the Setup-mode prompt and chose Recommended is asked
+    // a tracker question the Recommended contract says they never see — and the
+    // 'recommended' call site still reads correctly, so nothing at the call site
+    // shows it.
+    expect(gateModeArgument(call)).toBe('mode,');
+
+    // Known-bad probe: the same collector over a copy whose gate hardcodes the
+    // mode reports the literal, so the assertion above is a statement about the
+    // shipped call rather than about a shape the collector cannot express.
+    const wounded = call.replace('mode,', "mode: 'advanced',");
+    expect(wounded, 'the mutation must change the call, or it is not this mutation').not.toBe(call);
+    expect(gateModeArgument(wounded)).toBe("mode: 'advanced',");
+  });
+
+  it('gates both wizard paths on the one shared shouldRunTrackerStep predicate', async () => {
+    const source = await fs.readFile(INIT_SOURCE, 'utf-8');
+    // One predicate call, inside runTrackerStepAt — and two paths reaching it.
+    expect((source.match(/shouldRunTrackerStep\(\{/g) ?? []).length).toBe(1);
+    expect((source.match(/runTrackerStepAt\(\n?\s*'recommended'/g) ?? []).length).toBe(1);
+    expect((source.match(/runTrackerStepAt\('advanced'/g) ?? []).length).toBe(1);
+    // One prompt-step invocation total: the shared helper, never a hand-copied
+    // second call site.
+    expect((source.match(/await runTrackerStep\(\{/g) ?? []).length).toBe(1);
   });
 });
 

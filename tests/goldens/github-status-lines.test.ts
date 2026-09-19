@@ -3,10 +3,10 @@
  *
  * Measurements pinned to the current git-agent.md golden:
  *
- *   tests/fixtures/golden/git-agent.md          55,664 ch / 913 L   (== dist/agents/git.md)
+ *   tests/fixtures/golden/git-agent.md          58,782 ch / 918 L   (== dist/agents/git.md)
  *   src/assets/skills/git/SKILL.md               6,581 ch / 213 L
  *   src/assets/skills/worktree-support/SKILL.md  2,942 ch / 92 L
- *   Total (all three)                           65,187 ch / 1,218 L
+ *   Total (all three)                           68,305 ch / 1,223 L
  *
  * The post-Phase-0 figures the budget is derived FROM — git.md 65,677 ch / 992 L,
  * SKILL.md 9,205 ch / 283 L, total 77,824 ch / 1,367 L — are the pre-split
@@ -96,8 +96,8 @@ export const PRE_PHASE0_GIT_MD_LINES = 938
 // Phase-0 char baselines (JS `.length`, not bytes) — named constants so Phase-2's
 // byte-budget.test.ts can import them without re-deriving (C6). These are equality
 // baselines: they move only in the same commit as the golden fixture.
-export const GIT_MD_CHARS = 55_664
-export const GIT_MD_LINES = 913
+export const GIT_MD_CHARS = 58_818
+export const GIT_MD_LINES = 917
 // SKILL_GIT_CHARS/SKILL_GIT_LINES pin src/assets/skills/git/SKILL.md, the
 // preloaded skill file the git-agent golden above cross-references. Like
 // GIT_MD_CHARS/GIT_MD_LINES, this is an equality baseline: it moves only in
@@ -119,8 +119,8 @@ export const SKILL_WORKTREE_LINES = 92
  * golden-regeneration commit that moves the parts, never on their own to clear a
  * red assertion.
  */
-export const TOTAL_CHARS = 65_187
-export const TOTAL_LINES = 1_218
+export const TOTAL_CHARS = 68_341
+export const TOTAL_LINES = 1_222
 
 // Fixture invariants — these ARE bytes (Buffer.byteLength), not JS .length
 export const FIXTURE_BYTES = 17_527

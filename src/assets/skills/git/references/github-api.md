@@ -9,6 +9,30 @@ Extended patterns for GitHub API, gh CLI, and GraphQL operations.
 > implement that rule; they do not compete with it: an inline `--body "…"` cannot
 > be scrubbed at all.
 
+## The D11 temp files, and their removal
+
+`$DEVFLOW_BODY_RAW`/`$DEVFLOW_BODY` and `$DEVFLOW_NOTES_RAW`/`$DEVFLOW_NOTES` are
+`mktemp` files created per invocation. Every recipe below arms this before its first
+`mktemp`, and none of them repeats it:
+
+```bash
+trap 'GATE=$?; rm -- "$DEVFLOW_BODY_RAW" "$DEVFLOW_BODY" "$DEVFLOW_NOTES_RAW" "$DEVFLOW_NOTES" 2>/dev/null; exit "$GATE"' EXIT INT TERM
+```
+
+Three things about that one line, each of which has been got wrong before:
+
+- **The RAW files are the point.** One left on disk is exactly the bytes the scrub
+  exists to delete, sitting in the staging area with no gate over it — the scrub
+  guarantees something about the SINK, and the staging area is a second sink. The
+  scrubbed pair goes with them because a temp file nobody removes is litter that
+  accumulates across every spawn.
+- **Plain `rm`, never `rm -f`.** A permission layer refuses the flagged form, and a
+  cleanup that cannot run is not one. `2>/dev/null` is what makes an unset or
+  already-removed path silent, which is the job `-f` would otherwise be doing.
+- **`GATE=$?` first, `exit "$GATE"` last.** Removals placed after the gate overwrite
+  `$?`, so the scrubber's refusal is reported as success — the same swallowing the
+  `&&` discipline above exists to prevent, arriving by a different route.
+
 ---
 
 ## Rate Limit Handling
@@ -25,6 +49,11 @@ Extended patterns for GitHub API, gh CLI, and GraphQL operations.
 > to them. An unreadable probe is a stop too — `[ "" -lt 10 ]` is a shell error, and an
 > errored test skips the very branch that exists to stop us, so every probe below is
 > read through a digit-run `case` before it is compared.
+>
+> **The rung below that stop.** `X-RateLimit-Remaining` < 50 is D4's backpressure rung
+> for a batch op: still above the STOP threshold, so the fan-out continues — the
+> inter-operation delay rises from 1s to 3s for the remainder of the batch. A rung is
+> not a stop; reaching it is never a reason to report `THROTTLED`.
 
 ### Standard Throttling
 

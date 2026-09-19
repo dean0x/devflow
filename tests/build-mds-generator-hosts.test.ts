@@ -60,10 +60,14 @@ import {
   DIST_COMMAND_FILES,
 } from './fixtures/mds-manifest.js';
 import {
-  TRACKER_GITHUB_OPS,
+  MCP_BACKED_PROVIDER_SUBDIRS,
+  MCP_CONTRACT_MODULE,
+  TRACKER_OPS,
+  VARIANT_MODULES,
   GIT_CROSS_CUTTING_DOCS,
   ALLOWED_OUTPUT_DIR_NAMES,
   SKILL_REFS_OUTPUT_DIR,
+  deferredReferenceModuleSources,
 } from '../src/core/mds-variants.js';
 import { MAX_REFERENCE_SWEEP_DEPTH } from '../src/core/reference-sweep.js';
 
@@ -161,7 +165,15 @@ async function hashDistTree(root: string): Promise<Map<string, string>> {
  * Derived from the production op roster, never retyped.
  */
 const EXPECTED_REFERENCE_KEYS: readonly string[] = [
-  ...TRACKER_GITHUB_OPS.map(op => `skills/git/references/tracker/github/${op}.md`),
+  // One key per (provider, op) pair, derived from the registry's own provider
+  // rows rather than listed: a provider added to VARIANT_MODULES appears here by
+  // construction, and file-set parity across providers needs no second roster.
+  ...VARIANT_MODULES
+    .filter(mod => mod.kind === 'fanout')
+    .flatMap(mod => mod.ops.map(op => `skills/git/references/${mod.subdir}/${op}.md`)),
+  // The gated contract document, keyed the same way. `ops` carries its single
+  // emitted basename, so the shape is the same as a provider row's.
+  ...MCP_CONTRACT_MODULE.ops.map(op => `skills/git/references/${MCP_CONTRACT_MODULE.subdir}/${op}.md`),
   ...GIT_CROSS_CUTTING_DOCS.map(doc => `skills/git/references/${doc}.md`),
 ];
 
@@ -748,21 +760,42 @@ describe('printed host/partial counts agree with the manifest (AC-1.8)', () => {
    * absent — a missing line must fail loudly, never parse as 0 (PF-018).
    * Called by the committed-tree assertion AND by the seeded-tree probe below.
    */
-  function parsePrintedCounts(output: string): { hosts: number; partials: number } {
+  function parsePrintedCounts(output: string): { hosts: number; partials: number; deferred: number } {
     const hostMatch = /^\s*(\d+) host\(s\) to compile:/m.exec(output);
     const partialMatch = /^\s*(\d+) partial\(s\) skipped \(no output-dir:\)/m.exec(output);
+    const deferredMatch = /^\s*(\d+) reference module\(s\) deferred \(generation gated\)/m.exec(output);
     if (!hostMatch) {
       throw new Error(`build output has no "N host(s) to compile:" line:\n${output}`);
     }
     if (!partialMatch) {
       throw new Error(`build output has no "N partial(s) skipped" line:\n${output}`);
     }
-    return { hosts: Number(hostMatch[1]), partials: Number(partialMatch[1]) };
+    if (!deferredMatch) {
+      throw new Error(`build output has no "N reference module(s) deferred" line:\n${output}`);
+    }
+    return {
+      hosts: Number(hostMatch[1]),
+      partials: Number(partialMatch[1]),
+      deferred: Number(deferredMatch[1]),
+    };
   }
 
   /** Expected totals, derived from the manifest — never retyped as literals. */
   const EXPECTED_HOSTS = ALL_DISCOVERED_HOSTS.length;
   const EXPECTED_PARTIALS = MDS_PARTIALS.length;
+  /**
+   * How many gated reference modules this registry holds back — read from the
+   * one owner that answers it (src/core/mds-variants.ts), never from a roster
+   * kept beside it.
+   *
+   * ZERO on this tree, and that is the claim rather than an absence of one: the
+   * contract module's gate is keyed on a provider that needs it being
+   * registered, and TWO such providers are, so nothing is deferred. The arm
+   * below proves the predicate still discriminates — against a registry with
+   * every gated sub-directory removed, because with more than one of them a
+   * probe that drops only the first leaves the gate open.
+   */
+  const EXPECTED_DEFERRED = deferredReferenceModuleSources().length;
 
   it('a build of the committed tree prints the manifest host and partial counts', async () => {
     // Shares the one memoised spawn with the dist/-staleness check above.
@@ -780,6 +813,49 @@ describe('printed host/partial counts agree with the manifest (AC-1.8)', () => {
       counts.partials,
       `build printed ${counts.partials} skipped partial(s); the manifest names ${EXPECTED_PARTIALS}.`,
     ).toBe(EXPECTED_PARTIALS);
+    // The third bucket. A gated reference module declares an output-dir: but is
+    // not compiled, so it must land in NEITHER of the two counts above — and the
+    // reason this is asserted rather than assumed is that the arithmetic is
+    // `total - hosts - deferred`: fold the deferred into the partials and the
+    // partial count silently moves for a reason that is not a roster change.
+    expect(
+      counts.deferred,
+      `build printed ${counts.deferred} deferred reference module(s); the manifest names ` +
+      `${EXPECTED_DEFERRED} gated module(s) held back by this registry.`,
+    ).toBe(EXPECTED_DEFERRED);
+    for (const source of deferredReferenceModuleSources()) {
+      expect(
+        run.combined,
+        `the build must NAME each deferred module and why — a bare count leaves a reader unable ` +
+        `to tell a gated module from a lost one`,
+      ).toContain(`deferred: ${source}`);
+    }
+
+    // PF-064: the loop above ranges over an empty set on this tree, so the arm
+    // that keeps it honest is a PRESENCE arm on the predicate rather than a floor
+    // on the roster. Ask the same owner about a registry with the tool-call
+    // provider removed: the contract module must then be deferred. Without this,
+    // a predicate welded to "nothing is ever gated" would read exactly the same.
+    //
+    // The probe registry drops EVERY gated sub-directory, read from the gate's own
+    // subject rather than naming one provider: with two tool-call providers
+    // registered, dropping the first left the second holding the gate open and this
+    // arm reported the predicate as broken when it was the probe that had gone
+    // stale. A probe that names one member of a set the gate ranges over stops
+    // discriminating the moment the set grows.
+    const gatedSubdirs: readonly string[] = MCP_BACKED_PROVIDER_SUBDIRS;
+    const withoutToolCallProvider = VARIANT_MODULES.filter(
+      mod => !gatedSubdirs.includes(mod.subdir),
+    );
+    expect(
+      deferredReferenceModuleSources(withoutToolCallProvider),
+      'the deferral predicate must still hold back the contract module for a registry with no ' +
+      'provider that needs it — otherwise the zero above is a mechanism that stopped working',
+    ).toEqual([MCP_CONTRACT_MODULE.source]);
+    expect(
+      withoutToolCallProvider.length,
+      'the probe registry must actually differ from the shipped one',
+    ).toBeLessThan(VARIANT_MODULES.length);
   }, 120_000);
 
   it('known-bad probe: one extra host in a copied tree moves the printed count off the manifest', async () => {

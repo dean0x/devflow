@@ -18,6 +18,8 @@
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { spawnSync } from 'child_process';
+import { createRequire } from 'module';
+import { createHash } from 'crypto';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
@@ -638,5 +640,817 @@ describe('adversarial backtracking budget', () => {
 
     expect(r.exitCode).toBe(0);
     expect(elapsed).toBeLessThan(2000);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// P3a-S11 — `--emit`: the mechanical D11 gate for MCP sinks (AC-3.5)
+// ---------------------------------------------------------------------------
+//
+// WHY A SECOND MODE EXISTS AT ALL (GAP-04). The file-sink gate is a shell `&&`
+// chain: `redact-secrets.cjs raw scrubbed && gh issue comment --body-file scrubbed`.
+// A tracker reached through a tool call has no `--body-file` and no shell operator
+// between the scrub and the post, so the `&&` cannot exist — and an instruction
+// ("remember to scrub first") is not a gate. `--emit` restores a mechanical one:
+// the scrubbed bytes are only obtainable from a stdout framing line the script
+// alone can produce, so a body with no framing line is a body that was never
+// scrubbed.
+//
+// Three properties carry that claim, and each is asserted on EVERY path rather
+// than argued from construction:
+//   1. NO BODY ON ANY NON-ZERO EXIT. A partial body behind a gate that appears to
+//      have run is worse than no gate.
+//   2. THE NONCE IS PER-INVOCATION. Composed bodies contain untrusted issue text,
+//      so a fixed `D11-OK` literal would be forgeable by anyone who can write an
+//      issue comment (§14.9-3).
+//   3. THE FIRST-PASS COUNT TRAVELS IN THE FRAMING [DR-01]. Without it the only
+//      signal that a real credential was present is computed and thrown away, and
+//      the user is never told to rotate it.
+//
+// The helpers are unit-tested through `require()` as well as end-to-end: flag
+// parsing and the second-pass gate are observable ONLY end-to-end otherwise, and
+// an end-to-end-only suite cannot reach the nonce-failure arm at all [DR-14].
+
+const NODE_REQUIRE = createRequire(import.meta.url);
+
+// ---------------------------------------------------------------------------
+// The .cjs seam
+//
+// redact-secrets.cjs is plain CommonJS, and this tree sits outside every
+// tsconfig the project runs (PF-069), so the interface below is the ONLY shape
+// authority for the module's exports on this side. It is transcribed from the
+// module's own JSDoc — open that before changing anything here, because a shape
+// invented on this side is a fixture the runtime rejects (PF-043).
+// ---------------------------------------------------------------------------
+
+/** A per-slug redaction count map. */
+type ScrubCounts = Readonly<Record<string, number>>;
+
+/** `scrub()` — the scrubbed text, and what it replaced. */
+interface ScrubResult {
+  readonly result: string;
+  readonly counts: ScrubCounts;
+}
+
+/** `scrubTwice()` — the first pass's text, and both passes' counts. */
+interface ScrubTwiceResult {
+  readonly text: string;
+  readonly first: ScrubCounts;
+  readonly second: ScrubCounts;
+}
+
+/** `frameEmit()`'s success arm. */
+interface FrameEmitOk {
+  readonly emitLine: string;
+  readonly body: string;
+  readonly error?: undefined;
+}
+
+/** `frameEmit()`'s refusal arm — no framing line is produced at all. */
+interface FrameEmitErr {
+  readonly emitLine?: undefined;
+  readonly body?: undefined;
+  readonly error: string;
+}
+
+type FrameEmitResult = FrameEmitOk | FrameEmitErr;
+
+/** `parseArgs()` — tagged on `kind`, never on field presence. */
+type ParsedArgs =
+  | { readonly kind: 'emit'; readonly inputPath: string }
+  | { readonly kind: 'file'; readonly inputPath: string; readonly outputPath: string }
+  | { readonly kind: 'usage'; readonly usage: string };
+
+/** `main()`'s emit-mode return: the framing, the body, and the exit code. */
+interface MainEmitResult {
+  readonly emitLine: string;
+  readonly body: string;
+  readonly code: number;
+}
+
+/** `main()` — an exit code, the file mode's SCRUB line, or the emit triple. */
+type MainResult = number | { readonly scrubLine: string } | MainEmitResult;
+
+/**
+ * Injected only by tests, to reach the two arms no fixture can.
+ *
+ * `nonceSource` is `() => unknown` because that is what the script validates: it
+ * type-checks the value it gets back and refuses anything that is not 32 hex
+ * characters, so a source declared to return `string` would describe a contract
+ * narrower than the one the code implements — and every malformed-nonce fixture
+ * would need a cast to reach the check it exists to prove.
+ */
+interface MainDeps {
+  readonly scrubFn?: (content: string) => ScrubResult;
+  readonly nonceSource?: () => unknown;
+}
+
+/** The module's exported surface [DR-14]. */
+interface RedactScrubber {
+  readonly NONCE_HEX_CHARS: number;
+  readonly ZERO_SCRUB_LINE: string;
+  readonly D11_FAIL_REASONS: readonly string[];
+  shouldSkip(candidate: string): boolean;
+  scrub(content: string): ScrubResult;
+  formatScrubLine(counts: ScrubCounts): string;
+  parseArgs(argv: readonly string[]): ParsedArgs;
+  scrubTwice(content: string, scrubFn?: (content: string) => ScrubResult): ScrubTwiceResult;
+  frameEmit(scrubbed: string, scrubLine: string, nonceSource?: () => unknown): FrameEmitResult;
+  main(argv: readonly string[], deps?: MainDeps): MainResult;
+}
+
+/** The script's exported pure helpers. Required once — the module is idempotent. */
+const SCRUBBER = NODE_REQUIRE(SCRIPT) as RedactScrubber;
+
+/**
+ * frameEmit's success arm, or a test failure naming the refusal.
+ *
+ * The refusal arm carries no `emitLine`, so without narrowing every success-path
+ * assertion reads `string | undefined` — and the shortest way to silence that is
+ * the strongest available cast, applied to the exact value being probed.
+ */
+function framedOk(framed: FrameEmitResult): FrameEmitOk {
+  if (framed.error !== undefined) {
+    throw new Error(`frameEmit refused where the assertion requires a framing: ${framed.error}`);
+  }
+  return framed;
+}
+
+/** main()'s emit triple, or a test failure — the other two arms return other shapes. */
+function emitResult(result: MainResult): MainEmitResult {
+  if (typeof result === 'number' || !('code' in result)) {
+    throw new Error(`main() returned a non-emit result: ${JSON.stringify(result)}`);
+  }
+  return result;
+}
+
+interface EmitResult {
+  /** stdout line 1 — the framing, without its newline. */
+  framing: string;
+  /** Everything after line 1 — the body, byte-exact. */
+  body: string;
+  stderr: string;
+  exitCode: number;
+  /** Raw stdout, for the "no body" assertions that must see every byte. */
+  stdout: string;
+}
+
+/**
+ * `run(in,out)`'s sibling for the emit mode (~6 lines, per §9's harness row),
+ * plus the stdout split the framing contract requires.
+ *
+ * The split is at the FIRST newline only: the body may contain newlines, and a
+ * `split('\n')` would silently drop every line after the first.
+ */
+function runEmit(inputPath: string, extraArgs: readonly string[] = []): EmitResult {
+  const result = spawnSync('node', [SCRIPT, '--emit', inputPath, ...extraArgs], {
+    encoding: 'utf8',
+    stdio: ['pipe', 'pipe', 'pipe'],
+    timeout: 10_000,
+  });
+  const stdout = result.stdout ?? '';
+  const nl = stdout.indexOf('\n');
+  return {
+    framing: nl === -1 ? stdout : stdout.slice(0, nl),
+    body: nl === -1 ? '' : stdout.slice(nl + 1),
+    stderr: result.stderr ?? '',
+    exitCode: result.status ?? 1,
+    stdout,
+  };
+}
+
+function writeInput(content: string, name = 'emit-input.txt'): string {
+  const p = path.join(tmpDir, name);
+  fs.writeFileSync(p, content, 'utf8');
+  return p;
+}
+
+/**
+ * The framing grammar, §8.9 row 2. Anchored on both ends (§14.1: never `^A|B$`).
+ * The nonce width is pinned from the script's own constant so the two cannot drift.
+ */
+const NONCE_HEX_CHARS: number = SCRUBBER.NONCE_HEX_CHARS;
+const FRAMING_RE = new RegExp(
+  `^D11-OK [0-9a-f]{${NONCE_HEX_CHARS}} [0-9a-f]{64} \\d+ \\d+ \\[[^\\]]*\\]$`,
+);
+
+describe('--emit: parseArgs (unit, no subprocess) [DR-14]', () => {
+  it('parses the flag BEFORE the positionals', () => {
+    // The bug this prevents: `main(argv)` read argv[2]/argv[3] positionally with
+    // no flag handling, so `--emit` bound as a FILENAME and the run died at
+    // statSync with exit 2 — a silent misdiagnosis of "your input is missing".
+    expect(SCRUBBER.parseArgs(['node', 'script', '--emit', '/tmp/in'])).toEqual({
+      kind: 'emit',
+      inputPath: '/tmp/in',
+    });
+  });
+
+  it('accepts the flag in either position', () => {
+    expect(SCRUBBER.parseArgs(['node', 'script', '/tmp/in', '--emit'])).toEqual({
+      kind: 'emit',
+      inputPath: '/tmp/in',
+    });
+  });
+
+  it('the two-positional form is the file mode', () => {
+    expect(SCRUBBER.parseArgs(['node', 'script', '/tmp/in', '/tmp/out'])).toEqual({
+      kind: 'file',
+      inputPath: '/tmp/in',
+      outputPath: '/tmp/out',
+    });
+  });
+
+  it('every result is TAGGED — the mode is read from `kind`, never from field presence', () => {
+    // main() dispatches on this tag. Discriminating by which optional field
+    // happens to be present makes a fourth shape — or a renamed field — read as
+    // an existing mode instead of failing, and the modes differ in whether the
+    // scrubbed body reaches stdout.
+    const ARGVS: ReadonlyArray<readonly string[]> = [
+      ['--emit', '/tmp/in'],
+      ['/tmp/in', '/tmp/out'],
+      ['--emit'],
+      ['--unknown', '/tmp/in', '/tmp/out'],
+    ];
+    expect(ARGVS.length, 'the argv corpus must be non-empty (PF-018)').toBeGreaterThan(0);
+    expect(ARGVS.map((a) => SCRUBBER.parseArgs(['node', 'script', ...a]).kind))
+      .toEqual(['emit', 'file', 'usage', 'usage']);
+  });
+
+  it('refuses every wrong arity and every unknown flag, naming usage', () => {
+    const WRONG: ReadonlyArray<readonly string[]> = [
+      [],
+      ['/tmp/in'],
+      ['--emit'],
+      ['--emit', '/tmp/in', '/tmp/out'],
+      ['/tmp/a', '/tmp/b', '/tmp/c'],
+      ['--unknown', '/tmp/in', '/tmp/out'],
+      ['-e', '/tmp/in'],
+    ];
+    expect(WRONG.length, 'the arity corpus must be non-empty (PF-018)').toBeGreaterThan(0);
+    const accepted: string[] = [];
+    for (const args of WRONG) {
+      const parsed = SCRUBBER.parseArgs(['node', 'script', ...args]);
+      if (parsed.kind !== 'usage') accepted.push(JSON.stringify(args));
+    }
+    expect(accepted, `argv shape(s) accepted that must be a usage error: ${accepted.join(', ')}`)
+      .toEqual([]);
+  });
+
+  it('a flag-looking input path is refused rather than silently treated as a file', () => {
+    // `--emit --emit` and `--help` must not become filenames.
+    expect(SCRUBBER.parseArgs(['node', 'script', '--help']).kind).toBe('usage');
+  });
+});
+
+describe('--emit: scrubTwice — the gate [DR-14]', () => {
+  it('a clean second pass is what "gated" means', () => {
+    const r = SCRUBBER.scrubTwice('aws key: AKIAIOSFODNN7EXAMPLE\n');
+    expect(r.text).toContain('[REDACTED:aws-key]');
+    expect(SCRUBBER.formatScrubLine(r.first)).toBe('SCRUB: 1 [aws-key:1]');
+    expect(
+      SCRUBBER.formatScrubLine(r.second),
+      'the SECOND pass returning zero IS the gate — it is what proves the first pass left nothing',
+    ).toBe('SCRUB: 0 []');
+  });
+
+  it('the second pass is a re-scrub of the FIRST pass output, not of the input', () => {
+    // A second pass over the original content would find the same secrets again
+    // and the gate would never pass, so this is the one wiring mistake that turns
+    // the whole mode off.
+    const calls: string[] = [];
+    const spy = (content: string) => {
+      calls.push(content);
+      return SCRUBBER.scrub(content);
+    };
+    const r = SCRUBBER.scrubTwice('aws key: AKIAIOSFODNN7EXAMPLE\n', spy);
+    expect(calls).toHaveLength(2);
+    expect(calls[1], 'the second pass must receive the first pass output').toBe(r.text);
+  });
+
+  it('known-bad probe: an injected non-idempotent scrub makes the second pass non-zero', () => {
+    // The gate can only be shown live by injection: the real rules ARE idempotent
+    // (`[REDACTED:` is a contains-skip), so no fixture reaches this arm.
+    const hostile = (content: string) => ({
+      result: content + '\nAKIAIOSFODNN7EXAMPLE',
+      counts: { 'aws-key': 1 },
+    });
+    const r = SCRUBBER.scrubTwice('clean\n', hostile);
+    expect(SCRUBBER.formatScrubLine(r.second)).not.toBe('SCRUB: 0 []');
+  });
+});
+
+describe('--emit: frameEmit — nonce, digest, byte count and the first-pass payload [DR-01]', () => {
+  it('embeds formatScrubLine’s payload rather than re-spelling the count text', () => {
+    const scrubLine = SCRUBBER.formatScrubLine({ 'aws-key': 2, 'api-key': 1 });
+    const framed = framedOk(SCRUBBER.frameEmit('body bytes', scrubLine));
+    expect(framed.emitLine).toMatch(FRAMING_RE);
+    expect(
+      framed.emitLine.endsWith('3 [aws-key:2,api-key:1]'),
+      `the framing must carry the first-pass count and its [type:count,…] payload — without it a ` +
+      `user whose issue body held a live credential is never told to rotate it [DR-01]. Got: ` +
+      framed.emitLine,
+    ).toBe(true);
+    expect(framed.body).toBe('body bytes');
+  });
+
+  it('the <bytes> field is the body’s UTF-8 byte length, not its character count [DR-06]', () => {
+    // The consumer verifies the received body against this number to detect a
+    // harness-truncated Bash result. A character count would be wrong for exactly
+    // the multi-byte bodies a Jira description carries.
+    const body = 'héllo — ✓';
+    const framed = framedOk(SCRUBBER.frameEmit(body, 'SCRUB: 0 []'));
+    const bytes = Number(framed.emitLine.split(' ')[3]);
+    expect(bytes).toBe(Buffer.byteLength(body, 'utf8'));
+    expect(bytes, 'a character count would understate a multi-byte body').not.toBe(body.length);
+  });
+
+  it('the digest is sha256 of the body', () => {
+    const body = 'deterministic body\n';
+    const framed = framedOk(SCRUBBER.frameEmit(body, 'SCRUB: 0 []'));
+    expect(framed.emitLine.split(' ')[2]).toBe(
+      createHash('sha256').update(body, 'utf8').digest('hex'),
+    );
+  });
+
+  it('a malformed or throwing nonce source is refused, never framed', () => {
+    // Injected rather than mocked: this is the one failure arm no fixture and no
+    // subprocess can reach, and an unreachable arm is an unasserted arm.
+    //
+    // Every source below is passed UNCAST. `nonceSource` is declared `() => unknown`
+    // because the script validates what it gets back, so the wrong-typed sources are
+    // exactly the inputs the check exists for — a cast here would suppress the one
+    // check the assertion is probing.
+    const BAD_SOURCES: ReadonlyArray<() => unknown> = [
+      () => { throw new Error('entropy pool empty'); },
+      () => 'NOTHEX',
+      () => '',
+      () => 42,
+    ];
+    expect(BAD_SOURCES.length, 'the nonce-source corpus must be non-empty (PF-018)').toBeGreaterThan(0);
+    for (const bad of BAD_SOURCES) {
+      const framed = SCRUBBER.frameEmit('body', 'SCRUB: 0 []', bad);
+      expect(framed.emitLine, `nonce source ${String(bad)} must not produce a framing`).toBeUndefined();
+      expect(framed.error, 'the refusal must name itself').toContain('nonce');
+    }
+  });
+});
+
+describe('--emit: framing and body end-to-end (AC-3.5)', () => {
+  it('stdout is the framing line then the scrubbed body, byte-exact', () => {
+    const fixture = 'intro\naws key: AKIAIOSFODNN7EXAMPLE\ntail\n';
+    const r = runEmit(writeInput(fixture));
+    expect(r.exitCode, `emit should succeed.\n${r.stderr}`).toBe(0);
+    expect(r.framing).toMatch(FRAMING_RE);
+    expect(r.body).toBe(fixture.replace('AKIAIOSFODNN7EXAMPLE', '[REDACTED:aws-key]'));
+    expect(r.body, 'the secret must not survive into the body').not.toContain('AKIAIOSFODNN7EXAMPLE');
+    expect(r.framing, 'the framing line must never carry secret bytes')
+      .not.toContain('AKIAIOSFODNN7EXAMPLE');
+  });
+
+  it('the framing carries the first-pass count, not the (always-zero) second-pass count [DR-01]', () => {
+    const r = runEmit(writeInput('aws key: AKIAIOSFODNN7EXAMPLE\n'));
+    expect(r.exitCode).toBe(0);
+    expect(
+      r.framing.endsWith(' 1 [aws-key:1]'),
+      `the framing reported a zero count for a body that DID contain a credential — the rotation ` +
+      `warning is then unreachable. Got: ${r.framing}`,
+    ).toBe(true);
+  });
+
+  it('a body with no redactions still frames, with a zero payload', () => {
+    const fixture = 'nothing secret here\n';
+    const r = runEmit(writeInput(fixture));
+    expect(r.exitCode).toBe(0);
+    expect(r.framing.endsWith(' 0 []')).toBe(true);
+    expect(r.body).toBe(fixture);
+  });
+
+  it('the nonce is per-invocation: two runs on identical input differ', () => {
+    const p = writeInput('same bytes every time\n');
+    const a = runEmit(p);
+    const b = runEmit(p);
+    expect(a.exitCode).toBe(0);
+    expect(b.exitCode).toBe(0);
+    const nonceA = a.framing.split(' ')[1];
+    const nonceB = b.framing.split(' ')[1];
+    expect(nonceA).toMatch(new RegExp(`^[0-9a-f]{${NONCE_HEX_CHARS}}$`));
+    expect(
+      nonceA,
+      'a stable nonce is a forgeable one: anyone who can write an issue comment could paste a ' +
+      '`D11-OK <known nonce>` line into it and have it read as a scrub receipt (§14.9-3)',
+    ).not.toBe(nonceB);
+    // …while the digest, which is a function of the body alone, is stable.
+    expect(a.framing.split(' ')[2]).toBe(b.framing.split(' ')[2]);
+  });
+
+  it('writes nothing beside the input — the emit sink is stdout', () => {
+    const p = writeInput('body\n', 'cleanup-input.txt');
+    expect(runEmit(p).exitCode).toBe(0);
+    const residue = fs.readdirSync(tmpDir).filter(f => f !== 'cleanup-input.txt');
+    expect(
+      residue,
+      'the emit path prints the bytes it holds and owns no file. Anything it leaves beside the ' +
+      'input is a second on-disk copy of a comment body, with the input directory’s lifetime and ' +
+      'surviving a SIGKILL',
+    ).toEqual([]);
+  });
+
+  it('an unwritable INPUT directory does not stop a clean scrub', () => {
+    // The emit path holds the bytes it returns and prints them, so it never needs
+    // to prove the input's directory is writable. Doing so turns a filesystem
+    // property into "this body cannot be published": a clean, fully gated body is
+    // refused and the caller degrades for a reason unrelated to scrubbing.
+    const dir = fs.mkdtempSync(path.join(tmpDir, 'ro-'));
+    const p = path.join(dir, 'in.txt');
+    fs.writeFileSync(p, 'aws key: AKIAIOSFODNN7EXAMPLE\n', 'utf8');
+    fs.chmodSync(dir, 0o500);
+    try {
+      const r = runEmit(p);
+      expect(r.exitCode, `a read-only input directory refused a clean scrub.\n${r.stderr}`).toBe(0);
+      expect(r.framing).toMatch(FRAMING_RE);
+      expect(r.body).toBe('aws key: [REDACTED:aws-key]\n');
+    } finally {
+      fs.chmodSync(dir, 0o700);
+    }
+  });
+
+  it('does not write the output-file positional form’s artifact (there is no output path)', () => {
+    const p = writeInput('body\n', 'no-out-input.txt');
+    runEmit(p);
+    expect(fs.existsSync(p + '.tmp'), 'the --in/--out temp name must not be reused').toBe(false);
+  });
+});
+
+/** Named collector: registry reasons that no arm of the emit mode can produce. */
+function collectUnreachableReasons(
+  registry: readonly string[],
+  observed: readonly string[],
+): string[] {
+  return registry.filter((reason) => !observed.includes(reason));
+}
+
+/**
+ * TWO SHAPES, ONE PROPERTY: no failure ever writes body bytes.
+ *
+ * FRAMED refusals — the ones the mode owns and can name — are exactly
+ * `D11-FAIL <reason>` with an empty body. UNFRAMED refusals write nothing to
+ * stdout at all: the usage error precedes mode selection, and the internal error
+ * escapes main() before the boundary knows a mode, so neither can render a
+ * framing line. The consumer gates on the presence of `D11-OK`, so both shapes
+ * are one case to it and the unframed one is strictly stronger.
+ */
+describe('--emit: NO BODY on any non-zero exit (AC-3.5, §8.9 — every path)', () => {
+  /** Every FRAMED failure path, with the exit code it must produce. */
+  function assertNoBody(label: string, r: EmitResult, expectedCode: number): void {
+    expect(r.exitCode, `${label}: must exit ${expectedCode}.\n${r.stderr}`).toBe(expectedCode);
+    expect(
+      r.body,
+      `${label}: stdout carried ${r.body.length} body byte(s) after a non-zero exit. A consumer ` +
+      `that reads "everything after line 1" would post them.`,
+    ).toBe('');
+    expect(
+      r.framing.startsWith('D11-FAIL '),
+      `${label}: stdout line 1 must be exactly \`D11-FAIL <reason>\`, got: ${JSON.stringify(r.framing)}`,
+    ).toBe(true);
+    expect(r.framing, `${label}: a D11-OK line must never accompany a failure`).not.toContain('D11-OK');
+  }
+
+  it('missing input ⇒ exit 2, no body', () => {
+    assertNoBody('missing input', runEmit(path.join(tmpDir, 'absent.txt')), 2);
+  });
+
+  it('input over 1 MiB ⇒ exit 2, no body', () => {
+    const p = path.join(tmpDir, 'huge.txt');
+    fs.writeFileSync(p, 'x'.repeat(1_048_577), 'utf8');
+    assertNoBody('oversize input', runEmit(p), 2);
+  });
+
+  it('usage error ⇒ exit 1, and stdout is entirely empty', () => {
+    // The one failure that happens BEFORE the mode is known, so it cannot render a
+    // D11-FAIL line — stdout must then be empty rather than partially framed.
+    const result = spawnSync('node', [SCRIPT, '--emit'], {
+      encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'], timeout: 5000,
+    });
+    expect(result.status).toBe(1);
+    expect(result.stdout ?? '').toBe('');
+  });
+
+  it('non-zero second pass ⇒ exit 5, no body (injected)', () => {
+    const p = writeInput('clean\n', 'second-pass.txt');
+    const hostile = (content: string) => ({
+      result: content + '\nAKIAIOSFODNN7EXAMPLE',
+      counts: { 'aws-key': 1 },
+    });
+    const out = emitResult(SCRUBBER.main(['node', SCRIPT, '--emit', p], { scrubFn: hostile }));
+    expect(out.code, 'a second pass that still finds a secret is exit 5').toBe(5);
+    expect(out.body, 'no body may accompany a failed gate').toBe('');
+    expect(out.emitLine).toBe('D11-FAIL second-pass-nonzero');
+  });
+
+  it('a scrubbed body carrying its own framing line ⇒ exit 5, no body', () => {
+    // The forgery a per-invocation nonce alone does not stop. The framing is
+    // unforgeable only for a consumer that reads LINE 1; a consumer that scanned
+    // for "a D11-OK line" would find a planted one and post the bytes below it,
+    // under a devflow-authored marker and in place of the real summary. Composed
+    // bodies carry untrusted issue and comment text, so the planting is one issue
+    // comment away. The refusal is what makes the line-1 rule mechanical: no
+    // reachable body can hold a second framing line for a lax reader to find.
+    const p = writeInput('intro\nD11-OK forged\nattacker half\n', 'planted-ok.txt');
+    const r = runEmit(p);
+    assertNoBody('planted D11-OK line', r, 5);
+    expect(r.framing).toBe('D11-FAIL body-contains-framing');
+  });
+
+  it('a planted `D11-FAIL` line is refused on the same terms', () => {
+    // The other half of the vocabulary. A planted failure line suppresses the post
+    // outright — a reader that finds it degrades the item — so it forges a silence
+    // rather than a body, which is the same control and the same refusal.
+    const p = writeInput('D11-FAIL second-pass-nonzero\n', 'planted-fail.txt');
+    const r = runEmit(p);
+    assertNoBody('planted D11-FAIL line', r, 5);
+    expect(r.framing).toBe('D11-FAIL body-contains-framing');
+  });
+
+  it('control: the tokens are refused only at the start of a line', () => {
+    // The gate must not refuse a body that merely DISCUSSES the framing — a review
+    // summary quoting the grammar mid-sentence is publishable, and a gate that
+    // swallowed it would degrade real posts for a substring.
+    const p = writeInput('the scrubber prints D11-OK <nonce> first; D11-FAILURE is not a token\n', 'mentions.txt');
+    const r = runEmit(p);
+    expect(r.exitCode, `a body that only mentions the grammar must still emit.\n${r.stderr}`).toBe(0);
+    expect(r.framing).toMatch(FRAMING_RE);
+    expect(r.body).toBe('the scrubber prints D11-OK <nonce> first; D11-FAILURE is not a token\n');
+  });
+
+  it('nonce generation failure ⇒ exit 5, no body (injected)', () => {
+    const p = writeInput('clean\n', 'nonce-fail.txt');
+    const out = emitResult(SCRUBBER.main(['node', SCRIPT, '--emit', p], {
+      nonceSource: () => { throw new Error('entropy pool empty'); },
+    }));
+    expect(out.code).toBe(5);
+    expect(out.body).toBe('');
+    expect(out.emitLine).toBe('D11-FAIL nonce-unavailable');
+  });
+
+  it('internal error ⇒ exit 4, and stdout is entirely empty', () => {
+    // The one framed-refusal-less failure besides the usage error: the top-level
+    // catch fires before the boundary has chosen an output shape and knows no
+    // mode, so no `D11-FAIL` line can describe it and stdout carries nothing at
+    // all. Strictly stronger than an empty body — the consumer's `D11-OK` gate
+    // reads it as the same refusal — but the claim needs asserting, not arguing.
+    //
+    // Injected through a `--require` preload rather than main()'s deps: the catch
+    // lives inside the `require.main === module` boundary and is reachable only in
+    // a subprocess. Breaking the digest fails frameEmit AFTER the gate has passed,
+    // which is the shape of an unexpected internal failure.
+    const preload = path.join(tmpDir, 'throw-on-hash.cjs');
+    fs.writeFileSync(
+      preload,
+      "require('crypto').createHash = () => { throw new Error('seeded internal error'); };\n",
+      'utf8',
+    );
+    const input = writeInput('clean body\n', 'internal-error.txt');
+    const spawnOpts = { encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'], timeout: 10_000 } as const;
+
+    const broken = spawnSync('node', ['--require', preload, SCRIPT, '--emit', input], spawnOpts);
+    expect(broken.status, `internal error must be exit 4.\n${broken.stderr}`).toBe(4);
+    expect(
+      broken.stdout ?? '',
+      'an internal error must leave stdout entirely EMPTY — not a partial framing, not a body',
+    ).toBe('');
+    expect(broken.stderr, 'the diagnosis goes to stderr, which no recipe forwards')
+      .toContain('internal error');
+
+    // Control: the same spawn WITHOUT the preload frames and exits 0, so the arm
+    // above is evidence about the seeded throw and not about a spawn that never
+    // reached the script.
+    const control = spawnSync('node', [SCRIPT, '--emit', input], spawnOpts);
+    expect(control.status).toBe(0);
+    expect((control.stdout ?? '').split('\n')[0]).toMatch(FRAMING_RE);
+  });
+
+  it('the closed registry holds no reason no arm can produce', () => {
+    // The script's own argument for keeping `internal-error` OUT of the registry:
+    // a value in a closed vocabulary that no arm reaches is a reason a consumer
+    // can never see, and it reads as a live refusal to anyone auditing the set.
+    // Driven over the arms rather than asserted as a list, so deleting an arm
+    // without its reason (or adding a reason without its arm) is what goes red.
+    const reasonOf = (framing: string): string => framing.replace(/^D11-FAIL /, '');
+    const clean = writeInput('clean\n', 'registry-clean.txt');
+    const huge = path.join(tmpDir, 'registry-huge.txt');
+    fs.writeFileSync(huge, 'x'.repeat(1_048_577), 'utf8');
+
+    const observed = [
+      reasonOf(runEmit(path.join(tmpDir, 'registry-absent.txt')).framing),
+      reasonOf(runEmit(huge).framing),
+      reasonOf(runEmit(writeInput('D11-OK forged\n', 'registry-planted.txt')).framing),
+      reasonOf(emitResult(SCRUBBER.main(['node', SCRIPT, '--emit', clean], {
+        scrubFn: (content) => ({
+          result: content + '\nAKIAIOSFODNN7EXAMPLE',
+          counts: { 'aws-key': 1 },
+        }),
+      })).emitLine),
+      reasonOf(emitResult(SCRUBBER.main(['node', SCRIPT, '--emit', clean], {
+        nonceSource: () => { throw new Error('entropy pool empty'); },
+      })).emitLine),
+    ];
+
+    expect(observed.length, 'the failure-arm corpus must be non-empty (PF-018)').toBeGreaterThan(0);
+    expect(
+      collectUnreachableReasons(SCRUBBER.D11_FAIL_REASONS, observed),
+      `reason(s) in the frozen registry that no arm of this mode emits. Observed: ${observed.join(', ')}`,
+    ).toEqual([]);
+  });
+
+  it('known-bad probe: the same collector reports a reason no arm emits', () => {
+    expect(collectUnreachableReasons(['reached-reason', 'phantom-reason'], ['reached-reason']))
+      .toEqual(['phantom-reason']);
+  });
+
+  it('every D11-FAIL reason is a bare token — no path, no secret, no prose', () => {
+    // stdout is read back by an agent and pasted into reports; a reason carrying a
+    // tmpdir path or input bytes would travel with it.
+    for (const reason of SCRUBBER.D11_FAIL_REASONS) {
+      expect(reason, `"${reason}" must be a bare lowercase token`).toMatch(/^[a-z][a-z-]{2,39}$/);
+    }
+    expect(
+      SCRUBBER.D11_FAIL_REASONS.length,
+      'the reason registry must be non-empty',
+    ).toBeGreaterThanOrEqual(4);
+  });
+});
+
+describe('--emit: the single stdout boundary is amended, not bypassed (§8.9)', () => {
+  const SOURCE = fs.readFileSync(SCRIPT, 'utf8');
+
+  /**
+   * Named collector: every site that writes to stdout, comments excluded.
+   *
+   * Comments are stripped for the same reason as in collectProcessExitCalls
+   * below: the boundary block's own normative prose NAMES `process.stdout.write`
+   * while explaining why there may be only two of them, and a raw grep reports
+   * the sentence that states the rule as a violation of it.
+   */
+  function collectStdoutWrites(source: string): string[] {
+    return source
+      .split('\n')
+      .map(l => l.replace(/\/\/.*$/, '').replace(/\*.*$/, ''))
+      .filter(line => /process\.stdout\.write/.test(line))
+      .map(line => line.trim());
+  }
+
+  it('exactly two stdout write sites exist in the whole script', () => {
+    const sites = collectStdoutWrites(SOURCE);
+    expect(
+      sites.length,
+      `the normative boundary block is the ONLY place that writes stdout. A third site is how a ` +
+      `body reaches stdout without passing the gate:\n  ${sites.join('\n  ')}`,
+    ).toBe(2);
+  });
+
+  it('known-bad probe: a seeded third write site is reported by the same collector', () => {
+    const seeded = SOURCE + '\nprocess.stdout.write(body);\n';
+    expect(collectStdoutWrites(seeded).length).toBe(3);
+  });
+
+  it('the normative comment still says what it always said', () => {
+    expect(
+      SOURCE,
+      'the boundary block’s normative sentence must survive the amendment verbatim — it is what ' +
+      'tells the next author not to add a third write site',
+    ).toContain('This is the ONLY place that writes to stdout and sets process.exitCode.');
+  });
+
+  /**
+   * Named collector: real `process.exit(` CALLS, comments excluded.
+   *
+   * The comment exclusion is not convenience: the boundary block's own normative
+   * sentence and the `process.exitCode` rationale both spell `process.exit()`, so
+   * a raw grep reports the very prose that forbids it.
+   */
+  function collectProcessExitCalls(source: string): string[] {
+    return source
+      .split('\n')
+      .map(l => l.replace(/\/\/.*$/, '').replace(/\*.*$/, ''))
+      .filter(l => /process\.exit\s*\(/.test(l))
+      .map(l => l.trim());
+  }
+
+  it('no code path calls process.exit() (PF-014 survives the amendment)', () => {
+    const offenders = collectProcessExitCalls(SOURCE);
+    expect(offenders, `process.exit() sites:\n  ${offenders.join('\n  ')}`).toEqual([]);
+  });
+
+  it('known-bad probe: the same collector reports a seeded process.exit() call', () => {
+    expect(collectProcessExitCalls(SOURCE + '\nprocess.exit(5);\n')).toEqual(['process.exit(5);']);
+  });
+
+  it('the exit-code header documents 5', () => {
+    expect(SOURCE, 'a new exit code nobody documented is a code a caller cannot handle')
+      .toMatch(/^\/\/\s+5\s+/m);
+  });
+});
+
+describe('placeholder-skip narrowing (GAP-54)', () => {
+  it('a value that merely CONTAINS a placeholder is still scrubbed', () => {
+    // Before the narrowing, `<x>` anywhere in the value disarmed rule 8 — the only
+    // generic `key = value` rule — and provider-rendered bodies and remote issue
+    // text are exactly what newly flows into a composed comment.
+    const fixture = 'api_key = "<ref> a8Kd91jZx0Qw7Lp2Vn"\n';
+    const r = runWithContent(fixture, tmpDir, 'gap54-contains.txt');
+    expect(r.exitCode).toBe(0);
+    expect(
+      r.outputContent,
+      'a placeholder pasted next to a live credential must not defuse the rule',
+    ).toContain('[REDACTED:secret-assignment]');
+    expect(r.stdout.trim()).toBe('SCRUB: 1 [secret-assignment:1]');
+  });
+
+  it('a value that IS entirely a placeholder is still skipped', () => {
+    const fixture = 'api_key = "${DEPLOY_API_KEY_VALUE}"\n';
+    const r = runWithContent(fixture, tmpDir, 'gap54-anchored.txt');
+    expect(r.exitCode).toBe(0);
+    expect(r.outputContent, 'an author fixture must stay readable (PF-028)').toBe(fixture);
+    expect(r.stdout.trim()).toBe('SCRUB: 0 []');
+  });
+
+  it('shouldSkip: anchored for placeholders, marker-STRIPPED for [REDACTED: (unit)', () => {
+    expect(SCRUBBER.shouldSkip('${VAR}')).toBe(true);
+    expect(SCRUBBER.shouldSkip('<placeholder>')).toBe(true);
+    expect(SCRUBBER.shouldSkip('{{ template }}')).toBe(true);
+    expect(SCRUBBER.shouldSkip('$VAR')).toBe(true);
+    expect(SCRUBBER.shouldSkip('<x> AKIAIOSFODNN7EXAMPLE')).toBe(false);
+    expect(SCRUBBER.shouldSkip('${VAR} plus a real secret')).toBe(false);
+
+    // A value that is this script's OWN output — markers and nothing else — is
+    // skipped, which is what keeps the second pass at zero and the gate open.
+    expect(SCRUBBER.shouldSkip('[REDACTED:secret-assignment]')).toBe(true);
+    expect(
+      SCRUBBER.shouldSkip('[REDACTED:github-token] [REDACTED:aws-key]'),
+      'two markers are still nothing but markers — an ANCHORED check would re-match this value, ' +
+      'the second pass could never return zero, and the gate would refuse every body',
+    ).toBe(true);
+
+    // …while bytes surviving beside a marker are judged on those bytes.
+    expect(
+      SCRUBBER.shouldSkip('[REDACTED:aws-key] a8Kd91jZx0Qw7Lp2Vn'),
+      'a marker pasted next to a live credential must not disarm the rule — the same widening ' +
+      'GAP-54 anchored away for the four placeholder skips',
+    ).toBe(false);
+  });
+
+  it('a marker pasted beside a real credential does not defuse rule 8 (GAP-54)', () => {
+    // Remote issue text and provider-rendered bodies are exactly what flows into a
+    // composed comment, and `[REDACTED:` is a literal anyone can type into one.
+    const secret = 'a8Kd91jZx0Qw7Lp2Vn';
+    const fixture = `api_key = "[REDACTED:aws-key] ${secret}"\n`;
+    const r = runWithContent(fixture, tmpDir, 'gap54-marker.txt');
+    expect(r.exitCode).toBe(0);
+    expect(r.outputContent, 'the live credential must not survive').not.toContain(secret);
+    expect(r.outputContent).toBe('api_key = "[REDACTED:secret-assignment]"\n');
+    expect(r.stdout.trim()).toBe('SCRUB: 1 [secret-assignment:1]');
+  });
+
+  it('the marker-bearing line is still IDEMPOTENT — a second run changes nothing', () => {
+    // The property the whole `--emit` gate rests on: re-scrubbing this script's own
+    // output must report zero, or the second pass refuses every body.
+    const first = path.join(tmpDir, 'marker-idem-in.txt');
+    const firstOut = path.join(tmpDir, 'marker-idem-1.txt');
+    fs.writeFileSync(first, 'api_key = "[REDACTED:aws-key] a8Kd91jZx0Qw7Lp2Vn"\n', 'utf8');
+    expect(run(first, firstOut).exitCode).toBe(0);
+    const once = fs.readFileSync(firstOut, 'utf8');
+
+    const secondOut = path.join(tmpDir, 'marker-idem-2.txt');
+    const r2 = run(firstOut, secondOut);
+    expect(r2.exitCode).toBe(0);
+    expect(fs.readFileSync(secondOut, 'utf8')).toBe(once);
+    expect(r2.stdout.trim(), 'a non-zero second pass is exactly what closes the --emit gate')
+      .toBe('SCRUB: 0 []');
+  });
+
+  it('--emit still opens the gate on a body that carries markers', () => {
+    // End-to-end form of the idempotency claim: the second pass inside `--emit` is
+    // the gate, so a marker-bearing body must frame rather than refuse.
+    const p = writeInput('api_key = "[REDACTED:aws-key] a8Kd91jZx0Qw7Lp2Vn"\n', 'marker-emit.txt');
+    const r = runEmit(p);
+    expect(r.exitCode, `the gate refused a marker-bearing body.\n${r.stderr}`).toBe(0);
+    expect(r.framing).toMatch(FRAMING_RE);
+    expect(r.body).toBe('api_key = "[REDACTED:secret-assignment]"\n');
+  });
+});
+
+describe('--emit does not change the --in/--out mode (regression scope)', () => {
+  it('the two-positional form still writes the file and prints only the SCRUB line', () => {
+    const fixture = 'aws key: AKIAIOSFODNN7EXAMPLE\n';
+    const r = runWithContent(fixture, tmpDir, 'unchanged.txt');
+    expect(r.exitCode).toBe(0);
+    expect(r.stdout).toBe('SCRUB: 1 [aws-key:1]\n');
+    expect(r.outputContent).toBe('aws key: [REDACTED:aws-key]\n');
+  });
+
+  it('the --in/--out mode never prints a framing line', () => {
+    const r = runWithContent('clean\n', tmpDir, 'unchanged-clean.txt');
+    expect(r.stdout, 'a D11-OK line on the file path would give two receipts for one contract')
+      .not.toContain('D11-OK');
   });
 });

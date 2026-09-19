@@ -29,6 +29,55 @@ function sessionInput(tmpDir: string, extra: Record<string, unknown> = {}): stri
 }
 
 /**
+ * Seed a temp HOME that stands in for `~/.devflow` (AC-3.22).
+ *
+ * `session-start-context` reads user-scope state — the global learning.json and,
+ * since Section 3, the tracker manifest and its `.tracker.enabled` sentinel — out
+ * of `${DEVFLOW_DIR:-$HOME/.devflow}`. Every hook in this file additionally
+ * sources `hook-log-init`, whose `devflow_log_dir` does an unconditional
+ * `mkdir -p "$HOME/.devflow/logs/<slug>"`. Every hook invocation below therefore
+ * passes an explicit HOME and an explicit empty DEVFLOW_DIR, so no assertion in
+ * this file can be decided by — or leave a directory behind on — the developer's
+ * real machine (PF-060).
+ *
+ * SEEDED, never empty (PF-018): the directory tree the hook actually reads is
+ * created, so a green run here means the hook reached its gates and declined,
+ * not that it tripped over a missing path.
+ */
+function mkTmpHome(): string {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-config-disable-guards-home-'));
+  fs.mkdirSync(path.join(home, '.devflow', 'logs'), { recursive: true });
+  return home;
+}
+
+/** A user-scope manifest naming `provider` at features.tracker.provider. */
+function seedTrackerProvider(home: string, provider: string): void {
+  fs.mkdirSync(path.join(home, '.devflow'), { recursive: true });
+  fs.writeFileSync(path.join(home, '.devflow', 'manifest.json'), JSON.stringify({
+    version: '2.0.0',
+    plugins: ['devflow-core-skills'],
+    scope: 'user',
+    installedAt: '2026-01-01T00:00:00.000Z',
+    updatedAt: '2026-01-01T00:00:00.000Z',
+    features: { ambient: true, memory: true, tracker: { provider } },
+  }, null, 2));
+  // The presence sentinel devflow writes whenever the resolved provider is not
+  // github — without it Section 3 stops at a shell builtin and the fixture would
+  // be inert (the exact vacuous-seed shape PF-018 describes).
+  fs.writeFileSync(path.join(home, '.devflow', '.tracker.enabled'), '');
+}
+
+/**
+ * Hook environment: an explicit HOME and DEVFLOW_DIR on every invocation.
+ *
+ * `''` is treated as unset by `${DEVFLOW_DIR:-…}`, so this both neutralises a
+ * DEVFLOW_DIR exported in the developer's shell and exercises the fallback.
+ */
+function hookEnv(home: string): NodeJS.ProcessEnv {
+  return { ...process.env, HOME: home, DEVFLOW_DIR: '' };
+}
+
+/**
  * Parse hook stdout into the additionalContext string.
  * Asserts structural validity before property access so test failures are
  * clear rather than runtime TypeErrors on undefined properties.
@@ -47,16 +96,20 @@ function parseHookOutput(rawOutput: string): string {
 describe('config guard: pre-compact-memory', () => {
   const HOOK = path.join(HOOKS_DIR, 'pre-compact-memory');
   let tmpDir: string;
+  let tmpHome: string;
 
-  beforeEach(() => { tmpDir = mkTmpDir(); });
-  afterEach(() => { fs.rmSync(tmpDir, { recursive: true, force: true }); });
+  beforeEach(() => { tmpDir = mkTmpDir(); tmpHome = mkTmpHome(); });
+  afterEach(() => {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+    fs.rmSync(tmpHome, { recursive: true, force: true });
+  });
 
   it('exits cleanly when feature config has memory: false', () => {
     mkMemoryDir(tmpDir);
     fs.writeFileSync(path.join(tmpDir, '.devflow', 'config.json'), JSON.stringify({ memory: false }));
     const input = sessionInput(tmpDir);
     expect(() => {
-      execSync(`bash "${HOOK}"`, { input, stdio: ['pipe', 'pipe', 'pipe'] });
+      execSync(`bash "${HOOK}"`, { input, env: hookEnv(tmpHome), stdio: ['pipe', 'pipe', 'pipe'] });
     }).not.toThrow();
     // backup.json must NOT be written when disabled
     expect(fs.existsSync(path.join(tmpDir, '.devflow', 'memory', 'backup.json'))).toBe(false);
@@ -66,7 +119,7 @@ describe('config guard: pre-compact-memory', () => {
     mkMemoryDir(tmpDir);
     const input = sessionInput(tmpDir);
     expect(() => {
-      execSync(`bash "${HOOK}"`, { input, stdio: ['pipe', 'pipe', 'pipe'] });
+      execSync(`bash "${HOOK}"`, { input, env: hookEnv(tmpHome), stdio: ['pipe', 'pipe', 'pipe'] });
     }).not.toThrow();
     // pre-compact-memory creates backup.json
     expect(fs.existsSync(path.join(tmpDir, '.devflow', 'memory', 'backup.json'))).toBe(true);
@@ -76,16 +129,20 @@ describe('config guard: pre-compact-memory', () => {
 describe('config guard: session-start-memory', () => {
   const HOOK = path.join(HOOKS_DIR, 'session-start-memory');
   let tmpDir: string;
+  let tmpHome: string;
 
-  beforeEach(() => { tmpDir = mkTmpDir(); });
-  afterEach(() => { fs.rmSync(tmpDir, { recursive: true, force: true }); });
+  beforeEach(() => { tmpDir = mkTmpDir(); tmpHome = mkTmpHome(); });
+  afterEach(() => {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+    fs.rmSync(tmpHome, { recursive: true, force: true });
+  });
 
   it('outputs nothing when feature config has memory: false (even with WORKING-MEMORY.md present)', () => {
     mkMemoryDir(tmpDir);
     fs.writeFileSync(path.join(tmpDir, '.devflow', 'config.json'), JSON.stringify({ memory: false }));
     fs.writeFileSync(path.join(tmpDir, '.devflow', 'memory', 'WORKING-MEMORY.md'), '## Now\n- testing');
     const input = sessionInput(tmpDir);
-    const output = execSync(`bash "${HOOK}"`, { input, stdio: ['pipe', 'pipe', 'pipe'] }).toString().trim();
+    const output = execSync(`bash "${HOOK}"`, { input, env: hookEnv(tmpHome), stdio: ['pipe', 'pipe', 'pipe'] }).toString().trim();
     expect(output).toBe('');
   });
 
@@ -93,7 +150,7 @@ describe('config guard: session-start-memory', () => {
     mkMemoryDir(tmpDir);
     fs.writeFileSync(path.join(tmpDir, '.devflow', 'memory', 'WORKING-MEMORY.md'), '## Now\n- testing');
     const input = sessionInput(tmpDir);
-    const output = execSync(`bash "${HOOK}"`, { input, stdio: ['pipe', 'pipe', 'pipe'] }).toString().trim();
+    const output = execSync(`bash "${HOOK}"`, { input, env: hookEnv(tmpHome), stdio: ['pipe', 'pipe', 'pipe'] }).toString().trim();
     // Should output the session JSON envelope
     expect(output.length).toBeGreaterThan(0);
     const additionalContext = parseHookOutput(output);
@@ -128,9 +185,13 @@ describe('decisions-usage-scan.cjs', () => {
 describe('config guard: capture-turn decisions scanner gating', () => {
   const HOOK = path.join(HOOKS_DIR, 'capture-turn');
   let tmpDir: string;
+  let tmpHome: string;
 
-  beforeEach(() => { tmpDir = mkTmpDir(); });
-  afterEach(() => { fs.rmSync(tmpDir, { recursive: true, force: true }); });
+  beforeEach(() => { tmpDir = mkTmpDir(); tmpHome = mkTmpHome(); });
+  afterEach(() => {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+    fs.rmSync(tmpHome, { recursive: true, force: true });
+  });
 
   it('does NOT run scanner when feature config has learning: false', () => {
     mkMemoryDir(tmpDir);
@@ -145,7 +206,7 @@ describe('config guard: capture-turn decisions scanner gating', () => {
       entries: { 'ADR-001': { cites: 0, last_cited: null } },
     }, null, 2));
     const input = sessionInput(tmpDir, { last_assistant_message: 'applies ADR-001' });
-    execSync(`bash "${HOOK}"`, { input, stdio: ['pipe', 'pipe', 'pipe'] });
+    execSync(`bash "${HOOK}"`, { input, env: hookEnv(tmpHome), stdio: ['pipe', 'pipe', 'pipe'] });
     const updated = JSON.parse(fs.readFileSync(usagePath, 'utf-8'));
     // Scanner should not have run — cites stays at 0
     expect(updated.entries['ADR-001'].cites).toBe(0);
@@ -160,7 +221,7 @@ describe('config guard: capture-turn decisions scanner gating', () => {
       entries: { 'ADR-001': { cites: 0, last_cited: null } },
     }, null, 2));
     const input = sessionInput(tmpDir, { last_assistant_message: 'applies ADR-001' });
-    execSync(`bash "${HOOK}"`, { input, stdio: ['pipe', 'pipe', 'pipe'] });
+    execSync(`bash "${HOOK}"`, { input, env: hookEnv(tmpHome), stdio: ['pipe', 'pipe', 'pipe'] });
     const updated = JSON.parse(fs.readFileSync(usagePath, 'utf-8'));
     // Scanner ran — cites incremented
     expect(updated.entries['ADR-001'].cites).toBe(1);
@@ -172,9 +233,22 @@ describe('config guard: capture-turn decisions scanner gating', () => {
 describe('config guard: session-start-context', () => {
   const HOOK = path.join(HOOKS_DIR, 'session-start-context');
   let tmpDir: string;
+  let tmpHome: string;
 
-  beforeEach(() => { tmpDir = mkTmpDir(); });
-  afterEach(() => { fs.rmSync(tmpDir, { recursive: true, force: true }); });
+  beforeEach(() => { tmpDir = mkTmpDir(); tmpHome = mkTmpHome(); });
+  afterEach(() => {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+    fs.rmSync(tmpHome, { recursive: true, force: true });
+  });
+
+  /** Run the hook against the seeded temp HOME. Never the developer's own. */
+  function runContextHook(input: string, home: string = tmpHome): string {
+    return execSync(`bash "${HOOK}"`, {
+      input,
+      env: hookEnv(home),
+      stdio: ['pipe', 'pipe', 'pipe'],
+    }).toString().trim();
+  }
 
   it('script exists and passes bash -n', () => {
     expect(fs.existsSync(HOOK)).toBe(true);
@@ -191,16 +265,14 @@ describe('config guard: session-start-context', () => {
 
   it('outputs nothing when CWD is empty', () => {
     const input = JSON.stringify({ cwd: '', session_id: 'test' });
-    const output = execSync(`bash "${HOOK}"`, { input, stdio: ['pipe', 'pipe', 'pipe'] }).toString().trim();
-    expect(output).toBe('');
+    expect(runContextHook(input)).toBe('');
   });
 
   it('outputs decisions TL;DR when learning enabled and decisions.md exists', () => {
     mkMemoryDir(tmpDir);
     const decisionsDir = path.join(tmpDir, '.devflow', 'learning');
     fs.writeFileSync(path.join(decisionsDir, 'decisions.md'), '<!-- TL;DR: 1 decisions. Key: ADR-001 -->\n# Decisions\n');
-    const input = sessionInput(tmpDir);
-    const output = execSync(`bash "${HOOK}"`, { input, stdio: ['pipe', 'pipe', 'pipe'] }).toString().trim();
+    const output = runContextHook(sessionInput(tmpDir));
     expect(output.length).toBeGreaterThan(0);
     const additionalContext = parseHookOutput(output);
     expect(additionalContext).toContain('PROJECT DECISIONS');
@@ -214,10 +286,64 @@ describe('config guard: session-start-context', () => {
       path.join(tmpDir, '.devflow', 'config.json'),
       JSON.stringify({ learning: false }),
     );
-    const input = sessionInput(tmpDir);
-    const output = execSync(`bash "${HOOK}"`, { input, stdio: ['pipe', 'pipe', 'pipe'] }).toString().trim();
     // No output (nothing else to inject in this minimal test)
-    expect(output).toBe('');
+    expect(runContextHook(sessionInput(tmpDir))).toBe('');
+  });
+
+  // ─── AC-3.22 — the developer's real $HOME never decides these assertions ───
+  //
+  // Both emptiness assertions above ran with NO `env`, so they inherited the
+  // developer's real HOME. Since Section 3 reads user-scope tracker state out of
+  // `${DEVFLOW_DIR:-$HOME/.devflow}`, a maintainer who ran `devflow --tracker jira`
+  // on their own machine turned both of them red locally while CI — whose HOME has
+  // no devflow install — stayed green. The temp HOME above is the fix; the two
+  // cases below are what keeps it honest.
+
+  it('AC-3.22: the learning:false emptiness assertion survives a HOME with provider jira', () => {
+    // The seeded HOME is the hostile one: manifest provider jira AND the presence
+    // sentinel, i.e. exactly the machine state that used to break this file.
+    seedTrackerProvider(tmpHome, 'jira');
+    mkMemoryDir(tmpDir);
+    fs.writeFileSync(
+      path.join(tmpDir, '.devflow', 'learning', 'decisions.md'),
+      '<!-- TL;DR: 1 decisions. Key: ADR-001 -->\n# Decisions\n',
+    );
+    fs.writeFileSync(
+      path.join(tmpDir, '.devflow', 'config.json'),
+      JSON.stringify({ learning: false }),
+    );
+    // The SessionStart event these guards send carries no `source`, and Section 3
+    // emits only on startup/clear — so the output is empty for a reason that does
+    // not depend on which HOME is in play.
+    expect(runContextHook(sessionInput(tmpDir))).toBe('');
+  });
+
+  it('AC-3.22: two temp HOMEs produce identical output, and the seeded one is not inert', () => {
+    const otherHome = mkTmpHome();
+    try {
+      seedTrackerProvider(tmpHome, 'jira');
+      mkMemoryDir(tmpDir);
+      // Section 3 is gated on the project root being inside a repository; an
+      // empty `.git` satisfies df_has_git_marker's `-e` walk without being a
+      // repository to `git rev-parse`.
+      fs.mkdirSync(path.join(tmpDir, '.git'));
+
+      // (a) Identical output across a bare HOME and a tracker-configured one.
+      const bare = runContextHook(sessionInput(tmpDir), otherHome);
+      const seeded = runContextHook(sessionInput(tmpDir), tmpHome);
+      expect(bare).toBe('');
+      expect(seeded).toBe(bare);
+
+      // (b) Non-vacuity: the seeded HOME really is reachable. With `source:
+      // startup` the two HOMEs diverge, so (a) is a property of the source gate
+      // rather than a fixture the hook never looked at (PF-018).
+      const startup = sessionInput(tmpDir, { source: 'startup' });
+      expect(runContextHook(startup, otherHome)).toBe('');
+      const withTracker = runContextHook(startup, tmpHome);
+      expect(parseHookOutput(withTracker)).toContain('--- TRACKER SETUP ---');
+    } finally {
+      fs.rmSync(otherHome, { recursive: true, force: true });
+    }
   });
 
   it('session-start-context does not output LEARNED BEHAVIORS (learning pipeline removed)', () => {
@@ -232,8 +358,7 @@ describe('config guard: session-start-context', () => {
       artifact_path: '/.claude/commands/self-learning/deploy-flow.md', confidence: 0.95,
       last_seen: new Date().toISOString(),
     }) + '\n');
-    const input = sessionInput(tmpDir);
-    const output = execSync(`bash "${HOOK}"`, { input, stdio: ['pipe', 'pipe', 'pipe'] }).toString().trim();
+    const output = runContextHook(sessionInput(tmpDir));
     // LEARNED BEHAVIORS section must never appear (AC-F1)
     if (output.length > 0) {
       const additionalContext = parseHookOutput(output);
@@ -249,7 +374,11 @@ describe('config guard: session-start-context', () => {
     fs.writeFileSync(path.join(decisionsDir, 'decisions.md'), '<!-- TL;DR: 1 decisions. Key: ADR-001 -->\n# Decisions\n');
     fs.writeFileSync(path.join(tmpDir, '.devflow', 'memory', 'WORKING-MEMORY.md'), '## Now\n- testing');
     const input = sessionInput(tmpDir);
-    const output = execSync(`bash "${SESSION_START_MEMORY}"`, { input, stdio: ['pipe', 'pipe', 'pipe'] }).toString().trim();
+    const output = execSync(`bash "${SESSION_START_MEMORY}"`, {
+      input,
+      env: hookEnv(tmpHome),
+      stdio: ['pipe', 'pipe', 'pipe'],
+    }).toString().trim();
     // WORKING-MEMORY.md exists so the hook always produces output here.
     expect(output.length).toBeGreaterThan(0);
     const additionalContext = parseHookOutput(output);

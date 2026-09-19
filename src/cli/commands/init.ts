@@ -58,6 +58,24 @@ import {
   buildClackCompliancePrompts,
 } from './compliance-prompts.js';
 import {
+  applyTrackerSentinel,
+  parseTrackerId,
+  rearmTrackerInference,
+  renameStaleTrackerConventions,
+  DEFAULT_TRACKER_PROVIDER,
+  type TrackerFeatureState,
+  type TrackerProvider,
+  type TrackerResult,
+  type TrackerTransition,
+} from '../../core/tracker.js';
+import {
+  formatTrackerSummary,
+  shouldRunTrackerStep,
+  runTrackerStep,
+  buildClackTrackerPrompts,
+  type TrackerStepMessage,
+} from './tracker-prompts.js';
+import {
   shouldRunAttributionStep,
   runAttributionStep,
   buildClackAttributionPrompts,
@@ -330,6 +348,190 @@ export function resolveComplianceInitState(
 export { formatComplianceSummary } from './compliance-prompts.js';
 
 /**
+ * Parse the --tracker CLI option into a tracker override.
+ *
+ * Pure function — no I/O, no side effects; extracted for testability.
+ *
+ * Returns:
+ *   {ok: true, value}  — override state derived from the option
+ *   {ok: false, error} — not a registry provider ID (caller handles exit)
+ *   undefined          — option was not supplied; no override
+ *
+ * There is no `--no-tracker` (decision D-E): `--tracker github` IS the off
+ * switch, because `provider:'github'` is the off position. Parsing is strict —
+ * reject, never repair — so `--tracker jira-cloud` exits rather than silently
+ * selecting jira.
+ */
+export function resolveTrackerInitState(
+  trackerOption: string | undefined,
+): { ok: true; value: TrackerFeatureState } | { ok: false; error: string } | undefined {
+  if (typeof trackerOption !== 'string') return undefined;
+  const parsed = parseTrackerId(trackerOption);
+  if (!parsed.ok) return { ok: false, error: parsed.error };
+  return { ok: true, value: { provider: parsed.value } };
+}
+
+/**
+ * The outcome line for a provider that arrived as `--tracker <id>`.
+ *
+ * D-TRACKER-CLI-SURFACE [PF-029]: the Advanced path prints no end-of-wizard
+ * summary, and `--tracker` suppresses the wizard step that would otherwise
+ * print one, so the CLI-override arm is the only place the selection can
+ * surface there. Without this line `devflow init --advanced --tracker jira`
+ * changes the machine-wide provider with nothing on screen — the same
+ * unreachable-step failure the wizard gate exists to prevent, arrived at from
+ * the flag side. Recommended already has its surface in the summary note's
+ * Tracker row; both paths or the step is invisible on one.
+ *
+ * Pure — the caller renders. The summary half is `formatTrackerSummary`, the one
+ * spelling every tracker surface shares.
+ */
+export function trackerOverrideMessage(provider: TrackerProvider): TrackerStepMessage {
+  return {
+    level: provider === DEFAULT_TRACKER_PROVIDER ? 'info' : 'success',
+    text: `Tracker: ${formatTrackerSummary(provider)}`,
+  };
+}
+
+/** A message produced by an init lifecycle step. Emitted by the caller, never logged here. */
+export interface InitLifecycleMessage {
+  level: 'info' | 'warn';
+  text: string;
+}
+
+/**
+ * Injectable I/O seam for `persistManifestThenConvergeTracker`.
+ *
+ * Mirrors the DI shape the wizard steps already use (`buildClackTrackerPrompts`):
+ * the real adapter is built by `buildTrackerLifecycleIO`, tests substitute a
+ * recorder. Each member is one of the four single-owner operations — the manifest
+ * writer plus the three tracker file-lifecycle owners in src/core/tracker.ts.
+ */
+export interface TrackerLifecycleIO {
+  writeManifest(devflowDir: string, data: ManifestData): Promise<void>;
+  renameStaleConventions(
+    devflowDir: string,
+    previous: TrackerProvider | undefined,
+    resolved: TrackerProvider,
+  ): Promise<TrackerTransition>;
+  rearmInference(devflowDir: string): Promise<TrackerResult<void>>;
+  applySentinel(devflowDir: string, provider: TrackerProvider): Promise<TrackerResult<void>>;
+}
+
+/** The real adapter — the ONE binding of each owner into the init lifecycle. */
+export function buildTrackerLifecycleIO(): TrackerLifecycleIO {
+  return {
+    writeManifest,
+    renameStaleConventions: renameStaleTrackerConventions,
+    rearmInference: rearmTrackerInference,
+    applySentinel: applyTrackerSentinel,
+  };
+}
+
+/** What `persistManifestThenConvergeTracker` did — reported, never thrown. */
+export interface ManifestTrackerOutcome {
+  /** The manifest reached disk. False means the tracker selection was not persisted. */
+  manifestWritten: boolean;
+  /** The three tracker artifacts were converged against the persisted provider. */
+  converged: boolean;
+  messages: InitLifecycleMessage[];
+}
+
+/**
+ * Persist the installation manifest, then converge the tracker artifacts against
+ * the provider that was actually persisted.
+ *
+ * D-TRACKER-CONVERGE: the manifest write and the three tracker file-lifecycle
+ * owners are ONE unit because their relative order is the invariant, not an
+ * implementation detail (PF-015). The manifest write is explicitly failable —
+ * init must not abort on it — so converging the sentinel, the attempt counter or
+ * the conventions file ahead of it leaves the artifacts disagreeing in both
+ * directions: github→jira writes a sentinel for a provider the manifest never
+ * records (a per-session fork cost forever), and jira→github removes the
+ * sentinel, renames tracker.md to .bak and leaves the manifest on jira (silent
+ * permanent degradation with no re-trigger). Writing first and gating the three
+ * owners on `manifestWritten` makes the artifacts converge all-or-none, and puts
+ * this call site in the same order as the sibling `devflow tracker --set`
+ * (src/cli/commands/tracker.ts): rename → persist → rearm → sentinel.
+ *
+ * The provider is read from `manifestData.features.tracker.provider` rather than
+ * taken as a separate argument, so there is exactly one binding and the artifacts
+ * cannot converge on a value other than the one on disk.
+ *
+ * `previousProvider` is the caller's REAL prior manifest value, never the
+ * --reset-gated seed: under --reset the resolved provider collapses to github
+ * while the prior provider is still jira/linear, and that IS a transition the
+ * stale-conventions rename has to fire on.
+ *
+ * Every step reports rather than aborts (PF-009's isolation posture): a
+ * feature-state change must never fail `devflow init`.
+ */
+export async function persistManifestThenConvergeTracker(opts: {
+  devflowDir: string;
+  manifestData: ManifestData;
+  previousProvider: TrackerProvider | undefined;
+  io: TrackerLifecycleIO;
+}): Promise<ManifestTrackerOutcome> {
+  const { devflowDir, manifestData, previousProvider, io } = opts;
+  const provider = manifestData.features.tracker.provider;
+  const messages: InitLifecycleMessage[] = [];
+
+  // The gate. Non-fatal for the install (which has already succeeded) but
+  // decisive for the tracker artifacts: an unpersisted selection converges none
+  // of them, so the on-disk state stays internally consistent and the next
+  // `devflow init` retries the whole transition from an unchanged starting point.
+  try {
+    await io.writeManifest(devflowDir, manifestData);
+  } catch (error) {
+    messages.push({
+      level: 'warn',
+      text: `Failed to write installation manifest (install succeeded): ${error instanceof Error ? error.message : error}`,
+    });
+    messages.push({
+      level: 'warn',
+      text: `Tracker selection (${provider}) was not persisted — the sentinel, attempt counter and ` +
+        `conventions file are unchanged. Re-run devflow init, or devflow tracker --set ${provider}.`,
+    });
+    return { manifestWritten: false, converged: false, messages };
+  }
+
+  // P3a-S15: move a now-stale conventions file aside (AC-3.20's writer arm).
+  //
+  // D-TRACKER-PARALLEL: the rename stays strictly ahead of the other two. It is
+  // the only step that reads the PREVIOUS provider and the only one that reports
+  // a transition, so keeping it first fixes the message order (the transition
+  // notice always precedes any owner warning) and keeps the sequence readable as
+  // "settle the old provider, then converge the new one". The two that follow
+  // touch disjoint files — the attempt counter and the presence sentinel —
+  // depend on nothing the other writes, and both report through TrackerResult
+  // instead of throwing (PF-014), so they run concurrently and their warnings
+  // are pushed in a fixed order regardless of which settles first.
+  const transition = await io.renameStaleConventions(devflowDir, previousProvider, provider);
+  if (transition.kind === 'renamed') {
+    messages.push({
+      level: 'info',
+      text: `Tracker provider changed — previous ${transition.previous} conventions moved to ` +
+        `${color.dim(transition.to)}`,
+    });
+  } else if (transition.kind === 'failed') {
+    messages.push({ level: 'warn', text: transition.error });
+  }
+
+  const [rearm, sentinel] = await Promise.all([
+    // [DR-22] The documented re-arm path: devflow init resets the attempt counter
+    // so a previously-capped inference gets another five tries.
+    io.rearmInference(devflowDir),
+    // [DR-10] Converge the presence sentinel: written for jira/linear, removed for
+    // github. This is what keeps the GitHub SessionStart path at one stat and zero forks.
+    io.applySentinel(devflowDir, provider),
+  ]);
+  if (!rearm.ok) messages.push({ level: 'warn', text: rearm.error });
+  if (!sentinel.ok) messages.push({ level: 'warn', text: sentinel.error });
+
+  return { manifestWritten: true, converged: true, messages };
+}
+
+/**
  * Options for the init command parsed by Commander.js
  */
 interface InitOptions {
@@ -351,6 +553,13 @@ interface InitOptions {
    * undefined → not passed; seed value used
    */
   compliance?: string | false;
+  /**
+   * Issue tracker provider ID (github | jira | linear), parsed by parseTrackerId.
+   * string    → --tracker <id> (select this provider, suppress the wizard prompt)
+   * undefined → not passed; seed value used
+   * There is no --no-tracker: --tracker github is the off switch (decision D-E).
+   */
+  tracker?: string;
   security?: SecurityMode;
   hudOnly?: boolean;
   recommended?: boolean;
@@ -379,6 +588,7 @@ export const initCommand = new Command('init')
   .option('--no-proxy', 'Disable external model routing')
   .option('--compliance <list>', 'Enable compliance with comma-separated framework IDs (e.g., gdpr,hipaa)')
   .option('--no-compliance', 'Disable compliance (artifacts removed; frameworks remembered for re-enable)')
+  .option('--tracker <id>', 'Issue tracker provider: github, jira, or linear')
   .option('--security <mode>', 'Security deny list location: user, managed, or none', /^(user|managed|none)$/i)
   .option('--hud-only', 'Install only the HUD (no plugins, hooks, or extras)')
   .option('--recommended', 'Apply recommended defaults after plugin selection (skip advanced prompts)')
@@ -479,6 +689,11 @@ export const initCommand = new Command('init')
             ambient: false, memory: false, hud: true, knowledge: false,
             learning: false, rules: false, flags: {}, proxy: false,
             compliance: existingHudManifest?.features.compliance ?? { enabled: false, frameworks: [] },
+            // Preserve the user's tracker selection: a HUD-only install must not
+            // silently reset a Jira/Linear user back to github. The fallback is
+            // the exported default, not a literal — the one constant every other
+            // module reads, so a moved default moves here too.
+            tracker: existingHudManifest?.features.tracker ?? { provider: DEFAULT_TRACKER_PROVIDER },
           },
           installedAt: now,
           updatedAt: now,
@@ -538,6 +753,21 @@ export const initCommand = new Command('init')
           process.exit(1);
         }
         cliComplianceOverride = complianceStateResult.value;
+      }
+    }
+
+    // Early validation: parse --tracker <id> at the boundary before any prompts.
+    // Strict — reject, never repair — so a typo'd provider exits here rather than
+    // installing mechanics for a tracker the user did not name.
+    let cliTrackerOverride: TrackerFeatureState | undefined;
+    {
+      const trackerStateResult = resolveTrackerInitState(options.tracker);
+      if (trackerStateResult !== undefined) {
+        if (!trackerStateResult.ok) {
+          p.log.error(trackerStateResult.error);
+          process.exit(1);
+        }
+        cliTrackerOverride = trackerStateResult.value;
       }
     }
 
@@ -726,6 +956,9 @@ export const initCommand = new Command('init')
     // CLI override applied below in both Recommended and Advanced paths.
     let complianceEnabled = seed.features.compliance.enabled;
     let complianceFrameworks = seed.features.compliance.frameworks;
+    // tracker: manifest-group (like proxy and compliance); seed from prior manifest.
+    // CLI override applied below in both Recommended and Advanced paths.
+    let trackerProvider: TrackerProvider = seed.features.tracker.provider;
     let enabledFlags: FlagsRecord = { ...seed.flags };
     // viewModeExplicit: true when --reset is passed; signals resolveFinalViewMode to let the
     // seed-time view-mode win over an externally-set value in settings.json.
@@ -740,6 +973,50 @@ export const initCommand = new Command('init')
     // The final value is written to the manifest and consumed by the dedicated security step.
     let securityMode: SecurityMode = 'user'; // placeholder; overwritten below by resolve
     let managedSettingsConfirmed = false;
+
+    /**
+     * Run the tracker wizard step for one wizard path.
+     *
+     * D-TRACKER-CALLSHAPE: both paths share one gate (shouldRunTrackerStep), one
+     * cancel idiom and one prompt adapter; they differ only in the mode they
+     * declare, the provider they seed from, and whether the step's own outcome
+     * line is emitted. Holding all three differences as parameters keeps the
+     * shared half single-sourced, so the paths cannot drift the way two
+     * hand-copied call sites do.
+     *
+     * Returns the chosen state, or undefined when the gate declined to run — the
+     * caller then owns the CLI-override fallback, which is the only other way the
+     * provider can change on that path.
+     */
+    const runTrackerStepAt = async (
+      mode: 'recommended' | 'advanced',
+      seedProvider: TrackerProvider,
+      emitMessages: boolean,
+    ): Promise<TrackerFeatureState | undefined> => {
+      if (!shouldRunTrackerStep({
+        mode,
+        modePromptShown,
+        isTTY: process.stdin.isTTY,
+        hasCliOverride: cliTrackerOverride !== undefined,
+      })) {
+        return undefined;
+      }
+      const trackerStep = await runTrackerStep({
+        seed: { provider: seedProvider },
+        prompts: buildClackTrackerPrompts(),
+      });
+      if (trackerStep.kind === 'cancelled') {
+        p.cancel('Installation cancelled.');
+        process.exit(0);
+      }
+      if (emitMessages) {
+        for (const msg of trackerStep.messages) {
+          if (msg.level === 'success') p.log.success(msg.text);
+          else p.log.info(msg.text);
+        }
+      }
+      return trackerStep.state;
+    };
 
     // Safe-delete detection (both paths need this)
     const platform = detectPlatform();
@@ -776,6 +1053,16 @@ export const initCommand = new Command('init')
         // prints the Compliance line from complianceSummary via formatComplianceSummary.
       }
 
+      // Tracker wizard step — same gate as compliance, so both wizard paths are
+      // governed by the one documented gate table (AC-3.6). Runs only when the
+      // Setup-mode prompt actually ran, so --recommended and !isTTY stay promptless.
+      // emitMessages=false: the Recommended summary note (below) prints the
+      // Tracker line via formatTrackerSummary, so the step's own outcome line
+      // would be a duplicate.
+      const wizardTracker = await runTrackerStepAt(
+        'recommended', seed.features.tracker.provider, false,
+      );
+
       // No attribution step here: the suppress-attribution question is Advanced-only (D27).
       // Recommended silently carries the seeded value in enabledFlags — fresh installs get
       // the registry default (off), re-inits get prior state. See shouldRunAttributionStep.
@@ -792,6 +1079,8 @@ export const initCommand = new Command('init')
         rules: options.rules,
         proxy: options.proxy,
         compliance: cliComplianceOverride ?? wizardCompliance,
+        // Precedence: cliOverride ?? wizardResult ?? seed (applyCliToggles supplies the seed arm).
+        tracker: cliTrackerOverride ?? wizardTracker,
       });
       ambientEnabled = effectiveFeatures.ambient;
       memoryEnabled = effectiveFeatures.memory;
@@ -802,6 +1091,7 @@ export const initCommand = new Command('init')
       proxyEnabled = effectiveFeatures.proxy;
       complianceEnabled = effectiveFeatures.compliance.enabled;
       complianceFrameworks = effectiveFeatures.compliance.frameworks;
+      trackerProvider = effectiveFeatures.tracker.provider;
       // enabledFlags is already initialised to seed.flags above.
 
       // Compute safe-delete block synchronously so we know whether to fetch installed version
@@ -840,6 +1130,10 @@ export const initCommand = new Command('init')
         `Knowledge bases: ${knowledgeEnabled ? 'enabled' : 'disabled'}`,
         `Ext model routing: ${proxyEnabled ? 'enabled' : 'disabled'}`,
         `Compliance:      ${complianceSummary}`,
+        // Recommended emits no per-step outcome lines, so this summary row is the
+        // tracker step's ONLY surface on this path — both surfaces or it is
+        // invisible on one path.
+        `Tracker:         ${formatTrackerSummary(trackerProvider)}`,
         `View mode:       ${readViewMode(enabledFlags)}`,
         `Claude Code flags: ${defaultFlagCount} configured`,
         `${claudeignoreEnabled ? '.claudeignore:   created' : ''}`,
@@ -1046,6 +1340,26 @@ export const initCommand = new Command('init')
       // No third case in practice: on this path the predicate only returns false for a
       // CLI override (isTTY is guaranteed true by the non-TTY guard above). If it ever
       // did, the seed values assigned at declaration stand — which is the right default.
+
+      // Tracker feature (after compliance, before attribution). Gated by the same
+      // shouldRunTrackerStep predicate as the Recommended path, so the documented
+      // gate table is the single authority for both and they cannot drift.
+      // This call site is the one that matters on RE-INIT: re-init is Advanced-only
+      // by construction, so a Recommended-only wiring would be dead there.
+      // emitMessages=true: Advanced has no end-of-wizard summary recap, so the
+      // step's outcome line is this path's ONLY surface — mandatory, not decorative.
+      const advancedTracker = await runTrackerStepAt('advanced', trackerProvider, true);
+      if (advancedTracker !== undefined) {
+        trackerProvider = advancedTracker.provider;
+      } else if (cliTrackerOverride !== undefined) {
+        // --tracker passed explicitly — honour without prompting, and say so.
+        // The gate declined the step, and this path has no summary recap, so
+        // this line is the selection's ONLY surface (D-TRACKER-CLI-SURFACE).
+        trackerProvider = cliTrackerOverride.provider;
+        const overrideLine = trackerOverrideMessage(trackerProvider);
+        if (overrideLine.level === 'success') p.log.success(overrideLine.text);
+        else p.log.info(overrideLine.text);
+      }
 
       // Attribution feature (after compliance, before flags). This is the ONLY call site —
       // the attribution question is Advanced-only (D27); the Recommended path never asks and
@@ -2101,14 +2415,30 @@ export const initCommand = new Command('init')
         // and Advanced wizard selection. convergeComplianceArtifacts was called above.
         // normalizeFrameworks: dedup + filter unknowns before persisting.
         compliance: { enabled: complianceEnabled, frameworks: normalizeFrameworks(complianceFrameworks) },
+        // Resolved tracker selection. Already a validated TrackerProvider — it came
+        // through parseTrackerId (CLI), the typed wizard select, or the seed, which
+        // itself came through normalizeTrackerFeature on read.
+        tracker: { provider: trackerProvider },
       },
       installedAt: existingManifest?.installedAt ?? now,
       updatedAt: now,
     };
-    try {
-      await writeManifest(devflowDir, manifestData);
-    } catch (error) {
-      p.log.warn(`Failed to write installation manifest (install succeeded): ${error instanceof Error ? error.message : error}`);
+    // ── Manifest write + tracker selection lifecycle (the ONE call site) ──────
+    // persistManifestThenConvergeTracker owns the ordering invariant: the three
+    // tracker file-lifecycle owners in src/core/tracker.ts converge only against
+    // a provider the manifest actually persisted (D-TRACKER-CONVERGE, PF-015).
+    const trackerLifecycle = await persistManifestThenConvergeTracker({
+      devflowDir,
+      manifestData,
+      // The REAL manifest, not the --reset-gated seed: under --reset the resolved
+      // provider collapses to github while the prior provider is still jira/linear,
+      // and that IS a transition the stale-file rename has to fire on.
+      previousProvider: existingManifest?.features.tracker.provider,
+      io: buildTrackerLifecycleIO(),
+    });
+    for (const msg of trackerLifecycle.messages) {
+      if (msg.level === 'warn') p.log.warn(msg.text);
+      else p.log.info(msg.text);
     }
 
     // External model routing status line (Advanced path / explicit --proxy flag only)

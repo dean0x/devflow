@@ -102,10 +102,25 @@ export const TRACKER_PARTIAL_ADOPTERS = [
 export const MDS_GENERATOR_HOSTS = ['git'] as const;
 
 /**
- * Reference modules: .mds sources under src/assets/mds/ that fan out into MANY
- * output files instead of one. Two today:
+ * Reference modules: .mds sources under src/assets/mds/ that the build COMPILES,
+ * each fanning out into MANY output files instead of one. Five today:
  *   src/assets/mds/tracker/_github.mds  → dist/skills/git/references/tracker/github/*.md
- *     (kind 'fanout' — one file per entry of TRACKER_GITHUB_OPS)
+ *     (kind 'fanout' — one file per entry of TRACKER_OPS)
+ *   src/assets/mds/tracker/_jira.mds    → dist/skills/git/references/tracker/jira/*.md
+ *     (kind 'fanout' — the same TRACKER_OPS roster, which is what makes file-set
+ *      parity across providers a compile-time property)
+ *   src/assets/mds/tracker/_linear.mds  → dist/skills/git/references/tracker/linear/*.md
+ *     (kind 'fanout' — the same roster again; three providers is where the parity
+ *      scan stops being vacuous, §8.11)
+ *   src/assets/mds/tracker/_mcp.mds     → dist/skills/git/references/tracker/_mcp.md
+ *     (kind 'contract' — GENERATION IS GATED on a provider that reaches its
+ *      tracker through a tool call being registered. Such a provider is
+ *      registered, so the gate is open and this module compiles like any other.
+ *      The gate and its roster live in src/core/mds-variants.ts, not here:
+ *      MCP_CONTRACT_MODULE / mcpContractIsGenerated decide whether it compiles,
+ *      GATED_REFERENCE_MODULE_SOURCES is the roster of modules the gate can hold
+ *      back, and deferredReferenceModuleSources() is the subset it holds back for
+ *      a given registry.)
  *   src/assets/mds/git/_references.mds  → dist/skills/git/references/*.md
  *     (kind 'named' — the cross-cutting documents, GIT_CROSS_CUTTING_DOCS)
  *
@@ -117,11 +132,14 @@ export const MDS_GENERATOR_HOSTS = ['git'] as const;
  * rather than one set with an exception.
  *
  * The emitted file set itself is not restated here: it is derived from
- * TRACKER_GITHUB_OPS / GIT_CROSS_CUTTING_DOCS in src/core/mds-variants.ts, so there
- * is one roster, not a production copy and a test copy that can drift.
+ * TRACKER_OPS / GIT_CROSS_CUTTING_DOCS in src/core/mds-variants.ts, so there is
+ * one roster, not a production copy and a test copy that can drift.
  */
 export const MDS_REFERENCE_MODULES = [
   'src/assets/mds/tracker/_github.mds',
+  'src/assets/mds/tracker/_jira.mds',
+  'src/assets/mds/tracker/_linear.mds',
+  'src/assets/mds/tracker/_mcp.mds',
   'src/assets/mds/git/_references.mds',
 ] as const;
 

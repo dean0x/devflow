@@ -1,0 +1,720 @@
+/**
+ * Tests for src/core/tracker.ts
+ *
+ * Covers:
+ *   - TRACKER_PROVIDERS registry shape (+ the "MCP stays out of user-facing text" bound)
+ *   - parseTrackerId: strict boundary parser — REJECT, NEVER REPAIR (hostile table)
+ *   - normalizeTrackerFeature: tolerant sink normaliser (ADR-014 self-heal)
+ *   - trackerAttemptsPath / trackerEnabledSentinelPath / trackerConventionsPath
+ *   - rearmTrackerInference: idempotent-when-absent / removes-when-present / never throws [DR-22]
+ *   - applyTrackerSentinel: written when provider != github, removed when it is [DR-10]
+ *   - renameStaleTrackerConventions: the provider-change transition (P3a-S15 / AC-3.20)
+ *   - the reported-failure arm of all three lifecycle owners, each driven by a
+ *     deterministic obstruction, so the warn-never-abort posture (PF-009) is
+ *     exercised rather than asserted about
+ *   - TRACKER_CONVENTIONS_BACKUP_NAMES: every backup the rename can write, so uninstall
+ *     can classify the whole set as user content (OD-15)
+ *   - TRACKER_PROVIDER_KEY_PATH: the shared TS<->shell manifest key path constant
+ *   - TRACKER_ATTEMPTS_MAX: the inference cap, cross-pinned against the hook literal
+ *
+ * Per PF-018: every table asserts its own row count so a payload deleted from the
+ * table (or a registry that shrinks to nothing) fails RED instead of passing vacuously.
+ * Per PF-014: no helper throws — every fallible path returns a Result.
+ * Per PF-060: every filesystem case runs under its own mkdtemp root; no test reads
+ * or writes the developer's real $HOME or ~/.devflow.
+ */
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { promises as fs } from 'fs';
+import * as os from 'os';
+import * as path from 'path';
+import { fileURLToPath } from 'url';
+
+import {
+  TRACKER_PROVIDERS,
+  TRACKER_PROVIDER_IDS,
+  TRACKER_PROVIDER_KEY_PATH,
+  DEFAULT_TRACKER_PROVIDER,
+  TRACKER_CONVENTIONS_FILE,
+  TRACKER_ATTEMPTS_FILE,
+  TRACKER_ENABLED_FILE,
+  TRACKER_CLAIM_FILE,
+  TRACKER_STAGED_PREFIX,
+  TRACKER_ATTEMPTS_MAX,
+  TRACKER_CONVENTIONS_BACKUP_NAMES,
+  parseTrackerId,
+  isTrackerProvider,
+  normalizeTrackerFeature,
+  describeTrackerValue,
+  trackerConventionsPath,
+  trackerAttemptsPath,
+  trackerEnabledSentinelPath,
+  trackerConventionsBackupName,
+  trackerConventionsBackupPath,
+  rearmTrackerInference,
+  applyTrackerSentinel,
+  renameStaleTrackerConventions,
+  type TrackerProvider,
+} from '../../src/core/tracker.js';
+import { readManifest } from '../../src/core/manifest.js';
+
+const REPO_ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
+
+/** The module under test, as source — read by the single-authority guard below. */
+const MODULE_SOURCE = path.join(REPO_ROOT, 'src', 'core', 'tracker.ts');
+
+/** The Tracker agent's prompt — the second spelling of the staging prefix (PF-013). */
+const TRACKER_AGENT_SOURCE = path.join(REPO_ROOT, 'src', 'assets', 'agents', 'tracker.md');
+
+// ── Registry ──────────────────────────────────────────────────────────────────
+
+describe('TRACKER_PROVIDERS registry', () => {
+  it('holds exactly the three Phase-3 providers, github first', () => {
+    expect(TRACKER_PROVIDERS.map(p => p.id)).toEqual(['github', 'jira', 'linear']);
+    expect(TRACKER_PROVIDER_IDS).toEqual(['github', 'jira', 'linear']);
+  });
+
+  it('every entry carries a non-empty id, label and hint', () => {
+    expect(TRACKER_PROVIDERS.length).toBe(3);
+    for (const provider of TRACKER_PROVIDERS) {
+      expect(provider.id.length).toBeGreaterThan(0);
+      expect(provider.label.length).toBeGreaterThan(0);
+      expect(provider.hint.length).toBeGreaterThan(0);
+    }
+  });
+
+  it('no user-facing hint or label mentions MCP (standing prohibition)', () => {
+    // "MCP stays out of user-facing text" so transport never leaks into it.
+    // Labels and hints are rendered in the init wizard note and the select prompt.
+    for (const provider of TRACKER_PROVIDERS) {
+      expect(`${provider.label} ${provider.hint}`).not.toMatch(/MCP/i);
+    }
+  });
+
+  it('DEFAULT_TRACKER_PROVIDER is github and is a registry id', () => {
+    expect(DEFAULT_TRACKER_PROVIDER).toBe('github');
+    expect(TRACKER_PROVIDER_IDS).toContain(DEFAULT_TRACKER_PROVIDER);
+  });
+
+  it('the artifact basenames are the literals the hook and uninstall agree on', () => {
+    expect(TRACKER_CONVENTIONS_FILE).toBe('tracker.md');
+    expect(TRACKER_ATTEMPTS_FILE).toBe('.tracker.attempts');
+    expect(TRACKER_ENABLED_FILE).toBe('.tracker.enabled');
+    expect(TRACKER_CLAIM_FILE).toBe('.tracker.processing');
+    expect(TRACKER_STAGED_PREFIX).toBe('.tracker-staged.');
+  });
+
+  it('the staged prefix is the one the Tracker agent stages under (PF-013)', async () => {
+    // The agent's prompt cannot import from here, so the mktemp template is a
+    // second spelling; an uninstall sweep keyed to a prefix the agent no longer
+    // uses walks past every orphaned stage while reporting ~/.devflow swept.
+    const agent = await fs.readFile(TRACKER_AGENT_SOURCE, 'utf-8');
+    expect(agent).toContain(`${TRACKER_STAGED_PREFIX}XXXXXX`);
+    // Non-vacuity: the match is exact-literal, so a neighbouring template must
+    // not satisfy it.
+    expect(agent).not.toContain(`${TRACKER_STAGED_PREFIX}XXXXXXX`);
+  });
+});
+
+// ── The registry is the ONE authority on the provider domain (PF-049) ─────────
+//
+// `TrackerProvider` is a projection of TRACKER_PROVIDERS, so the type domain and
+// the runtime domain are the same set by construction. Nothing at RUNTIME can
+// tell a derived union from a hand-listed one — both produce identical values —
+// so the guard is over the DECLARATIONS, each collector carrying a known-bad
+// probe so it cannot pass vacuously (PF-018).
+
+/**
+ * Named collector: the right-hand side of the exported `TrackerProvider` alias.
+ *
+ * Scoped to the declaration rather than to the file, so "the word `typeof`
+ * appears somewhere in tracker.ts" can never satisfy the assertion below.
+ * `null` when the alias is absent — reported, never silently passed.
+ */
+function providerAliasBody(source: string): string | null {
+  const marker = 'export type TrackerProvider =';
+  const start = source.indexOf(marker);
+  if (start === -1) return null;
+  const end = source.indexOf(';', start + marker.length);
+  if (end === -1) return null;
+  return source.slice(start + marker.length, end).trim();
+}
+
+/**
+ * Named collector: the registry declaration, from `export const TRACKER_PROVIDERS`
+ * through the `;` that closes it. The rows carry no `;`, so the first `;\n` after
+ * the marker is the terminator. `null` when the declaration is absent.
+ */
+function registryDeclaration(source: string): string | null {
+  const marker = 'export const TRACKER_PROVIDERS';
+  const start = source.indexOf(marker);
+  if (start === -1) return null;
+  const end = source.indexOf(';\n', start);
+  if (end === -1) return null;
+  return source.slice(start, end + 1);
+}
+
+describe('the provider domain is derived from the registry (PF-049)', () => {
+  let source: string;
+
+  beforeEach(async () => {
+    source = await fs.readFile(MODULE_SOURCE, 'utf-8');
+  });
+
+  it('declares TrackerProvider as a projection of TRACKER_PROVIDERS, never a hand-listed union', () => {
+    const body = providerAliasBody(source);
+    expect(body).not.toBeNull();
+    expect(body).toContain('typeof TRACKER_PROVIDERS');
+    // A literal here would be a second hand-maintained authority: `'asana'` added
+    // to the union alone typechecks at every consumer while parseTrackerId rejects
+    // it and providerChoices() never offers it.
+    for (const id of TRACKER_PROVIDER_IDS) {
+      expect(body, `the union must not spell ${id} by hand`).not.toContain(`'${id}'`);
+    }
+  });
+
+  it('pins the registry rows with `as const satisfies`, so the ids stay literal', () => {
+    const declaration = registryDeclaration(source);
+    expect(declaration).not.toBeNull();
+    // `satisfies` checks every row against the row shape; `as const` is what stops
+    // the ids widening to `string` and collapsing the derived domain.
+    expect(declaration).toContain('as const satisfies');
+    expect(declaration).toContain('TrackerProviderDefinition');
+  });
+
+  it('known-bad probe: both collectors report a hand-listed union and registry', () => {
+    // The two assertions above are evidence only while these collectors can fail.
+    const handListed =
+      "export type TrackerProvider = 'github' | 'jira' | 'linear';\n" +
+      'export const TRACKER_PROVIDERS: readonly TrackerProviderDefinition[] = [\n' +
+      "  { id: 'github', label: 'GitHub', hint: 'x' },\n" +
+      '];\n';
+    expect(providerAliasBody(handListed)).toBe("'github' | 'jira' | 'linear'");
+    expect(providerAliasBody(handListed)).not.toContain('typeof TRACKER_PROVIDERS');
+    expect(registryDeclaration(handListed)).not.toContain('as const satisfies');
+    // An absent declaration is reported, never passed off as "nothing to check".
+    expect(providerAliasBody('// no tracker types here')).toBeNull();
+    expect(registryDeclaration('// no tracker registry here')).toBeNull();
+  });
+});
+
+describe('isTrackerProvider (the one runtime membership test)', () => {
+  it('accepts every registry id', () => {
+    expect(TRACKER_PROVIDER_IDS.length).toBeGreaterThan(0);
+    for (const id of TRACKER_PROVIDER_IDS) {
+      expect(isTrackerProvider(id), `expected ${id} to be admitted`).toBe(true);
+    }
+  });
+
+  it('rejects every non-string and every value outside the registry', () => {
+    const REJECTED: Array<[label: string, value: unknown]> = [
+      ['undefined', undefined],
+      ['null', null],
+      ['a number', 3],
+      ['an object', {}],
+      ['an array holding a valid id', ['jira']],
+      ['an unknown id', 'asana'],
+      ['a suffixed variant', 'jira-cloud'],
+      ['an uppercase id', 'JIRA'],
+      ['a padded id', 'jira '],
+      ['the empty string', ''],
+    ];
+    expect(REJECTED.length).toBe(10);
+    for (const [label, value] of REJECTED) {
+      expect(isTrackerProvider(value), `expected ${label} to be rejected`).toBe(false);
+    }
+  });
+});
+
+// ── parseTrackerId — strict: REJECT, NEVER REPAIR ─────────────────────────────
+
+describe('parseTrackerId (strict boundary parser)', () => {
+  it('accepts each registry id exactly', () => {
+    for (const id of TRACKER_PROVIDER_IDS) {
+      const result = parseTrackerId(id);
+      expect(result.ok, `expected ${id} to parse`).toBe(true);
+      if (result.ok) expect(result.value).toBe(id);
+    }
+  });
+
+  // EC-59 / non-vacuity register row 21: the hostile payload table.
+  // Every row must be REJECTED — reject-never-repair. `jira-cloud` must NOT
+  // normalise to `jira`, `JIRA` must NOT case-fold, `jira ` must NOT trim.
+  const HOSTILE: Array<[label: string, payload: string]> = [
+    ['uppercase', 'JIRA'],
+    ['mixed case', 'GitHub'],
+    ['trailing space', 'jira '],
+    ['leading space', ' jira'],
+    ['bare space', ' '],
+    ['suffixed variant', 'jira-cloud'],
+    ['path traversal', '../../etc/passwd'],
+    ['path traversal through a valid id', 'github/../../rules/devflow'],
+    ['empty', ''],
+    ['200 chars', 'j'.repeat(200)],
+    ['backticked', '`id`'],
+    ['command substitution', '$(id)'],
+    ['newline injection', 'jira\nlinear'],
+  ];
+
+  it('rejects every hostile payload, naming the valid ids', () => {
+    // Non-vacuity: the table itself is pinned, so deleting a payload fails RED.
+    expect(HOSTILE.length).toBe(13);
+    for (const [label, payload] of HOSTILE) {
+      const result = parseTrackerId(payload);
+      expect(result.ok, `expected ${label} ("${payload}") to be rejected`).toBe(false);
+      if (!result.ok) {
+        for (const id of TRACKER_PROVIDER_IDS) {
+          expect(result.error).toContain(id);
+        }
+      }
+    }
+  });
+
+  it('reject-never-repair: jira-cloud errors instead of normalising to jira', () => {
+    const result = parseTrackerId('jira-cloud');
+    expect(result.ok).toBe(false);
+    // Known-bad probe for the assertion itself: a repairing parser would have
+    // returned {ok:true, value:'jira'} here.
+    if (result.ok) expect(result.value).not.toBe('jira');
+  });
+
+  it('the error quotes the offending value', () => {
+    const result = parseTrackerId('jira-cloud');
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error).toContain('jira-cloud');
+  });
+
+  it('the echoed value is bounded and control-character free', () => {
+    const hostile = `[31mjira${'x'.repeat(500)}`;
+    const result = parseTrackerId(hostile);
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error).not.toContain('');
+      expect(result.error).not.toContain('');
+      // The 500-char payload must not be echoed in full.
+      expect(result.error.length).toBeLessThan(200);
+    }
+  });
+});
+
+/**
+ * A UTF-16 string is well formed when every surrogate is one half of a pair.
+ * Truncating by code UNIT can leave the other half behind, and a lone surrogate
+ * is mojibake at every sink the value is echoed to.
+ */
+function hasLoneSurrogate(value: string): boolean {
+  return /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/.test(value);
+}
+
+describe('describeTrackerValue', () => {
+  it('replaces control characters and truncates long values', () => {
+    expect(describeTrackerValue('jira[0m')).not.toContain('');
+    expect(describeTrackerValue('a'.repeat(120)).length).toBeLessThanOrEqual(41);
+  });
+
+  it('passes a well-formed id through unchanged', () => {
+    expect(describeTrackerValue('jira')).toBe('jira');
+  });
+
+  it('truncates by code point, so an astral character is never cut in half', () => {
+    // Known-bad probe for the detector itself: it must call a bare high surrogate
+    // broken and a whole pair fine, or the assertion below passes vacuously.
+    expect(hasLoneSurrogate('\uD83D')).toBe(true);
+    expect(hasLoneSurrogate('\uD83D\uDE00')).toBe(false);
+
+    // 39 BMP characters put the 40th UTF-16 code unit inside the first pair.
+    const rendered = describeTrackerValue(`${'x'.repeat(39)}${'\u{1F600}'.repeat(5)}`);
+    expect(hasLoneSurrogate(rendered)).toBe(false);
+  });
+
+  it('bounds an all-astral value at 40 code points plus the ellipsis', () => {
+    const rendered = describeTrackerValue('\u{1F600}'.repeat(60));
+    expect(hasLoneSurrogate(rendered)).toBe(false);
+    expect([...rendered]).toHaveLength(41);
+  });
+
+  // ── the never-throws contract, at the sink that has to honour it (PF-014) ───
+  //
+  // The module header promises nothing here throws. This is the display sink
+  // every rejected value passes through, and `raw.replace` on a non-string makes
+  // that promise false one deleted caller-side guard away.
+
+  it('never throws on a value the type says cannot reach it', () => {
+    const NON_STRINGS: Array<[label: string, value: unknown]> = [
+      ['undefined', undefined],
+      ['null', null],
+      ['a number', 7],
+      ['a boolean', false],
+      ['an object', {}],
+      ['an array', ['jira']],
+      ['a symbol', Symbol('jira')],
+      ['a null-prototype object', Object.create(null)],
+      ['an object whose toString throws', { toString() { throw new Error('boom'); } }],
+    ];
+    expect(NON_STRINGS.length).toBe(9);
+    for (const [label, value] of NON_STRINGS) {
+      expect(() => describeTrackerValue(value), `${label} must not throw`).not.toThrow();
+    }
+  });
+
+  it('renders a non-string by its type, never by asking the value what it is', () => {
+    // Naming the type keeps the render total: `String(raw)` would hand control to
+    // a caller-supplied toString, which is both a throw path and an echo path.
+    expect(describeTrackerValue(undefined)).toBe('<undefined>');
+    expect(describeTrackerValue(null)).toBe('<null>');
+    expect(describeTrackerValue(7)).toBe('<number>');
+    expect(describeTrackerValue({ toString: () => '[31mowned' })).toBe('<object>');
+  });
+
+  it('parseTrackerId reports a non-string instead of throwing', () => {
+    // The caller-side guard this depends on is one edit from being gone; the
+    // parser's own contract is that it always returns a Result.
+    const result = parseTrackerId(undefined as unknown as string);
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error).toContain('<undefined>');
+  });
+});
+
+// ── normalizeTrackerFeature — tolerant sink (ADR-014 self-heal) ───────────────
+
+describe('normalizeTrackerFeature (tolerant sink normaliser)', () => {
+  const MALFORMED: Array<[label: string, raw: unknown]> = [
+    ['absent', undefined],
+    ['null', null],
+    ['a bare string (the shape AC-3.21 names)', 'jira'],
+    ['a number', 7],
+    ['an array', ['jira']],
+    ['an object with no provider', {}],
+    ['an object with a null provider', { provider: null }],
+    ['an object with a numeric provider', { provider: 3 }],
+    ['an object with an unknown provider', { provider: 'jira-cloud' }],
+    ['an object with an uppercase provider', { provider: 'JIRA' }],
+    ['an object with a traversal provider', { provider: '../../etc/passwd' }],
+  ];
+
+  it('self-heals every malformed shape to {provider:"github"}', () => {
+    expect(MALFORMED.length).toBe(11);
+    for (const [label, raw] of MALFORMED) {
+      expect(normalizeTrackerFeature(raw), `expected ${label} to self-heal`).toEqual({ provider: 'github' });
+    }
+  });
+
+  it('preserves each valid provider', () => {
+    for (const id of TRACKER_PROVIDER_IDS) {
+      expect(normalizeTrackerFeature({ provider: id })).toEqual({ provider: id });
+    }
+  });
+
+  it('drops unknown sibling keys rather than carrying them through', () => {
+    expect(normalizeTrackerFeature({ provider: 'jira', enabled: true })).toEqual({ provider: 'jira' });
+  });
+
+  it('never aliases its input object', () => {
+    const raw = { provider: 'jira' };
+    const normalized = normalizeTrackerFeature(raw);
+    expect(normalized).not.toBe(raw);
+  });
+});
+
+// ── Path derivation + lifecycle helpers ───────────────────────────────────────
+
+describe('tracker file lifecycle', () => {
+  let devflowDir: string;
+
+  beforeEach(async () => {
+    // PF-060: a mkdtemp root, never the developer's real ~/.devflow.
+    devflowDir = await fs.mkdtemp(path.join(os.tmpdir(), 'devflow-core-tracker-'));
+  });
+
+  afterEach(async () => {
+    await fs.rm(devflowDir, { recursive: true, force: true });
+  });
+
+  it('derives every path from the devflow dir and the shared basenames', () => {
+    expect(trackerConventionsPath(devflowDir)).toBe(path.join(devflowDir, 'tracker.md'));
+    expect(trackerAttemptsPath(devflowDir)).toBe(path.join(devflowDir, '.tracker.attempts'));
+    expect(trackerEnabledSentinelPath(devflowDir)).toBe(path.join(devflowDir, '.tracker.enabled'));
+  });
+
+  // ── rearmTrackerInference [DR-22] ──────────────────────────────────────────
+
+  it('rearmTrackerInference removes the attempt counter when present', async () => {
+    const counter = trackerAttemptsPath(devflowDir);
+    await fs.writeFile(counter, '3\n', 'utf-8');
+
+    const result = await rearmTrackerInference(devflowDir);
+
+    expect(result.ok).toBe(true);
+    await expect(fs.access(counter)).rejects.toThrow();
+  });
+
+  it('rearmTrackerInference is idempotent when the counter is absent', async () => {
+    const first = await rearmTrackerInference(devflowDir);
+    const second = await rearmTrackerInference(devflowDir);
+    expect(first.ok).toBe(true);
+    expect(second.ok).toBe(true);
+  });
+
+  it('rearmTrackerInference never throws when the devflow dir does not exist', async () => {
+    const missing = path.join(devflowDir, 'does', 'not', 'exist');
+    const result = await rearmTrackerInference(missing);
+    expect(result.ok).toBe(true);
+  });
+
+  it('rearmTrackerInference reports a removal it cannot make, and never throws', async () => {
+    // The failure arm, driven rather than asserted about: `force` swallows an
+    // absent file but not a DIRECTORY sitting where the counter file belongs, so
+    // the rm rejects. Without this the whole warn-never-abort posture (PF-009) is
+    // untested for this owner.
+    await fs.mkdir(trackerAttemptsPath(devflowDir));
+
+    const result = await rearmTrackerInference(devflowDir);
+
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error).toContain('attempt counter');
+    // The obstruction is reported, never removed behind the user's back.
+    await expect(fs.access(trackerAttemptsPath(devflowDir))).resolves.toBeUndefined();
+  });
+
+  // ── applyTrackerSentinel [DR-10] ───────────────────────────────────────────
+
+  it('applyTrackerSentinel writes a zero-byte sentinel for a non-github provider', async () => {
+    for (const provider of ['jira', 'linear'] as TrackerProvider[]) {
+      await fs.rm(trackerEnabledSentinelPath(devflowDir), { force: true });
+      const result = await applyTrackerSentinel(devflowDir, provider);
+      expect(result.ok, `expected the sentinel write to succeed for ${provider}`).toBe(true);
+      const stat = await fs.stat(trackerEnabledSentinelPath(devflowDir));
+      expect(stat.size).toBe(0);
+    }
+  });
+
+  it('applyTrackerSentinel removes the sentinel for github', async () => {
+    await fs.writeFile(trackerEnabledSentinelPath(devflowDir), '', 'utf-8');
+
+    const result = await applyTrackerSentinel(devflowDir, 'github');
+
+    expect(result.ok).toBe(true);
+    await expect(fs.access(trackerEnabledSentinelPath(devflowDir))).rejects.toThrow();
+  });
+
+  it('applyTrackerSentinel is idempotent in both directions', async () => {
+    expect((await applyTrackerSentinel(devflowDir, 'github')).ok).toBe(true);
+    expect((await applyTrackerSentinel(devflowDir, 'jira')).ok).toBe(true);
+    expect((await applyTrackerSentinel(devflowDir, 'jira')).ok).toBe(true);
+    await expect(fs.access(trackerEnabledSentinelPath(devflowDir))).resolves.toBeUndefined();
+    expect((await applyTrackerSentinel(devflowDir, 'github')).ok).toBe(true);
+    await expect(fs.access(trackerEnabledSentinelPath(devflowDir))).rejects.toThrow();
+  });
+
+  it('applyTrackerSentinel creates the devflow dir when it is absent', async () => {
+    const fresh = path.join(devflowDir, 'nested');
+    const result = await applyTrackerSentinel(fresh, 'jira');
+    expect(result.ok).toBe(true);
+    await expect(fs.access(path.join(fresh, '.tracker.enabled'))).resolves.toBeUndefined();
+  });
+
+  it('applyTrackerSentinel reports a sentinel it cannot write, and never throws', async () => {
+    // The failure arm, driven rather than asserted about: a devflow dir whose
+    // parent is a FILE cannot be created (ENOTDIR), so the write rejects. Without
+    // this the warn-never-abort posture (PF-009) is untested for this owner.
+    const blocker = path.join(devflowDir, 'not-a-dir');
+    await fs.writeFile(blocker, '', 'utf-8');
+
+    const result = await applyTrackerSentinel(path.join(blocker, 'devflow'), 'jira');
+
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error).toContain('tracker sentinel');
+    // Non-vacuity: the same call against a writable dir succeeds, so the failure
+    // above is the blocked parent and not a helper that never writes anything.
+    expect((await applyTrackerSentinel(devflowDir, 'jira')).ok).toBe(true);
+  });
+
+  // ── renameStaleTrackerConventions (P3a-S15 / AC-3.20) ──────────────────────
+
+  it('renames a stale tracker.md to tracker.md.{old}.bak on a provider change', async () => {
+    await fs.writeFile(trackerConventionsPath(devflowDir), '---\nprovider: jira\n---\n', 'utf-8');
+
+    const transition = await renameStaleTrackerConventions(devflowDir, 'jira', 'github');
+
+    expect(transition.kind).toBe('renamed');
+    if (transition.kind !== 'renamed') return;
+    expect(transition.to).toBe(path.join(devflowDir, 'tracker.md.jira.bak'));
+    // Deterministic asserted end-state: the backup is present, tracker.md is gone,
+    // so the next session re-arms inference instead of trusting a stale file.
+    await expect(fs.access(transition.to)).resolves.toBeUndefined();
+    await expect(fs.access(trackerConventionsPath(devflowDir))).rejects.toThrow();
+  });
+
+  it('does nothing when the provider is unchanged', async () => {
+    await fs.writeFile(trackerConventionsPath(devflowDir), 'stale', 'utf-8');
+
+    const transition = await renameStaleTrackerConventions(devflowDir, 'jira', 'jira');
+
+    expect(transition.kind).toBe('none');
+    // The file must still be there — an unchanged provider is not a transition.
+    await expect(fs.access(trackerConventionsPath(devflowDir))).resolves.toBeUndefined();
+  });
+
+  it('does nothing on a fresh install with no prior provider', async () => {
+    const transition = await renameStaleTrackerConventions(devflowDir, undefined, 'jira');
+    expect(transition.kind).toBe('none');
+  });
+
+  it('does nothing when the provider changed but no tracker.md exists', async () => {
+    const transition = await renameStaleTrackerConventions(devflowDir, 'github', 'jira');
+    expect(transition.kind).toBe('none');
+    await expect(fs.access(path.join(devflowDir, 'tracker.md.github.bak'))).rejects.toThrow();
+  });
+
+  it('reports nothing to move when the devflow dir does not exist', async () => {
+    // There is no conventions file under a directory that does not exist, so this
+    // is the "nothing to move aside" branch — asserted exactly, rather than as a
+    // disjunction over both branches that no outcome could falsify.
+    const missing = path.join(devflowDir, 'absent-dir');
+    const transition = await renameStaleTrackerConventions(missing, 'jira', 'github');
+    expect(transition.kind).toBe('none');
+  });
+
+  it('a second transition for the same provider keeps the first backup', async () => {
+    // OD-15: a .bak holds exactly what tracker.md held — the user's inferred site
+    // and project key, hand-correctable — which is why tracker.md is classified as
+    // user content on uninstall. jira->github->jira->github must therefore not
+    // replace the first copy with the second while init prints "moved aside".
+    const backup = trackerConventionsBackupPath(devflowDir, 'jira');
+    await fs.writeFile(trackerConventionsPath(devflowDir), 'first generation\n', 'utf-8');
+    expect((await renameStaleTrackerConventions(devflowDir, 'jira', 'github')).kind).toBe('renamed');
+    // PF-018: the first backup must really be on disk, or the survival asserted
+    // below is the state the temp dir started in.
+    await expect(fs.readFile(backup, 'utf-8')).resolves.toBe('first generation\n');
+
+    await fs.writeFile(trackerConventionsPath(devflowDir), 'second generation\n', 'utf-8');
+    const second = await renameStaleTrackerConventions(devflowDir, 'jira', 'github');
+
+    expect(second.kind).toBe('failed');
+    if (second.kind !== 'failed') return;
+    // Both files survive, and the message names the one that blocked the move so
+    // the user can act on it (PF-009: report, never abort).
+    await expect(fs.readFile(backup, 'utf-8')).resolves.toBe('first generation\n');
+    await expect(fs.readFile(trackerConventionsPath(devflowDir), 'utf-8'))
+      .resolves.toBe('second generation\n');
+    expect(second.error).toContain(backup);
+  });
+
+  it('refuses rather than overwrites whatever already occupies the backup path', async () => {
+    // EEXIST is the refusal, not "an earlier .bak specifically": anything sitting
+    // at the destination is something the move would have destroyed.
+    await fs.writeFile(trackerConventionsPath(devflowDir), 'live\n', 'utf-8');
+    await fs.mkdir(trackerConventionsBackupPath(devflowDir, 'jira'));
+
+    const transition = await renameStaleTrackerConventions(devflowDir, 'jira', 'linear');
+
+    expect(transition.kind).toBe('failed');
+    await expect(fs.readFile(trackerConventionsPath(devflowDir), 'utf-8')).resolves.toBe('live\n');
+  });
+
+  // ── TRACKER_CONVENTIONS_BACKUP_NAMES (the uninstall classification set, OD-15) ──
+
+  it('carries one backup basename per registry provider, in registry order', () => {
+    expect(TRACKER_CONVENTIONS_BACKUP_NAMES).toEqual(
+      TRACKER_PROVIDER_IDS.map(id => `${TRACKER_CONVENTIONS_FILE}.${id}.bak`),
+    );
+    // PF-018 non-vacuity: a registry that shrank to nothing would make the set
+    // empty and every containment assertion below pass without guarding anything.
+    expect(TRACKER_CONVENTIONS_BACKUP_NAMES.length).toBe(TRACKER_PROVIDER_IDS.length);
+    expect(TRACKER_CONVENTIONS_BACKUP_NAMES.length).toBeGreaterThan(0);
+  });
+
+  it('derives the backup path from the backup basename and the devflow dir', () => {
+    for (const id of TRACKER_PROVIDER_IDS) {
+      expect(trackerConventionsBackupPath(devflowDir, id))
+        .toBe(path.join(devflowDir, trackerConventionsBackupName(id)));
+    }
+  });
+
+  it('names every file the rename can actually write', async () => {
+    // The completeness cross-pin: uninstall classifies the NAMES, the rename
+    // creates the FILES. A drift between the two is a file holding the user's
+    // inferred site and project key that no uninstall list accounts for.
+    for (const previous of TRACKER_PROVIDER_IDS) {
+      await fs.writeFile(trackerConventionsPath(devflowDir), `provider: ${previous}\n`, 'utf-8');
+      const resolved: TrackerProvider = previous === 'github' ? 'jira' : 'github';
+
+      const transition = await renameStaleTrackerConventions(devflowDir, previous, resolved);
+
+      expect(transition.kind, `expected a rename for ${previous} -> ${resolved}`).toBe('renamed');
+      if (transition.kind !== 'renamed') continue;
+      expect(TRACKER_CONVENTIONS_BACKUP_NAMES).toContain(path.basename(transition.to));
+    }
+  });
+});
+
+// ── TS <-> shell manifest key-path parity (the shared constant) ────────────────
+
+describe('TRACKER_PROVIDER_KEY_PATH', () => {
+  let devflowDir: string;
+
+  beforeEach(async () => {
+    devflowDir = await fs.mkdtemp(path.join(os.tmpdir(), 'devflow-core-tracker-key-'));
+  });
+
+  afterEach(async () => {
+    await fs.rm(devflowDir, { recursive: true, force: true });
+  });
+
+  it('is the dotted manifest path both the TS reader and the shell reader use', () => {
+    expect(TRACKER_PROVIDER_KEY_PATH).toBe('features.tracker.provider');
+  });
+
+  it('walking the dotted path over a real manifest yields what readManifest yields', async () => {
+    const data = {
+      version: '2.0.0',
+      plugins: ['devflow-core-skills'],
+      scope: 'user',
+      features: {
+        ambient: true, memory: true, hud: false, knowledge: false, learning: false,
+        rules: true, flags: {}, proxy: false,
+        compliance: { enabled: false, frameworks: [] },
+        tracker: { provider: 'jira' },
+      },
+      installedAt: '2026-01-01T00:00:00.000Z',
+      updatedAt: '2026-01-01T00:00:00.000Z',
+    };
+    await fs.writeFile(path.join(devflowDir, 'manifest.json'), JSON.stringify(data), 'utf-8');
+
+    // The shell side (json_field_file) splits on '.' and walks — model that here so
+    // the constant cannot drift from the shape readManifest parses.
+    const walked = TRACKER_PROVIDER_KEY_PATH.split('.').reduce<unknown>(
+      (node, segment) => (node !== null && typeof node === 'object'
+        ? (node as Record<string, unknown>)[segment]
+        : undefined),
+      data,
+    );
+
+    const manifest = await readManifest(devflowDir);
+    expect(manifest).not.toBeNull();
+    expect(walked).toBe('jira');
+    expect(manifest!.features.tracker.provider).toBe(walked);
+  });
+});
+
+// -- TRACKER_ATTEMPTS_MAX -- the cap, shared with the SessionStart hook --------
+//
+// The hook is the enforcer and cannot import from here (PF-013), so the literal
+// exists twice; `devflow tracker --status` quotes the constant, and this pin is
+// what stops it quoting a number the hook no longer enforces.
+
+describe('TRACKER_ATTEMPTS_MAX', () => {
+  const HOOK_SOURCE = path.join(
+    path.dirname(fileURLToPath(import.meta.url)), '..', '..',
+    'src', 'assets', 'scripts', 'hooks', 'session-start-context',
+  );
+
+  it('is the cap the SessionStart hook enforces', async () => {
+    const hook = await fs.readFile(HOOK_SOURCE, 'utf-8');
+    expect(hook).toContain(`TRACKER_ATTEMPTS_MAX=${TRACKER_ATTEMPTS_MAX}`);
+    // Non-vacuity: the match above is exact-literal, so a neighbouring cap must
+    // not satisfy it.
+    expect(hook).not.toContain(`TRACKER_ATTEMPTS_MAX=${TRACKER_ATTEMPTS_MAX + 1}`);
+  });
+});

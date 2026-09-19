@@ -14,7 +14,7 @@
  * The question is ADVANCED-ONLY; Recommended never asks. See shouldRunAttributionStep.
  *
  * Shared DI seam (PromptOutcome, WizardPromptIO, clackNote, clackSelect) lives in
- * prompt-io.ts — one definition, both wizard modules import from there (ADR-019).
+ * prompt-io.ts — one definition, both wizard modules import from there.
  */
 
 import { clackNote, clackSelect, type PromptOutcome, type WizardPromptIO } from './prompt-io.js';

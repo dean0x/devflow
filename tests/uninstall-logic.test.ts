@@ -3,8 +3,9 @@ import { promises as fs } from 'fs';
 import { execFileSync } from 'child_process';
 import * as os from 'os';
 import * as path from 'path';
-import { computeAssetsToRemove, formatDryRunPlan, resolveSecurityRemovalDecision, enumerateUserDevFlowContent, resolveDevflowDirCleanup, resolveProjectDataCleanup, removeDevFlowInstallArtifacts, installArtifactPaths, enumerateDryRunExtras, removeAllDevFlow, removeSelectedPlugins, sweepDevflowNamespaces, isDevFlowInstalled, runDryRunPhase, runSelectivePhaseForScope, runFullPhaseForScope, runCleanupPhase } from '../src/cli/commands/uninstall.js';
+import { computeAssetsToRemove, formatDryRunPlan, resolveSecurityRemovalDecision, enumerateUserDevFlowContent, userContentPaths, resolveDevflowDirCleanup, resolveProjectDataCleanup, removeDevFlowInstallArtifacts, installArtifactPaths, resolveInstallArtifactPaths, enumerateDryRunExtras, removeAllDevFlow, removeSelectedPlugins, sweepDevflowNamespaces, isDevFlowInstalled, runDryRunPhase, runSelectivePhaseForScope, runFullPhaseForScope, runCleanupPhase } from '../src/cli/commands/uninstall.js';
 import { DEVFLOW_PLUGINS, getAllAgentNames, parsePluginSelection, type PluginDefinition } from '../src/core/plugins.js';
+import { TRACKER_CONVENTIONS_BACKUP_NAMES, TRACKER_STAGED_PREFIX } from '../src/core/tracker.js';
 import { modelCacheDir } from '../src/core/cache.js';
 import { LEGACY_SKILL_NAMES } from '../src/targets/claude-code/legacy.js';
 
@@ -416,6 +417,231 @@ describe('enumerateUserDevFlowContent (WS5)', () => {
     expect(result.some(s => s.includes('rule shadow'))).toBe(false);
     expect(result.some(s => s.includes('preference-profile.md'))).toBe(true);
     expect(result.some(s => s.includes('learning.json'))).toBe(true);
+  });
+
+  // === tracker classification (OD-15) ===
+
+  it('lists tracker.md — it is USER CONTENT, hand-editable and inferred once', async () => {
+    await fs.writeFile(path.join(tmpDir, 'tracker.md'), '---\nprovider: jira\n---\n', 'utf-8');
+
+    const result = await enumerateUserDevFlowContent(tmpDir);
+
+    expect(result).toHaveLength(1);
+    expect(result.some(s => s.includes('tracker.md'))).toBe(true);
+  });
+
+  it('does NOT list the tracker install artifacts (claim file, counter, sentinel)', async () => {
+    // @D8 disjointness: these three are removed by every artifacts-only pass, so
+    // naming them in the confirm prompt would make the prompt a lie.
+    await fs.writeFile(path.join(tmpDir, '.tracker.processing'), '', 'utf-8');
+    await fs.writeFile(path.join(tmpDir, '.tracker.attempts'), '2', 'utf-8');
+    await fs.writeFile(path.join(tmpDir, '.tracker.enabled'), '', 'utf-8');
+
+    const result = await enumerateUserDevFlowContent(tmpDir);
+
+    expect(result).toEqual([]);
+  });
+
+  it('lists a stale tracker.md.{provider}.bak — the backup is USER CONTENT too', async () => {
+    // renameStaleTrackerConventions writes this on every provider change and it
+    // holds what tracker.md held: the user's site and project key. Unlisted, it
+    // survives an uninstall that reports the directory swept, and the confirm
+    // prompt never names it.
+    await fs.writeFile(path.join(tmpDir, 'tracker.md.jira.bak'), '---\nprovider: jira\n---\n', 'utf-8');
+
+    const result = await enumerateUserDevFlowContent(tmpDir);
+
+    expect(result).toHaveLength(1);
+    expect(result[0]).toContain('tracker.md.jira.bak');
+  });
+
+  it('lists a backup for every provider in the registry', async () => {
+    // Registry-derived, not spelled out: a fourth provider is classified the
+    // moment it joins TRACKER_PROVIDERS, with no second edit to remember.
+    expect(TRACKER_CONVENTIONS_BACKUP_NAMES.length).toBeGreaterThan(0);
+    for (const name of TRACKER_CONVENTIONS_BACKUP_NAMES) {
+      await fs.writeFile(path.join(tmpDir, name), 'stale', 'utf-8');
+    }
+
+    const result = await enumerateUserDevFlowContent(tmpDir);
+
+    expect(result).toHaveLength(TRACKER_CONVENTIONS_BACKUP_NAMES.length);
+    for (const name of TRACKER_CONVENTIONS_BACKUP_NAMES) {
+      expect(result.some(s => s.includes(name)), `${name} must be enumerated as user content`).toBe(true);
+    }
+  });
+
+  // === the enumeration IS the table (what makes the @D8 intersection meaningful) ===
+
+  it('reports exactly one item per userContentPaths entry when all are present', async () => {
+    // The mechanical @D8 intersection below compares userContentPaths against
+    // installArtifactPaths. That only means anything while the table is what
+    // enumerateUserDevFlowContent actually walks — this is that link, asserted.
+    const table = userContentPaths(tmpDir);
+    expect(table.length).toBeGreaterThan(0);
+    for (const entry of table) {
+      const full = path.join(tmpDir, entry.relPath);
+      if (entry.isDir) {
+        await fs.mkdir(full, { recursive: true });
+        await fs.writeFile(path.join(full, 'seeded'), '', 'utf-8');
+      } else {
+        await fs.writeFile(full, '', 'utf-8');
+      }
+    }
+
+    const result = await enumerateUserDevFlowContent(tmpDir);
+
+    expect(result).toHaveLength(table.length);
+    expect(result).toEqual(table.map(e => e.label));
+  });
+});
+
+// ---------------------------------------------------------------------------
+// @D8 disjointness, asserted mechanically over the production lists
+// ---------------------------------------------------------------------------
+//
+// enumerateUserDevFlowContent names what the confirm prompt says it is about to
+// delete; removeDevFlowInstallArtifacts runs on the decline, cancel,
+// non-interactive AND --keep-docs paths. A name on both lists is deleted no
+// matter what the user answers, which makes the prompt a lie.
+//
+// Test 9f proves the BEHAVIOUR (every enumerated item survives an artifact pass)
+// from files seeded by hand. This pair proves the SETS, derived from the two
+// production functions, so an entry added to either list is covered the day it
+// lands without anyone remembering to seed a fixture (avoids PF-018).
+
+describe('@D8: userContentPaths and installArtifactPaths are disjoint', () => {
+  const intersect = (a: readonly string[], b: readonly string[]): string[] =>
+    a.filter(name => b.includes(name));
+
+  const underPrefix = (names: readonly string[], prefixes: readonly string[]): string[] =>
+    names.filter(name => prefixes.some(prefix => name.startsWith(prefix)));
+
+  it('shares no relative path between the two lists', () => {
+    const dir = '/tmp/devflow-d8-disjoint';
+    const userPaths = userContentPaths(dir).map(e => e.relPath);
+    const artifactPaths = installArtifactPaths(dir).map(e => e.relPath);
+
+    // Non-vacuity: two empty lists intersect to [] and would pass forever.
+    expect(userPaths.length).toBeGreaterThan(0);
+    expect(artifactPaths.length).toBeGreaterThan(0);
+
+    expect(intersect(userPaths, artifactPaths)).toEqual([]);
+  });
+
+  it('no user-content path falls under a prefix artifact', () => {
+    // A prefix entry sweeps every direct child that starts with it, so equality
+    // of the two name sets is no longer the whole invariant: a user-content name
+    // beginning with a prefix would be deleted by every artifacts-only pass
+    // without appearing in the intersection above.
+    const dir = '/tmp/devflow-d8-disjoint';
+    const userPaths = userContentPaths(dir).map(e => e.relPath);
+    const prefixes = installArtifactPaths(dir).filter(e => e.isPrefix === true).map(e => e.relPath);
+
+    // Non-vacuity: a list with no prefix entries would make this pass forever.
+    expect(prefixes.length).toBeGreaterThan(0);
+    expect(userPaths.length).toBeGreaterThan(0);
+
+    expect(underPrefix(userPaths, prefixes)).toEqual([]);
+  });
+
+  it('known-bad probe: both collectors report a real overlap', () => {
+    // The assertions above are only evidence while these helpers can fail.
+    expect(intersect(['tracker.md', 'hud.json'], ['migrations.json', 'hud.json'])).toEqual(['hud.json']);
+    expect(underPrefix(['tracker.md', 'tracker.md.jira.bak'], ['tracker.md.']))
+      .toEqual(['tracker.md.jira.bak']);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// resolveInstallArtifactPaths — the prefix family, resolved against real disk
+// ---------------------------------------------------------------------------
+//
+// The Tracker agent stages its scrubbed file as ~/.devflow/.tracker-staged.XXXXXX
+// and removes it from a trap on EXIT INT TERM. A SIGKILL outruns the trap, so a
+// stage can outlive its run; an artifacts-only sweep over exact paths walks past
+// it while reporting the directory swept.
+
+describe('resolveInstallArtifactPaths (the staged-file family)', () => {
+  let tmpDir: string;
+
+  beforeEach(async () => {
+    // PF-060: a mkdtemp root, never the developer's real ~/.devflow.
+    tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'devflow-staged-'));
+  });
+
+  afterEach(async () => {
+    await fs.rm(tmpDir, { recursive: true, force: true });
+  });
+
+  it('declares the staged prefix as a prefix entry, never as a literal filename', () => {
+    const entry = installArtifactPaths(tmpDir).find(e => e.relPath === TRACKER_STAGED_PREFIX);
+    expect(entry, 'the staged stage must be an install artifact').toBeDefined();
+    expect(entry?.isPrefix).toBe(true);
+    // A literal `.tracker-staged.` is a filename mktemp never produces; resolving
+    // it as one would sweep nothing while the list claimed coverage.
+    expect(entry?.isDir).toBeFalsy();
+  });
+
+  it('expands the prefix into every orphaned stage on disk, and nothing else', async () => {
+    await fs.writeFile(path.join(tmpDir, `${TRACKER_STAGED_PREFIX}Ab12Cd`), 'scrubbed', 'utf-8');
+    await fs.writeFile(path.join(tmpDir, `${TRACKER_STAGED_PREFIX}Zz99Yy`), 'scrubbed', 'utf-8');
+    await fs.writeFile(path.join(tmpDir, 'tracker.md'), 'user content', 'utf-8');
+
+    const resolved = (await resolveInstallArtifactPaths(tmpDir)).map(e => e.relPath);
+
+    expect(resolved).toContain(`${TRACKER_STAGED_PREFIX}Ab12Cd`);
+    expect(resolved).toContain(`${TRACKER_STAGED_PREFIX}Zz99Yy`);
+    // The unexpanded prefix must not survive into the path list.
+    expect(resolved).not.toContain(TRACKER_STAGED_PREFIX);
+    // Neighbouring user content is not swept in by the prefix.
+    expect(resolved).not.toContain('tracker.md');
+  });
+
+  it('passes the exact entries through unchanged when no stage is on disk', async () => {
+    const exact = installArtifactPaths(tmpDir).filter(e => e.isPrefix !== true).map(e => e.relPath);
+    expect(exact.length).toBeGreaterThan(0);
+
+    const resolved = (await resolveInstallArtifactPaths(tmpDir)).map(e => e.relPath);
+
+    expect(resolved).toEqual(exact);
+  });
+
+  it('yields the exact entries alone when the devflow dir does not exist', async () => {
+    const missing = path.join(tmpDir, 'absent');
+    const exact = installArtifactPaths(missing).filter(e => e.isPrefix !== true).map(e => e.relPath);
+
+    const resolved = (await resolveInstallArtifactPaths(missing)).map(e => e.relPath);
+
+    expect(resolved).toEqual(exact);
+  });
+
+  it('an artifacts-only removal takes an orphaned stage and leaves user content', async () => {
+    const orphan = path.join(tmpDir, `${TRACKER_STAGED_PREFIX}Kj03Lm`);
+    await fs.writeFile(orphan, 'scrubbed but never placed', 'utf-8');
+    await fs.writeFile(path.join(tmpDir, 'tracker.md'), '---\nprovider: jira\n---\n', 'utf-8');
+    // PF-018: both must be on disk before the pass, or their state afterwards is
+    // the state the temp dir started in.
+    await expect(fs.access(orphan)).resolves.toBeUndefined();
+
+    await removeDevFlowInstallArtifacts(tmpDir, false);
+
+    await expect(fs.access(orphan)).rejects.toThrow();
+    await expect(fs.readFile(path.join(tmpDir, 'tracker.md'), 'utf-8'))
+      .resolves.toBe('---\nprovider: jira\n---\n');
+  });
+
+  it('the dry-run preview names an orphaned stage it is about to remove', async () => {
+    const orphan = path.join(tmpDir, `${TRACKER_STAGED_PREFIX}Pq77Rs`);
+    await fs.writeFile(orphan, 'scrubbed', 'utf-8');
+    const claudeDir = path.join(tmpDir, 'claude-home');
+    await fs.mkdir(claudeDir, { recursive: true });
+
+    const extras = await enumerateDryRunExtras(claudeDir, tmpDir);
+
+    // The preview and the removal read one resolver, so a path removed without
+    // being previewed is not reachable.
+    expect(extras).toContain(orphan);
   });
 });
 
@@ -870,6 +1096,11 @@ describe('removeDevFlowInstallArtifacts — proxy artifact removal (TEST-4)', ()
     // agent-models.json is an install artifact (stale keys silently re-apply to
     // renamed/deleted agents on reinstall — AC-P1-F4), NOT user-authored content.
     await fs.writeFile(path.join(devflowDir, 'agent-models.json'), '{}', 'utf-8');
+    // The three tracker artifacts: the Tracker agent's claim file, its attempt
+    // counter, and the provider presence sentinel. All install artifacts.
+    await fs.writeFile(path.join(devflowDir, '.tracker.processing'), '', 'utf-8');
+    await fs.writeFile(path.join(devflowDir, '.tracker.attempts'), '2', 'utf-8');
+    await fs.writeFile(path.join(devflowDir, '.tracker.enabled'), '', 'utf-8');
 
     // ── User-authored files (must survive) ───────────────────────────────────
     await fs.mkdir(path.join(devflowDir, 'skills', 'my-skill'), { recursive: true });
@@ -879,13 +1110,21 @@ describe('removeDevFlowInstallArtifacts — proxy artifact removal (TEST-4)', ()
     await fs.writeFile(path.join(devflowDir, 'preference-profile.md'), '# Profile', 'utf-8');
     await fs.writeFile(path.join(devflowDir, 'learning.json'), '{}', 'utf-8');
     await fs.writeFile(path.join(devflowDir, 'hud.json'), '{}', 'utf-8');
+    // tracker.md is USER CONTENT (OD-15) — it must survive an artifacts-only pass,
+    // and so must the backup a provider change leaves beside it: same inferred
+    // content, same classification.
+    await fs.writeFile(path.join(devflowDir, 'tracker.md'), '---\nprovider: jira\n---\n', 'utf-8');
+    await fs.writeFile(path.join(devflowDir, 'tracker.md.jira.bak'), '---\nprovider: jira\n---\n', 'utf-8');
 
     await removeDevFlowInstallArtifacts(devflowDir, false);
 
     // ── Equality assertion: only user-authored entries may remain ─────────────
     const remaining = new Set(await fs.readdir(devflowDir));
     // Install artifacts must be gone (including agent-models.json — reclassified as artifact)
-    for (const artifact of ['manifest.json', 'migrations.json', 'proxy.json', 'logs', 'cache', 'costs', 'agent-models.json']) {
+    for (const artifact of [
+      'manifest.json', 'migrations.json', 'proxy.json', 'logs', 'cache', 'costs', 'agent-models.json',
+      '.tracker.processing', '.tracker.attempts', '.tracker.enabled',
+    ]) {
       expect(remaining.has(artifact), `install artifact "${artifact}" should be removed but was found in ${devflowDir}`).toBe(false);
     }
     // Exact equality: nothing but user-authored state remains, and every enumerated
@@ -900,6 +1139,8 @@ describe('removeDevFlowInstallArtifacts — proxy artifact removal (TEST-4)', ()
       'preference-profile.md',
       'learning.json',
       'hud.json',
+      'tracker.md',
+      'tracker.md.jira.bak',
     ]));
   });
 
@@ -921,12 +1162,22 @@ describe('removeDevFlowInstallArtifacts — proxy artifact removal (TEST-4)', ()
     // and it must NOT appear in the before/after enumeration.
     await fs.writeFile(path.join(devflowDir, 'agent-models.json'), '{}', 'utf-8');
     await fs.writeFile(path.join(devflowDir, 'hud.json'), '{}', 'utf-8');
+    // tracker.md and the backup a provider change leaves beside it are USER
+    // CONTENT (OD-15); the three .tracker.* files are install artifacts, present
+    // here to prove the artifact pass takes them and leaves the other two — the
+    // @D8 disjointness invariant at its newest boundary.
+    await fs.writeFile(path.join(devflowDir, 'tracker.md'), '---\nprovider: jira\n---\n', 'utf-8');
+    await fs.writeFile(path.join(devflowDir, 'tracker.md.jira.bak'), '---\nprovider: jira\n---\n', 'utf-8');
+    await fs.writeFile(path.join(devflowDir, '.tracker.processing'), '', 'utf-8');
+    await fs.writeFile(path.join(devflowDir, '.tracker.attempts'), '2', 'utf-8');
+    await fs.writeFile(path.join(devflowDir, '.tracker.enabled'), '', 'utf-8');
 
     const before = await enumerateUserDevFlowContent(devflowDir);
     // Non-vacuity: the enumeration found every USER-AUTHORED category on disk.
-    // Count is 5: skill shadows, rule shadows, preference-profile.md, learning.json, hud.json.
-    // agent-models.json is absent from the count — it is an artifact, not user content.
-    expect(before.length).toBe(5);
+    // Count is 7: skill shadows, rule shadows, preference-profile.md, learning.json,
+    // hud.json, tracker.md, tracker.md.jira.bak. agent-models.json and the three
+    // .tracker.* files are absent from the count — they are artifacts, not user content.
+    expect(before.length).toBe(7);
 
     await removeDevFlowInstallArtifacts(devflowDir, false);
 
@@ -968,6 +1219,18 @@ describe('installArtifactPaths (A4)', () => {
     const entry = entries.find(e => e.relPath === 'logs');
     expect(entry).toBeDefined();
     expect(entry?.isDir).toBe(true);
+  });
+
+  it('includes the three tracker artifacts, and NOT tracker.md itself', () => {
+    const entries = installArtifactPaths('/tmp/x');
+    for (const relPath of ['.tracker.processing', '.tracker.attempts', '.tracker.enabled']) {
+      const entry = entries.find(e => e.relPath === relPath);
+      expect(entry, `${relPath} must be an install artifact`).toBeDefined();
+      expect(entry?.isDir).toBeFalsy();
+    }
+    // tracker.md is USER CONTENT (OD-15) — an entry here would delete the user's
+    // inferred conventions on every decline/cancel/--keep-docs path.
+    expect(entries.find(e => e.relPath === 'tracker.md')).toBeUndefined();
   });
 
   it('includes costs as a directory artifact', () => {
