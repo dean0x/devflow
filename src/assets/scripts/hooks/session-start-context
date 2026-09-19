@@ -399,8 +399,8 @@ if [ -f "$TRACKER_SENTINEL" ] && [ ! -f "$TRACKER_CONVENTIONS" ]; then
     # hand-edited value carrying quotes or newlines would reach additionalContext
     # verbatim. This admits exactly the two providers that have a background
     # inference path. Reject, never repair — `jira-cloud` and `JIRA` are refused
-    # rather than normalised (§14.9 constraint 6), so neither spawns an agent for a
-    # tracker the user did not name.
+    # rather than normalised, so neither spawns an agent for a tracker the user did
+    # not name.
     #
     # The dotted key path is the same literal as TRACKER_PROVIDER_KEY_PATH in
     # src/core/tracker.ts and works on both json-parse backends: jq interpolates
@@ -451,7 +451,7 @@ if [ -f "$TRACKER_SENTINEL" ] && [ ! -f "$TRACKER_CONVENTIONS" ]; then
   }
 
   if tracker_gates_open; then
-    # Allowlisted the same way LEARNING_MODEL is (§14.9 constraint 7). The tier is
+    # Allowlisted the same way LEARNING_MODEL is. The tier is
     # a constant today — there is no tracker tuning config — so this `case` is an
     # assertion of the closed domain rather than a sanitiser, and it is the single
     # place the tier is validated, so a later config read cannot be wired in

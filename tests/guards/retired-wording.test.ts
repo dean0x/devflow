@@ -310,6 +310,38 @@ const RETIRED_LITERALS: ReadonlyArray<RetiredEntry> = [
   },
 
   // -------------------------------------------------------------------------
+  // Design-document section coordinates in the shell hooks.
+  //
+  // A `§14.9 constraint 6` in a hook's comment points into a planning artifact
+  // that is not in this repo. The hooks' comments are read by whoever has the
+  // shell open and a session misbehaving in front of them, which is the one
+  // audience that cannot follow the pointer — and the rule each coordinate
+  // annotated is stated in the same sentence, so only the pointer goes (ADR-003).
+  //
+  // A pattern rather than two literals: the members are not enumerable — the
+  // section numbering belongs to whichever document is current — and a fixed list
+  // would pass over exactly the coordinate it was added to stop.
+  //
+  // SCOPED to the hooks, deliberately and not as a convenience. `src/core/*.ts`
+  // and `redact-secrets.cjs` carry the same coordinates in JSDoc, where the
+  // audience is a maintainer reading the source with the repo checked out; that
+  // is a different argument with a different answer, and sweeping both under one
+  // entry would settle it by omission (applies ADR-025).
+  // -------------------------------------------------------------------------
+  {
+    literal: '§14.x design-document coordinates',
+    pattern: /§14\.[0-9]/,
+    removedFrom: 'src/assets/scripts/hooks/session-start-context (Section 3, gates 5 and the model allowlist)',
+    scope: ['src/assets/scripts/hooks/'],
+    justification:
+      'Two Section-3 comments annotated their rule with a section number from a design document ' +
+      'that does not ship. A hook comment is read during a live debugging session by someone who ' +
+      'has the script and not the artifact, so the coordinate is cost with no reader while the ' +
+      'rule it pointed at — reject never repair, and the closed model domain — is stated in the ' +
+      'same sentence. Scoped to the hook tree; the TypeScript JSDoc sites are a separate case.',
+  },
+
+  // -------------------------------------------------------------------------
   // The UNGATED github link line.
   //
   // This entry is a CLASSIFIER, not a spelling: the literal survives at exactly

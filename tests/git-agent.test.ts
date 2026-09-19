@@ -2332,3 +2332,101 @@ describe('git agent: the operation roster is unchanged (registry Guard 6)', () =
     expect(collectOperationNames(seeded)).toEqual(['setup-task', 'renamed-op']);
   });
 });
+
+// ---------------------------------------------------------------------------
+// The D9 resolve condition has ONE authority in the reference tree
+//
+// `references/github-api.md` carried its own statement of the gate — and it was
+// WRONG: it admitted FALSE_POSITIVE and BY_DESIGN as resolvable, where D9 says
+// those two are the thread author's call to close and devflow replies only. Two
+// statements of one rule is how one of them ends up saying the opposite, and the
+// reader who lands on the reference rather than the agent acts on the wrong one.
+//
+// The corpus is the REFERENCE tree — the documents the agent loads — not the
+// agent prompt itself. The Git agent is the authority: it states the gate as a
+// table, as a sentence, and as the step that applies it, and those three are one
+// document's internal business. What the tree must not do is repeat the
+// predicate, because a reference has no way to know when the agent's copy moves.
+// ---------------------------------------------------------------------------
+
+/**
+ * The predicate itself: the verification status and a verdict, close enough
+ * together to be one claim about when a thread may be resolved.
+ *
+ * Deliberately NOT a byte-exact sentence. The defect this exists for was a
+ * PARAPHRASE — a second author restating the gate in their own words and getting
+ * it wrong — and a byte-exact registry entry matches only the spelling somebody
+ * already wrote down. The window is bounded (PF-018) so a file that mentions the
+ * status in one paragraph and a verdict three paragraphs later is not reported.
+ */
+const D9_RESOLVE_CONDITION = /VERIFICATION_STATUS[\s\S]{0,200}?\b(FIXED|FALSE_POSITIVE|BY_DESIGN)\b/;
+
+/** The reference trees the Git agent loads: generated, and hand-authored. */
+function gitReferenceCorpus(): CorpusEntry[] {
+  const corpus: CorpusEntry[] = [];
+  for (const [label, dir] of [
+    ['dist/skills/git/references', compiledSkillRefsDir()],
+    ['src/assets/skills/git/references', path.join(skillsDir(), 'git', 'references')],
+  ] as const) {
+    for (const file of walkFiles(dir, f => f.endsWith('.md'))) {
+      corpus.push({
+        path: `${label}/${path.relative(dir, file).split(path.sep).join('/')}`,
+        content: readFileSync(file, 'utf-8'),
+      });
+    }
+  }
+  return corpus;
+}
+
+/** Named collector: every reference file that states the D9 resolve predicate. */
+export function collectResolveConditionStatements(corpus: readonly CorpusEntry[]): string[] {
+  return corpus.filter(entry => D9_RESOLVE_CONDITION.test(entry.content)).map(entry => entry.path);
+}
+
+describe('git agent: the D9 resolve condition is stated once in the reference tree', () => {
+  const corpus = gitReferenceCorpus();
+
+  it('scans a real corpus', () => {
+    expect(
+      corpus.length,
+      'the git reference corpus is empty — run `npm run build`; a single-authority guard over ' +
+      'nothing certifies everything',
+    ).toBeGreaterThan(5);
+  });
+
+  it('exactly one reference states it, and it is the marker registry that DEFINES D9', () => {
+    expect(
+      collectResolveConditionStatements(corpus),
+      'the resolve condition is stated in more than one reference, or in none. The marker ' +
+      'registry defines D9 and the Git agent applies it; every other document names the gate ' +
+      'and defers. A second statement is free to disagree with the first, and one already did — ' +
+      'github-api.md admitted FALSE_POSITIVE and BY_DESIGN as resolvable, which D9 forbids',
+    ).toEqual(['dist/skills/git/references/decision-markers.md']);
+  });
+
+  it('the deferring reference names the gate instead of restating it', () => {
+    const githubApi = corpus.find(e => e.path.endsWith('git/references/github-api.md'));
+    expect(githubApi, 'github-api.md is not in the corpus').toBeDefined();
+    expect(
+      githubApi!.content,
+      'a reference that drops the restatement must say WHERE the rule lives, or the next author ' +
+      'writes a third one to fill the hole',
+    ).toContain("the Git agent's D9 gate");
+  });
+
+  it('known-bad probe: the collector reports a seeded restatement and a paraphrase of it', () => {
+    const seeded = [
+      { path: 'probe/verbatim.md', content: 'resolve only when VERIFICATION_STATUS == PASS and verdict FIXED.' },
+      { path: 'probe/paraphrase.md', content: 'Resolve when VERIFICATION_STATUS is PASS, including BY_DESIGN with evidence.' },
+    ];
+    expect(collectResolveConditionStatements(seeded)).toEqual(['probe/verbatim.md', 'probe/paraphrase.md']);
+    // …and does not fire on a document that merely names the gate, nor on one
+    // that mentions the status far away from any verdict.
+    expect(collectResolveConditionStatements([
+      { path: 'probe/defers.md', content: "The resolve condition is stated once, in the Git agent's D9 gate." },
+    ])).toEqual([]);
+    expect(collectResolveConditionStatements([
+      { path: 'probe/far.md', content: `VERIFICATION_STATUS is reported here.\n${'x'.repeat(400)}\nFIXED appears later.` },
+    ])).toEqual([]);
+  });
+});
