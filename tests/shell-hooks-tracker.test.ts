@@ -655,15 +655,99 @@ describe('session-start-context: tracker setup directive (Section 3)', () => {
     }
   });
 
-  it('[DR-10] the gate itself is two shell builtins — no fork can precede it (source-level)', () => {
-    // The runtime differential above proves the current tree; this pins the
-    // mechanism, so a rewrite that reintroduced a fork before the gate is caught
-    // even if the differential were ever weakened.
+  /**
+   * Work that must not appear in Section 3 ahead of the sentinel test, each
+   * LABELLED so a rule that stopped matching is named rather than certified by the
+   * silence of the others (PF-064).
+   *
+   * The subject is READS, not only forks. A fork is the expensive case and the one
+   * the runtime differential counts, but the property the sentinel buys is wider:
+   * the GitHub path — every user until someone chooses otherwise — must reach the
+   * early exit having touched nothing but the two `[ -f ]` tests. A `read` builtin
+   * or a `<` redirect costs no subprocess and the differential would score it zero,
+   * while still opening a user-writable file on the SessionStart critical path for
+   * 100% of users who never chose a tracker.
+   */
+  const PRE_SENTINEL_WORK: ReadonlyArray<readonly [string, RegExp]> = [
+    ['a command substitution', /\$\(/],
+    ['a backtick substitution', /`/],
+    ['a JSON field read', /json_field/],
+    ['an input redirect', /(?<![<>0-9])<(?!<)/],
+    ['the read builtin', /\bread\b/],
+    ['a sourced file', /^\s*(?:source|\.)\s+\S/],
+  ];
+
+  /**
+   * Named collector: every line of Section 3 above the sentinel gate that does any
+   * of the work above. Comment lines are skipped — the section's own rationale
+   * names `jq`, `node` and the manifest read in order to FORBID them ahead of the
+   * gate, and a collector that read the prohibition as the violation would send the
+   * next reader to narrow the guard instead of to read the hit.
+   */
+  function collectPreSentinelWork(source: string): string[] {
+    const sectionAt = source.indexOf('# --- Section 3:');
+    if (sectionAt === -1) return ['Section 3 not found'];
+    const section = source.slice(sectionAt);
+    const gateAt = section.indexOf('if [ -f "$TRACKER_SENTINEL"');
+    if (gateAt === -1) return ['the sentinel gate was renamed'];
+    const violations: string[] = [];
+    for (const line of section.slice(0, gateAt).split('\n')) {
+      if (line.trimStart().startsWith('#') || line.trim() === '') continue;
+      for (const [label, rule] of PRE_SENTINEL_WORK) {
+        if (rule.test(line)) violations.push(`${line.trim()} — ${label}`);
+      }
+    }
+    return violations;
+  }
+
+  it('[DR-10] no read precedes the sentinel — the gate is two shell builtins (source-level)', () => {
+    // The runtime differential above proves the current tree by COUNTING forks;
+    // this pins the mechanism, so a rewrite that put a read before the gate is
+    // caught even where the count cannot see it.
+    expect(
+      collectPreSentinelWork(HOOK_SOURCE),
+      'Section 3 does work before the `.tracker.enabled` test. Everything above that gate is ' +
+      'paid by every session of every user, including the ones who never chose a tracker:\n  ' +
+      collectPreSentinelWork(HOOK_SOURCE).join('\n  '),
+    ).toEqual([]);
+
+    // …and the gate itself is the two tests and nothing else.
     const section = HOOK_SOURCE.slice(HOOK_SOURCE.indexOf('# --- Section 3:'));
-    expect(section.length, 'Section 3 not found in the hook source').toBeGreaterThan(0);
     const gate = section.slice(0, section.indexOf('\n', section.indexOf('if [')));
     expect(gate).toContain('.tracker.enabled');
     expect(gate).not.toMatch(/\$\(|`|json_field/);
+  });
+
+  it('known-bad probe: EVERY pre-sentinel rule fires on its own shape', () => {
+    // One seeded line per rule, and the two lists asserted the same length, so a
+    // rule that stopped matching is visible rather than certified by the others.
+    const SHAPES: ReadonlyArray<readonly [string, string]> = [
+      ['a command substitution', 'TRACKER_PROVIDER=$(json_field_file "$M" "features.tracker.provider" "github")'],
+      ['a backtick substitution', 'TRACKER_NOW=`date +%s`'],
+      ['a JSON field read', 'TRACKER_P=$TRACKER_X; json_field_file "$M" "k" "d"'],
+      ['an input redirect', 'IFS= read -r TRACKER_X < "$TRACKER_DEVFLOW_DIR/manifest.json"'],
+      ['the read builtin', 'IFS= read -r -n 16 TRACKER_X'],
+      ['a sourced file', '  source "$SCRIPT_DIR/git-marker"'],
+    ];
+    expect(SHAPES.length, 'one shape per rule').toBe(PRE_SENTINEL_WORK.length);
+    for (const [label, line] of SHAPES) {
+      const seeded = [
+        '# --- Section 3: probe ---',
+        line,
+        'if [ -f "$TRACKER_SENTINEL" ] && [ ! -f "$TRACKER_CONVENTIONS" ]; then',
+      ].join('\n');
+      expect(
+        collectPreSentinelWork(seeded).some(v => v.endsWith(label)),
+        `"${line}" must be reported by the ${label} rule`,
+      ).toBe(true);
+    }
+    // …and the two assignments that legitimately precede the gate are not work.
+    expect(collectPreSentinelWork([
+      '# --- Section 3: probe ---',
+      'TRACKER_SENTINEL="$TRACKER_DEVFLOW_DIR/.tracker.enabled"',
+      'TRACKER_CONVENTIONS="$TRACKER_DEVFLOW_DIR/tracker.md"',
+      'if [ -f "$TRACKER_SENTINEL" ] && [ ! -f "$TRACKER_CONVENTIONS" ]; then',
+    ].join('\n'))).toEqual([]);
   });
 
   // ---------------------------------------------------------------------------

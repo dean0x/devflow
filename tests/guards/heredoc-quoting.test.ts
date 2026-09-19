@@ -153,6 +153,11 @@ describe('heredoc quoting: no unquoted delimiter ships in src/assets/ (GAP-15, S
       ['underscore-led', 'cat <<_private'],
       ['blanks before the delimiter', ': << EOF'],
       ['blanks after `<<-`', 'cat <<-\tEOF'],
+      // The shape a heredoc takes once it is joined to an `&&` chain: brace-grouped
+      // so the compose step HAS a status the chain can gate on. The opening brace
+      // sits before the redirect, and a delimiter-adjacent pattern that anchored on
+      // the start of the line would stop reading the line at all.
+      ['brace-grouped, unquoted', '{ cat > "$RAW" <<EOF'],
     ];
     const missed = expands.filter(([, text]) => !UNQUOTED_HEREDOC_RE.test(text)).map(([l]) => l);
     expect(
@@ -171,6 +176,7 @@ describe('heredoc quoting: no unquoted delimiter ships in src/assets/ (GAP-15, S
       ['quoted after `<<-`', "cat <<-'EOF'"],
       ['here-string, quoted word', 'read -r line <<< "$value"'],
       ['here-string, bare word', 'read -r line <<< value'],
+      ['brace-grouped, single-quoted', "{ cat > \"$RAW\" <<'EOF'"],
     ];
     const flagged = inert.filter(([, text]) => UNQUOTED_HEREDOC_RE.test(text)).map(([l]) => l);
     expect(

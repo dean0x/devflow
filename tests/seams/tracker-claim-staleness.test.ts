@@ -123,33 +123,56 @@ export function collectAgentAttemptCaps(source: string): number[] {
   return [...source.matchAll(/\*\*(\d+) attempts?\*\*/g)].map(m => Number(m[1]));
 }
 
-/** How far past `**Heartbeat**` the cadence may be stated. Bounded (PF-018). */
+/** How far past `**Heartbeat**` the refresh may be stated. Bounded (PF-018). */
 const HEARTBEAT_WINDOW_CHARS = 400;
 
 /**
- * Named collector: the work units the agent names as HEARTBEAT INTERVALS.
+ * Named collector: how the agent states its claim refresh — as ONE point, or as a
+ * repeating cadence.
  *
  * The bound above is only a liveness bound if something refreshes the claim file
- * while the run is alive. A heartbeat is therefore a CADENCE, and prose can state a
- * cadence only by naming the unit of work between two touches ("once per capability
- * probed", "once per section composed"). A sentence that names a single BOUNDARY —
- * "touch it again at the probe → compose boundary" — states a checkpoint, and the
- * collector returns `[]` for it: from that one touch the whole remaining run is
- * measured, so a compose phase longer than the bound self-classifies as crashed and
- * the next session's gate re-arms against an agent that is still live. That is the
- * concurrency the claim exists to prevent, arriving through the timer instead of
- * through the claim.
+ * while the run is alive, and the question this seam asks is WHERE. The refresh is
+ * stated as a single point at the probe → compose boundary: the probe phase is
+ * network-bound and its duration is not the agent's to predict, so the clock that
+ * matters is the one composition runs against, and one touch there re-arms the
+ * bound for exactly the phase that could otherwise outlive it.
+ *
+ * A CADENCE — "once per capability probed, and once per section composed" — is
+ * reported instead of accepted. It reads as strictly safer and is not: it is an
+ * instruction with no observable count, so nothing distinguishes a run that
+ * followed it from one that touched once and moved on, and every extra touch is a
+ * write to the very file the next session's gate stats. The single point is the
+ * form a prompt can actually be held to.
+ *
+ * Returns the cadence units it found, so `[]` means "no repetition stated" — the
+ * shape the agent must have — and a non-empty list names what to delete. The
+ * boundary itself is asserted separately, so an agent that states NEITHER is
+ * caught rather than read as compliant.
  *
  * Whitespace is normalised first because the agent hard-wraps: `once per` lands
  * across a line break in the shipped text, and pinning where a sentence happens to
  * break is what PF-057 warns against.
  */
-export function collectHeartbeatIntervals(source: string): string[] {
+export function collectHeartbeatCadenceUnits(source: string): string[] {
+  const block = heartbeatBlock(source);
+  return [...block.matchAll(/once per ([a-z]+(?: [a-z]+)?)/g)].map(m => m[1]);
+}
+
+/** The `**Heartbeat**` step's own text, whitespace-normalised and bounded. */
+function heartbeatBlock(source: string): string {
   const normalized = source.replace(/\s+/g, ' ');
   const at = normalized.indexOf('**Heartbeat**');
-  if (at === -1) return [];
-  const block = normalized.slice(at, at + HEARTBEAT_WINDOW_CHARS);
-  return [...block.matchAll(/once per ([a-z]+(?: [a-z]+)?)/g)].map(m => m[1]);
+  if (at === -1) return '';
+  return normalized.slice(at, at + HEARTBEAT_WINDOW_CHARS);
+}
+
+/** The boundary the single refresh is pinned to, as both sides of this seam name it. */
+const REFRESH_POINT = /probe\s*(?:→|->)\s*compose/i;
+
+/** Named collector: whether the heartbeat names the one point it refreshes at. */
+export function collectHeartbeatRefreshPoint(source: string): string | null {
+  const match = REFRESH_POINT.exec(heartbeatBlock(source));
+  return match === null ? null : match[0];
 }
 
 // ---------------------------------------------------------------------------
@@ -205,29 +228,35 @@ describe('tracker claim-staleness seam: the hook and the Tracker agent agree on 
     ).toEqual([600, 900]);
   });
 
-  it('the Tracker agent refreshes the claim on a CADENCE, so the bound measures liveness', () => {
-    const intervals = collectHeartbeatIntervals(agentSource);
+  it('the Tracker agent refreshes the claim at exactly ONE named point, never on a cadence', () => {
     expect(
-      intervals,
-      'The Tracker agent names fewer than two heartbeat intervals. One touch at one boundary is ' +
-        'not a heartbeat: the bound is then measured from that single point for the whole rest ' +
-        'of the run, so a compose phase that outlives it is classified as a crash while the ' +
+      collectHeartbeatRefreshPoint(agentSource),
+      'The Tracker agent names no refresh point. The bound is then measured from the create for ' +
+        'the whole run, so a probe phase that outlives it self-classifies as a crash while the ' +
         'agent is still working — and the hook re-arms against a live sibling.',
-    ).not.toHaveLength(0);
-    expect(intervals.length).toBeGreaterThanOrEqual(2);
-
-    // Known-bad, same it: a single-boundary sentence states a checkpoint and must
-    // be reported as stating no cadence, and an agent with no heartbeat at all
-    // must report [] rather than throw.
+    ).not.toBeNull();
+    const cadence = collectHeartbeatCadenceUnits(agentSource);
     expect(
-      collectHeartbeatIntervals(
-        '3. **Heartbeat**: `touch` the claim file again at the probe → compose boundary, so a ' +
-          'slow run is never mistaken for a crashed one.',
-      ),
+      cadence,
+      `The Tracker agent states a repeating heartbeat (${cadence.join(', ')}). A per-unit ` +
+        'cadence in a prompt has no observable count: nothing distinguishes a run that followed ' +
+        'it from one that touched once, and every extra touch writes to the file the gate stats. ' +
+        'One refresh at the probe → compose boundary is the form this seam can hold the agent to.',
     ).toEqual([]);
-    expect(collectHeartbeatIntervals('**Heartbeat**: touch it once per section composed.'))
-      .toEqual(['section composed']);
-    expect(collectHeartbeatIntervals('The agent states no heartbeat.')).toEqual([]);
+
+    // Known-bad, same it: the retired cadence must be REPORTED and must name no
+    // single point, and an agent with no heartbeat at all must come back null/[]
+    // rather than throw.
+    const retired =
+      '3. **Heartbeat**: `touch` the claim file **repeatedly** while you work — once per\n' +
+      '   capability probed, and once per section composed.';
+    expect(collectHeartbeatCadenceUnits(retired)).toEqual(['capability probed', 'section composed']);
+    expect(
+      collectHeartbeatRefreshPoint(retired),
+      'the retired cadence named no single point either — the two collectors must disagree about it',
+    ).toBeNull();
+    expect(collectHeartbeatCadenceUnits('The agent states no heartbeat.')).toEqual([]);
+    expect(collectHeartbeatRefreshPoint('The agent states no heartbeat.')).toBeNull();
   });
 
   it('the agent\'s stated bound equals the hook\'s TRACKER_PROCESSING_STALE_SECS', () => {

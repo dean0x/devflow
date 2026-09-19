@@ -269,13 +269,26 @@ const RETIRED_LITERALS: ReadonlyArray<RetiredEntry> = [
   },
   {
     literal: 'PF-003',
-    removedFrom: 'src/assets/agents/git.mds (Principle 7, "avoids PF-003")',
-    scope: ['src/assets/agents/git.mds', 'dist/agents/git.md'],
+    removedFrom:
+      'src/assets/agents/git.mds (Principle 7, "avoids PF-003") and ' +
+      'src/assets/agents/tracker.md (`## Finishing` step 3)',
+    scope: ['src/assets/agents/git.mds', 'dist/agents/git.md', 'src/assets/agents/tracker.md'],
     justification:
-      'Principle 7 forbids bare `rm` and then cited the pitfall it avoids. The prohibition is the ' +
-      'whole content; the citation is provenance for a maintainer, and the maintainer reads ' +
-      'pitfalls.md. Scoped to the prompt — tracker.md, learning.md and json-helper.cjs cite ' +
+      'Both prompts forbid a flagged `rm` and then cited the pitfall they avoid. The prohibition ' +
+      'is the whole content; the citation is provenance for a maintainer, and the maintainer ' +
+      'reads pitfalls.md. Scoped to the two prompts — learning.md and json-helper.cjs cite ' +
       'PF-003 legitimately and are not retired from it here.',
+  },
+  {
+    literal: '[DR-02]',
+    removedFrom: 'src/assets/agents/tracker.md (`## Finishing` step 1)',
+    scope: ['src/assets/agents/tracker.md'],
+    justification:
+      'The prompt told the model that the session-start gate spends the attempt, and then cited ' +
+      'the decision record that says so. The claim is what the agent acts on and it is stated in ' +
+      'the same sentence; the anchor is a lookup a prompt\'s reader cannot perform. Scoped to the ' +
+      'prompt: session-start-context\'s shell comment and CLAUDE.md both cite [DR-02] for the ' +
+      'maintainer who can follow it.',
   },
   {
     literal: 'Phase 5/9',
