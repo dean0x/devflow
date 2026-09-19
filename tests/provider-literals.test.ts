@@ -728,6 +728,24 @@ const SHARED_RULES: readonly SharedRule[] = [
       'second ceiling',
   },
   {
+    define: 'reference_rendering_gate',
+    emitted: '**Discard, never repair**',
+    why:
+      'the read-site shape gate for `## Reference Rendering`, and the fallback it routes a ' +
+      'discard to. The token is interpolated into a branch name and into a PR body from a ' +
+      'hand-editable machine-wide file, so a second author is a second denylist — and the half ' +
+      'that decides where a discarded token GOES is what stopped the section degrading forever',
+  },
+  {
+    define: 'dedup_ladder',
+    emitted: 'Rungs, strongest evidence first, each named for a CAPABILITY and never for a tool',
+    why:
+      'the four-rung ladder and its bottom rung. A second copy is a second ordering, and the ' +
+      'rung a provider lands on decides whether a release back-link is suppressed on evidence ' +
+      'or on a coincidence — the recorded hint may only NARROW the probe, never raise it, and ' +
+      'that qualification has to be in the same sentence as the rungs it qualifies',
+  },
+  {
     define: 'ref_preflight_tail',
     emitted: '— a `COMPLETE` over zero processed issues is the report a release believes.',
     why:
