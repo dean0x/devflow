@@ -222,7 +222,7 @@ third-party input — to you when you compose it and to every reader afterwards.
   **sentinel and an absent section are different outcomes**: an absent section
   means the documented neutral default, a sentinel means the reader degrades and
   asks the human to edit the file.
-- **A global-safe section whose validator is a closed enum and whose documented
+- **A global-safe section whose shape gate is a closed enum and whose documented
   default is one of that enum's own values is never sentinelled — write the
   constant.** Every value it admits is written down in the table below, it holds
   for the whole machine, and the default is itself one of them: there is nothing
