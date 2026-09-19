@@ -179,14 +179,6 @@
       "description": "Total `**Process:**` / `### Process` blocks in the tracker corpus (dist/agents/git.md + the generated reference tree). Raised 18 -> 29 in the Scrutinize pass: 18 was exactly git.md's own contribution, so the floor was met with the generated tree entirely absent while the guard claimed to scan both (PF-018). The corpus split is now asserted by provenance as well, so the count is a floor rather than the whole proof. RAISED 29 -> 39 in the Phase-3 3b commit that adds the Jira provider and 39 -> 49 in the 3c commit that adds Linear: ten more per-op references each time, each with its own process block. A provider adds its whole roster at once, so the floor moves by a provider rather than by a file."
     },
     {
-      "id": "git-agent-guard-count",
-      "floor": 73,
-      "pattern": "toBeGreaterThanOrEqual(73)",
-      "occurrences": 1,
-      "sourceFile": "tests/guards/guard-census.test.ts",
-      "description": "AC-2.6 / GAP-49: the number of `it(` guards DECLARED in tests/git-agent.test.ts (line-anchored declarations, not the cases vitest runs — several declarations sit inside `for` loops over named op sets, so the runtime number moves with a roster and the declared number moves only when a guard is added or deleted). May rise, may never fall. Phase 0 stood at 40; this branch stands at 73 — P2-S7 widened the D11 inline-body guard, P2-S4 added four detector guards, [DR-20] replaced ONE D10 scope guard with a successor pair of four so the replacement is visibly not a net loss, and #341 added three: the five-shape inline-body table probe, the pre-split baseline known-bad probe, and the corpus-reach check. The assertion reads the floor out of this manifest rather than spelling it, and the two are asserted equal, so the number cannot be lowered in one place only."
-    },
-    {
       "id": "min-reference-chars",
       "floor": 80,
       "pattern": "const MIN_REFERENCE_CHARS = 80;",

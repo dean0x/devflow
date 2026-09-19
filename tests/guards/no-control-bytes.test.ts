@@ -260,7 +260,7 @@ describe('no-control-bytes: no shipped source file holds a raw control byte', ()
   });
 
   it('every forbidden range is named, and the ranges compose into the matcher', () => {
-    // The table is the matcher (the guard-census shape): a range added to
+    // The table IS the matcher: a range added to
     // FORBIDDEN_RANGES must be a range the regex expresses, and the boundary
     // bytes on either side of each carve-out are what a hand-written class gets
     // wrong. 0x09/0x0a/0x0d allowed; 0x08/0x0b/0x0e forbidden.
