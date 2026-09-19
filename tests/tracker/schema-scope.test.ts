@@ -740,8 +740,13 @@ export function reasonSpellings(reason: string): string[] {
  * become a dumping ground: the forward arm below asserts every entry here is
  * actually emitted, so an unregistered NEW reason parked here goes red.
  *
- * ACTION FOR THE PHASE: §14.2 needs this row, or the literal needs retiring. Both
- * are appendix decisions, not this subtask's.
+ * DELIBERATELY EXCLUDED from the `{ISSUE_REF}` template rewrite, and the exclusion
+ * is recorded here because it looks like an oversight. `#${old_issue}` is a SHELL
+ * expansion inside an executable `||` chain in a file that only ever runs under
+ * github, where `#N` IS the correct rendering. `{ISSUE_REF}` is a rendering token
+ * the agent substitutes into an Output template; substituting it into a shell
+ * recipe would replace a live variable with a literal brace pair and break the
+ * command. The rewrite's subject is the agent's templates, and this is neither.
  */
 const GITHUB_ONLY_REASONS: readonly string[] = [
   'tech-debt archive failed for #${old_issue}',
@@ -1149,20 +1154,27 @@ const RENDERING_CLAUSES: readonly ContractClause[] = [
       'the reader DOES with it, which is the half AC-3.11 needs',
   },
   {
-    label: 'a rendered ref is never `#`-prefixed under a non-github provider',
-    pattern: /never `#`-prefixed/,
+    // RE-POINTED, not deleted. The old spelling was a PROHIBITION on the rendered
+    // output ("never `#`-prefixed"), which is the shape the rule had to take while
+    // the Output templates were frozen byte-for-byte and still spelled `#{number}`.
+    // The templates now carry `{ISSUE_REF}`, so the rule states the POSITIVE github
+    // rendering instead — the half a github spawn needs, and the half a prohibition
+    // could never supply.
+    label: 'the github rendering of an issue ref is named',
+    pattern: /`#\{number\}` under github/,
     why:
-      '§14.1 fixes ISSUE_REF as `#`-prefixed under github ONLY. Without this the templates are the ' +
-      'only instruction in scope and a jira spawn renders `#PROJ-123`, a reference no tracker resolves',
-  },
-  {
-    label: "the templates' `#` is named as github's rendering, not a literal",
-    pattern: /Output templates' `#` is github's rendering, not a literal/,
-    why:
-      'the reclassification IS the fix. The `#` cannot be edited out of the templates — AC-3.1 ' +
-      'freezes them byte-for-byte — so the always-loaded text has to say what it means instead',
+      '§14.1 fixes ISSUE_REF as `#`-prefixed under github ONLY. Without this the token is ' +
+      'unresolved on the github path, and the one provider whose exact bytes the golden fixture ' +
+      'pins is the one with no instruction for rendering its own references',
   },
 ];
+
+// The third clause is RETIRED with the template freeze it existed to work around.
+// It required the always-loaded block to say the templates' `#` "is github's
+// rendering, not a literal" — a reclassification, chosen because AC-3.1 froze the
+// template bytes and the `#` could not be edited out. The bytes are editable now
+// and the `#` is gone from every issue slot, so a rule reclassifying a character
+// that is no longer there would be a rule about nothing.
 
 /** Named collector: rendering clauses the reader block does not state. */
 export function collectMissingRenderingClauses(
@@ -1189,18 +1201,26 @@ describe('the reader block states the non-github rendering rule (AC-3.11, §14.1
     ).toEqual([]);
   });
 
-  it('the templates it reclassifies are really there, and really still carry the `#`', () => {
-    // Non-vacuity in the direction that matters: if the Output templates ever lost
-    // their `#{number}` slots, the rule above would be a rule about nothing and this
-    // whole claim would pass while asserting no live property. It would also mean
-    // AC-3.1's frozen fixture had been broken, which is the louder failure.
-    for (const slot of ['- **Issue**: #{number}', '- **Number**: #{number}', '### Issue #{number']) {
-      expect(
-        GIT_MD,
-        `the Output templates must still carry ${JSON.stringify(slot)} — it is frozen by the ` +
-        `Phase-0 capture (AC-3.1) and is what the reader block's rule reclassifies`,
-      ).toContain(slot);
+  it('every issue slot renders through the token, and the PR slots keep their `#`', () => {
+    // The successor to the "templates still carry the `#`" arm, which asserted the
+    // exact opposite: it existed to hold the frozen bytes in place while the rule
+    // above reclassified them. The claim it becomes is the one that was always
+    // wanted — every ISSUE slot renders through the provider-neutral token — plus
+    // the discrimination the sweep needed: the PR slots are correct as `#` under
+    // every provider, because pull requests stay on the PR host, and a rewrite that
+    // swept them along would render a PR reference no host resolves.
+    for (const slot of ['- **Issue**: {ISSUE_REF}', '- **Number**: {ISSUE_REF}', '## Issue {ISSUE_REF']) {
+      expect(GIT_MD, `the Output templates must carry ${JSON.stringify(slot)}`).toContain(slot);
     }
+    expect(
+      GIT_MD,
+      'the PR slots keep their `#` — sweeping them into the issue-token rule would render a pull ' +
+      'request reference no host resolves',
+    ).toContain('- **PR**: #{number}');
+    expect(
+      GIT_MD.includes('- **Issue**: #{number}'),
+      'no issue slot may still spell the bare `#` rendering — that is the defect the token replaces',
+    ).toBe(false);
   });
 
   it('known-bad probe: each clause, deleted from a copy, is reported by the same collector', () => {

@@ -135,7 +135,7 @@ Load when the resolved tracker provider is `github` and the operation is `fetch-
      ...
    \}\}'
    ```
-2b. Render each issue's `state` (`OPEN` or `CLOSED`) as a `**State**: \{state\}` line of its own, between that issue's `### Issue #\{number\}:` heading and its `<untrusted-issue-body>` marker — OUTSIDE the wrapper, because `state` is an enum the tracker computed, not remote prose. A caller refreshing a batch reads it to see a ticket closed out of band.
+2b. Render each issue's `state` (`OPEN` or `CLOSED`) as a `**State**: \{state\}` line of its own, between that issue's `### Issue \{ISSUE_REF\}:` heading and its `<untrusted-issue-body>` marker — OUTSIDE the wrapper, because `state` is an enum the tracker computed, not remote prose. A caller refreshing a batch reads it to see a ticket closed out of band.
 @end
 
 @define manage_debt():

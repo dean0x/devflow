@@ -199,12 +199,12 @@ const ISSUE_CAPTURE_CONTRACT: Array<{
     producerPattern: 'Acceptance Criteria',
     producerOps: ['setup-task', 'fetch-issue', 'fetch-issues-batch'],
   },
-  // "## Issue #{number}:" heading in fetch-issue; "### Issue #{number1}:" in batch.
+  // "## Issue {ISSUE_REF}:" heading in fetch-issue; "### Issue {ISSUE_REF1}:" in batch.
   // setup-task reports the number under "### Issue (if fetched)" and is NOT a
   // producer of the rendered-reference heading.
   {
     label: 'ISSUE_REF',
-    producerPattern: '## Issue #',
+    producerPattern: '## Issue {ISSUE_REF',
     producerOps: ['fetch-issue', 'fetch-issues-batch'],
   },
   // The three `### Handoff Values` producers (P2-S10, written in T2b). Each is
