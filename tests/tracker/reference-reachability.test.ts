@@ -244,30 +244,43 @@ function providerReachablePaths(template: string): string[] {
     .flatMap(mod => reachablePaths(template, mod.subdir.slice('tracker/'.length), mod.ops));
 }
 
+const CONTRACT_REL = 'tracker/_mcp.md';
+
 /**
  * The tool-call CONTRACT document's own reachability rule — a third kind, matching
  * its third module kind.
  *
  * A `fanout` file is reachable by instantiating the template; a `named` document is
- * reachable because the agent spells its path; the contract is reachable because
- * its DECLARED CONSUMERS name it — the per-operation mechanics of the providers
- * that reach their tracker through a tool call. That is not a weaker rule than the
- * other two, it is the same rule applied to the file's actual naming site: the
- * contract is deliberately NOT named from the always-loaded preamble (which would
- * be a second `references/tracker/` naming line, and the single-naming-line
- * assertion below forbids exactly that) and is deliberately NOT named from any
- * github op file (AC-3.12 — a CLI provider must not load a document about a
- * transport it never uses).
+ * reachable because the agent spells its path; and so is the contract — the agent
+ * names it, as a fixed literal, on the SAME physical line that composes the
+ * per-operation mechanics path.
  *
- * Reads the generated tree rather than a list: "some shipped mechanics file names
- * it" is the property, and a hand-listed namer would drift from the files.
+ * IT USED TO BE THE CONSUMERS THAT NAMED IT, and that is the defect this rule
+ * replaces. The contract carries the transport prohibition and the trust
+ * discipline for every tracker call a non-github spawn makes, but only five of the
+ * ten per-operation files happened to name it: the other five ran tracker calls
+ * with neither. An extraction that turns a universal obligation into per-consumer
+ * opt-in is PF-058 exactly, and "some shipped file names it" could never have
+ * caught it — five namers satisfy it as completely as ten do.
+ *
+ * It is named from the preamble WITHOUT becoming a second convergence point,
+ * because it shares the one existing naming line and is a fixed literal composed
+ * from nothing: the validated provider token selects the mechanics directory and
+ * never reaches this name. The inverse — no generated op file may name it — is a
+ * live arm below, not a comment.
  */
-function contractIsNamedByAConsumer(): boolean {
-  const contract = 'tracker/_mcp.md';
-  if (!generatedReferenceManifest().includes(contract)) return false;
+function contractIsNamedByThePreamble(content: string): boolean {
+  if (!generatedReferenceManifest().includes(CONTRACT_REL)) return false;
+  const naming = collectTrackerNamingLines(content);
+  return naming.length === 1 && naming[0].includes(`references/${CONTRACT_REL}`);
+}
+
+/** Named collector: generated op files that name the contract — must always be empty. */
+function collectContractNamers(): string[] {
   return walkFiles(path.join(REFS_DIR, 'tracker'), f => f.endsWith('.md'))
     .filter(file => path.basename(file) !== '_mcp.md')
-    .some(file => requireFile('generated reference', file).includes(contract));
+    .filter(file => requireFile('generated reference', file).includes(CONTRACT_REL))
+    .map(file => path.relative(REFS_DIR, file).split(path.sep).join('/'));
 }
 
 /**
@@ -322,8 +335,8 @@ describe('generated references: every reference is reachable from the agent (AC-
       ...[...collectLiteralReferenceNames(agent.content)].filter(rel =>
         (GIT_CROSS_CUTTING_DOCS as readonly string[]).includes(path.basename(rel, '.md')),
       ),
-      // The 'contract' module kind: reachable ⇔ a shipped consumer names it.
-      ...(contractIsNamedByAConsumer() ? ['tracker/_mcp.md'] : []),
+      // The 'contract' module kind: reachable ⇔ the preamble names it.
+      ...(contractIsNamedByThePreamble(agent.content) ? [CONTRACT_REL] : []),
     ]);
 
     const emitted = walkFiles(REFS_DIR, f => f.endsWith('.md'))
@@ -369,13 +382,43 @@ describe('generated references: every reference is reachable from the agent (AC-
       providers.reduce((n, mod) => n + mod.ops.length, 0) + GIT_CROSS_CUTTING_DOCS.length,
     );
     // The contract's own rule, asserted rather than assumed: it is in the manifest
-    // AND some shipped mechanics file names it. Either half alone would let an
-    // unreachable contract ship (ADR-003) or a named one go missing.
+    // AND the preamble names it. Either half alone would let an unreachable
+    // contract ship (ADR-003) or a named one go missing.
     expect(
-      contractIsNamedByAConsumer(),
-      'the tool-call contract is in the manifest but no provider mechanics file names it — it ' +
-      'would be installed on every machine of every user of that provider and read by nothing',
-    ).toBe(generatedReferenceManifest().includes('tracker/_mcp.md'));
+      contractIsNamedByThePreamble(agent.content),
+      'the tool-call contract is in the manifest but the preamble does not name it — it would be ' +
+      'installed on every machine of every user of that provider and read by nothing',
+    ).toBe(generatedReferenceManifest().includes(CONTRACT_REL));
+  });
+
+  it('the contract is a FIXED per-spawn load: no generated op file names it', () => {
+    // The inverse of the rule above, and the half that makes it a fix rather than a
+    // relocation. While the per-operation files were the namers, five of ten named
+    // it and five did not, and every guard in the tree was satisfied by the five
+    // (PF-058). An op file that names it again re-opens exactly that door, so the
+    // prohibition is absolute rather than a floor on the count.
+    expect(
+      collectContractNamers(),
+      'generated op file(s) name the tool-call contract. It is loaded once per SPAWN from the ' +
+      'agent preamble under every non-github provider; a per-operation naming line makes the ' +
+      'load look conditional on which operation ran, which is how half the operations lost it:\n  ' +
+      collectContractNamers().join('\n  '),
+    ).toEqual([]);
+  });
+
+  it('known-bad probe: a seeded op-file naming line is reported by the same collector', () => {
+    // The collector reads the built tree, so the probe re-runs its predicate over a
+    // seeded body rather than writing into dist/ (PF-018 without a side effect).
+    const namesContract = (body: string): boolean => body.includes(CONTRACT_REL);
+    expect(
+      namesContract('## Operation: setup-task\n\nRead `references/tracker/_mcp.md` first.\n'),
+      'the predicate must see a seeded naming line — otherwise the prohibition above is inert',
+    ).toBe(true);
+    expect(
+      namesContract('## Operation: setup-task\n\nRead the tool-call contract first.\n'),
+      'the predicate must NOT fire on the contract named in prose — the rule is about composing ' +
+      'a second load path, not about mentioning the document',
+    ).toBe(false);
   });
 
   it('known-bad probe: an emitted file outside the registry is reported as unreachable', () => {
@@ -413,7 +456,7 @@ describe('generated references: every reference is reachable from the agent (AC-
       ...[...namedInStripped].filter(rel =>
         (GIT_CROSS_CUTTING_DOCS as readonly string[]).includes(path.basename(rel, '.md')),
       ),
-      ...(contractIsNamedByAConsumer() ? ['tracker/_mcp.md'] : []),
+      ...(contractIsNamedByThePreamble(stripped) ? [CONTRACT_REL] : []),
     ]);
     expect(generatedReferenceManifest().filter(rel => !reachable.has(rel))).toEqual([target]);
   });

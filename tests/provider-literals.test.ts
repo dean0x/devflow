@@ -721,10 +721,11 @@ const SHARED_RULES: readonly SharedRule[] = [
   },
   {
     define: 'aggregate_call_budget',
-    emitted: "**Aggregate call budget [DR-09] — the fallback's ceiling.**",
+    emitted: "**Aggregate call budget — the fallback's ceiling.**",
     why:
-      "[DR-09]'s product bound. The rung that lands differs per provider and is passed in; the " +
-      'bound and the truncation report do not, and a second copy is a second ceiling',
+      'the product bound on the marker-check fallback. The rung that lands differs per provider ' +
+      'and is passed in; the bound and the truncation report do not, and a second copy is a ' +
+      'second ceiling',
   },
   {
     define: 'ref_preflight_tail',

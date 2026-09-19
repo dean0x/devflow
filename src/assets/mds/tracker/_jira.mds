@@ -68,7 +68,7 @@ Load when the resolved tracker provider is `jira` and the operation is `setup-ta
 
 ### Setup — session-scoped, resolved once before any step below
 
-- Resolve the capability set and the current-user identity exactly once per spawn, per `references/tracker/_mcp.md`. Nothing in this operation probes a second time.
+- Resolve the capability set and the current-user identity exactly once per spawn, per the tool-call contract. Nothing in this operation probes a second time.
 - **Site.** From `## Project` in the configuration the preamble already read. It must satisfy `^https://[a-z0-9]([a-z0-9-]\{0,61\}[a-z0-9])?(\.[a-z0-9-]+)+$` — **no userinfo, no port, no path**. Anything else ⇒ `TRACEABILITY: DEGRADED (unusable site)` and no tracker call.
 - **Project key.** The preamble's chain already resolved it (explicit ref → this repo's history → the configuration file → the documented neutral default) and shape-gated it. This operation consumes that value and never re-derives it.
 - **Issue types.** Read the *project and issue-type metadata* capability HERE, once, and enumerate the types this run may use. Required-field metadata is read at this same point and nowhere else.

@@ -44,6 +44,7 @@ import {
   MCP_BACKED_PROVIDERS,
   MCP_CONTRACT_REL,
   MODEL_CROSS_CUTTING_ON_DEMAND,
+  MODEL_CROSS_CUTTING_ASSERTED,
   PRELOADED,
   REFS_DIR,
   SECTIONS,
@@ -878,6 +879,14 @@ describe('byte budget: the provider-resolution preamble', () => {
     // AC-2.5's scope clause [DR-27(c)]: PF-023 requires ONE convergence point.
     // A second naming line anywhere else is a second place a provider path is
     // composed, which is the ~30-sink shape this phase exists to remove.
+    //
+    // ONE LINE, TWO PATHS — and the count stays 1 deliberately. That line composes
+    // the per-operation mechanics path from the validated provider token AND names
+    // the tool-call contract, which is a FIXED literal composed from nothing. The
+    // convergence point PF-023 is about is the COMPOSITION, so a fixed name riding
+    // on the same line adds no second place a path is built. The arm below is the
+    // other half: it holds the fixed literal to that same line, so the two claims
+    // cannot be satisfied by two lines between them.
     const naming = collectTrackerNamingLines(GIT_AGENT.content);
     expect(
       naming.length,
@@ -891,12 +900,39 @@ describe('byte budget: the provider-resolution preamble', () => {
       'the single reference-naming line must live inside the preamble, not in an op body',
     ).toBe(true);
 
+    expect(
+      /references\/tracker\/\\?\{provider\\?\}/.test(naming[0]),
+      'the single naming line must COMPOSE the mechanics path from the provider token — an ' +
+      'instruction that hard-codes a provider cannot reach the tree the registry emits',
+    ).toBe(true);
+
     // Standing prohibition (§14.5): references are addressed skill-relatively.
     expect(
       naming[0].includes('~/.claude'),
       'no generated reference path literal may begin with ~/.claude — CLAUDE_CODE_DIR and ' +
       'local-scope installs put the skill somewhere else entirely',
     ).toBe(false);
+  });
+
+  it('the tool-call contract is named as a fixed literal on that same line', () => {
+    // The contract is read once per SPAWN under every non-github provider, so its
+    // naming site has to be the always-loaded preamble. It used to be the
+    // per-operation mechanics that named it, and only five of ten did — the other
+    // five ran tracker calls with no transport prohibition and no trust discipline
+    // (PF-058). The reachability suite owns the inverse (no generated op file names
+    // it); this arm owns the byte-budget half: it rides the existing line, so the
+    // fix costs one clause rather than a second preloaded naming line.
+    const naming = collectTrackerNamingLines(GIT_AGENT.content);
+    expect(
+      naming.length,
+      'the composition arm above is the precondition for this one',
+    ).toBe(1);
+    expect(
+      naming[0],
+      'the preamble must name references/tracker/_mcp.md on the SAME line that composes the ' +
+      'mechanics path. A line of its own would be a second preloaded naming line; a naming site ' +
+      'inside an operation would make a per-spawn load look per-operation.',
+    ).toContain('references/tracker/_mcp.md');
   });
 
   it('known-bad probe: a seeded second naming line is detected by the same collector', () => {
@@ -980,7 +1016,10 @@ describe('byte budget: formula file-set ↔ nameable file-set (both directions)'
     // nothing — the one place a file could be added to every user's install with
     // no term anywhere in the budget.
     const scanned = nameableCrossCutting(GIT_AGENT.content);
-    const modelled = new Set(MODEL_CROSS_CUTTING_ON_DEMAND);
+    // Both declared halves: the glossary the agent may consult and the contract it
+    // must have. The scope question is 'does the model know the agent can name this',
+    // and a name in either half is a name the model knows about.
+    const modelled = new Set([...MODEL_CROSS_CUTTING_ON_DEMAND, ...MODEL_CROSS_CUTTING_ASSERTED]);
 
     expect(
       collectMissingFrom('(always-loaded)', scanned, modelled),
@@ -1011,7 +1050,11 @@ describe('byte budget: formula file-set ↔ nameable file-set (both directions)'
       'See the `devflow:git` skill\'s `references/smuggled.md`.\n\n' +
       GIT_AGENT.content.slice(opAt);
     expect(
-      collectMissingFrom('(always-loaded)', nameableCrossCutting(seededAbove), new Set(MODEL_CROSS_CUTTING_ON_DEMAND)),
+      collectMissingFrom(
+        '(always-loaded)',
+        nameableCrossCutting(seededAbove),
+        new Set([...MODEL_CROSS_CUTTING_ON_DEMAND, ...MODEL_CROSS_CUTTING_ASSERTED]),
+      ),
       'a reference newly named in the always-loaded part must be reported as unmodelled',
     ).toEqual(['(always-loaded) → smuggled.md']);
 

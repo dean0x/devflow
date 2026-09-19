@@ -24,13 +24,19 @@ tool-call provider NAMES this file, this file names nothing back, and that file
 may INVOKE a rule here but never restate its substance. On any conflict between a
 per-operation file and this contract, THIS CONTRACT WINS.
 
-The namer is the per-operation file and NOT the agent preamble, deliberately. The
-preamble states exactly one line that composes a `references/tracker/` path
-(PF-023's single convergence point, asserted as exactly one), so a second naming
-line there would be a second place a provider path is built; and the operations
-that need this contract are exactly the ones whose provider reaches its tracker
-through a tool call, which is a fact the per-operation file already knows and the
-always-loaded preamble would have to re-derive.
+THE NAMER IS THE AGENT PREAMBLE, and not the per-operation file. This contract is
+read once per SPAWN, so a per-operation naming reached it only for the operations
+that happened to carry one — five of ten — and the other five ran tracker calls
+with neither the transport prohibition nor the trust discipline below. An
+extraction that turns a universal obligation into per-consumer opt-in is the
+defect, not the saving.
+
+The preamble names it on the SAME physical line that composes the per-operation
+mechanics path, which is what keeps PF-023's single convergence point at exactly
+one line. That is sound rather than a loophole: what PF-023 counts is where a path
+is BUILT, and this one is a fixed literal built from nothing — the validated
+provider token selects the mechanics directory and never reaches this name. A
+per-operation file naming it again is forbidden, and asserted as forbidden.
 
 Headings below the first are `###` by grammar, not by taste: a column-0 `## `
 line outside a fence terminates this file's section for every guard that reads it
@@ -62,7 +68,7 @@ not live here, because the CLI provider's is a different number.
 @define posting_gate_head(scope, compose_tail = ""):
 ### Posting gate
 
-`references/tracker/_mcp.md` governs {scope}; this operation names its steps and restates none of its rules.
+The tool-call contract governs {scope}; this operation names its steps and restates none of its rules.
 
 1. Compose this post's own content into `$DEVFLOW_BODY_RAW` — a fresh `mktemp` per invocation, under D11's removal `trap`.{compose_tail}
 2. Run `node "$\{DEVFLOW_DIR:-$HOME/.devflow\}/scripts/redact-secrets.cjs" --emit "$DEVFLOW_BODY_RAW"`.
@@ -96,7 +102,7 @@ Rungs, strongest evidence first, each named for a CAPABILITY and never for a too
 @end
 
 @define aggregate_call_budget(rung_cost):
-**Aggregate call budget [DR-09] — the fallback's ceiling.** {rung_cost} The op-level cost is therefore a PRODUCT, and it is bounded: `≤50` items × `≤2` pages = **`≤100`** marker calls. Exceeding the budget ⇒ stop and report the remainder as `TRUNCATED (\{n\} not processed)`.
+**Aggregate call budget — the fallback's ceiling.** {rung_cost} The op-level cost is therefore a PRODUCT, and it is bounded: `≤50` items × `≤2` pages = **`≤100`** marker calls. Exceeding the budget ⇒ stop and report the remainder as `TRUNCATED (\{n\} not processed)`.
 @end
 
 @define reference_rendering_gate():

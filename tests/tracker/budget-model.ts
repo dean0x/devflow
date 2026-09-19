@@ -258,6 +258,24 @@ export function nameableCrossCutting(content: string): Set<string> {
 export const MODEL_CROSS_CUTTING_ON_DEMAND: readonly string[] = ['decision-markers.md'];
 
 /**
+ * The cross-cutting references the always-loaded part names that ARE asserted —
+ * the other half of the same declaration, kept beside it rather than folded in.
+ *
+ * `tracker/_mcp.md` is named from the preamble because it is read once per SPAWN
+ * under every non-github provider, and its cost is already a summed term of the
+ * per-provider rows (`providerLoadedSet`), billed 0 on the GitHub path by
+ * construction. So it is exactly the case ON_DEMAND is not: not a glossary a
+ * reader may consult, but a contract the spawn must have.
+ *
+ * Two lists rather than one, because the scope check and the printed table want
+ * different answers. The scope check asks "does the model know the agent can name
+ * this?" and must see both. The `2b` table row asks "what would it cost to treat
+ * the on-demand ones as mandatory?" and must see only the first — a contract
+ * already inside the asserted gate would be counted twice there.
+ */
+export const MODEL_CROSS_CUTTING_ASSERTED: readonly string[] = [MCP_CONTRACT_REL];
+
+/**
  * The cross-cutting references the BUDGET MODEL attributes to each operation,
  * beyond its own generated mechanics file [DR-12].
  *
