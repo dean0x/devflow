@@ -904,8 +904,11 @@ describe('[DR-04] DEGRADED literal registry: forward direction', () => {
     ).toBe(CANONICAL_REASONS.length);
     expect(
       CANONICAL_REASONS.length,
-      '§14.2 fixes eighteen non-`(none)` reasons; a shorter table is a narrowed registry',
-    ).toBeGreaterThanOrEqual(18);
+      // 18 at the tracker wave, 20 now: the mismatch reason split by cause (+2 -1)
+      // and the plan artifact's cap (+1). A floor rises with the table and never
+      // falls — a shorter table is a narrowed registry, whatever the reason given.
+      '§14.2 fixes 20 non-`(none)` reasons; a shorter table is a narrowed registry',
+    ).toBeGreaterThanOrEqual(20);
     // The instantiation rule is a NARROWING, not a wildcard: only `{provider}` is
     // instantiated, only with tokens the registry carries, and a reason without the
     // placeholder still matches itself and nothing else.
