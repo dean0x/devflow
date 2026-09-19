@@ -6,7 +6,7 @@ import { DEVFLOW_PLUGINS, SKILL_NAMESPACE, prefixSkillName, unprefixSkillName, g
 import { skillsDir, agentSourceDirs, rulesDir, commandsDir, scriptsDir, compiledSkillRefsDir, type AgentSourceDirs } from '../../core/assets.js';
 import { getPackageRoot, isContainedIn } from '../../core/paths.js';
 import { sweepOrphanedAssets, mdFileName, mdEntryName, type SweepResult } from '../../core/orphan-sweep.js';
-import { generatedReferenceManifest, SKILL_REFS_SKILL_NAME } from '../../core/mds-variants.js';
+import { generatedReferenceManifest, installedReferenceManifest, SKILL_REFS_SKILL_NAME } from '../../core/mds-variants.js';
 import { sweepOrphanedReferences, MAX_REFERENCE_SWEEP_DEPTH } from '../../core/reference-sweep.js';
 
 // ---------------------------------------------------------------------------
@@ -1101,6 +1101,51 @@ export async function overlayGeneratedReferences(opts: {
   }
 
   return { overlaidRefs, overlayFailures, pruned };
+}
+
+/**
+ * Converge the installed `devflow:git` references onto ONE provider's install set.
+ *
+ * The provider-scoped entry point to {@link overlayGeneratedReferences}: it
+ * resolves the install manifest and the target directory from a claudeDir and a
+ * provider, and changes nothing else. There is exactly ONE overlay spelling in
+ * this codebase and this is its only wrapper — `devflow init` reaches the
+ * overlay through `installViaFileCopy`, `devflow tracker --set` reaches it
+ * through here, and both converge to the same manifest for the same provider.
+ *
+ * Convergence is two-directional by construction, because the underlying overlay
+ * PRUNES everything under `references/tracker/**` the manifest does not name: a
+ * jira → github change removes the jira tree and `_mcp.md` in the same call that
+ * refreshes the github tree (applies PF-015).
+ *
+ * Throws on an absent generated tree, exactly as its callee does — that is a
+ * build artifact that was never produced, not an I/O degradation, and the
+ * refusal lands before the target directory is created so a refused overlay
+ * leaves the install as it found it.
+ *
+ * @param opts.provider - The RESOLVED tracker provider id.
+ * @param opts.referencesRoot - The GENERATED tree to install from; defaults to
+ *   `compiledSkillRefsDir()`. Injectable so the absent-tree refusal is provable
+ *   without deleting `dist/` out from under a concurrent test run (applies
+ *   PF-013 — a seam the caller can drive, not a global the test has to break).
+ */
+export async function overlayInstalledReferences(opts: {
+  claudeDir: string;
+  provider: string;
+  warn?: (msg: string) => void;
+  referencesRoot?: string;
+}): Promise<ReferenceOverlayResult> {
+  return overlayGeneratedReferences({
+    referencesTarget: path.join(
+      opts.claudeDir,
+      'skills',
+      prefixSkillName(SKILL_REFS_SKILL_NAME),
+      'references',
+    ),
+    sourceRoot: opts.referencesRoot,
+    manifest: installedReferenceManifest({ provider: opts.provider }),
+    warn: opts.warn,
+  });
 }
 
 // ---------------------------------------------------------------------------
