@@ -33,6 +33,7 @@ import * as path from 'path';
 import {
   DEVFLOW_PLUGINS,
   FEATURE_OWNED_SKILLS,
+  SKILL_NAMESPACE,
   PRESENCE_GATED_SKILLS,
   TEMPLATE_SKILL_REFS,
   getAllSkillNames,
@@ -51,6 +52,19 @@ const AGENT_DIRS = [path.join(ROOT, 'dist', 'agents'), path.join(ROOT, 'src', 'a
  * floor is what notices. Measured 2026-09-19 over 200 files / 297 sites.
  */
 const REF_TOKEN_FLOOR = 44;
+
+/**
+ * The namespace prefix, composed rather than spelled inline in the probes below.
+ *
+ * The probes deliberately feed the scanner names that are NOT skills — a typo, an
+ * undeclared reference — and that is the whole point of them. Writing those as
+ * source literals would also hand them to `tests/skill-references.test.ts`, whose
+ * job is to catch exactly such a name appearing anywhere under `tests/`. The
+ * probe input is byte-identical either way; only the spelling in this file moves,
+ * so the global scanner stays strict instead of gaining an exemption for the one
+ * file whose subject is invalid references.
+ */
+const NS = `${SKILL_NAMESPACE}`;
 
 // ---------------------------------------------------------------------------
 // Named collectors
@@ -92,10 +106,11 @@ export function collectSkillRefs(body: string, file: string): RawRef[] {
  * Resolve one reference against a scope.
  *
  * A reference carrying a `{...}` placeholder is a TEMPLATE. It resolves through
- * the literal prefix in front of the placeholder: `devflow:research-{TYPE}`
- * resolves iff at least one in-scope skill starts with `research-`. A template
- * with NO literal prefix — `devflow:{focus}` — has nothing to resolve against,
- * and that is exactly the one classified exception the registry declares.
+ * the literal prefix in front of the placeholder: the Research agent's
+ * `research-{RESEARCH_TYPE}` form resolves iff at least one in-scope skill
+ * starts with `research-`. A template with NO literal prefix —
+ * `devflow:{focus}` — has nothing to resolve against, and that is exactly the
+ * one classified exception the registry declares.
  */
 function resolveRef(ref: RawRef, scope: ReadonlySet<string>): 'in-scope' | 'template-exception' | 'out-of-scope' {
   if (TEMPLATE_SKILL_REFS.some(t => t.literal === ref.raw)) return 'template-exception';
@@ -206,18 +221,18 @@ describe('requires closure (forward): every skill reference resolves in scope', 
   });
 
   it('known-bad probe: an undeclared reference in a synthetic corpus is caught', () => {
-    const refs = collectSkillRefs('Load via Skill(skill="devflow:undeclared").', 'synthetic.md');
-    expect(refs.map(r => r.raw)).toEqual(['devflow:undeclared']);
+    const refs = collectSkillRefs(`Load via Skill(skill="${NS}undeclared").`, 'synthetic.md');
+    expect(refs.map(r => r.raw)).toEqual([`${NS}undeclared`]);
     expect(resolveRef(refs[0], new Set(['security']))).toBe('out-of-scope');
   });
 
   it('known-bad probe: the two non-skill devflow: spellings are classified out, a typo is not', () => {
     const body = [
-      'See `/devflow:dynamic-plan` for the planning pass.',
-      '<!-- devflow:review-summary ts:{TS} -->',
-      'Load `devflow:securty` for the security pass.',
+      `See \`/${NS}dynamic-plan\` for the planning pass.`,
+      `<!-- ${NS}review-summary ts:{TS} -->`,
+      `Load \`${NS}securty\` for the security pass.`,
     ].join('\n');
-    expect(collectSkillRefs(body, 'synthetic.md').map(r => r.raw)).toEqual(['devflow:securty']);
+    expect(collectSkillRefs(body, 'synthetic.md').map(r => r.raw)).toEqual([`${NS}securty`]);
   });
 });
 

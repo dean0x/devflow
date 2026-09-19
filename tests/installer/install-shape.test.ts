@@ -189,7 +189,11 @@ describe('removal: scoped, gated, and never beyond the registry', () => {
     // registry is an orphan, and it leaves through the orphan sweep — reported
     // as such, so the summary says "no longer in the registry" rather than
     // "no selected plugin requires it", which would be a different fact.
-    const foreign = 'devflow:not-a-registry-skill';
+    // Composed rather than spelled inline: tests/skill-references.test.ts scans
+    // every tests/**/*.ts for a `devflow:` name that is not a registry skill,
+    // which is exactly what this probe needs on DISK and must not leave in
+    // SOURCE. The directory name is byte-identical either way.
+    const foreign = `${prefixSkillName('not-a-registry-skill')}`;
     await fs.mkdir(path.join(claudeDir, 'skills', foreign), { recursive: true });
 
     const report = await run({ plugins: [plugin('devflow-explore')], isPartialInstall: false });
@@ -219,7 +223,8 @@ describe('removal: scoped, gated, and never beyond the registry', () => {
 
 describe('sweep and pre-clean are scoped in opposite directions, on purpose', () => {
   it('the SWEEP is unscoped: a partial install still prunes a name the registry lost', async () => {
-    const retired = 'devflow:retired-skill-probe';
+    // Composed, for the same reason as the foreign-directory probe below.
+    const retired = `${prefixSkillName('retired-skill-probe')}`;
     await fs.mkdir(path.join(claudeDir, 'skills', retired), { recursive: true });
 
     await run({

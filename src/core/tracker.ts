@@ -340,6 +340,14 @@ export function trackerEnabledSentinelPath(devflowDir: string): string {
 }
 
 /** `tracker.md.{provider}.bak` — the basename a stale conventions file lands under. */
+/*
+ * The two backup-name helpers below are EXPORTED deliberately, not by oversight.
+ * The `.bak` filename is a user-visible contract: `renameStaleTrackerConventions`
+ * writes it, `devflow tracker --status` and the uninstall user-content list both
+ * reason about it, and tests/core/tracker.test.ts pins it. Un-exporting would
+ * force the pin to re-derive the name from a template beside the real one, which
+ * is the shadow-reimplementation a guard is worth nothing without (PF-018).
+ */
 export function trackerConventionsBackupName(previous: TrackerProvider): string {
   return `${TRACKER_CONVENTIONS_FILE}.${previous}.bak`;
 }

@@ -3,13 +3,119 @@ import { promises as fs } from 'fs';
 import { execFileSync } from 'child_process';
 import * as os from 'os';
 import * as path from 'path';
-import { computeAssetsToRemove, formatDryRunPlan, resolveSecurityRemovalDecision, enumerateUserDevFlowContent, userContentPaths, resolveDevflowDirCleanup, resolveProjectDataCleanup, removeDevFlowInstallArtifacts, installArtifactPaths, resolveInstallArtifactPaths, enumerateDryRunExtras, removeAllDevFlow, removeSelectedPlugins, sweepDevflowNamespaces, isDevFlowInstalled, runDryRunPhase, runSelectivePhaseForScope, runFullPhaseForScope, runCleanupPhase } from '../src/cli/commands/uninstall.js';
-import { DEVFLOW_PLUGINS, getAllAgentNames, parsePluginSelection, type PluginDefinition } from '../src/core/plugins.js';
+import { computeAssetsToRemove, formatDryRunPlan, resolveSecurityRemovalDecision, enumerateUserDevFlowContent, userContentPaths, resolveDevflowDirCleanup, resolveProjectDataCleanup, removeDevFlowInstallArtifacts, installArtifactPaths, resolveInstallArtifactPaths, enumerateDryRunExtras, removeAllDevFlow, removeSelectedPlugins, sweepDevflowNamespaces, isDevFlowInstalled, runDryRunPhase, runSelectivePhaseForScope, runFullPhaseForScope, runCleanupPhase, resolveInstalledPlugins } from '../src/cli/commands/uninstall.js';
+import { DEVFLOW_PLUGINS, getAllAgentNames, parsePluginSelection, skillsOf, type PluginDefinition } from '../src/core/plugins.js';
 import { TRACKER_CONVENTIONS_BACKUP_NAMES, TRACKER_STAGED_PREFIX } from '../src/core/tracker.js';
 import { modelCacheDir } from '../src/core/cache.js';
 import { LEGACY_SKILL_NAMES } from '../src/targets/claude-code/legacy.js';
 
-describe('computeAssetsToRemove', () => {
+describe('computeAssetsToRemove: the retained set comes from what is INSTALLED', () => {
+  const byName = (name: string) => DEVFLOW_PLUGINS.find(p => p.name === name)!;
+
+  it('retains a skill only when a still-INSTALLED plugin needs it, not any registry plugin', () => {
+    // 'patterns' is owned by devflow-plan and also declared by devflow-implement.
+    // Under a manifest that records only plan + core, uninstalling plan must
+    // remove it — retaining it on behalf of a plugin the user never installed
+    // leaves them with exactly the files they asked to delete.
+    const installed = [byName('devflow-core-skills'), byName('devflow-plan')];
+    const { skills } = computeAssetsToRemove([byName('devflow-plan')], installed);
+    expect(skills).toContain('patterns');
+
+    // The same removal against the whole registry retains it, which is the
+    // pre-change behaviour and the defect: devflow-implement is not installed.
+    const againstRegistry = computeAssetsToRemove([byName('devflow-plan')], DEVFLOW_PLUGINS);
+    expect(againstRegistry.skills).not.toContain('patterns');
+  });
+
+  it('retains across the CLOSURE — a skill another installed plugin REQUIRES survives', () => {
+    // devflow-explore requires review-methodology without owning it. Uninstalling
+    // its owner while explore is still installed must not take it away.
+    const installed = [byName('devflow-code-review'), byName('devflow-explore')];
+    const { skills } = computeAssetsToRemove([byName('devflow-code-review')], installed);
+    expect(
+      skills,
+      'a skill an installed plugin merely requires is still a skill it needs',
+    ).not.toContain('review-methodology');
+  });
+
+  it('removes the closure of the selected plugins, not only what they own', () => {
+    const solo = byName('devflow-explore');
+    const { skills } = computeAssetsToRemove([solo], [byName('devflow-core-skills'), solo]);
+    // core-skills is still installed and its own closure covers most of explore's
+    // requires, so what leaves is what only explore reached.
+    for (const name of skills) {
+      expect(skillsOf([byName('devflow-core-skills')]).has(name)).toBe(false);
+    }
+  });
+
+  it('falls back to the registry when the manifest names nothing this registry has', async () => {
+    const tmp = await fs.mkdtemp(path.join(os.tmpdir(), 'devflow-uninstall-manifest-'));
+    try {
+      // No manifest at all.
+      expect(await resolveInstalledPlugins(tmp)).toEqual(DEVFLOW_PLUGINS);
+
+      // A manifest naming only plugins this registry has dropped.
+      const seedManifest = async (dir: string, plugins: string[]): Promise<void> => {
+      await fs.writeFile(
+        path.join(dir, 'manifest.json'),
+        JSON.stringify({
+          version: '2.0.0',
+          plugins,
+          scope: 'user',
+          knownPlugins: plugins,
+          features: {
+            ambient: false, memory: false, hud: false, knowledge: false, learning: false,
+            rules: false, flags: {}, security: 'user', proxy: false,
+            compliance: { enabled: false, frameworks: [] },
+            tracker: { provider: 'github' },
+          },
+          installedAt: '2026-01-01T00:00:00.000Z',
+          updatedAt: '2026-01-01T00:00:00.000Z',
+        }),
+        'utf-8',
+      );
+    };
+      await seedManifest(tmp, ['devflow-long-gone']);
+      expect(
+        await resolveInstalledPlugins(tmp),
+        'retaining too much is the safe direction for a removal',
+      ).toEqual(DEVFLOW_PLUGINS);
+    } finally {
+      await fs.rm(tmp, { recursive: true, force: true });
+    }
+  });
+
+  it('resolves the recorded plugins to their definitions', async () => {
+    const tmp = await fs.mkdtemp(path.join(os.tmpdir(), 'devflow-uninstall-manifest-'));
+    try {
+      const seedManifest = async (dir: string, plugins: string[]): Promise<void> => {
+      await fs.writeFile(
+        path.join(dir, 'manifest.json'),
+        JSON.stringify({
+          version: '2.0.0',
+          plugins,
+          scope: 'user',
+          knownPlugins: plugins,
+          features: {
+            ambient: false, memory: false, hud: false, knowledge: false, learning: false,
+            rules: false, flags: {}, security: 'user', proxy: false,
+            compliance: { enabled: false, frameworks: [] },
+            tracker: { provider: 'github' },
+          },
+          installedAt: '2026-01-01T00:00:00.000Z',
+          updatedAt: '2026-01-01T00:00:00.000Z',
+        }),
+        'utf-8',
+      );
+    };
+      await seedManifest(tmp, ['devflow-core-skills', 'devflow-explore', 'devflow-long-gone']);
+      expect((await resolveInstalledPlugins(tmp)).map(pl => pl.name))
+        .toEqual(['devflow-core-skills', 'devflow-explore']);
+    } finally {
+      await fs.rm(tmp, { recursive: true, force: true });
+    }
+  });
+
   it('removes skills unique to selected plugins', () => {
     // devflow-debug has no unique skills (all are shared), pick a plugin with unique assets
     const debugPlugin = DEVFLOW_PLUGINS.find(p => p.name === 'devflow-debug')!;
@@ -1473,6 +1579,7 @@ describe('runDryRunPhase (A8)', () => {
       scopesToUninstall: ['user'],
       isSelectiveUninstall: true,
       selectedPlugins: [reviewPlugin],
+      installedPlugins: DEVFLOW_PLUGINS,
     })).resolves.not.toThrow();
   });
 
@@ -1482,6 +1589,7 @@ describe('runDryRunPhase (A8)', () => {
       scopesToUninstall: [],
       isSelectiveUninstall: false,
       selectedPlugins: [],
+      installedPlugins: DEVFLOW_PLUGINS,
     })).resolves.not.toThrow();
   });
 });
