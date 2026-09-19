@@ -148,6 +148,17 @@ provider's per-operation mechanics.
 - **Resolve the capability set and the current-user identity exactly once per
   spawn, before any loop.** Never probe inside a loop.
 
+### Rate-limit signals
+
+Backpressure does not always arrive as a `429`: on some providers it is a NAMED
+error inside an ordinary `4xx`, which a status-shaped rule reads as a generic 4xx
+and D4 answers with "degrade this item and continue" — running on into the window
+the rung exists to stop.
+
+**Where the resolved provider's mechanics name such a signal, it is D4's STOP
+rung and never a generic 4xx.** Read the error TEXT, not the status alone. This
+binds every operation, not only the one that fans out.
+
 ### Capability table
 
 Each row is a capability an operation may require. The right column is what an

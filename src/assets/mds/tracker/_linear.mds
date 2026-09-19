@@ -242,7 +242,7 @@ Load when the resolved tracker provider is `linear` and the operation is `backli
 
 The D4 degradation contract and the D11 comment-sink scrub state the rules; what they leave to the provider is the SIGNAL. These are this provider's.
 
-- **Backpressure arrives as an HTTP `400` carrying `RATELIMITED`, not as a 429.** In a tool call it surfaces as error text rather than as a status line, so the detector must read that error text and not the status — a status-shaped rule classifies `400` as a generic 4xx, which D4 answers with "degrade this item and continue", and the fan-out runs straight on into the window this rung exists to stop. On `RATELIMITED`, **STOP** the fan-out and report the remainder.
+- **Backpressure arrives as an HTTP `400` carrying `RATELIMITED`, not as a 429**, and in a tool call it surfaces as error text rather than as a status line. This is the named 4xx signal `### Rate-limit signals` in the tool-call contract governs: on `RATELIMITED`, **STOP** the fan-out and report the remainder.
 - **There is no pre-emptive rung.** This provider does not publish a remaining-request count, so there is no threshold at which the inter-item delay rises. A rung keyed on one would never engage, and a module that stated one would read as coverage while providing none.
 - **Unavailability:** the *add comment* or *list comments with authors* capability absent or denied — D4's "no remote" condition on this provider.
 
