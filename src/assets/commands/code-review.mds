@@ -169,6 +169,8 @@ Per worktree, detect file types in diff using `DIFF_RANGE` to determine conditio
 
 If `COMPLIANCE_SKILL_INSTALLED` AND the diff touches regulated surface (data models, auth flows, logging/observability, payments, IaC, retention): add `compliance` to REVIEW_FOCUS_LIST for this worktree.
 
+**Language focus presence gate.** The eight language focuses — `typescript`, `react`, `accessibility`, `ui-design`, `go`, `java`, `python`, `rust` — ship with optional plugins, so their pattern skills are installed only when the user selected that plugin. Gate them exactly as `compliance` is gated: for each language focus the table above would add, check whether `~/.claude/skills/devflow:\{focus\}/SKILL.md` exists (one file-existence check per candidate focus, read-only, silent). If it does not exist, do NOT add that focus to `REVIEW_FOCUS_LIST` and do NOT spawn a Review agent for it — the file-type condition alone never spawns a language focus. The eight core focuses are unconditional and are never presence-gated.
+
 ### Phase 1b: Load Decisions Index
 
 **Produces:** DECISIONS_CONTEXT, FEATURE_KNOWLEDGE, COMPLIANCE_SKILL_INSTALLED (carried from Step 0b)
@@ -200,14 +202,14 @@ Spawn Review agents **in a single message**. Always run 8 core reviews; conditio
 | regression | ✓ | devflow:regression |
 | testing | ✓ | devflow:testing |
 | reliability | ✓ | devflow:reliability |
-| typescript | conditional | devflow:typescript |
-| react | conditional | devflow:react |
-| accessibility | conditional | devflow:accessibility |
-| ui-design | conditional | devflow:ui-design |
-| go | conditional | devflow:go |
-| java | conditional | devflow:java |
-| python | conditional | devflow:python |
-| rust | conditional | devflow:rust |
+| typescript | presence-gated | devflow:typescript |
+| react | presence-gated | devflow:react |
+| accessibility | presence-gated | devflow:accessibility |
+| ui-design | presence-gated | devflow:ui-design |
+| go | presence-gated | devflow:go |
+| java | presence-gated | devflow:java |
+| python | presence-gated | devflow:python |
+| rust | presence-gated | devflow:rust |
 | database | conditional | devflow:database |
 | dependencies | conditional | devflow:dependencies |
 | documentation | conditional | devflow:documentation |

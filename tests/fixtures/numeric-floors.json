@@ -217,6 +217,14 @@
       "occurrences": 1,
       "sourceFile": "tests/tracker/hostile-values.test.ts",
       "description": "Rows HOSTILE_REFS must carry — shell separator, command substitution, both flag-injection spellings, path traversal, size, the zero-numbered key an unanchored digit class admits, and whitespace. Every pinned §14.1 grammar in PROVIDER_REF_GRAMMARS is driven over the whole table, so one row added widens the corpus for every provider at once and one removed silently narrows it for all of them. A FLOOR for the same reason as min-hostile-payloads."
+    },
+    {
+      "id": "requires-closure-token-floor",
+      "floor": 44,
+      "pattern": "REF_TOKEN_FLOOR = 44",
+      "occurrences": 1,
+      "sourceFile": "tests/guards/requires-closure.test.ts",
+      "description": "Distinct devflow: skill references across the widened closure corpus (dist/commands + agent sources + skill bodies incl. references/). Non-vacuity floor for the bidirectional requires: guard — a scanner that stopped matching would make both arms pass over an empty corpus. Measured 2026-09-19: 200 files, 297 sites, 44 distinct."
     }
   ],
   "ceilings": [

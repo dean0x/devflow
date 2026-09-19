@@ -267,7 +267,7 @@ export const trackerCommand = new Command('tracker')
     // ── Set ────────────────────────────────────────────────────────────────────
     const resolved = resolveTrackerCliAction(current, setProvider);
 
-    // P3a-S15: a conventions file inferred for the previous provider is stale the
+    // A conventions file inferred for the previous provider is stale the
     // moment the provider changes — move it aside so it can never be silently
     // authoritative, and so the reader-side mismatch guard has nothing to fight.
     const transition = await renameStaleTrackerConventions(

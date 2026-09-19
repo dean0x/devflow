@@ -46,6 +46,17 @@ interface RetiredEntry {
   removedFrom: string;
   justification: string;
   /**
+   * Matches a CLASS of retired wording rather than one spelling. When present it
+   * replaces the `literal` substring test and `literal` becomes the entry's
+   * human-readable name in the failure message.
+   *
+   * Reserved for residue whose members are not enumerable in advance — a phase
+   * label is minted by whoever writes the next phase, so a fixed list would go
+   * stale the moment it mattered. Everything with a knowable spelling stays a
+   * literal, individually classified (applies ADR-025).
+   */
+  pattern?: RegExp;
+  /**
    * Corpus path prefixes this literal is retired FROM, spelled as the corpus spells
    * them (`dist/commands/`, `src/assets/skills/git/`, …). Absent means the whole
    * corpus.
@@ -225,6 +236,35 @@ const RETIRED_LITERALS: ReadonlyArray<RetiredEntry> = [
       `Retired status heading — ${why}. A heading with no emitter is residue; a heading an op ` +
       `still emits is a user-visible section describing a flow that no longer exists.`,
   })),
+
+  // -------------------------------------------------------------------------
+  // Transition narration in the TypeScript sources.
+  //
+  // Comments that date a line to the wave that wrote it ("P3a-S15: move a
+  // now-stale conventions file aside") describe the transition, not the end
+  // state, and a reader six months on cannot resolve the label to anything. The
+  // rationale itself is worth keeping — only the coordinate goes (applies
+  // ADR-003).
+  //
+  // A pattern rather than seven literals because the members are not enumerable:
+  // the next wave mints its own labels, and a fixed list would pass over exactly
+  // the narration it was added to stop.
+  // -------------------------------------------------------------------------
+  {
+    literal: 'P{n}-S{n} phase labels',
+    pattern: /P[0-9][a-z]?-S[0-9]+/,
+    phase: '4',
+    removedFrom:
+      'src/core/{tracker,mds-variants,feature-config}.ts, src/cli/commands/{init,tracker}.ts, ' +
+      'src/targets/claude-code/installer.ts, src/assets/scripts/redact-secrets.cjs',
+    scope: ['src/'],
+    justification:
+      'Wave coordinates in source comments are transition narration: they name a phase of a ' +
+      'delivery that has shipped, and resolve to nothing for the next reader. Seven sites carried ' +
+      'them; each was rewritten to state the rule instead of the phase that introduced it. Scoped ' +
+      'to src/ because the plan artifacts, handoffs and knowledge bases under .devflow/ and docs/ ' +
+      'are where that provenance legitimately lives (PF-040).',
+  },
 ];
 
 // ---------------------------------------------------------------------------
@@ -264,6 +304,13 @@ function buildCorpus(): Array<{ relPath: string; content: string }> {
   // '' in exts picks up extensionless hook scripts in src/assets/scripts/hooks/ so
   // retired-wording checks are not silently skipped for that corpus (e.g. capture-prompt, ensure-proxy).
   addDir(path.join(ROOT, 'src', 'assets'), 'src/assets', ['.md', '.mds', '.sh', '']);
+  // The TypeScript sources and the shipped CJS scripts. Without them the phase-label
+  // entry would be retired from a tree nothing scanned — every site it names lives
+  // in a .ts or .cjs file, and the four extensions above reach none of them.
+  for (const sub of ['core', 'cli', 'targets', 'hud']) {
+    addDir(path.join(ROOT, 'src', sub), `src/${sub}`, ['.ts', '.cjs']);
+  }
+  addDir(path.join(ROOT, 'src', 'assets', 'scripts'), 'src/assets/scripts', ['.cjs']);
   addDir(path.join(ROOT, 'dist', 'commands'), 'dist/commands', ['.md']);
   addDir(path.join(ROOT, 'dist', 'agents'), 'dist/agents', ['.md']);
   // Phase 2 generates a third build output. Without it the scoped `sleep 60` entry
@@ -299,7 +346,10 @@ function collectRetiredLiteralViolations(
   for (const { relPath, content } of corpus) {
     for (const entry of RETIRED_LITERALS) {
       if (entry.scope && !entry.scope.some(prefix => relPath.startsWith(prefix))) continue;
-      if (content.includes(entry.literal)) {
+      const hit = entry.pattern !== undefined
+        ? entry.pattern.test(content)
+        : content.includes(entry.literal);
+      if (hit) {
         violations.push(
           `${relPath}: contains retired literal "${entry.literal}" (phase ${entry.phase}; removed from ${entry.removedFrom})`,
         );
@@ -348,6 +398,25 @@ describe('retired-wording guard — denylist of retired literals (P0-S22, GAP-32
       `scope prefix(es) matching no corpus file — the entry is retired from a tree nothing scans:\n  ` +
       dead.join('\n  '),
     ).toEqual([]);
+  });
+
+  it('known-bad probe: a seeded phase label in a src/ source is caught (mechanic 2)', () => {
+    // The pattern entry has no fixed spelling to seed, so the probe mints one the
+    // denylist has never seen — which is the property a literal list cannot have.
+    const seeded = collectRetiredLiteralViolations([{
+      relPath: 'src/core/probe.ts',
+      content: '// P7c-S42: a coordinate nobody can resolve\nexport const probe = 1;\n',
+    }]);
+    expect(
+      seeded.filter(v => v.includes('P{n}-S{n} phase labels')),
+      'a freshly-minted phase label in src/ must be caught by the class rule',
+    ).not.toEqual([]);
+
+    // …and the same label in the plan artifacts it legitimately belongs to is not.
+    const provenance = collectRetiredLiteralViolations([
+      { relPath: 'docs/reference/probe.md', content: 'The P7c-S42 step landed the overlay.\n' },
+    ]);
+    expect(provenance.filter(v => v.includes('P{n}-S{n} phase labels'))).toEqual([]);
   });
 
   it('known-bad probe: a scope confines its entry to the named tree (mechanic 2)', () => {

@@ -8,7 +8,7 @@ export type ReviewPublication = 'auto' | 'full' | 'off';
 /**
  * The parsed per-repo tracker override — THREE states, because the Git agent's
  * resolution order needs all three and no two of them mean the same thing
- * (P3a-S13, OD-9, [DR-26]).
+ * (OD-9, [DR-26]).
  *
  *   absent  — no override. The agent defers to `features.tracker.provider` in the
  *             manifest. This is NOT the same as `github`: a chosen `github` is a

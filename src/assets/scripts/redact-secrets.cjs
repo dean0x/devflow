@@ -57,7 +57,7 @@
 'use strict';
 
 const fs = require('fs');
-// Genuinely new in P3a-S11: no hashing or randomness helper exists anywhere else
+// Genuinely new: no hashing or randomness helper exists anywhere else
 // under src/assets/scripts. frameEmit is the ONLY consumer.
 const crypto = require('crypto');
 

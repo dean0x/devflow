@@ -473,7 +473,7 @@ export const VARIANT_MODULES = [
 
 // ---------------------------------------------------------------------------
 // The tool-call contract module, and the gate on its generation
-// (P3a-S12, hazard H7, conflict C5)
+// (hazard H7, conflict C5)
 // ---------------------------------------------------------------------------
 
 /**

@@ -15,6 +15,11 @@ import {
   LEGACY_PLUGIN_NAMES,
   FEATURE_OWNED_SKILLS,
   FEATURE_OWNED_RULES,
+  PRESENCE_GATED_SKILLS,
+  skillsOf,
+  skillOwners,
+  buildScopedSkillsMap,
+  resolveSkillInstallPlan,
   type PluginDefinition,
 } from '../src/core/plugins.js';
 import { LEGACY_SKILL_NAMES } from '../src/targets/claude-code/legacy.js';
@@ -125,6 +130,169 @@ describe('buildFullSkillsMap', () => {
   });
 });
 
+// ---------------------------------------------------------------------------
+// Scoped skill closure (D-SCOPED-SKILLS)
+// ---------------------------------------------------------------------------
+
+describe('skillsOf', () => {
+  const byName = (name: string): PluginDefinition => {
+    const found = DEVFLOW_PLUGINS.find(p => p.name === name);
+    if (found === undefined) throw new Error(`no such plugin: ${name}`);
+    return found;
+  };
+
+  it('is the union of skills AND requires, not either alone', () => {
+    const explore = byName('devflow-explore');
+    const closure = skillsOf([explore]);
+    for (const owned of explore.skills) expect(closure.has(owned)).toBe(true);
+    for (const required of explore.requires) expect(closure.has(required)).toBe(true);
+    expect(closure.size).toBe(new Set([...explore.skills, ...explore.requires]).size);
+  });
+
+  it('review-methodology reaches devflow-explore through its Synthesize agent', () => {
+    // The widened corpus (design review C1) is what puts it there: explore owns
+    // none of the pattern skills, and synthesize.md names review-methodology,
+    // whose own body then names the ten focus skills.
+    expect(byName('devflow-explore').requires).toContain('review-methodology');
+    expect(skillsOf([byName('devflow-explore')]).has('review-methodology')).toBe(true);
+  });
+
+  it('deduplicates across plugins and is empty for an empty selection', () => {
+    expect(skillsOf([]).size).toBe(0);
+    const pair = skillsOf([byName('devflow-explore'), byName('devflow-research')]);
+    expect(pair.size).toBeLessThan(
+      skillsOf([byName('devflow-explore')]).size + skillsOf([byName('devflow-research')]).size,
+    );
+  });
+
+  it('the full registry closure equals the full registry skill set', () => {
+    // A requires entry is always some plugin's owned skill, so the closure adds
+    // nothing at registry scope — the property buildFullSkillsMap relies on.
+    expect([...skillsOf(DEVFLOW_PLUGINS)].sort()).toEqual([...getAllSkillNames()].sort());
+  });
+
+  it('scoping is real: the default (non-optional) selection is a strict subset', () => {
+    const scoped = skillsOf(DEVFLOW_PLUGINS.filter(p => !p.optional));
+    expect(scoped.size).toBeLessThan(getAllSkillNames().length);
+    for (const gated of PRESENCE_GATED_SKILLS) {
+      expect(scoped.has(gated), `${gated} must not install by default`).toBe(false);
+    }
+  });
+});
+
+describe('skillOwners', () => {
+  it('returns every declaring plugin, not the first', () => {
+    const owners = skillOwners('worktree-support');
+    expect(owners.length).toBeGreaterThan(1);
+    for (const name of owners) {
+      expect(DEVFLOW_PLUGINS.find(p => p.name === name)?.skills).toContain('worktree-support');
+    }
+  });
+
+  it('preserves registry declaration order', () => {
+    const owners = skillOwners('worktree-support');
+    const registryOrder = DEVFLOW_PLUGINS.map(p => p.name).filter(n => owners.includes(n));
+    expect(owners).toEqual(registryOrder);
+  });
+
+  it('never reports a plugin that merely requires the skill', () => {
+    // devflow-explore requires review-methodology; devflow-code-review owns it.
+    expect(skillOwners('review-methodology')).not.toContain('devflow-explore');
+    expect(skillOwners('review-methodology')).toContain('devflow-code-review');
+  });
+
+  it('is empty for an unknown name', () => {
+    expect(skillOwners('no-such-skill')).toEqual([]);
+  });
+});
+
+describe('buildScopedSkillsMap', () => {
+  const explore = DEVFLOW_PLUGINS.find(p => p.name === 'devflow-explore')!;
+
+  it('keys on the closure, not on owned skills alone', () => {
+    const map = buildScopedSkillsMap([explore]);
+    expect([...map.keys()].sort()).toEqual([...skillsOf([explore])].sort());
+  });
+
+  it('attributes a required-but-unowned skill to its real owner', () => {
+    const map = buildScopedSkillsMap([explore]);
+    expect(map.get('review-methodology')).toBe(skillOwners('review-methodology')[0]);
+    expect(map.get('review-methodology')).not.toBe('devflow-explore');
+  });
+
+  it('attributes an owned skill to the selected plugin that owns it', () => {
+    const map = buildScopedSkillsMap([explore]);
+    expect(map.get('feature-knowledge')).toBe('devflow-explore');
+  });
+
+  it('installs no presence-gated language skill for a non-language selection', () => {
+    const map = buildScopedSkillsMap([explore]);
+    for (const gated of PRESENCE_GATED_SKILLS) expect(map.has(gated)).toBe(false);
+  });
+});
+
+describe('resolveSkillInstallPlan', () => {
+  const nonOptional = DEVFLOW_PLUGINS.filter(p => !p.optional);
+  const explore = DEVFLOW_PLUGINS.find(p => p.name === 'devflow-explore')!;
+
+  it('a partial install removes nothing (AC-22)', () => {
+    const plan = resolveSkillInstallPlan({
+      effectivePlugins: [explore],
+      isPartialInstall: true,
+      shadowedSkills: [],
+    });
+    expect(plan.remove.size).toBe(0);
+    expect([...plan.install].sort()).toEqual([...skillsOf([explore])].sort());
+  });
+
+  it('a full install removes exactly skillsOf(all) \\ skillsOf(selected) \\ FEATURE_OWNED', () => {
+    const plan = resolveSkillInstallPlan({
+      effectivePlugins: nonOptional,
+      isPartialInstall: false,
+      shadowedSkills: [],
+    });
+    const expected = [...skillsOf(DEVFLOW_PLUGINS)]
+      .filter(s => !plan.install.has(s))
+      .filter(s => !(FEATURE_OWNED_SKILLS as readonly string[]).includes(s))
+      .sort();
+    expect([...plan.remove].sort()).toEqual(expected);
+    expect(plan.remove.size).toBeGreaterThan(0);
+  });
+
+  it('never removes a feature-owned skill even when no plugin claims it', () => {
+    const plan = resolveSkillInstallPlan({
+      effectivePlugins: nonOptional,
+      isPartialInstall: false,
+      shadowedSkills: [],
+    });
+    for (const owned of FEATURE_OWNED_SKILLS) {
+      expect(plan.remove.has(owned), `${owned} belongs to its feature, not to this sweep`).toBe(false);
+    }
+  });
+
+  it('a shadow outside the install set is dormant, never removed', () => {
+    const plan = resolveSkillInstallPlan({
+      effectivePlugins: [explore],
+      isPartialInstall: false,
+      shadowedSkills: ['typescript', 'feature-knowledge'],
+    });
+    expect(plan.dormantShadows).toEqual(['typescript']);
+    // Dormancy is a report, not a deletion instruction: the shadow directory
+    // lives in ~/.devflow/skills/ and is user content.
+    expect(plan.remove.has('typescript')).toBe(true);
+    expect(plan.dormantShadows).not.toContain('feature-knowledge');
+  });
+
+  it('deduplicates and sorts dormant shadows', () => {
+    const plan = resolveSkillInstallPlan({
+      effectivePlugins: [explore],
+      isPartialInstall: true,
+      shadowedSkills: ['rust', 'go', 'rust'],
+    });
+    expect(plan.dormantShadows).toEqual(['go', 'rust']);
+  });
+});
+
 describe('DEVFLOW_PLUGINS integrity', () => {
   it('has no duplicate plugin names', () => {
     const names = DEVFLOW_PLUGINS.map(p => p.name);
@@ -140,6 +308,8 @@ describe('DEVFLOW_PLUGINS integrity', () => {
       expect(Array.isArray(plugin.commands)).toBe(true);
       expect(Array.isArray(plugin.agents)).toBe(true);
       expect(Array.isArray(plugin.skills)).toBe(true);
+      expect(Array.isArray(plugin.requires)).toBe(true);
+      expect(Array.isArray(plugin.rules)).toBe(true);
     }
   });
 
@@ -152,6 +322,10 @@ describe('DEVFLOW_PLUGINS integrity', () => {
       for (const agent of plugin.agents) {
         expect(typeof agent).toBe('string');
         expect(agent.length).toBeGreaterThan(0);
+      }
+      for (const required of plugin.requires) {
+        expect(typeof required).toBe('string');
+        expect(required.length).toBeGreaterThan(0);
       }
     }
   });

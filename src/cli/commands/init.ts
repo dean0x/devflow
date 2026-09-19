@@ -495,7 +495,7 @@ export async function persistManifestThenConvergeTracker(opts: {
     return { manifestWritten: false, converged: false, messages };
   }
 
-  // P3a-S15: move a now-stale conventions file aside (AC-3.20's writer arm).
+  // Move a now-stale conventions file aside (the writer arm of the provider change).
   //
   // D-TRACKER-PARALLEL: the rename stays strictly ahead of the other two. It is
   // the only step that reads the PREVIOUS provider and the only one that reports

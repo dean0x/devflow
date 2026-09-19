@@ -313,7 +313,7 @@ export async function chmodRecursive(dir: string, mode: number, _depth = 0): Pro
 }
 
 // ---------------------------------------------------------------------------
-// Generated skill-reference overlay (P2-S14)
+// Generated skill-reference overlay
 // ---------------------------------------------------------------------------
 
 /** Sub-path under the references root that the prune converges to the manifest. */
