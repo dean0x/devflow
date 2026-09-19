@@ -921,3 +921,129 @@ describe('provider-scope: the plan command promises a tracker issue, not a host 
     ).toEqual(PLAN_COMMAND_PATHS.map(p => `${p}: Create or enrich a GitHub issue?`));
   });
 });
+
+// ---------------------------------------------------------------------------
+// 5. The OTHER direction — the incumbent's grammar in the provider-neutral body
+// ---------------------------------------------------------------------------
+//
+// Sections 1–4 look for a FOREIGN provider's literal in a file that is not that
+// provider's. They cannot see the opposite failure, which is the one this tree
+// actually shipped: the incumbent's grammar left behind in text that claims to be
+// provider-neutral. `jira` and `linear` are foreign tokens a scan can spot;
+// `#[0-9]+` is GitHub's issue grammar wearing no provider's name at all, so a
+// one-directional guard reported nothing while `gather-release-evidence` parsed
+// GitHub refs out of every commit range under every provider and handed back an
+// empty set (avoids PF-072).
+//
+// SCOPE: the documents that are provider-neutral BY CONTRACT — the always-loaded
+// agent and the tool-call contract. A provider's own mechanics module is where its
+// grammar belongs, `references/github-api.md` is a GitHub reference, and neither
+// is in scope here.
+//
+// PR-HOST ALLOWLIST: pull requests stay on GitHub under every provider, so a `#`
+// that names a PR is correct provider-neutral text and a `gh pr`/`gh api user`/
+// `gh repo view`/`gh release create` line is a PR-host mechanic, not a tracker
+// one. The allowlist is per LINE and is asserted to be load-bearing.
+
+interface GrammarPattern {
+  readonly name: string;
+  readonly pattern: RegExp;
+}
+
+/**
+ * Spellings of an ISSUE-reference grammar that only GitHub satisfies.
+ *
+ * Grammar, never rendering. `#{number}` in an Output template is a token the
+ * `## Reference Rendering` rule substitutes per provider; `#[0-9]+` is a parser.
+ * The first is how a reference is printed and the second is what counts as one.
+ */
+const GITHUB_ISSUE_GRAMMAR: readonly GrammarPattern[] = [
+  { name: 'the `#[0-9]` issue-ref regex', pattern: /#\[0-9\]/ },
+  { name: 'a digit-only ref filter', pattern: /digit-only/i },
+  { name: 'a bare-number ref rule stated as universal', pattern: /issue numbers from commit/i },
+];
+
+/** Lines that legitimately carry `#` because their subject is the PR host. */
+const PR_HOST_ALLOWLIST: readonly RegExp[] = [
+  /\bgh pr\b/,
+  /\bgh api user\b/,
+  /\bgh repo view\b/,
+  /\bgh release create\b/,
+  /\bPR refs are always\b/,
+];
+
+/** The provider-neutral documents, by corpus label. */
+const NEUTRAL_BODY_PATHS: readonly string[] = [
+  GIT_HOST,
+  'dist/agents/git.md',
+  'src/assets/mds/tracker/_mcp.mds',
+  'dist/skills/git/references/tracker/_mcp.md',
+];
+
+/**
+ * Named collector: GitHub issue-grammar spellings in a provider-neutral document,
+ * outside the PR-host allowlist.
+ */
+export function collectGithubGrammarInNeutralBody(corpus: readonly CorpusEntry[]): string[] {
+  const violations: string[] = [];
+  for (const entry of corpus) {
+    if (!NEUTRAL_BODY_PATHS.includes(entry.path)) continue;
+    for (const line of entry.content.split('\n')) {
+      if (PR_HOST_ALLOWLIST.some(allowed => allowed.test(line))) continue;
+      for (const grammar of GITHUB_ISSUE_GRAMMAR) {
+        if (grammar.pattern.test(line)) {
+          violations.push(`${entry.path}: ${grammar.name} — ${line.trim().slice(0, 90)}`);
+        }
+      }
+    }
+  }
+  return violations;
+}
+
+describe('provider-scope: the provider-neutral body states no GitHub issue grammar', () => {
+  const corpus = scanCorpus();
+
+  it('every provider-neutral document is in the corpus (the scope is not silently empty)', () => {
+    for (const rel of NEUTRAL_BODY_PATHS) {
+      requireCorpusEntry(corpus, rel);
+    }
+  });
+
+  it('no GitHub issue grammar appears outside a provider-owned mechanics file', () => {
+    const violations = collectGithubGrammarInNeutralBody(corpus);
+    expect(
+      violations,
+      'a provider-neutral document states GitHub\'s issue grammar. Under jira or linear that ' +
+      'grammar matches nothing, so the step yields an empty set and reports success — the failure ' +
+      'is silent, and a foreign-token scan cannot see it because the incumbent names no ' +
+      'provider:\n  ' + violations.join('\n  '),
+    ).toEqual([]);
+  });
+
+  it('known-bad probe: the collector sees the grammar, and the PR-host allowlist is load-bearing', () => {
+    const seed = (line: string): CorpusEntry[] =>
+      [{ path: 'dist/agents/git.md', content: `## Operations\n${line}\n` }];
+
+    expect(
+      collectGithubGrammarInNeutralBody(seed('parse for `#[0-9]+` references from `refs #`')),
+      'the collector must report the grammar this rule exists to remove',
+    ).toEqual(['dist/agents/git.md: the `#[0-9]` issue-ref regex — parse for `#[0-9]+` references from `refs #`']);
+
+    expect(
+      collectGithubGrammarInNeutralBody(seed('retain only digit-only entries')),
+      'and the filter that means the same thing in words',
+    ).toHaveLength(1);
+
+    expect(
+      collectGithubGrammarInNeutralBody(seed('`gh pr view {PR_NUMBER} --json comments` matches `#[0-9]+`')),
+      'a PR-host line is allowlisted — pull requests stay on GitHub under every provider',
+    ).toEqual([]);
+
+    expect(
+      collectGithubGrammarInNeutralBody([
+        { path: 'src/assets/mds/tracker/_github.mds', content: "grep -oE '#[0-9]+'\n" },
+      ]),
+      'a provider-owned mechanics file is out of scope — its grammar is what the file is for',
+    ).toEqual([]);
+  });
+});

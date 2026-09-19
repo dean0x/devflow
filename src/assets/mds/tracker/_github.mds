@@ -265,6 +265,7 @@ Load when the resolved tracker provider is `github` and the operation is `gather
 
 ### Process
 
+3b. **This provider's history grammar** is `#[0-9]+`, full-matching the whole candidate token. A bare number is not a reference here either: the keyword-anchored candidate must carry the `#`, and this provider has no project key, so the KEY-equality half of the agent's gate does not apply.
 4. If `gh` is authenticated and remote is reachable, resolve which issues the commit range closes — **batch first, never one call per commit** — and merge the result with the commit-message set:
    - **Batch (the normal path).** Resolve the whole range with one `gh api graphql` query per page of the range, using per-commit aliases on `associatedPullRequests(first:5)` and reading each PR's `closingIssuesReferences`. The call count is bounded by the number of pages, not by the number of commits — a 100-commit range costs a handful of calls, not 100.
    - **Dedup by PR number** before collecting references: several commits of one merged PR resolve to that PR once, so its `closingIssuesReferences` are read once.
