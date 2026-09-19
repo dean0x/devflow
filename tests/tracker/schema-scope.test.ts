@@ -597,7 +597,13 @@ const LIVE_REASONS: readonly string[] = [
   'unknown tracker provider',
   'tracker configuration unreadable',
   'tracker.md exceeds size bound',
-  'tracker configuration mismatch',
+  // SPLIT BY CAUSE. One spelling covered two different mistakes with two different
+  // remedies — a per-repo `tracker` key that narrows to a provider the manifest does
+  // not carry, and a tracker configuration file whose frontmatter provider disagrees
+  // with the resolved one. A user who reads the unsplit reason cannot tell which file
+  // to edit, which is the whole point of naming a reason.
+  'tracker configuration mismatch (repository override)',
+  'tracker configuration mismatch (conventions file)',
   'tracker mechanics unavailable',
   'tracker not configured',
   'tracker.md required fields incomplete — edit ~/.devflow/tracker.md',
@@ -737,7 +743,7 @@ export function reasonSpellings(reason: string): string[] {
  * ACTION FOR THE PHASE: §14.2 needs this row, or the literal needs retiring. Both
  * are appendix decisions, not this subtask's.
  */
-const PRE_PHASE3_REASONS: readonly string[] = [
+const GITHUB_ONLY_REASONS: readonly string[] = [
   'tech-debt archive failed for #${old_issue}',
 ];
 
@@ -752,7 +758,7 @@ const PRE_PHASE3_REASONS: readonly string[] = [
  * git.md, so the two directions disagreed about their own subject, and the four
  * DEGRADED reasons this phase added to git.md were registered by review alone.
  *
- * Written in the same register as PRE_PHASE3_REASONS and for the same reason: a
+ * Written in the same register as GITHUB_ONLY_REASONS and for the same reason: a
  * prohibition and its exemption registry are ONE authority (PF-067). An exemption
  * that lives in a `.filter` predicate is invisible to anyone reading the rule, and
  * a reader who greps only the rule finds a violation the arm silently permits.
@@ -762,7 +768,7 @@ const PRE_PHASE3_REASONS: readonly string[] = [
  * review-comment ops, the two 5xx retry ceilings, and the release version parse.
  * The arm below asserts every entry is genuinely emitted, so this cannot become a
  * dumping ground — an entry parked here that nothing emits goes red, exactly as it
- * does for PRE_PHASE3_REASONS.
+ * does for GITHUB_ONLY_REASONS.
  *
  * ACTION FOR THE PHASE: these rows belong in §14.2 or in a github-scoped table of
  * their own. Either is an appendix decision, not this subtask's.
@@ -835,7 +841,15 @@ const PHASE3_STATUS_LINES: readonly string[] = [
  * registry arms compare on.
  */
 export function collectDegradedReasons(text: string): string[] {
-  return [...text.matchAll(/DEGRADED \(([^)]*(?:\([^)]*\)[^)]*)*)\)/g)]
+  // One level of nesting, balanced. The previous alternation was written for the
+  // same purpose and could never fire: its leading `[^)]*` admits `(`, so it
+  // swallowed the opening parenthesis of a nested group and the closing `\)` then
+  // matched the INNER close. A split reason came back as
+  // `tracker configuration mismatch (repository override` — an unregistered
+  // spelling of a registered row, reported against the very agent that emits it
+  // correctly. Excluding `(` from the outer class is what makes the alternation
+  // reachable (STRENGTHENED, applies ADR-025).
+  return [...text.matchAll(/DEGRADED \(((?:[^()]|\([^()]*\))*)\)/g)]
     .map(m => m[1].replace(/\s+/g, ' ').trim());
 }
 
@@ -861,7 +875,7 @@ export function collectUnregisteredReasons(corpus: readonly CorpusEntry[]): stri
     for (const reason of collectDegradedReasons(entry.content)) {
       if (REASON_PLACEHOLDERS.includes(reason)) continue;
       if (CANONICAL_REASONS.some(canonical => reasonSpellings(canonical).includes(reason))) continue;
-      if (PRE_PHASE3_REASONS.includes(reason)) continue;
+      if (GITHUB_ONLY_REASONS.includes(reason)) continue;
       if (entry.path === GIT_AGENT.path && GIT_AGENT_LEGACY_REASONS.includes(reason)) continue;
       unregistered.push(`${entry.path}: "${reason}"`);
     }
@@ -917,8 +931,8 @@ describe('[DR-04] DEGRADED literal registry: forward direction', () => {
     expect(capabilitySpellings[0], 'the template itself is always the first spelling')
       .toBe('no tracker tool for {capability}');
     expect(
-      PRE_PHASE3_REASONS.length,
-      'the pre-Phase-3 list is empty — the reverse arm would then be silently stricter than the ' +
+      GITHUB_ONLY_REASONS.length,
+      'the github-only list is empty — the reverse arm would then be silently stricter than the ' +
       'tree it scans, and the table gap it records would be lost',
     ).toBeGreaterThan(0);
     expect(

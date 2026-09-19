@@ -287,8 +287,10 @@ export function userContentPaths(devflowDir: string): ReadonlyArray<UserContentE
     // artifact precisely because stale overrides re-apply *silently*; "silently" is
     // the load-bearing word. A stale tracker.md whose frontmatter provider
     // disagrees with the resolved provider produces
-    // `TRACEABILITY: DEGRADED (tracker configuration mismatch)` and no tracker
-    // call — that is what removes the silence. If that guard is ever dropped,
+    // `TRACEABILITY: DEGRADED (tracker configuration mismatch (conventions file))`
+    // and no tracker call — that is what removes the silence, and the reason names
+    // THIS file rather than the per-repo override so the user is told which of the
+    // two to edit. If that guard is ever dropped,
     // reclassify tracker.md to an install artifact IN THE SAME CHANGE, otherwise a
     // silently-authoritative stale file survives uninstall.
     { relPath: TRACKER_CONVENTIONS_FILE, label: `${TRACKER_CONVENTIONS_FILE} (issue tracker conventions)` },

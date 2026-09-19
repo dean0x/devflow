@@ -217,7 +217,7 @@ re-derived per repository at call time, so the value here is a last resort.
 | Section | Scope | Absent ⇒ | Shape gate at the sink |
 |---|---|---|---|
 | `## Project` → site | global-safe | `tracker not configured` | `^https://[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?(\.[a-z0-9-]+)+$` — no userinfo, no port, no path |
-| `## Project` → key | repo-derived | `tracker not configured` | `^[A-Za-z][A-Za-z0-9_]{0,9}$` |
+| `## Project` → key | repo-derived | `tracker not configured` | `^[A-Z][A-Z0-9_]{1,9}$` — ASCII-upper-normalised once at the key's own boundary |
 | `## Issue Types` | repo-derived | `tracker not configured` | `^[A-Za-z0-9][A-Za-z0-9 ._/-]{0,49}$`, and an exact match against the types enumerated this run |
 | `## Required Fields` | repo-derived | the empty set | allowlist: `project` \| `issuetype` \| `summary` \| `description` \| `labels` \| `components` \| `priority` \| `parent`; every other name is denied, explicitly including `security`, `reporter`, `votes`, `__proto__`, `assignee` beyond `self`, any name with a leading `-`, and the literal `(ask each time)` |
 | `## Iteration Policy` | repo-derived | the resolved provider's documented neutral default | an exact match against the iteration states enumerated this run |

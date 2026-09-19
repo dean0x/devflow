@@ -544,8 +544,18 @@ describe('hostile values: tracker.md fields (AC-3.7, register row 22)', () => {
     // file is touched to show red.
     const lax = parseValidator('`^.*$`');
     expect(rejectionReasons(lax, 'PROJ`whoami`'), 'a permissive regex must be caught here').toEqual([]);
-    const strict = parseValidator('`^[A-Za-z][A-Za-z0-9_]{0,9}$`');
+    const strict = parseValidator('`^[A-Z][A-Z0-9_]{1,9}$`');
     expect(rejectionReasons(strict, 'PROJ`whoami`').length).toBeGreaterThan(0);
+    // …and the CASE half of the same alphabet, which is what normalising once at the
+    // key's own boundary exists to make observable: what reaches the gate is already
+    // upper, so a lowercase key is REJECTED rather than quietly admitted by a
+    // case-insensitive shape.
+    expect(
+      rejectionReasons(strict, 'proj').length,
+      'a lowercase project key must be rejected by the shipped alphabet — the agent normalises ' +
+      'once, at the boundary, and a gate that accepted both cases would make that step optional',
+    ).toBeGreaterThan(0);
+    expect(rejectionReasons(strict, 'PROJ'), 'and the normalised form is admitted').toEqual([]);
   });
 
   it('known-bad probe: an alternative arm that admits a payload is reported, however strict the rest', () => {
@@ -677,13 +687,41 @@ describe('hostile values: the agent declares no second provider parser (§14.9 c
     // `parseTrackerId` in src/core/tracker.ts is the one owner, and the Git agent's
     // resolution preamble is the one prompt-side spelling. A third pipeline in this
     // prompt would be a repair path in a reject-never-repair design.
+    //
+    // SUBJECT: the PROVIDER TOKEN, and only it (SOFTENED in scope, applies ADR-025).
+    // It arrives validated in the spawn directive and is copied verbatim, so any
+    // normalisation of it here is a second parser. The project KEY is a different
+    // value with a different provenance — inferred from the repo, hand-editable in
+    // the configuration file, and gated at every sink against one uppercase
+    // alphabet — and normalising it ONCE at its own boundary is what makes that
+    // alphabet enforceable rather than a shape nobody can reach. Excluding the key's
+    // own schema row is therefore a narrowing of the subject, not of the rule: the
+    // arm below proves the row is excluded because it is the key's, and a
+    // provider-token pipeline seeded into it still fails.
+    const KEY_ROW = '| `## Project` → key |';
+    const scoped = TRACKER_TEXT.split('\n').filter(line => !line.startsWith(KEY_ROW)).join('\n');
+    expect(
+      TRACKER_TEXT.split('\n').filter(line => line.startsWith(KEY_ROW)),
+      'the project-key schema row must exist — otherwise this scoping removes nothing and the ' +
+      'narrowing is silent',
+    ).toHaveLength(1);
+
     for (const phrase of ['ASCII-lowercase', 'case folding', 'ASCII-upper']) {
       expect(
-        TRACKER_TEXT,
+        scoped,
         `'${phrase}' describes a provider-token repair pipeline. The token arrives validated ` +
         'in the spawn directive; re-deriving it here adds a second convergence point (PF-023).',
       ).not.toContain(phrase);
     }
+
+    // Known-bad, same it: a provider-token pipeline seeded OUTSIDE the key row is
+    // still reported, so the scoping above is a narrowing of subject rather than a
+    // hole the next pipeline slips through.
+    const seeded = `${scoped}\nNormalise TRACKER_PROVIDER by ASCII-lowercase, then retry.\n`;
+    expect(
+      seeded.includes('ASCII-lowercase'),
+      'the scoped corpus must still see a seeded provider-token pipeline',
+    ).toBe(true);
   });
 
   it('the normalisation literal appears exactly once in the agent (AC-3.7)', () => {

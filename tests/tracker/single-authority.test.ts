@@ -515,3 +515,94 @@ describe('tool-call contract: one authority per normative sentence [DR-19]', () 
     ).toEqual(['empty', 'keystroke', 'too short']);
   });
 });
+
+// ---------------------------------------------------------------------------
+// 3. The project-key alphabet — one shape, three readers
+// ---------------------------------------------------------------------------
+//
+// A project key is shape-gated in three places that never see each other: the Git
+// agent's always-loaded preamble, the tracker configuration file's schema table in
+// the Tracker agent, and the key segment of every `KEY-N` reference grammar in the
+// tool-call providers' mechanics.
+//
+// They diverged. The first two admitted `^[A-Za-z][A-Za-z0-9_]{0,9}$` — lowercase,
+// and one character shorter at the minimum — while every provider grammar required
+// `^[A-Z][A-Z0-9_]{1,9}$`. So a key the preamble resolved and the writer recorded
+// could be one no reference the agent then rendered would accept, and the failure
+// surfaces as an unparseable ref rather than as a bad key.
+//
+// This is the same claim [DR-19] makes about a shared sentence, applied to a shared
+// SHAPE: one authority, quoted byte-identically wherever it is read. It is asserted
+// by extraction from each shipping file rather than by comparing each to a literal
+// here — a constant in a test is a fourth authority, and the one nobody ships.
+
+/** The one alphabet, extracted from the site that is the reason it is uppercase. */
+const KEY_ALPHABET = '^[A-Z][A-Z0-9_]{1,9}$';
+
+/** Named collector: the distinct project-key alphabets a text spells out. */
+function collectKeyAlphabets(text: string): string[] {
+  return [...new Set(
+    [...text.matchAll(/\^\[A-Z(?:a-z)?\]\[A-Z(?:a-z)?0-9_\]\\?\{\d,\d\\?\}\$/g)].map(m =>
+      m[0].replace(/\\/g, ''),
+    ),
+  )];
+}
+
+describe('the project-key alphabet has one authority, quoted identically by all three readers', () => {
+  const agentDir = path.join(path.resolve(import.meta.dirname, '../..'), 'src', 'assets', 'agents');
+  const gitHost = requireFile('agent source', path.join(agentDir, 'git.mds'));
+  const trackerAgent = requireFile('agent source', path.join(agentDir, 'tracker.md'));
+
+  it('the Git agent preamble and the Tracker agent schema table state the same alphabet', () => {
+    for (const [label, text] of [['git.mds', gitHost], ['tracker.md', trackerAgent]] as const) {
+      const found = collectKeyAlphabets(text);
+      expect(
+        found,
+        `${label} states ${found.length} project-key alphabet(s): ${found.join(', ')}. One reader ` +
+        `admitting a key another rejects surfaces as an unparseable reference, never as a bad key.`,
+      ).toEqual([KEY_ALPHABET]);
+    }
+  });
+
+  it('and every tool-call provider grammar carries it as its KEY segment', () => {
+    const grammarBearing = VARIANT_MODULES
+      .filter(mod => mod.subdir.startsWith('tracker/') && mod.subdir !== 'tracker/github')
+      .map(mod => mod.subdir);
+    expect(grammarBearing.length, 'no tool-call provider registered — this arm is vacuous')
+      .toBeGreaterThan(0);
+
+    const keySegment = KEY_ALPHABET.replace(/\$$/, '');
+    const missing: string[] = [];
+    for (const subdir of grammarBearing) {
+      const files = walkFiles(path.join(REFS_DIR, ...subdir.split('/')), f => f.endsWith('.md'), 1);
+      // Linear's team key is deliberately a NARROWER alphabet than a Jira project
+      // key (no underscore, and a one-character key is legal), so the claim is that
+      // a provider whose grammar admits underscores uses THE shared segment — never
+      // that every provider's grammar is one string.
+      const bearing = files.filter(f => requireFile('generated reference', f).includes('[A-Z0-9_]'));
+      if (bearing.length === 0) continue;
+      for (const file of bearing) {
+        if (!requireFile('generated reference', file).includes(keySegment)) {
+          missing.push(path.relative(REFS_DIR, file).split(path.sep).join('/'));
+        }
+      }
+    }
+    expect(
+      missing,
+      'provider mechanics spell an underscore-bearing key alphabet that is not the shared one:\n  ' +
+      missing.join('\n  '),
+    ).toEqual([]);
+  });
+
+  it('known-bad probe: a divergent alphabet is reported by the same collector', () => {
+    expect(
+      collectKeyAlphabets('gate with `^[A-Za-z][A-Za-z0-9_]{0,9}$` here'),
+      'the collector must recognise the retired lowercase shape — otherwise the arms above are ' +
+      'green because the collector sees nothing (PF-018)',
+    ).toEqual(['^[A-Za-z][A-Za-z0-9_]{0,9}$']);
+    expect(
+      collectKeyAlphabets(`one ${KEY_ALPHABET} and one ^[A-Za-z][A-Za-z0-9_]{0,9}$`).length,
+      'and must report TWO distinct alphabets in a text that states two',
+    ).toBe(2);
+  });
+});
