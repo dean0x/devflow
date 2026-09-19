@@ -296,7 +296,7 @@ Load when the resolved tracker provider is `linear` and the operation is `ensure
 
 1. If `ISSUE_INPUT` is provided — an issue reference, or free prose to resolve through the *search* capability with a structured filter:
    - Compose a structured comment using the D3 sections and post it through `### Posting gate` below. **NEVER rewrite the issue description** — an existing description is somebody's work.
-   - If `PLAN_ARTIFACT_PATH` is provided: **the artifact is NOT inlined.** See `### The artifact is a pointer, not a collapsed block`.
+   - If `PLAN_ARTIFACT_PATH` is provided: **the artifact is NOT inlined.** See `### The artifact is posted as content`.
    - Return the issue reference.
 2. If no `ISSUE_INPUT`: create a new issue through the *create issue* capability.
    - Title: derived from `TASK_DESCRIPTION` (same slug logic as `setup-task`).
@@ -304,11 +304,11 @@ Load when the resolved tracker provider is `linear` and the operation is `ensure
    - **Description** — composed from the D3 template and posted through `### Posting gate` below. `TASK_DESCRIPTION`, `INITIAL_REQUEST` and `REQUIREMENTS` are caller-supplied and untrusted — they reach the call as values, never as part of a query or a command.
 3. Return the issue reference.
 
-### The artifact is a pointer, not a collapsed block
+### The artifact is posted as content
 
-This provider's comment format has **no HTML-comment node and no collapsed-block analogue**, so `render_collapsed_block` degrades to a **pointer sentence only**: post a comment whose line 1 is the marker `devflow:traceability \{ISSUE_REF\} · https://github.com/dean0x/devflow` and whose body names where the artifact lives — `Implementation plan: \{PLAN_ARTIFACT_PATH\} (not committed; ask the author)` — then reference that comment from the `## Implementation Plan` section. The marker's shape, and why the URL is on it, are stated once with the dedup ladder in this operation's `backlink-shipped-issues` reference.
+This provider's comment format has **no HTML-comment node and no collapsed-block analogue**, so `render_collapsed_block` degrades to a PLAIN comment rather than to a pointer: post the plan body itself through `### Posting gate` below with the *add comment* capability, line 1 the marker `devflow:traceability \{ISSUE_REF\} · https://github.com/dean0x/devflow`, then reference that comment from the `## Implementation Plan` section. The plan is the content a reader came for, and a link into an uncommitted local file resolves for nobody but its author.
 
-Inlining it instead would flatten a structured document into a wall of plain text that the reader cannot collapse and the next dedup scan cannot parse. A pointer that resolves is worth more than a dump that does not.
+Measure the composed body against the `{comment_cap()}`-character cap **after redaction** — the scrubber's tokens can grow it. Over the cap, post **none of the plan**: post the pointer sentence alone — `Implementation plan: \{PLAN_ARTIFACT_PATH\} (not committed; ask the author)` — and emit `TRACEABILITY: DEGRADED (plan artifact exceeds comment cap)`. A truncated plan is worse than a pointer, because the reader cannot tell which half is missing.
 
 Over the `{comment_cap()}`-character cap after redaction, truncate in **preservation order** — line 1 the marker, then the status and DEGRADED lines, then the pointer sentence; the untrusted middle is what gets cut — and end with `NOTE: body exceeded the {comment_cap()}-character cap after redaction — truncated/stub posted`. The pointer sentence is the last thing to go because it is the only line that still leads somewhere.
 
@@ -322,7 +322,7 @@ Over the `{comment_cap()}`-character cap after redaction, truncate in **preserva
 The D3 section headings are the canonical ones; only the transport differs from the GitHub path. Rules:
 
 - Pre-existing issues: post a structured comment using the D3 sections — NEVER rewrite the issue description.
-- New issues: create with the D3 description, then post the artifact POINTER comment and reference it from the `## Implementation Plan` section.
+- New issues: create with the D3 description, then post the artifact as its own comment and reference it from the `## Implementation Plan` section.
 - Issue creation is gated by the `COMPLIANCE` input: `enabled` → mandatory (DEGRADED states exempt), absent or `(none)` → optional.
 @end
 

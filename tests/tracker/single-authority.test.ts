@@ -792,3 +792,78 @@ describe('Reference Rendering: a discarded token yields the default, never a DEG
     ).toContain('never write `# UNRESOLVED:` here');
   });
 });
+
+// ---------------------------------------------------------------------------
+// 6. The plan artifact is CONTENT, and over the cap it is nothing
+// ---------------------------------------------------------------------------
+//
+// A tool-call provider's comment format has no collapsed-block analogue, which is
+// why the artifact used to degrade to a pointer sentence naming a path. The path
+// is a local file that is not committed, so the pointer resolved for its author
+// and for nobody else — the reader the traceability comment exists for got a
+// filename. The artifact is posted as content instead.
+//
+// The claim that needs a guard is the OVER-CAP branch, because it is the one a
+// later edit will reach for: truncating is the obvious thing to do with a body
+// that is too long, and it is the wrong thing here. A truncated plan reads as a
+// whole plan — nothing in the comment says which half is missing — so the
+// operation posts none of it, falls back to the pointer, and names the reason.
+
+describe('the plan artifact is posted as content, and over the cap posts none of it', () => {
+  const providers = VARIANT_MODULES
+    .filter(mod => mod.subdir.startsWith('tracker/') && mod.subdir !== 'tracker/github')
+    .map(mod => mod.subdir.slice('tracker/'.length));
+
+  it('this arm has providers to range over', () => {
+    expect(providers.length).toBeGreaterThan(0);
+  });
+
+  for (const provider of ['jira', 'linear']) {
+    it(`${provider}: the artifact is content, the over-cap branch posts none of the plan`, () => {
+      const file = path.join(REFS_DIR, 'tracker', provider, 'ensure-traceable-issue.md');
+      const body = requireFile('generated reference', file);
+
+      expect(
+        body,
+        'the artifact section must say the plan is posted, not pointed at — a pointer into an ' +
+        'uncommitted local file resolves for its author and for nobody else',
+      ).toContain('### The artifact is posted as content');
+      expect(
+        body.includes('### The artifact is a pointer, not a collapsed block'),
+        'the pointer heading must be gone, not kept beside the new one — two headings is two ' +
+        'policies, and the one a reader follows is whichever they reach first',
+      ).toBe(false);
+      expect(
+        body.includes('A pointer that resolves is worth more than a dump that does not.'),
+        'and the sentence that argued for the pointer must go with it',
+      ).toBe(false);
+
+      expect(
+        body,
+        'the cap is measured AFTER redaction — the scrubber\'s replacement tokens can make a body ' +
+        'that fitted before the scrub too long after it',
+      ).toMatch(/cap \*\*after redaction\*\*/);
+      expect(
+        body,
+        'over the cap the operation must post NONE of the plan. Truncating it produces a comment ' +
+        'that reads as a whole plan with no indication of what was cut',
+      ).toContain('post **none of the plan**');
+      expect(
+        body,
+        'and it must name the reason, or the reader sees a pointer and assumes that is the design',
+      ).toContain('TRACEABILITY: DEGRADED (plan artifact exceeds comment cap)');
+    });
+  }
+
+  it('known-bad probe: the over-cap shape discriminates truncation from refusal', () => {
+    const refuses = (text: string): boolean =>
+      text.includes('post **none of the plan**') &&
+      text.includes('plan artifact exceeds comment cap');
+    expect(refuses('Over the cap, post **none of the plan**: plan artifact exceeds comment cap.')).toBe(true);
+    expect(
+      refuses('Over the cap, truncate in preservation order and note the truncation.'),
+      'the truncation shape — which is correct for the D3 comment beside it and wrong for the ' +
+      'plan — must NOT satisfy the refusal check',
+    ).toBe(false);
+  });
+});

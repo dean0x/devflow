@@ -632,6 +632,12 @@ const LIVE_REASONS: readonly string[] = [
   'no parseable refs for provider {p}',
   'unusable site',
   'unsupported transition',
+  // The plan artifact is posted as CONTENT, so there is a body that can exceed the
+  // provider's field limit. Over the cap the operation posts none of the plan and
+  // says so: a truncated plan is worse than a pointer, because the reader cannot
+  // tell which half is missing. No {provider} token — the cap is the provider's,
+  // the failure is not.
+  'plan artifact exceeds comment cap',
 ];
 
 /**
