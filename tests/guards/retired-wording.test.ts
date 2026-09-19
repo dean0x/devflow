@@ -308,6 +308,32 @@ const RETIRED_LITERALS: ReadonlyArray<RetiredEntry> = [
       'of eighteen parameter lists, free to drift against the authority below it. The column is ' +
       'gone; the index keeps operation and purpose. Unscoped for the same reason as above.',
   },
+
+  // -------------------------------------------------------------------------
+  // The UNGATED github link line.
+  //
+  // This entry is a CLASSIFIER, not a spelling: the literal survives at exactly
+  // one site — the github-gated fallback in /implement's PR step — and the rule
+  // is about the qualification in front of it, which no substring test can see.
+  // The permitted occurrence is admitted by the pattern rather than excluded by a
+  // hand-written filter, so it stays admitted only while it stays gated, and the
+  // guard needs no second list to keep in sync with this one (PF-067).
+  // -------------------------------------------------------------------------
+  {
+    literal: 'an ungated `Closes #{ISSUE_NUMBER}`',
+    // Both spellings of the corpus: the `.mds` source escapes the braces, the
+    // compiled `.md` does not. `[^.\n]{0,80}` is the qualification window — a
+    // sentence, not a paragraph, so a `github` mentioned in the line above does
+    // not license a rendering three sentences later.
+    pattern: /(?<!github[^.\n]{0,80})Closes #\\?\{ISSUE_NUMBER\\?\}/,
+    removedFrom: 'src/assets/commands/implement.mds (Phase 10) and dist/commands/implement.md',
+    justification:
+      'The PR step rendered `Closes #{ISSUE_NUMBER}` whenever an issue number was known, with no ' +
+      'provider in the condition. Under jira or linear that number is the tail of a key like ' +
+      'PROJ-12, so the line closed whichever GitHub issue happens to carry the same digits — a ' +
+      'wrong, silent, GitHub-visible write. The rendering is correct under github and is kept ' +
+      'there; what is retired is stating it without the gate.',
+  },
 ];
 
 // ---------------------------------------------------------------------------

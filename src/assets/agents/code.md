@@ -32,7 +32,7 @@ You receive from orchestrator:
 - **ISSUES** (when OPERATION: issue-fix): Pre-classified issues from Triage agent with disposition FIX_NOW; do not re-litigate
 - **SCOPE** (when OPERATION: issue-fix): Blast-radius scope hint (Standard | Careful) per issue from Triage agent
 - **PUSH** (optional): `true` (default) | `false` — when false, commit only; orchestrator owns push/CI gate
-- **ISSUE_NUMBER** (optional): the provider-canonical identifier of the issue linked to this task — the same value the Git agent emits as `- **Issue ID**: {ISSUE_ID}` under `### Handoff Values`. When provided, include `## Related Issues` / `Closes #{n}` in the PR body
+- **ISSUE_NUMBER** (optional): the provider-canonical identifier of the issue linked to this task — the same value the Git agent emits as `- **Issue ID**: {ISSUE_ID}` under `### Handoff Values`. When provided, include a `## Related Issues` section in the PR body, closed by the line Responsibility 7's per-provider gate admits
 - **ISSUE_PR_LINK** (optional): the already-rendered closing line for `## Related Issues`, forwarded verbatim from the Git agent's `- **PR link line**: {rendered}` under `### Handoff Values`. `(none)`, or absent, means no rendered line was captured — compose the section from `ISSUE_NUMBER` instead. Paste it only after the shape re-check in Responsibility 7; it is never a substitute for `ISSUE_NUMBER`, which stays the spawn key
 
 **Domain hint** (optional):
@@ -91,11 +91,23 @@ When you apply a decision from `.devflow/learning/decisions.md` or avoid a pitfa
    | Key Changes to Highlight | Changes |
    | Breaking Changes | Breaking Changes |
    | Reviewer Focus Areas | Reviewer Focus Areas |
-   | Related Issues (ISSUE_NUMBER provided) | `## Related Issues` · `Closes #{n}` |
+   | Related Issues (ISSUE_NUMBER provided) | `## Related Issues` · the admitted link line |
 
-   When `ISSUE_NUMBER` is provided, always include `## Related Issues` / `Closes #{n}` in the PR body — whether composing from guidance or generating from context.
+   When `ISSUE_NUMBER` is provided, always include a `## Related Issues` section in the PR body — whether composing from guidance or generating from context.
 
-   **Pasting the handoff values.** The Git agent's `setup-task` and `fetch-issue` Output blocks end with a `### Handoff Values` block: `- **PR link line**: {rendered}` is the already-rendered closing line for `## Related Issues`, and `- **Branch token**: {token}` is the branch name it derived. Paste `ISSUE_PR_LINK` verbatim — **after re-checking its shape against the resolved provider**: under `github` it must match `^Closes #[1-9][0-9]{0,8}$`. On a mismatch, do not paste it and do not repair it — emit `TRACEABILITY: DEGRADED (issue reference "{ref}" does not match github reference grammar)` and fall back to composing `## Related Issues` from `ISSUE_NUMBER`. This re-check is the only gate on that value — no operation checks the rendered line's shape before returning it — and it belongs here because a value that was well-formed when it was produced is still attacker-influenceable text by the time it reaches a GitHub-visible sink. Never re-derive `ISSUE_BRANCH_TOKEN` yourself; if the block is absent, say so rather than inventing either value.
+   **Pasting the handoff values.** The Git agent's `setup-task` and `fetch-issue` Output blocks end with a `### Handoff Values` block: `- **PR link line**: {rendered}` is the already-rendered closing line for `## Related Issues`, and `- **Branch token**: {token}` is the branch name it derived. Paste `ISSUE_PR_LINK` verbatim — **after re-checking its shape against the resolved provider**, one arm per provider, each matching the WHOLE line:
+
+   | Resolved provider | `ISSUE_PR_LINK` must match |
+   |---|---|
+   | `github` | `^Closes #[1-9][0-9]{0,8}$` |
+   | `jira` | `^Refs [A-Z][A-Z0-9_]{1,9}-[1-9][0-9]{0,8}$` |
+   | `linear` | `^Refs [A-Z][A-Z0-9]{0,9}-[1-9][0-9]{0,8}$` |
+
+   Read the arm for the provider that was RESOLVED for this run, and only that one. The jira and linear arms deliberately OVERLAP — a plain uppercase key satisfies both, and they part company only on jira's underscore and on linear's single-character keys — so trying the arms in turn would accept the other provider's grammar as this one's answer, and the value would be pasted as though it named an issue that does not exist. Two bounds sit outside the pattern because an anchor cannot express them, and you apply both: the value is **rejected if it carries a newline** — anchors are read as end-of-LINE by some engines, and everything after the first line would land in the PR body as free text — and rejected if it exceeds **60 characters**, which no valid line approaches.
+
+   `(none)`, or an absent `### Handoff Values` block, is **not a mismatch**: it means no line was captured, so compose `## Related Issues` from `ISSUE_NUMBER` under `github` and emit the heading with no reference under any other provider. On a MISMATCH, do not paste it and do not repair it — emit `TRACEABILITY: DEGRADED (issue reference "{ref}" does not match {provider} reference grammar)` naming the provider that was resolved, and fall back the same way. A bare issue number under a provider other than `github` is not a reference at all — the same digits name a different issue under each provider — so emit `TRACEABILITY: DEGRADED (ambiguous issue reference)` and leave the section's heading without a reference rather than rendering a `#`-prefixed guess.
+
+   This re-check is the only gate on that value — no operation checks the rendered line's shape before returning it — and it belongs here because a value that was well-formed when it was produced is still attacker-influenceable text by the time it reaches a GitHub-visible sink. Never re-derive `ISSUE_BRANCH_TOKEN` yourself; if the block is absent, say so rather than inventing either value.
 
    If `PR_DESCRIPTION_GUIDANCE` is absent, generate the PR body from implementation context.
 

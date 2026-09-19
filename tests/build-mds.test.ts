@@ -2043,3 +2043,111 @@ describe('dedup-marker ownership — `<!-- devflow:` absent from dist/commands (
     }
   });
 });
+
+// ---------------------------------------------------------------------------
+// §23  /implement forwards the issue argument UNCLASSIFIED
+//
+// The Git agent's `setup-task` is the one site that resolves a provider and the
+// one site that knows what an issue reference looks like on this machine. The
+// command layer's job is to hand it the argument, not to decide whether the
+// argument is one: `#123` is github's spelling, `PROJ-12` is jira's and `ENG-12`
+// is linear's, so a `starts with #` gate at the command silently reclassifies
+// every non-github reference as a task DESCRIPTION — the branch is derived from
+// prose, no issue is fetched, and nothing reports a problem.
+//
+// Two properties, because presence alone would not catch either failure: the
+// forwarded token carries no provider-specific test, and it is offered BEFORE
+// the description fallback, which is what makes the description a fallback.
+// ---------------------------------------------------------------------------
+
+describe('implement.md forwards the issue argument unclassified (§23)', () => {
+  /** Spellings that classify the argument at the command layer. Each LABELLED (PF-064). */
+  const CLASSIFIER_RULES: ReadonlyArray<readonly [string, RegExp]> = [
+    ['a `#` prefix test', /starts with\s*`?#/i],
+    ['a `#`-shaped pattern', /#\[0-9\]|#\{?[0-9n]/],
+    ['an issue-number noun', /\bissue number\b/i],
+  ];
+
+  /**
+   * Named collector: the `ISSUE_INPUT:` line of a spawn payload, and every
+   * classifier spelling on it.
+   *
+   * Scoped to that one line rather than the file: the command legitimately talks
+   * about issue numbers elsewhere (the `ISSUE_NUMBER` capture, the github-gated PR
+   * link), and a file-wide scan would report the prose that describes the value
+   * instead of the instruction that produces it.
+   */
+  function collectIssueInputClassifiers(source: string): string[] {
+    const violations: string[] = [];
+    for (const line of source.split('\n')) {
+      if (!line.trimStart().startsWith('ISSUE_INPUT:')) continue;
+      for (const [label, rule] of CLASSIFIER_RULES) {
+        if (rule.test(line)) violations.push(`${line.trim()} — ${label}`);
+      }
+    }
+    return violations;
+  }
+
+  it('the ISSUE_INPUT line forwards the argument and applies no provider-specific test', async () => {
+    const source = await fs.readFile(path.join(BUILT_COMMANDS, 'implement.md'), 'utf-8');
+    const lines = source.split('\n').filter(l => l.trimStart().startsWith('ISSUE_INPUT:'));
+    expect(
+      lines.length,
+      'no ISSUE_INPUT: line in the compiled command — the setup-task spawn stopped forwarding ' +
+      'the argument at all, which no presence check elsewhere would notice',
+    ).toBe(1);
+    expect(
+      lines[0],
+      'the value must be read off $ARGUMENTS, not restated as a classified noun',
+    ).toContain('$ARGUMENTS');
+    expect(
+      collectIssueInputClassifiers(source),
+      'the command layer classified the issue argument. Only the Git agent has resolved a ' +
+      'provider at this point, so any test here is a github test wearing a neutral name:\n  ' +
+      collectIssueInputClassifiers(source).join('\n  '),
+    ).toEqual([]);
+    // The one test that IS the command's to make: a plan-document path is not an
+    // issue reference under any provider, and it is decided by the file extension.
+    expect(lines[0], 'the `.md` carve-out is the command layer\'s own').toContain('.md');
+  });
+
+  it('ISSUE_INPUT is offered before the TASK_DESCRIPTION fallback, in the same payload', async () => {
+    const source = await fs.readFile(path.join(BUILT_COMMANDS, 'implement.md'), 'utf-8');
+    const issueAt = source.indexOf('ISSUE_INPUT:');
+    const descAt = source.indexOf('TASK_DESCRIPTION:');
+    expect(issueAt, 'ISSUE_INPUT: absent').toBeGreaterThan(-1);
+    expect(descAt, 'TASK_DESCRIPTION: absent').toBeGreaterThan(-1);
+    expect(
+      issueAt,
+      'the description is the FALLBACK — stated first it reads as the default, and the argument ' +
+      'that is an issue reference reaches the Git agent as prose',
+    ).toBeLessThan(descAt);
+    // Same payload, not two distant sections: a blank line between them would mean
+    // the Git agent is handed one or the other by two different instructions.
+    expect(
+      source.slice(issueAt, descAt),
+      'the two keys must sit in one contiguous spawn payload',
+    ).not.toContain('\n\n');
+  });
+
+  it('known-bad probe: EVERY classifier rule fires on its own shape', async () => {
+    const SHAPES: ReadonlyArray<readonly [string, string]> = [
+      ['a `#` prefix test', 'ISSUE_INPUT: {issue if $ARGUMENTS starts with `#`, otherwise omit}'],
+      ['a `#`-shaped pattern', 'ISSUE_INPUT: {the #{n} token from $ARGUMENTS}'],
+      ['an issue-number noun', 'ISSUE_INPUT: {issue number from $ARGUMENTS}'],
+    ];
+    expect(SHAPES.length, 'one shape per rule').toBe(CLASSIFIER_RULES.length);
+    for (const [label, line] of SHAPES) {
+      expect(
+        collectIssueInputClassifiers(line).some(v => v.endsWith(label)),
+        `"${line}" must be reported by the ${label} rule`,
+      ).toBe(true);
+    }
+    // …and the neutral forwarding instruction is not reported, nor is the same
+    // prose on a line that is not the ISSUE_INPUT key.
+    expect(collectIssueInputClassifiers(
+      'ISSUE_INPUT: {the first $ARGUMENTS token verbatim, unless it ends in .md — then omit}',
+    )).toEqual([]);
+    expect(collectIssueInputClassifiers('Capture the issue number the Git agent returns.')).toEqual([]);
+  });
+});

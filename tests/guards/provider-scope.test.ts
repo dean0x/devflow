@@ -114,12 +114,64 @@ function scanCorpus(): CorpusEntry[] {
  * times inside it (the normalisation rule, the map rows, the input contract), and
  * a line-scoped allowlist would have to enumerate them and go stale on any rewrap.
  */
-const PROVIDER_MAP_ALLOWLIST = {
-  files: [GIT_HOST, 'dist/agents/git.md'],
-  /** The preamble's own bounds — the same two anchors byte-budget.test.ts uses. */
-  from: '## Tracker provider resolution',
-  to: '## Comment-sink scrub (D11)',
-} as const;
+interface AllowlistedRegion {
+  /** What the region is, for the failure message. */
+  readonly label: string;
+  /** Corpus paths that carry it, as `scanCorpus` labels them. */
+  readonly files: readonly string[];
+  /** The region's own bounds. */
+  readonly from: string;
+  readonly to: string;
+  /** Why a closed token set has to be written HERE and nowhere else. */
+  readonly justification: string;
+}
+
+/**
+ * Every block that must enumerate the closed provider set, and nothing else.
+ *
+ * A registry rather than one constant because a second such block now exists, and
+ * the alternative was a hand-written second condition beside the first — two
+ * mechanisms for one rule, which is how one of them goes stale (PF-067). Each row
+ * is still a BLOCK inside a file that must otherwise stay clean, which is what
+ * keeps this distinct from `PROVIDER_OWNED_PATHS` below: that one says a whole
+ * file belongs to a provider, this one says a bounded region inside a
+ * provider-neutral file may name all of them.
+ */
+const ALLOWLISTED_PROVIDER_REGIONS: readonly AllowlistedRegion[] = [
+  {
+    label: "the Git agent's provider-resolution preamble",
+    files: [GIT_HOST, 'dist/agents/git.md'],
+    /** The preamble's own bounds — the same two anchors byte-budget.test.ts uses. */
+    from: '## Tracker provider resolution',
+    to: '## Comment-sink scrub (D11)',
+    justification:
+      'PF-023 requires exactly ONE convergence point where a provider token becomes a path, and a ' +
+      'map with one row decides nothing — the closed set has to be written where the resolution ' +
+      'happens.',
+  },
+  {
+    label: "the Code agent's PR-link paste gate",
+    files: [`${SRC_AGENTS_LABEL}/code.md`],
+    from: '| Resolved provider | `ISSUE_PR_LINK` must match |',
+    to: 'This re-check is the only gate on that value',
+    justification:
+      'The PR body is a GitHub-visible sink and the Code agent is the last hand the rendered link ' +
+      'line passes through — no operation checks its shape before returning it. A per-provider ' +
+      'gate cannot be written without naming the providers it discriminates, and the Code agent ' +
+      'loads no provider mechanics file it could defer to: it is outside the Git spawn surface ' +
+      'entirely. So the closed set is enumerated once, inside the gate, and the agent reads the ' +
+      'arm for the provider that was RESOLVED for the run rather than resolving one itself — ' +
+      'which is what keeps this a sink check and not a second convergence point.',
+  },
+];
+
+/**
+ * The resolution preamble specifically. Three arms below assert properties of
+ * THAT region — that it is the convergence point, and that its own anchors still
+ * bracket the token set — so it keeps its own name rather than being addressed by
+ * index at each site.
+ */
+const PROVIDER_MAP_ALLOWLIST = ALLOWLISTED_PROVIDER_REGIONS[0];
 
 interface ProviderToken {
   readonly name: string;
@@ -240,15 +292,19 @@ function ownsToken(path: string, token: string): boolean {
   return PROVIDER_OWNED_PATHS.some(owned => owned.token === token && path.startsWith(owned.prefix));
 }
 
-/** Remove the allowlisted preamble block from an allowlisted file; identity elsewhere. */
+/** Remove every allowlisted block that lives in this file; identity elsewhere. */
 function stripAllowlistedRegion(entry: CorpusEntry): string {
-  if (!PROVIDER_MAP_ALLOWLIST.files.includes(entry.path as never)) return entry.content;
-  const start = entry.content.indexOf(PROVIDER_MAP_ALLOWLIST.from);
-  if (start === -1) return entry.content;
-  const end = entry.content.indexOf(PROVIDER_MAP_ALLOWLIST.to, start);
-  return end === -1
-    ? entry.content.slice(0, start)
-    : entry.content.slice(0, start) + entry.content.slice(end);
+  let content = entry.content;
+  for (const region of ALLOWLISTED_PROVIDER_REGIONS) {
+    if (!region.files.includes(entry.path)) continue;
+    const start = content.indexOf(region.from);
+    if (start === -1) continue;
+    const end = content.indexOf(region.to, start);
+    content = end === -1
+      ? content.slice(0, start)
+      : content.slice(0, start) + content.slice(end);
+  }
+  return content;
 }
 
 /**
@@ -286,31 +342,39 @@ describe('provider-scope: no Jira or Linear literal outside the provider map (§
         `scan root "${root.label}" contributed no files — the scope has silently shrunk`,
       ).toBe(true);
     }
-    // The two files that carry the allowlisted block must actually be in the corpus,
+    // Every file that carries an allowlisted block must actually be in the corpus,
     // or the allowlist is silencing nothing and the guard is proving nothing about it.
-    for (const file of PROVIDER_MAP_ALLOWLIST.files) {
-      expect(corpus.map(e => e.path), `allowlisted file ${file} must be in the corpus`).toContain(file);
+    for (const region of ALLOWLISTED_PROVIDER_REGIONS) {
+      for (const file of region.files) {
+        expect(corpus.map(e => e.path), `allowlisted file ${file} must be in the corpus`).toContain(file);
+      }
     }
   });
 
-  it('the allowlist is still needed: the preamble really does carry the token set', () => {
+  it('every allowlisted region is still needed: each really does carry the token set', () => {
     // A stale allowlist is the failure mode the inline-body exclusion list taught —
-    // an exemption nobody notices going out of date. If the map ever stops naming
-    // the foreign tokens, this fails and the allowlist is deleted, not carried.
-    for (const file of PROVIDER_MAP_ALLOWLIST.files) {
-      const entry = requireCorpusEntry(corpus, file);
-      const whole = entry.content;
-      const stripped = stripAllowlistedRegion(entry);
+    // an exemption nobody notices going out of date. If a region ever stops naming
+    // the foreign tokens, this fails and the row is deleted, not carried.
+    for (const region of ALLOWLISTED_PROVIDER_REGIONS) {
       expect(
-        stripped.length,
-        `${file}: the allowlisted region was not found — the preamble anchors changed`,
-      ).toBeLessThan(whole.length);
-      for (const token of FOREIGN_PROVIDER_TOKENS) {
+        region.justification.length,
+        `${region.label}: a region without a stated reason is an exemption, not a classification`,
+      ).toBeGreaterThan(80);
+      for (const file of region.files) {
+        const entry = requireCorpusEntry(corpus, file);
+        const whole = entry.content;
+        const stripped = stripAllowlistedRegion(entry);
         expect(
-          token.pattern.test(whole) && !token.pattern.test(stripped),
-          `${file}: "${token.name}" is no longer confined to the provider map — either it moved ` +
-          `(a second convergence point, PF-023) or the map dropped it and the allowlist is stale`,
-        ).toBe(true);
+          stripped.length,
+          `${file}: ${region.label} was not found — its anchors changed`,
+        ).toBeLessThan(whole.length);
+        for (const token of FOREIGN_PROVIDER_TOKENS) {
+          expect(
+            token.pattern.test(whole) && !token.pattern.test(stripped),
+            `${file}: "${token.name}" is no longer confined to ${region.label} — either it moved ` +
+            `(a second convergence point, PF-023) or the region dropped it and the row is stale`,
+          ).toBe(true);
+        }
       }
     }
   });
