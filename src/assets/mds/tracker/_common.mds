@@ -1,4 +1,6 @@
-A partial: the provider-NEUTRAL lines every tracker module writes identically.
+A partial: the lines two or three tracker modules would otherwise write out
+identically. Not all of them are provider-neutral — see EACH DEFINE STATES ITS
+OWN AUDIENCE below.
 
 It declares no `output-dir:`, so the build skips it and it reaches the artifact
 only by expanding into the modules that import it. `tests/fixtures/mds-manifest.ts`
