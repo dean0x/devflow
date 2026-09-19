@@ -326,6 +326,14 @@ export const MCP_SHARED_LITERAL_REGISTRY: readonly McpSharedLiteral[] = [
       'table, so a provider selecting by tool name degrades on names nobody can grep for.',
   },
   {
+    sentence: 'Qualification is **per CAPABILITY, never per server**',
+    justification:
+      'The two-server routing rule (AC-13). It decides which server a WRITE reaches, and a ' +
+      'provider restating it is a provider whose copy can be relaxed to per-server promotion — ' +
+      'the shape in which a create lands on one tracker and its comment on another, with a ' +
+      'DEGRADED line nowhere because each call individually succeeded.',
+  },
+  {
     sentence: '| fetch by key | `no tracker tool for fetch by key` |',
     justification:
       'A capability-table ROW. The prose form (`DEGRADED (no tracker tool for fetch by key)`) is ' +

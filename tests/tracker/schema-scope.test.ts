@@ -638,6 +638,13 @@ const LIVE_REASONS: readonly string[] = [
   // tell which half is missing. No {provider} token — the cap is the provider's,
   // the failure is not.
   'plan artifact exceeds comment cap',
+  // Two connected servers is the one configuration in which a write lands in the
+  // WRONG tracker and nothing downstream can tell. `{n}` is how many servers
+  // qualified: runtime data with no closed domain, so it is emitted verbatim and
+  // NEVER instantiated, exactly like `{ref}` and `{p}`. `{capability}` IS
+  // instantiated, because the contract's own table is its closed domain — the
+  // ambiguity is per capability, so the reason has to name which one.
+  'ambiguous tracker server — {n} servers offer {capability}',
 ];
 
 /**
@@ -904,11 +911,12 @@ describe('[DR-04] DEGRADED literal registry: forward direction', () => {
     ).toBe(CANONICAL_REASONS.length);
     expect(
       CANONICAL_REASONS.length,
-      // 18 at the tracker wave, 20 now: the mismatch reason split by cause (+2 -1)
-      // and the plan artifact's cap (+1). A floor rises with the table and never
-      // falls — a shorter table is a narrowed registry, whatever the reason given.
-      '§14.2 fixes 20 non-`(none)` reasons; a shorter table is a narrowed registry',
-    ).toBeGreaterThanOrEqual(20);
+      // 18 at the tracker wave, 21 now: the mismatch reason split by cause (+2 -1),
+      // the plan artifact's cap (+1) and the two-server ambiguity (+1). A floor
+      // rises with the table and never falls — a shorter table is a narrowed
+      // registry, whatever the reason given.
+      '§14.2 fixes 21 non-`(none)` reasons; a shorter table is a narrowed registry',
+    ).toBeGreaterThanOrEqual(21);
     // The instantiation rule is a NARROWING, not a wildcard: only `{provider}` is
     // instantiated, only with tokens the registry carries, and a reason without the
     // placeholder still matches itself and nothing else.
@@ -944,6 +952,25 @@ describe('[DR-04] DEGRADED literal registry: forward direction', () => {
     ).not.toContain('no tracker tool for frobnicate');
     expect(capabilitySpellings[0], 'the template itself is always the first spelling')
       .toBe('no tracker tool for {capability}');
+    // A reason may carry BOTH an instantiable placeholder and a non-instantiable
+    // one. `{capability}` is drawn from the contract's closed table; `{n}` is a
+    // count known only at runtime, so every spelling must still carry it verbatim.
+    // A registry that instantiated `{n}` would admit an unbounded family of
+    // spellings and stop being a closed vocabulary — GAP-13 by the back door.
+    const ambiguitySpellings = reasonSpellings('ambiguous tracker server — {n} servers offer {capability}');
+    expect(
+      ambiguitySpellings,
+      'the capability half must instantiate against the contract table, as it does elsewhere',
+    ).toContain('ambiguous tracker server — {n} servers offer fetch by key');
+    expect(
+      ambiguitySpellings.filter(spelling => !spelling.includes('{n}')),
+      '`{n}` has no closed domain and must survive verbatim in EVERY spelling — a spelling ' +
+      'without it is one no site can emit and no reader can grep for',
+    ).toEqual([]);
+    expect(
+      ambiguitySpellings,
+      'and a capability the contract does not define is refused here too',
+    ).not.toContain('ambiguous tracker server — {n} servers offer frobnicate');
     expect(
       GITHUB_ONLY_REASONS.length,
       'the github-only list is empty — the reverse arm would then be silently stricter than the ' +
@@ -1433,5 +1460,184 @@ describe('the read site carries the `## Reference Rendering` gate it names (secu
       collectMissingWriterGate(validator.split('semicolon').join('')),
       'a writer row that lost a denylist member must be reported',
     ).toContain('the denied semicolon');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 8. Two-server scoping: a unique qualifying server, or no call (AC-13)
+// ---------------------------------------------------------------------------
+//
+// Two connected servers that both offer tracker capabilities is the one
+// configuration in which a write can land in somebody else's tracker and nothing
+// downstream can tell. The contract answers it with SIX clauses, and this is a
+// clause table rather than one substring for the reason PF-018 gives: a rule that
+// kept its DEGRADED literal and lost its affinity clause would satisfy any
+// single-fragment assertion while routing the second half of one operation to the
+// other server.
+//
+// Each clause carries its own detector and its own known-bad probe below, so a
+// clause removed from the contract takes exactly one named assertion red with it
+// — never zero, and never the whole file.
+
+interface ScopingClause {
+  readonly name: string;
+  /** Detector over the emitted subsection. */
+  readonly detector: RegExp;
+  /** A byte-exact fragment whose removal must make `detector` fail (the probe). */
+  readonly wound: string;
+  readonly why: string;
+}
+
+/** The heading that opens the subsection, byte-exact as the contract spells it. */
+const SCOPING_HEADING = '### Which server, when more than one is connected';
+
+const TWO_SERVER_CLAUSES: readonly ScopingClause[] = [
+  {
+    name: 'partition by server',
+    detector: /partition/i,
+    wound: 'Partition',
+    why:
+      'without a partition there is no "server" to be ambiguous between, and every rule below ' +
+      'degenerates into "pick a tool", which is the state that lets one operation straddle two ' +
+      'servers. The transport acronym cannot be spelled here (provider-scope forbids it in every ' +
+      'loadable file), so the partition is stated by the tool name\'s leading namespace segment',
+  },
+  {
+    name: 'per-capability qualification',
+    detector: /per CAPABILITY, never per server/,
+    wound: 'per CAPABILITY, never per server',
+    why:
+      'qualification per SERVER is the defect: a server that can create an issue would be ' +
+      'promoted to receive the comment too, and the second call is the one that lands in the ' +
+      'wrong place. The capability is the unit because the capability is what the mechanics ask for',
+  },
+  {
+    name: 'unique winner needs no further evidence',
+    detector: /[Ee]xactly one qualifying server/,
+    wound: 'Exactly one qualifying server',
+    why:
+      'a single terse server — one whose descriptions never name the tracker — is still the only ' +
+      'thing that can serve the capability. Requiring vocabulary evidence of it would degrade on ' +
+      'terseness, which is a property of the server\'s documentation and not of the routing',
+  },
+  {
+    name: 'two or more is DEGRADED and no call',
+    detector: /DEGRADED \(ambiguous tracker server — \{n\} servers offer \{capability\}\)/,
+    wound: 'ambiguous tracker server',
+    why:
+      'the registered reason and the refusal it names. Without the refusal the reason is advice: ' +
+      'an agent that reports the ambiguity and then calls anyway has written into a tracker it ' +
+      'could not identify, and the DEGRADED line makes that look handled',
+  },
+  {
+    name: 'affinity pinned for the spawn',
+    detector: /pinned for the whole spawn/,
+    wound: 'pinned for the whole spawn',
+    why:
+      're-deciding per call is how the read and the write of one operation land on two servers. ' +
+      'The decision is made once because the operation is one operation',
+  },
+  {
+    name: 'corroborating read, once per spawn',
+    detector: /once per spawn\*\* — never per item/,
+    wound: 'never per item',
+    why:
+      'the write scope check, and its bound. A corroborating read per ITEM turns a fifty-issue ' +
+      'backlink into a hundred calls (design review H2); a corroborating read per SPAWN is one ' +
+      'fetch of the project by key, which is all the evidence the routing needs',
+  },
+];
+
+/** The emitted tool-call contract, read fail-loud. */
+function toolCallContract(): string {
+  const file = path.join(compiledSkillRefsDir(), 'tracker', '_mcp.md');
+  const content = readFileSync(file, 'utf-8');
+  if (content.trim() === '') throw new Error(`${file} is empty — this section has no subject`);
+  return content;
+}
+
+/**
+ * Named collector: the two-server subsection of a contract text, or `''`.
+ *
+ * Sliced heading-to-next-heading so the negative arm below cannot be satisfied by
+ * a `no tracker tool for` that lives in a different subsection of the same file.
+ */
+export function sliceScopingSection(text: string): string {
+  const start = text.indexOf(SCOPING_HEADING);
+  if (start === -1) return '';
+  const rest = text.slice(start + SCOPING_HEADING.length);
+  const end = rest.indexOf('\n### ');
+  return end === -1 ? rest : rest.slice(0, end);
+}
+
+/** Named collector: clauses the two-server rule does not state. */
+export function collectMissingScopingClauses(section: string): string[] {
+  return TWO_SERVER_CLAUSES
+    .filter(clause => !clause.detector.test(section))
+    .map(clause => `${clause.name} — ${clause.why}`);
+}
+
+describe('the two-server scoping rule states every clause (AC-13)', () => {
+  it('the registry and the corpus it ranges over are both real (PF-018)', () => {
+    expect(TWO_SERVER_CLAUSES.length, 'an empty clause table asserts nothing').toBeGreaterThan(0);
+    for (const clause of TWO_SERVER_CLAUSES) {
+      expect(clause.why.trim().length, `${clause.name}: a clause without a reason is a grep`)
+        .toBeGreaterThan(40);
+      expect(clause.wound.length, `${clause.name}: an empty wound makes its probe inert`)
+        .toBeGreaterThan(0);
+    }
+    expect(
+      new Set(TWO_SERVER_CLAUSES.map(c => c.name)).size,
+      'two clauses sharing a name have no per-clause accounting',
+    ).toBe(TWO_SERVER_CLAUSES.length);
+  });
+
+  it('the shipped contract states all six clauses', () => {
+    const section = sliceScopingSection(toolCallContract());
+    expect(
+      section,
+      `the contract has no ${SCOPING_HEADING} subsection — two connected servers is the ` +
+      'configuration AC-13 exists for, and without the subsection nothing scopes a write',
+    ).not.toBe('');
+    const missing = collectMissingScopingClauses(section);
+    expect(
+      missing,
+      `clause(s) the two-server rule does not state:\n  ${missing.join('\n  ')}`,
+    ).toEqual([]);
+  });
+
+  it('the plural case does NOT reuse the singular capability reason', () => {
+    // `no tracker tool for {capability}` means "nothing offers it". The plural case
+    // is the opposite — SEVERAL things offer it — and answering both with one
+    // literal is the GAP-13 shape: a user reading the status cannot tell whether to
+    // connect a server or disconnect one, and a grep cannot separate the two.
+    const section = sliceScopingSection(toolCallContract());
+    expect(section, 'no subsection to check').not.toBe('');
+    expect(
+      section,
+      'the ambiguity case must carry its own registered reason, not the unavailability one',
+    ).not.toContain('no tracker tool for');
+    expect(
+      section,
+      'and it must carry the registered spelling, on one line, so the registry\'s forward arm ' +
+      'has a site to find',
+    ).toContain('DEGRADED (ambiguous tracker server — {n} servers offer {capability})');
+  });
+
+  it('known-bad probe: each clause, removed from a copy, is reported by the same collector', () => {
+    const pristine = sliceScopingSection(toolCallContract());
+    expect(
+      collectMissingScopingClauses(pristine),
+      'the collector must be silent on the shipped subsection, or every probe below proves nothing',
+    ).toEqual([]);
+    for (const clause of TWO_SERVER_CLAUSES) {
+      const wounded = pristine.split(clause.wound).join('');
+      expect(wounded, `removing ${JSON.stringify(clause.wound)} changed nothing — probe is inert`)
+        .not.toBe(pristine);
+      expect(
+        collectMissingScopingClauses(wounded).join('\n'),
+        `removing ${JSON.stringify(clause.wound)} must be reported as "${clause.name}"`,
+      ).toContain(clause.name);
+    }
   });
 });
