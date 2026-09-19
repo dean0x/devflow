@@ -5,18 +5,18 @@
     {
       "id": "dist-host-count",
       "floor": 13,
-      "pattern": "toBeGreaterThanOrEqual(13)",
+      "pattern": "MDS_COMMAND_HOSTS.length).toBeGreaterThanOrEqual(13)",
       "occurrences": 1,
       "sourceFile": "tests/build-mds.test.ts",
-      "description": "Number of compiled MDS host commands in dist/commands/ (MDS_COMMAND_HOSTS). The discovery assertion is a set-equality against tests/fixtures/mds-manifest.ts and this floor is that manifest's length, asserted alongside the set: the set says WHICH hosts, the floor says the roster may not shrink behind it."
+      "description": "Number of compiled MDS host commands in dist/commands/ (MDS_COMMAND_HOSTS). The discovery assertion is a set-equality against tests/fixtures/mds-manifest.ts and this floor is that manifest's length, asserted alongside the set: the set says WHICH hosts, the floor says the roster may not shrink behind it. The pattern names its RECEIVER because partial-count in the same file now pins the same number: two entries sharing one bare pattern have no per-entry accounting, and the decrement probe of each would keep finding the other's site."
     },
     {
       "id": "partial-count",
-      "floor": 12,
-      "pattern": "toBeGreaterThanOrEqual(12)",
+      "floor": 13,
+      "pattern": "ALL_MDS_PARTIALS.length).toBeGreaterThanOrEqual(13)",
       "occurrences": 1,
       "sourceFile": "tests/build-mds.test.ts",
-      "description": "Number of _partials/*.mds partial files (MDS_PARTIALS). The discovery assertion is a set-equality against tests/fixtures/mds-manifest.ts; this floor is its length. Floors rise with the roster, never fall — a partial deleted rather than inlined takes its callers with it silently."
+      "description": "Number of .mds partial files anywhere under src/ (ALL_MDS_PARTIALS = MDS_PARTIALS under src/assets/commands/_partials/, plus MDS_REFERENCE_PARTIALS elsewhere). The discovery assertion is a set-equality against tests/fixtures/mds-manifest.ts over a repo-wide walk that classifies by the build's own rule -- no output-dir: key -- so a partial parked outside _partials/ is named rather than merely counted; this floor is its length. Floors rise with the roster, never fall — a partial deleted rather than inlined takes its callers with it silently."
     },
     {
       "id": "dist-files-count",

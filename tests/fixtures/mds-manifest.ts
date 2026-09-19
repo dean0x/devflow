@@ -22,7 +22,7 @@
  *   - tests/mds-variants.test.ts
  *       "validateOutputName"            — every basename the build owns is accepted by the name rule
  *
- * Length floors (`>= 13`, `>= 11`) are asserted alongside the set-equality in
+ * Length floors (`>= 13`, `>= 13`) are asserted alongside the set-equality in
  * tests/build-mds.test.ts and registered in tests/fixtures/numeric-floors.json.
  * A floor never decreases; a manifest entry may only be added or renamed in step
  * with the file on disk.
@@ -56,10 +56,14 @@ export const MDS_COMMAND_HOSTS = [
 ] as const;
 
 /**
- * The 12 partials in src/assets/commands/_partials/. A partial declares no
- * `output-dir:`, so the build skips it — it is imported by hosts instead.
- * The `_` prefix is the partial convention (and is refused by validateOutputName,
- * so a partial can never become an output filename by accident).
+ * The 12 partials in src/assets/commands/_partials/, by BASENAME. A partial
+ * declares no `output-dir:`, so the build skips it — it is imported by hosts
+ * instead. The `_` prefix is the partial convention (and is refused by
+ * validateOutputName, so a partial can never become an output filename by
+ * accident).
+ *
+ * Not the whole partial roster: MDS_REFERENCE_PARTIALS below holds the ones that
+ * live outside this directory, and ALL_MDS_PARTIALS is the union the build counts.
  */
 export const MDS_PARTIALS = [
   '_compliance',
@@ -75,6 +79,36 @@ export const MDS_PARTIALS = [
   '_tracker',
   '_wave',
 ] as const;
+
+/**
+ * Partials that live OUTSIDE `src/assets/commands/_partials/`, by repo-relative
+ * source path — the same addressing as MDS_REFERENCE_MODULES, and for the same
+ * reason: a basename is only unique inside one directory.
+ *
+ * One today. `_common.mds` holds the lines every tracker module writes
+ * identically, including the CLI provider's — the counterpart to `_mcp.mds`,
+ * which owns what is shared only by the TOOL-CALL providers. It is a partial
+ * because it declares no `output-dir:`: the build skips it and it reaches the
+ * artifact only through the modules that import it.
+ *
+ * This roster is what makes the partial discovery below a repo-wide walk rather
+ * than a listing of one directory. A partial parked outside `_partials/` was
+ * previously invisible to every assertion here while still being counted by the
+ * build, so the printed count and the manifest could disagree with nothing red.
+ */
+export const MDS_REFERENCE_PARTIALS = [
+  'src/assets/mds/tracker/_common.mds',
+] as const;
+
+/**
+ * Every partial the build walks past, and therefore the number it prints as
+ * "N partial(s) skipped (no output-dir:)". Addressed as repo-relative paths so
+ * the two halves compose without a directory being implied.
+ */
+export const ALL_MDS_PARTIALS: readonly string[] = [
+  ...MDS_PARTIALS.map(name => `src/assets/commands/_partials/${name}.mds`),
+  ...MDS_REFERENCE_PARTIALS,
+];
 
 /**
  * The hosts that adopt `_partials/_tracker.mds` (P2-S9). Named as a set, not a

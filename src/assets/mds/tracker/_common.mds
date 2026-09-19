@@ -1,0 +1,82 @@
+A partial: the provider-NEUTRAL lines every tracker module writes identically.
+
+It declares no `output-dir:`, so the build skips it and it reaches the artifact
+only by expanding into the modules that import it. `tests/fixtures/mds-manifest.ts`
+names it in `MDS_REFERENCE_PARTIALS`; it is a partial living outside
+`src/assets/commands/_partials/`, which is why that manifest's partial discovery
+is a repo-wide walk rather than one directory listing.
+
+OWNERSHIP, stated here and in `_mcp.mds` so neither module has to be read to know
+what the other holds:
+
+- **`_mcp.mds` owns the emitted tool-call CONTRACT**, and the authoring-only
+  defines whose rules `tests/guards/mcp-sink-bypass.test.ts` requires every
+  posting mechanic to spell for itself.
+- **THIS module owns every other shared line** — anything two or three tracker
+  modules would otherwise write out identically.
+
+EACH DEFINE STATES ITS OWN AUDIENCE, because this module's are not all the same.
+`compliance_step_gate`, `compliance_issue_policy` and `state_batch_line` are
+every provider's, the CLI one included. The five ref pre-flight defines are the
+TOOL-CALL providers' only, and they are here rather than in `_mcp.mds` — where
+their subject would put them — for a measured reason recorded at that module:
+compiling `_jira.mds` against `_mcp.mds` doubles in cost per define added there
+and stops finishing at twelve, while the same five defines cost 1.2 s here. An
+audience is a comment; a build that does not finish is not.
+
+THE REF PRE-FLIGHT HEAD IS FOUR DEFINES, NOT ONE TAKING A MODE. The four differ
+by what is being gated — one reference a caller named, a list, the always-loaded
+entry gate, a segment of a branch name — while the grammar, the normalisation
+step and the alternation warning arrive as arguments, so a provider needing none
+of them pays for none of them. Four rather than one because `@if` is
+BLOCK-structured: its expansion ends the line, and every one of the fourteen call
+sites is a fragment in the middle of a markdown list item, so a mode parameter
+would break the list the sites live in.
+
+One line is DELIBERATELY not here. The marker-neutralisation bullet
+(`_github.mds`, `_jira.mds`, `_linear.mds`) is byte-identical in its content and
+NOT in its indentation — five spaces in one module and three in the other two,
+because the surrounding list nests differently. A define emits one string, so
+hoisting it would re-indent one of the three, and indentation is list grammar
+rather than whitespace here (PF-063). Normalising those lists is its own edit.
+
+@define compliance_step_gate():
+(Compliance-gated — skip if `COMPLIANCE` is absent or `(none)`)
+@end
+
+@define compliance_issue_policy():
+- Issue creation is gated by the `COMPLIANCE` input: `enabled` → mandatory (DEGRADED states exempt), absent or `(none)` → optional.
+@end
+
+@define state_batch_line(subject, subject_ref, ref_token):
+2b. Render each issue's {subject} as a `**State**: \{state\}` line of its own, between that issue's `### Issue {ref_token}:` heading and its `<untrusted-issue-body>` marker — OUTSIDE the wrapper, because {subject_ref} is an enum the tracker computed, not remote prose. A caller refreshing a batch reads it to see a ticket closed out of band.
+@end
+
+@define bare_number_rule():
+A **bare number** ⇒ `TRACEABILITY: DEGRADED (ambiguous issue reference)` — under this provider a number names nothing.
+@end
+
+@define ref_preflight_single(provider, grammar, normalise = "", forms = "", tail = ""):
+{normalise}Shape-gate it against {grammar}, anchored at both ends{forms}. {bare_number_rule()} Any other shape ⇒ `TRACEABILITY: DEGRADED (issue reference "\{ref\}" does not match {provider} reference grammar)`.{tail}
+@end
+
+@define ref_preflight_list(provider, grammar, normalise = "", forms = "", tail = ""):
+{normalise}Pre-flight the list against {grammar}, anchored at both ends{forms}, and **drop** every entry that fails, reporting each as `TRACEABILITY: DEGRADED (issue reference "\{ref\}" does not match {provider} reference grammar)` — a bare number among them goes with them, in silence: `ambiguous issue reference` answers a reference a caller named, not one line of a list nobody chose. Every entry dropped ⇒ `TRACEABILITY: DEGRADED (no parseable refs for provider \{p\})`{tail}
+@end
+
+@define ref_preflight_entry(provider, grammar, normalise = "", forms = ""):
+{normalise}Every entry of `SHIPPED_ISSUES` must satisfy {grammar}, anchored at both ends of the STRING (a newline fails it){forms} — this provider's grammar is what the entry gate's shape requirement means here, and the anchored form is what keeps a ref out of a query or a command. **Drop** every entry that fails and report it as `TRACEABILITY: DEGRADED (issue reference "\{ref\}" does not match {provider} reference grammar)`.
+@end
+
+@define ref_preflight_branch(match_phrase):
+extract the segment {match_phrase} and verify it with the *fetch by key* capability. If the call fails, or the issue is not open, **skip silently** — never render a link for an unverified reference. A branch name can carry a token that merely looks like one, and the existence check is the guard.
+@end
+
+@export compliance_step_gate
+@export compliance_issue_policy
+@export state_batch_line
+@export bare_number_rule
+@export ref_preflight_single
+@export ref_preflight_list
+@export ref_preflight_entry
+@export ref_preflight_branch

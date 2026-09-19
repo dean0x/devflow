@@ -65,6 +65,22 @@ stated once and NAMED by the operations — never restated by them. And a rule t
 differs per provider belongs in that provider's module: the comment-body cap does
 not live here, because the CLI provider's is a different number.
 
+OWNERSHIP AGAINST `_common.mds`, stated in both modules so neither has to be read
+to know what the other holds: **this module owns the emitted CONTRACT, and the
+authoring-only defines whose rules a per-file guard requires every posting
+mechanic to spell for itself.** `_common.mds` owns every other shared line — a
+line two or three tracker modules would otherwise write out identically.
+
+THE DEFINE COUNT HERE IS CAPPED BY THE COMPILER, and that is why the ref
+pre-flight heads live in `_common.mds` although they are tool-call-only by
+subject. Compiling `_jira.mds` against this module costs 3.3 s at nine defines,
+4.9 s at ten and 8.3 s at eleven, and does not finish inside twelve seconds at
+twelve — measured with defines whose whole body is one character, so it is the
+COUNT against this module's size and not the content. The same five defines added
+to `_common.mds` cost 1.2 s in total. A rule that belongs here by subject and
+would be the tenth define belongs in `_common.mds` with its audience stated at
+the define, and this paragraph is the reason.
+
 @define posting_gate_head(scope, compose_tail = ""):
 ### Posting gate
 

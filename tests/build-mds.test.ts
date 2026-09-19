@@ -41,6 +41,8 @@ import {
   DYNAMIC_COMMAND_HOSTS,
   MDS_COMMAND_HOSTS,
   MDS_PARTIALS,
+  MDS_REFERENCE_PARTIALS,
+  ALL_MDS_PARTIALS,
   TRACKER_PARTIAL_ADOPTERS,
   DIST_COMMAND_FILES,
 } from './fixtures/mds-manifest.js';
@@ -181,8 +183,69 @@ describe('MDS host discovery', () => {
   it('commands/_partials/ holds exactly the manifest\'s 12 partials (both directions)', async () => {
     const { partials } = await collectMdsNames(PARTIALS_DIR);
     expect(partials).toEqual([...MDS_PARTIALS].sort());
+  });
+
+  /**
+   * Named collector: every `.mds` under `src/` that declares no `output-dir:`,
+   * as a repo-relative path — the build's own definition of a partial, applied
+   * over the build's own walk rather than over one directory listing.
+   *
+   * The listing this replaced could only see `_partials/`, so a partial parked
+   * anywhere else was counted by the build and named by nothing. Driven by the
+   * set-equality arm AND by the probe below, so a collector that stopped
+   * classifying cannot leave a green set-equality behind it.
+   */
+  async function collectRepoPartials(dir: string, depth = 0): Promise<string[]> {
+    const found: string[] = [];
+    for (const e of await fs.readdir(dir, { withFileTypes: true })) {
+      const full = path.join(dir, e.name);
+      if (e.isDirectory()) {
+        if (depth < 6) found.push(...await collectRepoPartials(full, depth + 1));
+        continue;
+      }
+      if (!e.isFile() || !e.name.endsWith('.mds')) continue;
+      const text = await fs.readFile(full, 'utf-8');
+      // The build's own classifier: a LEADING `---` block declaring output-dir:.
+      // A file with no leading block has no build key at all and is a partial;
+      // reading the key anywhere else would let body prose reclassify a file.
+      const block = /^---\n([\s\S]*?)\n---\n/.exec(text)?.[1] ?? '';
+      if (/^output-dir:/m.test(block)) continue;
+      found.push(path.relative(ROOT, full).split(path.sep).join('/'));
+    }
+    return found.sort();
+  }
+
+  it('src/ holds exactly the manifest\'s 13 partials, wherever they live (both directions)', async () => {
+    const partials = await collectRepoPartials(path.join(ROOT, 'src'));
+    expect(
+      partials,
+      'the repo-wide partial set must equal the manifest — a partial outside _partials/ that ' +
+      'nothing names is one the build counts and no assertion sees',
+    ).toEqual([...ALL_MDS_PARTIALS].sort());
+    expect(
+      partials,
+      'the walk must reach outside src/assets/commands/_partials/, or widening it bought nothing',
+    ).toContain(MDS_REFERENCE_PARTIALS[0]);
     // Manifest length floor — floors never decrease (numeric-floors.json: partial-count).
-    expect(MDS_PARTIALS.length).toBeGreaterThanOrEqual(12);
+    expect(ALL_MDS_PARTIALS.length).toBeGreaterThanOrEqual(13);
+  });
+
+  it('known-bad probe: the repo-wide collector reports a seeded partial and skips a seeded host', async () => {
+    const tmp = await fs.mkdtemp(path.join(os.tmpdir(), 'devflow-repo-partials-probe-'));
+    try {
+      await fs.mkdir(path.join(tmp, 'deep', 'er'), { recursive: true });
+      await fs.writeFile(path.join(tmp, 'deep', 'er', '_stray.mds'), 'body only\n', 'utf-8');
+      await fs.writeFile(
+        path.join(tmp, 'deep', 'a-host.mds'),
+        '---\noutput-dir: dist/commands\n---\nbody\n',
+        'utf-8',
+      );
+      const found = (await collectRepoPartials(tmp)).map(p => path.basename(p));
+      expect(found, 'a partial nested outside _partials/ must be reported').toContain('_stray.mds');
+      expect(found, 'a file declaring output-dir: is a host, not a partial').not.toContain('a-host.mds');
+    } finally {
+      await fs.rm(tmp, { recursive: true, force: true });
+    }
   });
 
   it('commands/_partials/ is flat — no subdirectories at any depth', async () => {
@@ -219,10 +282,12 @@ describe('MDS host discovery', () => {
   });
 
   it('each partial .mds does NOT declare output-dir:', async () => {
-    const entries = await fs.readdir(PARTIALS_DIR, { withFileTypes: true });
-    for (const e of entries.filter(f => f.isFile() && f.name.endsWith('.mds'))) {
-      const content = await fs.readFile(path.join(PARTIALS_DIR, e.name), 'utf-8');
-      expect(content, `_partials/${e.name} must not declare output-dir:`).not.toMatch(/^output-dir:/m);
+    // Every partial the manifest names, not only the ones under _partials/: the
+    // property that makes a file a partial is the absence of the key, and a
+    // partial outside that directory is the case the property is easiest to lose.
+    for (const rel of ALL_MDS_PARTIALS) {
+      const content = await fs.readFile(path.join(ROOT, rel), 'utf-8');
+      expect(content, `${rel} must not declare output-dir:`).not.toMatch(/^output-dir:/m);
     }
   });
 
