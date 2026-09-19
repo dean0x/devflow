@@ -82,6 +82,7 @@ describe('buildAssetMaps', () => {
       commands: [],
       agents: ['agent-a'],
       skills: ['skill-a', 'skill-b'],
+      requires: [],
     }];
     const { skillsMap, agentsMap } = buildAssetMaps(single);
     expect(skillsMap.size).toBe(2);
@@ -92,8 +93,8 @@ describe('buildAssetMaps', () => {
 
   it('deduplicates overlapping skills/agents (first plugin wins)', () => {
     const plugins: PluginDefinition[] = [
-      { name: 'first', description: '', commands: [], agents: ['shared-agent'], skills: ['shared-skill'] },
-      { name: 'second', description: '', commands: [], agents: ['shared-agent'], skills: ['shared-skill'] },
+      { name: 'first', description: '', commands: [], agents: ['shared-agent'], skills: ['shared-skill'], requires: [] },
+      { name: 'second', description: '', commands: [], agents: ['shared-agent'], skills: ['shared-skill'], requires: [] },
     ];
     const { skillsMap, agentsMap } = buildAssetMaps(plugins);
     expect(skillsMap.get('shared-skill')).toBe('first');

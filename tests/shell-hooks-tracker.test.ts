@@ -1543,6 +1543,55 @@ describe('session-start-context: tracker setup directive (Section 3)', () => {
     ).toEqual({ preambleDecides: true, section2: true, section3: true });
   });
 
+  /**
+   * The gate is a POSITIVE shape, not a denylist of the characters someone
+   * thought of. These payloads carry none of the four a denylist named — no
+   * quote, no backslash, no CR, no LF — and every one of them is still inert
+   * only by accident of what the model happens to do with it. An allowlist
+   * refuses them by construction; the denylist admitted all four.
+   */
+  const OUTSIDE_ALLOWLIST: ReadonlyArray<readonly [string, string]> = [
+    ['space', 'proj name'],
+    ['command substitution', 'proj$(whoami)'],
+    ['backtick', 'proj`id`'],
+    ['semicolon', 'proj;echo'],
+  ];
+
+  for (const [label, infix] of OUTSIDE_ALLOWLIST) {
+    it(`a path carrying a ${label} is refused by the positive shape gate`, () => {
+      const hostile = path.join(tmpDir, `${infix}-root`);
+      fs.mkdirSync(path.join(hostile, '.devflow', 'learning'), { recursive: true });
+      seedDecisionsTldr(hostile);
+      fs.writeFileSync(
+        path.join(hostile, '.devflow', 'learning', '.pending-turns.jsonl'),
+        '{"role":"user","content":"we chose X over Y","ts":1}\n',
+      );
+      seedTracker(homeDir, { provider: 'jira' });
+
+      const { stdout, exitCode } = run(sessionStart(hostile));
+      expect(exitCode).toBe(0);
+      const ctx = contextOf(stdout);
+      expect(ctx, 'the directive must not carry a path the allowlist never admitted')
+        .not.toContain('--- LEARNING MAINTENANCE ---');
+      expect(ctx).not.toContain(BANNER);
+    });
+  }
+
+  it('the gate spells an allowlist, not a list of forbidden characters', () => {
+    // Read off the source: a denylist of specific hostile characters is the
+    // shape this control replaced, and a revert would restore it silently.
+    const gate = HOOK_SOURCE.slice(
+      HOOK_SOURCE.indexOf('DIRECTIVE_PATHS_SAFE="yes"'),
+      HOOK_SOURCE.indexOf('DEVFLOW_DIR="$PROJECT_ROOT/.devflow"'),
+    );
+    expect(gate.length, 'the gate block must be locatable').toBeGreaterThan(0);
+    expect(
+      gate,
+      'the matcher must be a negated character class over the admitted set',
+    ).toContain('*[!A-Za-z0-9/._-]*');
+    expect(gate, 'an empty value must be refused explicitly, not read as "nothing forbidden"').toContain("''|");
+  });
+
   it('known-bad probe: the guard collector reports a section that never consults the flag', () => {
     const seeded = [
       `${GUARD_FLAG}="yes"`,

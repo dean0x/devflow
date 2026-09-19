@@ -70,8 +70,8 @@ describe('computeAssetsToRemove', () => {
 
   it('handles custom plugin lists', () => {
     const plugins: PluginDefinition[] = [
-      { name: 'a', description: '', commands: ['/a'], agents: ['shared', 'only-a'], skills: ['shared-skill', 'only-a-skill'], rules: [] },
-      { name: 'b', description: '', commands: ['/b'], agents: ['shared', 'only-b'], skills: ['shared-skill', 'only-b-skill'], rules: [] },
+      { name: 'a', description: '', commands: ['/a'], agents: ['shared', 'only-a'], skills: ['shared-skill', 'only-a-skill'], requires: [], rules: [] },
+      { name: 'b', description: '', commands: ['/b'], agents: ['shared', 'only-b'], skills: ['shared-skill', 'only-b-skill'], requires: [], rules: [] },
     ];
 
     // Remove 'a', keep 'b'
@@ -83,8 +83,8 @@ describe('computeAssetsToRemove', () => {
 
   it('returns rules unique to the removed plugin', () => {
     const plugins: PluginDefinition[] = [
-      { name: 'plugin-a', description: '', commands: [], agents: [], skills: [], rules: ['rule-a', 'shared-rule'] },
-      { name: 'plugin-b', description: '', commands: [], agents: [], skills: [], rules: ['rule-b', 'shared-rule'] },
+      { name: 'plugin-a', description: '', commands: [], agents: [], skills: [], requires: [], rules: ['rule-a', 'shared-rule'] },
+      { name: 'plugin-b', description: '', commands: [], agents: [], skills: [], requires: [], rules: ['rule-b', 'shared-rule'] },
     ];
     const { rules } = computeAssetsToRemove([plugins[0]], plugins);
     expect(rules).toContain('rule-a');
@@ -114,6 +114,7 @@ describe('formatDryRunPlan', () => {
   it('lists skills, agents, and commands', () => {
     const plan = formatDryRunPlan({
       skills: ['security', 'test-driven-development'],
+      requires: [],
       agents: ['code'],
       commands: ['/implement'],
     });
@@ -131,6 +132,7 @@ describe('formatDryRunPlan', () => {
   it('omits empty sections', () => {
     const plan = formatDryRunPlan({
       skills: ['software-design'],
+      requires: [],
       agents: [],
       commands: [],
     });
@@ -142,6 +144,7 @@ describe('formatDryRunPlan', () => {
   it('deduplicates skills, agents, and commands', () => {
     const plan = formatDryRunPlan({
       skills: ['software-design', 'software-design', 'testing'],
+      requires: [],
       agents: ['code', 'code'],
       commands: ['/implement', '/implement'],
     });
@@ -154,6 +157,7 @@ describe('formatDryRunPlan', () => {
   it('includes rules section when rules are provided', () => {
     const plan = formatDryRunPlan({
       skills: [],
+      requires: [],
       agents: [],
       commands: [],
       rules: ['security', 'engineering'],
@@ -166,6 +170,7 @@ describe('formatDryRunPlan', () => {
   it('omits rules section when rules array is empty', () => {
     const plan = formatDryRunPlan({
       skills: ['software-design'],
+      requires: [],
       agents: [],
       commands: [],
       rules: [],
@@ -176,6 +181,7 @@ describe('formatDryRunPlan', () => {
   it('omits rules section when rules field is absent', () => {
     const plan = formatDryRunPlan({
       skills: ['software-design'],
+      requires: [],
       agents: [],
       commands: [],
     });
@@ -185,6 +191,7 @@ describe('formatDryRunPlan', () => {
   it('deduplicates rules', () => {
     const plan = formatDryRunPlan({
       skills: [],
+      requires: [],
       agents: [],
       commands: [],
       rules: ['security', 'security', 'engineering'],

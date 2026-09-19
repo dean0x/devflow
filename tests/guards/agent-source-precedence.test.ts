@@ -53,6 +53,7 @@ function fixturePlugin(): PluginDefinition {
     commands: [],
     agents: [...ALL_AGENTS],
     skills: [],
+    requires: [],
     optional: false,
     rules: [],
   };
@@ -71,6 +72,7 @@ async function installAll(root: string, dirs?: AgentSourceDirs): Promise<Map<str
     devflowDir: path.join(claudeDir, 'devflow'),
     skillsMap: new Map(),
     agentsMap: buildAssetMaps([plugin]).agentsMap,
+    trackerProvider: 'github',
     isPartialInstall: false,
     spinner,
     ...(dirs === undefined ? {} : { agentSourceDirs: dirs }),

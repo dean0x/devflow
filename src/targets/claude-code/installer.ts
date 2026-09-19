@@ -2,7 +2,7 @@ import { promises as fs } from 'fs';
 import { existsSync } from 'fs';
 import * as path from 'path';
 import type { PluginDefinition } from '../../core/plugins.js';
-import { DEVFLOW_PLUGINS, SKILL_NAMESPACE, prefixSkillName, unprefixSkillName, getAllSkillNames, getAllAgentNames, getAllCommandNames, FEATURE_OWNED_SKILLS } from '../../core/plugins.js';
+import { DEVFLOW_PLUGINS, SKILL_NAMESPACE, prefixSkillName, unprefixSkillName, getAllSkillNames, getAllAgentNames, getAllCommandNames, FEATURE_OWNED_SKILLS, resolveSkillInstallPlan } from '../../core/plugins.js';
 import { skillsDir, agentSourceDirs, rulesDir, commandsDir, scriptsDir, compiledSkillRefsDir, type AgentSourceDirs } from '../../core/assets.js';
 import { getPackageRoot, isContainedIn } from '../../core/paths.js';
 import { sweepOrphanedAssets, mdFileName, mdEntryName, type SweepResult } from '../../core/orphan-sweep.js';
@@ -65,6 +65,20 @@ export interface InstallReport {
    * has to say out loud.
    */
   overlayFailures: OverlayFailure[];
+  /**
+   * Skill names removed because no plugin in the effective selection owns or
+   * requires them — the visible cost of a deselection. Empty on a partial
+   * install, which never removes anything.
+   */
+  removedSkills: string[];
+  /**
+   * Shadowed skills that fall OUTSIDE the install set. The shadow directory is
+   * user content and is never deleted (applies ADR-024); it simply applies to
+   * nothing until the plugin that uses the skill is selected again. Reported
+   * because "inactive" and "ignored" look identical from the filesystem, and a
+   * user who wrote a shadow deserves to hear which of the two happened.
+   */
+  dormantShadows: string[];
 }
 
 /** Discriminated outcome for a single rule installation. */
@@ -1245,6 +1259,25 @@ export interface FileCopyOptions {
   devflowDir: string;
   skillsMap: Map<string, string>;
   agentsMap: Map<string, string>;
+  /**
+   * The RESOLVED tracker provider. Required rather than defaulted: the overlay
+   * converges — it PRUNES what the manifest does not name — so a caller that
+   * forgot to pass one would not install a slightly wrong set, it would delete
+   * the previous provider's mechanics on every install. There is no safe
+   * default for a destructive convergence, so the type refuses to guess.
+   */
+  trackerProvider: string;
+  /**
+   * The plugins whose skill closure {@link FileCopyOptions.skillsMap} was built
+   * from — the removal and dormancy decisions are made against these.
+   *
+   * Differs from `plugins` on a PARTIAL install only: `--plugin=X` installs X's
+   * assets while the effective selection is the prior manifest's plugins ∪ X, so
+   * the skills a previously-installed plugin contributed must survive. Defaults
+   * to `plugins`, which is exactly right for a full install — where the two are
+   * the same list — and for every caller that has only one.
+   */
+  effectivePlugins?: PluginDefinition[];
   /** Rules to install from selected plugins. Defaults to empty map (no rules). */
   rulesMap?: Map<string, string>;
   isPartialInstall: boolean;
@@ -1277,6 +1310,27 @@ async function firstExisting(candidates: readonly string[]): Promise<string | un
     } catch { /* not here — try the next directory in preference order */ }
   }
   return undefined;
+}
+
+/**
+ * Registry skills that have a shadow directory under `~/.devflow/skills/`.
+ *
+ * One readdir of the SHADOW tree, intersected with the registry. Deliberately
+ * not a readdir of the installed skills directory: that tree is the thing being
+ * converged, and reading it to decide what to remove is how a directory a user
+ * put there by hand becomes a deselection (applies ADR-024).
+ *
+ * Whether a shadow is VALID is a separate question, answered per skill by
+ * validateSkillShadow at install time. This only answers "did the user write
+ * one?", which is what dormancy reporting turns on.
+ */
+async function listShadowedSkills(devflowDir: string): Promise<string[]> {
+  const registry = new Set(getAllSkillNames());
+  let entries: string[];
+  try {
+    entries = await fs.readdir(path.join(devflowDir, 'skills'));
+  } catch { return []; }
+  return entries.filter(name => registry.has(name));
 }
 
 /**
@@ -1321,7 +1375,27 @@ export async function installViaFileCopy(options: FileCopyOptions): Promise<Inst
     sweepFailures: [],
     overlaidRefs: [],
     overlayFailures: [],
+    removedSkills: [],
+    dormantShadows: [],
   };
+
+  // The skill decision, made in full before anything is touched — which skills
+  // this selection installs, which it removes, and which shadows it leaves inert.
+  // Pure and registry-driven: the removal set is `skillsOf(all) \ skillsOf(selected)
+  // \ FEATURE_OWNED`, never a readdir of the installed skills directory, so an
+  // unrelated `devflow:` directory a user put there by hand is not swept as a
+  // deselection (applies ADR-024).
+  //
+  // Computed BEFORE shadows are resolved: a shadow is applied only to a skill the
+  // selection installs, so the install set is the question that has to be settled
+  // first. Resolving shadows first would mean probing shadow directories for
+  // skills this run is about to remove.
+  const skillPlan = resolveSkillInstallPlan({
+    effectivePlugins: options.effectivePlugins ?? plugins,
+    isPartialInstall,
+    shadowedSkills: await listShadowedSkills(devflowDir),
+  });
+  report.dormantShadows = [...skillPlan.dormantShadows];
 
   // Clean old Devflow files before installing
   spinner.message('Cleaning old files...');
@@ -1362,20 +1436,41 @@ export async function installViaFileCopy(options: FileCopyOptions): Promise<Inst
   // Pre-clean the prefixed install targets before re-copying so stale content
   // never bleeds into a fresh install. Bare pre-namespace dirs at
   // ~/.claude/skills/{name} are owned solely by the frozen LEGACY_SKILL_NAMES
-  // pass in init.ts (runs immediately after this call, init.ts:1149). A bare
-  // dir whose name matches a current registry skill is by construction foreign
-  // to Devflow and must not be touched here (avoids PF-012).
-  const allSkills = new Set<string>();
-  for (const plugin of DEVFLOW_PLUGINS) {
-    for (const skill of plugin.skills) {
-      allSkills.add(skill);
+  // pass in init.ts (runs immediately after this call). A bare dir whose name
+  // matches a current registry skill is by construction foreign to Devflow and
+  // must not be touched here (avoids PF-012).
+  //
+  // The pre-clean is SCOPED to what this run reinstalls and the orphan sweep
+  // above is UNSCOPED (the full registry). The opposite scoping is deliberate,
+  // not an inconsistency waiting to be simplified away:
+  //   - the sweep removes names the registry no longer has at all, which is true
+  //     regardless of selection, so a partial install must still prune them;
+  //   - the pre-clean empties a directory this run is about to rewrite, so
+  //     widening it past the install set would delete a selected plugin's skill
+  //     and never put it back.
+  // Gated on a full install for the same reason: `--plugin=X` rewrites X's
+  // skills only, and a pre-clean over the whole registry would wipe every other
+  // plugin's skills on an add-one run.
+  if (!isPartialInstall) {
+    for (const skill of skillsMap.keys()) {
+      // Remove prefixed directory (will be re-created during install phase)
+      try {
+        await fs.rm(path.join(claudeDir, 'skills', prefixSkillName(skill)), { recursive: true, force: true });
+      } catch { /* ignore */ }
     }
   }
-  for (const skill of allSkills) {
-    // Remove prefixed directory (will be re-created during install phase)
+
+  // Remove the skills no selected plugin owns or requires — the deselection half
+  // of the scoped install. Empty on a partial install by construction
+  // (resolveSkillInstallPlan gates it), so `--plugin=X` adds and never subtracts
+  // (AC-22). Failures are per-item and non-fatal (applies PF-009).
+  for (const skill of skillPlan.remove) {
     try {
       await fs.rm(path.join(claudeDir, 'skills', prefixSkillName(skill)), { recursive: true, force: true });
-    } catch { /* ignore */ }
+      report.removedSkills.push(skill);
+    } catch (err) {
+      warn(`Could not remove deselected skill "${prefixSkillName(skill)}" — ${String(err)}`);
+    }
   }
 
   // Install commands from selected plugins using registry-driven lookup.
@@ -1498,6 +1593,10 @@ export async function installViaFileCopy(options: FileCopyOptions): Promise<Inst
     if (skillName === SKILL_REFS_SKILL_NAME) {
       const overlay = await overlayGeneratedReferences({
         referencesTarget: path.join(skillTarget, 'references'),
+        // Only the tracker mechanics this install can reach: {github} ∪ the
+        // selected provider. The overlay converges rather than merges, so a
+        // provider left behind by a previous selection is pruned here.
+        manifest: installedReferenceManifest({ provider: options.trackerProvider }),
         warn,
       });
       report.overlaidRefs.push(...overlay.overlaidRefs);

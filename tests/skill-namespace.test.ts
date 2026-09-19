@@ -232,6 +232,7 @@ describe('installViaFileCopy skill lifecycle', () => {
       devflowDir,
       skillsMap: new Map([[testSkillName, 'devflow-core-skills']]),
       agentsMap: new Map(),
+      trackerProvider: 'github',
       isPartialInstall: opts?.isPartialInstall ?? false,
       spinner: noopSpinner,
     });

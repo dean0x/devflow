@@ -34,10 +34,10 @@ import {
   type OverlayUnit,
   type Spinner,
 } from '../../src/targets/claude-code/installer.js';
-import { formatOverlaySummary } from '../../src/cli/commands/init.js';
+import { formatOverlaySummary } from '../../src/cli/commands/install-report.js';
 import { sweepOrphanedReferences, MAX_REFERENCE_SWEEP_DEPTH } from '../../src/core/reference-sweep.js';
 import { compiledSkillRefsDir } from '../../src/core/assets.js';
-import { expandVariants, generatedReferenceManifest } from '../../src/core/mds-variants.js';
+import { expandVariants, generatedReferenceManifest, installedReferenceManifest } from '../../src/core/mds-variants.js';
 
 // ---------------------------------------------------------------------------
 // Harness
@@ -242,6 +242,18 @@ describe('overlay unit classification (D-OVERLAY-PROVIDER-SHAPE)', () => {
 // ---------------------------------------------------------------------------
 
 describe('reference overlay through installViaFileCopy (AC-2.4a)', () => {
+  /**
+   * The provider this describe installs as — the overlay converges to its set.
+   *
+   * A tool-call provider rather than github, because its install set is the only
+   * one carrying BOTH unit shapes the overlay has to handle: a provider directory
+   * (tracker/{provider}/{op}.md) AND a file landing directly in tracker/
+   * (tracker/_mcp.md, the flat-set-in-a-subdirectory shape that was once
+   * mis-bucketed as a provider directory). It is also a superset of the github
+   * set, so the github floor is covered by the same arms.
+   */
+  const INSTALL_PROVIDER = 'jira';
+
   let claudeDir: string;
   let devflowDir: string;
   let warnings: string[];
@@ -256,6 +268,7 @@ describe('reference overlay through installViaFileCopy (AC-2.4a)', () => {
       devflowDir,
       skillsMap: new Map([['git', 'devflow-code-review']]),
       agentsMap: new Map(),
+      trackerProvider: INSTALL_PROVIDER,
       isPartialInstall: false,
       spinner: noopSpinner,
       warn: (msg) => { warnings.push(msg); },
@@ -263,7 +276,12 @@ describe('reference overlay through installViaFileCopy (AC-2.4a)', () => {
   }
 
   beforeEach(async () => {
-    manifest = await requireBuiltReferences();
+    // The install is provider-scoped: `installViaFileCopy` converges to
+    // {github} ∪ {selected provider}, not to everything the build emitted. The
+    // built-tree probe still runs, so an unbuilt dist/ fails loud rather than
+    // asserting over an empty set.
+    await requireBuiltReferences();
+    manifest = installedReferenceManifest({ provider: INSTALL_PROVIDER });
     claudeDir = await fs.mkdtemp(path.join(os.tmpdir(), 'devflow-overlay-claude-'));
     devflowDir = await fs.mkdtemp(path.join(os.tmpdir(), 'devflow-overlay-home-'));
     warnings = [];
