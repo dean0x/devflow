@@ -492,6 +492,24 @@ export const VARIANT_MODULES = [
  */
 export const MCP_BACKED_PROVIDER_SUBDIRS = ['tracker/jira', 'tracker/linear'] as const;
 
+/** The destination directory every tracker provider module lands under. */
+export const TRACKER_DESTINATION_ROOT = 'tracker';
+
+/**
+ * The tracker destination every install carries, whatever the user selected.
+ *
+ * Not a default and not a fallback: PR hosting stays on GitHub under every
+ * issue-tracker provider, so a jira or linear user still runs `gh pr` mechanics
+ * and still needs the GitHub tree reachable. It is the FLOOR of
+ * {@link installedReferenceManifest}'s union.
+ *
+ * Stated rather than derived, because the fact is about where pull requests
+ * live, not about anything the registry knows. A derivation from "the one
+ * CLI-backed module" would read as a rule and silently promote the next
+ * CLI-backed provider into everyone's install.
+ */
+export const PR_HOST_TRACKER_SUBDIR = `${TRACKER_DESTINATION_ROOT}/github`;
+
 /**
  * The provider-independent tool-call contract document.
  *
@@ -780,6 +798,91 @@ export function generatedReferenceManifest(): readonly string[] {
     );
   }
   return expanded.value.map(pair => pair.relPath);
+}
+
+/**
+ * The references ONE install carries, for one resolved tracker provider — the
+ * narrower manifest the overlay converges to.
+ *
+ * D-INSTALL-SET: the BUILD emits every provider ({@link generatedReferenceManifest},
+ * 34 files) because the tarball must be able to serve any selection without a
+ * rebuild. An INSTALL carries `{github} ∪ {selected provider}`:
+ *
+ *   - the GitHub tree is the FLOOR under every provider, not an optional extra.
+ *     PR hosting stays on GitHub whatever the issue tracker is, so those
+ *     mechanics stay reachable for a jira or linear user;
+ *   - the cross-cutting documents (`subdir: ''`) are provider-independent and
+ *     always land;
+ *   - a provider directory the user did not select is 11 files nothing they can
+ *     reach ever loads (applies ADR-003 — ship the end state, not every state).
+ *
+ * `tracker/_mcp.md` rides the same gate its GENERATION does
+ * ({@link MCP_BACKED_PROVIDER_SUBDIRS}): it is the transport contract for
+ * providers reached by tool call, and GitHub's mechanics are `gh` commands. One
+ * predicate, asked of the selection here and of the registry in
+ * {@link mcpContractIsGenerated}, so opening the gate and shipping the provider
+ * stay the same edit.
+ *
+ * Derived from the registry rather than a provider table: a provider registered
+ * with a `tracker/{id}` subdir is installable by construction, and a literal
+ * here would be a second roster to keep in step with VARIANT_MODULES.
+ *
+ * Asserts rather than degrades on a registry that does not expand, exactly as
+ * its sibling does (design review M3): the registry is a compile-time constant,
+ * so a refusal is a programming error rather than an install-time degradation —
+ * no caller could sensibly continue, and every caller would otherwise carry the
+ * same impossible branch.
+ *
+ * @param opts.provider - The resolved tracker provider id, used as the
+ *   `tracker/{id}` sub-directory key.
+ * @param opts.modules - Registry to expand (defaults to the shipped one).
+ *   Injectable so both the refusal arm and a provider set this build does not
+ *   produce are provable without editing the registry.
+ */
+export function installedReferenceManifest(opts: {
+  readonly provider: string;
+  readonly modules?: readonly VariantModule[];
+}): readonly string[] {
+  const modules = opts.modules ?? resolveVariantModules();
+  const expanded = expandVariants(modules);
+  if (!expanded.ok) {
+    throw new Error(
+      `Reference module registry does not expand — ${JSON.stringify(expanded.error)}. ` +
+      `VARIANT_MODULES in src/core/mds-variants.ts is invalid.`,
+    );
+  }
+
+  const providerSubdir = `${TRACKER_DESTINATION_ROOT}/${opts.provider}`;
+  const wanted = new Set(['', PR_HOST_TRACKER_SUBDIR, providerSubdir]);
+
+  const installed = expanded.value
+    .filter(pair => wanted.has(subdirOfRelPath(pair.relPath)))
+    .map(pair => pair.relPath);
+
+  const gated: readonly string[] = MCP_BACKED_PROVIDER_SUBDIRS;
+  if (gated.includes(providerSubdir)) {
+    const contract = contractRelPath(modules);
+    if (contract !== undefined) installed.push(contract);
+  }
+
+  return installed;
+}
+
+/** The directory part of a manifest-relative path; `''` for a file at the root. */
+function subdirOfRelPath(relPath: string): string {
+  const cut = relPath.lastIndexOf('/');
+  return cut < 0 ? '' : relPath.slice(0, cut);
+}
+
+/**
+ * The tool-call contract's emitted path, as this registry expands it — read from
+ * the expansion rather than composed from the module's fields, so the name can
+ * only ever be the one the build actually writes.
+ */
+function contractRelPath(modules: readonly VariantModule[]): string | undefined {
+  const expanded = expandVariants(modules);
+  if (!expanded.ok) return undefined;
+  return expanded.value.find(pair => pair.module === MCP_CONTRACT_MODULE.source)?.relPath;
 }
 
 // ---------------------------------------------------------------------------

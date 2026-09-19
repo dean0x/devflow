@@ -152,7 +152,7 @@
       "pattern": "toBeGreaterThanOrEqual(34)",
       "occurrences": 2,
       "sourceFile": "tests/installer/reference-overlay.test.ts",
-      "description": "P2-S14 overlay: the generated reference manifest. Two sites — the manifest shape assertion and the 0644 normalisation's installed-file count. A manifest short enough to enumerate by hand makes every convergence assertion vacuous (GAP-42/PF-018), which is the same reason MIN_VARIANT_PAIRS exists. RAISED 13 -> 24 in the Phase-3 3b commit that registers the Jira provider, then 24 -> 34 in the 3c commit that registers Linear: 10 GitHub ops + 10 Jira ops + 10 Linear ops (the SAME TRACKER_OPS roster, which is what makes file-set parity structural) + 3 cross-cutting documents + the tool-call contract, whose generation gate the first tool-call provider opens. A floor may only rise, and here it rises by a whole provider at a time."
+      "description": "BUILD/TARBALL SCOPE: the manifest the build EMITS, which is every provider. Distinct from installed-reference-count-{github,provider}, which pin what ONE install carries; the build stays at 34 so the tarball can serve any selection without a rebuild, and narrowing the install never lowers this floor. Two sites — the manifest shape assertion and the 0644 normalisation's installed-file count. A manifest short enough to enumerate by hand makes every convergence assertion vacuous (GAP-42/PF-018), which is the same reason MIN_VARIANT_PAIRS exists. RAISED 13 -> 24 in the Phase-3 3b commit that registers the Jira provider, then 24 -> 34 in the 3c commit that registers Linear: 10 GitHub ops + 10 Jira ops + 10 Linear ops (the SAME TRACKER_OPS roster, which is what makes file-set parity structural) + 3 cross-cutting documents + the tool-call contract, whose generation gate the first tool-call provider opens. A floor may only rise, and here it rises by a whole provider at a time."
     },
     {
       "id": "issue-pr-link-forwarding-sites",
@@ -168,7 +168,7 @@
       "pattern": "toBeGreaterThanOrEqual(34)",
       "occurrences": 1,
       "sourceFile": "tests/packaging.test.ts",
-      "description": "P2-S14 prefix-shippability clause (i): the tarball must carry every file the reference overlay converges to. The floor keeps the packed-set assertion non-vacuous if the manifest is ever narrowed. RAISED 13 -> 24 alongside generated-reference-manifest-size in the 3b commit that registers the Jira provider, then 24 -> 34 in the 3c commit that registers Linear — the two pin the same manifest at its two sinks (install and tarball) and must move together, or a provider could ship un-packed."
+      "description": "BUILD/TARBALL SCOPE (unaffected by the selection-scoped install): prefix-shippability clause (i) — the tarball must carry every file the reference overlay converges to. The floor keeps the packed-set assertion non-vacuous if the manifest is ever narrowed. RAISED 13 -> 24 alongside generated-reference-manifest-size in the 3b commit that registers the Jira provider, then 24 -> 34 in the 3c commit that registers Linear — the two pin the same manifest at its two sinks (install and tarball) and must move together, or a provider could ship un-packed."
     },
     {
       "id": "capability-hoist-block-floor",
@@ -225,6 +225,22 @@
       "occurrences": 1,
       "sourceFile": "tests/guards/requires-closure.test.ts",
       "description": "Distinct devflow: skill references across the widened closure corpus (dist/commands + agent sources + skill bodies incl. references/). Non-vacuity floor for the bidirectional requires: guard — a scanner that stopped matching would make both arms pass over an empty corpus. Measured 2026-09-19: 200 files, 297 sites, 44 distinct."
+    },
+    {
+      "id": "installed-reference-count-github",
+      "floor": 13,
+      "pattern": "INSTALLED_REFS_GITHUB = 13",
+      "occurrences": 1,
+      "sourceFile": "tests/mds-variants.test.ts",
+      "description": "Reference files ONE github install carries: the tracker/github tree plus the provider-independent cross-cutting documents. Install-time scope, distinct from the build-time 34 below, which is unchanged — the build still emits every provider so the tarball can serve any selection without a rebuild. Measured 2026-09-19: 13 files / 31,399 B."
+    },
+    {
+      "id": "installed-reference-count-provider",
+      "floor": 24,
+      "pattern": "INSTALLED_REFS_PROVIDER = 24",
+      "occurrences": 1,
+      "sourceFile": "tests/mds-variants.test.ts",
+      "description": "Reference files ONE jira or linear install carries: github (13, the PR-host floor) + the selected provider (11). Excludes tracker/_mcp.md from the count assertion path, which is asserted biconditionally instead. Install-time scope, distinct from the build-time 34 below. Measured 2026-09-19: jira 24 files / 69,252 B, linear 24 / 73,501 B."
     }
   ],
   "ceilings": [
