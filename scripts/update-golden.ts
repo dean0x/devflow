@@ -3,13 +3,13 @@
  * update-golden.ts — Golden fixture update script (DR-03).
  *
  * Usage: npm run test:golden:update -- <target>
- *        npm run test:golden:update -- github-status-lines --unfreeze  (frozen through Phase 3)
+ *        npm run test:golden:update -- github-status-lines --unfreeze  (frozen fixture)
  *        npm run test:golden:update -- <target> --out-dir <dir>
  *
  * A target is required. Without one, exits non-zero and prints usage.
- * The target `github-status-lines` is frozen through Phase 3 and is refused
- * without an explicit --unfreeze argument (the frozen-target refusal test
- * asserts this behaviour — tests/goldens/github-status-lines.test.ts).
+ * The target `github-status-lines` is a frozen fixture and is refused without
+ * an explicit --unfreeze argument (the frozen-target refusal test asserts this
+ * behaviour — tests/goldens/github-status-lines.test.ts).
  *
  * `--out-dir <dir>` redirects the write away from tests/fixtures/golden/.
  * The acceptance half of the refusal guard uses it to exercise the real write
@@ -18,8 +18,9 @@
  * which is the one thing §3 forbids — "a CI job that regenerates a golden is a
  * golden that asserts nothing".
  *
- * DR-03 lifecycle rule:
- *   "frozen at Phase 0, never regenerated through Phase 3; green only with --unfreeze"
+ * DR-03 lifecycle rule: the fixture is frozen; regenerating it takes --unfreeze
+ * AND a fresh explicit authorisation. Three have been granted and all three are
+ * spent — see the authorisation log in tests/goldens/github-status-lines.test.ts.
  */
 
 import { writeFileSync, mkdirSync } from 'fs'
@@ -31,10 +32,11 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const ROOT = path.resolve(__dirname, '..')
 const GOLDENS_DIR = path.join(ROOT, 'tests', 'fixtures', 'golden')
 
-// §0.2 lifecycle rule — printed verbatim on frozen-target refusal (DR-03)
+// The lifecycle rule — printed verbatim on frozen-target refusal (DR-03)
 const FROZEN_LIFECYCLE_RULE =
-  'github-status-lines.txt is frozen at Phase 0, never regenerated through Phase 3. ' +
-  'Pass --unfreeze only when this constraint has been formally lifted by the phase plan.'
+  'github-status-lines.txt is a frozen fixture: regenerating it requires --unfreeze ' +
+  'AND a fresh explicit authorisation naming the bytes it permits. Three authorisations ' +
+  'have been granted and all three are spent. Pass --unfreeze only under a new one.'
 
 const args = process.argv.slice(2)
 const hasUnfreeze = args.includes('--unfreeze')
@@ -73,7 +75,7 @@ if (targetArg === 'github-status-lines' && !hasUnfreeze) {
   console.error('')
   console.error(FROZEN_LIFECYCLE_RULE)
   console.error('')
-  console.error('To override (only when the phase plan permits it):')
+  console.error('To override (only under a fresh explicit authorisation):')
   console.error('  npm run test:golden:update -- github-status-lines --unfreeze')
   process.exit(1)
 }

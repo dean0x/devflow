@@ -159,8 +159,8 @@ describe('golden: github-status-lines frozen fixture (AC-0.9)', () => {
 
       expect.fail(
         `github-status-lines.txt golden mismatch.\n${hint}\n\n` +
-        `This fixture is frozen through Phase 3. If the source change is intentional\n` +
-        `AND the phase plan explicitly permits regeneration:\n` +
+        `This fixture is frozen. If the source change is intentional AND a fresh\n` +
+        `explicit authorisation permits regenerating it:\n` +
         `  npm run test:golden:update -- github-status-lines --unfreeze`,
       )
     }
@@ -172,7 +172,7 @@ describe('golden: github-status-lines frozen fixture (AC-0.9)', () => {
     const golden = loadGolden('github-status-lines.txt')
     expect(
       Buffer.byteLength(golden, 'utf-8'),
-      `Fixture byte count changed — this fixture is frozen through Phase 3 (AC-0.9)`,
+      `Fixture byte count changed — this fixture is frozen (AC-0.9)`,
     ).toBe(FIXTURE_BYTES)
   })
 
@@ -180,7 +180,7 @@ describe('golden: github-status-lines frozen fixture (AC-0.9)', () => {
     const golden = loadGolden('github-status-lines.txt')
     expect(
       newlineCount(golden),
-      `Fixture newline count changed — the fixture is frozen through Phase 3 (AC-0.9)`,
+      `Fixture newline count changed — the fixture is frozen (AC-0.9)`,
     ).toBe(FIXTURE_NEWLINES)
   })
 })
@@ -292,11 +292,16 @@ describe('test:golden:update — frozen-target refusal [DR-03]', () => {
     ).not.toBe(0)
 
     const combined = (result.stdout ?? '') + (result.stderr ?? '')
-    // The §0.2 lifecycle rule must be printed verbatim on refusal
+    // The lifecycle rule must be printed verbatim on refusal, and it must state
+    // BOTH halves of the gate — the flag alone is not the permission. Matched on
+    // the rule sentence's own clause rather than on the words "authorisation" or
+    // "--unfreeze", which the override hint two lines below it also carries: a
+    // pattern any line of the refusal could satisfy pins the refusal, not the rule.
     expect(
       combined,
-      'Refusal message must mention the frozen phase lifecycle rule',
-    ).toMatch(/frozen at Phase 0|never regenerated through Phase 3/i)
+      'Refusal message must print the lifecycle rule, which states that regeneration ' +
+      'needs --unfreeze AND a fresh authorisation',
+    ).toMatch(/frozen fixture: regenerating it requires --unfreeze AND a fresh explicit authorisation/i)
   })
 
   it('accepts github-status-lines with --unfreeze, writing to --out-dir (never the live fixture)', () => {
