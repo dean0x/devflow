@@ -339,6 +339,12 @@ describe('devflow tracker --set converges every tracker artifact', () => {
     tmpHome = await fs.mkdtemp(path.join(os.tmpdir(), 'devflow-tracker-set-'));
     devflowDir = path.join(tmpHome, '.devflow');
     await fs.mkdir(devflowDir, { recursive: true });
+    // --set converges the reference subtree into devflow:git, and refuses when
+    // that skill is absent rather than creating an invisible husk under a skill
+    // nothing installed. Seed it so these arms exercise the converging path.
+    const gitSkill = path.join(tmpHome, '.claude', 'skills', 'devflow:git');
+    await fs.mkdir(gitSkill, { recursive: true });
+    await fs.writeFile(path.join(gitSkill, 'SKILL.md'), '# git\n', 'utf-8');
   });
 
   afterEach(async () => {
@@ -425,21 +431,22 @@ describe('devflow tracker --set converges every tracker artifact', () => {
 // inlines an `fs.rm`/`fs.writeFile` here or duplicates a call.
 
 describe('devflow tracker call sites', () => {
-  it('re-arms once from each branch and never inlines the removal [DR-22, D-F]', async () => {
+  it('re-arms once from the --status branch and once through the --set adapter [DR-22, D-F]', async () => {
     const source = await fs.readFile(TRACKER_CLI_SOURCE, 'utf-8');
 
-    // Split the action body at the Set separator so each branch is counted on
-    // its own: a total of two says nothing about WHERE the two calls are.
+    // The --set branch reaches every file-lifecycle owner through the injectable
+    // TrackerSetIO adapter, which is what makes its step ORDER assertable. So
+    // the two bindings live in two different places, and each is counted where
+    // it is: a total of two says nothing about WHERE the two calls are.
+    const adapterStart = source.indexOf('export function buildTrackerSetIO()');
     const statusStart = source.indexOf('if (options.status) {');
-    const setStart = source.indexOf('// ── Set ─');
+    expect(adapterStart, 'the --set adapter must be findable').toBeGreaterThan(0);
     expect(statusStart, 'the --status branch guard must be findable').toBeGreaterThan(0);
-    expect(setStart, 'the Set separator must follow the --status branch').toBeGreaterThan(statusStart);
 
-    const statusBranch = source.slice(statusStart, setStart);
-    const setBranch = source.slice(setStart);
+    const adapter = source.slice(adapterStart, source.indexOf('export interface TrackerSetOutcome'));
+    const statusBranch = source.slice(statusStart, source.indexOf('// ── Set ─', statusStart));
+    expect((adapter.match(/rearmTrackerInference[,(]/g) ?? []).length).toBe(1);
     expect((statusBranch.match(/rearmTrackerInference\(/g) ?? []).length).toBe(1);
-    expect((setBranch.match(/rearmTrackerInference\(/g) ?? []).length).toBe(1);
-    expect((source.match(/rearmTrackerInference\(/g) ?? []).length).toBe(2);
     expect(source).not.toMatch(/\.tracker\.attempts/);
   });
 
@@ -459,17 +466,43 @@ describe('devflow tracker call sites', () => {
     expect(source.slice(statusStart, setStart)).toContain('Inference:');
   });
 
-  it('converges the sentinel through applyTrackerSentinel exactly once [DR-10]', async () => {
+  it('converges the sentinel through applyTrackerSentinel, bound exactly once [DR-10]', async () => {
     const source = await fs.readFile(TRACKER_CLI_SOURCE, 'utf-8');
-    const calls = source.match(/applyTrackerSentinel\(/g) ?? [];
-    expect(calls.length).toBe(1);
+    // One BINDING in the adapter, and the orchestrator reaches it only through
+    // io.applySentinel — so there is still exactly one owner, and the CLI still
+    // never touches the sentinel file itself.
+    const bindings = source.match(/applySentinel: applyTrackerSentinel/g) ?? [];
+    expect(bindings.length).toBe(1);
+    expect((source.match(/io\.applySentinel\(/g) ?? []).length).toBe(1);
     expect(source).not.toMatch(/\.tracker\.enabled/);
   });
 
-  it('invokes the provider-change rename transition (P3a-S15)', async () => {
+  it('invokes the provider-change rename transition, bound exactly once', async () => {
     const source = await fs.readFile(TRACKER_CLI_SOURCE, 'utf-8');
-    const calls = source.match(/renameStaleTrackerConventions\(/g) ?? [];
-    expect(calls.length).toBe(1);
+    expect((source.match(/renameStaleConventions: renameStaleTrackerConventions/g) ?? []).length).toBe(1);
+    expect((source.match(/io\.renameStaleConventions\(/g) ?? []).length).toBe(1);
+  });
+
+  it('reaches every file-lifecycle owner through the adapter, never inline', async () => {
+    // The --set orchestrator takes its I/O as an injected seam so the step
+    // ORDER is assertable (D-TRACKER-CONVERGE-SET). A call that went direct
+    // would bypass the recorder and be invisible to the order test.
+    const source = await fs.readFile(TRACKER_CLI_SOURCE, 'utf-8');
+    const body = source.slice(
+      source.indexOf('export async function runTrackerSet('),
+      source.indexOf('interface TrackerOptions'),
+    );
+    expect(body.length, 'the orchestrator body must be locatable').toBeGreaterThan(0);
+    for (const direct of [
+      'renameStaleTrackerConventions(',
+      'rearmTrackerInference(',
+      'applyTrackerSentinel(',
+      'syncManifestFeature(',
+      'convergeTrackerArtifacts(',
+      'overlayInstalledReferences(',
+    ]) {
+      expect(body, `runTrackerSet must reach ${direct} through io, not directly`).not.toContain(direct);
+    }
   });
 
   it('persists through the generic syncManifestFeature — no bespoke manifest write', async () => {

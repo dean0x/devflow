@@ -22,8 +22,15 @@ import { promises as fs } from 'fs';
 import * as path from 'path';
 import * as os from 'os';
 
-import { convergeTrackerArtifacts } from '../src/targets/claude-code/tracker-install.js';
-import { overlayInstalledReferences } from '../src/targets/claude-code/installer.js';
+import { convergeTrackerArtifacts, type ConvergeTrackerArtifactsResult } from '../src/targets/claude-code/tracker-install.js';
+import { overlayInstalledReferences, type OverlayFailure } from '../src/targets/claude-code/installer.js';
+import {
+  runTrackerSet,
+  readTrackerMechanics,
+  formatTrackerMechanics,
+  type TrackerSetIO,
+} from '../src/cli/commands/tracker.js';
+import type { TrackerProvider, TrackerResult, TrackerTransition } from '../src/core/tracker.js';
 import { installedReferenceManifest } from '../src/core/mds-variants.js';
 import { compiledSkillRefsDir } from '../src/core/assets.js';
 
@@ -195,5 +202,253 @@ describe('overlayInstalledReferences: the provider-scoped subtree', () => {
       await exists(refsTarget()),
       'the refusal must come before the target is touched — nothing installed, nothing abandoned',
     ).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// `devflow tracker --set` — the step order, and the two abort branches
+// ---------------------------------------------------------------------------
+
+describe('runTrackerSet: the convergence order is the invariant', () => {
+  /**
+   * Recording IO. Every call appends a labelled entry, so assertions read the
+   * real call ORDER rather than a per-step boolean.
+   */
+  function makeRecorder(opts: {
+    gitSkill?: boolean;
+    overlayThrows?: Error;
+    overlayFailures?: OverlayFailure[];
+    overlaid?: string[];
+    pruned?: string[];
+    transition?: TrackerTransition;
+    artifacts?: ConvergeTrackerArtifactsResult;
+    rearm?: TrackerResult<void>;
+    sentinel?: TrackerResult<void>;
+  } = {}) {
+    const calls: string[] = [];
+    const io: TrackerSetIO = {
+      gitSkillInstalled: async () => {
+        calls.push('probe');
+        return opts.gitSkill ?? true;
+      },
+      overlayReferences: async (_claudeDir, provider) => {
+        calls.push(`overlay:${provider}`);
+        if (opts.overlayThrows) throw opts.overlayThrows;
+        return {
+          overlaidRefs: opts.overlaid ?? ['tracker/github/setup-task.md'],
+          overlayFailures: opts.overlayFailures ?? [],
+          pruned: { scanned: 0, removed: opts.pruned ?? [], failed: [] },
+        };
+      },
+      renameStaleConventions: async (_dir, previous, resolved) => {
+        calls.push(`rename:${previous}->${resolved}`);
+        return opts.transition ?? { kind: 'none' };
+      },
+      syncManifest: async (_dir, state) => { calls.push(`manifest:${state.provider}`); },
+      convergeArtifacts: async (_claudeDir, provider) => {
+        calls.push(`agent:${provider}`);
+        return opts.artifacts ?? {
+          converged: true,
+          agent: provider === 'github' ? 'removed' : 'installed',
+        };
+      },
+      rearmInference: async () => {
+        calls.push('rearm');
+        return opts.rearm ?? { ok: true, value: undefined };
+      },
+      applySentinel: async (_dir, provider) => {
+        calls.push(`sentinel:${provider}`);
+        return opts.sentinel ?? { ok: true, value: undefined };
+      },
+    };
+    return { calls, io };
+  }
+
+  const run = (io: TrackerSetIO, current: TrackerProvider, requested: TrackerProvider) =>
+    runTrackerSet({
+      devflowDir: '/tmp/devflow-not-touched',
+      claudeDir: '/tmp/claude-not-touched',
+      current: { provider: current },
+      requested,
+      io,
+    });
+
+  it('converges in the fixed order: probe, overlay, rename, manifest, agent, rearm, sentinel', async () => {
+    const { calls, io } = makeRecorder();
+    const outcome = await run(io, 'github', 'jira');
+
+    expect(outcome.exitCode).toBe(0);
+    expect(calls).toEqual([
+      'probe',
+      'overlay:jira',
+      'rename:github->jira',
+      'manifest:jira',
+      'agent:jira',
+      'rearm',
+      'sentinel:jira',
+    ]);
+  });
+
+  it('the overlay precedes the manifest write; the agent file follows it', async () => {
+    // The asymmetry, asserted as an ordering rather than as prose: the
+    // reference subtree is inert until a spawn resolves a provider, and
+    // resolving a provider reads the manifest. The agent file advertises one.
+    const { calls, io } = makeRecorder();
+    await run(io, 'github', 'linear');
+    expect(calls.indexOf('overlay:linear')).toBeLessThan(calls.indexOf('manifest:linear'));
+    expect(calls.indexOf('agent:linear')).toBeGreaterThan(calls.indexOf('manifest:linear'));
+  });
+
+  it('an absent devflow:git aborts before anything is written (design review C3)', async () => {
+    const { calls, io } = makeRecorder({ gitSkill: false });
+    const outcome = await run(io, 'github', 'jira');
+
+    expect(outcome.exitCode).toBe(1);
+    expect(outcome.provider, 'the selection in force is unchanged').toBe('github');
+    expect(calls, 'nothing beyond the probe may run').toEqual(['probe']);
+    const text = outcome.messages.map(m => m.text).join('\n');
+    expect(text).toContain('devflow:git is not installed');
+    expect(text).toContain('devflow init --tracker jira');
+    expect(text, 'no husk, and no half-applied selection').toContain('unchanged');
+  });
+
+  it('an overlay failure aborts before the manifest write, and says what DID move (H1)', async () => {
+    const failure: OverlayFailure = {
+      unit: { kind: 'provider', dir: 'tracker/jira', files: ['tracker/jira/setup-task.md'] },
+      state: { kind: 'installed-unchanged' },
+      error: new Error('EACCES'),
+    } as unknown as OverlayFailure;
+
+    const { calls, io } = makeRecorder({ overlayFailures: [failure] });
+    const outcome = await run(io, 'github', 'jira');
+
+    expect(outcome.exitCode).toBe(1);
+    expect(calls).toEqual(['probe', 'overlay:jira']);
+    const text = outcome.messages.map(m => m.text).join('\n');
+    expect(text).toContain('Tracker: not changed');
+    expect(text).toContain('manifest, sentinel and conventions file are unchanged');
+    expect(
+      text,
+      'the overlay is atomic per unit, so "nothing else changed" would be the false sentence',
+    ).toContain('atomic per unit');
+  });
+
+  it('an absent generated tree aborts with the same end state, never a throw', async () => {
+    const { calls, io } = makeRecorder({
+      overlayThrows: new Error('Generated skill references not found: dist/skills/git/references'),
+    });
+    const outcome = await run(io, 'jira', 'linear');
+
+    expect(outcome.exitCode).toBe(1);
+    expect(outcome.provider).toBe('jira');
+    expect(calls).toEqual(['probe', 'overlay:linear']);
+    expect(outcome.messages.map(m => m.text).join('\n')).toContain('Generated skill references not found');
+  });
+
+  it('repeating the current provider still runs the overlay and reports (unchanged)', async () => {
+    const { calls, io } = makeRecorder({ overlaid: [], pruned: [], artifacts: { converged: true, agent: 'unchanged' } });
+    const outcome = await run(io, 'jira', 'jira');
+
+    expect(outcome.exitCode).toBe(0);
+    expect(
+      calls,
+      'an equality check would early-return on a claim about the manifest, not about disk',
+    ).toContain('overlay:jira');
+    expect(outcome.messages.at(-1)?.text).toBe('Tracker: jira (unchanged)');
+  });
+
+  it('reports the asset delta when something moved', async () => {
+    const { io } = makeRecorder({
+      overlaid: ['a.md', 'b.md'],
+      pruned: ['tracker/jira/setup-task.md'],
+    });
+    const outcome = await run(io, 'jira', 'linear');
+    expect(outcome.messages.at(-1)?.text)
+      .toBe('Tracker: linear — 2 installed, 1 removed, tracker agent installed');
+  });
+
+  // ── C2: both directions of the sentinel ──────────────────────────────────
+
+  it('an unconverged agent suppresses the sentinel WRITE', async () => {
+    const { calls, io } = makeRecorder({ artifacts: { converged: false, agent: 'unchanged' } });
+    const outcome = await run(io, 'github', 'jira');
+
+    expect(outcome.exitCode, 'the selection stuck; only the advertising artifact did not').toBe(0);
+    expect(calls).not.toContain('sentinel:jira');
+    expect(outcome.messages.map(m => m.text).join('\n')).toContain('sentinel not written');
+  });
+
+  it('an unconverged agent does NOT suppress the sentinel REMOVAL', async () => {
+    const { calls, io } = makeRecorder({ artifacts: { converged: false, agent: 'unchanged' } });
+    await run(io, 'jira', 'github');
+
+    expect(
+      calls,
+      'a stale sentinel costs every future session a fork for a provider the user has left',
+    ).toContain('sentinel:github');
+  });
+
+  it('a failed rename, rearm or sentinel warns without aborting (applies PF-009)', async () => {
+    const { calls, io } = makeRecorder({
+      transition: { kind: 'failed', error: 'could not move the previous conventions aside' },
+      rearm: { ok: false, error: 'could not reset the attempt counter' },
+      sentinel: { ok: false, error: 'could not update the sentinel' },
+    });
+    const outcome = await run(io, 'github', 'jira');
+
+    expect(outcome.exitCode).toBe(0);
+    expect(calls).toHaveLength(7);
+    const warnings = outcome.messages.filter(m => m.level === 'warn').map(m => m.text);
+    expect(warnings).toEqual([
+      'could not move the previous conventions aside',
+      'could not reset the attempt counter',
+      'could not update the sentinel',
+    ]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// `devflow tracker --status` — the mechanics arm
+// ---------------------------------------------------------------------------
+
+describe('readTrackerMechanics / formatTrackerMechanics', () => {
+  const refsRoot = (): string => path.join(claudeDir, 'skills', 'devflow:git', 'references');
+
+  it('reports MISSING when nothing is installed', async () => {
+    const state = await readTrackerMechanics(claudeDir, 'github');
+    expect(state).toEqual({ kind: 'missing' });
+    expect(formatTrackerMechanics(state)).toBe('MISSING — run devflow init');
+  });
+
+  it('counts the installed files for the resolved provider', async () => {
+    await overlayInstalledReferences({ claudeDir, provider: 'jira', warn });
+    const state = await readTrackerMechanics(claudeDir, 'jira');
+    expect(state).toEqual({ kind: 'installed', count: installedReferenceManifest({ provider: 'jira' }).length });
+    expect(formatTrackerMechanics(state)).toContain('installed (');
+  });
+
+  it('counts against the manifest for the provider, so a jira tree reads short under linear', async () => {
+    await overlayInstalledReferences({ claudeDir, provider: 'jira', warn });
+    const asLinear = await readTrackerMechanics(claudeDir, 'linear');
+    expect(asLinear.kind).toBe('installed');
+    expect(
+      asLinear.kind === 'installed' && asLinear.count,
+      'the github floor and _mcp.md are there; the linear tree is not',
+    ).toBeLessThan(installedReferenceManifest({ provider: 'linear' }).length);
+  });
+
+  it('distinguishes "could not look" from "nothing there"', async () => {
+    if (typeof process.getuid === 'function' && process.getuid() === 0) return;
+    await overlayInstalledReferences({ claudeDir, provider: 'github', warn });
+    const blocked = path.join(refsRoot(), 'tracker');
+    await fs.chmod(blocked, 0o000);
+    try {
+      const state = await readTrackerMechanics(claudeDir, 'github');
+      expect(state.kind).toBe('unreadable');
+      expect(formatTrackerMechanics(state)).toContain('unreadable (');
+      expect(formatTrackerMechanics(state)).not.toContain('run devflow init');
+    } finally {
+      await fs.chmod(blocked, 0o755).catch(() => undefined);
+    }
   });
 });
