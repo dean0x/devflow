@@ -241,6 +241,60 @@ const RETIRED_LITERALS: ReadonlyArray<RetiredEntry> = [
       'to src/ because the plan artifacts, handoffs and knowledge bases under .devflow/ and docs/ ' +
       'are where that provenance legitimately lives (PF-040).',
   },
+
+  // -------------------------------------------------------------------------
+  // Internal identifiers and delivery coordinates cut from the Git agent's prompt.
+  //
+  // The agent's text is read by a model, not by a maintainer: an `ADR-NNN`, a
+  // `PF-NNN` or a phase coordinate resolves to nothing there, so it is cost with
+  // no reader. The RULE each one annotated is kept and stated plainly in place —
+  // only the pointer goes.
+  //
+  // Each is scoped to the two files that carry the prompt (the .mds source and
+  // its compiled artifact) rather than registered repo-wide. `ADR-007` and
+  // `PF-003` are legitimate — and load-bearing — in CLAUDE.md, in docs/, in the
+  // other agents and in the learning ledger, which is where a decision record is
+  // supposed to be cited (applies ADR-025: classified individually, not swept).
+  // -------------------------------------------------------------------------
+  {
+    literal: 'ADR-007',
+    removedFrom: 'src/assets/agents/git.mds (the "Neutral values" heading)',
+    scope: ['src/assets/agents/git.mds', 'dist/agents/git.md'],
+    justification:
+      'The neutral-value discipline was cited by anchor in the always-loaded preamble. The rule ' +
+      'it names — a missing artifact degrades to a neutral value, never to a fallback path — is ' +
+      'stated in the same sentence, so the anchor added a lookup the reader of a prompt cannot ' +
+      'perform. Scoped to the prompt because citing ADR-007 in CLAUDE.md and in the decisions ' +
+      'ledger is exactly what that anchor is for.',
+  },
+  {
+    literal: 'PF-003',
+    removedFrom: 'src/assets/agents/git.mds (Principle 7, "avoids PF-003")',
+    scope: ['src/assets/agents/git.mds', 'dist/agents/git.md'],
+    justification:
+      'Principle 7 forbids bare `rm` and then cited the pitfall it avoids. The prohibition is the ' +
+      'whole content; the citation is provenance for a maintainer, and the maintainer reads ' +
+      'pitfalls.md. Scoped to the prompt — tracker.md, learning.md and json-helper.cjs cite ' +
+      'PF-003 legitimately and are not retired from it here.',
+  },
+  {
+    literal: 'Phase 5/9',
+    removedFrom: 'src/assets/agents/git.mds (post-resolution-summary step 4)',
+    justification:
+      'A delivery coordinate naming which phase of the resolve workflow writes resolution-summary.md. ' +
+      'The agent reads the path it is given; the producer\'s phase number is not a fact it can use, ' +
+      'and the numbering it refers to no longer exists. Unscoped: the spelling appears nowhere else ' +
+      'in the corpus, so a scope would narrow a rule that has nothing to narrow.',
+  },
+  {
+    literal: 'Key Parameters',
+    removedFrom: 'src/assets/agents/git.mds (the Operations table\'s third column)',
+    justification:
+      'The Operations index carried a third column repeating each operation\'s inputs, every one of ' +
+      'which the operation\'s own `**Input:**` line already states — an always-loaded second copy ' +
+      'of eighteen parameter lists, free to drift against the authority below it. The column is ' +
+      'gone; the index keeps operation and purpose. Unscoped for the same reason as above.',
+  },
 ];
 
 // ---------------------------------------------------------------------------

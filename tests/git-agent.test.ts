@@ -1362,11 +1362,30 @@ describe('git agent — static content guards (PF-018)', () => {
   });
 
   it('D10: REVIEW_PUBLICATION is documented with all three values: auto, full, off', () => {
-    const sec = extractOpSection(soleCorpus, 'post-review-summary', 'sole');
-    expect(sec, 'D10: REVIEW_PUBLICATION not documented in post-review-summary').toContain('REVIEW_PUBLICATION');
-    expect(sec, 'D10: `off` → SKIPPED resolution step not present').toContain('`off` → report');
-    expect(sec, 'D10: `full` → mode FULL resolution step not present').toContain('`full` → mode FULL, skip probe');
-    expect(sec, 'D10: `auto` → probe resolution step not present').toContain('`auto` or absent/unrecognised → probe');
+    // RE-POINTED, not weakened (applies ADR-025). The three-value enumeration used to
+    // be spelled in BOTH summary op sections AND, byte-identically, in
+    // references/publication-gate.md — three copies of one enum, each free to drift.
+    // The reference is the authority both ops name (the [DR-20](i) arm below proves
+    // exactly those two name it), so the enum is asserted THERE and the op sections
+    // are asserted to still route the input into it.
+    //
+    // What deliberately did NOT move: the fail-closed visibility probe. That is a
+    // containment control, so it stays spelled inline in both ops (PF-058) and the
+    // [DR-20](ii) arm below is what holds it there.
+    const gate = readGeneratedReference('publication-gate.md');
+    expect(gate, 'D10: `off` → SKIPPED resolution step not present').toContain('`off` → report');
+    expect(gate, 'D10: `full` → mode FULL resolution step not present').toContain('`full` → mode FULL, skip probe');
+    expect(gate, 'D10: `auto` → probe resolution step not present').toContain('`auto` or absent/unrecognised → probe');
+
+    for (const op of ['post-review-summary', 'post-resolution-summary']) {
+      const sec = extractOpSection(soleCorpus, op, 'sole');
+      expect(sec, `D10: REVIEW_PUBLICATION not documented in ${op}`).toContain('REVIEW_PUBLICATION');
+      expect(
+        sec,
+        `D10: ${op} must name references/publication-gate.md — an op that resolves ` +
+        'REVIEW_PUBLICATION without naming the gate has no route to the three values',
+      ).toContain('references/publication-gate.md');
+    }
   });
 
   it('D10: publication output enum line is present in git.md', () => {
