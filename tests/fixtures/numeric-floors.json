@@ -299,6 +299,14 @@
       "occurrences": 1,
       "sourceFile": "tests/shell-hooks-tracker.test.ts",
       "description": "EC-17 — max characters of the Section-3 tracker directive TEMPLATE as spelled in src/assets/scripts/hooks/session-start-context. additionalContext is re-sent on every qualifying session start, so the directive length is a per-session cost. Measured 722 at the pin, headroom 78. Pinned against the hook SOURCE rather than the emitted text because the emitted text carries two absolute paths whose length is a property of the caller tmpdir, not of the directive. May be LOWERED after a pass that actually cuts the text, never raised: a cap raised to fit whatever the directive grew into is not a cap."
+    },
+    {
+      "id": "claude-md-tracker-block-max-chars",
+      "ceiling": 3500,
+      "pattern": "const TRACKER_BLOCK_MAX_CHARS = 3500;",
+      "occurrences": 1,
+      "sourceFile": "tests/docs/claude-md-tracker-section.test.ts",
+      "description": "Max characters of the CLAUDE.md Tracker block — every consecutive bold-lead paragraph whose lead begins with Tracker, plus the blank lines between them. CLAUDE.md is loaded into every session in this repository, so the block length is a recurring per-session cost, and it is the paragraph run most likely to absorb every new tracker detail: a paragraph that grows a sentence per change has no natural stopping point. Measured 3,458 at the pin, headroom 42. May be LOWERED after a pass that cuts the text, never raised: a cap raised to fit whatever the block grew into is not a cap."
     }
   ]
 }

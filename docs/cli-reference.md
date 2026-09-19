@@ -132,6 +132,12 @@ Valid provider IDs: `github`, `jira`, `linear`. The ID is matched **exactly** �
 
 The selection is stored in `~/.devflow/manifest.json` under `features.tracker.provider` and is **machine-wide**, not per-project. A malformed value in that file is self-healed to `github` silently on read.
 
+The selection also decides what gets installed. `github` installs 13 generated reference files under the `devflow:git` skill; `jira` and `linear` install 24, plus the tool-call contract `references/tracker/_mcp.md` and the Tracker agent that reads it. `devflow tracker --set <id>` converges all of that in a fixed order — references, stale-conventions rename, manifest, Tracker agent file, attempt counter, presence sentinel — and it converges **both ways**, so `--set github` removes what `jira` or `linear` installed.
+
+Two branches exit 1 and change nothing you can see: `devflow:git` is not installed (there is nowhere for the mechanics to land — run `devflow init --tracker <id>` instead), or the reference overlay failed. In both the manifest, the sentinel and the conventions file are left exactly as they were, so the previous provider stays whole. The overlay is atomic per unit, so a failure reports the units that failed rather than claiming nothing moved at all.
+
+`devflow tracker --status` prints the provider, where the selection came from, whether `~/.devflow/tracker.md` has been learned yet, and a `Mechanics:` line — `installed (N file(s))`, `MISSING — run devflow init`, or `unreadable (<errno>)`. The three are different facts with different remedies: nothing installed is fixed by an install, a permissions problem is not.
+
 ### When the wizard asks
 
 `devflow init` asks for a provider only when the question can be answered interactively:
@@ -219,7 +225,7 @@ Override any Devflow skill with your own version. Shadowed skills survive `devfl
 ```bash
 npx devflow-kit skills shadow software-design    # Create override (copies current as reference)
 vim ~/.devflow/skills/software-design/SKILL.md   # Edit your override
-npx devflow-kit skills list                      # List all skills with shadow state
+npx devflow-kit skills list                      # List all skills: shadow state and which plugin provides each
 npx devflow-kit skills unshadow software-design  # Remove override
 ```
 
@@ -360,7 +366,7 @@ npx devflow-kit uninstall
 | Option | Description |
 |--------|-------------|
 | `--scope <user\|local>` | Uninstall scope (default: auto-detect all installed scopes) |
-| `--plugin <names>` | Selective uninstall by plugin name |
+| `--plugin <names>` | Selective uninstall by plugin name. Assets are retained on behalf of the plugins the **manifest** records as installed — not the whole registry — so removing a plugin removes exactly its own skills, agents and rules and keeps only what a plugin you actually installed still needs |
 | `--keep-docs` | Preserve `.devflow/docs/` directory |
 | `--dry-run` | Show what would be removed |
 | `--verbose` | Show detailed output |
