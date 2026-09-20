@@ -479,13 +479,20 @@ export async function persistManifestThenConvergeTracker(opts: {
   for (const text of agentWarnings) messages.push({ level: 'warn', text });
 
   // C2: the sentinel converges in BOTH directions, and only the WRITE is gated.
-  //   provider ≠ github → a write. Skipped when the agent did not converge, so
-  //     nothing advertises a provider whose agent is absent (fail-closed).
+  //   provider ≠ github → a write, when a spawnable agent is actually there.
   //   provider = github → a removal. ALWAYS attempted, because leaving a stale
   //     sentinel behind costs every future session a fork for a provider the
   //     user has left, and a failed agent removal is not a reason to keep it.
-  const sentinelIsRemoval = provider === DEFAULT_TRACKER_PROVIDER;
-  const applySentinelNow = sentinelIsRemoval || artifacts.converged;
+  //
+  // The write gate reads `agentPresent`, not `converged`. `converged` answers
+  // "did THIS run copy it", and reading that alone is wrong in both directions:
+  // a re-copy that fails over an already-installed agent would disable a provider
+  // that still works, and merely SUPPRESSING the write leaves the PREVIOUS
+  // provider's sentinel in place — so a jira → linear init whose agent copy
+  // failed goes on advertising jira, which is the state the suppression exists to
+  // prevent. Not-spawnable therefore REMOVES, through the one sentinel owner in
+  // src/core/tracker.ts (D-TRACKER-OWNER), never an inline fs.rm here.
+  const advertisable = provider === DEFAULT_TRACKER_PROVIDER || artifacts.agentPresent;
 
   const [rearm, sentinel] = await Promise.all([
     // [DR-22] The documented re-arm path: devflow init resets the attempt counter
@@ -493,17 +500,19 @@ export async function persistManifestThenConvergeTracker(opts: {
     io.rearmInference(devflowDir),
     // [DR-10] Converge the presence sentinel: written for jira/linear, removed for
     // github. This is what keeps the GitHub SessionStart path at one stat and zero forks.
-    applySentinelNow
-      ? io.applySentinel(devflowDir, provider)
-      : Promise.resolve<TrackerResult<void>>({
-        ok: false,
-        error:
-          `Tracker sentinel not written — the ${provider} agent could not be installed, so nothing ` +
-          `advertises a provider whose agent is missing. Re-run devflow init, or devflow tracker --set ${provider}.`,
-      }),
+    io.applySentinel(devflowDir, advertisable ? provider : DEFAULT_TRACKER_PROVIDER),
   ]);
   if (!rearm.ok) messages.push({ level: 'warn', text: rearm.error });
   if (!sentinel.ok) messages.push({ level: 'warn', text: sentinel.error });
+  if (!advertisable) {
+    messages.push({
+      level: 'warn',
+      text:
+        `Tracker sentinel removed — no ${provider} agent is installed, so nothing advertises a ` +
+        `provider whose agent is missing and no session will try to spawn it. ` +
+        `Re-run devflow init, or devflow tracker --set ${provider}.`,
+    });
+  }
 
   return {
     manifestWritten: true,

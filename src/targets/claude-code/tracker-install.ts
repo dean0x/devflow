@@ -50,6 +50,26 @@ export interface ConvergeTrackerArtifactsResult {
    * unconverged run must not advertise a provider whose agent is missing.
    */
   converged: boolean;
+  /**
+   * Is a spawnable copy of the Tracker agent at the target NOW — whoever put it
+   * there, and whatever this run managed to do?
+   *
+   * Distinct from {@link ConvergeTrackerArtifactsResult.converged}, and the
+   * distinction is what the presence sentinel has to be gated on. `converged`
+   * answers "did this run succeed"; a caller that reads it alone gets both
+   * directions wrong:
+   *
+   *   - a re-copy that fails over an already-installed agent (a transient
+   *     EACCES, a full disk) would disable a provider that can still be spawned;
+   *   - suppressing a sentinel WRITE leaves a previous provider's sentinel
+   *     untouched, so a jira → linear transition whose agent copy failed goes on
+   *     advertising jira. "Nothing advertises a provider whose agent is missing"
+   *     is only true if somebody removes it.
+   *
+   * False when the path could not be probed at all (a non-absolute claudeDir):
+   * a caller must not advertise on an answer this function could not establish.
+   */
+  agentPresent: boolean;
   /** What happened to `{claudeDir}/agents/devflow/tracker.md`. */
   agent: TrackerAgentState;
 }
@@ -124,21 +144,21 @@ export async function convergeTrackerArtifacts(
   // unexpected, and the removal branch runs fs.rm against it.
   if (!path.isAbsolute(claudeDir)) {
     warn(`tracker: claudeDir is not an absolute path ("${claudeDir}") — skipping convergence`);
-    return { converged: false, agent: 'unchanged' };
+    return { converged: false, agentPresent: false, agent: 'unchanged' };
   }
 
   const target = agentTarget(claudeDir);
 
   if (provider === AGENTLESS_PROVIDER) {
     const existed = await pathExists(target);
-    if (!existed) return { converged: true, agent: 'unchanged' };
+    if (!existed) return { converged: true, agentPresent: false, agent: 'unchanged' };
     try {
       await fs.rm(target, { force: true });
     } catch (err) {
       warn(`tracker: failed to remove the Tracker agent (${target}) — ${String(err)}`);
-      return { converged: false, agent: 'unchanged' };
+      return { converged: false, agentPresent: true, agent: 'unchanged' };
     }
-    return { converged: true, agent: 'removed' };
+    return { converged: true, agentPresent: false, agent: 'removed' };
   }
 
   const dirs = opts.agentSourceDirs ?? agentSourceDirs();
@@ -149,7 +169,10 @@ export async function convergeTrackerArtifacts(
       `tracker: agent source not found for "${TRACKER_AGENT_NAME}" (searched: ${candidates.join(', ')}) — ` +
       `run \`npm run build:mds\` if it is compiled from an .mds generator host`,
     );
-    return { converged: false, agent: 'unchanged' };
+    // Probed rather than assumed: a previous run may have left a copy that is
+    // still spawnable, and that is the difference between "this run did nothing"
+    // and "there is nothing there".
+    return { converged: false, agentPresent: await pathExists(target), agent: 'unchanged' };
   }
 
   try {
@@ -157,8 +180,8 @@ export async function convergeTrackerArtifacts(
     await fs.copyFile(source, target);
   } catch (err) {
     warn(`tracker: failed to install the Tracker agent (${target}) — ${String(err)}`);
-    return { converged: false, agent: 'unchanged' };
+    return { converged: false, agentPresent: await pathExists(target), agent: 'unchanged' };
   }
 
-  return { converged: true, agent: 'installed' };
+  return { converged: true, agentPresent: true, agent: 'installed' };
 }

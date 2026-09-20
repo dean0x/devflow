@@ -422,21 +422,34 @@ export async function runTrackerSet(opts: {
   for (const text of agentWarnings) messages.push({ level: 'warn', text });
 
   // 6 + 7. [DR-22] a selection change re-arms the attempt counter; [DR-10] the
-  // sentinel converges in both directions. Only the WRITE is gated on the agent
-  // (design review C2) — a removal must always be attempted, because a stale
-  // sentinel costs every future session a fork for a provider the user has left.
+  // sentinel converges in both directions. A removal is always attempted, because
+  // a stale sentinel costs every future session a fork for a provider the user
+  // has left; the WRITE is gated on the agent being SPAWNABLE (design review C2).
+  //
+  // The gate is `agentPresent`, not `converged`. Reading `converged` alone is
+  // wrong in both directions: a re-copy that fails over an already-installed
+  // agent would disable a provider that still works, and merely SUPPRESSING the
+  // write leaves the previous provider's sentinel in place — so a jira → linear
+  // switch whose agent copy failed keeps advertising jira, which is the very
+  // state the suppression exists to prevent. Not-spawnable therefore REMOVES,
+  // through the one sentinel owner in src/core/tracker.ts (D-TRACKER-OWNER) —
+  // never an inline fs.rm here.
   const rearm = await io.rearmInference(devflowDir);
   if (!rearm.ok) messages.push({ level: 'warn', text: rearm.error });
 
-  if (requested === DEFAULT_TRACKER_PROVIDER || artifacts.converged) {
-    const sentinel = await io.applySentinel(devflowDir, requested);
-    if (!sentinel.ok) messages.push({ level: 'warn', text: sentinel.error });
-  } else {
+  const advertisable = requested === DEFAULT_TRACKER_PROVIDER || artifacts.agentPresent;
+  const sentinel = await io.applySentinel(
+    devflowDir,
+    advertisable ? requested : DEFAULT_TRACKER_PROVIDER,
+  );
+  if (!sentinel.ok) messages.push({ level: 'warn', text: sentinel.error });
+  if (!advertisable) {
     messages.push({
       level: 'warn',
       text:
-        `Tracker sentinel not written — the ${requested} agent could not be installed, so nothing ` +
-        `advertises a provider whose agent is missing. Re-run devflow tracker --set ${requested}.`,
+        `Tracker sentinel removed — no ${requested} agent is installed, so nothing advertises a ` +
+        `provider whose agent is missing and no session will try to spawn it. ` +
+        `Re-run devflow tracker --set ${requested}.`,
     });
   }
 

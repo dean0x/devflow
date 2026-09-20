@@ -116,7 +116,50 @@ describe('convergeTrackerArtifacts: the Tracker agent file', () => {
 
     const result = await convergeTrackerArtifacts({ claudeDir, provider: 'jira', warn });
     expect(result.converged, 'a failed convergence must not report success').toBe(false);
+    expect(
+      result.agentPresent,
+      'nothing was ever copied there, so there is no agent any directive could spawn',
+    ).toBe(false);
     expect(warnings.length, 'the failure must be reported, not swallowed').toBeGreaterThan(0);
+  });
+
+  // ── agentPresent: what a caller may advertise, as distinct from what this run did ──
+
+  it('agentPresent reports the file, not this run — a successful copy is present', async () => {
+    const result = await convergeTrackerArtifacts({ claudeDir, provider: 'jira', warn });
+    expect(result.agentPresent).toBe(true);
+  });
+
+  it('agentPresent is false once the agent is removed for github', async () => {
+    await convergeTrackerArtifacts({ claudeDir, provider: 'jira', warn });
+    const result = await convergeTrackerArtifacts({ claudeDir, provider: 'github', warn });
+    expect(result.agentPresent).toBe(false);
+  });
+
+  it('a failed re-copy over a still-present agent reports agentPresent (PRESENCE, not success)', async () => {
+    // The distinction the sentinel gate rides on: this run did not converge, but a
+    // previous one left a copy that can still be spawned. A caller that reads
+    // `converged` alone disables a working provider on a transient I/O failure.
+    await convergeTrackerArtifacts({ claudeDir, provider: 'jira', warn });
+    expect(await exists(agentFile())).toBe(true);
+
+    const result = await convergeTrackerArtifacts({
+      claudeDir,
+      provider: 'jira',
+      warn,
+      agentSourceDirs: [path.join(claudeDir, 'no-such-source-dir')],
+    });
+    expect(result.converged, 'no source to copy from — this run converged nothing').toBe(false);
+    expect(
+      result.agentPresent,
+      'the previously installed copy is still spawnable, so the provider stays advertisable',
+    ).toBe(true);
+  });
+
+  it('a relative claudeDir reports agentPresent=false (fail closed — it cannot look)', async () => {
+    const result = await convergeTrackerArtifacts({ claudeDir: 'relative/path', provider: 'jira', warn });
+    expect(result.converged).toBe(false);
+    expect(result.agentPresent).toBe(false);
   });
 
   it('never throws — callers gate on converged, they do not catch', async () => {
@@ -249,6 +292,7 @@ describe('runTrackerSet: the convergence order is the invariant', () => {
         calls.push(`agent:${provider}`);
         return opts.artifacts ?? {
           converged: true,
+          agentPresent: provider !== 'github',
           agent: provider === 'github' ? 'removed' : 'installed',
         };
       },
@@ -370,12 +414,14 @@ describe('runTrackerSet: the convergence order is the invariant', () => {
   // ── C2: both directions of the sentinel ──────────────────────────────────
 
   it('an unconverged agent suppresses the sentinel WRITE', async () => {
-    const { calls, io } = makeRecorder({ artifacts: { converged: false, agent: 'unchanged' } });
+    const { calls, io } = makeRecorder({
+      artifacts: { converged: false, agentPresent: false, agent: 'unchanged' },
+    });
     const outcome = await run(io, 'github', 'jira');
 
     expect(outcome.exitCode, 'the selection stuck; only the advertising artifact did not').toBe(0);
     expect(calls).not.toContain('sentinel:jira');
-    expect(outcome.messages.map(m => m.text).join('\n')).toContain('sentinel not written');
+    expect(outcome.messages.map(m => m.text).join('\n')).toContain('sentinel removed');
   });
 
   it('an unconverged agent does NOT suppress the sentinel REMOVAL', async () => {
@@ -386,6 +432,43 @@ describe('runTrackerSet: the convergence order is the invariant', () => {
       calls,
       'a stale sentinel costs every future session a fork for a provider the user has left',
     ).toContain('sentinel:github');
+  });
+
+  it('an unconverged agent with NO copy on disk REMOVES the sentinel a prior provider left', async () => {
+    // The hole the github→jira arm above cannot see: on that transition the
+    // sentinel is absent anyway, so "suppress the write" and "leave nothing
+    // advertising" coincide. On jira→linear they do not — jira's sentinel is
+    // already on disk, and suppressing the write leaves it advertising a
+    // provider whose agent is missing, which is the exact state the suppression
+    // exists to prevent.
+    const { calls, io } = makeRecorder({
+      artifacts: { converged: false, agentPresent: false, agent: 'unchanged' },
+    });
+    const outcome = await run(io, 'jira', 'linear');
+
+    expect(outcome.exitCode, 'the selection stuck; only the advertising artifact did not').toBe(0);
+    expect(calls, 'the write must not happen').not.toContain('sentinel:linear');
+    expect(
+      calls,
+      'the previous provider\'s sentinel must be removed, not left advertising a missing agent',
+    ).toContain('sentinel:github');
+    expect(outcome.messages.map(m => m.text).join('\n')).toContain('sentinel removed');
+  });
+
+  it('a failed re-copy over a still-present agent WRITES the sentinel (no false disable)', async () => {
+    // converged=false with a copy still on disk is a transient I/O failure over a
+    // working install. Removing the sentinel there would disable a provider that
+    // can be spawned, so the gate is presence, not "did this run write it".
+    const { calls, io } = makeRecorder({
+      artifacts: { converged: false, agentPresent: true, agent: 'unchanged' },
+    });
+    const outcome = await run(io, 'jira', 'linear');
+
+    expect(outcome.exitCode).toBe(0);
+    expect(
+      calls,
+      'an agent that is present can be spawned, so the provider stays advertised',
+    ).toContain('sentinel:linear');
   });
 
   it('a failed rename, rearm or sentinel warns without aborting (applies PF-009)', async () => {

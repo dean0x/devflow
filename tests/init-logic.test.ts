@@ -1883,7 +1883,7 @@ describe('persistManifestThenConvergeTracker', () => {
     transition?: TrackerTransition;
     rearm?: TrackerResult<void>;
     sentinel?: TrackerResult<void>;
-    artifacts?: { converged: boolean; agent: 'installed' | 'removed' | 'unchanged' };
+    artifacts?: { converged: boolean; agentPresent: boolean; agent: 'installed' | 'removed' | 'unchanged' };
     artifactWarning?: string;
   } = {}) {
     const calls: string[] = []
@@ -1901,6 +1901,7 @@ describe('persistManifestThenConvergeTracker', () => {
         if (opts.artifactWarning) warn(opts.artifactWarning)
         return opts.artifacts ?? {
           converged: true,
+          agentPresent: provider !== 'github',
           agent: provider === 'github' ? 'removed' : 'installed',
         }
       },
@@ -2059,28 +2060,55 @@ describe('persistManifestThenConvergeTracker', () => {
 
   // ── C2: the sentinel converges in BOTH directions, only the WRITE is gated ──
 
-  it('an unconverged agent suppresses the sentinel WRITE (fail-closed)', async () => {
+  it('an agent that is not present suppresses the sentinel WRITE and REMOVES it', async () => {
+    // The write is gated on the agent being SPAWNABLE, and "suppress the write"
+    // alone is not fail-closed: on a jira → linear init the previous provider's
+    // sentinel is already on disk, so nothing being written still leaves jira
+    // advertised. Not-spawnable removes, through the one sentinel owner.
     const { calls, io } = makeRecorder({
-      artifacts: { converged: false, agent: 'unchanged' },
+      artifacts: { converged: false, agentPresent: false, agent: 'unchanged' },
       artifactWarning: 'tracker: failed to install the Tracker agent',
     })
 
     const outcome = await persistManifestThenConvergeTracker({
       devflowDir: '/tmp/devflow',
       claudeDir: '/tmp/devflow-claude',
-      manifestData: makeManifestData('jira'),
-      previousProvider: 'github',
+      manifestData: makeManifestData('linear'),
+      previousProvider: 'jira',
       io,
     })
 
-    expect(calls).toContain('agent:jira')
+    expect(calls).toContain('agent:linear')
     expect(
       calls,
       'nothing may advertise a provider whose agent is missing',
-    ).not.toContain('sentinel:jira')
+    ).not.toContain('sentinel:linear')
+    expect(
+      calls,
+      'the previous provider\'s sentinel has to be removed, not merely left unwritten',
+    ).toContain('sentinel:github')
     expect(outcome.converged).toBe(false)
     expect(outcome.agent).toBe('unchanged')
-    expect(outcome.messages.some(m => m.text.includes('could not be installed'))).toBe(true)
+    expect(outcome.messages.some(m => m.text.includes('sentinel removed'))).toBe(true)
+  })
+
+  it('a failed re-copy over a still-present agent WRITES the sentinel (no false disable)', async () => {
+    // The opposite error the presence gate exists to avoid: a transient copy
+    // failure over a working install must not disable a provider that can
+    // still be spawned.
+    const { calls, io } = makeRecorder({
+      artifacts: { converged: false, agentPresent: true, agent: 'unchanged' },
+    })
+
+    await persistManifestThenConvergeTracker({
+      devflowDir: '/tmp/devflow',
+      claudeDir: '/tmp/devflow-claude',
+      manifestData: makeManifestData('linear'),
+      previousProvider: 'jira',
+      io,
+    })
+
+    expect(calls).toContain('sentinel:linear')
   })
 
   it('an unconverged agent does NOT suppress the sentinel REMOVAL (github)', async () => {
@@ -2088,7 +2116,9 @@ describe('persistManifestThenConvergeTracker', () => {
     // for a provider the user has left, and a failed agent removal is not a
     // reason to keep paying it.
     const { calls } = makeRecorder()
-    const { io } = makeRecorder({ artifacts: { converged: false, agent: 'unchanged' } })
+    const { io } = makeRecorder({
+      artifacts: { converged: false, agentPresent: true, agent: 'unchanged' },
+    })
     void calls
 
     const recorded: string[] = []
