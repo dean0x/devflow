@@ -87,6 +87,23 @@ export function collectDefineBody(source: string, name: string): string {
 }
 
 /**
+ * Named collector: how many times a module invokes the shared ladder define.
+ *
+ * Counts `{dedup_ladder()}` and `{mcp.dedup_ladder()}` alike. The provider
+ * modules reach `_mcp.mds` through an ALIAS import — selective imports capture
+ * deep and cost the resolver exponential time, see
+ * `tests/build-mds-compile-time.test.ts` — and an alias is a lookup path, not a
+ * second author, so both spellings are the SAME single invocation this seam
+ * requires exactly one of. A bare `dedup_ladder` in prose is not a call site and
+ * is not counted, which is what the leading `{` and trailing `()}` carry.
+ */
+export function countLadderInvocations(source: string): number {
+  return [...source.matchAll(
+    new RegExp(String.raw`\{(?:[A-Za-z_][A-Za-z0-9_]*\.)?${LADDER_DEFINE}\(\)\}`, 'g'),
+  )].length;
+}
+
+/**
  * Named collector: the ladder's rungs, as position + TOKEN.
  *
  * The contract spells each rung `**<n> \`<token>\`**` — the number because the
@@ -193,6 +210,20 @@ describe('tracker dedup ladder seam: the writer records rungs the readers can ac
     expect(
       collectLadderRungs(`@define ${LADDER_DEFINE}():\n**1 \`a-b\`** → **2 \`c\`**\n@end\n`),
     ).toEqual([{ position: 1, token: 'a-b' }, { position: 2, token: 'c' }]);
+
+    // Known-bad, same it: the invocation counter accepts the bare and the
+    // alias-prefixed call site as one invocation each, and counts neither the
+    // define's own declaration nor a mention of its name in prose.
+    expect(countLadderInvocations(`x {${LADDER_DEFINE}()} y`)).toBe(1);
+    expect(countLadderInvocations(`x {mcp.${LADDER_DEFINE}()} y`)).toBe(1);
+    expect(
+      countLadderInvocations(`{${LADDER_DEFINE}()}\n{mcp.${LADDER_DEFINE}()}`),
+      'two call sites are two invocations however each is spelled — this seam requires exactly one',
+    ).toBe(2);
+    expect(
+      countLadderInvocations(`@define ${LADDER_DEFINE}():\nthe \`${LADDER_DEFINE}\` rule\n@end\n`),
+      'a declaration and a prose mention are not call sites',
+    ).toBe(0);
   });
 
   it('the Tracker agent states its closed set of rung tokens (collector is live)', () => {
@@ -314,7 +345,7 @@ describe('tracker dedup ladder seam: the writer records rungs the readers can ac
 
     for (const subdir of MCP_BACKED_PROVIDER_SUBDIRS) {
       const { name, source } = providerModule(subdir);
-      const invocations = source.split(`{${LADDER_DEFINE}()}`).length - 1;
+      const invocations = countLadderInvocations(source);
       expect(
         invocations,
         `${name} invokes {${LADDER_DEFINE}()} ${invocations} time(s) — it must be exactly one: none ` +
