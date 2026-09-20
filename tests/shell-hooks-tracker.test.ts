@@ -1602,6 +1602,18 @@ describe('session-start-context: tracker setup directive (Section 3)', () => {
    * producing site while the file asserts it covers them all. Counting
    * consultations would not catch it; naming the sections does.
    */
+  /**
+   * The flag each section must consult — ONE PER VALUE SET, not one flag shared
+   * by sections that interpolate different values.
+   *
+   * Section 2 embeds $PROJECT_ROOT alone; Section 3 embeds that AND
+   * $TRACKER_DEVFLOW_DIR. A single flag over their concatenation is wrong in the
+   * direction that costs a feature rather than leaks one: a ~/.devflow path the
+   * allowlist refuses would suppress the Learning directive, which never embeds
+   * it. So the claim is per section, and the flag it names is the one covering
+   * exactly what that section interpolates.
+   */
+  const ROOT_FLAG = 'DIRECTIVE_ROOT_SAFE';
   const GUARD_FLAG = 'DIRECTIVE_PATHS_SAFE';
 
   function collectGuardedSections(
@@ -1610,21 +1622,56 @@ describe('session-start-context: tracker setup directive (Section 3)', () => {
     const s1 = source.indexOf('# --- Section 1:');
     const s2 = source.indexOf('# --- Section 2:');
     const s3 = source.indexOf('# --- Section 3:');
-    const consults = (body: string) => body.includes(`[ -z "$${GUARD_FLAG}" ]`);
+    const consults = (body: string, flag: string) => body.includes(`[ -z "$${flag}" ]`);
+    const preamble = s1 > 0 ? source.slice(0, s1) : '';
     return {
-      preambleDecides: s1 > 0 && source.slice(0, s1).includes(`${GUARD_FLAG}="yes"`),
-      section2: s2 > 0 && s3 > s2 && consults(source.slice(s2, s3)),
-      section3: s3 > 0 && consults(source.slice(s3)),
+      preambleDecides:
+        preamble.includes(`${ROOT_FLAG}="yes"`) &&
+        preamble.includes(`${GUARD_FLAG}="$${ROOT_FLAG}"`),
+      section2: s2 > 0 && s3 > s2 && consults(source.slice(s2, s3), ROOT_FLAG),
+      section3: s3 > 0 && consults(source.slice(s3), GUARD_FLAG),
     };
   }
 
-  it('the path guard is decided above the sections and consulted inside each of them', () => {
+  it('each directive section consults the flag covering exactly what it interpolates', () => {
     expect(
       collectGuardedSections(HOOK_SOURCE),
-      `${GUARD_FLAG} must be decided once, above Section 1, and consulted by every ` +
-      `section that interpolates a path into a directive. A section that never ` +
-      `reads it interpolates a value no gate saw.`,
+      `Both flags must be decided once, above Section 1, with ${GUARD_FLAG} seeded ` +
+      `from ${ROOT_FLAG} so it can only be narrower. Section 2 interpolates ` +
+      `$PROJECT_ROOT alone and must consult ${ROOT_FLAG}; Section 3 interpolates ` +
+      `$TRACKER_DEVFLOW_DIR as well and must consult ${GUARD_FLAG}. A section that ` +
+      `reads neither interpolates a value no gate saw; a section that reads the ` +
+      `wider flag is suppressed by a value it never embeds.`,
     ).toEqual({ preambleDecides: true, section2: true, section3: true });
+  });
+
+  it('a hostile ~/.devflow shape suppresses the TRACKER directive and spares Learning', () => {
+    // The coupling regression, in both directions at once: the Learning directive
+    // never embeds $TRACKER_DEVFLOW_DIR, so its shape must not silence it — while
+    // Section 3, which does embed it, must still refuse.
+    const cleanRoot = path.join(tmpDir, 'clean-root');
+    fs.mkdirSync(path.join(cleanRoot, '.devflow', 'learning'), { recursive: true });
+    seedDecisionsTldr(cleanRoot);
+    fs.writeFileSync(
+      path.join(cleanRoot, '.devflow', 'learning', '.pending-turns.jsonl'),
+      '{"role":"user","content":"we chose X over Y","ts":1}\n',
+    );
+
+    const hostileDevflow = path.join(tmpDir, 'dev flow home');
+    fs.mkdirSync(hostileDevflow, { recursive: true });
+    fs.writeFileSync(path.join(hostileDevflow, '.tracker.enabled'), '');
+
+    const { stdout, exitCode } = run(sessionStart(cleanRoot), homeDir, { DEVFLOW_DIR: hostileDevflow });
+    expect(exitCode).toBe(0);
+    const ctx = contextOf(stdout);
+    expect(
+      ctx,
+      'the Learning directive interpolates $PROJECT_ROOT only — a ~/.devflow shape must not silence it',
+    ).toContain('--- LEARNING MAINTENANCE ---');
+    expect(
+      ctx,
+      'Section 3 does interpolate $TRACKER_DEVFLOW_DIR, so the same value must still refuse it',
+    ).not.toContain(BANNER);
   });
 
   /**
@@ -1665,7 +1712,7 @@ describe('session-start-context: tracker setup directive (Section 3)', () => {
     // Read off the source: a denylist of specific hostile characters is the
     // shape this control replaced, and a revert would restore it silently.
     const gate = HOOK_SOURCE.slice(
-      HOOK_SOURCE.indexOf('DIRECTIVE_PATHS_SAFE="yes"'),
+      HOOK_SOURCE.indexOf(`${ROOT_FLAG}="yes"`),
       HOOK_SOURCE.indexOf('DEVFLOW_DIR="$PROJECT_ROOT/.devflow"'),
     );
     expect(gate.length, 'the gate block must be locatable').toBeGreaterThan(0);
@@ -1674,19 +1721,51 @@ describe('session-start-context: tracker setup directive (Section 3)', () => {
       'the matcher must be a negated character class over the admitted set',
     ).toContain('*[!A-Za-z0-9/._-]*');
     expect(gate, 'an empty value must be refused explicitly, not read as "nothing forbidden"').toContain("''|");
+    // Both values are gated, each in its own `case`. One `case` over their
+    // concatenation is the coupling defect, and it reads as a single matcher.
+    expect(
+      gate.match(/\*\[!A-Za-z0-9\/\._-\]\*/g)?.length,
+      'each gated value needs its own matcher — one over a concatenation suppresses ' +
+      'a section by a value that section never interpolates',
+    ).toBe(2);
+    expect(gate, 'the project root is gated on its own').toContain('case "$PROJECT_ROOT" in');
+    expect(gate, 'the global root is gated on its own').toContain('case "$TRACKER_DEVFLOW_DIR" in');
   });
 
-  it('known-bad probe: the guard collector reports a section that never consults the flag', () => {
-    const seeded = [
-      `${GUARD_FLAG}="yes"`,
+  it('known-bad probe: the guard collector reports a section reading the wrong flag', () => {
+    // The seeded defect IS the coupling regression: Section 2 consults the wider
+    // flag, so a ~/.devflow shape it never interpolates would silence it.
+    const coupled = [
+      `${ROOT_FLAG}="yes"`,
+      `${GUARD_FLAG}="$${ROOT_FLAG}"`,
       '# --- Section 1: decisions ---',
       '# --- Section 2: learning ---',
       `  if [ -z "$${GUARD_FLAG}" ]; then LEARNING_WORK=""; fi`,
       '# --- Section 3: tracker ---',
+      `  if [ -z "$${GUARD_FLAG}" ]; then return 1; fi`,
+    ].join('\n');
+    expect(collectGuardedSections(coupled))
+      .toEqual({ preambleDecides: true, section2: false, section3: true });
+
+    // And the original defect the collector was built for: a section consulting
+    // no flag at all.
+    const unguarded = [
+      `${ROOT_FLAG}="yes"`,
+      `${GUARD_FLAG}="$${ROOT_FLAG}"`,
+      '# --- Section 1: decisions ---',
+      '# --- Section 2: learning ---',
+      `  if [ -z "$${ROOT_FLAG}" ]; then LEARNING_WORK=""; fi`,
+      '# --- Section 3: tracker ---',
       '  TRACKER_SECTION="Project root: $PROJECT_ROOT"',
     ].join('\n');
-    expect(collectGuardedSections(seeded))
+    expect(collectGuardedSections(unguarded))
       .toEqual({ preambleDecides: true, section2: true, section3: false });
+
+    // A preamble that decides the narrow flag but never derives the wide one
+    // from it could let the two drift apart.
+    const underived = unguarded.replace(`${GUARD_FLAG}="$${ROOT_FLAG}"`, `${GUARD_FLAG}="yes"`);
+    expect(collectGuardedSections(underived).preambleDecides).toBe(false);
+
     expect(collectGuardedSections('nothing here'))
       .toEqual({ preambleDecides: false, section2: false, section3: false });
   });

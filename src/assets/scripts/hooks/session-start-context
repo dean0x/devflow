@@ -88,10 +88,18 @@ TRACKER_DEVFLOW_DIR="${DEVFLOW_DIR:-$HOME/.devflow}"
 # what is known to be inert, so the next escape nobody has thought of is refused
 # by construction rather than by a later amendment.
 #
-# The narrowing is real and deliberate: a home directory containing a space, a
-# quote, or any non-ASCII character now suppresses the directives rather than
-# interpolating an unproven value. That is the fail-closed direction — the
-# directive is an optimisation, and `dbg` names the reason on the debug path.
+# The narrowing is real and deliberate: a project root containing a space, a
+# quote, a backtick, `$` or `;` now suppresses the directive that embeds it
+# rather than interpolating an unproven value. That is the fail-closed direction
+# — the directive is an optimisation, and `dbg` names the reason on the debug
+# path.
+#
+# What the range does NOT promise is "ASCII only". A `case` bracket range
+# collates under LC_COLLATE, so `A-Za-z0-9` admits an accented letter under a
+# UTF-8 locale and refuses it under C. Every byte the gate exists to refuse —
+# quote, backslash, CR, LF, space, backtick, `$`, `;` — is outside the range in
+# both, so the security property holds either way; only the exact width of the
+# admitted set is locale-dependent, and no rule here rests on it.
 #
 # Checked ONCE, here, where both values are resolved and above every section that
 # interpolates them, so no sink can embed a value no gate saw (PF-023 — the
@@ -99,8 +107,26 @@ TRACKER_DEVFLOW_DIR="${DEVFLOW_DIR:-$HOME/.devflow}"
 # whichever section someone remembered). `case` is a shell builtin, so the GitHub
 # path still forks zero times [DR-10]. The empty arm is explicit: an unset
 # PROJECT_ROOT must not read as "no forbidden character, therefore safe".
-DIRECTIVE_PATHS_SAFE="yes"
-case "$PROJECT_ROOT$TRACKER_DEVFLOW_DIR" in
+#
+# ONE gate per VALUE, not one over their concatenation. Section 2 interpolates
+# $PROJECT_ROOT alone; only Section 3 also interpolates $TRACKER_DEVFLOW_DIR.
+# Gating the two values jointly made a rejected ~/.devflow shape suppress the
+# Learning directive as well — a value Section 2 never embeds, silently
+# disabling the whole learning pipeline for any machine whose home directory
+# carries a space. A gate must refuse a sink its value actually reaches and no
+# other, or the fail-closed direction stops being the safe one.
+DIRECTIVE_ROOT_SAFE="yes"
+case "$PROJECT_ROOT" in
+  ''|*[!A-Za-z0-9/._-]*)
+    DIRECTIVE_ROOT_SAFE=""
+    ;;
+esac
+
+# Section 3's flag: BOTH values, because Section 3 interpolates both. Seeded from
+# the root flag so it can only ever be narrower — a root the sections may not
+# embed is not embeddable by the section that embeds more of them.
+DIRECTIVE_PATHS_SAFE="$DIRECTIVE_ROOT_SAFE"
+case "$TRACKER_DEVFLOW_DIR" in
   ''|*[!A-Za-z0-9/._-]*)
     DIRECTIVE_PATHS_SAFE=""
     ;;
@@ -175,7 +201,9 @@ if [ "$LEARNING_ENABLED" = "true" ]; then
     LEARNING_WORK="queue"
   fi
 
-  if [ -n "$LEARNING_WORK" ] && [ -z "$DIRECTIVE_PATHS_SAFE" ]; then
+  # $PROJECT_ROOT is the only path this directive interpolates (line below), so
+  # it is the only one whose shape may suppress it.
+  if [ -n "$LEARNING_WORK" ] && [ -z "$DIRECTIVE_ROOT_SAFE" ]; then
     dbg "learning directive suppressed: interpolated path shape rejected"
     LEARNING_WORK=""
   fi
