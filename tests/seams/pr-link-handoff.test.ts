@@ -1,5 +1,11 @@
 import { describe, it, expect, afterAll } from 'vitest'
-import { buildCommittedTree, cleanupCommittedTree, requireDistFile, resolveAgentSource } from '../helpers.js'
+import * as fs from 'fs'
+import * as path from 'path'
+import { buildCommittedTree, cleanupCommittedTree, requireDistFile, resolveAgentSource, walkFiles } from '../helpers.js'
+import { compiledSkillRefsDir } from '../../src/core/assets.js'
+
+/** The generated `devflow:git` reference tree — the providers' own mechanics. */
+const REFS_DIR = compiledSkillRefsDir()
 
 // -------------------------------------------------------------------------
 // `### Handoff Values` — Git agent producer ↔ Code agent consumer (P2-S10, GAP-15).
@@ -241,6 +247,86 @@ describe('code.md — the paste gate, one arm per resolved provider', () => {
     // An unanchored pattern is not a row this collector reads at all, which is
     // what makes the anchoring arm above a real check rather than a tautology.
     expect(collectPasteArms('| `linear` | `Refs [A-Z]+-[0-9]+` |').size).toBe(0)
+  })
+
+  // -----------------------------------------------------------------------
+  // The arms are a FOURTH reader of each provider's reference grammar.
+  //
+  // The Code agent sits outside the Git spawn surface and loads no provider
+  // mechanics file it could defer to, so a per-provider sink check has to
+  // enumerate the closed set once, inside the gate — that is what keeps it a
+  // sink check rather than a second convergence point (PF-023). What it must
+  // not become is a second AUTHORITY: the shape a `KEY-N` reference takes is
+  // stated by each provider's own mechanics, and the project-key alphabet
+  // already has an explicit one-authority claim over three readers
+  // (tests/tracker/single-authority.test.ts). This gate was the reader that
+  // claim does not cover.
+  //
+  // The arms agree with the mechanics today. What was missing is anything that
+  // would notice if a provider's grammar were edited and this table were not —
+  // and the dangerous direction is silent: a widened arm admits a link line the
+  // provider's own mechanics would refuse, at the one gate standing between an
+  // attacker-influenceable value and a GitHub-visible sink.
+  // -----------------------------------------------------------------------
+
+  /**
+   * Named collector: the reference grammars a provider's generated mechanics
+   * state, deduplicated.
+   *
+   * Read out of the shipped tree, never re-typed here — a literal in this file
+   * would be the fifth authority and the only one nobody ships (PF-018).
+   * Linear's internal-id form is deliberately excluded: it carries no team, so
+   * the provider's own history grammar admits the TEAM-KEY form only, and a
+   * rendered PR link is always that form.
+   */
+  function collectProviderRefGrammars(provider: string): string[] {
+    const dir = path.join(REFS_DIR, 'tracker', provider)
+    const found = new Set<string>()
+    for (const file of walkFiles(dir, f => f.endsWith('.md'), 1)) {
+      for (const m of fs.readFileSync(file, 'utf-8').matchAll(/\^\[A-Z\]\[A-Z0-9_?\]\{\d,\d\}-\[1-9\]\[0-9\]\{\d,\d\}\$/g)) {
+        found.add(m[0])
+      }
+    }
+    return [...found]
+  }
+
+  it('each non-github arm is its provider\'s own reference grammar, prefixed by the rendered verb', () => {
+    const arms = collectPasteArms(CODE)
+    for (const provider of PASTE_PROVIDERS.filter(p => p !== 'github')) {
+      const grammars = collectProviderRefGrammars(provider)
+      expect(
+        grammars,
+        `${provider}'s mechanics state ${grammars.length} distinct KEY-N grammars; one authority ` +
+        `means exactly one`,
+      ).toHaveLength(1)
+
+      const arm = arms.get(provider)
+      expect(arm, `no paste arm for ${provider}`).toBeDefined()
+      // The arm is the grammar with the rendered verb spliced in after `^`.
+      expect(
+        arm,
+        `${provider}: the paste gate admits a shape its own mechanics do not state. The gate is a ` +
+        `SINK check, not a second authority — widen the provider's grammar or narrow the gate, ` +
+        `never let the two drift.\n  gate:      ${arm}\n  mechanics: ${grammars[0]}`,
+      ).toBe(grammars[0].replace('^', '^Refs '))
+    }
+  })
+
+  it('known-bad probe: the grammar collector reads the shipped tree and reports a drift', () => {
+    // Non-vacuity: the collector must actually be finding grammars in the
+    // shipped tree, or the arm above compares two absences.
+    for (const provider of ['jira', 'linear']) {
+      expect(
+        collectProviderRefGrammars(provider),
+        `${provider}: the collector found no grammar, so the arm above proves nothing`,
+      ).toHaveLength(1)
+    }
+    // And a drifted gate is reported rather than tolerated: the linear grammar
+    // against the jira arm is exactly the mix-up the overlap makes plausible.
+    const [jira] = collectProviderRefGrammars('jira')
+    const [linear] = collectProviderRefGrammars('linear')
+    expect(jira, 'the two providers must differ, or the drift probe is vacuous').not.toBe(linear)
+    expect(jira.replace('^', '^Refs ')).not.toBe(linear.replace('^', '^Refs '))
   })
 })
 
