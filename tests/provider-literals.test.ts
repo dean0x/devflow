@@ -834,6 +834,36 @@ export function collectSecondAuthors(
   return corpus.filter(e => unescapeMds(e.text).includes(emitted)).map(e => e.label);
 }
 
+/**
+ * Does `source` pull in the authoring module `basename`, in EITHER import form?
+ *
+ * MDS spells the same dependency two ways — selective
+ * (`@import { a, b } from "./_mcp.mds"`) and alias (`@import "./_mcp.mds" as mcp`).
+ * The tool-call provider modules use the alias form deliberately: a selective
+ * import captures each named function by deep copy and the resolver re-snapshots
+ * that captured scope once per `@define`, which is the compile-time cliff
+ * `tests/build-mds-compile-time.test.ts` now holds shut. The claim this arm makes
+ * — "the provider depends on the single author rather than restating it" — is the
+ * same under both spellings, so it is matched against the `@import` DIRECTIVE
+ * naming the module, not against one of its two syntaxes.
+ */
+export function importsModule(source: string, basename: string): boolean {
+  const quoted = basename.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  return new RegExp(String.raw`^@import\b.*"\./${quoted}"`, 'm').test(source);
+}
+
+/**
+ * Does `source` invoke `define` at a call site, bare or through an import alias?
+ *
+ * `{posting_gate_head(` and `{mcp.posting_gate_head(` are the same invocation of
+ * the same single author; the alias is a lookup path, not a second definition. A
+ * bare `posting_gate_head` in prose is NOT a call site and must not count, which
+ * is what the leading `{` and the trailing `(` carry.
+ */
+export function invokesDefine(source: string, define: string): boolean {
+  return new RegExp(String.raw`\{(?:[A-Za-z_][A-Za-z0-9_]*\.)?${define}\(`).test(source);
+}
+
 describe('shared provider-independent rules have exactly one author', () => {
   /** Each authoring module's source, keyed by path — read once, both modules. */
   const authoringSources = new Map<string, string>(
@@ -903,12 +933,12 @@ describe('shared provider-independent rules have exactly one author', () => {
     for (const entry of providerSources) {
       for (const module of authoringSources.keys()) {
         const basename = module.slice(module.lastIndexOf('/') + 1);
-        if (!entry.text.includes(`from "./${basename}"`)) {
+        if (!importsModule(entry.text, basename)) {
           missing.push(`${entry.label}: imports nothing from ${basename}`);
         }
       }
       for (const rule of SHARED_RULES) {
-        if (!entry.text.includes(`{${rule.define}(`)) {
+        if (!invokesDefine(entry.text, rule.define)) {
           missing.push(`${entry.label}: never invokes ${rule.define}`);
         }
       }
@@ -958,6 +988,33 @@ describe('shared provider-independent rules have exactly one author', () => {
         `the escaped spelling of ${rule.define} must be reported too`,
       ).toEqual(['seed/_escaped.mds']);
     }
+  });
+
+  it('known-bad probe: the import and invocation predicates still report an absence', () => {
+    // Both predicates accept two spellings each. A predicate widened to accept
+    // two things is one edit away from accepting everything, and the arm above
+    // would stay green through that edit — these are the seeded negatives.
+    expect(importsModule('@import "./_mcp.mds" as mcp\n', '_mcp.mds')).toBe(true);
+    expect(importsModule('@import { a, b } from "./_mcp.mds"\n', '_mcp.mds')).toBe(true);
+    expect(
+      importsModule('prose naming `_mcp.mds` and "./_mcp.mds" outside any directive\n', '_mcp.mds'),
+      'a module NAMED in prose is not a module IMPORTED',
+    ).toBe(false);
+    expect(
+      importsModule('@import { a } from "./_common.mds"\n', '_mcp.mds'),
+      'importing the other authoring module is not importing this one',
+    ).toBe(false);
+
+    expect(invokesDefine('x {posting_gate_head("a")} y', 'posting_gate_head')).toBe(true);
+    expect(invokesDefine('x {mcp.posting_gate_head("a")} y', 'posting_gate_head')).toBe(true);
+    expect(
+      invokesDefine('the `posting_gate_head` rule is authored in `_mcp.mds`', 'posting_gate_head'),
+      'a define NAMED in prose is not a define INVOKED',
+    ).toBe(false);
+    expect(
+      invokesDefine('x {mcp.query_safety()} y', 'posting_gate_head'),
+      'invoking a sibling rule is not invoking this one',
+    ).toBe(false);
   });
 });
 
