@@ -128,6 +128,19 @@ function providerReferenceCorpus(): Array<{ label: string; content: string }> {
   }));
 }
 
+/**
+ * Registered tool-call (non-GitHub) tracker providers, as bare ids ('jira', 'linear', …).
+ *
+ * Used everywhere §§4-6 need "the providers reached through a tool call" rather
+ * than "every provider" — GitHub has no Reference Rendering gate, no plan-artifact
+ * comment cap, and no `_mcp.md` to name.
+ */
+function toolCallProviderIds(): string[] {
+  return VARIANT_MODULES
+    .filter(mod => mod.subdir.startsWith('tracker/') && mod.subdir !== 'tracker/github')
+    .map(mod => mod.subdir.slice('tracker/'.length));
+}
+
 // ---------------------------------------------------------------------------
 // 1. The cross-cutting documents' registry [DR-19]
 // ---------------------------------------------------------------------------
@@ -645,9 +658,7 @@ describe('the project-key alphabet has one authority, quoted identically by all 
 // ---------------------------------------------------------------------------
 
 describe('Reference Rendering: rule once in the contract, value once per provider', () => {
-  const providers = VARIANT_MODULES
-    .filter(mod => mod.subdir.startsWith('tracker/') && mod.subdir !== 'tracker/github')
-    .map(mod => mod.subdir.slice('tracker/'.length));
+  const providers = toolCallProviderIds();
 
   it('this arm has providers to range over', () => {
     expect(providers.length, 'no tool-call provider registered — both arms are vacuous')
@@ -747,9 +758,7 @@ describe('Reference Rendering: a discarded token yields the default, never a DEG
   const HOSTILE_TOKEN = 'pr-link: $(whoami)';
 
   it('the gate names discard-and-default and the Substitutions record, for every provider', () => {
-    const providers = VARIANT_MODULES
-      .filter(mod => mod.subdir.startsWith('tracker/') && mod.subdir !== 'tracker/github')
-      .map(mod => mod.subdir.slice('tracker/'.length));
+    const providers = toolCallProviderIds();
     expect(providers.length, 'no tool-call provider registered').toBeGreaterThan(0);
 
     for (const provider of providers) {
@@ -818,9 +827,7 @@ describe('Reference Rendering: a discarded token yields the default, never a DEG
 // operation posts none of it, falls back to the pointer, and names the reason.
 
 describe('the plan artifact is posted as content, and over the cap posts none of it', () => {
-  const providers = VARIANT_MODULES
-    .filter(mod => mod.subdir.startsWith('tracker/') && mod.subdir !== 'tracker/github')
-    .map(mod => mod.subdir.slice('tracker/'.length));
+  const providers = toolCallProviderIds();
 
   it('this arm has providers to range over', () => {
     expect(providers.length).toBeGreaterThan(0);

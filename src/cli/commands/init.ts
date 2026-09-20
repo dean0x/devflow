@@ -181,6 +181,32 @@ export function formatSweepSummary(
 }
 
 /**
+ * Log each summary line at the severity it carries — the one dispatch every
+ * `SummaryLine[]` renderer shares.
+ *
+ * Exhaustive over `SummaryLine['level']` rather than an `if/else`: a level added
+ * to the interface has to be routed here, at compile time, instead of silently
+ * degrading to `info` at every call site.
+ */
+function logSummaryLines(lines: readonly SummaryLine[]): void {
+  for (const line of lines) {
+    switch (line.level) {
+      case 'info':
+        p.log.info(line.message);
+        break;
+      case 'warn':
+        p.log.warn(line.message);
+        break;
+      default: {
+        const _exhaustive: never = line.level;
+        void _exhaustive;
+        break;
+      }
+    }
+  }
+}
+
+/**
  * Classify the safe-delete installation state based on the installed version
  * in the user's shell profile.
  */
@@ -2279,28 +2305,12 @@ export const initCommand = new Command('init')
     // failed removal leaves a retired asset live. Both must surface.
     // After I09, the installer's knownNames set unions FEATURE_OWNED_SKILLS, so
     // devflow:compliance is never swept here — no suppression predicate is needed.
-    for (const line of formatSweepSummary(installReport)) {
-      if (line.level === 'warn') p.log.warn(line.message);
-      else p.log.info(line.message);
-    }
+    logSummaryLines(formatSweepSummary(installReport));
 
     // Reference-overlay reporting: the overlay rewrites files inside an installed skill
     // the user may have shadowed, and reports any unit it had to leave alone (PF-015).
-    for (const line of formatOverlaySummary(installReport, trackerProvider)) {
-      switch (line.level) {
-        case 'info':
-          p.log.info(line.message);
-          break;
-        case 'warn':
-          p.log.warn(line.message);
-          break;
-        default: {
-          const _exhaustive: never = line.level;
-          void _exhaustive;
-          break;
-        }
-      }
-    }
+    logSummaryLines(formatOverlaySummary(installReport, trackerProvider));
+
     // Skill-scoping reporting: a deselected skill is deleted and a dormant shadow
     // is inert, and neither is distinguishable from "never installed" on disk.
     //
@@ -2312,10 +2322,7 @@ export const initCommand = new Command('init')
       existingManifest !== null &&
       new Set(existingManifest.plugins).size === new Set(effectivePluginNames).size &&
       effectivePluginNames.every(name => existingManifest.plugins.includes(name));
-    for (const line of formatSkillScopeSummary(installReport, pluginListUnchanged)) {
-      if (line.level === 'warn') p.log.warn(line.message);
-      else p.log.info(line.message);
-    }
+    logSummaryLines(formatSkillScopeSummary(installReport, pluginListUnchanged));
 
     for (const warning of installWarnings) p.log.warn(warning);
 
@@ -2439,10 +2446,7 @@ export const initCommand = new Command('init')
       removedRefs: installReport.sweptOrphans.filter(o => o.kind === 'reference').length,
       agent: trackerLifecycle.agent,
     });
-    for (const line of trackerLines) {
-      if (line.level === 'warn') p.log.warn(line.message);
-      else p.log.info(line.message);
-    }
+    logSummaryLines(trackerLines);
 
     // External model routing status line (Advanced path / explicit --proxy flag only)
     if (proxyEnabled) {

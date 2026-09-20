@@ -861,7 +861,7 @@ export function installedReferenceManifest(opts: {
 
   const gated: readonly string[] = MCP_BACKED_PROVIDER_SUBDIRS;
   if (gated.includes(providerSubdir)) {
-    const contract = contractRelPath(modules);
+    const contract = contractRelPath(expanded.value);
     if (contract !== undefined) installed.push(contract);
   }
 
@@ -878,11 +878,13 @@ function subdirOfRelPath(relPath: string): string {
  * The tool-call contract's emitted path, as this registry expands it — read from
  * the expansion rather than composed from the module's fields, so the name can
  * only ever be the one the build actually writes.
+ *
+ * Takes the already-expanded pairs rather than re-expanding: the caller has
+ * already validated the same registry expands cleanly, so a second call would
+ * only duplicate that work and reintroduce a refusal branch that can never fire.
  */
-function contractRelPath(modules: readonly VariantModule[]): string | undefined {
-  const expanded = expandVariants(modules);
-  if (!expanded.ok) return undefined;
-  return expanded.value.find(pair => pair.module === MCP_CONTRACT_MODULE.source)?.relPath;
+function contractRelPath(pairs: readonly VariantPair[]): string | undefined {
+  return pairs.find(pair => pair.module === MCP_CONTRACT_MODULE.source)?.relPath;
 }
 
 // ---------------------------------------------------------------------------

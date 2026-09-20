@@ -412,8 +412,6 @@ describe('runTrackerSet: the convergence order is the invariant', () => {
 // ---------------------------------------------------------------------------
 
 describe('readTrackerMechanics / formatTrackerMechanics', () => {
-  const refsRoot = (): string => path.join(claudeDir, 'skills', 'devflow:git', 'references');
-
   it('reports MISSING when nothing is installed', async () => {
     const state = await readTrackerMechanics(claudeDir, 'github');
     expect(state).toEqual({ kind: 'missing' });
@@ -440,7 +438,7 @@ describe('readTrackerMechanics / formatTrackerMechanics', () => {
   it('distinguishes "could not look" from "nothing there"', async () => {
     if (typeof process.getuid === 'function' && process.getuid() === 0) return;
     await overlayInstalledReferences({ claudeDir, provider: 'github', warn });
-    const blocked = path.join(refsRoot(), 'tracker');
+    const blocked = path.join(refsTarget(), 'tracker');
     await fs.chmod(blocked, 0o000);
     try {
       const state = await readTrackerMechanics(claudeDir, 'github');

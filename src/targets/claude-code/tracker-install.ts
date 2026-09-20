@@ -83,22 +83,19 @@ function agentTarget(claudeDir: string): string {
   return path.join(claudeDir, 'agents', 'devflow', mdFileName(TRACKER_AGENT_NAME));
 }
 
-/** First path in `candidates` that exists, or undefined when none do. */
-async function firstExisting(candidates: readonly string[]): Promise<string | undefined> {
-  for (const candidate of candidates) {
-    try {
-      await fs.access(candidate);
-      return candidate;
-    } catch { /* not here — try the next directory in preference order */ }
-  }
-  return undefined;
-}
-
 async function pathExists(p: string): Promise<boolean> {
   try {
     await fs.access(p);
     return true;
   } catch { return false; }
+}
+
+/** First path in `candidates` that exists, or undefined when none do. */
+async function firstExisting(candidates: readonly string[]): Promise<string | undefined> {
+  for (const candidate of candidates) {
+    if (await pathExists(candidate)) return candidate;
+  }
+  return undefined;
 }
 
 // ── Convergence ────────────────────────────────────────────────────────────

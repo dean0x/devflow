@@ -71,9 +71,12 @@ export interface TrackerCliActionResult {
  *   `parseTrackerId` at the CLI boundary.
  *
  * Replace semantics: the parsed provider becomes the selection, github included —
- * `--set github` is the off switch; there is no --no-tracker (D-E). The
- * `--status` branch reads the manifest and reports it directly, so `--set` is
- * the only action that reaches this resolver.
+ * `--set github` is the off switch; there is no --no-tracker (D-E).
+ *
+ * Kept as a standalone pure resolver for the (current, requested) → (nextState,
+ * messages) matrix it is unit-tested against; {@link runTrackerSet} builds its
+ * own messages inline because it also has to sequence the I/O steps that
+ * produce them.
  */
 export function resolveTrackerCliAction(
   current: TrackerFeatureState,
