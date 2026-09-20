@@ -223,12 +223,13 @@ const BUDGET_LOADED_SET = 80_200;
 /**
  * THE JIRA-SCOPED loaded-set ceiling — a spawn under the Jira provider.
  *
- * WHY A SECOND ROW AND NOT A RAISED FIRST ONE. `BUDGET_LOADED_SET_P3` above answers
- * "what does a tracker spawn cost on the GitHub path?", and the answer is unchanged
- * by this phase: no github operation file names the tool-call contract (the
+ * WHY A SECOND ROW AND NOT A RAISED FIRST ONE. `BUDGET_LOADED_SET` above answers
+ * "what does a tracker spawn cost on the GitHub path?", and a provider's cost does
+ * not change that answer: no github operation file names the tool-call contract (the
  * re-scoped AC-2.7 arm in tests/guards/provider-scope.test.ts PROVES that rather
  * than assuming it), so `MCP_TERM` stays 0 by construction and the GitHub row keeps
- * its 107 ch of headroom. Folding a provider that DOES load the contract into that
+ * its own headroom (45 ch as measured — read the printed table, not this
+ * sentence). Folding a provider that DOES load the contract into that
  * number would have billed every GitHub user for bytes they never receive — the
  * exact defect GAP-02 recorded — and would have done it by raising a ratcheted
  * ceiling, which §14.5 forbids outright.

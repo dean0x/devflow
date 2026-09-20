@@ -2,7 +2,6 @@
  * Tests for src/cli/commands/tracker.ts
  *
  * Covers:
- *   - resolveTrackerCliAction pure resolver matrix
  *   - parseTrackerId "Commander parse pin" (error names every valid ID)
  *   - readTrackerProvenance / formatTrackerProvenance (the --status surface)
  *   - the D-F re-arm, driven as a subprocess against a seeded temp HOME
@@ -23,7 +22,6 @@ import { fileURLToPath } from 'url';
 import { requireBuiltCli } from './helpers.js';
 
 import {
-  resolveTrackerCliAction,
   readTrackerProvenance,
   formatTrackerProvenance,
 } from '../src/cli/commands/tracker.js';
@@ -31,41 +29,6 @@ import { TRACKER_PROVIDER_IDS, parseTrackerId } from '../src/core/tracker.js';
 
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const TRACKER_CLI_SOURCE = path.join(REPO_ROOT, 'src', 'cli', 'commands', 'tracker.ts');
-
-// ── resolveTrackerCliAction ───────────────────────────────────────────────────
-
-describe('resolveTrackerCliAction', () => {
-  it('set replaces the provider and reports the change', () => {
-    const result = resolveTrackerCliAction({ provider: 'github' }, 'jira');
-    expect(result.nextState).toEqual({ provider: 'jira' });
-    expect(result.messages).toHaveLength(1);
-    expect(result.messages[0].level).toBe('success');
-    expect(result.messages[0].text).toContain('jira');
-  });
-
-  it('set to the provider already in the manifest is reported as a no-change', () => {
-    const result = resolveTrackerCliAction({ provider: 'jira' }, 'jira');
-    expect(result.nextState).toEqual({ provider: 'jira' });
-    expect(result.messages.some(m => m.text.toLowerCase().includes('already'))).toBe(true);
-  });
-
-  it('set back to github is honoured — github is the off switch (decision D-E)', () => {
-    // There is no --no-tracker: `--set github` IS the way off.
-    const result = resolveTrackerCliAction({ provider: 'linear' }, 'github');
-    expect(result.nextState).toEqual({ provider: 'github' });
-    expect(result.messages[0].text).toContain('github');
-  });
-
-  it('with no provider leaves the current state untouched and never aliases it', () => {
-    // Defensive: the caller parses --set at the boundary, so this arm should be
-    // unreachable — it must still never invent a provider, and the state it
-    // hands back is a fresh object the caller can persist without sharing.
-    const current = { provider: 'linear' as const };
-    const result = resolveTrackerCliAction(current);
-    expect(result.nextState).toEqual({ provider: 'linear' });
-    expect(result.nextState).not.toBe(current);
-  });
-});
 
 // ── Commander parse pin: --set with an unknown ID ──────────────────────────────
 

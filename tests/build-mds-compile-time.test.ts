@@ -118,8 +118,12 @@ describe('MDS reference modules compile well under the define-capture cliff', ()
 
   beforeAll(async () => {
     await init();
-    // Warm the addon on a module this file does not time, so no measurement
-    // below is charged for one-time lazy initialisation.
+    // Warm the addon before anything is timed, so no measurement below is
+    // charged for one-time lazy initialisation. `_mcp.mds` is the cheapest
+    // module on the roster (it imports nothing, ~1 ms), and it IS timed later —
+    // a warm-up outside the roster would be a second module to keep in step for
+    // no gain, and the first timed measurement would pay the initialisation
+    // this call absorbs.
     await compileFile(path.join(ROOT, 'src/assets/mds/tracker/_mcp.mds'), {});
     tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'devflow-mds-time-'));
   }, 120_000);

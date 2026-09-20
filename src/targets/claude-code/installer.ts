@@ -354,7 +354,8 @@ export type OverlayUnitRef =
  * What a failed overlay unit left on disk.
  *
  * Populated from what the run actually did, because a failure does not imply a no-op.
- * One rendered sentence per arm (see `formatOverlaySummary` in src/cli/commands/init.ts):
+ * One rendered sentence per arm (see `describeOverlayFailureState` in
+ * src/cli/commands/install-report.ts):
  * a single shared sentence — "the previously installed files were left unchanged" — is
  * true of exactly one arm below. A flat set caught mid-promotion is part new and part
  * old, a unit whose displaced copy could not be put back has no live copy at all, and a

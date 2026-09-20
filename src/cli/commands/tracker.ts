@@ -54,48 +54,6 @@ export interface TrackerCliActionMessage {
   text: string;
 }
 
-export interface TrackerCliActionResult {
-  nextState: TrackerFeatureState;
-  messages: TrackerCliActionMessage[];
-}
-
-// ── Pure resolver ──────────────────────────────────────────────────────────────
-
-/**
- * Pure resolver for `--set`: maps (currentState × requested provider) →
- * (nextState, messages).
- *
- * D: Pure function — no I/O, fully testable without filesystem access. The I/O
- *   layer (rename transition, manifest write, re-arm, sentinel) is always the
- *   caller's responsibility. `setProvider` must already have passed
- *   `parseTrackerId` at the CLI boundary.
- *
- * Replace semantics: the parsed provider becomes the selection, github included —
- * `--set github` is the off switch; there is no --no-tracker (D-E).
- *
- * Kept as a standalone pure resolver for the (current, requested) → (nextState,
- * messages) matrix it is unit-tested against; {@link runTrackerSet} builds its
- * own messages inline because it also has to sequence the I/O steps that
- * produce them.
- */
-export function resolveTrackerCliAction(
-  current: TrackerFeatureState,
-  setProvider?: TrackerProvider,
-): TrackerCliActionResult {
-  // Never invent a provider: an absent setProvider keeps the current one.
-  const provider = setProvider ?? current.provider;
-  if (provider === current.provider) {
-    return {
-      nextState: { provider },
-      messages: [{ level: 'info', text: `Tracker provider already ${provider}` }],
-    };
-  }
-  return {
-    nextState: { provider },
-    messages: [{ level: 'success', text: `Tracker provider set to ${provider}` }],
-  };
-}
-
 // ── Provenance (the --status surface) ──────────────────────────────────────────
 
 /**
