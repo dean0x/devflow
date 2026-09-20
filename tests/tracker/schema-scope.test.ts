@@ -890,7 +890,21 @@ const REASON_PLACEHOLDERS: readonly string[] = ['{reason}', '\\{reason\\}'];
 export function collectUnregisteredReasons(corpus: readonly CorpusEntry[]): string[] {
   const unregistered: string[] = [];
   for (const entry of corpus) {
-    for (const reason of collectDegradedReasons(entry.content)) {
+    // The parser's blind spot is SILENCE, not a false pass: a reason whose
+    // parentheses are unbalanced, or nested two deep, matches nothing and is
+    // dropped rather than reported, so the registry arm goes quiet about exactly
+    // the spelling it exists to catch (avoids PF-064 — an absence-based guard
+    // has to know it looked). Every `DEGRADED (` in the corpus must therefore
+    // yield a parse.
+    const opened = entry.content.match(/DEGRADED \(/g)?.length ?? 0;
+    const parsed = collectDegradedReasons(entry.content);
+    if (parsed.length !== opened) {
+      unregistered.push(
+        `${entry.path}: ${opened} "DEGRADED (" site(s) but ${parsed.length} parsed — a reason ` +
+        `with unbalanced or doubly-nested parentheses is invisible to this registry, not clean`,
+      );
+    }
+    for (const reason of parsed) {
       if (REASON_PLACEHOLDERS.includes(reason)) continue;
       if (CANONICAL_REASONS.some(canonical => reasonSpellings(canonical).includes(reason))) continue;
       if (GITHUB_ONLY_REASONS.includes(reason)) continue;
@@ -1147,6 +1161,39 @@ describe('[DR-04] DEGRADED literal registry: reverse direction', () => {
       'a reason containing a path and an em-dash must come back whole',
     ).toEqual(['tracker.md required fields incomplete — edit ~/.devflow/tracker.md']);
     expect(collectDegradedReasons('no degradation here')).toEqual([]);
+    expect(
+      collectDegradedReasons('DEGRADED (tracker configuration mismatch (repository override))'),
+      'one level of nesting is what the shipped split reasons carry, and it must come back whole',
+    ).toEqual(['tracker configuration mismatch (repository override)']);
+  });
+
+  it('known-bad probe: a reason the parser cannot read is REPORTED, not dropped', () => {
+    // The parser bounds nesting at one level and requires balance, and both
+    // limits fail SILENTLY — the site matches nothing and the registry arm has
+    // nothing to object to. A guard that certifies by finding nothing has to
+    // know it actually looked (avoids PF-064).
+    for (const [label, body] of [
+      ['unbalanced', 'emit `TRACEABILITY: DEGRADED (tracker configuration mismatch (repository override)`'],
+      ['doubly nested', 'emit `TRACEABILITY: DEGRADED (outer (middle (inner)))`'],
+    ] as const) {
+      expect(
+        collectDegradedReasons(body),
+        `${label}: the parser genuinely cannot read this — that is the premise of the arm below`,
+      ).toEqual([]);
+      expect(
+        collectUnregisteredReasons([{ path: 'probe.md', content: body }]),
+        `${label}: an unparseable reason must be reported as unparseable, never as clean`,
+      ).toHaveLength(1);
+    }
+
+    expect(
+      collectUnregisteredReasons([{
+        path: 'probe.md',
+        content: 'DEGRADED (tracker configuration mismatch (repository override))',
+      }]),
+      'and a reason the parser CAN read is not reported by the count check — or the arm above ' +
+      'proves only that the check reports everything',
+    ).toEqual([]);
   });
 });
 

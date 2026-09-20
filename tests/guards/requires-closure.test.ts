@@ -240,17 +240,30 @@ describe('requires closure (forward): every skill reference resolves in scope', 
 // Reverse: nothing in requires is unreferenced
 // ---------------------------------------------------------------------------
 
+/**
+ * Named collector: the `requires` entries of one plugin that nothing in that
+ * plugin's corpus references.
+ *
+ * Extracted so the known-bad probe can drive THE SAME predicate the live arm
+ * drives (PF-018). The probe it replaced asserted only that
+ * `collectPluginRefs({empty plugin})` does not contain a made-up name — which an
+ * empty corpus satisfies tautologically, so it passed for a gutted collector,
+ * never constructed a violation, and never exercised the loop or its
+ * `requires.length === 0` skip.
+ */
+async function collectDeadRequires(plugin: PluginDefinition): Promise<string[]> {
+  if (plugin.requires.length === 0) return [];
+  const referenced = new Set((await collectPluginRefs(plugin)).map(r => r.token));
+  return plugin.requires
+    .filter(required => !referenced.has(required))
+    .map(required => `${plugin.name}: requires '${required}' but nothing in its corpus references it`);
+}
+
 describe('requires closure (reverse): no requires entry is dead weight', () => {
   it('every requires entry is referenced somewhere in its plugin corpus', async () => {
     const violations: string[] = [];
     for (const plugin of DEVFLOW_PLUGINS) {
-      if (plugin.requires.length === 0) continue;
-      const referenced = new Set((await collectPluginRefs(plugin)).map(r => r.token));
-      for (const required of plugin.requires) {
-        if (!referenced.has(required)) {
-          violations.push(`${plugin.name}: requires '${required}' but nothing in its corpus references it`);
-        }
-      }
+      violations.push(...await collectDeadRequires(plugin));
     }
     expect(
       violations,
@@ -259,7 +272,31 @@ describe('requires closure (reverse): no requires entry is dead weight', () => {
     ).toEqual([]);
   });
 
-  it('known-bad probe: a synthetic plugin requiring an unreferenced skill is caught', async () => {
+  it('known-bad probe: the collector discriminates a dead entry from a live one', async () => {
+    // Built from a REAL plugin, so the corpus is non-empty and the probe cannot
+    // pass by having nothing to scan. Its own requires list is kept WHOLE — the
+    // scan's scope is `skills ∪ requires`, so dropping entries would shrink the
+    // corpus and report live entries as dead for the wrong reason. One extra
+    // entry nothing can reference is added, and the collector must name exactly
+    // that one out of the several it is handed.
+    const base = DEVFLOW_PLUGINS.find(
+      plugin => plugin.requires.length > 0 && (plugin.commands.length > 0 || plugin.agents.length > 0),
+    );
+    expect(base, 'the probe needs a registry plugin with a corpus and a requires list').toBeDefined();
+    expect(base!.requires.length, 'the live half of the discrimination needs entries').toBeGreaterThan(0);
+
+    const dead = 'nonexistent-skill';
+    const synthetic: PluginDefinition = { ...base!, requires: [...base!.requires, dead] };
+
+    expect(
+      await collectDeadRequires(synthetic),
+      `exactly the unreferenced entry is reported; the ${base!.requires.length} referenced ones are not`,
+    ).toEqual([`${base!.name}: requires '${dead}' but nothing in its corpus references it`]);
+  });
+
+  it('known-bad probe: a requires entry with NO corpus to reach it is reported', async () => {
+    // The other shape the arm has to catch: a plugin that installs a skill it has
+    // no command, agent or skill body that could ever reference.
     const synthetic: PluginDefinition = {
       name: 'devflow-synthetic',
       description: 'probe',
@@ -269,8 +306,22 @@ describe('requires closure (reverse): no requires entry is dead weight', () => {
       requires: ['nonexistent-skill'],
       rules: [],
     };
-    const referenced = new Set((await collectPluginRefs(synthetic)).map(r => r.token));
-    expect(referenced.has('nonexistent-skill')).toBe(false);
+    expect(await collectDeadRequires(synthetic)).toEqual([
+      "devflow-synthetic: requires 'nonexistent-skill' but nothing in its corpus references it",
+    ]);
+  });
+
+  it('known-bad probe: an empty requires list is skipped, not reported as clean by accident', async () => {
+    const synthetic: PluginDefinition = {
+      name: 'devflow-synthetic',
+      description: 'probe',
+      commands: [],
+      agents: [],
+      skills: [],
+      requires: [],
+      rules: [],
+    };
+    expect(await collectDeadRequires(synthetic)).toEqual([]);
   });
 });
 

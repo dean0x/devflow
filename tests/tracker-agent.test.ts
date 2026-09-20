@@ -525,26 +525,58 @@ function shellBody(
  * than waited on, so N claimants can be in flight at once.
  *
  * `spawnSync` cannot express a race. Two SEQUENTIAL runs prove only that the
- * second one met a path the first had already taken, which a non-exclusive
- * primitive satisfies just as well: `mv` would also "lose" the second time,
- * because by then there is nothing to race. A claim primitive is exclusive or it
- * is not, and only genuinely concurrent claimants can tell the two apart
- * (PF-068 rule 3). Shape copied from tests/queue-append.test.ts's parallel-append
- * harness: spawn N, resolve on `close`, `Promise.all`.
+ * second one met a path the first had already taken, and an exclusive create
+ * satisfies that trivially — so sequencing cannot DISTINGUISH a claim primitive
+ * from a non-exclusive one either. A claim primitive is exclusive or it is not,
+ * and only genuinely concurrent claimants can tell the two apart (PF-068 rule 3).
+ * Shape copied from tests/queue-append.test.ts's parallel-append harness: spawn
+ * N, resolve on `close`, `Promise.all`.
+ *
+ * Each run reports the wall-clock window it occupied, because "spawned" is not
+ * "raced": the runner may still serialise them under load, and every claimant
+ * outcome this file asserts is ALSO what a serialised run produces. The overlap
+ * is the only observation that separates the two, so it is measured rather than
+ * assumed ({@link overlapWindow}).
  */
+interface AsyncShellRun extends ShellRun {
+  /** ms since epoch at spawn. */
+  startedAt: number;
+  /** ms since epoch at `close`. */
+  endedAt: number;
+}
+
 function runShellAsync(
   script: string,
   sandbox: Sandbox,
   opts: { instrument?: boolean; stub?: string } = {},
-): Promise<ShellRun> {
-  return new Promise<ShellRun>(resolve => {
+): Promise<AsyncShellRun> {
+  return new Promise<AsyncShellRun>(resolve => {
+    const startedAt = Date.now();
     const child = spawn('bash', ['-c', shellBody(script, sandbox, opts)], { env: shellEnv(sandbox) });
     let stdout = '';
     let stderr = '';
     child.stdout.on('data', chunk => { stdout += String(chunk); });
     child.stderr.on('data', chunk => { stderr += String(chunk); });
-    child.on('close', status => resolve({ status, stdout, stderr }));
+    child.on('close', status => resolve({ status, stdout, stderr, startedAt, endedAt: Date.now() }));
   });
+}
+
+/**
+ * Named collector: the interval during which EVERY run was simultaneously alive,
+ * in ms. Zero or negative means at least one run finished before another started
+ * — the claimants were serialised and no race occurred.
+ *
+ * This is the harness's own self-check, and it needs one because neither
+ * claimant assertion can supply it. `set -o noclobber` yields exactly one winner
+ * when run sequentially, and `mv` yields N winners when run sequentially, so the
+ * exclusivity arm and its known-bad probe produce their expected results under a
+ * serialised harness just as they do under a racing one (PF-018 — a green arm
+ * that a degenerate harness also satisfies is not evidence).
+ */
+function overlapWindow(runs: readonly AsyncShellRun[]): number {
+  const lastStart = Math.max(...runs.map(r => r.startedAt));
+  const firstEnd = Math.min(...runs.map(r => r.endedAt));
+  return firstEnd - lastStart;
 }
 
 /**
@@ -1382,6 +1414,16 @@ describe('Tracker agent claim primitive, executed (PF-068)', () => {
         runShellAsync(script, sandbox, { instrument: false })),
     );
 
+    // The harness's own precondition, asserted before its result is read: all
+    // eight were alive at once. Sequential claimants produce exactly this
+    // outcome against `set -o noclobber`, so without this the arm below is
+    // satisfied by a harness that raced nothing.
+    expect(
+      overlapWindow(runs),
+      `the ${CONCURRENT_CLAIMANTS} claimants were not all alive at once, so nothing below ` +
+      'observed a race: at least one run finished before another started',
+    ).toBeGreaterThan(0);
+
     const winners = runs.filter(r => r.stdout.trim() === 'CLAIMED');
     expect(
       winners.length,
@@ -1416,6 +1458,11 @@ describe('Tracker agent claim primitive, executed (PF-068)', () => {
     // greps for the command name passes on both spellings, which is why the broken
     // one is driven through the harness that must report it — at the same
     // concurrency, so the two results differ only in the primitive.
+    //
+    // What this probe does NOT establish is that the harness raced anything: `mv`
+    // wins unconditionally, so it reports N winners serialised too. The overlap
+    // assertion in the arm above is what carries that, and it is repeated here so
+    // this probe's own result is read off a run that raced.
     const sandbox = makeSandbox();
     const renameClaim =
       'MARKER="$(command mktemp)"\nif mv "$MARKER" "$TRACKER_CLAIM" 2>/dev/null; then ' +
@@ -1426,11 +1473,36 @@ describe('Tracker agent claim primitive, executed (PF-068)', () => {
         runShellAsync(script, sandbox, { instrument: false })),
     );
     expect(
+      overlapWindow(runs),
+      'the probe must be read off a racing harness, exactly as the arm above is',
+    ).toBeGreaterThan(0);
+    expect(
       runs.filter(r => r.stdout.trim() === 'CLAIMED').length,
-      'rename-to-claim reported a single winner — the harness is not running the claimants ' +
-      'concurrently, so the arm above proves nothing about exclusivity',
+      'rename-to-claim reported a single winner against a racing harness — the arm above ' +
+      'then proves nothing about exclusivity, because both primitives would be reporting ' +
+      'the same thing',
     ).toBeGreaterThan(1);
   }, 20_000);
+
+  it('known-bad probe: the overlap collector reports serialised runs as no race', () => {
+    // Driving the collector, not re-implementing it: a set of windows that do not
+    // all intersect must come back non-positive, and one that does must not.
+    const raced: AsyncShellRun[] = [
+      { status: 0, stdout: '', stderr: '', startedAt: 100, endedAt: 400 },
+      { status: 0, stdout: '', stderr: '', startedAt: 150, endedAt: 380 },
+      { status: 0, stdout: '', stderr: '', startedAt: 200, endedAt: 500 },
+    ];
+    expect(overlapWindow(raced)).toBe(180);
+
+    const serialised: AsyncShellRun[] = [
+      { status: 0, stdout: '', stderr: '', startedAt: 100, endedAt: 200 },
+      { status: 0, stdout: '', stderr: '', startedAt: 210, endedAt: 300 },
+    ];
+    expect(
+      overlapWindow(serialised),
+      'back-to-back runs share no instant, so the collector must not report an overlap',
+    ).toBeLessThanOrEqual(0);
+  });
 });
 
 describe('Tracker agent write chain, executed (PF-066, AC-3.15)', () => {
