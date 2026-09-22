@@ -169,6 +169,40 @@ export function formatTrackerAssetSummary(input: {
 }
 
 /**
+ * Did this run's plugin selection match the one already on disk?
+ *
+ * The question {@link formatSkillScopeSummary}'s `pluginListUnchanged` asks, and
+ * a separate function because the two halves fail differently and only one of
+ * them had executed evidence (design review L2): the renderer's behaviour given
+ * an answer, and the answer itself.
+ *
+ * Two clauses, and the first one is the one a set comparison alone would lose:
+ *
+ *   - **A prior manifest must EXIST.** `null` is a first install. Nothing was
+ *     removed from a user who had nothing, so there is no upgrade to explain,
+ *     and comparing "no previous selection" against this run's would otherwise
+ *     read as a match whenever both are empty.
+ *   - **The plugin SETS must be equal**, not the arrays: order is an artifact of
+ *     how the selection was assembled, and a duplicate name in either list is a
+ *     manifest detail rather than a different selection.
+ *
+ * Pure function (applies ADR-013).
+ *
+ * @param previousPlugins - `manifest.plugins` as it stands before this run, or
+ *   `null` when there is no prior manifest.
+ * @param effectivePluginNames - What this run installs.
+ */
+export function isPluginListUnchanged(
+  previousPlugins: readonly string[] | null,
+  effectivePluginNames: readonly string[],
+): boolean {
+  if (previousPlugins === null) return false;
+  const previous = new Set(previousPlugins);
+  const effective = new Set(effectivePluginNames);
+  return previous.size === effective.size && [...effective].every(name => previous.has(name));
+}
+
+/**
  * Turn the skill-scoping half of an InstallReport into summary lines.
  *
  * Two facts the filesystem cannot tell the user apart from an install that never

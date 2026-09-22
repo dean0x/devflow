@@ -160,6 +160,17 @@ const PASTE_PAYLOADS: ReadonlyArray<{ label: string; value: string; accepts: rea
   { label: 'a trailing comment', value: 'Closes #12 <!-- x -->', accepts: [] },
   { label: 'a markdown link', value: 'Closes [#12](http://x.test)', accepts: [] },
   { label: 'the empty string', value: '', accepts: [] },
+  // The value crosses an agent boundary as prose and is pasted into a PR body a
+  // shell composes. A shape gate that admitted this would hand a command
+  // substitution to whatever `gh pr create` invocation quotes it wrongly — so the
+  // arms' whole-line anchoring is what has to refuse it, not a later escape.
+  { label: 'a command substitution', value: 'pr-link: $(whoami)', accepts: [] },
+  // Length. Every arm bounds its key and its number, so a line far past those
+  // bounds has no accepting arm — the property that keeps an unbounded paste out
+  // of the PR body. 74 characters, and its only defect IS the length: strip it
+  // back to `Refs AB-1` and the jira and linear arms both take it.
+  { label: 'an over-long line (74 ch, past every arm\'s bounded key and number)',
+    value: `Refs A${'B'.repeat(10)}-${'1'.repeat(57)}`, accepts: [] },
 ]
 
 describe('code.md — the paste gate, one arm per resolved provider', () => {

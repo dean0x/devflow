@@ -7,7 +7,7 @@ import color from 'picocolors';
 import { getInstallationPaths } from '../../targets/claude-code/claude-paths.js';
 import { getGitRoot } from '../../core/git.js';
 import { installViaFileCopy, composeScripts, type InstallReport } from '../../targets/claude-code/installer.js';
-import { formatOverlaySummary, formatSkillScopeSummary, formatTrackerAssetSummary, type SummaryLine } from './install-report.js';
+import { formatOverlaySummary, formatSkillScopeSummary, formatTrackerAssetSummary, isPluginListUnchanged, type SummaryLine } from './install-report.js';
 import { convergeTrackerArtifacts, type ConvergeTrackerArtifactsResult, type TrackerAgentState } from '../../targets/claude-code/tracker-install.js';
 import {
   installSettings,
@@ -2328,9 +2328,7 @@ export const initCommand = new Command('init')
     // there is no upgrade to explain — the removal notice would be addressed to
     // a user who never had the skills.
     const pluginListUnchanged =
-      existingManifest !== null &&
-      new Set(existingManifest.plugins).size === new Set(effectivePluginNames).size &&
-      effectivePluginNames.every(name => existingManifest.plugins.includes(name));
+      isPluginListUnchanged(existingManifest?.plugins ?? null, effectivePluginNames);
     logSummaryLines(formatSkillScopeSummary(installReport, pluginListUnchanged));
 
     for (const warning of installWarnings) p.log.warn(warning);

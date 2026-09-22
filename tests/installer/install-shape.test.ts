@@ -22,6 +22,7 @@ import { installViaFileCopy, type Spinner } from '../../src/targets/claude-code/
 import {
   formatSkillScopeSummary,
   formatTrackerAssetSummary,
+  isPluginListUnchanged,
 } from '../../src/cli/commands/install-report.js';
 import {
   DEVFLOW_PLUGINS,
@@ -337,6 +338,74 @@ describe('formatSkillScopeSummary', () => {
       formatSkillScopeSummary(report, false),
       'a user who deselected a plugin asked for the removal and needs no notice (L2)',
     ).toEqual([]);
+  });
+
+  // -------------------------------------------------------------------------
+  // The OTHER half of L2: the answer, not the rendering of it.
+  //
+  // Every arm above hands `pluginListUnchanged` in as a boolean. What decides
+  // that boolean — a prior manifest exists AND its plugin set equals this run's —
+  // lived inline in init.ts with nothing executing it, so the renderer could be
+  // exhaustively covered while the predicate feeding it was wrong in either
+  // direction: a first install explaining an upgrade nobody had, or a re-init
+  // deleting skills and saying nothing.
+  // -------------------------------------------------------------------------
+
+  describe('isPluginListUnchanged (L2)', () => {
+    it('a first install is never "unchanged", even when the selection is empty both ways', () => {
+      expect(
+        isPluginListUnchanged(null, ['devflow-plan']),
+        'no prior manifest means nothing was removed from this user — the notice would explain ' +
+        'an upgrade they did not have',
+      ).toBe(false);
+      expect(
+        isPluginListUnchanged(null, []),
+        'and the empty case is the one a set comparison alone gets wrong: ∅ equals ∅',
+      ).toBe(false);
+    });
+
+    it('equal SETS are unchanged — order and duplicates are not a different selection', () => {
+      expect(isPluginListUnchanged(['devflow-plan', 'devflow-explore'], ['devflow-plan', 'devflow-explore'])).toBe(true);
+      expect(
+        isPluginListUnchanged(['devflow-explore', 'devflow-plan'], ['devflow-plan', 'devflow-explore']),
+        'order is an artifact of how the selection was assembled',
+      ).toBe(true);
+      expect(
+        isPluginListUnchanged(['devflow-plan', 'devflow-plan'], ['devflow-plan']),
+        'a duplicate in the manifest is a manifest detail, not a second plugin',
+      ).toBe(true);
+      expect(isPluginListUnchanged([], [])).toBe(true);
+    });
+
+    it('any difference in either direction is a change', () => {
+      expect(
+        isPluginListUnchanged(['devflow-plan'], ['devflow-plan', 'devflow-explore']),
+        'an ADDED plugin moved the selection',
+      ).toBe(false);
+      expect(
+        isPluginListUnchanged(['devflow-plan', 'devflow-explore'], ['devflow-plan']),
+        'a DESELECTED plugin is the case the notice must stay silent for — the removal is what ' +
+        'the user asked for',
+      ).toBe(false);
+      expect(
+        isPluginListUnchanged(['devflow-plan'], ['devflow-explore']),
+        'same size, different members',
+      ).toBe(false);
+    });
+
+    it('feeds the renderer: the same manifest that is unchanged is the one that gets the line', () => {
+      const report = { removedSkills: ['rust'], dormantShadows: [] };
+      const prior = ['devflow-plan'];
+
+      expect(
+        formatSkillScopeSummary(report, isPluginListUnchanged(prior, ['devflow-plan'])),
+        'a re-init on the same selection that deleted a skill has to say so',
+      ).toHaveLength(1);
+      expect(
+        formatSkillScopeSummary(report, isPluginListUnchanged(null, ['devflow-plan'])),
+        'a first install that removed the same skill has nothing to explain',
+      ).toEqual([]);
+    });
   });
 
   it('reports each dormant shadow regardless of whether the plugin list moved', () => {
