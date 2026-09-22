@@ -1262,6 +1262,45 @@ describe('git agent — static content guards (PF-018)', () => {
     }
   });
 
+  /**
+   * The same property, widened from two exact spellings to the TOKEN (AC-3, M-2).
+   *
+   * The two full detectors above are the sentences the authority file happens to
+   * use. A restatement elsewhere does not have to reuse either of them to be a
+   * second authority: `gather-release-evidence.md` stated GitHub's stop rung as
+   * ``Secondary rate limit (403/429 or `X-RateLimit-Remaining` < 10)`` — neither
+   * spelling, and so invisible to the exact-string arm, while jira and linear
+   * both POINT at their provider-signals section instead of restating it.
+   *
+   * So the guard is on the bare header name. Wherever it appears, that file is
+   * claiming to know the threshold; only the operation that owns a provider's
+   * fan-out may, and for every provider that is `backlink-shipped-issues.md`.
+   */
+  it('P2-S4: only the fan-out operation names a provider\'s rate-limit header (AC-3)', () => {
+    const TOKEN = 'X-RateLimit-Remaining';
+    const AUTHORITY = 'backlink-shipped-issues.md';
+    const trackerRoot = path.join(ROOT, 'dist', 'skills', 'git', 'references', 'tracker');
+    const providerFiles = walkFiles(trackerRoot, f => f.endsWith('.md'));
+    expect(providerFiles.length, 'no provider reference was read').toBeGreaterThan(0);
+
+    const naming = providerFiles.filter(f => readFileSync(f, 'utf-8').includes(TOKEN));
+    expect(
+      naming.map(f => path.basename(f)),
+      `${TOKEN} must be stated only in ${AUTHORITY} — the operation that owns the fan-out and ` +
+      'therefore the rung. A restatement in another operation is a second authority on the ' +
+      'same threshold, free to drift from it, and it is what AC-3 asks every provider to ' +
+      'replace with a pointer (PF-023):\n  ' +
+      naming.map(f => path.relative(trackerRoot, f)).join('\n  '),
+    ).toEqual([AUTHORITY]);
+
+    // Non-vacuity: the authority really does carry the token, so an empty result
+    // would be a deleted rung rather than a clean tree (PF-018).
+    expect(
+      readFileSync(naming[0], 'utf-8'),
+      'the authority file must still state the rung it is the authority for',
+    ).toContain(TOKEN);
+  });
+
   it('P2-S4: the D4 and D11 INVARIANTS stay in the always-loaded agent', () => {
     // The other half of the split: nothing that decides whether to stop, or whether a
     // body may be posted, may become a file the spawn might not have (PF-027).
