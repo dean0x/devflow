@@ -24,6 +24,7 @@ import {
   formatTrackerAssetSummary,
   isPluginListUnchanged,
 } from '../../src/cli/commands/install-report.js';
+import { installedReferenceManifest, SKILL_REFS_SKILL_NAME } from "../../src/core/mds-variants.js";
 import {
   DEVFLOW_PLUGINS,
   FEATURE_OWNED_SKILLS,
@@ -57,6 +58,7 @@ async function run(opts: {
   plugins: PluginDefinition[];
   effectivePlugins?: PluginDefinition[];
   isPartialInstall: boolean;
+  trackerProvider?: string;
 }) {
   const effective = opts.effectivePlugins ?? opts.plugins;
   return installViaFileCopy({
@@ -66,7 +68,7 @@ async function run(opts: {
     devflowDir,
     skillsMap: buildScopedSkillsMap(effective),
     agentsMap: new Map(),
-    trackerProvider: 'github',
+    trackerProvider: opts.trackerProvider ?? 'github',
     isPartialInstall: opts.isPartialInstall,
     spinner: noopSpinner,
     warn: (msg) => { warnings.push(msg); },
@@ -467,5 +469,86 @@ describe('formatTrackerAssetSummary', () => {
     });
     expect(lines[1].message).toContain('−11 reference(s)');
     expect(lines[1].message).toContain('tracker agent removed');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The pre-clean vs the reference overlay — who owns `references/` on a full install
+// ---------------------------------------------------------------------------
+
+/**
+ * A full re-init must be idempotent over the generated reference tree.
+ *
+ * The pre-clean empties every skill directory this run rewrites, and the overlay then
+ * converges `references/` onto the manifest. If the pre-clean takes the overlay-owned
+ * subtree with it, the overlay has nothing left to compare against and force-promotes
+ * every unit — so a re-init that changed nothing still reports the whole manifest as
+ * installed, and `unchangedRefs` can never be non-empty in an install (QA S2).
+ *
+ * The arms below pin BOTH halves of the ownership split: what the pre-clean must leave
+ * for the overlay, and what it must still take.
+ */
+describe('a full re-init leaves the overlay-owned reference tree for the overlay to converge', () => {
+  const core = (): PluginDefinition[] => [plugin('devflow-core-skills')];
+  const refsRoot = (): string =>
+    path.join(claudeDir, 'skills', prefixSkillName(SKILL_REFS_SKILL_NAME), 'references');
+  const jiraManifest = (): string[] => [...installedReferenceManifest({ provider: 'jira' })].sort();
+
+  async function installJira() {
+    return run({ plugins: core(), isPartialInstall: false, trackerProvider: 'jira' });
+  }
+
+  it('the FIRST install writes every reference; the SECOND writes none and reports them unchanged', async () => {
+    const first = await installJira();
+    expect([...first.overlaidRefs].sort(), 'a fresh install writes the whole install set').toEqual(jiraManifest());
+    expect(first.unchangedRefs).toEqual([]);
+
+    const second = await installJira();
+    expect(
+      second.overlaidRefs,
+      'nothing changed between the two runs, so nothing may be written',
+    ).toEqual([]);
+    expect([...second.unchangedRefs].sort()).toEqual(jiraManifest());
+  });
+
+  it('a hand-edited reference is restored on the next run and REPORTED as written', async () => {
+    await installJira();
+    const edited = jiraManifest().find(r => r.startsWith('tracker/jira/'));
+    if (edited === undefined) throw new Error('the jira install set has no provider reference');
+    const editedPath = path.join(refsRoot(), edited);
+    const canonical = await fs.readFile(editedPath, 'utf-8');
+    await fs.writeFile(editedPath, 'hand-edited\n', 'utf-8');
+
+    const report = await installJira();
+
+    expect(await fs.readFile(editedPath, 'utf-8'), 'drift is converged away').toBe(canonical);
+    expect(report.overlaidRefs, 'and reported, never hidden behind an unchanged count').toContain(edited);
+    expect(report.unchangedRefs).not.toContain(edited);
+  });
+
+  it('a stale file the manifest does not name is pruned from the tracker subtree (converge, not merge)', async () => {
+    await installJira();
+    const stale = path.join(refsRoot(), 'tracker', 'jira', 'not-in-the-manifest.md');
+    await fs.writeFile(stale, 'left by an older build\n', 'utf-8');
+
+    await installJira();
+
+    await expect(fs.access(stale)).rejects.toThrow();
+  });
+
+  it('a stale file OUTSIDE the overlay-owned set is still removed by the pre-clean', async () => {
+    await installJira();
+    const straySkillFile = path.join(claudeDir, 'skills', prefixSkillName(SKILL_REFS_SKILL_NAME), 'SKILL.md.bak');
+    const strayReference = path.join(refsRoot(), 'stale.md');
+    await fs.writeFile(straySkillFile, 'from a previous install\n', 'utf-8');
+    await fs.writeFile(strayReference, 'a reference no manifest names\n', 'utf-8');
+
+    await installJira();
+
+    await expect(fs.access(straySkillFile)).rejects.toThrow();
+    await expect(
+      fs.access(strayReference),
+      'the references ROOT is not the overlay\'s to prune, so the pre-clean has to reach it',
+    ).rejects.toThrow();
   });
 });

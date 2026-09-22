@@ -1,4 +1,4 @@
-import { promises as fs } from 'fs';
+import { promises as fs, type Dirent } from 'fs';
 import { existsSync } from 'fs';
 import * as path from 'path';
 import type { PluginDefinition } from '../../core/plugins.js';
@@ -62,6 +62,19 @@ export interface InstallReport {
    * unchanged provider report `+0 reference(s)` instead of restating the whole manifest.
    */
   overlaidRefs: string[];
+  /**
+   * Manifest-relative paths this install found already installed byte-for-byte and
+   * therefore did NOT write — the complement of {@link InstallReport.overlaidRefs}
+   * over the units that neither failed nor were skipped.
+   *
+   * Carried rather than inferred from `manifest \ overlaidRefs`: that subtraction is
+   * also satisfied by a unit that FAILED, and the two states are opposites — one is a
+   * reference that is already correct, the other one that may be absent. No summary
+   * line renders this field; it is what makes "a re-init wrote nothing" an assertable
+   * outcome rather than an absence nobody can distinguish from an install that never
+   * reached the overlay at all.
+   */
+  unchangedRefs: string[];
   /**
    * Overlay units this run did not refresh, each carrying the state it was left in —
    * see {@link OverlayFailureState}. The install still succeeds (PF-009); what a unit
@@ -1260,6 +1273,88 @@ export async function overlayInstalledReferences(opts: {
   });
 }
 
+/** The directory inside an installed skill that the reference overlay converges. */
+const SKILL_REFERENCES_DIRNAME = 'references';
+
+/**
+ * What inside an installed skill directory the reference overlay owns, and the
+ * pre-clean must therefore leave standing (D-OVERLAY-OWNERSHIP).
+ *
+ * Derived from the manifest the overlay is about to converge to, never a hand-typed
+ * list: the two would be one edit apart from disagreeing, and the failure is silent —
+ * a name the pre-clean forgot is simply force-promoted again on every run, which is the
+ * defect this split exists to close.
+ *
+ * Paths are skill-relative and TOP-LEVEL under `references/`, which makes them mean
+ * different things for the two unit kinds, matching what the overlay does with each:
+ *   - a nested entry (`tracker/jira/setup-task.md`) contributes the SUBTREE
+ *     `references/tracker`. The overlay prunes everything under it the manifest does not
+ *     name, so preserving it whole cannot strand an orphan — a file the manifest lost
+ *     leaves through {@link prunePreservingRecoveryCopies} on this same run.
+ *   - a flat entry (`decision-markers.md`) contributes only THAT FILE. The references
+ *     root holds hand-authored documents beside the generated ones with no manifest of
+ *     which is which (D-OVERLAY-FLAT-UNIT), so the overlay never prunes there and the
+ *     pre-clean must keep reaching it: preserving the root wholesale would make a
+ *     retired generated document, and any stale file beside it, permanent.
+ *
+ * Pure function (applies ADR-013).
+ */
+function overlayOwnedSkillPaths(manifest: readonly string[]): ReadonlySet<string> {
+  const owned = new Set<string>();
+  for (const relPath of manifest) {
+    const top = relPath.split('/')[0];
+    if (top === '') continue;
+    owned.add(`${SKILL_REFERENCES_DIRNAME}/${top}`);
+  }
+  return owned;
+}
+
+/**
+ * Empty a directory of everything but the paths another converger owns.
+ *
+ * `fs.rm(dir)` with a hole in it. `keep` holds directory-relative paths, each preserved
+ * whole — a file as itself, a directory with its entire subtree. Everything else is
+ * removed exactly as the unconditional pre-clean would have removed it.
+ *
+ * Descent is bounded, and the bound is the `keep` set's own deepest path rather than a
+ * constant: the walk only ever descends INTO a directory that still has a kept
+ * descendant below it, so there is nothing to look for past that depth. A `keep` set of
+ * depth 2 — which is what {@link overlayOwnedSkillPaths} produces — walks two levels and
+ * `fs.rm`s the rest recursively in one call.
+ *
+ * An unreadable directory is left alone rather than reported: the caller already
+ * swallows the errors of the `fs.rm` this stands in for, and a pre-clean that cannot
+ * read its target has nothing to remove from it.
+ */
+async function emptyDirectoryExcept(dir: string, keep: ReadonlySet<string>): Promise<void> {
+  const kept = [...keep];
+  const maxDepth = Math.max(0, ...kept.map(relPath => relPath.split('/').length));
+
+  const walk = async (current: string, rel: string, depth: number): Promise<void> => {
+    let entries: Dirent[];
+    try {
+      entries = await fs.readdir(current, { withFileTypes: true });
+    } catch { return; }
+
+    for (const entry of entries) {
+      const entryRel = rel === '' ? entry.name : `${rel}/${entry.name}`;
+      if (keep.has(entryRel)) continue;
+
+      const holdsSomethingKept = entry.isDirectory()
+        && depth < maxDepth
+        && kept.some(relPath => relPath.startsWith(`${entryRel}/`));
+      if (holdsSomethingKept) {
+        await walk(path.join(current, entry.name), entryRel, depth + 1);
+        continue;
+      }
+
+      await fs.rm(path.join(current, entry.name), { recursive: true, force: true });
+    }
+  };
+
+  await walk(dir, '', 1);
+}
+
 // ---------------------------------------------------------------------------
 // Script composer
 // ---------------------------------------------------------------------------
@@ -1472,6 +1567,7 @@ export async function installViaFileCopy(options: FileCopyOptions): Promise<Inst
     sweptOrphans: [],
     sweepFailures: [],
     overlaidRefs: [],
+    unchangedRefs: [],
     overlayFailures: [],
     removedSkills: [],
     dormantShadows: [],
@@ -1549,11 +1645,37 @@ export async function installViaFileCopy(options: FileCopyOptions): Promise<Inst
   // Gated on a full install for the same reason: `--plugin=X` rewrites X's
   // skills only, and a pre-clean over the whole registry would wipe every other
   // plugin's skills on an add-one run.
+  //
+  // ONE skill is pre-cleaned around a hole rather than emptied: the skill hosting the
+  // generated references, whose overlay-owned subtree belongs to
+  // {@link overlayGeneratedReferences} and to nothing else (D-OVERLAY-OWNERSHIP). The
+  // two mechanisms are not alternatives — the overlay is a CONVERGER and the pre-clean
+  // is not, so handing it the subtree loses what the converger is for:
+  //   - the overlay compares each unit against what is installed and skips the ones
+  //     already correct ({@link stagedUnitIsAlreadyInstalled}). A pre-clean that deletes
+  //     the installed copy first leaves it nothing to compare against, so every unit is
+  //     force-promoted and a re-init that changed nothing still reports the whole
+  //     manifest as written (QA S2);
+  //   - the overlay PRUNES `references/tracker/**` down to the manifest and swaps each
+  //     unit atomically, so drift and orphans under that subtree are converged away
+  //     without the pre-clean reaching them at all.
+  // Everything else in the directory is still emptied, so a stale hand-authored skill
+  // file — including a reference at the references ROOT, which the overlay may replace
+  // but never delete (D-OVERLAY-FLAT-UNIT) — does not survive a full install.
   if (!isPartialInstall) {
+    const overlayOwned = overlayOwnedSkillPaths(
+      installedReferenceManifest({ provider: options.trackerProvider }),
+    );
     for (const skill of skillsMap.keys()) {
-      // Remove prefixed directory (will be re-created during install phase)
+      // Empty the prefixed directory (its contents are re-created during the install
+      // phase), minus whatever another converger owns inside it.
+      const target = path.join(claudeDir, 'skills', prefixSkillName(skill));
       try {
-        await fs.rm(path.join(claudeDir, 'skills', prefixSkillName(skill)), { recursive: true, force: true });
+        if (skill === SKILL_REFS_SKILL_NAME) {
+          await emptyDirectoryExcept(target, overlayOwned);
+        } else {
+          await fs.rm(target, { recursive: true, force: true });
+        }
       } catch { /* ignore */ }
     }
   }
@@ -1698,6 +1820,7 @@ export async function installViaFileCopy(options: FileCopyOptions): Promise<Inst
         warn,
       });
       report.overlaidRefs.push(...overlay.overlaidRefs);
+      report.unchangedRefs.push(...overlay.unchangedRefs);
       report.overlayFailures.push(...overlay.overlayFailures);
       recordSweep(report, 'reference', overlay.pruned);
     }

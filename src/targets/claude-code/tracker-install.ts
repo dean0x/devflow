@@ -118,15 +118,42 @@ async function firstExisting(candidates: readonly string[]): Promise<string | un
   return undefined;
 }
 
+/**
+ * Would copying `source` over `target` change anything?
+ *
+ * Asked once, between resolving the source and copying it, so a run that would write a
+ * byte-identical copy of the installed agent reports `unchanged` instead of `installed`
+ * — the same question the reference overlay asks per unit, for the same reason: a
+ * summary that can only ever say "installed" says nothing, and a steady-state re-init
+ * announcing "tracker agent installed" is the noise this closes (QA S2).
+ *
+ * It does NOT weaken the self-heal. A hand-edited or truncated agent differs from its
+ * source, so it is copied and reported as written; only an identical file is skipped,
+ * and skipping a copy of what is already there changes nothing on disk.
+ *
+ * Any error — an absent target, an unreadable one — answers "no". The fallback is the
+ * copy that was going to happen anyway, so a failure to compare costs a write, never
+ * correctness.
+ */
+async function copyWouldChangeNothing(source: string, target: string): Promise<boolean> {
+  try {
+    const [from, to] = await Promise.all([fs.readFile(source), fs.readFile(target)]);
+    return from.equals(to);
+  } catch { return false; }
+}
+
 // ── Convergence ────────────────────────────────────────────────────────────
 
 /**
  * Converge the Tracker agent file onto the resolved provider.
  *
  * Convergence matrix:
- *   provider !== github → copy the agent in (re-copied every run, so a truncated
- *                         or hand-edited file self-heals rather than being
- *                         trusted because it exists)
+ *   provider !== github → copy the agent in, unless the installed file is already
+ *                         byte-identical to the source. Compared rather than trusted
+ *                         for existing, so a truncated or hand-edited file self-heals;
+ *                         compared rather than re-copied blind, so a run that changes
+ *                         nothing reports `unchanged` and the summary stays quiet
+ *                         (see {@link copyWouldChangeNothing})
  *   provider === github → remove it, absent or not
  *
  * Never throws. A caller gates on `converged`; it does not catch. The one
@@ -173,6 +200,13 @@ export async function convergeTrackerArtifacts(
     // still spawnable, and that is the difference between "this run did nothing"
     // and "there is nothing there".
     return { converged: false, agentPresent: await pathExists(target), agent: 'unchanged' };
+  }
+
+  // Already converged — nothing to write, and nothing for the summary to announce.
+  // The directory is not created either: an identical file at the target means it is
+  // already there (see {@link copyWouldChangeNothing}).
+  if (await copyWouldChangeNothing(source, target)) {
+    return { converged: true, agentPresent: true, agent: 'unchanged' };
   }
 
   try {

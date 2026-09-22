@@ -193,6 +193,34 @@ describe('devflow init installs {github} ∪ {selected provider}', () => {
     expect(expected.length, 'scoping must actually narrow something').toBeLessThan(getAllSkillNames().length);
   });
 
+  /**
+   * A re-init that changes nothing must SAY nothing.
+   *
+   * The unit arms prove the installer reports zero written references; this one proves
+   * the wiring all the way out to what the user reads. Both summary lines are
+   * movement-gated — `formatOverlaySummary` renders its line only when something was
+   * written, and `formatTrackerAssetSummary` renders the delta only when something
+   * moved — so a steady-state re-init is legible precisely by their ABSENCE (QA S2).
+   */
+  it('a second identical init writes nothing and reports no movement', () => {
+    const first = init(['--tracker', 'jira']);
+    expect(first.status, `init failed:\n${first.stdout}\n${first.stderr}`).toBe(0);
+    expect(first.stdout).toContain('Installed 24 generated skill reference(s)');
+    expect(first.stdout).toContain('+24 reference(s)');
+
+    const second = init(['--tracker', 'jira']);
+    expect(second.status, `re-init failed:\n${second.stdout}\n${second.stderr}`).toBe(0);
+    expect(second.stdout, 'the provider is still named').toContain('Tracker: jira');
+    expect(
+      second.stdout,
+      'nothing was written, so the install line must not claim a reference was',
+    ).not.toContain('generated skill reference(s)');
+    expect(
+      second.stdout,
+      'nothing moved, so the delta line is noise and is suppressed entirely',
+    ).not.toContain('Tracker assets:');
+  });
+
   it('the summary names the active provider', () => {
     const result = init(['--tracker', 'linear']);
     expect(result.status).toBe(0);

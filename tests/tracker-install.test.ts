@@ -91,8 +91,24 @@ describe('convergeTrackerArtifacts: the Tracker agent file', () => {
 
     await convergeTrackerArtifacts({ claudeDir, provider: 'jira', warn });
     const jiraAgain = await convergeTrackerArtifacts({ claudeDir, provider: 'jira', warn });
-    expect(jiraAgain.agent, 'a re-copy that changes nothing is still a converged state').toBe('installed');
+    expect(
+      jiraAgain.agent,
+      'the file is byte-identical, so this run wrote nothing and must not claim it did',
+    ).toBe('unchanged');
+    expect(jiraAgain.converged, 'nothing to do is a converged state, not a failed one').toBe(true);
+    expect(jiraAgain.agentPresent, 'unchanged says nothing about presence — the agent is still there').toBe(true);
     expect(await exists(agentFile())).toBe(true);
+  });
+
+  it('reports a hand-edited agent as INSTALLED — drift is converged, never hidden', async () => {
+    await convergeTrackerArtifacts({ claudeDir, provider: 'jira', warn });
+    const canonical = await fs.readFile(agentFile(), 'utf-8');
+    await fs.writeFile(agentFile(), 'hand-edited\n', 'utf-8');
+
+    const result = await convergeTrackerArtifacts({ claudeDir, provider: 'jira', warn });
+
+    expect(await fs.readFile(agentFile(), 'utf-8')).toBe(canonical);
+    expect(result.agent, 'this run DID write the file, so the summary has to say so').toBe('installed');
   });
 
   it('self-heals a corrupted agent file rather than trusting its presence', async () => {
