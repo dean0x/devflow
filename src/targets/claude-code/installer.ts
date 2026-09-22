@@ -54,8 +54,12 @@ export interface InstallReport {
   /** Per-item removal failures from orphan sweeps — isolates failures per PF-009. */
   sweepFailures: SweepFailure[];
   /**
-   * Manifest-relative paths of the generated `devflow:git` references installed by the
-   * reference overlay, e.g. `tracker/github/setup-task.md`.
+   * Manifest-relative paths of the generated `devflow:git` references this install
+   * actually WROTE, e.g. `tracker/github/setup-task.md`.
+   *
+   * A reference already installed byte-for-byte is not listed — see
+   * {@link ReferenceOverlayResult.unchangedRefs} — which is what makes a re-init over an
+   * unchanged provider report `+0 reference(s)` instead of restating the whole manifest.
    */
   overlaidRefs: string[];
   /**
@@ -415,8 +419,25 @@ export function overlayUnitLabel(unit: OverlayUnitRef): string {
 }
 
 export interface ReferenceOverlayResult {
-  /** Manifest-relative paths successfully installed by this run. */
+  /**
+   * Manifest-relative paths this run actually WROTE.
+   *
+   * A unit whose staged tree matched what was already installed is reported in
+   * {@link unchangedRefs} instead, never here — see {@link stagedUnitIsAlreadyInstalled}.
+   * That is what lets a render site distinguish an install that moved something from a
+   * re-run that converged onto a tree already in the right state, and it is the whole
+   * basis of `devflow tracker --set <same provider>`'s `(unchanged)` line and of a
+   * re-init reporting `+0 reference(s)`.
+   */
   overlaidRefs: string[];
+  /**
+   * Manifest-relative paths this run left exactly as it found them, because the unit
+   * they belong to was already installed byte-for-byte.
+   *
+   * Reported rather than dropped: a caller has to be able to tell "converged, nothing to
+   * do" from "did not reach this unit at all", and the latter is {@link overlayFailures}.
+   */
+  unchangedRefs: string[];
   /** Units this run did not refresh, each carrying the state it was left in. */
   overlayFailures: OverlayFailure[];
   /** Result of converging `references/tracker/**` to the manifest. */
@@ -690,6 +711,66 @@ async function buildUnitStagingTree(
   }
 
   return { ok: true, stagingDir };
+}
+
+/**
+ * Is this unit's freshly built staging tree already what is installed?
+ *
+ * Asked once per unit, between the build and the promotion, so a unit that would be
+ * promoted onto an identical copy of itself is skipped and reported as unchanged
+ * instead. Without it every run writes every unit, `overlaidRefs` is never empty, and
+ * every render site downstream — `devflow tracker --set`'s `(unchanged)` line, init's
+ * `Tracker assets: +N` summary — can only ever report movement (AC-23).
+ *
+ * Comparison is against what the PROMOTION would do, not merely against the bytes the
+ * manifest names, and the two differ by unit kind:
+ *
+ *   - a PROVIDER unit is swapped whole ({@link promoteProviderUnit}), so an installed
+ *     entry the manifest no longer names is something this run would REMOVE. Comparing
+ *     only the manifest's own files would call such a unit unchanged and leave the stray
+ *     installed — converge-not-merge silently downgraded to a merge.
+ *   - a CROSS-CUTTING unit is promoted one document at a time into a directory holding
+ *     entries the overlay must never replace or delete (D-OVERLAY-FLAT-UNIT), so its
+ *     files are exactly the comparison and the neighbours are none of its business.
+ *
+ * What it deliberately does NOT compare is file MODE. D-OVERLAY-MODE-SCOPE normalises the
+ * whole references directory on every run regardless of which units promoted, so a unit
+ * skipped here still has its modes converged — a skipped promotion can hide byte drift
+ * from nothing, and mode drift from nothing either.
+ *
+ * Any error — an absent installed copy, an unreadable one, a directory that is not there
+ * — answers "no". The fallback is always the promotion that was going to happen anyway,
+ * so a failure to compare can only cost a write, never correctness.
+ */
+async function stagedUnitIsAlreadyInstalled(
+  unit: OverlayUnit,
+  referencesTarget: string,
+  stagingDir: string,
+): Promise<boolean> {
+  const basenameOf = (relPath: string): string => relPath.split('/').slice(-1)[0];
+
+  if (unit.kind === 'provider') {
+    const owned = new Set(unit.files.map(basenameOf));
+    let installed: string[];
+    try {
+      installed = await fs.readdir(underRoot(referencesTarget, unit.subdir));
+    } catch {
+      return false;
+    }
+    if (installed.length !== owned.size) return false;
+    if (installed.some(name => !owned.has(name))) return false;
+  }
+
+  for (const relPath of unit.files) {
+    try {
+      const staged = await fs.readFile(path.join(stagingDir, basenameOf(relPath)));
+      const live = await fs.readFile(underRoot(referencesTarget, relPath));
+      if (!staged.equals(live)) return false;
+    } catch {
+      return false;
+    }
+  }
+  return true;
 }
 
 /** Outcome of promoting one unit — a failure carries the state it left on disk. */
@@ -1033,6 +1114,12 @@ async function prunePreservingRecoveryCopies(
  * unit this run did not refresh reaches `overlayFailures` carrying the state it was
  * actually left in, never a blanket claim that nothing changed.
  *
+ * A unit already installed byte-for-byte is neither written nor a failure: it is skipped
+ * and named in `unchangedRefs` (see {@link stagedUnitIsAlreadyInstalled}), so
+ * `overlaidRefs` is what this run WROTE rather than what it considered. Every run still
+ * BUILDS every unit's staging tree, because that comparison is what the convergence is —
+ * the saving is the promotion, not the work of deciding.
+ *
  * @param opts.referencesTarget - `{claudeDir}/skills/devflow:git/references`.
  * @param opts.sourceRoot - Generated tree; defaults to `compiledSkillRefsDir()`.
  * @param opts.manifest - Manifest to converge to; defaults to the build registries.
@@ -1063,6 +1150,7 @@ export async function overlayGeneratedReferences(opts: {
   const warn = opts.warn ?? (() => { /* notices are optional for callers with no logger */ });
 
   const overlaidRefs: string[] = [];
+  const unchangedRefs: string[] = [];
   const overlayFailures: OverlayFailure[] = [];
 
   // Before the target is touched, so a refused overlay leaves the install exactly as it
@@ -1079,6 +1167,15 @@ export async function overlayGeneratedReferences(opts: {
         state: await classifyUntouchedUnit(unit, opts.referencesTarget),
         error: built.error,
       });
+      continue;
+    }
+    // Converged already — discard the staging tree rather than promote a copy of what is
+    // installed, so `overlaidRefs` names what this run WROTE (AC-23). The discard is the
+    // same one both promotion halves perform on their way out; skipping it would leave
+    // the `.tmp` residue every other path is asserted not to leave.
+    if (await stagedUnitIsAlreadyInstalled(unit, opts.referencesTarget, built.stagingDir)) {
+      await fs.rm(built.stagingDir, { recursive: true, force: true }).catch(() => undefined);
+      unchangedRefs.push(...unit.files);
       continue;
     }
     const promoted = await promoteUnitStagingTree(unit, opts.referencesTarget, built.stagingDir);
@@ -1115,7 +1212,7 @@ export async function overlayGeneratedReferences(opts: {
     warn(`reference overlay: could not normalise reference file modes — ${String(err)}`);
   }
 
-  return { overlaidRefs, overlayFailures, pruned };
+  return { overlaidRefs, unchangedRefs, overlayFailures, pruned };
 }
 
 /**
