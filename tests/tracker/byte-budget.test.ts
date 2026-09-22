@@ -832,7 +832,7 @@ describe('byte budget: component and loaded-set pins (AC-2.5)', () => {
 // ---------------------------------------------------------------------------
 
 describe('byte budget: the provider-resolution preamble', () => {
-  it('sits between the D4 block and the publication gate, and is <= 40 lines', () => {
+  it(`sits between the D4 block and the publication gate, and is <= ${PREAMBLE_MAX_LINES} lines`, () => {
     const block = preambleBlock(GIT_AGENT.content);
     const lines = block.split('\n');
     expect(
