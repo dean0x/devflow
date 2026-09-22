@@ -25,6 +25,7 @@ import * as os from 'os';
 import * as path from 'path';
 
 import { installViaFileCopy } from '../../src/targets/claude-code/installer.js';
+import { convergeTrackerArtifacts } from '../../src/targets/claude-code/tracker-install.js';
 import { loadShippedDefaults } from '../../src/core/agent-models.js';
 import { agentSourceDirs, agentsDir, compiledAgentsDir, type AgentSourceDirs } from '../../src/core/assets.js';
 import { readFrontmatterModel } from '../../src/core/agent-frontmatter.js';
@@ -62,6 +63,13 @@ function fixturePlugin(): PluginDefinition {
 /**
  * Install every registry agent into a fresh claude dir and return the installed
  * content keyed by agent name.
+ *
+ * Two writers, because the registry has two agent OWNERS (D-TRACKER-AGENT-OWNER):
+ * the installer's copy loop writes every agent but the Tracker agent, and
+ * `convergeTrackerArtifacts` writes that one. Both are handed the SAME injected
+ * directory list, which is the point — the precedence policy has one owner, so an
+ * agent resolved by the second writer must land out of the same tree as the rest,
+ * and dropping it from this population instead would retire exactly that coverage.
  */
 async function installAll(root: string, dirs?: AgentSourceDirs): Promise<Map<string, string>> {
   const plugin = fixturePlugin();
@@ -77,6 +85,16 @@ async function installAll(root: string, dirs?: AgentSourceDirs): Promise<Map<str
     spinner,
     ...(dirs === undefined ? {} : { agentSourceDirs: dirs }),
   });
+
+  // The provider is any non-github one: what is under test is which TREE the
+  // agent came out of, not which provider asked for it.
+  const converged = await convergeTrackerArtifacts({
+    claudeDir,
+    provider: 'jira',
+    warn: () => {},
+    ...(dirs === undefined ? {} : { agentSourceDirs: dirs }),
+  });
+  expect(converged.agent, `the Tracker agent's own owner must have written it`).toBe('installed');
 
   const installed = new Map<string, string>();
   for (const name of ALL_AGENTS) {

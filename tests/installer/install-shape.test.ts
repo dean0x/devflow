@@ -25,10 +25,13 @@ import {
   isPluginListUnchanged,
 } from '../../src/cli/commands/install-report.js';
 import { installedReferenceManifest, SKILL_REFS_SKILL_NAME } from "../../src/core/mds-variants.js";
+import { convergeTrackerArtifacts } from '../../src/targets/claude-code/tracker-install.js';
 import {
   DEVFLOW_PLUGINS,
   FEATURE_OWNED_SKILLS,
+  buildAssetMaps,
   buildScopedSkillsMap,
+  getAllAgentNames,
   getAllSkillNames,
   prefixSkillName,
   skillsOf,
@@ -46,6 +49,10 @@ const plugin = (name: string): PluginDefinition => {
   if (found === undefined) throw new Error(`no such plugin: ${name}`);
   return found;
 };
+
+async function exists(p: string): Promise<boolean> {
+  try { await fs.access(p); return true; } catch { return false; }
+}
 
 async function installedSkillDirs(): Promise<string[]> {
   try {
@@ -550,5 +557,113 @@ describe('a full re-init leaves the overlay-owned reference tree for the overlay
       fs.access(strayReference),
       'the references ROOT is not the overlay\'s to prune, so the pre-clean has to reach it',
     ).rejects.toThrow();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Who owns agents/devflow/tracker.md
+// ---------------------------------------------------------------------------
+
+/**
+ * The Tracker agent is `convergeTrackerArtifacts`'s file, not the agent loop's.
+ *
+ * The agent stays DECLARED in `devflow-core-skills.agents` — the roster floor and the
+ * reverse-spawn guards both key on the registry — but its presence on disk is
+ * conditional on the provider, and exactly one owner may decide that (plan A3). While
+ * the generic copy loop also wrote it, every install did the work twice and the two
+ * owners disagreed in both directions: a github re-run reported `tracker agent removed`
+ * for a file only that same run had put there, and a fresh jira install never reported
+ * `installed` because converge found the loop's byte-identical copy already in place.
+ *
+ * The arms below pin the split from the loop's side. The converge side — both
+ * directions of the biconditional — is tests/tracker-install.test.ts.
+ */
+describe('the agent copy loop leaves the Tracker agent to convergeTrackerArtifacts', () => {
+  const everyPlugin = (): PluginDefinition[] => [...DEVFLOW_PLUGINS];
+  const trackerAgentFile = (): string => path.join(claudeDir, 'agents', 'devflow', 'tracker.md');
+
+  async function installedAgents(): Promise<string[]> {
+    try { return (await fs.readdir(path.join(claudeDir, 'agents', 'devflow'))).sort(); }
+    catch { return []; }
+  }
+
+  /** Every declared agent but the Tracker agent, as installed filenames. */
+  const everyOtherAgent = (): string[] =>
+    getAllAgentNames().filter(name => name !== 'tracker').map(name => `${name}.md`).sort();
+
+  async function installAll(trackerProvider: string) {
+    return installViaFileCopy({
+      plugins: everyPlugin(),
+      effectivePlugins: everyPlugin(),
+      claudeDir,
+      devflowDir,
+      skillsMap: buildScopedSkillsMap(everyPlugin()),
+      agentsMap: buildAssetMaps(everyPlugin()).agentsMap,
+      trackerProvider,
+      isPartialInstall: false,
+      spinner: noopSpinner,
+      warn: (msg) => { warnings.push(msg); },
+    });
+  }
+
+  it.each(['github', 'jira'] as const)(
+    'writes every other agent and never the Tracker agent (provider %s)',
+    async (provider) => {
+      await installAll(provider);
+
+      expect(
+        await exists(trackerAgentFile()),
+        'the loop has no business deciding a provider-conditional file',
+      ).toBe(false);
+      expect(
+        await installedAgents(),
+        'and skipping one agent must not cost any of the others',
+      ).toEqual(everyOtherAgent());
+    },
+  );
+
+  it('converge is what puts the agent there under jira', async () => {
+    await installAll('jira');
+    expect(await exists(trackerAgentFile())).toBe(false);
+
+    const result = await convergeTrackerArtifacts({
+      claudeDir,
+      provider: 'jira',
+      warn: (msg) => { warnings.push(msg); },
+    });
+
+    expect(result.agent, 'a fresh install has an agent to announce').toBe('installed');
+    expect(await exists(trackerAgentFile())).toBe(true);
+  });
+
+  it('a re-install leaves a converged Tracker agent standing for converge to compare', async () => {
+    await installAll('jira');
+    await convergeTrackerArtifacts({ claudeDir, provider: 'jira', warn: () => {} });
+    const converged = await fs.readFile(trackerAgentFile(), 'utf-8');
+
+    await installAll('jira');
+
+    // Both halves of the carve-out, and the reason for it: converge reports
+    // `unchanged` only if there is still an installed copy to compare against.
+    expect(
+      await exists(trackerAgentFile()),
+      'the pre-clean empties the directory AROUND it and the sweep keys on the full registry',
+    ).toBe(true);
+    expect(await fs.readFile(trackerAgentFile(), 'utf-8')).toBe(converged);
+
+    const second = await convergeTrackerArtifacts({ claudeDir, provider: 'jira', warn: () => {} });
+    expect(second.agent, 'a steady-state re-init has nothing to announce').toBe('unchanged');
+  });
+
+  it('everything else in the agent directory still goes', async () => {
+    await installAll('jira');
+    await convergeTrackerArtifacts({ claudeDir, provider: 'jira', warn: () => {} });
+    const stray = path.join(claudeDir, 'agents', 'devflow', 'from-an-older-install.md');
+    await fs.writeFile(stray, 'from a previous install\n', 'utf-8');
+
+    await installAll('jira');
+
+    await expect(fs.access(stray)).rejects.toThrow();
+    expect(await exists(trackerAgentFile())).toBe(true);
   });
 });

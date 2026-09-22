@@ -147,6 +147,20 @@ describe('devflow init installs {github} ∪ {selected provider}', () => {
     expect(await exists(path.join(refsRoot(), 'tracker', '_mcp.md'))).toBe(false);
     expect(await exists(trackerAgent()), 'github infers no conventions, so it needs no agent').toBe(false);
     expect(await exists(sentinel()), 'the sentinel is what costs a session a fork').toBe(false);
+    expect(
+      result.stdout,
+      'nothing put an agent there, so nothing may report having taken one away',
+    ).not.toContain('tracker agent');
+  });
+
+  it('a second github init still says nothing about the agent', () => {
+    expect(init().status).toBe(0);
+    const second = init();
+    expect(second.status, `re-init failed:\n${second.stdout}\n${second.stderr}`).toBe(0);
+    expect(
+      second.stdout,
+      'a steady-state github re-run has no agent to install and none to remove',
+    ).not.toContain('tracker agent');
   });
 
   it.each(['jira', 'linear'] as const)('--tracker %s adds its tree, _mcp.md, the agent and the sentinel', async (provider) => {
@@ -161,6 +175,10 @@ describe('devflow init installs {github} ∪ {selected provider}', () => {
     expect(await exists(path.join(refsRoot(), 'tracker', '_mcp.md'))).toBe(true);
     expect(await exists(trackerAgent())).toBe(true);
     expect(await exists(sentinel())).toBe(true);
+    expect(
+      result.stdout,
+      'the agent is installed by this run, so the summary has to say so',
+    ).toContain('tracker agent installed');
   });
 
   it('the jira install differs from the github one by exactly the jira tree, _mcp.md and the agent', async () => {
@@ -219,6 +237,10 @@ describe('devflow init installs {github} ∪ {selected provider}', () => {
       second.stdout,
       'nothing moved, so the delta line is noise and is suppressed entirely',
     ).not.toContain('Tracker assets:');
+    expect(
+      second.stdout,
+      'the agent was already converged by the first run and is unchanged by this one',
+    ).not.toContain('tracker agent');
   });
 
   it('the summary names the active provider', () => {

@@ -8,6 +8,7 @@ import { getPackageRoot, isContainedIn } from '../../core/paths.js';
 import { sweepOrphanedAssets, mdFileName, mdEntryName, type SweepResult } from '../../core/orphan-sweep.js';
 import { generatedReferenceManifest, installedReferenceManifest, SKILL_REFS_SKILL_NAME } from '../../core/mds-variants.js';
 import { sweepOrphanedReferences, MAX_REFERENCE_SWEEP_DEPTH } from '../../core/reference-sweep.js';
+import { TRACKER_AGENT_NAME } from './tracker-install.js';
 
 // ---------------------------------------------------------------------------
 // Shadow override reporting types
@@ -1599,7 +1600,6 @@ export async function installViaFileCopy(options: FileCopyOptions): Promise<Inst
     // without discarding assets from plugins not included in this run.
     const oldDirs = [
       path.join(claudeDir, 'commands', 'devflow'),
-      path.join(claudeDir, 'agents', 'devflow'),
       path.join(claudeDir, 'rules', 'devflow'),
     ];
     for (const dir of oldDirs) {
@@ -1607,6 +1607,22 @@ export async function installViaFileCopy(options: FileCopyOptions): Promise<Inst
         await fs.rm(dir, { recursive: true, force: true });
       } catch { /* ignore */ }
     }
+
+    // D-TRACKER-AGENT-OWNER, pre-clean half — the same split the reference tree
+    // needed (D-OVERLAY-OWNERSHIP), for the same reason. The agent directory is
+    // emptied AROUND the one file `convergeTrackerArtifacts` owns: taking it
+    // would leave converge with nothing to byte-compare against, so a
+    // steady-state jira re-init would re-copy the agent and announce
+    // `tracker agent installed` on every run. Everything else is removed
+    // exactly as the unconditional wipe removed it, and the file is still
+    // converged on this run — under github converge deletes it, and drift in it
+    // is restored, so preserving it strands nothing.
+    try {
+      await emptyDirectoryExcept(
+        path.join(claudeDir, 'agents', 'devflow'),
+        new Set([mdFileName(TRACKER_AGENT_NAME)]),
+      );
+    } catch { /* ignore */ }
   }
 
   // Sweep stale devflow:* skill dirs — ungated: runs on every install shape,
@@ -1736,11 +1752,26 @@ export async function installViaFileCopy(options: FileCopyOptions): Promise<Inst
   // src/assets/agents/{name}.md. A declared agent absent from BOTH is a
   // build/packaging failure and throws rather than silently skipping (matches
   // command pattern); the message names the build step as well as the tree.
+  //
+  // D-TRACKER-AGENT-OWNER: every declared agent but ONE. The Tracker agent's
+  // presence is conditional on the resolved provider, and `convergeTrackerArtifacts`
+  // owns that decision alone (plan A3) — it runs after this function in init and is
+  // the sole caller in `devflow tracker --set`. Copying it here too made every
+  // install do the work twice and the two owners contradict each other in both
+  // directions: a github run reported `tracker agent removed` for a file only that
+  // same run had written, and a fresh jira install never reported `installed`
+  // because converge found this loop's byte-identical copy already in place.
+  //
+  // The name is skipped from the COPY set only. It stays declared in
+  // `devflow-core-skills.agents`, so the sweep below — which keys on the full
+  // registry via getAllAgentNames() — still treats a converged tracker.md as known
+  // and leaves it alone.
   const agentsTarget = path.join(claudeDir, 'agents', 'devflow');
   const agentDirs = options.agentSourceDirs ?? agentSourceDirs();
   const allAgentNames = new Set<string>();
   for (const plugin of plugins) {
     for (const agent of plugin.agents) {
+      if (agent === TRACKER_AGENT_NAME) continue;
       if (!allAgentNames.has(agent) && agentsMap.get(agent) === plugin.name) {
         allAgentNames.add(agent);
       }

@@ -74,21 +74,27 @@ export interface ConvergeTrackerArtifactsResult {
   agent: TrackerAgentState;
 }
 
-// ── Internals ──────────────────────────────────────────────────────────────
-
 /**
  * The agent whose presence is conditional on the provider.
  *
- * It stays DECLARED in `devflow-core-skills.agents` and is filtered here at
- * install time rather than being lifted into a feature-owned set: the compliance
+ * It stays DECLARED in `devflow-core-skills.agents` and is filtered at install
+ * time rather than being lifted into a feature-owned set: the compliance
  * precedent does not transfer, because compliance's plugin was deleted while
  * `devflow-core-skills` is a live, non-optional owner. A feature-owned set would
  * cost three new union sites and a rewrite of the pinned agent-roster floor to
  * solve a problem the agent SWEEP does not have — the sweep keys on the full
- * registry, so it never sees this file as an orphan, and removing it is solely
- * this function's job.
+ * registry, so it never sees this file as an orphan.
+ *
+ * Exported because the filter has more than one reader and may have only one
+ * authority (D-TRACKER-AGENT-OWNER): {@link convergeTrackerArtifacts} below,
+ * which decides whether the file exists, and, in installer.ts, both the generic
+ * agent copy loop — which has to skip the one agent it does not own — and the
+ * full-install pre-clean, which has to empty the agent directory around it. A
+ * second literal at any of those sites is the shape this export exists to forbid.
  */
-const TRACKER_AGENT_NAME = 'tracker';
+export const TRACKER_AGENT_NAME = 'tracker';
+
+// ── Internals ──────────────────────────────────────────────────────────────
 
 /**
  * The provider whose mechanics need no Tracker agent.
