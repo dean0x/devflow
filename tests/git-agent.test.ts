@@ -21,7 +21,6 @@ import {
   TRACKER_GITHUB_OPS,
   GIT_CROSS_CUTTING_DOCS,
   PR_HOST_DESTINATION_ROOT,
-  PR_HOST_OPS,
   VARIANT_MODULES,
 } from '../src/core/mds-variants.js';
 import { ROOT, resolveAgentSource, resolveAllAgents, gitAgentSinkCorpus, extractOpSectionFromCorpus, collectUnfencedH2, loadFile, requireDistFile, walkFiles, type CorpusEntry } from './helpers.js';
@@ -86,13 +85,18 @@ const PR_HOST_PREFIX = `${PR_HOST_DESTINATION_ROOT}/`;
 /**
  * `git.md` plus the PR-host references, and NOTHING else.
  *
- * The corpus for a guard whose literal moved in #326 and only in #326. Widening
- * such a guard all the way to `gitAgentSinkCorpus()` would also hand it the three
- * provider trees — text an earlier phase moved, for operations this commit never
- * touched — and that is a blanket widening, not a classification (ADR-025). The
- * observable cost is not theoretical: over the full sink corpus, `setup-task` is
- * detected as remote-I/O through its PROVIDER mechanics, changing the subject of
- * a guard about the agent's own degradation contract.
+ * The corpus for a DETECTION guard — one where the corpus decides WHICH ops are
+ * the subject, not merely whether a fixed op can reach a literal. AC-0.6b's
+ * remote-I/O sweep is that shape, and the cost is not theoretical: over the full
+ * sink corpus `setup-task` is detected as remote-I/O through its PROVIDER
+ * mechanics, silently changing the subject of a guard about the agent's own
+ * degradation contract. A detection guard must therefore see exactly what moved
+ * in #326 and no further — widening it to `gitAgentSinkCorpus()` is a blanket
+ * widening rather than a classification (ADR-025).
+ *
+ * The literal-presence guards in this file read the full union on purpose: their
+ * op set is fixed by the caller, the corpus only answers whether that op can
+ * reach the text, and each is held non-vacuous by `sinkCorpusWithoutPrHost()`.
  */
 function gitPlusPrHostCorpus(): CorpusEntry[] {
   return cachedSinkCorpus().filter(
@@ -1504,6 +1508,15 @@ describe('git agent — static content guards (PF-018)', () => {
   // than once for the file.
   const D10_SUMMARY_OPS = ['post-review-summary', 'post-resolution-summary'] as const;
 
+  /**
+   * The fail-closed rule, named because two readers need the SAME string: the
+   * table below, which requires every summary op to reach it, and the known-bad
+   * probe, which seeds it away from one of them. Re-spelt at the probe it was a
+   * second authority that could keep its own copy of a literal the live guard no
+   * longer checks (PF-018).
+   */
+  const D10_FAIL_CLOSED_LITERAL = 'treat as PUBLIC';
+
   /** Every D10 literal each summary op must be able to reach, with its reason. */
   const D10_PER_OP_LITERALS: readonly { readonly literal: string; readonly why: string }[] = [
     {
@@ -1514,7 +1527,7 @@ describe('git agent — static content guards (PF-018)', () => {
     { literal: 'INTERNAL', why: 'removing a visibility value silently disables a gate branch' },
     { literal: 'PUBLIC', why: 'removing a visibility value silently disables a gate branch' },
     {
-      literal: 'treat as PUBLIC',
+      literal: D10_FAIL_CLOSED_LITERAL,
       why: 'the fail-closed rule — any probe error must default to STUB, never FULL',
     },
     {
@@ -1523,27 +1536,39 @@ describe('git agent — static content guards (PF-018)', () => {
     },
   ];
 
+  /**
+   * The D10 per-op containment predicate: can `op` reach `literal` in `corpus`?
+   *
+   * Mode 'union' [DR-18], widened by #326 — named here, once, in the commit that
+   * moved the text (ADR-025). The live guard and its known-bad probe both call
+   * it, so narrowing the predicate takes the probe red instead of leaving a copy
+   * of the old spelling standing behind the guard it is supposed to freeze.
+   */
+  const d10Reaches = (corpus: CorpusEntry[], op: string, literal: string): boolean =>
+    extractOpSection(corpus, op, 'union').includes(literal);
+
   it('D10: every summary op reaches the probe, the three visibility values, the fail-closed rule and the stub sentence', () => {
-    // Mode 'union' [DR-18], widened by #326 — named here, at the call site, in the
-    // commit that moved the text (ADR-025).
     for (const op of D10_SUMMARY_OPS) {
-      const sec = extractOpSection(cachedSinkCorpus(), op, 'union');
       for (const { literal, why } of D10_PER_OP_LITERALS) {
-        expect(sec, `D10: ${op} cannot reach "${literal}" — ${why}`).toContain(literal);
+        expect(
+          d10Reaches(cachedSinkCorpus(), op, literal),
+          `D10: ${op} cannot reach "${literal}" — ${why}`,
+        ).toBe(true);
       }
     }
   });
 
   it('D10 known-bad probe: deleting one literal from ONE pr/ file is reported for that op only', () => {
     // ADR-024 / PF-018. Seeds a corpus in which post-review-summary's PR-host
-    // mechanics have lost the fail-closed rule, and asserts the same per-op
-    // predicate the live guard uses reports exactly that op. A file-scoped
-    // `toContain` over git.md ∪ references could not: the sibling op's copy of
-    // the same sentence would keep it green.
-    const PROBE = 'treat as PUBLIC';
-    const seeded = seedPrHostFile('post-review-summary', c => c.split(PROBE).join('treat as WHATEVER'));
-    const reached = D10_SUMMARY_OPS.filter(
-      op => extractOpSection(seeded, op, 'union').includes(PROBE),
+    // mechanics have lost the fail-closed rule, and drives the live guard's OWN
+    // predicate (d10Reaches) over the result. A file-scoped `toContain` over
+    // git.md ∪ references could not report it: the sibling op's copy of the same
+    // sentence would keep it green.
+    const seeded = seedPrHostFile('post-review-summary', c =>
+      c.split(D10_FAIL_CLOSED_LITERAL).join('treat as WHATEVER'),
+    );
+    const reached = D10_SUMMARY_OPS.filter(op =>
+      d10Reaches(seeded, op, D10_FAIL_CLOSED_LITERAL),
     );
     expect(
       reached,
@@ -1731,6 +1756,19 @@ describe('git agent — static content guards (PF-018)', () => {
     ).toContain('never pipelines');
   });
 
+  /**
+   * Does this op section post a body to GitHub? The D11 posting predicate.
+   *
+   * Stated once because two guards decide the SAME question with it: the forward
+   * guard below, which requires every posting op to name the scrub, and the
+   * known-bad probe, which re-asks it over the corpus with the PR-host tree
+   * dropped. Re-spelt at the probe, narrowing the live predicate would leave the
+   * probe green against a set the guard no longer scans — a frozen copy of a
+   * rule nobody enforces (ADR-024 / PF-018).
+   */
+  const isPostingSection = (sec: string): boolean =>
+    sec.includes('--body-file') || sec.includes('-F body=@');
+
   it('D11: every posting op (--body-file or -F body=@) references D11 (forward guard, ≥8 ops)', () => {
     // Non-vacuous: assert ≥ 8 posting ops exist AND each one references D11 (PF-018)
     // Sink corpus = git.md ∪ dist/skills/git/references/*.md (ENOENT-tolerant on dist).
@@ -1744,7 +1782,7 @@ describe('git agent — static content guards (PF-018)', () => {
 
     for (const op of opNames) {
       const sec = extractOpSection(sinkCorpus, op, 'union');
-      if (sec.includes('--body-file') || sec.includes('-F body=@')) {
+      if (isPostingSection(sec)) {
         postingOps.push(op);
         if (!sec.includes('Comment-sink scrub (D11)')) postingOpsWithoutD11.push(op);
       }
@@ -1786,7 +1824,7 @@ describe('git agent — static content guards (PF-018)', () => {
     ).toHaveLength(0);
   });
 
-  it('D11 known-bad probe: dropping the PR-host tree halves the posting set (SG-8 non-vacuity)', () => {
+  it('D11 known-bad probe: dropping the PR-host tree narrows the posting set from 8 to 5 (SG-8 non-vacuity)', () => {
     // SG-8's proof obligation for #326, and the one thing the floor of 8 above
     // cannot show on its own. The posting SET is the same 8 operations before and
     // after the move, so the forward guard stayed green through it — which means
@@ -1810,10 +1848,9 @@ describe('git agent — static content guards (PF-018)', () => {
     ];
     const narrowed = sinkCorpusWithoutPrHost();
     const opNames = collectOpNames(content);
-    const postingOps = opNames.filter(op => {
-      const sec = extractOpSection(narrowed, op, 'union');
-      return sec.includes('--body-file') || sec.includes('-F body=@');
-    });
+    const postingOps = opNames.filter(op =>
+      isPostingSection(extractOpSection(narrowed, op, 'union')),
+    );
     // A NAMED set, not a count: a count of 5 is equally satisfied by losing
     // `ensure-pr-ready` and gaining an unrelated op, which would be a real
     // regression reported as agreement (the `scanned > 0` anti-pattern, one level up).
