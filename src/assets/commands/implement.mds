@@ -62,23 +62,40 @@ Spawn Git agent to set up task environment. The Git agent derives the branch nam
 Agent(subagent_type="Git"):
 "OPERATION: setup-task
 BASE_BRANCH: {current branch name}
-ISSUE_INPUT: {the first $ARGUMENTS token verbatim, unless it ends in .md — then omit}
-TASK_DESCRIPTION: {task description from $ARGUMENTS if the first token was omitted above, otherwise omit}
+ISSUE_INPUT: {$ARGUMENTS verbatim, when it is a single whitespace-delimited token that does not end in .md — otherwise omit}
+TASK_DESCRIPTION: {$ARGUMENTS verbatim, when it is two or more whitespace-delimited tokens — otherwise omit}
 COMPLIANCE: {enabled if COMPLIANCE_SKILL_INSTALLED, otherwise (none)}
 PLAN_ARTIFACT_PATH: {path to plan document if $ARGUMENTS ends in .md, otherwise (none)}
 Derive branch name from issue or description, create feature branch, and fetch issue if specified.
 Return the branch setup summary."
 ```
 
-The issue token is forwarded **unclassified**. `setup-task` is the one step that
-has resolved a provider, and therefore the only one that knows what an issue
-reference looks like on this machine: `#123`, `PROJ-12` and `ENG-12` are three
-providers' spellings of the same thing. A `starts with #` test here would be a
-github test wearing a neutral name — it reclassifies every other provider's
-reference as a task description, so the branch is derived from prose and no issue
-is ever fetched, with nothing reporting a problem. The one test that IS this
-command's to make is the file extension: a path ending in `.md` is a plan
-document under every provider.
+The issue token is forwarded **unclassified**, and the routing is decided by
+SHAPE alone — how many tokens `$ARGUMENTS` has, and whether it ends in `.md`.
+
+`setup-task` is the one step that has resolved a provider, and therefore the only
+one that knows what an issue reference looks like on this machine: `#123`,
+`PROJ-12` and `ENG-12` are three providers' spellings of the same thing. A
+`starts with #` test here would be a github test wearing a neutral name — it
+reclassifies every other provider's reference as a task description, so the
+branch is derived from prose and no issue is ever fetched, with nothing reporting
+a problem. Token COUNT is the gate that stays provider-neutral: every one of
+those spellings is a single token, and no free-text task description is.
+
+The two tests this command does make are its own under every provider:
+
+- **Extension.** A path ending in `.md` is a plan document, never an issue
+  reference — it goes to `PLAN_ARTIFACT_PATH` and neither of the other two keys.
+- **Token count.** A single token is an issue reference. Two or more is prose:
+  forwarding only its FIRST token would send `/implement fix the login bug` to
+  the Git agent as `ISSUE_INPUT: fix` with no description at all, and
+  `setup-task` fetches whatever it is handed — so the command would derive a
+  branch from a failed lookup and drop the request on the floor.
+
+The cost of the count gate is a one-word task description (`/implement refactor`)
+reaching `setup-task` as an issue reference, where it fails the lookup and is
+reported. That is the direction the failure has to fall: an unfetched issue is
+visible, a silently discarded request is not.
 
 **Capture from Git agent output** (used throughout flow):
 - `TASK_ID`: The branch name created by Git agent (use as TASK_ID for rest of flow)

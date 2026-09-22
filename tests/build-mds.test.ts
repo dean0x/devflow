@@ -2058,6 +2058,14 @@ describe('dedup-marker ownership — `<!-- devflow:` absent from dist/commands (
 // Two properties, because presence alone would not catch either failure: the
 // forwarded token carries no provider-specific test, and it is offered BEFORE
 // the description fallback, which is what makes the description a fallback.
+//
+// A third, added after M-1: neutrality is not enough on its own. Forwarding the
+// FIRST token of `$ARGUMENTS` is perfectly provider-neutral and still loses the
+// request — `/implement fix the login bug` reaches setup-task as `ISSUE_INPUT:
+// fix` with no description behind it. The gate that is both neutral and correct
+// is token COUNT: every provider's reference is a single token and no prose
+// description is, so the arms below assert the routing each SHAPE produces
+// rather than the sentence that produces it.
 // ---------------------------------------------------------------------------
 
 describe('implement.md forwards the issue argument unclassified (§23)', () => {
@@ -2066,7 +2074,49 @@ describe('implement.md forwards the issue argument unclassified (§23)', () => {
     ['a `#` prefix test', /starts with\s*`?#/i],
     ['a `#`-shaped pattern', /#\[0-9\]|#\{?[0-9n]/],
     ['an issue-number noun', /\bissue number\b/i],
+    // Neutral, and still wrong: it routes a multi-token argument's first word to
+    // the issue lookup and leaves TASK_DESCRIPTION empty (M-1).
+    ['an unconditional first-token forward', /\bfirst\b[^\n]*\btokens?\b/i],
   ];
+
+  /**
+   * The condition the ISSUE_INPUT line must state: `$ARGUMENTS` is ONE token.
+   *
+   * A family of spellings rather than one, because the assertion is about which
+   * shape routes where, not about the sentence chosen to say it. What no member
+   * of the family admits is a gate on the first token of a longer argument —
+   * that shape is reported by the collector above instead.
+   */
+  const SINGLE_TOKEN_GATE = /\b(?:a single|exactly one|one)\b[^\n]*\btokens?\b/i;
+
+  /** The complementary condition on TASK_DESCRIPTION: two or more tokens. */
+  const MULTI_TOKEN_GATE = /\b(?:two or more|2\+|multiple|more than one)\b[^\n]*\btokens?\b/i;
+
+  /**
+   * The `setup-task` spawn payload — the ONE payload that routes `$ARGUMENTS`.
+   *
+   * Scoped rather than file-wide because `TASK_DESCRIPTION:` appears in nine
+   * payloads of this command, eight of which hand a Code agent a phase
+   * description that has nothing to do with the command's arguments. A file-wide
+   * reader would pick whichever came first and assert against the wrong one.
+   */
+  function setupTaskPayload(source: string): string {
+    const at = source.indexOf('OPERATION: setup-task');
+    expect(at, 'no setup-task spawn in the compiled command').toBeGreaterThan(-1);
+    const end = source.indexOf('```', at);
+    expect(end, 'the setup-task spawn fence is unterminated').toBeGreaterThan(at);
+    return source.slice(at, end);
+  }
+
+  /** The one line of the `setup-task` payload that carries `key:`. */
+  function payloadLine(source: string, key: string): string {
+    const lines = setupTaskPayload(source).split('\n').filter(l => l.trimStart().startsWith(`${key}:`));
+    expect(
+      lines.length,
+      `expected exactly one \`${key}:\` line in the setup-task payload, found ${lines.length}`,
+    ).toBe(1);
+    return lines[0];
+  }
 
   /**
    * Named collector: the `ISSUE_INPUT:` line of a spawn payload, and every
@@ -2111,6 +2161,53 @@ describe('implement.md forwards the issue argument unclassified (§23)', () => {
     expect(lines[0], 'the `.md` carve-out is the command layer\'s own').toContain('.md');
   });
 
+  it('a SINGLE-token argument is what reaches ISSUE_INPUT — and it carries no provider test', async () => {
+    const source = await fs.readFile(path.join(BUILT_COMMANDS, 'implement.md'), 'utf-8');
+    const issueLine = payloadLine(source, 'ISSUE_INPUT');
+
+    expect(
+      issueLine,
+      'ISSUE_INPUT must be gated on $ARGUMENTS being ONE token. Ungated, the first word of ' +
+      '`/implement fix the login bug` is forwarded to setup-task as an issue reference and ' +
+      'the request itself is never passed at all (M-1):\n  ' + issueLine.trim(),
+    ).toMatch(SINGLE_TOKEN_GATE);
+    expect(
+      issueLine,
+      'and the gate must be on the argument as a whole, not on its first token',
+    ).not.toMatch(/\bfirst\b[^\n]*\btokens?\b/i);
+    // `PROJ-12`, `ENG-7`, `#42` and `42` are all one token, so the count gate
+    // admits every provider's spelling — which is what keeps it neutral.
+    expect(collectIssueInputClassifiers(source)).toEqual([]);
+  });
+
+  it('a MULTI-token argument routes to TASK_DESCRIPTION instead, and is not split', async () => {
+    const source = await fs.readFile(path.join(BUILT_COMMANDS, 'implement.md'), 'utf-8');
+    const descLine = payloadLine(source, 'TASK_DESCRIPTION');
+
+    expect(
+      descLine,
+      'TASK_DESCRIPTION must state the complementary shape — two or more tokens — rather than ' +
+      'depending on whatever the ISSUE_INPUT line happened to leave behind:\n  ' + descLine.trim(),
+    ).toMatch(MULTI_TOKEN_GATE);
+    expect(
+      descLine,
+      'the whole argument is the description; forwarding a remainder would drop its first word',
+    ).toContain('$ARGUMENTS');
+  });
+
+  it('a `.md` argument routes to PLAN_ARTIFACT_PATH, and to neither of the other two keys', async () => {
+    const source = await fs.readFile(path.join(BUILT_COMMANDS, 'implement.md'), 'utf-8');
+
+    expect(payloadLine(source, 'PLAN_ARTIFACT_PATH')).toContain('.md');
+    expect(
+      payloadLine(source, 'ISSUE_INPUT'),
+      'the extension carve-out has to be stated where the issue value is produced',
+    ).toContain('.md');
+    // A path is one token, so without the carve-out the count gate alone would
+    // send it to ISSUE_INPUT.
+    expect(payloadLine(source, 'ISSUE_INPUT')).toMatch(/\bnot\b[^\n]*\.md|unless[^\n]*\.md|does not end in \.md/i);
+  });
+
   it('ISSUE_INPUT is offered before the TASK_DESCRIPTION fallback, in the same payload', async () => {
     const source = await fs.readFile(path.join(BUILT_COMMANDS, 'implement.md'), 'utf-8');
     const issueAt = source.indexOf('ISSUE_INPUT:');
@@ -2135,6 +2232,12 @@ describe('implement.md forwards the issue argument unclassified (§23)', () => {
       ['a `#` prefix test', 'ISSUE_INPUT: {issue if $ARGUMENTS starts with `#`, otherwise omit}'],
       ['a `#`-shaped pattern', 'ISSUE_INPUT: {the #{n} token from $ARGUMENTS}'],
       ['an issue-number noun', 'ISSUE_INPUT: {issue number from $ARGUMENTS}'],
+      // The exact line this command shipped before M-1. Provider-neutral, and it
+      // still sent `/implement fix the login bug` on as `ISSUE_INPUT: fix`.
+      [
+        'an unconditional first-token forward',
+        'ISSUE_INPUT: {the first $ARGUMENTS token verbatim, unless it ends in .md — then omit}',
+      ],
     ];
     expect(SHAPES.length, 'one shape per rule').toBe(CLASSIFIER_RULES.length);
     for (const [label, line] of SHAPES) {
@@ -2143,10 +2246,11 @@ describe('implement.md forwards the issue argument unclassified (§23)', () => {
         `"${line}" must be reported by the ${label} rule`,
       ).toBe(true);
     }
-    // …and the neutral forwarding instruction is not reported, nor is the same
+    // …and the shipped forwarding instruction is not reported, nor is the same
     // prose on a line that is not the ISSUE_INPUT key.
     expect(collectIssueInputClassifiers(
-      'ISSUE_INPUT: {the first $ARGUMENTS token verbatim, unless it ends in .md — then omit}',
+      'ISSUE_INPUT: {$ARGUMENTS verbatim, when it is a single whitespace-delimited token ' +
+      'that does not end in .md — otherwise omit}',
     )).toEqual([]);
     expect(collectIssueInputClassifiers('Capture the issue number the Git agent returns.')).toEqual([]);
   });
