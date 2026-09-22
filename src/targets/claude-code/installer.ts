@@ -6,7 +6,7 @@ import { DEVFLOW_PLUGINS, SKILL_NAMESPACE, prefixSkillName, unprefixSkillName, g
 import { skillsDir, agentSourceDirs, rulesDir, commandsDir, scriptsDir, compiledSkillRefsDir, type AgentSourceDirs } from '../../core/assets.js';
 import { getPackageRoot, isContainedIn } from '../../core/paths.js';
 import { sweepOrphanedAssets, mdFileName, mdEntryName, type SweepResult } from '../../core/orphan-sweep.js';
-import { generatedReferenceManifest, installedReferenceManifest, SKILL_REFS_SKILL_NAME } from '../../core/mds-variants.js';
+import { generatedReferenceManifest, installedReferenceManifest, PR_HOST_DESTINATION_ROOT, SKILL_REFS_SKILL_NAME } from '../../core/mds-variants.js';
 import { sweepOrphanedReferences, MAX_REFERENCE_SWEEP_DEPTH } from '../../core/reference-sweep.js';
 import { TRACKER_AGENT_NAME } from './tracker-install.js';
 
@@ -348,8 +348,42 @@ export async function chmodRecursive(dir: string, mode: number, _depth = 0): Pro
 // Generated skill-reference overlay
 // ---------------------------------------------------------------------------
 
-/** Sub-path under the references root that the prune converges to the manifest. */
+/** Sub-path under the references root holding the per-provider tracker mechanics. */
 const TRACKER_SUBTREE = 'tracker';
+
+/**
+ * Every sub-path under the references root the prune converges to the manifest.
+ *
+ * D-CONVERGED-SUBTREES: a directory converges exactly when EVERY file in it is
+ * generated — that is the whole rule, and these two directories are the whole set that
+ * satisfies it today.
+ *
+ * `tracker/` holds the per-provider mechanics and `pr/` ({@link PR_HOST_DESTINATION_ROOT})
+ * the PR/review host bodies; the build emits both wholesale, so anything inside them the
+ * manifest does not name is by construction a leftover — a retired op, a provider the
+ * selection dropped, a shadow-supplied file, a staging tree a crashed run stranded — and
+ * removing it is the only way the installed tree can equal the manifest. `pr/` is wanted
+ * under EVERY provider (applies ADR-026), so a provider switch neither adds nor removes
+ * the directory; what it converges is the directory's CONTENTS, exactly as `tracker/`'s
+ * are converged.
+ *
+ * The references ROOT is the exemption, and the reason is the inverse of the rule: it
+ * holds hand-authored documents (`github-api.md`, `violations.md`, …) beside the flat
+ * generated ones with no manifest of which names are hand-authored, so a prune there
+ * cannot tell a retired generated document from a reference the skill has always shipped
+ * (D-OVERLAY-FLAT-UNIT). The root is overlaid and never pruned; the full-install
+ * pre-clean is what reaches a stale file there ({@link overlayOwnedSkillPaths}).
+ *
+ * An explicit list rather than "every top-level directory the manifest names", which
+ * would be self-maintaining and is still the wrong rule: a subtree the manifest stops
+ * naming ENTIRELY would drop out of a derived set and keep its whole installed tree,
+ * which is the retirement case this prune exists for. Listed here, the same subtree
+ * converges to empty. The cost is one entry per new wholly-generated directory — and on
+ * this side that entry is the whole edit, because the prune and everything downstream of
+ * it read the list rather than a subtree of their own (avoids PF-015 — a fan-out that
+ * converges some of its artifacts and not the others).
+ */
+const CONVERGED_SUBTREES = [TRACKER_SUBTREE, PR_HOST_DESTINATION_ROOT] as const;
 
 /**
  * Which document set an overlay unit covers.
@@ -454,7 +488,11 @@ export interface ReferenceOverlayResult {
   unchangedRefs: string[];
   /** Units this run did not refresh, each carrying the state it was left in. */
   overlayFailures: OverlayFailure[];
-  /** Result of converging `references/tracker/**` to the manifest. */
+  /**
+   * Result of converging every {@link CONVERGED_SUBTREES} directory to the manifest,
+   * merged into one report. `removed` and `failed` names are relative to the references
+   * ROOT (`tracker/probe-provider`, `pr/stale.md`), so a name identifies the file.
+   */
   pruned: SweepResult;
 }
 
@@ -603,8 +641,8 @@ const STAGING_TOKEN = `${process.pid}-${Date.now().toString(36)}`;
  *
  * 1. The basename carries {@link STAGING_TOKEN}, so a concurrent run's staging tree is
  *    never the tree this one pre-cleans, builds into, or promotes.
- * 2. Both names resolve under `tracker/`, the subtree
- *    {@link prunePreservingRecoveryCopies} converges, so a staging tree stranded by a crash
+ * 2. Both names resolve under `tracker/`, one of the {@link CONVERGED_SUBTREES}, so a
+ *    staging tree stranded by a crash
  *    between `mkdir` and promotion is removed by the next run's prune. It HAS to be the
  *    prune that removes it, because (1) means no later run's pre-clean will ever look at
  *    that name again. A staging directory at the references root instead (say
@@ -1043,8 +1081,8 @@ async function requireGeneratedTree(sourceRoot: string, manifest: readonly strin
 }
 
 /**
- * Converge the tracker subtree to the manifest — unless that would delete a recovery
- * copy this same run just created.
+ * Converge ONE subtree to the manifest — unless that would delete a recovery copy this
+ * same run just created.
  *
  * A promotion whose restore failed leaves the unit's ONLY surviving copy in its `.old`
  * sibling, which sits inside the subtree this prune converges and which the manifest
@@ -1059,20 +1097,37 @@ async function requireGeneratedTree(sourceRoot: string, manifest: readonly strin
  * `.old`/`.tmp` names from the walk would mean a new exclusion option on
  * sweepOrphanedReferences, i.e. changing the shape of a module this concern does not own.
  *
+ * The skip is scoped to the subtree the recovery copy is IN, which is what makes it a
+ * skip rather than a blanket refusal: a backup stranded under `tracker/` says nothing
+ * about whether `pr/` can be converged, and a run that stopped converging both would
+ * leave orphans behind for a reason that never applied to one of them.
+ *
  * The skip is not silent. The unswept subtree is reported through `failed` — the same
  * channel that module uses for its own depth-bound breach — so nothing claims
- * convergence over ground it did not cover (avoids PF-009, PF-015). Orphans under
- * `tracker/` survive this install and the next one converges them.
+ * convergence over ground it did not cover (avoids PF-009, PF-015). Orphans under that
+ * subtree survive this install and the next one converges them.
+ *
+ * Every name this returns is relative to the references ROOT, not to the subtree it
+ * swept. The results of the {@link CONVERGED_SUBTREES} sweeps are merged into one
+ * {@link SweepResult}, and `stale.md` removed from `pr/` and `stale.md` removed from
+ * `tracker/` would otherwise reach the install report as one indistinguishable name —
+ * a report naming a file the user cannot find. It also puts the removals in the same
+ * coordinate system as the manifest that decided them and as the stranded-skip failure
+ * below, which has always named its subtree from the root.
  */
 async function prunePreservingRecoveryCopies(
-  trackerRoot: string,
+  referencesTarget: string,
+  subtree: string,
   manifest: readonly string[],
   overlayFailures: readonly OverlayFailure[],
 ): Promise<SweepResult> {
+  const subtreeRoot = underRoot(referencesTarget, subtree);
+  const prefix = `${subtree}/`;
+
   const stranded: string[] = [];
   for (const failure of overlayFailures) {
     if (failure.state.kind !== 'restore-failed') continue;
-    if (!isContainedIn(trackerRoot, failure.state.recoveryPath)) continue;
+    if (!isContainedIn(subtreeRoot, failure.state.recoveryPath)) continue;
     stranded.push(failure.state.recoveryPath);
   }
 
@@ -1081,12 +1136,12 @@ async function prunePreservingRecoveryCopies(
       scanned: 0,
       removed: [],
       failed: [{
-        name: TRACKER_SUBTREE,
+        name: subtree,
         error: new Error(
-          `${TRACKER_SUBTREE}: the stale-reference prune was skipped — a promotion that ` +
+          `${subtree}: the stale-reference prune was skipped — a promotion that ` +
           `could not be rolled back left the only surviving copy of its references in ` +
           `${stranded.join(', ')}, which this prune would delete in the same run that ` +
-          `named it as the way back. Orphaned references under ${TRACKER_SUBTREE}/ ` +
+          `named it as the way back. Orphaned references under ${prefix} ` +
           `survive this install; the next one converges them.`,
         ),
       }],
@@ -1095,21 +1150,63 @@ async function prunePreservingRecoveryCopies(
 
   // Keyed by relative path, because `tracker/{provider}/{op}.md` is what distinguishes
   // two providers' identically named files — the reason mdEntryName cannot serve here.
-  const prefix = `${TRACKER_SUBTREE}/`;
-  return sweepOrphanedReferences(
-    trackerRoot,
+  const swept = await sweepOrphanedReferences(
+    subtreeRoot,
     new Set(manifest.filter(p => p.startsWith(prefix)).map(p => p.slice(prefix.length))),
   );
+  return {
+    scanned: swept.scanned,
+    removed: swept.removed.map(rel => `${prefix}${rel}`),
+    failed: swept.failed.map(f => ({ name: `${prefix}${f.name}`, error: f.error })),
+  };
+}
+
+/**
+ * Converge every wholly-generated subtree, as one result.
+ *
+ * One {@link SweepResult} rather than one per subtree because a sweep result is a
+ * REPORT, and its three fields already answer the two questions any reader has —
+ * "what went" (`removed`, each name rooted at `references/`) and "what was left
+ * unconverged, and why" (`failed`). Splitting it per subtree would push that join onto
+ * {@link recordSweep} and `devflow tracker --set`'s summary line, neither of which has
+ * anything to say about which directory a reference used to live in.
+ *
+ * `scanned` sums, which keeps it the non-vacuity counter it is everywhere else: a run
+ * that scanned nothing scanned nothing in any subtree.
+ */
+async function pruneConvergedSubtrees(
+  referencesTarget: string,
+  manifest: readonly string[],
+  overlayFailures: readonly OverlayFailure[],
+): Promise<SweepResult> {
+  let scanned = 0;
+  const removed: string[] = [];
+  const failed: Array<{ name: string; error: unknown }> = [];
+
+  for (const subtree of CONVERGED_SUBTREES) {
+    const swept = await prunePreservingRecoveryCopies(
+      referencesTarget,
+      subtree,
+      manifest,
+      overlayFailures,
+    );
+    scanned += swept.scanned;
+    removed.push(...swept.removed);
+    failed.push(...swept.failed);
+  }
+
+  return { scanned, removed, failed };
 }
 
 /**
  * Converge an installed `devflow:git` references directory onto the generated tree.
  *
- * Converge, not merge — for the `tracker/` subtree, which is the whole of what converges.
+ * Converge, not merge — for every wholly-generated subtree ({@link CONVERGED_SUBTREES}).
  * Every unit is rebuilt from the generated sources and swapped in atomically, and anything
- * under `references/tracker/**` that the manifest does not name is then removed: a shadow
- * that supplies its own file under that subtree does not keep it (AC-2.4c), and a provider
- * directory the manifest stops listing is gone rather than left to rot (GAP-24).
+ * under one of those subtrees that the manifest does not name is then removed: a shadow
+ * that supplies its own file under `tracker/` does not keep it (AC-2.4c), a provider
+ * directory the manifest stops listing is gone rather than left to rot (GAP-24), and a
+ * retired `pr/{op}.md` goes the same way for the same reason.
  *
  * The references ROOT is overlaid but never pruned, and that is where the guarantee stops.
  * The flat cross-cutting documents land beside hand-authored references with no manifest of
@@ -1200,11 +1297,7 @@ export async function overlayGeneratedReferences(opts: {
     overlaidRefs.push(...unit.files);
   }
 
-  const pruned = await prunePreservingRecoveryCopies(
-    path.join(opts.referencesTarget, TRACKER_SUBTREE),
-    manifest,
-    overlayFailures,
-  );
+  const pruned = await pruneConvergedSubtrees(opts.referencesTarget, manifest, overlayFailures);
 
   // D-OVERLAY-MODE-SCOPE: normalise the WHOLE references directory, not only the files
   // this run installed. copyDirectory preserves source modes, so a hand-authored
@@ -1240,9 +1333,11 @@ export async function overlayGeneratedReferences(opts: {
  * through here, and both converge to the same manifest for the same provider.
  *
  * Convergence is two-directional by construction, because the underlying overlay
- * PRUNES everything under `references/tracker/**` the manifest does not name: a
+ * PRUNES everything under its converged subtrees the manifest does not name: a
  * jira → github change removes the jira tree and `_mcp.md` in the same call that
- * refreshes the github tree (applies PF-015).
+ * refreshes the github tree (applies PF-015). `references/pr/` is wanted under
+ * every provider (applies ADR-026), so a provider change leaves it standing —
+ * converged, not removed.
  *
  * Throws on an absent generated tree, exactly as its callee does — that is a
  * build artifact that was never produced, not an I/O degradation, and the
@@ -1672,9 +1767,9 @@ export async function installViaFileCopy(options: FileCopyOptions): Promise<Inst
   //     the installed copy first leaves it nothing to compare against, so every unit is
   //     force-promoted and a re-init that changed nothing still reports the whole
   //     manifest as written (QA S2);
-  //   - the overlay PRUNES `references/tracker/**` down to the manifest and swaps each
-  //     unit atomically, so drift and orphans under that subtree are converged away
-  //     without the pre-clean reaching them at all.
+  //   - the overlay PRUNES every wholly-generated subtree (`tracker/`, `pr/`) down to the
+  //     manifest and swaps each unit atomically, so drift and orphans under those subtrees
+  //     are converged away without the pre-clean reaching them at all.
   // Everything else in the directory is still emptied, so a stale hand-authored skill
   // file — including a reference at the references ROOT, which the overlay may replace
   // but never delete (D-OVERLAY-FLAT-UNIT) — does not survive a full install.

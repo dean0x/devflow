@@ -37,7 +37,12 @@ import {
 import { formatOverlaySummary } from '../../src/cli/commands/install-report.js';
 import { sweepOrphanedReferences, MAX_REFERENCE_SWEEP_DEPTH } from '../../src/core/reference-sweep.js';
 import { compiledSkillRefsDir } from '../../src/core/assets.js';
-import { expandVariants, generatedReferenceManifest, installedReferenceManifest } from '../../src/core/mds-variants.js';
+import {
+  expandVariants,
+  generatedReferenceManifest,
+  installedReferenceManifest,
+  PR_HOST_DESTINATION_ROOT,
+} from '../../src/core/mds-variants.js';
 
 // ---------------------------------------------------------------------------
 // Harness
@@ -463,7 +468,10 @@ describe('converge-not-merge staged swap (GAP-24)', () => {
       second.pruned.scanned,
       'a prune that scanned nothing proves nothing (avoids PF-018)',
     ).toBeGreaterThan(0);
-    expect(second.pruned.removed).toContain('probe-provider');
+    // Named from the references ROOT, not from the subtree that was swept: the prune
+    // merges one sweep per converged subtree, and a bare `probe-provider` would not say
+    // which of them it came out of.
+    expect(second.pruned.removed).toContain('tracker/probe-provider');
     // Positive half: the retained set survived the prune.
     for (const rel of manifest.filter(p => p.startsWith('tracker/github/'))) {
       expect(await exists(abs(target, rel)), `${rel} must survive the prune`).toBe(true);
@@ -605,7 +613,7 @@ describe('converge-not-merge staged swap (GAP-24)', () => {
       'a partial copy of the cross-cutting documents must not survive inside the installed skill',
     ).toBe(false);
     expect(next.pruned.removed, 'and the prune is what removed it')
-      .toContain('.cross-cutting.99999-crashedrun.tmp');
+      .toContain('tracker/.cross-cutting.99999-crashedrun.tmp');
 
     // Positive half: the successful path is unchanged by where staging lives. The source
     // did not move between the two runs, so every unit is reported unchanged rather than
@@ -674,6 +682,201 @@ describe('converge-not-merge staged swap (GAP-24)', () => {
     // Positive half: an install is not abandoned over one unwalked subtree (avoids PF-009).
     expect(result.overlayFailures).toEqual([]);
     expect([...result.overlaidRefs].sort()).toEqual([...manifest].sort());
+  });
+});
+
+// ---------------------------------------------------------------------------
+// D-CONVERGED-SUBTREES — `references/pr/` converges exactly like `references/tracker/`
+// ---------------------------------------------------------------------------
+
+describe('the PR-host subtree converges like the tracker subtree (D-CONVERGED-SUBTREES, #326)', () => {
+  const PR_PREFIX = `${PR_HOST_DESTINATION_ROOT}/`;
+
+  /** A provider directory the real manifest does not list — same fixture rationale as above. */
+  const EXTRA_PROVIDER_MANIFEST = [
+    'tracker/probe-provider/comment.md',
+    'tracker/probe-provider/transition.md',
+  ] as const;
+
+  let sourceRoot: string;
+  let target: string;
+  let manifest: readonly string[];
+
+  beforeEach(async () => {
+    manifest = await requireBuiltReferences();
+    sourceRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'devflow-overlay-src-'));
+    target = await fs.mkdtemp(path.join(os.tmpdir(), 'devflow-overlay-dst-'));
+  });
+
+  afterEach(async () => {
+    await fs.rm(sourceRoot, { recursive: true, force: true });
+    await fs.rm(target, { recursive: true, force: true });
+  });
+
+  /**
+   * The prune as it stood BEFORE this change: one sweep, scoped to `tracker/` alone.
+   *
+   * This is the known-bad probe (applies ADR-024, avoids PF-018). Every other arm in
+   * this describe reads the INSTALLED tree, and no installed-tree observation
+   * distinguishes "converges `pr/`" from "does not" unless something is actually
+   * ORPHANED under `pr/` — a manifest-complete install looks identical under both rules,
+   * because the overlay's flat promotion writes every document either way. So the
+   * replaced rule is spelled out here and run against the same seeded orphan the real
+   * prune is run against: if the two ever stop disagreeing on that input, the arm below
+   * has stopped being a regression guard and says so.
+   *
+   * Spelled out rather than imported: `prunePreservingRecoveryCopies` is internal and
+   * should stay internal, and a probe that called the CURRENT function with a narrowed
+   * argument would track future edits to it — which is the opposite of what a frozen
+   * "how it used to be" rule is for.
+   */
+  async function pruneTrackerSubtreeOnly(
+    referencesTarget: string,
+    against: readonly string[],
+  ): Promise<{ removed: string[] }> {
+    const prefix = 'tracker/';
+    const swept = await sweepOrphanedReferences(
+      path.join(referencesTarget, 'tracker'),
+      new Set(against.filter(p => p.startsWith(prefix)).map(p => p.slice(prefix.length))),
+    );
+    return { removed: swept.removed };
+  }
+
+  /** The manifest's PR-host entries, proven non-empty. */
+  function prEntries(): string[] {
+    const entries = manifest.filter(p => p.startsWith(PR_PREFIX));
+    expect(
+      entries.length,
+      `the manifest carries nothing under ${PR_PREFIX} — every arm in this describe is ` +
+      'vacuous. Run `npm run build` first; if it is still empty, PR_HOST_OPS is gone and ' +
+      'this whole describe should go with it.',
+    ).toBeGreaterThan(0);
+    return entries;
+  }
+
+  it('the PR-host subtree is WHOLLY generated — the premise the prune rests on', () => {
+    // D-CONVERGED-SUBTREES converges a directory because every file in it is generated.
+    // `pr/` qualifies only while the manifest names a flat set of documents one level
+    // under it and the git skill ships no hand-authored file there; a hand-authored
+    // sibling would make the prune delete a file nobody generated.
+    for (const rel of prEntries()) {
+      expect(rel.split('/'), `${rel} must land directly in ${PR_PREFIX}`).toHaveLength(2);
+    }
+    expect(
+      planOverlayUnits(manifest).filter(u => u.kind === 'cross-cutting' && u.dir === PR_HOST_DESTINATION_ROOT),
+      `${PR_PREFIX} must plan as exactly one flat unit`,
+    ).toHaveLength(1);
+  });
+
+  it('a stale file under pr/ the manifest does not name is removed, and named from the root', async () => {
+    await stageSource(sourceRoot, manifest);
+    const first = await overlayGeneratedReferences({ referencesTarget: target, sourceRoot, manifest });
+    expect(first.overlayFailures, 'the seeding install must succeed').toEqual([]);
+
+    // A document a retired op left behind — or a shadow supplied. It survives the flat
+    // promotion by construction (that arm renames only the documents the manifest names),
+    // so the prune is the only thing that can remove it.
+    const stale = abs(target, `${PR_PREFIX}retired-op.md`);
+    await fs.writeFile(stale, '# left by an older build\n', 'utf-8');
+
+    const second = await overlayGeneratedReferences({ referencesTarget: target, sourceRoot, manifest });
+
+    expect(await exists(stale), 'a file the manifest does not name must not survive under pr/').toBe(false);
+    expect(
+      second.pruned.scanned,
+      'a prune that scanned nothing proves nothing (avoids PF-018)',
+    ).toBeGreaterThan(0);
+    expect(second.pruned.removed).toContain(`${PR_PREFIX}retired-op.md`);
+
+    // Positive half: the generated set survived the prune that removed its neighbour.
+    for (const rel of prEntries()) {
+      expect(await exists(abs(target, rel)), `${rel} must survive the prune`).toBe(true);
+    }
+  });
+
+  it('known-bad probe: the replaced tracker-only prune leaves that same file standing', async () => {
+    await stageSource(sourceRoot, manifest);
+    await overlayGeneratedReferences({ referencesTarget: target, sourceRoot, manifest });
+    const stale = abs(target, `${PR_PREFIX}retired-op.md`);
+    await fs.writeFile(stale, '# left by an older build\n', 'utf-8');
+
+    const replaced = await pruneTrackerSubtreeOnly(target, manifest);
+
+    expect(
+      await exists(stale),
+      'the replaced rule must really leave this standing, or the arm above proves nothing',
+    ).toBe(true);
+    expect(replaced.removed, 'and it never even names it').toEqual([]);
+
+    // The two rules must still AGREE on the tracker subtree — the probe is narrow, not
+    // a claim that the old rule swept nothing.
+    const trackerStale = abs(target, 'tracker/retired-op.md');
+    await fs.writeFile(trackerStale, '# left by an older build\n', 'utf-8');
+    expect((await pruneTrackerSubtreeOnly(target, manifest)).removed).toContain('retired-op.md');
+  });
+
+  it('a generated pr/{op}.md deleted from the install is put back by the next overlay', async () => {
+    await stageSource(sourceRoot, manifest);
+    await overlayGeneratedReferences({ referencesTarget: target, sourceRoot, manifest });
+
+    const [victim] = prEntries();
+    const canonical = await fs.readFile(abs(target, victim));
+    await fs.rm(abs(target, victim));
+
+    const second = await overlayGeneratedReferences({ referencesTarget: target, sourceRoot, manifest });
+
+    expect(second.overlayFailures).toEqual([]);
+    expect((await fs.readFile(abs(target, victim))).equals(canonical), `${victim} must be restored byte-for-byte`).toBe(true);
+    // Reported as WRITTEN, never hidden behind an unchanged count (AC-23): the flat unit
+    // is promoted whole, so every one of its documents is named here.
+    expect(second.overlaidRefs, 'the restored document must be reported as written').toContain(victim);
+    expect(second.unchangedRefs).not.toContain(victim);
+  });
+
+  it('a backup stranded under tracker/ skips THAT subtree only — pr/ still converges', async () => {
+    const wide = [...manifest, ...EXTRA_PROVIDER_MANIFEST];
+    await stageSource(sourceRoot, wide);
+    const seeded = await overlayGeneratedReferences({ referencesTarget: target, sourceRoot, manifest: wide });
+    expect(seeded.overlayFailures, 'the seeding install must succeed').toEqual([]);
+
+    // One orphan in each converged subtree, both placed where no unit promotion can reach
+    // them: `tracker/` and `pr/` are flat units, whose promotion renames only the
+    // documents the manifest names. Whatever removes these is the prune.
+    const trackerStale = abs(target, 'tracker/retired-op.md');
+    const prStale = abs(target, `${PR_PREFIX}retired-op.md`);
+    await fs.writeFile(trackerStale, '# stale\n', 'utf-8');
+    await fs.writeFile(prStale, '# stale\n', 'utf-8');
+
+    // Only the probe provider drifts, so it is the one unit that reaches a promotion —
+    // and the one whose restore can be made to fail (AC-23).
+    await fs.appendFile(abs(sourceRoot, 'tracker/probe-provider/comment.md'), '\n<!-- drifted -->\n');
+
+    const realRename = fs.rename.bind(fs);
+    const stagingOrBackup = /(^|[/\\])probe-provider(\..+)?\.(tmp|old)$/;
+    const renameSpy = vi.spyOn(fs, 'rename').mockImplementation(async (from, to) => {
+      if (stagingOrBackup.test(String(from))) throw new Error('EIO: simulated rename failure');
+      return realRename(from, to);
+    });
+
+    let result;
+    try {
+      result = await overlayGeneratedReferences({ referencesTarget: target, sourceRoot, manifest: wide });
+    } finally {
+      renameSpy.mockRestore();
+    }
+
+    // The stranded copy is under `tracker/`, so `tracker/` is skipped and says so …
+    expect(result.overlayFailures.map(f => f.state.kind)).toEqual(['restore-failed']);
+    expect(result.pruned.failed.map(f => f.name)).toEqual(['tracker']);
+    expect(
+      await exists(trackerStale),
+      'the skipped subtree keeps its orphans — that is what "skipped" means',
+    ).toBe(true);
+
+    // … and `pr/` — which the stranded backup says nothing about — is converged anyway.
+    // A blanket refusal would leave this standing for a reason that never applied to it.
+    expect(await exists(prStale), 'pr/ has no stranded copy, so its prune must still run').toBe(false);
+    expect(result.pruned.removed).toEqual([`${PR_PREFIX}retired-op.md`]);
   });
 });
 

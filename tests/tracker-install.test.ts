@@ -32,7 +32,7 @@ import {
   type TrackerSetIO,
 } from '../src/cli/commands/tracker.js';
 import type { TrackerProvider, TrackerResult, TrackerTransition } from '../src/core/tracker.js';
-import { installedReferenceManifest } from '../src/core/mds-variants.js';
+import { installedReferenceManifest, PR_HOST_DESTINATION_ROOT } from '../src/core/mds-variants.js';
 import { compiledSkillRefsDir } from '../src/core/assets.js';
 
 let claudeDir: string;
@@ -235,6 +235,13 @@ describe('overlayInstalledReferences: the provider-scoped subtree', () => {
       after.filter(r => r.startsWith('tracker/github/')).length,
       'github is the floor under every provider — PR hosting does not move',
       ).toBe(installedReferenceManifest({ provider: 'github' }).filter(r => r.startsWith('tracker/github/')).length);
+    // The PR-host tree is wanted under EVERY provider (applies ADR-026), so a swap
+    // converges its contents and never adds or removes the directory itself
+    // (D-CONVERGED-SUBTREES, #326).
+    const prPrefix = `${PR_HOST_DESTINATION_ROOT}/`;
+    expect(after.filter(r => r.startsWith(prPrefix))).toEqual(
+      [...installedReferenceManifest({ provider: 'linear' })].filter(r => r.startsWith(prPrefix)).sort(),
+    );
   });
 
   it('narrowing to github prunes _mcp.md and both provider trees', async () => {
