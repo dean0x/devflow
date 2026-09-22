@@ -441,6 +441,53 @@ export function worstCaseNonTrackerLoad(): OpMax {
   return maxOver(nonTracker, oneSpawnLoad);
 }
 
+/**
+ * D-LOADED-SET-SCOPE, the written half — the references a loaded-set row does not
+ * charge, DECLARED as a list rather than filtered inline, so the exclusion is
+ * something a reviewer can read and disagree with.
+ *
+ * `references/github-api.md` is the only member. It is GitHub CLI, GraphQL and
+ * rate-limit recipe prose that `fetch-review-threads` and `resolve-review-threads`
+ * loaded long before any split existed. #326 moved the step that NAMES it out of
+ * the agent and into `references/pr/{op}.md`, which changed which file spells the
+ * name and nothing at all about what a spawn pays. Charging it to the PR-host row
+ * would make that row a measure of a file this work neither wrote nor edited, and
+ * would bury what the row does measure — the `pr/` bodies, none of which reaches
+ * 4_500 ch — under a term four times their size.
+ *
+ * What the exclusion owes in return (ADR-025): the excluded term is RECORDED, not
+ * dropped. Shape `2c-ex` of the four-shape table prints the same maximum with
+ * this file charged, and the file's own size is pinned by equality as
+ * GITHUB_API_MD_CHARS in tests/tracker/byte-budget.test.ts — so an exclusion can
+ * never become a place a reference grows unwatched.
+ */
+export const LOADED_SET_WRITTEN_EXCLUSIONS: readonly string[] = ['github-api.md'];
+
+/**
+ * `max over PR_HOST_OPS of ( sum of every reference that op can name in one spawn )`
+ * — the PR-host path's own term.
+ *
+ * ITS OWN ROW, for the reason each provider has one (D-LOADED-SET-PER-PROVIDER).
+ * `references/pr/` is installed under EVERY tracker because pull requests, PR
+ * reviews and PR checks stay on GitHub whatever issues the project files
+ * elsewhere. So a PR operation costs the same bytes on all three paths, and
+ * folding it into the per-provider rows would price one cost three times while
+ * leaving the shape a reader actually asks about — what does a PR spawn load? —
+ * printed nowhere.
+ *
+ * `exclusions` is a parameter rather than a closed-over constant so the recorded
+ * `2c-ex` row can ask THIS function for the unexcluded figure. One measurement
+ * read two ways, instead of a second near-copy free to drift from it.
+ */
+export function worstCasePrHostLoad(
+  exclusions: readonly string[] = LOADED_SET_WRITTEN_EXCLUSIONS,
+): OpMax {
+  return maxOver(PR_HOST_OPS, op =>
+    [...summedFor(op)]
+      .filter(rel => !exclusions.includes(rel))
+      .reduce((n, rel) => n + referenceChars(rel), 0));
+}
+
 /** max_op chars(references/tracker/github/{op}.md) — the largest single mechanics file. */
 export function largestTrackerReference(): OpMax {
   return maxOver(TRACKER_GITHUB_OPS, op => referenceChars(trackerRefRel(op)));
