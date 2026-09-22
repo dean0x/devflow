@@ -43,6 +43,7 @@ import * as path from 'path';
 
 import { agentsDir, commandsDir, compiledAgentsDir, compiledSkillRefsDir, skillsDir } from '../../src/core/assets.js';
 import {
+  PR_HOST_DESTINATION_ROOT,
   TRACKER_GITHUB_OPS,
   TRACKER_OPS,
   MCP_BACKED_PROVIDER_SUBDIRS,
@@ -420,6 +421,11 @@ describe('provider-scope: no Jira or Linear literal outside the provider map (§
       'dist/agents/git.md',
       'dist/commands/',
       'dist/skills/git/references/tracker/github/',
+      // The PR-host tree is provider-NEUTRAL: it is installed under every
+      // provider, so a jira or linear literal there would be read by users of a
+      // third tracker as if it were theirs. It belongs in this list for a
+      // stronger reason than the github tree does, not a weaker one.
+      `dist/skills/git/references/${PR_HOST_DESTINATION_ROOT}/`,
       `${SRC_AGENTS_LABEL}/`,
       'src/assets/commands/',
     ];
@@ -453,6 +459,10 @@ describe('provider-scope: no Jira or Linear literal outside the provider map (§
       {
         path: 'dist/skills/git/references/tracker/github/seed.md',
         content: 'If the tracker is Jira, fall back to the label map.\n',
+      },
+      {
+        path: `dist/skills/git/references/${PR_HOST_DESTINATION_ROOT}/seed.md`,
+        content: 'Under Linear, skip the merge-readiness probe.\n',
       },
       { path: `${SRC_AGENTS_LABEL}/seed.md`, content: 'Resolve the jira project key.\n' },
       { path: 'src/assets/commands/seed.mds', content: 'Ask which Linear team owns the ticket.\n' },

@@ -418,7 +418,7 @@ Load when the resolved tracker provider is `github` and the operation is `post-w
 
 Load when the resolved tracker provider is `github` and the operation is `ensure-pr-ready`.
 
-**Mechanics held here:** the whole of step 4b — the open-PR lookup, the issue-number resolution order, the `Closes #\{n\}` line it renders, and the scrub-then-edit that publishes the updated body. The operation's other steps stay with it.
+**Mechanics held here:** the whole of step 4b — the open-PR lookup, the issue-number resolution order, the `Closes #\{n\}` line it renders, and the scrub-then-edit that publishes the updated body. The operation's other steps are PR-host mechanics and live in `references/pr/ensure-pr-ready.md`.
 
 ### Process
 

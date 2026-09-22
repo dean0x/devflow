@@ -146,7 +146,7 @@ describe('generated reference manifest (bidirectional registry doctrine)', () =>
     expect(
       manifest.length,
       'a manifest short enough to enumerate by hand makes every convergence assertion vacuous',
-    ).toBeGreaterThanOrEqual(34);
+    ).toBeGreaterThanOrEqual(42);
     expect(manifest).toContain('tracker/github/setup-task.md');
     expect(manifest).toContain('decision-markers.md');
     expect(manifest.filter(p => p.startsWith('tracker/github/')).length).toBeGreaterThanOrEqual(10);
@@ -498,7 +498,7 @@ describe('converge-not-merge staged swap (GAP-24)', () => {
     await overlayGeneratedReferences({ referencesTarget: target, sourceRoot, manifest });
 
     const files = (await walkTree(target)).filter(p => !p.endsWith('/'));
-    expect(files.length, 'no files installed — the mode assertion would be vacuous').toBeGreaterThanOrEqual(34);
+    expect(files.length, 'no files installed — the mode assertion would be vacuous').toBeGreaterThanOrEqual(42);
     for (const rel of files) {
       const stat = await fs.stat(abs(target, rel));
       expect(stat.mode & 0o777, `${rel} must be normalised to 0644`).toBe(0o644);

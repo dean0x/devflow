@@ -33,6 +33,8 @@ import {
   TRACKER_GITHUB_OPS,
   GIT_CROSS_CUTTING_DOCS,
   MIN_VARIANT_PAIRS,
+  PR_HOST_DESTINATION_ROOT,
+  PR_HOST_OPS,
   VARIANT_MODULES,
   expandVariants,
   generatedReferenceManifest,
@@ -302,6 +304,46 @@ function collectLiteralReferenceNames(content: string): Set<string> {
   return names;
 }
 
+/** Named collector: the `pr/…` paths the agent spells out literally. */
+function collectPrHostNames(content: string): string[] {
+  return [...collectLiteralReferenceNames(content)]
+    .filter(rel => rel.startsWith(`${PR_HOST_DESTINATION_ROOT}/`))
+    .sort();
+}
+
+/** The `pr/…` path the registry emits for an op — derived, never retyped. */
+function prHostRel(op: string): string {
+  return `${PR_HOST_DESTINATION_ROOT}/${op}.md`;
+}
+
+/**
+ * Named collector: every manifest path a spawn reading `content` could name.
+ *
+ * FOUR arms, one per module kind the registry carries, and the live check and
+ * both known-bad probes drive this one function — a probe that rebuilt the union
+ * inline would stay green after an arm was dropped from the real check (PF-018).
+ *
+ *   fanout / tracker    instantiate the preamble's ONE templated instruction;
+ *   named               the agent spells the document's path out, once each;
+ *   fanout / PR-host    the agent spells each file's path out, once per op. Not
+ *                       templated on purpose: the file is the same under every
+ *                       provider, so there is nothing to instantiate — and a
+ *                       second templated instruction would be a second path
+ *                       composed from the provider token, which is the single
+ *                       convergence point PF-023 exists to protect;
+ *   contract            the preamble names it, as a fixed literal.
+ */
+function reachableSetFrom(content: string): Set<string> {
+  return new Set([
+    ...providerReachablePaths(LOAD_INSTRUCTION_TEMPLATE),
+    ...[...collectLiteralReferenceNames(content)].filter(rel =>
+      (GIT_CROSS_CUTTING_DOCS as readonly string[]).includes(path.basename(rel, '.md')),
+    ),
+    ...collectPrHostNames(content),
+    ...(contractIsNamedByThePreamble(content) ? [CONTRACT_REL] : []),
+  ]);
+}
+
 describe('generated references: every reference is reachable from the agent (AC-2.7)', () => {
   const agent = resolveAgentSource('git');
 
@@ -326,18 +368,7 @@ describe('generated references: every reference is reachable from the agent (AC-
     // generated, installed on every machine and shipped in the tarball, and a
     // cross-cutting document that lost its one naming line is exactly as invisible
     // as an orphan file.
-    const reachable = new Set([
-      // The 'fanout' module kind, for every registered provider: reachable ⇔
-      // instantiating the preamble's single templated instruction yields the path.
-      ...providerReachablePaths(LOAD_INSTRUCTION_TEMPLATE),
-      // The 'named' module kind: reachable ⇔ the compiled agent spells the path
-      // out literally. Read out of the agent, never restated here (PF-018).
-      ...[...collectLiteralReferenceNames(agent.content)].filter(rel =>
-        (GIT_CROSS_CUTTING_DOCS as readonly string[]).includes(path.basename(rel, '.md')),
-      ),
-      // The 'contract' module kind: reachable ⇔ the preamble names it.
-      ...(contractIsNamedByThePreamble(agent.content) ? [CONTRACT_REL] : []),
-    ]);
+    const reachable = reachableSetFrom(agent.content);
 
     const emitted = walkFiles(REFS_DIR, f => f.endsWith('.md'))
       .map(f => path.relative(REFS_DIR, f).split(path.sep).join('/'));
@@ -451,14 +482,80 @@ describe('generated references: every reference is reachable from the agent (AC-
     ).toBe(false);
 
     // …and the same set difference the live check computes now reports it.
-    const reachable = new Set([
-      ...providerReachablePaths(LOAD_INSTRUCTION_TEMPLATE),
-      ...[...namedInStripped].filter(rel =>
-        (GIT_CROSS_CUTTING_DOCS as readonly string[]).includes(path.basename(rel, '.md')),
-      ),
-      ...(contractIsNamedByThePreamble(stripped) ? [CONTRACT_REL] : []),
-    ]);
+    const reachable = reachableSetFrom(stripped);
     expect(generatedReferenceManifest().filter(rel => !reachable.has(rel))).toEqual([target]);
+  });
+
+  // ── The PR-host tree: parity, and its own reachability direction (#326) ────
+
+  it('PR-host parity: every PR_HOST_OPS entry has a non-trivial file, and every pr/ file has an op', () => {
+    // The same claim the provider trees carry, for the tree that belongs to no
+    // provider. Both directions, because the forward one alone lets a stray file
+    // ship unreferenced and the reverse one alone lets a listed op emit nothing —
+    // and a per-file size floor, because a reference that kept its heading and
+    // lost its body reads downstream as "mechanics unavailable" while the install
+    // reports success (GAP-44).
+    const emitted = walkFiles(path.join(REFS_DIR, PR_HOST_DESTINATION_ROOT), f => f.endsWith('.md'))
+      .map(f => path.relative(REFS_DIR, f).split(path.sep).join('/'))
+      .sort();
+    expect(
+      emitted,
+      'the pr/ tree and PR_HOST_OPS must be the same set in both directions',
+    ).toEqual([...PR_HOST_OPS].map(prHostRel).sort());
+    expect(
+      PR_HOST_OPS.length,
+      'the PR-host roster is below the fan-out floor — every parity assertion over it is vacuous',
+    ).toBeGreaterThanOrEqual(MIN_VARIANT_PAIRS);
+
+    for (const op of PR_HOST_OPS) {
+      const body = requireFile('PR-host reference', path.join(REFS_DIR, PR_HOST_DESTINATION_ROOT, `${op}.md`));
+      expect(
+        body.length,
+        `${prHostRel(op)} is ${body.length} ch — below MIN_REFERENCE_CHARS (${MIN_REFERENCE_CHARS})`,
+      ).toBeGreaterThanOrEqual(MIN_REFERENCE_CHARS);
+      expect(
+        body.startsWith(`## Operation: ${op}\n`),
+        `${prHostRel(op)} must OPEN with its own "## Operation: ${op}" anchor on line 1 — every ` +
+        'union-mode extraction starts there, and an anchor further down silently truncates the ' +
+        'section to whatever precedes it (PF-063)',
+      ).toBe(true);
+    }
+  });
+
+  it('PR-host parity known-bad probe: an anchor that is not on line 1 is reported', () => {
+    // The anchor rule is a prefix check, so on live inputs it is green whether or
+    // not the predicate is live (PF-064). Drive it over a seeded body instead.
+    const op = PR_HOST_OPS[0];
+    const displaced = `Load this first.\n\n## Operation: ${op}\n\nSteps.\n`;
+    expect(
+      displaced.startsWith(`## Operation: ${op}\n`),
+      'a body whose anchor is preceded by prose must NOT satisfy the line-1 rule',
+    ).toBe(false);
+  });
+
+  it('pr/ reachability: the agent names exactly the PR-host roster, both directions', () => {
+    expect(
+      collectPrHostNames(agent.content),
+      'the pr/ paths the agent spells out and the PR_HOST_OPS roster must be the same set — a ' +
+      'pointer with no file degrades every spawn of that op, and a file with no pointer is ' +
+      'installed on every machine and read by nothing (ADR-003)',
+    ).toEqual([...PR_HOST_OPS].map(prHostRel).sort());
+  });
+
+  it('pr/ reachability known-bad probe: deleting one pointer line makes its file unreachable', () => {
+    // The direction the parity arm above cannot see: the files stay emitted and
+    // the roster stays intact, and only the AGENT changed. Strips one op's pointer
+    // from a COPY and drives the SAME reachability collector the live check uses.
+    const target = prHostRel('check-ci-status');
+    const stripped = agent.content
+      .split('\n')
+      .filter(line => !line.includes(`references/${target}`))
+      .join('\n');
+    expect(stripped, 'the strip must actually change the agent copy').not.toBe(agent.content);
+    expect(
+      generatedReferenceManifest().filter(rel => !reachableSetFrom(stripped).has(rel)),
+      'an emitted pr/ file whose pointer line is gone must be reported as unreachable',
+    ).toEqual([target]);
   });
 
   it('known-bad probe: a seeded extra manifest entry is reported against the emitted tree', () => {

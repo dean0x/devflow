@@ -137,7 +137,7 @@ export const MDS_GENERATOR_HOSTS = ['git'] as const;
 
 /**
  * Reference modules: .mds sources under src/assets/mds/ that the build COMPILES,
- * each fanning out into MANY output files instead of one. Five today:
+ * each fanning out into MANY output files instead of one. Six today:
  *   src/assets/mds/tracker/_github.mds  → dist/skills/git/references/tracker/github/*.md
  *     (kind 'fanout' — one file per entry of TRACKER_OPS)
  *   src/assets/mds/tracker/_jira.mds    → dist/skills/git/references/tracker/jira/*.md
@@ -155,6 +155,10 @@ export const MDS_GENERATOR_HOSTS = ['git'] as const;
  *      GATED_REFERENCE_MODULE_SOURCES is the roster of modules the gate can hold
  *      back, and deferredReferenceModuleSources() is the subset it holds back for
  *      a given registry.)
+ *   src/assets/mds/git/_pr.mds          → dist/skills/git/references/pr/*.md
+ *     (kind 'fanout' — one file per entry of PR_HOST_OPS. Under no provider:
+ *      pull requests, PR reviews and PR checks stay on GitHub whatever the
+ *      issue tracker is, so these are the same eight files for everyone.)
  *   src/assets/mds/git/_references.mds  → dist/skills/git/references/*.md
  *     (kind 'named' — the cross-cutting documents, GIT_CROSS_CUTTING_DOCS)
  *
@@ -166,14 +170,15 @@ export const MDS_GENERATOR_HOSTS = ['git'] as const;
  * rather than one set with an exception.
  *
  * The emitted file set itself is not restated here: it is derived from
- * TRACKER_OPS / GIT_CROSS_CUTTING_DOCS in src/core/mds-variants.ts, so there is
- * one roster, not a production copy and a test copy that can drift.
+ * TRACKER_OPS / PR_HOST_OPS / GIT_CROSS_CUTTING_DOCS in src/core/mds-variants.ts,
+ * so there is one roster, not a production copy and a test copy that can drift.
  */
 export const MDS_REFERENCE_MODULES = [
   'src/assets/mds/tracker/_github.mds',
   'src/assets/mds/tracker/_jira.mds',
   'src/assets/mds/tracker/_linear.mds',
   'src/assets/mds/tracker/_mcp.mds',
+  'src/assets/mds/git/_pr.mds',
   'src/assets/mds/git/_references.mds',
 ] as const;
 

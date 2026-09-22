@@ -352,6 +352,57 @@ export const TRACKER_OPS = [
 export const TRACKER_GITHUB_OPS = TRACKER_OPS;
 
 /**
+ * The 8 PR/review operations whose mechanics are generated once, for every
+ * provider, under `pr/`.
+ *
+ * A PR-HOST roster, not a tracker roster, and the distinction is the whole
+ * reason this list exists separately from {@link TRACKER_OPS}: pull requests, PR
+ * reviews and PR checks stay on GitHub under every issue-tracker provider, so
+ * these steps are the SAME file whatever `TRACKER_PROVIDER` resolves to. Filing
+ * them under `tracker/github/` would make a jira user's PR mechanics read as
+ * their tracker's, and fanning them across the three provider directories would
+ * ship three identical trees.
+ *
+ * `ensure-pr-ready` is a member of BOTH rosters by design, and the two halves do
+ * not overlap: the PR skeleton (branch/commit/push, create, retitle) is a PR-host
+ * fact and lives here; the issue-number lookup and the link line it renders are
+ * tracker facts and live in `tracker/{provider}/ensure-pr-ready.md`. The
+ * operation carries one pointer to each.
+ *
+ * Exactly 8 entries, which is {@link MIN_VARIANT_PAIRS} exactly. That is a
+ * property, not a coincidence: the module cannot be grown an operation at a time,
+ * because a shorter roster makes every parity assertion over it vacuous (GAP-42,
+ * the PF-018 trap) and `expandVariants` refuses the build. Dropping an op from
+ * this list therefore fails the build on purpose rather than silently shrinking
+ * the guard surface.
+ */
+export const PR_HOST_OPS = [
+  'ensure-pr-ready',
+  'validate-branch',
+  'post-review-summary',
+  'check-ci-status',
+  'fetch-review-threads',
+  'resolve-review-threads',
+  'post-resolution-summary',
+  'check-merge-readiness',
+] as const;
+
+/**
+ * The destination directory the PR-host module lands under.
+ *
+ * Stated, exactly as {@link TRACKER_DESTINATION_ROOT} is, rather than derived
+ * from the module that writes there: it is a fact about where PR mechanics live
+ * in the reference tree, not something the registry can work out.
+ *
+ * Not to be confused with {@link PR_HOST_TRACKER_SUBDIR} (`tracker/github`),
+ * which is the TRACKER directory every install carries because PR hosting is on
+ * GitHub. This one is the provider-independent `pr/` directory itself — it is
+ * under no provider, and every install carries it for the same reason: a jira or
+ * linear user still opens pull requests.
+ */
+export const PR_HOST_DESTINATION_ROOT = 'pr';
+
+/**
  * How a module's emitted filenames are decided — and therefore whether the
  * MIN_VARIANT_PAIRS floor applies to it.
  *
@@ -462,6 +513,12 @@ export const VARIANT_MODULES = [
     subdir: 'tracker/linear',
     kind: 'fanout',
     ops: TRACKER_OPS,
+  },
+  {
+    source: 'src/assets/mds/git/_pr.mds',
+    subdir: PR_HOST_DESTINATION_ROOT,
+    kind: 'fanout',
+    ops: PR_HOST_OPS,
   },
   {
     source: 'src/assets/mds/git/_references.mds',
@@ -813,6 +870,11 @@ export function generatedReferenceManifest(): readonly string[] {
  *     mechanics stay reachable for a jira or linear user;
  *   - the cross-cutting documents (`subdir: ''`) are provider-independent and
  *     always land;
+ *   - the PR-host tree ({@link PR_HOST_DESTINATION_ROOT}) is provider-independent
+ *     for the same reason the GitHub tree is a floor — pull requests, PR reviews
+ *     and PR checks stay on GitHub under every issue tracker — but it sits under
+ *     no provider directory, so it is named here rather than reached through the
+ *     provider union;
  *   - a provider directory the user did not select is 11 files nothing they can
  *     reach ever loads (applies ADR-003 — ship the end state, not every state).
  *
@@ -853,7 +915,7 @@ export function installedReferenceManifest(opts: {
   }
 
   const providerSubdir = `${TRACKER_DESTINATION_ROOT}/${opts.provider}`;
-  const wanted = new Set(['', PR_HOST_TRACKER_SUBDIR, providerSubdir]);
+  const wanted = new Set(['', PR_HOST_DESTINATION_ROOT, PR_HOST_TRACKER_SUBDIR, providerSubdir]);
 
   const installed = expanded.value
     .filter(pair => wanted.has(subdirOfRelPath(pair.relPath)))

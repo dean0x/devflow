@@ -456,12 +456,12 @@ describe('formatTrackerAssetSummary', () => {
       provider: 'jira',
       previous: 'github',
       isDefault: false,
-      installedRefs: 24,
+      installedRefs: 32,
       removedRefs: 0,
       agent: 'installed',
     });
     expect(moved).toHaveLength(2);
-    expect(moved[1].message).toContain('+24 reference(s)');
+    expect(moved[1].message).toContain('+32 reference(s)');
     expect(moved[1].message).toContain('tracker agent installed');
   });
 
@@ -470,7 +470,7 @@ describe('formatTrackerAssetSummary', () => {
       provider: 'github',
       previous: 'linear',
       isDefault: true,
-      installedRefs: 13,
+      installedRefs: 21,
       removedRefs: 11,
       agent: 'removed',
     });

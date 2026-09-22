@@ -35,6 +35,7 @@ import * as path from 'path';
 
 import {
   GIT_CROSS_CUTTING_DOCS,
+  PR_HOST_DESTINATION_ROOT,
   TRACKER_GITHUB_OPS,
   VARIANT_MODULES,
   generatedReferenceManifest,
@@ -122,10 +123,23 @@ function collectRestatements(
 
 /** The generated per-provider mechanics files, as a labelled corpus. */
 function providerReferenceCorpus(): Array<{ label: string; content: string }> {
-  return walkFiles(path.join(REFS_DIR, 'tracker'), f => f.endsWith('.md')).map(file => ({
-    label: path.relative(REFS_DIR, file).split(path.sep).join('/'),
-    content: requireFile('generated reference', file),
-  }));
+  const trees = [
+    path.join(REFS_DIR, 'tracker'),
+    // The PR-host tree is NOT a provider tree, and it is scanned for the same
+    // reason (#326). A single-authority sentence restated in `pr/{op}.md` has the
+    // identical defect the tracker arm forbids — two homes for one rule — and is
+    // if anything worse, because a `pr/` file is installed and loadable under
+    // EVERY provider, so the restatement travels everywhere rather than to one
+    // provider's users. Scanning only `tracker/` left eight loadable files free
+    // to restate the D9 gate or the publication order verbatim.
+    path.join(REFS_DIR, PR_HOST_DESTINATION_ROOT),
+  ];
+  return trees.flatMap(dir =>
+    walkFiles(dir, f => f.endsWith('.md')).map(file => ({
+      label: path.relative(REFS_DIR, file).split(path.sep).join('/'),
+      content: requireFile('generated reference', file),
+    })),
+  );
 }
 
 /**
@@ -258,6 +272,13 @@ describe('shared-literal registry — one authority per normative sentence [DR-1
         `outside this corpus is a tree that may restate a single-authority sentence freely`,
       ).toBe(true);
     }
+    // …and the PR-host tree, by the same provenance rule: a count that the three
+    // provider trees already satisfy says nothing about whether `pr/` was read.
+    expect(
+      providers.some(entry => entry.label.startsWith(`${PR_HOST_DESTINATION_ROOT}/`)),
+      `the shared-literal negative arm never read ${PR_HOST_DESTINATION_ROOT}/ — those files are ` +
+      'loadable under every provider, so a restatement there reaches every user',
+    ).toBe(true);
 
     const restatements: string[] = [];
     for (const entry of SHARED_LITERAL_REGISTRY) {
@@ -281,6 +302,22 @@ describe('shared-literal registry — one authority per normative sentence [DR-1
       collectRestatements(SHARED_LITERAL_REGISTRY[0].sentence, seeded),
       'the collector must see a restatement in a provider file — otherwise the negative arm is inert',
     ).toEqual(['tracker/github/probe.md']);
+  });
+
+  it('known-bad probe: a seeded restatement in a PR-host file is reported by the same collector', () => {
+    // The widening above is only real if a `pr/` entry is actually subject to the
+    // predicate. Seeded rather than written to dist/ (PF-055), through the same
+    // collector both live arms call.
+    const label = `${PR_HOST_DESTINATION_ROOT}/probe.md`;
+    const seeded = [
+      ...providerReferenceCorpus(),
+      { label, content: `prelude\n${SHARED_LITERAL_REGISTRY[0].sentence}\ntail\n` },
+    ];
+    expect(
+      collectRestatements(SHARED_LITERAL_REGISTRY[0].sentence, seeded),
+      'the collector must see a restatement in a PR-host file — otherwise widening the corpus ' +
+      'changed what is read and not what is checked',
+    ).toEqual([label]);
   });
 });
 

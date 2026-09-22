@@ -26,6 +26,8 @@ import * as path from 'path';
 import { skillsDir, compiledSkillRefsDir } from '../../src/core/assets.js';
 import {
   MCP_BACKED_PROVIDER_SUBDIRS,
+  PR_HOST_DESTINATION_ROOT,
+  PR_HOST_OPS,
   TRACKER_GITHUB_OPS,
   TRACKER_OPS,
   VARIANT_MODULES,
@@ -128,6 +130,22 @@ export function trackerRefRel(op: string): string {
 }
 
 /**
+ * The generated PR-host mechanics file for an operation.
+ *
+ * One file, not one per provider: pull requests, PR reviews and PR checks stay on
+ * GitHub under every issue tracker, so a `pr/` reference costs the same on every
+ * path and enters every provider's sum identically.
+ */
+export function prRefRel(op: string): string {
+  return `${PR_HOST_DESTINATION_ROOT}/${op}.md`;
+}
+
+/** Whether an op's mechanics live (also) in the PR-host tree. */
+function isPrHostOp(op: string): boolean {
+  return (PR_HOST_OPS as readonly string[]).includes(op);
+}
+
+/**
  * The tracker providers whose mechanics reach the tracker through a TOOL CALL, and
  * therefore load `references/tracker/_mcp.md` on every spawn.
  *
@@ -185,17 +203,56 @@ function referenceMentions(text: string): string[] {
  *   - any literal `references/<name>.md` named inside the op's own section.
  * A templated mention inside a section is skipped: it is a restatement of the
  * preamble's instruction, not a second file.
+ *
+ * ONE HOP, and exactly one (#326). A `pr/` reference the op's own section names is
+ * itself loaded text, and what IT names is loaded in the same spawn — so pricing
+ * the reference without pricing what it pulls in would under-count exactly as the
+ * pre-[DR-12] formula did. `fetch-review-threads` is the case that forces it: its
+ * only `github-api.md` mention left git.md with step 1, so with no hop the model
+ * sums a file the scan can no longer see an op name.
+ *
+ * The hop does not recurse and must not: the term this feeds is a per-spawn cost,
+ * a fixed point over an unbounded chain is not a budget anyone could read, and a
+ * cycle in the reference graph would not terminate. Depth is therefore a constant
+ * here, not a parameter — if a `pr/` file ever needs a reference two hops deep,
+ * that is a modelling decision to take deliberately, not a loop bound to raise.
  */
-export function nameableFrom(op: string): Set<string> {
+export function nameableFrom(
+  op: string,
+  readReference: (rel: string) => string | null = readReferenceFromDisk,
+): Set<string> {
   const nameable = new Set<string>();
   if ((TRACKER_GITHUB_OPS as readonly string[]).includes(op)) {
     nameable.add(trackerRefRel(op));
   }
-  for (const rel of referenceMentions(SECTIONS.get(op) ?? '')) {
-    if (rel.includes('{')) continue;
+  const literalMentions = (text: string): string[] =>
+    referenceMentions(text).filter(rel => !rel.includes('{'));
+
+  for (const rel of literalMentions(SECTIONS.get(op) ?? '')) {
     nameable.add(rel);
   }
+  if (isPrHostOp(op)) {
+    const prRef = prRefRel(op);
+    const body = nameable.has(prRef) ? readReference(prRef) : null;
+    if (body !== null) {
+      for (const rel of literalMentions(body)) nameable.add(rel);
+    }
+  }
   return nameable;
+}
+
+/**
+ * The hop's default reader — and the seam its known-bad probe drives.
+ *
+ * Injected rather than read inline so the probe can seed a `pr/` body that names
+ * a file nothing models, WITHOUT writing into `dist/` mid-suite: vitest runs
+ * other files in parallel workers against those exact paths (PF-055). An absence
+ * check over a corpus nobody can perturb is green whether or not the hop runs
+ * (PF-064), which is precisely what the probe has to rule out.
+ */
+function readReferenceFromDisk(rel: string): string | null {
+  const resolved = resolveReference(rel);
+  return resolved === null ? null : readFileSync(resolved, 'utf-8');
 }
 
 // ---------------------------------------------------------------------------
@@ -309,6 +366,7 @@ export function summedFor(op: string): Set<string> {
   if ((TRACKER_GITHUB_OPS as readonly string[]).includes(op)) {
     summed.add(trackerRefRel(op));
   }
+  if (isPrHostOp(op)) summed.add(prRefRel(op));
   return summed;
 }
 
@@ -323,6 +381,9 @@ export function summedFor(op: string): Set<string> {
 function summedForProvider(provider: string, op: string): Set<string> {
   const summed = new Set<string>(MODEL_CROSS_CUTTING_REFS[op] ?? []);
   summed.add(providerRefRel(provider, op));
+  // The PR-host tree is provider-independent and installed under every provider,
+  // so it is the same addend on every path — not a GitHub-only cost.
+  if (isPrHostOp(op)) summed.add(prRefRel(op));
   return summed;
 }
 

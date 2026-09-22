@@ -20,6 +20,8 @@ import { getAllAgentNames } from '../src/core/plugins.js';
 import {
   TRACKER_GITHUB_OPS,
   GIT_CROSS_CUTTING_DOCS,
+  PR_HOST_DESTINATION_ROOT,
+  PR_HOST_OPS,
   VARIANT_MODULES,
 } from '../src/core/mds-variants.js';
 import { ROOT, resolveAgentSource, resolveAllAgents, gitAgentSinkCorpus, extractOpSectionFromCorpus, collectUnfencedH2, loadFile, requireDistFile, walkFiles, type CorpusEntry } from './helpers.js';
@@ -76,6 +78,57 @@ let sinkCorpusMemo: CorpusEntry[] | undefined;
 /** `gitAgentSinkCorpus()`, built once per module. */
 function cachedSinkCorpus(): CorpusEntry[] {
   return (sinkCorpusMemo ??= gitAgentSinkCorpus());
+}
+
+/** POSIX path prefix of the PR-host reference tree, derived from the registry. */
+const PR_HOST_PREFIX = `${PR_HOST_DESTINATION_ROOT}/`;
+
+/**
+ * The sink corpus with the PR-host references removed — the known-bad probe every
+ * guard #326 re-pointed from 'sole' to 'union' is proven live against (ADR-024,
+ * PF-018).
+ *
+ * A widening is only honest if dropping what it widened TO turns the guard red.
+ * Without this, `mode: 'union'` is indistinguishable from `mode: 'sole'` on a
+ * corpus that happens to still contain the literal somewhere, and ADR-025's
+ * classification collapses into "widen everything until green" — the exact
+ * failure that rule exists to forbid.
+ *
+ * Path-prefix matching on the corpus entry, not a re-read: every entry's `path`
+ * is the absolute file it was read from, so the discriminator is the directory
+ * the build wrote it to.
+ */
+/**
+ * `git.md` plus the PR-host references, and NOTHING else.
+ *
+ * The corpus for a guard whose literal moved in #326 and only in #326. Widening
+ * such a guard all the way to `gitAgentSinkCorpus()` would also hand it the three
+ * provider trees — text an earlier phase moved, for operations this commit never
+ * touched — and that is a blanket widening, not a classification (ADR-025). The
+ * observable cost is not theoretical: over the full sink corpus, `setup-task` is
+ * detected as remote-I/O through its PROVIDER mechanics, changing the subject of
+ * a guard about the agent's own degradation contract.
+ */
+function gitPlusPrHostCorpus(): CorpusEntry[] {
+  return cachedSinkCorpus().filter(
+    entry =>
+      entry.path === GIT_AGENT_PATH ||
+      entry.path.replace(/\\/g, '/').includes(`/references/${PR_HOST_PREFIX}`),
+  );
+}
+
+function sinkCorpusWithoutPrHost(): CorpusEntry[] {
+  const dropped = cachedSinkCorpus().filter(
+    entry => !entry.path.replace(/\\/g, '/').includes(`/references/${PR_HOST_PREFIX}`),
+  );
+  if (dropped.length === cachedSinkCorpus().length) {
+    throw new Error(
+      `sinkCorpusWithoutPrHost: dropped nothing — no corpus entry sits under references/` +
+      `${PR_HOST_PREFIX}, so every probe built on this helper is vacuous (PF-018). ` +
+      'Run `npm run build` so the PR-host references exist.',
+    );
+  }
+  return dropped;
 }
 
 // ── Inline-body (D11 bypass) scan ───────────────────────────────────────────
@@ -879,19 +932,43 @@ describe('git agent — static content guards (PF-018)', () => {
   // ── Guard 2: Load-bearing numeric bounds ────────────────────────────────────
 
   it('post-review-summary: 60000-char comment cap is present', () => {
-    const sec = extractOpSection(soleCorpus, 'post-review-summary', 'sole');
+    // Mode 'union' [DR-18], widened by #326: the compose step that states the cap
+    // moved to references/pr/post-review-summary.md, so the pin follows the text
+    // (ADR-025 — named here, at the call site, in the commit that moved it). The
+    // floor literal is unchanged; only the corpus widened.
+    const sec = extractOpSection(cachedSinkCorpus(), 'post-review-summary', 'union');
     expect(
       sec,
       'post-review-summary: missing 60000-char cap — GitHub rejects > 65536 chars; 4xx silent-skip would hide the failure',
     ).toContain('60000');
   });
 
+  it('post-review-summary: 60000-char cap known-bad probe — dropping the PR-host tree loses it', () => {
+    // ADR-024 / PF-018: the widening above is only honest if the literal is gone
+    // from the narrower corpus. If this ever passes, the cap came back to git.md
+    // and the guard should be re-classified 'sole', not left widened.
+    expect(
+      extractOpSection(sinkCorpusWithoutPrHost(), 'post-review-summary', 'union'),
+      'the 60000 cap must live ONLY in the PR-host reference — a second copy in git.md is a ' +
+      'second authority on the same bound',
+    ).not.toContain('60000');
+  });
+
   it('post-resolution-summary: 60000-char comment cap is present', () => {
-    const sec = extractOpSection(soleCorpus, 'post-resolution-summary', 'sole');
+    // Mode 'union' [DR-18], widened by #326 — same move, same reason as the
+    // sibling summary op above.
+    const sec = extractOpSection(cachedSinkCorpus(), 'post-resolution-summary', 'union');
     expect(
       sec,
       'post-resolution-summary: missing 60000-char cap',
     ).toContain('60000');
+  });
+
+  it('post-resolution-summary: 60000-char cap known-bad probe — dropping the PR-host tree loses it', () => {
+    expect(
+      extractOpSection(sinkCorpusWithoutPrHost(), 'post-resolution-summary', 'union'),
+      'the 60000 cap must live ONLY in the PR-host reference',
+    ).not.toContain('60000');
   });
 
   it('post-wave-report: 60000-char comment cap is present', () => {
@@ -927,11 +1004,27 @@ describe('git agent — static content guards (PF-018)', () => {
   });
 
   it('resolve-review-threads: ≤50 threads processing bound is present', () => {
-    const sec = extractOpSection(soleCorpus, 'resolve-review-threads', 'sole');
+    // Mode 'union' [DR-18], widened by #326: the bounded loop text moved to
+    // references/pr/resolve-review-threads.md. 'sole' would still PASS here — the
+    // op's retained `**Output:**` enum spells `≤50` in its TRUNCATED arm — which
+    // is precisely why it must not stay 'sole': the guard would be pinning an
+    // output label while the bound it is named for had gone (ADR-025).
+    const sec = extractOpSection(cachedSinkCorpus(), 'resolve-review-threads', 'union');
     expect(
       sec,
       'resolve-review-threads: missing ≤50 threads bound — unbounded mutation calls violate the GitHub rate contract',
     ).toMatch(/≤50/);
+  });
+
+  it('resolve-review-threads: ≤50 bound known-bad probe — the loop text is in the PR-host tree', () => {
+    // The accidental-pass hazard above, made mechanical: dropping the PR-host tree
+    // must lose the LOOP's statement of the bound. The retained Output enum is
+    // allowed to keep the token, so the probe asks for the loop's own sentence.
+    expect(
+      extractOpSection(sinkCorpusWithoutPrHost(), 'resolve-review-threads', 'union'),
+      'the bounded-loop statement must live in the PR-host reference — if git.md still carries ' +
+      'it, re-classify this guard rather than leaving it widened',
+    ).not.toContain('sequentially, ≤50, 1s between operations');
   });
 
   // AC-0.3 named these three assertions as Guard 2's pinning test for
@@ -990,11 +1083,24 @@ describe('git agent — static content guards (PF-018)', () => {
   });
 
   it('fetch-review-threads: ≤2-page / 100-thread GraphQL bound is present', () => {
-    const sec = extractOpSection(soleCorpus, 'fetch-review-threads', 'sole');
+    // Mode 'union' [DR-18], widened by #326: step 1 — which states the bound and
+    // the cursor trap that makes it real — moved to
+    // references/pr/fetch-review-threads.md. The op's purpose line in git.md still
+    // says "bounded: ≤2 pages of 50", so this would pass 'sole' too; the widening
+    // is what keeps the guard attached to the STEP rather than to the blurb.
+    const sec = extractOpSection(cachedSinkCorpus(), 'fetch-review-threads', 'union');
     expect(
       sec,
       'fetch-review-threads: missing ≤2-page / 100-thread GraphQL bound — unbounded pagination can exhaust rate limits',
     ).toMatch(/2 pages of 50|100 max|≤2 pages/);
+  });
+
+  it('fetch-review-threads: ≤2-page bound known-bad probe — the cursor trap is in the PR-host tree', () => {
+    expect(
+      extractOpSection(sinkCorpusWithoutPrHost(), 'fetch-review-threads', 'union'),
+      'the cursor-correctness trap is what makes the ≤2-page bound yield 100 DISTINCT threads; ' +
+      'it must live with the step, in the PR-host reference',
+    ).not.toContain('Cursor correctness trap');
   });
 
   // Guard 2's four learn-conventions bound pins read the MOVED copy.
@@ -1322,7 +1428,10 @@ describe('git agent — static content guards (PF-018)', () => {
   // ── Guard 5: Dedup marker formats ───────────────────────────────────────────
 
   it('review-summary dedup marker uses cycle:{N} ts: pair form', () => {
-    const sec = extractOpSection(soleCorpus, 'post-review-summary', 'sole');
+    // Mode 'union' [DR-18], widened by #326: both the dedup SEARCH (step 1) and
+    // the marker's two template renderings (step 5) moved to the PR-host
+    // reference, so every site of the literal is there now.
+    const sec = extractOpSection(cachedSinkCorpus(), 'post-review-summary', 'union');
     expect(
       sec,
       'review-summary dedup: missing "devflow:review-summary cycle:{N} ts:" marker pair — changing either token breaks idempotency for existing comments',
@@ -1330,11 +1439,27 @@ describe('git agent — static content guards (PF-018)', () => {
   });
 
   it('resolution-summary dedup marker uses ts: form', () => {
-    const sec = extractOpSection(soleCorpus, 'post-resolution-summary', 'sole');
+    // Mode 'union' [DR-18], widened by #326 — same move as the sibling above.
+    const sec = extractOpSection(cachedSinkCorpus(), 'post-resolution-summary', 'union');
     expect(
       sec,
       'resolution-summary dedup: missing "devflow:resolution-summary ts:" marker — changing this format breaks idempotency for existing comments',
     ).toContain('devflow:resolution-summary ts:');
+  });
+
+  it('dedup marker FORM known-bad probe — both marker literals left git.md with their steps', () => {
+    // ADR-024 / PF-018 for the pair above. Neither marker may survive in git.md:
+    // an op that restates its own dedup marker in the contract is the GAP-20 shape
+    // (two authorities on one idempotency key).
+    const narrowed = sinkCorpusWithoutPrHost();
+    expect(
+      extractOpSection(narrowed, 'post-review-summary', 'union'),
+      'devflow:review-summary must live only in the PR-host mechanics',
+    ).not.toMatch(/devflow:review-summary cycle:/);
+    expect(
+      extractOpSection(narrowed, 'post-resolution-summary', 'union'),
+      'devflow:resolution-summary must live only in the PR-host mechanics',
+    ).not.toContain('devflow:resolution-summary ts:');
   });
 
   // ── Guard 6: D10 publication visibility gate ─────────────────────────────
@@ -1352,52 +1477,90 @@ describe('git agent — static content guards (PF-018)', () => {
     ).toContain('## Publication gate (D10)');
   });
 
-  it('D10: gh repo view --json visibility probe command is present', () => {
-    expect(
-      content,
-      'D10: missing "gh repo view --json visibility" — the visibility probe is the sole mechanism for determining FULL vs STUB mode',
-    ).toContain('gh repo view --json visibility');
+  // The four literals below used to be asserted over the whole of `git.md`, where
+  // a file-scoped `toContain` could not say WHICH operation carried the control.
+  // #326 moved both summary operations' step 3 (the probe, the three visibility
+  // values, the fail-closed rule) and step 5 (the stub template) into the PR-host
+  // references, so the honest successor is a per-op loop over each summary op's
+  // UNION section: the control must be reachable from the operation that applies
+  // it, not merely present somewhere on the spawn surface. PF-058's shape — a
+  // containment control is owed by each op independently — asserted per op rather
+  // than once for the file.
+  const D10_SUMMARY_OPS = ['post-review-summary', 'post-resolution-summary'] as const;
+
+  /** Every D10 literal each summary op must be able to reach, with its reason. */
+  const D10_PER_OP_LITERALS: readonly { readonly literal: string; readonly why: string }[] = [
+    {
+      literal: 'gh repo view --json visibility',
+      why: 'the visibility probe is the sole mechanism for determining FULL vs STUB mode',
+    },
+    { literal: 'PRIVATE', why: 'removing a visibility value silently disables a gate branch' },
+    { literal: 'INTERNAL', why: 'removing a visibility value silently disables a gate branch' },
+    { literal: 'PUBLIC', why: 'removing a visibility value silently disables a gate branch' },
+    {
+      literal: 'treat as PUBLIC',
+      why: 'the fail-closed rule — any probe error must default to STUB, never FULL',
+    },
+    {
+      literal: 'Full summary withheld (public repository).',
+      why: 'changing this line alters the stub template seen by PR reviewers',
+    },
+  ];
+
+  it('D10: every summary op reaches the probe, the three visibility values, the fail-closed rule and the stub sentence', () => {
+    // Mode 'union' [DR-18], widened by #326 — named here, at the call site, in the
+    // commit that moved the text (ADR-025).
+    for (const op of D10_SUMMARY_OPS) {
+      const sec = extractOpSection(cachedSinkCorpus(), op, 'union');
+      for (const { literal, why } of D10_PER_OP_LITERALS) {
+        expect(sec, `D10: ${op} cannot reach "${literal}" — ${why}`).toContain(literal);
+      }
+    }
   });
 
-  it('D10: PRIVATE, INTERNAL, and PUBLIC visibility values are all named in the gate logic', () => {
-    // All three canonical GitHub visibility values must appear; removing one silently disables a gate branch
-    expect(content, 'D10: PRIVATE not documented').toContain('PRIVATE');
-    expect(content, 'D10: INTERNAL not documented').toContain('INTERNAL');
-    expect(content, 'D10: PUBLIC not documented').toContain('PUBLIC');
-  });
-
-  it('D10: fail-closed rule "treat as PUBLIC" is present', () => {
+  it('D10 known-bad probe: deleting one literal from ONE pr/ file is reported for that op only', () => {
+    // ADR-024 / PF-018. Seeds a corpus in which post-review-summary's PR-host
+    // mechanics have lost the fail-closed rule, and asserts the same per-op
+    // predicate the live guard uses reports exactly that op. A file-scoped
+    // `toContain` over git.md ∪ references could not: the sibling op's copy of
+    // the same sentence would keep it green.
+    const PROBE = 'treat as PUBLIC';
+    const seeded: CorpusEntry[] = cachedSinkCorpus().map(entry =>
+      entry.path.replace(/\\/g, '/').endsWith(`/${PR_HOST_PREFIX}post-review-summary.md`)
+        ? { path: entry.path, content: entry.content.split(PROBE).join('treat as WHATEVER') }
+        : entry,
+    );
+    const reached = D10_SUMMARY_OPS.filter(
+      op => extractOpSection(seeded, op, 'union').includes(PROBE),
+    );
     expect(
-      content,
-      'D10: missing "treat as PUBLIC" fail-closed rule — any probe error must default to STUB (not FULL)',
-    ).toContain('treat as PUBLIC');
-  });
-
-  it('D10: stub-withheld sentence is present', () => {
-    expect(
-      content,
-      'D10: missing "Full summary withheld (public repository)." — changing this line alters the stub template seen by PR reviewers',
-    ).toContain('Full summary withheld (public repository).');
+      reached,
+      'the per-op predicate must lose exactly the op whose mechanics were emptied — if it loses ' +
+      'both or neither, the seeding missed the file and the probe is inert',
+    ).toEqual(['post-resolution-summary']);
   });
 
   it('D10: review-summary dedup marker appears ≥2× in post-review-summary (full mode + stub template)', () => {
-    const sec = extractOpSection(soleCorpus, 'post-review-summary', 'sole');
+    // Mode 'union' [DR-18], widened by #326: both renderings moved with step 5.
+    // Floor unchanged at 2 — the widening moves the corpus, never the bound.
+    const sec = extractOpSection(cachedSinkCorpus(), 'post-review-summary', 'union');
     const matches = sec.match(/devflow:review-summary cycle:/g);
     expect(
       matches,
       'post-review-summary: "devflow:review-summary cycle:" must appear ≥2 times (full body + stub template)',
     ).not.toBeNull();
-    expect(matches!.length).toBeGreaterThanOrEqual(2);
+    expect(matches!.length).toBeGreaterThanOrEqual(2); // floor: d10-dedup-marker-floor (numeric-floors.json)
   });
 
   it('D10: resolution-summary dedup marker appears ≥2× in post-resolution-summary (full mode + stub template)', () => {
-    const sec = extractOpSection(soleCorpus, 'post-resolution-summary', 'sole');
+    // Mode 'union' [DR-18], widened by #326 — same move, floor unchanged.
+    const sec = extractOpSection(cachedSinkCorpus(), 'post-resolution-summary', 'union');
     const matches = sec.match(/devflow:resolution-summary ts:/g);
     expect(
       matches,
       'post-resolution-summary: "devflow:resolution-summary ts:" must appear ≥2 times (full body + stub template)',
     ).not.toBeNull();
-    expect(matches!.length).toBeGreaterThanOrEqual(2);
+    expect(matches!.length).toBeGreaterThanOrEqual(2); // floor: d10-dedup-marker-floor (numeric-floors.json)
   });
 
   it('D10: REVIEW_PUBLICATION is documented with all three values: auto, full, off', () => {
@@ -1444,12 +1607,20 @@ describe('git agent — static content guards (PF-018)', () => {
   // is two assertions, both non-vacuous, and they REPLACE one `it` with three, so
   // AC-2.6's guard count rises rather than falls.
   //
-  // Deviation recorded: [DR-20](ii) is written as "only in that file AND the two ops
-  // it is named from". SG-8 forbids moving post-review-summary / post-resolution-
-  // summary mechanics, so their step-3 probe lines stay in git.md by rule; asserting
-  // the literal appears in publication-gate.md ALONE would demand a move the phase
-  // prohibits. The set below is therefore the original scope property plus the file
-  // the section moved to — strictly stronger than "the literal exists".
+  // The scope property is a THREE-site rule, and each site holds the literal for a
+  // different reason (PF-058 — containment is several separate obligations, not one):
+  //
+  //   publication-gate.md            the gate's own step order, the one authority
+  //                                  on how REVIEW_PUBLICATION resolves;
+  //   pr/post-review-summary.md      the fail-closed probe spelled inline in that
+  //   pr/post-resolution-summary.md  operation's own mechanics, one file each.
+  //
+  // Why the probe is spelled three times rather than deferred to the gate: it is a
+  // containment control, and a control an operation must load a SECOND file to
+  // learn is a control that can go missing when that load does not happen (PF-027).
+  // The gate states the resolution order; each operation states the probe it must
+  // run itself. `git.md` is NOT a site — #326 moved both step 3s out — which is why
+  // the set below names files and no longer names an op inside git.md.
 
   it('D10 [DR-20](i): references/publication-gate.md is named from EXACTLY the two summary ops', () => {
     const opNames = collectOpNames(content);
@@ -1473,12 +1644,35 @@ describe('git agent — static content guards (PF-018)', () => {
     ).toEqual(['post-fake-summary', 'post-resolution-summary', 'post-review-summary']);
   });
 
-  it('D10 [DR-20](ii): `gh repo view` appears only in publication-gate.md and the two ops that name it', () => {
+  it('D10 [DR-20](ii): `gh repo view` appears only in publication-gate.md and the two summary ops\' own mechanics', () => {
+    const EXPECTED_SITES = [
+      'post-resolution-summary.md',
+      'post-review-summary.md',
+      'publication-gate.md',
+    ];
+
+    // The collector labels a generated reference by BASENAME, so the expected set
+    // is only readable while each of those three names belongs to exactly one file.
+    // Scoped to the three, deliberately: `ensure-pr-ready.md` legitimately exists
+    // in four trees (`pr/` plus one per provider), so a corpus-wide distinctness
+    // claim would be false — and asserting a false thing to protect a true one is
+    // how a guard acquires a exception list. What must hold is that THESE labels
+    // name one file each; if a provider ever grew a `post-review-summary.md`, this
+    // arm fails and the collector gets a path-relative label rather than the
+    // expected set quietly meaning two files.
+    for (const name of EXPECTED_SITES) {
+      const carriers = cachedSinkCorpus().filter(e => path.basename(e.path) === name);
+      expect(
+        carriers.map(e => e.path),
+        `"${name}" must name exactly one file for the basename label to be unambiguous`,
+      ).toHaveLength(1);
+    }
+
     expect(
       collectGhRepoViewSites(cachedSinkCorpus()),
       'D10 scope violation: the visibility probe escaped the publication gate and the two summary ' +
-      'operations — every other site is an op deciding publication for itself',
-    ).toEqual(['git.md:post-resolution-summary', 'git.md:post-review-summary', 'publication-gate.md']);
+      'operations\' own mechanics — every other site is an op deciding publication for itself',
+    ).toEqual(EXPECTED_SITES);
   });
 
   it('D10 [DR-20](ii) known-bad probe: a seeded fourth probe site is reported by the same collector', () => {
@@ -1578,6 +1772,44 @@ describe('git agent — static content guards (PF-018)', () => {
       d11OpsWithoutPost,
       `D11 reverse guard: ops referencing Comment-sink scrub without a posting call: [${d11OpsWithoutPost.join(', ')}]`,
     ).toHaveLength(0);
+  });
+
+  it('D11 known-bad probe: dropping the PR-host tree halves the posting set (SG-8 non-vacuity)', () => {
+    // SG-8's proof obligation for #326, and the one thing the floor of 8 above
+    // cannot show on its own. The posting SET is the same 8 operations before and
+    // after the move, so the forward guard stayed green through it — which means
+    // green alone never established that the union corpus is what carries four of
+    // those eight. This drives the SAME predicate over the narrowed corpus and
+    // pins the number that only the widening supplies.
+    //
+    // Three of the eight vanish entirely — post-review-summary,
+    // post-resolution-summary and resolve-review-threads post only from `pr/`.
+    // `ensure-pr-ready` survives at a reduced surface because it is a member of
+    // BOTH rosters: step 4a's create moved to `pr/`, step 4b's edit stayed in
+    // `tracker/{provider}/`, and each states its own scrub. The four tracker-side
+    // posters (backlink-shipped-issues, ensure-traceable-issue, manage-debt,
+    // post-wave-report) are untouched by this commit.
+    const EXPECTED_WITHOUT_PR_HOST = [
+      'ensure-pr-ready',
+      'manage-debt',
+      'backlink-shipped-issues',
+      'ensure-traceable-issue',
+      'post-wave-report',
+    ];
+    const narrowed = sinkCorpusWithoutPrHost();
+    const opNames = collectOpNames(content);
+    const postingOps = opNames.filter(op => {
+      const sec = extractOpSection(narrowed, op, 'union');
+      return sec.includes('--body-file') || sec.includes('-F body=@');
+    });
+    // A NAMED set, not a count: a count of 5 is equally satisfied by losing
+    // `ensure-pr-ready` and gaining an unrelated op, which would be a real
+    // regression reported as agreement (the `scanned > 0` anti-pattern, one level up).
+    expect(
+      [...postingOps].sort(),
+      `without references/${PR_HOST_PREFIX} the posting set must fall from 8 to exactly these 5 ` +
+      'ops — a set that does not move proves the union corpus was never load-bearing (PF-018)',
+    ).toEqual([...EXPECTED_WITHOUT_PR_HOST].sort());
   });
 
   it('D11: no gh call passes a body inline — every body reaches GitHub through a scrubbed file (bypass guard)', () => {
@@ -1802,7 +2034,10 @@ describe('git agent — static content guards (PF-018)', () => {
   });
 
   it('D11: ensure-pr-ready scrubs the PR body it creates (gh pr create is a publication sink)', () => {
-    const sec = extractOpSection(soleCorpus, 'ensure-pr-ready', 'sole');
+    // Mode 'union' [DR-18], widened by #326: step 4a — which states both the scrub
+    // and the `--body-file` create it gates — is PR-host mechanics and moved to
+    // references/pr/ensure-pr-ready.md. The literals are unchanged.
+    const sec = extractOpSection(cachedSinkCorpus(), 'ensure-pr-ready', 'union');
     // extractOpSection throws when the anchor is absent — sec.length is always > 0 here (not a guard).
     expect(
       sec,
@@ -1812,6 +2047,17 @@ describe('git agent — static content guards (PF-018)', () => {
       sec,
       'ensure-pr-ready: PR creation must reference the Comment-sink scrub (D11)',
     ).toContain('Comment-sink scrub (D11)');
+  });
+
+  it('D11: ensure-pr-ready known-bad probe — the create sink is in the PR-host tree', () => {
+    // ADR-024 / PF-018 for the widening above. `tracker/github/ensure-pr-ready.md`
+    // keeps its OWN scrub (step 4b's `gh pr edit`), so this probe must ask for the
+    // CREATE call specifically — asking for "Comment-sink scrub (D11)" would pass
+    // on the tracker half and prove nothing about the one that moved.
+    expect(
+      extractOpSection(sinkCorpusWithoutPrHost(), 'ensure-pr-ready', 'union'),
+      'step 4a\'s `gh pr create` sink must live in the PR-host reference',
+    ).not.toContain('gh pr create … --body-file "$DEVFLOW_BODY"');
   });
 
   it('D11: erasure guidance — rotation (/rotat/i) and edit-history retention are documented', () => {
@@ -1984,10 +2230,21 @@ describe('git agent — static content guards (PF-018)', () => {
     // indicators below are an explicit list (not derived from op text).
     // D4 scope: all ops that call gh CLI or a remote tracker (posting, mutation, or read-only fetch).
     // G1 added D4 to fetch-issue (~:268) and fetch-issues-batch (~:314) — both fetch remotely via gh.
+    // Two corpora, one per question, and the split is the point (ADR-025):
+    //   DETECTION reads git.md ∪ the PR-host references — #326 moved these ops'
+    //     `gh` calls into references/pr/, and a 'sole' read would have silently
+    //     narrowed the remote-I/O set from 14 to 13 (post-resolution-summary's
+    //     `gh` indicators are all in its moved body) while staying green on a
+    //     smaller subject. Widened to exactly what moved and no further: over the
+    //     FULL sink corpus `setup-task` would be detected through its provider
+    //     mechanics, which is a different guard about a different file.
+    //   D4 EVIDENCE stays 'sole' — the degradation contract is the agent's, and a
+    //     clause in a loadable reference is a clause a spawn can decline to load
+    //     (PF-027). git.md alone must answer for it.
     const remoteOps: string[] = [];
     const missingD4: string[] = [];
     for (const op of REQUIRED_OPS) {
-      const sec = extractOpSection(soleCorpus, op, 'sole');
+      const sec = extractOpSection(gitPlusPrHostCorpus(), op, 'union');
       // Remote I/O indicators: body-file posting, git push, explicit gh subcommands
       // that write state, plus read-only API calls (gh api, gh issue view/list, GraphQL,
       // and backtick-quoted `gh` which appears in D4 lines of fetch-issue/fetch-issues-batch).
@@ -2010,7 +2267,8 @@ describe('git agent — static content guards (PF-018)', () => {
       // TRACEABILITY: DEGRADED site (ops that carry the degradation concept but use
       // the inline form rather than a separate labelled clause — e.g. setup-task,
       // create-release in git.md@5fc76aa).
-      const hasD4Evidence = sec.includes('**Degradation (D4):**') || sec.includes('TRACEABILITY: DEGRADED');
+      const own = extractOpSection(soleCorpus, op, 'sole');
+      const hasD4Evidence = own.includes('**Degradation (D4):**') || own.includes('TRACEABILITY: DEGRADED');
       remoteOps.push(op);
       if (!hasD4Evidence) missingD4.push(op);
     }
@@ -2027,6 +2285,16 @@ describe('git agent — static content guards (PF-018)', () => {
       remoteOps.length,
       'no REQUIRED_OPS detected as remote-I/O — guard is vacuous (PF-018)',
     ).toBeGreaterThan(0);
+    // A FLOOR, not a `> 0` shrug. `> 0` is met by one op, so it could not tell a
+    // corpus narrowing from a real removal — which is exactly what #326 would have
+    // done here had the detection stayed 'sole' (14 → 13, silently). Registered as
+    // git-agent-remote-io-ops in numeric-floors.json.
+    expect(
+      remoteOps.length,
+      `remote-I/O ops detected: ${remoteOps.length} [${remoteOps.join(', ')}] — the set may only ` +
+      'grow. A drop means either an op stopped touching the remote or the corpus this guard ' +
+      'reads got narrower; both need a decision, not a green run',
+    ).toBeGreaterThanOrEqual(14); // floor: git-agent-remote-io-ops (numeric-floors.json)
     expect(
       missingD4,
       `REQUIRED_OPS with remote I/O missing **Degradation (D4):** clause: [${missingD4.join(', ')}]`,
@@ -2123,15 +2391,42 @@ describe('git agent — static content guards (PF-018)', () => {
     ).toBeGreaterThanOrEqual(3); // floor: containment-external-thread-floor (numeric-floors.json)
 
     // Negative arm: summary/reply ops must not interpolate remote body placeholders.
+    //
+    // Mode 'union' [DR-18], widened by #326: two of these three ops now span two
+    // files — the contract in git.md and the compose templates in
+    // references/pr/{op}.md — and a placeholder is most likely to appear in a
+    // compose template, which is the half that moved. A negative check narrowed to
+    // the half that stayed goes blind exactly where the risk went (the same
+    // reasoning that keeps `learn-conventions`' negative arm on the sink corpus).
     const SUMMARY_OPS = ['post-review-summary', 'post-resolution-summary', 'post-wave-report'];
+    const REMOTE_PLACEHOLDER_RE = /\{body\}|\{description\}|\{title\}/;
     for (const op of SUMMARY_OPS) {
       // {body} / {description} / {title} as MDS template placeholders (curly-brace form)
       // would echo remote origin content verbatim. Shell vars ($DEVFLOW_BODY) are safe.
       expect(
-        /\{body\}|\{description\}|\{title\}/.test(opSection(op)),
+        REMOTE_PLACEHOLDER_RE.test(extractOpSection(cachedSinkCorpus(), op, 'union')),
         `${op}: must not interpolate remote body fields ({body}/{description}/{title}) in its Output template`,
       ).toBe(false);
     }
+  });
+
+  it('containment negative arm known-bad probe: a placeholder seeded in a pr/ body is reported', () => {
+    // ADR-024 / PF-018. The arm above is an ABSENCE check over a corpus that spans
+    // two files, so on live inputs it is green whether or not the union half is
+    // being read at all (PF-064). Seeds `{title}` into the PR-host compose template
+    // and asserts the same predicate reports it.
+    const seeded: CorpusEntry[] = cachedSinkCorpus().map(entry =>
+      entry.path.replace(/\\/g, '/').endsWith(`/${PR_HOST_PREFIX}post-review-summary.md`)
+        ? { path: entry.path, content: `${entry.content}\nEcho the thread {title} verbatim.\n` }
+        : entry,
+    );
+    expect(
+      /\{body\}|\{description\}|\{title\}/.test(
+        extractOpSection(seeded, 'post-review-summary', 'union'),
+      ),
+      'a remote placeholder seeded in the PR-host compose template must be detected — otherwise ' +
+      'the negative arm is only reading the half that stayed in git.md',
+    ).toBe(true);
   });
 
   // ── Guard 11: D11 matchCount + known-bad probe (M9, AC-0.8) ────────────────

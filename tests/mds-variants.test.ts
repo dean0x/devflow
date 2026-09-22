@@ -980,11 +980,12 @@ describe('validateContractOutputName — the narrow underscore allowance', () =>
 /**
  * Files one install carries. Floors, not equalities: a new cross-cutting
  * document raises both; a new provider operation raises the provider count.
- * Registered in tests/fixtures/numeric-floors.json. Measured 2026-09-19 —
- * github 13 files / 31,399 B, jira 24 / 69,252 B, linear 24 / 73,501 B.
+ * Registered in tests/fixtures/numeric-floors.json. Re-derived 2026-09-22,
+ * when the PR-host tree (8 files, provider-independent) joined both sets:
+ * github 21, jira 32, linear 32.
  */
-const INSTALLED_REFS_GITHUB = 13;
-const INSTALLED_REFS_PROVIDER = 24;
+const INSTALLED_REFS_GITHUB = 21;
+const INSTALLED_REFS_PROVIDER = 32;
 
 describe('installedReferenceManifest — {github} ∪ {selected provider}', () => {
   const generated = generatedReferenceManifest();
@@ -1036,7 +1037,7 @@ describe('installedReferenceManifest — {github} ∪ {selected provider}', () =
   });
 
   it('the build still emits every provider — the narrowing is install-time only', () => {
-    expect(generated.length).toBe(34);
+    expect(generated.length).toBe(42);
     const union = new Set([
       ...installedReferenceManifest({ provider: 'github' }),
       ...installedReferenceManifest({ provider: 'jira' }),

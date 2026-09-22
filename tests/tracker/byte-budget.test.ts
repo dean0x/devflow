@@ -35,7 +35,7 @@ import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'fs';
 import * as path from 'path';
 
-import { MIN_VARIANT_PAIRS, TRACKER_GITHUB_OPS } from '../../src/core/mds-variants.js';
+import { MIN_VARIANT_PAIRS, PR_HOST_OPS, TRACKER_GITHUB_OPS } from '../../src/core/mds-variants.js';
 import { collectTrackerNamingLines } from '../helpers.js';
 import {
   ALL_OPS,
@@ -55,6 +55,7 @@ import {
   measureOptional,
   nameableCrossCutting,
   nameableFrom,
+  prRefRel,
   preambleBlock,
   providerLoadedSet,
   referenceChars,
@@ -1045,6 +1046,38 @@ describe('byte budget: formula file-set ↔ nameable file-set (both directions)'
     // …and the symmetric direction reports nothing when nothing is extra.
     expect(collectMissingFrom('setup-task', summed, nameable)).toEqual([]);
   });
+
+  it('the ONE hop into a pr/ body is live — github-api.md reaches fetch-review-threads only through it', () => {
+    // #326's addition to nameableFrom, asserted where it bites rather than in
+    // prose. `fetch-review-threads` step 1 — the only place the operation names
+    // github-api.md — moved into references/pr/fetch-review-threads.md. Without
+    // the hop the model sums a file the scan can no longer see the op name, and
+    // direction 1 goes red for a reason that is not a regression.
+    expect(
+      SECTIONS.get('fetch-review-threads') ?? '',
+      'this arm only means something while git.md itself does NOT name github-api.md for this op ' +
+      '— if the mention came back, the hop is no longer what makes direction 1 pass',
+    ).not.toContain('references/github-api.md');
+    expect(
+      [...nameableFrom('fetch-review-threads')],
+      'github-api.md must be reachable through the pr/ reference the op names',
+    ).toContain('github-api.md');
+  });
+
+  it('known-bad probe: a file named only inside a pr/ body is reported by direction 2', () => {
+    // Seeds the hop's own reader rather than writing into dist/ (PF-055), and
+    // drives the SAME collector both live directions call. Without this, the hop
+    // could stop resolving and every direction-2 assertion would stay green —
+    // an absence check over a corpus nobody perturbs (PF-064).
+    const op = 'post-review-summary';
+    const seededNameable = nameableFrom(op, rel =>
+      rel === prRefRel(op) ? 'Then read `references/smuggled.md` for the rest.\n' : null);
+    expect(
+      collectMissingFrom(op, seededNameable, summedFor(op)),
+      'a reference named only inside the PR-host body must be reported as unmodelled — otherwise ' +
+      'the hop is declared and never taken',
+    ).toEqual([`${op} → smuggled.md`]);
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -1062,15 +1095,43 @@ describe('byte budget: written exclusions', () => {
     ).toContain('## Comment-sink scrub (D11)');
   });
 
-  it('the two summary ops keep their mechanics in the agent (SG-8)', () => {
-    // Both are D10 AND D11 sinks and may move only in a PR that moves their
-    // guards — never as a size optimisation.
+  it('the two summary ops are PR-host, never tracker, and keep their D10 naming line in the agent (SG-8)', () => {
+    // SG-8 as SHIPPED, which is not quite SG-8 as first written. The rule was
+    // "these two never move", and #326 moved their step order into
+    // references/pr/{op}.md — under the condition SG-8 actually imposes: in the
+    // same commit as their guards, with each repointed guard carrying a known-bad
+    // probe, and with the D10/D11 controls still answerable from the agent.
+    //
+    // The END STATE, asserted rather than the prohibition it replaced:
+    //   1. the op is still a section of the agent (its contract did not move);
+    //   2. it still names the publication gate from git.md — [DR-20](i) reads
+    //      git.md ALONE, so an op that stopped naming it there would take the
+    //      scope property with it;
+    //   3. it is a PR-host op, not a tracker op — these two are never generated
+    //      per provider, which is the half of the original exclusion that was
+    //      always about correctness rather than size;
+    //   4. the PR-host reference it names is real and non-empty, so "the step
+    //      order moved" names a file that exists rather than nothing.
     for (const op of ['post-review-summary', 'post-resolution-summary']) {
       expect(SECTIONS.has(op), `${op} must still be a section of the agent`).toBe(true);
+      expect(
+        SECTIONS.get(op) ?? '',
+        `${op} must still name references/publication-gate.md from git.md — [DR-20](i) reads the ` +
+        'agent alone, and the D10 scope property lives or dies there',
+      ).toContain('references/publication-gate.md');
       expect(
         (TRACKER_GITHUB_OPS as readonly string[]).includes(op),
         `${op} must not be a generated tracker reference (SG-8 written exclusion)`,
       ).toBe(false);
+      expect(
+        (PR_HOST_OPS as readonly string[]).includes(op),
+        `${op} must be a PR-host op — PR comments are posted on GitHub under every tracker`,
+      ).toBe(true);
+      expect(
+        referenceChars(prRefRel(op)),
+        `${prRefRel(op)} must exist and carry its mechanics — an empty file would make the move ` +
+        'a deletion wearing a pointer',
+      ).toBeGreaterThan(0);
     }
   });
 
