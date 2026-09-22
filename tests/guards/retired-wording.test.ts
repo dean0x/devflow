@@ -75,6 +75,17 @@ const RETIRED_LITERALS: ReadonlyArray<RetiredEntry> = [
   },
   {
     literal: 'close milestone',
+    // Everything the corpus reaches EXCEPT CHANGELOG.md, enumerated rather than
+    // implied. The changelog's own end-state sentence for this fix is "the
+    // `close milestone` reference is removed" — a true statement about the tree
+    // that has to name the thing it removed. Suppressing the entry there is the
+    // narrow reading; deleting the changelog's sentence to green a guard would be
+    // damaging a correct record to satisfy a check (R2 runs the other way: widen
+    // the corpus, then say exactly where each entry applies).
+    scope: [
+      'src/assets/', 'src/core/', 'src/cli/', 'src/targets/', 'src/hud/',
+      'dist/', 'docs/', 'CLAUDE.md', 'README.md', 'CONTRIBUTING.md',
+    ],
     removedFrom: 'src/assets/commands/release.md',
     justification: 'Untruthful claim deleted from release.md in A1 (AC-0.14)',
   },
@@ -366,6 +377,50 @@ const RETIRED_LITERALS: ReadonlyArray<RetiredEntry> = [
       'wrong, silent, GitHub-visible write. The rendering is correct under github and is kept ' +
       'there; what is retired is stating it without the gate.',
   },
+
+  // ── The `[Unreleased]` changelog's claims about the shipped tree (M-3) ──────
+  //
+  // Scoped to CHANGELOG.md because each of these is a sentence ABOUT the
+  // mechanism rather than the mechanism itself, and the corpus entry for that
+  // file is already reduced to the `[Unreleased]` section's After-halves (see
+  // unreleasedClaims). A released section keeps whatever it said; what may not
+  // stand is a claim that the tree behaves a way it no longer does.
+  {
+    literal: 'first hit wins',
+    scope: ['CHANGELOG.md'],
+    removedFrom: 'CHANGELOG.md [Unreleased] — the Git-agent provider-resolution bullet',
+    justification:
+      'The resolution order is explicitly NOT first-hit-wins: rung 1 (the per-repo `tracker` key) ' +
+      'NARROWS rung 2 and cannot be evaluated without it, so both are read before anything is ' +
+      'decided. dist/agents/git.md states the prohibition in those words.',
+  },
+  {
+    literal: 'corroborat',
+    scope: ['CHANGELOG.md'],
+    removedFrom: 'CHANGELOG.md [Unreleased] — the Git-agent provider-resolution bullet',
+    justification:
+      'The shipped agent runs no corroboration scan and no share threshold. The repository\'s ' +
+      'issue grammar is not a rung and never selects a provider — it narrows one already ' +
+      'resolved. A stated 60% share is a mechanism a reader would look for and not find.',
+  },
+  {
+    literal: '77,824',
+    scope: ['CHANGELOG.md'],
+    removedFrom: 'CHANGELOG.md [Unreleased] — the byte-budget bullet',
+    justification:
+      'The pre-split preloaded set, described as a live ceiling. The loaded set is now priced ' +
+      'per provider — BUDGET_LOADED_SET 80,200 on the GitHub path, 89,500 under jira, 91,700 ' +
+      'under linear — and quoting a number no constant holds sends a reader to find it.',
+  },
+  {
+    literal: 're-captured twice',
+    scope: ['CHANGELOG.md'],
+    removedFrom: 'CHANGELOG.md [Unreleased] — the github-status-lines fixture bullet',
+    justification:
+      'A count that the next re-capture falsifies, in a section that is meant to read as end ' +
+      'state. This branch spent the third authorisation, so the sentence was already wrong when ' +
+      'it was read.',
+  },
 ];
 
 // ---------------------------------------------------------------------------
@@ -431,7 +486,57 @@ function buildCorpus(): Array<{ relPath: string; content: string }> {
     }
   }
 
+  const changelog = unreleasedClaims(path.join(ROOT, 'CHANGELOG.md'));
+  if (changelog !== undefined) corpus.push({ relPath: 'CHANGELOG.md', content: changelog });
+
   return corpus;
+}
+
+/**
+ * The `[Unreleased]` section of CHANGELOG.md, reduced to what it CLAIMS about the
+ * tree as it stands.
+ *
+ * Two reductions, each for a reason the guard would otherwise get wrong:
+ *
+ *   - **Released sections are dropped.** `## [2.4.0]` says what 2.4.0 did. A
+ *     mechanism retired since is not residue there, it is the record — and the
+ *     record is not editable after the fact.
+ *   - **Only the `After:` half of a before/after bullet is kept.** Every bullet
+ *     here is written `- **{the defect}** — before: {what the tree did} After:
+ *     {what it does}`, and two of its three parts exist to NAME the retired
+ *     mechanism: the title states the defect, the `before:` half states the
+ *     behaviour that was removed. Scanning either would report the bullets that
+ *     exist precisely to record `ISSUE: {issue number}` and `close milestone`
+ *     being removed, and the only way to green that is to damage a correct entry.
+ *     A bullet with no `before:` asserts current behaviour throughout and is kept
+ *     whole.
+ *
+ * What survives is the set of sentences that assert current behaviour — which is
+ * the same thing the guard reads CLAUDE.md and README.md for. Returns undefined
+ * when the file or the section is absent; the corpus-size assertion is what
+ * catches a corpus that has collapsed.
+ */
+function unreleasedClaims(absPath: string): string | undefined {
+  let raw: string;
+  try {
+    raw = readFileSync(absPath, 'utf-8');
+  } catch {
+    return undefined;
+  }
+  const start = raw.indexOf('## [Unreleased]');
+  if (start === -1) return undefined;
+  const nextRelease = raw.indexOf('\n## [', start + 1);
+  const section = nextRelease === -1 ? raw.slice(start) : raw.slice(start, nextRelease);
+
+  return section
+    .split('\n')
+    .map(line => {
+      const before = line.indexOf('before:');
+      if (before === -1) return line;
+      const after = line.indexOf('After:', before);
+      return after === -1 ? '' : line.slice(after);
+    })
+    .join('\n');
 }
 
 // ---------------------------------------------------------------------------
@@ -521,23 +626,43 @@ describe('retired-wording guard — denylist of retired literals (GAP-32)', () =
   });
 
   it('known-bad probe: a scope confines its entry to the named tree (mechanic 2)', () => {
-    const scoped = RETIRED_LITERALS.find(e => e.scope !== undefined);
-    expect(scoped, 'at least one entry must be scoped, or the scope arm is untested').toBeDefined();
-    const prefix = scoped!.scope![0];
-    const inside = collectRetiredLiteralViolations([
-      { relPath: `${prefix}probe.md`, content: `seeded ${scoped!.literal} here\n` },
-    ]);
-    const outside = collectRetiredLiteralViolations([
-      { relPath: 'docs/probe.md', content: `seeded ${scoped!.literal} here\n` },
-    ]);
+    // EVERY scoped entry, not the first one found. Picking one made the probe
+    // depend on which entry happened to sort first and on that entry's scope not
+    // naming whatever tree the probe used for "outside" — both of which a later
+    // entry can change, turning a real guard red for a reason that is about the
+    // probe (PF-064). The outside path is synthetic for the same reason: no scope
+    // prefix in the denylist can match it, whoever writes the next entry.
+    const scopedEntries = RETIRED_LITERALS.filter(e => e.scope !== undefined);
     expect(
-      inside.length,
-      `the collector must flag "${scoped!.literal}" inside ${prefix}`,
+      scopedEntries.length,
+      'at least one entry must be scoped, or the scope arm is untested',
     ).toBeGreaterThan(0);
-    expect(
-      outside.filter(v => v.includes(scoped!.literal)),
-      `the collector must NOT flag "${scoped!.literal}" outside its scope — that is what the scope is for`,
-    ).toEqual([]);
+
+    for (const scoped of scopedEntries) {
+      const seeded = `seeded ${scoped.literal} here\n`;
+      // The inside half seeds the entry's own `literal`, so it can only be run for
+      // entries the collector matches BY that literal. A `pattern` entry's
+      // `literal` is its human-readable name (`P{n}-S{n} phase labels`), which the
+      // pattern is not required to match and generally does not; seeding a shape
+      // for it would mean this probe carrying a second copy of the pattern's
+      // intent. The outside half below runs for every scoped entry either way,
+      // and that is the half the scope exists for.
+      for (const prefix of scoped.pattern === undefined ? scoped.scope! : []) {
+        const relPath = prefix.endsWith('/') ? `${prefix}probe.md` : prefix;
+        expect(
+          collectRetiredLiteralViolations([{ relPath, content: seeded }])
+            .filter(v => v.includes(scoped.literal)),
+          `the collector must flag "${scoped.literal}" at ${relPath} — a scope prefix that ` +
+          'cannot be shown to admit its own entry is decoration',
+        ).not.toEqual([]);
+      }
+      expect(
+        collectRetiredLiteralViolations([
+          { relPath: '__outside_every_scope__/probe.md', content: seeded },
+        ]).filter(v => v.includes(scoped.literal)),
+        `the collector must NOT flag "${scoped.literal}" outside its scope — that is what the scope is for`,
+      ).toEqual([]);
+    }
   });
 
   it('no retired literal appears in the shipping assets, the compiled output, or the repo docs', () => {
