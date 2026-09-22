@@ -2358,6 +2358,16 @@ describe('git agent — static content guards (PF-018)', () => {
   // `post-wave-report` each state the non-reproduction half of Principle 8 for the remote-derived
   // artifact they post.
 
+  /**
+   * The remote-body placeholders a summary op's compose template must never carry.
+   *
+   * Declared at describe scope so the negative arm and its known-bad probe read the
+   * SAME predicate. Spelling the alternation twice would leave the probe green after
+   * the live arm was narrowed — an absence check proven by a regex the live arm no
+   * longer uses proves nothing about the live arm (ADR-024, PF-018).
+   */
+  const REMOTE_PLACEHOLDER_RE = /\{body\}|\{description\}|\{title\}/;
+
   it('containment (AC-0.10): ops rendering remote-sourced fields wrap them in containment tags (op-scoped)', () => {
     const opNames = collectOpNames(content);
     /** An operation's own section — cut at the next unfenced `## `, never a shared trailer. */
@@ -2411,7 +2421,6 @@ describe('git agent — static content guards (PF-018)', () => {
     // the half that stayed goes blind exactly where the risk went (the same
     // reasoning that keeps `learn-conventions`' negative arm on the sink corpus).
     const SUMMARY_OPS = ['post-review-summary', 'post-resolution-summary', 'post-wave-report'];
-    const REMOTE_PLACEHOLDER_RE = /\{body\}|\{description\}|\{title\}/;
     for (const op of SUMMARY_OPS) {
       // {body} / {description} / {title} as MDS template placeholders (curly-brace form)
       // would echo remote origin content verbatim. Shell vars ($DEVFLOW_BODY) are safe.
@@ -2432,9 +2441,7 @@ describe('git agent — static content guards (PF-018)', () => {
       c => `${c}\nEcho the thread {title} verbatim.\n`,
     );
     expect(
-      /\{body\}|\{description\}|\{title\}/.test(
-        extractOpSection(seeded, 'post-review-summary', 'union'),
-      ),
+      REMOTE_PLACEHOLDER_RE.test(extractOpSection(seeded, 'post-review-summary', 'union')),
       'a remote placeholder seeded in the PR-host compose template must be detected — otherwise ' +
       'the negative arm is only reading the half that stayed in git.md',
     ).toBe(true);

@@ -317,6 +317,19 @@ function prHostRel(op: string): string {
 }
 
 /**
+ * Named predicate: does a per-op reference open with its OWN anchor on line 1?
+ *
+ * A function rather than an inline `startsWith` at each site, because the live arm
+ * and its known-bad probe must read the SAME rule. Restated inline, the probe
+ * asserts only that one hand-written string fails one hand-written check — it stays
+ * green after the live arm is weakened (say to `includes`), which is the shape
+ * ADR-024 exists to forbid and PF-018 names.
+ */
+function anchorsOnLineOne(body: string, op: string): boolean {
+  return body.startsWith(`## Operation: ${op}\n`);
+}
+
+/**
  * Named collector: every manifest path a spawn reading `content` could name.
  *
  * FOUR arms, one per module kind the registry carries, and the live check and
@@ -514,7 +527,7 @@ describe('generated references: every reference is reachable from the agent (AC-
         `${prHostRel(op)} is ${body.length} ch — below MIN_REFERENCE_CHARS (${MIN_REFERENCE_CHARS})`,
       ).toBeGreaterThanOrEqual(MIN_REFERENCE_CHARS);
       expect(
-        body.startsWith(`## Operation: ${op}\n`),
+        anchorsOnLineOne(body, op),
         `${prHostRel(op)} must OPEN with its own "## Operation: ${op}" anchor on line 1 — every ` +
         'union-mode extraction starts there, and an anchor further down silently truncates the ' +
         'section to whatever precedes it (PF-063)',
@@ -524,13 +537,23 @@ describe('generated references: every reference is reachable from the agent (AC-
 
   it('PR-host parity known-bad probe: an anchor that is not on line 1 is reported', () => {
     // The anchor rule is a prefix check, so on live inputs it is green whether or
-    // not the predicate is live (PF-064). Drive it over a seeded body instead.
+    // not the predicate is live (PF-064). Drive `anchorsOnLineOne` — the SAME
+    // function the live arm calls — over two seeded bodies instead, both
+    // directions, so the probe fails on a predicate that has been weakened to
+    // accept a displaced anchor AND on one that has gone constant-false.
     const op = PR_HOST_OPS[0];
     const displaced = `Load this first.\n\n## Operation: ${op}\n\nSteps.\n`;
     expect(
-      displaced.startsWith(`## Operation: ${op}\n`),
+      anchorsOnLineOne(displaced, op),
       'a body whose anchor is preceded by prose must NOT satisfy the line-1 rule',
     ).toBe(false);
+
+    const wellFormed = `## Operation: ${op}\n\nSteps.\n`;
+    expect(
+      anchorsOnLineOne(wellFormed, op),
+      'a body that DOES open with its anchor must satisfy the rule — otherwise the live arm ' +
+      'passes only because nothing it asks can ever be true',
+    ).toBe(true);
   });
 
   it('pr/ reachability: the agent names exactly the PR-host roster, both directions', () => {
