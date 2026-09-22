@@ -84,21 +84,6 @@ function cachedSinkCorpus(): CorpusEntry[] {
 const PR_HOST_PREFIX = `${PR_HOST_DESTINATION_ROOT}/`;
 
 /**
- * The sink corpus with the PR-host references removed — the known-bad probe every
- * guard #326 re-pointed from 'sole' to 'union' is proven live against (ADR-024,
- * PF-018).
- *
- * A widening is only honest if dropping what it widened TO turns the guard red.
- * Without this, `mode: 'union'` is indistinguishable from `mode: 'sole'` on a
- * corpus that happens to still contain the literal somewhere, and ADR-025's
- * classification collapses into "widen everything until green" — the exact
- * failure that rule exists to forbid.
- *
- * Path-prefix matching on the corpus entry, not a re-read: every entry's `path`
- * is the absolute file it was read from, so the discriminator is the directory
- * the build wrote it to.
- */
-/**
  * `git.md` plus the PR-host references, and NOTHING else.
  *
  * The corpus for a guard whose literal moved in #326 and only in #326. Widening
@@ -117,6 +102,37 @@ function gitPlusPrHostCorpus(): CorpusEntry[] {
   );
 }
 
+/**
+ * A copy of the sink corpus with one PR-host file's content replaced by `transform`.
+ *
+ * Shared by the known-bad probes below that seed a defect into a single
+ * `references/pr/{op}.md` entry and drive the live guard's own predicate over
+ * the result (ADR-024) — the seeding is scaffolding common to both probes, the
+ * defect and the predicate are what make each one distinct.
+ */
+function seedPrHostFile(op: string, transform: (content: string) => string): CorpusEntry[] {
+  return cachedSinkCorpus().map(entry =>
+    entry.path.replace(/\\/g, '/').endsWith(`/${PR_HOST_PREFIX}${op}.md`)
+      ? { path: entry.path, content: transform(entry.content) }
+      : entry,
+  );
+}
+
+/**
+ * The sink corpus with the PR-host references removed — the known-bad probe every
+ * guard #326 re-pointed from 'sole' to 'union' is proven live against (ADR-024,
+ * PF-018).
+ *
+ * A widening is only honest if dropping what it widened TO turns the guard red.
+ * Without this, `mode: 'union'` is indistinguishable from `mode: 'sole'` on a
+ * corpus that happens to still contain the literal somewhere, and ADR-025's
+ * classification collapses into "widen everything until green" — the exact
+ * failure that rule exists to forbid.
+ *
+ * Path-prefix matching on the corpus entry, not a re-read: every entry's `path`
+ * is the absolute file it was read from, so the discriminator is the directory
+ * the build wrote it to.
+ */
 function sinkCorpusWithoutPrHost(): CorpusEntry[] {
   const dropped = cachedSinkCorpus().filter(
     entry => !entry.path.replace(/\\/g, '/').includes(`/references/${PR_HOST_PREFIX}`),
@@ -1525,11 +1541,7 @@ describe('git agent — static content guards (PF-018)', () => {
     // `toContain` over git.md ∪ references could not: the sibling op's copy of
     // the same sentence would keep it green.
     const PROBE = 'treat as PUBLIC';
-    const seeded: CorpusEntry[] = cachedSinkCorpus().map(entry =>
-      entry.path.replace(/\\/g, '/').endsWith(`/${PR_HOST_PREFIX}post-review-summary.md`)
-        ? { path: entry.path, content: entry.content.split(PROBE).join('treat as WHATEVER') }
-        : entry,
-    );
+    const seeded = seedPrHostFile('post-review-summary', c => c.split(PROBE).join('treat as WHATEVER'));
     const reached = D10_SUMMARY_OPS.filter(
       op => extractOpSection(seeded, op, 'union').includes(PROBE),
     );
@@ -2415,10 +2427,9 @@ describe('git agent — static content guards (PF-018)', () => {
     // two files, so on live inputs it is green whether or not the union half is
     // being read at all (PF-064). Seeds `{title}` into the PR-host compose template
     // and asserts the same predicate reports it.
-    const seeded: CorpusEntry[] = cachedSinkCorpus().map(entry =>
-      entry.path.replace(/\\/g, '/').endsWith(`/${PR_HOST_PREFIX}post-review-summary.md`)
-        ? { path: entry.path, content: `${entry.content}\nEcho the thread {title} verbatim.\n` }
-        : entry,
+    const seeded = seedPrHostFile(
+      'post-review-summary',
+      c => `${c}\nEcho the thread {title} verbatim.\n`,
     );
     expect(
       /\{body\}|\{description\}|\{title\}/.test(
