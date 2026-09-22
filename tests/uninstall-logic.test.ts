@@ -3,13 +3,119 @@ import { promises as fs } from 'fs';
 import { execFileSync } from 'child_process';
 import * as os from 'os';
 import * as path from 'path';
-import { computeAssetsToRemove, formatDryRunPlan, resolveSecurityRemovalDecision, enumerateUserDevFlowContent, userContentPaths, resolveDevflowDirCleanup, resolveProjectDataCleanup, removeDevFlowInstallArtifacts, installArtifactPaths, resolveInstallArtifactPaths, enumerateDryRunExtras, removeAllDevFlow, removeSelectedPlugins, sweepDevflowNamespaces, isDevFlowInstalled, runDryRunPhase, runSelectivePhaseForScope, runFullPhaseForScope, runCleanupPhase } from '../src/cli/commands/uninstall.js';
-import { DEVFLOW_PLUGINS, getAllAgentNames, parsePluginSelection, type PluginDefinition } from '../src/core/plugins.js';
+import { computeAssetsToRemove, formatDryRunPlan, resolveSecurityRemovalDecision, enumerateUserDevFlowContent, userContentPaths, resolveDevflowDirCleanup, resolveProjectDataCleanup, removeDevFlowInstallArtifacts, installArtifactPaths, resolveInstallArtifactPaths, enumerateDryRunExtras, removeAllDevFlow, removeSelectedPlugins, sweepDevflowNamespaces, isDevFlowInstalled, runDryRunPhase, runSelectivePhaseForScope, runFullPhaseForScope, runCleanupPhase, resolveInstalledPlugins } from '../src/cli/commands/uninstall.js';
+import { DEVFLOW_PLUGINS, getAllAgentNames, parsePluginSelection, skillsOf, type PluginDefinition } from '../src/core/plugins.js';
 import { TRACKER_CONVENTIONS_BACKUP_NAMES, TRACKER_STAGED_PREFIX } from '../src/core/tracker.js';
 import { modelCacheDir } from '../src/core/cache.js';
 import { LEGACY_SKILL_NAMES } from '../src/targets/claude-code/legacy.js';
 
-describe('computeAssetsToRemove', () => {
+describe('computeAssetsToRemove: the retained set comes from what is INSTALLED', () => {
+  const byName = (name: string) => DEVFLOW_PLUGINS.find(p => p.name === name)!;
+
+  it('retains a skill only when a still-INSTALLED plugin needs it, not any registry plugin', () => {
+    // 'patterns' is owned by devflow-plan and also declared by devflow-implement.
+    // Under a manifest that records only plan + core, uninstalling plan must
+    // remove it — retaining it on behalf of a plugin the user never installed
+    // leaves them with exactly the files they asked to delete.
+    const installed = [byName('devflow-core-skills'), byName('devflow-plan')];
+    const { skills } = computeAssetsToRemove([byName('devflow-plan')], installed);
+    expect(skills).toContain('patterns');
+
+    // The same removal against the whole registry retains it, which is the
+    // pre-change behaviour and the defect: devflow-implement is not installed.
+    const againstRegistry = computeAssetsToRemove([byName('devflow-plan')], DEVFLOW_PLUGINS);
+    expect(againstRegistry.skills).not.toContain('patterns');
+  });
+
+  it('retains across the CLOSURE — a skill another installed plugin REQUIRES survives', () => {
+    // devflow-explore requires review-methodology without owning it. Uninstalling
+    // its owner while explore is still installed must not take it away.
+    const installed = [byName('devflow-code-review'), byName('devflow-explore')];
+    const { skills } = computeAssetsToRemove([byName('devflow-code-review')], installed);
+    expect(
+      skills,
+      'a skill an installed plugin merely requires is still a skill it needs',
+    ).not.toContain('review-methodology');
+  });
+
+  it('removes the closure of the selected plugins, not only what they own', () => {
+    const solo = byName('devflow-explore');
+    const { skills } = computeAssetsToRemove([solo], [byName('devflow-core-skills'), solo]);
+    // core-skills is still installed and its own closure covers most of explore's
+    // requires, so what leaves is what only explore reached.
+    for (const name of skills) {
+      expect(skillsOf([byName('devflow-core-skills')]).has(name)).toBe(false);
+    }
+  });
+
+  it('falls back to the registry when the manifest names nothing this registry has', async () => {
+    const tmp = await fs.mkdtemp(path.join(os.tmpdir(), 'devflow-uninstall-manifest-'));
+    try {
+      // No manifest at all.
+      expect(await resolveInstalledPlugins(tmp)).toEqual(DEVFLOW_PLUGINS);
+
+      // A manifest naming only plugins this registry has dropped.
+      const seedManifest = async (dir: string, plugins: string[]): Promise<void> => {
+      await fs.writeFile(
+        path.join(dir, 'manifest.json'),
+        JSON.stringify({
+          version: '2.0.0',
+          plugins,
+          scope: 'user',
+          knownPlugins: plugins,
+          features: {
+            ambient: false, memory: false, hud: false, knowledge: false, learning: false,
+            rules: false, flags: {}, security: 'user', proxy: false,
+            compliance: { enabled: false, frameworks: [] },
+            tracker: { provider: 'github' },
+          },
+          installedAt: '2026-01-01T00:00:00.000Z',
+          updatedAt: '2026-01-01T00:00:00.000Z',
+        }),
+        'utf-8',
+      );
+    };
+      await seedManifest(tmp, ['devflow-long-gone']);
+      expect(
+        await resolveInstalledPlugins(tmp),
+        'retaining too much is the safe direction for a removal',
+      ).toEqual(DEVFLOW_PLUGINS);
+    } finally {
+      await fs.rm(tmp, { recursive: true, force: true });
+    }
+  });
+
+  it('resolves the recorded plugins to their definitions', async () => {
+    const tmp = await fs.mkdtemp(path.join(os.tmpdir(), 'devflow-uninstall-manifest-'));
+    try {
+      const seedManifest = async (dir: string, plugins: string[]): Promise<void> => {
+      await fs.writeFile(
+        path.join(dir, 'manifest.json'),
+        JSON.stringify({
+          version: '2.0.0',
+          plugins,
+          scope: 'user',
+          knownPlugins: plugins,
+          features: {
+            ambient: false, memory: false, hud: false, knowledge: false, learning: false,
+            rules: false, flags: {}, security: 'user', proxy: false,
+            compliance: { enabled: false, frameworks: [] },
+            tracker: { provider: 'github' },
+          },
+          installedAt: '2026-01-01T00:00:00.000Z',
+          updatedAt: '2026-01-01T00:00:00.000Z',
+        }),
+        'utf-8',
+      );
+    };
+      await seedManifest(tmp, ['devflow-core-skills', 'devflow-explore', 'devflow-long-gone']);
+      expect((await resolveInstalledPlugins(tmp)).map(pl => pl.name))
+        .toEqual(['devflow-core-skills', 'devflow-explore']);
+    } finally {
+      await fs.rm(tmp, { recursive: true, force: true });
+    }
+  });
+
   it('removes skills unique to selected plugins', () => {
     // devflow-debug has no unique skills (all are shared), pick a plugin with unique assets
     const debugPlugin = DEVFLOW_PLUGINS.find(p => p.name === 'devflow-debug')!;
@@ -70,8 +176,8 @@ describe('computeAssetsToRemove', () => {
 
   it('handles custom plugin lists', () => {
     const plugins: PluginDefinition[] = [
-      { name: 'a', description: '', commands: ['/a'], agents: ['shared', 'only-a'], skills: ['shared-skill', 'only-a-skill'], rules: [] },
-      { name: 'b', description: '', commands: ['/b'], agents: ['shared', 'only-b'], skills: ['shared-skill', 'only-b-skill'], rules: [] },
+      { name: 'a', description: '', commands: ['/a'], agents: ['shared', 'only-a'], skills: ['shared-skill', 'only-a-skill'], requires: [], rules: [] },
+      { name: 'b', description: '', commands: ['/b'], agents: ['shared', 'only-b'], skills: ['shared-skill', 'only-b-skill'], requires: [], rules: [] },
     ];
 
     // Remove 'a', keep 'b'
@@ -83,8 +189,8 @@ describe('computeAssetsToRemove', () => {
 
   it('returns rules unique to the removed plugin', () => {
     const plugins: PluginDefinition[] = [
-      { name: 'plugin-a', description: '', commands: [], agents: [], skills: [], rules: ['rule-a', 'shared-rule'] },
-      { name: 'plugin-b', description: '', commands: [], agents: [], skills: [], rules: ['rule-b', 'shared-rule'] },
+      { name: 'plugin-a', description: '', commands: [], agents: [], skills: [], requires: [], rules: ['rule-a', 'shared-rule'] },
+      { name: 'plugin-b', description: '', commands: [], agents: [], skills: [], requires: [], rules: ['rule-b', 'shared-rule'] },
     ];
     const { rules } = computeAssetsToRemove([plugins[0]], plugins);
     expect(rules).toContain('rule-a');
@@ -114,6 +220,7 @@ describe('formatDryRunPlan', () => {
   it('lists skills, agents, and commands', () => {
     const plan = formatDryRunPlan({
       skills: ['security', 'test-driven-development'],
+      requires: [],
       agents: ['code'],
       commands: ['/implement'],
     });
@@ -131,6 +238,7 @@ describe('formatDryRunPlan', () => {
   it('omits empty sections', () => {
     const plan = formatDryRunPlan({
       skills: ['software-design'],
+      requires: [],
       agents: [],
       commands: [],
     });
@@ -142,6 +250,7 @@ describe('formatDryRunPlan', () => {
   it('deduplicates skills, agents, and commands', () => {
     const plan = formatDryRunPlan({
       skills: ['software-design', 'software-design', 'testing'],
+      requires: [],
       agents: ['code', 'code'],
       commands: ['/implement', '/implement'],
     });
@@ -154,6 +263,7 @@ describe('formatDryRunPlan', () => {
   it('includes rules section when rules are provided', () => {
     const plan = formatDryRunPlan({
       skills: [],
+      requires: [],
       agents: [],
       commands: [],
       rules: ['security', 'engineering'],
@@ -166,6 +276,7 @@ describe('formatDryRunPlan', () => {
   it('omits rules section when rules array is empty', () => {
     const plan = formatDryRunPlan({
       skills: ['software-design'],
+      requires: [],
       agents: [],
       commands: [],
       rules: [],
@@ -176,6 +287,7 @@ describe('formatDryRunPlan', () => {
   it('omits rules section when rules field is absent', () => {
     const plan = formatDryRunPlan({
       skills: ['software-design'],
+      requires: [],
       agents: [],
       commands: [],
     });
@@ -185,6 +297,7 @@ describe('formatDryRunPlan', () => {
   it('deduplicates rules', () => {
     const plan = formatDryRunPlan({
       skills: [],
+      requires: [],
       agents: [],
       commands: [],
       rules: ['security', 'security', 'engineering'],
@@ -1466,6 +1579,7 @@ describe('runDryRunPhase (A8)', () => {
       scopesToUninstall: ['user'],
       isSelectiveUninstall: true,
       selectedPlugins: [reviewPlugin],
+      installedPlugins: DEVFLOW_PLUGINS,
     })).resolves.not.toThrow();
   });
 
@@ -1475,6 +1589,7 @@ describe('runDryRunPhase (A8)', () => {
       scopesToUninstall: [],
       isSelectiveUninstall: false,
       selectedPlugins: [],
+      installedPlugins: DEVFLOW_PLUGINS,
     })).resolves.not.toThrow();
   });
 });
@@ -1632,6 +1747,136 @@ describe('runSelectivePhaseForScope (A8)', () => {
       selectedPlugins: [anyPlugin],
       verbose: false,
     })).resolves.not.toThrow();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// AC-26 — the preview and the outcome are computed from ONE resolution.
+//
+// `uninstall --plugin --dry-run` prints a plan; `uninstall --plugin` removes
+// files. Both go through resolveInstalledPlugins(devflowDir) → the manifest, and
+// the CLI hands each phase the result of that one call (D-RETAIN-FROM-MANIFEST).
+// Nothing executed proved they AGREE — and a preview that disagrees with the
+// outcome is worse than no preview, because it is the thing a user consented to.
+//
+// So: one seeded manifest, one seeded install, both paths run against it, and the
+// plan's own list compared against what the removal actually left on disk.
+// ---------------------------------------------------------------------------
+
+describe('AC-26: dry-run and real selective uninstall agree on the retained set', () => {
+  const byName = (name: string) => DEVFLOW_PLUGINS.find(p => p.name === name)!;
+
+  /** What the manifest RECORDS as installed — deliberately a subset of the registry. */
+  const INSTALLED_NAMES = ['devflow-core-skills', 'devflow-plan', 'devflow-explore'];
+  /** What `--plugin` selects for removal. */
+  const SELECTED_NAMES = ['devflow-plan'];
+
+  let claudeDir: string;
+  let devflowDir: string;
+
+  const seedManifest = async (dir: string, plugins: string[]): Promise<void> => {
+    await fs.writeFile(
+      path.join(dir, 'manifest.json'),
+      JSON.stringify({
+        version: '2.0.0',
+        plugins,
+        scope: 'user',
+        knownPlugins: plugins,
+        features: {
+          ambient: false, memory: false, hud: false, knowledge: false, learning: false,
+          rules: false, flags: {}, security: 'user', proxy: false,
+          compliance: { enabled: false, frameworks: [] },
+          tracker: { provider: 'github' },
+        },
+        installedAt: '2026-01-01T00:00:00.000Z',
+        updatedAt: '2026-01-01T00:00:00.000Z',
+      }),
+      'utf-8',
+    );
+  };
+
+  /** Seed a skill directory per installed skill, the way the installer lays them out. */
+  const seedSkills = async (names: Iterable<string>): Promise<void> => {
+    for (const name of names) {
+      const dir = path.join(claudeDir, 'skills', `devflow:${name}`);
+      await fs.mkdir(dir, { recursive: true });
+      await fs.writeFile(path.join(dir, 'SKILL.md'), `# ${name}\n`, 'utf-8');
+    }
+  };
+
+  const installedSkillNames = async (): Promise<string[]> => {
+    const entries = await fs.readdir(path.join(claudeDir, 'skills'), { withFileTypes: true });
+    return entries
+      .filter(e => e.isDirectory() && e.name.startsWith('devflow:'))
+      .map(e => e.name.slice('devflow:'.length))
+      .sort();
+  };
+
+  beforeEach(async () => {
+    claudeDir = await fs.mkdtemp(path.join(os.tmpdir(), 'devflow-ac26-claude-'));
+    devflowDir = await fs.mkdtemp(path.join(os.tmpdir(), 'devflow-ac26-devflow-'));
+    await seedManifest(devflowDir, INSTALLED_NAMES);
+    await seedSkills(skillsOf(INSTALLED_NAMES.map(byName)));
+  });
+
+  afterEach(async () => {
+    await fs.rm(claudeDir, { recursive: true, force: true });
+    await fs.rm(devflowDir, { recursive: true, force: true });
+  });
+
+  it('the plan the dry run prints is the removal the real path performs', async () => {
+    const selected = SELECTED_NAMES.map(byName);
+    const seeded = await installedSkillNames();
+
+    // THE PREVIEW. Resolved the way the dry-run branch resolves it: from the
+    // manifest in the scope's devflowDir, with no knowledge of what follows.
+    const previewInstalled = await resolveInstalledPlugins(devflowDir);
+    const planned = computeAssetsToRemove(selected, previewInstalled);
+    expect(
+      formatDryRunPlan(planned),
+      'a plan of "Nothing to remove." over a seeded install would make every comparison below ' +
+      'vacuously true (PF-018)',
+    ).not.toBe('Nothing to remove.');
+
+    // THE OUTCOME. A SECOND, independent resolution — exactly as the real branch
+    // makes it, per scope, after the dry-run branch has returned. If the two ever
+    // stop reading the same source this is where they part.
+    await runSelectivePhaseForScope({
+      claudeDir,
+      devflowDir,
+      selectedPlugins: selected,
+      verbose: false,
+      installedPlugins: await resolveInstalledPlugins(devflowDir),
+    });
+
+    const remaining = await installedSkillNames();
+    const removed = seeded.filter(name => !remaining.includes(name));
+
+    expect(
+      removed,
+      'what the removal took must be exactly what the plan named — a preview the outcome does ' +
+      'not honour is the thing the user consented to, and it was wrong',
+    ).toEqual([...new Set(planned.skills)].sort());
+    expect(
+      remaining,
+      'and the retained set is the complement, so the comparison cannot pass by removing nothing',
+    ).toEqual(seeded.filter(name => !planned.skills.includes(name)));
+  });
+
+  it('known-bad probe: the manifest is what decides, not the registry', async () => {
+    const selected = SELECTED_NAMES.map(byName);
+
+    const fromManifest = computeAssetsToRemove(selected, await resolveInstalledPlugins(devflowDir));
+    const fromRegistry = computeAssetsToRemove(selected, DEVFLOW_PLUGINS);
+
+    expect(
+      fromManifest.skills,
+      'the two lists must differ, or this manifest cannot show the preview reading it — ' +
+      '`patterns` is owned by devflow-plan and also declared by devflow-implement, which this ' +
+      'manifest does not record as installed',
+    ).not.toEqual(fromRegistry.skills);
+    expect(fromManifest.skills).toContain('patterns');
+    expect(fromRegistry.skills).not.toContain('patterns');
   });
 });
 

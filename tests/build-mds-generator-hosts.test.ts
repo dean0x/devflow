@@ -54,7 +54,7 @@ import {
 import {
   MDS_COMMAND_HOSTS,
   MDS_GENERATOR_HOSTS,
-  MDS_PARTIALS,
+  ALL_MDS_PARTIALS,
   MDS_REFERENCE_MODULES,
   ALL_DISCOVERED_HOSTS,
   DIST_COMMAND_FILES,
@@ -782,7 +782,7 @@ describe('printed host/partial counts agree with the manifest (AC-1.8)', () => {
 
   /** Expected totals, derived from the manifest — never retyped as literals. */
   const EXPECTED_HOSTS = ALL_DISCOVERED_HOSTS.length;
-  const EXPECTED_PARTIALS = MDS_PARTIALS.length;
+  const EXPECTED_PARTIALS = ALL_MDS_PARTIALS.length;
   /**
    * How many gated reference modules this registry holds back — read from the
    * one owner that answers it (src/core/mds-variants.ts), never from a roster

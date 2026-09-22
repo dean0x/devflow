@@ -597,7 +597,13 @@ const LIVE_REASONS: readonly string[] = [
   'unknown tracker provider',
   'tracker configuration unreadable',
   'tracker.md exceeds size bound',
-  'tracker configuration mismatch',
+  // SPLIT BY CAUSE. One spelling covered two different mistakes with two different
+  // remedies — a per-repo `tracker` key that narrows to a provider the manifest does
+  // not carry, and a tracker configuration file whose frontmatter provider disagrees
+  // with the resolved one. A user who reads the unsplit reason cannot tell which file
+  // to edit, which is the whole point of naming a reason.
+  'tracker configuration mismatch (repository override)',
+  'tracker configuration mismatch (conventions file)',
   'tracker mechanics unavailable',
   'tracker not configured',
   'tracker.md required fields incomplete — edit ~/.devflow/tracker.md',
@@ -626,6 +632,19 @@ const LIVE_REASONS: readonly string[] = [
   'no parseable refs for provider {p}',
   'unusable site',
   'unsupported transition',
+  // The plan artifact is posted as CONTENT, so there is a body that can exceed the
+  // provider's field limit. Over the cap the operation posts none of the plan and
+  // says so: a truncated plan is worse than a pointer, because the reader cannot
+  // tell which half is missing. No {provider} token — the cap is the provider's,
+  // the failure is not.
+  'plan artifact exceeds comment cap',
+  // Two connected servers is the one configuration in which a write lands in the
+  // WRONG tracker and nothing downstream can tell. `{n}` is how many servers
+  // qualified: runtime data with no closed domain, so it is emitted verbatim and
+  // NEVER instantiated, exactly like `{ref}` and `{p}`. `{capability}` IS
+  // instantiated, because the contract's own table is its closed domain — the
+  // ambiguity is per capability, so the reason has to name which one.
+  'ambiguous tracker server — {n} servers offer {capability}',
 ];
 
 /**
@@ -734,10 +753,15 @@ export function reasonSpellings(reason: string): string[] {
  * become a dumping ground: the forward arm below asserts every entry here is
  * actually emitted, so an unregistered NEW reason parked here goes red.
  *
- * ACTION FOR THE PHASE: §14.2 needs this row, or the literal needs retiring. Both
- * are appendix decisions, not this subtask's.
+ * DELIBERATELY EXCLUDED from the `{ISSUE_REF}` template rewrite, and the exclusion
+ * is recorded here because it looks like an oversight. `#${old_issue}` is a SHELL
+ * expansion inside an executable `||` chain in a file that only ever runs under
+ * github, where `#N` IS the correct rendering. `{ISSUE_REF}` is a rendering token
+ * the agent substitutes into an Output template; substituting it into a shell
+ * recipe would replace a live variable with a literal brace pair and break the
+ * command. The rewrite's subject is the agent's templates, and this is neither.
  */
-const PRE_PHASE3_REASONS: readonly string[] = [
+const GITHUB_ONLY_REASONS: readonly string[] = [
   'tech-debt archive failed for #${old_issue}',
 ];
 
@@ -752,7 +776,7 @@ const PRE_PHASE3_REASONS: readonly string[] = [
  * git.md, so the two directions disagreed about their own subject, and the four
  * DEGRADED reasons this phase added to git.md were registered by review alone.
  *
- * Written in the same register as PRE_PHASE3_REASONS and for the same reason: a
+ * Written in the same register as GITHUB_ONLY_REASONS and for the same reason: a
  * prohibition and its exemption registry are ONE authority (PF-067). An exemption
  * that lives in a `.filter` predicate is invisible to anyone reading the rule, and
  * a reader who greps only the rule finds a violation the arm silently permits.
@@ -762,7 +786,7 @@ const PRE_PHASE3_REASONS: readonly string[] = [
  * review-comment ops, the two 5xx retry ceilings, and the release version parse.
  * The arm below asserts every entry is genuinely emitted, so this cannot become a
  * dumping ground — an entry parked here that nothing emits goes red, exactly as it
- * does for PRE_PHASE3_REASONS.
+ * does for GITHUB_ONLY_REASONS.
  *
  * ACTION FOR THE PHASE: these rows belong in §14.2 or in a github-scoped table of
  * their own. Either is an appendix decision, not this subtask's.
@@ -835,7 +859,15 @@ const PHASE3_STATUS_LINES: readonly string[] = [
  * registry arms compare on.
  */
 export function collectDegradedReasons(text: string): string[] {
-  return [...text.matchAll(/DEGRADED \(([^)]*(?:\([^)]*\)[^)]*)*)\)/g)]
+  // One level of nesting, balanced. The previous alternation was written for the
+  // same purpose and could never fire: its leading `[^)]*` admits `(`, so it
+  // swallowed the opening parenthesis of a nested group and the closing `\)` then
+  // matched the INNER close. A split reason came back as
+  // `tracker configuration mismatch (repository override` — an unregistered
+  // spelling of a registered row, reported against the very agent that emits it
+  // correctly. Excluding `(` from the outer class is what makes the alternation
+  // reachable (STRENGTHENED, applies ADR-025).
+  return [...text.matchAll(/DEGRADED \(((?:[^()]|\([^()]*\))*)\)/g)]
     .map(m => m[1].replace(/\s+/g, ' ').trim());
 }
 
@@ -858,10 +890,24 @@ const REASON_PLACEHOLDERS: readonly string[] = ['{reason}', '\\{reason\\}'];
 export function collectUnregisteredReasons(corpus: readonly CorpusEntry[]): string[] {
   const unregistered: string[] = [];
   for (const entry of corpus) {
-    for (const reason of collectDegradedReasons(entry.content)) {
+    // The parser's blind spot is SILENCE, not a false pass: a reason whose
+    // parentheses are unbalanced, or nested two deep, matches nothing and is
+    // dropped rather than reported, so the registry arm goes quiet about exactly
+    // the spelling it exists to catch (avoids PF-064 — an absence-based guard
+    // has to know it looked). Every `DEGRADED (` in the corpus must therefore
+    // yield a parse.
+    const opened = entry.content.match(/DEGRADED \(/g)?.length ?? 0;
+    const parsed = collectDegradedReasons(entry.content);
+    if (parsed.length !== opened) {
+      unregistered.push(
+        `${entry.path}: ${opened} "DEGRADED (" site(s) but ${parsed.length} parsed — a reason ` +
+        `with unbalanced or doubly-nested parentheses is invisible to this registry, not clean`,
+      );
+    }
+    for (const reason of parsed) {
       if (REASON_PLACEHOLDERS.includes(reason)) continue;
       if (CANONICAL_REASONS.some(canonical => reasonSpellings(canonical).includes(reason))) continue;
-      if (PRE_PHASE3_REASONS.includes(reason)) continue;
+      if (GITHUB_ONLY_REASONS.includes(reason)) continue;
       if (entry.path === GIT_AGENT.path && GIT_AGENT_LEGACY_REASONS.includes(reason)) continue;
       unregistered.push(`${entry.path}: "${reason}"`);
     }
@@ -879,8 +925,12 @@ describe('[DR-04] DEGRADED literal registry: forward direction', () => {
     ).toBe(CANONICAL_REASONS.length);
     expect(
       CANONICAL_REASONS.length,
-      '§14.2 fixes eighteen non-`(none)` reasons; a shorter table is a narrowed registry',
-    ).toBeGreaterThanOrEqual(18);
+      // 18 at the tracker wave, 21 now: the mismatch reason split by cause (+2 -1),
+      // the plan artifact's cap (+1) and the two-server ambiguity (+1). A floor
+      // rises with the table and never falls — a shorter table is a narrowed
+      // registry, whatever the reason given.
+      '§14.2 fixes 21 non-`(none)` reasons; a shorter table is a narrowed registry',
+    ).toBeGreaterThanOrEqual(21);
     // The instantiation rule is a NARROWING, not a wildcard: only `{provider}` is
     // instantiated, only with tokens the registry carries, and a reason without the
     // placeholder still matches itself and nothing else.
@@ -916,9 +966,28 @@ describe('[DR-04] DEGRADED literal registry: forward direction', () => {
     ).not.toContain('no tracker tool for frobnicate');
     expect(capabilitySpellings[0], 'the template itself is always the first spelling')
       .toBe('no tracker tool for {capability}');
+    // A reason may carry BOTH an instantiable placeholder and a non-instantiable
+    // one. `{capability}` is drawn from the contract's closed table; `{n}` is a
+    // count known only at runtime, so every spelling must still carry it verbatim.
+    // A registry that instantiated `{n}` would admit an unbounded family of
+    // spellings and stop being a closed vocabulary — GAP-13 by the back door.
+    const ambiguitySpellings = reasonSpellings('ambiguous tracker server — {n} servers offer {capability}');
     expect(
-      PRE_PHASE3_REASONS.length,
-      'the pre-Phase-3 list is empty — the reverse arm would then be silently stricter than the ' +
+      ambiguitySpellings,
+      'the capability half must instantiate against the contract table, as it does elsewhere',
+    ).toContain('ambiguous tracker server — {n} servers offer fetch by key');
+    expect(
+      ambiguitySpellings.filter(spelling => !spelling.includes('{n}')),
+      '`{n}` has no closed domain and must survive verbatim in EVERY spelling — a spelling ' +
+      'without it is one no site can emit and no reader can grep for',
+    ).toEqual([]);
+    expect(
+      ambiguitySpellings,
+      'and a capability the contract does not define is refused here too',
+    ).not.toContain('ambiguous tracker server — {n} servers offer frobnicate');
+    expect(
+      GITHUB_ONLY_REASONS.length,
+      'the github-only list is empty — the reverse arm would then be silently stricter than the ' +
       'tree it scans, and the table gap it records would be lost',
     ).toBeGreaterThan(0);
     expect(
@@ -1092,6 +1161,39 @@ describe('[DR-04] DEGRADED literal registry: reverse direction', () => {
       'a reason containing a path and an em-dash must come back whole',
     ).toEqual(['tracker.md required fields incomplete — edit ~/.devflow/tracker.md']);
     expect(collectDegradedReasons('no degradation here')).toEqual([]);
+    expect(
+      collectDegradedReasons('DEGRADED (tracker configuration mismatch (repository override))'),
+      'one level of nesting is what the shipped split reasons carry, and it must come back whole',
+    ).toEqual(['tracker configuration mismatch (repository override)']);
+  });
+
+  it('known-bad probe: a reason the parser cannot read is REPORTED, not dropped', () => {
+    // The parser bounds nesting at one level and requires balance, and both
+    // limits fail SILENTLY — the site matches nothing and the registry arm has
+    // nothing to object to. A guard that certifies by finding nothing has to
+    // know it actually looked (avoids PF-064).
+    for (const [label, body] of [
+      ['unbalanced', 'emit `TRACEABILITY: DEGRADED (tracker configuration mismatch (repository override)`'],
+      ['doubly nested', 'emit `TRACEABILITY: DEGRADED (outer (middle (inner)))`'],
+    ] as const) {
+      expect(
+        collectDegradedReasons(body),
+        `${label}: the parser genuinely cannot read this — that is the premise of the arm below`,
+      ).toEqual([]);
+      expect(
+        collectUnregisteredReasons([{ path: 'probe.md', content: body }]),
+        `${label}: an unparseable reason must be reported as unparseable, never as clean`,
+      ).toHaveLength(1);
+    }
+
+    expect(
+      collectUnregisteredReasons([{
+        path: 'probe.md',
+        content: 'DEGRADED (tracker configuration mismatch (repository override))',
+      }]),
+      'and a reason the parser CAN read is not reported by the count check — or the arm above ' +
+      'proves only that the check reports everything',
+    ).toEqual([]);
   });
 });
 
@@ -1135,20 +1237,27 @@ const RENDERING_CLAUSES: readonly ContractClause[] = [
       'the reader DOES with it, which is the half AC-3.11 needs',
   },
   {
-    label: 'a rendered ref is never `#`-prefixed under a non-github provider',
-    pattern: /never `#`-prefixed/,
+    // RE-POINTED, not deleted. The old spelling was a PROHIBITION on the rendered
+    // output ("never `#`-prefixed"), which is the shape the rule had to take while
+    // the Output templates were frozen byte-for-byte and still spelled `#{number}`.
+    // The templates now carry `{ISSUE_REF}`, so the rule states the POSITIVE github
+    // rendering instead — the half a github spawn needs, and the half a prohibition
+    // could never supply.
+    label: 'the github rendering of an issue ref is named',
+    pattern: /`#\{number\}` under github/,
     why:
-      '§14.1 fixes ISSUE_REF as `#`-prefixed under github ONLY. Without this the templates are the ' +
-      'only instruction in scope and a jira spawn renders `#PROJ-123`, a reference no tracker resolves',
-  },
-  {
-    label: "the templates' `#` is named as github's rendering, not a literal",
-    pattern: /Output templates' `#` is github's rendering, not a literal/,
-    why:
-      'the reclassification IS the fix. The `#` cannot be edited out of the templates — AC-3.1 ' +
-      'freezes them byte-for-byte — so the always-loaded text has to say what it means instead',
+      '§14.1 fixes ISSUE_REF as `#`-prefixed under github ONLY. Without this the token is ' +
+      'unresolved on the github path, and the one provider whose exact bytes the golden fixture ' +
+      'pins is the one with no instruction for rendering its own references',
   },
 ];
+
+// The third clause is RETIRED with the template freeze it existed to work around.
+// It required the always-loaded block to say the templates' `#` "is github's
+// rendering, not a literal" — a reclassification, chosen because AC-3.1 froze the
+// template bytes and the `#` could not be edited out. The bytes are editable now
+// and the `#` is gone from every issue slot, so a rule reclassifying a character
+// that is no longer there would be a rule about nothing.
 
 /** Named collector: rendering clauses the reader block does not state. */
 export function collectMissingRenderingClauses(
@@ -1175,18 +1284,26 @@ describe('the reader block states the non-github rendering rule (AC-3.11, §14.1
     ).toEqual([]);
   });
 
-  it('the templates it reclassifies are really there, and really still carry the `#`', () => {
-    // Non-vacuity in the direction that matters: if the Output templates ever lost
-    // their `#{number}` slots, the rule above would be a rule about nothing and this
-    // whole claim would pass while asserting no live property. It would also mean
-    // AC-3.1's frozen fixture had been broken, which is the louder failure.
-    for (const slot of ['- **Issue**: #{number}', '- **Number**: #{number}', '### Issue #{number']) {
-      expect(
-        GIT_MD,
-        `the Output templates must still carry ${JSON.stringify(slot)} — it is frozen by the ` +
-        `Phase-0 capture (AC-3.1) and is what the reader block's rule reclassifies`,
-      ).toContain(slot);
+  it('every issue slot renders through the token, and the PR slots keep their `#`', () => {
+    // The successor to the "templates still carry the `#`" arm, which asserted the
+    // exact opposite: it existed to hold the frozen bytes in place while the rule
+    // above reclassified them. The claim it becomes is the one that was always
+    // wanted — every ISSUE slot renders through the provider-neutral token — plus
+    // the discrimination the sweep needed: the PR slots are correct as `#` under
+    // every provider, because pull requests stay on the PR host, and a rewrite that
+    // swept them along would render a PR reference no host resolves.
+    for (const slot of ['- **Issue**: {ISSUE_REF}', '- **Number**: {ISSUE_REF}', '## Issue {ISSUE_REF']) {
+      expect(GIT_MD, `the Output templates must carry ${JSON.stringify(slot)}`).toContain(slot);
     }
+    expect(
+      GIT_MD,
+      'the PR slots keep their `#` — sweeping them into the issue-token rule would render a pull ' +
+      'request reference no host resolves',
+    ).toContain('- **PR**: #{number}');
+    expect(
+      GIT_MD.includes('- **Issue**: #{number}'),
+      'no issue slot may still spell the bare `#` rendering — that is the defect the token replaces',
+    ).toBe(false);
   });
 
   it('known-bad probe: each clause, deleted from a copy, is reported by the same collector', () => {
@@ -1390,5 +1507,184 @@ describe('the read site carries the `## Reference Rendering` gate it names (secu
       collectMissingWriterGate(validator.split('semicolon').join('')),
       'a writer row that lost a denylist member must be reported',
     ).toContain('the denied semicolon');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 8. Two-server scoping: a unique qualifying server, or no call (AC-13)
+// ---------------------------------------------------------------------------
+//
+// Two connected servers that both offer tracker capabilities is the one
+// configuration in which a write can land in somebody else's tracker and nothing
+// downstream can tell. The contract answers it with SIX clauses, and this is a
+// clause table rather than one substring for the reason PF-018 gives: a rule that
+// kept its DEGRADED literal and lost its affinity clause would satisfy any
+// single-fragment assertion while routing the second half of one operation to the
+// other server.
+//
+// Each clause carries its own detector and its own known-bad probe below, so a
+// clause removed from the contract takes exactly one named assertion red with it
+// — never zero, and never the whole file.
+
+interface ScopingClause {
+  readonly name: string;
+  /** Detector over the emitted subsection. */
+  readonly detector: RegExp;
+  /** A byte-exact fragment whose removal must make `detector` fail (the probe). */
+  readonly wound: string;
+  readonly why: string;
+}
+
+/** The heading that opens the subsection, byte-exact as the contract spells it. */
+const SCOPING_HEADING = '### Which server, when more than one is connected';
+
+const TWO_SERVER_CLAUSES: readonly ScopingClause[] = [
+  {
+    name: 'partition by server',
+    detector: /partition/i,
+    wound: 'Partition',
+    why:
+      'without a partition there is no "server" to be ambiguous between, and every rule below ' +
+      'degenerates into "pick a tool", which is the state that lets one operation straddle two ' +
+      'servers. The transport acronym cannot be spelled here (provider-scope forbids it in every ' +
+      'loadable file), so the partition is stated by the tool name\'s leading namespace segment',
+  },
+  {
+    name: 'per-capability qualification',
+    detector: /per CAPABILITY, never per server/,
+    wound: 'per CAPABILITY, never per server',
+    why:
+      'qualification per SERVER is the defect: a server that can create an issue would be ' +
+      'promoted to receive the comment too, and the second call is the one that lands in the ' +
+      'wrong place. The capability is the unit because the capability is what the mechanics ask for',
+  },
+  {
+    name: 'unique winner needs no further evidence',
+    detector: /[Ee]xactly one qualifying server/,
+    wound: 'Exactly one qualifying server',
+    why:
+      'a single terse server — one whose descriptions never name the tracker — is still the only ' +
+      'thing that can serve the capability. Requiring vocabulary evidence of it would degrade on ' +
+      'terseness, which is a property of the server\'s documentation and not of the routing',
+  },
+  {
+    name: 'two or more is DEGRADED and no call',
+    detector: /DEGRADED \(ambiguous tracker server — \{n\} servers offer \{capability\}\)/,
+    wound: 'ambiguous tracker server',
+    why:
+      'the registered reason and the refusal it names. Without the refusal the reason is advice: ' +
+      'an agent that reports the ambiguity and then calls anyway has written into a tracker it ' +
+      'could not identify, and the DEGRADED line makes that look handled',
+  },
+  {
+    name: 'affinity pinned for the spawn',
+    detector: /pinned for the whole spawn/,
+    wound: 'pinned for the whole spawn',
+    why:
+      're-deciding per call is how the read and the write of one operation land on two servers. ' +
+      'The decision is made once because the operation is one operation',
+  },
+  {
+    name: 'corroborating read, once per spawn',
+    detector: /once per spawn\*\* — never per item/,
+    wound: 'never per item',
+    why:
+      'the write scope check, and its bound. A corroborating read per ITEM turns a fifty-issue ' +
+      'backlink into a hundred calls (design review H2); a corroborating read per SPAWN is one ' +
+      'fetch of the project by key, which is all the evidence the routing needs',
+  },
+];
+
+/** The emitted tool-call contract, read fail-loud. */
+function toolCallContract(): string {
+  const file = path.join(compiledSkillRefsDir(), 'tracker', '_mcp.md');
+  const content = readFileSync(file, 'utf-8');
+  if (content.trim() === '') throw new Error(`${file} is empty — this section has no subject`);
+  return content;
+}
+
+/**
+ * Named collector: the two-server subsection of a contract text, or `''`.
+ *
+ * Sliced heading-to-next-heading so the negative arm below cannot be satisfied by
+ * a `no tracker tool for` that lives in a different subsection of the same file.
+ */
+export function sliceScopingSection(text: string): string {
+  const start = text.indexOf(SCOPING_HEADING);
+  if (start === -1) return '';
+  const rest = text.slice(start + SCOPING_HEADING.length);
+  const end = rest.indexOf('\n### ');
+  return end === -1 ? rest : rest.slice(0, end);
+}
+
+/** Named collector: clauses the two-server rule does not state. */
+export function collectMissingScopingClauses(section: string): string[] {
+  return TWO_SERVER_CLAUSES
+    .filter(clause => !clause.detector.test(section))
+    .map(clause => `${clause.name} — ${clause.why}`);
+}
+
+describe('the two-server scoping rule states every clause (AC-13)', () => {
+  it('the registry and the corpus it ranges over are both real (PF-018)', () => {
+    expect(TWO_SERVER_CLAUSES.length, 'an empty clause table asserts nothing').toBeGreaterThan(0);
+    for (const clause of TWO_SERVER_CLAUSES) {
+      expect(clause.why.trim().length, `${clause.name}: a clause without a reason is a grep`)
+        .toBeGreaterThan(40);
+      expect(clause.wound.length, `${clause.name}: an empty wound makes its probe inert`)
+        .toBeGreaterThan(0);
+    }
+    expect(
+      new Set(TWO_SERVER_CLAUSES.map(c => c.name)).size,
+      'two clauses sharing a name have no per-clause accounting',
+    ).toBe(TWO_SERVER_CLAUSES.length);
+  });
+
+  it('the shipped contract states all six clauses', () => {
+    const section = sliceScopingSection(toolCallContract());
+    expect(
+      section,
+      `the contract has no ${SCOPING_HEADING} subsection — two connected servers is the ` +
+      'configuration AC-13 exists for, and without the subsection nothing scopes a write',
+    ).not.toBe('');
+    const missing = collectMissingScopingClauses(section);
+    expect(
+      missing,
+      `clause(s) the two-server rule does not state:\n  ${missing.join('\n  ')}`,
+    ).toEqual([]);
+  });
+
+  it('the plural case does NOT reuse the singular capability reason', () => {
+    // `no tracker tool for {capability}` means "nothing offers it". The plural case
+    // is the opposite — SEVERAL things offer it — and answering both with one
+    // literal is the GAP-13 shape: a user reading the status cannot tell whether to
+    // connect a server or disconnect one, and a grep cannot separate the two.
+    const section = sliceScopingSection(toolCallContract());
+    expect(section, 'no subsection to check').not.toBe('');
+    expect(
+      section,
+      'the ambiguity case must carry its own registered reason, not the unavailability one',
+    ).not.toContain('no tracker tool for');
+    expect(
+      section,
+      'and it must carry the registered spelling, on one line, so the registry\'s forward arm ' +
+      'has a site to find',
+    ).toContain('DEGRADED (ambiguous tracker server — {n} servers offer {capability})');
+  });
+
+  it('known-bad probe: each clause, removed from a copy, is reported by the same collector', () => {
+    const pristine = sliceScopingSection(toolCallContract());
+    expect(
+      collectMissingScopingClauses(pristine),
+      'the collector must be silent on the shipped subsection, or every probe below proves nothing',
+    ).toEqual([]);
+    for (const clause of TWO_SERVER_CLAUSES) {
+      const wounded = pristine.split(clause.wound).join('');
+      expect(wounded, `removing ${JSON.stringify(clause.wound)} changed nothing — probe is inert`)
+        .not.toBe(pristine);
+      expect(
+        collectMissingScopingClauses(wounded).join('\n'),
+        `removing ${JSON.stringify(clause.wound)} must be reported as "${clause.name}"`,
+      ).toContain(clause.name);
+    }
   });
 });

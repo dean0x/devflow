@@ -47,8 +47,7 @@ are **user-configured**, so their tool names differ per machine and **cannot be
 enumerated at authoring time**. Any allowlist written here would be a guess, and a
 wrong guess fails at *runtime* — in a background run nobody is watching, with no
 error anyone sees — not at build time. The boundary above is the compensating
-control, pinned in `tests/tracker-agent.test.ts`. Do not trade it for an allowlist
-that cannot be written correctly.
+control. Do not trade it for an allowlist that cannot be written correctly.
 
 ## Environment
 
@@ -69,16 +68,20 @@ otherwise — so the fallback cannot land anywhere the gate would not have:
 TRACKER_DEVFLOW_DIR="${DEVFLOW_DIR:-$HOME/.devflow}"
 TRACKER_FILE="$TRACKER_DEVFLOW_DIR/tracker.md"
 TRACKER_CLAIM="$TRACKER_DEVFLOW_DIR/.tracker.processing"
+TRACKER_ATTEMPTS_FILE="$TRACKER_DEVFLOW_DIR/.tracker.attempts"
 ```
 
-Resolve all three **once**, at the start, and reuse them. An unset `TRACKER_FILE`
-later in the write chain would redirect into an empty path rather than fail.
+Resolve all four **once**, at the start, and refer to every path below by its
+variable and nothing else — `"$TRACKER_FILE"`, never a re-spelled path. A path
+written out a second time is a second resolution that can disagree with the
+first, and an unset variable expands to nothing rather than failing, so the
+disagreement arrives as a write into an empty path.
 
 | Path | Role |
 |---|---|
 | `$TRACKER_FILE` | the file you write — **write-once** |
 | `$TRACKER_CLAIM` | your claim file |
-| `{TRACKER_DEVFLOW_DIR}/.tracker.attempts` | the attempt counter |
+| `$TRACKER_ATTEMPTS_FILE` | the attempt counter |
 
 Treat the provider token as opaque: copy it into the file's `provider:` field
 verbatim and **never re-derive, re-map or repair it** — a second normalisation
@@ -89,15 +92,17 @@ site is a second place the resolution can disagree with itself.
 1. If `$TRACKER_CLAIM` exists, compare its age against the claim-staleness bound
    of **600 seconds** — the same bound the session-start gate applies, so one
    claim file is classified identically on both sides:
-   - **Fresh** (age under the bound) — another Tracker agent is live. **Exit
-     silently**; change nothing, report nothing.
+   - **Fresh** (age under the bound) — another Tracker agent is live. Report
+     `LOST` and exit 3, exactly as the losing branch of step 2 does: it is the
+     same outcome reached one check earlier, and two spellings of one outcome is
+     the ambiguity the report exists to remove. Change nothing, write nothing.
    - **Stale** (age at or over the bound) — a previous run crashed. Re-claim it by
      `touch`ing the claim file.
 2. Otherwise claim it with a **create-exclusive** create, so exactly one winner
    survives concurrent sessions:
 
    ```bash
-   if ( set -o noclobber; : > "$TRACKER_CLAIM" ) 2>/dev/null; then :; else exit 0; fi
+   if ( set -o noclobber; : > "$TRACKER_CLAIM" ) 2>/dev/null; then echo CLAIMED; else echo LOST; exit 3; fi
    ```
 
    The contended resource is the claim **path**, so the primitive has to be one
@@ -105,17 +110,26 @@ site is a second place the resolution can disagree with itself.
    marker or `mkdir` of a lock directory refuse on the same terms. A rename does
    not: `mv src dst` replaces an existing `dst` and exits 0, so both racers would
    win and the loser branch would never be taken. The redirect failing **is** the
-   loser branch: another agent claimed first, so **exit silently**. The create is
-   also its own existence check, which leaves no window between step 1 and this
-   line.
-3. **Heartbeat**: `touch` the claim file **repeatedly** while you work — once per
-   capability probed, and once per section composed. The interval the staleness
-   bound is measured against is then one unit of work rather than the whole run. A
-   single touch at one boundary bounds nothing: a compose phase that outlives the
-   bound measured from it self-classifies as crashed, and the next session's gate
-   re-arms against an agent that is still live.
+   loser branch: another agent claimed first. The create is also its own existence
+   check, which leaves no window between step 1 and this line.
 
-**Vanished inputs**: if the claim file or `{TRACKER_DEVFLOW_DIR}` disappears
+   The branch you took is **the outcome you report to yourself**, so it has to be
+   visible. `CLAIMED` means the run is yours; `LOST` with status 3 means it is
+   not, and 3 rather than 0 or 1 because success and "the create failed" are both
+   readings this branch is not. **Absent output ⇒ LOST; the loser writes
+   nothing** — not `$TRACKER_FILE`, not `$TRACKER_ATTEMPTS_FILE`, not the claim.
+   A run killed between the create and its echo is indistinguishable from a
+   winner that printed nothing, and of the two readings only this one is safe.
+3. **Heartbeat**: `touch` the claim file **once**, at the probe → compose
+   boundary. The probe is network-bound and its duration is not yours to predict;
+   composition is local and short. One refresh there restarts the staleness clock
+   for the only phase that could otherwise outlive it. A cadence repeated per
+   capability probed and per section composed reads as safer and is not: it is an
+   instruction with no observable count, so nothing distinguishes a run that
+   followed it from one that touched once, and every extra touch is a write to
+   the file the next session's gate stats.
+
+**Vanished inputs**: if the claim file or `$TRACKER_DEVFLOW_DIR` disappears
 mid-run — the user disabled or cleared the feature — stop without further writes.
 Never recreate them.
 
@@ -208,6 +222,19 @@ third-party input — to you when you compose it and to every reader afterwards.
   **sentinel and an absent section are different outcomes**: an absent section
   means the documented neutral default, a sentinel means the reader degrades and
   asks the human to edit the file.
+- **A global-safe section whose shape gate is a closed enum and whose documented
+  default is one of that enum's own values is never sentinelled — write the
+  constant.** Every value it admits is written down in the table below, it holds
+  for the whole machine, and the default is itself one of them: there is nothing
+  a human could resolve that you do not already know, and a sentinel there makes
+  every reader degrade forever over a value you had. `## Dedup Strategy` is a
+  closed enum too and is NOT covered — its documented default is a live probe,
+  not a member, so an unresolved rung there is a real unknown.
+- Every value is composed in the same restricted alphabet the `## Reference
+  Rendering` denylist names: **no backtick, no `$`, no `;`** anywhere in the
+  file. The write chain refuses the whole composition over one of them, so a
+  scanned string carrying one is a discard with a `### Substitutions` row, never
+  a value you pass through.
 
 ### Section scope, defaults and shape gates
 
@@ -217,7 +244,7 @@ re-derived per repository at call time, so the value here is a last resort.
 | Section | Scope | Absent ⇒ | Shape gate at the sink |
 |---|---|---|---|
 | `## Project` → site | global-safe | `tracker not configured` | `^https://[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?(\.[a-z0-9-]+)+$` — no userinfo, no port, no path |
-| `## Project` → key | repo-derived | `tracker not configured` | `^[A-Za-z][A-Za-z0-9_]{0,9}$` |
+| `## Project` → key | repo-derived | `tracker not configured` | `^[A-Z][A-Z0-9_]{1,9}$` — ASCII-upper-normalised once at the key's own boundary |
 | `## Issue Types` | repo-derived | `tracker not configured` | `^[A-Za-z0-9][A-Za-z0-9 ._/-]{0,49}$`, and an exact match against the types enumerated this run |
 | `## Required Fields` | repo-derived | the empty set | allowlist: `project` \| `issuetype` \| `summary` \| `description` \| `labels` \| `components` \| `priority` \| `parent`; every other name is denied, explicitly including `security`, `reporter`, `votes`, `__proto__`, `assignee` beyond `self`, any name with a leading `-`, and the literal `(ask each time)` |
 | `## Iteration Policy` | repo-derived | the resolved provider's documented neutral default | an exact match against the iteration states enumerated this run |
@@ -225,7 +252,7 @@ re-derived per repository at call time, so the value here is a last resort.
 | `## Assignee` | global-safe | `none` | enum: `none` \| `self`; `self` requires identify-current-user and degrades with it; **never** a literal email address or account identifier |
 | `## Tech Debt` | global-safe | `single rolling item` | enum: `single rolling item` |
 | `## Wave Filter` | repo-derived | `tracker not configured` | structured filter fields only; no free-text query field is permitted |
-| `## Reference Rendering` | global-safe | the resolved provider's documented default | `^[A-Za-z0-9 #{}/_.-]{1,60}$`; denylist: backtick \| dollar \| double-quote \| backslash \| semicolon \| newline; a discard ⇒ default + a `### Substitutions` row |
+| `## Reference Rendering` | global-safe | the resolved provider's documented default | `^[A-Za-z0-9 #{}/_.-]{1,60}$`; denylist: backtick \| dollar \| double-quote \| backslash \| semicolon \| newline; a discard ⇒ default + a `### Substitutions` row ; **never write `# UNRESOLVED:` here** — an unresolved rendering is the resolved provider's documented default, which its mechanics state and the reader applies |
 | `## Dedup Strategy` | global-safe | probe live | enum: `entity-property` \| `comment-edit-in-place` \| `authored-marker` \| `post-with-warning` — the reader's ladder rungs, strongest evidence first — recorded with its probe evidence |
 
 `### Substitutions` carries no value and has no sink gate — it is report-only,
@@ -312,13 +339,15 @@ RAW=""; SCRUBBED=""
 trap 'rm -- "$RAW" "$SCRUBBED" 2>/dev/null' EXIT INT TERM
 RAW="$(mktemp)" \
   && SCRUBBED="$(mktemp "$TRACKER_DEVFLOW_DIR/.tracker-staged.XXXXXX")" || exit 1
-cat > "$RAW" <<'EOF'
+{ cat > "$RAW" <<'EOF'
 <the composed file, literally>
 EOF
-node "$TRACKER_DEVFLOW_DIR/scripts/redact-secrets.cjs" "$RAW" "$SCRUBBED" \
+} \
+  && node "$TRACKER_DEVFLOW_DIR/scripts/redact-secrets.cjs" "$RAW" "$SCRUBBED" \
   && [ -s "$SCRUBBED" ] \
   && grep -q '^provider: ' "$SCRUBBED" \
   && grep -q '^## Dedup Strategy$' "$SCRUBBED" \
+  && ! grep -q '[`$;]' "$SCRUBBED" \
   && ln "$SCRUBBED" "$TRACKER_FILE" \
   && chmod 600 "$TRACKER_FILE"
 GATE=$?; exit "$GATE"
@@ -337,6 +366,12 @@ Every part of that is load-bearing:
 - **Each `mktemp` is a precondition, not an assumption** — `|| exit 1` before
   anything is composed. A chain in which every link is load-bearing cannot have an
   unchecked first link.
+- **The compose step is brace-grouped so it HAS a status the chain can read.** A
+  bare `cat > "$RAW" <<'EOF' … EOF` is its own statement, and the shell throws its
+  exit code away: a full disk, a read-only temp directory or a vanished `$RAW`
+  leaves an empty or partial composition, and every link after it runs happily
+  over the result. `{ … } &&` makes the write the first link of the same chain
+  the placement hangs off.
 - **Both temp files are removed by a `trap` on `EXIT INT TERM`** — on the refusal
   paths and the signal paths, not only on the one where the chain runs to the end.
   `$RAW` holds the PRE-scrub composition, so leaving it behind keeps exactly the
@@ -362,14 +397,28 @@ Every part of that is load-bearing:
   scrubber's framed stdout mode exists for comment sinks that have no such
   boundary — a different sink with a different problem. **Keep the two reasons
   apart; neither simplifies into the other.**
-- **`[ -s "$SCRUBBED" ]` and the two `grep`s are the shape gate.** The scrubber's
-  exit status says it RAN, not that it produced a file worth keeping: an empty
-  composition scrubs to zero bytes and every link of the chain still exits 0. The
-  size test and the two greps — the frontmatter's first key and the LAST template
-  heading — bracket the composition at both ends, so a body that is empty,
-  truncated or not the template at all never reaches placement. Downstream reads
-  nothing but existence, so this is the line where the Iron Law is enforced rather
-  than asserted.
+- **`[ -s "$SCRUBBED" ]` and the three `grep`s are the shape gate.** The
+  scrubber's exit status says it RAN, not that it produced a file worth keeping:
+  an empty composition scrubs to zero bytes and every link of the chain still
+  exits 0. The size test and the first two greps — the frontmatter's first key
+  and the last REQUIRED heading — bracket the composition at both ends, so a body
+  that is empty, truncated or not the template at all never reaches placement.
+  Downstream reads nothing but existence, so this is the line where the Iron Law
+  is enforced rather than asserted.
+- **The third `grep` validates the range the anchors only bracket.** Two anchors
+  say the head and the tail arrived and say nothing about the lines between them
+  — or after them, which is where `### Substitutions` sits, and every row of that
+  section is a value that already failed its own shape gate. The negated grep
+  reads every line of the composition and refuses the write over a backtick, a
+  `$` or a `;`: the `## Reference Rendering` denylist, hoisted from one section
+  to the whole file. The section rule stays where it is — this is a second,
+  independent control at the sink, not a replacement for the one at the source.
+  The other two characters that denylist names are deliberately NOT here, each
+  for its own reason: the scrubber may re-quote an assignment it redacted, so a
+  link that refused a double quote would make a SUCCESSFUL redaction refuse the
+  write; and a backslash inside a bracket expression is read as an escape by some
+  `grep`s and as a literal by others, which would be a portability bug in a
+  security control rather than a control.
 - **`ln` places the file atomically and create-exclusively.** `link(2)` publishes
   a file that is ALREADY complete, under a name that must not exist: there is no
   instant at which `$TRACKER_FILE` holds a prefix of the content. It fails with
@@ -388,18 +437,21 @@ identifier.
 ## Finishing
 
 1. **On a write-less exit** — no capability reachable, capability denied, or the
-   scrub gate refused — **leave `{TRACKER_DEVFLOW_DIR}/.tracker.attempts` exactly
-   as you found it.** The session-start gate spends one attempt from it at the
-   moment it emits your directive [DR-02], so a run that dies before reaching this
-   line costs the gate the same single attempt as one that reaches it, and the cap
-   of **5 attempts** engages without you. A second attempt spent here would spend
-   the budget twice per cycle, closing the feature after three directives, not five.
-2. **On a successful write**, delete `{TRACKER_DEVFLOW_DIR}/.tracker.attempts`.
+   scrub gate refused — **leave `"$TRACKER_ATTEMPTS_FILE"` exactly as you found
+   it.** The session-start gate spends one attempt from it at the moment it emits
+   your directive, so a run that dies before reaching this line costs the gate the
+   same single attempt as one that reaches it, and the cap of **5 attempts**
+   engages without you. A second attempt spent here would spend the budget twice
+   per cycle, closing the feature after three directives, not five.
+2. **On a successful write**, delete `"$TRACKER_ATTEMPTS_FILE"`.
    The file now exists, so the attempt history is spent.
-3. Delete the claim file as your **FINAL act**, strictly after every other write.
-   Use a plain `rm --`: devflow's recommended deny-list denies the FLAGGED
-   spellings, and you run unattended with no one to answer the prompt (PF-003).
-   `--` ends the options, so a path is never read as one:
+3. Delete the claim file as your **FINAL act**, strictly after every other write,
+   and **a write-less exit still deletes the claim** — every path that reaches
+   this section releases it, or the next session reads a held claim as a live
+   sibling and waits out the whole staleness bound for a run that decided in
+   seconds it had nothing to say. Use a plain `rm --`: devflow's recommended
+   deny-list denies the FLAGGED spellings, and you run unattended with no one to
+   answer the prompt. `--` ends the options, so a path is never read as one:
    `rm -- "$TRACKER_CLAIM"`
    Crashing before this line leaves the claim file for the next run's stale
    recovery — the correct outcome for a partial run.

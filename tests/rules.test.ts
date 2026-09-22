@@ -58,14 +58,14 @@ describe('isValidRuleName', () => {
 describe('buildRulesMap', () => {
   it('returns empty map for plugins with no rules', () => {
     const plugins: PluginDefinition[] = [
-      { name: 'devflow-plan', description: '', commands: [], agents: [], skills: [], rules: [] },
+      { name: 'devflow-plan', description: '', commands: [], agents: [], skills: [], requires: [], rules: [] },
     ];
     expect(buildRulesMap(plugins).size).toBe(0);
   });
 
   it('maps rule names to their owning plugin', () => {
     const plugins: PluginDefinition[] = [
-      { name: 'devflow-core-skills', description: '', commands: [], agents: [], skills: [], rules: ['security', 'engineering'] },
+      { name: 'devflow-core-skills', description: '', commands: [], agents: [], skills: [], requires: [], rules: ['security', 'engineering'] },
     ];
     const map = buildRulesMap(plugins);
     expect(map.get('security')).toBe('devflow-core-skills');
@@ -74,16 +74,16 @@ describe('buildRulesMap', () => {
 
   it('first plugin wins when two plugins declare the same rule', () => {
     const plugins: PluginDefinition[] = [
-      { name: 'plugin-a', description: '', commands: [], agents: [], skills: [], rules: ['shared'] },
-      { name: 'plugin-b', description: '', commands: [], agents: [], skills: [], rules: ['shared'] },
+      { name: 'plugin-a', description: '', commands: [], agents: [], skills: [], requires: [], rules: ['shared'] },
+      { name: 'plugin-b', description: '', commands: [], agents: [], skills: [], requires: [], rules: ['shared'] },
     ];
     expect(buildRulesMap(plugins).get('shared')).toBe('plugin-a');
   });
 
   it('merges rules from multiple plugins without duplicates', () => {
     const plugins: PluginDefinition[] = [
-      { name: 'plugin-a', description: '', commands: [], agents: [], skills: [], rules: ['rule-a'] },
-      { name: 'plugin-b', description: '', commands: [], agents: [], skills: [], rules: ['rule-b'] },
+      { name: 'plugin-a', description: '', commands: [], agents: [], skills: [], requires: [], rules: ['rule-a'] },
+      { name: 'plugin-b', description: '', commands: [], agents: [], skills: [], requires: [], rules: ['rule-b'] },
     ];
     const map = buildRulesMap(plugins);
     expect(map.size).toBe(2);
@@ -93,7 +93,7 @@ describe('buildRulesMap', () => {
 
   it('throws on invalid rule name', () => {
     const plugins: PluginDefinition[] = [
-      { name: 'plugin-a', description: '', commands: [], agents: [], skills: [], rules: ['Bad Name'] },
+      { name: 'plugin-a', description: '', commands: [], agents: [], skills: [], requires: [], rules: ['Bad Name'] },
     ];
     expect(() => buildRulesMap(plugins)).toThrow(/Invalid rule name/);
   });
@@ -328,6 +328,7 @@ describe('installViaFileCopy rules report', () => {
         skillsMap: new Map(),
         agentsMap: new Map(),
         rulesMap: new Map([['security', 'devflow-core-skills']]),
+        trackerProvider: 'github',
         isPartialInstall: true,
         spinner: noopSpinner,
       });
@@ -362,6 +363,7 @@ describe('installViaFileCopy rules report', () => {
         skillsMap: new Map(),
         agentsMap: new Map(),
         rulesMap: new Map([['security', 'devflow-core-skills']]),
+        trackerProvider: 'github',
         isPartialInstall: true,
         spinner: noopSpinner,
       });
@@ -393,6 +395,7 @@ describe('installViaFileCopy rules report', () => {
         skillsMap: new Map(),
         agentsMap: new Map(),
         rulesMap: new Map([['security', 'devflow-core-skills']]),
+        trackerProvider: 'github',
         isPartialInstall: true,
         spinner: noopSpinner,
       });
@@ -429,6 +432,7 @@ describe('installViaFileCopy rules report', () => {
           skillsMap: new Map(),
           agentsMap: new Map(),
           rulesMap: new Map([['orphan-rule', 'devflow-core-skills']]),
+          trackerProvider: 'github',
           isPartialInstall: true,
           spinner: noopSpinner,
         }),

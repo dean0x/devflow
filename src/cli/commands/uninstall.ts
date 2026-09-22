@@ -6,7 +6,9 @@ import * as p from '@clack/prompts';
 import color from 'picocolors';
 import { getInstallationPaths, getClaudeDirectory, getManagedSettingsPath } from '../../targets/claude-code/claude-paths.js';
 import { getGitRoot } from '../../core/git.js';
-import { DEVFLOW_PLUGINS, SKILL_NAMESPACE, getAllSkillNames, getAllAgentNames, getAllCommandNames, parsePluginSelection, resolveFeatureRedirect, prefixSkillName, unprefixSkillName, FEATURE_OWNED_SKILLS, type PluginDefinition } from '../../core/plugins.js';
+import { DEVFLOW_PLUGINS, SKILL_NAMESPACE, getAllSkillNames, getAllAgentNames, getAllCommandNames, parsePluginSelection, resolveFeatureRedirect, prefixSkillName, unprefixSkillName, skillsOf, FEATURE_OWNED_SKILLS, type PluginDefinition } from '../../core/plugins.js';
+import { readManifest } from '../../core/manifest.js';
+import { TRACKER_ATTEMPTS_FILE, TRACKER_CLAIM_FILE, TRACKER_ENABLED_FILE } from '../../core/tracker.js';
 import { sweepOrphanedAssets, mdFileName, mdEntryName } from '../../core/orphan-sweep.js';
 import { LEGACY_SKILL_NAMES } from '../../targets/claude-code/legacy.js';
 import { removeAmbientHook } from './ambient.js';
@@ -34,22 +36,54 @@ import { stripDevflowTeammateModeFromJson } from '../../core/teammate-mode-clean
 import { getPackageRoot, isContainedIn } from '../../core/paths.js';
 
 /**
+ * The plugins the manifest records as installed, as registry definitions.
+ *
+ * Falls back to the whole registry when there is no readable manifest, or when
+ * it names nothing this registry still has: that is the pre-manifest and the
+ * corrupt-manifest case, and retaining too much is the safe direction for a
+ * removal. Names the manifest carries that the registry has since dropped are
+ * skipped rather than invented — a definition is what the retained-set
+ * arithmetic needs, and there is none for a deleted plugin.
+ */
+export async function resolveInstalledPlugins(devflowDir: string): Promise<PluginDefinition[]> {
+  const manifest = await readManifest(devflowDir).catch(() => null);
+  const names = new Set(manifest?.plugins ?? []);
+  if (names.size === 0) return DEVFLOW_PLUGINS;
+  const resolved = DEVFLOW_PLUGINS.filter(plugin => names.has(plugin.name));
+  return resolved.length === 0 ? DEVFLOW_PLUGINS : resolved;
+}
+
+/**
  * Compute which assets should be removed during selective plugin uninstall.
  * Skills and agents shared by remaining plugins are retained.
  * Rules shared by remaining plugins are also retained.
+ *
+ * D-RETAIN-FROM-MANIFEST: `installedPlugins` is what the MANIFEST records as
+ * installed, not the whole registry. Once skills are plugin-scoped the two stop
+ * agreeing, and taking the registry retains assets on behalf of plugins the user
+ * never installed — so `devflow uninstall --plugin=X` keeps X's skills alive
+ * because some unselected plugin also declares them, and the user is left with
+ * exactly the files they asked to remove. Skills are retained across the CLOSURE
+ * (`skills ∪ requires`) of the remaining plugins, for the same reason the
+ * install set is a closure: a skill another installed plugin merely requires is
+ * still a skill it needs.
+ *
+ * @param installedPlugins - The plugins the manifest records. Callers pass the
+ *   registry only when there is no manifest to read, and the dry-run and the
+ *   real removal must always be given the SAME list or they describe different
+ *   outcomes.
  */
 export function computeAssetsToRemove(
   selectedPlugins: PluginDefinition[],
-  allPlugins: PluginDefinition[],
+  installedPlugins: PluginDefinition[],
 ): { skills: string[]; agents: string[]; commands: string[]; rules: string[] } {
   const selectedNames = new Set(selectedPlugins.map(p => p.name));
-  const remainingPlugins = allPlugins.filter(p => !selectedNames.has(p.name));
+  const remainingPlugins = installedPlugins.filter(p => !selectedNames.has(p.name));
 
-  const retainedSkills = new Set<string>();
+  const retainedSkills = skillsOf(remainingPlugins);
   const retainedAgents = new Set<string>();
   const retainedRules = new Set<string>();
   for (const rp of remainingPlugins) {
-    for (const s of rp.skills) retainedSkills.add(s);
     for (const a of rp.agents) retainedAgents.add(a);
     for (const r of rp.rules) retainedRules.add(r);
   }
@@ -59,10 +93,11 @@ export function computeAssetsToRemove(
   const commands: string[] = [];
   const rules: string[] = [];
 
+  for (const skill of skillsOf(selectedPlugins)) {
+    if (!retainedSkills.has(skill)) skills.push(skill);
+  }
+
   for (const plugin of selectedPlugins) {
-    for (const skill of plugin.skills) {
-      if (!retainedSkills.has(skill)) skills.push(skill);
-    }
     for (const agent of plugin.agents) {
       if (!retainedAgents.has(agent)) agents.push(agent);
     }
@@ -252,8 +287,10 @@ export function userContentPaths(devflowDir: string): ReadonlyArray<UserContentE
     // artifact precisely because stale overrides re-apply *silently*; "silently" is
     // the load-bearing word. A stale tracker.md whose frontmatter provider
     // disagrees with the resolved provider produces
-    // `TRACEABILITY: DEGRADED (tracker configuration mismatch)` and no tracker
-    // call — that is what removes the silence. If that guard is ever dropped,
+    // `TRACEABILITY: DEGRADED (tracker configuration mismatch (conventions file))`
+    // and no tracker call — that is what removes the silence, and the reason names
+    // THIS file rather than the per-repo override so the user is told which of the
+    // two to edit. If that guard is ever dropped,
     // reclassify tracker.md to an install artifact IN THE SAME CHANGE, otherwise a
     // silently-authoritative stale file survives uninstall.
     { relPath: TRACKER_CONVENTIONS_FILE, label: `${TRACKER_CONVENTIONS_FILE} (issue tracker conventions)` },
@@ -400,9 +437,9 @@ export function installArtifactPaths(devflowDir: string): ReadonlyArray<InstallA
     // content, so they go on this list; `tracker.md` beside them and the
     // `tracker.md.{provider}.bak` a provider change leaves are USER CONTENT
     // (OD-15) and are deliberately NOT here (@D8: the two lists stay disjoint).
-    { relPath: '.tracker.processing' },
-    { relPath: '.tracker.attempts' },
-    { relPath: '.tracker.enabled' },
+    { relPath: TRACKER_CLAIM_FILE },
+    { relPath: TRACKER_ATTEMPTS_FILE },
+    { relPath: TRACKER_ENABLED_FILE },
     // The agent's scrubbed staging file, one per invocation under a mktemp name
     // it removes from a trap — a SIGKILL outruns the trap and leaves it behind.
     // A prefix, because the names exist only on disk. Content is a scrubbed copy
@@ -604,19 +641,25 @@ export async function enumerateDryRunExtras(claudeDir: string, devflowDir: strin
  * @param opts.scopesToUninstall - Scopes detected in the setup phase.
  * @param opts.isSelectiveUninstall - true when --plugin was given.
  * @param opts.selectedPlugins - The plugin subset for selective mode.
+ * @param opts.installedPlugins - What the manifest records as installed. The
+ *   dry-run and the real removal MUST receive the same list, or the preview
+ *   describes an outcome the removal does not produce.
  */
 export async function runDryRunPhase(opts: {
   scopesToUninstall: ReadonlyArray<'user' | 'local'>;
   isSelectiveUninstall: boolean;
   selectedPlugins: PluginDefinition[];
+  installedPlugins: PluginDefinition[];
 }): Promise<void> {
-  const { scopesToUninstall, isSelectiveUninstall, selectedPlugins } = opts;
+  const { scopesToUninstall, isSelectiveUninstall, selectedPlugins, installedPlugins } = opts;
 
   p.log.info(`Scope(s): ${[...scopesToUninstall].join(', ')} (dry-run shows all detected scopes)`);
 
   if (isSelectiveUninstall) {
-    // Selective: compute from registry — this accurately reflects what would be removed.
-    const assets = computeAssetsToRemove(selectedPlugins, DEVFLOW_PLUGINS);
+    // Selective: computed against the INSTALLED list, the same argument the real
+    // removal is given below — a preview computed from a different list is a
+    // preview of a different uninstall.
+    const assets = computeAssetsToRemove(selectedPlugins, installedPlugins);
     const plan = formatDryRunPlan(assets);
     for (const line of plan.split('\n')) {
       p.log.info(line);
@@ -660,8 +703,11 @@ export async function runSelectivePhaseForScope(opts: {
   devflowDir: string;
   selectedPlugins: PluginDefinition[];
   verbose: boolean;
+  /** What the manifest records as installed — the retained set is computed from it. */
+  installedPlugins?: PluginDefinition[];
 }): Promise<void> {
   const { claudeDir, devflowDir, selectedPlugins, verbose } = opts;
+  const installedPlugins = opts.installedPlugins ?? DEVFLOW_PLUGINS;
 
   // Revert GPT agent frontmatter BEFORE removing agent files — strips GPT model
   // lines from installed agent frontmatter while the files are still present.
@@ -678,7 +724,7 @@ export async function runSelectivePhaseForScope(opts: {
     } catch { /* agents dir absent or revert failed — non-fatal */ }
   }
 
-  await removeSelectedPlugins(claudeDir, selectedPlugins, verbose);
+  await removeSelectedPlugins(claudeDir, selectedPlugins, verbose, installedPlugins);
 
   // Clean up ambient hook if ambient plugin is being removed
   if (selectedPlugins.some(sp => sp.name === 'devflow-ambient')) {
@@ -1160,7 +1206,19 @@ export const uninstallCommand = new Command('uninstall')
 
     // === DRY RUN: show plan and exit ===
     if (dryRun) {
-      await runDryRunPhase({ scopesToUninstall, isSelectiveUninstall, selectedPlugins });
+      // One resolution, handed to the dry-run and (below) to the real removal,
+      // so the preview and the outcome are computed from the same list.
+      let dryRunInstalled: PluginDefinition[] = DEVFLOW_PLUGINS;
+      try {
+        const paths = await getInstallationPaths(scopesToUninstall[0]);
+        dryRunInstalled = await resolveInstalledPlugins(paths.devflowDir);
+      } catch { /* scope path resolution failed — fall back to the registry */ }
+      await runDryRunPhase({
+        scopesToUninstall,
+        isSelectiveUninstall,
+        selectedPlugins,
+        installedPlugins: dryRunInstalled,
+      });
       p.outro(color.dim('No changes made (dry run)'));
       return;
     }
@@ -1210,7 +1268,13 @@ export const uninstallCommand = new Command('uninstall')
       }
 
       if (isSelectiveUninstall) {
-        await runSelectivePhaseForScope({ claudeDir, devflowDir, selectedPlugins, verbose });
+        await runSelectivePhaseForScope({
+          claudeDir,
+          devflowDir,
+          selectedPlugins,
+          verbose,
+          installedPlugins: await resolveInstalledPlugins(devflowDir),
+        });
       } else {
         await runFullPhaseForScope({ scope, claudeDir, devflowDir, devflowScriptsDir, verbose, keepDocs: !!options.keepDocs, isTTY: !!process.stdin.isTTY });
       }
@@ -1379,8 +1443,9 @@ export async function removeSelectedPlugins(
   claudeDir: string,
   plugins: typeof DEVFLOW_PLUGINS,
   verbose: boolean,
+  installedPlugins: PluginDefinition[] = DEVFLOW_PLUGINS,
 ): Promise<void> {
-  const { skills, agents, commands, rules } = computeAssetsToRemove(plugins, DEVFLOW_PLUGINS);
+  const { skills, agents, commands, rules } = computeAssetsToRemove(plugins, installedPlugins);
 
   const commandsDir = path.join(claudeDir, 'commands', 'devflow');
   for (const cmd of commands) {

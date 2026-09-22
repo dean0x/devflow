@@ -8,7 +8,8 @@
  *
  * Three suites measure that one shape, one step apart, which is why they read one
  * constant instead of three:
- *   - tests/tracker/containment.test.ts floors the generated GitHub references.
+ *   - tests/tracker/reference-reachability.test.ts floors the generated GitHub
+ *     references, beside the parity check that says each of them must exist.
  *   - tests/tracker/linear-module.test.ts floors the generated Linear tree.
  *   - tests/tracker/jira-module.test.ts floors the generated Jira tree AND the
  *     `@define` BODY the generator reads, because a define that lost its body

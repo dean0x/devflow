@@ -31,7 +31,8 @@ import {
   MDS_COMMAND_HOSTS,
   MDS_GENERATOR_HOSTS,
   MDS_REFERENCE_MODULES,
-  MDS_PARTIALS,
+  ALL_MDS_PARTIALS,
+  MDS_REFERENCE_PARTIALS,
 } from './fixtures/mds-manifest.js';
 import {
   GATED_REFERENCE_MODULE_SOURCES,
@@ -508,7 +509,7 @@ describe('Guard 6 (tarball contents): npm pack --dry-run output excludes source 
    * a new partial, or a source that silently stops shipping all move this number.
    */
   const EXPECTED_SHIPPED_MDS =
-    MDS_COMMAND_HOSTS.length + MDS_PARTIALS.length + MDS_GENERATOR_HOSTS.length +
+    MDS_COMMAND_HOSTS.length + ALL_MDS_PARTIALS.length + MDS_GENERATOR_HOSTS.length +
     MDS_REFERENCE_MODULES.length;
 
   it(`tarball ships all ${EXPECTED_SHIPPED_MDS} src/assets/**/*.mds generator sources (D-A(a))`, () => {
@@ -522,7 +523,7 @@ describe('Guard 6 (tarball contents): npm pack --dry-run output excludes source 
     expect(
       shippedMds.length,
       `Expected ${EXPECTED_SHIPPED_MDS} .mds sources in the tarball ` +
-      `(${MDS_COMMAND_HOSTS.length} command hosts + ${MDS_PARTIALS.length} partials + ` +
+      `(${MDS_COMMAND_HOSTS.length} command hosts + ${ALL_MDS_PARTIALS.length} partials + ` +
       `${MDS_GENERATOR_HOSTS.length} generator host + ${MDS_REFERENCE_MODULES.length} reference ` +
       `module(s)), got ${shippedMds.length}:\n  ${shippedMds.join('\n  ')}\n` +
       `Shipping the sources is deliberate (decision D-A(a)); update the manifest if a source was added or removed.`,
@@ -535,6 +536,11 @@ describe('Guard 6 (tarball contents): npm pack --dry-run output excludes source 
     // Reference modules ship for the same reason: an installed package should
     // show what its generated skill references were compiled from.
     for (const source of MDS_REFERENCE_MODULES) {
+      expect(shippedMds, `${source} must ship`).toContain(source);
+    }
+    // A partial outside _partials/ ships for the same reason and is the class most
+    // easily lost: it lives beside the reference modules, not with the other partials.
+    for (const source of MDS_REFERENCE_PARTIALS) {
       expect(shippedMds, `${source} must ship`).toContain(source);
     }
     // A GATED module ships whether or not this build generates anything from it.

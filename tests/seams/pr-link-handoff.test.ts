@@ -1,5 +1,11 @@
 import { describe, it, expect, afterAll } from 'vitest'
-import { buildCommittedTree, cleanupCommittedTree, requireDistFile, resolveAgentSource } from '../helpers.js'
+import * as fs from 'fs'
+import * as path from 'path'
+import { buildCommittedTree, cleanupCommittedTree, requireDistFile, resolveAgentSource, walkFiles } from '../helpers.js'
+import { compiledSkillRefsDir } from '../../src/core/assets.js'
+
+/** The generated `devflow:git` reference tree — the providers' own mechanics. */
+const REFS_DIR = compiledSkillRefsDir()
 
 // -------------------------------------------------------------------------
 // `### Handoff Values` — Git agent producer ↔ Code agent consumer (P2-S10, GAP-15).
@@ -86,17 +92,252 @@ describe('code.md — ### Handoff Values consumer', () => {
     expect(
       CODE,
       'a foreign-shaped ref must emit the canonical DEGRADED reason, never be silently repaired or dropped',
-    ).toContain('does not match github reference grammar')
+    ).toContain('does not match {provider} reference grammar')
   })
 
   it('re-checks BEFORE it pastes — order, not mere presence', () => {
     const recheck = CODE.indexOf('after re-checking its shape against the resolved provider')
-    const degraded = CODE.indexOf('does not match github reference grammar')
+    const degraded = CODE.indexOf('does not match {provider} reference grammar')
     expect(recheck, 'the re-check instruction must exist').toBeGreaterThan(-1)
     expect(
       recheck,
       'the shape re-check must be stated as a precondition of the paste, not as an afterthought below the DEGRADED line',
     ).toBeLessThan(degraded)
+  })
+})
+
+// -------------------------------------------------------------------------
+// The paste gate is ONE arm per resolved provider, and every arm is executed.
+//
+// The gate used to be a single `github` arm. Under any other provider the Git
+// agent renders `Refs PROJ-12`, which that arm rejects — so the one value the
+// seam exists to carry was discarded as malformed for two of the three
+// providers, and the PR body silently recomposed a github-shaped link from a
+// number that is not a github issue.
+//
+// The arms are read OUT of the prompt and RUN here rather than re-typed. A
+// hand-copied grammar in a test is a second authority that agrees with the first
+// only until one of them is edited (PF-018), and an anchored pattern is exactly
+// the kind of literal whose defect — a missing `^`, a `+` where `{0,8}` was
+// meant — is invisible to a reader and obvious to anything that executes it.
+// -------------------------------------------------------------------------
+
+/** The providers whose `ISSUE_PR_LINK` the Code agent may be handed. Named, not discovered. */
+const PASTE_PROVIDERS = ['github', 'jira', 'linear'] as const
+
+/**
+ * Named collector: the per-provider paste arms, as the prompt's table spells them.
+ *
+ * A row is `| `provider` | `^…$` |`. Returned as a Map so a missing provider is a
+ * missing KEY — reported by name — rather than an arm silently defaulting to
+ * whichever row happened to parse.
+ */
+function collectPasteArms(source: string): Map<string, string> {
+  const arms = new Map<string, string>()
+  for (const m of source.matchAll(/^\s*\|\s*`([a-z]+)`\s*\|\s*`(\^[^`]+\$)`\s*\|/gm)) {
+    arms.set(m[1], m[2])
+  }
+  return arms
+}
+
+/** Every payload, with the providers whose arm must ACCEPT it. Absent ⇒ every arm rejects. */
+const PASTE_PAYLOADS: ReadonlyArray<{ label: string; value: string; accepts: readonly string[] }> = [
+  { label: 'a github link line', value: 'Closes #12', accepts: ['github'] },
+  // The jira and linear arms OVERLAP on a plain uppercase key, and the table
+  // records that rather than pretending otherwise: it is why the resolved
+  // provider decides which arm runs instead of the arms deciding between
+  // themselves. They part on exactly two shapes, one each way, below.
+  { label: 'a plain uppercase key', value: 'Refs PROJ-12', accepts: ['jira', 'linear'] },
+  { label: 'a three-letter key', value: 'Refs ENG-12', accepts: ['jira', 'linear'] },
+  { label: 'an underscored key (jira only)', value: 'Refs A_B-1', accepts: ['jira'] },
+  { label: 'a single-character key (linear only)', value: 'Refs A-1', accepts: ['linear'] },
+  // Hostile / malformed — every arm must refuse all of them.
+  { label: 'two link lines in one value', value: 'Closes #12\nCloses #13', accepts: [] },
+  { label: 'a trailing newline', value: 'Closes #12\n', accepts: [] },
+  { label: 'a leading newline', value: '\nCloses #12', accepts: [] },
+  { label: 'a zero issue number', value: 'Closes #0', accepts: [] },
+  { label: 'a lowercase key', value: 'Refs proj-12', accepts: [] },
+  { label: 'a trailing comment', value: 'Closes #12 <!-- x -->', accepts: [] },
+  { label: 'a markdown link', value: 'Closes [#12](http://x.test)', accepts: [] },
+  { label: 'the empty string', value: '', accepts: [] },
+  // The value crosses an agent boundary as prose and is pasted into a PR body a
+  // shell composes. A shape gate that admitted this would hand a command
+  // substitution to whatever `gh pr create` invocation quotes it wrongly — so the
+  // arms' whole-line anchoring is what has to refuse it, not a later escape.
+  { label: 'a command substitution', value: 'pr-link: $(whoami)', accepts: [] },
+  // Length. Every arm bounds its key and its number, so a line far past those
+  // bounds has no accepting arm — the property that keeps an unbounded paste out
+  // of the PR body. 74 characters, and its only defect IS the length: strip it
+  // back to `Refs AB-1` and the jira and linear arms both take it.
+  { label: 'an over-long line (74 ch, past every arm\'s bounded key and number)',
+    value: `Refs A${'B'.repeat(10)}-${'1'.repeat(57)}`, accepts: [] },
+]
+
+describe('code.md — the paste gate, one arm per resolved provider', () => {
+  it('states an anchored arm for every provider, and no arm for anything else', () => {
+    const arms = collectPasteArms(CODE)
+    expect(
+      [...arms.keys()].sort(),
+      'the paste gate must name every provider the Git agent can render a line for — an absent ' +
+      'arm is a provider whose only valid value the agent has no rule to accept',
+    ).toEqual([...PASTE_PROVIDERS].sort())
+    for (const [provider, pattern] of arms) {
+      expect(pattern.startsWith('^'), `${provider}: the arm must anchor the start of the line`).toBe(true)
+      expect(pattern.endsWith('$'), `${provider}: the arm must anchor the end of the line`).toBe(true)
+    }
+  })
+
+  it('every arm, EXECUTED against every payload, accepts exactly what it should', () => {
+    const arms = collectPasteArms(CODE)
+    const wrong: string[] = []
+    for (const { label, value, accepts } of PASTE_PAYLOADS) {
+      for (const provider of PASTE_PROVIDERS) {
+        const pattern = arms.get(provider)
+        expect(pattern, `no arm for ${provider}`).toBeDefined()
+        const matched = new RegExp(pattern!).test(value)
+        const expected = accepts.includes(provider)
+        if (matched !== expected) {
+          wrong.push(
+            `${provider} ${matched ? 'ACCEPTED' : 'REJECTED'} ${label} (${JSON.stringify(value)}) ` +
+            `— expected ${expected ? 'accept' : 'reject'}; arm is ${pattern}`,
+          )
+        }
+      }
+    }
+    expect(
+      wrong,
+      `paste-arm outcome(s) the prompt's own grammar does not produce:\n  ${wrong.join('\n  ')}`,
+    ).toEqual([])
+  })
+
+  it('states the bounds a regex engine is not guaranteed to apply', () => {
+    // The arms are run by a model, not by this file's engine. `$` is
+    // end-of-input in JS and end-of-LINE in several others, so the multi-line
+    // refusal has to be written down as well as anchored; and an anchored
+    // pattern bounds the SHAPE of a line, never its length.
+    expect(
+      CODE,
+      'a value carrying a newline must be refused in words — a `$` that some engines read as ' +
+      'end-of-line would admit everything after the first line into the PR body as free text',
+    ).toMatch(/reject(?:s|ed)?[\s\S]{0,120}?(newline|multi-line)/i)
+    expect(CODE, 'the arms must carry an explicit length bound').toMatch(/60 characters/)
+  })
+
+  it('(none) is not a mismatch, and a bare number under a non-github provider is ambiguous', () => {
+    expect(
+      CODE,
+      '`(none)` means no line was captured, which is the documented absent case — degrading over ' +
+      'it would report a malformed value every time a task has no issue',
+    ).toMatch(/`\(none\)`[\s\S]{0,200}?not a mismatch/i)
+    expect(
+      CODE,
+      'a bare issue number is a github spelling. Under jira or linear it names nothing, and the ' +
+      'canonical reason for that is already registered — reuse it, never a new spelling',
+    ).toContain('TRACEABILITY: DEGRADED (ambiguous issue reference)')
+  })
+
+  it('names the RESOLVED provider in the mismatch reason, never a fixed one', () => {
+    expect(
+      CODE,
+      'a reason hard-coded to `github` reports the wrong grammar for two of the three providers, ' +
+      'and the reader cannot tell which grammar the value actually failed',
+    ).toContain('does not match {provider} reference grammar')
+    expect(CODE).not.toContain('does not match github reference grammar')
+  })
+
+  it('known-bad probe: the arm collector reports a missing anchor and a missing row', () => {
+    const seeded = [
+      '| Resolved provider | value |',
+      '|---|---|',
+      '| `github` | `^Closes #[1-9][0-9]{0,8}$` |',
+      '| `jira` | `^Refs [A-Z]+-[0-9]+$` |',
+    ].join('\n')
+    const arms = collectPasteArms(seeded)
+    expect([...arms.keys()], 'the collector must read the rows it can and omit the row it cannot')
+      .toEqual(['github', 'jira'])
+    // An unanchored pattern is not a row this collector reads at all, which is
+    // what makes the anchoring arm above a real check rather than a tautology.
+    expect(collectPasteArms('| `linear` | `Refs [A-Z]+-[0-9]+` |').size).toBe(0)
+  })
+
+  // -----------------------------------------------------------------------
+  // The arms are a FOURTH reader of each provider's reference grammar.
+  //
+  // The Code agent sits outside the Git spawn surface and loads no provider
+  // mechanics file it could defer to, so a per-provider sink check has to
+  // enumerate the closed set once, inside the gate — that is what keeps it a
+  // sink check rather than a second convergence point (PF-023). What it must
+  // not become is a second AUTHORITY: the shape a `KEY-N` reference takes is
+  // stated by each provider's own mechanics, and the project-key alphabet
+  // already has an explicit one-authority claim over three readers
+  // (tests/tracker/single-authority.test.ts). This gate was the reader that
+  // claim does not cover.
+  //
+  // The arms agree with the mechanics today. What was missing is anything that
+  // would notice if a provider's grammar were edited and this table were not —
+  // and the dangerous direction is silent: a widened arm admits a link line the
+  // provider's own mechanics would refuse, at the one gate standing between an
+  // attacker-influenceable value and a GitHub-visible sink.
+  // -----------------------------------------------------------------------
+
+  /**
+   * Named collector: the reference grammars a provider's generated mechanics
+   * state, deduplicated.
+   *
+   * Read out of the shipped tree, never re-typed here — a literal in this file
+   * would be the fifth authority and the only one nobody ships (PF-018).
+   * Linear's internal-id form is deliberately excluded: it carries no team, so
+   * the provider's own history grammar admits the TEAM-KEY form only, and a
+   * rendered PR link is always that form.
+   */
+  function collectProviderRefGrammars(provider: string): string[] {
+    const dir = path.join(REFS_DIR, 'tracker', provider)
+    const found = new Set<string>()
+    for (const file of walkFiles(dir, f => f.endsWith('.md'), 1)) {
+      for (const m of fs.readFileSync(file, 'utf-8').matchAll(/\^\[A-Z\]\[A-Z0-9_?\]\{\d,\d\}-\[1-9\]\[0-9\]\{\d,\d\}\$/g)) {
+        found.add(m[0])
+      }
+    }
+    return [...found]
+  }
+
+  it('each non-github arm is its provider\'s own reference grammar, prefixed by the rendered verb', () => {
+    const arms = collectPasteArms(CODE)
+    for (const provider of PASTE_PROVIDERS.filter(p => p !== 'github')) {
+      const grammars = collectProviderRefGrammars(provider)
+      expect(
+        grammars,
+        `${provider}'s mechanics state ${grammars.length} distinct KEY-N grammars; one authority ` +
+        `means exactly one`,
+      ).toHaveLength(1)
+
+      const arm = arms.get(provider)
+      expect(arm, `no paste arm for ${provider}`).toBeDefined()
+      // The arm is the grammar with the rendered verb spliced in after `^`.
+      expect(
+        arm,
+        `${provider}: the paste gate admits a shape its own mechanics do not state. The gate is a ` +
+        `SINK check, not a second authority — widen the provider's grammar or narrow the gate, ` +
+        `never let the two drift.\n  gate:      ${arm}\n  mechanics: ${grammars[0]}`,
+      ).toBe(grammars[0].replace('^', '^Refs '))
+    }
+  })
+
+  it('known-bad probe: the grammar collector reads the shipped tree and reports a drift', () => {
+    // Non-vacuity: the collector must actually be finding grammars in the
+    // shipped tree, or the arm above compares two absences.
+    for (const provider of ['jira', 'linear']) {
+      expect(
+        collectProviderRefGrammars(provider),
+        `${provider}: the collector found no grammar, so the arm above proves nothing`,
+      ).toHaveLength(1)
+    }
+    // And a drifted gate is reported rather than tolerated: the linear grammar
+    // against the jira arm is exactly the mix-up the overlap makes plausible.
+    const [jira] = collectProviderRefGrammars('jira')
+    const [linear] = collectProviderRefGrammars('linear')
+    expect(jira, 'the two providers must differ, or the drift probe is vacuous').not.toBe(linear)
+    expect(jira.replace('^', '^Refs ')).not.toBe(linear.replace('^', '^Refs '))
   })
 })
 

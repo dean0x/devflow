@@ -34,10 +34,10 @@ import {
   type OverlayUnit,
   type Spinner,
 } from '../../src/targets/claude-code/installer.js';
-import { formatOverlaySummary } from '../../src/cli/commands/init.js';
+import { formatOverlaySummary } from '../../src/cli/commands/install-report.js';
 import { sweepOrphanedReferences, MAX_REFERENCE_SWEEP_DEPTH } from '../../src/core/reference-sweep.js';
 import { compiledSkillRefsDir } from '../../src/core/assets.js';
-import { expandVariants, generatedReferenceManifest } from '../../src/core/mds-variants.js';
+import { expandVariants, generatedReferenceManifest, installedReferenceManifest } from '../../src/core/mds-variants.js';
 
 // ---------------------------------------------------------------------------
 // Harness
@@ -242,6 +242,18 @@ describe('overlay unit classification (D-OVERLAY-PROVIDER-SHAPE)', () => {
 // ---------------------------------------------------------------------------
 
 describe('reference overlay through installViaFileCopy (AC-2.4a)', () => {
+  /**
+   * The provider this describe installs as — the overlay converges to its set.
+   *
+   * A tool-call provider rather than github, because its install set is the only
+   * one carrying BOTH unit shapes the overlay has to handle: a provider directory
+   * (tracker/{provider}/{op}.md) AND a file landing directly in tracker/
+   * (tracker/_mcp.md, the flat-set-in-a-subdirectory shape that was once
+   * mis-bucketed as a provider directory). It is also a superset of the github
+   * set, so the github floor is covered by the same arms.
+   */
+  const INSTALL_PROVIDER = 'jira';
+
   let claudeDir: string;
   let devflowDir: string;
   let warnings: string[];
@@ -256,6 +268,7 @@ describe('reference overlay through installViaFileCopy (AC-2.4a)', () => {
       devflowDir,
       skillsMap: new Map([['git', 'devflow-code-review']]),
       agentsMap: new Map(),
+      trackerProvider: INSTALL_PROVIDER,
       isPartialInstall: false,
       spinner: noopSpinner,
       warn: (msg) => { warnings.push(msg); },
@@ -263,7 +276,12 @@ describe('reference overlay through installViaFileCopy (AC-2.4a)', () => {
   }
 
   beforeEach(async () => {
-    manifest = await requireBuiltReferences();
+    // The install is provider-scoped: `installViaFileCopy` converges to
+    // {github} ∪ {selected provider}, not to everything the build emitted. The
+    // built-tree probe still runs, so an unbuilt dist/ fails loud rather than
+    // asserting over an empty set.
+    await requireBuiltReferences();
+    manifest = installedReferenceManifest({ provider: INSTALL_PROVIDER });
     claudeDir = await fs.mkdtemp(path.join(os.tmpdir(), 'devflow-overlay-claude-'));
     devflowDir = await fs.mkdtemp(path.join(os.tmpdir(), 'devflow-overlay-home-'));
     warnings = [];
@@ -589,9 +607,13 @@ describe('converge-not-merge staged swap (GAP-24)', () => {
     expect(next.pruned.removed, 'and the prune is what removed it')
       .toContain('.cross-cutting.99999-crashedrun.tmp');
 
-    // Positive half: the successful path is unchanged by where staging lives.
+    // Positive half: the successful path is unchanged by where staging lives. The source
+    // did not move between the two runs, so every unit is reported unchanged rather than
+    // re-promoted (AC-23) — the run still STAGED each one, which is what let the prune
+    // reach the stranded tree at all.
     expect(next.overlayFailures).toEqual([]);
-    expect([...next.overlaidRefs].sort()).toEqual([...manifest].sort());
+    expect([...next.unchangedRefs].sort()).toEqual([...manifest].sort());
+    expect(next.overlaidRefs, 'nothing drifted, so nothing was rewritten').toEqual([]);
   });
 
   // -------------------------------------------------------------------------
@@ -943,6 +965,14 @@ describe('atomic per-unit swap (AC-2.4b, DR-05, risk P2-g)', () => {
     const backup = `${live}.old`;
     const before = await fs.readFile(abs(target, 'tracker/probe-provider/comment.md'));
 
+    // Drift in all three units, because a promotion only runs for a unit that has
+    // something to promote: a source identical to what is installed is reported unchanged
+    // and never reaches the rename below (AC-23). Read of `before` is above this, so the
+    // backup's bytes are still the ones the assertions compare against.
+    for (const rel of ['tracker/probe-provider/comment.md', 'tracker/github/setup-task.md', 'decision-markers.md']) {
+      await fs.appendFile(abs(sourceRoot, rel), '\n<!-- drifted -->\n');
+    }
+
     // Two renames no filesystem can be coaxed into failing on demand, in this order: the
     // staging rename (so the promotion fails AFTER displacing the unit) and the restore
     // that follows it. Everything else runs for real — the displacement, the `.old`
@@ -1088,6 +1118,118 @@ describe('atomic per-unit swap (AC-2.4b, DR-05, risk P2-g)', () => {
     expect(result.overlaidRefs).toContain('tracker/github/setup-task.md');
     expect(result.overlaidRefs).toContain('decision-markers.md');
     expect((await walkTree(target)).filter(p => p.includes('.tmp'))).toEqual([]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// AC-23 — a unit already installed byte-for-byte is REPORTED, never rewritten
+// ---------------------------------------------------------------------------
+
+describe('unchanged units are reported separately (AC-23)', () => {
+  let sourceRoot: string;
+  let target: string;
+  let manifest: readonly string[];
+
+  beforeEach(async () => {
+    manifest = await requireBuiltReferences();
+    sourceRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'devflow-overlay-src-'));
+    target = await fs.mkdtemp(path.join(os.tmpdir(), 'devflow-overlay-dst-'));
+    await stageSource(sourceRoot, manifest);
+  });
+
+  afterEach(async () => {
+    await fs.rm(sourceRoot, { recursive: true, force: true });
+    await fs.rm(target, { recursive: true, force: true });
+  });
+
+  const overlay = (): ReturnType<typeof overlayGeneratedReferences> =>
+    overlayGeneratedReferences({ referencesTarget: target, sourceRoot, manifest });
+
+  /**
+   * Inode per manifest entry — what separates "did not write" from "wrote the same bytes".
+   *
+   * Every promotion path installs a file by renaming a freshly COPIED staging entry into
+   * place, so a re-promoted document always arrives with a new inode even when its bytes
+   * are identical. The report alone would be a label; this is the observation behind it
+   * (avoids PF-018).
+   */
+  const inodes = (): Promise<number[]> =>
+    Promise.all(manifest.map(async rel => (await fs.stat(abs(target, rel))).ino));
+
+  it('a repeat overlay over an identical source writes nothing and reports every unit unchanged', async () => {
+    const first = await overlay();
+    expect(first.overlayFailures).toEqual([]);
+    expect(
+      [...first.overlaidRefs].sort(),
+      'the seeding run must really install the whole manifest',
+    ).toEqual([...manifest].sort());
+    expect(first.unchangedRefs, 'nothing was installed before it, so nothing can be unchanged').toEqual([]);
+
+    const before = await inodes();
+
+    const second = await overlay();
+
+    expect(second.overlayFailures).toEqual([]);
+    expect(
+      second.overlaidRefs,
+      'nothing was written, so nothing may be reported as installed — this is the whole of ' +
+      'what makes `tracker --set <same provider>` able to say (unchanged)',
+    ).toEqual([]);
+    expect([...second.unchangedRefs].sort()).toEqual([...manifest].sort());
+    expect(await inodes(), 'an unchanged unit must not be re-promoted on disk').toEqual(before);
+
+    // …and the render site says nothing at all, rather than "Installed N references".
+    expect(formatOverlaySummary({
+      overlaidRefs: second.overlaidRefs,
+      overlayFailures: second.overlayFailures,
+    })).toEqual([]);
+  });
+
+  it('known-bad probe: a byte-changed source file IS re-promoted, and only its own unit', async () => {
+    await overlay();
+
+    const changed = 'tracker/github/setup-task.md';
+    await fs.appendFile(abs(sourceRoot, changed), '\n<!-- drifted -->\n');
+
+    const result = await overlay();
+
+    expect(result.overlayFailures).toEqual([]);
+    expect(result.overlaidRefs, 'drift must never hide behind an unchanged report').toContain(changed);
+    expect(result.unchangedRefs).not.toContain(changed);
+    expect(
+      await fs.readFile(abs(target, changed), 'utf-8'),
+      'and the drifted bytes are the ones now installed',
+    ).toContain('<!-- drifted -->');
+
+    // Only that unit moved. Every entry outside `tracker/github/` is still unchanged, so
+    // an implementation that gave up and re-promoted everything would fail here too.
+    const others = manifest.filter(rel => !rel.startsWith('tracker/github/'));
+    expect(
+      others.length,
+      'the manifest carries only one unit — the per-unit half of this probe is vacuous',
+    ).toBeGreaterThan(0);
+    for (const rel of others) {
+      expect(result.unchangedRefs, `${rel} did not change and must not be re-promoted`).toContain(rel);
+    }
+  });
+
+  it('a provider directory holding a file the manifest does not name is NOT unchanged', async () => {
+    await overlay();
+
+    // A provider unit is swapped WHOLE, so this stray is something the promotion removes.
+    // A comparison over the manifest's own files alone would call the unit unchanged and
+    // leave the stray installed — convergence silently downgraded to a merge.
+    const stray = abs(target, 'tracker/github/stray-op.md');
+    await fs.writeFile(stray, '# left by an earlier build\n', 'utf-8');
+
+    const result = await overlay();
+
+    expect(result.overlaidRefs).toContain('tracker/github/setup-task.md');
+    expect(result.unchangedRefs).not.toContain('tracker/github/setup-task.md');
+    expect(
+      await exists(stray),
+      'the whole-directory swap must still remove what the manifest does not name',
+    ).toBe(false);
   });
 });
 

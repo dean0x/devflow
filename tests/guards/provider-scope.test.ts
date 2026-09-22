@@ -114,12 +114,64 @@ function scanCorpus(): CorpusEntry[] {
  * times inside it (the normalisation rule, the map rows, the input contract), and
  * a line-scoped allowlist would have to enumerate them and go stale on any rewrap.
  */
-const PROVIDER_MAP_ALLOWLIST = {
-  files: [GIT_HOST, 'dist/agents/git.md'],
-  /** The preamble's own bounds — the same two anchors byte-budget.test.ts uses. */
-  from: '## Tracker provider resolution',
-  to: '## Comment-sink scrub (D11)',
-} as const;
+interface AllowlistedRegion {
+  /** What the region is, for the failure message. */
+  readonly label: string;
+  /** Corpus paths that carry it, as `scanCorpus` labels them. */
+  readonly files: readonly string[];
+  /** The region's own bounds. */
+  readonly from: string;
+  readonly to: string;
+  /** Why a closed token set has to be written HERE and nowhere else. */
+  readonly justification: string;
+}
+
+/**
+ * Every block that must enumerate the closed provider set, and nothing else.
+ *
+ * A registry rather than one constant because a second such block now exists, and
+ * the alternative was a hand-written second condition beside the first — two
+ * mechanisms for one rule, which is how one of them goes stale (PF-067). Each row
+ * is still a BLOCK inside a file that must otherwise stay clean, which is what
+ * keeps this distinct from `PROVIDER_OWNED_PATHS` below: that one says a whole
+ * file belongs to a provider, this one says a bounded region inside a
+ * provider-neutral file may name all of them.
+ */
+const ALLOWLISTED_PROVIDER_REGIONS: readonly AllowlistedRegion[] = [
+  {
+    label: "the Git agent's provider-resolution preamble",
+    files: [GIT_HOST, 'dist/agents/git.md'],
+    /** The preamble's own bounds — the same two anchors byte-budget.test.ts uses. */
+    from: '## Tracker provider resolution',
+    to: '## Comment-sink scrub (D11)',
+    justification:
+      'PF-023 requires exactly ONE convergence point where a provider token becomes a path, and a ' +
+      'map with one row decides nothing — the closed set has to be written where the resolution ' +
+      'happens.',
+  },
+  {
+    label: "the Code agent's PR-link paste gate",
+    files: [`${SRC_AGENTS_LABEL}/code.md`],
+    from: '| Resolved provider | `ISSUE_PR_LINK` must match |',
+    to: 'This re-check is the only gate on that value',
+    justification:
+      'The PR body is a GitHub-visible sink and the Code agent is the last hand the rendered link ' +
+      'line passes through — no operation checks its shape before returning it. A per-provider ' +
+      'gate cannot be written without naming the providers it discriminates, and the Code agent ' +
+      'loads no provider mechanics file it could defer to: it is outside the Git spawn surface ' +
+      'entirely. So the closed set is enumerated once, inside the gate, and the agent reads the ' +
+      'arm for the provider that was RESOLVED for the run rather than resolving one itself — ' +
+      'which is what keeps this a sink check and not a second convergence point.',
+  },
+];
+
+/**
+ * The resolution preamble specifically. Three arms below assert properties of
+ * THAT region — that it is the convergence point, and that its own anchors still
+ * bracket the token set — so it keeps its own name rather than being addressed by
+ * index at each site.
+ */
+const PROVIDER_MAP_ALLOWLIST = ALLOWLISTED_PROVIDER_REGIONS[0];
 
 interface ProviderToken {
   readonly name: string;
@@ -240,15 +292,19 @@ function ownsToken(path: string, token: string): boolean {
   return PROVIDER_OWNED_PATHS.some(owned => owned.token === token && path.startsWith(owned.prefix));
 }
 
-/** Remove the allowlisted preamble block from an allowlisted file; identity elsewhere. */
+/** Remove every allowlisted block that lives in this file; identity elsewhere. */
 function stripAllowlistedRegion(entry: CorpusEntry): string {
-  if (!PROVIDER_MAP_ALLOWLIST.files.includes(entry.path as never)) return entry.content;
-  const start = entry.content.indexOf(PROVIDER_MAP_ALLOWLIST.from);
-  if (start === -1) return entry.content;
-  const end = entry.content.indexOf(PROVIDER_MAP_ALLOWLIST.to, start);
-  return end === -1
-    ? entry.content.slice(0, start)
-    : entry.content.slice(0, start) + entry.content.slice(end);
+  let content = entry.content;
+  for (const region of ALLOWLISTED_PROVIDER_REGIONS) {
+    if (!region.files.includes(entry.path)) continue;
+    const start = content.indexOf(region.from);
+    if (start === -1) continue;
+    const end = content.indexOf(region.to, start);
+    content = end === -1
+      ? content.slice(0, start)
+      : content.slice(0, start) + content.slice(end);
+  }
+  return content;
 }
 
 /**
@@ -286,31 +342,39 @@ describe('provider-scope: no Jira or Linear literal outside the provider map (§
         `scan root "${root.label}" contributed no files — the scope has silently shrunk`,
       ).toBe(true);
     }
-    // The two files that carry the allowlisted block must actually be in the corpus,
+    // Every file that carries an allowlisted block must actually be in the corpus,
     // or the allowlist is silencing nothing and the guard is proving nothing about it.
-    for (const file of PROVIDER_MAP_ALLOWLIST.files) {
-      expect(corpus.map(e => e.path), `allowlisted file ${file} must be in the corpus`).toContain(file);
+    for (const region of ALLOWLISTED_PROVIDER_REGIONS) {
+      for (const file of region.files) {
+        expect(corpus.map(e => e.path), `allowlisted file ${file} must be in the corpus`).toContain(file);
+      }
     }
   });
 
-  it('the allowlist is still needed: the preamble really does carry the token set', () => {
+  it('every allowlisted region is still needed: each really does carry the token set', () => {
     // A stale allowlist is the failure mode the inline-body exclusion list taught —
-    // an exemption nobody notices going out of date. If the map ever stops naming
-    // the foreign tokens, this fails and the allowlist is deleted, not carried.
-    for (const file of PROVIDER_MAP_ALLOWLIST.files) {
-      const entry = requireCorpusEntry(corpus, file);
-      const whole = entry.content;
-      const stripped = stripAllowlistedRegion(entry);
+    // an exemption nobody notices going out of date. If a region ever stops naming
+    // the foreign tokens, this fails and the row is deleted, not carried.
+    for (const region of ALLOWLISTED_PROVIDER_REGIONS) {
       expect(
-        stripped.length,
-        `${file}: the allowlisted region was not found — the preamble anchors changed`,
-      ).toBeLessThan(whole.length);
-      for (const token of FOREIGN_PROVIDER_TOKENS) {
+        region.justification.length,
+        `${region.label}: a region without a stated reason is an exemption, not a classification`,
+      ).toBeGreaterThan(80);
+      for (const file of region.files) {
+        const entry = requireCorpusEntry(corpus, file);
+        const whole = entry.content;
+        const stripped = stripAllowlistedRegion(entry);
         expect(
-          token.pattern.test(whole) && !token.pattern.test(stripped),
-          `${file}: "${token.name}" is no longer confined to the provider map — either it moved ` +
-          `(a second convergence point, PF-023) or the map dropped it and the allowlist is stale`,
-        ).toBe(true);
+          stripped.length,
+          `${file}: ${region.label} was not found — its anchors changed`,
+        ).toBeLessThan(whole.length);
+        for (const token of FOREIGN_PROVIDER_TOKENS) {
+          expect(
+            token.pattern.test(whole) && !token.pattern.test(stripped),
+            `${file}: "${token.name}" is no longer confined to ${region.label} — either it moved ` +
+            `(a second convergence point, PF-023) or the region dropped it and the row is stale`,
+          ).toBe(true);
+        }
       }
     }
   });
@@ -919,5 +983,131 @@ describe('provider-scope: the plan command promises a tracker issue, not a host 
       ),
       'a regression appended to the shipped bytes must be reported in both artifacts',
     ).toEqual(PLAN_COMMAND_PATHS.map(p => `${p}: Create or enrich a GitHub issue?`));
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 5. The OTHER direction — the incumbent's grammar in the provider-neutral body
+// ---------------------------------------------------------------------------
+//
+// Sections 1–4 look for a FOREIGN provider's literal in a file that is not that
+// provider's. They cannot see the opposite failure, which is the one this tree
+// actually shipped: the incumbent's grammar left behind in text that claims to be
+// provider-neutral. `jira` and `linear` are foreign tokens a scan can spot;
+// `#[0-9]+` is GitHub's issue grammar wearing no provider's name at all, so a
+// one-directional guard reported nothing while `gather-release-evidence` parsed
+// GitHub refs out of every commit range under every provider and handed back an
+// empty set (avoids PF-072).
+//
+// SCOPE: the documents that are provider-neutral BY CONTRACT — the always-loaded
+// agent and the tool-call contract. A provider's own mechanics module is where its
+// grammar belongs, `references/github-api.md` is a GitHub reference, and neither
+// is in scope here.
+//
+// PR-HOST ALLOWLIST: pull requests stay on GitHub under every provider, so a `#`
+// that names a PR is correct provider-neutral text and a `gh pr`/`gh api user`/
+// `gh repo view`/`gh release create` line is a PR-host mechanic, not a tracker
+// one. The allowlist is per LINE and is asserted to be load-bearing.
+
+interface GrammarPattern {
+  readonly name: string;
+  readonly pattern: RegExp;
+}
+
+/**
+ * Spellings of an ISSUE-reference grammar that only GitHub satisfies.
+ *
+ * Grammar, never rendering. `#{number}` in an Output template is a token the
+ * `## Reference Rendering` rule substitutes per provider; `#[0-9]+` is a parser.
+ * The first is how a reference is printed and the second is what counts as one.
+ */
+const GITHUB_ISSUE_GRAMMAR: readonly GrammarPattern[] = [
+  { name: 'the `#[0-9]` issue-ref regex', pattern: /#\[0-9\]/ },
+  { name: 'a digit-only ref filter', pattern: /digit-only/i },
+  { name: 'a bare-number ref rule stated as universal', pattern: /issue numbers from commit/i },
+];
+
+/** Lines that legitimately carry `#` because their subject is the PR host. */
+const PR_HOST_ALLOWLIST: readonly RegExp[] = [
+  /\bgh pr\b/,
+  /\bgh api user\b/,
+  /\bgh repo view\b/,
+  /\bgh release create\b/,
+  /\bPR refs are always\b/,
+];
+
+/** The provider-neutral documents, by corpus label. */
+const NEUTRAL_BODY_PATHS: readonly string[] = [
+  GIT_HOST,
+  'dist/agents/git.md',
+  'src/assets/mds/tracker/_mcp.mds',
+  'dist/skills/git/references/tracker/_mcp.md',
+];
+
+/**
+ * Named collector: GitHub issue-grammar spellings in a provider-neutral document,
+ * outside the PR-host allowlist.
+ */
+export function collectGithubGrammarInNeutralBody(corpus: readonly CorpusEntry[]): string[] {
+  const violations: string[] = [];
+  for (const entry of corpus) {
+    if (!NEUTRAL_BODY_PATHS.includes(entry.path)) continue;
+    for (const line of entry.content.split('\n')) {
+      if (PR_HOST_ALLOWLIST.some(allowed => allowed.test(line))) continue;
+      for (const grammar of GITHUB_ISSUE_GRAMMAR) {
+        if (grammar.pattern.test(line)) {
+          violations.push(`${entry.path}: ${grammar.name} — ${line.trim().slice(0, 90)}`);
+        }
+      }
+    }
+  }
+  return violations;
+}
+
+describe('provider-scope: the provider-neutral body states no GitHub issue grammar', () => {
+  const corpus = scanCorpus();
+
+  it('every provider-neutral document is in the corpus (the scope is not silently empty)', () => {
+    for (const rel of NEUTRAL_BODY_PATHS) {
+      requireCorpusEntry(corpus, rel);
+    }
+  });
+
+  it('no GitHub issue grammar appears outside a provider-owned mechanics file', () => {
+    const violations = collectGithubGrammarInNeutralBody(corpus);
+    expect(
+      violations,
+      'a provider-neutral document states GitHub\'s issue grammar. Under jira or linear that ' +
+      'grammar matches nothing, so the step yields an empty set and reports success — the failure ' +
+      'is silent, and a foreign-token scan cannot see it because the incumbent names no ' +
+      'provider:\n  ' + violations.join('\n  '),
+    ).toEqual([]);
+  });
+
+  it('known-bad probe: the collector sees the grammar, and the PR-host allowlist is load-bearing', () => {
+    const seed = (line: string): CorpusEntry[] =>
+      [{ path: 'dist/agents/git.md', content: `## Operations\n${line}\n` }];
+
+    expect(
+      collectGithubGrammarInNeutralBody(seed('parse for `#[0-9]+` references from `refs #`')),
+      'the collector must report the grammar this rule exists to remove',
+    ).toEqual(['dist/agents/git.md: the `#[0-9]` issue-ref regex — parse for `#[0-9]+` references from `refs #`']);
+
+    expect(
+      collectGithubGrammarInNeutralBody(seed('retain only digit-only entries')),
+      'and the filter that means the same thing in words',
+    ).toHaveLength(1);
+
+    expect(
+      collectGithubGrammarInNeutralBody(seed('`gh pr view {PR_NUMBER} --json comments` matches `#[0-9]+`')),
+      'a PR-host line is allowlisted — pull requests stay on GitHub under every provider',
+    ).toEqual([]);
+
+    expect(
+      collectGithubGrammarInNeutralBody([
+        { path: 'src/assets/mds/tracker/_github.mds', content: "grep -oE '#[0-9]+'\n" },
+      ]),
+      'a provider-owned mechanics file is out of scope — its grammar is what the file is for',
+    ).toEqual([]);
   });
 });

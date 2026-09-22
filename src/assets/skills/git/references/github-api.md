@@ -675,7 +675,7 @@ printf '%s\n' "$REPLY_BODY" > "$DEVFLOW_BODY_RAW" \
 
 ### Resolve a Review Thread
 
-Only resolve when VERIFICATION_STATUS == PASS and the verdict is FIXED, FALSE_POSITIVE, or BY_DESIGN with cited evidence. ESCALATED and FAILED verdicts → reply-only, never resolve.
+The resolve condition is stated once, in the Git agent's D9 gate. This reference holds the mutation, not the rule that calls it.
 
 ```bash
 gh api graphql -f query='

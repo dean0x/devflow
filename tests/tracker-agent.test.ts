@@ -29,7 +29,7 @@
  */
 
 import { describe, it, expect, afterAll } from 'vitest';
-import { spawnSync } from 'child_process';
+import { spawn, spawnSync } from 'child_process';
 import {
   copyFileSync,
   existsSync,
@@ -305,6 +305,42 @@ export function collectCounterIncrementSites(content: string): string[] {
   return sites;
 }
 
+/** How far either side of a `touch` the claim file may be named. Bounded (PF-018). */
+const TOUCH_WINDOW_CHARS = 70;
+const CLAIM_FILE_NAMED = /(claim file|\$\{?TRACKER_CLAIM\b)/i;
+
+/**
+ * Named collector: every instruction to `touch` THE CLAIM FILE, with its context.
+ *
+ * Two sites are correct and no more: the stale-recovery re-claim in step 1, and
+ * the ONE heartbeat refresh at the probe → compose boundary. The shape this
+ * replaces was `expect(TRACKER_TEXT).toMatch(/\btouch\b/)`, which is satisfied by
+ * any one of them — and equally by nineteen, which is what the retired cadence
+ * ("once per capability probed, and once per section composed") actually
+ * instructed. A count is the only thing that can tell those apart, and the
+ * instruction the agent follows is unobservable at runtime, so the count has to
+ * be taken here.
+ *
+ * Windowed rather than line-scoped because the agent hard-wraps: `touch`ing and
+ * "the claim file" land on either side of a line break in the shipped text, and
+ * pinning where a sentence happens to break is what PF-057 warns against. The
+ * prose at `## Read-only boundary` ("nothing outside it is yours to touch") names
+ * no claim file and is correctly not a site.
+ */
+export function collectClaimTouchSites(content: string): string[] {
+  const text = content.replace(/\s+/g, ' ');
+  const sites: string[] = [];
+  for (const match of text.matchAll(/\btouch(?:ing|es)?\b/gi)) {
+    const at = match.index ?? 0;
+    const window = text.slice(Math.max(0, at - TOUCH_WINDOW_CHARS), at + TOUCH_WINDOW_CHARS);
+    if (CLAIM_FILE_NAMED.test(window)) sites.push(window.trim());
+  }
+  return sites;
+}
+
+/** A refresh instruction that states a repetition rather than a single point. */
+const REPEATED_TOUCH = /\b(repeatedly|once per|each time|every time|periodically)\b/i;
+
 /**
  * Named collector: every ```bash fence in the agent, dedented to column 0.
  *
@@ -444,21 +480,103 @@ function runShell(
   sandbox: Sandbox,
   opts: { instrument?: boolean; stub?: string } = {},
 ): ShellRun {
-  const { instrument = true, stub = '' } = opts;
-  const prelude = instrument
-    ? `TRACKER_TMPLOG=${JSON.stringify(sandbox.tmplog)}\n` +
-      'mktemp() { command mktemp "$@" | tee -a "$TRACKER_TMPLOG"; }\n'
-    : '';
-  // Built key by key rather than spread-and-delete: `DEVFLOW_DIR` must be ABSENT,
-  // so that `## Environment`'s own `${DEVFLOW_DIR:-$HOME/.devflow}` fallback is
-  // what resolves the paths under test.
+  const run = spawnSync('bash', ['-c', shellBody(script, sandbox, opts)], {
+    env: shellEnv(sandbox),
+    encoding: 'utf-8',
+  });
+  return { status: run.status, stdout: run.stdout ?? '', stderr: run.stderr ?? '' };
+}
+
+/**
+ * The env every run of the agent's shell gets. ONE builder, because `runShell`
+ * and `runShellAsync` below must agree byte for byte about it: a second
+ * hand-rolled copy is the shadow reimplementation PF-018 names, and the property
+ * it would silently drop is the deliberately ABSENT `DEVFLOW_DIR`.
+ *
+ * Built key by key rather than spread-and-delete, so `DEVFLOW_DIR` is absent
+ * rather than empty and `## Environment`'s own `${DEVFLOW_DIR:-$HOME/.devflow}`
+ * fallback is what resolves the paths under test.
+ */
+function shellEnv(sandbox: Sandbox): Record<string, string> {
   const env: Record<string, string> = {};
   for (const [key, value] of Object.entries(process.env)) {
     if (value !== undefined && key !== 'DEVFLOW_DIR') env[key] = value;
   }
   env.HOME = sandbox.home;
-  const run = spawnSync('bash', ['-c', prelude + stub + script], { env, encoding: 'utf-8' });
-  return { status: run.status, stdout: run.stdout ?? '', stderr: run.stderr ?? '' };
+  return env;
+}
+
+/** The script both runners hand to `bash -c`, prelude and stub included. */
+function shellBody(
+  script: string,
+  sandbox: Sandbox,
+  opts: { instrument?: boolean; stub?: string } = {},
+): string {
+  const { instrument = true, stub = '' } = opts;
+  const prelude = instrument
+    ? `TRACKER_TMPLOG=${JSON.stringify(sandbox.tmplog)}\n` +
+      'mktemp() { command mktemp "$@" | tee -a "$TRACKER_TMPLOG"; }\n'
+    : '';
+  return prelude + stub + script;
+}
+
+/**
+ * The asynchronous sibling of `runShell` — same script, same env, spawned rather
+ * than waited on, so N claimants can be in flight at once.
+ *
+ * `spawnSync` cannot express a race. Two SEQUENTIAL runs prove only that the
+ * second one met a path the first had already taken, and an exclusive create
+ * satisfies that trivially — so sequencing cannot DISTINGUISH a claim primitive
+ * from a non-exclusive one either. A claim primitive is exclusive or it is not,
+ * and only genuinely concurrent claimants can tell the two apart (PF-068 rule 3).
+ * Shape copied from tests/queue-append.test.ts's parallel-append harness: spawn
+ * N, resolve on `close`, `Promise.all`.
+ *
+ * Each run reports the wall-clock window it occupied, because "spawned" is not
+ * "raced": the runner may still serialise them under load, and every claimant
+ * outcome this file asserts is ALSO what a serialised run produces. The overlap
+ * is the only observation that separates the two, so it is measured rather than
+ * assumed ({@link overlapWindow}).
+ */
+interface AsyncShellRun extends ShellRun {
+  /** ms since epoch at spawn. */
+  startedAt: number;
+  /** ms since epoch at `close`. */
+  endedAt: number;
+}
+
+function runShellAsync(
+  script: string,
+  sandbox: Sandbox,
+  opts: { instrument?: boolean; stub?: string } = {},
+): Promise<AsyncShellRun> {
+  return new Promise<AsyncShellRun>(resolve => {
+    const startedAt = Date.now();
+    const child = spawn('bash', ['-c', shellBody(script, sandbox, opts)], { env: shellEnv(sandbox) });
+    let stdout = '';
+    let stderr = '';
+    child.stdout.on('data', chunk => { stdout += String(chunk); });
+    child.stderr.on('data', chunk => { stderr += String(chunk); });
+    child.on('close', status => resolve({ status, stdout, stderr, startedAt, endedAt: Date.now() }));
+  });
+}
+
+/**
+ * Named collector: the interval during which EVERY run was simultaneously alive,
+ * in ms. Zero or negative means at least one run finished before another started
+ * — the claimants were serialised and no race occurred.
+ *
+ * This is the harness's own self-check, and it needs one because neither
+ * claimant assertion can supply it. `set -o noclobber` yields exactly one winner
+ * when run sequentially, and `mv` yields N winners when run sequentially, so the
+ * exclusivity arm and its known-bad probe produce their expected results under a
+ * serialised harness just as they do under a racing one (PF-018 — a green arm
+ * that a degenerate harness also satisfies is not evidence).
+ */
+function overlapWindow(runs: readonly AsyncShellRun[]): number {
+  const lastStart = Math.max(...runs.map(r => r.startedAt));
+  const firstEnd = Math.min(...runs.map(r => r.endedAt));
+  return firstEnd - lastStart;
 }
 
 /**
@@ -513,6 +631,22 @@ function writeChain(body: string, fence: string = WRITE_FENCE): string {
 /** The create-exclusive placement the scrub gate must guard. Named once. */
 const PLACEMENT = 'ln "$SCRUBBED" "$TRACKER_FILE"';
 
+/**
+ * The chain link that validates every line of the composition rather than two
+ * anchor lines. Named once, and spelled here exactly as the fence spells it.
+ *
+ * The character class is the schema's own `## Reference Rendering` denylist,
+ * hoisted from one section to the whole file: backtick, dollar and semicolon. The
+ * other two the section names — double quote and backslash — are deliberately NOT
+ * at this link, each for its own reason, and both are stated in the agent beside
+ * the chain: the scrubber may re-quote an assignment it redacted, so a link that
+ * refused a quote would make a SUCCESSFUL redaction refuse the write; and a
+ * backslash inside a bracket expression is read as an escape by some greps and as
+ * a literal by others, which is a portability bug in a security control rather
+ * than a control.
+ */
+const RANGE_LINK = "! grep -q '[`$;]' \"$SCRUBBED\"";
+
 /** Backslash continuations joined, so one logical statement is one string. */
 function joinContinuations(fence: string): string {
   return fence.replace(/\\\n[ \t]*/g, ' ');
@@ -541,9 +675,46 @@ function joinContinuations(fence: string): string {
 export function collectScrubChain(fence: string): string | null {
   const statements = joinContinuations(fence)
     .split('\n')
-    .flatMap(line => line.split(/[;|]/));
+    .flatMap(splitUnquotedSeparators);
   const hits = statements.filter(s => s.includes(SCRUBBER));
   return hits.length === 1 ? hits[0].trim() : null;
+}
+
+/**
+ * Split one line at its UNQUOTED `;` and `|`, which are exactly the separators
+ * that end an `&&` chain's reach.
+ *
+ * A naive `split(/[;|]/)` reads the shell's separators inside a QUOTED word, where
+ * they are ordinary characters — and the chain's own shape gate quotes a bracket
+ * expression that contains one. Cutting there would report the scrubber's
+ * statement as ending before the placement, so the guard would fail on a chain
+ * that is correct: a false positive on a security control, which gets the control
+ * rewritten rather than the collector fixed.
+ *
+ * Quote tracking is deliberately the shell's own rule and nothing more — an
+ * opening `'` or `"` runs to its matching partner. Backslash escaping inside
+ * double quotes is NOT modelled (PF-064): no recipe in this agent spells one, and
+ * the failure direction of that omission is a split too EARLY, which is reported
+ * rather than silently admitted.
+ */
+function splitUnquotedSeparators(line: string): string[] {
+  const parts: string[] = [];
+  let current = '';
+  let quote: string | null = null;
+  for (const ch of line) {
+    if (quote === null && (ch === "'" || ch === '"')) {
+      quote = ch;
+    } else if (quote === ch) {
+      quote = null;
+    } else if (quote === null && (ch === ';' || ch === '|')) {
+      parts.push(current);
+      current = '';
+      continue;
+    }
+    current += ch;
+  }
+  parts.push(current);
+  return parts;
 }
 
 /**
@@ -551,13 +722,22 @@ export function collectScrubChain(fence: string): string | null {
  *
  * The known-bad spelling, produced from the REAL fence rather than hand-written, so
  * the probe cannot drift away from the chain it is the negative of. Spelling-
- * independent: it replaces the first `&&` on the scrubber's own logical line, so it
- * keeps working when the chain is reflowed.
+ * independent: it replaces the first `&&` AFTER the scrubber's own token.
+ *
+ * "After the scrubber" and not "first on the line": once the compose step joined
+ * the same chain, the scrubber's logical line opens with the `} &&` that binds the
+ * heredoc to it, and breaking THAT operator unbinds compose→scrub while leaving
+ * scrub→place intact — a mutation that produces a still-gated chain and a probe
+ * that certifies nothing.
  */
 function breakScrubChain(fence: string): string {
   return joinContinuations(fence)
     .split('\n')
-    .map(line => (line.includes(SCRUBBER) ? line.replace(/\s+&&\s+/, '\n') : line))
+    .map(line => {
+      const at = line.indexOf(SCRUBBER);
+      if (at === -1) return line;
+      return line.slice(0, at) + line.slice(at).replace(/\s+&&\s+/, '\n');
+    })
     .join('\n');
 }
 
@@ -823,13 +1003,57 @@ describe('Tracker agent claim-file lifecycle (AC-3.17, EC-28)', () => {
     expect(TRACKER_TEXT).toContain('.tracker.attempts');
   });
 
-  it('states the loser branch as an exit, not as a report', () => {
-    expect(TRACKER_TEXT).toContain('exit silently');
+  it('states the loser branch as an OBSERVABLE outcome, not as silence', () => {
+    // The outcome tokens themselves are pinned by the executed race above; what
+    // this arm owns is the fail-closed reading of a run that printed NEITHER.
+    // Without it, a claimant killed between the create and its echo would be read
+    // as a winner, which is the one interpretation that publishes twice.
+    expect(
+      TRACKER_TEXT,
+      'a claim whose outcome has no default reading is decided by whatever the model infers ' +
+      'from an empty stdout, and the unsafe inference is the plausible one',
+    ).toContain('Absent output ⇒ LOST');
   });
 
-  it('touches a heartbeat and deletes the claim file as its final act', () => {
-    expect(TRACKER_TEXT).toMatch(/\btouch\b/);
+  it('refreshes the claim at exactly ONE point, and deletes it as its final act', () => {
+    const sites = collectClaimTouchSites(TRACKER_TEXT);
+    expect(
+      sites,
+      'the agent gives no instruction to touch the claim file at all — the staleness bound is ' +
+      'then measured from the create for the whole run, and a slow probe self-classifies as a crash',
+    ).not.toHaveLength(0);
+    const repeated = sites.filter(site => REPEATED_TOUCH.test(site));
+    expect(
+      repeated,
+      'the heartbeat instructs a REPEATED refresh. A cadence spread over every capability and ' +
+      'every section is an instruction with no observable count — nothing can distinguish a run ' +
+      'that touched nineteen times from one that touched twice — and every extra touch is a ' +
+      `write to the file the next session's gate reads:\n  ${repeated.join('\n  ')}`,
+    ).toEqual([]);
+    expect(
+      sites.length,
+      `${sites.length} claim-file touch site(s). Exactly two are correct: the stale-recovery ` +
+      're-claim in step 1, and the single heartbeat refresh at the probe → compose boundary',
+    ).toBe(2);
     expect(TRACKER_TEXT).toContain('FINAL act');
+  });
+
+  it('known-bad probe: the touch collector counts the cadence it replaced, and ignores unrelated prose', () => {
+    const cadence =
+      '3. **Heartbeat**: `touch` the claim file **repeatedly** while you work — once per\n' +
+      '   capability probed, and once per section composed.\n';
+    const seeded = collectClaimTouchSites(cadence);
+    expect(seeded, 'the retired cadence must still be READ as a touch site').toHaveLength(1);
+    expect(
+      seeded.filter(site => REPEATED_TOUCH.test(site)),
+      'and reported as a repetition — otherwise the arm above is green for a cadence',
+    ).toHaveLength(1);
+    // …and prose that names no claim file is not a site, in either direction.
+    expect(collectClaimTouchSites('nothing outside it is yours to touch.\n')).toEqual([]);
+    expect(
+      collectClaimTouchSites('Re-claim it by\n`touch`ing the claim file.\n'),
+      'a site split across a line break must still be read — the agent hard-wraps',
+    ).toHaveLength(1);
   });
 
   it('deletes the claim file with a plain rm, never a flagged one (PF-003)', () => {
@@ -843,6 +1067,19 @@ describe('Tracker agent claim-file lifecycle (AC-3.17, EC-28)', () => {
     // The spelling itself, so "no flagged rm" cannot be satisfied by an agent that
     // stopped naming a deletion mechanism at all. Same recipe as the Git corpus.
     expect(TRACKER_TEXT).toContain('rm -- "$TRACKER_CLAIM"');
+  });
+
+  it('says the claim is released on a WRITE-LESS exit too, not only after a successful write', () => {
+    // `## Finishing` is reached on every path the agent survives, but its three
+    // steps read as the success story. An agent that treats "nothing to write" as
+    // "nothing to do" leaves the claim behind, and the next session's gate reads a
+    // held claim as a live sibling — so the feature stalls for the whole staleness
+    // bound after a run that decided in seconds it had nothing to say.
+    expect(
+      TRACKER_TEXT,
+      'the release must be stated as unconditional, or the one path that produces no file also ' +
+      'produces no release',
+    ).toContain('a write-less exit still deletes the claim');
   });
 
   it('known-bad probe: the flagged-rm collector reports every seeded flag', () => {
@@ -878,7 +1115,12 @@ describe('Tracker agent claim-file lifecycle (AC-3.17, EC-28)', () => {
     ).toEqual([]);
     // Positive half: the agent has to SAY whose increment it is relying on, or the
     // next reader restores the one this guard deletes. Bounded (PF-018).
-    expect(TRACKER_TEXT).toMatch(/write-less exit[\s\S]{0,400}?\[DR-02\]/);
+    //
+    // Pinned on the CLAIM the agent makes, not on the anchor that used to cite it:
+    // `[DR-02]` resolves to nothing for the model reading this prompt, and a guard
+    // that demanded the anchor would have kept a lookup no reader can perform in
+    // the file purely to stay green (applies ADR-025 — the rule is the content).
+    expect(TRACKER_TEXT).toMatch(/write-less exit[\s\S]{0,400}?spends one attempt/);
   });
 
   it('known-bad probe: the increment collector reports the retired instruction', () => {
@@ -899,8 +1141,17 @@ describe('Tracker agent claim-file lifecycle (AC-3.17, EC-28)', () => {
     ).toEqual([]);
   });
 
-  it('deletes the counter on a successful write [DR-02]', () => {
-    expect(TRACKER_TEXT).toMatch(/successful write[\s\S]{0,200}?\.tracker\.attempts/i);
+  it('deletes the counter on a successful write, through the bound path variable', () => {
+    // The counter is addressed as `"$TRACKER_ATTEMPTS_FILE"` everywhere below
+    // `## Environment`, which is where the basename is resolved ONCE. A prose
+    // template (`{TRACKER_DEVFLOW_DIR}/.tracker.attempts`) is a second spelling of
+    // a path the fence already binds, and the two can disagree (PF-023).
+    expect(TRACKER_TEXT).toMatch(/successful write[\s\S]{0,200}?TRACKER_ATTEMPTS_FILE/i);
+    expect(
+      ENV_FENCE,
+      'the counter path must be BOUND in the one fence that resolves paths, or the variable ' +
+      'every later reference uses expands to nothing and the delete lands on an empty path',
+    ).toContain('TRACKER_ATTEMPTS_FILE="$TRACKER_DEVFLOW_DIR/.tracker.attempts"');
   });
 
   it('states the attempt cap in the shape the three-sided seam reads (OD-14)', () => {
@@ -994,20 +1245,45 @@ describe('Tracker agent write path (AC-3.9, AC-3.15, §14.9 constraints 3 and 11
     expect(collectScrubChain(`node ${SCRUBBER} "$R" "$S" \\\n  && ${place}`)).toContain(place);
   });
 
-  it('gates placement on a NON-EMPTY, template-shaped body (reliability-02)', () => {
-    // The scrubber's status says it RAN. These three links say the thing it wrote
-    // is worth publishing — head anchor, tail anchor, and not zero bytes.
+  it('gates placement on a NON-EMPTY, template-shaped, metachar-free body (reliability-02)', () => {
+    // The scrubber's status says it RAN. These four links say the thing it wrote
+    // is worth publishing — not zero bytes, a head anchor, a tail anchor, and a
+    // body whose every line is free of the metacharacters the schema's own
+    // Reference Rendering denylist names.
     expect(WRITE_FENCE).toContain('[ -s "$SCRUBBED" ]');
     const greps = WRITE_FENCE.split('\n').filter(l => /grep -q/.test(l));
     expect(
       greps,
-      'the shape gate brackets the composition at BOTH ends: the frontmatter key it opens with ' +
-      'and the last template heading it closes with, so a truncation at either end is caught',
-    ).toHaveLength(2);
+      'the shape gate brackets the composition at BOTH ends — the frontmatter key it opens with ' +
+      'and the last required heading it closes with — and then validates the RANGE, so content ' +
+      'written after the tail anchor (a trailing `### Substitutions`) is inside the gate too',
+    ).toHaveLength(3);
     // Both anchors are bound to the SHARED schema oracle, so renaming a template
     // section tells you here that the chain's anchor has to move with it.
     expect(greps.join('\n')).toContain(`'^${TRACKER_SCHEMA_FRONTMATTER_KEYS[0]}: '`);
     expect(greps.join('\n')).toContain(`'^${TEMPLATE_TAIL_HEADING}$'`);
+    expect(
+      greps.join('\n'),
+      'the range link is a NEGATED grep over the whole composition: the two anchors say the ' +
+      'head and the tail arrived, and nothing else says a word about the lines between and ' +
+      'after them, which is where a discarded scanned value lands',
+    ).toContain(RANGE_LINK);
+  });
+
+  it('joins the COMPOSE step to the same fail-closed chain (no unchecked first link)', () => {
+    // `cat > "$RAW" <<'EOF' … EOF` as its own statement is a write whose status
+    // nothing reads: a full disk, a read-only temp directory or a vanished $RAW
+    // leaves an empty or partial composition, and the scrubber then runs happily
+    // over it. Brace-grouped and `&&`-joined, the heredoc's status is the first
+    // link of the same chain the placement hangs off.
+    const chain = collectScrubChain(WRITE_FENCE);
+    expect(chain, 'the scrubber sits in no single statement').not.toBeNull();
+    expect(
+      chain!,
+      'the compose step must reach the scrubber through `&&`, not sit above it as a separate ' +
+      'statement — a chain in which every link is load-bearing cannot have an unchecked first one',
+    ).toContain('}');
+    expect(WRITE_FENCE, 'the heredoc is brace-grouped so it HAS a status to chain on').toContain('{ cat > "$RAW"');
   });
 
   it('cleans both temp files from a trap on the same chain as the mktemps (reliability-09)', () => {
@@ -1116,35 +1392,116 @@ describe('Tracker agent write path (AC-3.9, AC-3.15, §14.9 constraints 3 and 11
 // anything (PF-018).
 // ---------------------------------------------------------------------------
 
+/**
+ * How many claimants race for one path.
+ *
+ * Two is not a race — it is a sequence with a shared destination, and every
+ * primitive "wins once" against it. Eight is enough that the losers land inside
+ * the winner's own create rather than after it, which is the interleaving a
+ * rename survives and an exclusive create does not.
+ */
+const CONCURRENT_CLAIMANTS = 8;
+
+/** The status a loser exits with, as `## Step 0` spells it. */
+const LOST_STATUS = 3;
+
 describe('Tracker agent claim primitive, executed (PF-068)', () => {
-  it('refuses a path that is already taken — two claims, exactly one winner', () => {
+  it(`${CONCURRENT_CLAIMANTS} concurrent claimants: exactly one CLAIMED, every loser LOST and exit ${LOST_STATUS}`, async () => {
     const sandbox = makeSandbox();
-    const script = `${ENV_FENCE}\n${CLAIM_FENCE}\necho WON`;
-    const first = runShell(script, sandbox);
-    const second = runShell(script, sandbox);
+    const script = `${ENV_FENCE}\n${CLAIM_FENCE}`;
+    const runs = await Promise.all(
+      Array.from({ length: CONCURRENT_CLAIMANTS }, () =>
+        runShellAsync(script, sandbox, { instrument: false })),
+    );
 
-    expect(first.stdout.trim(), `the winner did not proceed: ${first.stderr}`).toBe('WON');
+    // The harness's own precondition, asserted before its result is read: all
+    // eight were alive at once. Sequential claimants produce exactly this
+    // outcome against `set -o noclobber`, so without this the arm below is
+    // satisfied by a harness that raced nothing.
     expect(
-      second.stdout.trim(),
-      'the second claimant proceeded — the claim excludes nobody, so both agents probe the ' +
-      'user\'s tracker and the loser deletes the claim while the winner is still running',
-    ).toBe('');
-    expect(second.status, 'the loser exits SILENTLY: no output AND no failure').toBe(0);
-    expect(existsSync(path.join(sandbox.devflowDir, '.tracker.processing'))).toBe(true);
-  });
+      overlapWindow(runs),
+      `the ${CONCURRENT_CLAIMANTS} claimants were not all alive at once, so nothing below ` +
+      'observed a race: at least one run finished before another started',
+    ).toBeGreaterThan(0);
 
-  it('known-bad probe: rename-to-claim produces TWO winners through the same harness', () => {
+    const winners = runs.filter(r => r.stdout.trim() === 'CLAIMED');
+    expect(
+      winners.length,
+      `${winners.length} of ${CONCURRENT_CLAIMANTS} concurrent claimants reported CLAIMED. ` +
+      'More than one means the claim excludes nobody: every winner probes the user\'s tracker ' +
+      'and the first to finish deletes the claim while the others are still running. Zero means ' +
+      `the winner has no observable outcome at all:\n  ${runs.map(r => JSON.stringify(r.stdout)).join('\n  ')}`,
+    ).toBe(1);
+
+    const losers = runs.filter(r => r.stdout.trim() !== 'CLAIMED');
+    expect(losers).toHaveLength(CONCURRENT_CLAIMANTS - 1);
+    for (const loser of losers) {
+      expect(
+        loser.stdout.trim(),
+        'a loser must SAY it lost. `:` and `exit 0` are indistinguishable from a winner that ' +
+        'printed nothing, so a silent loser is a run nobody — including the agent reading its ' +
+        'own shell\'s output — can classify',
+      ).toBe('LOST');
+      expect(
+        loser.status,
+        'the loser exits with its own status: 0 reads as success and 1 as a failed create, and ' +
+        'neither says "another agent owns this run"',
+      ).toBe(LOST_STATUS);
+    }
+    expect(existsSync(path.join(sandbox.devflowDir, '.tracker.processing'))).toBe(true);
+  }, 20_000);
+
+  it('known-bad probe: rename-to-claim produces MANY winners through the same harness', async () => {
     // `mv src dst` is rename(2): an existing destination is REPLACED and mv exits
     // 0, so the loser branch is one the kernel never takes. The replaced claim file
     // also resets the staleness clock the other agent is judged by. A guard that
     // greps for the command name passes on both spellings, which is why the broken
-    // one is driven through the harness that must report it.
+    // one is driven through the harness that must report it — at the same
+    // concurrency, so the two results differ only in the primitive.
+    //
+    // What this probe does NOT establish is that the harness raced anything: `mv`
+    // wins unconditionally, so it reports N winners serialised too. The overlap
+    // assertion in the arm above is what carries that, and it is repeated here so
+    // this probe's own result is read off a run that raced.
     const sandbox = makeSandbox();
-    const renameClaim = 'MARKER="$(command mktemp)"\nmv "$MARKER" "$TRACKER_CLAIM" || exit 0\necho WON';
+    const renameClaim =
+      'MARKER="$(command mktemp)"\nif mv "$MARKER" "$TRACKER_CLAIM" 2>/dev/null; then ' +
+      'echo CLAIMED; else echo LOST; exit 3; fi';
     const script = `${ENV_FENCE}\n${renameClaim}`;
-    const first = runShell(script, sandbox, { instrument: false });
-    const second = runShell(script, sandbox, { instrument: false });
-    expect([first.stdout.trim(), second.stdout.trim()]).toEqual(['WON', 'WON']);
+    const runs = await Promise.all(
+      Array.from({ length: CONCURRENT_CLAIMANTS }, () =>
+        runShellAsync(script, sandbox, { instrument: false })),
+    );
+    expect(
+      overlapWindow(runs),
+      'the probe must be read off a racing harness, exactly as the arm above is',
+    ).toBeGreaterThan(0);
+    expect(
+      runs.filter(r => r.stdout.trim() === 'CLAIMED').length,
+      'rename-to-claim reported a single winner against a racing harness — the arm above ' +
+      'then proves nothing about exclusivity, because both primitives would be reporting ' +
+      'the same thing',
+    ).toBeGreaterThan(1);
+  }, 20_000);
+
+  it('known-bad probe: the overlap collector reports serialised runs as no race', () => {
+    // Driving the collector, not re-implementing it: a set of windows that do not
+    // all intersect must come back non-positive, and one that does must not.
+    const raced: AsyncShellRun[] = [
+      { status: 0, stdout: '', stderr: '', startedAt: 100, endedAt: 400 },
+      { status: 0, stdout: '', stderr: '', startedAt: 150, endedAt: 380 },
+      { status: 0, stdout: '', stderr: '', startedAt: 200, endedAt: 500 },
+    ];
+    expect(overlapWindow(raced)).toBe(180);
+
+    const serialised: AsyncShellRun[] = [
+      { status: 0, stdout: '', stderr: '', startedAt: 100, endedAt: 200 },
+      { status: 0, stdout: '', stderr: '', startedAt: 210, endedAt: 300 },
+    ];
+    expect(
+      overlapWindow(serialised),
+      'back-to-back runs share no instant, so the collector must not report an overlap',
+    ).toBeLessThanOrEqual(0);
   });
 });
 
@@ -1197,6 +1554,60 @@ describe('Tracker agent write chain, executed (PF-066, AC-3.15)', () => {
     expect(run.status).not.toBe(0);
     expect(existsSync(sandbox.trackerFile)).toBe(false);
     expect(stagingResidue(sandbox)).toEqual([]);
+  });
+
+  it('admits a trailing `### Substitutions` — the tail anchor is not the end of the gate', () => {
+    // The section the agent writes when it discarded a scanned value sits AFTER
+    // the tail anchor, so the old two-anchor gate bracketed the composition short
+    // of it. It is also the section most likely to carry third-party text, since
+    // every row of it is a value that failed its own shape gate.
+    const sandbox = makeSandbox();
+    const withSubstitutions =
+      `${COMPOSED_FILE}\n\n### Substitutions\n- ## Assignee: discarded scanned value, default applied`;
+    expect(
+      withSubstitutions.indexOf('### Substitutions'),
+      'the fixture must place the section AFTER the tail anchor, or it proves nothing',
+    ).toBeGreaterThan(withSubstitutions.indexOf(TEMPLATE_TAIL_HEADING));
+
+    const run = runShell(writeChain(withSubstitutions), sandbox);
+    expect(run.status, `a well-formed Substitutions section was refused: ${run.stderr}`).toBe(0);
+    expect(readFileSync(sandbox.trackerFile, 'utf-8')).toBe(`${withSubstitutions}\n`);
+  });
+
+  it('refuses a body carrying a shell metacharacter, even past the tail anchor', () => {
+    const sandbox = makeSandbox();
+    const hostile = `${COMPOSED_FILE}\n\n### Substitutions\n- ## Project: discarded $(id), default applied`;
+
+    const run = runShell(writeChain(hostile), sandbox);
+    expect(
+      run.status,
+      'both anchors are present and the body is non-empty, so every other link of the chain ' +
+      'passes; the range link is the only one that sees this line',
+    ).not.toBe(0);
+    expect(
+      existsSync(sandbox.trackerFile),
+      'the file is written ONCE and read by every downstream reader — a substitution row is ' +
+      'the residue of a value that already failed its own shape gate',
+    ).toBe(false);
+    expect(stagingResidue(sandbox)).toEqual([]);
+  });
+
+  it('known-bad probe: with the range link deleted, the same metacharacter IS published', () => {
+    // The RED half of the arm above, produced from the REAL fence. Without it,
+    // "no file was written" is equally consistent with a chain that refused for
+    // one of the other three reasons (PF-018).
+    const sandbox = makeSandbox();
+    const unranged = WRITE_FENCE.split('\n').filter(line => !line.includes(RANGE_LINK)).join('\n');
+    expect(unranged, 'the mutation must actually remove the range link').not.toBe(WRITE_FENCE);
+    const hostile = `${COMPOSED_FILE}\n\n### Substitutions\n- ## Project: discarded $(id), default applied`;
+
+    const run = runShell(writeChain(hostile, unranged), sandbox, { instrument: false });
+    expect(run.status, `the unranged chain should complete: ${run.stderr}`).toBe(0);
+    expect(
+      readFileSync(sandbox.trackerFile, 'utf-8'),
+      'with the range link gone, the two anchors admit anything written after the tail — the ' +
+      'defect the link exists for',
+    ).toContain('$(id)');
   });
 
   it('known-bad probe: with the shape gate deleted, the same empty composition IS published', () => {
@@ -1464,6 +1875,40 @@ describe('~/.devflow/tracker.md schema template (§14.3, P3a-S16)', () => {
 
   it('distinguishes a sentinel from an absent section', () => {
     expect(TRACKER_TEXT).toMatch(/sentinel and an absent section are different outcomes/i);
+  });
+
+  it('forbids sentinelling a global-safe section whose validator is a closed enum', () => {
+    // `# UNRESOLVED:` asks a human to edit the line. That is the right outcome for
+    // a repo-derived value the scan could not establish, and the wrong one for a
+    // section whose admissible values are all written down here and hold for the
+    // whole machine: there is nothing for the human to resolve, and the sentinel
+    // makes every reader degrade forever over a value the agent already knew.
+    expect(
+      TRACKER_TEXT,
+      'the rule must be stated where the agent composes, or an unresolved closed-enum section ' +
+      'takes the generic sentinel path by default',
+    ).toMatch(/is never sentinelled — write the\s+constant/i);
+    // Bound to the schema oracle rather than a hand-typed heading list, and the
+    // predicate is the rule's own: global-safe, a closed enum, and a documented
+    // default that is ITSELF one of that enum's values. `## Dedup Strategy` is a
+    // closed enum whose default is a live probe, so it is deliberately outside
+    // the rule — a third row that qualified would have to be named here in the
+    // same commit as the table change that made it qualify.
+    const rows = collectTrackerSchemaRows(TRACKER_TEXT);
+    const bare = (cell: string): string => cell.replace(/`/g, '').trim();
+    const constantEnumRows = rows.filter(row =>
+      row.scope === 'global-safe' &&
+      /^enum: /.test(row.validator) &&
+      bare(row.validator).includes(bare(row.absent)));
+    expect(
+      constantEnumRows.map(row => bare(row.section)),
+      'the rows the rule governs — global-safe, closed enum, default inside the enum',
+    ).toEqual(['## Assignee', '## Tech Debt']);
+    expect(
+      rows.filter(row => row.scope === 'global-safe' && /^enum: /.test(row.validator)).length,
+      'a closed-enum global-safe row whose default is NOT a member must exist, or the rule\'s ' +
+      'carve-out is describing nothing and the next reader will delete it',
+    ).toBeGreaterThan(constantEnumRows.length);
   });
 });
 

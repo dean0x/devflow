@@ -102,14 +102,14 @@ devflow/
 │   ├── helpers.ts                    # Shared helpers: resolveAgentSource, resolveAllAgents, extractOpSectionFromCorpus, gitAgentSinkCorpus, walkFiles, loadGolden, extractStatusLines, parseFences, isAgentBlock, requireDistFile/requireDistFiles
 │   ├── seams/                        # Command→agent input contract
 │   ├── goldens/                      # Byte-equality against tests/fixtures/golden/
-│   ├── guards/                       # Named-collector guards with known-bad probes: literal-agent-paths, retired-wording, numeric-floor-manifest, agent-source-resolver, agent-source-precedence, dist-agents, extended-references, capability-hoist, heredoc-quoting, fence-grammar, provider-scope, guard-census
-│   ├── tracker/                      # Tracker contract/mechanics split — containment oracle, byte budget
+│   ├── docs/                         # Docs guards — the CLAUDE.md Tracker block cap and the selection-scoped naming
+│   ├── guards/                       # Named-collector guards with known-bad probes: literal-agent-paths, retired-wording, numeric-floor-manifest, agent-source-resolver, agent-source-precedence, dist-agents, extended-references, capability-hoist, heredoc-quoting, fence-grammar, provider-scope, requires-closure
+│   ├── tracker/                      # Tracker contract/mechanics split — byte budget, schema scope, hostile values, single-authority registries, reference reachability
 │   ├── dynamic/                      # Two-sided writer↔reader grammar seams
 │   ├── installer/                    # Generated-reference overlay (converge-not-merge, atomic per-unit swap)
 │   ├── integration/                  # Real claude / tarball installs
 │   └── fixtures/
 │       ├── golden/                   # git-agent.md (regenerated in fixture-only commits); github-status-lines.txt (frozen)
-│       ├── tracker/baseline/         # Byte copies of the pre-split tree — never regenerated
 │       └── numeric-floors.json       # Hand-registered ratchet manifest — floors raise, never lower; ceilings lower, never raise
 ├── docs/
 │   └── reference/                    # Extracted reference docs
@@ -126,11 +126,12 @@ Plugins are entries in `DEVFLOW_PLUGINS` in `src/core/plugins.ts` — no per-plu
   commands: ['/implement'],
   agents: ['git', 'code', 'simplify', 'scrutinize', 'evaluate', 'test', 'validate', 'knowledge'],
   skills: ['patterns', 'qa', 'quality-gates', 'worktree-support', 'feature-knowledge', 'apply-feature-knowledge'],
+  requires: ['git', 'testing', 'test-driven-development', 'software-design', /* … */],
   rules: [],
 }
 ```
 
-The `commands` array lists slash-command names (e.g., `'/implement'`). The installer maps each command name to a compiled `.md` file in `dist/commands/` and copies it to `~/.claude/commands/devflow/`. Skills and rules are copied directly from `src/assets/` with no build step. Agents are mixed: a hand-authored `src/assets/agents/{name}.md` is copied directly, while an `.mds` generator host is installed from the `dist/agents/{name}.md` it compiles to.
+The `commands` array lists slash-command names (e.g., `'/implement'`). The installer maps each command name to a compiled `.md` file in `dist/commands/` and copies it to `~/.claude/commands/devflow/`. Skills and rules are copied directly from `src/assets/` with no build step. `skills` are the skills a plugin OWNS and `requires` the ones it uses without owning; the install set is the closure of both over the selected plugins, and a bidirectional guard holds `requires` against what the plugin's commands, agents and skill bodies actually name. Agents are mixed: a hand-authored `src/assets/agents/{name}.md` is copied directly, while an `.mds` generator host is installed from the `dist/agents/{name}.md` it compiles to.
 
 ## Installation Paths
 
@@ -138,7 +139,7 @@ The `commands` array lists slash-command names (e.g., `'/implement'`). The insta
 |-------|------|-------|
 | Commands | `~/.claude/commands/devflow/` | Namespaced; installed from `dist/commands/*.md` |
 | Agents | `~/.claude/agents/devflow/` | Namespaced; resolved most-preferred-first over `dist/agents/` then `src/assets/agents/`, first hit wins |
-| Skills | `~/.claude/skills/devflow:*/` | Namespaced (`devflow:` prefix); installed from `src/assets/skills/` |
+| Skills | `~/.claude/skills/devflow:*/` | Namespaced (`devflow:` prefix); installed from `src/assets/skills/`, scoped to the selected plugins and their declared `requires:` |
 | Rules | `~/.claude/rules/devflow/` | Flat `.md`; installed from `src/assets/rules/` (plugin-scoped) |
 | Scripts | `~/.devflow/scripts/` | Helper scripts |
 | Hooks | `~/.devflow/scripts/hooks/` | Installed from `src/assets/scripts/hooks/`; Working Memory hooks |

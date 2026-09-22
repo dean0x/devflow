@@ -872,8 +872,14 @@ describe('linear module: query safety and the cross-cutting rules it invokes', (
       namers.push(linearRel(op));
       expect(
         content,
-        `${linearRel(op)}: a posting mechanic must name the contract that governs it`,
-      ).toContain('references/tracker/_mcp.md');
+        `${linearRel(op)}: a posting mechanic must invoke the contract that governs it`,
+      ).toContain('The tool-call contract governs');
+      expect(
+        content,
+        `${linearRel(op)}: a posting mechanic must NOT compose the contract's path. The contract is ` +
+        `a per-SPAWN load named once, from the agent preamble; a per-operation path made it look ` +
+        `per-operation, and five of these ten files did not carry it at all (PF-058).`,
+      ).not.toContain('references/tracker/_mcp.md');
     }
     expect(
       namers.length,

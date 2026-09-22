@@ -339,7 +339,17 @@ export function trackerEnabledSentinelPath(devflowDir: string): string {
   return path.join(devflowDir, TRACKER_ENABLED_FILE);
 }
 
-/** `tracker.md.{provider}.bak` — the basename a stale conventions file lands under. */
+/**
+ * `tracker.md.{provider}.bak` — the basename a stale conventions file lands under.
+ *
+ * EXPORTED deliberately, not by oversight, and so is
+ * {@link trackerConventionsBackupPath} below. The `.bak` filename is a
+ * user-visible contract: `renameStaleTrackerConventions` writes it, `devflow
+ * tracker --status` and the uninstall user-content list both reason about it, and
+ * tests/core/tracker.test.ts pins it. Un-exporting would force the pin to
+ * re-derive the name from a template beside the real one, which is the
+ * shadow-reimplementation a guard is worth nothing without (PF-018).
+ */
 export function trackerConventionsBackupName(previous: TrackerProvider): string {
   return `${TRACKER_CONVENTIONS_FILE}.${previous}.bak`;
 }
@@ -430,7 +440,7 @@ export type TrackerTransition =
 /**
  * Move a now-stale `~/.devflow/tracker.md` aside when the provider changes.
  *
- * P3a-S15 / AC-3.20 — the writer's repair. A conventions file inferred for one
+ * The writer's repair. A conventions file inferred for one
  * provider is silently authoritative for the next one unless it is moved aside,
  * and the reader half (the provider-mismatch guard) then has nothing to disagree
  * with. Landing it at `tracker.md.{old}.bak` keeps the user's inferred content

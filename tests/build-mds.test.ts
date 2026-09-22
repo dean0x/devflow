@@ -41,6 +41,8 @@ import {
   DYNAMIC_COMMAND_HOSTS,
   MDS_COMMAND_HOSTS,
   MDS_PARTIALS,
+  MDS_REFERENCE_PARTIALS,
+  ALL_MDS_PARTIALS,
   TRACKER_PARTIAL_ADOPTERS,
   DIST_COMMAND_FILES,
 } from './fixtures/mds-manifest.js';
@@ -181,8 +183,69 @@ describe('MDS host discovery', () => {
   it('commands/_partials/ holds exactly the manifest\'s 12 partials (both directions)', async () => {
     const { partials } = await collectMdsNames(PARTIALS_DIR);
     expect(partials).toEqual([...MDS_PARTIALS].sort());
+  });
+
+  /**
+   * Named collector: every `.mds` under `src/` that declares no `output-dir:`,
+   * as a repo-relative path — the build's own definition of a partial, applied
+   * over the build's own walk rather than over one directory listing.
+   *
+   * The listing this replaced could only see `_partials/`, so a partial parked
+   * anywhere else was counted by the build and named by nothing. Driven by the
+   * set-equality arm AND by the probe below, so a collector that stopped
+   * classifying cannot leave a green set-equality behind it.
+   */
+  async function collectRepoPartials(dir: string, depth = 0): Promise<string[]> {
+    const found: string[] = [];
+    for (const e of await fs.readdir(dir, { withFileTypes: true })) {
+      const full = path.join(dir, e.name);
+      if (e.isDirectory()) {
+        if (depth < 6) found.push(...await collectRepoPartials(full, depth + 1));
+        continue;
+      }
+      if (!e.isFile() || !e.name.endsWith('.mds')) continue;
+      const text = await fs.readFile(full, 'utf-8');
+      // The build's own classifier: a LEADING `---` block declaring output-dir:.
+      // A file with no leading block has no build key at all and is a partial;
+      // reading the key anywhere else would let body prose reclassify a file.
+      const block = /^---\n([\s\S]*?)\n---\n/.exec(text)?.[1] ?? '';
+      if (/^output-dir:/m.test(block)) continue;
+      found.push(path.relative(ROOT, full).split(path.sep).join('/'));
+    }
+    return found.sort();
+  }
+
+  it('src/ holds exactly the manifest\'s 13 partials, wherever they live (both directions)', async () => {
+    const partials = await collectRepoPartials(path.join(ROOT, 'src'));
+    expect(
+      partials,
+      'the repo-wide partial set must equal the manifest — a partial outside _partials/ that ' +
+      'nothing names is one the build counts and no assertion sees',
+    ).toEqual([...ALL_MDS_PARTIALS].sort());
+    expect(
+      partials,
+      'the walk must reach outside src/assets/commands/_partials/, or widening it bought nothing',
+    ).toContain(MDS_REFERENCE_PARTIALS[0]);
     // Manifest length floor — floors never decrease (numeric-floors.json: partial-count).
-    expect(MDS_PARTIALS.length).toBeGreaterThanOrEqual(12);
+    expect(ALL_MDS_PARTIALS.length).toBeGreaterThanOrEqual(13);
+  });
+
+  it('known-bad probe: the repo-wide collector reports a seeded partial and skips a seeded host', async () => {
+    const tmp = await fs.mkdtemp(path.join(os.tmpdir(), 'devflow-repo-partials-probe-'));
+    try {
+      await fs.mkdir(path.join(tmp, 'deep', 'er'), { recursive: true });
+      await fs.writeFile(path.join(tmp, 'deep', 'er', '_stray.mds'), 'body only\n', 'utf-8');
+      await fs.writeFile(
+        path.join(tmp, 'deep', 'a-host.mds'),
+        '---\noutput-dir: dist/commands\n---\nbody\n',
+        'utf-8',
+      );
+      const found = (await collectRepoPartials(tmp)).map(p => path.basename(p));
+      expect(found, 'a partial nested outside _partials/ must be reported').toContain('_stray.mds');
+      expect(found, 'a file declaring output-dir: is a host, not a partial').not.toContain('a-host.mds');
+    } finally {
+      await fs.rm(tmp, { recursive: true, force: true });
+    }
   });
 
   it('commands/_partials/ is flat — no subdirectories at any depth', async () => {
@@ -219,10 +282,12 @@ describe('MDS host discovery', () => {
   });
 
   it('each partial .mds does NOT declare output-dir:', async () => {
-    const entries = await fs.readdir(PARTIALS_DIR, { withFileTypes: true });
-    for (const e of entries.filter(f => f.isFile() && f.name.endsWith('.mds'))) {
-      const content = await fs.readFile(path.join(PARTIALS_DIR, e.name), 'utf-8');
-      expect(content, `_partials/${e.name} must not declare output-dir:`).not.toMatch(/^output-dir:/m);
+    // Every partial the manifest names, not only the ones under _partials/: the
+    // property that makes a file a partial is the absence of the key, and a
+    // partial outside that directory is the case the property is easiest to lose.
+    for (const rel of ALL_MDS_PARTIALS) {
+      const content = await fs.readFile(path.join(ROOT, rel), 'utf-8');
+      expect(content, `${rel} must not declare output-dir:`).not.toMatch(/^output-dir:/m);
     }
   });
 
@@ -1976,5 +2041,217 @@ describe('dedup-marker ownership — `<!-- devflow:` absent from dist/commands (
         `${marker} must still be owned by the Git agent — the caller stopped restating it, the operation did not stop emitting it`,
       ).toContain(marker);
     }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// §23  /implement forwards the issue argument UNCLASSIFIED
+//
+// The Git agent's `setup-task` is the one site that resolves a provider and the
+// one site that knows what an issue reference looks like on this machine. The
+// command layer's job is to hand it the argument, not to decide whether the
+// argument is one: `#123` is github's spelling, `PROJ-12` is jira's and `ENG-12`
+// is linear's, so a `starts with #` gate at the command silently reclassifies
+// every non-github reference as a task DESCRIPTION — the branch is derived from
+// prose, no issue is fetched, and nothing reports a problem.
+//
+// Two properties, because presence alone would not catch either failure: the
+// forwarded token carries no provider-specific test, and it is offered BEFORE
+// the description fallback, which is what makes the description a fallback.
+//
+// A third, added after M-1: neutrality is not enough on its own. Forwarding the
+// FIRST token of `$ARGUMENTS` is perfectly provider-neutral and still loses the
+// request — `/implement fix the login bug` reaches setup-task as `ISSUE_INPUT:
+// fix` with no description behind it. The gate that is both neutral and correct
+// is token COUNT: every provider's reference is a single token and no prose
+// description is, so the arms below assert the routing each SHAPE produces
+// rather than the sentence that produces it.
+// ---------------------------------------------------------------------------
+
+describe('implement.md forwards the issue argument unclassified (§23)', () => {
+  /** Spellings that classify the argument at the command layer. Each LABELLED (PF-064). */
+  const CLASSIFIER_RULES: ReadonlyArray<readonly [string, RegExp]> = [
+    ['a `#` prefix test', /starts with\s*`?#/i],
+    ['a `#`-shaped pattern', /#\[0-9\]|#\{?[0-9n]/],
+    ['an issue-number noun', /\bissue number\b/i],
+    // Neutral, and still wrong: it routes a multi-token argument's first word to
+    // the issue lookup and leaves TASK_DESCRIPTION empty (M-1).
+    ['an unconditional first-token forward', /\bfirst\b[^\n]*\btokens?\b/i],
+  ];
+
+  /**
+   * The condition the ISSUE_INPUT line must state: `$ARGUMENTS` is ONE token.
+   *
+   * A family of spellings rather than one, because the assertion is about which
+   * shape routes where, not about the sentence chosen to say it. What no member
+   * of the family admits is a gate on the first token of a longer argument —
+   * that shape is reported by the collector above instead.
+   */
+  const SINGLE_TOKEN_GATE = /\b(?:a single|exactly one|one)\b[^\n]*\btokens?\b/i;
+
+  /** The complementary condition on TASK_DESCRIPTION: two or more tokens. */
+  const MULTI_TOKEN_GATE = /\b(?:two or more|2\+|multiple|more than one)\b[^\n]*\btokens?\b/i;
+
+  /**
+   * The `setup-task` spawn payload — the ONE payload that routes `$ARGUMENTS`.
+   *
+   * Scoped rather than file-wide because `TASK_DESCRIPTION:` appears in nine
+   * payloads of this command, eight of which hand a Code agent a phase
+   * description that has nothing to do with the command's arguments. A file-wide
+   * reader would pick whichever came first and assert against the wrong one.
+   */
+  function setupTaskPayload(source: string): string {
+    const at = source.indexOf('OPERATION: setup-task');
+    expect(at, 'no setup-task spawn in the compiled command').toBeGreaterThan(-1);
+    const end = source.indexOf('```', at);
+    expect(end, 'the setup-task spawn fence is unterminated').toBeGreaterThan(at);
+    return source.slice(at, end);
+  }
+
+  /** The one line of the `setup-task` payload that carries `key:`. */
+  function payloadLine(source: string, key: string): string {
+    const lines = setupTaskPayload(source).split('\n').filter(l => l.trimStart().startsWith(`${key}:`));
+    expect(
+      lines.length,
+      `expected exactly one \`${key}:\` line in the setup-task payload, found ${lines.length}`,
+    ).toBe(1);
+    return lines[0];
+  }
+
+  /**
+   * Named collector: the `ISSUE_INPUT:` line of a spawn payload, and every
+   * classifier spelling on it.
+   *
+   * Scoped to that one line rather than the file: the command legitimately talks
+   * about issue numbers elsewhere (the `ISSUE_NUMBER` capture, the github-gated PR
+   * link), and a file-wide scan would report the prose that describes the value
+   * instead of the instruction that produces it.
+   */
+  function collectIssueInputClassifiers(source: string): string[] {
+    const violations: string[] = [];
+    for (const line of source.split('\n')) {
+      if (!line.trimStart().startsWith('ISSUE_INPUT:')) continue;
+      for (const [label, rule] of CLASSIFIER_RULES) {
+        if (rule.test(line)) violations.push(`${line.trim()} — ${label}`);
+      }
+    }
+    return violations;
+  }
+
+  it('the ISSUE_INPUT line forwards the argument and applies no provider-specific test', async () => {
+    const source = await fs.readFile(path.join(BUILT_COMMANDS, 'implement.md'), 'utf-8');
+    const lines = source.split('\n').filter(l => l.trimStart().startsWith('ISSUE_INPUT:'));
+    expect(
+      lines.length,
+      'no ISSUE_INPUT: line in the compiled command — the setup-task spawn stopped forwarding ' +
+      'the argument at all, which no presence check elsewhere would notice',
+    ).toBe(1);
+    expect(
+      lines[0],
+      'the value must be read off $ARGUMENTS, not restated as a classified noun',
+    ).toContain('$ARGUMENTS');
+    expect(
+      collectIssueInputClassifiers(source),
+      'the command layer classified the issue argument. Only the Git agent has resolved a ' +
+      'provider at this point, so any test here is a github test wearing a neutral name:\n  ' +
+      collectIssueInputClassifiers(source).join('\n  '),
+    ).toEqual([]);
+    // The one test that IS the command's to make: a plan-document path is not an
+    // issue reference under any provider, and it is decided by the file extension.
+    expect(lines[0], 'the `.md` carve-out is the command layer\'s own').toContain('.md');
+  });
+
+  it('a SINGLE-token argument is what reaches ISSUE_INPUT — and it carries no provider test', async () => {
+    const source = await fs.readFile(path.join(BUILT_COMMANDS, 'implement.md'), 'utf-8');
+    const issueLine = payloadLine(source, 'ISSUE_INPUT');
+
+    expect(
+      issueLine,
+      'ISSUE_INPUT must be gated on $ARGUMENTS being ONE token. Ungated, the first word of ' +
+      '`/implement fix the login bug` is forwarded to setup-task as an issue reference and ' +
+      'the request itself is never passed at all (M-1):\n  ' + issueLine.trim(),
+    ).toMatch(SINGLE_TOKEN_GATE);
+    expect(
+      issueLine,
+      'and the gate must be on the argument as a whole, not on its first token',
+    ).not.toMatch(/\bfirst\b[^\n]*\btokens?\b/i);
+    // `PROJ-12`, `ENG-7`, `#42` and `42` are all one token, so the count gate
+    // admits every provider's spelling — which is what keeps it neutral.
+    expect(collectIssueInputClassifiers(source)).toEqual([]);
+  });
+
+  it('a MULTI-token argument routes to TASK_DESCRIPTION instead, and is not split', async () => {
+    const source = await fs.readFile(path.join(BUILT_COMMANDS, 'implement.md'), 'utf-8');
+    const descLine = payloadLine(source, 'TASK_DESCRIPTION');
+
+    expect(
+      descLine,
+      'TASK_DESCRIPTION must state the complementary shape — two or more tokens — rather than ' +
+      'depending on whatever the ISSUE_INPUT line happened to leave behind:\n  ' + descLine.trim(),
+    ).toMatch(MULTI_TOKEN_GATE);
+    expect(
+      descLine,
+      'the whole argument is the description; forwarding a remainder would drop its first word',
+    ).toContain('$ARGUMENTS');
+  });
+
+  it('a `.md` argument routes to PLAN_ARTIFACT_PATH, and to neither of the other two keys', async () => {
+    const source = await fs.readFile(path.join(BUILT_COMMANDS, 'implement.md'), 'utf-8');
+
+    expect(payloadLine(source, 'PLAN_ARTIFACT_PATH')).toContain('.md');
+    expect(
+      payloadLine(source, 'ISSUE_INPUT'),
+      'the extension carve-out has to be stated where the issue value is produced',
+    ).toContain('.md');
+    // A path is one token, so without the carve-out the count gate alone would
+    // send it to ISSUE_INPUT.
+    expect(payloadLine(source, 'ISSUE_INPUT')).toMatch(/\bnot\b[^\n]*\.md|unless[^\n]*\.md|does not end in \.md/i);
+  });
+
+  it('ISSUE_INPUT is offered before the TASK_DESCRIPTION fallback, in the same payload', async () => {
+    const source = await fs.readFile(path.join(BUILT_COMMANDS, 'implement.md'), 'utf-8');
+    const issueAt = source.indexOf('ISSUE_INPUT:');
+    const descAt = source.indexOf('TASK_DESCRIPTION:');
+    expect(issueAt, 'ISSUE_INPUT: absent').toBeGreaterThan(-1);
+    expect(descAt, 'TASK_DESCRIPTION: absent').toBeGreaterThan(-1);
+    expect(
+      issueAt,
+      'the description is the FALLBACK — stated first it reads as the default, and the argument ' +
+      'that is an issue reference reaches the Git agent as prose',
+    ).toBeLessThan(descAt);
+    // Same payload, not two distant sections: a blank line between them would mean
+    // the Git agent is handed one or the other by two different instructions.
+    expect(
+      source.slice(issueAt, descAt),
+      'the two keys must sit in one contiguous spawn payload',
+    ).not.toContain('\n\n');
+  });
+
+  it('known-bad probe: EVERY classifier rule fires on its own shape', async () => {
+    const SHAPES: ReadonlyArray<readonly [string, string]> = [
+      ['a `#` prefix test', 'ISSUE_INPUT: {issue if $ARGUMENTS starts with `#`, otherwise omit}'],
+      ['a `#`-shaped pattern', 'ISSUE_INPUT: {the #{n} token from $ARGUMENTS}'],
+      ['an issue-number noun', 'ISSUE_INPUT: {issue number from $ARGUMENTS}'],
+      // The exact line this command shipped before M-1. Provider-neutral, and it
+      // still sent `/implement fix the login bug` on as `ISSUE_INPUT: fix`.
+      [
+        'an unconditional first-token forward',
+        'ISSUE_INPUT: {the first $ARGUMENTS token verbatim, unless it ends in .md — then omit}',
+      ],
+    ];
+    expect(SHAPES.length, 'one shape per rule').toBe(CLASSIFIER_RULES.length);
+    for (const [label, line] of SHAPES) {
+      expect(
+        collectIssueInputClassifiers(line).some(v => v.endsWith(label)),
+        `"${line}" must be reported by the ${label} rule`,
+      ).toBe(true);
+    }
+    // …and the shipped forwarding instruction is not reported, nor is the same
+    // prose on a line that is not the ISSUE_INPUT key.
+    expect(collectIssueInputClassifiers(
+      'ISSUE_INPUT: {$ARGUMENTS verbatim, when it is a single whitespace-delimited token ' +
+      'that does not end in .md — otherwise omit}',
+    )).toEqual([]);
+    expect(collectIssueInputClassifiers('Capture the issue number the Git agent returns.')).toEqual([]);
   });
 });

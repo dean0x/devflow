@@ -6,7 +6,9 @@ import * as p from '@clack/prompts';
 import color from 'picocolors';
 import { getInstallationPaths } from '../../targets/claude-code/claude-paths.js';
 import { getGitRoot } from '../../core/git.js';
-import { installViaFileCopy, composeScripts, overlayUnitLabel, type InstallReport, type OverlayFailureState } from '../../targets/claude-code/installer.js';
+import { installViaFileCopy, composeScripts, type InstallReport } from '../../targets/claude-code/installer.js';
+import { formatOverlaySummary, formatSkillScopeSummary, formatTrackerAssetSummary, isPluginListUnchanged, type SummaryLine } from './install-report.js';
+import { convergeTrackerArtifacts, type ConvergeTrackerArtifactsResult, type TrackerAgentState } from '../../targets/claude-code/tracker-install.js';
 import {
   installSettings,
   installManagedSettings,
@@ -25,7 +27,7 @@ import {
   stripUserSecurityDenyList,
   type SecurityMode,
 } from '../../targets/claude-code/post-install.js';
-import { DEVFLOW_PLUGINS, LEGACY_PLUGIN_NAMES, LEGACY_COMMAND_NAMES, LEGACY_RULE_NAMES, buildAssetMaps, buildFullSkillsMap, buildRulesMap, partitionSelectablePlugins, WORKFLOW_ORDER, parsePluginSelection, resolveFeatureRedirect, FEATURE_OWNED_SKILLS, prefixSkillName, type PluginDefinition } from '../../core/plugins.js';
+import { DEVFLOW_PLUGINS, LEGACY_PLUGIN_NAMES, LEGACY_COMMAND_NAMES, LEGACY_RULE_NAMES, buildAssetMaps, buildScopedSkillsMap, buildRulesMap, partitionSelectablePlugins, WORKFLOW_ORDER, parsePluginSelection, resolveFeatureRedirect, FEATURE_OWNED_SKILLS, prefixSkillName, type PluginDefinition } from '../../core/plugins.js';
 import { LEGACY_SKILL_NAMES } from '../../targets/claude-code/legacy.js';
 import { detectPlatform, detectShell, getProfilePath, getSafeDeleteInfo, hasSafeDelete } from '../../core/safe-delete.js';
 import { generateSafeDeleteBlock, installToProfile, removeFromProfile, getInstalledVersion, SAFE_DELETE_BLOCK_VERSION } from '../../core/safe-delete-install.js';
@@ -137,12 +139,6 @@ export async function runMigrationsWithFallback(
   return migrationResult;
 }
 
-/** One line of post-install summary output, with the severity it should be logged at. */
-export interface SummaryLine {
-  level: 'info' | 'warn';
-  message: string;
-}
-
 /**
  * Turn the orphan-sweep half of an InstallReport into summary lines.
  *
@@ -185,89 +181,27 @@ export function formatSweepSummary(
 }
 
 /**
- * Turn the reference-overlay half of an InstallReport into summary lines.
+ * Log each summary line at the severity it carries — the one dispatch every
+ * `SummaryLine[]` renderer shares.
  *
- * The overlay rewrites files inside an installed skill directory the user may have
- * shadowed, and a unit it could not refresh is left in one of the states
- * {@link OverlayFailureState} enumerates — running on the previous install, half
- * replaced, absent, or recoverable only from a backup path. None of that is visible from
- * the filesystem at a glance, so all of it reaches the summary — PF-015: a report field
- * with no render site is not a report, and a render site that flattens four states into
- * one sentence is the same defect one layer up.
- *
- * Pure function — returns lines, logs nothing (applies ADR-013).
- *
- * @param skillName - Bare name of the skill hosting the generated references,
- *   rendered `devflow:`-prefixed. Defaults to the core constant the build path and
- *   the installer's overlay trigger both read, so the renderer is never a third
- *   independent statement of which skill owns them — the divergence PF-013
- *   describes, where changing the answer means finding every retyped spelling and
- *   nothing fails if one is missed.
+ * Exhaustive over `SummaryLine['level']` rather than an `if/else`: a level added
+ * to the interface has to be routed here, at compile time, instead of silently
+ * degrading to `info` at every call site.
  */
-export function formatOverlaySummary(
-  report: Pick<InstallReport, 'overlaidRefs' | 'overlayFailures'>,
-  skillName: string = SKILL_REFS_SKILL_NAME,
-): SummaryLine[] {
-  const lines: SummaryLine[] = [];
-
-  if (report.overlaidRefs.length > 0) {
-    lines.push({
-      level: 'info',
-      message:
-        `Installed ${report.overlaidRefs.length} generated skill reference(s) for ` +
-        prefixSkillName(skillName),
-    });
-  }
-
-  for (const failure of report.overlayFailures) {
-    lines.push({
-      level: 'warn',
-      message:
-        `Could not refresh the generated references for ${overlayUnitLabel(failure.unit)} ` +
-        `(${failure.error}) — ${describeOverlayFailureState(failure.state)}`,
-    });
-  }
-
-  return lines;
-}
-
-/**
- * The half of an overlay warning that describes what is actually on disk.
- *
- * One sentence per state, each true of that state and of no other. A single shared
- * sentence — "the previously installed files were left unchanged" — is true of the first
- * arm only, and would read loudest over the arms it fits worst: a set left
- * half-refreshed, and a unit whose only surviving copy is a backup path the user has to
- * be told about.
- *
- * Exhaustive over {@link OverlayFailureState} — a new state added to the union without a
- * sentence here is a compile error, not a state that silently prints nothing.
- */
-function describeOverlayFailureState(state: OverlayFailureState): string {
-  switch (state.kind) {
-    case 'installed-unchanged':
-      return 'the previously installed files were left unchanged';
-    case 'not-installed':
-      return (
-        `nothing is installed in their place, so ${state.absent.length} reference(s) the ` +
-        `agent is told to load are absent: ${state.absent.join(', ')}`
-      );
-    case 'partially-refreshed':
-      return (
-        `${state.refreshed.length} of ${state.refreshed.length + state.stale.length} ` +
-        `document(s) had already been replaced, so the set is part new and part old — ` +
-        `still on the previous install: ${state.stale.join(', ') || 'none'}`
-      );
-    case 'restore-failed':
-      return (
-        `the displaced copy could NOT be put back (${state.restoreError}), so nothing is ` +
-        `installed there now — the only surviving copy is "${state.recoveryPath}", which ` +
-        `this run's stale-reference prune was skipped to preserve`
-      );
-    default: {
-      const _exhaustive: never = state;
-      void _exhaustive;
-      return 'the state it was left in is unknown';
+function logSummaryLines(lines: readonly SummaryLine[]): void {
+  for (const line of lines) {
+    switch (line.level) {
+      case 'info':
+        p.log.info(line.message);
+        break;
+      case 'warn':
+        p.log.warn(line.message);
+        break;
+      default: {
+        const _exhaustive: never = line.level;
+        void _exhaustive;
+        break;
+      }
     }
   }
 }
@@ -414,6 +348,19 @@ export interface TrackerLifecycleIO {
     previous: TrackerProvider | undefined,
     resolved: TrackerProvider,
   ): Promise<TrackerTransition>;
+  /**
+   * The fourth owner: the Tracker agent file, converged against the persisted
+   * provider. The generated reference subtree is the fifth artifact that moves
+   * with a provider change, and it is NOT here — `installViaFileCopy` already
+   * converged it, inside the install, before the manifest was written. That
+   * asymmetry is deliberate and is stated on
+   * {@link persistManifestThenConvergeTracker}.
+   */
+  convergeArtifacts(
+    claudeDir: string,
+    provider: TrackerProvider,
+    warn: (msg: string) => void,
+  ): Promise<ConvergeTrackerArtifactsResult>;
   rearmInference(devflowDir: string): Promise<TrackerResult<void>>;
   applySentinel(devflowDir: string, provider: TrackerProvider): Promise<TrackerResult<void>>;
 }
@@ -423,6 +370,8 @@ export function buildTrackerLifecycleIO(): TrackerLifecycleIO {
   return {
     writeManifest,
     renameStaleConventions: renameStaleTrackerConventions,
+    convergeArtifacts: (claudeDir, provider, warn) =>
+      convergeTrackerArtifacts({ claudeDir, provider, warn }),
     rearmInference: rearmTrackerInference,
     applySentinel: applyTrackerSentinel,
   };
@@ -432,8 +381,10 @@ export function buildTrackerLifecycleIO(): TrackerLifecycleIO {
 export interface ManifestTrackerOutcome {
   /** The manifest reached disk. False means the tracker selection was not persisted. */
   manifestWritten: boolean;
-  /** The three tracker artifacts were converged against the persisted provider. */
+  /** Every tracker artifact converged against the persisted provider. */
   converged: boolean;
+  /** What happened to the Tracker agent file — reported so the summary can name it. */
+  agent: TrackerAgentState;
   messages: InitLifecycleMessage[];
 }
 
@@ -468,11 +419,12 @@ export interface ManifestTrackerOutcome {
  */
 export async function persistManifestThenConvergeTracker(opts: {
   devflowDir: string;
+  claudeDir: string;
   manifestData: ManifestData;
   previousProvider: TrackerProvider | undefined;
   io: TrackerLifecycleIO;
 }): Promise<ManifestTrackerOutcome> {
-  const { devflowDir, manifestData, previousProvider, io } = opts;
+  const { devflowDir, claudeDir, manifestData, previousProvider, io } = opts;
   const provider = manifestData.features.tracker.provider;
   const messages: InitLifecycleMessage[] = [];
 
@@ -492,10 +444,10 @@ export async function persistManifestThenConvergeTracker(opts: {
       text: `Tracker selection (${provider}) was not persisted — the sentinel, attempt counter and ` +
         `conventions file are unchanged. Re-run devflow init, or devflow tracker --set ${provider}.`,
     });
-    return { manifestWritten: false, converged: false, messages };
+    return { manifestWritten: false, converged: false, agent: 'unchanged', messages };
   }
 
-  // P3a-S15: move a now-stale conventions file aside (AC-3.20's writer arm).
+  // Move a now-stale conventions file aside (the writer arm of the provider change).
   //
   // D-TRACKER-PARALLEL: the rename stays strictly ahead of the other two. It is
   // the only step that reads the PREVIOUS provider and the only one that reports
@@ -517,18 +469,57 @@ export async function persistManifestThenConvergeTracker(opts: {
     messages.push({ level: 'warn', text: transition.error });
   }
 
+  // The fourth owner — the Tracker agent file. SEQUENTIAL, and strictly before
+  // the pair below, because the sentinel's WRITE is gated on its outcome: a
+  // sentinel that advertises jira while the agent it would spawn is missing is
+  // the drifted state this whole ordering exists to prevent (design review H6 —
+  // the parallel pair stays a parallel pair, it is not flattened to make room).
+  const agentWarnings: string[] = [];
+  const artifacts = await io.convergeArtifacts(claudeDir, provider, (msg) => agentWarnings.push(msg));
+  for (const text of agentWarnings) messages.push({ level: 'warn', text });
+
+  // C2: the sentinel converges in BOTH directions, and only the WRITE is gated.
+  //   provider ≠ github → a write, when a spawnable agent is actually there.
+  //   provider = github → a removal. ALWAYS attempted, because leaving a stale
+  //     sentinel behind costs every future session a fork for a provider the
+  //     user has left, and a failed agent removal is not a reason to keep it.
+  //
+  // The write gate reads `agentPresent`, not `converged`. `converged` answers
+  // "did THIS run copy it", and reading that alone is wrong in both directions:
+  // a re-copy that fails over an already-installed agent would disable a provider
+  // that still works, and merely SUPPRESSING the write leaves the PREVIOUS
+  // provider's sentinel in place — so a jira → linear init whose agent copy
+  // failed goes on advertising jira, which is the state the suppression exists to
+  // prevent. Not-spawnable therefore REMOVES, through the one sentinel owner in
+  // src/core/tracker.ts (D-TRACKER-OWNER), never an inline fs.rm here.
+  const advertisable = provider === DEFAULT_TRACKER_PROVIDER || artifacts.agentPresent;
+
   const [rearm, sentinel] = await Promise.all([
     // [DR-22] The documented re-arm path: devflow init resets the attempt counter
     // so a previously-capped inference gets another five tries.
     io.rearmInference(devflowDir),
     // [DR-10] Converge the presence sentinel: written for jira/linear, removed for
     // github. This is what keeps the GitHub SessionStart path at one stat and zero forks.
-    io.applySentinel(devflowDir, provider),
+    io.applySentinel(devflowDir, advertisable ? provider : DEFAULT_TRACKER_PROVIDER),
   ]);
   if (!rearm.ok) messages.push({ level: 'warn', text: rearm.error });
   if (!sentinel.ok) messages.push({ level: 'warn', text: sentinel.error });
+  if (!advertisable) {
+    messages.push({
+      level: 'warn',
+      text:
+        `Tracker sentinel removed — no ${provider} agent is installed, so nothing advertises a ` +
+        `provider whose agent is missing and no session will try to spawn it. ` +
+        `Re-run devflow init, or devflow tracker --set ${provider}.`,
+    });
+  }
 
-  return { manifestWritten: true, converged: true, messages };
+  return {
+    manifestWritten: true,
+    converged: artifacts.converged && sentinel.ok,
+    agent: artifacts.agent,
+    messages,
+  };
 }
 
 /**
@@ -1662,9 +1653,18 @@ export const initCommand = new Command('init')
       pluginsToInstall.push(ambientPlugin);
     }
 
-    // Skills: install ALL from ALL plugins (skills are tiny markdown files;
-    // commands need skills from other plugins to function)
-    const skillsMap = buildFullSkillsMap();
+    // The EFFECTIVE selection — what the manifest will record, resolved here
+    // rather than at manifest-write time because the skills install set is
+    // derived from it. On a full install it is `pluginsToInstall`; on a partial
+    // install (`--plugin=X`) it merges the prior manifest's plugins with X, so a
+    // previously-installed plugin's skills survive an add-one run (AC-22).
+    const installedPluginNames = pluginsToInstall.map(pl => pl.name);
+    const effectivePluginNames = resolvePluginList(installedPluginNames, existingManifest, !!options.plugin);
+    const effectivePlugins = DEVFLOW_PLUGINS.filter(pl => effectivePluginNames.includes(pl.name));
+
+    // Skills: the effective selection's closure — every plugin's own skills plus
+    // the ones it requires. Scoped like rules, agents and commands already are.
+    const skillsMap = buildScopedSkillsMap(effectivePlugins);
     // Agents: install only from selected plugins
     const { agentsMap } = buildAssetMaps(pluginsToInstall);
     // Rules: install only from selected plugins (plugin-scoped, not universal)
@@ -1717,11 +1717,13 @@ export const initCommand = new Command('init')
     try {
       installReport = await installViaFileCopy({
         plugins: pluginsToInstall,
+        effectivePlugins,
         claudeDir,
         devflowDir,
         skillsMap,
         agentsMap,
         rulesMap,
+        trackerProvider,
         isPartialInstall: !!options.plugin,
         spinner: s,
         // Non-fatal install notices with no other channel (skipped symlinks in the
@@ -2312,28 +2314,23 @@ export const initCommand = new Command('init')
     // failed removal leaves a retired asset live. Both must surface.
     // After I09, the installer's knownNames set unions FEATURE_OWNED_SKILLS, so
     // devflow:compliance is never swept here — no suppression predicate is needed.
-    for (const line of formatSweepSummary(installReport)) {
-      if (line.level === 'warn') p.log.warn(line.message);
-      else p.log.info(line.message);
-    }
+    logSummaryLines(formatSweepSummary(installReport));
 
     // Reference-overlay reporting: the overlay rewrites files inside an installed skill
     // the user may have shadowed, and reports any unit it had to leave alone (PF-015).
-    for (const line of formatOverlaySummary(installReport)) {
-      switch (line.level) {
-        case 'info':
-          p.log.info(line.message);
-          break;
-        case 'warn':
-          p.log.warn(line.message);
-          break;
-        default: {
-          const _exhaustive: never = line.level;
-          void _exhaustive;
-          break;
-        }
-      }
-    }
+    logSummaryLines(formatOverlaySummary(installReport, trackerProvider));
+
+    // Skill-scoping reporting: a deselected skill is deleted and a dormant shadow
+    // is inert, and neither is distinguishable from "never installed" on disk.
+    //
+    // L2: "the plugin list is unchanged" means a prior manifest EXISTS and its
+    // plugin set equals this run's. A first install had nothing to remove, so
+    // there is no upgrade to explain — the removal notice would be addressed to
+    // a user who never had the skills.
+    const pluginListUnchanged =
+      isPluginListUnchanged(existingManifest?.plugins ?? null, effectivePluginNames);
+    logSummaryLines(formatSkillScopeSummary(installReport, pluginListUnchanged));
+
     for (const warning of installWarnings) p.log.warn(warning);
 
     const installedSet = new Set(pluginsToInstall.flatMap(p => p.commands).filter(c => c.length > 0));
@@ -2389,11 +2386,13 @@ export const initCommand = new Command('init')
     }
 
     // Write installation manifest for upgrade tracking (non-fatal — install already succeeded)
-    const installedPluginNames = pluginsToInstall.map(pl => pl.name);
     const now = new Date().toISOString();
     const manifestData = {
       version,
-      plugins: resolvePluginList(installedPluginNames, existingManifest, !!options.plugin),
+      // Resolved above, before the install, because the skills install set is
+      // derived from it — one binding, so the manifest can never record a
+      // selection other than the one the assets were installed for.
+      plugins: effectivePluginNames,
       scope,
       // Snapshot of known plugin names at this install — used by resolveSeedPlugins on next init
       // to detect new non-optional plugins and auto-adopt them.
@@ -2429,6 +2428,7 @@ export const initCommand = new Command('init')
     // a provider the manifest actually persisted (D-TRACKER-CONVERGE, PF-015).
     const trackerLifecycle = await persistManifestThenConvergeTracker({
       devflowDir,
+      claudeDir,
       manifestData,
       // The REAL manifest, not the --reset-gated seed: under --reset the resolved
       // provider collapses to github while the prior provider is still jira/linear,
@@ -2440,6 +2440,20 @@ export const initCommand = new Command('init')
       if (msg.level === 'warn') p.log.warn(msg.text);
       else p.log.info(msg.text);
     }
+
+    // Name the active provider and what the selection moved. The reference
+    // counts come from the install report rather than being recomputed: the
+    // overlay is what actually installed and pruned them, so a second count
+    // here could only ever disagree with it.
+    const trackerLines = formatTrackerAssetSummary({
+      provider: trackerProvider,
+      previous: existingManifest?.features.tracker.provider,
+      isDefault: trackerProvider === DEFAULT_TRACKER_PROVIDER,
+      installedRefs: installReport.overlaidRefs.length,
+      removedRefs: installReport.sweptOrphans.filter(o => o.kind === 'reference').length,
+      agent: trackerLifecycle.agent,
+    });
+    logSummaryLines(trackerLines);
 
     // External model routing status line (Advanced path / explicit --proxy flag only)
     if (proxyEnabled) {

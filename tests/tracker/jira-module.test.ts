@@ -413,6 +413,17 @@ const MODULE_DEFINES: readonly ModuleDefine[] = [
       'them while every other site and a presence-only guard stay green, and the truncation ' +
       'floor derives from it — so the number has one owner per module and every site invokes it',
   },
+  {
+    name: 'pr_link_default',
+    providers: ['jira', 'linear'],
+    bodyShape: /^Refs \\\{[A-Z]+\\\}-\\\{n\\\}$/,
+    why:
+      'the documented Reference Rendering default. A provider FACT, like the cap beside it: the ' +
+      'rule that routes to it is the tool-call contract\'s and is provider-independent, but the ' +
+      'value cannot be — a provider-keyed table inside the contract would put provider literals ' +
+      'in a file provider-scope scans and no provider owns. Owned by the two tool-call providers ' +
+      'on purpose: github renders `#{n}` and needs no fallback, because its section is never read.',
+  },
 ];
 
 /** The registered non-operation define names. */
@@ -1167,7 +1178,8 @@ describe('jira module: query safety and the cross-cutting rules it invokes', () 
 
   it('every posting mechanic invokes the tool-call contract by name, never restates it', () => {
     // The load chain is one-directional: a per-op file may INVOKE a rule in the
-    // contract and never restate its substance. Naming the file is the invocation.
+    // contract and never restate its substance. The invocation is by NAME, in prose —
+    // composing its path here is what made a per-spawn load look per-operation.
     const namers: string[] = [];
     for (const op of TRACKER_OPS) {
       const content = readGenerated(jiraRel(op));
@@ -1175,8 +1187,14 @@ describe('jira module: query safety and the cross-cutting rules it invokes', () 
       namers.push(jiraRel(op));
       expect(
         content,
-        `${jiraRel(op)}: a posting mechanic must name the contract that governs it`,
-      ).toContain('references/tracker/_mcp.md');
+        `${jiraRel(op)}: a posting mechanic must invoke the contract that governs it`,
+      ).toContain('The tool-call contract governs');
+      expect(
+        content,
+        `${jiraRel(op)}: a posting mechanic must NOT compose the contract's path. The contract is ` +
+        `a per-SPAWN load named once, from the agent preamble; a per-operation path made it look ` +
+        `per-operation, and five of these ten files did not carry it at all (PF-058).`,
+      ).not.toContain('references/tracker/_mcp.md');
     }
     expect(
       namers.length,

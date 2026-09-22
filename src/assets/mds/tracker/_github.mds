@@ -1,6 +1,8 @@
 ---
 output-dir: dist/skills/git/references
 ---
+@import { compliance_step_gate, compliance_issue_policy, state_batch_line } from "./_common.mds"
+
 GitHub tracker mechanics for the `devflow:git` skill.
 
 One section per tracker operation. The build emits each section as its own file
@@ -35,11 +37,11 @@ Load when the resolved tracker provider is `github` and the operation is `setup-
 
 ### Process
 
-1b. (Compliance-gated — skip if `COMPLIANCE` is absent or `(none)`) Load branch naming convention:
+1b. {compliance_step_gate()} Load branch naming convention:
    - Read `.devflow/conventions.md` Branch Naming section. If file absent, invoke `learn-conventions` first (write the file), then read the result.
    - Branch naming derived in step 3 MUST follow the recorded convention.
    - **Metacharacter guard:** `.devflow/conventions.md` is git-tracked and team-shared, so its content is third-party input. Before using the convention-derived prefix and separator in step 3, check the fully composed branch name (type + separator + slug). If it contains any of `` $ ` \ " ' ; | & < > `` or whitespace or a newline, discard the convention and fall back to the step-2 heuristic defaults. Bind the validated name to a shell variable for checkout: `DEVFLOW_BRANCH="..."`.
-1c. (Compliance-gated — skip if `COMPLIANCE` is absent or `(none)`) Issue-first: before branch derivation, ensure a GitHub issue exists for this task:
+1c. {compliance_step_gate()} Issue-first: before branch derivation, ensure a GitHub issue exists for this task:
    - Preconditions: remote reachable AND `gh` authenticated. If either fails → emit `TRACEABILITY: DEGRADED (\{reason\})` and continue to step 2 (convention still applies; no issue number is set).
    - If `ISSUE_INPUT` provided: use it as the existing issue number.
    - Otherwise: invoke `ensure-traceable-issue` with `TASK_DESCRIPTION` (and `PLAN_ARTIFACT_PATH` if provided) to create or find an issue. Capture the returned issue number.
@@ -135,7 +137,7 @@ Load when the resolved tracker provider is `github` and the operation is `fetch-
      ...
    \}\}'
    ```
-2b. Render each issue's `state` (`OPEN` or `CLOSED`) as a `**State**: \{state\}` line of its own, between that issue's `### Issue #\{number\}:` heading and its `<untrusted-issue-body>` marker — OUTSIDE the wrapper, because `state` is an enum the tracker computed, not remote prose. A caller refreshing a batch reads it to see a ticket closed out of band.
+{state_batch_line("`state` (`OPEN` or `CLOSED`)", "`state`", "{ISSUE_REF}")}
 @end
 
 @define manage_debt():
@@ -265,11 +267,12 @@ Load when the resolved tracker provider is `github` and the operation is `gather
 
 ### Process
 
+3b. **This provider's history grammar** is `#[0-9]+`, full-matching the whole candidate token. A bare number is not a reference here either: the keyword-anchored candidate must carry the `#`, and this provider has no project key, so the KEY-equality half of the agent's gate does not apply.
 4. If `gh` is authenticated and remote is reachable, resolve which issues the commit range closes — **batch first, never one call per commit** — and merge the result with the commit-message set:
    - **Batch (the normal path).** Resolve the whole range with one `gh api graphql` query per page of the range, using per-commit aliases on `associatedPullRequests(first:5)` and reading each PR's `closingIssuesReferences`. The call count is bounded by the number of pages, not by the number of commits — a 100-commit range costs a handful of calls, not 100.
    - **Dedup by PR number** before collecting references: several commits of one merged PR resolve to that PR once, so its `closingIssuesReferences` are read once.
    - **Sequential fallback, bounded at ≤25 commits.** Only when the batch query is unavailable or errors, fall back to per-commit resolution in range order for at most ≤25 commits; report the remainder as `THROTTLED (\{n\} not processed)` and never report the enrichment as complete while commits went unresolved.
-   - On any 4xx → DEGRADED for that item, continue. On 5xx → 1 retry; still 5xx → DEGRADED for that item, continue. Secondary rate limit (403/429 or `X-RateLimit-Remaining` < 10) → stop GitHub enrichment immediately, report remaining as `THROTTLED`.
+   - On any 4xx → DEGRADED for that item, continue. On 5xx → 1 retry; still 5xx → DEGRADED for that item, continue. On the secondary rate limit of `### Provider signals (GitHub)` in this operation's `backlink-shipped-issues` reference, which is where this provider's signals are stated → stop GitHub enrichment immediately, report remaining as `THROTTLED`.
 @end
 
 @define backlink_shipped_issues():
@@ -383,7 +386,7 @@ When creating or enriching a GitHub issue via the `ensure-traceable-issue` opera
 **Rules:**
 - Pre-existing issues: post a structured comment using D3 sections — NEVER rewrite the issue body.
 - New issues: create with D3 body; then post the design artifact as a `<details>` collapsed comment; link that comment URL in the `## Implementation Plan` section.
-- Issue creation is gated by the `COMPLIANCE` input: `enabled` → mandatory (DEGRADED states exempt), absent or `(none)` → optional.
+{compliance_issue_policy()}
 @end
 
 @define post_wave_report():

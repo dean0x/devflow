@@ -10,13 +10,12 @@
  * diffable and containment-green. Byte equality answers whether these are the
  * same bytes and never whether they still mean the same thing.
  *
- * The pitfall's recorded remedy has two halves, and Phase 2 shipped only one.
- * The half that shipped: demote the offending headings to `###` on the move (two
- * entries in `CONTAINMENT_EXEMPTIONS`, booked because the grammar rather than the
- * content forced the edit). The half that did not: "make the rule structural
- * rather than advisory — forbid the reserved token at the destination and ASSERT
- * that prohibition, because a convention that lives only in a handoff is one
- * agent away from being re-broken." This file is that assertion.
+ * The pitfall's recorded remedy has two halves. The first is a convention:
+ * demote a heading the grammar rather than the content forces down, `##` → `###`,
+ * as it moves. The second is what makes the first hold — "make the rule
+ * structural rather than advisory: forbid the reserved token at the destination
+ * and ASSERT that prohibition, because a convention that lives only in a handoff
+ * is one agent away from being re-broken." This file is that assertion.
  *
  * Demotion alone was never sufficient, because some `## ` lines MUST ship. A
  * heredoc that composes a GitHub issue body carries the issue's own Markdown:

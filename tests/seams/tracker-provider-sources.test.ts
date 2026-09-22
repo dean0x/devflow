@@ -52,7 +52,10 @@ const GIT_AGENT_HOST = path.join(ROOT, 'src', 'assets', 'agents', 'git.mds');
 const SRC_DIR = path.join(ROOT, 'src');
 
 /** The canonical §14.2 reason an inadmissible per-repo key resolves to. */
-const MISMATCH_REASON = 'tracker configuration mismatch';
+// The per-repo rung's OWN reason, split by cause. The unsplit spelling is a prefix
+// of both halves, so pinning it would have been satisfied by the conventions-file
+// half too — a rung asserted to carry a reason that names the other file.
+const MISMATCH_REASON = 'tracker configuration mismatch (repository override)';
 /** The command that re-opens the path the mismatch closes. */
 const REMEDY = 'devflow tracker --set';
 
@@ -341,8 +344,21 @@ describe('tracker provider sources: the reader admits no source the writer never
     expect(
       collectMissingNarrowingParts(
         'the key NARROWS only — `github` or the manifest\'s own provider, else ' +
-          '`TRACEABILITY: DEGRADED (tracker configuration mismatch)`;',
+          `\`TRACEABILITY: DEGRADED (${MISMATCH_REASON})\`;`,
       ),
     ).toEqual([`the remedy (${REMEDY})`]);
+
+    // …and the OTHER half of the split reason does not satisfy this rung. Both
+    // halves share a prefix, so a rung that named the conventions-file cause would
+    // have passed an `includes` on the unsplit spelling while pointing the reader
+    // at a file the rung has nothing to do with.
+    expect(
+      collectMissingNarrowingParts(
+        'the key NARROWS only — `github` or the manifest\'s own provider, else ' +
+          '`TRACEABILITY: DEGRADED (tracker configuration mismatch (conventions file))`, ' +
+          'remedy `devflow tracker --set {id}`;',
+      ),
+      'the conventions-file cause must NOT satisfy the per-repo rung\'s reason requirement',
+    ).toEqual([`the canonical reason (${MISMATCH_REASON})`]);
   });
 });

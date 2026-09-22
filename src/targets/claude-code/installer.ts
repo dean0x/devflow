@@ -1,13 +1,14 @@
-import { promises as fs } from 'fs';
+import { promises as fs, type Dirent } from 'fs';
 import { existsSync } from 'fs';
 import * as path from 'path';
 import type { PluginDefinition } from '../../core/plugins.js';
-import { DEVFLOW_PLUGINS, SKILL_NAMESPACE, prefixSkillName, unprefixSkillName, getAllSkillNames, getAllAgentNames, getAllCommandNames, FEATURE_OWNED_SKILLS } from '../../core/plugins.js';
+import { DEVFLOW_PLUGINS, SKILL_NAMESPACE, prefixSkillName, unprefixSkillName, getAllSkillNames, getAllAgentNames, getAllCommandNames, FEATURE_OWNED_SKILLS, resolveSkillInstallPlan } from '../../core/plugins.js';
 import { skillsDir, agentSourceDirs, rulesDir, commandsDir, scriptsDir, compiledSkillRefsDir, type AgentSourceDirs } from '../../core/assets.js';
 import { getPackageRoot, isContainedIn } from '../../core/paths.js';
 import { sweepOrphanedAssets, mdFileName, mdEntryName, type SweepResult } from '../../core/orphan-sweep.js';
-import { generatedReferenceManifest, SKILL_REFS_SKILL_NAME } from '../../core/mds-variants.js';
+import { generatedReferenceManifest, installedReferenceManifest, SKILL_REFS_SKILL_NAME } from '../../core/mds-variants.js';
 import { sweepOrphanedReferences, MAX_REFERENCE_SWEEP_DEPTH } from '../../core/reference-sweep.js';
+import { TRACKER_AGENT_NAME } from './tracker-install.js';
 
 // ---------------------------------------------------------------------------
 // Shadow override reporting types
@@ -54,10 +55,27 @@ export interface InstallReport {
   /** Per-item removal failures from orphan sweeps — isolates failures per PF-009. */
   sweepFailures: SweepFailure[];
   /**
-   * Manifest-relative paths of the generated `devflow:git` references installed by the
-   * reference overlay, e.g. `tracker/github/setup-task.md`.
+   * Manifest-relative paths of the generated `devflow:git` references this install
+   * actually WROTE, e.g. `tracker/github/setup-task.md`.
+   *
+   * A reference already installed byte-for-byte is not listed — see
+   * {@link ReferenceOverlayResult.unchangedRefs} — which is what makes a re-init over an
+   * unchanged provider report `+0 reference(s)` instead of restating the whole manifest.
    */
   overlaidRefs: string[];
+  /**
+   * Manifest-relative paths this install found already installed byte-for-byte and
+   * therefore did NOT write — the complement of {@link InstallReport.overlaidRefs}
+   * over the units that neither failed nor were skipped.
+   *
+   * Carried rather than inferred from `manifest \ overlaidRefs`: that subtraction is
+   * also satisfied by a unit that FAILED, and the two states are opposites — one is a
+   * reference that is already correct, the other one that may be absent. No summary
+   * line renders this field; it is what makes "a re-init wrote nothing" an assertable
+   * outcome rather than an absence nobody can distinguish from an install that never
+   * reached the overlay at all.
+   */
+  unchangedRefs: string[];
   /**
    * Overlay units this run did not refresh, each carrying the state it was left in —
    * see {@link OverlayFailureState}. The install still succeeds (PF-009); what a unit
@@ -65,6 +83,20 @@ export interface InstallReport {
    * has to say out loud.
    */
   overlayFailures: OverlayFailure[];
+  /**
+   * Skill names removed because no plugin in the effective selection owns or
+   * requires them — the visible cost of a deselection. Empty on a partial
+   * install, which never removes anything.
+   */
+  removedSkills: string[];
+  /**
+   * Shadowed skills that fall OUTSIDE the install set. The shadow directory is
+   * user content and is never deleted (applies ADR-024); it simply applies to
+   * nothing until the plugin that uses the skill is selected again. Reported
+   * because "inactive" and "ignored" look identical from the filesystem, and a
+   * user who wrote a shadow deserves to hear which of the two happened.
+   */
+  dormantShadows: string[];
 }
 
 /** Discriminated outcome for a single rule installation. */
@@ -313,7 +345,7 @@ export async function chmodRecursive(dir: string, mode: number, _depth = 0): Pro
 }
 
 // ---------------------------------------------------------------------------
-// Generated skill-reference overlay (P2-S14)
+// Generated skill-reference overlay
 // ---------------------------------------------------------------------------
 
 /** Sub-path under the references root that the prune converges to the manifest. */
@@ -340,7 +372,8 @@ export type OverlayUnitRef =
  * What a failed overlay unit left on disk.
  *
  * Populated from what the run actually did, because a failure does not imply a no-op.
- * One rendered sentence per arm (see `formatOverlaySummary` in src/cli/commands/init.ts):
+ * One rendered sentence per arm (see `describeOverlayFailureState` in
+ * src/cli/commands/install-report.ts):
  * a single shared sentence — "the previously installed files were left unchanged" — is
  * true of exactly one arm below. A flat set caught mid-promotion is part new and part
  * old, a unit whose displaced copy could not be put back has no live copy at all, and a
@@ -400,8 +433,25 @@ export function overlayUnitLabel(unit: OverlayUnitRef): string {
 }
 
 export interface ReferenceOverlayResult {
-  /** Manifest-relative paths successfully installed by this run. */
+  /**
+   * Manifest-relative paths this run actually WROTE.
+   *
+   * A unit whose staged tree matched what was already installed is reported in
+   * {@link unchangedRefs} instead, never here — see {@link stagedUnitIsAlreadyInstalled}.
+   * That is what lets a render site distinguish an install that moved something from a
+   * re-run that converged onto a tree already in the right state, and it is the whole
+   * basis of `devflow tracker --set <same provider>`'s `(unchanged)` line and of a
+   * re-init reporting `+0 reference(s)`.
+   */
   overlaidRefs: string[];
+  /**
+   * Manifest-relative paths this run left exactly as it found them, because the unit
+   * they belong to was already installed byte-for-byte.
+   *
+   * Reported rather than dropped: a caller has to be able to tell "converged, nothing to
+   * do" from "did not reach this unit at all", and the latter is {@link overlayFailures}.
+   */
+  unchangedRefs: string[];
   /** Units this run did not refresh, each carrying the state it was left in. */
   overlayFailures: OverlayFailure[];
   /** Result of converging `references/tracker/**` to the manifest. */
@@ -675,6 +725,66 @@ async function buildUnitStagingTree(
   }
 
   return { ok: true, stagingDir };
+}
+
+/**
+ * Is this unit's freshly built staging tree already what is installed?
+ *
+ * Asked once per unit, between the build and the promotion, so a unit that would be
+ * promoted onto an identical copy of itself is skipped and reported as unchanged
+ * instead. Without it every run writes every unit, `overlaidRefs` is never empty, and
+ * every render site downstream — `devflow tracker --set`'s `(unchanged)` line, init's
+ * `Tracker assets: +N` summary — can only ever report movement (AC-23).
+ *
+ * Comparison is against what the PROMOTION would do, not merely against the bytes the
+ * manifest names, and the two differ by unit kind:
+ *
+ *   - a PROVIDER unit is swapped whole ({@link promoteProviderUnit}), so an installed
+ *     entry the manifest no longer names is something this run would REMOVE. Comparing
+ *     only the manifest's own files would call such a unit unchanged and leave the stray
+ *     installed — converge-not-merge silently downgraded to a merge.
+ *   - a CROSS-CUTTING unit is promoted one document at a time into a directory holding
+ *     entries the overlay must never replace or delete (D-OVERLAY-FLAT-UNIT), so its
+ *     files are exactly the comparison and the neighbours are none of its business.
+ *
+ * What it deliberately does NOT compare is file MODE. D-OVERLAY-MODE-SCOPE normalises the
+ * whole references directory on every run regardless of which units promoted, so a unit
+ * skipped here still has its modes converged — a skipped promotion can hide byte drift
+ * from nothing, and mode drift from nothing either.
+ *
+ * Any error — an absent installed copy, an unreadable one, a directory that is not there
+ * — answers "no". The fallback is always the promotion that was going to happen anyway,
+ * so a failure to compare can only cost a write, never correctness.
+ */
+async function stagedUnitIsAlreadyInstalled(
+  unit: OverlayUnit,
+  referencesTarget: string,
+  stagingDir: string,
+): Promise<boolean> {
+  const basenameOf = (relPath: string): string => relPath.split('/').slice(-1)[0];
+
+  if (unit.kind === 'provider') {
+    const owned = new Set(unit.files.map(basenameOf));
+    let installed: string[];
+    try {
+      installed = await fs.readdir(underRoot(referencesTarget, unit.subdir));
+    } catch {
+      return false;
+    }
+    if (installed.length !== owned.size) return false;
+    if (installed.some(name => !owned.has(name))) return false;
+  }
+
+  for (const relPath of unit.files) {
+    try {
+      const staged = await fs.readFile(path.join(stagingDir, basenameOf(relPath)));
+      const live = await fs.readFile(underRoot(referencesTarget, relPath));
+      if (!staged.equals(live)) return false;
+    } catch {
+      return false;
+    }
+  }
+  return true;
 }
 
 /** Outcome of promoting one unit — a failure carries the state it left on disk. */
@@ -1018,6 +1128,12 @@ async function prunePreservingRecoveryCopies(
  * unit this run did not refresh reaches `overlayFailures` carrying the state it was
  * actually left in, never a blanket claim that nothing changed.
  *
+ * A unit already installed byte-for-byte is neither written nor a failure: it is skipped
+ * and named in `unchangedRefs` (see {@link stagedUnitIsAlreadyInstalled}), so
+ * `overlaidRefs` is what this run WROTE rather than what it considered. Every run still
+ * BUILDS every unit's staging tree, because that comparison is what the convergence is —
+ * the saving is the promotion, not the work of deciding.
+ *
  * @param opts.referencesTarget - `{claudeDir}/skills/devflow:git/references`.
  * @param opts.sourceRoot - Generated tree; defaults to `compiledSkillRefsDir()`.
  * @param opts.manifest - Manifest to converge to; defaults to the build registries.
@@ -1048,6 +1164,7 @@ export async function overlayGeneratedReferences(opts: {
   const warn = opts.warn ?? (() => { /* notices are optional for callers with no logger */ });
 
   const overlaidRefs: string[] = [];
+  const unchangedRefs: string[] = [];
   const overlayFailures: OverlayFailure[] = [];
 
   // Before the target is touched, so a refused overlay leaves the install exactly as it
@@ -1064,6 +1181,15 @@ export async function overlayGeneratedReferences(opts: {
         state: await classifyUntouchedUnit(unit, opts.referencesTarget),
         error: built.error,
       });
+      continue;
+    }
+    // Converged already — discard the staging tree rather than promote a copy of what is
+    // installed, so `overlaidRefs` names what this run WROTE (AC-23). The discard is the
+    // same one both promotion halves perform on their way out; skipping it would leave
+    // the `.tmp` residue every other path is asserted not to leave.
+    if (await stagedUnitIsAlreadyInstalled(unit, opts.referencesTarget, built.stagingDir)) {
+      await fs.rm(built.stagingDir, { recursive: true, force: true }).catch(() => undefined);
+      unchangedRefs.push(...unit.files);
       continue;
     }
     const promoted = await promoteUnitStagingTree(unit, opts.referencesTarget, built.stagingDir);
@@ -1100,7 +1226,134 @@ export async function overlayGeneratedReferences(opts: {
     warn(`reference overlay: could not normalise reference file modes — ${String(err)}`);
   }
 
-  return { overlaidRefs, overlayFailures, pruned };
+  return { overlaidRefs, unchangedRefs, overlayFailures, pruned };
+}
+
+/**
+ * Converge the installed `devflow:git` references onto ONE provider's install set.
+ *
+ * The provider-scoped entry point to {@link overlayGeneratedReferences}: it
+ * resolves the install manifest and the target directory from a claudeDir and a
+ * provider, and changes nothing else. There is exactly ONE overlay spelling in
+ * this codebase and this is its only wrapper — `devflow init` reaches the
+ * overlay through `installViaFileCopy`, `devflow tracker --set` reaches it
+ * through here, and both converge to the same manifest for the same provider.
+ *
+ * Convergence is two-directional by construction, because the underlying overlay
+ * PRUNES everything under `references/tracker/**` the manifest does not name: a
+ * jira → github change removes the jira tree and `_mcp.md` in the same call that
+ * refreshes the github tree (applies PF-015).
+ *
+ * Throws on an absent generated tree, exactly as its callee does — that is a
+ * build artifact that was never produced, not an I/O degradation, and the
+ * refusal lands before the target directory is created so a refused overlay
+ * leaves the install as it found it.
+ *
+ * @param opts.provider - The RESOLVED tracker provider id.
+ * @param opts.referencesRoot - The GENERATED tree to install from; defaults to
+ *   `compiledSkillRefsDir()`. Injectable so the absent-tree refusal is provable
+ *   without deleting `dist/` out from under a concurrent test run (applies
+ *   PF-013 — a seam the caller can drive, not a global the test has to break).
+ */
+export async function overlayInstalledReferences(opts: {
+  claudeDir: string;
+  provider: string;
+  warn?: (msg: string) => void;
+  referencesRoot?: string;
+}): Promise<ReferenceOverlayResult> {
+  return overlayGeneratedReferences({
+    referencesTarget: path.join(
+      opts.claudeDir,
+      'skills',
+      prefixSkillName(SKILL_REFS_SKILL_NAME),
+      'references',
+    ),
+    sourceRoot: opts.referencesRoot,
+    manifest: installedReferenceManifest({ provider: opts.provider }),
+    warn: opts.warn,
+  });
+}
+
+/** The directory inside an installed skill that the reference overlay converges. */
+const SKILL_REFERENCES_DIRNAME = 'references';
+
+/**
+ * What inside an installed skill directory the reference overlay owns, and the
+ * pre-clean must therefore leave standing (D-OVERLAY-OWNERSHIP).
+ *
+ * Derived from the manifest the overlay is about to converge to, never a hand-typed
+ * list: the two would be one edit apart from disagreeing, and the failure is silent —
+ * a name the pre-clean forgot is simply force-promoted again on every run, which is the
+ * defect this split exists to close.
+ *
+ * Paths are skill-relative and TOP-LEVEL under `references/`, which makes them mean
+ * different things for the two unit kinds, matching what the overlay does with each:
+ *   - a nested entry (`tracker/jira/setup-task.md`) contributes the SUBTREE
+ *     `references/tracker`. The overlay prunes everything under it the manifest does not
+ *     name, so preserving it whole cannot strand an orphan — a file the manifest lost
+ *     leaves through {@link prunePreservingRecoveryCopies} on this same run.
+ *   - a flat entry (`decision-markers.md`) contributes only THAT FILE. The references
+ *     root holds hand-authored documents beside the generated ones with no manifest of
+ *     which is which (D-OVERLAY-FLAT-UNIT), so the overlay never prunes there and the
+ *     pre-clean must keep reaching it: preserving the root wholesale would make a
+ *     retired generated document, and any stale file beside it, permanent.
+ *
+ * Pure function (applies ADR-013).
+ */
+function overlayOwnedSkillPaths(manifest: readonly string[]): ReadonlySet<string> {
+  const owned = new Set<string>();
+  for (const relPath of manifest) {
+    const top = relPath.split('/')[0];
+    if (top === '') continue;
+    owned.add(`${SKILL_REFERENCES_DIRNAME}/${top}`);
+  }
+  return owned;
+}
+
+/**
+ * Empty a directory of everything but the paths another converger owns.
+ *
+ * `fs.rm(dir)` with a hole in it. `keep` holds directory-relative paths, each preserved
+ * whole — a file as itself, a directory with its entire subtree. Everything else is
+ * removed exactly as the unconditional pre-clean would have removed it.
+ *
+ * Descent is bounded, and the bound is the `keep` set's own deepest path rather than a
+ * constant: the walk only ever descends INTO a directory that still has a kept
+ * descendant below it, so there is nothing to look for past that depth. A `keep` set of
+ * depth 2 — which is what {@link overlayOwnedSkillPaths} produces — walks two levels and
+ * `fs.rm`s the rest recursively in one call.
+ *
+ * An unreadable directory is left alone rather than reported: the caller already
+ * swallows the errors of the `fs.rm` this stands in for, and a pre-clean that cannot
+ * read its target has nothing to remove from it.
+ */
+async function emptyDirectoryExcept(dir: string, keep: ReadonlySet<string>): Promise<void> {
+  const kept = [...keep];
+  const maxDepth = Math.max(0, ...kept.map(relPath => relPath.split('/').length));
+
+  const walk = async (current: string, rel: string, depth: number): Promise<void> => {
+    let entries: Dirent[];
+    try {
+      entries = await fs.readdir(current, { withFileTypes: true });
+    } catch { return; }
+
+    for (const entry of entries) {
+      const entryRel = rel === '' ? entry.name : `${rel}/${entry.name}`;
+      if (keep.has(entryRel)) continue;
+
+      const holdsSomethingKept = entry.isDirectory()
+        && depth < maxDepth
+        && kept.some(relPath => relPath.startsWith(`${entryRel}/`));
+      if (holdsSomethingKept) {
+        await walk(path.join(current, entry.name), entryRel, depth + 1);
+        continue;
+      }
+
+      await fs.rm(path.join(current, entry.name), { recursive: true, force: true });
+    }
+  };
+
+  await walk(dir, '', 1);
 }
 
 // ---------------------------------------------------------------------------
@@ -1200,6 +1453,25 @@ export interface FileCopyOptions {
   devflowDir: string;
   skillsMap: Map<string, string>;
   agentsMap: Map<string, string>;
+  /**
+   * The RESOLVED tracker provider. Required rather than defaulted: the overlay
+   * converges — it PRUNES what the manifest does not name — so a caller that
+   * forgot to pass one would not install a slightly wrong set, it would delete
+   * the previous provider's mechanics on every install. There is no safe
+   * default for a destructive convergence, so the type refuses to guess.
+   */
+  trackerProvider: string;
+  /**
+   * The plugins whose skill closure {@link FileCopyOptions.skillsMap} was built
+   * from — the removal and dormancy decisions are made against these.
+   *
+   * Differs from `plugins` on a PARTIAL install only: `--plugin=X` installs X's
+   * assets while the effective selection is the prior manifest's plugins ∪ X, so
+   * the skills a previously-installed plugin contributed must survive. Defaults
+   * to `plugins`, which is exactly right for a full install — where the two are
+   * the same list — and for every caller that has only one.
+   */
+  effectivePlugins?: PluginDefinition[];
   /** Rules to install from selected plugins. Defaults to empty map (no rules). */
   rulesMap?: Map<string, string>;
   isPartialInstall: boolean;
@@ -1232,6 +1504,27 @@ async function firstExisting(candidates: readonly string[]): Promise<string | un
     } catch { /* not here — try the next directory in preference order */ }
   }
   return undefined;
+}
+
+/**
+ * Registry skills that have a shadow directory under `~/.devflow/skills/`.
+ *
+ * One readdir of the SHADOW tree, intersected with the registry. Deliberately
+ * not a readdir of the installed skills directory: that tree is the thing being
+ * converged, and reading it to decide what to remove is how a directory a user
+ * put there by hand becomes a deselection (applies ADR-024).
+ *
+ * Whether a shadow is VALID is a separate question, answered per skill by
+ * validateSkillShadow at install time. This only answers "did the user write
+ * one?", which is what dormancy reporting turns on.
+ */
+async function listShadowedSkills(devflowDir: string): Promise<string[]> {
+  const registry = new Set(getAllSkillNames());
+  let entries: string[];
+  try {
+    entries = await fs.readdir(path.join(devflowDir, 'skills'));
+  } catch { return []; }
+  return entries.filter(name => registry.has(name));
 }
 
 /**
@@ -1275,8 +1568,29 @@ export async function installViaFileCopy(options: FileCopyOptions): Promise<Inst
     sweptOrphans: [],
     sweepFailures: [],
     overlaidRefs: [],
+    unchangedRefs: [],
     overlayFailures: [],
+    removedSkills: [],
+    dormantShadows: [],
   };
+
+  // The skill decision, made in full before anything is touched — which skills
+  // this selection installs, which it removes, and which shadows it leaves inert.
+  // Pure and registry-driven: the removal set is `skillsOf(all) \ skillsOf(selected)
+  // \ FEATURE_OWNED`, never a readdir of the installed skills directory, so an
+  // unrelated `devflow:` directory a user put there by hand is not swept as a
+  // deselection (applies ADR-024).
+  //
+  // Computed BEFORE shadows are resolved: a shadow is applied only to a skill the
+  // selection installs, so the install set is the question that has to be settled
+  // first. Resolving shadows first would mean probing shadow directories for
+  // skills this run is about to remove.
+  const skillPlan = resolveSkillInstallPlan({
+    effectivePlugins: options.effectivePlugins ?? plugins,
+    isPartialInstall,
+    shadowedSkills: await listShadowedSkills(devflowDir),
+  });
+  report.dormantShadows = [...skillPlan.dormantShadows];
 
   // Clean old Devflow files before installing
   spinner.message('Cleaning old files...');
@@ -1286,7 +1600,6 @@ export async function installViaFileCopy(options: FileCopyOptions): Promise<Inst
     // without discarding assets from plugins not included in this run.
     const oldDirs = [
       path.join(claudeDir, 'commands', 'devflow'),
-      path.join(claudeDir, 'agents', 'devflow'),
       path.join(claudeDir, 'rules', 'devflow'),
     ];
     for (const dir of oldDirs) {
@@ -1294,6 +1607,22 @@ export async function installViaFileCopy(options: FileCopyOptions): Promise<Inst
         await fs.rm(dir, { recursive: true, force: true });
       } catch { /* ignore */ }
     }
+
+    // D-TRACKER-AGENT-OWNER, pre-clean half — the same split the reference tree
+    // needed (D-OVERLAY-OWNERSHIP), for the same reason. The agent directory is
+    // emptied AROUND the one file `convergeTrackerArtifacts` owns: taking it
+    // would leave converge with nothing to byte-compare against, so a
+    // steady-state jira re-init would re-copy the agent and announce
+    // `tracker agent installed` on every run. Everything else is removed
+    // exactly as the unconditional wipe removed it, and the file is still
+    // converged on this run — under github converge deletes it, and drift in it
+    // is restored, so preserving it strands nothing.
+    try {
+      await emptyDirectoryExcept(
+        path.join(claudeDir, 'agents', 'devflow'),
+        new Set([mdFileName(TRACKER_AGENT_NAME)]),
+      );
+    } catch { /* ignore */ }
   }
 
   // Sweep stale devflow:* skill dirs — ungated: runs on every install shape,
@@ -1317,20 +1646,67 @@ export async function installViaFileCopy(options: FileCopyOptions): Promise<Inst
   // Pre-clean the prefixed install targets before re-copying so stale content
   // never bleeds into a fresh install. Bare pre-namespace dirs at
   // ~/.claude/skills/{name} are owned solely by the frozen LEGACY_SKILL_NAMES
-  // pass in init.ts (runs immediately after this call, init.ts:1149). A bare
-  // dir whose name matches a current registry skill is by construction foreign
-  // to Devflow and must not be touched here (avoids PF-012).
-  const allSkills = new Set<string>();
-  for (const plugin of DEVFLOW_PLUGINS) {
-    for (const skill of plugin.skills) {
-      allSkills.add(skill);
+  // pass in init.ts (runs immediately after this call). A bare dir whose name
+  // matches a current registry skill is by construction foreign to Devflow and
+  // must not be touched here (avoids PF-012).
+  //
+  // The pre-clean is SCOPED to what this run reinstalls and the orphan sweep
+  // above is UNSCOPED (the full registry). The opposite scoping is deliberate,
+  // not an inconsistency waiting to be simplified away:
+  //   - the sweep removes names the registry no longer has at all, which is true
+  //     regardless of selection, so a partial install must still prune them;
+  //   - the pre-clean empties a directory this run is about to rewrite, so
+  //     widening it past the install set would delete a selected plugin's skill
+  //     and never put it back.
+  // Gated on a full install for the same reason: `--plugin=X` rewrites X's
+  // skills only, and a pre-clean over the whole registry would wipe every other
+  // plugin's skills on an add-one run.
+  //
+  // ONE skill is pre-cleaned around a hole rather than emptied: the skill hosting the
+  // generated references, whose overlay-owned subtree belongs to
+  // {@link overlayGeneratedReferences} and to nothing else (D-OVERLAY-OWNERSHIP). The
+  // two mechanisms are not alternatives — the overlay is a CONVERGER and the pre-clean
+  // is not, so handing it the subtree loses what the converger is for:
+  //   - the overlay compares each unit against what is installed and skips the ones
+  //     already correct ({@link stagedUnitIsAlreadyInstalled}). A pre-clean that deletes
+  //     the installed copy first leaves it nothing to compare against, so every unit is
+  //     force-promoted and a re-init that changed nothing still reports the whole
+  //     manifest as written (QA S2);
+  //   - the overlay PRUNES `references/tracker/**` down to the manifest and swaps each
+  //     unit atomically, so drift and orphans under that subtree are converged away
+  //     without the pre-clean reaching them at all.
+  // Everything else in the directory is still emptied, so a stale hand-authored skill
+  // file — including a reference at the references ROOT, which the overlay may replace
+  // but never delete (D-OVERLAY-FLAT-UNIT) — does not survive a full install.
+  if (!isPartialInstall) {
+    const overlayOwned = overlayOwnedSkillPaths(
+      installedReferenceManifest({ provider: options.trackerProvider }),
+    );
+    for (const skill of skillsMap.keys()) {
+      // Empty the prefixed directory (its contents are re-created during the install
+      // phase), minus whatever another converger owns inside it.
+      const target = path.join(claudeDir, 'skills', prefixSkillName(skill));
+      try {
+        if (skill === SKILL_REFS_SKILL_NAME) {
+          await emptyDirectoryExcept(target, overlayOwned);
+        } else {
+          await fs.rm(target, { recursive: true, force: true });
+        }
+      } catch { /* ignore */ }
     }
   }
-  for (const skill of allSkills) {
-    // Remove prefixed directory (will be re-created during install phase)
+
+  // Remove the skills no selected plugin owns or requires — the deselection half
+  // of the scoped install. Empty on a partial install by construction
+  // (resolveSkillInstallPlan gates it), so `--plugin=X` adds and never subtracts
+  // (AC-22). Failures are per-item and non-fatal (applies PF-009).
+  for (const skill of skillPlan.remove) {
     try {
       await fs.rm(path.join(claudeDir, 'skills', prefixSkillName(skill)), { recursive: true, force: true });
-    } catch { /* ignore */ }
+      report.removedSkills.push(skill);
+    } catch (err) {
+      warn(`Could not remove deselected skill "${prefixSkillName(skill)}" — ${String(err)}`);
+    }
   }
 
   // Install commands from selected plugins using registry-driven lookup.
@@ -1376,11 +1752,26 @@ export async function installViaFileCopy(options: FileCopyOptions): Promise<Inst
   // src/assets/agents/{name}.md. A declared agent absent from BOTH is a
   // build/packaging failure and throws rather than silently skipping (matches
   // command pattern); the message names the build step as well as the tree.
+  //
+  // D-TRACKER-AGENT-OWNER: every declared agent but ONE. The Tracker agent's
+  // presence is conditional on the resolved provider, and `convergeTrackerArtifacts`
+  // owns that decision alone (plan A3) — it runs after this function in init and is
+  // the sole caller in `devflow tracker --set`. Copying it here too made every
+  // install do the work twice and the two owners contradict each other in both
+  // directions: a github run reported `tracker agent removed` for a file only that
+  // same run had written, and a fresh jira install never reported `installed`
+  // because converge found this loop's byte-identical copy already in place.
+  //
+  // The name is skipped from the COPY set only. It stays declared in
+  // `devflow-core-skills.agents`, so the sweep below — which keys on the full
+  // registry via getAllAgentNames() — still treats a converged tracker.md as known
+  // and leaves it alone.
   const agentsTarget = path.join(claudeDir, 'agents', 'devflow');
   const agentDirs = options.agentSourceDirs ?? agentSourceDirs();
   const allAgentNames = new Set<string>();
   for (const plugin of plugins) {
     for (const agent of plugin.agents) {
+      if (agent === TRACKER_AGENT_NAME) continue;
       if (!allAgentNames.has(agent) && agentsMap.get(agent) === plugin.name) {
         allAgentNames.add(agent);
       }
@@ -1453,9 +1844,14 @@ export async function installViaFileCopy(options: FileCopyOptions): Promise<Inst
     if (skillName === SKILL_REFS_SKILL_NAME) {
       const overlay = await overlayGeneratedReferences({
         referencesTarget: path.join(skillTarget, 'references'),
+        // Only the tracker mechanics this install can reach: {github} ∪ the
+        // selected provider. The overlay converges rather than merges, so a
+        // provider left behind by a previous selection is pruned here.
+        manifest: installedReferenceManifest({ provider: options.trackerProvider }),
         warn,
       });
       report.overlaidRefs.push(...overlay.overlaidRefs);
+      report.unchangedRefs.push(...overlay.unchangedRefs);
       report.overlayFailures.push(...overlay.overlayFailures);
       recordSweep(report, 'reference', overlay.pruned);
     }

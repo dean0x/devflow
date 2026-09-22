@@ -284,8 +284,9 @@ FENCED `## ` — inside a heredoc or a template fence a provider module ships on
 e.g. `manage-debt.md`'s `## Items` or `ensure-traceable-issue.md`'s D3 template — is
 exempt, via the fence-aware `collectUnfencedH2` helper in `tests/helpers.ts`, because
 demoting THOSE headings would change what the tracker renders). Every emitted file also
-clears a content floor (`MIN_REFERENCE_CHARS = 80`, asserted in `tests/tracker/
-containment.test.ts` / `linear-module.test.ts` — a thinness guard owned by the
+clears a content floor (`MIN_REFERENCE_CHARS = 80`, owned by `tests/tracker/
+reference-floor.ts` and imported by `reference-reachability.test.ts` / `linear-module.test.ts` /
+`jira-module.test.ts` — a thinness guard owned by the
 `tracker-references`/`tracker-feature` test suite, not by the build itself; the build's own
 emptiness check, `empty-section`, only refuses a fully blank section, not a merely thin one).
 

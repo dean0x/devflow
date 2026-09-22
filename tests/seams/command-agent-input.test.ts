@@ -199,12 +199,12 @@ const ISSUE_CAPTURE_CONTRACT: Array<{
     producerPattern: 'Acceptance Criteria',
     producerOps: ['setup-task', 'fetch-issue', 'fetch-issues-batch'],
   },
-  // "## Issue #{number}:" heading in fetch-issue; "### Issue #{number1}:" in batch.
+  // "## Issue {ISSUE_REF}:" heading in fetch-issue; "### Issue {ISSUE_REF1}:" in batch.
   // setup-task reports the number under "### Issue (if fetched)" and is NOT a
   // producer of the rendered-reference heading.
   {
     label: 'ISSUE_REF',
-    producerPattern: '## Issue #',
+    producerPattern: '## Issue {ISSUE_REF',
     producerOps: ['fetch-issue', 'fetch-issues-batch'],
   },
   // The three `### Handoff Values` producers (P2-S10, written in T2b). Each is
@@ -785,27 +785,30 @@ describe('third direction: every issue_capture_contract() value has a producer i
     ).toContain('is emitted by the **single-issue** operations only, `setup-task` and `fetch-issue`')
   })
 
-  it('known-bad probe: the three Handoff Values have no producer in the pre-split baseline', () => {
-    // The committed pre-split capture — the tree as it stood before T2b appended
-    // the `### Handoff Values` block. Driving the REAL collector over it is the
-    // permanent record that this direction was RED for these three keys and that
-    // the producers, not the list, are what turned it green (PF-018, H10: no
-    // landed fix is reverted to manufacture the proof).
-    const baseline = readFileSync(
-      path.join(ROOT, 'tests', 'fixtures', 'tracker', 'baseline', 'git-agent.md'),
-      'utf-8',
-    )
-    expect(baseline.length, 'baseline fixture must be non-empty').toBeGreaterThan(1000)
+  it('known-bad probe: a git.md with no `### Handoff Values` block reports all six pairs', () => {
+    // The shape this direction exists to catch: a contract key whose producer line
+    // nobody emits. Seeded by stripping the three Handoff Values lines out of a COPY
+    // of the live body and driving the REAL collector over it, so a collector that
+    // stopped reporting takes this red too (PF-018) — and so the probe tracks the
+    // live text rather than a snapshot that can only go stale.
+    const gitContent = gitCorpus[0]?.content ?? ''
+    expect(gitContent.length, 'git.md corpus must be non-empty (non-vacuity)').toBeGreaterThan(1000)
+    const handoffPatterns = ['- **Issue ID**:', '- **PR link line**:', '- **Branch token**:']
+    const stripped = gitContent
+      .split('\n')
+      .filter(line => !handoffPatterns.some(pattern => line.includes(pattern)))
+      .join('\n')
+    expect(stripped, 'the strip must actually remove something').not.toBe(gitContent)
 
-    const missing = collectMissingProducers(baseline)
+    const missing = collectMissingProducers(stripped)
     // Per-op now, so the three appear once per named producer op — six pairs, not
     // three labels. The pair spelling is the point: it names WHICH operation was
     // missing the block, which the concatenated form could not say.
     expect(
       missing.sort(),
-      'exactly the three Handoff Values, in each of the two single-issue ops, must be missing ' +
-      'from the baseline — the other three had producers all along, so a probe that reported ' +
-      'every pair would prove nothing',
+      'exactly the three Handoff Values, in each of the two single-issue ops, must be reported ' +
+      'once their lines are gone — the other three contract entries have producers elsewhere in ' +
+      'the section, so a probe that reported every pair would prove nothing',
     ).toEqual([
       'ISSUE_BRANCH_TOKEN → fetch-issue: pattern "- **Branch token**:" not found in git.md fetch-issue Output',
       'ISSUE_BRANCH_TOKEN → setup-task: pattern "- **Branch token**:" not found in git.md setup-task Output',

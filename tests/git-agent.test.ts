@@ -529,6 +529,47 @@ function collectProviderDetectors(
   return hits;
 }
 
+/**
+ * KNOWN-BAD document for the cross-cutting detector probe.
+ *
+ * An always-loaded header that names the GitHub CLI and GitHub's own rate-limit
+ * headers in its degradation clause, its comment-sink section and its boundaries —
+ * the shape the contract/mechanics split had to reach zero from, and the one a
+ * provider-neutral agent must never take again. The `## Operation:` section in the
+ * middle carries a detector too, deliberately: it is MECHANICS, so the collectors
+ * must leave it alone, and a probe with no legitimate detector in it could not say
+ * so.
+ *
+ * Seeded rather than read off disk: the property is that the collectors recognise
+ * and LOCATE these shapes, and a whole document kept on disk to carry six lines
+ * goes stale the moment the real file moves on.
+ */
+const CROSS_CUTTING_DETECTOR_SAMPLE = [
+  '# Git Agent',
+  '',
+  '## Degradation (D4)',
+  '',
+  '- No remote / `gh` unauthenticated / no PR → emit `TRACEABILITY: DEGRADED ({reason})`',
+  '- Before each iteration, read `X-RateLimit-Remaining` from the last response header',
+  '- Secondary limit (403/429 or `X-RateLimit-Remaining` < 10) → STOP and report THROTTLED',
+  '',
+  '## Comment-sink scrub (D11)',
+  '',
+  'Scrub the body, then `&& gh issue comment "$ISSUE" --body-file "$DEVFLOW_BODY"`.',
+  '',
+  '## Principles',
+  '',
+  '1. Every operation runs a bounded git/gh scan before it writes anything.',
+  '',
+  '## Operation: setup-task',
+  '',
+  'Resolve the issue with gh issue view "$REF" --json title,body — mechanics, not doctrine.',
+  '',
+  '## Boundaries',
+  '',
+  '- Never run gh pr merge without an explicit request.',
+].join('\n');
+
 /** git.md ∪ every generated reference, joined — mode 'union' at file scope [DR-18]. */
 function joinedSinkText(): string {
   return cachedSinkCorpus().map(e => e.content).join('\n');
@@ -576,12 +617,70 @@ function collectLiteralOccurrences(corpus: CorpusEntry[], literal: string): stri
   return hits;
 }
 
-/** The pre-split bytes, committed at tests/fixtures/tracker/baseline/ (see containment.test.ts). */
-function baselineCorpus(): CorpusEntry[] {
-  const dir = path.join(ROOT, 'tests', 'fixtures', 'tracker', 'baseline');
-  return ['git-agent.md', 'SKILL.md', 'github-api.md'].map(name => ({
-    path: path.join(dir, name),
-    content: readFileSync(path.join(dir, name), 'utf-8'),
+/**
+ * KNOWN-BAD posting recipes — the corpus the D11 inline-body probe runs over.
+ *
+ * Eighteen command lines, byte-exact, each of which posts a body devflow composed
+ * without sending it through the scrubber first. They are quoted rather than
+ * synthesised: every one is a recipe devflow itself shipped before the D11 gate
+ * landed, so the shapes are the ones a real author really wrote, and the probe
+ * proves the collector's RECALL against them without the fix ever being un-landed
+ * to show red.
+ *
+ * This is a probe corpus, never a specimen of anything current: the live arms read
+ * `cachedInlineBodyCorpus()`, and nothing here is on disk anywhere else. Kept as
+ * lines rather than as whole documents because one line is all each of them
+ * contributes — a collector is proven by the shapes it must report, not by the
+ * word count around them.
+ */
+const UNSCRUBBED_POSTING_SAMPLES: readonly string[] = [
+  'gh api  -X POST  "repos/${OWNER}/${REPO}/pulls/${PR_NUMBER}/comments"  -f body="$COMMENT_BODY"  -f commit_id="$HEAD_SHA"  -f path="$FILE_PATH"  -F line=$LINE_NUMBER  -f side="RIGHT"',
+  'gh issue create  --title "Bug: Login fails for SSO users"  --label "bug,priority-high"  --assignee "username"  --body "$(cat <<\'EOF\'',
+  'gh issue comment $TECH_DEBT_ISSUE --body "$new_item"',
+  'gh issue close $old_issue --comment "## Archived',
+  'TECH_DEBT_ISSUE=$(gh issue create  --title "Tech Debt Backlog"  --label "tech-debt"  --body "Continued from #${old_issue}',
+  'gh issue comment $old_issue --body "**Continued in:** #${TECH_DEBT_ISSUE}"',
+  'gh release create "v${version}"  --title "v${version}"  --notes "$changelog"',
+  'gh release create "v${VERSION}"  --title "v${VERSION} - ${RELEASE_TITLE}"  --notes-file CHANGELOG.md  ./dist/*.tar.gz ./dist/*.zip',
+  'gh pr create --title "Add user authentication" --body "$(cat <<\'EOF\'',
+  'gh pr create --draft --title "WIP: Feature X" --body "Work in progress, not ready for review"',
+  'gh pr review $PR_NUMBER --approve --body "LGTM! Tested locally and all checks pass."',
+  'gh pr review $PR_NUMBER --request-changes --body "$(cat <<\'EOF\'',
+  'PR_NUMBER=$(gh pr create --title "..." --body "..." --json number -q \'.number\')',
+  'gh api -X POST "repos/.../pulls/${PR}/comments" -f body="Comment" -f path="file.ts"',
+  'gh api -X POST "repos/.../pulls/${PR}/comments" -f body="Issue" -f path="$file"',
+  'gh pr create --title "WIP: Feature" --body "Not ready yet"',
+  '\' -f threadId="$THREAD_ID" -f body="$REPLY_BODY"',
+  'gh release create "v${VERSION}" --title "v${VERSION}" --notes "$NOTES"',
+];
+
+/** The known-bad posting recipes as a corpus the shared collectors accept. */
+function unscrubbedPostingCorpus(): CorpusEntry[] {
+  return UNSCRUBBED_POSTING_SAMPLES.map((content, index) => ({
+    path: `known-bad/unscrubbed-posting-${index + 1}`,
+    content,
+  }));
+}
+
+/**
+ * KNOWN-BAD rate-limit recipes — three `sleep 60` sites, byte-exact.
+ *
+ * Same provenance and the same job as the posting samples above: D4 says STOP the
+ * fan-out and report THROTTLED, and these are the three lines that said wait
+ * instead. The GAP-25 rule below is an absence assertion, so it is green over a
+ * corpus the collector can no longer read; this is what keeps it honest (PF-018).
+ */
+const RATE_LIMIT_SLEEP_SAMPLES: readonly string[] = [
+  'if [ "$REMAINING" -lt 10 ]; then sleep 60; fi',
+  '        sleep 60',
+  '            sleep 60',
+];
+
+/** The known-bad rate-limit recipes as a corpus the shared collectors accept. */
+function rateLimitSleepCorpus(): CorpusEntry[] {
+  return RATE_LIMIT_SLEEP_SAMPLES.map((content, index) => ({
+    path: `known-bad/rate-limit-sleep-${index + 1}`,
+    content,
   }));
 }
 
@@ -1070,27 +1169,37 @@ describe('git agent — static content guards (PF-018)', () => {
     ).toEqual(['(header)', 'Task Setup: {branch-name}', 'Principles']);
   });
 
-  it('P2-S4 known-bad probe: the pre-split baseline carried these detectors cross-cutting', () => {
-    // Permanent RED evidence (H10): the same collector over the byte-exact pre-split
-    // file, which had the `gh` and X-RateLimit literals in D4, D11, the D1 legend row,
-    // Principles and Boundaries. Eight sites — six in the pre-operations header, one in
-    // Principles, one in Boundaries — the number the split had to reach zero from. The
-    // assertion is a FLOOR under that census, not an equality on it: the claim being
-    // proven is that the collector still recognises pre-split detectors, and pinning the
-    // exact eight would tie a probe about the collector to a per-row table that may
-    // legitimately gain a row.
-    const baseline = readFileSync(
-      path.join(ROOT, 'tests', 'fixtures', 'tracker', 'baseline', 'git-agent.md'),
-      'utf-8',
-    );
+  it('known-bad probe: a header carrying provider detectors is reported, section by section', () => {
+    // The live rule above asserts an EMPTY hit list, which a collector that read no
+    // sections would also satisfy. This drives the SAME pair of collectors over a
+    // known-bad document: an always-loaded header, a D11 section and a Boundaries
+    // section that each name `gh` or a GitHub rate-limit header — the shape the
+    // contract/mechanics split had to reach zero from. The assertion is a FLOOR, not
+    // an equality: the claim is that the collectors still recognise and LOCATE
+    // detectors, and pinning an exact count would tie a probe about the collectors to
+    // a detector table that may legitimately gain a row.
+    const hits = collectProviderDetectors(collectCrossCuttingSections(CROSS_CUTTING_DETECTOR_SAMPLE));
     expect(
-      collectProviderDetectors(collectCrossCuttingSections(baseline)).length,
-      'the collector must find the pre-split cross-cutting detectors — otherwise the rule above ' +
+      hits.length,
+      'the collectors must find the seeded cross-cutting detectors — otherwise the rule above ' +
       'is satisfied by a scan that recognises nothing',
     ).toBeGreaterThanOrEqual(6);
+    // …located, not merely counted: a collector that returned every line of one
+    // section would clear the floor while saying nothing about where a detector sits.
+    expect(
+      [...new Set(hits.map(hit => hit.slice(0, hit.indexOf(' ['))))].sort(),
+      'detectors in more than one cross-cutting section must be reported under their own ' +
+      'section labels',
+    ).toEqual(['(header)', 'Boundaries']);
+    // …and the operation body is NOT cross-cutting: its detector is legitimate
+    // mechanics and must stay out of the hit list.
+    expect(
+      hits.filter(hit => hit.includes('setup-task')),
+      'an operation section is mechanics, never cross-cutting text',
+    ).toEqual([]);
   });
 
-  it('P2-S4 known-bad probe: every detector row fires on its own shape, and `through ` on none', () => {
+  it('known-bad probe: every detector row fires on its own shape, and `through ` on none', () => {
     // Both directions, per ROW. The RED half is the usual H10 claim — a table is only
     // as good as the shapes it can be SHOWN to express. The GREEN half is the half this
     // guard was missing: its predecessor matched three substrings, and `'gh '` sits
@@ -1151,6 +1260,45 @@ describe('git agent — static content guards (PF-018)', () => {
         'a second copy is a second authority on that provider\'s rate-limit signal (PF-023)',
       ).toHaveLength(1);
     }
+  });
+
+  /**
+   * The same property, widened from two exact spellings to the TOKEN (AC-3, M-2).
+   *
+   * The two full detectors above are the sentences the authority file happens to
+   * use. A restatement elsewhere does not have to reuse either of them to be a
+   * second authority: `gather-release-evidence.md` stated GitHub's stop rung as
+   * ``Secondary rate limit (403/429 or `X-RateLimit-Remaining` < 10)`` — neither
+   * spelling, and so invisible to the exact-string arm, while jira and linear
+   * both POINT at their provider-signals section instead of restating it.
+   *
+   * So the guard is on the bare header name. Wherever it appears, that file is
+   * claiming to know the threshold; only the operation that owns a provider's
+   * fan-out may, and for every provider that is `backlink-shipped-issues.md`.
+   */
+  it('P2-S4: only the fan-out operation names a provider\'s rate-limit header (AC-3)', () => {
+    const TOKEN = 'X-RateLimit-Remaining';
+    const AUTHORITY = 'backlink-shipped-issues.md';
+    const trackerRoot = path.join(ROOT, 'dist', 'skills', 'git', 'references', 'tracker');
+    const providerFiles = walkFiles(trackerRoot, f => f.endsWith('.md'));
+    expect(providerFiles.length, 'no provider reference was read').toBeGreaterThan(0);
+
+    const naming = providerFiles.filter(f => readFileSync(f, 'utf-8').includes(TOKEN));
+    expect(
+      naming.map(f => path.basename(f)),
+      `${TOKEN} must be stated only in ${AUTHORITY} — the operation that owns the fan-out and ` +
+      'therefore the rung. A restatement in another operation is a second authority on the ' +
+      'same threshold, free to drift from it, and it is what AC-3 asks every provider to ' +
+      'replace with a pointer (PF-023):\n  ' +
+      naming.map(f => path.relative(trackerRoot, f)).join('\n  '),
+    ).toEqual([AUTHORITY]);
+
+    // Non-vacuity: the authority really does carry the token, so an empty result
+    // would be a deleted rung rather than a clean tree (PF-018).
+    expect(
+      readFileSync(naming[0], 'utf-8'),
+      'the authority file must still state the rung it is the authority for',
+    ).toContain(TOKEN);
   });
 
   it('P2-S4: the D4 and D11 INVARIANTS stay in the always-loaded agent', () => {
@@ -1253,11 +1401,30 @@ describe('git agent — static content guards (PF-018)', () => {
   });
 
   it('D10: REVIEW_PUBLICATION is documented with all three values: auto, full, off', () => {
-    const sec = extractOpSection(soleCorpus, 'post-review-summary', 'sole');
-    expect(sec, 'D10: REVIEW_PUBLICATION not documented in post-review-summary').toContain('REVIEW_PUBLICATION');
-    expect(sec, 'D10: `off` → SKIPPED resolution step not present').toContain('`off` → report');
-    expect(sec, 'D10: `full` → mode FULL resolution step not present').toContain('`full` → mode FULL, skip probe');
-    expect(sec, 'D10: `auto` → probe resolution step not present').toContain('`auto` or absent/unrecognised → probe');
+    // RE-POINTED, not weakened (applies ADR-025). The three-value enumeration used to
+    // be spelled in BOTH summary op sections AND, byte-identically, in
+    // references/publication-gate.md — three copies of one enum, each free to drift.
+    // The reference is the authority both ops name (the [DR-20](i) arm below proves
+    // exactly those two name it), so the enum is asserted THERE and the op sections
+    // are asserted to still route the input into it.
+    //
+    // What deliberately did NOT move: the fail-closed visibility probe. That is a
+    // containment control, so it stays spelled inline in both ops (PF-058) and the
+    // [DR-20](ii) arm below is what holds it there.
+    const gate = readGeneratedReference('publication-gate.md');
+    expect(gate, 'D10: `off` → SKIPPED resolution step not present').toContain('`off` → report');
+    expect(gate, 'D10: `full` → mode FULL resolution step not present').toContain('`full` → mode FULL, skip probe');
+    expect(gate, 'D10: `auto` → probe resolution step not present').toContain('`auto` or absent/unrecognised → probe');
+
+    for (const op of ['post-review-summary', 'post-resolution-summary']) {
+      const sec = extractOpSection(soleCorpus, op, 'sole');
+      expect(sec, `D10: REVIEW_PUBLICATION not documented in ${op}`).toContain('REVIEW_PUBLICATION');
+      expect(
+        sec,
+        `D10: ${op} must name references/publication-gate.md — an op that resolves ` +
+        'REVIEW_PUBLICATION without naming the gate has no route to the three values',
+      ).toContain('references/publication-gate.md');
+    }
   });
 
   it('D10: publication output enum line is present in git.md', () => {
@@ -1524,16 +1691,25 @@ describe('git agent — static content guards (PF-018)', () => {
     ).toEqual([]);
   });
 
-  it('D11: known-bad probe — the pre-split baseline is still full of inline bodies the same collector reports', () => {
-    // tests/fixtures/tracker/baseline/ holds the byte-exact pre-split files and is
-    // never regenerated, so it is a PERMANENT known-bad corpus: the widened shapes
-    // are proven against real text that really did post unscrubbed bodies, and the
-    // proof does not require un-landing the fix (H10).
-    const offenders = collectInlineBodyOffenders(baselineCorpus());
-    const texts = offenders.map(o => o.match);
+  it('D11: known-bad probe — every unscrubbed posting recipe is reported by the same collector', () => {
+    // The live arms above assert an EMPTY offender list, which a collector that
+    // matched nothing would also satisfy. This drives the SAME collector over the
+    // known-bad corpus, so a shape that stopped matching is named here (PF-018).
+    const offenders = collectInlineBodyOffenders(unscrubbedPostingCorpus());
+    const reported = new Set(offenders.map(o => o.file));
+    const unreported = unscrubbedPostingCorpus()
+      .filter(entry => !reported.has(entry.path))
+      .map(entry => entry.content);
+    expect(
+      unreported,
+      `known-bad posting recipe(s) the inline-body shapes no longer see — each one posts a body ` +
+      `devflow composed without scrubbing it:\n  ${unreported.join('\n  ')}`,
+    ).toEqual([]);
+
     // Double spaces are the joiner's signature: the space before a `\` survives and
     // the fold adds its own, so a match spelled with single spaces would be a match
     // against text the collector never produces.
+    const texts = offenders.map(o => o.match);
     const expected = [
       'gh issue create  --title "Bug: Login fails for SSO users"  --label "bug,priority-high"  --assignee "username"  --body ',
       'gh issue close $old_issue --comment ',
@@ -1544,21 +1720,8 @@ describe('git agent — static content guards (PF-018)', () => {
     const absent = expected.filter(text => !texts.includes(text));
     expect(
       absent,
-      `the widened shapes no longer see known-bad text in the pre-split baseline:\n  ${absent.join('\n  ')}`,
+      `the shapes no longer produce the matched text they used to:\n  ${absent.join('\n  ')}`,
     ).toEqual([]);
-
-    const byFile = (name: string): number =>
-      offenders.filter(o => path.basename(o.file) === name).length;
-    expect(
-      byFile('github-api.md'),
-      'the pre-split github-api.md posted many inline bodies — a collapse here means the ' +
-      'collector narrowed, not that the baseline changed (it is never regenerated)',
-    ).toBeGreaterThanOrEqual(17);
-    expect(
-      byFile('SKILL.md'),
-      'the pre-split git SKILL.md carried an inline-body recipe too — SKILL.md is preloaded ' +
-      'on every spawn, so it is the arm that matters most',
-    ).toBeGreaterThanOrEqual(1);
   });
 
   it('D11: the scan reaches the whole installed prompt surface, not just the Git agent neighbourhood', () => {
@@ -1656,12 +1819,11 @@ describe('git agent — static content guards (PF-018)', () => {
     expect(content, 'D11: "edit history" retention note missing — GitHub retains edit history; deletion is not remediation').toContain('edit history');
   });
 
-  // ── Guard 7b: GAP-25 single-authority literals (P2-S7) ─────────────────────
+  // ── Guard 7b: GAP-25 single-authority literals ─────────────────────────────
   //
-  // Two rules over `dist/agents/git.md ∪ src/assets/skills/git/**`. Both were RED on
-  // the pre-split tree, and the proof is permanent rather than anecdotal: the probes
-  // below run the SAME collector over tests/fixtures/tracker/baseline/, which holds
-  // the byte-exact pre-split files. H10 — the fix is never un-landed to show red.
+  // Two rules over `dist/agents/git.md ∪ src/assets/skills/git/**`. Both are absence
+  // assertions, so each carries a probe that runs the SAME collector over a
+  // known-bad corpus — the fix is never un-landed to show red.
 
   it('GAP-25: no `sleep 60` survives in git.md ∪ skills/git/** — D4 says STOP, not wait', () => {
     const hits = collectLiteralOccurrences(gitAuthorityCorpus(), 'sleep 60');
@@ -1673,13 +1835,17 @@ describe('git agent — static content guards (PF-018)', () => {
     ).toEqual([]);
   });
 
-  it('GAP-25 probe: the pre-split baseline had three `sleep 60` sites', () => {
-    const hits = collectLiteralOccurrences(baselineCorpus(), 'sleep 60');
+  it('GAP-25 probe: the known-bad `sleep 60` recipes are reported by the same collector', () => {
+    const hits = collectLiteralOccurrences(rateLimitSleepCorpus(), 'sleep 60');
     expect(
       hits.length,
-      'the collector must find the pre-split occurrences in the committed baseline — ' +
-      'otherwise the rule above is satisfied by a scan that reads nothing',
-    ).toBe(3);
+      'the collector must find every known-bad `sleep 60` site — otherwise the rule above is ' +
+      'satisfied by a scan that reads nothing',
+    ).toBe(RATE_LIMIT_SLEEP_SAMPLES.length);
+    expect(
+      collectLiteralOccurrences(rateLimitSleepCorpus(), 'sleep 90'),
+      'a literal the corpus does not carry must not be reported — the collector has to discriminate',
+    ).toEqual([]);
   });
 
   it('GAP-25: the learn-conventions branch bound is stated exactly once', () => {
@@ -2146,5 +2312,160 @@ describe('git agent — static content guards (PF-018)', () => {
       violations.some(v => v.startsWith('learn-conventions:')),
       `probe must name 'learn-conventions' in at least one violation; got: ${JSON.stringify(violations)}`,
     ).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The operation roster
+// ---------------------------------------------------------------------------
+
+/**
+ * Every `## Operation:` name the Git agent declares, in file order.
+ *
+ * A NAMED set, not a count. Registry Guard 6 (tests/registry-integrity.test.ts)
+ * asserts that spawn-fence `OPERATION:` values and `## Operation:` headings agree,
+ * which stays true across a coordinated rename — rename the op and its callers
+ * together and Guard 6 never moves. The operation name is a public contract: a
+ * caller written against a release two versions ago resolves by name, so a rename
+ * is a breaking change and has to be a visible edit to this list.
+ */
+export const GIT_OPERATION_ROSTER: readonly string[] = [
+  'ensure-pr-ready',
+  'validate-branch',
+  'setup-task',
+  'fetch-issue',
+  'fetch-issues-batch',
+  'post-review-summary',
+  'manage-debt',
+  'check-ci-status',
+  'create-release',
+  'gather-release-evidence',
+  'learn-conventions',
+  'fetch-review-threads',
+  'resolve-review-threads',
+  'post-resolution-summary',
+  'check-merge-readiness',
+  'backlink-shipped-issues',
+  'ensure-traceable-issue',
+  'post-wave-report',
+];
+
+/** Named collector: the `## Operation:` names an agent source declares, in file order. */
+export function collectOperationNames(content: string): string[] {
+  return [...content.matchAll(/^## Operation: (\S+)/gm)].map(m => m[1]);
+}
+
+describe('git agent: the operation roster is unchanged (registry Guard 6)', () => {
+  it('the compiled agent declares exactly the registered operation names, in order', () => {
+    const names = collectOperationNames(resolveAgentSource('git').content);
+    expect(
+      names,
+      'the operation roster changed. Registry Guard 6 stays green across a coordinated rename, so ' +
+      'it cannot see this: a renamed op silently breaks every caller pinned to the old name.',
+    ).toEqual(GIT_OPERATION_ROSTER);
+  });
+
+  it('the roster check is non-vacuous, and the collector sees a seeded change', () => {
+    expect(GIT_OPERATION_ROSTER.length, 'the named set is empty').toBe(18);
+    const seeded = '## Operation: setup-task\nbody\n\n## Operation: renamed-op\nbody\n';
+    expect(collectOperationNames(seeded)).toEqual(['setup-task', 'renamed-op']);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The D9 resolve condition has ONE authority in the reference tree
+//
+// `references/github-api.md` carried its own statement of the gate — and it was
+// WRONG: it admitted FALSE_POSITIVE and BY_DESIGN as resolvable, where D9 says
+// those two are the thread author's call to close and devflow replies only. Two
+// statements of one rule is how one of them ends up saying the opposite, and the
+// reader who lands on the reference rather than the agent acts on the wrong one.
+//
+// The corpus is the REFERENCE tree — the documents the agent loads — not the
+// agent prompt itself. The Git agent is the authority: it states the gate as a
+// table, as a sentence, and as the step that applies it, and those three are one
+// document's internal business. What the tree must not do is repeat the
+// predicate, because a reference has no way to know when the agent's copy moves.
+// ---------------------------------------------------------------------------
+
+/**
+ * The predicate itself: the verification status and a verdict, close enough
+ * together to be one claim about when a thread may be resolved.
+ *
+ * Deliberately NOT a byte-exact sentence. The defect this exists for was a
+ * PARAPHRASE — a second author restating the gate in their own words and getting
+ * it wrong — and a byte-exact registry entry matches only the spelling somebody
+ * already wrote down. The window is bounded (PF-018) so a file that mentions the
+ * status in one paragraph and a verdict three paragraphs later is not reported.
+ */
+const D9_RESOLVE_CONDITION = /VERIFICATION_STATUS[\s\S]{0,200}?\b(FIXED|FALSE_POSITIVE|BY_DESIGN)\b/;
+
+/** The reference trees the Git agent loads: generated, and hand-authored. */
+function gitReferenceCorpus(): CorpusEntry[] {
+  const corpus: CorpusEntry[] = [];
+  for (const [label, dir] of [
+    ['dist/skills/git/references', compiledSkillRefsDir()],
+    ['src/assets/skills/git/references', path.join(skillsDir(), 'git', 'references')],
+  ] as const) {
+    for (const file of walkFiles(dir, f => f.endsWith('.md'))) {
+      corpus.push({
+        path: `${label}/${path.relative(dir, file).split(path.sep).join('/')}`,
+        content: readFileSync(file, 'utf-8'),
+      });
+    }
+  }
+  return corpus;
+}
+
+/** Named collector: every reference file that states the D9 resolve predicate. */
+export function collectResolveConditionStatements(corpus: readonly CorpusEntry[]): string[] {
+  return corpus.filter(entry => D9_RESOLVE_CONDITION.test(entry.content)).map(entry => entry.path);
+}
+
+describe('git agent: the D9 resolve condition is stated once in the reference tree', () => {
+  const corpus = gitReferenceCorpus();
+
+  it('scans a real corpus', () => {
+    expect(
+      corpus.length,
+      'the git reference corpus is empty — run `npm run build`; a single-authority guard over ' +
+      'nothing certifies everything',
+    ).toBeGreaterThan(5);
+  });
+
+  it('exactly one reference states it, and it is the marker registry that DEFINES D9', () => {
+    expect(
+      collectResolveConditionStatements(corpus),
+      'the resolve condition is stated in more than one reference, or in none. The marker ' +
+      'registry defines D9 and the Git agent applies it; every other document names the gate ' +
+      'and defers. A second statement is free to disagree with the first, and one already did — ' +
+      'github-api.md admitted FALSE_POSITIVE and BY_DESIGN as resolvable, which D9 forbids',
+    ).toEqual(['dist/skills/git/references/decision-markers.md']);
+  });
+
+  it('the deferring reference names the gate instead of restating it', () => {
+    const githubApi = corpus.find(e => e.path.endsWith('git/references/github-api.md'));
+    expect(githubApi, 'github-api.md is not in the corpus').toBeDefined();
+    expect(
+      githubApi!.content,
+      'a reference that drops the restatement must say WHERE the rule lives, or the next author ' +
+      'writes a third one to fill the hole',
+    ).toContain("the Git agent's D9 gate");
+  });
+
+  it('known-bad probe: the collector reports a seeded restatement and a paraphrase of it', () => {
+    const seeded = [
+      { path: 'probe/verbatim.md', content: 'resolve only when VERIFICATION_STATUS == PASS and verdict FIXED.' },
+      { path: 'probe/paraphrase.md', content: 'Resolve when VERIFICATION_STATUS is PASS, including BY_DESIGN with evidence.' },
+    ];
+    expect(collectResolveConditionStatements(seeded)).toEqual(['probe/verbatim.md', 'probe/paraphrase.md']);
+    // …and does not fire on a document that merely names the gate, nor on one
+    // that mentions the status far away from any verdict.
+    expect(collectResolveConditionStatements([
+      { path: 'probe/defers.md', content: "The resolve condition is stated once, in the Git agent's D9 gate." },
+    ])).toEqual([]);
+    expect(collectResolveConditionStatements([
+      { path: 'probe/far.md', content: `VERIFICATION_STATUS is reported here.\n${'x'.repeat(400)}\nFIXED appears later.` },
+    ])).toEqual([]);
   });
 });

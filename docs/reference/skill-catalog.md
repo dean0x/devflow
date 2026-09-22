@@ -33,7 +33,7 @@ Commands and Code agents load language/framework skills based on files touched:
 
 ## Agent-Internal Skills
 
-These skills are always installed (universal skill installation) but loaded by agents internally at runtime:
+These skills are installed whenever a selected plugin owns or requires them, and are loaded by agents internally at runtime rather than by a command:
 
 - devflow:review-methodology — Full review process (6-step, 3-category classification)
 - devflow:complexity — Cyclomatic complexity, deep nesting analysis
@@ -46,4 +46,4 @@ These skills are always installed (universal skill installation) but loaded by a
 - devflow:accessibility — WCAG compliance, ARIA roles, keyboard navigation
 - devflow:performance — N+1 queries, memory leaks, caching opportunities
 - devflow:qa — Scenario-based acceptance testing, evidence collection
-- devflow:compliance — Regulatory code-level controls: GDPR, HIPAA, PCI DSS, SOC 2, ISO 27001, SOX; used by Review agent (compliance focus, diff-driven), Design agent (gap-analysis compliance focus), and Code agent (when skill installed and regulated surface detected); feature-owned, opt-in (installed when compliance is enabled; not a universal skill). SKILL.md and the rule are dynamically composed at install time from per-framework fragment files (`frameworks/{id}/fragment.md` within the compliance skill source); each framework also has a `frameworks/{id}/reference.md` in source, installed as `references/{id}.md` in the skill directory. The source `references/` directory holds only the two always-present files (`detection.md` and `sources.md`); per-framework reference files live under `frameworks/` in source. Installed SKILL.md contains only the selected frameworks (no all-six blob). Shadow SKILL.md without composition tokens bypasses composition (C1 passthrough); flagged in `devflow compliance --status`.
+- devflow:compliance — Regulatory code-level controls: GDPR, HIPAA, PCI DSS, SOC 2, ISO 27001, SOX; used by Review agent (compliance focus, diff-driven), Design agent (gap-analysis compliance focus), and Code agent (when skill installed and regulated surface detected); feature-owned, opt-in (installed when compliance is enabled; not plugin-scoped). SKILL.md and the rule are dynamically composed at install time from per-framework fragment files (`frameworks/{id}/fragment.md` within the compliance skill source); each framework also has a `frameworks/{id}/reference.md` in source, installed as `references/{id}.md` in the skill directory. The source `references/` directory holds only the two always-present files (`detection.md` and `sources.md`); per-framework reference files live under `frameworks/` in source. Installed SKILL.md contains only the selected frameworks (no all-six blob). Shadow SKILL.md without composition tokens bypasses composition (C1 passthrough); flagged in `devflow compliance --status`.

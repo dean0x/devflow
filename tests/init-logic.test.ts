@@ -1139,6 +1139,7 @@ describe('installViaFileCopy cleanup (isPartialInstall)', () => {
       devflowDir,
       skillsMap: new Map(),
       agentsMap: new Map(),
+      trackerProvider: 'github',
       isPartialInstall: false,
       spinner: noopSpinner,
     });
@@ -1157,6 +1158,7 @@ describe('installViaFileCopy cleanup (isPartialInstall)', () => {
       devflowDir,
       skillsMap: new Map(),
       agentsMap: new Map(),
+      trackerProvider: 'github',
       isPartialInstall: true,
       spinner: noopSpinner,
     });
@@ -1209,6 +1211,7 @@ describe('init LEGACY_SKILL_NAMES cleanup pass (init.ts:1149-1153)', () => {
       devflowDir,
       skillsMap: new Map(),
       agentsMap: new Map(),
+      trackerProvider: 'github',
       isPartialInstall: false,
       spinner: noopSpinner,
     });
@@ -1233,6 +1236,7 @@ describe('init LEGACY_SKILL_NAMES cleanup pass (init.ts:1149-1153)', () => {
       devflowDir,
       skillsMap: new Map(),
       agentsMap: new Map(),
+      trackerProvider: 'github',
       isPartialInstall: false,
       spinner: noopSpinner,
     });
@@ -1309,6 +1313,7 @@ describe('partial install registry-diff sweep correctness', () => {
       devflowDir,
       skillsMap: new Map(),
       agentsMap: new Map(),
+      trackerProvider: 'github',
       isPartialInstall: true,
       spinner: noopSpinner,
     });
@@ -1574,8 +1579,8 @@ describe('buildRulesMap', () => {
 
   it('deduplicates rules when two plugins declare the same rule name', () => {
     // Create synthetic plugins to test deduplication
-    const fakePlug1 = { name: 'devflow-a', description: '', commands: [], agents: [], skills: [], rules: ['shared-rule'] };
-    const fakePlug2 = { name: 'devflow-b', description: '', commands: [], agents: [], skills: [], rules: ['shared-rule'] };
+    const fakePlug1 = { name: 'devflow-a', description: '', commands: [], agents: [], skills: [], requires: [], rules: ['shared-rule'] };
+    const fakePlug2 = { name: 'devflow-b', description: '', commands: [], agents: [], skills: [], requires: [], rules: ['shared-rule'] };
     const map = buildRulesMap([fakePlug1, fakePlug2]);
     expect(map.size).toBe(1);
     expect(map.get('shared-rule')).toBe('devflow-a'); // first plugin wins
@@ -1878,6 +1883,8 @@ describe('persistManifestThenConvergeTracker', () => {
     transition?: TrackerTransition;
     rearm?: TrackerResult<void>;
     sentinel?: TrackerResult<void>;
+    artifacts?: { converged: boolean; agentPresent: boolean; agent: 'installed' | 'removed' | 'unchanged' };
+    artifactWarning?: string;
   } = {}) {
     const calls: string[] = []
     const io: TrackerLifecycleIO = {
@@ -1888,6 +1895,15 @@ describe('persistManifestThenConvergeTracker', () => {
       renameStaleConventions: async (_dir, previous, resolved) => {
         calls.push(`rename:${previous ?? 'none'}->${resolved}`)
         return opts.transition ?? { kind: 'none' }
+      },
+      convergeArtifacts: async (_claudeDir, provider, warn) => {
+        calls.push(`agent:${provider}`)
+        if (opts.artifactWarning) warn(opts.artifactWarning)
+        return opts.artifacts ?? {
+          converged: true,
+          agentPresent: provider !== 'github',
+          agent: provider === 'github' ? 'removed' : 'installed',
+        }
       },
       rearmInference: async () => {
         calls.push('rearm')
@@ -1908,6 +1924,7 @@ describe('persistManifestThenConvergeTracker', () => {
 
     const outcome = await persistManifestThenConvergeTracker({
       devflowDir: '/tmp/devflow-not-touched',
+      claudeDir: '/tmp/devflow-claude',
       manifestData: makeManifestData('jira'),
       previousProvider: 'github',
       io,
@@ -1928,6 +1945,7 @@ describe('persistManifestThenConvergeTracker', () => {
 
     const outcome = await persistManifestThenConvergeTracker({
       devflowDir: '/tmp/devflow-not-touched',
+      claudeDir: '/tmp/devflow-claude',
       manifestData: makeManifestData('github'),
       previousProvider: 'jira',
       io,
@@ -1938,11 +1956,12 @@ describe('persistManifestThenConvergeTracker', () => {
     expect(outcome.converged).toBe(false)
   })
 
-  it('a successful manifest write converges all three owners, write first', async () => {
+  it('a successful manifest write converges every owner, write first', async () => {
     const { calls, io } = makeRecorder()
 
     const outcome = await persistManifestThenConvergeTracker({
       devflowDir: '/tmp/devflow',
+      claudeDir: '/tmp/devflow-claude',
       manifestData: makeManifestData('jira'),
       previousProvider: 'github',
       io,
@@ -1954,8 +1973,11 @@ describe('persistManifestThenConvergeTracker', () => {
     // independent owners, which may complete in either order.
     expect(calls[0]).toBe('write:jira')
     expect(calls[1]).toBe('rename:github->jira')
-    expect(calls.slice(2).sort()).toEqual(['rearm', 'sentinel:jira'])
-    expect(calls).toHaveLength(4)
+    // The agent file is SEQUENTIAL and strictly ahead of the parallel pair: the
+    // sentinel write is gated on its outcome (design review C2/H6).
+    expect(calls[2]).toBe('agent:jira')
+    expect(calls.slice(3).sort()).toEqual(['rearm', 'sentinel:jira'])
+    expect(calls).toHaveLength(5)
   })
 
   it('converges the provider the manifest persisted, not the previous one', async () => {
@@ -1963,6 +1985,7 @@ describe('persistManifestThenConvergeTracker', () => {
 
     await persistManifestThenConvergeTracker({
       devflowDir: '/tmp/devflow',
+      claudeDir: '/tmp/devflow-claude',
       manifestData: makeManifestData('linear'),
       previousProvider: 'jira',
       io,
@@ -1979,6 +2002,7 @@ describe('persistManifestThenConvergeTracker', () => {
 
     const outcome = await persistManifestThenConvergeTracker({
       devflowDir: '/d',
+      claudeDir: '/tmp/devflow-claude',
       manifestData: makeManifestData('github'),
       previousProvider: 'jira',
       io,
@@ -1996,6 +2020,7 @@ describe('persistManifestThenConvergeTracker', () => {
 
     const outcome = await persistManifestThenConvergeTracker({
       devflowDir: '/tmp/devflow',
+      claudeDir: '/tmp/devflow-claude',
       manifestData: makeManifestData('github'),
       previousProvider: undefined,
       io,
@@ -2014,13 +2039,17 @@ describe('persistManifestThenConvergeTracker', () => {
 
     const outcome = await persistManifestThenConvergeTracker({
       devflowDir: '/tmp/devflow',
+      claudeDir: '/tmp/devflow-claude',
       manifestData: makeManifestData('jira'),
       previousProvider: 'github',
       io,
     })
 
     expect(outcome.manifestWritten).toBe(true)
-    expect(outcome.converged).toBe(true)
+    // The manifest reached disk, so the SELECTION stuck; the sentinel did not,
+    // so the artifacts did not all converge. Reporting those as one boolean is
+    // what made an unconverged install indistinguishable from a converged one.
+    expect(outcome.converged).toBe(false)
     expect(outcome.messages.map(m => m.level)).toEqual(['warn', 'warn', 'warn'])
     expect(outcome.messages.map(m => m.text)).toEqual([
       'Could not move the previous jira conventions aside',
@@ -2028,15 +2057,124 @@ describe('persistManifestThenConvergeTracker', () => {
       'Could not update the tracker sentinel',
     ])
   })
+
+  // ── C2: the sentinel converges in BOTH directions, only the WRITE is gated ──
+
+  it('an agent that is not present suppresses the sentinel WRITE and REMOVES it', async () => {
+    // The write is gated on the agent being SPAWNABLE, and "suppress the write"
+    // alone is not fail-closed: on a jira → linear init the previous provider's
+    // sentinel is already on disk, so nothing being written still leaves jira
+    // advertised. Not-spawnable removes, through the one sentinel owner.
+    const { calls, io } = makeRecorder({
+      artifacts: { converged: false, agentPresent: false, agent: 'unchanged' },
+      artifactWarning: 'tracker: failed to install the Tracker agent',
+    })
+
+    const outcome = await persistManifestThenConvergeTracker({
+      devflowDir: '/tmp/devflow',
+      claudeDir: '/tmp/devflow-claude',
+      manifestData: makeManifestData('linear'),
+      previousProvider: 'jira',
+      io,
+    })
+
+    expect(calls).toContain('agent:linear')
+    expect(
+      calls,
+      'nothing may advertise a provider whose agent is missing',
+    ).not.toContain('sentinel:linear')
+    expect(
+      calls,
+      'the previous provider\'s sentinel has to be removed, not merely left unwritten',
+    ).toContain('sentinel:github')
+    expect(outcome.converged).toBe(false)
+    expect(outcome.agent).toBe('unchanged')
+    expect(outcome.messages.some(m => m.text.includes('sentinel removed'))).toBe(true)
+  })
+
+  it('a failed re-copy over a still-present agent WRITES the sentinel (no false disable)', async () => {
+    // The opposite error the presence gate exists to avoid: a transient copy
+    // failure over a working install must not disable a provider that can
+    // still be spawned.
+    const { calls, io } = makeRecorder({
+      artifacts: { converged: false, agentPresent: true, agent: 'unchanged' },
+    })
+
+    await persistManifestThenConvergeTracker({
+      devflowDir: '/tmp/devflow',
+      claudeDir: '/tmp/devflow-claude',
+      manifestData: makeManifestData('linear'),
+      previousProvider: 'jira',
+      io,
+    })
+
+    expect(calls).toContain('sentinel:linear')
+  })
+
+  it('an unconverged agent does NOT suppress the sentinel REMOVAL (github)', async () => {
+    // The other direction. A stale sentinel costs every future session a fork
+    // for a provider the user has left, and a failed agent removal is not a
+    // reason to keep paying it.
+    const { calls } = makeRecorder()
+    const { io } = makeRecorder({
+      artifacts: { converged: false, agentPresent: true, agent: 'unchanged' },
+    })
+    void calls
+
+    const recorded: string[] = []
+    const spyIo = {
+      ...io,
+      applySentinel: async (_dir: string, provider: TrackerProvider) => {
+        recorded.push(`sentinel:${provider}`)
+        return { ok: true as const, value: undefined }
+      },
+    }
+
+    const outcome = await persistManifestThenConvergeTracker({
+      devflowDir: '/tmp/devflow',
+      claudeDir: '/tmp/devflow-claude',
+      manifestData: makeManifestData('github'),
+      previousProvider: 'jira',
+      io: spyIo,
+    })
+
+    expect(recorded).toEqual(['sentinel:github'])
+    expect(outcome.converged, 'the agent still failed, and that is still reported').toBe(false)
+  })
+
+  it('reports what happened to the agent file so the summary can name it', async () => {
+    const { io } = makeRecorder()
+    const installed = await persistManifestThenConvergeTracker({
+      devflowDir: '/tmp/devflow',
+      claudeDir: '/tmp/devflow-claude',
+      manifestData: makeManifestData('linear'),
+      previousProvider: 'github',
+      io,
+    })
+    expect(installed.agent).toBe('installed')
+
+    const removed = await persistManifestThenConvergeTracker({
+      devflowDir: '/tmp/devflow',
+      claudeDir: '/tmp/devflow-claude',
+      manifestData: makeManifestData('github'),
+      previousProvider: 'linear',
+      io: makeRecorder().io,
+    })
+    expect(removed.agent).toBe('removed')
+  })
 })
 
 describe('buildTrackerLifecycleIO', () => {
-  it('binds each of the four single-owner operations exactly once', () => {
+  it('binds each single-owner operation exactly once', () => {
     const io = buildTrackerLifecycleIO()
     expect(io.writeManifest).toBe(writeManifest)
     expect(io.renameStaleConventions).toBe(renameStaleTrackerConventions)
     expect(io.rearmInference).toBe(rearmTrackerInference)
     expect(io.applySentinel).toBe(applyTrackerSentinel)
+    // The fourth owner is bound through a closure (it takes claudeDir, not
+    // devflowDir), so identity cannot be asserted — its presence and arity can.
+    expect(typeof io.convergeArtifacts).toBe('function')
+    expect(io.convergeArtifacts.length).toBe(3)
   })
 })
 
