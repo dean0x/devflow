@@ -358,6 +358,10 @@ const MODEL_CROSS_CUTTING_REFS: Readonly<Record<string, readonly string[]>> = {
   'learn-conventions': ['learn-conventions.md'],
   'post-review-summary': ['publication-gate.md'],
   'post-resolution-summary': ['publication-gate.md'],
+  // check-merge-readiness step 3 reuses check-ci-status's classification, and those
+  // steps live only in the sibling's PR-host file, so its reference names that file
+  // for loading. One spawn therefore pays for both `pr/` files.
+  'check-merge-readiness': [prRefRel('check-ci-status')],
 };
 
 /** The file set the budget formula sums for an operation. */

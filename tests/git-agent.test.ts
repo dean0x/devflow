@@ -1824,7 +1824,7 @@ describe('git agent — static content guards (PF-018)', () => {
     ).toHaveLength(0);
   });
 
-  it('D11 known-bad probe: dropping the PR-host tree narrows the posting set from 8 to 5 (SG-8 non-vacuity)', () => {
+  it('D11 known-bad probe: dropping the PR-host tree narrows the posting set from 8 to 4 (SG-8 non-vacuity)', () => {
     // SG-8's proof obligation for #326, and the one thing the floor of 8 above
     // cannot show on its own. The posting SET is the same 8 operations before and
     // after the move, so the forward guard stayed green through it — which means
@@ -1832,15 +1832,15 @@ describe('git agent — static content guards (PF-018)', () => {
     // those eight. This drives the SAME predicate over the narrowed corpus and
     // pins the number that only the widening supplies.
     //
-    // Three of the eight vanish entirely — post-review-summary,
-    // post-resolution-summary and resolve-review-threads post only from `pr/`.
-    // `ensure-pr-ready` survives at a reduced surface because it is a member of
-    // BOTH rosters: step 4a's create moved to `pr/`, step 4b's edit stayed in
-    // `tracker/{provider}/`, and each states its own scrub. The four tracker-side
-    // posters (backlink-shipped-issues, ensure-traceable-issue, manage-debt,
-    // post-wave-report) are untouched by this commit.
+    // Four of the eight vanish entirely — post-review-summary,
+    // post-resolution-summary, resolve-review-threads and ensure-pr-ready post only
+    // from `pr/`. ensure-pr-ready is a member of BOTH rosters, but both of its
+    // PR-body writes are PR-host mechanics: step 4a's create and step 4b's
+    // PR-host half (the scrub-then-edit). Its tracker reference only resolves the
+    // issue and renders the link line. The four tracker-side posters
+    // (backlink-shipped-issues, ensure-traceable-issue, manage-debt,
+    // post-wave-report) post from `tracker/{provider}/`.
     const EXPECTED_WITHOUT_PR_HOST = [
-      'ensure-pr-ready',
       'manage-debt',
       'backlink-shipped-issues',
       'ensure-traceable-issue',
@@ -1856,7 +1856,7 @@ describe('git agent — static content guards (PF-018)', () => {
     // regression reported as agreement (the `scanned > 0` anti-pattern, one level up).
     expect(
       [...postingOps].sort(),
-      `without references/${PR_HOST_PREFIX} the posting set must fall from 8 to exactly these 5 ` +
+      `without references/${PR_HOST_PREFIX} the posting set must fall from 8 to exactly these 4 ` +
       'ops — a set that does not move proves the union corpus was never load-bearing (PF-018)',
     ).toEqual([...EXPECTED_WITHOUT_PR_HOST].sort());
   });
@@ -2099,10 +2099,10 @@ describe('git agent — static content guards (PF-018)', () => {
   });
 
   it('D11: ensure-pr-ready known-bad probe — the create sink is in the PR-host tree', () => {
-    // ADR-024 / PF-018 for the widening above. `tracker/github/ensure-pr-ready.md`
-    // keeps its OWN scrub (step 4b's `gh pr edit`), so this probe must ask for the
-    // CREATE call specifically — asking for "Comment-sink scrub (D11)" would pass
-    // on the tracker half and prove nothing about the one that moved.
+    // PF-018 for the widening above. The probe asks for the CREATE call
+    // specifically: `pr/ensure-pr-ready.md` holds two scrubbed writes (4a's create
+    // and 4b's edit), and asking for "Comment-sink scrub (D11)" would not say which
+    // one the narrowed corpus lost.
     expect(
       extractOpSection(sinkCorpusWithoutPrHost(), 'ensure-pr-ready', 'union'),
       'step 4a\'s `gh pr create` sink must live in the PR-host reference',

@@ -364,10 +364,11 @@ export const TRACKER_GITHUB_OPS = TRACKER_OPS;
  * ship three identical trees.
  *
  * `ensure-pr-ready` is a member of BOTH rosters by design, and the two halves do
- * not overlap: the PR skeleton (branch/commit/push, create, retitle) is a PR-host
- * fact and lives here; the issue-number lookup and the link line it renders are
- * tracker facts and live in `tracker/{provider}/ensure-pr-ready.md`. The
- * operation carries one pointer to each.
+ * not overlap: the PR skeleton (branch/commit/push, create, retitle, and step
+ * 4b's open-PR lookup and body edit) is a PR-host fact and lives here; step 4b
+ * itself — the issue-number lookup and the link line it renders — is a tracker
+ * fact and lives in `tracker/{provider}/ensure-pr-ready.md`. The operation
+ * carries one pointer to each.
  *
  * Exactly 8 entries, which is {@link MIN_VARIANT_PAIRS} exactly. That is a
  * property, not a coincidence: the module cannot be grown an operation at a time,

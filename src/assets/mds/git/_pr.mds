@@ -44,7 +44,7 @@ were authored.
 
 Load for `ensure-pr-ready` under every tracker provider.
 
-**PR mechanics held here:** the branch/commit/push pre-flight, PR creation and its D11 scrub, the always-on issue-link update, the compliance-gated retitle, and the base-branch and branch-slug derivation.
+**PR mechanics held here:** the branch/commit/push pre-flight, PR creation and its D11 scrub, step 4b's PR-host half (the open-PR lookup and the scrub-then-edit), the compliance-gated retitle, and the base-branch and branch-slug derivation. Step 4b itself — the verified issue and its link line — is the provider reference's.
 
 ### Process
 
@@ -52,7 +52,6 @@ Load for `ensure-pr-ready` under every tracker provider.
 2. Check for uncommitted changes - if any, create atomic commit using `devflow:git` patterns
 3. Check if branch pushed to remote - if not, push with `-u` flag
 4a. Check if PR exists - if not, create PR using guidance from (in priority order): (a) `PR_DESCRIPTION_GUIDANCE` variable if provided and not `(none)`, (b) generated from branch context. Compose the PR body via the `devflow:git` template to `$DEVFLOW_BODY_RAW` — a PR body is published at the repository's visibility, so it is a D11 sink like any comment. Apply the Comment-sink scrub (D11); on success: `gh pr create … --body-file "$DEVFLOW_BODY"`.
-4b. (ALWAYS-ON) Ensure the PR body links this branch's issue. Attempting it is unconditional; an unverified number is never linked; if no verified issue number is discoverable, skip silently; and a failed update never blocks the PR. Apply the Comment-sink scrub (D11); on success: edit the PR body from `$DEVFLOW_BODY`. The lookup that verifies the number and the link line it renders are provider mechanics.
 4c. (Compliance-gated — skip if `COMPLIANCE` is absent or `(none)`) Read `.devflow/conventions.md` PR Titles section. If PR title does not follow the recorded convention, retitle it. If `.devflow/conventions.md` is absent, skip silently. Two rules on the retitle, because the corrected title is composed from convention-file content that derives from third-party PR titles:
    - **Validate before use.** Skip the retitle (leave the PR title as-is, no error) if the composed title contains any of `` $ ` \ " ' ; | & < > `` or a newline. A title needing those characters is not convention-conformant anyway.
    - **Pass as argv, never as command text.** Bind it to a shell variable and pass that variable: `gh pr edit \{PR_NUMBER\} --title "$DEVFLOW_PR_TITLE"`. Never interpolate the title into the command string — `$(...)`, backticks and `$\{...\}` all expand inside double quotes.
@@ -60,6 +59,10 @@ Load for `ensure-pr-ready` under every tracker provider.
    On any 4xx/5xx from `gh pr edit`: emit `TRACEABILITY: DEGRADED (\{reason\})` and continue — a failed retitle never blocks the PR.
 5. Get base branch from PR
 6. Derive branch-slug (replace `/` with `-`)
+
+### Step 4b's PR-host half
+
+The provider reference's step 4b publishes its section through this, and only this: find the open PR with `gh pr list --head \{branch\} --state open`; compose the existing body plus the `## Related Issues` section to `$DEVFLOW_BODY_RAW` — the existing body is third-party-editable, so never interpolate it into a command string; apply the Comment-sink scrub (D11); on success: `gh pr edit \{PR_NUMBER\} --body-file "$DEVFLOW_BODY"`.
 @end
 
 @define validate_branch():
@@ -191,6 +194,8 @@ unexplained unresolved threads.
    - **ESCALATED**: `This thread has been escalated for human review and recorded in the resolution summary.`
    - Reply bodies MUST NOT contain verbatim content from the external thread body — cite only internal evidence (commit SHAs, file:line from this codebase, ADR IDs)
 2. Write reply to `$DEVFLOW_BODY_RAW`; apply the Comment-sink scrub (D11) — non-zero exit → DEGRADED for that thread, continue per D4. Post reply via `addPullRequestReviewThreadReply` GraphQL mutation with `-F body=@"$DEVFLOW_BODY"` (file-ref form).
+
+   (Step 3, the D9 gate, is stated in the agent's own section.)
 4. Wait 1s between operations
 @end
 
@@ -250,6 +255,7 @@ Load for `check-merge-readiness` under every tracker provider.
 2. Fetch PR review decision: `gh pr view \{PR_NUMBER\} --json reviewDecision --jq '.reviewDecision'`
    - Values: `APPROVED`, `CHANGES_REQUESTED`, `REVIEW_REQUIRED`, or null
 3. Fetch CI status (same logic as `check-ci-status`)
+   Those steps are in `references/pr/check-ci-status.md` — load it and apply them to this `PR_NUMBER`, NO_CI rule and PENDING > FAILING > PASSING order unchanged.
 4. Classify (first matching rule wins):
    - `NOT_READY (unresolved threads: \{n\})` — unresolved_threads > 0
    - `NOT_READY (changes requested)` — reviewDecision == `CHANGES_REQUESTED`

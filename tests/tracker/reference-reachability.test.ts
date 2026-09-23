@@ -39,7 +39,12 @@ import {
   expandVariants,
   generatedReferenceManifest,
 } from '../../src/core/mds-variants.js';
-import { collectTrackerNamingLines, resolveAgentSource, walkFiles } from '../helpers.js';
+import {
+  collectTrackerNamingLines,
+  extractOpSectionFromCorpus,
+  resolveAgentSource,
+  walkFiles,
+} from '../helpers.js';
 import { MIN_REFERENCE_CHARS } from './reference-floor.js';
 
 // ---------------------------------------------------------------------------
@@ -590,5 +595,133 @@ describe('generated references: every reference is reachable from the agent (AC-
       'a manifest entry with no emitted file must be reported — the install would copy nothing ' +
       'and the agent would name a path that does not exist',
     ).toEqual(['tracker/github/smuggled.md']);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 3. The merged step list across files: deferrals are loadable, labels have one owner
+// ---------------------------------------------------------------------------
+
+/** Every emitted `pr/…` reference, keyed by op. */
+function prHostFiles(): Map<string, string> {
+  return new Map(PR_HOST_OPS.map(op => [
+    op,
+    requireFile('PR-host reference', path.join(REFS_DIR, PR_HOST_DESTINATION_ROOT, `${op}.md`)),
+  ]));
+}
+
+/**
+ * Named collector: the ops a PR-host reference defers to ("same logic as `{op}`")
+ * without telling the spawn to load the file that holds those steps.
+ *
+ * The load rule reads only the file an op's own pointer names, so a deferral to a
+ * sibling op's steps reaches nothing unless the deferring file names the sibling's
+ * `pr/` path itself. Before #326 the sibling's steps sat in the always-loaded agent
+ * and the phrase alone was enough; after the split it points at a file no spawn of
+ * the deferring op reads.
+ */
+function collectUnloadedDeferrals(body: string): string[] {
+  const named = collectLiteralReferenceNames(body);
+  return [...body.matchAll(/same logic as `([a-z-]+)`/g)]
+    .map(m => m[1])
+    .filter(op => !((PR_HOST_OPS as readonly string[]).includes(op) && named.has(prHostRel(op))));
+}
+
+/** Column-0 step labels (`1.`, `4b.`) in a body — the numbers the merged-order rule sequences. */
+function stepLabels(body: string): string[] {
+  return [...body.matchAll(/^(\d+[a-z]?)\.\s/gm)].map(m => m[1]);
+}
+
+/**
+ * Named collector: step labels supplied by more than one file loaded for the same op.
+ *
+ * The agent's merge rule executes every loaded file's steps as ONE list in numeric
+ * order. It interleaves; it has no rule for two files that both supply `4b.`, so a
+ * shared label reads as either one step or the same step twice (a double
+ * scrub-then-edit). Every label must therefore have exactly one owning file.
+ */
+function collectSharedStepLabels(files: ReadonlyArray<{ path: string; body: string }>): string[] {
+  const owners = new Map<string, string[]>();
+  for (const { path: rel, body } of files) {
+    for (const label of new Set(stepLabels(body))) {
+      owners.set(label, [...(owners.get(label) ?? []), rel]);
+    }
+  }
+  return [...owners]
+    .filter(([, paths]) => paths.length > 1)
+    .map(([label, paths]) => `${label}. in ${paths.join(' and ')}`);
+}
+
+/** The files one spawn of a PR-host op loads under one provider, agent section included. */
+function loadedStepFiles(
+  agentContent: string,
+  op: string,
+  providerSubdir: string,
+): Array<{ path: string; body: string }> {
+  const files = [
+    { path: 'git.md', body: extractOpSectionFromCorpus([{ path: 'git.md', content: agentContent }], op, { mode: 'sole' }).content },
+    { path: prHostRel(op), body: prHostFiles().get(op) ?? '' },
+  ];
+  const mod = VARIANT_MODULES.find(m => m.subdir === providerSubdir);
+  if (mod !== undefined && mod.ops.includes(op)) {
+    const rel = `${providerSubdir}/${op}.md`;
+    files.push({ path: rel, body: requireFile('provider reference', path.join(REFS_DIR, rel)) });
+  }
+  return files;
+}
+
+const PROVIDER_SUBDIRS = VARIANT_MODULES
+  .map(mod => mod.subdir)
+  .filter(subdir => subdir.startsWith('tracker/'));
+
+describe('PR-host references: the merged step list is executable from what one spawn loads', () => {
+  const agent = resolveAgentSource('git');
+
+  it('every "same logic as `{op}`" in a pr/ file names that op\'s pr/ file for loading', () => {
+    const offenders = [...prHostFiles()].flatMap(([op, body]) =>
+      collectUnloadedDeferrals(body).map(target => `${prHostRel(op)} defers to ${target}`));
+    expect(
+      offenders,
+      'a PR-host reference defers to a sibling op\'s steps without naming the file that holds them — ' +
+      'the spawn is told to load only its own pointer\'s file, so it improvises the steps:\n  ' +
+      offenders.join('\n  '),
+    ).toEqual([]);
+  });
+
+  it('the deferral rule is non-vacuous: the live pr/ corpus carries at least one deferral', () => {
+    const deferrals = [...prHostFiles().values()]
+      .flatMap(body => [...body.matchAll(/same logic as `([a-z-]+)`/g)]);
+    expect(deferrals.length, 'no deferral in the pr/ corpus — the rule above ranges over nothing').toBeGreaterThan(0);
+  });
+
+  it('known-bad probe: a deferral with no load name is reported, and the named form is not', () => {
+    const bare = '3. Fetch CI status (same logic as `check-ci-status`)\n';
+    expect(collectUnloadedDeferrals(bare)).toEqual(['check-ci-status']);
+    const loaded = `${bare}   Load \`references/${prHostRel('check-ci-status')}\` for those steps.\n`;
+    expect(collectUnloadedDeferrals(loaded)).toEqual([]);
+  });
+
+  it('no step label is supplied by two files loaded for the same op, under any provider', () => {
+    const offenders = PROVIDER_SUBDIRS.flatMap(subdir =>
+      PR_HOST_OPS.flatMap(op =>
+        collectSharedStepLabels(loadedStepFiles(agent.content, op, subdir)).map(hit => `${op} (${subdir}): ${hit}`)));
+    expect(
+      offenders,
+      'two loaded files supply the same step label — the merge rule has no collision clause, so the ' +
+      'step reads as one step or as the same step twice:\n  ' + offenders.join('\n  '),
+    ).toEqual([]);
+  });
+
+  it('the label rule is non-vacuous: some op loads three files, and the providers are all ranged', () => {
+    expect(PROVIDER_SUBDIRS.length, 'no provider module registered').toBeGreaterThan(0);
+    const threeFileOps = PR_HOST_OPS.filter(op => loadedStepFiles(agent.content, op, PROVIDER_SUBDIRS[0]).length === 3);
+    expect(threeFileOps, 'no PR-host op is also a tracker op — the collision the rule guards cannot occur').not.toEqual([]);
+  });
+
+  it('known-bad probe: one label in two files is reported, disjoint labels are not', () => {
+    const pr = { path: 'pr/x.md', body: '1. a\n4b. b\n' };
+    expect(collectSharedStepLabels([pr, { path: 'tracker/github/x.md', body: '4b. c\n' }]))
+      .toEqual(['4b. in pr/x.md and tracker/github/x.md']);
+    expect(collectSharedStepLabels([pr, { path: 'tracker/github/x.md', body: '4c. c\n' }])).toEqual([]);
   });
 });

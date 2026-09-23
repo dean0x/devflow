@@ -322,7 +322,7 @@ Load when the resolved tracker provider is `jira` and the operation is `post-wav
 
 Load when the resolved tracker provider is `jira` and the operation is `ensure-pr-ready`.
 
-**Mechanics held here:** step 4b's TRACKER half only — resolving the issue key for this branch and rendering the link line. The open-PR lookup and the PR-body edit are **PR-host** mechanics and are unchanged under every provider: devflow deliberately keeps pull requests on their existing host while the tracker is this one, so nothing about the PR surface is provider-dependent and none of it is restated here.
+**Mechanics held here:** step 4b's TRACKER half only — resolving the issue key for this branch and rendering the link line. The open-PR lookup and the PR-body edit are **PR-host** mechanics, stated once for every provider in `references/pr/ensure-pr-ready.md`: devflow deliberately keeps pull requests on their existing host while the tracker is this one, so nothing about the PR surface is provider-dependent and none of it is restated here.
 
 ### Process
 
@@ -332,6 +332,8 @@ Load when the resolved tracker provider is `jira` and the operation is `ensure-p
    c. The *fetch by key* capability absent or denied ⇒ `TRACEABILITY: DEGRADED (no tracker tool for fetch by key)` and skip the section; the PR is never blocked on it.
 
    Render the line through `## Reference Rendering`. **This provider has no closing-reference magic** — a reference in a PR body does not transition or close anything here, and claiming otherwise in the rendered text would promise an effect that never happens; closing is a `## Transitions` matter and `gather-release-evidence` reports the absence as `TRACEABILITY: DEGRADED (unsupported by jira)`. `## Reference Rendering` absent, or its token discarded by the gate below ⇒ render the key on its own line under the section heading, and record the discard under `### Substitutions`.
+
+   Publish the section through step 4b's PR-host half.
 
    If no verified issue key is discoverable, skip silently. A failure while updating the PR body emits `TRACEABILITY: DEGRADED (\{reason\})` and continues — a failed Related Issues update never blocks the PR.
 
