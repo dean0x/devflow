@@ -1597,6 +1597,145 @@ describe('assign-anchor precondition assertions', () => {
 });
 
 // ---------------------------------------------------------------------------
+// E4: pre-mint collision guard — refuse to mint over an existing citation
+// ---------------------------------------------------------------------------
+
+const COLLISION_GIT_ENV = {
+  ...process.env,
+  GIT_AUTHOR_NAME: 'Test',
+  GIT_AUTHOR_EMAIL: 'test@test.com',
+  GIT_COMMITTER_NAME: 'Test',
+  GIT_COMMITTER_EMAIL: 'test@test.com',
+  GIT_CONFIG_NOSYSTEM: '1',
+  GIT_CONFIG_GLOBAL: '/dev/null',
+};
+
+function initGitRepoWithFile(dir: string, relFile: string, content: string): void {
+  execSync('git init -q', { cwd: dir, env: COLLISION_GIT_ENV });
+  const absFile = path.join(dir, relFile);
+  fs.mkdirSync(path.dirname(absFile), { recursive: true });
+  fs.writeFileSync(absFile, content, 'utf8');
+  execSync('git add -A', { cwd: dir, env: COLLISION_GIT_ENV });
+  execSync('git commit -q -m init', { cwd: dir, env: COLLISION_GIT_ENV });
+}
+
+describe('E4: pre-mint collision guard', () => {
+  let tmpDir: string;
+
+  beforeEach(() => {
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'aa-collision-test-'));
+    fs.mkdirSync(path.join(tmpDir, '.devflow', 'learning'), { recursive: true });
+  });
+
+  afterEach(() => {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  it('refuses to mint when the candidate id is cited in a git-tracked file; ledger left byte-unchanged', () => {
+    writeLedger(tmpDir, [makeLedgerRow({ anchor_id: 'ADR-001' })]);
+    const ledgerPath = path.join(tmpDir, '.devflow', 'learning', 'decisions-ledger.jsonl');
+    const before = fs.readFileSync(ledgerPath);
+
+    // Next candidate for a ledger already holding ADR-001 is ADR-002 — plant that
+    // as a design-local citation with a different meaning, in a tracked file.
+    initGitRepoWithFile(tmpDir, 'docs/design.md', 'See ADR-002 for the rationale.\n');
+    writeLog(tmpDir, [makeObsRow({ id: 'obs_collide', type: 'decision', status: 'ready' })]);
+
+    const result = runHelper('assign-anchor decision obs_collide', tmpDir);
+    expect(result.code).not.toBe(0);
+    expect(result.stderr).toContain('ADR-002');
+    expect(result.stderr).toContain('docs/design.md:1');
+
+    const after = fs.readFileSync(ledgerPath);
+    expect(after.equals(before)).toBe(true);
+  });
+
+  it('refuses to mint when the candidate id is cited in a non-git project (fs-walk fallback)', () => {
+    writeLog(tmpDir, [makeObsRow({ id: 'obs_collide_nogit', type: 'decision', status: 'ready' })]);
+    fs.mkdirSync(path.join(tmpDir, 'docs'), { recursive: true });
+    fs.writeFileSync(path.join(tmpDir, 'docs', 'notes.md'), 'Design number ADR-001 was reserved earlier.\n');
+
+    const result = runHelper('assign-anchor decision obs_collide_nogit', tmpDir);
+    expect(result.code).not.toBe(0);
+    expect(result.stderr).toContain('ADR-001');
+    expect(result.stderr).toContain('notes.md');
+
+    const ledgerPath = path.join(tmpDir, '.devflow', 'learning', 'decisions-ledger.jsonl');
+    expect(fs.existsSync(ledgerPath)).toBe(false);
+  });
+
+  it('mints normally when there is no citation anywhere in the tree', () => {
+    writeLog(tmpDir, [makeObsRow({ id: 'obs_clean', type: 'decision', status: 'ready' })]);
+    const result = runHelper('assign-anchor decision obs_clean', tmpDir);
+    expect(result.code).toBe(0);
+    expect(result.stdout.trim()).toBe('ADR-001');
+  });
+
+  it('--allow-collision mints anyway despite a citation', () => {
+    writeLog(tmpDir, [makeObsRow({ id: 'obs_override', type: 'decision', status: 'ready' })]);
+    fs.mkdirSync(path.join(tmpDir, 'docs'), { recursive: true });
+    fs.writeFileSync(path.join(tmpDir, 'docs', 'notes.md'), 'ADR-001 already means something else.\n');
+
+    const result = runHelper('assign-anchor decision obs_override --allow-collision', tmpDir);
+    expect(result.code).toBe(0);
+    expect(result.stdout.trim()).toBe('ADR-001');
+  });
+
+  it('rejects an unknown flag before touching the ledger', () => {
+    writeLog(tmpDir, [makeObsRow({ id: 'obs_badflag', type: 'decision', status: 'ready' })]);
+    const result = runHelper('assign-anchor decision obs_badflag --allow-typo', tmpDir);
+    expect(result.code).not.toBe(0);
+    expect(result.stderr).toContain('unknown flag');
+    const ledgerPath = path.join(tmpDir, '.devflow', 'learning', 'decisions-ledger.jsonl');
+    expect(fs.existsSync(ledgerPath)).toBe(false);
+  });
+
+  it('ignores a self-citation inside .devflow/learning (mints normally)', () => {
+    writeLog(tmpDir, [makeObsRow({ id: 'obs_selfcite', type: 'decision', status: 'ready' })]);
+    // A rendered .md file already containing "ADR-001" is the ledger's own
+    // territory (self-citation) and must never trigger the guard.
+    fs.writeFileSync(
+      path.join(tmpDir, '.devflow', 'learning', 'decisions.md'),
+      '## ADR-001: Some prior entry\n'
+    );
+
+    const result = runHelper('assign-anchor decision obs_selfcite', tmpDir);
+    expect(result.code).toBe(0);
+    expect(result.stdout.trim()).toBe('ADR-001');
+  });
+
+  describe('next-anchor (read-only)', () => {
+    it('prints the next candidate id and creates no ledger when there is no citation', () => {
+      const ledgerPath = path.join(tmpDir, '.devflow', 'learning', 'decisions-ledger.jsonl');
+      expect(fs.existsSync(ledgerPath)).toBe(false);
+
+      const result = runHelper('next-anchor decision', tmpDir);
+      expect(result.code).toBe(0);
+      expect(result.stdout.trim()).toBe('ADR-001');
+      expect(fs.existsSync(ledgerPath)).toBe(false);
+    });
+
+    it('reports collision hits and exits non-zero without mutating anything', () => {
+      fs.mkdirSync(path.join(tmpDir, 'docs'), { recursive: true });
+      fs.writeFileSync(path.join(tmpDir, 'docs', 'notes.md'), 'ADR-001 is cited here.\n');
+      const ledgerPath = path.join(tmpDir, '.devflow', 'learning', 'decisions-ledger.jsonl');
+
+      const result = runHelper('next-anchor decision', tmpDir);
+      expect(result.code).not.toBe(0);
+      expect(result.stdout.trim()).toBe('ADR-001');
+      expect(result.stderr).toContain('notes.md');
+      expect(fs.existsSync(ledgerPath)).toBe(false);
+    });
+
+    it('type validation matches assign-anchor', () => {
+      const result = runHelper('next-anchor workflow', tmpDir);
+      expect(result.code).not.toBe(0);
+      expect(result.stderr).toContain("must be 'decision' or 'pitfall'");
+    });
+  });
+});
+
+// ---------------------------------------------------------------------------
 // toLedgerRow projector: canonical ledger shape (Issue 3)
 // ---------------------------------------------------------------------------
 

@@ -153,6 +153,17 @@ node "$HOME/.devflow/scripts/hooks/json-helper.cjs" assign-anchor "pitfall" "obs
 NEVER hand-edit `decisions.md` or `pitfalls.md`. NEVER invent an ADR-NNN/PF-NNN number
 yourself — `assign-anchor` is the only source of numbering.
 
+**Pre-mint collision guard (E4) — STOP rule**: `assign-anchor` refuses to mint when the
+candidate id is already cited as a whole word somewhere in tracked source with a different
+meaning (a design doc that named a number before the ledger ever minted it). Before promoting,
+you may preview the candidate with `node "$HOME/.devflow/scripts/hooks/json-helper.cjs"
+next-anchor "decision"` (or `"pitfall"`), then `git grep -nE '\b<ID>\b' -- ':!.devflow/learning'`
+to double-check yourself. If `assign-anchor` refuses with a collision: STOP. Do not retry with
+a different number, do not pass `--allow-collision` on your own judgment, and do not fall back
+to hand-editing the `.md` files. Report the printed `file:line` hits to the user and let them
+rule on it — resolving the collision (or explicitly authorizing `--allow-collision`) is a human
+call, not yours to make silently.
+
 **After reinforcing already-anchored observations**: once you have updated all target log rows
 (incrementing `observations`, refreshing `pattern`/`details`, updating `last_seen`), collect
 all anchor ids and make ONE variadic call:

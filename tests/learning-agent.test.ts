@@ -128,6 +128,14 @@ describe('learning agent', () => {
     it('keeps the ADR-XOR-PF hard rule', () => {
       expect(content).toContain('ADR-XOR-PF (hard rule)');
     });
+
+    it('E4: STOPs on an assign-anchor collision refusal instead of retrying or self-authorizing --allow-collision', () => {
+      expect(content).toContain('Pre-mint collision guard (E4) — STOP rule');
+      expect(content).toMatch(/json-helper\.cjs"\s*\n?\s*next-anchor/);
+      expect(content).toContain('STOP');
+      expect(content).toContain('do not pass `--allow-collision` on your own judgment');
+      expect(content).toContain('Report the printed `file:line` hits to the user');
+    });
   });
 
   describe('direct file access (no worker-era script reads)', () => {

@@ -24,7 +24,12 @@
 //   session-output <context>              Build SessionStart output envelope
 //   prompt-output <context>               Build UserPromptSubmit output envelope
 //   backup-construct                      Build pre-compact backup JSON from --arg pairs
-//   assign-anchor <type> <obs_id>         Claim next ADR/PF number, render both .md files
+//   assign-anchor <type> <obs_id> [--allow-collision]
+//                                          Claim next ADR/PF number, render both .md files.
+//                                          Refuses on a pre-mint citation collision (E4) unless
+//                                          --allow-collision is passed.
+//   next-anchor <type>                    Read-only: print the next candidate ADR/PF id and
+//                                          any pre-mint collision hits; mutates nothing (E4)
 //   retire-anchor <anchor_id> <status>    Flip ledger row status, re-render both .md files
 //   refresh-anchor <anchor_id>            Re-project log obs onto ledger row, re-render
 //   rotate-observations [<log>] [<arch>]  Archive observing rows older than 30 days
@@ -33,6 +38,7 @@
 
 const fs = require('fs');
 const path = require('path');
+const { execFileSync } = require('child_process');
 
 const op = process.argv[2];
 const args = process.argv.slice(3);
@@ -154,6 +160,149 @@ function nextAnchorFromLedger(ledgerRows, type) {
   }
   const nextN = (maxN + 1).toString().padStart(3, '0');
   return { anchorId: `${prefix}-${nextN}`, nextN };
+}
+
+// ---------------------------------------------------------------------------
+// Pre-mint collision guard (E4).
+//
+// A design doc can cite a design-local number ("PF-017") in tracked source
+// before the ledger ever mints that same number for an unrelated entry — the
+// two silently collide and nothing catches it until a human notices the text
+// doesn't match. This scans the project tree for a whole-word citation of the
+// candidate id BEFORE assign-anchor writes it, and refuses to mint over a hit.
+// The consumer-side counterpart lives in mdl's scripts/verify-ledger-citations.mjs.
+// ---------------------------------------------------------------------------
+
+/** Directory names excluded from collision scanning at any depth (E4). */
+const COLLISION_SCAN_EXCLUDED_SEGMENTS = new Set(['.git', 'node_modules', 'target', 'dist']);
+
+/** Files larger than this are skipped during collision scanning — bounds the scan (E4). */
+const COLLISION_SCAN_MAX_FILE_BYTES = 5 * 1024 * 1024;
+
+/**
+ * True when a project-relative path must be excluded from collision scanning:
+ * the ledger's own files (`.devflow/learning/**`, self-citation is expected,
+ * not a collision) or any of the excluded directory segments.
+ *
+ * @param {string} relPath - path relative to the project root, either separator style
+ * @returns {boolean}
+ */
+function isCollisionScanExcluded(relPath) {
+  const norm = relPath.split(path.sep).join('/');
+  if (norm === '.devflow/learning' || norm.startsWith('.devflow/learning/')) return true;
+  return norm.split('/').some(seg => COLLISION_SCAN_EXCLUDED_SEGMENTS.has(seg));
+}
+
+/**
+ * List tracked files via `git ls-files` (respects .gitignore; args passed as an
+ * array — never shelled through a string-built command). Throws when the
+ * project root is not a git working tree or the `git` binary is unavailable;
+ * callers fall back to `listFsWalkFiles`.
+ *
+ * @param {string} projectRoot
+ * @returns {string[]} project-relative paths
+ */
+function listGitTrackedFiles(projectRoot) {
+  const out = execFileSync('git', ['ls-files', '-z'], {
+    cwd: projectRoot,
+    stdio: ['ignore', 'pipe', 'ignore'],
+  });
+  return out.toString('utf8').split('\0').filter(Boolean);
+}
+
+/**
+ * Bounded, non-recursing-into-excluded-dirs fs walk — fallback for a project
+ * root that is not a git working tree. The walk is bounded by construction:
+ * it only descends into directories actually present on disk, and never
+ * descends into an excluded directory at all (E4).
+ *
+ * @param {string} projectRoot
+ * @returns {string[]} project-relative paths
+ */
+function listFsWalkFiles(projectRoot) {
+  const results = [];
+  const stack = [''];
+  while (stack.length > 0) {
+    const relDir = stack.pop();
+    const absDir = relDir ? path.join(projectRoot, relDir) : projectRoot;
+    let entries;
+    try {
+      entries = fs.readdirSync(absDir, { withFileTypes: true });
+    } catch {
+      continue; // unreadable dir — best-effort scan, skip
+    }
+    for (const entry of entries) {
+      const relPath = relDir ? `${relDir}/${entry.name}` : entry.name;
+      if (isCollisionScanExcluded(relPath)) continue;
+      if (entry.isDirectory()) {
+        stack.push(relPath);
+      } else if (entry.isFile()) {
+        results.push(relPath);
+      }
+    }
+  }
+  return results;
+}
+
+/**
+ * Scan the project tree for a whole-word citation of `id` (e.g. `ADR-042`),
+ * excluding the ledger's own files and common vendored/build directories.
+ * Prefers tracked files (`git ls-files`) when the project root is a git
+ * working tree; falls back to a bounded fs walk otherwise. Best-effort:
+ * unreadable, binary, or oversized files are skipped rather than failing
+ * the scan.
+ *
+ * @param {string} projectRoot
+ * @param {string} id - e.g. 'ADR-042' or 'PF-017'
+ * @returns {{ file: string, line: number }[]} hits, empty when no collision
+ */
+function scanForAnchorCollision(projectRoot, id) {
+  let files;
+  try {
+    files = listGitTrackedFiles(projectRoot);
+  } catch {
+    files = listFsWalkFiles(projectRoot);
+  }
+
+  const escaped = id.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const pattern = new RegExp(`\\b${escaped}\\b`);
+  const hits = [];
+  for (const relPath of files) {
+    if (isCollisionScanExcluded(relPath)) continue;
+    const absPath = path.join(projectRoot, relPath);
+    let stat;
+    try {
+      stat = fs.statSync(absPath);
+    } catch {
+      continue; // race: listed then removed — best-effort scan, skip
+    }
+    if (!stat.isFile() || stat.size > COLLISION_SCAN_MAX_FILE_BYTES) continue;
+    let content;
+    try {
+      content = fs.readFileSync(absPath, 'utf8');
+    } catch {
+      continue; // unreadable or invalid utf8 — best-effort scan, skip
+    }
+    if (content.includes('\u0000')) continue; // binary heuristic
+    const lines = content.split('\n');
+    for (let i = 0; i < lines.length; i++) {
+      if (pattern.test(lines[i])) {
+        hits.push({ file: relPath, line: i + 1 });
+      }
+    }
+  }
+  return hits;
+}
+
+/**
+ * Format collision hits for a stderr/stdout report — one `file:line` per line,
+ * two-space indented (E4).
+ *
+ * @param {{ file: string, line: number }[]} hits
+ * @returns {string}
+ */
+function formatCollisionHits(hits) {
+  return hits.map(h => `  ${h.file}:${h.line}`).join('\n');
 }
 
 /**
@@ -533,20 +682,36 @@ try {
     }
 
     // -------------------------------------------------------------------------
-    // assign-anchor <type> <obs_id>
+    // assign-anchor <type> <obs_id> [--allow-collision]
     // AC-A2: Assign next anchor ID for the given type (decision|pitfall) to the
     // observation identified by obs_id in decisions-log.jsonl. Atomic under a
     // single .decisions.lock acquisition. Registers usage, re-renders both .md.
+    //
+    // E4: before writing, refuses if the candidate id is already cited as a
+    // whole word somewhere in tracked source (a pre-mint collision — see
+    // scanForAnchorCollision above). --allow-collision skips the scan and
+    // mints anyway, for the human-ruled case where the citation should be
+    // superseded by the ledger's number.
     //
     // Locking discipline: holds ONLY .decisions.lock (never .observations.lock).
     // O(anchored) — single pass for max numeric suffix (AC-P2).
     // -------------------------------------------------------------------------
     case 'assign-anchor': {
-      const assignType = args[0]; // 'decision' or 'pitfall'
-      const assignObsId = args[1];
+      const aaKnownFlags = new Set(['--allow-collision']);
+      const aaFlags = args.filter(a => a.startsWith('--'));
+      const aaUnknownFlags = aaFlags.filter(f => !aaKnownFlags.has(f));
+      if (aaUnknownFlags.length > 0) {
+        process.stderr.write(`assign-anchor: unknown flag(s): ${aaUnknownFlags.join(', ')}\n`);
+        process.exit(1);
+      }
+      const aaAllowCollision = aaFlags.includes('--allow-collision');
+      const aaPositional = args.filter(a => !a.startsWith('--'));
+
+      const assignType = aaPositional[0]; // 'decision' or 'pitfall'
+      const assignObsId = aaPositional[1];
 
       if (!assignType || !assignObsId) {
-        process.stderr.write('assign-anchor: usage: assign-anchor <type> <obs_id>\n');
+        process.stderr.write('assign-anchor: usage: assign-anchor <type> <obs_id> [--allow-collision]\n');
         process.exit(1);
       }
       if (assignType !== 'decision' && assignType !== 'pitfall') {
@@ -564,6 +729,22 @@ try {
 
         // Compute next anchor — O(anchored), single pass
         const { anchorId: aaAnchorId } = nextAnchorFromLedger(aaLedgerRows, assignType);
+
+        // E4: pre-mint collision guard — refuse if the candidate id is already
+        // cited (as a whole word) somewhere in tracked source with a different
+        // meaning, before any ledger write. Never auto-skip to the next free
+        // number — the collision is a human call (rename the citation, or
+        // rerun with --allow-collision to mint over it deliberately).
+        if (!aaAllowCollision) {
+          const aaCollisionHits = scanForAnchorCollision(aaProjectRoot, aaAnchorId);
+          if (aaCollisionHits.length > 0) {
+            throw new Error(
+              `assign-anchor: '${aaAnchorId}' is already cited in source with a different ` +
+              `meaning; resolve the collision before minting (or pass --allow-collision):\n` +
+              formatCollisionHits(aaCollisionHits)
+            );
+          }
+        }
 
         // Read observation from log
         let aaLogEntries = parseLedger(aaLogPath);
@@ -645,6 +826,41 @@ try {
         // Print assigned anchor id to stdout
         process.stdout.write(aaAnchorId + '\n');
       });
+      break;
+    }
+
+    // -------------------------------------------------------------------------
+    // next-anchor <type>
+    // E4: Read-only preview of what assign-anchor would mint next — no lock
+    // acquired, no file written, no usage entry registered. Prints the
+    // candidate id and, when a pre-mint collision guard would fire, its
+    // file:line hits — so a caller can check before committing to assign-anchor.
+    // -------------------------------------------------------------------------
+    case 'next-anchor': {
+      const naType = args[0];
+
+      if (!naType) {
+        process.stderr.write('next-anchor: usage: next-anchor <type>\n');
+        process.exit(1);
+      }
+      if (naType !== 'decision' && naType !== 'pitfall') {
+        process.stderr.write(`next-anchor: type must be 'decision' or 'pitfall', got '${naType}'\n`);
+        process.exit(1);
+      }
+
+      const naProjectRoot = process.cwd();
+      const naLedgerRows = parseLedger(getDecisionsLedgerPath(naProjectRoot));
+      const { anchorId: naAnchorId } = nextAnchorFromLedger(naLedgerRows, naType);
+      const naHits = scanForAnchorCollision(naProjectRoot, naAnchorId);
+
+      process.stdout.write(naAnchorId + '\n');
+      if (naHits.length > 0) {
+        process.stderr.write(
+          `next-anchor: '${naAnchorId}' is already cited in source — collision hits:\n` +
+          formatCollisionHits(naHits) + '\n'
+        );
+        process.exit(1);
+      }
       break;
     }
 
@@ -906,5 +1122,7 @@ if (typeof module !== 'undefined' && module.exports) {
     initDecisionsContent,
     nextAnchorFromLedger,
     rotateObservations,
+    scanForAnchorCollision,
+    isCollisionScanExcluded,
   };
 }
