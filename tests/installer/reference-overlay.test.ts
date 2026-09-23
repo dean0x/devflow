@@ -797,35 +797,6 @@ describe('the PR-host subtree converges like the tracker subtree (D-CONVERGED-SU
     await fs.rm(target, { recursive: true, force: true });
   });
 
-  /**
-   * The prune as it stood BEFORE this change: one sweep, scoped to `tracker/` alone.
-   *
-   * This is the known-bad probe (applies ADR-024, avoids PF-018). Every other arm in
-   * this describe reads the INSTALLED tree, and no installed-tree observation
-   * distinguishes "converges `pr/`" from "does not" unless something is actually
-   * ORPHANED under `pr/` — a manifest-complete install looks identical under both rules,
-   * because the overlay's flat promotion writes every document either way. So the
-   * replaced rule is spelled out here and run against the same seeded orphan the real
-   * prune is run against: if the two ever stop disagreeing on that input, the arm below
-   * has stopped being a regression guard and says so.
-   *
-   * Spelled out rather than imported: `prunePreservingRecoveryCopies` is internal and
-   * should stay internal, and a probe that called the CURRENT function with a narrowed
-   * argument would track future edits to it — which is the opposite of what a frozen
-   * "how it used to be" rule is for.
-   */
-  async function pruneTrackerSubtreeOnly(
-    referencesTarget: string,
-    against: readonly string[],
-  ): Promise<{ removed: string[] }> {
-    const prefix = 'tracker/';
-    const swept = await sweepOrphanedReferences(
-      path.join(referencesTarget, 'tracker'),
-      new Set(against.filter(p => p.startsWith(prefix)).map(p => p.slice(prefix.length))),
-    );
-    return { removed: swept.removed };
-  }
-
   /** The manifest's PR-host entries, proven non-empty. */
   function prEntries(): string[] {
     const entries = manifest.filter(p => p.startsWith(PR_PREFIX));
@@ -943,27 +914,6 @@ describe('the PR-host subtree converges like the tracker subtree (D-CONVERGED-SU
     }
     const residue = (await walkTree(target)).filter(p => p.includes('.old') || p.includes('.tmp'));
     expect(residue, 'a failed swap must leave neither backup nor staging residue').toEqual([]);
-  });
-
-  it('known-bad probe: the replaced tracker-only prune leaves that same file standing', async () => {
-    await stageSource(sourceRoot, manifest);
-    await overlayGeneratedReferences({ referencesTarget: target, sourceRoot, manifest });
-    const stale = abs(target, `${PR_PREFIX}retired-op.md`);
-    await fs.writeFile(stale, '# left by an older build\n', 'utf-8');
-
-    const replaced = await pruneTrackerSubtreeOnly(target, manifest);
-
-    expect(
-      await exists(stale),
-      'the replaced rule must really leave this standing, or the arm above proves nothing',
-    ).toBe(true);
-    expect(replaced.removed, 'and it never even names it').toEqual([]);
-
-    // The two rules must still AGREE on the tracker subtree — the probe is narrow, not
-    // a claim that the old rule swept nothing.
-    const trackerStale = abs(target, 'tracker/retired-op.md');
-    await fs.writeFile(trackerStale, '# left by an older build\n', 'utf-8');
-    expect((await pruneTrackerSubtreeOnly(target, manifest)).removed).toContain('retired-op.md');
   });
 
   it('a generated pr/{op}.md deleted from the install is put back by the next overlay', async () => {

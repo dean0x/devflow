@@ -121,25 +121,38 @@ function collectRestatements(
   return corpus.filter(entry => entry.content.includes(sentence)).map(entry => entry.label);
 }
 
-/** The generated per-provider mechanics files, as a labelled corpus. */
-function providerReferenceCorpus(): Array<{ label: string; content: string }> {
-  const trees = [
-    path.join(REFS_DIR, 'tracker'),
-    // The PR-host tree is NOT a provider tree, and it is scanned for the same
-    // reason (#326). A single-authority sentence restated in `pr/{op}.md` has the
-    // identical defect the tracker arm forbids — two homes for one rule — and is
-    // if anything worse, because a `pr/` file is installed and loadable under
-    // EVERY provider, so the restatement travels everywhere rather than to one
-    // provider's users. Scanning only `tracker/` left eight loadable files free
-    // to restate the D9 gate or the publication order verbatim.
-    path.join(REFS_DIR, PR_HOST_DESTINATION_ROOT),
-  ];
+/**
+ * The generated mechanics trees the shared-literal negative arm reads.
+ *
+ * The PR-host tree is NOT a provider tree, and it is scanned for the same reason.
+ * A single-authority sentence restated in `pr/{op}.md` has the identical defect the
+ * tracker arm forbids — two homes for one rule — and is if anything worse, because
+ * a `pr/` file is installed and loadable under EVERY provider, so the restatement
+ * travels everywhere rather than to one provider's users.
+ */
+const MECHANICS_TREES: readonly string[] = [
+  path.join(REFS_DIR, 'tracker'),
+  path.join(REFS_DIR, PR_HOST_DESTINATION_ROOT),
+];
+
+/** The generated per-provider and PR-host mechanics files, as a labelled corpus. */
+function providerReferenceCorpus(
+  trees: readonly string[] = MECHANICS_TREES,
+): Array<{ label: string; content: string }> {
   return trees.flatMap(dir =>
     walkFiles(dir, f => f.endsWith('.md')).map(file => ({
       label: path.relative(REFS_DIR, file).split(path.sep).join('/'),
       content: requireFile('generated reference', file),
     })),
   );
+}
+
+/**
+ * Named predicate: did a labelled corpus read the PR-host tree? Shared by the
+ * negative arm's provenance check and its known-bad probe (PF-018).
+ */
+function readsPrHostTree(corpus: ReadonlyArray<{ label: string }>): boolean {
+  return corpus.some(entry => entry.label.startsWith(`${PR_HOST_DESTINATION_ROOT}/`));
 }
 
 /**
@@ -275,7 +288,7 @@ describe('shared-literal registry — one authority per normative sentence [DR-1
     // …and the PR-host tree, by the same provenance rule: a count that the three
     // provider trees already satisfy says nothing about whether `pr/` was read.
     expect(
-      providers.some(entry => entry.label.startsWith(`${PR_HOST_DESTINATION_ROOT}/`)),
+      readsPrHostTree(providers),
       `the shared-literal negative arm never read ${PR_HOST_DESTINATION_ROOT}/ — those files are ` +
       'loadable under every provider, so a restatement there reaches every user',
     ).toBe(true);
@@ -304,20 +317,18 @@ describe('shared-literal registry — one authority per normative sentence [DR-1
     ).toEqual(['tracker/github/probe.md']);
   });
 
-  it('known-bad probe: a seeded restatement in a PR-host file is reported by the same collector', () => {
-    // The widening above is only real if a `pr/` entry is actually subject to the
-    // predicate. Seeded rather than written to dist/ (PF-055), through the same
-    // collector both live arms call.
-    const label = `${PR_HOST_DESTINATION_ROOT}/probe.md`;
-    const seeded = [
-      ...providerReferenceCorpus(),
-      { label, content: `prelude\n${SHARED_LITERAL_REGISTRY[0].sentence}\ntail\n` },
-    ];
+  it('known-bad probe: a corpus walked without the PR-host tree fails the pr/ provenance check', () => {
+    // The live arm's provenance predicate, driven over the real walker's output with
+    // the PR-host tree left out — the corpus the negative arm would read if pr/
+    // dropped off MECHANICS_TREES. It must report that pr/ was never read.
+    const prTree = path.join(REFS_DIR, PR_HOST_DESTINATION_ROOT);
+    const withoutPrHost = providerReferenceCorpus(MECHANICS_TREES.filter(dir => dir !== prTree));
+    expect(withoutPrHost.length, 'the tracker trees alone must still yield files').toBeGreaterThan(0);
     expect(
-      collectRestatements(SHARED_LITERAL_REGISTRY[0].sentence, seeded),
-      'the collector must see a restatement in a PR-host file — otherwise widening the corpus ' +
-      'changed what is read and not what is checked',
-    ).toEqual([label]);
+      readsPrHostTree(withoutPrHost),
+      'the provenance check must fail on a corpus that never read pr/ — otherwise the negative ' +
+      'arm could stop reading the PR-host tree and stay green',
+    ).toBe(false);
   });
 });
 
