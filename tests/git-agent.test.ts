@@ -87,9 +87,9 @@ function cachedSinkCorpus(): CorpusEntry[] {
  * remote-I/O sweep is that shape, and the cost is not theoretical: over the full
  * sink corpus `setup-task` is detected as remote-I/O through its PROVIDER
  * mechanics, silently changing the subject of a guard about the agent's own
- * degradation contract. A detection guard must therefore see exactly what moved
- * in #326 and no further — widening it to `gitAgentSinkCorpus()` is a blanket
- * widening rather than a classification (ADR-025).
+ * degradation contract. A detection guard must therefore see git.md plus the
+ * PR-host half of those operations and no further — widening it to
+ * `gitAgentSinkCorpus()` is a blanket widening rather than a classification (ADR-025).
  *
  * The literal-presence guards in this file read the full union on purpose: their
  * op set is fixed by the caller, the corpus only answers whether that op can
@@ -107,7 +107,7 @@ function gitPlusPrHostCorpus(): CorpusEntry[] {
  *
  * Shared by the known-bad probes below that seed a defect into a single
  * `references/pr/{op}.md` entry and drive the live guard's own predicate over
- * the result (ADR-024) — the seeding is scaffolding common to both probes, the
+ * the result (PF-018) — the seeding is scaffolding common to both probes, the
  * defect and the predicate are what make each one distinct.
  */
 function seedPrHostFile(op: string, transform: (content: string) => string): CorpusEntry[] {
@@ -120,8 +120,7 @@ function seedPrHostFile(op: string, transform: (content: string) => string): Cor
 
 /**
  * The sink corpus with the PR-host references removed — the known-bad probe every
- * guard #326 re-pointed from 'sole' to 'union' is proven live against (ADR-024,
- * PF-018).
+ * 'union' guard over a PR-host literal is proven live against (PF-018).
  *
  * A widening is only honest if dropping what it widened TO turns the guard red.
  * Without this, `mode: 'union'` is indistinguishable from `mode: 'sole'` on a
@@ -946,10 +945,9 @@ describe('git agent — static content guards (PF-018)', () => {
   // ── Guard 2: Load-bearing numeric bounds ────────────────────────────────────
 
   it('post-review-summary: 60000-char comment cap is present', () => {
-    // Mode 'union' [DR-18], widened by #326: the compose step that states the cap
-    // moved to references/pr/post-review-summary.md, so the pin follows the text
-    // (ADR-025 — named here, at the call site, in the commit that moved it). The
-    // floor literal is unchanged; only the corpus widened.
+    // Mode 'union' [DR-18]: the compose step that states the cap lives in
+    // references/pr/post-review-summary.md, so the pin reads the op's union
+    // section (ADR-025 — the mode is named at the call site).
     const sec = extractOpSection(cachedSinkCorpus(), 'post-review-summary', 'union');
     expect(
       sec,
@@ -958,8 +956,8 @@ describe('git agent — static content guards (PF-018)', () => {
   });
 
   it('post-review-summary: 60000-char cap known-bad probe — dropping the PR-host tree loses it', () => {
-    // ADR-024 / PF-018: the widening above is only honest if the literal is gone
-    // from the narrower corpus. If this ever passes, the cap came back to git.md
+    // PF-018: the union read above is only honest if the literal is gone from
+    // the narrower corpus. If this ever passes, the cap came back to git.md
     // and the guard should be re-classified 'sole', not left widened.
     expect(
       extractOpSection(sinkCorpusWithoutPrHost(), 'post-review-summary', 'union'),
@@ -969,8 +967,8 @@ describe('git agent — static content guards (PF-018)', () => {
   });
 
   it('post-resolution-summary: 60000-char comment cap is present', () => {
-    // Mode 'union' [DR-18], widened by #326 — same move, same reason as the
-    // sibling summary op above.
+    // Mode 'union' [DR-18] — the compose step lives in the PR-host reference, as
+    // for the sibling summary op above.
     const sec = extractOpSection(cachedSinkCorpus(), 'post-resolution-summary', 'union');
     expect(
       sec,
@@ -1454,9 +1452,9 @@ describe('git agent — static content guards (PF-018)', () => {
   // ── Guard 5: Dedup marker formats ───────────────────────────────────────────
 
   it('review-summary dedup marker uses cycle:{N} ts: pair form', () => {
-    // Mode 'union' [DR-18], widened by #326: both the dedup SEARCH (step 1) and
-    // the marker's two template renderings (step 5) moved to the PR-host
-    // reference, so every site of the literal is there now.
+    // Mode 'union' [DR-18]: both the dedup SEARCH (step 1) and the marker's two
+    // template renderings (step 5) live in the PR-host reference, so every site
+    // of the literal is there.
     const sec = extractOpSection(cachedSinkCorpus(), 'post-review-summary', 'union');
     expect(
       sec,
@@ -1465,7 +1463,8 @@ describe('git agent — static content guards (PF-018)', () => {
   });
 
   it('resolution-summary dedup marker uses ts: form', () => {
-    // Mode 'union' [DR-18], widened by #326 — same move as the sibling above.
+    // Mode 'union' [DR-18] — the marker's sites live in the PR-host reference, as
+    // for the sibling above.
     const sec = extractOpSection(cachedSinkCorpus(), 'post-resolution-summary', 'union');
     expect(
       sec,
@@ -1474,7 +1473,7 @@ describe('git agent — static content guards (PF-018)', () => {
   });
 
   it('dedup marker FORM known-bad probe — both marker literals left git.md with their steps', () => {
-    // ADR-024 / PF-018 for the pair above. Neither marker may survive in git.md:
+    // PF-018 for the pair above. Neither marker may survive in git.md:
     // an op that restates its own dedup marker in the contract is the GAP-20 shape
     // (two authorities on one idempotency key).
     const narrowed = sinkCorpusWithoutPrHost();
@@ -1503,13 +1502,13 @@ describe('git agent — static content guards (PF-018)', () => {
     ).toContain('## Publication gate (D10)');
   });
 
-  // The four literals below used to be asserted over the whole of `git.md`, where
-  // a file-scoped `toContain` could not say WHICH operation carried the control.
-  // #326 moved both summary operations' step 3 (the probe, the three visibility
-  // values, the fail-closed rule) and step 5 (the stub template) into the PR-host
-  // references, so the honest successor is a per-op loop over each summary op's
-  // UNION section: the control must be reachable from the operation that applies
-  // it, not merely present somewhere on the spawn surface. PF-058's shape — a
+  // Both summary operations' step 3 (the probe, the three visibility values, the
+  // fail-closed rule) and step 5 (the stub template) live in the PR-host
+  // references, so the four literals below are asserted per op over each summary
+  // op's UNION section rather than over a whole file, where a file-scoped
+  // `toContain` could not say WHICH operation carried the control: the control
+  // must be reachable from the operation that applies it, not merely present
+  // somewhere on the spawn surface. PF-058's shape — a
   // containment control is owed by each op independently — asserted per op rather
   // than once for the file.
   const D10_SUMMARY_OPS = ['post-review-summary', 'post-resolution-summary'] as const;
@@ -1545,10 +1544,10 @@ describe('git agent — static content guards (PF-018)', () => {
   /**
    * The D10 per-op containment predicate: can `op` reach `literal` in `corpus`?
    *
-   * Mode 'union' [DR-18], widened by #326 — named here, once, in the commit that
-   * moved the text (ADR-025). The live guard and its known-bad probe both call
-   * it, so narrowing the predicate takes the probe red instead of leaving a copy
-   * of the old spelling standing behind the guard it is supposed to freeze.
+   * Mode 'union' [DR-18] — named here, once (ADR-025). The live guard and its
+   * known-bad probe both call it, so narrowing the predicate takes the probe red
+   * instead of leaving a copy of the old spelling standing behind the guard it is
+   * supposed to freeze.
    */
   const d10Reaches = (corpus: CorpusEntry[], op: string, literal: string): boolean =>
     extractOpSection(corpus, op, 'union').includes(literal);
@@ -1565,7 +1564,7 @@ describe('git agent — static content guards (PF-018)', () => {
   });
 
   it('D10 known-bad probe: deleting one literal from ONE pr/ file is reported for that op only', () => {
-    // ADR-024 / PF-018. Seeds a corpus in which post-review-summary's PR-host
+    // PF-018. Seeds a corpus in which post-review-summary's PR-host
     // mechanics have lost the fail-closed rule, and drives the live guard's OWN
     // predicate (d10Reaches) over the result. A file-scoped `toContain` over
     // git.md ∪ references could not report it: the sibling op's copy of the same
@@ -1584,8 +1583,8 @@ describe('git agent — static content guards (PF-018)', () => {
   });
 
   it('D10: review-summary dedup marker appears ≥2× in post-review-summary (full mode + stub template)', () => {
-    // Mode 'union' [DR-18], widened by #326: both renderings moved with step 5.
-    // Floor unchanged at 2 — the widening moves the corpus, never the bound.
+    // Mode 'union' [DR-18]: both renderings live with step 5 in the PR-host
+    // reference. The floor of 2 is the bound; the mode only names the corpus.
     const sec = extractOpSection(cachedSinkCorpus(), 'post-review-summary', 'union');
     const matches = sec.match(/devflow:review-summary cycle:/g);
     expect(
@@ -1596,7 +1595,7 @@ describe('git agent — static content guards (PF-018)', () => {
   });
 
   it('D10: resolution-summary dedup marker appears ≥2× in post-resolution-summary (full mode + stub template)', () => {
-    // Mode 'union' [DR-18], widened by #326 — same move, floor unchanged.
+    // Mode 'union' [DR-18] — both renderings live in the PR-host reference, as above.
     const sec = extractOpSection(cachedSinkCorpus(), 'post-resolution-summary', 'union');
     const matches = sec.match(/devflow:resolution-summary ts:/g);
     expect(
@@ -1662,8 +1661,8 @@ describe('git agent — static content guards (PF-018)', () => {
   // containment control, and a control an operation must load a SECOND file to
   // learn is a control that can go missing when that load does not happen (PF-027).
   // The gate states the resolution order; each operation states the probe it must
-  // run itself. `git.md` is NOT a site — #326 moved both step 3s out — which is why
-  // the set below names files and no longer names an op inside git.md.
+  // run itself. `git.md` is NOT a site — both step 3s live in the PR-host
+  // references — which is why the set below names files and no op inside git.md.
 
   it('D10 [DR-20](i): references/publication-gate.md is named from EXACTLY the two summary ops', () => {
     const opNames = collectOpNames(content);
@@ -1770,7 +1769,7 @@ describe('git agent — static content guards (PF-018)', () => {
    * known-bad probe, which re-asks it over the corpus with the PR-host tree
    * dropped. Re-spelt at the probe, narrowing the live predicate would leave the
    * probe green against a set the guard no longer scans — a frozen copy of a
-   * rule nobody enforces (ADR-024 / PF-018).
+   * rule nobody enforces (PF-018).
    */
   const isPostingSection = (sec: string): boolean =>
     sec.includes('--body-file') || sec.includes('-F body=@');
@@ -1831,12 +1830,11 @@ describe('git agent — static content guards (PF-018)', () => {
   });
 
   it('D11 known-bad probe: dropping the PR-host tree narrows the posting set from 8 to 4 (SG-8 non-vacuity)', () => {
-    // SG-8's proof obligation for #326, and the one thing the floor of 8 above
-    // cannot show on its own. The posting SET is the same 8 operations before and
-    // after the move, so the forward guard stayed green through it — which means
-    // green alone never established that the union corpus is what carries four of
-    // those eight. This drives the SAME predicate over the narrowed corpus and
-    // pins the number that only the widening supplies.
+    // SG-8's proof obligation, and the one thing the floor of 8 above cannot show
+    // on its own: the forward guard is green whichever file carries a posting
+    // op's sink, so green alone never establishes that the union corpus is what
+    // carries four of those eight. This drives the SAME predicate over the
+    // narrowed corpus and pins the number that only the widening supplies.
     //
     // Four of the eight vanish entirely — post-review-summary,
     // post-resolution-summary, resolve-review-threads and ensure-pr-ready post only
@@ -2089,9 +2087,9 @@ describe('git agent — static content guards (PF-018)', () => {
   });
 
   it('D11: ensure-pr-ready scrubs the PR body it creates (gh pr create is a publication sink)', () => {
-    // Mode 'union' [DR-18], widened by #326: step 4a — which states both the scrub
-    // and the `--body-file` create it gates — is PR-host mechanics and moved to
-    // references/pr/ensure-pr-ready.md. The literals are unchanged.
+    // Mode 'union' [DR-18]: step 4a — which states both the scrub and the
+    // `--body-file` create it gates — is PR-host mechanics and lives in
+    // references/pr/ensure-pr-ready.md.
     const sec = extractOpSection(cachedSinkCorpus(), 'ensure-pr-ready', 'union');
     // extractOpSection throws when the anchor is absent — sec.length is always > 0 here (not a guard).
     expect(
@@ -2286,11 +2284,11 @@ describe('git agent — static content guards (PF-018)', () => {
     // D4 scope: all ops that call gh CLI or a remote tracker (posting, mutation, or read-only fetch).
     // G1 added D4 to fetch-issue (~:268) and fetch-issues-batch (~:314) — both fetch remotely via gh.
     // Two corpora, one per question, and the split is the point (ADR-025):
-    //   DETECTION reads git.md ∪ the PR-host references — #326 moved these ops'
-    //     `gh` calls into references/pr/, and a 'sole' read would have silently
-    //     narrowed the remote-I/O set from 14 to 13 (post-resolution-summary's
-    //     `gh` indicators are all in its moved body) while staying green on a
-    //     smaller subject. Widened to exactly what moved and no further: over the
+    //   DETECTION reads git.md ∪ the PR-host references — these ops' `gh` calls
+    //     live in references/pr/, and a 'sole' read silently narrows the
+    //     remote-I/O set from 14 to 13 (post-resolution-summary's `gh` indicators
+    //     are all in its PR-host body) while staying green on a smaller subject.
+    //     Widened to exactly the PR-host half and no further: over the
     //     FULL sink corpus `setup-task` would be detected through its provider
     //     mechanics, which is a different guard about a different file.
     //   D4 EVIDENCE stays 'sole' — the degradation contract is the agent's, and a
@@ -2341,8 +2339,8 @@ describe('git agent — static content guards (PF-018)', () => {
       'no REQUIRED_OPS detected as remote-I/O — guard is vacuous (PF-018)',
     ).toBeGreaterThan(0);
     // A FLOOR, not a `> 0` shrug. `> 0` is met by one op, so it could not tell a
-    // corpus narrowing from a real removal — which is exactly what #326 would have
-    // done here had the detection stayed 'sole' (14 → 13, silently). Registered as
+    // corpus narrowing from a real removal — which is exactly what a 'sole'
+    // detection read does here (14 → 13, silently). Registered as
     // git-agent-remote-io-ops in numeric-floors.json.
     expect(
       remoteOps.length,
@@ -2407,7 +2405,7 @@ describe('git agent — static content guards (PF-018)', () => {
    * Declared at describe scope so the negative arm and its known-bad probe read the
    * SAME predicate. Spelling the alternation twice would leave the probe green after
    * the live arm was narrowed — an absence check proven by a regex the live arm no
-   * longer uses proves nothing about the live arm (ADR-024, PF-018).
+   * longer uses proves nothing about the live arm (PF-018).
    */
   const REMOTE_PLACEHOLDER_RE = /\{body\}|\{description\}|\{title\}/;
 

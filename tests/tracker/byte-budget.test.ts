@@ -17,8 +17,7 @@
  * skipped. A skipped budget asserts nothing and reads as "fine" in a CI log
  * (PF-018), so a ceiling that goes red is answered by cutting the artifact, never
  * by raising the ceiling or disabling its gate. Each ceiling's own JSDoc records
- * its measurement, its headroom, and — where it was re-baselined once under an
- * explicit authorisation — what the raise bought.
+ * its measurement and its headroom.
  *
  * UNIT: characters, not bytes, throughout — `wc -m` semantics. JS `.length`
  * counts UTF-16 code units, which equals `wc -m` for this corpus (every
@@ -78,12 +77,10 @@ import {
 /**
  * THE git.md CEILING — the one gate on the always-loaded half of the split.
  *
- * RE-DERIVED DOWNWARD 55_750 → 45_150 against a measured 45_068 ch, after #326
- * moved the eight PR-host operations' `**Process:**` bodies out of the agent and
- * into `references/pr/{op}.md`. That cut is the whole of the re-derivation. The
- * 82 ch of headroom is deliberately thin — the same thinness every earlier
- * derivation of this number chose — so the next content addition to git.mds must
- * fund itself with a cut elsewhere rather than spend slack.
+ * Derived from a measured 45_068 ch — with the eight PR-host operations'
+ * `**Process:**` bodies in `references/pr/{op}.md`, not in the agent — and pinned
+ * at 45_150. The 82 ch of headroom is deliberately thin, so the next content
+ * addition to git.mds must fund itself with a cut elsewhere rather than spend slack.
  *
  * THE RULE: this ceiling is a REGRESSION ALARM, and it is RE-DERIVED ONLY DOWNWARD —
  * lowered after a pass that actually cut the artifact, never raised to fit one that
@@ -135,15 +132,11 @@ const BUDGET_SKILL_MD = 6_600;
  * row, so this number can never drift into billing every GitHub user for bytes
  * they never receive (GAP-02).
  *
- * LOWERED 80_200 → 67_200 against a measured 67_123, after #326 moved the eight
- * PR-host operations' bodies out of the always-loaded agent. Every term but the
- * preloaded set is unchanged by that move; the whole of the fall is git.md's.
- * 77 ch of headroom, deliberately thin, so the next addition to the agent or to a
- * github mechanics file must fund itself with a cut. The 2026-09-20 re-baseline
- * this row once carried is fully spent back: the ceiling now sits below the
- * pre-split preloaded set that preceded it.
+ * Derived from a measured 67_123 and pinned at 67_200 — 77 ch of headroom,
+ * deliberately thin, so the next addition to the agent or to a github mechanics
+ * file must fund itself with a cut.
  *
- * LOWERED THEREAFTER, NEVER RAISED. Registered as `budget-loaded-set` in
+ * MAY BE LOWERED, NEVER RAISED. Registered as `budget-loaded-set` in
  * tests/fixtures/numeric-floors.json; lowering re-pins the value AND the pattern
  * in the same commit.
  */
@@ -170,16 +163,14 @@ const BUDGET_LOADED_SET = 67_200;
  *   + max_op chars(references/tracker/jira/{op}.md)
  *   + max over TRACKER ops of the one-spawn load [DR-12, D-LOADED-SET-SCOPE]
  *
- * LOWERED 89_500 → 76_500 against a measured 76_427, after #326's cut to the
- * always-loaded agent. 73 ch of headroom, tighter than the GitHub row's, so the
- * next addition to the contract or to a Jira mechanics file must fund itself with
- * a cut rather than reach for slack. Trimming `references/tracker/_mcp.md` is the
- * honest first move: it is contract prose, it is the single largest term this row
- * adds over the GitHub one, and a pass over it is cheaper than another ceiling.
- * The 2026-09-20 re-baseline this row once carried is fully spent back — the
- * ceiling now sits well below the 88_660 it was raised from.
+ * Derived from a measured 76_427 and pinned at 76_500 — 73 ch of headroom,
+ * tighter than the GitHub row's, so the next addition to the contract or to a Jira
+ * mechanics file must fund itself with a cut rather than reach for slack. Trimming
+ * `references/tracker/_mcp.md` is the honest first move: it is contract prose, it
+ * is the single largest term this row adds over the GitHub one, and a pass over it
+ * is cheaper than another ceiling.
  *
- * LOWERED THEREAFTER, NEVER RAISED. Registered as `budget-loaded-set-jira` in
+ * MAY BE LOWERED, NEVER RAISED. Registered as `budget-loaded-set-jira` in
  * tests/fixtures/numeric-floors.json.
  */
 const BUDGET_LOADED_SET_JIRA = 76_500;
@@ -191,13 +182,10 @@ const BUDGET_LOADED_SET_JIRA = 76_500;
  * each MCP-backed provider is priced on its own row, none of them can move the
  * GitHub one, and the GitHub one cannot absorb theirs.
  *
- * LOWERED 91_700 → 78_700 against a measured 78_610, after #326's cut to the
- * always-loaded agent. 90 ch of headroom, and this is still the LARGEST of the
- * four rows and therefore the binding constraint on any addition to the
- * always-loaded agent: a character added to git.md is a character added to every
- * row, and this is the row it reaches its ceiling on first. The 2026-09-20
- * re-baseline this row once carried is fully spent back — the ceiling now sits
- * well below the 91_000 it was raised from.
+ * Derived from a measured 78_610 and pinned at 78_700 — 90 ch of headroom. This
+ * is the LARGEST of the four ceilings but not the binding one: a character added
+ * to git.md is a character added to every row, and it reaches the ceiling with the
+ * least headroom first. Re-run this file for each row's current headroom.
  *
  * WHY THIS PROVIDER'S max_op IS THE LARGEST OF THE THREE, recorded so the number is
  * not read as bloat. `backlink-shipped-issues` is where the dedup LADDER is stated,
@@ -210,7 +198,7 @@ const BUDGET_LOADED_SET_JIRA = 76_500;
  * provider's `max_op` the largest of the three in the printed table, and it is
  * content rather than slack.
  *
- * LOWERED THEREAFTER, NEVER RAISED. Registered as `budget-loaded-set-linear` in
+ * MAY BE LOWERED, NEVER RAISED. Registered as `budget-loaded-set-linear` in
  * tests/fixtures/numeric-floors.json.
  */
 const BUDGET_LOADED_SET_LINEAR = 78_700;
@@ -251,7 +239,7 @@ const BUDGET_LOADED_SET_LINEAR = 78_700;
  * references/publication-gate.md) and pinned at 59_100 — 67 ch of headroom, the
  * same deliberate thinness as its siblings.
  *
- * LOWERED THEREAFTER, NEVER RAISED. Registered as `budget-loaded-set-pr-host` in
+ * MAY BE LOWERED, NEVER RAISED. Registered as `budget-loaded-set-pr-host` in
  * tests/fixtures/numeric-floors.json.
  */
 const BUDGET_LOADED_SET_PR_HOST = 59_100;
@@ -542,7 +530,7 @@ describe('byte budget: four-shape table (recorded)', () => {
  * sequential Read each.
  *
  * Parameterised over the prefix rather than fixed to `**Mechanics:**`, because
- * #326 gave the agent a SECOND pointer vocabulary: an operation whose mechanics
+ * the agent has a SECOND pointer vocabulary: an operation whose mechanics
  * live under `references/pr/` points at them with `**PR mechanics:**`, and a
  * collector that only knew the first spelling would report a falling round-trip
  * count for a change that raised it.
@@ -1049,11 +1037,11 @@ describe('byte budget: formula file-set ↔ nameable file-set (both directions)'
   });
 
   it('the ONE hop into a pr/ body is live — github-api.md reaches fetch-review-threads only through it', () => {
-    // #326's addition to nameableFrom, asserted where it bites rather than in
-    // prose. `fetch-review-threads` step 1 — the only place the operation names
-    // github-api.md — moved into references/pr/fetch-review-threads.md. Without
-    // the hop the model sums a file the scan can no longer see the op name, and
-    // direction 1 goes red for a reason that is not a regression.
+    // nameableFrom's PR-host hop, asserted where it bites rather than in prose.
+    // `fetch-review-threads` step 1 — the only place the operation names
+    // github-api.md — lives in references/pr/fetch-review-threads.md. Without the
+    // hop the model sums a file the scan cannot see the op name, and direction 1
+    // goes red for a reason that is not a regression.
     expect(
       SECTIONS.get('fetch-review-threads') ?? '',
       'this arm only means something while git.md itself does NOT name github-api.md for this op ' +
@@ -1097,11 +1085,10 @@ describe('byte budget: written exclusions', () => {
   });
 
   it('the two summary ops are PR-host, never tracker, and keep their D10 naming line in the agent (SG-8)', () => {
-    // SG-8 as SHIPPED, which is not quite SG-8 as first written. The rule was
-    // "these two never move", and #326 moved their step order into
-    // references/pr/{op}.md — under the condition SG-8 actually imposes: in the
-    // same commit as their guards, with each repointed guard carrying a known-bad
-    // probe, and with the D10/D11 controls still answerable from the agent.
+    // SG-8 as shipped: the two summary ops' step order lives in
+    // references/pr/{op}.md under the condition SG-8 imposes — each guard reading
+    // it carries a known-bad probe, and the D10/D11 controls stay answerable from
+    // the agent.
     //
     // The END STATE, asserted rather than the prohibition it replaced:
     //   1. the op is still a section of the agent (its contract did not move);
