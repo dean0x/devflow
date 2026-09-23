@@ -118,9 +118,9 @@
       "id": "manage-debt-archive-cap",
       "floor": 60000,
       "pattern": "toContain('60000')",
-      "occurrences": 6,
+      "occurrences": 7,
       "sourceFile": "tests/git-agent.test.ts",
-      "description": "The 60 000-character body cap, asserted at 6 sites in tests/git-agent.test.ts: the manage-debt archive threshold, the post-wave-report cap, and -- since #326 moved both summary operations' compose steps into the PR-host references -- each summary op's positive union assertion plus its known-bad probe that the literal is NOT reachable once the PR-host tree is dropped. The pattern is a substring of the negated form too, which is why the probes count; lowering the cap at any one site is caught."
+      "description": "The 60 000-character body cap, asserted at 7 sites in tests/git-agent.test.ts: the manage-debt archive threshold, the post-wave-report cap, each summary op's positive union assertion plus its known-bad probe that the literal is NOT reachable once the PR-host tree is dropped (both summary operations' compose steps live in the PR-host references), and the containment negative arm's in-scope witness that its scanned surface reaches the compose templates. The pattern is a substring of the negated form too, which is why the probes count; lowering the cap at any one site is caught."
     },
     {
       "id": "d10-dedup-marker-floor",

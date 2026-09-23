@@ -1018,22 +1018,23 @@ describe('git agent — static content guards (PF-018)', () => {
   });
 
   it('resolve-review-threads: ≤50 threads processing bound is present', () => {
-    // Mode 'union' [DR-18], widened by #326: the bounded loop text moved to
-    // references/pr/resolve-review-threads.md. 'sole' would still PASS here — the
-    // op's retained `**Output:**` enum spells `≤50` in its TRUNCATED arm — which
-    // is precisely why it must not stay 'sole': the guard would be pinning an
-    // output label while the bound it is named for had gone (ADR-025).
+    // Mode 'union' [DR-18]: the bounded loop lives in
+    // references/pr/resolve-review-threads.md. A bare `/≤50/` would be met by the
+    // op's `**Output:**` enum in git.md alone (its TRUNCATED arm spells `≤50`), so
+    // it would pin an output label and stay green with the loop's bound gone. The
+    // guard pins the loop's own sentence instead, which only the PR-host half
+    // carries — the probe below holds it there (ADR-025).
     const sec = extractOpSection(cachedSinkCorpus(), 'resolve-review-threads', 'union');
     expect(
       sec,
-      'resolve-review-threads: missing ≤50 threads bound — unbounded mutation calls violate the GitHub rate contract',
-    ).toMatch(/≤50/);
+      'resolve-review-threads: missing the ≤50 loop bound — unbounded mutation calls violate the GitHub rate contract',
+    ).toContain('sequentially, ≤50, 1s between operations');
   });
 
   it('resolve-review-threads: ≤50 bound known-bad probe — the loop text is in the PR-host tree', () => {
-    // The accidental-pass hazard above, made mechanical: dropping the PR-host tree
-    // must lose the LOOP's statement of the bound. The retained Output enum is
-    // allowed to keep the token, so the probe asks for the loop's own sentence.
+    // Dropping the PR-host tree must lose the loop's statement of the bound, or
+    // the live arm above could be met by a copy in git.md. The Output enum is
+    // allowed to keep the `≤50` token; the loop sentence is not.
     expect(
       extractOpSection(sinkCorpusWithoutPrHost(), 'resolve-review-threads', 'union'),
       'the bounded-loop statement must live in the PR-host reference — if git.md still carries ' +
@@ -1097,21 +1098,32 @@ describe('git agent — static content guards (PF-018)', () => {
   });
 
   it('fetch-review-threads: ≤2-page / 100-thread GraphQL bound is present', () => {
-    // Mode 'union' [DR-18], widened by #326: step 1 — which states the bound and
-    // the cursor trap that makes it real — moved to
-    // references/pr/fetch-review-threads.md. The op's purpose line in git.md still
-    // says "bounded: ≤2 pages of 50", so this would pass 'sole' too; the widening
-    // is what keeps the guard attached to the STEP rather than to the blurb.
+    // Mode 'union' [DR-18]: step 1 — which states the bound — and the cursor trap
+    // that makes it real live in references/pr/fetch-review-threads.md. The op's
+    // purpose line in git.md says "bounded: ≤2 pages of 50", which a loose
+    // `/2 pages of 50/` would accept alone, so the guard pins the step's own
+    // `bounds:` wording and the trap; the probe below holds both in the PR-host half.
     const sec = extractOpSection(cachedSinkCorpus(), 'fetch-review-threads', 'union');
     expect(
       sec,
       'fetch-review-threads: missing ≤2-page / 100-thread GraphQL bound — unbounded pagination can exhaust rate limits',
-    ).toMatch(/2 pages of 50|100 max|≤2 pages/);
+    ).toMatch(/bounds: ≤2 pages of 50 \(100 max\)/);
+    expect(
+      sec,
+      'fetch-review-threads: missing the cursor-correctness trap — without it the ≤2-page bound ' +
+      'yields page 1 twice instead of 100 distinct threads',
+    ).toContain('Cursor correctness trap');
   });
 
   it('fetch-review-threads: ≤2-page bound known-bad probe — the cursor trap is in the PR-host tree', () => {
+    const withoutPrHost = extractOpSection(sinkCorpusWithoutPrHost(), 'fetch-review-threads', 'union');
     expect(
-      extractOpSection(sinkCorpusWithoutPrHost(), 'fetch-review-threads', 'union'),
+      withoutPrHost,
+      'the step-1 bound must live with the step, in the PR-host reference — a copy in git.md would ' +
+      'meet the live arm without it',
+    ).not.toMatch(/bounds: ≤2 pages of 50/);
+    expect(
+      withoutPrHost,
       'the cursor-correctness trap is what makes the ≤2-page bound yield 100 DISTINCT threads; ' +
       'it must live with the step, in the PR-host reference',
     ).not.toContain('Cursor correctness trap');
@@ -1580,7 +1592,7 @@ describe('git agent — static content guards (PF-018)', () => {
       matches,
       'post-review-summary: "devflow:review-summary cycle:" must appear ≥2 times (full body + stub template)',
     ).not.toBeNull();
-    expect(matches!.length).toBeGreaterThanOrEqual(2); // floor: d10-dedup-marker-floor (numeric-floors.json)
+    expect((matches ?? []).length).toBeGreaterThanOrEqual(2); // floor: d10-dedup-marker-floor (numeric-floors.json)
   });
 
   it('D10: resolution-summary dedup marker appears ≥2× in post-resolution-summary (full mode + stub template)', () => {
@@ -1591,7 +1603,7 @@ describe('git agent — static content guards (PF-018)', () => {
       matches,
       'post-resolution-summary: "devflow:resolution-summary ts:" must appear ≥2 times (full body + stub template)',
     ).not.toBeNull();
-    expect(matches!.length).toBeGreaterThanOrEqual(2); // floor: d10-dedup-marker-floor (numeric-floors.json)
+    expect((matches ?? []).length).toBeGreaterThanOrEqual(2); // floor: d10-dedup-marker-floor (numeric-floors.json)
   });
 
   it('D10: REVIEW_PUBLICATION is documented with all three values: auto, full, off', () => {
@@ -2399,6 +2411,18 @@ describe('git agent — static content guards (PF-018)', () => {
    */
   const REMOTE_PLACEHOLDER_RE = /\{body\}|\{description\}|\{title\}/;
 
+  /**
+   * The surface a summary op's negative arm scans: its section in EVERY corpus file
+   * that declares it, in mode 'union'.
+   *
+   * One function for the live arm and its known-bad probe, so the probe exercises
+   * the arm's corpus choice and not only its regex. The live arm additionally pins
+   * a witness that lives only outside git.md, so a scope that shrinks back to the
+   * agent file fails loudly instead of passing an absence check over less text.
+   */
+  const summaryComposeSurface = (corpus: CorpusEntry[], op: string): string =>
+    extractOpSection(corpus, op, 'union');
+
   it('containment (AC-0.10): ops rendering remote-sourced fields wrap them in containment tags (op-scoped)', () => {
     const opNames = collectOpNames(content);
     /** An operation's own section — cut at the next unfenced `## `, never a shared trailer. */
@@ -2445,34 +2469,46 @@ describe('git agent — static content guards (PF-018)', () => {
 
     // Negative arm: summary/reply ops must not interpolate remote body placeholders.
     //
-    // Mode 'union' [DR-18], widened by #326: two of these three ops now span two
-    // files — the contract in git.md and the compose templates in
-    // references/pr/{op}.md — and a placeholder is most likely to appear in a
-    // compose template, which is the half that moved. A negative check narrowed to
-    // the half that stayed goes blind exactly where the risk went (the same
-    // reasoning that keeps `learn-conventions`' negative arm on the sink corpus).
+    // Mode 'union' [DR-18]: each of these ops spans two files — the contract in
+    // git.md and the compose template in its generated reference (references/pr/
+    // for the two review-summary ops, the provider mechanics for post-wave-report)
+    // — and a placeholder is most likely to appear in a compose template. A
+    // negative check narrowed to git.md goes blind exactly where the risk is (the
+    // same reasoning that keeps `learn-conventions`' negative arm on the sink corpus).
+    //
+    // In-scope witness: every compose template states the 60000-char cap, and no
+    // one of these ops' git.md sections does (the two summary ops' cap is held out
+    // of git.md by the probes beside their cap guards). A surface without `60000`
+    // is not reading the compose half, and the absence check below would be green
+    // over the wrong text.
     const SUMMARY_OPS = ['post-review-summary', 'post-resolution-summary', 'post-wave-report'];
     for (const op of SUMMARY_OPS) {
+      const surface = summaryComposeSurface(cachedSinkCorpus(), op);
+      expect(
+        surface,
+        `${op}: the negative arm is not reading the compose template — its 60000 cap is missing ` +
+        'from the scanned surface',
+      ).toContain('60000');
       // {body} / {description} / {title} as MDS template placeholders (curly-brace form)
       // would echo remote origin content verbatim. Shell vars ($DEVFLOW_BODY) are safe.
       expect(
-        REMOTE_PLACEHOLDER_RE.test(extractOpSection(cachedSinkCorpus(), op, 'union')),
+        REMOTE_PLACEHOLDER_RE.test(surface),
         `${op}: must not interpolate remote body fields ({body}/{description}/{title}) in its Output template`,
       ).toBe(false);
     }
   });
 
   it('containment negative arm known-bad probe: a placeholder seeded in a pr/ body is reported', () => {
-    // ADR-024 / PF-018. The arm above is an ABSENCE check over a corpus that spans
-    // two files, so on live inputs it is green whether or not the union half is
-    // being read at all (PF-064). Seeds `{title}` into the PR-host compose template
-    // and asserts the same predicate reports it.
+    // PF-018 / PF-064. The arm above is an ABSENCE check over a corpus that spans
+    // two files. Seeds `{title}` into the PR-host compose template and drives the
+    // arm's own surface function and predicate over it; the arm's in-scope witness
+    // is what holds the live call on that same surface.
     const seeded = seedPrHostFile(
       'post-review-summary',
       c => `${c}\nEcho the thread {title} verbatim.\n`,
     );
     expect(
-      REMOTE_PLACEHOLDER_RE.test(extractOpSection(seeded, 'post-review-summary', 'union')),
+      REMOTE_PLACEHOLDER_RE.test(summaryComposeSurface(seeded, 'post-review-summary')),
       'a remote placeholder seeded in the PR-host compose template must be detected — otherwise ' +
       'the negative arm is only reading the half that stayed in git.md',
     ).toBe(true);
