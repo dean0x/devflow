@@ -415,6 +415,26 @@ const RETIRED_LITERALS: ReadonlyArray<RetiredEntry> = [
       'come back as a ceiling either.',
   },
   {
+    literal: '58,870',
+    scope: ['CHANGELOG.md'],
+    removedFrom: 'CHANGELOG.md [Unreleased] — the GitHub-mechanics and byte-budget bullets',
+    justification:
+      '`BUDGET_GIT_MD_P3` (58,870) was the live git.md ceiling before #326 collapsed the two-sided ' +
+      'gate to a single `BUDGET_GIT_MD` (45,150). Both changelog bullets that named it are rewritten ' +
+      'to state the current single-ceiling gate instead of restating a constant that no longer exists.',
+  },
+  {
+    literal: '55,750',
+    scope: ['CHANGELOG.md'],
+    removedFrom: 'CHANGELOG.md [Unreleased] — the GitHub-mechanics and byte-budget bullets',
+    justification:
+      '`BUDGET_GIT_MD` (55,750) was the Phase-2 non-preamble base paired with `BUDGET_GIT_MD_P3` ' +
+      '(see the companion entry above). #326 re-derived the same constant to 45,150 and deleted the ' +
+      'non-preamble companion arm along with `PREAMBLE_CHARS_P2` (the preamble-chars constant it ' +
+      'subtracted), so neither the number nor the assertion it described survives; the changelog ' +
+      'prose that quoted it is rewritten to match.',
+  },
+  {
     literal: 're-captured twice',
     scope: ['CHANGELOG.md'],
     removedFrom: 'CHANGELOG.md [Unreleased] — the github-status-lines fixture bullet',

@@ -1510,7 +1510,7 @@ export function splitFrontmatter(text: string): FrontmatterSplit | null {
 // EVERY ROW PINS A TOKEN, NEVER A SENTENCE — and that is a standing rule, not a
 // style note. These generated mechanics are priced against the per-provider
 // loaded-set ceilings in tests/tracker/byte-budget.test.ts, of which
-// `budget-loaded-set-linear` is the thinnest and therefore the binding one, so a
+// `budget-loaded-set-linear` is the largest, and so the binding one, so a
 // condensing pass over this prose is an expected event rather than a hypothetical.
 // A row that pins a whole sentence makes the two forces contradict each other: the
 // ceiling demands the sentence be shortened and the guard forbids it from changing,
