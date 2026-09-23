@@ -43,12 +43,17 @@ import * as os from 'os';
 import * as path from 'path';
 
 import { compiledSkillRefsDir } from '../../src/core/assets.js';
-import { TRACKER_GITHUB_OPS, generatedReferenceManifest } from '../../src/core/mds-variants.js';
+import {
+  PR_HOST_OPS,
+  TRACKER_GITHUB_OPS,
+  generatedReferenceManifest,
+} from '../../src/core/mds-variants.js';
 import {
   ROOT,
   collectUnfencedH2,
   extractOpSectionFromCorpus,
   gitAgentSinkCorpus,
+  prHostRel,
 } from '../helpers.js';
 
 // ---------------------------------------------------------------------------
@@ -89,6 +94,21 @@ function readGeneratedReferences(dir: string = compiledSkillRefsDir()): Generate
 function trackerOpRelPath(op: string): string {
   return `tracker/github/${op}.md`;
 }
+
+/**
+ * Every per-op reference the anchor rule ranges over, as `(op, relPath)` pairs.
+ *
+ * Tracker ops UNION PR-host ops, because the rule is about the FILE SHAPE every
+ * union-mode extraction depends on, and a `pr/` file is extracted exactly the way
+ * a `tracker/{provider}/` one is. Iterating only the tracker roster would leave
+ * eight generated files whose line 1 nothing checks — and a displaced anchor there
+ * silently truncates every D10, D11 and numeric-bound guard that now reads them
+ * (PF-063).
+ */
+const PER_OP_REFERENCES: readonly { readonly op: string; readonly relPath: string }[] = [
+  ...TRACKER_GITHUB_OPS.map(op => ({ op, relPath: trackerOpRelPath(op) })),
+  ...PR_HOST_OPS.map(op => ({ op, relPath: prHostRel(op) })),
+];
 
 /**
  * How many column-0 `## ` lines the live generated tree must carry INSIDE a fence.
@@ -233,8 +253,8 @@ describe('generated references carry no unfenced `## ` below their own heading (
     ).toBeGreaterThanOrEqual(floor);
     expect(
       refs.map(r => r.relPath),
-      'every tracker operation must contribute a per-op reference to the scan',
-    ).toEqual(expect.arrayContaining(TRACKER_GITHUB_OPS.map(trackerOpRelPath)));
+      'every tracker AND PR-host operation must contribute a per-op reference to the scan',
+    ).toEqual(expect.arrayContaining(PER_OP_REFERENCES.map(r => r.relPath)));
     for (const ref of refs) {
       expect(ref.content.length, `${ref.relPath} is empty`).toBeGreaterThan(0);
     }
@@ -244,9 +264,9 @@ describe('generated references carry no unfenced `## ` below their own heading (
     // The anchor is the one unfenced `## ` a per-op reference is allowed, and it
     // must be the FIRST line: a preamble above it would put the anchor's own
     // heading into the "stray" class and make the arm below unfalsifiable.
-    for (const op of TRACKER_GITHUB_OPS) {
-      const ref = refs.find(r => r.relPath === trackerOpRelPath(op));
-      expect(ref, `${trackerOpRelPath(op)} is missing from the manifest`).toBeDefined();
+    for (const { op, relPath } of PER_OP_REFERENCES) {
+      const ref = refs.find(r => r.relPath === relPath);
+      expect(ref, `${relPath} is missing from the manifest`).toBeDefined();
       const headings = collectUnfencedH2(ref!.content);
       expect(
         headings[0],

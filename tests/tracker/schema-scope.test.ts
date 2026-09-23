@@ -45,6 +45,7 @@ import * as path from 'path';
 import { commandsDir, compiledSkillRefsDir, skillsDir } from '../../src/core/assets.js';
 import {
   MCP_BACKED_PROVIDER_SUBDIRS,
+  PR_HOST_DESTINATION_ROOT,
   TRACKER_GITHUB_OPS,
   VARIANT_MODULES,
 } from '../../src/core/mds-variants.js';
@@ -55,6 +56,8 @@ import {
   collectTrackerTemplate,
   collectTrackerTemplateHeadings,
   gitAgentSinkCorpus,
+  isPrHostEntryPath,
+  prHostRel,
   resolveAgentSource,
   walkFiles,
   type CorpusEntry,
@@ -783,7 +786,9 @@ const GITHUB_ONLY_REASONS: readonly string[] = [
  *
  * Each entry is a github-op status literal that predates §14.2 and whose scope the
  * canonical table does not claim: the rate-limit backoff, the no-PR branch of the
- * review-comment ops, the two 5xx retry ceilings, and the release version parse.
+ * review-comment ops, and the release version parse. The two summary operations'
+ * 5xx retry ceilings are emitted from the PR-host references and live in
+ * PR_HOST_LEGACY_REASONS below.
  * The arm below asserts every entry is genuinely emitted, so this cannot become a
  * dumping ground — an entry parked here that nothing emits goes red, exactly as it
  * does for GITHUB_ONLY_REASONS.
@@ -794,9 +799,32 @@ const GITHUB_ONLY_REASONS: readonly string[] = [
 const GIT_AGENT_LEGACY_REASONS: readonly string[] = [
   'rate limited',
   'no PR',
+  'malformed version',
+];
+
+/**
+ * The same class of pre-§14.2 literal, in the PR-HOST references instead of the
+ * agent — a second scoped registry, not a widening of the first.
+ *
+ * #326 moved the two summary operations' step 7 (the 5xx retry ceiling) out of
+ * `git.md` and into `references/pr/{op}.md`. The literals are byte-identical and
+ * owe §14.2 exactly what they owed before; what changed is the file that emits
+ * them, and the scope is the whole point of both registries. Folding these two
+ * rows back into `GIT_AGENT_LEGACY_REASONS` would exempt the wording ANYWHERE the
+ * agent file appears, and vice versa — the shipped property is narrower: each
+ * legacy literal is excused in the one tree that emits it and reported everywhere
+ * else (applies ADR-025; the classification is per literal, per site).
+ *
+ * Scoped by PATH PREFIX rather than by basename, because `ensure-pr-ready.md`
+ * exists under `pr/` and under every provider: a basename scope would quietly
+ * excuse a provider file too.
+ *
+ * ACTION FOR THE PHASE, unchanged by the move: these rows belong in §14.2 or in a
+ * scoped table of their own. Relocating them did not decide that.
+ */
+const PR_HOST_LEGACY_REASONS: readonly string[] = [
   '5xx on post-review-summary',
   '5xx on post-resolution-summary',
-  'malformed version',
 ];
 
 /**
@@ -909,6 +937,7 @@ export function collectUnregisteredReasons(corpus: readonly CorpusEntry[]): stri
       if (CANONICAL_REASONS.some(canonical => reasonSpellings(canonical).includes(reason))) continue;
       if (GITHUB_ONLY_REASONS.includes(reason)) continue;
       if (entry.path === GIT_AGENT.path && GIT_AGENT_LEGACY_REASONS.includes(reason)) continue;
+      if (isPrHostEntryPath(entry.path) && PR_HOST_LEGACY_REASONS.includes(reason)) continue;
       unregistered.push(`${entry.path}: "${reason}"`);
     }
   }
@@ -1113,6 +1142,60 @@ describe('[DR-04] DEGRADED literal registry: reverse direction', () => {
       'the legacy exemption is scoped to the agent file; a provider reference reaching for the ' +
       'same wording is a new reason in an old spelling',
     ).toEqual([`${seeded.path}: "${GIT_AGENT_LEGACY_REASONS[0]}"`]);
+  });
+
+  it('every PR-host exemption is really emitted, and is really scoped to the pr/ tree', () => {
+    // The mirror of the arm above for the second scoped registry (#326). Same two
+    // properties, asserted the same way: nothing parked, nothing excused outside
+    // the tree that emits it.
+    const prOnly = gitAgentSinkCorpus().filter(e => isPrHostEntryPath(e.path));
+    expect(
+      prOnly.length,
+      'no PR-host reference is in the corpus — run `npm run build`; without it this whole arm is ' +
+      'a comparison against nothing (PF-018)',
+    ).toBeGreaterThan(0);
+
+    const emitted = new Set(prOnly.flatMap(e => collectDegradedReasons(e.content)));
+    const unemitted = PR_HOST_LEGACY_REASONS.filter(reason => !emitted.has(reason));
+    expect(
+      unemitted,
+      `PR-host exemption(s) nothing in references/${PR_HOST_DESTINATION_ROOT}/ emits. Delete the ` +
+      `entry — an exemption for a reason nothing writes is a hole held open for nothing:\n  ` +
+      unemitted.join('\n  '),
+    ).toEqual([]);
+    expect(
+      PR_HOST_LEGACY_REASONS.length,
+      'the PR-host legacy list is empty — then its exemption branch is dead and this probe proves ' +
+      'nothing (PF-018)',
+    ).toBeGreaterThan(0);
+
+    // Scope probe, both directions of the scoping. A provider reference reaching
+    // for a PR-host legacy spelling IS reported…
+    const foreign: CorpusEntry = {
+      path: 'dist/skills/git/references/tracker/jira/comment.md',
+      content: `On failure emit \`TRACEABILITY: DEGRADED (${PR_HOST_LEGACY_REASONS[0]})\`.`,
+    };
+    expect(
+      collectUnregisteredReasons([foreign]),
+      'the PR-host exemption must not excuse a provider reference — that is a new reason in an ' +
+      'old spelling',
+    ).toEqual([`${foreign.path}: "${PR_HOST_LEGACY_REASONS[0]}"`]);
+
+    // …and a pr/ reference reaching for an AGENT legacy spelling is reported too,
+    // which is what keeps the two registries two rather than one with a longer list.
+    // Named by value, and required to be agent-only: a literal on both lists would
+    // be excused in pr/ by the PR-host exemption and prove nothing about this one.
+    const AGENT_ONLY_REASON = 'malformed version';
+    expect(GIT_AGENT_LEGACY_REASONS).toContain(AGENT_ONLY_REASON);
+    expect(PR_HOST_LEGACY_REASONS).not.toContain(AGENT_ONLY_REASON);
+    const crossed: CorpusEntry = {
+      path: `dist/skills/git/references/${prHostRel('check-ci-status')}`,
+      content: `On failure emit \`TRACEABILITY: DEGRADED (${AGENT_ONLY_REASON})\`.`,
+    };
+    expect(
+      collectUnregisteredReasons([crossed]),
+      'the agent-scoped exemption must not leak into the PR-host tree',
+    ).toEqual([`${crossed.path}: "${AGENT_ONLY_REASON}"`]);
   });
 
   it('known-bad probe: a new unregistered reason in the agent file is reported', () => {

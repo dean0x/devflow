@@ -223,8 +223,13 @@ describe('devflow init installs {github} ∪ {selected provider}', () => {
   it('a second identical init writes nothing and reports no movement', () => {
     const first = init(['--tracker', 'jira']);
     expect(first.status, `init failed:\n${first.stdout}\n${first.stderr}`).toBe(0);
-    expect(first.stdout).toContain('Installed 24 generated skill reference(s)');
-    expect(first.stdout).toContain('+24 reference(s)');
+    // Derived from the registry, not typed: the install-set size moves whenever a
+    // module joins (#326 added the 8-file PR-host tree), and a literal here would
+    // report that as an e2e regression in a file whose subject is the STEADY-STATE
+    // re-init, not the count.
+    const jiraRefs = installedReferenceManifest({ provider: 'jira' }).length;
+    expect(first.stdout).toContain(`Installed ${jiraRefs} generated skill reference(s)`);
+    expect(first.stdout).toContain(`+${jiraRefs} reference(s)`);
 
     const second = init(['--tracker', 'jira']);
     expect(second.status, `re-init failed:\n${second.stdout}\n${second.stderr}`).toBe(0);

@@ -64,7 +64,8 @@ devflow/
 │       │   └── _partials/            # MDS partials (no output-dir:, never compiled directly)
 │       ├── mds/                      # MDS reference modules (compiled to dist/skills/git/references/ by build:mds)
 │       │   ├── tracker/_github.mds     # One file per GitHub tracker operation
-│       │   └── git/_references.mds     # Cross-cutting documents the Git agent names
+│       │   ├── git/_references.mds     # Cross-cutting documents the Git agent names
+│       │   └── git/_pr.mds             # One file per PR-host operation (provider-independent)
 │       └── scripts/hooks/            # Capture + memory + learning + ambient hooks
 │           ├── capture-prompt        # UserPromptSubmit hook: appends user turn to memory + learning queues (independently gated)
 │           ├── capture-turn          # Stop hook: appends assistant turn to memory + learning queues; never spawns

@@ -33,11 +33,19 @@ import {
   TRACKER_GITHUB_OPS,
   GIT_CROSS_CUTTING_DOCS,
   MIN_VARIANT_PAIRS,
+  PR_HOST_DESTINATION_ROOT,
+  PR_HOST_OPS,
   VARIANT_MODULES,
   expandVariants,
   generatedReferenceManifest,
 } from '../../src/core/mds-variants.js';
-import { collectTrackerNamingLines, resolveAgentSource, walkFiles } from '../helpers.js';
+import {
+  collectTrackerNamingLines,
+  extractOpSectionFromCorpus,
+  prHostRel,
+  resolveAgentSource,
+  walkFiles,
+} from '../helpers.js';
 import { MIN_REFERENCE_CHARS } from './reference-floor.js';
 
 // ---------------------------------------------------------------------------
@@ -302,6 +310,54 @@ function collectLiteralReferenceNames(content: string): Set<string> {
   return names;
 }
 
+/** Named collector: the `pr/…` paths the agent spells out literally. */
+function collectPrHostNames(content: string): string[] {
+  return [...collectLiteralReferenceNames(content)]
+    .filter(rel => rel.startsWith(`${PR_HOST_DESTINATION_ROOT}/`))
+    .sort();
+}
+
+/**
+ * Named predicate: does a per-op reference open with its OWN anchor on line 1?
+ *
+ * A function rather than an inline `startsWith` at each site, because the live arm
+ * and its known-bad probe must read the SAME rule. Restated inline, the probe
+ * asserts only that one hand-written string fails one hand-written check — it stays
+ * green after the live arm is weakened (say to `includes`), which is the vacuous
+ * pass PF-018 names.
+ */
+function anchorsOnLineOne(body: string, op: string): boolean {
+  return body.startsWith(`## Operation: ${op}\n`);
+}
+
+/**
+ * Named collector: every manifest path a spawn reading `content` could name.
+ *
+ * FOUR arms, one per module kind the registry carries, and the live check and
+ * both known-bad probes drive this one function — a probe that rebuilt the union
+ * inline would stay green after an arm was dropped from the real check (PF-018).
+ *
+ *   fanout / tracker    instantiate the preamble's ONE templated instruction;
+ *   named               the agent spells the document's path out, once each;
+ *   fanout / PR-host    the agent spells each file's path out, once per op. Not
+ *                       templated on purpose: the file is the same under every
+ *                       provider, so there is nothing to instantiate — and a
+ *                       second templated instruction would be a second path
+ *                       composed from the provider token, which is the single
+ *                       convergence point PF-023 exists to protect;
+ *   contract            the preamble names it, as a fixed literal.
+ */
+function reachableSetFrom(content: string): Set<string> {
+  return new Set([
+    ...providerReachablePaths(LOAD_INSTRUCTION_TEMPLATE),
+    ...[...collectLiteralReferenceNames(content)].filter(rel =>
+      (GIT_CROSS_CUTTING_DOCS as readonly string[]).includes(path.basename(rel, '.md')),
+    ),
+    ...collectPrHostNames(content),
+    ...(contractIsNamedByThePreamble(content) ? [CONTRACT_REL] : []),
+  ]);
+}
+
 describe('generated references: every reference is reachable from the agent (AC-2.7)', () => {
   const agent = resolveAgentSource('git');
 
@@ -326,18 +382,7 @@ describe('generated references: every reference is reachable from the agent (AC-
     // generated, installed on every machine and shipped in the tarball, and a
     // cross-cutting document that lost its one naming line is exactly as invisible
     // as an orphan file.
-    const reachable = new Set([
-      // The 'fanout' module kind, for every registered provider: reachable ⇔
-      // instantiating the preamble's single templated instruction yields the path.
-      ...providerReachablePaths(LOAD_INSTRUCTION_TEMPLATE),
-      // The 'named' module kind: reachable ⇔ the compiled agent spells the path
-      // out literally. Read out of the agent, never restated here (PF-018).
-      ...[...collectLiteralReferenceNames(agent.content)].filter(rel =>
-        (GIT_CROSS_CUTTING_DOCS as readonly string[]).includes(path.basename(rel, '.md')),
-      ),
-      // The 'contract' module kind: reachable ⇔ the preamble names it.
-      ...(contractIsNamedByThePreamble(agent.content) ? [CONTRACT_REL] : []),
-    ]);
+    const reachable = reachableSetFrom(agent.content);
 
     const emitted = walkFiles(REFS_DIR, f => f.endsWith('.md'))
       .map(f => path.relative(REFS_DIR, f).split(path.sep).join('/'));
@@ -451,14 +496,90 @@ describe('generated references: every reference is reachable from the agent (AC-
     ).toBe(false);
 
     // …and the same set difference the live check computes now reports it.
-    const reachable = new Set([
-      ...providerReachablePaths(LOAD_INSTRUCTION_TEMPLATE),
-      ...[...namedInStripped].filter(rel =>
-        (GIT_CROSS_CUTTING_DOCS as readonly string[]).includes(path.basename(rel, '.md')),
-      ),
-      ...(contractIsNamedByThePreamble(stripped) ? [CONTRACT_REL] : []),
-    ]);
+    const reachable = reachableSetFrom(stripped);
     expect(generatedReferenceManifest().filter(rel => !reachable.has(rel))).toEqual([target]);
+  });
+
+  // ── The PR-host tree: parity, and its own reachability direction (#326) ────
+
+  it('PR-host parity: every PR_HOST_OPS entry has a non-trivial file, and every pr/ file has an op', () => {
+    // The same claim the provider trees carry, for the tree that belongs to no
+    // provider. Both directions, because the forward one alone lets a stray file
+    // ship unreferenced and the reverse one alone lets a listed op emit nothing —
+    // and a per-file size floor, because a reference that kept its heading and
+    // lost its body reads downstream as "mechanics unavailable" while the install
+    // reports success (GAP-44).
+    const emitted = walkFiles(path.join(REFS_DIR, PR_HOST_DESTINATION_ROOT), f => f.endsWith('.md'))
+      .map(f => path.relative(REFS_DIR, f).split(path.sep).join('/'))
+      .sort();
+    expect(
+      emitted,
+      'the pr/ tree and PR_HOST_OPS must be the same set in both directions',
+    ).toEqual([...PR_HOST_OPS].map(prHostRel).sort());
+    expect(
+      PR_HOST_OPS.length,
+      'the PR-host roster is below the fan-out floor — every parity assertion over it is vacuous',
+    ).toBeGreaterThanOrEqual(MIN_VARIANT_PAIRS);
+
+    for (const op of PR_HOST_OPS) {
+      const body = requireFile('PR-host reference', path.join(REFS_DIR, PR_HOST_DESTINATION_ROOT, `${op}.md`));
+      expect(
+        body.length,
+        `${prHostRel(op)} is ${body.length} ch — below MIN_REFERENCE_CHARS (${MIN_REFERENCE_CHARS})`,
+      ).toBeGreaterThanOrEqual(MIN_REFERENCE_CHARS);
+      expect(
+        anchorsOnLineOne(body, op),
+        `${prHostRel(op)} must OPEN with its own "## Operation: ${op}" anchor on line 1 — every ` +
+        'union-mode extraction starts there, and an anchor further down silently truncates the ' +
+        'section to whatever precedes it (PF-063)',
+      ).toBe(true);
+    }
+  });
+
+  it('PR-host parity known-bad probe: an anchor that is not on line 1 is reported', () => {
+    // The anchor rule is a prefix check, so on live inputs it is green whether or
+    // not the predicate is live (PF-064). Drive `anchorsOnLineOne` — the SAME
+    // function the live arm calls — over two seeded bodies instead, both
+    // directions, so the probe fails on a predicate that has been weakened to
+    // accept a displaced anchor AND on one that has gone constant-false.
+    const op = PR_HOST_OPS[0];
+    const displaced = `Load this first.\n\n## Operation: ${op}\n\nSteps.\n`;
+    expect(
+      anchorsOnLineOne(displaced, op),
+      'a body whose anchor is preceded by prose must NOT satisfy the line-1 rule',
+    ).toBe(false);
+
+    const wellFormed = `## Operation: ${op}\n\nSteps.\n`;
+    expect(
+      anchorsOnLineOne(wellFormed, op),
+      'a body that DOES open with its anchor must satisfy the rule — otherwise the live arm ' +
+      'passes only because nothing it asks can ever be true',
+    ).toBe(true);
+  });
+
+  it('pr/ reachability: the agent names exactly the PR-host roster, both directions', () => {
+    expect(
+      collectPrHostNames(agent.content),
+      'the pr/ paths the agent spells out and the PR_HOST_OPS roster must be the same set — a ' +
+      'pointer with no file degrades every spawn of that op, and a file with no pointer is ' +
+      'installed on every machine and read by nothing (ADR-003)',
+    ).toEqual([...PR_HOST_OPS].map(prHostRel).sort());
+  });
+
+  it('pr/ reachability known-bad probe: deleting one pointer line makes its file unreachable', () => {
+    // The direction the parity arm above cannot see: the files stay emitted and
+    // the roster stays intact, and only the AGENT changed. Strips one op's pointer
+    // from a COPY and drives the SAME reachability collector the live check uses.
+    const target = prHostRel('check-ci-status');
+    const stripped = agent.content
+      .split('\n')
+      .filter(line => !line.includes(`references/${target}`))
+      .join('\n');
+    expect(stripped, 'the strip must actually change the agent copy').not.toBe(agent.content);
+    expect(
+      generatedReferenceManifest().filter(rel => !reachableSetFrom(stripped).has(rel)),
+      'an emitted pr/ file whose pointer line is gone must be reported as unreachable',
+    ).toEqual([target]);
   });
 
   it('known-bad probe: a seeded extra manifest entry is reported against the emitted tree', () => {
@@ -470,5 +591,133 @@ describe('generated references: every reference is reachable from the agent (AC-
       'a manifest entry with no emitted file must be reported — the install would copy nothing ' +
       'and the agent would name a path that does not exist',
     ).toEqual(['tracker/github/smuggled.md']);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 3. The merged step list across files: deferrals are loadable, labels have one owner
+// ---------------------------------------------------------------------------
+
+/** Every emitted `pr/…` reference, keyed by op. */
+function prHostFiles(): Map<string, string> {
+  return new Map(PR_HOST_OPS.map(op => [
+    op,
+    requireFile('PR-host reference', path.join(REFS_DIR, PR_HOST_DESTINATION_ROOT, `${op}.md`)),
+  ]));
+}
+
+/**
+ * Named collector: the ops a PR-host reference defers to ("same logic as `{op}`")
+ * without telling the spawn to load the file that holds those steps.
+ *
+ * The load rule reads only the file an op's own pointer names, so a deferral to a
+ * sibling op's steps reaches nothing unless the deferring file names the sibling's
+ * `pr/` path itself. Before #326 the sibling's steps sat in the always-loaded agent
+ * and the phrase alone was enough; after the split it points at a file no spawn of
+ * the deferring op reads.
+ */
+function collectUnloadedDeferrals(body: string): string[] {
+  const named = collectLiteralReferenceNames(body);
+  return [...body.matchAll(/same logic as `([a-z-]+)`/g)]
+    .map(m => m[1])
+    .filter(op => !((PR_HOST_OPS as readonly string[]).includes(op) && named.has(prHostRel(op))));
+}
+
+/** Column-0 step labels (`1.`, `4b.`) in a body — the numbers the merged-order rule sequences. */
+function stepLabels(body: string): string[] {
+  return [...body.matchAll(/^(\d+[a-z]?)\.\s/gm)].map(m => m[1]);
+}
+
+/**
+ * Named collector: step labels supplied by more than one file loaded for the same op.
+ *
+ * The agent's merge rule executes every loaded file's steps as ONE list in numeric
+ * order. It interleaves; it has no rule for two files that both supply `4b.`, so a
+ * shared label reads as either one step or the same step twice (a double
+ * scrub-then-edit). Every label must therefore have exactly one owning file.
+ */
+function collectSharedStepLabels(files: ReadonlyArray<{ path: string; body: string }>): string[] {
+  const owners = new Map<string, string[]>();
+  for (const { path: rel, body } of files) {
+    for (const label of new Set(stepLabels(body))) {
+      owners.set(label, [...(owners.get(label) ?? []), rel]);
+    }
+  }
+  return [...owners]
+    .filter(([, paths]) => paths.length > 1)
+    .map(([label, paths]) => `${label}. in ${paths.join(' and ')}`);
+}
+
+/** The files one spawn of a PR-host op loads under one provider, agent section included. */
+function loadedStepFiles(
+  agentContent: string,
+  op: string,
+  providerSubdir: string,
+): Array<{ path: string; body: string }> {
+  const files = [
+    { path: 'git.md', body: extractOpSectionFromCorpus([{ path: 'git.md', content: agentContent }], op, { mode: 'sole' }).content },
+    { path: prHostRel(op), body: prHostFiles().get(op) ?? '' },
+  ];
+  const mod = VARIANT_MODULES.find(m => m.subdir === providerSubdir);
+  if (mod !== undefined && mod.ops.includes(op)) {
+    const rel = `${providerSubdir}/${op}.md`;
+    files.push({ path: rel, body: requireFile('provider reference', path.join(REFS_DIR, rel)) });
+  }
+  return files;
+}
+
+const PROVIDER_SUBDIRS = VARIANT_MODULES
+  .map(mod => mod.subdir)
+  .filter(subdir => subdir.startsWith('tracker/'));
+
+describe('PR-host references: the merged step list is executable from what one spawn loads', () => {
+  const agent = resolveAgentSource('git');
+
+  it('every "same logic as `{op}`" in a pr/ file names that op\'s pr/ file for loading', () => {
+    const offenders = [...prHostFiles()].flatMap(([op, body]) =>
+      collectUnloadedDeferrals(body).map(target => `${prHostRel(op)} defers to ${target}`));
+    expect(
+      offenders,
+      'a PR-host reference defers to a sibling op\'s steps without naming the file that holds them — ' +
+      'the spawn is told to load only its own pointer\'s file, so it improvises the steps:\n  ' +
+      offenders.join('\n  '),
+    ).toEqual([]);
+  });
+
+  it('the deferral rule is non-vacuous: the live pr/ corpus carries at least one deferral', () => {
+    const deferrals = [...prHostFiles().values()]
+      .flatMap(body => [...body.matchAll(/same logic as `([a-z-]+)`/g)]);
+    expect(deferrals.length, 'no deferral in the pr/ corpus — the rule above ranges over nothing').toBeGreaterThan(0);
+  });
+
+  it('known-bad probe: a deferral with no load name is reported, and the named form is not', () => {
+    const bare = '3. Fetch CI status (same logic as `check-ci-status`)\n';
+    expect(collectUnloadedDeferrals(bare)).toEqual(['check-ci-status']);
+    const loaded = `${bare}   Load \`references/${prHostRel('check-ci-status')}\` for those steps.\n`;
+    expect(collectUnloadedDeferrals(loaded)).toEqual([]);
+  });
+
+  it('no step label is supplied by two files loaded for the same op, under any provider', () => {
+    const offenders = PROVIDER_SUBDIRS.flatMap(subdir =>
+      PR_HOST_OPS.flatMap(op =>
+        collectSharedStepLabels(loadedStepFiles(agent.content, op, subdir)).map(hit => `${op} (${subdir}): ${hit}`)));
+    expect(
+      offenders,
+      'two loaded files supply the same step label — the merge rule has no collision clause, so the ' +
+      'step reads as one step or as the same step twice:\n  ' + offenders.join('\n  '),
+    ).toEqual([]);
+  });
+
+  it('the label rule is non-vacuous: some op loads three files, and the providers are all ranged', () => {
+    expect(PROVIDER_SUBDIRS.length, 'no provider module registered').toBeGreaterThan(0);
+    const threeFileOps = PR_HOST_OPS.filter(op => loadedStepFiles(agent.content, op, PROVIDER_SUBDIRS[0]).length === 3);
+    expect(threeFileOps, 'no PR-host op is also a tracker op — the collision the rule guards cannot occur').not.toEqual([]);
+  });
+
+  it('known-bad probe: one label in two files is reported, disjoint labels are not', () => {
+    const pr = { path: 'pr/x.md', body: '1. a\n4b. b\n' };
+    expect(collectSharedStepLabels([pr, { path: 'tracker/github/x.md', body: '4b. c\n' }]))
+      .toEqual(['4b. in pr/x.md and tracker/github/x.md']);
+    expect(collectSharedStepLabels([pr, { path: 'tracker/github/x.md', body: '4c. c\n' }])).toEqual([]);
   });
 });

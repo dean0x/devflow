@@ -73,8 +73,11 @@ export const LOOP_MARKERS: readonly Marker[] = [
     label: 'for-each',
     pattern: /^[ \t]*(?:[-*][ \t]+|\d+[a-z]?\.[ \t]+)?(?:\*\*)?For (?:each|every)\b/i,
     justification:
-      'The corpus states its three real fan-outs this way: git.md fetch-review-threads step 4, ' +
-      'resolve-review-threads\' ≤50 reply loop, and backlink-shipped-issues\' ≤50 issue loop.',
+      'The corpus states its three real fan-outs this way: references/pr/fetch-review-threads.md ' +
+      'step 4, references/pr/resolve-review-threads.md\'s ≤50 reply loop, and ' +
+      'backlink-shipped-issues\' ≤50 issue loop. The first two named git.md until #326 moved ' +
+      'those bodies into the PR-host tree; the corpus already spans both, so the sites moved ' +
+      'and the marker did not.',
   },
   {
     label: 'then-per-item',
@@ -313,7 +316,7 @@ describe('capability-hoist: no capability probe runs inside a loop [DR-11]', () 
     expect(
       blocks.length,
       'too few process blocks to be scanning both git.md and the generated references',
-    ).toBeGreaterThanOrEqual(49);
+    ).toBeGreaterThanOrEqual(57);
 
     expect(LOOP_MARKERS.length, 'LOOP_MARKERS must be non-empty').toBeGreaterThan(0);
     expect(PROBE_MARKERS.length, 'PROBE_MARKERS must be non-empty').toBeGreaterThan(0);

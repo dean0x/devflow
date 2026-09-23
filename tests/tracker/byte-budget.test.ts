@@ -17,8 +17,7 @@
  * skipped. A skipped budget asserts nothing and reads as "fine" in a CI log
  * (PF-018), so a ceiling that goes red is answered by cutting the artifact, never
  * by raising the ceiling or disabling its gate. Each ceiling's own JSDoc records
- * its measurement, its headroom, and — where it was re-baselined once under an
- * explicit authorisation — what the raise bought.
+ * its measurement and its headroom.
  *
  * UNIT: characters, not bytes, throughout — `wc -m` semantics. JS `.length`
  * counts UTF-16 code units, which equals `wc -m` for this corpus (every
@@ -35,11 +34,13 @@ import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'fs';
 import * as path from 'path';
 
-import { MIN_VARIANT_PAIRS, TRACKER_GITHUB_OPS } from '../../src/core/mds-variants.js';
-import { collectTrackerNamingLines } from '../helpers.js';
+import { MIN_VARIANT_PAIRS, PR_HOST_OPS, TRACKER_GITHUB_OPS } from '../../src/core/mds-variants.js';
+import { collectTrackerNamingLines, prHostRel } from '../helpers.js';
 import {
   ALL_OPS,
   GIT_AGENT,
+  LOADED_SET_WRITTEN_EXCLUSIONS,
+  isPrHostOp,
   MCP_BACKED_PROVIDERS,
   MCP_CONTRACT_REL,
   MODEL_CROSS_CUTTING_ON_DEMAND,
@@ -64,6 +65,7 @@ import {
   summedFor,
   trackerRefRel,
   worstCaseNonTrackerLoad,
+  worstCasePrHostLoad,
   worstCaseProviderLoad,
   worstCaseReferenceLoad,
 } from './budget-model.js';
@@ -73,113 +75,33 @@ import {
 // ---------------------------------------------------------------------------
 
 /**
- * Design-time derivation: the post-Phase-0 merge-commit capture of
- * dist/agents/git.md, less the cut Phase 2 projected for it — the tracker
- * mechanics, the learn-conventions body, the marker legend (the D4 and D11 rows
- * stay, E10) and the D10 step-order block, net of the add-back. That baseline is
- * the one BUDGET_LOADED_SET below is pinned to, and it is stated there once.
- * No per-component decomposition of the projected cut is recorded here: three
- * successive re-derivations of those components disagreed (PF-057) and no
- * printed row produces them.
+ * THE git.md CEILING — the one gate on the always-loaded half of the split.
+ *
+ * Derived from a measured 45_068 ch — with the eight PR-host operations'
+ * `**Process:**` bodies in `references/pr/{op}.md`, not in the agent — and pinned
+ * at 45_150. The 82 ch of headroom is deliberately thin, so the next content
+ * addition to git.mds must fund itself with a cut elsewhere rather than spend slack.
  *
  * THE RULE: this ceiling is a REGRESSION ALARM, and it is RE-DERIVED ONLY DOWNWARD —
- * lowered after a condensing pass that actually cut the artifact, never raised to fit
- * one that grew. A budget that rises to meet the artifact is a description, not a
- * budget (§14.5).
+ * lowered after a pass that actually cut the artifact, never raised to fit one that
+ * grew. A budget that rises to meet the artifact is a description, not a budget
+ * (§14.5). The only legitimate way back under this line is to move text out of the
+ * agent.
  *
- * LOWERED 55_900 → 55_750 after the Mechanics-pointer condensing pass: B31 replaced
- * the eleven per-op pointer sentences with `**Mechanics:** load this operation's
- * provider reference.` (55_896 → 55_577 ch) and B32 landed back at 55_664. 55_750
- * leaves 86 ch of headroom over that measurement — deliberately thin, so the next
- * content addition to git.mds must fund itself with a cut elsewhere.
+ * NO PER-COMPONENT DECOMPOSITION of the cut is recorded here, and none is welcome:
+ * three successive re-derivations of such components disagreed once already
+ * (PF-057), and no printed row produces them. Measure the artifact instead —
+ *
+ *   npm run build && node -e "process.stdout.write(String(require('fs').readFileSync('dist/agents/git.md','utf8').length))"
+ *
+ * — and read the shape table this file prints for everything the measurement feeds.
  *
  * Registered as a `ceilings` entry (`budget-git-md`) in
  * tests/fixtures/numeric-floors.json. Lowering re-pins that entry's value AND its
  * pattern in the same commit; that is the permitted direction for a ceiling, and the
  * manifest guard's probe still proves an INCREMENT would go red.
- *
- * THE LIVE git.md GATE IS BUDGET_GIT_MD_P3 below; this value is the DECLARED BASE
- * that one is re-derived from, and it is registered for that reason. A ceiling is
- * only ever re-derived DOWNWARD, so the base has to stay pinned: the Phase-3
- * figure is read as a delta from it, and lowering it here would silently lower the
- * Phase-3 loaded-set gate too. Recorded in the four-shape table as the Phase-2 row.
  */
-const BUDGET_GIT_MD = 55_750;
-
-/**
- * THE PHASE-3 git.md CEILING [DR-13(b)] — the gate, with BUDGET_GIT_MD above as
- * its declared base.
- *
- * A re-derivation of BUDGET_GIT_MD by the MEASURED growth of the preamble block,
- * not an estimate — and mechanically so: the gate below holds the revision to
- * that block's own length. Measured 58_782 against this ceiling (headroom 88 —
- * the same deliberate thinness Phase 2 chose, so the next content addition must
- * again fund itself). The portion of git.md OUTSIDE the preamble has only ever
- * been CUT on this branch, never grown — the alignment pass deleted the GitHub
- * rate-limit signal from `backlink-shipped-issues`' D4 line and spent what that
- * recovered on a preamble rule. That direction is what the companion gate below
- * is for: it holds the portion outside the preamble to the UNRAISED Phase-2
- * number, and a cut there widens its margin rather than consuming this ceiling.
- *
- * No per-pass decomposition of that portion is recorded here — three successive
- * re-derivations of those components disagreed (PF-057), so re-run this file for
- * the current figures: the ceilings are the assertion, the printed table is the
- * record.
- *
- * WHAT THE REVISION BUYS, line by line. Phase 2's preamble resolved the provider
- * MANIFEST-ONLY and read no configuration file; Phase 3 makes the slot real, and
- * every clause below is a control with no mechanical backstop anywhere else:
- *   + the four-step resolution order (per-repo key → ref grammar → manifest → github)
- *   + ref-grammar corroboration, INCLUDING the explicit prohibition on reading the
- *     remote or the PR host — the rule that would otherwise disable the feature for
- *     every user it targets (OD-9's corrected condition)
- *   + the project-key resolution chain and its shape gate
- *   + the provider-mismatch guard (P3a-S14) — the precondition for preserving the
- *     configuration file across an uninstall (OD-15's reversal condition)
- *   + the unreadable-file arm, the `# UNRESOLVED:` sentinel arm, the
- *     `tracker not configured` arm and the `ambiguous issue reference` arm
- *   + the `## Tracker input contract` section list and its absent⇒default rule
- *   − the retired `**Phase scope:** manifest-only` sentence
- *   − one statement each of the mechanics-absent rule and the provider-neutral
- *     value, which Phase 2 stated three times and twice respectively
- *
- * WHY A NEW CONSTANT AND NOT A RAISED ONE. A ceiling may only be re-derived
- * DOWNWARD (§14.5), so BUDGET_GIT_MD is not touched: it stays as the Phase-2
- * measurement AND as the base this value is computed from, which is what keeps it
- * load-bearing rather than a tombstone. The escape §14.10 offers instead of a new
- * number — [DR-13(c)]'s `references/tracker/_resolution.md` — was measured and
- * REJECTED, and the arithmetic is recorded here because it is not obvious:
- * moving text into a per-op-summed reference is NET ZERO on the loaded-set gate
- * (git.md loses the bytes, `worst` gains them), and the only classification that
- * would have reduced it — a cross-cutting reference RECORDED but not gated — is
- * the one classification these clauses cannot honestly take. A mismatch guard
- * that decides whether a tracker call happens is a containment control, and
- * PF-058 is precisely the rule that a containment control is never a file the
- * spawn might not have loaded.
- *
- * Registered as a NEW `ceilings` entry (`budget-git-md-p3`). It is the ONLY new
- * literal: the loaded-set companion below is COMPUTED from this number, so both
- * gates ratchet on one registered value.
- *
- * WHAT STOPS THIS BEING A BLANK CHEQUE. The revision is spendable ONLY on the
- * preamble, and that is mechanical rather than a promise: PREAMBLE_CHARS_P2 below
- * lets the non-preamble portion of git.md be gated against the UNRAISED
- * BUDGET_GIT_MD, so growth anywhere else in the file is still measured against
- * Phase 2's number with Phase 2's 86 ch of headroom.
- */
-const BUDGET_GIT_MD_P3 = 58_870;
-
-/**
- * The provider-resolution preamble's size at the PHASE-2 boundary, measured on
- * the compiled agent at commit e66ef30: 3_385 ch / 29 lines.
- *
- * A historical measurement, in the same class as BUDGET_LOADED_SET's Phase-0
- * capture: it exists so `BUDGET_GIT_MD − PREAMBLE_CHARS_P2` is a real allowance
- * for everything OUTSIDE the preamble, rather than a number someone chose. That
- * subtraction is what turns the Phase-3 revision from "git.md may be bigger" into
- * "the preamble may be bigger, and nothing else may be".
- */
-const PREAMBLE_CHARS_P2 = 3_385;
+const BUDGET_GIT_MD = 45_150;
 
 /**
  * Design-time derivation: the PRE-SPLIT capture of skills/git/SKILL.md, less the
@@ -197,115 +119,73 @@ const BUDGET_SKILL_MD = 6_600;
  * THE GITHUB-PATH loaded-set ceiling — the worst-case cost of a tracker spawn
  * that resolves to github, where `bytes(tracker/_mcp.md)` is 0 by construction.
  *
- * ONE-TIME RE-BASELINE, 2026-09-20, under the authorisation recorded for all
- * three loaded-set rows (see BUDGET_LOADED_SET_JIRA below for the terms). It was
- * the PRE-SPLIT preloaded set (77_824 ch: git.md 65_677 + git SKILL.md 9_205 +
- * worktree-support 2_942) with a computed Phase-paired companion layered on top;
- * both are retired and this is now a single number gating the shipped shape.
+ * The formula the gate below states term by term:
+ *   the always-preloaded set
+ *   + 0                                          — tracker/_mcp.md, on the GitHub path
+ *   + max_op chars(references/tracker/github/{op}.md)
+ *   + max over TRACKER ops of the one-spawn load [DR-12, D-LOADED-SET-SCOPE]
  *
- * WHAT THE RAISE BOUGHT, read off the printed shape table's `2. per-op split,
- * GitHub path` row: the per-op split itself. The monolith loaded one document;
- * the split loads the agent plus the operation's own mechanics plus whatever
- * cross-cutting references that operation can name in one spawn, and the sum of
- * those terms is larger than the monolith was. That is the cost the split was
- * accepted at, and pricing it honestly is what makes the number a gate rather
- * than an aspiration.
+ * That this row's contract term is 0 is PROVEN, not assumed: the re-scoped AC-2.7
+ * arm in tests/guards/provider-scope.test.ts asserts no `tracker/github/{op}.md`
+ * names the tool-call contract, and a gate in this file repeats the check against
+ * every github mechanics file. A provider that DOES load it is priced on its own
+ * row, so this number can never drift into billing every GitHub user for bytes
+ * they never receive (GAP-02).
  *
- * Measured 80_155, pinned at 80_200 — 45 ch of headroom, deliberately thin, so
- * the next addition to the agent or to a github mechanics file must fund itself
- * with a cut. LOWERED THEREAFTER, NEVER RAISED AGAIN.
+ * Derived from a measured 67_123 and pinned at 67_200 — 77 ch of headroom,
+ * deliberately thin, so the next addition to the agent or to a github mechanics
+ * file must fund itself with a cut.
  *
- * Registered as `budget-loaded-set` in tests/fixtures/numeric-floors.json;
- * lowering re-pins the value AND the pattern in the same commit.
+ * MAY BE LOWERED, NEVER RAISED. Registered as `budget-loaded-set` in
+ * tests/fixtures/numeric-floors.json; lowering re-pins the value AND the pattern
+ * in the same commit.
  */
-const BUDGET_LOADED_SET = 80_200;
+const BUDGET_LOADED_SET = 67_200;
 
 /**
  * THE JIRA-SCOPED loaded-set ceiling — a spawn under the Jira provider.
  *
  * WHY A SECOND ROW AND NOT A RAISED FIRST ONE. `BUDGET_LOADED_SET` above answers
  * "what does a tracker spawn cost on the GitHub path?", and a provider's cost does
- * not change that answer: no github operation file names the tool-call contract (the
- * re-scoped AC-2.7 arm in tests/guards/provider-scope.test.ts PROVES that rather
- * than assuming it), so `MCP_TERM` stays 0 by construction and the GitHub row keeps
- * its own headroom (45 ch as measured — read the printed table, not this
- * sentence). Folding a provider that DOES load the contract into that
- * number would have billed every GitHub user for bytes they never receive — the
- * exact defect GAP-02 recorded — and would have done it by raising a ratcheted
- * ceiling, which §14.5 forbids outright.
+ * not change that answer: no github operation file names the tool-call contract, so
+ * that row's `MCP_TERM` stays 0 by construction and keeps its own headroom. Folding
+ * a provider that DOES load the contract into that number would have billed every
+ * GitHub user for bytes they never receive — the exact defect GAP-02 recorded — and
+ * would have done it by raising a ratcheted ceiling, which §14.5 forbids outright.
  *
  * So the cost of a provider is priced per provider. Each MCP-backed provider gets
  * its own row and its own ceiling; none of them can move the GitHub one, and the
  * GitHub one cannot absorb theirs.
  *
- * MEASURED, term by term, off the printed shape table on this tree:
- *     dist/agents/git.md                             58_100
- *   + skills/git/SKILL.md                             6_581
- *   + skills/worktree-support/SKILL.md                2_942
- *   = the always-preloaded set                       67_623
- *   + references/tracker/_mcp.md                      7_963   ← 0 on the GitHub path
- *   + max_op references/tracker/jira/{op}.md          6_058   (backlink-shipped-issues)
- *   + max over jira ops of the one-spawn load         7_815   (setup-task: its own
- *                                                              mechanics + learn-conventions.md)
- *   =                                                89_459
+ * The formula, term by term:
+ *   the always-preloaded set
+ *   + chars(references/tracker/_mcp.md)          — per-spawn under this provider
+ *   + max_op chars(references/tracker/jira/{op}.md)
+ *   + max over TRACKER ops of the one-spawn load [DR-12, D-LOADED-SET-SCOPE]
  *
- * ONE-TIME RE-BASELINE, 2026-09-20. This row and its Linear sibling were pinned
- * at 88_660 / 91_000 before the tool-call contract grew, and that growth was not
- * priced when those numbers were set. The re-baseline is authorised once, the
- * companion "not a free number" gate is retired with it, and both rows are
- * LOWERED THEREAFTER, NEVER RAISED AGAIN.
+ * Derived from a measured 76_427 and pinned at 76_500 — 73 ch of headroom,
+ * tighter than the GitHub row's, so the next addition to the contract or to a Jira
+ * mechanics file must fund itself with a cut rather than reach for slack. Trimming
+ * `references/tracker/_mcp.md` is the honest first move: it is contract prose, it
+ * is the single largest term this row adds over the GitHub one, and a pass over it
+ * is cheaper than another ceiling.
  *
- * WHAT THE RAISE BOUGHT, read off the printed table rather than reconstructed:
- * every character of it lands in `references/tracker/_mcp.md`, which went
- * 6_907 → 7_963 ch. That file gained the two-server per-capability scoping rule
- * (partition by the tool name's leading namespace segment, per-capability
- * qualification, unique-winner-else-DEGRADED, spawn-pinned affinity, and the
- * corroborating read a write requires), the rate-limit signals section, the
- * Reference Rendering rule, and the plan artifact posted as content with an
- * over-cap DEGRADED path. Each is a control with no mechanical backstop
- * elsewhere.
- *
- * Pinned at 89_500 — 41 ch of headroom, tighter than any git.md ceiling's, so
- * the next addition to the contract or to a Jira mechanics file must fund itself
- * with a cut rather than reach for slack. Trimming
- * `references/tracker/_mcp.md` is the honest first move: it is contract prose,
- * it is the single largest term this row adds, and a pass over it is cheaper
- * than another ceiling.
- *
- * Registered as `budget-loaded-set-jira` in tests/fixtures/numeric-floors.json.
+ * MAY BE LOWERED, NEVER RAISED. Registered as `budget-loaded-set-jira` in
+ * tests/fixtures/numeric-floors.json.
  */
-const BUDGET_LOADED_SET_JIRA = 89_500;
+const BUDGET_LOADED_SET_JIRA = 76_500;
 
 /**
  * THE LINEAR-SCOPED loaded-set ceiling — a spawn under the Linear provider.
  *
  * THE THIRD ROW, for the reason the second one exists (D-LOADED-SET-PER-PROVIDER):
  * each MCP-backed provider is priced on its own row, none of them can move the
- * GitHub one, and the GitHub one cannot absorb theirs. Folding a provider that
- * loads the tool-call contract into a row whose contract term is 0 by construction
- * would bill every GitHub user for bytes they never receive (GAP-02), and would do
- * it by raising a ratcheted ceiling.
+ * GitHub one, and the GitHub one cannot absorb theirs.
  *
- * MEASURED, term by term, off the printed shape table on this tree:
- *     dist/agents/git.md                             58_100
- *   + skills/git/SKILL.md                             6_581
- *   + skills/worktree-support/SKILL.md                2_942
- *   = the always-preloaded set                       67_623
- *   + references/tracker/_mcp.md                      7_963   ← 0 on the GitHub path
- *   + max_op references/tracker/linear/{op}.md        7_480   (backlink-shipped-issues)
- *   + max over linear ops of the one-spawn load       8_576   (setup-task: its own
- *                                                              mechanics + learn-conventions.md)
- *   =                                                91_642
- *
- * ONE-TIME RE-BASELINE, 2026-09-20, on the same authorisation and for the same
- * unpriced contract growth as the Jira row above, whose JSDoc records what the
- * raise bought term by term. The companion "not a free number" gate is retired
- * with it. LOWERED THEREAFTER, NEVER RAISED AGAIN.
- *
- * Pinned at 91_700 — 58 ch of headroom, and still the binding constraint on any
- * addition to the always-loaded agent: a character added to git.md is a
- * character added to this row, so the next such addition must fund itself with a
- * cut rather than reach for slack.
+ * Derived from a measured 78_610 and pinned at 78_700 — 90 ch of headroom. This
+ * is the LARGEST of the four ceilings but not the binding one: a character added
+ * to git.md is a character added to every row, and it reaches the ceiling with the
+ * least headroom first. Re-run this file for each row's current headroom.
  *
  * WHY THIS PROVIDER'S max_op IS THE LARGEST OF THE THREE, recorded so the number is
  * not read as bloat. `backlink-shipped-issues` is where the dedup LADDER is stated,
@@ -318,12 +198,51 @@ const BUDGET_LOADED_SET_JIRA = 89_500;
  * provider's `max_op` the largest of the three in the printed table, and it is
  * content rather than slack.
  *
- * Registered as `budget-loaded-set-linear` in tests/fixtures/numeric-floors.json:
- * this row's growth is mostly content with no earlier measurement to derive it
- * from, so it is a pinned literal rather than a computed value. It may be LOWERED
- * after a pass that actually cuts the contract or the mechanics, and never raised.
+ * MAY BE LOWERED, NEVER RAISED. Registered as `budget-loaded-set-linear` in
+ * tests/fixtures/numeric-floors.json.
  */
-const BUDGET_LOADED_SET_LINEAR = 91_700;
+const BUDGET_LOADED_SET_LINEAR = 78_700;
+
+/**
+ * THE PR-HOST loaded-set ceiling — the worst-case cost of a spawn that runs one of
+ * the eight operations whose mechanics live under `references/pr/`.
+ *
+ * ITS OWN ROW, for the reason each provider has one (D-LOADED-SET-PER-PROVIDER).
+ * `references/pr/` is installed under EVERY tracker, because pull requests, PR
+ * reviews and PR checks stay on GitHub whatever issues the project files
+ * elsewhere. A PR operation therefore costs the same bytes on all three paths:
+ * folding it into the per-provider rows would price one cost three times over
+ * while leaving the question a reader actually asks — what does a PR spawn load? —
+ * answered nowhere. And it cannot ride the GitHub row, which is scoped to TRACKER
+ * ops by D-LOADED-SET-SCOPE and would have to widen its own scope to carry it.
+ *
+ * The formula, term by term:
+ *   the always-preloaded set
+ *   + max over PR_HOST_OPS of ( chars(references/pr/{op}.md)
+ *                               + every reference that op's own section names )
+ *
+ * No `max_op` term of its own: unlike the tracker rows, an op's PR-host mechanics
+ * file is already inside its one-spawn load, so a separate largest-file term would
+ * count the same document twice.
+ *
+ * THE ONE WRITTEN EXCLUSION is `references/github-api.md`, declared as
+ * LOADED_SET_WRITTEN_EXCLUSIONS in tests/tracker/budget-model.ts with the reason
+ * beside it: it is a file two of these ops loaded long before any split existed,
+ * this work moved the line that names it without changing a byte a spawn pays, and
+ * charging 21_166 ch of it here would bury the `pr/` bodies this row exists to
+ * measure. What the exclusion owes in return (ADR-025) is shape `2c-ex` of the
+ * four-shape table — the same maximum, RECORDED with the file charged — plus the
+ * equality pin GITHUB_API_MD_CHARS, which is what stops an excluded term growing
+ * unwatched.
+ *
+ * Derived from measurement at 59_033 (`post-review-summary`: its PR-host body plus
+ * references/publication-gate.md) and pinned at 59_100 — 67 ch of headroom, the
+ * same deliberate thinness as its siblings.
+ *
+ * MAY BE LOWERED, NEVER RAISED. Registered as `budget-loaded-set-pr-host` in
+ * tests/fixtures/numeric-floors.json.
+ */
+const BUDGET_LOADED_SET_PR_HOST = 59_100;
 
 /**
  * Every MCP-backed provider and the ceiling that prices it.
@@ -473,6 +392,22 @@ describe('byte budget: four-shape table (recorded)', () => {
         chars: providerLoadedSet(provider),
       })),
       {
+        // The PR-host path — the shape the three tracker rows deliberately do not
+        // describe, since references/pr/ is installed under every provider and costs
+        // the same bytes on each. Gated by BUDGET_LOADED_SET_PR_HOST.
+        shape: '2c. PR-host spawn (the eight pr/ ops — same cost under every tracker)',
+        chars: PRELOADED + worstCasePrHostLoad().value,
+      },
+      {
+        // RECORDED ONLY, never gated [D-LOADED-SET-SCOPE]. The same maximum with the
+        // written exclusion CHARGED — what the PR-host row would be if
+        // references/github-api.md were treated as a cost this work introduced. This
+        // is what the exclusion owes in return for being excluded (ADR-025): the
+        // term stays visible and attributable instead of vanishing from the record.
+        shape: '2c-ex. PR-host spawn + the written exclusion charged (RECORDED, not gated)',
+        chars: PRELOADED + worstCasePrHostLoad([]).value,
+      },
+      {
         // RECORDED ONLY, never the gate [D-CROSS-CUTTING-ON-DEMAND]. What shape 2
         // would cost if the cross-cutting glossary were treated as a mandatory
         // per-spawn load rather than a pointer a reader follows. Printed so the
@@ -539,9 +474,9 @@ describe('byte budget: four-shape table (recorded)', () => {
     })));
 
     // Structural sanity only — the table must actually have measured something.
-    // Five fixed shapes plus one per MCP-backed provider, derived so a provider
+    // Seven fixed shapes plus one per MCP-backed provider, derived so a provider
     // registered later cannot be silently dropped from the record.
-    expect(shapes).toHaveLength(5 + MCP_BACKED_PROVIDERS.length);
+    expect(shapes).toHaveLength(7 + MCP_BACKED_PROVIDERS.length);
     expect(
       MCP_BACKED_PROVIDERS.length,
       'no MCP-backed provider is registered, so every provider row and the contract term below ' +
@@ -590,14 +525,24 @@ describe('byte budget: four-shape table (recorded)', () => {
 // for it. It is also NOT licence to re-inline a reference to make the number
 // smaller; that reverses the split decision and spends the budget's headroom.
 
-/** Named collector: the lines that ARE `**Mechanics:**` pointers — one extra Read each. */
-function collectMechanicsPointerSites(content: string): string[] {
-  return content.split('\n').filter(line => line.startsWith('**Mechanics:**'));
+/**
+ * Named collector: the lines that ARE load pointers under `prefix` — one extra
+ * sequential Read each.
+ *
+ * Parameterised over the prefix rather than fixed to `**Mechanics:**`, because
+ * the agent has a SECOND pointer vocabulary: an operation whose mechanics
+ * live under `references/pr/` points at them with `**PR mechanics:**`, and a
+ * collector that only knew the first spelling would report a falling round-trip
+ * count for a change that raised it.
+ */
+function collectPointerSites(content: string, prefix: string): string[] {
+  return content.split('\n').filter(line => line.startsWith(prefix));
 }
 
 describe('byte budget: the round-trip term (recorded)', () => {
   it('records the Reads per spawn and the smallest references the character budget does not price', () => {
-    const sites = collectMechanicsPointerSites(GIT_AGENT.content);
+    const mechanicsSites = collectPointerSites(GIT_AGENT.content, '**Mechanics:**');
+    const prMechanicsSites = collectPointerSites(GIT_AGENT.content, '**PR mechanics:**');
     // Reads per spawn is |summedFor(op)| — the SAME set the budget sums characters
     // over, read for its cardinality instead of its size. One file named is one Read.
     // Scoped to TRACKER ops for the same reason the gate is [D-LOADED-SET-SCOPE].
@@ -612,7 +557,12 @@ describe('byte budget: the round-trip term (recorded)', () => {
     console.table([
       {
         term: '`**Mechanics:**` pointer sites in the agent (1 extra sequential Read each)',
-        value: sites.length,
+        value: mechanicsSites.length,
+        unit: 'sites',
+      },
+      {
+        term: '`**PR mechanics:**` pointer sites in the agent (1 extra sequential Read each)',
+        value: prMechanicsSites.length,
         unit: 'sites',
       },
       {
@@ -636,10 +586,11 @@ describe('byte budget: the round-trip term (recorded)', () => {
       'Run `npm run build`.',
     ).toBeGreaterThan(0);
 
-    // The pointer-site COUNT is printed and deliberately NOT asserted. It is a property
-    // of the agent's prose, already owned by the single-naming-line assertion below and
-    // by reference-structure.test.ts; a second authority on how many pointer sites the
-    // agent must have would fight them from a budget file, and a count is not a budget.
+    // BOTH pointer-site COUNTS are printed and deliberately NOT asserted. They are a
+    // property of the agent's prose, already owned by the single-naming-line assertion
+    // below and by reference-structure.test.ts; a second authority on how many pointer
+    // sites the agent must have would fight them from a budget file, and a count is not
+    // a budget.
   });
 });
 
@@ -648,51 +599,17 @@ describe('byte budget: the round-trip term (recorded)', () => {
 // ---------------------------------------------------------------------------
 
 describe('byte budget: component and loaded-set pins (AC-2.5)', () => {
-  it('chars(dist/agents/git.md) <= BUDGET_GIT_MD_P3', () => {
-    // The always-loaded half of the split. The only legitimate way back under this
-    // line is to move text out of the agent — never to raise the constant.
+  it('chars(dist/agents/git.md) <= BUDGET_GIT_MD', () => {
+    // The always-loaded half of the split, and the term every loaded-set row below
+    // carries. The only legitimate way back under this line is to move text out of
+    // the agent — never to raise the constant.
     expect(
       gitMd.chars,
-      `dist/agents/git.md is ${gitMd.chars} ch, budget ${BUDGET_GIT_MD_P3} ch ` +
-      `(over by ${gitMd.chars - BUDGET_GIT_MD_P3}). Move the mechanics into the operation's ` +
-      `generated reference. Do NOT raise BUDGET_GIT_MD_P3 — §14.5: no threshold is lowered, and a ` +
+      `dist/agents/git.md is ${gitMd.chars} ch, budget ${BUDGET_GIT_MD} ch ` +
+      `(over by ${gitMd.chars - BUDGET_GIT_MD}). Move the mechanics into the operation's ` +
+      `generated reference. Do NOT raise BUDGET_GIT_MD — §14.5: no threshold is lowered, and a ` +
       `budget raised to meet the artifact measures nothing.`,
-    ).toBeLessThanOrEqual(BUDGET_GIT_MD_P3);
-  });
-
-  it('★ everything OUTSIDE the preamble still fits the UNRAISED Phase-2 budget', () => {
-    // This is what makes the Phase-3 revision honest rather than a blank cheque.
-    // The revision was granted for the provider-resolution preamble; this asserts
-    // it can be SPENT nowhere else. The allowance is the Phase-2 ceiling minus the
-    // Phase-2 preamble measurement — neither number raised — so a future commit
-    // that grows an operation section and reaches for BUDGET_GIT_MD_P3's headroom
-    // goes red here while the file-level gate still passes.
-    const preambleChars = preambleBlock(GIT_AGENT.content).length;
-    const nonPreamble = gitMd.chars - preambleChars;
-    const allowance = BUDGET_GIT_MD - PREAMBLE_CHARS_P2;
-    expect(
-      preambleChars,
-      'the preamble measured 0 ch — the split below would attribute the whole file to the ' +
-      'non-preamble term and pass for the wrong reason',
-    ).toBeGreaterThan(PREAMBLE_CHARS_P2);
-    expect(
-      nonPreamble,
-      `git.md outside the preamble is ${nonPreamble} ch against the unraised Phase-2 allowance of ` +
-      `${allowance} ch (BUDGET_GIT_MD ${BUDGET_GIT_MD} − PREAMBLE_CHARS_P2 ${PREAMBLE_CHARS_P2}), ` +
-      `over by ${nonPreamble - allowance}. The Phase-3 revision is for the preamble ONLY. Text ` +
-      `added to an operation section must still fund itself, exactly as it had to in Phase 2.`,
-    ).toBeLessThanOrEqual(allowance);
-  });
-
-  it('the Phase-3 ceiling is a re-derivation of the Phase-2 one, not a free number', () => {
-    const delta = BUDGET_GIT_MD_P3 - BUDGET_GIT_MD;
-    expect(delta, 'the Phase-3 ceiling may not sit below the Phase-2 one').toBeGreaterThan(0);
-    expect(
-      delta,
-      `the Phase-3 revision is ${delta} ch and must not exceed the preamble it bought ` +
-      `(${preambleBlock(GIT_AGENT.content).length} ch). A revision larger than the block it was ` +
-      `granted for is a revision spent somewhere it was not granted.`,
-    ).toBeLessThanOrEqual(preambleBlock(GIT_AGENT.content).length);
+    ).toBeLessThanOrEqual(BUDGET_GIT_MD);
   });
 
   it('chars(skills/git/SKILL.md) <= BUDGET_SKILL_MD', () => {
@@ -738,6 +655,79 @@ describe('byte budget: component and loaded-set pins (AC-2.5)', () => {
       `re-derived DOWNWARD or not at all; move text out of the agent, or condense the github ` +
       `mechanics, instead.`,
     ).toBeLessThanOrEqual(BUDGET_LOADED_SET);
+  });
+
+  it('the worst-case PR-host spawn <= BUDGET_LOADED_SET_PR_HOST', () => {
+    // worst = preloaded set
+    //       + max over PR_HOST_OPS of ( chars(pr/{op}.md) + every reference that op's
+    //         own section names ), less LOADED_SET_WRITTEN_EXCLUSIONS
+    //
+    // No max_op term: a PR-host op's own mechanics file is already inside its
+    // one-spawn load, so a separate largest-file term would count it twice.
+    const worst = worstCasePrHostLoad();
+    const total = PRELOADED + worst.value;
+
+    // referenceChars() answers 0 for a file it cannot resolve, so an unbuilt
+    // dist/skills/git/references/ drives the term to 0 and this gate passes by
+    // measuring nothing (PF-018).
+    expect(
+      worst.value,
+      'no PR-host reference load resolved — the budget summed nothing. Run `npm run build`.',
+    ).toBeGreaterThan(0);
+
+    // Every written exclusion has to be EXERCISED, or it is a declaration about
+    // nothing that would stay green after the file it names stopped being
+    // reachable (PF-064). Each is asserted as the ops that actually reach it,
+    // named rather than counted: a count of 2 is equally satisfied by losing one
+    // of these and gaining an unrelated op. Keyed per exclusion, so a new entry
+    // on the list cannot ride through unexercised.
+    const REACHED_BY: Readonly<Record<string, readonly string[]>> = {
+      'github-api.md': ['fetch-review-threads', 'resolve-review-threads'],
+    };
+    expect(
+      [...LOADED_SET_WRITTEN_EXCLUSIONS].sort(),
+      'every LOADED_SET_WRITTEN_EXCLUSIONS entry needs the ops that reach it recorded here — an ' +
+      'exclusion with no expected reach is one nothing proves is exercised',
+    ).toEqual(Object.keys(REACHED_BY).sort());
+    for (const excluded of LOADED_SET_WRITTEN_EXCLUSIONS) {
+      const reaching = PR_HOST_OPS.filter(op => summedFor(op).has(excluded));
+      expect(
+        [...reaching].sort(),
+        `no PR-host op names ${excluded} as expected, so LOADED_SET_WRITTEN_EXCLUSIONS excludes ` +
+        'nothing there and shape 2c-ex records the same figure as this gate. Retire the ' +
+        'exclusion, or find out what stopped reaching the file.',
+      ).toEqual(REACHED_BY[excluded]);
+    }
+
+    expect(
+      total,
+      `worst-case PR-host spawn is ${total} ch (preloaded ${PRELOADED} + worst one-spawn load ` +
+      `${worst.value} [${worst.op}]), budget ${BUDGET_LOADED_SET_PR_HOST} ch. references/pr/ is ` +
+      `installed under EVERY tracker, so a character added to a pr/ body is a character every ` +
+      `user pays on every path. Do NOT raise BUDGET_LOADED_SET_PR_HOST — §14.5: a ceiling is ` +
+      `re-derived DOWNWARD or not at all; condense the pr/ mechanics instead.`,
+    ).toBeLessThanOrEqual(BUDGET_LOADED_SET_PR_HOST);
+  });
+
+  it('the written exclusion is load-bearing — charging it would take the PR-host row over', () => {
+    // What the recorded 2c-ex row is FOR, asserted rather than left to the table: the
+    // exclusion is not a rounding convenience. If some later commit decides
+    // github-api.md should be charged here, this arm states the consequence in
+    // advance — the ceiling would have to move, which §14.5 does not allow, so the
+    // decision is "re-scope the row", never "raise the number".
+    const gated = PRELOADED + worstCasePrHostLoad().value;
+    const unexcluded = PRELOADED + worstCasePrHostLoad([]).value;
+    expect(
+      unexcluded,
+      'charging the written exclusion changes nothing — either the exclusion is inert or the ' +
+      'file shrank to nothing, and shape 2c-ex is recording the gated figure twice',
+    ).toBeGreaterThan(gated);
+    expect(
+      unexcluded,
+      `the unexcluded PR-host row is ${unexcluded} ch and would fit under ` +
+      `${BUDGET_LOADED_SET_PR_HOST}. The exclusion is then buying nothing and should be retired ` +
+      `rather than defended.`,
+    ).toBeGreaterThan(BUDGET_LOADED_SET_PR_HOST);
   });
 
   // One gate per priced provider, generated from PRICED_PROVIDERS rather than
@@ -1045,6 +1035,38 @@ describe('byte budget: formula file-set ↔ nameable file-set (both directions)'
     // …and the symmetric direction reports nothing when nothing is extra.
     expect(collectMissingFrom('setup-task', summed, nameable)).toEqual([]);
   });
+
+  it('the ONE hop into a pr/ body is live — github-api.md reaches fetch-review-threads only through it', () => {
+    // nameableFrom's PR-host hop, asserted where it bites rather than in prose.
+    // `fetch-review-threads` step 1 — the only place the operation names
+    // github-api.md — lives in references/pr/fetch-review-threads.md. Without the
+    // hop the model sums a file the scan cannot see the op name, and direction 1
+    // goes red for a reason that is not a regression.
+    expect(
+      SECTIONS.get('fetch-review-threads') ?? '',
+      'this arm only means something while git.md itself does NOT name github-api.md for this op ' +
+      '— if the mention came back, the hop is no longer what makes direction 1 pass',
+    ).not.toContain('references/github-api.md');
+    expect(
+      [...nameableFrom('fetch-review-threads')],
+      'github-api.md must be reachable through the pr/ reference the op names',
+    ).toContain('github-api.md');
+  });
+
+  it('known-bad probe: a file named only inside a pr/ body is reported by direction 2', () => {
+    // Seeds the hop's own reader rather than writing into dist/ (PF-055), and
+    // drives the SAME collector both live directions call. Without this, the hop
+    // could stop resolving and every direction-2 assertion would stay green —
+    // an absence check over a corpus nobody perturbs (PF-064).
+    const op = 'post-review-summary';
+    const seededNameable = nameableFrom(op, rel =>
+      rel === prHostRel(op) ? 'Then read `references/smuggled.md` for the rest.\n' : null);
+    expect(
+      collectMissingFrom(op, seededNameable, summedFor(op)),
+      'a reference named only inside the PR-host body must be reported as unmodelled — otherwise ' +
+      'the hop is declared and never taken',
+    ).toEqual([`${op} → smuggled.md`]);
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -1062,15 +1084,42 @@ describe('byte budget: written exclusions', () => {
     ).toContain('## Comment-sink scrub (D11)');
   });
 
-  it('the two summary ops keep their mechanics in the agent (SG-8)', () => {
-    // Both are D10 AND D11 sinks and may move only in a PR that moves their
-    // guards — never as a size optimisation.
+  it('the two summary ops are PR-host, never tracker, and keep their D10 naming line in the agent (SG-8)', () => {
+    // SG-8 as shipped: the two summary ops' step order lives in
+    // references/pr/{op}.md under the condition SG-8 imposes — each guard reading
+    // it carries a known-bad probe, and the D10/D11 controls stay answerable from
+    // the agent.
+    //
+    // The END STATE, asserted rather than the prohibition it replaced:
+    //   1. the op is still a section of the agent (its contract did not move);
+    //   2. it still names the publication gate from git.md — [DR-20](i) reads
+    //      git.md ALONE, so an op that stopped naming it there would take the
+    //      scope property with it;
+    //   3. it is a PR-host op, not a tracker op — these two are never generated
+    //      per provider, which is the half of the original exclusion that was
+    //      always about correctness rather than size;
+    //   4. the PR-host reference it names is real and non-empty, so "the step
+    //      order moved" names a file that exists rather than nothing.
     for (const op of ['post-review-summary', 'post-resolution-summary']) {
       expect(SECTIONS.has(op), `${op} must still be a section of the agent`).toBe(true);
+      expect(
+        SECTIONS.get(op) ?? '',
+        `${op} must still name references/publication-gate.md from git.md — [DR-20](i) reads the ` +
+        'agent alone, and the D10 scope property lives or dies there',
+      ).toContain('references/publication-gate.md');
       expect(
         (TRACKER_GITHUB_OPS as readonly string[]).includes(op),
         `${op} must not be a generated tracker reference (SG-8 written exclusion)`,
       ).toBe(false);
+      expect(
+        isPrHostOp(op),
+        `${op} must be a PR-host op — PR comments are posted on GitHub under every tracker`,
+      ).toBe(true);
+      expect(
+        referenceChars(prHostRel(op)),
+        `${prHostRel(op)} must exist and carry its mechanics — an empty file would make the move ` +
+        'a deletion wearing a pointer',
+      ).toBeGreaterThan(0);
     }
   });
 
