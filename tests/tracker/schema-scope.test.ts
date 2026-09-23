@@ -786,7 +786,9 @@ const GITHUB_ONLY_REASONS: readonly string[] = [
  *
  * Each entry is a github-op status literal that predates §14.2 and whose scope the
  * canonical table does not claim: the rate-limit backoff, the no-PR branch of the
- * review-comment ops, the two 5xx retry ceilings, and the release version parse.
+ * review-comment ops, and the release version parse. The two summary operations'
+ * 5xx retry ceilings are emitted from the PR-host references and live in
+ * PR_HOST_LEGACY_REASONS below.
  * The arm below asserts every entry is genuinely emitted, so this cannot become a
  * dumping ground — an entry parked here that nothing emits goes red, exactly as it
  * does for GITHUB_ONLY_REASONS.
