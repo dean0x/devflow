@@ -6,7 +6,7 @@ import { DEVFLOW_PLUGINS, SKILL_NAMESPACE, prefixSkillName, unprefixSkillName, g
 import { skillsDir, agentSourceDirs, rulesDir, commandsDir, scriptsDir, compiledSkillRefsDir, type AgentSourceDirs } from '../../core/assets.js';
 import { getPackageRoot, isContainedIn } from '../../core/paths.js';
 import { sweepOrphanedAssets, mdFileName, mdEntryName, type SweepResult } from '../../core/orphan-sweep.js';
-import { generatedReferenceManifest, installedReferenceManifest, PR_HOST_DESTINATION_ROOT, SKILL_REFS_SKILL_NAME } from '../../core/mds-variants.js';
+import { generatedReferenceManifest, installedReferenceManifest, PR_HOST_DESTINATION_ROOT, SKILL_REFS_SKILL_NAME, TRACKER_DESTINATION_ROOT } from '../../core/mds-variants.js';
 import { sweepOrphanedReferences, MAX_REFERENCE_SWEEP_DEPTH } from '../../core/reference-sweep.js';
 import { TRACKER_AGENT_NAME } from './tracker-install.js';
 
@@ -348,9 +348,6 @@ export async function chmodRecursive(dir: string, mode: number, _depth = 0): Pro
 // Generated skill-reference overlay
 // ---------------------------------------------------------------------------
 
-/** Sub-path under the references root holding the per-provider tracker mechanics. */
-const TRACKER_SUBTREE = 'tracker';
-
 /**
  * Every sub-path under the references root the prune converges to the manifest.
  *
@@ -358,14 +355,16 @@ const TRACKER_SUBTREE = 'tracker';
  * generated — that is the whole rule, and these two directories are the whole set that
  * satisfies it today.
  *
- * `tracker/` holds the per-provider mechanics and `pr/` ({@link PR_HOST_DESTINATION_ROOT})
- * the PR/review host bodies; the build emits both wholesale, so anything inside them the
- * manifest does not name is by construction a leftover — a retired op, a provider the
- * selection dropped, a shadow-supplied file, a staging tree a crashed run stranded — and
- * removing it is the only way the installed tree can equal the manifest. `pr/` is wanted
- * under EVERY provider (applies ADR-026), so a provider switch neither adds nor removes
- * the directory; what it converges is the directory's CONTENTS, exactly as `tracker/`'s
- * are converged.
+ * `tracker/` ({@link TRACKER_DESTINATION_ROOT}) holds the per-provider mechanics and `pr/`
+ * ({@link PR_HOST_DESTINATION_ROOT}) the PR/review host bodies; the build emits both
+ * wholesale, so anything inside them the manifest does not name is by construction a
+ * leftover — a retired op, a provider the selection dropped, a shadow-supplied file, a
+ * staging tree a crashed run stranded — and removing it is the only way the installed
+ * tree can equal the manifest. `pr/` is wanted under EVERY provider (applies ADR-026), so
+ * a provider switch neither adds nor removes the directory; what it converges is the
+ * directory's CONTENTS, exactly as `tracker/`'s are converged. Both entries are the
+ * registry's own constants, so a renamed destination root moves the build and the prune
+ * together.
  *
  * The references ROOT is the exemption, and the reason is the inverse of the rule: it
  * holds hand-authored documents (`github-api.md`, `violations.md`, …) beside the flat
@@ -378,12 +377,21 @@ const TRACKER_SUBTREE = 'tracker';
  * would be self-maintaining and is still the wrong rule: a subtree the manifest stops
  * naming ENTIRELY would drop out of a derived set and keep its whole installed tree,
  * which is the retirement case this prune exists for. Listed here, the same subtree
- * converges to empty. The cost is one entry per new wholly-generated directory — and on
- * this side that entry is the whole edit, because the prune and everything downstream of
- * it read the list rather than a subtree of their own (avoids PF-015 — a fan-out that
- * converges some of its artifacts and not the others).
+ * converges to empty. The list is also the one thing that lets the pre-clean keep a
+ * nested directory whole ({@link overlayOwnedSkillPaths}), so a directory missing from
+ * it fails safe — kept file by file, like the root — rather than keeping its stale files
+ * forever (avoids PF-074). The cost is one entry per new wholly-generated directory, and
+ * that entry is the whole edit: everything downstream reads the list (avoids PF-015).
  */
-const CONVERGED_SUBTREES = [TRACKER_SUBTREE, PR_HOST_DESTINATION_ROOT] as const;
+const CONVERGED_SUBTREES = [TRACKER_DESTINATION_ROOT, PR_HOST_DESTINATION_ROOT] as const;
+
+/** One of the {@link CONVERGED_SUBTREES} — the only directories a prune may be pointed at. */
+type ConvergedSubtree = (typeof CONVERGED_SUBTREES)[number];
+
+/** Is this top-level directory under the references root one the prune converges? */
+function isConvergedSubtree(top: string): top is ConvergedSubtree {
+  return (CONVERGED_SUBTREES as readonly string[]).includes(top);
+}
 
 /**
  * Which document set an overlay unit covers.
@@ -397,9 +405,16 @@ const CONVERGED_SUBTREES = [TRACKER_SUBTREE, PR_HOST_DESTINATION_ROOT] as const;
  * its trailing segment. The trailing segment is not an identity: two modules whose
  * subdirs end in the same segment are two units and would report under one name, which
  * is a live concern the moment a second provider lands beside `tracker/github`.
+ *
+ * Three arms, one per thing a unit can hold: a provider's mechanics (`tracker/{provider}`),
+ * the PR-host mechanics (`pr/`, {@link PR_HOST_DESTINATION_ROOT}), and a cross-cutting
+ * document set sharing its directory with entries it does not own (the references root,
+ * `tracker/`). The first two are directories the unit owns outright and are swapped whole;
+ * the third is promoted document by document (D-OVERLAY-FLAT-UNIT).
  */
 export type OverlayUnitRef =
   | { readonly kind: 'provider'; readonly subdir: string }
+  | { readonly kind: 'pr-host'; readonly dir: string }
   | { readonly kind: 'cross-cutting'; readonly dir: string };
 
 /**
@@ -433,9 +448,10 @@ export type OverlayFailureState =
       readonly stale: readonly string[];
     }
   /**
-   * A provider directory was displaced to its `.old` sibling and could not be put back.
+   * A directory unit was displaced to its `.old` backup and could not be put back.
    * Nothing lives at the installed path; `recoveryPath` holds the only copy, which is
-   * why this run's prune is skipped rather than converging over it.
+   * why this run's prune of the subtree holding it is skipped rather than converging
+   * over it.
    */
   | {
       readonly kind: 'restore-failed';
@@ -460,10 +476,20 @@ export interface OverlayFailure {
  * rather than leaving each render site to invent its own wording (avoids PF-013).
  */
 export function overlayUnitLabel(unit: OverlayUnitRef): string {
-  if (unit.kind === 'provider') return `provider directory "${unit.subdir}"`;
-  return unit.dir === ''
-    ? 'the cross-cutting document set'
-    : `the cross-cutting document set in "${unit.dir}"`;
+  switch (unit.kind) {
+    case 'provider':
+      return `provider directory "${unit.subdir}"`;
+    case 'pr-host':
+      return `the PR-host mechanics in "${unit.dir}"`;
+    case 'cross-cutting':
+      return unit.dir === ''
+        ? 'the cross-cutting document set'
+        : `the cross-cutting document set in "${unit.dir}"`;
+    default: {
+      const _exhaustive: never = unit;
+      return _exhaustive;
+    }
+  }
 }
 
 export interface ReferenceOverlayResult {
@@ -499,17 +525,21 @@ export interface ReferenceOverlayResult {
 /**
  * One atomically-swapped overlay unit.
  *
- * D-OVERLAY-FLAT-UNIT: the isolation unit is a DIRECTORY for the nested provider trees
- * (`tracker/{provider}/`) and the WHOLE FLAT SET for the provider-independent documents
- * — not one unit per flat file.
+ * D-OVERLAY-FLAT-UNIT: the isolation unit is a DIRECTORY wherever the unit owns one
+ * outright — each provider tree (`tracker/{provider}/`) and the PR-host tree (`pr/`) — and
+ * the WHOLE FLAT SET for the cross-cutting documents, which share their directory with
+ * entries they do not own — not one unit per flat file.
  *
- * A flat set's documents land beside entries the overlay must never replace or delete —
- * the references root holds hand-authored files (`github-api.md`, `violations.md`, …) and
- * `tracker/` holds the provider directories — so there is no directory to rename and no
- * `.tmp` sibling that could stand in for one. Which directory a flat set lands in is
- * therefore part of the unit (`dir`, `''` for the references root), because it is the one
- * thing that differs between them. What the flat set gets is the same DECISION rule as a
- * provider directory — build every
+ * The split is by what else lives in the directory. `pr/` holds nothing but its own unit's
+ * documents, so it is swapped whole exactly as a provider tree is, and a failed promotion
+ * leaves every document on one install's bytes. A flat set's documents land beside
+ * entries the overlay must never replace or delete — the references root holds
+ * hand-authored files (`github-api.md`, `violations.md`, …) and `tracker/` holds the
+ * provider directories — so there is no directory to rename and no `.tmp` sibling that
+ * could stand in for one. Which directory a flat set lands in is therefore part of the
+ * unit (`dir`, `''` for the references root), because it is the one thing that differs
+ * between them. What the flat set gets is the same DECISION rule as a directory unit —
+ * build every
  * document under a staging tree first, and on any per-file failure abort the whole unit,
  * leaving all previously installed flat documents exactly as they were — promoted by one
  * `rename` per document. The promotion loop is the one place where a mid-flight I/O
@@ -530,8 +560,8 @@ export type OverlayUnit = OverlayUnitRef & {
   readonly files: readonly string[];
 };
 
-/** The provider-directory arm of {@link OverlayUnit}, for the code that swaps one whole. */
-type ProviderOverlayUnit = Extract<OverlayUnit, { kind: 'provider' }>;
+/** The arms of {@link OverlayUnit} that own their directory outright and are swapped whole. */
+type DirectoryOverlayUnit = Extract<OverlayUnit, { kind: 'provider' | 'pr-host' }>;
 
 /** The flat cross-cutting arm of {@link OverlayUnit}, for the code that renames it document by document. */
 type CrossCuttingOverlayUnit = Extract<OverlayUnit, { kind: 'cross-cutting' }>;
@@ -539,8 +569,8 @@ type CrossCuttingOverlayUnit = Extract<OverlayUnit, { kind: 'cross-cutting' }>;
 /** The identity half of a unit, as the failure report carries it. */
 function unitRef(unit: OverlayUnit): OverlayUnitRef {
   return unit.kind === 'provider'
-    ? { kind: 'provider', subdir: unit.subdir }
-    : { kind: 'cross-cutting', dir: unit.dir };
+    ? { kind: unit.kind, subdir: unit.subdir }
+    : { kind: unit.kind, dir: unit.dir };
 }
 
 /** POSIX sub-path a unit's files land in under a root — `''` for the references root. */
@@ -549,11 +579,12 @@ function unitSubdir(unit: OverlayUnit): string {
 }
 
 /**
- * Is this directory part a PROVIDER directory — a swappable directory of its own?
+ * Is this directory part a PROVIDER directory — a provider's mechanics, swapped whole?
  *
- * `D-OVERLAY-PROVIDER-SHAPE`. Exactly `tracker/{provider}`, which is the only shape the
- * reference-module registry emits a directory for, and the only shape whose whole
- * directory may be renamed into place.
+ * `D-OVERLAY-PROVIDER-SHAPE`. Exactly `tracker/{provider}`: the only directory the
+ * reference-module registry emits INSIDE `tracker/`, and so the only one there whose
+ * whole directory may be renamed into place. (`pr/` is the registry's other emitted
+ * directory, and is classified by name in {@link planOverlayUnits}.)
  *
  * The distinction is load-bearing rather than cosmetic, and it is what the previous
  * "any non-empty directory part is a provider" rule got wrong the first time the
@@ -566,7 +597,7 @@ function unitSubdir(unit: OverlayUnit): string {
  */
 function isProviderSubdir(subdir: string): boolean {
   const segments = subdir.split('/');
-  return segments.length === 2 && segments[0] === TRACKER_SUBTREE && segments[1] !== '';
+  return segments.length === 2 && segments[0] === TRACKER_DESTINATION_ROOT && segments[1] !== '';
 }
 
 /**
@@ -575,16 +606,17 @@ function isProviderSubdir(subdir: string): boolean {
  * Deterministic order — sorted by directory part — so a failure report and a loud throw
  * are reproducible run to run.
  *
- * Two kinds, decided by the SHAPE of the directory part ({@link isProviderSubdir}):
- * a `tracker/{provider}` directory is a provider unit and is swapped whole, and every
- * other directory holds a FLAT SET — documents that land beside entries this overlay
- * must never replace or delete, promoted one rename at a time. The references root is
- * one such directory (beside the hand-authored references) and `tracker/` is another
- * (beside the provider directories); both take the flat arm, which is why that arm
- * carries the directory it lands in rather than assuming the root.
+ * Three kinds, decided by the directory part: a `tracker/{provider}` directory
+ * ({@link isProviderSubdir}) is a provider unit and `pr/` ({@link PR_HOST_DESTINATION_ROOT})
+ * is the PR-host unit — each a directory holding only its own unit's documents, swapped
+ * whole. Every other directory holds a FLAT SET — documents that land beside entries this
+ * overlay must never replace or delete, promoted one rename at a time. The references
+ * root is one such directory (beside the hand-authored references) and `tracker/` is
+ * another (beside the provider directories); both take the flat arm, which is why that
+ * arm carries the directory it lands in rather than assuming the root.
  *
  * Exported for the one property no arm reading the INSTALLED tree can discriminate:
- * which KIND a directory becomes. The directory parts sort `'' < tracker <
+ * which KIND a directory becomes. The directory parts sort `'' < pr < tracker <
  * tracker/{provider}`, so a `tracker/` entry mis-bucketed as a provider renames the
  * whole subtree into place BEFORE the provider units promote back into it, and the
  * installed tree ends up complete under either rule. The classification itself is the
@@ -601,10 +633,11 @@ export function planOverlayUnits(manifest: readonly string[]): OverlayUnit[] {
   }
   return [...bySubdir.entries()]
     .sort(([a], [b]) => a.localeCompare(b))
-    .map(([subdir, files]): OverlayUnit =>
-      isProviderSubdir(subdir)
-        ? { kind: 'provider', subdir, files }
-        : { kind: 'cross-cutting', dir: subdir, files });
+    .map(([subdir, files]): OverlayUnit => {
+      if (isProviderSubdir(subdir)) return { kind: 'provider', subdir, files };
+      if (subdir === PR_HOST_DESTINATION_ROOT) return { kind: 'pr-host', dir: subdir, files };
+      return { kind: 'cross-cutting', dir: subdir, files };
+    });
 }
 
 /** Resolve a POSIX manifest sub-path against a root, spelled for this filesystem. */
@@ -654,33 +687,99 @@ const STAGING_TOKEN = `${process.pid}-${Date.now().toString(36)}`;
  *
  * The provider arm inherits the property from its unit: the path is the unit's own
  * installed location plus a suffix, so it is converged exactly when the unit is, and every
- * provider subdir the reference-module registry declares is `tracker/{provider}`. A flat
- * arm has no installed location to hang a suffix on — its documents ARE the directory —
- * so it is placed under the converged subtree explicitly, under a name carrying its own
- * directory slug so two flat sets cannot share one staging path. The cost is that a
- * manifest carrying flat entries alone would create an empty `tracker/` on its way
- * through; the registry never produces one, and an empty directory is not a partial
- * install.
+ * provider subdir the reference-module registry declares is `tracker/{provider}`. Every
+ * other arm is placed under the converged subtree explicitly ({@link sidecarBaseFor}): a
+ * flat set has no installed location to hang a suffix on — its documents ARE the
+ * directory — and `pr/`'s own sibling (`pr.{token}.tmp`) would sit at the references
+ * root, outside every convergence. The name carries the kind and the directory slug, so
+ * no two units share one staging path. The cost is that a manifest carrying no provider
+ * would create an empty `tracker/` on its way through; the registry never produces one,
+ * and an empty directory is not a partial install.
  *
  * No staging name can collide with a manifest entry, and the prune reaches them all for
  * the same reason it reaches the `.old` backups: it converges the `tracker/` subtree
  * against the manifest BY PATH, so anything under it the manifest does not name is
  * removed and no staging name has to be recognised as one. Not by spelling — a provider
  * arm's basename is `{provider}.{token}.tmp`, which is not dot-prefixed, so a rule keyed
- * on the name would reach the flat arm only.
+ * on the name would reach the other arms only.
  */
 function stagingDirFor(referencesTarget: string, unit: OverlayUnit): string {
-  if (unit.kind === 'provider') {
-    return `${underRoot(referencesTarget, unit.subdir)}.${STAGING_TOKEN}.tmp`;
-  }
-  // One staging name per flat DIRECTORY. A name keyed only on the kind was unique
-  // while exactly one flat set existed; with a second (the tool-call contract, which
-  // lands in `tracker/` beside the provider directories) both units would pre-clean,
-  // build into and promote from the SAME path — each deleting the other's half-built
-  // tree, which is precisely the collision STAGING_TOKEN exists to prevent between
-  // runs, reproduced within one.
+  return `${sidecarBaseFor(referencesTarget, unit)}.${STAGING_TOKEN}.tmp`;
+}
+
+/**
+ * Backup a directory unit is displaced to while its replacement is renamed into place.
+ *
+ * Beside the staging tree, and under `tracker/` for the same reason (property 2 of
+ * {@link stagingDirFor}): a backup a crash strands is removed by a later run's prune.
+ */
+function backupDirFor(referencesTarget: string, unit: DirectoryOverlayUnit): string {
+  return `${sidecarBaseFor(referencesTarget, unit)}.old`;
+}
+
+/**
+ * The path a unit's staging tree and backup are named from, before their suffixes.
+ *
+ * A provider's own installed location, which already lies under `tracker/`. Every other
+ * unit gets a dot-prefixed name directly under `tracker/`, keyed on kind AND directory:
+ * with two flat sets (the references root, and the tool-call contract in `tracker/`) a
+ * name keyed on the kind alone would give both units the SAME staging path, each deleting
+ * the other's half-built tree — the collision STAGING_TOKEN prevents between runs,
+ * reproduced within one.
+ */
+function sidecarBaseFor(referencesTarget: string, unit: OverlayUnit): string {
+  if (unit.kind === 'provider') return underRoot(referencesTarget, unit.subdir);
   const slug = unit.dir === '' ? 'root' : unit.dir.split('/').join('-');
-  return path.join(referencesTarget, TRACKER_SUBTREE, `.cross-cutting.${slug}.${STAGING_TOKEN}.tmp`);
+  return path.join(referencesTarget, TRACKER_DESTINATION_ROOT, `.${unit.kind}.${slug}`);
+}
+
+/**
+ * Why a converged subtree's root must not be used — or `null` when it may.
+ *
+ * D-CONVERGED-ROOT-REAL: every write and every removal the overlay makes under a
+ * converged subtree goes through that subtree's ROOT — staging trees are built under
+ * `tracker/`, `pr/` is renamed into place, and each prune starts with a `readdir` of its
+ * root. The per-entry symlink guards (the prune's lstat-based `isDirectory()`, the
+ * build's symlink skip) protect everything BELOW a root and nothing AT it: `readdir` and
+ * `mkdir` follow a link at the root itself. So a root planted as a symlink would send the
+ * installer's writes and deletions into whatever it points at.
+ *
+ * Absent is fine — the overlay creates what it converges. Anything else that is not a
+ * real directory, including a root that cannot be lstat'd, is refused (fail closed), and
+ * the refusal is reported by the caller rather than repaired: the installer does not
+ * delete a link it did not create.
+ */
+async function convergedRootFault(
+  referencesTarget: string,
+  subtree: ConvergedSubtree,
+): Promise<string | null> {
+  const root = underRoot(referencesTarget, subtree);
+  let stat;
+  try {
+    stat = await fs.lstat(root);
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === 'ENOENT') return null;
+    return `references/${subtree} could not be inspected (${String(err)}) — ` +
+      `nothing is staged, promoted or pruned through it.`;
+  }
+  if (stat.isDirectory()) return null;
+  const what = stat.isSymbolicLink() ? 'a symbolic link' : 'not a directory';
+  return `references/${subtree} is ${what} — nothing is staged, promoted or pruned ` +
+    `through it. Replace it with a real directory and re-run.`;
+}
+
+/**
+ * The {@link CONVERGED_SUBTREES} a unit's build or promotion writes under.
+ *
+ * Read off the paths the unit actually uses — where its documents land, where it stages,
+ * and where a directory unit's backup goes — rather than restated per kind, so a unit
+ * that moves its staging moves this answer with it.
+ */
+function subtreesTouchedBy(referencesTarget: string, unit: OverlayUnit): ConvergedSubtree[] {
+  const paths = [underRoot(referencesTarget, unitSubdir(unit)), stagingDirFor(referencesTarget, unit)];
+  if (unit.kind !== 'cross-cutting') paths.push(backupDirFor(referencesTarget, unit));
+  const tops = new Set(paths.map(p => path.relative(referencesTarget, p).split(path.sep)[0]));
+  return CONVERGED_SUBTREES.filter(subtree => tops.has(subtree));
 }
 
 /**
@@ -777,10 +876,11 @@ async function buildUnitStagingTree(
  * Comparison is against what the PROMOTION would do, not merely against the bytes the
  * manifest names, and the two differ by unit kind:
  *
- *   - a PROVIDER unit is swapped whole ({@link promoteProviderUnit}), so an installed
- *     entry the manifest no longer names is something this run would REMOVE. Comparing
- *     only the manifest's own files would call such a unit unchanged and leave the stray
- *     installed — converge-not-merge silently downgraded to a merge.
+ *   - a DIRECTORY unit (a provider, or `pr/`) is swapped whole
+ *     ({@link promoteDirectoryUnit}), so an installed entry the manifest no longer names
+ *     is something this run would REMOVE. Comparing only the manifest's own files would
+ *     call such a unit unchanged and leave the stray installed — converge-not-merge
+ *     silently downgraded to a merge.
  *   - a CROSS-CUTTING unit is promoted one document at a time into a directory holding
  *     entries the overlay must never replace or delete (D-OVERLAY-FLAT-UNIT), so its
  *     files are exactly the comparison and the neighbours are none of its business.
@@ -801,11 +901,11 @@ async function stagedUnitIsAlreadyInstalled(
 ): Promise<boolean> {
   const basenameOf = (relPath: string): string => relPath.split('/').slice(-1)[0];
 
-  if (unit.kind === 'provider') {
+  if (unit.kind !== 'cross-cutting') {
     const owned = new Set(unit.files.map(basenameOf));
     let installed: string[];
     try {
-      installed = await fs.readdir(underRoot(referencesTarget, unit.subdir));
+      installed = await fs.readdir(underRoot(referencesTarget, unitSubdir(unit)));
     } catch {
       return false;
     }
@@ -835,7 +935,7 @@ export type UnitPromotion =
  *
  * A swallowed rename error would make a failed recovery indistinguishable from a
  * successful one: the install would report the previously installed files as unchanged
- * over a provider directory that no longer exists, and the prune would then delete the
+ * over a directory that no longer exists, and the prune would then delete the
  * backup holding the only copy. What this returns is what the failure state is built
  * from.
  */
@@ -867,7 +967,7 @@ type RecordPromotionState = (state: OverlayFailureState) => void;
  * never replace or delete, so the unit is promoted one `rename` per document and a
  * mid-flight failure leaves it part new and part old
  * (D-OVERLAY-FLAT-UNIT, recorded on {@link OverlayUnit}). That is a weaker guarantee than
- * {@link promoteProviderUnit}'s whole-directory swap, which is why the recorded state
+ * {@link promoteDirectoryUnit}'s whole-directory swap, which is why the recorded state
  * names which documents carry this run's bytes rather than claiming the set is untouched.
  *
  * Throws on the first failing rename; the caller reports the state recorded by then.
@@ -879,7 +979,7 @@ async function promoteCrossCuttingUnit(
   record: RecordPromotionState,
 ): Promise<void> {
   const destDir = underRoot(referencesTarget, unit.dir);
-  // The directory this set lands in, created rather than assumed — {@link promoteProviderUnit}
+  // The directory this set lands in, created rather than assumed — {@link promoteDirectoryUnit}
   // does the same for its target's parent. The two flat directories the registry emits today
   // exist by the time promotion runs for reasons that have nothing to do with the unit landing
   // in them: the references root is created by {@link overlayGeneratedReferences}, and
@@ -904,38 +1004,39 @@ async function promoteCrossCuttingUnit(
 }
 
 /**
- * Promote a provider directory — swapped whole, or not at all.
+ * Promote a directory unit (a provider, or `pr/`) — swapped whole, or not at all.
  *
- * Displace the installed unit to a `.old` sibling, rename the staging tree into its
- * place, then drop the backup — so the installed directory is either entirely the
- * previous install or entirely the new one (DR-05, risk P2-g), and a rename that fails
- * half-way restores the previous one rather than leaving the provider empty.
+ * Displace the installed unit to its `.old` backup ({@link backupDirFor}), rename the
+ * staging tree into its place, then drop the backup — so the installed directory is
+ * either entirely the previous install or entirely the new one (DR-05, risk P2-g), and a
+ * rename that fails half-way restores the previous one rather than leaving it empty.
  *
  * Throws once the state it left has been recorded; the caller reports it.
  */
-async function promoteProviderUnit(
-  unit: ProviderOverlayUnit,
+async function promoteDirectoryUnit(
+  unit: DirectoryOverlayUnit,
   referencesTarget: string,
   stagingDir: string,
   record: RecordPromotionState,
 ): Promise<void> {
-  const target = underRoot(referencesTarget, unit.subdir);
+  const target = underRoot(referencesTarget, unitSubdir(unit));
+  const backup = backupDirFor(referencesTarget, unit);
   await fs.mkdir(path.dirname(target), { recursive: true });
+  await fs.mkdir(path.dirname(backup), { recursive: true });
 
   // Move the installed unit ASIDE, never delete it, before the staging tree takes
   // its place. `rm(target)` then `rename(staging, target)` destroys the only copy
-  // first: a rename that then fails leaves the provider with NO mechanics at all,
+  // first: a rename that then fails leaves the unit with NO mechanics at all,
   // while the report — and the summary line init.ts renders from it — still claims
   // the previously installed files were left unchanged. The backup is what makes
   // that claim true, so a failed promotion is recoverable rather than a silent
   // deletion (avoids PF-009: a reported failure must describe the state it left).
   //
-  // The `.old` sibling is pre-cleaned like the `.tmp` one. A crash that strands
+  // The `.old` backup is pre-cleaned like the `.tmp` tree. A crash that strands
   // either is converged away by a later run's tracker-subtree prune (both names end
   // in neither `/` nor `.md`, so no manifest entry can collide with them) — but the
   // backup this run is still relying on is exempt from this run's prune, which is
   // what `restore-failed` carries the recovery path for.
-  const backup = `${target}.old`;
   await fs.rm(backup, { recursive: true, force: true });
 
   let displaced = false;
@@ -967,8 +1068,8 @@ async function promoteProviderUnit(
 /**
  * Promote a fully built staging tree into place, dispatched on what kind of unit it is.
  *
- * The two kinds are promoted by two different strategies with two different guarantees,
- * and each half states its own: {@link promoteProviderUnit} swaps a directory whole,
+ * The unit kinds are promoted by two different strategies with two different guarantees,
+ * and each half states its own: {@link promoteDirectoryUnit} swaps a directory whole,
  * {@link promoteCrossCuttingUnit} renames the flat set document by document.
  *
  * What they share is the failure shape. A failure reports the state it left rather than a
@@ -998,7 +1099,8 @@ export async function promoteUnitStagingTree(
         await promoteCrossCuttingUnit(unit, referencesTarget, stagingDir, record);
         break;
       case 'provider':
-        await promoteProviderUnit(unit, referencesTarget, stagingDir, record);
+      case 'pr-host':
+        await promoteDirectoryUnit(unit, referencesTarget, stagingDir, record);
         break;
       default: {
         const _exhaustive: never = unit;
@@ -1107,6 +1209,10 @@ async function requireGeneratedTree(sourceRoot: string, manifest: readonly strin
  * convergence over ground it did not cover (avoids PF-009, PF-015). Orphans under that
  * subtree survive this install and the next one converges them.
  *
+ * A subtree whose root is not a real directory ({@link convergedRootFault}) is skipped
+ * the same way and through the same channel: a sweep's `readdir` of its root follows a
+ * link planted there, so pruning it would delete inside whatever the link points at.
+ *
  * Every name this returns is relative to the references ROOT, not to the subtree it
  * swept. The results of the {@link CONVERGED_SUBTREES} sweeps are merged into one
  * {@link SweepResult}, and `stale.md` removed from `pr/` and `stale.md` removed from
@@ -1117,12 +1223,19 @@ async function requireGeneratedTree(sourceRoot: string, manifest: readonly strin
  */
 async function prunePreservingRecoveryCopies(
   referencesTarget: string,
-  subtree: string,
+  subtree: ConvergedSubtree,
   manifest: readonly string[],
   overlayFailures: readonly OverlayFailure[],
 ): Promise<SweepResult> {
   const subtreeRoot = underRoot(referencesTarget, subtree);
   const prefix = `${subtree}/`;
+
+  // Checked here rather than trusted from the unit loop: this is the call that follows
+  // the root, and the root is re-read at the moment it would be followed.
+  const fault = await convergedRootFault(referencesTarget, subtree);
+  if (fault !== null) {
+    return { scanned: 0, removed: [], failed: [{ name: subtree, error: new Error(fault) }] };
+  }
 
   const stranded: string[] = [];
   for (const failure of overlayFailures) {
@@ -1180,8 +1293,8 @@ async function pruneConvergedSubtrees(
   overlayFailures: readonly OverlayFailure[],
 ): Promise<SweepResult> {
   let scanned = 0;
-  const removed: string[] = [];
-  const failed: Array<{ name: string; error: unknown }> = [];
+  const removed: SweepResult['removed'] = [];
+  const failed: Array<SweepResult['failed'][number]> = [];
 
   for (const subtree of CONVERGED_SUBTREES) {
     const swept = await prunePreservingRecoveryCopies(
@@ -1220,10 +1333,12 @@ async function pruneConvergedSubtrees(
  * must still receive the canonical GitHub mechanics the agent is told to load
  * (AC-2.4a / UAC-28).
  *
- * The prune runs last and yields to one thing only — a recovery copy this run itself
- * created and is still relying on (see {@link prunePreservingRecoveryCopies}). Every
- * unit this run did not refresh reaches `overlayFailures` carrying the state it was
- * actually left in, never a blanket claim that nothing changed.
+ * The prune runs last and yields to two things only — a recovery copy this run itself
+ * created and is still relying on, and a converged root that is not a real directory
+ * (see {@link prunePreservingRecoveryCopies}); a unit that would stage or land through
+ * such a root is refused before it is built (D-CONVERGED-ROOT-REAL). Every unit this run
+ * did not refresh reaches `overlayFailures` carrying the state it was actually left in,
+ * never a blanket claim that nothing changed.
  *
  * A unit already installed byte-for-byte is neither written nor a failure: it is skipped
  * and named in `unchangedRefs` (see {@link stagedUnitIsAlreadyInstalled}), so
@@ -1270,7 +1385,27 @@ export async function overlayGeneratedReferences(opts: {
 
   await fs.mkdir(opts.referencesTarget, { recursive: true });
 
+  // D-CONVERGED-ROOT-REAL, unit half: a unit whose build or promotion would pass through
+  // a converged root that is not a real directory is refused before it touches anything.
+  // Every unit stages under `tracker/`, so a faulted `tracker/` refuses them all.
+  const rootFaults = new Map<ConvergedSubtree, string>();
+  for (const subtree of CONVERGED_SUBTREES) {
+    const fault = await convergedRootFault(opts.referencesTarget, subtree);
+    if (fault !== null) rootFaults.set(subtree, fault);
+  }
+
   for (const unit of planOverlayUnits(manifest)) {
+    const fault = subtreesTouchedBy(opts.referencesTarget, unit)
+      .map(subtree => rootFaults.get(subtree))
+      .find((reason): reason is string => reason !== undefined);
+    if (fault !== undefined) {
+      overlayFailures.push({
+        unit: unitRef(unit),
+        state: await classifyUntouchedUnit(unit, opts.referencesTarget),
+        error: fault,
+      });
+      continue;
+    }
     const built = await buildUnitStagingTree(unit, sourceRoot, opts.referencesTarget, warn);
     if (!built.ok) {
       overlayFailures.push({
@@ -1381,26 +1516,38 @@ const SKILL_REFERENCES_DIRNAME = 'references';
  * a name the pre-clean forgot is simply force-promoted again on every run, which is the
  * defect this split exists to close.
  *
- * Paths are skill-relative and TOP-LEVEL under `references/`, which makes them mean
- * different things for the two unit kinds, matching what the overlay does with each:
- *   - a nested entry (`tracker/jira/setup-task.md`) contributes the SUBTREE
- *     `references/tracker`. The overlay prunes everything under it the manifest does not
- *     name, so preserving it whole cannot strand an orphan — a file the manifest lost
- *     leaves through {@link prunePreservingRecoveryCopies} on this same run.
- *   - a flat entry (`decision-markers.md`) contributes only THAT FILE. The references
- *     root holds hand-authored documents beside the generated ones with no manifest of
- *     which is which (D-OVERLAY-FLAT-UNIT), so the overlay never prunes there and the
- *     pre-clean must keep reaching it: preserving the root wholesale would make a
- *     retired generated document, and any stale file beside it, permanent.
+ * Paths are skill-relative, and what an entry contributes depends on whether a prune
+ * converges the directory it lands in — the one thing that makes preserving a whole
+ * directory safe:
+ *   - an entry under a {@link CONVERGED_SUBTREES} directory (`tracker/jira/setup-task.md`)
+ *     contributes that SUBTREE, `references/tracker`. The overlay prunes everything under
+ *     it the manifest does not name, so preserving it whole cannot strand an orphan — a
+ *     file the manifest lost leaves through {@link prunePreservingRecoveryCopies} on this
+ *     same run.
+ *   - any other entry contributes only THAT FILE: a flat one (`decision-markers.md`), and
+ *     a nested one whose directory no prune converges. The references root holds
+ *     hand-authored documents beside the generated ones with no manifest of which is
+ *     which (D-OVERLAY-FLAT-UNIT), so the overlay never prunes there and the pre-clean
+ *     must keep reaching it; a nested directory missing from the converged list is in
+ *     the same position. Preserving either wholesale would make a retired generated
+ *     document, and any stale file beside it, permanent.
  *
- * Pure function (applies ADR-013).
+ * Deciding the subtree arm by {@link CONVERGED_SUBTREES} rather than by nesting is what
+ * makes the two lists agree by construction: a directory is kept whole exactly when a
+ * prune owns it, so a fan-out directory registered without a converged entry fails safe
+ * instead of surviving every install (avoids PF-074).
+ *
+ * Pure function (applies ADR-013). Exported for the one property no installed-tree arm
+ * can reach: the build emits no nested directory outside the converged list, so the
+ * fail-safe arm is only observable on a manifest the registry does not produce.
  */
-function overlayOwnedSkillPaths(manifest: readonly string[]): ReadonlySet<string> {
+export function overlayOwnedSkillPaths(manifest: readonly string[]): ReadonlySet<string> {
   const owned = new Set<string>();
   for (const relPath of manifest) {
-    const top = relPath.split('/')[0];
-    if (top === '') continue;
-    owned.add(`${SKILL_REFERENCES_DIRNAME}/${top}`);
+    const segments = relPath.split('/');
+    if (segments[0] === '') continue;
+    const keptWhole = segments.length > 1 && isConvergedSubtree(segments[0]);
+    owned.add(`${SKILL_REFERENCES_DIRNAME}/${keptWhole ? segments[0] : relPath}`);
   }
   return owned;
 }
@@ -1412,11 +1559,17 @@ function overlayOwnedSkillPaths(manifest: readonly string[]): ReadonlySet<string
  * whole — a file as itself, a directory with its entire subtree. Everything else is
  * removed exactly as the unconditional pre-clean would have removed it.
  *
+ * A kept path is preserved only as a real file or directory. A symlink planted at one is
+ * removed like anything else (the link, never its target): the converger that owns the
+ * path writes and prunes through it, so a link left standing here would hand that
+ * converger someone else's directory (D-CONVERGED-ROOT-REAL). `Dirent` types are
+ * lstat-based, which is what makes the check see the link rather than its target.
+ *
  * Descent is bounded, and the bound is the `keep` set's own deepest path rather than a
  * constant: the walk only ever descends INTO a directory that still has a kept
  * descendant below it, so there is nothing to look for past that depth. A `keep` set of
- * depth 2 — which is what {@link overlayOwnedSkillPaths} produces — walks two levels and
- * `fs.rm`s the rest recursively in one call.
+ * depth 2 — which is what {@link overlayOwnedSkillPaths} produces for every manifest the
+ * build emits — walks two levels and `fs.rm`s the rest recursively in one call.
  *
  * An unreadable directory is left alone rather than reported: the caller already
  * swallows the errors of the `fs.rm` this stands in for, and a pre-clean that cannot
@@ -1434,7 +1587,7 @@ async function emptyDirectoryExcept(dir: string, keep: ReadonlySet<string>): Pro
 
     for (const entry of entries) {
       const entryRel = rel === '' ? entry.name : `${rel}/${entry.name}`;
-      if (keep.has(entryRel)) continue;
+      if (keep.has(entryRel) && !entry.isSymbolicLink()) continue;
 
       const holdsSomethingKept = entry.isDirectory()
         && depth < maxDepth
