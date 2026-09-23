@@ -36,11 +36,12 @@ import { readFileSync } from 'fs';
 import * as path from 'path';
 
 import { MIN_VARIANT_PAIRS, PR_HOST_OPS, TRACKER_GITHUB_OPS } from '../../src/core/mds-variants.js';
-import { collectTrackerNamingLines } from '../helpers.js';
+import { collectTrackerNamingLines, prHostRel } from '../helpers.js';
 import {
   ALL_OPS,
   GIT_AGENT,
   LOADED_SET_WRITTEN_EXCLUSIONS,
+  isPrHostOp,
   MCP_BACKED_PROVIDERS,
   MCP_CONTRACT_REL,
   MODEL_CROSS_CUTTING_ON_DEMAND,
@@ -56,7 +57,6 @@ import {
   measureOptional,
   nameableCrossCutting,
   nameableFrom,
-  prRefRel,
   preambleBlock,
   providerLoadedSet,
   referenceChars,
@@ -687,19 +687,29 @@ describe('byte budget: component and loaded-set pins (AC-2.5)', () => {
       'no PR-host reference load resolved — the budget summed nothing. Run `npm run build`.',
     ).toBeGreaterThan(0);
 
-    // The written exclusion has to be EXERCISED, or it is a declaration about
+    // Every written exclusion has to be EXERCISED, or it is a declaration about
     // nothing that would stay green after the file it names stopped being
-    // reachable (PF-064). Asserted as the pair of ops that actually reach it,
+    // reachable (PF-064). Each is asserted as the ops that actually reach it,
     // named rather than counted: a count of 2 is equally satisfied by losing one
-    // of these and gaining an unrelated op.
-    const excluded = LOADED_SET_WRITTEN_EXCLUSIONS[0];
-    const reaching = PR_HOST_OPS.filter(op => summedFor(op).has(excluded));
+    // of these and gaining an unrelated op. Keyed per exclusion, so a new entry
+    // on the list cannot ride through unexercised.
+    const REACHED_BY: Readonly<Record<string, readonly string[]>> = {
+      'github-api.md': ['fetch-review-threads', 'resolve-review-threads'],
+    };
     expect(
-      [...reaching].sort(),
-      `no PR-host op names ${excluded}, so LOADED_SET_WRITTEN_EXCLUSIONS excludes nothing and ` +
-      'shape 2c-ex records the same figure as this gate. Retire the exclusion, or find out ' +
-      'what stopped reaching the file.',
-    ).toEqual(['fetch-review-threads', 'resolve-review-threads']);
+      [...LOADED_SET_WRITTEN_EXCLUSIONS].sort(),
+      'every LOADED_SET_WRITTEN_EXCLUSIONS entry needs the ops that reach it recorded here — an ' +
+      'exclusion with no expected reach is one nothing proves is exercised',
+    ).toEqual(Object.keys(REACHED_BY).sort());
+    for (const excluded of LOADED_SET_WRITTEN_EXCLUSIONS) {
+      const reaching = PR_HOST_OPS.filter(op => summedFor(op).has(excluded));
+      expect(
+        [...reaching].sort(),
+        `no PR-host op names ${excluded} as expected, so LOADED_SET_WRITTEN_EXCLUSIONS excludes ` +
+        'nothing there and shape 2c-ex records the same figure as this gate. Retire the ' +
+        'exclusion, or find out what stopped reaching the file.',
+      ).toEqual(REACHED_BY[excluded]);
+    }
 
     expect(
       total,
@@ -1062,7 +1072,7 @@ describe('byte budget: formula file-set ↔ nameable file-set (both directions)'
     // an absence check over a corpus nobody perturbs (PF-064).
     const op = 'post-review-summary';
     const seededNameable = nameableFrom(op, rel =>
-      rel === prRefRel(op) ? 'Then read `references/smuggled.md` for the rest.\n' : null);
+      rel === prHostRel(op) ? 'Then read `references/smuggled.md` for the rest.\n' : null);
     expect(
       collectMissingFrom(op, seededNameable, summedFor(op)),
       'a reference named only inside the PR-host body must be reported as unmodelled — otherwise ' +
@@ -1115,12 +1125,12 @@ describe('byte budget: written exclusions', () => {
         `${op} must not be a generated tracker reference (SG-8 written exclusion)`,
       ).toBe(false);
       expect(
-        (PR_HOST_OPS as readonly string[]).includes(op),
+        isPrHostOp(op),
         `${op} must be a PR-host op — PR comments are posted on GitHub under every tracker`,
       ).toBe(true);
       expect(
-        referenceChars(prRefRel(op)),
-        `${prRefRel(op)} must exist and carry its mechanics — an empty file would make the move ` +
+        referenceChars(prHostRel(op)),
+        `${prHostRel(op)} must exist and carry its mechanics — an empty file would make the move ` +
         'a deletion wearing a pointer',
       ).toBeGreaterThan(0);
     }

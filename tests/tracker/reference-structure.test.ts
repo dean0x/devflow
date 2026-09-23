@@ -44,7 +44,6 @@ import * as path from 'path';
 
 import { compiledSkillRefsDir } from '../../src/core/assets.js';
 import {
-  PR_HOST_DESTINATION_ROOT,
   PR_HOST_OPS,
   TRACKER_GITHUB_OPS,
   generatedReferenceManifest,
@@ -54,6 +53,7 @@ import {
   collectUnfencedH2,
   extractOpSectionFromCorpus,
   gitAgentSinkCorpus,
+  prHostRel,
 } from '../helpers.js';
 
 // ---------------------------------------------------------------------------
@@ -95,11 +95,6 @@ function trackerOpRelPath(op: string): string {
   return `tracker/github/${op}.md`;
 }
 
-/** The emitted path of a PR-host operation's mechanics. */
-function prHostOpRelPath(op: string): string {
-  return `${PR_HOST_DESTINATION_ROOT}/${op}.md`;
-}
-
 /**
  * Every per-op reference the anchor rule ranges over, as `(op, relPath)` pairs.
  *
@@ -112,7 +107,7 @@ function prHostOpRelPath(op: string): string {
  */
 const PER_OP_REFERENCES: readonly { readonly op: string; readonly relPath: string }[] = [
   ...TRACKER_GITHUB_OPS.map(op => ({ op, relPath: trackerOpRelPath(op) })),
-  ...PR_HOST_OPS.map(op => ({ op, relPath: prHostOpRelPath(op) })),
+  ...PR_HOST_OPS.map(op => ({ op, relPath: prHostRel(op) })),
 ];
 
 /**

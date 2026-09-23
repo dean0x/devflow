@@ -26,13 +26,12 @@ import * as path from 'path';
 import { skillsDir, compiledSkillRefsDir } from '../../src/core/assets.js';
 import {
   MCP_BACKED_PROVIDER_SUBDIRS,
-  PR_HOST_DESTINATION_ROOT,
   PR_HOST_OPS,
   TRACKER_GITHUB_OPS,
   TRACKER_OPS,
   VARIANT_MODULES,
 } from '../../src/core/mds-variants.js';
-import { resolveAgentSource } from '../helpers.js';
+import { prHostRel, resolveAgentSource } from '../helpers.js';
 
 // ---------------------------------------------------------------------------
 // Fail-loud measurement
@@ -130,18 +129,14 @@ export function trackerRefRel(op: string): string {
 }
 
 /**
- * The generated PR-host mechanics file for an operation.
+ * Whether an op's mechanics live (also) in the PR-host tree.
  *
- * One file, not one per provider: pull requests, PR reviews and PR checks stay on
- * GitHub under every issue tracker, so a `pr/` reference costs the same on every
- * path and enters every provider's sum identically.
+ * Its `pr/` file (`prHostRel(op)`, tests/helpers.ts) is one file, not one per
+ * provider: pull requests, PR reviews and PR checks stay on GitHub under every
+ * issue tracker, so a `pr/` reference costs the same on every path and enters
+ * every provider's sum identically.
  */
-export function prRefRel(op: string): string {
-  return `${PR_HOST_DESTINATION_ROOT}/${op}.md`;
-}
-
-/** Whether an op's mechanics live (also) in the PR-host tree. */
-function isPrHostOp(op: string): boolean {
+export function isPrHostOp(op: string): op is (typeof PR_HOST_OPS)[number] {
   return (PR_HOST_OPS as readonly string[]).includes(op);
 }
 
@@ -232,7 +227,7 @@ export function nameableFrom(
     nameable.add(rel);
   }
   if (isPrHostOp(op)) {
-    const prRef = prRefRel(op);
+    const prRef = prHostRel(op);
     const body = nameable.has(prRef) ? readReference(prRef) : null;
     if (body !== null) {
       for (const rel of literalMentions(body)) nameable.add(rel);
@@ -361,7 +356,7 @@ const MODEL_CROSS_CUTTING_REFS: Readonly<Record<string, readonly string[]>> = {
   // check-merge-readiness step 3 reuses check-ci-status's classification, and those
   // steps live only in the sibling's PR-host file, so its reference names that file
   // for loading. One spawn therefore pays for both `pr/` files.
-  'check-merge-readiness': [prRefRel('check-ci-status')],
+  'check-merge-readiness': [prHostRel('check-ci-status')],
 };
 
 /** The file set the budget formula sums for an operation. */
@@ -370,7 +365,7 @@ export function summedFor(op: string): Set<string> {
   if ((TRACKER_GITHUB_OPS as readonly string[]).includes(op)) {
     summed.add(trackerRefRel(op));
   }
-  if (isPrHostOp(op)) summed.add(prRefRel(op));
+  if (isPrHostOp(op)) summed.add(prHostRel(op));
   return summed;
 }
 
@@ -387,7 +382,7 @@ function summedForProvider(provider: string, op: string): Set<string> {
   summed.add(providerRefRel(provider, op));
   // The PR-host tree is provider-independent and installed under every provider,
   // so it is the same addend on every path — not a GitHub-only cost.
-  if (isPrHostOp(op)) summed.add(prRefRel(op));
+  if (isPrHostOp(op)) summed.add(prHostRel(op));
   return summed;
 }
 

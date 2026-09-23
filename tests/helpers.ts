@@ -7,6 +7,7 @@ import { DEFAULT_TRACKER_PROVIDER } from '../src/core/tracker.js'
 import { getAllAgentNames } from '../src/core/plugins.js'
 import { agentSourceDirs, compiledSkillRefsDir } from '../src/core/assets.js'
 import { MAX_REFERENCE_SWEEP_DEPTH } from '../src/core/reference-sweep.js'
+import { PR_HOST_DESTINATION_ROOT } from '../src/core/mds-variants.js'
 
 export const ROOT = path.resolve(import.meta.dirname, '..')
 
@@ -727,6 +728,33 @@ export function gitAgentSinkCorpus(root = ROOT): CorpusEntry[] {
   }
 
   return corpus
+}
+
+// ── PR-host path grammar ─────────────────────────────────────────────────────
+//
+// ONE spelling of where the PR-host mechanics live, read by every suite that
+// builds, filters or seeds a `references/pr/` path. Several local copies of this
+// grammar would let the next directory move update one and silently narrow the
+// corpus of every guard built on the others (PF-018: a corpus that went empty
+// after a move passes by matching nothing).
+
+/** The references-root-relative path of an op's PR-host mechanics: `pr/{op}.md`. */
+export function prHostRel(op: string): string {
+  return `${PR_HOST_DESTINATION_ROOT}/${op}.md`
+}
+
+/**
+ * Whether a corpus entry's path is a PR-host reference — any file under
+ * `references/pr/`, or, when `op` is given, exactly that op's `references/pr/{op}.md`.
+ *
+ * Separator-normalised, so an absolute path built with `path.join` matches on
+ * every platform.
+ */
+export function isPrHostEntryPath(entryPath: string, op?: string): boolean {
+  const posix = entryPath.replace(/\\/g, '/')
+  return op === undefined
+    ? posix.includes(`/references/${PR_HOST_DESTINATION_ROOT}/`)
+    : posix.endsWith(`/references/${prHostRel(op)}`)
 }
 
 // ── Tracker reference-naming collector ───────────────────────────────────────

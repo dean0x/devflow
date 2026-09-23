@@ -23,7 +23,7 @@ import {
   PR_HOST_DESTINATION_ROOT,
   VARIANT_MODULES,
 } from '../src/core/mds-variants.js';
-import { ROOT, resolveAgentSource, resolveAllAgents, gitAgentSinkCorpus, extractOpSectionFromCorpus, collectUnfencedH2, loadFile, requireDistFile, walkFiles, type CorpusEntry } from './helpers.js';
+import { ROOT, resolveAgentSource, resolveAllAgents, gitAgentSinkCorpus, extractOpSectionFromCorpus, collectUnfencedH2, loadFile, requireDistFile, walkFiles, isPrHostEntryPath, type CorpusEntry } from './helpers.js';
 
 /**
  * How many corpus files declare a `## Operation:` section for a TRACKER op:
@@ -79,9 +79,6 @@ function cachedSinkCorpus(): CorpusEntry[] {
   return (sinkCorpusMemo ??= gitAgentSinkCorpus());
 }
 
-/** POSIX path prefix of the PR-host reference tree, derived from the registry. */
-const PR_HOST_PREFIX = `${PR_HOST_DESTINATION_ROOT}/`;
-
 /**
  * `git.md` plus the PR-host references, and NOTHING else.
  *
@@ -101,8 +98,7 @@ const PR_HOST_PREFIX = `${PR_HOST_DESTINATION_ROOT}/`;
 function gitPlusPrHostCorpus(): CorpusEntry[] {
   return cachedSinkCorpus().filter(
     entry =>
-      entry.path === GIT_AGENT_PATH ||
-      entry.path.replace(/\\/g, '/').includes(`/references/${PR_HOST_PREFIX}`),
+      entry.path === GIT_AGENT_PATH || isPrHostEntryPath(entry.path),
   );
 }
 
@@ -116,7 +112,7 @@ function gitPlusPrHostCorpus(): CorpusEntry[] {
  */
 function seedPrHostFile(op: string, transform: (content: string) => string): CorpusEntry[] {
   return cachedSinkCorpus().map(entry =>
-    entry.path.replace(/\\/g, '/').endsWith(`/${PR_HOST_PREFIX}${op}.md`)
+    isPrHostEntryPath(entry.path, op)
       ? { path: entry.path, content: transform(entry.content) }
       : entry,
   );
@@ -138,13 +134,11 @@ function seedPrHostFile(op: string, transform: (content: string) => string): Cor
  * the build wrote it to.
  */
 function sinkCorpusWithoutPrHost(): CorpusEntry[] {
-  const dropped = cachedSinkCorpus().filter(
-    entry => !entry.path.replace(/\\/g, '/').includes(`/references/${PR_HOST_PREFIX}`),
-  );
+  const dropped = cachedSinkCorpus().filter(entry => !isPrHostEntryPath(entry.path));
   if (dropped.length === cachedSinkCorpus().length) {
     throw new Error(
       `sinkCorpusWithoutPrHost: dropped nothing — no corpus entry sits under references/` +
-      `${PR_HOST_PREFIX}, so every probe built on this helper is vacuous (PF-018). ` +
+      `${PR_HOST_DESTINATION_ROOT}/, so every probe built on this helper is vacuous (PF-018). ` +
       'Run `npm run build` so the PR-host references exist.',
     );
   }
@@ -1856,7 +1850,7 @@ describe('git agent — static content guards (PF-018)', () => {
     // regression reported as agreement (the `scanned > 0` anti-pattern, one level up).
     expect(
       [...postingOps].sort(),
-      `without references/${PR_HOST_PREFIX} the posting set must fall from 8 to exactly these 4 ` +
+      `without references/${PR_HOST_DESTINATION_ROOT}/ the posting set must fall from 8 to exactly these 4 ` +
       'ops — a set that does not move proves the union corpus was never load-bearing (PF-018)',
     ).toEqual([...EXPECTED_WITHOUT_PR_HOST].sort());
   });

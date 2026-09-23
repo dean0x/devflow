@@ -42,6 +42,7 @@ import {
 import {
   collectTrackerNamingLines,
   extractOpSectionFromCorpus,
+  prHostRel,
   resolveAgentSource,
   walkFiles,
 } from '../helpers.js';
@@ -316,19 +317,14 @@ function collectPrHostNames(content: string): string[] {
     .sort();
 }
 
-/** The `pr/…` path the registry emits for an op — derived, never retyped. */
-function prHostRel(op: string): string {
-  return `${PR_HOST_DESTINATION_ROOT}/${op}.md`;
-}
-
 /**
  * Named predicate: does a per-op reference open with its OWN anchor on line 1?
  *
  * A function rather than an inline `startsWith` at each site, because the live arm
  * and its known-bad probe must read the SAME rule. Restated inline, the probe
  * asserts only that one hand-written string fails one hand-written check — it stays
- * green after the live arm is weakened (say to `includes`), which is the shape
- * ADR-024 exists to forbid and PF-018 names.
+ * green after the live arm is weakened (say to `includes`), which is the vacuous
+ * pass PF-018 names.
  */
 function anchorsOnLineOne(body: string, op: string): boolean {
   return body.startsWith(`## Operation: ${op}\n`);

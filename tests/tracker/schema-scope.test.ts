@@ -56,6 +56,8 @@ import {
   collectTrackerTemplate,
   collectTrackerTemplateHeadings,
   gitAgentSinkCorpus,
+  isPrHostEntryPath,
+  prHostRel,
   resolveAgentSource,
   walkFiles,
   type CorpusEntry,
@@ -823,14 +825,6 @@ const PR_HOST_LEGACY_REASONS: readonly string[] = [
   '5xx on post-resolution-summary',
 ];
 
-/** The references-root-relative prefix `PR_HOST_LEGACY_REASONS` is scoped to. */
-const PR_HOST_SCOPE = `${path.sep}references${path.sep}${PR_HOST_DESTINATION_ROOT}${path.sep}`;
-
-/** Whether a corpus entry is one of the PR-host references. */
-function isPrHostEntry(entryPath: string): boolean {
-  return entryPath.includes(PR_HOST_SCOPE) || entryPath.includes(`/references/${PR_HOST_DESTINATION_ROOT}/`);
-}
-
 /**
  * §14.2 rows with no emitting site yet.
  *
@@ -941,7 +935,7 @@ export function collectUnregisteredReasons(corpus: readonly CorpusEntry[]): stri
       if (CANONICAL_REASONS.some(canonical => reasonSpellings(canonical).includes(reason))) continue;
       if (GITHUB_ONLY_REASONS.includes(reason)) continue;
       if (entry.path === GIT_AGENT.path && GIT_AGENT_LEGACY_REASONS.includes(reason)) continue;
-      if (isPrHostEntry(entry.path) && PR_HOST_LEGACY_REASONS.includes(reason)) continue;
+      if (isPrHostEntryPath(entry.path) && PR_HOST_LEGACY_REASONS.includes(reason)) continue;
       unregistered.push(`${entry.path}: "${reason}"`);
     }
   }
@@ -1152,7 +1146,7 @@ describe('[DR-04] DEGRADED literal registry: reverse direction', () => {
     // The mirror of the arm above for the second scoped registry (#326). Same two
     // properties, asserted the same way: nothing parked, nothing excused outside
     // the tree that emits it.
-    const prOnly = gitAgentSinkCorpus().filter(e => isPrHostEntry(e.path));
+    const prOnly = gitAgentSinkCorpus().filter(e => isPrHostEntryPath(e.path));
     expect(
       prOnly.length,
       'no PR-host reference is in the corpus — run `npm run build`; without it this whole arm is ' +
@@ -1187,14 +1181,19 @@ describe('[DR-04] DEGRADED literal registry: reverse direction', () => {
 
     // …and a pr/ reference reaching for an AGENT legacy spelling is reported too,
     // which is what keeps the two registries two rather than one with a longer list.
+    // Named by value, and required to be agent-only: a literal on both lists would
+    // be excused in pr/ by the PR-host exemption and prove nothing about this one.
+    const AGENT_ONLY_REASON = 'malformed version';
+    expect(GIT_AGENT_LEGACY_REASONS).toContain(AGENT_ONLY_REASON);
+    expect(PR_HOST_LEGACY_REASONS).not.toContain(AGENT_ONLY_REASON);
     const crossed: CorpusEntry = {
-      path: `dist/skills/git/references/${PR_HOST_DESTINATION_ROOT}/check-ci-status.md`,
-      content: `On failure emit \`TRACEABILITY: DEGRADED (${GIT_AGENT_LEGACY_REASONS[2]})\`.`,
+      path: `dist/skills/git/references/${prHostRel('check-ci-status')}`,
+      content: `On failure emit \`TRACEABILITY: DEGRADED (${AGENT_ONLY_REASON})\`.`,
     };
     expect(
       collectUnregisteredReasons([crossed]),
       'the agent-scoped exemption must not leak into the PR-host tree',
-    ).toEqual([`${crossed.path}: "${GIT_AGENT_LEGACY_REASONS[2]}"`]);
+    ).toEqual([`${crossed.path}: "${AGENT_ONLY_REASON}"`]);
   });
 
   it('known-bad probe: a new unregistered reason in the agent file is reported', () => {
