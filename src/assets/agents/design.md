@@ -1,6 +1,6 @@
 ---
 name: Design
-description: Design analysis agent with preloaded mode skills. Modes: gap-analysis (completeness, architecture, security, performance, compliance, consistency, dependencies), design-review (anti-pattern detection).
+description: "Design analysis agent with preloaded mode skills. Modes: gap-analysis (completeness, architecture, security, performance, compliance, consistency, dependencies), design-review (anti-pattern detection)."
 model: opus
 skills:
   - devflow:worktree-support
