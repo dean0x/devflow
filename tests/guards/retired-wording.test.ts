@@ -375,8 +375,8 @@ const RETIRED_LITERALS: ReadonlyArray<RetiredEntry> = [
       'The PR step rendered `Closes #{ISSUE_NUMBER}` whenever an issue number was known, with no ' +
       'provider in the condition. Under jira or linear that number is the tail of a key like ' +
       'PROJ-12, so the line closed whichever GitHub issue happens to carry the same digits — a ' +
-      'wrong, silent, GitHub-visible write. The rendering is correct under github and is kept ' +
-      'there; what is retired is stating it without the gate.',
+      'wrong, silent, GitHub-visible write. The rendering is correct only under github; what is ' +
+      'retired is stating it without the gate.',
   },
 
   // ── The `[Unreleased]` changelog's claims about the shipped tree (M-3) ──────

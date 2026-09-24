@@ -532,3 +532,60 @@ describe('ISSUE_PR_LINK forwarding — every Code spawn site carries the sibling
     ).toBeGreaterThan(numberAt)
   })
 })
+
+// -------------------------------------------------------------------------
+// /implement's parallel path opens its PR through a Code `pr-create` spawn (#359, G3).
+//
+// The orchestrator used to run `gh pr create` itself for PARALLEL_CODE_AGENTS: the
+// body skipped the D11 scrub every Code-created PR gets, and the command layer
+// rendered its own link line — a second rendering site with no provider to render
+// it against. Both went when the step became a Code spawn whose Responsibility 7
+// owns the body, the paste gate and the scrub. This block pins that the spawn
+// exists, carries everything Responsibility 7 reads, and lands on a declared mode.
+// -------------------------------------------------------------------------
+
+/** Named collector: the Code spawn payloads that run `OPERATION: pr-create`. */
+function collectPrCreateSpawns(source: string): SpawnPayload[] {
+  return collectIssueSpawnPayloads('implement.md', source).filter(p => p.block.includes('OPERATION: pr-create'))
+}
+
+/** The keys Responsibility 7 reads, every one of which the pr-create spawn must carry. */
+const PR_CREATE_KEYS = [
+  'Agent(subagent_type="Code")',
+  'CREATE_PR: true',
+  'BASE_BRANCH:',
+  'PR_DESCRIPTION_GUIDANCE:',
+  'ISSUE_NUMBER:',
+  'ISSUE_PR_LINK:',
+] as const
+
+describe('/implement parallel PR — a Code pr-create spawn, never the orchestrator', () => {
+  it('Phase 10 spawns exactly one pr-create Code agent carrying every Responsibility-7 input', async () => {
+    const { root } = await buildCommittedTree()
+    const implement = requireDistFile('implement.md', root)
+    const spawns = collectPrCreateSpawns(implement)
+    expect(spawns, 'one pr-create spawn — the parallel path must not create the PR itself').toHaveLength(1)
+    for (const key of PR_CREATE_KEYS) {
+      expect(spawns[0].block, `the pr-create spawn must pass ${key}`).toContain(key)
+    }
+    expect(implement, 'the retired orchestrator-run PR creation').not.toContain('run `gh pr create`')
+  }, 20_000)
+
+  it('code.md declares the mode and routes it through Responsibility 7 and its D11 scrub', () => {
+    expect(CODE).toMatch(/\*\*OPERATION\*\* \(optional\):[^\n]*`pr-create`/)
+    const mode = CODE.slice(CODE.indexOf('## Mode: pr-create'))
+    expect(mode.startsWith('## Mode: pr-create'), 'the mode section must exist').toBe(true)
+    const body = mode.slice(0, mode.indexOf('\n## ', 1))
+    expect(body).toContain('Responsibility 7')
+    expect(body).toContain('D11 scrub')
+    expect(body).toContain('Make no code changes')
+  })
+
+  it('known-bad probe: a Phase 10 that lost its spawn is reported', async () => {
+    const { root } = await buildCommittedTree()
+    const real = requireDistFile('implement.md', root)
+    const seeded = real.replace('OPERATION: pr-create', 'OPERATION: implement')
+    expect(seeded, 'the seed must actually change the text').not.toBe(real)
+    expect(collectPrCreateSpawns(seeded)).toHaveLength(0)
+  })
+})

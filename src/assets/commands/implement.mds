@@ -516,7 +516,7 @@ If any Git agent output emitted `TRACEABILITY: DEGRADED (\{reason\})` lines duri
 ├─ Phase 10: Create PR (if needed)
 │  └─ SINGLE_CODE_AGENT: handled by Code agent
 │  └─ SEQUENTIAL: handled by last Code agent
-│  └─ PARALLEL: orchestrator creates unified PR
+│  └─ PARALLEL: Code agent (pr-create) creates unified PR
 │
 ├─ Phase 11: Report
 │

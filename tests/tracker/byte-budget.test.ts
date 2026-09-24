@@ -154,15 +154,15 @@ const BUDGET_SKILL_MD = 6_600;
  * row, so this number can never drift into billing every GitHub user for bytes
  * they never receive (GAP-02).
  *
- * Derived from a measured 63_941 plus the 2,200 ch RESERVATION LEDGER above:
- * 66_141. Outside the ledger, the next addition to the agent or to a github
+ * Derived from a measured 63_929 plus the 2,200 ch RESERVATION LEDGER above:
+ * 66_129. Outside the ledger, the next addition to the agent or to a github
  * mechanics file must fund itself with a cut.
  *
  * MAY BE LOWERED, NEVER RAISED. Registered as `budget-loaded-set` in
  * tests/fixtures/numeric-floors.json; lowering re-pins the value AND the pattern
  * in the same commit.
  */
-const BUDGET_LOADED_SET = 66_141;
+const BUDGET_LOADED_SET = 66_129;
 
 /**
  * THE JIRA-SCOPED loaded-set ceiling — a spawn under the Jira provider.
@@ -185,8 +185,8 @@ const BUDGET_LOADED_SET = 66_141;
  *   + max_op chars(references/tracker/jira/{op}.md)
  *   + max over TRACKER ops of the one-spawn load [DR-12, D-LOADED-SET-SCOPE]
  *
- * Derived from a measured 74_226 plus the 2,200 ch RESERVATION LEDGER above:
- * 76_426. Outside the ledger, the next addition to the contract or to a Jira
+ * Derived from a measured 74_225 plus the 2,200 ch RESERVATION LEDGER above:
+ * 76_425. Outside the ledger, the next addition to the contract or to a Jira
  * mechanics file must fund itself with a cut rather than reach for slack. Trimming
  * `references/tracker/_mcp.md` is the honest first move: it is contract prose, it
  * is the single largest term this row adds over the GitHub one, and a pass over it
@@ -195,7 +195,7 @@ const BUDGET_LOADED_SET = 66_141;
  * MAY BE LOWERED, NEVER RAISED. Registered as `budget-loaded-set-jira` in
  * tests/fixtures/numeric-floors.json.
  */
-const BUDGET_LOADED_SET_JIRA = 76_426;
+const BUDGET_LOADED_SET_JIRA = 76_425;
 
 /**
  * THE LINEAR-SCOPED loaded-set ceiling — a spawn under the Linear provider.
@@ -204,8 +204,8 @@ const BUDGET_LOADED_SET_JIRA = 76_426;
  * each MCP-backed provider is priced on its own row, none of them can move the
  * GitHub one, and the GitHub one cannot absorb theirs.
  *
- * Derived from a measured 76_191 plus the 2,200 ch RESERVATION LEDGER above:
- * 78_391. This is the LARGEST of the four ceilings but not the binding one: a
+ * Derived from a measured 76_184 plus the 2,200 ch RESERVATION LEDGER above:
+ * 78_384. This is the LARGEST of the four ceilings but not the binding one: a
  * character added to git.md is a character added to every row, and every row
  * reserves the same ledger. Re-run this file for each row's current headroom.
  *
@@ -223,7 +223,7 @@ const BUDGET_LOADED_SET_JIRA = 76_426;
  * MAY BE LOWERED, NEVER RAISED. Registered as `budget-loaded-set-linear` in
  * tests/fixtures/numeric-floors.json.
  */
-const BUDGET_LOADED_SET_LINEAR = 78_391;
+const BUDGET_LOADED_SET_LINEAR = 78_384;
 
 /**
  * THE PR-HOST loaded-set ceiling — the worst-case cost of a spawn that runs one of

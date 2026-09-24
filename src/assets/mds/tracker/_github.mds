@@ -47,7 +47,7 @@ Load when the resolved tracker provider is `github` and the operation is `setup-
 {common.conventions_step()}
 1c. Issue-first: before branch derivation, ensure a GitHub issue exists for this task:
    - Preconditions: remote reachable AND `gh` authenticated. If either fails → emit `TRACEABILITY: DEGRADED (\{reason\})` and continue to step 2 (convention still applies; no issue number is set).
-   - If step 1 admitted `ISSUE_INPUT`: its digits are the existing issue number.
+   - If `ISSUE_INPUT` was provided, step 1 alone decides the number.
    - Otherwise: invoke `ensure-traceable-issue` with `TASK_DESCRIPTION` (and `PLAN_ARTIFACT_PATH` if provided) to create or find an issue. Capture the returned issue number.
    - Issue number drives the branch name in step 3: `\{type\}/\{number\}-\{slug\}`.
 {common.branch_detection_step()}
@@ -251,7 +251,7 @@ Load when the resolved tracker provider is `github` and the operation is `gather
    - **The listing:** `gh pr list --state merged --search "merged:>=$TAG_DATE" --limit 200 --json number,mergeCommit,closingIssuesReferences`; with no tag, omit `--search`.
    - **Map locally, with no further call:** keep a listed PR when its `mergeCommit.oid` is in `git rev-list \{last_tag\}..HEAD`, or when a range commit's subject ends `(#N)` naming it. Keep only references whose `repository.owner.login`/`name` equal this repo's identity — any other ⇒ `TRACEABILITY: DEGRADED (foreign issue reference \{ref\})`. Render each kept number `#\{n\}`.
    - **Coverage:** a range subject carries a PR marker (`(#N)` or `Merge pull request #N`) but no listed PR maps into the range ⇒ `TRACEABILITY: DEGRADED (merged-PR listing did not cover the range)`. A listing of exactly 200 ⇒ status `INDETERMINATE (merged-PR listing hit its 200 cap)`, returning what was collected.
-   - **The listing fails** (an older `gh` reports `Unknown JSON field`) ⇒ `TRACEABILITY: DEGRADED (\{reason\})`, then fall back to `gh pr view N --json closingIssuesReferences` over the PR numbers in `(#N)` / `Merge pull request #N` subjects, bounded at ≤25 PRs; report the remainder as `THROTTLED (\{n\} not processed)` and never report the enrichment as complete while PRs went unresolved.
+   - **The listing fails** (an older `gh` reports `Unknown JSON field`) ⇒ `TRACEABILITY: DEGRADED (\{reason\})`, then fall back to `gh pr view N --json closingIssuesReferences` over the PR numbers in `(#N)` / `Merge pull request #N` subjects, each N gated `^[1-9][0-9]\{0,8\}$`, filtered and rendered as above, bounded at ≤25 PRs; report the remainder as `THROTTLED (\{n\} not processed)` and never report the enrichment as complete while PRs went unresolved.
    - On any 4xx → DEGRADED for that item, continue. On 5xx → 1 retry; still 5xx → DEGRADED for that item, continue. On the secondary rate limit of `### Provider signals (GitHub)` in this operation's `backlink-shipped-issues` reference, which is where this provider's signals are stated → stop GitHub enrichment immediately, report remaining as `THROTTLED`.
 @end
 

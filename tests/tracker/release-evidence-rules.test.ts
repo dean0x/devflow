@@ -115,6 +115,11 @@ const CASES: ReadonlyArray<{ readonly text: string; readonly provider: 'github' 
   { text: 'Closes: #12', provider: 'github', expected: ['#12'] },
   { text: 'Closes #1, #2', provider: 'github', expected: ['#1', '#2'] },
   { text: 'Refs KEY-9;', provider: 'jira', expected: ['KEY-9'] },
+  { text: 'closed: #7', provider: 'github', expected: ['#7'] },
+  // Rejected — a reference in the other provider's grammar never crosses the gate.
+  { text: 'Refs KEY-9', provider: 'github', expected: [] },
+  { text: 'Closes #12', provider: 'jira', expected: [] },
+  { text: 'Refs OTHER-9', provider: 'jira', expected: [] },
   // Rejected — by the gate, or because no keyword precedes the token.
   { text: 'Closes #12abc', provider: 'github', expected: [] },
   { text: 'Closes owner/repo#12', provider: 'github', expected: [] },

@@ -129,7 +129,7 @@ Load when the resolved tracker provider is `linear` and the operation is `setup-
 
 1. **`ISSUE_INPUT` pre-flight**, when provided: it is an existing issue reference. {common.ref_preflight_single("linear", "**either** anchored form — the team-key form `^[A-Z][A-Z0-9]{0,9}-[1-9][0-9]{0,8}$` or the internal-id form `^[0-9A-F]{8}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{12}$`", "**ASCII-upper-normalise it first** — a reference copied out of a branch name or a URL arrives lowercased. ", ", never joined into one alternation")} Step 3 resolves an admitted reference with *fetch by key*.
 {common.conventions_step()}
-1c. Issue-first, when step 1 admitted no reference: invoke `ensure-traceable-issue` with `TASK_DESCRIPTION` (and `PLAN_ARTIFACT_PATH` if provided) and capture the returned reference for step 3's `\{type\}/\{REF\}-\{slug\}`.
+1c. Issue-first, if `ISSUE_INPUT` is absent: invoke `ensure-traceable-issue` with `TASK_DESCRIPTION` (and `PLAN_ARTIFACT_PATH` if provided) and capture the returned reference for step 3's `\{type\}/\{REF\}-\{slug\}`.
    - Preconditions: the *create issue* and *fetch by key* capabilities are both available. Either one absent or denied ⇒ `TRACEABILITY: DEGRADED (no tracker tool for \{capability\})` naming the capability, and continue to step 2. **The branch is still cut and the PR is still opened**, with the traceability field carrying `Tracked (pending)` and the reason. **NEVER create a GitHub issue as a fallback**.
 {common.branch_detection_step()}
    - The convention owns the branch **shape**, `## Reference Rendering` only the **token** in it; neither is the other's fallback.
