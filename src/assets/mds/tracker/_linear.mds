@@ -302,6 +302,8 @@ Load when the resolved tracker provider is `linear` and the operation is `ensure
 
 **Mechanics held here:** the `**Process:**` body — issue creation, and how the design artifact is attached on a provider whose comment format has no collapsed-block analogue.
 
+{common.traceable_issue_rules()}
+
 ### Process
 
 1. If `ISSUE_INPUT` is provided — an issue reference, or free prose to resolve through the *search* capability with a structured filter:
@@ -342,6 +344,8 @@ The D3 section headings are the canonical ones; only the transport differs from 
 Load when the resolved tracker provider is `linear` and the operation is `post-wave-report`.
 
 **Mechanics held here:** the `**Process:**` body — locating the wave's tracking item and posting the report once.
+
+{common.wave_report_inputs()}
 
 ### Process
 

@@ -409,10 +409,11 @@ const RETIRED_LITERALS: ReadonlyArray<RetiredEntry> = [
     removedFrom: 'CHANGELOG.md [Unreleased] — the byte-budget bullet',
     justification:
       'The pre-split preloaded set, described as a live ceiling. The loaded set is now priced ' +
-      'per path — BUDGET_LOADED_SET 67,200 on the GitHub path, 76,500 under jira, 78,700 under ' +
-      'linear, 59,100 for a PR-host spawn — and quoting a number no constant holds sends a ' +
-      'reader to find it. Every one of those rows is now BELOW the retired figure, so it cannot ' +
-      'come back as a ceiling either.',
+      'per path — BUDGET_LOADED_SET on the GitHub path, BUDGET_LOADED_SET_JIRA and ' +
+      'BUDGET_LOADED_SET_LINEAR under those providers, BUDGET_LOADED_SET_PR_HOST for a PR-host ' +
+      'spawn (tests/tracker/byte-budget.test.ts holds the values) — and quoting a number no ' +
+      'constant holds sends a reader to find it. Every one of those rows is BELOW the retired ' +
+      'figure, and ceilings are only ever lowered, so it cannot come back as a ceiling either.',
   },
   {
     literal: '58,870',

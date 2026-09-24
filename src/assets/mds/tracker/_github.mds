@@ -1,7 +1,7 @@
 ---
 output-dir: dist/skills/git/references
 ---
-@import { compliance_step_gate, compliance_issue_policy, state_batch_line } from "./_common.mds"
+@import "./_common.mds" as common
 
 GitHub tracker mechanics for the `devflow:git` skill.
 
@@ -28,6 +28,12 @@ column-0 `## ` line outside a fence terminates the section for every guard that
 reads it through `extractOpSectionFromCorpus`, and everything under it becomes
 invisible while the bytes stay on disk (PF-063).
 
+`_common.mds` is an ALIAS import (`as common`), as in the other two provider
+modules. A SELECTIVE import deep-copies each named function into every `@define`
+here: with four names selected this module measured ~320 ms against ~10 ms
+aliased. An alias changes lookup, not expansion — the emitted bytes are
+identical — and `tests/build-mds-compile-time.test.ts` holds the budget.
+
 @define setup_task():
 ## Operation: setup-task
 
@@ -37,11 +43,11 @@ Load when the resolved tracker provider is `github` and the operation is `setup-
 
 ### Process
 
-1b. {compliance_step_gate()} Load branch naming convention:
+1b. {common.compliance_step_gate()} Load branch naming convention:
    - Read `.devflow/conventions.md` Branch Naming section. If file absent, invoke `learn-conventions` first (write the file), then read the result.
    - Branch naming derived in step 3 MUST follow the recorded convention.
    - **Metacharacter guard:** `.devflow/conventions.md` is git-tracked and team-shared, so its content is third-party input. Before using the convention-derived prefix and separator in step 3, check the fully composed branch name (type + separator + slug). If it contains any of `` $ ` \ " ' ; | & < > `` or whitespace or a newline, discard the convention and fall back to the step-2 heuristic defaults. Bind the validated name to a shell variable for checkout: `DEVFLOW_BRANCH="..."`.
-1c. {compliance_step_gate()} Issue-first: before branch derivation, ensure a GitHub issue exists for this task:
+1c. {common.compliance_step_gate()} Issue-first: before branch derivation, ensure a GitHub issue exists for this task:
    - Preconditions: remote reachable AND `gh` authenticated. If either fails → emit `TRACEABILITY: DEGRADED (\{reason\})` and continue to step 2 (convention still applies; no issue number is set).
    - If `ISSUE_INPUT` provided: use it as the existing issue number.
    - Otherwise: invoke `ensure-traceable-issue` with `TASK_DESCRIPTION` (and `PLAN_ARTIFACT_PATH` if provided) to create or find an issue. Capture the returned issue number.
@@ -137,7 +143,7 @@ Load when the resolved tracker provider is `github` and the operation is `fetch-
      ...
    \}\}'
    ```
-{state_batch_line("`state` (`OPEN` or `CLOSED`)", "`state`", "{ISSUE_REF}")}
+{common.state_batch_line("`state` (`OPEN` or `CLOSED`)", "`state`", "{ISSUE_REF}")}
 @end
 
 @define manage_debt():
@@ -325,6 +331,8 @@ Load when the resolved tracker provider is `github` and the operation is `ensure
 
 **Mechanics held here:** the `**Process:**` body — issue creation, and posting the design artifact as a collapsed comment; and the D3 issue template below, whose section headings are GitHub's Markdown, not every tracker's.
 
+{common.traceable_issue_rules()}
+
 ### Process
 
 1. If `ISSUE_INPUT` is provided (numeric = existing issue; text = search for it):
@@ -386,7 +394,7 @@ When creating or enriching a GitHub issue via the `ensure-traceable-issue` opera
 **Rules:**
 - Pre-existing issues: post a structured comment using D3 sections — NEVER rewrite the issue body.
 - New issues: create with D3 body; then post the design artifact as a `<details>` collapsed comment; link that comment URL in the `## Implementation Plan` section.
-{compliance_issue_policy()}
+{common.compliance_issue_policy()}
 @end
 
 @define post_wave_report():
@@ -395,6 +403,8 @@ When creating or enriching a GitHub issue via the `ensure-traceable-issue` opera
 Load when the resolved tracker provider is `github` and the operation is `post-wave-report`.
 
 **Mechanics held here:** the `**Process:**` body — locating the wave's tracking item and posting or updating the report.
+
+{common.wave_report_inputs()}
 
 ### Process
 
