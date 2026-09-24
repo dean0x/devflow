@@ -35,7 +35,7 @@ Resolve the tracker provider **once per spawn, before any operation** — never 
 - **Normalise `TRACKER_PROVIDER`:** trim → strip one pair of surrounding quotes → if any character falls outside `[A-Za-z]`, REJECT → ASCII-lowercase → require exact membership in `{github, jira, linear}`. **Reject, never repair:** no fuzzy match, no substring search, no salvaging a prefix.
 - **Select, never concatenate:** the validated token selects a hardcoded directory from the static map below. It is never joined into a path, and no path is ever composed from an unvalidated value.
 - **The remote, the hosting platform and the PR host are NEVER tracker signals, and a rule that reads one is WRONG and must never be implemented:** pull requests stay on GitHub under every provider, so the remote says nothing about which tracker this repo uses. The only corroborating signal is whose issue grammar this repo's own history speaks, and it NARROWS what is already resolved — it never selects, and it is never a rung.
-- **Project key:** explicit ref in the task inputs → this repo's git history → the global configuration file. **ASCII-upper-normalise once, at the key's own boundary**, then shape-gate every step with `^[A-Z][A-Z0-9_]{1,9}$` — one alphabet, the same one the configuration file's own schema gate applies and the same one a `KEY-N` reference's key segment must satisfy. Git-history strings are **UNTRUSTED** — the `learn-conventions` operation's UNTRUSTED-strings block governs them here too. No usable key ⇒ `TRACEABILITY: DEGRADED (tracker not configured)`; there is **no neutral default**, because a key nobody configured names nobody's project. An explicit ref is authoritative **for that op only** and is **never written back**; a conflict between steps is reported **once** on the `- **Tracker**:` line, never silently reconciled.
+- **Project key** (non-github providers): explicit ref in the task inputs → this repo's git history → the global configuration file. **ASCII-upper-normalise once, at the key's own boundary**, then shape-gate every step with `^[A-Z][A-Z0-9_]{1,9}$` — one alphabet, the same one the configuration file's own schema gate applies and the same one a `KEY-N` reference's key segment must satisfy. Git-history strings are **UNTRUSTED** — the `learn-conventions` operation's UNTRUSTED-strings block governs them here too. There is **no neutral default**, because a key nobody configured names nobody's project. An explicit ref is authoritative **for that op only** and is **never written back**; a conflict between steps is reported **once** on the `- **Tracker**:` line, never silently reconciled.
 
 | Token | Mechanics directory |
 |---|---|
@@ -44,7 +44,7 @@ Resolve the tracker provider **once per spawn, before any operation** — never 
 | `linear` | `tracker/linear/` |
 
 **Neutral values — a missing artifact degrades to a neutral value, never to a fallback path:**
-- Absent, or resolved `github` — default or chosen → silent: no DEGRADED, no file read, no spawn, and **no tracker status line at all**. Under any other provider, add `- **Tracker**: {provider} ({winning source}) | DEGRADED ({reason})` beside `- **Conventions**:` in `### Traceability` — additive, exactly one rendering, `({n} unresolved)` on first use.
+- Absent, or resolved `github` — default or chosen → silent: no DEGRADED, no `tracker.md` read, no spawn, and **no tracker status line at all**. Under any other provider, add `- **Tracker**: {provider} ({winning source}) | DEGRADED ({reason})` beside `- **Conventions**:` in `### Traceability` — additive, exactly one rendering, `({n} unresolved)` on first use.
 - Token fails normalisation, or the `.devflow/config.json` value is outside the map → `TRACEABILITY: DEGRADED (unknown tracker provider)`; continue down the resolution order, and never substitute a repaired token.
 - Generated mechanics absent **for an operation that names them** → `TRACEABILITY: DEGRADED (tracker mechanics unavailable)` and **no tracker call**. File presence in the installed skill directory is the authoritative signal; **NEVER fabricate provider mechanics for an absent generated reference.** An operation that names no mechanics file has none to be missing and never emits this line.
 - No usable key or site under a non-github provider → `TRACEABILITY: DEGRADED (tracker not configured)`.
@@ -481,8 +481,8 @@ Collect release evidence — commit list and shipped issue numbers since the las
 
 1. Find last tag: `git describe --tags --abbrev=0 2>/dev/null`. If no tags exist, use the initial commit (`git rev-list --max-parents=0 HEAD`).
 2. Collect commit list: `git log {last_tag}..HEAD --oneline` — take the first ≤100 entries; if more exist, append a final `…and {n} more commits` note to signal truncation.
-3. Extract CANDIDATE issue references from the subjects and bodies of that range: tokenise on whitespace, keep only tokens that follow a closing keyword (`refs`, `closes`, `fixes`, case-insensitive) on the same line, and bound the candidates at 200 tokens, noting `TRUNCATED ({n} not processed)` beyond it. No grammar is stated here — the resolved provider's Mechanics own what a reference is.
-5. Gate each candidate against that provider's grammar, full match and anchored at both ends. Where the grammar is `KEY-N`, its KEY must equal the resolved project key after ASCII-upper normalisation; a well-formed reference carrying another key is dropped and reported once as `TRACEABILITY: DEGRADED (foreign issue reference {ref})`. Deduplicate the SURVIVORS — after the gate, never before — then take the first ≤50, appending `…and {n} more issues` if more exist. A `Merge pull request` subject and a trailing parenthesised reference carry no keyword and are never candidates; an empty `SHIPPED_ISSUES` is reported empty, not degraded.
+3. Extract CANDIDATE issue references from the subjects and bodies of that range with the Mechanics' closing-keyword rule (step 3a), bounded at 200 candidates, noting `TRUNCATED ({n} not processed)` beyond it. No grammar is stated here — the resolved provider's Mechanics own what a reference is.
+5. Gate each candidate against that provider's grammar, full match and anchored at both ends. Where the grammar is `KEY-N`, its KEY must equal the resolved project key after ASCII-upper normalisation; a well-formed reference carrying another key is dropped and reported once as `TRACEABILITY: DEGRADED (foreign issue reference {ref})`. Deduplicate the SURVIVORS — after the gate, never before — then take the first ≤50, appending `…and {n} more issues` if more exist. A `Merge pull request` subject and a trailing parenthesised reference carry no keyword and are never candidates; an empty `SHIPPED_ISSUES` is reported empty, not degraded, unless the Mechanics flag merged PRs they could not resolve.
 
 **Output:**
 ```markdown
@@ -497,7 +497,7 @@ Collect release evidence — commit list and shipped issue numbers since the las
 ### SHIPPED_ISSUES
 {space-separated issue references, ≤50}
 
-### Status: READY | DEGRADED ({reason})
+### Status: READY | DEGRADED ({reason}) | INDETERMINATE ({reason})
 ```
 
 ---
