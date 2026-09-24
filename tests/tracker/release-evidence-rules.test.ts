@@ -244,3 +244,38 @@ describe('G1: the GitHub merged-PR listing', () => {
       .toHaveLength(1)
   })
 })
+
+// ---------------------------------------------------------------------------
+// G1 tag-date binding — TAG_DATE must interpolate the `{last_tag}` placeholder
+// git.md's own steps use, never an unbound shell variable step 4 itself never
+// assigns (#359 PR1 M1 — the pre-fix line read `"$LAST_TAG"`, which nothing in
+// the operation binds, so the listing's `--search` term evaluated to an empty
+// tag date on every real invocation).
+// ---------------------------------------------------------------------------
+
+/** Named collector: lines referencing a `$LAST_TAG` shell variable nothing in the reference binds. */
+export function collectUnboundLastTagRefs(text: string): string[] {
+  return text.split('\n').filter(line => /\$LAST_TAG\b/.test(line))
+}
+
+describe('G1: the tag-date binding', () => {
+  const text = gatherRef('github')
+
+  it('TAG_DATE interpolates the {last_tag} placeholder, not an unbound shell variable', () => {
+    expect(collectUnboundLastTagRefs(text), 'gather step 4 must not reference $LAST_TAG').toEqual([])
+    const tagDateLine = text.split('\n').find(line => line.includes('TAG_DATE='))
+    expect(tagDateLine, 'the once-before-the-listing bullet must exist').toBeDefined()
+    expect(tagDateLine).toContain('--format=%cd {last_tag})')
+  })
+
+  it('states the fallback when TAG_DATE fails its shape gate', () => {
+    expect(text).toContain('If `TAG_DATE` fails this gate, treat it as **the listing fails** below')
+  })
+
+  it('known-bad probe: the collector reports the pre-fix unbound form and clears the fixed one', () => {
+    const broken = '   - TAG_DATE=$(TZ=UTC git log -1 --date=format-local:%Y-%m-%d --format=%cd "$LAST_TAG")'
+    const fixed = '   - TAG_DATE=$(TZ=UTC git log -1 --date=format-local:%Y-%m-%d --format=%cd {last_tag})'
+    expect(collectUnboundLastTagRefs(broken)).toHaveLength(1)
+    expect(collectUnboundLastTagRefs(fixed)).toEqual([])
+  })
+})
