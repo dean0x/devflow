@@ -578,30 +578,15 @@ devflow-authored reply, comment or commit message.
 
 ## Operation: resolve-review-threads
 
-Reply to external review threads and, when conditions are met, mark them resolved. Sequential execution with 1s throttle between operations.
+Reply to external review threads and, when conditions are met, mark them resolved.
 
 **Input:** `THREAD_MAP`, `VERIFICATION_STATUS`, `PR_NUMBER`, `WORKTREE_PATH` (optional)
 
-`THREAD_MAP` maps ext-\{N\} → `\{thread_id, verdict, evidence, commit_sha\}`. Verdicts:
-- `FIXED` — issue addressed
-- `FALSE_POSITIVE` — not a real issue; requires grep/file:line citation as evidence
-- `BY_DESIGN` — intentional; requires ADR or code citation as evidence
-- `ESCALATED` — requires human review
+`THREAD_MAP` maps ext-\{N\} → `\{thread_id, verdict, evidence, commit_sha\}`; its four verdicts are defined in the PR mechanics file.
 
-**Resolution gate (D9) — single authority:**
+**Resolution gate (D9) — single authority:** `resolveReviewThread` mutation is called ONLY when VERIFICATION_STATUS == PASS AND verdict == FIXED AND commit_sha non-empty. FALSE_POSITIVE and BY_DESIGN findings are the thread author's call to close — devflow replies with cited evidence but leaves the thread unresolved. ESCALATED, FAILED, and SKIPPED are always reply-only.
 
-| Condition | Required value | Action |
-|-----------|----------------|--------|
-| `VERIFICATION_STATUS` | `PASS` | prerequisite; if not met → reply-only for all verdicts |
-| Verdict `FIXED` | `commit_sha` non-empty | resolve via `resolveReviewThread` mutation + attribution reply |
-| Verdict `FALSE_POSITIVE` | `evidence` non-empty | reply-only with cited evidence; leave unresolved |
-| Verdict `BY_DESIGN` | `evidence` non-empty | reply-only with cited evidence; leave unresolved |
-| Verdict `ESCALATED` | — | reply-only; leave unresolved |
-| `VERIFICATION_STATUS` `FAILED` or `SKIPPED` | — | reply-only for all verdicts; leave unresolved |
-
-`resolveReviewThread` mutation is called ONLY when VERIFICATION_STATUS == PASS AND verdict == FIXED AND commit_sha non-empty. FALSE_POSITIVE and BY_DESIGN findings are the thread author's call to close — devflow replies with cited evidence but leaves the thread unresolved. ESCALATED, FAILED, and SKIPPED are always reply-only.
-
-**Degradation (D4):** No PR / `gh` unauthenticated → `TRACEABILITY: DEGRADED (\{reason\})`, warn, return. Other 4xx on a mutation → DEGRADED for that thread, continue. 5xx → 1 retry; still 5xx → DEGRADED for that thread, continue. Rate limits: this op fans out, so read the remaining-budget rungs in `references/github-api.md` before the first iteration.
+**Degradation (D4):** No PR / `gh` unauthenticated → `TRACEABILITY: DEGRADED (\{reason\})`, warn, return. Other 4xx on a mutation → DEGRADED for that thread, continue. 5xx → 1 retry; still 5xx → DEGRADED for that thread, continue.
 
 **Process:**
 
@@ -653,7 +638,7 @@ The body those mechanics compose MUST NOT reproduce verbatim content from any `<
 
 ## Operation: check-merge-readiness
 
-Report-only merge readiness check (D6). Never takes action — reports READY or NOT_READY with specific reason.
+Report-only merge readiness check (D6).
 
 **Input:** `PR_NUMBER`, `WORKTREE_PATH` (optional)
 
@@ -725,13 +710,11 @@ Create or enrich a tracker issue using the D3 issue template. Returns the issue 
 
 **Degradation (D4):** No remote / `gh` unauthenticated → `TRACEABILITY: DEGRADED (\{reason\})`, return status DEGRADED — caller continues without an issue number.
 
-**D3 issue template sections:** `## Initial Request`, `## Product Requirements`, `## Implementation Plan`
-
 **Process:**
 
 **Mechanics:** load this operation's provider reference.
 
-`TASK_DESCRIPTION`, `INITIAL_REQUEST`, `REQUIREMENTS` and `LABELS` are caller-supplied and untrusted — never interpolate them into a command string. The operation returns the issue number.
+(The D3 section list and the untrusted-input rule are in that reference.)
 
 **Output:**
 ```markdown
@@ -746,14 +729,11 @@ Create or enrich a tracker issue using the D3 issue template. Returns the issue 
 
 ## Operation: post-wave-report
 
-Post the wave completion summary as a comment on the tracking issue. Marker-based deduplication prevents duplicate posts for the same wave run.
+Post the wave completion summary as a comment on the tracking issue.
 
 **Input:** `TRACKING_ISSUE`, `WAVE_REPORT_PATH`, `WAVE_ID`, `WORKTREE_PATH` (optional)
 
-- `TRACKING_ISSUE`: tracker issue reference for the parent tracking issue
-- `WAVE_REPORT_PATH`: Repo-relative or absolute path to the wave-report.md file written by the wave orchestrator (repo-relative paths are resolved against WORKTREE_PATH when supplied, else the current worktree root)
-- `WAVE_ID`: Timestamped wave directory slug (e.g. `2026-08-20_1730`) — used as the dedup marker
-- `WORKTREE_PATH` (optional): See worktree-support skill
+(Input definitions and the marker dedup are in the provider reference.)
 
 **Degradation (D4):** No remote / `gh` unauthenticated → `TRACEABILITY: DEGRADED (\{reason\})`, warn, return. The wave report is already written to disk regardless.
 

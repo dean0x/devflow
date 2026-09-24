@@ -133,12 +133,34 @@ function seedPrHostFile(op: string, transform: (content: string) => string): Cor
  * the build wrote it to.
  */
 function sinkCorpusWithoutPrHost(): CorpusEntry[] {
-  const dropped = cachedSinkCorpus().filter(entry => !isPrHostEntryPath(entry.path));
+  return sinkCorpusWithout(`${PR_HOST_DESTINATION_ROOT}/`);
+}
+
+/**
+ * A corpus entry's path relative to the generated `references/` root, or null
+ * for an entry outside it (git.md itself). Separator-normalised.
+ */
+function referenceRelPath(entryPath: string): string | null {
+  const posix = entryPath.replace(/\\/g, '/');
+  const at = posix.lastIndexOf('/references/');
+  return at === -1 ? null : posix.slice(at + '/references/'.length);
+}
+
+/**
+ * The sink corpus with every generated reference under `prefix` (relative to the
+ * references root, e.g. `pr/` or `tracker/jira/`) removed — the known-bad probe
+ * for a literal that moved into that tree. Throws when nothing is dropped: a probe
+ * over a tree the build never emitted is vacuous (PF-018).
+ */
+function sinkCorpusWithout(prefix: string): CorpusEntry[] {
+  const dropped = cachedSinkCorpus().filter(
+    entry => !(referenceRelPath(entry.path)?.startsWith(prefix) ?? false),
+  );
   if (dropped.length === cachedSinkCorpus().length) {
     throw new Error(
-      `sinkCorpusWithoutPrHost: dropped nothing — no corpus entry sits under references/` +
-      `${PR_HOST_DESTINATION_ROOT}/, so every probe built on this helper is vacuous (PF-018). ` +
-      'Run `npm run build` so the PR-host references exist.',
+      `sinkCorpusWithout: dropped nothing — no corpus entry sits under references/${prefix}, ` +
+      'so every probe built on this helper is vacuous (PF-018). ' +
+      'Run `npm run build` so the generated references exist.',
     );
   }
   return dropped;
@@ -1192,6 +1214,17 @@ describe('git agent — static content guards (PF-018)', () => {
       sec,
       'D9 gate: BY_DESIGN must be reply-only — reviewers retain control over closing their own threads',
     ).toMatch(/BY_DESIGN.*reply.only/s);
+  });
+
+  it('D9: ESCALATED, and every non-PASS verification status, is reply-only', () => {
+    // The gate's condition table was the only other place these three rows were
+    // spelled; it was removed from the agent as a restatement of the sentence the
+    // pins above read (#358), so the sentence now carries them alone.
+    const sec = extractOpSection(soleCorpus, 'resolve-review-threads', 'sole');
+    expect(
+      sec,
+      'D9 gate: ESCALATED threads and FAILED/SKIPPED verification must stay reply-only',
+    ).toContain('ESCALATED, FAILED, and SKIPPED are always reply-only');
   });
 
   // ── Guard 4: D4 rate-limit backpressure clauses ─────────────────────────────
@@ -2845,5 +2878,132 @@ describe('git agent: the D9 resolve condition is stated once in the reference tr
     expect(collectResolveConditionStatements([
       { path: 'probe/far.md', content: `VERIFICATION_STATUS is reported here.\n${'x'.repeat(400)}\nFIXED appears later.` },
     ])).toEqual([]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Text moved out of the always-loaded agent still reaches the spawn that needs it
+//
+// #358 moved non-contract text out of dist/agents/git.md into the references
+// each operation already loads: resolve-review-threads' verdict definitions and
+// its rate-limit pre-read, check-merge-readiness' report-only rule (PR-host
+// tree), ensure-traceable-issue's D3 section list and untrusted-input rule, and
+// post-wave-report's input definitions (every tracker provider's tree). A move is
+// only a move while three things hold, and each arm below owns one:
+//   - the text is inside the op's own section of EVERY tree that must carry it
+//     (a tracker op resolves its provider per spawn, so one provider carrying it
+//     says nothing about the other two — the check is per tree, never a union);
+//   - the text left git.md, so the obligation has one home rather than two;
+//   - the per-tree check goes red when that tree is absent (PF-018, PF-064).
+// Each literal is wording that exists ONLY in the moved text (ADR-025's
+// correction: a literal the retained half still spells in another role would
+// let the reach arm pass from git.md alone).
+// ---------------------------------------------------------------------------
+
+/** One obligation moved into generated references. */
+interface MovedObligation {
+  readonly op: string;
+  /** Wording unique to the moved text. */
+  readonly literal: string;
+  /** Trees (relative to the references root) that must each carry it. */
+  readonly trees: readonly string[];
+}
+
+/** Every registered tracker provider's tree, derived from the registry. */
+const TRACKER_PROVIDER_TREES: readonly string[] = VARIANT_MODULES
+  .filter(mod => mod.subdir.startsWith('tracker/'))
+  .map(mod => `${mod.subdir}/`);
+
+const PR_HOST_TREE: readonly string[] = [`${PR_HOST_DESTINATION_ROOT}/`];
+
+const MOVED_OBLIGATIONS: readonly MovedObligation[] = [
+  { op: 'resolve-review-threads', literal: '`FALSE_POSITIVE` — not a real issue; requires grep/file:line citation as evidence', trees: PR_HOST_TREE },
+  { op: 'resolve-review-threads', literal: '`BY_DESIGN` — intentional; requires ADR or code citation as evidence', trees: PR_HOST_TREE },
+  { op: 'resolve-review-threads', literal: '`ESCALATED` — requires human review', trees: PR_HOST_TREE },
+  { op: 'resolve-review-threads', literal: 'read the remaining-budget rungs in `references/github-api.md` before the first iteration', trees: PR_HOST_TREE },
+  { op: 'check-merge-readiness', literal: 'Never take action on the PR', trees: PR_HOST_TREE },
+  { op: 'ensure-traceable-issue', literal: '**D3 issue template sections:** `## Initial Request`, `## Product Requirements`, `## Implementation Plan`', trees: TRACKER_PROVIDER_TREES },
+  { op: 'ensure-traceable-issue', literal: '`TASK_DESCRIPTION`, `INITIAL_REQUEST`, `REQUIREMENTS` and `LABELS` are caller-supplied and untrusted', trees: TRACKER_PROVIDER_TREES },
+  { op: 'post-wave-report', literal: '- `TRACKING_ISSUE`: tracker issue reference for the parent tracking issue', trees: TRACKER_PROVIDER_TREES },
+  { op: 'post-wave-report', literal: '- `WAVE_REPORT_PATH`: Repo-relative or absolute path to the wave-report.md file', trees: TRACKER_PROVIDER_TREES },
+  { op: 'post-wave-report', literal: '- `WAVE_ID`: Timestamped wave directory slug', trees: TRACKER_PROVIDER_TREES },
+];
+
+/**
+ * Named collector: every (tree, obligation) pair whose reference does not carry
+ * the moved text inside the op's own section — fence-aware, so text stranded
+ * below a stray unfenced `## ` would be reported rather than counted (PF-063).
+ */
+function collectUnreachedObligations(
+  corpus: readonly CorpusEntry[],
+  obligations: readonly MovedObligation[],
+): string[] {
+  const missing: string[] = [];
+  for (const { op, literal, trees } of obligations) {
+    for (const tree of trees) {
+      const rel = `${tree}${op}.md`;
+      const entry = corpus.find(e => referenceRelPath(e.path) === rel);
+      const section = entry === undefined
+        ? ''
+        // 'sole' over a one-entry corpus: the section of exactly this tree's file.
+        : extractOpSectionFromCorpus([entry], op, { mode: 'sole' }).content;
+      if (!section.includes(literal)) missing.push(`${rel}: ${literal}`);
+    }
+  }
+  return missing;
+}
+
+describe('git agent: text moved out of the always-loaded agent still reaches its spawn (#358)', () => {
+  const gitOnly: CorpusEntry[] = [{ path: GIT_AGENT_PATH, content: GIT_AGENT_SOURCE.content }];
+
+  it('the obligation set and the tree set are non-empty (PF-018)', () => {
+    expect(MOVED_OBLIGATIONS.length, 'no moved obligation is registered').toBeGreaterThan(0);
+    expect(
+      TRACKER_PROVIDER_TREES,
+      'the tracker trees are derived from VARIANT_MODULES; GitHub must be among them',
+    ).toContain('tracker/github/');
+  });
+
+  it('every moved obligation is inside its op section in every tree that must carry it', () => {
+    expect(
+      collectUnreachedObligations(cachedSinkCorpus(), MOVED_OBLIGATIONS),
+      'moved text is missing from a reference the operation loads — a spawn running that op ' +
+      'under that tree would never see it',
+    ).toEqual([]);
+  });
+
+  it('every moved obligation left git.md — one home, not two', () => {
+    const stillInAgent = MOVED_OBLIGATIONS
+      .filter(({ op, literal }) => extractOpSection(gitOnly, op, 'sole').includes(literal))
+      .map(({ op, literal }) => `${op}: ${literal}`);
+    expect(stillInAgent, 'moved text is still stated in git.md as well').toEqual([]);
+  });
+
+  it('known-bad probe: dropping a tree reports every obligation that tree carries', () => {
+    // Probe cardinality matches arm cardinality (PF-064): every tree any
+    // obligation names is removed in turn, and each must report exactly the
+    // obligations routed through it.
+    const trees = [...new Set(MOVED_OBLIGATIONS.flatMap(o => o.trees))];
+    expect(trees.length, 'no tree to probe').toBeGreaterThan(1);
+    for (const tree of trees) {
+      const routed = MOVED_OBLIGATIONS
+        .filter(o => o.trees.includes(tree))
+        .map(o => ({ ...o, trees: [tree] }));
+      expect(
+        collectUnreachedObligations(sinkCorpusWithout(tree), routed),
+        `with references/${tree} removed, the collector must report all ${routed.length} of its obligations`,
+      ).toHaveLength(routed.length);
+    }
+  });
+
+  it('known-bad probe: a present file with the text stripped is reported by name', () => {
+    const [target] = MOVED_OBLIGATIONS;
+    const rel = `${target.trees[0]}${target.op}.md`;
+    const seeded = cachedSinkCorpus().map(entry =>
+      referenceRelPath(entry.path) === rel
+        ? { path: entry.path, content: entry.content.replace(target.literal, '') }
+        : entry,
+    );
+    expect(collectUnreachedObligations(seeded, [target])).toEqual([`${rel}: ${target.literal}`]);
   });
 });

@@ -178,9 +178,21 @@ Load for `fetch-review-threads` under every tracker provider.
 
 Load for `resolve-review-threads` under every tracker provider.
 
-**PR mechanics held here:** the bounded per-thread loop, the four verdict reply templates, the scrub-then-reply mutation and the inter-operation throttle. Step 3 — applying the D9 gate — stays in the agent and interleaves here by number.
+**PR mechanics held here:** the verdict definitions, the rate-limit pre-read, the bounded per-thread loop, the four verdict reply templates, the scrub-then-reply mutation and the inter-operation throttle. Step 3 — applying the D9 gate — stays in the agent and interleaves here by number.
+
+### Verdicts
+
+Each `THREAD_MAP` entry carries one verdict:
+- `FIXED` — issue addressed
+- `FALSE_POSITIVE` — not a real issue; requires grep/file:line citation as evidence
+- `BY_DESIGN` — intentional; requires ADR or code citation as evidence
+- `ESCALATED` — requires human review
+
+(The resolution gate these verdicts feed — D9 — is stated in the agent's own section.)
 
 ### Process
+
+Rate limits: this op fans out, so read the remaining-budget rungs in `references/github-api.md` before the first iteration.
 
 For each `ext-\{N\}` in THREAD_MAP (sequentially, ≤50, 1s between operations). `fetch-review-threads`
 returns up to 100 threads, so a busy PR can exceed this bound: process the first 50 in THREAD_MAP
@@ -247,7 +259,7 @@ Load for `post-resolution-summary` under every tracker provider.
 
 Load for `check-merge-readiness` under every tracker provider.
 
-**PR mechanics held here:** the unresolved-thread count with its >100 approximation note, the review-decision fetch, the CI-status reuse and the first-match-wins classification ladder.
+**PR mechanics held here:** the report-only rule, the unresolved-thread count with its >100 approximation note, the review-decision fetch, the CI-status reuse and the first-match-wins classification ladder.
 
 ### Process
 
@@ -263,6 +275,8 @@ Load for `check-merge-readiness` under every tracker provider.
    - `NOT_READY (CI pending)` — ci_status == `PENDING` (expected after a push; non-alarming)
    - `NOT_READY (no approving review)` — reviewDecision == `REVIEW_REQUIRED` or null
    - `READY` — no rule above matched (unresolved_threads == 0, reviewDecision == `APPROVED`, ci_status == `PASSING` or `NO_CI`)
+
+Never take action on the PR — report READY or NOT_READY, always with the specific reason.
 @end
 
 <!-- op: ensure-pr-ready -->
