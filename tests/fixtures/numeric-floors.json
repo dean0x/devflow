@@ -156,11 +156,11 @@
     },
     {
       "id": "issue-pr-link-forwarding-sites",
-      "floor": 14,
-      "pattern": "const MIN_FORWARDING_SITES = 14",
+      "floor": 15,
+      "pattern": "const MIN_FORWARDING_SITES = 15",
       "occurrences": 1,
       "sourceFile": "tests/seams/pr-link-handoff.test.ts",
-      "description": "GAP-15 forwarding seam: Code-agent spawn sites carrying an ISSUE_NUMBER key across implement.md (8) and dynamic-build.md (6). The relational assertion -- every ISSUE_NUMBER payload also carries ISSUE_PR_LINK -- is vacuous over an empty or truncated payload set, so the site count is the non-vacuity floor and may only rise as spawn sites are added."
+      "description": "GAP-15 forwarding seam: Code-agent spawn sites carrying an ISSUE_NUMBER key across implement.md (9, including the parallel-strategy pr-create spawn #359 added) and dynamic-build.md (6). The relational assertion -- every ISSUE_NUMBER payload also carries ISSUE_PR_LINK -- is vacuous over an empty or truncated payload set, so the site count is the non-vacuity floor and may only rise as spawn sites are added."
     },
     {
       "id": "packed-reference-manifest-size",

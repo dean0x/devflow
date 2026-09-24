@@ -444,11 +444,21 @@ Strategy-conditional: run for **SINGLE_CODE_AGENT** (PR exists from Phase 2), sk
 **Produces:** PR_URL
 **Requires:** BASE_BRANCH, TASK_ID
 
-**For SEQUENTIAL_CODE_AGENTS or PARALLEL_CODE_AGENTS**: The last sequential Code agent (with CREATE_PR: true) handles PR creation. For parallel Code agents, create unified PR using `devflow:git` skill patterns. Push branch and run `gh pr create` with comprehensive description, targeting `BASE_BRANCH`.
+**For SEQUENTIAL_CODE_AGENTS or PARALLEL_CODE_AGENTS**: The last sequential Code agent (with CREATE_PR: true) handles PR creation. For parallel Code agents, spawn one Code agent to create the unified PR:
 
-If `PR_DESCRIPTION_GUIDANCE` is not `(none)`, use it to compose the PR body (see Code agent Responsibility 7 for field-to-section mapping).
+```
+Agent(subagent_type="Code"):
+"TASK_ID: {task-id}
+TASK_DESCRIPTION: Create the unified PR for the parallel implementation
+OPERATION: pr-create
+BASE_BRANCH: {base branch}
+CREATE_PR: true
+PR_DESCRIPTION_GUIDANCE: {pr_description_guidance}
+ISSUE_NUMBER: {ISSUE_ID captured in Phase 1, or (none)}
+ISSUE_PR_LINK: {ISSUE_PR_LINK captured in Phase 1, or (none)}"
+```
 
-When `ISSUE_PR_LINK` is present in the Phase-1 Handoff Values, the PR body's `## Related Issues` section closes with that line **verbatim** — the Git agent already rendered it in the resolved provider's grammar, and re-rendering it here is a second rendering site that can disagree with the first. When it is `(none)` or absent, compose the line only under `github`, where it renders `Closes #\{ISSUE_NUMBER\}`; under any other provider `ISSUE_NUMBER` is the tail of a key like `PROJ-12`, so a `#`-prefixed line would close whichever GitHub issue happens to carry the same digits — emit the heading with no reference instead.
+Its Responsibility 7 composes the body, pastes `ISSUE_PR_LINK` through the paste gate and scrubs the body (D11) before `gh pr create`. This command renders no link line and creates no PR itself: the Git agent's Phase-1 rendering is the only one, forwarded verbatim.
 
 **For SINGLE_CODE_AGENT**: PR is created by the Code agent (CREATE_PR: true) — the Code agent's Responsibility 7 handles Related Issues inclusion when ISSUE_NUMBER is provided.
 
