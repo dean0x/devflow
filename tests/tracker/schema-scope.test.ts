@@ -766,6 +766,12 @@ export function reasonSpellings(reason: string): string[] {
  */
 const GITHUB_ONLY_REASONS: readonly string[] = [
   'tech-debt archive failed for #${old_issue}',
+  // #359 (G1): the merged-PR listing is a GitHub mechanic — only this provider has a
+  // closing-reference capability for gather-release-evidence to read — and a range
+  // whose PR markers no listed PR maps into is the one case an empty SHIPPED_ISSUES
+  // is NOT "empty, not degraded". The Jira and Linear cells degrade on
+  // `unsupported by {provider}` instead, so the reason has no other emitter.
+  'merged-PR listing did not cover the range',
 ];
 
 /**
