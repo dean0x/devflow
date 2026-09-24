@@ -1,6 +1,6 @@
 ---
 name: Synthesize
-description: Combines outputs from multiple agents into actionable summaries (modes: exploration, planning, review, bug-analysis, design, research)
+description: "Combines outputs from multiple agents into actionable summaries (modes: exploration, planning, review, bug-analysis, design, research)"
 model: haiku
 skills:
   - devflow:review-methodology
