@@ -48,3 +48,16 @@ These are not assumptions — they are rules that exist because of the assumptio
 - **Never serialise `~/.claude.json`.** It holds live MCP server environments, including API keys, on a developer's machine. `json_field_file`'s jq branch renders a value with `tostring`, which on an **object** emits the whole sub-tree — so a single careless key path prints the entire env block. No hook reads it, no agent reads it, and no documentation example may show it being read. MCP-server detection from a hook is excluded by design for this reason: the hook decides whether to spawn from a manifest enum and a zero-byte sentinel, never from the client's configuration.
 - **No wildcard `mcp__*` pre-approval.** Neither documentation, nor an example, nor an agent's frontmatter may pre-approve MCP tools by pattern. The tool set is user-configured and unbounded, so a wildcard pre-approves tools nobody has read — including write tools on servers unrelated to the tracker. Approve by capability at the point of use, or let the permission prompt happen.
 - **No `--dangerously-skip-permissions` in any doc, example or prompt.** The flag turns every one of the controls above into a suggestion. Where a test genuinely needs it, the test is opt-in and excluded from the default run (`tests/integration/subagent-skill-preload.test.ts` is the one such case, and it is excluded at glob time rather than by a command-line path).
+
+## Subagent nesting and concurrency
+
+The concurrency and depth defaults devflow ships for parallel waves assume the nesting model below.
+
+| Assumption | Date verified | Observable symptom if it drifts |
+|---|---|---|
+| Subagent nesting is real since Claude Code 2.1.219 (upstream spawn-depth default 3, deliberately kept; tunable via `devflow flags --set subagent-spawn-depth=N`); nested fan-outs share the concurrency pool — `max-concurrent-subagents` default 40 is sized for typical devflow parallel waves | 2026-09-24 | A parallel wave (8-12 Review spawns in `/code-review`, N parallel Code spawns in `/resolve`) whose agents spawn their own sub-agents gets slower with no error: spawns beyond the shared cap queue rather than fail, so wall time is the only signal. If upstream stops sharing one pool across nesting levels, or moves its spawn-depth or concurrency default, the `max-concurrent-subagents` and `subagent-spawn-depth` entries in `src/core/flags.ts` are sized against the wrong model; their recorded `upstreamDefault` values (20 and 3) are what to re-check. |
+
+Working practice that follows from it:
+
+- Use parallel execution where possible
+- Leverage `.claudeignore` for context reduction
