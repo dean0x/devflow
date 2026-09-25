@@ -362,7 +362,7 @@ After manage-debt completes:
 
 **Step 9b-1: Resolve external threads (Compliance-gated)**
 
-Skip this step if `COMPLIANCE_SKILL_INSTALLED` is false or THREAD_MAP is empty.
+Skip this step if `COMPLIANCE_SKILL_INSTALLED` is false or THREAD_MAP is empty, and record `THREAD_RESOLUTION_RESULT` as `SKIPPED (\{reason\})`.
 
 Prepare THREAD_MAP with verdicts from triage/code agent results:
 - For each `ext-\{N\}`: match to an issue verdict (FIXED, FALSE_POSITIVE, BY_DESIGN, ESCALATED) by `file:line` correlation
@@ -384,6 +384,10 @@ D9: resolve threads ONLY when VERIFICATION_STATUS == PASS AND verdict == FIXED A
 
 If Git agent returns `TRACEABILITY: DEGRADED`: warn, record in `## Third-Party Threads`, continue to step 9b-2.
 
+Capture the returned `### Status:` line as `THREAD_RESOLUTION_RESULT`.
+
+Update `## Third-Party Threads` in resolution-summary.md with these thread results now — 9b-2 posts that file, so an update after it never reaches the PR comment.
+
 **Step 9b-2: Post resolution summary (ALWAYS-ON)**
 
 Always run this step when a PR is known, regardless of `COMPLIANCE_SKILL_INSTALLED`.
@@ -401,9 +405,7 @@ WORKTREE_PATH: {worktree_path}  (omit if cwd)
 Posts the consolidated resolution-summary comment (marker-deduped by the operation on RESOLUTION_TS)."
 ```
 
-If Git agent returns `TRACEABILITY: DEGRADED`: warn, continue.
-
-Update `## Third-Party Threads` section in resolution-summary.md with thread resolution results.
+Capture the Git agent's `**Publication**:` and `**Status**:` lines as `PR_COMMENT`. If it returns `TRACEABILITY: DEGRADED (\{reason\})` instead, `PR_COMMENT`'s status is `DEGRADED (\{reason\})`: warn, continue.
 
 ### Phase 9c: Merge Readiness (Compliance-gated, Report-only)
 
@@ -427,9 +429,9 @@ If Git agent returns `TRACEABILITY: DEGRADED`: warn, proceed to Phase 10.
 
 ### Phase 10: Report
 
-**Requires:** BRANCH_INFO, TARGET_DIR
+**Requires:** BRANCH_INFO, TARGET_DIR, PR_COMMENT, THREAD_RESOLUTION_RESULT
 
-The resolution summary was already written to `\{TARGET_DIR\}/resolution-summary.md` in Phase 5 (updated by Phase 7 and Phase 9). Display results to the user:
+The resolution summary was already written to `\{TARGET_DIR\}/resolution-summary.md` in Phase 5 (updated by Phase 7, Phase 9 and Phase 9b-1). Display results to the user:
 
 ```
 ## Resolution Summary
@@ -462,8 +464,10 @@ Final gate: {PASS | FAILED after N attempts}
 ### Tech Debt Added
 - {n} items added to backlog
 
-### Publication (from Git agent)
-{FULL (private repo) | FULL (config override) | STUB (public repository) | OFF (publication disabled by config)}
+### Evidence Posts
+- Resolution comment: {POSTED | POSTED+TRUNCATED | SKIPPED (already posted) | DEGRADED (reason)}
+- Publication: {FULL (private repo) | FULL (config override) | STUB (public repository) | OFF (publication disabled by config)}
+- Thread replies: {COMPLETE | PARTIAL | TRUNCATED | SKIPPED (reason) | DEGRADED (reason)}
 
 ### Merge Readiness (if compliance enabled)
 {READY | NOT_READY (reason) | DEGRADED (reason) | SKIPPED (compliance not enabled)}

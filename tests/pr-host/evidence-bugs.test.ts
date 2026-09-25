@@ -275,3 +275,97 @@ describe('resolution dedupe is keyed on the per-run RESOLUTION_TS (§3.1, AC-2)'
     expect(resolve, 'the local file and the posted marker must agree').toContain('**Date**: {RESOLUTION_TS}')
   })
 })
+
+// ---------------------------------------------------------------------------
+// 2. Thread order, PR_COMMENT and `### Evidence Posts` (§3.2, AC-3)
+// ---------------------------------------------------------------------------
+//
+// `## Third-Party Threads` was updated AFTER the 9b-2 spawn had already posted the
+// file, so the PR comment never carried thread outcomes; and Phase 10 printed the
+// publication mode but never the post status, so SKIPPED and DEGRADED vanished.
+
+/** The ordering /resolve's 9b step must keep. */
+const THREAD_ORDER: readonly OrderRule[] = [
+  {
+    label: 'Third-Party Threads updated before 9b-2 reads the file',
+    before: 'Update `## Third-Party Threads`',
+    after: '"OPERATION: post-resolution-summary',
+  },
+]
+
+/** The `d09da34` 9b tail: the update sat below the spawn that posts the file. */
+const D09DA34_9B_TAIL = [
+  '"OPERATION: post-resolution-summary',
+  'If Git agent returns `TRACEABILITY: DEGRADED`: warn, continue.',
+  '',
+  'Update `## Third-Party Threads` section in resolution-summary.md with thread resolution results.',
+].join('\n')
+
+/** Each Evidence Posts row and the statuses it must be able to report. */
+const EVIDENCE_POST_ROWS: ReadonlyArray<{ readonly row: string; readonly statuses: readonly string[] }> = [
+  { row: '- Resolution comment:', statuses: ['POSTED', 'POSTED+TRUNCATED', 'SKIPPED (already posted)', 'DEGRADED'] },
+  { row: '- Publication:', statuses: ['FULL (private repo)', 'STUB (public repository)', 'OFF (publication disabled by config)'] },
+  { row: '- Thread replies:', statuses: ['COMPLETE', 'PARTIAL', 'TRUNCATED', 'SKIPPED', 'DEGRADED'] },
+]
+
+/** The `### Evidence Posts` block of /resolve's Phase 10 report, or null. */
+function evidencePostsBlock(resolve: string): string | null {
+  const phase10 = resolve.indexOf('### Phase 10: Report')
+  if (phase10 === -1) return null
+  const start = resolve.indexOf('### Evidence Posts', phase10)
+  if (start === -1) return null
+  const end = resolve.indexOf('\n### ', start + 1)
+  return end === -1 ? null : resolve.slice(start, end)
+}
+
+/** Named collector: Evidence Posts rows, or statuses within them, the Phase 10 report lacks. */
+export function collectMissingEvidencePosts(resolve: string): string[] {
+  const block = evidencePostsBlock(resolve)
+  if (block === null) return ['Phase 10 has no `### Evidence Posts` block']
+  const lines = block.split('\n')
+  const out: string[] = []
+  for (const { row, statuses } of EVIDENCE_POST_ROWS) {
+    const line = lines.find(l => l.startsWith(row))
+    if (line === undefined) {
+      out.push(`missing row "${row}"`)
+      continue
+    }
+    for (const status of statuses) if (!line.includes(status)) out.push(`"${row}" cannot report ${status}`)
+  }
+  return out
+}
+
+describe('/resolve posts the thread outcomes and reports every evidence post (§3.2, AC-3)', () => {
+  it('Third-Party Threads is updated before the 9b-2 spawn', () => {
+    expect(collectOrderViolations('resolve.md', requireDistFile('resolve.md'), THREAD_ORDER)).toEqual([])
+  })
+
+  it('known-bad probe: the d09da34 order is reported by the same collector', () => {
+    expect(collectOrderViolations('d09da34/resolve.md', D09DA34_9B_TAIL, THREAD_ORDER)).toHaveLength(1)
+  })
+
+  it('9b captures both Git agent results, and Phase 10 requires the comment result', () => {
+    const resolve = requireDistFile('resolve.md')
+    expect(resolve).toMatch(/`\*\*Publication\*\*:` and `\*\*Status\*\*:` lines as `PR_COMMENT`/)
+    expect(resolve).toMatch(/`### Status:` line as `THREAD_RESOLUTION_RESULT`/)
+    const phase10 = resolve.slice(resolve.indexOf('### Phase 10: Report'))
+    expect(phase10.split('\n').find(l => l.startsWith('**Requires:**'))).toContain('PR_COMMENT')
+  })
+
+  it('Phase 10 reports every evidence post with its statuses', () => {
+    const resolve = requireDistFile('resolve.md')
+    expect(collectMissingEvidencePosts(resolve)).toEqual([])
+    expect(resolve, 'the mode-only block is replaced, not kept beside').not.toContain('### Publication (from Git agent)')
+  })
+
+  it('known-bad probe: the d09da34 mode-only Phase 10 is reported', () => {
+    const d09da34 = [
+      '### Phase 10: Report',
+      '### Publication (from Git agent)',
+      '{FULL (private repo) | FULL (config override) | STUB (public repository) | OFF (publication disabled by config)}',
+      '',
+      '### Merge Readiness (if compliance enabled)',
+    ].join('\n')
+    expect(collectMissingEvidencePosts(d09da34)).toEqual(['Phase 10 has no `### Evidence Posts` block'])
+  })
+})
