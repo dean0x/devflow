@@ -781,12 +781,18 @@ describe('only a trusted first-comment author can exclude a thread (§3.6, AC-5)
 const FORK_REASON = 'TRACEABILITY: DEGRADED (cannot push to fork)'
 
 /**
- * The exemption: `maintainerCanModify` says whether the BASE repo's maintainers may
- * push to the fork, not whether this user may. A contributor running devflow on
- * their own fork PR (an org fork has no maintainer-edit option at all) pushes to a
- * repository they own, so the degrade needs their own access checked as well.
+ * `maintainerCanModify` says whether the BASE repo's maintainers may push to the
+ * fork, not whether this user may. A contributor running devflow on their own fork
+ * PR (an org-owned fork has no maintainer-edit option at all) pushes to a
+ * repository they can write to, so the two PR fields alone would degrade them.
+ * Each pre-flight therefore also establishes the user's OWN access:
+ * - validate-branch is read-only, so it asks: the fork's `permissions.push`;
+ * - ensure-pr-ready is the op that pushes, so the push itself answers — the
+ *   degrade is emitted only for a push the fork refused. (A second API probe there
+ *   would make its one-spawn load the PR-host max op and overrun the #360 budget.)
  */
 const FORK_PUSH_ACCESS = `--jq '.permissions.push'`
+const FORK_PUSH_REFUSED = 'If that push is refused'
 
 /** The text of `text` from the line holding `start` up to (not including) the line holding `end`. */
 function slice(text: string, start: string, end: string): string {
@@ -820,11 +826,12 @@ export function collectMissingForkPreflight(files: ForkFiles): string[] {
   need('pr/ensure-pr-ready.md step 3', soleLine(files.ensurePrReady, '3. ') ?? '', [
     'isCrossRepository',
     'maintainerCanModify',
-    FORK_PUSH_ACCESS,
+    FORK_PUSH_REFUSED,
     FORK_REASON,
   ])
   out.push(...collectOrderViolations('pr/ensure-pr-ready.md', files.ensurePrReady, [
-    { label: 'the fork check precedes the push', before: FORK_REASON, after: 'push with `-u` flag' },
+    { label: 'the push is tried before a refusal is classified', before: 'push with `-u` flag', after: FORK_PUSH_REFUSED },
+    { label: 'only a refused push degrades', before: FORK_PUSH_REFUSED, after: FORK_REASON },
   ]))
   const r = files.resolve
   need('/resolve Step 0b', slice(r, '#### Step 0b', '#### Step 0c'), ['`fork_no_push`', FORK_REASON])
@@ -854,23 +861,29 @@ describe('a fork PR without maintainer edits degrades instead of failing a push 
     expect(calls, 'one gh pr view in validate-branch').toHaveLength(1)
   })
 
-  it('known-bad probe: a pre-flight keyed on the two PR fields alone is reported at both sites', () => {
+  it('known-bad probe: pre-flights keyed on the two PR fields alone are reported at both sites', () => {
     // isCrossRepository && !maintainerCanModify alone degrades a contributor's own
-    // fork PR, whose pushes go to a repository they can write to.
-    const probe = `(\`gh api "repos/{headRepositoryOwner.login}/{headRepository.name}" ${FORK_PUSH_ACCESS}\` does not print \`true\`)`
+    // fork PR, whose pushes go to a repository they can write to. The seeds are the
+    // first #360 spellings: validate-branch without its access probe, and
+    // ensure-pr-ready refusing to push before trying.
+    const accessProbe =
+      `, \`maintainerCanModify\` is false and you cannot push to that fork yourself (\`gh api "repos/{headRepositoryOwner.login}/{headRepository.name}" ${FORK_PUSH_ACCESS}\` does not print \`true\`),`
     const files = shippedForkFiles()
-    const strip = (text: string): string => {
-      expect(text.split(probe), 'the access probe must occur once per pre-flight').toHaveLength(2)
-      return text.split(probe).join('')
-    }
+    expect(files.validateBranch.split(accessProbe), 'the access probe must occur once').toHaveLength(2)
+    const shippedStep3 = soleLine(files.ensurePrReady, '3. ')
+    expect(shippedStep3, 'ensure-pr-ready step 3 must be one line').not.toBeNull()
+    const predictingStep3 =
+      "3. If the branch's open PR is cross-repository and its maintainer cannot modify it (`gh pr view --json isCrossRepository,maintainerCanModify`), do not push: emit `TRACEABILITY: DEGRADED (cannot push to fork)` and go to 4a (4a–4c edit only the PR). Otherwise check if branch pushed to remote - if not, push with `-u` flag"
     const wounded: ForkFiles = {
       ...files,
-      validateBranch: strip(files.validateBranch),
-      ensurePrReady: strip(files.ensurePrReady),
+      validateBranch: files.validateBranch.split(accessProbe).join(' and `maintainerCanModify` is false,'),
+      ensurePrReady: files.ensurePrReady.split(shippedStep3!).join(predictingStep3),
     }
     expect(collectMissingForkPreflight(wounded)).toEqual([
       `pr/validate-branch.md: missing ${FORK_PUSH_ACCESS}`,
-      `pr/ensure-pr-ready.md step 3: missing ${FORK_PUSH_ACCESS}`,
+      `pr/ensure-pr-ready.md step 3: missing ${FORK_PUSH_REFUSED}`,
+      `pr/ensure-pr-ready.md: [the push is tried before a refusal is classified] after anchor absent: "${FORK_PUSH_REFUSED}"`,
+      `pr/ensure-pr-ready.md: [only a refused push degrades] before anchor absent: "${FORK_PUSH_REFUSED}"`,
     ])
   })
 
