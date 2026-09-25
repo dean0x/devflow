@@ -1406,6 +1406,9 @@ describe('Phase F traceability — release.md evidence + dynamic-build mechanism
       content,
       'release.md must contain backlink-shipped-issues Git op (Step 2.9)',
     ).toContain('backlink-shipped-issues');
+    // #362: the evidence and back-link steps key on the evidence policy, not the skill.
+    expect(content, 'release.md must not resolve COMPLIANCE_SKILL_INSTALLED').not.toContain('COMPLIANCE_SKILL_INSTALLED');
+    expect(content, 'release.md must not check the compliance skill path').not.toContain('skills/devflow:compliance/SKILL.md');
   });
 
   it('dynamic-build.md passes the mechanism inputs and ISSUE_NUMBER, and restates no branch convention (#362)', async () => {
@@ -1495,9 +1498,10 @@ describe('publication_gate adoption in compiled host commands (Phase C)', () => 
 //
 // compliance_gate() adoption guard: 2 importers (code-review, plan) must use the
 // shared {compliance_gate()} partial — the review lens is the one command-layer use
-// of the skill check left. release.md inlines its own COMPLIANCE_SKILL_INSTALLED
-// check — it never calls {compliance_gate()} — recorded as an allowlisted
-// exception by name (§14.5). hostsScanned === 2 asserts non-vacuity [DR-27a].
+// of the skill check left. release.md carries no skill check at all since #362: its
+// evidence and back-link steps gate on EVIDENCE_POLICY, resolved by the
+// evidence_policy() text it holds verbatim. hostsScanned === 2 asserts non-vacuity
+// [DR-27a].
 // bug-analysis, dynamic-build and implement dropped the import in #362: their only
 // use of the check was to key a Git spawn, and the evidence policy now supplies the
 // mechanism inputs those spawns take. resolve dropped it in the same PR: its thread
@@ -1514,8 +1518,7 @@ describe('DIST_FILES scope (§14.5, P0-S21) + compliance_gate adoption (P0-S22)'
 
   it('both compliance_gate importers contain COMPLIANCE_SKILL_INSTALLED in their compiled output (P0-S22)', async () => {
     // The 2 MDS host commands that use {compliance_gate()} from _partials/_compliance.mds.
-    // Exception (allowlisted by name): release.md inlines its own COMPLIANCE_SKILL_INSTALLED
-    // check and never calls {compliance_gate()} — it is not in this list (§14.5).
+    // release.md is hand-authored, cannot import, and checks no skill (#362).
     const COMPLIANCE_GATE_IMPORTERS = ['code-review', 'plan'] as const;
 
     // The adoption set is read from the sources, both ways: a host that imports the

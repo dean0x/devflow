@@ -16,8 +16,6 @@
  *                exactly once. A gate the table does not govern is a policy
  *                nobody reviewed.
  *
- * Row 12 still gates on `COMPLIANCE_SKILL_INSTALLED` at this commit; a later
- * commit of #362 moves it to `EVIDENCE_POLICY` and re-points its sites here.
  * Row 13's op-side sites carry the `stub` publication value, which names no gate,
  * so they are held by direction 1 alone; its caller sites are gated lines like any
  * other.
@@ -226,16 +224,15 @@ const DISPOSITION: readonly DispositionRow[] = [
     ],
   },
   {
-    // §6 row 12 → EVIDENCE_POLICY in P3.
     row: 12,
-    subject: '/release evidence, conventions and back-link',
-    inputs: ['COMPLIANCE_SKILL_INSTALLED'],
-    on: 'gather evidence and back-link shipped issues',
-    off: 'skip both',
+    subject: '/release evidence, release-notes enrichment and back-link',
+    inputs: ['EVIDENCE_POLICY'],
+    on: 'gather evidence, pass it to create-release, and back-link shipped issues',
+    off: 'skip all three',
     sites: [
-      { file: 'commands/release.md', anchor: '2b. **Gather release evidence**', phrase: 'compliance-gated: only when COMPLIANCE_SKILL_INSTALLED' },
-      { file: 'commands/release.md', anchor: '4. **Tag and GitHub Release**', phrase: 'when COMPLIANCE_SKILL_INSTALLED' },
-      { file: 'commands/release.md', anchor: '4b. **Back-link shipped issues**', phrase: 'compliance-gated: only when COMPLIANCE_SKILL_INSTALLED' },
+      { file: 'commands/release.md', anchor: '2b. **Gather release evidence**', phrase: policyGate },
+      { file: 'commands/release.md', anchor: '4. **Tag and GitHub Release**', phrase: policyGate },
+      { file: 'commands/release.md', anchor: '4b. **Back-link shipped issues**', phrase: policyGate },
     ],
   },
   {

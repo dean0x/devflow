@@ -205,8 +205,9 @@ export const MDS_REFERENCE_MODULES = [
 ] as const;
 
 /**
- * Hand-authored files copied verbatim into dist/commands/. release.md inlines its
- * own COMPLIANCE gate and is not MDS-compiled; the divergence is permanent (SG-13).
+ * Hand-authored files copied verbatim into dist/commands/. release.md carries the
+ * built `evidence_policy()` text verbatim instead of importing it, and is not
+ * MDS-compiled; the divergence is permanent (SG-13).
  */
 export const HAND_AUTHORED_COMMAND_FILES = ['release.md'] as const;
 

@@ -1,11 +1,12 @@
 /**
- * AC-17 — `backlink-shipped-issues` is compliance-gated at its ONE call site.
+ * AC-17 — `backlink-shipped-issues` is policy-gated at its ONE call site.
  *
  * The operation writes to every issue a release shipped, so whether it runs at
  * all is a policy question and not a mechanics one. `/release` decides: step 4b
- * spawns it only when the compliance skill is installed, and step 2b gates the
- * evidence-gathering that feeds it on the same condition. Nothing else may
- * decide, and that is the property with no executed evidence before this file.
+ * spawns it only when the resolved evidence policy is `required`, and step 2b
+ * gates the evidence-gathering that feeds it on the same condition (#362 moved
+ * both from the installed compliance skill to `EVIDENCE_POLICY`). Nothing else
+ * may decide, and that is the property with no executed evidence before this file.
  *
  * WHY A MATRIX AND NOT A PRESENCE CHECK. "The gate is stated" is cleared by the
  * caller alone. The failure this guards is the other half: a provider's
@@ -44,11 +45,25 @@ const REFS_DIR = compiledSkillRefsDir();
 const OP = 'backlink-shipped-issues';
 
 /**
- * The gate's condition as `/release` spells it. A near-miss spelling is the
- * failure mode a substring search over `compliance` would not catch: the step
- * would read as gated to a human and name a variable nothing sets.
+ * The gate's condition as `/release` spells it — the canonical caller-side policy
+ * phrase. A near-miss spelling is the failure mode a substring search would not
+ * catch: the step would read as gated to a human and name a variable nothing sets.
  */
-const GATE = 'compliance-gated: only when COMPLIANCE_SKILL_INSTALLED';
+const GATE = 'only when `EVIDENCE_POLICY` is `required`';
+
+/**
+ * Named collector: lines of an operation's mechanics that name the evidence
+ * policy at all. An agent is passed the mechanism inputs only, never
+ * `EVIDENCE_POLICY` (the partial's hand-off rule), so any mention in an op file
+ * is a second policy decision the caller cannot see.
+ */
+function collectPolicyMentions(label: string, body: string): string[] {
+  const hits: string[] = [];
+  body.split('\n').forEach((line, i) => {
+    if (/\bEVIDENCE_POLICY\b/.test(line)) hits.push(`${label}:${i + 1}: ${line.trim().slice(0, 120)}`);
+  });
+  return hits;
+}
 
 /**
  * Every provider whose mechanics ship. Hardcoded rather than derived from the
@@ -113,6 +128,11 @@ function collectComplianceConditions(label: string, body: string): string[] {
 describe(`AC-17: ${OP} is gated by the caller and by nobody else`, () => {
   const release = requireFile('release command', path.join(ROOT, 'dist', 'commands', 'release.md'));
 
+  it('the release command no longer keys either step on the compliance skill', () => {
+    expect(release, 'the retired gate variable').not.toContain('COMPLIANCE_SKILL_INSTALLED');
+    expect(release, 'the retired step prefix').not.toMatch(/compliance-gated/i);
+  });
+
   it('the release command spawns the operation exactly once, and gates that spawn', () => {
     const spawnSteps = release
       .split('\n')
@@ -157,6 +177,11 @@ describe(`AC-17: ${OP} is gated by the caller and by nobody else`, () => {
         'drift from it and nothing compares the two:\n  ' +
         collectComplianceConditions(rel, body).join('\n  '),
       ).toEqual([]);
+      expect(
+        collectPolicyMentions(rel, body),
+        `${rel} names the evidence policy. Agents are never passed it — /release step 4b gates the ` +
+        'spawn, and the operation runs whenever it is spawned',
+      ).toEqual([]);
 
       // …and the file is not empty-passing. These two sentences are what the
       // generated file actually carries for every provider; an absence-only arm
@@ -190,6 +215,12 @@ describe(`AC-17: ${OP} is gated by the caller and by nobody else`, () => {
       collectComplianceConditions('(probe)', 'Compliance frameworks are listed in the skill directory.'),
       'a sentence that names compliance without stating a run condition is not a second gate',
     ).toEqual([]);
+    // The policy half: the 825077e release gate, moved into a mechanics file.
+    expect(
+      collectPolicyMentions('(probe)', `4b. Post the comment (${GATE}).`),
+      'the collector must report the caller\'s gate restated in an operation',
+    ).toHaveLength(1);
+    expect(collectPolicyMentions('(probe)', 'Post one comment per shipped issue.')).toEqual([]);
   });
 });
 
