@@ -648,6 +648,10 @@ const LIVE_REASONS: readonly string[] = [
   // instantiated, because the contract's own table is its closed domain — the
   // ambiguity is per capability, so the reason has to name which one.
   'ambiguous tracker server — {n} servers offer {capability}',
+  // #364 (PR5): gather-release-evidence step 6, authored once in `_common.mds` and
+  // emitted by every provider — the trace script failed, printed no header, or
+  // (Jira/Linear) no usable key existed, so every commit's trace is unknown.
+  'trace map unavailable',
 ];
 
 /**
