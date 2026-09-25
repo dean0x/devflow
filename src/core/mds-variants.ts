@@ -352,7 +352,7 @@ export const TRACKER_OPS = [
 export const TRACKER_GITHUB_OPS = TRACKER_OPS;
 
 /**
- * The 8 PR/review operations whose mechanics are generated once, for every
+ * The 9 PR/review operations whose mechanics are generated once, for every
  * provider, under `pr/`.
  *
  * A PR-HOST roster, not a tracker roster, and the distinction is the whole
@@ -370,12 +370,11 @@ export const TRACKER_GITHUB_OPS = TRACKER_OPS;
  * fact and lives in `tracker/{provider}/ensure-pr-ready.md`. The operation
  * carries one pointer to each.
  *
- * Exactly 8 entries, which is {@link MIN_VARIANT_PAIRS} exactly. That is a
- * property, not a coincidence: the module cannot be grown an operation at a time,
- * because a shorter roster makes every parity assertion over it vacuous (GAP-42,
- * the PF-018 trap) and `expandVariants` refuses the build. Dropping an op from
- * this list therefore fails the build on purpose rather than silently shrinking
- * the guard surface.
+ * 9 entries, one above {@link MIN_VARIANT_PAIRS}, which is a floor and not a
+ * target: a shorter roster makes every parity assertion over it vacuous (GAP-42,
+ * the PF-018 trap) and `expandVariants` refuses the build, so the roster can grow
+ * but never drop below 8. `update-pr-evidence` (#363) is the ninth — it edits the
+ * PR body and comments on the PR, both GitHub whatever the tracker is.
  */
 export const PR_HOST_OPS = [
   'ensure-pr-ready',
@@ -386,6 +385,7 @@ export const PR_HOST_OPS = [
   'resolve-review-threads',
   'post-resolution-summary',
   'check-merge-readiness',
+  'update-pr-evidence',
 ] as const;
 
 /**

@@ -56,6 +56,7 @@ import {
   measureOptional,
   nameableCrossCutting,
   nameableFrom,
+  prHostOpLoad,
   preambleBlock,
   providerLoadedSet,
   referenceChars,
@@ -228,7 +229,7 @@ const BUDGET_LOADED_SET_LINEAR = 78_159;
 
 /**
  * THE PR-HOST loaded-set ceiling — the worst-case cost of a spawn that runs one of
- * the eight operations whose mechanics live under `references/pr/`.
+ * the nine operations whose mechanics live under `references/pr/`.
  *
  * ITS OWN ROW, for the reason each provider has one (D-LOADED-SET-PER-PROVIDER).
  * `references/pr/` is installed under EVERY tracker, because pull requests, PR
@@ -266,6 +267,28 @@ const BUDGET_LOADED_SET_LINEAR = 78_159;
  * tests/fixtures/numeric-floors.json.
  */
 const BUDGET_LOADED_SET_PR_HOST = 58_659;
+
+/**
+ * THE PER-OP PR-HOST CAP — no single PR-host operation may load more than this,
+ * `pr/{op}.md` plus every reference its load instructions can name (AC-8, #363).
+ *
+ * It is what keeps the PR-host row honest while the SDLC-evidence series adds
+ * operations to it: that row prices only its WORST op, so an op that grew past
+ * today's worst (`post-review-summary`: its PR-host body plus
+ * references/publication-gate.md, 4_540) would move the row by its own growth ON
+ * TOP of any git.md growth — spending the reservation ledger twice. Held at the
+ * current worst, the row moves by exactly what git.md moves, and the ledger above
+ * stays the only line anything spends.
+ *
+ * Derived from that measured 4_540 and nothing else: a cap re-derived to fit the op
+ * that exceeded it is no cap. An op over it is condensed first (§2 of the #363
+ * design). Written exclusions are excluded here exactly as the row excludes them —
+ * the per-op measure is `prHostOpLoad`, the one the row's maximum reads.
+ *
+ * MAY BE LOWERED, NEVER RAISED. Registered as `pr-host-max-op-load` in
+ * tests/fixtures/numeric-floors.json.
+ */
+const PR_HOST_MAX_OP_LOAD = 4_540;
 
 /**
  * Every MCP-backed provider and the ceiling that prices it.
@@ -425,7 +448,7 @@ describe('byte budget: four-shape table (recorded)', () => {
         // The PR-host path — the shape the three tracker rows deliberately do not
         // describe, since references/pr/ is installed under every provider and costs
         // the same bytes on each. Gated by BUDGET_LOADED_SET_PR_HOST.
-        shape: '2c. PR-host spawn (the eight pr/ ops — same cost under every tracker)',
+        shape: '2c. PR-host spawn (the nine pr/ ops — same cost under every tracker)',
         chars: PRELOADED + worstCasePrHostLoad().value,
       },
       {
@@ -629,6 +652,14 @@ describe('byte budget: the round-trip term (recorded)', () => {
 // 2. The budget gates
 // ---------------------------------------------------------------------------
 
+/** Named collector: ops whose one-spawn load exceeds a per-op cap, one line each. */
+function collectOverOpCap(
+  loads: readonly { readonly op: string; readonly load: number }[],
+  cap: number,
+): string[] {
+  return loads.filter(l => l.load > cap).map(l => `${l.op}: ${l.load} ch (cap ${cap})`);
+}
+
 describe('byte budget: component and loaded-set pins (AC-2.5)', () => {
   it('chars(dist/agents/git.md) <= BUDGET_GIT_MD', () => {
     // The always-loaded half of the split, and the term every loaded-set row below
@@ -738,6 +769,32 @@ describe('byte budget: component and loaded-set pins (AC-2.5)', () => {
       `user pays on every path. Do NOT raise BUDGET_LOADED_SET_PR_HOST — §14.5: a ceiling is ` +
       `re-derived DOWNWARD or not at all; condense the pr/ mechanics instead.`,
     ).toBeLessThanOrEqual(BUDGET_LOADED_SET_PR_HOST);
+  });
+
+  it(`no PR-host op loads more than PR_HOST_MAX_OP_LOAD (${PR_HOST_MAX_OP_LOAD} ch, AC-8)`, () => {
+    const loads = PR_HOST_OPS.map(op => ({ op, load: prHostOpLoad(op) }));
+    // Printed: the per-op figures are what a reviewer checks the cap against.
+    console.table(loads);
+    expect(
+      loads.filter(l => l.load === 0).map(l => l.op),
+      'a PR-host op measured 0 — its reference is unbuilt and the cap would pass on nothing. Run ' +
+      '`npm run build`.',
+    ).toEqual([]);
+    expect(
+      collectOverOpCap(loads, PR_HOST_MAX_OP_LOAD),
+      `PR-host op(s) over the per-op cap. The PR-host row prices only its worst op, so one that ` +
+      `grows past today's worst moves the row by its own growth on top of git.md's. Condense the ` +
+      `op's pr/ mechanics — do NOT raise PR_HOST_MAX_OP_LOAD.`,
+    ).toEqual([]);
+  });
+
+  it('known-bad probe: the per-op cap collector reports an op one character over, and only it', () => {
+    expect(
+      collectOverOpCap(
+        [{ op: 'seed-under', load: PR_HOST_MAX_OP_LOAD }, { op: 'seed-over', load: PR_HOST_MAX_OP_LOAD + 1 }],
+        PR_HOST_MAX_OP_LOAD,
+      ),
+    ).toEqual([`seed-over: ${PR_HOST_MAX_OP_LOAD + 1} ch (cap ${PR_HOST_MAX_OP_LOAD})`]);
   });
 
   it('the written exclusion is load-bearing — charging it would take the PR-host row over', () => {

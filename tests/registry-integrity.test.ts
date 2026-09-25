@@ -440,6 +440,14 @@ describe('Guard 6 (build-gated): OPERATION: values ↔ git.md ## Operation: decl
     // git-agent.test.ts (AC-0.11).
   ]);
 
+  // TEMPORARY: #363 (SDLC-evidence PR4) lands `update-pr-evidence` in phase P3 and
+  // its first caller — /implement's Phase 10b spawn — in phase P4 of the same PR.
+  // Between the two commits the op is declared and not yet called. This is NOT an
+  // INTERNAL_OPS entry: nothing inside the Git agent invokes it. P4 deletes this
+  // set with the commit that adds the caller, and the self-expiry arm below makes
+  // that deletion compulsory — an entry whose op a command now references is red.
+  const PENDING_CALLER_OPS = new Set(['update-pr-evidence']);
+
   it('spawned OPERATION: values match git.md declarations (fail-loud when dist absent)', async () => {
     const distExists = await fs.access(distCommandsDir).then(() => true).catch(() => false);
     // FAIL-LOUD: a guard that silently skips on a missing build artifact is not a guard.
@@ -510,11 +518,20 @@ describe('Guard 6 (build-gated): OPERATION: values ↔ git.md ## Operation: decl
     // Reverse check: every declared op must be referenced in at least one compiled
     // command (by name, in any context) or be explicitly internal.
     for (const op of declaredOps) {
-      if (!opNameFoundInAnyFile.get(op) && !INTERNAL_OPS.has(op)) {
+      if (!opNameFoundInAnyFile.get(op) && !INTERNAL_OPS.has(op) && !PENDING_CALLER_OPS.has(op)) {
         violations.push(
           `git.md declares ## Operation: ${op} but no compiled command references it ` +
           `(add to INTERNAL_OPS if this op is invoked internally by another git.md operation)`,
         );
+      }
+    }
+    // Self-expiry: a pending entry must be declared and still uncalled. Once a
+    // command references it, the allowance has outlived its reason.
+    for (const op of PENDING_CALLER_OPS) {
+      if (!declaredOps.has(op)) {
+        violations.push(`PENDING_CALLER_OPS names ${op}, which git.md does not declare`);
+      } else if (opNameFoundInAnyFile.get(op)) {
+        violations.push(`PENDING_CALLER_OPS names ${op}, which a compiled command now references — delete the entry`);
       }
     }
 

@@ -483,10 +483,22 @@ export const LOADED_SET_WRITTEN_EXCLUSIONS: readonly string[] = ['github-api.md'
 export function worstCasePrHostLoad(
   exclusions: readonly string[] = LOADED_SET_WRITTEN_EXCLUSIONS,
 ): OpMax {
-  return maxOver(PR_HOST_OPS, op =>
-    [...summedFor(op)]
-      .filter(rel => !exclusions.includes(rel))
-      .reduce((n, rel) => n + referenceChars(rel), 0));
+  return maxOver(PR_HOST_OPS, op => prHostOpLoad(op, exclusions));
+}
+
+/**
+ * One PR-host op's one-spawn load: its `pr/{op}.md` plus every reference its load
+ * instructions can name, less `exclusions`. The ONE measure both the row's maximum
+ * above and the per-op cap in byte-budget.test.ts read, so the cap and the row can
+ * never price the same op two ways.
+ */
+export function prHostOpLoad(
+  op: string,
+  exclusions: readonly string[] = LOADED_SET_WRITTEN_EXCLUSIONS,
+): number {
+  return [...summedFor(op)]
+    .filter(rel => !exclusions.includes(rel))
+    .reduce((n, rel) => n + referenceChars(rel), 0);
 }
 
 /** max_op chars(references/tracker/github/{op}.md) — the largest single mechanics file. */

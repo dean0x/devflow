@@ -953,6 +953,9 @@ describe('git agent — static content guards (PF-018)', () => {
     // Wired live from plan.mds Gate 0 (single-issue and multi-issue fetch paths) — AC-0.11
     'fetch-issue',
     'fetch-issues-batch',
+    // #363 (PR4): splices the test-plan block into the PR body and posts the
+    // SHA-keyed evidence comment — remote I/O on both sinks.
+    'update-pr-evidence',
   ];
 
   for (const op of REQUIRED_OPS) {
@@ -1819,11 +1822,12 @@ describe('git agent — static content guards (PF-018)', () => {
   const isPostingSection = (sec: string): boolean =>
     sec.includes('--body-file') || sec.includes('-F body=@');
 
-  it('D11: every posting op (--body-file or -F body=@) references D11 (forward guard, ≥8 ops)', () => {
-    // Non-vacuous: assert ≥ 8 posting ops exist AND each one references D11 (PF-018)
+  it('D11: every posting op (--body-file or -F body=@) references D11 (forward guard, ≥9 ops)', () => {
+    // Non-vacuous: assert ≥ 9 posting ops exist AND each one references D11 (PF-018)
     // Sink corpus = git.md ∪ dist/skills/git/references/*.md (ENOENT-tolerant on dist).
     // Mode 'union' — a posting op's D11 reference may live in a moved mechanics file
-    // (Phase 2+); unioning ensures the floor never silently drops below 8 [DR-18, AC-0.8].
+    // (Phase 2+); unioning ensures the floor never silently drops below 9 [DR-18, AC-0.8].
+    // 8 → 9 with #363's update-pr-evidence (the PR-body edit and the evidence comment).
     const sinkCorpus = cachedSinkCorpus();
     const opNames = (content.match(/## Operation: (\S+)/g) ?? []).map(m => m.replace('## Operation: ', ''));
 
@@ -1840,8 +1844,8 @@ describe('git agent — static content guards (PF-018)', () => {
 
     expect(
       postingOps.length,
-      `D11 forward guard: expected ≥ 8 posting ops, found ${postingOps.length}: [${postingOps.join(', ')}]`,
-    ).toBeGreaterThanOrEqual(8);
+      `D11 forward guard: expected ≥ 9 posting ops, found ${postingOps.length}: [${postingOps.join(', ')}]`,
+    ).toBeGreaterThanOrEqual(9);
     expect(
       postingOpsWithoutD11,
       `D11 forward guard: posting ops missing Comment-sink scrub (D11) named reference: [${postingOpsWithoutD11.join(', ')}]`,
@@ -1874,16 +1878,16 @@ describe('git agent — static content guards (PF-018)', () => {
     ).toHaveLength(0);
   });
 
-  it('D11 known-bad probe: dropping the PR-host tree narrows the posting set from 8 to 4 (SG-8 non-vacuity)', () => {
-    // SG-8's proof obligation, and the one thing the floor of 8 above cannot show
+  it('D11 known-bad probe: dropping the PR-host tree narrows the posting set from 9 to 4 (SG-8 non-vacuity)', () => {
+    // SG-8's proof obligation, and the one thing the floor of 9 above cannot show
     // on its own: the forward guard is green whichever file carries a posting
     // op's sink, so green alone never establishes that the union corpus is what
-    // carries four of those eight. This drives the SAME predicate over the
+    // carries five of those nine. This drives the SAME predicate over the
     // narrowed corpus and pins the number that only the widening supplies.
     //
-    // Four of the eight vanish entirely — post-review-summary,
-    // post-resolution-summary, resolve-review-threads and ensure-pr-ready post only
-    // from `pr/`. ensure-pr-ready is a member of BOTH rosters, but both of its
+    // Five of the nine vanish entirely — post-review-summary,
+    // post-resolution-summary, resolve-review-threads, ensure-pr-ready and
+    // update-pr-evidence post only from `pr/`. ensure-pr-ready is a member of BOTH rosters, but both of its
     // PR-body writes are PR-host mechanics: step 4a's create and step 4b's
     // PR-host half (the scrub-then-edit). Its tracker reference only resolves the
     // issue and renders the link line. The four tracker-side posters
@@ -1905,7 +1909,7 @@ describe('git agent — static content guards (PF-018)', () => {
     // regression reported as agreement (the `scanned > 0` anti-pattern, one level up).
     expect(
       [...postingOps].sort(),
-      `without references/${PR_HOST_DESTINATION_ROOT}/ the posting set must fall from 8 to exactly these 4 ` +
+      `without references/${PR_HOST_DESTINATION_ROOT}/ the posting set must fall from 9 to exactly these 4 ` +
       'ops — a set that does not move proves the union corpus was never load-bearing (PF-018)',
     ).toEqual([...EXPECTED_WITHOUT_PR_HOST].sort());
   });
@@ -2331,7 +2335,7 @@ describe('git agent — static content guards (PF-018)', () => {
     // Two corpora, one per question, and the split is the point (ADR-025):
     //   DETECTION reads git.md ∪ the PR-host references — these ops' `gh` calls
     //     live in references/pr/, and a 'sole' read silently narrows the
-    //     remote-I/O set from 14 to 13 (post-resolution-summary's `gh` indicators
+    //     remote-I/O set from 15 to 14 (post-resolution-summary's `gh` indicators
     //     are all in its PR-host body) while staying green on a smaller subject.
     //     Widened to exactly the PR-host half and no further: over the
     //     FULL sink corpus `setup-task` would be detected through its provider
@@ -2385,14 +2389,15 @@ describe('git agent — static content guards (PF-018)', () => {
     ).toBeGreaterThan(0);
     // A FLOOR, not a `> 0` shrug. `> 0` is met by one op, so it could not tell a
     // corpus narrowing from a real removal — which is exactly what a 'sole'
-    // detection read does here (14 → 13, silently). Registered as
-    // git-agent-remote-io-ops in numeric-floors.json.
+    // detection read does here (15 → 14, silently). Registered as
+    // git-agent-remote-io-ops in numeric-floors.json; 14 → 15 with #363's
+    // update-pr-evidence.
     expect(
       remoteOps.length,
       `remote-I/O ops detected: ${remoteOps.length} [${remoteOps.join(', ')}] — the set may only ` +
       'grow. A drop means either an op stopped touching the remote or the corpus this guard ' +
       'reads got narrower; both need a decision, not a green run',
-    ).toBeGreaterThanOrEqual(14); // floor: git-agent-remote-io-ops (numeric-floors.json)
+    ).toBeGreaterThanOrEqual(15); // floor: git-agent-remote-io-ops (numeric-floors.json)
     expect(
       missingD4,
       `REQUIRED_OPS with remote I/O missing **Degradation (D4):** clause: [${missingD4.join(', ')}]`,
@@ -2771,6 +2776,7 @@ export const GIT_OPERATION_ROSTER: readonly string[] = [
   'backlink-shipped-issues',
   'ensure-traceable-issue',
   'post-wave-report',
+  'update-pr-evidence',
 ];
 
 /** Named collector: the `## Operation:` names an agent source declares, in file order. */
@@ -2789,7 +2795,7 @@ describe('git agent: the operation roster is unchanged (registry Guard 6)', () =
   });
 
   it('the roster check is non-vacuous, and the collector sees a seeded change', () => {
-    expect(GIT_OPERATION_ROSTER.length, 'the named set is empty').toBe(18);
+    expect(GIT_OPERATION_ROSTER.length, 'the named set is empty').toBe(19);
     const seeded = '## Operation: setup-task\nbody\n\n## Operation: renamed-op\nbody\n';
     expect(collectOperationNames(seeded)).toEqual(['setup-task', 'renamed-op']);
   });
