@@ -343,7 +343,9 @@ export const MODEL_CROSS_CUTTING_ASSERTED: readonly string[] = [MCP_CONTRACT_REL
  * §5 anticipated.
  */
 const MODEL_CROSS_CUTTING_REFS: Readonly<Record<string, readonly string[]>> = {
-  'fetch-review-threads': ['github-api.md'],
+  // trust-rule.md (#363) is named from this op's PR-host body — step 2 applies the
+  // one trust rule — so it reaches the op through the same one hop github-api.md does.
+  'fetch-review-threads': ['github-api.md', 'trust-rule.md'],
   // resolve-review-threads fans out over the same threads, so it reads the same
   // rate-limit rungs. The row is what keeps the two directions honest about a
   // reference the op now names; the worst-case term is unchanged, because the

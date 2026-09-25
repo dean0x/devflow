@@ -148,11 +148,11 @@
     },
     {
       "id": "generated-reference-manifest-size",
-      "floor": 42,
-      "pattern": "toBeGreaterThanOrEqual(42)",
+      "floor": 43,
+      "pattern": "toBeGreaterThanOrEqual(43)",
       "occurrences": 2,
       "sourceFile": "tests/installer/reference-overlay.test.ts",
-      "description": "BUILD/TARBALL SCOPE: the manifest the build EMITS, which is every provider plus the provider-independent trees. Distinct from installed-reference-count-{github,provider}, which pin what ONE install carries; the build stays complete so the tarball can serve any selection without a rebuild, and narrowing the install never lowers this floor. 42 = 10 GitHub ops + 10 Jira ops + 10 Linear ops (the SAME TRACKER_OPS roster, which is what makes file-set parity structural) + 8 PR-host ops (PR_HOST_OPS, under no provider: pull requests stay on GitHub whatever the tracker is) + 3 cross-cutting documents + the tool-call contract, whose generation gate the first tool-call provider opens. Two sites — the manifest shape assertion and the 0644 normalisation's installed-file count. A manifest short enough to enumerate by hand makes every convergence assertion vacuous (GAP-42/PF-018), which is the same reason MIN_VARIANT_PAIRS exists. A floor may only rise, and here it rises by a whole module at a time."
+      "description": "BUILD/TARBALL SCOPE: the manifest the build EMITS, which is every provider plus the provider-independent trees. Distinct from installed-reference-count-{github,provider}, which pin what ONE install carries; the build stays complete so the tarball can serve any selection without a rebuild, and narrowing the install never lowers this floor. 43 = 10 GitHub ops + 10 Jira ops + 10 Linear ops (the SAME TRACKER_OPS roster, which is what makes file-set parity structural) + 8 PR-host ops (PR_HOST_OPS, under no provider: pull requests stay on GitHub whatever the tracker is) + 4 cross-cutting documents + the tool-call contract, whose generation gate the first tool-call provider opens. Two sites — the manifest shape assertion and the 0644 normalisation's installed-file count. A manifest short enough to enumerate by hand makes every convergence assertion vacuous (GAP-42/PF-018), which is the same reason MIN_VARIANT_PAIRS exists. A floor may only rise, and here it rises by a whole module at a time."
     },
     {
       "id": "issue-pr-link-forwarding-sites",
@@ -164,8 +164,8 @@
     },
     {
       "id": "packed-reference-manifest-size",
-      "floor": 42,
-      "pattern": "toBeGreaterThanOrEqual(42)",
+      "floor": 43,
+      "pattern": "toBeGreaterThanOrEqual(43)",
       "occurrences": 1,
       "sourceFile": "tests/packaging.test.ts",
       "description": "BUILD/TARBALL SCOPE (unaffected by the selection-scoped install): prefix-shippability clause (i) — the tarball must carry every file the reference overlay converges to. The floor keeps the packed-set assertion non-vacuous if the manifest is ever narrowed. It pins the same manifest as generated-reference-manifest-size at the OTHER sink, and the two must move together, or a module could ship un-packed."
@@ -220,19 +220,19 @@
     },
     {
       "id": "installed-reference-count-github",
-      "floor": 21,
-      "pattern": "INSTALLED_REFS_GITHUB = 21",
+      "floor": 22,
+      "pattern": "INSTALLED_REFS_GITHUB = 22",
       "occurrences": 1,
       "sourceFile": "tests/mds-variants.test.ts",
-      "description": "Reference files ONE github install carries: the tracker/github tree, the provider-independent PR-host tree (pr/, 8 files) and the cross-cutting documents. Install-time scope, distinct from the build-time floor, which is unchanged — the build still emits every provider so the tarball can serve any selection without a rebuild. Re-derived 2026-09-22 when the PR-host tree landed: 21 files."
+      "description": "Reference files ONE github install carries: the tracker/github tree, the provider-independent PR-host tree (pr/, 8 files) and the cross-cutting documents. Install-time scope, distinct from the build-time floor, which is unchanged — the build still emits every provider so the tarball can serve any selection without a rebuild. Re-derived 2026-09-22 when the PR-host tree landed: 21 files; 22 since #363 (PR4) added the cross-cutting trust-rule.md."
     },
     {
       "id": "installed-reference-count-provider",
-      "floor": 32,
-      "pattern": "INSTALLED_REFS_PROVIDER = 32",
+      "floor": 33,
+      "pattern": "INSTALLED_REFS_PROVIDER = 33",
       "occurrences": 1,
       "sourceFile": "tests/mds-variants.test.ts",
-      "description": "Reference files ONE jira or linear install carries: the github floor (21, which already includes the 8 provider-independent PR-host files) + the selected provider's own 11. Excludes tracker/_mcp.md from the count assertion path, which is asserted biconditionally instead. Install-time scope, distinct from the build-time floor. Re-derived 2026-09-22: 32 files."
+      "description": "Reference files ONE jira or linear install carries: the github floor (22, which already includes the 8 provider-independent PR-host files) + the selected provider's own 11. Excludes tracker/_mcp.md from the count assertion path, which is asserted biconditionally instead. Install-time scope, distinct from the build-time floor. Re-derived 2026-09-22: 32 files; 33 since #363 (PR4)."
     },
     {
       "id": "git-agent-remote-io-ops",

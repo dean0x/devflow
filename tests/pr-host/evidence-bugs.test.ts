@@ -659,12 +659,22 @@ describe('`full` is decided by the publication gate alone (§3.5, AC-8)', () => 
 //
 // fetch-review-threads step 3's PRIMARY predicate excludes any thread whose first
 // comment contains `<!-- devflow:`, whoever wrote it — so anyone could hide their
-// own review thread from /resolve by pasting the marker. Step 2 now names who is
+// own review thread from /resolve by pasting the marker. Step 2 names who is
 // trusted, from fields the SAME single GraphQL call selects (avoids PF-064: the
 // predicate is written against the value that carries the property — the author's
 // association — not against the marker text a stranger can type).
+//
+// #363 (PR4, P3) moved the rule's BODY into the generated cross-cutting document
+// `references/trust-rule.md`, its one prose statement, which the evidence scripts'
+// `trust()` implements. Step 2 keeps the anchor and names the document. So the
+// collector's corpus widened to step 2 + trust-rule.md and no further (ADR-025:
+// the literals moved, and only they): the TRUST_TERMS are read from the document,
+// and step 2 is held to naming it WITHOUT restating it — a second statement is the
+// divergence the single document exists to prevent. The `660edc1` step 2 (the rule
+// inline, no document) is the probe that proves the second half has teeth.
 
 const TRUST_ANCHOR = '**Trusted first-comment author:**'
+const TRUST_POINTER = `${TRUST_ANCHOR} per \`references/trust-rule.md\``
 const EXCLUSION_STEP = '3. Apply devflow-authored exclusion predicate'
 const TRUST_TERMS: readonly string[] = [
   'VIEWER_LOGIN',
@@ -678,6 +688,14 @@ const TRUST_TERMS: readonly string[] = [
   '`COLLABORATOR`',
   '`isCrossRepository`',
 ]
+
+/**
+ * The TRUST_TERMS that state the rule rather than merely use its vocabulary.
+ * Step 2 legitimately spells bare `VIEWER_LOGIN` (it stores the viewer login under
+ * that name); every other term is rule text, and step 2 carrying one is a second
+ * statement of the rule.
+ */
+const RULE_TERMS: readonly string[] = TRUST_TERMS.filter(term => term !== 'VIEWER_LOGIN')
 
 /** Where each new field must sit in the review-threads query, as order rules over its text. */
 const QUERY_FIELD_ORDER: readonly OrderRule[] = [
@@ -699,16 +717,26 @@ function reviewThreadsQuery(githubApi: string): string | null {
   return end === -1 ? null : fn.slice(start, end)
 }
 
-/** Named collector: every way the fetch-review-threads exclusion can still be spoofed. */
-export function collectUntrustedMarkerExclusion(prFetchThreads: string, githubApi: string): string[] {
+/**
+ * Named collector: every way the fetch-review-threads exclusion can still be spoofed.
+ *
+ * Reads step 2 of `pr/fetch-review-threads.md` and the trust document it names —
+ * the two places the rule's text can live — plus the query that selects the
+ * fields the rule reads.
+ */
+export function collectUntrustedMarkerExclusion(prFetchThreads: string, trustRule: string, githubApi: string): string[] {
   const out: string[] = []
   const step2 = soleLine(prFetchThreads, '2. ')
   if (step2 === null) {
     out.push('pr/fetch-review-threads.md: no single step 2')
   } else {
-    for (const term of TRUST_TERMS) {
-      if (!step2.includes(term)) out.push(`pr/fetch-review-threads.md step 2 does not name ${term}`)
+    if (!step2.includes(TRUST_POINTER)) out.push('pr/fetch-review-threads.md step 2 does not name references/trust-rule.md')
+    if (RULE_TERMS.some(term => step2.includes(term))) {
+      out.push('pr/fetch-review-threads.md step 2 restates the trust rule — it must only name references/trust-rule.md')
     }
+  }
+  for (const term of TRUST_TERMS) {
+    if (!trustRule.includes(term)) out.push(`trust-rule.md does not name ${term}`)
   }
   out.push(...collectOrderViolations('pr/fetch-review-threads.md', prFetchThreads, [
     { label: 'trust rule before the exclusion predicate', before: TRUST_ANCHOR, after: EXCLUSION_STEP },
@@ -725,6 +753,10 @@ export function collectUntrustedMarkerExclusion(prFetchThreads: string, githubAp
 /** The `d09da34` step 2 — viewer login only, no trust rule for the marker. */
 const D09DA34_FETCH_STEP_2 =
   "2. Filter to unresolved threads only (`isResolved: false`). Fetch viewer login (author-filtered — a third party posting a devflow marker must not suppress threads): `gh api user --jq '.login'` → store as VIEWER_LOGIN."
+
+/** The `660edc1` step 2, verbatim — the rule stated inline, before trust-rule.md existed. */
+const S660EDC1_FETCH_STEP_2 =
+  "2. Filter to unresolved threads only (`isResolved: false`). Fetch viewer login (author-filtered — a third party posting a devflow marker must not suppress threads): `gh api user --jq '.login'` → store as VIEWER_LOGIN. **Trusted first-comment author:** `VIEWER_LOGIN` always; otherwise `authorAssociation` `OWNER`, `MEMBER` or `COLLABORATOR` — never for the PR author when `isCrossRepository` is true. A first comment by anyone else is marker-free for step 3: its `<!-- devflow:` text excludes nothing."
 
 /** The `d09da34` review-threads query, verbatim: `author { login }` and `body` only. */
 const D09DA34_REVIEW_THREADS_QUERY = `fetch_review_threads() {
@@ -763,42 +795,69 @@ function ghInvocations(text: string): string[] {
 
 describe('only a trusted first-comment author can exclude a thread (§3.6, AC-5)', () => {
   const prFetch = requireRef(prHostRel('fetch-review-threads'))
+  const trustRule = requireRef('trust-rule.md')
   // Hand-authored, not generated: installed from the skill's own references/ directory.
   const githubApi = readFileSync(path.join(ROOT, 'src', 'assets', 'skills', 'git', 'references', 'github-api.md'), 'utf-8')
 
-  it('step 2 names the trusted authors before step 3 applies the marker, from the one query', () => {
-    expect(collectUntrustedMarkerExclusion(prFetch, githubApi)).toEqual([])
+  it('the corpus is the built step 2 and the built trust document, both non-empty', () => {
+    expect(soleLine(prFetch, '2. '), 'pr/fetch-review-threads.md must carry one step 2').not.toBeNull()
+    expect(trustRule.startsWith('## Trust rule\n'), 'trust-rule.md must be the generated document').toBe(true)
   })
 
-  it('the trust fields ride the existing call — no extra API call', () => {
+  it('step 2 names the trust document before step 3 applies the marker, and the document names every term', () => {
+    expect(collectUntrustedMarkerExclusion(prFetch, trustRule, githubApi)).toEqual([])
+  })
+
+  it('the trust fields ride the existing call; the only other lookup is the capped permission read', () => {
     expect(ghInvocations(prFetch), 'the op still invokes only the viewer lookup itself').toEqual(['gh api user'])
     const fnStart = githubApi.indexOf('fetch_review_threads() {')
     const fn = githubApi.slice(fnStart, githubApi.indexOf('\n}\n', fnStart))
     expect(fn.match(/gh api graphql/g), 'page 1 and page 2 of the same query').toHaveLength(2)
+    // The association arm now needs the author's repository permission, one read
+    // per login, bounded — the price of not trusting a read-only COLLABORATOR.
+    expect(trustRule).toContain('collaborators/{login}/permission')
+    expect(trustRule).toContain('at most 20 in total')
+    expect(soleLine(prFetch, '2. '), 'decided only for a marker-carrying first comment').toContain(
+      'decided only for a first comment carrying the marker',
+    )
   })
 
   it('known-bad probe: the d09da34 step 2 is reported', () => {
     const seeded = replaceLine(prFetch, /^2\. /, D09DA34_FETCH_STEP_2)
-    const found = collectUntrustedMarkerExclusion(seeded, githubApi)
+    const found = collectUntrustedMarkerExclusion(seeded, trustRule, githubApi)
     expect(found).toEqual([
-      ...TRUST_TERMS.filter(t => t !== 'VIEWER_LOGIN').map(t => `pr/fetch-review-threads.md step 2 does not name ${t}`),
+      'pr/fetch-review-threads.md step 2 does not name references/trust-rule.md',
       `pr/fetch-review-threads.md: [trust rule before the exclusion predicate] before anchor absent: "${TRUST_ANCHOR}"`,
     ])
+  })
+
+  it('known-bad probe: the 660edc1 step 2 — the rule restated inline — is reported', () => {
+    const seeded = replaceLine(prFetch, /^2\. /, S660EDC1_FETCH_STEP_2)
+    expect(collectUntrustedMarkerExclusion(seeded, trustRule, githubApi)).toEqual([
+      'pr/fetch-review-threads.md step 2 does not name references/trust-rule.md',
+      'pr/fetch-review-threads.md step 2 restates the trust rule — it must only name references/trust-rule.md',
+    ])
+  })
+
+  it('known-bad probe: a trust document missing its terms is reported, term by term', () => {
+    expect(collectUntrustedMarkerExclusion(prFetch, '## Trust rule\n', githubApi)).toEqual(
+      TRUST_TERMS.map(term => `trust-rule.md does not name ${term}`),
+    )
   })
 
   it('known-bad probe: a trust rule whose fork-author exclusion can bind the viewer is reported', () => {
     // "`VIEWER_LOGIN`, or … — never the PR author when …" reads the exclusion over
     // the whole list, so on a fork PR the viewer authored, the operator's own
     // marker would exclude nothing.
-    const ambiguous = prFetch.replace('`VIEWER_LOGIN` always; otherwise', '`VIEWER_LOGIN`, or')
-    expect(ambiguous, 'the seed must land').not.toBe(prFetch)
-    expect(collectUntrustedMarkerExclusion(ambiguous, githubApi)).toEqual([
-      'pr/fetch-review-threads.md step 2 does not name `VIEWER_LOGIN` always',
+    const ambiguous = trustRule.replace('`VIEWER_LOGIN` always; otherwise', '`VIEWER_LOGIN`, or')
+    expect(ambiguous, 'the seed must land').not.toBe(trustRule)
+    expect(collectUntrustedMarkerExclusion(prFetch, ambiguous, githubApi)).toEqual([
+      'trust-rule.md does not name `VIEWER_LOGIN` always',
     ])
   })
 
   it('known-bad probe: the d09da34 query is reported', () => {
-    const found = collectUntrustedMarkerExclusion(prFetch, D09DA34_REVIEW_THREADS_QUERY)
+    const found = collectUntrustedMarkerExclusion(prFetch, trustRule, D09DA34_REVIEW_THREADS_QUERY)
     expect(found, found.join('\n')).toHaveLength(QUERY_FIELD_ORDER.length)
     expect(found.every(v => v.startsWith('github-api.md query: '))).toBe(true)
   })

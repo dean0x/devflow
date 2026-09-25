@@ -345,7 +345,7 @@ const GITHUB_API_MD_CHARS = 21_355;
 // from memory; asserting them would pin a ratio nobody intends to hold constant.
 
 describe('byte budget: four-shape table (recorded)', () => {
-  it('records every shape, with all three cross-cutting documents as named rows', () => {
+  it('records every shape, with all four cross-cutting documents as named rows', () => {
     const largest = largestTrackerReference();
     const worst = worstCaseReferenceLoad();
     const nonTracker = worstCaseNonTrackerLoad();
@@ -367,6 +367,13 @@ describe('byte budget: four-shape table (recorded)', () => {
     const decisionMarkers = measureOptional(
       'references/decision-markers.md',
       path.join(REFS_DIR, 'decision-markers.md'),
+    );
+    // The fourth (#363): the trust rule, named from fetch-review-threads' PR-host
+    // body and summed into that op's one-spawn load. A row, so its size is on the
+    // record beside the load it adds to.
+    const trustRule = measureOptional(
+      'references/trust-rule.md',
+      path.join(REFS_DIR, 'trust-rule.md'),
     );
     const crossCuttingOnDemand = MODEL_CROSS_CUTTING_ON_DEMAND.reduce(
       (n, rel) => n + referenceChars(rel), 0,
@@ -446,7 +453,7 @@ describe('byte budget: four-shape table (recorded)', () => {
       // whole of the NON-tracker row below, but that row is labelled by OP: the file
       // it costs is named here so the excluded term is attributable to the bytes
       // someone edits, and so its equality pin (GITHUB_API_MD_CHARS) has a visible row.
-      ...[gitMd, skillGit, skillWorktree, learnConventions, publicationGate, decisionMarkers, githubApiMd].map(m => ({
+      ...[gitMd, skillGit, skillWorktree, learnConventions, publicationGate, decisionMarkers, trustRule, githubApiMd].map(m => ({
         row: m.label + (m.present ? '' : '  (absent — recorded as 0)'),
         chars: m.chars,
         bytes: m.bytes,
@@ -513,12 +520,13 @@ describe('byte budget: four-shape table (recorded)', () => {
     expect(PRELOADED, 'the preloaded set measured 0 — the table is vacuous').toBeGreaterThan(0);
     expect(allTrackerRefs, 'no tracker reference measured — the table is vacuous').toBeGreaterThan(0);
     expect(
-      [learnConventions.label, publicationGate.label, decisionMarkers.label],
-      'all three named cross-cutting rows must appear in the table even while absent',
+      [learnConventions.label, publicationGate.label, decisionMarkers.label, trustRule.label],
+      'all four named cross-cutting rows must appear in the table even while absent',
     ).toEqual([
       'references/learn-conventions.md',
       'references/publication-gate.md',
       'references/decision-markers.md',
+      'references/trust-rule.md',
     ]);
     expect(
       crossCuttingOnDemand,
@@ -1074,6 +1082,23 @@ describe('byte budget: formula file-set ↔ nameable file-set (both directions)'
       [...nameableFrom('fetch-review-threads')],
       'github-api.md must be reachable through the pr/ reference the op names',
     ).toContain('github-api.md');
+  });
+
+  it('the same hop is the ONLY route trust-rule.md has to fetch-review-threads (#363)', () => {
+    // The trust rule is named from step 2 of references/pr/fetch-review-threads.md
+    // and from no line of the agent — a name in git.md would bill every spawn for a
+    // rule one operation reads. So it reaches the op through the hop alone, and a
+    // reader that sees no pr/ body must lose it.
+    expect(
+      SECTIONS.get('fetch-review-threads') ?? '',
+      'git.md must not name trust-rule.md — the hop, not the agent, is the route under test',
+    ).not.toContain('references/trust-rule.md');
+    expect([...nameableFrom('fetch-review-threads')]).toContain('trust-rule.md');
+    expect(
+      [...nameableFrom('fetch-review-threads', () => null)],
+      'with the pr/ body unread, trust-rule.md must drop out — otherwise something other than the ' +
+      'hop names it, and direction 1 is green for a reason this arm does not describe',
+    ).not.toContain('trust-rule.md');
   });
 
   it('known-bad probe: a file named only inside a pr/ body is reported by direction 2', () => {

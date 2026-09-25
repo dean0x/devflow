@@ -25,7 +25,7 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { readFileSync } from 'fs';
+import { existsSync, readFileSync } from 'fs';
 import * as path from 'path';
 
 import { compiledSkillRefsDir } from '../../src/core/assets.js';
@@ -297,8 +297,8 @@ function collectContractNamers(): string[] {
  *
  * The templated tracker instruction is skipped — it is handled by reachablePaths
  * above, and a `{provider}`/`{op}` path is not a name any one file answers to.
- * This is the OTHER half of reachability: the three cross-cutting documents are
- * not reached by instantiating a template, they are named individually at exactly
+ * This is the OTHER half of reachability: the cross-cutting documents are not
+ * reached by instantiating a template, they are named individually at exactly
  * one site each [GIT_CROSS_CUTTING_DOCS, 'named' module kind].
  */
 function collectLiteralReferenceNames(content: string): Set<string> {
@@ -330,15 +330,28 @@ function anchorsOnLineOne(body: string, op: string): boolean {
   return body.startsWith(`## Operation: ${op}\n`);
 }
 
+/** Read an emitted `pr/…` body for the named arm's one hop; null when it is absent. */
+function readEmittedPrBody(rel: string): string | null {
+  const file = path.join(REFS_DIR, ...rel.split('/'));
+  return existsSync(file) ? readFileSync(file, 'utf-8') : null;
+}
+
 /**
  * Named collector: every manifest path a spawn reading `content` could name.
  *
  * FOUR arms, one per module kind the registry carries, and the live check and
- * both known-bad probes drive this one function — a probe that rebuilt the union
+ * every known-bad probe drive this one function — a probe that rebuilt the union
  * inline would stay green after an arm was dropped from the real check (PF-018).
  *
  *   fanout / tracker    instantiate the preamble's ONE templated instruction;
- *   named               the agent spells the document's path out, once each;
+ *   named               the agent spells the document's path out, once each —
+ *                       or, ONE hop out, a `pr/` body the agent names spells it
+ *                       (`trust-rule.md`, named by the one PR-host op that
+ *                       applies it, #363). The hop admits cross-cutting documents
+ *                       only and never recurses: a `pr/` path spelled inside a
+ *                       body is NOT reachable through it, which is what keeps the
+ *                       check-ci-status pointer probe below meaningful — its file
+ *                       is also named from check-merge-readiness' body;
  *   fanout / PR-host    the agent spells each file's path out, once per op. Not
  *                       templated on purpose: the file is the same under every
  *                       provider, so there is nothing to instantiate — and a
@@ -346,14 +359,24 @@ function anchorsOnLineOne(body: string, op: string): boolean {
  *                       composed from the provider token, which is the single
  *                       convergence point PF-023 exists to protect;
  *   contract            the preamble names it, as a fixed literal.
+ *
+ * `readPrBody` is injectable so the hop's probe can take it away.
  */
-function reachableSetFrom(content: string): Set<string> {
+function reachableSetFrom(
+  content: string,
+  readPrBody: (rel: string) => string | null = readEmittedPrBody,
+): Set<string> {
+  const prNames = collectPrHostNames(content);
+  const hopNames = prNames.flatMap(rel => {
+    const body = readPrBody(rel);
+    return body === null ? [] : [...collectLiteralReferenceNames(body)];
+  });
   return new Set([
     ...providerReachablePaths(LOAD_INSTRUCTION_TEMPLATE),
-    ...[...collectLiteralReferenceNames(content)].filter(rel =>
+    ...[...collectLiteralReferenceNames(content), ...hopNames].filter(rel =>
       (GIT_CROSS_CUTTING_DOCS as readonly string[]).includes(path.basename(rel, '.md')),
     ),
-    ...collectPrHostNames(content),
+    ...prNames,
     ...(contractIsNamedByThePreamble(content) ? [CONTRACT_REL] : []),
   ]);
 }
@@ -377,11 +400,11 @@ describe('generated references: every reference is reachable from the agent (AC-
 
   it('every op in the registry is reachable, and every emitted file is reachable (both directions)', () => {
     // Scope: the WHOLE manifest, not the tracker/ subtree. Walking only
-    // tracker/ excludes the three GIT_CROSS_CUTTING_DOCS from BOTH directions —
-    // decision-markers.md, learn-conventions.md and publication-gate.md are
-    // generated, installed on every machine and shipped in the tarball, and a
-    // cross-cutting document that lost its one naming line is exactly as invisible
-    // as an orphan file.
+    // tracker/ excludes the four GIT_CROSS_CUTTING_DOCS from BOTH directions —
+    // decision-markers.md, learn-conventions.md, publication-gate.md and
+    // trust-rule.md are generated, installed on every machine and shipped in the
+    // tarball, and a cross-cutting document that lost its one naming line is
+    // exactly as invisible as an orphan file.
     const reachable = reachableSetFrom(agent.content);
 
     const emitted = walkFiles(REFS_DIR, f => f.endsWith('.md'))
@@ -498,6 +521,16 @@ describe('generated references: every reference is reachable from the agent (AC-
     // …and the same set difference the live check computes now reports it.
     const reachable = reachableSetFrom(stripped);
     expect(generatedReferenceManifest().filter(rel => !reachable.has(rel))).toEqual([target]);
+  });
+
+  it('known-bad probe: trust-rule.md is reachable only through the pr/ hop', () => {
+    // Its one naming site is references/pr/fetch-review-threads.md step 2, not the
+    // agent. Take the hop's reader away and the SAME collector must lose it — and
+    // only it — or the named arm reaches the document some other way and the hop
+    // is declared and never taken (PF-064).
+    expect(collectLiteralReferenceNames(agent.content).has('trust-rule.md'), 'the agent must not name it').toBe(false);
+    const unhopped = reachableSetFrom(agent.content, () => null);
+    expect(generatedReferenceManifest().filter(rel => !unhopped.has(rel))).toEqual(['trust-rule.md']);
   });
 
   // ── The PR-host tree: parity, and its own reachability direction (#326) ────

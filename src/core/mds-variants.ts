@@ -413,8 +413,9 @@ export const PR_HOST_DESTINATION_ROOT = 'pr';
  *   that returns something, so the floor is what stops a short one being
  *   introduced.
  * 'named' — a fixed set of cross-cutting documents, each named individually at
- *   exactly one site in the agent (`references/decision-markers.md` and, later,
- *   `learn-conventions.md` / `publication-gate.md`). Nothing ranges over the set,
+ *   exactly one site — in the agent (`references/decision-markers.md`,
+ *   `learn-conventions.md`, `publication-gate.md`) or in the one PR-host reference
+ *   that applies it (`trust-rule.md`). Nothing ranges over the set,
  *   so a floor over it would not make any assertion sharper — it would only
  *   forbid the first such document from existing. What proves these correct is
  *   splitVariantSections' bidirectional check plus the byte-budget's
@@ -472,11 +473,21 @@ export interface VariantModule {
  * `publication-gate` holds the D10 step order. It is named from the two summary
  * operations and from nowhere else, which is the scope property [DR-20] asserts:
  * an operation that can load the gate is an operation that probes repo visibility.
+ *
+ * `trust-rule` is the ONE prose statement of who counts as a trusted author of a
+ * PR comment, review thread or review (#363). `pr-evidence.cjs`'s `trust()` is its
+ * one implementation, and a parity test holds the two to the same terms. It is the
+ * only document here named from a PR-HOST reference rather than from the agent:
+ * `references/pr/fetch-review-threads.md` applies it and names it, while an op that
+ * runs the evidence scripts gets the rule from `trust()` and never loads the
+ * document — naming it from the agent would bill every spawn for a rule one
+ * operation reads.
  */
 export const GIT_CROSS_CUTTING_DOCS = [
   'decision-markers',
   'learn-conventions',
   'publication-gate',
+  'trust-rule',
 ] as const;
 
 /**
