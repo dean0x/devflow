@@ -68,7 +68,7 @@ If `pr_number` is absent or the command fails, set `PR_DESCRIPTION` to `(none)`.
 
 #### Step 0c: Target Review Directory
 
-**Produces:** TARGET_DIR
+**Produces:** TARGET_DIR, TARGET_DIR_REL
 **Requires:** BRANCH_INFO
 
 For each worktree:
@@ -87,7 +87,7 @@ For each worktree:
 - If found: set `TARGET_DIR` to that path. Reviews take priority — bug analysis is only used when no qualifying review exists.
 - If not found within those 10 directories: skip worktree — report "No unresolved review or bug analysis found. Run `/code-review` or `/bug-analysis` first."
 
-Set `TARGET_DIR` to the selected review or bug-analysis directory path.
+Set `TARGET_DIR` to the selected review or bug-analysis directory path, and `TARGET_DIR_REL` to the same directory relative to the worktree root (`.devflow/docs/reviews/…` or `.devflow/docs/bug-analysis/…`) — the only form of it that may reach a PR comment.
 
 #### Step 0d: Load Project Decisions
 
@@ -239,7 +239,7 @@ Collect from each Code agent:
 ### Phase 5: Write resolution-summary.md
 
 **Produces:** RESOLUTION_FILE (early write for compaction safety)
-**Requires:** TRIAGE_RESULTS, CODE_AGENT_RESULTS, TARGET_DIR, BRANCH_INFO, RESOLUTION_TS
+**Requires:** TRIAGE_RESULTS, CODE_AGENT_RESULTS, TARGET_DIR, TARGET_DIR_REL, BRANCH_INFO, RESOLUTION_TS
 
 **Immediately write `resolution-summary.md`** to `\{TARGET_DIR\}` using the Write tool. Do this now — not in Phase 9 — while results are fresh in context. This ensures the record is persisted even if later phases (Simplify, Verification Gate, CI gate, Tech Debt) trigger context compaction.
 
@@ -358,7 +358,7 @@ After manage-debt completes:
 ### Phase 9b: Thread Resolution + Resolution Comment
 
 **Produces:** THREAD_RESOLUTION_RESULT, PR_COMMENT
-**Requires:** THREAD_MAP (from Phase 1b), VERIFICATION_STATUS, CODE_AGENT_RESULTS, TRIAGE_RESULTS, RESOLUTION_TS
+**Requires:** THREAD_MAP (from Phase 1b), VERIFICATION_STATUS, CODE_AGENT_RESULTS, TRIAGE_RESULTS, TARGET_DIR_REL, RESOLUTION_TS
 
 **Step 9b-1: Resolve external threads (Compliance-gated)**
 
@@ -398,7 +398,7 @@ Spawn Git agent:
 Agent(subagent_type="Git"):
 "OPERATION: post-resolution-summary
 PR_NUMBER: {pr_number}
-RESOLUTION_SUMMARY_PATH: {TARGET_DIR}/resolution-summary.md
+RESOLUTION_SUMMARY_PATH: {TARGET_DIR_REL}/resolution-summary.md
 RESOLUTION_TS: {RESOLUTION_TS}
 REVIEW_PUBLICATION: {REVIEW_PUBLICATION}
 WORKTREE_PATH: {worktree_path}  (omit if cwd)
@@ -574,7 +574,7 @@ Written in Phase 5 (Collect Results) to `\{TARGET_DIR\}/resolution-summary.md`:
 
 **Branch**: {branch} -> {base_branch}
 **Date**: {RESOLUTION_TS}
-**Review**: {TARGET_DIR}
+**Review**: {TARGET_DIR_REL}
 **Command**: /resolve
 
 ## Decisions Citations

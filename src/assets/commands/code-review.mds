@@ -263,7 +263,7 @@ Output: {worktree_path}/.devflow/docs/reviews/{branch-slug}/{timestamp}/review-s
 Agent(subagent_type="Git", run_in_background=false):
 "OPERATION: post-review-summary
 PR_NUMBER: {pr_number}
-REVIEW_SUMMARY_PATH: {worktree_path}/.devflow/docs/reviews/{branch-slug}/{timestamp}/review-summary.md
+REVIEW_SUMMARY_PATH: .devflow/docs/reviews/{branch-slug}/{timestamp}/review-summary.md
 CYCLE_NUMBER: {cycle_number}
 REVIEW_TIMESTAMP: {timestamp}
 REVIEW_PUBLICATION: {REVIEW_PUBLICATION}

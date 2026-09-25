@@ -102,7 +102,7 @@ Load for `post-review-summary` under every tracker provider.
    - If found: skip — report `Skipped: already posted for cycle \{CYCLE_NUMBER\} ts:\{REVIEW_TIMESTAMP\}`
 2. Resolve `REVIEW_PUBLICATION` through `references/publication-gate.md`; `off` ends the op without posting.
 3. Probe (if mode not yet determined): `gh repo view --json visibility --jq '.visibility'`, case-insensitive. `PRIVATE`/`INTERNAL` → FULL; `PUBLIC` → `STUB (public repository)`; empty output, an error or any other value → `STUB (visibility undeterminable)`. **Fail-closed: on any error or unrecognised value, treat as PUBLIC (mode STUB).**
-4. Read `REVIEW_SUMMARY_PATH` (the review-summary.md file written by the Synthesize agent).
+4. Read `REVIEW_SUMMARY_PATH` — repo-relative; read it under `WORKTREE_PATH` (else cwd).
 5. Compose body:
    - **FULL mode:**
      ```
@@ -227,7 +227,7 @@ Load for `post-resolution-summary` under every tracker provider.
    - If found: skip — report `Skipped: already posted for ts:\{RESOLUTION_TS\}`
 2. Resolve `REVIEW_PUBLICATION` through `references/publication-gate.md`; `off` ends the op without posting.
 3. Probe (if mode not yet determined): `gh repo view --json visibility --jq '.visibility'`, case-insensitive. `PRIVATE`/`INTERNAL` → FULL; `PUBLIC` → `STUB (public repository)`; empty output, an error or any other value → `STUB (visibility undeterminable)`. **Fail-closed: on any error or unrecognised value, treat as PUBLIC (mode STUB).**
-4. Read `RESOLUTION_SUMMARY_PATH` (resolution-summary.md).
+4. Read `RESOLUTION_SUMMARY_PATH` — repo-relative; read it under `WORKTREE_PATH` (else cwd).
 5. Compose body (where `\{TS\}` = `RESOLUTION_TS`):
    - **FULL mode:**
      ```

@@ -20,9 +20,12 @@ import {
   collectOrderViolations,
   extractOpSectionFromCorpus,
   gitAgentSinkCorpus,
+  isAgentBlock,
   isPrHostEntryPath,
+  parseFences,
   prHostRel,
   requireDistFile,
+  requireDistFiles,
   resolveAgentSource,
   type CorpusEntry,
   type OrderRule,
@@ -457,5 +460,101 @@ describe('a probe failure is reported as STUB (visibility undeterminable) (§3.3
     expect(collectMissingUndeterminable(labelSites(wounded))).toEqual([
       `/code-review Phase 4: cannot report ${UNDETERMINABLE}`,
     ])
+  })
+})
+
+// ---------------------------------------------------------------------------
+// 4. Repo-relative summary paths — no absolute local path reaches a PR (§3.4, AC-4)
+// ---------------------------------------------------------------------------
+//
+// The STUB bodies render `Full report: {REVIEW_SUMMARY_PATH}` / the resolution
+// sibling, and both callers passed an absolute path — `{worktree_path}/.devflow/…`
+// and `{TARGET_DIR}/…` — so `/Users/<name>/…` reached public PRs. The templates are
+// frozen and unchanged; the values fed into them are now repo-relative.
+
+const SUMMARY_PATH_KEYS = ['REVIEW_SUMMARY_PATH', 'RESOLUTION_SUMMARY_PATH'] as const
+
+/** A value starting with any of these is an absolute, machine-local path. */
+const ABSOLUTE_PATH_PREFIXES: readonly string[] = [
+  '{worktree_path}',
+  '{worktree}',
+  '{WORKTREE_PATH}',
+  '{TARGET_DIR}',
+  '/',
+  '~',
+  '$HOME',
+]
+
+interface SummaryPathSite {
+  readonly file: string
+  readonly key: string
+  readonly value: string
+}
+
+/** Every `*_SUMMARY_PATH:` value passed inside a Git spawn fence. */
+function collectSummaryPathSites(corpus: readonly CorpusEntry[]): SummaryPathSite[] {
+  const sites: SummaryPathSite[] = []
+  for (const entry of corpus) {
+    for (const fence of parseFences(entry.content).filter(f => isAgentBlock(f, 'Git'))) {
+      for (const m of fence.matchAll(/^[ \t]*"?(REVIEW_SUMMARY_PATH|RESOLUTION_SUMMARY_PATH): (.*)$/gm)) {
+        sites.push({ file: path.basename(entry.path), key: m[1], value: m[2].trim() })
+      }
+    }
+  }
+  return sites
+}
+
+/** Named collector: summary-path values a caller passes in machine-local form. */
+export function collectAbsoluteSummaryPaths(corpus: readonly CorpusEntry[]): string[] {
+  return collectSummaryPathSites(corpus)
+    .filter(site => ABSOLUTE_PATH_PREFIXES.some(prefix => site.value.startsWith(prefix)))
+    .map(site => `${site.file}: ${site.key}: ${site.value}`)
+}
+
+function commandCorpus(): CorpusEntry[] {
+  return requireDistFiles().map(name => ({ path: `dist/commands/${name}`, content: requireDistFile(name) }))
+}
+
+/** The `d09da34` caller lines, each inside the Git fence it lived in. */
+const D09DA34_SUMMARY_PATH_FENCES: CorpusEntry[] = [
+  {
+    path: 'd09da34/code-review.md',
+    content: '```\nAgent(subagent_type="Git", run_in_background=false):\n"OPERATION: post-review-summary\n' +
+      'REVIEW_SUMMARY_PATH: {worktree_path}/.devflow/docs/reviews/{branch-slug}/{timestamp}/review-summary.md\n```\n',
+  },
+  {
+    path: 'd09da34/resolve.md',
+    content: '```\nAgent(subagent_type="Git"):\n"OPERATION: post-resolution-summary\n' +
+      'RESOLUTION_SUMMARY_PATH: {TARGET_DIR}/resolution-summary.md\n```\n',
+  },
+]
+
+describe('summary paths reach a PR repo-relative (§3.4, AC-4)', () => {
+  it('reads exactly the two summary-path sites, one per key', () => {
+    const sites = collectSummaryPathSites(commandCorpus())
+    expect(sites.map(s => s.key).sort(), JSON.stringify(sites)).toEqual([...SUMMARY_PATH_KEYS].sort())
+  })
+
+  it('no caller passes an absolute summary path', () => {
+    expect(collectAbsoluteSummaryPaths(commandCorpus())).toEqual([])
+  })
+
+  it('known-bad probe: both d09da34 caller lines are reported', () => {
+    expect(collectAbsoluteSummaryPaths(D09DA34_SUMMARY_PATH_FENCES)).toHaveLength(2)
+  })
+
+  it('both ops read the path as repo-relative, under WORKTREE_PATH', () => {
+    for (const op of ['post-review-summary', 'post-resolution-summary']) {
+      const step4 = soleLine(requireRef(prHostRel(op)), '4. ')
+      expect(step4, `${op} step 4`).toContain('repo-relative')
+      expect(step4, `${op} step 4`).toContain('`WORKTREE_PATH`')
+    }
+  })
+
+  it('/resolve derives TARGET_DIR_REL, and the posted summary names it rather than TARGET_DIR', () => {
+    const resolve = requireDistFile('resolve.md')
+    expect(resolve).toMatch(/`TARGET_DIR_REL` to the same directory relative to the worktree root/)
+    expect(resolve, 'resolution-summary.md is posted whole in FULL mode').toContain('**Review**: {TARGET_DIR_REL}')
+    expect(resolve).not.toContain('**Review**: {TARGET_DIR}\n')
   })
 })
