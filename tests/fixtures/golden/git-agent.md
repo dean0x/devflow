@@ -154,7 +154,7 @@ Pre-flight checks and fixes for `/code-review`. Ensures branch is ready for code
 
 ## Operation: validate-branch
 
-Pre-flight validation for `/resolve`. Checks branch state without modifications.
+Read-only pre-flight check for `/resolve`; it may emit `TRACEABILITY: DEGRADED`.
 
 **Input:** `WORKTREE_PATH` (optional)
 
