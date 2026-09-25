@@ -23,7 +23,7 @@ You receive from orchestrator:
 
 1. **Discover validation commands**: Check package.json scripts, Makefile, Cargo.toml, or similar for available commands
 2. **Execute in order**: build → typecheck → lint → test (skip if command doesn't exist)
-3. **Capture all output**: Record stdout/stderr for each command
+3. **Capture all output**: Record stdout/stderr and the exit code for each command, and the commit they ran against (`git rev-parse HEAD`)
 4. **Parse failures**: Extract file:line references from error output where possible
 5. **Report results**: Return structured pass/fail status with failure details
 
@@ -68,11 +68,13 @@ Return structured validation results:
 
 ### Status: PASS | FAIL | BLOCKED
 
+HEAD: {the 40-hex `git rev-parse HEAD`, read before the first command}
+
 ### Commands Executed
-| Command | Status | Duration |
-|---------|--------|----------|
-| npm run build | PASS | 3.2s |
-| npm run typecheck | FAIL | 1.8s |
+| Command | Status | Exit | Duration |
+|---------|--------|------|----------|
+| npm run build | PASS | 0 | 3.2s |
+| npm run typecheck | FAIL | 2 | 1.8s |
 
 ### Failures (if FAIL)
 
