@@ -12,3 +12,6 @@ import { ROOT } from '../helpers.js'
 
 /** The pure core: grammars, markers, ladder, render, splice, trust. */
 export const PR_EVIDENCE_SCRIPT = path.join(ROOT, 'src', 'assets', 'scripts', 'pr-evidence.cjs')
+
+/** The I/O half: gathers the facts through gh and git, feeds `classify`, prints one EVIDENCE line. */
+export const VERIFY_EVIDENCE_SCRIPT = path.join(ROOT, 'src', 'assets', 'scripts', 'verify-evidence.cjs')
