@@ -93,7 +93,7 @@ A pipeline's exit status swallows a scrubber crash (fail-open). Chain with `&&` 
 | `manage-debt` | Update tech debt backlog with pre-existing issues |
 | `check-ci-status` | Check CI/PR check status for a branch |
 | `create-release` | Create GitHub release with version tag |
-| `gather-release-evidence` | Collect commit list and shipped issues since the last tag for release notes (D4) |
+| `gather-release-evidence` | Collect commits, shipped issues and a per-commit trace map since the last release (D4) |
 | `learn-conventions` | Bounded scan → write .devflow/conventions.md once (D1) |
 | `fetch-review-threads` | GraphQL reviewThreads, filter devflow-authored, return ext-* records (D2) |
 | `resolve-review-threads` | Reply to and optionally resolve external review threads (D2, D9) |
@@ -435,9 +435,9 @@ Check CI/PR check status for a branch's pull request.
 
 Create a GitHub release with version tag.
 
-**Input:** `VERSION` (semver), `CHANGELOG_CONTENT`, `RELEASE_TITLE` (optional), `COMMIT_LIST` (optional), `SHIPPED_ISSUES` (optional)
+**Input:** `VERSION` (semver), `CHANGELOG_CONTENT`, `RELEASE_TITLE` (optional), `COMMIT_LIST` (optional), `SHIPPED_ISSUES` (optional), `TRACEABILITY_EXCEPTIONS` (optional)
 
-**Degradation carve-out for primary-effect ops:** The global D4 "never abort" clause does NOT apply to the primary release effects in steps 1–6 below. A failed tag push or release create is a hard failure — report it and stop. Only the traceability adornments (`COMMIT_LIST`/`SHIPPED_ISSUES` enrichment and the `backlink-shipped-issues` call) degrade per D4 (emit `TRACEABILITY: DEGRADED ({reason})`, warn, continue).
+**Degradation carve-out:** D4's "never abort" does NOT cover steps 1–6's primary effects — a failed tag push or release create is a hard failure: report it and stop. Only the `COMMIT_LIST`/`SHIPPED_ISSUES` enrichment degrades per D4 (`TRACEABILITY: DEGRADED ({reason})`, warn, continue).
 
 **Process:**
 
@@ -451,6 +451,7 @@ Create a GitHub release with version tag.
 5. Compose release notes body:
    - Start with `CHANGELOG_CONTENT`
    - If `COMMIT_LIST` provided: append a `## Commits` section with the commit list — **first ≤100 entries**; if truncated, add a final `…and {n} more commits` line (D4 degrade if enrichment fails)
+   - If `TRACEABILITY_EXCEPTIONS` provided: append it verbatim, last; the cap below never drops it
    - Cap the composed body at 60000 characters (GitHub's limit is 65536); if it would exceed that, drop the `## Commits` section first and note `Commit list omitted (release notes size limit)`
 6. Write composed release notes to `$DEVFLOW_NOTES_RAW`; apply the Comment-sink scrub (D11) (using `$DEVFLOW_NOTES_RAW`/`$DEVFLOW_NOTES` in place of the body files) — non-zero exit → fail loudly: release notes with unredacted secrets must not be published. Create GitHub release via `gh release create {tag} --notes-file "$DEVFLOW_NOTES"` — fail loudly on error.
 
@@ -469,7 +470,7 @@ Create a GitHub release with version tag.
 
 ## Operation: gather-release-evidence
 
-Collect release evidence — commit list and shipped issue numbers since the last tag — for inclusion in release notes. Called before `create-release` to supply `COMMIT_LIST` and `SHIPPED_ISSUES`.
+Collect release evidence since the last release tag — commit list, shipped issues and a per-commit trace map. Called before `create-release` to supply `COMMIT_LIST` and `SHIPPED_ISSUES`.
 
 **Input:** `WORKTREE_PATH` (optional)
 
@@ -497,7 +498,10 @@ Collect release evidence — commit list and shipped issue numbers since the las
 ### SHIPPED_ISSUES
 {space-separated issue references, ≤50}
 
-### Status: READY | DEGRADED ({reason}) | INDETERMINATE ({reason})
+### TRACE_MAP
+{the trace script's lines, verbatim}
+
+### Status: READY | PARTIAL ({n} DEGRADED) | TRUNCATED ({n} not processed) | DEGRADED ({reason}) | INDETERMINATE ({reason})
 ```
 
 ---
@@ -662,7 +666,7 @@ Report-only merge readiness check (D6).
 
 ## Operation: backlink-shipped-issues
 
-Comment a shipped marker on each issue when a version ships. Marker-deduped: exactly one back-link per version per issue, even across re-runs. Processes ≤50 issues with 1s throttle.
+Comment a shipped marker on each issue when a version ships — exactly one per version per issue, even across re-runs.
 
 **Input:** `SHIPPED_ISSUES`, `VERSION`, `WORKTREE_PATH` (optional)
 
@@ -679,11 +683,9 @@ Comment a shipped marker on each issue when a version ships. Marker-deduped: exa
    grammar, stated and enforced by its mechanics. Drop any entry that fails; if `VERSION`
    fails, emit `TRACEABILITY: DEGRADED (malformed version)` and return without commenting.
 
-   Normalize VERSION: strip any leading `v` to get BARE_VERSION (e.g. `v1.2.3` → `1.2.3`,
-   `1.2.3` → `1.2.3`). All marker composition and comment text below use `v{BARE_VERSION}` —
-   this prevents `vv1.2.3` double-prefix when VERSION arrives already `v`-prefixed.
+   BARE_VERSION = VERSION less one leading `v`; every marker and text below uses `v{BARE_VERSION}` (never `vv`).
 
-For each issue reference in `SHIPPED_ISSUES` (sequentially, ≤50 in list order, 1s between operations). If the list contains more than 50 entries, process the first 50 and report the remainder as `TRUNCATED ({n} not processed)` — never report the status as `COMPLETE` while issues went unprocessed.
+For each issue reference in `SHIPPED_ISSUES` (sequentially, the first ≤50 in list order, 1s apart); report the rest as `TRUNCATED ({n} not processed)` — never `COMPLETE` while any went unprocessed.
 
 **Output:**
 ```markdown
