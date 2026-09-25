@@ -6,6 +6,9 @@
  * Applies ADR-001: compliance is manifest-group (like proxy), not config.json-gated.
  * Avoids PF-009: per-artifact failures are warn-not-throw.
  * Avoids PF-015: enable/disable each converge BOTH artifacts unconditionally.
+ * The evidence-policy lines (--status, and the --enable/--set suggestion) come
+ *   from src/core/evidence-policy.ts, the seam onto the package's own resolver;
+ *   the CLI prints .devflow/policy.json and never writes it (applies ADR-024).
  */
 
 import { Command } from 'commander';
@@ -23,6 +26,12 @@ import {
 } from '../../core/compliance.js';
 import { frameworkChoices, FRAMEWORK_SELECT_MESSAGE } from './compliance-prompts.js';
 import { COMPLIANCE_SKILL_TOKENS } from '../../core/compliance-compose.js';
+import {
+  evidencePolicyStatusLine,
+  evidencePolicySuggestion,
+  formatEvidencePolicyUnavailable,
+  loadEvidencePolicyModule,
+} from '../../core/evidence-policy.js';
 import { readManifest, writeManifest } from '../../core/manifest.js';
 import { convergeFromManifest } from '../../targets/claude-code/compliance-install.js';
 import { validateRuleShadow, validateSkillShadow } from '../../targets/claude-code/installer.js';
@@ -232,7 +241,7 @@ export const complianceCommand = new Command('compliance')
   .description('Enable, disable, or configure the compliance feature')
   .option('--enable', 'Enable compliance (restores previously selected frameworks)')
   .option('--disable', 'Disable compliance (artifacts removed; frameworks remembered for re-enable)')
-  .option('--status', 'Show compliance state: manifest, installed artifacts, and shadow presence')
+  .option('--status', 'Show compliance state: manifest, installed artifacts, shadow presence, and the evidence policy for the current repository')
   .option('--set <list>', 'Set active frameworks (comma-separated IDs); enables compliance. Use --set "" for zero frameworks (generic controls only)')
   .action(async (options: ComplianceOptions) => {
     const claudeDir = getClaudeDirectory();
@@ -313,6 +322,11 @@ export const complianceCommand = new Command('compliance')
             ? color.yellow(' (withheld — rules disabled)')
             : '') +
           (isRuleShadowed ? color.green(' [shadowed]') : ''),
+        '',
+        // The repository in cwd, resolved by the package's own resolver with the
+        // compliance state already read above (D-POLICY-CJS-SEAM). Bounded: at most
+        // two `gh` calls, each with a timeout, so offline degrades to a flagged line.
+        evidencePolicyStatusLine(loadEvidencePolicyModule(), { dir: process.cwd(), compliance: current }),
       ];
 
       if (driftInstalled.length > 0 || validMissing.length > 0 || invalidIds.length > 0) {
@@ -404,5 +418,17 @@ export const complianceCommand = new Command('compliance')
         color.dim('Note: compliance rule withheld (rules disabled) — ' +
           'run `devflow rules --enable` to install the stamped rule'),
       );
+    }
+
+    // Suggest the team policy file compliance now implies. Printed, never written:
+    // .devflow/policy.json is team-owned (D-POLICY-NO-WRITE, applies ADR-024).
+    if (resolved.nextState.enabled) {
+      const policyModule = loadEvidencePolicyModule();
+      if (!policyModule.ok) {
+        p.log.warn(formatEvidencePolicyUnavailable(policyModule.error));
+      } else {
+        const suggestion = evidencePolicySuggestion(resolved.nextState, policyModule.value);
+        if (suggestion !== null) p.note(suggestion, 'Evidence policy');
+      }
     }
   });

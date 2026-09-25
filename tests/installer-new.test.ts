@@ -12,6 +12,7 @@
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { promises as fs } from 'fs';
+import { createRequire } from 'module';
 import * as os from 'os';
 import * as path from 'path';
 
@@ -20,6 +21,7 @@ import { buildAssetMaps } from '../src/core/plugins.js';
 import type { PluginDefinition } from '../src/core/plugins.js';
 import { agentsDir, compiledAgentsDir, type AgentSourceDirs } from '../src/core/assets.js';
 import { resolveAgentSource, splitFrontmatter } from './helpers.js';
+import { RESOLVER_SCRIPT, buildScriptedShim, createFakeBin, runResolver } from './evidence-policy/scripted-shim.js';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -118,6 +120,43 @@ describe('composeScripts', () => {
       'redact-secrets.cjs must be non-empty after install (PF-018)',
     ).toBeGreaterThan(0);
   });
+
+  it('copies resolve-evidence-policy.cjs to the top level, and the INSTALLED copy runs under the composed {"type":"module"} package (install path pin)', async () => {
+    // Same verbatim copy as redact-secrets.cjs, so no installer code exists to pin —
+    // and composeScripts swallows a failed copy, so this is the only thing that
+    // notices a missing one. Running the installed copy (not the src one) is what
+    // proves the `.cjs` extension keeps it CommonJS next to package.json's
+    // {"type":"module"}; PR3b's prompts invoke exactly this path.
+    const target = path.join(tmpDir, 'scripts');
+    await composeScripts(target);
+
+    const installed = path.join(target, 'resolve-evidence-policy.cjs');
+    await expect(
+      fs.access(installed),
+      'resolve-evidence-policy.cjs not found in compose output — must land at top level of scripts dir',
+    ).resolves.toBeUndefined();
+    const content = await fs.readFile(installed, 'utf-8');
+    expect(content.length, 'resolve-evidence-policy.cjs must be non-empty after install').toBeGreaterThan(0);
+    const pkg = JSON.parse(await fs.readFile(path.join(target, 'package.json'), 'utf-8')) as { type?: string };
+    expect(pkg.type, 'the pin is only meaningful under the ESM package marker').toBe('module');
+
+    // A non-git directory: the scripted git fake answers "not a repository", so the
+    // run makes no gh call and needs no network. HOME/DEVFLOW_DIR are tmp (PF-060).
+    const home = path.join(tmpDir, 'home');
+    await fs.mkdir(path.join(home, '.devflow'), { recursive: true });
+    const shim = buildScriptedShim(createFakeBin(tmpDir), tmpDir, [
+      { tool: 'git', args: ['rev-parse', '--show-toplevel'], exit: 128, stderr: 'fatal: not a git repository\n' },
+    ]);
+    const run = runResolver({ home, args: [home], script: installed, shim });
+    expect(run.status, run.stderr).toBe(0);
+    const lines = run.stdout.split('\n');
+    expect(lines, 'exactly one \\n-terminated line').toHaveLength(2);
+    // The grammar comes from the package copy — the single authority for it.
+    const { OUTPUT_LINE_RE } = createRequire(import.meta.url)(RESOLVER_SCRIPT) as { OUTPUT_LINE_RE: RegExp };
+    expect(lines[0]).toMatch(OUTPUT_LINE_RE);
+    // Budget: a directory copy plus a node + bash-fake spawn — well under 5 s alone,
+    // but spawns slow to seconds under full-suite load (same as the resolver suite).
+  }, 20_000);
 });
 
 // ---------------------------------------------------------------------------

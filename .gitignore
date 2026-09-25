@@ -57,3 +57,4 @@ install.log
 !.devflow/conventions.md
 release-notes.md
 .claudeignore
+!.devflow/policy.json
