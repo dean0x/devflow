@@ -377,10 +377,16 @@ describe('AC-8: `## Traceability exceptions` — rendering, persistence and sink
     expect(template.join('\n')).not.toMatch(/<subject>/)
   })
 
-  it('it is checkpointed, and passed to create-release only as TRACEABILITY_EXCEPTIONS', () => {
+  it('it is checkpointed, and passed to create-release as TRACEABILITY_EXCEPTIONS whenever either rule composes it', () => {
     const text = release()
-    const step4 = text.split('\n').find(l => l.startsWith('4. **Tag and GitHub Release**'))
-    expect(step4).toContain('`TRACEABILITY_EXCEPTIONS` when recorded')
+    const lines = text.split('\n')
+    const step4 = lines.find(l => l.startsWith('4. **Tag and GitHub Release**'))
+    expect(step4).toContain('`TRACEABILITY_EXCEPTIONS` when composed (Record, or the no-ask exempt rule)')
+    const completion = lines.find(l => l.startsWith('- GitHub Release created with release notes'))
+    expect(completion).toContain('`## Traceability exceptions` last, when composed (Record, or the no-ask exempt rule)')
+    // "when recorded" names only Record, so the exempt-only block the no-ask rule
+    // composes would never reach create-release (D3).
+    expect(text).not.toContain('when recorded')
     expect(text).toContain('Compose `TRACEABILITY_EXCEPTIONS` below and add it to `.release/.progress.json`.')
   })
 

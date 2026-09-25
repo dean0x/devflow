@@ -172,7 +172,7 @@ Sequential execution with progress checkpoints:
 1. **Version bumps** — write new version to configured files
 2. **Changelog update** — move Unreleased section to versioned entry (if configured)
 3. **Release commit** — `chore(release): v{VERSION}` (conventional commit)
-4. **Tag and GitHub Release** — spawn `Agent(subagent_type="Git")` with `create-release` operation (the agent reads `.devflow/conventions.md` for tag format and release title conventions; compliance defaults when absent); only when `EVIDENCE_POLICY` is `required`, also pass `COMMIT_LIST` and `SHIPPED_ISSUES` from RELEASE_EVIDENCE, and `TRACEABILITY_EXCEPTIONS` when recorded, as inputs so the agent includes them in the release notes body.
+4. **Tag and GitHub Release** — spawn `Agent(subagent_type="Git")` with `create-release` operation (the agent reads `.devflow/conventions.md` for tag format and release title conventions; compliance defaults when absent); only when `EVIDENCE_POLICY` is `required`, also pass `COMMIT_LIST` and `SHIPPED_ISSUES` from RELEASE_EVIDENCE, and `TRACEABILITY_EXCEPTIONS` when composed (Record, or the no-ask exempt rule), as inputs so the agent includes them in the release notes body.
 4b. **Back-link shipped issues** (only when `EVIDENCE_POLICY` is `required`) — spawn `Agent(subagent_type="Git")` with `backlink-shipped-issues` operation, passing `VERSION` and `SHIPPED_ISSUES`; posts a marker-deduped comment on each issue (bounds and throttle enforced by the operation); degrade gracefully (D4) on any API failure — never block the release
 4c. **Associate shipped issues with the release** (only when `EVIDENCE_POLICY` is `required` and `SHIPPED_ISSUES` is non-empty) — spawn `Agent(subagent_type="Git")` with `associate-release` operation, passing `VERSION` and `SHIPPED_ISSUES`; it adds each issue to the release's tracker marker and never replaces another; degrade gracefully (D4) — never block the release
 5. **Publish** — CI-driven (report) or manual (provide instructions)
@@ -196,7 +196,7 @@ If the orchestrator receives a `WORKTREE_PATH` context, pass it through to all s
 
 On completion:
 - Git tag created: `v{VERSION}` (or configured tag format)
-- GitHub Release created with release notes (with `## Traceability exceptions` last, when recorded)
+- GitHub Release created with release notes — `## Traceability exceptions` last, when composed (Record, or the no-ask exempt rule)
 - Changelog updated (if configured)
 - Version files bumped
 - `.release/RELEASE-FLOW.md` created (first run only)
