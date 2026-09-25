@@ -445,6 +445,43 @@ export function realGit(cwd: string, home: string, args: readonly string[]): str
   return r.stdout;
 }
 
+// ---------------------------------------------------------------------------
+// Spawn hygiene (applies PF-060) — the one collector both evidence suites run
+// ---------------------------------------------------------------------------
+
+const SPAWN_RE = /(?:spawnSync|execFileSync|execSync)\(/g;
+
+/**
+ * Named collector: every spawn call in a source whose argument list does not
+ * pass through scopedEnv() or does not name a `cwd` (an inherited cwd is the
+ * developer's repository). The argument list is taken paren-balanced from the
+ * call site, bounded to 2000 characters; comment lines are stripped first.
+ */
+export function collectUnscopedSpawns(source: string): string[] {
+  const code = source.split('\n')
+    .map(l => (/^\s*(\*|\/\/|\/\*)/.test(l) ? '' : l))
+    .join('\n');
+  const offenders: string[] = [];
+  for (const m of code.matchAll(SPAWN_RE)) {
+    const open = (m.index ?? 0) + m[0].length - 1;
+    let depth = 0;
+    let close = -1;
+    for (let i = open; i < code.length && i < open + 2000; i++) {
+      if (code[i] === '(') depth++;
+      if (code[i] === ')') depth--;
+      if (depth === 0) { close = i; break; }
+    }
+    const call = code.slice(m.index, close === -1 ? open + 2000 : close + 1);
+    if (!call.includes('scopedEnv(') || !/\bcwd\b/.test(call)) offenders.push(call.split('\n')[0].trim());
+  }
+  return offenders;
+}
+
+/** The spawn call sites in a source — the corpus the collector above reads. */
+export function countSpawnSites(source: string): number {
+  return [...source.matchAll(SPAWN_RE)].length;
+}
+
 /** Create a FIFO for the never-opened test; returns false where mkfifo is unavailable. */
 export function makeFifo(fifoPath: string, home: string): boolean {
   const r = spawnSync('mkfifo', [fifoPath], {

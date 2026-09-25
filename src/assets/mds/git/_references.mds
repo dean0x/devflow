@@ -10,7 +10,8 @@ directions or the build fails. Everything above the first section marker is
 module-level prose and is emitted nowhere.
 
 Unlike the tracker module, nothing ranges over this set: each document is named at
-exactly one site in the agent, and that naming is what the byte budget's
+exactly one site — in the agent, or, for `trust-rule`, in the one PR-host
+reference that applies it — and that naming is what the byte budget's
 formula ↔ nameable-set check tests. The module is registered `kind: 'named'` for
 that reason.
 
@@ -111,6 +112,16 @@ Applies to **`post-review-summary` and `post-resolution-summary` only.** No othe
 7. Post; 5xx retry-once (unchanged).
 @end
 
+@define trust_rule():
+## Trust rule
+
+Who counts as a trusted author of a PR comment, review thread or review. `fetch-review-threads` applies it to a thread's first comment; the evidence scripts implement it (`trust()` in `pr-evidence.cjs`) for the evidence record and the approval check, and a test holds both to these terms.
+
+- **Trusted:** `VIEWER_LOGIN` always; otherwise only when `authorAssociation` is `OWNER`, `MEMBER` or `COLLABORATOR` **and** `gh api "repos/\{owner\}/\{repo\}/collaborators/\{login\}/permission" --jq .permission` prints `admin` or `write`. The `maintain` role prints `write`; `triage` and `read` print `read`. Any other association is untrusted, with no lookup; any other output, a 404 or an error is untrusted.
+- **The association arm never trusts:** a login ending in `[bot]`; a login outside `^[A-Za-z0-9][A-Za-z0-9-]\{0,38\}$`; the PR author when `isCrossRepository` is true or unknown.
+- **Bounded:** look up only a login the association arm can still trust, each at most once per spawn and at most 20 in total; a login past the cap is untrusted. `VIEWER_LOGIN` is never looked up.
+@end
+
 <!-- op: decision-markers -->
 {decision_markers()}
 
@@ -119,3 +130,6 @@ Applies to **`post-review-summary` and `post-resolution-summary` only.** No othe
 
 <!-- op: publication-gate -->
 {publication_gate()}
+
+<!-- op: trust-rule -->
+{trust_rule()}

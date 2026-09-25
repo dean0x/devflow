@@ -14,6 +14,12 @@
  *          code.md's paste gate over a table of valid and hostile lines, and every
  *          line the rendering rules can produce passes that gate.
  *
+ * #363 (SDLC-evidence PR4) widened the closed kind set from `ticket-link` to
+ * `ticket-link` or `test-plan` — /implement's test-plan ask records the second —
+ * in the partial, code.md's gate and pr-evidence.cjs's EXCEPTION_LINE_RE at once.
+ * The grammar table holds both kinds valid and their near-misses invalid; the
+ * three-way parity itself is held by tests/evidence/contract-parity.test.ts.
+ *
  * Orchestrator decision (2026-09-25): /code-review and /bug-analysis never gate on
  * a ticket, so only /implement is held here; disposition.test.ts holds the review
  * hosts' side and the "exceptions are /implement-only" arm.
@@ -437,7 +443,9 @@ const GRAMMAR_TABLE: ReadonlyArray<{ readonly label: string; readonly value: str
   { label: 'a reason with a newline', value: line('@octocat', 'first\nsecond'), valid: false },
   { label: 'a reason with `<!--`', value: line('@octocat', 'x <!-- devflow:review-summary -->'), valid: false },
   { label: 'a 201-character reason', value: line('@octocat', 'r'.repeat(201)), valid: false },
-  { label: 'kind `test-plan`', value: line('@octocat', 'x', 'test-plan'), valid: false },
+  { label: 'kind `test-plan`', value: line('@octocat', 'x', 'test-plan'), valid: true },
+  { label: 'kind `ticket-links`', value: line('@octocat', 'x', 'ticket-links'), valid: false },
+  { label: 'kind `test-plans`', value: line('@octocat', 'x', 'test-plans'), valid: false },
   { label: 'a mention', value: line('@octocat', 'approved by @lead'), valid: false },
   { label: 'an issue reference', value: line('@octocat', 'fixes #12'), valid: false },
   { label: 'a closing keyword with a full issue URL', value: line('@octocat', 'fixes https://github.com/o/r/issues/1'), valid: false },
@@ -464,7 +472,7 @@ const exceptionSpec = (): ExceptionSpec => parseExceptionSpec(defineBody(DEFINE)
 describe('AC-11: the exception grammar — define 2 and code.md\'s gate agree, and both refuse the hostile rows', () => {
   it('define 2 parses into the documented rules', () => {
     const spec = exceptionSpec()
-    expect(spec.kinds, 'the kind set is closed to ticket-link in #362').toEqual(['ticket-link'])
+    expect(spec.kinds, 'the kind set is closed: ticket-link (#362) and test-plan (#363)').toEqual(['ticket-link', 'test-plan'])
     expect(spec.login).toBe('[A-Za-z0-9][A-Za-z0-9-]{0,38}')
     expect(spec.loginFallback).toBe('(login unavailable)')
     expect(spec.utcFormat).toBe('%Y-%m-%dT%H:%M:%SZ')
@@ -484,10 +492,12 @@ describe('AC-11: the exception grammar — define 2 and code.md\'s gate agree, a
     expect(collectGrammarMisses(gate)).toEqual([])
   })
 
-  it('known-bad probes: a widened kind set, an unanchored gate and a gate missing a removed character are reported', () => {
+  it('known-bad probes: a widened or narrowed kind set, an unanchored gate and a gate missing a removed character are reported', () => {
     const spec = exceptionSpec()
-    const widened = compileExceptionTemplate({ ...spec, kinds: [...spec.kinds, 'test-plan'] })
-    expect(collectGrammarMisses(widened).some(m => m.startsWith('kind `test-plan`'))).toBe(true)
+    const widened = compileExceptionTemplate({ ...spec, kinds: [...spec.kinds, 'ticket-links'] })
+    expect(collectGrammarMisses(widened).some(m => m.startsWith('kind `ticket-links`'))).toBe(true)
+    const narrowed = compileExceptionTemplate({ ...spec, kinds: spec.kinds.filter(k => k !== 'test-plan') })
+    expect(collectGrammarMisses(narrowed).some(m => m.startsWith('kind `test-plan`'))).toBe(true)
     const unanchored = new RegExp(codeGate(codeMd()).source.slice(0, -1))
     expect(collectGrammarMisses(unanchored).some(m => m.startsWith('trailing text on a second line'))).toBe(true)
     const leaky = compileExceptionTemplate({ ...spec, removed: spec.removed.filter(c => c !== '#') })

@@ -35,8 +35,8 @@ const GOLDENS_DIR = path.join(ROOT, 'tests', 'fixtures', 'golden')
 // The lifecycle rule — printed verbatim on frozen-target refusal (DR-03)
 const FROZEN_LIFECYCLE_RULE =
   'github-status-lines.txt is a frozen fixture: regenerating it requires --unfreeze ' +
-  'AND a fresh explicit authorisation naming the bytes it permits. Three authorisations ' +
-  'have been granted and all three are spent. Pass --unfreeze only under a new one.'
+  'AND a fresh explicit authorisation naming the bytes it permits. Five authorisations ' +
+  'have been granted and all five are spent. Pass --unfreeze only under a new one.'
 
 const args = process.argv.slice(2)
 const hasUnfreeze = args.includes('--unfreeze')

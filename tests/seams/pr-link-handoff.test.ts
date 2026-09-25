@@ -558,6 +558,7 @@ const PR_CREATE_KEYS = [
   'ISSUE_NUMBER:',
   'ISSUE_PR_LINK:',
   'PR_EXCEPTIONS:', // #362: /implement's recorded evidence exception, pasted by Responsibility 7
+  'PR_TEST_PLAN_BLOCK:', // #363: /implement's rendered test-plan block, pasted behind `check block`
 ] as const
 
 describe('/implement parallel PR — a Code pr-create spawn, never the orchestrator', () => {

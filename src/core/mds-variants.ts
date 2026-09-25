@@ -352,7 +352,7 @@ export const TRACKER_OPS = [
 export const TRACKER_GITHUB_OPS = TRACKER_OPS;
 
 /**
- * The 8 PR/review operations whose mechanics are generated once, for every
+ * The 9 PR/review operations whose mechanics are generated once, for every
  * provider, under `pr/`.
  *
  * A PR-HOST roster, not a tracker roster, and the distinction is the whole
@@ -370,12 +370,11 @@ export const TRACKER_GITHUB_OPS = TRACKER_OPS;
  * fact and lives in `tracker/{provider}/ensure-pr-ready.md`. The operation
  * carries one pointer to each.
  *
- * Exactly 8 entries, which is {@link MIN_VARIANT_PAIRS} exactly. That is a
- * property, not a coincidence: the module cannot be grown an operation at a time,
- * because a shorter roster makes every parity assertion over it vacuous (GAP-42,
- * the PF-018 trap) and `expandVariants` refuses the build. Dropping an op from
- * this list therefore fails the build on purpose rather than silently shrinking
- * the guard surface.
+ * 9 entries, one above {@link MIN_VARIANT_PAIRS}, which is a floor and not a
+ * target: a shorter roster makes every parity assertion over it vacuous (GAP-42,
+ * the PF-018 trap) and `expandVariants` refuses the build, so the roster can grow
+ * but never drop below 8. `update-pr-evidence` (#363) is the ninth — it edits the
+ * PR body and comments on the PR, both GitHub whatever the tracker is.
  */
 export const PR_HOST_OPS = [
   'ensure-pr-ready',
@@ -386,6 +385,7 @@ export const PR_HOST_OPS = [
   'resolve-review-threads',
   'post-resolution-summary',
   'check-merge-readiness',
+  'update-pr-evidence',
 ] as const;
 
 /**
@@ -413,8 +413,9 @@ export const PR_HOST_DESTINATION_ROOT = 'pr';
  *   that returns something, so the floor is what stops a short one being
  *   introduced.
  * 'named' — a fixed set of cross-cutting documents, each named individually at
- *   exactly one site in the agent (`references/decision-markers.md` and, later,
- *   `learn-conventions.md` / `publication-gate.md`). Nothing ranges over the set,
+ *   exactly one site — in the agent (`references/decision-markers.md`,
+ *   `learn-conventions.md`, `publication-gate.md`) or in the one PR-host reference
+ *   that applies it (`trust-rule.md`). Nothing ranges over the set,
  *   so a floor over it would not make any assertion sharper — it would only
  *   forbid the first such document from existing. What proves these correct is
  *   splitVariantSections' bidirectional check plus the byte-budget's
@@ -472,11 +473,21 @@ export interface VariantModule {
  * `publication-gate` holds the D10 step order. It is named from the two summary
  * operations and from nowhere else, which is the scope property [DR-20] asserts:
  * an operation that can load the gate is an operation that probes repo visibility.
+ *
+ * `trust-rule` is the ONE prose statement of who counts as a trusted author of a
+ * PR comment, review thread or review (#363). `pr-evidence.cjs`'s `trust()` is its
+ * one implementation, and a parity test holds the two to the same terms. It is the
+ * only document here named from a PR-HOST reference rather than from the agent:
+ * `references/pr/fetch-review-threads.md` applies it and names it, while an op that
+ * runs the evidence scripts gets the rule from `trust()` and never loads the
+ * document — naming it from the agent would bill every spawn for a rule one
+ * operation reads.
  */
 export const GIT_CROSS_CUTTING_DOCS = [
   'decision-markers',
   'learn-conventions',
   'publication-gate',
+  'trust-rule',
 ] as const;
 
 /**

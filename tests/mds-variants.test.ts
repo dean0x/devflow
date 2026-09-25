@@ -982,10 +982,12 @@ describe('validateContractOutputName — the narrow underscore allowance', () =>
  * document raises both; a new provider operation raises the provider count.
  * Registered in tests/fixtures/numeric-floors.json. Re-derived 2026-09-22,
  * when the PR-host tree (8 files, provider-independent) joined both sets:
- * github 21, jira 32, linear 32.
+ * github 21, jira 32, linear 32. Raised by #363 (PR4), which added
+ * pr/update-pr-evidence.md and the cross-cutting trust-rule.md to both sets:
+ * github 23, jira 34, linear 34.
  */
-const INSTALLED_REFS_GITHUB = 21;
-const INSTALLED_REFS_PROVIDER = 32;
+const INSTALLED_REFS_GITHUB = 23;
+const INSTALLED_REFS_PROVIDER = 34;
 
 describe('installedReferenceManifest — {github} ∪ {selected provider}', () => {
   const generated = generatedReferenceManifest();
@@ -1037,7 +1039,7 @@ describe('installedReferenceManifest — {github} ∪ {selected provider}', () =
   });
 
   it('the build still emits every provider — the narrowing is install-time only', () => {
-    expect(generated.length).toBe(42);
+    expect(generated.length).toBe(44);
     const union = new Set([
       ...installedReferenceManifest({ provider: 'github' }),
       ...installedReferenceManifest({ provider: 'jira' }),

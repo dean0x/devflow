@@ -56,6 +56,7 @@ import {
   measureOptional,
   nameableCrossCutting,
   nameableFrom,
+  prHostOpLoad,
   preambleBlock,
   providerLoadedSet,
   referenceChars,
@@ -75,17 +76,17 @@ import {
 // ---------------------------------------------------------------------------
 
 /*
- * THE RESERVATION LEDGER — 1,800 ch, spoken for by name.
+ * THE RESERVATION LEDGER — 900 ch, spoken for by name.
  *
  * Every ceiling below that carries dist/agents/git.md (`BUDGET_GIT_MD` and the four
  * `BUDGET_LOADED_SET*` rows) was re-derived by #358 as `measured actual + 2,300`,
  * then by #359 (PR1, which spent its 100-ch line) as `measured actual + 2,200`, by
- * #360 (PR2, which spent its 150-ch line) as `measured actual + 2,050`, and by #362
- * (PR3b, which spent its 250-ch line) as `measured actual + 1,800`: headroom
- * reserved for the always-loaded text the rest of the SDLC-evidence series (#357)
- * is scoped to add —
+ * #360 (PR2, which spent its 150-ch line) as `measured actual + 2,050`, by #362
+ * (PR3b, which spent its 250-ch line) as `measured actual + 1,800`, and by #363
+ * (PR4, which spent 776 ch of its 900-ch line and released the other 124) as
+ * `measured actual + 900`: headroom reserved for the always-loaded text the rest of
+ * the SDLC-evidence series (#357) is scoped to add —
  *
- *   PR4  (#363) test-plan evidence ...... 900
  *   PR5  (#364) release ................. 900
  *
  * git.md growth lands in every loaded-set row, so every row reserves the whole
@@ -98,10 +99,11 @@ import {
 /**
  * THE git.md CEILING — the one gate on the always-loaded half of the split.
  *
- * Derived from a measured 42_796 ch — with the eight PR-host operations'
+ * Derived from a measured 43_572 ch — with the PR-host operations'
  * `**Process:**` bodies in `references/pr/{op}.md`, #358's moves out of the
- * agent, #359's condensed release-evidence step, #360's evidence fixes and #362's
- * mechanism inputs — plus the 1,800 ch RESERVATION LEDGER above: 44_596. Outside
+ * agent, #359's condensed release-evidence step, #360's evidence fixes, #362's
+ * mechanism inputs and #363's update-pr-evidence op, merge-readiness evidence and
+ * CI-status fix — plus the 900 ch RESERVATION LEDGER above: 44_472. Outside
  * the ledger, the next content addition to git.mds must fund itself with a cut
  * elsewhere.
  *
@@ -124,7 +126,7 @@ import {
  * pattern in the same commit; that is the permitted direction for a ceiling, and the
  * manifest guard's probe still proves an INCREMENT would go red.
  */
-const BUDGET_GIT_MD = 44_596;
+const BUDGET_GIT_MD = 44_472;
 
 /**
  * Design-time derivation: the PRE-SPLIT capture of skills/git/SKILL.md, less the
@@ -155,15 +157,15 @@ const BUDGET_SKILL_MD = 6_600;
  * row, so this number can never drift into billing every GitHub user for bytes
  * they never receive (GAP-02).
  *
- * Derived from a measured 64_104 plus the 1,800 ch RESERVATION LEDGER above:
- * 65_904. Outside the ledger, the next addition to the agent or to a github
+ * Derived from a measured 64_880 plus the 900 ch RESERVATION LEDGER above:
+ * 65_780. Outside the ledger, the next addition to the agent or to a github
  * mechanics file must fund itself with a cut.
  *
  * MAY BE LOWERED, NEVER RAISED. Registered as `budget-loaded-set` in
  * tests/fixtures/numeric-floors.json; lowering re-pins the value AND the pattern
  * in the same commit.
  */
-const BUDGET_LOADED_SET = 65_904;
+const BUDGET_LOADED_SET = 65_780;
 
 /**
  * THE JIRA-SCOPED loaded-set ceiling — a spawn under the Jira provider.
@@ -186,8 +188,8 @@ const BUDGET_LOADED_SET = 65_904;
  *   + max_op chars(references/tracker/jira/{op}.md)
  *   + max over TRACKER ops of the one-spawn load [DR-12, D-LOADED-SET-SCOPE]
  *
- * Derived from a measured 74_400 plus the 1,800 ch RESERVATION LEDGER above:
- * 76_200. Outside the ledger, the next addition to the contract or to a Jira
+ * Derived from a measured 75_176 plus the 900 ch RESERVATION LEDGER above:
+ * 76_076. Outside the ledger, the next addition to the contract or to a Jira
  * mechanics file must fund itself with a cut rather than reach for slack. Trimming
  * `references/tracker/_mcp.md` is the honest first move: it is contract prose, it
  * is the single largest term this row adds over the GitHub one, and a pass over it
@@ -196,7 +198,7 @@ const BUDGET_LOADED_SET = 65_904;
  * MAY BE LOWERED, NEVER RAISED. Registered as `budget-loaded-set-jira` in
  * tests/fixtures/numeric-floors.json.
  */
-const BUDGET_LOADED_SET_JIRA = 76_200;
+const BUDGET_LOADED_SET_JIRA = 76_076;
 
 /**
  * THE LINEAR-SCOPED loaded-set ceiling — a spawn under the Linear provider.
@@ -205,8 +207,8 @@ const BUDGET_LOADED_SET_JIRA = 76_200;
  * each MCP-backed provider is priced on its own row, none of them can move the
  * GitHub one, and the GitHub one cannot absorb theirs.
  *
- * Derived from a measured 76_359 plus the 1,800 ch RESERVATION LEDGER above:
- * 78_159. This is the LARGEST of the four ceilings but not the binding one: a
+ * Derived from a measured 77_135 plus the 900 ch RESERVATION LEDGER above:
+ * 78_035. This is the LARGEST of the four ceilings but not the binding one: a
  * character added to git.md is a character added to every row, and every row
  * reserves the same ledger. Re-run this file for each row's current headroom.
  *
@@ -224,11 +226,11 @@ const BUDGET_LOADED_SET_JIRA = 76_200;
  * MAY BE LOWERED, NEVER RAISED. Registered as `budget-loaded-set-linear` in
  * tests/fixtures/numeric-floors.json.
  */
-const BUDGET_LOADED_SET_LINEAR = 78_159;
+const BUDGET_LOADED_SET_LINEAR = 78_035;
 
 /**
  * THE PR-HOST loaded-set ceiling — the worst-case cost of a spawn that runs one of
- * the eight operations whose mechanics live under `references/pr/`.
+ * the nine operations whose mechanics live under `references/pr/`.
  *
  * ITS OWN ROW, for the reason each provider has one (D-LOADED-SET-PER-PROVIDER).
  * `references/pr/` is installed under EVERY tracker, because pull requests, PR
@@ -258,14 +260,36 @@ const BUDGET_LOADED_SET_LINEAR = 78_159;
  * equality pin GITHUB_API_MD_CHARS, which is what stops an excluded term growing
  * unwatched.
  *
- * Derived from a measured 56_859 (`post-review-summary`: its PR-host body plus
- * references/publication-gate.md) plus the 1,800 ch RESERVATION LEDGER above:
- * 58_659.
+ * Derived from a measured 57_635 (`post-review-summary`: its PR-host body plus
+ * references/publication-gate.md, still the worst op at 4_540) plus the 900 ch
+ * RESERVATION LEDGER above: 58_535.
  *
  * MAY BE LOWERED, NEVER RAISED. Registered as `budget-loaded-set-pr-host` in
  * tests/fixtures/numeric-floors.json.
  */
-const BUDGET_LOADED_SET_PR_HOST = 58_659;
+const BUDGET_LOADED_SET_PR_HOST = 58_535;
+
+/**
+ * THE PER-OP PR-HOST CAP — no single PR-host operation may load more than this,
+ * `pr/{op}.md` plus every reference its load instructions can name (AC-8, #363).
+ *
+ * It is what keeps the PR-host row honest while the SDLC-evidence series adds
+ * operations to it: that row prices only its WORST op, so an op that grew past
+ * today's worst (`post-review-summary`: its PR-host body plus
+ * references/publication-gate.md, 4_540) would move the row by its own growth ON
+ * TOP of any git.md growth — spending the reservation ledger twice. Held at the
+ * current worst, the row moves by exactly what git.md moves, and the ledger above
+ * stays the only line anything spends.
+ *
+ * Derived from that measured 4_540 and nothing else: a cap re-derived to fit the op
+ * that exceeded it is no cap. An op over it is condensed first (§2 of the #363
+ * design). Written exclusions are excluded here exactly as the row excludes them —
+ * the per-op measure is `prHostOpLoad`, the one the row's maximum reads.
+ *
+ * MAY BE LOWERED, NEVER RAISED. Registered as `pr-host-max-op-load` in
+ * tests/fixtures/numeric-floors.json.
+ */
+const PR_HOST_MAX_OP_LOAD = 4_540;
 
 /**
  * Every MCP-backed provider and the ceiling that prices it.
@@ -345,7 +369,7 @@ const GITHUB_API_MD_CHARS = 21_355;
 // from memory; asserting them would pin a ratio nobody intends to hold constant.
 
 describe('byte budget: four-shape table (recorded)', () => {
-  it('records every shape, with all three cross-cutting documents as named rows', () => {
+  it('records every shape, with all four cross-cutting documents as named rows', () => {
     const largest = largestTrackerReference();
     const worst = worstCaseReferenceLoad();
     const nonTracker = worstCaseNonTrackerLoad();
@@ -367,6 +391,13 @@ describe('byte budget: four-shape table (recorded)', () => {
     const decisionMarkers = measureOptional(
       'references/decision-markers.md',
       path.join(REFS_DIR, 'decision-markers.md'),
+    );
+    // The fourth (#363): the trust rule, named from fetch-review-threads' PR-host
+    // body and summed into that op's one-spawn load. A row, so its size is on the
+    // record beside the load it adds to.
+    const trustRule = measureOptional(
+      'references/trust-rule.md',
+      path.join(REFS_DIR, 'trust-rule.md'),
     );
     const crossCuttingOnDemand = MODEL_CROSS_CUTTING_ON_DEMAND.reduce(
       (n, rel) => n + referenceChars(rel), 0,
@@ -418,7 +449,7 @@ describe('byte budget: four-shape table (recorded)', () => {
         // The PR-host path — the shape the three tracker rows deliberately do not
         // describe, since references/pr/ is installed under every provider and costs
         // the same bytes on each. Gated by BUDGET_LOADED_SET_PR_HOST.
-        shape: '2c. PR-host spawn (the eight pr/ ops — same cost under every tracker)',
+        shape: '2c. PR-host spawn (the nine pr/ ops — same cost under every tracker)',
         chars: PRELOADED + worstCasePrHostLoad().value,
       },
       {
@@ -446,7 +477,7 @@ describe('byte budget: four-shape table (recorded)', () => {
       // whole of the NON-tracker row below, but that row is labelled by OP: the file
       // it costs is named here so the excluded term is attributable to the bytes
       // someone edits, and so its equality pin (GITHUB_API_MD_CHARS) has a visible row.
-      ...[gitMd, skillGit, skillWorktree, learnConventions, publicationGate, decisionMarkers, githubApiMd].map(m => ({
+      ...[gitMd, skillGit, skillWorktree, learnConventions, publicationGate, decisionMarkers, trustRule, githubApiMd].map(m => ({
         row: m.label + (m.present ? '' : '  (absent — recorded as 0)'),
         chars: m.chars,
         bytes: m.bytes,
@@ -513,12 +544,13 @@ describe('byte budget: four-shape table (recorded)', () => {
     expect(PRELOADED, 'the preloaded set measured 0 — the table is vacuous').toBeGreaterThan(0);
     expect(allTrackerRefs, 'no tracker reference measured — the table is vacuous').toBeGreaterThan(0);
     expect(
-      [learnConventions.label, publicationGate.label, decisionMarkers.label],
-      'all three named cross-cutting rows must appear in the table even while absent',
+      [learnConventions.label, publicationGate.label, decisionMarkers.label, trustRule.label],
+      'all four named cross-cutting rows must appear in the table even while absent',
     ).toEqual([
       'references/learn-conventions.md',
       'references/publication-gate.md',
       'references/decision-markers.md',
+      'references/trust-rule.md',
     ]);
     expect(
       crossCuttingOnDemand,
@@ -620,6 +652,14 @@ describe('byte budget: the round-trip term (recorded)', () => {
 // ---------------------------------------------------------------------------
 // 2. The budget gates
 // ---------------------------------------------------------------------------
+
+/** Named collector: ops whose one-spawn load exceeds a per-op cap, one line each. */
+function collectOverOpCap(
+  loads: readonly { readonly op: string; readonly load: number }[],
+  cap: number,
+): string[] {
+  return loads.filter(l => l.load > cap).map(l => `${l.op}: ${l.load} ch (cap ${cap})`);
+}
 
 describe('byte budget: component and loaded-set pins (AC-2.5)', () => {
   it('chars(dist/agents/git.md) <= BUDGET_GIT_MD', () => {
@@ -730,6 +770,32 @@ describe('byte budget: component and loaded-set pins (AC-2.5)', () => {
       `user pays on every path. Do NOT raise BUDGET_LOADED_SET_PR_HOST — §14.5: a ceiling is ` +
       `re-derived DOWNWARD or not at all; condense the pr/ mechanics instead.`,
     ).toBeLessThanOrEqual(BUDGET_LOADED_SET_PR_HOST);
+  });
+
+  it(`no PR-host op loads more than PR_HOST_MAX_OP_LOAD (${PR_HOST_MAX_OP_LOAD} ch, AC-8)`, () => {
+    const loads = PR_HOST_OPS.map(op => ({ op, load: prHostOpLoad(op) }));
+    // Printed: the per-op figures are what a reviewer checks the cap against.
+    console.table(loads);
+    expect(
+      loads.filter(l => l.load === 0).map(l => l.op),
+      'a PR-host op measured 0 — its reference is unbuilt and the cap would pass on nothing. Run ' +
+      '`npm run build`.',
+    ).toEqual([]);
+    expect(
+      collectOverOpCap(loads, PR_HOST_MAX_OP_LOAD),
+      `PR-host op(s) over the per-op cap. The PR-host row prices only its worst op, so one that ` +
+      `grows past today's worst moves the row by its own growth on top of git.md's. Condense the ` +
+      `op's pr/ mechanics — do NOT raise PR_HOST_MAX_OP_LOAD.`,
+    ).toEqual([]);
+  });
+
+  it('known-bad probe: the per-op cap collector reports an op one character over, and only it', () => {
+    expect(
+      collectOverOpCap(
+        [{ op: 'seed-under', load: PR_HOST_MAX_OP_LOAD }, { op: 'seed-over', load: PR_HOST_MAX_OP_LOAD + 1 }],
+        PR_HOST_MAX_OP_LOAD,
+      ),
+    ).toEqual([`seed-over: ${PR_HOST_MAX_OP_LOAD + 1} ch (cap ${PR_HOST_MAX_OP_LOAD})`]);
   });
 
   it('the written exclusion is load-bearing — charging it would take the PR-host row over', () => {
@@ -1074,6 +1140,23 @@ describe('byte budget: formula file-set ↔ nameable file-set (both directions)'
       [...nameableFrom('fetch-review-threads')],
       'github-api.md must be reachable through the pr/ reference the op names',
     ).toContain('github-api.md');
+  });
+
+  it('the same hop is the ONLY route trust-rule.md has to fetch-review-threads (#363)', () => {
+    // The trust rule is named from step 2 of references/pr/fetch-review-threads.md
+    // and from no line of the agent — a name in git.md would bill every spawn for a
+    // rule one operation reads. So it reaches the op through the hop alone, and a
+    // reader that sees no pr/ body must lose it.
+    expect(
+      SECTIONS.get('fetch-review-threads') ?? '',
+      'git.md must not name trust-rule.md — the hop, not the agent, is the route under test',
+    ).not.toContain('references/trust-rule.md');
+    expect([...nameableFrom('fetch-review-threads')]).toContain('trust-rule.md');
+    expect(
+      [...nameableFrom('fetch-review-threads', () => null)],
+      'with the pr/ body unread, trust-rule.md must drop out — otherwise something other than the ' +
+      'hop names it, and direction 1 is green for a reason this arm does not describe',
+    ).not.toContain('trust-rule.md');
   });
 
   it('known-bad probe: a file named only inside a pr/ body is reported by direction 2', () => {

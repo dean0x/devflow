@@ -465,11 +465,12 @@ describe('non-vacuity: per-agent-type fence counts', () => {
     ).toBe(gitFencesMentioningOperation)
   })
 
-  it('at least 13 operations have a live caller fence (key-map non-vacuity)', () => {
+  it('at least 14 operations have a live caller fence (key-map non-vacuity)', () => {
     // Directions 1 and 2 iterate keysPassedByOp. An empty or near-empty map makes
     // both of them assert nothing regardless of how many fences were counted.
-    // M9: git.md declares 18 ## Operation: sections; 13 have a live caller fence in
-    // dist/commands/. The five without are:
+    // M9: git.md declares 19 ## Operation: sections; 14 have a live caller fence in
+    // dist/commands/ (update-pr-evidence joined with /implement's Phase 10b spawn,
+    // #363). The five without are:
     //   - learn-conventions: internal — invoked by setup-task step 1b inside the Git
     //     agent itself, not by any command fence.
     //   - check-ci-status: prose-only references in implement.md and resolve.md (the
@@ -480,16 +481,16 @@ describe('non-vacuity: per-agent-type fence counts', () => {
     // Raise when new caller fences are added (numeric-floors.json seam-ops-with-callers).
     expect(
       keysPassedByOp.size,
-      `only ${keysPassedByOp.size} operations have caller fences — expected ≥ 13; ` +
+      `only ${keysPassedByOp.size} operations have caller fences — expected ≥ 14; ` +
       'the forward and reverse directions iterate this map and would be near-vacuous',
-    ).toBeGreaterThanOrEqual(13)
+    ).toBeGreaterThanOrEqual(14)
   })
 
-  it('op→section map covers at least 15 operations [DR-24]', () => {
+  it('op→section map covers at least 16 operations [DR-24]', () => {
     expect(
       opSectionMap.size,
-      `op→section map has only ${opSectionMap.size} ops — expected ≥ 15 (matching opsCovered floor); is git.md truncated?`,
-    ).toBeGreaterThanOrEqual(15)
+      `op→section map has only ${opSectionMap.size} ops — expected ≥ 16 (matching opsCovered floor); is git.md truncated?`,
+    ).toBeGreaterThanOrEqual(16)
   })
 
   it('DIST_FILES has exactly 14 compiled command files', () => {

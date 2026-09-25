@@ -6,6 +6,7 @@ output-dir: dist/commands
 @import { decisions_load } from "./_partials/_decisions.mds"
 @import { compliance_gate } from "./_partials/_compliance.mds"
 @import { evidence_policy } from "./_partials/_evidence_policy.mds"
+@import { test_plan_line } from "./_partials/_plan_contract.mds"
 @import { issue_ref_grammar, issue_capture_contract } from "./_partials/_tracker.mds"
 
 # Plan Command
@@ -294,7 +295,7 @@ Spawn 3 Plan agents **in a single message**, each with implementation exploratio
 | Focus | Output |
 |-------|--------|
 | Implementation steps | Ordered steps with files, dependencies, gap mitigations |
-| Testing strategy | Unit tests, integration tests, edge case tests |
+| Testing strategy | Unit tests, integration tests, edge case tests; at least one scenario per acceptance criterion, with how it is verified (CI, a local command, or manual steps) and the files it covers |
 | Execution strategy | SINGLE_CODE_AGENT vs SEQUENTIAL_CODE_AGENTS vs PARALLEL_CODE_AGENTS |
 
 Implementation steps planner: include explicit gap mitigations (from Phase 6) in the relevant steps.
@@ -345,7 +346,7 @@ Use AskUserQuestion to present:
 1. **Implementation Plan Summary**
    - Execution strategy (SINGLE_CODE_AGENT / SEQUENTIAL_CODE_AGENTS / PARALLEL_CODE_AGENTS)
    - Key implementation steps with files
-   - Test strategy
+   - Test strategy — the test plan as TP lines, at least one per acceptance criterion (shape below)
 
 2. **Design Review Findings** (from Phase 12)
    - Each anti-pattern finding with severity and proposed mitigation
@@ -356,6 +357,10 @@ Use AskUserQuestion to present:
 4. **Risk Assessment**
    - Context risk level (LOW/MEDIUM/HIGH/CRITICAL)
    - Unresolved gaps carried forward
+
+**Test plan lines.** Gate 2 shows the test plan in the one shape `/implement` and the evidence scripts read. Word each scenario in plain words, with no `#`, `@` or `/`: name the files it covers in `files:`, never an issue, a person or a URL. The TP-line contract:
+
+{test_plan_line()}
 
 User can:
 - **Accept** — proceed to output phases
@@ -413,6 +418,7 @@ Required sections:
 10. **Design Review Results** — anti-pattern findings with mitigations
 11. **Risk Assessment** — context risk level, unresolved risks
 12. **PR Description Guidance** — problem being solved, key changes, breaking changes, Reviewer Focus Areas
+13. **Test Plan** — the TP lines Gate 2 confirmed, under a `## Test Plan` heading: at least one per acceptance criterion, each citing the criterion it covers
 
 ### 12. PR Description Guidance
 
@@ -436,6 +442,14 @@ Closes {ISSUE_REF}
 ```
 
 Under `github`, `\{ISSUE_REF\}` is `#`-prefixed, so that line renders `Closes #\{n\}`.
+
+**Check the test plan before the artifact exists:** place the `## Test Plan` section's lines in a fresh temp file and run:
+
+```bash
+node "${DEVFLOW_DIR:-$HOME/.devflow}/scripts/verify-evidence.cjs" check tp <that file>; echo "exit=$?"
+```
+
+`exit=0` passes. On any other result, correct the lines once — the script names the failing line and its code on stderr — and check again. Still failing ⇒ keep the section as it stands and say so in the report: `/implement` re-checks it before any Code spawn.
 
 **Write the artifact now** — frontmatter `issue: \{ISSUE_ID\}` if an issue is already known, else `issue: pending`.
 

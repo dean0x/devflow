@@ -31,6 +31,8 @@ import {
   ARGV,
   RESOLVER_SCRIPT,
   buildScriptedShim,
+  collectUnscopedSpawns,
+  countSpawnSites,
   createFakeBin,
   makeFifo,
   realGit,
@@ -1620,35 +1622,8 @@ describe('source guards', () => {
 // ---------------------------------------------------------------------------
 
 describe('spawn environment hygiene', () => {
-  const SPAWN_RE = /(?:spawnSync|execFileSync|execSync)\(/g;
-
-  /**
-   * Named collector: every spawn call in a source whose argument list does not
-   * pass through scopedEnv() or does not name a `cwd` (an inherited cwd is the
-   * developer's repository). The argument list is taken paren-balanced from the
-   * call site, bounded to 2000 characters; comment lines are stripped first.
-   */
-  function collectUnscopedSpawns(source: string): string[] {
-    const code = source.split('\n')
-      .map(l => (/^\s*(\*|\/\/|\/\*)/.test(l) ? '' : l))
-      .join('\n');
-    const offenders: string[] = [];
-    for (const m of code.matchAll(SPAWN_RE)) {
-      const open = (m.index ?? 0) + m[0].length - 1;
-      let depth = 0;
-      let close = -1;
-      for (let i = open; i < code.length && i < open + 2000; i++) {
-        if (code[i] === '(') depth++;
-        if (code[i] === ')') depth--;
-        if (depth === 0) { close = i; break; }
-      }
-      const call = code.slice(m.index, close === -1 ? open + 2000 : close + 1);
-      if (!call.includes('scopedEnv(') || !/\bcwd\b/.test(call)) offenders.push(call.split('\n')[0].trim());
-    }
-    return offenders;
-  }
-
-  const countSpawnSites = (source: string): number => [...source.matchAll(SPAWN_RE)].length;
+  // collectUnscopedSpawns / countSpawnSites live in scripted-shim.ts: the one rule
+  // this suite and tests/evidence/ both run.
 
   it('every spawn in tests/evidence-policy/ passes through scopedEnv() and names its cwd', () => {
     const files = fs.readdirSync(import.meta.dirname).filter(f => f.endsWith('.ts'));

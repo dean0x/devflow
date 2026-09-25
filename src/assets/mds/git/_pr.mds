@@ -136,15 +136,15 @@ Load for `post-review-summary` under every tracker provider.
 
 Load for `check-ci-status` under every tracker provider.
 
-**PR mechanics held here:** the PR-number discovery fallback, the checks fetch, and the priority-ordered PENDING/FAILING/PASSING classification.
+**PR mechanics held here:** the PR-number discovery fallback, the checks fetch over `bucket`, and the priority-ordered classification whose last arm is `INDETERMINATE`.
 
 ### Process
 
 1. If `PR_NUMBER` not provided, discover it: `gh pr view --json number --jq '.number' 2>/dev/null`
 2. If no PR found → output status `NO_PR`, stop
-3. Fetch checks: `gh pr checks \{number\} --json name,state,conclusion 2>/dev/null`
-4. If empty or command fails → output status `NO_CI`
-5. Classify in priority order: if any check has state `IN_PROGRESS` or `PENDING` → `PENDING`; else if any conclusion is `FAILURE` → `FAILING`; else if all conclusions are `SUCCESS` → `PASSING`
+3. Fetch checks: `gh pr checks \{number\} --json name,state,bucket; echo "exit=$?"` — exit 0, or 8 (checks pending), is a result; any other exit is a failure
+4. If the result is `[]`, or the failure says `no checks reported` → output status `NO_CI`; any other failure → output status `INDETERMINATE`
+5. Classify by `bucket` in priority order: any `pending` → `PENDING`; else any `fail` or `cancel` → `FAILING`; else every check `pass` or `skipping` with at least one `pass` → `PASSING`; else → `INDETERMINATE`
 6. List failing/pending checks with names
 @end
 
@@ -160,7 +160,7 @@ Load for `fetch-review-threads` under every tracker provider.
 1. Fetch review threads via GraphQL — use the `fetch_review_threads()` pattern in `devflow:git` → `references/github-api.md` § Review Threads (GraphQL); bounds: ≤2 pages of 50 (100 max).
 
    **Cursor correctness trap:** Page 2 REQUIRES the page-1 `pageInfo.endCursor` bound as `$cursor` — omit it and the call silently re-fetches page 1, so the ≤2-page bound yields 50 threads twice instead of 100 distinct ones. Page 1 omits `cursor` (nullable; server starts at the beginning); if `pageInfo.hasNextPage` is true, pass the page-1 `endCursor` as `$cursor` for page 2. Stop after 2 pages.
-2. Filter to unresolved threads only (`isResolved: false`). Fetch viewer login (author-filtered — a third party posting a devflow marker must not suppress threads): `gh api user --jq '.login'` → store as VIEWER_LOGIN. **Trusted first-comment author:** `VIEWER_LOGIN` always; otherwise `authorAssociation` `OWNER`, `MEMBER` or `COLLABORATOR` — never for the PR author when `isCrossRepository` is true. A first comment by anyone else is marker-free for step 3: its `<!-- devflow:` text excludes nothing.
+2. Filter to unresolved threads only (`isResolved: false`). Fetch viewer login (author-filtered — a third party posting a devflow marker must not suppress threads): `gh api user --jq '.login'` → store as VIEWER_LOGIN. **Trusted first-comment author:** per `references/trust-rule.md`, decided only for a first comment carrying the marker. A first comment by anyone else is marker-free for step 3: its `<!-- devflow:` text excludes nothing.
 3. Apply devflow-authored exclusion predicate — exclude a thread if:
    - (PRIMARY) First comment body contains `<!-- devflow:` marker, OR
    - (SECONDARY) VIEWER_LOGIN matches thread author login AND first comment body does not appear to be a code-style review comment
@@ -259,7 +259,7 @@ Load for `post-resolution-summary` under every tracker provider.
 
 Load for `check-merge-readiness` under every tracker provider.
 
-**PR mechanics held here:** the report-only rule, the unresolved-thread count with its >100 approximation note, the review-decision fetch, the CI-status reuse and the first-match-wins classification ladder.
+**PR mechanics held here:** the report-only rule, the unresolved-thread count with its >100 approximation note, the review-decision fetch, the CI-status reuse, the test-plan evidence read and the first-match-wins ladder whose READY arm is a positive conjunction.
 
 ### Process
 
@@ -267,16 +267,39 @@ Load for `check-merge-readiness` under every tracker provider.
 2. Fetch PR review decision: `gh pr view \{PR_NUMBER\} --json reviewDecision --jq '.reviewDecision'`
    - Values: `APPROVED`, `CHANGES_REQUESTED`, `REVIEW_REQUIRED`, or null
 3. Fetch CI status (same logic as `check-ci-status`)
-   Those steps are in `references/pr/check-ci-status.md` — load it and apply them to this `PR_NUMBER`, NO_CI rule and PENDING > FAILING > PASSING order unchanged.
-4. Classify (first matching rule wins):
+   Those steps are in `references/pr/check-ci-status.md` — load it and apply them to this `PR_NUMBER`, every arm unchanged.
+4. Read the test-plan evidence at the current head, from `WORKTREE_PATH` (else cwd): `node "$\{DEVFLOW_DIR:-$HOME/.devflow\}/scripts/verify-evidence.cjs" verify --pr \{PR_NUMBER\} --approval; echo "exit=$?"`. The evidence is *known* only on `exit=0` with stdout exactly one `EVIDENCE pr:\{PR_NUMBER\} …` line; otherwise it is *unknown*. From it read `total`, `VERIFIED-CI`, `ATTESTED-LOCAL` (report the two apart), `exceptions` and `approval`; *verified* = `VERIFIED-CI` + `ATTESTED-LOCAL`, never inferred from an absent field. The script re-derives every state at the head and decides `approval` by the trust rule; it prints nothing it read from the PR.
+5. Classify (first matching rule wins):
    - `NOT_READY (unresolved threads: \{n\})` — unresolved_threads > 0
    - `NOT_READY (changes requested)` — reviewDecision == `CHANGES_REQUESTED`
    - `NOT_READY (CI failing: \{checks\})` — ci_status == `FAILING`
    - `NOT_READY (CI pending)` — ci_status == `PENDING` (expected after a push; non-alarming)
    - `NOT_READY (no approving review)` — reviewDecision == `REVIEW_REQUIRED` or null
-   - `READY` — no rule above matched (unresolved_threads == 0, reviewDecision == `APPROVED`, ci_status == `PASSING` or `NO_CI`)
+   - `NOT_READY (test-plan evidence unavailable)` — the evidence is unknown
+   - `NOT_READY (no non-author approval)` — only when `REQUIRE_NON_AUTHOR_APPROVAL` is `true` and the evidence's `approval` is not `yes`
+   - `NOT_READY (no test-plan evidence)` — `total` == 0 and `exceptions` has no `test-plan`
+   - `NOT_READY (test plan: \{v\}/\{t\} verified)` — *verified* < `total`, whatever `exceptions` holds
+   - `READY` — only when all hold: unresolved_threads == 0 and not approximate; reviewDecision == `APPROVED`; ci_status == `PASSING` or `NO_CI`; the evidence is known; `approval` is `yes` or `REQUIRE_NON_AUTHOR_APPROVAL` is `false`; *verified* == `total` ≥ 1, or `total` == 0 and `exceptions` has `test-plan`
+   - `NOT_READY (status unknown)` — anything else (an `INDETERMINATE` CI status, an approximate thread count, an unrecognised value)
 
 Never take action on the PR — report READY or NOT_READY, always with the specific reason.
+@end
+
+@define update_pr_evidence():
+## Operation: update-pr-evidence
+
+Load for `update-pr-evidence` under every tracker provider.
+
+**PR mechanics held here:** the evidence script run, the compare-and-swap body edit and the append-only evidence comment. The script owns every marker, grammar and state rule; nothing here restates one.
+
+### Process
+
+Run steps 1–4 as ONE Bash invocation from `WORKTREE_PATH` (else cwd) — the trap removes `$S` and the temp files when it exits — with `V="$\{DEVFLOW_DIR:-$HOME/.devflow\}/scripts"`.
+
+1. **Verify.** Set `S=`, arm the D11 trap with `[ -n "$S" ] && \{ rm -- "$S/base" "$S/base.sha256"; rmdir -- "$S"; \} 2>/dev/null` added before its `exit`, then the four `mktemp`s and `S="$(mktemp -d)"`. Run `node "$V/verify-evidence.cjs" verify --pr \{PR_NUMBER\} --state "$S" --block-out "$DEVFLOW_NOTES_RAW" --comment-out "$DEVFLOW_BODY_RAW"`, adding `--publication \{REVIEW_PUBLICATION\}` only when that is `auto`, `full`, `off` or `stub`, and `--evidence "\{EVIDENCE_FILE\}"` when given — only a value matching `^[A-Za-z0-9._/-]\{1,255\}$` reaches the shell; any other is a failed run. Continue only on exit 0 with stdout exactly one line, `EVIDENCE pr:<n> head:<sha> total:<n> VERIFIED-CI:<n> ATTESTED-LOCAL:<n> UNVERIFIED:<n> STALE:<n> FAILED:<n> INDETERMINATE:<n> stale:<ids|none> exceptions:<kinds|none> approval:<yes|no|unchecked> key:<hex> posted:<yes|no|n/a> body:<same|changed>`; otherwise emit `TRACEABILITY: DEGRADED (evidence unavailable)` and stop. The script makes this op's one `gh pr view` read and prints nothing it read from the PR; never read the PR another way.
+2. **Body**, only on `body:changed` (else `UNCHANGED`): `node "$V/redact-secrets.cjs" "$DEVFLOW_NOTES_RAW" "$DEVFLOW_NOTES" && node "$V/verify-evidence.cjs" splice --pr \{PR_NUMBER\} --state "$S" --block "$DEVFLOW_NOTES" --out "$DEVFLOW_BODY" && gh pr edit \{PR_NUMBER\} --body-file "$DEVFLOW_BODY"`. Only the composed block is scrubbed (D11); every byte outside its markers is the PR's own and stays identical. `splice` re-reads the body: unchanged since step 1 → it writes; changed → it splices once onto the fresh body and re-reads; changed again → `SPLICE conflict`: `SKIPPED` and `TRACEABILITY: DEGRADED (concurrent edit)`. Any other non-zero → `DEGRADED (\{reason\})`, naming a printed `SPLICE` token. No edit either way; go to step 4.
+3. **Read back** after an edit: `node "$V/verify-evidence.cjs" readback --pr \{PR_NUMBER\} --expect "$DEVFLOW_BODY"`; anything but `READBACK ok` → `TRACEABILITY: DEGRADED (body read-back mismatch)`, else `EDITED`. GitHub has no conditional body edit: a human edit landing between the last re-read and `gh pr edit` is overwritten (it stays in the PR's edit history), and the read-back proves only that these bytes landed.
+4. **Comment.** `posted:yes` → `SKIPPED`; `posted:n/a` → `OFF`. Otherwise apply the Comment-sink scrub (D11): `node "$V/redact-secrets.cjs" "$DEVFLOW_BODY_RAW" "$DEVFLOW_BODY" && gh pr comment \{PR_NUMBER\} --body-file "$DEVFLOW_BODY"` → `POSTED`. Never edit or delete an evidence comment. On 5xx retry once; still 5xx → `DEGRADED (\{reason\})`.
 @end
 
 <!-- op: ensure-pr-ready -->
@@ -302,3 +325,6 @@ Never take action on the PR — report READY or NOT_READY, always with the speci
 
 <!-- op: check-merge-readiness -->
 {check_merge_readiness()}
+
+<!-- op: update-pr-evidence -->
+{update_pr_evidence()}

@@ -76,11 +76,11 @@
     },
     {
       "id": "d11-posting-ops",
-      "floor": 8,
-      "pattern": "toBeGreaterThanOrEqual(8)",
+      "floor": 9,
+      "pattern": "toBeGreaterThanOrEqual(9)",
       "occurrences": 1,
       "sourceFile": "tests/git-agent.test.ts",
-      "description": "D11 forward guard: posting ops (--body-file / -F body=@) that must reference Comment-sink scrub (D11), counted over the sink corpus gitAgentSinkCorpus() returns -- the resolved Git agent UNIONED with dist/skills/git/references/*.md, sliced in extractOpSection mode 'union' [DR-18]. The union is load-bearing: posting mechanics live in the generated references, so a git.md-only count would drop below the floor for reasons that are not a regression. The plugin-count entry above pins a different >= 8 in a different file."
+      "description": "D11 forward guard: posting ops (--body-file / -F body=@) that must reference Comment-sink scrub (D11), counted over the sink corpus gitAgentSinkCorpus() returns -- the resolved Git agent UNIONED with dist/skills/git/references/*.md, sliced in extractOpSection mode 'union' [DR-18]. The union is load-bearing: posting mechanics live in the generated references, so a git.md-only count would drop below the floor for reasons that are not a regression. 9 since #363 (PR4) added update-pr-evidence, which edits the PR body and posts the evidence comment from its PR-host reference."
     },
     {
       "id": "agent-roster-count",
@@ -92,19 +92,19 @@
     },
     {
       "id": "seam-op-section-map",
-      "floor": 15,
-      "pattern": "toBeGreaterThanOrEqual(15)",
+      "floor": 16,
+      "pattern": "toBeGreaterThanOrEqual(16)",
       "occurrences": 1,
       "sourceFile": "tests/seams/command-agent-input.test.ts",
-      "description": "Operations indexed from git.md by the seam test's op→section map [DR-24]"
+      "description": "Operations indexed from git.md by the seam test's op→section map [DR-24]. 16 since #363 (PR4) declared update-pr-evidence; git.md declares 19 operations."
     },
     {
       "id": "seam-ops-with-callers",
-      "floor": 13,
-      "pattern": "toBeGreaterThanOrEqual(13)",
+      "floor": 14,
+      "pattern": "toBeGreaterThanOrEqual(14)",
       "occurrences": 1,
       "sourceFile": "tests/seams/command-agent-input.test.ts",
-      "description": "Operations with at least one live caller fence. Directions 1 and 2 iterate this map; if it empties, both pass vacuously (the defect this floor exists to make loud)."
+      "description": "Operations with at least one live caller fence. Directions 1 and 2 iterate this map; if it empties, both pass vacuously (the defect this floor exists to make loud). 14 since #363 (PR4): /implement's Phase 10b spawn gave update-pr-evidence its caller fence."
     },
     {
       "id": "issue-capture-contract-size",
@@ -148,11 +148,11 @@
     },
     {
       "id": "generated-reference-manifest-size",
-      "floor": 42,
-      "pattern": "toBeGreaterThanOrEqual(42)",
+      "floor": 44,
+      "pattern": "toBeGreaterThanOrEqual(44)",
       "occurrences": 2,
       "sourceFile": "tests/installer/reference-overlay.test.ts",
-      "description": "BUILD/TARBALL SCOPE: the manifest the build EMITS, which is every provider plus the provider-independent trees. Distinct from installed-reference-count-{github,provider}, which pin what ONE install carries; the build stays complete so the tarball can serve any selection without a rebuild, and narrowing the install never lowers this floor. 42 = 10 GitHub ops + 10 Jira ops + 10 Linear ops (the SAME TRACKER_OPS roster, which is what makes file-set parity structural) + 8 PR-host ops (PR_HOST_OPS, under no provider: pull requests stay on GitHub whatever the tracker is) + 3 cross-cutting documents + the tool-call contract, whose generation gate the first tool-call provider opens. Two sites — the manifest shape assertion and the 0644 normalisation's installed-file count. A manifest short enough to enumerate by hand makes every convergence assertion vacuous (GAP-42/PF-018), which is the same reason MIN_VARIANT_PAIRS exists. A floor may only rise, and here it rises by a whole module at a time."
+      "description": "BUILD/TARBALL SCOPE: the manifest the build EMITS, which is every provider plus the provider-independent trees. Distinct from installed-reference-count-{github,provider}, which pin what ONE install carries; the build stays complete so the tarball can serve any selection without a rebuild, and narrowing the install never lowers this floor. 44 = 10 GitHub ops + 10 Jira ops + 10 Linear ops (the SAME TRACKER_OPS roster, which is what makes file-set parity structural) + 9 PR-host ops (PR_HOST_OPS, under no provider: pull requests stay on GitHub whatever the tracker is) + 4 cross-cutting documents + the tool-call contract, whose generation gate the first tool-call provider opens. Two sites — the manifest shape assertion and the 0644 normalisation's installed-file count. A manifest short enough to enumerate by hand makes every convergence assertion vacuous (GAP-42/PF-018), which is the same reason MIN_VARIANT_PAIRS exists. A floor may only rise, and here it rises by a whole module at a time."
     },
     {
       "id": "issue-pr-link-forwarding-sites",
@@ -164,19 +164,19 @@
     },
     {
       "id": "packed-reference-manifest-size",
-      "floor": 42,
-      "pattern": "toBeGreaterThanOrEqual(42)",
+      "floor": 44,
+      "pattern": "toBeGreaterThanOrEqual(44)",
       "occurrences": 1,
       "sourceFile": "tests/packaging.test.ts",
       "description": "BUILD/TARBALL SCOPE (unaffected by the selection-scoped install): prefix-shippability clause (i) — the tarball must carry every file the reference overlay converges to. The floor keeps the packed-set assertion non-vacuous if the manifest is ever narrowed. It pins the same manifest as generated-reference-manifest-size at the OTHER sink, and the two must move together, or a module could ship un-packed."
     },
     {
       "id": "capability-hoist-block-floor",
-      "floor": 57,
-      "pattern": "toBeGreaterThanOrEqual(57)",
+      "floor": 59,
+      "pattern": "toBeGreaterThanOrEqual(59)",
       "occurrences": 1,
       "sourceFile": "tests/guards/capability-hoist.test.ts",
-      "description": "Total `**Process:**` / `### Process` blocks in the tracker corpus (dist/agents/git.md + the generated reference tree). The corpus split is asserted by provenance as well as by count: git.md's own contribution is 18, so a bare 18 was met with the generated tree entirely absent while the guard claimed to scan both (PF-018). 57 = 18 in git.md + 1 learn-conventions + 30 provider blocks (ten per-op references for each of the three providers) + 8 PR-host blocks. A provider adds its whole roster at once, so the floor moves by a module rather than by a file."
+      "description": "Total `**Process:**` / `### Process` blocks in the tracker corpus (dist/agents/git.md + the generated reference tree). The corpus split is asserted by provenance as well as by count: git.md's own contribution was 18, so a bare 18 was met with the generated tree entirely absent while the guard claimed to scan both (PF-018). 59 = 19 in git.md + 1 learn-conventions + 30 provider blocks (ten per-op references for each of the three providers) + 9 PR-host blocks (#363 added update-pr-evidence's pair). A provider adds its whole roster at once, so the floor moves by a module rather than by a file."
     },
     {
       "id": "min-reference-chars",
@@ -220,53 +220,53 @@
     },
     {
       "id": "installed-reference-count-github",
-      "floor": 21,
-      "pattern": "INSTALLED_REFS_GITHUB = 21",
+      "floor": 23,
+      "pattern": "INSTALLED_REFS_GITHUB = 23",
       "occurrences": 1,
       "sourceFile": "tests/mds-variants.test.ts",
-      "description": "Reference files ONE github install carries: the tracker/github tree, the provider-independent PR-host tree (pr/, 8 files) and the cross-cutting documents. Install-time scope, distinct from the build-time floor, which is unchanged — the build still emits every provider so the tarball can serve any selection without a rebuild. Re-derived 2026-09-22 when the PR-host tree landed: 21 files."
+      "description": "Reference files ONE github install carries: the tracker/github tree, the provider-independent PR-host tree (pr/, 9 files) and the cross-cutting documents. Install-time scope, distinct from the build-time floor, which is unchanged — the build still emits every provider so the tarball can serve any selection without a rebuild. Re-derived 2026-09-22 when the PR-host tree landed: 21 files; 23 since #363 (PR4) added pr/update-pr-evidence.md and the cross-cutting trust-rule.md."
     },
     {
       "id": "installed-reference-count-provider",
-      "floor": 32,
-      "pattern": "INSTALLED_REFS_PROVIDER = 32",
+      "floor": 34,
+      "pattern": "INSTALLED_REFS_PROVIDER = 34",
       "occurrences": 1,
       "sourceFile": "tests/mds-variants.test.ts",
-      "description": "Reference files ONE jira or linear install carries: the github floor (21, which already includes the 8 provider-independent PR-host files) + the selected provider's own 11. Excludes tracker/_mcp.md from the count assertion path, which is asserted biconditionally instead. Install-time scope, distinct from the build-time floor. Re-derived 2026-09-22: 32 files."
+      "description": "Reference files ONE jira or linear install carries: the github floor (23, which already includes the 9 provider-independent PR-host files) + the selected provider's own 11. Excludes tracker/_mcp.md from the count assertion path, which is asserted biconditionally instead. Install-time scope, distinct from the build-time floor. Re-derived 2026-09-22: 32 files; 34 since #363 (PR4)."
     },
     {
       "id": "git-agent-remote-io-ops",
-      "floor": 14,
-      "pattern": "toBeGreaterThanOrEqual(14); // floor: git-agent-remote-io-ops",
+      "floor": 15,
+      "pattern": "toBeGreaterThanOrEqual(15); // floor: git-agent-remote-io-ops",
       "occurrences": 1,
       "sourceFile": "tests/git-agent.test.ts",
-      "description": "AC-0.6b: REQUIRED_OPS detected as doing remote I/O, over git.md UNIONED with the PR-host references (the corpus #326's move made necessary — a git.md-only read silently narrows the set to 13 because post-resolution-summary's gh indicators all moved with its body). Replaces a bare `> 0` non-vacuity check, which one detected op satisfies and which therefore cannot tell a corpus narrowing from a real removal. Zero headroom at 14: the D4 evidence half of the same guard stays git.md-only (PF-027 — a degradation clause a spawn can decline to load is not a contract), so the two halves read different corpora on purpose."
+      "description": "AC-0.6b: REQUIRED_OPS detected as doing remote I/O, over git.md UNIONED with the PR-host references (the corpus #326's move made necessary — a git.md-only read silently narrows the set by one because post-resolution-summary's gh indicators all moved with its body). Replaces a bare `> 0` non-vacuity check, which one detected op satisfies and which therefore cannot tell a corpus narrowing from a real removal. Zero headroom at 15 (14 + #363's update-pr-evidence): the D4 evidence half of the same guard stays git.md-only (PF-027 — a degradation clause a spawn can decline to load is not a contract), so the two halves read different corpora on purpose."
     }
   ],
   "ceilings": [
     {
       "id": "budget-git-md",
-      "ceiling": 44596,
-      "pattern": "const BUDGET_GIT_MD = 44_596;",
+      "ceiling": 44472,
+      "pattern": "const BUDGET_GIT_MD = 44_472;",
       "occurrences": 1,
       "sourceFile": "tests/tracker/byte-budget.test.ts",
-      "description": "THE git.md ceiling — the one gate on dist/agents/git.md, the always-loaded half of the tracker contract/mechanics split and a term every loaded-set row below carries. Re-derived by #362 as a measured 42_796 ch plus the RESERVATION LEDGER (1,800 ch since #362, PR3b, spent its 250-ch line; one line per future PR of the SDLC-evidence series #357): PR4 900 · PR5 900. The reserved headroom is spoken for, not slack: each PR in the series spends only its own line, and any addition outside the ledger funds itself with a cut. The measurement follows #326's move of the eight PR-host operations' bodies into references/pr/{op}.md and #358's moves of non-contract text into the references each operation already loads, plus the condensed ## Principles, then #359's and #360's fixes and #362's mechanism inputs. No per-component decomposition of any cut is recorded — three successive re-derivations of such components disagreed once already (PF-057) — so measure the artifact instead: npm run build && node -e \"process.stdout.write(String(require('fs').readFileSync('dist/agents/git.md','utf8').length))\". May be LOWERED, never raised: a budget raised to fit the artifact is not a budget, it asserts that the current size is the current size."
+      "description": "THE git.md ceiling — the one gate on dist/agents/git.md, the always-loaded half of the tracker contract/mechanics split and a term every loaded-set row below carries. Re-derived by #363 as a measured 43_572 ch plus the RESERVATION LEDGER (900 ch since #363, PR4, spent 776 ch of its 900-ch line and released the other 124; one line per future PR of the SDLC-evidence series #357): PR5 900. The reserved headroom is spoken for, not slack: each PR in the series spends only its own line, and any addition outside the ledger funds itself with a cut. The measurement follows #326's move of the PR-host operations' bodies into references/pr/{op}.md and #358's moves of non-contract text into the references each operation already loads, plus the condensed ## Principles, then #359's and #360's fixes, #362's mechanism inputs and #363's test-plan evidence op, merge-readiness evidence and CI-status fix. No per-component decomposition of any cut is recorded — three successive re-derivations of such components disagreed once already (PF-057) — so measure the artifact instead: npm run build && node -e \"process.stdout.write(String(require('fs').readFileSync('dist/agents/git.md','utf8').length))\". May be LOWERED, never raised: a budget raised to fit the artifact is not a budget, it asserts that the current size is the current size."
     },
     {
       "id": "budget-loaded-set-jira",
-      "ceiling": 76200,
-      "pattern": "const BUDGET_LOADED_SET_JIRA = 76_200;",
+      "ceiling": 76076,
+      "pattern": "const BUDGET_LOADED_SET_JIRA = 76_076;",
       "occurrences": 1,
       "sourceFile": "tests/tracker/byte-budget.test.ts",
-      "description": "Max characters of the worst-case tracker spawn under the JIRA provider — its own row, never folded into budget-loaded-set. The GitHub row keeps bytes(tracker/_mcp.md) = 0 BY CONSTRUCTION, so pricing a provider that DOES load the contract on that row would bill every GitHub user for bytes they never receive (GAP-02), and would do it by raising a ratcheted ceiling. Re-derived by #362 as a measured 74_400 (shape '2-jira. per-op split, jira path') plus the RESERVATION LEDGER (1,800 ch since #362, PR3b, spent its 250-ch line; one line per future PR of the SDLC-evidence series #357): PR4 900 · PR5 900. The reserved headroom is spoken for, not slack: each PR in the series spends only its own line, and any addition outside the ledger funds itself with a cut. git.md growth lands in every loaded-set row, so this row reserves the whole ledger. Re-measure rather than trust a figure restated here: npm run build && npx vitest run tests/tracker/byte-budget.test.ts prints every row. Trimming references/tracker/_mcp.md is the sanctioned first response to this row going red (contract prose, and the single largest term this row adds over the GitHub one), condensing the jira mechanics the second; neither is 'give the provider more room'. budget-loaded-set-linear is the sibling row; a registered MCP-backed provider with no such entry fails a named arm in the same file. LOWERED, NEVER RAISED."
+      "description": "Max characters of the worst-case tracker spawn under the JIRA provider — its own row, never folded into budget-loaded-set. The GitHub row keeps bytes(tracker/_mcp.md) = 0 BY CONSTRUCTION, so pricing a provider that DOES load the contract on that row would bill every GitHub user for bytes they never receive (GAP-02), and would do it by raising a ratcheted ceiling. Re-derived by #363 as a measured 75_176 (shape '2-jira. per-op split, jira path') plus the RESERVATION LEDGER (900 ch since #363, PR4, spent 776 ch of its 900-ch line and released the other 124; one line per future PR of the SDLC-evidence series #357): PR5 900. The reserved headroom is spoken for, not slack: each PR in the series spends only its own line, and any addition outside the ledger funds itself with a cut. git.md growth lands in every loaded-set row, so this row reserves the whole ledger. Re-measure rather than trust a figure restated here: npm run build && npx vitest run tests/tracker/byte-budget.test.ts prints every row. Trimming references/tracker/_mcp.md is the sanctioned first response to this row going red (contract prose, and the single largest term this row adds over the GitHub one), condensing the jira mechanics the second; neither is 'give the provider more room'. budget-loaded-set-linear is the sibling row; a registered MCP-backed provider with no such entry fails a named arm in the same file. LOWERED, NEVER RAISED."
     },
     {
       "id": "budget-loaded-set-linear",
-      "ceiling": 78159,
-      "pattern": "const BUDGET_LOADED_SET_LINEAR = 78_159;",
+      "ceiling": 78035,
+      "pattern": "const BUDGET_LOADED_SET_LINEAR = 78_035;",
       "occurrences": 1,
       "sourceFile": "tests/tracker/byte-budget.test.ts",
-      "description": "Max characters of the worst-case tracker spawn under the LINEAR provider — its own row, for the reason the jira row is one (D-LOADED-SET-PER-PROVIDER). Re-derived by #362 as a measured 76_359 (shape '2-linear. per-op split, linear path') plus the RESERVATION LEDGER (1,800 ch since #362, PR3b, spent its 250-ch line; one line per future PR of the SDLC-evidence series #357): PR4 900 · PR5 900. The reserved headroom is spoken for, not slack: each PR in the series spends only its own line, and any addition outside the ledger funds itself with a cut. git.md growth lands in every loaded-set row, so this row reserves the whole ledger. Re-measure rather than trust a figure restated here: npm run build && npx vitest run tests/tracker/byte-budget.test.ts prints every row. This is the LARGEST of the four rows, and its max_op is the largest of the three providers' for a recorded reason rather than by accident: backlink-shipped-issues is where the dedup ladder is stated, and on a stock official server three of its four rungs are unreachable (OD-12), so each rung's unavailability plus both halves of the rank-4 marker predicate have to be written down. LOWERED, NEVER RAISED."
+      "description": "Max characters of the worst-case tracker spawn under the LINEAR provider — its own row, for the reason the jira row is one (D-LOADED-SET-PER-PROVIDER). Re-derived by #363 as a measured 77_135 (shape '2-linear. per-op split, linear path') plus the RESERVATION LEDGER (900 ch since #363, PR4, spent 776 ch of its 900-ch line and released the other 124; one line per future PR of the SDLC-evidence series #357): PR5 900. The reserved headroom is spoken for, not slack: each PR in the series spends only its own line, and any addition outside the ledger funds itself with a cut. git.md growth lands in every loaded-set row, so this row reserves the whole ledger. Re-measure rather than trust a figure restated here: npm run build && npx vitest run tests/tracker/byte-budget.test.ts prints every row. This is the LARGEST of the four rows, and its max_op is the largest of the three providers' for a recorded reason rather than by accident: backlink-shipped-issues is where the dedup ladder is stated, and on a stock official server three of its four rungs are unreachable (OD-12), so each rung's unavailability plus both halves of the rank-4 marker predicate have to be written down. LOWERED, NEVER RAISED."
     },
     {
       "id": "budget-skill-md",
@@ -278,19 +278,27 @@
     },
     {
       "id": "budget-loaded-set",
-      "ceiling": 65904,
-      "pattern": "const BUDGET_LOADED_SET = 65_904;",
+      "ceiling": 65780,
+      "pattern": "const BUDGET_LOADED_SET = 65_780;",
       "occurrences": 1,
       "sourceFile": "tests/tracker/byte-budget.test.ts",
-      "description": "Max characters of the worst-case tracker spawn on the GITHUB path, where bytes(tracker/_mcp.md) is 0 by construction (no github op file names the contract; the re-scoped AC-2.7 arm in tests/guards/provider-scope.test.ts proves it, and a gate in the same file repeats the check against every github mechanics file). Re-derived by #362 as a measured 64_104 (shape '2. per-op split, GitHub path') plus the RESERVATION LEDGER (1,800 ch since #362, PR3b, spent its 250-ch line; one line per future PR of the SDLC-evidence series #357): PR4 900 · PR5 900. The reserved headroom is spoken for, not slack: each PR in the series spends only its own line, and any addition outside the ledger funds itself with a cut. git.md growth lands in every loaded-set row, so this row reserves the whole ledger. Re-measure rather than trust a figure restated here: npm run build && npx vitest run tests/tracker/byte-budget.test.ts prints every row. LOWERED, NEVER RAISED: the sanctioned response to it going red is moving text out of the agent or condensing the github mechanics."
+      "description": "Max characters of the worst-case tracker spawn on the GITHUB path, where bytes(tracker/_mcp.md) is 0 by construction (no github op file names the contract; the re-scoped AC-2.7 arm in tests/guards/provider-scope.test.ts proves it, and a gate in the same file repeats the check against every github mechanics file). Re-derived by #363 as a measured 64_880 (shape '2. per-op split, GitHub path') plus the RESERVATION LEDGER (900 ch since #363, PR4, spent 776 ch of its 900-ch line and released the other 124; one line per future PR of the SDLC-evidence series #357): PR5 900. The reserved headroom is spoken for, not slack: each PR in the series spends only its own line, and any addition outside the ledger funds itself with a cut. git.md growth lands in every loaded-set row, so this row reserves the whole ledger. Re-measure rather than trust a figure restated here: npm run build && npx vitest run tests/tracker/byte-budget.test.ts prints every row. LOWERED, NEVER RAISED: the sanctioned response to it going red is moving text out of the agent or condensing the github mechanics."
     },
     {
       "id": "budget-loaded-set-pr-host",
-      "ceiling": 58659,
-      "pattern": "const BUDGET_LOADED_SET_PR_HOST = 58_659;",
+      "ceiling": 58535,
+      "pattern": "const BUDGET_LOADED_SET_PR_HOST = 58_535;",
       "occurrences": 1,
       "sourceFile": "tests/tracker/byte-budget.test.ts",
-      "description": "Max characters of the worst-case spawn that runs one of the eight operations whose mechanics live under references/pr/ — its own row, for the reason each provider has one (D-LOADED-SET-PER-PROVIDER). references/pr/ is installed under EVERY tracker, because pull requests, PR reviews and PR checks stay on GitHub whatever issues the project files elsewhere, so a PR operation costs the same bytes on all three paths: folding it into the per-provider rows would price one cost three times while answering nowhere the question a reader asks (what does a PR spawn load?), and it cannot ride the GitHub row, which is scoped to TRACKER ops by D-LOADED-SET-SCOPE. The formula is the preloaded set plus max over PR_HOST_OPS of ( chars(references/pr/{op}.md) + every reference that op's own section names ); no max_op term of its own, because an op's PR-host file is already inside its one-spawn load and a separate largest-file term would count it twice. ONE WRITTEN EXCLUSION, references/github-api.md, declared as LOADED_SET_WRITTEN_EXCLUSIONS in tests/tracker/budget-model.ts: two of these ops loaded it long before any split existed, #326 moved the line that names it without changing a byte a spawn pays, and charging 21_355 ch of it here would bury the pr/ bodies this row exists to measure. What the exclusion owes in return (ADR-025) is shape '2c-ex' of the printed table — the same maximum RECORDED with the file charged — plus the equality pin GITHUB_API_MD_CHARS, and an arm asserting the unexcluded figure would NOT fit under this ceiling, so the exclusion is load-bearing rather than a rounding convenience. Re-derived by #362 as a measured 56_859 (shape '2c. PR-host spawn', post-review-summary: its PR-host body plus references/publication-gate.md) plus the RESERVATION LEDGER (1,800 ch since #362, PR3b, spent its 250-ch line; one line per future PR of the SDLC-evidence series #357): PR4 900 · PR5 900. The reserved headroom is spoken for, not slack: each PR in the series spends only its own line, and any addition outside the ledger funds itself with a cut. git.md growth lands in this row too, so it reserves the whole ledger. Re-measure rather than trust a figure restated here: npm run build && npx vitest run tests/tracker/byte-budget.test.ts prints every row. May be LOWERED, never raised: condense the pr/ mechanics instead."
+      "description": "Max characters of the worst-case spawn that runs one of the nine operations whose mechanics live under references/pr/ — its own row, for the reason each provider has one (D-LOADED-SET-PER-PROVIDER). references/pr/ is installed under EVERY tracker, because pull requests, PR reviews and PR checks stay on GitHub whatever issues the project files elsewhere, so a PR operation costs the same bytes on all three paths: folding it into the per-provider rows would price one cost three times while answering nowhere the question a reader asks (what does a PR spawn load?), and it cannot ride the GitHub row, which is scoped to TRACKER ops by D-LOADED-SET-SCOPE. The formula is the preloaded set plus max over PR_HOST_OPS of ( chars(references/pr/{op}.md) + every reference that op's own section names ); no max_op term of its own, because an op's PR-host file is already inside its one-spawn load and a separate largest-file term would count it twice. ONE WRITTEN EXCLUSION, references/github-api.md, declared as LOADED_SET_WRITTEN_EXCLUSIONS in tests/tracker/budget-model.ts: two of these ops loaded it long before any split existed, #326 moved the line that names it without changing a byte a spawn pays, and charging 21_355 ch of it here would bury the pr/ bodies this row exists to measure. What the exclusion owes in return (ADR-025) is shape '2c-ex' of the printed table — the same maximum RECORDED with the file charged — plus the equality pin GITHUB_API_MD_CHARS, and an arm asserting the unexcluded figure would NOT fit under this ceiling, so the exclusion is load-bearing rather than a rounding convenience. Re-derived by #363 as a measured 57_635 (shape '2c. PR-host spawn', post-review-summary: its PR-host body plus references/publication-gate.md) plus the RESERVATION LEDGER (900 ch since #363, PR4, spent 776 ch of its 900-ch line and released the other 124; one line per future PR of the SDLC-evidence series #357): PR5 900. The reserved headroom is spoken for, not slack: each PR in the series spends only its own line, and any addition outside the ledger funds itself with a cut. git.md growth lands in this row too, so it reserves the whole ledger. Re-measure rather than trust a figure restated here: npm run build && npx vitest run tests/tracker/byte-budget.test.ts prints every row. May be LOWERED, never raised: condense the pr/ mechanics instead."
+    },
+    {
+      "id": "pr-host-max-op-load",
+      "ceiling": 4540,
+      "pattern": "const PR_HOST_MAX_OP_LOAD = 4_540;",
+      "occurrences": 1,
+      "sourceFile": "tests/tracker/byte-budget.test.ts",
+      "description": "AC-8 of #363 (SDLC-evidence PR4): no single PR-host operation may load more than 4,540 ch (its pr/{op}.md plus every reference its load instructions name, less the written exclusions) -- the measured worst op, post-review-summary, when PR4 began. The PR-host row prices only its worst op, so an op growing past it would move that row by its own growth on top of git.md's and spend the reservation ledger twice; held here, the row moves by exactly the git.md delta. May be lowered, never raised."
     },
     {
       "id": "preamble-max-lines",

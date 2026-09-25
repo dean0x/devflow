@@ -236,6 +236,15 @@ export const SHARED_LITERAL_REGISTRY: readonly SharedLiteral[] = [
       'The D10 label definition, distinct from the gate mechanics it labels. Two definitions of one ' +
       'marker is the divergence the single-authority split exists to repair, reproduced on a new label.',
   },
+  {
+    owner: 'trust-rule.md',
+    sentence:
+      '- **Trusted:** `VIEWER_LOGIN` always; otherwise only when `authorAssociation` is `OWNER`, `MEMBER` or `COLLABORATOR` **and** `gh api "repos/{owner}/{repo}/collaborators/{login}/permission" --jq .permission` prints `admin` or `write`.',
+    justification:
+      'Who may carry a devflow marker or a merge-gating approval (#363). A PR-host reference restating it ' +
+      'becomes a second trust rule that `trust()` in pr-evidence.cjs is not parity-pinned to, and the ' +
+      'first edit to either copy lets a read-only collaborator hide a thread or approve a PR.',
+  },
 ];
 
 describe('shared-literal registry — one authority per normative sentence [DR-19]', () => {
@@ -476,7 +485,7 @@ describe('tool-call contract: one authority per normative sentence [DR-19]', () 
   });
 
   it('positive arm: every registry sentence is in the contract, and in nothing else', () => {
-    // Scoped over the contract PLUS the three cross-cutting documents: a sentence
+    // Scoped over the contract PLUS the cross-cutting documents: a sentence
     // that had migrated into one of those would have two homes just as surely as
     // one that migrated into a provider file, and the sibling registry above would
     // not see it because it only knows its own sentences.

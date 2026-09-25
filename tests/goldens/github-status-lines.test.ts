@@ -26,7 +26,7 @@
  * github-status-lines.txt is frozen, and the --unfreeze refusal guard below
  * protects that fixture only. Overriding the freeze takes an explicit, dated user
  * authorisation naming the exact bytes it permits, and each such authorisation is
- * spent by the single commit that uses it. Four have been granted and all four
+ * spent by the single commit that uses it. Five have been granted and all five
  * are spent:
  *
  *   2026-09-14  e4876e0  the extractor retarget after the mechanics split
@@ -42,6 +42,11 @@
  *                        166 (an empty SHIPPED_ISSUES is degraded when the
  *                        Mechanics flag unresolved merged PRs); 239-240 are
  *                        byte-identical
+ *   2026-09-25  (#363 PR4, D1; Refs #352)  the fifth re-capture, granted for
+ *                        lines 143, 144 and 145 and spent on all three: the
+ *                        check-ci-status steps 3-5 read CI through `bucket`
+ *                        (gh has no `conclusion` field), keep stderr and exit
+ *                        8, and classify totally, ending in INDETERMINATE
  *
  * THE AUTHORISATION IS SPENT. Any further change to this fixture requires a new
  * explicit authorisation; none is outstanding.
@@ -111,8 +116,8 @@ export const PRE_PHASE0_GIT_MD_LINES = 938
 // Phase-0 char baselines (JS `.length`, not bytes) — named constants so Phase-2's
 // byte-budget.test.ts can import them without re-deriving (C6). These are equality
 // baselines: they move only in the same commit as the golden fixture.
-export const GIT_MD_CHARS = 42_796
-export const GIT_MD_LINES = 780
+export const GIT_MD_CHARS = 43_572
+export const GIT_MD_LINES = 803
 // SKILL_GIT_CHARS/SKILL_GIT_LINES pin src/assets/skills/git/SKILL.md, the
 // preloaded skill file the git-agent golden above cross-references. Like
 // GIT_MD_CHARS/GIT_MD_LINES, this is an equality baseline: it moves only in
@@ -134,11 +139,11 @@ export const SKILL_WORKTREE_LINES = 92
  * golden-regeneration commit that moves the parts, never on their own to clear a
  * red assertion.
  */
-export const TOTAL_CHARS = 52_319
-export const TOTAL_LINES = 1_085
+export const TOTAL_CHARS = 53_095
+export const TOTAL_LINES = 1_108
 
 // Fixture invariants — these ARE bytes (Buffer.byteLength), not JS .length
-export const FIXTURE_BYTES = 18_234
+export const FIXTURE_BYTES = 18_420
 export const FIXTURE_NEWLINES = 249
 
 describe('golden: github-status-lines frozen fixture (AC-0.9)', () => {

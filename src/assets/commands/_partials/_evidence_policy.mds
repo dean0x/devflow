@@ -18,7 +18,7 @@ Set `EVIDENCE_POLICY`, `ISSUE_REQUIRED`, `APPLY_CONVENTIONS` and `REQUIRE_NON_AU
 - `<kind>` self-attested by @<login> at <utc>: <reason>
 ```
 
-- `<kind>` is one of `ticket-link` — a closed set; no other kind is ever rendered.
+- `<kind>` is one of `ticket-link` or `test-plan` — a closed set; no other kind is ever rendered, and the section holds each kind at most once.
 - `@<login>` is `@` followed by the output of `gh api user --jq .login` when that output matches `^[A-Za-z0-9][A-Za-z0-9-]\{0,38\}$`. On any other output, or a failed call, it is `(login unavailable)` instead, with no `@`.
 - `<utc>` is the output of `date -u +%Y-%m-%dT%H:%M:%SZ`.
 - `<reason>` is the user's own words, made inert: replace every character outside printable ASCII (newlines and tabs included) with a space, remove every `<`, `>`, `` ` ``, `[`, `]`, `\`, `/`, `#`, `@`, `&` and `$`, collapse runs of spaces, trim, keep the first 200 characters, and trim again. A reason that is empty after this is no reason.

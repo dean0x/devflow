@@ -2,7 +2,8 @@
  * The evidence-policy DISPOSITION table, held two ways (#362, AC-8).
  *
  * Design §6 disposes of every site that used to key on compliance (rows 1–13; row
- * 14 is the /dynamic-tickets note §3.16 added): each one now
+ * 14 is the /dynamic-tickets note §3.16 added; row 15 is /implement's test-plan
+ * ask, #363 PR4, which keys on the policy as /plan's issue step does): each one now
  * gates on a mechanism input (`ISSUE_REQUIRED`, `APPLY_CONVENTIONS`,
  * `REQUIRE_NON_AUTHOR_APPROVAL`), on `EVIDENCE_POLICY` itself at a caller, or
  * stays on `COMPLIANCE_SKILL_INSTALLED` because it is the review lens rather than
@@ -214,15 +215,22 @@ const DISPOSITION: readonly DispositionRow[] = [
     ],
   },
   {
-    // Caller-side only: check-merge-readiness is unchanged and takes no new input in #362.
+    // Caller side (#362): /resolve runs Phase 9c only under the input. Op side
+    // (#363 PR4): check-merge-readiness takes the input and gates the non-author
+    // approval at its own arm (PF-076) — READY needs a trusted non-author's
+    // approval unless the input is `false`.
     row: 11,
-    subject: '/resolve Phase 9c — merge readiness',
+    subject: '/resolve Phase 9c — merge readiness, and its non-author approval arm',
     inputs: ['REQUIRE_NON_AUTHOR_APPROVAL'],
-    on: 'report merge readiness',
+    on: 'report merge readiness; READY needs a trusted non-author approval',
     off: 'skip; report SKIPPED',
     sites: [
       { file: 'commands/resolve.md', after: '### Phase 9c:', anchor: 'Run this phase only when', phrase: gate('REQUIRE_NON_AUTHOR_APPROVAL') },
+      { file: 'commands/resolve.md', after: '### Phase 9c:', anchor: 'REQUIRE_NON_AUTHOR_APPROVAL: {', phrase: 'REQUIRE_NON_AUTHOR_APPROVAL: {REQUIRE_NON_AUTHOR_APPROVAL}' },
       { file: 'commands/resolve.md', after: '## Edge Cases', anchor: '| `REQUIRE_NON_AUTHOR_APPROVAL` is `false` |', phrase: '`REQUIRE_NON_AUTHOR_APPROVAL` is `false`' },
+      { file: 'agents/git.md', after: '## Operation: check-merge-readiness', anchor: '**Input:**', phrase: '`REQUIRE_NON_AUTHOR_APPROVAL`' },
+      { file: 'skills/git/references/pr/check-merge-readiness.md', anchor: '- `NOT_READY (no non-author approval)` —', phrase: gate('REQUIRE_NON_AUTHOR_APPROVAL') },
+      { file: 'skills/git/references/pr/check-merge-readiness.md', anchor: '- `READY` — only when all hold', phrase: '`REQUIRE_NON_AUTHOR_APPROVAL` is `false`' },
     ],
   },
   {
@@ -239,7 +247,8 @@ const DISPOSITION: readonly DispositionRow[] = [
   },
   {
     // Caller side: the publication partial turns a resolved `off` into `stub` under
-    // the policy (it expands into both hosts), and each host's Edge Cases row says so.
+    // the policy (it expands into its three hosts — /implement since #363, for the
+    // evidence comment), and each review host's Edge Cases row says so.
     // Op side: the `stub` value, which names no gate.
     row: 13,
     subject: 'publication `off` → `stub` — the caller turns it, the op accepts it',
@@ -248,6 +257,7 @@ const DISPOSITION: readonly DispositionRow[] = [
     off: '`off` stays `off`: no comment posts',
     sites: [
       { file: 'commands/code-review.md', anchor: PUBLICATION_STUB_RULE, phrase: policyGate },
+      { file: 'commands/implement.md', anchor: PUBLICATION_STUB_RULE, phrase: policyGate },
       { file: 'commands/resolve.md', anchor: PUBLICATION_STUB_RULE, phrase: policyGate },
       { file: 'commands/code-review.md', after: '## Edge Cases', anchor: '| `reviewPublication: off` |', phrase: policyGate },
       { file: 'commands/resolve.md', after: '## Edge Cases', anchor: '| `reviewPublication: off` |', phrase: policyGate },
@@ -268,6 +278,19 @@ const DISPOSITION: readonly DispositionRow[] = [
     off: 'no note',
     sites: [
       { file: 'commands/dynamic-tickets.md', anchor: '- **Evidence policy:**', phrase: gate('ISSUE_REQUIRED') },
+    ],
+  },
+  {
+    // #363 (PR4): no new mechanism key — the ask keys on the policy itself, as row 9
+    // (/plan's issue step) does, so the resolver and its grammar stay untouched.
+    row: 15,
+    subject: '/implement test-plan ask — no test plan could be written',
+    inputs: ['EVIDENCE_POLICY'],
+    on: 'ask — record a self-attested `test-plan` exception, or stop with BLOCKED (no test plan)',
+    off: 'never ask; report the missing test plan',
+    sites: [
+      { file: 'commands/implement.md', anchor: '**Missing test plan, ', phrase: policyGate },
+      { file: 'commands/implement.md', anchor: 'a missing test plan is never asked about', phrase: 'When `EVIDENCE_POLICY` is `standard`' },
     ],
   },
 ]
@@ -444,8 +467,8 @@ describe('evidence-policy disposition: the table and the tree agree, both ways (
     expect(exempt.size, 'the resolution text the exemption names is empty').toBeGreaterThanOrEqual(4)
   })
 
-  it('the table is well-formed: numbered 1..14 in order, each row with sites and a named input', () => {
-    expect(DISPOSITION.map(r => r.row)).toEqual(Array.from({ length: 14 }, (_, i) => i + 1))
+  it('the table is well-formed: numbered 1..15 in order, each row with sites and a named input', () => {
+    expect(DISPOSITION.map(r => r.row)).toEqual(Array.from({ length: 15 }, (_, i) => i + 1))
     for (const row of DISPOSITION) {
       expect(row.sites.length, `row ${row.row} has no site`).toBeGreaterThan(0)
       expect(row.inputs.length, `row ${row.row} gates on nothing`).toBeGreaterThan(0)
@@ -512,8 +535,9 @@ describe('evidence-policy disposition: the table and the tree agree, both ways (
 
 /**
  * Row 13's caller side, held beyond its sites: the `off` → `stub` turn is stated
- * ONCE — in the publication partial, expanded into its two hosts — and both hosts
- * can report the label it produces. A host that restated the rule would be a
+ * ONCE — in the publication partial, expanded into its three hosts — and the two
+ * review hosts can report the label it produces; /implement (#363) hands the value
+ * to update-pr-evidence, whose comment has no publication label. A host that restated the rule would be a
  * second authority free to drift from the partial; an Edge Cases row may describe
  * the outcome, but never carries the rule sentence itself.
  *
@@ -521,9 +545,10 @@ describe('evidence-policy disposition: the table and the tree agree, both ways (
  * tests/evidence-policy/partial-wiring.test.ts, whose order guard reads every line
  * naming `EVIDENCE_POLICY` in all eight policy files — the expanded rule included.
  */
-describe('row 13 caller side: the publication stub is one rule, reported by both hosts', () => {
+describe('row 13 caller side: the publication stub is one rule, reported by the review hosts', () => {
   const corpus = builtCorpus()
-  const PUBLICATION_HOSTS = ['commands/code-review.md', 'commands/resolve.md'] as const
+  const PUBLICATION_HOSTS = ['commands/code-review.md', 'commands/implement.md', 'commands/resolve.md'] as const
+  const REVIEW_HOSTS = ['commands/code-review.md', 'commands/resolve.md'] as const
   const STUB_LABEL = 'STUB (evidence policy)'
 
   /** Named collector: every line of a built command that states the stub rule, by file. */
@@ -547,7 +572,7 @@ describe('row 13 caller side: the publication stub is one rule, reported by both
     }
   })
 
-  it('both hosts can report the label the stub produces', () => {
+  it('both review hosts can report the label the stub produces', () => {
     const codeReview = corpus.find(f => f.file === 'commands/code-review.md')!.content
     const status = codeReview.split('\n').find(l => l.includes('- Publication status:'))
     expect(status, 'code-review Phase 4 publication status line').toBeDefined()
@@ -556,9 +581,18 @@ describe('row 13 caller side: the publication stub is one rule, reported by both
     const row = resolve.split('\n').find(l => l.startsWith('- Publication:'))
     expect(row, 'resolve Phase 10 Publication row').toBeDefined()
     expect(row).toContain(STUB_LABEL)
+    expect(REVIEW_HOSTS.every(h => (PUBLICATION_HOSTS as readonly string[]).includes(h))).toBe(true)
   })
 
-  it('known-bad probe: a third host restating the rule is reported', () => {
+  it('/implement passes the resolved value to update-pr-evidence, its one consumer', () => {
+    const implement = corpus.find(f => f.file === 'commands/implement.md')!.content
+    const keyLines = implement.split('\n').filter(l => /^\s*"?REVIEW_PUBLICATION: /.test(l))
+    expect(keyLines).toEqual(['REVIEW_PUBLICATION: {REVIEW_PUBLICATION resolved in Phase 1, or auto}'])
+    const spawn = implement.slice(implement.lastIndexOf('Agent(subagent_type="Git")', implement.indexOf(keyLines[0])))
+    expect(spawn.slice(0, spawn.indexOf('```'))).toContain('OPERATION: update-pr-evidence')
+  })
+
+  it('known-bad probe: a fourth host restating the rule is reported', () => {
     const seeded = corpus.map(f =>
       f.file === 'commands/bug-analysis.md'
         ? { ...f, content: `${f.content}\n${PUBLICATION_STUB_RULE} ${policyGate}, a resolved \`off\` becomes \`stub\`.\n` }
