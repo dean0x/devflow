@@ -1146,36 +1146,31 @@ function bodyPlan(body) {
 }
 
 /**
- * D-VERIFY-RECORD: a trusted record's line as a claim. A record is a VERDICT, and
- * only some verdicts fix the claim's outcome:
- *   VERIFIED-CI, ATTESTED-LOCAL ⇒ PASS        FAILED ⇒ FAIL
- *   sha:none                    ⇒ no claim
- *   anything else (STALE, INDETERMINATE, UNVERIFIED with a SHA) ⇒ an outcome the
- *     record cannot tell. It is classified with a FAIL placeholder — which can
- *     never reach a verified state — and the verdict is kept only when it is
- *     UNVERIFIED, INDETERMINATE or STALE; anything the placeholder alone decided
- *     reads UNVERIFIED. So such a TP can go STALE (and be re-verified) or wait on
- *     an unresolved fact, but only a NEW claim can make it pass or fail.
+ * D-VERIFY-RECORD: a trusted record's line as the claim it rests on — its SHA, its
+ * outcome (`out:`, D-RECORD-OUTCOME) and its exit code; `sha:none` is no claim.
+ * The recorded STATE is never carried forward: `classify` re-derives it from the
+ * facts as they are now, exactly as for a new claim. So a record written while CI
+ * was pending (INDETERMINATE) reads VERIFIED-CI once the run succeeds, or FAILED
+ * once it fails; a STALE claim whose files the diff no longer touches is decided
+ * again; and a recorded FAIL or SKIP never passes. The record reaches here only
+ * from a trusted author (findTrustedRecord) and only for TP text whose hash it
+ * carries (tpInputs), and the parser has refused any record whose outcome
+ * contradicts its state.
  *
  * @param {any} record  a parseEvidenceComment TpRecord
- * @returns {{ claim: object, unknownOutcome: boolean } | null}
+ * @returns {object | null}  a Claim, or null for no claim
  */
 function recordClaim(record) {
   if (record.sha === null) return null;
-  const known = record.state === 'VERIFIED-CI' || record.state === 'ATTESTED-LOCAL' ? 'PASS'
-    : record.state === 'FAILED' ? 'FAIL' : null;
-  return {
-    claim: Object.freeze({
-      target: 'TP-' + record.id,
-      tp: record.id,
-      gate: null,
-      outcome: known === null ? 'FAIL' : known,
-      sha: record.sha,
-      by: 'test',
-      exit: record.exit,
-    }),
-    unknownOutcome: known === null,
-  };
+  return Object.freeze({
+    target: 'TP-' + record.id,
+    tp: record.id,
+    gate: null,
+    outcome: record.outcome,
+    sha: record.sha,
+    by: 'test',
+    exit: record.exit,
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -1183,7 +1178,7 @@ function recordClaim(record) {
 // ---------------------------------------------------------------------------
 
 /**
- * @typedef {{ tp: any, hash: string, recorded: boolean, claim: object | null, unknownOutcome: boolean,
+ * @typedef {{ tp: any, hash: string, recorded: boolean, claim: object | null,
  *   textMatches: boolean | undefined, forceIndeterminate: boolean }} TpInput
  *   `recorded`: the trusted record carries this TP with the same text hash.
  */
@@ -1191,9 +1186,9 @@ function recordClaim(record) {
 /**
  * The facts for one TP, gathered in the order `classify` consults them and no
  * further than the first arm that can already decide: nothing past a missing or
- * SKIP claim, a text mismatch or an unresolved head; nothing past an ancestry
- * answer other than "in the PR". Stopping early can only leave a fact absent,
- * and an absent fact reads unresolved — never a pass.
+ * SKIP claim (a text mismatch attaches none, see tpInputs) or an unresolved head;
+ * nothing past an ancestry answer other than "in the PR". Stopping early can only
+ * leave a fact absent, and an absent fact reads unresolved — never a pass.
  *
  * @param {Io} io
  * @param {Repo} repo
@@ -1206,7 +1201,7 @@ function gatherFacts(io, repo, memo, x) {
   /** @type {Record<string, unknown>} */
   const facts = { claim, head: repo.headResolved ? repo.head : null, inPr: null };
   if (x.textMatches !== undefined) facts.textMatches = x.textMatches;
-  if (claim === null || claim.outcome === 'SKIP' || x.textMatches === false || !repo.headResolved) return facts;
+  if (claim === null || claim.outcome === 'SKIP' || !repo.headResolved) return facts;
   facts.inPr = inPr(io, repo, claim.sha);
   if (facts.inPr !== true) return facts;
   if (claim.sha !== repo.head && x.tp.files.length > 0) facts.diff = diffPaths(io, repo, claim.sha);
@@ -1233,22 +1228,18 @@ function gatherFacts(io, repo, memo, x) {
  * @param {Repo} repo
  * @param {RunMemo} memo
  * @param {TpInput} x
- * @returns {{ state: string, sha: string | null, run: any, exit: number | null }}
+ * @returns {{ state: string, sha: string | null, outcome: string | null, run: any, exit: number | null }}
  */
 function classifyTp(io, repo, memo, x) {
-  if (x.forceIndeterminate) {
-    const claim = /** @type {any} */ (x.claim);
-    return { state: 'INDETERMINATE', sha: claim === null ? null : claim.sha, run: null, exit: claim === null ? null : claim.exit };
-  }
+  // D-VERIFY-THROTTLE: the record that would decide this TP could not be read, so
+  // no claim rests on it (tpInputs attaches none) — INDETERMINATE, sha:none.
+  if (x.forceIndeterminate) return { state: 'INDETERMINATE', sha: null, outcome: null, run: null, exit: null };
   const facts = gatherFacts(io, repo, memo, x);
-  let verdict = PE.classify(x.tp, facts);
+  const verdict = PE.classify(x.tp, facts);
   const claim = /** @type {any} */ (x.claim);
   if (x.tp.method === 'ci' && verdict.state === 'ATTESTED-LOCAL' && verdict.run === 'none' && claim.sha !== repo.head) {
     const headRuns = runsAt(io, memo, repo.head);
-    if (headRuns !== null) verdict = PE.classify(x.tp, { ...facts, verifyingSha: repo.head, runs: headRuns });
-  }
-  if (x.unknownOutcome && !['UNVERIFIED', 'INDETERMINATE', 'STALE'].includes(verdict.state)) {
-    return { state: 'UNVERIFIED', sha: verdict.sha, run: null, exit: verdict.exit };
+    if (headRuns !== null) return PE.classify(x.tp, { ...facts, verifyingSha: repo.head, runs: headRuns });
   }
   return verdict;
 }
@@ -1272,8 +1263,13 @@ function publicationMode(publication) {
 /**
  * The claims, hashes and text checks for every TP of the plan (D-VERIFY-RECORD):
  * a file claim wins; else the trusted record's, when the record's `h:` equals the
- * TP's hash. A body-sourced TP's text counts only when that hash matches. Null when
- * a TP line fails its grammar (the hash is refused).
+ * TP's hash. A body-sourced TP's text counts only when that hash matches — and a
+ * claim attaches only to text that counts: body text that fails the check gets no
+ * claim at all, not even the file's. The file's claim was made against the text
+ * the record published, not this text, and a record binding the two would pass
+ * the next refresh's hash check and launder the claim onto it. A TP whose record
+ * is unknown (D-VERIFY-THROTTLE) gets no claim either. Null when a TP line fails
+ * its grammar (the hash is refused).
  *
  * @param {{ tps: readonly any[] }} plan
  * @param {EvidenceInput | null} evidence
@@ -1291,18 +1287,14 @@ function tpInputs(plan, evidence, record, fromFile) {
     const rec = recordById.get(tp.id);
     const recordApplies = rec !== undefined && rec.hash === hash.value;
     const fileClaim = evidence === null ? undefined : evidence.claims.get(tp.id);
-    const fromRecord = recordApplies ? recordClaim(rec) : null;
-    inputs.push({
-      tp,
-      hash: hash.value,
-      recorded: recordApplies,
-      claim: fileClaim !== undefined ? fileClaim : fromRecord === null ? null : fromRecord.claim,
-      unknownOutcome: fileClaim === undefined && fromRecord !== null && fromRecord.unknownOutcome,
-      textMatches: fromFile ? undefined : recordApplies,
-      // D-VERIFY-THROTTLE: when the record itself is unknown, so is every claim or
-      // text check that would have come from it.
-      forceIndeterminate: record.kind === 'unknown' && (!fromFile || fileClaim === undefined),
-    });
+    const textMatches = fromFile ? undefined : recordApplies;
+    // D-VERIFY-THROTTLE: when the record itself is unknown, so is every claim or
+    // text check that would have come from it.
+    const forceIndeterminate = record.kind === 'unknown' && (!fromFile || fileClaim === undefined);
+    const claim = textMatches === false || forceIndeterminate ? null
+      : fileClaim !== undefined ? fileClaim
+        : recordApplies ? recordClaim(rec) : null;
+    inputs.push({ tp, hash: hash.value, recorded: recordApplies, claim, textMatches, forceIndeterminate });
   }
   return inputs;
 }
@@ -1434,7 +1426,7 @@ function runVerify(io, args, deps) {
   const memo = { lists: new Map(), views: new Map(), htmlUrl: undefined };
   const records = inputs.map(x => {
     const v = classifyTp(io, repo, memo, x);
-    return Object.freeze({ id: x.tp.id, state: v.state, sha: v.sha, run: v.run, exit: v.exit, hash: x.hash });
+    return Object.freeze({ id: x.tp.id, state: v.state, sha: v.sha, outcome: v.outcome, run: v.run, exit: v.exit, hash: x.hash });
   });
 
   const exceptions = evidence !== null && evidence.exceptions !== null ? evidence.exceptions

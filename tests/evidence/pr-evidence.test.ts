@@ -84,7 +84,14 @@ interface Facts {
   htmlUrl?: string
 }
 type RunRef = { readonly id: number; readonly attempt: number } | 'none' | null
-interface Verdict { readonly state: State; readonly sha: string | null; readonly run: RunRef; readonly exit: number | null }
+type Outcome = 'PASS' | 'FAIL' | 'SKIP'
+interface Verdict {
+  readonly state: State
+  readonly sha: string | null
+  readonly outcome: Outcome | null
+  readonly run: RunRef
+  readonly exit: number | null
+}
 interface TpRecord extends Verdict { readonly id: number; readonly hash: string }
 interface ExceptionRecord { readonly kind: string; readonly login: string | null; readonly at: string; readonly reason: string | null }
 interface Evidence {
@@ -728,13 +735,20 @@ describe('classify — the §3.3 ladder, first match wins, conservative terminal
     const verdict = PE.classify(tpOf(row.tp), { ...row.facts, claim })
     expect(verdict.state).toBe(row.state)
     if (row.run !== undefined) expect(verdict.run).toEqual(row.run)
+    // The verdict carries the claim's outcome exactly when it carries its SHA.
+    expect(verdict.outcome).toBe(verdict.sha === null ? null : claim?.outcome)
     expect(Object.isFrozen(verdict)).toBe(true)
   })
 
-  it('carries the claim SHA and exit through to the record, and nothing for a missing claim', () => {
+  it('carries the claim SHA, outcome and exit through to the record, and nothing for a missing claim', () => {
     const v = PE.classify(tpOf(LOCAL), { ...atHead, claim: claimOf(claimLine('TP-1', 'PASS', HEAD, 'test', 0)) })
-    expect(v).toEqual({ state: 'ATTESTED-LOCAL', sha: HEAD, run: null, exit: 0 })
-    expect(PE.classify(tpOf(LOCAL), { ...atHead, claim: null })).toEqual({ state: 'UNVERIFIED', sha: null, run: null, exit: null })
+    expect(v).toEqual({ state: 'ATTESTED-LOCAL', sha: HEAD, outcome: 'PASS', run: null, exit: 0 })
+    expect(PE.classify(tpOf(LOCAL), { ...atHead, claim: null })).toEqual({ state: 'UNVERIFIED', sha: null, outcome: null, run: null, exit: null })
+    const skip = PE.classify(tpOf(LOCAL), { ...atHead, claim: claimOf(claimLine('TP-1', 'SKIP', HEAD)) })
+    expect(skip).toEqual({ state: 'UNVERIFIED', sha: HEAD, outcome: 'SKIP', run: null, exit: null })
+    // A claim for another TP is no claim at all: no SHA, no outcome.
+    const other = PE.classify(tpOf(LOCAL), { ...atHead, claim: claimOf(claimLine('TP-2', 'PASS', HEAD, 'test', 0)) })
+    expect(other).toMatchObject({ sha: null, outcome: null })
   })
 
   /** Named collector: the states no ladder row reaches. */
@@ -750,6 +764,19 @@ describe('classify — the §3.3 ladder, first match wins, conservative terminal
 
   it('known-bad probe: a table without its STALE rows is reported', () => {
     expect(collectUnreachedStates(LADDER.filter(r => r.state !== 'STALE'))).toEqual(['STALE'])
+  })
+
+  it('every verdict is a record the comment grammar admits, and round-trips through a STUB unchanged', () => {
+    for (const row of LADDER) {
+      const claim = row.claim === null ? null : claimOf(row.claim)
+      const verdict = PE.classify(tpOf(row.tp), { ...row.facts, claim })
+      const record: TpRecord = { id: 1, ...verdict, hash: 'e'.repeat(12) }
+      const key = PE.dedupeKey({ records: [record], exceptions: [] }, sha256)
+      expect(key.ok, `${row.name}: ${verdict.state}/${verdict.outcome}`).toBe(true)
+      if (!key.ok) continue
+      const text = unwrap(PE.render(PLAN, { head: HEAD, key: key.value, htmlUrl: HTML, records: [record], exceptions: [] }, 'stub')).text
+      expect(unwrap(PE.parseEvidenceComment(text), row.name).records, row.name).toEqual([record])
+    }
   })
 
   it('an expired run is never VERIFIED or FAILED, whatever the other runs say (AC-3)', () => {
@@ -813,9 +840,9 @@ function hashOf(tp: Tp): string {
 }
 
 const RECORDS: readonly TpRecord[] = [
-  { id: 1, state: 'VERIFIED-CI', sha: HEAD, run: { id: 101, attempt: 2 }, exit: null, hash: hashOf(PLAN.tps[0]) },
-  { id: 2, state: 'STALE', sha: SHA_A, run: null, exit: 0, hash: hashOf(PLAN.tps[1]) },
-  { id: 3, state: 'ATTESTED-LOCAL', sha: HEAD, run: null, exit: null, hash: hashOf(PLAN.tps[2]) },
+  { id: 1, state: 'VERIFIED-CI', sha: HEAD, outcome: 'PASS', run: { id: 101, attempt: 2 }, exit: null, hash: hashOf(PLAN.tps[0]) },
+  { id: 2, state: 'STALE', sha: SHA_A, outcome: 'FAIL', run: null, exit: 1, hash: hashOf(PLAN.tps[1]) },
+  { id: 3, state: 'ATTESTED-LOCAL', sha: HEAD, outcome: 'PASS', run: null, exit: null, hash: hashOf(PLAN.tps[2]) },
 ]
 const EXCEPTIONS: readonly ExceptionRecord[] = [
   { kind: 'test-plan', login: 'octocat', at: '2026-09-25T21:00:00Z', reason: 'no plan | spike' },
@@ -869,9 +896,9 @@ describe('render', () => {
       `## Test Plan Evidence ${EM} ${HEAD.slice(0, 7)}`,
       'Verified 2/3: VERIFIED-CI 1, ATTESTED-LOCAL 1, UNVERIFIED 0, STALE 1, FAILED 0, INDETERMINATE 0',
       '',
-      `- TP-1 VERIFIED-CI sha:${HEAD} run:101/2 h:${RECORDS[0].hash}`,
-      `- TP-2 STALE sha:${SHA_A} exit:0 h:${RECORDS[1].hash}`,
-      `- TP-3 ATTESTED-LOCAL sha:${HEAD} h:${RECORDS[2].hash}`,
+      `- TP-1 VERIFIED-CI sha:${HEAD} out:PASS run:101/2 h:${RECORDS[0].hash}`,
+      `- TP-2 STALE sha:${SHA_A} out:FAIL exit:1 h:${RECORDS[1].hash}`,
+      `- TP-3 ATTESTED-LOCAL sha:${HEAD} out:PASS h:${RECORDS[2].hash}`,
       '- exception:test-plan by:@octocat at:2026-09-25T21:00:00Z status:self-attested',
     ].join('\n'))
     for (const leak of ['pipes', 'walk-through', 'spike', 'https://']) expect(r.text).not.toContain(leak)
@@ -891,7 +918,7 @@ describe('render', () => {
 
   it('full falls back to stub when over 55,000 characters, or when html_url is not a repo URL', () => {
     const big = unwrap(PE.parsePlan(Array.from({ length: 200 }, (_, i) => tpLine(i + 1, 1, 'x'.repeat(200), 'manual')).join('\n')))
-    const records = big.tps.map(tp => ({ id: tp.id, state: 'ATTESTED-LOCAL' as State, sha: HEAD, run: null, exit: null, hash: hashOf(tp) }))
+    const records = big.tps.map(tp => ({ id: tp.id, state: 'ATTESTED-LOCAL' as State, sha: HEAD, outcome: 'PASS' as const, run: null, exit: null, hash: hashOf(tp) }))
     const bigEv = evidence({ records, exceptions: [] })
     const stubText = unwrap(PE.render(big, bigEv, 'stub')).text
     expect(stubText.length).toBeLessThanOrEqual(PE.LIMITS.FULL_COMMENT_CHARS)
@@ -933,12 +960,12 @@ describe('parseEvidenceComment round-trips what render emits', () => {
   })
 
   it('reads CRLF, records a run:none label, and ignores prose and table lines', () => {
-    const noRuns: TpRecord = { id: 4, state: 'ATTESTED-LOCAL', sha: HEAD, run: 'none', exit: null, hash: 'f'.repeat(12) }
+    const noRuns: TpRecord = { id: 4, state: 'ATTESTED-LOCAL', sha: HEAD, outcome: 'PASS', run: 'none', exit: null, hash: 'f'.repeat(12) }
     const text = [
       `<!-- devflow:evidence head:${HEAD} key:${'0'.repeat(12)} -->`,
       '## Test Plan Evidence',
       '| - TP-9 VERIFIED-CI | forged inside a table |',
-      `- TP-4 ATTESTED-LOCAL sha:${HEAD} run:none h:${'f'.repeat(12)}`,
+      `- TP-4 ATTESTED-LOCAL sha:${HEAD} out:PASS run:none h:${'f'.repeat(12)}`,
       'free prose',
     ].join('\r\n')
     expect(unwrap(PE.parseEvidenceComment(text)).records).toEqual([noRuns])
@@ -946,7 +973,7 @@ describe('parseEvidenceComment round-trips what render emits', () => {
 
   it('requires the marker on the first line and refuses duplicates, disorder and oversize', () => {
     const marker = `<!-- devflow:evidence head:${HEAD} key:${'0'.repeat(12)} -->`
-    const rec = (id: number): string => `- TP-${id} UNVERIFIED sha:none h:${'e'.repeat(12)}`
+    const rec = (id: number): string => `- TP-${id} UNVERIFIED sha:none out:none h:${'e'.repeat(12)}`
     expect(errCode(PE.parseEvidenceComment(`\n${marker}\n${rec(1)}`))).toBe('malformed')
     expect(errCode(PE.parseEvidenceComment(` ${marker}\n${rec(1)}`))).toBe('malformed')
     expect(errCode(PE.parseEvidenceComment(`${marker}\n${rec(1)}\n${rec(1)}`))).toBe('duplicate')
@@ -955,6 +982,141 @@ describe('parseEvidenceComment round-trips what render emits', () => {
     expect(errCode(PE.parseEvidenceComment(`${marker}\n${twoKinds}\n${twoKinds}`))).toBe('duplicate')
     expect(errCode(PE.parseEvidenceComment(`${marker}\n${'x\n'.repeat(PE.LIMITS.COMMENT_LINES + 1)}`))).toBe('oversize')
     expect(errCode(PE.parseEvidenceComment(7))).toBe('invalid')
+  })
+})
+
+// ---------------------------------------------------------------------------
+// The record's claim outcome — `out:` carries the claim, so a refresh can
+// re-derive the state from current facts instead of guessing it from the state
+// ---------------------------------------------------------------------------
+
+const OUT_TOKENS = ['PASS', 'FAIL', 'SKIP', 'none'] as const
+type OutToken = typeof OUT_TOKENS[number]
+
+/**
+ * The (state, out) pairs a record may carry, stated here independently of the
+ * script from the ladder's own logic: a SKIP is decided by the first arm, so it is
+ * only ever UNVERIFIED; a verified state needs a PASS; a FAIL can be anything but
+ * verified; no claim (`out:none`) is UNVERIFIED, or INDETERMINATE when the record
+ * that might have held the claim could not be read.
+ */
+const ADMITTED_PAIRS: readonly string[] = [
+  ...PE.STATES.map(s => `${s}/PASS`),
+  'UNVERIFIED/FAIL', 'INDETERMINATE/FAIL', 'STALE/FAIL', 'FAILED/FAIL',
+  'UNVERIFIED/SKIP',
+  'UNVERIFIED/none', 'INDETERMINATE/none',
+].sort()
+
+const RECORD_MARKER = `<!-- devflow:evidence head:${HEAD} key:${'0'.repeat(12)} -->`
+const outRecordLine = (state: string, out: OutToken): string =>
+  `- TP-1 ${state} sha:${out === 'none' ? 'none' : HEAD} out:${out} h:${'e'.repeat(12)}`
+
+/**
+ * Named collector: the (state, out) pairs a comment parser accepts as a record,
+ * over every state × every out token (`sha:` coupled to `out:` as the grammar
+ * requires, so only the state/outcome consistency is under test here).
+ */
+function collectAdmittedPairs(parse: (text: string) => Result<{ records: readonly unknown[] }>): string[] {
+  const out: string[] = []
+  for (const state of PE.STATES) {
+    for (const token of OUT_TOKENS) {
+      const r = parse(`${RECORD_MARKER}\n${outRecordLine(state, token)}`)
+      if (r.ok && r.value.records.length === 1) out.push(`${state}/${token}`)
+    }
+  }
+  return out.sort()
+}
+
+describe('record outcome — `out:PASS|FAIL|SKIP|none` (the claim, beside the verdict)', () => {
+  it('admits exactly the (state, out) pairs the ladder can produce', () => {
+    expect(PE.STATES.length * OUT_TOKENS.length, 'the corpus is every state × every token').toBe(24)
+    expect(ADMITTED_PAIRS).toHaveLength(13)
+    expect(collectAdmittedPairs(PE.parseEvidenceComment)).toEqual(ADMITTED_PAIRS)
+  })
+
+  it('known-bad probe: a parser with no consistency check is reported', () => {
+    const permissive = (): Result<{ records: readonly unknown[] }> => ({ ok: true, value: { records: [{}] } })
+    const admitted = collectAdmittedPairs(permissive)
+    expect(admitted).toHaveLength(24)
+    expect(admitted).not.toEqual(ADMITTED_PAIRS)
+  })
+
+  it('a record whose outcome contradicts its state makes the whole comment malformed, naming the line', () => {
+    const refused = PE.STATES.flatMap(s => OUT_TOKENS.map(o => `${s}/${o}`)).filter(p => !ADMITTED_PAIRS.includes(p))
+    expect(refused).toHaveLength(11)
+    for (const pair of refused) {
+      const [state, token] = pair.split('/') as [string, OutToken]
+      const r = PE.parseEvidenceComment(`${RECORD_MARKER}\n## Test Plan Evidence\n${outRecordLine(state, token)}`)
+      expect(errCode(r), pair).toBe('malformed')
+      expect(r.ok ? 0 : r.error.line, pair).toBe(3)
+    }
+  })
+
+  it('`sha:none` goes with `out:none` and nothing else — either without the other is malformed', () => {
+    for (const line of [
+      `- TP-1 UNVERIFIED sha:${HEAD} out:none h:${'e'.repeat(12)}`,
+      `- TP-1 UNVERIFIED sha:none out:PASS h:${'e'.repeat(12)}`,
+      `- TP-1 INDETERMINATE sha:none out:FAIL h:${'e'.repeat(12)}`,
+      `- TP-1 UNVERIFIED sha:none out:SKIP h:${'e'.repeat(12)}`,
+    ]) {
+      expect(errCode(PE.parseEvidenceComment(`${RECORD_MARKER}\n${line}`)), line).toBe('malformed')
+    }
+  })
+
+  // A line outside the record grammar is not a record: it is skipped as prose, so
+  // its TP has no record, no claim, and can never be promoted by it.
+  const HOSTILE_OUT: ReadonlyArray<readonly [string, string]> = [
+    ['no out: at all (the pre-outcome grammar)', `- TP-1 INDETERMINATE sha:${HEAD} run:101/1 h:${'e'.repeat(12)}`],
+    ['lowercase', `- TP-1 INDETERMINATE sha:${HEAD} out:pass run:101/1 h:${'e'.repeat(12)}`],
+    ['mixed case', `- TP-1 INDETERMINATE sha:${HEAD} out:Pass h:${'e'.repeat(12)}`],
+    ['a longer word', `- TP-1 INDETERMINATE sha:${HEAD} out:PASSED h:${'e'.repeat(12)}`],
+    ['an empty value', `- TP-1 INDETERMINATE sha:${HEAD} out: h:${'e'.repeat(12)}`],
+    ['two outcomes', `- TP-1 INDETERMINATE sha:${HEAD} out:PASS,FAIL h:${'e'.repeat(12)}`],
+    ['a repeated token', `- TP-1 INDETERMINATE sha:${HEAD} out:FAIL out:PASS h:${'e'.repeat(12)}`],
+    ['a zero-width space', `- TP-1 INDETERMINATE sha:${HEAD} out:PASS​ h:${'e'.repeat(12)}`],
+    ['full-width letters', `- TP-1 INDETERMINATE sha:${HEAD} out:ＰＡＳＳ h:${'e'.repeat(12)}`],
+    ['a number', `- TP-1 INDETERMINATE sha:${HEAD} out:1 h:${'e'.repeat(12)}`],
+    ['a trailing marker fragment', `- TP-1 INDETERMINATE sha:${HEAD} out:PASS<!-- h:${'e'.repeat(12)}`],
+    ['a tab before it', `- TP-1 INDETERMINATE sha:${HEAD}\tout:PASS h:${'e'.repeat(12)}`],
+    ['before sha:', `- TP-1 INDETERMINATE out:PASS sha:${HEAD} h:${'e'.repeat(12)}`],
+    ['after run:', `- TP-1 INDETERMINATE sha:${HEAD} run:101/1 out:PASS h:${'e'.repeat(12)}`],
+    ['after h:', `- TP-1 INDETERMINATE sha:${HEAD} h:${'e'.repeat(12)} out:PASS`],
+  ]
+  it.each(HOSTILE_OUT.map(([label, line]) => [label, line] as const))('a hostile out: is no record — %s', (_, line) => {
+    const good = `- TP-2 INDETERMINATE sha:${HEAD} out:FAIL h:${'f'.repeat(12)}`
+    const parsed = unwrap(PE.parseEvidenceComment(`${RECORD_MARKER}\n${line}\n${good}`))
+    expect(parsed.records.map(r => r.id)).toEqual([2])
+  })
+
+  it('every admitted pair renders and parses back to the same record, and the key recomputes', () => {
+    const records: TpRecord[] = ADMITTED_PAIRS.map((pair, i) => {
+      const [state, token] = pair.split('/') as [State, OutToken]
+      return {
+        id: i + 1, state, sha: token === 'none' ? null : HEAD, outcome: token === 'none' ? null : token,
+        run: null, exit: null, hash: 'e'.repeat(12),
+      }
+    })
+    const key = unwrap(PE.dedupeKey({ records, exceptions: [] }, sha256))
+    const text = unwrap(PE.render(PLAN, { head: HEAD, key, htmlUrl: HTML, records, exceptions: [] }, 'stub')).text
+    const parsed = unwrap(PE.parseEvidenceComment(text))
+    expect(parsed.records).toEqual(records)
+    expect(unwrap(PE.dedupeKey({ records: parsed.records, exceptions: [] }, sha256))).toBe(key)
+  })
+
+  it('render and dedupeKey refuse a record with a contradicting, unknown or missing outcome', () => {
+    const variants: ReadonlyArray<readonly [string, readonly unknown[]]> = [
+      ['a verified state with a FAIL', [{ ...RECORDS[0], outcome: 'FAIL' }, RECORDS[1], RECORDS[2]]],
+      ['a lowercase outcome', [{ ...RECORDS[0], outcome: 'pass' }, RECORDS[1], RECORDS[2]]],
+      ['the string none (no claim is null)', [{ ...RECORDS[0], outcome: 'none' }, RECORDS[1], RECORDS[2]]],
+      ['a missing outcome', [{ ...RECORDS[0], outcome: undefined }, RECORDS[1], RECORDS[2]]],
+      ['a SHA with no outcome', [{ ...RECORDS[0], outcome: null }, RECORDS[1], RECORDS[2]]],
+      ['an outcome with no SHA', [RECORDS[0], { ...RECORDS[1], sha: null }, RECORDS[2]]],
+    ]
+    for (const [label, records] of variants) {
+      const ev = { head: HEAD, key: '0'.repeat(12), htmlUrl: HTML, records, exceptions: [] } as unknown as Evidence
+      expect(errCode(PE.render(PLAN, ev, 'stub')), label).toBe('invalid')
+      expect(errCode(PE.dedupeKey({ records: records as TpRecord[], exceptions: [] }, sha256)), label).toBe('invalid')
+    }
   })
 })
 
@@ -973,6 +1135,9 @@ describe('tpHash and dedupeKey', () => {
     expect(unwrap(PE.dedupeKey({ records: RECORDS, exceptions: EXCEPTIONS }, sha256))).toBe(k1)
     const moved = [{ ...RECORDS[0], state: 'STALE' as State }, ...RECORDS.slice(1)]
     expect(unwrap(PE.dedupeKey({ records: moved, exceptions: EXCEPTIONS }, sha256))).not.toBe(k1)
+    // The outcome alone moves the key: the same state resting on another claim is new evidence.
+    const flipped = [RECORDS[0], { ...RECORDS[1], outcome: 'PASS' as const }, RECORDS[2]]
+    expect(unwrap(PE.dedupeKey({ records: flipped, exceptions: EXCEPTIONS }, sha256))).not.toBe(k1)
     expect(unwrap(PE.dedupeKey({ records: RECORDS, exceptions: [] }, sha256))).not.toBe(k1)
   })
 

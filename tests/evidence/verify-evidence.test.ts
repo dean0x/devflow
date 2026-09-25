@@ -69,6 +69,7 @@ interface TpRecord {
   readonly id: number
   readonly state: State
   readonly sha: string | null
+  readonly outcome: 'PASS' | 'FAIL' | 'SKIP' | null
   readonly run: { readonly id: number; readonly attempt: number } | 'none' | null
   readonly exit: number | null
   readonly hash: string
@@ -870,13 +871,26 @@ describe('caps (D-VERIFY-CAPS, D-VERIFY-THROTTLE)', () => {
 // The trusted record and refresh mode (no --evidence)
 // ---------------------------------------------------------------------------
 
+type OutToken = 'PASS' | 'FAIL' | 'SKIP' | 'none'
+
 interface RecordSpec {
   readonly id: number
   readonly state: State
   readonly sha: string | null
   readonly line: string
+  /** The claim's outcome. Implied for no claim (none), a verified state (PASS) and FAILED-on-a-FAIL; any other record states it. */
+  readonly out?: OutToken
   readonly run?: string
   readonly exit?: number
+}
+
+/** The `out:` a record spec means: stated, or implied where the state leaves no doubt. */
+function outOf(r: RecordSpec): OutToken {
+  if (r.out !== undefined) return r.out
+  if (r.sha === null) return 'none'
+  if (r.state === 'VERIFIED-CI' || r.state === 'ATTESTED-LOCAL') return 'PASS'
+  if (r.state === 'FAILED') return 'FAIL'
+  throw new Error(`TP-${r.id}: a ${r.state} record with a SHA must state its out:`)
 }
 
 /** An evidence comment as a STUB prints it (the key is not re-checked on read). */
@@ -886,7 +900,7 @@ function recordComment(head: string, recs: readonly RecordSpec[], key = '0'.repe
     `## Test Plan Evidence ${EM} ${head.slice(0, 7)}`,
     'Verified 0/0: (prose a record reader skips)',
     '',
-    ...recs.map(r => `- TP-${r.id} ${r.state} sha:${r.sha ?? 'none'}${r.run ? ` run:${r.run}` : ''}${r.exit === undefined ? '' : ` exit:${r.exit}`} h:${h12(r.line)}`),
+    ...recs.map(r => `- TP-${r.id} ${r.state} sha:${r.sha ?? 'none'} out:${outOf(r)}${r.run ? ` run:${r.run}` : ''}${r.exit === undefined ? '' : ` exit:${r.exit}`} h:${h12(r.line)}`),
   ].join('\n')
 }
 
@@ -948,7 +962,7 @@ describe('trusted record — refresh mode reads claims from it (D-VERIFY-RECORD)
       { login: 'devbot', body: failed, viewerDidAuthor: true },
     ] } })
     expect(newestFailed.states.get(1)).toBe('FAILED')
-    const malformed = `${PE.MARKERS.EVIDENCE_OPEN} head:${HEAD} key:${'0'.repeat(12)} -->\n- TP-2 STALE sha:none h:${'0'.repeat(12)}\n- TP-1 STALE sha:none h:${'0'.repeat(12)}`
+    const malformed = `${PE.MARKERS.EVIDENCE_OPEN} head:${HEAD} key:${'0'.repeat(12)} -->\n- TP-2 UNVERIFIED sha:none out:none h:${'0'.repeat(12)}\n- TP-1 UNVERIFIED sha:none out:none h:${'0'.repeat(12)}`
     const v = verifyScn({ scn: { body, runs, comments: [
       { login: 'devbot', body: good, viewerDidAuthor: true },
       { login: 'devbot', body: malformed, viewerDidAuthor: true },
@@ -1002,37 +1016,6 @@ describe('trusted record — refresh mode reads claims from it (D-VERIFY-RECORD)
     expect(PE.parsePlan(v.stale).ok).toBe(true)
   })
 
-  it('a record whose outcome it cannot tell (STALE, INDETERMINATE) can go STALE but never pass or fail', () => {
-    const unknown = recordComment(OLD, [
-      { id: 1, state: 'INDETERMINATE', sha: HEAD, line: CI, run: '101/1' },
-      { id: 2, state: 'STALE', sha: OLD, line: LOCAL, exit: 0 },
-    ])
-    const disjoint = verifyScn({ scn: {
-      body, comments: [{ login: 'devbot', body: unknown, viewerDidAuthor: true }],
-      ancestry: { [OLD]: 'in' }, diffs: { [OLD]: ['docs/x.md'] }, runs,
-    } })
-    expect(disjoint.states.get(1), 'CI now passes, but the record never said the claim did').toBe('UNVERIFIED')
-    expect(disjoint.states.get(2), 'the diff no longer touches it, but the outcome is unknown').toBe('UNVERIFIED')
-    const touching = verifyScn({ scn: {
-      body, comments: [{ login: 'devbot', body: unknown, viewerDidAuthor: true }],
-      ancestry: { [OLD]: 'in' }, diffs: { [OLD]: ['src/a.ts'] }, runs,
-    } })
-    expect(touching.states.get(2)).toBe('STALE')
-  })
-
-  it('an unknown-outcome record is classified with a FAIL placeholder: it never reaches for the head\'s runs', () => {
-    // A PASS placeholder would read ATTESTED-LOCAL (run:none) here and consult the
-    // head's runs before the post-rule reset it; the FAIL placeholder never gets there.
-    const unknown = recordComment(OLD, [{ id: 1, state: 'INDETERMINATE', sha: OLD, line: CI, run: '101/1' }])
-    const v = verifyScn({ scn: {
-      body: `${blockOf([tpLine(1, 'the suite covers login', 'ci', ['src/**'])])}\n`,
-      comments: [{ login: 'devbot', body: unknown.replace(h12(CI), h12(tpLine(1, 'the suite covers login', 'ci', ['src/**']))), viewerDidAuthor: true }],
-      ancestry: { [OLD]: 'in' }, diffs: { [OLD]: ['docs/x.md'] }, runs: { [OLD]: [], [HEAD]: [{ id: 201 }] },
-    } })
-    expect(v.states.get(1)).toBe('UNVERIFIED')
-    expect(countArgv(v.recorded, ARGV.runList(HEAD))).toBe(0)
-  })
-
   it('no test-plan block in the body: total 0, body same, nothing to post', () => {
     const v = verifyScn({ scn: { body: 'just prose\n', comments: [{ login: 'devbot', body: good, viewerDidAuthor: true }] } })
     expect(v.code).toBe(0)
@@ -1047,6 +1030,135 @@ describe('trusted record — refresh mode reads claims from it (D-VERIFY-RECORD)
       expect(v.code).toBe(2)
       expect(v.stdout).toBe('')
     }
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Refresh promotion — a trusted record's claim (`out:`) re-classified at the
+// facts as they are now, never a state carried forward on trust
+// ---------------------------------------------------------------------------
+
+describe('refresh re-derives a recorded claim from current facts (D-VERIFY-RECORD, D-RECORD-OUTCOME)', () => {
+  const CI = tpLine(1, 'the suite covers login', 'ci', ['src/**'])
+  const LOCAL = tpLine(2, 'a local check', 'local', ['src/**'])
+  const body = `Intro text.\n\n${blockOf([CI, LOCAL])}\n`
+  const viewer = (text: string): CommentSpec => ({ login: 'devbot', body: text, viewerDidAuthor: true })
+  const ci = (over: Partial<RecordSpec> = {}): RecordSpec =>
+    ({ id: 1, state: 'INDETERMINATE', sha: HEAD, line: CI, out: 'PASS', run: '101/1', ...over })
+  const local = (over: Partial<RecordSpec> = {}): RecordSpec =>
+    ({ id: 2, state: 'INDETERMINATE', sha: HEAD, line: LOCAL, out: 'PASS', exit: 0, ...over })
+  /** The head moved from OLD, over the TPs' `src/**` files — or only past them. */
+  const movedOver: Scn = { ancestry: { [OLD]: 'in' }, diffs: { [OLD]: ['src/a.ts'] } }
+  const movedPast: Scn = { ancestry: { [OLD]: 'in' }, diffs: { [OLD]: ['docs/x.md'] } }
+
+  interface PromotionRow { readonly label: string; readonly record: RecordSpec; readonly scn: Scn; readonly want: State }
+
+  const ROWS: readonly PromotionRow[] = [
+    // A claim whose CI was still running when the record was written.
+    { label: 'INDETERMINATE (CI pending) → VERIFIED-CI once the run succeeds', record: ci(), scn: { runs: { [HEAD]: [{ id: 101 }] } }, want: 'VERIFIED-CI' },
+    { label: 'INDETERMINATE (CI pending) → FAILED once the run fails', record: ci(), scn: { runs: { [HEAD]: [{ id: 101, conclusion: 'failure' }] } }, want: 'FAILED' },
+    { label: 'INDETERMINATE stays INDETERMINATE while the run is still pending', record: ci(), scn: { runs: { [HEAD]: [{ id: 101, status: 'in_progress', conclusion: '' }] } }, want: 'INDETERMINATE' },
+    { label: 'INDETERMINATE stays INDETERMINATE once the run has expired (404)', record: ci(), scn: { runs: { [HEAD]: [{ id: 101, expired: true }] } }, want: 'INDETERMINATE' },
+    { label: 'INDETERMINATE stays INDETERMINATE while the runs cannot be listed', record: ci(), scn: { runs: { [HEAD]: 'error' } }, want: 'INDETERMINATE' },
+    { label: 'a recorded FAIL never passes, however green CI is', record: ci({ out: 'FAIL' }), scn: { runs: { [HEAD]: [{ id: 101 }] } }, want: 'FAILED' },
+    { label: 'a recorded SKIP stays UNVERIFIED, however green CI is', record: ci({ state: 'UNVERIFIED', out: 'SKIP', run: undefined }), scn: { runs: { [HEAD]: [{ id: 101 }] } }, want: 'UNVERIFIED' },
+    // The head moved since the claim.
+    { label: 'STALE wins over a now-green run when the head moved over the TP\'s files', record: ci({ sha: OLD }), scn: { ...movedOver, runs: { [OLD]: [{ id: 101, headSha: OLD }] } }, want: 'STALE' },
+    { label: 'INDETERMINATE precedes STALE: the run at the old SHA is still queued', record: ci({ sha: OLD }), scn: { ...movedOver, runs: { [OLD]: [{ id: 101, headSha: OLD, status: 'queued', conclusion: null }] } }, want: 'INDETERMINATE' },
+    { label: 'a head move past the TP\'s files keeps a now-green claim verifiable', record: ci({ sha: OLD }), scn: { ...movedPast, runs: { [OLD]: [{ id: 101, headSha: OLD }] } }, want: 'VERIFIED-CI' },
+    { label: 'a recorded ci PASS at a SHA with no runs reaches for the head\'s runs, as a file claim does', record: ci({ sha: OLD, run: 'none' }), scn: { ...movedPast, runs: { [OLD]: [], [HEAD]: [{ id: 201 }] } }, want: 'VERIFIED-CI' },
+    // A FAILED ci record may rest on a PASS claim and a failed run: a re-run settles it.
+    { label: 'FAILED (PASS claim, failed run) → VERIFIED-CI once a re-run attempt succeeds', record: ci({ state: 'FAILED' }), scn: { runs: { [HEAD]: [{ id: 101, attempt: 2 }] } }, want: 'VERIFIED-CI' },
+    // Local claims.
+    { label: 'a STALE local claim → ATTESTED-LOCAL once the diff since no longer touches its files', record: local({ state: 'STALE', sha: OLD }), scn: movedPast, want: 'ATTESTED-LOCAL' },
+    { label: 'a STALE local claim stays STALE while the diff since still touches its files', record: local({ state: 'STALE', sha: OLD }), scn: movedOver, want: 'STALE' },
+    { label: 'UNVERIFIED with a SHA (then outside the PR) → ATTESTED-LOCAL once the commit is in it', record: local({ state: 'UNVERIFIED', sha: OLD }), scn: movedPast, want: 'ATTESTED-LOCAL' },
+    { label: 'UNVERIFIED with a SHA stays UNVERIFIED while the commit is still outside the PR', record: local({ state: 'UNVERIFIED', sha: OUTSIDE }), scn: { ancestry: { [OUTSIDE]: 'out' } }, want: 'UNVERIFIED' },
+    { label: 'INDETERMINATE (ancestry then unknown) → ATTESTED-LOCAL once it resolves', record: local(), scn: {}, want: 'ATTESTED-LOCAL' },
+    { label: 'a local PASS recorded without an exit code stays UNVERIFIED', record: local({ state: 'UNVERIFIED', exit: undefined }), scn: {}, want: 'UNVERIFIED' },
+    { label: 'a local FAIL stays FAILED', record: local({ out: 'FAIL', exit: 1 }), scn: {}, want: 'FAILED' },
+  ]
+
+  for (const row of ROWS) {
+    it(row.label, () => {
+      const v = verifyScn({ scn: { body, comments: [viewer(recordComment(HEAD, [row.record]))], ...row.scn } })
+      expect(v.code, v.stderr).toBe(0)
+      expect(v.states.get(row.record.id)).toBe(row.want)
+      // The refreshed record rests on the same claim, so the next refresh can decide again.
+      expect(v.records.find(r => r.id === row.record.id)).toMatchObject({ sha: row.record.sha, outcome: outOf(row.record) })
+    })
+  }
+
+  /** Named collector: the non-verified record states the table promotes a claim out of. */
+  function collectPromotedFrom(rows: readonly PromotionRow[]): State[] {
+    const verified: readonly State[] = ['VERIFIED-CI', 'ATTESTED-LOCAL']
+    return [...new Set(rows.filter(r => !verified.includes(r.record.state) && verified.includes(r.want)).map(r => r.record.state))].sort()
+  }
+
+  it('the table promotes out of every non-verified state a claim can rest in', () => {
+    expect(ROWS.length).toBeGreaterThanOrEqual(15)
+    expect(collectPromotedFrom(ROWS)).toEqual(['FAILED', 'INDETERMINATE', 'STALE', 'UNVERIFIED'])
+  })
+
+  it('known-bad probe: a table without its STALE promotions is reported', () => {
+    expect(collectPromotedFrom(ROWS.filter(r => r.record.state !== 'STALE'))).toEqual(['FAILED', 'INDETERMINATE', 'UNVERIFIED'])
+  })
+
+  it('an untrusted author\'s record never promotes, whatever it records', () => {
+    const pending = recordComment(HEAD, [ci()])
+    const verified = recordComment(HEAD, [ci({ state: 'VERIFIED-CI' })])
+    const AUTHORS: ReadonlyArray<readonly [string, CommentSpec, Scn['permissions']]> = [
+      ['a CONTRIBUTOR recording a pending PASS', { login: 'drive', association: 'CONTRIBUTOR', body: pending }, {}],
+      ['a COLLABORATOR with read recording a pending PASS', { login: 'tri', association: 'COLLABORATOR', body: pending }, { tri: 'read' }],
+      ['a CONTRIBUTOR recording VERIFIED-CI', { login: 'drive', association: 'CONTRIBUTOR', body: verified }, {}],
+    ]
+    for (const [label, comment, permissions] of AUTHORS) {
+      const v = verifyScn({ scn: { body, runs: { [HEAD]: [{ id: 101 }] }, comments: [comment], permissions } })
+      expect(v.states.get(1), label).toBe('UNVERIFIED')
+      expect(v.records.find(r => r.id === 1), label).toMatchObject({ sha: null, outcome: null })
+    }
+  })
+
+  it('a newer untrusted record cannot replace the trusted record\'s outcome', () => {
+    const v = verifyScn({ scn: { body, runs: { [HEAD]: [{ id: 101 }] }, comments: [
+      viewer(recordComment(HEAD, [ci({ out: 'FAIL' })])),
+      { login: 'drive', association: 'CONTRIBUTOR', body: recordComment(HEAD, [ci({ out: 'PASS' })]) },
+    ] } })
+    expect(v.states.get(1)).toBe('FAILED')
+  })
+
+  it('a record whose hash no longer matches the body\'s TP text never promotes it', () => {
+    const edited = body.replace('the suite covers login', 'the suite covers everything')
+    const v = verifyScn({ scn: { body: edited, runs: { [HEAD]: [{ id: 101 }] }, comments: [viewer(recordComment(HEAD, [ci()]))] } })
+    expect(v.states.get(1)).toBe('UNVERIFIED')
+    expect(v.records.find(r => r.id === 1)).toMatchObject({ sha: null, outcome: null })
+  })
+
+  it('a record line without `out:` is no record: it is never read as a PASS', () => {
+    const outless = recordComment(HEAD, [ci()]).replace(' out:PASS', '')
+    expect(outless).not.toContain('out:')
+    const v = verifyScn({ scn: { body, runs: { [HEAD]: [{ id: 101 }] }, comments: [viewer(outless)] } })
+    expect(v.states.get(1)).toBe('UNVERIFIED')
+  })
+
+  it('a newest trusted record whose outcome contradicts its state is no record — never the older one', () => {
+    const v = verifyScn({ scn: { body, runs: { [HEAD]: [{ id: 101 }] }, comments: [
+      viewer(recordComment(HEAD, [ci({ state: 'VERIFIED-CI' })])),
+      viewer(recordComment(HEAD, [ci({ state: 'VERIFIED-CI', out: 'FAIL' })])),
+    ] } })
+    expect(v.states.get(1)).toBe('UNVERIFIED')
+  })
+
+  it('end to end: the pending record verify writes is the record a later refresh promotes', () => {
+    const file = evidenceFile([CI, LOCAL], [claimLine(1, 'PASS', HEAD), claimLine(2, 'PASS', HEAD, 0)])
+    const pending = verifyScn({ scn: { body, runs: { [HEAD]: [{ id: 101, status: 'in_progress', conclusion: '' }] } }, evidence: file })
+    expect(pending.states.get(1)).toBe('INDETERMINATE')
+    expect(pending.comment).toContain(`- TP-1 INDETERMINATE sha:${HEAD} out:PASS run:101/1 h:${h12(CI)}`)
+    const later = verifyScn({ scn: { body, runs: { [HEAD]: [{ id: 101 }] }, comments: [viewer(pending.comment.trimEnd())] } })
+    expect(later.code, later.stderr).toBe(0)
+    expect(later.states.get(1)).toBe('VERIFIED-CI')
+    expect(later.states.get(2)).toBe('ATTESTED-LOCAL')
+    expect(later.fields?.posted, 'the state moved, so the key is new and the evidence posts').toBe('no')
   })
 })
 
@@ -1084,6 +1196,13 @@ describe('evidence mode merges the file over the record', () => {
     const v = verifyScn({ scn: { body: edited, comments, runs }, evidence: '## Claims\n' + claimLine(2, 'PASS', HEAD, 0) + '\n' })
     expect(v.states.get(1)).toBe('VERIFIED-CI')
     expect(v.states.get(2)).toBe('UNVERIFIED')
+    // The record written binds no claim to the unrecorded text, so the next refresh —
+    // whose hash check that new record now passes — cannot launder the claim onto it.
+    expect(v.records.find(r => r.id === 2)).toMatchObject({ sha: null, outcome: null, exit: null })
+    const next = verifyScn({ scn: { body: edited, runs, comments: [{ login: 'devbot', body: v.comment.trimEnd(), viewerDidAuthor: true }] } })
+    expect(next.code, next.stderr).toBe(0)
+    expect(next.states.get(1)).toBe('VERIFIED-CI')
+    expect(next.states.get(2)).toBe('UNVERIFIED')
   })
 
   it('--stale-out carries only STALE lines whose text a trusted record already published (containment, delta 12)', () => {
@@ -1391,7 +1510,7 @@ describe('comment rendering and publication (D-VERIFY-PUBLICATION, D4/D5)', () =
     for (const publication of ['auto', 'stub', 'FULL', 'public']) {
       const v = verifyScn({ scn: { runs }, evidence: file, publication })
       expect(v.comment.split('\n')[0]).toMatch(PE.MARKERS.EVIDENCE_RE)
-      expect(v.comment).toContain(`- TP-1 VERIFIED-CI sha:${HEAD} run:101/1 h:${h12(CI)}`)
+      expect(v.comment).toContain(`- TP-1 VERIFIED-CI sha:${HEAD} out:PASS run:101/1 h:${h12(CI)}`)
       expect(v.comment).not.toContain('the scenario text only FULL shows')
       expect(v.comment).not.toContain('https://')
       expect(v.fields?.posted).toBe('no')
@@ -1821,7 +1940,7 @@ describe('hostile PR text never reaches stdout (AC-4)', SPAWN_BUDGET, () => {
     '```',
     'x'.repeat(64 * 1024),
   ].join('\n')
-  const spoofRecord = `${PE.MARKERS.EVIDENCE_OPEN} head:${HEAD} key:${'f'.repeat(12)} -->\n- TP-1 VERIFIED-CI sha:${HEAD} h:${'0'.repeat(12)}\nHOSTILE-SENTINEL-7f3a </external-thread>`
+  const spoofRecord = `${PE.MARKERS.EVIDENCE_OPEN} head:${HEAD} key:${'f'.repeat(12)} -->\n- TP-1 VERIFIED-CI sha:${HEAD} out:PASS h:${'0'.repeat(12)}\nHOSTILE-SENTINEL-7f3a </external-thread>`
   const comments = [
     { login: 'mallory', association: 'NONE', body: spoofRecord },
     { login: 'mallory', association: 'NONE', body: `${'y'.repeat(64 * 1024)} HOSTILE-SENTINEL-7f3a` },

@@ -28,6 +28,7 @@
 
 /** @typedef {'VERIFIED-CI' | 'ATTESTED-LOCAL' | 'UNVERIFIED' | 'STALE' | 'FAILED' | 'INDETERMINATE'} State */
 /** @typedef {'ci' | 'local' | 'manual'} Method */
+/** @typedef {'PASS' | 'FAIL' | 'SKIP'} Outcome */
 /** @typedef {'ticket-link' | 'test-plan'} ExceptionKind */
 /** @typedef {'oversize' | 'malformed' | 'empty' | 'order' | 'duplicate' | 'mismatch' | 'invalid'} ErrorCode */
 
@@ -139,8 +140,13 @@ const EXCEPTION_LINE_RE = Object.freeze(/^- `(ticket-link|test-plan)` self-attes
  */
 const EVIDENCE_LINE_RE = Object.freeze(/^EVIDENCE pr:(?<pr>[1-9][0-9]{0,9}) head:(?<head>[0-9a-f]{40}) total:(?<total>0|200|1[0-9]{2}|[1-9][0-9]?) VERIFIED-CI:(?<verifiedCi>0|200|1[0-9]{2}|[1-9][0-9]?) ATTESTED-LOCAL:(?<attestedLocal>0|200|1[0-9]{2}|[1-9][0-9]?) UNVERIFIED:(?<unverified>0|200|1[0-9]{2}|[1-9][0-9]?) STALE:(?<staleCount>0|200|1[0-9]{2}|[1-9][0-9]?) FAILED:(?<failed>0|200|1[0-9]{2}|[1-9][0-9]?) INDETERMINATE:(?<indeterminate>0|200|1[0-9]{2}|[1-9][0-9]?) stale:(?<stale>none|TP-(?:200|1[0-9]{2}|[1-9][0-9]?)(?:,TP-(?:200|1[0-9]{2}|[1-9][0-9]?)){0,199}) exceptions:(?<exceptions>none|ticket-link(?:,test-plan)?|test-plan) approval:(?<approval>yes|no|unchecked) key:(?<key>[0-9a-f]{12}) posted:(?<posted>yes|no|n\/a) body:(?<body>same|changed)$/);
 
-/** One TP record of an evidence comment: `- TP-n STATE sha:<40|none>[ run:<id>/<n>|run:none][ exit:<k>] h:<12hex>`. */
-const TP_RECORD_RE = /^- TP-(?<id>200|1[0-9]{2}|[1-9][0-9]?) (?<state>VERIFIED-CI|ATTESTED-LOCAL|UNVERIFIED|STALE|FAILED|INDETERMINATE) sha:(?<sha>[0-9a-f]{40}|none)(?: run:(?:(?<runId>[1-9][0-9]{0,14})\/(?<attempt>[1-9][0-9]{0,2})|(?<noRuns>none)))?(?: exit:(?<exit>25[0-5]|2[0-4][0-9]|1[0-9]{2}|[1-9]?[0-9]))? h:(?<hash>[0-9a-f]{12})$/;
+/**
+ * One TP record of an evidence comment:
+ *   - TP-n STATE sha:<40|none> out:<PASS|FAIL|SKIP|none>[ run:<id>/<n>| run:none][ exit:<k>] h:<12hex>
+ * `sha:`, `out:` and `exit:` are the claim the verdict rests on; RECORD_STATES
+ * holds which states each `out:` may carry.
+ */
+const TP_RECORD_RE = /^- TP-(?<id>200|1[0-9]{2}|[1-9][0-9]?) (?<state>VERIFIED-CI|ATTESTED-LOCAL|UNVERIFIED|STALE|FAILED|INDETERMINATE) sha:(?<sha>[0-9a-f]{40}|none) out:(?<outcome>PASS|FAIL|SKIP|none)(?: run:(?:(?<runId>[1-9][0-9]{0,14})\/(?<attempt>[1-9][0-9]{0,2})|(?<noRuns>none)))?(?: exit:(?<exit>25[0-5]|2[0-4][0-9]|1[0-9]{2}|[1-9]?[0-9]))? h:(?<hash>[0-9a-f]{12})$/;
 
 /** One exception record of an evidence comment. */
 const EXCEPTION_RECORD_RE = /^- exception:(?<kind>ticket-link|test-plan) by:(?:@(?<login>[A-Za-z0-9][A-Za-z0-9-]{0,38})|unavailable) at:(?<at>[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z) status:self-attested$/;
@@ -197,6 +203,33 @@ const PASSING_CONCLUSIONS = new Set(['success', 'skipped', 'neutral']);
 const FAILING_CONCLUSIONS = new Set(['failure', 'timed_out', 'startup_failure']);
 const UNSETTLED_CONCLUSIONS = new Set(['cancelled', 'action_required', 'stale']);
 
+/** A claim's outcome, as CLAIM_LINE_RE admits it. */
+const CLAIM_OUTCOMES = Object.freeze(/** @type {Outcome[]} */ (['PASS', 'FAIL', 'SKIP']));
+
+/**
+ * D-RECORD-OUTCOME: a record carries the claim's outcome (`out:`) beside the
+ * verdict, because the verdict alone cannot tell it — an INDETERMINATE, STALE or
+ * UNVERIFIED record may rest on a PASS or a FAIL. With the outcome, a later
+ * refresh re-derives the state from the facts as they are then (a pending run now
+ * green ⇒ VERIFIED-CI) instead of needing a new claim.
+ *
+ * The states each outcome may carry — exactly what the ladder can produce: a
+ * verified state needs a PASS; a FAIL can be anything but verified; a SKIP is
+ * decided by the first arm, so it is only ever UNVERIFIED; no claim (null, printed
+ * `out:none` beside `sha:none`) is UNVERIFIED, or INDETERMINATE when the record
+ * that might have held the claim could not be read. A record outside this table
+ * is refused — `malformed` by the parser, `invalid` by render and dedupeKey — so
+ * no contradictory record is ever printed or read back.
+ *
+ * @type {ReadonlyMap<Outcome | null, readonly State[]>}
+ */
+const RECORD_STATES = new Map(/** @type {Array<[Outcome | null, readonly State[]]>} */ ([
+  ['PASS', STATES],
+  ['FAIL', Object.freeze(/** @type {State[]} */ (['UNVERIFIED', 'INDETERMINATE', 'STALE', 'FAILED']))],
+  ['SKIP', Object.freeze(/** @type {State[]} */ (['UNVERIFIED']))],
+  [null, Object.freeze(/** @type {State[]} */ (['UNVERIFIED', 'INDETERMINATE']))],
+]));
+
 /** D-TRUST: the associations the association arm considers, and the permissions that satisfy it. */
 const TRUSTED_ASSOCIATIONS = Object.freeze(['OWNER', 'MEMBER', 'COLLABORATOR']);
 const TRUSTED_PERMISSIONS = Object.freeze(['admin', 'write']);
@@ -214,7 +247,7 @@ const TRUSTED_PERMISSIONS = Object.freeze(['admin', 'write']);
  * @typedef {{ tps: readonly Tp[] }} Plan
  *
  * @typedef {{ target: string, tp: number | null, gate: 'validate' | 'qa' | null,
- *   outcome: 'PASS' | 'FAIL' | 'SKIP', sha: string, by: 'test' | 'validate', exit: number | null }} Claim
+ *   outcome: Outcome, sha: string, by: 'test' | 'validate', exit: number | null }} Claim
  * @typedef {{ tp: Map<number, Claim>, gates: { validate: Claim | null, qa: Claim | null },
  *   malformed: number, truncated: boolean }} Claims
  *
@@ -244,8 +277,11 @@ const TRUSTED_PERMISSIONS = Object.freeze(['admin', 'write']);
  *
  * @typedef {{ id: number, attempt: number } | 'none' | null} RunRef
  *   The run a verdict rests on; 'none' labels a ci PASS whose SHA has no runs at all.
- * @typedef {{ state: State, sha: string | null, run: RunRef, exit: number | null }} Verdict
- * @typedef {{ id: number, state: State, sha: string | null, run: RunRef, exit: number | null, hash: string }} TpRecord
+ * @typedef {{ state: State, sha: string | null, outcome: Outcome | null, run: RunRef, exit: number | null }} Verdict
+ *   `sha`, `outcome` and `exit` are the valid claim's (all null without one).
+ * @typedef {{ id: number, state: State, sha: string | null, outcome: Outcome | null, run: RunRef,
+ *   exit: number | null, hash: string }} TpRecord
+ *   One record line; `outcome` null prints `out:none` (see D-RECORD-OUTCOME).
  * @typedef {{ kind: ExceptionKind, login: string | null, at: string, reason: string | null }} ExceptionRecord
  *   `reason` is null when read back from an evidence comment (reasons are not records).
  * @typedef {{ head: string, key: string, htmlUrl: string, records: readonly TpRecord[],
@@ -440,7 +476,7 @@ function parseClaimLine(line) {
     target: g.target,
     tp: g.tp === undefined ? null : Number(g.tp),
     gate: g.gate === undefined ? null : /** @type {'validate' | 'qa'} */ (g.gate),
-    outcome: /** @type {'PASS' | 'FAIL' | 'SKIP'} */ (g.outcome),
+    outcome: /** @type {Outcome} */ (g.outcome),
     sha: g.sha,
     by: /** @type {'test' | 'validate'} */ (g.by),
     exit: g.exit === undefined ? null : Number(g.exit),
@@ -853,6 +889,9 @@ const ARMS = Object.freeze([
  */
 const PRECEDENCE = Object.freeze(/** @type {State[]} */ (ARMS.map(arm => arm.state)));
 
+/** The verdict for a TP that is not a TP: UNVERIFIED, resting on no claim. */
+const NO_VERDICT = Object.freeze(/** @type {Verdict} */ ({ state: 'UNVERIFIED', sha: null, outcome: null, run: null, exit: null }));
+
 /**
  * Classify one TP from the facts the caller gathered (see the Facts typedef).
  * Pure and total: any malformed fact reads as unresolved, never as a pass.
@@ -863,12 +902,12 @@ const PRECEDENCE = Object.freeze(/** @type {State[]} */ (ARMS.map(arm => arm.sta
  */
 function classify(tp, facts) {
   const f = /** @type {Facts} */ (isObject(facts) ? facts : {});
-  if (!isTp(tp)) return Object.freeze({ state: /** @type {State} */ ('UNVERIFIED'), sha: null, run: null, exit: null });
+  if (!isTp(tp)) return NO_VERDICT;
   const raw = /** @type {unknown} */ (f.claim);
   const claim = isObject(raw)
     && /** @type {Claim} */ (raw).tp === tp.id
     && isSha40(/** @type {Claim} */ (raw).sha)
-    && ['PASS', 'FAIL', 'SKIP'].includes(/** @type {Claim} */ (raw).outcome)
+    && CLAIM_OUTCOMES.includes(/** @type {Claim} */ (raw).outcome)
     && (/** @type {Claim} */ (raw).exit === null || isIntIn(/** @type {Claim} */ (raw).exit, 0, 255))
     ? /** @type {Claim} */ (raw)
     : null;
@@ -886,13 +925,14 @@ function classify(tp, facts) {
       return Object.freeze({
         state: arm.state,
         sha: claim === null ? null : claim.sha,
+        outcome: claim === null ? null : claim.outcome,
         run: arm.run === undefined ? null : arm.run(input),
         exit: claim === null ? null : claim.exit,
       });
     }
   }
   // Unreachable: the last arm always matches. Kept total for the type.
-  return Object.freeze({ state: /** @type {State} */ ('UNVERIFIED'), sha: null, run: null, exit: null });
+  return NO_VERDICT;
 }
 
 // ---------------------------------------------------------------------------
@@ -935,6 +975,22 @@ function tallyLine(t) {
 // ---------------------------------------------------------------------------
 
 /**
+ * D-RECORD-OUTCOME: whether a record's claim and verdict agree — a SHA exactly
+ * when there is an outcome, and a state RECORD_STATES admits for that outcome. An
+ * outcome outside the vocabulary (a missing one included) admits no state.
+ *
+ * @param {unknown} state
+ * @param {unknown} sha
+ * @param {unknown} outcome
+ * @returns {boolean}
+ */
+function recordConsistent(state, sha, outcome) {
+  if ((sha === null) !== (outcome === null)) return false;
+  const states = RECORD_STATES.get(/** @type {Outcome | null} */ (outcome));
+  return states !== undefined && states.includes(/** @type {State} */ (state));
+}
+
+/**
  * @param {unknown} rec
  * @returns {rec is TpRecord}
  */
@@ -949,6 +1005,7 @@ function isRecord(rec) {
   return isIntIn(r.id, 1, LIMITS.TP_MAX)
     && typeof r.state === 'string' && STATES.includes(/** @type {State} */ (r.state))
     && (r.sha === null || isSha40(r.sha))
+    && recordConsistent(r.state, r.sha, r.outcome)
     && runOk
     && (r.exit === null || isIntIn(r.exit, 0, 255))
     && typeof r.hash === 'string' && /^[0-9a-f]{12}$/.test(r.hash);
@@ -974,7 +1031,8 @@ function isExceptionRecord(e) {
 function recordLine(r) {
   const run = r.run === 'none' ? ' run:none' : r.run === null ? '' : ' run:' + r.run.id + '/' + r.run.attempt;
   const exit = r.exit === null ? '' : ' exit:' + r.exit;
-  return '- TP-' + r.id + ' ' + r.state + ' sha:' + (r.sha === null ? 'none' : r.sha) + run + exit + ' h:' + r.hash;
+  return '- TP-' + r.id + ' ' + r.state + ' sha:' + (r.sha === null ? 'none' : r.sha)
+    + ' out:' + (r.outcome === null ? 'none' : r.outcome) + run + exit + ' h:' + r.hash;
 }
 
 /**
@@ -1230,8 +1288,11 @@ function parseBlock(text) {
 
 /**
  * Parse an evidence comment: the marker on the first line, then any TP and
- * exception records (other lines — prose, headings, table rows — are skipped).
- * TP ids ascend strictly; each exception kind appears at most once.
+ * exception records (other lines — prose, headings, table rows, and any line
+ * outside the record grammar — are skipped, so such a TP simply has no record).
+ * TP ids ascend strictly; each exception kind appears at most once; a TP record
+ * whose claim contradicts its state (D-RECORD-OUTCOME) makes the whole comment
+ * `malformed`, since no ladder wrote it.
  *
  * @param {unknown} text
  * @returns {Result<{ head: string, key: string, records: readonly TpRecord[], exceptions: readonly ExceptionRecord[] }>}
@@ -1256,6 +1317,9 @@ function parseEvidenceComment(text) {
       const last = records.length > 0 ? records[records.length - 1].id : 0;
       if (id === last) return fail('duplicate', i + 1);
       if (id < last) return fail('order', i + 1);
+      const sha = g.sha === 'none' ? null : g.sha;
+      const outcome = g.outcome === 'none' ? null : /** @type {Outcome} */ (g.outcome);
+      if (!recordConsistent(g.state, sha, outcome)) return fail('malformed', i + 1);
       /** @type {RunRef} */
       let run = null;
       if (g.noRuns !== undefined) run = 'none';
@@ -1263,7 +1327,8 @@ function parseEvidenceComment(text) {
       records.push(Object.freeze({
         id,
         state: /** @type {State} */ (g.state),
-        sha: g.sha === 'none' ? null : g.sha,
+        sha,
+        outcome,
         run,
         exit: g.exit === undefined ? null : Number(g.exit),
         hash: g.hash,
