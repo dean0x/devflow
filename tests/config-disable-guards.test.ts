@@ -245,6 +245,9 @@ describe('config guard: session-start-context', () => {
   function runContextHook(input: string, home: string = tmpHome): string {
     return execSync(`bash "${HOOK}"`, {
       input,
+      // Never the inherited cwd (the developer's repo): the empty-CWD row relies on
+      // the hook's guard alone, and a regression there would resolve this directory.
+      cwd: tmpDir,
       env: hookEnv(home),
       stdio: ['pipe', 'pipe', 'pipe'],
     }).toString().trim();

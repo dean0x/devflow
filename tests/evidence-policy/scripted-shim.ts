@@ -28,9 +28,10 @@
  *
  * Environment hygiene (PF-060): every spawn in tests/evidence-policy/ takes its
  * env from scopedEnv(), which points HOME and DEVFLOW_DIR at a tmp dir — otherwise
- * the developer's real ~/.devflow/manifest.json decides the compliance default. A
+ * the developer's real ~/.devflow/manifest.json decides the compliance default —
+ * and names its cwd, so none inherits vitest's (the developer's repository). A
  * source guard in resolver.test.ts (collectUnscopedSpawns) fails any spawn call in
- * this directory that does not pass through it.
+ * this directory that skips either.
  */
 
 import { spawnSync } from 'child_process';
@@ -447,6 +448,7 @@ export function realGit(cwd: string, home: string, args: readonly string[]): str
 /** Create a FIFO for the never-opened test; returns false where mkfifo is unavailable. */
 export function makeFifo(fifoPath: string, home: string): boolean {
   const r = spawnSync('mkfifo', [fifoPath], {
+    cwd: home,
     env: scopedEnv(home),
     stdio: ['ignore', 'pipe', 'pipe'],
     timeout: 10_000,

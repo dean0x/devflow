@@ -127,6 +127,17 @@ const LINE = {
   standardInputs: 'ISSUE_REQUIRED=false APPLY_CONVENTIONS=false REQUIRE_NON_AUTHOR_APPROVAL=false',
 };
 
+/**
+ * Per-test budget for every describe block that spawns real subprocesses (the
+ * script under node with the bash fakes, or real git). Alone each such test runs
+ * well inside vitest's 5 s default, but under the full suite many workers spawn at
+ * once and one node or git spawn can take seconds — the real-git rows (about ten
+ * spawns each) timed out at 5 s there. Only the wall-clock budget changes; every
+ * assertion is the same. Each spawn keeps its own bound (runResolver 30 s,
+ * realGit 20 s), so a genuinely hung child still fails the test.
+ */
+const SUBPROCESS_TIMEOUT = { timeout: 20_000 } as const;
+
 let tmp: string;
 let home: string;
 let root: string;
@@ -638,7 +649,7 @@ describe('named rows — exact lines', () => {
 // Exhaustiveness (avoids PF-075: every declared value reachable, nothing outside it)
 // ---------------------------------------------------------------------------
 
-describe('SOURCES and WARNINGS exhaustiveness', () => {
+describe('SOURCES and WARNINGS exhaustiveness', SUBPROCESS_TIMEOUT, () => {
   const GOVERNING_STATES = ['absent', 'invalid', 'required', 'standard'] as const;
   const EXPECTED_SOURCE: Record<'reachable' | 'unavailable', Record<(typeof GOVERNING_STATES)[number], Source>> = {
     reachable: { absent: 'default', invalid: 'invalid', required: 'file', standard: 'file' },
@@ -835,7 +846,7 @@ const LS_REMOTE_CALL = ['git', 'ls-remote', '--symref', 'origin', 'HEAD'];
 const VERIFY_CALL = ['git', 'rev-parse', '--verify', '--quiet', 'refs/remotes/origin/main'];
 const TRACKING_CALL = ['git', 'cat-file', 'blob', 'refs/remotes/origin/main:.devflow/policy.json'];
 
-describe('argv log — exact sequences through the real spawnSync', () => {
+describe('argv log — exact sequences through the real spawnSync', SUBPROCESS_TIMEOUT, () => {
   it('reachable + present: probe, contents (GET), HEAD blob — nothing else', () => {
     writeWorktree(root, BODY.required);
     const run = e2e(scenarioCalls({
@@ -989,12 +1000,109 @@ describe('per-call bounds (in-process recording)', () => {
     expect(RESOLVER.formatLine(res)).toBe(RESOLVER.FAIL_CLOSED_LINE);
   });
 
-  it('a malformed exec result reads as a failed call, not a crash', () => {
+  it('a malformed exec result is not an answer: it fails closed, never a crash and never "not a repository"', () => {
     const res = RESOLVER.resolve({ dir: root, compliance: DISABLED }, {
       exec: () => null as unknown as ReturnType<ExecFn>,
     });
+    expect(RESOLVER.formatLine(res)).toBe(RESOLVER.FAIL_CLOSED_LINE);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Fail-closed when local git does not ANSWER (avoids PF-075)
+//
+// Only an answered non-zero exit is a real "no" (not a repository, no such path,
+// no such ref). A git that is missing, timed out, overflowed or was killed has not
+// answered, and each local-git step must then land on the conservative verdict —
+// never the permissive one reached by exhaustion. The remote steps (the gh probe,
+// the contents call, ls-remote) keep their designed "remote unavailable" reading,
+// flagged in WARN; these rows cover the LOCAL steps the offline fold relies on.
+// ---------------------------------------------------------------------------
+
+describe('fail-closed when local git does not answer', () => {
+  /** A scripted table with one call replaced by a spawn-level failure. */
+  function withFailure(base: readonly ScriptedCall[], args: readonly string[], spawnError: string): ScriptedCall[] {
+    return [{ tool: 'git', args, spawnError }, ...base];
+  }
+
+  it.each(['ENOENT', 'ETIMEDOUT', 'ENOBUFS', 'EACCES'])(
+    'step 1 (rev-parse --show-toplevel) %s ⇒ the fail-closed resolution, and no further call',
+    (code) => {
+      writeWorktree(root, BODY.standard);
+      const { exec, recorded } = scriptedExec(withFailure(scenarioCalls({ root }), ARGV.toplevel, code));
+      const res = RESOLVER.resolve({ dir: root, compliance: DISABLED }, { exec });
+      expect(RESOLVER.formatLine(res)).toBe(RESOLVER.FAIL_CLOSED_LINE);
+      expect(recorded.map(c => [c.file, ...c.args])).toEqual([TOPLEVEL_CALL]);
+    },
+  );
+
+  it('step 1 killed by a signal (no status, no error) ⇒ the fail-closed resolution', () => {
+    const res = RESOLVER.resolve({ dir: root, compliance: DISABLED }, {
+      exec: () => ({ status: null, stdout: Buffer.alloc(0), stderr: Buffer.alloc(0) }),
+    });
+    expect(RESOLVER.formatLine(res)).toBe(RESOLVER.FAIL_CLOSED_LINE);
+  });
+
+  it.each([
+    ['a relative path', 'repo\n'],
+    ['an empty answer', '\n'],
+    ['a path carrying a second line', `${'/tmp/a'}\n/tmp/b\n`],
+  ])('step 1 exit 0 with an unusable root (%s) ⇒ the fail-closed resolution', (_label, stdout) => {
+    const res = resolveWith([{ tool: 'git', args: ARGV.toplevel, stdout }]);
+    expect(RESOLVER.formatLine(res)).toBe(RESOLVER.FAIL_CLOSED_LINE);
+  });
+
+  it('control: step 1 ANSWERED non-zero (not a repository) still resolves from compliance', () => {
+    const res = resolveWith([{ tool: 'git', args: ARGV.toplevel, exit: 128, stderr: 'fatal: not a git repository\n' }]);
+    expect(res.source).toBe('default');
+    expect(res.policy).toBe('standard');
+  });
+
+  it.each(['ETIMEDOUT', 'ENOBUFS'])(
+    'offline: the tracking-ref check %s ⇒ T invalid, so a standard worktree cannot govern alone',
+    (code) => {
+      writeWorktree(root, BODY.standard);
+      const base = scenarioCalls({
+        root, lsRemoteBranch: 'main', tracking: { bytes: BODY.required }, head: { bytes: BODY.standard },
+      });
+      const res = resolveWith(withFailure(base, ARGV.verifyTracking('main'), code));
+      expect(RESOLVER.formatLine(res)).toBe(
+        `EVIDENCE_POLICY=required SOURCE=worktree REF=main WARN=remote-unavailable,invalid-file,pr-changes-policy ${LINE.requiredInputs}`,
+      );
+    },
+  );
+
+  it('offline: the tracking blob read timing out ⇒ T invalid (never absent)', () => {
+    writeWorktree(root, BODY.standard);
+    const base = scenarioCalls({
+      root, lsRemoteBranch: 'main', tracking: { bytes: BODY.required }, head: { bytes: BODY.standard },
+    });
+    const res = resolveWith(withFailure(base, ARGV.trackingBlob('main'), 'ETIMEDOUT'));
+    expect(res.policy).toBe('required');
+    expect(res.warnings).toEqual(['remote-unavailable', 'invalid-file', 'pr-changes-policy']);
+  });
+
+  it('control: an ANSWERED missing tracking ref is "B unknown" — the worktree governs, nothing raises', () => {
+    writeWorktree(root, BODY.standard);
+    const res = resolveWith(scenarioCalls({ root, lsRemoteBranch: 'main', tracking: 'no-ref', head: { bytes: BODY.standard } }));
     expect(RESOLVER.formatLine(res))
-      .toBe(`EVIDENCE_POLICY=standard SOURCE=default REF=none WARN=remote-unavailable ${LINE.standardInputs}`);
+      .toBe(`EVIDENCE_POLICY=standard SOURCE=worktree REF=main WARN=remote-unavailable ${LINE.standardInputs}`);
+  });
+
+  it('online: the HEAD blob read timing out only fires the advisory token — H is never folded', () => {
+    writeWorktree(root, BODY.standard);
+    const base = scenarioCalls({ root, defaultBranch: 'main', remote: { bytes: BODY.standard }, head: { bytes: BODY.standard } });
+    const res = resolveWith(withFailure(base, ARGV.headBlob, 'ETIMEDOUT'));
+    expect(RESOLVER.formatLine(res))
+      .toBe(`EVIDENCE_POLICY=standard SOURCE=file REF=main WARN=pr-changes-policy ${LINE.standardInputs}`);
+  });
+
+  it('main(): git missing at step 1 ⇒ exit 4 with FAIL_CLOSED_LINE', () => {
+    vi.stubEnv('DEVFLOW_DIR', path.join(home, '.devflow'));
+    vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
+    const { exec } = scriptedExec(withFailure(scenarioCalls({ root }), ARGV.toplevel, 'ENOENT'));
+    expect(RESOLVER.main(['node', RESOLVER_SCRIPT, root], { exec }))
+      .toEqual({ code: 4, line: RESOLVER.FAIL_CLOSED_LINE });
   });
 });
 
@@ -1002,7 +1110,7 @@ describe('per-call bounds (in-process recording)', () => {
 // Injection — file content and remote strings never reach stdout
 // ---------------------------------------------------------------------------
 
-describe('injection — every hostile input yields one grammar line', () => {
+describe('injection — every hostile input yields one grammar line', SUBPROCESS_TIMEOUT, () => {
   const FALLBACK = `EVIDENCE_POLICY=standard SOURCE=default REF=none WARN=remote-unavailable ${LINE.standardInputs}`;
 
   it.each([
@@ -1062,7 +1170,7 @@ describe('injection — every hostile input yields one grammar line', () => {
 // Exit arms
 // ---------------------------------------------------------------------------
 
-describe('exit arms', () => {
+describe('exit arms', SUBPROCESS_TIMEOUT, () => {
   function preloadThrowingSpawn(): string {
     const preload = path.join(tmp, 'throw-on-spawn.cjs');
     fs.writeFileSync(preload, "require('child_process').spawnSync = () => { throw new Error('seeded internal error'); };\n");
@@ -1116,6 +1224,28 @@ describe('exit arms', () => {
     const control = runResolver({ home, args: [root], shim });
     expect(control.status).toBe(0);
     expect(fieldOf(control.stdout.trim(), 'SOURCE')).toBe('default');
+  });
+
+  it('4 ⇒ git missing (spawnSync reports ENOENT, as it does for an absent binary) prints FAIL_CLOSED_LINE', () => {
+    // The preload answers ONLY git with the exact shape spawnSync returns for a
+    // binary that is not on PATH, so the real boundary sees an unanswered step 1.
+    const preload = path.join(tmp, 'git-enoent.cjs');
+    fs.writeFileSync(preload, [
+      "const cp = require('child_process');",
+      'const real = cp.spawnSync;',
+      'cp.spawnSync = (file, args, opts) => (file === \'git\'',
+      "  ? { pid: 0, output: null, stdout: null, stderr: null, status: null, signal: null,",
+      "      error: Object.assign(new Error('spawnSync git ENOENT'), { code: 'ENOENT' }) }",
+      '  : real(file, args, opts));',
+      '',
+    ].join('\n'));
+    writeWorktree(root, BODY.standard);
+    const shim = buildScriptedShim(fakeBin, tmp, scenarioCalls({ root }));
+    const run = runResolver({ home, args: [root], shim, nodeArgs: ['--require', preload] });
+    expect(run.status, run.stderr).toBe(4);
+    expect(run.stdout).toBe(`${RESOLVER.FAIL_CLOSED_LINE}\n`);
+    expect(run.stderr).toContain('git did not answer');
+    expect(shim.readLog(), 'no fake was reached: the failure is at step 1').toEqual([]);
   });
 
   it('5 ⇒ an injected formatter returning a hostile line is refused with FAIL_CLOSED_LINE', () => {
@@ -1183,7 +1313,7 @@ describe('exit arms', () => {
 // Bounds — the worktree file is lstat-refused before it is opened or read
 // ---------------------------------------------------------------------------
 
-describe('bounds', () => {
+describe('bounds', SUBPROCESS_TIMEOUT, () => {
   function openedPaths(spy: { mock: { calls: unknown[][] } }): string[] {
     return spy.mock.calls.map(c => String(c[0]));
   }
@@ -1257,7 +1387,7 @@ describe('bounds', () => {
 // The manifest — the compliance state the script reads for itself
 // ---------------------------------------------------------------------------
 
-describe('manifest read (subprocess; HOME and DEVFLOW_DIR are tmp)', () => {
+describe('manifest read (subprocess; HOME and DEVFLOW_DIR are tmp)', SUBPROCESS_TIMEOUT, () => {
   const NOT_A_REPO: ScriptedCall[] = [{ tool: 'git', args: ARGV.toplevel, exit: 128, stderr: 'fatal: not a git repository\n' }];
 
   function writeManifest(dir: string, compliance: unknown): string {
@@ -1315,7 +1445,7 @@ describe('manifest read (subprocess; HOME and DEVFLOW_DIR are tmp)', () => {
 // Real git — the offline tracking-copy fold against a local bare origin
 // ---------------------------------------------------------------------------
 
-describe('real git (gh faked unavailable, git real)', () => {
+describe('real git (gh faked unavailable, git real)', SUBPROCESS_TIMEOUT, () => {
   const GH_UNAVAILABLE: ScriptedCall[] = [
     { tool: 'gh', args: ARGV.probe, exit: 1, stderr: 'To get started with GitHub CLI, please run:  gh auth login\n' },
   ];
@@ -1456,7 +1586,8 @@ describe('spawn environment hygiene', () => {
 
   /**
    * Named collector: every spawn call in a source whose argument list does not
-   * pass through scopedEnv(). The argument list is taken paren-balanced from the
+   * pass through scopedEnv() or does not name a `cwd` (an inherited cwd is the
+   * developer's repository). The argument list is taken paren-balanced from the
    * call site, bounded to 2000 characters; comment lines are stripped first.
    */
   function collectUnscopedSpawns(source: string): string[] {
@@ -1474,14 +1605,14 @@ describe('spawn environment hygiene', () => {
         if (depth === 0) { close = i; break; }
       }
       const call = code.slice(m.index, close === -1 ? open + 2000 : close + 1);
-      if (!call.includes('scopedEnv(')) offenders.push(call.split('\n')[0].trim());
+      if (!call.includes('scopedEnv(') || !/\bcwd\b/.test(call)) offenders.push(call.split('\n')[0].trim());
     }
     return offenders;
   }
 
   const countSpawnSites = (source: string): number => [...source.matchAll(SPAWN_RE)].length;
 
-  it('every spawn in tests/evidence-policy/ passes through scopedEnv()', () => {
+  it('every spawn in tests/evidence-policy/ passes through scopedEnv() and names its cwd', () => {
     const files = fs.readdirSync(import.meta.dirname).filter(f => f.endsWith('.ts'));
     expect(files.length, 'the hygiene corpus must include this file and the shim').toBeGreaterThanOrEqual(2);
     let sites = 0;
@@ -1495,10 +1626,12 @@ describe('spawn environment hygiene', () => {
     expect(offenders).toEqual([]);
   });
 
-  it('known-bad probe: a seeded bare spawn is reported; a scoped one is not', () => {
-    const bare = `const r = ${'spawn'}Sync('gh', ['api'], { env: process.env });`;
-    const scoped = `const r = ${'spawn'}Sync('gh', ['api'], { env: scopedEnv(home) });`;
+  it('known-bad probes: a bare spawn and a scoped spawn with an inherited cwd are reported; a fully scoped one is not', () => {
+    const bare = `const r = ${'spawn'}Sync('gh', ['api'], { cwd: home, env: process.env });`;
+    const inheritedCwd = `const r = ${'spawn'}Sync('gh', ['api'], { env: scopedEnv(home) });`;
+    const scoped = `const r = ${'spawn'}Sync('gh', ['api'], { cwd: home, env: scopedEnv(home) });`;
     expect(collectUnscopedSpawns(bare)).toHaveLength(1);
+    expect(collectUnscopedSpawns(inheritedCwd)).toHaveLength(1);
     expect(collectUnscopedSpawns(scoped)).toEqual([]);
   });
 });

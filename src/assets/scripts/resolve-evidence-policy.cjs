@@ -26,7 +26,8 @@
 //   2  input unusable — <dir> missing or not a directory; prints FAIL_CLOSED_LINE
 //   3  never emitted — this script writes no file, so the write-failure code of
 //      redact-secrets.cjs has no arm here and is absent from EXIT_CODES
-//   4  internal error — prints FAIL_CLOSED_LINE
+//   4  internal error — or git could not say whether <dir> is in a repository
+//      (missing, timed out, killed); prints FAIL_CLOSED_LINE
 //   5  output gate refused — the composed line failed the grammar or was not
 //      consistent with the resolved policy; prints FAIL_CLOSED_LINE. Final: a
 //      re-run resolves the same inputs to the same refusal
@@ -463,6 +464,20 @@ function readManifestCompliance() {
  * @typedef {{ exec: ExecFn, env: NodeJS.ProcessEnv }} CallContext
  */
 
+/**
+ * Whether a call ran to completion and exited on its own — as opposed to never
+ * starting (ENOENT), timing out, overflowing its buffer or being killed. Only an
+ * answered non-zero exit is a real "no" ("not a repository", "no such path",
+ * "no such ref"); an unanswered call is NOT KNOWING, and a local-git step that
+ * does not know must not read as the permissive answer (avoids PF-075).
+ *
+ * @param {CallResult} r
+ * @returns {boolean}
+ */
+function answered(r) {
+  return r.errorCode === null && r.status !== null;
+}
+
 /** @param {unknown} value @returns {Buffer} */
 function asBuffer(value) {
   if (Buffer.isBuffer(value)) return value;
@@ -504,21 +519,31 @@ function runCall(ctx, file, args, cwd, timeout, maxBuffer) {
 }
 
 /**
- * Step 1: the repository root, or null. The answer must be exactly one absolute
- * path plus its newline — anything else (no repository, a bare repository, a
- * path carrying a newline) is null, and the resolver then treats the remote as
- * unavailable and the worktree file as absent.
+ * @typedef {{ kind: 'root', root: string } | { kind: 'none' } | { kind: 'unknown' }} Toplevel
+ */
+
+/**
+ * Step 1: the repository root.
+ *   root     exit 0 with exactly one absolute path plus its newline
+ *   none     git ANSWERED non-zero — not a repository (or not a work tree); the
+ *            resolver then treats the remote as unavailable and the worktree file
+ *            as absent
+ *   unknown  git did not answer (missing, timed out, overflowed, killed), or
+ *            answered exit 0 — a repository — with an unusable path. Either way a
+ *            repository's files may exist and cannot be read, so resolve() fails
+ *            closed rather than resolving from compliance alone
  *
  * @param {CallContext} ctx
  * @param {string} dir
- * @returns {string | null}
+ * @returns {Toplevel}
  */
 function gitToplevel(ctx, dir) {
   const r = runCall(ctx, 'git', ['rev-parse', '--show-toplevel'], dir, GIT_LOCAL_TIMEOUT_MS, LINE_MAX_BUFFER);
-  if (!r.ok) return null;
+  if (!answered(r)) return { kind: 'unknown' };
+  if (r.status !== 0) return { kind: 'none' };
   const text = r.stdout.toString('utf8').replace(/\r?\n$/, '');
-  if (text === '' || /[\r\n\0]/.test(text) || !path.isAbsolute(text)) return null;
-  return text;
+  if (text === '' || /[\r\n\0]/.test(text) || !path.isAbsolute(text)) return { kind: 'unknown' };
+  return { kind: 'root', root: text };
 }
 
 /**
@@ -587,24 +612,11 @@ function lsRemoteDefaultBranch(ctx, root) {
 }
 
 /**
- * Step 6 (offline, D known): whether the local tracking ref exists. It decides
- * whether T can stand for the default branch at all — a missing ref is "B
- * unknown", which a failed blob read could not tell apart from "file absent".
- *
- * @param {CallContext} ctx
- * @param {string} root
- * @param {string} ref
- * @returns {boolean}
- */
-function trackingRefExists(ctx, root, ref) {
-  return runCall(ctx, 'git', ['rev-parse', '--verify', '--quiet', 'refs/remotes/origin/' + ref], root,
-    GIT_LOCAL_TIMEOUT_MS, LINE_MAX_BUFFER).ok;
-}
-
-/**
  * Steps 4 and 7: a policy blob at a revision (HEAD, or the tracking ref).
- * Exit 0 ⇒ parse; ENOBUFS ⇒ invalid; any other failure (the path does not exist
- * there, an unborn HEAD) ⇒ absent.
+ * Exit 0 ⇒ parse; an answered non-zero exit (the path does not exist there, an
+ * unborn HEAD) ⇒ absent; an unanswered call (ENOBUFS included) ⇒ invalid — never
+ * absent, or a git that timed out would silently drop the default branch's copy
+ * from the fold.
  *
  * @param {CallContext} ctx
  * @param {string} root
@@ -614,8 +626,28 @@ function trackingRefExists(ctx, root, ref) {
 function catFilePolicy(ctx, root, revision) {
   const r = runCall(ctx, 'git', ['cat-file', 'blob', revision + ':' + POLICY_REL], root,
     GIT_LOCAL_TIMEOUT_MS, BLOB_MAX_BUFFER);
-  if (r.errorCode === 'ENOBUFS') return INVALID;
-  return r.ok ? parsePolicyBytes(r.stdout) : ABSENT;
+  if (r.ok) return parsePolicyBytes(r.stdout);
+  return answered(r) ? ABSENT : INVALID;
+}
+
+/**
+ * Steps 6 and 7 (offline, D known): T, the local tracking copy of the default
+ * branch's file. The ref check decides whether T can stand for the default branch
+ * at all — a ref git ANSWERS is missing is "B unknown" (null), which a failed blob
+ * read could not tell apart from "file absent". A ref check git does not answer is
+ * not knowing, so T is invalid (it raises) rather than unknown (it would not).
+ *
+ * @param {CallContext} ctx
+ * @param {string} root
+ * @param {string} ref
+ * @returns {ParsedPolicy | null}
+ */
+function trackingPolicy(ctx, root, ref) {
+  const trackingRef = 'refs/remotes/origin/' + ref;
+  const r = runCall(ctx, 'git', ['rev-parse', '--verify', '--quiet', trackingRef], root,
+    GIT_LOCAL_TIMEOUT_MS, LINE_MAX_BUFFER);
+  if (r.ok) return catFilePolicy(ctx, root, trackingRef);
+  return answered(r) ? null : INVALID;
 }
 
 // ---------------------------------------------------------------------------
@@ -633,7 +665,8 @@ function catFilePolicy(ctx, root, revision) {
  *   compliance: Policy,
  * }} Facts
  *   remote   R — set iff reachable
- *   tracking T — set iff offline and refs/remotes/origin/<D> exists
+ *   tracking T — set iff offline and refs/remotes/origin/<D> exists (or git could
+ *            not answer whether it does — then invalid)
  *   head     H — set iff B (R online, T offline) is known
  */
 
@@ -647,10 +680,13 @@ function catFilePolicy(ctx, root, revision) {
  *   git cat-file blob refs/remotes/origin/D:…             (that ref exists)
  *   git cat-file blob HEAD:…                              (B known)
  *
+ * Returns null when git cannot say whether <dir> is in a repository at all (see
+ * gitToplevel): nothing below can be trusted then, and resolve() fails closed.
+ *
  * @param {string} dir
  * @param {Policy} compliance
  * @param {ExecFn} exec
- * @returns {Facts}
+ * @returns {Facts | null}
  */
 function gatherFacts(dir, compliance, exec) {
   /** @type {CallContext} */
@@ -659,10 +695,12 @@ function gatherFacts(dir, compliance, exec) {
     env: Object.assign({}, process.env, { GH_PROMPT_DISABLED: '1', GIT_TERMINAL_PROMPT: '0' }),
   };
 
-  const root = gitToplevel(ctx, dir);
-  if (root === null) {
+  const toplevel = gitToplevel(ctx, dir);
+  if (toplevel.kind === 'unknown') return null;
+  if (toplevel.kind === 'none') {
     return { reachable: false, ref: null, remote: null, worktree: ABSENT, tracking: null, head: null, compliance };
   }
+  const root = toplevel.root;
 
   const worktree = readWorktreePolicy(root);
   let ref = probeDefaultBranch(ctx, root);
@@ -672,9 +710,7 @@ function gatherFacts(dir, compliance, exec) {
   let tracking = null;
   if (!reachable) {
     if (ref === null) ref = lsRemoteDefaultBranch(ctx, root);
-    if (ref !== null && trackingRefExists(ctx, root, ref)) {
-      tracking = catFilePolicy(ctx, root, 'refs/remotes/origin/' + ref);
-    }
+    if (ref !== null) tracking = trackingPolicy(ctx, root, ref);
   }
 
   const baseKnown = reachable || tracking !== null;
@@ -806,8 +842,9 @@ function defaultExec(file, args, opts) {
 
 /**
  * Resolve the policy for `opts.dir`. Never throws: an unexpected internal
- * failure (the exec itself throwing, say) is the fail-closed resolution —
- * `required`, SOURCE `error`, REF `none` — which main() maps to exit 4.
+ * failure (the exec itself throwing, say), or a git that cannot say whether
+ * `opts.dir` is in a repository, is the fail-closed resolution — `required`,
+ * SOURCE `error`, REF `none` — which main() maps to exit 4.
  *
  * @param {ResolveOptions} opts
  * @param {ResolveDeps} [deps]
@@ -817,7 +854,8 @@ function resolve(opts, deps) {
   try {
     const exec = deps && typeof deps.exec === 'function' ? deps.exec : defaultExec;
     const compliance = complianceDefault(opts.compliance !== undefined ? opts.compliance : readManifestCompliance());
-    return foldPolicy(gatherFacts(opts.dir, compliance, exec));
+    const facts = gatherFacts(opts.dir, compliance, exec);
+    return facts === null ? ERROR_RESOLUTION : foldPolicy(facts);
   } catch (_) {
     return ERROR_RESOLUTION;
   }
@@ -959,7 +997,8 @@ function main(argv, deps) {
 
   const resolution = resolve({ dir: args.dir }, { exec: d.exec });
   if (resolution.source === 'error') {
-    process.stderr.write('resolve-evidence-policy: internal error while resolving — failing closed to required\n');
+    process.stderr.write('resolve-evidence-policy: could not resolve (git did not answer, or an internal error)'
+      + ' — failing closed to required\n');
     return { code: EXIT_CODES.INTERNAL_ERROR, line: FAIL_CLOSED_LINE };
   }
 

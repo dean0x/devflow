@@ -154,7 +154,9 @@ describe('composeScripts', () => {
     // The grammar comes from the package copy — the single authority for it.
     const { OUTPUT_LINE_RE } = createRequire(import.meta.url)(RESOLVER_SCRIPT) as { OUTPUT_LINE_RE: RegExp };
     expect(lines[0]).toMatch(OUTPUT_LINE_RE);
-  });
+    // Budget: a directory copy plus a node + bash-fake spawn — well under 5 s alone,
+    // but spawns slow to seconds under full-suite load (same as the resolver suite).
+  }, 20_000);
 });
 
 // ---------------------------------------------------------------------------

@@ -1247,9 +1247,14 @@ describe('ensure-devflow-init behavioral', () => {
   it('returns non-zero and creates no .devflow/ when called with empty argument (SEC-3 guard)', () => {
     // The `[ -z "$1" ] && return 1` guard at the top of ensure-devflow-init prevents
     // accidental directory creation when no project path is supplied.
+    // cwd is tmpDir, never the inherited repo: without the guard, `git -C ""` resolves
+    // the working directory's repository, so a regression writes HERE — where the
+    // assertion looks — instead of into the developer's checkout, where it would pass
+    // unseen. tmpDir must be a repository for that resolution to land on it.
+    execSync(`git init -q "${tmpDir}"`, { stdio: 'pipe' });
     const result = execSync(
       `bash -c 'source "${ENSURE_DEVFLOW}" ""; echo $?'`,
-      { stdio: 'pipe' },
+      { stdio: 'pipe', cwd: tmpDir },
     ).toString().trim();
 
     // return 1 from a sourced script propagates as the last exit status
