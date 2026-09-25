@@ -1,6 +1,6 @@
 /**
- * SDLC-evidence PR2 (#360), phase P2 — the /plan → /implement issue flow (G5),
- * structurally pinned.
+ * SDLC-evidence PR2 (#360), phase P2 — the /plan → /implement issue flow (G5)
+ * and /implement's PR-timing contradiction, structurally pinned.
  *
  * G5: /plan wrote its design artifact before it created the tracker issue, so
  * the frontmatter `issue:` never received the new ID; /implement read that
@@ -9,6 +9,11 @@
  * DUPLICATE issue. The fix orders both commands: /plan writes `issue: pending`,
  * spawns, then patches that one line in place; /implement reads the frontmatter
  * first and forwards a non-`pending` value as the setup-task `ISSUE_INPUT`.
+ *
+ * PR timing: Phase 9 skipped the CI gate for SEQUENTIAL because the PR was "not
+ * yet created", while Phase 2 has the last sequential Code agent create it. The
+ * resolution: SINGLE and SEQUENTIAL run the gate (their PR exists from Phase 2);
+ * PARALLEL skips it (its unified PR is created in Phase 10).
  *
  * Every guard has the three parts PF-064 asks of an absence-based check: a NAMED
  * collector, an assertion that the text it read is the text it claims to read,
@@ -337,5 +342,140 @@ describe('/implement reads the plan frontmatter before setup-task and treats `pe
       expect(violations, `reverting ${site} must be reported, and only it`).toHaveLength(1)
       expect(violations[0]).toContain(site)
     }
+  })
+})
+
+// ---------------------------------------------------------------------------
+// 3. /implement PR timing — SINGLE and SEQUENTIAL run the CI gate (§3.10, AC-10)
+// ---------------------------------------------------------------------------
+
+const RUN_STRATEGIES = ['SINGLE', 'SEQUENTIAL'] as const
+const SKIP_STRATEGY = 'PARALLEL'
+
+/** One statement of which strategies Phase 9 runs for. */
+interface TimingSite {
+  readonly label: string
+  readonly find: (implement: string) => string | null
+}
+
+/** The single line of `text` satisfying `match`, or null. */
+function soleLine(text: string | null, match: (line: string) => boolean): string | null {
+  if (text === null) return null
+  const hits = text.split('\n').filter(match)
+  return hits.length === 1 ? hits[0] : null
+}
+
+/** The three places that say which strategies Phase 9 gates. */
+const GATE_SITES: readonly TimingSite[] = [
+  {
+    label: 'Phase 9 gate sentence',
+    find: md => soleLine(sliceBetween(md, '### Phase 9: CI Status Gate', '\n### '), l => l.startsWith('Strategy-conditional:')),
+  },
+  { label: 'Architecture Phase 9', find: md => soleLine(md, l => l.includes('├─ Phase 9:')) },
+  { label: 'Principle 12', find: md => soleLine(md, l => l.startsWith('12. **CI awareness**')) },
+]
+
+/** Phase 10's SEQUENTIAL sentence: it must state the PR already exists. */
+function phase10SequentialLine(implement: string): string | null {
+  return soleLine(sliceBetween(implement, '### Phase 10: Create PR', '\n### '), l => l.startsWith('**For SEQUENTIAL_CODE_AGENTS'))
+}
+
+/** Phase 2's `**Produces:**` line — where PR_URL must come from for Phase 9 to require it. */
+function phase2ProducesLine(implement: string): string | null {
+  return soleLine(sliceBetween(implement, '### Phase 2: Implement', '\n### '), l => l.startsWith('**Produces:**'))
+}
+
+/**
+ * Named collector: every statement of /implement's PR timing that contradicts
+ * the resolution (SINGLE + SEQUENTIAL run Phase 9, PARALLEL skips it).
+ *
+ * Each gate site is split at its first `skip`: the run set is what precedes it,
+ * the skip set what follows. A site with no `skip` clause has an empty skip set,
+ * so an unqualified "SINGLE only" is reported for leaving PARALLEL unstated.
+ * Beyond the three gate sites: Phase 10 must say the SEQUENTIAL PR already
+ * exists, Phase 2 must produce the PR_URL Phase 9 requires, and no line anywhere
+ * may pair SEQUENTIAL with "not yet created" — the contradiction itself.
+ */
+export function collectPrTimingContradictions(implement: string): string[] {
+  const out: string[] = []
+  for (const site of GATE_SITES) {
+    const line = site.find(implement)
+    if (line === null) {
+      out.push(`${site.label}: site not found (expected exactly one line)`)
+      continue
+    }
+    const skipAt = line.search(/\bskip/i)
+    const runSet = skipAt === -1 ? line : line.slice(0, skipAt)
+    const skipSet = skipAt === -1 ? '' : line.slice(skipAt)
+    for (const strategy of RUN_STRATEGIES) {
+      if (!runSet.includes(strategy)) out.push(`${site.label}: ${strategy} is not in the run set`)
+      if (skipSet.includes(strategy)) out.push(`${site.label}: ${strategy} is in the skip set`)
+    }
+    if (runSet.includes(SKIP_STRATEGY)) out.push(`${site.label}: ${SKIP_STRATEGY} is in the run set`)
+    if (!skipSet.includes(SKIP_STRATEGY)) out.push(`${site.label}: ${SKIP_STRATEGY} is not in the skip set`)
+  }
+  const phase10 = phase10SequentialLine(implement)
+  if (phase10 === null) out.push('Phase 10 SEQUENTIAL sentence: site not found (expected exactly one line)')
+  else if (!phase10.includes('already exists')) out.push('Phase 10 SEQUENTIAL sentence: does not say the PR already exists')
+  const produces = phase2ProducesLine(implement)
+  if (produces === null) out.push('Phase 2 Produces: site not found (expected exactly one line)')
+  else if (!/\bPR_URL\b/.test(produces)) out.push('Phase 2 Produces: does not produce PR_URL, which Phase 9 requires')
+  for (const line of implement.split('\n')) {
+    if (/sequential/i.test(line) && /not yet created/i.test(line)) {
+      out.push(`a line pairs SEQUENTIAL with "not yet created": "${line.trim()}"`)
+    }
+  }
+  return out
+}
+
+/** The `d09da34` line at each PR-timing site, quoted verbatim (built). */
+const D09DA34_TIMING: Readonly<Record<string, string>> = {
+  'Phase 9 gate sentence':
+    'Strategy-conditional: run for **SINGLE_CODE_AGENT** (PR exists from Phase 2), skip for ' +
+    '**SEQUENTIAL_CODE_AGENTS** / **PARALLEL_CODE_AGENTS** (PR not yet created).',
+  'Architecture Phase 9': '├─ Phase 9: CI Status Gate (SINGLE_CODE_AGENT only)',
+  'Principle 12': '12. **CI awareness** - CI status is checked before merge for SINGLE_CODE_AGENT strategy',
+  'Phase 10 SEQUENTIAL sentence':
+    '**For SEQUENTIAL_CODE_AGENTS or PARALLEL_CODE_AGENTS**: The last sequential Code agent (with ' +
+    'CREATE_PR: true) handles PR creation. For parallel Code agents, spawn one Code agent to create the unified PR:',
+  'Phase 2 Produces': '**Produces:** CODE_AGENT_OUTPUT, FILES_CHANGED',
+}
+
+/** Each site's finder, keyed by the label its violations carry. */
+const TIMING_FINDERS: Readonly<Record<string, (implement: string) => string | null>> = {
+  ...Object.fromEntries(GATE_SITES.map(site => [site.label, site.find])),
+  'Phase 10 SEQUENTIAL sentence': phase10SequentialLine,
+  'Phase 2 Produces': phase2ProducesLine,
+}
+
+describe('/implement PR timing — SINGLE and SEQUENTIAL gate CI, PARALLEL skips (§3.10, AC-10)', () => {
+  it('every site agrees with the resolution, and nothing pairs SEQUENTIAL with "not yet created"', () => {
+    const implement = requireDistFile('implement.md')
+    // Non-vacuity: every site resolves to exactly one line of the shipped file.
+    for (const [label, find] of Object.entries(TIMING_FINDERS)) {
+      expect(find(implement), `${label} not found`).not.toBeNull()
+    }
+    expect(collectPrTimingContradictions(implement)).toEqual([])
+  })
+
+  it('known-bad probe: each site, reverted alone to its d09da34 line, is reported by name', () => {
+    const implement = requireDistFile('implement.md')
+    // Probe cardinality matches arm cardinality: one probe per site the live arm reads.
+    expect(Object.keys(D09DA34_TIMING).sort()).toEqual(Object.keys(TIMING_FINDERS).sort())
+    for (const [label, historical] of Object.entries(D09DA34_TIMING)) {
+      const current = TIMING_FINDERS[label](implement)
+      expect(current, `${label} not found`).not.toBeNull()
+      const violations = collectPrTimingContradictions(replaceWholeLine(implement, current as string, historical))
+      expect(violations.length, `reverting ${label} must be reported`).toBeGreaterThan(0)
+      expect(
+        violations.every(v => v.startsWith(label) || v.includes('"not yet created"')),
+        `reverting ${label} must be reported against that site only:\n  ${violations.join('\n  ')}`,
+      ).toBe(true)
+    }
+  })
+
+  it('known-bad probe: the d09da34 Phase 9 sentence is also the SEQUENTIAL/"not yet created" contradiction', () => {
+    const violations = collectPrTimingContradictions(D09DA34_TIMING['Phase 9 gate sentence'])
+    expect(violations.some(v => v.includes('pairs SEQUENTIAL with "not yet created"'))).toBe(true)
   })
 })
