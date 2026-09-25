@@ -591,3 +591,162 @@ describe('/implement parallel PR — a Code pr-create spawn, never the orchestra
     expect(collectPrCreateSpawns(seeded)).toHaveLength(0)
   })
 })
+
+// -------------------------------------------------------------------------
+// PR_TEST_PLAN_BLOCK forwarding — every ensure-pr-ready spawn carries it (#365, AC-5).
+//
+// ensure-pr-ready creates the PR for /code-review and /bug-analysis, and step
+// 4a pastes a caller's test-plan block behind `check block`. A fence that drops
+// the key leaves that paste with nothing to paste, silently: the PR opens with
+// no test plan and nothing reports it. Each caller renders the block from
+// /implement's evidence file alone (D8), with the branch slug shape-gated and
+// the path double-quoted, so the slug never reaches a shell unchecked.
+//
+// The caller set is NAMED and then cross-checked against discovery over every
+// compiled command, both ways: a new ensure-pr-ready caller (the /dynamic-build
+// wave PR) goes red here until it joins the named set — and with it this arm.
+// -------------------------------------------------------------------------
+
+/** The deployed commands that spawn ensure-pr-ready. Named, and cross-checked against discovery. */
+const ENSURE_PR_READY_CALLERS: readonly string[] = ['code-review.md', 'bug-analysis.md']
+
+const ENSURE_PR_READY_OP = 'OPERATION: ensure-pr-ready'
+
+/**
+ * Named collector: every spawn payload that runs `OPERATION: ensure-pr-ready`.
+ *
+ * Blank-line bounded, the unit `collectIssueSpawnPayloads` reads, so one fence is
+ * one payload. Bounded: a corpus with more sites than MAX_SITES is reported
+ * rather than silently truncated.
+ */
+function collectEnsurePrReadySpawns(file: string, source: string): SpawnPayload[] {
+  const MAX_SITES = 16
+  const lines = source.split('\n')
+  const payloads: SpawnPayload[] = []
+  for (let i = 0; i < lines.length; i++) {
+    if (!lines[i].includes(ENSURE_PR_READY_OP)) continue
+    let start = i
+    while (start > 0 && lines[start - 1].trim() !== '') start--
+    let end = i
+    while (end < lines.length - 1 && lines[end + 1].trim() !== '') end++
+    if (payloads.length >= MAX_SITES) {
+      throw new Error(`${file}: more than ${MAX_SITES} ${ENSURE_PR_READY_OP} sites — bound exceeded, scan aborted`)
+    }
+    payloads.push({ file, line: i + 1, block: lines.slice(start, end + 1).join('\n') })
+  }
+  return payloads
+}
+
+/**
+ * Named collector: disagreements between the named caller set and discovery over
+ * a command corpus — an unnamed spawner, or a named file that no longer spawns.
+ */
+function collectCallerDrift(
+  corpus: ReadonlyArray<{ readonly name: string; readonly content: string }>,
+  named: readonly string[],
+): string[] {
+  const discovered = corpus.filter(c => c.content.includes(ENSURE_PR_READY_OP)).map(c => c.name)
+  return [
+    ...discovered.filter(n => !named.includes(n)).map(n => `${n}: spawns ensure-pr-ready but is not a named caller`),
+    ...named.filter(n => !discovered.includes(n)).map(n => `${n}: named caller spawns no ensure-pr-ready`),
+  ]
+}
+
+/** The ensure-pr-ready payloads that do not pass the test-plan block — rendered for the failure message. */
+function collectUnforwardedTestPlanSites(payloads: readonly SpawnPayload[]): string[] {
+  return payloads.filter(p => !p.block.includes('PR_TEST_PLAN_BLOCK:')).map(p => `${p.file}:${p.line}`)
+}
+
+/** The caller's render paragraph: from its lead to the spawn it feeds. */
+function testPlanRenderText(source: string): string | null {
+  const at = source.indexOf('Render the test-plan block')
+  if (at === -1) return null
+  const end = source.indexOf(ENSURE_PR_READY_OP, at)
+  return end === -1 ? null : source.slice(at, end)
+}
+
+/** The render command each caller runs: the slug-built path, double-quoted, then its exit code. */
+const QUOTED_RENDER_RE = /verify-evidence\.cjs" render --plan "[^"\s]*\.devflow\/docs\/evidence-\{branch_slug\}\.md"; echo "exit=\$\?"/
+
+/** Named collector: what a caller's PR_TEST_PLAN_BLOCK rendering fails to state. */
+function collectTestPlanRenderDefects(file: string, source: string): string[] {
+  const text = testPlanRenderText(source)
+  if (text === null) return [`${file}: no test-plan render before the ensure-pr-ready spawn`]
+  const out: string[] = []
+  const need = (what: string, ok: boolean): void => { if (!ok) out.push(`${file}: ${what}`) }
+  need('the block comes from /implement\'s evidence file alone', text.includes("from `/implement`'s evidence file, and from nothing else"))
+  need('the slug is shape-gated', text.includes('Only when `branch_slug` matches `^[A-Za-z0-9._-]{1,200}$`'))
+  need('the evidence path is double-quoted', QUOTED_RENDER_RE.test(text))
+  need('only `exit=0` yields the block, else `(none)`',
+    text.includes('On `exit=0`, `PR_TEST_PLAN_BLOCK` is its stdout byte for byte without that `exit=` line; in every other case it is `(none)`'))
+  return out
+}
+
+describe('PR_TEST_PLAN_BLOCK forwarding — every ensure-pr-ready spawn carries the key (AC-5)', () => {
+  it('the named caller set is exactly the compiled commands that spawn ensure-pr-ready', async () => {
+    const { run, root } = await buildCommittedTree()
+    expect(run.status, `the committed-tree build must succeed.\n${run.combined}`).toBe(0)
+    const corpus = fs.readdirSync(path.join(root, 'dist', 'commands'))
+      .filter(f => f.endsWith('.md'))
+      .map(name => ({ name, content: requireDistFile(name, root) }))
+    expect(corpus.length, 'no compiled command — the discovery corpus is empty (PF-018)').toBeGreaterThan(10)
+    expect(
+      collectCallerDrift(corpus, ENSURE_PR_READY_CALLERS),
+      'an ensure-pr-ready caller outside the named set is a spawn this seam never reads — add it to ' +
+      'ENSURE_PR_READY_CALLERS (and give it the key); a named caller that no longer spawns is a stale entry',
+    ).toEqual([])
+
+    // Known-bad probe: a new spawner outside the set, and a named caller that lost its spawn.
+    const seeded = corpus.map(c =>
+      c.name === 'dynamic-build.md' ? { ...c, content: `${c.content}\n"${ENSURE_PR_READY_OP}\n` }
+      : c.name === 'bug-analysis.md' ? { ...c, content: c.content.split(ENSURE_PR_READY_OP).join('OPERATION: validate-branch') }
+      : c)
+    expect(collectCallerDrift(seeded, ENSURE_PR_READY_CALLERS)).toEqual([
+      'dynamic-build.md: spawns ensure-pr-ready but is not a named caller',
+      'bug-analysis.md: named caller spawns no ensure-pr-ready',
+    ])
+  }, 20_000) // pays for the memoised committed-tree build.
+
+  it('every ensure-pr-ready spawn passes PR_TEST_PLAN_BLOCK', async () => {
+    const { root } = await buildCommittedTree()
+    const payloads = ENSURE_PR_READY_CALLERS.flatMap(name => collectEnsurePrReadySpawns(name, requireDistFile(name, root)))
+    for (const name of ENSURE_PR_READY_CALLERS) {
+      expect(payloads.some(p => p.file === name), `${name} contributed no ensure-pr-ready spawn`).toBe(true)
+    }
+    expect(
+      collectUnforwardedTestPlanSites(payloads),
+      'ensure-pr-ready spawn(s) without PR_TEST_PLAN_BLOCK — step 4a would have no test plan to paste',
+    ).toEqual([])
+    for (const p of payloads) {
+      expect(p.block, `${p.file}:${p.line}: the key must carry the rendered value or (none)`)
+        .toContain('PR_TEST_PLAN_BLOCK: {PR_TEST_PLAN_BLOCK verbatim, or (none)}')
+    }
+  }, 20_000)
+
+  it('each caller renders the block from /implement\'s evidence file, slug-gated and quoted, before the spawn', async () => {
+    const { root } = await buildCommittedTree()
+    expect(ENSURE_PR_READY_CALLERS.flatMap(name => collectTestPlanRenderDefects(name, requireDistFile(name, root))))
+      .toEqual([])
+  }, 20_000)
+
+  it('known-bad probes: a dropped key, an unquoted path and an ungated slug are reported', async () => {
+    const { root } = await buildCommittedTree()
+    const real = requireDistFile('code-review.md', root)
+
+    const dropped = real.replace(/^PR_TEST_PLAN_BLOCK: .*\n/m, '')
+    expect(dropped, 'the drop seed must land').not.toBe(real)
+    const sites = collectUnforwardedTestPlanSites(collectEnsurePrReadySpawns('code-review.md', dropped))
+    expect(sites.length, 'dropping the key must leave exactly one site unforwarded').toBe(1)
+
+    const unquoted = real.replace(/render --plan "([^"]*)"/, 'render --plan $1')
+    expect(unquoted, 'the unquoting seed must land').not.toBe(real)
+    expect(collectTestPlanRenderDefects('code-review.md', unquoted)).toEqual(['code-review.md: the evidence path is double-quoted'])
+
+    const ungated = real.replace('Only when `branch_slug` matches `^[A-Za-z0-9._-]{1,200}$` and', 'When')
+    expect(ungated, 'the gate seed must land').not.toBe(real)
+    expect(collectTestPlanRenderDefects('code-review.md', ungated)).toEqual(['code-review.md: the slug is shape-gated'])
+
+    expect(collectTestPlanRenderDefects('bug-analysis.md', real.replace('Render the test-plan block', 'Render the block')))
+      .toEqual(['bug-analysis.md: no test-plan render before the ensure-pr-ready spawn'])
+  }, 20_000)
+})
