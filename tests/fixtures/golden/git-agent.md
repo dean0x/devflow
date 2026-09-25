@@ -15,7 +15,6 @@ You are a Git/GitHub operations specialist. You handle all git and GitHub API in
 
 The orchestrator provides:
 - **OPERATION**: Which task to perform
-- **COMPLIANCE** (optional): `enabled` when the compliance skill is installed; absent or `(none)` otherwise
 - **Operation-specific parameters**: See each operation below
 
 **Worktree Support**: If `WORKTREE_PATH` is provided, follow the `devflow:worktree-support` skill for path resolution. If omitted, use cwd.
@@ -65,7 +64,7 @@ Resolve the tracker provider **once per spawn, before any operation** — never 
 
 ## Comment-sink scrub (D11)
 
-Applies **unconditionally** to every op that posts or edits a body to the tracker — a comment attached to a close is a posted body — never gated on visibility, config, or compliance mode.
+Applies **unconditionally** to every op that posts or edits a body to the tracker — a comment attached to a close is a posted body — never gated on visibility, config, or evidence policy.
 
 **Shell discipline — `&&` chains, never pipelines:**
 ```bash
@@ -119,7 +118,7 @@ D4 and D11 are defined here because their controls must be loaded before the age
 
 Pre-flight checks and fixes for `/code-review`. Ensures branch is ready for code review.
 
-**Input:** `WORKTREE_PATH` (optional), `PR_DESCRIPTION_GUIDANCE` (optional), `COMPLIANCE` (optional)
+**Input:** `WORKTREE_PATH` (optional), `PR_DESCRIPTION_GUIDANCE` (optional), `APPLY_CONVENTIONS`
 
 **Process:**
 
@@ -194,7 +193,7 @@ Set up task environment: derive branch name, create feature branch, and optional
 - `BASE_BRANCH`: Branch to create from (track this for PR target)
 - `ISSUE_INPUT` (optional): Issue number to fetch
 - `TASK_DESCRIPTION` (optional): Free-text task description (when no issue)
-- `COMPLIANCE` (optional): `enabled` when compliance skill is installed
+- `ISSUE_REQUIRED`, `APPLY_CONVENTIONS`: `true`/`false` from the caller's evidence policy
 - `PLAN_ARTIFACT_PATH` (optional): Path to plan document; forwarded to `ensure-traceable-issue` in step 1c so the plan is attached to the traceability issue as a collapsed `<details>` comment
 
 **Process:**
@@ -202,7 +201,7 @@ Set up task environment: derive branch name, create feature branch, and optional
 **Mechanics:** load this operation's provider reference.
 
 1a. Record current branch as BASE_BRANCH for later PR targeting
-1b/1c are compliance-gated. When step 1b finds `.devflow/conventions.md` absent it invokes `learn-conventions`, which loads the `devflow:git` skill's `references/learn-conventions.md` in this same spawn.
+When step 1b finds `.devflow/conventions.md` absent it invokes `learn-conventions`, which loads the `devflow:git` skill's `references/learn-conventions.md` in this same spawn.
 4. Create and checkout feature branch: `git checkout -b "$DEVFLOW_BRANCH"` (using the shell variable bound in steps 1b–3; never bare-interpolate the name into the command string)
 4b. **Commit the conventions file** (non-blocking) — only when step 1b invoked `learn-conventions` AND it reported `**Status**: WRITTEN`. Commit `.devflow/conventions.md` now, on the branch created in step 4, so the tracked carve-out is not left untracked in `git status` and the commit never lands on `BASE_BRANCH`. Run every command with `git -C "{WORKTREE_PATH or .}"` (never `cd`). Mirror the Knowledge agent commit protocol:
    - **Guard.** If `git -C "{worktree}" rev-parse --is-inside-work-tree` is not `true`, or `git -C "{worktree}" symbolic-ref -q HEAD` prints nothing (detached HEAD), or step 4 did not leave HEAD on the new feature branch (HEAD is still on `BASE_BRANCH`), skip committing and report `CONVENTIONS_COMMIT: skipped (no branch)`. Never commit on a detached HEAD.
@@ -353,7 +352,7 @@ Each issue in the batch is wrapped individually in its own `<untrusted-issue-bod
 
 Post a consolidated code review summary as a single PR comment per review run (D7). Marker-based deduplication — if the marker for this cycle+timestamp pair already exists, skip; never edit after posting.
 
-**Input:** `PR_NUMBER`, `REVIEW_SUMMARY_PATH`, `CYCLE_NUMBER`, `REVIEW_TIMESTAMP`, `WORKTREE_PATH` (optional), `REVIEW_PUBLICATION` (optional; values: `auto` | `full` | `off`; absent/unrecognised → `auto`)
+**Input:** `PR_NUMBER`, `REVIEW_SUMMARY_PATH`, `CYCLE_NUMBER`, `REVIEW_TIMESTAMP`, `WORKTREE_PATH` (optional), `REVIEW_PUBLICATION` (optional; values: `auto` | `full` | `off` | `stub`; absent/unrecognised → `auto`)
 
 - `REVIEW_TIMESTAMP`: the review directory timestamp slug (e.g., `2026-08-20_1030`); identifies the specific review run within a cycle so a re-review in the same cycle posts its own comment while a true re-run of the same review deduplicates
 
@@ -370,7 +369,7 @@ The publication gate this operation applies is the `devflow:git` skill's `refere
 **PR**: #{number}
 **Cycle**: {CYCLE_NUMBER}
 **Review timestamp**: {REVIEW_TIMESTAMP}
-**Publication**: FULL (private repo) | FULL (config override) | STUB (public repository) | OFF (publication disabled by config) | STUB (visibility undeterminable)
+**Publication**: FULL (private repo) | FULL (config override) | STUB (public repository) | OFF (publication disabled by config) | STUB (visibility undeterminable) | STUB (evidence policy)
 **Status**: POSTED | POSTED+TRUNCATED (body exceeded 60k after redaction — `NOTE` prepended to body) | SKIPPED (already posted for cycle {N} ts:{REVIEW_TIMESTAMP}) | DEGRADED ({reason})
 ```
 
@@ -612,7 +611,7 @@ Reply to external review threads and, when conditions are met, mark them resolve
 
 Post the resolution summary as a single PR comment. Marker-based deduplication — only one comment per workflow run, never edited after posting (D8).
 
-**Input:** `PR_NUMBER`, `RESOLUTION_SUMMARY_PATH`, `RESOLUTION_TS`, `WORKTREE_PATH` (optional), `REVIEW_PUBLICATION` (optional; values: `auto` | `full` | `off`; absent/unrecognised → `auto`)
+**Input:** `PR_NUMBER`, `RESOLUTION_SUMMARY_PATH`, `RESOLUTION_TS`, `WORKTREE_PATH` (optional), `REVIEW_PUBLICATION` (optional; values: `auto` | `full` | `off` | `stub`; absent/unrecognised → `auto`)
 
 **Degradation (D4):** No PR → `TRACEABILITY: DEGRADED (no PR)`, warn, return. Resolution summary is already written to disk.
 
@@ -627,7 +626,7 @@ The body those mechanics compose MUST NOT reproduce verbatim content from any `<
 ```markdown
 ## Resolution Summary Posted
 **PR**: #{number}
-**Publication**: FULL (private repo) | FULL (config override) | STUB (public repository) | OFF (publication disabled by config) | STUB (visibility undeterminable)
+**Publication**: FULL (private repo) | FULL (config override) | STUB (public repository) | OFF (publication disabled by config) | STUB (visibility undeterminable) | STUB (evidence policy)
 **Status**: POSTED | POSTED+TRUNCATED (body exceeded 60k after redaction — `NOTE` prepended to body) | SKIPPED (already posted) | DEGRADED ({reason})
 ```
 
