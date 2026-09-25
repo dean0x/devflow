@@ -149,6 +149,14 @@ const RETIRED_ALLOWLIST: ReadonlyArray<AllowlistEntry> = [
       'no agent spawn reference',
     contexts: ['CodeReviewComments'],
   },
+  {
+    path: 'src/assets/scripts/resolve-evidence-policy.cjs',
+    name: 'Coder',
+    reason:
+      'THIRD_PARTY: "TextDecoder" — the WHATWG Encoding API the resolver decodes ' +
+      'policy bytes with (fatal on malformed UTF-8); no agent spawn reference',
+    contexts: ['TextDecoder'],
+  },
 
   // -----------------------------------------------------------------------
   // Evaluator — CONCEPT (MDS function name + inline prompt role descriptors)
