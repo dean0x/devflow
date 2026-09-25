@@ -355,7 +355,7 @@ Each issue in the batch is wrapped individually in its own `<untrusted-issue-bod
 
 Post a consolidated code review summary as a single PR comment per review run (D7). Marker-based deduplication — if the marker for this cycle+timestamp pair already exists, skip; never edit after posting.
 
-**Input:** `PR_NUMBER`, `REVIEW_SUMMARY_PATH`, `CYCLE_NUMBER`, `REVIEW_TIMESTAMP`, `WORKTREE_PATH` (optional), `REVIEW_PUBLICATION` (optional; values: `auto` | `full` | `off`; absent/unrecognised → `auto`)
+**Input:** `PR_NUMBER`, `REVIEW_SUMMARY_PATH`, `CYCLE_NUMBER`, `REVIEW_TIMESTAMP`, `WORKTREE_PATH` (optional), `REVIEW_PUBLICATION` (optional; values: `auto` | `full` | `off` | `stub`; absent/unrecognised → `auto`)
 
 - `REVIEW_TIMESTAMP`: the review directory timestamp slug (e.g., `2026-08-20_1030`); identifies the specific review run within a cycle so a re-review in the same cycle posts its own comment while a true re-run of the same review deduplicates
 
@@ -372,7 +372,7 @@ The publication gate this operation applies is the `devflow:git` skill's `refere
 **PR**: #{number}
 **Cycle**: {CYCLE_NUMBER}
 **Review timestamp**: {REVIEW_TIMESTAMP}
-**Publication**: FULL (private repo) | FULL (config override) | STUB (public repository) | OFF (publication disabled by config) | STUB (visibility undeterminable)
+**Publication**: FULL (private repo) | FULL (config override) | STUB (public repository) | OFF (publication disabled by config) | STUB (visibility undeterminable) | STUB (evidence policy)
 **Status**: POSTED | POSTED+TRUNCATED (body exceeded 60k after redaction — `NOTE` prepended to body) | SKIPPED (already posted for cycle {N} ts:{REVIEW_TIMESTAMP}) | DEGRADED ({reason})
 ```
 
@@ -614,7 +614,7 @@ Reply to external review threads and, when conditions are met, mark them resolve
 
 Post the resolution summary as a single PR comment. Marker-based deduplication — only one comment per workflow run, never edited after posting (D8).
 
-**Input:** `PR_NUMBER`, `RESOLUTION_SUMMARY_PATH`, `RESOLUTION_TS`, `WORKTREE_PATH` (optional), `REVIEW_PUBLICATION` (optional; values: `auto` | `full` | `off`; absent/unrecognised → `auto`)
+**Input:** `PR_NUMBER`, `RESOLUTION_SUMMARY_PATH`, `RESOLUTION_TS`, `WORKTREE_PATH` (optional), `REVIEW_PUBLICATION` (optional; values: `auto` | `full` | `off` | `stub`; absent/unrecognised → `auto`)
 
 **Degradation (D4):** No PR → `TRACEABILITY: DEGRADED (no PR)`, warn, return. Resolution summary is already written to disk.
 
@@ -629,7 +629,7 @@ The body those mechanics compose MUST NOT reproduce verbatim content from any `<
 ```markdown
 ## Resolution Summary Posted
 **PR**: #{number}
-**Publication**: FULL (private repo) | FULL (config override) | STUB (public repository) | OFF (publication disabled by config) | STUB (visibility undeterminable)
+**Publication**: FULL (private repo) | FULL (config override) | STUB (public repository) | OFF (publication disabled by config) | STUB (visibility undeterminable) | STUB (evidence policy)
 **Status**: POSTED | POSTED+TRUNCATED (body exceeded 60k after redaction — `NOTE` prepended to body) | SKIPPED (already posted) | DEGRADED ({reason})
 ```
 
