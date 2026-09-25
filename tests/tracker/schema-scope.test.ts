@@ -869,6 +869,13 @@ const PR_HOST_REASONS: readonly string[] = [
   'evidence unavailable',
   'concurrent edit',
   'body read-back mismatch',
+  // #365 (PR6): ensure-pr-ready step 4a's two caller-block gates. A block the
+  // caller passed failed its `verify-evidence.cjs check wave` / `check block`,
+  // so 4a omits it rather than repairing it. The PR host creates the PR either
+  // way — no tracker is involved. The second spelling is code.md
+  // Responsibility 7's, so one refusal reads the same from both PR creators.
+  'wave block does not match its grammar',
+  'test-plan block does not match its grammar',
 ];
 
 /**
