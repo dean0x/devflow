@@ -626,10 +626,15 @@ function collectPublicationImporters(sources: ReadonlyArray<{ name: string; cont
 const PHASE10B = '### Phase 10b: Evidence'
 const EVIDENCE_SPAWN = '"OPERATION: update-pr-evidence'
 
+/** The one push /implement runs itself: claims keyed to a local HEAD must be in the PR before 10b reads them. */
+const EVIDENCE_PUSH = 'git push origin HEAD; echo "exit=$?"'
+
 const PHASE10B_ORDER: readonly OrderRule[] = [
   { label: 'the policy resolves before the publication partial reads it', before: 'resolve-evidence-policy.cjs', after: '**Evidence stub:**' },
   { label: 'REVIEW_PUBLICATION resolves in Phase 1', before: '**Evidence stub:**', after: '### Phase 2: Implement' },
   { label: 'Phase 10b follows Phase 10', before: '### Phase 10: Create PR', after: PHASE10B },
+  { label: 'the push sits in Phase 10b', before: PHASE10B, after: EVIDENCE_PUSH },
+  { label: 'the push precedes the evidence spawn', before: EVIDENCE_PUSH, after: EVIDENCE_SPAWN },
   { label: 'the evidence spawn sits in Phase 10b', before: PHASE10B, after: EVIDENCE_SPAWN },
   { label: 'Phase 11 follows the evidence spawn', before: EVIDENCE_SPAWN, after: '### Phase 11: Report' },
 ]
@@ -649,6 +654,59 @@ function collectEvidenceSpawnDefects(content: string): string[] {
   if (!phase.includes('It never blocks')) out.push('Phase 10b may block')
   return out
 }
+
+/**
+ * Named collector: what Phase 10b's push lacks. It is the command's only push: one
+ * bash fence, never forced, never retried, and a failure is a DEGRADED line rather
+ * than a stop — the evidence spawn still runs, and an unpushed claim reads
+ * UNVERIFIED rather than blocking the PR.
+ */
+function collectEvidencePushDefects(content: string): string[] {
+  const at = content.indexOf(PHASE10B)
+  const end = content.indexOf('### Phase 11: Report')
+  if (at === -1 || end === -1) return ['no Phase 10b section']
+  const phase = content.slice(at, end)
+  const out: string[] = []
+  const pushes = parseFences(phase).filter(f => /\bgit\b[^\n]*\bpush\b/.test(f))
+  if (pushes.length !== 1) out.push(`expected one push fence in Phase 10b, found ${pushes.length}`)
+  if (pushes.some(f => !f.includes(EVIDENCE_PUSH))) out.push('the push is not the stated command')
+  if (pushes.some(f => /(^|\s)(--force(-with-lease)?\b|-f\b|\+\S)/.test(f))) out.push('the push may force')
+  if (!phase.includes('never force, and no retry')) out.push('the push does not say never force, no retry')
+  if (!phase.includes('`TRACEABILITY: DEGRADED (evidence push failed)`')) out.push('a failed push names no DEGRADED reason')
+  if (!phase.includes('does not block') || !phase.includes('spawn anyway')) out.push('a failed push may block the evidence spawn')
+  return out
+}
+
+describe('0b: Phase 10b pushes the branch before the evidence spawn', () => {
+  it('one unforced push precedes the spawn, and its failure is DEGRADED, never a stop', () => {
+    const md = implementMd()
+    expect(md.split(EVIDENCE_PUSH).length - 1, 'the push command is the corpus').toBe(1)
+    expect(collectEvidencePushDefects(md)).toEqual([])
+    expect(collectOrderViolations('implement.md', md, PHASE10B_ORDER)).toEqual([])
+  })
+
+  it('the Report surfaces the push\'s DEGRADED line and the diagram shows the push', () => {
+    const md = implementMd()
+    expect(md).toContain('or Phase 10b\'s push recorded one, surface them verbatim')
+    expect(md).toContain('Push the branch (never force; a failure is DEGRADED, not a stop)')
+  })
+
+  it('known-bad probes: a push after the spawn, a forced push, a lost push and a blocking failure are reported', () => {
+    const md = implementMd()
+    const phase = md.slice(md.indexOf(PHASE10B), md.indexOf('### Phase 11: Report'))
+    const pushFence = '```bash\n' + EVIDENCE_PUSH + '\n```\n\n'
+    expect(phase.includes(pushFence), 'the push fence moved').toBe(true)
+    const late = md.replace(pushFence, '').replace('### Phase 11: Report', pushFence + '### Phase 11: Report')
+    expect(collectOrderViolations('implement.md', late, PHASE10B_ORDER).some(v => v.includes('the push precedes the evidence spawn'))).toBe(true)
+    expect(collectEvidencePushDefects(md.replace(EVIDENCE_PUSH, 'git push --force origin HEAD; echo "exit=$?"'))).toEqual([
+      'the push is not the stated command',
+      'the push may force',
+    ])
+    expect(collectEvidencePushDefects(md.replace(EVIDENCE_PUSH, 'git push origin +HEAD; echo "exit=$?"'))).toContain('the push may force')
+    expect(collectEvidencePushDefects(md.replace(pushFence, ''))).toEqual(['expected one push fence in Phase 10b, found 0'])
+    expect(collectEvidencePushDefects(md.replace('spawn anyway', 'stop'))).toEqual(['a failed push may block the evidence spawn'])
+  })
+})
 
 describe('AC-11: Phase 10b runs update-pr-evidence once, after Phase 10, for every strategy', () => {
   it('the publication partial has three importers, /implement among them', () => {

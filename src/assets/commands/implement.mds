@@ -537,6 +537,14 @@ Its Responsibility 7 composes the body, pastes `ISSUE_PR_LINK`, `PR_EXCEPTIONS` 
 
 Run once, after Phase 10, under every strategy: the PR exists by now under all three — from Phase 2 for SINGLE_CODE_AGENT and SEQUENTIAL_CODE_AGENTS, from Phase 10 for PARALLEL_CODE_AGENTS. Skip it only when no PR was created. PARALLEL_CODE_AGENTS ran no CI gate, so its `ci` TPs usually read `INDETERMINATE` until a later refresh.
 
+**Push first.** Every claim is keyed to the HEAD an agent reported, and a Scrutinize or fix agent may have committed without pushing; a claim whose SHA is not in the PR reads `UNVERIFIED`. So push the branch once before the spawn — never force, and no retry:
+
+```bash
+git push origin HEAD; echo "exit=$?"
+```
+
+`exit=0` continues to the spawn. Any other result, a rejected non-fast-forward push included, does not block: record `TRACEABILITY: DEGRADED (evidence push failed)` for the Phase 11 report and spawn anyway.
+
 ```
 Agent(subagent_type="Git"):
 "OPERATION: update-pr-evidence
@@ -556,7 +564,7 @@ Display completion summary with phase status, PR info, and next steps.
 
 Show the test plan's evidence from Phase 10b: `Test plan: \{VERIFIED-CI + ATTESTED-LOCAL\}/\{total\} verified (VERIFIED-CI \{n\}, ATTESTED-LOCAL \{n\})`, read from the `EVIDENCE` line and never inferred, then its `**Body**:` / `**Comment**:` line verbatim. Without an `EVIDENCE` line, show `Test plan: evidence unavailable`; with no test plan, `Test plan: missing`.
 
-If any Git agent output emitted `TRACEABILITY: DEGRADED (\{reason\})` lines during the run, surface them verbatim in the report under a `### Traceability` subsection so the user can act on them.
+If any Git agent output emitted `TRACEABILITY: DEGRADED (\{reason\})` lines during the run, or Phase 10b's push recorded one, surface them verbatim in the report under a `### Traceability` subsection so the user can act on them.
 
 If Phase 1 recorded an evidence exception, show its `## Evidence Exceptions` lines in the report.
 
@@ -612,6 +620,7 @@ If Phase 1 recorded an evidence exception, show its `## Evidence Exceptions` lin
 │  └─ PARALLEL: Code agent (pr-create) creates unified PR
 │
 ├─ Phase 10b: Evidence (every strategy, once the PR exists)
+│  └─ Push the branch (never force; a failure is DEGRADED, not a stop)
 │  └─ Git agent (update-pr-evidence) - test-plan block + evidence comment; never blocks
 │
 ├─ Phase 11: Report
