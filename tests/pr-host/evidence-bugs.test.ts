@@ -369,3 +369,93 @@ describe('/resolve posts the thread outcomes and reports every evidence post (§
     expect(collectMissingEvidencePosts(d09da34)).toEqual(['Phase 10 has no `### Evidence Posts` block'])
   })
 })
+
+// ---------------------------------------------------------------------------
+// 3. "undeterminable" — a probe failure is not a public repository (§3.3, AC-6)
+// ---------------------------------------------------------------------------
+//
+// A visibility probe that errored on a PRIVATE repo was reported as
+// `STUB (public repository)`. The fail-closed STUB is right; the label was not.
+// The frozen STUB BODY sentence keeps "(public repository)" — only the status
+// and the two reports become exact.
+
+const UNDETERMINABLE = 'STUB (visibility undeterminable)'
+
+/** One line that must be able to report the undeterminable status. */
+interface LabelSite {
+  readonly label: string
+  readonly line: string | null
+}
+
+/** The single line of `text` that starts with `prefix` (after indentation), or null. */
+function soleLine(text: string, prefix: string): string | null {
+  const hits = text.split('\n').filter(line => line.trimStart().startsWith(prefix))
+  return hits.length === 1 ? hits[0] : null
+}
+
+/** The six sites that name a publication status: two Outputs, two probes, two reports. */
+function labelSites(files: {
+  gitMd: string
+  prReview: string
+  prResolution: string
+  resolve: string
+  codeReview: string
+}): LabelSite[] {
+  const gitCorpus: CorpusEntry[] = [{ path: 'git.md', content: files.gitMd }]
+  const output = (op: string): string | null =>
+    soleLine(extractOpSectionFromCorpus(gitCorpus, op, { mode: 'sole' }).content, '**Publication**:')
+  return [
+    { label: 'git.md post-review-summary Output', line: output('post-review-summary') },
+    { label: 'git.md post-resolution-summary Output', line: output('post-resolution-summary') },
+    { label: 'pr/post-review-summary.md step 3', line: soleLine(files.prReview, '3. ') },
+    { label: 'pr/post-resolution-summary.md step 3', line: soleLine(files.prResolution, '3. ') },
+    { label: '/resolve Phase 10 Evidence Posts', line: soleLine(evidencePostsBlock(files.resolve) ?? '', '- Publication:') },
+    { label: '/code-review Phase 4', line: soleLine(files.codeReview, '- Publication status:') },
+  ]
+}
+
+/** Named collector: publication-status sites that cannot report a probe failure exactly. */
+export function collectMissingUndeterminable(sites: readonly LabelSite[]): string[] {
+  return sites.flatMap(site =>
+    site.line === null
+      ? [`${site.label}: site not found (expected exactly one line)`]
+      : site.line.includes(UNDETERMINABLE)
+        ? []
+        : [`${site.label}: cannot report ${UNDETERMINABLE}`])
+}
+
+function shippedLabelFiles() {
+  return {
+    gitMd: GIT_AGENT.content,
+    prReview: requireRef(prHostRel('post-review-summary')),
+    prResolution: requireRef(prHostRel('post-resolution-summary')),
+    resolve: requireDistFile('resolve.md'),
+    codeReview: requireDistFile('code-review.md'),
+  }
+}
+
+describe('a probe failure is reported as STUB (visibility undeterminable) (§3.3, AC-6)', () => {
+  it('every publication-status site can report it', () => {
+    const sites = labelSites(shippedLabelFiles())
+    expect(sites, 'the six sites the label must reach').toHaveLength(6)
+    expect(collectMissingUndeterminable(sites)).toEqual([])
+  })
+
+  it('both probes map PUBLIC and a failure to different labels, still fail-closed to STUB', () => {
+    const files = shippedLabelFiles()
+    for (const step of [soleLine(files.prReview, '3. '), soleLine(files.prResolution, '3. ')]) {
+      expect(step).toContain('`PUBLIC` → `STUB (public repository)`')
+      expect(step).toContain(`→ \`${UNDETERMINABLE}\``)
+      expect(step, 'the fail-closed rule stays inline in each op (PF-058)').toContain('treat as PUBLIC (mode STUB)')
+    }
+  })
+
+  it('known-bad probe: removing the label from ONE site reports that site only', () => {
+    const files = shippedLabelFiles()
+    const wounded = { ...files, codeReview: files.codeReview.split(` | ${UNDETERMINABLE}`).join('') }
+    expect(wounded.codeReview, 'the seeding must change the file').not.toBe(files.codeReview)
+    expect(collectMissingUndeterminable(labelSites(wounded))).toEqual([
+      `/code-review Phase 4: cannot report ${UNDETERMINABLE}`,
+    ])
+  })
+})

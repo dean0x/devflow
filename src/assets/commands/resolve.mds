@@ -466,7 +466,7 @@ Final gate: {PASS | FAILED after N attempts}
 
 ### Evidence Posts
 - Resolution comment: {POSTED | POSTED+TRUNCATED | SKIPPED (already posted) | DEGRADED (reason)}
-- Publication: {FULL (private repo) | FULL (config override) | STUB (public repository) | OFF (publication disabled by config)}
+- Publication: {FULL (private repo) | FULL (config override) | STUB (public repository) | OFF (publication disabled by config) | STUB (visibility undeterminable)}
 - Thread replies: {COMPLETE | PARTIAL | TRUNCATED | SKIPPED (reason) | DEGRADED (reason)}
 
 ### Merge Readiness (if compliance enabled)

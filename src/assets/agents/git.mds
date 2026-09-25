@@ -373,7 +373,7 @@ The publication gate this operation applies is the `devflow:git` skill's `refere
 **PR**: #{number}
 **Cycle**: {CYCLE_NUMBER}
 **Review timestamp**: {REVIEW_TIMESTAMP}
-**Publication**: FULL (private repo) | FULL (config override) | STUB (public repository) | OFF (publication disabled by config)
+**Publication**: FULL (private repo) | FULL (config override) | STUB (public repository) | OFF (publication disabled by config) | STUB (visibility undeterminable)
 **Status**: POSTED | POSTED+TRUNCATED (body exceeded 60k after redaction — `NOTE` prepended to body) | SKIPPED (already posted for cycle {N} ts:{REVIEW_TIMESTAMP}) | DEGRADED ({reason})
 ```
 
@@ -630,7 +630,7 @@ The body those mechanics compose MUST NOT reproduce verbatim content from any `<
 ```markdown
 ## Resolution Summary Posted
 **PR**: #{number}
-**Publication**: FULL (private repo) | FULL (config override) | STUB (public repository) | OFF (publication disabled by config)
+**Publication**: FULL (private repo) | FULL (config override) | STUB (public repository) | OFF (publication disabled by config) | STUB (visibility undeterminable)
 **Status**: POSTED | POSTED+TRUNCATED (body exceeded 60k after redaction — `NOTE` prepended to body) | SKIPPED (already posted) | DEGRADED ({reason})
 ```
 
