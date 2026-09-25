@@ -613,6 +613,12 @@ describe('preamble — orchestrator charter mode', () => {
       expect(parsed.hookSpecificOutput.additionalContext).toBe(REMINDER_TEMPLATE);
     });
 
+    it('F2b: reminder names no model (no haiku/sonnet/opus)', () => {
+      const out = runPreamble('fix the auth bug');
+      const parsed = JSON.parse(out) as { hookSpecificOutput: { additionalContext: string } };
+      expect(parsed.hookSpecificOutput.additionalContext).not.toMatch(/haiku|sonnet|opus/i);
+    });
+
     it('F5a: old keyword prompt (implement the cache) → reminder, not directive [AC-F5]', () => {
       const out = runPreamble('implement the cache');
       const parsed = JSON.parse(out) as { hookSpecificOutput: { additionalContext: string } };
@@ -1046,13 +1052,22 @@ describe('session-start-orchestrator', () => {
     expect(ctx).toContain('devflow:implement');
   });
 
-  it('AC-F1: additionalContext contains model-tier names (haiku, sonnet, opus)', () => {
+  it('AC-F1: additionalContext routes by roster agent and pins no model (no haiku/sonnet/opus)', () => {
     const { stdout } = runHook(ORCHESTRATOR_HOOK, { cwd: tmpDir }, homeDir);
     const parsed = JSON.parse(stdout) as { hookSpecificOutput: { additionalContext: string } };
     const ctx = parsed.hookSpecificOutput.additionalContext;
-    expect(ctx).toContain('haiku');
-    expect(ctx).toContain('sonnet');
-    expect(ctx).toContain('opus');
+    // Each agent's model/effort is user-configured; naming a model would steer the
+    // orchestrator into overriding it on the Agent call.
+    expect(ctx).not.toMatch(/haiku|sonnet|opus/i);
+    for (const agent of ['Explore', 'Skim', 'Code', 'Validate', 'Git', 'Design', 'Research', 'Review', 'Triage']) {
+      expect(ctx).toContain(agent);
+    }
+  });
+
+  it('AC-F1: additionalContext carries no HTML comment (maintainer notes never reach users)', () => {
+    const { stdout } = runHook(ORCHESTRATOR_HOOK, { cwd: tmpDir }, homeDir);
+    const parsed = JSON.parse(stdout) as { hookSpecificOutput: { additionalContext: string } };
+    expect(parsed.hookSpecificOutput.additionalContext).not.toContain('<!--');
   });
 
   it('AC-F9: DEVFLOW_BG_UPDATER=1 → empty stdout (no injection into nested bg sessions)', () => {
