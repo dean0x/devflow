@@ -3,14 +3,16 @@
 # rules that govern .devflow/.
 #
 # .devflow/ holds per-developer runtime state (memory, learning, docs, locks) —
-# local by default. TWO exceptions are shared via git:
+# local by default. THREE exceptions are shared via git:
 # 1. Feature knowledge bases under .devflow/features/: index.md and every
 #    {slug}/KNOWLEDGE.md (tracked, committed by the Knowledge agent at workflow end).
 # 2. .devflow/conventions.md — naming-convention authority written by the Git
 #    learn-conventions operation; shared so the team uses one naming source.
+# 3. .devflow/policy.json — the team-owned evidence policy, read from the default
+#    branch by resolve-evidence-policy.cjs. Devflow never writes it.
 #
-# Everything else under .devflow/ stays local. A user opts back out by re-adding
-# `.devflow/features/` or `.devflow/conventions.md` to their own .gitignore.
+# Everything else under .devflow/ stays local. A user opts back out of the first two
+# by re-adding `.devflow/features/` or `.devflow/conventions.md` to their own .gitignore.
 #
 # Re-including files under an ignored tree requires un-ignoring each level with a
 # `dir/*` + `!dir/keep` pair: a bare `.devflow/` excludes the directory outright,
@@ -23,21 +25,23 @@
 # Both reach this one writer so the rule is applied identically everywhere; this
 # decouples git-tracking of .devflow/ from any single feature toggle (avoids PF-014).
 #
-# Idempotent and O(1) after the first run via the .root-gitignore-configured-v4
+# Idempotent and O(1) after the first run via the .root-gitignore-configured-v5
 # marker under .devflow/ (project-local). The marker is a claim, not proof, so the
-# fast path also requires the block's own sentinel AND a .claudeignore entry to be
-# present; a .gitignore that lost the block to a merge resolution is healed on the
-# next run.
+# fast path also requires the block's own sentinel, the policy line AND a
+# .claudeignore entry to be present; a .gitignore that lost any of them (a merge
+# resolution, a hand edit) is healed on the next run. A v4-marked project misses the
+# fast path, gains the policy line and is re-stamped v5.
 #
-# D-GITIGNORE-V4: the block is detected by its devflow-unique sentinel
-# `!.devflow/conventions.md` — NEVER by `.claudeignore`, which users legitimately
-# author themselves. Keying presence off a user-authored line inverts both halves of
-# the contract: projects that already ignore `.claudeignore` never receive the
-# carve-out (so .devflow/ runtime files leak into git), and re-appending
-# `.claudeignore` after a user's `!.claudeignore` reverses their intent under
-# gitignore's last-match-wins. Hence: a `.claudeignore` OR `!.claudeignore` entry
-# means "the user owns that line" — emit the block without it. All matching is
-# whole-line and whitespace-tolerant; never substring.
+# D-GITIGNORE-V5: the block is detected ONLY by its devflow-unique sentinel
+# `!.devflow/conventions.md` — NEVER by `.claudeignore` or `!.devflow/policy.json`,
+# which users legitimately author themselves. Those two are completion lines: each is
+# topped up when missing, in block order (policy, then .claudeignore). Keying presence
+# off a user-authored line inverts both halves of the contract: projects that already
+# carry that line never receive the carve-out (so .devflow/ runtime files leak into
+# git), and re-appending `.claudeignore` after a user's `!.claudeignore` reverses
+# their intent under gitignore's last-match-wins. Hence: a `.claudeignore` OR
+# `!.claudeignore` entry means "the user owns that line" — emit the block without it.
+# All matching is whole-line and whitespace-tolerant; never substring.
 #
 # Usage: source ensure-root-gitignore "$PROJECT_ROOT"
 # Sourced helper: uses `return` (never exit), _ERG_-prefixed locals (never clobbers
@@ -46,7 +50,7 @@
 [ -z "$1" ] && return 1
 
 _ERG_DEVFLOW_DIR="$1/.devflow"
-_ERG_MARKER="$_ERG_DEVFLOW_DIR/.root-gitignore-configured-v4"
+_ERG_MARKER="$_ERG_DEVFLOW_DIR/.root-gitignore-configured-v5"
 _ERG_GITIGNORE="$1/.gitignore"
 
 # Whole-line, whitespace-tolerant matchers. `*` and `.` are escaped so the ERE
@@ -55,13 +59,15 @@ _ERG_RE_OPTOUT='^[[:space:]]*/\.devflow/[[:space:]]*$'
 _ERG_RE_LEGACY='^[[:space:]]*\.devflow/[[:space:]]*$'
 _ERG_RE_SENTINEL='^[[:space:]]*!\.devflow/conventions\.md[[:space:]]*$'
 _ERG_RE_SENTINEL_V2='^[[:space:]]*!\.devflow/features/\*/KNOWLEDGE\.md[[:space:]]*$'
+_ERG_RE_POLICY='^[[:space:]]*!\.devflow/policy\.json[[:space:]]*$'
 _ERG_RE_CLAUDEIGNORE='^[[:space:]]*!?\.claudeignore[[:space:]]*$'
 
 # Fast path: converged only when the marker is stamped AND the block sentinel is
-# present AND a .claudeignore entry exists. Every other state falls through and
-# recomputes.
+# present AND the policy line is present AND a .claudeignore entry exists. Every
+# other state falls through and recomputes.
 if [ -f "$_ERG_MARKER" ] \
   && grep -qE "$_ERG_RE_SENTINEL" "$_ERG_GITIGNORE" 2>/dev/null \
+  && grep -qE "$_ERG_RE_POLICY" "$_ERG_GITIGNORE" 2>/dev/null \
   && grep -qE "$_ERG_RE_CLAUDEIGNORE" "$_ERG_GITIGNORE" 2>/dev/null; then
   return 0
 fi
@@ -77,10 +83,10 @@ mkdir -p "$_ERG_DEVFLOW_DIR" 2>/dev/null || return 1
 # src/targets/claude-code/post-install.ts.
 printf -v _ERG_BLOCK_NO_CI '%s\n' \
   '# Devflow runtime data — local by default (memory, learning, docs, locks).' \
-  '# Two exceptions are shared via git: feature knowledge bases under .devflow/features/' \
-  '# (index.md and every {slug}/KNOWLEDGE.md) and .devflow/conventions.md (naming' \
-  '# authority). To stop sharing, re-add `.devflow/features/` or `.devflow/conventions.md`' \
-  '# to your own .gitignore.' \
+  '# Shared via git: feature knowledge bases under .devflow/features/ (index.md and' \
+  '# every {slug}/KNOWLEDGE.md), .devflow/conventions.md (naming authority) and' \
+  '# .devflow/policy.json (evidence policy). To stop sharing the first two, re-add' \
+  '# `.devflow/features/` or `.devflow/conventions.md` to your own .gitignore.' \
   '.devflow/*' \
   '!.devflow/features/' \
   '.devflow/features/*' \
@@ -88,15 +94,29 @@ printf -v _ERG_BLOCK_NO_CI '%s\n' \
   '!.devflow/features/*/' \
   '.devflow/features/*/*' \
   '!.devflow/features/*/KNOWLEDGE.md' \
-  '!.devflow/conventions.md'
+  '!.devflow/conventions.md' \
+  '!.devflow/policy.json'
 printf -v _ERG_LINE_SENTINEL '%s\n' '!.devflow/conventions.md'
+printf -v _ERG_LINE_POLICY '%s\n' '!.devflow/policy.json'
 printf -v _ERG_LINE_CLAUDEIGNORE '%s\n' '.claudeignore'
 _ERG_BLOCK="$_ERG_BLOCK_NO_CI$_ERG_LINE_CLAUDEIGNORE"
 
-# Does the file already carry a .claudeignore entry of the user's own (either form)?
-# Computed BEFORE the legacy filter below, which rewrites the file.
+# Does the file already carry the policy line, or a .claudeignore entry of the user's
+# own (either form)? Computed BEFORE the legacy filter below, which rewrites the file.
+_ERG_HAS_POLICY=0
+grep -qE "$_ERG_RE_POLICY" "$_ERG_GITIGNORE" 2>/dev/null && _ERG_HAS_POLICY=1
 _ERG_HAS_CI=0
 grep -qE "$_ERG_RE_CLAUDEIGNORE" "$_ERG_GITIGNORE" 2>/dev/null && _ERG_HAS_CI=1
+
+# The completion lines this file lacks, in block order (policy, then .claudeignore).
+# Mirrors missingCompletionLines in the TS twin.
+_ERG_COMPLETION=''
+if [ "$_ERG_HAS_POLICY" = 0 ]; then
+  _ERG_COMPLETION="$_ERG_LINE_POLICY"
+fi
+if [ "$_ERG_HAS_CI" = 0 ]; then
+  _ERG_COMPLETION="$_ERG_COMPLETION$_ERG_LINE_CLAUDEIGNORE"
+fi
 
 # Classify: noop (nothing to do) | continue (extend an existing block) |
 # block (install a fresh block) | fail (a rewrite failed; leave the file alone).
@@ -107,19 +127,15 @@ if grep -qE "$_ERG_RE_OPTOUT" "$_ERG_GITIGNORE" 2>/dev/null; then
   # Checked FIRST so a file containing both it and a sentinel keeps the user's entry.
   _ERG_MODE=noop
 elif grep -qE "$_ERG_RE_SENTINEL" "$_ERG_GITIGNORE" 2>/dev/null; then
-  # Current block installed — complete it only if the .claudeignore line is missing.
-  if [ "$_ERG_HAS_CI" = 0 ]; then
+  # Block installed (v3 and later) — top up only the completion lines it lacks.
+  if [ -n "$_ERG_COMPLETION" ]; then
     _ERG_MODE=continue
-    _ERG_APPEND="$_ERG_LINE_CLAUDEIGNORE"
+    _ERG_APPEND="$_ERG_COMPLETION"
   fi
 elif grep -qE "$_ERG_RE_SENTINEL_V2" "$_ERG_GITIGNORE" 2>/dev/null; then
   # v2 block installed — append the lines it lacks, in block order.
   _ERG_MODE=continue
-  if [ "$_ERG_HAS_CI" = 1 ]; then
-    _ERG_APPEND="$_ERG_LINE_SENTINEL"
-  else
-    _ERG_APPEND="$_ERG_LINE_SENTINEL$_ERG_LINE_CLAUDEIGNORE"
-  fi
+  _ERG_APPEND="$_ERG_LINE_SENTINEL$_ERG_COMPLETION"
 else
   # No devflow block — install one, omitting the .claudeignore line the user owns.
   _ERG_MODE=block
@@ -177,9 +193,10 @@ case "$_ERG_MODE" in
     ;;
 esac
 
-# On success, stamp the current-format v4 marker and drop legacy markers.
+# On success, stamp the current-format v5 marker and drop legacy markers.
 [ "$_ERG_OK" = 1 ] && {
   touch "$_ERG_MARKER"
+  rm -f "$_ERG_DEVFLOW_DIR/.root-gitignore-configured-v4" 2>/dev/null
   rm -f "$_ERG_DEVFLOW_DIR/.root-gitignore-configured-v3" 2>/dev/null
   rm -f "$_ERG_DEVFLOW_DIR/.root-gitignore-configured-v2" 2>/dev/null
   rm -f "$_ERG_DEVFLOW_DIR/.root-gitignore-configured" 2>/dev/null
