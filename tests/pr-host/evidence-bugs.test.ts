@@ -895,6 +895,15 @@ describe('a fork PR without maintainer edits degrades instead of failing a push 
     expect(calls, 'one gh pr view in validate-branch').toHaveLength(1)
   })
 
+  it('validate-branch\'s self-discovery call runs from WORKTREE_PATH, not the orchestrator\'s cwd (A1)', () => {
+    // `gh` has no `-C` flag: the no-number self-discovery call must name WORKTREE_PATH
+    // as where it runs, or a multi-worktree /resolve discovers the wrong PR.
+    const line = soleLine(requireRef(prHostRel('validate-branch')), '- If a PR exists')
+    expect(line, 'the self-discovery bullet must be one line').not.toBeNull()
+    expect(line).toContain('omit `{number}` for the current branch')
+    expect(line).toContain('`WORKTREE_PATH`')
+  })
+
   it('known-bad probe: pre-flights keyed on the two PR fields alone are reported at both sites', () => {
     // isCrossRepository && !maintainerCanModify alone degrades a contributor's own
     // fork PR, whose pushes go to a repository they can write to. The seeds are the

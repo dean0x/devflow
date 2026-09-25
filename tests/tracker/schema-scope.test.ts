@@ -840,11 +840,13 @@ const PR_HOST_LEGACY_REASONS: readonly string[] = [
  * the wrong home and a provider file spelling one is reported.
  */
 const PR_HOST_REASONS: readonly string[] = [
-  // #360: validate-branch step 6 and ensure-pr-ready step 3 read `isCrossRepository`
-  // and `maintainerCanModify` from a PR call they already make, then the user's own
-  // push access to the fork; a fork PR this run cannot push to refuses every push,
-  // so the caller skips pushes and still posts, instead of failing mid-run and
-  // citing commits the PR never got.
+  // #360: validate-branch reads `isCrossRepository` and `maintainerCanModify` from
+  // the `gh pr view` call it already makes, then checks the user's own push access
+  // to the fork (`permissions.push`) before any push is attempted. ensure-pr-ready
+  // makes no such proactive check — it degrades only when the push it actually
+  // attempts is refused and that PR is a fork without maintainer edits. Either way
+  // the caller skips pushes and still posts, instead of failing mid-run and citing
+  // commits the PR never got.
   'cannot push to fork',
 ];
 
