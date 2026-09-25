@@ -68,7 +68,7 @@ Accept the output only when it is exactly two lines: `exit=0` last and, before i
 
 Set `EVIDENCE_POLICY`, `ISSUE_REQUIRED`, `APPLY_CONVENTIONS` and `REQUIRE_NON_AUTHOR_APPROVAL` from the accepted line. Pass agents only the three mechanism inputs, never `EVIDENCE_POLICY`. Report `Evidence policy: {EVIDENCE_POLICY} (source: {SOURCE})`, plus any `WARN` tokens as advisory, once in the final report.
 
-Reuse this result for all subsequent phases: it decides whether a real release gathers and traces its evidence (Phases 4–5), passes it to the release notes (step 4), and back-links shipped issues (step 4b).
+Reuse this result for all subsequent phases: it decides whether a real release gathers and traces its evidence (Phases 4–5), passes it to the release notes (step 4), and back-links shipped issues and associates them with the release (steps 4b–4c).
 
 ### Phase 2: Detect Release Process (First Run Only)
 
@@ -170,6 +170,7 @@ Sequential execution with progress checkpoints:
 3. **Release commit** — `chore(release): v{VERSION}` (conventional commit)
 4. **Tag and GitHub Release** — spawn `Agent(subagent_type="Git")` with `create-release` operation (the agent reads `.devflow/conventions.md` for tag format and release title conventions; compliance defaults when absent); only when `EVIDENCE_POLICY` is `required`, also pass `COMMIT_LIST` and `SHIPPED_ISSUES` from RELEASE_EVIDENCE, and `TRACEABILITY_EXCEPTIONS` when recorded, as inputs so the agent includes them in the release notes body.
 4b. **Back-link shipped issues** (only when `EVIDENCE_POLICY` is `required`) — spawn `Agent(subagent_type="Git")` with `backlink-shipped-issues` operation, passing `VERSION` and `SHIPPED_ISSUES`; posts a marker-deduped comment on each issue (bounds and throttle enforced by the operation); degrade gracefully (D4) on any API failure — never block the release
+4c. **Associate shipped issues with the release** (only when `EVIDENCE_POLICY` is `required` and `SHIPPED_ISSUES` is non-empty) — spawn `Agent(subagent_type="Git")` with `associate-release` operation, passing `VERSION` and `SHIPPED_ISSUES`; it adds each issue to the release's tracker marker and never replaces another; degrade gracefully (D4) — never block the release
 5. **Publish** — CI-driven (report) or manual (provide instructions)
 6. **Post-release steps** — version bump to next dev
 
@@ -223,7 +224,7 @@ On completion:
 │  └─ Confirm with user before executing
 │
 ├─ Phase 6: Execute Release
-│  ├─ Version bumps → Changelog → Commit → Git agent (tag + release) → Back-link → Publish → Post-release
+│  ├─ Version bumps → Changelog → Commit → Git agent (tag + release) → Back-link → Associate → Publish → Post-release
 │  └─ Progress checkpoints between each step
 │
 └─ Phase 7: Suggest Improvements
@@ -242,7 +243,7 @@ On completion:
 - Validate agent fails (build/test): halt, report failures, do not proceed
 - User declines release plan: halt gracefully
 - User halts at the traceability question: stop — nothing has been committed, tagged or published
-- Git agent reports DEGRADED while gathering or back-linking: warn and continue — never halt the release
+- Git agent reports DEGRADED while gathering, back-linking or associating: warn and continue — never halt the release
 - Git agent fails (tag/release): halt, report error, suggest manual steps
 - Mid-release failure: progress checkpoint enables resume on next run
 - Version file not found: halt, report which file is missing, ask user to update RELEASE-FLOW.md

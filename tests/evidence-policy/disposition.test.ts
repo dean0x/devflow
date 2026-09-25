@@ -238,11 +238,13 @@ const DISPOSITION: readonly DispositionRow[] = [
     // map is classified — and untraced commits asked about — BEFORE the confirm. A
     // `--dry-run` gathers under either policy (the gather site's own clause carries
     // both arms) and halts after Phase 4, so it never reaches the ask or step 4.
+    // Step 4c (P3) is its own spawn, separate from 4b, and states its own gate
+    // (PF-076) — plus a second clause, a non-empty SHIPPED_ISSUES.
     row: 12,
-    subject: '/release evidence gather, traceability ask, release-notes enrichment and back-link',
+    subject: '/release evidence gather, traceability ask, release-notes enrichment, back-link and release association',
     inputs: ['EVIDENCE_POLICY'],
-    on: 'gather and trace the evidence before the confirm; untraced commits or unknown coverage ⇒ record self-attested exceptions or halt; pass evidence and exceptions to create-release; back-link shipped issues',
-    off: 'a real release skips all four; a --dry-run still gathers and reports the trace, never asking',
+    on: 'gather and trace the evidence before the confirm; untraced commits or unknown coverage ⇒ record self-attested exceptions or halt; pass evidence and exceptions to create-release; back-link shipped issues; associate them with the release marker',
+    off: 'a real release skips all five; a --dry-run still gathers and reports the trace, never asking',
     sites: [
       {
         file: 'commands/release.md',
@@ -252,6 +254,7 @@ const DISPOSITION: readonly DispositionRow[] = [
       { file: 'commands/release.md', anchor: '**Traceability**', phrase: policyGate },
       { file: 'commands/release.md', anchor: '4. **Tag and GitHub Release**', phrase: policyGate },
       { file: 'commands/release.md', anchor: '4b. **Back-link shipped issues**', phrase: policyGate },
+      { file: 'commands/release.md', anchor: '4c. **Associate shipped issues with the release**', phrase: policyGate },
     ],
   },
   {
