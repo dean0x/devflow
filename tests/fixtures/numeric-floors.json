@@ -100,11 +100,11 @@
     },
     {
       "id": "seam-ops-with-callers",
-      "floor": 13,
-      "pattern": "toBeGreaterThanOrEqual(13)",
+      "floor": 14,
+      "pattern": "toBeGreaterThanOrEqual(14)",
       "occurrences": 1,
       "sourceFile": "tests/seams/command-agent-input.test.ts",
-      "description": "Operations with at least one live caller fence. Directions 1 and 2 iterate this map; if it empties, both pass vacuously (the defect this floor exists to make loud)."
+      "description": "Operations with at least one live caller fence. Directions 1 and 2 iterate this map; if it empties, both pass vacuously (the defect this floor exists to make loud). 14 since #363 (PR4): /implement's Phase 10b spawn gave update-pr-evidence its caller fence."
     },
     {
       "id": "issue-capture-contract-size",

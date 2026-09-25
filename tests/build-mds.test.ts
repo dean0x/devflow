@@ -1430,17 +1430,19 @@ describe('Phase F traceability — release.md evidence + dynamic-build mechanism
 
 // ---------------------------------------------------------------------------
 // §19  Phase C publication gate wiring — _publication.mds partial (11th partial)
-//      code-review.md and resolve.md must expand publication_gate()
-//      and pass REVIEW_PUBLICATION only in their Git post-*-summary spawns (PF-024)
+//      code-review.md, resolve.md and (since #363) implement.md must expand
+//      publication_gate() and pass REVIEW_PUBLICATION only in Git spawns (PF-024) —
+//      post-*-summary for the two review hosts, update-pr-evidence for /implement
 // ---------------------------------------------------------------------------
 
 describe('publication_gate adoption in compiled host commands (Phase C)', () => {
   const PUBLICATION_HOSTS: Record<string, string> = {
     'code-review': DIST_COMMANDS,
+    'implement':   DIST_COMMANDS,
     'resolve':     DIST_COMMANDS,
   };
 
-  it('code-review.md and resolve.md contain REVIEW_PUBLICATION resolution step', async () => {
+  it('code-review.md, implement.md and resolve.md contain REVIEW_PUBLICATION resolution step', async () => {
     let scanned = 0;
     for (const [basename, destRelDir] of Object.entries(PUBLICATION_HOSTS)) {
       const outputPath = path.join(BUILT_COMMANDS, `${basename}.md`);

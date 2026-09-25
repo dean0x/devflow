@@ -7,6 +7,7 @@ output-dir: dist/commands
 @import { evidence_policy, evidence_exception } from "./_partials/_evidence_policy.mds"
 @import { issue_ref_grammar, issue_capture_contract } from "./_partials/_tracker.mds"
 @import { test_plan_line } from "./_partials/_plan_contract.mds"
+@import { publication_gate } from "./_partials/_publication.mds"
 
 # Implement Command
 
@@ -43,13 +44,13 @@ When the user explicitly asks to re-validate, re-check, or re-run quality gates 
 2. **Skip Phase 2** — no Code agent needed, user already made changes.
 3. **Detect FILES_CHANGED**: `git diff --name-only \{base_branch\}...HEAD`
 4. **Run Phases 3-8** — full quality gate pipeline on detected changes.
-5. **Proceed to Phase 10** (Create PR) / **Phase 11** (Report).
+5. **Proceed to Phase 10** (Create PR), **Phase 10b** (Evidence) and **Phase 11** (Report).
 
 If the user prompt does NOT match re-validation, proceed with the full pipeline below.
 
 ### Phase 1: Setup
 
-**Produces:** TASK_ID, BASE_BRANCH, EXECUTION_PLAN, DECISIONS_CONTEXT, FEATURE_KNOWLEDGE, PR_DESCRIPTION_GUIDANCE, ISSUE_NUMBER, EVIDENCE_POLICY, ISSUE_REQUIRED, APPLY_CONVENTIONS, REQUIRE_NON_AUTHOR_APPROVAL, PR_EXCEPTIONS, TEST_PLAN, EVIDENCE_FILE, PR_TEST_PLAN_BLOCK
+**Produces:** TASK_ID, BASE_BRANCH, EXECUTION_PLAN, DECISIONS_CONTEXT, FEATURE_KNOWLEDGE, PR_DESCRIPTION_GUIDANCE, ISSUE_NUMBER, EVIDENCE_POLICY, ISSUE_REQUIRED, APPLY_CONVENTIONS, REQUIRE_NON_AUTHOR_APPROVAL, PR_EXCEPTIONS, TEST_PLAN, EVIDENCE_FILE, PR_TEST_PLAN_BLOCK, REVIEW_PUBLICATION
 
 **Load Companion Skills** — Load via Skill tool: `devflow:test-driven-development`, `devflow:patterns`, `devflow:dependency-research`. If a skill fails to load, continue without it.
 
@@ -156,6 +157,9 @@ node "${DEVFLOW_DIR:-$HOME/.devflow}/scripts/verify-evidence.cjs" render --plan 
 ```
 
 - `EVIDENCE_FILE` — `.devflow/docs/evidence-\{branch_slug\}.md`, its `## Evidence Exceptions` section now a byte copy of `PR_EXCEPTIONS` (absent when that is `(none)`).
+
+{publication_gate()}
+Phase 10b passes the resolved value to `update-pr-evidence`, which decides what each value means for the evidence comment.
 
 {decisions_load()}
 
@@ -327,7 +331,18 @@ Run build, typecheck, lint, test. Report pass/fail with failure details."
    - Loop back to Phase 3 (re-validate)
 4. If `validation_retry_count > 2`: Report failures to user and halt
 
-**If PASS:** Continue to Phase 4
+**If PASS:** append a `gate:validate` claim, then continue to Phase 4.
+
+**Evidence claims** are lines appended to the `## Claims` section of `EVIDENCE_FILE` — the file's last section, created when absent. Append only: never edit or remove a claim; the last valid one per target wins. Each line takes exactly one of these shapes, where `<head>` is the 40-hex `HEAD:` the agent's report shows:
+
+```
+- gate:validate PASS sha:<head> by:validate
+- TP-<n> <PASS|FAIL|SKIP> sha:<head> by:test exit:<0-255>
+```
+
+- `gate:validate` — after a Phase 3 or Phase 6 PASS.
+- `TP-<n>` — after every Phase 8 run, one line per `### Test Plan Evidence` row whose TP is in `TEST_PLAN`, with the row's outcome; the line ends at `by:test` when the row's Exit is not a number from 0 to 255.
+- Append nothing from a report whose `HEAD:` is not a single 40-hex SHA — a reported before/after change included — and say so in the Phase 11 report.
 
 ### Phase 4: Simplify
 
@@ -378,7 +393,7 @@ Verify Scrutinize agent's fixes didn't break anything."
 
 **If FAIL:** Report to user - Scrutinize agent broke tests, needs manual intervention.
 
-**If PASS:** Continue to Phase 7
+**If PASS:** append a `gate:validate` claim (Phase 3's **Evidence claims**), then continue to Phase 7.
 
 ### Phase 7: Alignment Check
 
@@ -441,6 +456,8 @@ ACCEPTANCE_CRITERIA: {extracted criteria if available}
 TEST_PLAN: {the TP lines of the evidence file's ## Test Plan section, or (none)}
 Design and execute scenario-based acceptance tests. Report PASS or FAIL with evidence."
 ```
+
+After every Test agent run — PASS or FAIL, first run or retry — append its TP claims (Phase 3's **Evidence claims**).
 
 **If PASS:** Continue to Phase 9
 
@@ -513,15 +530,35 @@ Its Responsibility 7 composes the body, pastes `ISSUE_PR_LINK`, `PR_EXCEPTIONS` 
 
 **For SINGLE_CODE_AGENT**: PR is created by the Code agent (CREATE_PR: true) — the Code agent's Responsibility 7 handles Related Issues inclusion when ISSUE_NUMBER is provided.
 
+### Phase 10b: Evidence
+
+**Produces:** EVIDENCE_RESULT
+**Requires:** PR_URL, EVIDENCE_FILE, REVIEW_PUBLICATION
+
+Run once, after Phase 10, under every strategy: the PR exists by now under all three — from Phase 2 for SINGLE_CODE_AGENT and SEQUENTIAL_CODE_AGENTS, from Phase 10 for PARALLEL_CODE_AGENTS. Skip it only when no PR was created. PARALLEL_CODE_AGENTS ran no CI gate, so its `ci` TPs usually read `INDETERMINATE` until a later refresh.
+
+```
+Agent(subagent_type="Git"):
+"OPERATION: update-pr-evidence
+PR_NUMBER: {number from PR_URL}
+EVIDENCE_FILE: .devflow/docs/evidence-{branch_slug}.md
+REVIEW_PUBLICATION: {REVIEW_PUBLICATION resolved in Phase 1, or auto}
+Update the PR's test-plan block and post its evidence comment."
+```
+
+Omit the `EVIDENCE_FILE` line when that file does not exist. Capture the op's `## PR Evidence` block — its `EVIDENCE` line and its `**Body**:` / `**Comment**:` line — as `EVIDENCE_RESULT`, or its `TRACEABILITY: DEGRADED (\{reason\})` line. It never blocks: whatever it returns, continue to Phase 11.
+
 ### Phase 11: Report
 
-**Requires:** VALIDATION_RESULT, ALIGNMENT_RESULT, QA_RESULT, PR_URL
+**Requires:** VALIDATION_RESULT, ALIGNMENT_RESULT, QA_RESULT, PR_URL, EVIDENCE_RESULT
 
 Display completion summary with phase status, PR info, and next steps.
 
+Show the test plan's evidence from Phase 10b: `Test plan: \{VERIFIED-CI + ATTESTED-LOCAL\}/\{total\} verified (VERIFIED-CI \{n\}, ATTESTED-LOCAL \{n\})`, read from the `EVIDENCE` line and never inferred, then its `**Body**:` / `**Comment**:` line verbatim. Without an `EVIDENCE` line, show `Test plan: evidence unavailable`; with no test plan, `Test plan: missing`.
+
 If any Git agent output emitted `TRACEABILITY: DEGRADED (\{reason\})` lines during the run, surface them verbatim in the report under a `### Traceability` subsection so the user can act on them.
 
-If Phase 1 recorded an evidence exception, show its `## Evidence Exceptions` line in the report.
+If Phase 1 recorded an evidence exception, show its `## Evidence Exceptions` lines in the report.
 
 {knowledge_writeback()}
 
@@ -531,7 +568,7 @@ If Phase 1 recorded an evidence exception, show its `## Evidence Exceptions` lin
 /implement (orchestrator - spawns agents only)
 │
 ├─ Re-validation Path (when user says "re-validate"/"re-check"/"re-run gates")
-│  └─ Branch safety → skip Phase 2 → detect FILES_CHANGED → Phases 3-8 → Phase 10-11
+│  └─ Branch safety → skip Phase 2 → detect FILES_CHANGED → Phases 3-8 → Phase 10, 10b, 11
 │
 ├─ Phase 1: Setup
 │  └─ Plan document parsing (if .md path provided) - extracts execution plan, strategy, frontmatter issue
@@ -547,6 +584,7 @@ If Phase 1 recorded an evidence exception, show its `## Evidence Exceptions` lin
 ├─ Phase 3: Validate
 │  └─ Validate agent (build, typecheck, lint, test)
 │  └─ If FAIL: Code agent fix loop (max 2 retries) → re-validate
+│  └─ If PASS: gate:validate claim → evidence file
 │
 ├─ Phase 4: Simplify
 │  └─ Simplify agent (refines code clarity and consistency)
@@ -562,7 +600,7 @@ If Phase 1 recorded an evidence exception, show its `## Evidence Exceptions` lin
 │  └─ If MISALIGNED: Code agent fix loop (max 2 iterations) → Validate agent → re-check
 │
 ├─ Phase 8: QA Testing
-│  └─ Test agent (scenario-based acceptance tests)
+│  └─ Test agent (scenario-based acceptance tests, TEST_PLAN) → one claim per TP row → evidence file
 │  └─ If FAIL: Code agent fix loop (max 2 retries) → Validate agent → re-test
 │
 ├─ Phase 9: CI Status Gate (SINGLE_CODE_AGENT + SEQUENTIAL_CODE_AGENTS; skipped for PARALLEL_CODE_AGENTS)
@@ -572,6 +610,9 @@ If Phase 1 recorded an evidence exception, show its `## Evidence Exceptions` lin
 │  └─ SINGLE_CODE_AGENT: already created by the Phase 2 Code agent
 │  └─ SEQUENTIAL: already created by the last Phase 2 Code agent
 │  └─ PARALLEL: Code agent (pr-create) creates unified PR
+│
+├─ Phase 10b: Evidence (every strategy, once the PR exists)
+│  └─ Git agent (update-pr-evidence) - test-plan block + evidence comment; never blocks
 │
 ├─ Phase 11: Report
 │
@@ -592,7 +633,7 @@ If Phase 1 recorded an evidence exception, show its `## Evidence Exceptions` lin
 9. **Validate agent owns validation** - Never run `npm test`, `npm run build`, or similar in main session; always delegate to Validate agent
 10. **Code agent owns fixes** - Never implement fixes in main session; spawn Code agent for validation failures and alignment fixes
 11. **Loop limits** - Max 2 validation retries, max 2 alignment fix iterations before escalating to user
-12. **CI awareness** - CI status is checked before merge for SINGLE_CODE_AGENT and SEQUENTIAL_CODE_AGENTS, whose PR exists from Phase 2; skipped for PARALLEL_CODE_AGENTS, whose PR is created in Phase 10
+12. **CI awareness** - CI status is checked before merge for SINGLE_CODE_AGENT and SEQUENTIAL_CODE_AGENTS, whose PR exists from Phase 2; skipped for PARALLEL_CODE_AGENTS, whose PR is created in Phase 10; test-plan evidence (Phase 10b) is recorded under every strategy once the PR exists
 
 ## Error Handling
 

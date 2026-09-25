@@ -21,7 +21,11 @@
  *          one: record a `test-plan` exception, or stop with BLOCKED (no test plan)
  *          and the policy-file remedy. `standard` never asks.
  *   AC-10  Every Code spawn that can create the PR forwards PR_TEST_PLAN_BLOCK.
- *   AC-11  The Phase 8 Test spawn passes TEST_PLAN.
+ *   AC-11  The Phase 8 Test spawn passes TEST_PLAN. Phase 3/6 PASSes and every
+ *          Phase 8 run append claims whose shapes CLAIM_LINE_RE admits, and Phase
+ *          10b — after Phase 10, one spawn for all three strategies — runs
+ *          update-pr-evidence with the REVIEW_PUBLICATION Phase 1 resolved through
+ *          the publication partial (its third importer, after the policy resolves).
  *   AC-9   /plan's artifact carries a `## Test Plan` section (required section
  *          13): Gate 2 shows the TP lines in the imported TP-line contract, and
  *          Phase 14 runs `check tp` over them before the artifact's one write —
@@ -41,7 +45,7 @@
 
 import { describe, it, expect, afterAll } from 'vitest'
 import { createRequire } from 'module'
-import { mkdtempSync, rmSync, writeFileSync } from 'fs'
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'fs'
 import { tmpdir } from 'os'
 import * as path from 'path'
 
@@ -51,6 +55,8 @@ import {
   parseFences,
   requireDistFile,
   resolveAgentSource,
+  ROOT,
+  walkFiles,
   type OrderRule,
 } from '../helpers.js'
 import { RESOLVER_SCRIPT } from '../evidence-policy/scripted-shim.js'
@@ -537,5 +543,149 @@ describe('AC-10/AC-11: the spawns carry the test plan', () => {
     const tests = parseFences(implementMd()).filter(f => isAgentBlock(f, 'Test'))
     expect(tests, 'the Phase 8 Test spawn').toHaveLength(1)
     expect(tests[0]).toContain("TEST_PLAN: {the TP lines of the evidence file's ## Test Plan section, or (none)}")
+  })
+})
+
+// ---------------------------------------------------------------------------
+// /implement — claims (AC-11)
+// ---------------------------------------------------------------------------
+
+/** The claim shapes the Evidence claims paragraph states: the lines of the fence under it. */
+function claimTemplates(content: string): string[] {
+  const at = content.indexOf('**Evidence claims** are lines appended')
+  if (at === -1) return []
+  const fence = /```\n([\s\S]*?)```/.exec(content.slice(at))
+  return fence === null ? [] : fence[1].split('\n').filter(l => l !== '')
+}
+
+/**
+ * Named collector: every concrete claim a template can produce that CLAIM_LINE_RE
+ * refuses, plus template placeholders it cannot fill. `<a|b>` alternations are
+ * expanded; `exit:<0-255>` is filled at both bounds and also dropped (the line may
+ * end at `by:test`).
+ */
+function collectInadmissibleClaims(templates: readonly string[]): string[] {
+  const head = 'a'.repeat(40)
+  const out: string[] = []
+  for (const template of templates) {
+    const alternation = /<([A-Z]+(?:\|[A-Z]+)+)>/.exec(template)
+    const outcomes = alternation === null ? [''] : alternation[1].split('|')
+    for (const outcome of outcomes) {
+      for (const exit of ['0', '255', null]) {
+        let line = template.replace('<head>', head).replace('<n>', '7')
+        if (alternation !== null) line = line.replace(alternation[0], outcome)
+        line = exit === null ? line.replace(/ exit:<0-255>$/, '') : line.replace('<0-255>', exit)
+        if (/<[^>]*>/.test(line)) out.push(`unfilled placeholder: ${template}`)
+        else if (!PE.CLAIM_LINE_RE.test(line)) out.push(`refused: ${line}`)
+      }
+    }
+  }
+  return [...new Set(out)]
+}
+
+describe('AC-11: /implement appends claims the evidence script can read', () => {
+  it('the gate and TP claim shapes fill to lines CLAIM_LINE_RE admits, with the claim outcome vocabulary', () => {
+    const templates = claimTemplates(implementMd())
+    expect(templates).toHaveLength(2)
+    expect(templates[1]).toContain(`<${claimOutcomes().join('|')}>`)
+    expect(collectInadmissibleClaims(templates)).toEqual([])
+  })
+
+  it('Phase 3 and Phase 6 PASS append the gate claim, and every Phase 8 run its TP claims', () => {
+    const lines = implementMd().split('\n')
+    expect(lines.filter(l => l.startsWith('**If PASS:** append a `gate:validate` claim'))).toHaveLength(2)
+    expect(lines.filter(l => l.startsWith('After every Test agent run — PASS or FAIL, first run or retry — append its TP claims'))).toHaveLength(1)
+  })
+
+  it('known-bad probes: an outcome outside the grammar, an unfilled placeholder and a short SHA are refused', () => {
+    expect(collectInadmissibleClaims(['- TP-<n> <PASS|PASSED> sha:<head> by:test exit:<0-255>'])).toContain(
+      `refused: - TP-7 PASSED sha:${'a'.repeat(40)} by:test exit:0`,
+    )
+    expect(collectInadmissibleClaims(['- TP-<n> <outcome> sha:<head> by:test'])).toEqual([
+      'unfilled placeholder: - TP-<n> <outcome> sha:<head> by:test',
+    ])
+    expect(collectInadmissibleClaims(['- gate:validate PASS sha:abc123 by:validate'])).toEqual([
+      'refused: - gate:validate PASS sha:abc123 by:validate',
+    ])
+  })
+})
+
+// ---------------------------------------------------------------------------
+// /implement — REVIEW_PUBLICATION and Phase 10b (AC-11)
+// ---------------------------------------------------------------------------
+
+const PUBLICATION_IMPORT = './_partials/_publication.mds'
+
+/** Named collector: which src .mds hosts import the publication partial, in any import form. */
+function collectPublicationImporters(sources: ReadonlyArray<{ name: string; content: string }>): string[] {
+  const importLine = new RegExp(`^@import\\b.*"${PUBLICATION_IMPORT.replace(/[.*+?^${}()|[\]\\/]/g, '\\$&')}"`, 'm')
+  return sources.filter(s => importLine.test(s.content)).map(s => s.name).sort()
+}
+
+const PHASE10B = '### Phase 10b: Evidence'
+const EVIDENCE_SPAWN = '"OPERATION: update-pr-evidence'
+
+const PHASE10B_ORDER: readonly OrderRule[] = [
+  { label: 'the policy resolves before the publication partial reads it', before: 'resolve-evidence-policy.cjs', after: '**Evidence stub:**' },
+  { label: 'REVIEW_PUBLICATION resolves in Phase 1', before: '**Evidence stub:**', after: '### Phase 2: Implement' },
+  { label: 'Phase 10b follows Phase 10', before: '### Phase 10: Create PR', after: PHASE10B },
+  { label: 'the evidence spawn sits in Phase 10b', before: PHASE10B, after: EVIDENCE_SPAWN },
+  { label: 'Phase 11 follows the evidence spawn', before: EVIDENCE_SPAWN, after: '### Phase 11: Report' },
+]
+
+/** Named collector: what the Phase 10b spawn lacks — exactly one, carrying the op's Input keys. */
+function collectEvidenceSpawnDefects(content: string): string[] {
+  const spawns = parseFences(content).filter(f => isAgentBlock(f, 'Git') && f.includes(EVIDENCE_SPAWN))
+  if (spawns.length !== 1) return [`expected one update-pr-evidence spawn, found ${spawns.length}`]
+  const keys = spawns[0].split('\n').map(l => /^\s*"?([A-Z_]+): /.exec(l)?.[1]).filter((k): k is string => k !== undefined)
+  const out: string[] = []
+  for (const key of ['OPERATION', 'PR_NUMBER', 'EVIDENCE_FILE', 'REVIEW_PUBLICATION']) {
+    if (!keys.includes(key)) out.push(`the spawn does not pass ${key}`)
+  }
+  if (!spawns[0].includes('EVIDENCE_FILE: .devflow/docs/evidence-{branch_slug}.md')) out.push('EVIDENCE_FILE is not the evidence file')
+  const phase = content.slice(content.indexOf(PHASE10B), content.indexOf('### Phase 11: Report'))
+  if (!phase.includes('under every strategy')) out.push('Phase 10b does not run under every strategy')
+  if (!phase.includes('It never blocks')) out.push('Phase 10b may block')
+  return out
+}
+
+describe('AC-11: Phase 10b runs update-pr-evidence once, after Phase 10, for every strategy', () => {
+  it('the publication partial has three importers, /implement among them', () => {
+    const sources = walkFiles(path.join(ROOT, 'src'), f => f.endsWith('.mds')).map(f => ({
+      name: path.basename(f, '.mds'),
+      content: readFileSync(f, 'utf-8'),
+    }))
+    expect(sources.length, 'the src/ .mds walk found nothing').toBeGreaterThanOrEqual(20)
+    expect(collectPublicationImporters(sources)).toEqual(['code-review', 'implement', 'resolve'])
+  })
+
+  it('the order holds and the spawn carries the op\'s Input keys', () => {
+    const md = implementMd()
+    expect(collectOrderViolations('implement.md', md, PHASE10B_ORDER)).toEqual([])
+    expect(collectEvidenceSpawnDefects(md)).toEqual([])
+  })
+
+  it('the re-validation path, the Report and Principle 12 name the evidence step', () => {
+    const lines = implementMd().split('\n')
+    expect(lines.find(l => l.startsWith('5. **Proceed to Phase 10**'))).toContain('**Phase 10b** (Evidence)')
+    expect(lines.find(l => l.startsWith('Show the test plan\'s evidence from Phase 10b'))).toContain('never inferred')
+    expect(lines.find(l => l.startsWith('12. **CI awareness**'))).toContain('test-plan evidence (Phase 10b) is recorded under every strategy')
+  })
+
+  it('known-bad probes: a lost spawn, a dropped key, a spawn before Phase 10 and a stray importer are reported', () => {
+    const md = implementMd()
+    expect(collectEvidenceSpawnDefects(md.replace(EVIDENCE_SPAWN, '"OPERATION: check-ci-status'))).toEqual([
+      'expected one update-pr-evidence spawn, found 0',
+    ])
+    expect(collectEvidenceSpawnDefects(md.replace('\nREVIEW_PUBLICATION: {REVIEW_PUBLICATION resolved in Phase 1, or auto}', ''))).toEqual([
+      'the spawn does not pass REVIEW_PUBLICATION',
+    ])
+    const early = md.replace('### Phase 10: Create PR', '### Phase 10 later').replace('### Phase 11: Report', '### Phase 10: Create PR\n\n### Phase 11: Report')
+    expect(collectOrderViolations('implement.md', early, PHASE10B_ORDER).some(v => v.includes('Phase 10b follows Phase 10'))).toBe(true)
+    expect(collectPublicationImporters([
+      { name: 'implement', content: `@import { publication_gate } from "${PUBLICATION_IMPORT}"` },
+      { name: 'stray', content: `@import "${PUBLICATION_IMPORT}" as pub` },
+      { name: 'other', content: '@import { x } from "./_partials/_plan_contract.mds"' },
+    ])).toEqual(['implement', 'stray'])
   })
 })
