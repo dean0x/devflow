@@ -834,6 +834,20 @@ const PR_HOST_LEGACY_REASONS: readonly string[] = [
 ];
 
 /**
+ * LIVE DEGRADED reasons whose only emitters are the PR-host references — the
+ * same path scope as PR_HOST_LEGACY_REASONS, but not legacy: each row was written
+ * for the PR host and belongs to no tracker provider, so §14.2's tracker table is
+ * the wrong home and a provider file spelling one is reported.
+ */
+const PR_HOST_REASONS: readonly string[] = [
+  // #360: validate-branch step 6 and ensure-pr-ready step 3 read `isCrossRepository`
+  // and `maintainerCanModify` from a PR call they already make; a fork PR its
+  // maintainer cannot push to refuses every push, so the caller skips pushes and
+  // still posts, instead of failing mid-run and citing commits the PR never got.
+  'cannot push to fork',
+];
+
+/**
  * §14.2 rows with no emitting site yet.
  *
  * EMPTY from Phase 3b: the tool-call contract and the first provider mechanics
@@ -944,6 +958,7 @@ export function collectUnregisteredReasons(corpus: readonly CorpusEntry[]): stri
       if (GITHUB_ONLY_REASONS.includes(reason)) continue;
       if (entry.path === GIT_AGENT.path && GIT_AGENT_LEGACY_REASONS.includes(reason)) continue;
       if (isPrHostEntryPath(entry.path) && PR_HOST_LEGACY_REASONS.includes(reason)) continue;
+      if (isPrHostEntryPath(entry.path) && PR_HOST_REASONS.includes(reason)) continue;
       unregistered.push(`${entry.path}: "${reason}"`);
     }
   }
@@ -1202,6 +1217,35 @@ describe('[DR-04] DEGRADED literal registry: reverse direction', () => {
       collectUnregisteredReasons([crossed]),
       'the agent-scoped exemption must not leak into the PR-host tree',
     ).toEqual([`${crossed.path}: "${AGENT_ONLY_REASON}"`]);
+  });
+
+  it('every live PR-host reason is emitted in pr/, scoped to pr/, and admits only its own spelling', () => {
+    // The same two properties as the legacy arm above, for the live list (#360).
+    const prOnly = gitAgentSinkCorpus().filter(e => isPrHostEntryPath(e.path));
+    expect(prOnly.length, 'no PR-host reference is in the corpus — run `npm run build`').toBeGreaterThan(0);
+    expect(PR_HOST_REASONS.length, 'the live PR-host list is empty (PF-018)').toBeGreaterThan(0);
+
+    const emitted = new Set(prOnly.flatMap(e => collectDegradedReasons(e.content)));
+    expect(
+      PR_HOST_REASONS.filter(reason => !emitted.has(reason)),
+      `live PR-host reason(s) nothing in references/${PR_HOST_DESTINATION_ROOT}/ emits`,
+    ).toEqual([]);
+
+    // Scope probe: the registered spelling in a provider reference IS reported…
+    const foreign: CorpusEntry = {
+      path: 'dist/skills/git/references/tracker/jira/setup-task.md',
+      content: `emit \`TRACEABILITY: DEGRADED (${PR_HOST_REASONS[0]})\``,
+    };
+    expect(collectUnregisteredReasons([foreign])).toEqual([`${foreign.path}: "${PR_HOST_REASONS[0]}"`]);
+
+    // …and a near-miss spelling in the PR-host tree is reported too: the registry
+    // admits the one string it lists, not the family around it.
+    const misspelled = 'cannot push to the fork';
+    const seeded: CorpusEntry = {
+      path: `dist/skills/git/references/${prHostRel('validate-branch')}`,
+      content: `emit \`TRACEABILITY: DEGRADED (${misspelled})\``,
+    };
+    expect(collectUnregisteredReasons([seeded])).toEqual([`${seeded.path}: "${misspelled}"`]);
   });
 
   it('known-bad probe: a new unregistered reason in the agent file is reported', () => {

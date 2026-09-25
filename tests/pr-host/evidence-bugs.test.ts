@@ -310,6 +310,7 @@ const EVIDENCE_POST_ROWS: ReadonlyArray<{ readonly row: string; readonly statuse
   { row: '- Resolution comment:', statuses: ['POSTED', 'POSTED+TRUNCATED', 'SKIPPED (already posted)', 'DEGRADED'] },
   { row: '- Publication:', statuses: ['FULL (private repo)', 'STUB (public repository)', 'OFF (publication disabled by config)'] },
   { row: '- Thread replies:', statuses: ['COMPLETE', 'PARTIAL', 'TRUNCATED', 'SKIPPED', 'DEGRADED'] },
+  { row: '- Push:', statuses: ['pushed', 'skipped (cannot push to fork)'] },
 ]
 
 /** The `### Evidence Posts` block of /resolve's Phase 10 report, or null. */
@@ -745,5 +746,102 @@ describe('only a trusted first-comment author can exclude a thread (§3.6, AC-5)
     const found = collectUntrustedMarkerExclusion(prFetch, D09DA34_REVIEW_THREADS_QUERY)
     expect(found, found.join('\n')).toHaveLength(QUERY_FIELD_ORDER.length)
     expect(found.every(v => v.startsWith('github-api.md query: '))).toBe(true)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// 7. Fork pre-flight — a cross-repo PR the maintainer cannot push to (§3.7, AC-7)
+// ---------------------------------------------------------------------------
+//
+// Nothing detected a fork PR without maintainer edits: the push failed mid-run,
+// and FIXED replies cited commits that never reached the PR. Both pre-flights
+// read the two fields from a call they already make and emit one DEGRADED reason;
+// /resolve turns it into `fork_no_push` and keeps posting what does not need a push.
+
+const FORK_REASON = 'TRACEABILITY: DEGRADED (cannot push to fork)'
+
+/** The text of `text` from the line holding `start` up to (not including) the line holding `end`. */
+function slice(text: string, start: string, end: string): string {
+  const from = text.indexOf(start)
+  if (from === -1) return ''
+  const to = text.indexOf(end, from + start.length)
+  return to === -1 ? '' : text.slice(from, to)
+}
+
+interface ForkFiles {
+  readonly validateBranch: string
+  readonly ensurePrReady: string
+  readonly resolve: string
+}
+
+/** Named collector: every place the fork pre-flight or its consumption is missing. */
+export function collectMissingForkPreflight(files: ForkFiles): string[] {
+  const out: string[] = []
+  const need = (label: string, text: string, terms: readonly string[]): void => {
+    if (text === '') {
+      out.push(`${label}: section not found`)
+      return
+    }
+    for (const term of terms) if (!text.includes(term)) out.push(`${label}: missing ${term}`)
+  }
+  need('pr/validate-branch.md', files.validateBranch, [
+    '--json baseRefName,isCrossRepository,maintainerCanModify',
+    FORK_REASON,
+  ])
+  need('pr/ensure-pr-ready.md step 3', soleLine(files.ensurePrReady, '3. ') ?? '', [
+    'isCrossRepository',
+    'maintainerCanModify',
+    FORK_REASON,
+  ])
+  out.push(...collectOrderViolations('pr/ensure-pr-ready.md', files.ensurePrReady, [
+    { label: 'the fork check precedes the push', before: FORK_REASON, after: 'push with `-u` flag' },
+  ]))
+  const r = files.resolve
+  need('/resolve Step 0b', slice(r, '#### Step 0b', '#### Step 0c'), ['`fork_no_push`', FORK_REASON])
+  need('/resolve Phase 7', slice(r, '### Phase 7:', '### Phase 8:'), ['`fork_no_push`', '`Push: skipped — cannot push to fork`'])
+  need('/resolve Phase 8', slice(r, '### Phase 8:', '### Phase 9:'), ['`fork_no_push`'])
+  need('/resolve Step 9b-1', slice(r, '**Step 9b-1', '**Step 9b-2'), ['`fork_no_push`', 'FIXED'])
+  need('/resolve Evidence Posts', evidencePostsBlock(r) ?? '', ['- Push: {pushed | skipped (cannot push to fork)}'])
+  need('/resolve Edge Cases', slice(r, '## Edge Cases', '## Principles'), ['cannot push to fork'])
+  return out
+}
+
+function shippedForkFiles(): ForkFiles {
+  return {
+    validateBranch: requireRef(prHostRel('validate-branch')),
+    ensurePrReady: requireRef(prHostRel('ensure-pr-ready')),
+    resolve: requireDistFile('resolve.md'),
+  }
+}
+
+describe('a fork PR without maintainer edits degrades instead of failing a push (§3.7, AC-7)', () => {
+  it('both pre-flights emit the reason and /resolve consumes it everywhere a push matters', () => {
+    expect(collectMissingForkPreflight(shippedForkFiles())).toEqual([])
+  })
+
+  it('validate-branch reads the fork fields from its one existing PR call', () => {
+    const calls = requireRef(prHostRel('validate-branch')).match(/gh pr view[^`]*/g) ?? []
+    expect(calls, 'one gh pr view in validate-branch').toHaveLength(1)
+  })
+
+  it('9b-2 still posts under fork_no_push — the resolution comment needs no push', () => {
+    const step = slice(requireDistFile('resolve.md'), '**Step 9b-2', '### Phase 9c')
+    expect(step).toContain('Always run this step when a PR is known')
+    expect(step).not.toContain('fork_no_push')
+  })
+
+  it('known-bad probe: the d09da34 validate-branch call and a resolve without the flag are both reported', () => {
+    const files = shippedForkFiles()
+    const wounded: ForkFiles = {
+      ...files,
+      validateBranch: '6. fetch PR details via `gh pr view {number} --json baseRefName`; use `baseRefName` as `base_branch`\n',
+      resolve: files.resolve.split('`fork_no_push`').join('`something_else`'),
+    }
+    const found = collectMissingForkPreflight(wounded)
+    expect(found).toContain('pr/validate-branch.md: missing --json baseRefName,isCrossRepository,maintainerCanModify')
+    expect(found).toContain('pr/validate-branch.md: missing ' + FORK_REASON)
+    for (const site of ['Step 0b', 'Phase 7', 'Phase 8', 'Step 9b-1']) {
+      expect(found).toContain(`/resolve ${site}: missing \`fork_no_push\``)
+    }
   })
 })
