@@ -18,8 +18,9 @@
  *
  * Rows 9 and 12 still gate on `COMPLIANCE_SKILL_INSTALLED` at this commit; later
  * commits of #362 move them to `EVIDENCE_POLICY` and re-point their sites here.
- * Row 13's op side is the `stub` publication value, which names no gate, so it is
- * held by direction 1 alone.
+ * Row 13's op-side sites carry the `stub` publication value, which names no gate,
+ * so they are held by direction 1 alone; its caller sites are gated lines like any
+ * other.
  *
  * ORCHESTRATOR DECISIONS encoded as their own arms (user-confirmed 2026-09-25):
  * /code-review and /bug-analysis never gate on a ticket under either policy —
@@ -59,6 +60,9 @@ type GateInput = GateName | 'stub'
 const gate = (name: GateName): string => `only when \`${name}\` is \`true\``
 /** The caller-side policy gate — the one canonical phrase that keys on `EVIDENCE_POLICY` itself. */
 const policyGate = 'only when `EVIDENCE_POLICY` is `required`'
+
+/** The publication partial's rule sentence, stated once and expanded into its two hosts. */
+const PUBLICATION_STUB_RULE = '**Evidence stub:**'
 const fenceKey = (name: GateName): string => `${name}: {${name}}`
 const recipeKey = (name: GateName): string => `${name}: \${${name}}`
 const recipeConst = (name: GateName): string => `const ${name} = `
@@ -236,13 +240,19 @@ const DISPOSITION: readonly DispositionRow[] = [
     ],
   },
   {
-    // The caller side (a resolved `off` becomes `stub` under the policy) lands in P3.
+    // Caller side: the publication partial turns a resolved `off` into `stub` under
+    // the policy (it expands into both hosts), and each host's Edge Cases row says so.
+    // Op side: the `stub` value, which names no gate.
     row: 13,
-    subject: 'publication `stub` — the op side',
-    inputs: ['stub'],
-    on: 'mode STUB, no probe; report STUB (evidence policy)',
-    off: 'mode STUB, no probe; report STUB (evidence policy)',
+    subject: 'publication `off` → `stub` — the caller turns it, the op accepts it',
+    inputs: ['EVIDENCE_POLICY', 'stub'],
+    on: 'a resolved `off` is passed as `stub`: mode STUB, no probe; report STUB (evidence policy)',
+    off: '`off` stays `off`: no comment posts',
     sites: [
+      { file: 'commands/code-review.md', anchor: PUBLICATION_STUB_RULE, phrase: policyGate },
+      { file: 'commands/resolve.md', anchor: PUBLICATION_STUB_RULE, phrase: policyGate },
+      { file: 'commands/code-review.md', after: '## Edge Cases', anchor: '| `reviewPublication: off` |', phrase: policyGate },
+      { file: 'commands/resolve.md', after: '## Edge Cases', anchor: '| `reviewPublication: off` |', phrase: policyGate },
       { file: 'skills/git/references/publication-gate.md', anchor: '   - `stub` (never unrecognised)', phrase: 'report `STUB (evidence policy)`' },
       { file: 'agents/git.md', after: '## Operation: post-review-summary', anchor: '**Input:**', phrase: '| `off` | `stub`;' },
       { file: 'agents/git.md', after: '## Operation: post-review-summary', anchor: '**Publication**:', phrase: '| STUB (evidence policy)' },
@@ -438,8 +448,9 @@ describe('evidence-policy disposition: the table and the tree agree, both ways (
 
   it('direction 1: every site of a gate-name row is itself a gated line (no row pads the table)', () => {
     const padded: string[] = []
-    for (const row of DISPOSITION.filter(r => r.inputs.every(i => i !== 'stub'))) {
-      for (const site of row.sites) {
+    for (const row of DISPOSITION) {
+      // Row 13's op-side sites carry the `stub` value, which names no gate; its caller sites do.
+      for (const site of row.sites.filter(s => !row.inputs.includes('stub') || s.file.startsWith('commands/'))) {
         const file = corpus.find(f => f.file === site.file)!
         const at = locate(site, file.content)
         if (!gated.some(g => g.file === site.file && g.index === at)) padded.push(`row ${row.row} ${site.file}:${at + 1}`)
@@ -486,6 +497,63 @@ describe('evidence-policy disposition: the table and the tree agree, both ways (
     const found = collectUngovernedGates(DISPOSITION, drifted, collectGatedSites(drifted, exempt))
     expect(found).toHaveLength(1)
     expect(found[0]).toContain('row 7 does not gate on ISSUE_REQUIRED')
+  })
+})
+
+/**
+ * Row 13's caller side, held beyond its sites: the `off` → `stub` turn is stated
+ * ONCE — in the publication partial, expanded into its two hosts — and both hosts
+ * can report the label it produces. A host that restated the rule would be a
+ * second authority free to drift from the partial; an Edge Cases row may describe
+ * the outcome, but never carries the rule sentence itself.
+ *
+ * The order half (the policy resolves before the partial reads it) is held by
+ * tests/evidence-policy/partial-wiring.test.ts, whose order guard reads every line
+ * naming `EVIDENCE_POLICY` in all eight policy files — the expanded rule included.
+ */
+describe('row 13 caller side: the publication stub is one rule, reported by both hosts', () => {
+  const corpus = builtCorpus()
+  const PUBLICATION_HOSTS = ['commands/code-review.md', 'commands/resolve.md'] as const
+  const STUB_LABEL = 'STUB (evidence policy)'
+
+  /** Named collector: every line of a built command that states the stub rule, by file. */
+  function collectStubRuleSites(files: readonly BuiltFile[]): string[] {
+    return files
+      .filter(f => f.file.startsWith('commands/'))
+      .flatMap(f => f.content.split('\n').filter(l => l.includes(PUBLICATION_STUB_RULE)).map(() => f.file))
+      .sort()
+  }
+
+  it('the rule is stated exactly once in each publication host and nowhere else', () => {
+    expect(corpus.filter(f => f.file.startsWith('commands/')).length, 'no commands in the corpus').toBeGreaterThanOrEqual(10)
+    expect(collectStubRuleSites(corpus)).toEqual([...PUBLICATION_HOSTS])
+  })
+
+  it('`stub` is never a config value: the partial still accepts only `auto`, `full` and `off` from the file', () => {
+    for (const host of PUBLICATION_HOSTS) {
+      const content = corpus.find(f => f.file === host)!.content
+      expect(content, `${host}: the config read`).toContain('is one of `auto`, `full`, or `off`')
+      expect(content, `${host}: a configured stub is unrecognised`).toContain('`stub` is never a config value')
+    }
+  })
+
+  it('both hosts can report the label the stub produces', () => {
+    const codeReview = corpus.find(f => f.file === 'commands/code-review.md')!.content
+    const status = codeReview.split('\n').find(l => l.includes('- Publication status:'))
+    expect(status, 'code-review Phase 4 publication status line').toBeDefined()
+    expect(status).toContain(STUB_LABEL)
+    const resolve = corpus.find(f => f.file === 'commands/resolve.md')!.content
+    const row = resolve.split('\n').find(l => l.startsWith('- Publication:'))
+    expect(row, 'resolve Phase 10 Publication row').toBeDefined()
+    expect(row).toContain(STUB_LABEL)
+  })
+
+  it('known-bad probe: a third host restating the rule is reported', () => {
+    const seeded = corpus.map(f =>
+      f.file === 'commands/bug-analysis.md'
+        ? { ...f, content: `${f.content}\n${PUBLICATION_STUB_RULE} ${policyGate}, a resolved \`off\` becomes \`stub\`.\n` }
+        : f)
+    expect(collectStubRuleSites(seeded)).toEqual(['commands/bug-analysis.md', ...PUBLICATION_HOSTS].sort())
   })
 })
 

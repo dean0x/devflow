@@ -471,7 +471,7 @@ Final gate: {PASS | FAILED after N attempts}
 
 ### Evidence Posts
 - Resolution comment: {POSTED | POSTED+TRUNCATED | SKIPPED (already posted) | SKIPPED (publication off) | SKIPPED (no PR) | DEGRADED (reason)}
-- Publication: {FULL (private repo) | FULL (config override) | STUB (public repository) | OFF (publication disabled by config) | STUB (visibility undeterminable)}
+- Publication: {FULL (private repo) | FULL (config override) | STUB (public repository) | OFF (publication disabled by config) | STUB (visibility undeterminable) | STUB (evidence policy)}
 - Thread replies: {COMPLETE | PARTIAL | TRUNCATED | SKIPPED (reason) | DEGRADED (reason)}
 - Push: {pushed | skipped (no fixes) | skipped (cannot push to fork)}
 
@@ -557,7 +557,7 @@ In multi-worktree mode, report results per worktree with aggregate summary.
 | THREAD_MAP empty or DEGRADED | Phase 9b-1 skipped; resolution comment (Phase 9b-2) still posted if PR known |
 | No PR exists for post-resolution-summary | Git agent returns TRACEABILITY: DEGRADED; resolution-summary.md already on disk — not a blocker |
 | Public repo (`auto` mode) | Git agent probes visibility, posts counts-only STUB comment; full resolution report stays local |
-| `reviewPublication: off` | Git agent skips posting the resolution comment (OFF) |
+| `reviewPublication: off` | Git agent skips posting the resolution comment (OFF) — except that, only when `EVIDENCE_POLICY` is `required`, Step 0d passes `stub` and a counts-only STUB comment posts |
 | Fork PR this run cannot push to (no maintainer edits, no push access of its own) | validate-branch emits `TRACEABILITY: DEGRADED (cannot push to fork)` → `fork_no_push`: Phase 7 skips the push, Phase 8 is skipped, 9b-1 records FIXED threads as DEGRADED instead of citing unpushed commits; 9b-2 still posts the resolution comment |
 
 ## Principles

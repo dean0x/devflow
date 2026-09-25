@@ -146,7 +146,7 @@ MAX_REVIEW_CYCLES = 10
 #### Step 0f: Resolve Publication Mode (Per Worktree)
 
 **Produces:** REVIEW_PUBLICATION
-**Requires:** WORKTREES
+**Requires:** WORKTREES, EVIDENCE_POLICY
 
 For each reviewable worktree, call:
 
@@ -288,7 +288,7 @@ Per worktree, after successful completion:
    - Merge recommendation (from Synthesize agent)
    - Issue counts by category (🔴 blocking / ⚠️ should-fix / ℹ️ pre-existing)
    - Review comment status: POSTED / POSTED+TRUNCATED (body exceeded 60k after redaction) / SKIPPED (D7 dedup) / DEGRADED (from Git)
-   - Publication status: FULL (private repo) | FULL (config override) | STUB (public repository) | OFF (publication disabled by config) | STUB (visibility undeterminable) (from Git agent)
+   - Publication status: FULL (private repo) | FULL (config override) | STUB (public repository) | OFF (publication disabled by config) | STUB (visibility undeterminable) | STUB (evidence policy) (from Git agent)
    - Artifact paths
 
 In multi-worktree mode, report results per worktree.
@@ -346,7 +346,7 @@ In multi-worktree mode, report results per worktree.
 | Parsing failure on resolution-summary.md | fp_ratio = 0, convergence tracking degraded (see Step 0e-ii) |
 | Concurrent sessions | Advisory only, each session computes independently |
 | Public repo (`auto` mode) | Git agent probes visibility, posts counts-only STUB comment; full report stays local |
-| `reviewPublication: off` | Git agent skips posting the review comment (OFF) |
+| `reviewPublication: off` | Git agent skips posting the review comment (OFF) — except that, only when `EVIDENCE_POLICY` is `required`, Step 0f passes `stub` and a counts-only STUB comment posts |
 
 ## Backwards Compatibility
 

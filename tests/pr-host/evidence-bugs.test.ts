@@ -313,7 +313,8 @@ const EVIDENCE_POST_ROWS: ReadonlyArray<{ readonly row: string; readonly statuse
     row: '- Resolution comment:',
     statuses: ['POSTED', 'POSTED+TRUNCATED', 'SKIPPED (already posted)', 'SKIPPED (publication off)', 'SKIPPED (no PR)', 'DEGRADED'],
   },
-  { row: '- Publication:', statuses: ['FULL (private repo)', 'STUB (public repository)', 'OFF (publication disabled by config)'] },
+  // `STUB (evidence policy)`: under the required policy a configured `off` is passed as `stub` (#362).
+  { row: '- Publication:', statuses: ['FULL (private repo)', 'STUB (public repository)', 'OFF (publication disabled by config)', 'STUB (evidence policy)'] },
   { row: '- Thread replies:', statuses: ['COMPLETE', 'PARTIAL', 'TRUNCATED', 'SKIPPED', 'DEGRADED'] },
   { row: '- Push:', statuses: ['pushed', 'skipped (no fixes)', 'skipped (cannot push to fork)'] },
 ]
