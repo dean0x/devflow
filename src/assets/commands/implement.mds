@@ -498,9 +498,10 @@ Strategy-conditional: run when the PR already exists — **SINGLE_CODE_AGENT** a
 1. Spawn `Agent(subagent_type="Git")` with `OPERATION: check-ci-status` and `PR_NUMBER` from PR_URL.
 2. **If PASSING** → proceed to Phase 10.
 3. **If NO_PR or NO_CI** → skip: "No PR/CI configured, skipping CI validation." Proceed to Phase 10.
-4. **If PENDING** → poll every 60 seconds (global budget, see step 6). Re-spawn Git agent each poll. If PASSING → proceed. If still PENDING after budget exhausted → report "CI still running — verify manually before merging" and proceed.
-5. **If FAILING** → report failing checks. Spawn `Agent(subagent_type="Code")` to fix CI failures based on check names and failure context. After fix, push and re-check. Max 2 fix attempts. If still failing → report failures and proceed.
-6. **Total budget**: max 10 polls and max 2 fix attempts across all check/fix cycles combined. If budget exhausted, report current status and proceed.
+4. **If PENDING** → poll every 60 seconds (global budget, see step 7). Re-spawn Git agent each poll. If PASSING → proceed. If still PENDING after budget exhausted → report "CI still running — verify manually before merging" and proceed.
+5. **If INDETERMINATE** → poll as PENDING within the same budget. If still INDETERMINATE after budget exhausted → report "CI status unknown — verify manually before merging" and proceed.
+6. **If FAILING** → report failing checks. Spawn `Agent(subagent_type="Code")` to fix CI failures based on check names and failure context. After fix, push and re-check. Max 2 fix attempts. If still failing → report failures and proceed.
+7. **Total budget**: max 10 polls and max 2 fix attempts across all check/fix cycles combined. If budget exhausted, report current status and proceed.
 <!-- /PATTERN: ci-status-gate -->
 
 ### Phase 10: Create PR

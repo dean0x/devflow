@@ -136,15 +136,15 @@ Load for `post-review-summary` under every tracker provider.
 
 Load for `check-ci-status` under every tracker provider.
 
-**PR mechanics held here:** the PR-number discovery fallback, the checks fetch, and the priority-ordered PENDING/FAILING/PASSING classification.
+**PR mechanics held here:** the PR-number discovery fallback, the checks fetch over `bucket`, and the priority-ordered classification whose last arm is `INDETERMINATE`.
 
 ### Process
 
 1. If `PR_NUMBER` not provided, discover it: `gh pr view --json number --jq '.number' 2>/dev/null`
 2. If no PR found → output status `NO_PR`, stop
-3. Fetch checks: `gh pr checks \{number\} --json name,state,conclusion 2>/dev/null`
-4. If empty or command fails → output status `NO_CI`
-5. Classify in priority order: if any check has state `IN_PROGRESS` or `PENDING` → `PENDING`; else if any conclusion is `FAILURE` → `FAILING`; else if all conclusions are `SUCCESS` → `PASSING`
+3. Fetch checks: `gh pr checks \{number\} --json name,state,bucket; echo "exit=$?"` — exit 0, or 8 (checks pending), is a result; any other exit is a failure
+4. If the result is `[]`, or the failure says `no checks reported` → output status `NO_CI`; any other failure → output status `INDETERMINATE`
+5. Classify by `bucket` in priority order: any `pending` → `PENDING`; else any `fail` or `cancel` → `FAILING`; else every check `pass` or `skipping` with at least one `pass` → `PASSING`; else → `INDETERMINATE`
 6. List failing/pending checks with names
 @end
 

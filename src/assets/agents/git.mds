@@ -421,15 +421,15 @@ Check CI/PR check status for a branch's pull request.
 ```markdown
 ## CI Status
 **PR**: #{number}
-**Status**: PASSING | FAILING | PENDING | NO_CI | NO_PR
+**Status**: PASSING | FAILING | PENDING | NO_CI | NO_PR | INDETERMINATE
 
 ### Check Results
-| Check | State | Conclusion |
-|-------|-------|------------|
-| {name} | {state} | {conclusion} |
+| Check | State | Bucket |
+|-------|-------|--------|
+| {name} | {state} | {bucket} |
 
 ### Failing Checks (if any)
-- {name}: {conclusion}
+- {name}: {bucket}
 ```
 
 ---
