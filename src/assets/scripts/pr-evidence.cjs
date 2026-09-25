@@ -113,10 +113,16 @@ const LOGIN_RE = Object.freeze(/^[A-Za-z0-9][A-Za-z0-9-]{0,38}$/);
  * <n> 1–200, <m> 1–999, no leading zeros. The scenario is 1–200 printable code
  * points (no Unicode control, format, surrogate, private-use, unassigned or
  * line/paragraph-separator character) with no leading or trailing space, no `<`,
- * `>`, backtick, `[` or `]`, and never the text ` — method:`. The per-character
- * lookahead keeps the scan linear.
+ * `>`, backtick, `[`, `]`, `#`, `@` or `/`, and never the text ` — method:`. The
+ * per-character lookahead keeps the scan linear.
+ *
+ * D-TP-SCENARIO: the scenario is pasted into the PR body, so it admits none of
+ * the characters an issue reference (`#12`, `o/r#12`, a full issue URL), a closing
+ * keyword's target, an @-mention, markup or a code span needs — the same exclusions
+ * the exception reason carries. A path belongs in `files:`, whose glob class keeps
+ * `/` and admits no `#` or `@`.
  */
-const TP_LINE_RE = Object.freeze(/^- \[ \] TP-(?<n>200|1[0-9]{2}|[1-9][0-9]?) \(AC-(?<ac>[1-9][0-9]{0,2})\) (?<scenario>(?! )(?:(?! — method:)[^\p{C}\p{Zl}\p{Zp}<>`[\]]){1,200}(?<! )) — method:(?<method>ci|local|manual)(?: \[files: (?<files>[A-Za-z0-9._/*?-]{1,120}(?:, [A-Za-z0-9._/*?-]{1,120}){0,9})\])?$/u);
+const TP_LINE_RE = Object.freeze(/^- \[ \] TP-(?<n>200|1[0-9]{2}|[1-9][0-9]?) \(AC-(?<ac>[1-9][0-9]{0,2})\) (?<scenario>(?! )(?:(?! — method:)[^\p{C}\p{Zl}\p{Zp}<>`[\]#@\/]){1,200}(?<! )) — method:(?<method>ci|local|manual)(?: \[files: (?<files>[A-Za-z0-9._/*?-]{1,120}(?:, [A-Za-z0-9._/*?-]{1,120}){0,9})\])?$/u);
 
 /**
  * One claim line of the evidence file's `## Claims` section:

@@ -130,7 +130,7 @@ visible, a silently discarded request is not.
 
 **Test plan.** Before any Code spawn, give the task a test plan in the evidence file `.devflow/docs/evidence-\{branch_slug\}.md` (`EVIDENCE_FILE`) — unlike the handoff file, it stays after the PR exists. It holds up to three sections, in this order and nothing else: `## Test Plan`; `## Evidence Exceptions`, a byte copy of `PR_EXCEPTIONS` present only while that is not `(none)`; and `## Claims`, always last, so every claim is appended at the end of the file. Create the file if absent; if it exists, replace its `## Test Plan` and `## Evidence Exceptions` sections and keep `## Claims` byte-identical.
 
-Write the `## Test Plan` section: when `$ARGUMENTS` is a plan document with a `## Test Plan` section, copy that section's lines verbatim; otherwise write one TP line per acceptance criterion the plan, the issue or the task text states, numbered from `TP-1`. Never invent a criterion, and word every scenario yourself — never copy a `#N` reference, an `@`-mention, a URL or a closing keyword into one: the lines reach the PR body. Each line follows the TP-line contract:
+Write the `## Test Plan` section: when `$ARGUMENTS` is a plan document with a `## Test Plan` section, copy that section's lines verbatim; otherwise write one TP line per acceptance criterion the plan, the issue or the task text states, numbered from `TP-1`. Never invent a criterion, and word every scenario yourself in plain words: the lines reach the PR body, so a scenario holds no `#`, `@` or `/` — no issue reference, mention, closing keyword target or URL — and the files a TP covers go in its `files:` field. Each line follows the TP-line contract:
 
 {test_plan_line()}
 

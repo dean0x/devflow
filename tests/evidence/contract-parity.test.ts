@@ -14,6 +14,13 @@
  *         the TP lines its `## Test Plan` section keeps) and /implement (its Phase 1
  *         authors or copies them) — carries the define's whole expansion exactly once.
  *
+ * D-TP-SCENARIO: the scenario reaches the PR body, so neither the contract nor
+ * TP_LINE_RE admits `#`, `@`, `/`, `<`, `>` or a backtick in it — the characters an
+ * issue reference, a closing keyword's target, a mention, a link, markup or a code
+ * span needs. Held by the Fields collector (the prose names each) and by
+ * `collectHostileScenarioAdmissions` over a hostile corpus, whose probe is the
+ * pre-narrowing scenario class.
+ *
  * The exception grammar is held three ways: `evidence_exception()`'s kind list,
  * code.md's paste gate and the script's EXCEPTION_KINDS / EXCEPTION_LINE_RE name
  * the same kinds in the same order, and the gate IS EXCEPTION_LINE_RE's source.
@@ -259,6 +266,31 @@ function compileShape(templates: { line: string; files: string }, globsPerLine: 
   return new RegExp(`^${compile(templates.line)}(?:${compile(templates.files)})?$`, 'u')
 }
 
+/**
+ * D-TP-SCENARIO's hostile corpus: scenarios that would carry an issue reference, a
+ * closing keyword's target, a mention, a link, markup or a code span into the PR
+ * body. Each also names one character the contract excludes.
+ */
+const HOSTILE_SCENARIOS: readonly string[] = [
+  'Closes #12',
+  'fixes o/r#12',
+  'fixes https://github.com/o/r/issues/1',
+  'ask @user to review',
+  '<img src=x onerror=alert(1)>',
+  'run `npm test` first',
+  'a#b',
+  'a@b',
+  'a/b',
+  'a<b',
+  'a>b',
+  'a`b',
+]
+
+/** Named collector: the hostile scenarios a TP grammar admits as a whole line. */
+function collectHostileScenarioAdmissions(grammar: RegExp, scenarios: readonly string[] = HOSTILE_SCENARIOS): string[] {
+  return scenarios.filter(sc => grammar.test(tp(1, 1, sc, 'ci')))
+}
+
 const tp = (n: string | number, m: string | number, scenario: string, method: string, files?: string): string =>
   `- [ ] TP-${n} (AC-${m}) ${scenario} ${EM} method:${method}${files === undefined ? '' : ` [files: ${files}]`}`
 
@@ -302,6 +334,7 @@ function differentialTable(): string[] {
     tp(1, 1, 'a'.repeat(201), 'ci'),
     tp(1, 1, 'a<b', 'ci'),
     tp(1, 1, `a ${EM} method:ci`, 'local'),
+    ...HOSTILE_SCENARIOS.map(h => tp(1, 1, h, 'ci')),
     '',
   )
   return rows
@@ -437,7 +470,7 @@ describe('AC-2: the Fields prose names the script\'s own bounds', () => {
     scenarioMax: PE.LIMITS.SCENARIO_MAX,
     globClass: `[A-Za-z0-9._/*?-]{1,${PE.LIMITS.GLOB_MAX}}`,
     globsPerLine: PE.LIMITS.GLOBS_PER_LINE,
-    excluded: ['<', '>', '[', ']', '`'].sort(),
+    excluded: ['<', '>', '[', ']', '`', '#', '@', '/'].sort(),
     forbiddenText: ` ${EM} method:`,
   }
 
@@ -482,9 +515,43 @@ describe('AC-2: the Fields prose names the script\'s own bounds', () => {
     const dropped = text.replace('`<`, `>`, backtick', '`<`, backtick')
     expect(dropped, 'the seed must land').not.toBe(text)
     expect(collectFieldRules(dropped)).not.toEqual(expected)
+    const hashless = text.replace('`]`, `#`, `@` or `/`', '`]`, `@` or `/`')
+    expect(hashless, 'the seed must land').not.toBe(text)
+    expect(collectFieldRules(hashless)).not.toEqual(expected)
     const raised = text.replace('`<n>` is 1–200', '`<n>` is 1–250')
     expect(raised, 'the seed must land').not.toBe(text)
     expect(collectFieldRules(raised)).not.toEqual(expected)
+  })
+})
+
+describe('D-TP-SCENARIO: no scenario carries a reference, a mention, a link or markup', () => {
+  it('TP_LINE_RE refuses every hostile scenario in the corpus', () => {
+    expect(HOSTILE_SCENARIOS.length, 'the hostile corpus is empty').toBeGreaterThanOrEqual(12)
+    expect(collectHostileScenarioAdmissions(PE.TP_LINE_RE)).toEqual([])
+  })
+
+  it('the plain wording of the same scenarios passes, so the refusal is the characters', () => {
+    const plain = ['closes issue twelve', 'fixes the linked issue', 'ask the maintainer to review', 'an image tag', 'run npm test first']
+    expect(collectHostileScenarioAdmissions(PE.TP_LINE_RE, plain)).toEqual(plain)
+  })
+
+  it('known-bad probe: the pre-narrowing scenario class admits the corpus', () => {
+    const source = PE.TP_LINE_RE.source
+    const widened = source.replace('#@\\/]', ']')
+    expect(widened, 'the seed must land').not.toBe(source)
+    const admitted = collectHostileScenarioAdmissions(new RegExp(widened, PE.TP_LINE_RE.flags))
+    expect(admitted).toEqual(['Closes #12', 'fixes o/r#12', 'fixes https://github.com/o/r/issues/1', 'ask @user to review', 'a#b', 'a@b', 'a/b'])
+  })
+
+  it('known-bad probe: re-admitting any one excluded character is caught by the corpus', () => {
+    const source = PE.TP_LINE_RE.source
+    for (const [ch, escaped] of [['#', '#'], ['@', '@'], ['/', '\\/'], ['<', '<'], ['>', '>'], ['`', '`']] as const) {
+      const cls = '<>`[\\]#@\\/]'
+      expect(source.includes(cls), 'the scenario class moved').toBe(true)
+      const reopened = source.replace(cls, cls.replace(escaped, ''))
+      expect(reopened, `the ${ch} seed must land`).not.toBe(source)
+      expect(collectHostileScenarioAdmissions(new RegExp(reopened, PE.TP_LINE_RE.flags)).length, ch).toBeGreaterThan(0)
+    }
   })
 })
 

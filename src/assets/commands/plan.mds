@@ -358,7 +358,7 @@ Use AskUserQuestion to present:
    - Context risk level (LOW/MEDIUM/HIGH/CRITICAL)
    - Unresolved gaps carried forward
 
-**Test plan lines.** Gate 2 shows the test plan in the one shape `/implement` and the evidence scripts read — the TP-line contract:
+**Test plan lines.** Gate 2 shows the test plan in the one shape `/implement` and the evidence scripts read. Word each scenario in plain words, with no `#`, `@` or `/`: name the files it covers in `files:`, never an issue, a person or a URL. The TP-line contract:
 
 {test_plan_line()}
 

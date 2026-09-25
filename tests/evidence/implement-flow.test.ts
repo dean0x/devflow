@@ -35,12 +35,9 @@
  * Every guard has a named collector, a non-empty-corpus assertion and a known-bad
  * probe run through the same collector (PF-064).
  *
- * NOT covered: the TP scenario text class is P1's TP_LINE_RE, and it admits `#`,
- * `@` and `/` — a scenario that carries a `#N` reference, an `@`-mention or a
- * closing keyword passes `check block` and reaches the PR body. The exception
- * grammar removes those characters; the TP grammar does not. Reported to the
- * orchestrator rather than re-decided here, because narrowing TP_LINE_RE changes
- * a shared, parity-pinned contract.
+ * The block table carries D-TP-SCENARIO's rows: a scenario holding a closing
+ * keyword, an issue URL, a mention or a code span fails `check block`, so it never
+ * reaches the PR body (the TP grammar excludes `#`, `@`, `/`, `<`, `>` and backtick).
  */
 
 import { describe, it, expect, afterAll } from 'vitest'
@@ -215,6 +212,10 @@ function blockTable(): ReadonlyArray<{ readonly label: string; readonly text: st
     { label: 'the (none) placeholder', text: '(none)\n', admit: false },
     { label: 'an empty value', text: '', admit: false },
     { label: 'a TP line with markup', text: block.replace('login succeeds', '<img src=x> login succeeds'), admit: false },
+    { label: 'a scenario closing an issue', text: block.replace('login succeeds', 'Closes #12 login succeeds'), admit: false },
+    { label: 'a scenario with an issue URL', text: block.replace('login succeeds', 'fixes https://github.com/o/r/issues/1 login succeeds'), admit: false },
+    { label: 'a scenario mentioning a user', text: block.replace('login succeeds', '@user login succeeds'), admit: false },
+    { label: 'a scenario with a code span', text: block.replace('login succeeds', '`login` succeeds'), admit: false },
   ]
 }
 

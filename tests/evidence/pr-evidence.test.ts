@@ -438,7 +438,7 @@ describe('TP_LINE_RE and parsePlan', () => {
     tpLine(4, 4, 'ten globs', 'ci', Array.from({ length: 10 }, (_, i) => `g${i}`)),
     tpLine(5, 5, 'a'.repeat(200), 'local'),
     tpLine(6, 6, 'glob of 120', 'ci', ['a'.repeat(120)]),
-    tpLine(7, 7, 'punctuation ok: /path#frag @user & $x (y) {z} | pipes', 'manual'),
+    tpLine(7, 7, 'punctuation ok: & $x (y) {z} | pipes, 100% sure; a=b? yes!', 'manual'),
   ]
   const invalid: ReadonlyArray<[string, string]> = [
     ['TP-0', tpLine(0, 1, 'x', 'ci')],
@@ -458,6 +458,17 @@ describe('TP_LINE_RE and parsePlan', () => {
     ['[', tpLine(1, 1, 'a[b', 'ci')],
     [']', tpLine(1, 1, 'a]b', 'ci')],
     ['marker in scenario', tpLine(1, 1, '<!-- devflow:test-plan -->', 'ci')],
+    // D-TP-SCENARIO: nothing that forms an issue reference, a mention, a link or markup.
+    ['#', tpLine(1, 1, 'a#b', 'ci')],
+    ['@', tpLine(1, 1, 'a@b', 'ci')],
+    ['/', tpLine(1, 1, 'a/b', 'ci')],
+    ['closing keyword', tpLine(1, 1, 'Closes #12', 'ci')],
+    ['cross-repo reference', tpLine(1, 1, 'fixes o/r#12', 'ci')],
+    ['issue URL', tpLine(1, 1, 'fixes https://github.com/o/r/issues/1', 'ci')],
+    ['mention', tpLine(1, 1, 'ping @user', 'ci')],
+    ['img tag', tpLine(1, 1, '<img src=x onerror=alert(1)>', 'ci')],
+    ['code span', tpLine(1, 1, 'run `rm x` first', 'ci')],
+    ['path in scenario', tpLine(1, 1, 'src/auth.ts rejects a bad password', 'ci')],
     ['nested method text', tpLine(1, 1, `a ${EM} method:ci`, 'local')],
     ['tab', tpLine(1, 1, 'a\tb', 'ci')],
     ['CR', tpLine(1, 1, 'a\rb', 'ci')],
