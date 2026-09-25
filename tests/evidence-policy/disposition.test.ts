@@ -1,7 +1,8 @@
 /**
  * The evidence-policy DISPOSITION table, held two ways (#362, AC-8).
  *
- * Design §6 disposes of every site that used to key on compliance: each one now
+ * Design §6 disposes of every site that used to key on compliance (rows 1–13; row
+ * 14 is the /dynamic-tickets note §3.16 added): each one now
  * gates on a mechanism input (`ISSUE_REQUIRED`, `APPLY_CONVENTIONS`,
  * `REQUIRE_NON_AUTHOR_APPROVAL`), on `EVIDENCE_POLICY` itself at a caller, or
  * stays on `COMPLIANCE_SKILL_INSTALLED` because it is the review lens rather than
@@ -257,6 +258,18 @@ const DISPOSITION: readonly DispositionRow[] = [
       { file: 'agents/git.md', after: '## Operation: post-resolution-summary', anchor: '**Publication**:', phrase: '| STUB (evidence policy)' },
     ],
   },
+  {
+    // Beyond design §6: the /dynamic-tickets slate gate names the ticket expectation (§3.16).
+    // It informs; per-ticket issue filing is PR6.
+    row: 14,
+    subject: '/dynamic-tickets slate gate — the ticket-issue note',
+    inputs: ['ISSUE_REQUIRED'],
+    on: 'tell the user each ticket needs a tracker issue before its PR',
+    off: 'no note',
+    sites: [
+      { file: 'commands/dynamic-tickets.md', anchor: '- **Evidence policy:**', phrase: gate('ISSUE_REQUIRED') },
+    ],
+  },
 ]
 
 // ---------------------------------------------------------------------------
@@ -431,8 +444,8 @@ describe('evidence-policy disposition: the table and the tree agree, both ways (
     expect(exempt.size, 'the resolution text the exemption names is empty').toBeGreaterThanOrEqual(4)
   })
 
-  it('the table is well-formed: numbered 1..13 in order, each row with sites and a named input', () => {
-    expect(DISPOSITION.map(r => r.row)).toEqual(Array.from({ length: 13 }, (_, i) => i + 1))
+  it('the table is well-formed: numbered 1..14 in order, each row with sites and a named input', () => {
+    expect(DISPOSITION.map(r => r.row)).toEqual(Array.from({ length: 14 }, (_, i) => i + 1))
     for (const row of DISPOSITION) {
       expect(row.sites.length, `row ${row.row} has no site`).toBeGreaterThan(0)
       expect(row.inputs.length, `row ${row.row} gates on nothing`).toBeGreaterThan(0)
