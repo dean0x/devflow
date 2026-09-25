@@ -221,6 +221,11 @@ const MARKER_REFS = new Set([
   // real divergence and are recorded rather than quietly unified.
   'wave',
   'traceability',
+  // The PR test-plan evidence markers (#363): the body block's open/close pair
+  // (`devflow:test-plan`) and the evidence comment's first line (`devflow:evidence`).
+  // Their only source home is `MARKERS` in src/assets/scripts/pr-evidence.cjs.
+  'test-plan',
+  'evidence',
 ]);
 
 /**
