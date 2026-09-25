@@ -35,6 +35,7 @@ You receive from orchestrator:
 - **ISSUE_NUMBER** (optional): the provider-canonical identifier of the issue linked to this task — the same value the Git agent emits as `- **Issue ID**: {ISSUE_ID}` under `### Handoff Values`. When provided, include a `## Related Issues` section in the PR body, closed by the line Responsibility 7's paste gate admits
 - **ISSUE_PR_LINK** (optional): the already-rendered closing line for `## Related Issues`, forwarded verbatim from the Git agent's `- **PR link line**: {rendered}` under `### Handoff Values`. `(none)`, or absent, means no rendered line was captured — the section then carries its heading and no reference. Paste it only after the shape re-check in Responsibility 7; it is never a substitute for `ISSUE_NUMBER`, which stays the spawn key
 - **PR_EXCEPTIONS** (optional): the pre-rendered `## Evidence Exceptions` section — a self-attested evidence exception /implement recorded when no ticket was linked — forwarded verbatim from its handoff file. `(none)`, or absent, means none was recorded and the body carries no such section. Paste it only after the shape re-check in Responsibility 7
+- **PR_TEST_PLAN_BLOCK** (optional): the pre-rendered test-plan block — the task's test plan as /implement rendered it with `verify-evidence.cjs render --plan` — forwarded verbatim. `(none)`, or absent, means there is no test plan to show and the body carries no block. Paste it only after the `check block` gate in Responsibility 7
 
 **Domain hint** (optional):
 - **DOMAIN**: `backend` | `frontend` | `tests` | `fullstack` - Load/apply relevant domain skills
@@ -118,6 +119,8 @@ When you apply a decision from `.devflow/learning/decisions.md` or avoid a pitfa
 
    The value holds that heading and one or more such lines, and nothing else — no blank line, no second heading, no free text — with each kind at most once. The pattern bounds every line: the reason is at most 200 characters, and it admits no `<`, `>`, backtick, bracket, backslash, `/`, `#`, `@`, `&`, `$` or non-ASCII character, so no markup, mention, issue reference (a full issue URL included), marker or shell expansion rides in on it. `(none)`, or absent, is **not a mismatch**: add no section. On a MISMATCH anywhere, paste none of it and do not repair it — emit `TRACEABILITY: DEGRADED (evidence exception does not match its grammar)`. The scrubber-failure minimal body below never carries the section.
 
+   **Pasting `PR_TEST_PLAN_BLOCK`.** When `PR_TEST_PLAN_BLOCK` is provided (not `(none)`), save it byte for byte to a fresh `mktemp` file with the Write tool — never through an interpolated shell string — and run `node "${DEVFLOW_DIR:-$HOME/.devflow}/scripts/verify-evidence.cjs" check block <that file>; echo "exit=$?"`. The script holds the block's whole grammar; only `exit=0` admits the value. Then append it verbatim, before any `## Evidence Exceptions` section — it is scrubbed with the body. Any other result is a MISMATCH: omit the block, never repair or partly paste it, and emit `TRACEABILITY: DEGRADED (test-plan block does not match its grammar)`. `(none)`, or absent, is **not a mismatch**: add no block. The scrubber-failure minimal body below never carries the block.
+
    If `PR_DESCRIPTION_GUIDANCE` is absent, generate the PR body from implementation context.
 
    **D11 scrub (PR body is a GitHub-visible sink):** Compose the final PR body to `$DEVFLOW_BODY_RAW` (`DEVFLOW_BODY_RAW="$(mktemp)"`); scrub via `node "${DEVFLOW_DIR:-$HOME/.devflow}/scripts/redact-secrets.cjs" "$DEVFLOW_BODY_RAW" "$DEVFLOW_BODY"` (where `DEVFLOW_BODY="$(mktemp)"`). On success: create PR with `gh pr create … --body-file "$DEVFLOW_BODY"`. **On scrubber failure** (non-zero exit or script missing): still create the PR — PR existence is the deliverable — but with a minimal body containing only the task reference, plan path (if available), and issue link (if ISSUE_NUMBER provided), plus the literal line `TRACEABILITY: DEGRADED (redaction unavailable)`. Never post `$DEVFLOW_BODY_RAW`.
@@ -198,11 +201,11 @@ When `OPERATION: qa-fix`, you are fixing scenario-based acceptance test failures
 
 When `OPERATION: pr-create`, earlier Code agents have already committed the implementation and you only open the pull request. Make no code changes.
 
-**Inputs:** `TASK_ID`, `BASE_BRANCH`, `CREATE_PR: true`, `PR_DESCRIPTION_GUIDANCE`, `ISSUE_NUMBER`, `ISSUE_PR_LINK`, `PR_EXCEPTIONS`
+**Inputs:** `TASK_ID`, `BASE_BRANCH`, `CREATE_PR: true`, `PR_DESCRIPTION_GUIDANCE`, `ISSUE_NUMBER`, `ISSUE_PR_LINK`, `PR_EXCEPTIONS`, `PR_TEST_PLAN_BLOCK`
 
 **Protocol:**
 1. Push the current feature branch.
-2. Run Responsibility 7 only — the PR body, the `## Related Issues` and `PR_EXCEPTIONS` paste gates and the D11 scrub — targeting `BASE_BRANCH`.
+2. Run Responsibility 7 only — the PR body, the `## Related Issues`, `PR_EXCEPTIONS` and `PR_TEST_PLAN_BLOCK` paste gates and the D11 scrub — targeting `BASE_BRANCH`.
 3. Return the PR URL.
 
 ## Principles
