@@ -23,7 +23,7 @@ Set `EVIDENCE_POLICY`, `ISSUE_REQUIRED`, `APPLY_CONVENTIONS` and `REQUIRE_NON_AU
 - `<utc>` is the output of `date -u +%Y-%m-%dT%H:%M:%SZ`.
 - `<reason>` is the user's own words, made inert: replace every character outside printable ASCII (newlines and tabs included) with a space, remove every `<`, `>`, `` ` ``, `[`, `]`, `\`, `/`, `#`, `@`, `&` and `$`, collapse runs of spaces, trim, keep the first 200 characters, and trim again. A reason that is empty after this is no reason.
 
-Note: the section reaches a public PR body. The Code agent re-checks every line against this shape before it pastes, and the body's D11 scrub is the reason's secret scrub — rendering neutralises markup, mentions and issue references, full issue URLs included; it filters no secrets.
+Note: the section reaches a public PR body. The Code agent re-checks every line against this shape before it pastes, and the body's D11 scrub is the reason's secret scrub — rendering filters no secrets. A rendered reason carries no HTML or comment markers, link or image syntax, @-mentions, `#N` or full-URL references (no `/` survives), entities or shell-expansion characters; plain emphasis and `www.` or `GH-N` autolinks can remain — the requester authors the reason.
 @end
 
 @export evidence_policy
