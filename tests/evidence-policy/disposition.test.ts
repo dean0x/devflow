@@ -226,6 +226,7 @@ const DISPOSITION: readonly DispositionRow[] = [
     off: 'skip; report SKIPPED',
     sites: [
       { file: 'commands/resolve.md', after: '### Phase 9c:', anchor: 'Run this phase only when', phrase: gate('REQUIRE_NON_AUTHOR_APPROVAL') },
+      { file: 'commands/resolve.md', after: '### Phase 9c:', anchor: 'REQUIRE_NON_AUTHOR_APPROVAL: {', phrase: 'REQUIRE_NON_AUTHOR_APPROVAL: {REQUIRE_NON_AUTHOR_APPROVAL}' },
       { file: 'commands/resolve.md', after: '## Edge Cases', anchor: '| `REQUIRE_NON_AUTHOR_APPROVAL` is `false` |', phrase: '`REQUIRE_NON_AUTHOR_APPROVAL` is `false`' },
       { file: 'agents/git.md', after: '## Operation: check-merge-readiness', anchor: '**Input:**', phrase: '`REQUIRE_NON_AUTHOR_APPROVAL`' },
       { file: 'skills/git/references/pr/check-merge-readiness.md', anchor: '- `NOT_READY (no non-author approval)` —', phrase: gate('REQUIRE_NON_AUTHOR_APPROVAL') },
