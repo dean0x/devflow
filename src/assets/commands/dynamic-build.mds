@@ -80,7 +80,14 @@ Check for (in priority order):
 
 Extract or note:
 - Implementation plan (for Code agent prompt and Evaluate agent)
-- Acceptance criteria and test plan (for Gate 2) — pass them as `criteria` and `testPlan` when invoking the workflow; a test plan alone still runs the Test agent
+- Acceptance criteria (for Gate 2) — pass them as `criteria` when invoking the workflow
+- The test plan (for Gate 2) — a plan's TP lines, passed only once they pass this check. Copy the plan's `## Test Plan` section byte for byte into a fresh `mktemp` file with the Write tool, never through an interpolated shell string, and run:
+
+```bash
+node "${DEVFLOW_DIR:-$HOME/.devflow}/scripts/verify-evidence.cjs" check tp <that file>; echo "exit=$?"
+```
+
+  Only `exit=0` passes it: pass the section's TP lines, as one string, as `testPlan` when invoking the workflow — a test plan alone still runs the Test agent. Any other result, or a plan with no `## Test Plan` section: omit `testPlan` and note `Test plan: missing or malformed` in the run summary. Nothing is repaired, and a test plan in any other shape — an older JSON one included — is never passed.
 
 If none found: build proceeds Gate-1-only (Gate 2 skipped with a note). Never refuse to build; never fabricate criteria.
 
@@ -116,7 +123,7 @@ const TICKET = args.ticket || args[0] || "see task description";
 const BRANCH = args.branch || `ticket/${TICKET.replace(/[^a-z0-9]/gi, '-').toLowerCase()}`;
 const PLAN = args.plan || null;
 const CRITERIA = args.criteria || null;
-const TEST_PLAN = args.testPlan || null;  // /devflow:dynamic-plan testPlan (Pre-authoring step 4)
+const TEST_PLAN = args.testPlan || null;  // the plan's checked TP lines, one string (Pre-authoring step 4)
 const DECISIONS_CONTEXT = args.decisionsContext || "";  // injected before authoring
 const ISSUE_NUMBER = args.issueNumber || "(none)";  // resolved in Pre-authoring step 5
 const ISSUE_PR_LINK = args.issuePrLink || "(none)";  // captured in Pre-authoring step 4; "(none)" ⇒ Code emits the heading with no reference
@@ -221,7 +228,7 @@ Self-verify your fix compiles (background-Bash + Monitor for any build >120s —
   if (CRITERIA || TEST_PLAN) {
     const testResult = await agent(`Run scenario-based acceptance tests on branch ${BRANCH} against these criteria:
 ${CRITERIA || "(none)"}
-TEST_PLAN: ${TEST_PLAN ? JSON.stringify(TEST_PLAN) : "(none)"}
+TEST_PLAN: ${TEST_PLAN || "(none)"}
 For any test/build command that may run silent >120s, use the background-Bash + Monitor poll procedure (your "Long-running commands" discipline) so you never trip the 180s watchdog.
 Cover: functionality, API contracts, performance, and cover every TEST_PLAN scenario. Report: PASS or FAIL per scenario.`, { agentType: "Test" });
     testVerdict = testResult.verdict;
