@@ -96,6 +96,7 @@ function collectStaleReverifyDefects(md: string): string[] {
   if (!step.includes('any `</untrusted-test-plan>` inside them neutralised')) out.push('the closing tag is not neutralised')
   if (!step.includes('at most one per /resolve cycle, never re-spawned on its result, and no fix loop follows it')) out.push('the Test spawn is not bounded to one per cycle')
   if (!step.includes('Use its `EVIDENCE` line only on `exit=0`')) out.push('a failed script run may still drive a spawn')
+  if (!step.includes('Run it only when `TARGET_DIR_REL` matches `^[A-Za-z0-9._/-]+$`')) out.push('the branch-derived TARGET_DIR_REL reaches the shell unchecked')
   if (!step.includes(VERIFICATION_RECORD)) out.push('the re-verification is not recorded under ## Verification')
   return out
 }
@@ -189,6 +190,7 @@ describe('AC-15: /resolve re-verifies STALE TPs once and refreshes the evidence 
     expect(spawn.length, 'the Test spawn moved').toBeGreaterThan(0)
     expect(collectStaleReverifyDefects(md.replace(spawn, `${spawn}\n\n${spawn}`))).toContain('expected one Test spawn in 9b-0, found 2')
     expect(collectStaleReverifyDefects(md.replace('TEST_PLAN: <untrusted-test-plan>', 'TEST_PLAN: {stale lines}'))).toContain('the stale TPs travel unwrapped')
+    expect(collectStaleReverifyDefects(md.replace('Run it only when `TARGET_DIR_REL` matches', 'Run it when `TARGET_DIR_REL` matches'))).toEqual(['the branch-derived TARGET_DIR_REL reaches the shell unchecked'])
     const gitDetect = '```\nAgent(subagent_type="Git"):\n"OPERATION: update-pr-evidence\nPR_NUMBER: {pr_number}"\n```\n'
     expect(collectStaleReverifyDefects(md.replace(STEP1, `${gitDetect}\n${STEP1}`))).toContain('9b-0 spawns a Git agent; STALE detection is the script\'s')
     expect(collectRefreshDefects(md.replace('Run this step only when Step 9b-0 ran — the head moved', 'Run this step always'))).toEqual(['9b-3 is not gated on the head having moved'])

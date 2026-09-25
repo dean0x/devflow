@@ -331,7 +331,9 @@ const READY_CONJUNCTS: readonly Conjunct[] = [
   { token: 'ci_status == `PASSING` or `NO_CI`', holds: f => f.ci === 'PASSING' || f.ci === 'NO_CI' },
   { token: 'the evidence is known', holds: f => f.evidence !== null },
   { token: '`approval` is `yes` or `REQUIRE_NON_AUTHOR_APPROVAL` is `false`', holds: f => f.evidence?.approval === 'yes' || f.require === 'false' },
-  { token: '*verified* == `total` ≥ 1, or `exceptions` has `test-plan`', holds: f => f.evidence !== null && ((f.evidence.total >= 1 && f.evidence.verified === f.evidence.total) || f.evidence.testPlanException) },
+  // A `test-plan` exception stands in for a test plan that does not exist (total 0) —
+  // never for TPs that exist and are not verified.
+  { token: '*verified* == `total` ≥ 1, or `total` == 0 and `exceptions` has `test-plan`', holds: f => f.evidence !== null && ((f.evidence.total >= 1 && f.evidence.verified === f.evidence.total) || (f.evidence.total === 0 && f.evidence.testPlanException)) },
 ]
 
 interface Arm {
@@ -358,8 +360,8 @@ const LADDER: readonly Arm[] = [
   { label: 'NOT_READY (no test-plan evidence)', tokens: ['`total` == 0', 'no `test-plan`'], when: f => noException(f) && f.evidence!.total === 0 },
   {
     label: 'NOT_READY (test plan: {v}/{t} verified)',
-    tokens: ['*verified* < `total`', 'no `test-plan`'],
-    when: f => noException(f) && f.evidence!.verified < f.evidence!.total,
+    tokens: ['*verified* < `total`', 'whatever `exceptions` holds'],
+    when: f => f.evidence !== null && f.evidence.verified < f.evidence.total,
   },
   { label: 'READY', tokens: ['only when all hold', ...READY_CONJUNCTS.map(c => c.token)], when: f => READY_CONJUNCTS.every(c => c.holds(f)) },
   { label: 'NOT_READY (status unknown)', tokens: ['anything else'], when: () => true },
@@ -495,6 +497,24 @@ describe('AC-14: check-merge-readiness reads the evidence at head and is READY o
     const prose = proseArms(ref)
     const swapped = [prose[9], ...prose.slice(0, 9), ...prose.slice(10)]
     expect(collectLadderDefects(swapped, LADDER, factDomain())[0]).toMatch(/^the prose arms are \[READY \|/)
+  })
+
+  it('known-bad probe: a test-plan exception that excuses TPs which exist and are not verified is reported', () => {
+    const ref = requirePrRef(MR)
+    const excused = ref
+      .replace('*verified* < `total`, whatever `exceptions` holds', '*verified* < `total` and `exceptions` has no `test-plan`')
+      .replace('or `total` == 0 and `exceptions` has `test-plan`', 'or `exceptions` has `test-plan`')
+    expect(excused, 'the seed must land').not.toBe(ref)
+    const excusedModel: readonly Arm[] = LADDER.map(arm => (arm.label === 'NOT_READY (test plan: {v}/{t} verified)'
+      ? { ...arm, when: (f: Facts) => noException(f) && f.evidence!.verified < f.evidence!.total }
+      : arm.label === 'READY'
+        ? { ...arm, when: (f: Facts) => READY_CONJUNCTS.slice(0, -1).every(c => c.holds(f)) && f.evidence !== null && ((f.evidence.total >= 1 && f.evidence.verified === f.evidence.total) || f.evidence.testPlanException) }
+        : arm))
+    const defects = collectLadderDefects(proseArms(excused), excusedModel, factDomain())
+    expect(defects).toEqual(expect.arrayContaining([
+      'NOT_READY (test plan: {v}/{t} verified): its condition does not carry "whatever `exceptions` holds"',
+      'READY is reached while "*verified* == `total` ≥ 1, or `total` == 0 and `exceptions` has `test-plan`" is false',
+    ]))
   })
 
   it('step 4 runs verify --approval from the worktree and reads only EVIDENCE fields the grammar has', () => {

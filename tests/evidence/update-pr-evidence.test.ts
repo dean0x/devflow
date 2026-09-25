@@ -338,6 +338,8 @@ export function collectMechanicsDefects(prBody: string): string[] {
     ['append-only', 'Never edit or delete an evidence comment'],
     ['residual race', 'GitHub has no conditional body edit'],
     ['state cleanup', 'rmdir -- "$S"'],
+    ['empty-state guard', '[ -n "$S" ] && { rm -- "$S/base" "$S/base.sha256"; rmdir -- "$S"; }'],
+    ['evidence-file path gate', 'only a value matching `^[A-Za-z0-9._/-]{1,255}$` reaches the shell'],
   ] as const) {
     if (!prBody.includes(text)) out.push(`does not state the ${label} rule`)
   }
@@ -370,6 +372,15 @@ describe('AC-6: the mechanics drive the evidence scripts', () => {
     expect(collectMechanicsDefects(seeded)).toEqual([
       'evidence comment: not one `&&` chain of 2 gated steps ending in gh pr comment',
     ])
+  })
+
+  it('known-bad probe: a cleanup that runs on an empty $S, and an ungated evidence path, are reported', () => {
+    const unguarded = prBody.replace('[ -n "$S" ] && { rm -- "$S/base" "$S/base.sha256"; rmdir -- "$S"; }', 'rm -- "$S/base" "$S/base.sha256"; rmdir -- "$S"')
+    expect(unguarded, 'the seed must land').not.toBe(prBody)
+    expect(collectMechanicsDefects(unguarded)).toEqual(['does not state the empty-state guard rule'])
+    const ungated = prBody.replace(' — only a value matching `^[A-Za-z0-9._/-]{1,255}$` reaches the shell', '')
+    expect(ungated, 'the seed must land').not.toBe(prBody)
+    expect(collectMechanicsDefects(ungated)).toEqual(['does not state the evidence-file path gate rule'])
   })
 
   it('known-bad probe: a marker literal, an own PR read and a visibility probe are each reported', () => {

@@ -979,6 +979,32 @@ describe('trusted record — refresh mode reads claims from it (D-VERIFY-RECORD)
     expect(v.states.get(2)).toBe('UNVERIFIED')
   })
 
+  it('a newer marker comment whose author lookup gave no answer (5xx, timeout) makes the record unknown — never the older one', () => {
+    const failed = recordComment(HEAD, [{ id: 1, state: 'FAILED', sha: HEAD, line: CI, run: '101/1' }])
+    const comments = [
+      { login: 'devbot', body: good, viewerDidAuthor: true },
+      { login: 'maint', association: 'COLLABORATOR', body: failed },
+    ]
+    const noAnswer: readonly TwinCall[] = [
+      { tool: 'gh', args: ARGV.permission('maint'), exit: 1, stderr: 'gh: Server Error (HTTP 502)\n' },
+      { tool: 'gh', args: ARGV.permission('maint'), exit: 1, stderr: 'error connecting to api.github.com\n' },
+      { tool: 'gh', args: ARGV.permission('maint'), spawnError: 'ETIMEDOUT' },
+    ]
+    for (const call of noAnswer) {
+      const { exec } = twin([call, ...scenarioCalls({ body, runs, comments })])
+      const dir = scratch('perm-unknown')
+      const r = runMain(['verify', '--pr', String(PR), '--comment-out', path.join(dir, 'c.md')], { exec })
+      expect(r.code, r.stderr).toBe(0)
+      const fields = PE.parseEvidenceLine(r.stdout.trim())
+      expect(fields.ok && fields.value.counts, call.stderr ?? call.spawnError).toMatchObject({ INDETERMINATE: 2, 'VERIFIED-CI': 0 })
+      expect(r.stderr).toMatch(/record-unknown/)
+    }
+    // Controls: a 404 is an ANSWER (not a collaborator), so the viewer's older record
+    // decides; a write answer makes the newer FAILED record the record.
+    expect(verifyScn({ scn: { body, runs, comments, permissions: { maint: 'http-404' } } }).states.get(1)).toBe('VERIFIED-CI')
+    expect(verifyScn({ scn: { body, runs, comments, permissions: { maint: 'write' } } }).states.get(1)).toBe('FAILED')
+  })
+
   it('an untrusted newer marker comment does not displace the trusted record', () => {
     const spoof = recordComment(HEAD, [{ id: 1, state: 'FAILED', sha: HEAD, line: CI }])
     const v = verifyScn({ scn: { body, runs, comments: [
@@ -1024,10 +1050,34 @@ describe('trusted record — refresh mode reads claims from it (D-VERIFY-RECORD)
     expect(PE.parsePlan(v.stale).ok).toBe(true)
   })
 
-  it('no test-plan block in the body: total 0, body same, nothing to post', () => {
-    const v = verifyScn({ scn: { body: 'just prose\n', comments: [{ login: 'devbot', body: good, viewerDidAuthor: true }] } })
+  it('no test-plan block in the body and no record: total 0, body same, nothing to post', () => {
+    const v = verifyScn({ scn: { body: 'just prose\n' } })
     expect(v.code).toBe(0)
     expect(v.fields).toMatchObject({ total: 0, body: 'same', posted: 'n/a' })
+  })
+
+  it('a body that drops a TP the trusted record carries cannot serve as the plan: exit 2, never a smaller total', () => {
+    // Positive control: the full block reads 2/2.
+    const full = verifyScn({ scn: { body, runs, comments: [{ login: 'devbot', body: good, viewerDidAuthor: true }] } })
+    expect(full.fields).toMatchObject({ total: 2, counts: { 'VERIFIED-CI': 1, 'ATTESTED-LOCAL': 1 } })
+    // A body editor the trust rule never trusts (a fork author) deletes one line, or the whole block.
+    const trusted = [{ login: 'devbot', body: good, viewerDidAuthor: true }]
+    for (const edited of [`Intro text.\n\n${blockOf([CI])}\n`, 'just prose\n']) {
+      const v = verifyScn({ scn: { body: edited, runs, comments: trusted } })
+      expect(v.code, edited).toBe(2)
+      expect(v.stdout).toBe('')
+      expect(v.stderr).toContain('drops a TP the trusted record carries')
+    }
+    // An untrusted record binds nothing: the same short body reads 1 TP.
+    const untrusted = verifyScn({ scn: { body: `${blockOf([LOCAL])}\n`, comments: [{ login: 'drive', association: 'CONTRIBUTOR', body: good }] } })
+    expect(untrusted.code, untrusted.stderr).toBe(0)
+    expect(untrusted.fields?.total).toBe(1)
+  })
+
+  it('an evidence-file plan is local text, never held to the record\'s TP set', () => {
+    const v = verifyScn({ scn: { body, runs, comments: [{ login: 'devbot', body: good, viewerDidAuthor: true }] }, evidence: evidenceFile([CI]) })
+    expect(v.code, v.stderr).toBe(0)
+    expect(v.fields?.total).toBe(1)
   })
 
   it('a counts-only or malformed body block cannot serve as the plan: exit 2, stdout empty', () => {

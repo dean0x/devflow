@@ -719,16 +719,32 @@ function approvalCandidates(pr) {
 /**
  * @typedef {{ ctx: { viewer: string, prAuthor: string, isCrossRepository: boolean | undefined,
  *   permissions: Map<string, string | null> }, refused: Set<string> }} TrustState
- *   `refused` holds logins that permissionLookups named but whose lookup was
- *   refused (throttle, cap, deadline): their trust is UNKNOWN, not "untrusted".
+ *   `refused` holds logins that permissionLookups named but whose lookup gave no
+ *   ANSWER (a refusal — throttle, cap, deadline — or a timeout, a spawn error, a
+ *   5xx, a network failure): trust() still reads them untrusted, as the rule says of
+ *   an error, but whether such a login's comment is the NEWEST trusted record is
+ *   unknown, so findTrustedRecord never falls back past it to an older record.
  */
+
+/**
+ * Whether a permission lookup that did not print a permission was nevertheless an
+ * ANSWER: GitHub said 404 (not a collaborator) or a plain 403 (the viewer may not
+ * read it). Everything else that failed is not knowing.
+ *
+ * @param {CallResult} r
+ * @returns {boolean}
+ */
+function lookupDenied(r) {
+  return answered(r) && /HTTP 40[34]\b/.test(r.stderr) && !isThrottle(r);
+}
 
 /**
  * Look up the permissions the trust rule needs — ONCE per spawn, for exactly the
  * logins pr-evidence `permissionLookups` names (≤ PERMISSION_LOOKUPS). Only the
  * authors whose trust can matter are offered: evidence-marker comment authors,
- * newest first, then (with --approval) the approval candidates. A 404, a plain 403
- * or an error stores null — untrusted, per the rule.
+ * newest first, then (with --approval) the approval candidates. A printed
+ * permission is stored as printed; a 404 or a plain 403 stores null — untrusted,
+ * per the rule; any other failure leaves the login `refused` (see TrustState).
  *
  * @param {Io} io
  * @param {PrFacts} pr
@@ -748,7 +764,7 @@ function resolveTrust(io, pr, approval) {
   for (const login of PE.permissionLookups(actors, ctx)) {
     const r = gh(io, ['api', 'repos/{owner}/{repo}/collaborators/' + loginArg(login) + '/permission', '--jq', '.permission'],
       LINE_MAX_BUFFER);
-    if (r.refused !== null || isThrottle(r)) {
+    if (r.refused !== null || isThrottle(r) || !(r.ok || lookupDenied(r))) {
       refused.add(login);
       continue;
     }
@@ -1308,6 +1324,25 @@ function recordsById(record) {
 }
 
 /**
+ * D-VERIFY-RECORD: whether a PR-body plan still carries every TP the trusted record
+ * does. The hash check guards the text of each TP the body shows, but not the TPs
+ * it leaves out: anyone who can edit the body — a fork author, whom the trust rule
+ * never trusts — could delete the failing lines so that the verified rest equals
+ * the total. A body plan that drops a recorded TP therefore cannot serve as the
+ * plan at all (input unusable), rather than yield a smaller total. A plan read from
+ * the evidence file is local text and is not held to the record.
+ *
+ * @param {{ tps: readonly any[] }} plan
+ * @param {TrustedRecord} record
+ * @returns {boolean}
+ */
+function coversRecord(plan, record) {
+  if (record.kind !== 'record') return true;
+  const ids = new Set(plan.tps.map(tp => tp.id));
+  return record.records.every(r => ids.has(r.id));
+}
+
+/**
  * The body update: the block (or its counts-only form, D-SPLICE) spliced into the
  * body. When it cannot be spliced — malformed markers, oversize even as counts —
  * the body reads `changed`, so the caller runs `splice`, which names the refusal.
@@ -1418,6 +1453,9 @@ function runVerify(io, args, deps) {
   const fromFile = evidence !== null && evidence.plan !== null;
   const plan = fromFile ? /** @type {any} */ (evidence).plan : bodyPlan(pr.body);
   if (plan === null) return refuse(io, EXIT_CODES.INPUT_UNUSABLE, 'the PR body test-plan block cannot serve as the plan');
+  if (!fromFile && !coversRecord(plan, record)) {
+    return refuse(io, EXIT_CODES.INPUT_UNUSABLE, 'the PR body test-plan block drops a TP the trusted record carries');
+  }
   const inputs = tpInputs(plan, evidence, record, fromFile);
   if (inputs === null) return refuse(io, EXIT_CODES.OUTPUT_GATE_REFUSED, 'a TP line failed its grammar');
 
