@@ -679,6 +679,7 @@ const LADDER: readonly LadderRow[] = [
   { name: 'runs unresolved', tp: CI, claim: claimLine('TP-1', 'PASS', HEAD), facts: { ...ciAtHead, runs: null }, state: 'INDETERMINATE' },
   { name: 'runs never supplied', tp: CI, claim: claimLine('TP-1', 'PASS', HEAD), facts: { ...atHead, htmlUrl: HTML }, state: 'INDETERMINATE' },
   { name: 'expired run (404)', tp: CI, claim: claimLine('TP-1', 'PASS', HEAD), facts: { ...ciAtHead, runs: [run(), { id: 102, attempt: 1, expired: true }] }, state: 'INDETERMINATE', run: { id: 102, attempt: 1 } },
+  { name: 'an expired flag wins over a completed-looking record', tp: CI, claim: claimLine('TP-1', 'PASS', HEAD), facts: { ...ciAtHead, runs: [run({ expired: true })] }, state: 'INDETERMINATE', run: { id: 101, attempt: 1 } },
   { name: 'run in progress', tp: CI, claim: claimLine('TP-1', 'PASS', HEAD), facts: { ...ciAtHead, runs: [run({ status: 'in_progress', conclusion: null })] }, state: 'INDETERMINATE', run: { id: 101, attempt: 1 } },
   { name: 'run cancelled', tp: CI, claim: claimLine('TP-1', 'PASS', HEAD), facts: { ...ciAtHead, runs: [run({ conclusion: 'cancelled' })] }, state: 'INDETERMINATE', run: { id: 101, attempt: 1 } },
   { name: 'run action_required', tp: CI, claim: claimLine('TP-1', 'PASS', HEAD), facts: { ...ciAtHead, runs: [run({ conclusion: 'action_required' })] }, state: 'INDETERMINATE', run: { id: 101, attempt: 1 } },

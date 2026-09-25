@@ -1326,9 +1326,9 @@ function locateBlock(body) {
     const lineEnd = nl === -1 ? body.length : nl;
     const contentEnd = nl !== -1 && lineEnd > pos && body.charCodeAt(lineEnd - 1) === 13 ? lineEnd - 1 : lineEnd;
     const content = body.slice(pos, contentEnd);
-    const isMarker = content === MARKERS.BLOCK_START || content === MARKERS.BLOCK_END;
     if (fence !== null) {
-      if (isMarker) return fail('malformed');
+      // A marker line inside a fence is not collected, so the occurrence check
+      // below refuses it.
       if (fenceCloses(content, fence)) fence = null;
     } else if (content === MARKERS.BLOCK_START) {
       starts.push(pos);
