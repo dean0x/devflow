@@ -63,7 +63,7 @@ Load for `ensure-pr-ready` under every tracker provider.
 
 ### Step 4b's PR-host half
 
-The provider reference's step 4b publishes its section only through this: find the open PR with `gh pr list --head \{branch\} --state open`; compose the existing body plus the `## Related Issues` section to `$DEVFLOW_BODY_RAW` — the existing body is third-party-editable, so never interpolate it into a command string; apply the Comment-sink scrub (D11); on success: `gh pr edit \{PR_NUMBER\} --body-file "$DEVFLOW_BODY"`.
+The provider reference's step 4b publishes its section only through this: find the open PR with `gh pr list --head \{branch\} --state open --limit 1`; compose the existing body plus the `## Related Issues` section to `$DEVFLOW_BODY_RAW` — the existing body is third-party-editable, so never interpolate it into a command string; apply the Comment-sink scrub (D11); on success: `gh pr edit \{PR_NUMBER\} --body-file "$DEVFLOW_BODY"`.
 @end
 
 @define validate_branch():

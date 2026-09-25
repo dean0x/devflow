@@ -481,7 +481,9 @@ describe('PF-075: the gather references report only declared statuses', () => {
 
 // ---------------------------------------------------------------------------
 // `--limit` on every `gh pr list` — widened from the GitHub gather reference to
-// the compiled agent, every generated reference and release.md (#364).
+// the compiled agent, every generated reference and release.md (#364), then to
+// the hand-written git skill references and SKILL.md (#365), which closed the
+// last unbounded listing in each and retired the exemption registry.
 // ---------------------------------------------------------------------------
 
 /**
@@ -493,8 +495,8 @@ describe('PF-075: the gather references report only declared statuses', () => {
  * `gh pr list` scan" whose invocation, bounded, lives in its reference.
  *
  * NOT covered: an invocation split across a backslash continuation, a `--limit`
- * passed through a variable, and files outside the corpus below (hand-authored
- * skill references and the other commands).
+ * passed through a variable, and files outside the corpus below (the other
+ * skills' references and the other commands).
  */
 export function collectUnboundedInvocations(text: string): string[] {
   const out: string[] = []
@@ -511,27 +513,26 @@ export function collectUnboundedInvocations(text: string): string[] {
 }
 
 /**
- * Invocations the corpus carries without `--limit`, each with its reason — the
- * rule and its exemptions are one authority (PF-067). Every entry must still be
- * emitted, so an exemption cannot outlive the line it excuses.
+ * The hand-written git skill files the guard reads besides the built tree: every
+ * `.md` under the skill's own `references/` plus `SKILL.md`. They are installed
+ * as authored — no build step touches them — so they are read from src and
+ * labelled by their repo-relative path.
  */
-const KNOWN_UNBOUNDED_INVOCATIONS: ReadonlyArray<{ readonly file: string; readonly invocation: string; readonly why: string }> = [
-  {
-    file: 'skills/git/references/pr/ensure-pr-ready.md',
-    invocation: 'gh pr list --head {branch} --state open',
-    why:
-      'the open-PR lookup for one head branch, in PR-host mechanics that #364 does not touch (its ' +
-      'budget prices no pr/ file). gh caps an unflagged listing at 30, and a head branch has at ' +
-      'most one open PR per base; adding `--limit` there is recorded as a follow-up',
-  },
-]
+const HAND_WRITTEN_GIT_ROOT = path.join(ROOT, 'src', 'assets', 'skills', 'git')
 
-describe('#364: `--limit` on every `gh pr list` in the agent, the references and release.md', () => {
+/** The shipped spelling of patterns.md's pre-flight lookup before #365 bounded it. */
+const UNBOUNDED_PATTERNS_LOOKUP = `gh pr list --head "$(git branch --show-current)" --json number --jq '.[0].number')`
+
+describe('#364/#365: `--limit` on every `gh pr list` in the agent, the references and release.md', () => {
   const distRoot = path.join(ROOT, 'dist')
   const corpus = [
     { file: 'agents/git.md', content: resolveAgentSource('git').content },
     ...walkFiles(REFS_DIR, f => f.endsWith('.md')).map(f => ({
       file: path.relative(distRoot, f).split(path.sep).join('/'),
+      content: readFileSync(f, 'utf-8'),
+    })),
+    ...walkFiles(HAND_WRITTEN_GIT_ROOT, f => f.endsWith('.md')).map(f => ({
+      file: path.relative(ROOT, f).split(path.sep).join('/'),
       content: readFileSync(f, 'utf-8'),
     })),
     { file: 'commands/release.md', content: requireDistFile('release.md') },
@@ -545,28 +546,19 @@ describe('#364: `--limit` on every `gh pr list` in the agent, the references and
       'skills/git/references/learn-conventions.md',
       'skills/git/references/tracker/github/gather-release-evidence.md',
       'skills/git/references/pr/ensure-pr-ready.md',
+      'src/assets/skills/git/SKILL.md',
+      'src/assets/skills/git/references/patterns.md',
     ]) {
       expect(files, `sentinel ${sentinel} was not read`).toContain(sentinel)
     }
     const invocations = corpus.flatMap(c => c.content.split('\n').filter(l => /gh pr list\b/.test(l)))
-    expect(invocations.length, 'fewer `gh pr list` lines than the tree carries').toBeGreaterThanOrEqual(4)
+    expect(invocations.length, 'fewer `gh pr list` lines than the tree carries').toBeGreaterThanOrEqual(5)
   })
 
-  it('every invocation carries `--limit N`, or is a named exemption', () => {
+  it('every invocation carries `--limit N` — no exemption registry exists', () => {
     const offenders = corpus.flatMap(({ file, content }) =>
-      collectUnboundedInvocations(content)
-        .filter(inv => !KNOWN_UNBOUNDED_INVOCATIONS.some(e => e.file === file && e.invocation === inv))
-        .map(inv => `${file}: ${inv}`))
+      collectUnboundedInvocations(content).map(inv => `${file}: ${inv}`))
     expect(offenders).toEqual([])
-  })
-
-  it('every exemption is still emitted, and has a reason', () => {
-    for (const e of KNOWN_UNBOUNDED_INVOCATIONS) {
-      const entry = corpus.find(c => c.file === e.file)
-      expect(entry, `${e.file} is not in the corpus`).toBeDefined()
-      expect(collectUnboundedInvocations(entry!.content), `${e.file}: the exemption excuses nothing`).toContain(e.invocation)
-      expect(e.why.length).toBeGreaterThan(40)
-    }
   })
 
   it('known-bad probes: an unbounded invocation in release.md is reported; the bare name is not', () => {
@@ -576,5 +568,20 @@ describe('#364: `--limit` on every `gh pr list` in the agent, the references and
     expect(collectUnboundedInvocations('```bash\ngh pr list\n```')).toEqual(['gh pr list'])
     expect(collectUnboundedInvocations('Any 4xx on the `gh pr list` scan → skip the signal.')).toEqual([])
     expect(collectUnboundedInvocations('`gh pr list --state merged --limit 30 --json title`')).toEqual([])
+  })
+
+  it('known-bad probe: the pre-#365 hand-written pre-flight lookup in patterns.md is reported', () => {
+    const patterns = corpus.find(c => c.file === 'src/assets/skills/git/references/patterns.md')!.content
+    expect(collectUnboundedInvocations(patterns), 'the shipped lookup is bounded').toEqual([])
+    const seeded = patterns.replace(' --limit 1 --json number', ' --json number')
+    expect(seeded, 'the seed must land on the shipped lookup').not.toBe(patterns)
+    expect(collectUnboundedInvocations(seeded)).toEqual([UNBOUNDED_PATTERNS_LOOKUP])
+  })
+
+  it('known-bad probe: the pre-#365 open-PR lookup in pr/ensure-pr-ready.md is reported', () => {
+    const prReady = corpus.find(c => c.file === 'skills/git/references/pr/ensure-pr-ready.md')!.content
+    const seeded = prReady.replace('--state open --limit 1', '--state open')
+    expect(seeded, 'the seed must land on the shipped lookup').not.toBe(prReady)
+    expect(collectUnboundedInvocations(seeded)).toEqual(['gh pr list --head {branch} --state open'])
   })
 })
