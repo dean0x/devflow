@@ -259,7 +259,7 @@ Load for `post-resolution-summary` under every tracker provider.
 
 Load for `check-merge-readiness` under every tracker provider.
 
-**PR mechanics held here:** the report-only rule, the unresolved-thread count with its >100 approximation note, the review-decision fetch, the CI-status reuse and the first-match-wins classification ladder.
+**PR mechanics held here:** the report-only rule, the unresolved-thread count with its >100 approximation note, the review-decision fetch, the CI-status reuse, the test-plan evidence read and the first-match-wins ladder whose READY arm is a positive conjunction.
 
 ### Process
 
@@ -267,14 +267,20 @@ Load for `check-merge-readiness` under every tracker provider.
 2. Fetch PR review decision: `gh pr view \{PR_NUMBER\} --json reviewDecision --jq '.reviewDecision'`
    - Values: `APPROVED`, `CHANGES_REQUESTED`, `REVIEW_REQUIRED`, or null
 3. Fetch CI status (same logic as `check-ci-status`)
-   Those steps are in `references/pr/check-ci-status.md` — load it and apply them to this `PR_NUMBER`, NO_CI rule and PENDING > FAILING > PASSING order unchanged.
-4. Classify (first matching rule wins):
+   Those steps are in `references/pr/check-ci-status.md` — load it and apply them to this `PR_NUMBER`, every arm unchanged.
+4. Read the test-plan evidence at the current head, from `WORKTREE_PATH` (else cwd): `node "$\{DEVFLOW_DIR:-$HOME/.devflow\}/scripts/verify-evidence.cjs" verify --pr \{PR_NUMBER\} --approval; echo "exit=$?"`. The evidence is *known* only on `exit=0` with stdout exactly one `EVIDENCE pr:\{PR_NUMBER\} …` line; otherwise it is *unknown*. From it read `total`, `VERIFIED-CI`, `ATTESTED-LOCAL` (report the two apart), `exceptions` and `approval`; *verified* = `VERIFIED-CI` + `ATTESTED-LOCAL`, never inferred from an absent field. The script re-derives every state at the head and decides `approval` by the trust rule; it prints nothing it read from the PR.
+5. Classify (first matching rule wins):
    - `NOT_READY (unresolved threads: \{n\})` — unresolved_threads > 0
    - `NOT_READY (changes requested)` — reviewDecision == `CHANGES_REQUESTED`
    - `NOT_READY (CI failing: \{checks\})` — ci_status == `FAILING`
    - `NOT_READY (CI pending)` — ci_status == `PENDING` (expected after a push; non-alarming)
    - `NOT_READY (no approving review)` — reviewDecision == `REVIEW_REQUIRED` or null
-   - `READY` — no rule above matched (unresolved_threads == 0, reviewDecision == `APPROVED`, ci_status == `PASSING` or `NO_CI`)
+   - `NOT_READY (test-plan evidence unavailable)` — the evidence is unknown
+   - `NOT_READY (no non-author approval)` — only when `REQUIRE_NON_AUTHOR_APPROVAL` is `true` and the evidence's `approval` is not `yes`
+   - `NOT_READY (no test-plan evidence)` — `total` == 0 and `exceptions` has no `test-plan`
+   - `NOT_READY (test plan: \{v\}/\{t\} verified)` — *verified* < `total` and `exceptions` has no `test-plan`
+   - `READY` — only when all hold: unresolved_threads == 0 and not approximate; reviewDecision == `APPROVED`; ci_status == `PASSING` or `NO_CI`; the evidence is known; `approval` is `yes` or `REQUIRE_NON_AUTHOR_APPROVAL` is `false`; *verified* == `total` ≥ 1, or `exceptions` has `test-plan`
+   - `NOT_READY (status unknown)` — anything else (an `INDETERMINATE` CI status, an approximate thread count, an unrecognised value)
 
 Never take action on the PR — report READY or NOT_READY, always with the specific reason.
 @end

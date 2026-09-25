@@ -215,15 +215,21 @@ const DISPOSITION: readonly DispositionRow[] = [
     ],
   },
   {
-    // Caller-side only: check-merge-readiness is unchanged and takes no new input in #362.
+    // Caller side (#362): /resolve runs Phase 9c only under the input. Op side
+    // (#363 PR4): check-merge-readiness takes the input and gates the non-author
+    // approval at its own arm (PF-076) — READY needs a trusted non-author's
+    // approval unless the input is `false`.
     row: 11,
-    subject: '/resolve Phase 9c — merge readiness',
+    subject: '/resolve Phase 9c — merge readiness, and its non-author approval arm',
     inputs: ['REQUIRE_NON_AUTHOR_APPROVAL'],
-    on: 'report merge readiness',
+    on: 'report merge readiness; READY needs a trusted non-author approval',
     off: 'skip; report SKIPPED',
     sites: [
       { file: 'commands/resolve.md', after: '### Phase 9c:', anchor: 'Run this phase only when', phrase: gate('REQUIRE_NON_AUTHOR_APPROVAL') },
       { file: 'commands/resolve.md', after: '## Edge Cases', anchor: '| `REQUIRE_NON_AUTHOR_APPROVAL` is `false` |', phrase: '`REQUIRE_NON_AUTHOR_APPROVAL` is `false`' },
+      { file: 'agents/git.md', after: '## Operation: check-merge-readiness', anchor: '**Input:**', phrase: '`REQUIRE_NON_AUTHOR_APPROVAL`' },
+      { file: 'skills/git/references/pr/check-merge-readiness.md', anchor: '- `NOT_READY (no non-author approval)` —', phrase: gate('REQUIRE_NON_AUTHOR_APPROVAL') },
+      { file: 'skills/git/references/pr/check-merge-readiness.md', anchor: '- `READY` — only when all hold', phrase: '`REQUIRE_NON_AUTHOR_APPROVAL` is `false`' },
     ],
   },
   {
