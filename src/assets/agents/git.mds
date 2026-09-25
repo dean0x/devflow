@@ -615,7 +615,7 @@ Reply to external review threads and, when conditions are met, mark them resolve
 
 Post the resolution summary as a single PR comment. Marker-based deduplication — only one comment per workflow run, never edited after posting (D8).
 
-**Input:** `PR_NUMBER`, `RESOLUTION_SUMMARY_PATH`, `WORKTREE_PATH` (optional), `REVIEW_PUBLICATION` (optional; values: `auto` | `full` | `off`; absent/unrecognised → `auto`)
+**Input:** `PR_NUMBER`, `RESOLUTION_SUMMARY_PATH`, `RESOLUTION_TS`, `WORKTREE_PATH` (optional), `REVIEW_PUBLICATION` (optional; values: `auto` | `full` | `off`; absent/unrecognised → `auto`)
 
 **Degradation (D4):** No PR → `TRACEABILITY: DEGRADED (no PR)`, warn, return. Resolution summary is already written to disk.
 

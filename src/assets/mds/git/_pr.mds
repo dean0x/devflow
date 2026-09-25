@@ -223,12 +223,12 @@ Load for `post-resolution-summary` under every tracker provider.
 1. Check for existing marker (author-filtered — a third party posting the marker string must not suppress devflow's comment):
    - Fetch viewer login: `gh api user --jq '.login'` → store as VIEWER_LOGIN
    - `gh pr view \{PR_NUMBER\} --json comments --jq '[.comments[] | select(.author.login == "'"$VIEWER_LOGIN"'")] | .[].body'`
-   - Search for `<!-- devflow:resolution-summary ts:` in the viewer-authored comment bodies only
-   - If found: skip — report `Skipped: resolution summary already posted`
+   - Search the viewer-authored bodies only for the exact key `<!-- devflow:resolution-summary ts:\{RESOLUTION_TS\} -->`
+   - If found: skip — report `Skipped: already posted for ts:\{RESOLUTION_TS\}`
 2. Resolve `REVIEW_PUBLICATION` through `references/publication-gate.md`; `off` ends the op without posting.
 3. Probe visibility (if mode not yet determined): `gh repo view --json visibility --jq '.visibility'` — compare case-insensitively. `PRIVATE` or `INTERNAL` → mode FULL. Anything else (including `PUBLIC`, empty output, command error, unauthenticated) → mode STUB. **Fail-closed: on any error or unrecognised value, treat as PUBLIC (mode STUB).**
 4. Read `RESOLUTION_SUMMARY_PATH` (resolution-summary.md).
-5. Compose body (where `\{TS\}` = current UTC timestamp, ISO 8601):
+5. Compose body (where `\{TS\}` = `RESOLUTION_TS`):
    - **FULL mode:**
      ```
      <!-- devflow:resolution-summary ts:\{TS\} -->

@@ -91,7 +91,7 @@ Set `TARGET_DIR` to the selected review or bug-analysis directory path.
 
 #### Step 0d: Load Project Decisions
 
-**Produces:** DECISIONS_CONTEXT, FEATURE_KNOWLEDGE, COMPLIANCE_SKILL_INSTALLED, REVIEW_PUBLICATION
+**Produces:** DECISIONS_CONTEXT, FEATURE_KNOWLEDGE, COMPLIANCE_SKILL_INSTALLED, REVIEW_PUBLICATION, RESOLUTION_TS
 
 {decisions_load()}
 
@@ -106,6 +106,8 @@ Reuse this result for every worktree.
 
 {publication_gate()}
 Resolve this per worktree — unlike the compliance check above, the config file is per worktree root.
+
+**Mint `RESOLUTION_TS` once per run:** `date -u +%Y-%m-%dT%H:%M:%SZ`. Every worktree reuses it — the resolution comment's dedup marker is searched per PR, so one run key keeps a retry of this run deduplicated while the next /resolve on the same PR posts. Phase 5 writes it as the summary's `**Date**:` and Phase 9b-2 passes it, so the local file and the posted marker agree.
 
 ### Phase 1: Parse Issues
 
@@ -237,7 +239,7 @@ Collect from each Code agent:
 ### Phase 5: Write resolution-summary.md
 
 **Produces:** RESOLUTION_FILE (early write for compaction safety)
-**Requires:** TRIAGE_RESULTS, CODE_AGENT_RESULTS, TARGET_DIR, BRANCH_INFO
+**Requires:** TRIAGE_RESULTS, CODE_AGENT_RESULTS, TARGET_DIR, BRANCH_INFO, RESOLUTION_TS
 
 **Immediately write `resolution-summary.md`** to `\{TARGET_DIR\}` using the Write tool. Do this now — not in Phase 9 — while results are fresh in context. This ensures the record is persisted even if later phases (Simplify, Verification Gate, CI gate, Tech Debt) trigger context compaction.
 
@@ -356,7 +358,7 @@ After manage-debt completes:
 ### Phase 9b: Thread Resolution + Resolution Comment
 
 **Produces:** THREAD_RESOLUTION_RESULT, PR_COMMENT
-**Requires:** THREAD_MAP (from Phase 1b), VERIFICATION_STATUS, CODE_AGENT_RESULTS, TRIAGE_RESULTS
+**Requires:** THREAD_MAP (from Phase 1b), VERIFICATION_STATUS, CODE_AGENT_RESULTS, TRIAGE_RESULTS, RESOLUTION_TS
 
 **Step 9b-1: Resolve external threads (Compliance-gated)**
 
@@ -393,9 +395,10 @@ Agent(subagent_type="Git"):
 "OPERATION: post-resolution-summary
 PR_NUMBER: {pr_number}
 RESOLUTION_SUMMARY_PATH: {TARGET_DIR}/resolution-summary.md
+RESOLUTION_TS: {RESOLUTION_TS}
 REVIEW_PUBLICATION: {REVIEW_PUBLICATION}
 WORKTREE_PATH: {worktree_path}  (omit if cwd)
-Posts the consolidated resolution-summary comment (marker-deduped by the operation)."
+Posts the consolidated resolution-summary comment (marker-deduped by the operation on RESOLUTION_TS)."
 ```
 
 If Git agent returns `TRACEABILITY: DEGRADED`: warn, continue.
@@ -566,7 +569,7 @@ Written in Phase 5 (Collect Results) to `\{TARGET_DIR\}/resolution-summary.md`:
 # Resolution Summary
 
 **Branch**: {branch} -> {base_branch}
-**Date**: {timestamp}
+**Date**: {RESOLUTION_TS}
 **Review**: {TARGET_DIR}
 **Command**: /resolve
 
