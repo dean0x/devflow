@@ -418,15 +418,15 @@ Check CI/PR check status for a branch's pull request.
 ```markdown
 ## CI Status
 **PR**: #{number}
-**Status**: PASSING | FAILING | PENDING | NO_CI | NO_PR
+**Status**: PASSING | FAILING | PENDING | NO_CI | NO_PR | INDETERMINATE
 
 ### Check Results
-| Check | State | Conclusion |
-|-------|-------|------------|
-| {name} | {state} | {conclusion} |
+| Check | State | Bucket |
+|-------|-------|--------|
+| {name} | {state} | {bucket} |
 
 ### Failing Checks (if any)
-- {name}: {conclusion}
+- {name}: {bucket}
 ```
 
 ---
@@ -637,7 +637,7 @@ The body those mechanics compose MUST NOT reproduce verbatim content from any `<
 
 Report-only merge readiness check (D6).
 
-**Input:** `PR_NUMBER`, `WORKTREE_PATH` (optional)
+**Input:** `PR_NUMBER`, `REQUIRE_NON_AUTHOR_APPROVAL`, `WORKTREE_PATH` (optional)
 
 **Degradation (D4):** No PR / `gh` unauthenticated → `TRACEABILITY: DEGRADED ({reason})`, return DEGRADED verdict.
 
@@ -655,6 +655,7 @@ Report-only merge readiness check (D6).
 - Unresolved threads: {n}
 - Review decision: {decision}
 - CI status: {status}
+- Test plan: {v}/{t} (VERIFIED-CI {n}, ATTESTED-LOCAL {n}) | unavailable · non-author approval: {yes | no | not required}
 ```
 
 ---
