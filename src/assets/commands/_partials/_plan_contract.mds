@@ -1,3 +1,12 @@
+@define test_plan_line():
+**Test-plan line (TP).** Write every test-plan entry as one line in exactly this shape. `TP_LINE_RE` in `pr-evidence.cjs` parses it and refuses any other line.
+
+- **Shape:** `- [ ] TP-<n> (AC-<m>) <scenario> — method:<ci|local|manual>`, optionally followed by ` [files: <glob>[, <glob>…]]` (the brackets are literal).
+- **Fields:** `<n>` is 1–200, unique and ascending. Each line cites exactly one `AC-<m>`, with `<m>` in 1–999. `<scenario>` is 1–200 printable characters with no leading or trailing space; it contains no `<`, `>`, backtick, `[` or `]`, and never the text ` — method:`. Each `<glob>` matches `[A-Za-z0-9._/*?-]\{1,120\}`, at most 10 per line. `**` crosses `/`, and `**/` may match no directory at all; `*` and `?` do not cross `/`.
+- **Methods:** `ci` — the CI suite covers the scenario; `local` — a command whose exit code the Test agent reads; `manual` — agent-driven steps, observed.
+- **States (closed):** `VERIFIED-CI | ATTESTED-LOCAL | UNVERIFIED | STALE | FAILED | INDETERMINATE`. Only the first two count as verified. Only the evidence scripts assign a state; never write one by hand. They take the first match in the order `UNVERIFIED → INDETERMINATE → STALE → FAILED → VERIFIED-CI → ATTESTED-LOCAL → UNVERIFIED`, so a TP that no earlier arm accepts stays `UNVERIFIED`.
+@end
+
 @define acceptance_criteria_contract():
 ### Acceptance criteria + test plan contract
 
@@ -30,6 +39,10 @@ For each acceptance criterion:
 
 The test plan must be executable by the Test agent without further clarification — it is a complete specification, not notes.
 
+When the test plan is written as lines — a `## Test Plan` section, or a PR's test-plan block — each line follows this contract:
+
+{test_plan_line()}
+
 #### Consumption by Gate 2
 
 The Evaluate agent panel receives: the per-ticket plan + the numbered acceptance criteria (positive and negative).
@@ -48,4 +61,5 @@ A criterion is NOT acceptable if it is:
 Challenge every criterion against these three disqualifiers before accepting the plan.
 @end
 
+@export test_plan_line
 @export acceptance_criteria_contract
