@@ -493,11 +493,18 @@ describe('orchestrator decisions (2026-09-25): no ticket gate outside /implement
   const gated = collectGatedSites(corpus, resolutionLines())
   const REVIEW_HOSTS = ['commands/code-review.md', 'commands/bug-analysis.md'] as const
 
-  /** Named collector: a ticket gate — a gate on ISSUE_REQUIRED or on the policy itself — in the two review hosts. */
+  /**
+   * Named collector: a ticket gate in the two review hosts — a gate on
+   * `ISSUE_REQUIRED` (the input a ticket gate keys on, design §8 delta 7), or a
+   * gate on the policy itself that names a ticket. A bare `EVIDENCE_POLICY` gate
+   * is NOT one: /code-review legitimately turns a resolved `off` publication into
+   * `stub` under the policy (row 13's caller side), and that gates a comment, not
+   * the PR.
+   */
   function collectReviewTicketGates(lines: readonly GatedLine[]): string[] {
     return lines
       .filter(g => (REVIEW_HOSTS as readonly string[]).includes(g.file))
-      .filter(g => g.names.includes('ISSUE_REQUIRED') || g.names.includes('EVIDENCE_POLICY'))
+      .filter(g => g.names.includes('ISSUE_REQUIRED') || (g.names.includes('EVIDENCE_POLICY') && /\bticket/i.test(g.text)))
       .map(g => `${g.file}:${g.index + 1}: ${g.text.trim().slice(0, 100)}`)
   }
 
@@ -513,12 +520,16 @@ describe('orchestrator decisions (2026-09-25): no ticket gate outside /implement
     }
   })
 
-  it('known-bad probe: a seeded ticket gate in /code-review is reported', () => {
-    const seeded = corpus.map(f =>
-      f.file === 'commands/code-review.md'
-        ? { ...f, content: `${f.content}\nOnly when \`ISSUE_REQUIRED\` is \`true\`: stop with BLOCKED (no ticket link).\n` }
-        : f)
-    expect(collectReviewTicketGates(collectGatedSites(seeded, resolutionLines()))).toHaveLength(1)
+  it('known-bad probe: a seeded ticket gate in /code-review is reported, in either keying', () => {
+    const seed = (line: string): string[] => {
+      const seeded = corpus.map(f =>
+        f.file === 'commands/code-review.md' ? { ...f, content: `${f.content}\n${line}\n` } : f)
+      return collectReviewTicketGates(collectGatedSites(seeded, resolutionLines()))
+    }
+    expect(seed('Only when `ISSUE_REQUIRED` is `true`: stop with BLOCKED.')).toHaveLength(1)
+    expect(seed('When `EVIDENCE_POLICY` is `required` and no ticket is linked, stop.')).toHaveLength(1)
+    // Negative control: the publication stub gates a comment, not the PR.
+    expect(seed('Only when `EVIDENCE_POLICY` is `required`, a resolved `off` becomes `stub`.')).toEqual([])
   })
 
   it('/implement is the only command that records an evidence exception', () => {
