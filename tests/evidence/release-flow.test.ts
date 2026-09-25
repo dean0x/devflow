@@ -10,7 +10,8 @@
  *         one when the header is sound and nothing is untraced, and every unknown
  *         — a status outside the declared five included — lands on arm 1
  *         (PF-075: a gate that reaches its permissive verdict by exhaustion fails
- *         open). A `--dry-run` never asks and leaves no checkpoint to resume.
+ *         open). A `--dry-run` never asks and leaves no checkpoint to resume;
+ *         a real release shows the untraced and exempt commits before it asks.
  *   AC-8  `## Traceability exceptions` renders with `evidence_exception()`'s
  *         login, time and reason rules copied BYTE-IDENTICALLY (the
  *         partial-wiring precedent for release.md, which is hand-authored and
@@ -253,6 +254,55 @@ describe('AC-7: a dry run leaves no checkpoint to resume', () => {
   it('known-bad probe: an unconditional checkpoint write in Phase 4 is reported', () => {
     const seeded = '### Phase 4\nWrite `.release/.progress.json` checkpoint, with RELEASE_EVIDENCE when it was gathered.\n### Phase 5'
     expect(collectDryRunCheckpointWrites(seeded)).toHaveLength(1)
+  })
+})
+
+/**
+ * The real-release listing that precedes the attestation ask. A `--dry-run` lists
+ * the untraced and exempt commits, but it never asks; the release that DOES ask
+ * must show the same commits first, or the user attests to a count they never saw.
+ */
+const ATTESTATION_LISTING = 'Arm 1 or 2 ⇒ first show the attestation list'
+
+/** The ask the listing must precede. */
+const ATTESTATION_ASK = 'Arm 1 or 2 ⇒ ask once, via AskUserQuestion'
+
+/** What the listing must name: the untraced lines' SHA and author, their bound and overflow, and the exempt counts and SHAs. */
+const LISTING_TERMS = ['`### TRACE_MAP`', '`untraced`', '`<sha12>`', 'author', '≤100', '`…and <n> more`', 'exempt kind\'s count', 'every listed exempt SHA']
+
+/** Named collector: how the attestation listing fails to show what the ask attests to, before it asks. */
+export function collectAttestationListingDefects(text: string): string[] {
+  const lines = text.split('\n')
+  const traceability = lines.findIndex(l => l.startsWith('**Traceability**'))
+  const listing = lines.findIndex(l => l.startsWith(ATTESTATION_LISTING))
+  const ask = lines.findIndex(l => l.startsWith(ATTESTATION_ASK))
+  if (listing === -1) return ['no attestation listing']
+  if (ask === -1) return ['no attestation ask']
+  const defects = LISTING_TERMS.filter(term => !lines[listing].includes(term)).map(term => `listing omits ${term}`)
+  if (!(traceability < listing && listing < ask)) defects.push('listing does not precede the ask')
+  else if (lines.slice(listing + 1, ask).some(l => l.trim() !== '')) defects.push('listing is not directly before the ask')
+  if (/DRY_RUN|--dry-run/.test(lines[listing])) defects.push('listing is gated on a dry run')
+  return defects
+}
+
+describe('AC-7: a real release shows the untraced and exempt commits before it asks', () => {
+  it('the listing names every untraced SHA and author, the overflow and the exempt commits, directly before the ask', () => {
+    expect(collectAttestationListingDefects(release())).toEqual([])
+  })
+
+  it('known-bad probes: a missing listing, one moved after the ask, and one dropping the overflow line are reported', () => {
+    const text = release()
+    const lines = text.split('\n')
+    const listing = lines.findIndex(l => l.startsWith(ATTESTATION_LISTING))
+    expect(listing, 'the listing line').toBeGreaterThan(-1)
+    const without = [...lines.slice(0, listing), ...lines.slice(listing + 1)]
+    expect(collectAttestationListingDefects(without.join('\n'))).toEqual(['no attestation listing'])
+    const halt = without.findIndex(l => l.startsWith('- **Halt** —'))
+    const after = [...without.slice(0, halt + 1), lines[listing], ...without.slice(halt + 1)]
+    expect(collectAttestationListingDefects(after.join('\n'))).toContain('listing does not precede the ask')
+    const noOverflow = text.replace(', the `…and <n> more` line', ', the overflow line')
+    expect(noOverflow, 'the seed must land').not.toBe(text)
+    expect(collectAttestationListingDefects(noOverflow)).toEqual(['listing omits `…and <n> more`'])
   })
 })
 

@@ -134,6 +134,8 @@ Unless `DRY_RUN` is true, write `.release/.progress.json` checkpoint, with RELEA
 3. **Partial** — status `PARTIAL`, `TRUNCATED` or `DEGRADED`: warn and continue; this arm never blocks on its own. A tracker with no closing-reference capability always lands here.
 4. **Clean** — status `READY` and *u* = 0, and no arm above.
 
+Arm 1 or 2 ⇒ first show the attestation list, copied from `### TRACE_MAP`: every listed `untraced` line's `<sha12>` and author (≤100), the `…and <n> more` line that closes the untraced list when there is one, and each exempt kind's count with every listed exempt SHA — the commits **Record** attests to, and those the `Exempt` line prints.
+
 Arm 1 or 2 ⇒ ask once, via AskUserQuestion: "{u} untraced commits{, coverage unknown: {cause}}. Record self-attested traceability exceptions, or halt?", with exactly two options:
 - **Record** — ask for the reason in the user's own words; if it renders empty, ask once more, then halt. Compose `TRACEABILITY_EXCEPTIONS` below and add it to `.release/.progress.json`.
 - **Halt** — stop now: nothing has been committed, tagged or published.
