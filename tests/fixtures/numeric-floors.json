@@ -12,8 +12,8 @@
     },
     {
       "id": "partial-count",
-      "floor": 13,
-      "pattern": "ALL_MDS_PARTIALS.length).toBeGreaterThanOrEqual(13)",
+      "floor": 14,
+      "pattern": "ALL_MDS_PARTIALS.length).toBeGreaterThanOrEqual(14)",
       "occurrences": 1,
       "sourceFile": "tests/build-mds.test.ts",
       "description": "Number of .mds partial files anywhere under src/ (ALL_MDS_PARTIALS = MDS_PARTIALS under src/assets/commands/_partials/, plus MDS_REFERENCE_PARTIALS elsewhere). The discovery assertion is a set-equality against tests/fixtures/mds-manifest.ts over a repo-wide walk that classifies by the build's own rule -- no output-dir: key -- so a partial parked outside _partials/ is named rather than merely counted; this floor is its length. Floors rise with the roster, never fall — a partial deleted rather than inlined takes its callers with it silently."

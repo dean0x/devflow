@@ -5,6 +5,7 @@ output-dir: dist/commands
 @import { knowledge_load, knowledge_writeback } from "./_partials/_knowledge.mds"
 @import { decisions_load } from "./_partials/_decisions.mds"
 @import { compliance_gate } from "./_partials/_compliance.mds"
+@import { evidence_policy } from "./_partials/_evidence_policy.mds"
 @import { issue_ref_grammar, issue_capture_contract } from "./_partials/_tracker.mds"
 
 # Implement Command
@@ -48,13 +49,15 @@ If the user prompt does NOT match re-validation, proceed with the full pipeline 
 
 ### Phase 1: Setup
 
-**Produces:** TASK_ID, BASE_BRANCH, EXECUTION_PLAN, DECISIONS_CONTEXT, FEATURE_KNOWLEDGE, PR_DESCRIPTION_GUIDANCE, ISSUE_NUMBER
+**Produces:** TASK_ID, BASE_BRANCH, EXECUTION_PLAN, DECISIONS_CONTEXT, FEATURE_KNOWLEDGE, PR_DESCRIPTION_GUIDANCE, ISSUE_NUMBER, EVIDENCE_POLICY, ISSUE_REQUIRED, APPLY_CONVENTIONS, REQUIRE_NON_AUTHOR_APPROVAL
 
 **Load Companion Skills** — Load via Skill tool: `devflow:test-driven-development`, `devflow:patterns`, `devflow:dependency-research`. If a skill fails to load, continue without it.
 
 Record the current branch name as `BASE_BRANCH` - this will be the PR target.
 
 {compliance_gate()}
+
+{evidence_policy()}
 
 **Plan Document Handling** (when $ARGUMENTS is a path ending in `.md`):
 1. Read the plan document from the path provided

@@ -5,6 +5,7 @@ output-dir: dist/commands
 @import { knowledge_load, knowledge_writeback } from "./_partials/_knowledge.mds"
 @import { decisions_load } from "./_partials/_decisions.mds"
 @import { compliance_gate } from "./_partials/_compliance.mds"
+@import { evidence_policy } from "./_partials/_evidence_policy.mds"
 @import { publication_gate } from "./_partials/_publication.mds"
 
 # Resolve Command
@@ -91,7 +92,7 @@ Set `TARGET_DIR` to the selected review or bug-analysis directory path, and `TAR
 
 #### Step 0d: Load Project Decisions
 
-**Produces:** DECISIONS_CONTEXT, FEATURE_KNOWLEDGE, COMPLIANCE_SKILL_INSTALLED, REVIEW_PUBLICATION, RESOLUTION_TS
+**Produces:** DECISIONS_CONTEXT, FEATURE_KNOWLEDGE, COMPLIANCE_SKILL_INSTALLED, EVIDENCE_POLICY, ISSUE_REQUIRED, APPLY_CONVENTIONS, REQUIRE_NON_AUTHOR_APPROVAL, REVIEW_PUBLICATION, RESOLUTION_TS
 
 {decisions_load()}
 
@@ -103,6 +104,8 @@ Pass `FEATURE_KNOWLEDGE` to the Triage agent in Phase 2.
 
 {compliance_gate()}
 Reuse this result for every worktree.
+
+{evidence_policy()}
 
 {publication_gate()}
 Resolve this per worktree — unlike the compliance check above, the config file is per worktree root.

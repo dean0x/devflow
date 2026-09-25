@@ -7,6 +7,7 @@ output-dir: dist/commands
 @import { agent_roster, agent_caveats } from "./_partials/_roster.mds"
 @import { ticket_body_template } from "./_partials/_ticket_template.mds"
 @import { factory_shape } from "./_partials/_factory.mds"
+@import { evidence_policy } from "./_partials/_evidence_policy.mds"
 
 {authoring_preamble()}
 
@@ -41,6 +42,12 @@ Before authoring, verify:
 ### Pre-authoring setup
 
 Before you write the workflow script:
+
+**0. Resolve the evidence policy**
+
+**Produces:** EVIDENCE_POLICY, ISSUE_REQUIRED, APPLY_CONVENTIONS, REQUIRE_NON_AUTHOR_APPROVAL
+
+{evidence_policy()}
 
 **1. Apply decisions context**
 
