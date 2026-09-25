@@ -45,7 +45,7 @@ Load when the resolved tracker provider is `github` and the operation is `setup-
 
 1. **`ISSUE_INPUT` pre-flight**, when provided: it must satisfy `^#?[1-9][0-9]\{0,8\}$`, anchored at both ends; strip one leading `#` — the digits are the issue number steps 1c and 3 use. Anything else ⇒ `TRACEABILITY: DEGRADED (issue reference "\{ref\}" does not match github reference grammar)`, and the task proceeds with no issue.
 {common.conventions_step()}
-1c. Issue-first: before branch derivation, ensure a GitHub issue exists for this task:
+1c. Issue-first, only when `ISSUE_REQUIRED` is `true`: before branch derivation, ensure a GitHub issue exists for this task:
    - Preconditions: remote reachable AND `gh` authenticated. If either fails → emit `TRACEABILITY: DEGRADED (\{reason\})` and continue to step 2 (convention still applies; no issue number is set).
    - If `ISSUE_INPUT` was provided, step 1 alone decides the number.
    - Otherwise: invoke `ensure-traceable-issue` with `TASK_DESCRIPTION` (and `PLAN_ARTIFACT_PATH` if provided) to create or find an issue. Capture the returned issue number.
@@ -368,7 +368,6 @@ When creating or enriching a GitHub issue via the `ensure-traceable-issue` opera
 **Rules:**
 - Pre-existing issues: post a structured comment using D3 sections — NEVER rewrite the issue body.
 - New issues: create with D3 body; then post the design artifact as a `<details>` collapsed comment; link that comment URL in the `## Implementation Plan` section.
-{common.compliance_issue_policy()}
 @end
 
 @define post_wave_report():

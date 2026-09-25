@@ -1068,30 +1068,79 @@ describe('compiled dynamic commands: --dry-run removal (C7)', () => {
 });
 
 // ---------------------------------------------------------------------------
-// 14. compliance wiring in compiled host commands (installed-skill gate)
+// 14. compliance wiring in compiled host commands (installed-skill gate) and the
+//     mechanism inputs that replaced the op-level COMPLIANCE key (#362)
 //
-// Current compliance guard state:
-//   - code-review.md, plan.md, and bug-analysis.md contain COMPLIANCE_SKILL_INSTALLED
-//     and the skill path (the gate's canonical variable and file-existence target)
-//   - implement.md has exactly one COMPLIANCE: line — in the Git setup-task spawn
-//     (Git agent, not a Code agent); no COMPLIANCE_ENABLED
-//   - code-review.md and bug-analysis.md have a COMPLIANCE: conditional line in
-//     their Git pre-flight (ensure-pr-ready) spawns — not in any Code-agent spawn
-//   - no compiled dist/commands/*.md contains COMPLIANCE_ENABLED or devflow-compliance
-//   - no compiled dist/commands/*.md contains the literal COMPLIANCE: ${
-//     (interpolated JS form — would indicate a MDS escaping bug)
-//   - no compiled dist/commands/*.md contains comment-pr (retired op)
+// Current guard state:
+//   - code-review.md and plan.md contain COMPLIANCE_SKILL_INSTALLED and the skill
+//     path — the review lens (compliance focus, compliance Design agent), which is
+//     the one command-layer use of the skill check the evidence policy did not take
+//   - no compiled dist command carries a COMPLIANCE: key (the AC-32 successor):
+//     the Git ops take ISSUE_REQUIRED / APPLY_CONVENTIONS instead
+//   - implement.md passes each mechanism input exactly once, in its Git setup-task
+//     spawn
+//   - every mechanism-input key line in every dist command sits in a Git-agent
+//     call — never a Code agent, including inside a multi-agent recipe fence
+//   - no compiled dist/commands/*.md contains COMPLIANCE_ENABLED, devflow-compliance
+//     or comment-pr (retired op)
 // ---------------------------------------------------------------------------
 
-describe('compliance wiring in compiled host commands (Part 1 — installed-skill gate)', () => {
-  // bug-analysis added in P0-S22 (AC-0.8 harness gap closure).
+/** The three mechanism inputs a command passes the Git agent (#362). */
+const MECHANISM_KEYS = ['ISSUE_REQUIRED', 'APPLY_CONVENTIONS', 'REQUIRE_NON_AUTHOR_APPROVAL'] as const;
+
+/** A spawn-fence key line naming one of the mechanism inputs. */
+const MECHANISM_KEY_LINE_RE = new RegExp(`^[ \\t]*"?(?:${MECHANISM_KEYS.join('|')}):\\s`, 'm');
+
+/** Named collector: spawn-fence lines that pass the retired op-level COMPLIANCE key. */
+function collectComplianceKeyLines(basename: string, content: string): string[] {
+  return content
+    .split('\n')
+    .map((line, i) => ({ line, i }))
+    .filter(({ line }) => /^[ \t]*"?COMPLIANCE:\s/.test(line))
+    .map(({ line, i }) => `${basename}:${i + 1}: ${line.trim()}`);
+}
+
+/**
+ * Named collector: mechanism-input key lines outside a Git-agent call.
+ *
+ * A prose fence is one spawn: it must be a Git spawn and must not also be a Code
+ * spawn. A language-tagged recipe fence holds many agent() calls of different
+ * types, so it is attributed PER CALL — each `agent(` segment carrying a key line
+ * must name `agentType: "Git"`. Fence-level attribution would credit a Code call's
+ * key to the Git call beside it. Returns the violations and the key lines seen, so
+ * the caller can hold the guard non-vacuous.
+ */
+function collectMechanismKeysOutsideGit(basename: string, content: string): { violations: string[]; keyLines: number } {
+  const violations: string[] = [];
+  let keyLines = 0;
+  const fencePattern = /```([^\n]*)\n[\s\S]*?```/g;
+  let match;
+  while ((match = fencePattern.exec(content)) !== null) {
+    const block = match[0];
+    if (!MECHANISM_KEY_LINE_RE.test(block)) continue;
+    const isRecipe = match[1].trim().length > 0;
+    const units = isRecipe ? block.split(/(?=\bagent\()/) : [block];
+    for (const unit of units) {
+      const n = unit.split('\n').filter(l => MECHANISM_KEY_LINE_RE.test(l)).length;
+      if (n === 0) continue;
+      keyLines += n;
+      const git = isRecipe ? /agentType:\s*"Git"/.test(unit) : /Agent\(subagent_type="Git"/.test(unit);
+      const code = isRecipe ? /agentType:\s*"Code"/.test(unit) : /Agent\(subagent_type="Code"/.test(unit);
+      if (!git || code) violations.push(`${basename}: fence at offset ${match.index} passes a mechanism input outside a Git call`);
+    }
+  }
+  return { violations, keyLines };
+}
+
+describe('compliance wiring in compiled host commands (review lens) + mechanism inputs (#362)', () => {
+  // The review lens keeps the installed-skill check; nothing else at the command
+  // layer gates on it once the evidence policy owns the mechanism inputs.
   const SKILL_CHECK_HOSTS: Record<string, string> = {
     'code-review': DIST_COMMANDS,
     'plan':        DIST_COMMANDS,
-    'bug-analysis': DIST_COMMANDS,
   };
 
-  it('code-review.md, plan.md, and bug-analysis.md contain COMPLIANCE_SKILL_INSTALLED and the skill path', async () => {
+  it('code-review.md and plan.md contain COMPLIANCE_SKILL_INSTALLED and the skill path (review lens)', async () => {
     for (const [basename, destRelDir] of Object.entries(SKILL_CHECK_HOSTS)) {
       const outputPath = path.join(BUILT_COMMANDS, `${basename}.md`);
       const content = await fs.readFile(outputPath, 'utf-8');
@@ -1106,116 +1155,87 @@ describe('compliance wiring in compiled host commands (Part 1 — installed-skil
     }
   });
 
-  it('implement.md contains ISSUE_NUMBER and COMPLIANCE setup-task wiring; no COMPLIANCE_ENABLED (Phase E, AC-32)', async () => {
-    const outputPath = path.join(BUILT_COMMANDS, 'implement.md');
-    const content = await fs.readFile(outputPath, 'utf-8');
-    // Positive: issue-first threading — ISSUE_NUMBER must appear in Code-agent spawns
-    expect(
-      content,
-      'implement.md must contain ISSUE_NUMBER (issue-first threading, Phase E)',
-    ).toContain('ISSUE_NUMBER');
-    // Positive: setup-task Git-input COMPLIANCE line (AC-32 sanctioned — Git spawn only)
-    expect(
-      content,
-      'implement.md must contain COMPLIANCE setup-task wiring (Git-input, AC-32 sanctioned)',
-    ).toContain('COMPLIANCE: {enabled');
-    // Negative: COMPLIANCE_ENABLED variable must not appear anywhere
-    expect(
-      content,
-      'implement.md must not contain COMPLIANCE_ENABLED — compliance machinery removed in Part 1',
-    ).not.toContain('COMPLIANCE_ENABLED');
-    // Narrow AC-32: the sanctioned COMPLIANCE: line appears ONLY in the Git setup-task spawn —
-    // never in any Code-agent (subagent_type="Code") spawn block
-    const complianceLines = content.split('\n').filter(l => /^COMPLIANCE:/.test(l));
-    expect(
-      complianceLines.length,
-      'implement.md must have exactly one COMPLIANCE: line (Git setup-task spawn only, AC-32)',
-    ).toBe(1);
+  it('implement.md passes each mechanism input exactly once, in its Git setup-task spawn (AC-32 successor)', async () => {
+    const content = await fs.readFile(path.join(BUILT_COMMANDS, 'implement.md'), 'utf-8');
+    expect(content, 'implement.md must contain ISSUE_NUMBER (issue-first threading, Phase E)').toContain('ISSUE_NUMBER');
+    expect(content, 'implement.md must not contain COMPLIANCE_ENABLED').not.toContain('COMPLIANCE_ENABLED');
+    for (const key of ['ISSUE_REQUIRED', 'APPLY_CONVENTIONS'] as const) {
+      const lines = content.split('\n').filter(l => l === `${key}: {${key}}`);
+      expect(lines, `implement.md must pass \`${key}: {${key}}\` exactly once`).toHaveLength(1);
+    }
+    const setupFence = [...content.matchAll(/```[^\n]*\n[\s\S]*?```/g)]
+      .map(m => m[0])
+      .find(f => f.includes('Agent(subagent_type="Git")') && f.includes('OPERATION: setup-task'));
+    expect(setupFence, 'implement.md has no Git setup-task spawn fence').toBeDefined();
+    expect(setupFence).toContain('ISSUE_REQUIRED: {ISSUE_REQUIRED}');
+    expect(setupFence).toContain('APPLY_CONVENTIONS: {APPLY_CONVENTIONS}');
   });
 
-  it('no compiled dist/commands/*.md contains COMPLIANCE_ENABLED, devflow-compliance, or comment-pr; implement.md has exactly one COMPLIANCE: {enabled line (AC-32)', async () => {
-    // Title corrected (P0-S22): the body asserts COMPLIANCE: {enabled (not COMPLIANCE: ${).
-    // dist/commands/dynamic-build.md:210 legitimately contains COMPLIANCE: ${COMPLIANCE}
-    // (a JS template literal in a code block) — that is intentional, not an MDS escape bug.
+  it('no compiled dist/commands/*.md passes COMPLIANCE:, or contains COMPLIANCE_ENABLED, devflow-compliance, or comment-pr', async () => {
     // M8: DIST_FILES (not COMMAND_HOSTS) — release.md is a hand-authored dist file that must
-    // pass the same COMPLIANCE_ENABLED/devflow-compliance/comment-pr cleanliness checks.
-    // COMMAND_HOSTS covers only the 13 MDS-compiled outputs; DIST_FILES = COMMAND_HOSTS + release.md (14 total).
-    // DIST_FILES entries already include the '.md' extension (e.g. 'implement.md').
-    // Use `basename` directly as the filename — do NOT append '.md' again.
+    // pass the same cleanliness checks. DIST_FILES entries already include '.md'.
     let scanned = 0;
+    const keyLines: string[] = [];
     for (const basename of DIST_FILES) {
-      const outputPath = path.join(BUILT_COMMANDS, basename);
-      let content: string;
-      try {
-        content = await fs.readFile(outputPath, 'utf-8');
-      } catch {
-        continue;
-      }
+      const content = await fs.readFile(path.join(BUILT_COMMANDS, basename), 'utf-8');
       scanned++;
-      expect(
-        content,
-        `${basename} must not contain COMPLIANCE_ENABLED`,
-      ).not.toContain('COMPLIANCE_ENABLED');
-      expect(
-        content,
-        `${basename} must not contain devflow-compliance`,
-      ).not.toContain('devflow-compliance');
-      // COMPLIANCE: {enabled is sanctioned only in implement.md (Git setup-task spawn, AC-32).
-      // All other files must not contain it.
-      if (basename !== 'implement.md') {
-        expect(
-          content,
-          `${basename} must not contain COMPLIANCE: {enabled (only implement.md's Git spawn is sanctioned)`,
-        ).not.toContain('COMPLIANCE: {enabled');
-      }
+      keyLines.push(...collectComplianceKeyLines(basename, content));
+      expect(content, `${basename} must not contain COMPLIANCE_ENABLED`).not.toContain('COMPLIANCE_ENABLED');
+      expect(content, `${basename} must not contain devflow-compliance`).not.toContain('devflow-compliance');
       // comment-pr was retired; post-review-summary replaces it.
-      expect(
-        content,
-        `${basename} must not contain comment-pr (retired operation)`,
-      ).not.toContain('comment-pr');
+      expect(content, `${basename} must not contain comment-pr (retired operation)`).not.toContain('comment-pr');
     }
-    expect(scanned, 'scanned zero dist commands — guard is vacuous').toBeGreaterThan(0);
+    expect(scanned, 'scanned zero dist commands — guard is vacuous').toBe(DIST_FILES.length);
+    expect(keyLines, 'the op-level COMPLIANCE key is retired (#362) — pass the mechanism inputs instead').toEqual([]);
   });
 
-  it('every COMPLIANCE: line in every dist command is inside a Git-agent spawn block (spawn-scoped guard)', async () => {
-    // Asserts that no COMPLIANCE: key appears in a prose or JS fence block whose agent is
-    // not Git. Doctrinal rule: COMPLIANCE is a Git-agent input only (AC-32).
-    // For each code fence (``` ... ```) that contains a ^COMPLIANCE: line,
-    // verify the fence also references "Git" as the agent type.
-    // M8: DIST_FILES (not COMMAND_HOSTS) — release.md has no COMPLIANCE content and will pass cleanly.
-    // DIST_FILES entries include the '.md' extension — use basename directly (no extra .md).
+  it('known-bad probe: the 825077e COMPLIANCE: spawn lines are reported by the same collector', () => {
+    const seeded = [
+      '"OPERATION: setup-task',
+      'COMPLIANCE: {enabled if COMPLIANCE_SKILL_INSTALLED, otherwise (none)}',
+      'COMPLIANCE: ${COMPLIANCE}',
+      'Pass `COMPLIANCE: \\{COMPLIANCE\\}` to Git agent spawns.',
+    ].join('\n');
+    expect(collectComplianceKeyLines('probe.md', seeded)).toHaveLength(2);
+  });
+
+  it('every mechanism-input key line in every dist command sits in a Git-agent call (spawn-scoped guard)', async () => {
     let scanned = 0;
+    let keyLines = 0;
+    const violations: string[] = [];
     for (const basename of DIST_FILES) {
-      const outputPath = path.join(BUILT_COMMANDS, basename);
-      let content: string;
-      try {
-        content = await fs.readFile(outputPath, 'utf-8');
-      } catch {
-        continue;
-      }
+      const content = await fs.readFile(path.join(BUILT_COMMANDS, basename), 'utf-8');
       scanned++;
-
-      const fencePattern = /```[^\n]*\n([\s\S]*?)```/g;
-      let match;
-      const violations: string[] = [];
-
-      while ((match = fencePattern.exec(content)) !== null) {
-        const block = match[0];
-        if (!/^COMPLIANCE:/m.test(block)) continue;
-        const hasGit =
-          /Agent\(subagent_type="Git"/.test(block) ||
-          /agentType:\s*"Git"/.test(block);
-        if (!hasGit) {
-          violations.push(`fence at offset ${match.index}`);
-        }
-      }
-
-      expect(
-        violations,
-        `${basename}: COMPLIANCE: line found in non-Git spawn block(s): ${violations.join(', ')}`,
-      ).toHaveLength(0);
+      const found = collectMechanismKeysOutsideGit(basename, content);
+      violations.push(...found.violations);
+      keyLines += found.keyLines;
     }
-    expect(scanned, 'scanned zero dist commands — guard is vacuous').toBeGreaterThan(0);
+    expect(scanned, 'scanned zero dist commands — guard is vacuous').toBe(DIST_FILES.length);
+    // implement 2 + code-review 1 + bug-analysis 1 + dynamic-build's recipe 2.
+    expect(keyLines, 'fewer mechanism-key lines than the four passing commands carry — is the guard reading them?').toBeGreaterThanOrEqual(6);
+    expect(violations, 'mechanism inputs are Git-agent inputs only:\n' + violations.join('\n')).toEqual([]);
+  });
+
+  it('known-bad probe: a key in a Code spawn, and in a recipe Code call beside a Git call, are both reported', () => {
+    const codeSpawn = [
+      '```',
+      'Agent(subagent_type="Code"):',
+      '"TASK_ID: x',
+      'APPLY_CONVENTIONS: {APPLY_CONVENTIONS}"',
+      '```',
+    ].join('\n');
+    const recipe = [
+      '```js',
+      'await phase("setup", () => agent(`OPERATION: setup-task',
+      'ISSUE_REQUIRED: ${ISSUE_REQUIRED}`, { agentType: "Git" }));',
+      'await phase("implement", () => agent(`Implement it.',
+      'APPLY_CONVENTIONS: ${APPLY_CONVENTIONS}`, { agentType: "Code" }));',
+      '```',
+    ].join('\n');
+    expect(collectMechanismKeysOutsideGit('probe.md', codeSpawn).violations).toHaveLength(1);
+    const mixed = collectMechanismKeysOutsideGit('probe.md', recipe);
+    expect(mixed.keyLines).toBe(2);
+    expect(mixed.violations, 'only the Code call is out of scope; the Git call beside it is not').toHaveLength(1);
   });
 });
 
@@ -1337,7 +1357,8 @@ describe('DUPLICATE verdict guards — resolve.md (§16b)', () => {
 
 // ---------------------------------------------------------------------------
 // §17  Phase E traceability — implement.mds (2.5) + plan.mds (2.6) guards
-//      implement.md: ISSUE_NUMBER in Code-agent spawns, COMPLIANCE in Git spawn
+//      implement.md: ISSUE_NUMBER in Code-agent spawns, the mechanism inputs in its
+//      Git spawn (#362)
 //      plan.md: ensure-traceable-issue replaces inline gh issue create
 // ---------------------------------------------------------------------------
 
@@ -1351,24 +1372,25 @@ describe('Phase E traceability — implement.md and plan.md (Steps 2.5, 2.6)', (
     ).toContain('ensure-traceable-issue');
   });
 
-  it('implement.md contains COMPLIANCE_SKILL_INSTALLED check (Step 2.5)', async () => {
+  it('implement.md passes the mechanism inputs to setup-task and no longer checks the compliance skill (#362)', async () => {
+    // Inverted from the Step 2.5 pin: /implement's only use of the skill check was to
+    // key setup-task on it, and the evidence policy now supplies both inputs.
     const outputPath = path.join(BUILT_COMMANDS, 'implement.md');
     const content = await fs.readFile(outputPath, 'utf-8');
-    expect(
-      content,
-      'implement.md must contain COMPLIANCE_SKILL_INSTALLED (setup-task compliance resolution)',
-    ).toContain('COMPLIANCE_SKILL_INSTALLED');
+    expect(content).toContain('ISSUE_REQUIRED: {ISSUE_REQUIRED}');
+    expect(content).toContain('APPLY_CONVENTIONS: {APPLY_CONVENTIONS}');
+    expect(content, 'implement.md must not resolve COMPLIANCE_SKILL_INSTALLED').not.toContain('COMPLIANCE_SKILL_INSTALLED');
   });
 });
 
 // ---------------------------------------------------------------------------
-// §18  Phase F release evidence (Step 2.9) + dynamic pipeline COMPLIANCE +
-//      ISSUE_NUMBER (Step 2.11)
+// §18  Phase F release evidence (Step 2.9) + dynamic pipeline mechanism inputs +
+//      ISSUE_NUMBER (Step 2.11, #362)
 //      release.md: COMMIT_LIST, SHIPPED_ISSUES, backlink-shipped-issues
-//      dynamic-build.md: COMPLIANCE_SKILL_INSTALLED, ISSUE_NUMBER, conventions.md
+//      dynamic-build.md: ISSUE_REQUIRED, APPLY_CONVENTIONS, ISSUE_NUMBER
 // ---------------------------------------------------------------------------
 
-describe('Phase F traceability — release.md evidence + dynamic-build compliance (Steps 2.9, 2.11)', () => {
+describe('Phase F traceability — release.md evidence + dynamic-build mechanism inputs (Steps 2.9, 2.11)', () => {
   it('release.md contains COMMIT_LIST, SHIPPED_ISSUES, and backlink-shipped-issues (Step 2.9 release evidence)', async () => {
     const outputPath = path.join(BUILT_COMMANDS, 'release.md');
     const content = await fs.readFile(outputPath, 'utf-8');
@@ -1386,21 +1408,20 @@ describe('Phase F traceability — release.md evidence + dynamic-build complianc
     ).toContain('backlink-shipped-issues');
   });
 
-  it('dynamic-build.md contains COMPLIANCE_SKILL_INSTALLED, ISSUE_NUMBER, and conventions.md (Step 2.11)', async () => {
+  it('dynamic-build.md passes the mechanism inputs and ISSUE_NUMBER, and restates no branch convention (#362)', async () => {
+    // Inverted from the Step 2.11 pin. The recipe's setup-task call carries both
+    // mechanism inputs, and the branch-naming restatement is gone: setup-task's own
+    // step 1b owns the convention and states its gate there.
     const outputPath = path.join(BUILT_COMMANDS, 'dynamic-build.md');
     const content = await fs.readFile(outputPath, 'utf-8');
-    expect(
-      content,
-      'dynamic-build.md must contain COMPLIANCE_SKILL_INSTALLED (pre-authoring compliance step, Step 2.11)',
-    ).toContain('COMPLIANCE_SKILL_INSTALLED');
+    expect(content).toContain('ISSUE_REQUIRED: ${ISSUE_REQUIRED}');
+    expect(content).toContain('APPLY_CONVENTIONS: ${APPLY_CONVENTIONS}');
     expect(
       content,
       'dynamic-build.md must contain ISSUE_NUMBER (Code-agent issue threading, Step 2.11)',
     ).toContain('ISSUE_NUMBER');
-    expect(
-      content,
-      'dynamic-build.md must contain conventions.md (branch naming authority, Step 2.11)',
-    ).toContain('conventions.md');
+    expect(content, 'dynamic-build.md must not resolve COMPLIANCE_SKILL_INSTALLED').not.toContain('COMPLIANCE_SKILL_INSTALLED');
+    expect(content, 'setup-task owns the branch convention; the host must not restate it').not.toContain('Branch Naming');
   });
 });
 
@@ -1472,11 +1493,13 @@ describe('publication_gate adoption in compiled host commands (Phase C)', () => 
 // §14.5 scope rule: deployed-behaviour guards scan DIST_FILES (14 files = 13
 // compiled MDS hosts + 1 hand-authored release.md).
 //
-// compliance_gate() adoption guard: 6 importers (bug-analysis, code-review,
-// dynamic-build, implement, plan, resolve) must use the shared {compliance_gate()}
-// partial. release.md inlines its own COMPLIANCE_SKILL_INSTALLED check — it never
-// calls {compliance_gate()} — recorded as an allowlisted exception by name (§14.5).
-// hostsScanned === 6 asserts non-vacuity [DR-27a].
+// compliance_gate() adoption guard: 3 importers (code-review, plan, resolve) must
+// use the shared {compliance_gate()} partial. release.md inlines its own
+// COMPLIANCE_SKILL_INSTALLED check — it never calls {compliance_gate()} — recorded
+// as an allowlisted exception by name (§14.5). hostsScanned === 3 asserts
+// non-vacuity [DR-27a]. bug-analysis, dynamic-build and implement dropped the
+// import in #362: their only use of the check was to key a Git spawn, and the
+// evidence policy now supplies the mechanism inputs those spawns take.
 // ---------------------------------------------------------------------------
 
 describe('DIST_FILES scope (§14.5, P0-S21) + compliance_gate adoption (P0-S22)', () => {
@@ -1486,20 +1509,20 @@ describe('DIST_FILES scope (§14.5, P0-S21) + compliance_gate adoption (P0-S22)'
     expect(DIST_FILES).toContain('release.md');
   });
 
-  it('all 6 compliance_gate importers contain COMPLIANCE_SKILL_INSTALLED in their compiled output (P0-S22)', async () => {
-    // The 6 MDS host commands that use {compliance_gate()} from _partials/_compliance.mds:
-    //   bug-analysis.mds:27, code-review.mds:43, dynamic-build.mds:49,
-    //   implement.mds:54, plan.mds:163, resolve.mds:104
+  it('all 3 compliance_gate importers contain COMPLIANCE_SKILL_INSTALLED in their compiled output (P0-S22)', async () => {
+    // The 3 MDS host commands that use {compliance_gate()} from _partials/_compliance.mds.
     // Exception (allowlisted by name): release.md inlines its own COMPLIANCE_SKILL_INSTALLED
     // check and never calls {compliance_gate()} — it is not in this list (§14.5).
-    const COMPLIANCE_GATE_IMPORTERS = [
-      'bug-analysis',
-      'code-review',
-      'dynamic-build',
-      'implement',
-      'plan',
-      'resolve',
-    ] as const;
+    const COMPLIANCE_GATE_IMPORTERS = ['code-review', 'plan', 'resolve'] as const;
+
+    // The adoption set is read from the sources, both ways: a host that imports the
+    // partial and is not listed fails here, and so does a listed host that stopped.
+    const importers: string[] = [];
+    for (const basename of COMMAND_HOSTS) {
+      const source = await fs.readFile(path.join(COMMANDS_DIR, `${basename}.mds`), 'utf-8');
+      if (source.includes('from "./_partials/_compliance.mds"')) importers.push(basename);
+    }
+    expect(importers.sort(), 'the hosts importing _compliance.mds').toEqual([...COMPLIANCE_GATE_IMPORTERS]);
 
     let hostsScanned = 0;
     for (const basename of COMPLIANCE_GATE_IMPORTERS) {
@@ -1512,29 +1535,22 @@ describe('DIST_FILES scope (§14.5, P0-S21) + compliance_gate adoption (P0-S22)'
       ).toContain('COMPLIANCE_SKILL_INSTALLED');
     }
 
-    // hostsScanned === 6: asserts non-vacuity (PF-018, [DR-27a]).
+    // hostsScanned === 3: asserts non-vacuity (PF-018, [DR-27a]).
     // Known-bad sample: a host with @import but no {compliance_gate()} call would
     // produce a compiled output without COMPLIANCE_SKILL_INSTALLED and fail here.
     expect(
       hostsScanned,
-      `compliance_gate guard is vacuous: expected hostsScanned === 6, got ${hostsScanned}`,
-    ).toBe(6);
+      `compliance_gate guard is vacuous: expected hostsScanned === 3, got ${hostsScanned}`,
+    ).toBe(3);
   });
 
   // GAP-31: the compliance gate must still resolve BEFORE its first consumer in
-  // every importer. P2-S9 inserts issue-grammar text into five of the same six
+  // every importer. P2-S9 inserted issue-grammar text into five of the then six
   // hosts; an insertion above the gate would leave COMPLIANCE_SKILL_INSTALLED
   // read before it is set, which no other assertion in this file would notice
   // (they all check presence, never order).
-  it('the compliance gate resolves before its first consumer in all 6 importers (GAP-31)', async () => {
-    const COMPLIANCE_GATE_IMPORTERS = [
-      'bug-analysis',
-      'code-review',
-      'dynamic-build',
-      'implement',
-      'plan',
-      'resolve',
-    ] as const;
+  it('the compliance gate resolves before its first consumer in all 3 importers (GAP-31)', async () => {
+    const COMPLIANCE_GATE_IMPORTERS = ['code-review', 'plan', 'resolve'] as const;
 
     // Named collector — shared by the live guard and the known-bad probe below.
     //
@@ -1590,8 +1606,8 @@ describe('DIST_FILES scope (§14.5, P0-S21) + compliance_gate adoption (P0-S22)'
     ).toHaveLength(1);
     expect(
       hostsScanned,
-      `compliance-gate ordering guard is vacuous: expected 6 hosts, got ${hostsScanned}`,
-    ).toBe(6);
+      `compliance-gate ordering guard is vacuous: expected 3 hosts, got ${hostsScanned}`,
+    ).toBe(3);
   });
 });
 

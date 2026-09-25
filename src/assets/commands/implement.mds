@@ -4,7 +4,6 @@ output-dir: dist/commands
 ---
 @import { knowledge_load, knowledge_writeback } from "./_partials/_knowledge.mds"
 @import { decisions_load } from "./_partials/_decisions.mds"
-@import { compliance_gate } from "./_partials/_compliance.mds"
 @import { evidence_policy } from "./_partials/_evidence_policy.mds"
 @import { issue_ref_grammar, issue_capture_contract } from "./_partials/_tracker.mds"
 
@@ -55,8 +54,6 @@ If the user prompt does NOT match re-validation, proceed with the full pipeline 
 
 Record the current branch name as `BASE_BRANCH` - this will be the PR target.
 
-{compliance_gate()}
-
 {evidence_policy()}
 
 **Plan Document Handling** (when $ARGUMENTS is a path ending in `.md`):
@@ -78,7 +75,8 @@ Agent(subagent_type="Git"):
 BASE_BRANCH: {current branch name}
 ISSUE_INPUT: {$ARGUMENTS verbatim, when it is a single whitespace-delimited token that does not end in .md; when it ends in .md, the plan frontmatter's issue value verbatim unless absent or pending — otherwise omit}
 TASK_DESCRIPTION: {$ARGUMENTS verbatim, when it is two or more whitespace-delimited tokens — otherwise omit}
-COMPLIANCE: {enabled if COMPLIANCE_SKILL_INSTALLED, otherwise (none)}
+ISSUE_REQUIRED: {ISSUE_REQUIRED}
+APPLY_CONVENTIONS: {APPLY_CONVENTIONS}
 PLAN_ARTIFACT_PATH: {path to plan document if $ARGUMENTS ends in .md, otherwise (none)}
 Derive branch name from issue or description, create feature branch, and fetch issue if specified.
 Return the branch setup summary."

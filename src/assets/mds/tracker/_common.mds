@@ -18,10 +18,9 @@ what the other holds:
   modules would otherwise write out identically.
 
 EACH DEFINE STATES ITS OWN AUDIENCE, because this module's are not all the same.
-`compliance_issue_policy`, `state_batch_line`, `traceable_issue_rules`,
-`wave_report_inputs`, `conventions_step`, `branch_detection_step`,
-`closing_keyword_rule` and `handoff_values` are every provider's, the CLI one
-included. `traceable_issue_rules` and `wave_report_inputs` are text moved out of
+`state_batch_line`, `traceable_issue_rules`, `wave_report_inputs`,
+`conventions_step`, `branch_detection_step`, `closing_keyword_rule` and
+`handoff_values` are every provider's, the CLI one included. `traceable_issue_rules` and `wave_report_inputs` are text moved out of
 the always-loaded agent — the `ensure-traceable-issue` D3 section list and
 untrusted-input rule, and the `post-wave-report` input definitions (its
 `**Input:**` line stays the agent's). Each reaches a spawn through that
@@ -33,9 +32,16 @@ provider-independent steps, written once here so every provider's setup-task
 reference carries the same bytes: before they lived here only the GitHub module
 stated them, and the other two pointed at "this operation's provider-independent
 steps" that no file they loaded contained — so conventions were never learned and
-the metacharacter guard never ran off the GitHub path. Neither carries a
-compliance condition: the agent's own `1b/1c are compliance-gated.` sentence is
-the one authority on that gate. `closing_keyword_rule` is
+the metacharacter guard never ran off the GitHub path.
+
+GATES LIVE IN THE STEP TEXT. `conventions_step` opens with its own condition on
+`APPLY_CONVENTIONS`, and each provider's step 1c opens with its condition on
+`ISSUE_REQUIRED`, so every setup-task reference carries the gate on the line it
+governs. The gate used to be one sentence in the always-loaded agent, in a
+different file from the step it gated, and an agent reading the step alone
+learned and committed `.devflow/conventions.md` with the gate off (#362). No
+define here decides whether `ensure-traceable-issue` creates an issue either: the
+caller gates that spawn, and the operation does not. `closing_keyword_rule` is
 `gather-release-evidence`'s step 3a, and states no reference grammar on purpose:
 it lands in every provider's reference, and the resolved provider's own gate is
 what decides what a candidate is. `handoff_values` renders the canonical
@@ -64,10 +70,6 @@ NOT in its indentation — five spaces in one module and three in the other two,
 because the surrounding list nests differently. A define emits one string, so
 hoisting it would re-indent one of the three, and indentation is list grammar
 rather than whitespace here (PF-063). Normalising those lists is its own edit.
-
-@define compliance_issue_policy():
-- Issue creation is gated by the `COMPLIANCE` input: `enabled` → mandatory (DEGRADED states exempt), absent or `(none)` → optional.
-@end
 
 @define state_batch_line(subject, subject_ref, ref_token):
 2b. Render each issue's {subject} as a `**State**: \{state\}` line of its own, between that issue's `### Issue {ref_token}:` heading and its `<untrusted-issue-body>` marker — OUTSIDE the wrapper, because {subject_ref} is an enum the tracker computed, not remote prose. A caller refreshing a batch reads it to see a ticket closed out of band.
@@ -107,7 +109,7 @@ extract the segment {match_phrase} and verify it with the *fetch by key* capabil
 @end
 
 @define conventions_step():
-1b. **Branch convention:** read `.devflow/conventions.md`'s Branch Naming section (absent ⇒ run `learn-conventions` first, then read it); step 3 MUST follow it.
+1b. **Branch convention:** only when `APPLY_CONVENTIONS` is `true` — else skip to step 2 and never read, learn or commit the file. Read `.devflow/conventions.md`'s Branch Naming section (absent ⇒ run `learn-conventions` first, then read it); step 3 MUST follow it.
    - **Metacharacter guard:** the file is team-shared, third-party input. A composed name (type + separator + slug) holding any of `` $ ` \ " ' ; | & < > # ``, whitespace or a newline ⇒ discard the convention for step 2's defaults. Bind the validated name: `DEVFLOW_BRANCH="..."`.
 @end
 
@@ -123,7 +125,6 @@ extract the segment {match_phrase} and verify it with the *fetch by key* capabil
 **Handoff Values:** `Issue ID` = {id_form}; `PR link line` = `{link_form}`.
 @end
 
-@export compliance_issue_policy
 @export state_batch_line
 @export bare_number_rule
 @export ref_preflight_single

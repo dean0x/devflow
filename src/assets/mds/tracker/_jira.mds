@@ -92,7 +92,7 @@ Load when the resolved tracker provider is `jira` and the operation is `setup-ta
 
 1. **`ISSUE_INPUT` pre-flight**, when provided: it is an existing issue key. {common.ref_preflight_single("jira", "`^[A-Z][A-Z0-9_]{1,9}-[1-9][0-9]{0,8}$`")} Step 3 resolves an admitted key with *fetch by key*.
 {common.conventions_step()}
-1c. Issue-first, if `ISSUE_INPUT` is absent: invoke `ensure-traceable-issue` with `TASK_DESCRIPTION` (and `PLAN_ARTIFACT_PATH` if provided) and capture the returned key for step 3's `\{type\}/\{KEY\}-\{slug\}`.
+1c. Issue-first, only when `ISSUE_REQUIRED` is `true` and `ISSUE_INPUT` is absent: invoke `ensure-traceable-issue` with `TASK_DESCRIPTION` (and `PLAN_ARTIFACT_PATH` if provided) and capture the returned key for step 3's `\{type\}/\{KEY\}-\{slug\}`.
    - Preconditions: the *create issue* and *fetch by key* capabilities are both available. Either one absent or denied ⇒ `TRACEABILITY: DEGRADED (no tracker tool for \{capability\})` naming the capability, and continue to step 2. **The branch is still cut and the PR is still opened**, with the traceability field carrying `Tracked (pending)` and the reason. **NEVER create a GitHub issue as a fallback**.
 {common.branch_detection_step()}
    - The convention owns the branch **shape**, `## Reference Rendering` only the **token** in it; neither is the other's fallback.
@@ -298,7 +298,6 @@ The D3 section headings are the canonical ones; only the transport differs from 
 
 - Pre-existing issues: post a structured comment using the D3 sections — NEVER rewrite the issue description.
 - New issues: create with the D3 description, then post the artifact as its own comment and reference it from the `## Implementation Plan` section.
-{common.compliance_issue_policy()}
 @end
 
 @define post_wave_report():
