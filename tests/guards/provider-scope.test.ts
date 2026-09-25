@@ -153,16 +153,17 @@ const ALLOWLISTED_PROVIDER_REGIONS: readonly AllowlistedRegion[] = [
   {
     label: "the Code agent's PR-link paste gate",
     files: [`${SRC_AGENTS_LABEL}/code.md`],
-    from: '| Resolved provider | `ISSUE_PR_LINK` must match |',
+    from: '| Tracker grammar | `ISSUE_PR_LINK` must match |',
     to: 'This re-check is the only gate on that value',
     justification:
       'The PR body is a GitHub-visible sink and the Code agent is the last hand the rendered link ' +
-      'line passes through — no operation checks its shape before returning it. A per-provider ' +
-      'gate cannot be written without naming the providers it discriminates, and the Code agent ' +
-      'loads no provider mechanics file it could defer to: it is outside the Git spawn surface ' +
-      'entirely. So the closed set is enumerated once, inside the gate, and the agent reads the ' +
-      'arm for the provider that was RESOLVED for the run rather than resolving one itself — ' +
-      'which is what keeps this a sink check and not a second convergence point.',
+      'line passes through — no operation checks its shape before returning it. The gate is a ' +
+      'union of the tracker grammars and cannot be written without naming the rows it admits, and ' +
+      'the Code agent loads no provider mechanics file it could defer to: it is outside the Git ' +
+      'spawn surface entirely, and it is never told the provider (#359). So the closed set is ' +
+      'enumerated once, inside the gate, and a value is pasted when it matches any one row — the ' +
+      'agent never resolves a provider, which is what keeps this a sink check and not a second ' +
+      'convergence point.',
   },
 ];
 

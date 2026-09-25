@@ -91,13 +91,13 @@ describe('code.md — ### Handoff Values consumer', () => {
     ).toContain('^Closes #[1-9][0-9]{0,8}$')
     expect(
       CODE,
-      'a foreign-shaped ref must emit the canonical DEGRADED reason, never be silently repaired or dropped',
-    ).toContain('does not match {provider} reference grammar')
+      'a malformed ref must emit a DEGRADED reason, never be silently repaired or dropped',
+    ).toContain('does not match any tracker reference grammar')
   })
 
   it('re-checks BEFORE it pastes — order, not mere presence', () => {
-    const recheck = CODE.indexOf('after re-checking its shape against the resolved provider')
-    const degraded = CODE.indexOf('does not match {provider} reference grammar')
+    const recheck = CODE.indexOf('after re-checking its shape against the tracker reference grammars')
+    const degraded = CODE.indexOf('does not match any tracker reference grammar')
     expect(recheck, 'the re-check instruction must exist').toBeGreaterThan(-1)
     expect(
       recheck,
@@ -107,13 +107,20 @@ describe('code.md — ### Handoff Values consumer', () => {
 })
 
 // -------------------------------------------------------------------------
-// The paste gate is ONE arm per resolved provider, and every arm is executed.
+// The paste gate is ONE row per tracker grammar, and every row is executed.
 //
 // The gate used to be a single `github` arm. Under any other provider the Git
 // agent renders `Refs PROJ-12`, which that arm rejects — so the one value the
 // seam exists to carry was discarded as malformed for two of the three
 // providers, and the PR body silently recomposed a github-shaped link from a
 // number that is not a github issue.
+//
+// It then became one arm per RESOLVED provider — but the Code agent is never
+// told the provider (#359, G3): the command layer holds no provider knowledge
+// and forwards the Git agent's rendered line verbatim. So the gate is a
+// provider-free UNION: a value is pasted when it matches any one row. That is a
+// sink check on the line's shape; the Git agent, which did resolve the
+// provider, is what chose the grammar.
 //
 // The arms are read OUT of the prompt and RUN here rather than re-typed. A
 // hand-copied grammar in a test is a second authority that agrees with the first
@@ -143,10 +150,11 @@ function collectPasteArms(source: string): Map<string, string> {
 /** Every payload, with the providers whose arm must ACCEPT it. Absent ⇒ every arm rejects. */
 const PASTE_PAYLOADS: ReadonlyArray<{ label: string; value: string; accepts: readonly string[] }> = [
   { label: 'a github link line', value: 'Closes #12', accepts: ['github'] },
-  // The jira and linear arms OVERLAP on a plain uppercase key, and the table
-  // records that rather than pretending otherwise: it is why the resolved
-  // provider decides which arm runs instead of the arms deciding between
-  // themselves. They part on exactly two shapes, one each way, below.
+  // The jira and linear rows OVERLAP on a plain uppercase key, and the table
+  // records that rather than pretending otherwise. Under the union gate the
+  // overlap is harmless — either row admitting a line is enough to paste it —
+  // but each row is still held to its OWN provider's grammar below, so the two
+  // shapes that part them, one each way, stay pinned.
   { label: 'a plain uppercase key', value: 'Refs PROJ-12', accepts: ['jira', 'linear'] },
   { label: 'a three-letter key', value: 'Refs ENG-12', accepts: ['jira', 'linear'] },
   { label: 'an underscored key (jira only)', value: 'Refs A_B-1', accepts: ['jira'] },
@@ -173,7 +181,7 @@ const PASTE_PAYLOADS: ReadonlyArray<{ label: string; value: string; accepts: rea
     value: `Refs A${'B'.repeat(10)}-${'1'.repeat(57)}`, accepts: [] },
 ]
 
-describe('code.md — the paste gate, one arm per resolved provider', () => {
+describe('code.md — the paste gate, one row per tracker grammar', () => {
   it('states an anchored arm for every provider, and no arm for anything else', () => {
     const arms = collectPasteArms(CODE)
     expect(
@@ -223,7 +231,7 @@ describe('code.md — the paste gate, one arm per resolved provider', () => {
     expect(CODE, 'the arms must carry an explicit length bound').toMatch(/60 characters/)
   })
 
-  it('(none) is not a mismatch, and a bare number under a non-github provider is ambiguous', () => {
+  it('(none) is not a mismatch, and is never recomposed from a bare number', () => {
     expect(
       CODE,
       '`(none)` means no line was captured, which is the documented absent case — degrading over ' +
@@ -231,23 +239,38 @@ describe('code.md — the paste gate, one arm per resolved provider', () => {
     ).toMatch(/`\(none\)`[\s\S]{0,200}?not a mismatch/i)
     expect(
       CODE,
-      'a bare issue number is a github spelling. Under jira or linear it names nothing, and the ' +
-      'canonical reason for that is already registered — reuse it, never a new spelling',
+      'with no rendered line the section keeps its heading and carries no reference — the Code ' +
+      'agent does not know the provider, so any line it composed would be a guess',
+    ).toContain('never compose one from `ISSUE_NUMBER`')
+    expect(
+      CODE,
+      'a bare issue number names a different issue under each provider, and the canonical reason ' +
+      'for that is already registered — reuse it, never a new spelling',
     ).toContain('TRACEABILITY: DEGRADED (ambiguous issue reference)')
   })
 
-  it('names the RESOLVED provider in the mismatch reason, never a fixed one', () => {
+  it('names no provider in the mismatch reason — the agent is never told one', () => {
     expect(
       CODE,
-      'a reason hard-coded to `github` reports the wrong grammar for two of the three providers, ' +
-      'and the reader cannot tell which grammar the value actually failed',
-    ).toContain('does not match {provider} reference grammar')
+      'the Code agent receives no provider, so a reason that named one would name a guess; the ' +
+      'union gate\'s honest report is that the line matched none of the grammars',
+    ).toContain('does not match any tracker reference grammar')
+    expect(CODE).not.toContain('does not match {provider} reference grammar')
     expect(CODE).not.toContain('does not match github reference grammar')
+  })
+
+  it('never asks the agent to read a provider it is not given', () => {
+    // The retired instruction. With no provider in the spawn, "the arm for the
+    // provider that was RESOLVED" has nothing to resolve against, and an agent
+    // told to find one improvises it.
+    expect(CODE).not.toMatch(/provider that was RESOLVED/i)
+    expect(CODE).not.toContain('| Resolved provider |')
+    expect(CODE, 'the gate is stated as a sink check').toContain('This is a sink check, not a provider check')
   })
 
   it('known-bad probe: the arm collector reports a missing anchor and a missing row', () => {
     const seeded = [
-      '| Resolved provider | value |',
+      '| Tracker grammar | value |',
       '|---|---|',
       '| `github` | `^Closes #[1-9][0-9]{0,8}$` |',
       '| `jira` | `^Refs [A-Z]+-[0-9]+$` |',
@@ -387,8 +410,13 @@ describe('handoff seam — git.md producer ↔ code.md consumer', () => {
 /** The deployed commands that spawn Code agents with an issue key. Named, not discovered. */
 const FORWARDING_COMMANDS: readonly string[] = ['implement.md', 'dynamic-build.md']
 
-/** §14.5 pins 14 Code-spawn sites: 8 in implement, 6 in dynamic-build. */
-const MIN_FORWARDING_SITES = 14
+/**
+ * §14.5 pinned 14 Code-spawn sites: 8 in implement, 6 in dynamic-build. #359 adds
+ * the 15th — /implement's parallel-strategy `pr-create` spawn, which replaced the
+ * orchestrator creating the unified PR itself (unscrubbed, and rendering its own
+ * link line): 9 in implement, 6 in dynamic-build.
+ */
+const MIN_FORWARDING_SITES = 15
 
 interface SpawnPayload {
   readonly file: string
@@ -495,12 +523,69 @@ describe('ISSUE_PR_LINK forwarding — every Code spawn site carries the sibling
     expect(
       CODE,
       'the declaration must name the (none) fallback, or an unset value has no defined behaviour',
-    ).toContain('compose the section from `ISSUE_NUMBER` instead')
+    ).toContain('the section then carries its heading and no reference')
     const numberAt = CODE.indexOf('**ISSUE_NUMBER** (optional)')
     const linkAt = CODE.indexOf('**ISSUE_PR_LINK** (optional)')
     expect(
       linkAt,
       'the sibling must be declared after the spawn key it accompanies, not in a distant section',
     ).toBeGreaterThan(numberAt)
+  })
+})
+
+// -------------------------------------------------------------------------
+// /implement's parallel path opens its PR through a Code `pr-create` spawn (#359, G3).
+//
+// The orchestrator used to run `gh pr create` itself for PARALLEL_CODE_AGENTS: the
+// body skipped the D11 scrub every Code-created PR gets, and the command layer
+// rendered its own link line — a second rendering site with no provider to render
+// it against. Both went when the step became a Code spawn whose Responsibility 7
+// owns the body, the paste gate and the scrub. This block pins that the spawn
+// exists, carries everything Responsibility 7 reads, and lands on a declared mode.
+// -------------------------------------------------------------------------
+
+/** Named collector: the Code spawn payloads that run `OPERATION: pr-create`. */
+function collectPrCreateSpawns(source: string): SpawnPayload[] {
+  return collectIssueSpawnPayloads('implement.md', source).filter(p => p.block.includes('OPERATION: pr-create'))
+}
+
+/** The keys Responsibility 7 reads, every one of which the pr-create spawn must carry. */
+const PR_CREATE_KEYS = [
+  'Agent(subagent_type="Code")',
+  'CREATE_PR: true',
+  'BASE_BRANCH:',
+  'PR_DESCRIPTION_GUIDANCE:',
+  'ISSUE_NUMBER:',
+  'ISSUE_PR_LINK:',
+] as const
+
+describe('/implement parallel PR — a Code pr-create spawn, never the orchestrator', () => {
+  it('Phase 10 spawns exactly one pr-create Code agent carrying every Responsibility-7 input', async () => {
+    const { root } = await buildCommittedTree()
+    const implement = requireDistFile('implement.md', root)
+    const spawns = collectPrCreateSpawns(implement)
+    expect(spawns, 'one pr-create spawn — the parallel path must not create the PR itself').toHaveLength(1)
+    for (const key of PR_CREATE_KEYS) {
+      expect(spawns[0].block, `the pr-create spawn must pass ${key}`).toContain(key)
+    }
+    expect(implement, 'the retired orchestrator-run PR creation').not.toContain('run `gh pr create`')
+  }, 20_000)
+
+  it('code.md declares the mode and routes it through Responsibility 7 and its D11 scrub', () => {
+    expect(CODE).toMatch(/\*\*OPERATION\*\* \(optional\):[^\n]*`pr-create`/)
+    const mode = CODE.slice(CODE.indexOf('## Mode: pr-create'))
+    expect(mode.startsWith('## Mode: pr-create'), 'the mode section must exist').toBe(true)
+    const body = mode.slice(0, mode.indexOf('\n## ', 1))
+    expect(body).toContain('Responsibility 7')
+    expect(body).toContain('D11 scrub')
+    expect(body).toContain('Make no code changes')
+  })
+
+  it('known-bad probe: a Phase 10 that lost its spawn is reported', async () => {
+    const { root } = await buildCommittedTree()
+    const real = requireDistFile('implement.md', root)
+    const seeded = real.replace('OPERATION: pr-create', 'OPERATION: implement')
+    expect(seeded, 'the seed must actually change the text').not.toBe(real)
+    expect(collectPrCreateSpawns(seeded)).toHaveLength(0)
   })
 })

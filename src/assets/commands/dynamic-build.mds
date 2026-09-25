@@ -94,7 +94,7 @@ Check, in priority order:
 
 If a number is found, record it as the command-level `ISSUE_NUMBER` and pass it as `issueNumber: <number>` when invoking the workflow (the Code agent threads it through as `ISSUE_NUMBER`). If none is found, pass nothing — `ISSUE_NUMBER` defaults to `"(none)"` in the workflow script.
 
-Pass the `ISSUE_PR_LINK` captured above the same way, as `issuePrLink: <rendered line>` — never re-derive it from `ISSUE_NUMBER`. If no `### Handoff Values` block supplied one, pass nothing: `ISSUE_PR_LINK` defaults to `"(none)"` and the Code agent composes `## Related Issues` from `ISSUE_NUMBER` instead.
+Pass the `ISSUE_PR_LINK` captured above the same way, as `issuePrLink: <rendered line>` — never re-derive it from `ISSUE_NUMBER`. If no `### Handoff Values` block supplied one, pass nothing: `ISSUE_PR_LINK` defaults to `"(none)"` and the Code agent emits the `## Related Issues` heading with no reference.
 
 ---
 
@@ -117,7 +117,7 @@ const PLAN = args.plan || null;
 const CRITERIA = args.criteria || null;
 const DECISIONS_CONTEXT = args.decisionsContext || "";  // injected before authoring
 const ISSUE_NUMBER = args.issueNumber || "(none)";  // resolved in Pre-authoring step 5
-const ISSUE_PR_LINK = args.issuePrLink || "(none)";  // captured in Pre-authoring step 4; "(none)" ⇒ Code composes from ISSUE_NUMBER
+const ISSUE_PR_LINK = args.issuePrLink || "(none)";  // captured in Pre-authoring step 4; "(none)" ⇒ Code emits the heading with no reference
 const COMPLIANCE = args.compliance || "(none)";  // "enabled" when COMPLIANCE_SKILL_INSTALLED, else "(none)"
 
 // Phase 1: Git setup — declare the operation; the agent owns the process

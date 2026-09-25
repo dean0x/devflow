@@ -355,12 +355,13 @@ const RETIRED_LITERALS: ReadonlyArray<RetiredEntry> = [
   // -------------------------------------------------------------------------
   // The UNGATED github link line.
   //
-  // This entry is a CLASSIFIER, not a spelling: the literal survives at exactly
-  // one site — the github-gated fallback in /implement's PR step — and the rule
-  // is about the qualification in front of it, which no substring test can see.
-  // The permitted occurrence is admitted by the pattern rather than excluded by a
-  // hand-written filter, so it stays admitted only while it stays gated, and the
-  // guard needs no second list to keep in sync with this one (PF-067).
+  // This entry is a CLASSIFIER, not a spelling: the rule is about the
+  // qualification in front of the literal, which no substring test can see. Its
+  // last site — the github-gated fallback in /implement's PR step — went with
+  // #359, which moved the parallel PR into a Code `pr-create` spawn: no command
+  // renders a link line now. A gated occurrence is still admitted by the pattern
+  // rather than excluded by a hand-written filter, so the guard needs no second
+  // list to keep in sync with this one (PF-067).
   // -------------------------------------------------------------------------
   {
     literal: 'an ungated `Closes #{ISSUE_NUMBER}`',
@@ -374,8 +375,8 @@ const RETIRED_LITERALS: ReadonlyArray<RetiredEntry> = [
       'The PR step rendered `Closes #{ISSUE_NUMBER}` whenever an issue number was known, with no ' +
       'provider in the condition. Under jira or linear that number is the tail of a key like ' +
       'PROJ-12, so the line closed whichever GitHub issue happens to carry the same digits — a ' +
-      'wrong, silent, GitHub-visible write. The rendering is correct under github and is kept ' +
-      'there; what is retired is stating it without the gate.',
+      'wrong, silent, GitHub-visible write. The rendering is correct only under github; what is ' +
+      'retired is stating it without the gate.',
   },
 
   // ── The `[Unreleased]` changelog's claims about the shipped tree (M-3) ──────

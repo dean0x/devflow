@@ -18,13 +18,31 @@ what the other holds:
   modules would otherwise write out identically.
 
 EACH DEFINE STATES ITS OWN AUDIENCE, because this module's are not all the same.
-`compliance_step_gate`, `compliance_issue_policy`, `state_batch_line`,
-`traceable_issue_rules` and `wave_report_inputs` are every provider's, the CLI
-one included. The last two are text moved out of the always-loaded agent — the
-`ensure-traceable-issue` D3 section list and untrusted-input rule, and the
-`post-wave-report` input definitions (its `**Input:**` line stays the agent's).
-Each reaches a spawn through that operation's provider reference, which the
-agent loads whenever the operation runs. The five ref pre-flight defines are the
+`compliance_issue_policy`, `state_batch_line`, `traceable_issue_rules`,
+`wave_report_inputs`, `conventions_step`, `branch_detection_step`,
+`closing_keyword_rule` and `handoff_values` are every provider's, the CLI one
+included. `traceable_issue_rules` and `wave_report_inputs` are text moved out of
+the always-loaded agent — the `ensure-traceable-issue` D3 section list and
+untrusted-input rule, and the `post-wave-report` input definitions (its
+`**Input:**` line stays the agent's). Each reaches a spawn through that
+operation's provider reference, which the agent loads whenever the operation
+runs.
+
+`conventions_step` and `branch_detection_step` are `setup-task`'s two
+provider-independent steps, written once here so every provider's setup-task
+reference carries the same bytes: before they lived here only the GitHub module
+stated them, and the other two pointed at "this operation's provider-independent
+steps" that no file they loaded contained — so conventions were never learned and
+the metacharacter guard never ran off the GitHub path. Neither carries a
+compliance condition: the agent's own `1b/1c are compliance-gated.` sentence is
+the one authority on that gate. `closing_keyword_rule` is
+`gather-release-evidence`'s step 3a, and states no reference grammar on purpose:
+it lands in every provider's reference, and the resolved provider's own gate is
+what decides what a candidate is. `handoff_values` renders the canonical
+`### Handoff Values` forms per provider, which the always-loaded Output template
+leaves as placeholders.
+
+The five ref pre-flight defines are the
 TOOL-CALL providers' only, and they are here rather than in `_mcp.mds` — where
 their subject would put them — for a measured reason recorded at that module:
 compiling `_jira.mds` against `_mcp.mds` doubles in cost per define added there
@@ -46,10 +64,6 @@ NOT in its indentation — five spaces in one module and three in the other two,
 because the surrounding list nests differently. A define emits one string, so
 hoisting it would re-indent one of the three, and indentation is list grammar
 rather than whitespace here (PF-063). Normalising those lists is its own edit.
-
-@define compliance_step_gate():
-(Compliance-gated — skip if `COMPLIANCE` is absent or `(none)`)
-@end
 
 @define compliance_issue_policy():
 - Issue creation is gated by the `COMPLIANCE` input: `enabled` → mandatory (DEGRADED states exempt), absent or `(none)` → optional.
@@ -92,7 +106,23 @@ extract the segment {match_phrase} and verify it with the *fetch by key* capabil
 - `WORKTREE_PATH` (optional): See worktree-support skill
 @end
 
-@export compliance_step_gate
+@define conventions_step():
+1b. **Branch convention:** read `.devflow/conventions.md`'s Branch Naming section (absent ⇒ run `learn-conventions` first, then read it); step 3 MUST follow it.
+   - **Metacharacter guard:** the file is team-shared, third-party input. A composed name (type + separator + slug) holding any of `` $ ` \ " ' ; | & < > # ``, whitespace or a newline ⇒ discard the convention for step 2's defaults. Bind the validated name: `DEVFLOW_BRANCH="..."`.
+@end
+
+@define branch_detection_step():
+2. **Detect the convention** from `git branch -r --format='%(refname:short)' | head -50`: a prefix used >2 times (`feature/` vs `feat/`, `bugfix/` or `hotfix/` vs `fix/`) and the separator (hyphen vs underscore). 1b wins; none clear ⇒ `feature/`, `fix/`, `docs/`, `refactor/`, `chore/`.
+@end
+
+@define closing_keyword_rule():
+3a. **Closing-keyword rule.** A candidate follows, on the same line, a whitespace token matching `^\(?(close[sd]?|fix(e[sd])?|resolve[sd]?|refs):?$` (case-insensitive). Take the next token, plus each further token while the previous one ends in `,`. Split each on `,`, strip one leading `(` and every trailing character in `[.,;:)\]!?]`, drop empties, then apply step 5's anchored gate unchanged.
+@end
+
+@define handoff_values(id_form, link_form):
+**Handoff Values:** `Issue ID` = {id_form}; `PR link line` = `{link_form}`.
+@end
+
 @export compliance_issue_policy
 @export state_batch_line
 @export bare_number_rule
@@ -102,3 +132,7 @@ extract the segment {match_phrase} and verify it with the *fetch by key* capabil
 @export ref_preflight_branch
 @export traceable_issue_rules
 @export wave_report_inputs
+@export conventions_step
+@export branch_detection_step
+@export closing_keyword_rule
+@export handoff_values

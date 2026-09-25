@@ -85,11 +85,19 @@ export function collectOverBudget(
  * Used only by the known-bad probe. The imported names are read off the call
  * sites (`{alias.name(`) rather than listed here, so the probe reconstructs
  * whatever the module actually uses and cannot drift out of step with it.
+ *
+ * `only` restricts the rewrite to the named aliases. The probe rewrites the
+ * `_mcp.mds` import alone: the cliff is exponential in the imported graph
+ * (PF-073), so rewriting EVERY import made the probe's own cost grow with each
+ * define `_common.mds` gained — at 13 exports (#359) it no longer finished inside
+ * its 120 s timeout, although the shipped alias build compiles in ~40 ms. One
+ * selective import still lands two orders of magnitude over the alias form and
+ * over the budget, which is all the probe has to show.
  */
-export function toSelectiveImports(source: string): string {
+export function toSelectiveImports(source: string, only?: ReadonlySet<string>): string {
   const aliasToModule = new Map<string, string>();
   for (const m of source.matchAll(/^@import\s+"(\.\/[^"]+)"\s+as\s+([A-Za-z_][A-Za-z0-9_]*)\s*$/gm)) {
-    aliasToModule.set(m[2], m[1]);
+    if (only === undefined || only.has(m[2])) aliasToModule.set(m[2], m[1]);
   }
 
   const namesByAlias = new Map<string, Set<string>>();
@@ -182,7 +190,7 @@ describe('MDS reference modules compile well under the define-capture cliff', ()
     // nothing), and a compile time that the budget arm above would have caught.
     const shippedRel = 'src/assets/mds/tracker/_jira.mds';
     const shipped = await fs.readFile(path.join(ROOT, shippedRel), 'utf8');
-    const selective = toSelectiveImports(shipped);
+    const selective = toSelectiveImports(shipped, new Set(['mcp']));
 
     expect(
       selective,
