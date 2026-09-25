@@ -33,13 +33,13 @@ Gate 2 inputs are produced by `/devflow:dynamic-plan`'s plan-challenge step — 
 - Run `evaluator_panel()` — see that block for the panel composition
 - If any critical lens returns MISALIGNED: fix-and-continue — the demanded fixes are applied by a Code agent that self-verifies its own build (batched per the review-pass batching doctrine if numerous). The recorded verdict becomes `FAIL-FIXED` (issues found, fixes applied, not re-evaluated by design); Gate 2 then proceeds. In SINGLE mode the run reports it as `UNVERIFIED`, never PASS.
 
-**Test agent** (only if acceptance criteria exist):
+**Test agent** (only if acceptance criteria or a test plan exist):
 - Scenario-based acceptance tests covering functionality, API contracts, performance
 - FAIL → fix-and-continue — a Code agent applies the demanded fixes and self-verifies its own build. The recorded verdict becomes `FAIL-FIXED`; Gate 2 then proceeds. In SINGLE mode the run reports it as `UNVERIFIED`, never PASS.
 
 **When Gate 2 inputs are absent:**
 - No plan → skip Evaluate agent panel silently (note in output: "Gate 2 Evaluate agent skipped — no plan available")
-- No acceptance criteria → skip Test agent silently (note in output: "Gate 2 Test agent skipped — no criteria available")
+- No acceptance criteria and no test plan → skip Test agent silently (note in output: "Gate 2 Test agent skipped — no criteria available")
 - Build proceeds Gate-1-only. Never refuse to build; never force-generate fake criteria. Trust the user.
 @end
 

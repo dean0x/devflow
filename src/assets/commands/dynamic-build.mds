@@ -79,7 +79,7 @@ Check for (in priority order):
 
 Extract or note:
 - Implementation plan (for Code agent prompt and Evaluate agent)
-- Acceptance criteria and test plan (for Gate 2)
+- Acceptance criteria and test plan (for Gate 2) — pass them as `criteria` and `testPlan` when invoking the workflow; a test plan alone still runs the Test agent
 
 If none found: build proceeds Gate-1-only (Gate 2 skipped with a note). Never refuse to build; never fabricate criteria.
 
@@ -115,6 +115,7 @@ const TICKET = args.ticket || args[0] || "see task description";
 const BRANCH = args.branch || `ticket/${TICKET.replace(/[^a-z0-9]/gi, '-').toLowerCase()}`;
 const PLAN = args.plan || null;
 const CRITERIA = args.criteria || null;
+const TEST_PLAN = args.testPlan || null;  // /devflow:dynamic-plan testPlan (Pre-authoring step 4)
 const DECISIONS_CONTEXT = args.decisionsContext || "";  // injected before authoring
 const ISSUE_NUMBER = args.issueNumber || "(none)";  // resolved in Pre-authoring step 5
 const ISSUE_PR_LINK = args.issuePrLink || "(none)";  // captured in Pre-authoring step 4; "(none)" ⇒ Code emits the heading with no reference
@@ -185,8 +186,8 @@ Commit fixes with conventional-commit message.`, { agentType: "Code" });
 
 // Phase 4: Gate 2 — acceptance gate (once, before review pass)
 const gate2 = await phase("gate2", async () => {
-  if (!PLAN && !CRITERIA) {
-    return { evaluateVerdict: "SKIPPED", testVerdict: "SKIPPED", skipReasons: ["No plan and no criteria provided"] };
+  if (!PLAN && !CRITERIA && !TEST_PLAN) {
+    return { evaluateVerdict: "SKIPPED", testVerdict: "SKIPPED", skipReasons: ["No plan, no criteria and no test plan provided"] };
   }
 
   let evalVerdict = "SKIPPED";
@@ -214,11 +215,12 @@ Self-verify your fix compiles (background-Bash + Monitor for any build >120s —
   }
 
   let testVerdict = "SKIPPED";
-  if (CRITERIA) {
+  if (CRITERIA || TEST_PLAN) {
     const testResult = await agent(`Run scenario-based acceptance tests on branch ${BRANCH} against these criteria:
-${CRITERIA}
+${CRITERIA || "(none)"}
+TEST_PLAN: ${TEST_PLAN ? JSON.stringify(TEST_PLAN) : "(none)"}
 For any test/build command that may run silent >120s, use the background-Bash + Monitor poll procedure (your "Long-running commands" discipline) so you never trip the 180s watchdog.
-Cover: functionality, API contracts, performance. Report: PASS or FAIL per scenario.`, { agentType: "Test" });
+Cover: functionality, API contracts, performance, and cover every TEST_PLAN scenario. Report: PASS or FAIL per scenario.`, { agentType: "Test" });
     testVerdict = testResult.verdict;
     if (testVerdict === "FAIL") {
       // fix-and-continue — no re-test, no inline Gate 1.

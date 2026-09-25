@@ -1,10 +1,15 @@
 /**
  * SDLC-evidence PR2 (#360), phase P3 — /dynamic-build's Gate 2 in SINGLE mode.
  *
- * `overallVerdict` ignored Gate 2. A `FAIL-FIXED` verdict — issues found, fixes
- * applied, never re-evaluated or re-run — was reported as **PASS**. The run now
- * reports it as `UNVERIFIED`; surviving findings, coverage gaps and an escalated
- * final gate still report `PARTIAL`.
+ * Two defects in the authored workflow skeleton:
+ *
+ * 1. `args.testPlan` never reached the Test agent. /devflow:dynamic-plan writes a
+ *    test plan for Gate 2, but the skeleton declared no constant for it, gated
+ *    the Test spawn on criteria alone and put nothing of the plan in its prompt.
+ * 2. `overallVerdict` ignored Gate 2. A `FAIL-FIXED` verdict — issues found,
+ *    fixes applied, never re-evaluated or re-run — was reported as **PASS**.
+ *    The run now reports it as `UNVERIFIED`; surviving findings, coverage gaps
+ *    and an escalated final gate still report `PARTIAL`.
  *
  * WAVE mode's merge rule (`_wave.mds`: "On engine PASS: merge") is untouched —
  * whether an UNVERIFIED ticket merges is decided later (plan delta 11).
@@ -12,17 +17,23 @@
  * Every guard has the three parts PF-064 asks of an absence-based check: a NAMED
  * collector, an assertion that the text it read is the text it claims to read,
  * and known-bad probes that drive the SAME collector over the `d09da34`
- * spellings — the verdict block quoted verbatim, and one seed per report site
+ * spellings — the verdict block quoted verbatim, and one seed per guarded site
  * restoring its d09da34 wording, so probe cardinality equals arm cardinality.
  *
- * The verdict is checked by EXECUTING the shipped skeleton's own text: a
- * wording pin would stay green over an expression that computes the wrong
- * answer.
+ * The verdict and the Gate 2 routing are checked by EXECUTING the shipped
+ * skeleton's own text with stubbed `phase`/`agent`/`parallel`: a wording pin
+ * would stay green over an expression that computes the wrong answer.
  */
 
 import { describe, it, expect } from 'vitest'
 
-import { parseFences, requireDistFile } from '../helpers.js'
+import {
+  collectOrderViolations,
+  parseFences,
+  requireDistFile,
+  resolveAgentSource,
+  type OrderRule,
+} from '../helpers.js'
 
 // ---------------------------------------------------------------------------
 // Shared text utilities
@@ -34,6 +45,13 @@ function offsetsOf(text: string, needle: string): number[] {
   // Bounded: each hit moves the cursor past a non-empty needle.
   for (let at = text.indexOf(needle); at !== -1; at = text.indexOf(needle, at + needle.length)) out.push(at)
   return out
+}
+
+/** Replace the single occurrence of `from`; throws when there is none or several — an inert seed proves nothing. */
+function seedOnce(text: string, from: string, to: string): string {
+  const hits = offsetsOf(text, from).length
+  if (hits !== 1) throw new Error(`seedOnce: expected exactly one "${from}", found ${hits} — the seed is inert`)
+  return text.replace(from, () => to)
 }
 
 // ---------------------------------------------------------------------------
@@ -252,4 +270,292 @@ describe('the run report — FAIL-FIXED is presented as UNVERIFIED', () => {
       expect(violations, violations.join('\n')).toEqual([expect.stringMatching(new RegExp(`^${site}:`))])
     })
   }
+})
+
+// ---------------------------------------------------------------------------
+// 3. TEST_PLAN reaches the Test agent (AC-11)
+// ---------------------------------------------------------------------------
+
+const TEST_PLAN_DECLARATION = 'const TEST_PLAN = args.testPlan'
+const GATE2_OPEN = 'const gate2 = await phase("gate2", async () => {'
+const REVIEW_OPEN = 'const reviewResult = await phase("review"'
+const TEST_SPAWN_CLOSE = '{ agentType: "Test" })'
+const TEST_PLAN_KEY = 'TEST_PLAN: ${'
+const TEST_PLAN_COVERAGE = 'cover every TEST_PLAN scenario'
+/** Gate 2's early return: the code the skip guard governs. */
+const GATE2_SKIP_RETURN = 'return { evaluateVerdict: "SKIPPED", testVerdict: "SKIPPED"'
+
+/** The `const gate2 = await phase("gate2", …)` statement, up to the review phase; null unless both anchors are unique. */
+function gate2Statement(script: string): string | null {
+  const open = offsetsOf(script, GATE2_OPEN)
+  const close = offsetsOf(script, REVIEW_OPEN)
+  if (open.length !== 1 || close.length !== 1 || close[0] < open[0]) return null
+  return script.slice(open[0], close[0])
+}
+
+/** Every Test agent call in `text`, from its `agent(\`` to its options object. */
+function testSpawnCalls(text: string): Array<{ call: string; at: number }> {
+  return offsetsOf(text, TEST_SPAWN_CLOSE).map(end => {
+    const at = text.lastIndexOf('agent(`', end)
+    return { call: text.slice(at === -1 ? 0 : at, end + TEST_SPAWN_CLOSE.length), at }
+  })
+}
+
+/** The last `if (` line before `offset`: the condition that governs the code at `offset`. */
+function governingCondition(text: string, offset: number): string | null {
+  const conditions = text
+    .slice(0, offset)
+    .split('\n')
+    .filter(l => l.trimStart().startsWith('if ('))
+  return conditions.length === 0 ? null : conditions[conditions.length - 1].trim()
+}
+
+/**
+ * Named collector: the sites where the SINGLE skeleton stops a test plan short
+ * of the Test agent. Five sites: the declaration (before Gate 2 reads it), the
+ * Gate 2 skip guard, the Test gate, the spawn's `TEST_PLAN:` key, and its
+ * instruction to cover every scenario.
+ */
+export function collectTestPlanWiringViolations(script: string | null): string[] {
+  if (script === null) return ['script: the SINGLE-mode workflow fence was not found']
+  const order: readonly OrderRule[] = [
+    { label: 'TEST_PLAN is bound before Gate 2 reads it', before: TEST_PLAN_DECLARATION, after: GATE2_OPEN },
+  ]
+  const out = collectOrderViolations('dynamic-build.md', script, order).map(v => `declaration: ${v}`)
+  const gate2 = gate2Statement(script)
+  if (gate2 === null) return [...out, 'gate2: the phase("gate2") statement was not found']
+
+  const skipReturn = gate2.indexOf(GATE2_SKIP_RETURN)
+  const skipGuard = skipReturn === -1 ? null : governingCondition(gate2, skipReturn)
+  if (skipGuard === null || !skipGuard.includes('!TEST_PLAN')) {
+    out.push(`skip-guard: Gate 2 is skipped while a test plan is present (${skipGuard})`)
+  }
+
+  const spawns = testSpawnCalls(gate2)
+  if (spawns.length === 0) return [...out, 'test-spawn: no Test agent call inside phase("gate2")']
+  for (const { call, at } of spawns) {
+    const gate = governingCondition(gate2, at)
+    if (gate === null || !gate.includes('TEST_PLAN')) out.push(`test-gate: the Test agent runs only on criteria (${gate})`)
+    if (!call.includes(TEST_PLAN_KEY)) out.push('test-spawn key: the Test prompt carries no TEST_PLAN:')
+    if (!call.includes(TEST_PLAN_COVERAGE)) out.push(`test-spawn coverage: the Test prompt does not say "${TEST_PLAN_COVERAGE}"`)
+  }
+  return out
+}
+
+/**
+ * One reverse seed per guarded site: the shipped spelling and its `d09da34`
+ * spelling, quoted verbatim. Applied together they restore the d09da34 shape
+ * of every guarded site.
+ */
+const D09DA34_WIRING_SEEDS: ReadonlyArray<{ readonly site: string; readonly shipped: string; readonly d09da34: string }> = [
+  {
+    site: 'declaration',
+    shipped: 'const TEST_PLAN = args.testPlan || null;  // /devflow:dynamic-plan testPlan (Pre-authoring step 4)\n',
+    d09da34: '',
+  },
+  { site: 'skip-guard', shipped: '  if (!PLAN && !CRITERIA && !TEST_PLAN) {', d09da34: '  if (!PLAN && !CRITERIA) {' },
+  { site: 'test-gate', shipped: '  if (CRITERIA || TEST_PLAN) {', d09da34: '  if (CRITERIA) {' },
+  {
+    site: 'test-spawn key',
+    shipped: '\nTEST_PLAN: ${TEST_PLAN ? JSON.stringify(TEST_PLAN) : "(none)"}\n',
+    d09da34: '\n',
+  },
+  {
+    site: 'test-spawn coverage',
+    shipped: 'Cover: functionality, API contracts, performance, and cover every TEST_PLAN scenario. Report: PASS or FAIL per scenario.',
+    d09da34: 'Cover: functionality, API contracts, performance. Report: PASS or FAIL per scenario.',
+  },
+]
+
+/** The shipped script with every reverse seed applied. */
+function d09da34Wiring(script: string): string {
+  return D09DA34_WIRING_SEEDS.reduce((text, s) => seedOnce(text, s.shipped, s.d09da34), script)
+}
+
+describe('TEST_PLAN — /devflow:dynamic-plan\'s test plan reaches the Test agent', () => {
+  it('every wiring site is present in the shipped skeleton', () => {
+    expect(collectTestPlanWiringViolations(SCRIPT)).toEqual([])
+  })
+
+  it('the Test spawn inside phase("gate2") is found — the per-call checks are not vacuous', () => {
+    const gate2 = gate2Statement(SCRIPT!)
+    expect(gate2, 'the phase("gate2") statement must be extractable').not.toBeNull()
+    expect(testSpawnCalls(gate2!)).toHaveLength(1)
+  })
+
+  it('probe cardinality equals site cardinality: one reverse seed per guarded site', () => {
+    const sites = D09DA34_WIRING_SEEDS.map(s => s.site)
+    expect(sites).toEqual(['declaration', 'skip-guard', 'test-gate', 'test-spawn key', 'test-spawn coverage'])
+  })
+
+  for (const seed of D09DA34_WIRING_SEEDS) {
+    it(`known-bad probe: the d09da34 ${seed.site} alone is reported, exactly once`, () => {
+      const seeded = seedOnce(SCRIPT!, seed.shipped, seed.d09da34)
+      const violations = collectTestPlanWiringViolations(seeded)
+      expect(violations, violations.join('\n')).toHaveLength(1)
+      expect(violations[0].startsWith(seed.site)).toBe(true)
+    })
+  }
+
+  it('known-bad probe: all five d09da34 sites together are all reported, and carry no TEST_PLAN at all', () => {
+    const d09 = d09da34Wiring(SCRIPT!)
+    expect(gate2Statement(d09), 'd09da34 Gate 2 never named a test plan').not.toContain('TEST_PLAN')
+    expect(collectTestPlanWiringViolations(d09).map(v => v.split(':')[0])).toEqual([
+      'declaration',
+      'skip-guard',
+      'test-gate',
+      'test-spawn key',
+      'test-spawn coverage',
+    ])
+  })
+
+  it('the Test agent declares TEST_PLAN in its Input Context', () => {
+    const test = resolveAgentSource('test').content
+    const inputs = test.slice(test.indexOf('## Input Context'), test.indexOf('## Responsibilities'))
+    expect(inputs.length, 'the Input Context section must be found').toBeGreaterThan(100)
+    expect(inputs).toContain('- **TEST_PLAN**:')
+  })
+})
+
+// ---------------------------------------------------------------------------
+// 4. Gate 2 routing, executed
+// ---------------------------------------------------------------------------
+
+interface Spawn {
+  readonly agentType: string
+  readonly prompt: string
+}
+
+interface Gate2Result {
+  readonly evaluateVerdict: string
+  readonly testVerdict: string
+}
+
+interface Gate2Inputs {
+  readonly plan: string | null
+  readonly criteria: string | null
+  readonly testPlan: readonly object[] | null
+}
+
+type AsyncFn = (...args: unknown[]) => Promise<unknown>
+const AsyncFunction = Object.getPrototypeOf(async () => undefined).constructor as new (...params: string[]) => AsyncFn
+
+/**
+ * Run the shipped `phase("gate2")` statement with stub agents. Evaluate agents
+ * pass; the Test agent returns `testVerdict`; every spawn is recorded.
+ */
+async function runGate2(
+  statement: string,
+  inputs: Gate2Inputs,
+  testVerdict: 'PASS' | 'FAIL',
+): Promise<{ gate2: Gate2Result; spawns: Spawn[] }> {
+  const spawns: Spawn[] = []
+  const agent = async (prompt: string, opts: { agentType: string }): Promise<object> => {
+    spawns.push({ agentType: opts.agentType, prompt })
+    if (opts.agentType === 'Test') return { verdict: testVerdict, failures: 'TP-1 failed' }
+    return { verdict: 'PASS', status: 'fixed' }
+  }
+  const phase = async (_name: string, fn: () => Promise<unknown>): Promise<unknown> => fn()
+  const parallel = async (thunks: Array<() => Promise<unknown>>): Promise<unknown[]> => Promise.all(thunks.map(t => t()))
+  const run = new AsyncFunction(
+    'phase', 'agent', 'parallel', 'BRANCH', 'PLAN', 'CRITERIA', 'TEST_PLAN', 'ISSUE_NUMBER', 'ISSUE_PR_LINK',
+    `${statement}\nreturn gate2;`,
+  )
+  const gate2 = (await run(
+    phase, agent, parallel, 'ticket/p3', inputs.plan, inputs.criteria, inputs.testPlan, '(none)', '(none)',
+  )) as Gate2Result
+  return { gate2, spawns }
+}
+
+/** A /devflow:dynamic-plan test plan: `{scenario, setup, expectedOutcome, verificationMethod}` entries. */
+const TEST_PLAN_FIXTURE = [
+  { scenario: 'TP-1 cycle-2 run posts', setup: 'two runs', expectedOutcome: 'posted', verificationMethod: 'gh api' },
+]
+
+interface RoutingCase {
+  readonly label: string
+  readonly inputs: Gate2Inputs
+  readonly testVerdict: 'PASS' | 'FAIL'
+  readonly check: (r: { gate2: Gate2Result; spawns: Spawn[] }) => string | null
+}
+
+const testSpawns = (spawns: Spawn[]): Spawn[] => spawns.filter(s => s.agentType === 'Test')
+
+/** Gate 2's routing over its inputs: which agents run, what the Test agent is told, what Gate 2 records. */
+const ROUTING_TABLE: readonly RoutingCase[] = [
+  {
+    label: 'a test plan alone runs the Test agent with the plan',
+    inputs: { plan: null, criteria: null, testPlan: TEST_PLAN_FIXTURE },
+    testVerdict: 'PASS',
+    check: ({ gate2, spawns }) => {
+      const tests = testSpawns(spawns)
+      if (tests.length !== 1) return `expected one Test spawn, got ${tests.length} (testVerdict ${gate2.testVerdict})`
+      if (!tests[0].prompt.includes(`TEST_PLAN: ${JSON.stringify(TEST_PLAN_FIXTURE)}`)) return 'the Test prompt does not carry the plan'
+      return gate2.testVerdict === 'PASS' ? null : `testVerdict ${gate2.testVerdict}`
+    },
+  },
+  {
+    label: 'criteria alone run the Test agent and name no test plan',
+    inputs: { plan: null, criteria: '1. posts on cycle 2', testPlan: null },
+    testVerdict: 'PASS',
+    check: ({ spawns }) => {
+      const tests = testSpawns(spawns)
+      if (tests.length !== 1) return `expected one Test spawn, got ${tests.length}`
+      if (!tests[0].prompt.includes('1. posts on cycle 2')) return 'the Test prompt lost the criteria'
+      return tests[0].prompt.includes('TEST_PLAN: (none)') ? null : 'the Test prompt does not say TEST_PLAN: (none)'
+    },
+  },
+  {
+    label: 'no plan, criteria or test plan skips Gate 2 entirely',
+    inputs: { plan: null, criteria: null, testPlan: null },
+    testVerdict: 'PASS',
+    check: ({ gate2, spawns }) =>
+      spawns.length === 0 && gate2.evaluateVerdict === 'SKIPPED' && gate2.testVerdict === 'SKIPPED'
+        ? null
+        : `expected no spawns and SKIPPED/SKIPPED, got ${spawns.length} spawns and ${gate2.evaluateVerdict}/${gate2.testVerdict}`,
+  },
+  {
+    label: 'a failing test-plan run is fixed and recorded FAIL-FIXED',
+    inputs: { plan: null, criteria: null, testPlan: TEST_PLAN_FIXTURE },
+    testVerdict: 'FAIL',
+    check: ({ gate2, spawns }) =>
+      gate2.testVerdict === 'FAIL-FIXED' && spawns.some(s => s.agentType === 'Code')
+        ? null
+        : `expected FAIL-FIXED after a Code fix, got ${gate2.testVerdict}`,
+  },
+]
+
+/** Named collector: every routing row the Gate 2 statement gets wrong. */
+export async function collectGate2RoutingViolations(statement: string | null): Promise<string[]> {
+  if (statement === null) return ['the phase("gate2") statement was not found']
+  const out: string[] = []
+  for (const row of ROUTING_TABLE) {
+    const problem = row.check(await runGate2(statement, row.inputs, row.testVerdict))
+    if (problem !== null) out.push(`${row.label}: ${problem}`)
+  }
+  return out
+}
+
+describe('Gate 2 routing, executed over the shipped statement', () => {
+  it('every routing row holds', async () => {
+    expect(await collectGate2RoutingViolations(gate2Statement(SCRIPT!))).toEqual([])
+  })
+
+  it('end to end: a test plan whose run fails and is fixed makes the run UNVERIFIED, not PASS', async () => {
+    const { gate2 } = await runGate2(gate2Statement(SCRIPT!)!, ROUTING_TABLE[0].inputs, 'FAIL')
+    const block = extractVerdictBlock(SCRIPT!)!
+    const run = new Function('reviewResult', 'gate1Final', 'gate2', `${block}\nreturn overallVerdict;`) as (
+      ...args: unknown[]
+    ) => unknown
+    expect(run({ survivingFindings: [], fixedFindings: [], coverageGaps: [] }, { verdict: 'PASS' }, gate2)).toBe('UNVERIFIED')
+  })
+
+  it('known-bad probe: the d09da34 Gate 2 drops a test plan and never tells the Test agent about one', async () => {
+    const d09 = gate2Statement(d09da34Wiring(SCRIPT!))
+    expect((await collectGate2RoutingViolations(d09)).map(v => v.split(':')[0])).toEqual([
+      'a test plan alone runs the Test agent with the plan',
+      'criteria alone run the Test agent and name no test plan',
+      'a failing test-plan run is fixed and recorded FAIL-FIXED',
+    ])
+  })
 })

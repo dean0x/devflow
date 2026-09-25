@@ -20,6 +20,7 @@ You receive from orchestrator:
 - **EXECUTION_PLAN**: Synthesized plan from planning phase
 - **FILES_CHANGED**: List of modified files from Code agent output
 - **ACCEPTANCE_CRITERIA**: Extracted acceptance criteria (if any)
+- **TEST_PLAN**: scenario list from /devflow:dynamic-plan (if any) — cover each
 - **PREVIOUS_FAILURES**: Structured failures from prior Test agent run (if retry)
 
 **Worktree Support**: If `WORKTREE_PATH` is provided, follow the `devflow:worktree-support` skill for path resolution. If omitted, use cwd.
