@@ -1023,6 +1023,72 @@ export function isAgentBlock(block: string, type: string): boolean {
   )
 }
 
+// ── Order collector ──────────────────────────────────────────────────────────
+
+/** One ordering claim over a text: `before` occurs, once, earlier than `after`. */
+export interface OrderRule {
+  /** Names the claim in every violation, so a failure says which order broke. */
+  readonly label: string
+  readonly before: string
+  readonly after: string
+}
+
+/** Every start offset of a non-empty `anchor` in `content`, in order. */
+function anchorOffsets(content: string, anchor: string): number[] {
+  const offsets: number[] = []
+  // Bounded by the content: each hit moves the cursor past the anchor, which is
+  // non-empty, so the loop runs at most content.length / anchor.length times.
+  for (let at = content.indexOf(anchor); at !== -1; at = content.indexOf(anchor, at + anchor.length)) {
+    offsets.push(at)
+  }
+  return offsets
+}
+
+/**
+ * Named collector: the ordering claims `content` breaks.
+ *
+ * Each anchor must occur EXACTLY once. An absent anchor is a violation, not a
+ * pass — an order check that skips a missing anchor certifies nothing (PF-018).
+ * A duplicated anchor is a violation too: a first-match reading picks one
+ * occurrence and silently ignores the other, which may be the one a reader
+ * follows (PF-057's first-match hazard, turned into a report). Only when both
+ * anchors are unique is `before` compared against `after`.
+ *
+ * Shared across suites so every order guard reads the same definition of "comes
+ * before"; `collectGateOrderViolations` in tests/build-mds.test.ts is the local
+ * precedent and stays as it is.
+ */
+export function collectOrderViolations(
+  file: string,
+  content: string,
+  rules: readonly OrderRule[],
+): string[] {
+  const violations: string[] = []
+  for (const rule of rules) {
+    const located: number[] = []
+    for (const [role, anchor] of [['before', rule.before], ['after', rule.after]] as const) {
+      if (anchor === '') {
+        violations.push(`${file}: [${rule.label}] ${role} anchor is empty — it would match everywhere`)
+        continue
+      }
+      const offsets = anchorOffsets(content, anchor)
+      if (offsets.length === 0) {
+        violations.push(`${file}: [${rule.label}] ${role} anchor absent: "${anchor}"`)
+      } else if (offsets.length > 1) {
+        violations.push(
+          `${file}: [${rule.label}] ${role} anchor is ambiguous (${offsets.length} occurrences): "${anchor}"`,
+        )
+      } else {
+        located.push(offsets[0])
+      }
+    }
+    if (located.length === 2 && located[0] >= located[1]) {
+      violations.push(`${file}: [${rule.label}] "${rule.before}" does not precede "${rule.after}"`)
+    }
+  }
+  return violations
+}
+
 // ── Golden fixture loader ────────────────────────────────────────────────────
 //
 // Throws with a command hint when the fixture is absent — never self-heals.

@@ -56,13 +56,24 @@ Record the current branch name as `BASE_BRANCH` - this will be the PR target.
 
 {compliance_gate()}
 
+**Plan Document Handling** (when $ARGUMENTS is a path ending in `.md`):
+1. Read the plan document from the path provided
+2. Extract from YAML frontmatter: `execution-strategy`, `context-risk`, `issue` number
+3. Extract from body: Subtask Breakdown, Implementation Plan, Patterns to Follow, Acceptance Criteria
+4. If the frontmatter `issue` is present and is not `pending`: forward it verbatim as the setup-task `ISSUE_INPUT` (`pending` means /plan's issue step degraded or was declined — treat it as absent)
+5. Use extracted content as EXECUTION_PLAN for the Code agent phase (replaces exploration/planning output)
+6. Captured values override defaults from Git agent where present
+7. Extract `## PR Description Guidance` section (if present) → set `PR_DESCRIPTION_GUIDANCE` to its full content. If section not found, set `PR_DESCRIPTION_GUIDANCE` to `(none)`.
+
+If `PR_DESCRIPTION_GUIDANCE` was not set above (non-plan paths: issue input or task description), set it to `(none)`.
+
 Spawn Git agent to set up task environment. The Git agent derives the branch name automatically from the issue or task description:
 
 ```
 Agent(subagent_type="Git"):
 "OPERATION: setup-task
 BASE_BRANCH: {current branch name}
-ISSUE_INPUT: {$ARGUMENTS verbatim, when it is a single whitespace-delimited token that does not end in .md — otherwise omit}
+ISSUE_INPUT: {$ARGUMENTS verbatim, when it is a single whitespace-delimited token that does not end in .md; when it ends in .md, the plan frontmatter's issue value verbatim unless absent or pending — otherwise omit}
 TASK_DESCRIPTION: {$ARGUMENTS verbatim, when it is two or more whitespace-delimited tokens — otherwise omit}
 COMPLIANCE: {enabled if COMPLIANCE_SKILL_INSTALLED, otherwise (none)}
 PLAN_ARTIFACT_PATH: {path to plan document if $ARGUMENTS ends in .md, otherwise (none)}
@@ -86,6 +97,8 @@ The two tests this command does make are its own under every provider:
 
 - **Extension.** A path ending in `.md` is a plan document, never an issue
   reference — it goes to `PLAN_ARTIFACT_PATH` and neither of the other two keys.
+  `ISSUE_INPUT` then carries the plan's frontmatter `issue` instead, never the
+  path (Plan Document Handling step 4).
 - **Token count.** A single token is an issue reference. Two or more is prose:
   forwarding only its FIRST token would send `/implement fix the login bug` to
   the Git agent as `ISSUE_INPUT: fix` with no description at all, and
@@ -104,17 +117,6 @@ visible, a silently discarded request is not.
 
 {issue_capture_contract()}
 
-**Plan Document Handling** (when $ARGUMENTS is a path ending in `.md`):
-1. Read the plan document from the path provided
-2. Extract from YAML frontmatter: `execution-strategy`, `context-risk`, `issue` number
-3. Extract from body: Subtask Breakdown, Implementation Plan, Patterns to Follow, Acceptance Criteria
-4. If `issue` field present in frontmatter: pass to Git agent as ISSUE_INPUT
-5. Use extracted content as EXECUTION_PLAN for the Code agent phase (replaces exploration/planning output)
-6. Captured values override defaults from Git agent where present
-7. Extract `## PR Description Guidance` section (if present) → set `PR_DESCRIPTION_GUIDANCE` to its full content. If section not found, set `PR_DESCRIPTION_GUIDANCE` to `(none)`.
-
-If `PR_DESCRIPTION_GUIDANCE` was not set above (non-plan paths: issue input or task description), set it to `(none)`.
-
 {decisions_load()}
 
 Pass to Code agent (Phase 2) and Scrutinize agent (Phase 5).
@@ -123,7 +125,7 @@ Pass to Code agent (Phase 2) and Scrutinize agent (Phase 5).
 
 ### Phase 2: Implement
 
-**Produces:** CODE_AGENT_OUTPUT, FILES_CHANGED
+**Produces:** CODE_AGENT_OUTPUT, FILES_CHANGED, PR_URL
 **Requires:** TASK_ID, BASE_BRANCH, EXECUTION_PLAN, PR_DESCRIPTION_GUIDANCE
 
 Based on Setup context (plan document, issue body, or conversation context), use the three-strategy framework:
@@ -428,7 +430,7 @@ Design and execute scenario-based acceptance tests. Report PASS or FAIL with evi
 **Produces:** CI_STATUS
 **Requires:** PR_URL, FILES_CHANGED
 
-Strategy-conditional: run for **SINGLE_CODE_AGENT** (PR exists from Phase 2), skip for **SEQUENTIAL_CODE_AGENTS** / **PARALLEL_CODE_AGENTS** (PR not yet created).
+Strategy-conditional: run when the PR already exists — **SINGLE_CODE_AGENT** and **SEQUENTIAL_CODE_AGENTS** (the Phase 2 Code agent with `CREATE_PR: true` creates it); skip for **PARALLEL_CODE_AGENTS** (its unified PR is created in Phase 10).
 
 <!-- PATTERN: ci-status-gate -->
 1. Spawn `Agent(subagent_type="Git")` with `OPERATION: check-ci-status` and `PR_NUMBER` from PR_URL.
@@ -444,7 +446,9 @@ Strategy-conditional: run for **SINGLE_CODE_AGENT** (PR exists from Phase 2), sk
 **Produces:** PR_URL
 **Requires:** BASE_BRANCH, TASK_ID
 
-**For SEQUENTIAL_CODE_AGENTS or PARALLEL_CODE_AGENTS**: The last sequential Code agent (with CREATE_PR: true) handles PR creation. For parallel Code agents, spawn one Code agent to create the unified PR:
+**For SEQUENTIAL_CODE_AGENTS**: the PR already exists — the last Phase 2 Code agent (`CREATE_PR: true`) created it, and Phase 9 has gated its CI.
+
+**For PARALLEL_CODE_AGENTS**: spawn one Code agent to create the unified PR:
 
 ```
 Agent(subagent_type="Code"):
@@ -481,8 +485,8 @@ If any Git agent output emitted `TRACEABILITY: DEGRADED (\{reason\})` lines duri
 │  └─ Branch safety → skip Phase 2 → detect FILES_CHANGED → Phases 3-8 → Phase 10-11
 │
 ├─ Phase 1: Setup
+│  └─ Plan document parsing (if .md path provided) - extracts execution plan, strategy, frontmatter issue
 │  └─ Git agent (operation: setup-task) - creates feature branch, fetches issue
-│  └─ Plan document parsing (if .md path provided) - extracts execution plan, strategy
 │
 ├─ Phase 2: Implement (3-strategy framework)
 │  ├─ SINGLE_CODE_AGENT (80%): One Code agent, full plan, CREATE_PR: true
@@ -510,12 +514,12 @@ If any Git agent output emitted `TRACEABILITY: DEGRADED (\{reason\})` lines duri
 │  └─ Test agent (scenario-based acceptance tests)
 │  └─ If FAIL: Code agent fix loop (max 2 retries) → Validate agent → re-test
 │
-├─ Phase 9: CI Status Gate (SINGLE_CODE_AGENT only)
+├─ Phase 9: CI Status Gate (SINGLE_CODE_AGENT + SEQUENTIAL_CODE_AGENTS; skipped for PARALLEL_CODE_AGENTS)
 │  └─ Git agent (check-ci-status) → poll/fix cycle (10 polls + 2 fix budget)
 │
 ├─ Phase 10: Create PR (if needed)
-│  └─ SINGLE_CODE_AGENT: handled by Code agent
-│  └─ SEQUENTIAL: handled by last Code agent
+│  └─ SINGLE_CODE_AGENT: already created by the Phase 2 Code agent
+│  └─ SEQUENTIAL: already created by the last Phase 2 Code agent
 │  └─ PARALLEL: Code agent (pr-create) creates unified PR
 │
 ├─ Phase 11: Report
@@ -537,7 +541,7 @@ If any Git agent output emitted `TRACEABILITY: DEGRADED (\{reason\})` lines duri
 9. **Validate agent owns validation** - Never run `npm test`, `npm run build`, or similar in main session; always delegate to Validate agent
 10. **Code agent owns fixes** - Never implement fixes in main session; spawn Code agent for validation failures and alignment fixes
 11. **Loop limits** - Max 2 validation retries, max 2 alignment fix iterations before escalating to user
-12. **CI awareness** - CI status is checked before merge for SINGLE_CODE_AGENT strategy
+12. **CI awareness** - CI status is checked before merge for SINGLE_CODE_AGENT and SEQUENTIAL_CODE_AGENTS, whose PR exists from Phase 2; skipped for PARALLEL_CODE_AGENTS, whose PR is created in Phase 10
 
 ## Error Handling
 

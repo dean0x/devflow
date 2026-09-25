@@ -263,7 +263,7 @@ Output: {worktree_path}/.devflow/docs/reviews/{branch-slug}/{timestamp}/review-s
 Agent(subagent_type="Git", run_in_background=false):
 "OPERATION: post-review-summary
 PR_NUMBER: {pr_number}
-REVIEW_SUMMARY_PATH: {worktree_path}/.devflow/docs/reviews/{branch-slug}/{timestamp}/review-summary.md
+REVIEW_SUMMARY_PATH: .devflow/docs/reviews/{branch-slug}/{timestamp}/review-summary.md
 CYCLE_NUMBER: {cycle_number}
 REVIEW_TIMESTAMP: {timestamp}
 REVIEW_PUBLICATION: {REVIEW_PUBLICATION}
@@ -281,7 +281,7 @@ Per worktree, after successful completion:
    - Merge recommendation (from Synthesize agent)
    - Issue counts by category (🔴 blocking / ⚠️ should-fix / ℹ️ pre-existing)
    - Review comment status: POSTED / POSTED+TRUNCATED (body exceeded 60k after redaction) / SKIPPED (D7 dedup) / DEGRADED (from Git)
-   - Publication status: FULL (private repo) | FULL (config override) | STUB (public repository) | OFF (publication disabled by config) (from Git agent)
+   - Publication status: FULL (private repo) | FULL (config override) | STUB (public repository) | OFF (publication disabled by config) | STUB (visibility undeterminable) (from Git agent)
    - Artifact paths
 
 In multi-worktree mode, report results per worktree.

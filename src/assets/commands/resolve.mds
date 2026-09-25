@@ -56,7 +56,7 @@ In multi-worktree mode, spawn all pre-flight agents **in a single message** (par
 
 **If BLOCKED:** In single-worktree mode, stop and report the blocker to user. If no reviews found, suggest `/code-review` or `/bug-analysis` first. In multi-worktree mode, report the failure but continue with other worktrees.
 
-**Extract from response:** `branch`, `base_branch`, `branch_slug`, `pr_number`, `review_count`, `diff_files` per worktree.
+**Extract from response:** `branch`, `base_branch`, `branch_slug`, `pr_number`, `review_count`, `diff_files` per worktree, and set `fork_no_push` when the response carries `TRACEABILITY: DEGRADED (cannot push to fork)` — the PR is cross-repository and this run cannot push to its branch.
 
 **Fetch PR body** (after extracting `pr_number`):
 ```bash
@@ -68,7 +68,7 @@ If `pr_number` is absent or the command fails, set `PR_DESCRIPTION` to `(none)`.
 
 #### Step 0c: Target Review Directory
 
-**Produces:** TARGET_DIR
+**Produces:** TARGET_DIR, TARGET_DIR_REL
 **Requires:** BRANCH_INFO
 
 For each worktree:
@@ -87,11 +87,11 @@ For each worktree:
 - If found: set `TARGET_DIR` to that path. Reviews take priority — bug analysis is only used when no qualifying review exists.
 - If not found within those 10 directories: skip worktree — report "No unresolved review or bug analysis found. Run `/code-review` or `/bug-analysis` first."
 
-Set `TARGET_DIR` to the selected review or bug-analysis directory path.
+Set `TARGET_DIR` to the selected review or bug-analysis directory path, and `TARGET_DIR_REL` to the same directory relative to the worktree root (`.devflow/docs/reviews/…` or `.devflow/docs/bug-analysis/…`) — the only form of it that may reach a PR comment.
 
 #### Step 0d: Load Project Decisions
 
-**Produces:** DECISIONS_CONTEXT, FEATURE_KNOWLEDGE, COMPLIANCE_SKILL_INSTALLED, REVIEW_PUBLICATION
+**Produces:** DECISIONS_CONTEXT, FEATURE_KNOWLEDGE, COMPLIANCE_SKILL_INSTALLED, REVIEW_PUBLICATION, RESOLUTION_TS
 
 {decisions_load()}
 
@@ -106,6 +106,8 @@ Reuse this result for every worktree.
 
 {publication_gate()}
 Resolve this per worktree — unlike the compliance check above, the config file is per worktree root.
+
+**Mint `RESOLUTION_TS` once per run:** `date -u +%Y-%m-%dT%H:%M:%SZ`. Every worktree reuses it — the resolution comment's dedup marker is searched per PR, so one run key keeps a retry of this run deduplicated while the next /resolve on the same PR posts. Phase 5 writes it as the summary's `**Date**:` and Phase 9b-2 passes it, so the local file and the posted marker agree.
 
 ### Phase 1: Parse Issues
 
@@ -237,7 +239,7 @@ Collect from each Code agent:
 ### Phase 5: Write resolution-summary.md
 
 **Produces:** RESOLUTION_FILE (early write for compaction safety)
-**Requires:** TRIAGE_RESULTS, CODE_AGENT_RESULTS, TARGET_DIR, BRANCH_INFO
+**Requires:** TRIAGE_RESULTS, CODE_AGENT_RESULTS, TARGET_DIR, TARGET_DIR_REL, BRANCH_INFO, RESOLUTION_TS
 
 **Immediately write `resolution-summary.md`** to `\{TARGET_DIR\}` using the Write tool. Do this now — not in Phase 9 — while results are fresh in context. This ensures the record is persisted even if later phases (Simplify, Verification Gate, CI gate, Tech Debt) trigger context compaction.
 
@@ -265,7 +267,7 @@ Simplify and refine the fixes for clarity and consistency"
 ### Phase 7: Verification Gate
 
 **Produces:** VERIFICATION_STATUS
-**Requires:** CODE_AGENT_RESULTS
+**Requires:** CODE_AGENT_RESULTS, BRANCH_INFO
 
 If no fixes were made (CODE_AGENT_RESULTS contains 0 commits) → set VERIFICATION_STATUS = SKIPPED, skip: "No fixes applied — skipping Verification Gate."
 
@@ -303,21 +305,25 @@ Run build, typecheck, lint, test. Report pass/fail with failure details."
 Record `## Verification` outcome in resolution-summary.md (runs unconditionally after the validation loop exits):
 - Rewrite the `## Verification` section with | Command | Result | table + `Final gate: PASS | FAILED after N attempts`
 
-Push all commits to remote once (Code agents and validation-fix Code agents ran with PUSH: false — runs unconditionally whether the gate PASSED or FAILED, so the branch is always visible before Phase 9 or CI runs):
+Push all commits to remote once (Code agents and validation-fix Code agents ran with PUSH: false — runs whether the gate PASSED or FAILED, so the branch is always visible before Phase 9 or CI runs):
 ```bash
 git -C {worktree} push
 ```
+
+**If `fork_no_push` is set:** do not push. Record `Push: skipped — cannot push to fork` under `## Verification`, and skip Phase 8 — no pushed commit exists for CI to check.
 
 **Route after push:** VERIFICATION_STATUS = PASS → continue to Phase 8 (CI gate). VERIFICATION_STATUS = FAILED → skip Phase 8; proceed directly to Phase 9 (manage-debt), then Phase 9b (thread resolution + resolution comment), then Phase 9c (merge readiness), then Phase 10 (report). VERIFICATION_STATUS = SKIPPED → skip Phase 8 (no fixes applied); proceed to Phase 9 (manage-debt), then Phase 9b (thread resolution + resolution comment), then Phase 9c (merge readiness, compliance-gated), then Phase 10 (report).
 
 ### Phase 8: CI Status Gate (Conditional)
 
 **Produces:** CI_STATUS
-**Requires:** CODE_AGENT_RESULTS, VERIFICATION_STATUS
+**Requires:** CODE_AGENT_RESULTS, VERIFICATION_STATUS, BRANCH_INFO
 
 If no issues were fixed (CODE_AGENT_RESULTS contains 0 fixes) → skip: "No fixes applied — skipping CI validation."
 
 If Verification Gate FAILED → skip CI gate (validation failures already reported).
+
+If `fork_no_push` is set → skip: "Cannot push to fork — skipping CI validation."
 
 Otherwise, for each worktree with fixes:
 
@@ -356,16 +362,17 @@ After manage-debt completes:
 ### Phase 9b: Thread Resolution + Resolution Comment
 
 **Produces:** THREAD_RESOLUTION_RESULT, PR_COMMENT
-**Requires:** THREAD_MAP (from Phase 1b), VERIFICATION_STATUS, CODE_AGENT_RESULTS, TRIAGE_RESULTS
+**Requires:** THREAD_MAP (from Phase 1b), VERIFICATION_STATUS, CODE_AGENT_RESULTS, TRIAGE_RESULTS, BRANCH_INFO, TARGET_DIR_REL, RESOLUTION_TS
 
 **Step 9b-1: Resolve external threads (Compliance-gated)**
 
-Skip this step if `COMPLIANCE_SKILL_INSTALLED` is false or THREAD_MAP is empty.
+Skip this step if `COMPLIANCE_SKILL_INSTALLED` is false or THREAD_MAP is empty, and record `THREAD_RESOLUTION_RESULT` as `SKIPPED (\{reason\})`.
 
 Prepare THREAD_MAP with verdicts from triage/code agent results:
 - For each `ext-\{N\}`: match to an issue verdict (FIXED, FALSE_POSITIVE, BY_DESIGN, ESCALATED) by `file:line` correlation
 - If the matched issue has verdict DUPLICATE, use the **primary's** verdict and verification status for the reply — do not expose DUPLICATE to the thread author (avoids PF-024; caller-side mapping — git.md contracts unchanged)
 - Include `commit_sha` from Code agent results for FIXED verdicts
+- If `fork_no_push` is set: drop FIXED entries from THREAD_MAP — their commits never reached the PR — and record each as `DEGRADED` in `## Third-Party Threads`
 - Unmatched threads: ESCALATED (human review)
 
 Spawn Git agent:
@@ -380,7 +387,11 @@ WORKTREE_PATH: {worktree_path}  (omit if cwd)
 D9: resolve threads ONLY when VERIFICATION_STATUS == PASS AND verdict == FIXED AND commit_sha non-empty."
 ```
 
-If Git agent returns `TRACEABILITY: DEGRADED`: warn, record in `## Third-Party Threads`, continue to step 9b-2.
+If Git agent returns `TRACEABILITY: DEGRADED`: warn, record in `## Third-Party Threads`, record `THREAD_RESOLUTION_RESULT` as `DEGRADED (\{reason\})`, continue to step 9b-2.
+
+Capture the returned `### Status:` line as `THREAD_RESOLUTION_RESULT`.
+
+Update `## Third-Party Threads` in resolution-summary.md with these thread results now — 9b-2 posts that file, so an update after it never reaches the PR comment.
 
 **Step 9b-2: Post resolution summary (ALWAYS-ON)**
 
@@ -392,15 +403,14 @@ Spawn Git agent:
 Agent(subagent_type="Git"):
 "OPERATION: post-resolution-summary
 PR_NUMBER: {pr_number}
-RESOLUTION_SUMMARY_PATH: {TARGET_DIR}/resolution-summary.md
+RESOLUTION_SUMMARY_PATH: {TARGET_DIR_REL}/resolution-summary.md
+RESOLUTION_TS: {RESOLUTION_TS}
 REVIEW_PUBLICATION: {REVIEW_PUBLICATION}
 WORKTREE_PATH: {worktree_path}  (omit if cwd)
-Posts the consolidated resolution-summary comment (marker-deduped by the operation)."
+Posts the consolidated resolution-summary comment (marker-deduped by the operation on RESOLUTION_TS)."
 ```
 
-If Git agent returns `TRACEABILITY: DEGRADED`: warn, continue.
-
-Update `## Third-Party Threads` section in resolution-summary.md with thread resolution results.
+Capture the Git agent's `**Publication**:` and `**Status**:` lines as `PR_COMMENT`. If it returns `TRACEABILITY: DEGRADED (\{reason\})` instead, `PR_COMMENT`'s status is `DEGRADED (\{reason\})`: warn, continue.
 
 ### Phase 9c: Merge Readiness (Compliance-gated, Report-only)
 
@@ -424,9 +434,9 @@ If Git agent returns `TRACEABILITY: DEGRADED`: warn, proceed to Phase 10.
 
 ### Phase 10: Report
 
-**Requires:** BRANCH_INFO, TARGET_DIR
+**Requires:** BRANCH_INFO, TARGET_DIR, PR_COMMENT, THREAD_RESOLUTION_RESULT
 
-The resolution summary was already written to `\{TARGET_DIR\}/resolution-summary.md` in Phase 5 (updated by Phase 7 and Phase 9). Display results to the user:
+The resolution summary was already written to `\{TARGET_DIR\}/resolution-summary.md` in Phase 5 (updated by Phase 7, Phase 9 and Phase 9b-1). Display results to the user:
 
 ```
 ## Resolution Summary
@@ -459,8 +469,11 @@ Final gate: {PASS | FAILED after N attempts}
 ### Tech Debt Added
 - {n} items added to backlog
 
-### Publication (from Git agent)
-{FULL (private repo) | FULL (config override) | STUB (public repository) | OFF (publication disabled by config)}
+### Evidence Posts
+- Resolution comment: {POSTED | POSTED+TRUNCATED | SKIPPED (already posted) | SKIPPED (publication off) | SKIPPED (no PR) | DEGRADED (reason)}
+- Publication: {FULL (private repo) | FULL (config override) | STUB (public repository) | OFF (publication disabled by config) | STUB (visibility undeterminable)}
+- Thread replies: {COMPLETE | PARTIAL | TRUNCATED | SKIPPED (reason) | DEGRADED (reason)}
+- Push: {pushed | skipped (no fixes) | skipped (cannot push to fork)}
 
 ### Merge Readiness (if compliance enabled)
 {READY | NOT_READY (reason) | DEGRADED (reason) | SKIPPED (compliance not enabled)}
@@ -544,6 +557,7 @@ In multi-worktree mode, report results per worktree with aggregate summary.
 | No PR exists for post-resolution-summary | Git agent returns TRACEABILITY: DEGRADED; resolution-summary.md already on disk — not a blocker |
 | Public repo (`auto` mode) | Git agent probes visibility, posts counts-only STUB comment; full resolution report stays local |
 | `reviewPublication: off` | Git agent skips posting the resolution comment (OFF) |
+| Fork PR this run cannot push to (no maintainer edits, no push access of its own) | validate-branch emits `TRACEABILITY: DEGRADED (cannot push to fork)` → `fork_no_push`: Phase 7 skips the push, Phase 8 is skipped, 9b-1 records FIXED threads as DEGRADED instead of citing unpushed commits; 9b-2 still posts the resolution comment |
 
 ## Principles
 
@@ -566,8 +580,8 @@ Written in Phase 5 (Collect Results) to `\{TARGET_DIR\}/resolution-summary.md`:
 # Resolution Summary
 
 **Branch**: {branch} -> {base_branch}
-**Date**: {timestamp}
-**Review**: {TARGET_DIR}
+**Date**: {RESOLUTION_TS}
+**Review**: {TARGET_DIR_REL}
 **Command**: /resolve
 
 ## Decisions Citations

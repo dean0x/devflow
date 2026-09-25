@@ -154,7 +154,7 @@ Pre-flight checks and fixes for `/code-review`. Ensures branch is ready for code
 
 ## Operation: validate-branch
 
-Pre-flight validation for `/resolve`. Checks branch state without modifications.
+Read-only pre-flight check for `/resolve`; it may emit `TRACEABILITY: DEGRADED`.
 
 **Input:** `WORKTREE_PATH` (optional)
 
@@ -370,7 +370,7 @@ The publication gate this operation applies is the `devflow:git` skill's `refere
 **PR**: #{number}
 **Cycle**: {CYCLE_NUMBER}
 **Review timestamp**: {REVIEW_TIMESTAMP}
-**Publication**: FULL (private repo) | FULL (config override) | STUB (public repository) | OFF (publication disabled by config)
+**Publication**: FULL (private repo) | FULL (config override) | STUB (public repository) | OFF (publication disabled by config) | STUB (visibility undeterminable)
 **Status**: POSTED | POSTED+TRUNCATED (body exceeded 60k after redaction — `NOTE` prepended to body) | SKIPPED (already posted for cycle {N} ts:{REVIEW_TIMESTAMP}) | DEGRADED ({reason})
 ```
 
@@ -612,7 +612,7 @@ Reply to external review threads and, when conditions are met, mark them resolve
 
 Post the resolution summary as a single PR comment. Marker-based deduplication — only one comment per workflow run, never edited after posting (D8).
 
-**Input:** `PR_NUMBER`, `RESOLUTION_SUMMARY_PATH`, `WORKTREE_PATH` (optional), `REVIEW_PUBLICATION` (optional; values: `auto` | `full` | `off`; absent/unrecognised → `auto`)
+**Input:** `PR_NUMBER`, `RESOLUTION_SUMMARY_PATH`, `RESOLUTION_TS`, `WORKTREE_PATH` (optional), `REVIEW_PUBLICATION` (optional; values: `auto` | `full` | `off`; absent/unrecognised → `auto`)
 
 **Degradation (D4):** No PR → `TRACEABILITY: DEGRADED (no PR)`, warn, return. Resolution summary is already written to disk.
 
@@ -627,7 +627,7 @@ The body those mechanics compose MUST NOT reproduce verbatim content from any `<
 ```markdown
 ## Resolution Summary Posted
 **PR**: #{number}
-**Publication**: FULL (private repo) | FULL (config override) | STUB (public repository) | OFF (publication disabled by config)
+**Publication**: FULL (private repo) | FULL (config override) | STUB (public repository) | OFF (publication disabled by config) | STUB (visibility undeterminable)
 **Status**: POSTED | POSTED+TRUNCATED (body exceeded 60k after redaction — `NOTE` prepended to body) | SKIPPED (already posted) | DEGRADED ({reason})
 ```
 
