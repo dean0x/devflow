@@ -40,6 +40,11 @@ function makeRunner(tmpHome: string, devflowDir: string) {
     const result = spawnSync('node', [CLI, ...args], {
       encoding: 'utf-8',
       timeout: 60000,
+      // A temp HOME alone does not isolate `init`: a user-scope install resolves the
+      // project git root from its cwd, and an inherited cwd is the developer's repo, so
+      // every run rewrote that repo's .devflow/config.json, root .gitignore and
+      // .claudeignore (applies PF-060). tmpHome is a fresh mkdtemp, never inside a repo.
+      cwd: tmpHome,
       env: {
         ...process.env,
         HOME: tmpHome,
