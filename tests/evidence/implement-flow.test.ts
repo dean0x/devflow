@@ -15,6 +15,11 @@
  *          and the HEAD it ran at (read before and after); the Validate agent
  *          reports each command's exit and its HEAD. The Test outcome vocabulary is
  *          the claim grammar's (CLAIM_LINE_RE), so every row maps onto a claim.
+ *   AC-9   /plan's artifact carries a `## Test Plan` section (required section
+ *          13): Gate 2 shows the TP lines in the imported TP-line contract, and
+ *          Phase 14 runs `check tp` over them before the artifact's one write —
+ *          so the contract text, whose "Write every" would read as a second write
+ *          instruction, stays out of Phase 14 (g5-issue-flow's single-write rule).
  *
  * Every guard has a named collector, a non-empty-corpus assertion and a known-bad
  * probe run through the same collector (PF-064).
@@ -33,7 +38,7 @@ import { mkdtempSync, rmSync, writeFileSync } from 'fs'
 import { tmpdir } from 'os'
 import * as path from 'path'
 
-import { collectOrderViolations, resolveAgentSource, type OrderRule } from '../helpers.js'
+import { collectOrderViolations, requireDistFile, resolveAgentSource, type OrderRule } from '../helpers.js'
 import { PR_EVIDENCE_SCRIPT, VERIFY_EVIDENCE_SCRIPT } from './seam.js'
 
 /** Transcribed from the script's JSDoc — only what this suite calls. */
@@ -297,6 +302,53 @@ describe('AC-11: the Test and Validate agents report what a claim needs', () => 
     const validate = resolveAgentSource('validate').content
     expect(collectValidateReportDefects(validate.replace(VALIDATE_HEADER, '| Command | Status | Duration |'))).toEqual([
       `no "${VALIDATE_HEADER}" table`,
+    ])
+  })
+})
+
+// ---------------------------------------------------------------------------
+// /plan — the artifact's `## Test Plan` section (AC-9)
+// ---------------------------------------------------------------------------
+
+const CONTRACT_HEAD = '**Test-plan line (TP).**'
+const PLAN_CHECK = '**Check the test plan before the artifact exists:**'
+const PLAN_WRITE = '**Write the artifact now**'
+
+const PLAN_ORDER: readonly OrderRule[] = [
+  { label: 'Gate 2 shows the TP lines in the contract\'s shape', before: '#### Phase 13: Gate 2', after: CONTRACT_HEAD },
+  { label: 'the contract stays out of Phase 14', before: CONTRACT_HEAD, after: '#### Phase 14: Output' },
+  { label: 'section 13 is listed in Phase 14', before: '#### Phase 14: Output', after: '13. **Test Plan** — ' },
+  { label: 'the plan is checked before the artifact is written', before: PLAN_CHECK, after: PLAN_WRITE },
+]
+
+/** Named collector: what /plan's built text lacks for the `## Test Plan` section. */
+function collectPlanTestPlanDefects(plan: string): string[] {
+  const out = collectOrderViolations('plan.md', plan, PLAN_ORDER)
+  const lines = plan.split('\n')
+  if (lines.filter(l => l === '### 12. PR Description Guidance').length !== 1) out.push('`### 12.` lost its number')
+  if (!lines.some(l => l.startsWith('   - Test strategy — the test plan as TP lines'))) out.push('Gate 2 does not list the TP lines')
+  const check = lines.find(l => l.startsWith('node ') && l.includes('verify-evidence.cjs" check tp <that file>; echo "exit=$?"'))
+  if (check === undefined) out.push('Phase 14 runs no `check tp`')
+  return out
+}
+
+describe('AC-9: /plan keeps a checked `## Test Plan` section', () => {
+  it('Gate 2 shows the contract, section 13 is listed and the check precedes the one write', () => {
+    const plan = requireDistFile('plan.md')
+    expect(plan.split(CONTRACT_HEAD).length - 1, 'the contract expands exactly once').toBe(1)
+    expect(collectPlanTestPlanDefects(plan)).toEqual([])
+  })
+
+  it('known-bad probes: a lost section 13 and a check moved after the write are reported', () => {
+    const plan = requireDistFile('plan.md')
+    const noSection = plan.replace('13. **Test Plan** — ', '13. Test plan — ')
+    expect(noSection, 'the seed must land').not.toBe(plan)
+    expect(collectPlanTestPlanDefects(noSection)).toEqual([
+      'plan.md: [section 13 is listed in Phase 14] after anchor absent: "13. **Test Plan** — "',
+    ])
+    const late = plan.replace(PLAN_CHECK, 'Check later:').replace(PLAN_WRITE, `${PLAN_WRITE}\n\n${PLAN_CHECK}`)
+    expect(collectPlanTestPlanDefects(late)).toEqual([
+      `plan.md: [the plan is checked before the artifact is written] "${PLAN_CHECK}" does not precede "${PLAN_WRITE}"`,
     ])
   })
 })

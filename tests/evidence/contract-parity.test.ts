@@ -9,8 +9,10 @@
  *         RegExp that accepts and rejects exactly what TP_LINE_RE does over a
  *         differential table; the Fields prose names the script's own bounds; the
  *         States, Methods and precedence lists equal STATES, METHODS and PRECEDENCE.
- *         The partial stays import-free with two defines (PF-073), and both
- *         /dynamic-* commands carry the define's whole expansion exactly once.
+ *         The partial stays import-free with two defines (PF-073), and every
+ *         adopter — the two /dynamic-* commands, /plan (#363 P4: its Gate 2 shows
+ *         the TP lines its `## Test Plan` section keeps) and, from the commit that
+ *         wires it, /implement — carries the define's whole expansion exactly once.
  *
  * The exception grammar is held three ways: `evidence_exception()`'s kind list,
  * code.md's paste gate and the script's EXCEPTION_KINDS / EXCEPTION_LINE_RE name
@@ -56,8 +58,8 @@ const EM = '—'
 
 /** PF-073: compile cost is exponential in the define count; the contract partial holds exactly these. */
 const KNOWN_DEFINES: readonly string[] = [TP_DEFINE, CONTRACT_DEFINE]
-/** The command hosts that import the contract partial. */
-const CONTRACT_ADOPTERS: readonly string[] = ['dynamic-build', 'dynamic-plan']
+/** The command hosts that import the contract partial, sorted. */
+const CONTRACT_ADOPTERS: readonly string[] = ['dynamic-build', 'dynamic-plan', 'plan']
 
 interface TextFile {
   readonly name: string
@@ -360,7 +362,7 @@ describe('AC-2: the _plan_contract partial', () => {
     expect(body.split('\n').filter(l => l.trim() === `{${TP_DEFINE}()}`)).toHaveLength(1)
   })
 
-  it('is imported by exactly the /dynamic-* hosts', () => {
+  it('is imported by exactly the adopter hosts', () => {
     const corpus = walkFiles(path.join(ROOT, 'src'), f => f.endsWith('.mds')).map(f => ({
       name: path.basename(f, '.mds'),
       content: readFileSync(f, 'utf-8'),
@@ -377,7 +379,7 @@ describe('AC-2: the _plan_contract partial', () => {
     expect(collectContractImporters(seeded)).toEqual(['stray'])
   })
 
-  it('both built /dynamic-* commands carry the whole expansion exactly once', () => {
+  it('every adopter\'s built command carries the whole expansion exactly once', () => {
     const expansion = contractText()
     expect(expansion.length, 'the define body is empty').toBeGreaterThan(600)
     const files = CONTRACT_ADOPTERS.map(h => ({ name: `${h}.md`, content: requireDistFile(`${h}.md`) }))
