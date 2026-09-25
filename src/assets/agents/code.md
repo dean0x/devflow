@@ -34,6 +34,7 @@ You receive from orchestrator:
 - **PUSH** (optional): `true` (default) | `false` — when false, commit only; orchestrator owns push/CI gate
 - **ISSUE_NUMBER** (optional): the provider-canonical identifier of the issue linked to this task — the same value the Git agent emits as `- **Issue ID**: {ISSUE_ID}` under `### Handoff Values`. When provided, include a `## Related Issues` section in the PR body, closed by the line Responsibility 7's paste gate admits
 - **ISSUE_PR_LINK** (optional): the already-rendered closing line for `## Related Issues`, forwarded verbatim from the Git agent's `- **PR link line**: {rendered}` under `### Handoff Values`. `(none)`, or absent, means no rendered line was captured — the section then carries its heading and no reference. Paste it only after the shape re-check in Responsibility 7; it is never a substitute for `ISSUE_NUMBER`, which stays the spawn key
+- **PR_EXCEPTIONS** (optional): the pre-rendered `## Evidence Exceptions` section — a self-attested evidence exception /implement recorded when no ticket was linked — forwarded verbatim from its handoff file. `(none)`, or absent, means none was recorded and the body carries no such section. Paste it only after the shape re-check in Responsibility 7
 
 **Domain hint** (optional):
 - **DOMAIN**: `backend` | `frontend` | `tests` | `fullstack` - Load/apply relevant domain skills
@@ -108,6 +109,14 @@ When you apply a decision from `.devflow/learning/decisions.md` or avoid a pitfa
    `(none)`, or an absent `### Handoff Values` block, is **not a mismatch**: it means no line was captured, so emit the `## Related Issues` heading with no reference — never compose one from `ISSUE_NUMBER`. A bare issue number is not a reference at all — the same digits name a different issue under each provider — which is why `TRACEABILITY: DEGRADED (ambiguous issue reference)` exists rather than a `#`-prefixed guess. On a MISMATCH, do not paste it and do not repair it — emit `TRACEABILITY: DEGRADED (issue reference "{ref}" does not match any tracker reference grammar)` and emit the heading with no reference.
 
    This re-check is the only gate on that value — no operation checks the rendered line's shape before returning it — and it belongs here because a value that was well-formed when it was produced is still attacker-influenceable text by the time it reaches a GitHub-visible sink. Never re-derive `ISSUE_BRANCH_TOKEN` yourself; if the block is absent, say so rather than inventing either value.
+
+   **Pasting `PR_EXCEPTIONS`.** When `PR_EXCEPTIONS` is provided (not `(none)`), append it verbatim as the body's last section — it is scrubbed with the body. Re-check its shape first: its first line must be exactly `## Evidence Exceptions`, and every line after it must match this pattern as the WHOLE line:
+
+   ```
+   ^- `ticket-link` self-attested by (@[A-Za-z0-9][A-Za-z0-9-]{0,38}|\(login unavailable\)) at [0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z: [!"%'()*+,./0-9:;=?A-Z^_a-z{|}~-][ !"%'()*+,./0-9:;=?A-Z^_a-z{|}~-]{0,199}$
+   ```
+
+   The value holds that heading and one or more such lines, and nothing else — no blank line, no second heading, no free text — with each kind at most once. The pattern bounds every line: the reason is at most 200 characters, and it admits no `<`, `>`, backtick, bracket, backslash, `#`, `@`, `&`, `$` or non-ASCII character, so no markup, mention, issue reference, marker or shell expansion rides in on it. `(none)`, or absent, is **not a mismatch**: add no section. On a MISMATCH anywhere, paste none of it and do not repair it — emit `TRACEABILITY: DEGRADED (evidence exception does not match its grammar)`. The scrubber-failure minimal body below never carries the section.
 
    If `PR_DESCRIPTION_GUIDANCE` is absent, generate the PR body from implementation context.
 
@@ -189,11 +198,11 @@ When `OPERATION: qa-fix`, you are fixing scenario-based acceptance test failures
 
 When `OPERATION: pr-create`, earlier Code agents have already committed the implementation and you only open the pull request. Make no code changes.
 
-**Inputs:** `TASK_ID`, `BASE_BRANCH`, `CREATE_PR: true`, `PR_DESCRIPTION_GUIDANCE`, `ISSUE_NUMBER`, `ISSUE_PR_LINK`
+**Inputs:** `TASK_ID`, `BASE_BRANCH`, `CREATE_PR: true`, `PR_DESCRIPTION_GUIDANCE`, `ISSUE_NUMBER`, `ISSUE_PR_LINK`, `PR_EXCEPTIONS`
 
 **Protocol:**
 1. Push the current feature branch.
-2. Run Responsibility 7 only — the PR body, the `## Related Issues` paste gate and the D11 scrub — targeting `BASE_BRANCH`.
+2. Run Responsibility 7 only — the PR body, the `## Related Issues` and `PR_EXCEPTIONS` paste gates and the D11 scrub — targeting `BASE_BRANCH`.
 3. Return the PR URL.
 
 ## Principles

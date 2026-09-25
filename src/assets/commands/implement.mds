@@ -4,7 +4,7 @@ output-dir: dist/commands
 ---
 @import { knowledge_load, knowledge_writeback } from "./_partials/_knowledge.mds"
 @import { decisions_load } from "./_partials/_decisions.mds"
-@import { evidence_policy } from "./_partials/_evidence_policy.mds"
+@import { evidence_policy, evidence_exception } from "./_partials/_evidence_policy.mds"
 @import { issue_ref_grammar, issue_capture_contract } from "./_partials/_tracker.mds"
 
 # Implement Command
@@ -48,7 +48,7 @@ If the user prompt does NOT match re-validation, proceed with the full pipeline 
 
 ### Phase 1: Setup
 
-**Produces:** TASK_ID, BASE_BRANCH, EXECUTION_PLAN, DECISIONS_CONTEXT, FEATURE_KNOWLEDGE, PR_DESCRIPTION_GUIDANCE, ISSUE_NUMBER, EVIDENCE_POLICY, ISSUE_REQUIRED, APPLY_CONVENTIONS, REQUIRE_NON_AUTHOR_APPROVAL
+**Produces:** TASK_ID, BASE_BRANCH, EXECUTION_PLAN, DECISIONS_CONTEXT, FEATURE_KNOWLEDGE, PR_DESCRIPTION_GUIDANCE, ISSUE_NUMBER, EVIDENCE_POLICY, ISSUE_REQUIRED, APPLY_CONVENTIONS, REQUIRE_NON_AUTHOR_APPROVAL, PR_EXCEPTIONS
 
 **Load Companion Skills** — Load via Skill tool: `devflow:test-driven-development`, `devflow:patterns`, `devflow:dependency-research`. If a skill fails to load, continue without it.
 
@@ -118,6 +118,14 @@ visible, a silently discarded request is not.
 
 {issue_capture_contract()}
 
+**Ticket link, only when `ISSUE_REQUIRED` is `true`:** when the capture above holds no `ISSUE_PR_LINK` (absent, or `(none)`), ask with AskUserQuestion before any Code spawn — "No tracker issue is linked to this task. Record a self-attested exception, or stop?" — offering exactly these two options:
+- **Record an exception** — the user gives the reason as free text. Render it with the grammar below; when the rendered reason is empty, ask for it once more, and stop as below if it is empty again.
+- **Stop** — report `BLOCKED (no ticket link)`, name the branch setup-task created (`TASK_ID`) and `BASE_BRANCH` so it can be reused or removed, and give the remedy: create or link the tracker issue and re-run `/implement` with its reference, or — for a team that does not want ticket links — commit `.devflow/policy.json` as `\{"version":1,"evidencePolicy":"standard"\}` on the default branch. Spawn nothing further.
+
+{evidence_exception()}
+
+**Record the exception at once**, before any Code spawn: write the rendered section as the `## Evidence Exceptions` section of `.devflow/docs/handoff-\{branch_slug\}.md`, creating the file if absent, and set `PR_EXCEPTIONS` to that section. The file is its one home until the PR exists: every later write to the file keeps the section byte-identical, every PR-creating Code spawn passes it verbatim as `PR_EXCEPTIONS`, and the file is deleted only once the PR exists — after the PR-creating Phase 2 Code agent under SINGLE_CODE_AGENT and SEQUENTIAL_CODE_AGENTS, after Phase 10 under PARALLEL_CODE_AGENTS. With no exception recorded, `PR_EXCEPTIONS` is `(none)`.
+
 {decisions_load()}
 
 Pass to Code agent (Phase 2) and Scrutinize agent (Phase 5).
@@ -127,7 +135,7 @@ Pass to Code agent (Phase 2) and Scrutinize agent (Phase 5).
 ### Phase 2: Implement
 
 **Produces:** CODE_AGENT_OUTPUT, FILES_CHANGED, PR_URL
-**Requires:** TASK_ID, BASE_BRANCH, EXECUTION_PLAN, PR_DESCRIPTION_GUIDANCE
+**Requires:** TASK_ID, BASE_BRANCH, EXECUTION_PLAN, PR_DESCRIPTION_GUIDANCE, PR_EXCEPTIONS
 
 Based on Setup context (plan document, issue body, or conversation context), use the three-strategy framework:
 
@@ -158,7 +166,8 @@ FEATURE_KNOWLEDGE: {feature_knowledge}
 DECISIONS_CONTEXT: {decisions_context}
 PR_DESCRIPTION_GUIDANCE: {pr_description_guidance}
 ISSUE_NUMBER: {ISSUE_ID captured in Phase 1, or (none)}
-ISSUE_PR_LINK: {ISSUE_PR_LINK captured in Phase 1, or (none)}"
+ISSUE_PR_LINK: {ISSUE_PR_LINK captured in Phase 1, or (none)}
+PR_EXCEPTIONS: {the ## Evidence Exceptions section of .devflow/docs/handoff-{branch_slug}.md verbatim, or (none)}"
 ```
 
 ---
@@ -203,11 +212,12 @@ DECISIONS_CONTEXT: {decisions_context}
 PR_DESCRIPTION_GUIDANCE: {pr_description_guidance}
 ISSUE_NUMBER: {ISSUE_ID captured in Phase 1, or (none)}
 ISSUE_PR_LINK: {ISSUE_PR_LINK captured in Phase 1, or (none)}
+PR_EXCEPTIONS: {the ## Evidence Exceptions section of .devflow/docs/handoff-{branch_slug}.md verbatim, or (none)}
 HANDOFF_REQUIRED: {true if not last phase}
 HANDOFF_FILE: .devflow/docs/handoff-{branch_slug}.md"
 ```
 
-**Handoff Protocol**: Each sequential Code agent receives the prior Code agent's implementation summary via PRIOR_PHASE_SUMMARY and FILES_FROM_PRIOR_PHASE. The Code agent's built-in branch orientation step handles git log scanning, file reading, and pattern discovery automatically. After each Code agent with HANDOFF_REQUIRED=true completes, write its phase summary to `.devflow/docs/handoff-\{branch_slug\}.md` using the Write tool (survives context compaction). Delete `.devflow/docs/handoff-\{branch_slug\}.md` after the final Code agent completes (cleanup).
+**Handoff Protocol**: Each sequential Code agent receives the prior Code agent's implementation summary via PRIOR_PHASE_SUMMARY and FILES_FROM_PRIOR_PHASE. The Code agent's built-in branch orientation step handles git log scanning, file reading, and pattern discovery automatically. After each Code agent with HANDOFF_REQUIRED=true completes, write its phase summary to `.devflow/docs/handoff-\{branch_slug\}.md` using the Write tool (survives context compaction), keeping any `## Evidence Exceptions` section byte-identical. Delete `.devflow/docs/handoff-\{branch_slug\}.md` once the PR exists — after the final Code agent, which creates it, completes (cleanup).
 
 ---
 
@@ -445,7 +455,7 @@ Strategy-conditional: run when the PR already exists — **SINGLE_CODE_AGENT** a
 ### Phase 10: Create PR
 
 **Produces:** PR_URL
-**Requires:** BASE_BRANCH, TASK_ID
+**Requires:** BASE_BRANCH, TASK_ID, PR_EXCEPTIONS
 
 **For SEQUENTIAL_CODE_AGENTS**: the PR already exists — the last Phase 2 Code agent (`CREATE_PR: true`) created it, and Phase 9 has gated its CI.
 
@@ -460,10 +470,11 @@ BASE_BRANCH: {base branch}
 CREATE_PR: true
 PR_DESCRIPTION_GUIDANCE: {pr_description_guidance}
 ISSUE_NUMBER: {ISSUE_ID captured in Phase 1, or (none)}
-ISSUE_PR_LINK: {ISSUE_PR_LINK captured in Phase 1, or (none)}"
+ISSUE_PR_LINK: {ISSUE_PR_LINK captured in Phase 1, or (none)}
+PR_EXCEPTIONS: {the ## Evidence Exceptions section of .devflow/docs/handoff-{branch_slug}.md verbatim, or (none)}"
 ```
 
-Its Responsibility 7 composes the body, pastes `ISSUE_PR_LINK` through the paste gate and scrubs the body (D11) before `gh pr create`. This command renders no link line and creates no PR itself: the Git agent's Phase-1 rendering is the only one, forwarded verbatim.
+Its Responsibility 7 composes the body, pastes `ISSUE_PR_LINK` and `PR_EXCEPTIONS` through their paste gates and scrubs the body (D11) before `gh pr create`. This command renders no link line and creates no PR itself: the Git agent's Phase-1 rendering is the only one, forwarded verbatim.
 
 **For SINGLE_CODE_AGENT**: PR is created by the Code agent (CREATE_PR: true) — the Code agent's Responsibility 7 handles Related Issues inclusion when ISSUE_NUMBER is provided.
 
@@ -474,6 +485,8 @@ Its Responsibility 7 composes the body, pastes `ISSUE_PR_LINK` through the paste
 Display completion summary with phase status, PR info, and next steps.
 
 If any Git agent output emitted `TRACEABILITY: DEGRADED (\{reason\})` lines during the run, surface them verbatim in the report under a `### Traceability` subsection so the user can act on them.
+
+If Phase 1 recorded an evidence exception, show its `## Evidence Exceptions` line in the report.
 
 {knowledge_writeback()}
 
@@ -488,6 +501,7 @@ If any Git agent output emitted `TRACEABILITY: DEGRADED (\{reason\})` lines duri
 ├─ Phase 1: Setup
 │  └─ Plan document parsing (if .md path provided) - extracts execution plan, strategy, frontmatter issue
 │  └─ Git agent (operation: setup-task) - creates feature branch, fetches issue
+│  └─ Ticket-link ask (no linked ticket, issue required) - record a self-attested exception or stop
 │
 ├─ Phase 2: Implement (3-strategy framework)
 │  ├─ SINGLE_CODE_AGENT (80%): One Code agent, full plan, CREATE_PR: true

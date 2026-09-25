@@ -36,7 +36,7 @@ import { readFileSync } from 'fs'
 import * as path from 'path'
 
 import { compiledSkillRefsDir } from '../../src/core/assets.js'
-import { requireDistFiles, requireDistFile, walkFiles } from '../helpers.js'
+import { requireDistFiles, requireDistFile, resolveAllAgents, walkFiles } from '../helpers.js'
 
 const ROOT = path.resolve(import.meta.dirname, '../..')
 const REFS_DIR = compiledSkillRefsDir()
@@ -139,13 +139,14 @@ const DISPOSITION: readonly DispositionRow[] = [
   },
   {
     row: 5,
-    subject: '/implement setup-task spawn',
+    subject: '/implement setup-task spawn and the ticket-link ask',
     inputs: ['ISSUE_REQUIRED', 'APPLY_CONVENTIONS'],
-    on: 'forward the resolved inputs',
-    off: 'forward the resolved inputs',
+    on: 'forward the resolved inputs; with no linked ticket, ask — record a self-attested exception, or stop',
+    off: 'forward the resolved inputs; no ask',
     sites: [
       { file: 'commands/implement.md', anchor: fenceKey('ISSUE_REQUIRED'), phrase: fenceKey('ISSUE_REQUIRED') },
       { file: 'commands/implement.md', anchor: fenceKey('APPLY_CONVENTIONS'), phrase: fenceKey('APPLY_CONVENTIONS') },
+      { file: 'commands/implement.md', anchor: '**Ticket link, ', phrase: gate('ISSUE_REQUIRED') },
     ],
   },
   {
@@ -597,11 +598,29 @@ describe('orchestrator decisions (2026-09-25): no ticket gate outside /implement
     expect(seed('Only when `EVIDENCE_POLICY` is `required`, a resolved `off` becomes `stub`.')).toEqual([])
   })
 
-  it('/implement is the only command that records an evidence exception', () => {
-    const carriers = corpus
-      .filter(f => f.file.startsWith('commands/'))
+  /**
+   * Named collector: the built commands and agents that carry the exception flow.
+   * /implement records it; the Code agent pastes it (the one creation path
+   * /implement has). Anything else carrying it is a second recorder or a second sink.
+   */
+  function collectExceptionCarriers(files: readonly BuiltFile[]): string[] {
+    return files
       .filter(f => f.content.includes('PR_EXCEPTIONS') || f.content.includes('## Evidence Exceptions'))
       .map(f => f.file)
-    expect(carriers.filter(f => f !== 'commands/implement.md')).toEqual([])
+      .sort()
+  }
+
+  it('/implement is the only command that records an evidence exception, and code.md the only agent that pastes it', () => {
+    const agents = [...resolveAllAgents().entries()].map(([name, a]) => ({ file: `agents/${name}.md`, content: a.content }))
+    expect(agents.map(a => a.file), 'the agents corpus must reach code.md').toContain('agents/code.md')
+    const commands = corpus.filter(f => f.file.startsWith('commands/'))
+    expect(collectExceptionCarriers([...commands, ...agents])).toEqual(['agents/code.md', 'commands/implement.md'])
+  })
+
+  it('known-bad probe: a review host carrying the flow is reported', () => {
+    const seeded = corpus.map(f =>
+      f.file === 'commands/code-review.md' ? { ...f, content: `${f.content}\nPR_EXCEPTIONS: (none)\n` } : f)
+    expect(collectExceptionCarriers(seeded.filter(f => f.file.startsWith('commands/'))))
+      .toEqual(['commands/code-review.md', 'commands/implement.md'])
   })
 })
