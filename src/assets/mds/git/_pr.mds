@@ -160,7 +160,7 @@ Load for `fetch-review-threads` under every tracker provider.
 1. Fetch review threads via GraphQL — use the `fetch_review_threads()` pattern in `devflow:git` → `references/github-api.md` § Review Threads (GraphQL); bounds: ≤2 pages of 50 (100 max).
 
    **Cursor correctness trap:** Page 2 REQUIRES the page-1 `pageInfo.endCursor` bound as `$cursor` — omit it and the call silently re-fetches page 1, so the ≤2-page bound yields 50 threads twice instead of 100 distinct ones. Page 1 omits `cursor` (nullable; server starts at the beginning); if `pageInfo.hasNextPage` is true, pass the page-1 `endCursor` as `$cursor` for page 2. Stop after 2 pages.
-2. Filter to unresolved threads only (`isResolved: false`). Fetch viewer login (author-filtered — a third party posting a devflow marker must not suppress threads): `gh api user --jq '.login'` → store as VIEWER_LOGIN.
+2. Filter to unresolved threads only (`isResolved: false`). Fetch viewer login (author-filtered — a third party posting a devflow marker must not suppress threads): `gh api user --jq '.login'` → store as VIEWER_LOGIN. **Trusted first-comment author:** `VIEWER_LOGIN`, or `authorAssociation` `OWNER`, `MEMBER` or `COLLABORATOR` — never the PR author when `isCrossRepository` is true. A first comment by anyone else is marker-free for step 3: its `<!-- devflow:` text excludes nothing.
 3. Apply devflow-authored exclusion predicate — exclude a thread if:
    - (PRIMARY) First comment body contains `<!-- devflow:` marker, OR
    - (SECONDARY) VIEWER_LOGIN matches thread author login AND first comment body does not appear to be a code-style review comment

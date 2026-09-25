@@ -27,6 +27,7 @@ import {
   requireDistFile,
   requireDistFiles,
   resolveAgentSource,
+  ROOT,
   type CorpusEntry,
   type OrderRule,
 } from '../helpers.js'
@@ -608,5 +609,141 @@ describe('`full` is decided by the publication gate alone (§3.5, AC-8)', () => 
         "What each value does is decided by the Git agent's publication gate (`references/publication-gate.md` step 2); this partial only resolves the value.",
       )
     }
+  })
+})
+
+// ---------------------------------------------------------------------------
+// 6. Marker spoof — only a trusted author's marker excludes a thread (§3.6, AC-5)
+// ---------------------------------------------------------------------------
+//
+// fetch-review-threads step 3's PRIMARY predicate excludes any thread whose first
+// comment contains `<!-- devflow:`, whoever wrote it — so anyone could hide their
+// own review thread from /resolve by pasting the marker. Step 2 now names who is
+// trusted, from fields the SAME single GraphQL call selects (avoids PF-064: the
+// predicate is written against the value that carries the property — the author's
+// association — not against the marker text a stranger can type).
+
+const TRUST_ANCHOR = '**Trusted first-comment author:**'
+const EXCLUSION_STEP = '3. Apply devflow-authored exclusion predicate'
+const TRUST_TERMS: readonly string[] = [
+  'VIEWER_LOGIN',
+  '`authorAssociation`',
+  '`OWNER`',
+  '`MEMBER`',
+  '`COLLABORATOR`',
+  '`isCrossRepository`',
+]
+
+/** Where each new field must sit in the review-threads query, as order rules over its text. */
+const QUERY_FIELD_ORDER: readonly OrderRule[] = [
+  { label: 'isCrossRepository is a pull-request field', before: 'pullRequest(number: $pr) {', after: 'isCrossRepository' },
+  { label: 'isCrossRepository precedes the threads', before: 'isCrossRepository', after: 'reviewThreads(first: 50' },
+  { label: 'authorAssociation is a first-comment field', before: 'comments(first: 1)', after: 'authorAssociation' },
+]
+
+/** The single GraphQL query text inside github-api.md's `fetch_review_threads()`, or null. */
+function reviewThreadsQuery(githubApi: string): string | null {
+  const fnStart = githubApi.indexOf('fetch_review_threads() {')
+  if (fnStart === -1) return null
+  const fnEnd = githubApi.indexOf('\n}\n', fnStart)
+  const fn = githubApi.slice(fnStart, fnEnd === -1 ? undefined : fnEnd)
+  const opener = "local query='"
+  if (fn.split(opener).length - 1 !== 1) return null
+  const start = fn.indexOf(opener) + opener.length
+  const end = fn.indexOf("'", start)
+  return end === -1 ? null : fn.slice(start, end)
+}
+
+/** Named collector: every way the fetch-review-threads exclusion can still be spoofed. */
+export function collectUntrustedMarkerExclusion(prFetchThreads: string, githubApi: string): string[] {
+  const out: string[] = []
+  const step2 = soleLine(prFetchThreads, '2. ')
+  if (step2 === null) {
+    out.push('pr/fetch-review-threads.md: no single step 2')
+  } else {
+    for (const term of TRUST_TERMS) {
+      if (!step2.includes(term)) out.push(`pr/fetch-review-threads.md step 2 does not name ${term}`)
+    }
+  }
+  out.push(...collectOrderViolations('pr/fetch-review-threads.md', prFetchThreads, [
+    { label: 'trust rule before the exclusion predicate', before: TRUST_ANCHOR, after: EXCLUSION_STEP },
+  ]))
+  const query = reviewThreadsQuery(githubApi)
+  if (query === null) {
+    out.push('github-api.md: no single review-threads query in fetch_review_threads()')
+  } else {
+    out.push(...collectOrderViolations('github-api.md query', query, QUERY_FIELD_ORDER))
+  }
+  return out
+}
+
+/** The `d09da34` step 2 — viewer login only, no trust rule for the marker. */
+const D09DA34_FETCH_STEP_2 =
+  "2. Filter to unresolved threads only (`isResolved: false`). Fetch viewer login (author-filtered — a third party posting a devflow marker must not suppress threads): `gh api user --jq '.login'` → store as VIEWER_LOGIN."
+
+/** The `d09da34` review-threads query, verbatim: `author { login }` and `body` only. */
+const D09DA34_REVIEW_THREADS_QUERY = `fetch_review_threads() {
+    local query='
+      query($owner: String!, $repo: String!, $pr: Int!, $cursor: String) {
+        repository(owner: $owner, name: $repo) {
+          pullRequest(number: $pr) {
+            reviewThreads(first: 50, after: $cursor) {
+              nodes {
+                id
+                isResolved
+                path
+                line
+                comments(first: 1) {
+                  nodes {
+                    author { login }
+                    body
+                  }
+                }
+              }
+              pageInfo {
+                hasNextPage
+                endCursor
+              }
+            }
+          }
+        }
+      }'
+}
+`
+
+/** Every distinct `gh <cmd> <sub>` a text invokes, in code spans or fences. */
+function ghInvocations(text: string): string[] {
+  return [...new Set([...text.matchAll(/\bgh (api|pr|repo|issue) ([a-z]+)/g)].map(m => m[0]))].sort()
+}
+
+describe('only a trusted first-comment author can exclude a thread (§3.6, AC-5)', () => {
+  const prFetch = requireRef(prHostRel('fetch-review-threads'))
+  // Hand-authored, not generated: installed from the skill's own references/ directory.
+  const githubApi = readFileSync(path.join(ROOT, 'src', 'assets', 'skills', 'git', 'references', 'github-api.md'), 'utf-8')
+
+  it('step 2 names the trusted authors before step 3 applies the marker, from the one query', () => {
+    expect(collectUntrustedMarkerExclusion(prFetch, githubApi)).toEqual([])
+  })
+
+  it('the trust fields ride the existing call — no extra API call', () => {
+    expect(ghInvocations(prFetch), 'the op still invokes only the viewer lookup itself').toEqual(['gh api user'])
+    const fnStart = githubApi.indexOf('fetch_review_threads() {')
+    const fn = githubApi.slice(fnStart, githubApi.indexOf('\n}\n', fnStart))
+    expect(fn.match(/gh api graphql/g), 'page 1 and page 2 of the same query').toHaveLength(2)
+  })
+
+  it('known-bad probe: the d09da34 step 2 is reported', () => {
+    const seeded = replaceLine(prFetch, /^2\. /, D09DA34_FETCH_STEP_2)
+    const found = collectUntrustedMarkerExclusion(seeded, githubApi)
+    expect(found).toEqual([
+      ...TRUST_TERMS.filter(t => t !== 'VIEWER_LOGIN').map(t => `pr/fetch-review-threads.md step 2 does not name ${t}`),
+      `pr/fetch-review-threads.md: [trust rule before the exclusion predicate] before anchor absent: "${TRUST_ANCHOR}"`,
+    ])
+  })
+
+  it('known-bad probe: the d09da34 query is reported', () => {
+    const found = collectUntrustedMarkerExclusion(prFetch, D09DA34_REVIEW_THREADS_QUERY)
+    expect(found, found.join('\n')).toHaveLength(QUERY_FIELD_ORDER.length)
+    expect(found.every(v => v.startsWith('github-api.md query: '))).toBe(true)
   })
 })
