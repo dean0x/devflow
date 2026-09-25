@@ -16,7 +16,8 @@
  *   - Jira's `fixVersions` and Linear's labels are MULTI-valued, but a stock
  *     field write REPLACES the set. So the add is a read-modify-write — current ∪
  *     new — and only over a field the batch read returned whole; anything else
- *     is DEGRADED with no write.
+ *     is DEGRADED with no write. The union write's own race window is written
+ *     down, as GitHub's is.
  *
  * Nothing is posted: there is no body, so D11 does not apply and no posting verb
  * may appear. The caller gates the spawn (`tests/tracker/compliance-gate.test.ts`),
@@ -127,6 +128,11 @@ const PROVIDER_CLAUSES: Readonly<Record<ProviderToken, readonly Clause[]>> = {
       why: 'one batched read answers which items already hold a milestone',
     },
     {
+      id: 'read parsed on exit 1',
+      literal: 'Read every alias even when `gh` exits 1: a null or absent alias ⇒ that item DEGRADED',
+      why: 'one PR number or unknown ref nulls its alias and makes `gh` exit 1; the other aliases still answer',
+    },
+    {
       id: 'no replace',
       literal: 'another ⇒ Kept other release, left untouched',
       why: 'a milestone is single-valued; assigning over another release REPLACES it',
@@ -188,6 +194,11 @@ const PROVIDER_CLAUSES: Readonly<Record<ProviderToken, readonly Clause[]>> = {
       literal: '*edit issue fields* capability',
       why: 'the write goes through a capability the contract table defines',
     },
+    {
+      id: 'race documented',
+      literal: '**Residual race, not closed:** the union write drops a version another writer adds between steps 2 and 3',
+      why: 'a read-modify-write has the same unclosed window as GitHub\'s read-then-assign, and it is written down',
+    },
   ],
   linear: [
     {
@@ -224,6 +235,11 @@ const PROVIDER_CLAUSES: Readonly<Record<ProviderToken, readonly Clause[]>> = {
       id: 'read-modify-write',
       literal: 'current labels ∪ the release label, and only when step 2 returned them whole',
       why: 'a union over a partial read would still drop a label',
+    },
+    {
+      id: 'race documented',
+      literal: '**Residual race, not closed:** the union write drops a label another writer adds between steps 2 and 3',
+      why: 'a read-modify-write has the same unclosed window as GitHub\'s read-then-assign, and it is written down',
     },
   ],
 };

@@ -118,7 +118,7 @@ Spawn `Agent(subagent_type="Validate")` for build + test.
 
 **Gather release evidence** — under either policy when `DRY_RUN` is true, otherwise only when `EVIDENCE_POLICY` is `required`: spawn `Agent(subagent_type="Git")` with `gather-release-evidence` operation; pass `WORKTREE_PATH` if provided. Keep `COMMIT_LIST`, `SHIPPED_ISSUES`, `### TRACE_MAP` and `### Status:` as RELEASE_EVIDENCE. The Git agent applies its own bounds (≤100 commits, ≤50 issues, 500 traced commits) and degrades gracefully per D4.
 
-Write `.release/.progress.json` checkpoint, with RELEASE_EVIDENCE when it was gathered.
+Unless `DRY_RUN` is true, write `.release/.progress.json` checkpoint, with RELEASE_EVIDENCE when it was gathered — a dry run leaves nothing to resume.
 
 `--dry-run`: report what would happen and, when evidence was gathered, the Phase 5 traceability arms, the untraced list and the exempt counts — never asking — then **halt after this phase**.
 
@@ -129,7 +129,7 @@ Write `.release/.progress.json` checkpoint, with RELEASE_EVIDENCE when it was ga
 
 **Traceability** (only when `EVIDENCE_POLICY` is `required`), before the confirm below. Classify RELEASE_EVIDENCE by its `### Status:` value — `READY`, `PARTIAL`, `TRUNCATED`, `DEGRADED` or `INDETERMINATE` — and by the first `### TRACE_MAP` line, `TRACE from:<ref> scanned:<n> traced:<n> untraced:<n> exempt:<n> unmatched:<n> bound:<ok|hit>`. Let *u* be its `untraced` count, and re-check traced + untraced + exempt = scanned yourself. Every arm that matches applies:
 
-1. **Coverage unknown** — no gather ran, its output is missing or unparseable, there is no `TRACE` line, the sum does not hold, `bound:hit`, or status `INDETERMINATE`.
+1. **Coverage unknown** — no gather ran, its output is missing or unparseable, there is no `TRACE` line, the sum does not hold, `bound:hit`, status `INDETERMINATE`, or a status that is none of the five.
 2. **Untraced** — *u* > 0.
 3. **Partial** — status `PARTIAL`, `TRUNCATED` or `DEGRADED`: warn and continue; this arm never blocks on its own. A tracker with no closing-reference capability always lands here.
 4. **Clean** — status `READY` and *u* = 0, and no arm above.
@@ -147,10 +147,12 @@ Arm 1 or 2 ⇒ ask once, via AskUserQuestion: "{u} untraced commits{, coverage u
 Exempt (not attested): release <n> · revert <n> · bot <n> — <sha12>, …
 ```
 
-- One `untraced` line per listed untraced commit (≤100), its `<sha12>` and `<author>` copied from that `### TRACE_MAP` line. One `coverage` line per arm-1 cause — `bound-hit` for `bound:hit`, `gather-indeterminate` for status `INDETERMINATE`, `trace-unavailable` for any other — plus `untraced-beyond-list` when an `…and <n> more` line closes the untraced list. The `Exempt` line counts each exempt kind (its listed lines plus its `…and <n> more`) and names every listed exempt SHA.
+- One `untraced` line per listed untraced commit (≤100), its `<sha12>` and `<author>` copied from that `### TRACE_MAP` line. One `coverage` line per arm-1 cause — `bound-hit` for `bound:hit`, `gather-indeterminate` for status `INDETERMINATE` or none of the five, `trace-unavailable` for any other — plus `untraced-beyond-list` when an `…and <n> more` line closes the untraced list. The `Exempt` line counts each exempt kind (its listed lines plus its `…and <n> more`) and names every listed exempt SHA.
 - `@<login>` is `@` followed by the output of `gh api user --jq .login` when that output matches `^[A-Za-z0-9][A-Za-z0-9-]{0,38}$`. On any other output, or a failed call, it is `(login unavailable)` instead, with no `@`.
 - `<utc>` is the output of `date -u +%Y-%m-%dT%H:%M:%SZ`.
 - `<reason>` is the user's own words, made inert: replace every character outside printable ASCII (newlines and tabs included) with a space, remove every `<`, `>`, `` ` ``, `[`, `]`, `\`, `/`, `#`, `@`, `&` and `$`, collapse runs of spaces, trim, keep the first 200 characters, and trim again. A reason that is empty after this is no reason.
+
+No ask, but the trace lists an exempt commit ⇒ `TRACEABILITY_EXCEPTIONS` is the heading and the `Exempt` line alone, added to `.release/.progress.json` the same way: an exemption is self-asserted, so it is printed, never hidden.
 
 Build ordered execution plan from RELEASE_CONFIG. For monorepo: respect dependency ordering, present package selection to user.
 

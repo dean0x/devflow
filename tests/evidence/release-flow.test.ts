@@ -8,13 +8,15 @@
  *         of the status domain git.md DECLARES × every TRACE-header state × an
  *         untraced count of zero or more lands on at least one arm, on exactly
  *         one when the header is sound and nothing is untraced, and every unknown
- *         lands on arm 1 (PF-075: a gate that reaches its permissive verdict by
- *         exhaustion fails open). A `--dry-run` never asks.
+ *         — a status outside the declared five included — lands on arm 1
+ *         (PF-075: a gate that reaches its permissive verdict by exhaustion fails
+ *         open). A `--dry-run` never asks and leaves no checkpoint to resume.
  *   AC-8  `## Traceability exceptions` renders with `evidence_exception()`'s
  *         login, time and reason rules copied BYTE-IDENTICALLY (the
  *         partial-wiring precedent for release.md, which is hand-authored and
- *         imports nothing); it is persisted in the checkpoint; and create-release
- *         appends it last, where the notes cap never drops it.
+ *         imports nothing); it is persisted in the checkpoint; create-release
+ *         appends it last, where the notes cap never drops it; and with nothing
+ *         asked, exempt commits still reach it (D3).
  *
  * The classifier is not re-implemented from memory: its arms are parsed from
  * release.md and its status domain from git.md, so either file drifting moves
@@ -61,6 +63,17 @@ const HEADER_PHRASES: Readonly<Record<Exclude<HeaderState, 'ok'>, RegExp>> = {
   'bound:hit': /`bound:hit`/,
 }
 
+/**
+ * Arm 1's catch-all for a status outside the declared domain. The gather is prose
+ * an agent executes, so a value nobody declared (its own fallback's `THROTTLED`, a
+ * habitual `COMPLETE`) can still arrive — and without this clause it would match no
+ * arm, and /release would reach its confirm without asking (PF-075).
+ */
+const UNDECLARED_PHRASE = /a status that is none of the five/
+
+/** A status outside the declared domain that a drifted gather could emit. */
+const UNDECLARED_STATUS = 'THROTTLED'
+
 interface Classifier {
   /** The four numbered arm lines, by label. */
   readonly arms: ReadonlyArray<{ readonly label: string; readonly line: string }>
@@ -83,8 +96,9 @@ export function collectArmLines(text: string): Array<{ label: string; line: stri
 /**
  * Named collector: the classifier release.md states, as a model. Each arm's
  * statuses are the declared values it names in backticks; arm 1's header states
- * are the ones it names; arm 2 fires on a positive count it can read; the clean
- * arm needs zero untraced and, when it says so, no arm above.
+ * are the ones it names, and it takes an undeclared status only when it carries
+ * UNDECLARED_PHRASE; arm 2 fires on a positive count it can read; the clean arm
+ * needs zero untraced and, when it says so, no arm above.
  */
 export function parseClassifier(text: string, domain: readonly string[]): Classifier {
   const arms = collectArmLines(text)
@@ -96,12 +110,14 @@ export function parseClassifier(text: string, domain: readonly string[]): Classi
   const clean = find('Clean')
   const unknownHeaders = (Object.keys(HEADER_PHRASES) as Array<Exclude<HeaderState, 'ok'>>)
     .filter(h => HEADER_PHRASES[h].test(unknown))
+  const takesUndeclared = UNDECLARED_PHRASE.test(unknown)
   return {
     arms,
     classify(status, header, untraced) {
       const hit: string[] = []
       const readable = header === 'ok' || header === 'bound:hit' || header === 'sum-mismatch'
-      if ((header !== 'ok' && unknownHeaders.includes(header)) || named(unknown).includes(status)) hit.push('Coverage unknown')
+      const undeclared = takesUndeclared && !domain.includes(status)
+      if ((header !== 'ok' && unknownHeaders.includes(header)) || named(unknown).includes(status) || undeclared) hit.push('Coverage unknown')
       if (/\*u\* > 0/.test(untracedArm) && readable && untraced > 0) hit.push('Untraced')
       if (named(partial).includes(status)) hit.push('Partial')
       const noneAbove = /no arm above/.test(clean) ? hit.length === 0 : true
@@ -111,17 +127,22 @@ export function parseClassifier(text: string, domain: readonly string[]): Classi
   }
 }
 
-/** Named collector: every classifier gap over the full outcome grid, as report lines. */
+/**
+ * Named collector: every classifier gap over the full outcome grid, as report
+ * lines. The grid is the declared domain plus UNDECLARED_STATUS, which must land
+ * on arm 1 like any other unknown.
+ */
 export function collectClassifierGaps(model: Classifier, domain: readonly string[]): string[] {
   const gaps: string[] = []
-  for (const status of domain) {
+  for (const status of new Set([...domain, UNDECLARED_STATUS])) {
+    const declared = domain.includes(status)
     for (const header of HEADER_STATES) {
       for (const untraced of [0, 3]) {
         const hit = model.classify(status, header, untraced)
         const at = `${status} × ${header} × u=${untraced}`
         if (hit.length === 0) gaps.push(`${at}: no arm`)
         if (header === 'ok' && untraced === 0 && hit.length > 1) gaps.push(`${at}: ${hit.join(' + ')} (must be exactly one)`)
-        if ((header !== 'ok' || status === 'INDETERMINATE') && !hit.includes('Coverage unknown')) gaps.push(`${at}: unknown coverage misses arm 1`)
+        if ((header !== 'ok' || status === 'INDETERMINATE' || !declared) && !hit.includes('Coverage unknown')) gaps.push(`${at}: unknown coverage misses arm 1`)
         if (hit.includes('Clean') && (header !== 'ok' || untraced > 0 || status !== 'READY')) gaps.push(`${at}: Clean without a sound, fully traced READY`)
       }
     }
@@ -170,11 +191,22 @@ describe('AC-7: the Phase 5 classifier is total over the declared gather outcome
     const noTruncated = text.replace('`PARTIAL`, `TRUNCATED` or `DEGRADED`: warn', '`PARTIAL` or `DEGRADED`: warn')
     expect(noTruncated, 'the seed must land').not.toBe(text)
     expect(collectClassifierGaps(parseClassifier(noTruncated, domain), domain)).toContain('TRUNCATED × ok × u=0: no arm')
-    const noBound = text.replace('the sum does not hold, `bound:hit`, or', 'the sum does not hold, or')
+    const noBound = text.replace('the sum does not hold, `bound:hit`, status', 'the sum does not hold, status')
     expect(noBound, 'the seed must land').not.toBe(text)
     expect(collectClassifierGaps(parseClassifier(noBound, domain), domain)).toContain('READY × bound:hit × u=0: unknown coverage misses arm 1')
-    // …and a sixth declared status nobody classifies is a gap, not a pass.
+    // …and a sixth declared status nobody classifies is a gap, not a pass: the
+    // catch-all is for values nobody declared, never a substitute for an arm.
     expect(collectClassifierGaps(parseClassifier(text, [...domain, 'COMPLETE']), [...domain, 'COMPLETE'])).toContain('COMPLETE × ok × u=0: no arm')
+  })
+
+  it('known-bad probe: without arm 1\'s catch-all, an undeclared status lands on no arm and /release proceeds unasked', () => {
+    const text = release()
+    expect(collectArmLines(text).find(a => a.label === 'Coverage unknown')?.line).toMatch(UNDECLARED_PHRASE)
+    const noCatchAll = text.replace(', or a status that is none of the five.', '.')
+    expect(noCatchAll, 'the seed must land').not.toBe(text)
+    const gaps = collectClassifierGaps(parseClassifier(noCatchAll, domain), domain)
+    expect(gaps).toContain(`${UNDECLARED_STATUS} × ok × u=0: no arm`)
+    expect(gaps).toContain(`${UNDECLARED_STATUS} × ok × u=0: unknown coverage misses arm 1`)
   })
 })
 
@@ -191,6 +223,36 @@ describe('AC-7: known-bad probe — a dry run that asks is reported', () => {
   it('the collector reports an asking dry run and clears the shipped one', () => {
     expect(collectDryRunAsks('`--dry-run`: report the arms and ask via AskUserQuestion, then **halt after this phase**.'))
       .toEqual(['names AskUserQuestion', 'does not say it never asks'])
+  })
+})
+
+/**
+ * Named collector: Phase 4 lines that write the resume checkpoint without
+ * excluding a dry run. A dry run's checkpoint is offered as an interrupted release
+ * on the next run, and a Resume reuses the evidence traced at the dry run's HEAD:
+ * a commit landed since would be neither traced nor listed.
+ */
+export function collectDryRunCheckpointWrites(text: string): string[] {
+  const lines = text.split('\n')
+  const start = lines.findIndex(l => l.startsWith('### Phase 4'))
+  const end = lines.findIndex((l, i) => i > start && l.startsWith('### Phase 5'))
+  if (start === -1 || end === -1) return ['Phase 4 not found']
+  return lines.slice(start, end)
+    .filter(l => l.includes('`.release/.progress.json`') && /\bwrite\b/i.test(l) && !l.includes('Unless `DRY_RUN` is true'))
+}
+
+describe('AC-7: a dry run leaves no checkpoint to resume', () => {
+  it('Phase 4 writes the checkpoint only on a real release', () => {
+    const text = release()
+    expect(text, 'the checkpoint line must exist, or this arm clears nothing').toContain(
+      'Unless `DRY_RUN` is true, write `.release/.progress.json` checkpoint',
+    )
+    expect(collectDryRunCheckpointWrites(text)).toEqual([])
+  })
+
+  it('known-bad probe: an unconditional checkpoint write in Phase 4 is reported', () => {
+    const seeded = '### Phase 4\nWrite `.release/.progress.json` checkpoint, with RELEASE_EVIDENCE when it was gathered.\n### Phase 5'
+    expect(collectDryRunCheckpointWrites(seeded)).toHaveLength(1)
   })
 })
 
@@ -217,6 +279,22 @@ export function collectRenderingDrift(text: string, bullets: readonly string[]):
     .map(b => ({ b, n: text.split('\n').filter(l => l === b).length }))
     .filter(({ n }) => n !== 1)
     .map(({ b, n }) => `${b.slice(0, 40)}… held ${n} times (expected 1)`)
+}
+
+/**
+ * The Phase 5 rule for a trace that asks nothing yet lists exempt commits (arms 3
+ * and 4 only). Both exemption fields are self-asserted, so the D3 mitigation is
+ * that exempt SHAs reach the release notes — on every path, not only on Record.
+ */
+const NO_ASK_EXEMPT_RULE = 'No ask, but the trace lists an exempt commit ⇒'
+
+/** Named collector: what the no-ask exempt rule owes and does not state. */
+export function collectHiddenExemptions(text: string): string[] {
+  const line = text.split('\n').find(l => l.startsWith(NO_ASK_EXEMPT_RULE))
+  if (line === undefined) return ['no-ask exempt rule missing']
+  return ['`TRACEABILITY_EXCEPTIONS`', 'the `Exempt` line', '`.release/.progress.json`', 'never hidden']
+    .filter(term => !line.includes(term))
+    .map(term => `no-ask exempt rule omits ${term}`)
 }
 
 /** The fenced `## Traceability exceptions` template in release.md, line by line. */
@@ -254,6 +332,24 @@ describe('AC-8: `## Traceability exceptions` — rendering, persistence and sink
     const step4 = text.split('\n').find(l => l.startsWith('4. **Tag and GitHub Release**'))
     expect(step4).toContain('`TRACEABILITY_EXCEPTIONS` when recorded')
     expect(text).toContain('Compose `TRACEABILITY_EXCEPTIONS` below and add it to `.release/.progress.json`.')
+  })
+
+  it('with nothing asked, an exempt commit is still printed (D3: exempt SHAs are printed, never hidden)', () => {
+    const text = release()
+    expect(collectHiddenExemptions(text)).toEqual([])
+    const lines = text.split('\n')
+    const rule = lines.findIndex(l => l.startsWith(NO_ASK_EXEMPT_RULE))
+    const traceability = lines.findIndex(l => l.startsWith('**Traceability**'))
+    const confirm = lines.findIndex(l => l.startsWith('Confirm with user via AskUserQuestion'))
+    expect(traceability < rule && rule < confirm, 'the rule sits in Phase 5, before the confirm').toBe(true)
+  })
+
+  it('known-bad probe: a release.md with no no-ask exempt rule, or one that drops the notes, is reported', () => {
+    const text = release()
+    const line = text.split('\n').find(l => l.startsWith(NO_ASK_EXEMPT_RULE))!
+    expect(collectHiddenExemptions(text.replace(line, ''))).toEqual(['no-ask exempt rule missing'])
+    expect(collectHiddenExemptions(text.replace(line, line.replace('`TRACEABILITY_EXCEPTIONS`', 'the report'))))
+      .toEqual(['no-ask exempt rule omits `TRACEABILITY_EXCEPTIONS`'])
   })
 
   it('known-bad probe: a one-character drift in release.md\'s reason bullet is reported', () => {

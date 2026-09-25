@@ -319,6 +319,8 @@ Load when the resolved tracker provider is `linear` and the operation is `associ
 2. **Read once:** one *batch fetch* over the admitted references, bounded `≤50`, requesting labels. A reference it returns nothing for ⇒ that item DEGRADED; one already holding the label ⇒ Already set.
 3. **Add**, per item, 1s apart, through the *edit issue fields* capability. The stock issue update REPLACES the label set, so prefer an additive operation; otherwise write the item's current labels ∪ the release label, and only when step 2 returned them whole — else that item DEGRADED, with no write. Another release label on the item stays; the item counts as Added.
 4. On backpressure, follow `### Provider signals (Linear)` in this operation's `backlink-shipped-issues` reference.
+
+**Residual race, not closed:** the union write drops a label another writer adds between steps 2 and 3; the additive operation has no such window.
 @end
 
 @define ensure_traceable_issue():

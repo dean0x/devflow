@@ -277,6 +277,8 @@ Load when the resolved tracker provider is `jira` and the operation is `associat
 2. **Read once:** one *batch fetch* over the admitted keys, bounded `≤50`, requesting `fixVersions`. A key it returns nothing for ⇒ that item DEGRADED; one already holding the version ⇒ Already set.
 3. **Add**, per item, 1s apart, through the *edit issue fields* capability. Prefer the tool's additive operation; otherwise write the item's current `fixVersions` ∪ the version, and only when step 2 returned that field whole — else that item DEGRADED, with no write. Another version on the item stays; the item counts as Added.
 4. On backpressure, follow `### Provider signals (Jira)` in this operation's `backlink-shipped-issues` reference.
+
+**Residual race, not closed:** the union write drops a version another writer adds between steps 2 and 3; the additive operation has no such window.
 @end
 
 @define ensure_traceable_issue():
