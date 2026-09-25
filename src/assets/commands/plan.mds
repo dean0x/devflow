@@ -373,7 +373,7 @@ User can:
 
 **Store design artifact:**
 
-Write design artifact to disk:
+**Pre-compute the artifact path** from the slug (it never changes after this):
 - If one issue: `.devflow/docs/design/\{ISSUE_ID\}-\{topic-slug\}.\{YYYY-MM-DD_HHMM\}.md` (the `docs-framework` skill's design-document pattern, e.g. `42-jwt-auth.2026-04-07_1430.md`)
 - If multi-issue: `.devflow/docs/design/\{ISSUE_ID\}-multi.\{YYYY-MM-DD_HHMM\}.md`, using the first issue's `ISSUE_ID`
 - If no issue: `.devflow/docs/design/\{topic-slug\}.\{YYYY-MM-DD_HHMM\}.md`
@@ -395,6 +395,8 @@ execution-strategy: SINGLE_CODE_AGENT
 context-risk: LOW
 ---
 ```
+
+`issue:` is `pending` while no issue is known yet; the tracker-issue step below patches it in place.
 
 Required sections:
 1. **Problem Statement** — core problem and target users
@@ -433,6 +435,8 @@ Closes {ISSUE_REF}
 
 Under `github`, `\{ISSUE_REF\}` is `#`-prefixed, so that line renders `Closes #\{n\}`.
 
+**Write the artifact now** — frontmatter `issue: \{ISSUE_ID\}` if an issue is already known, else `issue: pending`.
+
 **Create or enrich tracker issue:**
 
 When `COMPLIANCE_SKILL_INSTALLED` is true, issue linking is MANDATORY (DEGRADED states are exempt with a warning in the final summary) — proceed to the spawn below.
@@ -456,6 +460,8 @@ Return the issue number."
 ```
 
 Capture `ISSUE_NUMBER` from the Git agent output for use in the completion report and the `/implement` hand-off suggestion.
+
+**Patch the frontmatter `issue:` line in place** — when it still reads `issue: pending` and the spawn returned an issue (`CREATED` or `ENRICHED`), replace only that one line inside the leading `---` block with `issue: \{ISSUE_NUMBER\}` (Edit tool). Never rename the artifact, never rewrite it, never spawn `ensure-traceable-issue` again. Declined or DEGRADED ⇒ leave `issue: pending`.
 
 Surface any `TRACEABILITY: DEGRADED (\{reason\})` lines from the Git agent output in the report.
 

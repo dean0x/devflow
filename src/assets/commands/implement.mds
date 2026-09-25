@@ -56,13 +56,24 @@ Record the current branch name as `BASE_BRANCH` - this will be the PR target.
 
 {compliance_gate()}
 
+**Plan Document Handling** (when $ARGUMENTS is a path ending in `.md`):
+1. Read the plan document from the path provided
+2. Extract from YAML frontmatter: `execution-strategy`, `context-risk`, `issue` number
+3. Extract from body: Subtask Breakdown, Implementation Plan, Patterns to Follow, Acceptance Criteria
+4. If the frontmatter `issue` is present and is not `pending`: forward it verbatim as the setup-task `ISSUE_INPUT` (`pending` means /plan's issue step degraded or was declined — treat it as absent)
+5. Use extracted content as EXECUTION_PLAN for the Code agent phase (replaces exploration/planning output)
+6. Captured values override defaults from Git agent where present
+7. Extract `## PR Description Guidance` section (if present) → set `PR_DESCRIPTION_GUIDANCE` to its full content. If section not found, set `PR_DESCRIPTION_GUIDANCE` to `(none)`.
+
+If `PR_DESCRIPTION_GUIDANCE` was not set above (non-plan paths: issue input or task description), set it to `(none)`.
+
 Spawn Git agent to set up task environment. The Git agent derives the branch name automatically from the issue or task description:
 
 ```
 Agent(subagent_type="Git"):
 "OPERATION: setup-task
 BASE_BRANCH: {current branch name}
-ISSUE_INPUT: {$ARGUMENTS verbatim, when it is a single whitespace-delimited token that does not end in .md — otherwise omit}
+ISSUE_INPUT: {$ARGUMENTS verbatim, when it is a single whitespace-delimited token that does not end in .md; when it ends in .md, the plan frontmatter's issue value verbatim unless absent or pending — otherwise omit}
 TASK_DESCRIPTION: {$ARGUMENTS verbatim, when it is two or more whitespace-delimited tokens — otherwise omit}
 COMPLIANCE: {enabled if COMPLIANCE_SKILL_INSTALLED, otherwise (none)}
 PLAN_ARTIFACT_PATH: {path to plan document if $ARGUMENTS ends in .md, otherwise (none)}
@@ -86,6 +97,8 @@ The two tests this command does make are its own under every provider:
 
 - **Extension.** A path ending in `.md` is a plan document, never an issue
   reference — it goes to `PLAN_ARTIFACT_PATH` and neither of the other two keys.
+  `ISSUE_INPUT` then carries the plan's frontmatter `issue` instead, never the
+  path (Plan Document Handling step 4).
 - **Token count.** A single token is an issue reference. Two or more is prose:
   forwarding only its FIRST token would send `/implement fix the login bug` to
   the Git agent as `ISSUE_INPUT: fix` with no description at all, and
@@ -103,17 +116,6 @@ visible, a silently discarded request is not.
 - `ISSUE_NUMBER`: the provider-canonical issue identifier for this task — the same value the Git agent emits as `ISSUE_ID` (if provided, or created by the Git agent's issue-first step in setup-task)
 
 {issue_capture_contract()}
-
-**Plan Document Handling** (when $ARGUMENTS is a path ending in `.md`):
-1. Read the plan document from the path provided
-2. Extract from YAML frontmatter: `execution-strategy`, `context-risk`, `issue` number
-3. Extract from body: Subtask Breakdown, Implementation Plan, Patterns to Follow, Acceptance Criteria
-4. If `issue` field present in frontmatter: pass to Git agent as ISSUE_INPUT
-5. Use extracted content as EXECUTION_PLAN for the Code agent phase (replaces exploration/planning output)
-6. Captured values override defaults from Git agent where present
-7. Extract `## PR Description Guidance` section (if present) → set `PR_DESCRIPTION_GUIDANCE` to its full content. If section not found, set `PR_DESCRIPTION_GUIDANCE` to `(none)`.
-
-If `PR_DESCRIPTION_GUIDANCE` was not set above (non-plan paths: issue input or task description), set it to `(none)`.
 
 {decisions_load()}
 
@@ -481,8 +483,8 @@ If any Git agent output emitted `TRACEABILITY: DEGRADED (\{reason\})` lines duri
 │  └─ Branch safety → skip Phase 2 → detect FILES_CHANGED → Phases 3-8 → Phase 10-11
 │
 ├─ Phase 1: Setup
+│  └─ Plan document parsing (if .md path provided) - extracts execution plan, strategy, frontmatter issue
 │  └─ Git agent (operation: setup-task) - creates feature branch, fetches issue
-│  └─ Plan document parsing (if .md path provided) - extracts execution plan, strategy
 │
 ├─ Phase 2: Implement (3-strategy framework)
 │  ├─ SINGLE_CODE_AGENT (80%): One Code agent, full plan, CREATE_PR: true
