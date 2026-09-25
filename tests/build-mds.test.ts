@@ -1279,7 +1279,7 @@ describe('Phase D traceability ops — code-review.md (Part 2, Step 2.3)', () =>
 // ---------------------------------------------------------------------------
 // §16  Phase D traceability op guards — resolve (Part 2, Step 2.4)
 //      fetch-review-threads, resolve-review-threads, post-resolution-summary,
-//      check-merge-readiness, Third-Party Threads section, COMPLIANCE wiring
+//      check-merge-readiness, Third-Party Threads section, evidence-policy gates (#362)
 // ---------------------------------------------------------------------------
 
 describe('Phase D traceability ops — resolve.md (Part 2, Step 2.4)', () => {
@@ -1293,17 +1293,17 @@ describe('Phase D traceability ops — resolve.md (Part 2, Step 2.4)', () => {
     expect(content, 'resolve.md must contain Third-Party Threads section').toContain('Third-Party Threads');
   });
 
-  it('resolve.md contains COMPLIANCE_SKILL_INSTALLED check (Step 0d compliance wiring)', async () => {
+  it('resolve.md keys its thread steps on EVIDENCE_POLICY and Phase 9c on REQUIRE_NON_AUTHOR_APPROVAL (#362)', async () => {
+    // Inverted from the Step 0d compliance-wiring pin: /resolve's only uses of the
+    // skill check were to gate the thread steps and merge readiness, and the
+    // evidence policy now decides both.
     const outputPath = path.join(BUILT_COMMANDS, 'resolve.md');
     const content = await fs.readFile(outputPath, 'utf-8');
-    expect(
-      content,
-      'resolve.md must contain COMPLIANCE_SKILL_INSTALLED from Step 0d wiring',
-    ).toContain('COMPLIANCE_SKILL_INSTALLED');
-    expect(
-      content,
-      'resolve.md must contain the compliance skill path',
-    ).toContain('skills/devflow:compliance/SKILL.md');
+    expect(content, 'resolve.md must not resolve COMPLIANCE_SKILL_INSTALLED').not.toContain('COMPLIANCE_SKILL_INSTALLED');
+    expect(content, 'resolve.md must not check the compliance skill path').not.toContain('skills/devflow:compliance/SKILL.md');
+    expect(content).toContain('Run this phase only when `EVIDENCE_POLICY` is `required`');
+    expect(content).toContain('Run this step only when `EVIDENCE_POLICY` is `required`');
+    expect(content).toContain('Run this phase only when `REQUIRE_NON_AUTHOR_APPROVAL` is `true`');
   });
 });
 
@@ -1493,13 +1493,16 @@ describe('publication_gate adoption in compiled host commands (Phase C)', () => 
 // §14.5 scope rule: deployed-behaviour guards scan DIST_FILES (14 files = 13
 // compiled MDS hosts + 1 hand-authored release.md).
 //
-// compliance_gate() adoption guard: 3 importers (code-review, plan, resolve) must
-// use the shared {compliance_gate()} partial. release.md inlines its own
-// COMPLIANCE_SKILL_INSTALLED check — it never calls {compliance_gate()} — recorded
-// as an allowlisted exception by name (§14.5). hostsScanned === 3 asserts
-// non-vacuity [DR-27a]. bug-analysis, dynamic-build and implement dropped the
-// import in #362: their only use of the check was to key a Git spawn, and the
-// evidence policy now supplies the mechanism inputs those spawns take.
+// compliance_gate() adoption guard: 2 importers (code-review, plan) must use the
+// shared {compliance_gate()} partial — the review lens is the one command-layer use
+// of the skill check left. release.md inlines its own COMPLIANCE_SKILL_INSTALLED
+// check — it never calls {compliance_gate()} — recorded as an allowlisted
+// exception by name (§14.5). hostsScanned === 2 asserts non-vacuity [DR-27a].
+// bug-analysis, dynamic-build and implement dropped the import in #362: their only
+// use of the check was to key a Git spawn, and the evidence policy now supplies the
+// mechanism inputs those spawns take. resolve dropped it in the same PR: its thread
+// steps gate on EVIDENCE_POLICY and its merge readiness on
+// REQUIRE_NON_AUTHOR_APPROVAL.
 // ---------------------------------------------------------------------------
 
 describe('DIST_FILES scope (§14.5, P0-S21) + compliance_gate adoption (P0-S22)', () => {
@@ -1509,11 +1512,11 @@ describe('DIST_FILES scope (§14.5, P0-S21) + compliance_gate adoption (P0-S22)'
     expect(DIST_FILES).toContain('release.md');
   });
 
-  it('all 3 compliance_gate importers contain COMPLIANCE_SKILL_INSTALLED in their compiled output (P0-S22)', async () => {
-    // The 3 MDS host commands that use {compliance_gate()} from _partials/_compliance.mds.
+  it('both compliance_gate importers contain COMPLIANCE_SKILL_INSTALLED in their compiled output (P0-S22)', async () => {
+    // The 2 MDS host commands that use {compliance_gate()} from _partials/_compliance.mds.
     // Exception (allowlisted by name): release.md inlines its own COMPLIANCE_SKILL_INSTALLED
     // check and never calls {compliance_gate()} — it is not in this list (§14.5).
-    const COMPLIANCE_GATE_IMPORTERS = ['code-review', 'plan', 'resolve'] as const;
+    const COMPLIANCE_GATE_IMPORTERS = ['code-review', 'plan'] as const;
 
     // The adoption set is read from the sources, both ways: a host that imports the
     // partial and is not listed fails here, and so does a listed host that stopped.
@@ -1535,13 +1538,13 @@ describe('DIST_FILES scope (§14.5, P0-S21) + compliance_gate adoption (P0-S22)'
       ).toContain('COMPLIANCE_SKILL_INSTALLED');
     }
 
-    // hostsScanned === 3: asserts non-vacuity (PF-018, [DR-27a]).
+    // hostsScanned === 2: asserts non-vacuity (PF-018, [DR-27a]).
     // Known-bad sample: a host with @import but no {compliance_gate()} call would
     // produce a compiled output without COMPLIANCE_SKILL_INSTALLED and fail here.
     expect(
       hostsScanned,
-      `compliance_gate guard is vacuous: expected hostsScanned === 3, got ${hostsScanned}`,
-    ).toBe(3);
+      `compliance_gate guard is vacuous: expected hostsScanned === 2, got ${hostsScanned}`,
+    ).toBe(2);
   });
 
   // GAP-31: the compliance gate must still resolve BEFORE its first consumer in
@@ -1549,8 +1552,8 @@ describe('DIST_FILES scope (§14.5, P0-S21) + compliance_gate adoption (P0-S22)'
   // hosts; an insertion above the gate would leave COMPLIANCE_SKILL_INSTALLED
   // read before it is set, which no other assertion in this file would notice
   // (they all check presence, never order).
-  it('the compliance gate resolves before its first consumer in all 3 importers (GAP-31)', async () => {
-    const COMPLIANCE_GATE_IMPORTERS = ['code-review', 'plan', 'resolve'] as const;
+  it('the compliance gate resolves before its first consumer in both importers (GAP-31)', async () => {
+    const COMPLIANCE_GATE_IMPORTERS = ['code-review', 'plan'] as const;
 
     // Named collector — shared by the live guard and the known-bad probe below.
     //
@@ -1606,8 +1609,8 @@ describe('DIST_FILES scope (§14.5, P0-S21) + compliance_gate adoption (P0-S22)'
     ).toHaveLength(1);
     expect(
       hostsScanned,
-      `compliance-gate ordering guard is vacuous: expected 3 hosts, got ${hostsScanned}`,
-    ).toBe(3);
+      `compliance-gate ordering guard is vacuous: expected 2 hosts, got ${hostsScanned}`,
+    ).toBe(2);
   });
 });
 

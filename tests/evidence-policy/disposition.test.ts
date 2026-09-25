@@ -16,10 +16,10 @@
  *                exactly once. A gate the table does not govern is a policy
  *                nobody reviewed.
  *
- * Rows 9–12 still gate on `COMPLIANCE_SKILL_INSTALLED` at this commit; phase P3
- * of #362 moves them to `EVIDENCE_POLICY` / `REQUIRE_NON_AUTHOR_APPROVAL` and
- * re-points their sites here. Row 13's op side is the `stub` publication value,
- * which names no gate, so it is held by direction 1 alone.
+ * Rows 9 and 12 still gate on `COMPLIANCE_SKILL_INSTALLED` at this commit; later
+ * commits of #362 move them to `EVIDENCE_POLICY` and re-point their sites here.
+ * Row 13's op side is the `stub` publication value, which names no gate, so it is
+ * held by direction 1 alone.
  *
  * ORCHESTRATOR DECISIONS encoded as their own arms (user-confirmed 2026-09-25):
  * /code-review and /bug-analysis never gate on a ticket under either policy —
@@ -57,6 +57,8 @@ type GateInput = GateName | 'stub'
 
 /** The canonical spellings (design §3, "Canonical gate phrases"): one each, so guards can collect them. */
 const gate = (name: GateName): string => `only when \`${name}\` is \`true\``
+/** The caller-side policy gate — the one canonical phrase that keys on `EVIDENCE_POLICY` itself. */
+const policyGate = 'only when `EVIDENCE_POLICY` is `required`'
 const fenceKey = (name: GateName): string => `${name}: {${name}}`
 const recipeKey = (name: GateName): string => `${name}: \${${name}}`
 const recipeConst = (name: GateName): string => `const ${name} = `
@@ -196,29 +198,28 @@ const DISPOSITION: readonly DispositionRow[] = [
     ],
   },
   {
-    // §6 row 10 → EVIDENCE_POLICY in P3.
     row: 10,
     subject: '/resolve Phase 1b and Step 9b-1 — external review threads',
-    inputs: ['COMPLIANCE_SKILL_INSTALLED'],
+    inputs: ['EVIDENCE_POLICY'],
     on: 'fetch and resolve external threads',
     off: 'skip; the resolution summary still posts',
     sites: [
-      { file: 'commands/resolve.md', after: '### Phase 1b:', anchor: 'Skip this phase if', phrase: 'if `COMPLIANCE_SKILL_INSTALLED` is false' },
-      { file: 'commands/resolve.md', after: '**Step 9b-1', anchor: 'Skip this step if', phrase: 'if `COMPLIANCE_SKILL_INSTALLED` is false' },
-      { file: 'commands/resolve.md', anchor: 'Always run this step when a PR is known', phrase: 'regardless of `COMPLIANCE_SKILL_INSTALLED`' },
-      { file: 'commands/resolve.md', anchor: '_(Omit `## Third-Party Threads`', phrase: 'if `COMPLIANCE_SKILL_INSTALLED` is false' },
+      { file: 'commands/resolve.md', after: '### Phase 1b:', anchor: 'Run this phase only when', phrase: policyGate },
+      { file: 'commands/resolve.md', after: '**Step 9b-1', anchor: 'Run this step only when', phrase: policyGate },
+      { file: 'commands/resolve.md', anchor: '_(Omit `## Third-Party Threads`', phrase: 'unless `EVIDENCE_POLICY` is `required`' },
+      { file: 'commands/resolve.md', after: '## Edge Cases', anchor: '| `EVIDENCE_POLICY` is `standard` |', phrase: '`EVIDENCE_POLICY` is `standard`' },
     ],
   },
   {
-    // §6 row 11 → REQUIRE_NON_AUTHOR_APPROVAL in P3 (caller-side only; the op is unchanged).
+    // Caller-side only: check-merge-readiness is unchanged and takes no new input in #362.
     row: 11,
     subject: '/resolve Phase 9c — merge readiness',
-    inputs: ['COMPLIANCE_SKILL_INSTALLED'],
+    inputs: ['REQUIRE_NON_AUTHOR_APPROVAL'],
     on: 'report merge readiness',
-    off: 'skip',
+    off: 'skip; report SKIPPED',
     sites: [
-      { file: 'commands/resolve.md', after: '### Phase 9c:', anchor: 'Skip this phase if', phrase: 'if `COMPLIANCE_SKILL_INSTALLED` is false' },
-      { file: 'commands/resolve.md', after: '## Edge Cases', anchor: '| COMPLIANCE_SKILL_INSTALLED false |', phrase: 'COMPLIANCE_SKILL_INSTALLED false' },
+      { file: 'commands/resolve.md', after: '### Phase 9c:', anchor: 'Run this phase only when', phrase: gate('REQUIRE_NON_AUTHOR_APPROVAL') },
+      { file: 'commands/resolve.md', after: '## Edge Cases', anchor: '| `REQUIRE_NON_AUTHOR_APPROVAL` is `false` |', phrase: '`REQUIRE_NON_AUTHOR_APPROVAL` is `false`' },
     ],
   },
   {
