@@ -132,7 +132,7 @@ const SAFE_REF_RE = /^(?![A-Za-z0-9._/-]{0,254}\.\.)[A-Za-z0-9][A-Za-z0-9._/-]{0
 
 /**
  * D-POLICY-LINE: the exported output grammar — anchored, closed alternations
- * only, named groups for consumers. PR3b's prompt-side parse is pinned to this
+ * only, named groups for consumers. Consumers' parses are pinned to this
  * expression, so it is the one definition of a well-formed line. REF admits
  * `none` or a SAFE_REF_RE branch (a branch literally named `none` is ambiguous;
  * REF is display-only and no consumer branches on it).
