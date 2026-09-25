@@ -51,7 +51,7 @@ Before you write the workflow script:
 
 {evidence_policy()}
 
-Author the resolved `ISSUE_REQUIRED` and `APPLY_CONVENTIONS` into the workflow script as constants, and pass both to the Git `setup-task` spawn.
+Author the resolved `ISSUE_REQUIRED` and `APPLY_CONVENTIONS` into the workflow script as constants — pass them as `issueRequired` and `applyConventions` when invoking the workflow — and pass both to the Git `setup-task` spawn.
 
 **1. Apply decisions context**
 
@@ -120,8 +120,8 @@ const TEST_PLAN = args.testPlan || null;  // /devflow:dynamic-plan testPlan (Pre
 const DECISIONS_CONTEXT = args.decisionsContext || "";  // injected before authoring
 const ISSUE_NUMBER = args.issueNumber || "(none)";  // resolved in Pre-authoring step 5
 const ISSUE_PR_LINK = args.issuePrLink || "(none)";  // captured in Pre-authoring step 4; "(none)" ⇒ Code emits the heading with no reference
-const ISSUE_REQUIRED = args.issueRequired || "true";  // Pre-authoring step 0; fail-closed like the resolver
-const APPLY_CONVENTIONS = args.applyConventions || "true";
+const ISSUE_REQUIRED = String(args.issueRequired) === "false" ? "false" : "true";  // Pre-authoring step 0; only an explicit false turns it off — absent or unrecognised fails closed, like the resolver
+const APPLY_CONVENTIONS = String(args.applyConventions) === "false" ? "false" : "true";
 
 // Phase 1: Git setup — declare the operation; the agent owns the process
 await phase("setup", () =>

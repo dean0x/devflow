@@ -5,7 +5,7 @@
 node "${DEVFLOW_DIR:-$HOME/.devflow}/scripts/resolve-evidence-policy.cjs" 2>/dev/null; echo "exit=$?"
 ```
 
-Accept the output only when it is exactly two lines: `exit=0` last and, before it, one line of the form `EVIDENCE_POLICY=<required|standard> SOURCE=<file|worktree|default|invalid|error> REF=<branch|none>[ WARN=<remote-unavailable|invalid-file|raised-by-compliance|pr-changes-policy>[,…]] ISSUE_REQUIRED=<true|false> APPLY_CONVENTIONS=<true|false> REQUIRE_NON_AUTHOR_APPROVAL=<true|false>` — these fields, in this order, nothing else. **Anything else** (a non-zero exit, no line, extra text, or a missing, reordered or unlisted field or value) ⇒ use `EVIDENCE_POLICY=required SOURCE=error REF=none ISSUE_REQUIRED=true APPLY_CONVENTIONS=true REQUIRE_NON_AUTHOR_APPROVAL=true` instead.
+Accept the output only when it is exactly two lines: `exit=0` last and, before it, one line of the form `EVIDENCE_POLICY=<required|standard> SOURCE=<file|worktree|default|invalid|error> REF=<branch|none>[ WARN=<remote-unavailable|invalid-file|raised-by-compliance|pr-changes-policy>[,…]] ISSUE_REQUIRED=<true|false> APPLY_CONVENTIONS=<true|false> REQUIRE_NON_AUTHOR_APPROVAL=<true|false>` — these fields, in this order, nothing else, where `<branch>` is a branch name such as `main`. **Anything else** (a non-zero exit, no line, extra text, or a missing, reordered or unlisted field or value) ⇒ use `EVIDENCE_POLICY=required SOURCE=error REF=none ISSUE_REQUIRED=true APPLY_CONVENTIONS=true REQUIRE_NON_AUTHOR_APPROVAL=true` instead.
 
 Set `EVIDENCE_POLICY`, `ISSUE_REQUIRED`, `APPLY_CONVENTIONS` and `REQUIRE_NON_AUTHOR_APPROVAL` from the accepted line. Pass agents only the three mechanism inputs, never `EVIDENCE_POLICY`. Report `Evidence policy: \{EVIDENCE_POLICY\} (source: \{SOURCE\})`, plus any `WARN` tokens as advisory, once in the final report.
 @end
@@ -21,9 +21,9 @@ Set `EVIDENCE_POLICY`, `ISSUE_REQUIRED`, `APPLY_CONVENTIONS` and `REQUIRE_NON_AU
 - `<kind>` is one of `ticket-link` — a closed set; no other kind is ever rendered.
 - `@<login>` is `@` followed by the output of `gh api user --jq .login` when that output matches `^[A-Za-z0-9][A-Za-z0-9-]\{0,38\}$`. On any other output, or a failed call, it is `(login unavailable)` instead, with no `@`.
 - `<utc>` is the output of `date -u +%Y-%m-%dT%H:%M:%SZ`.
-- `<reason>` is the user's own words, made inert: replace every character outside printable ASCII (newlines and tabs included) with a space, remove every `<`, `>`, `` ` ``, `[`, `]`, `\`, `#`, `@`, `&` and `$`, collapse runs of spaces, trim, keep the first 200 characters, and trim again. A reason that is empty after this is no reason.
+- `<reason>` is the user's own words, made inert: replace every character outside printable ASCII (newlines and tabs included) with a space, remove every `<`, `>`, `` ` ``, `[`, `]`, `\`, `/`, `#`, `@`, `&` and `$`, collapse runs of spaces, trim, keep the first 200 characters, and trim again. A reason that is empty after this is no reason.
 
-Note: the section reaches a public PR body. The Code agent re-checks every line against this shape before it pastes, and the body's D11 scrub is the reason's secret scrub — rendering neutralises markup, mentions and issue references; it filters no secrets.
+Note: the section reaches a public PR body. The Code agent re-checks every line against this shape before it pastes, and the body's D11 scrub is the reason's secret scrub — rendering neutralises markup, mentions and issue references, full issue URLs included; it filters no secrets.
 @end
 
 @export evidence_policy

@@ -103,6 +103,12 @@ function requireFile(label: string, filePath: string): string {
  * the conventions learner applies "compliance defaults" when git history shows no
  * pattern, which names a set of defaults and gates nothing.
  *
+ * One more arm is case-SENSITIVE, so it lives in COMPLIANCE_KEY_RE: the bare
+ * uppercase key `COMPLIANCE` in any spelling (`COMPLIANCE: enabled`, "when
+ * COMPLIANCE is set"). The retired setup-task-common guard matched it anywhere in
+ * the setup-task and fetch-issue references; this collector keeps that reach on the
+ * whole op surface, so widening the corpus never narrowed the token set.
+ *
  * NOT covered (PF-064): a compliance gate in synonyms ("only for regulated
  * projects"), or a conditional clause more than 60 characters, or a sentence
  * boundary, before the word. A clean result means none of these shapes occurred.
@@ -117,10 +123,15 @@ const COMPLIANCE_CONDITION_RE =
  * Driven by every live arm and by the known-bad probes, so each probe exercises
  * the real predicate rather than a copy of it.
  */
+/** The retired op-level key as a bare uppercase word — never part of `COMPLIANCE_SKILL_INSTALLED`. */
+const COMPLIANCE_KEY_RE = /\bCOMPLIANCE\b/;
+
 function collectComplianceConditions(label: string, body: string): string[] {
   const hits: string[] = [];
   body.split('\n').forEach((line, i) => {
-    if (COMPLIANCE_CONDITION_RE.test(line)) hits.push(`${label}:${i + 1}: ${line.trim().slice(0, 120)}`);
+    if (COMPLIANCE_CONDITION_RE.test(line) || COMPLIANCE_KEY_RE.test(line)) {
+      hits.push(`${label}:${i + 1}: ${line.trim().slice(0, 120)}`);
+    }
   });
   return hits;
 }
@@ -307,6 +318,15 @@ describe('AC-5: no operation or reference states a compliance condition (#362)',
       }
     });
   }
+
+  it('known-bad probe: the bare uppercase key, unquoted, is reported in any reference', () => {
+    // The retired setup-task-common guard matched /COMPLIANCE/ anywhere; the key
+    // without backticks or bold must not slip past the widened collector.
+    for (const seed of ['COMPLIANCE: enabled', 'Skip this step when COMPLIANCE is (none).']) {
+      expect(collectComplianceConditions('(probe)', seed), JSON.stringify(seed)).toHaveLength(1);
+    }
+    expect(collectComplianceConditions('(probe)', 'DEVFLOW_COMPLIANCE_SCOPE'), 'part of a longer identifier').toEqual([]);
+  });
 
   it('negative probes: a mention that names compliance without gating on it is not a condition', () => {
     for (const benign of [

