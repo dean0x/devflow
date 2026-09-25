@@ -12,6 +12,10 @@
  *         The partial stays import-free with two defines (PF-073), and both
  *         /dynamic-* commands carry the define's whole expansion exactly once.
  *
+ * The exception grammar is held three ways: `evidence_exception()`'s kind list,
+ * code.md's paste gate and the script's EXCEPTION_KINDS / EXCEPTION_LINE_RE name
+ * the same kinds in the same order, and the gate IS EXCEPTION_LINE_RE's source.
+ *
  * The script's grammar is required, never transcribed: a hand-copied pattern is a
  * second authority that agrees with the first only until one of them is edited.
  *
@@ -536,8 +540,10 @@ describe('AC-2: the States, Methods and precedence equal the exports', () => {
 })
 
 // ---------------------------------------------------------------------------
-// EXCEPTION_LINE_RE ↔ code.md's paste gate (modulo the kind set)
+// EXCEPTION_LINE_RE ↔ code.md's paste gate ↔ the partial's kind set
 // ---------------------------------------------------------------------------
+
+const EVIDENCE_POLICY_PARTIAL = path.join(ROOT, 'src', 'assets', 'commands', '_partials', '_evidence_policy.mds')
 
 /** code.md's paste gate: the anchored pattern in the fence under its PR_EXCEPTIONS paragraph. */
 function codeGateSource(code: string): string {
@@ -556,19 +562,74 @@ function splitKinds(source: string): { kinds: string[]; rest: string } {
   return { kinds, rest: source.replace(m[0], '^- `<KIND>`') }
 }
 
-describe('EXCEPTION_LINE_RE is code.md\'s paste gate, widened only in its kind set', () => {
-  it('identical outside the kind alternation; kinds equal EXCEPTION_KINDS', () => {
-    const gate = splitKinds(codeGateSource(resolveAgentSource('code').content))
-    const script = splitKinds(PE.EXCEPTION_LINE_RE.source)
-    expect(script.rest).toBe(gate.rest)
-    expect(script.kinds).toEqual([...PE.EXCEPTION_KINDS])
-    for (const k of gate.kinds) expect(PE.EXCEPTION_KINDS).toContain(k)
+/**
+ * The kinds `evidence_exception()` (define 2 of `_evidence_policy.mds`) renders:
+ * the code spans of its `<kind>` bullet between "is one of" and the first " — ".
+ * Read below the template fence, whose own line also opens with "- `<kind>`".
+ */
+function partialKinds(source: string = readFileSync(EVIDENCE_POLICY_PARTIAL, 'utf-8')): string[] {
+  const body = defineBody(source, 'evidence_exception')
+  if (body === null) throw new Error(`${EVIDENCE_POLICY_PARTIAL}: no \`@define evidence_exception():\` block`)
+  const rules = body.slice(body.indexOf('```', body.indexOf('```markdown') + 3) + 3)
+  const bulletLine = rules.split('\n').find(l => l.startsWith('- `<kind>`'))
+  if (bulletLine === undefined) return []
+  return spans(bulletLine.slice(bulletLine.indexOf(' is one of '), bulletLine.indexOf(' — ')))
+}
+
+/**
+ * Named collector: where the three statements of the exception grammar disagree —
+ * the partial that renders a line, code.md's gate that pastes it, and the script
+ * (EXCEPTION_KINDS and EXCEPTION_LINE_RE) that parses it back out of a PR. The gate
+ * and the script regex must be the SAME source, so a line one admits the other
+ * can never refuse, and all three kind lists must be equal, in order.
+ */
+function collectExceptionGrammarDisagreements(input: {
+  partial: readonly string[]
+  gate: string
+  script: string
+  kinds: readonly string[]
+}): string[] {
+  const out: string[] = []
+  if (input.script !== input.gate) out.push('EXCEPTION_LINE_RE is not code.md\'s paste gate byte for byte')
+  const gateKinds = splitKinds(input.gate).kinds
+  const scriptKinds = splitKinds(input.script).kinds
+  const want = input.kinds.join('|')
+  if (input.partial.join('|') !== want) out.push(`the partial renders [${input.partial.join(', ')}], EXCEPTION_KINDS is [${input.kinds.join(', ')}]`)
+  if (gateKinds.join('|') !== want) out.push(`code.md's gate admits [${gateKinds.join(', ')}], EXCEPTION_KINDS is [${input.kinds.join(', ')}]`)
+  if (scriptKinds.join('|') !== want) out.push(`EXCEPTION_LINE_RE admits [${scriptKinds.join(', ')}], EXCEPTION_KINDS is [${input.kinds.join(', ')}]`)
+  return out
+}
+
+describe('the exception grammar: the partial, code.md\'s gate and the script agree three ways', () => {
+  const live = () => ({
+    partial: partialKinds(),
+    gate: codeGateSource(resolveAgentSource('code').content),
+    script: PE.EXCEPTION_LINE_RE.source,
+    kinds: PE.EXCEPTION_KINDS,
+  })
+
+  it('the partial, the gate and the script name the same kinds, and the gate is EXCEPTION_LINE_RE', () => {
+    const now = live()
+    expect(now.partial.length, 'no kind parsed out of the partial — the collector is blind').toBeGreaterThanOrEqual(2)
+    expect(now.kinds).toEqual(['ticket-link', 'test-plan'])
+    expect(collectExceptionGrammarDisagreements(now)).toEqual([])
     expect(PE.EXCEPTION_LINE_RE.flags).toBe('')
   })
 
-  it('known-bad probe: a script pattern whose reason bound drifted is reported', () => {
-    const gate = splitKinds(codeGateSource(resolveAgentSource('code').content))
-    const drifted = splitKinds(PE.EXCEPTION_LINE_RE.source.replace('{0,199}', '{0,299}'))
-    expect(drifted.rest).not.toBe(gate.rest)
+  it('known-bad probes: a narrowed gate, a partial with a third kind and a drifted reason bound are each reported', () => {
+    const now = live()
+    const narrowedGate = now.gate.replace('(ticket-link|test-plan)', 'ticket-link')
+    expect(narrowedGate, 'the seed must land').not.toBe(now.gate)
+    expect(collectExceptionGrammarDisagreements({ ...now, gate: narrowedGate })).toEqual([
+      'EXCEPTION_LINE_RE is not code.md\'s paste gate byte for byte',
+      'code.md\'s gate admits [ticket-link], EXCEPTION_KINDS is [ticket-link, test-plan]',
+    ])
+    const seededPartial = readFileSync(EVIDENCE_POLICY_PARTIAL, 'utf-8').replace('`ticket-link` or `test-plan`', '`ticket-link`, `test-plan` or `waiver`')
+    expect(partialKinds(seededPartial)).toEqual(['ticket-link', 'test-plan', 'waiver'])
+    expect(collectExceptionGrammarDisagreements({ ...now, partial: partialKinds(seededPartial) })).toHaveLength(1)
+    const drifted = now.script.replace('{0,199}', '{0,299}')
+    expect(collectExceptionGrammarDisagreements({ ...now, script: drifted })).toEqual([
+      'EXCEPTION_LINE_RE is not code.md\'s paste gate byte for byte',
+    ])
   })
 })

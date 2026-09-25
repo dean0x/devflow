@@ -119,7 +119,7 @@ visible, a silently discarded request is not.
 {issue_capture_contract()}
 
 **Ticket link, only when `ISSUE_REQUIRED` is `true`:** when the capture above holds no `ISSUE_PR_LINK` (absent, or `(none)`), ask with AskUserQuestion before any Code spawn — "No tracker issue is linked to this task. Record a self-attested exception, or stop?" — offering exactly these two options:
-- **Record an exception** — the user gives the reason as free text. Render it with the grammar below; when the rendered reason is empty, ask for it once more, and stop as below if it is empty again.
+- **Record an exception** — the user gives the reason as free text. Render it with the grammar below, as kind `ticket-link`; when the rendered reason is empty, ask for it once more, and stop as below if it is empty again.
 - **Stop** — report `BLOCKED (no ticket link)`, name the branch setup-task created (`TASK_ID`) and `BASE_BRANCH` so it can be reused or removed, and give the remedy: create or link the tracker issue and re-run `/implement` with its reference, or — for a team that does not want ticket links — commit `.devflow/policy.json` as `\{"version":1,"evidencePolicy":"standard"\}` on the default branch; a machine with compliance enabled still resolves `required` whatever that file says. Spawn nothing further.
 
 {evidence_exception()}

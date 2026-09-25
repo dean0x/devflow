@@ -113,7 +113,7 @@ When you apply a decision from `.devflow/learning/decisions.md` or avoid a pitfa
    **Pasting `PR_EXCEPTIONS`.** When `PR_EXCEPTIONS` is provided (not `(none)`), append it verbatim as the body's last section — it is scrubbed with the body. Re-check its shape first: its first line must be exactly `## Evidence Exceptions`, and every line after it must match this pattern as the WHOLE line:
 
    ```
-   ^- `ticket-link` self-attested by (@[A-Za-z0-9][A-Za-z0-9-]{0,38}|\(login unavailable\)) at [0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z: [!"%'()*+,.0-9:;=?A-Z^_a-z{|}~-][ !"%'()*+,.0-9:;=?A-Z^_a-z{|}~-]{0,199}$
+   ^- `(ticket-link|test-plan)` self-attested by (@[A-Za-z0-9][A-Za-z0-9-]{0,38}|\(login unavailable\)) at [0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z: [!"%'()*+,.0-9:;=?A-Z^_a-z{|}~-][ !"%'()*+,.0-9:;=?A-Z^_a-z{|}~-]{0,199}$
    ```
 
    The value holds that heading and one or more such lines, and nothing else — no blank line, no second heading, no free text — with each kind at most once. The pattern bounds every line: the reason is at most 200 characters, and it admits no `<`, `>`, backtick, bracket, backslash, `/`, `#`, `@`, `&`, `$` or non-ASCII character, so no markup, mention, issue reference (a full issue URL included), marker or shell expansion rides in on it. `(none)`, or absent, is **not a mismatch**: add no section. On a MISMATCH anywhere, paste none of it and do not repair it — emit `TRACEABILITY: DEGRADED (evidence exception does not match its grammar)`. The scrubber-failure minimal body below never carries the section.
