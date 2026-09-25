@@ -956,6 +956,9 @@ describe('git agent — static content guards (PF-018)', () => {
     // #363 (PR4): splices the test-plan block into the PR body and posts the
     // SHA-keyed evidence comment — remote I/O on both sinks.
     'update-pr-evidence',
+    // #364 (PR5): adds each shipped issue to the release's tracker marker — a
+    // milestone, fixVersion or label write per provider, and no posted body.
+    'associate-release',
   ];
 
   for (const op of REQUIRED_OPS) {
@@ -2391,13 +2394,13 @@ describe('git agent — static content guards (PF-018)', () => {
     // corpus narrowing from a real removal — which is exactly what a 'sole'
     // detection read does here (15 → 14, silently). Registered as
     // git-agent-remote-io-ops in numeric-floors.json; 14 → 15 with #363's
-    // update-pr-evidence.
+    // update-pr-evidence, 15 → 16 with #364's associate-release.
     expect(
       remoteOps.length,
       `remote-I/O ops detected: ${remoteOps.length} [${remoteOps.join(', ')}] — the set may only ` +
       'grow. A drop means either an op stopped touching the remote or the corpus this guard ' +
       'reads got narrower; both need a decision, not a green run',
-    ).toBeGreaterThanOrEqual(15); // floor: git-agent-remote-io-ops (numeric-floors.json)
+    ).toBeGreaterThanOrEqual(16); // floor: git-agent-remote-io-ops (numeric-floors.json)
     expect(
       missingD4,
       `REQUIRED_OPS with remote I/O missing **Degradation (D4):** clause: [${missingD4.join(', ')}]`,
@@ -2774,6 +2777,7 @@ export const GIT_OPERATION_ROSTER: readonly string[] = [
   'post-resolution-summary',
   'check-merge-readiness',
   'backlink-shipped-issues',
+  'associate-release',
   'ensure-traceable-issue',
   'post-wave-report',
   'update-pr-evidence',
@@ -2795,7 +2799,7 @@ describe('git agent: the operation roster is unchanged (registry Guard 6)', () =
   });
 
   it('the roster check is non-vacuous, and the collector sees a seeded change', () => {
-    expect(GIT_OPERATION_ROSTER.length, 'the named set is empty').toBe(19);
+    expect(GIT_OPERATION_ROSTER.length, 'the named set is empty').toBe(20);
     const seeded = '## Operation: setup-task\nbody\n\n## Operation: renamed-op\nbody\n';
     expect(collectOperationNames(seeded)).toEqual(['setup-task', 'renamed-op']);
   });

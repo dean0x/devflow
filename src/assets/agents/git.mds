@@ -103,6 +103,7 @@ A pipeline's exit status swallows a scrubber crash (fail-open). Chain with `&&` 
 | `post-resolution-summary` | Post resolution-summary.md as single PR comment with marker dedup (D8) |
 | `check-merge-readiness` | Report-only: unresolved threads + review decision + CI status (D6) |
 | `backlink-shipped-issues` | Comment shipped marker on issues (marker-deduped, ≤50 issues) |
+| `associate-release` | Add shipped issues to the release marker (never replace) |
 | `ensure-traceable-issue` | Create or enrich a tracker issue from the D3 template (D5) |
 | `post-wave-report` | Post wave completion summary as a tracking-issue comment (marker-deduped) |
 | `update-pr-evidence` | Test-plan block + SHA-keyed evidence comment (append-only) |
@@ -701,6 +702,31 @@ For each issue reference in `SHIPPED_ISSUES` (sequentially, the first ≤50 in l
 - Truncated (beyond ≤50 bound): {n}
 
 ### Status: COMPLETE | PARTIAL ({n} DEGRADED) | TRUNCATED ({n} not processed)
+```
+
+---
+
+## Operation: associate-release
+
+Add shipped issues to the release's tracker marker; never replace one.
+
+**Input:** `SHIPPED_ISSUES`, `VERSION`, `WORKTREE_PATH` (optional)
+
+**Degradation (D4):** as `backlink-shipped-issues` (no remote / `gh` unauthenticated → return); an unusable marker ⇒ `TRACEABILITY: DEGRADED (\{reason\})`, no item call.
+
+**Process:**
+
+**Mechanics:** load this operation's provider reference.
+
+0. `backlink-shipped-issues`' step 0, then resolve the marker once, before the first ≤50 entries (the rest `TRUNCATED (\{n\} not processed)`); never `COMPLETE` over zero processed.
+
+**Output:**
+```markdown
+## Release Associated
+**Marker**: v{BARE_VERSION} ({created | existing})
+- Added: {n} · Already set: {n} · Kept other release: {n} · DEGRADED: {n}
+
+### Status: COMPLETE | PARTIAL ({n} DEGRADED) | TRUNCATED ({n} not processed) | DEGRADED ({reason})
 ```
 
 ---

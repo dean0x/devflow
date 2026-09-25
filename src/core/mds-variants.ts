@@ -299,7 +299,7 @@ export function resolveOutputDir(
 // ---------------------------------------------------------------------------
 
 /**
- * The 10 tracker operations whose provider mechanics are generated as separate
+ * The 11 tracker operations whose provider mechanics are generated as separate
  * skill reference files.
  *
  * Bidirectional parity, the COMPLIANCE_SKILL_TOKENS model
@@ -322,6 +322,7 @@ export const TRACKER_OPS = [
   'create-release',
   'gather-release-evidence',
   'backlink-shipped-issues',
+  'associate-release',
   'ensure-traceable-issue',
   'post-wave-report',
   'ensure-pr-ready',

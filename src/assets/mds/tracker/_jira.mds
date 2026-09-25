@@ -260,6 +260,25 @@ For each issue the hoist did not answer, within the operation's `≤50` bound:
 4. Post through the *add comment* capability with arguments (issue key, body: \{SCRUBBED_BODY\}).
 @end
 
+@define associate_release():
+## Operation: associate-release
+
+Load when the resolved tracker provider is `jira` and the operation is `associate-release`.
+
+**Mechanics held here:** the project's release version — found, else created — and the read-modify-write that adds it to each item's `fixVersions` without removing any other.
+
+### Process
+
+**Setup (once, before any item):** resolve the capability set per the tool-call contract; the project key is the preamble's.
+
+**Ref pre-flight (the always-loaded entry gate, instantiated for this provider).** {common.ref_preflight_entry("jira", "`^[A-Z][A-Z0-9_]{1,9}-[1-9][0-9]{0,8}$`")} {mcp.ref_preflight_tail()}
+
+1. **The version, once:** through the *release versions or labels* capability, find the project version named exactly `v\{BARE_VERSION\}`. Found ⇒ `existing`, unless archived ⇒ `TRACEABILITY: DEGRADED (release marker closed)`. Absent ⇒ create it in the project ⇒ `created`; a 403, a denial or any other failure ⇒ `TRACEABILITY: DEGRADED (release marker unavailable)`. Either DEGRADED makes no item call.
+2. **Read once:** one *batch fetch* over the admitted keys, bounded `≤50`, requesting `fixVersions`. A key it returns nothing for ⇒ that item DEGRADED; one already holding the version ⇒ Already set.
+3. **Add**, per item, 1s apart, through the *edit issue fields* capability. Prefer the tool's additive operation; otherwise write the item's current `fixVersions` ∪ the version, and only when step 2 returned that field whole — else that item DEGRADED, with no write. Another version on the item stays; the item counts as Added.
+4. On backpressure, follow `### Provider signals (Jira)` in this operation's `backlink-shipped-issues` reference.
+@end
+
 @define ensure_traceable_issue():
 ## Operation: ensure-traceable-issue
 
@@ -372,6 +391,9 @@ Load when the resolved tracker provider is `jira` and the operation is `ensure-p
 
 <!-- op: backlink-shipped-issues -->
 {backlink_shipped_issues()}
+
+<!-- op: associate-release -->
+{associate_release()}
 
 <!-- op: ensure-traceable-issue -->
 {ensure_traceable_issue()}

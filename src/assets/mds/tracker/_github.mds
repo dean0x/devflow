@@ -300,6 +300,27 @@ Then, per issue, within the operation's ≤50 bound:
 4. Wait 1s between issues.
 @end
 
+@define associate_release():
+## Operation: associate-release
+
+Load when the resolved tracker provider is `github` and the operation is `associate-release`.
+
+**Mechanics held here:** the release milestone — created first, else found by a bounded walk — then one batched read and one batched assignment that never replaces a milestone.
+
+### Process
+
+**Ref pre-flight (the always-loaded entry gate, instantiated for this provider).** Every entry of `SHIPPED_ISSUES` must satisfy `^#?[1-9][0-9]\{0,8\}$`, anchored at both ends of the STRING; strip exactly one leading `#` once, and interpolate only the digits. Drop each failure as `TRACEABILITY: DEGRADED (issue reference "\{ref\}" does not match github reference grammar)`. Every entry dropped ⇒ `TRACEABILITY: DEGRADED (no parseable refs for provider \{p\})`, no call, and **never report the status as `COMPLETE`**.
+
+Steps 1, 3 and 4 each run in ONE shell that opens with `trap 'rm -- "$F"' EXIT; F="$(mktemp)"`.
+
+1. **Create first**, once: `gh api --method POST "repos/\{owner\}/\{repo\}/milestones" -f title="v\{BARE_VERSION\}" > "$F"; echo "exit=$?"`, then read `$F` raw — never `--jq` over an error body. `exit=0` ⇒ `created`; keep its `number` and `node_id`.
+2. **HTTP 422 whose `errors[].code` includes `already_exists`** ⇒ `existing`: `gh api --method GET "repos/\{owner\}/\{repo\}/milestones" -f state=all -f per_page=100 -f page=N`, N = 1…10, stopping at the first page under 100 items; keep the one exact `title` match. None found ⇒ `TRACEABILITY: DEGRADED (release marker unavailable)`; its `state` `closed` ⇒ `TRACEABILITY: DEGRADED (release marker closed)`. Any other failure of step 1 or 2 ⇒ `TRACEABILITY: DEGRADED (release marker unavailable)`. Each of these makes no item call.
+3. **Read**, one query: write `query($owner:String!, $name:String!)\{ repository(owner:$owner, name:$name)\{ … \} \}` to `$F`, one alias per item, `iN: issue(number:N)\{ id milestone\{ number \} \}`, and run `gh api graphql -F owner='\{owner\}' -F name='\{repo\}' -F query=@"$F"`. A null alias ⇒ that item DEGRADED; this milestone's number ⇒ Already set; another ⇒ Kept other release, left untouched.
+4. **Assign**, one mutation over the items with no milestone: gate every node ID, the milestone's too, against `^[A-Za-z0-9_=-]\{1,100\}$`; write one `mutation` to `$F` with `mN: updateIssue(input:\{id:"<id>", milestoneId:"<node_id>"\})\{ issue\{ number \} \}` per item, and run `gh api graphql -F query=@"$F"`. Parse every alias even when `gh` exits 1: `data.mN` non-null ⇒ Added, null ⇒ that item DEGRADED.
+
+**Residual race, not closed:** a milestone set on an item between steps 3 and 4 is overwritten — GitHub has no conditional update. On backpressure, follow `### Provider signals (GitHub)` in this operation's `backlink-shipped-issues` reference.
+@end
+
 @define ensure_traceable_issue():
 ## Operation: ensure-traceable-issue
 
@@ -437,6 +458,9 @@ Load when the resolved tracker provider is `github` and the operation is `ensure
 
 <!-- op: backlink-shipped-issues -->
 {backlink_shipped_issues()}
+
+<!-- op: associate-release -->
+{associate_release()}
 
 <!-- op: ensure-traceable-issue -->
 {ensure_traceable_issue()}

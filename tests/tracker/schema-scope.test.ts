@@ -652,6 +652,16 @@ const LIVE_REASONS: readonly string[] = [
   // emitted by every provider — the trace script failed, printed no header, or
   // (Jira/Linear) no usable key existed, so every commit's trace is unknown.
   'trace map unavailable',
+  // #364 (PR5): associate-release resolves the release's tracker marker once,
+  // before any item, and each of these stops it with no item call. The spellings
+  // are provider-neutral on purpose — the marker is a milestone, a project version
+  // or a label depending on the provider, and the reason names none of them.
+  // `closed`: GitHub's closed milestone, Jira's archived version. `unavailable`:
+  // not found, not creatable, or refused (a 403). `ambiguous`: Linear, where two
+  // labels can share the exact name and choosing one would be a guess.
+  'release marker closed',
+  'release marker unavailable',
+  'ambiguous release marker',
 ];
 
 /**
@@ -989,12 +999,13 @@ describe('[DR-04] DEGRADED literal registry: forward direction', () => {
     ).toBe(CANONICAL_REASONS.length);
     expect(
       CANONICAL_REASONS.length,
-      // 18 at the tracker wave, 21 now: the mismatch reason split by cause (+2 -1),
-      // the plan artifact's cap (+1) and the two-server ambiguity (+1). A floor
-      // rises with the table and never falls — a shorter table is a narrowed
-      // registry, whatever the reason given.
-      '§14.2 fixes 21 non-`(none)` reasons; a shorter table is a narrowed registry',
-    ).toBeGreaterThanOrEqual(21);
+      // 18 at the tracker wave, 21 after it: the mismatch reason split by cause
+      // (+2 -1), the plan artifact's cap (+1) and the two-server ambiguity (+1).
+      // 25 since #364 (PR5): the trace map (+1) and associate-release's three
+      // marker reasons (+3). A floor rises with the table and never falls — a
+      // shorter table is a narrowed registry, whatever the reason given.
+      '§14.2 fixes 25 non-`(none)` reasons; a shorter table is a narrowed registry',
+    ).toBeGreaterThanOrEqual(25);
     // The instantiation rule is a NARROWING, not a wildcard: only `{provider}` is
     // instantiated, only with tokens the registry carries, and a reason without the
     // placeholder still matches itself and nothing else.

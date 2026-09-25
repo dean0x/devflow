@@ -468,16 +468,17 @@ describe('non-vacuity: per-agent-type fence counts', () => {
   it('at least 14 operations have a live caller fence (key-map non-vacuity)', () => {
     // Directions 1 and 2 iterate keysPassedByOp. An empty or near-empty map makes
     // both of them assert nothing regardless of how many fences were counted.
-    // M9: git.md declares 19 ## Operation: sections; 14 have a live caller fence in
+    // M9: git.md declares 20 ## Operation: sections; 14 have a live caller fence in
     // dist/commands/ (update-pr-evidence joined with /implement's Phase 10b spawn,
-    // #363). The five without are:
+    // #363). The six without are:
     //   - learn-conventions: internal — invoked by setup-task step 1b inside the Git
     //     agent itself, not by any command fence.
     //   - check-ci-status: prose-only references in implement.md and resolve.md (the
     //     Spawn description appears in text, not inside a parseable code fence).
-    //   - create-release, gather-release-evidence, backlink-shipped-issues: described
-    //     only in the hand-authored release.md prose; the operation names appear in
-    //     plain text, not in Agent(…) spawn fences the parser recognises.
+    //   - create-release, gather-release-evidence, backlink-shipped-issues,
+    //     associate-release (#364): described only in the hand-authored release.md
+    //     prose; the operation names appear in plain text, not in Agent(…) spawn
+    //     fences the parser recognises.
     // Raise when new caller fences are added (numeric-floors.json seam-ops-with-callers).
     expect(
       keysPassedByOp.size,
@@ -486,11 +487,11 @@ describe('non-vacuity: per-agent-type fence counts', () => {
     ).toBeGreaterThanOrEqual(14)
   })
 
-  it('op→section map covers at least 16 operations [DR-24]', () => {
+  it('op→section map covers at least 17 operations [DR-24]', () => {
     expect(
       opSectionMap.size,
-      `op→section map has only ${opSectionMap.size} ops — expected ≥ 16 (matching opsCovered floor); is git.md truncated?`,
-    ).toBeGreaterThanOrEqual(16)
+      `op→section map has only ${opSectionMap.size} ops — expected ≥ 17 (matching opsCovered floor); is git.md truncated?`,
+    ).toBeGreaterThanOrEqual(17)
   })
 
   it('DIST_FILES has exactly 14 compiled command files', () => {

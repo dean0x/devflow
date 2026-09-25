@@ -196,7 +196,47 @@ const PROVIDER_LITERALS: readonly ProviderLiteral[] = [
       'as a 429. D4\'s status-shaped rule answers a generic 4xx with "degrade this item and ' +
       'continue", so without this literal the fan-out runs straight into the penalty window',
   },
+  // #364 (PR5): associate-release's release MARKER is a different object per
+  // provider, and each module names only its own. The contract names none of them
+  // (RELEASE_MARKER_LITERALS below keeps both out of git.md and the tool-call
+  // contract); Linear's marker is a plain label, so it owns no row here.
+  {
+    literal: 'fixVersion',
+    present: ['jira'],
+    why:
+      'Jira\'s release marker: a project version held in the multi-valued `fixVersions` field, ' +
+      'which associate-release reads and writes back as a union so another release stays. A ' +
+      'second provider naming it is writing a field its tracker does not have',
+  },
+  {
+    literal: 'milestone',
+    present: ['github'],
+    why:
+      'GitHub\'s release marker, and a SINGLE-valued one: associate-release never replaces it, ' +
+      'which is why an item holding another release is left alone there. A tool-call provider ' +
+      'naming it has borrowed GitHub\'s marker model, not its own',
+  },
 ];
+
+/**
+ * The provider literals that name a release MARKER, which the provider-neutral
+ * half — `dist/agents/git.md` and the tool-call contract — must never name: the
+ * contract says "the release's tracker marker" and each provider module says what
+ * that is. Checked against the matrix above, so a row cannot be dropped from one
+ * list and kept in the other.
+ */
+const RELEASE_MARKER_LITERALS: readonly string[] = ['fixVersion', 'milestone'];
+
+/**
+ * Named collector: marker literals in a provider-neutral file, case-insensitive —
+ * `Milestone` in a heading is as provider-specific as `milestone` in a step.
+ */
+export function collectNeutralMarkerLeaks(label: string, text: string): string[] {
+  const lower = text.toLowerCase();
+  return RELEASE_MARKER_LITERALS
+    .filter(literal => lower.includes(literal.toLowerCase()))
+    .map(literal => `${label}: names "${literal}", a provider fact`);
+}
 
 /** Named collector: (provider, literal) pairs whose presence is wrong. */
 export function collectLiteralViolations(
@@ -286,7 +326,7 @@ describe('provider literals: the cross-provider matrix (AC-3.13, GAP-13)', () =>
 
     // …and the mirror: a GitHub module carrying a tool-call provider's cap.
     expect(
-      collectLiteralViolations('seed', 'cap 32767; X-RateLimit-Remaining < 10 stops the fan-out; 60000', 'github', PROVIDER_LITERALS)
+      collectLiteralViolations('seed', 'cap 32767; X-RateLimit-Remaining < 10 stops the fan-out; 60000; milestone', 'github', PROVIDER_LITERALS)
         .map(v => v.split(' — ')[0]),
       'the GitHub column must reject the borrowed cap while accepting its own two signals',
     ).toEqual(['seed: forbidden "32767"']);
@@ -301,7 +341,7 @@ describe('provider literals: the cross-provider matrix (AC-3.13, GAP-13)', () =>
     // while dropping "never slept on" is exactly the ambiguity the clause resolves:
     // STOP beside a waitable value, with nothing saying which wins.
     expect(
-      collectLiteralViolations('seed', 'cap 32767; Retry-After on a 429 stops the fan-out', 'jira', PROVIDER_LITERALS)
+      collectLiteralViolations('seed', 'cap 32767; Retry-After on a 429 stops the fan-out; fixVersions', 'jira', PROVIDER_LITERALS)
         .map(v => v.split(' — ')[0]),
       'a Jira row naming the header but dropping the do-not-sleep clause must be reported',
     ).toEqual(['seed: missing "never slept on"']);
@@ -310,6 +350,66 @@ describe('provider literals: the cross-provider matrix (AC-3.13, GAP-13)', () =>
         .map(v => v.split(' — ')[0]),
       'a provider whose signal hands the agent no waitable value must not carry the clause',
     ).toEqual(['seed: forbidden "never slept on"']);
+  });
+
+  it('known-bad probe: a release marker swapped across providers is reported in both directions', () => {
+    // #364: each associate-release reference names its own provider's marker.
+    expect(
+      collectLiteralViolations('seed', 'cap 32767; Retry-After, never slept on; set the milestone', 'jira', PROVIDER_LITERALS)
+        .map(v => v.split(' — ')[0]),
+      'a Jira row that assigns a milestone and never names fixVersions must be reported twice',
+    ).toEqual(['seed: missing "fixVersion"', 'seed: forbidden "milestone"']);
+    expect(
+      collectLiteralViolations('seed', 'cap 32767; a 400 RATELIMITED stops the fan-out; add to fixVersions', 'linear', PROVIDER_LITERALS)
+        .map(v => v.split(' — ')[0]),
+      'Linear\'s marker is a label; Jira\'s field name there is a borrowed model',
+    ).toEqual(['seed: forbidden "fixVersion"']);
+    expect(
+      collectLiteralViolations('seed', 'cap 60000; X-RateLimit-Remaining < 50; a label', 'github', PROVIDER_LITERALS)
+        .map(v => v.split(' — ')[0]),
+      'a GitHub row that dropped its milestone must be reported',
+    ).toEqual(['seed: missing "milestone"']);
+  });
+});
+
+describe('provider literals: the provider-neutral contract names no release marker (#364)', () => {
+  function neutralCorpus(): Array<{ label: string; text: string }> {
+    const git = resolveAgentSource('git');
+    return [
+      { label: 'agents/git.md', text: git.content },
+      { label: 'tracker/_mcp.md', text: readGenerated('tracker/_mcp.md') },
+      { label: 'src/assets/mds/tracker/_mcp.mds', text: readSource('src/assets/mds/tracker/_mcp.mds') },
+    ];
+  }
+
+  it('every marker literal is a provider fact in the matrix, owned by exactly one provider', () => {
+    for (const literal of RELEASE_MARKER_LITERALS) {
+      const row = PROVIDER_LITERALS.find(entry => entry.literal === literal);
+      expect(row, `"${literal}" has no PROVIDER_LITERALS row — nothing pins which provider owns it`).toBeDefined();
+      expect(row!.present, `"${literal}" must be one provider's marker`).toHaveLength(1);
+    }
+  });
+
+  it('git.md and the tool-call contract name neither marker', () => {
+    const corpus = neutralCorpus();
+    expect(corpus.every(entry => entry.text.length > 0), 'an empty neutral file clears this vacuously').toBe(true);
+    expect(
+      corpus.map(entry => entry.text).join('\n'),
+      'the corpus must hold the op whose marker this is about, or the arm reads the wrong files',
+    ).toContain('## Operation: associate-release');
+    const leaks = corpus.flatMap(entry => collectNeutralMarkerLeaks(entry.label, entry.text));
+    expect(
+      leaks,
+      `a provider's release marker named in the provider-neutral half:\n  ${leaks.join('\n  ')}`,
+    ).toEqual([]);
+  });
+
+  it('known-bad probe: a marker seeded into git.md or the contract is reported', () => {
+    const [git, contract] = neutralCorpus();
+    expect(collectNeutralMarkerLeaks(git.label, `${git.text}\nAssign the release Milestone.`))
+      .toEqual(['agents/git.md: names "milestone", a provider fact']);
+    expect(collectNeutralMarkerLeaks(contract.label, `${contract.text}\n| fixVersion edit | x |`))
+      .toEqual(['tracker/_mcp.md: names "fixVersion", a provider fact']);
   });
 });
 

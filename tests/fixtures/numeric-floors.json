@@ -92,11 +92,11 @@
     },
     {
       "id": "seam-op-section-map",
-      "floor": 16,
-      "pattern": "toBeGreaterThanOrEqual(16)",
+      "floor": 17,
+      "pattern": "toBeGreaterThanOrEqual(17)",
       "occurrences": 1,
       "sourceFile": "tests/seams/command-agent-input.test.ts",
-      "description": "Operations indexed from git.md by the seam test's op→section map [DR-24]. 16 since #363 (PR4) declared update-pr-evidence; git.md declares 19 operations."
+      "description": "Operations indexed from git.md by the seam test's op→section map [DR-24]. 16 since #363 (PR4) declared update-pr-evidence; 17 since #364 (PR5) declared associate-release; git.md declares 20 operations."
     },
     {
       "id": "seam-ops-with-callers",
@@ -148,11 +148,11 @@
     },
     {
       "id": "generated-reference-manifest-size",
-      "floor": 44,
-      "pattern": "toBeGreaterThanOrEqual(44)",
+      "floor": 47,
+      "pattern": "toBeGreaterThanOrEqual(47)",
       "occurrences": 2,
       "sourceFile": "tests/installer/reference-overlay.test.ts",
-      "description": "BUILD/TARBALL SCOPE: the manifest the build EMITS, which is every provider plus the provider-independent trees. Distinct from installed-reference-count-{github,provider}, which pin what ONE install carries; the build stays complete so the tarball can serve any selection without a rebuild, and narrowing the install never lowers this floor. 44 = 10 GitHub ops + 10 Jira ops + 10 Linear ops (the SAME TRACKER_OPS roster, which is what makes file-set parity structural) + 9 PR-host ops (PR_HOST_OPS, under no provider: pull requests stay on GitHub whatever the tracker is) + 4 cross-cutting documents + the tool-call contract, whose generation gate the first tool-call provider opens. Two sites — the manifest shape assertion and the 0644 normalisation's installed-file count. A manifest short enough to enumerate by hand makes every convergence assertion vacuous (GAP-42/PF-018), which is the same reason MIN_VARIANT_PAIRS exists. A floor may only rise, and here it rises by a whole module at a time."
+      "description": "BUILD/TARBALL SCOPE: the manifest the build EMITS, which is every provider plus the provider-independent trees. Distinct from installed-reference-count-{github,provider}, which pin what ONE install carries; the build stays complete so the tarball can serve any selection without a rebuild, and narrowing the install never lowers this floor. 47 = 11 GitHub ops + 11 Jira ops + 11 Linear ops (the SAME TRACKER_OPS roster, which is what makes file-set parity structural) + 9 PR-host ops (PR_HOST_OPS, under no provider: pull requests stay on GitHub whatever the tracker is) + 4 cross-cutting documents + the tool-call contract, whose generation gate the first tool-call provider opens (44 until #364, PR5, added associate-release to the roster). Two sites — the manifest shape assertion and the 0644 normalisation's installed-file count. A manifest short enough to enumerate by hand makes every convergence assertion vacuous (GAP-42/PF-018), which is the same reason MIN_VARIANT_PAIRS exists. A floor may only rise, and here it rises by a whole module at a time."
     },
     {
       "id": "issue-pr-link-forwarding-sites",
@@ -164,19 +164,19 @@
     },
     {
       "id": "packed-reference-manifest-size",
-      "floor": 44,
-      "pattern": "toBeGreaterThanOrEqual(44)",
+      "floor": 47,
+      "pattern": "toBeGreaterThanOrEqual(47)",
       "occurrences": 1,
       "sourceFile": "tests/packaging.test.ts",
       "description": "BUILD/TARBALL SCOPE (unaffected by the selection-scoped install): prefix-shippability clause (i) — the tarball must carry every file the reference overlay converges to. The floor keeps the packed-set assertion non-vacuous if the manifest is ever narrowed. It pins the same manifest as generated-reference-manifest-size at the OTHER sink, and the two must move together, or a module could ship un-packed."
     },
     {
       "id": "capability-hoist-block-floor",
-      "floor": 59,
-      "pattern": "toBeGreaterThanOrEqual(59)",
+      "floor": 63,
+      "pattern": "toBeGreaterThanOrEqual(63)",
       "occurrences": 1,
       "sourceFile": "tests/guards/capability-hoist.test.ts",
-      "description": "Total `**Process:**` / `### Process` blocks in the tracker corpus (dist/agents/git.md + the generated reference tree). The corpus split is asserted by provenance as well as by count: git.md's own contribution was 18, so a bare 18 was met with the generated tree entirely absent while the guard claimed to scan both (PF-018). 59 = 19 in git.md + 1 learn-conventions + 30 provider blocks (ten per-op references for each of the three providers) + 9 PR-host blocks (#363 added update-pr-evidence's pair). A provider adds its whole roster at once, so the floor moves by a module rather than by a file."
+      "description": "Total `**Process:**` / `### Process` blocks in the tracker corpus (dist/agents/git.md + the generated reference tree). The corpus split is asserted by provenance as well as by count: git.md's own contribution was 18, so a bare 18 was met with the generated tree entirely absent while the guard claimed to scan both (PF-018). 63 = 20 in git.md + 1 learn-conventions + 33 provider blocks (eleven per-op references for each of the three providers) + 9 PR-host blocks (#363 added update-pr-evidence's pair; #364 added associate-release's four). A provider adds its whole roster at once, so the floor moves by a module rather than by a file."
     },
     {
       "id": "min-reference-chars",
@@ -220,27 +220,27 @@
     },
     {
       "id": "installed-reference-count-github",
-      "floor": 23,
-      "pattern": "INSTALLED_REFS_GITHUB = 23",
+      "floor": 24,
+      "pattern": "INSTALLED_REFS_GITHUB = 24",
       "occurrences": 1,
       "sourceFile": "tests/mds-variants.test.ts",
-      "description": "Reference files ONE github install carries: the tracker/github tree, the provider-independent PR-host tree (pr/, 9 files) and the cross-cutting documents. Install-time scope, distinct from the build-time floor, which is unchanged — the build still emits every provider so the tarball can serve any selection without a rebuild. Re-derived 2026-09-22 when the PR-host tree landed: 21 files; 23 since #363 (PR4) added pr/update-pr-evidence.md and the cross-cutting trust-rule.md."
+      "description": "Reference files ONE github install carries: the tracker/github tree, the provider-independent PR-host tree (pr/, 9 files) and the cross-cutting documents. Install-time scope, distinct from the build-time floor, which is unchanged — the build still emits every provider so the tarball can serve any selection without a rebuild. Re-derived 2026-09-22 when the PR-host tree landed: 21 files; 23 since #363 (PR4) added pr/update-pr-evidence.md and the cross-cutting trust-rule.md; 24 since #364 (PR5) added tracker/github/associate-release.md."
     },
     {
       "id": "installed-reference-count-provider",
-      "floor": 34,
-      "pattern": "INSTALLED_REFS_PROVIDER = 34",
+      "floor": 36,
+      "pattern": "INSTALLED_REFS_PROVIDER = 36",
       "occurrences": 1,
       "sourceFile": "tests/mds-variants.test.ts",
-      "description": "Reference files ONE jira or linear install carries: the github floor (23, which already includes the 9 provider-independent PR-host files) + the selected provider's own 11. Excludes tracker/_mcp.md from the count assertion path, which is asserted biconditionally instead. Install-time scope, distinct from the build-time floor. Re-derived 2026-09-22: 32 files; 34 since #363 (PR4)."
+      "description": "Reference files ONE jira or linear install carries: the github floor (24, which already includes the 9 provider-independent PR-host files) + the selected provider's own 12. Excludes tracker/_mcp.md from the count assertion path, which is asserted biconditionally instead. Install-time scope, distinct from the build-time floor. Re-derived 2026-09-22: 32 files; 34 since #363 (PR4); 36 since #364 (PR5) added associate-release to the github tree and to the provider's own."
     },
     {
       "id": "git-agent-remote-io-ops",
-      "floor": 15,
-      "pattern": "toBeGreaterThanOrEqual(15); // floor: git-agent-remote-io-ops",
+      "floor": 16,
+      "pattern": "toBeGreaterThanOrEqual(16); // floor: git-agent-remote-io-ops",
       "occurrences": 1,
       "sourceFile": "tests/git-agent.test.ts",
-      "description": "AC-0.6b: REQUIRED_OPS detected as doing remote I/O, over git.md UNIONED with the PR-host references (the corpus #326's move made necessary — a git.md-only read silently narrows the set by one because post-resolution-summary's gh indicators all moved with its body). Replaces a bare `> 0` non-vacuity check, which one detected op satisfies and which therefore cannot tell a corpus narrowing from a real removal. Zero headroom at 15 (14 + #363's update-pr-evidence): the D4 evidence half of the same guard stays git.md-only (PF-027 — a degradation clause a spawn can decline to load is not a contract), so the two halves read different corpora on purpose."
+      "description": "AC-0.6b: REQUIRED_OPS detected as doing remote I/O, over git.md UNIONED with the PR-host references (the corpus #326's move made necessary — a git.md-only read silently narrows the set by one because post-resolution-summary's gh indicators all moved with its body). Replaces a bare `> 0` non-vacuity check, which one detected op satisfies and which therefore cannot tell a corpus narrowing from a real removal. Zero headroom at 16 (14 + #363's update-pr-evidence + #364's associate-release): the D4 evidence half of the same guard stays git.md-only (PF-027 — a degradation clause a spawn can decline to load is not a contract), so the two halves read different corpora on purpose."
     }
   ],
   "ceilings": [

@@ -213,14 +213,14 @@ operation does when no exposed tool describes it.
 | project and issue-type metadata | `no tracker tool for project and issue-type metadata` |
 | list by filter | `no tracker tool for list by filter` |
 | transitions | `no tracker tool for transitions` |
+| release versions or labels | `no tracker tool for release versions or labels` |
+| edit issue fields | `no tracker tool for edit issue fields` |
 | entity property read/write | fall to the next dedup rung; never an error on its own |
 | edit comment in place | fall to the next dedup rung; never an error on its own |
 | create remote link | fall to the next dedup rung; never an error on its own |
 | attachment create, URL form | fall to the next dedup rung; never an error on its own |
 
-`identify current user` is the one row that degrades and still proceeds: a
-duplicate comment is worse than no comment only if nobody is told, so the
-DEGRADED reason is what makes posting the safe choice.
+`identify current user` alone degrades and still posts.
 
 ### The scrub gate (D11) for a tool-call sink
 

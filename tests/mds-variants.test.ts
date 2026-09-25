@@ -613,7 +613,7 @@ describe('splitVariantSections', () => {
   });
 
   it('known-bad probe: a registered op with no section is refused (reverse direction)', () => {
-    const short = body(TRACKER_GITHUB_OPS.slice(0, 9));
+    const short = body(TRACKER_GITHUB_OPS.slice(0, -1));
     const err = errorOf(splitVariantSections(short, entries(TRACKER_GITHUB_OPS)));
     expect(err.kind).toBe('missing-section');
     if (err.kind !== 'missing-section') throw new Error('unexpected kind');
@@ -984,10 +984,13 @@ describe('validateContractOutputName — the narrow underscore allowance', () =>
  * when the PR-host tree (8 files, provider-independent) joined both sets:
  * github 21, jira 32, linear 32. Raised by #363 (PR4), which added
  * pr/update-pr-evidence.md and the cross-cutting trust-rule.md to both sets:
- * github 23, jira 34, linear 34.
+ * github 23, jira 34, linear 34. Raised by #364 (PR5), whose associate-release
+ * operation adds tracker/github/associate-release.md to both sets and the
+ * selected provider's own copy to a jira or linear install: github 24, jira 36,
+ * linear 36.
  */
-const INSTALLED_REFS_GITHUB = 23;
-const INSTALLED_REFS_PROVIDER = 34;
+const INSTALLED_REFS_GITHUB = 24;
+const INSTALLED_REFS_PROVIDER = 36;
 
 describe('installedReferenceManifest — {github} ∪ {selected provider}', () => {
   const generated = generatedReferenceManifest();
@@ -1039,7 +1042,7 @@ describe('installedReferenceManifest — {github} ∪ {selected provider}', () =
   });
 
   it('the build still emits every provider — the narrowing is install-time only', () => {
-    expect(generated.length).toBe(44);
+    expect(generated.length).toBe(47);
     const union = new Set([
       ...installedReferenceManifest({ provider: 'github' }),
       ...installedReferenceManifest({ provider: 'jira' }),
