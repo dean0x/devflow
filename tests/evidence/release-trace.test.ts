@@ -528,12 +528,15 @@ describe('render and the output gate (D-TRACE-STDOUT, D-TRACE-GATE)', () => {
   it('refuses every incoherent output', () => {
     const header = (over: string) => `TRACE from:v1.0.0 ${over}\n`
     const bad: ReadonlyArray<readonly [string, unknown]> = [
-      ['counts do not sum', header('scanned:3 traced:1 untraced:1 exempt:0 unmatched:0 bound:ok')],
+      // Every other check passes here (nothing listed, nothing claimed listed): only the sum refuses it.
+      ['counts do not sum', header('scanned:3 traced:1 untraced:0 exempt:0 unmatched:0 bound:ok')],
       ['listed untraced ≠ header', `${header('scanned:1 traced:0 untraced:1 exempt:0 unmatched:0 bound:ok')}`],
       ['scanned past the bound', header('scanned:501 traced:501 untraced:0 exempt:0 unmatched:0 bound:hit')],
       ['bound:hit below the bound', header('scanned:3 traced:3 untraced:0 exempt:0 unmatched:0 bound:hit')],
       ['a hostile author', `${header('scanned:1 traced:0 untraced:1 exempt:0 unmatched:0 bound:ok')}- 000000000001 untraced author:$(x)\n`],
       ['exempt listed before untraced', `${header('scanned:2 traced:0 untraced:1 exempt:1 unmatched:0 bound:ok')}- 000000000002 exempt:bot author:b\n- 000000000001 untraced author:a\n`],
+      // The totals agree (2 untraced lines' worth, 0 exempt): only the class labels refuse it.
+      ['an exempt-labelled line counted as untraced', `${header('scanned:2 traced:0 untraced:2 exempt:0 unmatched:0 bound:ok')}- 000000000002 exempt:bot author:b\n- 000000000001 untraced author:a\n`],
       ['an overflow line after a short class', `${header('scanned:5 traced:0 untraced:5 exempt:0 unmatched:0 bound:ok')}- 000000000001 untraced author:a\n- …and 4 more\n`],
       ['a trailing foreign line', `${header('scanned:0 traced:0 untraced:0 exempt:0 unmatched:0 bound:ok')}Closes #12\n`],
       ['no final newline', 'TRACE from:v1.0.0 scanned:0 traced:0 untraced:0 exempt:0 unmatched:0 bound:ok'],
@@ -571,6 +574,9 @@ describe('parsing git\'s answers (D-TRACE-PARSE)', () => {
     expect(RT.parseMessageLog(`${SHA_A}\0n\0e\0s\0b\0x\x1e\n`, [SHA_A]), 'an extra NUL').toBeNull()
     expect(RT.parseMessageLog(good, [SHA_B]), 'another commit').toBeNull()
     expect(RT.parseMessageLog(good, [SHA_A, SHA_B]), 'a commit missing').toBeNull()
+    const second = `${SHA_A}\0n\0e\0s\0b\x1e\n${SHA_C}\0n\0e\0s\0b\x1e\n`
+    expect(RT.parseMessageLog(second, [SHA_A, SHA_C]), 'the positive control').not.toBeNull()
+    expect(RT.parseMessageLog(second, [SHA_A, SHA_B]), 'a later record naming another commit').toBeNull()
     expect(RT.parseMessageLog(`${SHA_A}\0n\0e\0s\0b\x1e`, [SHA_A]), 'a truncated record').toBeNull()
     expect(RT.parseMessageLog('', []), 'nothing to parse').toBeNull()
   })
@@ -760,6 +766,23 @@ describe('map: first-parent commits only (D4), and the jira grammar', SPAWN_BUDG
     const withFile = parseTrace(r.stdout)
     expect(classOf(withFile, merge)).toBe('traced')
     expect(withFile.header.unmatched, 'a branch-internal SHA is outside the first-parent scan').toBe('1')
+  })
+
+  it('a root commit inside the range is diffed against the empty tree even when the repository sets log.showRoot=false', () => {
+    const repo = fs.mkdtempSync(path.join(tmp, 'root-in-range-'))
+    git(repo, ['init', '-q', '-b', 'main'])
+    const root = commit(repo, { subject: 'docs: first changelog', files: { 'CHANGELOG.md': '1' } })
+    git(repo, ['checkout', '-q', '--orphan', 'unrelated'])
+    git(repo, ['rm', '-rqf', '.'])
+    commit(repo, { subject: 'chore: unrelated history', files: { u: '1' } })
+    git(repo, ['tag', 'v1.0.0'])
+    git(repo, ['checkout', '-q', 'main'])
+    git(repo, ['config', 'log.showRoot', 'false'])
+    const r = run(repo, ['map', '--from', 'v1.0.0', '--grammar', 'github'])
+    expect(r.status, r.stderr).toBe(0)
+    const t = parseTrace(r.stdout)
+    expect(t.header.scanned).toBe('1')
+    expect(classOf(t, root), 'the root commit changes CHANGELOG.md only').toBe('exempt:release')
   })
 
   it('jira: a same-key reference traces, a foreign key and a lowercase key do not; --key is upper-normalised', () => {
@@ -1010,7 +1033,8 @@ describe('output gate (exit 5)', () => {
   })
 
   it.each([
-    ['counts that do not sum', () => 'TRACE from:v1.0.0 scanned:1 traced:1 untraced:1 exempt:0 unmatched:0 bound:ok\n'],
+    // Header matches this run and nothing is listed: only the sum (0 ≠ 1) refuses it.
+    ['counts that do not sum', () => 'TRACE from:v1.0.0 scanned:1 traced:0 untraced:0 exempt:0 unmatched:0 bound:ok\n'],
     ['a header describing another run', () => 'TRACE from:v1.0.0 scanned:0 traced:0 untraced:0 exempt:0 unmatched:0 bound:ok\n'],
     ['a raw author', () => 'TRACE from:v1.0.0 scanned:1 traced:0 untraced:1 exempt:0 unmatched:0 bound:ok\n- bbbbbbbbbbbb untraced author:$(id)\n'],
     ['not a string', () => 7],
@@ -1063,13 +1087,14 @@ describe('the git argv the script sends', SPAWN_BUDGET, () => {
       expect(c).toContain('--first-parent')
     }
     expect(calls[3]).toContain('--no-use-mailmap')
+    expect(calls[3], 'the raw ident (%an/%ae), never the mailmapped %aN/%aE').toContain('--format=%H%x00%an%x00%ae%x00%s%x00%b%x1e')
     expect(calls[4].slice(0, 3)).toEqual(['git', '-c', 'log.showRoot=true'])
     for (const flag of ['--no-renames', '--no-relative', '--ignore-submodules=none', '--diff-merges=first-parent', '-z']) {
       expect(calls[4]).toContain(flag)
     }
   })
 
-  it('.mailmap cannot re-attribute a commit to a bot, and diff.relative cannot hide a path', () => {
+  it('.mailmap cannot re-attribute a commit to a bot (raw ident), and diff.relative cannot hide a path', () => {
     const repo = newRepo('config')
     git(repo, ['tag', 'v1.0.0'])
     const human = commit(repo, { subject: 'feat: human', files: { 'sub/CHANGELOG.md': '1', 'src/x.js': '1' } })

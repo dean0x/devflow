@@ -881,9 +881,12 @@ const PATH_LOG_FLAGS = Object.freeze([
 ]);
 
 /**
- * D-TRACE-MAILMAP: the message-log flags. `--no-use-mailmap` matters: a
- * repository's `.mailmap` is committed content, and honouring it would let a
- * later commit re-attribute an earlier one to a `[bot]` identity.
+ * D-TRACE-MAILMAP: the message-log flags. A repository's `.mailmap` is committed
+ * content, and honouring it would let a later commit re-attribute an earlier one
+ * to a `[bot]` identity. The format therefore reads the RAW ident — `%an`/`%ae`,
+ * never `%aN`/`%aE`, which apply the mailmap (git 2.50 leaves `%an` raw even under
+ * `--use-mailmap`) — and `--no-use-mailmap` also disarms `log.mailmap` for a git
+ * that rewrites the ident itself.
  */
 const MESSAGE_LOG_FLAGS = Object.freeze([
   '--first-parent', '--no-color', '--no-show-signature', '--no-notes', '--no-use-mailmap', '--encoding=UTF-8',
