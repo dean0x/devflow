@@ -157,6 +157,37 @@ describe('composeScripts', () => {
     // Budget: a directory copy plus a node + bash-fake spawn — well under 5 s alone,
     // but spawns slow to seconds under full-suite load (same as the resolver suite).
   }, 20_000);
+
+  it('copies pr-evidence.cjs and verify-evidence.cjs to the top level, and the INSTALLED verify-evidence.cjs loads its sibling under the composed {"type":"module"} package (install path pin)', async () => {
+    // verify-evidence.cjs requires pr-evidence.cjs through __dirname, so the pair
+    // only works when both land side by side at the top of the scripts dir. Running
+    // the installed copy — not the src one — is what proves the sibling resolves and
+    // the `.cjs` extension keeps both CommonJS next to package.json's {"type":"module"}.
+    const target = path.join(tmpDir, 'scripts');
+    await composeScripts(target);
+
+    for (const name of ['pr-evidence.cjs', 'verify-evidence.cjs']) {
+      const installed = path.join(target, name);
+      await expect(fs.access(installed), `${name} not found at the top level of the scripts dir`).resolves.toBeUndefined();
+      const content = await fs.readFile(installed, 'utf-8');
+      expect(content.length, `${name} must be non-empty after install (PF-018)`).toBeGreaterThan(0);
+    }
+    const pkg = JSON.parse(await fs.readFile(path.join(target, 'package.json'), 'utf-8')) as { type?: string };
+    expect(pkg.type, 'the pin is only meaningful under the ESM package marker').toBe('module');
+
+    // `render --plan` makes no subprocess call, so no fake is needed; HOME is tmp (PF-060).
+    const home = path.join(tmpDir, 'home');
+    await fs.mkdir(home, { recursive: true });
+    const plan = path.join(home, 'plan.md');
+    const tp = '- [ ] TP-1 (AC-1) the installed pair renders a block — method:manual';
+    await fs.writeFile(plan, `## Test Plan\n${tp}\n`);
+    const run = runResolver({ home, args: ['render', '--plan', plan], script: path.join(target, 'verify-evidence.cjs') });
+    expect(run.status, run.stderr).toBe(0);
+    const { MARKERS } = createRequire(import.meta.url)(path.join(target, 'pr-evidence.cjs')) as {
+      MARKERS: { BLOCK_START: string; BLOCK_END: string };
+    };
+    expect(run.stdout).toBe(`${[MARKERS.BLOCK_START, '## Test Plan', tp, MARKERS.BLOCK_END].join('\n')}\n`);
+  }, 20_000);
 });
 
 // ---------------------------------------------------------------------------
