@@ -461,7 +461,7 @@ Return the issue number."
 
 Capture `ISSUE_NUMBER` from the Git agent output for use in the completion report and the `/implement` hand-off suggestion.
 
-**Patch the frontmatter `issue:` line in place** — when it still reads `issue: pending` and the spawn returned an issue (`CREATED` or `ENRICHED`), replace only that one line inside the leading `---` block with `issue: \{ISSUE_NUMBER\}` (Edit tool). Never rename the artifact, never rewrite it, never spawn `ensure-traceable-issue` again. Declined or DEGRADED ⇒ leave `issue: pending`.
+**Patch the frontmatter `issue:` line in place** — when it still reads `issue: pending` and the spawn returned an issue (`CREATED` or `ENRICHED`), replace only that one line inside the leading `---` block with `issue: \{ISSUE_NUMBER\}` — bare, no `#` (`issue: #42` parses as YAML null) — using the Edit tool. Never rename the artifact, never rewrite it, never spawn `ensure-traceable-issue` again. Declined or DEGRADED ⇒ leave `issue: pending`.
 
 Surface any `TRACEABILITY: DEGRADED (\{reason\})` lines from the Git agent output in the report.
 

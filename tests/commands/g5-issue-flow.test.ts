@@ -173,7 +173,7 @@ describe('/plan writes the artifact with `issue: pending`, then patches that lin
     // ID written up front is never re-spelled by the spawn's rendered reference.
     const PATCH_PHRASES = [
       'in place', 'still reads `issue: pending`', 'only that one line', 'leading `---` block', 'Edit tool',
-      'leave `issue: pending`',
+      'leave `issue: pending`', 'bare, no `#`',
     ]
     for (const phrase of PATCH_PHRASES) {
       expect(patch[0], `the patch sentence must say "${phrase}"`).toContain(phrase)
