@@ -409,15 +409,17 @@ Self-verify your fix compiles. Commit fixes with conventional-commit message.`, 
 });
 
 // PASS requires survivingFindings.length === 0 && coverageGaps.length === 0 && gate1Final.verdict !== "ESCALATED"
+// and no FAIL-FIXED Gate 2 verdict: fixes applied but never re-run report UNVERIFIED, never PASS
 const coverageGaps = reviewResult.coverageGaps || [];
-const overallVerdict = (reviewResult.survivingFindings?.length || 0) === 0 && coverageGaps.length === 0 && gate1Final.verdict !== "ESCALATED" ? "PASS" : "PARTIAL";
+const gate2Unverified = [gate2.evaluateVerdict, gate2.testVerdict].includes("FAIL-FIXED");
+const overallVerdict = (reviewResult.survivingFindings?.length || 0) === 0 && coverageGaps.length === 0 && gate1Final.verdict !== "ESCALATED" ? (gate2Unverified ? "UNVERIFIED" : "PASS") : "PARTIAL";
 
 // Phase 6: Report
 return phase("report", () =>
   agent(`Synthesize the build run for ticket ${TICKET} on branch ${BRANCH}:
 - Implementation summary
 - Gate 1 (#1 post-implementation) result
-- Gate 2 result: ${JSON.stringify(gate2)}
+- Gate 2 result: ${JSON.stringify(gate2)} (render FAIL-FIXED as "UNVERIFIED (fixes applied, not re-run)", never PASS)
 - Review: single pass (full branch diff)
 - Final Gate 1 (#2 post-fix): ${JSON.stringify(gate1Final)}
 - Findings disposition:
