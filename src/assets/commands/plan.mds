@@ -443,9 +443,9 @@ Under `github`, `\{ISSUE_REF\}` is `#`-prefixed, so that line renders `Closes #\
 
 **Create or enrich tracker issue:**
 
-When `COMPLIANCE_SKILL_INSTALLED` is true, issue linking is MANDATORY (DEGRADED states are exempt with a warning in the final summary) — proceed to the spawn below.
+Issue linking is MANDATORY only when `EVIDENCE_POLICY` is `required` — proceed to the spawn below. DEGRADED states are exempt, with a warning in the final summary: `/implement` asks about the missing ticket before it spawns any Code agent.
 
-When `COMPLIANCE_SKILL_INSTALLED` is false, issue linking is optional. Prompt the user first via AskUserQuestion: "Create or enrich a tracker issue for this plan?" — skip the spawn entirely if the user declines.
+When `EVIDENCE_POLICY` is `standard`, issue linking is optional. Prompt the user first via AskUserQuestion: "Create or enrich a tracker issue for this plan?" — skip the spawn entirely if the user declines.
 
 Spawn a Git agent with `OPERATION: ensure-traceable-issue`:
 

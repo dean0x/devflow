@@ -16,8 +16,8 @@
  *                exactly once. A gate the table does not govern is a policy
  *                nobody reviewed.
  *
- * Rows 9 and 12 still gate on `COMPLIANCE_SKILL_INSTALLED` at this commit; later
- * commits of #362 move them to `EVIDENCE_POLICY` and re-point their sites here.
+ * Row 12 still gates on `COMPLIANCE_SKILL_INSTALLED` at this commit; a later
+ * commit of #362 moves it to `EVIDENCE_POLICY` and re-points its sites here.
  * Row 13's op-side sites carry the `stub` publication value, which names no gate,
  * so they are held by direction 1 alone; its caller sites are gated lines like any
  * other.
@@ -190,15 +190,14 @@ const DISPOSITION: readonly DispositionRow[] = [
     ],
   },
   {
-    // §6 row 9 → EVIDENCE_POLICY in P3.
     row: 9,
     subject: '/plan tracker issue',
-    inputs: ['COMPLIANCE_SKILL_INSTALLED'],
-    on: 'mandatory (DEGRADED exempt with a warning)',
+    inputs: ['EVIDENCE_POLICY'],
+    on: 'mandatory (DEGRADED exempt with a warning; /implement asks later)',
     off: 'ask the user',
     sites: [
-      { file: 'commands/plan.md', anchor: 'When `COMPLIANCE_SKILL_INSTALLED` is true, issue linking', phrase: 'When `COMPLIANCE_SKILL_INSTALLED` is true' },
-      { file: 'commands/plan.md', anchor: 'When `COMPLIANCE_SKILL_INSTALLED` is false, issue linking', phrase: 'When `COMPLIANCE_SKILL_INSTALLED` is false' },
+      { file: 'commands/plan.md', anchor: 'Issue linking is MANDATORY', phrase: policyGate },
+      { file: 'commands/plan.md', anchor: 'is `standard`, issue linking is optional', phrase: 'When `EVIDENCE_POLICY` is `standard`' },
     ],
   },
   {
