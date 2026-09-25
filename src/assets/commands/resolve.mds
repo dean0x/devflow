@@ -4,7 +4,7 @@ output-dir: dist/commands
 ---
 @import { knowledge_load, knowledge_writeback } from "./_partials/_knowledge.mds"
 @import { decisions_load } from "./_partials/_decisions.mds"
-@import { compliance_gate } from "./_partials/_compliance.mds"
+@import { evidence_policy } from "./_partials/_evidence_policy.mds"
 @import { publication_gate } from "./_partials/_publication.mds"
 
 # Resolve Command
@@ -91,7 +91,7 @@ Set `TARGET_DIR` to the selected review or bug-analysis directory path, and `TAR
 
 #### Step 0d: Load Project Decisions
 
-**Produces:** DECISIONS_CONTEXT, FEATURE_KNOWLEDGE, COMPLIANCE_SKILL_INSTALLED, REVIEW_PUBLICATION, RESOLUTION_TS
+**Produces:** DECISIONS_CONTEXT, FEATURE_KNOWLEDGE, EVIDENCE_POLICY, ISSUE_REQUIRED, APPLY_CONVENTIONS, REQUIRE_NON_AUTHOR_APPROVAL, REVIEW_PUBLICATION, RESOLUTION_TS
 
 {decisions_load()}
 
@@ -101,11 +101,11 @@ This produces a compact index of active ADR/PF entries written at render time �
 
 Pass `FEATURE_KNOWLEDGE` to the Triage agent in Phase 2.
 
-{compliance_gate()}
+{evidence_policy()}
 Reuse this result for every worktree.
 
 {publication_gate()}
-Resolve this per worktree — unlike the compliance check above, the config file is per worktree root.
+Resolve this per worktree — unlike the evidence policy above, the config file is per worktree root.
 
 **Mint `RESOLUTION_TS` once per run:** `date -u +%Y-%m-%dT%H:%M:%SZ`. Every worktree reuses it — the resolution comment's dedup marker is searched per PR, so one run key keeps a retry of this run deduplicated while the next /resolve on the same PR posts. Phase 5 writes it as the summary's `**Date**:` and Phase 9b-2 passes it, so the local file and the posted marker agree.
 
@@ -137,12 +137,12 @@ Issues are extracted from `\{TARGET_DIR\}` only — never cross-reference review
 - `suggested_fix`: From review report
 - `reviewer_confidence`: Confidence percentage if present in the report (e.g., "85%"), else omit
 
-### Phase 1b: Fetch External Review Threads (Compliance-gated)
+### Phase 1b: Fetch External Review Threads
 
 **Produces:** THREAD_MAP
-**Requires:** BRANCH_INFO, COMPLIANCE_SKILL_INSTALLED
+**Requires:** BRANCH_INFO, EVIDENCE_POLICY
 
-Skip this phase if `COMPLIANCE_SKILL_INSTALLED` is false.
+Run this phase only when `EVIDENCE_POLICY` is `required`; otherwise skip it and leave `THREAD_MAP` empty.
 
 Spawn Git agent to fetch unresolved external (non-devflow-authored) review threads:
 
@@ -312,7 +312,7 @@ git -C {worktree} push
 
 **If `fork_no_push` is set:** do not push. Record `Push: skipped — cannot push to fork` under `## Verification`, and skip Phase 8 — no pushed commit exists for CI to check.
 
-**Route after push:** VERIFICATION_STATUS = PASS → continue to Phase 8 (CI gate). VERIFICATION_STATUS = FAILED → skip Phase 8; proceed directly to Phase 9 (manage-debt), then Phase 9b (thread resolution + resolution comment), then Phase 9c (merge readiness), then Phase 10 (report). VERIFICATION_STATUS = SKIPPED → skip Phase 8 (no fixes applied); proceed to Phase 9 (manage-debt), then Phase 9b (thread resolution + resolution comment), then Phase 9c (merge readiness, compliance-gated), then Phase 10 (report).
+**Route after push:** VERIFICATION_STATUS = PASS → continue to Phase 8 (CI gate). VERIFICATION_STATUS = FAILED → skip Phase 8; proceed directly to Phase 9 (manage-debt), then Phase 9b (thread resolution + resolution comment), then Phase 9c (merge readiness), then Phase 10 (report). VERIFICATION_STATUS = SKIPPED → skip Phase 8 (no fixes applied); proceed to Phase 9 (manage-debt), then Phase 9b (thread resolution + resolution comment), then Phase 9c (merge readiness, when non-author approval is required), then Phase 10 (report).
 
 ### Phase 8: CI Status Gate (Conditional)
 
@@ -362,11 +362,11 @@ After manage-debt completes:
 ### Phase 9b: Thread Resolution + Resolution Comment
 
 **Produces:** THREAD_RESOLUTION_RESULT, PR_COMMENT
-**Requires:** THREAD_MAP (from Phase 1b), VERIFICATION_STATUS, CODE_AGENT_RESULTS, TRIAGE_RESULTS, BRANCH_INFO, TARGET_DIR_REL, RESOLUTION_TS
+**Requires:** THREAD_MAP (from Phase 1b), EVIDENCE_POLICY, VERIFICATION_STATUS, CODE_AGENT_RESULTS, TRIAGE_RESULTS, BRANCH_INFO, TARGET_DIR_REL, RESOLUTION_TS
 
-**Step 9b-1: Resolve external threads (Compliance-gated)**
+**Step 9b-1: Resolve external threads**
 
-Skip this step if `COMPLIANCE_SKILL_INSTALLED` is false or THREAD_MAP is empty, and record `THREAD_RESOLUTION_RESULT` as `SKIPPED (\{reason\})`.
+Run this step only when `EVIDENCE_POLICY` is `required` and THREAD_MAP is non-empty; otherwise skip it and record `THREAD_RESOLUTION_RESULT` as `SKIPPED (\{reason\})`.
 
 Prepare THREAD_MAP with verdicts from triage/code agent results:
 - For each `ext-\{N\}`: match to an issue verdict (FIXED, FALSE_POSITIVE, BY_DESIGN, ESCALATED) by `file:line` correlation
@@ -395,7 +395,7 @@ Update `## Third-Party Threads` in resolution-summary.md with these thread resul
 
 **Step 9b-2: Post resolution summary (ALWAYS-ON)**
 
-Always run this step when a PR is known, regardless of `COMPLIANCE_SKILL_INSTALLED`.
+Always run this step when a PR is known, under either evidence policy.
 
 Spawn Git agent:
 
@@ -412,12 +412,12 @@ Posts the consolidated resolution-summary comment (marker-deduped by the operati
 
 Capture the Git agent's `**Publication**:` and `**Status**:` lines as `PR_COMMENT`. If it returns `TRACEABILITY: DEGRADED (\{reason\})` instead, `PR_COMMENT`'s status is `DEGRADED (\{reason\})`: warn, continue.
 
-### Phase 9c: Merge Readiness (Compliance-gated, Report-only)
+### Phase 9c: Merge Readiness (Report-only)
 
 **Produces:** MERGE_READINESS_REPORT
-**Requires:** BRANCH_INFO, COMPLIANCE_SKILL_INSTALLED
+**Requires:** BRANCH_INFO, REQUIRE_NON_AUTHOR_APPROVAL
 
-Skip this phase if `COMPLIANCE_SKILL_INSTALLED` is false.
+Run this phase only when `REQUIRE_NON_AUTHOR_APPROVAL` is `true`; otherwise skip it and report it as SKIPPED.
 
 Spawn Git agent:
 
@@ -471,12 +471,12 @@ Final gate: {PASS | FAILED after N attempts}
 
 ### Evidence Posts
 - Resolution comment: {POSTED | POSTED+TRUNCATED | SKIPPED (already posted) | SKIPPED (publication off) | SKIPPED (no PR) | DEGRADED (reason)}
-- Publication: {FULL (private repo) | FULL (config override) | STUB (public repository) | OFF (publication disabled by config) | STUB (visibility undeterminable)}
+- Publication: {FULL (private repo) | FULL (config override) | STUB (public repository) | OFF (publication disabled by config) | STUB (visibility undeterminable) | STUB (evidence policy)}
 - Thread replies: {COMPLETE | PARTIAL | TRUNCATED | SKIPPED (reason) | DEGRADED (reason)}
 - Push: {pushed | skipped (no fixes) | skipped (cannot push to fork)}
 
-### Merge Readiness (if compliance enabled)
-{READY | NOT_READY (reason) | DEGRADED (reason) | SKIPPED (compliance not enabled)}
+### Merge Readiness (when non-author approval is required)
+{READY | NOT_READY (reason) | DEGRADED (reason) | SKIPPED (non-author approval not required)}
 
 ### Artifacts
 - Resolution report: {TARGET_DIR}/resolution-summary.md
@@ -495,11 +495,11 @@ In multi-worktree mode, report results per worktree with aggregate summary.
 │  ├─ Step 0a: git worktree list → filter resolvable
 │  ├─ Step 0b: Git agent (validate-branch) per worktree [parallel] ← + DIFF_FILES
 │  ├─ Step 0c: Target latest review directory per worktree
-│  └─ Step 0d: Load project decisions → DECISIONS_CONTEXT + COMPLIANCE_SKILL_INSTALLED + REVIEW_PUBLICATION
+│  └─ Step 0d: Load project decisions → DECISIONS_CONTEXT + EVIDENCE_POLICY + REVIEW_PUBLICATION
 │
 ├─ Phase 1: Parse issues from TARGET_DIR + extract confidence %
 │
-├─ Phase 1b: Fetch external threads (compliance-gated)
+├─ Phase 1b: Fetch external threads (evidence policy required)
 │  └─ Git agent (fetch-review-threads) → THREAD_MAP
 │
 ├─ Phase 2: Global Triage [Triage agent, opus, single agent]
@@ -524,10 +524,10 @@ In multi-worktree mode, report results per worktree with aggregate summary.
 │  SEQUENTIAL across worktrees
 │
 ├─ Phase 9b: Thread resolution + resolution comment
-│  ├─ Step 9b-1: Git agent (resolve-review-threads) — compliance-gated
+│  ├─ Step 9b-1: Git agent (resolve-review-threads) — evidence policy required
 │  └─ Step 9b-2: Git agent (post-resolution-summary, REVIEW_PUBLICATION) — always-on
 │
-├─ Phase 9c: Git agent (check-merge-readiness) — compliance-gated, report-only
+├─ Phase 9c: Git agent (check-merge-readiness) — non-author approval required, report-only
 │
 └─ Phase 10: Display results (resolution-summary.md written in Phase 5)
 ```
@@ -552,11 +552,12 @@ In multi-worktree mode, report results per worktree with aggregate summary.
 | DUPLICATE issues in THREAD_MAP | Map ext-\{N\} to primary's verdict/verification status for thread reply |
 | Verification Gate FAILED after 2 attempts | Recorded as FAILED in ## Verification + blocking callout; CI gate skipped; proceed to Phase 9 (manage-debt) then Phase 10 (display) |
 | gh/GitHub absent | manage-debt degrades (`TRACEABILITY: DEGRADED (\{reason\})`); Tracked stays `(pending — TRACEABILITY: DEGRADED (\{reason\}))` — recorded, not dropped |
-| COMPLIANCE_SKILL_INSTALLED false | Phases 1b, 9b-step-1, and 9c are skipped; post-resolution-summary (Phase 9b step 2) still runs if a PR is known |
+| `EVIDENCE_POLICY` is `standard` | Phases 1b and 9b-step-1 are skipped; post-resolution-summary (Phase 9b step 2) still runs if a PR is known |
+| `REQUIRE_NON_AUTHOR_APPROVAL` is `false` | Phase 9c is skipped and reported as SKIPPED |
 | THREAD_MAP empty or DEGRADED | Phase 9b-1 skipped; resolution comment (Phase 9b-2) still posted if PR known |
 | No PR exists for post-resolution-summary | Git agent returns TRACEABILITY: DEGRADED; resolution-summary.md already on disk — not a blocker |
 | Public repo (`auto` mode) | Git agent probes visibility, posts counts-only STUB comment; full resolution report stays local |
-| `reviewPublication: off` | Git agent skips posting the resolution comment (OFF) |
+| `reviewPublication: off` | Git agent skips posting the resolution comment (OFF) — except that, only when `EVIDENCE_POLICY` is `required`, Step 0d passes `stub` and a counts-only STUB comment posts |
 | Fork PR this run cannot push to (no maintainer edits, no push access of its own) | validate-branch emits `TRACEABILITY: DEGRADED (cannot push to fork)` → `fork_no_push`: Phase 7 skips the push, Phase 8 is skipped, 9b-1 records FIXED threads as DEGRADED instead of citing unpushed commits; 9b-2 still posts the resolution comment |
 
 ## Principles
@@ -570,7 +571,7 @@ In multi-worktree mode, report results per worktree with aggregate summary.
 7. **Complete tracking** - Every issue gets exactly one verdict in the ledger
 8. **Latest review by default** - Only process the most recent complete review
 9. **Auto-discover worktrees** - One command handles all resolvable branches
-10. **Traceability-aware** - Compliance-gated ops (thread fetch/resolve, merge readiness) degrade cleanly when skill absent; resolution comment (Phase 9b-2) is always-on
+10. **Traceability-aware** - Policy-gated ops (thread fetch/resolve, merge readiness) are skipped cleanly when the evidence policy does not ask for them; resolution comment (Phase 9b-2) is always-on
 
 ## Output Artifact
 
@@ -660,6 +661,6 @@ Final gate: PASS | FAILED after {n} attempts
 | ext-{N} | {file}:{line} | {FIXED \| FALSE_POSITIVE \| BY_DESIGN \| ESCALATED} | {RESOLVED \| REPLIED \| DEGRADED} |
 ```
 
-_(Omit `## Third-Party Threads` if `COMPLIANCE_SKILL_INSTALLED` is false or no external threads were found.)_
+_(Omit `## Third-Party Threads` unless `EVIDENCE_POLICY` is `required` and external threads were found.)_
 
 **Statistics mapping (parser contract)**: the `Deferred` row = FIX_SEPARATE + TECH_DEBT (both deferral dispositions combined); By Design and Escalated are counted separately and excluded from `Deferred`. The `Duplicates Collapsed` row is additive — the `/code-review` convergence parser reads only `Deferred`, `Fixed`, and `False Positive` rows plus `## Fixed Issues` / `## False Positives` headings — keep those labels byte-stable. All rows that the parser reads count UNIQUE (non-DUPLICATE) issues only, so collapsed duplicates do not inflate fp\_ratio.

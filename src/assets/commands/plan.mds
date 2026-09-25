@@ -5,6 +5,7 @@ output-dir: dist/commands
 @import { knowledge_load } from "./_partials/_knowledge.mds"
 @import { decisions_load } from "./_partials/_decisions.mds"
 @import { compliance_gate } from "./_partials/_compliance.mds"
+@import { evidence_policy } from "./_partials/_evidence_policy.mds"
 @import { issue_ref_grammar, issue_capture_contract } from "./_partials/_tracker.mds"
 
 # Plan Command
@@ -369,6 +370,7 @@ User can:
 
 #### Phase 14: Output
 
+**Produces:** EVIDENCE_POLICY, ISSUE_REQUIRED, APPLY_CONVENTIONS, REQUIRE_NON_AUTHOR_APPROVAL
 **Requires:** APPROVED_PLAN
 
 **Store design artifact:**
@@ -437,11 +439,13 @@ Under `github`, `\{ISSUE_REF\}` is `#`-prefixed, so that line renders `Closes #\
 
 **Write the artifact now** — frontmatter `issue: \{ISSUE_ID\}` if an issue is already known, else `issue: pending`.
 
+{evidence_policy()}
+
 **Create or enrich tracker issue:**
 
-When `COMPLIANCE_SKILL_INSTALLED` is true, issue linking is MANDATORY (DEGRADED states are exempt with a warning in the final summary) — proceed to the spawn below.
+Issue linking is MANDATORY only when `EVIDENCE_POLICY` is `required` — proceed to the spawn below. DEGRADED states are exempt, with a warning in the final summary: `/implement` asks about the missing ticket before it spawns any Code agent.
 
-When `COMPLIANCE_SKILL_INSTALLED` is false, issue linking is optional. Prompt the user first via AskUserQuestion: "Create or enrich a tracker issue for this plan?" — skip the spawn entirely if the user declines.
+When `EVIDENCE_POLICY` is `standard`, issue linking is optional. Prompt the user first via AskUserQuestion: "Create or enrich a tracker issue for this plan?" — skip the spawn entirely if the user declines.
 
 Spawn a Git agent with `OPERATION: ensure-traceable-issue`:
 

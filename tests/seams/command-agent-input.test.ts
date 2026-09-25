@@ -20,8 +20,13 @@
  *
  * Exclusions (asserted as a literal set with a rationale comment):
  *   OPERATION   — routing key, not an agent input field
- *   COMPLIANCE  — injected by the orchestrator, not declared in agent **Input:**
  *   WORKTREE_PATH — cross-cutting optional; excluded by convention (PF-039 analogy)
+ *
+ * `COMPLIANCE` was a third exclusion until #362: an op-level key every caller
+ * passed and no **Input:** line declared, so no direction could see it. The ops
+ * now declare the mechanism inputs (`ISSUE_REQUIRED`, `APPLY_CONVENTIONS`) and
+ * the seam checks them like any other key; a probe below proves a returning
+ * `COMPLIANCE:` key fails the forward direction.
  *
  * **Produces:** / **Requires:** are excluded as a literal set (PF-039, B10(13)):
  * they are a phase-ordering DAG naming principal upstream state, not a
@@ -54,7 +59,6 @@ const DIST_COMMANDS_DIR = path.join(ROOT, 'dist', 'commands')
 // Rationale must be stated per key so the exclusion is never read as accidental.
 const EXCLUDED_KEYS = new Set([
   'OPERATION',    // routing key, not an agent **Input:** field
-  'COMPLIANCE',   // injected by the orchestrator, not declared in agent **Input:**
   'WORKTREE_PATH', // cross-cutting optional; excluded by convention (PF-039 analogy)
 ])
 
@@ -613,6 +617,43 @@ describe('forward: every KEY: passed is declared in **Input:**', () => {
       forwardViolationsFor(section, harvested.keys),
       'the post-A1 fence must be clean — ISSUE_INPUT is declared in fetch-issue **Input:**',
     ).toHaveLength(0)
+  })
+
+  // Known-bad sample for #362: the `825077e` /implement setup-task fence, verbatim.
+  // `COMPLIANCE` left EXCLUDED_KEYS in the same commit that moved the ops onto the
+  // mechanism inputs, so the retired key is now an ordinary undeclared key. This
+  // arm is what shows the exclusion's removal is load-bearing: were `COMPLIANCE`
+  // still excluded, the fence would harvest cleanly and the arm would go red.
+  const RETIRED_COMPLIANCE_FENCE =
+    '```\n' +
+    'Agent(subagent_type="Git"):\n' +
+    '"OPERATION: setup-task\n' +
+    'BASE_BRANCH: {current branch name}\n' +
+    'COMPLIANCE: {enabled if COMPLIANCE_SKILL_INSTALLED, otherwise (none)}\n' +
+    'PLAN_ARTIFACT_PATH: {path to plan document if $ARGUMENTS ends in .md, otherwise (none)}\n' +
+    'Derive branch name from issue or description, create feature branch, and fetch issue if specified.\n' +
+    'Return the branch setup summary."\n' +
+    '```'
+
+  it('known-bad sample: the retired COMPLIANCE: key is a forward violation on setup-task (#362)', () => {
+    const harvested = requireHarvest(RETIRED_COMPLIANCE_FENCE, 'the 825077e setup-task fence')
+    expect(harvested.op).toBe('setup-task')
+    expect(
+      forwardViolationsFor(requireOpSection('setup-task'), harvested.keys),
+      'COMPLIANCE is no longer an agent input; a caller passing it must fail the forward direction',
+    ).toEqual(['COMPLIANCE'])
+  })
+
+  it('setup-task and ensure-pr-ready declare the mechanism inputs as required, never optional (#362)', () => {
+    // Required, not optional: the seam's reverse direction then insists a caller
+    // passes them, which is what lets the ops carry no absent-input prose (ADR-028).
+    const setup = parseInputIdentifiers(requireOpSection('setup-task'))
+    expect(setup.required).toEqual(expect.arrayContaining(['ISSUE_REQUIRED', 'APPLY_CONVENTIONS']))
+    const prReady = parseInputIdentifiers(requireOpSection('ensure-pr-ready'))
+    expect(prReady.required).toContain('APPLY_CONVENTIONS')
+    for (const { required, optional } of [setup, prReady]) {
+      expect(required.concat(optional), 'the op-level COMPLIANCE input is retired').not.toContain('COMPLIANCE')
+    }
   })
 
   it('process-only key: a key mentioned only in **Process:** but not in **Input:** is a violation', () => {

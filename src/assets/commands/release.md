@@ -54,11 +54,21 @@ Load feature knowledge: Attempt to read `.devflow/features/index.md` (the regene
 
 Pass both to all subsequent agents via their input contracts.
 
-### Phase 1c: Resolve Compliance Context
+### Phase 1c: Resolve the Evidence Policy
 
-**Produces:** COMPLIANCE_SKILL_INSTALLED
+**Produces:** EVIDENCE_POLICY, ISSUE_REQUIRED, APPLY_CONVENTIONS, REQUIRE_NON_AUTHOR_APPROVAL
 
-**Resolve `COMPLIANCE_SKILL_INSTALLED` once per run:** Check whether `~/.claude/skills/devflow:compliance/SKILL.md` exists (one file-existence check, read-only, silent). Set `COMPLIANCE_SKILL_INSTALLED = true` if the file exists, `false` otherwise. Reuse this result for all subsequent phases. The compliance gate determines whether release evidence is gathered and shipped-issue back-links are posted.
+**Resolve the evidence policy once per run**, from the repository root, before any step reads the values:
+
+```bash
+node "${DEVFLOW_DIR:-$HOME/.devflow}/scripts/resolve-evidence-policy.cjs" 2>/dev/null; echo "exit=$?"
+```
+
+Accept the output only when it is exactly two lines: `exit=0` last and, before it, one line of the form `EVIDENCE_POLICY=<required|standard> SOURCE=<file|worktree|default|invalid|error> REF=<branch|none>[ WARN=<remote-unavailable|invalid-file|raised-by-compliance|pr-changes-policy>[,…]] ISSUE_REQUIRED=<true|false> APPLY_CONVENTIONS=<true|false> REQUIRE_NON_AUTHOR_APPROVAL=<true|false>` — these fields, in this order, nothing else, where `<branch>` is a branch name such as `main`. **Anything else** (a non-zero exit, no line, extra text, or a missing, reordered or unlisted field or value) ⇒ use `EVIDENCE_POLICY=required SOURCE=error REF=none ISSUE_REQUIRED=true APPLY_CONVENTIONS=true REQUIRE_NON_AUTHOR_APPROVAL=true` instead.
+
+Set `EVIDENCE_POLICY`, `ISSUE_REQUIRED`, `APPLY_CONVENTIONS` and `REQUIRE_NON_AUTHOR_APPROVAL` from the accepted line. Pass agents only the three mechanism inputs, never `EVIDENCE_POLICY`. Report `Evidence policy: {EVIDENCE_POLICY} (source: {SOURCE})`, plus any `WARN` tokens as advisory, once in the final report.
+
+Reuse this result for all subsequent phases: it decides whether release evidence is gathered (step 2b), passed to the release notes (step 4), and back-linked to shipped issues (step 4b).
 
 ### Phase 2: Detect Release Process (First Run Only)
 
@@ -125,15 +135,15 @@ Confirm with user via AskUserQuestion before executing:
 ### Phase 6: Execute Release
 
 **Produces:** RELEASE_RESULT
-**Requires:** RELEASE_PLAN, VERSION
+**Requires:** RELEASE_PLAN, VERSION, EVIDENCE_POLICY
 
 Sequential execution with progress checkpoints:
 1. **Version bumps** — write new version to configured files
 2. **Changelog update** — move Unreleased section to versioned entry (if configured)
-2b. **Gather release evidence** (compliance-gated: only when COMPLIANCE_SKILL_INSTALLED) — spawn `Agent(subagent_type="Git")` with `gather-release-evidence` operation; pass `WORKTREE_PATH` if provided. Consume the returned `COMMIT_LIST` and `SHIPPED_ISSUES` for use in steps 4 and 4b. The Git agent applies bounds (≤100 commits, ≤50 issues) and degrades gracefully per D4.
+2b. **Gather release evidence** (only when `EVIDENCE_POLICY` is `required`) — spawn `Agent(subagent_type="Git")` with `gather-release-evidence` operation; pass `WORKTREE_PATH` if provided. Consume the returned `COMMIT_LIST` and `SHIPPED_ISSUES` for use in steps 4 and 4b. The Git agent applies bounds (≤100 commits, ≤50 issues) and degrades gracefully per D4.
 3. **Release commit** — `chore(release): v{VERSION}` (conventional commit)
-4. **Tag and GitHub Release** — spawn `Agent(subagent_type="Git")` with `create-release` operation (the agent reads `.devflow/conventions.md` for tag format and release title conventions; compliance defaults when absent); when COMPLIANCE_SKILL_INSTALLED, also pass `COMMIT_LIST` and `SHIPPED_ISSUES` as inputs so the agent includes them in the release notes body.
-4b. **Back-link shipped issues** (compliance-gated: only when COMPLIANCE_SKILL_INSTALLED) — spawn `Agent(subagent_type="Git")` with `backlink-shipped-issues` operation, passing `VERSION` and `SHIPPED_ISSUES`; posts a marker-deduped comment on each issue (bounds and throttle enforced by the operation); degrade gracefully (D4) on any API failure — never block the release
+4. **Tag and GitHub Release** — spawn `Agent(subagent_type="Git")` with `create-release` operation (the agent reads `.devflow/conventions.md` for tag format and release title conventions; compliance defaults when absent); only when `EVIDENCE_POLICY` is `required`, also pass `COMMIT_LIST` and `SHIPPED_ISSUES` as inputs so the agent includes them in the release notes body.
+4b. **Back-link shipped issues** (only when `EVIDENCE_POLICY` is `required`) — spawn `Agent(subagent_type="Git")` with `backlink-shipped-issues` operation, passing `VERSION` and `SHIPPED_ISSUES`; posts a marker-deduped comment on each issue (bounds and throttle enforced by the operation); degrade gracefully (D4) on any API failure — never block the release
 5. **Publish** — CI-driven (report) or manual (provide instructions)
 6. **Post-release steps** — version bump to next dev
 

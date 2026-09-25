@@ -1,11 +1,12 @@
 /**
- * AC-17 — `backlink-shipped-issues` is compliance-gated at its ONE call site.
+ * AC-17 — `backlink-shipped-issues` is policy-gated at its ONE call site.
  *
  * The operation writes to every issue a release shipped, so whether it runs at
  * all is a policy question and not a mechanics one. `/release` decides: step 4b
- * spawns it only when the compliance skill is installed, and step 2b gates the
- * evidence-gathering that feeds it on the same condition. Nothing else may
- * decide, and that is the property with no executed evidence before this file.
+ * spawns it only when the resolved evidence policy is `required`, and step 2b
+ * gates the evidence-gathering that feeds it on the same condition (#362 moved
+ * both from the installed compliance skill to `EVIDENCE_POLICY`). Nothing else
+ * may decide, and that is the property with no executed evidence before this file.
  *
  * WHY A MATRIX AND NOT A PRESENCE CHECK. "The gate is stated" is cleared by the
  * caller alone. The failure this guards is the other half: a provider's
@@ -19,6 +20,15 @@
  * would pass an absence-only arm, so each provider's file is also required to
  * carry the mechanics it exists for — its own entry gate and the never-report-
  * COMPLETE-over-zero rule — read off what the generated files actually say.
+ *
+ * THE OPERATION HALF, WIDENED (#362, AC-5). The same doctrine holds for every
+ * operation, not only this one: a caller decides whether a compliance-dependent
+ * step runs, and passes the Git agent a mechanism input (`ISSUE_REQUIRED`,
+ * `APPLY_CONVENTIONS`) that the step names. So the second describe below reads
+ * the whole op surface — `dist/agents/git.md` and every generated reference —
+ * and requires ZERO condition-shaped compliance mentions in it. A mention that
+ * names compliance without gating on it (the conventions learner's "compliance
+ * defaults") is not a condition and stays legal.
  */
 
 import { describe, it, expect } from 'vitest';
@@ -26,6 +36,7 @@ import { readFileSync } from 'fs';
 import * as path from 'path';
 
 import { compiledSkillRefsDir } from '../../src/core/assets.js';
+import { walkFiles } from '../helpers.js';
 
 const ROOT = path.resolve(import.meta.dirname, '../..');
 const REFS_DIR = compiledSkillRefsDir();
@@ -34,11 +45,25 @@ const REFS_DIR = compiledSkillRefsDir();
 const OP = 'backlink-shipped-issues';
 
 /**
- * The gate's condition as `/release` spells it. A near-miss spelling is the
- * failure mode a substring search over `compliance` would not catch: the step
- * would read as gated to a human and name a variable nothing sets.
+ * The gate's condition as `/release` spells it — the canonical caller-side policy
+ * phrase. A near-miss spelling is the failure mode a substring search would not
+ * catch: the step would read as gated to a human and name a variable nothing sets.
  */
-const GATE = 'compliance-gated: only when COMPLIANCE_SKILL_INSTALLED';
+const GATE = 'only when `EVIDENCE_POLICY` is `required`';
+
+/**
+ * Named collector: lines of an operation's mechanics that name the evidence
+ * policy at all. An agent is passed the mechanism inputs only, never
+ * `EVIDENCE_POLICY` (the partial's hand-off rule), so any mention in an op file
+ * is a second policy decision the caller cannot see.
+ */
+function collectPolicyMentions(label: string, body: string): string[] {
+  const hits: string[] = [];
+  body.split('\n').forEach((line, i) => {
+    if (/\bEVIDENCE_POLICY\b/.test(line)) hits.push(`${label}:${i + 1}: ${line.trim().slice(0, 120)}`);
+  });
+  return hits;
+}
 
 /**
  * Every provider whose mechanics ship. Hardcoded rather than derived from the
@@ -62,25 +87,62 @@ function requireFile(label: string, filePath: string): string {
 }
 
 /**
- * Named collector: compliance conditions stated inside an operation's own
- * mechanics.
+ * A compliance CONDITION, case-insensitive — the shapes a gate on compliance takes:
  *
- * Both spellings the caller uses, because either one appearing in a mechanics
- * file is the same defect. Driven by the live arms and by the known-bad probe,
- * so the probe exercises the real predicate rather than a copy of it.
+ *   compliance-gated / compliance gated      the retired step prefix
+ *   COMPLIANCE_SKILL_INSTALLED               the command-layer variable
+ *   `COMPLIANCE` / **COMPLIANCE**            the retired op-level input, as an Input
+ *                                            line and as a prose reference
+ *   compliance mode|input|enabled|skill is installed
+ *                                            a condition named as a state
+ *   if|when|unless|only when|gated on|by … compliance
+ *                                            a conditional clause, up to 60 chars
+ *                                            and within one sentence
+ *
+ * The last arm is negated for `compliance defaults` and `compliance framework(s)`:
+ * the conventions learner applies "compliance defaults" when git history shows no
+ * pattern, which names a set of defaults and gates nothing.
+ *
+ * One more arm is case-SENSITIVE, so it lives in COMPLIANCE_KEY_RE: the bare
+ * uppercase key `COMPLIANCE` in any spelling (`COMPLIANCE: enabled`, "when
+ * COMPLIANCE is set"). The retired setup-task-common guard matched it anywhere in
+ * the setup-task and fetch-issue references; this collector keeps that reach on the
+ * whole op surface, so widening the corpus never narrowed the token set.
+ *
+ * NOT covered (PF-064): a compliance gate in synonyms ("only for regulated
+ * projects"), or a conditional clause more than 60 characters, or a sentence
+ * boundary, before the word. A clean result means none of these shapes occurred.
  */
+const COMPLIANCE_CONDITION_RE =
+  /compliance[- ]gated|COMPLIANCE_SKILL_INSTALLED|`COMPLIANCE`|\*\*COMPLIANCE\*\*|\bcompliance (?:mode|input|enabled|skill is installed)\b|\b(?:if|when|unless|only when|gated (?:on|by))\b[^.\n]{0,60}\bcompliance\b(?!\s+(?:defaults|frameworks?)\b)/i;
+
+/**
+ * Named collector: compliance conditions stated inside an operation's own
+ * mechanics or the agent's contract.
+ *
+ * Driven by every live arm and by the known-bad probes, so each probe exercises
+ * the real predicate rather than a copy of it.
+ */
+/** The retired op-level key as a bare uppercase word — never part of `COMPLIANCE_SKILL_INSTALLED`. */
+const COMPLIANCE_KEY_RE = /\bCOMPLIANCE\b/;
+
 function collectComplianceConditions(label: string, body: string): string[] {
   const hits: string[] = [];
-  for (const line of body.split('\n')) {
-    if (/COMPLIANCE_SKILL_INSTALLED|compliance-gated/.test(line)) {
-      hits.push(`${label}: ${line.trim().slice(0, 120)}`);
+  body.split('\n').forEach((line, i) => {
+    if (COMPLIANCE_CONDITION_RE.test(line) || COMPLIANCE_KEY_RE.test(line)) {
+      hits.push(`${label}:${i + 1}: ${line.trim().slice(0, 120)}`);
     }
-  }
+  });
   return hits;
 }
 
 describe(`AC-17: ${OP} is gated by the caller and by nobody else`, () => {
   const release = requireFile('release command', path.join(ROOT, 'dist', 'commands', 'release.md'));
+
+  it('the release command no longer keys either step on the compliance skill', () => {
+    expect(release, 'the retired gate variable').not.toContain('COMPLIANCE_SKILL_INSTALLED');
+    expect(release, 'the retired step prefix').not.toMatch(/compliance-gated/i);
+  });
 
   it('the release command spawns the operation exactly once, and gates that spawn', () => {
     const spawnSteps = release
@@ -126,6 +188,11 @@ describe(`AC-17: ${OP} is gated by the caller and by nobody else`, () => {
         'drift from it and nothing compares the two:\n  ' +
         collectComplianceConditions(rel, body).join('\n  '),
       ).toEqual([]);
+      expect(
+        collectPolicyMentions(rel, body),
+        `${rel} names the evidence policy. Agents are never passed it — /release step 4b gates the ` +
+        'spawn, and the operation runs whenever it is spawned',
+      ).toEqual([]);
 
       // …and the file is not empty-passing. These two sentences are what the
       // generated file actually carries for every provider; an absence-only arm
@@ -159,5 +226,115 @@ describe(`AC-17: ${OP} is gated by the caller and by nobody else`, () => {
       collectComplianceConditions('(probe)', 'Compliance frameworks are listed in the skill directory.'),
       'a sentence that names compliance without stating a run condition is not a second gate',
     ).toEqual([]);
+    // The policy half: the 825077e release gate, moved into a mechanics file.
+    expect(
+      collectPolicyMentions('(probe)', `4b. Post the comment (${GATE}).`),
+      'the collector must report the caller\'s gate restated in an operation',
+    ).toHaveLength(1);
+    expect(collectPolicyMentions('(probe)', 'Post one comment per shipped issue.')).toEqual([]);
+  });
+});
+
+/** One file of the op surface, by its path relative to `dist/`. */
+interface OpSurfaceFile {
+  readonly rel: string;
+  readonly content: string;
+}
+
+/** The whole op surface: the compiled agent plus every generated reference. */
+function opSurface(): OpSurfaceFile[] {
+  const distRoot = path.join(ROOT, 'dist');
+  const gitMd = path.join(distRoot, 'agents', 'git.md');
+  const files = [gitMd, ...walkFiles(REFS_DIR, f => f.endsWith('.md'))];
+  return files.map(f => ({
+    rel: path.relative(distRoot, f).split(path.sep).join('/'),
+    content: requireFile('op surface', f),
+  }));
+}
+
+/**
+ * One sentinel per corpus class, so reach is proven by name rather than by a size
+ * floor (PF-064), each paired with the retired text that class used to carry.
+ */
+const CLASS_PROBES: ReadonlyArray<{ readonly cls: string; readonly sentinel: string; readonly seeds: readonly string[] }> = [
+  {
+    cls: 'agent contract',
+    sentinel: 'agents/git.md',
+    seeds: [
+      '- **COMPLIANCE** (optional): `enabled` when the compliance skill is installed; absent or `(none)` otherwise',
+      '1b/1c are compliance-gated. When step 1b finds `.devflow/conventions.md` absent it invokes `learn-conventions`.',
+    ],
+  },
+  {
+    cls: 'tracker reference',
+    sentinel: 'skills/git/references/tracker/github/ensure-traceable-issue.md',
+    seeds: [
+      '- Issue creation is gated by the `COMPLIANCE` input: `enabled` → mandatory (DEGRADED states exempt), absent or `(none)` → optional.',
+    ],
+  },
+  {
+    cls: 'PR-host reference',
+    sentinel: 'skills/git/references/pr/ensure-pr-ready.md',
+    seeds: [
+      '4c. (Compliance-gated — skip if `COMPLIANCE` is absent or `(none)`) Read `.devflow/conventions.md` PR Titles section.',
+    ],
+  },
+  {
+    cls: 'cross-cutting reference',
+    sentinel: 'skills/git/references/publication-gate.md',
+    seeds: ['Run only when compliance is enabled.'],
+  },
+];
+
+describe('AC-5: no operation or reference states a compliance condition (#362)', () => {
+  const surface = opSurface();
+
+  it('the corpus is git.md plus every generated reference, and reaches each class', () => {
+    expect(surface.map(f => f.rel), 'the compiled agent must be in the corpus').toContain('agents/git.md');
+    expect(surface.length, 'fewer references than the installed tree carries — is dist/ stale?').toBeGreaterThanOrEqual(30);
+    for (const { cls, sentinel } of CLASS_PROBES) {
+      expect(surface.map(f => f.rel), `${cls}: sentinel ${sentinel} was not read`).toContain(sentinel);
+    }
+  });
+
+  it('zero condition-shaped compliance mentions across the op surface', () => {
+    const hits = surface.flatMap(f => collectComplianceConditions(f.rel, f.content));
+    expect(
+      hits,
+      'a compliance condition in an op or reference is a second policy the caller cannot see. The ' +
+      'caller resolves the evidence policy and passes a mechanism input; the step names that input:\n  ' +
+      hits.join('\n  '),
+    ).toEqual([]);
+  });
+
+  for (const { cls, sentinel, seeds } of CLASS_PROBES) {
+    it(`known-bad probe (${cls}): the retired text, seeded into ${sentinel}, is reported`, () => {
+      const real = surface.find(f => f.rel === sentinel);
+      expect(real, `${sentinel} is not in the corpus`).toBeDefined();
+      for (const seed of seeds) {
+        const hits = collectComplianceConditions(sentinel, `${real!.content}\n${seed}\n`);
+        expect(hits, `the collector must report ${JSON.stringify(seed)} inside ${sentinel}`).toHaveLength(1);
+        expect(hits[0]).toContain(seed.slice(0, 40));
+      }
+    });
+  }
+
+  it('known-bad probe: the bare uppercase key, unquoted, is reported in any reference', () => {
+    // The retired setup-task-common guard matched /COMPLIANCE/ anywhere; the key
+    // without backticks or bold must not slip past the widened collector.
+    for (const seed of ['COMPLIANCE: enabled', 'Skip this step when COMPLIANCE is (none).']) {
+      expect(collectComplianceConditions('(probe)', seed), JSON.stringify(seed)).toHaveLength(1);
+    }
+    expect(collectComplianceConditions('(probe)', 'DEVFLOW_COMPLIANCE_SCOPE'), 'part of a longer identifier').toEqual([]);
+  });
+
+  it('negative probes: a mention that names compliance without gating on it is not a condition', () => {
+    for (const benign of [
+      '3. For each section, apply heuristics with a 50% majority rule. If no clear pattern: apply compliance defaults:',
+      'Learn project conventions from git history and write `.devflow/conventions.md` once. Uses compliance defaults for unlearnable sections.',
+      'Compliance frameworks are listed in the skill directory.',
+    ]) {
+      expect(collectComplianceConditions('(probe)', benign), JSON.stringify(benign)).toEqual([]);
+    }
   });
 });

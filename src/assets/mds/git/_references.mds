@@ -103,6 +103,7 @@ Applies to **`post-review-summary` and `post-resolution-summary` only.** No othe
 **Step order inside each summary op:**
 1. Dedup check (D7/D8 marker — unchanged, stays first).
 2. Resolve `REVIEW_PUBLICATION` input: `off` → report `**Publication**: OFF (publication disabled by config)`, op ends without posting. `full` → mode FULL, skip probe. `auto` or absent/unrecognised → probe.
+   - `stub` (never unrecognised) → mode STUB, skip probe; report `STUB (evidence policy)`.
 3. Probe once: `gh repo view --json visibility --jq '.visibility'` — compare case-insensitively. `PRIVATE` or `INTERNAL` → mode FULL. Anything else (including `PUBLIC`, empty output, command error, unauthenticated) → mode STUB. **Fail-closed rule: on any error or unrecognised value, treat as PUBLIC (mode STUB).**
 4. Compose body (full content in FULL mode; stub template in STUB mode — defined per op).
 5. Scrub per D11 (both modes — the stub is also scrubbed).

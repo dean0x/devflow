@@ -75,16 +75,16 @@ import {
 // ---------------------------------------------------------------------------
 
 /*
- * THE RESERVATION LEDGER — 2,050 ch, spoken for by name.
+ * THE RESERVATION LEDGER — 1,800 ch, spoken for by name.
  *
  * Every ceiling below that carries dist/agents/git.md (`BUDGET_GIT_MD` and the four
  * `BUDGET_LOADED_SET*` rows) was re-derived by #358 as `measured actual + 2,300`,
- * then by #359 (PR1, which spent its 100-ch line) as `measured actual + 2,200`, and
- * by #360 (PR2, which spent its 150-ch line) as `measured actual + 2,050`:
- * headroom reserved for the always-loaded text the rest of the SDLC-evidence
- * series (#357) is scoped to add —
+ * then by #359 (PR1, which spent its 100-ch line) as `measured actual + 2,200`, by
+ * #360 (PR2, which spent its 150-ch line) as `measured actual + 2,050`, and by #362
+ * (PR3b, which spent its 250-ch line) as `measured actual + 1,800`: headroom
+ * reserved for the always-loaded text the rest of the SDLC-evidence series (#357)
+ * is scoped to add —
  *
- *   PR3b (#362) policy wiring ........... 250
  *   PR4  (#363) test-plan evidence ...... 900
  *   PR5  (#364) release ................. 900
  *
@@ -98,11 +98,12 @@ import {
 /**
  * THE git.md CEILING — the one gate on the always-loaded half of the split.
  *
- * Derived from a measured 42_850 ch — with the eight PR-host operations'
+ * Derived from a measured 42_796 ch — with the eight PR-host operations'
  * `**Process:**` bodies in `references/pr/{op}.md`, #358's moves out of the
- * agent, #359's condensed release-evidence step and #360's evidence fixes — plus
- * the 2,050 ch RESERVATION LEDGER above: 44_900. Outside the ledger,
- * the next content addition to git.mds must fund itself with a cut elsewhere.
+ * agent, #359's condensed release-evidence step, #360's evidence fixes and #362's
+ * mechanism inputs — plus the 1,800 ch RESERVATION LEDGER above: 44_596. Outside
+ * the ledger, the next content addition to git.mds must fund itself with a cut
+ * elsewhere.
  *
  * THE RULE: this ceiling is a REGRESSION ALARM, and it is RE-DERIVED ONLY DOWNWARD —
  * lowered after a pass that actually cut the artifact, never raised to fit one that
@@ -123,7 +124,7 @@ import {
  * pattern in the same commit; that is the permitted direction for a ceiling, and the
  * manifest guard's probe still proves an INCREMENT would go red.
  */
-const BUDGET_GIT_MD = 44_900;
+const BUDGET_GIT_MD = 44_596;
 
 /**
  * Design-time derivation: the PRE-SPLIT capture of skills/git/SKILL.md, less the
@@ -154,15 +155,15 @@ const BUDGET_SKILL_MD = 6_600;
  * row, so this number can never drift into billing every GitHub user for bytes
  * they never receive (GAP-02).
  *
- * Derived from a measured 64_016 plus the 2,050 ch RESERVATION LEDGER above:
- * 66_066. Outside the ledger, the next addition to the agent or to a github
+ * Derived from a measured 64_104 plus the 1,800 ch RESERVATION LEDGER above:
+ * 65_904. Outside the ledger, the next addition to the agent or to a github
  * mechanics file must fund itself with a cut.
  *
  * MAY BE LOWERED, NEVER RAISED. Registered as `budget-loaded-set` in
  * tests/fixtures/numeric-floors.json; lowering re-pins the value AND the pattern
  * in the same commit.
  */
-const BUDGET_LOADED_SET = 66_066;
+const BUDGET_LOADED_SET = 65_904;
 
 /**
  * THE JIRA-SCOPED loaded-set ceiling — a spawn under the Jira provider.
@@ -185,8 +186,8 @@ const BUDGET_LOADED_SET = 66_066;
  *   + max_op chars(references/tracker/jira/{op}.md)
  *   + max over TRACKER ops of the one-spawn load [DR-12, D-LOADED-SET-SCOPE]
  *
- * Derived from a measured 74_312 plus the 2,050 ch RESERVATION LEDGER above:
- * 76_362. Outside the ledger, the next addition to the contract or to a Jira
+ * Derived from a measured 74_400 plus the 1,800 ch RESERVATION LEDGER above:
+ * 76_200. Outside the ledger, the next addition to the contract or to a Jira
  * mechanics file must fund itself with a cut rather than reach for slack. Trimming
  * `references/tracker/_mcp.md` is the honest first move: it is contract prose, it
  * is the single largest term this row adds over the GitHub one, and a pass over it
@@ -195,7 +196,7 @@ const BUDGET_LOADED_SET = 66_066;
  * MAY BE LOWERED, NEVER RAISED. Registered as `budget-loaded-set-jira` in
  * tests/fixtures/numeric-floors.json.
  */
-const BUDGET_LOADED_SET_JIRA = 76_362;
+const BUDGET_LOADED_SET_JIRA = 76_200;
 
 /**
  * THE LINEAR-SCOPED loaded-set ceiling — a spawn under the Linear provider.
@@ -204,8 +205,8 @@ const BUDGET_LOADED_SET_JIRA = 76_362;
  * each MCP-backed provider is priced on its own row, none of them can move the
  * GitHub one, and the GitHub one cannot absorb theirs.
  *
- * Derived from a measured 76_271 plus the 2,050 ch RESERVATION LEDGER above:
- * 78_321. This is the LARGEST of the four ceilings but not the binding one: a
+ * Derived from a measured 76_359 plus the 1,800 ch RESERVATION LEDGER above:
+ * 78_159. This is the LARGEST of the four ceilings but not the binding one: a
  * character added to git.md is a character added to every row, and every row
  * reserves the same ledger. Re-run this file for each row's current headroom.
  *
@@ -223,7 +224,7 @@ const BUDGET_LOADED_SET_JIRA = 76_362;
  * MAY BE LOWERED, NEVER RAISED. Registered as `budget-loaded-set-linear` in
  * tests/fixtures/numeric-floors.json.
  */
-const BUDGET_LOADED_SET_LINEAR = 78_321;
+const BUDGET_LOADED_SET_LINEAR = 78_159;
 
 /**
  * THE PR-HOST loaded-set ceiling — the worst-case cost of a spawn that runs one of
@@ -257,14 +258,14 @@ const BUDGET_LOADED_SET_LINEAR = 78_321;
  * equality pin GITHUB_API_MD_CHARS, which is what stops an excluded term growing
  * unwatched.
  *
- * Derived from a measured 56_822 (`post-review-summary`: its PR-host body plus
- * references/publication-gate.md) plus the 2,050 ch RESERVATION LEDGER above:
- * 58_872.
+ * Derived from a measured 56_859 (`post-review-summary`: its PR-host body plus
+ * references/publication-gate.md) plus the 1,800 ch RESERVATION LEDGER above:
+ * 58_659.
  *
  * MAY BE LOWERED, NEVER RAISED. Registered as `budget-loaded-set-pr-host` in
  * tests/fixtures/numeric-floors.json.
  */
-const BUDGET_LOADED_SET_PR_HOST = 58_872;
+const BUDGET_LOADED_SET_PR_HOST = 58_659;
 
 /**
  * Every MCP-backed provider and the ceiling that prices it.

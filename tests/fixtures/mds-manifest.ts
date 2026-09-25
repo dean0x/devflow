@@ -22,7 +22,7 @@
  *   - tests/mds-variants.test.ts
  *       "validateOutputName"            — every basename the build owns is accepted by the name rule
  *
- * Length floors (`>= 13`, `>= 13`) are asserted alongside the set-equality in
+ * Length floors (`>= 13` hosts, `>= 14` partials) are asserted alongside the set-equality in
  * tests/build-mds.test.ts and registered in tests/fixtures/numeric-floors.json.
  * A floor never decreases; a manifest entry may only be added or renamed in step
  * with the file on disk.
@@ -56,7 +56,7 @@ export const MDS_COMMAND_HOSTS = [
 ] as const;
 
 /**
- * The 12 partials in src/assets/commands/_partials/, by BASENAME. A partial
+ * The 13 partials in src/assets/commands/_partials/, by BASENAME. A partial
  * declares no `output-dir:`, so the build skips it — it is imported by hosts
  * instead. The `_` prefix is the partial convention (and is refused by
  * validateOutputName, so a partial can never become an output filename by
@@ -69,6 +69,7 @@ export const MDS_PARTIALS = [
   '_compliance',
   '_decisions',
   '_engine',
+  '_evidence_policy',
   '_factory',
   '_knowledge',
   '_plan_contract',
@@ -129,6 +130,27 @@ export const TRACKER_PARTIAL_ADOPTERS = [
 ] as const;
 
 /**
+ * The hosts that adopt `_partials/_evidence_policy.mds` (SDLC-evidence PR3b,
+ * #362). Named as a set for the same reason as TRACKER_PARTIAL_ADOPTERS.
+ *
+ * These are the seven commands that act on the resolved evidence policy. Each
+ * resolves it once per run through `evidence_policy()`, so the invocation and its
+ * parse have one authority. release.md cannot import (it is hand-authored) and
+ * carries the define's built text verbatim instead. It is not in this list, and
+ * tests/evidence-policy/partial-wiring.test.ts holds it byte-identical to the
+ * expansion.
+ */
+export const EVIDENCE_POLICY_PARTIAL_ADOPTERS = [
+  'bug-analysis',
+  'code-review',
+  'dynamic-build',
+  'dynamic-tickets',
+  'implement',
+  'plan',
+  'resolve',
+] as const;
+
+/**
  * Generator hosts: .mds sources outside src/assets/commands/ that compile to a
  * destination other than dist/commands. Today exactly one — the Git agent,
  * src/assets/agents/git.mds → dist/agents/git.md.
@@ -183,8 +205,9 @@ export const MDS_REFERENCE_MODULES = [
 ] as const;
 
 /**
- * Hand-authored files copied verbatim into dist/commands/. release.md inlines its
- * own COMPLIANCE gate and is not MDS-compiled; the divergence is permanent (SG-13).
+ * Hand-authored files copied verbatim into dist/commands/. release.md carries the
+ * built `evidence_policy()` text verbatim instead of importing it, and is not
+ * MDS-compiled; the divergence is permanent (SG-13).
  */
 export const HAND_AUTHORED_COMMAND_FILES = ['release.md'] as const;
 

@@ -1638,7 +1638,7 @@ describe('git agent — static content guards (PF-018)', () => {
     expect((matches ?? []).length).toBeGreaterThanOrEqual(2); // floor: d10-dedup-marker-floor (numeric-floors.json)
   });
 
-  it('D10: REVIEW_PUBLICATION is documented with all three values: auto, full, off', () => {
+  it('D10: REVIEW_PUBLICATION is documented with all four values: auto, full, off, stub', () => {
     // RE-POINTED, not weakened (applies ADR-025). The three-value enumeration used to
     // be spelled in BOTH summary op sections AND, byte-identically, in
     // references/publication-gate.md — three copies of one enum, each free to drift.
@@ -1649,18 +1649,30 @@ describe('git agent — static content guards (PF-018)', () => {
     // What deliberately did NOT move: the fail-closed visibility probe. That is a
     // containment control, so it stays spelled inline in both ops (PF-058) and the
     // [DR-20](ii) arm below is what holds it there.
+    //
+    // `stub` joined in #362: a caller whose evidence policy turns `off` into a
+    // counts-only record passes it, and the op must RECOGNISE it — an unrecognised
+    // value falls through to `auto`, which on a private repository posts the FULL
+    // body the caller asked to withhold. It lands on a sub-bullet under step 2
+    // rather than on step 2's own line, which is a frozen fixture sample.
     const gate = readGeneratedReference('publication-gate.md');
     expect(gate, 'D10: `off` → SKIPPED resolution step not present').toContain('`off` → report');
     expect(gate, 'D10: `full` → mode FULL resolution step not present').toContain('`full` → mode FULL, skip probe');
     expect(gate, 'D10: `auto` → probe resolution step not present').toContain('`auto` or absent/unrecognised → probe');
+    expect(gate, 'D10: `stub` → mode STUB resolution step not present')
+      .toMatch(/^ {3}- `stub` \(never unrecognised\) → mode STUB, skip probe; report `STUB \(evidence policy\)`\.$/m);
 
     for (const op of ['post-review-summary', 'post-resolution-summary']) {
       const sec = extractOpSection(soleCorpus, op, 'sole');
       expect(sec, `D10: REVIEW_PUBLICATION not documented in ${op}`).toContain('REVIEW_PUBLICATION');
+      expect(sec, `D10: ${op}'s **Input:** line must accept \`stub\``)
+        .toContain('values: `auto` | `full` | `off` | `stub`; absent/unrecognised → `auto`');
+      expect(sec, `D10: ${op}'s **Publication** enum must be able to report the policy stub`)
+        .toMatch(/^\*\*Publication\*\*: .*\| STUB \(evidence policy\)$/m);
       expect(
         sec,
         `D10: ${op} must name references/publication-gate.md — an op that resolves ` +
-        'REVIEW_PUBLICATION without naming the gate has no route to the three values',
+        'REVIEW_PUBLICATION without naming the gate has no route to the four values',
       ).toContain('references/publication-gate.md');
     }
   });
