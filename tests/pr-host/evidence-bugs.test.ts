@@ -558,3 +558,55 @@ describe('summary paths reach a PR repo-relative (§3.4, AC-4)', () => {
     expect(resolve).not.toContain('**Review**: {TARGET_DIR}\n')
   })
 })
+
+// ---------------------------------------------------------------------------
+// 5. `full` has one authority: publication-gate.md step 2 (§3.5, AC-8)
+// ---------------------------------------------------------------------------
+//
+// The audit's G6 fragility: what `full` means was reachable only by inference.
+// The authority already exists and is frozen (publication-gate.md step 2), so no
+// text moves: both summary ops' step 2 LOAD it explicitly, and the caller-side
+// partial points at it instead of defining the values a second time.
+
+/** A statement of what `full` DOES — allowed in the gate and nowhere else. */
+const FULL_SEMANTICS_RE = /`full` → /
+
+/** Named collector: files other than the gate that state what `full` does. */
+export function collectSecondFullAuthorities(corpus: readonly CorpusEntry[]): string[] {
+  return corpus
+    .filter(entry => path.basename(entry.path) !== 'publication-gate.md')
+    .filter(entry => FULL_SEMANTICS_RE.test(entry.content))
+    .map(entry => entry.path)
+}
+
+describe('`full` is decided by the publication gate alone (§3.5, AC-8)', () => {
+  it('the gate still states it, and it is the only file that does', () => {
+    expect(requireRef('publication-gate.md')).toContain('`full` → mode FULL, skip probe')
+    const corpus = [...gitAgentSinkCorpus(), ...commandCorpus()]
+    expect(corpus.some(e => path.basename(e.path) === 'publication-gate.md'), 'the gate must be in the corpus').toBe(true)
+    expect(collectSecondFullAuthorities(corpus)).toEqual([])
+  })
+
+  it('known-bad probe: a partial that restates the value set is reported', () => {
+    const seeded: CorpusEntry[] = [
+      ...commandCorpus(),
+      { path: 'dist/commands/probe.md', content: 'Note: `full` → mode FULL, skip probe.\n' },
+    ]
+    expect(collectSecondFullAuthorities(seeded)).toEqual(['dist/commands/probe.md'])
+  })
+
+  it('both summary ops load the gate at step 2', () => {
+    for (const op of ['post-review-summary', 'post-resolution-summary']) {
+      expect(soleLine(requireRef(prHostRel(op)), '2. '), op)
+        .toMatch(/^2\. Load `references\/publication-gate\.md` and resolve `REVIEW_PUBLICATION` by its step 2;/)
+    }
+  })
+
+  it('the caller-side partial points at the gate in both commands that expand it', () => {
+    for (const name of ['code-review.md', 'resolve.md']) {
+      expect(requireDistFile(name), name).toContain(
+        "What each value does is decided by the Git agent's publication gate (`references/publication-gate.md` step 2); this partial only resolves the value.",
+      )
+    }
+  })
+})

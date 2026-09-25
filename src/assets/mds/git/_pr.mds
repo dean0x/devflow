@@ -100,7 +100,7 @@ Load for `post-review-summary` under every tracker provider.
    - `gh pr view \{PR_NUMBER\} --json comments --jq '[.comments[] | select(.author.login == "'"$VIEWER_LOGIN"'")] | .[].body'`
    - Search for `<!-- devflow:review-summary cycle:\{CYCLE_NUMBER\} ts:\{REVIEW_TIMESTAMP\}` in the viewer-authored comment bodies only (full pair match)
    - If found: skip — report `Skipped: already posted for cycle \{CYCLE_NUMBER\} ts:\{REVIEW_TIMESTAMP\}`
-2. Resolve `REVIEW_PUBLICATION` through `references/publication-gate.md`; `off` ends the op without posting.
+2. Load `references/publication-gate.md` and resolve `REVIEW_PUBLICATION` by its step 2; `off` ends the op without posting.
 3. Probe (if mode not yet determined): `gh repo view --json visibility --jq '.visibility'`, case-insensitive. `PRIVATE`/`INTERNAL` → FULL; `PUBLIC` → `STUB (public repository)`; empty output, an error or any other value → `STUB (visibility undeterminable)`. **Fail-closed: on any error or unrecognised value, treat as PUBLIC (mode STUB).**
 4. Read `REVIEW_SUMMARY_PATH` — repo-relative; read it under `WORKTREE_PATH` (else cwd).
 5. Compose body:
@@ -225,7 +225,7 @@ Load for `post-resolution-summary` under every tracker provider.
    - `gh pr view \{PR_NUMBER\} --json comments --jq '[.comments[] | select(.author.login == "'"$VIEWER_LOGIN"'")] | .[].body'`
    - Search the viewer-authored bodies only for the exact key `<!-- devflow:resolution-summary ts:\{RESOLUTION_TS\} -->`
    - If found: skip — report `Skipped: already posted for ts:\{RESOLUTION_TS\}`
-2. Resolve `REVIEW_PUBLICATION` through `references/publication-gate.md`; `off` ends the op without posting.
+2. Load `references/publication-gate.md` and resolve `REVIEW_PUBLICATION` by its step 2; `off` ends the op without posting.
 3. Probe (if mode not yet determined): `gh repo view --json visibility --jq '.visibility'`, case-insensitive. `PRIVATE`/`INTERNAL` → FULL; `PUBLIC` → `STUB (public repository)`; empty output, an error or any other value → `STUB (visibility undeterminable)`. **Fail-closed: on any error or unrecognised value, treat as PUBLIC (mode STUB).**
 4. Read `RESOLUTION_SUMMARY_PATH` — repo-relative; read it under `WORKTREE_PATH` (else cwd).
 5. Compose body (where `\{TS\}` = `RESOLUTION_TS`):
