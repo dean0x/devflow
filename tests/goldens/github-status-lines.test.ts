@@ -42,7 +42,7 @@
  *                        166 (an empty SHIPPED_ISSUES is degraded when the
  *                        Mechanics flag unresolved merged PRs); 239-240 are
  *                        byte-identical
- *   2026-09-26  (#363 PR4, D1; Refs #352)  the fifth re-capture, granted for
+ *   2026-09-25  (#363 PR4, D1; Refs #352)  the fifth re-capture, granted for
  *                        lines 143, 144 and 145 and spent on all three: the
  *                        check-ci-status steps 3-5 read CI through `bucket`
  *                        (gh has no `conclusion` field), keep stderr and exit
