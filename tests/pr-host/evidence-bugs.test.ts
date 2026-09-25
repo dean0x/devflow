@@ -307,10 +307,15 @@ const D09DA34_9B_TAIL = [
 
 /** Each Evidence Posts row and the statuses it must be able to report. */
 const EVIDENCE_POST_ROWS: ReadonlyArray<{ readonly row: string; readonly statuses: readonly string[] }> = [
-  { row: '- Resolution comment:', statuses: ['POSTED', 'POSTED+TRUNCATED', 'SKIPPED (already posted)', 'DEGRADED'] },
+  // Every documented edge case needs an arm (PF-075): `reviewPublication: off` and
+  // "no PR" end 9b-2 without a post, and a run that fixed nothing has nothing to push.
+  {
+    row: '- Resolution comment:',
+    statuses: ['POSTED', 'POSTED+TRUNCATED', 'SKIPPED (already posted)', 'SKIPPED (publication off)', 'SKIPPED (no PR)', 'DEGRADED'],
+  },
   { row: '- Publication:', statuses: ['FULL (private repo)', 'STUB (public repository)', 'OFF (publication disabled by config)'] },
   { row: '- Thread replies:', statuses: ['COMPLETE', 'PARTIAL', 'TRUNCATED', 'SKIPPED', 'DEGRADED'] },
-  { row: '- Push:', statuses: ['pushed', 'skipped (cannot push to fork)'] },
+  { row: '- Push:', statuses: ['pushed', 'skipped (no fixes)', 'skipped (cannot push to fork)'] },
 ]
 
 /** The `### Evidence Posts` block of /resolve's Phase 10 report, or null. */
@@ -628,6 +633,10 @@ const TRUST_ANCHOR = '**Trusted first-comment author:**'
 const EXCLUSION_STEP = '3. Apply devflow-authored exclusion predicate'
 const TRUST_TERMS: readonly string[] = [
   'VIEWER_LOGIN',
+  // The viewer is trusted unconditionally; the fork-author exclusion narrows only
+  // the association arm. Without "always", a fork PR the viewer authored reads as
+  // "never the PR author" and untrusts the operator's own markers.
+  '`VIEWER_LOGIN` always',
   '`authorAssociation`',
   '`OWNER`',
   '`MEMBER`',
@@ -742,6 +751,17 @@ describe('only a trusted first-comment author can exclude a thread (§3.6, AC-5)
     ])
   })
 
+  it('known-bad probe: a trust rule whose fork-author exclusion can bind the viewer is reported', () => {
+    // "`VIEWER_LOGIN`, or … — never the PR author when …" reads the exclusion over
+    // the whole list, so on a fork PR the viewer authored, the operator's own
+    // marker would exclude nothing.
+    const ambiguous = prFetch.replace('`VIEWER_LOGIN` always; otherwise', '`VIEWER_LOGIN`, or')
+    expect(ambiguous, 'the seed must land').not.toBe(prFetch)
+    expect(collectUntrustedMarkerExclusion(ambiguous, githubApi)).toEqual([
+      'pr/fetch-review-threads.md step 2 does not name `VIEWER_LOGIN` always',
+    ])
+  })
+
   it('known-bad probe: the d09da34 query is reported', () => {
     const found = collectUntrustedMarkerExclusion(prFetch, D09DA34_REVIEW_THREADS_QUERY)
     expect(found, found.join('\n')).toHaveLength(QUERY_FIELD_ORDER.length)
@@ -759,6 +779,14 @@ describe('only a trusted first-comment author can exclude a thread (§3.6, AC-5)
 // /resolve turns it into `fork_no_push` and keeps posting what does not need a push.
 
 const FORK_REASON = 'TRACEABILITY: DEGRADED (cannot push to fork)'
+
+/**
+ * The exemption: `maintainerCanModify` says whether the BASE repo's maintainers may
+ * push to the fork, not whether this user may. A contributor running devflow on
+ * their own fork PR (an org fork has no maintainer-edit option at all) pushes to a
+ * repository they own, so the degrade needs their own access checked as well.
+ */
+const FORK_PUSH_ACCESS = `--jq '.permissions.push'`
 
 /** The text of `text` from the line holding `start` up to (not including) the line holding `end`. */
 function slice(text: string, start: string, end: string): string {
@@ -786,11 +814,13 @@ export function collectMissingForkPreflight(files: ForkFiles): string[] {
   }
   need('pr/validate-branch.md', files.validateBranch, [
     '--json baseRefName,isCrossRepository,maintainerCanModify',
+    FORK_PUSH_ACCESS,
     FORK_REASON,
   ])
   need('pr/ensure-pr-ready.md step 3', soleLine(files.ensurePrReady, '3. ') ?? '', [
     'isCrossRepository',
     'maintainerCanModify',
+    FORK_PUSH_ACCESS,
     FORK_REASON,
   ])
   out.push(...collectOrderViolations('pr/ensure-pr-ready.md', files.ensurePrReady, [
@@ -801,7 +831,7 @@ export function collectMissingForkPreflight(files: ForkFiles): string[] {
   need('/resolve Phase 7', slice(r, '### Phase 7:', '### Phase 8:'), ['`fork_no_push`', '`Push: skipped — cannot push to fork`'])
   need('/resolve Phase 8', slice(r, '### Phase 8:', '### Phase 9:'), ['`fork_no_push`'])
   need('/resolve Step 9b-1', slice(r, '**Step 9b-1', '**Step 9b-2'), ['`fork_no_push`', 'FIXED'])
-  need('/resolve Evidence Posts', evidencePostsBlock(r) ?? '', ['- Push: {pushed | skipped (cannot push to fork)}'])
+  need('/resolve Evidence Posts', evidencePostsBlock(r) ?? '', ['skipped (cannot push to fork)'])
   need('/resolve Edge Cases', slice(r, '## Edge Cases', '## Principles'), ['cannot push to fork'])
   return out
 }
@@ -822,6 +852,26 @@ describe('a fork PR without maintainer edits degrades instead of failing a push 
   it('validate-branch reads the fork fields from its one existing PR call', () => {
     const calls = requireRef(prHostRel('validate-branch')).match(/gh pr view[^`]*/g) ?? []
     expect(calls, 'one gh pr view in validate-branch').toHaveLength(1)
+  })
+
+  it('known-bad probe: a pre-flight keyed on the two PR fields alone is reported at both sites', () => {
+    // isCrossRepository && !maintainerCanModify alone degrades a contributor's own
+    // fork PR, whose pushes go to a repository they can write to.
+    const probe = `(\`gh api "repos/{headRepositoryOwner.login}/{headRepository.name}" ${FORK_PUSH_ACCESS}\` does not print \`true\`)`
+    const files = shippedForkFiles()
+    const strip = (text: string): string => {
+      expect(text.split(probe), 'the access probe must occur once per pre-flight').toHaveLength(2)
+      return text.split(probe).join('')
+    }
+    const wounded: ForkFiles = {
+      ...files,
+      validateBranch: strip(files.validateBranch),
+      ensurePrReady: strip(files.ensurePrReady),
+    }
+    expect(collectMissingForkPreflight(wounded)).toEqual([
+      `pr/validate-branch.md: missing ${FORK_PUSH_ACCESS}`,
+      `pr/ensure-pr-ready.md step 3: missing ${FORK_PUSH_ACCESS}`,
+    ])
   })
 
   it('9b-2 still posts under fork_no_push — the resolution comment needs no push', () => {

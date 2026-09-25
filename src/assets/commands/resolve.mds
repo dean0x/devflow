@@ -56,7 +56,7 @@ In multi-worktree mode, spawn all pre-flight agents **in a single message** (par
 
 **If BLOCKED:** In single-worktree mode, stop and report the blocker to user. If no reviews found, suggest `/code-review` or `/bug-analysis` first. In multi-worktree mode, report the failure but continue with other worktrees.
 
-**Extract from response:** `branch`, `base_branch`, `branch_slug`, `pr_number`, `review_count`, `diff_files` per worktree, and set `fork_no_push` when the response carries `TRACEABILITY: DEGRADED (cannot push to fork)` — the PR is cross-repository and its maintainer cannot push to it.
+**Extract from response:** `branch`, `base_branch`, `branch_slug`, `pr_number`, `review_count`, `diff_files` per worktree, and set `fork_no_push` when the response carries `TRACEABILITY: DEGRADED (cannot push to fork)` — the PR is cross-repository and this run cannot push to its branch.
 
 **Fetch PR body** (after extracting `pr_number`):
 ```bash
@@ -470,10 +470,10 @@ Final gate: {PASS | FAILED after N attempts}
 - {n} items added to backlog
 
 ### Evidence Posts
-- Resolution comment: {POSTED | POSTED+TRUNCATED | SKIPPED (already posted) | DEGRADED (reason)}
+- Resolution comment: {POSTED | POSTED+TRUNCATED | SKIPPED (already posted) | SKIPPED (publication off) | SKIPPED (no PR) | DEGRADED (reason)}
 - Publication: {FULL (private repo) | FULL (config override) | STUB (public repository) | OFF (publication disabled by config) | STUB (visibility undeterminable)}
 - Thread replies: {COMPLETE | PARTIAL | TRUNCATED | SKIPPED (reason) | DEGRADED (reason)}
-- Push: {pushed | skipped (cannot push to fork)}
+- Push: {pushed | skipped (no fixes) | skipped (cannot push to fork)}
 
 ### Merge Readiness (if compliance enabled)
 {READY | NOT_READY (reason) | DEGRADED (reason) | SKIPPED (compliance not enabled)}
@@ -557,7 +557,7 @@ In multi-worktree mode, report results per worktree with aggregate summary.
 | No PR exists for post-resolution-summary | Git agent returns TRACEABILITY: DEGRADED; resolution-summary.md already on disk — not a blocker |
 | Public repo (`auto` mode) | Git agent probes visibility, posts counts-only STUB comment; full resolution report stays local |
 | `reviewPublication: off` | Git agent skips posting the resolution comment (OFF) |
-| Fork PR its maintainer cannot push to | validate-branch emits `TRACEABILITY: DEGRADED (cannot push to fork)` → `fork_no_push`: Phase 7 skips the push, Phase 8 is skipped, 9b-1 records FIXED threads as DEGRADED instead of citing unpushed commits; 9b-2 still posts the resolution comment |
+| Fork PR this run cannot push to (no maintainer edits, no push access of its own) | validate-branch emits `TRACEABILITY: DEGRADED (cannot push to fork)` → `fork_no_push`: Phase 7 skips the push, Phase 8 is skipped, 9b-1 records FIXED threads as DEGRADED instead of citing unpushed commits; 9b-2 still posts the resolution comment |
 
 ## Principles
 

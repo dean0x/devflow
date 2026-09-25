@@ -506,8 +506,9 @@ Return: {"ready": [...ticket-ids], "blocked": [{"ticket": "id", "namedBlocker": 
   for (const ticketId of ready) {
     try {
       const engineResult = await runSingleTicketEngine({ ticketId, integrationBranch: INTEGRATION_BRANCH, plans, decisionsContext: DECISIONS_CONTEXT, issueNumber: ISSUE_NUMBER, issuePrLink: ISSUE_PR_LINK });
-      // Check both verdict (engine_output_schema) and overallVerdict (SINGLE skeleton alias)
-      if ((engineResult.verdict || engineResult.overallVerdict) === "PASS") {
+      // Check both verdict (engine_output_schema) and overallVerdict (SINGLE skeleton alias).
+      // UNVERIFIED is the SINGLE report's PASS with a FAIL-FIXED Gate 2 — the wave merges it as it merges PASS.
+      if (["PASS", "UNVERIFIED"].includes(engineResult.verdict || engineResult.overallVerdict)) {
         await agent(`Merge ticket/${ticketId} to ${INTEGRATION_BRANCH}. Include ticket ID ${ticketId} in the merge commit message. Run Validate agent (build + test) after merge.`, { agentType: "Git" });
       } else {
         waveState.quarantined.push({ ticket: ticketId, reason: engineResult.escalations?.[0]?.description || "engine fail/escalated" });

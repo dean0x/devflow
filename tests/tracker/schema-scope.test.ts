@@ -841,9 +841,10 @@ const PR_HOST_LEGACY_REASONS: readonly string[] = [
  */
 const PR_HOST_REASONS: readonly string[] = [
   // #360: validate-branch step 6 and ensure-pr-ready step 3 read `isCrossRepository`
-  // and `maintainerCanModify` from a PR call they already make; a fork PR its
-  // maintainer cannot push to refuses every push, so the caller skips pushes and
-  // still posts, instead of failing mid-run and citing commits the PR never got.
+  // and `maintainerCanModify` from a PR call they already make, then the user's own
+  // push access to the fork; a fork PR this run cannot push to refuses every push,
+  // so the caller skips pushes and still posts, instead of failing mid-run and
+  // citing commits the PR never got.
   'cannot push to fork',
 ];
 

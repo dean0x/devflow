@@ -11,8 +11,9 @@
  *    The run now reports it as `UNVERIFIED`; surviving findings, coverage gaps
  *    and an escalated final gate still report `PARTIAL`.
  *
- * WAVE mode's merge rule (`_wave.mds`: "On engine PASS: merge") is untouched —
- * whether an UNVERIFIED ticket merges is decided later (plan delta 11).
+ * WAVE mode's merge rule (`_wave.mds`: "On engine PASS: merge") is untouched, and
+ * the wave skeleton merges an UNVERIFIED ticket exactly as it merged the PASS that
+ * a FAIL-FIXED Gate 2 used to report (plan delta 11; section 5 executes it).
  *
  * Every guard has the three parts PF-064 asks of an absence-based check: a NAMED
  * collector, an assertion that the text it read is the text it claims to read,
@@ -557,5 +558,73 @@ describe('Gate 2 routing, executed over the shipped statement', () => {
       'criteria alone run the Test agent and name no test plan',
       'a failing test-plan run is fixed and recorded FAIL-FIXED',
     ])
+  })
+})
+
+// ---------------------------------------------------------------------------
+// 5. WAVE mode merges exactly what it merged before (plan delta 11)
+// ---------------------------------------------------------------------------
+//
+// The wave loop reads the SINGLE skeleton's `overallVerdict` alias, so the new
+// UNVERIFIED reaches its merge check. Before #360 a FAIL-FIXED Gate 2 reported
+// PASS and merged; a `=== "PASS"` check over the new alias would quarantine it
+// instead — and cascade-block its dependents under the reason "engine
+// fail/escalated". Whether an UNVERIFIED ticket should merge is the wave merge
+// rule's decision, not this PR's, so the wave keeps merging it.
+
+const WAVE_ENGINE_CALL = 'const engineResult = await runSingleTicketEngine('
+
+/** The wave skeleton's merge condition — the first `if (…) {` after the engine call — or null. */
+export function extractWaveMergeCondition(built: string): string | null {
+  const fences = parseFences(built).filter(f => f.includes(WAVE_ENGINE_CALL))
+  if (fences.length !== 1) return null
+  const lines = fences[0].split('\n')
+  const at = lines.findIndex(l => l.includes(WAVE_ENGINE_CALL))
+  const test = lines.slice(at + 1).find(l => /^\s*if \(/.test(l))
+  return test?.match(/^\s*if \((.*)\) \{\s*$/)?.[1] ?? null
+}
+
+interface WaveMergeCase {
+  readonly label: string
+  readonly engineResult: Readonly<Record<string, string>>
+  readonly merge: boolean
+}
+
+const WAVE_MERGE_TABLE: readonly WaveMergeCase[] = [
+  { label: 'schema verdict PASS', engineResult: { verdict: 'PASS' }, merge: true },
+  { label: 'SINGLE alias PASS', engineResult: { overallVerdict: 'PASS' }, merge: true },
+  { label: 'SINGLE alias UNVERIFIED (a FAIL-FIXED Gate 2)', engineResult: { overallVerdict: 'UNVERIFIED' }, merge: true },
+  { label: 'SINGLE alias PARTIAL', engineResult: { overallVerdict: 'PARTIAL' }, merge: false },
+  { label: 'schema verdict FAIL', engineResult: { verdict: 'FAIL' }, merge: false },
+  { label: 'schema verdict ESCALATED', engineResult: { verdict: 'ESCALATED' }, merge: false },
+  { label: 'no verdict at all', engineResult: {}, merge: false },
+]
+
+/** Named collector: every row the wave's merge condition decides wrongly (or cannot decide). */
+export function collectWaveMergeViolations(condition: string | null): string[] {
+  if (condition === null) return ['wave merge condition not found (the first if after runSingleTicketEngine)']
+  const decide = new Function('engineResult', `return (${condition});`) as (engineResult: unknown) => unknown
+  return WAVE_MERGE_TABLE.flatMap(row =>
+    Boolean(decide(row.engineResult)) === row.merge ? [] : [`${row.label}: expected ${row.merge ? 'merge' : 'quarantine'}`])
+}
+
+/** The `d09da34` merge condition, verbatim. */
+const D09DA34_WAVE_CONDITION = '(engineResult.verdict || engineResult.overallVerdict) === "PASS"'
+
+describe('WAVE mode — a FAIL-FIXED ticket still merges (plan delta 11)', () => {
+  it('the shipped merge condition is found and decides every row', () => {
+    const condition = extractWaveMergeCondition(BUILT)
+    expect(condition, 'exactly one wave skeleton with a merge condition').not.toBeNull()
+    expect(collectWaveMergeViolations(condition)).toEqual([])
+  })
+
+  it('known-bad probe: the d09da34 condition quarantines the UNVERIFIED alias, and only it', () => {
+    expect(collectWaveMergeViolations(D09DA34_WAVE_CONDITION)).toEqual([
+      'SINGLE alias UNVERIFIED (a FAIL-FIXED Gate 2): expected merge',
+    ])
+  })
+
+  it('known-bad probe: a skeleton the collector cannot read is reported, not passed', () => {
+    expect(collectWaveMergeViolations(extractWaveMergeCondition('no fences here'))).toHaveLength(1)
   })
 })
