@@ -11,8 +11,8 @@
  *         States, Methods and precedence lists equal STATES, METHODS and PRECEDENCE.
  *         The partial stays import-free with two defines (PF-073), and every
  *         adopter — the two /dynamic-* commands, /plan (#363 P4: its Gate 2 shows
- *         the TP lines its `## Test Plan` section keeps) and, from the commit that
- *         wires it, /implement — carries the define's whole expansion exactly once.
+ *         the TP lines its `## Test Plan` section keeps) and /implement (its Phase 1
+ *         authors or copies them) — carries the define's whole expansion exactly once.
  *
  * The exception grammar is held three ways: `evidence_exception()`'s kind list,
  * code.md's paste gate and the script's EXCEPTION_KINDS / EXCEPTION_LINE_RE name
@@ -59,7 +59,7 @@ const EM = '—'
 /** PF-073: compile cost is exponential in the define count; the contract partial holds exactly these. */
 const KNOWN_DEFINES: readonly string[] = [TP_DEFINE, CONTRACT_DEFINE]
 /** The command hosts that import the contract partial, sorted. */
-const CONTRACT_ADOPTERS: readonly string[] = ['dynamic-build', 'dynamic-plan', 'plan']
+const CONTRACT_ADOPTERS: readonly string[] = ['dynamic-build', 'dynamic-plan', 'implement', 'plan']
 
 interface TextFile {
   readonly name: string

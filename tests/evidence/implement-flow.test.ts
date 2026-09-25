@@ -15,6 +15,13 @@
  *          and the HEAD it ran at (read before and after); the Validate agent
  *          reports each command's exit and its HEAD. The Test outcome vocabulary is
  *          the claim grammar's (CLAIM_LINE_RE), so every row maps onto a claim.
+ *   AC-9   /implement writes and checks the evidence file's `## Test Plan` in
+ *          Phase 1 — after the ticket ask and the exception record, before any
+ *          Code spawn — and, only under a `required` policy, asks about a missing
+ *          one: record a `test-plan` exception, or stop with BLOCKED (no test plan)
+ *          and the policy-file remedy. `standard` never asks.
+ *   AC-10  Every Code spawn that can create the PR forwards PR_TEST_PLAN_BLOCK.
+ *   AC-11  The Phase 8 Test spawn passes TEST_PLAN.
  *   AC-9   /plan's artifact carries a `## Test Plan` section (required section
  *          13): Gate 2 shows the TP lines in the imported TP-line contract, and
  *          Phase 14 runs `check tp` over them before the artifact's one write —
@@ -38,7 +45,15 @@ import { mkdtempSync, rmSync, writeFileSync } from 'fs'
 import { tmpdir } from 'os'
 import * as path from 'path'
 
-import { collectOrderViolations, requireDistFile, resolveAgentSource, type OrderRule } from '../helpers.js'
+import {
+  collectOrderViolations,
+  isAgentBlock,
+  parseFences,
+  requireDistFile,
+  resolveAgentSource,
+  type OrderRule,
+} from '../helpers.js'
+import { RESOLVER_SCRIPT } from '../evidence-policy/scripted-shim.js'
 import { PR_EVIDENCE_SCRIPT, VERIFY_EVIDENCE_SCRIPT } from './seam.js'
 
 /** Transcribed from the script's JSDoc — only what this suite calls. */
@@ -52,6 +67,13 @@ interface ClaimGrammar {
   readonly CLAIM_LINE_RE: RegExp
 }
 const PE = createRequire(import.meta.url)(PR_EVIDENCE_SCRIPT) as ClaimGrammar
+
+/** Transcribed from the resolver's JSDoc: the policy-file parser and serializer. */
+interface PolicyFileApi {
+  parsePolicyBytes(buf: Uint8Array): { kind: string; policy?: string }
+  serializePolicy(policy: unknown): string | null
+}
+const RESOLVER = createRequire(import.meta.url)(RESOLVER_SCRIPT) as PolicyFileApi
 
 const SCRATCH = mkdtempSync(path.join(tmpdir(), 'devflow-implement-flow-'))
 afterAll(() => rmSync(SCRATCH, { recursive: true, force: true }))
@@ -350,5 +372,170 @@ describe('AC-9: /plan keeps a checked `## Test Plan` section', () => {
     expect(collectPlanTestPlanDefects(late)).toEqual([
       `plan.md: [the plan is checked before the artifact is written] "${PLAN_CHECK}" does not precede "${PLAN_WRITE}"`,
     ])
+  })
+})
+
+// ---------------------------------------------------------------------------
+// /implement Phase 1 — the test-plan step and its ask (AC-9)
+// ---------------------------------------------------------------------------
+
+const CODE_SPAWN = 'Agent(subagent_type="Code")'
+const TICKET_ASK = '**Ticket link, only when `ISSUE_REQUIRED` is `true`:**'
+const RECORD = '**Record the exception at once**'
+const TEST_PLAN_STEP = '**Test plan.** Before any Code spawn'
+const MISSING_ASK = '**Missing test plan, only when `EVIDENCE_POLICY` is `required`:**'
+const OUTPUTS = '**Test-plan outputs**'
+const STANDARD_LINE = 'When `EVIDENCE_POLICY` is `standard`, a missing test plan is never asked about'
+
+function implementMd(): string {
+  return requireDistFile('implement.md')
+}
+
+/** The order Phase 1 keeps, invocation to first Code spawn. Every anchor is unique in the built file. */
+const PHASE1_ORDER: readonly OrderRule[] = [
+  { label: 'the policy resolves before setup-task', before: 'resolve-evidence-policy.cjs', after: 'OPERATION: setup-task' },
+  { label: 'setup-task runs before the ticket ask', before: 'OPERATION: setup-task', after: TICKET_ASK },
+  { label: 'the ticket exception is recorded before the test-plan step', before: RECORD, after: TEST_PLAN_STEP },
+  { label: 'the test plan is checked before it can be missing', before: 'check tp .devflow/docs/evidence-{branch_slug}.md', after: MISSING_ASK },
+  { label: 'the missing-plan ask precedes the outputs', before: MISSING_ASK, after: OUTPUTS },
+  { label: 'the outputs are set before Phase 2', before: OUTPUTS, after: '### Phase 2: Implement' },
+]
+
+/** Named collector: Code spawns that open before `anchor` — every one must follow it, not just the first. */
+function collectCodeSpawnsBefore(content: string, anchor: string): string[] {
+  const at = content.indexOf(anchor)
+  if (at === -1) return [`the anchor is absent: "${anchor}"`]
+  const out: string[] = []
+  for (let i = content.indexOf(CODE_SPAWN); i !== -1; i = content.indexOf(CODE_SPAWN, i + CODE_SPAWN.length)) {
+    if (i < at) out.push(`a Code spawn at offset ${i} opens before "${anchor}" (offset ${at})`)
+  }
+  return out
+}
+
+describe('AC-9: /implement writes and checks the test plan before any Code spawn', () => {
+  it('invocation → setup-task → ticket ask → record → test-plan step → missing-plan ask → outputs → Phase 2', () => {
+    const md = implementMd()
+    expect(md.split(CODE_SPAWN).length - 1, 'no Code spawn read').toBeGreaterThanOrEqual(5)
+    expect(collectOrderViolations('implement.md', md, PHASE1_ORDER)).toEqual([])
+    expect(collectCodeSpawnsBefore(md, OUTPUTS)).toEqual([])
+  })
+
+  it('known-bad probes: a test-plan step moved above the record and a Code spawn seeded above the outputs are reported', () => {
+    const md = implementMd()
+    const hoisted = md.replace(TEST_PLAN_STEP, 'Test plan later.').replace(RECORD, `${TEST_PLAN_STEP}\n\n${RECORD}`)
+    expect(collectOrderViolations('implement.md', hoisted, PHASE1_ORDER).some(v => v.includes('the ticket exception is recorded before'))).toBe(true)
+    const seeded = md.replace(MISSING_ASK, `${CODE_SPAWN}:\n\n${MISSING_ASK}`)
+    expect(collectCodeSpawnsBefore(seeded, OUTPUTS)).toHaveLength(1)
+  })
+
+  it('the check and the render run the installed script over the evidence file', () => {
+    const lines = implementMd().split('\n')
+    const script = 'node "${DEVFLOW_DIR:-$HOME/.devflow}/scripts/verify-evidence.cjs"'
+    expect(lines).toContain(`${script} check tp .devflow/docs/evidence-{branch_slug}.md; echo "exit=$?"`)
+    expect(lines).toContain(`${script} render --plan .devflow/docs/evidence-{branch_slug}.md; echo "exit=$?"`)
+  })
+})
+
+/** The missing-plan ask: from its gate to the blank line after its last option. */
+function missingAskBlock(content: string): string | null {
+  const start = content.indexOf(MISSING_ASK)
+  if (start === -1) return null
+  const end = content.indexOf('\n\n', start)
+  return content.slice(start, end === -1 ? content.length : end)
+}
+
+/**
+ * Named collector: what the missing-plan ask fails to state. Scoped to its own
+ * block, so ticket-gate's options collector (which reads the ticket ask through
+ * the record paragraph) never sees these options.
+ */
+function collectMissingAskDefects(block: string | null): string[] {
+  if (block === null) return ['no missing-plan ask block']
+  const out: string[] = []
+  const need = (what: string, ok: boolean): void => { if (!ok) out.push(what) }
+  need('keys on the policy (`required`), no mechanism key', block.startsWith(MISSING_ASK))
+  need('asks with AskUserQuestion before any Code spawn', block.includes('AskUserQuestion before any Code spawn'))
+  const options = block.split('\n').filter(l => /^- \*\*[^*]+\*\* — /.test(l)).map(l => l.slice(4, l.indexOf('** ')))
+  need(`exactly the two options (found: ${options.join(', ')})`, options.join('|') === 'Record an exception|Stop')
+  need('renders the exception as kind `test-plan`', block.includes('as kind `test-plan`'))
+  need('a bounded re-ask for an empty reason', /ask for it once more, and stop/.test(block))
+  need('the same Evidence Exceptions section of the handoff file', block.includes('`## Evidence Exceptions` section of `.devflow/docs/handoff-{branch_slug}.md`'))
+  need('the BLOCKED report', block.includes('`BLOCKED (no test plan)`'))
+  need('the branch and BASE_BRANCH', block.includes('`TASK_ID`') && block.includes('`BASE_BRANCH`'))
+  need('the policy-file remedy', block.includes('`.devflow/policy.json`'))
+  return out
+}
+
+describe('AC-9: a missing test plan asks only under `required`, and a stop names its remedy', () => {
+  it('the ask states every part of the contract', () => {
+    expect(collectMissingAskDefects(missingAskBlock(implementMd()))).toEqual([])
+  })
+
+  it('the remedy quotes the canonical standard policy file, and it parses', () => {
+    const block = missingAskBlock(implementMd())!
+    const literal = /`(\{"version":1,[^`]*\})`/.exec(block)?.[1]
+    expect(literal, 'the remedy must quote the policy file').toBeDefined()
+    expect(`${literal}\n`).toBe(RESOLVER.serializePolicy('standard'))
+    expect(RESOLVER.parsePolicyBytes(new TextEncoder().encode(literal!))).toEqual({ kind: 'valid', policy: 'standard' })
+  })
+
+  it('under `standard` the missing plan is reported and never asked about', () => {
+    const lines = implementMd().split('\n').filter(l => l.startsWith(STANDARD_LINE))
+    expect(lines).toHaveLength(1)
+    expect(lines[0]).toContain('Phase 11 report')
+    expect(lines[0]).not.toContain('AskUserQuestion')
+  })
+
+  it('known-bad probes: a third option, a lost BLOCKED report and a missing block are reported', () => {
+    const block = missingAskBlock(implementMd())!
+    const third = block.replace('- **Stop** — ', '- **Skip the plan** — carry on.\n- **Stop** — ')
+    expect(collectMissingAskDefects(third).some(d => d.startsWith('exactly the two options'))).toBe(true)
+    expect(collectMissingAskDefects(block.replace('`BLOCKED (no test plan)`', 'an error'))).toEqual(['the BLOCKED report'])
+    expect(collectMissingAskDefects(null)).toEqual(['no missing-plan ask block'])
+  })
+})
+
+// ---------------------------------------------------------------------------
+// /implement spawns — PR_TEST_PLAN_BLOCK (AC-10) and TEST_PLAN (AC-11)
+// ---------------------------------------------------------------------------
+
+const FORWARD_LINE = 'PR_TEST_PLAN_BLOCK: {PR_TEST_PLAN_BLOCK from Phase 1 verbatim, or (none)}'
+
+/**
+ * Named collector: Code spawns that can create the PR (`CREATE_PR: true`, or the
+ * sequential `CREATE_PR: {true if last …}`) and do not forward the block. Returns
+ * the violations and how many PR-creating spawns were read.
+ */
+function collectUnforwardedTestPlan(content: string): { creating: number; violations: string[] } {
+  let creating = 0
+  const violations: string[] = []
+  parseFences(content).forEach((fence, i) => {
+    if (!isAgentBlock(fence, 'Code')) return
+    if (!/^\s*"?CREATE_PR: (?:true\b|\{true if last)/m.test(fence)) return
+    creating++
+    const lines = fence.split('\n').map(l => l.replace(/"$/, ''))
+    if (!lines.includes(FORWARD_LINE)) violations.push(`fence ${i + 1}: a PR-creating Code spawn without "${FORWARD_LINE}"`)
+  })
+  return { creating, violations }
+}
+
+describe('AC-10/AC-11: the spawns carry the test plan', () => {
+  it('SINGLE, SEQUENTIAL Phase 2+ and PARALLEL pr-create forward PR_TEST_PLAN_BLOCK', () => {
+    const { creating, violations } = collectUnforwardedTestPlan(implementMd())
+    expect(creating, 'fewer PR-creating Code spawns than SINGLE + SEQUENTIAL + pr-create').toBeGreaterThanOrEqual(3)
+    expect(violations).toEqual([])
+  })
+
+  it('known-bad probe: a spawn that lost the key is reported', () => {
+    const md = implementMd()
+    const seeded = md.replace(`\n${FORWARD_LINE}`, '')
+    expect(seeded, 'the seed must land').not.toBe(md)
+    expect(collectUnforwardedTestPlan(seeded).violations).toHaveLength(1)
+  })
+
+  it('the Phase 8 Test spawn passes TEST_PLAN from the evidence file', () => {
+    const tests = parseFences(implementMd()).filter(f => isAgentBlock(f, 'Test'))
+    expect(tests, 'the Phase 8 Test spawn').toHaveLength(1)
+    expect(tests[0]).toContain("TEST_PLAN: {the TP lines of the evidence file's ## Test Plan section, or (none)}")
   })
 })

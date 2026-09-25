@@ -2,7 +2,8 @@
  * The evidence-policy DISPOSITION table, held two ways (#362, AC-8).
  *
  * Design §6 disposes of every site that used to key on compliance (rows 1–13; row
- * 14 is the /dynamic-tickets note §3.16 added): each one now
+ * 14 is the /dynamic-tickets note §3.16 added; row 15 is /implement's test-plan
+ * ask, #363 PR4, which keys on the policy as /plan's issue step does): each one now
  * gates on a mechanism input (`ISSUE_REQUIRED`, `APPLY_CONVENTIONS`,
  * `REQUIRE_NON_AUTHOR_APPROVAL`), on `EVIDENCE_POLICY` itself at a caller, or
  * stays on `COMPLIANCE_SKILL_INSTALLED` because it is the review lens rather than
@@ -270,6 +271,19 @@ const DISPOSITION: readonly DispositionRow[] = [
       { file: 'commands/dynamic-tickets.md', anchor: '- **Evidence policy:**', phrase: gate('ISSUE_REQUIRED') },
     ],
   },
+  {
+    // #363 (PR4): no new mechanism key — the ask keys on the policy itself, as row 9
+    // (/plan's issue step) does, so the resolver and its grammar stay untouched.
+    row: 15,
+    subject: '/implement test-plan ask — no test plan could be written',
+    inputs: ['EVIDENCE_POLICY'],
+    on: 'ask — record a self-attested `test-plan` exception, or stop with BLOCKED (no test plan)',
+    off: 'never ask; report the missing test plan',
+    sites: [
+      { file: 'commands/implement.md', anchor: '**Missing test plan, ', phrase: policyGate },
+      { file: 'commands/implement.md', anchor: 'a missing test plan is never asked about', phrase: 'When `EVIDENCE_POLICY` is `standard`' },
+    ],
+  },
 ]
 
 // ---------------------------------------------------------------------------
@@ -444,8 +458,8 @@ describe('evidence-policy disposition: the table and the tree agree, both ways (
     expect(exempt.size, 'the resolution text the exemption names is empty').toBeGreaterThanOrEqual(4)
   })
 
-  it('the table is well-formed: numbered 1..14 in order, each row with sites and a named input', () => {
-    expect(DISPOSITION.map(r => r.row)).toEqual(Array.from({ length: 14 }, (_, i) => i + 1))
+  it('the table is well-formed: numbered 1..15 in order, each row with sites and a named input', () => {
+    expect(DISPOSITION.map(r => r.row)).toEqual(Array.from({ length: 15 }, (_, i) => i + 1))
     for (const row of DISPOSITION) {
       expect(row.sites.length, `row ${row.row} has no site`).toBeGreaterThan(0)
       expect(row.inputs.length, `row ${row.row} gates on nothing`).toBeGreaterThan(0)

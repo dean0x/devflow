@@ -6,6 +6,7 @@ output-dir: dist/commands
 @import { decisions_load } from "./_partials/_decisions.mds"
 @import { evidence_policy, evidence_exception } from "./_partials/_evidence_policy.mds"
 @import { issue_ref_grammar, issue_capture_contract } from "./_partials/_tracker.mds"
+@import { test_plan_line } from "./_partials/_plan_contract.mds"
 
 # Implement Command
 
@@ -48,7 +49,7 @@ If the user prompt does NOT match re-validation, proceed with the full pipeline 
 
 ### Phase 1: Setup
 
-**Produces:** TASK_ID, BASE_BRANCH, EXECUTION_PLAN, DECISIONS_CONTEXT, FEATURE_KNOWLEDGE, PR_DESCRIPTION_GUIDANCE, ISSUE_NUMBER, EVIDENCE_POLICY, ISSUE_REQUIRED, APPLY_CONVENTIONS, REQUIRE_NON_AUTHOR_APPROVAL, PR_EXCEPTIONS
+**Produces:** TASK_ID, BASE_BRANCH, EXECUTION_PLAN, DECISIONS_CONTEXT, FEATURE_KNOWLEDGE, PR_DESCRIPTION_GUIDANCE, ISSUE_NUMBER, EVIDENCE_POLICY, ISSUE_REQUIRED, APPLY_CONVENTIONS, REQUIRE_NON_AUTHOR_APPROVAL, PR_EXCEPTIONS, TEST_PLAN, EVIDENCE_FILE, PR_TEST_PLAN_BLOCK
 
 **Load Companion Skills** — Load via Skill tool: `devflow:test-driven-development`, `devflow:patterns`, `devflow:dependency-research`. If a skill fails to load, continue without it.
 
@@ -126,6 +127,36 @@ visible, a silently discarded request is not.
 
 **Record the exception at once**, before any Code spawn: write the rendered section as the `## Evidence Exceptions` section of `.devflow/docs/handoff-\{branch_slug\}.md`, creating the file if absent, and set `PR_EXCEPTIONS` to that section. The file is its one home until the PR exists: every later write to the file keeps the section byte-identical, every PR-creating Code spawn passes it verbatim as `PR_EXCEPTIONS`, and the file is deleted only once the PR exists — after the PR-creating Phase 2 Code agent under SINGLE_CODE_AGENT and SEQUENTIAL_CODE_AGENTS, after Phase 10 under PARALLEL_CODE_AGENTS. With no exception recorded, `PR_EXCEPTIONS` is `(none)`.
 
+**Test plan.** Before any Code spawn, give the task a test plan in the evidence file `.devflow/docs/evidence-\{branch_slug\}.md` (`EVIDENCE_FILE`) — unlike the handoff file, it stays after the PR exists. It holds up to three sections, in this order and nothing else: `## Test Plan`; `## Evidence Exceptions`, a byte copy of `PR_EXCEPTIONS` present only while that is not `(none)`; and `## Claims`, always last, so every claim is appended at the end of the file. Create the file if absent; if it exists, replace its `## Test Plan` and `## Evidence Exceptions` sections and keep `## Claims` byte-identical.
+
+Write the `## Test Plan` section: when `$ARGUMENTS` is a plan document with a `## Test Plan` section, copy that section's lines verbatim; otherwise write one TP line per acceptance criterion the plan, the issue or the task text states, numbered from `TP-1`. Never invent a criterion, and word every scenario yourself — never copy a `#N` reference, an `@`-mention, a URL or a closing keyword into one: the lines reach the PR body. Each line follows the TP-line contract:
+
+{test_plan_line()}
+
+Check the section:
+
+```bash
+node "${DEVFLOW_DIR:-$HOME/.devflow}/scripts/verify-evidence.cjs" check tp .devflow/docs/evidence-{branch_slug}.md; echo "exit=$?"
+```
+
+`exit=0` passes. On any other result, rewrite the section once — the script names the failing line and its code on stderr — and check again. Still failing, or no line to write, means the test plan is **missing**: drop the `## Test Plan` section from the file.
+
+**Missing test plan, only when `EVIDENCE_POLICY` is `required`:** when the check above leaves the test plan missing, ask with AskUserQuestion before any Code spawn — "No test plan could be written for this task. Record a self-attested exception, or stop?" — offering exactly these two options:
+- **Record an exception** — the user gives the reason as free text. Render it with the exception grammar above, as kind `test-plan`; when the rendered reason is empty, ask for it once more, and stop as below if it is empty again. Add the rendered line to the `## Evidence Exceptions` section of `.devflow/docs/handoff-\{branch_slug\}.md` — after any `ticket-link` line, creating the section and the file when absent — and set `PR_EXCEPTIONS` to that section, under the same rules as the record above.
+- **Stop** — report `BLOCKED (no test plan)`, name `TASK_ID` and `BASE_BRANCH` so the branch can be reused or removed, and give the remedy: state the acceptance criteria in the task, the issue or a `/plan` document (its `## Test Plan` section is copied) and re-run `/implement`, or — for a team that does not want test plans enforced — commit `.devflow/policy.json` as `\{"version":1,"evidencePolicy":"standard"\}` on the default branch; a machine with compliance enabled still resolves `required` whatever that file says. Spawn nothing further.
+
+When `EVIDENCE_POLICY` is `standard`, a missing test plan is never asked about: carry `Test plan: missing` to the Phase 11 report.
+
+**Test-plan outputs**, set once before any Code spawn:
+- `TEST_PLAN` — the TP lines of the evidence file's `## Test Plan` section, or `(none)` when the test plan is missing.
+- `PR_TEST_PLAN_BLOCK` — when the test plan is present and this render ends in `exit=0`, its stdout byte for byte without that `exit=` line; `(none)` otherwise:
+
+```bash
+node "${DEVFLOW_DIR:-$HOME/.devflow}/scripts/verify-evidence.cjs" render --plan .devflow/docs/evidence-{branch_slug}.md; echo "exit=$?"
+```
+
+- `EVIDENCE_FILE` — `.devflow/docs/evidence-\{branch_slug\}.md`, its `## Evidence Exceptions` section now a byte copy of `PR_EXCEPTIONS` (absent when that is `(none)`).
+
 {decisions_load()}
 
 Pass to Code agent (Phase 2) and Scrutinize agent (Phase 5).
@@ -135,7 +166,7 @@ Pass to Code agent (Phase 2) and Scrutinize agent (Phase 5).
 ### Phase 2: Implement
 
 **Produces:** CODE_AGENT_OUTPUT, FILES_CHANGED, PR_URL
-**Requires:** TASK_ID, BASE_BRANCH, EXECUTION_PLAN, PR_DESCRIPTION_GUIDANCE, PR_EXCEPTIONS
+**Requires:** TASK_ID, BASE_BRANCH, EXECUTION_PLAN, PR_DESCRIPTION_GUIDANCE, PR_EXCEPTIONS, PR_TEST_PLAN_BLOCK
 
 Based on Setup context (plan document, issue body, or conversation context), use the three-strategy framework:
 
@@ -167,7 +198,8 @@ DECISIONS_CONTEXT: {decisions_context}
 PR_DESCRIPTION_GUIDANCE: {pr_description_guidance}
 ISSUE_NUMBER: {ISSUE_ID captured in Phase 1, or (none)}
 ISSUE_PR_LINK: {ISSUE_PR_LINK captured in Phase 1, or (none)}
-PR_EXCEPTIONS: {the ## Evidence Exceptions section of .devflow/docs/handoff-{branch_slug}.md verbatim, or (none)}"
+PR_EXCEPTIONS: {the ## Evidence Exceptions section of .devflow/docs/handoff-{branch_slug}.md verbatim, or (none)}
+PR_TEST_PLAN_BLOCK: {PR_TEST_PLAN_BLOCK from Phase 1 verbatim, or (none)}"
 ```
 
 ---
@@ -213,6 +245,7 @@ PR_DESCRIPTION_GUIDANCE: {pr_description_guidance}
 ISSUE_NUMBER: {ISSUE_ID captured in Phase 1, or (none)}
 ISSUE_PR_LINK: {ISSUE_PR_LINK captured in Phase 1, or (none)}
 PR_EXCEPTIONS: {the ## Evidence Exceptions section of .devflow/docs/handoff-{branch_slug}.md verbatim, or (none)}
+PR_TEST_PLAN_BLOCK: {PR_TEST_PLAN_BLOCK from Phase 1 verbatim, or (none)}
 HANDOFF_REQUIRED: {true if not last phase}
 HANDOFF_FILE: .devflow/docs/handoff-{branch_slug}.md"
 ```
@@ -395,7 +428,7 @@ Validate alignment with request and plan. Report ALIGNED or MISALIGNED with deta
 ### Phase 8: QA Testing
 
 **Produces:** QA_RESULT
-**Requires:** FILES_CHANGED, EXECUTION_PLAN
+**Requires:** FILES_CHANGED, EXECUTION_PLAN, TEST_PLAN
 
 After Evaluate agent passes, spawn Test agent for scenario-based acceptance testing:
 
@@ -405,6 +438,7 @@ Agent(subagent_type="Test"):
 EXECUTION_PLAN: {execution plan from Phase 1}
 FILES_CHANGED: {list of files from Code agent output}
 ACCEPTANCE_CRITERIA: {extracted criteria if available}
+TEST_PLAN: {the TP lines of the evidence file's ## Test Plan section, or (none)}
 Design and execute scenario-based acceptance tests. Report PASS or FAIL with evidence."
 ```
 
@@ -455,7 +489,7 @@ Strategy-conditional: run when the PR already exists — **SINGLE_CODE_AGENT** a
 ### Phase 10: Create PR
 
 **Produces:** PR_URL
-**Requires:** BASE_BRANCH, TASK_ID, PR_EXCEPTIONS
+**Requires:** BASE_BRANCH, TASK_ID, PR_EXCEPTIONS, PR_TEST_PLAN_BLOCK
 
 **For SEQUENTIAL_CODE_AGENTS**: the PR already exists — the last Phase 2 Code agent (`CREATE_PR: true`) created it, and Phase 9 has gated its CI.
 
@@ -471,10 +505,11 @@ CREATE_PR: true
 PR_DESCRIPTION_GUIDANCE: {pr_description_guidance}
 ISSUE_NUMBER: {ISSUE_ID captured in Phase 1, or (none)}
 ISSUE_PR_LINK: {ISSUE_PR_LINK captured in Phase 1, or (none)}
-PR_EXCEPTIONS: {the ## Evidence Exceptions section of .devflow/docs/handoff-{branch_slug}.md verbatim, or (none)}"
+PR_EXCEPTIONS: {the ## Evidence Exceptions section of .devflow/docs/handoff-{branch_slug}.md verbatim, or (none)}
+PR_TEST_PLAN_BLOCK: {PR_TEST_PLAN_BLOCK from Phase 1 verbatim, or (none)}"
 ```
 
-Its Responsibility 7 composes the body, pastes `ISSUE_PR_LINK` and `PR_EXCEPTIONS` through their paste gates and scrubs the body (D11) before `gh pr create`. This command renders no link line and creates no PR itself: the Git agent's Phase-1 rendering is the only one, forwarded verbatim.
+Its Responsibility 7 composes the body, pastes `ISSUE_PR_LINK`, `PR_EXCEPTIONS` and `PR_TEST_PLAN_BLOCK` through their paste gates and scrubs the body (D11) before `gh pr create`. This command renders no link line and creates no PR itself: the Git agent's Phase-1 rendering is the only one, forwarded verbatim.
 
 **For SINGLE_CODE_AGENT**: PR is created by the Code agent (CREATE_PR: true) — the Code agent's Responsibility 7 handles Related Issues inclusion when ISSUE_NUMBER is provided.
 
@@ -502,6 +537,7 @@ If Phase 1 recorded an evidence exception, show its `## Evidence Exceptions` lin
 │  └─ Plan document parsing (if .md path provided) - extracts execution plan, strategy, frontmatter issue
 │  └─ Git agent (operation: setup-task) - creates feature branch, fetches issue
 │  └─ Ticket-link ask (no linked ticket, issue required) - record a self-attested exception or stop
+│  └─ Test plan (evidence file) - copy or author TP lines, check them, render the PR block; missing under a required policy: record a test-plan exception or stop
 │
 ├─ Phase 2: Implement (3-strategy framework)
 │  ├─ SINGLE_CODE_AGENT (80%): One Code agent, full plan, CREATE_PR: true
