@@ -345,6 +345,23 @@ export function collectMissingEvidencePosts(resolve: string): string[] {
   return out
 }
 
+/**
+ * Named collector: the 9b-1 DEGRADED branch, if it never sets `THREAD_RESOLUTION_RESULT`.
+ * The non-degraded path sets it by capturing the Git agent's `### Status:` line
+ * (checked separately below); the DEGRADED branch is a distinct early exit that
+ * must set it too, or Phase 10's `Thread replies: … DEGRADED (reason)` row has no
+ * source that ever wrote that value (#360 M1).
+ */
+export function collectMissingDegradeSetter(resolve: string): string[] {
+  const step = slice(resolve, '**Step 9b-1', '**Step 9b-2')
+  if (step === '') return ['Step 9b-1 section not found']
+  const degradeLine = step.split('\n').find(l => l.includes('If Git agent returns `TRACEABILITY: DEGRADED`'))
+  if (degradeLine === undefined) return ['Step 9b-1 has no DEGRADED branch']
+  return degradeLine.includes('record `THREAD_RESOLUTION_RESULT`')
+    ? []
+    : ['Step 9b-1 DEGRADED branch never sets THREAD_RESOLUTION_RESULT']
+}
+
 describe('/resolve posts the thread outcomes and reports every evidence post (§3.2, AC-3)', () => {
   it('Third-Party Threads is updated before the 9b-2 spawn', () => {
     expect(collectOrderViolations('resolve.md', requireDistFile('resolve.md'), THREAD_ORDER)).toEqual([])
@@ -360,6 +377,23 @@ describe('/resolve posts the thread outcomes and reports every evidence post (§
     expect(resolve).toMatch(/`### Status:` line as `THREAD_RESOLUTION_RESULT`/)
     const phase10 = resolve.slice(resolve.indexOf('### Phase 10: Report'))
     expect(phase10.split('\n').find(l => l.startsWith('**Requires:**'))).toContain('PR_COMMENT')
+  })
+
+  it('9b-1\'s DEGRADED branch also sets THREAD_RESOLUTION_RESULT, not only the success path', () => {
+    expect(collectMissingDegradeSetter(requireDistFile('resolve.md'))).toEqual([])
+  })
+
+  it('known-bad probe: a DEGRADED branch that continues without setting the result is reported', () => {
+    const wounded = [
+      '**Step 9b-1: Resolve external threads (Compliance-gated)**',
+      '',
+      'If Git agent returns `TRACEABILITY: DEGRADED`: warn, record in `## Third-Party Threads`, continue to step 9b-2.',
+      '',
+      'Capture the returned `### Status:` line as `THREAD_RESOLUTION_RESULT`.',
+      '',
+      '**Step 9b-2: Post resolution summary (ALWAYS-ON)**',
+    ].join('\n')
+    expect(collectMissingDegradeSetter(wounded)).toEqual(['Step 9b-1 DEGRADED branch never sets THREAD_RESOLUTION_RESULT'])
   })
 
   it('Phase 10 reports every evidence post with its statuses', () => {

@@ -387,7 +387,7 @@ WORKTREE_PATH: {worktree_path}  (omit if cwd)
 D9: resolve threads ONLY when VERIFICATION_STATUS == PASS AND verdict == FIXED AND commit_sha non-empty."
 ```
 
-If Git agent returns `TRACEABILITY: DEGRADED`: warn, record in `## Third-Party Threads`, continue to step 9b-2.
+If Git agent returns `TRACEABILITY: DEGRADED`: warn, record in `## Third-Party Threads`, record `THREAD_RESOLUTION_RESULT` as `DEGRADED (\{reason\})`, continue to step 9b-2.
 
 Capture the returned `### Status:` line as `THREAD_RESOLUTION_RESULT`.
 
