@@ -1167,6 +1167,44 @@ describe('injection — every hostile input yields one grammar line', SUBPROCESS
 });
 
 // ---------------------------------------------------------------------------
+// Invalid policy bytes — spawned end to end (issue #361: parsePolicyBytes'
+// INVALID table exercises these shapes in-process only; this proves the real
+// subprocess also folds them to SOURCE=invalid, offline and online alike)
+// ---------------------------------------------------------------------------
+
+describe('invalid policy bytes reach SOURCE=invalid through the real subprocess', SUBPROCESS_TIMEOUT, () => {
+  const COMPACT = '{"version":1,"evidencePolicy":"required"}';
+  const padTo = (s: string, n: number): string => s + ' '.repeat(n - Buffer.byteLength(s));
+
+  const INVALID_ROWS: ReadonlyArray<readonly [string, string | Buffer]> = [
+    ['"REQUIRED"', '{"version":1,"evidencePolicy":"REQUIRED"}'],
+    ['an empty array', '[]'],
+    ['a __proto__ key', '{"__proto__":{"evidencePolicy":"standard"},"version":1}'],
+    ['BOM + valid', Buffer.concat([Buffer.from([0xef, 0xbb, 0xbf]), Buffer.from(COMPACT)])],
+    ['4097 bytes', padTo(COMPACT, 4097)],
+  ];
+
+  it.each(INVALID_ROWS)('offline (worktree file): %s', (_label, bytes) => {
+    writeWorktree(root, bytes);
+    const run = e2e(scenarioCalls({ root }));
+    expect(run.status).toBe(0);
+    const line = expectOneGrammarLine(run.stdout);
+    expect(fieldOf(line, 'EVIDENCE_POLICY')).toBe('required');
+    expect(fieldOf(line, 'SOURCE')).toBe('invalid');
+    expect(fieldOf(line, 'WARN').split(',')).toContain('invalid-file');
+  });
+
+  it.each(INVALID_ROWS)('online (remote file via the scripted shim): %s', (_label, bytes) => {
+    const run = e2e(scenarioCalls({ root, defaultBranch: 'main', remote: { bytes }, head: { bytes } }));
+    expect(run.status).toBe(0);
+    const line = expectOneGrammarLine(run.stdout);
+    expect(fieldOf(line, 'EVIDENCE_POLICY')).toBe('required');
+    expect(fieldOf(line, 'SOURCE')).toBe('invalid');
+    expect(fieldOf(line, 'WARN').split(',')).toContain('invalid-file');
+  });
+});
+
+// ---------------------------------------------------------------------------
 // Exit arms
 // ---------------------------------------------------------------------------
 
