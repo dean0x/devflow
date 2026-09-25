@@ -1,12 +1,18 @@
 /**
- * AC-17 — `backlink-shipped-issues` is policy-gated at its ONE call site.
+ * AC-17 — each release write to the shipped issues is policy-gated at its ONE
+ * call site: `backlink-shipped-issues` (step 4b) and, since #364 (PR5),
+ * `associate-release` (step 4c), which adds each issue to the release's tracker
+ * marker.
  *
- * The operation writes to every issue a release shipped, so whether it runs at
- * all is a policy question and not a mechanics one. `/release` decides: step 4b
- * spawns it only when the resolved evidence policy is `required`, and step 2b
- * gates the evidence-gathering that feeds it on the same condition (#362 moved
- * both from the installed compliance skill to `EVIDENCE_POLICY`). Nothing else
- * may decide, and that is the property with no executed evidence before this file.
+ * Both operations write to every issue a release shipped, so whether they run at
+ * all is a policy question and not a mechanics one. `/release` decides: Phase 6
+ * spawns each only when the resolved evidence policy is `required` — two spawns,
+ * never one two-op spawn — and Phase 4's **Gather release evidence** step gates
+ * the evidence-gathering that feeds them on the same condition (#362 moved both
+ * from the installed compliance skill to `EVIDENCE_POLICY`; #364 moved the gather
+ * from Phase 6 to Phase 4 and let a `--dry-run` gather under either policy, which
+ * never reaches Phase 6). Nothing else may decide, and that is the property with
+ * no executed evidence before this file.
  *
  * WHY A MATRIX AND NOT A PRESENCE CHECK. "The gate is stated" is cleared by the
  * caller alone. The failure this guards is the other half: a provider's
@@ -41,8 +47,18 @@ import { walkFiles } from '../helpers.js';
 const ROOT = path.resolve(import.meta.dirname, '../..');
 const REFS_DIR = compiledSkillRefsDir();
 
-/** The operation this file is about, spelled once. */
-const OP = 'backlink-shipped-issues';
+/**
+ * The operations this file is about, each with the /release step that spawns it
+ * and any clause that step adds to the policy gate.
+ *
+ * `associate-release` is also skipped when there is nothing to associate: an
+ * empty `SHIPPED_ISSUES` would resolve — and on GitHub CREATE — a release marker
+ * with no item to put on it.
+ */
+const OPS: ReadonlyArray<{ readonly op: string; readonly step: string; readonly extraClause?: string }> = [
+  { op: 'backlink-shipped-issues', step: '4b' },
+  { op: 'associate-release', step: '4c', extraClause: 'and `SHIPPED_ISSUES` is non-empty' },
+];
 
 /**
  * The gate's condition as `/release` spells it — the canonical caller-side policy
@@ -50,6 +66,24 @@ const OP = 'backlink-shipped-issues';
  * catch: the step would read as gated to a human and name a variable nothing sets.
  */
 const GATE = 'only when `EVIDENCE_POLICY` is `required`';
+
+/**
+ * The gather step's own condition (#364): a `--dry-run` gathers under either
+ * policy — it reports the trace and halts after Phase 4, so it never reaches the
+ * back-link — and a real release gathers under the same GATE as the back-link.
+ * Asserted to CONTAIN `GATE`, so the pair cannot diverge on the real-release arm.
+ */
+const GATHER_GATE = 'under either policy when `DRY_RUN` is true, otherwise only when `EVIDENCE_POLICY` is `required`';
+
+/**
+ * Named collector: the release command's lines that spawn `op` through the Git
+ * agent — the call sites AC-17 counts. Driven by the live arm and by the probes.
+ */
+function collectSpawnSteps(release: string, op: string): string[] {
+  return release
+    .split('\n')
+    .filter(line => line.includes(`\`${op}\``) && line.includes('Agent(subagent_type="Git")'));
+}
 
 /**
  * Named collector: lines of an operation's mechanics that name the evidence
@@ -136,7 +170,7 @@ function collectComplianceConditions(label: string, body: string): string[] {
   return hits;
 }
 
-describe(`AC-17: ${OP} is gated by the caller and by nobody else`, () => {
+describe('AC-17: the release writes to shipped issues are gated by the caller and by nobody else', () => {
   const release = requireFile('release command', path.join(ROOT, 'dist', 'commands', 'release.md'));
 
   it('the release command no longer keys either step on the compliance skill', () => {
@@ -144,53 +178,98 @@ describe(`AC-17: ${OP} is gated by the caller and by nobody else`, () => {
     expect(release, 'the retired step prefix').not.toMatch(/compliance-gated/i);
   });
 
-  it('the release command spawns the operation exactly once, and gates that spawn', () => {
-    const spawnSteps = release
-      .split('\n')
-      .filter(line => line.includes(OP) && line.includes('Agent(subagent_type="Git")'));
+  for (const { op, step, extraClause } of OPS) {
+    it(`${op}: the release command spawns it exactly once, at step ${step}, and gates that spawn`, () => {
+      const spawnSteps = collectSpawnSteps(release, op);
 
-    expect(
-      spawnSteps.length,
-      `expected exactly one step spawning ${OP}; a second call site is a second policy`,
-    ).toBe(1);
-    expect(
-      spawnSteps[0],
-      `the ${OP} spawn must carry ${JSON.stringify(GATE)} — an ungated back-link writes to every ` +
-      'issue of every release, for every user, whether or not they asked for traceability',
-    ).toContain(GATE);
+      expect(
+        spawnSteps.length,
+        `expected exactly one step spawning ${op}; a second call site is a second policy`,
+      ).toBe(1);
+      expect(spawnSteps[0].startsWith(`${step}. `), `the ${op} spawn must be step ${step}`).toBe(true);
+      expect(
+        spawnSteps[0],
+        `the ${op} spawn must carry ${JSON.stringify(GATE)} — an ungated release write touches every ` +
+        'issue of every release, for every user, whether or not they asked for traceability',
+      ).toContain(GATE);
+      if (extraClause !== undefined) {
+        expect(spawnSteps[0], `the ${op} spawn must also carry ${JSON.stringify(extraClause)}`).toContain(
+          `${GATE} ${extraClause}`,
+        );
+      }
+    });
+  }
+
+  it('the two writes are two spawns, never one spawn running both operations', () => {
+    for (const { op } of OPS) {
+      const others = OPS.filter(o => o.op !== op).map(o => o.op);
+      for (const line of collectSpawnSteps(release, op)) {
+        for (const other of others) {
+          expect(line, `the ${op} spawn also names ${other}`).not.toContain(`\`${other}\``);
+        }
+      }
+    }
+  });
+
+  it('known-bad probe: a second call site, an ungated spawn and a dropped clause are reported', () => {
+    const [backlink, associate] = OPS;
+    const gated = collectSpawnSteps(release, associate.op);
+    expect(gated, 'the live 4c line is the probe\'s base').toHaveLength(1);
+    const doubled = `${release}\n${gated[0]}`;
+    expect(collectSpawnSteps(doubled, associate.op), 'a pasted second 4c is a second call site').toHaveLength(2);
+
+    const ungated = '4c. **Associate shipped issues with the release** — spawn `Agent(subagent_type="Git")` with `associate-release` operation.';
+    const [seeded] = collectSpawnSteps(ungated, associate.op);
+    expect(seeded, 'the collector must pick up the seeded spawn').toBeDefined();
+    expect(seeded).not.toContain(GATE);
+
+    const clauseDropped = gated[0].replace(` ${associate.extraClause}`, '');
+    expect(clauseDropped, 'the probe must actually remove the clause').not.toBe(gated[0]);
+    expect(clauseDropped).not.toContain(`${GATE} ${associate.extraClause}`);
+
+    // A name that is a prefix-free substring of another op must not be counted for it.
+    expect(collectSpawnSteps(gated[0], backlink.op)).toEqual([]);
   });
 
   it('the evidence it consumes is gated on the same condition, so the pair cannot diverge', () => {
-    const evidenceStep = release
+    expect(GATHER_GATE.includes(GATE), 'the gather condition must hold the back-link GATE verbatim').toBe(true);
+    const evidenceSteps = release
       .split('\n')
-      .find(line => line.includes('gather-release-evidence') && line.includes('Agent(subagent_type="Git")'));
+      .filter(line => line.includes('gather-release-evidence') && line.includes('Agent(subagent_type="Git")'));
 
-    expect(evidenceStep, 'no gather-release-evidence spawn in the release command').toBeDefined();
+    expect(evidenceSteps, 'exactly one gather-release-evidence spawn in the release command').toHaveLength(1);
     expect(
-      evidenceStep,
+      evidenceSteps[0],
       'SHIPPED_ISSUES is what the back-link posts against. Gating the poster while ungating its ' +
-      'input would run the enrichment for users who never receive the comment it feeds',
-    ).toContain(GATE);
+      'input would run the enrichment for users who never receive the comment it feeds; only a ' +
+      '--dry-run, which halts before the back-link, may gather under either policy',
+    ).toContain(GATHER_GATE);
   });
 
-  for (const provider of PROVIDERS) {
+  it('known-bad probe: a gather line that dropped the real-release arm is not GATHER_GATE', () => {
+    const ungated = '**Gather release evidence** — under either policy: spawn `Agent(subagent_type="Git")` with `gather-release-evidence` operation.';
+    expect(ungated).not.toContain(GATHER_GATE);
+    expect(ungated).not.toContain(GATE);
+  });
+
+  for (const { op: OP, step } of OPS) for (const provider of PROVIDERS) {
     const rel = `tracker/${provider}/${OP}.md`;
 
-    it(`${provider}: the operation file states its mechanics and NOT the gate`, () => {
+    it(`${OP} / ${provider}: the operation file states its mechanics and NOT the gate`, () => {
       const body = requireFile(rel, path.join(REFS_DIR, rel));
 
       // The ungated half. A mechanics file that also decided whether to run would
       // be a second policy the caller cannot see.
       expect(
         collectComplianceConditions(rel, body),
-        `${rel} states a compliance condition. The gate belongs to /release step 4b, which is the ` +
+        `${rel} states a compliance condition. The gate belongs to /release step ${step}, which is the ` +
         'one site that knows whether the run is a compliance run; a per-provider copy is free to ' +
         'drift from it and nothing compares the two:\n  ' +
         collectComplianceConditions(rel, body).join('\n  '),
       ).toEqual([]);
       expect(
         collectPolicyMentions(rel, body),
-        `${rel} names the evidence policy. Agents are never passed it — /release step 4b gates the ` +
+        `${rel} names the evidence policy. Agents are never passed it — /release step ${step} gates the ` +
         'spawn, and the operation runs whenever it is spawned',
       ).toEqual([]);
 

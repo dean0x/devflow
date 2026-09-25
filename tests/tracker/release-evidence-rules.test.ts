@@ -24,7 +24,7 @@ import { readFileSync } from 'fs'
 import * as path from 'path'
 
 import { compiledSkillRefsDir } from '../../src/core/assets.js'
-import { resolveAgentSource } from '../helpers.js'
+import { ROOT, requireDistFile, resolveAgentSource, walkFiles } from '../helpers.js'
 
 const REFS_DIR = compiledSkillRefsDir()
 const PROVIDERS = ['github', 'jira', 'linear'] as const
@@ -201,6 +201,24 @@ export function collectUnboundedFallbacks(text: string): string[] {
   return text.split('\n').filter(line => /gh pr view\b/.test(line) && !/≤\d+/.test(line))
 }
 
+/** Does a fallback line also take the range `(#N)` subjects a SUCCESSFUL listing left unmapped (#364)? */
+export function fallbackCoversUnmappedMarkers(line: string): boolean {
+  return line.includes('after a listing that succeeds, also over each range `(#N)` naming no listed PR')
+}
+
+/** The gather Output's declared status domain, as git.md spells it (PF-075). */
+const GATHER_STATUS_LINE =
+  '### Status: READY | PARTIAL ({n} DEGRADED) | TRUNCATED ({n} not processed) | DEGRADED ({reason}) | INDETERMINATE ({reason})'
+
+/** git.md's `gather-release-evidence` section, from its heading to the next operation's. */
+function gatherSection(): string {
+  const git = resolveAgentSource('git').content
+  const start = git.indexOf('## Operation: gather-release-evidence')
+  if (start === -1) throw new Error('git.md: no gather-release-evidence operation')
+  const next = git.indexOf('\n## Operation:', start + 1)
+  return next === -1 ? git.slice(start) : git.slice(start, next)
+}
+
 describe('G1: the GitHub merged-PR listing', () => {
   const text = gatherRef('github')
 
@@ -231,10 +249,20 @@ describe('G1: the GitHub merged-PR listing', () => {
     expect(fallbacks[0]).toContain('THROTTLED ({n} not processed)')
   })
 
-  it('the agent reports the new status and reads the flagged-empty case', () => {
-    const git = resolveAgentSource('git').content
-    expect(git).toContain('### Status: READY | DEGRADED ({reason}) | INDETERMINATE ({reason})')
-    expect(git).toContain('unless the Mechanics flag merged PRs they could not resolve')
+  it('the agent declares the five-value status and the trace map, and reads the flagged-empty case', () => {
+    const section = gatherSection()
+    expect(section).toContain(GATHER_STATUS_LINE)
+    expect(section).toContain('### TRACE_MAP\n{the trace script\'s lines, verbatim}')
+    expect(section).toContain('unless the Mechanics flag merged PRs they could not resolve')
+  })
+
+  it('the fallback also resolves a range `(#N)` that no listed PR maps (the G1 residual)', () => {
+    const fallback = text.split('\n').find(line => /gh pr view\b/.test(line))
+    expect(fallback, 'the fallback line must exist').toBeDefined()
+    expect(fallbackCoversUnmappedMarkers(fallback!), 'a successful listing must still hand an unmapped `(#N)` to the fallback').toBe(true)
+    expect(fallback, 'the listing-failure case keeps its wording').toContain(
+      '**The listing fails** (an older `gh` reports `Unknown JSON field`) ⇒ `TRACEABILITY: DEGRADED ({reason})`, then fall back to',
+    )
   })
 
   it('known-bad probe: an unbounded listing and an unbounded fallback are both reported', () => {
@@ -242,6 +270,12 @@ describe('G1: the GitHub merged-PR listing', () => {
       .toHaveLength(1)
     expect(collectUnboundedFallbacks('- fall back to `gh pr view N --json closingIssuesReferences` for every PR'))
       .toHaveLength(1)
+    // The pre-#364 fallback ran only when the listing failed, so a squash subject's
+    // `(#N)` naming a PR the listing missed dropped its issue silently.
+    const retired = '   - **The listing fails** (an older `gh` reports `Unknown JSON field`) ⇒ `TRACEABILITY: DEGRADED ({reason})`, ' +
+      'then fall back to `gh pr view N --json closingIssuesReferences` over the PR numbers in `(#N)` / `Merge pull request #N` ' +
+      'subjects, each N gated `^[1-9][0-9]{0,8}$`, bounded at ≤25 PRs'
+    expect(fallbackCoversUnmappedMarkers(retired)).toBe(false)
   })
 })
 
@@ -277,5 +311,270 @@ describe('G1: the tag-date binding', () => {
     const fixed = '   - TAG_DATE=$(TZ=UTC git log -1 --date=format-local:%Y-%m-%d --format=%cd {last_tag})'
     expect(collectUnboundLastTagRefs(broken)).toHaveLength(1)
     expect(collectUnboundLastTagRefs(fixed)).toEqual([])
+  })
+})
+
+// ---------------------------------------------------------------------------
+// #364 (PR5) — steps 1a and 6 come from `_common.mds`, byte for byte, in all
+// three gather references. Step 1a replaces step 1's `git describe` tag with the
+// last RELEASE tag; step 6 accounts for every first-parent commit of the range,
+// which is what closes the G1 residual: a commit no listed PR maps is no longer
+// dropped silently, it is listed as untraced.
+// ---------------------------------------------------------------------------
+
+const COMMON_SOURCE = path.join(ROOT, 'src', 'assets', 'mds', 'tracker', '_common.mds')
+
+/** The body line of `@define {name}(…):` in `_common.mds`, braces unescaped as the compiler emits them. */
+function commonDefineLine(name: string): string {
+  const source = readFileSync(COMMON_SOURCE, 'utf-8')
+  const open = source.split('\n').findIndex(line => line.startsWith(`@define ${name}(`))
+  if (open === -1) throw new Error(`_common.mds: no \`@define ${name}(\``)
+  const body = source.split('\n')[open + 1]
+  if (body === undefined || body === '@end') throw new Error(`_common.mds: ${name} has an empty body`)
+  return body.replace(/\\([{}])/g, '$1')
+}
+
+/** Named collector: the one line of a gather reference that opens with `prefix`, or null. */
+export function collectGatherStep(text: string, prefix: string): string | null {
+  const lines = text.split('\n').filter(line => line.startsWith(prefix))
+  return lines.length === 1 ? lines[0] : null
+}
+
+/**
+ * Named collector: the fixed fragments of the step-6 define — its body split on
+ * the two parameters — that a provider's step 6 does NOT carry, in order.
+ */
+export function collectMissingStep6Fragments(step: string, defineLine: string): string[] {
+  const fragments = defineLine.split(/\{(?:arm|args)\}/).filter(f => f !== '')
+  const missing: string[] = []
+  let from = 0
+  for (const fragment of fragments) {
+    const at = step.indexOf(fragment, from)
+    if (at === -1) missing.push(fragment)
+    else from = at + fragment.length
+  }
+  return missing
+}
+
+const STEP_1A = '1a. **Last release tag.**'
+const STEP_6 = '6. **Per-commit trace map.**'
+
+/** Each provider's own step-6 arguments: its grammar, and GitHub's traced SHAs. */
+const STEP_6_ARGS: Readonly<Record<(typeof PROVIDERS)[number], string>> = {
+  github: 'map --from {last_tag} --grammar github --traced-file "$T"; echo "exit=$?"',
+  jira: 'map --from {last_tag} --grammar jira --key {KEY}; echo "exit=$?"',
+  linear: 'map --from {last_tag} --grammar linear --key {KEY}; echo "exit=$?"',
+}
+
+describe('#364: steps 1a and 6 are _common.mds text in every gather reference (AC-5)', () => {
+  it('step 1a is the define\'s line, byte-identical in all three providers', () => {
+    const define = commonDefineLine('last_release_tag_step')
+    expect(define.startsWith(STEP_1A), 'the define must open with its step label').toBe(true)
+    for (const p of PROVIDERS) {
+      expect(collectGatherStep(gatherRef(p), STEP_1A), `${p}: step 1a`).toBe(define)
+    }
+  })
+
+  it('step 1a sits before step 3a, and step 6 is the last step', () => {
+    for (const p of PROVIDERS) {
+      const lines = gatherRef(p).split('\n')
+      const a = lines.findIndex(l => l.startsWith(STEP_1A))
+      const k = lines.findIndex(l => l.startsWith('3a. '))
+      const six = lines.findIndex(l => l.startsWith(STEP_6))
+      expect(a, `${p}: 1a before 3a`).toBeGreaterThan(-1)
+      expect(a, `${p}: 1a before 3a`).toBeLessThan(k)
+      expect(lines.slice(six + 1).filter(l => l.trim() !== ''), `${p}: nothing follows step 6`).toEqual([])
+    }
+  })
+
+  it('step 6 carries every fixed fragment of the define, in order, with this provider\'s arguments', () => {
+    const define = commonDefineLine('trace_map_step')
+    expect(define.split(/\{(?:arm|args)\}/).length, 'the define must take both parameters').toBe(3)
+    for (const p of PROVIDERS) {
+      const step = collectGatherStep(gatherRef(p), STEP_6)
+      expect(step, `${p}: exactly one step 6`).not.toBeNull()
+      expect(collectMissingStep6Fragments(step!, define), `${p}: step 6 drifted from _common.mds`).toEqual([])
+      expect(step, `${p}: its own grammar`).toContain(STEP_6_ARGS[p])
+    }
+  })
+
+  it('GitHub passes the SHAs step 4 traced; the keyed providers skip the run without a key', () => {
+    const github = collectGatherStep(gatherRef('github'), STEP_6)!
+    expect(github).toContain('`trap \'rm -- "$T"\' EXIT; T="$(mktemp)"`')
+    expect(github, 'a squash PR traces through its merge commit or its subject').toContain('its `mergeCommit.oid`, or a subject naming it')
+    for (const p of ['jira', 'linear'] as const) {
+      expect(collectGatherStep(gatherRef(p), STEP_6), p).toContain('with none usable, skip the run and take the arm below')
+    }
+  })
+
+  it('known-bad probe: a one-character drift in a provider\'s step 6 is reported', () => {
+    const define = commonDefineLine('trace_map_step')
+    const step = collectGatherStep(gatherRef('jira'), STEP_6)!
+    const drifted = step.replace('bound:hit` ⇒ status', 'bound:hit` => status')
+    expect(drifted, 'the seed must land').not.toBe(step)
+    expect(collectMissingStep6Fragments(drifted, define)).toHaveLength(1)
+    expect(collectGatherStep('1a. **Last release tag.** one\n1a. **Last release tag.** two', STEP_1A), 'two copies are no copy').toBeNull()
+  })
+})
+
+// ---------------------------------------------------------------------------
+// PF-075 — every status a gather reference reports is a value of the domain the
+// agent's Output declares. Jira and Linear reported PARTIAL and TRUNCATED for a
+// year under a three-value declaration; /release classifies by that declaration.
+// ---------------------------------------------------------------------------
+
+/** The status keywords the declared line admits. */
+function declaredStatuses(line: string): string[] {
+  return line.replace('### Status: ', '').split(' | ').map(v => v.split(' ')[0])
+}
+
+/**
+ * D4's item-level count — "report remaining items as `THROTTLED ({n} not
+ * processed)`" — is a report about ITEMS, not the operation's `### Status:`.
+ */
+const ITEM_LEVEL_REPORTS: readonly string[] = ['THROTTLED']
+
+/** The two shapes a reported status takes: after the word `status`, or as a `KEYWORD (reason)` span. */
+const REPORTED_STATUS_RES: readonly RegExp[] = [/\bstatus `([A-Z]+)\b/g, /`([A-Z]{4,}) \(/g]
+
+/** Every status keyword a gather reference reports, in either shape. */
+function reportedStatuses(text: string): string[] {
+  return REPORTED_STATUS_RES.flatMap(re => [...text.matchAll(re)].map(m => m[1]))
+    .filter(s => !ITEM_LEVEL_REPORTS.includes(s))
+}
+
+/**
+ * Named collector: status keywords a gather reference reports that the declared
+ * domain does not admit.
+ *
+ * NOT covered: a bare keyword in another verb shape ("return `COMPLETE`"), and
+ * the item-level `THROTTLED` count, which is not the operation's status.
+ */
+export function collectUndeclaredStatuses(text: string, declared: readonly string[]): string[] {
+  return [...new Set(reportedStatuses(text).filter(s => !declared.includes(s)))]
+}
+
+describe('PF-075: the gather references report only declared statuses', () => {
+  const declared = declaredStatuses(GATHER_STATUS_LINE)
+
+  it('the declared domain is the five values, and the agent carries it', () => {
+    expect(declared).toEqual(['READY', 'PARTIAL', 'TRUNCATED', 'DEGRADED', 'INDETERMINATE'])
+    expect(gatherSection()).toContain(GATHER_STATUS_LINE)
+  })
+
+  it('every reported status is declared, and each provider reports at least one', () => {
+    for (const p of PROVIDERS) {
+      const text = gatherRef(p)
+      expect(reportedStatuses(text).length, `${p}: no reported status was read`).toBeGreaterThan(0)
+      expect(collectUndeclaredStatuses(text, declared), p).toEqual([])
+    }
+  })
+
+  it('known-bad probe: an undeclared status is reported, a declared one is not', () => {
+    expect(collectUndeclaredStatuses('report status `COMPLETE (all good)`.', declared)).toEqual(['COMPLETE'])
+    expect(collectUndeclaredStatuses('Report `PARTIAL ({n} DEGRADED)` whenever', declared)).toEqual([])
+    // The pre-#364 three-value declaration would not admit what Jira reports.
+    expect(collectUndeclaredStatuses(gatherRef('jira'), ['READY', 'DEGRADED', 'INDETERMINATE']).sort())
+      .toEqual(['PARTIAL', 'TRUNCATED'])
+  })
+})
+
+// ---------------------------------------------------------------------------
+// `--limit` on every `gh pr list` — widened from the GitHub gather reference to
+// the compiled agent, every generated reference and release.md (#364).
+// ---------------------------------------------------------------------------
+
+/**
+ * Named collector: `gh pr list` INVOCATIONS with no `--limit N` in their own code
+ * span (or line, outside a span).
+ *
+ * A span holding only the name — `` `gh pr list` `` — names the command and is
+ * not an invocation: git.md's learn-conventions degradation clause speaks of "the
+ * `gh pr list` scan" whose invocation, bounded, lives in its reference.
+ *
+ * NOT covered: an invocation split across a backslash continuation, a `--limit`
+ * passed through a variable, and files outside the corpus below (hand-authored
+ * skill references and the other commands).
+ */
+export function collectUnboundedInvocations(text: string): string[] {
+  const out: string[] = []
+  for (const line of text.split('\n')) {
+    for (const m of line.matchAll(/gh pr list\b/g)) {
+      const at = m.index ?? 0
+      if (line[at - 1] === '`' && line[at + 'gh pr list'.length] === '`') continue
+      const close = line.indexOf('`', at)
+      const invocation = line.slice(at, close === -1 ? line.length : close)
+      if (!/--limit \d+/.test(invocation)) out.push(invocation)
+    }
+  }
+  return out
+}
+
+/**
+ * Invocations the corpus carries without `--limit`, each with its reason — the
+ * rule and its exemptions are one authority (PF-067). Every entry must still be
+ * emitted, so an exemption cannot outlive the line it excuses.
+ */
+const KNOWN_UNBOUNDED_INVOCATIONS: ReadonlyArray<{ readonly file: string; readonly invocation: string; readonly why: string }> = [
+  {
+    file: 'skills/git/references/pr/ensure-pr-ready.md',
+    invocation: 'gh pr list --head {branch} --state open',
+    why:
+      'the open-PR lookup for one head branch, in PR-host mechanics that #364 does not touch (its ' +
+      'budget prices no pr/ file). gh caps an unflagged listing at 30, and a head branch has at ' +
+      'most one open PR per base; adding `--limit` there is recorded as a follow-up',
+  },
+]
+
+describe('#364: `--limit` on every `gh pr list` in the agent, the references and release.md', () => {
+  const distRoot = path.join(ROOT, 'dist')
+  const corpus = [
+    { file: 'agents/git.md', content: resolveAgentSource('git').content },
+    ...walkFiles(REFS_DIR, f => f.endsWith('.md')).map(f => ({
+      file: path.relative(distRoot, f).split(path.sep).join('/'),
+      content: readFileSync(f, 'utf-8'),
+    })),
+    { file: 'commands/release.md', content: requireDistFile('release.md') },
+  ]
+
+  it('the corpus reaches each class, and invocations are found in it', () => {
+    const files = corpus.map(c => c.file)
+    for (const sentinel of [
+      'agents/git.md',
+      'commands/release.md',
+      'skills/git/references/learn-conventions.md',
+      'skills/git/references/tracker/github/gather-release-evidence.md',
+      'skills/git/references/pr/ensure-pr-ready.md',
+    ]) {
+      expect(files, `sentinel ${sentinel} was not read`).toContain(sentinel)
+    }
+    const invocations = corpus.flatMap(c => c.content.split('\n').filter(l => /gh pr list\b/.test(l)))
+    expect(invocations.length, 'fewer `gh pr list` lines than the tree carries').toBeGreaterThanOrEqual(4)
+  })
+
+  it('every invocation carries `--limit N`, or is a named exemption', () => {
+    const offenders = corpus.flatMap(({ file, content }) =>
+      collectUnboundedInvocations(content)
+        .filter(inv => !KNOWN_UNBOUNDED_INVOCATIONS.some(e => e.file === file && e.invocation === inv))
+        .map(inv => `${file}: ${inv}`))
+    expect(offenders).toEqual([])
+  })
+
+  it('every exemption is still emitted, and has a reason', () => {
+    for (const e of KNOWN_UNBOUNDED_INVOCATIONS) {
+      const entry = corpus.find(c => c.file === e.file)
+      expect(entry, `${e.file} is not in the corpus`).toBeDefined()
+      expect(collectUnboundedInvocations(entry!.content), `${e.file}: the exemption excuses nothing`).toContain(e.invocation)
+      expect(e.why.length).toBeGreaterThan(40)
+    }
+  })
+
+  it('known-bad probes: an unbounded invocation in release.md is reported; the bare name is not', () => {
+    const release = corpus.find(c => c.file === 'commands/release.md')!.content
+    expect(collectUnboundedInvocations(`${release}\n- list merged work: \`gh pr list --state merged --json number\`\n`))
+      .toEqual(['gh pr list --state merged --json number'])
+    expect(collectUnboundedInvocations('```bash\ngh pr list\n```')).toEqual(['gh pr list'])
+    expect(collectUnboundedInvocations('Any 4xx on the `gh pr list` scan → skip the signal.')).toEqual([])
+    expect(collectUnboundedInvocations('`gh pr list --state merged --limit 30 --json title`')).toEqual([])
   })
 })

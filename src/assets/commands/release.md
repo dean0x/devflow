@@ -68,7 +68,7 @@ Accept the output only when it is exactly two lines: `exit=0` last and, before i
 
 Set `EVIDENCE_POLICY`, `ISSUE_REQUIRED`, `APPLY_CONVENTIONS` and `REQUIRE_NON_AUTHOR_APPROVAL` from the accepted line. Pass agents only the three mechanism inputs, never `EVIDENCE_POLICY`. Report `Evidence policy: {EVIDENCE_POLICY} (source: {SOURCE})`, plus any `WARN` tokens as advisory, once in the final report.
 
-Reuse this result for all subsequent phases: it decides whether release evidence is gathered (step 2b), passed to the release notes (step 4), and back-linked to shipped issues (step 4b).
+Reuse this result for all subsequent phases: it decides whether a real release gathers and traces its evidence (Phases 4–5), passes it to the release notes (step 4), and back-links shipped issues and associates them with the release (steps 4b–4c).
 
 ### Phase 2: Detect Release Process (First Run Only)
 
@@ -100,13 +100,13 @@ Lazy-init `.release/` directory. Create `.release/.gitignore` with `.progress.js
 
 ### Phase 4: Pre-release Checks
 
-**Produces:** PRE_RELEASE_RESULT, VERSION
-**Requires:** RELEASE_CONFIG
+**Produces:** PRE_RELEASE_RESULT, VERSION, RELEASE_EVIDENCE
+**Requires:** RELEASE_CONFIG, EVIDENCE_POLICY
 
 **Version determination** (in order):
 1. Explicit version from args → use directly
 2. Bump type from args → compute from current version
-3. `semver-auto` strategy → analyze commits since last tag
+3. `semver-auto` strategy → analyze commits since the last release tag: the tag that `node "${DEVFLOW_DIR:-$HOME/.devflow}/scripts/release-trace.cjs" last-tag`, run from the repository root, prints as `LAST_TAG <tag>` (`LAST_TAG none` ⇒ the initial commit) — never `git describe`, which can return a local marker tag
 4. None → use AskUserQuestion
 
 Pre-release checks:
@@ -116,14 +116,45 @@ Pre-release checks:
 
 Spawn `Agent(subagent_type="Validate")` for build + test.
 
-Write `.release/.progress.json` checkpoint.
+**Gather release evidence** — under either policy when `DRY_RUN` is true, otherwise only when `EVIDENCE_POLICY` is `required`: spawn `Agent(subagent_type="Git")` with `gather-release-evidence` operation; pass `WORKTREE_PATH` if provided. Keep `COMMIT_LIST`, `SHIPPED_ISSUES`, `### TRACE_MAP` and `### Status:` as RELEASE_EVIDENCE. The Git agent applies its own bounds (≤100 commits, ≤50 issues, 500 traced commits) and degrades gracefully per D4.
 
-`--dry-run`: report what would happen and **halt after this phase**.
+Unless `DRY_RUN` is true, write `.release/.progress.json` checkpoint, with RELEASE_EVIDENCE when it was gathered — a dry run leaves nothing to resume.
+
+`--dry-run`: report what would happen and, when evidence was gathered, the Phase 5 traceability arms, the untraced list and the exempt counts — never asking — then **halt after this phase**.
 
 ### Phase 5: Build Release Plan
 
-**Produces:** RELEASE_PLAN
-**Requires:** PRE_RELEASE_RESULT, RELEASE_CONFIG, VERSION
+**Produces:** RELEASE_PLAN, TRACEABILITY_EXCEPTIONS
+**Requires:** PRE_RELEASE_RESULT, RELEASE_CONFIG, VERSION, RELEASE_EVIDENCE
+
+**Traceability** (only when `EVIDENCE_POLICY` is `required`), before the confirm below. Classify RELEASE_EVIDENCE by its `### Status:` value — `READY`, `PARTIAL`, `TRUNCATED`, `DEGRADED` or `INDETERMINATE` — and by the first `### TRACE_MAP` line, `TRACE from:<ref> scanned:<n> traced:<n> untraced:<n> exempt:<n> unmatched:<n> bound:<ok|hit>`. Let *u* be its `untraced` count, and re-check traced + untraced + exempt = scanned yourself. Every arm that matches applies:
+
+1. **Coverage unknown** — no gather ran, its output is missing or unparseable, there is no `TRACE` line, the sum does not hold, `bound:hit`, status `INDETERMINATE`, or a status that is none of the five.
+2. **Untraced** — *u* > 0.
+3. **Partial** — status `PARTIAL`, `TRUNCATED` or `DEGRADED`: warn and continue; this arm never blocks on its own. A tracker with no closing-reference capability always lands here.
+4. **Clean** — status `READY` and *u* = 0, and no arm above.
+
+Arm 1 or 2 ⇒ first show the attestation list, copied from `### TRACE_MAP`: every listed `untraced` line's `<sha12>` and author (≤100), the `…and <n> more` line that closes the untraced list when there is one, and each exempt kind's count with every listed exempt SHA — the commits **Record** attests to, and those the `Exempt` line prints.
+
+Arm 1 or 2 ⇒ ask once, via AskUserQuestion: "{u} untraced commits{, coverage unknown: {cause}}. Record self-attested traceability exceptions, or halt?", with exactly two options:
+- **Record** — ask for the reason in the user's own words; if it renders empty, ask once more, then halt. Compose `TRACEABILITY_EXCEPTIONS` below and add it to `.release/.progress.json`.
+- **Halt** — stop now: nothing has been committed, tagged or published.
+
+`TRACEABILITY_EXCEPTIONS` is this block, and no commit subject is ever written into it:
+
+```markdown
+## Traceability exceptions
+- `untraced` <sha12> (<author>) self-attested by @<login> at <utc>: <reason>
+- `coverage` <bound-hit|trace-unavailable|gather-indeterminate|untraced-beyond-list> self-attested by @<login> at <utc>: <reason>
+Exempt (not attested): release <n> · revert <n> · bot <n> — <sha12>, …
+```
+
+- One `untraced` line per listed untraced commit (≤100), its `<sha12>` and `<author>` copied from that `### TRACE_MAP` line. One `coverage` line per arm-1 cause — `bound-hit` for `bound:hit`, `gather-indeterminate` for status `INDETERMINATE` or none of the five, `trace-unavailable` for any other — plus `untraced-beyond-list` when an `…and <n> more` line closes the untraced list. The `Exempt` line counts each exempt kind (its listed lines plus its `…and <n> more`) and names every listed exempt SHA.
+- `@<login>` is `@` followed by the output of `gh api user --jq .login` when that output matches `^[A-Za-z0-9][A-Za-z0-9-]{0,38}$`. On any other output, or a failed call, it is `(login unavailable)` instead, with no `@`.
+- `<utc>` is the output of `date -u +%Y-%m-%dT%H:%M:%SZ`.
+- `<reason>` is the user's own words, made inert: replace every character outside printable ASCII (newlines and tabs included) with a space, remove every `<`, `>`, `` ` ``, `[`, `]`, `\`, `/`, `#`, `@`, `&` and `$`, collapse runs of spaces, trim, keep the first 200 characters, and trim again. A reason that is empty after this is no reason.
+
+No ask, but the trace lists an exempt commit ⇒ `TRACEABILITY_EXCEPTIONS` is the heading and the `Exempt` line alone, added to `.release/.progress.json` the same way: an exemption is self-asserted, so it is printed, never hidden.
 
 Build ordered execution plan from RELEASE_CONFIG. For monorepo: respect dependency ordering, present package selection to user.
 
@@ -135,17 +166,19 @@ Confirm with user via AskUserQuestion before executing:
 ### Phase 6: Execute Release
 
 **Produces:** RELEASE_RESULT
-**Requires:** RELEASE_PLAN, VERSION, EVIDENCE_POLICY
+**Requires:** RELEASE_PLAN, VERSION, EVIDENCE_POLICY, RELEASE_EVIDENCE, TRACEABILITY_EXCEPTIONS
 
 Sequential execution with progress checkpoints:
 1. **Version bumps** — write new version to configured files
 2. **Changelog update** — move Unreleased section to versioned entry (if configured)
-2b. **Gather release evidence** (only when `EVIDENCE_POLICY` is `required`) — spawn `Agent(subagent_type="Git")` with `gather-release-evidence` operation; pass `WORKTREE_PATH` if provided. Consume the returned `COMMIT_LIST` and `SHIPPED_ISSUES` for use in steps 4 and 4b. The Git agent applies bounds (≤100 commits, ≤50 issues) and degrades gracefully per D4.
 3. **Release commit** — `chore(release): v{VERSION}` (conventional commit)
-4. **Tag and GitHub Release** — spawn `Agent(subagent_type="Git")` with `create-release` operation (the agent reads `.devflow/conventions.md` for tag format and release title conventions; compliance defaults when absent); only when `EVIDENCE_POLICY` is `required`, also pass `COMMIT_LIST` and `SHIPPED_ISSUES` as inputs so the agent includes them in the release notes body.
+4. **Tag and GitHub Release** — spawn `Agent(subagent_type="Git")` with `create-release` operation (the agent reads `.devflow/conventions.md` for tag format and release title conventions; compliance defaults when absent); only when `EVIDENCE_POLICY` is `required`, also pass `COMMIT_LIST` and `SHIPPED_ISSUES` from RELEASE_EVIDENCE, and `TRACEABILITY_EXCEPTIONS` when composed (Record, or the no-ask exempt rule), as inputs so the agent includes them in the release notes body.
 4b. **Back-link shipped issues** (only when `EVIDENCE_POLICY` is `required`) — spawn `Agent(subagent_type="Git")` with `backlink-shipped-issues` operation, passing `VERSION` and `SHIPPED_ISSUES`; posts a marker-deduped comment on each issue (bounds and throttle enforced by the operation); degrade gracefully (D4) on any API failure — never block the release
+4c. **Associate shipped issues with the release** (only when `EVIDENCE_POLICY` is `required` and `SHIPPED_ISSUES` is non-empty) — spawn `Agent(subagent_type="Git")` with `associate-release` operation, passing `VERSION` and `SHIPPED_ISSUES`; it adds each issue to the release's tracker marker and never replaces another; degrade gracefully (D4) — never block the release
 5. **Publish** — CI-driven (report) or manual (provide instructions)
 6. **Post-release steps** — version bump to next dev
+
+**Resume:** a checkpoint missing the RELEASE_EVIDENCE its Phase 4 gate called for is gathered again, with Phase 5's traceability step re-run, only before step 4; after step 4, report `evidence lost on resume` and continue — never block.
 
 Delete `.release/.progress.json` on success.
 
@@ -163,7 +196,7 @@ If the orchestrator receives a `WORKTREE_PATH` context, pass it through to all s
 
 On completion:
 - Git tag created: `v{VERSION}` (or configured tag format)
-- GitHub Release created with release notes
+- GitHub Release created with release notes — `## Traceability exceptions` last, when composed (Record, or the no-ask exempt rule)
 - Changelog updated (if configured)
 - Version files bumped
 - `.release/RELEASE-FLOW.md` created (first run only)
@@ -187,13 +220,15 @@ On completion:
 │
 ├─ Phase 4: Pre-release Checks
 │  ├─ Validate agent (build + test)
+│  ├─ Git agent: gather release evidence + trace map (dry run, or evidence policy required)
 │  └─ Write progress checkpoint
 │
 ├─ Phase 5: Build Release Plan
+│  ├─ Traceability: classify the trace map; record exceptions or halt (evidence policy required)
 │  └─ Confirm with user before executing
 │
 ├─ Phase 6: Execute Release
-│  ├─ Version bumps → Changelog → Commit → Git agent (tag + release) → Publish → Post-release
+│  ├─ Version bumps → Changelog → Commit → Git agent (tag + release) → Back-link → Associate → Publish → Post-release
 │  └─ Progress checkpoints between each step
 │
 └─ Phase 7: Suggest Improvements
@@ -211,6 +246,8 @@ On completion:
 
 - Validate agent fails (build/test): halt, report failures, do not proceed
 - User declines release plan: halt gracefully
+- User halts at the traceability question: stop — nothing has been committed, tagged or published
+- Git agent reports DEGRADED while gathering, back-linking or associating: warn and continue — never halt the release
 - Git agent fails (tag/release): halt, report error, suggest manual steps
 - Mid-release failure: progress checkpoint enables resume on next run
 - Version file not found: halt, report which file is missing, ask user to update RELEASE-FLOW.md

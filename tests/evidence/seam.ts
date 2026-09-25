@@ -15,3 +15,6 @@ export const PR_EVIDENCE_SCRIPT = path.join(ROOT, 'src', 'assets', 'scripts', 'p
 
 /** The I/O half: gathers the facts through gh and git, feeds `classify`, prints one EVIDENCE line. */
 export const VERIFY_EVIDENCE_SCRIPT = path.join(ROOT, 'src', 'assets', 'scripts', 'verify-evidence.cjs')
+
+/** Release traceability plumbing: the last release tag and the per-commit trace map (git only). */
+export const RELEASE_TRACE_SCRIPT = path.join(ROOT, 'src', 'assets', 'scripts', 'release-trace.cjs')

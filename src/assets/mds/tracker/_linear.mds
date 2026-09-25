@@ -238,10 +238,11 @@ Inside step 5 (compose release notes):
 
 Load when the resolved tracker provider is `linear` and the operation is `gather-release-evidence`.
 
-**Mechanics held here:** resolving which issues a commit range closes, and the honest reporting of what this provider cannot resolve.
+**Mechanics held here:** the last release tag, resolving which issues a commit range closes, the honest reporting of what this provider cannot resolve, and the trace map.
 
 ### Process
 
+{common.last_release_tag_step()}
 {common.closing_keyword_rule()}
 4. Resolve which issues the commit range closes:
    - **There is no closing-reference capability on this provider.** Emit `TRACEABILITY: DEGRADED (unsupported by linear)` once for the whole step and fall back to the commit-message set alone — the references parsed out of the candidate references the agent extracted from the range's commit messages. The magic words this provider recognises in a pull-request body are the SERVER's own behaviour and are not a capability this operation can read back: a body that closed an issue leaves no signal here, which is precisely why this step degrades instead of guessing.
@@ -250,6 +251,7 @@ Load when the resolved tracker provider is `linear` and the operation is `gather
    - Confirm the survivors exist with **one** call to the *batch fetch* capability over the whole set, bounded `≤50` with `TRUNCATED (\{n\} not processed)` for the remainder — **one query, never a per-item loop**.
    - **Because the closing-reference step degraded, the enrichment is incomplete by construction: never report the status as `COMPLETE`.** Report `PARTIAL (\{n\} DEGRADED)` whenever any step above degraded, and `TRUNCATED (\{n\} not processed)` whenever the bound was reached. A release that reads `COMPLETE` over an unresolvable evidence set is the one report nobody re-checks.
    - On a tool error for an individual item → DEGRADED for that item, continue. On backpressure → follow `### Provider signals (Linear)` in this operation's `backlink-shipped-issues` reference, which is where this provider's one signal is stated.
+{common.trace_map_step("--grammar linear --key {KEY}", "`{KEY}` is the resolved team key; with none usable, skip the run and take the arm below. ")}
 @end
 
 @define backlink_shipped_issues():
@@ -298,6 +300,27 @@ For each issue the hoist did not answer, within the operation's `≤50` bound:
 
 {mcp.posting_gate_head("the write")}
 4. Post through the *add comment* capability with arguments (issue reference, body: \{SCRUBBED_BODY\}).
+@end
+
+@define associate_release():
+## Operation: associate-release
+
+Load when the resolved tracker provider is `linear` and the operation is `associate-release`.
+
+**Mechanics held here:** the release label — reused on an exact name, else created — and the read-modify-write that adds it to each item's labels without removing any other.
+
+### Process
+
+**Setup (once, before any item):** resolve the capability set per the tool-call contract; the team key is the preamble's.
+
+**Ref pre-flight (the always-loaded entry gate, instantiated for this provider).** {common.ref_preflight_entry("linear", "**either** anchored form — the team-key form `^[A-Z][A-Z0-9]{0,9}-[1-9][0-9]{0,8}$` or the internal-id form `^[0-9A-F]{8}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{12}$`", "**ASCII-upper-normalise every entry first.** ", ", and never joined into one alternation, which would anchor one branch only")} {mcp.ref_preflight_tail()}
+
+1. **The label, once:** through the *release versions or labels* capability, list the labels named exactly `v\{BARE_VERSION\}` that the resolved team can apply. Exactly one ⇒ reuse it, `existing`; none ⇒ create it in that team, `created`; two or more ⇒ `TRACEABILITY: DEGRADED (ambiguous release marker)`. A failed read or create ⇒ `TRACEABILITY: DEGRADED (release marker unavailable)`. Either DEGRADED makes no item call.
+2. **Read once:** one *batch fetch* over the admitted references, bounded `≤50`, requesting labels. A reference it returns nothing for ⇒ that item DEGRADED; one already holding the label ⇒ Already set.
+3. **Add**, per item, 1s apart, through the *edit issue fields* capability. The stock issue update REPLACES the label set, so prefer an additive operation; otherwise write the item's current labels ∪ the release label, and only when step 2 returned them whole — else that item DEGRADED, with no write. Another release label on the item stays; the item counts as Added.
+4. On backpressure, follow `### Provider signals (Linear)` in this operation's `backlink-shipped-issues` reference.
+
+**Residual race, not closed:** the union write drops a label another writer adds between steps 2 and 3; the additive operation has no such window.
 @end
 
 @define ensure_traceable_issue():
@@ -412,6 +435,9 @@ Load when the resolved tracker provider is `linear` and the operation is `ensure
 
 <!-- op: backlink-shipped-issues -->
 {backlink_shipped_issues()}
+
+<!-- op: associate-release -->
+{associate_release()}
 
 <!-- op: ensure-traceable-issue -->
 {ensure_traceable_issue()}

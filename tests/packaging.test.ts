@@ -596,7 +596,7 @@ describe('Guard 6 (tarball contents): npm pack --dry-run output excludes source 
     expect(
       manifest.length,
       'a manifest short enough to enumerate by hand makes this assertion vacuous',
-    ).toBeGreaterThanOrEqual(44);
+    ).toBeGreaterThanOrEqual(47);
 
     expect(
       collectMissingPackedReferences(files, manifest),
