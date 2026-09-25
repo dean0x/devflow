@@ -2,11 +2,14 @@
  * AC-17 — `backlink-shipped-issues` is policy-gated at its ONE call site.
  *
  * The operation writes to every issue a release shipped, so whether it runs at
- * all is a policy question and not a mechanics one. `/release` decides: step 4b
- * spawns it only when the resolved evidence policy is `required`, and step 2b
- * gates the evidence-gathering that feeds it on the same condition (#362 moved
- * both from the installed compliance skill to `EVIDENCE_POLICY`). Nothing else
- * may decide, and that is the property with no executed evidence before this file.
+ * all is a policy question and not a mechanics one. `/release` decides: Phase 6
+ * step 4b spawns it only when the resolved evidence policy is `required`, and
+ * Phase 4's **Gather release evidence** step gates the evidence-gathering that
+ * feeds it on the same condition (#362 moved both from the installed compliance
+ * skill to `EVIDENCE_POLICY`; #364 moved the gather from Phase 6 to Phase 4 and
+ * let a `--dry-run` gather under either policy, which never reaches step 4b).
+ * Nothing else may decide, and that is the property with no executed evidence
+ * before this file.
  *
  * WHY A MATRIX AND NOT A PRESENCE CHECK. "The gate is stated" is cleared by the
  * caller alone. The failure this guards is the other half: a provider's
@@ -50,6 +53,14 @@ const OP = 'backlink-shipped-issues';
  * catch: the step would read as gated to a human and name a variable nothing sets.
  */
 const GATE = 'only when `EVIDENCE_POLICY` is `required`';
+
+/**
+ * The gather step's own condition (#364): a `--dry-run` gathers under either
+ * policy — it reports the trace and halts after Phase 4, so it never reaches the
+ * back-link — and a real release gathers under the same GATE as the back-link.
+ * Asserted to CONTAIN `GATE`, so the pair cannot diverge on the real-release arm.
+ */
+const GATHER_GATE = 'under either policy when `DRY_RUN` is true, otherwise only when `EVIDENCE_POLICY` is `required`';
 
 /**
  * Named collector: lines of an operation's mechanics that name the evidence
@@ -161,16 +172,24 @@ describe(`AC-17: ${OP} is gated by the caller and by nobody else`, () => {
   });
 
   it('the evidence it consumes is gated on the same condition, so the pair cannot diverge', () => {
-    const evidenceStep = release
+    expect(GATHER_GATE.includes(GATE), 'the gather condition must hold the back-link GATE verbatim').toBe(true);
+    const evidenceSteps = release
       .split('\n')
-      .find(line => line.includes('gather-release-evidence') && line.includes('Agent(subagent_type="Git")'));
+      .filter(line => line.includes('gather-release-evidence') && line.includes('Agent(subagent_type="Git")'));
 
-    expect(evidenceStep, 'no gather-release-evidence spawn in the release command').toBeDefined();
+    expect(evidenceSteps, 'exactly one gather-release-evidence spawn in the release command').toHaveLength(1);
     expect(
-      evidenceStep,
+      evidenceSteps[0],
       'SHIPPED_ISSUES is what the back-link posts against. Gating the poster while ungating its ' +
-      'input would run the enrichment for users who never receive the comment it feeds',
-    ).toContain(GATE);
+      'input would run the enrichment for users who never receive the comment it feeds; only a ' +
+      '--dry-run, which halts before the back-link, may gather under either policy',
+    ).toContain(GATHER_GATE);
+  });
+
+  it('known-bad probe: a gather line that dropped the real-release arm is not GATHER_GATE', () => {
+    const ungated = '**Gather release evidence** — under either policy: spawn `Agent(subagent_type="Git")` with `gather-release-evidence` operation.';
+    expect(ungated).not.toContain(GATHER_GATE);
+    expect(ungated).not.toContain(GATE);
   });
 
   for (const provider of PROVIDERS) {
