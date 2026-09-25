@@ -19,6 +19,10 @@
  *     is DEGRADED with no write. The union write's own race window is written
  *     down, as GitHub's is.
  *
+ * The Jira and Linear mechanics select by two capabilities — *release versions or
+ * labels* and *edit issue fields* — so both must be rows of the built tool-call
+ * contract, which #364 held at its pre-existing size (TP-12).
+ *
  * Nothing is posted: there is no body, so D11 does not apply and no posting verb
  * may appear. The caller gates the spawn (`tests/tracker/compliance-gate.test.ts`),
  * so the evidence policy is never named here either.
@@ -54,6 +58,17 @@ function readReference(provider: ProviderToken): string {
 function contractSection(): string {
   const git = resolveAgentSource('git');
   return extractOpSectionFromCorpus([{ path: git.path, content: git.content }], OP, { mode: 'sole' }).content;
+}
+
+/** The built tool-call contract, which every Jira and Linear spawn loads. */
+const MCP_CONTRACT_REL = 'tracker/_mcp.md';
+
+function readContract(): string {
+  const abs = path.join(compiledSkillRefsDir(), ...MCP_CONTRACT_REL.split('/'));
+  if (!existsSync(abs)) {
+    throw new Error(`${MCP_CONTRACT_REL} is absent at ${abs} — run \`npm run build\` first (this guard reads the compiled contract)`);
+  }
+  return readFileSync(abs, 'utf-8');
 }
 
 // ---------------------------------------------------------------------------
@@ -321,6 +336,55 @@ export function collectMarkerReasonDrift(provider: ProviderToken, body: string):
 }
 
 // ---------------------------------------------------------------------------
+// The tool-call contract — the two capability rows and the size they fit in
+// ---------------------------------------------------------------------------
+
+/** The capabilities this op's Jira and Linear mechanics select by, both added to the contract by #364. */
+const OP_CAPABILITIES = ['release versions or labels', 'edit issue fields'] as const;
+
+/**
+ * The tool-call contract's ceiling, in characters (`.length`, the byte-budget unit).
+ *
+ * #364's design holds `_mcp.md` at ≤ 7,963 — net zero: the two rows (+146 ch) were
+ * funded by condensing unpinned contract prose, and no define was added. Measured
+ * 7,961 after c6f3fbda. Every Jira and Linear spawn loads this file, so its growth
+ * lands in both tool-call loaded sets.
+ */
+const MCP_CONTRACT_MAX_CHARS = 7_963;
+
+/**
+ * Named collector: the contract table's rows, capability → its `Unavailable ⇒` cell.
+ * The row parse is `collectContractCapabilities`'s (tests/seams/tracker-dedup-ladder.test.ts):
+ * a `| ` line, first cell, header and separator skipped — kept local so importing
+ * that test file does not register its arms a second time here.
+ */
+export function collectContractRows(contract: string): Map<string, string> {
+  const rows = new Map<string, string>();
+  for (const line of contract.split('\n')) {
+    if (!/^\| /.test(line)) continue;
+    const [, capability = '', unavailable = ''] = line.split('|').map(cell => cell.trim());
+    if (capability === '' || capability === 'Capability' || /^-+$/.test(capability)) continue;
+    rows.set(capability, unavailable);
+  }
+  return rows;
+}
+
+/** Named collector: what the contract owes this op — each row, degrading by its own name — and its size. */
+export function collectContractDefects(contract: string): string[] {
+  const rows = collectContractRows(contract);
+  const defects = OP_CAPABILITIES.flatMap(capability => {
+    const unavailable = rows.get(capability);
+    if (unavailable === undefined) return [`missing row "${capability}"`];
+    const expected = `\`no tracker tool for ${capability}\``;
+    return unavailable === expected ? [] : [`row "${capability}" does not degrade as ${expected}`];
+  });
+  if (contract.length > MCP_CONTRACT_MAX_CHARS) {
+    defects.push(`${MCP_CONTRACT_REL} is ${contract.length} ch, over ${MCP_CONTRACT_MAX_CHARS}`);
+  }
+  return defects;
+}
+
+// ---------------------------------------------------------------------------
 // The arms
 // ---------------------------------------------------------------------------
 
@@ -364,6 +428,28 @@ describe('associate-release: the contract in git.md', () => {
 
   it('posts nothing, so the contract section names no posting shape', () => {
     expect(collectPostingShapes(section)).toEqual([]);
+  });
+});
+
+describe('associate-release: the tool-call contract defines both capabilities within its size (TP-12, AC-12)', () => {
+  it('both rows are in the built contract table, each degrading by name, and _mcp.md is ≤ 7,963 ch', () => {
+    const contract = readContract();
+    expect(collectContractRows(contract).size, 'the collector parsed no more rows than it checks — it reads nothing')
+      .toBeGreaterThan(OP_CAPABILITIES.length);
+    expect(collectContractDefects(contract)).toEqual([]);
+  });
+
+  it('known-bad probes: a dropped row, a renamed reason and a contract over its ceiling are reported', () => {
+    const contract = readContract();
+    const noEdit = contract.split('\n').filter(line => !line.startsWith('| edit issue fields |')).join('\n');
+    expect(noEdit, 'the seed must land').not.toBe(contract);
+    expect(collectContractDefects(noEdit)).toEqual(['missing row "edit issue fields"']);
+    const renamed = contract.replace('`no tracker tool for release versions or labels`', '`no tracker tool for release markers`');
+    expect(renamed, 'the seed must land').not.toBe(contract);
+    expect(collectContractDefects(renamed))
+      .toEqual(['row "release versions or labels" does not degrade as `no tracker tool for release versions or labels`']);
+    const padded = contract + 'x'.repeat(Math.max(1, MCP_CONTRACT_MAX_CHARS + 1 - contract.length));
+    expect(collectContractDefects(padded)).toEqual([`${MCP_CONTRACT_REL} is ${padded.length} ch, over ${MCP_CONTRACT_MAX_CHARS}`]);
   });
 });
 
