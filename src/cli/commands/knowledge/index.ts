@@ -12,8 +12,8 @@ import { handleList } from './list.js';
 
 export const knowledgeCommand = new Command('knowledge')
   .description('Manage per-feature knowledge bases')
-  .option('--enable', 'Enable per-feature knowledge bases')
-  .option('--disable', 'Disable per-feature knowledge bases')
+  .option('--enable', 'Enable per-feature knowledge bases for this project')
+  .option('--disable', 'Disable per-feature knowledge bases for this project')
   .option('--status', 'Show knowledge base feature status')
   .action(async (options: { enable?: boolean; disable?: boolean; status?: boolean }) => {
     await handleToggle(options);

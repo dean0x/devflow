@@ -46,11 +46,12 @@ If no KBs exist, no KBs are relevant, or `.devflow/features/` is absent, set `FE
 
 Resolve the worktree root using the `devflow:worktree-support` algorithm (use WORKTREE_PATH if provided, otherwise cwd). All paths below are relative to `\{worktree\}`.
 
-**Step 1 — Check the opt-out gate:**
+**Step 1 — Check the opt-out gates (both must allow write-back):**
 
-Read `\{worktree\}/.devflow/config.json`. If the `knowledge` field is `false`, skip write-back entirely — the user has disabled it.
+1. Machine-wide: read `~/.devflow/manifest.json`. If `features.knowledge` is `false`, skip write-back entirely — the user disabled knowledge bases for every project with `devflow init`.
+2. This project: read `\{worktree\}/.devflow/config.json`. If the `knowledge` field is `false`, skip write-back entirely — the user disabled it for this project.
 
-If `.devflow/config.json` does not exist, proceed (default is enabled).
+A missing file or a missing field means that gate allows write-back (default is enabled).
 
 **Step 2 — Evaluate whether write-back is warranted:**
 

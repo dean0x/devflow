@@ -87,26 +87,29 @@ describe('resolveSeedFeatures', () => {
     });
   });
 
-  it('projectConfig present, no manifest → memory/learning/knowledge from config; ambient/hud/rules from defaults', () => {
+  it('projectConfig present, no manifest → memory from config; learning/knowledge/ambient/hud/rules from defaults', () => {
     const config = { memory: false, learning: false, knowledge: false, reviewPublication: 'auto' as const };
     const result = resolveSeedFeatures(null, config);
     expect(result.memory).toBe(false);
-    expect(result.learning).toBe(false);
-    expect(result.knowledge).toBe(false);
+    // D-LEARNING-MASTER-SWITCH: a repo's per-repo false never seeds the
+    // machine-wide switch — a reinstall from that repo must not turn the
+    // feature off in every other repo.
+    expect(result.learning).toBe(FEATURE_DEFAULTS.learning);
+    expect(result.knowledge).toBe(FEATURE_DEFAULTS.knowledge);
     // ambient/hud/rules from FEATURE_DEFAULTS when manifest absent
     expect(result.ambient).toBe(FEATURE_DEFAULTS.ambient);
     expect(result.hud).toBe(FEATURE_DEFAULTS.hud);
     expect(result.rules).toBe(FEATURE_DEFAULTS.rules);
   });
 
-  it('both present → config wins for memory/learning/knowledge; manifest wins for ambient/hud/rules/proxy', () => {
+  it('both present → config wins for memory; manifest wins for learning/knowledge/ambient/hud/rules/proxy', () => {
     const manifest = makeManifest({
       features: {
         ambient: false,
         memory: true, // overridden by config
         hud: false,
-        knowledge: true, // overridden by config
-        learning: true, // overridden by config
+        knowledge: true, // the machine-wide switch — the repo config does not override it
+        learning: true, // the machine-wide switch — the repo config does not override it
         rules: false,
         proxy: true,  // manifest wins for proxy (not config-gated per ADR-001)
         flags: [],
@@ -114,10 +117,11 @@ describe('resolveSeedFeatures', () => {
     });
     const config = { memory: false, learning: false, knowledge: false, reviewPublication: 'auto' as const };
     const result = resolveSeedFeatures(manifest, config);
-    // config wins for memory/learning/knowledge
+    // config wins for memory only
     expect(result.memory).toBe(false);
-    expect(result.learning).toBe(false);
-    expect(result.knowledge).toBe(false);
+    // a per-repo false must not become a machine-wide false on re-init
+    expect(result.learning).toBe(true);
+    expect(result.knowledge).toBe(true);
     // manifest wins for ambient/hud/rules/proxy
     expect(result.ambient).toBe(false);
     expect(result.hud).toBe(false);
@@ -125,13 +129,14 @@ describe('resolveSeedFeatures', () => {
     expect(result.proxy).toBe(true);
   });
 
-  it('config with learning: true overrides manifest learning: false (applies ADR-001)', () => {
+  it('a stale learning:true in the repo config never re-enables a machine-wide learning:false (#378)', () => {
     const manifest = makeManifest({
-      features: { ...makeManifest().features, learning: false },
+      features: { ...makeManifest().features, learning: false, knowledge: false },
     });
     const config = { memory: true, learning: true, knowledge: true, reviewPublication: 'auto' as const };
     const result = resolveSeedFeatures(manifest, config);
-    expect(result.learning).toBe(true);
+    expect(result.learning).toBe(false);
+    expect(result.knowledge).toBe(false);
   });
 });
 

@@ -82,15 +82,22 @@ export interface InitSeed {
 /**
  * Resolve feature booleans for the init seed.
  *
- * - memory / learning / knowledge come from projectConfig WHENEVER present,
- *   independent of whether a manifest exists (covers config-present /
- *   manifest-missing cases such as a fresh project with a prior learning run).
+ * - memory comes from projectConfig WHENEVER present, independent of whether a
+ *   manifest exists (covers config-present / manifest-missing cases).
+ * - learning / knowledge come from manifest.features ONLY; registry defaults
+ *   are used when the manifest is absent. The repo config is never consulted.
  * - ambient / hud / rules come from manifest.features; registry defaults
  *   (all true) are used when the manifest is absent.
  *
- * Applies ADR-001: .devflow/config.json is the source of truth for
- * memory/learning/knowledge; manifest reflects the last install choices for
- * the remaining toggles.
+ * D-LEARNING-MASTER-SWITCH / D-KNOWLEDGE-MASTER-SWITCH (src/core/feature-switch.ts):
+ * the manifest's learning/knowledge values are the machine-wide master switch
+ * init owns, and the repo config is a per-repo narrowing owned by
+ * `devflow learning|knowledge`. Seeding the machine-wide choice from whatever
+ * repo init happens to run in would flip the switch for EVERY repo as a side
+ * effect: a re-init in a repo whose config says `false` would turn the feature
+ * off machine-wide, and a re-init in one holding a stale `true` would silently
+ * re-enable it after the user turned it off. ADR-014's state-aware re-init
+ * preserves the prior MACHINE-WIDE choice, which is the manifest's.
  */
 export function resolveSeedFeatures(
   manifest: ManifestData | null,
@@ -114,16 +121,13 @@ export function resolveSeedFeatures(
   const rawTracker = manifest?.features.tracker ?? FEATURE_DEFAULTS.tracker;
   const tracker = { ...rawTracker };
 
-  // memory/learning/knowledge: projectConfig wins whenever present (ADR-001).
-  // Helper eliminates the repeated projectConfig !== null ternary pattern.
-  const fromConfig = (key: 'memory' | 'knowledge' | 'learning'): boolean =>
-    projectConfig !== null
-      ? projectConfig[key]
-      : (manifest?.features[key] ?? FEATURE_DEFAULTS[key]);
-
-  const memory = fromConfig('memory');
-  const knowledge = fromConfig('knowledge');
-  const learning = fromConfig('learning');
+  // memory: projectConfig wins whenever present.
+  const memory = projectConfig !== null
+    ? projectConfig.memory
+    : (manifest?.features.memory ?? FEATURE_DEFAULTS.memory);
+  // learning/knowledge: the machine-wide switch — manifest only (see docblock).
+  const knowledge = manifest?.features.knowledge ?? FEATURE_DEFAULTS.knowledge;
+  const learning = manifest?.features.learning ?? FEATURE_DEFAULTS.learning;
 
   return { ambient, memory, hud, knowledge, learning, rules, proxy, compliance, tracker };
 }
