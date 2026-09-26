@@ -1390,6 +1390,22 @@ describe('ensure-root-gitignore behavioral', () => {
     expect(fs.existsSync(path.join(tmpDir, '.devflow', '.root-gitignore-configured-v4'))).toBe(false);
   });
 
+  it('a `set -e` caller keeps running after the stamping path and the fast path alike', () => {
+    // capture-prompt, capture-turn and the other hooks that reach this file through
+    // ensure-devflow-init run under `set -e`. With no unversioned marker present (the
+    // common case) the legacy-marker helper's last `[ -e ]` test is false, and a
+    // function's non-zero status IS fatal under errexit where an inlined loop's is
+    // not — so the helper's `return 0` is what keeps those hooks alive, on both paths.
+    const probe = `set -e; source "${ENSURE_ROOT}" "${tmpDir}"; echo reached`;
+
+    const stamping = spawnSync('bash', ['-c', probe], { encoding: 'utf-8' });
+    expect(fs.existsSync(path.join(tmpDir, '.devflow', '.root-gitignore-configured-v5')), 'the first run stamps v5').toBe(true);
+    expect({ status: stamping.status, out: stamping.stdout.trim() }, 'the stamping path').toEqual({ status: 0, out: 'reached' });
+
+    const fast = spawnSync('bash', ['-c', probe], { encoding: 'utf-8' });
+    expect({ status: fast.status, out: fast.stdout.trim() }, 'the converged fast path').toEqual({ status: 0, out: 'reached' });
+  });
+
   it('v5 marker present but block dropped: heals the .gitignore (marker is a claim, not proof)', () => {
     // Simulate a merge-conflict resolution that drops the devflow block while leaving the v5 marker.
     fs.mkdirSync(path.join(tmpDir, '.devflow'), { recursive: true });
