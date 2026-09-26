@@ -618,7 +618,7 @@ describe('session-start-context: tracker setup directive (Section 3)', () => {
     // Baseline: a machine that never chose a tracker — no sentinel, and a
     // manifest with no tracker key. The manifest must be PRESENT in the baseline
     // too: Sections 1–2 read its machine-wide learning switch
-    // (D-LEARNING-MASTER-SWITCH) on every installed machine, so a manifest-free
+    // (D-FEATURES-MACHINE-WIDE) on every installed machine, so a manifest-free
     // baseline would charge that read to Section 3.
     const bareHome = fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-ctx-tracker-bare-'));
     fs.mkdirSync(path.join(bareHome, '.devflow', 'logs'), { recursive: true });

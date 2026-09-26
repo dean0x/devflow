@@ -55,7 +55,7 @@ const MOCK_FLAGS: ClaudeCodeFlag[] = [
 // ── resolveSeedFeatures ───────────────────────────────────────────────────────
 
 describe('resolveSeedFeatures', () => {
-  it('fresh (null, null) → FEATURE_DEFAULTS', () => {
+  it('fresh (null manifest) → FEATURE_DEFAULTS', () => {
     const result = resolveSeedFeatures(null);
     expect(result).toEqual(FEATURE_DEFAULTS);
   });
@@ -282,7 +282,7 @@ describe('resolveSeedPlugins', () => {
 // ── resolveInitSeed ───────────────────────────────────────────────────────────
 
 describe('resolveInitSeed', () => {
-  it('fresh (null manifest, null config, empty settings) → registry defaults', () => {
+  it('fresh (null manifest, empty settings) → registry defaults', () => {
     const seed = resolveInitSeed(null, '{}', DEVFLOW_PLUGINS);
     // features: FEATURE_DEFAULTS
     expect(seed.features).toEqual(FEATURE_DEFAULTS);
