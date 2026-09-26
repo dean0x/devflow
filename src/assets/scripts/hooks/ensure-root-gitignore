@@ -62,6 +62,21 @@ _ERG_RE_SENTINEL_V2='^[[:space:]]*!\.devflow/features/\*/KNOWLEDGE\.md[[:space:]
 _ERG_RE_POLICY='^[[:space:]]*!\.devflow/policy\.json[[:space:]]*$'
 _ERG_RE_CLAUDEIGNORE='^[[:space:]]*!?\.claudeignore[[:space:]]*$'
 
+# Drop every legacy marker beside v5 — builtin `[ -e ]` tests, so rm forks only for a
+# marker that exists. Called from the fast path and from the on-success stamp below,
+# so an older devflow's marker is dropped whichever path a run takes.
+# Always returns 0 (never fails the caller under `set -e`): the last iteration's
+# `[ -e ]` test is false whenever the unversioned marker is absent (the common case),
+# and a function call's own exit status is NOT exempt from errexit the way an inlined
+# for-loop's is — unlike this same loop when it sat directly inside the caller's `{ }`.
+_erg_drop_legacy_markers() {
+  for _ERG_OLD in -v4 -v3 -v2 ''; do
+    [ -e "$_ERG_DEVFLOW_DIR/.root-gitignore-configured$_ERG_OLD" ] \
+      && rm -f "$_ERG_DEVFLOW_DIR/.root-gitignore-configured$_ERG_OLD" 2>/dev/null
+  done
+  return 0
+}
+
 # Fast path: converged only when the marker is stamped AND the block sentinel is
 # present AND the policy line is present AND a .claudeignore entry exists. Every
 # other state falls through and recomputes.
@@ -69,6 +84,7 @@ if [ -f "$_ERG_MARKER" ] \
   && grep -qE "$_ERG_RE_SENTINEL" "$_ERG_GITIGNORE" 2>/dev/null \
   && grep -qE "$_ERG_RE_POLICY" "$_ERG_GITIGNORE" 2>/dev/null \
   && grep -qE "$_ERG_RE_CLAUDEIGNORE" "$_ERG_GITIGNORE" 2>/dev/null; then
+  _erg_drop_legacy_markers
   return 0
 fi
 
@@ -196,9 +212,6 @@ esac
 # On success, stamp the current-format v5 marker and drop legacy markers.
 [ "$_ERG_OK" = 1 ] && {
   touch "$_ERG_MARKER"
-  rm -f "$_ERG_DEVFLOW_DIR/.root-gitignore-configured-v4" 2>/dev/null
-  rm -f "$_ERG_DEVFLOW_DIR/.root-gitignore-configured-v3" 2>/dev/null
-  rm -f "$_ERG_DEVFLOW_DIR/.root-gitignore-configured-v2" 2>/dev/null
-  rm -f "$_ERG_DEVFLOW_DIR/.root-gitignore-configured" 2>/dev/null
+  _erg_drop_legacy_markers
 }
 return 0

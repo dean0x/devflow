@@ -39,8 +39,8 @@
  * (the untyped-seam shape PF-024 names). The prompt reads the FILE, so the
  * TypeScript side owes it two things and the second is the one a reader is
  * likely to miss: classify the same bytes the same way, AND leave those bytes on
- * disk — `updateFeature` is a read-modify-write over the whole config, so a
- * value the TS reader drops is a value the prompt can never see again.
+ * disk — `updateFeature` is a read-modify-write over the whole file, so a value
+ * its write drops is a value the prompt can never see again.
  */
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';

@@ -57,17 +57,46 @@ validate version format
   → restore [Unreleased] section + commit + push
 ```
 
-## Traceability Evidence (Compliance-Gated)
+## Traceability Evidence (Evidence Policy)
 
-When the compliance skill is installed (`~/.claude/skills/devflow:compliance/SKILL.md` exists), the `/release` command gathers and ships additional evidence:
+When the repository's evidence policy resolves `required` — `.devflow/policy.json` on the default branch, or compliance enabled on the releasing machine — the `/release` command gathers and ships additional evidence. `/release --dry-run` gathers and shows the same evidence under either policy, without asking anything or writing a resume checkpoint.
 
-**Commit list in release notes** — `git log {last_tag}..HEAD --oneline` is collected before the release commit and passed to the Git `create-release` operation. The release notes body includes a `## Commits` section listing all commits since the last tag.
+**Last release tag** — `release-trace.cjs last-tag` picks the highest merged tag matching `^v?X.Y.Z$`, compared numerically, so a marker tag (such as `sdlc-baseline-2026-09-24`) or a prerelease tag never counts as the last release. Version analysis uses the same tag under either policy.
 
-**Shipped-issue back-links** — After the release is created, the Git `backlink-shipped-issues` operation posts a `<!-- devflow:shipped v{VERSION} -->` marker-deduped comment on each issue referenced in the shipped commits (≤50 issues, 1s throttle). Running the release again for the same version is safe — the marker prevents duplicate comments.
+**Trace map** — at the end of pre-release checks, before the confirm, the Git `gather-release-evidence` operation collects the commit list and the shipped issues and runs `release-trace.cjs map`: a git-only, first-parent scan of at most 500 commits since the last tag. Each commit's full message is read (`git log --format=%B`), so a reference on a wrapped second line counts. Every commit is classified, first match wins:
 
-**Conventions naming authority** — `.devflow/conventions.md` is the canonical source for version/tag/version-PR title conventions. It is written by the Git `learn-conventions` operation (which scans branch/tag/PR history to infer the project's naming patterns) and GIT-TRACKED so the team shares a single naming source. The `/release` command consults it when naming the tag and GitHub release. Re-learn conventions by deleting `.devflow/conventions.md` — the next Git `learn-conventions` call rewrites it from history.
+| Class | Rule |
+|-------|------|
+| traced | a closing keyword plus a reference in the tracker's own grammar (a Jira or Linear key must match the configured project or team key), or, on GitHub, a merged PR that closes an issue |
+| exempt: release | a strict `chore(release): vX.Y.Z` subject, or a commit that touches only `CHANGELOG.md` |
+| exempt: revert | a revert subject backed by body evidence |
+| exempt: bot | a `[bot]` author name **and** a GitHub noreply bot email, read without `.mailmap` |
+| untraced | everything else |
 
-All three behaviors degrade gracefully (D4: `TRACEABILITY: DEGRADED ({reason})`) on API or file-access failures — they never block the release.
+**Exceptions or halt** — untraced commits, or unknown coverage (the 500-commit bound hit, the trace unavailable, or the gather indeterminate), trigger one question: record self-attested traceability exceptions, or halt before anything is committed or tagged. Recorded exceptions are appended last to the release notes under `## Traceability exceptions`, scrubbed (D11) with them, and never dropped by the size cap. Exempt commits are always listed there, since an exemption is self-asserted. Jira and Linear have no closing-reference capability, so their gather never reports `READY`: it lands on the partial arm, which warns and never blocks on its own.
+
+**Commit list in release notes** — the release notes body includes a `## Commits` section with the first 100 commits since the last tag. Notes over 60,000 characters drop `## Commits` first, then cut the changelog at a line boundary ending `…truncated`; the size is re-checked after the secret scrub.
+
+**Shipped-issue back-links** — after the release is created, the Git `backlink-shipped-issues` operation posts a marker-deduped comment on each shipped issue (≤50 issues, 1s throttle). Running the release again for the same version is safe — the marker prevents duplicate comments.
+
+**Release association** — the Git `associate-release` operation then adds each shipped issue to the release's tracker marker named `v{VERSION}`: a GitHub milestone, a Jira fixVersion or a Linear label. It adds and never replaces: on GitHub, an issue already on another milestone keeps it.
+
+**Conventions naming authority** — `.devflow/conventions.md` is the canonical source for version/tag/version-PR title conventions. It is written by the Git `learn-conventions` operation (which scans branch/tag/PR history to infer the project's naming patterns) when a `required` policy first needs it, and GIT-TRACKED so the team shares a single naming source. The `/release` command consults it, when present, for the tag and GitHub release names. Re-learn conventions by deleting `.devflow/conventions.md` — the next Git `learn-conventions` call rewrites it from history.
+
+The tag push and the release create are hard failures. The commit list, back-links and release association degrade gracefully (D4: `TRACEABILITY: DEGRADED ({reason})`) on API or file-access failures — they never block the release.
+
+## Out of Scope
+
+- **CI releases bypass `/release`.** The `workflow_dispatch` release above runs in GitHub Actions, not through `/release`, so it gathers no evidence, asks nothing about untraced commits, and posts no back-links or release markers. Run `/release --dry-run` first when a release needs its trace.
+- **No server-side enforcement.** Every evidence gate runs inside the devflow commands on the machine running them. Nothing in CI or branch protection checks the evidence policy, a test plan or a trace map: a PR opened or a release cut without devflow meets no gate.
+- **No auto-merge.** Devflow never merges a PR. `check-merge-readiness` only reports READY or NOT_READY, and `/dynamic-build` opens the wave PR but never merges it.
+
+## Residual Races
+
+Documented, not closed:
+
+- **Release markers.** GitHub has no conditional update, so a milestone set on an issue between `associate-release`'s read and its write is overwritten. On Jira and Linear, when the tool offers no additive operation, the operation writes the union of the current and new values, so a version or label another writer adds between the read and the write is dropped.
+- **Linear back-link dedup.** The Linear workspace cannot tell devflow which account it is, so `backlink-shipped-issues` cannot filter its dedup scan by author: every run reports `TRACEABILITY: DEGRADED (dedup unavailable — duplicate possible)` and posts anyway.
 
 ## Manual Fallback
 

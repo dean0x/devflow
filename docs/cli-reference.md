@@ -106,16 +106,18 @@ npx devflow-kit knowledge --status          # Show current status
 Manage regulatory compliance framework reference files installed in the compliance skill.
 
 ```bash
-npx devflow-kit compliance --status                    # Show installed frameworks and skill state
+npx devflow-kit compliance --status                    # Show frameworks, skill/rule state and the repo's evidence policy
 npx devflow-kit compliance --enable                    # Enable compliance feature (install skill + rule)
 npx devflow-kit compliance --disable                   # Disable compliance feature
 npx devflow-kit compliance --set gdpr,hipaa            # Set active frameworks (comma-separated IDs)
-npx devflow-kit compliance --set ""                    # Clear all active frameworks
+npx devflow-kit compliance --set ""                    # Zero frameworks: generic controls only (stays enabled)
 ```
 
 Available frameworks: `gdpr`, `hipaa`, `pci-dss`, `soc2`, `iso-27001`, `sox`
 
 The compliance skill and compliance rule are feature-owned (not plugin-scoped); installed when compliance is enabled (`devflow compliance --enable` or `devflow init --compliance <list>`); opt-in, off by default. Active frameworks are determined by which `references/{id}.md` files are present in the installed skill directory. SKILL.md and the rule are **dynamically composed** at install time from per-framework fragments — only the selected frameworks appear in the installed artifacts. `--status` shows `[shadowed]` when a skill shadow is present; `[shadowed, composition skipped — per-framework sections absent]` when the shadow has no composition tokens (C1 passthrough).
+
+**Evidence policy.** Enabled compliance — at any framework count, zero included — makes `required` the floor of the evidence policy on this machine: a repository with no committed `.devflow/policy.json` resolves `required`, and a committed `standard` is raised to it. `--status` also shows the policy resolved for the current directory's repository, as `Evidence policy: <required|standard> (source: <file|worktree|default|invalid|error>)` plus any warnings (`remote-unavailable`, `invalid-file`, `raised-by-compliance`, `pr-changes-policy`). `--enable` and `--set` print the policy file to commit on the default branch, `{"version":1,"evidencePolicy":"required"}`, so the policy applies to everyone working in the repository. The CLI never writes that file: the team owns it.
 
 ## Issue Tracker
 

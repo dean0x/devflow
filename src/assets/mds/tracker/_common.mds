@@ -125,7 +125,7 @@ extract the segment {match_phrase} and verify it with the *fetch by key* capabil
 @end
 
 @define closing_keyword_rule():
-3a. **Closing-keyword rule.** A candidate follows, on the same line, a whitespace token matching `^\(?(close[sd]?|fix(e[sd])?|resolve[sd]?|refs):?$` (case-insensitive). Take the next token, plus each further token while the previous one ends in `,`. Split each on `,`, strip one leading `(` and every trailing character in `[.,;:)\]!?]`, drop empties, then apply step 5's anchored gate unchanged.
+3a. **Closing-keyword rule.** A candidate follows, on the same line, a whitespace token matching `^\(?(close[sd]?|fix(e[sd])?|resolve[sd]?|refs):?$` (case-insensitive). Take the next token, plus each further token while the previous one ends in `,`. Split each on `,`, strip one leading `(` and every trailing character in `[.,;:)\]!?]`, drop empties, then apply step 5's anchored gate unchanged. Read each message as `git log --format=%B` lines.
 @end
 
 @define handoff_values(id_form, link_form):

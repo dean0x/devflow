@@ -31,6 +31,7 @@ import {
   TRACKER_OPS,
   VARIANT_MODULES,
 } from '../../src/core/mds-variants.js';
+import { TRACKER_PROVIDERS } from '../../src/core/tracker.js';
 import { prHostRel, resolveAgentSource } from '../helpers.js';
 
 // ---------------------------------------------------------------------------
@@ -243,9 +244,10 @@ export function nameableFrom(
  * a file nothing models, WITHOUT writing into `dist/` mid-suite: vitest runs
  * other files in parallel workers against those exact paths (PF-055). An absence
  * check over a corpus nobody can perturb is green whether or not the hop runs
- * (PF-064), which is precisely what the probe has to rule out.
+ * (PF-064), which is precisely what the probe has to rule out. Exported so the
+ * closure scan's seeded-reader probes can wrap it and perturb one body in memory.
  */
-function readReferenceFromDisk(rel: string): string | null {
+export function readReferenceFromDisk(rel: string): string | null {
   const resolved = resolveReference(rel);
   return resolved === null ? null : readFileSync(resolved, 'utf-8');
 }
@@ -361,38 +363,127 @@ const MODEL_CROSS_CUTTING_REFS: Readonly<Record<string, readonly string[]>> = {
   'check-merge-readiness': [prHostRel('check-ci-status')],
 };
 
-/** The file set the budget formula sums for an operation. */
-export function summedFor(op: string): Set<string> {
-  const summed = new Set<string>(MODEL_CROSS_CUTTING_REFS[op] ?? []);
-  if ((TRACKER_GITHUB_OPS as readonly string[]).includes(op)) {
-    summed.add(trackerRefRel(op));
-  }
-  if (isPrHostOp(op)) summed.add(prHostRel(op));
-  return summed;
+/**
+ * Every tracker provider the CLI can select, read from the registry rather than
+ * listed, so a fourth provider is ranged over by every per-provider arm by
+ * construction and the coverage arm names one that nothing prices.
+ */
+export const TRACKER_PROVIDER_IDS: readonly string[] = TRACKER_PROVIDERS.map(p => p.id);
+
+function isTrackerOp(op: string): boolean {
+  return (TRACKER_OPS as readonly string[]).includes(op);
 }
 
 /**
- * The file set a PROVIDER spawn sums for an operation.
+ * An operation's OWN load under one provider — the files its own pointers name,
+ * before any sibling-op hop a loaded body adds: its provider mechanics (a tracker
+ * op), its `pr/` file (a PR-host op) and the cross-cutting references
+ * MODEL_CROSS_CUTTING_REFS attributes to it.
  *
- * The same shape as `summedFor` above, with that provider's own mechanics
- * substituted for GitHub's. The contract document is deliberately NOT included
- * here: §14.10's formula carries it as its own term, once per SPAWN rather than
- * once per operation, and adding it in both places would double-count it.
+ * The contract document is deliberately NOT included: §14.10's formula carries it
+ * as its own term, once per SPAWN rather than once per operation, and adding it
+ * here as well would double-count it.
  */
-function summedForProvider(provider: string, op: string): Set<string> {
-  const summed = new Set<string>(MODEL_CROSS_CUTTING_REFS[op] ?? []);
-  summed.add(providerRefRel(provider, op));
+export function ownLoadForProvider(provider: string, op: string): Set<string> {
+  const own = new Set<string>(MODEL_CROSS_CUTTING_REFS[op] ?? []);
+  if (isTrackerOp(op)) own.add(providerRefRel(provider, op));
   // The PR-host tree is provider-independent and installed under every provider,
   // so it is the same addend on every path — not a GitHub-only cost.
-  if (isPrHostOp(op)) summed.add(prHostRel(op));
+  if (isPrHostOp(op)) own.add(prHostRel(op));
+  return own;
+}
+
+/**
+ * The reference-literal half of the model on the GitHub path: what an op's own
+ * pointers name. Directions 1 and 2 of the bidirectional check hold THIS against
+ * nameableFrom()'s scan of the agent; the op-mention half — the sibling-op hops a
+ * loaded body adds — is D-BODY-HOP-CLOSURE's, below.
+ */
+export function summedFor(op: string): Set<string> {
+  return ownLoadForProvider('github', op);
+}
+
+/** A per-provider table of sibling-op hops: provider → op → the ops its bodies hop to. */
+export type TransitiveRefs = Readonly<Record<string, Readonly<Record<string, readonly string[]>>>>;
+
+/**
+ * D-BODY-HOP-CLOSURE — the sibling-op hops a LOADED BODY makes, priced per provider.
+ *
+ * A mechanics body that tells the spawn to run another operation, or to follow a
+ * section of another operation's reference, makes that operation's own load part of
+ * this spawn: the Git agent executes it in the same context window. No reference
+ * literal names it, so nameableFrom()'s scan could not see it and the formula never
+ * summed it. setup-task step 1c is the case that forced this: under ISSUE_REQUIRED
+ * it invokes ensure-traceable-issue, whose mechanics are the largest term of the
+ * worst tracker spawn on every provider — and until this table existed the budget
+ * covered it only because the largest-file term happened to be about that size
+ * (D-LOADED-SET-ONE-SPAWN).
+ *
+ * FLAT and per provider. Each row names every op the closure reaches from that op
+ * under that provider, never a chain to follow: a two-hop target is listed directly,
+ * and the closure scan (nameableFromProvider) is what proves the list complete. Per
+ * provider because the hops genuinely differ — Linear's post-wave-report states its
+ * marker's second discriminator only in backlink-shipped-issues' reference, and no
+ * other provider's does.
+ *
+ * Only hops whose load no reference literal already prices live here: setup-task's
+ * `learn-conventions` and check-merge-readiness's `check-ci-status` are hops too, and
+ * both are priced by MODEL_CROSS_CUTTING_REFS because a `references/…` literal — in
+ * the agent's setup-task section, in check-merge-readiness's pr/ body — also names
+ * the file. A mention is PRICED when the files it would load are inside
+ * summedForProvider(provider, op), whichever table put them there.
+ *
+ * Checked both ways against the scan in tests/tracker/byte-budget.test.ts: every op a
+ * loaded body names is priced or listed in INFORMATIONAL_OP_MENTIONS, and every row
+ * here is still a mention the scan takes as a hop.
+ */
+export const MODEL_TRANSITIVE_REFS: TransitiveRefs = {
+  github: {
+    'setup-task': ['ensure-traceable-issue'],
+    'gather-release-evidence': ['backlink-shipped-issues'],
+    'associate-release': ['backlink-shipped-issues'],
+  },
+  jira: {
+    'setup-task': ['ensure-traceable-issue'],
+    'gather-release-evidence': ['backlink-shipped-issues'],
+    'associate-release': ['backlink-shipped-issues'],
+  },
+  linear: {
+    'setup-task': ['ensure-traceable-issue'],
+    'gather-release-evidence': ['backlink-shipped-issues'],
+    'associate-release': ['backlink-shipped-issues'],
+    'post-wave-report': ['backlink-shipped-issues'],
+  },
+};
+
+/**
+ * The file set ONE spawn of `op` sums under `provider` — its own load plus the own
+ * load of every op MODEL_TRANSITIVE_REFS says its bodies hop to. One function for
+ * every provider, the GitHub path included, so the rows cannot price a hop on one
+ * path and miss it on another.
+ *
+ * `transitive` is a parameter so the non-vacuity arm can ask what the live corpus
+ * reports with the table emptied — one measurement read two ways.
+ */
+export function summedForProvider(
+  provider: string,
+  op: string,
+  transitive: TransitiveRefs = MODEL_TRANSITIVE_REFS,
+): Set<string> {
+  const summed = ownLoadForProvider(provider, op);
+  for (const target of transitive[provider]?.[op] ?? []) {
+    for (const rel of ownLoadForProvider(provider, target)) summed.add(rel);
+  }
   return summed;
 }
 
 export const ALL_OPS = [...SECTIONS.keys()];
 
-/** The sum of every reference file an op's load instructions can name in one spawn. */
-function oneSpawnLoad(op: string): number {
-  return [...summedFor(op)].reduce((n, rel) => n + referenceChars(rel), 0);
+/** The characters of a file set, less any written exclusion. */
+function loadChars(rels: Iterable<string>, exclusions: readonly string[] = []): number {
+  return [...rels]
+    .filter(rel => !exclusions.includes(rel))
+    .reduce((n, rel) => n + referenceChars(rel), 0);
 }
 
 /** The winning op of a `max over ops` term, and the quantity it measured. */
@@ -431,15 +522,17 @@ export function maxOver(ops: Iterable<string>, measure: (op: string) => number):
  * and including it would make the budget a measure of a file this phase does not
  * own. Non-tracker ops are RECORDED in the four-shape table below (so the number
  * stays visible and is never quietly dropped) but do not gate.
+ *
+ * The GitHub path of worstCaseProviderLoad(), named for the rows that read it.
  */
 export function worstCaseReferenceLoad(): OpMax {
-  return maxOver(TRACKER_GITHUB_OPS, oneSpawnLoad);
+  return worstCaseProviderLoad('github');
 }
 
 /** The same maximum over the ops the budget does NOT gate on — recorded, never asserted. */
 export function worstCaseNonTrackerLoad(): OpMax {
-  const nonTracker = ALL_OPS.filter(op => !(TRACKER_GITHUB_OPS as readonly string[]).includes(op));
-  return maxOver(nonTracker, oneSpawnLoad);
+  const nonTracker = ALL_OPS.filter(op => !isTrackerOp(op));
+  return maxOver(nonTracker, op => loadChars(summedForProvider('github', op)));
 }
 
 /**
@@ -496,18 +589,21 @@ export function prHostOpLoad(
   op: string,
   exclusions: readonly string[] = LOADED_SET_WRITTEN_EXCLUSIONS,
 ): number {
-  return [...summedFor(op)]
-    .filter(rel => !exclusions.includes(rel))
-    .reduce((n, rel) => n + referenceChars(rel), 0);
+  return loadChars(summedForProvider('github', op), exclusions);
 }
 
-/** max_op chars(references/tracker/github/{op}.md) — the largest single mechanics file. */
+/**
+ * max_op chars(references/tracker/github/{op}.md) — the largest single mechanics file.
+ *
+ * RECORDED ONLY, never a term of a gate (D-LOADED-SET-ONE-SPAWN): the file it names
+ * is already inside some op's one-spawn load.
+ */
 export function largestTrackerReference(): OpMax {
   return maxOver(TRACKER_GITHUB_OPS, op => referenceChars(trackerRefRel(op)));
 }
 
 /**
- * The same two `max over ops` terms, scoped to one PROVIDER.
+ * The `max over ops` terms, scoped to one PROVIDER.
  *
  * D-LOADED-SET-PER-PROVIDER. Each MCP-backed provider is priced on its own row
  * rather than folded into the GitHub one, because the terms genuinely differ: its
@@ -518,22 +614,455 @@ export function largestTrackerReference(): OpMax {
  *
  * Scoped to TRACKER_OPS for the same reason the GitHub row is scoped to it
  * (D-LOADED-SET-SCOPE): the question is what a TRACKER spawn costs.
+ *
+ * largestProviderReference is RECORDED ONLY (D-LOADED-SET-ONE-SPAWN).
  */
 export function largestProviderReference(provider: string): OpMax {
   return maxOver(TRACKER_OPS, op => referenceChars(providerRefRel(provider, op)));
 }
 
 export function worstCaseProviderLoad(provider: string): OpMax {
-  return maxOver(TRACKER_OPS, op =>
-    [...summedForProvider(provider, op)].reduce((n, rel) => n + referenceChars(rel), 0));
+  return maxOver(TRACKER_OPS, op => loadChars(summedForProvider(provider, op)));
 }
 
-/** The whole loaded-set formula for one MCP-backed provider, as §14.10 states it. */
+/** The per-spawn tool-call contract: its size under an MCP-backed provider, 0 on every other path. */
+export function contractTerm(provider: string): number {
+  return MCP_BACKED_PROVIDERS.includes(provider) ? referenceChars(MCP_CONTRACT_REL) : 0;
+}
+
+/**
+ * The whole loaded-set formula for one tracker provider, the GitHub path included.
+ *
+ * D-LOADED-SET-ONE-SPAWN — a spawn runs ONE operation, plus whatever its loaded
+ * bodies hop to, so its reference cost is that operation's one-spawn load and
+ * nothing besides:
+ *
+ *   the always-preloaded set
+ *   + the per-spawn contract term (0 on the GitHub path)
+ *   + max over TRACKER ops of chars(summedForProvider(provider, op))
+ *
+ * The rows used to add a fourth term, `max_op chars(tracker/{provider}/{op}.md)`, and
+ * it double-counted: the largest mechanics file is itself inside some op's one-spawn
+ * load, so the formula charged one file twice. It survived because it did real work
+ * by coincidence — the unpriced setup-task step 1c → ensure-traceable-issue hop was
+ * about the size of the largest file, so the phantom term stood in for a real one.
+ * With every in-spawn hop priced (D-BODY-HOP-CLOSURE) the stand-in is no longer
+ * needed, and keeping it would bill every row for a file no spawn loads twice.
+ *
+ * The term is RECORDED, not dropped (ADR-025): largestTrackerReference() and
+ * largestProviderReference() still print as rows of the shape table, so the size of
+ * the biggest single file stays on the record for whoever next edits it.
+ */
 export function providerLoadedSet(provider: string): number {
-  return PRELOADED
-    + referenceChars(MCP_CONTRACT_REL)
-    + largestProviderReference(provider).value
-    + worstCaseProviderLoad(provider).value;
+  return PRELOADED + contractTerm(provider) + worstCaseProviderLoad(provider).value;
+}
+
+// ---------------------------------------------------------------------------
+// The body-hop closure — sibling ops a LOADED BODY names [D-BODY-HOP-CLOSURE]
+// ---------------------------------------------------------------------------
+//
+// nameableFrom() prices what the AGENT names as a `references/…` path. A mechanics
+// body can also make the spawn load more by naming another OPERATION — "invoke
+// `ensure-traceable-issue`", "follow … in this operation's `backlink-shipped-issues`
+// reference" — and no path literal marks that. The scan below reads every body a
+// spawn loads, finds every op name in it, and takes each one as a load hop unless a
+// row of INFORMATIONAL_OP_MENTIONS explains why it is not: DEFAULT-DENY. A mention
+// nobody classified is priced or it fails, the only direction an absence-based check
+// can be trusted in (PF-064).
+//
+// WRITTEN NON-GOALS, so a green run is not read as covering them (PF-064):
+//   - git.md's own `## Operation:` sections are not scanned. The agent is preloaded
+//     whole on every spawn, so an op named there resolves against text the spawn
+//     already holds (associate-release's "`backlink-shipped-issues`' step 0" is
+//     git.md's own step 0), and a load the agent makes is spelled as a `references/…`
+//     literal or a mechanics pointer, which nameableFrom() scans in both directions.
+//   - references/decision-markers.md is in no spawn's load set
+//     (D-CROSS-CUTTING-ON-DEMAND), so an op it names is a glossary entry, not a hop.
+//   - Always-loaded text — the agent above its first op, the preloaded skills, the
+//     per-spawn tool-call contract — is not a per-op body. It is held to the stricter
+//     rule alwaysLoadedBodies() documents: no hop at all.
+
+function escapeRegExp(text: string): string {
+  return text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+/**
+ * One operation name, bare or backticked, as a whole token — built from ALL_OPS,
+ * longest first, so `fetch-issue` never matches inside `fetch-issues-batch`.
+ *
+ * BARE as well as backticked because the prose is not consistent about it: the
+ * frozen status-lines fixture samples `(same slug logic as setup-task)` from the
+ * GitHub ensure-traceable-issue reference, and a backtick-only matcher would read that
+ * line as naming nothing. The token boundary is `[A-Za-z0-9_-]` on both sides and
+ * nothing wider, so a path segment (`references/pr/check-ci-status.md`) or a bare file
+ * name still counts as naming its op: maximal recall, because a shape this matcher
+ * cannot express is a hop nothing prices.
+ *
+ * Read it through collectOpMentions(), never with `.test()`/`.exec()`: it is global,
+ * and a shared global regex carries `lastIndex` from one caller into the next.
+ */
+export const OP_MENTION_RE = new RegExp(
+  '(?<![A-Za-z0-9_-])`?(' +
+    [...ALL_OPS].sort((a, b) => b.length - a.length).map(escapeRegExp).join('|') +
+    ')`?(?![A-Za-z0-9_-])',
+  'g',
+);
+
+/** One operation named inside a body. */
+export interface OpMention {
+  /** The body's skill-relative reference path, or an always-loaded body's label. */
+  readonly file: string;
+  /** The operation named. */
+  readonly target: string;
+  /** The whole line carrying the mention — what an INFORMATIONAL row's anchor is matched against. */
+  readonly line: string;
+  /** Where the matched token (backticks included) starts in `line`. */
+  readonly column: number;
+}
+
+/** Named collector: every operation named in `body`, one entry per occurrence. */
+export function collectOpMentions(file: string, body: string): OpMention[] {
+  const matcher = new RegExp(OP_MENTION_RE.source, OP_MENTION_RE.flags);
+  const mentions: OpMention[] = [];
+  for (const line of body.split('\n')) {
+    for (const match of line.matchAll(matcher)) {
+      mentions.push({ file, target: match[1], line, column: match.index });
+    }
+  }
+  return mentions;
+}
+
+/**
+ * A body naming its OWN operation — `tracker/jira/setup-task.md` saying `setup-task`,
+ * learn-conventions.md saying `learn-conventions`. Never a hop: the file it would load
+ * is the file being read. Keyed on the file's basename, so a SHARED document
+ * (publication-gate.md, github-api.md) owns no operation and every op it names is
+ * classified like any other mention.
+ */
+function namesItsOwnOp(mention: OpMention): boolean {
+  return path.posix.basename(mention.file, '.md') === mention.target;
+}
+
+/** One op mention that is NOT a load hop, and why. */
+export interface InformationalOpMention {
+  /** The body, spelled as OpMention.file spells it. */
+  readonly file: string;
+  /** The operation the line names. */
+  readonly target: string;
+  /** A verbatim substring of the ONE line carrying the mention; it must itself name `target`. */
+  readonly anchor: string;
+  /** Why the mention costs the spawn nothing. */
+  readonly why: string;
+}
+
+/**
+ * D-BODY-HOP-CLOSURE, the exemption half — every op a loaded or always-loaded body
+ * names WITHOUT making the spawn load it, each with its reason.
+ *
+ * CLOSED. A row is the only way a mention escapes being priced; it is keyed to one
+ * line by a verbatim anchor, never to a whole file, so a second mention of the same
+ * op in the same file is still a hop until someone classifies it. The test file holds
+ * the table to five things: every row is consulted by a live scan; its anchor still
+ * sits on one line of its file and names its target; the clause around the mention
+ * carries no load verb; its reason clears a length floor; and what it would cost if it
+ * WERE a hop is printed. A prohibition and its exemption table are one authority
+ * (PF-067): the scan that reports an unpriced hop reads this table, and the table is
+ * checked against the scan, so neither can drift without the other going red.
+ *
+ * Per provider where the prose differs, so a row exempts one file's line and never a
+ * sibling provider's.
+ */
+export const INFORMATIONAL_OP_MENTIONS: readonly InformationalOpMention[] = [
+  // create-release cites the bound it shares with backlink-shipped-issues.
+  ...TRACKER_PROVIDERS.map(({ id }) => ({
+    file: `tracker/${id}/create-release.md`,
+    target: 'backlink-shipped-issues',
+    anchor: 'the same bound `backlink-shipped-issues` applies',
+    why: 'Cites where the ≤50 bound comes from; the bound itself is written on the same line, so ' +
+      'nothing in backlink-shipped-issues\' mechanics is needed to apply it.',
+  })),
+  // ensure-pr-ready step 4b prefers a reference an EARLIER op returned.
+  ...TRACKER_PROVIDERS.flatMap(({ id }) => ['setup-task', 'ensure-traceable-issue'].map(target => ({
+    file: `tracker/${id}/ensure-pr-ready.md`,
+    target,
+    anchor: 'returned by `setup-task` / `ensure-traceable-issue` for this branch',
+    why: 'Names which earlier operation produced the issue reference the caller already holds; ' +
+      'it reads that Output value and runs none of the producing operation\'s steps.',
+  }))),
+  ...['jira', 'linear'].map(id => ({
+    file: `tracker/${id}/ensure-pr-ready.md`,
+    target: 'gather-release-evidence',
+    anchor: '`gather-release-evidence` reports the absence',
+    why: 'Says what a DIFFERENT operation reports later, in its own spawn, so this one can decline ' +
+      'to claim an effect; ensure-pr-ready never runs the release-evidence steps.',
+  })),
+  // ensure-traceable-issue's title rule names where it came from.
+  {
+    file: 'tracker/github/ensure-traceable-issue.md',
+    target: 'setup-task',
+    anchor: '(same slug logic as setup-task)',
+    why: 'Provenance of the title rule, not a load: the title is taken from TASK_DESCRIPTION, and ' +
+      'the spawn that needs setup-task\'s branch-slug steps (its step 1c) already holds them. ' +
+      'This line is sampled by the frozen status-lines fixture and cannot be reworded.',
+  },
+  ...['jira', 'linear'].map(id => ({
+    file: `tracker/${id}/ensure-traceable-issue.md`,
+    target: 'setup-task',
+    anchor: '(same slug logic as `setup-task`)',
+    why: 'Provenance of the summary/title rule, not a load: the text is taken from ' +
+      'TASK_DESCRIPTION, and the spawn that needs setup-task\'s branch-slug steps (its step 1c) ' +
+      'already holds them.',
+  })),
+  {
+    file: 'tracker/github/fetch-issue.md',
+    target: 'backlink-shipped-issues',
+    anchor: 'in this operation\'s sibling `backlink-shipped-issues` reference',
+    why: 'Cites where the RATIONALE for stripping one leading # is written; the anchored grammar ' +
+      'and the strip it drives are both stated inline, so the pre-flight runs without that file.',
+  },
+  {
+    file: 'tracker/linear/setup-task.md',
+    target: 'ensure-pr-ready',
+    anchor: '`ensure-pr-ready` renders the PR link line explicitly',
+    why: 'Explains why the server\'s branch auto-link is not relied on: a later operation writes ' +
+      'the PR link line in its own spawn, and setup-task runs none of its steps.',
+  },
+  // PR-host bodies name their neighbours in the review loop.
+  {
+    file: 'pr/resolve-review-threads.md',
+    target: 'fetch-review-threads',
+    anchor: '1s between operations). `fetch-review-threads`',
+    why: 'Names the producer of THREAD_MAP to explain why the ≤50 bound can bite; this op consumes ' +
+      'that map as an input and never runs the fetch.',
+  },
+  {
+    file: 'pr/resolve-review-threads.md',
+    target: 'check-merge-readiness',
+    anchor: 'since `check-merge-readiness` will otherwise show them as',
+    why: 'States the downstream consequence of an untouched thread — a later report counts it — ' +
+      'to justify the TRUNCATED status; no merge-readiness step runs here.',
+  },
+  ...['post-review-summary', 'post-resolution-summary'].map(target => ({
+    file: 'publication-gate.md',
+    target,
+    anchor: 'Applies to **`post-review-summary` and `post-resolution-summary` only.**',
+    why: 'Scope statement naming the two operations the gate applies to. Both load this file; ' +
+      'neither needs the other\'s PR-host mechanics to apply it.',
+  })),
+  // github-api.md is loaded by both review-thread operations (LOADED_SET_WRITTEN_EXCLUSIONS
+  // excludes its CHARACTERS from a gate, never its mentions from this scan).
+  {
+    file: 'github-api.md',
+    target: 'create-release',
+    anchor: 'because `create-release` composes notes',
+    why: 'Explains why the release-notes file pair is named apart from the body pair; the spawns ' +
+      'that load this file run the review-thread recipes and never the release steps.',
+  },
+  ...['fetch-review-threads', 'resolve-review-threads'].map(target => ({
+    file: 'github-api.md',
+    target,
+    anchor: 'Used by the `fetch-review-threads` and `resolve-review-threads` Git agent operations.',
+    why: 'Section header naming the two operations that use the Review Threads recipes; both ' +
+      'already load this file, and neither loads the other\'s pr/ steps.',
+  })),
+  {
+    file: 'github-api.md',
+    target: 'fetch-review-threads',
+    anchor: 'as `fetch-review-threads` step 2 defines',
+    why: 'A citation inside the Enumerate recipe, which only fetch-review-threads runs, with the ' +
+      'trust rule loaded; resolve-review-threads consumes THREAD_MAP and never enumerates.',
+  },
+  {
+    file: 'github-api.md',
+    target: 'resolve-review-threads',
+    anchor: 'Maximum threads to process in `resolve-review-threads`: ≤50',
+    why: 'States the resolve bound among the pagination limits; the fetch spawn that also loads ' +
+      'this file reads it as a number, never as steps to run.',
+  },
+  // Always-loaded text: held to "no hop at all", so its informational mentions are listed too.
+  ...['resolve-review-threads', 'backlink-shipped-issues'].map(target => ({
+    file: 'agents/git.md',
+    target,
+    anchor: '**Rate backpressure for batch ops** (`resolve-review-threads` and `backlink-shipped-issues`)',
+    why: 'Scope of the always-loaded D4 backpressure rule — the two batch operations it governs; ' +
+      'the rule itself is written on the same line, so no mechanics load follows.',
+  })),
+  {
+    file: 'skills/git/SKILL.md',
+    target: 'learn-conventions',
+    anchor: 'Naming conventions: `learn-conventions` writes `.devflow/conventions.md`',
+    why: 'Doctrine naming the one authority for naming conventions; the operation loads its own ' +
+      'reference, and only when .devflow/conventions.md is absent.',
+  },
+];
+
+function matchInformationalRow(
+  mention: OpMention,
+  table: readonly InformationalOpMention[],
+): InformationalOpMention | undefined {
+  return table.find(row =>
+    row.file === mention.file && row.target === mention.target && mention.line.includes(row.anchor));
+}
+
+/**
+ * The bound on the closure loop. The scan enqueues each operation at most once, so a
+ * live closure takes at most ALL_OPS.length steps; four times that is room for a
+ * roster that grows, not for a chain that deepens. Crossing it means the visited set
+ * stopped working, and the scan throws rather than spin.
+ */
+export const CLOSURE_STEP_LIMIT = 4 * ALL_OPS.length;
+
+/** What one spawn's body-hop closure found. */
+export interface BodyHopClosure {
+  /** Every per-op reference the spawn can be made to load. */
+  readonly files: ReadonlySet<string>;
+  /** The operations whose own load the closure took, in visit order (the spawn's own op first). */
+  readonly visited: readonly string[];
+  /** Mentions taken as load hops — every one no row explains. */
+  readonly hops: readonly OpMention[];
+  /** Mentions an INFORMATIONAL_OP_MENTIONS row explained, with that row. */
+  readonly informational: readonly { readonly mention: OpMention; readonly row: InformationalOpMention }[];
+  /** Bodies actually read, in visit order — the provenance the non-vacuity arm checks. */
+  readonly scanned: readonly string[];
+  /** Files the scan could name but not read. */
+  readonly unreadable: readonly string[];
+  /** Loop iterations taken. */
+  readonly steps: number;
+}
+
+export interface ClosureOptions {
+  /** The body reader — injected so a probe can seed one body in memory (PF-055). */
+  readonly readReference?: (rel: string) => string | null;
+  readonly informational?: readonly InformationalOpMention[];
+  readonly stepLimit?: number;
+}
+
+/** An op's own load as the SCAN sees it: nameableFrom()'s file set, instantiated for `provider`. */
+function scannedOwnLoad(
+  provider: string,
+  op: string,
+  readReference: (rel: string) => string | null,
+): string[] {
+  return [...nameableFrom(op, readReference)]
+    .map(rel => (rel === trackerRefRel(op) ? providerRefRel(provider, op) : rel));
+}
+
+/**
+ * D-BODY-HOP-CLOSURE, the scan half — every reference ONE spawn of `op` under
+ * `provider` can be made to load, found by reading the bodies rather than trusting
+ * the model.
+ *
+ * Starts from the op's own load as nameableFrom() scans it, reads every body in it,
+ * and follows each op a body names into THAT op's own load — to a fixed point, not
+ * one hop: a mention inside a hop target is loaded in the same spawn as the hop
+ * itself. A VISITED set makes each operation's load taken once, so a cycle ends, and
+ * CLOSURE_STEP_LIMIT bounds the loop outright.
+ *
+ * Classification, in order: a body naming its own op is not a hop; a mention an
+ * INFORMATIONAL_OP_MENTIONS row explains is not a hop; EVERY OTHER mention is a hop.
+ * Default-deny is the point: a new pointer lands in `hops` whether or not anyone
+ * thought to model it.
+ */
+export function nameableFromProvider(
+  provider: string,
+  op: string,
+  options: ClosureOptions = {},
+): BodyHopClosure {
+  const readReference = options.readReference ?? readReferenceFromDisk;
+  const table = options.informational ?? INFORMATIONAL_OP_MENTIONS;
+  const stepLimit = options.stepLimit ?? CLOSURE_STEP_LIMIT;
+
+  const files = new Set<string>();
+  const visited: string[] = [];
+  const enqueued = new Set<string>([op]);
+  const queue: string[] = [op];
+  const hops: OpMention[] = [];
+  const informational: { mention: OpMention; row: InformationalOpMention }[] = [];
+  const scanned: string[] = [];
+  const unreadable: string[] = [];
+  let steps = 0;
+
+  while (queue.length > 0) {
+    steps += 1;
+    if (steps > stepLimit) {
+      throw new Error(
+        `the body-hop closure for ${provider}/${op} took more than ${stepLimit} steps — each ` +
+        'operation is enqueued once, so this is a defect in the scan, not a deep chain',
+      );
+    }
+    const current = queue.shift()!;
+    visited.push(current);
+    for (const rel of scannedOwnLoad(provider, current, readReference)) {
+      if (files.has(rel)) continue;
+      files.add(rel);
+      const body = readReference(rel);
+      if (body === null) {
+        unreadable.push(rel);
+        continue;
+      }
+      scanned.push(rel);
+      for (const mention of collectOpMentions(rel, body)) {
+        if (namesItsOwnOp(mention)) continue;
+        const row = matchInformationalRow(mention, table);
+        if (row !== undefined) {
+          informational.push({ mention, row });
+          continue;
+        }
+        hops.push(mention);
+        if (!enqueued.has(mention.target)) {
+          enqueued.add(mention.target);
+          queue.push(mention.target);
+        }
+      }
+    }
+  }
+  return { files, visited, hops, informational, scanned, unreadable, steps };
+}
+
+/** One always-loaded body, labelled as INFORMATIONAL_OP_MENTIONS spells it. */
+export interface AlwaysLoadedBody {
+  readonly file: string;
+  readonly text: string;
+}
+
+/** The label the agent's always-loaded part carries in mentions and table rows. */
+export const AGENT_ALWAYS_LOADED = 'agents/git.md';
+
+/**
+ * Every body a Git spawn holds before it runs any operation: the agent above its
+ * first `## Operation:` heading, the two preloaded skills, and the tool-call contract
+ * an MCP-backed provider reads once per spawn.
+ *
+ * Held to a STRICTER rule than a per-op body — no hop at all. An op named here as a
+ * load would be paid by every spawn, which no per-op row can express, so the only
+ * mentions allowed are the `## Operations` dispatch table (the agent's index of
+ * itself) and INFORMATIONAL_OP_MENTIONS rows. The project-key preamble line used to
+ * send every spawn to the `learn-conventions` operation's UNTRUSTED-strings block, a
+ * reference loaded only when .devflow/conventions.md is absent; it now states the rule
+ * itself, and this is what keeps the pointer from coming back.
+ *
+ * `content` is a parameter so the probe can seed the agent in memory.
+ */
+export function alwaysLoadedBodies(
+  content: string = GIT_AGENT.content,
+  readReference: (rel: string) => string | null = readReferenceFromDisk,
+): AlwaysLoadedBody[] {
+  const bodies: AlwaysLoadedBody[] = [
+    { file: AGENT_ALWAYS_LOADED, text: crossCuttingSlice(content) },
+    { file: 'skills/git/SKILL.md', text: readFileSync(path.join(skillsDir(), 'git', 'SKILL.md'), 'utf-8') },
+    {
+      file: 'skills/worktree-support/SKILL.md',
+      text: readFileSync(path.join(skillsDir(), 'worktree-support', 'SKILL.md'), 'utf-8'),
+    },
+  ];
+  const contract = readReference(MCP_CONTRACT_REL);
+  if (contract !== null) bodies.push({ file: MCP_CONTRACT_REL, text: contract });
+  return bodies;
+}
+
+/** The op a line of the agent's `## Operations` dispatch table names in its first cell, if any. */
+export function dispatchRowOp(line: string): string | null {
+  return /^\| `([a-z0-9-]+)` \|/.exec(line)?.[1] ?? null;
 }
 
 // ---------------------------------------------------------------------------

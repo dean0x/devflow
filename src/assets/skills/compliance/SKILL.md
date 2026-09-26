@@ -28,6 +28,8 @@ ${DEVFLOW_COMPLIANCE_ACTIVE}
 
 Compliance covers regulatory-specific gaps: retention, erasure/data-subject rights, audit-trail completeness (actor/purpose fields), segregation of duties, framework mapping, IaC exposure. Do NOT re-raise security lens findings (injection, secret handling, authN/Z) — reference those via framework mapping only.
 
+**Lens only.** This skill shapes what a compliance review looks for in the diff or design. It does not decide how much evidence a change must carry: tracker links, test plans, approvals and release traces follow the repository's evidence policy. Never report a missing ticket, test plan or approval as a compliance finding.
+
 ## Clean-Report Contract
 
 If the diff/design has no regulated-data surface (no PII/PHI/payment fields, no sensitive data in logs, no IaC, no auth/audit/retention changes) → emit zero findings with a one-line "no compliance-relevant surface detected" note. Never manufacture findings.

@@ -62,7 +62,7 @@ const gate = (name: GateName): string => `only when \`${name}\` is \`true\``
 /** The caller-side policy gate — the one canonical phrase that keys on `EVIDENCE_POLICY` itself. */
 const policyGate = 'only when `EVIDENCE_POLICY` is `required`'
 
-/** The publication partial's rule sentence, stated once and expanded into its two hosts. */
+/** The publication partial's rule sentence, stated once and expanded into each of its hosts. */
 const PUBLICATION_STUB_RULE = '**Evidence stub:**'
 const fenceKey = (name: GateName): string => `${name}: {${name}}`
 const recipeKey = (name: GateName): string => `${name}: \${${name}}`
@@ -270,8 +270,9 @@ const DISPOSITION: readonly DispositionRow[] = [
   },
   {
     // Caller side: the publication partial turns a resolved `off` into `stub` under
-    // the policy (it expands into its three hosts — /implement since #363, for the
-    // evidence comment), and each review host's Edge Cases row says so.
+    // the policy (it expands into its four hosts — /implement since #363 and
+    // /dynamic-build since #376, each for its PR's evidence comment), and each review
+    // host's Edge Cases row says so.
     // Op side: the `stub` value, which names no gate.
     row: 13,
     subject: 'publication `off` → `stub` — the caller turns it, the op accepts it',
@@ -280,6 +281,7 @@ const DISPOSITION: readonly DispositionRow[] = [
     off: '`off` stays `off`: no comment posts',
     sites: [
       { file: 'commands/code-review.md', anchor: PUBLICATION_STUB_RULE, phrase: policyGate },
+      { file: 'commands/dynamic-build.md', anchor: PUBLICATION_STUB_RULE, phrase: policyGate },
       { file: 'commands/implement.md', anchor: PUBLICATION_STUB_RULE, phrase: policyGate },
       { file: 'commands/resolve.md', anchor: PUBLICATION_STUB_RULE, phrase: policyGate },
       { file: 'commands/code-review.md', after: '## Edge Cases', anchor: '| `reviewPublication: off` |', phrase: policyGate },
@@ -578,9 +580,10 @@ describe('evidence-policy disposition: the table and the tree agree, both ways (
 
 /**
  * Row 13's caller side, held beyond its sites: the `off` → `stub` turn is stated
- * ONCE — in the publication partial, expanded into its three hosts — and the two
- * review hosts can report the label it produces; /implement (#363) hands the value
- * to update-pr-evidence, whose comment has no publication label. A host that restated the rule would be a
+ * ONCE — in the publication partial, expanded into its four hosts — and the two
+ * review hosts can report the label it produces; /implement (#363) and
+ * /dynamic-build's wave PR (#376) hand the value to update-pr-evidence, whose
+ * comment has no publication label. A host that restated the rule would be a
  * second authority free to drift from the partial; an Edge Cases row may describe
  * the outcome, but never carries the rule sentence itself.
  *
@@ -590,7 +593,7 @@ describe('evidence-policy disposition: the table and the tree agree, both ways (
  */
 describe('row 13 caller side: the publication stub is one rule, reported by the review hosts', () => {
   const corpus = builtCorpus()
-  const PUBLICATION_HOSTS = ['commands/code-review.md', 'commands/implement.md', 'commands/resolve.md'] as const
+  const PUBLICATION_HOSTS = ['commands/code-review.md', 'commands/dynamic-build.md', 'commands/implement.md', 'commands/resolve.md'] as const
   const REVIEW_HOSTS = ['commands/code-review.md', 'commands/resolve.md'] as const
   const STUB_LABEL = 'STUB (evidence policy)'
 
@@ -635,7 +638,18 @@ describe('row 13 caller side: the publication stub is one rule, reported by the 
     expect(spawn.slice(0, spawn.indexOf('```'))).toContain('OPERATION: update-pr-evidence')
   })
 
-  it('known-bad probe: a fourth host restating the rule is reported', () => {
+  it('/dynamic-build step 7 passes the resolved value to update-pr-evidence, its one consumer there', () => {
+    const build = corpus.find(f => f.file === 'commands/dynamic-build.md')!.content
+    const keyLines = build.split('\n').filter(l => /^\s*"?REVIEW_PUBLICATION: /.test(l))
+    expect(keyLines).toEqual(['REVIEW_PUBLICATION: {REVIEW_PUBLICATION resolved above, or auto}'])
+    const spawn = build.slice(build.lastIndexOf('Agent(subagent_type="Git")', build.indexOf(keyLines[0])))
+    expect(spawn.slice(0, spawn.indexOf('```'))).toContain('OPERATION: update-pr-evidence')
+    // Resolved before the spawn that reads it, in the same step.
+    expect(build.indexOf(PUBLICATION_STUB_RULE)).toBeGreaterThan(build.indexOf('7. **Wave PR evidence**'))
+    expect(build.indexOf(PUBLICATION_STUB_RULE)).toBeLessThan(build.indexOf(keyLines[0]))
+  })
+
+  it('known-bad probe: a fifth host restating the rule is reported', () => {
     const seeded = corpus.map(f =>
       f.file === 'commands/bug-analysis.md'
         ? { ...f, content: `${f.content}\n${PUBLICATION_STUB_RULE} ${policyGate}, a resolved \`off\` becomes \`stub\`.\n` }

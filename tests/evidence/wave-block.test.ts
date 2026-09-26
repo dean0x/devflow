@@ -24,6 +24,9 @@
  *          empty, and the exits are 0 admit · 1 usage · 2 file unusable · 5 refused.
  *   AC-16  (in miniature) the documented example exits 0, and 5 once one closing
  *          line moves onto the QUARANTINED row.
+ *   W3     (#376) the related lines may open with ONE tracking line — `Refs` and a
+ *          ref that names no row, the wave's tracking issue. A `Closes` naming no
+ *          row, a second such line and one that is not first are all `orphan`.
  *
  * The parity arms pin the exports to the shipped text that governs them: every
  * line code.md's R7 paste gate admits (each ticket's captured ISSUE_PR_LINK) is a
@@ -67,7 +70,8 @@ interface WaveRow {
   readonly coverage: string
   readonly line: number
 }
-interface WaveBlock { readonly related: readonly WaveRelated[]; readonly rows: readonly WaveRow[] }
+/** `related` holds the lines that name a row; `tracking` the one leading `Refs` line that names none, or null. */
+interface WaveBlock { readonly tracking: WaveRelated | null; readonly related: readonly WaveRelated[]; readonly rows: readonly WaveRow[] }
 
 interface WaveExports {
   readonly LIMITS: Readonly<Record<string, number>>
@@ -149,12 +153,15 @@ const EXAMPLE = waveBlock(EXAMPLE_RELATED, EXAMPLE_ROWS)
 /** Line numbers inside EXAMPLE (1-based). */
 const L = { related1: 2, related3: 4, blank: 5, heading: 6, header: 7, separator: 8, row1: 9, row3: 11, row4: 12 } as const
 
-/** `n` merged rows T1…Tn, each with its own `Closes #k` line. */
-function mergedWave(n: number): string {
+/** `n` merged rows T1…Tn, each with its own `Closes #k` line, led by the `tracking` lines given. */
+function mergedWave(n: number, tracking: readonly string[] = []): string {
   const related = Array.from({ length: n }, (_, i) => `Closes #${i + 1}`)
   const rows = Array.from({ length: n }, (_, i) => row(i + 1, { ticket: `#${i + 1}`, verdict: 'PASS' }))
-  return waveBlock(related, rows)
+  return waveBlock([...tracking, ...related], rows)
 }
+
+/** The wave's tracking issue, as `/dynamic-build` step 3(a) leads the related lines with it: a ref no row names. */
+const TRACKING_LINE = 'Refs #99'
 
 function unwrap<T>(r: Result<T>, label = 'result'): T {
   if (!r.ok) throw new Error(`${label}: expected ok, got ${JSON.stringify(r.error)}`)
@@ -311,13 +318,24 @@ const RULES: readonly RuleCase[] = [
   { label: '100 rows and 100 related lines', text: mergedWave(100), code: null },
   { label: 'surviving at its three-digit bound', text: waveBlock([], [row(1, { ticket: '(none)', verdict: 'QUARANTINED', surviving: '999' })]), code: null },
 
+  // --- the tracking line: one leading Refs line that names no row ---------------
+  { label: 'a leading tracking Refs line', text: waveBlock([TRACKING_LINE, ...EXAMPLE_RELATED], EXAMPLE_ROWS), code: null },
+  { label: 'a keyed tracking Refs line over a keyed wave', text: waveBlock(['Refs PROJ-9', 'Refs PROJ-7'], [row(1, { ticket: 'PROJ-7', verdict: 'PASS' })]), code: null },
+  { label: 'a tracking line and no row line (every row blocked)', text: waveBlock([TRACKING_LINE], [row(1, { ticket: '#1', verdict: 'BLOCKED' })]), code: null },
+  { label: 'a lone leading Refs over a (none) row is the tracking line', text: waveBlock(['Refs #1'], [row(1, { ticket: '(none)', verdict: 'QUARANTINED' })]), code: null },
+  { label: '100 rows, 100 related lines and the tracking line', text: mergedWave(100, ['Refs #999']), code: null },
+  { label: 'a leading Closes naming no row (a tracking issue is never closed)', text: waveBlock(['Closes #99', ...EXAMPLE_RELATED], EXAMPLE_ROWS), code: 'orphan', line: 2 },
+  { label: 'two leading lines naming no row', text: waveBlock([TRACKING_LINE, 'Refs #98', ...EXAMPLE_RELATED], EXAMPLE_ROWS), code: 'orphan', line: 3 },
+  { label: 'the tracking line twice', text: waveBlock([TRACKING_LINE, TRACKING_LINE, ...EXAMPLE_RELATED], EXAMPLE_ROWS), code: 'orphan', line: 3 },
+  { label: 'a tracking line that is not first', text: waveBlock(['Closes #12', TRACKING_LINE, 'Closes #14', 'Refs #13'], EXAMPLE_ROWS), code: 'orphan', line: 3 },
+
   // --- the cross rules: a wrong closing line is unrepresentable ---------------
   { label: 'Closes on a QUARANTINED row', text: waveBlock(['Closes #12', 'Closes #14', 'Closes #13'], EXAMPLE_ROWS), code: 'unmerged', line: L.related3 },
   { label: 'Closes on a BLOCKED row', text: waveBlock([...EXAMPLE_RELATED, 'Closes #15'], EXAMPLE_ROWS), code: 'unmerged', line: 5 },
   { label: 'a merged row with no related line', text: waveBlock(['Closes #14', 'Refs #13'], EXAMPLE_ROWS), code: 'unlinked', line: 8 },
   { label: 'an UNVERIFIED row with no related line', text: waveBlock(['Closes #12', 'Refs #13'], EXAMPLE_ROWS), code: 'unlinked', line: 9 },
   { label: 'a related ref naming no row', text: waveBlock([...EXAMPLE_RELATED, 'Refs #99'], EXAMPLE_ROWS), code: 'orphan', line: 5 },
-  { label: 'a related ref naming a (none) row', text: waveBlock(['Refs #1'], [row(1, { ticket: '(none)', verdict: 'QUARANTINED' })]), code: 'orphan', line: 2 },
+  { label: 'a related ref naming a (none) row', text: waveBlock(['Closes #1', 'Refs #2'], [row(1, { ticket: '#1', verdict: 'PASS' }), row(2, { ticket: '(none)', verdict: 'QUARANTINED' })]), code: 'orphan', line: 3 },
   { label: 'a repeated related ref', text: waveBlock(['Closes #12', 'Closes #12', 'Closes #14', 'Refs #13'], EXAMPLE_ROWS), code: 'duplicate', line: 3 },
   { label: 'the same ref under both keywords', text: waveBlock(['Refs #12', ...EXAMPLE_RELATED], EXAMPLE_ROWS), code: 'duplicate', line: 3 },
   { label: 'a ticket in two rows', text: waveBlock(['Closes #1'], [row(1, { ticket: '#1', verdict: 'PASS' }), row(2, { ticket: '#1', verdict: 'QUARANTINED' })]), code: 'duplicate', line: 8 },
@@ -327,7 +345,7 @@ const RULES: readonly RuleCase[] = [
   { label: 'a Fixes keyword', text: waveBlock(['Fixes #1'], [row(1, { ticket: '#1', verdict: 'PASS' })]), code: 'malformed', line: 2 },
   { label: 'free text among the related lines', text: waveBlock(['Closes #12', 'please merge', 'Closes #14', 'Refs #13'], EXAMPLE_ROWS), code: 'malformed', line: 3 },
   { label: 'an HTML comment among the related lines', text: waveBlock(['<!-- wave -->', ...EXAMPLE_RELATED], EXAMPLE_ROWS), code: 'malformed', line: 2 },
-  { label: '101 related lines', text: waveBlock(Array.from({ length: 101 }, (_, i) => `Refs #${i + 1}`), [row(1, { ticket: '#1', verdict: 'QUARANTINED' })]), code: 'oversize', line: 102 },
+  { label: '102 related lines (one per row, plus the tracking line, is 101)', text: waveBlock(Array.from({ length: 102 }, (_, i) => `Refs #${i + 1}`), [row(1, { ticket: '#1', verdict: 'QUARANTINED' })]), code: 'oversize', line: 103 },
 
   // --- structure ----------------------------------------------------------------
   { label: 'a wrong first heading', text: EXAMPLE.replace('## Related Issues', '## Related issues'), code: 'malformed', line: 1 },
@@ -406,8 +424,43 @@ describe('parseWaveBlock — every rule of the wave grammar', () => {
     expect(collectRuleViolations(PE.parseWaveBlock, RULES)).toEqual([])
   })
 
+  /** The labels of `rules` that `found` (collectRuleViolations output) reports. */
+  const reportedLabels = (found: readonly string[], rules: readonly RuleCase[]): string[] =>
+    rules.filter(c => found.some(f => f.startsWith(`${c.label}: expected`))).map(c => c.label)
+
+  /** The rows the tracking rule decides: each admit that carries a tracking line, and each orphan refusal. */
+  const TRACKING_ADMITS = [
+    'a leading tracking Refs line',
+    'a keyed tracking Refs line over a keyed wave',
+    'a tracking line and no row line (every row blocked)',
+    'a lone leading Refs over a (none) row is the tracking line',
+    '100 rows, 100 related lines and the tracking line',
+  ]
+
+  it('known-bad probe: the pre-tracking grammar is reported on exactly the tracking admits', () => {
+    const noTracking = (text: unknown): Result<WaveBlock> => {
+      const r = PE.parseWaveBlock(text)
+      return r.ok && r.value.tracking !== null ? { ok: false, error: { code: 'orphan', line: r.value.tracking.line } } : r
+    }
+    const found = collectRuleViolations(noTracking, RULES)
+    expect(found).toHaveLength(TRACKING_ADMITS.length)
+    expect(reportedLabels(found, RULES)).toEqual(TRACKING_ADMITS)
+  })
+
+  it('known-bad probe: a grammar that admits every line naming no row is reported on exactly the orphan refusals', () => {
+    const anyOrphan = (text: unknown): Result<WaveBlock> => {
+      const r = PE.parseWaveBlock(text)
+      return !r.ok && r.error.code === 'orphan' ? { ok: true, value: { tracking: null, related: [], rows: [] } } : r
+    }
+    const orphans = RULES.filter(c => c.code === 'orphan')
+    expect(orphans.length, 'the tracking refusals are in the table').toBeGreaterThanOrEqual(6)
+    const found = collectRuleViolations(anyOrphan, RULES)
+    expect(found).toHaveLength(orphans.length)
+    expect(reportedLabels(found, RULES)).toEqual(orphans.map(c => c.label))
+  })
+
   it('known-bad probe: a grammar that admits everything is reported on every refusal row', () => {
-    const lenient = (): Result<WaveBlock> => ({ ok: true, value: { related: [], rows: [] } })
+    const lenient = (): Result<WaveBlock> => ({ ok: true, value: { tracking: null, related: [], rows: [] } })
     const refusals = RULES.filter(c => c.code !== null)
     expect(collectRuleViolations(lenient, RULES)).toHaveLength(refusals.length)
   })
@@ -430,6 +483,20 @@ describe('parseWaveBlock — every rule of the wave grammar', () => {
       [4, '#15', 'BLOCKED', EM, EM, null, EM, L.row4],
     ])
     for (const r of [...block.related, ...block.rows]) expect(Object.isFrozen(r)).toBe(true)
+    expect(block.tracking, 'the example carries no tracking line').toBeNull()
+  })
+
+  it('parses a leading tracking line apart from the row lines, frozen', () => {
+    const block = unwrap(PE.parseWaveBlock(waveBlock([TRACKING_LINE, ...EXAMPLE_RELATED], EXAMPLE_ROWS)))
+    expect(block.tracking).toEqual({ keyword: 'Refs', ref: '#99', line: 2 })
+    expect(Object.isFrozen(block.tracking)).toBe(true)
+    expect(block.related.map(r => `${r.keyword} ${r.ref} @${r.line}`)).toEqual(['Closes #12 @3', 'Closes #14 @4', 'Refs #13 @5'])
+  })
+
+  it('a leading Refs that names a row is that row\'s line, not a tracking line', () => {
+    const block = unwrap(PE.parseWaveBlock(waveBlock(['Refs #13', 'Closes #12', 'Closes #14'], EXAMPLE_ROWS)))
+    expect(block.tracking).toBeNull()
+    expect(block.related.map(r => r.ref)).toEqual(['#13', '#12', '#14'])
   })
 
   it('a (none) ticket parses to null', () => {
@@ -849,11 +916,18 @@ function gateValuesIn(text: string): string[] | null {
   return m === null ? null : [...[...m[1].matchAll(/`([A-Z-]+)`/g)].map(x => x[1]), m[2]]
 }
 
+/** The template's tracking line, as step 3(a) writes it: `Refs` and the tracking ref, first under the heading. */
+const TRACKING_TEMPLATE_LINE = 'Refs {tracking ref}'
+/** Step 3(a)'s tracking-line rule: when it is written, and that it is never a closing line. */
+const TRACKING_RULE = '**Tracking line** — only when Pre-authoring step 5 resolved a tracking issue whose token is, as a whole, a `#N` or `KEY-N` reference'
+const TRACKING_NEVER_CLOSES = 'Never `Closes` — the tracking issue outlives the wave.'
+
 /**
  * Named collector: where the built step 3 disagrees with the grammar `check wave`
- * enforces — the template's headings, the blank line between them, the header and
- * separator verbatim under the second heading, the verdict vocabulary and the gate
- * values. A step that renders a block the script refuses opens no wave PR at all.
+ * enforces — the template's headings, the tracking line leading the related lines,
+ * the blank line between the headings, the header and separator verbatim under the
+ * second heading, the verdict vocabulary and the gate values. A step that renders
+ * a block the script refuses opens no wave PR at all.
  */
 export function collectWaveStep3Drift(built: string): string[] {
   const step = waveStep3(built)
@@ -870,6 +944,9 @@ export function collectWaveStep3Drift(built: string): string[] {
     if (lines[h2 + 1] !== PE.WAVE_TABLE_HEADER) out.push('the table header under the second heading is not WAVE_TABLE_HEADER')
     if (lines[h2 + 2] !== SEPARATOR) out.push('the separator under the header is not verbatim')
   }
+  // D-WAVE-TRACKING: the only line the grammar admits that names no row — first, and a Refs.
+  if (lines[h1 + 1] !== TRACKING_TEMPLATE_LINE) out.push(`the template does not lead its related lines with ${TRACKING_TEMPLATE_LINE}`)
+  if (!step.includes(TRACKING_RULE) || !step.includes(TRACKING_NEVER_CLOSES)) out.push('the tracking-line rule is not stated: first, `Refs` only, never `Closes`')
   const verdicts = vocabularyAfter(step, '**Verdict** — one of ')
   if (JSON.stringify(verdicts) !== JSON.stringify(PE.WAVE_VERDICTS)) out.push(`the verdict vocabulary is ${JSON.stringify(verdicts)}, WAVE_VERDICTS is ${JSON.stringify(PE.WAVE_VERDICTS)}`)
   const gates = gateValuesIn(step)
@@ -890,6 +967,8 @@ describe('parity: the built dynamic-build step 3 renders exactly the grammar che
     ['a renamed second heading', `\n${PE.WAVE_HEADINGS[1]}\n`, '\n## Evidence\n', `the template has no ${PE.WAVE_HEADINGS[1]}`],
     ['a verdict vocabulary without BLOCKED', '`PASS | UNVERIFIED | QUARANTINED | BLOCKED`', '`PASS | UNVERIFIED | QUARANTINED`', 'the verdict vocabulary'],
     ['a gate list without SKIPPED', '`FAIL-FIXED` or `SKIPPED`, else', '`FAIL-FIXED` or `RETRIED`, else', 'the gate values'],
+    ['a tracking line rendered as Closes', `\n${TRACKING_TEMPLATE_LINE}\n`, '\nCloses {tracking ref}\n', 'the template does not lead'],
+    ['a tracking rule that drops its never-Closes clause', TRACKING_NEVER_CLOSES, 'Either keyword will do.', 'the tracking-line rule'],
   ]
   for (const [label, from, to, expected] of SEEDS) {
     it(`known-bad probe: ${label} is reported, and only it`, () => {
@@ -901,6 +980,16 @@ describe('parity: the built dynamic-build step 3 renders exactly the grammar che
       expect(drift[0].startsWith(expected), drift[0]).toBe(true)
     })
   }
+
+  it('the template\'s tracking line, filled with either ref shape, is the grammar\'s tracking line; its Closes form is refused', () => {
+    for (const [ref, rows] of [['#99', EXAMPLE_ROWS], ['PROJ-9', [row(1, { ticket: 'PROJ-7', verdict: 'PASS' })]]] as const) {
+      const line = TRACKING_TEMPLATE_LINE.replace('{tracking ref}', ref)
+      const others = ref === '#99' ? EXAMPLE_RELATED : ['Refs PROJ-7']
+      expect(unwrap(PE.parseWaveBlock(waveBlock([line, ...others], rows)), ref).tracking?.ref).toBe(ref)
+      const closing = PE.parseWaveBlock(waveBlock([line.replace(/^Refs /, 'Closes '), ...others], rows))
+      expect(closing.ok ? 'admitted' : closing.error.code, `Closes ${ref}`).not.toBe('admitted')
+    }
+  })
 
   it('known-bad probe: a build with no step 3 is reported, not passed', () => {
     expect(collectWaveStep3Drift(BUILT.replace(STEP3_OPEN, '3. **Compose**'))).toHaveLength(1)

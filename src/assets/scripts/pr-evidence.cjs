@@ -65,7 +65,8 @@ const EXCEPTION_KINDS = Object.freeze(/** @type {ExceptionKind[]} */ (['ticket-l
  *   RUNS_PER_SHA            runs at one SHA (`gh run list --limit 20`)
  *   TRUST_LOOKUPS           permission lookups per spawn
  *   WAVE_BLOCK_CHARS        a whole wave block
- *   WAVE_ROWS               a wave block's table rows, and its related lines (at most one per row)
+ *   WAVE_ROWS               a wave block's table rows, and its related lines (at most one per row,
+ *                           plus the one tracking line — see D-WAVE-TRACKING)
  */
 const LIMITS = Object.freeze({
   TP_MAX: 200,
@@ -212,6 +213,7 @@ const TICKED = '- [x] ';
  * `verify-evidence.cjs check wave`:
  *
  *   ## Related Issues
+ *   Refs #9
  *   Closes #12
  *   Refs #13
  *
@@ -224,7 +226,8 @@ const TICKED = '- [x] ';
  * Every cell is a closed-vocabulary token or a bounded number, and every related
  * line is a shape-gated reference, so no byte of a ticket title, a finding or an
  * agent's prose can ride into the PR body on it. The two headings, in order; an
- * admitted block IS the body's `## Related Issues` section.
+ * admitted block IS the body's `## Related Issues` section. `Refs #9` above is the
+ * optional tracking line (D-WAVE-TRACKING).
  */
 const WAVE_HEADINGS = Object.freeze(['## Related Issues', '## Wave Evidence']);
 
@@ -386,7 +389,9 @@ const TRUSTED_PERMISSIONS = Object.freeze(['admin', 'write']);
  * @typedef {{ k: number, ticket: string | null, verdict: WaveVerdict, evaluate: string, test: string,
  *   surviving: number | null, coverage: string, line: number }} WaveRow
  *   One table row; `ticket` is null for `(none)`, `surviving` for `—`.
- * @typedef {{ related: readonly WaveRelated[], rows: readonly WaveRow[] }} WaveBlock
+ * @typedef {{ tracking: WaveRelated | null, related: readonly WaveRelated[], rows: readonly WaveRow[] }} WaveBlock
+ *   `related` holds the lines that name a row; `tracking` is the leading `Refs`
+ *   line that names none (D-WAVE-TRACKING), or null.
  */
 
 // ---------------------------------------------------------------------------
@@ -1810,17 +1815,26 @@ function parseWaveRow(line) {
 
 /**
  * D-WAVE: parse a wave block (LF or CRLF, at most WAVE_BLOCK_CHARS). It holds
- * exactly, in order: `## Related Issues`; 0–WAVE_ROWS related lines; one blank
- * line; `## Wave Evidence`; the header and separator verbatim; 1–WAVE_ROWS rows
- * T1…Tn; then only blank lines. No leading text, no other line anywhere.
+ * exactly, in order: `## Related Issues`; 0–WAVE_ROWS + 1 related lines; one
+ * blank line; `## Wave Evidence`; the header and separator verbatim; 1–WAVE_ROWS
+ * rows T1…Tn; then only blank lines. No leading text, no other line anywhere.
  *
  * D-WAVE-CLOSE — the cross rules, which make a wrong closing line unrepresentable:
- *   - a related ref names exactly one row's Ticket (`orphan` when none), and no
- *     ref repeats (`duplicate`) — nor does a Ticket across rows (`duplicate`), so
- *     "exactly one" is never two;
+ *   - a related ref names exactly one row's Ticket (`orphan` when none — the one
+ *     tracking line below aside), and no ref repeats (`duplicate`) — nor does a
+ *     Ticket across rows (`duplicate`), so "exactly one" is never two;
  *   - `Closes` names only a PASS or UNVERIFIED row (`unmerged`);
  *   - every PASS or UNVERIFIED row with a Ticket has its related line (`unlinked`);
  *   - so any other row carries at most one line, and that line is a `Refs`.
+ *
+ * D-WAVE-TRACKING: the FIRST related line may instead be the wave's tracking
+ * issue — a `Refs` line whose ref names no row. It is admitted once and only
+ * there: a later line naming no row is `orphan`, a second leading one included,
+ * and a `Closes` naming no row is `orphan` wherever it stands, because a tracking
+ * issue outlives the wave and the wave PR never closes it. The line is shape-gated
+ * like every related line, so it adds no free text to the body. A leading `Refs`
+ * that names a row is that row's line, never a tracking line.
+ *
  * Structure is checked before the cross rules, so the first failure found is the
  * one reported. An error carries a code and a line number, never input bytes.
  *
@@ -1839,7 +1853,8 @@ function parseWaveBlock(text) {
   const related = [];
   let i = 1;
   for (; i < end && rows[i] !== ''; i++) {
-    if (related.length === LIMITS.WAVE_ROWS) return fail('oversize', i + 1);
+    // One line per row at most, plus the tracking line (D-WAVE-TRACKING).
+    if (related.length === LIMITS.WAVE_ROWS + 1) return fail('oversize', i + 1);
     const m = RELATED_LINE_RE.exec(rows[i]);
     if (m === null || m.groups === undefined) return fail('malformed', i + 1);
     const closes = m.groups.closes;
@@ -1873,9 +1888,14 @@ function parseWaveBlock(text) {
   }
   if (table.length === 0) return fail('empty');
 
+  // D-WAVE-TRACKING: only the first line, only as `Refs`, and only naming no row.
+  const lead = related[0];
+  const tracking = lead !== undefined && lead.keyword === 'Refs' && !byTicket.has(lead.ref) ? lead : null;
+  const rowLines = tracking === null ? related : related.slice(1);
+
   /** @type {Set<string>} */
   const linked = new Set();
-  for (const rel of related) {
+  for (const rel of rowLines) {
     const r = byTicket.get(rel.ref);
     if (r === undefined) return fail('orphan', rel.line);
     if (linked.has(rel.ref)) return fail('duplicate', rel.line);
@@ -1885,7 +1905,7 @@ function parseWaveBlock(text) {
   for (const r of table) {
     if (r.ticket !== null && WAVE_MERGED_VERDICTS.includes(r.verdict) && !linked.has(r.ticket)) return fail('unlinked', r.line);
   }
-  return ok(Object.freeze({ related: Object.freeze(related), rows: Object.freeze(table) }));
+  return ok(Object.freeze({ tracking, related: Object.freeze(rowLines), rows: Object.freeze(table) }));
 }
 
 // ---------------------------------------------------------------------------

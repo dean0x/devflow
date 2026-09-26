@@ -176,12 +176,12 @@ Mechanical procedure (spike-verified — a workflow sub-agent survived a 253s jo
 @define engine_output_schema():
 ### Engine output schema
 
-Each ticket engine run returns a structured result. The Synthesize agent or the wave loop reads this to decide next steps. The engine fills `verdict`: the SINGLE skeleton's `overallVerdict`, or `ESCALATED` from the ticket-link stop. The wave merges `PASS` and `UNVERIFIED` and quarantines every other value, or none.
+Each ticket engine run returns a structured result. The Synthesize agent or the wave loop reads this to decide next steps. The engine fills `verdict`: the SINGLE skeleton's `overallVerdict`, or `ESCALATED` from the ticket-link or branch stop. The wave merges `PASS` and `UNVERIFIED` and quarantines every other value, or none.
 
 ```json
 {
   "ticket": "string — ticket ID or description",
-  "branch": "string — branch name for this ticket",
+  "branch": "string — the branch this ticket's setup-task created, or (none)",
   "verdict": "PASS | UNVERIFIED | PARTIAL | FAIL | ESCALATED",
   "issueId": "string — the Issue ID captured from this ticket's setup-task Handoff Values, or (none)",
   "issuePrLink": "string — the PR link line captured from the same block, or (none)",
@@ -210,7 +210,7 @@ Each ticket engine run returns a structured result. The Synthesize agent or the 
   },
   "escalations": [
     {
-      "type": "merge-conflict | gate2-fail | validation-exhausted | ambiguous-resolution | review-coverage-incomplete | dependency-blocked | engine-crash | ticket-link-missing",
+      "type": "merge-conflict | gate2-fail | validation-exhausted | ambiguous-resolution | review-coverage-incomplete | dependency-blocked | engine-crash | ticket-link-missing | branch-missing",
       "description": "string"
     }
   ],

@@ -376,7 +376,8 @@ export const memoryCommand = new Command('memory')
         p.log.success('Working memory enabled — hooks registered');
         p.log.info(color.dim('Session context will be automatically preserved across conversations'));
       }
-      // Update config to enable memory feature
+      // Update config to enable memory feature. The write keeps every unmanaged
+      // key (D-CONFIG-PRESERVE-UNMANAGED).
       if (gitRoot) {
         await updateFeature(gitRoot, 'memory', true);
       }
@@ -387,6 +388,7 @@ export const memoryCommand = new Command('memory')
     if (options.disable) {
       // Hooks remain registered (shared with other features).
       // Disable by writing memory: false to config only — hooks are not removed.
+      // The write keeps every unmanaged key (D-CONFIG-PRESERVE-UNMANAGED).
       if (gitRoot) {
         await updateFeature(gitRoot, 'memory', false);
         // Drain orphaned queue files so stale turns don't process on re-enable

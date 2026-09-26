@@ -48,7 +48,7 @@ import { readManifest, writeManifest, resolvePluginList, detectUpgrade, type Man
 import { convergeFlagsIntoSettings, countActiveFlags, readViewMode, type FlagsRecord } from '../../core/flags.js';
 import { addContextHook, removeContextHook, hasContextHook } from './context.js';
 import { writeFileAtomicExclusive } from '../../core/fs-atomic.js';
-import { writeConfig, readConfigIfPresent, type FeatureConfig } from '../../core/feature-config.js';
+import { writeManagedConfig, readConfigIfPresent, type FeatureConfig } from '../../core/feature-config.js';
 import { resolveInitSeed, applyCliToggles, resolveResetGatedInputs } from './init-seed.js';
 import { parseFrameworkList, normalizeFrameworks, type ComplianceFeatureState } from '../../core/compliance.js';
 import {
@@ -2122,12 +2122,13 @@ export const initCommand = new Command('init')
     }
 
     // Write .devflow/config.json to manage per-feature enable/disable at runtime.
-    // Uses writeConfig (full atomic write) rather than three updateFeature calls because
-    // init always sets all three features at once and is never concurrent with toggle
-    // commands — it is a one-time setup action. See D1 in feature-config.ts for the
-    // concurrency assumption shared by both write strategies.
+    // A managed read-modify-write, not a whole-file write: init owns only these four
+    // keys, and every other key in the file — the hand-written per-repo `tracker`
+    // override first among them — is carried from disk, under --reset too
+    // (D-CONFIG-PRESERVE-UNMANAGED in feature-config.ts, avoids PF-071). init is never
+    // concurrent with the toggle commands; see D1 in feature-config.ts.
     if (gitRoot) {
-      await writeConfig(gitRoot, {
+      await writeManagedConfig(gitRoot, {
         memory: memoryEnabled,
         learning: learningEnabled,
         knowledge: knowledgeEnabled,

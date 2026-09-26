@@ -5,7 +5,7 @@ description: "Use when modifying /resolve or /code-review convergence logic, add
 category: architecture
 directories: [src/assets/commands/resolve.mds, src/assets/agents/triage.md, src/assets/agents/code.md, src/core/plugins.ts, src/assets/commands/code-review.mds]
 created: 2026-07-08
-updated: 2026-08-28
+updated: 2026-09-26
 ---
 
 # Resolve Pipeline (Triage → Fix → Verify)

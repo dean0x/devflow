@@ -7,10 +7,10 @@ import {
   getConfigPath,
   readConfig,
   readConfigIfPresent,
-  writeConfig,
+  writeManagedConfig,
   updateFeature,
   isFeatureEnabled,
-  type FeatureConfig,
+  type ManagedConfig,
   type ReviewPublication,
 } from '../src/core/feature-config.js';
 
@@ -150,7 +150,7 @@ describe('readConfig', () => {
   });
 });
 
-describe('writeConfig', () => {
+describe('writeManagedConfig', () => {
   let tmpDir: string;
 
   beforeEach(() => {
@@ -162,8 +162,8 @@ describe('writeConfig', () => {
   });
 
   it('creates directories and writes config', async () => {
-    const config: FeatureConfig = { memory: false, learning: false, knowledge: true, reviewPublication: 'auto' };
-    await writeConfig(tmpDir, config);
+    const config: ManagedConfig = { memory: false, learning: false, knowledge: true, reviewPublication: 'auto' };
+    await writeManagedConfig(tmpDir, config);
 
     const configPath = getConfigPath(tmpDir);
     expect(fs.existsSync(configPath)).toBe(true);
@@ -177,8 +177,8 @@ describe('writeConfig', () => {
   });
 
   it('writes to .devflow/config.json (neutral root, not inside learning/)', async () => {
-    const config: FeatureConfig = { memory: true, learning: true, knowledge: true, reviewPublication: 'auto' };
-    await writeConfig(tmpDir, config);
+    const config: ManagedConfig = { memory: true, learning: true, knowledge: true, reviewPublication: 'auto' };
+    await writeManagedConfig(tmpDir, config);
     // Verify it wrote to .devflow/config.json, not sidecar/ or dream/ or learning/
     expect(fs.existsSync(path.join(tmpDir, '.devflow', 'config.json'))).toBe(true);
     expect(fs.existsSync(path.join(tmpDir, '.devflow', 'learning', 'config.json'))).toBe(false);
@@ -189,8 +189,8 @@ describe('writeConfig', () => {
   it('overwrites an existing config', async () => {
     writeDevflowConfig(tmpDir, { memory: true, learning: true, knowledge: true });
 
-    const config: FeatureConfig = { memory: false, learning: false, knowledge: false, reviewPublication: 'auto' };
-    await writeConfig(tmpDir, config);
+    const config: ManagedConfig = { memory: false, learning: false, knowledge: false, reviewPublication: 'auto' };
+    await writeManagedConfig(tmpDir, config);
 
     const raw = fs.readFileSync(getConfigPath(tmpDir), 'utf-8');
     const parsed = JSON.parse(raw);
@@ -280,7 +280,7 @@ describe('isFeatureEnabled', () => {
   });
 });
 
-describe('writeConfig atomic pattern', () => {
+describe('writeManagedConfig atomic pattern', () => {
   let tmpDir: string;
 
   beforeEach(() => {
@@ -292,8 +292,8 @@ describe('writeConfig atomic pattern', () => {
   });
 
   it('writes valid JSON readable by readConfig (atomic pattern produces correct output)', async () => {
-    const config: FeatureConfig = { memory: false, learning: false, knowledge: true, reviewPublication: 'auto' };
-    await writeConfig(tmpDir, config);
+    const config: ManagedConfig = { memory: false, learning: false, knowledge: true, reviewPublication: 'auto' };
+    await writeManagedConfig(tmpDir, config);
 
     // readConfig should be able to read the atomically-written config
     const read = await readConfig(tmpDir);
@@ -303,8 +303,8 @@ describe('writeConfig atomic pattern', () => {
   });
 
   it('leaves no .tmp.* files behind after successful write', async () => {
-    const config: FeatureConfig = { memory: true, learning: true, knowledge: false, reviewPublication: 'auto' };
-    await writeConfig(tmpDir, config);
+    const config: ManagedConfig = { memory: true, learning: true, knowledge: false, reviewPublication: 'auto' };
+    await writeManagedConfig(tmpDir, config);
 
     const devflowDir = path.join(tmpDir, '.devflow');
     const files = fs.readdirSync(devflowDir);
@@ -313,8 +313,8 @@ describe('writeConfig atomic pattern', () => {
   });
 
   it('overwrites previous config atomically', async () => {
-    await writeConfig(tmpDir, { memory: true, learning: true, knowledge: true, reviewPublication: 'auto' });
-    await writeConfig(tmpDir, { memory: false, learning: false, knowledge: false, reviewPublication: 'auto' });
+    await writeManagedConfig(tmpDir, { memory: true, learning: true, knowledge: true, reviewPublication: 'auto' });
+    await writeManagedConfig(tmpDir, { memory: false, learning: false, knowledge: false, reviewPublication: 'auto' });
 
     const read = await readConfig(tmpDir);
     expect(read.memory).toBe(false);
@@ -348,7 +348,7 @@ describe('readConfigIfPresent', () => {
   });
 
   it('returns coerced config when config.json is present', async () => {
-    await writeConfig(tmpDir, { memory: false, learning: true, knowledge: false, reviewPublication: 'auto' });
+    await writeManagedConfig(tmpDir, { memory: false, learning: true, knowledge: false, reviewPublication: 'auto' });
     const result = await readConfigIfPresent(tmpDir);
     expect(result).not.toBeNull();
     expect(result!.memory).toBe(false);
@@ -419,19 +419,19 @@ describe('reviewPublication coercion', () => {
   });
 
   it('valid value "auto" round-trips through read/write', async () => {
-    await writeConfig(tmpDir, { memory: true, learning: true, knowledge: true, reviewPublication: 'auto' });
+    await writeManagedConfig(tmpDir, { memory: true, learning: true, knowledge: true, reviewPublication: 'auto' });
     const config = await readConfig(tmpDir);
     expect(config.reviewPublication).toBe('auto');
   });
 
   it('valid value "full" round-trips through read/write', async () => {
-    await writeConfig(tmpDir, { memory: true, learning: true, knowledge: true, reviewPublication: 'full' });
+    await writeManagedConfig(tmpDir, { memory: true, learning: true, knowledge: true, reviewPublication: 'full' });
     const config = await readConfig(tmpDir);
     expect(config.reviewPublication).toBe('full');
   });
 
   it('valid value "off" round-trips through read/write', async () => {
-    await writeConfig(tmpDir, { memory: true, learning: true, knowledge: true, reviewPublication: 'off' });
+    await writeManagedConfig(tmpDir, { memory: true, learning: true, knowledge: true, reviewPublication: 'off' });
     const config = await readConfig(tmpDir);
     expect(config.reviewPublication).toBe('off');
   });
@@ -458,7 +458,7 @@ describe('reviewPublication preservation across updateFeature', () => {
 
   it('updateFeature preserves reviewPublication: "off" when toggling knowledge', async () => {
     // Write initial config with reviewPublication set to a non-default value.
-    await writeConfig(tmpDir, { memory: true, learning: true, knowledge: true, reviewPublication: 'off' });
+    await writeManagedConfig(tmpDir, { memory: true, learning: true, knowledge: true, reviewPublication: 'off' });
 
     // Toggle a boolean feature — this must not erase reviewPublication.
     await updateFeature(tmpDir, 'knowledge', false);
@@ -469,7 +469,7 @@ describe('reviewPublication preservation across updateFeature', () => {
   });
 
   it('updateFeature preserves reviewPublication: "full" when toggling memory', async () => {
-    await writeConfig(tmpDir, { memory: true, learning: true, knowledge: true, reviewPublication: 'full' });
+    await writeManagedConfig(tmpDir, { memory: true, learning: true, knowledge: true, reviewPublication: 'full' });
     await updateFeature(tmpDir, 'memory', false);
 
     const config = await readConfig(tmpDir);
