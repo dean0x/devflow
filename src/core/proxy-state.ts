@@ -126,14 +126,17 @@ export async function writeProxyState(
 // ---------------------------------------------------------------------------
 
 /**
- * Accepted top-level keys for the subswitch 0.4.0 FileConfigSchema (z.strictObject).
- * Unknown top-level keys cause a hard relay startup error — never emit them.
+ * Top-level keys devflow carries into the routing config. Unknown top-level keys
+ * cause a hard relay startup error — never emit them.
  *
- * @D-EFR-4 Subswitch 0.4.0 routing config contract:
- *   FileConfigSchema is a z.strictObject with exactly 5 accepted top-level keys:
- *   port, logLevel, anthropic, providers, limits. Unknown keys cause a hard startup
- *   error — the relay refuses to start. anthropic and limits are themselves
- *   strictObject + prefault({}), so they may be partially specified.
+ * @D-EFR-4 Subswitch 0.5.0 routing config contract:
+ *   FileConfigSchema is a z.strictObject with exactly 6 accepted top-level keys:
+ *   port, logLevel, anthropic, providers, limits, codexIngress. Unknown keys cause a
+ *   hard startup error — the relay refuses to start. anthropic and limits are
+ *   themselves strictObject + prefault({}), so they may be partially specified.
+ *   codexIngress is accepted by the relay but deliberately NOT carried: devflow's
+ *   relay serves Claude Code only, and the ingress block would make it accept native
+ *   Codex traffic and hold Claude credentials on devflow's behalf.
  */
 const ROUTING_CONFIG_ALLOWED_TOP_KEYS = new Set<string>([
   'port', 'logLevel', 'anthropic', 'providers', 'limits',
@@ -203,7 +206,7 @@ export function buildRoutingConfigJson(port: number, existingContent?: string): 
       const parsed = JSON.parse(existingContent) as unknown;
       if (typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed)) {
         for (const [k, v] of Object.entries(parsed as Record<string, unknown>)) {
-          // Only preserve the 5 accepted top-level keys; port is always ours.
+          // Only preserve the carried top-level keys; port is always ours.
           if (ROUTING_CONFIG_ALLOWED_TOP_KEYS.has(k) && k !== 'port') {
             preserved[k] = v;
           }
