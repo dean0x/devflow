@@ -1,5 +1,5 @@
 import { promises as fs, writeFileSync, unlinkSync } from 'fs';
-import { execSync } from 'child_process';
+import { execFileSync } from 'child_process';
 import * as path from 'path';
 import * as os from 'os';
 import * as p from '@clack/prompts';
@@ -693,11 +693,14 @@ export async function installManagedSettings(
   }
 
   try {
-    execSync(`sudo mkdir -p '${managedDir}'`, { stdio: 'inherit' });
-    // Write via sudo tee to avoid shell quoting issues with the JSON content
+    execFileSync('sudo', ['mkdir', '-p', managedDir], { stdio: 'inherit' });
+    // Stage the JSON in a file and copy it with sudo. Every sudo call takes an
+    // argv (execFileSync, no shell), so no path is ever re-parsed by a shell — a
+    // package root under a home directory holding a quote cannot break or extend
+    // the root command.
     const tmpFile = path.join(rootDir, '.managed-settings-tmp.json');
     await fs.writeFile(tmpFile, content, 'utf-8');
-    execSync(`sudo cp '${tmpFile}' '${managedPath}'`, { stdio: 'inherit' });
+    execFileSync('sudo', ['cp', tmpFile, managedPath], { stdio: 'inherit' });
     await fs.rm(tmpFile, { force: true });
     if (verbose) {
       p.log.success(`Managed settings written to ${managedPath} (via sudo)`);
@@ -821,11 +824,11 @@ export async function removeManagedSettings(
 
   try {
     if (shouldDelete) {
-      execSync(`sudo rm '${managedPath}'`, { stdio: 'inherit' });
+      execFileSync('sudo', ['rm', managedPath], { stdio: 'inherit' });
     } else {
       const tmpFile = path.join(rootDir, '.managed-settings-tmp.json');
       await fs.writeFile(tmpFile, updatedContent!, 'utf-8');
-      execSync(`sudo cp '${tmpFile}' '${managedPath}'`, { stdio: 'inherit' });
+      execFileSync('sudo', ['cp', tmpFile, managedPath], { stdio: 'inherit' });
       await fs.rm(tmpFile, { force: true });
     }
     if (verbose) {
