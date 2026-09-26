@@ -80,6 +80,22 @@ export type BooleanFeature = {
   [K in keyof FeatureConfig]-?: FeatureConfig[K] extends boolean ? K : never;
 }[keyof FeatureConfig];
 
+/**
+ * The keys of FeatureConfig that devflow WRITES. `tracker` is not one of them:
+ * no devflow command sets the per-repo override, it is hand-written and only
+ * ever carried (see {@link mergeManagedConfig}).
+ */
+export type ManagedConfig = Omit<FeatureConfig, 'tracker'>;
+
+/**
+ * Keys devflow itself once wrote and has retired. A managed write drops them
+ * rather than carrying them, and `decisions` is why that matters: coerceConfig
+ * lets the legacy `decisions` value WIN over `learning`, so a carried
+ * `decisions` would revert the learning value just written on the very next
+ * read. `autoCommit` is inert — coerceConfig ignores it.
+ */
+const RETIRED_CONFIG_KEYS: ReadonlySet<string> = new Set(['decisions', 'autoCommit']);
+
 export const DEFAULT_CONFIG: FeatureConfig = {
   memory: true,
   learning: true,
@@ -122,6 +138,15 @@ export function parseTrackerOverride(raw: unknown): TrackerConfigOverride {
 }
 
 /**
+ * Whether a parsed JSON value is an object a config can be read from — the one
+ * test for "the file holds a config", shared by the reader and the managed
+ * write so the two never disagree about which files count as empty.
+ */
+function isJsonObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+/**
  * Parse and narrow an unknown JSON value into a FeatureConfig, merging onto
  * DEFAULT_CONFIG. Pure function — no I/O, no side effects.
  *
@@ -136,8 +161,8 @@ export function parseTrackerOverride(raw: unknown): TrackerConfigOverride {
  * the next candidate path).
  */
 function coerceConfig(parsed: unknown): FeatureConfig | null {
-  if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) return null;
-  const p = parsed as Record<string, unknown>;
+  if (!isJsonObject(parsed)) return null;
+  const p = parsed;
 
   // Coalesce decisions (legacy key) → learning. decisions wins when both present.
   let learning: boolean = DEFAULT_CONFIG.learning;
@@ -183,27 +208,88 @@ function coerceConfig(parsed: unknown): FeatureConfig | null {
  * through to DEFAULT_CONFIG (all features enabled by default).
  */
 export async function readConfig(projectRoot: string): Promise<FeatureConfig> {
-  const configPath = getFeatureConfigPath(projectRoot);
+  return coerceConfig(await readConfigBody(projectRoot)) ?? { ...DEFAULT_CONFIG };
+}
+
+/**
+ * The parsed JSON body of a project's config file, or `undefined` when the file
+ * is absent, unreadable or malformed. Every read of the file goes through here,
+ * so readConfig, readConfigIfPresent and writeManagedConfig agree on what an
+ * unusable file means.
+ */
+async function readConfigBody(projectRoot: string): Promise<unknown> {
   try {
-    const config = coerceConfig(JSON.parse(await fs.readFile(configPath, 'utf-8')));
-    if (config !== null) return config;
-    return { ...DEFAULT_CONFIG };
+    return JSON.parse(await fs.readFile(getFeatureConfigPath(projectRoot), 'utf-8'));
   } catch {
-    return { ...DEFAULT_CONFIG };
+    // ENOENT (absent) or SyntaxError (malformed) — treat as not present
+    return undefined;
   }
 }
 
 /**
- * Write the feature config for a project root.
+ * Serialise a config body to a project's config file.
  * Creates the .devflow/ directory if missing.
  * Uses an atomic temp+rename pattern to prevent partial reads under concurrent writes.
  */
-export async function writeConfig(projectRoot: string, config: FeatureConfig): Promise<void> {
+async function writeConfigBody(projectRoot: string, body: object): Promise<void> {
   const configPath = getFeatureConfigPath(projectRoot);
   await fs.mkdir(path.join(projectRoot, '.devflow'), { recursive: true });
   const tmpPath = configPath + '.tmp.' + process.pid;
-  await fs.writeFile(tmpPath, JSON.stringify(config, null, 2) + '\n', { encoding: 'utf-8', mode: 0o600 });
+  await fs.writeFile(tmpPath, JSON.stringify(body, null, 2) + '\n', { encoding: 'utf-8', mode: 0o600 });
   await fs.rename(tmpPath, configPath);
+}
+
+/**
+ * Write the feature config for a project root — the whole file, exactly the
+ * declared shape. Callers that own only part of the file use
+ * {@link writeManagedConfig} instead.
+ */
+export async function writeConfig(projectRoot: string, config: FeatureConfig): Promise<void> {
+  await writeConfigBody(projectRoot, config);
+}
+
+/**
+ * Merge devflow's managed keys over the config body the file already holds.
+ * Pure — returns a new object and never mutates `existing`.
+ *
+ * D-CONFIG-PRESERVE-UNMANAGED (avoids PF-071): `.devflow/config.json` is a
+ * user-editable file that devflow only PARTLY owns. The managed keys come from
+ * `managed`; every other key comes from the file, verbatim and by key presence
+ * — the hand-written per-repo `tracker` override (whose invalid values must
+ * survive so their DEGRADED report can name them) and any key devflow does not
+ * know. The alternative, writing the declared shape, is a silent delete of all
+ * of them on every `devflow init`. Only the four managed keys are copied from
+ * `managed`, by name, so a caller holding a whole FeatureConfig still cannot
+ * overwrite the file's override with its in-memory copy. The retired keys in
+ * RETIRED_CONFIG_KEYS are dropped, not carried. A body that is not a JSON
+ * object (absent, malformed, an array) reads as empty, exactly as
+ * readConfigIfPresent treats it.
+ *
+ * This holds under `devflow init --reset` too: a factory reset returns
+ * devflow's own settings to their defaults through `managed`, and leaves the
+ * keys devflow never wrote alone.
+ */
+export function mergeManagedConfig(existing: unknown, managed: ManagedConfig): Record<string, unknown> {
+  const fileKeys = isJsonObject(existing)
+    ? Object.fromEntries(Object.entries(existing).filter(([key]) => !RETIRED_CONFIG_KEYS.has(key)))
+    : {};
+  return {
+    ...fileKeys,
+    memory: managed.memory,
+    learning: managed.learning,
+    knowledge: managed.knowledge,
+    reviewPublication: managed.reviewPublication,
+  };
+}
+
+/**
+ * Write devflow's managed keys to a project's config, keeping every key it
+ * does not manage (D-CONFIG-PRESERVE-UNMANAGED). A read-modify-write under the
+ * same concurrency assumption as updateFeature (D1).
+ */
+export async function writeManagedConfig(projectRoot: string, managed: ManagedConfig): Promise<void> {
+  const existing = await readConfigBody(projectRoot);
+  await writeConfigBody(projectRoot, mergeManagedConfig(existing, managed));
 }
 
 /**
@@ -252,12 +338,6 @@ export async function isFeatureEnabled(
  * are disabled.
  */
 export async function readConfigIfPresent(projectRoot: string): Promise<FeatureConfig | null> {
-  const configPath = getFeatureConfigPath(projectRoot);
-  try {
-    const text = await fs.readFile(configPath, 'utf-8');
-    return coerceConfig(JSON.parse(text)); // null when JSON is not a plain object
-  } catch {
-    // ENOENT (absent) or SyntaxError (malformed) — treat as not present
-    return null;
-  }
+  // null when the file is absent or malformed, or its JSON is not a plain object
+  return coerceConfig(await readConfigBody(projectRoot));
 }
