@@ -559,6 +559,36 @@ interface InitOptions {
   reset?: boolean;
 }
 
+/** The queue drains `drainDisabledFeatureQueues` performs — injected for tests. */
+export interface DisabledQueueDrainIO {
+  drainMemoryQueue(projectRoot: string): Promise<void>;
+  drainLearningQueue(gitRoot: string): Promise<void>;
+}
+
+/**
+ * Drain this repo's memory and learning queues for each feature init switched
+ * off, so stale turns are not processed on a future re-enable — the same drains
+ * `devflow memory --disable` and `devflow learning --disable` perform. Other
+ * repos' queues are inert: every gate reads the machine-wide switch, so nothing
+ * appends to or processes them while the feature is off.
+ *
+ * D-INIT-DRAIN-AFTER-SWITCH: the drain runs only AFTER the manifest holding the
+ * switch is persisted (`manifestWritten`), the order the standalone toggles use
+ * (write the switch, then drain). The capture hooks read the manifest on every
+ * turn, so draining first left a window — the whole install — in which a
+ * concurrent session, still reading the old "on", appended turns that then
+ * survived the disable. When the manifest write failed the feature is still on
+ * everywhere, so its queue is live and is left alone.
+ */
+export async function drainDisabledFeatureQueues(
+  opts: { gitRoot: string | null; memoryEnabled: boolean; learningEnabled: boolean; manifestWritten: boolean },
+  io: DisabledQueueDrainIO = { drainMemoryQueue, drainLearningQueue },
+): Promise<void> {
+  if (!opts.manifestWritten || opts.gitRoot === null) return;
+  if (!opts.memoryEnabled) await io.drainMemoryQueue(opts.gitRoot);
+  if (!opts.learningEnabled) await io.drainLearningQueue(opts.gitRoot);
+}
+
 /**
  * The manifest `devflow init --hud-only` writes. Pure — never mutates `existing`.
  *
@@ -2177,18 +2207,6 @@ export const initCommand = new Command('init')
         // every other feature (PF-015 — read the post-gate binding, not the file).
         reviewPublication: seedConfig?.reviewPublication ?? DEFAULT_CONFIG.reviewPublication,
       });
-
-      // Drain this repo's queues when their feature is off, so stale turns are
-      // not processed on a future re-enable — the same drains `devflow memory
-      // --disable` and `devflow learning --disable` perform. (Other repos'
-      // queues are inert: every gate reads the machine-wide switch, so nothing
-      // appends to or processes them while the feature is off.)
-      if (!memoryEnabled) {
-        await drainMemoryQueue(gitRoot);
-      }
-      if (!learningEnabled) {
-        await drainLearningQueue(gitRoot);
-      }
     }
 
     // Configure HUD
@@ -2496,6 +2514,14 @@ export const initCommand = new Command('init')
       if (msg.level === 'warn') p.log.warn(msg.text);
       else p.log.info(msg.text);
     }
+
+    // Only now that the machine-wide switch is on disk (D-INIT-DRAIN-AFTER-SWITCH).
+    await drainDisabledFeatureQueues({
+      gitRoot,
+      memoryEnabled,
+      learningEnabled,
+      manifestWritten: trackerLifecycle.manifestWritten,
+    });
 
     // Name the active provider and what the selection moved. The reference
     // counts come from the install report rather than being recomputed: the

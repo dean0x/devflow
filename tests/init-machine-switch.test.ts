@@ -5,7 +5,9 @@
  * sandboxed CLI run cannot reach cheaply.
  */
 import { describe, it, expect } from 'vitest';
-import { buildHudOnlyManifest } from '../src/cli/commands/init.js';
+import { readFileSync } from 'fs';
+import * as path from 'path';
+import { buildHudOnlyManifest, drainDisabledFeatureQueues } from '../src/cli/commands/init.js';
 import type { ManifestData } from '../src/core/manifest.js';
 
 const NOW = '2026-09-26T00:00:00.000Z';
@@ -57,5 +59,59 @@ describe('buildHudOnlyManifest', () => {
     });
     expect(result.features.tracker.provider).toBe('github');
     expect(result.features.compliance).toEqual({ enabled: false, frameworks: [] });
+  });
+});
+
+describe('drainDisabledFeatureQueues (D-INIT-DRAIN-AFTER-SWITCH)', () => {
+  const ROOT = '/repo';
+
+  function recorder(): { calls: string[]; io: { drainMemoryQueue(r: string): Promise<void>; drainLearningQueue(r: string): Promise<void> } } {
+    const calls: string[] = [];
+    return {
+      calls,
+      io: {
+        drainMemoryQueue: async (r) => { calls.push(`memory:${r}`); },
+        drainLearningQueue: async (r) => { calls.push(`learning:${r}`); },
+      },
+    };
+  }
+
+  it('drains the queue of every feature switched off once the switch is persisted', async () => {
+    const { calls, io } = recorder();
+    await drainDisabledFeatureQueues({ gitRoot: ROOT, memoryEnabled: false, learningEnabled: false, manifestWritten: true }, io);
+    expect(calls).toEqual([`memory:${ROOT}`, `learning:${ROOT}`]);
+  });
+
+  it('drains only the features that are off', async () => {
+    const memOff = recorder();
+    await drainDisabledFeatureQueues({ gitRoot: ROOT, memoryEnabled: false, learningEnabled: true, manifestWritten: true }, memOff.io);
+    expect(memOff.calls).toEqual([`memory:${ROOT}`]);
+
+    const learnOff = recorder();
+    await drainDisabledFeatureQueues({ gitRoot: ROOT, memoryEnabled: true, learningEnabled: false, manifestWritten: true }, learnOff.io);
+    expect(learnOff.calls).toEqual([`learning:${ROOT}`]);
+  });
+
+  it('drains nothing when the manifest was not written — the switch is still on, so the turns are live', async () => {
+    const { calls, io } = recorder();
+    await drainDisabledFeatureQueues({ gitRoot: ROOT, memoryEnabled: false, learningEnabled: false, manifestWritten: false }, io);
+    expect(calls).toEqual([]);
+  });
+
+  it('drains nothing outside a git repository', async () => {
+    const { calls, io } = recorder();
+    await drainDisabledFeatureQueues({ gitRoot: null, memoryEnabled: false, learningEnabled: false, manifestWritten: true }, io);
+    expect(calls).toEqual([]);
+  });
+
+  it('init calls it only after the manifest write, never before (a concurrent session could refill the queue)', () => {
+    const src = readFileSync(path.resolve(import.meta.dirname, '..', 'src', 'cli', 'commands', 'init.ts'), 'utf-8');
+    const persistAt = src.indexOf('await persistManifestThenConvergeTracker({');
+    const drainCalls = [...src.matchAll(/await drainDisabledFeatureQueues\(/g)].map(m => m.index ?? -1);
+    expect(persistAt).toBeGreaterThan(-1);
+    expect(drainCalls).toHaveLength(1);
+    expect(drainCalls[0]).toBeGreaterThan(persistAt);
+    // No direct drain remains in the action body ahead of the manifest write.
+    expect(src.slice(0, persistAt)).not.toMatch(/await drain(Memory|Learning)Queue\(gitRoot\)/);
   });
 });
