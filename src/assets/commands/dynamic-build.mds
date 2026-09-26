@@ -125,7 +125,6 @@ export const meta = {
 // SINGLE mode: one ticket, one branch, full engine
 
 const TICKET = args.ticket || args[0] || "see task description";
-const BRANCH = args.branch || `ticket/${TICKET.replace(/[^a-z0-9]/gi, '-').toLowerCase()}`;
 const PLAN = args.plan || null;
 const CRITERIA = args.criteria || null;
 const TEST_PLAN = args.testPlan || null;  // the plan's checked TP lines, one string (Pre-authoring step 4)
@@ -134,7 +133,7 @@ const ISSUE_INPUT = args.issueInput || args.issueNumber || "(none)";  // this ti
 const ISSUE_REQUIRED = String(args.issueRequired) === "false" ? "false" : "true";  // Pre-authoring step 0; only an explicit false turns it off — absent or unrecognised fails closed, like the resolver
 const APPLY_CONVENTIONS = String(args.applyConventions) === "false" ? "false" : "true";
 
-// Phase 1: Git setup — declare the operation; the agent owns the process
+// Phase 1: Git setup — declare the operation; the agent owns the process, the branch name included
 const setup = await phase("setup", () =>
   agent(`OPERATION: setup-task
 BASE_BRANCH: ${args.baseBranch || "HEAD"}
@@ -142,7 +141,7 @@ TASK_DESCRIPTION: ${TICKET}
 ISSUE_REQUIRED: ${ISSUE_REQUIRED}
 APPLY_CONVENTIONS: ${APPLY_CONVENTIONS}
 ${ISSUE_INPUT !== "(none)" ? "ISSUE_INPUT: " + ISSUE_INPUT : ""}
-Return: {"issueId": "<the - **Issue ID**: value under your ### Handoff Values, or (none)>", "prLinkLine": "<the - **PR link line**: value, or (none)>"}`, { agentType: "Git" })
+Return: {"branch": "<the - **Branch name**: value under your ### Branch, or (none)>", "issueId": "<the - **Issue ID**: value under your ### Handoff Values, or (none)>", "prLinkLine": "<the - **PR link line**: value, or (none)>"}`, { agentType: "Git" })
 );
 
 // The ticket's own Handoff Values, read from setup-task's Output — never derived from ISSUE_INPUT.
@@ -150,10 +149,17 @@ Return: {"issueId": "<the - **Issue ID**: value under your ### Handoff Values, o
 const ISSUE_ID_SHAPE = /^(?:[1-9][0-9]{0,8}|[A-Z][A-Z0-9_]{0,9}-[1-9][0-9]{0,8})$/;
 const ISSUE_NUMBER = ISSUE_ID_SHAPE.test(String(setup?.issueId ?? "")) ? setup.issueId : "(none)";  // the captured Issue ID; "(none)" ⇒ none was captured
 const ISSUE_PR_LINK = setup?.prLinkLine || "(none)";  // "(none)" ⇒ Code emits the heading with no reference
+// The branch setup-task created, as it reported it: every later phase and the merge use it. The engine never names one.
+const BRANCH = typeof setup?.branch === "string" && setup.branch.trim() !== "" && setup.branch.trim() !== "(none)" ? setup.branch : "(none)";
 
 // Ticket-link stop, before implement. The workflow cannot ask, so it never records an exception: it stops.
 if (ISSUE_REQUIRED === "true" && ISSUE_NUMBER === "(none)") {
   return { ticket: TICKET, branch: BRANCH, verdict: "ESCALATED", issueId: "(none)", issuePrLink: ISSUE_PR_LINK, escalations: [{ type: "ticket-link-missing", description: "setup-task captured no Issue ID while issues are required — link or create this ticket's issue, then re-run" }] };
+}
+
+// Branch stop, before implement: with no branch there is nothing to build on or merge — a correctness stop, not a shape gate.
+if (BRANCH === "(none)") {
+  return { ticket: TICKET, branch: BRANCH, verdict: "ESCALATED", issueId: ISSUE_NUMBER, issuePrLink: ISSUE_PR_LINK, escalations: [{ type: "branch-missing", description: "setup-task reported no branch name — check its Output, then re-run" }] };
 }
 
 // Phase 2: Implement
@@ -505,7 +511,7 @@ When WAVE mode is detected, author a workflow that wraps the single-ticket engin
 
 **Wave workflow structure (author after the SINGLE engine blocks above):**
 
-The wave workflow uses the same phases as SINGLE but wraps them in a wave loop. The integration branch is `wave/<initiative>` — the initiative slug, referenced below as `\{slug\}` — (or the user's current branch). Per-ticket branches are `ticket/<slug>`. The Git agent manages worktrees for parallel-eligible tickets. After every merge: Validate agent (build + test). Escalations accumulate in a list; the final report lists all of them.
+The wave workflow uses the same phases as SINGLE but wraps them in a wave loop. The integration branch is `wave/<initiative>` — the initiative slug, referenced below as `\{slug\}` — (or the user's current branch). Each ticket works on the branch setup-task created. The Git agent manages worktrees for parallel-eligible tickets. After every merge: Validate agent (build + test). Escalations accumulate in a list; the final report lists all of them.
 
 Wave skeleton — compact reference (see `wave_loop()` doctrine for full semantics):
 
@@ -547,11 +553,11 @@ Return: {"ready": [...ticket-ids], "blocked": [{"ticket": "id", "namedBlocker": 
 
   for (const ticketId of ready) {
     try {
-      // ticketId is the ISSUE_REF the pre-fetch heading printed — this ticket's OWN reference: the engine's `ticket` (its TICKET,
-      // slugged into the BRANCH merged below) and its setup-task ISSUE_INPUT; plans[ticketId] is its own plan, criteria and checked testPlan (Pre-authoring step 4)
+      // ticketId is the ISSUE_REF the pre-fetch heading printed — this ticket's OWN reference: the engine's `ticket` (its TICKET)
+      // and its setup-task ISSUE_INPUT; the engine returns the branch that setup-task created, merged below; plans[ticketId] is its own plan, criteria and checked testPlan (Pre-authoring step 4)
       const engineResult = await runSingleTicketEngine({ ticket: ticketId, baseBranch: INTEGRATION_BRANCH, ...(plans[ticketId] || {}), decisionsContext: DECISIONS_CONTEXT, issueRequired: ISSUE_REQUIRED, applyConventions: APPLY_CONVENTIONS, issueInput: ticketId });
       // Check both verdict (engine_output_schema) and overallVerdict (SINGLE skeleton alias).
-      // PASS and UNVERIFIED merge; PARTIAL, FAIL, ESCALATED (the ticket-link stop included) or no verdict quarantine.
+      // PASS and UNVERIFIED merge; PARTIAL, FAIL, ESCALATED (the ticket-link and branch stops included) or no verdict quarantine.
       if (["PASS", "UNVERIFIED"].includes(engineResult.verdict || engineResult.overallVerdict)) {
         const merge = await agent(`Merge ${engineResult.branch} to ${INTEGRATION_BRANCH}. Include ticket ID ${ticketId} in the merge commit message. Run Validate agent (build + test) after merge.
 Return: {"merged": true} — or {"merged": false, "reason": "<why>"} when the merge or the post-merge build failed and the merge was not kept.`, { agentType: "Git" });

@@ -19,6 +19,12 @@
  *          `required` a merged row that links no ticket blocks it too.
  *   AC-8   (its flow half) the two frozen dynamic-build anchors stay the first
  *          occurrences, and every new step sits below them.
+ *   W2     (#376) the engine works on the branch its setup-task created, used
+ *          verbatim in every phase and the merge; it mints no name, and a
+ *          setup-task that reports none stops the ticket (ESCALATED
+ *          `branch-missing`) — a correctness stop, not a shape gate.
+ *   W3     (#376) with a tracking issue, the rendered wave block leads with its
+ *          `Refs` line, and `check wave` admits it.
  *
  * The engine and the wave loop are checked by EXECUTING the shipped skeletons —
  * the SINGLE workflow script and the wave round loop, both read from the built
@@ -108,8 +114,13 @@ interface Spawn { readonly agentType: string; readonly prompt: string }
 type Agent = (prompt: string, opts: { agentType: string }) => Promise<unknown>
 type EngineResult = Record<string, unknown> & { verdict?: string; escalations?: Array<{ type: string }> }
 
-/** What one ticket's world answers: its setup-task Handoff Values and its Test verdict. */
+/** What one ticket's world answers: its setup-task Output and its Test verdict. */
 interface TicketScript {
+  /**
+   * `- **Branch name**:` — absent ⇒ the branch a real setup-task derives (createdBranch);
+   * null ⇒ setup-task reports none; a string ⇒ exactly that.
+   */
+  readonly branch?: string | null
   /** `- **Issue ID**:` — absent ⇒ setup-task captured none. */
   readonly issueId?: string
   /** `- **PR link line**:` — absent ⇒ none. */
@@ -131,6 +142,21 @@ interface World {
 }
 
 /**
+ * The branch a stub setup-task creates when its script names none — the shape a
+ * real one derives from the issue (`#12` → `feat/12-work`), and never the
+ * `ticket/<slug>` shape the engine used to mint.
+ */
+function createdBranch(ref: string): string {
+  return `feat/${ref.replace(/[^A-Za-z0-9]/g, '').toLowerCase()}-work`
+}
+
+/** The `- **Branch name**:` a stub setup-task reports for `ref`: its script's, else createdBranch's; undefined ⇒ none. */
+function reportedBranch(world: World, ref: string): string | undefined {
+  const b = world.tickets[ref]?.branch
+  return b === undefined ? createdBranch(ref) : b ?? undefined
+}
+
+/**
  * A stub agent for every type the two skeletons spawn. Each answers the return
  * contract its prompt pins, and every spawn is recorded in order. The ticket a
  * spawn belongs to is the one whose setup-task ran last — the engine runs its
@@ -148,8 +174,9 @@ function stubAgent(world: World, spawns: Spawn[]): Agent {
       return { ready: [...ready, ...(world.injectReady ?? [])], blocked: [] }
     }
     if (opts.agentType === 'Git' && prompt.startsWith('OPERATION: setup-task')) {
-      current = world.tickets[/^ISSUE_INPUT: (.*)$/m.exec(prompt)?.[1] ?? '(none)'] ?? {}
-      return { issueId: current.issueId, prLinkLine: current.prLinkLine }
+      const ref = /^ISSUE_INPUT: (.*)$/m.exec(prompt)?.[1] ?? '(none)'
+      current = world.tickets[ref] ?? {}
+      return { branch: reportedBranch(world, ref), issueId: current.issueId, prLinkLine: current.prLinkLine }
     }
     if (opts.agentType === 'Git' && prompt.startsWith('Merge ')) {
       // The ticket is the ID the merge prompt names, never parsed back out of the branch spelling.
@@ -185,10 +212,11 @@ interface WaveRow {
   readonly coverageComplete?: boolean
 }
 
-/** One engine run the wave started: the args it passed and the result the engine returned. */
+/** One engine run the wave started: the args it passed, the result the engine returned, and the spawns it made. */
 interface EngineRun {
   readonly args: Readonly<Record<string, unknown>>
   readonly result: EngineResult
+  readonly spawns: readonly Spawn[]
 }
 
 interface WaveRun {
@@ -219,8 +247,9 @@ async function runWave(
   const engines: EngineRun[] = []
   const agent = stubAgent(world, spawns)
   const engine = async (args: Record<string, unknown>): Promise<EngineResult> => {
+    const from = spawns.length
     const result = await runEngine(engineBody, args, agent)
-    engines.push({ args, result })
+    engines.push({ args, result, spawns: spawns.slice(from) })
     return result
   }
   const run = new AsyncFunction(
@@ -369,13 +398,16 @@ describe('AC-10: each ticket gets its own reference; its Code agents get what se
 })
 
 // ---------------------------------------------------------------------------
-// The wave's engine runs under each ticket's own TICKET/BRANCH, off the
-// integration branch, and the merge names the branch it built on
+// W2 (#376) — the engine works on the branch its setup-task created, verbatim,
+// off the integration branch; it never mints one, and the merge names that
+// branch. A setup-task that reports no branch stops the ticket.
 // ---------------------------------------------------------------------------
 
-/** The SINGLE engine's fallback ticket, and the branch it slugs to: no wave ticket may run under either. */
+/** The SINGLE engine's fallback ticket: no wave ticket may run under it. */
 const FALLBACK_TICKET = 'see task description'
-const FALLBACK_BRANCH = 'ticket/see-task-description'
+
+/** The branch prefix the engine minted before W2: no spawn may name a branch of it. */
+const MINTED_PREFIX = 'ticket/'
 
 /** Every setup-task's `BASE_BRANCH:` value, in spawn order; `(absent)` for a setup-task with no such line. */
 function setupBaseBranches(run: WaveRun): string[] {
@@ -387,15 +419,16 @@ function setupBaseBranches(run: WaveRun): string[] {
 /**
  * Named collector: where a wave ticket's engine run works under anything but its
  * own ticket — the engine's fallback included — or its setup-task branches from
- * anything but the integration branch, or the merge step names a branch other
- * than the one that ticket's engine built on. `own` is the wave's refs, in run
- * order; each ticket's setup-task is the one whose ISSUE_INPUT is its ref.
+ * anything but the integration branch, or the engine works on, returns or merges
+ * any branch but the one its setup-task created, as that setup-task reported it.
+ * `own` is the wave's refs, in run order; each ticket's setup-task is the one
+ * whose ISSUE_INPUT is its ref, and `world` says which branch it reported.
  */
-export function collectWaveTicketContextViolations(run: WaveRun, own: readonly string[]): string[] {
+export function collectWaveTicketContextViolations(run: WaveRun, own: readonly string[], world: World): string[] {
   const out: string[] = []
   const tickets = run.engines.map(e => e.result.ticket)
   if (JSON.stringify(tickets) !== JSON.stringify(own)) out.push(`engine tickets were ${JSON.stringify(tickets)}, each ticket's own reference is ${JSON.stringify(own)}`)
-  const fallbacks = run.spawns.filter(s => s.prompt.includes(FALLBACK_TICKET) || s.prompt.includes(FALLBACK_BRANCH))
+  const fallbacks = run.spawns.filter(s => s.prompt.includes(FALLBACK_TICKET))
   if (fallbacks.length > 0) out.push(`the engine fallback reached ${fallbacks.length} spawn(s): ${[...new Set(fallbacks.map(s => s.agentType))].join(', ')}`)
   const setups = run.spawns.filter(s => s.prompt.startsWith('OPERATION: setup-task'))
   const merges = run.spawns.filter(s => s.agentType === 'Git' && s.prompt.startsWith('Merge '))
@@ -403,15 +436,30 @@ export function collectWaveTicketContextViolations(run: WaveRun, own: readonly s
     const setup = setups.find(s => s.prompt.split('\n').includes(`ISSUE_INPUT: ${ref}`))
     const base = setup === undefined ? undefined : /^BASE_BRANCH: (.*)$/m.exec(setup.prompt)?.[1]
     if (base !== INTEGRATION) out.push(`${ref}: its setup-task branches from ${base ?? 'no base'}, not the integration branch ${INTEGRATION}`)
-    const built = run.engines.find(e => e.args.issueInput === ref)?.result.branch
+    const created = reportedBranch(world, ref)
+    const engine = run.engines.find(e => e.args.issueInput === ref)
+    const built = engine?.result.branch
+    if (built !== created) out.push(`${ref}: its engine built on ${String(built ?? 'no branch')}, its setup-task created ${created ?? 'none'}`)
+    const offBranch = (engine?.spawns ?? []).filter(s => !s.prompt.startsWith('OPERATION: setup-task') && (created === undefined || !s.prompt.includes(created)))
+    if (offBranch.length > 0) out.push(`${ref}: ${offBranch.length} spawn(s) after setup-task do not work on ${created ?? 'a branch'}: ${[...new Set(offBranch.map(s => s.agentType))].join(', ')}`)
     const merge = merges.find(m => m.prompt.includes(`Include ticket ID ${ref} in`))
     const merged = merge === undefined ? undefined : /^Merge (\S+) to /.exec(merge.prompt)?.[1]
-    if (typeof built !== 'string' || merged !== built) out.push(`${ref}: the merge step names ${merged ?? 'no branch'}, its engine built on ${String(built ?? 'no branch')}`)
+    if (merge !== undefined && merged !== created) out.push(`${ref}: the merge step names ${merged ?? 'no branch'}, its setup-task created ${created ?? 'none'}`)
   }
+  const minted = run.spawns.filter(s => s.prompt.includes(MINTED_PREFIX))
+  if (minted.length > 0) out.push(`a minted ${MINTED_PREFIX}<slug> branch reached ${minted.length} spawn(s): ${[...new Set(minted.map(s => s.agentType))].join(', ')}`)
   return out
 }
 
-describe('each wave ticket\'s engine runs under its own TICKET/BRANCH off the integration branch, and the merge names that branch', () => {
+/** Two tickets whose setup-tasks name their own branches — one unlike anything the engine could derive. */
+const OWN_BRANCHES: World = {
+  tickets: {
+    '#12': { branch: 'user/Login_Form.v2', issueId: '12', prLinkLine: 'Closes #12' },
+    '#13': { issueId: '13', prLinkLine: 'Closes #13' },
+  },
+}
+
+describe('W2: each wave ticket works on the branch its setup-task created, off the integration branch, and the merge names it', () => {
   /** The shipped call's ticket key: `ticket`, the key the SINGLE engine reads (`args.ticket`). */
   const TICKET_KEY = 'runSingleTicketEngine({ ticket: ticketId,'
   /** The shipped call's base key: `baseBranch`, the key the SINGLE engine reads (`args.baseBranch`). */
@@ -419,53 +467,182 @@ describe('each wave ticket\'s engine runs under its own TICKET/BRANCH off the in
   /** The shipped merge lead: the branch the engine returned, the one its agents built on. */
   const MERGE_LEAD = 'Merge ${engineResult.branch} to '
 
-  it('executed: each engine sees its own ticket and slugged branch, never the fallback, and the merge names it', async () => {
-    const run = await runWave(WAVE!, SINGLE!, TWO_TICKETS, TWO_PLANS, 'true')
+  it('executed: each engine uses its setup-task\'s branch verbatim in every phase, and the merge names it', async () => {
+    const run = await runWave(WAVE!, SINGLE!, OWN_BRANCHES, TWO_PLANS, 'true')
     expect(run.spawns.length, 'the wave must have spawned the engines').toBeGreaterThan(10)
-    expect(run.engines.map(e => [e.result.ticket, e.result.branch])).toEqual([['#12', 'ticket/-12'], ['#13', 'ticket/-13']])
-    expect(run.spawns.filter(s => s.prompt.startsWith('Merge ')).map(s => s.prompt.split('.')[0])).toEqual(['Merge ticket/-12 to wave/demo', 'Merge ticket/-13 to wave/demo'])
-    expect(collectWaveTicketContextViolations(run, ['#12', '#13'])).toEqual([])
+    expect(run.engines.map(e => [e.result.ticket, e.result.branch])).toEqual([['#12', 'user/Login_Form.v2'], ['#13', 'feat/13-work']])
+    expect(run.spawns.filter(s => s.prompt.startsWith('Merge ')).map(s => s.prompt.split(' to ')[0])).toEqual(['Merge user/Login_Form.v2', 'Merge feat/13-work'])
+    expect(collectWaveTicketContextViolations(run, ['#12', '#13'], OWN_BRANCHES)).toEqual([])
   })
 
   it('executed: each ticket\'s setup-task branches from the integration branch, never HEAD', async () => {
     const run = await runWave(WAVE!, SINGLE!, TWO_TICKETS, TWO_PLANS, 'true')
     expect(setupBaseBranches(run)).toEqual([INTEGRATION, INTEGRATION])
-    expect(collectWaveTicketContextViolations(run, ['#12', '#13'])).toEqual([])
+    expect(collectWaveTicketContextViolations(run, ['#12', '#13'], TWO_TICKETS)).toEqual([])
   })
 
   it('known-bad probe: the unread `integrationBranch` key leaves every setup-task on BASE_BRANCH: HEAD', async () => {
     const unread = seedOnce(WAVE!, BASE_KEY, 'integrationBranch: INTEGRATION_BRANCH,')
     const run = await runWave(unread, SINGLE!, TWO_TICKETS, TWO_PLANS, 'true')
     expect(setupBaseBranches(run)).toEqual(['HEAD', 'HEAD'])
-    expect(collectWaveTicketContextViolations(run, ['#12', '#13'])).toEqual([
+    expect(collectWaveTicketContextViolations(run, ['#12', '#13'], TWO_TICKETS)).toEqual([
       '#12: its setup-task branches from HEAD, not the integration branch wave/demo',
       '#13: its setup-task branches from HEAD, not the integration branch wave/demo',
     ])
   })
 
-  it('executed: a keyed reference slugs to its lower-case branch, and the merge names that branch, not the raw key', async () => {
-    const world: World = { tickets: { 'ENG-12': { issueId: 'ENG-12', prLinkLine: 'Refs ENG-12' } } }
+  it('executed: a keyed reference works on the branch its setup-task reported, as reported', async () => {
+    const world: World = { tickets: { 'ENG-12': { branch: 'feature/ENG-12-sso', issueId: 'ENG-12', prLinkLine: 'Refs ENG-12' } } }
     const run = await runWave(WAVE!, SINGLE!, world, {}, 'true')
-    expect(run.engines.map(e => e.result.branch)).toEqual(['ticket/eng-12'])
-    expect(collectWaveTicketContextViolations(run, ['ENG-12'])).toEqual([])
+    expect(run.engines.map(e => e.result.branch)).toEqual(['feature/ENG-12-sso'])
+    expect(collectWaveTicketContextViolations(run, ['ENG-12'], world)).toEqual([])
   })
 
-  it('known-bad probe: the mismatched `ticketId` key leaves every engine on the fallback ticket and branch', async () => {
+  it('known-bad probe: the mismatched `ticketId` key leaves every engine on the fallback ticket', async () => {
     const misKeyed = seedOnce(WAVE!, TICKET_KEY, 'runSingleTicketEngine({ ticketId,')
     const run = await runWave(misKeyed, SINGLE!, TWO_TICKETS, TWO_PLANS, 'true')
-    const found = collectWaveTicketContextViolations(run, ['#12', '#13'])
+    const found = collectWaveTicketContextViolations(run, ['#12', '#13'], TWO_TICKETS)
     expect(found[0]).toBe('engine tickets were ["see task description","see task description"], each ticket\'s own reference is ["#12","#13"]')
     expect(found[1]).toMatch(/^the engine fallback reached \d+ spawn\(s\): Git, Code/)
     expect(found).toHaveLength(2)
   })
 
-  it('known-bad probe: a merge that names ticket/<raw ref> disagrees with the branch the engine built on', async () => {
+  it('known-bad probe: a merge that names ticket/<raw ref> disagrees with the branch setup-task created', async () => {
     const rawMerge = seedOnce(WAVE!, MERGE_LEAD, 'Merge ticket/${ticketId} to ')
     const run = await runWave(rawMerge, SINGLE!, TWO_TICKETS, TWO_PLANS, 'true')
-    expect(collectWaveTicketContextViolations(run, ['#12', '#13'])).toEqual([
-      '#12: the merge step names ticket/#12, its engine built on ticket/-12',
-      '#13: the merge step names ticket/#13, its engine built on ticket/-13',
+    expect(collectWaveTicketContextViolations(run, ['#12', '#13'], TWO_TICKETS)).toEqual([
+      '#12: the merge step names ticket/#12, its setup-task created feat/12-work',
+      '#13: the merge step names ticket/#13, its setup-task created feat/13-work',
+      'a minted ticket/<slug> branch reached 2 spawn(s): Git',
     ])
+  })
+
+  it('known-bad probe: the 0e520fc engine, which minted ticket/<slug> over setup-task\'s branch, is reported', async () => {
+    const minting = seedOnce(SINGLE!, BRANCH_LINE, 'const BRANCH = args.branch || `ticket/${TICKET.replace(/[^a-z0-9]/gi, \'-\').toLowerCase()}`;')
+    const run = await runWave(WAVE!, minting, TWO_TICKETS, TWO_PLANS, 'true')
+    const found = collectWaveTicketContextViolations(run, ['#12', '#13'], TWO_TICKETS)
+    expect(found).toContain('#12: its engine built on ticket/-12, its setup-task created feat/12-work')
+    expect(found).toContain('#13: the merge step names ticket/-13, its setup-task created feat/13-work')
+    expect(found.some(f => f.startsWith('#12: ') && f.includes('spawn(s) after setup-task do not work on feat/12-work'))).toBe(true)
+    expect(found[found.length - 1]).toMatch(/^a minted ticket\/<slug> branch reached \d+ spawn\(s\)/)
+  })
+})
+
+/** The engine's one BRANCH binding: setup-task's reported branch, verbatim, or "(none)". */
+const BRANCH_LINE = 'const BRANCH = typeof setup?.branch === "string" && setup.branch.trim() !== "" && setup.branch.trim() !== "(none)" ? setup.branch : "(none)";'
+/** The engine's branch stop. */
+const BRANCH_STOP_LINE = 'if (BRANCH === "(none)") {'
+
+interface BranchCase {
+  readonly label: string
+  /** What setup-task reports as `- **Branch name**:`; null ⇒ no such value at all. */
+  readonly branch: string | null
+  readonly stops: boolean
+}
+
+/** Not a shape gate: every non-empty name setup-task reports is used as reported; only "no branch" stops. */
+const BRANCH_TABLE: readonly BranchCase[] = [
+  { label: 'a derived branch', branch: 'feat/7-login', stops: false },
+  { label: 'an unusual name, used as reported', branch: 'user/Feat_7.v2', stops: false },
+  { label: 'a keyed name', branch: 'PROJ-7-sso', stops: false },
+  { label: 'no branch at all', branch: null, stops: true },
+  { label: 'the literal (none)', branch: '(none)', stops: true },
+  { label: 'an empty value', branch: '', stops: true },
+  { label: 'only whitespace', branch: '  ', stops: true },
+]
+
+/**
+ * Named collector: every branch case the executed engine decides wrongly — a stop
+ * that is not ESCALATED `branch-missing` before any other spawn, or a run that
+ * does not implement on exactly the reported branch. Each case runs under both
+ * policies with a captured Issue ID, so the ticket-link stop never decides it.
+ */
+export async function collectBranchStopViolations(body: string | null): Promise<string[]> {
+  if (body === null) return ['the SINGLE engine body was not found']
+  const out: string[] = []
+  for (const c of BRANCH_TABLE) {
+    for (const issueRequired of ['true', 'false']) {
+      const spawns: Spawn[] = []
+      const world: World = { tickets: { '#7': { branch: c.branch, issueId: '7', prLinkLine: 'Closes #7' } } }
+      const result = await runEngine(body, { ticket: 'x', issueNumber: '#7', issueRequired }, stubAgent(world, spawns))
+      const beyondSetup = spawns.filter(s => !s.prompt.startsWith('OPERATION: setup-task')).length
+      const where = `${c.label} (issueRequired ${issueRequired})`
+      if (c.stops) {
+        const stopped = result?.verdict === 'ESCALATED' && result.escalations?.[0]?.type === 'branch-missing' && result.branch === '(none)'
+        if (!(stopped && beyondSetup === 0)) out.push(`${where}: expected ESCALATED branch-missing before any other spawn, got ${result?.verdict} after ${beyondSetup} more spawn(s)`)
+      } else {
+        const implement = spawns.find(s => s.agentType === 'Code')
+        if (result?.branch !== c.branch || implement === undefined || !implement.prompt.includes(`on branch ${c.branch}`)) {
+          out.push(`${where}: expected the ticket implemented on ${JSON.stringify(c.branch)}, got ${result?.verdict} on ${JSON.stringify(result?.branch)}`)
+        }
+      }
+    }
+  }
+  return out
+}
+
+describe('W2: a setup-task that reports no branch stops the ticket; the engine mints none', () => {
+  it('the table covers both outcomes', () => {
+    expect(new Set(BRANCH_TABLE.map(c => c.stops))).toEqual(new Set([true, false]))
+  })
+
+  it('executed: the engine stops, or implements on the reported branch, exactly as the table says', async () => {
+    expect(await collectBranchStopViolations(SINGLE)).toEqual([])
+  })
+
+  it('the binding follows setup-task and the stop precedes phase("implement"); nothing mints or passes a branch name', () => {
+    const script = SINGLE!
+    const setup = script.indexOf('phase("setup"')
+    const binding = script.indexOf(BRANCH_LINE)
+    const stop = script.indexOf(BRANCH_STOP_LINE)
+    const implement = script.indexOf('phase("implement"')
+    expect(setup).toBeGreaterThan(-1)
+    expect(binding, 'BRANCH is bound from setup-task\'s Output').toBeGreaterThan(setup)
+    expect(stop, 'the stop follows the binding').toBeGreaterThan(binding)
+    expect(implement, 'and precedes the implement phase').toBeGreaterThan(stop)
+    expect(offsetsOf(script, 'const BRANCH = '), 'one binding: the reported branch').toHaveLength(1)
+    expect(script, 'setup-task is asked for its - **Branch name**: value').toContain('Return: {"branch": "<the - **Branch name**: value under your ### Branch, or (none)>"')
+    for (const minted of [MINTED_PREFIX, 'args.branch']) expect(script, `the engine must not mint or pass a branch name: "${minted}"`).not.toContain(minted)
+  })
+
+  it('known-bad probe: an engine without the branch stop implements a ticket that has no branch', async () => {
+    const unstopped = seedOnce(SINGLE!, BRANCH_STOP_LINE, 'if (false) {')
+    const found = await collectBranchStopViolations(unstopped)
+    expect(found.map(f => f.split(' (issueRequired')[0])).toEqual([
+      'no branch at all', 'no branch at all',
+      'the literal (none)', 'the literal (none)',
+      'an empty value', 'an empty value',
+      'only whitespace', 'only whitespace',
+    ])
+  })
+
+  it('known-bad probe: a shape-gated binding stops a branch setup-task really created', async () => {
+    const gated = seedOnce(SINGLE!, BRANCH_LINE, 'const BRANCH = /^(?:feat|fix)\\/[a-z0-9-]+$/.test(String(setup?.branch ?? "")) ? setup.branch : "(none)";')
+    const found = await collectBranchStopViolations(gated)
+    expect(found.map(f => f.split(' (issueRequired')[0])).toEqual([
+      'an unusual name, used as reported', 'an unusual name, used as reported',
+      'a keyed name', 'a keyed name',
+    ])
+  })
+
+  it('executed: a wave quarantines the branchless ticket, cascades to its dependent, and runs its independent sibling', async () => {
+    const world: World = {
+      tickets: {
+        '#12': { branch: null, issueId: '12', prLinkLine: 'Closes #12' },
+        '#13': { issueId: '13', prLinkLine: 'Closes #13' },
+        '#14': { issueId: '14', prLinkLine: 'Closes #14' },
+      },
+      deps: { '#13': ['#12'] },
+    }
+    const run = await runWave(WAVE!, SINGLE!, world, {}, 'true')
+    expect(run.tickets.map(t => [t.ticket, t.ran, t.verdict, t.merged])).toEqual([
+      ['#12', true, 'ESCALATED', false],
+      ['#13', false, null, false],
+      ['#14', true, 'PASS', true],
+    ])
+    expect(run.quarantined.map(q => q.ticket)).toEqual(['#12'])
+    expect(run.quarantined[0].reason).toContain('setup-task reported no branch')
+    expect(run.spawns.some(s => s.prompt.startsWith('Merge (none)'))).toBe(false)
   })
 })
 
