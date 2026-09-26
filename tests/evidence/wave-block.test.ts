@@ -29,12 +29,11 @@
  * line code.md's R7 paste gate admits (each ticket's captured ISSUE_PR_LINK) is a
  * related line, and so is its Closes→Refs swap, and nothing else; the heading is
  * the PR body section code.md emits; the merged verdicts are exactly what the
- * built wave skeleton's merge condition merges; every Gate 2 value the built
- * SINGLE skeleton produces is a table value.
- *
- * NOT covered here (P3 of #365 adds it with the wave-PR step): the table header
- * and the verdict vocabulary against the built dynamic-build.md that renders the
- * block — no shipped text renders it before P3.
+ * built wave skeleton's merge condition merges, over every engine verdict the
+ * engine schema declares (read from the built text, never listed here); every
+ * Gate 2 value the built SINGLE skeleton produces is a table value; and the
+ * headings, header, separator, verdict and gate vocabularies are exactly the ones
+ * the built dynamic-build.md step 3 tells the main model to render (#365 P3).
  *
  * Every guard has a named collector, a non-empty-corpus assertion and a known-bad
  * probe run through the same collector (PF-064).
@@ -87,6 +86,7 @@ interface VerifyEvidence {
   main(argv: readonly string[], deps?: { cwd?: string; stderr?: (t: string) => void; exec?: () => never }): Outcome
 }
 
+const ROOT = path.resolve(import.meta.dirname, '../..')
 const req = createRequire(import.meta.url)
 const PE = req(PR_EVIDENCE_SCRIPT) as WaveExports
 const VE = req(VERIFY_EVIDENCE_SCRIPT) as VerifyEvidence
@@ -669,11 +669,44 @@ describe('parity: RELATED_LINE_RE admits exactly code.md\'s R7 lines and their C
 const BUILT = requireDistFile('dynamic-build.md')
 const WAVE_ENGINE_CALL = 'const engineResult = await runSingleTicketEngine('
 
+/** The engine schema's verdict line, as `_engine.mds` declares it and the build expands it. */
+const SCHEMA_VERDICT_RE = /^ {2}"verdict": "([A-Z-]+(?: \| [A-Z-]+)*)",$/gm
+
 /**
- * Every engine verdict the wave can see: the SINGLE skeleton's overallVerdict
- * values and the engine schema's. (P3 of #365 declares the union in the schema.)
+ * Named collector: the verdicts the engine output schema declares, parsed from a
+ * text that expands `engine_output_schema()`. Null unless exactly one schema line.
  */
-const ENGINE_VERDICTS = ['PASS', 'UNVERIFIED', 'PARTIAL', 'FAIL', 'ESCALATED'] as const
+export function schemaEngineVerdicts(text: string): string[] | null {
+  const hits = [...text.matchAll(SCHEMA_VERDICT_RE)]
+  return hits.length === 1 ? hits[0][1].split(' | ') : null
+}
+
+/**
+ * Every engine verdict the wave can see — the schema's declared domain, read from
+ * the built text rather than listed here, so a verdict the schema gains is one the
+ * merge-parity arm below decides at once (PF-075: every value has one arm).
+ */
+const ENGINE_VERDICTS: readonly string[] = schemaEngineVerdicts(requireDistFile('dynamic-build.md')) ?? []
+
+describe('the engine verdict domain is the schema\'s own declaration', () => {
+  it('the built schema declares exactly the #365 union, and every merged verdict is in it', () => {
+    expect(ENGINE_VERDICTS, 'exactly one engine-schema verdict line').toEqual(['PASS', 'UNVERIFIED', 'PARTIAL', 'FAIL', 'ESCALATED'])
+    for (const v of PE.WAVE_MERGED_VERDICTS) expect(ENGINE_VERDICTS, `${v} merges, so the schema must declare it`).toContain(v)
+  })
+
+  it('the source partial states the same line the build expands', () => {
+    const source = fs.readFileSync(path.join(ROOT, 'src', 'assets', 'commands', '_partials', '_engine.mds'), 'utf-8')
+    expect(schemaEngineVerdicts(source)).toEqual(ENGINE_VERDICTS)
+  })
+
+  it('known-bad probe: the d9d1c8e schema line declares no UNVERIFIED, so it cannot carry a merged verdict', () => {
+    const d9d1c8e = '```json\n{\n  "verdict": "PASS | FAIL | ESCALATED",\n}\n```'
+    const parsed = schemaEngineVerdicts(d9d1c8e)
+    expect(parsed).toEqual(['PASS', 'FAIL', 'ESCALATED'])
+    expect(PE.WAVE_MERGED_VERDICTS.filter(v => !parsed!.includes(v))).toEqual(['UNVERIFIED'])
+    expect(schemaEngineVerdicts(`${d9d1c8e}\n${d9d1c8e}`), 'two schema lines are ambiguous').toBeNull()
+  })
+})
 
 /** The built wave skeleton's merge condition — the first `if (…) {` after the engine call — or null. */
 function waveMergeCondition(built: string): string | null {
@@ -785,5 +818,91 @@ describe('parity: every Gate 2 value the built SINGLE skeleton produces is a wav
     const seeded = statement.replace('testVerdict = "FAIL-FIXED";', 'testVerdict = "RETRIED";')
     expect(seeded, 'the seed must land').not.toBe(statement)
     expect(collectUnrepresentableGateValues(await gate2Values(seeded))).toEqual(['RETRIED: not in WAVE_GATE_VALUES'])
+  })
+})
+
+// --- the built dynamic-build.md step 3: what the main model is told to render ----
+
+const STEP3_OPEN = '3. **Compose the wave PR inputs**'
+const STEP3_CLOSE = '4. Surface ALL of them'
+
+/** The built post-workflow step 3, or null unless both anchors are unique and ordered. */
+function waveStep3(built: string): string | null {
+  const open = built.split(STEP3_OPEN).length - 1
+  const close = built.split(STEP3_CLOSE).length - 1
+  const at = built.indexOf(STEP3_OPEN)
+  const end = built.indexOf(STEP3_CLOSE)
+  return open === 1 && close === 1 && end > at ? built.slice(at, end) : null
+}
+
+/** A backticked ` | `-separated vocabulary after `lead`, e.g. "one of `A | B`". */
+function vocabularyAfter(text: string, lead: string): string[] | null {
+  const at = text.indexOf(lead)
+  if (at === -1) return null
+  const m = /^`([^`]+)`/.exec(text.slice(at + lead.length))
+  return m === null ? null : m[1].split(' | ')
+}
+
+/** The Evaluate/Test gate values the step lists: "when it is `A`, `B`, `C` or `D`, else `—`". */
+function gateValuesIn(text: string): string[] | null {
+  const m = /when it is ((?:`[A-Z-]+`, )*`[A-Z-]+` or `[A-Z-]+`), else `(—)`/.exec(text)
+  return m === null ? null : [...[...m[1].matchAll(/`([A-Z-]+)`/g)].map(x => x[1]), m[2]]
+}
+
+/**
+ * Named collector: where the built step 3 disagrees with the grammar `check wave`
+ * enforces — the template's headings, the blank line between them, the header and
+ * separator verbatim under the second heading, the verdict vocabulary and the gate
+ * values. A step that renders a block the script refuses opens no wave PR at all.
+ */
+export function collectWaveStep3Drift(built: string): string[] {
+  const step = waveStep3(built)
+  if (step === null) return ['step 3 (Compose the wave PR inputs) was not found exactly once']
+  const out: string[] = []
+  const template = parseFences(step).find(f => f.includes(PE.WAVE_HEADINGS[0]))
+  const lines = template === undefined ? [] : template.split('\n').slice(1, -1)
+  const h1 = lines.indexOf(PE.WAVE_HEADINGS[0])
+  const h2 = lines.indexOf(PE.WAVE_HEADINGS[1])
+  if (h1 !== 0) out.push(`the template does not open with ${PE.WAVE_HEADINGS[0]}`)
+  if (h2 === -1 || lines[h2 - 1] !== '') {
+    out.push(`the template has no ${PE.WAVE_HEADINGS[1]} after one blank line`)
+  } else {
+    if (lines[h2 + 1] !== PE.WAVE_TABLE_HEADER) out.push('the table header under the second heading is not WAVE_TABLE_HEADER')
+    if (lines[h2 + 2] !== SEPARATOR) out.push('the separator under the header is not verbatim')
+  }
+  const verdicts = vocabularyAfter(step, '**Verdict** — one of ')
+  if (JSON.stringify(verdicts) !== JSON.stringify(PE.WAVE_VERDICTS)) out.push(`the verdict vocabulary is ${JSON.stringify(verdicts)}, WAVE_VERDICTS is ${JSON.stringify(PE.WAVE_VERDICTS)}`)
+  const gates = gateValuesIn(step)
+  if (JSON.stringify(gates) !== JSON.stringify(PE.WAVE_GATE_VALUES)) out.push(`the gate values are ${JSON.stringify(gates)}, WAVE_GATE_VALUES is ${JSON.stringify(PE.WAVE_GATE_VALUES)}`)
+  return out
+}
+
+describe('parity: the built dynamic-build step 3 renders exactly the grammar check wave enforces', () => {
+  it('the step and its template are found, and every export agrees with them', () => {
+    const step = waveStep3(BUILT)
+    expect(step?.length ?? 0, 'step 3 is found').toBeGreaterThan(1000)
+    expect(parseFences(step!).some(f => f.includes(PE.WAVE_TABLE_HEADER)), 'its template fence carries the header').toBe(true)
+    expect(collectWaveStep3Drift(BUILT)).toEqual([])
+  })
+
+  const SEEDS: ReadonlyArray<readonly [string, string, string, string]> = [
+    ['a header missing its Coverage column', PE.WAVE_TABLE_HEADER, '| T | Ticket | Verdict | Evaluate | Test | Surviving |', 'the table header'],
+    ['a renamed second heading', `\n${PE.WAVE_HEADINGS[1]}\n`, '\n## Evidence\n', `the template has no ${PE.WAVE_HEADINGS[1]}`],
+    ['a verdict vocabulary without BLOCKED', '`PASS | UNVERIFIED | QUARANTINED | BLOCKED`', '`PASS | UNVERIFIED | QUARANTINED`', 'the verdict vocabulary'],
+    ['a gate list without SKIPPED', '`FAIL-FIXED` or `SKIPPED`, else', '`FAIL-FIXED` or `RETRIED`, else', 'the gate values'],
+  ]
+  for (const [label, from, to, expected] of SEEDS) {
+    it(`known-bad probe: ${label} is reported, and only it`, () => {
+      const step = waveStep3(BUILT)!
+      expect(step.split(from).length - 1, `the seed "${from}" must occur once in step 3`).toBe(1)
+      const seeded = BUILT.replace(step, step.replace(from, to))
+      const drift = collectWaveStep3Drift(seeded)
+      expect(drift, drift.join('\n')).toHaveLength(1)
+      expect(drift[0].startsWith(expected), drift[0]).toBe(true)
+    })
+  }
+
+  it('known-bad probe: a build with no step 3 is reported, not passed', () => {
+    expect(collectWaveStep3Drift(BUILT.replace(STEP3_OPEN, '3. **Compose**'))).toHaveLength(1)
   })
 })
