@@ -284,6 +284,7 @@ async function handleEnable(): Promise<void> {
   const gitRoot = await requireGitRoot('configuration not updated');
   if (!gitRoot) return;
 
+  // Keeps every unmanaged config key (D-CONFIG-PRESERVE-UNMANAGED).
   await updateFeature(gitRoot, 'learning', true);
   await syncManifestFeature(getDevFlowDirectory(), 'learning', true);
   p.log.success('Learning enabled — configuration updated');
@@ -294,6 +295,7 @@ async function handleDisable(): Promise<void> {
   const gitRoot = await requireGitRoot('configuration not updated');
   if (!gitRoot) return;
 
+  // Keeps every unmanaged config key (D-CONFIG-PRESERVE-UNMANAGED).
   await updateFeature(gitRoot, 'learning', false);
 
   // Drain the learning (decisions-detection) queue so stale turns don't process

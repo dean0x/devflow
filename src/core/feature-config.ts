@@ -45,12 +45,11 @@ export interface FeatureConfig {
    * `unknown`, not `string`, and deliberately unvalidated HERE unlike every
    * sibling field. Two properties rest on that:
    *
-   *   - `updateFeature` is a read-modify-write over the whole config, so the
-   *     value must survive a round trip byte-for-byte or an unrelated `devflow
-   *     knowledge --disable` would silently erase a user's edit — including a
-   *     misspelled one, whose erasure would also erase the DEGRADED that reports
-   *     it. Repair is forbidden for this value (§14.9-6: reject, never repair),
-   *     and a field that coerced on read could not preserve it.
+   *   - Repair is forbidden for this value (§14.9-6: reject, never repair), so a
+   *     reader must hand consumers the value the file holds — a misspelled one
+   *     included, or the DEGRADED that reports it is never reached. What stays
+   *     on DISK does not depend on this field: every writer carries the key from
+   *     the file itself (D-CONFIG-PRESERVE-UNMANAGED).
    *   - {@link parseTrackerOverride} gives a present-but-wrong-typed value its
    *     own `invalid` verdict. A `string` field would narrow the JSON before the
    *     parser ever saw it, leaving that arm reachable from a direct call and
@@ -175,20 +174,19 @@ function coerceConfig(parsed: unknown): FeatureConfig | null {
     rp === 'auto' || rp === 'full' || rp === 'off' ? rp : 'auto';
 
   // The per-repo tracker override is carried through VERBATIM — never coerced,
-  // never type-filtered. Three reasons, and the last two are the ones a reader is
+  // never type-filtered. Two reasons, and the second is the one a reader is
   // likely to miss:
   //   (a) repair is forbidden for a provider value (§14.9-6), so there is no
   //       healed value to fall back to the way reviewPublication has 'auto';
-  //   (b) coerceConfig feeds updateFeature's read-modify-write, so a value
-  //       dropped here is a value DELETED from the file on the next unrelated
-  //       toggle — erasing both the user's edit and the DEGRADED that reports it;
-  //   (c) a non-string is a state parseTrackerOverride CLASSIFIES (`invalid`),
+  //   (b) a non-string is a state parseTrackerOverride CLASSIFIES (`invalid`),
   //       not a state this function repairs. Filtering by type here would leave
   //       that arm reachable from a direct call to the parser and unreachable
   //       from the file, which is the only place it can actually be written.
   // Key PRESENCE is the whole rule: a present key is carried as written, and an
-  // absent one stays absent on disk. `hasOwnProperty` rather than `in` because
-  // the object comes from JSON.parse at a trust boundary.
+  // absent one stays absent. `hasOwnProperty` rather than `in` because the
+  // object comes from JSON.parse at a trust boundary. Retention on disk is not
+  // decided here: the writers carry every unmanaged key from the file itself
+  // (D-CONFIG-PRESERVE-UNMANAGED).
   const hasTracker = Object.prototype.hasOwnProperty.call(p, 'tracker');
 
   return {
@@ -214,8 +212,8 @@ export async function readConfig(projectRoot: string): Promise<FeatureConfig> {
 /**
  * The parsed JSON body of a project's config file, or `undefined` when the file
  * is absent, unreadable or malformed. Every read of the file goes through here,
- * so readConfig, readConfigIfPresent and writeManagedConfig agree on what an
- * unusable file means.
+ * so readConfig, readConfigIfPresent, writeManagedConfig and updateFeature
+ * agree on what an unusable file means.
  */
 async function readConfigBody(projectRoot: string): Promise<unknown> {
   try {
@@ -240,15 +238,6 @@ async function writeConfigBody(projectRoot: string, body: object): Promise<void>
 }
 
 /**
- * Write the feature config for a project root — the whole file, exactly the
- * declared shape. Callers that own only part of the file use
- * {@link writeManagedConfig} instead.
- */
-export async function writeConfig(projectRoot: string, config: FeatureConfig): Promise<void> {
-  await writeConfigBody(projectRoot, config);
-}
-
-/**
  * Merge devflow's managed keys over the config body the file already holds.
  * Pure — returns a new object and never mutates `existing`.
  *
@@ -258,11 +247,13 @@ export async function writeConfig(projectRoot: string, config: FeatureConfig): P
  * — the hand-written per-repo `tracker` override (whose invalid values must
  * survive so their DEGRADED report can name them) and any key devflow does not
  * know. The alternative, writing the declared shape, is a silent delete of all
- * of them on every `devflow init`. Only the four managed keys are copied from
- * `managed`, by name, so a caller holding a whole FeatureConfig still cannot
- * overwrite the file's override with its in-memory copy. The retired keys in
- * RETIRED_CONFIG_KEYS are dropped, not carried. A body that is not a JSON
- * object (absent, malformed, an array) reads as empty, exactly as
+ * of them on every `devflow init` and every feature toggle. Every writer of the
+ * file goes through here: writeManagedConfig (init) and updateFeature (the
+ * `memory`, `learning` and `knowledge` toggles). Only the four managed keys are
+ * copied from `managed`, by name, so a caller holding a whole FeatureConfig
+ * still cannot overwrite the file's override with its in-memory copy. The
+ * retired keys in RETIRED_CONFIG_KEYS are dropped, not carried. A body that is
+ * not a JSON object (absent, malformed, an array) reads as empty, exactly as
  * readConfigIfPresent treats it.
  *
  * This holds under `devflow init --reset` too: a factory reset returns
@@ -294,7 +285,10 @@ export async function writeManagedConfig(projectRoot: string, managed: ManagedCo
 
 /**
  * Toggle a single feature in the feature config.
- * Reads current config, applies the change, and writes back.
+ * Reads the file once, applies the change to the managed keys, and writes back
+ * every key it does not manage untouched (D-CONFIG-PRESERVE-UNMANAGED): the
+ * managed values come from the coerced config, so an invalid one still
+ * self-heals and a legacy `decisions` value still lands as `learning`.
  *
  * D1: Non-atomic read-modify-write. Concurrent invocations of `updateFeature`
  * could lose each other's writes. Acceptable here because: (a) devflow CLI
@@ -308,8 +302,9 @@ export async function updateFeature(
   feature: BooleanFeature,
   enabled: boolean,
 ): Promise<void> {
-  const config = await readConfig(projectRoot);
-  await writeConfig(projectRoot, { ...config, [feature]: enabled });
+  const existing = await readConfigBody(projectRoot);
+  const current = coerceConfig(existing) ?? { ...DEFAULT_CONFIG };
+  await writeConfigBody(projectRoot, mergeManagedConfig(existing, { ...current, [feature]: enabled }));
 }
 
 /**
