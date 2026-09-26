@@ -209,7 +209,7 @@ When step 1b finds `.devflow/conventions.md` absent it invokes `learn-convention
    - **Guard.** If `git -C "{worktree}" rev-parse --is-inside-work-tree` is not `true`, or `git -C "{worktree}" symbolic-ref -q HEAD` prints nothing (detached HEAD), or step 4 did not leave HEAD on the new feature branch (HEAD is still on `BASE_BRANCH`), skip committing and report `CONVENTIONS_COMMIT: skipped (no branch)`. Never commit on a detached HEAD.
    - **Detect changes.** `git -C "{worktree}" status --porcelain -- .devflow/conventions.md` — if empty, report `CONVENTIONS_COMMIT: skipped (no changes)` and stop.
    - **Stage only the path:** `git -C "{worktree}" add -- .devflow/conventions.md`
-   - **Commit only that path:** `git -C "{worktree}" commit --only -- .devflow/conventions.md -m "docs(devflow): record project conventions"`
+   - **Commit only that path:** `git -C "{worktree}" commit --only -m "docs(devflow): record project conventions" -- .devflow/conventions.md`
    - **Stop there.** Do NOT push. Do NOT force. Do NOT amend.
    - If any git step errors (commit hook rejects, index locked, no remote), report `CONVENTIONS_COMMIT: failed (<one-line reason>)` and finish normally — never abort the caller's workflow, and never retry in a loop.
 5. Return setup summary with branch name and BASE_BRANCH recorded
