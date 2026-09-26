@@ -107,7 +107,7 @@ Investigates bugs using competing hypotheses:
 
 ```
 /debug "login fails after session timeout"
-/debug #42                   # Investigate from GitHub issue
+/debug #42                   # Investigate from a tracker issue
 ```
 
 ## /self-review
@@ -193,7 +193,7 @@ The three dynamic commands form a sequential delivery pipeline — each stage pr
 /dynamic-plan <ticket-dir>      # plan + challenge each ticket
                                 # ↓ answer DECISIONS-NEEDED.md
 /dynamic-build <ticket-dir>     # implement, review, and verify
-                                # ↓ review wave-report.md and merge
+                                # ↓ review the gated wave PR, refreshed with test-plan evidence, and merge it
 ```
 
 The command boundary is the human gate: each stage returns to you before the next begins — there is no automatic hand-off between them.

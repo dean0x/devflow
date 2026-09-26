@@ -64,6 +64,10 @@ devflow/
 │       │   └── _partials/            # MDS partials (no output-dir:, never compiled directly)
 │       ├── mds/                      # MDS reference modules (compiled to dist/skills/git/references/ by build:mds)
 │       │   ├── tracker/_github.mds     # One file per GitHub tracker operation
+│       │   ├── tracker/_jira.mds       # One file per Jira tracker operation
+│       │   ├── tracker/_linear.mds     # One file per Linear tracker operation
+│       │   ├── tracker/_mcp.mds        # Provider-independent tool-call contract (emitted as tracker/_mcp.md)
+│       │   ├── tracker/_common.mds     # Partial: lines the tracker modules share (no output-dir:, never compiled directly)
 │       │   ├── git/_references.mds     # Cross-cutting documents the Git agent names
 │       │   └── git/_pr.mds             # One file per PR-host operation (provider-independent)
 │       └── scripts/                  # Installed verbatim to ~/.devflow/scripts/
