@@ -2350,6 +2350,60 @@ describe('session-start-context: learning maintenance directive (Section 2)', ()
     expect(stdout.trim()).toBe('');
   });
 
+  // D-LEARNING-MASTER-SWITCH: `devflow init --no-learning` writes
+  // features.learning:false to ~/.devflow/manifest.json; that must silence the
+  // directive (and the TL;DR) in every repo, whatever the repo's own config says.
+  describe('machine-wide learning switch (manifest)', () => {
+    const ENV = { DEVFLOW_DIR: '' };
+
+    function writeManifestFeatures(features: Record<string, unknown>): void {
+      fs.writeFileSync(
+        path.join(homeDir, '.devflow', 'manifest.json'),
+        JSON.stringify({ version: '2.0.0', features }),
+      );
+    }
+
+    it('learning:false in the manifest suppresses the directive and the TL;DR although config says true', () => {
+      seedQueue(tmpDir);
+      fs.writeFileSync(path.join(tmpDir, '.devflow', 'config.json'), JSON.stringify({ learning: true }));
+      fs.writeFileSync(
+        path.join(tmpDir, '.devflow', 'learning', 'decisions.md'),
+        '<!-- TL;DR: 1 decision. Key: ADR-001 Test -->\n# Architectural Decisions',
+      );
+      writeManifestFeatures({ learning: false });
+
+      const { stdout, exitCode } = runHook(CONTEXT_HOOK, { cwd: tmpDir }, homeDir, ENV);
+      expect(exitCode).toBe(0);
+      expect(stdout.trim()).toBe('');
+    });
+
+    it('learning:false in the manifest suppresses the directive where the repo has no config', () => {
+      seedQueue(tmpDir);
+      writeManifestFeatures({ learning: false });
+
+      const { stdout, exitCode } = runHook(CONTEXT_HOOK, { cwd: tmpDir }, homeDir, ENV);
+      expect(exitCode).toBe(0);
+      expect(stdout.trim()).toBe('');
+    });
+
+    it('a manifest without the learning key leaves the directive on (fail-open)', () => {
+      seedQueue(tmpDir);
+      writeManifestFeatures({ ambient: true });
+
+      const { stdout } = runHook(CONTEXT_HOOK, { cwd: tmpDir }, homeDir, ENV);
+      expect(contextOf(stdout)).toContain('--- LEARNING MAINTENANCE ---');
+    });
+
+    it('learning:true in the manifest never overrides a repo that turned learning off', () => {
+      seedQueue(tmpDir);
+      fs.writeFileSync(path.join(tmpDir, '.devflow', 'config.json'), JSON.stringify({ learning: false }));
+      writeManifestFeatures({ learning: true });
+
+      const { stdout } = runHook(CONTEXT_HOOK, { cwd: tmpDir }, homeDir, ENV);
+      expect(stdout.trim()).toBe('');
+    });
+  });
+
   it('DEVFLOW_BG_UPDATER=1 -> empty stdout even with a pending queue (guard precedes everything)', () => {
     seedQueue(tmpDir);
 

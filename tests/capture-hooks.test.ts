@@ -564,3 +564,94 @@ describe('capture-prompt + capture-turn integration', () => {
     }
   });
 });
+
+// =============================================================================
+// D-LEARNING-MASTER-SWITCH — the machine-wide learning switch in the manifest
+// =============================================================================
+// `devflow init --no-learning` records features.learning:false in
+// ~/.devflow/manifest.json. Every capture hook must honour it in EVERY repo —
+// including one whose own .devflow/config.json still says learning:true (a stale
+// value an earlier init wrote) and one with no config at all.
+describe('capture hooks honour the machine-wide learning switch', () => {
+  let projectDir: string;
+  let homeDir: string;
+
+  beforeEach(() => {
+    projectDir = fs.mkdtempSync(path.join(os.tmpdir(), 'cap-switch-'));
+    homeDir = fs.mkdtempSync(path.join(os.tmpdir(), 'cap-switch-home-'));
+  });
+
+  afterEach(() => {
+    fs.rmSync(projectDir, { recursive: true, force: true });
+    fs.rmSync(homeDir, { recursive: true, force: true });
+  });
+
+  function writeManifestFeatures(devflowDir: string, features: Record<string, unknown>): void {
+    fs.mkdirSync(devflowDir, { recursive: true });
+    fs.writeFileSync(path.join(devflowDir, 'manifest.json'), JSON.stringify({ version: '2.0.0', features }));
+  }
+
+  // An explicit empty DEVFLOW_DIR: a developer's exported value must never decide
+  // which manifest these assertions read.
+  const ENV = { DEVFLOW_DIR: '' };
+  const learningQueue = () => path.join(projectDir, '.devflow', 'learning', '.pending-turns.jsonl');
+  const memoryQueue = () => path.join(projectDir, '.devflow', 'memory', '.pending-turns.jsonl');
+
+  const HOOKS: ReadonlyArray<readonly [string, string, () => object, number]> = [
+    ['capture-prompt', CAPTURE_PROMPT, () => ({ cwd: projectDir, prompt: 'we chose X over Y' }), 1],
+    ['capture-turn', CAPTURE_TURN, () => ({ cwd: projectDir, session_id: 's', last_assistant_message: 'done' }), 1],
+    [
+      'capture-question',
+      CAPTURE_QUESTION,
+      () => ({
+        cwd: projectDir,
+        tool_name: 'AskUserQuestion',
+        tool_input: { questions: [{ question: 'Proceed?' }] },
+        tool_response: { answers: { 'Proceed?': 'yes' } },
+      }),
+      1,
+    ],
+  ];
+
+  for (const [name, hook, input, rows] of HOOKS) {
+    it(`${name}: switched off machine-wide → no learning append although the repo config says true`, () => {
+      writeFeatureConfig(projectDir, { memory: true, learning: true });
+      writeManifestFeatures(path.join(homeDir, '.devflow'), { learning: false });
+
+      const { exitCode } = runHook(hook, input(), homeDir, ENV);
+      expect(exitCode).toBe(0);
+      expect(fs.existsSync(learningQueue())).toBe(false);
+      // The switch is learning-only: memory keeps capturing.
+      expect(readJsonl(memoryQueue())).toHaveLength(rows);
+    });
+
+    it(`${name}: switched off machine-wide → no learning append in a repo with no config`, () => {
+      writeManifestFeatures(path.join(homeDir, '.devflow'), { learning: false });
+
+      runHook(hook, input(), homeDir, ENV);
+      expect(fs.existsSync(learningQueue())).toBe(false);
+    });
+
+    it(`${name}: a manifest without the key leaves learning on (fail-open)`, () => {
+      writeManifestFeatures(path.join(homeDir, '.devflow'), { ambient: true });
+
+      runHook(hook, input(), homeDir, ENV);
+      expect(readJsonl(learningQueue())).toHaveLength(rows);
+    });
+  }
+
+  it('the manifest is read from an inherited DEVFLOW_DIR override, not the project .devflow', () => {
+    const overrideDir = fs.mkdtempSync(path.join(os.tmpdir(), 'cap-switch-override-'));
+    try {
+      writeManifestFeatures(overrideDir, { learning: false });
+      // A decoy under $HOME that would say "on" if the override were ignored.
+      writeManifestFeatures(path.join(homeDir, '.devflow'), { learning: true });
+
+      runHook(CAPTURE_PROMPT, { cwd: projectDir, prompt: 'hello' }, homeDir, { DEVFLOW_DIR: overrideDir });
+      expect(fs.existsSync(learningQueue())).toBe(false);
+      expect(readJsonl(memoryQueue())).toHaveLength(1);
+    } finally {
+      fs.rmSync(overrideDir, { recursive: true, force: true });
+    }
+  });
+});

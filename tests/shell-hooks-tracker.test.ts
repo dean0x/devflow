@@ -615,9 +615,14 @@ describe('session-start-context: tracker setup directive (Section 3)', () => {
     expect(shim.shimmed.length, 'the shim farm is empty').toBeGreaterThan(1);
     const withShim = { PATH: `${shim.dir}:${process.env.PATH ?? ''}` };
 
-    // Baseline: a machine that never chose a tracker — no sentinel, no manifest.
+    // Baseline: a machine that never chose a tracker — no sentinel, and a
+    // manifest with no tracker key. The manifest must be PRESENT in the baseline
+    // too: Sections 1–2 read its machine-wide learning switch
+    // (D-LEARNING-MASTER-SWITCH) on every installed machine, so a manifest-free
+    // baseline would charge that read to Section 3.
     const bareHome = fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-ctx-tracker-bare-'));
     fs.mkdirSync(path.join(bareHome, '.devflow', 'logs'), { recursive: true });
+    seedTracker(bareHome, { sentinel: false });
     try {
       run(sessionStart(tmpDir), bareHome, withShim);
       const baseline = collectShimInvocations(shim.logPath).length;

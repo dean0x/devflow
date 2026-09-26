@@ -25,7 +25,7 @@
 #   from feature config themselves (see queue_read_gates below for the one-fork
 #   combined read that keeps this to a single config subprocess per hook).
 #
-# queue_read_gates <feature_config_path>
+# queue_read_gates <feature_config_path> [<manifest_path>]
 #   Reads BOTH the "memory" and "learning" fields from .devflow/config.json in a
 #   SINGLE subprocess fork (AC-P1 -- exactly one config-read fork per capture
 #   hook, not two). Sets _QG_MEMORY and _QG_LEARNING ("true"/"false") in the
@@ -34,6 +34,26 @@
 #   they are always the literal strings "true"/"false", never arbitrary
 #   content, so a plain newline split is unambiguous and easy to review (no
 #   invisible bytes hiding in the source).
+#
+#   D-LEARNING-MASTER-SWITCH: when <manifest_path> is given, learning is ON only
+#   if the repo config allows it AND ~/.devflow/manifest.json's
+#   `features.learning` is not `false`. `devflow init` records its learning
+#   choice in the manifest and writes config.json only for the repo it ran in,
+#   so a config-only gate left learning running in every other repo (and every
+#   non-git cwd) after the user turned it off machine-wide. The manifest value is
+#   a master switch, never a way to turn a repo ON: it can only clear
+#   _QG_LEARNING. Only an explicit boolean `false` switches it off -- an absent,
+#   unreadable or malformed manifest, or a missing key, leaves the repo value in
+#   charge, exactly as before the switch existed (fail-open, like the config
+#   default). Memory has no master switch: init removes the memory hooks
+#   machine-wide.
+#
+#   The manifest is a SEPARATE read, not folded into the config fork: jq's
+#   recovery from a parse error in one of several positional files differs
+#   between jq versions, and a malformed manifest must never discard the repo's
+#   own values (nor a malformed config the switch). The read is skipped when
+#   the repo has already turned learning off, so it costs at most one fork, and
+#   only where the answer could still change.
 
 queue_append_row() {
   local _qar_file="$1" _qar_role="$2" _qar_content="$3" _qar_ts="$4"
@@ -84,7 +104,7 @@ queue_append_both() {
 }
 
 queue_read_gates() {
-  local _qg_config="$1"
+  local _qg_config="$1" _qg_manifest="${2:-}"
   _QG_MEMORY="true"
   _QG_LEARNING="true"
 
@@ -109,6 +129,27 @@ queue_read_gates() {
     if [ -n "$_qg_fields" ]; then
       _QG_MEMORY="${_qg_fields%%$'\n'*}"
       _QG_LEARNING="${_qg_fields#*$'\n'}"
+    fi
+  fi
+
+  # Machine-wide switch (D-LEARNING-MASTER-SWITCH, see header). `try` covers a
+  # manifest whose top level or `features` is not an object; a parse failure
+  # empties the output, which reads as "not switched off".
+  if [ "$_QG_LEARNING" = "true" ] && [ -n "$_qg_manifest" ] && [ -f "$_qg_manifest" ]; then
+    local _qg_master
+    if [ "$_HAS_JQ" = "true" ]; then
+      _qg_master=$(jq -r \
+        'if (try .features.learning catch null) == false then "false" else "true" end' \
+        "$_qg_manifest" 2>/dev/null) || _qg_master=""
+    else
+      _qg_master=$(node -e "
+        const m = JSON.parse(require('fs').readFileSync(process.argv[1], 'utf8'));
+        const f = m !== null && typeof m === 'object' ? m.features : undefined;
+        process.stdout.write(f !== null && typeof f === 'object' && f.learning === false ? 'false' : 'true');
+      " -- "$_qg_manifest" 2>/dev/null) || _qg_master=""
+    fi
+    if [ "$_qg_master" = "false" ]; then
+      _QG_LEARNING="false"
     fi
   fi
 

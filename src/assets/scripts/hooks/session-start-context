@@ -2,8 +2,9 @@
 
 # SessionStart Hook: Cross-Feature Context Injection
 # Always-on hook that injects learning context as additionalContext. Sections
-# are gated by the `learning` field in feature config (config-only, ADR-001) —
-# this hook itself is never disabled.
+# 1–2 are gated by the `learning` field in feature config AND the machine-wide
+# `features.learning` switch in ~/.devflow/manifest.json (D-LEARNING-MASTER-SWITCH)
+# — this hook itself is never disabled.
 #
 # Section 1: Project decisions TL;DR (decisions.md / pitfalls.md header lines).
 # Section 2: Learning maintenance directive — when captured turns are pending in
@@ -68,7 +69,8 @@ CONTEXT=""
 # The devflow-GLOBAL root (~/.devflow), honouring the DEVFLOW_DIR env override —
 # the ensure-proxy:58-60 idiom. Captured HERE, above the project-scoped
 # DEVFLOW_DIR assignment that shadows the inherited value, because Section 3's
-# tracker files are user-scope and not project-scope. (Known divergence,
+# tracker files and the manifest the learning gate reads are user-scope and not
+# project-scope. (Known divergence,
 # deliberately not propagated: the global learning.json read in Section 2
 # hardcodes $HOME/.devflow and ignores this override.)
 TRACKER_DEVFLOW_DIR="${DEVFLOW_DIR:-$HOME/.devflow}"
@@ -138,12 +140,15 @@ LEARNING_DIR="$DEVFLOW_DIR/learning"
 # Normal logging
 source "$SCRIPT_DIR/hook-log-init" "session-start-context"
 
-# --- Learning gate (config-only) ---
-FEATURE_CONFIG="$DEVFLOW_DIR/config.json"
-LEARNING_ENABLED="true"
-if [ -f "$FEATURE_CONFIG" ]; then
-  LEARNING_ENABLED=$(json_field_file "$FEATURE_CONFIG" "learning" "true")
-fi
+# --- Learning gate: repo config AND the machine-wide switch ---
+# D-LEARNING-MASTER-SWITCH (see queue-append): the repo's .devflow/config.json
+# and ~/.devflow/manifest.json's features.learning are read by the same helper
+# the capture hooks use, so the directive and the queue it drains can never
+# disagree about whether learning is on. The manifest lives under the
+# devflow-global root captured above, not the project-scoped DEVFLOW_DIR.
+source "$SCRIPT_DIR/queue-append" || { echo "session-start-context: failed to source queue-append" >&2; exit 1; }
+queue_read_gates "$DEVFLOW_DIR/config.json" "$TRACKER_DEVFLOW_DIR/manifest.json"
+LEARNING_ENABLED="$_QG_LEARNING"
 
 # --- Section 1: Project Decisions TL;DR ---
 if [ "$LEARNING_ENABLED" = "true" ]; then

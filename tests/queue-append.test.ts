@@ -381,4 +381,91 @@ describe('queue_read_gates', () => {
     const r = readGates({});
     expect(r.exitCode).toBe(0);
   });
+
+  // D-LEARNING-MASTER-SWITCH: the manifest's features.learning is ANDed into the
+  // learning gate. Raw file contents (not objects) so malformed JSON is expressible.
+  describe('machine-wide learning switch (manifest)', () => {
+    type Raw = string | null;
+
+    function readGatesWith(
+      config: Raw,
+      manifest: Raw,
+      opts: { noJq?: boolean } = {},
+    ): { memory: string; learning: string; exitCode: number } {
+      const configPath = path.join(tmpDir, 'config.json');
+      const manifestPath = path.join(tmpDir, 'manifest.json');
+      if (config !== null) fs.writeFileSync(configPath, config);
+      if (manifest !== null) fs.writeFileSync(manifestPath, manifest);
+      const { stdout, exitCode } = runWithQueueAppend(`
+        ${opts.noJq ? '_HAS_JQ=false' : ''}
+        queue_read_gates "${configPath}" "${manifestPath}"
+        echo "MEMORY=$_QG_MEMORY"
+        echo "LEARNING=$_QG_LEARNING"
+      `);
+      return {
+        memory: stdout.match(/MEMORY=(\S*)/)?.[1] ?? '',
+        learning: stdout.match(/LEARNING=(\S*)/)?.[1] ?? '',
+        exitCode,
+      };
+    }
+
+    const manifestWith = (features: Record<string, unknown>): string =>
+      JSON.stringify({ version: '2.0.0', features });
+
+    for (const backend of [{ name: 'jq', noJq: false }, { name: 'node fallback', noJq: true }]) {
+      describe(`${backend.name} backend`, () => {
+        const gates = (config: Raw, manifest: Raw) => readGatesWith(config, manifest, { noJq: backend.noJq });
+
+        it('manifest learning:false turns learning off in a repo whose config says true', () => {
+          const r = gates(JSON.stringify({ memory: true, learning: true }), manifestWith({ learning: false }));
+          expect(r).toMatchObject({ memory: 'true', learning: 'false', exitCode: 0 });
+        });
+
+        it('manifest learning:false turns learning off where there is no repo config at all', () => {
+          const r = gates(null, manifestWith({ learning: false }));
+          expect(r).toMatchObject({ memory: 'true', learning: 'false', exitCode: 0 });
+        });
+
+        it('manifest learning:true never turns a repo that said false back on', () => {
+          const r = gates(JSON.stringify({ learning: false }), manifestWith({ learning: true }));
+          expect(r.learning).toBe('false');
+        });
+
+        it('a manifest without the learning key leaves the repo value in charge', () => {
+          expect(gates(JSON.stringify({ learning: true }), manifestWith({ ambient: true })).learning).toBe('true');
+          expect(gates(JSON.stringify({ learning: false }), manifestWith({ ambient: true })).learning).toBe('false');
+        });
+
+        it('no manifest file → learning stays on (fail-open, as before the switch existed)', () => {
+          const r = gates(null, null);
+          expect(r).toMatchObject({ memory: 'true', learning: 'true', exitCode: 0 });
+        });
+
+        it('a malformed manifest does not discard the repo config values', () => {
+          const r = gates(JSON.stringify({ memory: false, learning: false }), '{ not json');
+          expect(r).toMatchObject({ memory: 'false', learning: 'false', exitCode: 0 });
+        });
+
+        it('a malformed manifest alone fails open', () => {
+          expect(gates(null, '{ not json').learning).toBe('true');
+          expect(gates(null, '[1, 2]').learning).toBe('true');
+          expect(gates(null, JSON.stringify({ features: 'nope' })).learning).toBe('true');
+        });
+
+        it('a malformed repo config still honours the machine-wide switch', () => {
+          const r = gates('{ not json', manifestWith({ learning: false }));
+          expect(r).toMatchObject({ memory: 'true', learning: 'false', exitCode: 0 });
+        });
+
+        it('the switch reads only an explicit boolean false (a string "false" is not the switch)', () => {
+          expect(gates(null, manifestWith({ learning: 'false' })).learning).toBe('true');
+        });
+
+        it('memory is never touched by the manifest', () => {
+          const r = gates(JSON.stringify({ memory: false }), manifestWith({ memory: true, learning: true }));
+          expect(r).toMatchObject({ memory: 'false', learning: 'true' });
+        });
+      });
+    }
+  });
 });

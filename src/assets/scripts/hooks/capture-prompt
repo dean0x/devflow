@@ -42,6 +42,10 @@ source "$SCRIPT_DIR/resolve-project-root" 2>/dev/null || true
 PROJECT_ROOT="$(df_resolve_root "$CWD" 2>/dev/null || true)"
 [ -n "$PROJECT_ROOT" ] || PROJECT_ROOT="$CWD"
 
+# The machine-wide manifest (the learning master switch, D-LEARNING-MASTER-SWITCH
+# in queue-append) is user-scope: resolve it from the inherited DEVFLOW_DIR (or
+# ~/.devflow) BEFORE the project-scoped assignment below shadows that value.
+DEVFLOW_MANIFEST="${DEVFLOW_DIR:-$HOME/.devflow}/manifest.json"
 DEVFLOW_DIR="$PROJECT_ROOT/.devflow"
 MEMORY_DIR="$DEVFLOW_DIR/memory"
 LEARNING_DIR="$DEVFLOW_DIR/learning"
@@ -53,8 +57,8 @@ fi
 
 source "$SCRIPT_DIR/queue-append" || { echo "capture-prompt: failed to source queue-append" >&2; exit 1; }
 
-# --- AC-P1: exactly ONE config-read fork, fetching both memory + learning fields ---
-queue_read_gates "$DEVFLOW_DIR/config.json"
+# --- AC-P1: exactly ONE config-read fork for memory + learning (+ the machine-wide switch) ---
+queue_read_gates "$DEVFLOW_DIR/config.json" "$DEVFLOW_MANIFEST"
 MEMORY_ENABLED="$_QG_MEMORY"
 LEARNING_ENABLED="$_QG_LEARNING"
 
