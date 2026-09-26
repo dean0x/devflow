@@ -831,9 +831,9 @@ function collectConventionsCommitPlacementViolations(
   // sole mode: git.md is the single authority for setup-task.
   const setupTask = getSection(contractCorpus, 'setup-task', 'sole');
   if (setupTask !== null) {
-    if (!setupTask.includes('commit --only -- .devflow/conventions.md')) {
+    if (!setupTask.includes('commit --only -m "docs(devflow): record project conventions" -- .devflow/conventions.md')) {
       violations.push(
-        'setup-task: missing "commit --only -- .devflow/conventions.md" — ' +
+        'setup-task: missing \'commit --only -m "docs(devflow): record project conventions" -- .devflow/conventions.md\' — ' +
         'conventions commit must happen in setup-task step 4b, not inside learn-conventions (PF-030)',
       );
     }
@@ -2721,7 +2721,7 @@ describe('git agent — static content guards (PF-018)', () => {
     const oldStyleBlock =
       '\n**Commit (non-blocking):** Run only if learn-conventions returned `**Status**: WRITTEN`.\n' +
       '```bash\n' +
-      'git commit --only -- .devflow/conventions.md -m "docs(devflow): record project conventions"\n' +
+      'git commit --only -m "docs(devflow): record project conventions" -- .devflow/conventions.md\n' +
       '```\n';
     mutated =
       mutated.slice(0, cbIdx) +
