@@ -66,35 +66,42 @@ devflow/
 │       │   ├── tracker/_github.mds     # One file per GitHub tracker operation
 │       │   ├── git/_references.mds     # Cross-cutting documents the Git agent names
 │       │   └── git/_pr.mds             # One file per PR-host operation (provider-independent)
-│       └── scripts/hooks/            # Capture + memory + learning + ambient hooks
-│           ├── capture-prompt        # UserPromptSubmit hook: appends user turn to memory + learning queues (independently gated)
-│           ├── capture-turn          # Stop hook: appends assistant turn to memory + learning queues; never spawns
-│           ├── capture-question      # PostToolUse hook (matcher: AskUserQuestion): appends answered questions to both queues
-│           ├── queue-append          # Shared helper: queue_append_row / queue_append_both / queue_read_gates
-│           ├── memory-worker         # Stop hook (registered after capture-turn): 120s throttle, spawns background-memory-update
-│           ├── background-memory-update # Detached claude -p sonnet 4.6 worker: drains queue → staged write → CAS swap to WORKING-MEMORY.md (spawned by memory-worker)
-│           ├── learning-lock         # Shared helper: mkdir-based locking
-│           ├── session-start-memory  # SessionStart hook: injects memory + git state; recovers orphaned .pending-turns.processing itself
-│           ├── session-start-context # SessionStart hook: injects decisions TL;DR + the Learning agent spawn directive when the queue is pending
-│           ├── session-start-orchestrator # SessionStart hook (ambient, presence-gated): injects orchestrator charter (git repos only)
-│           ├── pre-compact-memory    # PreCompact hook: saves git state + WORKING-MEMORY.md snapshot; bootstraps WORKING-MEMORY.md with HEAD-SHA stamp when absent (requires non-empty branch + 40-hex sha)
-│           ├── preamble              # UserPromptSubmit hook (ambient, presence-gated): plan-handoff fast-path + slash skip + orchestrator reminder (git repos only)
-│           ├── git-marker            # Sourced helper: df_has_git_marker — bounded upward walk to detect git repos (no subprocess)
-│           ├── get-mtime             # Shared helper: portable mtime (BSD/GNU stat)
-│           ├── hook-bootstrap        # Shared helper: sources debug-trace + common setup
-│           ├── hook-log-init         # Shared helper: log initialization
-│           ├── debug-trace           # Shared helper: debug tracing (sourced via hook-bootstrap)
-│           ├── run-hook              # Shared helper: hook runner with logging; exits 0 when the named script is absent
-│           ├── log-paths             # Shared helper: per-project log path resolution
-│           ├── ensure-devflow-init   # Shared helper: lazy .devflow/ directory creation
-│           ├── decisions-usage-scan.cjs # Decisions usage scanning
-│           ├── json-helper.cjs       # Node.js jq-equivalent operations
-│           ├── json-parse            # Shell wrapper: jq with node fallback
-│           ├── assets/               # Static prose assets shipped with hooks
-│           │   └── orchestrator-charter.md  # Static charter asset: injected by session-start-orchestrator
-│           └── lib/                  # Node.js helper modules
-│               ├── project-paths.cjs   # Project slug + path resolution
-│               └── safe-path.cjs       # Path safety validation
+│       └── scripts/                  # Installed verbatim to ~/.devflow/scripts/
+│           ├── hud.sh                # HUD status-line entry script
+│           ├── redact-secrets.cjs    # D11 secret scrubber for every posted body and notes file
+│           ├── resolve-evidence-policy.cjs # Resolves EVIDENCE_POLICY from .devflow/policy.json; writes nothing
+│           ├── pr-evidence.cjs       # Pure core of test-plan evidence: grammars, markers, the state ladder
+│           ├── verify-evidence.cjs   # I/O half of test-plan evidence: check, render, verify, splice, readback
+│           ├── release-trace.cjs     # Git-only release trace: last release tag + per-commit trace map
+│           └── hooks/                # Capture + memory + learning + ambient hooks
+│               ├── capture-prompt        # UserPromptSubmit hook: appends user turn to memory + learning queues (independently gated)
+│               ├── capture-turn          # Stop hook: appends assistant turn to memory + learning queues; never spawns
+│               ├── capture-question      # PostToolUse hook (matcher: AskUserQuestion): appends answered questions to both queues
+│               ├── queue-append          # Shared helper: queue_append_row / queue_append_both / queue_read_gates
+│               ├── memory-worker         # Stop hook (registered after capture-turn): 120s throttle, spawns background-memory-update
+│               ├── background-memory-update # Detached claude -p sonnet 4.6 worker: drains queue → staged write → CAS swap to WORKING-MEMORY.md (spawned by memory-worker)
+│               ├── learning-lock         # Shared helper: mkdir-based locking
+│               ├── session-start-memory  # SessionStart hook: injects memory + git state; recovers orphaned .pending-turns.processing itself
+│               ├── session-start-context # SessionStart hook: injects decisions TL;DR + the Learning agent spawn directive when the queue is pending
+│               ├── session-start-orchestrator # SessionStart hook (ambient, presence-gated): injects orchestrator charter (git repos only)
+│               ├── pre-compact-memory    # PreCompact hook: saves git state + WORKING-MEMORY.md snapshot; bootstraps WORKING-MEMORY.md with HEAD-SHA stamp when absent (requires non-empty branch + 40-hex sha)
+│               ├── preamble              # UserPromptSubmit hook (ambient, presence-gated): plan-handoff fast-path + slash skip + orchestrator reminder (git repos only)
+│               ├── git-marker            # Sourced helper: df_has_git_marker — bounded upward walk to detect git repos (no subprocess)
+│               ├── get-mtime             # Shared helper: portable mtime (BSD/GNU stat)
+│               ├── hook-bootstrap        # Shared helper: sources debug-trace + common setup
+│               ├── hook-log-init         # Shared helper: log initialization
+│               ├── debug-trace           # Shared helper: debug tracing (sourced via hook-bootstrap)
+│               ├── run-hook              # Shared helper: hook runner with logging; exits 0 when the named script is absent
+│               ├── log-paths             # Shared helper: per-project log path resolution
+│               ├── ensure-devflow-init   # Shared helper: lazy .devflow/ directory creation
+│               ├── decisions-usage-scan.cjs # Decisions usage scanning
+│               ├── json-helper.cjs       # Node.js jq-equivalent operations
+│               ├── json-parse            # Shell wrapper: jq with node fallback
+│               ├── assets/               # Static prose assets shipped with hooks
+│               │   └── orchestrator-charter.md  # Static charter asset: injected by session-start-orchestrator
+│               └── lib/                  # Node.js helper modules
+│                   ├── project-paths.cjs   # Project slug + path resolution
+│                   └── safe-path.cjs       # Path safety validation
 ├── scripts/                          # Dev tooling
 │   ├── build-mds.ts                  # MDS compiler: command hosts → dist/commands/*.md, agent generator hosts → dist/agents/*.md, reference modules → dist/skills/git/references/**
 │   ├── bump-version.ts               # Version bump script
@@ -158,7 +165,8 @@ Assets live once in `src/assets/` and install to the user's `~/.claude/` — no 
 | Rules | `src/assets/rules/{name}.md` | `~/.claude/rules/devflow/{name}.md` | None — edit → init |
 | Commands | `dist/commands/{name}.md` | `~/.claude/commands/devflow/{name}.md` | `npm run build:mds` |
 | Skill references (generated) | `src/assets/mds/**/*.mds` → `dist/skills/git/references/**` | `~/.claude/skills/devflow:git/references/**` | `npm run build:mds` |
-| Scripts | `src/assets/scripts/hooks/` | `~/.devflow/scripts/hooks/` | None — edit → init |
+| Scripts (root) | `src/assets/scripts/*.cjs`, `hud.sh` | `~/.devflow/scripts/` | None — edit → init |
+| Scripts (hooks) | `src/assets/scripts/hooks/` | `~/.devflow/scripts/hooks/` | None — edit → init |
 
 ### Packaging
 
