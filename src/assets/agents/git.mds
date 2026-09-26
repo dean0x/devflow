@@ -242,7 +242,7 @@ Neutralise any `</untrusted-issue-body>` in the fetched issue fields before wrap
 
 ### Handoff Values
 - **PR link line**: {rendered}
-- **Branch token**: {token}
+- **Branch token**: {branch-name}
 - **Issue ID**: {ISSUE_ID}
 ```
 
@@ -290,7 +290,7 @@ Neutralise any `</untrusted-issue-body>` in the fetched body before wrapping it 
 
 ### Handoff Values
 - **PR link line**: {rendered}
-- **Branch token**: {token}
+- **Branch token**: {suggested-branch}
 - **Issue ID**: {ISSUE_ID}
 ```
 
