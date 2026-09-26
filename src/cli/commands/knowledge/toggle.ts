@@ -45,7 +45,8 @@ export async function handleToggle(options: { enable?: boolean; disable?: boolea
   if (options.enable) {
     p.intro(color.cyan('Enable Feature Knowledge Bases'));
 
-    // Update feature config (the sole gate — config-only per ADR-001)
+    // Update feature config (the sole gate — config-only per ADR-001); keeps
+    // every unmanaged key (D-CONFIG-PRESERVE-UNMANAGED)
     await updateFeature(worktreePath, 'knowledge', true);
 
     // Update manifest
@@ -63,7 +64,8 @@ export async function handleToggle(options: { enable?: boolean; disable?: boolea
   } else if (options.disable) {
     p.intro(color.cyan('Disable Feature Knowledge Bases'));
 
-    // Update feature config (the sole gate — config-only per ADR-001)
+    // Update feature config (the sole gate — config-only per ADR-001); keeps
+    // every unmanaged key (D-CONFIG-PRESERVE-UNMANAGED)
     await updateFeature(worktreePath, 'knowledge', false);
 
     // Update manifest

@@ -1165,10 +1165,24 @@ export async function updateGitignore(
  * fast path, in one commit (D-GITIGNORE-V5).
  */
 const GITIGNORE_MARKER_V5 = '.root-gitignore-configured-v5';
-/** Earlier markers — all removed when a project is stamped v5. */
-const GITIGNORE_MARKER_V4 = '.root-gitignore-configured-v4';
-const GITIGNORE_MARKER_V3 = '.root-gitignore-configured-v3';
-const GITIGNORE_MARKER_V2 = '.root-gitignore-configured-v2';
+/**
+ * Earlier markers, the unversioned (v1) one included — every one is removed
+ * whenever the project is v5-stamped, on the fast path too: an older devflow can
+ * re-stamp one beside v5, and the shell twin drops the same four.
+ */
+const LEGACY_GITIGNORE_MARKERS = [
+  '.root-gitignore-configured-v4',
+  '.root-gitignore-configured-v3',
+  '.root-gitignore-configured-v2',
+  '.root-gitignore-configured',
+] as const;
+
+/** Remove every legacy marker; an absent one is a no-op. Call only once v5 is stamped. */
+async function removeLegacyGitignoreMarkers(devflowDir: string): Promise<void> {
+  for (const legacy of LEGACY_GITIGNORE_MARKERS) {
+    try { await fs.rm(path.join(devflowDir, legacy), { force: true }); } catch { /* ok if absent */ }
+  }
+}
 
 /**
  * Deterministically ensure the project root .gitignore applies the `.devflow/`
@@ -1220,6 +1234,7 @@ export async function ensureDevflowGitignore(
           p.log.success('.gitignore configured (.devflow/ local; feature knowledge + conventions + evidence policy shared)');
         }
       }
+      await removeLegacyGitignoreMarkers(devflowDir);
       return;
     }
 
@@ -1236,12 +1251,10 @@ export async function ensureDevflowGitignore(
       }
     }
 
-    // Stamp v5 marker so subsequent runs fast-path; drop the legacy v4, v3 and v2 markers.
+    // Stamp v5 marker so subsequent runs fast-path; drop every legacy marker.
     await fs.mkdir(devflowDir, { recursive: true });
     await fs.writeFile(markerV5, '', 'utf-8');
-    for (const legacy of [GITIGNORE_MARKER_V4, GITIGNORE_MARKER_V3, GITIGNORE_MARKER_V2]) {
-      try { await fs.rm(path.join(devflowDir, legacy), { force: true }); } catch { /* ok if absent */ }
-    }
+    await removeLegacyGitignoreMarkers(devflowDir);
   } catch (error) {
     if (verbose) {
       p.log.warn(`Could not update .gitignore: ${error instanceof Error ? error.message : error}`);

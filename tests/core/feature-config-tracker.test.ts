@@ -13,11 +13,12 @@
  *      state distinct from "absent" [DR-26].
  *
  *   2. ROUND-TRIP PRESERVATION. `updateFeature` is a read-modify-write over the
- *      whole config (`{...config, [feature]: enabled}`), so a key coerceConfig
- *      does not carry is a key `devflow knowledge --disable` DELETES. Without the
- *      field, setting a per-repo tracker override and then toggling any unrelated
- *      feature silently reverts the repo to the manifest provider. That is the
- *      reachable consumer this key has at the 3a boundary (ADR-003).
+ *      whole file, so a key its write does not carry is a key `devflow knowledge
+ *      --disable` DELETES — setting a per-repo tracker override and then toggling
+ *      any unrelated feature would silently revert the repo to the manifest
+ *      provider. The write carries every unmanaged key from the file
+ *      (D-CONFIG-PRESERVE-UNMANAGED). That is the reachable consumer this key has
+ *      at the 3a boundary (ADR-003).
  *
  * The raw string is what the config file holds and what round-trips; the parsed
  * three-state view is what a consumer reads. They are separate on purpose — a
@@ -36,8 +37,7 @@ import {
   readConfig,
   readConfigIfPresent,
   updateFeature,
-  writeConfig,
-  type FeatureConfig,
+  writeManagedConfig,
   type TrackerConfigOverride,
 } from '../../src/core/feature-config.js';
 import { TRACKER_PROVIDER_IDS } from '../../src/core/tracker.js';
@@ -52,7 +52,7 @@ afterEach(() => {
   rmSync(tmpDir, { recursive: true, force: true });
 });
 
-/** Write a raw `.devflow/config.json` body, bypassing writeConfig's typing. */
+/** Write a raw `.devflow/config.json` body, bypassing every typed writer. */
 function seedConfig(body: string): void {
   mkdirSync(path.join(tmpDir, '.devflow'), { recursive: true });
   writeFileSync(path.join(tmpDir, '.devflow', 'config.json'), body, 'utf-8');
@@ -184,19 +184,13 @@ describe('the per-repo tracker key round-trips through the config', () => {
     expect(config!.tracker).toBe('linear');
   });
 
-  it('writeConfig omits the key entirely when there is no override', async () => {
-    const config: FeatureConfig = { ...DEFAULT_CONFIG };
-    await writeConfig(tmpDir, config);
+  it('writeManagedConfig omits the key entirely when there is no override', async () => {
+    await writeManagedConfig(tmpDir, { ...DEFAULT_CONFIG });
     expect(
       Object.keys(storedConfig()),
       'an explicit `"tracker": null` or `"tracker": "github"` would be a written override the ' +
       'user never chose — absent must stay absent on disk',
     ).not.toContain('tracker');
-  });
-
-  it('writeConfig persists an override it was given', async () => {
-    await writeConfig(tmpDir, { ...DEFAULT_CONFIG, tracker: 'jira' });
-    expect(storedConfig().tracker).toBe('jira');
   });
 
   it('★ updateFeature does NOT erase the override (the reachable consumer, ADR-003)', async () => {
@@ -232,7 +226,7 @@ describe('the per-repo tracker key round-trips through the config', () => {
    * reachable from a direct call and unreachable from the file, so the whole
    * class is silent for every user who can open a text editor — a parse arm
    * exercised only by inputs the reader cannot produce (PF-043). And because
-   * `updateFeature` is a read-modify-write, a value dropped on read is a value
+   * `updateFeature` is a read-modify-write, a value its write drops is a value
    * DELETED from disk on the next unrelated toggle, taking the user's edit and
    * the DEGRADED that reports it together.
    */

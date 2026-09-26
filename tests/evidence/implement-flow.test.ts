@@ -709,13 +709,14 @@ describe('0b: Phase 10b pushes the branch before the evidence spawn', () => {
 })
 
 describe('AC-11: Phase 10b runs update-pr-evidence once, after Phase 10, for every strategy', () => {
-  it('the publication partial has three importers, /implement among them', () => {
+  it('the publication partial has four importers, /implement among them', () => {
     const sources = walkFiles(path.join(ROOT, 'src'), f => f.endsWith('.mds')).map(f => ({
       name: path.basename(f, '.mds'),
       content: readFileSync(f, 'utf-8'),
     }))
     expect(sources.length, 'the src/ .mds walk found nothing').toBeGreaterThanOrEqual(20)
-    expect(collectPublicationImporters(sources)).toEqual(['code-review', 'implement', 'resolve'])
+    // dynamic-build joined in #376 (W1): the wave PR's evidence refresh resolves the same value.
+    expect(collectPublicationImporters(sources)).toEqual(['code-review', 'dynamic-build', 'implement', 'resolve'])
   })
 
   it('the order holds and the spawn carries the op\'s Input keys', () => {

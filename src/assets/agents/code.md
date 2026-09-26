@@ -97,7 +97,7 @@ When you apply a decision from `.devflow/learning/decisions.md` or avoid a pitfa
 
    When `ISSUE_NUMBER` is provided, always include a `## Related Issues` section in the PR body — whether composing from guidance or generating from context.
 
-   **Pasting the handoff values.** The Git agent's `setup-task` and `fetch-issue` Output blocks end with a `### Handoff Values` block: `- **PR link line**: {rendered}` is the already-rendered closing line for `## Related Issues`, and `- **Branch token**: {token}` is the branch name it derived. Paste `ISSUE_PR_LINK` verbatim — **after re-checking its shape against the tracker reference grammars**: paste it only if it matches **one row** of this table as the WHOLE line:
+   **Pasting the handoff values.** The Git agent's `setup-task` and `fetch-issue` Output blocks end with a `### Handoff Values` block: `- **PR link line**: {rendered}` is the already-rendered closing line for `## Related Issues`, and `- **Branch token**:` is the branch name it created or suggested. Paste `ISSUE_PR_LINK` verbatim — **after re-checking its shape against the tracker reference grammars**: paste it only if it matches **one row** of this table as the WHOLE line:
 
    | Tracker grammar | `ISSUE_PR_LINK` must match |
    |---|---|

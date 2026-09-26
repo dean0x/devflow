@@ -34,12 +34,43 @@ const CODE = resolveAgentSource('code').content
 
 afterAll(cleanupCommittedTree)
 
-/** The three producer lines, verbatim as git.md emits them under ### Handoff Values. */
+/** The producer lines, verbatim as git.md emits them under ### Handoff Values. */
 const PRODUCER_LINES = [
   '- **PR link line**: {rendered}',
-  '- **Branch token**: {token}',
+  '- **Branch token**: {branch-name}',
+  '- **Branch token**: {suggested-branch}',
   '- **Issue ID**: {ISSUE_ID}',
 ] as const
+
+/**
+ * The branch token IS the branch name (#376 S5), per operation: setup-task's is
+ * the branch it created, the placeholder its `## Task Setup:` heading uses, and
+ * fetch-issue's is the one its `### Suggested Branch` section names.
+ */
+const BRANCH_TOKEN_SOURCES = [
+  { op: 'setup-task', line: '- **Branch token**: {branch-name}', source: '## Task Setup: {branch-name}' },
+  { op: 'fetch-issue', line: '- **Branch token**: {suggested-branch}', source: '### Suggested Branch' },
+] as const
+
+/** git.md's section for one operation, from its heading to the next operation's. */
+function gitOpSection(git: string, op: string): string {
+  const start = git.indexOf(`## Operation: ${op}\n`)
+  if (start === -1) return ''
+  const next = git.indexOf('\n## Operation:', start + 1)
+  return next === -1 ? git.slice(start) : git.slice(start, next)
+}
+
+/** Named collector: each operation whose branch token is not the branch name it returns. */
+function collectBranchTokenDefects(git: string): string[] {
+  const out: string[] = []
+  for (const { op, line, source } of BRANCH_TOKEN_SOURCES) {
+    const section = gitOpSection(git, op)
+    if (section === '') out.push(`${op}: no section`)
+    else if (!section.includes(line) || !section.includes(source)) out.push(`${op}: branch token is not ${source}'s branch name`)
+  }
+  if (git.includes('- **Branch token**: {token}')) out.push('an opaque {token} placeholder is still emitted')
+  return out
+}
 
 describe('git.md — ### Handoff Values producer block', () => {
   it('is non-vacuous', () => {
@@ -54,6 +85,21 @@ describe('git.md — ### Handoff Values producer block', () => {
         `git.md must emit ${line} — the Code agent reads it by this exact label, not by prose`,
       ).toContain(line)
     }
+  })
+
+  it('defines the branch token as the branch name each operation returns (#376 S5)', () => {
+    expect(collectBranchTokenDefects(GIT)).toEqual([])
+  })
+
+  it('known-bad probes: an opaque {token}, and a setup-task token that is not its branch, are reported', () => {
+    const opaque = GIT.replace('- **Branch token**: {suggested-branch}', '- **Branch token**: {token}')
+    expect(opaque, 'the seed must land').not.toBe(GIT)
+    expect(collectBranchTokenDefects(opaque)).toEqual([
+      'fetch-issue: branch token is not ### Suggested Branch\'s branch name',
+      'an opaque {token} placeholder is still emitted',
+    ])
+    const swapped = GIT.replace('- **Branch token**: {branch-name}', '- **Branch token**: {suggested-branch}')
+    expect(collectBranchTokenDefects(swapped)).toEqual(['setup-task: branch token is not ## Task Setup: {branch-name}\'s branch name'])
   })
 
   it('emits the block from both issue-returning operations, not just one', () => {

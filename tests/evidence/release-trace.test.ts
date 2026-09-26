@@ -46,7 +46,7 @@ interface Commit {
   name: string
   email: string
   subject: string
-  body: string
+  message: string
   paths: readonly string[]
 }
 interface TraceRecord { sha: string; cls: TraceClass; author: string }
@@ -258,7 +258,7 @@ function fakeGit(o: { revParse?: ExecResult; revList?: ExecResult; messages?: Ex
 }
 
 const commitOf = (over: Partial<Commit>): Commit => ({
-  sha: SHA_A, name: 'Dev', email: 'dev@example.invalid', subject: 'feat: something', body: '', paths: ['src/a.js'], ...over,
+  sha: SHA_A, name: 'Dev', email: 'dev@example.invalid', subject: 'feat: something', message: '', paths: ['src/a.js'], ...over,
 })
 const ctxOf = (grammar: Grammar = 'github', key: string | null = null, traced: readonly string[] = []) =>
   ({ grammar, key, traced: new Set(traced) })
@@ -389,7 +389,7 @@ describe('classify — first match wins, terminal arm untraced', () => {
   const BOT = { name: 'github-actions[bot]', email: '41898282+github-actions[bot]@users.noreply.github.com' }
 
   it.each([
-    ['traced by a closing keyword', commitOf({ body: 'Closes #3.' }), 'traced'],
+    ['traced by a closing keyword', commitOf({ message: 'Closes #3.' }), 'traced'],
     ['traced by the traced file alone', commitOf({ sha: SHA_B }), 'traced'],
     ['the /release commit', commitOf({ subject: 'chore(release): v1.2.3' }), 'exempt:release'],
     ['a bare-version /release commit', commitOf({ subject: 'chore(release): 1.2.3' }), 'exempt:release'],
@@ -402,19 +402,19 @@ describe('classify — first match wins, terminal arm untraced', () => {
     ['a lowercase changelog.md', commitOf({ paths: ['changelog.md'] }), 'untraced'],
     ['a CHANGELOG.md.bak', commitOf({ paths: ['CHANGELOG.md.bak'] }), 'untraced'],
     ['an empty commit is never CHANGELOG-only', commitOf({ paths: [] }), 'untraced'],
-    ['git revert', commitOf({ subject: 'Revert "feat: x"', body: `This reverts commit ${SHA_C}.\n` }), 'exempt:revert'],
-    ['GitHub revert PR', commitOf({ subject: 'Revert "feat: x" (#21)', body: 'Reverts owner/repo#20\n' }), 'exempt:revert'],
+    ['git revert', commitOf({ subject: 'Revert "feat: x"', message: `This reverts commit ${SHA_C}.\n` }), 'exempt:revert'],
+    ['GitHub revert PR', commitOf({ subject: 'Revert "feat: x" (#21)', message: 'Reverts owner/repo#20\n' }), 'exempt:revert'],
     ['subject-only revert', commitOf({ subject: 'Revert "feat: x"' }), 'untraced'],
-    ['body-only revert', commitOf({ body: `This reverts commit ${SHA_C}.` }), 'untraced'],
-    ['revert naming a short SHA', commitOf({ subject: 'Revert "feat: x"', body: 'This reverts commit abc1234.' }), 'untraced'],
+    ['body-only revert', commitOf({ message: `This reverts commit ${SHA_C}.` }), 'untraced'],
+    ['revert naming a short SHA', commitOf({ subject: 'Revert "feat: x"', message: 'This reverts commit abc1234.' }), 'untraced'],
     ['bot with a numeric noreply', commitOf(BOT), 'exempt:bot'],
     ['bot with a bare noreply', commitOf({ name: 'dependabot[bot]', email: 'dependabot[bot]@users.noreply.github.com' }), 'exempt:bot'],
     ['[bot] name, foreign e-mail', commitOf({ name: 'evil[bot]', email: 'evil[bot]@example.com' }), 'untraced'],
     ['noreply bot e-mail, name without [bot]', commitOf({ name: 'renovate', email: 'renovate[bot]@users.noreply.github.com' }), 'untraced'],
     ['[bot] name, human noreply', commitOf({ name: 'x[bot]', email: '123+octocat@users.noreply.github.com' }), 'untraced'],
     ['order: a CHANGELOG-only bot commit (1a8ac476\'s shape) is release', commitOf({ ...BOT, paths: ['CHANGELOG.md'] }), 'exempt:release'],
-    ['order: a traced revert is traced', commitOf({ subject: 'Revert "x"', body: `This reverts commit ${SHA_C}.\nRefs #9` }), 'traced'],
-    ['order: a revert by a bot is revert', commitOf({ ...BOT, subject: 'Revert "x"', body: `This reverts commit ${SHA_C}.` }), 'exempt:revert'],
+    ['order: a traced revert is traced', commitOf({ subject: 'Revert "x"', message: `This reverts commit ${SHA_C}.\nRefs #9` }), 'traced'],
+    ['order: a revert by a bot is revert', commitOf({ ...BOT, subject: 'Revert "x"', message: `This reverts commit ${SHA_C}.` }), 'exempt:revert'],
   ] as const)('%s ⇒ %s', (_label, c, expected) => {
     expect(RT.classify(c, ctxOf('github', null, [SHA_B]))).toBe(expected)
   })
@@ -559,12 +559,12 @@ describe('render and the output gate (D-TRACE-STDOUT, D-TRACE-GATE)', () => {
 // ---------------------------------------------------------------------------
 
 describe('parsing git\'s answers (D-TRACE-PARSE)', () => {
-  it('a message body carrying `\\x1e\\n` and the next SHA keeps its record', () => {
+  it('a message carrying `\\x1e\\n` and the next SHA keeps its record', () => {
     const forged = `evil\x1e\n${SHA_B}\x1e\n${SHA_B}`
     const text = `${SHA_A}\0Dev\0d@x\0feat: a\0${forged}\x1e\n${SHA_B}\0Bot[bot]\0b@x\0chore(release): v1.0.0\0\x1e\n`
     expect(RT.parseMessageLog(text, [SHA_A, SHA_B])).toEqual([
-      { sha: SHA_A, name: 'Dev', email: 'd@x', subject: 'feat: a', body: forged },
-      { sha: SHA_B, name: 'Bot[bot]', email: 'b@x', subject: 'chore(release): v1.0.0', body: '' },
+      { sha: SHA_A, name: 'Dev', email: 'd@x', subject: 'feat: a', message: forged },
+      { sha: SHA_B, name: 'Bot[bot]', email: 'b@x', subject: 'chore(release): v1.0.0', message: '' },
     ])
   })
 
@@ -796,6 +796,44 @@ describe('map: first-parent commits only (D4), and the jira grammar', SPAWN_BUDG
     expect(r.status, r.stderr).toBe(0)
     const t = parseTrace(r.stdout)
     expect([ok, foreign, lower, hash].map(s => classOf(t, s))).toEqual(['traced', 'untraced', 'untraced', 'untraced'])
+  })
+})
+
+// ---------------------------------------------------------------------------
+// S1 (#376): the script reads each message as the gather step does
+// ---------------------------------------------------------------------------
+//
+// Step 3a finds a candidate "on the same line" as its keyword, and the gather
+// step reads each message as `git log --format=%B` lines. git's `%s` FOLDS a
+// wrapped subject paragraph onto one line, so a script that scanned `%s` saw a
+// keyword ending line 1 and a reference opening line 2 as one line — traced by
+// the script, never a candidate for the gather step. Both now read `%B`.
+
+/** The message-log format: `%s` only for the exempt rules, `%B` for the reference scan (pinned in the argv arm below). */
+const MESSAGE_LOG_FORMAT = '--format=%H%x00%an%x00%ae%x00%s%x00%B%x1e'
+
+describe('map: each message is read whole, as `git log --format=%B` lines (S1)', SPAWN_BUDGET, () => {
+  it('a keyword and a reference split across a wrapped subject trace as step 3a reads them', () => {
+    const repo = newRepo('wrapped')
+    git(repo, ['tag', 'v1.0.0'])
+    const split = commit(repo, { subject: 'fix: guard the parser so it closes\n#42 across the wrap', files: { a: '1' } })
+    const sameLine = commit(repo, { subject: 'feat: a subject long enough to wrap onto\na second line that closes #43', files: { b: '1' } })
+    const bodyRef = commit(repo, { subject: 'feat: short', body: 'Refs #44', files: { c: '1' } })
+    expect(git(repo, ['log', '-1', '--format=%s', split]).trim(), 'the hazard: %s folds the wrapped subject')
+      .toBe('fix: guard the parser so it closes #42 across the wrap')
+
+    const r = run(repo, ['map', '--from', 'v1.0.0', '--grammar', 'github'])
+    expect(r.status, r.stderr).toBe(0)
+    const t = parseTrace(r.stdout)
+    expect([split, sameLine, bodyRef].map(s => classOf(t, s))).toEqual(['untraced', 'traced', 'traced'])
+
+    // Agreement, not only a verdict: each class is exactly what step 3a yields over
+    // the `%B` lines the gather step reads for the same commit.
+    for (const sha of [split, sameLine, bodyRef]) {
+      const lines = git(repo, ['log', '-1', '--format=%B', sha])
+      const gathered = RT.findReference(lines, 'github', null) === null ? 'untraced' : 'traced'
+      expect(classOf(t, sha), sha.slice(0, 12)).toBe(gathered)
+    }
   })
 })
 
@@ -1087,7 +1125,8 @@ describe('the git argv the script sends', SPAWN_BUDGET, () => {
       expect(c).toContain('--first-parent')
     }
     expect(calls[3]).toContain('--no-use-mailmap')
-    expect(calls[3], 'the raw ident (%an/%ae), never the mailmapped %aN/%aE').toContain('--format=%H%x00%an%x00%ae%x00%s%x00%b%x1e')
+    expect(calls[3], 'the raw ident (%an/%ae), never the mailmapped %aN/%aE; the whole message (%B, S1)').toContain(MESSAGE_LOG_FORMAT)
+    expect(calls[3].filter(a => a.startsWith('--format=')), 'one format, so %b cannot ride in beside it').toHaveLength(1)
     expect(calls[4].slice(0, 3)).toEqual(['git', '-c', 'log.showRoot=true'])
     for (const flag of ['--no-renames', '--no-relative', '--ignore-submodules=none', '--diff-merges=first-parent', '-z']) {
       expect(calls[4]).toContain(flag)

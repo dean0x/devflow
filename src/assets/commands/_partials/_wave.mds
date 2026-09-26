@@ -37,7 +37,7 @@ Reader return shape:
 **Step 2 — Run ready tickets**
 
 For each ready ticket (sequentially by default; parallel only past the §7.1 bar):
-- Branch setup: `ticket/<slug>` off integration HEAD at ready-time (so it already contains merged deps)
+- Branch setup: the engine's setup-task creates the ticket's branch off integration HEAD at ready-time (so it already contains merged deps); every later phase, and the merge, uses the branch setup-task created, and a setup-task that reports none stops the ticket before implementing
 - Run the single-ticket engine inside a try/catch — one ticket's crash/stall never kills the wave; catch the exception, quarantine that ticket, and continue with the remaining ready set
 - The engine gets the ticket's own reference, the one the pre-fetch printed, as its setup-task input — never the wave's tracking issue
 - On engine PASS or UNVERIFIED: merge to integration branch, run Validate agent (build + test)
@@ -66,7 +66,7 @@ MAX_ROUNDS = LLM judgment based on ticket count (heuristic: ticket_count * 2 + 5
 
 **Integration branch:** `wave/<initiative>` (or the user's current branch if they direct it). NEVER main or master.
 
-**Per-ticket branches:** `ticket/<slug>`, branched off integration HEAD at the moment the ticket becomes ready. Branching at ready-time means the ticket branch already contains all merged dependencies.
+**Per-ticket branches:** the branch setup-task created, branched off integration HEAD at the moment the ticket becomes ready — the engine never names one itself. Branching at ready-time means the ticket branch already contains all merged dependencies.
 
 **Parallel independent tickets:** each gets its own `git worktree add` + durable branch managed by the Git agent. Use explicit `git worktree add` — NOT the Workflow tool's ephemeral `isolation:'worktree'`. The branch must persist across implement → review → resolve → merge stages; ephemeral worktrees are gone when the agent call ends.
 
@@ -110,6 +110,7 @@ A workflow cannot pause mid-run (F4). "Escalate" means: quarantine-and-continue 
 - Review coverage incomplete after retry (a focus area failed to produce a live Review agent result after the retry)
 - Ticket engine crash/stall (unrecoverable exception or watchdog kill — quarantine cascades to dependents)
 - No ticket link while issues are required (the engine stops before implementing)
+- No branch reported by setup-task (the engine stops before implementing)
 - Any situation requiring a human decision mid-run
 
 **Escalation procedure:**

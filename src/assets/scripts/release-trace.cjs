@@ -163,8 +163,8 @@ const GRAMMAR_NAMES = Object.freeze(/** @type {Grammar[]} */ (['github', 'jira',
  *   release  the `/release` commit's strict subject, or a commit whose changed
  *            paths are ALL named CHANGELOG.md — and there is at least one: an
  *            empty commit is never "CHANGELOG-only" (D-TRACE-EXEMPT-EMPTY)
- *   revert   a `Revert "…"` subject AND a body naming what it reverts, in git's
- *            own words or GitHub's revert-PR body
+ *   revert   a `Revert "…"` subject AND a message naming what it reverts, in
+ *            git's own words or GitHub's revert-PR body
  *   bot      a `[bot]` author name AND a GitHub noreply bot address (D3)
  */
 const EXEMPT = Object.freeze({
@@ -241,9 +241,11 @@ const USAGE = [
  * @typedef {'github' | 'jira' | 'linear'} Grammar
  * @typedef {'traced' | 'exempt:release' | 'exempt:revert' | 'exempt:bot' | 'untraced'} TraceClass
  *
- * @typedef {{ sha: string, name: string, email: string, subject: string, body: string, paths: readonly string[] }} Commit
- *   One first-parent commit: author name/e-mail, subject, body, and the paths it
- *   changes against its first parent.
+ * @typedef {{ sha: string, name: string, email: string, subject: string, message: string, paths: readonly string[] }} Commit
+ *   One first-parent commit: author name/e-mail, subject (`%s`, which git folds
+ *   onto one line — read by the exempt rules only), the whole message (`%B`, the
+ *   lines step 3a reads — D-TRACE-FULL-MESSAGE), and the paths it changes against
+ *   its first parent.
  *
  * @typedef {{ grammar: Grammar, key: string | null, traced: ReadonlySet<string> }} ClassifyContext
  *
@@ -427,9 +429,9 @@ function isChangelogOnly(paths) {
  */
 function classify(commit, ctx) {
   if (ctx.traced.has(commit.sha)) return 'traced';
-  if (findReference(commit.subject + '\n' + commit.body, ctx.grammar, ctx.key) !== null) return 'traced';
+  if (findReference(commit.message, ctx.grammar, ctx.key) !== null) return 'traced';
   if (EXEMPT.release.subject.test(commit.subject) || isChangelogOnly(commit.paths)) return 'exempt:release';
-  if (EXEMPT.revert.subject.test(commit.subject) && EXEMPT.revert.body.some(re => re.test(commit.body))) {
+  if (EXEMPT.revert.subject.test(commit.subject) && EXEMPT.revert.body.some(re => re.test(commit.message))) {
     return 'exempt:revert';
   }
   if (commit.name.endsWith(EXEMPT.bot.nameSuffix) && EXEMPT.bot.email.test(commit.email)) return 'exempt:bot';
@@ -574,15 +576,15 @@ function parseShaLines(text) {
 }
 
 /**
- * D-TRACE-PARSE (messages): split `--format=%H%x00%an%x00%ae%x00%s%x00%b%x1e`
+ * D-TRACE-PARSE (messages): split `--format=%H%x00%an%x00%ae%x00%s%x00%B%x1e`
  * output for exactly the commits `shas` names, in order, or null.
  *
  * Positional and exact: git stops printing a field at a NUL (a crafted object
  * cannot smuggle one into a message or an ident), so the output's only NULs are
- * the four per record the format writes, and the total is checked. The body
+ * the four per record the format writes, and the total is checked. The message
  * token of record k ends with `\x1e\n` plus record k+1's SHA — a fixed-length
- * suffix checked against the rev-list answer — so a body holding `\x1e\n` and a
- * SHA cannot move a record boundary.
+ * suffix checked against the rev-list answer — so a message holding `\x1e\n` and
+ * a SHA cannot move a record boundary.
  *
  * @param {string} text
  * @param {readonly string[]} shas
@@ -603,7 +605,7 @@ function parseMessageLog(text, shas) {
       name: tokens[4 * k + 1],
       email: tokens[4 * k + 2],
       subject: tokens[4 * k + 3],
-      body: tail.slice(0, tail.length - suffix.length),
+      message: tail.slice(0, tail.length - suffix.length),
     });
   }
   return out;
@@ -887,10 +889,18 @@ const PATH_LOG_FLAGS = Object.freeze([
  * never `%aN`/`%aE`, which apply the mailmap (git 2.50 leaves `%an` raw even under
  * `--use-mailmap`) — and `--no-use-mailmap` also disarms `log.mailmap` for a git
  * that rewrites the ident itself.
+ *
+ * D-TRACE-FULL-MESSAGE: references are scanned in `%B`, the raw message, never in
+ * `%s` + `%b`. git folds a wrapped subject paragraph onto ONE `%s` line, so a
+ * keyword ending the subject's first line and a reference opening its second
+ * would read as one line here and as two to step 3a, which reads each message as
+ * `git log --format=%B` lines — the script would trace a commit whose reference
+ * the gather step never collects. `%s` stays for the exempt rules, which match
+ * the subject as git renders it. The parity test pins both sides.
  */
 const MESSAGE_LOG_FLAGS = Object.freeze([
   '--first-parent', '--no-color', '--no-show-signature', '--no-notes', '--no-use-mailmap', '--encoding=UTF-8',
-  '--format=%H%x00%an%x00%ae%x00%s%x00%b%x1e',
+  '--format=%H%x00%an%x00%ae%x00%s%x00%B%x1e',
 ]);
 
 /**
@@ -1094,6 +1104,7 @@ module.exports = Object.freeze({
   TRACE_MORE_RE,
   LAST_TAG_LINE_RE,
   REASONS,
+  MESSAGE_LOG_FLAGS,
   selectLastTag,
   findReference,
   classify,

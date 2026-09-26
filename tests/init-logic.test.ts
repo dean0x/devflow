@@ -472,6 +472,39 @@ describe('ensureDevflowGitignore — v5 carve-out (.claudeignore + evidence poli
     await expect(fs.access(markerV3())).rejects.toThrow();
   });
 
+  // Every marker a v5 stamp retires, the unversioned (v1) one included.
+  const legacyMarkers = (): string[] => [markerV4(), markerV3(), markerV2(), path.join(tmpDir, '.devflow', '.root-gitignore-configured')];
+  const present = async (paths: readonly string[]): Promise<string[]> => {
+    const out: string[] = [];
+    for (const p of paths) {
+      try { await fs.access(p); out.push(path.basename(p)); } catch { /* absent */ }
+    }
+    return out;
+  };
+
+  it('a v5-marked install drops stale legacy markers (the unversioned one too) without rewriting .gitignore', async () => {
+    await ensureDevflowGitignore(tmpDir, false);
+    const converged = await read();
+    for (const marker of legacyMarkers()) await fs.writeFile(marker, '', 'utf-8');
+
+    await ensureDevflowGitignore(tmpDir, false);
+
+    expect(await read()).toBe(converged);
+    expect(await present(legacyMarkers())).toEqual([]);
+    await expect(fs.access(markerV5())).resolves.toBeUndefined();
+  });
+
+  it('stamping v5 drops an unversioned (v1) marker too', async () => {
+    await fs.mkdir(path.join(tmpDir, '.devflow'), { recursive: true });
+    const unversioned = path.join(tmpDir, '.devflow', '.root-gitignore-configured');
+    await fs.writeFile(unversioned, '', 'utf-8');
+
+    await ensureDevflowGitignore(tmpDir, false);
+
+    await expect(fs.access(markerV5())).resolves.toBeUndefined();
+    expect(await present([unversioned])).toEqual([]);
+  });
+
   it('is a no-op (byte-identical) when v5 marker already exists', async () => {
     // First run installs the carve-out and writes the marker.
     await ensureDevflowGitignore(tmpDir, false);

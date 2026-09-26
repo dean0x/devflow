@@ -1350,6 +1350,46 @@ describe('ensure-root-gitignore behavioral', () => {
     expect(fs.readFileSync(path.join(tmpDir, '.gitignore'), 'utf-8')).toBe(contentAfterFirst);
   });
 
+  // Every marker a v5 stamp retires. An older devflow can re-stamp one beside v5
+  // (a second checkout, a downgrade), and the fast path must still drop it.
+  const LEGACY_MARKERS = [
+    '.root-gitignore-configured-v4',
+    '.root-gitignore-configured-v3',
+    '.root-gitignore-configured-v2',
+    '.root-gitignore-configured',
+  ] as const;
+
+  it('v5 fast path drops stale legacy markers (the unversioned one too) and leaves .gitignore unchanged', () => {
+    execSync(`bash -c 'source "${ENSURE_ROOT}" "${tmpDir}"'`, { stdio: 'pipe' });
+    const converged = fs.readFileSync(path.join(tmpDir, '.gitignore'), 'utf-8');
+    for (const marker of LEGACY_MARKERS) fs.writeFileSync(path.join(tmpDir, '.devflow', marker), '');
+
+    execSync(`bash -c 'source "${ENSURE_ROOT}" "${tmpDir}"'`, { stdio: 'pipe' });
+
+    expect(fs.readFileSync(path.join(tmpDir, '.gitignore'), 'utf-8')).toBe(converged);
+    expect(LEGACY_MARKERS.filter(m => fs.existsSync(path.join(tmpDir, '.devflow', m)))).toEqual([]);
+    expect(fs.existsSync(path.join(tmpDir, '.devflow', '.root-gitignore-configured-v5'))).toBe(true);
+  });
+
+  it('v5 fast path forks `rm` only for a legacy marker that exists (builtin `[ -e ]` tests)', () => {
+    // An `rm` shim first on PATH logs every invocation, then does the real work.
+    const shimBin = path.join(tmpDir, 'shim-bin');
+    const rmLog = path.join(tmpDir, 'rm.log');
+    fs.mkdirSync(shimBin);
+    fs.writeFileSync(path.join(shimBin, 'rm'), `#!/bin/bash\necho "$@" >> "${rmLog}"\nexec /bin/rm "$@"\n`, { mode: 0o755 });
+    const env = { ...process.env, PATH: `${shimBin}:${process.env.PATH}` };
+    execSync(`bash -c 'source "${ENSURE_ROOT}" "${tmpDir}"'`, { stdio: 'pipe' });
+
+    execSync(`bash -c 'source "${ENSURE_ROOT}" "${tmpDir}"'`, { stdio: 'pipe', env });
+    expect(fs.existsSync(rmLog), 'a converged project forks no rm').toBe(false);
+
+    // Non-vacuity: the shim is live — one stale marker is one rm, and it is gone.
+    fs.writeFileSync(path.join(tmpDir, '.devflow', '.root-gitignore-configured-v4'), '');
+    execSync(`bash -c 'source "${ENSURE_ROOT}" "${tmpDir}"'`, { stdio: 'pipe', env });
+    expect(fs.readFileSync(rmLog, 'utf-8').trim().split('\n')).toHaveLength(1);
+    expect(fs.existsSync(path.join(tmpDir, '.devflow', '.root-gitignore-configured-v4'))).toBe(false);
+  });
+
   it('v5 marker present but block dropped: heals the .gitignore (marker is a claim, not proof)', () => {
     // Simulate a merge-conflict resolution that drops the devflow block while leaving the v5 marker.
     fs.mkdirSync(path.join(tmpDir, '.devflow'), { recursive: true });
