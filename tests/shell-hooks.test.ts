@@ -468,6 +468,42 @@ describe('hooks anchor .devflow/ to the project root (no stray nested .devflow/)
   });
 });
 
+describe('hook-log-init: first invocation for a fresh log dir', () => {
+  const HOOK_LOG_INIT = path.join(HOOKS_DIR, 'hook-log-init');
+
+  it('sources silently under set -e when the log file does not exist yet, and sizes it as 0', () => {
+    // HOME is a mktemp dir: devflow_log_dir mkdirs $HOME/.devflow/logs/<slug>
+    // unconditionally (PF-060). Seeded, never empty (PF-018). CWD is its own
+    // mktemp dir so its slug's log dir — and the log file — are brand new.
+    const homeDir = fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-loginit-home-'));
+    fs.mkdirSync(path.join(homeDir, '.devflow', 'logs'), { recursive: true });
+    const cwdDir = fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-loginit-cwd-'));
+    try {
+      // Sourced under `set -e` the way the capture hooks source it (PF-078):
+      // the caller must keep running past the size guard.
+      const script = [
+        'set -e',
+        `SCRIPT_DIR="${HOOKS_DIR}"`,
+        `CWD="${cwdDir}"`,
+        `source "${HOOK_LOG_INIT}" "fresh-hook"`,
+        'echo "size=$_LOG_SIZE"',
+        '[ -f "$LOG_FILE" ] && echo "exists" || echo "absent"',
+      ].join('\n');
+      const result = spawnSync('bash', ['-c', script], {
+        env: { ...process.env, HOME: homeDir, DEVFLOW_DIR: '' },
+        encoding: 'utf-8',
+      });
+
+      expect(result.stderr).toBe('');
+      expect(result.status).toBe(0);
+      expect(result.stdout).toBe('size=0\nabsent\n');
+    } finally {
+      fs.rmSync(homeDir, { recursive: true, force: true });
+      fs.rmSync(cwdDir, { recursive: true, force: true });
+    }
+  });
+});
+
 // =============================================================================
 // preamble — orchestrator charter mode (Suites 1-4)
 // =============================================================================

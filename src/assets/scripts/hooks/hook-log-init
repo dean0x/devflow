@@ -29,9 +29,11 @@ LOG_FILE="$LOG_DIR/.${_HOOK_LOG_NAME}.log"
 
 # Size guard: truncate log to tail 1MB when it exceeds 2MB (runs once per hook invocation)
 # stat -f%z (macOS/BSD) → stat -c%s (GNU/Linux) → wc -c (last resort), matching debug-trace pattern.
+# `2>/dev/null` precedes `<`: redirections apply left to right, so the shell's own
+# "No such file or directory" for a missing log (first run for a cwd) lands in /dev/null.
 _LOG_SIZE=$(stat -f%z "$LOG_FILE" 2>/dev/null) \
   || _LOG_SIZE=$(stat -c%s "$LOG_FILE" 2>/dev/null) \
-  || _LOG_SIZE=$(wc -c < "$LOG_FILE" 2>/dev/null) \
+  || _LOG_SIZE=$(wc -c 2>/dev/null < "$LOG_FILE") \
   || _LOG_SIZE=0
 if [ -f "$LOG_FILE" ] && [ "$_LOG_SIZE" -gt 2097152 ]; then
   _LTMP="$LOG_FILE.tmp.$$"
