@@ -126,7 +126,9 @@ import type {
  * #376, the series close-out, re-derived the three TRACKER rows' formula rather than
  * their headroom: each dropped its double-counted largest-file term and priced every
  * in-spawn reference hop instead (D-LOADED-SET-ONE-SPAWN, D-BODY-HOP-CLOSURE in
- * tests/tracker/budget-model.ts), and each fell to its new measurement + 80.
+ * tests/tracker/budget-model.ts), and each fell to its new measurement + 80. Its
+ * git.md delta was then -94 ch, and every git.md-carrying row — BUDGET_GIT_MD, the
+ * three tracker rows and the PR-host row — fell again to its measurement + 80.
  *
  * The 80 ch is general headroom, not a reservation: no line of it is spoken for,
  * and an addition still funds itself with a cut. git.md growth lands in every
@@ -137,14 +139,14 @@ import type {
 /**
  * THE git.md CEILING — the one gate on the always-loaded half of the split.
  *
- * Derived from a measured 44_257 ch — with the PR-host operations'
+ * Derived from a measured 44_163 ch — with the PR-host operations'
  * `**Process:**` bodies in `references/pr/{op}.md`, #358's moves out of the
  * agent, #359's condensed release-evidence step, #360's evidence fixes, #362's
  * mechanism inputs, #363's update-pr-evidence op, merge-readiness evidence and
  * CI-status fix, #364's trace map, traceability exceptions and
- * associate-release op, and #365's ensure-pr-ready caller-block inputs — plus the
- * 80 ch general headroom above: 44_337. The next content addition to git.mds must
- * fund itself with a cut elsewhere.
+ * associate-release op, #365's ensure-pr-ready caller-block inputs, and #376's
+ * close-out (net -94 ch) — plus the 80 ch general headroom above: 44_243. The next
+ * content addition to git.mds must fund itself with a cut elsewhere.
  *
  * THE RULE: this ceiling is a REGRESSION ALARM, and it is RE-DERIVED ONLY DOWNWARD —
  * lowered after a pass that actually cut the artifact, never raised to fit one that
@@ -165,7 +167,7 @@ import type {
  * pattern in the same commit; that is the permitted direction for a ceiling, and the
  * manifest guard's probe still proves an INCREMENT would go red.
  */
-const BUDGET_GIT_MD = 44_337;
+const BUDGET_GIT_MD = 44_243;
 
 /**
  * Design-time derivation: the PRE-SPLIT capture of skills/git/SKILL.md, less the
@@ -200,16 +202,16 @@ const BUDGET_SKILL_MD = 6_600;
  * row, so this number can never drift into billing every GitHub user for bytes
  * they never receive (GAP-02).
  *
- * Derived from a measured 64_989 (the worst spawn is setup-task, whose step 1c hops
+ * Derived from a measured 64_914 (the worst spawn is setup-task, whose step 1c hops
  * into ensure-traceable-issue under ISSUE_REQUIRED) plus the 80 ch general headroom
- * above: 65_069. The next addition to the agent or to a github mechanics file must
+ * above: 64_994. The next addition to the agent or to a github mechanics file must
  * fund itself with a cut.
  *
  * MAY BE LOWERED, NEVER RAISED. Registered as `budget-loaded-set` in
  * tests/fixtures/numeric-floors.json; lowering re-pins the value AND the pattern
  * in the same commit.
  */
-const BUDGET_LOADED_SET = 65_069;
+const BUDGET_LOADED_SET = 64_994;
 
 /**
  * THE JIRA-SCOPED loaded-set ceiling — a spawn under the Jira provider.
@@ -232,8 +234,8 @@ const BUDGET_LOADED_SET = 65_069;
  *   + max over TRACKER ops of the one-spawn load, every in-spawn hop priced
  *     [DR-12, D-LOADED-SET-SCOPE, D-BODY-HOP-CLOSURE]
  *
- * Derived from a measured 75_339 (setup-task and its step 1c hop into
- * ensure-traceable-issue) plus the 80 ch general headroom above: 75_419. The next
+ * Derived from a measured 75_264 (setup-task and its step 1c hop into
+ * ensure-traceable-issue) plus the 80 ch general headroom above: 75_344. The next
  * addition to the contract or to a Jira mechanics file must fund itself with a cut
  * rather than reach for slack. Trimming
  * `references/tracker/_mcp.md` is the honest first move: it is contract prose, it
@@ -243,7 +245,7 @@ const BUDGET_LOADED_SET = 65_069;
  * MAY BE LOWERED, NEVER RAISED. Registered as `budget-loaded-set-jira` in
  * tests/fixtures/numeric-floors.json.
  */
-const BUDGET_LOADED_SET_JIRA = 75_419;
+const BUDGET_LOADED_SET_JIRA = 75_344;
 
 /**
  * THE LINEAR-SCOPED loaded-set ceiling — a spawn under the Linear provider.
@@ -255,8 +257,8 @@ const BUDGET_LOADED_SET_JIRA = 75_419;
  * The formula is the Jira row's, term by term, with this provider's mechanics
  * [D-LOADED-SET-ONE-SPAWN, D-BODY-HOP-CLOSURE].
  *
- * Derived from a measured 75_935 (setup-task and its step 1c hop into
- * ensure-traceable-issue) plus the 80 ch general headroom above: 76_015. This is the
+ * Derived from a measured 75_860 (setup-task and its step 1c hop into
+ * ensure-traceable-issue) plus the 80 ch general headroom above: 75_940. This is the
  * LARGEST of the four ceilings but not the binding one: a character added to git.md
  * is a character added to every row, and every row carries the same headroom. Re-run
  * this file for each row's current headroom.
@@ -276,7 +278,7 @@ const BUDGET_LOADED_SET_JIRA = 75_419;
  * MAY BE LOWERED, NEVER RAISED. Registered as `budget-loaded-set-linear` in
  * tests/fixtures/numeric-floors.json.
  */
-const BUDGET_LOADED_SET_LINEAR = 76_015;
+const BUDGET_LOADED_SET_LINEAR = 75_940;
 
 /**
  * THE PR-HOST loaded-set ceiling — the worst-case cost of a spawn that runs one of
@@ -310,14 +312,14 @@ const BUDGET_LOADED_SET_LINEAR = 76_015;
  * equality pin GITHUB_API_MD_CHARS, which is what stops an excluded term growing
  * unwatched.
  *
- * Derived from a measured 58_320 (`post-review-summary`: its PR-host body plus
+ * Derived from a measured 58_226 (`post-review-summary`: its PR-host body plus
  * references/publication-gate.md, still the worst op at 4_540) plus the 80 ch
- * general headroom above: 58_400.
+ * general headroom above: 58_306.
  *
  * MAY BE LOWERED, NEVER RAISED. Registered as `budget-loaded-set-pr-host` in
  * tests/fixtures/numeric-floors.json.
  */
-const BUDGET_LOADED_SET_PR_HOST = 58_400;
+const BUDGET_LOADED_SET_PR_HOST = 58_306;
 
 /**
  * THE PER-OP PR-HOST CAP — no single PR-host operation may load more than this,
