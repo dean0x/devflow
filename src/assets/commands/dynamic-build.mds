@@ -549,7 +549,7 @@ Return: {"ready": [...ticket-ids], "blocked": [{"ticket": "id", "namedBlocker": 
     try {
       // ticketId is the ISSUE_REF the pre-fetch heading printed — this ticket's OWN reference: the engine's `ticket` (its TICKET,
       // slugged into the BRANCH merged below) and its setup-task ISSUE_INPUT; plans[ticketId] is its own plan, criteria and checked testPlan (Pre-authoring step 4)
-      const engineResult = await runSingleTicketEngine({ ticket: ticketId, integrationBranch: INTEGRATION_BRANCH, ...(plans[ticketId] || {}), decisionsContext: DECISIONS_CONTEXT, issueRequired: ISSUE_REQUIRED, applyConventions: APPLY_CONVENTIONS, issueInput: ticketId });
+      const engineResult = await runSingleTicketEngine({ ticket: ticketId, baseBranch: INTEGRATION_BRANCH, ...(plans[ticketId] || {}), decisionsContext: DECISIONS_CONTEXT, issueRequired: ISSUE_REQUIRED, applyConventions: APPLY_CONVENTIONS, issueInput: ticketId });
       // Check both verdict (engine_output_schema) and overallVerdict (SINGLE skeleton alias).
       // PASS and UNVERIFIED merge; PARTIAL, FAIL, ESCALATED (the ticket-link stop included) or no verdict quarantine.
       if (["PASS", "UNVERIFIED"].includes(engineResult.verdict || engineResult.overallVerdict)) {

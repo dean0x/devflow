@@ -199,6 +199,8 @@ interface WaveRun {
 
 /** The wave's tracking issue: its values are in scope of the loop, and must reach no ticket. */
 const TRACKING = '#99'
+/** The wave's integration branch, the loop's INTEGRATION_BRANCH: every ticket's setup-task branches from it. */
+const INTEGRATION = 'wave/demo'
 
 /**
  * Run the wave loop body with the real SINGLE engine as `runSingleTicketEngine`.
@@ -226,7 +228,7 @@ async function runWave(
   )
   const order = world.order ?? Object.keys(world.tickets)
   const out = (await run(
-    agent, engine, [...order], 'wave/demo', plans, '(none)', issueRequired, 'true', TRACKING, `Closes ${TRACKING}`,
+    agent, engine, [...order], INTEGRATION, plans, '(none)', issueRequired, 'true', TRACKING, `Closes ${TRACKING}`,
   )) as { tickets: WaveRow[]; quarantined: Array<{ ticket: string; reason: string }> }
   return { ...out, spawns, engines }
 }
@@ -366,18 +368,27 @@ describe('AC-10: each ticket gets its own reference; its Code agents get what se
 })
 
 // ---------------------------------------------------------------------------
-// The wave's engine runs under each ticket's own TICKET/BRANCH, the branch it merges
+// The wave's engine runs under each ticket's own TICKET/BRANCH, off the
+// integration branch, and the merge names the branch it built on
 // ---------------------------------------------------------------------------
 
 /** The SINGLE engine's fallback ticket, and the branch it slugs to: no wave ticket may run under either. */
 const FALLBACK_TICKET = 'see task description'
 const FALLBACK_BRANCH = 'ticket/see-task-description'
 
+/** Every setup-task's `BASE_BRANCH:` value, in spawn order; `(absent)` for a setup-task with no such line. */
+function setupBaseBranches(run: WaveRun): string[] {
+  return run.spawns
+    .filter(s => s.prompt.startsWith('OPERATION: setup-task'))
+    .map(s => /^BASE_BRANCH: (.*)$/m.exec(s.prompt)?.[1] ?? '(absent)')
+}
+
 /**
  * Named collector: where a wave ticket's engine run works under anything but its
- * own ticket — the engine's fallback included — or the merge step names a branch
- * other than the one that ticket's engine built on. `own` is the wave's refs, in
- * run order.
+ * own ticket — the engine's fallback included — or its setup-task branches from
+ * anything but the integration branch, or the merge step names a branch other
+ * than the one that ticket's engine built on. `own` is the wave's refs, in run
+ * order; each ticket's setup-task is the one whose ISSUE_INPUT is its ref.
  */
 export function collectWaveTicketContextViolations(run: WaveRun, own: readonly string[]): string[] {
   const out: string[] = []
@@ -385,8 +396,12 @@ export function collectWaveTicketContextViolations(run: WaveRun, own: readonly s
   if (JSON.stringify(tickets) !== JSON.stringify(own)) out.push(`engine tickets were ${JSON.stringify(tickets)}, each ticket's own reference is ${JSON.stringify(own)}`)
   const fallbacks = run.spawns.filter(s => s.prompt.includes(FALLBACK_TICKET) || s.prompt.includes(FALLBACK_BRANCH))
   if (fallbacks.length > 0) out.push(`the engine fallback reached ${fallbacks.length} spawn(s): ${[...new Set(fallbacks.map(s => s.agentType))].join(', ')}`)
+  const setups = run.spawns.filter(s => s.prompt.startsWith('OPERATION: setup-task'))
   const merges = run.spawns.filter(s => s.agentType === 'Git' && s.prompt.startsWith('Merge '))
   for (const ref of own) {
+    const setup = setups.find(s => s.prompt.split('\n').includes(`ISSUE_INPUT: ${ref}`))
+    const base = setup === undefined ? undefined : /^BASE_BRANCH: (.*)$/m.exec(setup.prompt)?.[1]
+    if (base !== INTEGRATION) out.push(`${ref}: its setup-task branches from ${base ?? 'no base'}, not the integration branch ${INTEGRATION}`)
     const built = run.engines.find(e => e.args.issueInput === ref)?.result.branch
     const merge = merges.find(m => m.prompt.includes(`Include ticket ID ${ref} in`))
     const merged = merge === undefined ? undefined : /^Merge (\S+) to /.exec(merge.prompt)?.[1]
@@ -395,9 +410,11 @@ export function collectWaveTicketContextViolations(run: WaveRun, own: readonly s
   return out
 }
 
-describe('each wave ticket\'s engine runs under its own TICKET/BRANCH, and the merge names that branch', () => {
+describe('each wave ticket\'s engine runs under its own TICKET/BRANCH off the integration branch, and the merge names that branch', () => {
   /** The shipped call's ticket key: `ticket`, the key the SINGLE engine reads (`args.ticket`). */
   const TICKET_KEY = 'runSingleTicketEngine({ ticket: ticketId,'
+  /** The shipped call's base key: `baseBranch`, the key the SINGLE engine reads (`args.baseBranch`). */
+  const BASE_KEY = 'baseBranch: INTEGRATION_BRANCH,'
   /** The shipped merge lead: the branch the engine returned, the one its agents built on. */
   const MERGE_LEAD = 'Merge ${engineResult.branch} to '
 
@@ -407,6 +424,22 @@ describe('each wave ticket\'s engine runs under its own TICKET/BRANCH, and the m
     expect(run.engines.map(e => [e.result.ticket, e.result.branch])).toEqual([['#12', 'ticket/-12'], ['#13', 'ticket/-13']])
     expect(run.spawns.filter(s => s.prompt.startsWith('Merge ')).map(s => s.prompt.split('.')[0])).toEqual(['Merge ticket/-12 to wave/demo', 'Merge ticket/-13 to wave/demo'])
     expect(collectWaveTicketContextViolations(run, ['#12', '#13'])).toEqual([])
+  })
+
+  it('executed: each ticket\'s setup-task branches from the integration branch, never HEAD', async () => {
+    const run = await runWave(WAVE!, SINGLE!, TWO_TICKETS, TWO_PLANS, 'true')
+    expect(setupBaseBranches(run)).toEqual([INTEGRATION, INTEGRATION])
+    expect(collectWaveTicketContextViolations(run, ['#12', '#13'])).toEqual([])
+  })
+
+  it('known-bad probe: the unread `integrationBranch` key leaves every setup-task on BASE_BRANCH: HEAD', async () => {
+    const unread = seedOnce(WAVE!, BASE_KEY, 'integrationBranch: INTEGRATION_BRANCH,')
+    const run = await runWave(unread, SINGLE!, TWO_TICKETS, TWO_PLANS, 'true')
+    expect(setupBaseBranches(run)).toEqual(['HEAD', 'HEAD'])
+    expect(collectWaveTicketContextViolations(run, ['#12', '#13'])).toEqual([
+      '#12: its setup-task branches from HEAD, not the integration branch wave/demo',
+      '#13: its setup-task branches from HEAD, not the integration branch wave/demo',
+    ])
   })
 
   it('executed: a keyed reference slugs to its lower-case branch, and the merge names that branch, not the raw key', async () => {
