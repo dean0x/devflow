@@ -11,9 +11,10 @@
  *    The run now reports it as `UNVERIFIED`; surviving findings, coverage gaps
  *    and an escalated final gate still report `PARTIAL`.
  *
- * WAVE mode's merge rule (`_wave.mds`: "On engine PASS: merge") is untouched, and
- * the wave skeleton merges an UNVERIFIED ticket exactly as it merged the PASS that
- * a FAIL-FIXED Gate 2 used to report (plan delta 11; section 5 executes it).
+ * WAVE mode merges an UNVERIFIED ticket exactly as it merged the PASS that a
+ * FAIL-FIXED Gate 2 used to report (plan delta 11; section 5 executes it). Since
+ * #365 the rule is declared as well as executed: the engine schema lists
+ * UNVERIFIED and `_wave.mds` says "On engine PASS or UNVERIFIED: merge".
  *
  * Every guard has the three parts PF-064 asks of an absence-based check: a NAMED
  * collector, an assertion that the text it read is the text it claims to read,
@@ -595,8 +596,8 @@ describe('Gate 2 routing, executed over the shipped statement', () => {
 // UNVERIFIED reaches its merge check. Before #360 a FAIL-FIXED Gate 2 reported
 // PASS and merged; a `=== "PASS"` check over the new alias would quarantine it
 // instead — and cascade-block its dependents under the reason "engine
-// fail/escalated". Whether an UNVERIFIED ticket should merge is the wave merge
-// rule's decision, not this PR's, so the wave keeps merging it.
+// fail/escalated". #365 (D2) kept the merge and declared it: UNVERIFIED merges,
+// its wave-PR row is flagged, and its TP lines join the wave test plan.
 
 const WAVE_ENGINE_CALL = 'const engineResult = await runSingleTicketEngine('
 

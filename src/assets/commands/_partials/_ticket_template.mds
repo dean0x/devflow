@@ -7,6 +7,7 @@ Each ticket in a wave MUST use this structure. The wave scheduler agents read th
 
 **Wave:** N
 **Depends on:** \{ISSUE_REF\}, \{ISSUE_REF\} (or "none")
+**Issue:** \{ISSUE_REF\} — written only by `/devflow:dynamic-tickets`' filing step, after the workflow; a drafting agent never writes it
 
 ---
 

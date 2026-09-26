@@ -39,9 +39,10 @@ Reader return shape:
 For each ready ticket (sequentially by default; parallel only past the §7.1 bar):
 - Branch setup: `ticket/<slug>` off integration HEAD at ready-time (so it already contains merged deps)
 - Run the single-ticket engine inside a try/catch — one ticket's crash/stall never kills the wave; catch the exception, quarantine that ticket, and continue with the remaining ready set
-- On engine PASS: merge to integration branch, run Validate agent (build + test)
+- The engine gets the ticket's own reference, the one the pre-fetch printed, as its setup-task input — never the wave's tracking issue
+- On engine PASS or UNVERIFIED: merge to integration branch, run Validate agent (build + test)
   - Merge FAIL (build red after merge): quarantine ticket, mark as escalated, continue
-- On engine FAIL or ESCALATED: quarantine ticket, do not block independent siblings
+- On any other verdict (PARTIAL, FAIL, ESCALATED) or none: quarantine ticket, do not block independent siblings
 
 **Cascade quarantine:** when a ticket is quarantined for any reason (Gate-1 exhausted, engine crash/stall, build-red after merge, review coverage incomplete after retry), the quarantine cascades to its direct and transitive dependents — each is marked blocked with the named reason, naming the blocker by its `\{ISSUE_REF\}` (e.g. "blocked: depends on \{ISSUE_REF\} which failed Gate-1"). Independent siblings are never affected. The quarantined list is injected into every subsequent Design agent reader prompt so the reader never schedules dependents of failed tickets.
 
@@ -108,6 +109,7 @@ A workflow cannot pause mid-run (F4). "Escalate" means: quarantine-and-continue 
 - Build red after merge (Validate agent fails post-merge)
 - Review coverage incomplete after retry (a focus area failed to produce a live Review agent result after the retry)
 - Ticket engine crash/stall (unrecoverable exception or watchdog kill — quarantine cascades to dependents)
+- No ticket link while issues are required (the engine stops before implementing)
 - Any situation requiring a human decision mid-run
 
 **Escalation procedure:**

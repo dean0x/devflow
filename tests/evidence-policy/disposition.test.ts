@@ -2,7 +2,8 @@
  * The evidence-policy DISPOSITION table, held two ways (#362, AC-8).
  *
  * Design §6 disposes of every site that used to key on compliance (rows 1–13; row
- * 14 is the /dynamic-tickets note §3.16 added; row 15 is /implement's test-plan
+ * 14 is the /dynamic-tickets note §3.16 added and, since #365, its issue-filing
+ * step; row 15 is /implement's test-plan
  * ask, #363 PR4, which keys on the policy as /plan's issue step does): each one now
  * gates on a mechanism input (`ISSUE_REQUIRED`, `APPLY_CONVENTIONS`,
  * `REQUIRE_NON_AUTHOR_APPROVAL`), on `EVIDENCE_POLICY` itself at a caller, or
@@ -152,16 +153,25 @@ const DISPOSITION: readonly DispositionRow[] = [
     ],
   },
   {
+    // #365 (PR6, D3): the recipe stops a ticket before implementing when setup-task
+    // captured no Issue ID. The workflow cannot ask, so it never records an exception
+    // (decision (b): /implement alone records one) — a wave quarantines the ticket and
+    // its dependents instead. The wave PR, opened at the command boundary, forwards the
+    // resolved conventions input and reads the policy command-side for its test plan
+    // (D4: no wave exception); the policy never reaches a spawn fence.
     row: 6,
-    subject: '/dynamic-build recipe setup-task call (headless; blocks nothing)',
-    inputs: ['ISSUE_REQUIRED', 'APPLY_CONVENTIONS'],
-    on: 'forward the resolved inputs',
-    off: 'forward the resolved inputs',
+    subject: '/dynamic-build recipe setup-task call and wave PR — stops before implementing when no issue ID (headless — never an exception)',
+    inputs: ['ISSUE_REQUIRED', 'APPLY_CONVENTIONS', 'EVIDENCE_POLICY'],
+    on: 'forward the resolved inputs; stops before implementing when no issue ID (headless — never an exception); a merged wave ticket with no test plan blocks the wave PR',
+    off: 'forward the resolved inputs; no stop; the wave PR test plan is optional',
     sites: [
       { file: 'commands/dynamic-build.md', anchor: recipeConst('ISSUE_REQUIRED'), phrase: recipeConst('ISSUE_REQUIRED') },
       { file: 'commands/dynamic-build.md', anchor: recipeConst('APPLY_CONVENTIONS'), phrase: recipeConst('APPLY_CONVENTIONS') },
       { file: 'commands/dynamic-build.md', anchor: recipeKey('ISSUE_REQUIRED'), phrase: recipeKey('ISSUE_REQUIRED') },
       { file: 'commands/dynamic-build.md', anchor: recipeKey('APPLY_CONVENTIONS'), phrase: recipeKey('APPLY_CONVENTIONS') },
+      { file: 'commands/dynamic-build.md', anchor: 'if (ISSUE_REQUIRED === "true"', phrase: 'if (ISSUE_REQUIRED === "true" && ISSUE_NUMBER === "(none)")' },
+      { file: 'commands/dynamic-build.md', anchor: '**Required plan**', phrase: policyGate },
+      { file: 'commands/dynamic-build.md', after: '6. **Wave PR**', anchor: fenceKey('APPLY_CONVENTIONS'), phrase: fenceKey('APPLY_CONVENTIONS') },
     ],
   },
   {
@@ -281,15 +291,17 @@ const DISPOSITION: readonly DispositionRow[] = [
     ],
   },
   {
-    // Beyond design §6: the /dynamic-tickets slate gate names the ticket expectation (§3.16).
-    // It informs; per-ticket issue filing is PR6.
+    // Beyond design §6: the /dynamic-tickets slate gate names the ticket expectation (§3.16),
+    // and since #365 (PR6, D5) the command files the issues itself — after the workflow
+    // returns, sequentially and capped, so the six-phase pipeline never files one.
     row: 14,
-    subject: '/dynamic-tickets slate gate — the ticket-issue note',
+    subject: '/dynamic-tickets slate gate and its post-workflow filing step',
     inputs: ['ISSUE_REQUIRED'],
-    on: 'tell the user each ticket needs a tracker issue before its PR',
-    off: 'no note',
+    on: 'file one issue per ticket and the tracking issue after the workflow',
+    off: 'no note; file nothing',
     sites: [
       { file: 'commands/dynamic-tickets.md', anchor: '- **Evidence policy:**', phrase: gate('ISSUE_REQUIRED') },
+      { file: 'commands/dynamic-tickets.md', anchor: '**File the issues**', phrase: gate('ISSUE_REQUIRED') },
     ],
   },
   {
@@ -532,6 +544,23 @@ describe('evidence-policy disposition: the table and the tree agree, both ways (
         ? { ...f, content: f.content.replace(`1b. **Branch convention:** ${gate('APPLY_CONVENTIONS')}`, '1b. **Branch convention:**') }
         : f)
     expect(collectSiteDefects(DISPOSITION, ungated)).toHaveLength(1)
+  })
+
+  it('known-bad probe: the ticket-link stop, the wave PR plan rule and the filing step, each ungated, are reported (#365)', () => {
+    // Each seed drops one new gate from its line, the way an unconditional rewrite
+    // would; the same direction-1 collector must name that one row and site.
+    const seeds: ReadonlyArray<readonly [string, string, string, string]> = [
+      ['commands/dynamic-build.md', 'if (ISSUE_REQUIRED === "true" && ISSUE_NUMBER === "(none)")', 'if (ISSUE_NUMBER === "(none)")', 'row 6 commands/dynamic-build.md: no line holds'],
+      ['commands/dynamic-build.md', `**Required plan** — ${policyGate}:`, '**Required plan** — always:', 'row 6 commands/dynamic-build.md:'],
+      ['commands/dynamic-tickets.md', `**File the issues** ${gate('ISSUE_REQUIRED')}.`, '**File the issues** always.', 'row 14 commands/dynamic-tickets.md:'],
+    ]
+    for (const [file, from, to, expected] of seeds) {
+      const seeded = corpus.map(f => (f.file === file ? { ...f, content: f.content.replace(from, to) } : f))
+      expect(seeded.find(f => f.file === file)!.content, `the seed "${from}" must land`).not.toBe(corpus.find(f => f.file === file)!.content)
+      const defects = collectSiteDefects(DISPOSITION, seeded)
+      expect(defects, defects.join('\n')).toHaveLength(1)
+      expect(defects[0].startsWith(expected), defects[0]).toBe(true)
+    }
   })
 
   it('known-bad probe: a gate on a name its row does not declare is reported', () => {
