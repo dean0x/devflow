@@ -37,10 +37,10 @@ install.log
 .claude/
 
 # Devflow runtime data — local by default (memory, learning, docs, locks).
-# Exception: feature knowledge bases under .devflow/features/ are shared via git —
-# index.md and every {slug}/KNOWLEDGE.md are tracked and committed; everything else
-# under .devflow/features/ stays local. To stop sharing, re-add `.devflow/features/`
-# to your own .gitignore.
+# Shared via git: feature knowledge bases under .devflow/features/ (index.md and
+# every {slug}/KNOWLEDGE.md), .devflow/conventions.md (naming authority) and
+# .devflow/policy.json (evidence policy). To stop sharing the first two, re-add
+# `.devflow/features/` or `.devflow/conventions.md` to your own .gitignore.
 .devflow/*
 !.devflow/features/
 .devflow/features/*
@@ -48,13 +48,13 @@ install.log
 !.devflow/features/*/
 .devflow/features/*/*
 !.devflow/features/*/KNOWLEDGE.md
+!.devflow/conventions.md
+!.devflow/policy.json
+.claudeignore
 
 # Launch marketing materials
 /launch/
 
 # Competitive analysis codenames (private)
 .competitive-codenames.json
-!.devflow/conventions.md
 release-notes.md
-.claudeignore
-!.devflow/policy.json
