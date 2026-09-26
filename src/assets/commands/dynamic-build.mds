@@ -547,13 +547,13 @@ Return: {"ready": [...ticket-ids], "blocked": [{"ticket": "id", "namedBlocker": 
 
   for (const ticketId of ready) {
     try {
-      // ticketId is the ISSUE_REF the pre-fetch heading printed — this ticket's OWN reference, its setup-task ISSUE_INPUT;
-      // plans[ticketId] is its own plan, criteria and checked testPlan (Pre-authoring step 4)
-      const engineResult = await runSingleTicketEngine({ ticketId, integrationBranch: INTEGRATION_BRANCH, ...(plans[ticketId] || {}), decisionsContext: DECISIONS_CONTEXT, issueRequired: ISSUE_REQUIRED, applyConventions: APPLY_CONVENTIONS, issueInput: ticketId });
+      // ticketId is the ISSUE_REF the pre-fetch heading printed — this ticket's OWN reference: the engine's `ticket` (its TICKET,
+      // slugged into the BRANCH merged below) and its setup-task ISSUE_INPUT; plans[ticketId] is its own plan, criteria and checked testPlan (Pre-authoring step 4)
+      const engineResult = await runSingleTicketEngine({ ticket: ticketId, integrationBranch: INTEGRATION_BRANCH, ...(plans[ticketId] || {}), decisionsContext: DECISIONS_CONTEXT, issueRequired: ISSUE_REQUIRED, applyConventions: APPLY_CONVENTIONS, issueInput: ticketId });
       // Check both verdict (engine_output_schema) and overallVerdict (SINGLE skeleton alias).
       // PASS and UNVERIFIED merge; PARTIAL, FAIL, ESCALATED (the ticket-link stop included) or no verdict quarantine.
       if (["PASS", "UNVERIFIED"].includes(engineResult.verdict || engineResult.overallVerdict)) {
-        const merge = await agent(`Merge ticket/${ticketId} to ${INTEGRATION_BRANCH}. Include ticket ID ${ticketId} in the merge commit message. Run Validate agent (build + test) after merge.
+        const merge = await agent(`Merge ${engineResult.branch} to ${INTEGRATION_BRANCH}. Include ticket ID ${ticketId} in the merge commit message. Run Validate agent (build + test) after merge.
 Return: {"merged": true} — or {"merged": false, "reason": "<why>"} when the merge or the post-merge build failed and the merge was not kept.`, { agentType: "Git" });
         results[ticketId] = rowOf(ticketId, engineResult, merge?.merged === true);
         if (merge?.merged !== true) waveState.quarantined.push({ ticket: ticketId, reason: merge?.reason || "merge or post-merge build failed" });

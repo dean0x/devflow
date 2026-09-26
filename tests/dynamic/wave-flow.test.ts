@@ -150,8 +150,9 @@ function stubAgent(world: World, spawns: Spawn[]): Agent {
       current = world.tickets[/^ISSUE_INPUT: (.*)$/m.exec(prompt)?.[1] ?? '(none)'] ?? {}
       return { issueId: current.issueId, prLinkLine: current.prLinkLine }
     }
-    if (opts.agentType === 'Git' && prompt.startsWith('Merge ticket/')) {
-      const id = /^Merge ticket\/(\S+) to /.exec(prompt)?.[1] ?? ''
+    if (opts.agentType === 'Git' && prompt.startsWith('Merge ')) {
+      // The ticket is the ID the merge prompt names, never parsed back out of the branch spelling.
+      const id = /Include ticket ID (\S+) in the merge commit message/.exec(prompt)?.[1] ?? ''
       return world.failMerge?.includes(id) ? { merged: false, reason: 'post-merge build red' } : { merged: true }
     }
     if (opts.agentType === 'Test') return { verdict: current.test ?? 'PASS', failures: 'TP-1 failed' }
@@ -183,10 +184,17 @@ interface WaveRow {
   readonly coverageComplete?: boolean
 }
 
+/** One engine run the wave started: the args it passed and the result the engine returned. */
+interface EngineRun {
+  readonly args: Readonly<Record<string, unknown>>
+  readonly result: EngineResult
+}
+
 interface WaveRun {
   readonly tickets: readonly WaveRow[]
   readonly quarantined: ReadonlyArray<{ ticket: string; reason: string }>
   readonly spawns: readonly Spawn[]
+  readonly engines: readonly EngineRun[]
 }
 
 /** The wave's tracking issue: its values are in scope of the loop, and must reach no ticket. */
@@ -205,8 +213,13 @@ async function runWave(
   issueRequired: 'true' | 'false',
 ): Promise<WaveRun> {
   const spawns: Spawn[] = []
+  const engines: EngineRun[] = []
   const agent = stubAgent(world, spawns)
-  const engine = (args: Record<string, unknown>): Promise<EngineResult> => runEngine(engineBody, args, agent)
+  const engine = async (args: Record<string, unknown>): Promise<EngineResult> => {
+    const result = await runEngine(engineBody, args, agent)
+    engines.push({ args, result })
+    return result
+  }
   const run = new AsyncFunction(
     'agent', 'runSingleTicketEngine', 'remainingTickets', 'INTEGRATION_BRANCH', 'plans', 'DECISIONS_CONTEXT',
     'ISSUE_REQUIRED', 'APPLY_CONVENTIONS', 'ISSUE_NUMBER', 'ISSUE_PR_LINK', waveBody,
@@ -215,7 +228,7 @@ async function runWave(
   const out = (await run(
     agent, engine, [...order], 'wave/demo', plans, '(none)', issueRequired, 'true', TRACKING, `Closes ${TRACKING}`,
   )) as { tickets: WaveRow[]; quarantined: Array<{ ticket: string; reason: string }> }
-  return { ...out, spawns }
+  return { ...out, spawns, engines }
 }
 
 describe('the two skeletons this suite executes', () => {
@@ -349,6 +362,76 @@ describe('AC-10: each ticket gets its own reference; its Code agents get what se
       'result: the engine result does not carry the captured issueId and issuePrLink',
     ])
     expect(await collectEngineHandoffViolations(null)).toHaveLength(1)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// The wave's engine runs under each ticket's own TICKET/BRANCH, the branch it merges
+// ---------------------------------------------------------------------------
+
+/** The SINGLE engine's fallback ticket, and the branch it slugs to: no wave ticket may run under either. */
+const FALLBACK_TICKET = 'see task description'
+const FALLBACK_BRANCH = 'ticket/see-task-description'
+
+/**
+ * Named collector: where a wave ticket's engine run works under anything but its
+ * own ticket — the engine's fallback included — or the merge step names a branch
+ * other than the one that ticket's engine built on. `own` is the wave's refs, in
+ * run order.
+ */
+export function collectWaveTicketContextViolations(run: WaveRun, own: readonly string[]): string[] {
+  const out: string[] = []
+  const tickets = run.engines.map(e => e.result.ticket)
+  if (JSON.stringify(tickets) !== JSON.stringify(own)) out.push(`engine tickets were ${JSON.stringify(tickets)}, each ticket's own reference is ${JSON.stringify(own)}`)
+  const fallbacks = run.spawns.filter(s => s.prompt.includes(FALLBACK_TICKET) || s.prompt.includes(FALLBACK_BRANCH))
+  if (fallbacks.length > 0) out.push(`the engine fallback reached ${fallbacks.length} spawn(s): ${[...new Set(fallbacks.map(s => s.agentType))].join(', ')}`)
+  const merges = run.spawns.filter(s => s.agentType === 'Git' && s.prompt.startsWith('Merge '))
+  for (const ref of own) {
+    const built = run.engines.find(e => e.args.issueInput === ref)?.result.branch
+    const merge = merges.find(m => m.prompt.includes(`Include ticket ID ${ref} in`))
+    const merged = merge === undefined ? undefined : /^Merge (\S+) to /.exec(merge.prompt)?.[1]
+    if (typeof built !== 'string' || merged !== built) out.push(`${ref}: the merge step names ${merged ?? 'no branch'}, its engine built on ${String(built ?? 'no branch')}`)
+  }
+  return out
+}
+
+describe('each wave ticket\'s engine runs under its own TICKET/BRANCH, and the merge names that branch', () => {
+  /** The shipped call's ticket key: `ticket`, the key the SINGLE engine reads (`args.ticket`). */
+  const TICKET_KEY = 'runSingleTicketEngine({ ticket: ticketId,'
+  /** The shipped merge lead: the branch the engine returned, the one its agents built on. */
+  const MERGE_LEAD = 'Merge ${engineResult.branch} to '
+
+  it('executed: each engine sees its own ticket and slugged branch, never the fallback, and the merge names it', async () => {
+    const run = await runWave(WAVE!, SINGLE!, TWO_TICKETS, TWO_PLANS, 'true')
+    expect(run.spawns.length, 'the wave must have spawned the engines').toBeGreaterThan(10)
+    expect(run.engines.map(e => [e.result.ticket, e.result.branch])).toEqual([['#12', 'ticket/-12'], ['#13', 'ticket/-13']])
+    expect(run.spawns.filter(s => s.prompt.startsWith('Merge ')).map(s => s.prompt.split('.')[0])).toEqual(['Merge ticket/-12 to wave/demo', 'Merge ticket/-13 to wave/demo'])
+    expect(collectWaveTicketContextViolations(run, ['#12', '#13'])).toEqual([])
+  })
+
+  it('executed: a keyed reference slugs to its lower-case branch, and the merge names that branch, not the raw key', async () => {
+    const world: World = { tickets: { 'ENG-12': { issueId: 'ENG-12', prLinkLine: 'Refs ENG-12' } } }
+    const run = await runWave(WAVE!, SINGLE!, world, {}, 'true')
+    expect(run.engines.map(e => e.result.branch)).toEqual(['ticket/eng-12'])
+    expect(collectWaveTicketContextViolations(run, ['ENG-12'])).toEqual([])
+  })
+
+  it('known-bad probe: the mismatched `ticketId` key leaves every engine on the fallback ticket and branch', async () => {
+    const misKeyed = seedOnce(WAVE!, TICKET_KEY, 'runSingleTicketEngine({ ticketId,')
+    const run = await runWave(misKeyed, SINGLE!, TWO_TICKETS, TWO_PLANS, 'true')
+    const found = collectWaveTicketContextViolations(run, ['#12', '#13'])
+    expect(found[0]).toBe('engine tickets were ["see task description","see task description"], each ticket\'s own reference is ["#12","#13"]')
+    expect(found[1]).toMatch(/^the engine fallback reached \d+ spawn\(s\): Git, Code/)
+    expect(found).toHaveLength(2)
+  })
+
+  it('known-bad probe: a merge that names ticket/<raw ref> disagrees with the branch the engine built on', async () => {
+    const rawMerge = seedOnce(WAVE!, MERGE_LEAD, 'Merge ticket/${ticketId} to ')
+    const run = await runWave(rawMerge, SINGLE!, TWO_TICKETS, TWO_PLANS, 'true')
+    expect(collectWaveTicketContextViolations(run, ['#12', '#13'])).toEqual([
+      '#12: the merge step names ticket/#12, its engine built on ticket/-12',
+      '#13: the merge step names ticket/#13, its engine built on ticket/-13',
+    ])
   })
 })
 
