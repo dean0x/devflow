@@ -399,6 +399,16 @@ describe('older manifests agree with the runtime gates', () => {
     expect(sessionContext(repoB)).toContain('--- LEARNING MAINTENANCE ---');
     expect(runCli(repoA, 'learning', '--status').out).toContain('Learning: enabled');
   }, MULTI_RUN_TIMEOUT_MS);
+
+  it('a manifest holding only the legacy kb:false: knowledge --status reports disabled (D-KNOWLEDGE-LEGACY-KB)', async () => {
+    runInit(repoA, '--recommended');
+    await editManifestFeatures(['knowledge'], { kb: false });
+    expect(runCli(repoB, 'knowledge', '--status').out).toContain('Status: disabled');
+
+    // An explicit knowledge value wins over the legacy key.
+    await editManifestFeatures([], { knowledge: true });
+    expect(runCli(repoB, 'knowledge', '--status').out).toContain('Status: enabled');
+  }, MULTI_RUN_TIMEOUT_MS);
 });
 
 // ─────────────────────────────────────────────────────────────────────────────

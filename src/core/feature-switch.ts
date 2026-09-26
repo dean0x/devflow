@@ -35,10 +35,15 @@ function isJsonObject(value: unknown): value is Record<string, unknown> {
 }
 
 /**
- * The pre-rename key `learning` was stored under (ADR-011). A manifest no
- * command has rewritten since the rename can still hold only this key.
+ * The pre-rename key each machine feature was stored under, where one exists:
+ * `learning` was `decisions` (ADR-011) and `knowledge` was `kb`. A manifest no
+ * command has rewritten since the rename can still hold only the legacy key.
+ * `memory` was never renamed.
  */
-const LEGACY_LEARNING_KEY = 'decisions';
+const LEGACY_KEYS: Readonly<Partial<Record<MachineFeature, string>>> = {
+  learning: 'decisions',
+  knowledge: 'kb',
+};
 
 /**
  * Whether a RAW parsed manifest leaves `feature` switched on. Pure.
@@ -57,6 +62,16 @@ const LEGACY_LEARNING_KEY = 'decisions';
  * would keep learning running until then. queue_read_gates applies the same
  * precedence.
  *
+ * D-KNOWLEDGE-LEGACY-KB (the same sub-decision for the other renamed key):
+ * `knowledge` is read as `features.knowledge` when that is a boolean, else the
+ * legacy `features.kb` when THAT is a boolean, else ON — again readManifest's
+ * precedence exactly, so `devflow knowledge --status` reports a `kb: false`
+ * as disabled. queue_read_gates never reads knowledge, so there is no shell
+ * mirror. The knowledge write-back prose gate deliberately does not learn the
+ * legacy key (ADR-028: no prompt text for a state only an un-upgraded install
+ * can hold); readManifest rewrites `kb` to `knowledge` on the next CLI run
+ * that loads the manifest, after which that gate reads the healed key.
+ *
  * Deliberately NOT built on readManifest(): it returns null for a manifest
  * missing any of its required fields — reported as "on" here, as the hooks read
  * it — and it writes its heals back to disk, which a read-only status must not.
@@ -65,8 +80,9 @@ export function isMachineFeatureOn(rawManifest: unknown, feature: MachineFeature
   if (!isJsonObject(rawManifest)) return true;
   const features = rawManifest.features;
   if (!isJsonObject(features)) return true;
-  const value = feature === 'learning' && typeof features.learning !== 'boolean'
-    ? features[LEGACY_LEARNING_KEY]
+  const legacyKey = LEGACY_KEYS[feature];
+  const value = legacyKey !== undefined && typeof features[feature] !== 'boolean'
+    ? features[legacyKey]
     : features[feature];
   return value !== false;
 }
@@ -77,8 +93,9 @@ export function isMachineFeatureOn(rawManifest: unknown, feature: MachineFeature
  * is no `features` record to write into).
  *
  * Only `features.<feature>` and `updatedAt` change; every other key is carried
- * verbatim. Writing `learning` leaves a legacy `decisions` key in place, inert:
- * a boolean `learning` wins over it (D-LEARNING-LEGACY-DECISIONS). Going through
+ * verbatim. Writing `learning` leaves a legacy `decisions` key in place, and
+ * writing `knowledge` a legacy `kb` key, inert: the boolean just written wins
+ * over it (D-LEARNING-LEGACY-DECISIONS, D-KNOWLEDGE-LEGACY-KB). Going through
  * readManifest()/writeManifest() instead would refuse a manifest that reader
  * rejects, drop every key ManifestData does not model (one a newer devflow
  * wrote, say), and persist that reader's unrelated heals as a side effect of a

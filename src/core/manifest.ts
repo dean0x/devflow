@@ -194,6 +194,8 @@ export async function readManifest(devflowDir: string): Promise<ManifestData | n
     //
     // Self-heal: rename features.kb → features.knowledge on disk.
     // Coalesce: features.knowledge wins; fall back to features.kb; default ON.
+    // D-KNOWLEDGE-LEGACY-KB: isMachineFeatureOn applies this exact precedence,
+    // so the legacy key is honoured before the heal lands.
     const knowledge = typeof features.knowledge === 'boolean' ? features.knowledge
       : typeof features.kb === 'boolean' ? features.kb as boolean
       : true;

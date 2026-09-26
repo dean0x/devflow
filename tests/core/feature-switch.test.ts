@@ -52,6 +52,21 @@ describe('isMachineFeatureOn (pure)', () => {
     expect(isMachineFeatureOn({ features: { decisions: false } }, 'knowledge')).toBe(true);
   });
 
+  it('knowledge honours the legacy features.kb key exactly as readManifest migrates it (D-KNOWLEDGE-LEGACY-KB)', () => {
+    // knowledge if boolean, else kb if boolean, else on.
+    expect(isMachineFeatureOn({ features: { kb: false } }, 'knowledge')).toBe(false);
+    expect(isMachineFeatureOn({ features: { kb: true } }, 'knowledge')).toBe(true);
+    expect(isMachineFeatureOn({ features: { kb: false, knowledge: true } }, 'knowledge')).toBe(true);
+    expect(isMachineFeatureOn({ features: { kb: true, knowledge: false } }, 'knowledge')).toBe(false);
+    // A non-boolean knowledge is not a value, so the legacy key still decides.
+    expect(isMachineFeatureOn({ features: { kb: false, knowledge: 'yes' } }, 'knowledge')).toBe(false);
+    // A non-boolean kb decides nothing.
+    expect(isMachineFeatureOn({ features: { kb: 'false' } }, 'knowledge')).toBe(true);
+    // The legacy key belongs to knowledge alone.
+    expect(isMachineFeatureOn({ features: { kb: false } }, 'memory')).toBe(true);
+    expect(isMachineFeatureOn({ features: { kb: false } }, 'learning')).toBe(true);
+  });
+
   it('reads each feature independently', () => {
     const raw = { features: { learning: false, knowledge: true } };
     expect(isMachineFeatureOn(raw, 'learning')).toBe(false);
@@ -111,6 +126,11 @@ describe('readMachineFeature / writeMachineFeature (I/O)', () => {
 
   it('a missing manifest reads as on', async () => {
     expect(await readMachineFeature(devflowDir, 'memory')).toBe(true);
+  });
+
+  it('a manifest holding only the legacy kb:false reads knowledge as off', async () => {
+    await writeManifest(JSON.stringify({ version: '1', features: { ambient: true, kb: false } }));
+    expect(await readMachineFeature(devflowDir, 'knowledge')).toBe(false);
   });
 
   it('a malformed manifest reads as on', async () => {
