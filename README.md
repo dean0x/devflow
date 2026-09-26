@@ -252,7 +252,7 @@ For deep dives: [Working Memory](https://github.com/dean0x/devflow/blob/main/doc
 npx devflow-kit init                    # Install (interactive wizard)
 npx devflow-kit init --plugin=implement # Install specific plugin
 npx devflow-kit ambient --enable        # Toggle ambient mode (orchestrator)
-npx devflow-kit learning --enable       # Toggle decision/pitfall tracking
+npx devflow-kit learning --enable       # Toggle decision/pitfall tracking (all projects)
 npx devflow-kit compliance --enable     # Enable compliance (pick frameworks); prints the policy.json to commit
 npx devflow-kit compliance --status     # Show compliance state and this repo's evidence policy
 npx devflow-kit tracker --set jira       # Pick the issue tracker (github | jira | linear)
