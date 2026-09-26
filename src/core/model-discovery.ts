@@ -696,7 +696,18 @@ async function _discoverInternal(
   const staleRawP = findStaleFallback(cacheDir, currentKey);
 
   // --- Live spawn ---
-  const env: NodeJS.ProcessEnv = { ...scrubChildEnv(), NO_COLOR: '1' };
+  // @D-EFR-6 Discovery reads the runtime's built-in registry, never a user config.
+  //   Since 0.5.0 every implicit config load merges the runtime's user-level file
+  //   ($XDG_CONFIG_HOME/subswitch/config.json, else ~/.config/subswitch/config.json)
+  //   under the cwd project file. Devflow's relay never sees that file — it is always
+  //   started with an explicit SUBSWITCH_CONFIG, which bypasses the merge — so a user
+  //   alias leaking into discovery would be offered in the picker yet never routed,
+  //   and a malformed file would fail every live discovery. The cache key also
+  //   assumes the catalog depends on the runtime version alone. Pointing
+  //   XDG_CONFIG_HOME at devflow's own cache directory, which never holds a
+  //   `subswitch/config.json`, makes the lookup a clean ENOENT. SUBSWITCH_CONFIG
+  //   stays unset (T2): an explicit path that is missing is a hard error.
+  const env: NodeJS.ProcessEnv = { ...scrubChildEnv(), NO_COLOR: '1', XDG_CONFIG_HOME: cacheDir };
   const spawnFn = deps?.spawnAndCollect ?? buildRealSpawnAndCollect(logPath);
 
   let spawnResult: { exitCode: number; stdout: string; timedOut: boolean };

@@ -776,8 +776,9 @@ describe('T1: Real-binary — discoverExternalModels with live runtime', () => {
 
     const result = await discoverExternalModels(cacheDir, logPath);
 
-    // subswitch models --json (0.4.0) is a static registry dump: no auth, no relay,
-    // no config file required (verified: exit 0, configFileFound:false). The per-test
+    // subswitch models --json (0.5.0) is a static registry dump: no auth, no relay,
+    // no config file required (verified: exit 0, configFileFound:false; the runtime's
+    // user-level config is isolated by D-EFR-6, covered by T13). The per-test
     // cacheDir is freshly created (beforeEach), so no cache hit is possible — source
     // must be 'live'. Guarding these behind `if (result.known)` would let the test
     // pass vacuously when the live call incorrectly returns known:false (avoids PF-018).
@@ -792,6 +793,8 @@ describe('T1: Real-binary — discoverExternalModels with live runtime', () => {
     for (const name of result.selectableNames) {
       expect(result.aliasToId.has(name)).toBe(true);
     }
+    // 0.5.0 lists gpt-5.5 with retired:true, routable:false — never offered.
+    expect(result.selectableNames).not.toContain('gpt-5.5');
   }, 10_000); // 10s timeout for live spawn
 });
 
@@ -926,6 +929,68 @@ describe('T2: Real-binary stub — hostile SUBSWITCH_CONFIG stripped from child 
     },
     10_000,
   );
+});
+
+// ---------------------------------------------------------------------------
+// T13: Real-binary — the runtime's user-level config never reaches discovery
+// (D-EFR-6; applies PF-016: the installed runtime, not a stub, reads the file)
+// ---------------------------------------------------------------------------
+
+describe('T13: Real-binary — user-level runtime config is isolated from discovery (D-EFR-6)', () => {
+  /**
+   * Run discovery against the installed runtime with HOME pointed at a temp home
+   * whose `.config/subswitch/config.json` holds `userConfig`. HOME is one of the
+   * scrubChildEnv allowlisted vars, so the child resolves its user config from it.
+   */
+  async function discoverWithUserConfig(userConfig: string): Promise<ExternalModelCatalog> {
+    const home = path.join(tmpDir, 'home');
+    await fsAsync.mkdir(path.join(home, '.config', 'subswitch'), { recursive: true });
+    await fsAsync.writeFile(path.join(home, '.config', 'subswitch', 'config.json'), userConfig, 'utf-8');
+    const origHome = process.env['HOME'];
+    process.env['HOME'] = home;
+    try {
+      return await discoverExternalModels(cacheDir, logPath);
+    } finally {
+      if (origHome === undefined) {
+        delete process.env['HOME'];
+      } else {
+        process.env['HOME'] = origHome;
+      }
+    }
+  }
+
+  async function skipWithoutRuntime(ctx: { skip: () => void }): Promise<boolean> {
+    const binResult = await resolveProxyBin();
+    if (binResult.ok) return false;
+    if (binResult.error.includes('MODULE_NOT_FOUND') || binResult.error.includes('routing runtime')) {
+      ctx.skip();
+      return true;
+    }
+    throw new Error(`resolveProxyBin failed unexpectedly: ${binResult.error}`);
+  }
+
+  it('a malformed user-level config does not fail live discovery', async (ctx) => {
+    if (await skipWithoutRuntime(ctx)) return;
+
+    const result = await discoverWithUserConfig('{"not": "closed"');
+
+    expect(result.known).toBe(true);
+    if (!result.known) return; // TypeScript narrowing only
+    expect(result.source).toBe('live');
+  }, 10_000);
+
+  it('aliases from a user-level config are not offered — the relay never routes them', async (ctx) => {
+    if (await skipWithoutRuntime(ctx)) return;
+
+    const result = await discoverWithUserConfig(
+      JSON.stringify({ providers: { codex: { aliases: { 'user-only-alias': 'gpt-5.6-terra' } } } }),
+    );
+
+    expect(result.known).toBe(true);
+    if (!result.known) return; // TypeScript narrowing only
+    expect(result.source).toBe('live');
+    expect(result.selectableNames).not.toContain('user-only-alias');
+  }, 10_000);
 });
 
 // ---------------------------------------------------------------------------
