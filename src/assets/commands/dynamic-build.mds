@@ -105,7 +105,7 @@ Check, in priority order:
 
 If a number is found, record it as the command-level `ISSUE_NUMBER`:
 - **SINGLE mode:** it is the ticket's own reference. Pass it as `issueNumber: <number>` when invoking the workflow; the engine hands it to setup-task as `ISSUE_INPUT`. If none is found, pass nothing.
-- **WAVE mode:** it is the tracking issue. Only step 2 after the workflow uses it, for the wave report. It never reaches a ticket: each ticket's engine gets that ticket's own reference as `issueInput`.
+- **WAVE mode:** it is the tracking issue. Only steps 2 and 3 after the workflow use it: step 2 for the wave report, step 3 for the wave block's tracking line. It never reaches a ticket: each ticket's engine gets that ticket's own reference as `issueInput`.
 
 Never pass `ISSUE_PR_LINK` into the workflow. The engine binds each ticket's `ISSUE_NUMBER` and `ISSUE_PR_LINK` from that ticket's own setup-task Output (`### Handoff Values`), never from the token it passed in, and hands both to that ticket's Code agents. No `- **PR link line**:` captured ⇒ `ISSUE_PR_LINK` is `"(none)"` and the Code agent emits the `## Related Issues` heading with no reference.
 
@@ -598,10 +598,11 @@ A workflow cannot pause mid-run. After the build/wave workflow returns, you (the
    - **Nothing merged** (no entry has `merged: true`): record `Wave PR: skipped (nothing merged)` and go to step 4.
    - Otherwise compose (a) and then (b).
 
-   **(a) The wave block.** Write it with the Write tool, byte for byte, to a fresh `mktemp` file — never through an interpolated shell string — in exactly this shape: the two headings with one blank line between them, the related lines in row order under the first, and the header and separator verbatim directly under the second:
+   **(a) The wave block.** Write it with the Write tool, byte for byte, to a fresh `mktemp` file — never through an interpolated shell string — in exactly this shape: the two headings with one blank line between them, the tracking line and then the related lines in row order under the first, and the header and separator verbatim directly under the second:
 
 ```markdown
 ## Related Issues
+Refs {tracking ref}
 {one related line per row that has one}
 
 ## Wave Evidence
@@ -614,6 +615,8 @@ A workflow cannot pause mid-run. After the build/wave workflow returns, you (the
    - **Verdict** — one of `PASS | UNVERIFIED | QUARANTINED | BLOCKED`. `ran: false` (cascade, deadlock, MAX_ROUNDS) ⇒ `BLOCKED`. `merged: true` with `verdict` `PASS` ⇒ `PASS`. `merged: true` with `verdict` `UNVERIFIED` ⇒ `UNVERIFIED`: the row stays flagged, and its TP lines join the wave test plan. Anything else that ran — PARTIAL, FAIL, ESCALATED, no verdict, an engine crash, a failed merge or a red post-merge build — ⇒ `QUARANTINED`.
    - **Evaluate, Test** — the entry's `evaluateVerdict` and `testVerdict` when it is `PASS`, `FAIL`, `FAIL-FIXED` or `SKIPPED`, else `—`. **Surviving** — its `surviving` count when it is 0–999, else `—`. **Coverage** — `complete` or `incomplete` from `coverageComplete`, else `—`. A `BLOCKED` row is `—` in all four.
    - **Ticket and related line** — the entry's captured `issuePrLink` is the only source of a closing reference. When it is not `(none)`: a `PASS` or `UNVERIFIED` row's related line is `issuePrLink` verbatim; a `QUARANTINED` row's is `issuePrLink` with a leading `Closes ` replaced by `Refs `; and the Ticket cell is the reference that line names (its text after `Closes ` or `Refs `). When it is `(none)`: no related line, and the Ticket cell is `(none)` on a `PASS` or `UNVERIFIED` row; on any other row it is the entry's `ticket` when that is a `#N` or `KEY-N` reference, else `(none)`.
+
+   **Tracking line** — only when Pre-authoring step 5 resolved a tracking issue whose token is, as a whole, a `#N` or `KEY-N` reference: `Refs ` and that token, verbatim, as the first line under `## Related Issues`. Never `Closes` — the tracking issue outlives the wave. Any other token (a bare number, a URL), or none ⇒ no tracking line: nothing is composed from a number.
 
    Then check it:
 

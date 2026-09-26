@@ -686,8 +686,9 @@ const REF_RE = /^(?:#[1-9][0-9]{0,8}|[A-Z][A-Z0-9_]{0,9}-[1-9][0-9]{0,8})$/
  * enough to render a block `check wave` admits; the rules themselves are pinned
  * by wave-block.test.ts's step-3 parity arm.
  */
-function renderWaveBlock(rows: readonly WaveRow[]): string {
-  const related: string[] = []
+function renderWaveBlock(rows: readonly WaveRow[], trackingToken?: string): string {
+  // The tracking line: first, `Refs` only, and only from a token that already is a reference.
+  const related: string[] = trackingToken !== undefined && REF_RE.test(trackingToken) ? [`Refs ${trackingToken}`] : []
   const table = rows.map((r, i) => {
     const verdict = !r.ran ? 'BLOCKED' : r.merged && r.verdict === 'PASS' ? 'PASS' : r.merged && r.verdict === 'UNVERIFIED' ? 'UNVERIFIED' : 'QUARANTINED'
     const merged = verdict === 'PASS' || verdict === 'UNVERIFIED'
@@ -744,6 +745,22 @@ describe('the wave\'s return renders a block check wave admits — UNVERIFIED cl
     const run = await runWave(WAVE!, SINGLE!, world, {}, 'true')
     const block = renderWaveBlock(run.tickets)
     expect(checkWave(seedOnce(block, 'Refs #14', 'Closes #14'))).toBe(5)
+  })
+
+  it('executed: with a tracking issue the block leads with its Refs line, and check wave admits it', async () => {
+    const run = await runWave(WAVE!, SINGLE!, world, { '#13': { criteria: '1. works' } }, 'true')
+    const block = renderWaveBlock(run.tickets, TRACKING)
+    expect(block.split('\n').slice(0, 3)).toEqual(['## Related Issues', `Refs ${TRACKING}`, 'Closes #12'])
+    expect(checkWave(block)).toBe(0)
+    // A bare number is no reference: nothing is composed from it.
+    expect(renderWaveBlock(run.tickets, TRACKING.slice(1)).split('\n')[1]).toBe('Closes #12')
+  })
+
+  it('known-bad probe: a tracking line rendered as Closes, or twice, is refused', async () => {
+    const run = await runWave(WAVE!, SINGLE!, world, {}, 'true')
+    const block = renderWaveBlock(run.tickets, TRACKING)
+    expect(checkWave(seedOnce(block, `Refs ${TRACKING}`, `Closes ${TRACKING}`))).toBe(5)
+    expect(checkWave(seedOnce(block, `Refs ${TRACKING}`, `Refs ${TRACKING}\nRefs ${TRACKING}`))).toBe(5)
   })
 })
 
