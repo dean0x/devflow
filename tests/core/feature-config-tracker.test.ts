@@ -12,11 +12,11 @@
  *      (`unknown tracker provider`), which only exists because "invalid" is a
  *      state distinct from "absent" [DR-26].
  *
- *   2. ROUND-TRIP PRESERVATION. `updateFeature` is a read-modify-write over the
- *      whole file, so a key its write does not carry is a key `devflow knowledge
- *      --disable` DELETES — setting a per-repo tracker override and then toggling
- *      any unrelated feature would silently revert the repo to the manifest
- *      provider. The write carries every unmanaged key from the file
+ *   2. ROUND-TRIP PRESERVATION. `writeManagedConfig` (devflow init's write) is a
+ *      read-modify-write over the whole file, so a key its write does not carry
+ *      is a key a re-init DELETES — setting a per-repo tracker override and then
+ *      re-running init would silently revert the repo to the manifest provider.
+ *      The write carries every unmanaged key from the file
  *      (D-CONFIG-PRESERVE-UNMANAGED). That is the reachable consumer this key has
  *      at the 3a boundary (ADR-003).
  *
@@ -36,7 +36,6 @@ import {
   parseTrackerOverride,
   readConfig,
   readConfigIfPresent,
-  updateFeature,
   writeManagedConfig,
   type TrackerConfigOverride,
 } from '../../src/core/feature-config.js';
@@ -155,7 +154,7 @@ describe('the per-repo tracker key round-trips through the config', () => {
   });
 
   it('readConfig carries a valid value through', async () => {
-    seedConfig(JSON.stringify({ memory: true, learning: true, knowledge: true, tracker: 'jira' }));
+    seedConfig(JSON.stringify({ reviewPublication: 'auto', tracker: 'jira' }));
     const config = await readConfig(tmpDir);
     expect(config.tracker).toBe('jira');
     expect(parseTrackerOverride(config.tracker)).toEqual({ kind: 'valid', provider: 'jira' });
@@ -172,7 +171,7 @@ describe('the per-repo tracker key round-trips through the config', () => {
   });
 
   it('readConfig leaves the key absent when the file does not set it', async () => {
-    seedConfig(JSON.stringify({ memory: false }));
+    seedConfig(JSON.stringify({ reviewPublication: 'off' }));
     const config = await readConfig(tmpDir);
     expect(config.tracker).toBeUndefined();
   });
@@ -193,24 +192,24 @@ describe('the per-repo tracker key round-trips through the config', () => {
     ).not.toContain('tracker');
   });
 
-  it('★ updateFeature does NOT erase the override (the reachable consumer, ADR-003)', async () => {
-    // The defect the key exists to prevent, stated as a test: updateFeature is a
-    // read-modify-write over the WHOLE config, so before this key existed
-    // `devflow knowledge --disable` on a Jira repo silently reverted it to the
-    // manifest provider — a tracker regression caused by an unrelated toggle.
-    seedConfig(JSON.stringify({ memory: true, learning: true, knowledge: true, tracker: 'jira' }));
-    await updateFeature(tmpDir, 'knowledge', false);
+  it('★ writeManagedConfig does NOT erase the override (the reachable consumer, ADR-003)', async () => {
+    // The defect the key exists to prevent, stated as a test: the managed write
+    // is a read-modify-write over the WHOLE config, so a write that did not carry
+    // the key would silently revert a Jira repo to the manifest provider on the
+    // next `devflow init` — a tracker regression caused by an unrelated write.
+    seedConfig(JSON.stringify({ reviewPublication: 'auto', tracker: 'jira' }));
+    await writeManagedConfig(tmpDir, { reviewPublication: 'off' });
     const after = storedConfig();
-    expect(after.knowledge, 'the toggle must still take effect').toBe(false);
+    expect(after.reviewPublication, 'the write must still take effect').toBe('off');
     expect(
       after.tracker,
-      'toggling an unrelated feature must not delete the per-repo tracker override',
+      'an unrelated managed write must not delete the per-repo tracker override',
     ).toBe('jira');
   });
 
-  it('updateFeature preserves an invalid override verbatim as well', async () => {
+  it('writeManagedConfig preserves an invalid override verbatim as well', async () => {
     seedConfig(JSON.stringify({ tracker: 'jira-cloud' }));
-    await updateFeature(tmpDir, 'memory', false);
+    await writeManagedConfig(tmpDir, { reviewPublication: 'off' });
     expect(
       storedConfig().tracker,
       'a value the parse refuses is still the user’s edit — erasing it hides the DEGRADED',
@@ -226,8 +225,8 @@ describe('the per-repo tracker key round-trips through the config', () => {
    * reachable from a direct call and unreachable from the file, so the whole
    * class is silent for every user who can open a text editor — a parse arm
    * exercised only by inputs the reader cannot produce (PF-043). And because
-   * `updateFeature` is a read-modify-write, a value its write drops is a value
-   * DELETED from disk on the next unrelated toggle, taking the user's edit and
+   * the managed write is a read-modify-write, a value it drops is a value
+   * DELETED from disk on the next unrelated write, taking the user's edit and
    * the DEGRADED that reports it together.
    */
   const NON_STRING: readonly { label: string; value: unknown; raw: string }[] = [
@@ -240,20 +239,20 @@ describe('the per-repo tracker key round-trips through the config', () => {
 
   for (const { label, value, raw } of NON_STRING) {
     it(`★ readConfig carries ${label} through, and the parse calls it invalid — not absent`, async () => {
-      seedConfig(JSON.stringify({ memory: true, learning: true, knowledge: true, tracker: value }));
+      seedConfig(JSON.stringify({ reviewPublication: 'auto', tracker: value }));
       const config = await readConfig(tmpDir);
       expect(config.tracker, 'the raw JSON value must reach the parser unchanged').toEqual(value);
       expect(parseTrackerOverride(config.tracker)).toEqual({ kind: 'invalid', raw });
     });
 
-    it(`★ updateFeature does not delete ${label}`, async () => {
-      seedConfig(JSON.stringify({ memory: true, learning: true, knowledge: true, tracker: value }));
-      await updateFeature(tmpDir, 'knowledge', false);
+    it(`★ writeManagedConfig does not delete ${label}`, async () => {
+      seedConfig(JSON.stringify({ reviewPublication: 'auto', tracker: value }));
+      await writeManagedConfig(tmpDir, { reviewPublication: 'off' });
       const after = storedConfig();
-      expect(after.knowledge, 'the toggle must still take effect').toBe(false);
+      expect(after.reviewPublication, 'the write must still take effect').toBe('off');
       expect(
         Object.prototype.hasOwnProperty.call(after, 'tracker'),
-        'an unrelated toggle deleted the key from disk — both the user’s edit and the ' +
+        'an unrelated write deleted the key from disk — both the user’s edit and the ' +
         '`unknown tracker provider` DEGRADED that would have reported it are gone',
       ).toBe(true);
       expect(after.tracker).toEqual(value);
@@ -271,10 +270,10 @@ describe('the per-repo tracker key round-trips through the config', () => {
     // `""` is an unset key with a character in it: the verdict is `absent`, and
     // the bytes are still the user's. One rule — a present key is carried —
     // covers it, and costs less than a type-shaped exception that erases it.
-    seedConfig(JSON.stringify({ memory: true, tracker: '' }));
+    seedConfig(JSON.stringify({ reviewPublication: 'auto', tracker: '' }));
     const config = await readConfig(tmpDir);
     expect(parseTrackerOverride(config.tracker)).toEqual({ kind: 'absent' });
-    await updateFeature(tmpDir, 'memory', false);
+    await writeManagedConfig(tmpDir, { reviewPublication: 'off' });
     expect(storedConfig().tracker).toBe('');
   });
 });

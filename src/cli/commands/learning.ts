@@ -9,8 +9,7 @@ import {
   getDecisionsLogPath,
   getDecisionsLockDir,
 } from '../../core/project-paths.js';
-import { updateFeature } from '../../core/feature-config.js';
-import { readFeatureSwitchState, readMachineSwitch, formatFeatureSwitchLines } from '../../core/feature-switch.js';
+import { readMachineFeature, writeMachineFeature } from '../../core/feature-switch.js';
 import { getDevFlowDirectory } from '../../targets/claude-code/claude-paths.js';
 import { getGitRoot } from '../../core/git.js';
 import { sweepLegacyDreamMarkers, drainLearningQueue } from '../../core/learning-queue-cleanup.js';
@@ -35,8 +34,8 @@ export type { DecisionsEntryStatus };
 function printUsage(): void {
   p.intro(color.bgCyan(color.black(' Learning ')));
   p.note(
-    `${color.cyan('devflow learning --enable')}      Enable learning for this project\n` +
-    `${color.cyan('devflow learning --disable')}     Disable learning for this project (drains queue)\n` +
+    `${color.cyan('devflow learning --enable')}      Enable learning in every project\n` +
+    `${color.cyan('devflow learning --disable')}     Disable learning in every project (drains this project's queue)\n` +
     `${color.cyan('devflow learning --status')}      Show learning status\n` +
     `${color.cyan('devflow learning --list')}        Show all observations\n` +
     `${color.cyan('devflow learning --configure')}   Configuration wizard\n` +
@@ -44,14 +43,8 @@ function printUsage(): void {
     `${color.cyan('devflow learning --reset')}       Remove all learning state files`,
     'Usage',
   );
-  p.outro(color.dim(`Detects architectural decisions and known pitfalls from your sessions. Machine-wide: ${color.cyan('devflow init --learning / --no-learning')}`));
+  p.outro(color.dim('Detects architectural decisions and known pitfalls from your sessions'));
 }
-
-/** Who owns each of the learning switches, for status output. */
-const LEARNING_SWITCH_OWNERS = {
-  machineWide: 'devflow init --learning / --no-learning',
-  repo: 'devflow learning --enable / --disable',
-} as const;
 
 /**
  * Resolve the git root for a state-mutating subcommand, warning and
@@ -67,13 +60,16 @@ async function requireGitRoot(actionSuffix: string): Promise<string | null> {
 }
 
 async function handleStatus(): Promise<void> {
+  // D-FEATURES-MACHINE-WIDE: the one switch is the manifest's, so the state is
+  // the same from every directory; only the observation counts are per-project.
+  const enabled = await readMachineFeature(getDevFlowDirectory(), 'learning');
+  const stateLine = `Learning: ${enabled ? 'enabled' : 'disabled'}`;
   const gitRoot = await getGitRoot();
   if (!gitRoot) {
-    p.log.info('Learning: disabled (not in a git project)');
+    p.log.info(`${stateLine}\nObservations: not in a git project`);
     return;
   }
   const logPath = getDecisionsLogPath(gitRoot);
-  const state = await readFeatureSwitchState(getDevFlowDirectory(), gitRoot, 'learning');
   const { observations, invalidCount } = await readObservations(logPath);
 
   const decisionObs = observations.filter(o => o.type === 'decision' || o.type === 'pitfall');
@@ -84,7 +80,7 @@ async function handleStatus(): Promise<void> {
   const observing = decisionObs.filter(o => o.status === 'observing');
   const deprecated = decisionObs.filter(o => o.status === 'deprecated');
 
-  const lines: string[] = formatFeatureSwitchLines('Learning', state, LEARNING_SWITCH_OWNERS);
+  const lines: string[] = [stateLine];
   if (decisionObs.length === 0) {
     lines.push('Observations: none');
   } else {
@@ -286,44 +282,34 @@ async function handleClear(): Promise<void> {
   p.log.success('Decisions log cleared.');
 }
 
-async function handleEnable(): Promise<void> {
-  const gitRoot = await requireGitRoot('configuration not updated');
-  if (!gitRoot) return;
-
-  // Per-repo only (D-LEARNING-MASTER-SWITCH): writes this project's config and
-  // never the manifest — a per-repo command must not make a hidden machine-wide
-  // write. Keeps every unmanaged config key (D-CONFIG-PRESERVE-UNMANAGED).
-  await updateFeature(gitRoot, 'learning', true);
-  p.log.success('Learning enabled for this project — configuration updated');
-
-  if (!(await readMachineSwitch(getDevFlowDirectory(), 'learning'))) {
-    p.log.warn(
-      'Learning is disabled machine-wide, so it stays off here until you turn it back on with ' +
-      `${color.cyan('devflow init --learning')}`,
-    );
+/**
+ * `--enable` / `--disable`: the machine-wide switch (D-FEATURES-MACHINE-WIDE),
+ * converged exactly as `devflow init --learning / --no-learning` converges it —
+ * the manifest value, and on disable a drained queue in the current project.
+ * Never requires a git root: the switch is not a per-project setting.
+ */
+async function handleToggle(enabled: boolean): Promise<void> {
+  const recorded = await writeMachineFeature(getDevFlowDirectory(), 'learning', enabled);
+  if (!recorded.ok) {
+    p.log.error(`Devflow is not installed on this machine — run ${color.cyan('devflow init')} first`);
+    process.exitCode = 1;
     return;
   }
-  p.log.info(color.dim('Architectural decisions and pitfalls will be detected from your sessions'));
-}
 
-async function handleDisable(): Promise<void> {
-  const gitRoot = await requireGitRoot('configuration not updated');
-  if (!gitRoot) return;
+  if (enabled) {
+    p.log.success('Learning enabled in every project');
+    p.log.info(color.dim('Architectural decisions and pitfalls will be detected from your sessions'));
+    return;
+  }
 
-  // Per-repo only (D-LEARNING-MASTER-SWITCH): the manifest is the machine-wide
-  // switch and is owned by `devflow init`; writing it here would silently turn
-  // learning off in every other project. Keeps every unmanaged config key
-  // (D-CONFIG-PRESERVE-UNMANAGED).
-  await updateFeature(gitRoot, 'learning', false);
-
-  // Drain the learning (decisions-detection) queue so stale turns don't process
-  // on re-enable — mirrors memory.ts's drain-on-disable behavior for the
-  // sibling memory queue. Unconditional: a mid-run Learning agent whose claimed
+  // Drain the current project's learning (decisions-detection) queue so stale
+  // turns don't process on re-enable. A mid-run Learning agent whose claimed
   // batch vanishes aborts without changes — the desired outcome of disabling.
-  await drainLearningQueue(gitRoot);
-
-  p.log.success('Learning disabled for this project — configuration updated');
-  p.log.info(color.dim(`To turn it off in every project: ${color.cyan('devflow init --no-learning')}`));
+  const gitRoot = await getGitRoot();
+  if (gitRoot) {
+    await drainLearningQueue(gitRoot);
+  }
+  p.log.success('Learning disabled in every project');
 }
 
 // ---------------------------------------------------------------------------
@@ -341,9 +327,9 @@ interface LearningOptions {
 }
 
 export const learningCommand = new Command('learning')
-  .description('Enable or disable learning (decision/pitfall detection) for this project')
-  .option('--enable', 'Enable learning for this project')
-  .option('--disable', 'Disable learning for this project')
+  .description('Enable or disable learning (decision/pitfall detection) in every project')
+  .option('--enable', 'Enable learning in every project')
+  .option('--disable', 'Disable learning in every project')
   .option('--status', 'Show learning status and observation counts')
   .option('--list', 'Show all decision/pitfall observations sorted by confidence')
   .option('--configure', 'Interactive configuration wizard for learning.json')
@@ -384,11 +370,11 @@ export const learningCommand = new Command('learning')
       return;
     }
     if (options.enable) {
-      await handleEnable();
+      await handleToggle(true);
       return;
     }
     if (options.disable) {
-      await handleDisable();
+      await handleToggle(false);
       return;
     }
   });

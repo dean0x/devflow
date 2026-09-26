@@ -1,13 +1,15 @@
 /**
- * End-to-end: `devflow init` as the MACHINE-WIDE control for learning and
- * knowledge (#378, D-LEARNING-MASTER-SWITCH / D-KNOWLEDGE-MASTER-SWITCH), the
- * per-repo `devflow learning|knowledge` commands, and init's on→off re-init
- * transitions.
+ * End-to-end: memory, learning and knowledge are MACHINE-WIDE features (#378,
+ * D-FEATURES-MACHINE-WIDE). `devflow init --[no-]<feature>` and `devflow
+ * <feature> --enable/--disable` write the one switch — `features.<feature>` in
+ * ~/.devflow/manifest.json — and every runtime gate reads that switch alone.
  *
  * The reported bug: `devflow init --no-learning` printed "Learning: disabled"
  * while every OTHER repo — one holding a stale `learning: true` an earlier init
  * wrote, one with no config, a non-git cwd — kept capturing and spawning the
- * Learning agent, because the runtime gates read only the per-repo config.
+ * Learning agent, because the runtime gates read the per-repo config. Those
+ * per-repo keys are now retired: a stale value decides nothing either way, and
+ * init's next config write drops it.
  *
  * These drive the REAL compiled CLI and the INSTALLED hook scripts (not the
  * source tree), so the assertion is about what a user's machine actually runs.
@@ -120,8 +122,21 @@ async function seedLearningQueue(dir: string): Promise<void> {
   await fs.writeFile(learningQueue(dir), '{"role":"user","content":"we chose X over Y","ts":1}\n', 'utf-8');
 }
 
-const queueLines = (dir: string): number =>
-  existsSync(learningQueue(dir)) ? readFileSync(learningQueue(dir), 'utf-8').split('\n').filter(Boolean).length : 0;
+const memoryQueue = (dir: string): string => path.join(dir, '.devflow', 'memory', '.pending-turns.jsonl');
+
+const linesOf = (file: string): number =>
+  existsSync(file) ? readFileSync(file, 'utf-8').split('\n').filter(Boolean).length : 0;
+const queueLines = (dir: string): number => linesOf(learningQueue(dir));
+
+/** Drive one prompt + one turn through the installed capture hooks in `dir`. */
+function captureTurn(dir: string): void {
+  runInstalledHook('capture-prompt', { cwd: dir, prompt: 'another turn' });
+  runInstalledHook('capture-turn', { cwd: dir, session_id: 's', last_assistant_message: 'a reply' });
+}
+
+/** The retired per-repo switches, as a pre-#378 init or toggle left them. */
+const STALE_OFF = { memory: false, learning: false, knowledge: false, reviewPublication: 'auto' } as const;
+const STALE_ON = { memory: true, learning: true, knowledge: true, reviewPublication: 'auto' } as const;
 
 /** The additionalContext session-start-context injects for `cwd` ('' when none). */
 function sessionContext(cwd: string): string {
@@ -153,54 +168,41 @@ afterEach(async () => {
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
-// TP-1 / TP-2 / TP-3 / TP-6 — init is the machine-wide switch
+// init is the machine-wide switch
 // ─────────────────────────────────────────────────────────────────────────────
 
-describe('init --no-learning / --no-knowledge switch the features off machine-wide', () => {
-  it('silences learning in a second repo and a non-git cwd, drains the cwd queue, and init --learning restores every repo', async () => {
+describe('init --no-<feature> switches the feature off in every project', () => {
+  it('learning: silences a second repo and a non-git cwd, drains the cwd queue, and init --learning restores every repo', async () => {
     // Repo B carries the stale `true` an earlier init wrote — the reported case.
-    await writeRepoConfig(repoB, { memory: true, learning: true, knowledge: true, reviewPublication: 'auto' });
+    await writeRepoConfig(repoB, STALE_ON);
     await seedLearningQueue(repoA);
     await fs.writeFile(learningProcessing(repoA), '{"role":"user","content":"claimed","ts":1}\n', 'utf-8');
     await seedLearningQueue(repoB);
     await seedLearningQueue(nonGit);
 
     const out = runInit(repoA, '--recommended', '--no-learning', '--no-knowledge');
-    // The summary says what init actually did: machine-wide.
-    expect(out).toContain('disabled in every project');
-
+    expect(out).toMatch(/Learning:\s+disabled/);
     expect(await readManifestFeatures()).toMatchObject({ learning: false, knowledge: false });
 
-    // TP-6: the cwd repo's pending learning queue (and a claimed batch) is drained.
+    // The cwd repo's pending learning queue (and a claimed batch) is drained.
     expect(existsSync(learningQueue(repoA))).toBe(false);
     expect(existsSync(learningProcessing(repoA))).toBe(false);
 
-    // TP-1: no Learning directive in the other repo or a non-git cwd…
+    // No Learning directive in the other repo or a non-git cwd…
     expect(sessionContext(repoB)).not.toContain('LEARNING MAINTENANCE');
     expect(sessionContext(nonGit)).not.toContain('LEARNING MAINTENANCE');
     // …and the capture hooks append nothing to their learning queues.
     for (const dir of [repoB, nonGit]) {
       const before = queueLines(dir);
-      runInstalledHook('capture-prompt', { cwd: dir, prompt: 'another turn' });
-      runInstalledHook('capture-turn', { cwd: dir, session_id: 's', last_assistant_message: 'a reply' });
+      captureTurn(dir);
       expect(queueLines(dir), `learning captured in ${dir} after a machine-wide disable`).toBe(before);
     }
 
-    // TP-2: the status of a repo whose config still says true reports the truth.
-    const learningStatus = runCli(repoB, 'learning', '--status').out;
-    expect(learningStatus).toContain('Learning: disabled');
-    expect(learningStatus).toContain('Machine-wide: off');
-    expect(learningStatus).toContain('This project: on');
-    const knowledgeStatus = runCli(repoB, 'knowledge', '--status').out;
-    expect(knowledgeStatus).toContain('Status: disabled');
-    expect(knowledgeStatus).toContain('Machine-wide: off');
+    // The status of a repo whose config still says true reports the truth.
+    expect(runCli(repoB, 'learning', '--status').out).toContain('Learning: disabled');
+    expect(runCli(repoB, 'knowledge', '--status').out).toContain('Status: disabled');
 
-    // D-INIT-REPO-SWITCH-PRESERVE: init recorded the choice in the manifest and
-    // left repo A's own per-repo value alone…
-    expect(await readRepoConfig(repoA)).toMatchObject({ learning: true, knowledge: true });
-
-    // …so turning it back on from ANOTHER directory restores every repo, repo A
-    // included — nothing is left silently off by an earlier machine-wide disable.
+    // Turning it back on from ANOTHER directory restores every repo.
     runInit(nonGit, '--recommended', '--learning', '--knowledge');
     expect(await readManifestFeatures()).toMatchObject({ learning: true, knowledge: true });
     await seedLearningQueue(repoA);
@@ -209,70 +211,143 @@ describe('init --no-learning / --no-knowledge switch the features off machine-wi
     expect(runCli(repoB, 'knowledge', '--status').out).toContain('Status: enabled');
   }, MULTI_RUN_TIMEOUT_MS);
 
+  it('memory: a second repo and a non-git cwd stop appending to the memory queue', async () => {
+    await writeRepoConfig(repoB, STALE_ON);
+
+    runInit(repoA, '--recommended', '--no-memory');
+    expect(await readManifestFeatures()).toMatchObject({ memory: false });
+    expect(hasMemoryHooks(await readSettings())).toBe(false);
+
+    for (const dir of [repoB, nonGit]) {
+      captureTurn(dir);
+      expect(linesOf(memoryQueue(dir)), `memory captured in ${dir} after init --no-memory`).toBe(0);
+      // Non-vacuity: the hooks ran and learning (still on) captured the turn.
+      expect(queueLines(dir), `the capture hooks did not run in ${dir}`).toBe(2);
+    }
+    expect(runCli(repoB, 'memory', '--status').out).toContain('Working memory: disabled');
+
+    // init --memory from another directory restores it everywhere.
+    runInit(nonGit, '--recommended', '--memory');
+    expect(hasMemoryHooks(await readSettings())).toBe(true);
+    captureTurn(repoB);
+    expect(linesOf(memoryQueue(repoB))).toBe(2);
+  }, MULTI_RUN_TIMEOUT_MS);
+
   it('a re-init keeps the machine-wide choice even from a repo whose config says true (ADR-014)', async () => {
-    runInit(repoA, '--recommended', '--no-learning', '--no-knowledge');
-    await writeRepoConfig(repoB, { memory: true, learning: true, knowledge: true, reviewPublication: 'auto' });
+    runInit(repoA, '--recommended', '--no-learning', '--no-knowledge', '--no-memory');
+    await writeRepoConfig(repoB, STALE_ON);
 
     // A plain re-init (an upgrade, say) from repo B must not flip the switch back.
     runInit(repoB, '--recommended');
-    expect(await readManifestFeatures()).toMatchObject({ learning: false, knowledge: false });
+    expect(await readManifestFeatures()).toMatchObject({ learning: false, knowledge: false, memory: false });
+    expect(hasMemoryHooks(await readSettings())).toBe(false);
   }, MULTI_RUN_TIMEOUT_MS);
 
-  it('a re-init from a repo that turned learning off for itself does not turn it off everywhere', async () => {
+  it('a stale repo config saying false switches nothing off, and init drops it', async () => {
     runInit(repoA, '--recommended');
-    const disabled = runCli(repoB, 'learning', '--disable');
-    expect(disabled.status).toBe(0);
+    await writeRepoConfig(repoB, { ...STALE_OFF, tracker: 'jira' });
 
+    // Every feature is on for repo B: the stale per-repo false decides nothing.
+    captureTurn(repoB);
+    expect(linesOf(memoryQueue(repoB))).toBe(2);
+    expect(queueLines(repoB)).toBe(2);
+    expect(sessionContext(repoB)).toContain('--- LEARNING MAINTENANCE ---');
+    expect(runCli(repoB, 'learning', '--status').out).toContain('Learning: enabled');
+    expect(runCli(repoB, 'knowledge', '--status').out).toContain('Status: enabled');
+
+    // A re-init from repo B does not turn anything off machine-wide, and its
+    // managed write drops the retired keys while keeping the repo's own facts.
     runInit(repoB, '--recommended');
-    expect((await readManifestFeatures()).learning).toBe(true);
-    // Repo B's own choice survives the re-init.
-    expect((await readRepoConfig(repoB)).learning).toBe(false);
+    expect(await readManifestFeatures()).toMatchObject({ memory: true, learning: true, knowledge: true });
+    expect(await readRepoConfig(repoB)).toEqual({ reviewPublication: 'auto', tracker: 'jira' });
   }, MULTI_RUN_TIMEOUT_MS);
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
-// TP-4 / TP-5 — the per-repo commands never write the manifest
+// The feature commands are the same machine-wide switch
 // ─────────────────────────────────────────────────────────────────────────────
 
-describe('devflow learning|knowledge --enable/--disable are per-repo', () => {
-  it('--disable changes only the repo config and leaves the manifest byte-identical', async () => {
+describe('devflow memory|learning|knowledge --enable/--disable are machine-wide', () => {
+  it('learning --disable from one repo silences every repo and drains that repo; --enable from a non-git cwd restores', async () => {
     runInit(repoA, '--recommended');
-    const before = await readManifestRaw();
+    await seedLearningQueue(repoA);
+    await seedLearningQueue(repoB);
 
     expect(runCli(repoB, 'learning', '--disable').status).toBe(0);
-    expect(runCli(repoB, 'knowledge', '--disable').status).toBe(0);
+    expect((await readManifestFeatures()).learning).toBe(false);
+    expect(existsSync(learningQueue(repoB)), 'the current repo queue is drained').toBe(false);
+    expect(sessionContext(repoA)).not.toContain('LEARNING MAINTENANCE');
+    expect(runCli(repoA, 'learning', '--status').out).toContain('Learning: disabled');
 
-    expect(await readManifestRaw()).toBe(before);
-    expect(await readRepoConfig(repoB)).toMatchObject({ learning: false, knowledge: false });
-    // The switch is still on, so a third repo is unaffected.
-    expect(runCli(repoA, 'learning', '--status').out).toContain('Learning: enabled');
+    // Never requires a git root: the switch is not a per-project setting.
+    const enabled = runCli(nonGit, 'learning', '--enable');
+    expect(enabled.status, enabled.out).toBe(0);
+    expect((await readManifestFeatures()).learning).toBe(true);
+    expect(sessionContext(repoA)).toContain('--- LEARNING MAINTENANCE ---');
   }, MULTI_RUN_TIMEOUT_MS);
 
-  it('--enable under a machine-wide off enables the repo, warns, names init, and writes no manifest', async () => {
-    runInit(repoA, '--recommended', '--no-learning', '--no-knowledge');
-    const before = await readManifestRaw();
+  it('memory --disable converges settings.json exactly as init --no-memory does, and drains the repo queue', async () => {
+    runInit(repoA, '--recommended', '--memory');
+    await fs.mkdir(path.dirname(memoryQueue(repoA)), { recursive: true });
+    await fs.writeFile(memoryQueue(repoA), '{"role":"user","content":"x","ts":1}\n');
 
-    const learning = runCli(repoB, 'learning', '--enable');
-    expect(learning.status).toBe(0);
-    expect(learning.out).toContain('disabled machine-wide');
-    expect(learning.out).toContain('devflow init --learning');
+    expect(runCli(repoA, 'memory', '--disable').status).toBe(0);
+    const viaCommand = await readSettings();
+    expect(hasMemoryHooks(viaCommand)).toBe(false);
+    expect((await readManifestFeatures()).memory).toBe(false);
+    expect(existsSync(memoryQueue(repoA))).toBe(false);
+    captureTurn(repoB);
+    expect(linesOf(memoryQueue(repoB))).toBe(0);
 
-    const knowledge = runCli(repoB, 'knowledge', '--enable');
-    expect(knowledge.status).toBe(0);
-    expect(knowledge.out).toContain('disabled machine-wide');
-    expect(knowledge.out).toContain('devflow init --knowledge');
-
-    expect(await readManifestRaw()).toBe(before);
-    expect(await readRepoConfig(repoB)).toMatchObject({ learning: true, knowledge: true });
-    // Still effectively off: the per-repo command cannot override the switch.
-    expect(runCli(repoB, 'learning', '--status').out).toContain('Learning: disabled');
+    // The same settings init itself produces for the same choice. Parsed, not
+    // byte-compared: a re-init re-serialises its own top-level keys (flags, env)
+    // in its own order; every hook array — order included — must match.
+    runInit(repoA, '--recommended', '--no-memory');
+    expect(JSON.parse(await readSettings())).toEqual(JSON.parse(viaCommand));
   }, MULTI_RUN_TIMEOUT_MS);
 
-  it('--enable under a machine-wide on does not warn', async () => {
+  it('memory --enable registers the hooks after capture-turn (append-before-spawn) and resumes capture', async () => {
+    runInit(repoA, '--recommended', '--no-memory');
+
+    const enabled = runCli(nonGit, 'memory', '--enable');
+    expect(enabled.status, enabled.out).toBe(0);
+    const settings = await readSettings();
+    expect(hasMemoryHooks(settings)).toBe(true);
+    expect((await readManifestFeatures()).memory).toBe(true);
+    const stop = (JSON.parse(settings) as Settings).hooks?.Stop ?? [];
+    const commands = stop.flatMap((m) => m.hooks.map((h) => h.command));
+    const captureAt = commands.findIndex((c) => c.includes('capture-turn'));
+    const workerAt = commands.findIndex((c) => c.includes('memory-worker'));
+    expect(captureAt).toBeGreaterThanOrEqual(0);
+    expect(workerAt, 'memory-worker must follow capture-turn in the Stop array').toBeGreaterThan(captureAt);
+    expect(runCli(repoB, 'memory', '--status').out).toContain('Working memory: enabled');
+
+    captureTurn(repoB);
+    expect(linesOf(memoryQueue(repoB))).toBe(2);
+  }, MULTI_RUN_TIMEOUT_MS);
+
+  it('knowledge --disable / --enable flip the machine-wide switch from any repo', async () => {
     runInit(repoA, '--recommended');
-    const learning = runCli(repoB, 'learning', '--enable');
-    expect(learning.status).toBe(0);
-    expect(learning.out).not.toContain('disabled machine-wide');
+
+    expect(runCli(repoB, 'knowledge', '--disable').status).toBe(0);
+    expect((await readManifestFeatures()).knowledge).toBe(false);
+    expect(runCli(repoA, 'knowledge', '--status').out).toContain('Status: disabled');
+
+    expect(runCli(repoA, 'knowledge', '--enable').status).toBe(0);
+    expect((await readManifestFeatures()).knowledge).toBe(true);
+    expect(runCli(repoB, 'knowledge', '--status').out).toContain('Status: enabled');
+  }, MULTI_RUN_TIMEOUT_MS);
+
+  it('the commands never write a repo config', async () => {
+    runInit(repoA, '--recommended');
+    const body = JSON.stringify({ ...STALE_ON, tracker: 'linear' });
+    await fs.mkdir(path.join(repoB, '.devflow'), { recursive: true });
+    await fs.writeFile(path.join(repoB, '.devflow', 'config.json'), body, 'utf-8');
+
+    for (const args of [['learning', '--disable'], ['memory', '--disable'], ['knowledge', '--disable'], ['learning', '--enable']]) {
+      expect(runCli(repoB, ...args).status).toBe(0);
+    }
+    expect(await fs.readFile(path.join(repoB, '.devflow', 'config.json'), 'utf-8')).toBe(body);
   }, MULTI_RUN_TIMEOUT_MS);
 });
 
@@ -330,7 +405,8 @@ describe('init on→off re-init transitions', () => {
     expect(hasHudStatusLine(off)).toBe(false);
     expect(existsSync(path.join(claudeDir(), 'rules', 'devflow'))).toBe(false);
     expect(await readManifestFeatures()).toMatchObject({ ambient: false, memory: false, hud: false, rules: false });
-    expect((await readRepoConfig(repoA)).memory).toBe(false);
+    // The per-repo config holds no feature switch (D-FEATURES-MACHINE-WIDE).
+    expect(await readRepoConfig(repoA)).toEqual({ reviewPublication: 'auto' });
     expect(existsSync(path.join(repoA, '.devflow', 'memory', '.pending-turns.jsonl'))).toBe(false);
     expect(JSON.parse(await fs.readFile(path.join(devflowDir(), 'hud.json'), 'utf-8')).enabled).toBe(false);
   }, MULTI_RUN_TIMEOUT_MS);

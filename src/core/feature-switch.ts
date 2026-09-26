@@ -1,34 +1,37 @@
 import { promises as fs } from 'fs';
 import * as path from 'path';
-import { isFeatureEnabled } from './feature-config.js';
+import { writeFileAtomicExclusive } from './fs-atomic.js';
 
 /**
- * The features whose manifest value is a MACHINE-WIDE MASTER SWITCH over the
- * per-repo `.devflow/config.json` value.
+ * The features that are switched on or off for the WHOLE MACHINE.
  *
- * D-LEARNING-MASTER-SWITCH / D-KNOWLEDGE-MASTER-SWITCH (#378): `devflow init`
- * records its learning/knowledge choice in `~/.devflow/manifest.json`, but it
- * can only write `.devflow/config.json` for the one repo it runs in. When the
- * runtime gates read the repo config alone, turning a feature off via init
- * disabled it in exactly that repo and left it running everywhere else. The
- * manifest value is therefore a master switch: a feature is effective in a repo
- * iff the manifest does not switch it off AND the repo config does not turn it
- * off. `devflow learning|knowledge --enable/--disable` stay per-repo and never
- * write the manifest; `devflow init` is the machine-wide control.
+ * D-FEATURES-MACHINE-WIDE (#378): `features.memory`, `features.learning` and
+ * `features.knowledge` in `~/.devflow/manifest.json` are the single source of
+ * truth for these three features, in every repository and every non-git cwd.
+ * `devflow init` and `devflow memory|learning|knowledge --enable/--disable` both
+ * write that one value; every runtime gate reads it — the shell hooks through
+ * `queue_read_gates` (queue-append), the knowledge write-back step through the
+ * `knowledge_writeback` partial, and the CLI's `--status` through
+ * {@link readMachineFeature}.
  *
- * Memory is deliberately NOT here: init removes the memory hooks machine-wide,
- * so its runtime is already off everywhere when init turns it off.
+ * There is no per-repo layer. Per-repo feature toggles were a leftover of the
+ * per-repo-install era, and the split they created is what #378 reported: init
+ * recorded "off" in the manifest while every other repo, reading its own
+ * `.devflow/config.json`, kept the feature running. The per-repo keys are retired
+ * (RETIRED_CONFIG_KEYS in feature-config.ts): no gate reads them and init's next
+ * config write drops them. `.devflow/config.json` holds only facts about a repo.
  */
-export type MachineSwitchFeature = 'learning' | 'knowledge';
+export type MachineFeature = 'memory' | 'learning' | 'knowledge';
 
-/** A feature's three states in one repo: the two switches and their AND. */
-export interface FeatureSwitchState {
-  /** `features.<x>` in the manifest is not an explicit `false`. */
-  readonly machineWide: boolean;
-  /** The repo's `.devflow/config.json` value (enabled when absent). */
-  readonly repo: boolean;
-  /** `machineWide && repo` — what the runtime gates act on. */
-  readonly effective: boolean;
+type Result<T, E> = { ok: true; value: T } | { ok: false; error: E };
+
+/** Why a machine-wide switch could not be written. */
+export type MachineFeatureWriteError =
+  /** No usable manifest: devflow is not installed on this machine (`devflow init`). */
+  | 'not-installed';
+
+function isJsonObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
 /**
@@ -36,68 +39,75 @@ export interface FeatureSwitchState {
  *
  * Only an explicit boolean `false` switches a feature off. A missing key, a
  * non-boolean value, or anything that is not a manifest-shaped object reads as
- * ON — the fail-open semantics the repo config default already has, and the
- * exact rule `queue_read_gates` applies in the shell hooks, so the CLI's status
- * and the runtime can never disagree about the same file.
+ * ON — fail-open (ADR-028), and the exact rule `queue_read_gates` applies in the
+ * shell hooks, so the CLI's status and the runtime never disagree about the
+ * same file.
  *
  * Deliberately NOT built on readManifest(): that reader heals an absent
  * `learning`/`knowledge` key to `false` (and returns null for a manifest missing
- * other fields), which would switch a feature off on a file the hooks read as on.
+ * other fields), which would report a feature off on a file the hooks read as on.
  */
-export function isMachineSwitchOn(rawManifest: unknown, feature: MachineSwitchFeature): boolean {
-  if (typeof rawManifest !== 'object' || rawManifest === null || Array.isArray(rawManifest)) return true;
-  const features = (rawManifest as Record<string, unknown>).features;
-  if (typeof features !== 'object' || features === null || Array.isArray(features)) return true;
-  return (features as Record<string, unknown>)[feature] !== false;
+export function isMachineFeatureOn(rawManifest: unknown, feature: MachineFeature): boolean {
+  if (!isJsonObject(rawManifest)) return true;
+  const features = rawManifest.features;
+  if (!isJsonObject(features)) return true;
+  return features[feature] !== false;
 }
 
 /**
- * The status lines for a feature under the machine-wide switch. Pure. The first
- * line is the EFFECTIVE state — what the runtime gates act on — and the two that
- * follow name which switch decided it and the command that owns each, so a
- * "disabled" is never left unexplained.
+ * Set `feature` in a RAW parsed manifest. Pure — returns a new object and never
+ * mutates its input. Null when the value is not a manifest-shaped object (there
+ * is no `features` record to write into).
+ *
+ * Only `features.<feature>` and `updatedAt` change; every other key is carried
+ * verbatim. Going through readManifest()/writeManifest() instead would persist
+ * that reader's heals — an absent `learning` key written back as `false` —
+ * so switching memory on could silently switch learning off.
  */
-export function formatFeatureSwitchLines(
-  label: string,
-  state: FeatureSwitchState,
-  owners: { readonly machineWide: string; readonly repo: string },
-): string[] {
-  const onOff = (on: boolean): string => (on ? 'on' : 'off');
-  return [
-    `${label}: ${state.effective ? 'enabled' : 'disabled'}`,
-    `  Machine-wide: ${onOff(state.machineWide)} (${owners.machineWide})`,
-    `  This project: ${onOff(state.repo)} (${owners.repo})`,
-  ];
+export function setMachineFeature(
+  rawManifest: unknown,
+  feature: MachineFeature,
+  enabled: boolean,
+  now: string,
+): Record<string, unknown> | null {
+  if (!isJsonObject(rawManifest) || !isJsonObject(rawManifest.features)) return null;
+  return {
+    ...rawManifest,
+    features: { ...rawManifest.features, [feature]: enabled },
+    updatedAt: now,
+  };
 }
 
-/** Combine the two switches. Pure. */
-export function combineFeatureSwitch(machineWide: boolean, repo: boolean): FeatureSwitchState {
-  return { machineWide, repo, effective: machineWide && repo };
+async function readRawManifest(devflowDir: string): Promise<unknown> {
+  try {
+    return JSON.parse(await fs.readFile(path.join(devflowDir, 'manifest.json'), 'utf-8'));
+  } catch {
+    // ENOENT, EACCES or SyntaxError — no usable manifest.
+    return undefined;
+  }
 }
 
 /**
  * Read the machine-wide switch from `<devflowDir>/manifest.json`. Read-only (no
  * heal write); an absent, unreadable or malformed manifest reads as ON.
  */
-export async function readMachineSwitch(devflowDir: string, feature: MachineSwitchFeature): Promise<boolean> {
-  try {
-    const raw: unknown = JSON.parse(await fs.readFile(path.join(devflowDir, 'manifest.json'), 'utf-8'));
-    return isMachineSwitchOn(raw, feature);
-  } catch {
-    // ENOENT, EACCES or SyntaxError — fail-open, as the hooks do.
-    return true;
-  }
+export async function readMachineFeature(devflowDir: string, feature: MachineFeature): Promise<boolean> {
+  return isMachineFeatureOn(await readRawManifest(devflowDir), feature);
 }
 
-/** Read both switches for `feature` in the repo rooted at `projectRoot`. */
-export async function readFeatureSwitchState(
+/**
+ * Write the machine-wide switch to `<devflowDir>/manifest.json` (atomic
+ * temp + rename). Refuses with `not-installed` when there is no manifest to
+ * write into — a manifest is created by `devflow init`, never by a toggle,
+ * because a bare `{features: {...}}` file is not a manifest any reader accepts.
+ */
+export async function writeMachineFeature(
   devflowDir: string,
-  projectRoot: string,
-  feature: MachineSwitchFeature,
-): Promise<FeatureSwitchState> {
-  const [machineWide, repo] = await Promise.all([
-    readMachineSwitch(devflowDir, feature),
-    isFeatureEnabled(projectRoot, feature),
-  ]);
-  return combineFeatureSwitch(machineWide, repo);
+  feature: MachineFeature,
+  enabled: boolean,
+): Promise<Result<void, MachineFeatureWriteError>> {
+  const next = setMachineFeature(await readRawManifest(devflowDir), feature, enabled, new Date().toISOString());
+  if (next === null) return { ok: false, error: 'not-installed' };
+  await writeFileAtomicExclusive(path.join(devflowDir, 'manifest.json'), JSON.stringify(next, null, 2) + '\n');
+  return { ok: true, value: undefined };
 }

@@ -3,7 +3,6 @@
  *
  * Computes the initial state (seed) for init prompts from:
  * - The existing manifest (from a prior install)
- * - The project feature config (.devflow/config.json)
  * - The current settings.json snapshot (for view-mode resolution)
  * - The plugin registry
  *
@@ -80,32 +79,17 @@ export interface InitSeed {
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 /**
- * Resolve feature booleans for the init seed.
+ * Resolve feature booleans for the init seed: every feature comes from
+ * manifest.features, with registry defaults when the manifest is absent.
  *
- * - memory comes from projectConfig WHENEVER present, independent of whether a
- *   manifest exists (covers config-present / manifest-missing cases).
- * - learning / knowledge come from manifest.features ONLY; registry defaults
- *   are used when the manifest is absent. The repo config is never consulted.
- * - ambient / hud / rules come from manifest.features; registry defaults
- *   (all true) are used when the manifest is absent.
- *
- * D-LEARNING-MASTER-SWITCH / D-KNOWLEDGE-MASTER-SWITCH (src/core/feature-switch.ts):
- * the manifest's learning/knowledge values are the machine-wide master switch
- * init owns, and the repo config is a per-repo narrowing owned by
- * `devflow learning|knowledge`. Seeding the machine-wide choice from whatever
- * repo init happens to run in would flip the switch for EVERY repo as a side
- * effect: a re-init in a repo whose config says `false` would turn the feature
- * off machine-wide, and a re-init in one holding a stale `true` would silently
- * re-enable it after the user turned it off. ADR-014's state-aware re-init
- * preserves the prior MACHINE-WIDE choice, which is the manifest's.
+ * D-FEATURES-MACHINE-WIDE (src/core/feature-switch.ts): memory, learning and
+ * knowledge are machine-wide, recorded in the manifest alone, so the seed takes
+ * no per-repo input at all. Seeding from whatever repo init happens to run in
+ * would flip the switch for EVERY repo as a side effect — a stale per-repo
+ * `true` would silently re-enable a feature the user turned off. ADR-014's
+ * state-aware re-init preserves the prior machine-wide choice, the manifest's.
  */
-export function resolveSeedFeatures(
-  manifest: ManifestData | null,
-  projectConfig: FeatureConfig | null,
-): FeatureSeed {
-  // ambient/hud/rules/proxy/compliance/tracker: manifest is the source; fall back to registry defaults.
-  // proxy, compliance and tracker follow the manifest group (like ambient) —
-  // NOT config.json-gated. The tracker selection is machine-wide.
+export function resolveSeedFeatures(manifest: ManifestData | null): FeatureSeed {
   const ambient = manifest?.features.ambient ?? FEATURE_DEFAULTS.ambient;
   const hud = manifest?.features.hud ?? FEATURE_DEFAULTS.hud;
   const rules = manifest?.features.rules ?? FEATURE_DEFAULTS.rules;
@@ -121,11 +105,7 @@ export function resolveSeedFeatures(
   const rawTracker = manifest?.features.tracker ?? FEATURE_DEFAULTS.tracker;
   const tracker = { ...rawTracker };
 
-  // memory: projectConfig wins whenever present.
-  const memory = projectConfig !== null
-    ? projectConfig.memory
-    : (manifest?.features.memory ?? FEATURE_DEFAULTS.memory);
-  // learning/knowledge: the machine-wide switch — manifest only (see docblock).
+  const memory = manifest?.features.memory ?? FEATURE_DEFAULTS.memory;
   const knowledge = manifest?.features.knowledge ?? FEATURE_DEFAULTS.knowledge;
   const learning = manifest?.features.learning ?? FEATURE_DEFAULTS.learning;
 
@@ -267,7 +247,7 @@ export function resolveExistingAttributionSuppression(settingsJson: string): tru
 }
 
 /**
- * Compose the full init seed from manifest, project config, settings, and registry.
+ * Compose the full init seed from manifest, settings, and registry.
  *
  * view-mode priority: existing settings.json (non-default) → manifest → 'default'.
  * suppress-attribution priority: settings.json exact devflow shape → manifest → false.
@@ -279,11 +259,10 @@ export function resolveExistingAttributionSuppression(settingsJson: string): tru
  */
 export function resolveInitSeed(
   seedManifest: ManifestData | null,
-  seedConfig: FeatureConfig | null,
   settingsSnapshot: string,
   plugins: PluginDefinition[],
 ): InitSeed {
-  const features = resolveSeedFeatures(seedManifest, seedConfig);
+  const features = resolveSeedFeatures(seedManifest);
 
   // features.flags is FlagsRecord; null for fresh install (no manifest).
   // seedManifest?.features.flags may be absent at runtime on very old manifests not yet

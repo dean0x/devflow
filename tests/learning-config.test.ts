@@ -1,479 +1,154 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import * as fs from 'fs';
-import * as path from 'path';
-import * as os from 'os';
+import { describe, it, expect, beforeEach, afterEach } from 'vitest'
+import * as fs from 'fs'
+import * as path from 'path'
+import * as os from 'os'
 import {
   DEFAULT_CONFIG,
   getConfigPath,
   readConfig,
   readConfigIfPresent,
   writeManagedConfig,
-  updateFeature,
-  isFeatureEnabled,
-  type ManagedConfig,
-  type ReviewPublication,
-} from '../src/core/feature-config.js';
-
-// ---------------------------------------------------------------------------
-// Fixture helpers
-// ---------------------------------------------------------------------------
+} from '../src/core/feature-config.js'
 
 /**
- * Create .devflow/ and write data as config.json under projectDir.
- * Covers the repeated 3-line "set up a project with a known config" pattern.
+ * The per-repo `.devflow/config.json`: facts about one repository
+ * (`reviewPublication`, the hand-written `tracker` override) — never a feature
+ * switch. D-FEATURES-MACHINE-WIDE retired its `memory`, `learning` and
+ * `knowledge` keys (with the older `decisions` / `autoCommit`): no reader
+ * surfaces them and a managed write drops them.
  */
-function writeDevflowConfig(projectDir: string, data: object): void {
-  const devflowDir = path.join(projectDir, '.devflow');
-  fs.mkdirSync(devflowDir, { recursive: true });
-  fs.writeFileSync(path.join(devflowDir, 'config.json'), JSON.stringify(data));
+
+/** Create .devflow/ and write data as config.json under projectDir. */
+function writeDevflowConfig(projectDir: string, data: unknown): void {
+  const devflowDir = path.join(projectDir, '.devflow')
+  fs.mkdirSync(devflowDir, { recursive: true })
+  fs.writeFileSync(path.join(devflowDir, 'config.json'), JSON.stringify(data))
 }
+
+function readRaw(projectDir: string): Record<string, unknown> {
+  return JSON.parse(fs.readFileSync(getConfigPath(projectDir), 'utf-8')) as Record<string, unknown>
+}
+
+const RETIRED = ['memory', 'learning', 'knowledge', 'decisions', 'autoCommit'] as const
+
+let tmpDir: string
+
+beforeEach(() => {
+  tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-feature-config-test-'))
+})
+
+afterEach(() => {
+  fs.rmSync(tmpDir, { recursive: true, force: true })
+})
 
 describe('getConfigPath', () => {
   it('returns .devflow/config.json under project root', () => {
-    const result = getConfigPath('/some/project');
-    expect(result).toBe('/some/project/.devflow/config.json');
-  });
-});
+    expect(getConfigPath('/some/project')).toBe('/some/project/.devflow/config.json')
+  })
+})
 
 describe('readConfig', () => {
-  let tmpDir: string;
+  it('returns DEFAULT_CONFIG when the file is missing', async () => {
+    expect(await readConfig(tmpDir)).toEqual(DEFAULT_CONFIG)
+  })
 
-  beforeEach(() => {
-    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-feature-config-test-'));
-  });
+  it('returns defaults for malformed JSON, a non-object, or an array', async () => {
+    fs.mkdirSync(path.join(tmpDir, '.devflow'), { recursive: true })
+    for (const body of ['not json at all', '"just a string"', '[false, true]']) {
+      fs.writeFileSync(getConfigPath(tmpDir), body)
+      expect(await readConfig(tmpDir), body).toEqual(DEFAULT_CONFIG)
+    }
+  })
 
-  afterEach(() => {
-    fs.rmSync(tmpDir, { recursive: true, force: true });
-  });
+  it('never surfaces a retired feature key — a stale learning:false decides nothing', async () => {
+    writeDevflowConfig(tmpDir, { memory: false, learning: false, knowledge: false, decisions: false, autoCommit: true })
+    const config = await readConfig(tmpDir) as unknown as Record<string, unknown>
+    for (const key of RETIRED) {
+      expect(config[key], key).toBeUndefined()
+    }
+  })
 
-  it('returns all-true defaults when config file is missing', async () => {
-    const config = await readConfig(tmpDir);
-    expect(config.memory).toBe(true);
-    expect(config.learning).toBe(true);
-    expect(config.knowledge).toBe(true);
-  });
-
-  it('reads a valid config file', async () => {
-    writeDevflowConfig(tmpDir, { memory: false, learning: false, knowledge: true });
-
-    const config = await readConfig(tmpDir);
-    expect(config.memory).toBe(false);
-    expect(config.learning).toBe(false);
-    expect(config.knowledge).toBe(true);
-  });
-
-  it('falls back to defaults for missing keys', async () => {
-    writeDevflowConfig(tmpDir, { memory: false });
-
-    const config = await readConfig(tmpDir);
-    expect(config.memory).toBe(false);
-    expect(config.learning).toBe(true); // default
-    expect(config.knowledge).toBe(true); // default
-  });
-
-  it('returns defaults for malformed JSON', async () => {
-    fs.mkdirSync(path.join(tmpDir, '.devflow'), { recursive: true });
-    fs.writeFileSync(path.join(tmpDir, '.devflow', 'config.json'), 'not json at all');
-
-    const config = await readConfig(tmpDir);
-    expect(config.memory).toBe(true);
-    expect(config.learning).toBe(true);
-    expect(config.knowledge).toBe(true);
-  });
-
-  it('returns defaults when config is a non-object JSON value', async () => {
-    fs.mkdirSync(path.join(tmpDir, '.devflow'), { recursive: true });
-    fs.writeFileSync(path.join(tmpDir, '.devflow', 'config.json'), '"just a string"');
-
-    const config = await readConfig(tmpDir);
-    expect(config.memory).toBe(true);
-  });
-
-  it('returns defaults when config is a JSON array', async () => {
-    fs.mkdirSync(path.join(tmpDir, '.devflow'), { recursive: true });
-    fs.writeFileSync(path.join(tmpDir, '.devflow', 'config.json'), '[false, true]');
-
-    const config = await readConfig(tmpDir);
-    expect(config.memory).toBe(true);
-    expect(config.learning).toBe(true);
-    expect(config.knowledge).toBe(true);
-  });
-
-  // AC-9 (clean break): old dream/config.json alone (no .devflow/config.json) → DEFAULT_CONFIG
-  // readConfig reads only .devflow/config.json; no fallback to dream/config.json (ADR-001 clean break).
-  it('AC-9: only dream/config.json present (no .devflow/config.json) → returns DEFAULT_CONFIG', async () => {
-    const dreamDir = path.join(tmpDir, '.devflow', 'dream');
-    fs.mkdirSync(dreamDir, { recursive: true });
-    fs.writeFileSync(
-      path.join(dreamDir, 'config.json'),
-      JSON.stringify({ memory: false, learning: false, knowledge: false }),
-    );
-    // No .devflow/config.json present — fallback removed (ADR-001).
-    const config = await readConfig(tmpDir);
-    expect(config.memory).toBe(true);    // DEFAULT_CONFIG: memory:true
-    expect(config.learning).toBe(true);  // DEFAULT_CONFIG: learning:true
-    expect(config.knowledge).toBe(true); // DEFAULT_CONFIG: knowledge:true
-  });
-
-  // Coalesce: legacy decisions key wins over learning key when both present
-  it('coerceConfig: decisions wins over learning when both present', async () => {
-    writeDevflowConfig(tmpDir, { memory: true, learning: true, decisions: false, knowledge: true });
-
-    const config = await readConfig(tmpDir);
-    // decisions: false wins over learning: true
-    expect(config.learning).toBe(false);
-    expect(config.memory).toBe(true);
-    expect(config.knowledge).toBe(true);
-  });
-
-  // Coalesce: decisions key alone (no learning key) is read correctly
-  it('coerceConfig: legacy decisions key alone is coalesced into learning', async () => {
-    writeDevflowConfig(tmpDir, { memory: true, decisions: false, knowledge: true });
-
-    const config = await readConfig(tmpDir);
-    expect(config.learning).toBe(false); // from legacy decisions key
-    expect(config.memory).toBe(true);
-    expect(config.knowledge).toBe(true);
-    // decisions key must not appear in the result type
-    expect((config as Record<string, unknown>).decisions).toBeUndefined();
-  });
-
-  // Coalesce: autoCommit silently ignored
-  it('coerceConfig silently ignores legacy autoCommit key', async () => {
-    writeDevflowConfig(tmpDir, { memory: false, learning: false, knowledge: true, autoCommit: true });
-
-    const config = await readConfig(tmpDir);
-    expect(config.memory).toBe(false);
-    expect(config.learning).toBe(false);
-    expect(config.knowledge).toBe(true);
-    expect((config as Record<string, unknown>).autoCommit).toBeUndefined();
-  });
-});
+  // AC-9 (clean break): readConfig reads only .devflow/config.json, never the
+  // retired dream/config.json location.
+  it('AC-9: only dream/config.json present (no .devflow/config.json) → DEFAULT_CONFIG', async () => {
+    const dreamDir = path.join(tmpDir, '.devflow', 'dream')
+    fs.mkdirSync(dreamDir, { recursive: true })
+    fs.writeFileSync(path.join(dreamDir, 'config.json'), JSON.stringify({ reviewPublication: 'full' }))
+    expect(await readConfig(tmpDir)).toEqual(DEFAULT_CONFIG)
+  })
+})
 
 describe('writeManagedConfig', () => {
-  let tmpDir: string;
+  it('creates .devflow/config.json (neutral root, not inside learning/)', async () => {
+    await writeManagedConfig(tmpDir, { reviewPublication: 'full' })
+    expect(readRaw(tmpDir)).toEqual({ reviewPublication: 'full' })
+    expect(fs.existsSync(path.join(tmpDir, '.devflow', 'learning', 'config.json'))).toBe(false)
+    expect(fs.existsSync(path.join(tmpDir, '.devflow', 'dream', 'config.json'))).toBe(false)
+  })
 
-  beforeEach(() => {
-    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-feature-config-test-'));
-  });
+  it('drops the retired feature keys a pre-#378 init or toggle left in the file', async () => {
+    writeDevflowConfig(tmpDir, {
+      memory: false, learning: false, knowledge: true, decisions: false, autoCommit: true,
+      reviewPublication: 'off',
+    })
+    await writeManagedConfig(tmpDir, { reviewPublication: 'off' })
+    expect(readRaw(tmpDir)).toEqual({ reviewPublication: 'off' })
+  })
 
-  afterEach(() => {
-    fs.rmSync(tmpDir, { recursive: true, force: true });
-  });
+  it('overwrites the managed key', async () => {
+    await writeManagedConfig(tmpDir, { reviewPublication: 'auto' })
+    await writeManagedConfig(tmpDir, { reviewPublication: 'off' })
+    expect((await readConfig(tmpDir)).reviewPublication).toBe('off')
+  })
 
-  it('creates directories and writes config', async () => {
-    const config: ManagedConfig = { memory: false, learning: false, knowledge: true, reviewPublication: 'auto' };
-    await writeManagedConfig(tmpDir, config);
-
-    const configPath = getConfigPath(tmpDir);
-    expect(fs.existsSync(configPath)).toBe(true);
-
-    const raw = fs.readFileSync(configPath, 'utf-8');
-    const parsed = JSON.parse(raw);
-    expect(parsed.memory).toBe(false);
-    expect(parsed.learning).toBe(false);
-    expect(parsed.knowledge).toBe(true);
-    expect(parsed.decisions).toBeUndefined(); // old key not written
-  });
-
-  it('writes to .devflow/config.json (neutral root, not inside learning/)', async () => {
-    const config: ManagedConfig = { memory: true, learning: true, knowledge: true, reviewPublication: 'auto' };
-    await writeManagedConfig(tmpDir, config);
-    // Verify it wrote to .devflow/config.json, not sidecar/ or dream/ or learning/
-    expect(fs.existsSync(path.join(tmpDir, '.devflow', 'config.json'))).toBe(true);
-    expect(fs.existsSync(path.join(tmpDir, '.devflow', 'learning', 'config.json'))).toBe(false);
-    expect(fs.existsSync(path.join(tmpDir, '.devflow', 'dream', 'config.json'))).toBe(false);
-    expect(fs.existsSync(path.join(tmpDir, '.devflow', 'sidecar', 'config.json'))).toBe(false);
-  });
-
-  it('overwrites an existing config', async () => {
-    writeDevflowConfig(tmpDir, { memory: true, learning: true, knowledge: true });
-
-    const config: ManagedConfig = { memory: false, learning: false, knowledge: false, reviewPublication: 'auto' };
-    await writeManagedConfig(tmpDir, config);
-
-    const raw = fs.readFileSync(getConfigPath(tmpDir), 'utf-8');
-    const parsed = JSON.parse(raw);
-    expect(parsed.memory).toBe(false);
-    expect(parsed.learning).toBe(false);
-  });
-});
-
-describe('updateFeature', () => {
-  let tmpDir: string;
-
-  beforeEach(() => {
-    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-feature-config-test-'));
-  });
-
-  afterEach(() => {
-    fs.rmSync(tmpDir, { recursive: true, force: true });
-  });
-
-  it('disables a feature from default-enabled state', async () => {
-    await updateFeature(tmpDir, 'memory', false);
-
-    const config = await readConfig(tmpDir);
-    expect(config.memory).toBe(false);
-    expect(config.learning).toBe(true); // unchanged
-    expect(config.knowledge).toBe(true); // unchanged
-  });
-
-  it('enables a feature that was disabled', async () => {
-    await updateFeature(tmpDir, 'learning', false);
-    await updateFeature(tmpDir, 'learning', true);
-
-    const config = await readConfig(tmpDir);
-    expect(config.learning).toBe(true);
-  });
-
-  it('is idempotent — disabling twice stays disabled', async () => {
-    await updateFeature(tmpDir, 'learning', false);
-    await updateFeature(tmpDir, 'learning', false);
-
-    const config = await readConfig(tmpDir);
-    expect(config.learning).toBe(false);
-  });
-
-  it('updates only the specified feature key', async () => {
-    await updateFeature(tmpDir, 'knowledge', false);
-
-    const config = await readConfig(tmpDir);
-    expect(config.knowledge).toBe(false);
-    expect(config.memory).toBe(true);
-    expect(config.learning).toBe(true);
-  });
-});
-
-describe('isFeatureEnabled', () => {
-  let tmpDir: string;
-
-  beforeEach(() => {
-    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-feature-config-test-'));
-  });
-
-  afterEach(() => {
-    fs.rmSync(tmpDir, { recursive: true, force: true });
-  });
-
-  it('returns true by default when config file is missing', async () => {
-    expect(await isFeatureEnabled(tmpDir, 'memory')).toBe(true);
-    expect(await isFeatureEnabled(tmpDir, 'learning')).toBe(true);
-    expect(await isFeatureEnabled(tmpDir, 'knowledge')).toBe(true);
-  });
-
-  it('returns false after feature is disabled', async () => {
-    await updateFeature(tmpDir, 'memory', false);
-    expect(await isFeatureEnabled(tmpDir, 'memory')).toBe(false);
-  });
-
-  it('returns true after feature is re-enabled', async () => {
-    await updateFeature(tmpDir, 'learning', false);
-    await updateFeature(tmpDir, 'learning', true);
-    expect(await isFeatureEnabled(tmpDir, 'learning')).toBe(true);
-  });
-
-  it('checks the correct feature key independently', async () => {
-    await updateFeature(tmpDir, 'learning', false);
-    expect(await isFeatureEnabled(tmpDir, 'memory')).toBe(true);
-    expect(await isFeatureEnabled(tmpDir, 'learning')).toBe(false);
-  });
-});
-
-describe('writeManagedConfig atomic pattern', () => {
-  let tmpDir: string;
-
-  beforeEach(() => {
-    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-feature-config-test-'));
-  });
-
-  afterEach(() => {
-    fs.rmSync(tmpDir, { recursive: true, force: true });
-  });
-
-  it('writes valid JSON readable by readConfig (atomic pattern produces correct output)', async () => {
-    const config: ManagedConfig = { memory: false, learning: false, knowledge: true, reviewPublication: 'auto' };
-    await writeManagedConfig(tmpDir, config);
-
-    // readConfig should be able to read the atomically-written config
-    const read = await readConfig(tmpDir);
-    expect(read.memory).toBe(false);
-    expect(read.learning).toBe(false);
-    expect(read.knowledge).toBe(true);
-  });
-
-  it('leaves no .tmp.* files behind after successful write', async () => {
-    const config: ManagedConfig = { memory: true, learning: true, knowledge: false, reviewPublication: 'auto' };
-    await writeManagedConfig(tmpDir, config);
-
-    const devflowDir = path.join(tmpDir, '.devflow');
-    const files = fs.readdirSync(devflowDir);
-    const tmpFiles = files.filter(f => f.includes('.tmp.'));
-    expect(tmpFiles).toHaveLength(0);
-  });
-
-  it('overwrites previous config atomically', async () => {
-    await writeManagedConfig(tmpDir, { memory: true, learning: true, knowledge: true, reviewPublication: 'auto' });
-    await writeManagedConfig(tmpDir, { memory: false, learning: false, knowledge: false, reviewPublication: 'auto' });
-
-    const read = await readConfig(tmpDir);
-    expect(read.memory).toBe(false);
-    expect(read.learning).toBe(false);
-  });
-});
-
-// ── readConfigIfPresent ───────────────────────────────────────────────────────
+  it('leaves no .tmp.* files behind after a successful write', async () => {
+    await writeManagedConfig(tmpDir, { reviewPublication: 'auto' })
+    const tmpFiles = fs.readdirSync(path.join(tmpDir, '.devflow')).filter(f => f.includes('.tmp.'))
+    expect(tmpFiles).toHaveLength(0)
+  })
+})
 
 describe('readConfigIfPresent', () => {
-  let tmpDir: string;
-
-  beforeEach(() => {
-    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-cfg-present-'));
-  });
-
-  afterEach(() => {
-    fs.rmSync(tmpDir, { recursive: true, force: true });
-  });
-
   it('returns null when config.json is absent (distinct from DEFAULT_CONFIG)', async () => {
-    // No .devflow/ dir or config.json
-    const result = await readConfigIfPresent(tmpDir);
-    expect(result).toBeNull();
-  });
+    expect(await readConfigIfPresent(tmpDir)).toBeNull()
+    fs.mkdirSync(path.join(tmpDir, '.devflow'), { recursive: true })
+    expect(await readConfigIfPresent(tmpDir)).toBeNull()
+  })
 
-  it('returns null when .devflow/ directory exists but config.json is absent', async () => {
-    fs.mkdirSync(path.join(tmpDir, '.devflow'), { recursive: true });
-    const result = await readConfigIfPresent(tmpDir);
-    expect(result).toBeNull();
-  });
+  it('returns the coerced config when config.json is present', async () => {
+    await writeManagedConfig(tmpDir, { reviewPublication: 'full' })
+    expect(await readConfigIfPresent(tmpDir)).toEqual({ reviewPublication: 'full' })
+  })
 
-  it('returns coerced config when config.json is present', async () => {
-    await writeManagedConfig(tmpDir, { memory: false, learning: true, knowledge: false, reviewPublication: 'auto' });
-    const result = await readConfigIfPresent(tmpDir);
-    expect(result).not.toBeNull();
-    expect(result!.memory).toBe(false);
-    expect(result!.learning).toBe(true);
-    expect(result!.knowledge).toBe(false);
-  });
-
-  it('coalesces legacy "decisions" key into "learning" (same as readConfig)', async () => {
-    fs.mkdirSync(path.join(tmpDir, '.devflow'), { recursive: true });
-    const configPath = path.join(tmpDir, '.devflow', 'config.json');
-    fs.writeFileSync(configPath, JSON.stringify({ decisions: false, learning: true, memory: true, knowledge: true }));
-    // decisions wins over learning (backward-compat coalescing in coerceConfig)
-    const result = await readConfigIfPresent(tmpDir);
-    expect(result).not.toBeNull();
-    expect(result!.learning).toBe(false); // decisions: false wins
-  });
-
-  it('returns null for malformed JSON (not default config — truly absent/unreadable)', async () => {
-    fs.mkdirSync(path.join(tmpDir, '.devflow'), { recursive: true });
-    const configPath = path.join(tmpDir, '.devflow', 'config.json');
-    fs.writeFileSync(configPath, 'not-valid-json{{{');
-    const result = await readConfigIfPresent(tmpDir);
-    expect(result).toBeNull();
-  });
-
-  it('returns null for non-object JSON (number, array)', async () => {
-    fs.mkdirSync(path.join(tmpDir, '.devflow'), { recursive: true });
-    const configPath = path.join(tmpDir, '.devflow', 'config.json');
-    fs.writeFileSync(configPath, JSON.stringify([1, 2, 3]));
-    const result = await readConfigIfPresent(tmpDir);
-    expect(result).toBeNull();
-  });
+  it('returns null for malformed JSON or non-object JSON', async () => {
+    fs.mkdirSync(path.join(tmpDir, '.devflow'), { recursive: true })
+    fs.writeFileSync(getConfigPath(tmpDir), 'not-valid-json{{{')
+    expect(await readConfigIfPresent(tmpDir)).toBeNull()
+    fs.writeFileSync(getConfigPath(tmpDir), JSON.stringify([1, 2, 3]))
+    expect(await readConfigIfPresent(tmpDir)).toBeNull()
+  })
 
   it('never throws even for unreadable paths (returns null)', async () => {
-    await expect(readConfigIfPresent('/nonexistent/project/path/xyz')).resolves.toBeNull();
-  });
-});
-
-// ── reviewPublication field ───────────────────────────────────────────────────
+    await expect(readConfigIfPresent('/nonexistent/project/path/xyz')).resolves.toBeNull()
+  })
+})
 
 describe('reviewPublication coercion', () => {
-  let tmpDir: string;
+  it('absent, invalid string or non-string coerces to "auto"', async () => {
+    for (const body of [{}, { reviewPublication: 'banana' }, { reviewPublication: 42 }]) {
+      writeDevflowConfig(tmpDir, body)
+      expect((await readConfig(tmpDir)).reviewPublication, JSON.stringify(body)).toBe('auto')
+    }
+  })
 
-  beforeEach(() => {
-    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-review-pub-test-'));
-  });
-
-  afterEach(() => {
-    fs.rmSync(tmpDir, { recursive: true, force: true });
-  });
-
-  it('absent reviewPublication field coerces to "auto"', async () => {
-    writeDevflowConfig(tmpDir, { memory: true, learning: true, knowledge: true });
-    const config = await readConfig(tmpDir);
-    expect(config.reviewPublication).toBe('auto');
-  });
-
-  it('invalid string value "banana" coerces to "auto"', async () => {
-    writeDevflowConfig(tmpDir, { memory: true, learning: true, knowledge: true, reviewPublication: 'banana' });
-    const config = await readConfig(tmpDir);
-    expect(config.reviewPublication).toBe('auto');
-  });
-
-  it('numeric value 42 coerces to "auto"', async () => {
-    writeDevflowConfig(tmpDir, { memory: true, learning: true, knowledge: true, reviewPublication: 42 });
-    const config = await readConfig(tmpDir);
-    expect(config.reviewPublication).toBe('auto');
-  });
-
-  it('valid value "auto" round-trips through read/write', async () => {
-    await writeManagedConfig(tmpDir, { memory: true, learning: true, knowledge: true, reviewPublication: 'auto' });
-    const config = await readConfig(tmpDir);
-    expect(config.reviewPublication).toBe('auto');
-  });
-
-  it('valid value "full" round-trips through read/write', async () => {
-    await writeManagedConfig(tmpDir, { memory: true, learning: true, knowledge: true, reviewPublication: 'full' });
-    const config = await readConfig(tmpDir);
-    expect(config.reviewPublication).toBe('full');
-  });
-
-  it('valid value "off" round-trips through read/write', async () => {
-    await writeManagedConfig(tmpDir, { memory: true, learning: true, knowledge: true, reviewPublication: 'off' });
-    const config = await readConfig(tmpDir);
-    expect(config.reviewPublication).toBe('off');
-  });
+  it.each(['auto', 'full', 'off'] as const)('valid value "%s" round-trips through read/write', async (value) => {
+    await writeManagedConfig(tmpDir, { reviewPublication: value })
+    expect((await readConfig(tmpDir)).reviewPublication).toBe(value)
+  })
 
   it('DEFAULT_CONFIG has reviewPublication "auto" (the fail-closed default)', () => {
-    // Assert on the shipped constant, not on a locally-declared literal — a local
-    // `const rp: ReviewPublication = 'auto'` passes even if DEFAULT_CONFIG says
-    // 'full', which is exactly the type-only vacuity PF-018 warns about.
-    const rp: ReviewPublication = DEFAULT_CONFIG.reviewPublication;
-    expect(rp, 'DEFAULT_CONFIG.reviewPublication must stay "auto" — "full" would publish full reports on public repos by default').toBe('auto');
-  });
-});
-
-describe('reviewPublication preservation across updateFeature', () => {
-  let tmpDir: string;
-
-  beforeEach(() => {
-    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-review-pub-preserve-'));
-  });
-
-  afterEach(() => {
-    fs.rmSync(tmpDir, { recursive: true, force: true });
-  });
-
-  it('updateFeature preserves reviewPublication: "off" when toggling knowledge', async () => {
-    // Write initial config with reviewPublication set to a non-default value.
-    await writeManagedConfig(tmpDir, { memory: true, learning: true, knowledge: true, reviewPublication: 'off' });
-
-    // Toggle a boolean feature — this must not erase reviewPublication.
-    await updateFeature(tmpDir, 'knowledge', false);
-
-    const config = await readConfig(tmpDir);
-    expect(config.knowledge).toBe(false);
-    expect(config.reviewPublication).toBe('off'); // must be preserved — erasure regression guard
-  });
-
-  it('updateFeature preserves reviewPublication: "full" when toggling memory', async () => {
-    await writeManagedConfig(tmpDir, { memory: true, learning: true, knowledge: true, reviewPublication: 'full' });
-    await updateFeature(tmpDir, 'memory', false);
-
-    const config = await readConfig(tmpDir);
-    expect(config.memory).toBe(false);
-    expect(config.reviewPublication).toBe('full'); // preserved
-  });
-});
+    // Assert on the shipped constant — "full" would publish full reports on
+    // public repos by default (PF-018: no locally-declared literal stand-in).
+    expect(DEFAULT_CONFIG.reviewPublication).toBe('auto')
+  })
+})

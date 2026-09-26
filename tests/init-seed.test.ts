@@ -56,7 +56,7 @@ const MOCK_FLAGS: ClaudeCodeFlag[] = [
 
 describe('resolveSeedFeatures', () => {
   it('fresh (null, null) → FEATURE_DEFAULTS', () => {
-    const result = resolveSeedFeatures(null, null);
+    const result = resolveSeedFeatures(null);
     expect(result).toEqual(FEATURE_DEFAULTS);
   });
 
@@ -73,7 +73,7 @@ describe('resolveSeedFeatures', () => {
         flags: [],
       },
     });
-    const result = resolveSeedFeatures(manifest, null);
+    const result = resolveSeedFeatures(manifest);
     expect(result).toEqual({
       ambient: false,
       memory: false,
@@ -87,54 +87,31 @@ describe('resolveSeedFeatures', () => {
     });
   });
 
-  it('projectConfig present, no manifest → memory from config; learning/knowledge/ambient/hud/rules from defaults', () => {
-    const config = { memory: false, learning: false, knowledge: false, reviewPublication: 'auto' as const };
-    const result = resolveSeedFeatures(null, config);
-    expect(result.memory).toBe(false);
-    // D-LEARNING-MASTER-SWITCH: a repo's per-repo false never seeds the
-    // machine-wide switch — a reinstall from that repo must not turn the
-    // feature off in every other repo.
-    expect(result.learning).toBe(FEATURE_DEFAULTS.learning);
-    expect(result.knowledge).toBe(FEATURE_DEFAULTS.knowledge);
-    // ambient/hud/rules from FEATURE_DEFAULTS when manifest absent
-    expect(result.ambient).toBe(FEATURE_DEFAULTS.ambient);
-    expect(result.hud).toBe(FEATURE_DEFAULTS.hud);
-    expect(result.rules).toBe(FEATURE_DEFAULTS.rules);
-  });
-
-  it('both present → config wins for memory; manifest wins for learning/knowledge/ambient/hud/rules/proxy', () => {
+  it('memory, learning and knowledge come from the manifest like every other feature (D-FEATURES-MACHINE-WIDE)', () => {
     const manifest = makeManifest({
       features: {
         ambient: false,
-        memory: true, // overridden by config
+        memory: false,
         hud: false,
-        knowledge: true, // the machine-wide switch — the repo config does not override it
-        learning: true, // the machine-wide switch — the repo config does not override it
+        knowledge: false,
+        learning: true,
         rules: false,
-        proxy: true,  // manifest wins for proxy (not config-gated per ADR-001)
+        proxy: true,
         flags: [],
       },
     });
-    const config = { memory: false, learning: false, knowledge: false, reviewPublication: 'auto' as const };
-    const result = resolveSeedFeatures(manifest, config);
-    // config wins for memory only
-    expect(result.memory).toBe(false);
-    // a per-repo false must not become a machine-wide false on re-init
-    expect(result.learning).toBe(true);
-    expect(result.knowledge).toBe(true);
-    // manifest wins for ambient/hud/rules/proxy
-    expect(result.ambient).toBe(false);
-    expect(result.hud).toBe(false);
-    expect(result.rules).toBe(false);
-    expect(result.proxy).toBe(true);
+    const result = resolveSeedFeatures(manifest);
+    expect(result).toMatchObject({
+      ambient: false, memory: false, hud: false, knowledge: false, learning: true, rules: false, proxy: true,
+    });
   });
 
-  it('a stale learning:true in the repo config never re-enables a machine-wide learning:false (#378)', () => {
+  it('a machine-wide off is re-seeded as off — a re-init never re-enables it (#378)', () => {
     const manifest = makeManifest({
-      features: { ...makeManifest().features, learning: false, knowledge: false },
+      features: { ...makeManifest().features, memory: false, learning: false, knowledge: false },
     });
-    const config = { memory: true, learning: true, knowledge: true, reviewPublication: 'auto' as const };
-    const result = resolveSeedFeatures(manifest, config);
+    const result = resolveSeedFeatures(manifest);
+    expect(result.memory).toBe(false);
     expect(result.learning).toBe(false);
     expect(result.knowledge).toBe(false);
   });
@@ -306,7 +283,7 @@ describe('resolveSeedPlugins', () => {
 
 describe('resolveInitSeed', () => {
   it('fresh (null manifest, null config, empty settings) → registry defaults', () => {
-    const seed = resolveInitSeed(null, null, '{}', DEVFLOW_PLUGINS);
+    const seed = resolveInitSeed(null, '{}', DEVFLOW_PLUGINS);
     // features: FEATURE_DEFAULTS
     expect(seed.features).toEqual(FEATURE_DEFAULTS);
     // flags: FlagsRecord with all registry flags at their defaults
@@ -326,7 +303,7 @@ describe('resolveInitSeed', () => {
     // view-mode lives in flags['view-mode'] (Phase 6 — no deprecated viewMode field)
     const manifest = makeManifest({ features: { ...makeManifest().features, flags: { ...makeManifest().features.flags, 'view-mode': 'verbose' } } });
     const settings = JSON.stringify({ viewMode: 'focus' });
-    const seed = resolveInitSeed(manifest, null, settings, DEVFLOW_PLUGINS);
+    const seed = resolveInitSeed(manifest, settings, DEVFLOW_PLUGINS);
     expect(readViewMode(seed.flags)).toBe('focus'); // settings beats manifest
   });
 
@@ -334,14 +311,14 @@ describe('resolveInitSeed', () => {
     // view-mode lives in flags['view-mode'] (Phase 6)
     const manifest = makeManifest({ features: { ...makeManifest().features, flags: { ...makeManifest().features.flags, 'view-mode': 'verbose' } } });
     const settings = JSON.stringify({ viewMode: 'default' });
-    const seed = resolveInitSeed(manifest, null, settings, DEVFLOW_PLUGINS);
+    const seed = resolveInitSeed(manifest, settings, DEVFLOW_PLUGINS);
     expect(readViewMode(seed.flags)).toBe('verbose'); // settings 'default' → fall through to manifest
   });
 
   it('view-mode: falls back to "default" when neither settings nor manifest has one', () => {
     const manifest = makeManifest(); // no 'view-mode' in flags → resolves to 'default'
     const settings = '{}';
-    const seed = resolveInitSeed(manifest, null, settings, DEVFLOW_PLUGINS);
+    const seed = resolveInitSeed(manifest, settings, DEVFLOW_PLUGINS);
     expect(readViewMode(seed.flags)).toBe('default');
   });
 
@@ -352,7 +329,7 @@ describe('resolveInitSeed', () => {
     const manifest = makeManifest({ features: { ...makeManifest().features, flags: manifestFlags } });
     const originalViewMode = manifest.features.flags?.['view-mode'];
 
-    resolveInitSeed(manifest, null, '{}', DEVFLOW_PLUGINS);
+    resolveInitSeed(manifest, '{}', DEVFLOW_PLUGINS);
 
     // Manifest flags must be unchanged after the call.
     expect(manifest.features.flags?.['view-mode']).toBe(originalViewMode);
@@ -360,7 +337,7 @@ describe('resolveInitSeed', () => {
 
   it('returned flags are a fresh copy — mutating them does not affect the manifest', () => {
     const manifest = makeManifest({ features: { ...makeManifest().features, flags: { 'view-mode': 'verbose' as const } } });
-    const seed = resolveInitSeed(manifest, null, '{}', DEVFLOW_PLUGINS);
+    const seed = resolveInitSeed(manifest, '{}', DEVFLOW_PLUGINS);
 
     (seed.flags as Record<string, unknown>)['view-mode'] = 'focus';
 
@@ -382,11 +359,10 @@ describe('resolveInitSeed', () => {
         flags: { tui: true, lsp: true, 'view-mode': 'verbose' },
       },
     });
-    const config = { memory: true, learning: true, knowledge: false, reviewPublication: 'auto' as const };
     const settings = '{}';
 
-    const seed1 = resolveInitSeed(manifest, config, settings, DEVFLOW_PLUGINS);
-    const seed2 = resolveInitSeed(manifest, config, settings, DEVFLOW_PLUGINS);
+    const seed1 = resolveInitSeed(manifest, settings, DEVFLOW_PLUGINS);
+    const seed2 = resolveInitSeed(manifest, settings, DEVFLOW_PLUGINS);
     expect(seed1).toEqual(seed2); // pure function — same inputs, same output
   });
 });
@@ -509,7 +485,7 @@ describe('resolveInitSeed — re-init composability (WS1)', () => {
       },
     };
 
-    const seed = resolveInitSeed(manifestWithKnown as unknown as typeof manifest, null, '{}', DEVFLOW_PLUGINS);
+    const seed = resolveInitSeed(manifestWithKnown as unknown as typeof manifest, '{}', DEVFLOW_PLUGINS);
 
     // Prior workflow selection is preserved
     expect(seed.workflowPlugins).toContain('devflow-implement');
@@ -520,7 +496,7 @@ describe('resolveInitSeed — re-init composability (WS1)', () => {
 
   it('factory reset (--reset): null manifest → fresh seed, not prior state', () => {
     // Simulate --reset: seedManifest = null, seedConfig = null (prior state ignored)
-    const seed = resolveInitSeed(null, null, '{}', DEVFLOW_PLUGINS);
+    const seed = resolveInitSeed(null, '{}', DEVFLOW_PLUGINS);
 
     // Features: all FEATURE_DEFAULTS (all true)
     expect(seed.features).toEqual(FEATURE_DEFAULTS);
@@ -539,7 +515,7 @@ describe('resolveInitSeed — re-init composability (WS1)', () => {
     // The original composability bug: devflow flags --disable tui + devflow memory --disable
     // were reset to defaults on --recommended re-init. After WS1, applyCliToggles(seed, {memory:false})
     // preserves the seed's other values while only overriding memory.
-    const seed = resolveInitSeed(null, null, '{}', DEVFLOW_PLUGINS); // fresh seed for this test
+    const seed = resolveInitSeed(null, '{}', DEVFLOW_PLUGINS); // fresh seed for this test
 
     const seedWithMemoryDisabled: FeatureSeed = {
       ...seed.features,
@@ -561,7 +537,7 @@ describe('resolveInitSeed — re-init composability (WS1)', () => {
 describe('resolveResetGatedInputs', () => {
   it('reset=false: passes manifest, config, and settings through unchanged', () => {
     const manifest = makeManifest();
-    const config = { memory: false, learning: false, knowledge: true, reviewPublication: 'auto' as const };
+    const config = { reviewPublication: 'full' as const };
     const settings = JSON.stringify({ viewMode: 'focus' });
 
     const { seedManifest, seedConfig, seedSettings } = resolveResetGatedInputs(
@@ -575,7 +551,7 @@ describe('resolveResetGatedInputs', () => {
 
   it('reset=true: discards manifest, config, and settings snapshot', () => {
     const manifest = makeManifest();
-    const config = { memory: false, learning: false, knowledge: false, reviewPublication: 'auto' as const };
+    const config = { reviewPublication: 'full' as const };
     const settings = JSON.stringify({ viewMode: 'focus' });
 
     const { seedManifest, seedConfig, seedSettings } = resolveResetGatedInputs(
@@ -595,7 +571,7 @@ describe('resolveResetGatedInputs', () => {
     const settings = JSON.stringify({ viewMode: 'focus' });
 
     const gated = resolveResetGatedInputs(true, manifest, null, settings);
-    const seed = resolveInitSeed(gated.seedManifest, gated.seedConfig, gated.seedSettings, DEVFLOW_PLUGINS);
+    const seed = resolveInitSeed(gated.seedManifest, gated.seedSettings, DEVFLOW_PLUGINS);
 
     expect(readViewMode(seed.flags)).toBe('default');
   });
@@ -604,7 +580,7 @@ describe('resolveResetGatedInputs', () => {
     // Complement to the reset case: without --reset, an externally-set /focus survives seeding.
     const settings = JSON.stringify({ viewMode: 'focus' });
     const gated = resolveResetGatedInputs(false, null, null, settings);
-    const seed = resolveInitSeed(gated.seedManifest, gated.seedConfig, gated.seedSettings, DEVFLOW_PLUGINS);
+    const seed = resolveInitSeed(gated.seedManifest, gated.seedSettings, DEVFLOW_PLUGINS);
 
     expect(readViewMode(seed.flags)).toBe('focus');
   });
@@ -618,7 +594,7 @@ describe('proxy seeding', () => {
   });
 
   it('fresh install (null manifest) → proxy defaults to false', () => {
-    const result = resolveSeedFeatures(null, null);
+    const result = resolveSeedFeatures(null);
     expect(result.proxy).toBe(false);
   });
 
@@ -626,7 +602,7 @@ describe('proxy seeding', () => {
     const manifest = makeManifest({
       features: { ...makeManifest().features, proxy: true },
     });
-    const result = resolveSeedFeatures(manifest, null);
+    const result = resolveSeedFeatures(manifest);
     expect(result.proxy).toBe(true);
   });
 
@@ -634,23 +610,15 @@ describe('proxy seeding', () => {
     const manifest = makeManifest({
       features: { ...makeManifest().features, proxy: false },
     });
-    const result = resolveSeedFeatures(manifest, null);
+    const result = resolveSeedFeatures(manifest);
     expect(result.proxy).toBe(false);
   });
 
   it('--reset (null manifest) → proxy seeds as false regardless of prior state', () => {
     // --reset passes seedManifest=null via resolveResetGatedInputs; proxy must fall
     // back to FEATURE_DEFAULTS.proxy=false rather than carrying a prior true value.
-    const result = resolveSeedFeatures(null, null);
+    const result = resolveSeedFeatures(null);
     expect(result.proxy).toBe(false);
-  });
-
-  it('project config has no effect on proxy (proxy is manifest-gated, not config-gated)', () => {
-    // Proxy is in the manifest group (like ambient/hud/rules), not the config group.
-    // Passing a config with memory/learning/knowledge must not affect the proxy seed.
-    const config = { memory: false, learning: false, knowledge: false };
-    const result = resolveSeedFeatures(null, config);
-    expect(result.proxy).toBe(false); // still falls back to FEATURE_DEFAULTS
   });
 
   it('applyCliToggles: --proxy overrides seed proxy=false', () => {
@@ -678,7 +646,7 @@ describe('proxy seeding', () => {
     const manifest = makeManifest({
       features: { ...makeManifest().features, proxy: true },
     });
-    const seed = resolveInitSeed(manifest, null, '{}', DEVFLOW_PLUGINS);
+    const seed = resolveInitSeed(manifest, '{}', DEVFLOW_PLUGINS);
     expect(seed.features.proxy).toBe(true);
   });
 });
@@ -703,60 +671,45 @@ describe('compliance seeding', () => {
   });
 
   it('fresh install (null manifest) → compliance defaults to disabled', () => {
-    const result = resolveSeedFeatures(null, null);
+    const result = resolveSeedFeatures(null);
     expect(result.compliance).toEqual({ enabled: false, frameworks: [] });
   });
 
   it('manifest.features.compliance=enabled → seeded as enabled (manifest-group, not config-gated)', () => {
     const manifest = makeComplianceManifest({ enabled: true, frameworks: ['gdpr', 'hipaa'] });
-    const result = resolveSeedFeatures(manifest, null);
+    const result = resolveSeedFeatures(manifest);
     expect(result.compliance).toEqual({ enabled: true, frameworks: ['gdpr', 'hipaa'] });
   });
 
   it('manifest.features.compliance=disabled → seeded as disabled', () => {
     const manifest = makeComplianceManifest({ enabled: false, frameworks: [] });
-    const result = resolveSeedFeatures(manifest, null);
+    const result = resolveSeedFeatures(manifest);
     expect(result.compliance).toEqual({ enabled: false, frameworks: [] });
-  });
-
-  it('projectConfig has no effect on compliance (manifest-gated, not config-gated)', () => {
-    const config = { memory: false, learning: false, knowledge: false, reviewPublication: 'auto' as const };
-    const result = resolveSeedFeatures(null, config);
-    expect(result.compliance).toEqual({ enabled: false, frameworks: [] }); // FEATURE_DEFAULTS wins
-  });
-
-  it('populated manifest wins over projectConfig: compliance comes from manifest, not FEATURE_DEFAULTS', () => {
-    // The removed compliance-cli.test.ts variant: both a populated manifest AND a projectConfig are
-    // present; compliance must come from the manifest (manifest-group), not from config or FEATURE_DEFAULTS.
-    const manifest = makeComplianceManifest({ enabled: true, frameworks: ['sox'] });
-    const config = { memory: false, learning: false, knowledge: false, reviewPublication: 'auto' as const };
-    const result = resolveSeedFeatures(manifest, config);
-    expect(result.compliance).toEqual({ enabled: true, frameworks: ['sox'] });
   });
 
   it('disable-keeps-frameworks: disabled manifest with non-empty frameworks → seeded with frameworks', () => {
     const manifest = makeComplianceManifest({ enabled: false, frameworks: ['sox', 'hipaa'] });
-    const result = resolveSeedFeatures(manifest, null);
+    const result = resolveSeedFeatures(manifest);
     expect(result.compliance).toEqual({ enabled: false, frameworks: ['sox', 'hipaa'] });
   });
 
   it('resolveSeedFeatures: compliance seed is a defensive copy (not a reference to manifest.features.compliance)', () => {
     const manifest = makeComplianceManifest({ enabled: true, frameworks: ['gdpr'] });
-    const result = resolveSeedFeatures(manifest, null);
+    const result = resolveSeedFeatures(manifest);
     expect(result.compliance.frameworks).not.toBe(manifest.features.compliance!.frameworks);
   });
 
   it('--reset (null seedManifest) → compliance falls back to FEATURE_DEFAULTS', () => {
     const manifest = makeComplianceManifest({ enabled: true, frameworks: ['gdpr', 'sox', 'hipaa'] });
     const { seedManifest } = resolveResetGatedInputs(true, manifest, null, '{}');
-    const seed = resolveInitSeed(seedManifest, null, '', DEVFLOW_PLUGINS);
+    const seed = resolveInitSeed(seedManifest, '', DEVFLOW_PLUGINS);
     expect(seed.features.compliance).toEqual({ enabled: false, frameworks: [] });
   });
 
   it('--no-reset preserves existing manifest compliance', () => {
     const manifest = makeComplianceManifest({ enabled: true, frameworks: ['pci-dss'] });
     const { seedManifest } = resolveResetGatedInputs(false, manifest, null, '{}');
-    const seed = resolveInitSeed(seedManifest, null, '', DEVFLOW_PLUGINS);
+    const seed = resolveInitSeed(seedManifest, '', DEVFLOW_PLUGINS);
     expect(seed.features.compliance).toEqual({ enabled: true, frameworks: ['pci-dss'] });
   });
 
@@ -790,7 +743,7 @@ describe('compliance seeding', () => {
 
   it('resolveInitSeed: compliance included in features result', () => {
     const manifest = makeComplianceManifest({ enabled: true, frameworks: ['gdpr'] });
-    const seed = resolveInitSeed(manifest, null, '{}', DEVFLOW_PLUGINS);
+    const seed = resolveInitSeed(manifest, '{}', DEVFLOW_PLUGINS);
     expect(seed.features.compliance).toEqual({ enabled: true, frameworks: ['gdpr'] });
   });
 });
@@ -813,32 +766,20 @@ describe('tracker seeding', () => {
   });
 
   it('fresh install (null manifest) → tracker defaults to github', () => {
-    const result = resolveSeedFeatures(null, null);
+    const result = resolveSeedFeatures(null);
     expect(result.tracker).toEqual({ provider: 'github' });
   });
 
   it('manifest.features.tracker=jira → seeded as jira (manifest-group, not config-gated)', () => {
-    const result = resolveSeedFeatures(makeTrackerManifest({ provider: 'jira' }), null);
+    const result = resolveSeedFeatures(makeTrackerManifest({ provider: 'jira' }));
     expect(result.tracker).toEqual({ provider: 'jira' });
-  });
-
-  it('projectConfig has no effect on tracker (manifest-gated, not config-gated)', () => {
-    const config = { memory: false, learning: false, knowledge: false, reviewPublication: 'auto' as const };
-    const result = resolveSeedFeatures(null, config);
-    expect(result.tracker).toEqual({ provider: 'github' });
-  });
-
-  it('populated manifest wins over projectConfig', () => {
-    const config = { memory: false, learning: false, knowledge: false, reviewPublication: 'auto' as const };
-    const result = resolveSeedFeatures(makeTrackerManifest({ provider: 'linear' }), config);
-    expect(result.tracker).toEqual({ provider: 'linear' });
   });
 
   it('the tracker seed is a defensive copy, never a reference to FEATURE_DEFAULTS.tracker', () => {
     // Without the spread, `manifest?.features.tracker ?? FEATURE_DEFAULTS.tracker`
     // hands back the module-level default BY REFERENCE and a downstream mutation
     // corrupts it process-wide.
-    const result = resolveSeedFeatures(null, null);
+    const result = resolveSeedFeatures(null);
     expect(result.tracker).not.toBe(FEATURE_DEFAULTS.tracker);
     result.tracker.provider = 'jira';
     expect(FEATURE_DEFAULTS.tracker).toEqual({ provider: 'github' });
@@ -846,21 +787,21 @@ describe('tracker seeding', () => {
 
   it('the tracker seed is a defensive copy, never a reference to the manifest value', () => {
     const manifest = makeTrackerManifest({ provider: 'jira' });
-    const result = resolveSeedFeatures(manifest, null);
+    const result = resolveSeedFeatures(manifest);
     expect(result.tracker).not.toBe(manifest.features.tracker);
   });
 
   it('--reset (null seedManifest) → tracker falls back to github (AC-3.20 / EC-62)', () => {
     const manifest = makeTrackerManifest({ provider: 'linear' });
     const { seedManifest } = resolveResetGatedInputs(true, manifest, null, '{}');
-    const seed = resolveInitSeed(seedManifest, null, '', DEVFLOW_PLUGINS);
+    const seed = resolveInitSeed(seedManifest, '', DEVFLOW_PLUGINS);
     expect(seed.features.tracker).toEqual({ provider: 'github' });
   });
 
   it('--no-reset preserves the existing manifest provider', () => {
     const manifest = makeTrackerManifest({ provider: 'jira' });
     const { seedManifest } = resolveResetGatedInputs(false, manifest, null, '{}');
-    const seed = resolveInitSeed(seedManifest, null, '', DEVFLOW_PLUGINS);
+    const seed = resolveInitSeed(seedManifest, '', DEVFLOW_PLUGINS);
     expect(seed.features.tracker).toEqual({ provider: 'jira' });
   });
 
@@ -886,7 +827,7 @@ describe('tracker seeding', () => {
   });
 
   it('resolveInitSeed: tracker included in the features result', () => {
-    const seed = resolveInitSeed(makeTrackerManifest({ provider: 'linear' }), null, '{}', DEVFLOW_PLUGINS);
+    const seed = resolveInitSeed(makeTrackerManifest({ provider: 'linear' }), '{}', DEVFLOW_PLUGINS);
     expect(seed.features.tracker).toEqual({ provider: 'linear' });
   });
 });
@@ -1137,14 +1078,14 @@ describe('resolveExistingAttributionSuppression (D27)', () => {
 
 describe('resolveInitSeed — suppress-attribution seeding (D27)', () => {
   it('fresh install (null manifest) → suppress-attribution defaults to false', () => {
-    const seed = resolveInitSeed(null, null, JSON.stringify({}), DEVFLOW_PLUGINS);
+    const seed = resolveInitSeed(null, JSON.stringify({}), DEVFLOW_PLUGINS);
     expect(seed.flags['suppress-attribution']).toBe(false);
   });
 
   it('settings.json with exact devflow attribution → seeds true (overrides manifest false)', () => {
     const settings = JSON.stringify({ attribution: { commit: '', pr: '' } });
     const manifest = makeManifest({ features: { ...makeManifest().features, flags: { 'suppress-attribution': false } } });
-    const seed = resolveInitSeed(manifest, null, settings, DEVFLOW_PLUGINS);
+    const seed = resolveInitSeed(manifest, settings, DEVFLOW_PLUGINS);
     expect(seed.flags['suppress-attribution']).toBe(true);
   });
 
@@ -1152,7 +1093,7 @@ describe('resolveInitSeed — suppress-attribution seeding (D27)', () => {
     const manifest = makeManifest({
       features: { ...makeManifest().features, flags: { 'suppress-attribution': true } },
     });
-    const seed = resolveInitSeed(manifest, null, JSON.stringify({}), DEVFLOW_PLUGINS);
+    const seed = resolveInitSeed(manifest, JSON.stringify({}), DEVFLOW_PLUGINS);
     expect(seed.flags['suppress-attribution']).toBe(true);
   });
 
@@ -1161,16 +1102,16 @@ describe('resolveInitSeed — suppress-attribution seeding (D27)', () => {
     const manifest = makeManifest({
       features: { ...makeManifest().features, flags: { 'suppress-attribution': false } },
     });
-    const seed = resolveInitSeed(manifest, null, settings, DEVFLOW_PLUGINS);
+    const seed = resolveInitSeed(manifest, settings, DEVFLOW_PLUGINS);
     expect(seed.flags['suppress-attribution']).toBe(false);
   });
 
   it('--reset → suppress-attribution defaults to false even when settings has exact shape', () => {
     const settings = JSON.stringify({ attribution: { commit: '', pr: '' } });
-    const { seedManifest, seedConfig, seedSettings } = resolveResetGatedInputs(
+    const { seedManifest, seedSettings } = resolveResetGatedInputs(
       true, makeManifest(), null, settings,
     );
-    const seed = resolveInitSeed(seedManifest, seedConfig, seedSettings, DEVFLOW_PLUGINS);
+    const seed = resolveInitSeed(seedManifest, seedSettings, DEVFLOW_PLUGINS);
     expect(seed.flags['suppress-attribution']).toBe(false);
   });
 
@@ -1180,7 +1121,7 @@ describe('resolveInitSeed — suppress-attribution seeding (D27)', () => {
     const manifest = makeManifest({
       features: { ...makeManifest().features, flags: { 'suppress-attribution': null, tui: true } },
     });
-    const seed = resolveInitSeed(manifest, null, JSON.stringify({}), DEVFLOW_PLUGINS);
+    const seed = resolveInitSeed(manifest, JSON.stringify({}), DEVFLOW_PLUGINS);
     expect(seed.flags['suppress-attribution']).toBe(false);
     // Non-vacuity (PF-018): neighbouring flag from prior manifest survives unchanged.
     expect(seed.flags['tui']).toBe(true);

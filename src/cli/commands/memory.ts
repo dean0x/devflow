@@ -4,7 +4,6 @@ import * as path from 'path';
 import * as p from '@clack/prompts';
 import color from 'picocolors';
 import { getClaudeDirectory, getDevFlowDirectory } from '../../targets/claude-code/claude-paths.js';
-import { syncManifestFeature } from '../../core/manifest.js';
 import { writeFileAtomicExclusive } from '../../core/fs-atomic.js';
 import { discoverProjectGitRoots } from '../../targets/claude-code/post-install.js';
 import { getGitRoot } from '../../core/git.js';
@@ -14,7 +13,7 @@ import {
   getPendingTurnsProcessingPath,
 } from '../../core/project-paths.js';
 import type { HookMatcher, Settings } from '../../targets/claude-code/hooks.js';
-import { updateFeature, isFeatureEnabled } from '../../core/feature-config.js';
+import { readMachineFeature, writeMachineFeature } from '../../core/feature-switch.js';
 
 /**
  * Map of hook event type → filename marker for the memory hooks.
@@ -177,6 +176,40 @@ export function countMemoryHooks(input: string | Settings): number {
   return count;
 }
 
+/**
+ * Converge the memory hooks in a settings JSON string to `enabled`. Pure.
+ *
+ * D-FEATURES-MACHINE-WIDE: the ONE settings transform for the memory feature,
+ * shared by `devflow init` (inside its single settings read-modify-write pass)
+ * and `devflow memory --enable/--disable`, so the two controls of the same
+ * machine-wide switch leave settings.json byte-for-byte alike. Always
+ * remove-then-add, which also upgrades an older hook format (e.g. `.sh` →
+ * `run-hook`) in place.
+ *
+ * Stop-array ordering (AC-C2): memory-worker is appended after whatever the
+ * Stop array already holds, so it lands after capture-turn as long as the
+ * capture hooks are registered first — init registers them earlier in the same
+ * pass, and on a standalone toggle they are already present.
+ */
+export function convergeMemoryHooks(settingsJson: string, enabled: boolean, devflowDir: string): string {
+  const cleaned = removeMemoryHooks(settingsJson);
+  return enabled ? addMemoryHooks(cleaned, devflowDir) : cleaned;
+}
+
+/**
+ * Drain a project's pending memory queue (and a claimed batch) so stale turns
+ * are not processed when memory is next switched on. Shared by `devflow init
+ * --no-memory` and `devflow memory --disable`. ENOENT-tolerant; any other
+ * error propagates to the command boundary, like drainLearningQueue.
+ */
+export async function drainMemoryQueue(projectRoot: string): Promise<void> {
+  const ignoreMissing = (e: NodeJS.ErrnoException): void => { if (e.code !== 'ENOENT') throw e; };
+  await Promise.all([
+    fs.unlink(getPendingTurnsPath(projectRoot)).catch(ignoreMissing),
+    fs.unlink(getPendingTurnsProcessingPath(projectRoot)).catch(ignoreMissing),
+  ]);
+}
+
 interface MemoryOptions {
   enable?: boolean;
   disable?: boolean;
@@ -241,8 +274,8 @@ export async function cleanQueueFiles(projectPaths: string[]): Promise<{ cleaned
 
 export const memoryCommand = new Command('memory')
   .description('Enable, disable, or clean up working memory (session context preservation)')
-  .option('--enable', 'Enable working memory')
-  .option('--disable', 'Disable working memory')
+  .option('--enable', 'Enable working memory in every project')
+  .option('--disable', 'Disable working memory in every project')
   .option('--status', 'Show current state')
   .option('--clear', 'Clean up queue files from projects')
   .action(async (options: MemoryOptions) => {
@@ -250,8 +283,8 @@ export const memoryCommand = new Command('memory')
     if (!hasFlag) {
       p.intro(color.bgCyan(color.white(' Working Memory ')));
       p.note(
-        `${color.cyan('devflow memory --enable')}   Add memory hooks\n` +
-        `${color.cyan('devflow memory --disable')}  Remove memory hooks\n` +
+        `${color.cyan('devflow memory --enable')}   Enable working memory (every project)\n` +
+        `${color.cyan('devflow memory --disable')}  Disable working memory (every project)\n` +
         `${color.cyan('devflow memory --status')}   Check current state\n` +
         `${color.cyan('devflow memory --clear')}    Clean up queue files`,
         'Usage',
@@ -318,89 +351,72 @@ export const memoryCommand = new Command('memory')
       return;
     }
 
-    const claudeDir = getClaudeDirectory();
-    const settingsPath = path.join(claudeDir, 'settings.json');
+    const settingsPath = path.join(getClaudeDirectory(), 'settings.json');
+    const devflowDir = getDevFlowDirectory();
 
     let settingsContent: string;
     try {
       settingsContent = await fs.readFile(settingsPath, 'utf-8');
     } catch {
-      if (options.status) {
-        p.log.info('Working memory: disabled (no settings.json found)');
-        return;
-      }
-      // Create minimal settings.json
       settingsContent = '{}';
     }
 
-    // Resolve current project root for feature config
-    const gitRoot = await getGitRoot();
-
     if (options.status) {
-      if (!gitRoot) {
-        p.log.info(`Working memory: ${color.dim('disabled')} (not in a git project)`);
-        return;
-      }
+      // D-FEATURES-MACHINE-WIDE: one switch, the manifest's. The hook count is
+      // reported beside it because the hooks are how that switch takes effect.
+      const enabled = await readMachineFeature(devflowDir, 'memory');
       const count = countMemoryHooks(settingsContent);
       const total = Object.keys(MEMORY_HOOK_CONFIG).length;
-      // Also check feature config: hooks may be registered but feature toggled off
-      const featureEnabled = await isFeatureEnabled(gitRoot, 'memory');
-      if (count === total && featureEnabled) {
+      if (enabled && count === total) {
         p.log.info(`Working memory: ${color.green('enabled')} (${total}/${total} hooks)`);
-      } else if (count === 0 || !featureEnabled) {
+      } else if (!enabled) {
         p.log.info(`Working memory: ${color.dim('disabled')}`);
       } else {
-        p.log.info(`Working memory: ${color.yellow(`partial (${count}/${total} hooks)`)} — run --enable to fix`);
+        p.log.info(
+          `Working memory: ${color.yellow(`enabled, but ${count}/${total} hooks registered`)} — ` +
+          `run ${color.cyan('devflow memory --enable')} to fix`,
+        );
       }
       return;
     }
 
-    const devflowDir = getDevFlowDirectory();
-
-    if (options.enable) {
-      // D: --enable both installs hooks AND writes feature config, while --disable only
-      // writes feature config. This asymmetry is intentional: capture hooks are shared
-      // across features (memory, learning, decisions) and must never be removed by a
-      // single-feature disable. --enable must still install them on first use.
-      const alreadyHasHooks = hasMemoryHooks(settingsContent);
-      const alreadyEnabled = alreadyHasHooks && (gitRoot ? await isFeatureEnabled(gitRoot, 'memory') : false);
-      if (alreadyEnabled) {
-        p.log.info('Working memory already enabled');
-      } else if (alreadyHasHooks) {
-        // Hooks are registered but config has memory:false — re-enable via config
-        p.log.success('Working memory enabled — configuration updated');
-        p.log.info(color.dim('Session context will be automatically preserved across conversations'));
-      } else {
-        const updated = addMemoryHooks(settingsContent, devflowDir);
-        await writeFileAtomicExclusive(settingsPath, updated);
-        p.log.success('Working memory enabled — hooks registered');
-        p.log.info(color.dim('Session context will be automatically preserved across conversations'));
-      }
-      // Update config to enable memory feature. The write keeps every unmanaged
-      // key (D-CONFIG-PRESERVE-UNMANAGED).
-      if (gitRoot) {
-        await updateFeature(gitRoot, 'memory', true);
-      }
-      await syncManifestFeature(getDevFlowDirectory(), 'memory', true);
+    // --enable / --disable: the machine-wide switch, converged exactly as
+    // `devflow init --memory / --no-memory` converges it (D-FEATURES-MACHINE-WIDE).
+    // The settings transform runs FIRST: it is the step that can reject its
+    // input (malformed JSON), and the switch must not be recorded unless the
+    // hooks that enact it can follow.
+    const enabled = options.enable === true;
+    let converged: string;
+    try {
+      converged = convergeMemoryHooks(settingsContent, enabled, devflowDir);
+    } catch (err) {
+      p.log.error(`Could not update ${settingsPath}: ${err instanceof Error ? err.message : String(err)}`);
+      process.exitCode = 1;
       return;
     }
 
-    if (options.disable) {
-      // Hooks remain registered (shared with other features).
-      // Disable by writing memory: false to config only — hooks are not removed.
-      // The write keeps every unmanaged key (D-CONFIG-PRESERVE-UNMANAGED).
-      if (gitRoot) {
-        await updateFeature(gitRoot, 'memory', false);
-        // Drain orphaned queue files so stale turns don't process on re-enable
-        await Promise.all([
-          fs.unlink(getPendingTurnsPath(gitRoot)).catch((e: NodeJS.ErrnoException) => { if (e.code !== 'ENOENT') throw e; }),
-          fs.unlink(getPendingTurnsProcessingPath(gitRoot)).catch((e: NodeJS.ErrnoException) => { if (e.code !== 'ENOENT') throw e; }),
-        ]);
-        await syncManifestFeature(getDevFlowDirectory(), 'memory', false);
-        p.log.success('Working memory disabled — configuration updated');
-      } else {
-        p.log.warn('Could not resolve git root — configuration not updated');
-      }
+    const recorded = await writeMachineFeature(devflowDir, 'memory', enabled);
+    if (!recorded.ok) {
+      p.log.error(`Devflow is not installed on this machine — run ${color.cyan('devflow init')} first`);
+      process.exitCode = 1;
       return;
     }
+
+    if (converged !== settingsContent) {
+      await writeFileAtomicExclusive(settingsPath, converged);
+    }
+
+    if (enabled) {
+      p.log.success('Working memory enabled in every project');
+      p.log.info(color.dim('Session context will be automatically preserved across conversations'));
+      return;
+    }
+
+    // Drain the current project's queue, as init does. Outside a git project
+    // there is no project queue to drain, and the switch itself still applies.
+    const gitRoot = await getGitRoot();
+    if (gitRoot) {
+      await drainMemoryQueue(gitRoot);
+    }
+    p.log.success('Working memory disabled in every project');
   });

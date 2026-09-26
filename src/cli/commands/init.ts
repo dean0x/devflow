@@ -32,7 +32,7 @@ import { LEGACY_SKILL_NAMES } from '../../targets/claude-code/legacy.js';
 import { detectPlatform, detectShell, getProfilePath, getSafeDeleteInfo, hasSafeDelete } from '../../core/safe-delete.js';
 import { generateSafeDeleteBlock, installToProfile, removeFromProfile, getInstalledVersion, SAFE_DELETE_BLOCK_VERSION } from '../../core/safe-delete-install.js';
 import { addAmbientHook, removeAmbientHook } from './ambient.js';
-import { addMemoryHooks, removeMemoryHooks } from './memory.js';
+import { convergeMemoryHooks, drainMemoryQueue } from './memory.js';
 import { addCaptureHooks, removeCaptureHooks } from './capture.js';
 import { removeDreamHook } from './legacy-hooks.js';
 import { addProxyHooks, removeProxyHooks, applyProxyEnv, stripProxyEnv, runProxyPreflight, buildRealPreflightDeps } from './proxy.js';
@@ -87,7 +87,6 @@ import {
   attributionSeedFrom,
 } from './attribution-prompts.js';
 import { convergeFromManifest } from '../../targets/claude-code/compliance-install.js';
-import { getPendingTurnsPath, getPendingTurnsProcessingPath } from '../../core/project-paths.js';
 import * as os from 'os';
 
 // Re-export pure functions for tests (canonical source is post-install.ts)
@@ -561,24 +560,6 @@ interface InitOptions {
 }
 
 /**
- * The Recommended-summary value for a feature under the machine-wide switch
- * (D-LEARNING-MASTER-SWITCH). Pure. init sets the switch for EVERY project, so
- * "disabled" says so; and when the switch is on but the project init runs in has
- * turned the feature off for itself (`repo === false`), a bare "enabled" would be
- * untrue here, so the line names the per-repo command that turns it back on.
- * `repo` is null when the project has no config (the feature follows the switch).
- */
-export function formatMachineSwitchSummary(
-  machineWide: boolean,
-  repo: boolean | null,
-  repoEnableCommand: string,
-): string {
-  if (!machineWide) return 'disabled in every project';
-  if (repo === false) return `enabled (off in this project — ${repoEnableCommand})`;
-  return 'enabled';
-}
-
-/**
  * The manifest `devflow init --hud-only` writes. Pure — never mutates `existing`.
  *
  * D-HUD-ONLY-PRESERVE: over a prior install, --hud-only installs the HUD and
@@ -587,9 +568,9 @@ export function formatMachineSwitchSummary(
  * earlier shape rewrote the whole record as a HUD-only fresh install (ambient,
  * memory, learning, knowledge, rules and proxy all `false`, plugins `[]`) while
  * leaving those features' artifacts on disk: the record stopped describing the
- * machine, the next re-init seeded every feature off (ADR-014), and with the
- * learning/knowledge values now the machine-wide master switch
- * (D-LEARNING-MASTER-SWITCH) a HUD install would have really disabled them
+ * machine, the next re-init seeded every feature off (ADR-014), and with
+ * memory/learning/knowledge switched by the manifest alone
+ * (D-FEATURES-MACHINE-WIDE) a HUD install would have really disabled them
  * everywhere. `version` is kept too: --hud-only reinstalls no plugin, and a
  * bumped version would make the next init skip the upgrade it still owes.
  *
@@ -781,7 +762,7 @@ export const initCommand = new Command('init')
     const { seedManifest, seedConfig, seedSettings } = resolveResetGatedInputs(
       !!options.reset, existingManifest, earlyProjectConfig, earlySettingsJson ?? '',
     );
-    const seed = resolveInitSeed(seedManifest, seedConfig, seedSettings, DEVFLOW_PLUGINS);
+    const seed = resolveInitSeed(seedManifest, seedSettings, DEVFLOW_PLUGINS);
 
     // Early validation: parse --compliance <list> at the boundary before any prompts (PF-parse-at-boundary).
     // options.compliance: string → --compliance <list>; false → --no-compliance; undefined → not passed
@@ -1168,10 +1149,10 @@ export const initCommand = new Command('init')
       const summaryLines = [
         `Ambient mode:    ${ambientEnabled ? 'enabled' : 'disabled'}`,
         `Working memory:  ${memoryEnabled ? 'enabled' : 'disabled'}`,
-        `Learning:        ${formatMachineSwitchSummary(learningEnabled, seedConfig?.learning ?? null, 'devflow learning --enable')}`,
+        `Learning:        ${learningEnabled ? 'enabled' : 'disabled'}`,
         `Rules:           ${rulesEnabled ? 'enabled' : 'disabled'}`,
         `HUD:             ${hudEnabled ? 'enabled' : 'disabled'}`,
-        `Knowledge bases: ${formatMachineSwitchSummary(knowledgeEnabled, seedConfig?.knowledge ?? null, 'devflow knowledge --enable')}`,
+        `Knowledge bases: ${knowledgeEnabled ? 'enabled' : 'disabled'}`,
         `Ext model routing: ${proxyEnabled ? 'enabled' : 'disabled'}`,
         `Compliance:      ${complianceSummary}`,
         // Recommended emits no per-step outcome lines, so this summary row is the
@@ -1229,7 +1210,8 @@ export const initCommand = new Command('init')
           'compaction. Clear your session at any point and resume right\n' +
           'where you left off.\n\n' +
           'Runs a background agent on session stop that consumes additional\n' +
-          'tokens. Consider skipping if token usage is a concern.',
+          'tokens. Consider skipping if token usage is a concern.\n' +
+          'Applies to every project.',
           'Working Memory',
         );
         const memoryChoice = await p.confirm({
@@ -1268,9 +1250,8 @@ export const initCommand = new Command('init')
         p.note(
           'Per-feature knowledge bases capture cross-cutting patterns,\n' +
           'conventions, and gotchas. Created and updated automatically\n' +
-          'when workflows touch a documented area (write-through model).\n\n' +
-          'Applies to every project; turn it off for one project with\n' +
-          'devflow knowledge --disable.',
+          'when workflows touch a documented area (write-through model).\n' +
+          'Applies to every project.',
           'Feature Knowledge Bases',
         );
         const knowledgeChoice = await p.confirm({
@@ -1290,9 +1271,7 @@ export const initCommand = new Command('init')
         p.note(
           'Detects architectural decisions and pitfalls from your session\n' +
           'dialogs. Runs a background agent on session stop that consumes\n' +
-          'additional tokens.\n\n' +
-          'Applies to every project; turn it off for one project with\n' +
-          'devflow learning --disable.',
+          'additional tokens. Applies to every project.',
           'Learning (Decision/Pitfall Tracking)',
         );
         const learningChoice = await p.confirm({
@@ -2092,19 +2071,19 @@ export const initCommand = new Command('init')
 
       // Capture hooks — always-on (like the context hook below), remove-then-add for
       // upgrade safety. Queue-append only (capture-prompt/capture-turn/capture-question);
-      // each script gates its own per-queue write internally via feature config, so there
-      // is no CLI-level enable/disable toggle here. MUST run before addMemoryHooks below
+      // each script gates its own per-queue write on the machine-wide switch, so there
+      // is no CLI-level enable/disable toggle here. MUST run before convergeMemoryHooks below
       // so capture-turn lands before memory-worker in the Stop array (AC-C2 ordering:
       // append-before-spawn).
       const cleanedForCapture = removeCaptureHooks(content);
       content = addCaptureHooks(cleanedForCapture, devflowDir);
 
-      // Memory hooks — always remove-then-add to upgrade hook format (e.g., .sh → run-hook).
-      // Three hooks: Stop (memory-worker), SessionStart (session-start-memory), PreCompact.
-      // Learning agent (spawned via session-start-context directive) handles decision/pitfall
-      // detection. Knowledge is handled in-command via write-through (knowledge_writeback MDS partial).
-      const cleaned = removeMemoryHooks(content);
-      content = memoryEnabled ? addMemoryHooks(cleaned, devflowDir) : cleaned;
+      // Memory hooks — Stop (memory-worker), SessionStart (session-start-memory),
+      // PreCompact — through the same transform `devflow memory --enable/--disable`
+      // uses (D-FEATURES-MACHINE-WIDE). Learning agent (spawned via
+      // session-start-context directive) handles decision/pitfall detection.
+      // Knowledge is handled in-command via write-through (knowledge_writeback MDS partial).
+      content = convergeMemoryHooks(content, memoryEnabled, devflowDir);
 
       // HUD statusLine
       content = hudEnabled
@@ -2183,43 +2162,30 @@ export const initCommand = new Command('init')
       );
     }
 
-    // Write .devflow/config.json to manage per-feature enable/disable at runtime.
-    // A managed read-modify-write, not a whole-file write: init owns only these four
-    // keys, and every other key in the file — the hand-written per-repo `tracker`
+    // Write .devflow/config.json — facts about this repo, never a feature switch
+    // (memory/learning/knowledge are the manifest's alone, D-FEATURES-MACHINE-WIDE;
+    // the managed write drops their retired per-repo keys). A managed
+    // read-modify-write, not a whole-file write: init owns only reviewPublication,
+    // and every other key in the file — the hand-written per-repo `tracker`
     // override first among them — is carried from disk, under --reset too
-    // (D-CONFIG-PRESERVE-UNMANAGED in feature-config.ts, avoids PF-071). init is never
-    // concurrent with the toggle commands; see D1 in feature-config.ts.
+    // (D-CONFIG-PRESERVE-UNMANAGED in feature-config.ts, avoids PF-071).
     if (gitRoot) {
       await writeManagedConfig(gitRoot, {
-        memory: memoryEnabled,
-        // D-INIT-REPO-SWITCH-PRESERVE: learning/knowledge in the manifest are the
-        // machine-wide master switch (D-LEARNING-MASTER-SWITCH), so init records
-        // its choice THERE and carries this repo's own per-repo value over, the
-        // way reviewPublication is carried. Writing the machine-wide choice into
-        // the one repo init ran in would conflate the two switches: a later
-        // `init --learning` from another repo would leave this one silently off,
-        // and an `init` here would erase a `devflow learning --disable`.
-        learning: seedConfig?.learning ?? DEFAULT_CONFIG.learning,
-        knowledge: seedConfig?.knowledge ?? DEFAULT_CONFIG.knowledge,
         // reviewPublication has no prompt, so it is carried over from the
         // reset-gated snapshot rather than re-read from disk: seedConfig is null
         // under --reset, which is what collapses the field back to 'auto' with
         // every other feature (PF-015 — read the post-gate binding, not the file).
-        reviewPublication: seedConfig?.reviewPublication ?? 'auto',
+        reviewPublication: seedConfig?.reviewPublication ?? DEFAULT_CONFIG.reviewPublication,
       });
 
-      // Drain orphaned queue files when memory is disabled so stale turns
-      // don't process on a future re-enable. Mirrors memory.ts --disable drain.
+      // Drain this repo's queues when their feature is off, so stale turns are
+      // not processed on a future re-enable — the same drains `devflow memory
+      // --disable` and `devflow learning --disable` perform. (Other repos'
+      // queues are inert: every gate reads the machine-wide switch, so nothing
+      // appends to or processes them while the feature is off.)
       if (!memoryEnabled) {
-        await Promise.all([
-          fs.unlink(getPendingTurnsPath(gitRoot)).catch((e: NodeJS.ErrnoException) => { if (e.code !== 'ENOENT') throw e; }),
-          fs.unlink(getPendingTurnsProcessingPath(gitRoot)).catch((e: NodeJS.ErrnoException) => { if (e.code !== 'ENOENT') throw e; }),
-        ]);
+        await drainMemoryQueue(gitRoot);
       }
-      // Same for learning: this repo's queue would otherwise sit waiting and be
-      // processed the moment learning is re-enabled. Mirrors `devflow learning
-      // --disable`. (Other repos' queues are inert: every gate now reads the
-      // machine-wide switch, so nothing drains or appends to them while off.)
       if (!learningEnabled) {
         await drainLearningQueue(gitRoot);
       }

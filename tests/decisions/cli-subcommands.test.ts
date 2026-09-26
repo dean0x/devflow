@@ -52,12 +52,12 @@ import {
   type LearningObservation,
 } from '../../src/core/observations.js';
 import { getGitRoot } from '../../src/core/git.js';
+import { getDevFlowDirectory } from '../../src/targets/claude-code/claude-paths.js';
 import { learningCommand } from '../../src/cli/commands/learning.js';
 import * as p from '@clack/prompts';
 import {
   getLearningPendingTurnsPath,
   getLearningPendingTurnsProcessingPath,
-  getFeatureConfigPath,
   getPendingTurnsPath,
   getDecisionsLogPath,
 } from '../../src/core/project-paths.js';
@@ -370,17 +370,33 @@ describe('learning --reset success message', () => {
 });
 
 // ---------------------------------------------------------------------------
-// --disable drains the learning (decisions-detection) pending-turns queue —
-// mirrors memory.ts's drain-on-disable behavior for the sibling memory queue.
-// Unconditional: a mid-run Learning agent whose claimed batch vanishes aborts
-// without changes, which is the desired outcome of disabling.
+// --disable switches learning off machine-wide (D-FEATURES-MACHINE-WIDE) and
+// drains the current project's learning (decisions-detection) pending-turns
+// queue — mirrors memory.ts's drain-on-disable behavior for the sibling memory
+// queue. Unconditional: a mid-run Learning agent whose claimed batch vanishes
+// aborts without changes, which is the desired outcome of disabling.
 // ---------------------------------------------------------------------------
 
 describe('learning --disable drains the learning pending-turns queue', () => {
   let tmpDir: string;
+  let devflowDir: string;
+
+  /** The machine-wide switch, as the command left it. */
+  function readLearningSwitch(): unknown {
+    return (JSON.parse(fs.readFileSync(path.join(devflowDir, 'manifest.json'), 'utf-8')) as {
+      features: Record<string, unknown>;
+    }).features.learning;
+  }
 
   beforeEach(() => {
     tmpDir = makeTmpDir();
+    // A scratch devflow root with an installed manifest — never the real one.
+    devflowDir = makeTmpDir();
+    fs.writeFileSync(path.join(devflowDir, 'manifest.json'), JSON.stringify({
+      version: '2.0.0', plugins: [], scope: 'user', features: { ambient: true, memory: true, learning: true },
+      installedAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z',
+    }));
+    vi.mocked(getDevFlowDirectory).mockReturnValue(devflowDir);
     vi.mocked(getGitRoot).mockResolvedValue(tmpDir);
     // Commander retains _optionValues across repeated parseAsync() calls on the
     // same Command instance (no built-in reset between calls). Production always
@@ -390,7 +406,9 @@ describe('learning --disable drains the learning pending-turns queue', () => {
   });
 
   afterEach(() => {
+    vi.mocked(getDevFlowDirectory).mockReturnValue('/home/user/.devflow');
     fs.rmSync(tmpDir, { recursive: true, force: true });
+    fs.rmSync(devflowDir, { recursive: true, force: true });
   });
 
   function writeDreamQueueFiles(root: string): void {
@@ -399,7 +417,7 @@ describe('learning --disable drains the learning pending-turns queue', () => {
     fs.writeFileSync(getLearningPendingTurnsProcessingPath(root), '{"role":"user"}\n');
   }
 
-  it('deletes queue + processing files and flips config (memory queue untouched)', async () => {
+  it('deletes queue + processing files and switches learning off machine-wide (memory queue untouched)', async () => {
     writeDreamQueueFiles(tmpDir);
     fs.mkdirSync(path.join(tmpDir, '.devflow', 'memory'), { recursive: true });
     fs.writeFileSync(getPendingTurnsPath(tmpDir), '{"role":"user"}\n');
@@ -409,14 +427,15 @@ describe('learning --disable drains the learning pending-turns queue', () => {
     expect(fs.existsSync(getLearningPendingTurnsPath(tmpDir))).toBe(false);
     expect(fs.existsSync(getLearningPendingTurnsProcessingPath(tmpDir))).toBe(false);
 
-    const config = JSON.parse(fs.readFileSync(getFeatureConfigPath(tmpDir), 'utf-8'));
-    expect(config.learning).toBe(false);
+    expect(readLearningSwitch()).toBe(false);
+    // The retired per-repo key is never written.
+    expect(fs.existsSync(path.join(tmpDir, '.devflow', 'config.json'))).toBe(false);
 
     // The sibling memory queue is never touched by decisions --disable
     expect(fs.existsSync(getPendingTurnsPath(tmpDir))).toBe(true);
   });
 
-  it('does not create a .disabled sentinel (gate is config-only)', async () => {
+  it('does not create a .disabled sentinel (the gate is the manifest)', async () => {
     writeDreamQueueFiles(tmpDir);
 
     await learningCommand.parseAsync(['--disable'], { from: 'user' });
@@ -433,8 +452,7 @@ describe('learning --disable drains the learning pending-turns queue', () => {
     expect(fs.existsSync(getLearningPendingTurnsPath(tmpDir))).toBe(false);
     expect(fs.existsSync(getLearningPendingTurnsProcessingPath(tmpDir))).toBe(false);
 
-    const config = JSON.parse(fs.readFileSync(getFeatureConfigPath(tmpDir), 'utf-8'));
-    expect(config.learning).toBe(false);
+    expect(readLearningSwitch()).toBe(false);
   });
 
   it('does not delete anything on --enable', async () => {
@@ -444,6 +462,15 @@ describe('learning --disable drains the learning pending-turns queue', () => {
 
     expect(fs.existsSync(getLearningPendingTurnsPath(tmpDir))).toBe(true);
     expect(fs.existsSync(getLearningPendingTurnsProcessingPath(tmpDir))).toBe(true);
+    expect(readLearningSwitch()).toBe(true);
+  });
+
+  it('switches learning off outside a git project too (the switch is not per-project)', async () => {
+    vi.mocked(getGitRoot).mockResolvedValue(null);
+
+    await learningCommand.parseAsync(['--disable'], { from: 'user' });
+
+    expect(readLearningSwitch()).toBe(false);
   });
 
   it('drains the resolved git-root paths, not process.cwd() (regression for the cwd class)', async () => {

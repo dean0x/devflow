@@ -1,12 +1,11 @@
 /**
- * Pure helpers behind init's machine-wide learning/knowledge switch (#378):
- * the --hud-only manifest (D-HUD-ONLY-PRESERVE) and the Recommended summary
- * wording (D-LEARNING-MASTER-SWITCH). The end-to-end behaviour is pinned in
- * init-machine-switch-e2e.test.ts; these cover the arms a sandboxed CLI run
- * cannot reach cheaply.
+ * The pure --hud-only manifest (D-HUD-ONLY-PRESERVE) behind init's
+ * machine-wide feature record (#378, D-FEATURES-MACHINE-WIDE). The end-to-end
+ * behaviour is pinned in init-machine-switch-e2e.test.ts; these cover the arms a
+ * sandboxed CLI run cannot reach cheaply.
  */
 import { describe, it, expect } from 'vitest';
-import { buildHudOnlyManifest, formatMachineSwitchSummary } from '../src/cli/commands/init.js';
+import { buildHudOnlyManifest } from '../src/cli/commands/init.js';
 import type { ManifestData } from '../src/core/manifest.js';
 
 const NOW = '2026-09-26T00:00:00.000Z';
@@ -58,27 +57,5 @@ describe('buildHudOnlyManifest', () => {
     });
     expect(result.features.tracker.provider).toBe('github');
     expect(result.features.compliance).toEqual({ enabled: false, frameworks: [] });
-  });
-});
-
-describe('formatMachineSwitchSummary', () => {
-  const CMD = 'devflow learning --enable';
-
-  it('a machine-wide off says so, whatever the project says', () => {
-    expect(formatMachineSwitchSummary(false, true, CMD)).toBe('disabled in every project');
-    expect(formatMachineSwitchSummary(false, null, CMD)).toBe('disabled in every project');
-    expect(formatMachineSwitchSummary(false, false, CMD)).toBe('disabled in every project');
-  });
-
-  it('on machine-wide but off in this project names the per-repo command', () => {
-    const line = formatMachineSwitchSummary(true, false, CMD);
-    expect(line).toContain('enabled');
-    expect(line).toContain('off in this project');
-    expect(line).toContain(CMD);
-  });
-
-  it('on machine-wide and not narrowed here is plainly enabled', () => {
-    expect(formatMachineSwitchSummary(true, true, CMD)).toBe('enabled');
-    expect(formatMachineSwitchSummary(true, null, CMD)).toBe('enabled');
   });
 });
