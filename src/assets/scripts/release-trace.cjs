@@ -163,8 +163,9 @@ const GRAMMAR_NAMES = Object.freeze(/** @type {Grammar[]} */ (['github', 'jira',
  *   release  the `/release` commit's strict subject, or a commit whose changed
  *            paths are ALL named CHANGELOG.md — and there is at least one: an
  *            empty commit is never "CHANGELOG-only" (D-TRACE-EXEMPT-EMPTY)
- *   revert   a `Revert "…"` subject AND a message naming what it reverts, in
- *            git's own words or GitHub's revert-PR body
+ *   revert   a `Revert "…"` subject AND a body naming what it reverts, in git's
+ *            own words or GitHub's revert-PR body — the body alone, never the
+ *            subject paragraph (D-TRACE-REVERT-BODY)
  *   bot      a `[bot]` author name AND a GitHub noreply bot address (D3)
  */
 const EXEMPT = Object.freeze({
@@ -407,6 +408,29 @@ function findReference(message, grammar, key) {
   return null;
 }
 
+/** A line git treats as blank when it splits a message: empty or ASCII whitespace only. */
+const BLANK_LINE_RE = /^[ \t\v\f\r]*$/;
+
+/**
+ * D-TRACE-REVERT-BODY: the body of a `%B` message, split as git splits it —
+ * leading blank lines skipped, the subject paragraph ended by the first blank
+ * line, the body everything after that line — or '' when there is none.
+ *
+ * The revert rule keys on the line git GENERATES in a revert's body. Since the
+ * scan reads the whole message (D-TRACE-FULL-MESSAGE), testing the message would
+ * let a body-less commit whose subject quotes that line pass as a revert.
+ *
+ * @param {string} message
+ * @returns {string}
+ */
+function messageBody(message) {
+  const lines = message.split('\n');
+  let i = 0;
+  while (i < lines.length && BLANK_LINE_RE.test(lines[i])) i++;
+  while (i < lines.length && !BLANK_LINE_RE.test(lines[i])) i++;
+  return lines.slice(i + 1).join('\n');
+}
+
 /**
  * D-TRACE-EXEMPT-EMPTY: at least one path, and every one named CHANGELOG.md.
  *
@@ -431,8 +455,9 @@ function classify(commit, ctx) {
   if (ctx.traced.has(commit.sha)) return 'traced';
   if (findReference(commit.message, ctx.grammar, ctx.key) !== null) return 'traced';
   if (EXEMPT.release.subject.test(commit.subject) || isChangelogOnly(commit.paths)) return 'exempt:release';
-  if (EXEMPT.revert.subject.test(commit.subject) && EXEMPT.revert.body.some(re => re.test(commit.message))) {
-    return 'exempt:revert';
+  if (EXEMPT.revert.subject.test(commit.subject)) {
+    const body = messageBody(commit.message);
+    if (EXEMPT.revert.body.some(re => re.test(body))) return 'exempt:revert';
   }
   if (commit.name.endsWith(EXEMPT.bot.nameSuffix) && EXEMPT.bot.email.test(commit.email)) return 'exempt:bot';
   return 'untraced';

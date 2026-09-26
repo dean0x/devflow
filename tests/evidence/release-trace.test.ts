@@ -260,6 +260,9 @@ function fakeGit(o: { revParse?: ExecResult; revList?: ExecResult; messages?: Ex
 const commitOf = (over: Partial<Commit>): Commit => ({
   sha: SHA_A, name: 'Dev', email: 'dev@example.invalid', subject: 'feat: something', message: '', paths: ['src/a.js'], ...over,
 })
+/** A commit as `%s` and `%B` render it: the subject, then — when there is one — a blank line and the body. */
+const revertOf = (subject: string, body: string): Commit =>
+  commitOf({ subject, message: body === '' ? `${subject}\n` : `${subject}\n\n${body}` })
 const ctxOf = (grammar: Grammar = 'github', key: string | null = null, traced: readonly string[] = []) =>
   ({ grammar, key, traced: new Set(traced) })
 
@@ -402,19 +405,24 @@ describe('classify — first match wins, terminal arm untraced', () => {
     ['a lowercase changelog.md', commitOf({ paths: ['changelog.md'] }), 'untraced'],
     ['a CHANGELOG.md.bak', commitOf({ paths: ['CHANGELOG.md.bak'] }), 'untraced'],
     ['an empty commit is never CHANGELOG-only', commitOf({ paths: [] }), 'untraced'],
-    ['git revert', commitOf({ subject: 'Revert "feat: x"', message: `This reverts commit ${SHA_C}.\n` }), 'exempt:revert'],
-    ['GitHub revert PR', commitOf({ subject: 'Revert "feat: x" (#21)', message: 'Reverts owner/repo#20\n' }), 'exempt:revert'],
-    ['subject-only revert', commitOf({ subject: 'Revert "feat: x"' }), 'untraced'],
-    ['body-only revert', commitOf({ message: `This reverts commit ${SHA_C}.` }), 'untraced'],
-    ['revert naming a short SHA', commitOf({ subject: 'Revert "feat: x"', message: 'This reverts commit abc1234.' }), 'untraced'],
+    ['git revert', revertOf('Revert "feat: x"', `This reverts commit ${SHA_C}.\n`), 'exempt:revert'],
+    ['GitHub revert PR', revertOf('Revert "feat: x" (#21)', 'Reverts owner/repo#20\n'), 'exempt:revert'],
+    ['subject-only revert', revertOf('Revert "feat: x"', ''), 'untraced'],
+    ['body-only revert', revertOf('feat: something', `This reverts commit ${SHA_C}.`), 'untraced'],
+    ['revert naming a short SHA', revertOf('Revert "feat: x"', 'This reverts commit abc1234.'), 'untraced'],
+    ['a body-less revert whose SUBJECT names the commit', revertOf(`Revert "This reverts commit ${SHA_C}"`, ''), 'untraced'],
+    ['a body-less revert whose SUBJECT names the PR', revertOf('Revert "Reverts owner/repo#20"', ''), 'untraced'],
+    ['a revert whose body follows a whitespace-only separator line', commitOf({
+      subject: 'Revert "feat: x"', message: `Revert "feat: x"\n \t\nThis reverts commit ${SHA_C}.\n`,
+    }), 'exempt:revert'],
     ['bot with a numeric noreply', commitOf(BOT), 'exempt:bot'],
     ['bot with a bare noreply', commitOf({ name: 'dependabot[bot]', email: 'dependabot[bot]@users.noreply.github.com' }), 'exempt:bot'],
     ['[bot] name, foreign e-mail', commitOf({ name: 'evil[bot]', email: 'evil[bot]@example.com' }), 'untraced'],
     ['noreply bot e-mail, name without [bot]', commitOf({ name: 'renovate', email: 'renovate[bot]@users.noreply.github.com' }), 'untraced'],
     ['[bot] name, human noreply', commitOf({ name: 'x[bot]', email: '123+octocat@users.noreply.github.com' }), 'untraced'],
     ['order: a CHANGELOG-only bot commit (1a8ac476\'s shape) is release', commitOf({ ...BOT, paths: ['CHANGELOG.md'] }), 'exempt:release'],
-    ['order: a traced revert is traced', commitOf({ subject: 'Revert "x"', message: `This reverts commit ${SHA_C}.\nRefs #9` }), 'traced'],
-    ['order: a revert by a bot is revert', commitOf({ ...BOT, subject: 'Revert "x"', message: `This reverts commit ${SHA_C}.` }), 'exempt:revert'],
+    ['order: a traced revert is traced', revertOf('Revert "x"', `This reverts commit ${SHA_C}.\nRefs #9`), 'traced'],
+    ['order: a revert by a bot is revert', { ...revertOf('Revert "x"', `This reverts commit ${SHA_C}.`), ...BOT }, 'exempt:revert'],
   ] as const)('%s ⇒ %s', (_label, c, expected) => {
     expect(RT.classify(c, ctxOf('github', null, [SHA_B]))).toBe(expected)
   })
@@ -636,6 +644,8 @@ describe('map: one probe per class over a real repository (AC-2)', SPAWN_BUDGET,
     sha.gitRevert = git(repo, ['rev-parse', 'HEAD']).trim()
     sha.githubRevert = commit(repo, { subject: 'Revert "feat: something" (#21)', body: 'Reverts owner/repo#20', files: { r: '1' } })
     sha.subjectOnlyRevert = commit(repo, { subject: 'Revert "feat: other"', files: { r2: '1' } })
+    // The revert rule reads the BODY: a subject naming the reverted commit is not git's revert line.
+    sha.subjectNamesRevert = commit(repo, { subject: `Revert "This reverts commit ${sha.nearMiss}"`, files: { r3: '1' } })
     sha.bot = commit(repo, {
       subject: 'chore: bump deps', files: { deps: '1' },
       author: { name: 'github-actions[bot]', email: '41898282+github-actions[bot]@users.noreply.github.com' },
@@ -681,6 +691,7 @@ describe('map: one probe per class over a real repository (AC-2)', SPAWN_BUDGET,
       gitRevert: 'exempt:revert',
       githubRevert: 'exempt:revert',
       subjectOnlyRevert: 'untraced',
+      subjectNamesRevert: 'untraced',
       bot: 'exempt:bot',
       botBare: 'exempt:bot',
       botForeign: 'untraced',
