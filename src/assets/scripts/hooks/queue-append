@@ -22,13 +22,14 @@
 # queue_append_both <memory_queue> <learning_queue> <memory_enabled> <learning_enabled> <role> <content> <ts>
 #   Calls queue_append_row for each queue whose *_enabled flag is "true". Each
 #   queue is gated independently -- callers compute memory_enabled/learning_enabled
-#   themselves (see queue_read_gates below for the one-fork read of both).
+#   themselves (see queue_read_gates below for the at-most-one-fork read of both).
 #
 # queue_read_gates <manifest_path>
 #   Reads BOTH `features.memory` and `features.learning` from the devflow-global
-#   ~/.devflow/manifest.json in a SINGLE subprocess fork (AC-P1 -- exactly one
-#   gate-read fork per capture hook, not two). Sets _QG_MEMORY and _QG_LEARNING
-#   ("true"/"false") in the caller's scope. The two values are newline-separated
+#   ~/.devflow/manifest.json in at most ONE subprocess fork (AC-P1 -- at most one
+#   gate-read fork per capture hook, not two; none when D-GATES-FAST-PATH
+#   settles it). Sets _QG_MEMORY and _QG_LEARNING ("true"/"false") in the
+#   caller's scope. The two values are newline-separated
 #   rather than using a control-character delimiter: they are always the literal
 #   strings "true"/"false", never arbitrary content, so a plain newline split is
 #   unambiguous and easy to review (no invisible bytes hiding in the source).
@@ -106,11 +107,29 @@ queue_append_both() {
 }
 
 queue_read_gates() {
-  local _qg_manifest="${1:-}"
+  local _qg_manifest="${1:-}" _qg_text="" _qg_parse="false"
   _QG_MEMORY="true"
   _QG_LEARNING="true"
 
   if [ -n "$_qg_manifest" ] && [ -f "$_qg_manifest" ]; then
+    # D-GATES-FAST-PATH: every capture hook and every session start pays this
+    # read, and on most machines both switches are on. Only a JSON boolean
+    # `false` under a "memory", "learning" or "decisions" key can switch anything
+    # off, and a `\u` escape is the only JSON spelling of a letter other than the
+    # letter itself, so without one such a key appears literally. A text holding
+    # no `\u` and no key-then-`false` sequence therefore cannot switch anything
+    # off -- valid or not, it reads both-on either way -- and is settled by shell
+    # builtins (read, case, [[ =~ ]]) with no jq/node fork; everything else takes
+    # the full parse below. `read -d ''` succeeds only on reaching a NUL byte,
+    # i.e. before the end of the file, so a text it cut short is parsed in full
+    # too. An unreadable file reads empty and fails open, as the parser would.
+    local _qg_re='"(memory|learning|decisions)"[[:space:]]*:[[:space:]]*false'
+    IFS= read -r -d '' _qg_text 2>/dev/null < "$_qg_manifest" && _qg_parse="true"
+    case "$_qg_text" in *'\u'*) _qg_parse="true" ;; esac
+    if [[ $_qg_text =~ $_qg_re ]]; then _qg_parse="true"; fi
+  fi
+
+  if [ "$_qg_parse" = "true" ]; then
     local _qg_fields
     if [ "$_HAS_JQ" = "true" ]; then
       # `try` covers a manifest whose top level or `features` is not an object; a

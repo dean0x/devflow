@@ -416,6 +416,49 @@ describe('queue_read_gates', () => {
         expect(gates(manifestWith({ decisions: false, learning: 'yes' }))).toMatchObject({ learning: 'false' });
         expect(gates(manifestWith({ decisions: 'false' }))).toMatchObject({ learning: 'true' });
       }, 15000);
+
+      it('an escaped key still switches off (a \\u escape always takes the full parse)', () => {
+        // JSON.parse and jq decode "memory" to "memory"; the builtin fast
+        // path cannot see through an escape, so it must never decide such a file.
+        const raw = '{"features":{"m\\u0065mory":false,"le\\u0061rning":false}}';
+        expect(gates(raw)).toMatchObject({ memory: 'false', learning: 'false', exitCode: 0 });
+        expect(gates('{"features":{"d\\u0065cisions":false}}')).toMatchObject({ memory: 'true', learning: 'false' });
+      });
+
+      it('forks no parser when no switch can be off, and exactly one when one can (D-GATES-FAST-PATH)', () => {
+        // Every capture hook and session start pays this read. A manifest whose
+        // text holds no `"memory"|"learning"|"decisions": false` cannot switch
+        // anything off, so it is answered by shell builtins alone. The parser is
+        // shadowed by a function that logs each call before running the real one.
+        const forkLog = path.join(tmpDir, 'forks.log');
+        const manifestPath = path.join(tmpDir, 'manifest.json');
+        const parser = backend.noJq ? 'node' : 'jq';
+        const probe = (manifest: string) => {
+          fs.writeFileSync(manifestPath, manifest);
+          fs.rmSync(forkLog, { force: true });
+          const { stdout, exitCode } = runWithQueueAppend(`
+            ${backend.noJq ? '_HAS_JQ=false' : ''}
+            ${parser}() { echo fork >> "${forkLog}"; command ${parser} "$@"; }
+            queue_read_gates "${manifestPath}"
+            echo "MEMORY=$_QG_MEMORY LEARNING=$_QG_LEARNING"
+          `);
+          const forks = fs.existsSync(forkLog) ? fs.readFileSync(forkLog, 'utf-8').trim().split('\n').length : 0;
+          return { stdout, exitCode, forks };
+        };
+
+        // A real manifest carries other `false` values (proxy, compliance.enabled);
+        // they are not switches and must not cost a fork.
+        const on = probe(JSON.stringify({
+          version: '2.0.0',
+          features: { ambient: true, memory: true, learning: true, proxy: false, compliance: { enabled: false } },
+        }, null, 2));
+        expect(on).toMatchObject({ exitCode: 0, forks: 0 });
+        expect(on.stdout).toContain('MEMORY=true LEARNING=true');
+
+        const off = probe(JSON.stringify({ features: { memory: false } }, null, 2));
+        expect(off).toMatchObject({ exitCode: 0, forks: 1 });
+        expect(off.stdout).toContain('MEMORY=false LEARNING=true');
+      });
     });
   }
 
