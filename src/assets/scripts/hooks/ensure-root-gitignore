@@ -64,11 +64,17 @@ _ERG_RE_CLAUDEIGNORE='^[[:space:]]*!?\.claudeignore[[:space:]]*$'
 
 # Fast path: converged only when the marker is stamped AND the block sentinel is
 # present AND the policy line is present AND a .claudeignore entry exists. Every
-# other state falls through and recomputes.
+# other state falls through and recomputes. A converged project still drops any
+# legacy marker an older devflow stamped beside v5 — builtin `[ -e ]` tests, so rm
+# forks only for a marker that exists.
 if [ -f "$_ERG_MARKER" ] \
   && grep -qE "$_ERG_RE_SENTINEL" "$_ERG_GITIGNORE" 2>/dev/null \
   && grep -qE "$_ERG_RE_POLICY" "$_ERG_GITIGNORE" 2>/dev/null \
   && grep -qE "$_ERG_RE_CLAUDEIGNORE" "$_ERG_GITIGNORE" 2>/dev/null; then
+  for _ERG_OLD in -v4 -v3 -v2 ''; do
+    [ -e "$_ERG_DEVFLOW_DIR/.root-gitignore-configured$_ERG_OLD" ] \
+      && rm -f "$_ERG_DEVFLOW_DIR/.root-gitignore-configured$_ERG_OLD" 2>/dev/null
+  done
   return 0
 fi
 
@@ -193,12 +199,13 @@ case "$_ERG_MODE" in
     ;;
 esac
 
-# On success, stamp the current-format v5 marker and drop legacy markers.
+# On success, stamp the current-format v5 marker and drop legacy markers (the same
+# builtin-tested loop as the fast path).
 [ "$_ERG_OK" = 1 ] && {
   touch "$_ERG_MARKER"
-  rm -f "$_ERG_DEVFLOW_DIR/.root-gitignore-configured-v4" 2>/dev/null
-  rm -f "$_ERG_DEVFLOW_DIR/.root-gitignore-configured-v3" 2>/dev/null
-  rm -f "$_ERG_DEVFLOW_DIR/.root-gitignore-configured-v2" 2>/dev/null
-  rm -f "$_ERG_DEVFLOW_DIR/.root-gitignore-configured" 2>/dev/null
+  for _ERG_OLD in -v4 -v3 -v2 ''; do
+    [ -e "$_ERG_DEVFLOW_DIR/.root-gitignore-configured$_ERG_OLD" ] \
+      && rm -f "$_ERG_DEVFLOW_DIR/.root-gitignore-configured$_ERG_OLD" 2>/dev/null
+  done
 }
 return 0
