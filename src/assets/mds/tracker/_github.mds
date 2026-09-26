@@ -424,12 +424,12 @@ Load when the resolved tracker provider is `github` and the operation is `post-w
 
 Load when the resolved tracker provider is `github` and the operation is `ensure-pr-ready`.
 
-**Mechanics held here:** step 4b's TRACKER half only — the issue-number resolution order and the `Closes #\{n\}` line it renders. The open-PR lookup, the scrub-then-edit that publishes the line, and the operation's other steps are PR-host mechanics in `references/pr/ensure-pr-ready.md`.
+**Mechanics held here:** step 4b's TRACKER half only — the issue-number resolution and its `Closes #\{n\}` line; every other step is in `references/pr/ensure-pr-ready.md`.
 
 ### Process
 
 4b. (ALWAYS-ON) Ensure PR body contains a `## Related Issues` section with `Closes #\{n\}` link when a verified issue number is known. Resolution order:
-   a. Prefer the issue number returned by `setup-task` / `ensure-traceable-issue` for this branch (available from branch context or task setup output). If found, use it directly — it was verified at creation time.
+   a. Prefer the issue number returned by `setup-task` / `ensure-traceable-issue` for this branch.
    b. If unavailable, fall back to the branch name pattern `\{type\}/\{number\}-\{slug\}`: extract the numeric segment and verify with `gh issue view \{n\} --json number,state`. If the call fails or `.state` is not `"open"`, skip silently — never add a `Closes` link for an unverified number. Branches like `chore/2026-cleanup` or `fix/2fa-login` may produce false matches; the existence check is the guard.
 
    Publish the section through step 4b's PR-host half.

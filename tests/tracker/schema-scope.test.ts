@@ -662,6 +662,12 @@ const LIVE_REASONS: readonly string[] = [
   'release marker closed',
   'release marker unavailable',
   'ambiguous release marker',
+  // #365 (PR6): /dynamic-build's post-workflow wave PR step. The integration
+  // worktree's branch is not `wave/<slug>` — the user directed another branch, or
+  // the name failed the slug gate the evidence-file path is built from — so no
+  // wave PR is composed, asked about or opened. Emitted by the command, never by
+  // a provider: no tracker is involved.
+  'not a wave branch',
 ];
 
 /**
@@ -869,6 +875,13 @@ const PR_HOST_REASONS: readonly string[] = [
   'evidence unavailable',
   'concurrent edit',
   'body read-back mismatch',
+  // #365 (PR6): ensure-pr-ready step 4a's two caller-block gates. A block the
+  // caller passed failed its `verify-evidence.cjs check wave` / `check block`,
+  // so 4a omits it rather than repairing it. The PR host creates the PR either
+  // way — no tracker is involved. The second spelling is code.md
+  // Responsibility 7's, so one refusal reads the same from both PR creators.
+  'wave block does not match its grammar',
+  'test-plan block does not match its grammar',
 ];
 
 /**
@@ -1002,10 +1015,11 @@ describe('[DR-04] DEGRADED literal registry: forward direction', () => {
       // 18 at the tracker wave, 21 after it: the mismatch reason split by cause
       // (+2 -1), the plan artifact's cap (+1) and the two-server ambiguity (+1).
       // 25 since #364 (PR5): the trace map (+1) and associate-release's three
-      // marker reasons (+3). A floor rises with the table and never falls — a
-      // shorter table is a narrowed registry, whatever the reason given.
-      '§14.2 fixes 25 non-`(none)` reasons; a shorter table is a narrowed registry',
-    ).toBeGreaterThanOrEqual(25);
+      // marker reasons (+3). 26 since #365 (PR6): the wave PR's branch check (+1).
+      // A floor rises with the table and never falls — a shorter table is a
+      // narrowed registry, whatever the reason given.
+      '§14.2 fixes 26 non-`(none)` reasons; a shorter table is a narrowed registry',
+    ).toBeGreaterThanOrEqual(26);
     // The instantiation rule is a NARROWING, not a wildcard: only `{provider}` is
     // instantiated, only with tokens the registry carries, and a reason without the
     // placeholder still matches itself and nothing else.
@@ -1071,12 +1085,28 @@ describe('[DR-04] DEGRADED literal registry: forward direction', () => {
     ).toBeGreaterThan(0);
   });
 
-  it('every LIVE reason is emitted by at least one named site', () => {
-    const corpus = [...gitAgentSinkCorpus(), ...commandCorpus()];
+  /** Named collector: the reasons in `reasons` that no entry of `corpus` emits as `DEGRADED (…)`. */
+  const collectUnemittedReasons = (reasons: readonly string[], corpus: readonly CorpusEntry[]): string[] => {
     const haystack = corpus.map(e => e.content).join('\n');
-    const unemitted = LIVE_REASONS.filter(
+    return reasons.filter(
       reason => !reasonSpellings(reason).some(spelling => haystack.includes(`DEGRADED (${spelling})`)),
     );
+  };
+
+  it('known-bad probe: the wave PR branch check, stripped from the commands, is reported unemitted (#365)', () => {
+    // The one emitter of `not a wave branch` is /dynamic-build's post-workflow step.
+    // Drop it from a copy of the command corpus and the forward predicate must name it.
+    const reason = 'not a wave branch';
+    const commands = commandCorpus();
+    expect(commands.some(e => e.content.includes(`DEGRADED (${reason})`)), 'the emitter must be in the corpus').toBe(true);
+    const stripped = commands.map(e => ({ ...e, content: e.content.split(`DEGRADED (${reason})`).join('DEGRADED (\\{reason\\})') }));
+    expect(collectUnemittedReasons([reason], [...gitAgentSinkCorpus(), ...stripped])).toEqual([reason]);
+    expect(collectUnemittedReasons([reason], [...gitAgentSinkCorpus(), ...commands])).toEqual([]);
+  });
+
+  it('every LIVE reason is emitted by at least one named site', () => {
+    const corpus = [...gitAgentSinkCorpus(), ...commandCorpus()];
+    const unemitted = collectUnemittedReasons(LIVE_REASONS, corpus);
     expect(
       unemitted,
       `reason(s) in the canonical table that NO site emits. A registry entry with no emitter is a ` +

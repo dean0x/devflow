@@ -29,17 +29,18 @@ Each criterion is either:
 
 At least one negative criterion is required per ticket (e.g., "must not break existing behavior X", "must not expose Y to unauthenticated callers", "must not regress test suite Z").
 
-**Test plan (structured, for the Test agent)**
+**Test plan (TP lines, for the Test agent)**
 
-For each acceptance criterion:
-- Test scenario: a concrete, runnable scenario description
-- Setup: preconditions and test data needed
-- Expected outcome: the specific observable result that confirms the criterion
-- Verification method: unit test / integration test / manual step / load test
+The test plan IS TP lines: at least one per acceptance criterion, numbered from TP-1, each citing the criterion it covers as `(AC-<m>)`. Map each scenario onto its line:
+- The scenario, in plain words → `<scenario>`.
+- Its verification method → `method:` — a test committed to the suite is `ci`; a command run and read (a load test, a script) is `local`; a step performed and observed is `manual`.
+- The paths it exercises → `files:`.
+
+A scenario's setup and expected outcome are not part of its line. They go under a `## Test Scenarios` section after `## Test Plan`, one `TP-<n>:` entry per TP. `## Test Plan` holds TP lines only, so `check tp` can parse it.
 
 The test plan must be executable by the Test agent without further clarification — it is a complete specification, not notes.
 
-When the test plan is written as lines — a `## Test Plan` section, or a PR's test-plan block — each line follows this contract:
+Every line of a `## Test Plan` section, or of a PR's test-plan block, follows this contract:
 
 {test_plan_line()}
 
@@ -47,7 +48,7 @@ When the test plan is written as lines — a `## Test Plan` section, or a PR's t
 
 The Evaluate agent panel receives: the per-ticket plan + the numbered acceptance criteria (positive and negative).
 
-The Test agent receives: the test plan (all scenarios and expected outcomes).
+The Test agent receives: the test plan's TP lines, once `check tp` has admitted them.
 
 If either document is absent (no plan from `/devflow:dynamic-plan`, or criteria not written), the corresponding Gate 2 agent is skipped silently — build proceeds Gate-1-only. Never fabricate criteria.
 

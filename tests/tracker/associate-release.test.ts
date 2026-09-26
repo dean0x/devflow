@@ -349,6 +349,9 @@ const OP_CAPABILITIES = ['release versions or labels', 'edit issue fields'] as c
  * funded by condensing unpinned contract prose, and no define was added. Measured
  * 7,961 after c6f3fbda. Every Jira and Linear spawn loads this file, so its growth
  * lands in both tool-call loaded sets.
+ *
+ * Registered by #365 (D7) as the `mcp-contract-max-chars` ceiling in
+ * tests/fixtures/numeric-floors.json, at 7,963 as shipped: MAY BE LOWERED, NEVER RAISED.
  */
 const MCP_CONTRACT_MAX_CHARS = 7_963;
 

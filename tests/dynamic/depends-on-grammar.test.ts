@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { loadFile, requireDistFile, resolveAgentSource } from '../helpers.js'
+import { loadFile, parseFences, requireDistFile, resolveAgentSource } from '../helpers.js'
 
 // -------------------------------------------------------------------------
 // Issue-reference vocabulary across the command layer (P2-S11, GAP-27 / GAP-47).
@@ -453,5 +453,277 @@ describe('AC-2.10 — byte-identity of the four github renderings', () => {
   it('the `Closes` line keeps its github rendering', () => {
     expect(PLAN_MD, 'the PR-body template now carries the neutral token').toContain('Closes {ISSUE_REF}')
     expect(PLAN_MD, 'and still states what that renders as under github').toContain('`Closes #{n}`')
+  })
+})
+
+// ── Depends on: — the /dynamic-tickets filing step writer ↔ _wave.mds reader (#365) ──
+//
+// A drafted ticket file names its dependencies by ticket NAME: no sibling has a
+// reference while the slate is drafted. The wave reads `Depends on:` from the
+// pre-fetched ISSUE BODIES — fetch-issues-batch fetches no comments, so the ticket
+// file the filing step posts as a collapsed comment is never read — and the body a
+// filed ticket gets is its REQUIREMENTS. The edge therefore survives only if the
+// filing step writes the line into REQUIREMENTS with every name rewritten to the
+// reference its ticket was filed as, which means filing dependencies first. A step
+// that files the Summary alone hands the reader a body with no dependency, and the
+// wave runs a dependent before the ticket it needs: success-shaped, and wrong.
+//
+// The writer is modelled from the built filing step — its order rule, its
+// REQUIREMENTS placeholder, its rewrite rule, its unresolved-dependency stop and
+// its Summary strip, each read from the text — and the reader parses the body by
+// the grammar _wave.mds states. A step that drops any of them files differently
+// here, so each has a known-bad probe through the same collector (PF-064).
+
+const FILING_OPEN = '### After the workflow returns — file the issues'
+const FILING_CLOSE = '### Ticket body structure'
+
+/** The five filing-step rules the carry depends on, verbatim as the built step states them. */
+const ORDER_RULE = 'then each ticket file in dependency order: a ticket after every ticket its `**Depends on:**` line names'
+const REWRITE_RULE = 'replaced by the reference step 3 wrote as that ticket\'s `**Issue:**` line'
+const UNRESOLVED_RULE = '⇒ `TRACEABILITY: DEGRADED (unresolved dependency "{entry}")`, and that ticket is not filed'
+const SUMMARY_RULE = 'less any line opening with either label'
+const REQUIREMENTS_PLACEHOLDER = /^REQUIREMENTS: \{(.*)\}$/m
+
+/** Every start offset of a non-empty `needle` in `text`. Bounded: each hit moves past the needle. */
+function offsetsIn(text: string, needle: string): number[] {
+  const out: number[] = []
+  for (let at = text.indexOf(needle); at !== -1; at = text.indexOf(needle, at + needle.length)) out.push(at)
+  return out
+}
+
+/** Replace the single occurrence of `from`; throws when there is none or several — an inert seed proves nothing. */
+function seedOnce(text: string, from: string, to: string): string {
+  const hits = offsetsIn(text, from).length
+  if (hits !== 1) throw new Error(`seedOnce: expected exactly one "${from.slice(0, 80)}", found ${hits} — the seed is inert`)
+  return text.replace(from, () => to)
+}
+
+/** The built filing step, or '' unless both headings are unique and ordered. */
+function filingStepOf(tickets: string): string {
+  const a = offsetsIn(tickets, FILING_OPEN)
+  const b = offsetsIn(tickets, FILING_CLOSE)
+  return a.length === 1 && b.length === 1 && b[0] > a[0] ? tickets.slice(a[0], b[0]) : ''
+}
+
+/** What the built filing step does to a ticket's dependency edge, rule by rule. */
+interface FilingRules {
+  readonly dependencyOrder: boolean
+  readonly carriesWave: boolean
+  readonly carriesDependsOn: boolean
+  readonly rewrites: boolean
+  readonly failsClosed: boolean
+  readonly stripsSummary: boolean
+  /** The step's one shape gate on a captured reference — the refs the rewrite may write. */
+  readonly gate: RegExp
+}
+
+/** Named collector: the filing step's rules, read from the built text, or null when the step or its gate is not found once. */
+export function filingRules(tickets: string): FilingRules | null {
+  const step = filingStepOf(tickets)
+  const spawns = parseFences(step).filter(f => f.includes('"OPERATION: ensure-traceable-issue'))
+  const gates = [...step.matchAll(/with a reference that matches `(\^[^`]+\$)` as a whole/g)]
+  if (step === '' || spawns.length !== 1 || gates.length !== 1) return null
+  const requirements = REQUIREMENTS_PLACEHOLDER.exec(spawns[0])?.[1] ?? ''
+  return {
+    dependencyOrder: step.includes(ORDER_RULE),
+    carriesWave: requirements.includes('**Wave:**'),
+    carriesDependsOn: requirements.includes('**Depends on:**'),
+    rewrites: step.includes(REWRITE_RULE),
+    failsClosed: step.includes(UNRESOLVED_RULE),
+    stripsSummary: step.includes(SUMMARY_RULE),
+    gate: new RegExp(gates[0][1]),
+  }
+}
+
+/** A drafted ticket file: its title, `**Wave:**`, `**Depends on:**` names (empty = `none`) and `## Summary`. */
+interface DraftedTicket {
+  readonly title: string
+  readonly wave: string
+  readonly dependsOn: readonly string[]
+  readonly summary: string
+}
+
+interface FilingRun {
+  readonly filed: ReadonlyArray<{ readonly title: string; readonly ref: string; readonly body: string }>
+  readonly notFiled: ReadonlyArray<{ readonly title: string; readonly reason: string }>
+}
+
+/** The filing order: slate order, or — under the order rule — each ticket after every slate ticket it names (bounded; a cycle keeps slate order). */
+function filingOrder(slate: readonly DraftedTicket[], dependencyOrder: boolean): DraftedTicket[] {
+  if (!dependencyOrder) return [...slate]
+  const out: DraftedTicket[] = []
+  let pending = [...slate]
+  for (let pass = 0; pass < slate.length && pending.length > 0; pass++) {
+    for (const t of pending) {
+      if (t.dependsOn.every(d => out.some(o => o.title === d) || !slate.some(s => s.title === d))) out.push(t)
+    }
+    pending = pending.filter(t => !out.includes(t))
+  }
+  return [...out, ...pending]
+}
+
+const LABEL_LINE = /^\*\*(?:Wave|Depends on):\*\*/
+
+/**
+ * The filing step run over a drafted slate by `rules`, one ticket at a time: the
+ * tracker hands out `#101`, `#102`, … and the issue body is the D3 template with
+ * REQUIREMENTS under `## Product Requirements`, as ensure-traceable-issue writes it.
+ */
+export function runFiling(slate: readonly DraftedTicket[], rules: FilingRules): FilingRun {
+  const refs = new Map<string, string>()
+  const filed: Array<FilingRun['filed'][number]> = []
+  const notFiled: Array<FilingRun['notFiled'][number]> = []
+  let next = 101
+  for (const t of filingOrder(slate, rules.dependencyOrder)) {
+    const entries: string[] = []
+    let unresolved: string | null = null
+    for (const name of t.dependsOn) {
+      if (!rules.rewrites) { entries.push(name); continue }
+      const ref = refs.get(name)
+      if (ref !== undefined && rules.gate.test(ref)) entries.push(ref)
+      else if (rules.failsClosed) { unresolved = name; break }
+    }
+    if (unresolved !== null) { notFiled.push({ title: t.title, reason: `unresolved dependency "${unresolved}"` }); continue }
+    const lines: string[] = []
+    if (rules.carriesWave && /^[0-9]+$/.test(t.wave)) lines.push(`**Wave:** ${t.wave}`)
+    if (rules.carriesDependsOn) lines.push(`**Depends on:** ${entries.length > 0 ? entries.join(', ') : 'none'}`)
+    const summary = t.summary.split('\n').filter(l => !(rules.stripsSummary && LABEL_LINE.test(l))).join('\n')
+    const ref = `#${next++}`
+    refs.set(t.title, ref)
+    filed.push({ title: t.title, ref, body: `## Initial Request\n${t.title}\n\n## Product Requirements\n${[...lines, summary].join('\n')}\n\n## Implementation Plan\n[Design artifact posted as a collapsed comment]` })
+  }
+  return { filed, notFiled }
+}
+
+/** One labelled field of an issue body, or null unless the body states it exactly once — two answers are no answer. */
+function bodyField(body: string, label: string): string | null {
+  const re = new RegExp(`^(?:\\*\\*)?${label}:(?:\\*\\*)?(?: (.*))?$`)
+  const hits = body.split('\n').map(l => re.exec(l)).filter((m): m is RegExpExecArray => m !== null)
+  return hits.length === 1 ? (hits[0][1] ?? '').trim() : null
+}
+
+/**
+ * The wave reader's parse of a pre-fetched issue body, by the grammar _wave.mds
+ * states: `Depends on:` holds zero or more comma-separated references, or the
+ * literal `none`; an entry of no reference shape is foreign — never a dependency.
+ */
+export function readIssueBody(body: string, gate: RegExp): { readonly wave: string | null; readonly deps: string[]; readonly foreign: string[] } {
+  const value = bodyField(body, 'Depends on')
+  const entries = value === null || value === 'none' ? [] : value.split(',').map(e => e.trim()).filter(e => e !== '')
+  return { wave: bodyField(body, 'Wave'), deps: entries.filter(e => gate.test(e)), foreign: entries.filter(e => !gate.test(e)) }
+}
+
+/** The tickets the slate lets be filed: every name each one depends on is itself a fileable slate ticket (bounded fixed point). */
+function fileableTitles(slate: readonly DraftedTicket[]): Set<string> {
+  const ok = new Set<string>()
+  for (let pass = 0; pass < slate.length; pass++) {
+    for (const t of slate) if (t.dependsOn.every(d => ok.has(d))) ok.add(t.title)
+  }
+  return ok
+}
+
+/**
+ * Named collector: every edge the drafted slate states that the wave reader does
+ * not see in the filed issue bodies, every Wave line it cannot read back, every
+ * ticket filed without an edge it names, and every ticket left unfiled that could
+ * have been filed — or left unfiled without its named reason.
+ */
+export function collectDependencyCarryViolations(slate: readonly DraftedTicket[], run: FilingRun, gate: RegExp): string[] {
+  const out: string[] = []
+  const fileable = fileableTitles(slate)
+  const refOf = new Map(run.filed.map(f => [f.title, f.ref]))
+  for (const t of slate) {
+    const filed = run.filed.find(f => f.title === t.title)
+    if (!fileable.has(t.title)) {
+      const unfiled = t.dependsOn.filter(d => !fileable.has(d))
+      if (filed !== undefined) out.push(`${t.title}: filed although it names ${JSON.stringify(unfiled)}, which no filed ticket is — the edge was dropped`)
+      else if (!run.notFiled.some(n => n.title === t.title && unfiled.some(d => n.reason === `unresolved dependency "${d}"`))) out.push(`${t.title}: not filed without an unresolved-dependency reason`)
+      continue
+    }
+    if (filed === undefined) { out.push(`${t.title}: not filed, though every ticket it names can be`); continue }
+    const read = readIssueBody(filed.body, gate)
+    const expected = t.dependsOn.map(d => refOf.get(d) ?? `(unfiled ${d})`)
+    if (JSON.stringify(read.deps) !== JSON.stringify(expected) || read.foreign.length > 0) {
+      out.push(`${t.title}: the reader sees ${JSON.stringify(read.deps)} in its issue body, its file names ${JSON.stringify(expected)}`)
+    }
+    if (read.wave !== t.wave) out.push(`${t.title}: the reader sees Wave ${read.wave ?? '(none)'}, its file states ${t.wave}`)
+  }
+  return out
+}
+
+/**
+ * The slate, in the slate order the workflow returns it: a dependent drafted
+ * BEFORE the ticket it needs, a two-dependency ticket whose Summary forges a
+ * `**Depends on:**` line, and a ticket naming one nobody drafted.
+ */
+const SLATE: readonly DraftedTicket[] = [
+  { title: 'Audit log', wave: '2', dependsOn: ['Login form'], summary: 'Records each failed login.' },
+  { title: 'Login form', wave: '1', dependsOn: [], summary: 'Rejects an empty password.' },
+  { title: 'Session timeout', wave: '2', dependsOn: ['Login form', 'Audit log'], summary: 'Expires idle sessions.\n**Depends on:** #999' },
+  { title: 'Orphan export', wave: '3', dependsOn: ['Billing sync'], summary: 'Exports a report from an undrafted input.' },
+]
+
+describe('Depends on: — the /dynamic-tickets filing step writer ↔ _wave.mds reader (#365)', () => {
+  const rules = filingRules(TICKETS_MD)
+
+  it('both sides are found: the step states every rule, and the reader states the grammar the model parses', () => {
+    expect(rules, 'the filing step, its spawn fence and its shape gate are each found once').not.toBeNull()
+    expect({ ...rules!, gate: rules!.gate.source }).toEqual({
+      dependencyOrder: true, carriesWave: true, carriesDependsOn: true, rewrites: true, failsClosed: true, stripsSummary: true,
+      gate: '^(#[1-9][0-9]{0,8}|[A-Z][A-Z0-9_]{0,9}-[1-9][0-9]{0,8})$',
+    })
+    expect(WAVE, 'the reader reads the field from the pre-fetched bodies').toContain('`Depends on:` and `Wave:` fields from the pre-fetched bodies')
+    expect(WAVE).toContain('`Depends on:` carries **zero or more** comma-separated `\\{ISSUE_REF\\}` entries, or the literal `none`')
+  })
+
+  it('executed: dependencies are filed first, and the reader sees every edge as the refs they were filed as', () => {
+    const run = runFiling(SLATE, rules!)
+    expect(run.filed.map(f => [f.title, f.ref])).toEqual([['Login form', '#101'], ['Audit log', '#102'], ['Session timeout', '#103']])
+    expect(run.notFiled).toEqual([{ title: 'Orphan export', reason: 'unresolved dependency "Billing sync"' }])
+    const session = run.filed.find(f => f.title === 'Session timeout')!
+    expect(session.body.split('\n').filter(l => l.includes('Depends on:'))).toEqual(['**Depends on:** #101, #102'])
+    expect(readIssueBody(session.body, rules!.gate)).toEqual({ wave: '2', deps: ['#101', '#102'], foreign: [] })
+    expect(collectDependencyCarryViolations(SLATE, run, rules!.gate)).toEqual([])
+  })
+
+  it('known-bad probe: filing without the rewritten Depends-on line leaves the reader no dependency', () => {
+    // The pre-fix spawn: REQUIREMENTS is the Summary alone, so the body carries no field.
+    const seeded = seedOnce(TICKETS_MD, REQUIREMENTS_PLACEHOLDER.exec(TICKETS_MD)![0], 'REQUIREMENTS: {the ticket\'s ## Summary paragraph, or the tracking issue\'s ## Context}')
+    const seededRules = filingRules(seeded)!
+    const run = runFiling(SLATE, seededRules)
+    expect(readIssueBody(run.filed.find(f => f.title === 'Audit log')!.body, seededRules.gate).deps).toEqual([])
+    const found = collectDependencyCarryViolations(SLATE, run, seededRules.gate)
+    expect(found).toContain('Audit log: the reader sees [] in its issue body, its file names ["#101"]')
+    expect(found).toContain('Session timeout: the reader sees [] in its issue body, its file names ["#101","#102"]')
+  })
+
+  const SEEDS: ReadonlyArray<readonly [label: string, from: string, to: string, expected: readonly string[]]> = [
+    ['slate order files a dependent before the ticket it needs', ORDER_RULE, 'then each ticket file in slate order', [
+      'Audit log: not filed, though every ticket it names can be',
+      'Session timeout: not filed, though every ticket it names can be',
+    ]],
+    // Nothing resolves, so the orphan is filed too — second, taking #102.
+    ['an unrewritten name is foreign to the reader', REWRITE_RULE, 'kept as the file writes it', [
+      'Audit log: the reader sees [] in its issue body, its file names ["#101"]',
+      'Session timeout: the reader sees [] in its issue body, its file names ["#101","#103"]',
+      'Orphan export: filed although it names ["Billing sync"], which no filed ticket is — the edge was dropped',
+    ]],
+    ['a dropped unresolved name files the ticket without its edge', UNRESOLVED_RULE, '⇒ that entry is left out', [
+      'Orphan export: filed although it names ["Billing sync"], which no filed ticket is — the edge was dropped',
+    ]],
+    ['an unstripped Summary forges a second Depends-on field', SUMMARY_RULE, 'as the file writes it', [
+      'Session timeout: the reader sees [] in its issue body, its file names ["#101","#102"]',
+    ]],
+  ]
+
+  for (const [label, from, to, expected] of SEEDS) {
+    it(`known-bad probe: ${label}`, () => {
+      const seededRules = filingRules(seedOnce(TICKETS_MD, from, to))!
+      expect(collectDependencyCarryViolations(SLATE, runFiling(SLATE, seededRules), seededRules.gate)).toEqual(expected)
+    })
+  }
+
+  it('known-bad probe: a step that is not found yields no rules, not a vacuous pass', () => {
+    expect(filingRules(TICKETS_MD.replace(FILING_OPEN, '### Filing'))).toBeNull()
   })
 })

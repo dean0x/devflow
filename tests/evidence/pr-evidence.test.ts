@@ -229,6 +229,9 @@ describe('module surface', () => {
       'CLAIM_LINE_RE', 'EVIDENCE_LINE_RE', 'EXCEPTION_KINDS', 'EXCEPTION_LINE_RE', 'GLOB_RE', 'LIMITS',
       'LOGIN_RE', 'MARKERS', 'METHODS', 'PRECEDENCE', 'SHA_RE', 'STATES', 'TP_LINE_RE',
       'TRUSTED_ASSOCIATIONS', 'TRUSTED_PERMISSIONS', 'VERIFIED_STATES',
+      // The wave block (#365) — tests/evidence/wave-block.test.ts is their suite.
+      'RELATED_LINE_RE', 'WAVE_GATE_VALUES', 'WAVE_HEADINGS', 'WAVE_MERGED_VERDICTS', 'WAVE_TABLE_HEADER',
+      'WAVE_TICKET_RE', 'WAVE_VERDICTS', 'parseWaveBlock',
       'classify', 'dedupeKey', 'evidenceSections', 'exception', 'findBlock', 'formatEvidenceLine',
       'isRepoLink', 'matchGlob', 'parseBlock', 'parseClaims', 'parseEvidenceComment', 'parseEvidenceLine',
       'parseExceptions', 'parsePlan', 'permissionLookups', 'render', 'splice', 'spliceFit', 'tally',

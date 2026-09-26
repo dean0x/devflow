@@ -9,7 +9,7 @@
 // through SHA ancestry, the diff since the claim, and `gh run view --attempt`.
 //
 // Usage:
-//   node verify-evidence.cjs check tp|block|exceptions <file>
+//   node verify-evidence.cjs check tp|block|exceptions|wave <file>
 //   node verify-evidence.cjs render --plan <file>
 //   node verify-evidence.cjs verify --pr <n> [--publication <mode>] [--evidence <file>]
 //        [--state <dir>] [--block-out <file>] [--comment-out <file>] [--stale-out <file>] [--approval]
@@ -139,7 +139,7 @@ const SPLICE_LINE_RE = /^SPLICE (?<outcome>ok|resplice|conflict|malformed|oversi
 const READBACK_LINE_RE = /^READBACK (?<outcome>ok|mismatch)$/;
 
 const USAGE = [
-  'Usage: node verify-evidence.cjs check tp|block|exceptions <file>',
+  'Usage: node verify-evidence.cjs check tp|block|exceptions|wave <file>',
   '       node verify-evidence.cjs render --plan <file>',
   '       node verify-evidence.cjs verify --pr <n> [--publication <mode>] [--evidence <file>]',
   '            [--state <dir>] [--block-out <file>] [--comment-out <file>] [--stale-out <file>] [--approval]',
@@ -189,7 +189,7 @@ const USAGE = [
 
 /**
  * @typedef {{ kind: 'usage' }
- *   | { kind: 'check', what: 'tp' | 'block' | 'exceptions', file: string }
+ *   | { kind: 'check', what: 'tp' | 'block' | 'exceptions' | 'wave', file: string }
  *   | { kind: 'render', plan: string }
  *   | { kind: 'verify', pr: number, publication: string, evidence: string | null, state: string | null,
  *       blockOut: string | null, commentOut: string | null, staleOut: string | null, approval: boolean }
@@ -255,10 +255,10 @@ function parseArgs(argv) {
   const sub = rest[0];
   const tail = rest.slice(1);
   if (sub === 'check') {
-    if (tail.length !== 2 || !['tp', 'block', 'exceptions'].includes(tail[0])) return USAGE_ARGS;
+    if (tail.length !== 2 || !['tp', 'block', 'exceptions', 'wave'].includes(tail[0])) return USAGE_ARGS;
     const file = tail[1];
     if (typeof file !== 'string' || file === '' || file.startsWith('-') || file.length > MAX_ARG_CHARS) return USAGE_ARGS;
-    return { kind: 'check', what: /** @type {'tp' | 'block' | 'exceptions'} */ (tail[0]), file };
+    return { kind: 'check', what: /** @type {'tp' | 'block' | 'exceptions' | 'wave'} */ (tail[0]), file };
   }
   if (sub === 'render') {
     const f = parseFlags(tail, { '--plan': 'value' });
@@ -1617,6 +1617,9 @@ function sectionOrWhole(text, section) {
 }
 
 /**
+ * `check wave` reads the whole file: a wave block is a PR-body section of its
+ * own, never a section of an evidence file.
+ *
  * @param {Io} io
  * @param {Extract<ParsedArgs, { kind: 'check' }>} args
  * @returns {Outcome}
@@ -1627,6 +1630,7 @@ function runCheck(io, args) {
   let result;
   if (args.what === 'tp') result = PE.parsePlan(sectionOrWhole(text, 'testPlan'));
   else if (args.what === 'exceptions') result = PE.parseExceptions(sectionOrWhole(text, 'exceptions'));
+  else if (args.what === 'wave') result = PE.parseWaveBlock(text);
   else {
     const b = PE.parseBlock(text);
     // R7 pastes only the creation form: TP lines, none ticked.

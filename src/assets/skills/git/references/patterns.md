@@ -276,7 +276,7 @@ EOF
 COMMITS_AHEAD=$(git rev-list --count main..HEAD)
 [ "$COMMITS_AHEAD" -eq 0 ] && echo "ERROR: No commits to review" && exit 1
 
-PR_EXISTS=$(gh pr list --head "$(git branch --show-current)" --json number --jq '.[0].number')
+PR_EXISTS=$(gh pr list --head "$(git branch --show-current)" --limit 1 --json number --jq '.[0].number')
 [ -n "$PR_EXISTS" ] && echo "PR #$PR_EXISTS already exists" && exit 1
 
 git ls-remote --exit-code --heads origin "$(git branch --show-current)" || git push -u origin "$(git branch --show-current)"

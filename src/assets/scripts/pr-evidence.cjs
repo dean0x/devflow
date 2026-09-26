@@ -1,9 +1,9 @@
 // src/assets/scripts/pr-evidence.cjs
 //
-// The PURE core of PR test-plan evidence: the TP-line, claim, exception and
-// EVIDENCE-line grammars, the marker literals, the state ladder, rendering, the
-// CRLF-aware body splice, the tally, the link check and the one implementation of
-// the trust rule. Installed as a top-level sibling of redact-secrets.cjs under
+// The PURE core of PR test-plan evidence: the TP-line, claim, exception,
+// EVIDENCE-line and wave-block grammars, the marker literals, the state ladder,
+// rendering, the CRLF-aware body splice, the tally, the link check and the one
+// implementation of the trust rule. Installed as a top-level sibling of redact-secrets.cjs under
 // ~/.devflow/scripts/ and required by verify-evidence.cjs, which performs every
 // read and every write; this module has no command line of its own.
 //
@@ -30,7 +30,12 @@
 /** @typedef {'ci' | 'local' | 'manual'} Method */
 /** @typedef {'PASS' | 'FAIL' | 'SKIP'} Outcome */
 /** @typedef {'ticket-link' | 'test-plan'} ExceptionKind */
-/** @typedef {'oversize' | 'malformed' | 'empty' | 'order' | 'duplicate' | 'mismatch' | 'invalid'} ErrorCode */
+/** @typedef {'PASS' | 'UNVERIFIED' | 'QUARANTINED' | 'BLOCKED'} WaveVerdict */
+/**
+ * @typedef {'oversize' | 'malformed' | 'empty' | 'order' | 'duplicate' | 'mismatch' | 'invalid'
+ *   | 'orphan' | 'unlinked' | 'unmerged'} ErrorCode
+ *   The last three are the wave block's cross rules (see parseWaveBlock).
+ */
 
 /** The six TP states, closed. The contract's `States (closed)` list is pinned to this order. */
 const STATES = Object.freeze(/** @type {State[]} */ ([
@@ -59,6 +64,8 @@ const EXCEPTION_KINDS = Object.freeze(/** @type {ExceptionKind[]} */ (['ticket-l
  *   PATH_CHARS / DIFF_FILES a diff path, and the diff paths, a glob is matched against
  *   RUNS_PER_SHA            runs at one SHA (`gh run list --limit 20`)
  *   TRUST_LOOKUPS           permission lookups per spawn
+ *   WAVE_BLOCK_CHARS        a whole wave block
+ *   WAVE_ROWS               a wave block's table rows, and its related lines (at most one per row)
  */
 const LIMITS = Object.freeze({
   TP_MAX: 200,
@@ -75,6 +82,8 @@ const LIMITS = Object.freeze({
   DIFF_FILES: 5000,
   RUNS_PER_SHA: 20,
   TRUST_LOOKUPS: 20,
+  WAVE_BLOCK_CHARS: 16000,
+  WAVE_ROWS: 100,
 });
 
 /**
@@ -197,6 +206,73 @@ const EM_DASH = '—';
 const UNTICKED = '- [ ] ';
 const TICKED = '- [x] ';
 
+/**
+ * D-WAVE: the wave block — the wave PR body's `## Related Issues` section and its
+ * evidence table, rendered by /devflow:dynamic-build and admitted only through
+ * `verify-evidence.cjs check wave`:
+ *
+ *   ## Related Issues
+ *   Closes #12
+ *   Refs #13
+ *
+ *   ## Wave Evidence
+ *   | T | Ticket | Verdict | Evaluate | Test | Surviving | Coverage |
+ *   |---|---|---|---|---|---|---|
+ *   | T1 | #12 | PASS | PASS | PASS | 0 | complete |
+ *   | T2 | #13 | QUARANTINED | FAIL-FIXED | SKIPPED | 2 | incomplete |
+ *
+ * Every cell is a closed-vocabulary token or a bounded number, and every related
+ * line is a shape-gated reference, so no byte of a ticket title, a finding or an
+ * agent's prose can ride into the PR body on it. The two headings, in order; an
+ * admitted block IS the body's `## Related Issues` section.
+ */
+const WAVE_HEADINGS = Object.freeze(['## Related Issues', '## Wave Evidence']);
+
+/** The evidence table's header line, verbatim. */
+const WAVE_TABLE_HEADER = '| T | Ticket | Verdict | Evaluate | Test | Surviving | Coverage |';
+
+/** The separator under it: one bare `---` per column, no alignment colon. */
+const WAVE_TABLE_SEPARATOR = '|---|---|---|---|---|---|---|';
+
+/**
+ * A wave row's verdict: merged as PASS; merged as UNVERIFIED (a FAIL-FIXED Gate 2,
+ * fixes applied and not re-run); QUARANTINED (it ran and did not merge, or its
+ * merge was quarantined after a red build); BLOCKED (it never ran).
+ */
+const WAVE_VERDICTS = Object.freeze(/** @type {WaveVerdict[]} */ (['PASS', 'UNVERIFIED', 'QUARANTINED', 'BLOCKED']));
+
+/** The verdicts of a ticket that merged — the only rows a `Closes` line may name. */
+const WAVE_MERGED_VERDICTS = Object.freeze(/** @type {WaveVerdict[]} */ (['PASS', 'UNVERIFIED']));
+
+/** An Evaluate or Test cell: a Gate 2 verdict, or `—` where the gate never ran. */
+const WAVE_GATE_VALUES = Object.freeze(['PASS', 'FAIL', 'FAIL-FIXED', 'SKIPPED', EM_DASH]);
+
+/** A Coverage cell: whether the review pass covered every focus. */
+const WAVE_COVERAGE_VALUES = Object.freeze(['complete', 'incomplete', EM_DASH]);
+
+/** A row's first cell, `T1` … `T100` (the sequence itself is checked by the parser). */
+const WAVE_T_RE = /^T(?:100|[1-9][0-9]?)$/;
+
+/** A Surviving cell: the review pass's surviving-finding count, or `—`. */
+const WAVE_SURVIVING_RE = /^(?:[0-9]{1,3}|—)$/;
+
+/**
+ * D-WAVE-REF: one related line of a wave block. `Closes` takes only a GitHub `#N`
+ * — Jira and Linear render `Refs` — and `Refs` takes `#N` (an unmerged GitHub
+ * ticket: its captured `Closes` line with the keyword swapped) or a keyed ref
+ * whose key is the union of the Jira `[A-Z][A-Z0-9_]{1,9}` and the Linear
+ * `[A-Z][A-Z0-9]{0,9}` key grammars. It admits every line code.md's R7 paste gate
+ * admits, their Closes→Refs swap, and nothing else (parity-pinned by
+ * tests/evidence/wave-block.test.ts).
+ */
+const RELATED_LINE_RE = Object.freeze(/^(?:Closes (?<closes>#[1-9][0-9]{0,8})|Refs (?<refs>#[1-9][0-9]{0,8}|[A-Z][A-Z0-9_]{0,9}-[1-9][0-9]{0,8}))$/);
+
+/** A wave row's Ticket cell: a reference of RELATED_LINE_RE's shapes, or `(none)`. */
+const WAVE_TICKET_RE = Object.freeze(/^(?:#[1-9][0-9]{0,8}|[A-Z][A-Z0-9_]{0,9}-[1-9][0-9]{0,8}|\(none\))$/);
+
+/** The Ticket cell of a row with no reference. */
+const NO_TICKET = '(none)';
+
 /** The three evidence-file sections, by heading. A Map, so no prototype key can match. */
 const SECTION_KEYS = new Map([
   [PLAN_HEADING, 'testPlan'],
@@ -304,6 +380,13 @@ const TRUSTED_PERMISSIONS = Object.freeze(['admin', 'write']);
  *   stale: readonly number[], exceptions: readonly ExceptionKind[],
  *   approval: 'yes' | 'no' | 'unchecked', key: string, posted: 'yes' | 'no' | 'n/a',
  *   body: 'same' | 'changed' }} EvidenceFields
+ *
+ * @typedef {{ keyword: 'Closes' | 'Refs', ref: string, line: number }} WaveRelated
+ *   One related line; `line` is its 1-based line in the block.
+ * @typedef {{ k: number, ticket: string | null, verdict: WaveVerdict, evaluate: string, test: string,
+ *   surviving: number | null, coverage: string, line: number }} WaveRow
+ *   One table row; `ticket` is null for `(none)`, `surviving` for `—`.
+ * @typedef {{ related: readonly WaveRelated[], rows: readonly WaveRow[] }} WaveBlock
  */
 
 // ---------------------------------------------------------------------------
@@ -1691,6 +1774,121 @@ function parseEvidenceLine(line) {
 }
 
 // ---------------------------------------------------------------------------
+// The wave block (D-WAVE)
+// ---------------------------------------------------------------------------
+
+/**
+ * Parse one wave row: seven ` | `-separated cells inside `| ` and ` |`, each in its
+ * closed vocabulary. No cell value holds ` | `, so the split is unambiguous and a
+ * forged cell leaves the row with the wrong count. A BLOCKED row never ran, so
+ * its last four cells are `—`. Null when the row is outside the grammar; the
+ * caller checks the T sequence.
+ *
+ * @param {string} line
+ * @returns {Omit<WaveRow, 'line'> | null}
+ */
+function parseWaveRow(line) {
+  if (!line.startsWith('| ') || !line.endsWith(' |')) return null;
+  const cells = line.slice(2, -2).split(' | ');
+  if (cells.length !== 7) return null;
+  const [t, ticket, verdict, evaluate, test, surviving, coverage] = cells;
+  if (!WAVE_T_RE.test(t) || !WAVE_TICKET_RE.test(ticket)
+    || !WAVE_VERDICTS.includes(/** @type {WaveVerdict} */ (verdict))
+    || !WAVE_GATE_VALUES.includes(evaluate) || !WAVE_GATE_VALUES.includes(test)
+    || !WAVE_SURVIVING_RE.test(surviving) || !WAVE_COVERAGE_VALUES.includes(coverage)) return null;
+  if (verdict === 'BLOCKED' && [evaluate, test, surviving, coverage].some(c => c !== EM_DASH)) return null;
+  return {
+    k: Number(t.slice(1)),
+    ticket: ticket === NO_TICKET ? null : ticket,
+    verdict: /** @type {WaveVerdict} */ (verdict),
+    evaluate,
+    test,
+    surviving: surviving === EM_DASH ? null : Number(surviving),
+    coverage,
+  };
+}
+
+/**
+ * D-WAVE: parse a wave block (LF or CRLF, at most WAVE_BLOCK_CHARS). It holds
+ * exactly, in order: `## Related Issues`; 0–WAVE_ROWS related lines; one blank
+ * line; `## Wave Evidence`; the header and separator verbatim; 1–WAVE_ROWS rows
+ * T1…Tn; then only blank lines. No leading text, no other line anywhere.
+ *
+ * D-WAVE-CLOSE — the cross rules, which make a wrong closing line unrepresentable:
+ *   - a related ref names exactly one row's Ticket (`orphan` when none), and no
+ *     ref repeats (`duplicate`) — nor does a Ticket across rows (`duplicate`), so
+ *     "exactly one" is never two;
+ *   - `Closes` names only a PASS or UNVERIFIED row (`unmerged`);
+ *   - every PASS or UNVERIFIED row with a Ticket has its related line (`unlinked`);
+ *   - so any other row carries at most one line, and that line is a `Refs`.
+ * Structure is checked before the cross rules, so the first failure found is the
+ * one reported. An error carries a code and a line number, never input bytes.
+ *
+ * @param {unknown} text
+ * @returns {Result<WaveBlock>}
+ */
+function parseWaveBlock(text) {
+  if (typeof text !== 'string') return fail('invalid');
+  if (text.length > LIMITS.WAVE_BLOCK_CHARS) return fail('oversize');
+  const rows = textLines(text);
+  let end = rows.length;
+  while (end > 0 && rows[end - 1] === '') end--;
+  if (rows[0] !== WAVE_HEADINGS[0]) return fail('malformed', 1);
+
+  /** @type {WaveRelated[]} */
+  const related = [];
+  let i = 1;
+  for (; i < end && rows[i] !== ''; i++) {
+    if (related.length === LIMITS.WAVE_ROWS) return fail('oversize', i + 1);
+    const m = RELATED_LINE_RE.exec(rows[i]);
+    if (m === null || m.groups === undefined) return fail('malformed', i + 1);
+    const closes = m.groups.closes;
+    related.push(Object.freeze({
+      keyword: /** @type {'Closes' | 'Refs'} */ (closes === undefined ? 'Refs' : 'Closes'),
+      ref: closes === undefined ? m.groups.refs : closes,
+      line: i + 1,
+    }));
+  }
+  // rows[i] is the one blank line; indices past `end` hold only blanks, so a
+  // missing section fails the first comparison that expects a non-blank line.
+  if (rows[i + 1] !== WAVE_HEADINGS[1]) return fail('malformed', i + 2);
+  if (rows[i + 2] !== WAVE_TABLE_HEADER) return fail('malformed', i + 3);
+  if (rows[i + 3] !== WAVE_TABLE_SEPARATOR) return fail('malformed', i + 4);
+
+  /** @type {WaveRow[]} */
+  const table = [];
+  /** @type {Map<string, WaveRow>} */
+  const byTicket = new Map();
+  for (let j = i + 4; j < end; j++) {
+    if (table.length === LIMITS.WAVE_ROWS) return fail('oversize', j + 1);
+    const parsed = parseWaveRow(rows[j]);
+    if (parsed === null) return fail('malformed', j + 1);
+    if (parsed.k !== table.length + 1) return fail('order', j + 1);
+    const r = Object.freeze({ ...parsed, line: j + 1 });
+    if (r.ticket !== null) {
+      if (byTicket.has(r.ticket)) return fail('duplicate', j + 1);
+      byTicket.set(r.ticket, r);
+    }
+    table.push(r);
+  }
+  if (table.length === 0) return fail('empty');
+
+  /** @type {Set<string>} */
+  const linked = new Set();
+  for (const rel of related) {
+    const r = byTicket.get(rel.ref);
+    if (r === undefined) return fail('orphan', rel.line);
+    if (linked.has(rel.ref)) return fail('duplicate', rel.line);
+    if (rel.keyword === 'Closes' && !WAVE_MERGED_VERDICTS.includes(r.verdict)) return fail('unmerged', rel.line);
+    linked.add(rel.ref);
+  }
+  for (const r of table) {
+    if (r.ticket !== null && WAVE_MERGED_VERDICTS.includes(r.verdict) && !linked.has(r.ticket)) return fail('unlinked', r.line);
+  }
+  return ok(Object.freeze({ related: Object.freeze(related), rows: Object.freeze(table) }));
+}
+
+// ---------------------------------------------------------------------------
 // Exports — frozen; verify-evidence.cjs and the unit tests are the consumers
 // ---------------------------------------------------------------------------
 
@@ -1711,6 +1909,14 @@ module.exports = Object.freeze({
   SHA_RE,
   GLOB_RE,
   LOGIN_RE,
+  WAVE_HEADINGS,
+  WAVE_TABLE_HEADER,
+  WAVE_VERDICTS,
+  WAVE_MERGED_VERDICTS,
+  WAVE_GATE_VALUES,
+  RELATED_LINE_RE,
+  WAVE_TICKET_RE,
+  parseWaveBlock,
   parsePlan,
   parseClaims,
   parseExceptions,

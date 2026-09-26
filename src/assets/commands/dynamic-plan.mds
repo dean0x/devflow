@@ -73,9 +73,16 @@ Read or note the tickets. The agents will read them in full; you need the list a
 A workflow cannot pause mid-run. Open design decisions collected in `DECISIONS-NEEDED.md` are surfaced to the user via **AskUserQuestion AFTER the workflow returns** — at the command boundary. The workflow only WRITES the file; the command (you, the main model) reads it and asks.
 
 After the workflow completes:
-1. Read the `decisionsNeededPath` returned by the workflow (e.g. `.devflow/docs/design/<slug>/<ts>/DECISIONS-NEEDED.md`). Always use the OUTDIR-scoped path the workflow wrote — never the flat `.devflow/docs/design/DECISIONS-NEEDED.md`.
-2. First surface the **Auto-Resolved Decisions** section (decision → resolution → source) for audit, then surface ALL open **Decisions Needed** to the user in ONE batched `AskUserQuestion` (never one-at-a-time).
-3. The user's answers feed into their own plan edits or a follow-up `/devflow:dynamic-plan` run.
+1. **Check each plan's test plan.** For every path in `planPaths`, copy that plan's `## Test Plan` section — the heading and its TP lines, up to the next `## ` heading — byte for byte into a fresh `mktemp` file with the Write tool, never through an interpolated shell string, and run:
+
+```bash
+node "${DEVFLOW_DIR:-$HOME/.devflow}/scripts/verify-evidence.cjs" check tp <that file>; echo "exit=$?"
+```
+
+   Check the section, never the whole plan file: the plan's other `## ` headings are not evidence-file sections, so the script would parse the whole document as the plan. `exit=0` passes. Any other result names that plan `test plan malformed (<code>)` in your summary, `<code>` being the code the script printed on stderr; a plan with no `## Test Plan` section copies as an empty file, which the script refuses. Nothing is repaired: `/devflow:dynamic-build` passes no test plan from that plan.
+2. Read the `decisionsNeededPath` returned by the workflow (e.g. `.devflow/docs/design/<slug>/<ts>/DECISIONS-NEEDED.md`). Always use the OUTDIR-scoped path the workflow wrote — never the flat `.devflow/docs/design/DECISIONS-NEEDED.md`.
+3. First surface the **Auto-Resolved Decisions** section (decision → resolution → source) for audit, then surface ALL open **Decisions Needed** to the user in ONE batched `AskUserQuestion` (never one-at-a-time).
+4. The user's answers feed into their own plan edits or a follow-up `/devflow:dynamic-plan` run.
 
 State this explicitly in the workflow script as a comment: `// AskUserQuestion happens at the command boundary after this workflow returns — NOT here.`
 
@@ -97,6 +104,7 @@ export const meta = {
 const ticketSource = args.ticketSource || args[0] || "see task description";
 const DECISIONS_CONTEXT = args.decisionsContext || "";   // injected before authoring
 const PREFERENCE_PROFILE = args.preferenceProfile || "";  // injected before authoring
+const TP_CONTRACT = args.tpContract || "";  // the "Test-plan line (TP)" contract below — its paragraph and four bullets — passed verbatim as tpContract when invoking the workflow, never pasted into this script (it holds backticks)
 const slug = args.slug || "wave";
 const ts = new Date().toISOString().slice(0,16).replace(/[-:T]/g, (c) => c === 'T' ? '_' : c === ':' ? '' : c);
 const OUTDIR = `.devflow/docs/design/${slug}/${ts}`;
@@ -135,15 +143,23 @@ Decisions context: ${DECISIONS_CONTEXT}
 Produce:
 1. List of improvements / gaps / edge cases / side-effects identified.
 2. Well-structured acceptance criteria (numbered, positive + negative, at least one negative per ticket). See the acceptance criteria contract below.
-3. A test plan for the Test agent: for each criterion, scenario + setup + expected outcome + verification method.
+3. The test plan for the Test agent as TP lines, numbered from TP-1, at least one per criterion, each in exactly the shape of the test-plan line contract below. Map each scenario onto its line:
+   - the scenario, in plain words, is the line's scenario text — never a path, a reference, a mention or markup;
+   - the number of the criterion it covers is its (AC-m);
+   - its verification method is its method: a test committed to the suite is ci; a command run and read (a load test, a script) is local; a step performed and observed is manual;
+   - the paths it exercises, from the plan's affected files, are its files: globs.
+   Setup and expected outcome never go in a line: give them per TP in testScenarios.
 4. A list of genuine design decisions that require user input (not settled by the plan, the preference profile, or existing ADRs).
+
+Test-plan line contract:
+${TP_CONTRACT}
 
 Acceptance criteria quality bar (apply strictly):
 - Vague criteria ("the feature should work correctly") are NOT acceptable — reject and rewrite.
 - Implementation-coupled criteria ("the function must call X") are NOT acceptable — test behavior, not implementation.
 - Untestable criteria are NOT acceptable.
 
-Return: { ticketTitle, improvements (array), acceptanceCriteria (array of numbered strings), testPlan (array of {scenario, setup, expectedOutcome, verificationMethod}), openDecisions (array) }.`, { agentType: "Evaluate" })
+Return: { ticketTitle, improvements (array), acceptanceCriteria (array of numbered strings), testPlan (array of TP-line strings, TP-1 first), testScenarios (array of {tp, setup, outcome}), openDecisions (array) }.`, { agentType: "Evaluate" })
   ))
 );
 
@@ -195,7 +211,8 @@ For each ticket, write ${OUTDIR}/{ticket-slug}-plan.md containing:
 - ## Implementation Plan
 - The plan body (incorporate cross-plan amendments)
 - ## Acceptance Criteria (numbered, positive + negative)
-- ## Test Plan (per-criterion scenarios)
+- ## Test Plan — the challenger's testPlan lines, verbatim, one per line, and nothing else: no prose, no blank line between them, no setup or outcome
+- ## Test Scenarios — one line per TP, in TP order: TP-n: its setup, then its expected outcome, from testScenarios
 - ## Auto-Resolved Decisions (if any — list each as: decision → resolution → source)
 
 Then write ${OUTDIR}/DECISIONS-NEEDED.md:
@@ -233,14 +250,14 @@ The workflow returns:
 
 ```json
 {
-  "planPaths": ["string — path to each per-ticket plan file"],
+  "planPaths": ["string — path to each per-ticket plan file; its ## Test Plan holds TP lines only, its ## Test Scenarios their setup and outcome"],
   "decisionsNeededPath": "string — path to DECISIONS-NEEDED.md",
   "decisionsNeededCount": "number — how many decisions need user input",
   "autoResolvedCount": "number — decisions auto-resolved by preference profile"
 }
 ```
 
-After the workflow returns: read `DECISIONS-NEEDED.md`. First briefly surface the **Auto-Resolved Decisions** section (decision → resolution → source) so silently-settled calls are visible and reversible, then surface ALL open **Decisions Needed** in ONE batched `AskUserQuestion` (never one-at-a-time). Do not ask questions mid-workflow — this is F4. If no preference profile was found, note in your summary: "no preference profile found — N decisions were surfaced that a profile might have auto-resolved; consider `/devflow:dynamic-profile`."
+After the workflow returns: check each plan's test plan (step 1 of the F4 list above), then read `DECISIONS-NEEDED.md`. First briefly surface the **Auto-Resolved Decisions** section (decision → resolution → source) so silently-settled calls are visible and reversible, then surface ALL open **Decisions Needed** in ONE batched `AskUserQuestion` (never one-at-a-time). Do not ask questions mid-workflow — this is F4. If no preference profile was found, note in your summary: "no preference profile found — N decisions were surfaced that a profile might have auto-resolved; consider `/devflow:dynamic-profile`."
 
 ---
 

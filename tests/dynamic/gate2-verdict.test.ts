@@ -11,9 +11,10 @@
  *    The run now reports it as `UNVERIFIED`; surviving findings, coverage gaps
  *    and an escalated final gate still report `PARTIAL`.
  *
- * WAVE mode's merge rule (`_wave.mds`: "On engine PASS: merge") is untouched, and
- * the wave skeleton merges an UNVERIFIED ticket exactly as it merged the PASS that
- * a FAIL-FIXED Gate 2 used to report (plan delta 11; section 5 executes it).
+ * WAVE mode merges an UNVERIFIED ticket exactly as it merged the PASS that a
+ * FAIL-FIXED Gate 2 used to report (plan delta 11; section 5 executes it). Since
+ * #365 the rule is declared as well as executed: the engine schema lists
+ * UNVERIFIED and `_wave.mds` says "On engine PASS or UNVERIFIED: merge".
  *
  * Every guard has the three parts PF-064 asks of an absence-based check: a NAMED
  * collector, an assertion that the text it read is the text it claims to read,
@@ -27,7 +28,9 @@
  */
 
 import { describe, it, expect } from 'vitest'
+import { createRequire } from 'module'
 
+import { PR_EVIDENCE_SCRIPT } from '../evidence/seam.js'
 import {
   collectOrderViolations,
   parseFences,
@@ -276,6 +279,10 @@ describe('the run report — FAIL-FIXED is presented as UNVERIFIED', () => {
 // ---------------------------------------------------------------------------
 // 3. TEST_PLAN reaches the Test agent (AC-11)
 // ---------------------------------------------------------------------------
+//
+// Since #365 (PR6 AC-3) TEST_PLAN is the plan's checked TP lines, one string, and
+// the spawn key carries it as it is: the `test-spawn key` site's shipped spelling
+// moved from the d9d1c8e `JSON.stringify` form, which section 4 keeps as a probe.
 
 const TEST_PLAN_DECLARATION = 'const TEST_PLAN = args.testPlan'
 const GATE2_OPEN = 'const gate2 = await phase("gate2", async () => {'
@@ -351,14 +358,15 @@ export function collectTestPlanWiringViolations(script: string | null): string[]
 const D09DA34_WIRING_SEEDS: ReadonlyArray<{ readonly site: string; readonly shipped: string; readonly d09da34: string }> = [
   {
     site: 'declaration',
-    shipped: 'const TEST_PLAN = args.testPlan || null;  // /devflow:dynamic-plan testPlan (Pre-authoring step 4)\n',
+    shipped: 'const TEST_PLAN = args.testPlan || null;  // the plan\'s checked TP lines, one string (Pre-authoring step 4)\n',
     d09da34: '',
   },
   { site: 'skip-guard', shipped: '  if (!PLAN && !CRITERIA && !TEST_PLAN) {', d09da34: '  if (!PLAN && !CRITERIA) {' },
   { site: 'test-gate', shipped: '  if (CRITERIA || TEST_PLAN) {', d09da34: '  if (CRITERIA) {' },
   {
     site: 'test-spawn key',
-    shipped: '\nTEST_PLAN: ${TEST_PLAN ? JSON.stringify(TEST_PLAN) : "(none)"}\n',
+    // #365: the key carries the checked TP lines as they are — a string, never JSON.
+    shipped: '\nTEST_PLAN: ${TEST_PLAN || "(none)"}\n',
     d09da34: '\n',
   },
   {
@@ -435,7 +443,8 @@ interface Gate2Result {
 interface Gate2Inputs {
   readonly plan: string | null
   readonly criteria: string | null
-  readonly testPlan: readonly object[] | null
+  /** The plan's checked TP lines, one string (#365). */
+  readonly testPlan: string | null
 }
 
 type AsyncFn = (...args: unknown[]) => Promise<unknown>
@@ -468,10 +477,15 @@ async function runGate2(
   return { gate2, spawns }
 }
 
-/** A /devflow:dynamic-plan test plan: `{scenario, setup, expectedOutcome, verificationMethod}` entries. */
+/**
+ * A checked test plan as /devflow:dynamic-build passes it since #365: the plan's
+ * `## Test Plan` TP lines, one string. The first routing arm below holds that the
+ * script's own grammar admits it.
+ */
 const TEST_PLAN_FIXTURE = [
-  { scenario: 'TP-1 cycle-2 run posts', setup: 'two runs', expectedOutcome: 'posted', verificationMethod: 'gh api' },
-]
+  '- [ ] TP-1 (AC-1) a cycle-2 run posts its summary — method:ci',
+  '- [ ] TP-2 (AC-2) a repeated run posts nothing new — method:local [files: src/**]',
+].join('\n')
 
 interface RoutingCase {
   readonly label: string
@@ -491,7 +505,7 @@ const ROUTING_TABLE: readonly RoutingCase[] = [
     check: ({ gate2, spawns }) => {
       const tests = testSpawns(spawns)
       if (tests.length !== 1) return `expected one Test spawn, got ${tests.length} (testVerdict ${gate2.testVerdict})`
-      if (!tests[0].prompt.includes(`TEST_PLAN: ${JSON.stringify(TEST_PLAN_FIXTURE)}`)) return 'the Test prompt does not carry the plan'
+      if (!tests[0].prompt.includes(`TEST_PLAN: ${TEST_PLAN_FIXTURE}\n`)) return 'the Test prompt does not carry the TP lines as they are'
       return gate2.testVerdict === 'PASS' ? null : `testVerdict ${gate2.testVerdict}`
     },
   },
@@ -538,6 +552,11 @@ export async function collectGate2RoutingViolations(statement: string | null): P
 }
 
 describe('Gate 2 routing, executed over the shipped statement', () => {
+  it('the test-plan fixture is a real TP plan: pr-evidence.cjs parsePlan admits it', () => {
+    const PE = createRequire(import.meta.url)(PR_EVIDENCE_SCRIPT) as { parsePlan(text: unknown): { ok: boolean } }
+    expect(PE.parsePlan(TEST_PLAN_FIXTURE).ok).toBe(true)
+  })
+
   it('every routing row holds', async () => {
     expect(await collectGate2RoutingViolations(gate2Statement(SCRIPT!))).toEqual([])
   })
@@ -549,6 +568,14 @@ describe('Gate 2 routing, executed over the shipped statement', () => {
       ...args: unknown[]
     ) => unknown
     expect(run({ survivingFindings: [], fixedFindings: [], coverageGaps: [] }, { verdict: 'PASS' }, gate2)).toBe('UNVERIFIED')
+  })
+
+  it('known-bad probe: the d9d1c8e key JSON-encodes the TP lines instead of passing them', async () => {
+    const statement = gate2Statement(SCRIPT!)!
+    const d9d1c8e = seedOnce(statement, 'TEST_PLAN: ${TEST_PLAN || "(none)"}', 'TEST_PLAN: ${TEST_PLAN ? JSON.stringify(TEST_PLAN) : "(none)"}')
+    expect(await collectGate2RoutingViolations(d9d1c8e)).toEqual([
+      'a test plan alone runs the Test agent with the plan: the Test prompt does not carry the TP lines as they are',
+    ])
   })
 
   it('known-bad probe: the d09da34 Gate 2 drops a test plan and never tells the Test agent about one', async () => {
@@ -569,8 +596,8 @@ describe('Gate 2 routing, executed over the shipped statement', () => {
 // UNVERIFIED reaches its merge check. Before #360 a FAIL-FIXED Gate 2 reported
 // PASS and merged; a `=== "PASS"` check over the new alias would quarantine it
 // instead — and cascade-block its dependents under the reason "engine
-// fail/escalated". Whether an UNVERIFIED ticket should merge is the wave merge
-// rule's decision, not this PR's, so the wave keeps merging it.
+// fail/escalated". #365 (D2) kept the merge and declared it: UNVERIFIED merges,
+// its wave-PR row is flagged, and its TP lines join the wave test plan.
 
 const WAVE_ENGINE_CALL = 'const engineResult = await runSingleTicketEngine('
 

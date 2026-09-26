@@ -65,6 +65,7 @@ Note the `budget` value from the Workflow tool context (or default to "medium" i
 
 - **SINGLE mode:** input is one ticket, one issue, one task description, or one plan document
 - **WAVE mode:** input is a set of GitHub issues (wave labels, milestone, issue list), or the user says "wave" / "all tickets in wave N"
+- **A `/devflow:dynamic-tickets` ticket directory** (`.devflow/docs/tickets/\{slug\}/\{ts\}/`) is WAVE input: in each ticket file (every `.md` there but `tracking-issue.md`), the `**Issue:**` line directly after `**Depends on:**` is one raw `ISSUE_REFS` token, forwarded to the wave's pre-fetch verbatim — never rendered, normalised or re-derived. A ticket file with no `**Issue:**` line, or more than one, contributes no token; name it in the run summary as `not filed`.
 
 When ambiguous, ask the user before authoring: "Is this a single ticket or a wave of tickets?"
 
@@ -80,7 +81,16 @@ Check for (in priority order):
 
 Extract or note:
 - Implementation plan (for Code agent prompt and Evaluate agent)
-- Acceptance criteria and test plan (for Gate 2) — pass them as `criteria` and `testPlan` when invoking the workflow; a test plan alone still runs the Test agent
+- Acceptance criteria (for Gate 2) — pass them as `criteria` when invoking the workflow
+- The test plan (for Gate 2) — a plan's TP lines, passed only once they pass this check. Copy the plan's `## Test Plan` section byte for byte into a fresh `mktemp` file with the Write tool, never through an interpolated shell string, and run:
+
+```bash
+node "${DEVFLOW_DIR:-$HOME/.devflow}/scripts/verify-evidence.cjs" check tp <that file>; echo "exit=$?"
+```
+
+  Only `exit=0` passes it: pass the section's TP lines, as one string, as `testPlan` when invoking the workflow — a test plan alone still runs the Test agent. Any other result, or a plan with no `## Test Plan` section: omit `testPlan` and note `Test plan: missing or malformed` in the run summary. Nothing is repaired, and a test plan in any other shape — an older JSON one included — is never passed.
+
+In WAVE mode, run this step once per ticket and author the results as `plans`, keyed by the ticket's reference: each ticket gets its own `plan`, `criteria` and checked `testPlan` — never one test plan for the whole wave. Keep each ticket's checked TP lines: step 3 after the workflow builds the wave test plan from them.
 
 If none found: build proceeds Gate-1-only (Gate 2 skipped with a note). Never refuse to build; never fabricate criteria.
 
@@ -88,14 +98,16 @@ If none found: build proceeds Gate-1-only (Gate 2 skipped with a note). Never re
 
 Check, in priority order:
 - An explicit candidate issue reference or issue URL in the user's input (e.g. `#42`, `42`, or `https://github.com/…/issues/42`)
-- The tracking-issue reference in the ticket set's `tracking-issue.md` (written by `/devflow:dynamic-tickets` at `.devflow/docs/tickets/\{slug\}/\{ts\}/tracking-issue.md`)
+- The `**Issue:**` line directly after the H1 of the ticket set's `tracking-issue.md` (written by `/devflow:dynamic-tickets`' filing step; the file is at `.devflow/docs/tickets/\{slug\}/\{ts\}/tracking-issue.md`), as a raw token — only when the file holds exactly one `**Issue:**` line
 - Otherwise: none
 
 {issue_ref_grammar()}
 
-If a number is found, record it as the command-level `ISSUE_NUMBER` and pass it as `issueNumber: <number>` when invoking the workflow (the Code agent threads it through as `ISSUE_NUMBER`). If none is found, pass nothing — `ISSUE_NUMBER` defaults to `"(none)"` in the workflow script.
+If a number is found, record it as the command-level `ISSUE_NUMBER`:
+- **SINGLE mode:** it is the ticket's own reference. Pass it as `issueNumber: <number>` when invoking the workflow; the engine hands it to setup-task as `ISSUE_INPUT`. If none is found, pass nothing.
+- **WAVE mode:** it is the tracking issue. Only step 2 after the workflow uses it, for the wave report. It never reaches a ticket: each ticket's engine gets that ticket's own reference as `issueInput`.
 
-Pass the `ISSUE_PR_LINK` captured above the same way, as `issuePrLink: <rendered line>` — never re-derive it from `ISSUE_NUMBER`. If no `### Handoff Values` block supplied one, pass nothing: `ISSUE_PR_LINK` defaults to `"(none)"` and the Code agent emits the `## Related Issues` heading with no reference.
+Never pass `ISSUE_PR_LINK` into the workflow. The engine binds each ticket's `ISSUE_NUMBER` and `ISSUE_PR_LINK` from that ticket's own setup-task Output (`### Handoff Values`), never from the token it passed in, and hands both to that ticket's Code agents. No `- **PR link line**:` captured ⇒ `ISSUE_PR_LINK` is `"(none)"` and the Code agent emits the `## Related Issues` heading with no reference.
 
 ---
 
@@ -116,22 +128,33 @@ const TICKET = args.ticket || args[0] || "see task description";
 const BRANCH = args.branch || `ticket/${TICKET.replace(/[^a-z0-9]/gi, '-').toLowerCase()}`;
 const PLAN = args.plan || null;
 const CRITERIA = args.criteria || null;
-const TEST_PLAN = args.testPlan || null;  // /devflow:dynamic-plan testPlan (Pre-authoring step 4)
+const TEST_PLAN = args.testPlan || null;  // the plan's checked TP lines, one string (Pre-authoring step 4)
 const DECISIONS_CONTEXT = args.decisionsContext || "";  // injected before authoring
-const ISSUE_NUMBER = args.issueNumber || "(none)";  // resolved in Pre-authoring step 5
-const ISSUE_PR_LINK = args.issuePrLink || "(none)";  // captured in Pre-authoring step 4; "(none)" ⇒ Code emits the heading with no reference
+const ISSUE_INPUT = args.issueInput || args.issueNumber || "(none)";  // this ticket's OWN raw reference (Pre-authoring step 5; a wave passes issueInput) — setup-task's input, never a Code agent's
 const ISSUE_REQUIRED = String(args.issueRequired) === "false" ? "false" : "true";  // Pre-authoring step 0; only an explicit false turns it off — absent or unrecognised fails closed, like the resolver
 const APPLY_CONVENTIONS = String(args.applyConventions) === "false" ? "false" : "true";
 
 // Phase 1: Git setup — declare the operation; the agent owns the process
-await phase("setup", () =>
+const setup = await phase("setup", () =>
   agent(`OPERATION: setup-task
 BASE_BRANCH: ${args.baseBranch || "HEAD"}
 TASK_DESCRIPTION: ${TICKET}
 ISSUE_REQUIRED: ${ISSUE_REQUIRED}
 APPLY_CONVENTIONS: ${APPLY_CONVENTIONS}
-${ISSUE_NUMBER && ISSUE_NUMBER !== "(none)" ? "ISSUE_INPUT: " + ISSUE_NUMBER : ""}`.trim(), { agentType: "Git" })
+${ISSUE_INPUT !== "(none)" ? "ISSUE_INPUT: " + ISSUE_INPUT : ""}
+Return: {"issueId": "<the - **Issue ID**: value under your ### Handoff Values, or (none)>", "prLinkLine": "<the - **PR link line**: value, or (none)>"}`, { agentType: "Git" })
 );
+
+// The ticket's own Handoff Values, read from setup-task's Output — never derived from ISSUE_INPUT.
+// An Issue ID is a bare number or a KEY-number, per the provider; any other value — "none", blank, prose — is no capture, so the stop fails closed.
+const ISSUE_ID_SHAPE = /^(?:[1-9][0-9]{0,8}|[A-Z][A-Z0-9_]{0,9}-[1-9][0-9]{0,8})$/;
+const ISSUE_NUMBER = ISSUE_ID_SHAPE.test(String(setup?.issueId ?? "")) ? setup.issueId : "(none)";  // the captured Issue ID; "(none)" ⇒ none was captured
+const ISSUE_PR_LINK = setup?.prLinkLine || "(none)";  // "(none)" ⇒ Code emits the heading with no reference
+
+// Ticket-link stop, before implement. The workflow cannot ask, so it never records an exception: it stops.
+if (ISSUE_REQUIRED === "true" && ISSUE_NUMBER === "(none)") {
+  return { ticket: TICKET, branch: BRANCH, verdict: "ESCALATED", issueId: "(none)", issuePrLink: ISSUE_PR_LINK, escalations: [{ type: "ticket-link-missing", description: "setup-task captured no Issue ID while issues are required — link or create this ticket's issue, then re-run" }] };
+}
 
 // Phase 2: Implement
 await phase("implement", () =>
@@ -221,7 +244,7 @@ Self-verify your fix compiles (background-Bash + Monitor for any build >120s —
   if (CRITERIA || TEST_PLAN) {
     const testResult = await agent(`Run scenario-based acceptance tests on branch ${BRANCH} against these criteria:
 ${CRITERIA || "(none)"}
-TEST_PLAN: ${TEST_PLAN ? JSON.stringify(TEST_PLAN) : "(none)"}
+TEST_PLAN: ${TEST_PLAN || "(none)"}
 For any test/build command that may run silent >120s, use the background-Bash + Monitor poll procedure (your "Long-running commands" discipline) so you never trip the 180s watchdog.
 Cover: functionality, API contracts, performance, and cover every TEST_PLAN scenario. Report: PASS or FAIL per scenario.`, { agentType: "Test" });
     testVerdict = testResult.verdict;
@@ -419,9 +442,9 @@ const coverageGaps = reviewResult.coverageGaps || [];
 const gate2Unverified = [gate2.evaluateVerdict, gate2.testVerdict].includes("FAIL-FIXED");
 const overallVerdict = (reviewResult.survivingFindings?.length || 0) === 0 && coverageGaps.length === 0 && gate1Final.verdict !== "ESCALATED" ? (gate2Unverified ? "UNVERIFIED" : "PASS") : "PARTIAL";
 
-// Phase 6: Report
-return phase("report", () =>
-  agent(`Synthesize the build run for ticket ${TICKET} on branch ${BRANCH}:
+// Phase 6: Report — the phase returns the engine result (engine_output_schema); its verdict is overallVerdict
+return phase("report", async () => {
+  const report = await agent(`Synthesize the build run for ticket ${TICKET} on branch ${BRANCH}:
 - Implementation summary
 - Gate 1 (#1 post-implementation) result
 - Gate 2 result: ${JSON.stringify(gate2)} (render FAIL-FIXED as "UNVERIFIED (fixes applied, not re-run)", never PASS)
@@ -432,8 +455,18 @@ return phase("report", () =>
   - SURVIVING: ${reviewResult.survivingFindings?.length || 0} findings not addressed (fix Code agent failed or deferred): ${JSON.stringify(reviewResult.survivingFindings)}
 - Overall verdict: ${overallVerdict}
 
-Write a concise report. Present only surviving findings as outstanding — never present FIXED findings as outstanding. The branch is ready for user review — do NOT merge to main.`, { agentType: "Synthesize" })
-);
+Write a concise report. Present only surviving findings as outstanding — never present FIXED findings as outstanding. The branch is ready for user review — do NOT merge to main.`, { agentType: "Synthesize" });
+  return {
+    ticket: TICKET, branch: BRANCH, verdict: overallVerdict, issueId: ISSUE_NUMBER, issuePrLink: ISSUE_PR_LINK,
+    survivingFindings: reviewResult.survivingFindings || [], fixedFindings: reviewResult.fixedFindings || [],
+    reviewCoverage: { failedFocuses: coverageGaps, complete: coverageGaps.length === 0 },
+    escalations: [
+      ...(gate1Final.verdict === "ESCALATED" ? [{ type: "validation-exhausted", description: gate1Final.reason || "final Gate 1 escalated" }] : []),
+      ...coverageGaps.map(focus => ({ type: "review-coverage-incomplete", description: `review coverage incomplete: ${focus}` })),
+    ],
+    gate2, report,
+  };
+});
 ```
 
 {concurrency_doctrine()}
@@ -478,6 +511,12 @@ Wave skeleton — compact reference (see `wave_loop()` doctrine for full semanti
 
 ```js
 // Wave round loop: Design agent reader → per-ticket try/catch → cascade quarantine via next reader
+// runSingleTicketEngine(args) is the SINGLE skeleton above as a function of its OWN args: the wave's
+// args.issueNumber (the tracking issue, Pre-authoring step 5) is never in its scope.
+const WAVE_TICKETS = [...remainingTickets];  // the pre-fetch's refs, in input order — the wave block's row order
+const results = {};  // ticketId → its row of the workflow's return; a ticket with no entry never ran
+// A row from an engine result: the fields step 3 after the workflow renders
+const rowOf = (ticketId, r, merged) => ({ ticket: ticketId, ran: true, verdict: r?.verdict || r?.overallVerdict || null, merged, issuePrLink: r?.issuePrLink || "(none)", evaluateVerdict: r?.gate2?.evaluateVerdict, testVerdict: r?.gate2?.testVerdict, surviving: r?.survivingFindings?.length, coverageComplete: r?.reviewCoverage?.complete });
 const MAX_ROUNDS = Math.max(10, remainingTickets.length * 2 + 5);  // heuristic; always finite
 const waveState = { quarantined: [], round: 0 };
 let reAskedThisDeadlock = false;  // re-ask guard: re-ask once on empty ready-set, then escalate
@@ -498,7 +537,7 @@ Return: {"ready": [...ticket-ids], "blocked": [{"ticket": "id", "namedBlocker": 
     { agentType: "Design" }
   );
 
-  const ready = waveRead?.ready || [];
+  const ready = (waveRead?.ready || []).filter(t => remainingTickets.includes(t));  // only the pre-fetch's own refs: a ready ID the reader invents never reaches an engine
   if (ready.length === 0) {
     if (reAskedThisDeadlock) break;  // second empty read → declare deadlock with named blockers, break
     reAskedThisDeadlock = true;      // re-ask once with vacuous-truth rule quoted verbatim
@@ -508,21 +547,31 @@ Return: {"ready": [...ticket-ids], "blocked": [{"ticket": "id", "namedBlocker": 
 
   for (const ticketId of ready) {
     try {
-      const engineResult = await runSingleTicketEngine({ ticketId, integrationBranch: INTEGRATION_BRANCH, plans, decisionsContext: DECISIONS_CONTEXT, issueNumber: ISSUE_NUMBER, issuePrLink: ISSUE_PR_LINK });
+      // ticketId is the ISSUE_REF the pre-fetch heading printed — this ticket's OWN reference: the engine's `ticket` (its TICKET,
+      // slugged into the BRANCH merged below) and its setup-task ISSUE_INPUT; plans[ticketId] is its own plan, criteria and checked testPlan (Pre-authoring step 4)
+      const engineResult = await runSingleTicketEngine({ ticket: ticketId, baseBranch: INTEGRATION_BRANCH, ...(plans[ticketId] || {}), decisionsContext: DECISIONS_CONTEXT, issueRequired: ISSUE_REQUIRED, applyConventions: APPLY_CONVENTIONS, issueInput: ticketId });
       // Check both verdict (engine_output_schema) and overallVerdict (SINGLE skeleton alias).
-      // UNVERIFIED is the SINGLE report's PASS with a FAIL-FIXED Gate 2 — the wave merges it as it merges PASS.
+      // PASS and UNVERIFIED merge; PARTIAL, FAIL, ESCALATED (the ticket-link stop included) or no verdict quarantine.
       if (["PASS", "UNVERIFIED"].includes(engineResult.verdict || engineResult.overallVerdict)) {
-        await agent(`Merge ticket/${ticketId} to ${INTEGRATION_BRANCH}. Include ticket ID ${ticketId} in the merge commit message. Run Validate agent (build + test) after merge.`, { agentType: "Git" });
+        const merge = await agent(`Merge ${engineResult.branch} to ${INTEGRATION_BRANCH}. Include ticket ID ${ticketId} in the merge commit message. Run Validate agent (build + test) after merge.
+Return: {"merged": true} — or {"merged": false, "reason": "<why>"} when the merge or the post-merge build failed and the merge was not kept.`, { agentType: "Git" });
+        results[ticketId] = rowOf(ticketId, engineResult, merge?.merged === true);
+        if (merge?.merged !== true) waveState.quarantined.push({ ticket: ticketId, reason: merge?.reason || "merge or post-merge build failed" });
       } else {
+        results[ticketId] = rowOf(ticketId, engineResult, false);
         waveState.quarantined.push({ ticket: ticketId, reason: engineResult.escalations?.[0]?.description || "engine fail/escalated" });
       }
     } catch (err) {
       // One ticket's crash/stall never kills the wave — quarantine it; cascade propagates to dependents via the next reader round
+      results[ticketId] = rowOf(ticketId, null, false);
       waveState.quarantined.push({ ticket: ticketId, reason: `engine crash: ${String(err)}` });
     }
     remainingTickets = remainingTickets.filter(t => t !== ticketId);
   }
 }
+
+// After the wave report is written: one row per wave ticket, in input order. No entry ⇒ never ran (cascade, deadlock, MAX_ROUNDS).
+return { tickets: WAVE_TICKETS.map(t => results[t] || { ticket: t, ran: false, verdict: null, merged: false, issuePrLink: "(none)" }), quarantined: waveState.quarantined };
 ```
 
 ---
@@ -544,8 +593,64 @@ A workflow cannot pause mid-run. After the build/wave workflow returns, you (the
    The Git agent deduplicates via its own marker — it skips if a report for this `WAVE_ID` is already posted. The marker's format belongs to the operation; this caller passes `WAVE_ID` and never restates the literal. On API failure it degrades gracefully (`TRACEABILITY: DEGRADED (\{reason\})`) and continues — never blocks the post-wave step. This comment is the evidence surface for the PR-less integration-branch path; no other PR machinery is invented.
 
    In WAVE mode, if no tracking-issue number was resolved in Pre-authoring step 5: state `TRACEABILITY: DEGRADED (no tracking issue for this run)` in the run summary and skip — never skip silently.
-3. Surface ALL of them — escalations AND open decisions — to the user in ONE batched `AskUserQuestion` (never one-at-a-time). `_wave.mds`'s escalation model already quarantines-and-continues; this batches the surfacing so the user answers everything in a single pass.
-4. If `~/.devflow/preference-profile.md` was absent, note in your summary: "no preference profile found — N decisions surfaced that a profile might have auto-resolved; consider `/devflow:dynamic-profile`."
+3. **Compose the wave PR inputs** (WAVE mode only — skip this step entirely in SINGLE mode). The workflow returned `tickets`: one entry per wave ticket, in its input order, each `\{ticket, ran, verdict, merged, issuePrLink, evaluateVerdict, testVerdict, surviving, coverageComplete\}`. Every value in it is agent-reported and treated as untrusted: nothing below is repaired, and no reference is ever composed from a number.
+   - **Branch check.** Run `git -C "\{integration worktree root\}" branch --show-current`. Only a name matching `^wave/[a-z0-9][a-z0-9-]\{0,59\}$` opens a wave PR, and its part after `wave/` is the `\{slug\}` below. Any other name: record `TRACEABILITY: DEGRADED (not a wave branch)` and go to step 4 with no wave PR.
+   - **Nothing merged** (no entry has `merged: true`): record `Wave PR: skipped (nothing merged)` and go to step 4.
+   - Otherwise compose (a) and then (b).
+
+   **(a) The wave block.** Write it with the Write tool, byte for byte, to a fresh `mktemp` file — never through an interpolated shell string — in exactly this shape: the two headings with one blank line between them, the related lines in row order under the first, and the header and separator verbatim directly under the second:
+
+```markdown
+## Related Issues
+{one related line per row that has one}
+
+## Wave Evidence
+| T | Ticket | Verdict | Evaluate | Test | Surviving | Coverage |
+|---|---|---|---|---|---|---|
+| T{k} | {ticket} | {verdict} | {evaluate} | {test} | {surviving} | {coverage} |
+```
+
+   One row per `tickets` entry, `T1` … `Tn` in order. Each entry maps to exactly one row, by these rules:
+   - **Verdict** — one of `PASS | UNVERIFIED | QUARANTINED | BLOCKED`. `ran: false` (cascade, deadlock, MAX_ROUNDS) ⇒ `BLOCKED`. `merged: true` with `verdict` `PASS` ⇒ `PASS`. `merged: true` with `verdict` `UNVERIFIED` ⇒ `UNVERIFIED`: the row stays flagged, and its TP lines join the wave test plan. Anything else that ran — PARTIAL, FAIL, ESCALATED, no verdict, an engine crash, a failed merge or a red post-merge build — ⇒ `QUARANTINED`.
+   - **Evaluate, Test** — the entry's `evaluateVerdict` and `testVerdict` when it is `PASS`, `FAIL`, `FAIL-FIXED` or `SKIPPED`, else `—`. **Surviving** — its `surviving` count when it is 0–999, else `—`. **Coverage** — `complete` or `incomplete` from `coverageComplete`, else `—`. A `BLOCKED` row is `—` in all four.
+   - **Ticket and related line** — the entry's captured `issuePrLink` is the only source of a closing reference. When it is not `(none)`: a `PASS` or `UNVERIFIED` row's related line is `issuePrLink` verbatim; a `QUARANTINED` row's is `issuePrLink` with a leading `Closes ` replaced by `Refs `; and the Ticket cell is the reference that line names (its text after `Closes ` or `Refs `). When it is `(none)`: no related line, and the Ticket cell is `(none)` on a `PASS` or `UNVERIFIED` row; on any other row it is the entry's `ticket` when that is a `#N` or `KEY-N` reference, else `(none)`.
+
+   Then check it:
+
+```bash
+node "${DEVFLOW_DIR:-$HOME/.devflow}/scripts/verify-evidence.cjs" check wave <that file>; echo "exit=$?"
+```
+
+   Only `exit=0` admits the file's text, verbatim, as `PR_WAVE_BLOCK`. Any other result: no wave PR — record `Wave PR: not opened (wave block refused: <the code on stderr>)` and go to step 4.
+
+   **Required link** — only when `EVIDENCE_POLICY` is `required`: a `PASS` or `UNVERIFIED` row whose Ticket is `(none)` — a merged ticket whose setup-task captured an Issue ID but no link line, so the wave PR would close nothing for it — ⇒ `Wave PR: BLOCKED (no ticket link for T<k>, …)`, with no wave PR question and the remedy "link or create those tickets' issues, then re-run"; there is no exception. Under `standard` such a row stays as the Ticket rule above renders it.
+
+   **(b) The wave test plan.** Take the checked TP lines each merged row's ticket was given in Pre-authoring step 4, in row order; renumber them `TP-1`, `TP-2`, … and prefix each scenario with its row's `T<k>: `. A line is never shortened or reworded: one whose prefixed scenario would pass 200 characters leaves its ticket with no usable test plan. Write `## Test Plan` and those lines, and nothing else, to `"\{integration worktree root\}/.devflow/docs/evidence-wave-\{slug\}.md"` with the Write tool, then run (the path double-quoted; one rewrite from the same lines after a refusal, never a second):
+
+```bash
+node "${DEVFLOW_DIR:-$HOME/.devflow}/scripts/verify-evidence.cjs" check tp "{integration worktree root}/.devflow/docs/evidence-wave-{slug}.md"; echo "exit=$?"
+node "${DEVFLOW_DIR:-$HOME/.devflow}/scripts/verify-evidence.cjs" render --plan "{integration worktree root}/.devflow/docs/evidence-wave-{slug}.md"; echo "exit=$?"
+```
+
+   Only when both exit 0 is `PR_TEST_PLAN_BLOCK` the render's stdout, byte for byte without its `exit=` line; in every other case it is `(none)`.
+
+   **Required plan** — only when `EVIDENCE_POLICY` is `required`: a merged ticket with no usable test plan ⇒ `Wave PR: BLOCKED (no test plan for T<k>, …)`, more than 200 lines in all ⇒ `Wave PR: BLOCKED (test plan over 200 lines)`, and a plan that did not check and render ⇒ `Wave PR: BLOCKED (test plan malformed)` — each with no wave PR question and the remedy "run `/devflow:dynamic-plan` for those tickets and re-run, or ship them through `/implement`"; no exception is offered here. Otherwise the block is optional: a ticket with no usable test plan is left out of it and named in the summary, and `(none)` is passed when no line remains.
+4. Surface ALL of them — escalations AND open decisions — to the user in ONE batched `AskUserQuestion` (never one-at-a-time). `_wave.mds`'s escalation model already quarantines-and-continues; this batches the surfacing so the user answers everything in a single pass.
+   - **The wave PR question.** Only when step 3 composed `PR_WAVE_BLOCK`, the batch gains exactly one question: "Open the wave PR from wave/\{slug\}? It links \{n\} merged tickets (\{u\} UNVERIFIED) and references \{q\} quarantined." It has exactly two options: open it, or don't. The counts come from the checked block's rows: `\{n\}` PASS and UNVERIFIED, `\{u\}` UNVERIFIED, `\{q\}` QUARANTINED.
+   - A `ticket-link-missing` escalation carries its remedy: link or create that ticket's issue, then re-run. There is no per-ticket exception.
+   - **Headless** — `AskUserQuestion` is unavailable, or no answer comes — is a decline: nothing is created and nothing is pushed.
+5. If `~/.devflow/preference-profile.md` was absent, note in your summary: "no preference profile found — N decisions surfaced that a profile might have auto-resolved; consider `/devflow:dynamic-profile`."
+6. **Wave PR** — only after an explicit "open" in step 4. Spawn:
+   ```
+   Agent(subagent_type="Git"):
+   "OPERATION: ensure-pr-ready
+   WORKTREE_PATH: \{integration worktree root\}
+   PR_DESCRIPTION_GUIDANCE: \{counts only — the wave slug and the merged, quarantined and blocked counts; never an issue title or body\}
+   APPLY_CONVENTIONS: \{APPLY_CONVENTIONS\}
+   PR_WAVE_BLOCK: \{PR_WAVE_BLOCK verbatim\}
+   PR_TEST_PLAN_BLOCK: \{PR_TEST_PLAN_BLOCK verbatim, or (none)\}"
+   ```
+   The Git agent pastes each block only behind its own check. Report its `**PR**` line and any `TRACEABILITY: DEGRADED (\{reason\})` lines. The wave PR is opened here and nowhere else; it is never merged, and main is never touched — the user merges.
 
 Do NOT ask questions mid-workflow — that is impossible (F4). The workflow only WRITES the report; you read it and ask.
 
