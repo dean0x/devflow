@@ -187,6 +187,8 @@ Return: { ticketPaths: string[], trackingIssuePath: string }.`, { agentType: "Sy
 
 The six-phase pipeline above never files an issue. Filing happens here, at the command boundary, after the workflow has returned: you (the main model) spawn the Git agent for it.
 
+**Drafted lines first, under every policy.** Only step 3 below writes an `**Issue:**` line, so one already in a ticket file or in `tracking-issue.md` came from a drafting agent and names no issue filed here — `/devflow:dynamic-build` would read it as that ticket's own reference, and a wave PR would close it. Before any spawn, remove each such line using the Edit tool, and name every file you removed one from in the report.
+
 **File the issues** only when `ISSUE_REQUIRED` is `true`. Otherwise file nothing, and say so in the report.
 
 1. **Order and bound.** The tracking issue first, then each ticket file in slate order (the workflow's `ticketPaths`). One Git spawn at a time, never in parallel, and at most 50 spawns in all: a file past the cap is reported `not filed (cap 50)`.

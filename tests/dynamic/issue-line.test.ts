@@ -118,6 +118,10 @@ export function collectPlacementDrift(tickets: string, build: string, template: 
   // The reader forwards the token raw — the L1 grammar: never rendered, normalised, or ruled out.
   need('reader: the ticket token is forwarded verbatim', waveInputReader(build).includes('forwarded to the wave\'s pre-fetch verbatim — never rendered, normalised or re-derived'))
   need('reader: the tracking token is read raw', trackingReader(build).includes('tracking-issue.md`), as a raw token'))
+  // A forged line cannot be told from a filed one by content, so a file carrying
+  // more than one yields no reference at all rather than whichever one a reader picks.
+  need('reader: a ticket file with several lines yields no token', waveInputReader(build).includes('A ticket file with no `**Issue:**` line, or more than one, contributes no token'))
+  need('reader: the tracking token only from a file with exactly one', trackingReader(build).includes('only when the file holds exactly one `**Issue:**` line'))
   return out
 }
 
@@ -152,6 +156,8 @@ describe('**Issue:** — /dynamic-tickets writer ↔ /dynamic-build reader', () 
     ['template: only the filing step writes it', 'template', 'a drafting agent never writes it', 'a drafting agent may write it'],
     ['reader: the ticket token is forwarded verbatim', 'build', 'verbatim — never rendered, normalised or re-derived', 'as rendered'],
     ['reader: the tracking token is read raw', 'build', 'tracking-issue.md`), as a raw token', 'tracking-issue.md`), rendered as a number'],
+    ['reader: a ticket file with several lines yields no token', 'build', ', or more than one, contributes no token', ' contributes no token'],
+    ['reader: the tracking token only from a file with exactly one', 'build', ' — only when the file holds exactly one `**Issue:**` line', ''],
   ]
 
   it('probe cardinality equals site cardinality', () => {
@@ -248,8 +254,17 @@ export function collectFilingStepDefects(tickets: string): string[] {
   need('spawn: one ensure-traceable-issue fence with its title, summary and file', spawns.length === 1
     && ['TASK_DESCRIPTION: ', 'REQUIREMENTS: ', 'PLAN_ARTIFACT_PATH: '].every(k => spawns[0].includes(k)))
   need('edit: the line is inserted with the Edit tool, nothing else changed', step.includes('with the Edit tool') && step.includes('Change nothing else in the file.'))
+  // Only the filing step writes the line, so a drafted one is removed before any
+  // spawn — under every policy, or a standard run (which files nothing) would hand
+  // /dynamic-build a reference no one filed.
+  const drafted = step.indexOf(DRAFTED_LINES_RULE)
+  need('drafted lines: removed first, under every policy', drafted !== -1 && drafted < step.indexOf('**File the issues**')
+    && step.includes('Before any spawn, remove each such line using the Edit tool'))
   return out
 }
+
+/** The lead of the filing step's drafted-line removal, which precedes the ISSUE_REQUIRED gate. */
+const DRAFTED_LINES_RULE = '**Drafted lines first, under every policy.**'
 
 const FILING_SEEDS: ReadonlyArray<readonly [label: string, from: string, to: string]> = [
   ['gate', '**File the issues** only when `ISSUE_REQUIRED` is `true`.', '**File the issues** always.'],
@@ -259,6 +274,7 @@ const FILING_SEEDS: ReadonlyArray<readonly [label: string, from: string, to: str
   ['rate limit', '`DEGRADED (rate limited)` ⇒ stop filing', '`DEGRADED (rate limited)` ⇒ retry'],
   ['spawn', 'PLAN_ARTIFACT_PATH: {the ticket or tracking-issue file path}\n', ''],
   ['edit', 'Change nothing else in the file.', 'Rewrite the file.'],
+  ['drafted lines', 'Before any spawn, remove each such line using the Edit tool', 'Before any spawn, keep each such line'],
 ]
 
 describe('AC-9: /dynamic-tickets files the issues after the workflow — gated, one at a time, at most 50', () => {
@@ -279,6 +295,15 @@ describe('AC-9: /dynamic-tickets files the issues after the workflow — gated, 
     const workflow = parseFences(TICKETS_MD).find(f => f.includes(WORKFLOW_MARKER))!
     const seeded = seedOnce(TICKETS_MD, workflow, workflow.replace('return phase("tracking-issue"', 'await agent(`OPERATION: ensure-traceable-issue`, { agentType: "Git" });\nreturn phase("tracking-issue"'))
     expect(collectFilingStepDefects(seeded)).toEqual(['the workflow files nothing'])
+  })
+
+  it('known-bad probe: the drafted-line removal moved under the ISSUE_REQUIRED gate is reported', () => {
+    const start = TICKETS_MD.indexOf(DRAFTED_LINES_RULE)
+    const paragraph = TICKETS_MD.slice(start, TICKETS_MD.indexOf('\n\n', start) + 2)
+    expect(paragraph.length, 'the paragraph is found').toBeGreaterThan(200)
+    const gateLine = 'Otherwise file nothing, and say so in the report.\n\n'
+    const moved = seedOnce(seedOnce(TICKETS_MD, paragraph, ''), gateLine, `${gateLine}${paragraph}`)
+    expect(collectFilingStepDefects(moved)).toEqual(['drafted lines: removed first, under every policy'])
   })
 
   it('known-bad probe: a step moved above the workflow is reported', () => {

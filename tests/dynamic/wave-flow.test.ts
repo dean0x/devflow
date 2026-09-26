@@ -79,6 +79,8 @@ function fenceBody(fence: string): string {
 
 const SINGLE_MARKER = 'name: "devflow-dynamic-build"'
 const WAVE_ENGINE_CALL = 'const engineResult = await runSingleTicketEngine('
+/** The engine's one Issue ID binding: setup-task's capture, shape-gated so a non-ID value is no capture. */
+const CAPTURE_LINE = 'const ISSUE_NUMBER = ISSUE_ID_SHAPE.test(String(setup?.issueId ?? "")) ? setup.issueId : "(none)";'
 
 /** The SINGLE workflow script with its pure-literal `export const meta` dropped, or null. */
 export function singleEngineBody(built: string): string | null {
@@ -123,6 +125,8 @@ interface World {
   readonly deps?: Readonly<Record<string, readonly string[]>>
   /** Tickets whose merge or post-merge build fails. */
   readonly failMerge?: readonly string[]
+  /** Ready IDs the reader adds that are not in the remaining set — an invented or injected ticket. */
+  readonly injectReady?: readonly string[]
 }
 
 /**
@@ -140,7 +144,7 @@ function stubAgent(world: World, spawns: Spawn[]): Agent {
       const quarantined = (JSON.parse(/^Quarantined [^:]*: (.*)$/m.exec(prompt)?.[1] ?? '[]') as Array<{ ticket: string }>).map(q => q.ticket)
       // The reader's rule: every named dependency has left the remaining set, and none was quarantined (the cascade).
       const ready = remaining.filter(t => (world.deps?.[t] ?? []).every(d => !remaining.includes(d) && !quarantined.includes(d)))
-      return { ready, blocked: [] }
+      return { ready: [...ready, ...(world.injectReady ?? [])], blocked: [] }
     }
     if (opts.agentType === 'Git' && prompt.startsWith('OPERATION: setup-task')) {
       current = world.tickets[/^ISSUE_INPUT: (.*)$/m.exec(prompt)?.[1] ?? '(none)'] ?? {}
@@ -312,6 +316,23 @@ describe('AC-10: each ticket gets its own reference; its Code agents get what se
     expect(run.tickets.map(t => [t.ticket, t.merged, t.issuePrLink])).toEqual([['#12', true, 'Closes #12'], ['#13', true, 'Closes #13']])
   })
 
+  /** The shipped reader-result line: the ready set, narrowed to the pre-fetch's own refs. */
+  const READY_LINE = 'const ready = (waveRead?.ready || []).filter(t => remainingTickets.includes(t));'
+  const INVENTED = '#777'
+
+  it('executed: a ready ID the reader invents never reaches an engine, and no row is added for it', async () => {
+    const run = await runWave(WAVE!, SINGLE!, { ...TWO_TICKETS, injectReady: [INVENTED] }, TWO_PLANS, 'true')
+    expect(run.spawns.some(s => s.agentType === 'Design'), 'the reader must have run').toBe(true)
+    expect(run.spawns.filter(s => s.prompt.includes(INVENTED) && s.agentType !== 'Design')).toEqual([])
+    expect(run.tickets.map(t => t.ticket)).toEqual(['#12', '#13'])
+  })
+
+  it('known-bad probe: an unfiltered ready set hands the invented ID to setup-task', async () => {
+    const unfiltered = seedOnce(WAVE!, READY_LINE, 'const ready = waveRead?.ready || [];')
+    const run = await runWave(unfiltered, SINGLE!, { ...TWO_TICKETS, injectReady: [INVENTED] }, TWO_PLANS, 'true')
+    expect(run.spawns.some(s => s.prompt.startsWith('OPERATION: setup-task') && s.prompt.split('\n').includes(`ISSUE_INPUT: ${INVENTED}`))).toBe(true)
+  })
+
   it('known-bad probe: the d9d1c8e call hands every ticket the tracking issue and no test plan', async () => {
     const d9d1c8e = seedOnce(WAVE!, shippedEngineCall(WAVE!), D9D1C8E_ENGINE_CALL)
     const run = await runWave(d9d1c8e, SINGLE!, TWO_TICKETS, TWO_PLANS, 'true')
@@ -322,7 +343,7 @@ describe('AC-10: each ticket gets its own reference; its Code agents get what se
   })
 
   it('known-bad probe: an engine that forwards its input token, not its capture, is reported', async () => {
-    const forwarded = seedOnce(SINGLE!, 'const ISSUE_NUMBER = setup?.issueId || "(none)";', 'const ISSUE_NUMBER = ISSUE_INPUT;')
+    const forwarded = seedOnce(SINGLE!, CAPTURE_LINE, 'const ISSUE_NUMBER = ISSUE_INPUT;')
     expect(await collectEngineHandoffViolations(forwarded)).toEqual([
       expect.stringMatching(/^code: a Code spawn carries ISSUE_NUMBER: #42/),
       'result: the engine result does not carry the captured issueId and issuePrLink',
@@ -346,6 +367,9 @@ const STOP_TABLE: readonly StopCase[] = [
   { label: 'required, no Issue ID', issueRequired: 'true', script: {}, stops: true },
   { label: 'required, no Issue ID but a link line', issueRequired: 'true', script: { prLinkLine: 'Closes #7' }, stops: true },
   { label: 'required, an Issue ID', issueRequired: 'true', script: { issueId: '7', prLinkLine: 'Closes #7' }, stops: false },
+  { label: 'required, a keyed Issue ID', issueRequired: 'true', script: { issueId: 'PROJ-7', prLinkLine: 'Refs PROJ-7' }, stops: false },
+  { label: 'required, an Issue ID of no tracker shape ("none")', issueRequired: 'true', script: { issueId: 'none', prLinkLine: 'Closes #7' }, stops: true },
+  { label: 'required, an Issue ID of no tracker shape (prose)', issueRequired: 'true', script: { issueId: 'see issue 7' }, stops: true },
   { label: 'standard, no Issue ID', issueRequired: 'false', script: {}, stops: false },
   { label: 'unset (fails closed, like the resolver), no Issue ID', issueRequired: undefined, script: {}, stops: true },
 ]
@@ -382,7 +406,7 @@ describe('AC-11: with issues required, no Issue ID stops the ticket before imple
 
   it('the stop comes after the capture and before phase("implement"), and the engine records no exception', () => {
     const script = SINGLE!
-    const capture = script.indexOf('const ISSUE_NUMBER = setup?.issueId')
+    const capture = script.indexOf(CAPTURE_LINE)
     const stop = script.indexOf(STOP_LINE)
     const implement = script.indexOf('phase("implement"')
     expect(capture).toBeGreaterThan(-1)
@@ -400,7 +424,18 @@ describe('AC-11: with issues required, no Issue ID stops the ticket before imple
     expect(found.map(f => f.split(':')[0])).toEqual([
       'required, no Issue ID',
       'required, no Issue ID but a link line',
+      'required, an Issue ID of no tracker shape ("none")',
+      'required, an Issue ID of no tracker shape (prose)',
       'unset (fails closed, like the resolver), no Issue ID',
+    ])
+  })
+
+  it('known-bad probe: an ungated capture lets a "none" or prose Issue ID through the stop', async () => {
+    const ungated = seedOnce(SINGLE!, CAPTURE_LINE, 'const ISSUE_NUMBER = setup?.issueId || "(none)";')
+    const found = await collectTicketLinkStopViolations(ungated)
+    expect(found.map(f => f.split(':')[0])).toEqual([
+      'required, an Issue ID of no tracker shape ("none")',
+      'required, an Issue ID of no tracker shape (prose)',
     ])
   })
 

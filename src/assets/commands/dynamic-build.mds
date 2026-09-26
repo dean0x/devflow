@@ -65,7 +65,7 @@ Note the `budget` value from the Workflow tool context (or default to "medium" i
 
 - **SINGLE mode:** input is one ticket, one issue, one task description, or one plan document
 - **WAVE mode:** input is a set of GitHub issues (wave labels, milestone, issue list), or the user says "wave" / "all tickets in wave N"
-- **A `/devflow:dynamic-tickets` ticket directory** (`.devflow/docs/tickets/\{slug\}/\{ts\}/`) is WAVE input: in each ticket file (every `.md` there but `tracking-issue.md`), the `**Issue:**` line directly after `**Depends on:**` is one raw `ISSUE_REFS` token, forwarded to the wave's pre-fetch verbatim — never rendered, normalised or re-derived. A ticket file with no `**Issue:**` line contributes no token; name it in the run summary as `not filed`.
+- **A `/devflow:dynamic-tickets` ticket directory** (`.devflow/docs/tickets/\{slug\}/\{ts\}/`) is WAVE input: in each ticket file (every `.md` there but `tracking-issue.md`), the `**Issue:**` line directly after `**Depends on:**` is one raw `ISSUE_REFS` token, forwarded to the wave's pre-fetch verbatim — never rendered, normalised or re-derived. A ticket file with no `**Issue:**` line, or more than one, contributes no token; name it in the run summary as `not filed`.
 
 When ambiguous, ask the user before authoring: "Is this a single ticket or a wave of tickets?"
 
@@ -98,7 +98,7 @@ If none found: build proceeds Gate-1-only (Gate 2 skipped with a note). Never re
 
 Check, in priority order:
 - An explicit candidate issue reference or issue URL in the user's input (e.g. `#42`, `42`, or `https://github.com/…/issues/42`)
-- The `**Issue:**` line directly after the H1 of the ticket set's `tracking-issue.md` (written by `/devflow:dynamic-tickets`' filing step; the file is at `.devflow/docs/tickets/\{slug\}/\{ts\}/tracking-issue.md`), as a raw token
+- The `**Issue:**` line directly after the H1 of the ticket set's `tracking-issue.md` (written by `/devflow:dynamic-tickets`' filing step; the file is at `.devflow/docs/tickets/\{slug\}/\{ts\}/tracking-issue.md`), as a raw token — only when the file holds exactly one `**Issue:**` line
 - Otherwise: none
 
 {issue_ref_grammar()}
@@ -145,8 +145,10 @@ ${ISSUE_INPUT !== "(none)" ? "ISSUE_INPUT: " + ISSUE_INPUT : ""}
 Return: {"issueId": "<the - **Issue ID**: value under your ### Handoff Values, or (none)>", "prLinkLine": "<the - **PR link line**: value, or (none)>"}`, { agentType: "Git" })
 );
 
-// The ticket's own Handoff Values, read from setup-task's Output — never derived from ISSUE_INPUT
-const ISSUE_NUMBER = setup?.issueId || "(none)";  // the captured Issue ID; "(none)" ⇒ none was captured
+// The ticket's own Handoff Values, read from setup-task's Output — never derived from ISSUE_INPUT.
+// An Issue ID is a bare number or a KEY-number, per the provider; any other value — "none", blank, prose — is no capture, so the stop fails closed.
+const ISSUE_ID_SHAPE = /^(?:[1-9][0-9]{0,8}|[A-Z][A-Z0-9_]{0,9}-[1-9][0-9]{0,8})$/;
+const ISSUE_NUMBER = ISSUE_ID_SHAPE.test(String(setup?.issueId ?? "")) ? setup.issueId : "(none)";  // the captured Issue ID; "(none)" ⇒ none was captured
 const ISSUE_PR_LINK = setup?.prLinkLine || "(none)";  // "(none)" ⇒ Code emits the heading with no reference
 
 // Ticket-link stop, before implement. The workflow cannot ask, so it never records an exception: it stops.
@@ -535,7 +537,7 @@ Return: {"ready": [...ticket-ids], "blocked": [{"ticket": "id", "namedBlocker": 
     { agentType: "Design" }
   );
 
-  const ready = waveRead?.ready || [];
+  const ready = (waveRead?.ready || []).filter(t => remainingTickets.includes(t));  // only the pre-fetch's own refs: a ready ID the reader invents never reaches an engine
   if (ready.length === 0) {
     if (reAskedThisDeadlock) break;  // second empty read → declare deadlock with named blockers, break
     reAskedThisDeadlock = true;      // re-ask once with vacuous-truth rule quoted verbatim
