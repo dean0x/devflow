@@ -37,8 +37,8 @@ Before authoring, verify:
 
 1. **Workflow tool available:** if the `Workflow` tool is not in your available tools, STOP and tell the user: "The Workflow tool is not available in this session. dynamic-build requires Claude Code's dynamic workflow runtime."
 2. **`agentType` support:** confirmed available (spike F5, 2026-06-11). If spawned agents return no results, check that devflow is installed (`devflow init` has been run).
-3. **GitHub paths:** if the input is a GitHub issue URL, `gh` CLI must be authenticated. If not authenticated, note it and fall back to the issue text the user provided.
-4. **No-remote path:** if the repo has no remote, skip GitHub-dependent steps (issue reading, PR creation) and proceed with local branch operations only.
+3. **Tracker paths:** an issue reference or URL in the input is read through the Git agent, which resolves the configured tracker and its access itself and reports `TRACEABILITY: DEGRADED (\{reason\})` when it cannot read one — then note it and fall back to the issue text the user provided. No tracker CLI is checked here.
+4. **No-remote path:** if the repo has no remote, skip the remote-dependent steps (the wave PR and its evidence) and proceed with local branch operations only; the Git agent reports DEGRADED for any tracker step it cannot reach.
 
 ---
 
@@ -65,7 +65,7 @@ Note the `budget` value from the Workflow tool context (or default to "medium" i
 **3. Detect mode: SINGLE or WAVE**
 
 - **SINGLE mode:** input is one ticket, one issue, one task description, or one plan document
-- **WAVE mode:** input is a set of GitHub issues (wave labels, milestone, issue list), or the user says "wave" / "all tickets in wave N"
+- **WAVE mode:** input is a set of tracker issues (wave labels, milestone, issue list), or the user says "wave" / "all tickets in wave N"
 - **A `/devflow:dynamic-tickets` ticket directory** (`.devflow/docs/tickets/\{slug\}/\{ts\}/`) is WAVE input: in each ticket file (every `.md` there but `tracking-issue.md`), the `**Issue:**` line directly after `**Depends on:**` is one raw `ISSUE_REFS` token, forwarded to the wave's pre-fetch verbatim — never rendered, normalised or re-derived. A ticket file with no `**Issue:**` line, or more than one, contributes no token; name it in the run summary as `not filed`.
 
 When ambiguous, ask the user before authoring: "Is this a single ticket or a wave of tickets?"

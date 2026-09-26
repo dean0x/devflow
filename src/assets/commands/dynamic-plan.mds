@@ -22,7 +22,7 @@ This command instructs you to construct and run a Claude Code dynamic Workflow t
 
 ---
 
-**Requires:** ticket files directory or GitHub issue list; optional `~/.devflow/preference-profile.md`
+**Requires:** ticket files directory or tracker issue list; optional `~/.devflow/preference-profile.md`
 **Produces:** per-ticket plan files + `DECISIONS-NEEDED.md` at `.devflow/docs/design/\{slug\}/\{ts\}/`
 
 ---
@@ -33,8 +33,8 @@ Before authoring, verify:
 
 1. **Workflow tool available:** if the `Workflow` tool is not in your available tools, STOP and tell the user: "The Workflow tool is not available in this session. dynamic-plan requires Claude Code's dynamic workflow runtime."
 2. **`agentType` support:** confirmed available (spike F5, 2026-06-11).
-3. **GitHub paths:** if the input is a list of GitHub issue URLs or numbers, `gh` CLI must be authenticated to read issue bodies. If not authenticated, fall back to reading ticket `.md` files from a local path.
-4. **No-remote path:** if the repo has no remote, skip GitHub-dependent steps and read ticket files from the provided local path.
+3. **Tracker paths:** a list of issue references or URLs is read through the Git agent, which resolves the configured tracker and its access itself and reports `TRACEABILITY: DEGRADED (\{reason\})` when it cannot read an issue — then fall back to reading ticket `.md` files from a local path. No tracker CLI is checked here.
+4. **No-remote path:** if the repo has no remote, read ticket files from the provided local path; the Git agent reports DEGRADED for any issue it cannot reach.
 
 ---
 
@@ -113,7 +113,7 @@ const OUTDIR = `.devflow/docs/design/${slug}/${ts}`;
 const tickets = await phase("read-tickets", () =>
   agent(`Read all tickets from: ${ticketSource}
 For each ticket, extract: title, summary, wave, dependsOn, scope (in/out), acceptance criteria, open questions, and any existing implementation hints.
-If the source is a directory, read all .md files. If the source is GitHub issues, use the Git agent's fetch-issue or fetch-issues-batch operation.
+If the source is a directory, read all .md files. If the source is tracker issues, use the Git agent's fetch-issue or fetch-issues-batch operation.
 Return: array of ticket objects with all fields.`, { agentType: "Git" })
 );
 
