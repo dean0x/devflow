@@ -191,14 +191,18 @@ The six-phase pipeline above never files an issue. Filing happens here, at the c
 
 **File the issues** only when `ISSUE_REQUIRED` is `true`. Otherwise file nothing, and say so in the report.
 
-1. **Order and bound.** The tracking issue first, then each ticket file in slate order (the workflow's `ticketPaths`). One Git spawn at a time, never in parallel, and at most 50 spawns in all: a file past the cap is reported `not filed (cap 50)`.
-2. **Spawn**, once per file:
+1. **Order and bound.** The tracking issue first, then each ticket file in dependency order: a ticket after every ticket its `**Depends on:**` line names, slate order (the workflow's `ticketPaths`) otherwise. One Git spawn at a time, never in parallel, and at most 50 spawns in all: a file past the cap is reported `not filed (cap 50)`.
+2. **Spawn**, once per file. A ticket's `REQUIREMENTS` opens with the two lines the wave reads from its issue body, each on its own line:
+   - `**Wave:** N` — the file's wave number when it is digits only, else no Wave line.
+   - `**Depends on:**` with each entry, a ticket title or file name, replaced by the reference step 3 wrote as that ticket's `**Issue:**` line — comma-separated, or `none`. An entry naming no ticket already filed in this run — unfiled, unknown, or written as a reference — ⇒ `TRACEABILITY: DEGRADED (unresolved dependency "\{entry\}")`, and that ticket is not filed: a dependency is never dropped.
+
+   Its `## Summary` paragraph follows, less any line opening with either label.
 
 ```
 Agent(subagent_type="Git"):
 "OPERATION: ensure-traceable-issue
 TASK_DESCRIPTION: {the ticket's title, or the tracking issue's H1}
-REQUIREMENTS: {the ticket's ## Summary paragraph, or the tracking issue's ## Context}
+REQUIREMENTS: {the ticket's **Wave:** and **Depends on:** lines, then its ## Summary paragraph; or the tracking issue's ## Context}
 PLAN_ARTIFACT_PATH: {the ticket or tracking-issue file path}
 WORKTREE_PATH: {WORKTREE_PATH when provided; omit otherwise}"
 ```
@@ -207,7 +211,7 @@ WORKTREE_PATH: {WORKTREE_PATH when provided; omit otherwise}"
    - `CREATED` or `ENRICHED`, with a reference that matches `^(#[1-9][0-9]\{0,8\}|[A-Z][A-Z0-9_]\{0,9\}-[1-9][0-9]\{0,8\})$` as a whole ⇒ insert `**Issue:** \{ISSUE_REF\}` with the Edit tool: in a ticket file as the line directly after its `**Depends on:**` line, in `tracking-issue.md` as the line directly after its H1. Change nothing else in the file.
    - A reference of any other shape ⇒ `TRACEABILITY: DEGRADED (issue reference "\{ref\}" does not match any tracker reference grammar)`, and no line.
    - `DEGRADED (rate limited)` ⇒ stop filing: this file and every file after it are reported `not filed`. Any other DEGRADED ⇒ that file gets no line; report it and go on to the next.
-4. **Report** each file's `**Issue:**` reference, or `not filed` and why, with every `TRACEABILITY: DEGRADED` line the spawns returned.
+4. **Report** each file's `**Issue:**` reference, or `not filed` and why, with every `TRACEABILITY: DEGRADED` line step 2 and the spawns produced.
 
 `/devflow:dynamic-build` reads these lines: the tracking issue's for its wave report, and each ticket's as that ticket's own reference.
 

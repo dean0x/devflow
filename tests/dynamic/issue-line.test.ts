@@ -246,7 +246,7 @@ export function collectFilingStepDefects(tickets: string): string[] {
   need('after the workflow: the step follows the workflow fence', workflow.length === 1 && tickets.indexOf(workflow[0]) < tickets.indexOf(step))
   need('the workflow files nothing', workflow.length === 1 && !workflow[0].includes('ensure-traceable-issue') && !workflow[0].includes(TOKEN))
   need('gate: only when ISSUE_REQUIRED is true', step.includes('**File the issues** only when `ISSUE_REQUIRED` is `true`. Otherwise file nothing'))
-  need('order: the tracking issue first, then the tickets in slate order', step.includes('The tracking issue first, then each ticket file in slate order'))
+  need('order: the tracking issue first, then the tickets in dependency order', step.includes('The tracking issue first, then each ticket file in dependency order'))
   need('sequential: one spawn at a time', step.includes('One Git spawn at a time, never in parallel'))
   need('bounded: at most 50 spawns', step.includes('at most 50 spawns in all: a file past the cap is reported `not filed (cap 50)`'))
   need('rate limit: stop filing', step.includes('`DEGRADED (rate limited)` ⇒ stop filing: this file and every file after it are reported `not filed`'))
@@ -268,7 +268,7 @@ const DRAFTED_LINES_RULE = '**Drafted lines first, under every policy.**'
 
 const FILING_SEEDS: ReadonlyArray<readonly [label: string, from: string, to: string]> = [
   ['gate', '**File the issues** only when `ISSUE_REQUIRED` is `true`.', '**File the issues** always.'],
-  ['order', 'The tracking issue first, then each ticket file in slate order', 'Each ticket file, then the tracking issue'],
+  ['order', 'The tracking issue first, then each ticket file in dependency order', 'Each ticket file, then the tracking issue'],
   ['sequential', 'One Git spawn at a time, never in parallel', 'All Git spawns in parallel'],
   ['bounded', 'at most 50 spawns in all', 'as many spawns as needed'],
   ['rate limit', '`DEGRADED (rate limited)` ⇒ stop filing', '`DEGRADED (rate limited)` ⇒ retry'],
