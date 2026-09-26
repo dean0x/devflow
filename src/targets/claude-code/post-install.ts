@@ -719,16 +719,28 @@ export async function installManagedSettings(
  * 1. Try direct write/delete
  * 2. If EACCES and TTY, ask user before sudo
  * 3. Non-TTY: return false (caller logs preservation message)
+ *
+ * `managedPathOverride` exists so a test can point the removal at a temp file;
+ * production callers omit it and get the platform's system path. It is a
+ * parameter, deliberately not an environment variable: this function may run
+ * `sudo rm` / `sudo cp` on the path, and an env-selectable target would let
+ * whoever controls the environment aim a root write the user consented to for
+ * "managed settings" at any file.
  */
 export async function removeManagedSettings(
   rootDir: string,
   verbose: boolean,
+  managedPathOverride?: string,
 ): Promise<boolean> {
   let managedPath: string;
-  try {
-    managedPath = getManagedSettingsPath();
-  } catch {
-    return false;
+  if (managedPathOverride !== undefined) {
+    managedPath = managedPathOverride;
+  } else {
+    try {
+      managedPath = getManagedSettingsPath();
+    } catch {
+      return false;
+    }
   }
 
   let existingContent: string;
