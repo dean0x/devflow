@@ -319,6 +319,103 @@ describe('artifact naming — plan.mds writer ↔ docs-framework reader', () => 
   it('the worked example is unchanged — the rename is provably a no-op on the github path', () => {
     expect(DOCS_FRAMEWORK).toContain('`42-jwt-auth.2026-04-07_1430.md`')
   })
+
+  it('the multi-issue artifact is named from its topic slug with `issue: pending`, never from a batch-fetched ID (#331)', () => {
+    expect(collectMultiIssueNamingDefects(PLAN_MDS)).toEqual([])
+  })
+
+  it('known-bad probe: the retired first-issue `{ISSUE_ID}-multi` name is reported', () => {
+    const line = multiIssueLine(PLAN_MDS)!
+    const retired = '- If multi-issue: `.devflow/docs/design/\\{ISSUE_ID\\}-multi.\\{YYYY-MM-DD_HHMM\\}.md`, using the first issue\'s `ISSUE_ID`'
+    expect(collectMultiIssueNamingDefects(PLAN_MDS.replace(line, retired))).toEqual([
+      'the multi-issue name is not multi-{topic-slug}.{ts}.md',
+      'the multi-issue name does not set `issue: pending`',
+      'the multi-issue name reads an ISSUE_ID, which fetch-issues-batch never returns',
+    ])
+    expect(collectMultiIssueNamingDefects('no naming here')).toEqual(['no multi-issue naming line'])
+  })
+})
+
+/** The Phase 14 naming bullet for a multi-issue plan, as the source spells it. */
+function multiIssueLine(source: string): string | undefined {
+  return source.split('\n').find(l => l.startsWith('- If multi-issue: `.devflow/docs/design/'))
+}
+
+/**
+ * Named collector (#331): how the multi-issue naming bullet still depends on an
+ * ID. `fetch-issues-batch` returns no `ISSUE_ID` (its Handoff Values are `(none)`),
+ * so a name built from "the first issue's ISSUE_ID" has nothing to build from.
+ */
+function collectMultiIssueNamingDefects(source: string): string[] {
+  const line = multiIssueLine(source)
+  if (line === undefined) return ['no multi-issue naming line']
+  const defects: string[] = []
+  if (!line.includes('`.devflow/docs/design/multi-\\{topic-slug\\}.\\{YYYY-MM-DD_HHMM\\}.md`')) {
+    defects.push('the multi-issue name is not multi-{topic-slug}.{ts}.md')
+  }
+  if (!line.includes('`issue: pending`')) defects.push('the multi-issue name does not set `issue: pending`')
+  if (line.includes('ISSUE_ID')) defects.push('the multi-issue name reads an ISSUE_ID, which fetch-issues-batch never returns')
+  return defects
+}
+
+// ── #331: the issue-capture values /plan names have consumers ────────────────
+//
+// `issue_capture_contract()` tells /plan to capture ISSUE_CONTENT and
+// ACCEPTANCE_CRITERIA; #331 found neither named again anywhere in the command,
+// so the capture was dead. Each must be named where it is USED: at Gate 0, which
+// it seeds, and in the design artifact, which it feeds.
+
+/** The captured values that must each have a Gate 0 consumer and an artifact consumer. */
+const CAPTURED_VALUES = ['ISSUE_CONTENT', 'ACCEPTANCE_CRITERIA'] as const
+
+/** The partial's own lines, which name every value and consume none. */
+const CAPTURE_CONTRACT_PREFIXES = [
+  '**Capture from the Git agent\'s Output block',
+  '**Which operation emits which value:**',
+  'Note: `ISSUE_CONTENT` stays inside',
+] as const
+
+/** The lines of `text` from the first line starting with `start` up to (not including) the first after it starting with `end`. */
+function region(text: string, start: string, end: string): string[] {
+  const lines = text.split('\n')
+  const from = lines.findIndex(l => l.startsWith(start))
+  if (from === -1) return []
+  const to = lines.findIndex((l, i) => i > from && l.startsWith(end))
+  return lines.slice(from, to === -1 ? lines.length : to)
+}
+
+/** Named collector (#331): every captured value with no consumer at Gate 0 or in the artifact. */
+function collectUnconsumedCaptures(planMd: string): string[] {
+  const gate0 = region(planMd, '#### Phase 1: Gate 0', '#### Phase 2:')
+    .filter(l => !CAPTURE_CONTRACT_PREFIXES.some(p => l.startsWith(p)))
+  const artifact = region(planMd, '**Store design artifact:**', '**Check the test plan before the artifact exists:**')
+  const out: string[] = []
+  for (const value of CAPTURED_VALUES) {
+    if (!gate0.some(l => l.includes(`\`${value}\``))) out.push(`${value}: no Gate 0 consumer`)
+    if (!artifact.some(l => l.includes(`\`${value}\``))) out.push(`${value}: no artifact consumer`)
+  }
+  return out
+}
+
+describe('#331 — /plan consumes the issue values it captures', () => {
+  it('ISSUE_CONTENT and ACCEPTANCE_CRITERIA each seed Gate 0 and feed the design artifact', () => {
+    expect(region(PLAN_MD, '#### Phase 1: Gate 0', '#### Phase 2:').length, 'the Gate 0 region is found').toBeGreaterThan(10)
+    expect(region(PLAN_MD, '**Store design artifact:**', '**Check the test plan').length, 'the artifact region is found').toBeGreaterThan(10)
+    expect(collectUnconsumedCaptures(PLAN_MD)).toEqual([])
+  })
+
+  it('known-bad probe: a plan that names the values only in the capture contract is reported', () => {
+    const deadCapture = PLAN_MD.split('\n')
+      .filter(l => CAPTURE_CONTRACT_PREFIXES.some(p => l.startsWith(p)) || !CAPTURED_VALUES.some(v => l.includes(`\`${v}\``)))
+      .join('\n')
+    expect(deadCapture, 'the seed must drop the consumers').not.toBe(PLAN_MD)
+    expect(collectUnconsumedCaptures(deadCapture)).toEqual([
+      'ISSUE_CONTENT: no Gate 0 consumer',
+      'ISSUE_CONTENT: no artifact consumer',
+      'ACCEPTANCE_CRITERIA: no Gate 0 consumer',
+      'ACCEPTANCE_CRITERIA: no artifact consumer',
+    ])
+  })
 })
 
 // ── AC-2.10: the four github-path renderings are byte-identical ──────────────
