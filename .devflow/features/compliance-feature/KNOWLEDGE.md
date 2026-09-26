@@ -1,7 +1,7 @@
 ---
 feature: compliance-feature
 name: Compliance Feature & SDLC Traceability
-description: "Use when adding or modifying the compliance feature (framework registry, converge contract, CLI, rule stamping), changing how host commands resolve COMPLIANCE_SKILL_INSTALLED, modifying traceability SEMANTICS in the Git agent (D1-D11 decision markers, D4 degradation contract, D9 resolution gate, containment, Handoff Values), or extending the D4 DEGRADED contract. Keywords: compliance, COMPLIANCE_SKILL_INSTALLED, convergeComplianceArtifacts, convergeFromManifest, frameworks, FEATURE_OWNED_SKILLS, traceability, D4, D9, gather-release-evidence, conventions.md, resolve-review-threads, ensure-traceable-issue, stamper, manifest-group, ComplianceFeatureState, Handoff Values, ISSUE_PR_LINK, issue_ref_grammar, issue_capture_contract, _tracker.mds, Provider signals, decision-markers.md, publication-gate.md, learn-conventions.md, tracker/github, PR_HOST_OPS, references/pr, PR mechanics, sinkCorpusWithoutPrHost, gitPlusPrHostCorpus."
+description: "Use when adding or modifying the compliance feature (framework registry, converge contract, CLI, rule stamping), changing how host commands resolve COMPLIANCE_SKILL_INSTALLED, modifying traceability SEMANTICS in the Git agent (D1-D11 decision markers, D4 degradation contract, D9 resolution gate, containment, Handoff Values), or extending the D4 DEGRADED contract. Keywords: compliance, COMPLIANCE_SKILL_INSTALLED, convergeComplianceArtifacts, convergeFromManifest, frameworks, FEATURE_OWNED_SKILLS, traceability, D4, D9, gather-release-evidence, conventions.md, resolve-review-threads, ensure-traceable-issue, stamper, manifest-group, ComplianceFeatureState, Handoff Values, ISSUE_PR_LINK, issue_ref_grammar, issue_capture_contract, _tracker.mds, Provider signals, decision-markers.md, publication-gate.md, learn-conventions.md, tracker/github, PR_HOST_OPS, references/pr, PR mechanics, sinkCorpusWithoutPrHost, gitPlusPrHostCorpus, release-trace.cjs, messageBody, D-TRACE-FULL-MESSAGE, D-TRACE-REVERT-BODY, MESSAGE_LOG_FLAGS, complianceDefault, resolve-evidence-policy, evidence policy floor, review lens only, Branch token."
 category: architecture
 directories:
   - src/core/compliance.ts
@@ -12,6 +12,8 @@ directories:
   - src/assets/agents/git.mds
   - src/assets/mds/tracker/_github.mds
   - src/assets/mds/git
+  - src/assets/scripts/release-trace.cjs
+  - src/assets/scripts/resolve-evidence-policy.cjs
   - src/assets/commands/_partials/_tracker.mds
   - src/assets/commands/code-review.mds
   - src/assets/commands/plan.mds
@@ -19,7 +21,7 @@ directories:
   - src/assets/commands/resolve.mds
   - src/assets/commands/release.md
 created: 2026-08-20
-updated: 2026-09-23
+updated: 2026-09-26
 ---
 
 # Compliance Feature & SDLC Traceability
@@ -172,6 +174,13 @@ Host command usage:
 
 `COMPLIANCE` is passed as `"enabled"` (string) or `"(none)"`. It is a **Git agent input only** — the spawn-scoped guard in build-mds §14 asserts that every `COMPLIANCE:` line in every compiled command appears inside a `subagent_type="Git"` spawn block.
 
+### Evidence-policy floor vs. review lens
+
+Two independent things sit on `manifest.features.compliance` and must not be conflated:
+
+- **The floor.** `src/assets/scripts/resolve-evidence-policy.cjs`'s `complianceDefault(rawFeatureValue)` mirrors `normalizeComplianceFeature` exactly (a parity test pins this): a well-formed `{enabled: true, frameworks: [...]}` resolves `required` **whatever the framework count** — an enable with zero frameworks selected ("generic controls only") still installs and gates the compliance skill, so which frameworks are listed never matters, only that `enabled` is `true`. Any malformed or `enabled: false` shape resolves `standard`. This compliance-derived value only ever **raises** the resolved policy (`stricter(policy, facts.compliance)`) — it can turn a file/worktree `standard` into `required` (flagged with the `raised-by-compliance` warning) but never lowers a `required` file value.
+- **The lens.** The compliance SKILL.md's own `**Lens only.**` note (Scope Boundary section) states the other half of the boundary: the skill's composed sections shape WHAT a compliance review looks for — regulatory-specific gaps (retention, erasure/data-subject rights, audit-trail completeness, segregation of duties, framework mapping, IaC exposure) — never HOW MUCH evidence a change must carry. Tracker links, test plans, approvals and release traces are governed solely by the resolved evidence policy (`resolve-evidence-policy.cjs`, `pr-evidence.cjs`, `verify-evidence.cjs`), never by a compliance finding. A missing ticket, test plan, or approval must never be reported as a compliance finding — that is the evidence policy's gap to report, not the lens's.
+
 ## Integration Patterns: Traceability Operations (git.md) — post-split semantics
 
 `src/assets/agents/git.mds` (compiles to `dist/agents/git.md`) is a provider-independent **contract**. Two disjoint mechanics splits load underneath it: **tracker mechanics** (per-provider, `TRACKER_PROVIDER`-gated, generated under `dist/skills/git/references/tracker/{provider}/`) and **PR-host mechanics** (provider-independent, generated under `dist/skills/git/references/pr/`, installed unconditionally under every provider). This section documents what the contract still says and where each kind of mechanics lives — for the split machinery itself (MDS build, byte budget, containment oracle, installer overlay) see `.devflow/features/tracker-references/KNOWLEDGE.md`.
@@ -244,13 +253,16 @@ D1–D3 and D5–D10 moved to a glossary reference, `references/decision-markers
 
 ### Handoff Values — issue-capture contract producers
 
-`setup-task` and `fetch-issue`'s `**Output:**` blocks each end with a `### Handoff Values` block:
+`setup-task` and `fetch-issue`'s `**Output:**` blocks each end with a `### Handoff Values` block. **Branch token is defined as the branch name itself** — each op renders its own already-computed value, never a shared generic placeholder:
+
 ```markdown
 ### Handoff Values
 - **PR link line**: {rendered}
-- **Branch token**: {token}
+- **Branch token**: {branch-name}
 - **Issue ID**: {ISSUE_ID}
 ```
+`setup-task`'s `{branch-name}` is the same value as its own `## Task Setup: {branch-name}` heading and `**Branch name**: {derived-branch-name}` field — the branch it just created. `fetch-issue` has no branch to hand off (it never creates one), so its block instead renders `- **Branch token**: {suggested-branch}` — the `### Suggested Branch` value (`{type}/{number}-{slug}`) computed two fields above it in the same Output block. Neither op reads or writes a value named `{token}`.
+
 These are the **only** producers — `fetch-issues-batch` answers `(none)` for all three (it identifies issues by `### Issue #{number}:` heading, an `ISSUE_REF` not an `ISSUE_ID`, and never synthesises the singular values from a batch heading).
 
 Consumers: `src/assets/commands/_partials/_tracker.mds`'s `issue_capture_contract()` define (scoped precisely to the real producers — read that partial, not this summary, for the exact capture rules) and `src/assets/agents/code.md`, which pastes `ISSUE_PR_LINK` only after **re-checking its shape** (`^Closes #[1-9][0-9]{0,8}$` under github — degrade-never-repair: a value well-formed when produced is still attacker-influenceable text by the time it's pasted). `ISSUE_PR_LINK` is forwarded as a sibling of `ISSUE_NUMBER` at all 14 Code-agent spawn sites across `implement.mds` and `dynamic-build.mds`.
@@ -270,6 +282,16 @@ GitHub rendering stays byte-identical pre/post-split: `Tracked = #{n}`, `Depends
 ### `create-release` reads conventions.md
 
 Step 1b reads the `## Version Names` and `## Version PR Titles` sections from `.devflow/conventions.md` (when present) to determine the annotated tag format and release title. Compliance defaults apply when the file is absent. This step stays inline in `git.md` (only the `## Closed Issues` enrichment bullet moved to the generated reference).
+
+Step 5 composes the release notes body: `CHANGELOG_CONTENT` first, then an optional `## Commits` section (first ≤100 entries), then `TRACEABILITY_EXCEPTIONS` verbatim last (the cap below never drops it). The 60000-char cap degrades in two stages, in order: drop the `## Commits` section first, noting `Commit list omitted (release notes size limit)`; if still over, cut only `CHANGELOG_CONTENT` itself **at a line boundary**, ending `…truncated` — never a mid-line cut, which could split a markdown fence or table row and corrupt the rendered release. Step 6 re-applies step 5's cap a second time, after the D11 scrub — a scrub substitution can push a body that was exactly at the cap back over it — so the size check is written at step 6 itself, beside the scrub call, not left implicit in step 5's text.
+
+### Release evidence: `release-trace.cjs` (full-message scan, revert exemption scoped to the body)
+
+`gather-release-evidence`'s shared `_common.mds` steps — `last_release_tag_step` (step 1a) and `trace_map_step` (step 6), both loaded by every provider's generated reference — shell out to `src/assets/scripts/release-trace.cjs`: `last-tag` for the last RELEASE tag (`LAST_TAG {tag}` / `LAST_TAG none`), and `map --from {last_tag} {grammar-args}` for the per-commit trace map. Only `exit=0` with the pinned `TRACE from:<ref> scanned:<n> traced:<n> untraced:<n> exempt:<n> unmatched:<n> bound:<ok|hit>` header is accepted; anything else is `TRACEABILITY: DEGRADED (trace map unavailable)` and status `INDETERMINATE`. `create-release`'s own step 1a (`last_release_tag_step`) shells out to the same `last-tag` subcommand rather than `git describe`, which can return a non-release marker tag.
+
+**D-TRACE-FULL-MESSAGE:** `release-trace.cjs`'s reference search (`findReference`) reads `%B` — the whole raw commit message — never `%s` + `%b`. Git folds a wrapped subject paragraph onto one `%s` line, so a keyword ending the subject's first line and a reference opening its second would read as one line under `%s`+`%b` and as two lines under a `%B` scan; a commit whose reference only a `%B` scan can see must be traced the same way by both this script and the mechanics step that gathers `COMMIT_LIST`, so both read `%B`. `MESSAGE_LOG_FLAGS` carries `--format=%H%x00%an%x00%ae%x00%s%x00%B%x1e` (`%s` is kept alongside `%B` only for the exempt rules, which match the subject as git renders it); `tests/evidence/release-trace-parity.test.ts` pins both sides in agreement.
+
+**D-TRACE-REVERT-BODY:** The `exempt:revert` rule requires a `Revert "…"` subject AND a body line naming what was reverted (`This reverts commit {40-hex-sha}`, or GitHub's `Reverts {owner}/{repo}#{n}`). Because the reference scan reads the whole message, testing the revert-body patterns against the whole message would let a body-less commit whose **subject** merely quotes `This reverts commit <sha>` pass as an exempt revert. `messageBody(message)` splits the message the way git splits it for a revert's generated body — skips leading blank lines, ends the subject paragraph at the first blank line, returns everything after that line (`''` when there is none) — and only the revert rule reads this scoped body; `findReference` still scans the full message unchanged.
 
 **60000-char cap — ALL comment ops:** `post-review-summary`, `post-resolution-summary`, `post-wave-report`, and `ensure-traceable-issue` (plan attachment) all cap composed bodies at 60000 characters. GitHub rejects comments over 65536 with a 422 (which the 4xx rule would silently skip). Truncation adds `…truncated — full report in the local artifact {PATH}`.
 
@@ -353,6 +375,14 @@ Step 1b reads the `## Version Names` and `## Version PR Titles` sections from `.
 
 **A D4/D11 sentence that "reads GitHub-specific" may actually be the invariant, not the detector.** When editing the always-loaded block in `git.md`, check whether the sentence names a concrete provider signal (status code, header name, `gh` invocation — belongs in `tracker/github/backlink-shipped-issues.md`) or a provider-neutral rule (STOP-on-secondary-rate-limit, THROTTLED reporting, never-COMPLETE-while-unprocessed — belongs inline). Getting this wrong re-creates the GAP-03 defect (two authorities on one path) that Tracker Phase 2 fixed.
 
+**Handoff Values' Branch token has no shared name — it IS the branch name.** `setup-task` renders `{branch-name}` (identical to its own header and `**Branch name**` fields); `fetch-issue` renders `{suggested-branch}` (its own `### Suggested Branch` value). There is no third, generic `{token}` placeholder anywhere in either block — do not reintroduce one.
+
+**`release-trace.cjs`'s revert exemption reads the commit BODY, not the full `%B` message.** The reference scan (`findReference`) intentionally reads the whole message, but `classify()`'s revert rule tests `messageBody(commit.message)` only. A commit whose subject merely quotes `This reverts commit <sha>` without an actual git- or GitHub-generated body sentence is `untraced`, not `exempt:revert` — this is by design (`D-TRACE-REVERT-BODY`), not a gap.
+
+**A compliance-enabled repo with zero frameworks selected still floors the evidence policy at `required`.** `resolve-evidence-policy.cjs`'s `complianceDefault()` only checks `enabled: true` — an empty `frameworks: []` array does not fall back to `standard`. Do not "optimize" this to skip the floor when no framework is selected; the compliance skill is already installed and gating at that state.
+
+**Release notes truncation order matters.** The 60000-char cap on `create-release`'s composed body drops `## Commits` before it ever touches `CHANGELOG_CONTENT`, and when `CHANGELOG_CONTENT` itself must be cut, the cut lands on a line boundary — never mid-line. The cap is also re-applied at step 6 (post-scrub), so a body sized exactly at the cap pre-scrub can still be trimmed again after redaction.
+
 ## Key Files
 
 | File | Purpose |
@@ -380,6 +410,8 @@ Step 1b reads the `## Version Names` and `## Version PR Titles` sections from `.
 | `src/assets/skills/git/SKILL.md` | Extended References table row for `references/tracker/{provider}/{op}.md`; naming-conventions authority pointer to `learn-conventions` |
 | `tests/git-agent.test.ts` | Static guards: required ops list, 60000-char caps, D9 gate, D4 backpressure, D7/D8 dedup markers, AC-0.10 containment (split into issue-body and external-thread guards); reads the joined corpus via `gitAgentSinkCorpus()` for guards whose literal moved, and via `sinkCorpusWithoutPrHost()`/`gitPlusPrHostCorpus()` for PR-host-specific non-vacuity and detection guards (#326) |
 | `tests/registry-integrity.test.ts` | Guard 6: OPERATION: values in compiled commands ↔ `## Operation:` headings in git.md (spawn↔op integrity) |
+| `src/assets/scripts/release-trace.cjs` | Pure git-history classifier backing `gather-release-evidence`'s trace map and `create-release`'s `LAST_TAG` lookup — `classify`, `messageBody` (D-TRACE-REVERT-BODY), `findReference` (D-TRACE-FULL-MESSAGE), `MESSAGE_LOG_FLAGS` |
+| `src/assets/scripts/resolve-evidence-policy.cjs` | `complianceDefault()` — the compliance-enabled-at-any-framework-count `required` floor, mirroring `normalizeComplianceFeature` |
 
 ## Related
 

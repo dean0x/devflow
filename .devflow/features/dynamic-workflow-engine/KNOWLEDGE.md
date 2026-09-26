@@ -1,7 +1,7 @@
 ---
 feature: dynamic-workflow-engine
 name: Dynamic Workflow Engine
-description: "Use when authoring or modifying the dynamic-* commands (dynamic-build, dynamic-plan, dynamic-tickets, dynamic-profile), the shared engine/wave/preamble/factory/tracker MDS partials, or the build-mds test suite that pins doctrine literals. Keywords: dynamic-build, dynamic-plan, dynamic-tickets, dynamic-profile, Workflow tool, agentType, Gate 1, Gate 2, review pass, wave, tickets→plan→build, MDS, _engine.mds, _wave.mds, _tracker.mds, issue_ref_grammar, issue_capture_contract, ISSUE_REF, ISSUE_ID, ISSUE_PR_LINK, depends-on-grammar, marker negative guard, 12 partials, 16 hosts, fetch-issues-batch, NOT_FOUND."
+description: "Use when authoring or modifying the dynamic-* commands (dynamic-build, dynamic-plan, dynamic-tickets, dynamic-profile), the shared engine/wave/preamble/factory/tracker MDS partials, or the build-mds test suite that pins doctrine literals. Keywords: dynamic-build, dynamic-plan, dynamic-tickets, dynamic-profile, Workflow tool, agentType, Gate 1, Gate 2, review pass, wave, tickets→plan→build, MDS, _engine.mds, _wave.mds, _tracker.mds, issue_ref_grammar, issue_capture_contract, ISSUE_REF, ISSUE_ID, ISSUE_PR_LINK, depends-on-grammar, marker negative guard, 12 partials, 16 hosts, fetch-issues-batch, NOT_FOUND, Tracker paths, parseWaveBlock, branch-missing, wave PR evidence, update-pr-evidence, publication_gate."
 category: architecture
 directories:
   - src/assets/commands/dynamic-build.mds
@@ -20,7 +20,7 @@ directories:
   - tests/build-mds.test.ts
   - tests/dynamic
 created: 2026-07-07
-updated: 2026-09-16
+updated: 2026-09-26
 ---
 
 # Dynamic Workflow Engine
@@ -142,6 +142,8 @@ setup (Git)
   → report (Synthesize)
 ```
 
+The **setup** phase's `OPERATION: setup-task` spawn returns `branch`, `issueId` and `prLinkLine` under its `Return:` JSON contract; the workflow binds `BRANCH` from `setup.branch` — the branch setup-task itself created and reported, never one the workflow synthesizes — and `ISSUE_NUMBER`/`ISSUE_PR_LINK` from the other two fields. Two `ESCALATED` stops sit between setup and implement, checked in order: `ticket-link-missing` (issues required but no Issue ID captured) then `branch-missing` (`BRANCH` is `(none)` — setup-task reported no branch). Both stop the ticket before implementing; neither is a shape gate — a stop fires only when the value is genuinely absent.
+
 Gate 1 runs exactly **twice per ticket**: once after initial implementation, once as the final build gate after all review-pass fixes are done. It never runs inside the review pass — fix Code agents self-verify their own builds instead.
 
 Gate 2 fires **once**, at implementation acceptance (before the review pass), not after review fixes. If no plan exists, Evaluate is silently skipped. If no acceptance criteria exist, Test is silently skipped. Gate 2 failures use fix-and-continue: the verdict becomes `FAIL-FIXED` (issues found, fixes applied) and the gate proceeds — never re-evaluate.
@@ -179,6 +181,14 @@ Integration branch is `wave/<initiative>` (the initiative slug, `{slug}`) — **
 
 **Post-wave-report and traceability** (WAVE mode only): Before authoring the workflow, the main model resolves an optional tracking-issue number — checking the user's input first, then `/dynamic-tickets`'s `tracking-issue.md` at `.devflow/docs/tickets/{slug}/{ts}/tracking-issue.md`. After the workflow returns, if a tracking-issue number was resolved and the wave report exists, the main model spawns a Git agent with `OPERATION: post-wave-report`, `TRACKING_ISSUE: <n>`, `WAVE_REPORT_PATH: <repo-relative path>` (resolved against `WORKTREE_PATH` when the wave ran in a linked worktree), `WAVE_ID: <ts>`, and `WORKTREE_PATH` when applicable. The Git agent deduplicates via its own marker (see the marker-ownership subsection above) and degrades gracefully on API failure (`TRACEABILITY: DEGRADED (<reason>)`). If no tracking issue was resolved: state `TRACEABILITY: DEGRADED (no tracking issue for this run)` in the run summary — never skip silently.
 
+### Wave PR: composing, opening, and its evidence refresh (steps 3, 6, 7)
+
+Three more of the main model's post-workflow steps (WAVE mode only) build on the wave report and the tracking-issue post above. **Step 3** composes the wave block from the workflow's returned `tickets` array: a `Refs {tracking ref}` line first — only when Pre-authoring step 5 resolved a tracking issue whose token is, as a whole, a `#N`/`KEY-N` reference; never `Closes`, since the tracking issue outlives the wave — then one related line per row that has one, then the `## Wave Evidence` table. `verify-evidence.cjs check wave` validates the composed text before it becomes `PR_WAVE_BLOCK`; its plumbing core, `pr-evidence.cjs`'s `parseWaveBlock`, returns `Result<{tracking, related, rows}>` — `tracking` is the parsed leading `Refs` line or `null`, `related` is every remaining row-linking `Closes`/`Refs` line, and `rows` is the `## Wave Evidence` table. The related-line cap is `LIMITS.WAVE_ROWS + 1` — one line per table row plus the one allowed leading tracking line — checked as structure, before the cross rules (orphan/duplicate/unmerged/unlinked) even run.
+
+**Step 6** opens the PR (only after an explicit "open" answer in step 4) via `OPERATION: ensure-pr-ready`, pasting `PR_WAVE_BLOCK` and `PR_TEST_PLAN_BLOCK` behind their own checks; the wave PR is opened here and nowhere else, and it is never merged — the user merges.
+
+**Step 7 ("Wave PR evidence")** runs only when step 6 reported the wave PR, sits right after the "Do NOT ask questions mid-workflow" anchor, and never blocks the run — every outcome goes into the run summary instead. It imports `_publication.mds` via the alias form `@import "./_partials/_publication.mds" as pub`; `dynamic-build.mds` is the only adopter that imports it this way — `code-review.mds`, `implement.mds` and `resolve.mds` all use the named `{ publication_gate }` form. Skip conditions: no `- **PR**: #{n}` line captured from step 6 ⇒ `TRACEABILITY: DEGRADED (wave PR number not captured)`, skip the whole step; `PR_TEST_PLAN_BLOCK` is `(none)` ⇒ `Wave evidence: skipped (no wave test plan)`, skip it. Otherwise: (a) spawn one Test agent on the integration worktree to cover the wave test plan and report PASS or FAIL — nothing is fixed here, the wave is already done and its PR is open; (b) append the Test agent's TP claims, PASS or FAIL alike, to the evidence file's `## Claims` section, keyed by its reported 40-hex `HEAD:` SHA (a report whose `HEAD:` is not one 40-hex SHA gets no claim, recorded as `Wave evidence: no claims (HEAD not one SHA)`); (c) push the integration branch once — never force, no retry — so every claim's SHA is in the PR (any non-`exit=0` result, a rejected non-fast-forward included, records `TRACEABILITY: DEGRADED (evidence push failed)` and refreshes anyway); (d) resolve the publication value via `pub.publication_gate()` and spawn `OPERATION: update-pr-evidence` to update the PR's test-plan block and post its evidence comment. A spawn that returns neither its `## PR Evidence` block nor a `TRACEABILITY: DEGRADED` line ⇒ `TRACEABILITY: DEGRADED (evidence refresh failed)`. Whatever step 7 returns, the run ends there.
+
 ### Ticket-factory pipeline (dynamic-tickets)
 
 Before the workflow runs, the main model proposes a candidate ticket slate and waits for user confirmation — this is the human gate before the pipeline invests in drafting.
@@ -196,6 +206,12 @@ The plan-challenge step uses a verbatim intent string (§5.1) — do not paraphr
 The preference profile (`~/.devflow/preference-profile.md`) auto-resolves decisions matching established taste. Unresolved decisions go to `DECISIONS-NEEDED.md` for the user.
 
 ## Integration Patterns
+
+### Tracker paths preflight (provider-neutral)
+
+All three dynamic commands that read or file tracker issues (`dynamic-build`, `dynamic-plan`, `dynamic-tickets`) state the same provider-neutral preflight item, `**Tracker paths:**`, instead of naming a host: each says the issue reference or URL (or, for `dynamic-tickets`, the filing step) routes through the Git agent, which resolves the configured tracker and its access itself and reports `TRACEABILITY: DEGRADED ({reason})` when it cannot read or file one — no tracker CLI (`gh` included) is checked at the command layer. `dynamic-profile.mds` has no such item — it never reads or files an issue.
+
+`tests/guards/provider-scope.test.ts`'s `collectHostIssueLiterals` scans 8 artifacts (source `.mds` + compiled `.md`, for `plan` and the three dynamic commands) and fails on any of four host literals — `GitHub issue`, `GitHub paths`, `GitHub-dependent`, `` `gh` CLI `` — appearing outside `plan.mds`'s usage-synopsis allowlist (the one place a literal `#42` GitHub-shaped example is legitimate). The same test also asserts every dynamic command's preflight literally contains `**Tracker paths:**` and a `TRACEABILITY: DEGRADED (` phrase.
 
 ### DECISIONS_CONTEXT loading
 
@@ -311,9 +327,9 @@ Agents that preload a skill via frontmatter `skills:` must never be instructed t
 
 A criterion is not acceptable if: vague ("the feature should work correctly"), implementation-coupled ("the function must call X"), or untestable. At least one NEGATIVE criterion (what the system MUST NOT do) is required per ticket. These rules are load-bearing because Gate 2 uses them directly — the Evaluate and Test agents have no other source of truth.
 
-### Per-ticket branch branching time
+### Per-ticket branch is whatever setup-task reports
 
-Per-ticket branches (`ticket/<slug>`) are branched off integration HEAD at the moment the ticket becomes **ready**, not at wave start. This ensures the ticket branch already contains all merged dependencies when it starts.
+Each ticket's `setup-task` spawn creates the branch and reports it under its `### Branch` block (the `- **Branch name**:` line); the workflow binds `BRANCH` from that value and uses it for every later phase and the merge — neither the SINGLE-mode workflow script nor the wave loop ever names a branch itself, and no `args.branch` override is read (setup-task's Input takes no requested branch name). Branching happens off integration HEAD at the moment the ticket becomes **ready**, not at wave start, so the ticket branch already contains all merged dependencies when it starts. When setup-task reports no branch, the workflow stops the ticket before implementing (`verdict: "ESCALATED"`, `escalations: [{ type: "branch-missing", description: "setup-task reported no branch name — check its Output, then re-run" }]`) rather than guessing or falling back to a synthesized name.
 
 ### Gate 1 #2 retry tracks latest failure details
 
@@ -338,6 +354,9 @@ A writer-only guard (does `_ticket_template.mds` emit the grammar token?) stays 
 - `tests/build-mds.test.ts` — doctrine-literal pinning tests (sections 10, 12, 13, 21–23: gh-issue scope, tracker adoption, marker ownership)
 - `tests/dynamic/depends-on-grammar.test.ts` — `{ISSUE_REF}`/`{ISSUE_ID}` writer↔reader pairs, the AC-2.10 byte-identity battery, and the round-refresh operation-naming guard (proves the wave names a real Git-agent roster operation, not an invented capability)
 - `tests/seams/pr-link-handoff.test.ts` — `ISSUE_PR_LINK` forwarding floor (`MIN_FORWARDING_SITES = 14`) across every Code spawn site carrying `ISSUE_NUMBER`
+- `src/assets/scripts/pr-evidence.cjs` — the evidence plumbing core; `parseWaveBlock` is the wave-block grammar dynamic-build's step 3 composition must satisfy, and `verify-evidence.cjs check wave` is its CLI front door — not owned by any feature KB today; this KB covers only the wave-block shape as consumed by dynamic-build
+- `tests/guards/provider-scope.test.ts` — `collectHostIssueLiterals` (Tracker paths preflight, 8-artifact scan) and the wider provider-neutrality guards
+- `tests/dynamic/wave-flow.test.ts` — the wave workflow's branch binding (`setup.branch` verbatim, no fallback) and the two ESCALATED stops
 - `scripts/build-mds.ts` — unified MDS compiler for all three host kinds (command hosts → `dist/commands/`, generator hosts → `dist/agents/`, reference modules → `dist/skills/git/references/`); see the count-rule table above for what 13/12/16/14/14 each count. The pipeline itself — discovery, destination validation, the frontmatter strips, pruning — is documented in the `feature-knowledge-system` KB
 - `tests/fixtures/mds-manifest.ts` — shared name manifest for the suite: `MDS_COMMAND_HOSTS`, `MDS_GENERATOR_HOSTS` (`['git']`), `MDS_PARTIALS`, `MDS_REFERENCE_MODULES`, `TRACKER_PARTIAL_ADOPTERS`, `HAND_AUTHORED_COMMAND_FILES`, `DIST_COMMAND_FILES`, `ALL_MDS_HOSTS`, `ALL_DISCOVERED_HOSTS` — tests derive counts from these instead of pinning literals
 
