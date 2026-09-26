@@ -42,7 +42,8 @@ function makeAgentFrontmatter(model: string): string {
 /**
  * Known GPT model IDs — literal list so this test file does not depend on the
  * hardcoded registry in external-models.ts (which is deleted in Commit 9).
- * These match the subswitch@0.4.0 catalog used throughout the Phase D tests.
+ * Canonical registry ids that still route by exact id under subswitch@0.5.0
+ * (gpt-5.5 is retired from discovery but remains exact-id routable).
  * applies ADR-003: end-state only — no externalModelIds() import.
  */
 const GPT_IDS = ['gpt-5.6-sol', 'gpt-5.6-terra', 'gpt-5.6-luna', 'gpt-5.5'];

@@ -20,7 +20,8 @@ import {
 } from '../src/core/external-models.js';
 
 // Literal GPT model IDs — independent of the deleted hardcoded registry.
-// These reflect the subswitch@0.4.0 catalog used throughout Phase D tests.
+// Canonical registry ids that still route by exact id under subswitch@0.5.0
+// (gpt-5.5 is retired from discovery but remains exact-id routable).
 // applies ADR-003: end-state only — no compatibility imports from deleted exports.
 const KNOWN_GPT_IDS = ['gpt-5.6-sol', 'gpt-5.6-terra', 'gpt-5.6-luna', 'gpt-5.5'];
 import {
