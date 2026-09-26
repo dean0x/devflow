@@ -30,6 +30,7 @@ import { hasAmbientHook } from '../src/cli/commands/ambient.js';
 import { hasHudStatusLine } from '../src/cli/commands/hud.js';
 import { addProxyHooks, applyProxyEnv, hasProxyHooks } from '../src/cli/commands/proxy.js';
 import { writeProxyState, buildProxyState, DEFAULT_PROXY_PORT } from '../src/core/proxy-state.js';
+import { DEVFLOW_HISTORICAL_DENY } from '../src/targets/claude-code/post-install.js';
 import type { Settings } from '../src/targets/claude-code/hooks.js';
 
 const CLI = requireBuiltCli();
@@ -443,32 +444,61 @@ describe('init --hud-only over a full install (D-HUD-ONLY-PRESERVE)', () => {
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
-// TP-9 — on→off re-init transitions converge every artifact (PF-015)
+// TP-8/TP-9 — on→off re-init transitions converge every artifact (PF-015)
 // ─────────────────────────────────────────────────────────────────────────────
 
 describe('init on→off re-init transitions', () => {
-  it('memory, ambient, HUD and rules all turn off on re-init', async () => {
-    runInit(repoA, '--recommended', '--ambient', '--memory', '--hud', '--rules');
+  it('memory, ambient, HUD, rules, learning and knowledge all turn off on re-init', async () => {
+    runInit(repoA, '--recommended', '--ambient', '--memory', '--hud', '--rules', '--learning', '--knowledge');
     const on = await readSettings();
     expect(hasMemoryHooks(on)).toBe(true);
     expect(hasAmbientHook(on)).toBe(true);
     expect(hasHudStatusLine(on)).toBe(true);
     expect(existsSync(path.join(claudeDir(), 'rules', 'devflow'))).toBe(true);
-    // A pending memory queue that the memory-off re-init must drain.
-    await fs.mkdir(path.join(repoA, '.devflow', 'memory'), { recursive: true });
-    await fs.writeFile(path.join(repoA, '.devflow', 'memory', '.pending-turns.jsonl'), '{"role":"user","content":"x","ts":1}\n');
+    expect(await readManifestFeatures()).toMatchObject({ learning: true, knowledge: true });
+    // Pending memory and learning queues that the off re-init must drain.
+    await fs.mkdir(path.dirname(memoryQueue(repoA)), { recursive: true });
+    await fs.writeFile(memoryQueue(repoA), '{"role":"user","content":"x","ts":1}\n');
+    await seedLearningQueue(repoA);
+    // Non-vacuity: learning is really on for the seeded queue before the re-init.
+    expect(sessionContext(repoA)).toContain('--- LEARNING MAINTENANCE ---');
 
-    runInit(repoA, '--recommended', '--no-ambient', '--no-memory', '--no-hud', '--no-rules');
+    runInit(repoA, '--recommended', '--no-ambient', '--no-memory', '--no-hud', '--no-rules', '--no-learning', '--no-knowledge');
     const off = await readSettings();
     expect(hasMemoryHooks(off)).toBe(false);
     expect(hasAmbientHook(off)).toBe(false);
     expect(hasHudStatusLine(off)).toBe(false);
     expect(existsSync(path.join(claudeDir(), 'rules', 'devflow'))).toBe(false);
-    expect(await readManifestFeatures()).toMatchObject({ ambient: false, memory: false, hud: false, rules: false });
+    expect(await readManifestFeatures()).toMatchObject({
+      ambient: false, memory: false, hud: false, rules: false, learning: false, knowledge: false,
+    });
     // The per-repo config holds no feature switch (D-FEATURES-MACHINE-WIDE).
     expect(await readRepoConfig(repoA)).toEqual({ reviewPublication: 'auto' });
-    expect(existsSync(path.join(repoA, '.devflow', 'memory', '.pending-turns.jsonl'))).toBe(false);
+    expect(existsSync(memoryQueue(repoA))).toBe(false);
+    expect(existsSync(learningQueue(repoA)), 'the learning-off re-init drains the repo learning queue').toBe(false);
+    expect(sessionContext(repoA)).not.toContain('LEARNING MAINTENANCE');
+    expect(runCli(repoA, 'knowledge', '--status').out).toContain('Status: disabled');
     expect(JSON.parse(await fs.readFile(path.join(devflowDir(), 'hud.json'), 'utf-8')).enabled).toBe(false);
+  }, MULTI_RUN_TIMEOUT_MS);
+
+  // No env seam exists for the managed-settings path (deliberately — sudo writes
+  // run against it), so a `none` re-init here reaches the REAL system file when it
+  // holds Devflow entries. As a normal user the direct write fails EACCES and,
+  // with no TTY, no sudo is tried; as root it would really rewrite that file, so
+  // the test refuses to run as root. The managed arm is pinned structurally in
+  // init-machine-switch.test.ts and by the injected-path unit tests.
+  it.skipIf(process.getuid?.() === 0)('security: a `--security none` re-init over a user-mode install strips every Devflow deny entry', async () => {
+    runInit(repoA, '--recommended', '--security', 'user');
+    const devflowDeny = (json: string): string[] =>
+      ((JSON.parse(json) as { permissions?: { deny?: string[] } }).permissions?.deny ?? [])
+        .filter((e) => DEVFLOW_HISTORICAL_DENY.has(e));
+    // Non-vacuity: the user-mode install really wrote the deny list.
+    expect(devflowDeny(await readSettings()).length).toBeGreaterThan(0);
+    expect((await readManifestFeatures()).security).toBe('user');
+
+    runInit(repoA, '--recommended', '--security', 'none');
+    expect(devflowDeny(await readSettings())).toEqual([]);
+    expect((await readManifestFeatures()).security).toBe('none');
   }, MULTI_RUN_TIMEOUT_MS);
 
   it('a plain `init --no-proxy` over a proxy-on install removes the hooks, the env and the manifest flag', async () => {

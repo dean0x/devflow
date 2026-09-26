@@ -115,3 +115,31 @@ describe('drainDisabledFeatureQueues (D-INIT-DRAIN-AFTER-SWITCH)', () => {
     expect(src.slice(0, persistAt)).not.toMatch(/await drain(Memory|Learning)Queue\(gitRoot\)/);
   });
 });
+
+describe('init --security none clears the managed deny list too', () => {
+  // The managed-settings path is a root-owned system file with no env seam, so
+  // the e2e re-init covers only the user-settings arm; this pins the managed arm.
+  const src = readFileSync(path.resolve(import.meta.dirname, '..', 'src', 'cli', 'commands', 'init.ts'), 'utf-8');
+
+  it('the `none` branch calls removeManagedDenyList when a managed deny list was detected', () => {
+    const noneAt = src.indexOf("} else if (securityMode === 'none') {");
+    expect(noneAt).toBeGreaterThan(-1);
+    // The branch ends at the exhaustive guard that follows it.
+    const endAt = src.indexOf('const _exhaustive: never = securityMode;', noneAt);
+    expect(endAt).toBeGreaterThan(noneAt);
+    const branch = src.slice(noneAt, endAt);
+
+    expect(branch).toContain('await stripUserSecurityDenyList(userSettingsPath)');
+    const guardAt = branch.indexOf('if (managedDenyDetected) {');
+    const removeAt = branch.indexOf('await removeManagedDenyList(rootDir, verbose)');
+    expect(guardAt).toBeGreaterThan(-1);
+    expect(removeAt, 'the managed removal runs inside the detection guard').toBeGreaterThan(guardAt);
+    // The outcome is reported, never thrown.
+    expect(branch).toMatch(/describeManagedDenyRemoval\(await removeManagedDenyList\(rootDir, verbose\)\)/);
+  });
+
+  it('the detection guard is set from the managed file\'s parse-safe deny state', () => {
+    expect(src).toMatch(/detectDenyState\(userSettingsJson, managedExists, managedContentJson\)/);
+    expect(src).toContain('managedDenyDetected = detected.managed;');
+  });
+});
