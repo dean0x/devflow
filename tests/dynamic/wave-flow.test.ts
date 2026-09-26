@@ -25,6 +25,10 @@
  *          `branch-missing`) — a correctness stop, not a shape gate.
  *   W3     (#376) with a tracking issue, the rendered wave block leads with its
  *          `Refs` line, and `check wave` admits it.
+ *   W1     (#376) after the wave PR opens, step 7 runs one Test agent on the
+ *          integration worktree, appends `/implement`'s TP claims to the wave
+ *          evidence file, pushes (never forced) and refreshes the PR through
+ *          `update-pr-evidence` — never blocking.
  *
  * The engine and the wave loop are checked by EXECUTING the shipped skeletons —
  * the SINGLE workflow script and the wave round loop, both read from the built
@@ -42,8 +46,9 @@ import * as fs from 'fs'
 import * as os from 'os'
 import * as path from 'path'
 
+import { compiledSkillRefsDir } from '../../src/core/assets.js'
 import { ROOT, parseFences, requireDistFile } from '../helpers.js'
-import { VERIFY_EVIDENCE_SCRIPT } from '../evidence/seam.js'
+import { PR_EVIDENCE_SCRIPT, VERIFY_EVIDENCE_SCRIPT } from '../evidence/seam.js'
 
 const BUILT = requireDistFile('dynamic-build.md')
 const BUILD_SOURCE = fs.readFileSync(path.join(ROOT, 'src', 'assets', 'commands', 'dynamic-build.mds'), 'utf-8')
@@ -53,6 +58,7 @@ interface VerifyEvidence {
   main(argv: readonly string[], deps?: { stderr?: (t: string) => void }): { code: number; stdout: string }
 }
 const VE = createRequire(import.meta.url)(VERIFY_EVIDENCE_SCRIPT) as VerifyEvidence
+const PE = createRequire(import.meta.url)(PR_EVIDENCE_SCRIPT) as { readonly CLAIM_LINE_RE: RegExp }
 
 const SCRATCH = fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-wave-flow-'))
 afterAll(() => fs.rmSync(SCRATCH, { recursive: true, force: true }))
@@ -1173,6 +1179,137 @@ describe('AC-13: under required, a merged row that links no ticket blocks the wa
 
   it('known-bad probe: the collector refuses a corpus with no unlinked merged row', () => {
     expect(collectRequiredLinkViolations([], requiredLinkRule(BUILT))).toHaveLength(1)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// W1 (#376) — step 7: the wave PR gets Test-agent claims and an evidence refresh
+// ---------------------------------------------------------------------------
+
+const STEP7 = '7. **Wave PR evidence**'
+const F4_LINE = 'Do NOT ask questions mid-workflow'
+const MAINTENANCE = '### Maintenance note'
+/** /implement's TP claim — the one grammar every claim appender writes. */
+const TP_CLAIM_TEMPLATE = '- TP-<n> <PASS|FAIL|SKIP> sha:<head> by:test exit:<0-255>'
+/** The wave evidence file, repo-relative, as step 3(b) writes it and step 7 hands it to update-pr-evidence. */
+const WAVE_EVIDENCE_FILE = '.devflow/docs/evidence-wave-{slug}.md'
+
+/** Built step 7, from its lead to the maintenance note, or null. */
+function waveEvidenceStep(built: string): string | null {
+  return section(built, STEP7, MAINTENANCE)
+}
+
+/**
+ * Named collector: what step 7 fails to state, each site labelled — one
+ * requirement per site, so one probe per site drives this collector.
+ */
+export function collectWaveEvidenceStepDefects(built: string): string[] {
+  const step = waveEvidenceStep(built)
+  if (step === null) return ['step 7: not found once, before the maintenance note']
+  const out: string[] = []
+  const need = (site: string, ok: boolean): void => { if (!ok) out.push(site) }
+  const fences = parseFences(step)
+  const tests = fences.filter(f => f.includes('Agent(subagent_type="Test")'))
+  const gits = fences.filter(f => f.includes('Agent(subagent_type="Git")'))
+  const f4 = offsetsOf(built, F4_LINE)
+  need('placement: after step 6 and its F4 line, so step 6 keeps its one fence',
+    f4.length === 1 && built.indexOf(STEP7) > f4[0] && built.indexOf(STEP7) > built.indexOf(STEP6))
+  need('gate: only once step 6 reported the wave PR, and never blocking',
+    step.includes('only when step 6 reported the wave PR') && step.includes('it never blocks'))
+  need('the PR number: step 6\'s PR line, shape-checked, else degraded',
+    step.includes('from step 6\'s `- **PR**: #{n}` line') && step.includes('`^[1-9][0-9]{0,9}$`')
+    && step.includes('`TRACEABILITY: DEGRADED (wave PR number not captured)`'))
+  need('no wave test plan: skipped, and named', step.includes('`PR_TEST_PLAN_BLOCK` `(none)` ⇒ record `Wave evidence: skipped (no wave test plan)`'))
+  need('the Test spawn: one Test agent on the integration worktree with the wave TP lines',
+    tests.length === 1 && tests[0].includes('\nWORKTREE_PATH: {integration worktree root}\n')
+    && tests[0].includes('\nTEST_PLAN: {the TP lines of the wave evidence file\'s ## Test Plan section}\n'))
+  need('the claims: /implement\'s TP claim, appended to the wave evidence file, keyed to one reported HEAD',
+    step.split('\n').includes(TP_CLAIM_TEMPLATE) && step.includes(`/${WAVE_EVIDENCE_FILE}"\``) && step.includes('`## Claims`')
+    && step.includes('gets no claim'))
+  need('the push: once, never forced, and a failure does not stop the refresh',
+    step.includes('push origin HEAD; echo "exit=$?"') && !/--force|\+HEAD|push -f\b/.test(step)
+    && step.includes('`TRACEABILITY: DEGRADED (evidence push failed)` and refresh anyway'))
+  need('the refresh: one update-pr-evidence spawn with the PR number, the repo-relative file, the publication value and the worktree',
+    gits.length === 1 && gits[0].includes('"OPERATION: update-pr-evidence\n') && gits[0].includes('\nPR_NUMBER: {n}\n')
+    && gits[0].includes(`\nEVIDENCE_FILE: ${WAVE_EVIDENCE_FILE}\n`) && /\nREVIEW_PUBLICATION: \{[^}\n]+\}\n/.test(gits[0])
+    && gits[0].includes('\nWORKTREE_PATH: {integration worktree root}\n'))
+  need('the publication value: resolved in this step, by the partial',
+    step.includes('**Resolve `REVIEW_PUBLICATION` per worktree:**') && step.includes('**Evidence stub:**'))
+  need('never blocks: a refresh that returns nothing degrades', step.includes('`TRACEABILITY: DEGRADED (evidence refresh failed)`'))
+  need('no policy in a spawn: the partial reads it command-side', fences.every(f => !f.includes('EVIDENCE_POLICY')))
+  return out
+}
+
+/** One seed per site: the shipped text, and the text that removes that site's requirement. */
+const STEP7_SEEDS: ReadonlyArray<readonly [site: string, from: string, to: string]> = [
+  ['placement', STEP7, `${F4_LINE}, again.\n\n${STEP7}`],
+  ['gate', 'it never blocks', 'it may block'],
+  ['the PR number', '`^[1-9][0-9]{0,9}$`', '`^[0-9]+$`'],
+  ['no wave test plan', '`Wave evidence: skipped (no wave test plan)`', '`Wave evidence: attempted anyway`'],
+  ['the Test spawn', 'Agent(subagent_type="Test")', 'Agent(subagent_type="Validate")'],
+  ['the claims', TP_CLAIM_TEMPLATE, '- TP-<n> <outcome> sha:<head> by:test'],
+  ['the push', 'push origin HEAD; echo', 'push --force origin HEAD; echo'],
+  ['the refresh', `EVIDENCE_FILE: ${WAVE_EVIDENCE_FILE}\n`, ''],
+  ['the publication value', '**Resolve `REVIEW_PUBLICATION` per worktree:**', 'Resolve it somehow:'],
+  ['never blocks', '`TRACEABILITY: DEGRADED (evidence refresh failed)`', 'the run stops'],
+  ['no policy in a spawn', 'WORKTREE_PATH: {integration worktree root}\nUpdate', 'WORKTREE_PATH: {integration worktree root}\nEVIDENCE_POLICY: {EVIDENCE_POLICY}\nUpdate'],
+]
+
+describe('W1: after the wave PR opens, step 7 claims its test plan and refreshes its evidence', () => {
+  it('every step-7 site states its rule', () => {
+    expect(waveEvidenceStep(BUILT)?.length ?? 0, 'step 7 is found').toBeGreaterThan(1000)
+    expect(collectWaveEvidenceStepDefects(BUILT)).toEqual([])
+  })
+
+  it('probe cardinality equals site cardinality', () => {
+    expect(collectWaveEvidenceStepDefects('no step 7'), 'a missing step is one defect').toHaveLength(1)
+    expect(STEP7_SEEDS.map(s => s[0])).toEqual([
+      'placement', 'gate', 'the PR number', 'no wave test plan', 'the Test spawn', 'the claims',
+      'the push', 'the refresh', 'the publication value', 'never blocks', 'no policy in a spawn',
+    ])
+  })
+
+  for (const [site, from, to] of STEP7_SEEDS) {
+    it(`known-bad probe: ${site} removed is reported, and only it`, () => {
+      const found = collectWaveEvidenceStepDefects(seedOnce(BUILT, from, to))
+      expect(found, found.join('\n')).toHaveLength(1)
+      expect(found[0].startsWith(site), found[0]).toBe(true)
+    })
+  }
+
+  it('step 6 keeps its one spawn fence: step 7 sits past the F4 line', () => {
+    expect(waveSpawn(BUILT), 'step 6\'s ensure-pr-ready fence').not.toBeNull()
+    expect(offsetsOf(BUILT, 'OPERATION: update-pr-evidence'), 'one refresh spawn').toHaveLength(1)
+  })
+
+  it('the claim line is /implement\'s TP claim, byte for byte', () => {
+    const implement = requireDistFile('implement.md')
+    expect(implement.split('\n').filter(l => l.startsWith('- TP-<n> ')), '/implement states its TP claim once').toEqual([TP_CLAIM_TEMPLATE])
+    expect(waveEvidenceStep(BUILT)!.split('\n').filter(l => l.startsWith('- TP-<n> '))).toEqual([TP_CLAIM_TEMPLATE])
+  })
+
+  it('filled in, the claim template is a line pr-evidence admits — with or without its exit', () => {
+    const head = 'a'.repeat(40)
+    const fill = (outcome: string, exit: string | null): string => {
+      const line = TP_CLAIM_TEMPLATE.replace('<n>', '3').replace('<PASS|FAIL|SKIP>', outcome).replace('<head>', head)
+      return exit === null ? line.replace(' exit:<0-255>', '') : line.replace('<0-255>', exit)
+    }
+    const lines = ['PASS', 'FAIL', 'SKIP'].flatMap(o => [fill(o, '0'), fill(o, '255'), fill(o, null)])
+    expect(lines.filter(l => !PE.CLAIM_LINE_RE.test(l))).toEqual([])
+    // Negative control: the template itself, unfilled, is never a claim.
+    expect(PE.CLAIM_LINE_RE.test(TP_CLAIM_TEMPLATE)).toBe(false)
+  })
+
+  it('the repo-relative EVIDENCE_FILE of every admitted wave slug passes update-pr-evidence\'s value gate', () => {
+    const mechanics = fs.readFileSync(path.join(compiledSkillRefsDir(), 'pr', 'update-pr-evidence.md'), 'utf-8')
+    const gate = /only a value matching `(\^[^`]+\$)` reaches the shell/.exec(mechanics)?.[1]
+    expect(gate, 'the op\'s EVIDENCE_FILE gate is found').toBe('^[A-Za-z0-9._/-]{1,255}$')
+    const re = new RegExp(gate!)
+    for (const slug of ['auth', 'a', 'sdlc-pr6-2026', 'a'.repeat(60)]) {
+      expect(re.test(WAVE_EVIDENCE_FILE.replace('{slug}', slug)), slug).toBe(true)
+    }
+    // Negative control: the gate read is live — a value with a space is refused.
+    expect(re.test('.devflow/docs/evidence-wave-a b.md')).toBe(false)
   })
 })
 

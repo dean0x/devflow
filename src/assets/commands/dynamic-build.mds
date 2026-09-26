@@ -10,6 +10,7 @@ output-dir: dist/commands
 @import { wave_loop, branch_merge_model, merge_doctrine, escalation_model } from "./_partials/_wave.mds"
 @import { acceptance_criteria_contract } from "./_partials/_plan_contract.mds"
 @import { issue_ref_grammar, issue_capture_contract } from "./_partials/_tracker.mds"
+@import "./_partials/_publication.mds" as pub
 
 {authoring_preamble()}
 
@@ -662,6 +663,55 @@ node "${DEVFLOW_DIR:-$HOME/.devflow}/scripts/verify-evidence.cjs" render --plan 
    The Git agent pastes each block only behind its own check. Report its `**PR**` line and any `TRACEABILITY: DEGRADED (\{reason\})` lines. The wave PR is opened here and nowhere else; it is never merged, and main is never touched — the user merges.
 
 Do NOT ask questions mid-workflow — that is impossible (F4). The workflow only WRITES the report; you read it and ask.
+
+7. **Wave PR evidence** — only when step 6 reported the wave PR, after it; it never blocks, and every outcome below goes into the run summary. Take `\{n\}` from step 6's `- **PR**: #\{n\}` line when `\{n\}` matches `^[1-9][0-9]\{0,9\}$` as a whole; no such line ⇒ record `TRACEABILITY: DEGRADED (wave PR number not captured)` and skip this step. `PR_TEST_PLAN_BLOCK` `(none)` ⇒ record `Wave evidence: skipped (no wave test plan)` and skip it.
+
+   **(a) Test the wave.** Spawn one Test agent on the integration worktree with the wave test plan — the TP lines of the `## Test Plan` section step 3(b) wrote to `.devflow/docs/evidence-wave-\{slug\}.md`:
+
+```
+Agent(subagent_type="Test"):
+"ORIGINAL_REQUEST: the merged tickets of wave/{slug}, as the wave test plan names them
+FILES_CHANGED: {the files wave/{slug} changes against the - **Base**: branch step 6 reported}
+TEST_PLAN: {the TP lines of the wave evidence file's ## Test Plan section}
+WORKTREE_PATH: {integration worktree root}
+Cover every TEST_PLAN line on the integration branch as it stands. Report PASS or FAIL with evidence."
+```
+
+   Nothing is fixed here, PASS or FAIL: the wave is done and its PR is open. Report the Test agent's Status.
+
+   **(b) Claims.** Append its TP claims, PASS or FAIL alike, to the `## Claims` section of `"\{integration worktree root\}/.devflow/docs/evidence-wave-\{slug\}.md"` — the file's last section, created when absent. Append only: never edit or remove a claim. Each line is `/implement`'s TP claim, keyed to the 40-hex `HEAD:` the Test agent's report shows:
+
+```
+- TP-<n> <PASS|FAIL|SKIP> sha:<head> by:test exit:<0-255>
+```
+
+   One line per `### Test Plan Evidence` row whose TP is in the wave test plan, with the row's outcome; the line ends at `by:test` when the row's Exit is not a number from 0 to 255. A report whose `HEAD:` is not a single 40-hex SHA — a reported before/after change included — gets no claim: record `Wave evidence: no claims (HEAD not one SHA)`.
+
+   **(c) Push** the integration branch once — never force, no retry — so every claim's SHA is in the PR:
+
+```bash
+git -C "{integration worktree root}" push origin HEAD; echo "exit=$?"
+```
+
+   Any result but `exit=0`, a rejected non-fast-forward push included ⇒ record `TRACEABILITY: DEGRADED (evidence push failed)` and refresh anyway.
+
+   **(d) Refresh.** Resolve the publication value for the integration worktree:
+
+{pub.publication_gate()}
+
+   Then spawn:
+
+```
+Agent(subagent_type="Git"):
+"OPERATION: update-pr-evidence
+PR_NUMBER: {n}
+EVIDENCE_FILE: .devflow/docs/evidence-wave-{slug}.md
+REVIEW_PUBLICATION: {REVIEW_PUBLICATION resolved above, or auto}
+WORKTREE_PATH: {integration worktree root}
+Update the wave PR's test-plan block and post its evidence comment."
+```
+
+   `update-pr-evidence` decides what each publication value means for the evidence comment. Report its `## PR Evidence` block — its `EVIDENCE` line and its `**Body**:` / `**Comment**:` line — or its `TRACEABILITY: DEGRADED (\{reason\})` line; a spawn that returns neither ⇒ `TRACEABILITY: DEGRADED (evidence refresh failed)`. Whatever it returns, the run ends here.
 
 ---
 
