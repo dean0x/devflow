@@ -35,6 +35,12 @@ function isJsonObject(value: unknown): value is Record<string, unknown> {
 }
 
 /**
+ * The pre-rename key `learning` was stored under (ADR-011). A manifest no
+ * command has rewritten since the rename can still hold only this key.
+ */
+const LEGACY_LEARNING_KEY = 'decisions';
+
+/**
  * Whether a RAW parsed manifest leaves `feature` switched on. Pure.
  *
  * Only an explicit boolean `false` switches a feature off. A missing key, a
@@ -43,15 +49,26 @@ function isJsonObject(value: unknown): value is Record<string, unknown> {
  * shell hooks, so the CLI's status and the runtime never disagree about the
  * same file.
  *
- * Deliberately NOT built on readManifest(): that reader heals an absent
- * `learning`/`knowledge` key to `false` (and returns null for a manifest missing
- * other fields), which would report a feature off on a file the hooks read as on.
+ * D-LEARNING-LEGACY-DECISIONS (a sub-decision of D-FEATURES-MACHINE-WIDE):
+ * `learning` is read as `features.learning` when that is a boolean, else the
+ * legacy `features.decisions` when THAT is a boolean, else ON — readManifest's
+ * migration precedence exactly. The legacy key is otherwise honoured only once
+ * some command happens to run readManifest and heal it, so a `decisions: false`
+ * would keep learning running until then. queue_read_gates applies the same
+ * precedence.
+ *
+ * Deliberately NOT built on readManifest(): it returns null for a manifest
+ * missing any of its required fields — reported as "on" here, as the hooks read
+ * it — and it writes its heals back to disk, which a read-only status must not.
  */
 export function isMachineFeatureOn(rawManifest: unknown, feature: MachineFeature): boolean {
   if (!isJsonObject(rawManifest)) return true;
   const features = rawManifest.features;
   if (!isJsonObject(features)) return true;
-  return features[feature] !== false;
+  const value = feature === 'learning' && typeof features.learning !== 'boolean'
+    ? features[LEGACY_LEARNING_KEY]
+    : features[feature];
+  return value !== false;
 }
 
 /**
@@ -60,9 +77,12 @@ export function isMachineFeatureOn(rawManifest: unknown, feature: MachineFeature
  * is no `features` record to write into).
  *
  * Only `features.<feature>` and `updatedAt` change; every other key is carried
- * verbatim. Going through readManifest()/writeManifest() instead would persist
- * that reader's heals — an absent `learning` key written back as `false` —
- * so switching memory on could silently switch learning off.
+ * verbatim. Writing `learning` leaves a legacy `decisions` key in place, inert:
+ * a boolean `learning` wins over it (D-LEARNING-LEGACY-DECISIONS). Going through
+ * readManifest()/writeManifest() instead would refuse a manifest that reader
+ * rejects, drop every key ManifestData does not model (one a newer devflow
+ * wrote, say), and persist that reader's unrelated heals as a side effect of a
+ * one-key toggle.
  */
 export function setMachineFeature(
   rawManifest: unknown,

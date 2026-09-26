@@ -404,6 +404,18 @@ describe('queue_read_gates', () => {
       it('only an explicit boolean false is the switch (a string "false" is not)', () => {
         expect(gates(manifestWith({ memory: 'false', learning: 0 }))).toMatchObject({ memory: 'true', learning: 'true' });
       });
+
+      it('learning falls back to the legacy decisions key, mirroring readManifest (D-LEARNING-LEGACY-DECISIONS)', () => {
+        expect(gates(manifestWith({ memory: true, decisions: false }))).toMatchObject({ memory: 'true', learning: 'false', exitCode: 0 });
+        expect(gates(manifestWith({ decisions: true }))).toMatchObject({ memory: 'true', learning: 'true' });
+        // An explicit boolean learning wins over the legacy key, either way.
+        expect(gates(manifestWith({ decisions: false, learning: true }))).toMatchObject({ learning: 'true' });
+        expect(gates(manifestWith({ decisions: true, learning: false }))).toMatchObject({ learning: 'false' });
+        // A non-boolean learning is not a value, so the legacy key decides; a
+        // non-boolean decisions decides nothing.
+        expect(gates(manifestWith({ decisions: false, learning: 'yes' }))).toMatchObject({ learning: 'false' });
+        expect(gates(manifestWith({ decisions: 'false' }))).toMatchObject({ learning: 'true' });
+      }, 15000);
     });
   }
 

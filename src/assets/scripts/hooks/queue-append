@@ -44,6 +44,12 @@
 #   a missing key, or a non-boolean value leaves it ON (fail-open, ADR-028), the
 #   same rule isMachineFeatureOn() applies in the CLI.
 #
+#   D-LEARNING-LEGACY-DECISIONS: learning reads `features.learning` when it is a
+#   boolean, else the pre-rename `features.decisions` (ADR-011) -- readManifest's
+#   migration precedence exactly, so a legacy `decisions: false` switches
+#   learning off before any command has healed the file. Only a boolean `false`
+#   in whichever key decides is off, as above.
+#
 #   Every hook that gates on memory or learning reads it through here: the
 #   capture hooks, session-start-context (Sections 1-2), memory-worker,
 #   session-start-memory, pre-compact-memory and background-memory-update. The
@@ -112,14 +118,17 @@ queue_read_gates() {
       # comma produces two raw-output lines (newline-separated) in one jq process.
       _qg_fields=$(jq -r '
         (if (try .features.memory catch null) == false then "false" else "true" end),
-        (if (try .features.learning catch null) == false then "false" else "true" end)
+        (if (try (.features | if (.learning | type) == "boolean" then .learning else .decisions end) catch null) == false
+          then "false" else "true" end)
       ' "$_qg_manifest" 2>/dev/null) || _qg_fields=""
     else
       _qg_fields=$(node -e "
         const m = JSON.parse(require('fs').readFileSync(process.argv[1], 'utf8'));
         const f = m !== null && typeof m === 'object' ? m.features : undefined;
-        const on = (k) => !(f !== null && typeof f === 'object' && f[k] === false);
-        process.stdout.write(String(on('memory')) + String.fromCharCode(10) + String(on('learning')));
+        const isObj = f !== null && typeof f === 'object';
+        const on = (k) => !(isObj && f[k] === false);
+        const learnKey = isObj && typeof f.learning !== 'boolean' ? 'decisions' : 'learning';
+        process.stdout.write(String(on('memory')) + String.fromCharCode(10) + String(on(learnKey)));
       " -- "$_qg_manifest" 2>/dev/null) || _qg_fields=""
     fi
     if [ -n "$_qg_fields" ]; then

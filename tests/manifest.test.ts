@@ -137,8 +137,9 @@ describe('readManifest', () => {
     const result = await readManifest(tmpDir);
     expect(result).not.toBeNull();
     expect(result!.features.hud).toBe(false);
-    expect(result!.features.knowledge).toBe(false);
-    expect(result!.features.learning).toBe(false);
+    // D-FEATURES-ABSENT-ON: an absent machine-wide switch reads as ON, as every gate reads it.
+    expect(result!.features.knowledge).toBe(true);
+    expect(result!.features.learning).toBe(true);
     expect(result!.features.rules).toBe(true);
     // Phase 2: flags migrated from absent (no flags in old JSON) → empty FlagsRecord
     expect(result!.features.flags).toEqual({});
@@ -146,7 +147,7 @@ describe('readManifest', () => {
     expect((result!.features as Record<string, unknown>).learn).toBeUndefined();
   });
 
-  it('normalizes old manifest without decisions to default false', async () => {
+  it('normalizes old manifest without learning or decisions to ON (D-FEATURES-ABSENT-ON)', async () => {
     const oldData = {
       version: '2.0.0',
       plugins: ['devflow-core-skills'],
@@ -158,11 +159,12 @@ describe('readManifest', () => {
     await fs.writeFile(path.join(tmpDir, 'manifest.json'), JSON.stringify(oldData), 'utf-8');
     const result = await readManifest(tmpDir);
     expect(result).not.toBeNull();
-    // 'decisions' was renamed to 'learning' — both absent and old-name fallback to false
-    expect(result!.features.learning).toBe(false);
+    // 'decisions' was renamed to 'learning' — both absent reads as ON, the value
+    // every runtime gate (queue_read_gates, isMachineFeatureOn) already applies.
+    expect(result!.features.learning).toBe(true);
   });
 
-  it('normalizes old manifest without kb to default false', async () => {
+  it('normalizes old manifest without knowledge or kb to ON (D-FEATURES-ABSENT-ON)', async () => {
     const oldData = {
       version: '1.4.0',
       plugins: ['devflow-core-skills'],
@@ -174,7 +176,41 @@ describe('readManifest', () => {
     await fs.writeFile(path.join(tmpDir, 'manifest.json'), JSON.stringify(oldData), 'utf-8');
     const result = await readManifest(tmpDir);
     expect(result).not.toBeNull();
-    expect(result!.features.knowledge).toBe(false);
+    expect(result!.features.knowledge).toBe(true);
+  });
+
+  it('keeps explicit learning/knowledge values, and a legacy decisions:false still reads as learning off', async () => {
+    const base = { version: '2.0.0', plugins: ['devflow-core-skills'], scope: 'user', installedAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z' };
+    const cases: Array<[Record<string, unknown>, { learning: boolean; knowledge: boolean }]> = [
+      [{ learning: false, knowledge: false }, { learning: false, knowledge: false }],
+      [{ learning: true, knowledge: true }, { learning: true, knowledge: true }],
+      [{ decisions: false }, { learning: false, knowledge: true }],
+      [{ decisions: false, learning: true }, { learning: true, knowledge: true }],
+      [{ kb: false }, { learning: true, knowledge: false }],
+    ];
+    for (const [extra, expected] of cases) {
+      await fs.writeFile(
+        path.join(tmpDir, 'manifest.json'),
+        JSON.stringify({ ...base, features: { ambient: true, memory: true, flags: {}, ...extra } }),
+        'utf-8',
+      );
+      const result = await readManifest(tmpDir);
+      expect(result, JSON.stringify(extra)).not.toBeNull();
+      expect({ learning: result!.features.learning, knowledge: result!.features.knowledge }, JSON.stringify(extra)).toEqual(expected);
+    }
+  });
+
+  it('a toggle through syncManifestFeature never writes an absent learning/knowledge key back as false', async () => {
+    // Pre-fix, `devflow hud --enable` on an older manifest persisted the reader's
+    // `false` default — silently switching learning and knowledge off machine-wide.
+    await fs.writeFile(
+      path.join(tmpDir, 'manifest.json'),
+      JSON.stringify({ version: '2.0.0', plugins: [], scope: 'user', features: { ambient: true, memory: true, hud: false, flags: {} }, installedAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z' }),
+      'utf-8',
+    );
+    await syncManifestFeature(tmpDir, 'hud', true);
+    const onDisk = JSON.parse(await fs.readFile(path.join(tmpDir, 'manifest.json'), 'utf-8')) as { features: Record<string, unknown> };
+    expect(onDisk.features).toMatchObject({ hud: true, learning: true, knowledge: true });
   });
 
   it('heals features.kb to features.knowledge on disk', async () => {

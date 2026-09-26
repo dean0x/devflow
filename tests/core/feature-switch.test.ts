@@ -37,6 +37,21 @@ describe('isMachineFeatureOn (pure)', () => {
     }
   });
 
+  it('learning honours the legacy features.decisions key exactly as readManifest migrates it (D-LEARNING-LEGACY-DECISIONS)', () => {
+    // learning if boolean, else decisions if boolean, else on.
+    expect(isMachineFeatureOn({ features: { decisions: false } }, 'learning')).toBe(false);
+    expect(isMachineFeatureOn({ features: { decisions: true } }, 'learning')).toBe(true);
+    expect(isMachineFeatureOn({ features: { decisions: false, learning: true } }, 'learning')).toBe(true);
+    expect(isMachineFeatureOn({ features: { decisions: true, learning: false } }, 'learning')).toBe(false);
+    // A non-boolean learning is not a value, so the legacy key still decides.
+    expect(isMachineFeatureOn({ features: { decisions: false, learning: 'yes' } }, 'learning')).toBe(false);
+    // A non-boolean decisions decides nothing.
+    expect(isMachineFeatureOn({ features: { decisions: 'false' } }, 'learning')).toBe(true);
+    // The legacy key belongs to learning alone.
+    expect(isMachineFeatureOn({ features: { decisions: false } }, 'memory')).toBe(true);
+    expect(isMachineFeatureOn({ features: { decisions: false } }, 'knowledge')).toBe(true);
+  });
+
   it('reads each feature independently', () => {
     const raw = { features: { learning: false, knowledge: true } };
     expect(isMachineFeatureOn(raw, 'learning')).toBe(false);

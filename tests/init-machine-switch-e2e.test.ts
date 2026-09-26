@@ -352,6 +352,56 @@ describe('devflow memory|learning|knowledge --enable/--disable are machine-wide'
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Older manifests: absent keys and the legacy `decisions` key
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** Rewrite the installed manifest's features: drop `remove`, then merge `set`. */
+async function editManifestFeatures(remove: string[], set: Record<string, unknown> = {}): Promise<void> {
+  const manifest = JSON.parse(await readManifestRaw()) as { features: Record<string, unknown> };
+  const features = Object.fromEntries(Object.entries(manifest.features).filter(([k]) => !remove.includes(k)));
+  await fs.writeFile(
+    path.join(devflowDir(), 'manifest.json'),
+    JSON.stringify({ ...manifest, features: { ...features, ...set } }, null, 2),
+    'utf-8',
+  );
+}
+
+describe('older manifests agree with the runtime gates', () => {
+  it('a manifest without learning/knowledge keys: a plain re-init keeps both enabled (D-FEATURES-ABSENT-ON)', async () => {
+    runInit(repoA, '--recommended');
+    await editManifestFeatures(['learning', 'knowledge']);
+    // The gates already read the absent keys as on…
+    expect(runCli(repoA, 'learning', '--status').out).toContain('Learning: enabled');
+    expect(runCli(repoA, 'knowledge', '--status').out).toContain('Status: enabled');
+
+    // …so a plain re-init (an upgrade) must record them on, not seed them off.
+    runInit(repoA, '--recommended');
+    expect(await readManifestFeatures()).toMatchObject({ learning: true, knowledge: true });
+    await seedLearningQueue(repoA);
+    expect(sessionContext(repoA)).toContain('--- LEARNING MAINTENANCE ---');
+  }, MULTI_RUN_TIMEOUT_MS);
+
+  it('a manifest holding only the legacy decisions:false: learning is off in the hooks and the CLI status (D-LEARNING-LEGACY-DECISIONS)', async () => {
+    runInit(repoA, '--recommended');
+    await editManifestFeatures(['learning'], { decisions: false });
+    await seedLearningQueue(repoB);
+
+    expect(sessionContext(repoB)).not.toContain('LEARNING MAINTENANCE');
+    const before = queueLines(nonGit);
+    captureTurn(nonGit);
+    expect(queueLines(nonGit), 'learning captured under a legacy decisions:false').toBe(before);
+    // Non-vacuity: the capture hooks ran — memory (still on) captured the turn.
+    expect(linesOf(memoryQueue(nonGit))).toBe(2);
+    expect(runCli(repoA, 'learning', '--status').out).toContain('Learning: disabled');
+
+    // An explicit learning value wins over the legacy key.
+    await editManifestFeatures([], { learning: true });
+    expect(sessionContext(repoB)).toContain('--- LEARNING MAINTENANCE ---');
+    expect(runCli(repoA, 'learning', '--status').out).toContain('Learning: enabled');
+  }, MULTI_RUN_TIMEOUT_MS);
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
 // TP-7 — --hud-only over a full install
 // ─────────────────────────────────────────────────────────────────────────────
 
