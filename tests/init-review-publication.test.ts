@@ -27,6 +27,10 @@ import { requireBuiltCli } from './helpers.js';
 
 const CLI = requireBuiltCli();
 
+// One budget for the spawn and the test that awaits it: a CLI spawn under load runs
+// well past vitest's 5 s default, so each test gets the spawn's own ceiling.
+const SUBPROCESS_TIMEOUT_MS = 60_000;
+
 let tmpHome: string;
 let tmpRepo: string;
 
@@ -38,7 +42,7 @@ function runInit(...args: string[]): { status: number | null; stderr: string } {
   );
   const result = spawnSync('node', [CLI, 'init', ...args], {
     encoding: 'utf-8',
-    timeout: 60_000,
+    timeout: SUBPROCESS_TIMEOUT_MS,
     cwd: tmpRepo,
     env: {
       ...process.env,
@@ -99,7 +103,7 @@ describe('devflow init — reviewPublication carry-over', () => {
       config.reviewPublication,
       're-init erased reviewPublication — the field has no prompt, so init must carry it over',
     ).toBe('off');
-  });
+  }, SUBPROCESS_TIMEOUT_MS);
 
   it('init --reset collapses reviewPublication back to "auto"', async () => {
     await writeProjectConfig('full');
@@ -114,7 +118,7 @@ describe('devflow init — reviewPublication carry-over', () => {
       config.reviewPublication,
       'init --reset preserved reviewPublication — a factory reset must not carry a publication override forward (PF-015)',
     ).toBe('auto');
-  });
+  }, SUBPROCESS_TIMEOUT_MS);
 
   it('a fresh repo with no prior config gets the fail-closed default', async () => {
     const result = runInit('--recommended');
@@ -122,7 +126,7 @@ describe('devflow init — reviewPublication carry-over', () => {
 
     const config = await readProjectConfig();
     expect(config.reviewPublication, 'fresh install must default to "auto"').toBe('auto');
-  });
+  }, SUBPROCESS_TIMEOUT_MS);
 });
 
 describe('devflow init — keys devflow does not manage survive the config write', () => {
@@ -144,7 +148,7 @@ describe('devflow init — keys devflow does not manage survive the config write
     expect(config.teamNote, 're-init erased a key devflow does not manage').toEqual(TEAM_NOTE);
     // Non-vacuous: the managed keys still converge on init's binding.
     expect(config.reviewPublication).toBe('off');
-  });
+  }, SUBPROCESS_TIMEOUT_MS);
 
   it('re-init keeps an INVALID tracker value verbatim — refuse, never repair (PF-071)', async () => {
     await writeRawProjectConfig({ ...MANAGED, tracker: 42 });
@@ -157,7 +161,7 @@ describe('devflow init — keys devflow does not manage survive the config write
       config.tracker,
       're-init erased an invalid tracker value, and with it the DEGRADED that names the typo',
     ).toBe(42);
-  });
+  }, SUBPROCESS_TIMEOUT_MS);
 
   it('init --reset resets the managed keys but keeps the keys devflow does not manage', async () => {
     await writeRawProjectConfig({
@@ -173,5 +177,5 @@ describe('devflow init — keys devflow does not manage survive the config write
     expect(config.reviewPublication).toBe('auto');
     expect(config.tracker, 'a factory reset of devflow state deleted a hand-written override').toBe('linear');
     expect(config.teamNote).toEqual(TEAM_NOTE);
-  });
+  }, SUBPROCESS_TIMEOUT_MS);
 });
