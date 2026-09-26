@@ -2,8 +2,9 @@
  * tests/evidence/release-trace-parity.test.ts
  *
  * AC-4 (SDLC-evidence PR5, #364): release-trace.cjs decides which commits are
- * TRACED with its own copy of the closing-keyword rule and the three history
- * grammars, while the Git agent reads the same rules out of the built
+ * TRACED with its own copy of the closing-keyword rule, the three history
+ * grammars and the message field it scans (`%B`, #376 S1), while the Git agent
+ * reads the same rules out of the built
  * gather-release-evidence references. Two copies agree only until one is edited,
  * so every literal the script exports is compared here with the literal the
  * built reference states — and the two line grammars the gather step and
@@ -31,6 +32,7 @@ type Grammar = 'github' | 'jira' | 'linear'
 interface ReleaseTraceLiterals {
   readonly KEYWORD_RE: RegExp
   readonly TRAILING_CLASS: string
+  readonly MESSAGE_LOG_FLAGS: readonly string[]
   readonly GRAMMARS: Readonly<Record<Grammar, RegExp>>
   readonly TRACE_HEADER_RE: RegExp
   readonly LAST_TAG_LINE_RE: RegExp
@@ -58,6 +60,21 @@ export function collectKeywordRule(text: string): { keyword: string; trailingCla
   const keyword = step?.match(/whitespace token matching `([^`]+)`/)?.[1]
   const trailingClass = step?.match(/every trailing character in `(\[[^`]+\])`/)?.[1]
   return keyword && trailingClass ? { keyword, trailingClass } : null
+}
+
+/**
+ * Named collector: the `git log --format=` field step 3a reads each message as —
+ * "Read each message as `git log --format=%B` lines." — or null.
+ */
+export function collectMessageField(text: string): string | null {
+  const step = text.split('\n').find(line => line.startsWith('3a. **Closing-keyword rule.**'))
+  return step?.match(/[Rr]ead each message as `git log --format=(%[A-Za-z])` lines/)?.[1] ?? null
+}
+
+/** The field the script's message log scans for references: the last one before its `%x1e` record end. */
+export function scriptMessageField(flags: readonly string[]): string | null {
+  const format = flags.find(f => f.startsWith('--format='))
+  return format?.match(/%x00(%[A-Za-z])%x1e$/)?.[1] ?? null
 }
 
 /**
@@ -117,6 +134,10 @@ export function collectParityDrift(script: ReleaseTraceLiterals, refs: Readonly<
       if (rule.keyword !== script.KEYWORD_RE.source) drift.push(`${p}: keyword ${rule.keyword} ≠ KEYWORD_RE ${script.KEYWORD_RE.source}`)
       if (rule.trailingClass !== script.TRAILING_CLASS) drift.push(`${p}: trailing class ${rule.trailingClass} ≠ TRAILING_CLASS ${script.TRAILING_CLASS}`)
     }
+    const field = collectMessageField(refs[p])
+    if (field === null || field !== scriptMessageField(script.MESSAGE_LOG_FLAGS)) {
+      drift.push(`${p}: step 3a reads messages as ${field} ≠ the script's ${scriptMessageField(script.MESSAGE_LOG_FLAGS)}`)
+    }
     const grammar = GRAMMAR_COLLECTORS[p](refs[p])
     if (grammar !== script.GRAMMARS[p].source) drift.push(`${p}: history grammar ${grammar} ≠ GRAMMARS.${p} ${script.GRAMMARS[p].source}`)
   }
@@ -151,8 +172,10 @@ describe('AC-4: release-trace.cjs and the built gather references state one rule
     for (const p of PROVIDERS) {
       expect(collectKeywordRule(gatherRef(p)), `${p}: step 3a`).not.toBeNull()
       expect(GRAMMAR_COLLECTORS[p](gatherRef(p)), `${p}: history grammar`).not.toBeNull()
+      expect(collectMessageField(gatherRef(p)), `${p}: step 3a's message format`).toBe('%B')
     }
     expect(SCRIPT.KEYWORD_RE.source.length).toBeGreaterThan(20)
+    expect(scriptMessageField(SCRIPT.MESSAGE_LOG_FLAGS), 'the script scans the full message').toBe('%B')
   })
 
   it('the keyword rule, the trailing class and all three grammars are equal', () => {
@@ -199,6 +222,14 @@ describe('AC-4: known-bad probes — a drifted reference is reported by the same
     // Why Linear has its own collector: the generic one reads nothing there.
     expect(collectHistoryGrammar(refs.linear)).toBeNull()
     expect(collectLinearHistoryGrammar(refs.github)).toBeNull()
+  })
+
+  it('step 3a reading another field than the script scans is reported for that provider only (S1)', () => {
+    const refs = builtRefs()
+    const drifted = { ...refs, linear: refs.linear.replace('`git log --format=%B` lines', '`git log --format=%s` lines') }
+    expect(drifted.linear, 'the seed must land').not.toBe(refs.linear)
+    expect(collectParityDrift(SCRIPT, drifted)).toEqual(['linear: step 3a reads messages as %s ≠ the script\'s %B'])
+    expect(scriptMessageField(['--format=%H%x00%an%x00%ae%x00%s%x00%b%x1e']), 'a %b script is read as %b').toBe('%b')
   })
 
   it('a TRACE template missing a field, or reordered, is reported', () => {
