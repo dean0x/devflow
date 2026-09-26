@@ -9,7 +9,10 @@
 # authored by the LLM; this script only does plumbing (lock, queue drain, spawn).
 # Avoids PF-006 (does NOT parse Stop hook JSON), PF-007 (edit source only).
 #
-# Usage: background-memory-update <CWD>
+# Usage: background-memory-update <CWD> [<manifest_path>]
+#   <manifest_path> — the devflow-global manifest whose `features.memory` is the
+#   machine-wide switch (D-FEATURES-MACHINE-WIDE). memory-worker passes it; when
+#   absent it resolves from ${DEVFLOW_DIR:-$HOME/.devflow}.
 #
 # Success:      removes .pending-turns.processing; touches .last-refresh-ok
 # Failure:      leaves .pending-turns.processing; this worker is the PRIMARY recovery owner —
@@ -33,6 +36,8 @@ if [ "${DEVFLOW_BG_UPDATER:-}" = "1" ]; then
 fi
 
 CWD="$1"
+# Resolved before DEVFLOW_DIR is shadowed with the project-scoped .devflow below.
+DEVFLOW_MANIFEST="${2:-${DEVFLOW_DIR:-$HOME/.devflow}/manifest.json}"
 if [ -z "$CWD" ] || [ ! -d "$CWD" ]; then
   echo "background-memory-update: CWD missing or not a directory: '$CWD'" >&2
   exit 1
@@ -70,15 +75,15 @@ STAGED_FILE="$MEMORY_FILE.new"  # staging path for CAS write (applies ADR-023)
 LOCK_DIR="$MEMORY_DIR/.working-memory.lock"
 TRIGGER_FILE="$MEMORY_DIR/.working-memory-last-trigger"
 OK_FILE="$MEMORY_DIR/.last-refresh-ok"
-FEATURE_CONFIG="$DEVFLOW_DIR/config.json"
 
-# --- Re-check memory:false at runtime (defense-in-depth: feature may be disabled since spawn) ---
-if [ -f "$FEATURE_CONFIG" ]; then
-  _MEM_ENABLED=$(json_field_file "$FEATURE_CONFIG" "memory" "true")
-  if [ "$_MEM_ENABLED" = "false" ]; then
-    log "ABORT: memory disabled in feature config (disabled after spawn)"
-    exit 0
-  fi
+# --- Re-check the machine-wide memory switch at runtime (defense-in-depth: the
+# feature may have been disabled since spawn). Same helper as every other
+# memory/learning gate (D-FEATURES-MACHINE-WIDE, see queue-append).
+source "$SCRIPT_DIR/queue-append" || { echo "background-memory-update: failed to source queue-append" >&2; exit 1; }
+queue_read_gates "$DEVFLOW_MANIFEST"
+if [ "$_QG_MEMORY" != "true" ]; then
+  log "ABORT: memory disabled machine-wide (disabled after spawn)"
+  exit 0
 fi
 
 # --- Resolve claude binary ---

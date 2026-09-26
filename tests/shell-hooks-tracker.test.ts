@@ -863,9 +863,16 @@ describe('session-start-context: tracker setup directive (Section 3)', () => {
   it('the tracker directive is NOT gated by the learning feature toggle', () => {
     // learning:false silences Sections 1 and 2. Section 3 is a different feature
     // and must survive: a user who turned learning off did not turn their tracker off.
+    // The switch is machine-wide (D-FEATURES-MACHINE-WIDE), so it rides in the
+    // same manifest that names the provider.
     seedTracker(homeDir, { provider: 'jira' });
-    fs.mkdirSync(path.join(tmpDir, '.devflow'), { recursive: true });
-    fs.writeFileSync(path.join(tmpDir, '.devflow', 'config.json'), JSON.stringify({ learning: false }));
+    const manifest = JSON.parse(fs.readFileSync(manifestOf(homeDir), 'utf-8')) as { features: Record<string, unknown> };
+    fs.writeFileSync(manifestOf(homeDir), JSON.stringify({ ...manifest, features: { ...manifest.features, learning: false } }));
+    fs.mkdirSync(path.join(tmpDir, '.devflow', 'learning'), { recursive: true });
+    fs.writeFileSync(
+      path.join(tmpDir, '.devflow', 'learning', 'decisions.md'),
+      '<!-- TL;DR: 1 decision. Key: ADR-001 Test -->\n# Architectural Decisions',
+    );
 
     const ctx = contextOf(run().stdout);
     expect(ctx).toContain(BANNER);

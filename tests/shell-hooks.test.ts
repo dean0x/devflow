@@ -2268,8 +2268,8 @@ describe('session-start-context root .gitignore (memory-independent)', () => {
 // directive instructing the main model to spawn the background Learning agent with
 // the resolved model (project learning.json → global ~/.devflow/learning.json
 // → opus). A FRESH .processing (younger than 900s) means a live agent already
-// owns the batch, so the directive is suppressed. Gate is config-only: the
-// `learning` field in feature config (.devflow/config.json).
+// owns the batch, so the directive is suppressed. Gate is the machine-wide
+// `features.learning` in ~/.devflow/manifest.json (D-FEATURES-MACHINE-WIDE).
 
 describe('session-start-context: learning maintenance directive (Section 2)', () => {
   const CONTEXT_HOOK = path.join(HOOKS_DIR, 'session-start-context');
@@ -2334,27 +2334,13 @@ describe('session-start-context: learning maintenance directive (Section 2)', ()
     expect(contextOf(stdout)).not.toContain('LEARNING MAINTENANCE');
   });
 
-  it('learning:false in feature config suppresses the directive (and the TL;DR)', () => {
-    seedQueue(tmpDir);
-    fs.writeFileSync(
-      path.join(tmpDir, '.devflow', 'config.json'),
-      JSON.stringify({ learning: false }),
-    );
-    fs.writeFileSync(
-      path.join(tmpDir, '.devflow', 'learning', 'decisions.md'),
-      '<!-- TL;DR: 1 decision. Key: ADR-001 Test -->\n# Architectural Decisions',
-    );
-
-    const { stdout, exitCode } = runHook(CONTEXT_HOOK, { cwd: tmpDir }, homeDir);
-    expect(exitCode).toBe(0);
-    expect(stdout.trim()).toBe('');
-  });
-
-  // D-LEARNING-MASTER-SWITCH: `devflow init --no-learning` writes
-  // features.learning:false to ~/.devflow/manifest.json; that must silence the
-  // directive (and the TL;DR) in every repo, whatever the repo's own config says.
-  describe('machine-wide learning switch (manifest)', () => {
+  // D-FEATURES-MACHINE-WIDE: `devflow init --no-learning` / `devflow learning
+  // --disable` write features.learning:false to ~/.devflow/manifest.json; that
+  // alone decides the directive (and the TL;DR) in every repo — the retired
+  // per-repo `learning` key decides nothing either way.
+  describe('machine-wide learning switch (manifest only)', () => {
     const ENV = { DEVFLOW_DIR: '' };
+    const TLDR = '<!-- TL;DR: 1 decision. Key: ADR-001 Test -->\n# Architectural Decisions';
 
     function writeManifestFeatures(features: Record<string, unknown>): void {
       fs.writeFileSync(
@@ -2363,13 +2349,10 @@ describe('session-start-context: learning maintenance directive (Section 2)', ()
       );
     }
 
-    it('learning:false in the manifest suppresses the directive and the TL;DR although config says true', () => {
+    it('learning:false in the manifest suppresses the directive and the TL;DR although the repo config says true', () => {
       seedQueue(tmpDir);
       fs.writeFileSync(path.join(tmpDir, '.devflow', 'config.json'), JSON.stringify({ learning: true }));
-      fs.writeFileSync(
-        path.join(tmpDir, '.devflow', 'learning', 'decisions.md'),
-        '<!-- TL;DR: 1 decision. Key: ADR-001 Test -->\n# Architectural Decisions',
-      );
+      fs.writeFileSync(path.join(tmpDir, '.devflow', 'learning', 'decisions.md'), TLDR);
       writeManifestFeatures({ learning: false });
 
       const { stdout, exitCode } = runHook(CONTEXT_HOOK, { cwd: tmpDir }, homeDir, ENV);
@@ -2394,13 +2377,15 @@ describe('session-start-context: learning maintenance directive (Section 2)', ()
       expect(contextOf(stdout)).toContain('--- LEARNING MAINTENANCE ---');
     });
 
-    it('learning:true in the manifest never overrides a repo that turned learning off', () => {
+    it('a stale repo config learning:false does not suppress the directive or the TL;DR', () => {
       seedQueue(tmpDir);
       fs.writeFileSync(path.join(tmpDir, '.devflow', 'config.json'), JSON.stringify({ learning: false }));
+      fs.writeFileSync(path.join(tmpDir, '.devflow', 'learning', 'decisions.md'), TLDR);
       writeManifestFeatures({ learning: true });
 
-      const { stdout } = runHook(CONTEXT_HOOK, { cwd: tmpDir }, homeDir, ENV);
-      expect(stdout.trim()).toBe('');
+      const ctx = contextOf(runHook(CONTEXT_HOOK, { cwd: tmpDir }, homeDir, ENV).stdout);
+      expect(ctx).toContain('--- LEARNING MAINTENANCE ---');
+      expect(ctx).toContain('PROJECT DECISIONS');
     });
   });
 

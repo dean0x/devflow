@@ -191,11 +191,11 @@ function createPromptCapturingShim(shimDir: string, stagedFile: string): string 
   return stdinCapture;
 }
 
-/** Write feature config.json */
-function writeDreamConfig(projectDir: string, fields: Record<string, unknown>): void {
-  const dir = path.join(projectDir, '.devflow');
+/** Switch features machine-wide: the devflow-global manifest under `homeDir` (D-FEATURES-MACHINE-WIDE). */
+function writeMachineFeatures(homeDir: string, features: Record<string, unknown>): void {
+  const dir = path.join(homeDir, '.devflow');
   fs.mkdirSync(dir, { recursive: true });
-  fs.writeFileSync(path.join(dir, 'config.json'), JSON.stringify(fields));
+  fs.writeFileSync(path.join(dir, 'manifest.json'), JSON.stringify({ version: '2.0.0', features }));
 }
 
 /** Seed .pending-turns.jsonl with one user and one assistant turn */
@@ -1514,13 +1514,13 @@ describe('S19: session-start-memory cold-path .pending-turns.processing recovery
     expect(fs.existsSync(path.join(projectDir, '.devflow', 'memory', '.pending-turns.jsonl'))).toBe(false);
   });
 
-  it('recovery is skipped entirely when memory is disabled via dream config', () => {
-    writeDreamConfig(projectDir, { memory: false });
+  it('recovery is skipped entirely when memory is switched off machine-wide', () => {
+    writeMachineFeatures(homeDir, { memory: false });
     const proc = path.join(projectDir, '.devflow', 'memory', '.pending-turns.processing');
     fs.writeFileSync(proc, JSON.stringify({ role: 'user', content: 'orphaned', ts: 1 }) + '\n');
     backdateMtime(proc, 600);
 
-    runHook(SESSION_START_MEMORY_HOOK, { cwd: projectDir }, homeDir);
+    runHook(SESSION_START_MEMORY_HOOK, { cwd: projectDir }, homeDir, { DEVFLOW_DIR: '' });
 
     // memory:false gates the whole hook (including the new recovery block) — .processing untouched
     expect(fs.existsSync(proc)).toBe(true);

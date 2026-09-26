@@ -1,5 +1,5 @@
 /**
- * Tests for config-based disable guards across memory and decisions hooks,
+ * Tests for the disable guards across memory and decisions hooks,
  * the session-start-context hook, hook registration utilities, and the
  * decisions usage scanner.
  *
@@ -50,8 +50,11 @@ function mkTmpHome(): string {
   return home;
 }
 
-/** A user-scope manifest naming `provider` at features.tracker.provider. */
-function seedTrackerProvider(home: string, provider: string): void {
+/**
+ * A user-scope manifest holding `features` — where memory, learning and
+ * knowledge are switched, machine-wide (D-FEATURES-MACHINE-WIDE).
+ */
+function writeManifest(home: string, features: Record<string, unknown>): void {
   fs.mkdirSync(path.join(home, '.devflow'), { recursive: true });
   fs.writeFileSync(path.join(home, '.devflow', 'manifest.json'), JSON.stringify({
     version: '2.0.0',
@@ -59,8 +62,18 @@ function seedTrackerProvider(home: string, provider: string): void {
     scope: 'user',
     installedAt: '2026-01-01T00:00:00.000Z',
     updatedAt: '2026-01-01T00:00:00.000Z',
-    features: { ambient: true, memory: true, tracker: { provider } },
+    features,
   }, null, 2));
+}
+
+/** A per-repo config. Its memory/learning keys are retired: no gate reads them. */
+function writeRepoConfig(base: string, fields: Record<string, unknown>): void {
+  fs.writeFileSync(path.join(base, '.devflow', 'config.json'), JSON.stringify(fields));
+}
+
+/** A user-scope manifest naming `provider` at features.tracker.provider. */
+function seedTrackerProvider(home: string, provider: string, features: Record<string, unknown> = {}): void {
+  writeManifest(home, { ambient: true, memory: true, tracker: { provider }, ...features });
   // The presence sentinel devflow writes whenever the resolved provider is not
   // github — without it Section 3 stops at a shell builtin and the fixture would
   // be inert (the exact vacuous-seed shape PF-018 describes).
@@ -104,15 +117,24 @@ describe('config guard: pre-compact-memory', () => {
     fs.rmSync(tmpHome, { recursive: true, force: true });
   });
 
-  it('exits cleanly when feature config has memory: false', () => {
+  it('exits cleanly when memory is switched off machine-wide, although the repo config says true', () => {
     mkMemoryDir(tmpDir);
-    fs.writeFileSync(path.join(tmpDir, '.devflow', 'config.json'), JSON.stringify({ memory: false }));
+    writeRepoConfig(tmpDir, { memory: true });
+    writeManifest(tmpHome, { memory: false });
     const input = sessionInput(tmpDir);
     expect(() => {
       execSync(`bash "${HOOK}"`, { input, env: hookEnv(tmpHome), stdio: ['pipe', 'pipe', 'pipe'] });
     }).not.toThrow();
     // backup.json must NOT be written when disabled
     expect(fs.existsSync(path.join(tmpDir, '.devflow', 'memory', 'backup.json'))).toBe(false);
+  });
+
+  it('a stale repo config memory:false does not switch it off', () => {
+    mkMemoryDir(tmpDir);
+    writeRepoConfig(tmpDir, { memory: false });
+    writeManifest(tmpHome, { memory: true });
+    execSync(`bash "${HOOK}"`, { input: sessionInput(tmpDir), env: hookEnv(tmpHome), stdio: ['pipe', 'pipe', 'pipe'] });
+    expect(fs.existsSync(path.join(tmpDir, '.devflow', 'memory', 'backup.json'))).toBe(true);
   });
 
   it('writes backup.json when disable guard absent', () => {
@@ -137,13 +159,23 @@ describe('config guard: session-start-memory', () => {
     fs.rmSync(tmpHome, { recursive: true, force: true });
   });
 
-  it('outputs nothing when feature config has memory: false (even with WORKING-MEMORY.md present)', () => {
+  it('outputs nothing when memory is switched off machine-wide (even with WORKING-MEMORY.md and a repo config saying true)', () => {
     mkMemoryDir(tmpDir);
-    fs.writeFileSync(path.join(tmpDir, '.devflow', 'config.json'), JSON.stringify({ memory: false }));
+    writeRepoConfig(tmpDir, { memory: true });
+    writeManifest(tmpHome, { memory: false });
     fs.writeFileSync(path.join(tmpDir, '.devflow', 'memory', 'WORKING-MEMORY.md'), '## Now\n- testing');
     const input = sessionInput(tmpDir);
     const output = execSync(`bash "${HOOK}"`, { input, env: hookEnv(tmpHome), stdio: ['pipe', 'pipe', 'pipe'] }).toString().trim();
     expect(output).toBe('');
+  });
+
+  it('a stale repo config memory:false does not silence it', () => {
+    mkMemoryDir(tmpDir);
+    writeRepoConfig(tmpDir, { memory: false });
+    writeManifest(tmpHome, { memory: true });
+    fs.writeFileSync(path.join(tmpDir, '.devflow', 'memory', 'WORKING-MEMORY.md'), '## Now\n- testing');
+    const output = execSync(`bash "${HOOK}"`, { input: sessionInput(tmpDir), env: hookEnv(tmpHome), stdio: ['pipe', 'pipe', 'pipe'] }).toString().trim();
+    expect(parseHookOutput(output)).toContain('WORKING MEMORY');
   });
 
   it('outputs context when disable guard absent and WORKING-MEMORY.md exists', () => {
@@ -193,12 +225,9 @@ describe('config guard: capture-turn decisions scanner gating', () => {
     fs.rmSync(tmpHome, { recursive: true, force: true });
   });
 
-  it('does NOT run scanner when feature config has learning: false', () => {
+  it('does NOT run scanner when learning is switched off machine-wide', () => {
     mkMemoryDir(tmpDir);
-    fs.writeFileSync(
-      path.join(tmpDir, '.devflow', 'config.json'),
-      JSON.stringify({ learning: false }),
-    );
+    writeManifest(tmpHome, { learning: false });
     // Create usage file to detect if scanner would have run
     const usagePath = path.join(tmpDir, '.devflow', 'learning', '.decisions-usage.json');
     fs.writeFileSync(usagePath, JSON.stringify({
@@ -281,16 +310,24 @@ describe('config guard: session-start-context', () => {
     expect(additionalContext).toContain('PROJECT DECISIONS');
   });
 
-  it('skips decisions TL;DR when feature config has learning: false', () => {
+  it('skips decisions TL;DR when learning is switched off machine-wide', () => {
     mkMemoryDir(tmpDir);
     const decisionsDir = path.join(tmpDir, '.devflow', 'learning');
     fs.writeFileSync(path.join(decisionsDir, 'decisions.md'), '<!-- TL;DR: 1 decisions. Key: ADR-001 -->\n# Decisions\n');
-    fs.writeFileSync(
-      path.join(tmpDir, '.devflow', 'config.json'),
-      JSON.stringify({ learning: false }),
-    );
+    writeManifest(tmpHome, { learning: false });
     // No output (nothing else to inject in this minimal test)
     expect(runContextHook(sessionInput(tmpDir))).toBe('');
+  });
+
+  it('a stale repo config learning:false does not skip the decisions TL;DR', () => {
+    mkMemoryDir(tmpDir);
+    fs.writeFileSync(
+      path.join(tmpDir, '.devflow', 'learning', 'decisions.md'),
+      '<!-- TL;DR: 1 decisions. Key: ADR-001 -->\n# Decisions\n',
+    );
+    writeRepoConfig(tmpDir, { learning: false });
+    writeManifest(tmpHome, { learning: true });
+    expect(parseHookOutput(runContextHook(sessionInput(tmpDir)))).toContain('PROJECT DECISIONS');
   });
 
   // ─── AC-3.22 — the developer's real $HOME never decides these assertions ───
@@ -305,15 +342,12 @@ describe('config guard: session-start-context', () => {
   it('AC-3.22: the learning:false emptiness assertion survives a HOME with provider jira', () => {
     // The seeded HOME is the hostile one: manifest provider jira AND the presence
     // sentinel, i.e. exactly the machine state that used to break this file.
-    seedTrackerProvider(tmpHome, 'jira');
+    // learning:false rides in the same manifest — it is the machine-wide switch.
+    seedTrackerProvider(tmpHome, 'jira', { learning: false });
     mkMemoryDir(tmpDir);
     fs.writeFileSync(
       path.join(tmpDir, '.devflow', 'learning', 'decisions.md'),
       '<!-- TL;DR: 1 decisions. Key: ADR-001 -->\n# Decisions\n',
-    );
-    fs.writeFileSync(
-      path.join(tmpDir, '.devflow', 'config.json'),
-      JSON.stringify({ learning: false }),
     );
     // The SessionStart event these guards send carries no `source`, and Section 3
     // emits only on startup/clear — so the output is empty for a reason that does

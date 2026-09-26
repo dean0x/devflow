@@ -37,7 +37,9 @@ function runHook(
   try {
     const result = execSync(`bash "${hookPath}"`, {
       input: JSON.stringify(input),
-      env: { ...process.env, HOME: homeDir, ...extraEnv },
+      // An explicit empty DEVFLOW_DIR (overridable per call): a developer's
+      // exported value must never decide which manifest the gates read.
+      env: { ...process.env, HOME: homeDir, DEVFLOW_DIR: '', ...extraEnv },
       stdio: ['pipe', 'pipe', 'pipe'],
     });
     return { stdout: result.toString(), stderr: '', exitCode: 0 };
@@ -85,10 +87,25 @@ function readJsonl(file: string): Record<string, unknown>[] {
   return fs.readFileSync(file, 'utf-8').trim().split('\n').filter(Boolean).map((l) => JSON.parse(l));
 }
 
+/**
+ * A per-repo .devflow/config.json. Its memory/learning keys are RETIRED
+ * (D-FEATURES-MACHINE-WIDE): tests write them only to prove no gate reads them.
+ */
 function writeFeatureConfig(projectDir: string, fields: Record<string, unknown>): void {
   const dir = path.join(projectDir, '.devflow');
   fs.mkdirSync(dir, { recursive: true });
   fs.writeFileSync(path.join(dir, 'config.json'), JSON.stringify(fields));
+}
+
+/** A devflow-global manifest.json under `devflowDir` holding `features`. */
+function writeManifestFeatures(devflowDir: string, features: Record<string, unknown>): void {
+  fs.mkdirSync(devflowDir, { recursive: true });
+  fs.writeFileSync(path.join(devflowDir, 'manifest.json'), JSON.stringify({ version: '2.0.0', features }));
+}
+
+/** Switch features machine-wide, the way `devflow init` records them. */
+function writeMachineFeatures(homeDir: string, features: Record<string, unknown>): void {
+  writeManifestFeatures(path.join(homeDir, '.devflow'), features);
 }
 
 function workerLogPath(projectDir: string, homeDir: string, hookName: string): string {
@@ -133,22 +150,22 @@ describe('capture-prompt', () => {
     expect(fs.existsSync(path.join(projectDir, '.devflow'))).toBe(false);
   });
 
-  it('AC-F4: memory:false -> no memory-queue append (learning append unaffected)', () => {
-    writeFeatureConfig(projectDir, { memory: false });
+  it('AC-F4: memory switched off -> no memory-queue append (learning append unaffected)', () => {
+    writeMachineFeatures(homeDir, { memory: false });
     runHook(CAPTURE_PROMPT, { cwd: projectDir, prompt: 'test' }, homeDir);
     expect(fs.existsSync(path.join(projectDir, '.devflow', 'memory', '.pending-turns.jsonl'))).toBe(false);
     expect(readJsonl(path.join(projectDir, '.devflow', 'learning', '.pending-turns.jsonl'))).toHaveLength(1);
   });
 
-  it('AC-F4: learning disabled via config field -> no learning-queue append (memory unaffected)', () => {
-    writeFeatureConfig(projectDir, { learning: false });
+  it('AC-F4: learning switched off -> no learning-queue append (memory unaffected)', () => {
+    writeMachineFeatures(homeDir, { learning: false });
     runHook(CAPTURE_PROMPT, { cwd: projectDir, prompt: 'test' }, homeDir);
     expect(readJsonl(path.join(projectDir, '.devflow', 'memory', '.pending-turns.jsonl'))).toHaveLength(1);
     expect(fs.existsSync(path.join(projectDir, '.devflow', 'learning', '.pending-turns.jsonl'))).toBe(false);
   });
 
   it('both disabled -> zero appends, no scaffolding', () => {
-    writeFeatureConfig(projectDir, { memory: false, learning: false });
+    writeMachineFeatures(homeDir, { memory: false, learning: false });
     runHook(CAPTURE_PROMPT, { cwd: projectDir, prompt: 'test' }, homeDir);
     expect(fs.existsSync(path.join(projectDir, '.devflow', 'memory', '.pending-turns.jsonl'))).toBe(false);
     expect(fs.existsSync(path.join(projectDir, '.devflow', 'learning', '.pending-turns.jsonl'))).toBe(false);
@@ -223,14 +240,14 @@ describe('capture-turn', () => {
   });
 
   it('AC-F4: gating independent per queue (memory:false, learning enabled)', () => {
-    writeFeatureConfig(projectDir, { memory: false });
+    writeMachineFeatures(homeDir, { memory: false });
     runHook(CAPTURE_TURN, { cwd: projectDir, session_id: 't', last_assistant_message: 'x' }, homeDir);
     expect(fs.existsSync(path.join(projectDir, '.devflow', 'memory', '.pending-turns.jsonl'))).toBe(false);
     expect(readJsonl(path.join(projectDir, '.devflow', 'learning', '.pending-turns.jsonl'))).toHaveLength(1);
   });
 
   it('decisions usage scanner still runs when memory is disabled', () => {
-    writeFeatureConfig(projectDir, { memory: false });
+    writeMachineFeatures(homeDir, { memory: false });
     // decisions-usage-scan.cjs itself no-ops when .devflow/memory/ is absent
     // (its own guard) — pre-create it, matching config-disable-guards.test.ts's
     // mkMemoryDir convention.
@@ -430,7 +447,7 @@ describe('capture-question', () => {
   });
 
   it('AC-F4: gating independent per queue (learning disabled, memory enabled)', () => {
-    writeFeatureConfig(projectDir, { learning: false });
+    writeMachineFeatures(homeDir, { learning: false });
     runHook(CAPTURE_QUESTION, { ...REAL_MULTI_QUESTION_PAYLOAD, cwd: projectDir }, homeDir);
     expect(readJsonl(path.join(projectDir, '.devflow', 'memory', '.pending-turns.jsonl'))).toHaveLength(2);
     expect(fs.existsSync(path.join(projectDir, '.devflow', 'learning', '.pending-turns.jsonl'))).toBe(false);
@@ -522,7 +539,7 @@ describe('memory-worker', () => {
   });
 
   it('memory:false -> no spawn attempted, no trigger touch', () => {
-    writeFeatureConfig(projectDir, { memory: false });
+    writeMachineFeatures(homeDir, { memory: false });
     const triggerFile = path.join(projectDir, '.devflow', 'memory', '.working-memory-last-trigger');
     fs.writeFileSync(triggerFile, '');
     backdateMtime(triggerFile, 600);
@@ -531,6 +548,178 @@ describe('memory-worker', () => {
 
     const age = Date.now() - fs.statSync(triggerFile).mtimeMs;
     expect(age).toBeGreaterThan(590 * 1000);
+  });
+
+  // ---------------------------------------------------------------------------
+  // D-FEATURES-MACHINE-WIDE — features.memory in ~/.devflow/manifest.json alone
+  // ---------------------------------------------------------------------------
+
+  it('manifest memory:false -> no spawn attempted, no trigger touch, although the repo config says true', () => {
+    writeFeatureConfig(projectDir, { memory: true });
+    writeManifestFeatures(path.join(homeDir, '.devflow'), { memory: false });
+    createFakeClaudeShim(shimDir, path.join(projectDir, '.devflow', 'memory', 'WORKING-MEMORY.md'));
+    const triggerFile = path.join(projectDir, '.devflow', 'memory', '.working-memory-last-trigger');
+    fs.writeFileSync(triggerFile, '');
+    backdateMtime(triggerFile, 600);
+
+    runHookWithPath(MEMORY_WORKER, { cwd: projectDir }, homeDir, shimDir);
+
+    const age = Date.now() - fs.statSync(triggerFile).mtimeMs;
+    expect(age).toBeGreaterThan(590 * 1000);
+  });
+
+  it('a stale repo config memory:false does not switch the worker off', () => {
+    writeFeatureConfig(projectDir, { memory: false });
+    writeManifestFeatures(path.join(homeDir, '.devflow'), { memory: true });
+    createFakeClaudeShim(shimDir, path.join(projectDir, '.devflow', 'memory', 'WORKING-MEMORY.md'));
+    const triggerFile = path.join(projectDir, '.devflow', 'memory', '.working-memory-last-trigger');
+    fs.writeFileSync(triggerFile, '');
+    backdateMtime(triggerFile, 600);
+
+    runHookWithPath(MEMORY_WORKER, { cwd: projectDir }, homeDir, shimDir);
+
+    expect(fs.statSync(triggerFile).mtimeMs).toBeGreaterThan(Date.now() - 15000);
+  });
+
+  it('a manifest without the memory key leaves the worker on (fail-open)', () => {
+    writeManifestFeatures(path.join(homeDir, '.devflow'), { learning: false });
+    createFakeClaudeShim(shimDir, path.join(projectDir, '.devflow', 'memory', 'WORKING-MEMORY.md'));
+    const triggerFile = path.join(projectDir, '.devflow', 'memory', '.working-memory-last-trigger');
+    fs.writeFileSync(triggerFile, '');
+    backdateMtime(triggerFile, 600);
+
+    runHookWithPath(MEMORY_WORKER, { cwd: projectDir }, homeDir, shimDir);
+
+    expect(fs.statSync(triggerFile).mtimeMs).toBeGreaterThan(Date.now() - 15000);
+  });
+
+  it('hands the spawned worker the devflow-global manifest, not one under the project .devflow', async () => {
+    // The worker re-reads the switch after spawn. memory-worker has shadowed
+    // DEVFLOW_DIR with the project path by then, so the worker must use the
+    // manifest path it is handed — a decoy "off" under the project .devflow
+    // proves it did not re-derive the path from the shadowed variable.
+    const overrideDir = fs.mkdtempSync(path.join(os.tmpdir(), 'mem-worker-override-'));
+    try {
+      writeManifestFeatures(overrideDir, { learning: true });
+      writeManifestFeatures(path.join(projectDir, '.devflow'), { memory: false });
+      const invokedMarker = path.join(shimDir, 'claude-invoked');
+      fs.writeFileSync(path.join(shimDir, 'claude'), `#!/bin/bash\necho invoked >> "${invokedMarker}"\nexit 1\n`);
+      fs.chmodSync(path.join(shimDir, 'claude'), 0o755);
+      fs.writeFileSync(
+        path.join(projectDir, '.devflow', 'memory', '.pending-turns.jsonl'),
+        JSON.stringify({ role: 'user', content: 'hi', ts: 1 }) + '\n' + JSON.stringify({ role: 'assistant', content: 'hey', ts: 2 }) + '\n',
+      );
+
+      runHookWithPath(MEMORY_WORKER, { cwd: projectDir }, homeDir, shimDir, { DEVFLOW_DIR: overrideDir });
+
+      // Bounded: 4000ms per attempt, ≤3 attempts total, explicit 15000ms it-timeout.
+      expect(await pollForTerminalLine(invokedMarker, 'invoked', 4000, 3)).toBe(true);
+      const log = fs.readFileSync(workerLogPath(projectDir, homeDir, 'background-memory-update'), 'utf-8');
+      expect(log).not.toContain('ABORT: memory disabled');
+    } finally {
+      fs.rmSync(overrideDir, { recursive: true, force: true });
+    }
+  }, 15000);
+});
+
+// =============================================================================
+// background-memory-update — the post-spawn re-check honours the switch too
+// =============================================================================
+describe('background-memory-update: machine-wide memory switch (D-FEATURES-MACHINE-WIDE)', () => {
+  const BG_UPDATER = path.join(HOOKS_DIR, 'background-memory-update');
+  let projectDir: string;
+  let homeDir: string;
+  let shimDir: string;
+  let invokedMarker: string;
+
+  beforeEach(() => {
+    projectDir = fs.mkdtempSync(path.join(os.tmpdir(), 'bmu-switch-'));
+    homeDir = fs.mkdtempSync(path.join(os.tmpdir(), 'bmu-switch-home-'));
+    shimDir = fs.mkdtempSync(path.join(os.tmpdir(), 'bmu-switch-shim-'));
+    fs.mkdirSync(path.join(projectDir, '.devflow', 'memory'), { recursive: true });
+    fs.writeFileSync(
+      path.join(projectDir, '.devflow', 'memory', '.pending-turns.jsonl'),
+      JSON.stringify({ role: 'user', content: 'hi', ts: 1 }) + '\n' + JSON.stringify({ role: 'assistant', content: 'hey', ts: 2 }) + '\n',
+    );
+    writeFeatureConfig(projectDir, { memory: true });
+    // A claude stand-in, so a run that fails to abort can never reach the real one.
+    invokedMarker = path.join(shimDir, 'claude-invoked');
+    fs.writeFileSync(path.join(shimDir, 'claude'), `#!/bin/bash\ntouch "${invokedMarker}"\nexit 1\n`);
+    fs.chmodSync(path.join(shimDir, 'claude'), 0o755);
+  });
+
+  afterEach(() => {
+    for (const dir of [projectDir, homeDir, shimDir]) fs.rmSync(dir, { recursive: true, force: true });
+  });
+
+  function runWorker(devflowDirEnv: string, manifestArg?: string): void {
+    const args = manifestArg === undefined ? `"${projectDir}"` : `"${projectDir}" "${manifestArg}"`;
+    execSync(`bash "${BG_UPDATER}" ${args}`, {
+      env: {
+        ...process.env,
+        HOME: homeDir,
+        DEVFLOW_DIR: devflowDirEnv,
+        PATH: `${shimDir}:${process.env.PATH ?? '/usr/bin:/bin'}`,
+        // A run that gets past the gate reaches the claude watchdog: 2s, not 120s.
+        DEVFLOW_BG_WATCHDOG_SECS: '2',
+      },
+      stdio: ['pipe', 'pipe', 'pipe'],
+    });
+  }
+
+  it('aborts before resolving claude when the manifest switches memory off, although the repo config says true', () => {
+    writeManifestFeatures(path.join(homeDir, '.devflow'), { memory: false });
+
+    runWorker('');
+
+    expect(fs.readFileSync(workerLogPath(projectDir, homeDir, 'background-memory-update'), 'utf-8'))
+      .toContain('ABORT: memory disabled');
+    expect(fs.existsSync(invokedMarker)).toBe(false);
+    // The queue is left for `devflow init --memory` to find, not consumed.
+    expect(readJsonl(path.join(projectDir, '.devflow', 'memory', '.pending-turns.jsonl'))).toHaveLength(2);
+  });
+
+  it('a stale repo config memory:false does not abort the worker', () => {
+    writeFeatureConfig(projectDir, { memory: false });
+
+    runWorker('');
+
+    expect(fs.existsSync(invokedMarker)).toBe(true);
+    expect(fs.readFileSync(workerLogPath(projectDir, homeDir, 'background-memory-update'), 'utf-8'))
+      .not.toContain('ABORT: memory disabled');
+  });
+
+  it('reads the manifest path it is handed as its second argument', () => {
+    const overrideDir = fs.mkdtempSync(path.join(os.tmpdir(), 'bmu-switch-override-'));
+    try {
+      writeManifestFeatures(overrideDir, { memory: false });
+      // A decoy under $HOME that would say "on" if the argument were ignored.
+      writeManifestFeatures(path.join(homeDir, '.devflow'), { memory: true });
+
+      runWorker('', path.join(overrideDir, 'manifest.json'));
+
+      expect(fs.readFileSync(workerLogPath(projectDir, homeDir, 'background-memory-update'), 'utf-8'))
+        .toContain('ABORT: memory disabled');
+      expect(fs.existsSync(invokedMarker)).toBe(false);
+    } finally {
+      fs.rmSync(overrideDir, { recursive: true, force: true });
+    }
+  });
+
+  it('without that argument, falls back to the inherited DEVFLOW_DIR', () => {
+    const overrideDir = fs.mkdtempSync(path.join(os.tmpdir(), 'bmu-switch-override-'));
+    try {
+      writeManifestFeatures(overrideDir, { memory: false });
+      writeManifestFeatures(path.join(homeDir, '.devflow'), { memory: true });
+
+      runWorker(overrideDir);
+
+      expect(fs.readFileSync(workerLogPath(projectDir, homeDir, 'background-memory-update'), 'utf-8'))
+        .toContain('ABORT: memory disabled');
+      expect(fs.existsSync(invokedMarker)).toBe(false);
+    } finally {
+      fs.rmSync(overrideDir, { recursive: true, force: true });
+    }
   });
 });
 
@@ -566,13 +755,14 @@ describe('capture-prompt + capture-turn integration', () => {
 });
 
 // =============================================================================
-// D-LEARNING-MASTER-SWITCH — the machine-wide learning switch in the manifest
+// D-FEATURES-MACHINE-WIDE — the manifest is the only memory/learning switch
 // =============================================================================
-// `devflow init --no-learning` records features.learning:false in
-// ~/.devflow/manifest.json. Every capture hook must honour it in EVERY repo —
-// including one whose own .devflow/config.json still says learning:true (a stale
-// value an earlier init wrote) and one with no config at all.
-describe('capture hooks honour the machine-wide learning switch', () => {
+// `devflow init --no-learning` / `--no-memory` (and `devflow learning|memory
+// --disable`) record features.learning:false / features.memory:false in
+// ~/.devflow/manifest.json. Every capture hook must honour them in EVERY repo,
+// and must ignore the retired per-repo keys either way: a stale `true` an
+// earlier init wrote cannot keep a feature on, a stale `false` cannot turn it off.
+describe('capture hooks read the machine-wide memory and learning switches only', () => {
   let projectDir: string;
   let homeDir: string;
 
@@ -586,13 +776,8 @@ describe('capture hooks honour the machine-wide learning switch', () => {
     fs.rmSync(homeDir, { recursive: true, force: true });
   });
 
-  function writeManifestFeatures(devflowDir: string, features: Record<string, unknown>): void {
-    fs.mkdirSync(devflowDir, { recursive: true });
-    fs.writeFileSync(path.join(devflowDir, 'manifest.json'), JSON.stringify({ version: '2.0.0', features }));
-  }
-
-  // An explicit empty DEVFLOW_DIR: a developer's exported value must never decide
-  // which manifest these assertions read.
+  // Explicit here as well as in the harness default: these assertions are about
+  // which manifest is read.
   const ENV = { DEVFLOW_DIR: '' };
   const learningQueue = () => path.join(projectDir, '.devflow', 'learning', '.pending-turns.jsonl');
   const memoryQueue = () => path.join(projectDir, '.devflow', 'memory', '.pending-turns.jsonl');
@@ -621,7 +806,7 @@ describe('capture hooks honour the machine-wide learning switch', () => {
       const { exitCode } = runHook(hook, input(), homeDir, ENV);
       expect(exitCode).toBe(0);
       expect(fs.existsSync(learningQueue())).toBe(false);
-      // The switch is learning-only: memory keeps capturing.
+      // Each switch clears only its own gate: memory keeps capturing.
       expect(readJsonl(memoryQueue())).toHaveLength(rows);
     });
 
@@ -636,6 +821,49 @@ describe('capture hooks honour the machine-wide learning switch', () => {
       writeManifestFeatures(path.join(homeDir, '.devflow'), { ambient: true });
 
       runHook(hook, input(), homeDir, ENV);
+      expect(readJsonl(learningQueue())).toHaveLength(rows);
+    });
+
+    it(`${name}: a stale repo config learning:false does not switch learning off`, () => {
+      writeFeatureConfig(projectDir, { memory: false, learning: false });
+      writeManifestFeatures(path.join(homeDir, '.devflow'), { memory: true, learning: true });
+
+      runHook(hook, input(), homeDir, ENV);
+      expect(readJsonl(learningQueue())).toHaveLength(rows);
+      expect(readJsonl(memoryQueue())).toHaveLength(rows);
+    });
+
+    // `devflow init --no-memory` removes the memory hooks and records
+    // features.memory:false, but these capture hooks stay registered — they must
+    // stop feeding a memory queue nothing will ever process.
+    it(`${name}: memory switched off machine-wide → no memory append although the repo config says true`, () => {
+      writeFeatureConfig(projectDir, { memory: true, learning: true });
+      writeManifestFeatures(path.join(homeDir, '.devflow'), { memory: false });
+
+      const { exitCode } = runHook(hook, input(), homeDir, ENV);
+      expect(exitCode).toBe(0);
+      expect(fs.existsSync(memoryQueue())).toBe(false);
+      // Each switch clears only its own gate: learning keeps capturing.
+      expect(readJsonl(learningQueue())).toHaveLength(rows);
+    });
+
+    it(`${name}: memory switched off machine-wide → no memory append in a repo with no config`, () => {
+      writeManifestFeatures(path.join(homeDir, '.devflow'), { memory: false });
+
+      runHook(hook, input(), homeDir, ENV);
+      expect(fs.existsSync(memoryQueue())).toBe(false);
+    });
+
+    it(`${name}: a manifest without the memory key leaves memory on (fail-open)`, () => {
+      writeManifestFeatures(path.join(homeDir, '.devflow'), { learning: true });
+
+      runHook(hook, input(), homeDir, ENV);
+      expect(readJsonl(memoryQueue())).toHaveLength(rows);
+    });
+
+    it(`${name}: no config and no manifest → both queues capture (fail-open)`, () => {
+      runHook(hook, input(), homeDir, ENV);
+      expect(readJsonl(memoryQueue())).toHaveLength(rows);
       expect(readJsonl(learningQueue())).toHaveLength(rows);
     });
   }
