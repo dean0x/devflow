@@ -210,7 +210,7 @@ Included settings:
 
 ## Capture + Learning Hooks
 
-A capture/spawn split across always-on shell-script hooks. Queue-append (`capture-prompt`/`capture-turn`/`capture-question`) is unconditional; each queue write is independently gated per-feature by feature config. Memory refresh is toggleable via `devflow memory --enable/--disable/--status` or `devflow init --memory/--no-memory`; learning detection/curation via `devflow learning --enable/--disable/--status` or `devflow init --learning/--no-learning`.
+A capture/spawn split across always-on shell-script hooks. Queue-append (`capture-prompt`/`capture-turn`/`capture-question`) is unconditional; each queue write is independently gated by its machine-wide switch in `~/.devflow/manifest.json` (`features.memory` / `features.learning`; a missing manifest or key means on — D-FEATURES-MACHINE-WIDE). Memory refresh is toggleable via `devflow memory --enable/--disable/--status` or `devflow init --memory/--no-memory`; learning detection/curation via `devflow learning --enable/--disable/--status` or `devflow init --learning/--no-learning`.
 
 | Hook / Worker | Event | Purpose |
 |---------------|-------|---------|
