@@ -456,8 +456,8 @@ Create a GitHub release with version tag.
    - Start with `CHANGELOG_CONTENT`
    - If `COMMIT_LIST` provided: append a `## Commits` section with the commit list — **first ≤100 entries**; if truncated, add a final `…and \{n\} more commits` line (D4 degrade if enrichment fails)
    - If `TRACEABILITY_EXCEPTIONS` provided: append it verbatim, last; the cap below never drops it
-   - Cap the composed body at 60000 characters (GitHub's limit is 65536); if it would exceed that, drop the `## Commits` section first and note `Commit list omitted (release notes size limit)`
-6. Write composed release notes to `$DEVFLOW_NOTES_RAW`; apply the Comment-sink scrub (D11) (using `$DEVFLOW_NOTES_RAW`/`$DEVFLOW_NOTES` in place of the body files) — non-zero exit → fail loudly: release notes with unredacted secrets must not be published. Create GitHub release via `gh release create \{tag\} --notes-file "$DEVFLOW_NOTES"` — fail loudly on error.
+   - Cap the composed body at 60000 characters; over it, drop the `## Commits` section first and note `Commit list omitted (release notes size limit)`; still over ⇒ cut only `CHANGELOG_CONTENT`, at a line boundary, ending `…truncated`
+6. Write composed release notes to `$DEVFLOW_NOTES_RAW`; apply the Comment-sink scrub (D11) (using `$DEVFLOW_NOTES_RAW`/`$DEVFLOW_NOTES` in place of the body files) — non-zero exit → fail loudly: release notes with unredacted secrets must not be published. Re-apply step 5's cap, then create GitHub release via `gh release create \{tag\} --notes-file "$DEVFLOW_NOTES"` — fail loudly on error.
 
 **Output:**
 ```markdown

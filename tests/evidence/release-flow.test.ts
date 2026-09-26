@@ -456,3 +456,60 @@ describe('AC-8: create-release appends the exceptions last, where the cap never 
     expect(collectNotesOrderDefects(moved).length).toBeGreaterThan(0)
   })
 })
+
+// ---------------------------------------------------------------------------
+// S2 (#376) — notes still over the cap once `## Commits` is gone
+// ---------------------------------------------------------------------------
+
+/** What step 5's cap must say after the commit-list drop: which section is cut, where, and the note. */
+const CAP_CUT_TERMS: readonly string[] = ['cut only `CHANGELOG_CONTENT`', 'at a line boundary', '`…truncated`']
+
+/** Step 6's re-check: the scrub can lengthen the notes, so the cap is applied again before the release exists. */
+const CAP_RECHECK = 'Re-apply step 5\'s cap'
+
+/**
+ * Named collector: how create-release fails to cut oversized notes at a line
+ * boundary with a note, after the commit-list drop, and to re-apply the cap
+ * between step 6's scrub and the release create.
+ */
+export function collectNotesCapDefects(section: string): string[] {
+  const lines = section.split('\n')
+  const cap = lines.find(l => l.startsWith(NOTES_ORDER[3]))
+  if (cap === undefined) return ['no cap bullet']
+  const defects = CAP_CUT_TERMS.filter(term => !cap.includes(term)).map(term => `cap omits ${term}`)
+  const drop = cap.indexOf('drop the `## Commits` section first')
+  const cut = cap.indexOf(CAP_CUT_TERMS[0])
+  if (drop !== -1 && cut !== -1 && cut < drop) defects.push('the cut comes before the commit-list drop')
+  if (cap.includes('65536')) defects.push('cap restates a host limit')
+  const step6 = lines.find(l => l.startsWith('6. ')) ?? ''
+  const scrub = step6.indexOf('Comment-sink scrub (D11)')
+  const recheck = step6.indexOf(CAP_RECHECK)
+  const create = step6.indexOf('gh release create')
+  if (!(scrub !== -1 && scrub < recheck && recheck < create)) defects.push('step 6 does not re-apply the cap between the scrub and the release create')
+  return defects
+}
+
+describe('S2: oversized release notes are cut at a line boundary, with a note', () => {
+  const section = opSection(gitMd(), 'create-release')
+
+  it('after `## Commits` goes, only CHANGELOG_CONTENT is cut, at a line boundary, ending `…truncated`; step 6 re-caps after its scrub', () => {
+    expect(collectNotesCapDefects(section)).toEqual([])
+  })
+
+  it('known-bad probes: a mid-line cut, a missing note, the old host limit and a missing re-cap are each reported', () => {
+    const lines = section.split('\n')
+    const cap = lines.find(l => l.startsWith(NOTES_ORDER[3]))!
+    const step6 = lines.find(l => l.startsWith('6. '))!
+    const seed = (from: string, to: string, what: string): string => {
+      const seeded = section.replace(from, to)
+      expect(seeded, `the ${what} seed must land`).not.toBe(section)
+      return seeded
+    }
+    expect(collectNotesCapDefects(seed(cap, cap.replace(', at a line boundary', ''), 'mid-line'))).toEqual(['cap omits at a line boundary'])
+    expect(collectNotesCapDefects(seed(cap, cap.replace('`…truncated`', 'nothing'), 'note'))).toEqual(['cap omits `…truncated`'])
+    expect(collectNotesCapDefects(seed(cap, `${cap} (GitHub's limit is 65536)`, 'host-limit'))).toEqual(['cap restates a host limit'])
+    expect(collectNotesCapDefects(seed(step6, step6.replace(CAP_RECHECK, 'Keep step 5\'s cap'), 're-cap')))
+      .toEqual(['step 6 does not re-apply the cap between the scrub and the release create'])
+    expect(collectNotesCapDefects('no create-release here')).toEqual(['no cap bullet'])
+  })
+})
