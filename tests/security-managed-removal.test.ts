@@ -94,7 +94,6 @@ describe('removeManagedDenyList', () => {
     const msg = describeManagedDenyRemoval(outcome);
     expect(msg.level).toBe('warn');
     expect(msg.text).toContain(managedPath);
-    expect(msg.text).toContain('devflow security --disable');
   });
 });
 
@@ -104,5 +103,15 @@ describe('describeManagedDenyRemoval', () => {
     expect(describeManagedDenyRemoval({ kind: 'absent' }).level).toBe('info');
     expect(describeManagedDenyRemoval({ kind: 'no-devflow-entries', path: '/x' }).level).toBe('warn');
     expect(describeManagedDenyRemoval({ kind: 'failed', path: '/x' }).level).toBe('warn');
+  });
+
+  it('a failure names a remedy that is correct from both callers (init --security none and security --disable)', () => {
+    const { text } = describeManagedDenyRemoval({ kind: 'failed', path: '/etc/claude-code/managed-settings.json' });
+    // No self-referential "run devflow security --disable" — that may be the command that just failed.
+    expect(text).not.toContain('devflow security --disable');
+    // Re-run interactively (the sudo prompt needs a TTY), or remove the entries by hand at the named path.
+    expect(text).toContain('interactive terminal');
+    expect(text).toContain('sudo');
+    expect(text).toMatch(/permissions\.deny in \/etc\/claude-code\/managed-settings\.json/);
   });
 });

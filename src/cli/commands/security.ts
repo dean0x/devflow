@@ -101,7 +101,17 @@ export async function removeManagedDenyList(
   return removed ? { kind: 'removed', path: target } : { kind: 'failed', path: target };
 }
 
-/** The user-facing line for a ManagedDenyRemoval. Pure. */
+/**
+ * The user-facing line for a ManagedDenyRemoval. Pure.
+ *
+ * D-MANAGED-REMOVAL-REMEDY: both `devflow security --disable` and
+ * `devflow init --security none` print this line, so the `failed` remedy names
+ * no command — pointing at `devflow security --disable` sent a user of that very
+ * command back to it. A `failed` removal means the write needed admin rights and
+ * the sudo fallback could not run (no interactive terminal) or was declined, so
+ * the remedy is exactly that: re-run interactively and accept the prompt, or
+ * edit the named file as an administrator.
+ */
 export function describeManagedDenyRemoval(
   outcome: ManagedDenyRemoval,
 ): { level: 'info' | 'warn'; text: string } {
@@ -117,7 +127,9 @@ export function describeManagedDenyRemoval(
         level: 'warn',
         text:
           `Could not remove the Devflow deny list from managed settings (${outcome.path}) — ` +
-          `it needs admin rights. Run ${color.cyan('devflow security --disable')} in a terminal to be prompted for sudo.`,
+          'it needs admin rights, and sudo was declined or unavailable. Re-run this command in an ' +
+          'interactive terminal and accept the sudo prompt, or, as an administrator, remove the Devflow ' +
+          `entries from permissions.deny in ${outcome.path}.`,
       };
   }
 }
