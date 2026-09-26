@@ -162,7 +162,7 @@ const DISPOSITION: readonly DispositionRow[] = [
     row: 6,
     subject: '/dynamic-build recipe setup-task call and wave PR — stops before implementing when no issue ID (headless — never an exception)',
     inputs: ['ISSUE_REQUIRED', 'APPLY_CONVENTIONS', 'EVIDENCE_POLICY'],
-    on: 'forward the resolved inputs; stops before implementing when no issue ID (headless — never an exception); a merged wave ticket with no test plan blocks the wave PR',
+    on: 'forward the resolved inputs; stops before implementing when no issue ID (headless — never an exception); a merged wave ticket with no test plan, or no ticket link, blocks the wave PR',
     off: 'forward the resolved inputs; no stop; the wave PR test plan is optional',
     sites: [
       { file: 'commands/dynamic-build.md', anchor: recipeConst('ISSUE_REQUIRED'), phrase: recipeConst('ISSUE_REQUIRED') },
@@ -171,6 +171,7 @@ const DISPOSITION: readonly DispositionRow[] = [
       { file: 'commands/dynamic-build.md', anchor: recipeKey('APPLY_CONVENTIONS'), phrase: recipeKey('APPLY_CONVENTIONS') },
       { file: 'commands/dynamic-build.md', anchor: 'if (ISSUE_REQUIRED === "true"', phrase: 'if (ISSUE_REQUIRED === "true" && ISSUE_NUMBER === "(none)")' },
       { file: 'commands/dynamic-build.md', anchor: '**Required plan**', phrase: policyGate },
+      { file: 'commands/dynamic-build.md', anchor: '**Required link**', phrase: policyGate },
       { file: 'commands/dynamic-build.md', after: '6. **Wave PR**', anchor: fenceKey('APPLY_CONVENTIONS'), phrase: fenceKey('APPLY_CONVENTIONS') },
     ],
   },
@@ -546,12 +547,13 @@ describe('evidence-policy disposition: the table and the tree agree, both ways (
     expect(collectSiteDefects(DISPOSITION, ungated)).toHaveLength(1)
   })
 
-  it('known-bad probe: the ticket-link stop, the wave PR plan rule and the filing step, each ungated, are reported (#365)', () => {
+  it('known-bad probe: the ticket-link stop, the wave PR plan and link rules and the filing step, each ungated, are reported (#365)', () => {
     // Each seed drops one new gate from its line, the way an unconditional rewrite
     // would; the same direction-1 collector must name that one row and site.
     const seeds: ReadonlyArray<readonly [string, string, string, string]> = [
       ['commands/dynamic-build.md', 'if (ISSUE_REQUIRED === "true" && ISSUE_NUMBER === "(none)")', 'if (ISSUE_NUMBER === "(none)")', 'row 6 commands/dynamic-build.md: no line holds'],
       ['commands/dynamic-build.md', `**Required plan** — ${policyGate}:`, '**Required plan** — always:', 'row 6 commands/dynamic-build.md:'],
+      ['commands/dynamic-build.md', `**Required link** — ${policyGate}:`, '**Required link** — always:', 'row 6 commands/dynamic-build.md:'],
       ['commands/dynamic-tickets.md', `**File the issues** ${gate('ISSUE_REQUIRED')}.`, '**File the issues** always.', 'row 14 commands/dynamic-tickets.md:'],
     ]
     for (const [file, from, to, expected] of seeds) {

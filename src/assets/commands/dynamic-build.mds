@@ -623,6 +623,8 @@ node "${DEVFLOW_DIR:-$HOME/.devflow}/scripts/verify-evidence.cjs" check wave <th
 
    Only `exit=0` admits the file's text, verbatim, as `PR_WAVE_BLOCK`. Any other result: no wave PR — record `Wave PR: not opened (wave block refused: <the code on stderr>)` and go to step 4.
 
+   **Required link** — only when `EVIDENCE_POLICY` is `required`: a `PASS` or `UNVERIFIED` row whose Ticket is `(none)` — a merged ticket whose setup-task captured an Issue ID but no link line, so the wave PR would close nothing for it — ⇒ `Wave PR: BLOCKED (no ticket link for T<k>, …)`, with no wave PR question and the remedy "link or create those tickets' issues, then re-run"; there is no exception. Under `standard` such a row stays as the Ticket rule above renders it.
+
    **(b) The wave test plan.** Take the checked TP lines each merged row's ticket was given in Pre-authoring step 4, in row order; renumber them `TP-1`, `TP-2`, … and prefix each scenario with its row's `T<k>: `. A line is never shortened or reworded: one whose prefixed scenario would pass 200 characters leaves its ticket with no usable test plan. Write `## Test Plan` and those lines, and nothing else, to `"\{integration worktree root\}/.devflow/docs/evidence-wave-\{slug\}.md"` with the Write tool, then run (the path double-quoted; one rewrite from the same lines after a refusal, never a second):
 
 ```bash

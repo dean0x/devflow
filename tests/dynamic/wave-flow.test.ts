@@ -15,7 +15,8 @@
  *          and an UNVERIFIED ticket renders its closing line on a flagged row.
  *   AC-13  the wave PR opens only on `wave/<slug>`, with a merged ticket and an
  *          explicit "open"; a headless or declined ask creates nothing; a
- *          non-wave head degrades; a required-plan gap blocks.
+ *          non-wave head degrades; a required-plan gap blocks; and under
+ *          `required` a merged row that links no ticket blocks it too.
  *   AC-8   (its flow half) the two frozen dynamic-build anchors stay the first
  *          occurrences, and every new step sits below them.
  *
@@ -853,6 +854,131 @@ describe('AC-13: the wave PR opens only on wave/<slug>, with a merged ticket and
     ]
     expect(admitted.filter(n => !re.test(n)), 'refused a wave branch').toEqual([])
     expect(refused.filter(n => re.test(n)), 'admitted a non-wave or unsafe name').toEqual([])
+  })
+})
+
+// ---------------------------------------------------------------------------
+// AC-13 — under `required`, a merged row that links no ticket blocks the wave PR
+// ---------------------------------------------------------------------------
+
+/** Step 3's required-link rule as the built text states it: the policy it keys on, the row verdicts it covers, its outcome. */
+interface RequiredLinkRule {
+  readonly policy: string
+  readonly verdicts: readonly string[]
+  readonly outcome: string
+}
+
+const REQUIRED_LINK_RE = /\*\*Required link\*\* — only when `EVIDENCE_POLICY` is `([a-z]+)`: a ((?:`[A-Z]+`(?:, | or )?)+) row whose Ticket is `\(none\)`[^⇒\n]*⇒ `(Wave PR: BLOCKED \(no ticket link for T<k>, …\))`/g
+
+/** The required-link rule read from built step 3, or null unless step 3 states exactly one. */
+export function requiredLinkRule(built: string): RequiredLinkRule | null {
+  const step3 = section(built, STEP3, STEP4)
+  const hits = step3 === null ? [] : [...step3.matchAll(REQUIRED_LINK_RE)]
+  if (hits.length !== 1) return null
+  const [, policy, verdicts, outcome] = hits[0]
+  return { policy, verdicts: [...verdicts.matchAll(/`([A-Z]+)`/g)].map(m => m[1]), outcome }
+}
+
+type WavePrOutcome =
+  | { readonly kind: 'composed'; readonly block: string }
+  | { readonly kind: 'blocked'; readonly line: string }
+  | { readonly kind: 'refused'; readonly code: number }
+
+/**
+ * A model of step 3's compose decision under one policy: render the block, admit
+ * it through `check wave`, then apply the required-link rule exactly as the built
+ * step 3 states it — so a step that drops the rule, or narrows its verdicts or
+ * its policy, composes here too.
+ */
+function composeWavePr(rows: readonly WaveRow[], policy: 'required' | 'standard', rule: RequiredLinkRule | null): WavePrOutcome {
+  const block = renderWaveBlock(rows)
+  const code = checkWave(block)
+  if (code !== 0) return { kind: 'refused', code }
+  if (rule !== null && rule.policy === policy) {
+    const unlinked = block.split('\n')
+      .map(l => /^\| (T[1-9][0-9]*) \| \(none\) \| ([A-Z]+) \|/.exec(l))
+      .filter((m): m is RegExpExecArray => m !== null && rule.verdicts.includes(m[2]))
+      .map(m => m[1])
+    if (unlinked.length > 0) return { kind: 'blocked', line: rule.outcome.replace('T<k>, …', unlinked.join(', ')) }
+  }
+  return { kind: 'composed', block }
+}
+
+/**
+ * Named collector: where step 3's decision over the wave's rows breaks the
+ * required-link rule. Under `required`, every merged row whose ticket has no
+ * captured link line — a PASS or UNVERIFIED row with Ticket `(none)`, which
+ * closes nothing — must block the wave PR, naming each such row; under
+ * `standard` the same rows still compose a block `check wave` admits.
+ */
+export function collectRequiredLinkViolations(rows: readonly WaveRow[], rule: RequiredLinkRule | null): string[] {
+  const out: string[] = []
+  const unlinked = rows.flatMap((r, i) => (r.merged && r.issuePrLink === '(none)' ? [`T${i + 1}`] : []))
+  if (unlinked.length === 0) return ['the corpus has no merged row without a ticket link — the rule is never exercised']
+  const expected = `Wave PR: BLOCKED (no ticket link for ${unlinked.join(', ')})`
+  const required = composeWavePr(rows, 'required', rule)
+  if (required.kind !== 'blocked') out.push(`required: a wave PR ${required.kind === 'composed' ? 'composes' : 'is refused'} with merged row(s) ${unlinked.join(', ')} linking no ticket — expected ${expected}`)
+  else if (required.line !== expected) out.push(`required: ${required.line} — expected ${expected}`)
+  const standard = composeWavePr(rows, 'standard', rule)
+  if (standard.kind !== 'composed') out.push(`standard: the (none) row rule must stand and the block compose, got ${standard.kind}`)
+  return out
+}
+
+describe('AC-13: under required, a merged row that links no ticket blocks the wave PR', () => {
+  /** Captured Issue IDs but no link line: #12 PASS, #13 UNVERIFIED — both merge under required; #14 is linked. */
+  const UNLINKED: World = {
+    tickets: {
+      '#12': { issueId: '12' },
+      '#13': { issueId: '13', test: 'FAIL' },
+      '#14': { issueId: '14', prLinkLine: 'Closes #14' },
+    },
+  }
+  const UNLINKED_PLANS = { '#13': { criteria: '1. works' } }
+
+  it('executed: the wave merges both unlinked tickets, and step 3 blocks the wave PR naming each row', async () => {
+    const run = await runWave(WAVE!, SINGLE!, UNLINKED, UNLINKED_PLANS, 'true')
+    expect(run.tickets.map(t => [t.ticket, t.verdict, t.merged, t.issuePrLink])).toEqual([
+      ['#12', 'PASS', true, '(none)'],
+      ['#13', 'UNVERIFIED', true, '(none)'],
+      ['#14', 'PASS', true, 'Closes #14'],
+    ])
+    const rule = requiredLinkRule(BUILT)
+    expect(rule, 'step 3 states the required-link rule once').toEqual({
+      policy: 'required',
+      verdicts: ['PASS', 'UNVERIFIED'],
+      outcome: 'Wave PR: BLOCKED (no ticket link for T<k>, …)',
+    })
+    expect(collectRequiredLinkViolations(run.tickets, rule)).toEqual([])
+    expect(composeWavePr(run.tickets, 'required', rule)).toEqual({ kind: 'blocked', line: 'Wave PR: BLOCKED (no ticket link for T1, T2)' })
+  })
+
+  it('executed: under required a wave whose merged rows are all linked still composes', async () => {
+    const run = await runWave(WAVE!, SINGLE!, TWO_TICKETS, TWO_PLANS, 'true')
+    expect(composeWavePr(run.tickets, 'required', requiredLinkRule(BUILT)).kind).toBe('composed')
+  })
+
+  it('known-bad probe: step 3 without the rule composes a wave PR that closes nothing for a merged ticket', async () => {
+    const step3 = section(BUILT, STEP3, STEP4)!
+    const paragraph = /^ {3}\*\*Required link\*\*.*\n\n/m.exec(step3)?.[0]
+    expect(paragraph, 'the rule is its own paragraph in step 3').toBeDefined()
+    const dropped = seedOnce(BUILT, paragraph!, '')
+    const run = await runWave(WAVE!, SINGLE!, UNLINKED, UNLINKED_PLANS, 'true')
+    expect(requiredLinkRule(dropped)).toBeNull()
+    expect(collectRequiredLinkViolations(run.tickets, requiredLinkRule(dropped))).toEqual([
+      'required: a wave PR composes with merged row(s) T1, T2 linking no ticket — expected Wave PR: BLOCKED (no ticket link for T1, T2)',
+    ])
+  })
+
+  it('known-bad probe: a rule narrowed to PASS rows lets the UNVERIFIED unlinked row through', async () => {
+    const narrowed = seedOnce(BUILT, '`required`: a `PASS` or `UNVERIFIED` row whose Ticket is `(none)`', '`required`: a `PASS` row whose Ticket is `(none)`')
+    const run = await runWave(WAVE!, SINGLE!, UNLINKED, UNLINKED_PLANS, 'true')
+    expect(collectRequiredLinkViolations(run.tickets, requiredLinkRule(narrowed))).toEqual([
+      'required: Wave PR: BLOCKED (no ticket link for T1) — expected Wave PR: BLOCKED (no ticket link for T1, T2)',
+    ])
+  })
+
+  it('known-bad probe: the collector refuses a corpus with no unlinked merged row', () => {
+    expect(collectRequiredLinkViolations([], requiredLinkRule(BUILT))).toHaveLength(1)
   })
 })
 
