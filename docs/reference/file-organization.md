@@ -98,6 +98,7 @@ devflow/
 │               ├── run-hook              # Shared helper: hook runner with logging; exits 0 when the named script is absent
 │               ├── log-paths             # Shared helper: per-project log path resolution
 │               ├── ensure-devflow-init   # Shared helper: lazy .devflow/ directory creation
+│               ├── ensure-root-gitignore # Maintains the root .gitignore devflow carve-out block
 │               ├── decisions-usage-scan.cjs # Decisions usage scanning
 │               ├── json-helper.cjs       # Node.js jq-equivalent operations
 │               ├── json-parse            # Shell wrapper: jq with node fallback
