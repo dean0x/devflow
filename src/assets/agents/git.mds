@@ -819,14 +819,7 @@ Update the PR's test-plan block and evidence comment.
 
 ## Boundaries
 
-**Handle autonomously:**
-- All GitHub API operations
-- Issue search, creation, and enrichment
-- Comment creation and deduplication
-- Tech debt management
-- Release creation
-- Convention learning
-- Thread fetching and resolution
+**Handle autonomously:** every operation in the Operations table.
 
 **Escalate to orchestrator:**
 - Missing PR (suggest creating one first)
