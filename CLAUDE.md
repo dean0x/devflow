@@ -67,7 +67,7 @@ node dist/cli.js init --plugin=code-review       # Single plugin
 /code-review
 ```
 
-**Build commands**: `npm run build` (full — TypeScript + MDS), `npm run build:cli` (TypeScript only — **does not produce installable agents**; a generator host stays uncompiled and the installer has nothing in `dist/agents/` to prefer), `npm run build:mds` (compile every MDS host: command hosts in `src/assets/commands/` → `dist/commands/`, agent generator hosts in `src/assets/agents/` → `dist/agents/`, reference modules in `src/assets/mds/` → `dist/skills/git/references/`), `npm run test:golden:update -- <target>` (`git-agent` regenerates the Git-agent golden in a fixture-only commit; `github-status-lines` refuses without `--unfreeze`)
+**Build commands**: `npm run build` (full — TypeScript + MDS), `npm run build:cli` (TypeScript only — **does not produce installable agents**; a generator host stays uncompiled and the installer has nothing in `dist/agents/` to prefer), `npm run build:mds` (compile every MDS host: command hosts in `src/assets/commands/` → `dist/commands/`, agent generator hosts in `src/assets/agents/` → `dist/agents/`, reference modules in `src/assets/mds/` → `dist/skills/git/references/`), `npm run test:golden:update -- <target>` (`git-agent` regenerates the Git-agent golden in a fixture-only commit; `github-status-lines` refuses without `--unfreeze`; `install-snapshot` rewrites the install-snapshot and hook-matrix goldens from the built CLI)
 
 The host and partial rosters are named in `tests/fixtures/mds-manifest.ts` rather than counted, and the build's own printed counts are asserted against it.
 
