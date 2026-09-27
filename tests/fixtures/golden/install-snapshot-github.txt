@@ -1,0 +1,585 @@
+# install-snapshot golden — config: github (#388 AC-2, AC-3, AC-4)
+# Records TODAY's behaviour, bugs included: a later PR that changes a section says why in its fixture-only test(snapshot): commit.
+# argv: devflow init --recommended --security user  (cwd <REPO>, HOME <HOME>, stdin not a TTY), run twice; then devflow uninstall
+# Regenerate: npm run test:golden:update -- install-snapshot  (fixture-only test(snapshot): commit)
+# Normalised: sandbox paths (logical + realpath), ISO timestamps, the package version. Walk lines: d dir/, x executable, - file, l link.
+
+## baseline: HOME
+d .claude/
+
+## baseline: repo
+- README.md
+d sub/
+- sub/notes.md
+
+## install: HOME
+d .claude/
+d .claude/agents/
+d .claude/agents/devflow/
+- .claude/agents/devflow/code.md
+- .claude/agents/devflow/design.md
+- .claude/agents/devflow/diagnose.md
+- .claude/agents/devflow/evaluate.md
+- .claude/agents/devflow/git.md
+- .claude/agents/devflow/knowledge.md
+- .claude/agents/devflow/learning.md
+- .claude/agents/devflow/research.md
+- .claude/agents/devflow/review.md
+- .claude/agents/devflow/scrutinize.md
+- .claude/agents/devflow/simplify.md
+- .claude/agents/devflow/skim.md
+- .claude/agents/devflow/synthesize.md
+- .claude/agents/devflow/test.md
+- .claude/agents/devflow/triage.md
+- .claude/agents/devflow/validate.md
+d .claude/commands/
+d .claude/commands/devflow/
+- .claude/commands/devflow/bug-analysis.md
+- .claude/commands/devflow/code-review.md
+- .claude/commands/devflow/debug.md
+- .claude/commands/devflow/explore.md
+- .claude/commands/devflow/implement.md
+- .claude/commands/devflow/plan.md
+- .claude/commands/devflow/release.md
+- .claude/commands/devflow/research.md
+- .claude/commands/devflow/resolve.md
+- .claude/commands/devflow/self-review.md
+d .claude/rules/
+d .claude/rules/devflow/
+- .claude/rules/devflow/engineering.md
+- .claude/rules/devflow/quality.md
+- .claude/rules/devflow/reliability.md
+- .claude/rules/devflow/security.md
+- .claude/settings.json
+d .claude/skills/
+d .claude/skills/devflow:apply-decisions/
+- .claude/skills/devflow:apply-decisions/SKILL.md
+d .claude/skills/devflow:apply-feature-knowledge/
+- .claude/skills/devflow:apply-feature-knowledge/SKILL.md
+d .claude/skills/devflow:architecture/
+- .claude/skills/devflow:architecture/SKILL.md
+d .claude/skills/devflow:architecture/references/
+- .claude/skills/devflow:architecture/references/detection.md
+- .claude/skills/devflow:architecture/references/patterns.md
+- .claude/skills/devflow:architecture/references/sources.md
+- .claude/skills/devflow:architecture/references/violations.md
+d .claude/skills/devflow:boundary-validation/
+- .claude/skills/devflow:boundary-validation/SKILL.md
+d .claude/skills/devflow:boundary-validation/references/
+- .claude/skills/devflow:boundary-validation/references/detection.md
+- .claude/skills/devflow:boundary-validation/references/patterns.md
+- .claude/skills/devflow:boundary-validation/references/sources.md
+- .claude/skills/devflow:boundary-validation/references/violations.md
+d .claude/skills/devflow:complexity/
+- .claude/skills/devflow:complexity/SKILL.md
+d .claude/skills/devflow:complexity/references/
+- .claude/skills/devflow:complexity/references/detection.md
+- .claude/skills/devflow:complexity/references/patterns.md
+- .claude/skills/devflow:complexity/references/violations.md
+d .claude/skills/devflow:consistency/
+- .claude/skills/devflow:consistency/SKILL.md
+d .claude/skills/devflow:consistency/references/
+- .claude/skills/devflow:consistency/references/detection.md
+- .claude/skills/devflow:consistency/references/patterns.md
+- .claude/skills/devflow:consistency/references/violations.md
+d .claude/skills/devflow:database/
+- .claude/skills/devflow:database/SKILL.md
+d .claude/skills/devflow:database/references/
+- .claude/skills/devflow:database/references/detection.md
+- .claude/skills/devflow:database/references/patterns.md
+- .claude/skills/devflow:database/references/violations.md
+d .claude/skills/devflow:dependencies/
+- .claude/skills/devflow:dependencies/SKILL.md
+d .claude/skills/devflow:dependencies/references/
+- .claude/skills/devflow:dependencies/references/detection.md
+- .claude/skills/devflow:dependencies/references/patterns.md
+- .claude/skills/devflow:dependencies/references/violations.md
+d .claude/skills/devflow:dependency-research/
+- .claude/skills/devflow:dependency-research/SKILL.md
+d .claude/skills/devflow:dependency-research/references/
+- .claude/skills/devflow:dependency-research/references/evaluation-criteria.md
+d .claude/skills/devflow:design-review/
+- .claude/skills/devflow:design-review/SKILL.md
+d .claude/skills/devflow:design-review/references/
+- .claude/skills/devflow:design-review/references/anti-patterns.md
+d .claude/skills/devflow:docs-framework/
+- .claude/skills/devflow:docs-framework/SKILL.md
+d .claude/skills/devflow:docs-framework/references/
+- .claude/skills/devflow:docs-framework/references/patterns.md
+- .claude/skills/devflow:docs-framework/references/violations.md
+d .claude/skills/devflow:documentation/
+- .claude/skills/devflow:documentation/SKILL.md
+d .claude/skills/devflow:documentation/references/
+- .claude/skills/devflow:documentation/references/detection.md
+- .claude/skills/devflow:documentation/references/patterns.md
+- .claude/skills/devflow:documentation/references/violations.md
+d .claude/skills/devflow:feature-knowledge/
+- .claude/skills/devflow:feature-knowledge/SKILL.md
+d .claude/skills/devflow:gap-analysis/
+- .claude/skills/devflow:gap-analysis/SKILL.md
+d .claude/skills/devflow:gap-analysis/references/
+- .claude/skills/devflow:gap-analysis/references/check-layers.md
+d .claude/skills/devflow:git/
+- .claude/skills/devflow:git/SKILL.md
+d .claude/skills/devflow:git/references/
+- .claude/skills/devflow:git/references/decision-markers.md
+- .claude/skills/devflow:git/references/detection.md
+- .claude/skills/devflow:git/references/github-api.md
+- .claude/skills/devflow:git/references/learn-conventions.md
+- .claude/skills/devflow:git/references/patterns.md
+d .claude/skills/devflow:git/references/pr/
+- .claude/skills/devflow:git/references/pr/check-ci-status.md
+- .claude/skills/devflow:git/references/pr/check-merge-readiness.md
+- .claude/skills/devflow:git/references/pr/ensure-pr-ready.md
+- .claude/skills/devflow:git/references/pr/fetch-review-threads.md
+- .claude/skills/devflow:git/references/pr/post-resolution-summary.md
+- .claude/skills/devflow:git/references/pr/post-review-summary.md
+- .claude/skills/devflow:git/references/pr/resolve-review-threads.md
+- .claude/skills/devflow:git/references/pr/update-pr-evidence.md
+- .claude/skills/devflow:git/references/pr/validate-branch.md
+- .claude/skills/devflow:git/references/publication-gate.md
+- .claude/skills/devflow:git/references/sources.md
+d .claude/skills/devflow:git/references/tracker/
+d .claude/skills/devflow:git/references/tracker/github/
+- .claude/skills/devflow:git/references/tracker/github/associate-release.md
+- .claude/skills/devflow:git/references/tracker/github/backlink-shipped-issues.md
+- .claude/skills/devflow:git/references/tracker/github/create-release.md
+- .claude/skills/devflow:git/references/tracker/github/ensure-pr-ready.md
+- .claude/skills/devflow:git/references/tracker/github/ensure-traceable-issue.md
+- .claude/skills/devflow:git/references/tracker/github/fetch-issue.md
+- .claude/skills/devflow:git/references/tracker/github/fetch-issues-batch.md
+- .claude/skills/devflow:git/references/tracker/github/gather-release-evidence.md
+- .claude/skills/devflow:git/references/tracker/github/manage-debt.md
+- .claude/skills/devflow:git/references/tracker/github/post-wave-report.md
+- .claude/skills/devflow:git/references/tracker/github/setup-task.md
+- .claude/skills/devflow:git/references/trust-rule.md
+- .claude/skills/devflow:git/references/violations.md
+d .claude/skills/devflow:patterns/
+- .claude/skills/devflow:patterns/SKILL.md
+d .claude/skills/devflow:patterns/references/
+- .claude/skills/devflow:patterns/references/patterns.md
+- .claude/skills/devflow:patterns/references/violations.md
+d .claude/skills/devflow:performance/
+- .claude/skills/devflow:performance/SKILL.md
+d .claude/skills/devflow:performance/references/
+- .claude/skills/devflow:performance/references/detection.md
+- .claude/skills/devflow:performance/references/patterns.md
+- .claude/skills/devflow:performance/references/sources.md
+- .claude/skills/devflow:performance/references/violations.md
+d .claude/skills/devflow:qa/
+- .claude/skills/devflow:qa/SKILL.md
+d .claude/skills/devflow:qa/references/
+- .claude/skills/devflow:qa/references/browser-testing.md
+- .claude/skills/devflow:qa/references/patterns.md
+- .claude/skills/devflow:qa/references/scenario-templates.md
+- .claude/skills/devflow:qa/references/sources.md
+- .claude/skills/devflow:qa/references/violations.md
+d .claude/skills/devflow:quality-gates/
+- .claude/skills/devflow:quality-gates/SKILL.md
+d .claude/skills/devflow:quality-gates/references/
+- .claude/skills/devflow:quality-gates/references/patterns.md
+- .claude/skills/devflow:quality-gates/references/report-template.md
+- .claude/skills/devflow:quality-gates/references/stub-detection.md
+- .claude/skills/devflow:quality-gates/references/violations.md
+d .claude/skills/devflow:regression/
+- .claude/skills/devflow:regression/SKILL.md
+d .claude/skills/devflow:regression/references/
+- .claude/skills/devflow:regression/references/detection.md
+- .claude/skills/devflow:regression/references/patterns.md
+- .claude/skills/devflow:regression/references/violations.md
+d .claude/skills/devflow:reliability/
+- .claude/skills/devflow:reliability/SKILL.md
+d .claude/skills/devflow:reliability/references/
+- .claude/skills/devflow:reliability/references/detection.md
+- .claude/skills/devflow:reliability/references/patterns.md
+- .claude/skills/devflow:reliability/references/sources.md
+- .claude/skills/devflow:reliability/references/violations.md
+d .claude/skills/devflow:research-codebase/
+- .claude/skills/devflow:research-codebase/SKILL.md
+d .claude/skills/devflow:research-competitor/
+- .claude/skills/devflow:research-competitor/SKILL.md
+d .claude/skills/devflow:research-external/
+- .claude/skills/devflow:research-external/SKILL.md
+d .claude/skills/devflow:research-market/
+- .claude/skills/devflow:research-market/SKILL.md
+d .claude/skills/devflow:research-technology/
+- .claude/skills/devflow:research-technology/SKILL.md
+d .claude/skills/devflow:review-methodology/
+- .claude/skills/devflow:review-methodology/SKILL.md
+d .claude/skills/devflow:review-methodology/references/
+- .claude/skills/devflow:review-methodology/references/patterns.md
+- .claude/skills/devflow:review-methodology/references/report-template.md
+- .claude/skills/devflow:review-methodology/references/violations.md
+d .claude/skills/devflow:security/
+- .claude/skills/devflow:security/SKILL.md
+d .claude/skills/devflow:security/references/
+- .claude/skills/devflow:security/references/detection.md
+- .claude/skills/devflow:security/references/patterns.md
+- .claude/skills/devflow:security/references/sources.md
+- .claude/skills/devflow:security/references/violations.md
+d .claude/skills/devflow:software-design/
+- .claude/skills/devflow:software-design/SKILL.md
+d .claude/skills/devflow:software-design/references/
+- .claude/skills/devflow:software-design/references/checklist.md
+- .claude/skills/devflow:software-design/references/code-smell-violations.md
+- .claude/skills/devflow:software-design/references/detection.md
+- .claude/skills/devflow:software-design/references/patterns.md
+- .claude/skills/devflow:software-design/references/sources.md
+- .claude/skills/devflow:software-design/references/violations.md
+d .claude/skills/devflow:test-driven-development/
+- .claude/skills/devflow:test-driven-development/SKILL.md
+d .claude/skills/devflow:test-driven-development/references/
+- .claude/skills/devflow:test-driven-development/references/rationalization-prevention.md
+d .claude/skills/devflow:testing/
+- .claude/skills/devflow:testing/SKILL.md
+d .claude/skills/devflow:testing/references/
+- .claude/skills/devflow:testing/references/detection.md
+- .claude/skills/devflow:testing/references/patterns.md
+- .claude/skills/devflow:testing/references/report-template.md
+- .claude/skills/devflow:testing/references/sources.md
+- .claude/skills/devflow:testing/references/violations.md
+d .claude/skills/devflow:worktree-support/
+- .claude/skills/devflow:worktree-support/SKILL.md
+d .devflow/
+- .devflow/hud.json
+- .devflow/manifest.json
+- .devflow/migrations.json
+d .devflow/scripts/
+d .devflow/scripts/core/
+- .devflow/scripts/core/ansi.js
+- .devflow/scripts/core/cache.js
+- .devflow/scripts/core/fs-atomic.js
+- .devflow/scripts/core/git.js
+- .devflow/scripts/core/paths.js
+- .devflow/scripts/core/project-paths.js
+d .devflow/scripts/hooks/
+d .devflow/scripts/hooks/assets/
+x .devflow/scripts/hooks/assets/orchestrator-charter.md
+x .devflow/scripts/hooks/background-memory-update
+x .devflow/scripts/hooks/capture-prompt
+x .devflow/scripts/hooks/capture-question
+x .devflow/scripts/hooks/capture-turn
+x .devflow/scripts/hooks/debug-trace
+x .devflow/scripts/hooks/decisions-usage-scan.cjs
+x .devflow/scripts/hooks/ensure-devflow-init
+x .devflow/scripts/hooks/ensure-proxy
+x .devflow/scripts/hooks/ensure-root-gitignore
+x .devflow/scripts/hooks/get-mtime
+x .devflow/scripts/hooks/git-marker
+x .devflow/scripts/hooks/hook-bootstrap
+x .devflow/scripts/hooks/hook-log-init
+x .devflow/scripts/hooks/is-hex-sha
+x .devflow/scripts/hooks/json-helper.cjs
+x .devflow/scripts/hooks/json-parse
+x .devflow/scripts/hooks/learning-lock
+d .devflow/scripts/hooks/lib/
+x .devflow/scripts/hooks/lib/decisions-format.cjs
+x .devflow/scripts/hooks/lib/mkdir-lock.cjs
+x .devflow/scripts/hooks/lib/project-paths.cjs
+x .devflow/scripts/hooks/lib/render-decisions.cjs
+x .devflow/scripts/hooks/lib/safe-path.cjs
+x .devflow/scripts/hooks/log-paths
+x .devflow/scripts/hooks/memory-worker
+x .devflow/scripts/hooks/pre-compact-memory
+x .devflow/scripts/hooks/preamble
+x .devflow/scripts/hooks/queue-append
+x .devflow/scripts/hooks/resolve-project-root
+x .devflow/scripts/hooks/run-hook
+x .devflow/scripts/hooks/session-start-context
+x .devflow/scripts/hooks/session-start-memory
+x .devflow/scripts/hooks/session-start-orchestrator
+d .devflow/scripts/hud/
+x .devflow/scripts/hud.sh
+- .devflow/scripts/hud/colors.js
+d .devflow/scripts/hud/components/
+- .devflow/scripts/hud/components/config-counts.js
+- .devflow/scripts/hud/components/context-usage.js
+- .devflow/scripts/hud/components/diff-stats.js
+- .devflow/scripts/hud/components/directory.js
+- .devflow/scripts/hud/components/git-ahead-behind.js
+- .devflow/scripts/hud/components/git-branch.js
+- .devflow/scripts/hud/components/learning-counts.js
+- .devflow/scripts/hud/components/model.js
+- .devflow/scripts/hud/components/release-info.js
+- .devflow/scripts/hud/components/session-cost.js
+- .devflow/scripts/hud/components/session-duration.js
+- .devflow/scripts/hud/components/todo-progress.js
+- .devflow/scripts/hud/components/usage-quota.js
+- .devflow/scripts/hud/components/version-badge.js
+- .devflow/scripts/hud/components/worktree-count.js
+- .devflow/scripts/hud/config.js
+- .devflow/scripts/hud/cost-history.js
+- .devflow/scripts/hud/git.js
+- .devflow/scripts/hud/index.js
+- .devflow/scripts/hud/render.js
+- .devflow/scripts/hud/stdin.js
+- .devflow/scripts/hud/transcript.js
+- .devflow/scripts/package.json
+x .devflow/scripts/pr-evidence.cjs
+x .devflow/scripts/redact-secrets.cjs
+x .devflow/scripts/release-trace.cjs
+x .devflow/scripts/resolve-evidence-policy.cjs
+x .devflow/scripts/verify-evidence.cjs
+
+## install: repo
+- .claudeignore
+d .devflow/
+- .devflow/.root-gitignore-configured-v5
+- .devflow/config.json
+- .gitignore
+- README.md
+d sub/
+- sub/notes.md
+
+## install: settings.json (permissions.deny collapsed to a count)
+{
+  "statusLine": {
+    "type": "command",
+    "command": "<HOME>/.devflow/scripts/hud.sh"
+  },
+  "hooks": {
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "<HOME>/.devflow/scripts/hooks/run-hook preamble",
+            "timeout": 5
+          }
+        ]
+      },
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "<HOME>/.devflow/scripts/hooks/run-hook capture-prompt",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "<HOME>/.devflow/scripts/hooks/run-hook capture-turn",
+            "timeout": 10
+          }
+        ]
+      },
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "<HOME>/.devflow/scripts/hooks/run-hook memory-worker",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "<HOME>/.devflow/scripts/hooks/run-hook session-start-orchestrator",
+            "timeout": 10
+          }
+        ]
+      },
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "<HOME>/.devflow/scripts/hooks/run-hook session-start-memory",
+            "timeout": 10
+          }
+        ]
+      },
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "<HOME>/.devflow/scripts/hooks/run-hook session-start-context",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "<HOME>/.devflow/scripts/hooks/run-hook capture-question",
+            "timeout": 10
+          }
+        ],
+        "matcher": "AskUserQuestion"
+      }
+    ],
+    "PreCompact": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "<HOME>/.devflow/scripts/hooks/run-hook pre-compact-memory",
+            "timeout": 10
+          }
+        ]
+      }
+    ]
+  },
+  "tui": "fullscreen",
+  "env": {
+    "ENABLE_TOOL_SEARCH": "true",
+    "ENABLE_LSP_TOOL": "true",
+    "ENABLE_PROMPT_CACHING_1H": "true",
+    "CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS": "40"
+  },
+  "showTurnDuration": true,
+  "showClearContextOnPlanAccept": true,
+  "permissions": {
+    "deny": "<154 entries>"
+  }
+}
+
+## install: manifest.json
+{
+  "version": "<VERSION>",
+  "plugins": [
+    "devflow-core-skills",
+    "devflow-plan",
+    "devflow-implement",
+    "devflow-code-review",
+    "devflow-resolve",
+    "devflow-debug",
+    "devflow-explore",
+    "devflow-research",
+    "devflow-release",
+    "devflow-self-review",
+    "devflow-bug-analysis",
+    "devflow-ambient"
+  ],
+  "scope": "user",
+  "knownPlugins": [
+    "devflow-core-skills",
+    "devflow-plan",
+    "devflow-implement",
+    "devflow-code-review",
+    "devflow-resolve",
+    "devflow-debug",
+    "devflow-explore",
+    "devflow-research",
+    "devflow-release",
+    "devflow-self-review",
+    "devflow-bug-analysis",
+    "devflow-ambient",
+    "devflow-dynamic",
+    "devflow-typescript",
+    "devflow-react",
+    "devflow-accessibility",
+    "devflow-ui-design",
+    "devflow-go",
+    "devflow-java",
+    "devflow-python",
+    "devflow-rust"
+  ],
+  "features": {
+    "ambient": true,
+    "memory": true,
+    "hud": true,
+    "knowledge": true,
+    "learning": true,
+    "rules": true,
+    "flags": {
+      "tui": true,
+      "tool-search": true,
+      "lsp": true,
+      "prompt-caching-1h": true,
+      "show-turn-duration": true,
+      "clear-context-on-plan": true,
+      "disable-bundled-skills": false,
+      "pin-sonnet-4-6": false,
+      "max-concurrent-subagents": 40,
+      "brief": false,
+      "thinking-summaries": false,
+      "subprocess-env-scrub": false,
+      "disable-nonessential-traffic": false,
+      "forked-subagents": false,
+      "disable-adaptive-thinking": false,
+      "always-thinking": false,
+      "disable-git-instructions": false,
+      "disable-compact": false,
+      "disable-1m-context": false,
+      "disable-autoupdater": false,
+      "agent-teams": false,
+      "enable-todo-tools": false,
+      "suppress-attribution": false,
+      "subagent-spawn-depth": null,
+      "workflow-size-guideline": null,
+      "default-model": null,
+      "goal-checkin-minutes": null,
+      "spellcheck": null,
+      "view-mode": "default"
+    },
+    "security": "user",
+    "proxy": false,
+    "compliance": {
+      "enabled": false,
+      "frameworks": []
+    },
+    "tracker": {
+      "provider": "github"
+    }
+  },
+  "installedAt": "<TIMESTAMP>",
+  "updatedAt": "<TIMESTAMP>"
+}
+
+## install: repo .devflow/config.json
+{
+  "reviewPublication": "auto"
+}
+
+## re-init: difference from the first install (AC-3 wants none)
+### install: HOME
+@@ line 302 @@
+- - .devflow/scripts/package.json
++ x .devflow/scripts/package.json
+### install: settings.json (permissions.deny collapsed to a count)
+@@ line 100 @@
++   "permissions": {
++     "deny": "<154 entries>"
++   },
+@@ line 108 @@
+-   "showClearContextOnPlanAccept": true,
+-   "permissions": {
+-     "deny": "<154 entries>"
+-   }
++   "showClearContextOnPlanAccept": true
+
+## uninstall: keep list (present after uninstall, absent from the baseline)
+d <HOME>/.claude/agents/
+d <HOME>/.claude/commands/
+d <HOME>/.claude/rules/
+- <HOME>/.claude/settings.json
+d <HOME>/.claude/skills/
+d <HOME>/.devflow/
+- <HOME>/.devflow/hud.json
+- <REPO>/.claudeignore
+d <REPO>/.devflow/
+- <REPO>/.devflow/.root-gitignore-configured-v5
+- <REPO>/.devflow/config.json
+- <REPO>/.gitignore
+
+## uninstall: baseline entries removed
+(none)
+
+## uninstall: settings.json (permissions.deny collapsed to a count)
+{
+  "permissions": {
+    "deny": "<154 entries>"
+  }
+}
