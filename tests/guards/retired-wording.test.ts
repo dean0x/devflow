@@ -510,10 +510,33 @@ function buildCorpus(): Array<{ relPath: string; content: string }> {
     }
   }
 
-  const changelog = unreleasedClaims(path.join(ROOT, 'CHANGELOG.md'));
-  if (changelog !== undefined) corpus.push({ relPath: 'CHANGELOG.md', content: changelog });
+  let changelogRaw: string | undefined;
+  try {
+    changelogRaw = readFileSync(path.join(ROOT, 'CHANGELOG.md'), 'utf-8');
+  } catch {
+    changelogRaw = undefined;
+  }
+  const changelog = changelogCorpusEntry(changelogRaw);
+  if (changelog !== undefined) corpus.push(changelog);
 
   return corpus;
+}
+
+/**
+ * CHANGELOG.md as the corpus holds it, or undefined only when the file is absent.
+ *
+ * A present file is ALWAYS a corpus entry, even when it carries no current claims.
+ * scripts/bump-version.ts renames `## [Unreleased]` to the release header, and the
+ * release workflow runs this suite on that tree: the file is still scanned there,
+ * it just has nothing unreleased in it. Dropping it would report every
+ * CHANGELOG.md-scoped entry as retired from a tree nothing scans — a failure on
+ * every release — when the scope is live and the next [Unreleased] is guarded.
+ */
+function changelogCorpusEntry(
+  raw: string | undefined,
+): { relPath: string; content: string } | undefined {
+  if (raw === undefined) return undefined;
+  return { relPath: 'CHANGELOG.md', content: unreleasedClaims(raw) };
 }
 
 /**
@@ -536,19 +559,12 @@ function buildCorpus(): Array<{ relPath: string; content: string }> {
  *     whole.
  *
  * What survives is the set of sentences that assert current behaviour — which is
- * the same thing the guard reads CLAUDE.md and README.md for. Returns undefined
- * when the file or the section is absent; the corpus-size assertion is what
- * catches a corpus that has collapsed.
+ * the same thing the guard reads CLAUDE.md and README.md for. Returns '' when
+ * the section is absent — the post-bump state, where every section is released.
  */
-function unreleasedClaims(absPath: string): string | undefined {
-  let raw: string;
-  try {
-    raw = readFileSync(absPath, 'utf-8');
-  } catch {
-    return undefined;
-  }
+function unreleasedClaims(raw: string): string {
   const start = raw.indexOf('## [Unreleased]');
-  if (start === -1) return undefined;
+  if (start === -1) return '';
   const nextRelease = raw.indexOf('\n## [', start + 1);
   const section = nextRelease === -1 ? raw.slice(start) : raw.slice(start, nextRelease);
 
@@ -589,6 +605,18 @@ function collectRetiredLiteralViolations(
   return violations;
 }
 
+/** Every scope prefix that matches no corpus path, as `"{literal}" → {prefix}`. */
+function deadScopePrefixes(paths: readonly string[]): string[] {
+  const dead: string[] = [];
+  for (const entry of RETIRED_LITERALS) {
+    if (!entry.scope) continue;
+    for (const prefix of entry.scope) {
+      if (!paths.some(p => p.startsWith(prefix))) dead.push(`"${entry.literal}" → ${prefix}`);
+    }
+  }
+  return dead;
+}
+
 // ---------------------------------------------------------------------------
 // Guard
 // ---------------------------------------------------------------------------
@@ -616,13 +644,7 @@ describe('retired-wording guard — denylist of retired literals (GAP-32)', () =
     // notices going stale. Checked against the real corpus, not the literal strings.
     const paths = buildCorpus().map(e => e.relPath);
     expect(paths.length, 'empty corpus').toBeGreaterThan(0);
-    const dead: string[] = [];
-    for (const entry of RETIRED_LITERALS) {
-      if (!entry.scope) continue;
-      for (const prefix of entry.scope) {
-        if (!paths.some(p => p.startsWith(prefix))) dead.push(`"${entry.literal}" → ${prefix}`);
-      }
-    }
+    const dead = deadScopePrefixes(paths);
     expect(
       dead,
       `scope prefix(es) matching no corpus file — the entry is retired from a tree nothing scans:\n  ` +
@@ -726,5 +748,70 @@ describe('retired-wording guard — denylist of retired literals (GAP-32)', () =
       syntheticViolations.length,
       `non-vacuity: the guard logic must flag a corpus entry seeded with "${retired.literal}"`,
     ).toBeGreaterThan(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The changelog across a release bump
+//
+// scripts/bump-version.ts renames `## [Unreleased]` to `## [X.Y.Z] - date` and
+// the release workflow runs the suite on that tree, so the guard sees a changelog
+// with no [Unreleased] section on every release. CHANGELOG.md is still scanned
+// then — it simply has no current claims — and its scoped entries must stay live.
+// ---------------------------------------------------------------------------
+
+describe('retired-wording guard — CHANGELOG.md across the release bump', () => {
+  const changelogScoped = RETIRED_LITERALS.filter(e => e.scope?.includes('CHANGELOG.md'));
+  const header = '# Changelog\n\nAll notable changes to Devflow will be documented in this file.\n\n';
+  const released = (literals: readonly string[]): string =>
+    '## [9.9.9] - 2099-01-01\n\n### Fixed\n\n' +
+    literals.map(l => `- **A defect** — before: it said ${l}. After: it says ${l}.\n`).join('') +
+    '\n## [9.9.8] - 2098-01-01\n\n- An older entry.\n';
+  const literals = changelogScoped.map(e => e.literal);
+  const postBump = header + released(literals);
+  const emptyUnreleased = header + '## [Unreleased]\n\n' + released(literals);
+
+  function pathsWith(changelogRaw: string): string[] {
+    const entry = changelogCorpusEntry(changelogRaw);
+    return [
+      ...buildCorpus().map(e => e.relPath).filter(p => p !== 'CHANGELOG.md'),
+      ...(entry === undefined ? [] : [entry.relPath]),
+    ];
+  }
+
+  it('has CHANGELOG.md-scoped entries to protect (non-vacuity)', () => {
+    expect(changelogScoped.length).toBeGreaterThan(0);
+  });
+
+  it('a post-bump changelog with no [Unreleased] section leaves no CHANGELOG.md scope dead', () => {
+    expect(postBump).not.toContain('## [Unreleased]');
+    expect(deadScopePrefixes(pathsWith(postBump))).toEqual([]);
+  });
+
+  it('an empty [Unreleased] section leaves no CHANGELOG.md scope dead', () => {
+    expect(deadScopePrefixes(pathsWith(emptyUnreleased))).toEqual([]);
+  });
+
+  it('a released section is the record, not residue — its retired literals are not flagged', () => {
+    for (const raw of [postBump, emptyUnreleased]) {
+      const entry = changelogCorpusEntry(raw);
+      expect(entry?.relPath).toBe('CHANGELOG.md');
+      expect(collectRetiredLiteralViolations(entry === undefined ? [] : [entry])).toEqual([]);
+    }
+  });
+
+  it('a retired literal re-entering the next [Unreleased] After-half is still flagged', () => {
+    for (const literal of literals) {
+      const reopened =
+        header +
+        `## [Unreleased]\n\n### Fixed\n\n- **A defect** — before: old. After: it says ${literal}.\n\n` +
+        released([]);
+      const entry = changelogCorpusEntry(reopened);
+      expect(
+        collectRetiredLiteralViolations(entry === undefined ? [] : [entry])
+          .filter(v => v.startsWith('CHANGELOG.md:') && v.includes(`"${literal}"`)),
+        `"${literal}" in a fresh [Unreleased] After-half must still be caught`,
+      ).toHaveLength(1);
+    }
   });
 });
