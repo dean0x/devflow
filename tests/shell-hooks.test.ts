@@ -11,7 +11,7 @@ import {
   DEVFLOW_GITIGNORE_BLOCK_WITHOUT_CLAUDEIGNORE,
   computeDevflowGitignore,
 } from '../src/targets/claude-code/post-install.js';
-import { HOOKS_DIR, runHook } from './shell-hooks-helpers.js';
+import { HOOKS_DIR, execHook, runHook } from './shell-hooks-helpers.js';
 
 function localDateString(): string {
   const d = new Date();
@@ -731,12 +731,9 @@ describe('preamble — orchestrator charter mode', () => {
     it('F13: DEVFLOW_BG_UPDATER=1 → empty stdout (no injection into nested bg sessions) [AC-F9]', () => {
       // The background memory worker (claude -p) runs in the project git root and fires
       // UserPromptSubmit; the guard must suppress the orchestrator reminder there.
+      // The guard exits before reading stdin: execHook, not execSync (D-STDIN-EPIPE).
       const input = JSON.stringify({ cwd: tmpDir, prompt: 'refresh working memory from these turns' });
-      const out = execSync(`bash "${PREAMBLE_HOOK}"`, {
-        input,
-        env: { ...process.env, DEVFLOW_BG_UPDATER: '1' },
-        stdio: ['pipe', 'pipe', 'pipe'],
-      }).toString();
+      const out = execHook(PREAMBLE_HOOK, input, { env: { ...process.env, DEVFLOW_BG_UPDATER: '1' } });
       expect(out).toBe('');
     });
   });

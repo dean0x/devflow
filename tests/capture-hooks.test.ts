@@ -7,7 +7,7 @@
  * test file) rather than adding to the already-large shell-hooks.test.ts.
  *
  * Harness idioms follow eager-memory-refresh.test.ts: fake-claude PATH shim,
- * temp dirs, DEVFLOW_BG_WATCHDOG_SECS override, execSync + JSON stdin. Real
+ * temp dirs, DEVFLOW_BG_WATCHDOG_SECS override, runHook + JSON stdin. Real
  * `claude` is never invoked from these tests.
  */
 
@@ -17,6 +17,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
 import { pollForTerminalLine } from './helpers/poll-for-terminal-line.js';
+import { runHook as runSharedHook } from './shell-hooks-helpers.js';
 
 const HOOKS_DIR = path.resolve(__dirname, '..', 'src', 'assets', 'scripts', 'hooks');
 const CAPTURE_PROMPT = path.join(HOOKS_DIR, 'capture-prompt');
@@ -28,25 +29,18 @@ const MEMORY_WORKER = path.join(HOOKS_DIR, 'memory-worker');
 // Harness helpers (mirrors eager-memory-refresh.test.ts)
 // ---------------------------------------------------------------------------
 
+/**
+ * The shared runHook (stdin-EPIPE safe: the DEVFLOW_BG_UPDATER guards below exit
+ * before reading stdin) with an explicit empty DEVFLOW_DIR, overridable per call:
+ * a developer's exported value must never decide which manifest the gates read.
+ */
 function runHook(
   hookPath: string,
   input: object,
   homeDir: string,
   extraEnv: Record<string, string> = {},
 ): { stdout: string; stderr: string; exitCode: number } {
-  try {
-    const result = execSync(`bash "${hookPath}"`, {
-      input: JSON.stringify(input),
-      // An explicit empty DEVFLOW_DIR (overridable per call): a developer's
-      // exported value must never decide which manifest the gates read.
-      env: { ...process.env, HOME: homeDir, DEVFLOW_DIR: '', ...extraEnv },
-      stdio: ['pipe', 'pipe', 'pipe'],
-    });
-    return { stdout: result.toString(), stderr: '', exitCode: 0 };
-  } catch (e: unknown) {
-    const err = e as { stdout?: Buffer; stderr?: Buffer; status?: number };
-    return { stdout: err.stdout?.toString() ?? '', stderr: err.stderr?.toString() ?? '', exitCode: err.status ?? 1 };
-  }
+  return runSharedHook(hookPath, input, homeDir, { DEVFLOW_DIR: '', ...extraEnv });
 }
 
 function runHookWithPath(
