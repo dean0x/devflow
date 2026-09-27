@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Tests
+
+- **The unit suite can no longer write to your real install** ([#388](https://github.com/dean0x/devflow/issues/388)) — every test file now runs under its own temp `HOME` with `DEVFLOW_DIR`, `CLAUDE_CODE_DIR` and `CLAUDE_CONFIG_DIR` unset (`tests/setup/isolate-env.ts`), and it fails loudly if that `HOME` is ever the real one. Spawned CLIs and hooks get their env from a shared `sandboxEnv(home)` allowlist rather than a copy of `process.env`. A canary test proves that an exported `CLAUDE_CONFIG_DIR` / `DEVFLOW_DIR` stays empty while `init` runs, and a red probe proves those variables really do redirect writes when left in place.
+- **CI runs the shell-hook suites under macOS `/bin/bash` 3.2** — a new `macos-bash32-hooks` job puts `/bin/bash` first on `PATH` and refuses to run unless `bash --version` reports 3.2, so a bash-4-only construct in a hook fails in CI instead of on a Mac.
+
 ---
 
 ## [2.5.0] - 2026-09-27
