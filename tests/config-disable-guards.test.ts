@@ -10,6 +10,7 @@ import { execSync } from 'child_process';
 import * as path from 'path';
 import * as fs from 'fs';
 import * as os from 'os';
+import { execHook } from './shell-hooks-helpers.js';
 
 const HOOKS_DIR = path.resolve(__dirname, '..', 'src', 'assets', 'scripts', 'hooks');
 
@@ -548,6 +549,14 @@ describe('dream hook upgrade cleanup', () => {
 // pre-compact-memory must all bail out before any read or write.
 // capture-prompt, capture-turn, and capture-question carry the equivalent
 // guard and are covered in tests/capture-hooks.test.ts.
+//
+// session-start-memory and pre-compact-memory exit on the guard BEFORE reading
+// stdin, so they run through execHook: plain execSync throws EPIPE whenever that
+// exit beats the write of `input` (see D-STDIN-EPIPE in shell-hooks-helpers.ts).
+// session-start-context drains stdin as its first I/O, so execSync is race-free.
+
+/** The inherited environment with the re-entrancy guard raised. */
+const BG_UPDATER_ENV: NodeJS.ProcessEnv = { ...process.env, DEVFLOW_BG_UPDATER: '1' };
 
 describe('re-entrancy guard: session-start-context DEVFLOW_BG_UPDATER', () => {
   const HOOK = path.join(HOOKS_DIR, 'session-start-context');
@@ -586,7 +595,7 @@ describe('re-entrancy guard: session-start-memory DEVFLOW_BG_UPDATER', () => {
     mkMemoryDir(tmpDir);
     fs.writeFileSync(path.join(tmpDir, '.devflow', 'memory', 'WORKING-MEMORY.md'), '## Now\n- testing');
     const input = sessionInput(tmpDir);
-    const output = execSync(`DEVFLOW_BG_UPDATER=1 bash "${HOOK}"`, { input, stdio: ['pipe', 'pipe', 'pipe'] }).toString().trim();
+    const output = execHook(HOOK, input, { env: BG_UPDATER_ENV }).trim();
     expect(output).toBe('');
   });
 
@@ -597,7 +606,7 @@ describe('re-entrancy guard: session-start-memory DEVFLOW_BG_UPDATER', () => {
     const old = new Date(Date.now() - 600 * 1000);
     fs.utimesSync(proc, old, old);
     const input = sessionInput(tmpDir);
-    execSync(`DEVFLOW_BG_UPDATER=1 bash "${HOOK}"`, { input, stdio: ['pipe', 'pipe', 'pipe'] });
+    execHook(HOOK, input, { env: BG_UPDATER_ENV });
     expect(fs.existsSync(proc)).toBe(true);
     expect(fs.existsSync(path.join(tmpDir, '.devflow', 'memory', '.pending-turns.jsonl'))).toBe(false);
   });
@@ -614,7 +623,7 @@ describe('re-entrancy guard: pre-compact-memory DEVFLOW_BG_UPDATER', () => {
     mkMemoryDir(tmpDir);
     const input = sessionInput(tmpDir);
     expect(() => {
-      execSync(`DEVFLOW_BG_UPDATER=1 bash "${HOOK}"`, { input, stdio: ['pipe', 'pipe', 'pipe'] });
+      execHook(HOOK, input, { env: BG_UPDATER_ENV });
     }).not.toThrow();
     expect(fs.existsSync(path.join(tmpDir, '.devflow', 'memory', 'backup.json'))).toBe(false);
   });
