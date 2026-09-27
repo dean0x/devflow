@@ -1396,9 +1396,11 @@ describe('T3: --hud-only preserves the tracker selection it did not ask about', 
   afterEach(async () => { await fs.rm(tmpHome, { recursive: true, force: true }); });
 
   it('T3: a prior linear selection survives a hud-only install', async () => {
-    expect(run('init', '--recommended', '--tracker', 'linear').status).toBe(0);
+    // --no-hud so the hud-only run has something observable to change below.
+    expect(run('init', '--recommended', '--tracker', 'linear', '--no-hud').status).toBe(0);
+    const prior = await readManifest(devflowDir);
     expect(
-      ((await readManifest(devflowDir)).features as Record<string, unknown>).tracker,
+      (prior.features as Record<string, unknown>).tracker,
       'the pre-state must be the non-default provider, or the assertion below is satisfied by the default',
     ).toEqual({ provider: 'linear' });
 
@@ -1406,12 +1408,13 @@ describe('T3: --hud-only preserves the tracker selection it did not ask about', 
     expect(result.status, `init --hud-only failed:\n${result.stderr}`).toBe(0);
 
     const features = (await readManifest(devflowDir)).features as Record<string, unknown>;
-    // The hud-only path writes its own minimal manifest. Dropping the carry-over
-    // resets every Jira/Linear user to github with nothing on screen.
+    // Dropping the carry-over resets every Jira/Linear user to github with
+    // nothing on screen.
     expect(features.tracker).toEqual({ provider: 'linear' });
-    // Non-vacuity: this really was the hud-only manifest, not the full one left
-    // untouched — hud-only clears the plugin list and turns the rest off.
+    // Non-vacuity: this really was the hud-only manifest write, not the full one
+    // left untouched — the HUD it installs is now recorded, and nothing else
+    // moved (D-HUD-ONLY-PRESERVE: the plugin list survives).
     expect(features.hud).toBe(true);
-    expect((await readManifest(devflowDir)).plugins).toEqual([]);
+    expect((await readManifest(devflowDir)).plugins).toEqual(prior.plugins);
   });
 });

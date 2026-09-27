@@ -44,6 +44,96 @@ export function countDenyEntries(settingsJson: string): number {
 
 // ─── Command ──────────────────────────────────────────────────────────────────
 
+/**
+ * What removing the Devflow deny list from managed settings did. Carries the
+ * path it acted on so every caller can name the file in its message.
+ */
+export type ManagedDenyRemoval =
+  | { kind: 'removed'; path: string }
+  /** No managed file, or a platform with no managed settings location. */
+  | { kind: 'absent' }
+  /** The file exists but is unparseable or holds no Devflow entry — left alone. */
+  | { kind: 'no-devflow-entries'; path: string }
+  /** The file holds Devflow entries and the write/delete was refused (e.g. EACCES
+   *  outside a TTY, or the user declined sudo). Never thrown. */
+  | { kind: 'failed'; path: string };
+
+/**
+ * Remove the Devflow deny list from the managed settings file — the ONE
+ * implementation `devflow security --disable` and `devflow init --security none`
+ * share, so "none" means none in every location (#378).
+ *
+ * Gated on detectDenyState's parse-safe signal rather than on the file merely
+ * existing: removeManagedSettings parses the file without a guard, so a corrupt
+ * managed file must be classified here and never reach it (SF5). Never throws —
+ * a permission failure is the `failed` outcome, reported by the caller.
+ *
+ * `managedPath` is the injectable seam for tests (see removeManagedSettings);
+ * production callers omit it and get the platform path.
+ */
+export async function removeManagedDenyList(
+  rootDir: string,
+  verbose: boolean,
+  managedPath?: string,
+): Promise<ManagedDenyRemoval> {
+  let target: string;
+  if (managedPath !== undefined) {
+    target = managedPath;
+  } else {
+    try {
+      target = getManagedSettingsPath();
+    } catch {
+      return { kind: 'absent' };
+    }
+  }
+
+  let content: string;
+  try {
+    content = await fs.readFile(target, 'utf-8');
+  } catch {
+    return { kind: 'absent' };
+  }
+
+  if (!detectDenyState(null, true, content).managed) {
+    return { kind: 'no-devflow-entries', path: target };
+  }
+  const removed = await removeManagedSettings(rootDir, verbose, target);
+  return removed ? { kind: 'removed', path: target } : { kind: 'failed', path: target };
+}
+
+/**
+ * The user-facing line for a ManagedDenyRemoval. Pure.
+ *
+ * D-MANAGED-REMOVAL-REMEDY: both `devflow security --disable` and
+ * `devflow init --security none` print this line, so the `failed` remedy names
+ * no command — pointing at `devflow security --disable` sent a user of that very
+ * command back to it. A `failed` removal means the write needed admin rights and
+ * the sudo fallback could not run (no interactive terminal) or was declined, so
+ * the remedy is exactly that: re-run interactively and accept the prompt, or
+ * edit the named file as an administrator.
+ */
+export function describeManagedDenyRemoval(
+  outcome: ManagedDenyRemoval,
+): { level: 'info' | 'warn'; text: string } {
+  switch (outcome.kind) {
+    case 'removed':
+      return { level: 'info', text: `Security deny list removed from managed settings (${outcome.path})` };
+    case 'absent':
+      return { level: 'info', text: 'No managed settings to remove' };
+    case 'no-devflow-entries':
+      return { level: 'warn', text: 'Managed settings file exists but contains no Devflow deny entries — skipping' };
+    case 'failed':
+      return {
+        level: 'warn',
+        text:
+          `Could not remove the Devflow deny list from managed settings (${outcome.path}) — ` +
+          'it needs admin rights, and sudo was declined or unavailable. Re-run this command in an ' +
+          'interactive terminal and accept the sudo prompt, or, as an administrator, remove the Devflow ' +
+          `entries from permissions.deny in ${outcome.path}.`,
+      };
+  }
+}
+
 export const securityCommand = new Command('security')
   .description('Manage the security deny list (permissions.deny in Claude Code settings)')
   .option('--status', 'Show current deny list state and entry counts')
@@ -192,19 +282,12 @@ export const securityCommand = new Command('security')
         }
       }
 
-      // Managed settings: gate on detected.managed (parse-safe signal from detectDenyState),
-      // not raw managedExists — avoids raw JSON.parse crash inside removeManagedSettings
-      // when the managed file exists but is corrupt JSON. (SF5 — applies engineering.md
-      // "never throw in business logic"; avoids PF partial-failure: user settings already
-      // stripped but manifest sync would be skipped on uncaught throw.)
-      if (detected.managed) {
-        await removeManagedSettings(rootDir, true);
-      } else if (managedExists && !detected.managed) {
-        // File exists but is unparseable or contains no Devflow entries — warn and skip.
-        p.log.warn('Managed settings file exists but contains no Devflow deny entries — skipping');
-      } else {
-        p.log.info('No managed settings to remove');
-      }
+      // Managed settings: the shared removal (parse-safe gate, never throws — SF5;
+      // a throw here would skip the manifest sync below after user settings were
+      // already stripped).
+      const managedMsg = describeManagedDenyRemoval(await removeManagedDenyList(rootDir, false));
+      if (managedMsg.level === 'warn') p.log.warn(managedMsg.text);
+      else p.log.info(managedMsg.text);
 
       await syncManifestFeature(devflowDir, 'security', 'none');
 

@@ -1,16 +1,17 @@
 /**
- * Every devflow write of `.devflow/config.json` — `devflow init`'s and each
- * feature toggle's — is a read-modify-write over a user-editable file
- * (D-CONFIG-PRESERVE-UNMANAGED, avoids PF-071).
+ * devflow's write of `.devflow/config.json` — `devflow init`'s — is a
+ * read-modify-write over a user-editable file (D-CONFIG-PRESERVE-UNMANAGED,
+ * avoids PF-071).
  *
- * devflow owns four keys — memory, learning, knowledge, reviewPublication — and
- * nothing else. Every other key in the file (the hand-written per-repo `tracker`
- * override, a key a newer devflow or the user added) belongs to the FILE, so it
- * must survive the write byte-for-byte, carried by key presence and never by
- * type. The two retired keys devflow itself once wrote (`decisions`,
- * `autoCommit`) are the exception, and `decisions` is why: coerceConfig lets a
- * legacy `decisions` value OVERRIDE `learning`, so carrying it would silently
- * revert the learning value just written on the very next read.
+ * devflow owns one key — reviewPublication — and nothing else. Every other key
+ * in the file (the hand-written per-repo `tracker` override, a key a newer
+ * devflow or the user added) belongs to the FILE, so it must survive the write
+ * byte-for-byte, carried by key presence and never by type. The keys devflow
+ * itself once wrote and has retired are the exception: `memory`, `learning` and
+ * `knowledge` (per-repo feature switches until D-FEATURES-MACHINE-WIDE made
+ * those features machine-wide), `decisions` and `autoCommit`. Carrying them
+ * would leave a stale `learning: false` in the file that no longer does what it
+ * says, so the write drops them.
  *
  * The file round trip is asserted, not only the pure merge, because PF-071's
  * lesson is that a direct call exercises an input path no user has.
@@ -24,18 +25,16 @@ import * as path from 'path';
 import {
   mergeManagedConfig,
   readConfig,
-  updateFeature,
   writeManagedConfig,
-  type BooleanFeature,
   type ManagedConfig,
 } from '../../src/core/feature-config.js';
 
 const MANAGED: ManagedConfig = {
-  memory: false,
-  learning: true,
-  knowledge: false,
   reviewPublication: 'off',
 };
+
+/** Every key devflow once wrote to this file and has retired. */
+const RETIRED = { memory: false, learning: false, knowledge: true, decisions: false, autoCommit: true };
 
 let tmpDir: string;
 
@@ -62,11 +61,8 @@ function readRaw(): Record<string, unknown> {
 }
 
 describe('mergeManagedConfig: the managed keys come from init, every other key from the file', () => {
-  it('keeps the tracker override and an unknown key, overwriting only the managed keys', () => {
+  it('keeps the tracker override and an unknown key, overwriting only the managed key', () => {
     const existing = {
-      memory: true,
-      learning: false,
-      knowledge: true,
       reviewPublication: 'full',
       tracker: 'jira',
       teamNote: { owner: 'platform', tags: ['a', 'b'] },
@@ -92,7 +88,7 @@ describe('mergeManagedConfig: the managed keys come from init, every other key f
   });
 
   it('never manufactures a tracker key the file does not hold', () => {
-    const merged = mergeManagedConfig({ memory: true }, MANAGED);
+    const merged = mergeManagedConfig({ reviewPublication: 'full' }, MANAGED);
 
     expect(Object.prototype.hasOwnProperty.call(merged, 'tracker')).toBe(false);
   });
@@ -105,8 +101,8 @@ describe('mergeManagedConfig: the managed keys come from init, every other key f
     expect(mergeManagedConfig({ tracker: 'linear' }, binding).tracker).toBe('linear');
   });
 
-  it('drops the retired keys devflow itself once wrote', () => {
-    const merged = mergeManagedConfig({ decisions: false, autoCommit: true, teamNote: 'kept' }, MANAGED);
+  it('drops the retired keys devflow itself once wrote — the old per-repo feature switches included', () => {
+    const merged = mergeManagedConfig({ ...RETIRED, teamNote: 'kept' }, MANAGED);
 
     expect(merged).toEqual({ ...MANAGED, teamNote: 'kept' });
   });
@@ -122,7 +118,7 @@ describe('mergeManagedConfig: the managed keys come from init, every other key f
   });
 
   it('returns a new object and never mutates the file value it was given', () => {
-    const existing = { memory: true, tracker: 'jira' };
+    const existing = { reviewPublication: 'full', tracker: 'jira' };
     const snapshot = structuredClone(existing);
 
     const merged = mergeManagedConfig(existing, MANAGED);
@@ -145,7 +141,7 @@ describe('mergeManagedConfig: the managed keys come from init, every other key f
 
 describe('writeManagedConfig: the read-modify-write through the file', () => {
   it('★ preserves the tracker override and an unknown key on disk', async () => {
-    seedConfig(JSON.stringify({ memory: true, tracker: 'jira', teamNote: { tags: ['a'] } }));
+    seedConfig(JSON.stringify({ reviewPublication: 'full', tracker: 'jira', teamNote: { tags: ['a'] } }));
 
     await writeManagedConfig(tmpDir, MANAGED);
 
@@ -153,13 +149,12 @@ describe('writeManagedConfig: the read-modify-write through the file', () => {
     expect((await readConfig(tmpDir)).tracker).toBe('jira');
   });
 
-  it('a legacy `decisions` key cannot revert the learning value just written', async () => {
-    seedConfig(JSON.stringify({ decisions: false, learning: false }));
+  it('★ drops a stale per-repo feature switch an earlier init or toggle wrote', async () => {
+    seedConfig(JSON.stringify({ ...RETIRED, tracker: 'jira' }));
 
-    await writeManagedConfig(tmpDir, { ...MANAGED, learning: true });
+    await writeManagedConfig(tmpDir, MANAGED);
 
-    expect((await readConfig(tmpDir)).learning).toBe(true);
-    expect(Object.prototype.hasOwnProperty.call(readRaw(), 'decisions')).toBe(false);
+    expect(readRaw()).toEqual({ ...MANAGED, tracker: 'jira' });
   });
 
   it('creates the file with only the managed keys when none exists', async () => {
@@ -176,90 +171,5 @@ describe('writeManagedConfig: the read-modify-write through the file', () => {
     await writeManagedConfig(tmpDir, MANAGED);
 
     expect(readRaw()).toEqual(MANAGED);
-  });
-});
-
-/**
- * The write each feature-toggle command makes. `devflow memory|learning|knowledge
- * --enable|--disable` all reach the file through updateFeature with exactly
- * these arguments, so this table is every toggle's write path.
- */
-const TOGGLE_WRITES: readonly { command: string; feature: BooleanFeature; enabled: boolean }[] = [
-  { command: 'devflow memory --enable', feature: 'memory', enabled: true },
-  { command: 'devflow memory --disable', feature: 'memory', enabled: false },
-  { command: 'devflow learning --enable', feature: 'learning', enabled: true },
-  { command: 'devflow learning --disable', feature: 'learning', enabled: false },
-  { command: 'devflow knowledge --enable', feature: 'knowledge', enabled: true },
-  { command: 'devflow knowledge --disable', feature: 'knowledge', enabled: false },
-];
-
-/** Keys devflow does not manage, seeded beside the managed ones. */
-const UNMANAGED = {
-  tracker: 'jira',
-  teamNote: { owner: 'platform', tags: ['a', 'b'] },
-  futureFlag: 42,
-};
-
-describe('updateFeature: every feature toggle keeps the keys it does not manage', () => {
-  it.each(TOGGLE_WRITES)('★ $command keeps the tracker override and an unknown key on disk', async ({ feature, enabled }) => {
-    // Every boolean starts opposite to the toggle, so the write is a real change.
-    seedConfig(JSON.stringify({
-      memory: !enabled,
-      learning: !enabled,
-      knowledge: !enabled,
-      reviewPublication: 'full',
-      ...UNMANAGED,
-    }));
-
-    await updateFeature(tmpDir, feature, enabled);
-
-    expect(readRaw()).toEqual({
-      memory: !enabled,
-      learning: !enabled,
-      knowledge: !enabled,
-      reviewPublication: 'full',
-      [feature]: enabled,
-      ...UNMANAGED,
-    });
-  });
-
-  it.each(TOGGLE_WRITES)('$command carries a non-string tracker value by presence', async ({ feature, enabled }) => {
-    seedConfig(JSON.stringify({ tracker: null, teamNote: 'kept' }));
-
-    await updateFeature(tmpDir, feature, enabled);
-
-    const after = readRaw();
-    expect(Object.prototype.hasOwnProperty.call(after, 'tracker')).toBe(true);
-    expect(after.tracker).toBeNull();
-    expect(after.teamNote).toBe('kept');
-  });
-
-  it('drops the retired keys and keeps the legacy `decisions` value as `learning`', async () => {
-    // coerceConfig reads `decisions: false` as learning off; the toggle of an
-    // unrelated feature must keep that meaning while dropping the retired key.
-    seedConfig(JSON.stringify({ decisions: false, learning: true, autoCommit: true, teamNote: 'kept' }));
-
-    await updateFeature(tmpDir, 'memory', false);
-
-    const after = readRaw();
-    expect(Object.prototype.hasOwnProperty.call(after, 'decisions')).toBe(false);
-    expect(Object.prototype.hasOwnProperty.call(after, 'autoCommit')).toBe(false);
-    expect(after).toMatchObject({ memory: false, learning: false, teamNote: 'kept' });
-  });
-
-  it('creates the file with only the managed keys when none exists', async () => {
-    expect(existsSync(configPath())).toBe(false);
-
-    await updateFeature(tmpDir, 'knowledge', false);
-
-    expect(readRaw()).toEqual({ memory: true, learning: true, knowledge: false, reviewPublication: 'auto' });
-  });
-
-  it('replaces a malformed file with the defaults plus the toggle instead of failing', async () => {
-    seedConfig('{ "teamNote": "lost", ');
-
-    await updateFeature(tmpDir, 'learning', false);
-
-    expect(readRaw()).toEqual({ memory: true, learning: false, knowledge: true, reviewPublication: 'auto' });
   });
 });

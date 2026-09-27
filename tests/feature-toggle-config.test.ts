@@ -1,10 +1,11 @@
 /**
  * `devflow memory|learning|knowledge --enable|--disable`, run through the
- * compiled CLI: each toggle rewrites `.devflow/config.json`, and every key it
- * does not manage must survive the write (D-CONFIG-PRESERVE-UNMANAGED, avoids
- * PF-071). tests/core/feature-config-managed-write.test.ts drives updateFeature
- * directly; this suite proves each command's own write path, by the file round
- * trip PF-071 prescribes — seed, run the toggle, re-read the file.
+ * compiled CLI (D-FEATURES-MACHINE-WIDE): each toggle writes the one
+ * machine-wide switch, `features.<feature>` in ~/.devflow/manifest.json, and
+ * never the per-repo `.devflow/config.json` — whose memory/learning/knowledge
+ * keys are retired. The config file round-trips byte-for-byte (PF-071: seed,
+ * run the toggle, re-read the file), and the manifest changes only in the one
+ * key and `updatedAt`.
  */
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
@@ -25,12 +26,6 @@ const TOGGLES = [
   { feature: 'knowledge', flag: '--disable', enabled: false },
 ] as const;
 
-/** Keys devflow does not manage: the hand-written override and one it does not know. */
-const UNMANAGED = {
-  tracker: 'jira',
-  teamNote: { owner: 'platform', tags: ['a', 'b'] },
-};
-
 let tmpHome: string;
 let tmpRepo: string;
 
@@ -46,17 +41,30 @@ afterEach(() => {
   fs.rmSync(tmpRepo, { recursive: true, force: true });
 });
 
-function configPath(): string {
-  return path.join(tmpRepo, '.devflow', 'config.json');
-}
+const configPath = (): string => path.join(tmpRepo, '.devflow', 'config.json');
+const manifestPath = (): string => path.join(tmpHome, '.devflow', 'manifest.json');
 
-function seedConfig(body: Record<string, unknown>): void {
+function seedConfig(body: string): void {
   fs.mkdirSync(path.dirname(configPath()), { recursive: true });
-  fs.writeFileSync(configPath(), JSON.stringify(body), 'utf-8');
+  fs.writeFileSync(configPath(), body, 'utf-8');
 }
 
-function readRaw(): Record<string, unknown> {
-  return JSON.parse(fs.readFileSync(configPath(), 'utf-8')) as Record<string, unknown>;
+/** A manifest carrying a key devflow does not know, so a whole-file rewrite would show. */
+function seedManifest(features: Record<string, unknown>): void {
+  fs.mkdirSync(path.dirname(manifestPath()), { recursive: true });
+  fs.writeFileSync(manifestPath(), JSON.stringify({
+    version: '2.0.0',
+    plugins: ['devflow-core-skills'],
+    scope: 'user',
+    installedAt: '2026-01-01T00:00:00.000Z',
+    updatedAt: '2026-01-01T00:00:00.000Z',
+    teamNote: 'kept',
+    features: { ambient: true, hud: false, tracker: { provider: 'jira' }, ...features },
+  }), 'utf-8');
+}
+
+function readManifest(): Record<string, unknown> & { features: Record<string, unknown> } {
+  return JSON.parse(fs.readFileSync(manifestPath(), 'utf-8')) as Record<string, unknown> & { features: Record<string, unknown> };
 }
 
 function runToggle(feature: string, flag: string): { status: number | null; out: string } {
@@ -85,27 +93,35 @@ function runToggle(feature: string, flag: string): { status: number | null; out:
   return { status: result.status, out: `${result.stdout ?? ''}${result.stderr ?? ''}` };
 }
 
-describe('feature toggles keep the per-repo config keys they do not manage', () => {
-  it.each(TOGGLES)('★ devflow $feature $flag keeps the tracker override and an unknown key', ({ feature, flag, enabled }) => {
-    // Every boolean starts opposite to the toggle, so the write is a real change.
-    seedConfig({
-      memory: !enabled,
-      learning: !enabled,
-      knowledge: !enabled,
-      reviewPublication: 'full',
-      ...UNMANAGED,
+describe('feature toggles write the machine-wide switch, never the per-repo config', () => {
+  it.each(TOGGLES)('★ devflow $feature $flag writes features.$feature and leaves config.json byte-identical', ({ feature, flag, enabled }) => {
+    // The switch starts opposite to the toggle, so the write is a real change;
+    // the repo config holds stale opposite values a pre-#378 toggle wrote.
+    seedManifest({ memory: !enabled, learning: !enabled, knowledge: !enabled });
+    const configBody = JSON.stringify({
+      memory: !enabled, learning: !enabled, knowledge: !enabled, reviewPublication: 'full', tracker: 'jira',
     });
+    seedConfig(configBody);
 
     const result = runToggle(feature, flag);
 
     expect(result.status, `devflow ${feature} ${flag} failed:\n${result.out}`).toBe(0);
-    expect(readRaw()).toEqual({
-      memory: !enabled,
-      learning: !enabled,
-      knowledge: !enabled,
-      reviewPublication: 'full',
+    expect(fs.readFileSync(configPath(), 'utf-8')).toBe(configBody);
+    const after = readManifest();
+    expect(after.features).toEqual({
+      ambient: true, hud: false, tracker: { provider: 'jira' },
+      memory: !enabled, learning: !enabled, knowledge: !enabled,
       [feature]: enabled,
-      ...UNMANAGED,
     });
+    expect(after.teamNote).toBe('kept');
+    expect(after.updatedAt).not.toBe('2026-01-01T00:00:00.000Z');
+  }, 60_000);
+
+  it.each(TOGGLES)('devflow $feature $flag refuses without a manifest and creates none', ({ feature, flag }) => {
+    const result = runToggle(feature, flag);
+
+    expect(result.status).toBe(1);
+    expect(result.out).toContain('devflow init');
+    expect(fs.existsSync(manifestPath())).toBe(false);
   }, 60_000);
 });

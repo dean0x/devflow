@@ -1,5 +1,5 @@
 import { promises as fs, writeFileSync, unlinkSync } from 'fs';
-import { execSync } from 'child_process';
+import { execFileSync } from 'child_process';
 import * as path from 'path';
 import * as os from 'os';
 import * as p from '@clack/prompts';
@@ -693,11 +693,14 @@ export async function installManagedSettings(
   }
 
   try {
-    execSync(`sudo mkdir -p '${managedDir}'`, { stdio: 'inherit' });
-    // Write via sudo tee to avoid shell quoting issues with the JSON content
+    execFileSync('sudo', ['mkdir', '-p', managedDir], { stdio: 'inherit' });
+    // Stage the JSON in a file and copy it with sudo. Every sudo call takes an
+    // argv (execFileSync, no shell), so no path is ever re-parsed by a shell — a
+    // package root under a home directory holding a quote cannot break or extend
+    // the root command.
     const tmpFile = path.join(rootDir, '.managed-settings-tmp.json');
     await fs.writeFile(tmpFile, content, 'utf-8');
-    execSync(`sudo cp '${tmpFile}' '${managedPath}'`, { stdio: 'inherit' });
+    execFileSync('sudo', ['cp', tmpFile, managedPath], { stdio: 'inherit' });
     await fs.rm(tmpFile, { force: true });
     if (verbose) {
       p.log.success(`Managed settings written to ${managedPath} (via sudo)`);
@@ -719,16 +722,28 @@ export async function installManagedSettings(
  * 1. Try direct write/delete
  * 2. If EACCES and TTY, ask user before sudo
  * 3. Non-TTY: return false (caller logs preservation message)
+ *
+ * `managedPathOverride` exists so a test can point the removal at a temp file;
+ * production callers omit it and get the platform's system path. It is a
+ * parameter, deliberately not an environment variable: this function may run
+ * `sudo rm` / `sudo cp` on the path, and an env-selectable target would let
+ * whoever controls the environment aim a root write the user consented to for
+ * "managed settings" at any file.
  */
 export async function removeManagedSettings(
   rootDir: string,
   verbose: boolean,
+  managedPathOverride?: string,
 ): Promise<boolean> {
   let managedPath: string;
-  try {
-    managedPath = getManagedSettingsPath();
-  } catch {
-    return false;
+  if (managedPathOverride !== undefined) {
+    managedPath = managedPathOverride;
+  } else {
+    try {
+      managedPath = getManagedSettingsPath();
+    } catch {
+      return false;
+    }
   }
 
   let existingContent: string;
@@ -809,11 +824,11 @@ export async function removeManagedSettings(
 
   try {
     if (shouldDelete) {
-      execSync(`sudo rm '${managedPath}'`, { stdio: 'inherit' });
+      execFileSync('sudo', ['rm', managedPath], { stdio: 'inherit' });
     } else {
       const tmpFile = path.join(rootDir, '.managed-settings-tmp.json');
       await fs.writeFile(tmpFile, updatedContent!, 'utf-8');
-      execSync(`sudo cp '${tmpFile}' '${managedPath}'`, { stdio: 'inherit' });
+      execFileSync('sudo', ['cp', tmpFile, managedPath], { stdio: 'inherit' });
       await fs.rm(tmpFile, { force: true });
     }
     if (verbose) {

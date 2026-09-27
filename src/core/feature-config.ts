@@ -30,10 +30,15 @@ export type TrackerConfigOverride =
   | { kind: 'valid'; provider: TrackerProvider }
   | { kind: 'invalid'; raw: string };
 
+/**
+ * The per-repo config: facts ABOUT one repository, never a feature switch.
+ *
+ * D-FEATURES-MACHINE-WIDE (src/core/feature-switch.ts): memory, learning and
+ * knowledge are switched in ~/.devflow/manifest.json alone. Their old per-repo
+ * keys are retired ({@link RETIRED_CONFIG_KEYS}) — no gate reads them, and the
+ * next managed write drops them from the file.
+ */
 export interface FeatureConfig {
-  memory: boolean;
-  learning: boolean;
-  knowledge: boolean;
   reviewPublication: ReviewPublication;
   /**
    * The per-repo tracker provider override, as the RAW JSON value the config
@@ -63,23 +68,6 @@ export interface FeatureConfig {
 }
 
 /**
- * The keys of FeatureConfig whose value type is boolean.
- * Used to restrict updateFeature / isFeatureEnabled to boolean-typed fields only —
- * neither reviewPublication nor the per-repo tracker override must be togglable
- * as a boolean.
- *
- * The `-?` is load-bearing, not tidying: a homomorphic mapped type PRESERVES the
- * optional modifier, so `tracker` stays optional in the mapped result and
- * indexing that result by `keyof FeatureConfig` resolves to
- * `'memory' | 'learning' | 'knowledge' | undefined`, which `updateFeature`'s
- * computed index rejects. Stripping the modifier keeps the union to real keys,
- * and any future optional field inherits the fix.
- */
-export type BooleanFeature = {
-  [K in keyof FeatureConfig]-?: FeatureConfig[K] extends boolean ? K : never;
-}[keyof FeatureConfig];
-
-/**
  * The keys of FeatureConfig that devflow WRITES. `tracker` is not one of them:
  * no devflow command sets the per-repo override, it is hand-written and only
  * ever carried (see {@link mergeManagedConfig}).
@@ -88,17 +76,20 @@ export type ManagedConfig = Omit<FeatureConfig, 'tracker'>;
 
 /**
  * Keys devflow itself once wrote and has retired. A managed write drops them
- * rather than carrying them, and `decisions` is why that matters: coerceConfig
- * lets the legacy `decisions` value WIN over `learning`, so a carried
- * `decisions` would revert the learning value just written on the very next
- * read. `autoCommit` is inert — coerceConfig ignores it.
+ * rather than carrying them; no reader consults them.
+ *
+ * D-FEATURES-MACHINE-WIDE: `memory`, `learning` and `knowledge` were per-repo
+ * feature switches from the per-repo-install era. A feature is now on or off
+ * for the whole machine, in the manifest, so a stale per-repo value must
+ * neither decide anything nor linger to be mistaken for a switch: carrying it
+ * would leave a `learning: false` in the file that no longer does what it says.
+ * `decisions` is the pre-rename spelling of `learning`; `autoCommit` is inert.
  */
-const RETIRED_CONFIG_KEYS: ReadonlySet<string> = new Set(['decisions', 'autoCommit']);
+const RETIRED_CONFIG_KEYS: ReadonlySet<string> = new Set([
+  'memory', 'learning', 'knowledge', 'decisions', 'autoCommit',
+]);
 
 export const DEFAULT_CONFIG: FeatureConfig = {
-  memory: true,
-  learning: true,
-  knowledge: true,
   reviewPublication: 'auto',
 };
 
@@ -149,12 +140,8 @@ function isJsonObject(value: unknown): value is Record<string, unknown> {
  * Parse and narrow an unknown JSON value into a FeatureConfig, merging onto
  * DEFAULT_CONFIG. Pure function — no I/O, no side effects.
  *
- * Coalesces legacy `decisions` key into `learning` when both are present:
- * `decisions` wins (legacy-decisions-wins semantics; intentionally opposite to
- * manifest.ts's new-key-wins self-heal — migration-compat requires the old key
- * to take precedence so old configs with `decisions: false` are not silently
- * re-enabled by a newer `learning: true` key).
- * Silently ignores `autoCommit` — old configs may still contain it.
+ * The retired keys ({@link RETIRED_CONFIG_KEYS}) are ignored: an old config may
+ * still hold them, and none of them decides anything (D-FEATURES-MACHINE-WIDE).
  *
  * Returns null when `parsed` is not a plain object (caller falls through to
  * the next candidate path).
@@ -162,11 +149,6 @@ function isJsonObject(value: unknown): value is Record<string, unknown> {
 function coerceConfig(parsed: unknown): FeatureConfig | null {
   if (!isJsonObject(parsed)) return null;
   const p = parsed;
-
-  // Coalesce decisions (legacy key) → learning. decisions wins when both present.
-  let learning: boolean = DEFAULT_CONFIG.learning;
-  if (typeof p.learning === 'boolean') learning = p.learning;
-  if (typeof p.decisions === 'boolean') learning = p.decisions; // decisions wins
 
   // Coerce reviewPublication: any invalid or absent value → 'auto' (self-heal, ADR-014 idiom).
   const rp = p.reviewPublication;
@@ -190,20 +172,14 @@ function coerceConfig(parsed: unknown): FeatureConfig | null {
   const hasTracker = Object.prototype.hasOwnProperty.call(p, 'tracker');
 
   return {
-    memory: typeof p.memory === 'boolean' ? p.memory : DEFAULT_CONFIG.memory,
-    learning,
-    knowledge: typeof p.knowledge === 'boolean' ? p.knowledge : DEFAULT_CONFIG.knowledge,
     reviewPublication,
     ...(hasTracker ? { tracker: p.tracker } : {}),
   };
 }
 
 /**
- * Read the feature config for a project root.
+ * Read the per-repo config for a project root.
  * Returns DEFAULT_CONFIG when the file is missing or unreadable.
- * Applies ADR-001: .devflow/config.json is the sole source of truth;
- * `devflow init` writes it directly on first install. An absent file falls
- * through to DEFAULT_CONFIG (all features enabled by default).
  */
 export async function readConfig(projectRoot: string): Promise<FeatureConfig> {
   return coerceConfig(await readConfigBody(projectRoot)) ?? { ...DEFAULT_CONFIG };
@@ -212,8 +188,8 @@ export async function readConfig(projectRoot: string): Promise<FeatureConfig> {
 /**
  * The parsed JSON body of a project's config file, or `undefined` when the file
  * is absent, unreadable or malformed. Every read of the file goes through here,
- * so readConfig, readConfigIfPresent, writeManagedConfig and updateFeature
- * agree on what an unusable file means.
+ * so readConfig, readConfigIfPresent and writeManagedConfig agree on what an
+ * unusable file means.
  */
 async function readConfigBody(projectRoot: string): Promise<unknown> {
   try {
@@ -247,12 +223,11 @@ async function writeConfigBody(projectRoot: string, body: object): Promise<void>
  * — the hand-written per-repo `tracker` override (whose invalid values must
  * survive so their DEGRADED report can name them) and any key devflow does not
  * know. The alternative, writing the declared shape, is a silent delete of all
- * of them on every `devflow init` and every feature toggle. Every writer of the
- * file goes through here: writeManagedConfig (init) and updateFeature (the
- * `memory`, `learning` and `knowledge` toggles). Only the four managed keys are
- * copied from `managed`, by name, so a caller holding a whole FeatureConfig
- * still cannot overwrite the file's override with its in-memory copy. The
- * retired keys in RETIRED_CONFIG_KEYS are dropped, not carried. A body that is
+ * of them on every `devflow init`. Every writer of the file goes through here
+ * (writeManagedConfig, called by init). Only the managed key is copied from
+ * `managed`, by name, so a caller holding a whole FeatureConfig still cannot
+ * overwrite the file's override with its in-memory copy. The retired keys in
+ * RETIRED_CONFIG_KEYS are dropped, not carried. A body that is
  * not a JSON object (absent, malformed, an array) reads as empty, exactly as
  * readConfigIfPresent treats it.
  *
@@ -266,17 +241,18 @@ export function mergeManagedConfig(existing: unknown, managed: ManagedConfig): R
     : {};
   return {
     ...fileKeys,
-    memory: managed.memory,
-    learning: managed.learning,
-    knowledge: managed.knowledge,
     reviewPublication: managed.reviewPublication,
   };
 }
 
 /**
  * Write devflow's managed keys to a project's config, keeping every key it
- * does not manage (D-CONFIG-PRESERVE-UNMANAGED). A read-modify-write under the
- * same concurrency assumption as updateFeature (D1).
+ * does not manage (D-CONFIG-PRESERVE-UNMANAGED).
+ *
+ * D1: Non-atomic read-modify-write. A concurrent writer could lose the other's
+ * change. Acceptable because init is a single-threaded, user-initiated command
+ * and the window is milliseconds on a local filesystem; the file swap itself is
+ * atomic (temp + rename), so a reader never sees a partial file.
  */
 export async function writeManagedConfig(projectRoot: string, managed: ManagedConfig): Promise<void> {
   const existing = await readConfigBody(projectRoot);
@@ -284,53 +260,13 @@ export async function writeManagedConfig(projectRoot: string, managed: ManagedCo
 }
 
 /**
- * Toggle a single feature in the feature config.
- * Reads the file once, applies the change to the managed keys, and writes back
- * every key it does not manage untouched (D-CONFIG-PRESERVE-UNMANAGED): the
- * managed values come from the coerced config, so an invalid one still
- * self-heals and a legacy `decisions` value still lands as `learning`.
- *
- * D1: Non-atomic read-modify-write. Concurrent invocations of `updateFeature`
- * could lose each other's writes. Acceptable here because: (a) devflow CLI
- * commands are single-threaded user-initiated actions, and (b) the window is
- * milliseconds on a local filesystem with no concurrent writers in normal use.
- * If concurrent safety is ever required, replace with an atomic file-swap or
- * a lock file.
- */
-export async function updateFeature(
-  projectRoot: string,
-  feature: BooleanFeature,
-  enabled: boolean,
-): Promise<void> {
-  const existing = await readConfigBody(projectRoot);
-  const current = coerceConfig(existing) ?? { ...DEFAULT_CONFIG };
-  await writeConfigBody(projectRoot, mergeManagedConfig(existing, { ...current, [feature]: enabled }));
-}
-
-/**
- * Check whether a specific feature is enabled for the given project root.
- */
-export async function isFeatureEnabled(
-  projectRoot: string,
-  feature: BooleanFeature,
-): Promise<boolean> {
-  const config = await readConfig(projectRoot);
-  return config[feature];
-}
-
-/**
- * Read the feature config for a project root, returning null when the file
+ * Read the per-repo config for a project root, returning null when the file
  * is absent or malformed.
  *
  * Unlike readConfig (which falls back to DEFAULT_CONFIG on any error),
  * readConfigIfPresent distinguishes "not configured yet" (null) from
- * "configured with specific values" (FeatureConfig).  The distinction
- * matters for init-seed resolution: a present config overrides the
- * manifest for memory/learning/knowledge even when the manifest is absent.
- *
- * Applies ADR-001: .devflow/config.json is the source of truth; null means
- * the config file does not exist or is unreadable — not that all features
- * are disabled.
+ * "configured with specific values" (FeatureConfig). init relies on the
+ * distinction to carry a repo's own reviewPublication across a re-init.
  */
 export async function readConfigIfPresent(projectRoot: string): Promise<FeatureConfig | null> {
   // null when the file is absent or malformed, or its JSON is not a plain object

@@ -345,40 +345,141 @@ describe('queue_read_gates', () => {
     fs.rmSync(tmpDir, { recursive: true, force: true });
   });
 
-  function readGates(config: Record<string, unknown> | null): { memory: string; learning: string; exitCode: number } {
-    const configPath = path.join(tmpDir, 'config.json');
-    if (config !== null) fs.writeFileSync(configPath, JSON.stringify(config));
+  // D-FEATURES-MACHINE-WIDE: the gates read ~/.devflow/manifest.json alone. Raw
+  // file contents (not objects) so malformed JSON is expressible.
+  type Raw = string | null;
 
+  function readGates(manifest: Raw, opts: { noJq?: boolean } = {}): { memory: string; learning: string; exitCode: number } {
+    const manifestPath = path.join(tmpDir, 'manifest.json');
+    if (manifest !== null) fs.writeFileSync(manifestPath, manifest);
     const { stdout, exitCode } = runWithQueueAppend(`
-      queue_read_gates "${configPath}"
+      ${opts.noJq ? '_HAS_JQ=false' : ''}
+      queue_read_gates "${manifestPath}"
       echo "MEMORY=$_QG_MEMORY"
       echo "LEARNING=$_QG_LEARNING"
     `);
-    const memMatch = stdout.match(/MEMORY=(\S*)/);
-    const learnMatch = stdout.match(/LEARNING=(\S*)/);
-    return { memory: memMatch?.[1] ?? '', learning: learnMatch?.[1] ?? '', exitCode };
+    return {
+      memory: stdout.match(/MEMORY=(\S*)/)?.[1] ?? '',
+      learning: stdout.match(/LEARNING=(\S*)/)?.[1] ?? '',
+      exitCode,
+    };
   }
 
-  it('both default to true when config is missing', () => {
-    const r = readGates(null);
-    expect(r).toMatchObject({ memory: 'true', learning: 'true', exitCode: 0 });
-  });
+  const manifestWith = (features: Record<string, unknown>): string =>
+    JSON.stringify({ version: '2.0.0', features });
 
-  it('reads both explicit fields in one pass', () => {
-    const r = readGates({ memory: true, learning: false });
-    expect(r).toMatchObject({ memory: 'true', learning: 'false' });
-  });
+  for (const backend of [{ name: 'jq', noJq: false }, { name: 'node fallback', noJq: true }]) {
+    describe(`${backend.name} backend`, () => {
+      const gates = (manifest: Raw) => readGates(manifest, { noJq: backend.noJq });
 
-  it('memory:false, learning field absent -> memory false, learning defaults true', () => {
-    const r = readGates({ memory: false });
-    expect(r).toMatchObject({ memory: 'false', learning: 'true' });
+      it('reads both switches in one pass', () => {
+        expect(gates(manifestWith({ memory: true, learning: false }))).toMatchObject({
+          memory: 'true', learning: 'false', exitCode: 0,
+        });
+        expect(gates(manifestWith({ memory: false, learning: true }))).toMatchObject({
+          memory: 'false', learning: 'true', exitCode: 0,
+        });
+      });
+
+      it('each switch clears only its own gate', () => {
+        expect(gates(manifestWith({ memory: false, learning: false }))).toMatchObject({ memory: 'false', learning: 'false' });
+        expect(gates(manifestWith({ learning: false }))).toMatchObject({ memory: 'true', learning: 'false' });
+        expect(gates(manifestWith({ memory: false }))).toMatchObject({ memory: 'false', learning: 'true' });
+      });
+
+      it('no manifest file → both on (fail-open)', () => {
+        expect(gates(null)).toMatchObject({ memory: 'true', learning: 'true', exitCode: 0 });
+      });
+
+      it('a manifest without the keys → both on (fail-open)', () => {
+        expect(gates(manifestWith({ ambient: true }))).toMatchObject({ memory: 'true', learning: 'true' });
+      });
+
+      it('a malformed manifest fails open', () => {
+        for (const raw of ['{ not json', '[1, 2]', JSON.stringify({ features: 'nope' }), JSON.stringify({ features: [false] })]) {
+          expect(gates(raw), raw).toMatchObject({ memory: 'true', learning: 'true', exitCode: 0 });
+        }
+      });
+
+      it('only an explicit boolean false is the switch (a string "false" is not)', () => {
+        expect(gates(manifestWith({ memory: 'false', learning: 0 }))).toMatchObject({ memory: 'true', learning: 'true' });
+      });
+
+      it('learning falls back to the legacy decisions key, mirroring readManifest (D-LEARNING-LEGACY-DECISIONS)', () => {
+        expect(gates(manifestWith({ memory: true, decisions: false }))).toMatchObject({ memory: 'true', learning: 'false', exitCode: 0 });
+        expect(gates(manifestWith({ decisions: true }))).toMatchObject({ memory: 'true', learning: 'true' });
+        // An explicit boolean learning wins over the legacy key, either way.
+        expect(gates(manifestWith({ decisions: false, learning: true }))).toMatchObject({ learning: 'true' });
+        expect(gates(manifestWith({ decisions: true, learning: false }))).toMatchObject({ learning: 'false' });
+        // A non-boolean learning is not a value, so the legacy key decides; a
+        // non-boolean decisions decides nothing.
+        expect(gates(manifestWith({ decisions: false, learning: 'yes' }))).toMatchObject({ learning: 'false' });
+        expect(gates(manifestWith({ decisions: 'false' }))).toMatchObject({ learning: 'true' });
+      }, 15000);
+
+      it('an escaped key still switches off (a \\u escape always takes the full parse)', () => {
+        // JSON.parse and jq decode "memory" to "memory"; the builtin fast
+        // path cannot see through an escape, so it must never decide such a file.
+        const raw = '{"features":{"m\\u0065mory":false,"le\\u0061rning":false}}';
+        expect(gates(raw)).toMatchObject({ memory: 'false', learning: 'false', exitCode: 0 });
+        expect(gates('{"features":{"d\\u0065cisions":false}}')).toMatchObject({ memory: 'true', learning: 'false' });
+      });
+
+      it('forks no parser when no switch can be off, and exactly one when one can (D-GATES-FAST-PATH)', () => {
+        // Every capture hook and session start pays this read. A manifest whose
+        // text holds no `"memory"|"learning"|"decisions": false` cannot switch
+        // anything off, so it is answered by shell builtins alone. The parser is
+        // shadowed by a function that logs each call before running the real one.
+        const forkLog = path.join(tmpDir, 'forks.log');
+        const manifestPath = path.join(tmpDir, 'manifest.json');
+        const parser = backend.noJq ? 'node' : 'jq';
+        const probe = (manifest: string) => {
+          fs.writeFileSync(manifestPath, manifest);
+          fs.rmSync(forkLog, { force: true });
+          const { stdout, exitCode } = runWithQueueAppend(`
+            ${backend.noJq ? '_HAS_JQ=false' : ''}
+            ${parser}() { echo fork >> "${forkLog}"; command ${parser} "$@"; }
+            queue_read_gates "${manifestPath}"
+            echo "MEMORY=$_QG_MEMORY LEARNING=$_QG_LEARNING"
+          `);
+          const forks = fs.existsSync(forkLog) ? fs.readFileSync(forkLog, 'utf-8').trim().split('\n').length : 0;
+          return { stdout, exitCode, forks };
+        };
+
+        // A real manifest carries other `false` values (proxy, compliance.enabled);
+        // they are not switches and must not cost a fork.
+        const on = probe(JSON.stringify({
+          version: '2.0.0',
+          features: { ambient: true, memory: true, learning: true, proxy: false, compliance: { enabled: false } },
+        }, null, 2));
+        expect(on).toMatchObject({ exitCode: 0, forks: 0 });
+        expect(on.stdout).toContain('MEMORY=true LEARNING=true');
+
+        const off = probe(JSON.stringify({ features: { memory: false } }, null, 2));
+        expect(off).toMatchObject({ exitCode: 0, forks: 1 });
+        expect(off.stdout).toContain('MEMORY=false LEARNING=true');
+      });
+    });
+  }
+
+  it('the per-repo config is never read: a stale false beside the manifest decides nothing', () => {
+    // The pre-#378 signature took the repo config first. A stale
+    // `.devflow/config.json` saying false must not switch anything off — and
+    // passing its path where the manifest belongs must not either.
+    const configPath = path.join(tmpDir, 'config.json');
+    fs.writeFileSync(configPath, JSON.stringify({ memory: false, learning: false }));
+    const { stdout } = runWithQueueAppend(`
+      queue_read_gates "${path.join(tmpDir, 'manifest.json')}"
+      echo "MEMORY=$_QG_MEMORY LEARNING=$_QG_LEARNING"
+    `);
+    expect(stdout).toContain('MEMORY=true LEARNING=true');
   });
 
   it('never exits non-zero (set -e safety)', () => {
     // Regression guard: queue_read_gates's exit status must never leak the
     // truthiness of its last internal test into a `set -e` caller that
     // invokes it as a plain statement.
-    const r = readGates({});
-    expect(r.exitCode).toBe(0);
+    expect(readGates(manifestWith({})).exitCode).toBe(0);
+    expect(readGates(manifestWith({ memory: false, learning: false })).exitCode).toBe(0);
   });
 });

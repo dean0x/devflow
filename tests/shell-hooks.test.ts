@@ -468,6 +468,42 @@ describe('hooks anchor .devflow/ to the project root (no stray nested .devflow/)
   });
 });
 
+describe('hook-log-init: first invocation for a fresh log dir', () => {
+  const HOOK_LOG_INIT = path.join(HOOKS_DIR, 'hook-log-init');
+
+  it('sources silently under set -e when the log file does not exist yet, and sizes it as 0', () => {
+    // HOME is a mktemp dir: devflow_log_dir mkdirs $HOME/.devflow/logs/<slug>
+    // unconditionally (PF-060). Seeded, never empty (PF-018). CWD is its own
+    // mktemp dir so its slug's log dir — and the log file — are brand new.
+    const homeDir = fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-loginit-home-'));
+    fs.mkdirSync(path.join(homeDir, '.devflow', 'logs'), { recursive: true });
+    const cwdDir = fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-loginit-cwd-'));
+    try {
+      // Sourced under `set -e` the way the capture hooks source it (PF-078):
+      // the caller must keep running past the size guard.
+      const script = [
+        'set -e',
+        `SCRIPT_DIR="${HOOKS_DIR}"`,
+        `CWD="${cwdDir}"`,
+        `source "${HOOK_LOG_INIT}" "fresh-hook"`,
+        'echo "size=$_LOG_SIZE"',
+        '[ -f "$LOG_FILE" ] && echo "exists" || echo "absent"',
+      ].join('\n');
+      const result = spawnSync('bash', ['-c', script], {
+        env: { ...process.env, HOME: homeDir, DEVFLOW_DIR: '' },
+        encoding: 'utf-8',
+      });
+
+      expect(result.stderr).toBe('');
+      expect(result.status).toBe(0);
+      expect(result.stdout).toBe('size=0\nabsent\n');
+    } finally {
+      fs.rmSync(homeDir, { recursive: true, force: true });
+      fs.rmSync(cwdDir, { recursive: true, force: true });
+    }
+  });
+});
+
 // =============================================================================
 // preamble — orchestrator charter mode (Suites 1-4)
 // =============================================================================
@@ -2268,8 +2304,8 @@ describe('session-start-context root .gitignore (memory-independent)', () => {
 // directive instructing the main model to spawn the background Learning agent with
 // the resolved model (project learning.json → global ~/.devflow/learning.json
 // → opus). A FRESH .processing (younger than 900s) means a live agent already
-// owns the batch, so the directive is suppressed. Gate is config-only: the
-// `learning` field in feature config (.devflow/config.json).
+// owns the batch, so the directive is suppressed. Gate is the machine-wide
+// `features.learning` in ~/.devflow/manifest.json (D-FEATURES-MACHINE-WIDE).
 
 describe('session-start-context: learning maintenance directive (Section 2)', () => {
   const CONTEXT_HOOK = path.join(HOOKS_DIR, 'session-start-context');
@@ -2334,20 +2370,59 @@ describe('session-start-context: learning maintenance directive (Section 2)', ()
     expect(contextOf(stdout)).not.toContain('LEARNING MAINTENANCE');
   });
 
-  it('learning:false in feature config suppresses the directive (and the TL;DR)', () => {
-    seedQueue(tmpDir);
-    fs.writeFileSync(
-      path.join(tmpDir, '.devflow', 'config.json'),
-      JSON.stringify({ learning: false }),
-    );
-    fs.writeFileSync(
-      path.join(tmpDir, '.devflow', 'learning', 'decisions.md'),
-      '<!-- TL;DR: 1 decision. Key: ADR-001 Test -->\n# Architectural Decisions',
-    );
+  // D-FEATURES-MACHINE-WIDE: `devflow init --no-learning` / `devflow learning
+  // --disable` write features.learning:false to ~/.devflow/manifest.json; that
+  // alone decides the directive (and the TL;DR) in every repo — the retired
+  // per-repo `learning` key decides nothing either way.
+  describe('machine-wide learning switch (manifest only)', () => {
+    const ENV = { DEVFLOW_DIR: '' };
+    const TLDR = '<!-- TL;DR: 1 decision. Key: ADR-001 Test -->\n# Architectural Decisions';
 
-    const { stdout, exitCode } = runHook(CONTEXT_HOOK, { cwd: tmpDir }, homeDir);
-    expect(exitCode).toBe(0);
-    expect(stdout.trim()).toBe('');
+    function writeManifestFeatures(features: Record<string, unknown>): void {
+      fs.writeFileSync(
+        path.join(homeDir, '.devflow', 'manifest.json'),
+        JSON.stringify({ version: '2.0.0', features }),
+      );
+    }
+
+    it('learning:false in the manifest suppresses the directive and the TL;DR although the repo config says true', () => {
+      seedQueue(tmpDir);
+      fs.writeFileSync(path.join(tmpDir, '.devflow', 'config.json'), JSON.stringify({ learning: true }));
+      fs.writeFileSync(path.join(tmpDir, '.devflow', 'learning', 'decisions.md'), TLDR);
+      writeManifestFeatures({ learning: false });
+
+      const { stdout, exitCode } = runHook(CONTEXT_HOOK, { cwd: tmpDir }, homeDir, ENV);
+      expect(exitCode).toBe(0);
+      expect(stdout.trim()).toBe('');
+    });
+
+    it('learning:false in the manifest suppresses the directive where the repo has no config', () => {
+      seedQueue(tmpDir);
+      writeManifestFeatures({ learning: false });
+
+      const { stdout, exitCode } = runHook(CONTEXT_HOOK, { cwd: tmpDir }, homeDir, ENV);
+      expect(exitCode).toBe(0);
+      expect(stdout.trim()).toBe('');
+    });
+
+    it('a manifest without the learning key leaves the directive on (fail-open)', () => {
+      seedQueue(tmpDir);
+      writeManifestFeatures({ ambient: true });
+
+      const { stdout } = runHook(CONTEXT_HOOK, { cwd: tmpDir }, homeDir, ENV);
+      expect(contextOf(stdout)).toContain('--- LEARNING MAINTENANCE ---');
+    });
+
+    it('a stale repo config learning:false does not suppress the directive or the TL;DR', () => {
+      seedQueue(tmpDir);
+      fs.writeFileSync(path.join(tmpDir, '.devflow', 'config.json'), JSON.stringify({ learning: false }));
+      fs.writeFileSync(path.join(tmpDir, '.devflow', 'learning', 'decisions.md'), TLDR);
+      writeManifestFeatures({ learning: true });
+
+      const ctx = contextOf(runHook(CONTEXT_HOOK, { cwd: tmpDir }, homeDir, ENV).stdout);
+      expect(ctx).toContain('--- LEARNING MAINTENANCE ---');
+      expect(ctx).toContain('PROJECT DECISIONS');
+    });
   });
 
   it('DEVFLOW_BG_UPDATER=1 -> empty stdout even with a pending queue (guard precedes everything)', () => {

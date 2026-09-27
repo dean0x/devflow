@@ -42,20 +42,24 @@ source "$SCRIPT_DIR/resolve-project-root" 2>/dev/null || true
 PROJECT_ROOT="$(df_resolve_root "$CWD" 2>/dev/null || true)"
 [ -n "$PROJECT_ROOT" ] || PROJECT_ROOT="$CWD"
 
+# The machine-wide manifest (the memory switch, D-FEATURES-MACHINE-WIDE in
+# queue-append) is user-scope: resolve it from the inherited DEVFLOW_DIR (or
+# ~/.devflow) BEFORE the project-scoped assignment below shadows that value.
+DEVFLOW_MANIFEST="${DEVFLOW_DIR:-$HOME/.devflow}/manifest.json"
 DEVFLOW_DIR="$PROJECT_ROOT/.devflow"
 MEMORY_DIR="$DEVFLOW_DIR/memory"
 
 # Normal logging
 source "$SCRIPT_DIR/hook-log-init" "session-start-memory"
 
-# Check feature config — single source of truth for memory enabled/disabled (ADR-001).
-FEATURE_CONFIG="$DEVFLOW_DIR/config.json"
-if [ -f "$FEATURE_CONFIG" ]; then
-  MEMORY_ENABLED=$(json_field_file "$FEATURE_CONFIG" "memory" "true")
-  if [ "$MEMORY_ENABLED" = "false" ]; then
-    dbg "EXIT: memory disabled in feature config"
-    exit 0
-  fi
+# Memory gate: the machine-wide switch, read by the helper every memory/learning
+# gate shares (D-FEATURES-MACHINE-WIDE, see queue-append). The per-repo config
+# is never consulted.
+source "$SCRIPT_DIR/queue-append" || { echo "session-start-memory: failed to source queue-append" >&2; exit 1; }
+queue_read_gates "$DEVFLOW_MANIFEST"
+if [ "$_QG_MEMORY" != "true" ]; then
+  dbg "EXIT: memory disabled machine-wide"
+  exit 0
 fi
 
 # --- D56c cold-path recovery: orphaned .pending-turns.processing ---

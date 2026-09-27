@@ -39,8 +39,9 @@
  * (the untyped-seam shape PF-024 names). The prompt reads the FILE, so the
  * TypeScript side owes it two things and the second is the one a reader is
  * likely to miss: classify the same bytes the same way, AND leave those bytes on
- * disk — `updateFeature` is a read-modify-write over the whole file, so a value
- * its write drops is a value the prompt can never see again.
+ * disk — `writeManagedConfig` (devflow init's write) is a read-modify-write over
+ * the whole file, so a value its write drops is a value the prompt can never see
+ * again.
  */
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
@@ -53,7 +54,7 @@ import { readManifest } from '../../src/core/manifest.js';
 import {
   parseTrackerOverride,
   readConfig,
-  updateFeature,
+  writeManagedConfig,
 } from '../../src/core/feature-config.js';
 import {
   DEFAULT_TRACKER_PROVIDER,
@@ -449,14 +450,14 @@ describe('per-repo tracker key: the verdict survives an unrelated CLI toggle', (
   function seed(index: number, shape: OverrideShape): string {
     const root = path.join(tmpRoot, `override-${index}`);
     fs.mkdirSync(path.join(root, '.devflow'), { recursive: true });
-    const body: Record<string, unknown> = { memory: true, learning: true, knowledge: true };
+    const body: Record<string, unknown> = { reviewPublication: 'auto' };
     if (shape.present !== false) body.tracker = shape.raw;
     fs.writeFileSync(configPath(root), JSON.stringify(body));
     return root;
   }
 
   for (const [index, shape] of OVERRIDES.entries()) {
-    it(`${shape.label} → ${shape.verdict}, before and after \`devflow knowledge --disable\``, async () => {
+    it(`${shape.label} → ${shape.verdict}, before and after a re-init's managed write`, async () => {
       const root = seed(index, shape);
 
       expect(
@@ -464,13 +465,13 @@ describe('per-repo tracker key: the verdict survives an unrelated CLI toggle', (
         `the TypeScript reader classified ${shape.label} differently from the table`,
       ).toBe(shape.verdict);
 
-      await updateFeature(root, 'knowledge', false);
+      await writeManagedConfig(root, { reviewPublication: 'off' });
       const onDisk = JSON.parse(fs.readFileSync(configPath(root), 'utf-8')) as Record<string, unknown>;
 
-      expect(onDisk.knowledge, 'the toggle must still take effect').toBe(false);
+      expect(onDisk.reviewPublication, 'the write must still take effect').toBe('off');
       expect(
         Object.prototype.hasOwnProperty.call(onDisk, 'tracker'),
-        'an unrelated toggle changed whether the key exists on disk — the prompt reads the ' +
+        'an unrelated write changed whether the key exists on disk — the prompt reads the ' +
         'FILE, so a key the CLI drops is a key the prompt can never see again',
       ).toBe(shape.present !== false);
       if (shape.present !== false) {

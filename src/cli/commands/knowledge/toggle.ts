@@ -1,7 +1,11 @@
 /**
  * Handle the enable/disable/status toggle actions for `devflow knowledge`.
  *
- * The sole opt-out mechanism is the feature config `knowledge` field (config-only gate per ADR-001).
+ * D-FEATURES-MACHINE-WIDE (src/core/feature-switch.ts): knowledge write-back is
+ * switched for the whole machine by `features.knowledge` in
+ * ~/.devflow/manifest.json. `--enable`/`--disable` write that value — the same
+ * one `devflow init --knowledge / --no-knowledge` writes — and `--status`
+ * reports it.
  */
 import { promises as fs } from 'fs';
 import * as path from 'path';
@@ -9,8 +13,7 @@ import * as p from '@clack/prompts';
 import color from 'picocolors';
 import { getGitRoot } from '../../../core/git.js';
 import { getDevFlowDirectory } from '../../../targets/claude-code/claude-paths.js';
-import { readManifest, writeManifest } from '../../../core/manifest.js';
-import { updateFeature, isFeatureEnabled } from '../../../core/feature-config.js';
+import { readMachineFeature, writeMachineFeature } from '../../../core/feature-switch.js';
 import { getFeaturesDir } from '../../../core/project-paths.js';
 
 async function getWorktreePath(): Promise<string> {
@@ -39,56 +42,35 @@ async function countKnowledgeBases(worktreePath: string): Promise<number> {
 export async function handleToggle(options: { enable?: boolean; disable?: boolean; status?: boolean }): Promise<void> {
   if (!options.enable && !options.disable && !options.status) return;
 
-  const worktreePath = await getWorktreePath();
   const devflowDir = getDevFlowDirectory();
 
-  if (options.enable) {
-    p.intro(color.cyan('Enable Feature Knowledge Bases'));
-
-    // Update feature config (the sole gate — config-only per ADR-001); keeps
-    // every unmanaged key (D-CONFIG-PRESERVE-UNMANAGED)
-    await updateFeature(worktreePath, 'knowledge', true);
-
-    // Update manifest
-    const manifest = await readManifest(devflowDir);
-    if (manifest) {
-      manifest.features.knowledge = true;
-      manifest.updatedAt = new Date().toISOString();
-      await writeManifest(devflowDir, manifest);
-    }
-
-    p.log.success('Feature knowledge bases enabled');
-    p.log.info('Knowledge bases are created automatically when workflows detect documented area changes.');
-    p.outro('');
-
-  } else if (options.disable) {
-    p.intro(color.cyan('Disable Feature Knowledge Bases'));
-
-    // Update feature config (the sole gate — config-only per ADR-001); keeps
-    // every unmanaged key (D-CONFIG-PRESERVE-UNMANAGED)
-    await updateFeature(worktreePath, 'knowledge', false);
-
-    // Update manifest
-    const manifest = await readManifest(devflowDir);
-    if (manifest) {
-      manifest.features.knowledge = false;
-      manifest.updatedAt = new Date().toISOString();
-      await writeManifest(devflowDir, manifest);
-    }
-
-    p.log.success('Feature knowledge bases disabled');
-    p.log.info('Existing knowledge bases preserved. Write-back skipped while disabled.');
-    p.outro('');
-
-  } else {
-    // options.status
+  if (options.status) {
     p.intro(color.cyan('Feature Knowledge Status'));
-
-    const enabled = await isFeatureEnabled(worktreePath, 'knowledge');
-    const kbCount = await countKnowledgeBases(worktreePath);
-
+    const enabled = await readMachineFeature(devflowDir, 'knowledge');
+    const kbCount = await countKnowledgeBases(await getWorktreePath());
     p.log.info(`Status: ${enabled ? color.green('enabled') : color.yellow('disabled')}`);
     p.log.info(`Knowledge bases: ${kbCount}`);
     p.outro('');
+    return;
   }
+
+  const enabled = options.enable === true;
+  p.intro(color.cyan(`${enabled ? 'Enable' : 'Disable'} Feature Knowledge Bases`));
+
+  const recorded = await writeMachineFeature(devflowDir, 'knowledge', enabled);
+  if (!recorded.ok) {
+    p.log.error(`Devflow is not installed on this machine — run ${color.cyan('devflow init')} first`);
+    process.exitCode = 1;
+    p.outro('');
+    return;
+  }
+
+  if (enabled) {
+    p.log.success('Feature knowledge bases enabled in every project');
+    p.log.info('Knowledge bases are created automatically when workflows detect documented area changes.');
+  } else {
+    p.log.success('Feature knowledge bases disabled in every project');
+    p.log.info('Existing knowledge bases preserved. Write-back skipped while disabled.');
+  }
+  p.outro('');
 }

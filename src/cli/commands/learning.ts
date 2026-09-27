@@ -9,8 +9,7 @@ import {
   getDecisionsLogPath,
   getDecisionsLockDir,
 } from '../../core/project-paths.js';
-import { updateFeature, isFeatureEnabled } from '../../core/feature-config.js';
-import { syncManifestFeature } from '../../core/manifest.js';
+import { readMachineFeature, writeMachineFeature } from '../../core/feature-switch.js';
 import { getDevFlowDirectory } from '../../targets/claude-code/claude-paths.js';
 import { getGitRoot } from '../../core/git.js';
 import { sweepLegacyDreamMarkers, drainLearningQueue } from '../../core/learning-queue-cleanup.js';
@@ -35,8 +34,8 @@ export type { DecisionsEntryStatus };
 function printUsage(): void {
   p.intro(color.bgCyan(color.black(' Learning ')));
   p.note(
-    `${color.cyan('devflow learning --enable')}      Enable learning (decision + pitfall detection)\n` +
-    `${color.cyan('devflow learning --disable')}     Disable learning (drains queue)\n` +
+    `${color.cyan('devflow learning --enable')}      Enable learning in every project\n` +
+    `${color.cyan('devflow learning --disable')}     Disable learning in every project (drains this project's queue)\n` +
     `${color.cyan('devflow learning --status')}      Show learning status\n` +
     `${color.cyan('devflow learning --list')}        Show all observations\n` +
     `${color.cyan('devflow learning --configure')}   Configuration wizard\n` +
@@ -61,13 +60,16 @@ async function requireGitRoot(actionSuffix: string): Promise<string | null> {
 }
 
 async function handleStatus(): Promise<void> {
+  // D-FEATURES-MACHINE-WIDE: the one switch is the manifest's, so the state is
+  // the same from every directory; only the observation counts are per-project.
+  const enabled = await readMachineFeature(getDevFlowDirectory(), 'learning');
+  const stateLine = `Learning: ${enabled ? 'enabled' : 'disabled'}`;
   const gitRoot = await getGitRoot();
   if (!gitRoot) {
-    p.log.info('Learning: disabled (not in a git project)');
+    p.log.info(`${stateLine}\nObservations: not in a git project`);
     return;
   }
   const logPath = getDecisionsLogPath(gitRoot);
-  const enabled = await isFeatureEnabled(gitRoot, 'learning');
   const { observations, invalidCount } = await readObservations(logPath);
 
   const decisionObs = observations.filter(o => o.type === 'decision' || o.type === 'pitfall');
@@ -78,7 +80,7 @@ async function handleStatus(): Promise<void> {
   const observing = decisionObs.filter(o => o.status === 'observing');
   const deprecated = decisionObs.filter(o => o.status === 'deprecated');
 
-  const lines: string[] = [`Learning: ${enabled ? 'enabled' : 'disabled'}`];
+  const lines: string[] = [stateLine];
   if (decisionObs.length === 0) {
     lines.push('Observations: none');
   } else {
@@ -280,32 +282,34 @@ async function handleClear(): Promise<void> {
   p.log.success('Decisions log cleared.');
 }
 
-async function handleEnable(): Promise<void> {
-  const gitRoot = await requireGitRoot('configuration not updated');
-  if (!gitRoot) return;
+/**
+ * `--enable` / `--disable`: the machine-wide switch (D-FEATURES-MACHINE-WIDE),
+ * converged exactly as `devflow init --learning / --no-learning` converges it —
+ * the manifest value, and on disable a drained queue in the current project.
+ * Never requires a git root: the switch is not a per-project setting.
+ */
+async function handleToggle(enabled: boolean): Promise<void> {
+  const recorded = await writeMachineFeature(getDevFlowDirectory(), 'learning', enabled);
+  if (!recorded.ok) {
+    p.log.error(`Devflow is not installed on this machine — run ${color.cyan('devflow init')} first`);
+    process.exitCode = 1;
+    return;
+  }
 
-  // Keeps every unmanaged config key (D-CONFIG-PRESERVE-UNMANAGED).
-  await updateFeature(gitRoot, 'learning', true);
-  await syncManifestFeature(getDevFlowDirectory(), 'learning', true);
-  p.log.success('Learning enabled — configuration updated');
-  p.log.info(color.dim('Architectural decisions and pitfalls will be detected from your sessions'));
-}
+  if (enabled) {
+    p.log.success('Learning enabled in every project');
+    p.log.info(color.dim('Architectural decisions and pitfalls will be detected from your sessions'));
+    return;
+  }
 
-async function handleDisable(): Promise<void> {
-  const gitRoot = await requireGitRoot('configuration not updated');
-  if (!gitRoot) return;
-
-  // Keeps every unmanaged config key (D-CONFIG-PRESERVE-UNMANAGED).
-  await updateFeature(gitRoot, 'learning', false);
-
-  // Drain the learning (decisions-detection) queue so stale turns don't process
-  // on re-enable — mirrors memory.ts's drain-on-disable behavior for the
-  // sibling memory queue. Unconditional: a mid-run Learning agent whose claimed
+  // Drain the current project's learning (decisions-detection) queue so stale
+  // turns don't process on re-enable. A mid-run Learning agent whose claimed
   // batch vanishes aborts without changes — the desired outcome of disabling.
-  await drainLearningQueue(gitRoot);
-
-  await syncManifestFeature(getDevFlowDirectory(), 'learning', false);
-  p.log.success('Learning disabled — configuration updated');
+  const gitRoot = await getGitRoot();
+  if (gitRoot) {
+    await drainLearningQueue(gitRoot);
+  }
+  p.log.success('Learning disabled in every project');
 }
 
 // ---------------------------------------------------------------------------
@@ -323,9 +327,9 @@ interface LearningOptions {
 }
 
 export const learningCommand = new Command('learning')
-  .description('Enable or disable learning (decision/pitfall detection + knowledge base)')
-  .option('--enable', 'Enable learning')
-  .option('--disable', 'Disable learning')
+  .description('Enable or disable learning (decision/pitfall detection) in every project')
+  .option('--enable', 'Enable learning in every project')
+  .option('--disable', 'Disable learning in every project')
   .option('--status', 'Show learning status and observation counts')
   .option('--list', 'Show all decision/pitfall observations sorted by confidence')
   .option('--configure', 'Interactive configuration wizard for learning.json')
@@ -366,11 +370,11 @@ export const learningCommand = new Command('learning')
       return;
     }
     if (options.enable) {
-      await handleEnable();
+      await handleToggle(true);
       return;
     }
     if (options.disable) {
-      await handleDisable();
+      await handleToggle(false);
       return;
     }
   });

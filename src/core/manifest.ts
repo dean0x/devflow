@@ -40,8 +40,12 @@ export interface ManifestData {
     ambient: boolean;
     memory: boolean;
     hud: boolean;
+    /** Absent (with no legacy `kb`) reads as true — D-FEATURES-ABSENT-ON in readManifest */
     knowledge: boolean;
-    /** Renamed from decisions — self-healed from features.decisions on read */
+    /**
+     * Renamed from decisions — self-healed from features.decisions on read.
+     * Absent (with no legacy `decisions`) reads as true — D-FEATURES-ABSENT-ON.
+     */
     learning: boolean;
     rules: boolean;
     /**
@@ -143,8 +147,8 @@ function parseManifestFlags(
  * Read and parse the manifest file. Returns null if missing or corrupt.
  *
  * Self-heals the following on-disk inconsistencies (applies ADR-014):
- * - features.kb → features.knowledge rename
- * - features.decisions → features.learning rename
+ * - features.kb → features.knowledge rename (both absent → true, D-FEATURES-ABSENT-ON)
+ * - features.decisions → features.learning rename (both absent → true, D-FEATURES-ABSENT-ON)
  * - features.flags as string[] → FlagsRecord (via migrateLegacyFlagsToRecord)
  * - features.viewMode folded into flags['view-mode'] and stripped from result
  * - features.knownFlags stripped from result (folded into FlagsRecord key-presence)
@@ -175,15 +179,33 @@ export async function readManifest(devflowDir: string): Promise<ManifestData | n
       return null;
     }
 
-    // Self-heal: rename features.kb → features.knowledge on disk
+    // D-FEATURES-ABSENT-ON (a sub-decision of D-FEATURES-MACHINE-WIDE,
+    // src/core/feature-switch.ts): knowledge and learning are machine-wide
+    // switches, and every runtime gate — queue_read_gates in the hooks,
+    // isMachineFeatureOn in the CLI, the knowledge write-back prose gate — reads
+    // an ABSENT key as ON. This reader must agree: init seeds from it and every
+    // syncManifestFeature toggle writes its result back, so a `false` default
+    // here would persist "off" for a feature the runtime is running — a plain
+    // re-init or `devflow hud --enable` on an older manifest silently switching
+    // it off machine-wide. Explicit booleans (and their legacy names) are kept
+    // as they are. memory needs no default: it is in the hard-null set above,
+    // so a manifest without it reads as no prior install and init seeds
+    // FEATURE_DEFAULTS.memory (true).
+    //
+    // Self-heal: rename features.kb → features.knowledge on disk.
+    // Coalesce: features.knowledge wins; fall back to features.kb; default ON.
+    // D-KNOWLEDGE-LEGACY-KB: isMachineFeatureOn applies this exact precedence,
+    // so the legacy key is honoured before the heal lands.
     const knowledge = typeof features.knowledge === 'boolean' ? features.knowledge
       : typeof features.kb === 'boolean' ? features.kb as boolean
-      : false;
-    // Self-heal: rename features.decisions → features.learning on disk
-    // Coalesce: features.learning wins; fall back to features.decisions; default false.
+      : true;
+    // Self-heal: rename features.decisions → features.learning on disk (ADR-011).
+    // Coalesce: features.learning wins; fall back to features.decisions; default ON.
+    // D-LEARNING-LEGACY-DECISIONS: isMachineFeatureOn and queue_read_gates apply
+    // this exact precedence, so the legacy key is honoured before the heal lands.
     const learning = typeof features.learning === 'boolean' ? features.learning
       : typeof features.decisions === 'boolean' ? features.decisions as boolean
-      : false;
+      : true;
 
     // Self-heal: non-string-array or absent knownFlags/knownPlugins → undefined (never partial/garbage)
     const asStringArray = (val: unknown): string[] | undefined =>

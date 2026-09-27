@@ -43,7 +43,7 @@ export function getDocsDir(projectRoot: string): string {
 // Feature config (neutral .devflow root — not inside learning/)
 // ---------------------------------------------------------------------------
 
-/** .devflow/config.json — feature toggles {memory, learning, knowledge} */
+/** .devflow/config.json — per-repo facts {reviewPublication, tracker override} */
 export function getFeatureConfigPath(projectRoot: string): string {
   return path.join(projectRoot, '.devflow', 'config.json');
 }

@@ -32,7 +32,7 @@ import { LEGACY_SKILL_NAMES } from '../../targets/claude-code/legacy.js';
 import { detectPlatform, detectShell, getProfilePath, getSafeDeleteInfo, hasSafeDelete } from '../../core/safe-delete.js';
 import { generateSafeDeleteBlock, installToProfile, removeFromProfile, getInstalledVersion, SAFE_DELETE_BLOCK_VERSION } from '../../core/safe-delete-install.js';
 import { addAmbientHook, removeAmbientHook } from './ambient.js';
-import { addMemoryHooks, removeMemoryHooks } from './memory.js';
+import { convergeMemoryHooks, drainMemoryQueue } from './memory.js';
 import { addCaptureHooks, removeCaptureHooks } from './capture.js';
 import { removeDreamHook } from './legacy-hooks.js';
 import { addProxyHooks, removeProxyHooks, applyProxyEnv, stripProxyEnv, runProxyPreflight, buildRealPreflightDeps } from './proxy.js';
@@ -48,7 +48,9 @@ import { readManifest, writeManifest, resolvePluginList, detectUpgrade, type Man
 import { convergeFlagsIntoSettings, countActiveFlags, readViewMode, type FlagsRecord } from '../../core/flags.js';
 import { addContextHook, removeContextHook, hasContextHook } from './context.js';
 import { writeFileAtomicExclusive } from '../../core/fs-atomic.js';
-import { writeManagedConfig, readConfigIfPresent, type FeatureConfig } from '../../core/feature-config.js';
+import { writeManagedConfig, readConfigIfPresent, DEFAULT_CONFIG, type FeatureConfig } from '../../core/feature-config.js';
+import { drainLearningQueue } from '../../core/learning-queue-cleanup.js';
+import { removeManagedDenyList, describeManagedDenyRemoval } from './security.js';
 import { resolveInitSeed, applyCliToggles, resolveResetGatedInputs } from './init-seed.js';
 import { parseFrameworkList, normalizeFrameworks, type ComplianceFeatureState } from '../../core/compliance.js';
 import {
@@ -85,7 +87,6 @@ import {
   attributionSeedFrom,
 } from './attribution-prompts.js';
 import { convergeFromManifest } from '../../targets/claude-code/compliance-install.js';
-import { getPendingTurnsPath, getPendingTurnsProcessingPath } from '../../core/project-paths.js';
 import * as os from 'os';
 
 // Re-export pure functions for tests (canonical source is post-install.ts)
@@ -558,6 +559,84 @@ interface InitOptions {
   reset?: boolean;
 }
 
+/** The queue drains `drainDisabledFeatureQueues` performs — injected for tests. */
+export interface DisabledQueueDrainIO {
+  drainMemoryQueue(projectRoot: string): Promise<void>;
+  drainLearningQueue(gitRoot: string): Promise<void>;
+}
+
+/**
+ * Drain this repo's memory and learning queues for each feature init switched
+ * off, so stale turns are not processed on a future re-enable — the same drains
+ * `devflow memory --disable` and `devflow learning --disable` perform. Other
+ * repos' queues are inert: every gate reads the machine-wide switch, so nothing
+ * appends to or processes them while the feature is off.
+ *
+ * D-INIT-DRAIN-AFTER-SWITCH: the drain runs only AFTER the manifest holding the
+ * switch is persisted (`manifestWritten`), the order the standalone toggles use
+ * (write the switch, then drain). The capture hooks read the manifest on every
+ * turn, so draining first left a window — the whole install — in which a
+ * concurrent session, still reading the old "on", appended turns that then
+ * survived the disable. When the manifest write failed the feature is still on
+ * everywhere, so its queue is live and is left alone.
+ */
+export async function drainDisabledFeatureQueues(
+  opts: { gitRoot: string | null; memoryEnabled: boolean; learningEnabled: boolean; manifestWritten: boolean },
+  io: DisabledQueueDrainIO = { drainMemoryQueue, drainLearningQueue },
+): Promise<void> {
+  if (!opts.manifestWritten || opts.gitRoot === null) return;
+  if (!opts.memoryEnabled) await io.drainMemoryQueue(opts.gitRoot);
+  if (!opts.learningEnabled) await io.drainLearningQueue(opts.gitRoot);
+}
+
+/**
+ * The manifest `devflow init --hud-only` writes. Pure — never mutates `existing`.
+ *
+ * D-HUD-ONLY-PRESERVE: over a prior install, --hud-only installs the HUD and
+ * nothing else, so the manifest keeps every recorded value — plugins, version,
+ * scope, installedAt and every feature — and only `features.hud` turns on. The
+ * earlier shape rewrote the whole record as a HUD-only fresh install (ambient,
+ * memory, learning, knowledge, rules and proxy all `false`, plugins `[]`) while
+ * leaving those features' artifacts on disk: the record stopped describing the
+ * machine, the next re-init seeded every feature off (ADR-014), and with
+ * memory/learning/knowledge switched by the manifest alone
+ * (D-FEATURES-MACHINE-WIDE) a HUD install would have really disabled them
+ * everywhere. `version` is kept too: --hud-only reinstalls no plugin, and a
+ * bumped version would make the next init skip the upgrade it still owes.
+ *
+ * With no prior manifest the result is the fresh HUD-only record: every other
+ * feature off, which is what is installed.
+ */
+export function buildHudOnlyManifest(
+  existing: ManifestData | null,
+  version: string,
+  scope: 'user' | 'local',
+  now: string,
+): ManifestData {
+  if (existing !== null) {
+    return {
+      ...existing,
+      features: { ...existing.features, hud: true },
+      updatedAt: now,
+    };
+  }
+  return {
+    version,
+    plugins: [],
+    scope,
+    features: {
+      ambient: false, memory: false, hud: true, knowledge: false,
+      learning: false, rules: false, flags: {}, proxy: false,
+      compliance: { enabled: false, frameworks: [] },
+      // The exported default, not a literal — the one constant every other
+      // module reads, so a moved default moves here too.
+      tracker: { provider: DEFAULT_TRACKER_PROVIDER },
+    },
+    installedAt: now,
+    updatedAt: now,
+  };
+}
+
 export const initCommand = new Command('init')
   .description('Initialize Devflow for Claude Code')
   .option('--scope <type>', 'Installation scope: user or local (project-only)', /^(user|local)$/i)
@@ -662,33 +741,18 @@ export const initCommand = new Command('init')
         process.exit(1);
       }
 
-      // Read existing manifest to preserve user-set compliance state (disable-keeps-frameworks
-      // contract: the hud-only path must not erase frameworks the user previously selected).
+      // Read the existing manifest: over a prior install, --hud-only touches only
+      // the HUD (D-HUD-ONLY-PRESERVE in buildHudOnlyManifest).
       let existingHudManifest: ManifestData | null = null;
       try {
         existingHudManifest = await readManifest(devflowDir);
       } catch { /* absent on fresh install — existingHudManifest stays null */ }
 
-      // Write minimal manifest
-      const now = new Date().toISOString();
       try {
-        await writeManifest(devflowDir, {
-          version,
-          plugins: [],
-          scope,
-          features: {
-            ambient: false, memory: false, hud: true, knowledge: false,
-            learning: false, rules: false, flags: {}, proxy: false,
-            compliance: existingHudManifest?.features.compliance ?? { enabled: false, frameworks: [] },
-            // Preserve the user's tracker selection: a HUD-only install must not
-            // silently reset a Jira/Linear user back to github. The fallback is
-            // the exported default, not a literal — the one constant every other
-            // module reads, so a moved default moves here too.
-            tracker: existingHudManifest?.features.tracker ?? { provider: DEFAULT_TRACKER_PROVIDER },
-          },
-          installedAt: now,
-          updatedAt: now,
-        });
+        await writeManifest(
+          devflowDir,
+          buildHudOnlyManifest(existingHudManifest, version, scope, new Date().toISOString()),
+        );
       } catch { /* non-fatal */ }
 
       p.log.success('HUD installed');
@@ -728,7 +792,7 @@ export const initCommand = new Command('init')
     const { seedManifest, seedConfig, seedSettings } = resolveResetGatedInputs(
       !!options.reset, existingManifest, earlyProjectConfig, earlySettingsJson ?? '',
     );
-    const seed = resolveInitSeed(seedManifest, seedConfig, seedSettings, DEVFLOW_PLUGINS);
+    const seed = resolveInitSeed(seedManifest, seedSettings, DEVFLOW_PLUGINS);
 
     // Early validation: parse --compliance <list> at the boundary before any prompts (PF-parse-at-boundary).
     // options.compliance: string → --compliance <list>; false → --no-compliance; undefined → not passed
@@ -1176,7 +1240,8 @@ export const initCommand = new Command('init')
           'compaction. Clear your session at any point and resume right\n' +
           'where you left off.\n\n' +
           'Runs a background agent on session stop that consumes additional\n' +
-          'tokens. Consider skipping if token usage is a concern.',
+          'tokens. Consider skipping if token usage is a concern.\n' +
+          'Applies to every project.',
           'Working Memory',
         );
         const memoryChoice = await p.confirm({
@@ -1215,7 +1280,8 @@ export const initCommand = new Command('init')
         p.note(
           'Per-feature knowledge bases capture cross-cutting patterns,\n' +
           'conventions, and gotchas. Created and updated automatically\n' +
-          'when workflows touch a documented area (write-through model).',
+          'when workflows touch a documented area (write-through model).\n' +
+          'Applies to every project.',
           'Feature Knowledge Bases',
         );
         const knowledgeChoice = await p.confirm({
@@ -1235,7 +1301,7 @@ export const initCommand = new Command('init')
         p.note(
           'Detects architectural decisions and pitfalls from your session\n' +
           'dialogs. Runs a background agent on session stop that consumes\n' +
-          'additional tokens.',
+          'additional tokens. Applies to every project.',
           'Learning (Decision/Pitfall Tracking)',
         );
         const learningChoice = await p.confirm({
@@ -1572,6 +1638,10 @@ export const initCommand = new Command('init')
     }
 
     // Detect current deny list state in user settings (read-only; write happens in security step)
+    // Whether the managed settings file holds a Devflow deny entry — the security
+    // step's `none` branch removes it only then (and only then stops the spinner
+    // for a possible sudo prompt).
+    let managedDenyDetected = false;
     {
       const userSettingsJson: string | null = earlySettingsJson;
 
@@ -1585,6 +1655,7 @@ export const initCommand = new Command('init')
       } catch { /* absent or unsupported platform */ }
 
       const detected = detectDenyState(userSettingsJson, managedExists, managedContentJson);
+      managedDenyDetected = detected.managed;
 
       const flagValue = options.security as SecurityMode | undefined;
       const manifestMode = existingManifest?.features.security as SecurityMode | undefined;
@@ -2030,19 +2101,19 @@ export const initCommand = new Command('init')
 
       // Capture hooks — always-on (like the context hook below), remove-then-add for
       // upgrade safety. Queue-append only (capture-prompt/capture-turn/capture-question);
-      // each script gates its own per-queue write internally via feature config, so there
-      // is no CLI-level enable/disable toggle here. MUST run before addMemoryHooks below
+      // each script gates its own per-queue write on the machine-wide switch, so there
+      // is no CLI-level enable/disable toggle here. MUST run before convergeMemoryHooks below
       // so capture-turn lands before memory-worker in the Stop array (AC-C2 ordering:
       // append-before-spawn).
       const cleanedForCapture = removeCaptureHooks(content);
       content = addCaptureHooks(cleanedForCapture, devflowDir);
 
-      // Memory hooks — always remove-then-add to upgrade hook format (e.g., .sh → run-hook).
-      // Three hooks: Stop (memory-worker), SessionStart (session-start-memory), PreCompact.
-      // Learning agent (spawned via session-start-context directive) handles decision/pitfall
-      // detection. Knowledge is handled in-command via write-through (knowledge_writeback MDS partial).
-      const cleaned = removeMemoryHooks(content);
-      content = memoryEnabled ? addMemoryHooks(cleaned, devflowDir) : cleaned;
+      // Memory hooks — Stop (memory-worker), SessionStart (session-start-memory),
+      // PreCompact — through the same transform `devflow memory --enable/--disable`
+      // uses (D-FEATURES-MACHINE-WIDE). Learning agent (spawned via
+      // session-start-context directive) handles decision/pitfall detection.
+      // Knowledge is handled in-command via write-through (knowledge_writeback MDS partial).
+      content = convergeMemoryHooks(content, memoryEnabled, devflowDir);
 
       // HUD statusLine
       content = hudEnabled
@@ -2121,32 +2192,21 @@ export const initCommand = new Command('init')
       );
     }
 
-    // Write .devflow/config.json to manage per-feature enable/disable at runtime.
-    // A managed read-modify-write, not a whole-file write: init owns only these four
-    // keys, and every other key in the file — the hand-written per-repo `tracker`
+    // Write .devflow/config.json — facts about this repo, never a feature switch
+    // (memory/learning/knowledge are the manifest's alone, D-FEATURES-MACHINE-WIDE;
+    // the managed write drops their retired per-repo keys). A managed
+    // read-modify-write, not a whole-file write: init owns only reviewPublication,
+    // and every other key in the file — the hand-written per-repo `tracker`
     // override first among them — is carried from disk, under --reset too
-    // (D-CONFIG-PRESERVE-UNMANAGED in feature-config.ts, avoids PF-071). init is never
-    // concurrent with the toggle commands; see D1 in feature-config.ts.
+    // (D-CONFIG-PRESERVE-UNMANAGED in feature-config.ts, avoids PF-071).
     if (gitRoot) {
       await writeManagedConfig(gitRoot, {
-        memory: memoryEnabled,
-        learning: learningEnabled,
-        knowledge: knowledgeEnabled,
         // reviewPublication has no prompt, so it is carried over from the
         // reset-gated snapshot rather than re-read from disk: seedConfig is null
         // under --reset, which is what collapses the field back to 'auto' with
         // every other feature (PF-015 — read the post-gate binding, not the file).
-        reviewPublication: seedConfig?.reviewPublication ?? 'auto',
+        reviewPublication: seedConfig?.reviewPublication ?? DEFAULT_CONFIG.reviewPublication,
       });
-
-      // Drain orphaned queue files when memory is disabled so stale turns
-      // don't process on a future re-enable. Mirrors memory.ts --disable drain.
-      if (!memoryEnabled) {
-        await Promise.all([
-          fs.unlink(getPendingTurnsPath(gitRoot)).catch((e: NodeJS.ErrnoException) => { if (e.code !== 'ENOENT') throw e; }),
-          fs.unlink(getPendingTurnsProcessingPath(gitRoot)).catch((e: NodeJS.ErrnoException) => { if (e.code !== 'ENOENT') throw e; }),
-        ]);
-      }
     }
 
     // Configure HUD
@@ -2256,10 +2316,23 @@ export const initCommand = new Command('init')
           }
         }
       } else if (securityMode === 'none') {
-        // None: strip Devflow deny entries from user settings.
-        // Uses the canonical helper (atomic temp+rename; ENOENT-safe; only-write-if-changed).
+        // None: strip Devflow deny entries from EVERY location, as
+        // `devflow security --disable` does. User settings first, via the
+        // canonical helper (atomic temp+rename; ENOENT-safe; only-write-if-changed).
         const stripResult = await stripUserSecurityDenyList(userSettingsPath);
         if (stripResult && verbose) p.log.info(`Security deny list removed (${stripResult.removed.length} entries stripped)`);
+        // Then managed settings, through the one removal security.ts also uses.
+        // Before this, `none` left the managed file in place: the deny list kept
+        // applying — at the highest precedence — while the manifest said `none`.
+        // A permission failure is reported, never thrown (the install already
+        // succeeded; the manifest records the choice and a re-run can retry).
+        if (managedDenyDetected) {
+          s.stop('Removing managed security settings (may prompt for sudo password)...');
+          const managedMsg = describeManagedDenyRemoval(await removeManagedDenyList(rootDir, verbose));
+          if (managedMsg.level === 'warn') p.log.warn(managedMsg.text);
+          else if (verbose) p.log.info(managedMsg.text);
+          s.start('Finalizing installation...');
+        }
       } else {
         // Exhaustive guard — if TypeScript reaches here, a new SecurityMode variant was added
         // without a matching branch. avoids PF-009 (stale references after rename/refactor).
@@ -2441,6 +2514,14 @@ export const initCommand = new Command('init')
       if (msg.level === 'warn') p.log.warn(msg.text);
       else p.log.info(msg.text);
     }
+
+    // Only now that the machine-wide switch is on disk (D-INIT-DRAIN-AFTER-SWITCH).
+    await drainDisabledFeatureQueues({
+      gitRoot,
+      memoryEnabled,
+      learningEnabled,
+      manifestWritten: trackerLifecycle.manifestWritten,
+    });
 
     // Name the active provider and what the selection moved. The reference
     // counts come from the install report rather than being recomputed: the

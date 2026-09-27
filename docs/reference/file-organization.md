@@ -210,7 +210,7 @@ Included settings:
 
 ## Capture + Learning Hooks
 
-A capture/spawn split across always-on shell-script hooks. Queue-append (`capture-prompt`/`capture-turn`/`capture-question`) is unconditional; each queue write is independently gated per-feature by feature config. Memory refresh is toggleable via `devflow memory --enable/--disable/--status` or `devflow init --memory/--no-memory`; learning detection/curation via `devflow learning --enable/--disable/--status` or `devflow init --learning/--no-learning`.
+A capture/spawn split across always-on shell-script hooks. Queue-append (`capture-prompt`/`capture-turn`/`capture-question`) is unconditional; each queue write is independently gated by its machine-wide switch in `~/.devflow/manifest.json` (`features.memory` / `features.learning`; a missing manifest or key means on — D-FEATURES-MACHINE-WIDE). Memory refresh is toggleable via `devflow memory --enable/--disable/--status` or `devflow init --memory/--no-memory`; learning detection/curation via `devflow learning --enable/--disable/--status` or `devflow init --learning/--no-learning`.
 
 | Hook / Worker | Event | Purpose |
 |---------------|-------|---------|
@@ -227,7 +227,7 @@ A capture/spawn split across always-on shell-script hooks. Queue-append (`captur
 
 **Flow**: User sends prompt → `capture-prompt` appends the user turn to both queues → session ends → `capture-turn` appends the assistant turn to both queues, then `memory-worker` spawns `background-memory-update` (if the 120s throttle has expired) which drains the queue, calls `claude -p` with the prompt on stdin, and writes the result via staged CAS to `WORKING-MEMORY.md`. On `/clear` or new session → `session-start-memory` injects the already-written `WORKING-MEMORY.md` as `additionalContext` (3-state git-reconciled header); `session-start-context` injects the decisions TL;DR and, when the learning queue has pending turns, the Learning maintenance directive — the main model silently spawns the Learning agent in the background, which claims the queue atomically, performs decision/pitfall detection and curation directly against the data files, deletes the claimed batch as its final act, and reports a 1–3 line summary.
 
-`devflow memory --disable` disables Working Memory (hooks stay registered; queue writes for memory are skipped). Use `devflow memory --clear` to clean up pending memory queue files across all projects, or `devflow learning --clear`/`--reset` for the learning queue and learning state.
+`devflow memory --disable` writes `features.memory: false` to `~/.devflow/manifest.json`, removes the three memory hooks and drains the current repo's memory queue; the always-on capture hooks stay registered (shared with learning) and stop appending to the memory queue. Use `devflow memory --clear` to clean up pending memory queue files across all projects, or `devflow learning --clear`/`--reset` for the learning queue and learning state.
 
 Hooks auto-create `.devflow/` on first run — no manual setup needed per project.
 
