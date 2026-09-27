@@ -5,6 +5,8 @@ export default defineConfig({
     root: '.',
     include: ['tests/**/*.test.ts'],
     exclude: ['tests/integration/**'],
+    // D-TEST-HOME-ISOLATION: a per-file temp HOME with DEVFLOW_DIR/CLAUDE_* unset (PF-060).
+    setupFiles: ['tests/setup/isolate-env.ts'],
     globals: false,
     environment: 'node',
     restoreMocks: true,

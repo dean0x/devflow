@@ -42,7 +42,7 @@ import { execSync, execFileSync, spawnSync } from 'child_process';
 import { promises as fs } from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import { requireBuiltCli } from '../helpers.js';
+import { requireBuiltCli, sandboxEnv } from '../helpers.js';
 
 const ROOT = path.resolve(import.meta.dirname, '../..');
 
@@ -99,26 +99,26 @@ function runSync(
 
 /**
  * Run `devflow init --recommended` in a subprocess with a fully isolated HOME.
- * Uses spawnSync rather than execSync so we can pass a clean env with HOME overridden
- * without inheriting the current session's ~/.devflow state.
+ *
+ * The integration suite runs under the developer's real HOME (its live-`claude`
+ * test needs the real ~/.claude), so this is the one place the suite's `init`
+ * spawn is sandboxed, and it is sandboxed by construction (PF-060): the env comes
+ * from `sandboxEnv`, an allowlist that throws unless HOME is a temp dir and never
+ * forwards an inherited DEVFLOW_DIR / CLAUDE_CODE_DIR / CLAUDE_CONFIG_DIR. The
+ * resolved HOME is echoed before the spawn so the run is checkable in the log.
  */
 function runDevflowInit(opts: {
   cliPath: string;
   cwd: string;
   home: string;
 }): { exitCode: number; stdout: string; stderr: string } {
+  const env = sandboxEnv(opts.home);
+  console.log(`[PF-060] devflow init HOME=${env.HOME}`);
   const result = spawnSync(process.execPath, [opts.cliPath, 'init', '--recommended'], {
     cwd: opts.cwd,
     encoding: 'utf-8',
     timeout: 90_000,
-    env: {
-      ...process.env,
-      HOME: opts.home,
-      DEVFLOW_DIR: path.join(opts.home, '.devflow'),
-      FORCE_COLOR: '0',
-      NO_COLOR: '1',
-      CI: '1',
-    },
+    env,
   });
   return {
     exitCode: result.status ?? 1,
