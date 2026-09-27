@@ -55,15 +55,8 @@ jobs:
       - run: npm run build
       - name: Shell-hook suites and hook matrix under bash 3.2
         run: |
-          suites="tests/shell-hooks.test.ts tests/shell-hooks-helpers.test.ts tests/shell-hooks-tracker.test.ts tests/capture-hooks.test.ts tests/queue-append.test.ts"
-          # The installed-hook matrix (tests/install-snapshot.test.ts) lands in the
-          # second half of #388; until it exists there is no file to name, and
-          # naming a missing file makes vitest fail with "No test files found".
-          if [ -f tests/install-snapshot.test.ts ]; then
-            suites="$suites tests/install-snapshot.test.ts"
-          else
-            echo "::notice::tests/install-snapshot.test.ts not present yet; running the shell-hook suites only"
-          fi
+          # tests/install-snapshot.test.ts carries the installed-hook matrix.
+          suites="tests/shell-hooks.test.ts tests/shell-hooks-helpers.test.ts tests/shell-hooks-tracker.test.ts tests/capture-hooks.test.ts tests/queue-append.test.ts tests/install-snapshot.test.ts"
           # One file at a time: these suites spawn hundreds of hook processes, and in
           # parallel on a 3-core runner the load alone times tests out (5 s default).
           npx vitest run --no-file-parallelism $suites
