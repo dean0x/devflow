@@ -81,6 +81,12 @@ to `_common.mds` cost 1.2 s in total. A rule that belongs here by subject and
 would be the tenth define belongs in `_common.mds` with its audience stated at
 the define, and this paragraph is the reason.
 
+NOTHING MORE GOES INTO THIS MODULE (PF-073). Anything further that wants
+hoisting goes to `_common.mds`, or this module shrinks first; and every importer
+reaches it by ALIAS (`as mcp`), never by a selective import, whose deep copy per
+importing define is the same cliff. `tests/build-mds-compile-time.test.ts` holds
+the per-module compile budget either breach would blow.
+
 @define posting_gate_head(scope, compose_tail = ""):
 ### Posting gate
 
