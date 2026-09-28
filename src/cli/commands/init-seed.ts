@@ -173,7 +173,7 @@ export function resolveSeedFlags(
  *   - Otherwise → split + adopt newly-added non-optional selectable plugins
  *     whose name is ∉ knownPlugins and ∉ manifestPlugins
  *
- * Always-installed plugins (devflow-core-skills, devflow-ambient) are filtered
+ * The plugins init adds itself (devflow-core-skills, devflow-ambient) are filtered
  * out by partitionSelectablePlugins and never appear in the returned buckets.
  */
 export function resolveSeedPlugins(

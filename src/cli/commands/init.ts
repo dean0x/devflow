@@ -946,7 +946,8 @@ export const initCommand = new Command('init')
     // When no --plugin flag is given and a manifest exists, the seed carries the prior
     // selection (existing plugins ∪ new non-optional plugins not yet in knownPlugins).
     // Fresh non-interactive installs (no manifest) fall through to the default path
-    // in pluginsToInstall which installs all non-optional plugins.
+    // in resolvePluginsToInstall: every non-optional plugin, with devflow-ambient
+    // following the ambient switch (D-AMBIENT-FOLLOWS-SWITCH).
     if (!options.plugin && !process.stdin.isTTY && seedManifest !== null) {
       selectedPlugins = [...seed.workflowPlugins, ...seed.languagePlugins];
     }
