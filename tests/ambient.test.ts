@@ -560,7 +560,7 @@ describe('hasAmbientHook', () => {
  * D-AMBIENT-EXACT-HOOK: a hook is devflow's ambient hook only when its command ends
  * in `/scripts/hooks/run-hook <marker>` (or the pre-run-hook `ambient-prompt.sh`),
  * under any directory. A user's hook that merely contains the word is not, and
- * filterHookEntries removes single hooks, dropping a matcher group only when it
+ * removeHooks removes single hooks, dropping a matcher group only when it
  * ends up empty — so a user's siblings in a shared group survive.
  */
 describe('ambient hook ownership is exact (TP-25, AC-21)', () => {

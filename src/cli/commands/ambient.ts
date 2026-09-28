@@ -6,29 +6,32 @@ import color from 'picocolors';
 import { getClaudeDirectory, getDevFlowDirectory } from '../../targets/claude-code/claude-paths.js';
 import { syncManifestFeature } from '../../core/manifest.js';
 import { writeFileAtomicExclusive } from '../../core/fs-atomic.js';
-import type { HookEntry, HookMatcher, Settings } from '../../targets/claude-code/hooks.js';
+import {
+  HOOKS_DIR_SUFFIX,
+  endsWithAny,
+  ensureHook,
+  hasHook,
+  removeHooks,
+  runHookCommand,
+  runHookSuffix,
+  type HookPredicate,
+  type Settings,
+} from '../../targets/claude-code/hooks.js';
 
 const PREAMBLE_HOOK_MARKER = 'preamble';
 /** SessionStart orchestrator charter hook — presence-gated by ambient toggle */
 const ORCHESTRATOR_HOOK_MARKER = 'session-start-orchestrator';
 
-/** The directory, relative to a devflow root, that holds every hook devflow registers. */
-const HOOKS_DIR_SUFFIX = '/scripts/hooks/';
-
-/** The command ending devflow writes for a `run-hook <marker>` hook. */
-function runHookSuffix(marker: string): string {
-  return `${HOOKS_DIR_SUFFIX}run-hook ${marker}`;
-}
-
 /**
  * The command endings of each ambient hook devflow has ever registered.
  *
- * D-AMBIENT-EXACT-HOOK: a hook is devflow's when its command ENDS in one of these,
- * under any directory — so installs made under a custom or repo-local devflow
- * directory are still recognised — and never because it merely contains a marker
- * word: a user's `~/bin/preamble-logger.sh` or `echo preamble` is theirs (applies
- * ADR-024). The legacy forms are the pre-preamble `ambient-prompt` hook (first a
- * bare `ambient-prompt.sh`, then through `run-hook`) and the retired
+ * D-AMBIENT-EXACT-HOOK — the ambient instance of D-EXACT-HOOK-OWNER (hooks.ts): a
+ * hook is devflow's when its command ENDS in one of these, under any directory — so
+ * installs made under a custom or repo-local devflow directory are still recognised —
+ * and never because it merely contains a marker word: a user's
+ * `~/bin/preamble-logger.sh` or `echo preamble` is theirs (applies ADR-024). The
+ * legacy forms are the pre-preamble `ambient-prompt` hook (first a bare
+ * `ambient-prompt.sh`, then through `run-hook`) and the retired
  * `session-start-classification` hook, both still swept on enable and disable.
  */
 const AMBIENT_HOOK_SUFFIXES = {
@@ -37,17 +40,6 @@ const AMBIENT_HOOK_SUFFIXES = {
   classification: [runHookSuffix('session-start-classification')],
   orchestrator: [runHookSuffix(ORCHESTRATOR_HOOK_MARKER)],
 } as const satisfies Record<string, readonly string[]>;
-
-/** A predicate over one hook entry of a matcher group. */
-type HookPredicate = (hook: HookEntry) => boolean;
-
-/** A predicate matching a hook whose command ends in any of `suffixes` (backslashes read as slashes). */
-function endsWithAny(suffixes: readonly string[]): HookPredicate {
-  return (hook) => {
-    const command = (hook.command ?? '').trim().replace(/\\/g, '/');
-    return suffixes.some((suffix) => command.endsWith(suffix));
-  };
-}
 
 const isPreamble = endsWithAny(AMBIENT_HOOK_SUFFIXES.preamble);
 const isLegacy = endsWithAny(AMBIENT_HOOK_SUFFIXES.legacyPrompt);
@@ -66,62 +58,6 @@ const isOrchestrator = endsWithAny(AMBIENT_HOOK_SUFFIXES.orchestrator);
 export const COMMANDS_RULE_PATH = path.join(getClaudeDirectory(), 'rules', 'devflow', 'commands.md');
 
 /**
- * Remove every hook matching `shouldRemove` from one event's matcher groups.
- * Returns true if any hook was removed.
- *
- * D-AMBIENT-EXACT-HOOK: removal is per HOOK, not per matcher group — a group
- * keeps the user's sibling hooks and is dropped only when nothing is left in it.
- * Empty event arrays and an empty `hooks` object are cleaned up.
- */
-function filterHookEntries(
-  settings: Settings,
-  eventName: string,
-  shouldRemove: HookPredicate,
-): boolean {
-  const matchers = settings.hooks?.[eventName];
-  if (!settings.hooks || !matchers) return false;
-
-  let removed = false;
-  const kept: HookMatcher[] = [];
-  for (const matcher of matchers) {
-    const remaining = matcher.hooks.filter((hook) => !shouldRemove(hook));
-    if (remaining.length === matcher.hooks.length) {
-      kept.push(matcher);
-      continue;
-    }
-    removed = true;
-    if (remaining.length > 0) kept.push({ ...matcher, hooks: remaining });
-  }
-  if (!removed) return false;
-
-  if (kept.length === 0) {
-    delete settings.hooks[eventName];
-  } else {
-    settings.hooks[eventName] = kept;
-  }
-  if (Object.keys(settings.hooks).length === 0) {
-    delete settings.hooks;
-  }
-  return true;
-}
-
-/** Whether any hook registered for `eventName` matches `isOurs`. */
-function hasHook(settings: Settings, eventName: string, isOurs: HookPredicate): boolean {
-  return settings.hooks?.[eventName]?.some((m) => m.hooks.some(isOurs)) ?? false;
-}
-
-/** Add a hook entry for an event unless a matching hook is already registered. Returns true when an entry was added. */
-function ensureHook(settings: Settings, eventName: string, isOurs: HookPredicate, entry: HookMatcher): boolean {
-  if (hasHook(settings, eventName, isOurs)) {
-    return false;
-  }
-  settings.hooks ??= {};
-  settings.hooks[eventName] ??= [];
-  settings.hooks[eventName].push(entry);
-  return true;
-}
-
-/**
  * Remove the legacy commands awareness rule file left by prior installs.
  * Idempotent — no-op if the file does not exist.
  * Fail-safe: swallows ALL errors (ENOENT, EACCES, EPERM, EROFS, etc.).
@@ -136,11 +72,6 @@ export async function removeLegacyCommandsRule(): Promise<void> {
     // ENOENT = already gone (idempotent); EACCES/EPERM/EROFS = unwritable
     // filesystem. Neither should abort the caller's primary operation.
   }
-}
-
-/** The command devflow registers for the `run-hook <marker>` hook under `devflowDir`. */
-function runHookCommand(devflowDir: string, marker: string): string {
-  return `${path.join(devflowDir, 'scripts', 'hooks', 'run-hook')} ${marker}`;
 }
 
 /**
@@ -169,12 +100,12 @@ export async function addAmbientHook(settingsJson: string, devflowDir: string): 
   const preambleCommand = runHookCommand(devflowDir, PREAMBLE_HOOK_MARKER);
   const orchestratorCommand = runHookCommand(devflowDir, ORCHESTRATOR_HOOK_MARKER);
 
-  const removedLegacy = filterHookEntries(settings, 'UserPromptSubmit', isLegacy);
+  const removedLegacy = removeHooks(settings, 'UserPromptSubmit', isLegacy);
   // Sweep stale classification hook from prior installs — symmetric with removeAmbientHook
-  const removedClassification = filterHookEntries(settings, 'SessionStart', isClassification);
+  const removedClassification = removeHooks(settings, 'SessionStart', isClassification);
   const removedMisdirected = [
-    filterHookEntries(settings, 'UserPromptSubmit', isMisdirected(isPreamble, preambleCommand)),
-    filterHookEntries(settings, 'SessionStart', isMisdirected(isOrchestrator, orchestratorCommand)),
+    removeHooks(settings, 'UserPromptSubmit', isMisdirected(isPreamble, preambleCommand)),
+    removeHooks(settings, 'SessionStart', isMisdirected(isOrchestrator, orchestratorCommand)),
   ].some(Boolean);
   const addedPreamble = ensureHook(
     settings, 'UserPromptSubmit', isPreamble,
@@ -210,10 +141,10 @@ export async function removeAmbientHook(
   options: { purgeLegacyRule?: boolean } = {},
 ): Promise<string> {
   const settings: Settings = JSON.parse(settingsJson);
-  const removedPrompt = filterHookEntries(settings, 'UserPromptSubmit', isAmbient);
-  const removedOrchestrator = filterHookEntries(settings, 'SessionStart', isOrchestrator);
+  const removedPrompt = removeHooks(settings, 'UserPromptSubmit', isAmbient);
+  const removedOrchestrator = removeHooks(settings, 'SessionStart', isOrchestrator);
   // Clean up stale classification hooks from previous installs (no longer registered)
-  const removedClassification = filterHookEntries(settings, 'SessionStart', isClassification);
+  const removedClassification = removeHooks(settings, 'SessionStart', isClassification);
 
   // Purge legacy commands rule (runs before early-return so stale files are always removed)
   if (options.purgeLegacyRule !== false) await removeLegacyCommandsRule();
