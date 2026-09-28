@@ -802,6 +802,31 @@ export function collectTrackerNamingLines(content: string): string[] {
   return content.split('\n').filter(line => line.includes('references/tracker/'))
 }
 
+/** One compiled artifact, labelled by its path under the build root. */
+export interface EmittedFile {
+  name: string
+  content: string
+}
+
+/**
+ * Named collector: every `\{` / `\}` in emitted text — a legacy escape that leaked.
+ *
+ * Since `@mdscript/mds` 0.4 a single-brace `{…}` is literal text and there is no
+ * backslash escape, so either half of a 0.2.0-era `\{…\}` ships its backslash with
+ * a clean build (PF-081). Shared by the compiled-tree guard in
+ * `tests/build-mds.test.ts` and the installed-package guard in
+ * `tests/integration/pack-install.test.ts`, so both apply one definition of a leak.
+ */
+export function collectBackslashBraceLeaks(files: readonly EmittedFile[]): string[] {
+  const leaks: string[] = []
+  for (const f of files) {
+    f.content.split('\n').forEach((line, i) => {
+      if (line.includes('\\{') || line.includes('\\}')) leaks.push(`${f.name}:${i + 1}: ${line.trim().slice(0, 120)}`)
+    })
+  }
+  return leaks
+}
+
 // ── Per-item fetch collector ([DR-08]) ───────────────────────────────────────
 //
 // §14.4 fixes `fetch_batch` as a SINGLE-QUERY capability for every provider, and

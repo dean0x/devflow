@@ -21,6 +21,7 @@ import { promises as fs } from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { getAllAgentNames } from '../../src/core/plugins.js';
+import { collectBackslashBraceLeaks } from '../helpers.js';
 
 const ROOT = path.resolve(import.meta.dirname, '../..');
 
@@ -194,7 +195,8 @@ describe('Guard 6 (pack-install): npm pack produces a working installable packag
     expect(compiledContent.startsWith('---\n'), 'compiled agent must retain its frontmatter').toBe(true);
     expect(compiledContent, 'compiled agent must carry its model tier').toContain('model:');
     expect(compiledContent, 'compiled agent must not leak the build-steering key').not.toContain('output-dir:');
-    expect(compiledContent, 'compiled agent must not leak escaped braces (PF-024)').not.toContain('\\{');
+    const leaks = collectBackslashBraceLeaks([{ name: 'dist/agents/git.md', content: compiledContent }]);
+    expect(leaks, `compiled agent must not leak escaped braces (PF-024):\n  ${leaks.join('\n  ')}`).toEqual([]);
   });
 
   it('installed package has src/targets/claude-code/templates/ with settings.json', async () => {

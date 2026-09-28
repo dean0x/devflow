@@ -56,6 +56,8 @@ import {
   requireDistFiles,
   gitAgentSinkCorpus,
   walkFiles,
+  collectBackslashBraceLeaks,
+  type EmittedFile,
 } from './helpers.js';
 
 const ROOT = path.resolve(import.meta.dirname, '..');
@@ -460,12 +462,6 @@ describe('partial expansion in compiled knowledge outputs', () => {
 // the build's empty-section check cannot see. These two guards are what does.
 // ---------------------------------------------------------------------------
 
-/** One compiled artifact, labelled by its path under the build root. */
-interface EmittedFile {
-  name: string;
-  content: string;
-}
-
 /**
  * Every artifact the MDS compiler emits, per output tree, read from a build root.
  * Each tree is enumerated from its registry (hosts, generator hosts, the
@@ -485,17 +481,6 @@ async function readCompiledTrees(root: string): Promise<Record<'commands' | 'age
       generatedReferenceManifest().map(r => read(`dist/skills/git/references/${r}`)),
     ),
   };
-}
-
-/** Named collector: every `\{` / `\}` in emitted text — a legacy escape that leaked. */
-function collectBackslashBraceLeaks(files: readonly EmittedFile[]): string[] {
-  const leaks: string[] = [];
-  for (const f of files) {
-    f.content.split('\n').forEach((line, i) => {
-      if (line.includes('\\{') || line.includes('\\}')) leaks.push(`${f.name}:${i + 1}: ${line.trim().slice(0, 120)}`);
-    });
-  }
-  return leaks;
 }
 
 /** Every `@define NAME(` helper name declared across the given .mds sources. */
@@ -570,8 +555,12 @@ describe('silent-migration guards: no escape leak and no lost helper expansion i
       { name: 'seed/leak.md', content: 'ok line\nDEGRADED (\\{reason\\})\n' },
       { name: 'seed/lost.md', content: 'x {setup_task()} y\n{{common.handoff_values("a")}}\n' },
       { name: 'seed/clean.md', content: 'DEGRADED ({reason}) {JSON.stringify(x)} {worktree} }}\n' },
+      { name: 'seed/close-only.md', content: 'tail \\}\n' },
     ];
-    expect(collectBackslashBraceLeaks(seeded)).toEqual(['seed/leak.md:2: DEGRADED (\\{reason\\})']);
+    expect(collectBackslashBraceLeaks(seeded)).toEqual([
+      'seed/leak.md:2: DEGRADED (\\{reason\\})',
+      'seed/close-only.md:1: tail \\}',
+    ]);
     expect(collectLostExpansions(seeded, new Set(['setup_task', 'handoff_values']))).toEqual([
       'seed/lost.md:1: {setup_task(',
       'seed/lost.md:2: {{common.handoff_values(',
