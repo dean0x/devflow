@@ -26,7 +26,7 @@
  * github-status-lines.txt is frozen, and the --unfreeze refusal guard below
  * protects that fixture only. Overriding the freeze takes an explicit, dated user
  * authorisation naming the exact bytes it permits, and each such authorisation is
- * spent by the single commit that uses it. Five have been granted and all five
+ * spent by the single commit that uses it. Six have been granted and all six
  * are spent:
  *
  *   2026-09-14  e4876e0  the extractor retarget after the mechanics split
@@ -47,6 +47,12 @@
  *                        check-ci-status steps 3-5 read CI through `bucket`
  *                        (gh has no `conclusion` field), keep stderr and exit
  *                        8, and classify totally, ending in INDETERMINATE
+ *   2026-09-27  (#389 PR2; user, Gate 2)  the sixth re-capture, granted for
+ *                        line 241 only and spent on it: the Code agent's D11
+ *                        scrub step now runs `node "$HOME/.devflow/scripts/
+ *                        redact-secrets.cjs"` (was `${DEVFLOW_DIR:-$HOME/
+ *                        .devflow}`, D-ONE-HOME); the other 248 lines are
+ *                        byte-identical
  *
  * THE AUTHORISATION IS SPENT. Any further change to this fixture requires a new
  * explicit authorisation; none is outstanding.
@@ -143,7 +149,7 @@ export const TOTAL_CHARS = 53_670
 export const TOTAL_LINES = 1_129
 
 // Fixture invariants — these ARE bytes (Buffer.byteLength), not JS .length
-export const FIXTURE_BYTES = 18_420
+export const FIXTURE_BYTES = 18_404
 export const FIXTURE_NEWLINES = 249
 
 describe('golden: github-status-lines frozen fixture (AC-0.9)', () => {
