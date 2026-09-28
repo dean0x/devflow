@@ -920,7 +920,7 @@ describe('detectDenyState', () => {
   });
 
   it('treats subset install (older entries) as user=true', () => {
-    // DEVFLOW_HISTORICAL_DENY has all 154 entries; even one match → user=true
+    // DEVFLOW_HISTORICAL_DENY holds every entry ever shipped; even one match → user=true
     const entry = [...DEVFLOW_HISTORICAL_DENY][0];
     const userJson = JSON.stringify({ permissions: { deny: [entry] } });
     const state = detectDenyState(userJson, false, null);
@@ -1082,17 +1082,39 @@ describe('assertHistoricalDenySuperset', () => {
     expect(() => assertHistoricalDenySuperset([])).not.toThrow();
   });
 
-  it('DEVFLOW_HISTORICAL_DENY is superset of actual template (154 entries covered)', () => {
-    // The actual template has 154 entries — all must be in the historical set
-    // We test a representative sample here since the full template is a file I/O concern
-    const sampleEntries = [
-      'Bash(rm -rf /*)',
-      'Read(/etc/shadow)',
-      'Read(/etc/sudoers)',
-      'Read(/etc/passwd)',
-      'Bash(sudo *)',
+  it('DEVFLOW_HISTORICAL_DENY is superset of the actual template (171 entries, no duplicates)', async () => {
+    const templateDeny = await loadTemplateDenyEntries(path.resolve(__dirname, '..'));
+    expect(templateDeny).toHaveLength(171);
+    expect(new Set(templateDeny).size).toBe(templateDeny.length);
+    expect(() => assertHistoricalDenySuperset(templateDeny)).not.toThrow();
+  });
+
+  it('ships the v2 batch (#399) in both the template and the historical set', async () => {
+    const v2Batch = [
+      'Bash(curl * | zsh*)',
+      'Bash(wget * | zsh*)',
+      'Bash(docker run*--privileged*)',
+      'Bash(docker run*-v /:*)',
+      'Bash(docker run*--volume /:*)',
+      'Bash(docker run*--volume=/:*)',
+      'Bash(docker pull *)',
+      'Bash(docker image pull *)',
+      'Bash(docker rm *)',
+      'Bash(docker container rm *)',
+      'Bash(docker rmi *)',
+      'Bash(docker image rm *)',
+      'Bash(docker volume rm *)',
+      'Bash(docker*prune*)',
+      'Bash(orb *)',
+      'Bash(orbctl *)',
+      'Bash(open *OrbStack*)',
     ];
-    expect(() => assertHistoricalDenySuperset(sampleEntries)).not.toThrow();
+    const templateDeny = await loadTemplateDenyEntries(path.resolve(__dirname, '..'));
+    expect(new Set(v2Batch).size).toBe(17);
+    for (const entry of v2Batch) {
+      expect(templateDeny.filter(e => e === entry)).toHaveLength(1);
+      expect(DEVFLOW_HISTORICAL_DENY.has(entry)).toBe(true);
+    }
   });
 });
 
