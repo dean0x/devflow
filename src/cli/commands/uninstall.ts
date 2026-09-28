@@ -260,9 +260,10 @@ export interface ProjectDataPlan {
 
 /**
  * Why the project-data step does nothing: no git root, a git root that is HOME,
- * a `.devflow` that is the machine-wide devflow directory, or no `.devflow` at all.
+ * a `.devflow` that is the machine-wide devflow directory, a `.devflow` that is a
+ * symbolic link to anywhere else, or no `.devflow` at all.
  */
-export type ProjectDataSkipReason = 'no-git-root' | 'home-root' | 'machine-dir' | 'absent';
+export type ProjectDataSkipReason = 'no-git-root' | 'home-root' | 'machine-dir' | 'symlink' | 'absent';
 
 export type ProjectDataResolution =
   | { kind: 'plan'; plan: ProjectDataPlan }
@@ -302,6 +303,10 @@ export function partitionProjectData(entries: ReadonlyArray<ProjectDataEntry>): 
  * HOME or its `.devflow` is the machine-wide devflow directory (a dotfiles repo):
  * there `.devflow` is the install itself, not project data. Both comparisons use
  * realpaths, so macOS's `/var` → `/private/var` and a symlinked HOME still match.
+ *
+ * A `.devflow` that is a symbolic link to anywhere else is skipped too, and never
+ * followed: its target is a directory devflow cannot prove it wrote (applies
+ * ADR-024), so a confirmed cleanup must not empty it — nor unlink a link the user made.
  */
 export async function resolveProjectDataPlan(opts: {
   gitRoot: string | null;
@@ -314,6 +319,12 @@ export async function resolveProjectDataPlan(opts: {
   const dir = path.join(opts.gitRoot, '.devflow');
   if (await isSameLocation(dir, opts.machineDevflowDir)) return { kind: 'skip', reason: 'machine-dir' };
 
+  try {
+    if ((await fs.lstat(dir)).isSymbolicLink()) return { kind: 'skip', reason: 'symlink' };
+  } catch {
+    return { kind: 'skip', reason: 'absent' };
+  }
+
   let dirents;
   try {
     dirents = await fs.readdir(dir, { withFileTypes: true });
@@ -324,6 +335,26 @@ export async function resolveProjectDataPlan(opts: {
     dirents.map((d) => ({ name: d.name, isDir: d.isDirectory() })),
   );
   return { kind: 'plan', plan: { dir, remove, keep } };
+}
+
+/**
+ * The line that tells the user why the project-data step was skipped, or null
+ * when there is nothing worth saying (no repository, no `.devflow`). Shared by
+ * the real cleanup and the dry run so both say the same. PURE.
+ */
+export function formatProjectDataSkip(reason: ProjectDataSkipReason, gitRoot: string | null): string | null {
+  if (gitRoot === null) return null;
+  const dir = path.join(gitRoot, '.devflow');
+  switch (reason) {
+    case 'home-root':
+    case 'machine-dir':
+      return `Project data step skipped: ${dir}/ is the machine-wide devflow directory`;
+    case 'symlink':
+      return `Project data step skipped: ${dir} is a symbolic link — devflow does not follow it; remove it yourself if nothing there is needed`;
+    case 'no-git-root':
+    case 'absent':
+      return null;
+  }
 }
 
 /** An entry as the prompt shows it: directories carry a trailing `/`. */
@@ -848,8 +879,9 @@ export async function runDryRunPhase(opts: {
     }
     // Project data under <gitRoot>/.devflow — the same plan the real cleanup phase
     // resolves, so the preview lists exactly what a confirmed removal deletes.
+    const projectRoot = await getGitRoot(process.cwd());
     const projectData = await resolveProjectDataPlan({
-      gitRoot: await getGitRoot(process.cwd()),
+      gitRoot: projectRoot,
       homeDir: getHomeDirectory(),
       machineDevflowDir: getInstallationPaths().devflowDir,
     });
@@ -857,6 +889,9 @@ export async function runDryRunPhase(opts: {
       for (const entry of projectData.plan.remove) {
         extras.push(`${path.join(projectData.plan.dir, entryLabel(entry))} (if confirmed)`);
       }
+    } else {
+      const skipped = formatProjectDataSkip(projectData.reason, projectRoot);
+      if (skipped !== null) extras.push(skipped);
     }
     extras.push('hooks removed from settings.json');
 
@@ -1097,7 +1132,8 @@ async function runProjectDataStep(
  *
  * Steps (all non-fatal, every interactive path gated on opts.isTTY):
  *   1. Project data under `<gitRoot>/.devflow`, minus DEVFLOW_TRACKED_PATHS
- *      (resolveProjectDataPlan; skipped outside a repo and in one rooted at HOME)
+ *      (resolveProjectDataPlan; skipped outside a repo, in one rooted at HOME, and
+ *      when `.devflow` is a symbolic link)
  *   2. .claudeignore
  *   3. settings.json — remove all Devflow hooks and flags
  *   4. Security deny list
@@ -1154,8 +1190,9 @@ export async function runCleanupPhase(opts: {
   });
   if (projectData.kind === 'plan') {
     await runProjectDataStep(projectData.plan, { keepDocs, isTTY, confirm });
-  } else if (projectData.reason === 'home-root' || projectData.reason === 'machine-dir') {
-    p.log.info(`Project data step skipped: ${gitRoot}/.devflow/ is the machine-wide devflow directory`);
+  } else {
+    const skipped = formatProjectDataSkip(projectData.reason, gitRoot);
+    if (skipped !== null) p.log.info(skipped);
   }
 
   // 2. .claudeignore

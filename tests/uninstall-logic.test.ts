@@ -2908,3 +2908,88 @@ describe('TP-27: uninstall run from HOME never touches the machine devflow dir (
     }
   });
 });
+
+/**
+ * ADR-024 (remove only what devflow can prove it wrote), D-UNINSTALL-CARVE-OUT: a
+ * repository whose `.devflow` is a symbolic link — to anything but the machine
+ * devflow dir, which is skipped as `machine-dir` — is not followed. The link's
+ * target is somewhere devflow cannot prove it owns, so a confirmed cleanup skips
+ * the project-data step and says why, and the dry run says the same.
+ */
+describe('a symlinked <gitRoot>/.devflow is never followed (#391)', () => {
+  let tmpHome: string;
+  let repo: string;
+  let target: string;
+  let link: string;
+
+  beforeEach(async () => {
+    tmpHome = await fs.mkdtemp(path.join(os.tmpdir(), 'devflow-symlink-home-'));
+    vi.stubEnv('HOME', tmpHome);
+    repo = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'devflow-symlink-repo-')));
+    execFileSync('git', ['init', '-q'], { cwd: repo });
+    target = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'devflow-symlink-target-')));
+    await fs.mkdir(path.join(target, 'memory'), { recursive: true });
+    await fs.writeFile(path.join(target, 'memory', 'WORKING-MEMORY.md'), '## Now\n');
+    await fs.writeFile(path.join(target, 'config.json'), '{}\n');
+    await fs.writeFile(path.join(target, 'notes.txt'), 'not devflow\'s\n');
+    link = path.join(repo, '.devflow');
+    await fs.symlink(target, link);
+  });
+
+  afterEach(async () => {
+    vi.unstubAllEnvs();
+    for (const dir of [repo, target, tmpHome]) await fs.rm(dir, { recursive: true, force: true });
+  });
+
+  it('resolveProjectDataPlan skips it as a symlink', async () => {
+    const resolution = await resolveProjectDataPlan({
+      gitRoot: repo,
+      homeDir: tmpHome,
+      machineDevflowDir: path.join(tmpHome, '.devflow'),
+    });
+    expect(resolution).toEqual({ kind: 'skip', reason: 'symlink' });
+  });
+
+  it('a confirmed cleanup never prompts, leaves the link and its target byte-identical, and says why', async () => {
+    const before = await projectTree(target);
+    const { messages, confirm } = recordingConfirm(true);
+
+    const out = await captureStdout(() => runCleanupPhase({
+      scopesToUninstall: [], keepDocs: false, verbose: false, cwd: repo, isTTY: true, confirm,
+    }));
+
+    expect(messages).toEqual([]);
+    expect(await projectTree(target)).toEqual(before);
+    expect((await fs.lstat(link)).isSymbolicLink(), 'the link itself stays').toBe(true);
+    expect(out).toContain(`Project data step skipped: ${link} is a symbolic link`);
+  });
+
+  it('the dry run says the same and previews no project-data removal', async () => {
+    const before = await projectTree(target);
+    vi.spyOn(process, 'cwd').mockReturnValue(repo);
+    try {
+      const out = await captureStdout(() => runDryRunPhase({
+        scopesToUninstall: [], isSelectiveUninstall: false, selectedPlugins: [], installedPlugins: [],
+      }));
+
+      expect(out).toContain(`Project data step skipped: ${link} is a symbolic link`);
+      expect(out).not.toContain('(if confirmed)');
+      expect(await projectTree(target)).toEqual(before);
+    } finally {
+      vi.mocked(process.cwd).mockRestore();
+    }
+  });
+
+  it('non-vacuity: the same content as a real directory is planned for removal', async () => {
+    await fs.unlink(link);
+    await fs.cp(target, link, { recursive: true });
+
+    const resolution = await resolveProjectDataPlan({
+      gitRoot: repo,
+      homeDir: tmpHome,
+      machineDevflowDir: path.join(tmpHome, '.devflow'),
+    });
+
+    expect(resolution.kind).toBe('plan');
+  });
+});
