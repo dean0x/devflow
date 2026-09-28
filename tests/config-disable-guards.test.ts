@@ -479,7 +479,7 @@ describe('context hook registration', () => {
     const { addContextHook, removeContextHook } = await import('../src/cli/commands/init.js');
     const input = JSON.stringify({
       hooks: {
-        SessionStart: [{ hooks: [{ type: 'command', command: '/path/run-hook session-start-memory' }] }],
+        SessionStart: [{ hooks: [{ type: 'command', command: '/path/.devflow/scripts/hooks/run-hook session-start-memory' }] }],
       },
     });
     const withContext = addContextHook(input, '/home/user/.devflow');
@@ -500,9 +500,9 @@ describe('dream hook upgrade cleanup', () => {
   const SETTINGS_WITH_DREAM_HOOK = JSON.stringify({
     hooks: {
       SessionStart: [
-        { hooks: [{ type: 'command', command: '/path/run-hook session-start-memory' }] },
-        { hooks: [{ type: 'command', command: '/path/run-hook session-start-context' }] },
-        { hooks: [{ type: 'command', command: '/path/run-hook spawn-dream-worker', timeout: 10 }] },
+        { hooks: [{ type: 'command', command: '/path/.devflow/scripts/hooks/run-hook session-start-memory' }] },
+        { hooks: [{ type: 'command', command: '/path/.devflow/scripts/hooks/run-hook session-start-context' }] },
+        { hooks: [{ type: 'command', command: '/path/.devflow/scripts/hooks/run-hook spawn-dream-worker', timeout: 10 }] },
       ],
     },
   });
@@ -532,7 +532,7 @@ describe('dream hook upgrade cleanup', () => {
     const { removeDreamHook } = await import('../src/cli/commands/init.js');
     const input = JSON.stringify({
       hooks: {
-        SessionStart: [{ hooks: [{ type: 'command', command: '/path/run-hook session-start-context' }] }],
+        SessionStart: [{ hooks: [{ type: 'command', command: '/path/.devflow/scripts/hooks/run-hook session-start-context' }] }],
       },
     });
     expect(removeDreamHook(input)).toBe(input);
@@ -543,6 +543,80 @@ describe('dream hook upgrade cleanup', () => {
     const { hasDreamHook } = await import('../src/cli/commands/init.js');
     expect(hasDreamHook(SETTINGS_WITH_DREAM_HOOK)).toBe(true);
     expect(hasDreamHook('{}')).toBe(false);
+  });
+});
+
+// ─── D-EXACT-HOOK-OWNER: context and dream hooks are matched exactly (#391) ──
+//
+// A hook is devflow's only when its command ends in
+// `/scripts/hooks/run-hook <marker>` under any directory. A user's hook that
+// merely contains the marker word is theirs, and removal takes devflow's single
+// hook out of a shared matcher group, keeping the siblings in order.
+
+describe('context and dream hook ownership is exact (#391)', () => {
+  const DEVFLOW = '/home/user/.devflow';
+  const run = (marker: string) => `${DEVFLOW}/scripts/hooks/run-hook ${marker}`;
+  /** A user group whose every hook mentions a marker word; none is devflow's. */
+  const USER_GROUP = { matcher: 'startup', hooks: [
+    { type: 'command', command: '~/bin/session-start-context.sh', timeout: 3 },
+    { type: 'command', command: 'echo spawn-dream-worker session-start-context' },
+    { type: 'command', command: '/opt/tools/run-hook session-start-context' },
+    { type: 'command', command: '/opt/tools/run-hook spawn-dream-worker' },
+  ] };
+  const userSettings = (): string => JSON.stringify({ hooks: { SessionStart: [USER_GROUP] } }, null, 2) + '\n';
+
+  it('user hooks that contain a marker word are neither the context nor the dream hook', async () => {
+    const { hasContextHook, hasDreamHook } = await import('../src/cli/commands/init.js');
+    expect(hasContextHook(userSettings())).toBe(false);
+    expect(hasDreamHook(userSettings())).toBe(false);
+  });
+
+  it('remove on settings holding only the user group is a byte-identical no-op', async () => {
+    const { removeContextHook, removeDreamHook } = await import('../src/cli/commands/init.js');
+    const input = userSettings();
+    expect(removeContextHook(input)).toBe(input);
+    expect(removeDreamHook(input)).toBe(input);
+  });
+
+  it('add registers the context hook after the byte-identical user group; init (remove-then-add) and uninstall keep it', async () => {
+    const { addContextHook, removeContextHook } = await import('../src/cli/commands/init.js');
+    const on = addContextHook(userSettings(), DEVFLOW);
+    const session = JSON.parse(on).hooks.SessionStart;
+    expect(session).toEqual([USER_GROUP, { hooks: [{ type: 'command', command: run('session-start-context'), timeout: 10 }] }]);
+
+    expect(addContextHook(removeContextHook(on), DEVFLOW), 're-init changes nothing').toBe(on);
+    expect(removeContextHook(on)).toBe(userSettings());
+  });
+
+  it('removes only devflow\'s hook from a shared group and keeps the siblings in order', async () => {
+    const { removeContextHook, removeDreamHook } = await import('../src/cli/commands/init.js');
+    const input = JSON.stringify({ hooks: { SessionStart: [{ hooks: [
+      { type: 'command', command: 'say hello' },
+      { type: 'command', command: run('session-start-context'), timeout: 10 },
+      { type: 'command', command: run('spawn-dream-worker'), timeout: 10 },
+      { type: 'command', command: 'say ready' },
+    ] }] } });
+
+    const settings = JSON.parse(removeDreamHook(removeContextHook(input)));
+
+    expect(settings.hooks.SessionStart).toEqual([{ hooks: [
+      { type: 'command', command: 'say hello' },
+      { type: 'command', command: 'say ready' },
+    ] }]);
+  });
+
+  it.each([
+    ['another directory', '/srv/old/.devflow/scripts/hooks/run-hook'],
+    ['a Windows path', 'C:\\Users\\u\\.devflow\\scripts\\hooks\\run-hook'],
+  ])('still recognises and removes devflow\'s hooks registered under %s', async (_label, runHook) => {
+    const { hasContextHook, removeContextHook, hasDreamHook, removeDreamHook } = await import('../src/cli/commands/init.js');
+    const input = JSON.stringify({ hooks: { SessionStart: [
+      { hooks: [{ type: 'command', command: `${runHook} session-start-context` }] },
+      { hooks: [{ type: 'command', command: `${runHook} spawn-dream-worker` }] },
+    ] } });
+    expect(hasContextHook(input)).toBe(true);
+    expect(hasDreamHook(input)).toBe(true);
+    expect(JSON.parse(removeDreamHook(removeContextHook(input))).hooks).toBeUndefined();
   });
 });
 

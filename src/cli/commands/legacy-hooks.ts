@@ -1,4 +1,9 @@
-import type { Settings, HookMatcher } from '../../targets/claude-code/hooks.js';
+import {
+  devflowHookOwner,
+  hasHook,
+  removeHooks,
+  type Settings,
+} from '../../targets/claude-code/hooks.js';
 
 // ─── Dream worker hook cleanup ──────────────────────────────────────────────
 //
@@ -11,34 +16,23 @@ import type { Settings, HookMatcher } from '../../targets/claude-code/hooks.js';
 const SPAWN_DREAM_WORKER_MARKER = 'spawn-dream-worker';
 
 /**
+ * D-EXACT-HOOK-OWNER: the dream-worker hook is devflow's only when its command
+ * ends in `/scripts/hooks/run-hook spawn-dream-worker` (hooks.ts), under any
+ * directory — the one form it was ever registered in.
+ */
+const isDreamHook = devflowHookOwner([SPAWN_DREAM_WORKER_MARKER]);
+
+/**
  * Remove the spawn-dream-worker hook from settings JSON.
  * Idempotent — returns unchanged JSON if hook not present.
- * Preserves all other SessionStart hooks (session-start-memory, session-start-context).
+ * Removes the single hook, so the other hooks of its matcher group and every
+ * other SessionStart group (session-start-memory, session-start-context) stay in place.
  */
 export function removeDreamHook(settingsJson: string): string {
   const settings: Settings = JSON.parse(settingsJson);
-
-  if (!settings.hooks?.SessionStart) {
+  if (!removeHooks(settings, 'SessionStart', isDreamHook)) {
     return settingsJson;
   }
-
-  const before = settings.hooks.SessionStart.length;
-  settings.hooks.SessionStart = settings.hooks.SessionStart.filter(
-    (matcher: HookMatcher) => !matcher.hooks.some((h) => h.command.includes(SPAWN_DREAM_WORKER_MARKER)),
-  );
-
-  if (settings.hooks.SessionStart.length === before) {
-    return settingsJson;
-  }
-
-  if (settings.hooks.SessionStart.length === 0) {
-    delete settings.hooks.SessionStart;
-  }
-
-  if (Object.keys(settings.hooks).length === 0) {
-    delete settings.hooks;
-  }
-
   return JSON.stringify(settings, null, 2) + '\n';
 }
 
@@ -48,7 +42,5 @@ export function removeDreamHook(settingsJson: string): string {
  */
 export function hasDreamHook(input: string | Settings): boolean {
   const settings: Settings = typeof input === 'string' ? JSON.parse(input) : input;
-  return settings.hooks?.SessionStart?.some(
-    (matcher) => matcher.hooks.some((h) => h.command.includes(SPAWN_DREAM_WORKER_MARKER)),
-  ) ?? false;
+  return hasHook(settings, 'SessionStart', isDreamHook);
 }
