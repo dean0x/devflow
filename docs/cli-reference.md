@@ -82,6 +82,8 @@ npx devflow-kit ambient --disable    # Disable ambient mode
 npx devflow-kit ambient --status     # Show current status (partial state detected and reported)
 ```
 
+`--enable` registers the hooks under `~/.devflow`, where `init` installs them. A hook is devflow's only when its command ends in `/scripts/hooks/run-hook <name>`: your own hooks, and any hooks sharing a matcher group with devflow's, are never removed, even when their commands mention `preamble`.
+
 ## Learning
 
 ```bash
@@ -204,6 +206,8 @@ npx devflow-kit hud --disable        # Disable HUD
 npx devflow-kit hud --detail         # Show tool/agent descriptions
 npx devflow-kit hud --no-detail      # Hide tool/agent descriptions
 ```
+
+A `statusLine` is devflow's only when its command ends in `/.devflow/scripts/hud.sh` (or the older `/.devflow/scripts/statusline.sh`). Any other `statusLine` is yours: `init`, `init --no-hud`, `hud --disable` and `uninstall` leave it alone, and `hud --enable` asks before replacing it.
 
 ## Security (Deny List)
 
@@ -371,6 +375,8 @@ npx devflow-kit uninstall
 |--------|-------------|
 | `--scope <user\|local>` | Uninstall only the machine-wide install (`user`) or a legacy project-local install in the current repo (`local`; never touches your home directory, and exits 1 with "No legacy project-local install here" outside a git repository or in a repository rooted at your home directory) (default: auto-detect both) |
 | `--plugin <names>` | Selective uninstall by plugin name. Assets are retained on behalf of the plugins the **manifest** records as installed — not the whole registry — so removing a plugin removes exactly its own skills, agents and rules and keeps only what a plugin you actually installed still needs |
-| `--keep-docs` | Preserve `.devflow/docs/` directory |
+| `--keep-docs` | Leave the repository's `.devflow/` project data untouched |
 | `--dry-run` | Show what would be removed |
 | `--verbose` | Show detailed output |
+
+**Project data.** A full uninstall run interactively inside a git repository offers to remove that repository's `.devflow/` at the git root, wherever in the repository you run it. Before asking, it lists what it would remove and what it keeps: `features/`, `conventions.md`, `policy.json` and `project.json` are shared through git and are always kept, so an uncommitted edit to one of them survives. Outside a git repository, or in a repository rooted at your home directory (whose `.devflow/` is the machine-wide install), the step is skipped. `--keep-docs`, a non-interactive run, and answering no all leave `.devflow/` as it was.
