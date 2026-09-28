@@ -727,6 +727,47 @@ describe('ambient --enable uses the canonical devflow dir (TP-24, AC-20)', () =>
     await createAmbientCommand().parseAsync(['--disable'], { from: 'user' });
     expect(await fs.readFile(settingsPath, 'utf-8')).toBe(original);
   });
+
+  it('re-points devflow\'s hooks an earlier enable registered under another directory, keeping user hooks and siblings in place', async () => {
+    const stale = '/opt/old/.devflow/scripts/hooks/run-hook';
+    const userGroup = { hooks: [{ type: 'command', command: '~/bin/preamble-logger.sh' }] };
+    const original = {
+      hooks: {
+        UserPromptSubmit: [
+          userGroup,
+          { hooks: [
+            { type: 'command', command: '/usr/local/bin/notify-prompt' },
+            { type: 'command', command: `${stale} preamble`, timeout: 5 },
+          ] },
+        ],
+        SessionStart: [
+          { matcher: 'startup', hooks: [
+            { type: 'command', command: `${stale} session-start-orchestrator`, timeout: 10 },
+            { type: 'command', command: 'echo started' },
+          ] },
+        ],
+      },
+    };
+    await fs.writeFile(settingsPath, JSON.stringify(original, null, 2) + '\n', 'utf-8');
+
+    await createAmbientCommand().parseAsync(['--enable'], { from: 'user' });
+
+    const settings = JSON.parse(await fs.readFile(settingsPath, 'utf-8'));
+    expect(settings.hooks.UserPromptSubmit).toEqual([
+      userGroup,
+      { hooks: [{ type: 'command', command: '/usr/local/bin/notify-prompt' }] },
+      { hooks: [{ type: 'command', command: `${runHook} preamble`, timeout: 5 }] },
+    ]);
+    expect(settings.hooks.SessionStart).toEqual([
+      { matcher: 'startup', hooks: [{ type: 'command', command: 'echo started' }] },
+      { hooks: [{ type: 'command', command: `${runHook} session-start-orchestrator`, timeout: 10 }] },
+    ]);
+
+    // Converged: a second enable finds nothing to change.
+    const converged = await fs.readFile(settingsPath, 'utf-8');
+    await createAmbientCommand().parseAsync(['--enable'], { from: 'user' });
+    expect(await fs.readFile(settingsPath, 'utf-8')).toBe(converged);
+  });
 });
 
 describe('parseStreamEvent', () => {

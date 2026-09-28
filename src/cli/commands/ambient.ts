@@ -138,30 +138,59 @@ export async function removeLegacyCommandsRule(): Promise<void> {
   }
 }
 
+/** The command devflow registers for the `run-hook <marker>` hook under `devflowDir`. */
+function runHookCommand(devflowDir: string, marker: string): string {
+  return `${path.join(devflowDir, 'scripts', 'hooks', 'run-hook')} ${marker}`;
+}
+
+/**
+ * A predicate matching devflow's own hook (`isOurs`) registered with any command
+ * other than `canonical` — i.e. under a directory other than the one `canonical` names.
+ */
+function isMisdirected(isOurs: HookPredicate, canonical: string): HookPredicate {
+  return (hook) => isOurs(hook) && (hook.command ?? '').trim() !== canonical;
+}
+
 /**
  * Add the ambient hooks (preamble UserPromptSubmit + session-start-orchestrator SessionStart)
  * and remove any legacy commands rule. Removes any legacy `ambient-prompt` hook first.
  * Idempotent — each hook is checked before adding so enable repairs partial states.
  * Legacy rule purge runs unconditionally to ensure stale files are always cleaned up.
+ *
+ * D-AMBIENT-CANONICAL-DIR: enable converges on `devflowDir`. A preamble or
+ * orchestrator hook devflow registered under another directory (an earlier enable
+ * that inferred its directory from a user's Stop hook, or a retired custom
+ * directory) is removed and the hook re-registered at `devflowDir`. Only hooks
+ * matched exactly (D-AMBIENT-EXACT-HOOK) are touched, one hook at a time, so the
+ * user's hooks and their matcher-group siblings keep their places.
  */
 export async function addAmbientHook(settingsJson: string, devflowDir: string): Promise<string> {
   const settings: Settings = JSON.parse(settingsJson);
+  const preambleCommand = runHookCommand(devflowDir, PREAMBLE_HOOK_MARKER);
+  const orchestratorCommand = runHookCommand(devflowDir, ORCHESTRATOR_HOOK_MARKER);
+
   const removedLegacy = filterHookEntries(settings, 'UserPromptSubmit', isLegacy);
   // Sweep stale classification hook from prior installs — symmetric with removeAmbientHook
   const removedClassification = filterHookEntries(settings, 'SessionStart', isClassification);
+  const removedMisdirected = [
+    filterHookEntries(settings, 'UserPromptSubmit', isMisdirected(isPreamble, preambleCommand)),
+    filterHookEntries(settings, 'SessionStart', isMisdirected(isOrchestrator, orchestratorCommand)),
+  ].some(Boolean);
   const addedPreamble = ensureHook(
     settings, 'UserPromptSubmit', isPreamble,
-    { hooks: [{ type: 'command', command: path.join(devflowDir, 'scripts', 'hooks', 'run-hook') + ` ${PREAMBLE_HOOK_MARKER}`, timeout: 5 }] },
+    { hooks: [{ type: 'command', command: preambleCommand, timeout: 5 }] },
   );
   const addedOrchestrator = ensureHook(
     settings, 'SessionStart', isOrchestrator,
-    { hooks: [{ type: 'command', command: path.join(devflowDir, 'scripts', 'hooks', 'run-hook') + ` ${ORCHESTRATOR_HOOK_MARKER}`, timeout: 10 }] },
+    { hooks: [{ type: 'command', command: orchestratorCommand, timeout: 10 }] },
   );
 
   // Purge legacy commands rule (runs before early-return so stale files are always removed)
   await removeLegacyCommandsRule();
 
-  if (!removedLegacy && !removedClassification && !addedPreamble && !addedOrchestrator) return settingsJson;
+  if (!removedLegacy && !removedClassification && !removedMisdirected && !addedPreamble && !addedOrchestrator) {
+    return settingsJson;
+  }
   return JSON.stringify(settings, null, 2) + '\n';
 }
 

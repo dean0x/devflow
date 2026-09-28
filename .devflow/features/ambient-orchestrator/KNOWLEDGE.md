@@ -160,7 +160,7 @@ This is intentional. SessionStart provably fires (via `SessionStart:clear`) in p
 
 **`addAmbientHook` sweeps session-start-classification symmetrically**: As of the resolve pass, `addAmbientHook` now also calls `filterHookEntries(settings, 'SessionStart', isClassification)`. This makes enable and disable symmetric: both purge the stale classification hook. This was a prior asymmetry — only `removeAmbientHook` did the sweep.
 
-**devflow-dir resolution**: `ambient --enable` always passes `getDevFlowDirectory()` to `addAmbientHook` (D-AMBIENT-CANONICAL-DIR). Hooks an older install registered under another directory are still recognised by suffix and removed by `--disable` or init's remove-then-add; `--enable` alone does not re-point an existing preamble hook.
+**devflow-dir resolution**: `ambient --enable` always passes `getDevFlowDirectory()` to `addAmbientHook` (D-AMBIENT-CANONICAL-DIR). Hooks an older install registered under another directory are still recognised by suffix: `--disable` removes them, and `addAmbientHook` (so `--enable` and init's remove-then-add alike) removes a preamble or orchestrator hook whose command is not the canonical `run-hook <marker>` under `devflowDir` and re-registers it there, one hook at a time, so user hooks and matcher-group siblings stay put.
 
 **`session-start-classification` is a stale marker**: The `AMBIENT_HOOK_SUFFIXES.classification` suffix (`/scripts/hooks/run-hook session-start-classification`) refers to a hook from a previous ambient design that no longer exists. Both `addAmbientHook` and `removeAmbientHook` clean it up to handle upgrades from those installs. Do not re-register it.
 

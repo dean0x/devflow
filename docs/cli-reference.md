@@ -82,7 +82,7 @@ npx devflow-kit ambient --disable    # Disable ambient mode
 npx devflow-kit ambient --status     # Show current status (partial state detected and reported)
 ```
 
-`--enable` registers the hooks under `~/.devflow`, where `init` installs them. A hook is devflow's only when its command ends in `/scripts/hooks/run-hook <name>`: your own hooks, and any hooks sharing a matcher group with devflow's, are never removed, even when their commands mention `preamble`.
+`--enable` registers the hooks under `~/.devflow`, where `init` installs them, and re-points any ambient hook devflow registered under another directory. A hook is devflow's only when its command ends in `/scripts/hooks/run-hook <name>`: your own hooks, and any hooks sharing a matcher group with devflow's, are never removed, even when their commands mention `preamble`.
 
 ## Learning
 
