@@ -7,8 +7,8 @@
  * then:
  * - TP-2: the baseline and post-init walks, settings.json, manifest and repo
  *   config.json equal `tests/fixtures/golden/install-snapshot-{config}.txt`;
- * - TP-5: the second init's difference from the first equals the golden's re-init
- *   section. AC-3 wants `(none)`; today it is not, and the golden says exactly how;
+ * - TP-5: a second init with the same argv changes nothing the snapshot records —
+ *   AC-3's `(none)`, which every install golden's re-init section also carries;
  * - TP-6: a non-interactive `uninstall` leaves exactly the golden's keep list;
  * - TP-7 (github only): every installed hook runs in four locations, one test per
  *   hook and location, against `hook-matrix.txt`.
@@ -210,8 +210,8 @@ function describeConfig(config: InstallConfig): void {
       expectSections(sections, golden)
     })
 
-    it('a second init with the same argv differs from the first exactly as the golden records (TP-5)', () => {
-      expect(renderReinitDiff(first, second)).toBe(golden.get(REINIT_HEADING))
+    it('a second init with the same argv changes nothing the snapshot records (TP-5, AC-3)', () => {
+      expect(renderReinitDiff(first, second)).toBe('(none)')
     })
 
     if (config.name === HOOK_MATRIX_CONFIG) describeHookMatrix(sandbox)
@@ -225,6 +225,12 @@ function describeConfig(config: InstallConfig): void {
 }
 
 for (const config of INSTALL_CONFIGS.filter(c => c.name !== GENERATOR_CONFIG)) describeConfig(config)
+
+describe('re-init goldens (TP-5, AC-3)', () => {
+  it.each(INSTALL_CONFIGS.map(c => c.name))('install-snapshot-%s records no re-init difference', (name) => {
+    expect(parseGolden(loadGolden(installGoldenName(findConfig(name)))).get(REINIT_HEADING)).toBe('(none)')
+  })
+})
 
 function hashGoldens(): Record<string, string> {
   return Object.fromEntries(readdirSync(GOLDENS_DIR).sort().map(name => [

@@ -29,7 +29,7 @@
  * `.git` and the hook log directory. The repo walk doubles as the write-boundary
  * check: everything init writes into the directory it was run from is on record.
  * A second init with the same argv is recorded as a line diff against the first
- * (AC-3's target is `(none)`), and the uninstall half records only the difference
+ * (AC-3 holds it at `(none)`), and the uninstall half records only the difference
  * from the pre-init baseline — the keep list, and any baseline entry it removed.
  *
  * D-HOOK-MATRIX: every hook command string in the installed settings.json is run
@@ -425,8 +425,8 @@ export const REINIT_HEADING = 're-init: difference from the first install (AC-3 
 
 /**
  * The re-init section: per install section, the line diff from the first init to a
- * second init with the same argv. `(none)` is the AC-3 target; anything else is
- * today's divergence, recorded so a fix PR shows up as a justified hunk.
+ * second init with the same argv. AC-3 holds it at `(none)`; anything else is a
+ * regression, and the hunks name exactly what the second run changed.
  */
 export function renderReinitDiff(first: readonly Section[], second: readonly Section[]): string {
   const blocks: string[] = []
