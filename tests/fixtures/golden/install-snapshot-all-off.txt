@@ -402,8 +402,7 @@ d sub/
     "devflow-research",
     "devflow-release",
     "devflow-self-review",
-    "devflow-bug-analysis",
-    "devflow-ambient"
+    "devflow-bug-analysis"
   ],
   "scope": "user",
   "knownPlugins": [
@@ -487,26 +486,7 @@ d sub/
 }
 
 ## re-init: difference from the first install (AC-3 wants none)
-### install: HOME
-@@ line 296 @@
-- - .devflow/scripts/package.json
-+ x .devflow/scripts/package.json
-### install: settings.json (permissions.deny collapsed to a count)
-@@ line 49 @@
-+   "permissions": {
-+     "deny": "<154 entries>"
-+   },
-@@ line 57 @@
--   "showClearContextOnPlanAccept": true,
--   "permissions": {
--     "deny": "<154 entries>"
--   }
-+   "showClearContextOnPlanAccept": true
-### install: manifest.json
-@@ line 14 @@
--     "devflow-bug-analysis",
--     "devflow-ambient"
-+     "devflow-bug-analysis"
+(none)
 
 ## uninstall: keep list (present after uninstall, absent from the baseline)
 d <HOME>/.claude/agents/

@@ -568,21 +568,7 @@ d sub/
 }
 
 ## re-init: difference from the first install (AC-3 wants none)
-### install: HOME
-@@ line 324 @@
-- - .devflow/scripts/package.json
-+ x .devflow/scripts/package.json
-### install: settings.json (permissions.deny collapsed to a count)
-@@ line 100 @@
-+   "permissions": {
-+     "deny": "<154 entries>"
-+   },
-@@ line 108 @@
--   "showClearContextOnPlanAccept": true,
--   "permissions": {
--     "deny": "<154 entries>"
--   }
-+   "showClearContextOnPlanAccept": true
+(none)
 
 ## uninstall: keep list (present after uninstall, absent from the baseline)
 d <HOME>/.claude/agents/
