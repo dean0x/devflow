@@ -778,7 +778,8 @@ describe('one home: init and uninstall under exported CLAUDE_CONFIG_DIR and DEVF
     await expect(fs.access(path.join(tmpHome, '.claude')), 'no Claude directory under HOME').rejects.toThrow();
     expect(readdirSync(canary), 'an exported DEVFLOW_DIR is never written').toEqual([]);
 
-    const uninstall = runCli(['uninstall'], tmpHome, { cwd: os.tmpdir(), extraEnv: env });
+    // TP-10: `--scope user` is the no-flag uninstall; plain `uninstall` is held strictly by install-snapshot.
+    const uninstall = runCli(['uninstall', '--scope', 'user'], tmpHome, { cwd: os.tmpdir(), extraEnv: env });
     expect(uninstall.status, uninstall.out).toBe(0);
     await expect(fs.access(path.join(configDir, 'agents', 'devflow'))).rejects.toThrow();
     await expect(fs.access(path.join(configDir, 'commands', 'devflow'))).rejects.toThrow();
