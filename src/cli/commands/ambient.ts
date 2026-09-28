@@ -231,7 +231,13 @@ interface AmbientOptions {
   status?: boolean;
 }
 
-export const ambientCommand = new Command('ambient')
+/**
+ * Build a fresh Commander Command for the `ambient` subcommand.
+ * Exported for tests that need per-test isolation (Commander keeps parsed option
+ * values on the instance, so a reused command leaks options between runs).
+ */
+export function createAmbientCommand(): Command {
+  return new Command('ambient')
   .description('Enable or disable ambient mode (orchestrator charter + plan handoff)')
   .option('--enable', 'Register ambient mode hooks')
   .option('--disable', 'Remove ambient mode hooks')
@@ -289,25 +295,12 @@ export const ambientCommand = new Command('ambient')
       return;
     }
 
-    // Resolve devflow scripts directory.
-    // Primary: getDevFlowDirectory() — purpose-built, not coupled to hook path layout.
-    // Fallback: infer from Stop hook command path (legacy installs where getDevFlowDirectory
-    //   may not yet reflect the correct location).
-    let devflowDir: string = getDevFlowDirectory();
-    try {
-      const stopHook = parsedSettings.hooks?.Stop?.[0]?.hooks?.[0]?.command;
-      if (stopHook) {
-        const hookBinary = stopHook.split(' ')[0];
-        const inferred = path.resolve(hookBinary, '..', '..', '..');
-        // Only use inferred path when it differs from the canonical default —
-        // this handles legacy installs where the hook was installed to a non-standard location.
-        if (inferred !== devflowDir) {
-          devflowDir = inferred;
-        }
-      }
-    } catch (err) {
-      p.log.warn(`Could not resolve devflow directory from Stop hook: ${(err as Error).message}`);
-    }
+    // D-AMBIENT-CANONICAL-DIR: the hooks always point at the canonical devflow
+    // directory, where init installs run-hook. Never infer it from settings.json:
+    // the first Stop hook is whichever hook the user listed first (a notification
+    // sound, say), and a path derived from it names a run-hook that does not
+    // exist, so every prompt would fail.
+    const devflowDir = getDevFlowDirectory();
 
     if (options.enable) {
       const updated = await addAmbientHook(settingsContent, devflowDir);
@@ -317,7 +310,7 @@ export const ambientCommand = new Command('ambient')
         return;
       }
       await writeFileAtomicExclusive(settingsPath, updated);
-      await syncManifestFeature(getDevFlowDirectory(), 'ambient', true);
+      await syncManifestFeature(devflowDir, 'ambient', true);
       p.log.success('Ambient mode enabled — orchestrator hooks registered');
       p.log.info(color.dim('Charter at session start, reminder per prompt, plan handoffs auto-run devflow:implement (git repos only)'));
     }
@@ -329,7 +322,10 @@ export const ambientCommand = new Command('ambient')
         return;
       }
       await writeFileAtomicExclusive(settingsPath, updated);
-      await syncManifestFeature(getDevFlowDirectory(), 'ambient', false);
+      await syncManifestFeature(devflowDir, 'ambient', false);
       p.log.success('Ambient mode disabled — hooks removed');
     }
   });
+}
+
+export const ambientCommand = createAmbientCommand();

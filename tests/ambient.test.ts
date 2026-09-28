@@ -1,7 +1,8 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { promises as fs } from 'fs';
 import * as path from 'path';
-import { addAmbientHook, removeAmbientHook, hasAmbientHook, removeLegacyCommandsRule, COMMANDS_RULE_PATH } from '../src/cli/commands/ambient.js';
+import * as os from 'os';
+import { addAmbientHook, removeAmbientHook, hasAmbientHook, removeLegacyCommandsRule, createAmbientCommand, COMMANDS_RULE_PATH } from '../src/cli/commands/ambient.js';
 import type { StreamResult } from './integration/helpers.js';
 import {
   hasSkillInvocations,
@@ -656,6 +657,75 @@ describe('ambient hook ownership is exact (TP-25, AC-21)', () => {
     const input = JSON.stringify({ hooks: { UserPromptSubmit: [{ hooks: [{ type: 'command', command }] }] } });
     expect(hasAmbientHook(input)).toBe(true);
     expect(JSON.parse(await removeAmbientHook(input)).hooks).toBeUndefined();
+  });
+});
+
+/**
+ * TP-24 (AC-20, D-AMBIENT-CANONICAL-DIR): `ambient --enable` registers its hooks
+ * under getDevFlowDirectory() — $HOME/.devflow — and never infers a directory from
+ * whatever Stop hook happens to be listed first.
+ */
+describe('ambient --enable uses the canonical devflow dir (TP-24, AC-20)', () => {
+  let tmpHome: string;
+  let settingsPath: string;
+  let runHook: string;
+
+  beforeEach(async () => {
+    tmpHome = await fs.mkdtemp(path.join(os.tmpdir(), 'devflow-ambient-enable-'));
+    vi.stubEnv('HOME', tmpHome);
+    await fs.mkdir(path.join(tmpHome, '.claude'), { recursive: true });
+    runHook = path.join(tmpHome, '.devflow', 'scripts', 'hooks', 'run-hook');
+    await fs.mkdir(path.dirname(runHook), { recursive: true });
+    await fs.writeFile(runHook, '#!/bin/sh\n', { mode: 0o755 });
+    settingsPath = path.join(tmpHome, '.claude', 'settings.json');
+  });
+
+  afterEach(async () => {
+    vi.unstubAllEnvs();
+    await fs.rm(tmpHome, { recursive: true, force: true });
+  });
+
+  it.each([
+    ['a notification-sound hook', 'afplay /System/Library/Sounds/Glass.aiff'],
+    ['an absolute user script', '/Users/someone/bin/on-stop.sh --beep'],
+    ['a devflow hook from another directory', '/opt/old-devflow/scripts/hooks/run-hook capture-turn'],
+  ])('with %s listed first under Stop, registers the existing run-hook under $HOME/.devflow', async (_label, firstStop) => {
+    await fs.writeFile(settingsPath, JSON.stringify({
+      hooks: {
+        Stop: [
+          { hooks: [{ type: 'command', command: firstStop }] },
+          { hooks: [{ type: 'command', command: `${runHook} capture-turn`, timeout: 10 }] },
+        ],
+      },
+    }, null, 2) + '\n', 'utf-8');
+
+    await createAmbientCommand().parseAsync(['--enable'], { from: 'user' });
+
+    const settings = JSON.parse(await fs.readFile(settingsPath, 'utf-8'));
+    expect(settings.hooks.UserPromptSubmit).toEqual([
+      { hooks: [{ type: 'command', command: `${runHook} preamble`, timeout: 5 }] },
+    ]);
+    expect(settings.hooks.SessionStart[0].hooks[0].command).toBe(`${runHook} session-start-orchestrator`);
+    // The registered path is a file that exists — the hook would actually run.
+    await expect(fs.access(runHook)).resolves.toBeUndefined();
+    expect(settings.hooks.Stop[0].hooks[0].command, 'the user Stop hook is untouched').toBe(firstStop);
+  });
+
+  it('enable then disable leaves a user group containing the word preamble byte-identical in settings.json', async () => {
+    const userGroup = { hooks: [
+      { type: 'command', command: '~/bin/preamble-logger.sh' },
+      { type: 'command', command: '/usr/local/bin/notify-prompt' },
+    ] };
+    const original = JSON.stringify({ hooks: { UserPromptSubmit: [userGroup] } }, null, 2) + '\n';
+    await fs.writeFile(settingsPath, original, 'utf-8');
+
+    await createAmbientCommand().parseAsync(['--enable'], { from: 'user' });
+    const enabled = JSON.parse(await fs.readFile(settingsPath, 'utf-8'));
+    expect(enabled.hooks.UserPromptSubmit).toHaveLength(2);
+    expect(enabled.hooks.UserPromptSubmit[0]).toEqual(userGroup);
+
+    await createAmbientCommand().parseAsync(['--disable'], { from: 'user' });
+    expect(await fs.readFile(settingsPath, 'utf-8')).toBe(original);
   });
 });
 
