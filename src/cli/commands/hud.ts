@@ -25,7 +25,8 @@ interface Settings {
 /**
  * Add the HUD statusLine to settings JSON.
  * Idempotent — returns unchanged JSON if HUD already set.
- * Upgrades legacy statusline.sh to hud.sh automatically.
+ * Upgrades devflow's legacy statusline.sh to hud.sh automatically; a statusLine
+ * that is not devflow's is returned unchanged (D-HUD-EXACT-OWNER).
  */
 export function addHudStatusLine(
   settingsJson: string,
@@ -83,17 +84,34 @@ export function hasHudStatusLine(settingsJson: string): boolean {
 }
 
 /**
+ * The statusLine command endings devflow has ever written: the HUD, and the
+ * pre-HUD `statusline.sh` it replaced.
+ */
+const DEVFLOW_STATUSLINE_SUFFIXES = [
+  '/.devflow/scripts/hud.sh',
+  '/.devflow/scripts/statusline.sh',
+] as const;
+
+/**
  * Check if an existing statusLine belongs to Devflow (HUD or legacy statusline).
- * Matches paths containing 'hud.sh', 'statusline.sh', or a '/devflow/' directory segment.
+ *
+ * D-HUD-EXACT-OWNER: a statusLine is devflow's only when its command ends in
+ * `/.devflow/scripts/hud.sh` or the legacy `/.devflow/scripts/statusline.sh`, under
+ * any parent directory — so installs from the custom-directory and local-scope era
+ * are still recognised. A bare `statusline.sh` (the Claude Code docs' own example,
+ * `~/.claude/statusline.sh`) or a path that merely contains a `devflow` segment is
+ * the user's (applies ADR-024: remove or replace only what devflow provably wrote).
+ * Backslashes are read as slashes so a Windows install is matched the same way.
+ *
+ * Every caller converges through this one predicate: `addHudStatusLine` (init's
+ * settings pass with the HUD on, `init --hud-only`, `hud --enable`),
+ * `removeHudStatusLine` (init's settings pass with `--no-hud`, `hud --disable`,
+ * uninstall's `runCleanupPhase`), and `hasHudStatusLine` / `hasNonDevFlowStatusLine`
+ * (`hud --enable`, `hud --status`).
  */
 function isDevFlowStatusLine(statusLine: StatusLine): boolean {
-  const cmd = statusLine.command ?? '';
-  return (
-    cmd.includes('hud.sh') ||
-    cmd.includes('statusline.sh') ||
-    cmd.includes('/devflow/') ||
-    cmd.includes('\\devflow\\')
-  );
+  const cmd = (statusLine.command ?? '').trim().replace(/\\/g, '/');
+  return DEVFLOW_STATUSLINE_SUFFIXES.some((suffix) => cmd.endsWith(suffix));
 }
 
 /**
