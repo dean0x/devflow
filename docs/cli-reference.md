@@ -41,6 +41,10 @@ Devflow installs machine-wide, into the Claude Code directory and `~/.devflow`:
 - `~/.devflow` is always the machine root. `DEVFLOW_DIR` is ignored.
 - There is no project-local install. `init --scope local` exits 1 and points at `devflow uninstall --scope local`, which removes an old project-local install (`<repo>/.claude` and `<repo>/.devflow` install artifacts) without touching anything under your home directory.
 
+### Your hooks stay yours
+
+`init`, the `ambient`, `memory` and `proxy` toggles, and `uninstall` add and remove only the hooks devflow wrote in `settings.json`. A hook is devflow's only when its command ends in `/scripts/hooks/run-hook <name>`, or in a form an older release wrote (such as `/scripts/hooks/session-start-memory.sh`). A hook of yours whose command merely mentions a devflow hook's name (`capture-turn`, `memory-worker`, `ensure-proxy`, ...) is never touched, and removing a devflow hook leaves the other hooks in its matcher group in place, in order.
+
 ## Plugin Management
 
 ```bash
@@ -379,4 +383,4 @@ npx devflow-kit uninstall
 | `--dry-run` | Show what would be removed |
 | `--verbose` | Show detailed output |
 
-**Project data.** A full uninstall run interactively inside a git repository offers to remove that repository's `.devflow/` at the git root, wherever in the repository you run it. Before asking, it lists what it would remove and what it keeps: `features/`, `conventions.md`, `policy.json` and `project.json` are shared through git and are always kept, so an uncommitted edit to one of them survives. Outside a git repository, or in a repository rooted at your home directory (whose `.devflow/` is the machine-wide install), the step is skipped. `--keep-docs`, a non-interactive run, and answering no all leave `.devflow/` as it was.
+**Project data.** A full uninstall run interactively inside a git repository offers to remove that repository's `.devflow/` at the git root, wherever in the repository you run it. Before asking, it lists what it would remove and what it keeps: `features/`, `conventions.md`, `policy.json` and `project.json` are shared through git and are always kept, so an uncommitted edit to one of them survives. Outside a git repository, or in a repository rooted at your home directory (whose `.devflow/` is the machine-wide install), the step is skipped. If the repository's `.devflow` is a symbolic link, the step is skipped too and says so: devflow does not follow the link, so neither the link nor what it points to is touched, and `--dry-run` reports the same. `--keep-docs`, a non-interactive run, and answering no all leave `.devflow/` as it was.
