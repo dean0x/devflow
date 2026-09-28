@@ -55,7 +55,14 @@ import {
   getDevFlowDirectory,
   getHomeDirectory,
 } from '../../targets/claude-code/claude-paths.js';
-import type { Settings, HookMatcher } from '../../targets/claude-code/hooks.js';
+import {
+  devflowHookOwner,
+  ensureHook,
+  hasHook,
+  removeHooks,
+  runHookCommand,
+  type Settings,
+} from '../../targets/claude-code/hooks.js';
 
 // ─── Result type (local pattern) ──────────────────────────────────────────────
 
@@ -71,8 +78,19 @@ function Err<E>(error: E): Result<never, E> {
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
-/** Marker used to identify ensure-proxy hook entries. */
+/** The run-hook marker of the ensure-proxy hook. */
 const PROXY_HOOK_MARKER = 'ensure-proxy';
+
+/**
+ * D-EXACT-HOOK-OWNER: the ensure-proxy hook is devflow's only when its command ends
+ * in `/scripts/hooks/run-hook ensure-proxy` (hooks.ts), under any directory — the one
+ * form it has ever been registered in. A user's hook that merely mentions the word
+ * is theirs.
+ */
+const isProxyHook = devflowHookOwner([PROXY_HOOK_MARKER]);
+
+/** The events the ensure-proxy hook is registered on. */
+const PROXY_HOOK_EVENTS = ['SessionStart', 'UserPromptSubmit'] as const;
 
 /** Pattern matching our relay's ANTHROPIC_BASE_URL value. */
 const OUR_BASE_URL_PATTERN = /^http:\/\/127\.0\.0\.1:\d+$/;
@@ -209,34 +227,6 @@ function _stripProxyEnvFromObject(settings: Settings, managedPort: number): bool
   return removedUrl || hadWindowVar; // OR the locals — never compose with || inline (PF-015)
 }
 
-/** Internal: add ensure-proxy hook to one event. Returns true when added. */
-function _ensureProxyHook(settings: Settings, eventName: string, hookCmd: string): boolean {
-  const existing = settings.hooks?.[eventName];
-  if (existing?.some((m) => m.hooks.some((h) => h.command.includes(PROXY_HOOK_MARKER)))) {
-    return false;
-  }
-  settings.hooks ??= {};
-  settings.hooks[eventName] ??= [];
-  const entry: HookMatcher = {
-    hooks: [{ type: 'command', command: hookCmd, timeout: 15 }],
-  };
-  settings.hooks[eventName].push(entry);
-  return true;
-}
-
-/** Internal: remove ensure-proxy hooks from one event. Returns true when removed. */
-function _filterProxyHooks(settings: Settings, eventName: string): boolean {
-  if (!settings.hooks?.[eventName]) return false;
-  const before = settings.hooks[eventName].length;
-  settings.hooks[eventName] = settings.hooks[eventName].filter(
-    (m) => !m.hooks.some((h) => h.command.includes(PROXY_HOOK_MARKER)),
-  );
-  if (settings.hooks[eventName].length === before) return false;
-  if (settings.hooks[eventName].length === 0) delete settings.hooks[eventName];
-  if (Object.keys(settings.hooks).length === 0) delete settings.hooks;
-  return true;
-}
-
 // ─── Pure env functions (exported for testing and cross-module reuse) ─────────
 
 /**
@@ -299,22 +289,26 @@ export function readProxyEnvState(
  * Mutates settings in place. Returns true when any hook was added.
  */
 export function addProxyHooks(settings: Settings, devflowDir: string): boolean {
-  const hookCmd =
-    path.join(devflowDir, 'scripts', 'hooks', 'run-hook') + ' ' + PROXY_HOOK_MARKER;
-  const addedSession = _ensureProxyHook(settings, 'SessionStart', hookCmd);
-  const addedPrompt = _ensureProxyHook(settings, 'UserPromptSubmit', hookCmd);
+  const command = runHookCommand(devflowDir, PROXY_HOOK_MARKER);
+  // Evaluate each event into its own local — never short-circuit (PF-015).
+  const [addedSession, addedPrompt] = PROXY_HOOK_EVENTS.map((event) =>
+    ensureHook(settings, event, isProxyHook, { hooks: [{ type: 'command', command, timeout: 15 }] }),
+  );
   return addedSession || addedPrompt;
 }
 
 /**
  * Remove ensure-proxy hooks from all events.
  * Idempotent — no-op when hooks are not present.
- * Preserves other hooks. Cleans empty arrays/objects.
+ * Removes single hooks, so the other hooks of a shared matcher group stay in place
+ * (D-EXACT-HOOK-OWNER). Cleans empty arrays/objects.
  * Mutates settings in place. Returns true when any hook was removed.
  */
 export function removeProxyHooks(settings: Settings): boolean {
-  const removedSession = _filterProxyHooks(settings, 'SessionStart');
-  const removedPrompt = _filterProxyHooks(settings, 'UserPromptSubmit');
+  // Evaluate each event into its own local — never short-circuit (PF-015).
+  const [removedSession, removedPrompt] = PROXY_HOOK_EVENTS.map((event) =>
+    removeHooks(settings, event, isProxyHook),
+  );
   return removedSession || removedPrompt;
 }
 
@@ -374,11 +368,7 @@ export function applyProxyTeardownToSettings(
  */
 export function hasProxyHooks(input: string | Settings): boolean {
   const settings: Settings = typeof input === 'string' ? JSON.parse(input) as Settings : input;
-  const check = (eventName: string) =>
-    settings.hooks?.[eventName]?.some((m) =>
-      m.hooks.some((h) => h.command.includes(PROXY_HOOK_MARKER)),
-    ) === true;
-  return check('SessionStart') || check('UserPromptSubmit');
+  return PROXY_HOOK_EVENTS.some((event) => hasHook(settings, event, isProxyHook));
 }
 
 // ─── Health-check identity helper ────────────────────────────────────────────
