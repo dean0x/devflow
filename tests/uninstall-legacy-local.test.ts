@@ -177,6 +177,10 @@ describe('legacy local uninstall phases never touch HOME (AC-43, in-process)', (
     repo = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'devflow-legacy-repo-')));
     await seedLegacyRepo(repo);
     confirmMessages.length = 0;
+    // detectShell() answers `powershell` whenever PSModulePath is set (it is on
+    // GitHub's Ubuntu runners), which would point the safe-delete step at a
+    // profile this fixture never seeds and make the prompt assertions vacuous.
+    vi.stubEnv('PSModulePath', '');
     vi.stubEnv('SHELL', '/bin/zsh');
   });
 
