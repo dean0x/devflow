@@ -94,8 +94,9 @@ effect of a one-key toggle. Refuses `{ok: false, error: 'not-installed'}` when n
 All three hooks source `queue-append` and call `queue_append_both`, which gates each write
 independently via `_QG_MEMORY`/`_QG_LEARNING` flags from a single
 `queue_read_gates "$DEVFLOW_MANIFEST"` call (AC-P1 — one subprocess per hook invocation).
-`$DEVFLOW_MANIFEST` is `${DEVFLOW_DIR:-$HOME/.devflow}/manifest.json`, always resolved BEFORE
-the project-scoped `DEVFLOW_DIR="$PROJECT_ROOT/.devflow"` reassignment.
+`$DEVFLOW_MANIFEST` is `$HOME/.devflow/manifest.json` — the machine root, which no environment
+variable relocates (D-ONE-HOME, #389). The project's own `.devflow` is a separate hook-local,
+`PROJECT_DEVFLOW_DIR="$PROJECT_ROOT/.devflow"`.
 
 Config splits along a different line than before #378:
 
@@ -118,7 +119,7 @@ Git agent's resolution order.
 All three capture hooks enforce in order: (1) **re-entrancy guard**
 (`if [ "${DEVFLOW_BG_UPDATER:-}" = "1" ]; then exit 0; fi`, before `hook-bootstrap`, prevents
 double-capture of the memory worker's own claude session); (2) **single config fork** via
-`queue_read_gates "$DEVFLOW_MANIFEST"` (resolved before the `DEVFLOW_DIR` shadow); (3) **JSONL
+`queue_read_gates "$DEVFLOW_MANIFEST"` (the machine-root manifest); (3) **JSONL
 append** via `jq` or `node JSON.stringify` (never string concatenation), `umask 077`;
 (4) **overflow guard** (>200 lines → truncate to newest 100, under `learning_lock_acquire`, 2s
 timeout). `capture-turn` also runs `decisions-usage-scan.cjs` before append when the assistant
@@ -131,9 +132,9 @@ delimiter for the combined `cwd+field` in `json_extract_cwd_field` — one subpr
 Emits `--- LEARNING MAINTENANCE ---` when `.pending-turns.jsonl` is non-empty OR
 `.pending-turns.processing` is stale (>= 900s); a fresh `.processing` suppresses it. Gated by the
 same `queue_read_gates` read, resolved from `$TRACKER_DEVFLOW_DIR/manifest.json`
-(`TRACKER_DEVFLOW_DIR="${DEVFLOW_DIR:-$HOME/.devflow}"`, captured ABOVE the project-scoped
-`DEVFLOW_DIR` reassignment — the global `learning.json` read still separately hardcodes
-`$HOME/.devflow`, a known divergence). Model resolves bash-side (project → global → `"opus"`)
+(`TRACKER_DEVFLOW_DIR="$HOME/.devflow"`, the machine root; the project root's `.devflow` is
+`PROJECT_DEVFLOW_DIR` — the global `learning.json` read spells `$HOME/.devflow` too, so the two
+no longer diverge). Model resolves bash-side (project → global → `"opus"`)
 through a mandatory `case "$LEARNING_MODEL" in opus|sonnet|haiku)` allowlist before
 interpolation — `learning.json` is user-controlled, so a newline-injected value must not reach
 `additionalContext`. Emitted with `subagent_type="Learning"`, `run_in_background: true`.
@@ -225,12 +226,11 @@ formatter (D5).
 
 ### Memory Worker (background-memory-update)
 
-**Manifest handoff**: `memory-worker` resolves `DEVFLOW_MANIFEST` BEFORE shadowing `DEVFLOW_DIR`
-to the project root, gates its own spawn decision on it, then hands that path explicitly to
-`background-memory-update` as `$2` (`background-memory-update <CWD> [<manifest_path>]`) — the
-worker re-checks the switch after spawn, once `DEVFLOW_DIR` in the spawned process names the
-project `.devflow`. When `$2` is absent, the worker falls back to the same
-`${DEVFLOW_DIR:-$HOME/.devflow}/manifest.json` resolution.
+**Manifest handoff**: `memory-worker` resolves `DEVFLOW_MANIFEST` (`$HOME/.devflow/manifest.json`),
+gates its own spawn decision on it, then hands that path explicitly to `background-memory-update`
+as `$2` (`background-memory-update <CWD> [<manifest_path>]`) — the worker re-checks the switch
+after spawn against the same manifest. When `$2` is absent, the worker falls back to
+`$HOME/.devflow/manifest.json`. An exported `DEVFLOW_DIR` is ignored everywhere (D-ONE-HOME).
 
 **Staged-write CAS (`verify_and_swap()` — applies ADR-023)**: the model writes ONLY
 `WORKING-MEMORY.md.new`, never the real file; `verify_and_swap()` assigns one OUTCOME —
@@ -330,10 +330,9 @@ Do not rename them: `decisions.md`/`pitfalls.md` (rendered output), `decisions-l
   `readMachineFeature`/`writeMachineFeature` against `~/.devflow/manifest.json` instead — this is
   exactly the bug #378 fixed.
 
-- **Resolving the manifest path AFTER shadowing `DEVFLOW_DIR` to the project root**: every caller
-  must capture the manifest path BEFORE reassigning `DEVFLOW_DIR`. Reversing the order silently
-  points the gate at a project path that never has a manifest — reads as fail-open ON regardless
-  of the real switch.
+- **Resolving the manifest path from the project root**: the manifest lives at the machine root
+  (`$HOME/.devflow/manifest.json`), never under `PROJECT_DEVFLOW_DIR`. A gate pointed at the
+  project path finds no manifest — reads as fail-open ON regardless of the real switch.
 
 - **Editing `decisions.md`/`pitfalls.md`/`index.md` directly**: exclusively owned by the ledger
   ops; hand-edits get silently overwritten.
@@ -409,8 +408,8 @@ Do not rename them: `decisions.md`/`pitfalls.md` (rendered output), `decisions-l
 - **Section 3 is not gated by the `learning` toggle**: disabling learning does not disable the
   issue tracker.
 
-- **Every `session-start-context` test seeds a temp `$HOME` and an explicit empty `DEVFLOW_DIR`**
-  — since manifest resolution is user-scope by design, a real `~/.devflow/manifest.json` with
+- **Every `session-start-context` test seeds a temp `$HOME`** (the hooks read `$HOME/.devflow`
+  only, so HOME is the whole isolation) — since manifest resolution is user-scope by design, a real `~/.devflow/manifest.json` with
   `features.learning: false` on the test machine would otherwise silently gate the test.
 
 - **A shell command-rewrite hook can silently truncate a `cat`/`head` read of a `.devflow` data
