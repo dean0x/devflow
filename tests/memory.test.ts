@@ -3,7 +3,7 @@ import { promises as fs } from 'fs';
 import * as path from 'path';
 import * as os from 'os';
 import { exec } from 'child_process';
-import { addMemoryHooks, removeMemoryHooks, hasMemoryHooks, countMemoryHooks, cleanQueueFiles, hasMemoryDir, filterProjectsWithMemory } from '../src/cli/commands/memory.js';
+import { addMemoryHooks, removeMemoryHooks, hasMemoryHooks, countMemoryHooks, convergeMemoryHooks, cleanQueueFiles, hasMemoryDir, filterProjectsWithMemory } from '../src/cli/commands/memory.js';
 
 /**
  * Seed a temp HOME that stands in for `~/.devflow`.
@@ -52,7 +52,7 @@ describe('addMemoryHooks', () => {
   it('does not touch UserPromptSubmit — owned by capture.ts, not memory.ts', () => {
     const input = JSON.stringify({
       hooks: {
-        UserPromptSubmit: [{ hooks: [{ type: 'command', command: '/path/run-hook preamble' }] }],
+        UserPromptSubmit: [{ hooks: [{ type: 'command', command: '/path/.devflow/scripts/hooks/run-hook preamble' }] }],
       },
     });
     const result = addMemoryHooks(input, '/home/user/.devflow');
@@ -75,8 +75,8 @@ describe('addMemoryHooks', () => {
   it('adds only missing hooks when partial state (1 hook missing)', () => {
     const input = JSON.stringify({
       hooks: {
-        Stop: [{ hooks: [{ type: 'command', command: '/path/memory-worker', timeout: 10 }] }],
-        SessionStart: [{ hooks: [{ type: 'command', command: '/path/session-start-memory', timeout: 10 }] }],
+        Stop: [{ hooks: [{ type: 'command', command: '/path/.devflow/scripts/hooks/run-hook memory-worker', timeout: 10 }] }],
+        SessionStart: [{ hooks: [{ type: 'command', command: '/path/.devflow/scripts/hooks/run-hook session-start-memory', timeout: 10 }] }],
       },
     });
     const result = addMemoryHooks(input, '/home/user/.devflow');
@@ -147,10 +147,10 @@ describe('removeMemoryHooks', () => {
     const input = JSON.stringify({
       hooks: {
         UserPromptSubmit: [
-          { hooks: [{ type: 'command', command: '/path/run-hook preamble' }] },
-          { hooks: [{ type: 'command', command: '/path/run-hook capture-prompt' }] },
+          { hooks: [{ type: 'command', command: '/path/.devflow/scripts/hooks/run-hook preamble' }] },
+          { hooks: [{ type: 'command', command: '/path/.devflow/scripts/hooks/run-hook capture-prompt' }] },
         ],
-        Stop: [{ hooks: [{ type: 'command', command: '/path/memory-worker' }] }],
+        Stop: [{ hooks: [{ type: 'command', command: '/path/.devflow/scripts/hooks/run-hook memory-worker' }] }],
       },
     });
     const result = removeMemoryHooks(input);
@@ -173,7 +173,7 @@ describe('removeMemoryHooks', () => {
   it('cleans empty hook type arrays', () => {
     const input = JSON.stringify({
       hooks: {
-        Stop: [{ hooks: [{ type: 'command', command: '/path/memory-worker' }] }],
+        Stop: [{ hooks: [{ type: 'command', command: '/path/.devflow/scripts/hooks/run-hook memory-worker' }] }],
       },
     });
     const result = removeMemoryHooks(input);
@@ -193,7 +193,7 @@ describe('removeMemoryHooks', () => {
   it('removes only the hooks that exist (partial)', () => {
     const input = JSON.stringify({
       hooks: {
-        Stop: [{ hooks: [{ type: 'command', command: '/path/memory-worker' }] }],
+        Stop: [{ hooks: [{ type: 'command', command: '/path/.devflow/scripts/hooks/run-hook memory-worker' }] }],
         // SessionStart, PreCompact already missing
       },
     });
@@ -207,9 +207,9 @@ describe('removeMemoryHooks', () => {
     const input = JSON.stringify({
       statusLine: { type: 'command' },
       hooks: {
-        Stop: [{ hooks: [{ type: 'command', command: '/path/memory-worker' }] }],
-        SessionStart: [{ hooks: [{ type: 'command', command: '/path/session-start-memory' }] }],
-        PreCompact: [{ hooks: [{ type: 'command', command: '/path/pre-compact-memory' }] }],
+        Stop: [{ hooks: [{ type: 'command', command: '/path/.devflow/scripts/hooks/run-hook memory-worker' }] }],
+        SessionStart: [{ hooks: [{ type: 'command', command: '/path/.devflow/scripts/hooks/run-hook session-start-memory' }] }],
+        PreCompact: [{ hooks: [{ type: 'command', command: '/path/.devflow/scripts/hooks/run-hook pre-compact-memory' }] }],
       },
     });
     const result = removeMemoryHooks(input);
@@ -243,7 +243,7 @@ describe('hasMemoryHooks', () => {
   it('returns false when partial (1 of 3)', () => {
     const input = JSON.stringify({
       hooks: {
-        Stop: [{ hooks: [{ type: 'command', command: '/path/memory-worker' }] }],
+        Stop: [{ hooks: [{ type: 'command', command: '/path/.devflow/scripts/hooks/run-hook memory-worker' }] }],
       },
     });
     expect(hasMemoryHooks(input)).toBe(false);
@@ -252,8 +252,8 @@ describe('hasMemoryHooks', () => {
   it('returns false when partial (2 of 3 — missing PreCompact)', () => {
     const input = JSON.stringify({
       hooks: {
-        Stop: [{ hooks: [{ type: 'command', command: '/path/memory-worker' }] }],
-        SessionStart: [{ hooks: [{ type: 'command', command: '/path/session-start-memory' }] }],
+        Stop: [{ hooks: [{ type: 'command', command: '/path/.devflow/scripts/hooks/run-hook memory-worker' }] }],
+        SessionStart: [{ hooks: [{ type: 'command', command: '/path/.devflow/scripts/hooks/run-hook session-start-memory' }] }],
       },
     });
     expect(hasMemoryHooks(input)).toBe(false);
@@ -282,8 +282,8 @@ describe('countMemoryHooks', () => {
   it('returns correct partial count (2 of 3)', () => {
     const input = JSON.stringify({
       hooks: {
-        Stop: [{ hooks: [{ type: 'command', command: '/path/memory-worker' }] }],
-        SessionStart: [{ hooks: [{ type: 'command', command: '/path/session-start-memory' }] }],
+        Stop: [{ hooks: [{ type: 'command', command: '/path/.devflow/scripts/hooks/run-hook memory-worker' }] }],
+        SessionStart: [{ hooks: [{ type: 'command', command: '/path/.devflow/scripts/hooks/run-hook session-start-memory' }] }],
       },
     });
     expect(countMemoryHooks(input)).toBe(2);
@@ -293,9 +293,9 @@ describe('countMemoryHooks', () => {
     const input = JSON.stringify({
       hooks: {
         UserPromptSubmit: [{ hooks: [{ type: 'command', command: '/path/preamble' }] }],
-        Stop: [{ hooks: [{ type: 'command', command: '/path/memory-worker' }] }],
-        SessionStart: [{ hooks: [{ type: 'command', command: '/path/session-start-memory' }] }],
-        PreCompact: [{ hooks: [{ type: 'command', command: '/path/pre-compact-memory' }] }],
+        Stop: [{ hooks: [{ type: 'command', command: '/path/.devflow/scripts/hooks/run-hook memory-worker' }] }],
+        SessionStart: [{ hooks: [{ type: 'command', command: '/path/.devflow/scripts/hooks/run-hook session-start-memory' }] }],
+        PreCompact: [{ hooks: [{ type: 'command', command: '/path/.devflow/scripts/hooks/run-hook pre-compact-memory' }] }],
       },
     });
     expect(countMemoryHooks(input)).toBe(3);
@@ -306,9 +306,9 @@ describe('countMemoryHooks accepts parsed Settings', () => {
   it('accepts a parsed Settings object (not just JSON string)', () => {
     const settings = {
       hooks: {
-        Stop: [{ hooks: [{ type: 'command' as const, command: '/path/memory-worker', timeout: 10 }] }],
-        SessionStart: [{ hooks: [{ type: 'command' as const, command: '/path/session-start-memory', timeout: 10 }] }],
-        PreCompact: [{ hooks: [{ type: 'command' as const, command: '/path/pre-compact-memory', timeout: 10 }] }],
+        Stop: [{ hooks: [{ type: 'command' as const, command: '/path/.devflow/scripts/hooks/run-hook memory-worker', timeout: 10 }] }],
+        SessionStart: [{ hooks: [{ type: 'command' as const, command: '/path/.devflow/scripts/hooks/run-hook session-start-memory', timeout: 10 }] }],
+        PreCompact: [{ hooks: [{ type: 'command' as const, command: '/path/.devflow/scripts/hooks/run-hook pre-compact-memory', timeout: 10 }] }],
       },
     };
     expect(countMemoryHooks(settings)).toBe(3);
@@ -324,8 +324,8 @@ describe('countMemoryHooks accepts parsed Settings', () => {
   it('accepts parsed Settings with partial hooks', () => {
     const settings = {
       hooks: {
-        Stop: [{ hooks: [{ type: 'command' as const, command: '/path/memory-worker', timeout: 10 }] }],
-        SessionStart: [{ hooks: [{ type: 'command' as const, command: '/path/session-start-memory', timeout: 10 }] }],
+        Stop: [{ hooks: [{ type: 'command' as const, command: '/path/.devflow/scripts/hooks/run-hook memory-worker', timeout: 10 }] }],
+        SessionStart: [{ hooks: [{ type: 'command' as const, command: '/path/.devflow/scripts/hooks/run-hook session-start-memory', timeout: 10 }] }],
       },
     };
     expect(countMemoryHooks(settings)).toBe(2);
@@ -489,9 +489,9 @@ describe('removeMemoryHooks accepts parsed Settings', () => {
   it('accepts a parsed Settings object and returns JSON string', () => {
     const settings = {
       hooks: {
-        Stop: [{ hooks: [{ type: 'command' as const, command: '/path/memory-worker', timeout: 10 }] }],
-        SessionStart: [{ hooks: [{ type: 'command' as const, command: '/path/session-start-memory', timeout: 10 }] }],
-        PreCompact: [{ hooks: [{ type: 'command' as const, command: '/path/pre-compact-memory', timeout: 10 }] }],
+        Stop: [{ hooks: [{ type: 'command' as const, command: '/path/.devflow/scripts/hooks/run-hook memory-worker', timeout: 10 }] }],
+        SessionStart: [{ hooks: [{ type: 'command' as const, command: '/path/.devflow/scripts/hooks/run-hook session-start-memory', timeout: 10 }] }],
+        PreCompact: [{ hooks: [{ type: 'command' as const, command: '/path/.devflow/scripts/hooks/run-hook pre-compact-memory', timeout: 10 }] }],
       },
     };
     const result = removeMemoryHooks(settings);
@@ -502,7 +502,7 @@ describe('removeMemoryHooks accepts parsed Settings', () => {
   it('does not mutate the original Settings object when passed by reference', () => {
     const settings = {
       hooks: {
-        Stop: [{ hooks: [{ type: 'command' as const, command: '/path/memory-worker', timeout: 10 }] }],
+        Stop: [{ hooks: [{ type: 'command' as const, command: '/path/.devflow/scripts/hooks/run-hook memory-worker', timeout: 10 }] }],
       },
     };
     removeMemoryHooks(settings);
@@ -513,7 +513,7 @@ describe('removeMemoryHooks accepts parsed Settings', () => {
   it('consistent API: string and Settings produce same result', () => {
     const settingsObj = {
       hooks: {
-        Stop: [{ hooks: [{ type: 'command' as const, command: '/path/memory-worker', timeout: 10 }] }],
+        Stop: [{ hooks: [{ type: 'command' as const, command: '/path/.devflow/scripts/hooks/run-hook memory-worker', timeout: 10 }] }],
       },
     };
     const resultFromObj = removeMemoryHooks(settingsObj);
@@ -652,8 +652,8 @@ describe('removeMemoryHooks removes legacy hook registrations', () => {
     const input = JSON.stringify({
       hooks: {
         UserPromptSubmit: [
-          { hooks: [{ type: 'command', command: '/path/run-hook sidecar-dispatch', timeout: 10 }] },
-          { hooks: [{ type: 'command', command: '/path/run-hook preamble', timeout: 10 }] },
+          { hooks: [{ type: 'command', command: '/path/.devflow/scripts/hooks/run-hook sidecar-dispatch', timeout: 10 }] },
+          { hooks: [{ type: 'command', command: '/path/.devflow/scripts/hooks/run-hook preamble', timeout: 10 }] },
         ],
       },
     });
@@ -669,7 +669,7 @@ describe('removeMemoryHooks removes legacy hook registrations', () => {
     const input = JSON.stringify({
       hooks: {
         Stop: [
-          { hooks: [{ type: 'command', command: '/path/run-hook sidecar-capture', timeout: 10 }] },
+          { hooks: [{ type: 'command', command: '/path/.devflow/scripts/hooks/run-hook sidecar-capture', timeout: 10 }] },
         ],
       },
     });
@@ -682,7 +682,7 @@ describe('removeMemoryHooks removes legacy hook registrations', () => {
     const input = JSON.stringify({
       hooks: {
         SessionEnd: [
-          { hooks: [{ type: 'command', command: '/path/run-hook sidecar-evaluate', timeout: 10 }] },
+          { hooks: [{ type: 'command', command: '/path/.devflow/scripts/hooks/run-hook sidecar-evaluate', timeout: 10 }] },
         ],
       },
     });
@@ -695,8 +695,8 @@ describe('removeMemoryHooks removes legacy hook registrations', () => {
     const input = JSON.stringify({
       hooks: {
         UserPromptSubmit: [
-          { hooks: [{ type: 'command', command: '/path/run-hook prompt-capture-memory', timeout: 10 }] },
-          { hooks: [{ type: 'command', command: '/path/run-hook preamble', timeout: 10 }] },
+          { hooks: [{ type: 'command', command: '/path/.devflow/scripts/hooks/run-hook prompt-capture-memory', timeout: 10 }] },
+          { hooks: [{ type: 'command', command: '/path/.devflow/scripts/hooks/run-hook preamble', timeout: 10 }] },
         ],
       },
     });
@@ -712,8 +712,8 @@ describe('removeMemoryHooks removes legacy hook registrations', () => {
     const input = JSON.stringify({
       hooks: {
         Stop: [
-          { hooks: [{ type: 'command', command: '/path/run-hook stop-update-memory', timeout: 10 }] },
-          { hooks: [{ type: 'command', command: '/path/run-hook stop-update-learning', timeout: 10 }] },
+          { hooks: [{ type: 'command', command: '/path/.devflow/scripts/hooks/run-hook stop-update-memory', timeout: 10 }] },
+          { hooks: [{ type: 'command', command: '/path/.devflow/scripts/hooks/run-hook stop-update-learning', timeout: 10 }] },
         ],
       },
     });
@@ -727,9 +727,9 @@ describe('removeMemoryHooks removes legacy hook registrations', () => {
     const input = JSON.stringify({
       hooks: {
         SessionEnd: [
-          { hooks: [{ type: 'command', command: '/path/run-hook session-end-learning', timeout: 10 }] },
-          { hooks: [{ type: 'command', command: '/path/run-hook session-end-decisions', timeout: 10 }] },
-          { hooks: [{ type: 'command', command: '/path/run-hook session-end-knowledge-refresh', timeout: 10 }] },
+          { hooks: [{ type: 'command', command: '/path/.devflow/scripts/hooks/run-hook session-end-learning', timeout: 10 }] },
+          { hooks: [{ type: 'command', command: '/path/.devflow/scripts/hooks/run-hook session-end-decisions', timeout: 10 }] },
+          { hooks: [{ type: 'command', command: '/path/.devflow/scripts/hooks/run-hook session-end-knowledge-refresh', timeout: 10 }] },
         ],
       },
     });
@@ -747,14 +747,14 @@ describe('removeMemoryHooks removes legacy hook registrations', () => {
     const input = JSON.stringify({
       hooks: {
         UserPromptSubmit: [
-          { hooks: [{ type: 'command', command: '/path/run-hook dream-dispatch', timeout: 10 }] },
-          { hooks: [{ type: 'command', command: '/path/run-hook preamble', timeout: 10 }] },
+          { hooks: [{ type: 'command', command: '/path/.devflow/scripts/hooks/run-hook dream-dispatch', timeout: 10 }] },
+          { hooks: [{ type: 'command', command: '/path/.devflow/scripts/hooks/run-hook preamble', timeout: 10 }] },
         ],
         Stop: [
-          { hooks: [{ type: 'command', command: '/path/run-hook dream-capture', timeout: 10 }] },
+          { hooks: [{ type: 'command', command: '/path/.devflow/scripts/hooks/run-hook dream-capture', timeout: 10 }] },
         ],
         SessionEnd: [
-          { hooks: [{ type: 'command', command: '/path/run-hook dream-evaluate', timeout: 10 }] },
+          { hooks: [{ type: 'command', command: '/path/.devflow/scripts/hooks/run-hook dream-evaluate', timeout: 10 }] },
         ],
       },
     });
@@ -774,23 +774,23 @@ describe('removeMemoryHooks removes legacy hook registrations', () => {
     const input = JSON.stringify({
       hooks: {
         UserPromptSubmit: [
-          { hooks: [{ type: 'command', command: '/path/run-hook prompt-capture-memory', timeout: 10 }] },
-          { hooks: [{ type: 'command', command: '/path/run-hook dream-dispatch', timeout: 10 }] },
+          { hooks: [{ type: 'command', command: '/path/.devflow/scripts/hooks/run-hook prompt-capture-memory', timeout: 10 }] },
+          { hooks: [{ type: 'command', command: '/path/.devflow/scripts/hooks/run-hook dream-dispatch', timeout: 10 }] },
         ],
         Stop: [
-          { hooks: [{ type: 'command', command: '/path/run-hook stop-update-memory', timeout: 10 }] },
-          { hooks: [{ type: 'command', command: '/path/run-hook dream-capture', timeout: 10 }] },
-          { hooks: [{ type: 'command', command: '/path/run-hook memory-worker', timeout: 10 }] },
+          { hooks: [{ type: 'command', command: '/path/.devflow/scripts/hooks/run-hook stop-update-memory', timeout: 10 }] },
+          { hooks: [{ type: 'command', command: '/path/.devflow/scripts/hooks/run-hook dream-capture', timeout: 10 }] },
+          { hooks: [{ type: 'command', command: '/path/.devflow/scripts/hooks/run-hook memory-worker', timeout: 10 }] },
         ],
         SessionEnd: [
-          { hooks: [{ type: 'command', command: '/path/run-hook session-end-learning', timeout: 10 }] },
-          { hooks: [{ type: 'command', command: '/path/run-hook dream-evaluate', timeout: 10 }] },
+          { hooks: [{ type: 'command', command: '/path/.devflow/scripts/hooks/run-hook session-end-learning', timeout: 10 }] },
+          { hooks: [{ type: 'command', command: '/path/.devflow/scripts/hooks/run-hook dream-evaluate', timeout: 10 }] },
         ],
         SessionStart: [
-          { hooks: [{ type: 'command', command: '/path/run-hook session-start-memory', timeout: 10 }] },
+          { hooks: [{ type: 'command', command: '/path/.devflow/scripts/hooks/run-hook session-start-memory', timeout: 10 }] },
         ],
         PreCompact: [
-          { hooks: [{ type: 'command', command: '/path/run-hook pre-compact-memory', timeout: 10 }] },
+          { hooks: [{ type: 'command', command: '/path/.devflow/scripts/hooks/run-hook pre-compact-memory', timeout: 10 }] },
         ],
       },
     });
@@ -801,5 +801,100 @@ describe('removeMemoryHooks removes legacy hook registrations', () => {
     // arrays) was either a legacy marker or a current memory hook, so nothing
     // survives — the whole `hooks` object is cleaned up entirely.
     expect(settings.hooks).toBeUndefined();
+  });
+});
+
+/**
+ * D-EXACT-HOOK-OWNER: a memory hook is devflow's only when its command ends in
+ * `/scripts/hooks/run-hook <marker>` — or a form an earlier release registered
+ * (the v1 direct `.sh` scripts, the retired run-hook markers) — under any
+ * directory. A user's hook that merely contains a marker word is theirs, and
+ * removal takes devflow's single hook out of a shared matcher group.
+ */
+describe('memory hook ownership is exact (#391)', () => {
+  const DEVFLOW = '/home/user/.devflow';
+  const run = (marker: string) => `${DEVFLOW}/scripts/hooks/run-hook ${marker}`;
+  /** User groups: every hook mentions a memory or legacy marker, none is devflow's. */
+  const USER_STOP = { hooks: [
+    { type: 'command', command: '~/bin/memory-worker --beep', timeout: 3 },
+    { type: 'command', command: 'echo stop-update-memory dream-capture >> /tmp/log' },
+    { type: 'command', command: '/opt/tools/run-hook memory-worker' },
+  ] };
+  const USER_SESSION = { matcher: 'startup', hooks: [
+    { type: 'command', command: 'my-session-start-memory-banner' },
+  ] };
+  const USER_COMPACT = { hooks: [{ type: 'command', command: 'notify pre-compact-memory.sh done' }] };
+  const USER_PROMPT = { hooks: [{ type: 'command', command: '~/bin/prompt-capture-memory' }] };
+  const USER_END = { hooks: [{ type: 'command', command: 'log session-end-learning' }] };
+  const userSettings = (): string => JSON.stringify({ hooks: {
+    Stop: [USER_STOP], SessionStart: [USER_SESSION], PreCompact: [USER_COMPACT],
+    UserPromptSubmit: [USER_PROMPT], SessionEnd: [USER_END],
+  } }, null, 2) + '\n';
+
+  it('user hooks that contain a memory marker word are not memory hooks', () => {
+    expect(countMemoryHooks(userSettings())).toBe(0);
+  });
+
+  it('disable on settings holding only user groups is a byte-identical no-op', () => {
+    const input = userSettings();
+    expect(removeMemoryHooks(input)).toBe(input);
+  });
+
+  it('enable registers devflow\'s three hooks after the byte-identical user groups', () => {
+    const enabled = JSON.parse(convergeMemoryHooks(userSettings(), true, DEVFLOW));
+
+    expect(enabled.hooks.Stop).toEqual([USER_STOP, { hooks: [{ type: 'command', command: run('memory-worker'), timeout: 10 }] }]);
+    expect(enabled.hooks.SessionStart[0]).toEqual(USER_SESSION);
+    expect(enabled.hooks.PreCompact[0]).toEqual(USER_COMPACT);
+    expect(enabled.hooks.UserPromptSubmit).toEqual([USER_PROMPT]);
+    expect(enabled.hooks.SessionEnd).toEqual([USER_END]);
+  });
+
+  it('enable → disable → enable (and a re-init) never touch the user groups', () => {
+    const on = convergeMemoryHooks(userSettings(), true, DEVFLOW);
+    const off = convergeMemoryHooks(on, false, DEVFLOW);
+    const reinit = convergeMemoryHooks(on, true, DEVFLOW);
+
+    expect(off).toBe(userSettings());
+    expect(reinit).toBe(on);
+  });
+
+  it('removes only devflow\'s hooks from shared matcher groups and keeps the siblings in order', () => {
+    const input = JSON.stringify({ hooks: {
+      Stop: [{ hooks: [
+        { type: 'command', command: run('capture-turn'), timeout: 10 },
+        { type: 'command', command: run('memory-worker'), timeout: 10 },
+        { type: 'command', command: 'say done' },
+      ] }],
+      SessionEnd: [{ hooks: [
+        { type: 'command', command: 'say bye' },
+        { type: 'command', command: run('dream-evaluate'), timeout: 10 },
+      ] }],
+    } });
+
+    const settings = JSON.parse(removeMemoryHooks(input));
+
+    expect(settings.hooks).toEqual({
+      Stop: [{ hooks: [
+        { type: 'command', command: run('capture-turn'), timeout: 10 },
+        { type: 'command', command: 'say done' },
+      ] }],
+      SessionEnd: [{ hooks: [{ type: 'command', command: 'say bye' }] }],
+    });
+  });
+
+  it.each([
+    ['Stop', 'v1 stop-update-memory.sh', '/Users/u/.devflow/scripts/hooks/stop-update-memory.sh'],
+    ['SessionStart', 'v1 session-start-memory.sh', '/Users/u/.devflow/scripts/hooks/session-start-memory.sh'],
+    ['PreCompact', 'v1 pre-compact-memory.sh', '/Users/u/.devflow/scripts/hooks/pre-compact-memory.sh'],
+    ['Stop', 'run-hook stop-update-memory', '/srv/old/.devflow/scripts/hooks/run-hook stop-update-memory'],
+    ['Stop', 'run-hook stop-update-learning', '/srv/old/.devflow/scripts/hooks/run-hook stop-update-learning'],
+    ['UserPromptSubmit', 'run-hook prompt-capture-memory', '/srv/old/.devflow/scripts/hooks/run-hook prompt-capture-memory'],
+    ['SessionEnd', 'run-hook session-end-decisions', '/srv/old/.devflow/scripts/hooks/run-hook session-end-decisions'],
+    ['Stop', 'a current hook under another directory', '/srv/old/.devflow/scripts/hooks/run-hook memory-worker'],
+    ['PreCompact', 'a Windows path', 'C:\\Users\\u\\.devflow\\scripts\\hooks\\run-hook pre-compact-memory'],
+  ])('on %s, still recognises and removes an old install\'s %s hook', (event, _label, command) => {
+    const input = JSON.stringify({ hooks: { [event]: [{ hooks: [{ type: 'command', command }] }] } });
+    expect(JSON.parse(removeMemoryHooks(input)).hooks).toBeUndefined();
   });
 });

@@ -12,7 +12,18 @@ import {
   getPendingTurnsPath,
   getPendingTurnsProcessingPath,
 } from '../../core/project-paths.js';
-import type { HookMatcher, Settings } from '../../targets/claude-code/hooks.js';
+import {
+  HOOKS_DIR_SUFFIX,
+  devflowHookOwner,
+  endsWithAny,
+  ensureHook,
+  hasHook,
+  removeHooks,
+  runHookCommand,
+  runHookSuffix,
+  type HookPredicate,
+  type Settings,
+} from '../../targets/claude-code/hooks.js';
 import { readMachineFeature, writeMachineFeature } from '../../core/feature-switch.js';
 
 /**
@@ -36,14 +47,33 @@ const MEMORY_HOOK_CONFIG: Record<string, string> = {
 };
 
 /**
- * Legacy hook filename markers from prior architectures.
- * Used by removeMemoryHooks to clean up hooks from upgrading users.
+ * The command endings of the memory-era hooks earlier releases registered, per
+ * event. Removed by removeMemoryHooks so an upgrade leaves no hook pointing at a
+ * script that no longer exists; never counted as a current memory hook.
+ *
+ * D-EXACT-HOOK-OWNER (hooks.ts): matched as command ENDINGS under any directory —
+ * the v1 (≤ v1.2) direct `.sh` scripts, then the retired `run-hook` markers of the
+ * prompt-capture, learning, decisions, knowledge-refresh, sidecar and dream
+ * pipelines — never as substrings, so a user's hook that mentions one is theirs.
  */
-const LEGACY_HOOK_MARKERS: Record<string, string[]> = {
-  UserPromptSubmit: ['prompt-capture-memory', 'sidecar-dispatch', 'dream-dispatch'],
-  Stop: ['stop-update-memory', 'stop-update-learning', 'sidecar-capture', 'dream-capture'],
-  SessionEnd: ['session-end-learning', 'session-end-decisions', 'session-end-knowledge-refresh', 'sidecar-evaluate', 'dream-evaluate'],
+const LEGACY_HOOK_SUFFIXES: Record<string, readonly string[]> = {
+  UserPromptSubmit: ['prompt-capture-memory', 'sidecar-dispatch', 'dream-dispatch'].map(runHookSuffix),
+  Stop: [
+    `${HOOKS_DIR_SUFFIX}stop-update-memory.sh`,
+    ...['stop-update-memory', 'stop-update-learning', 'sidecar-capture', 'dream-capture'].map(runHookSuffix),
+  ],
+  SessionStart: [`${HOOKS_DIR_SUFFIX}session-start-memory.sh`],
+  PreCompact: [`${HOOKS_DIR_SUFFIX}pre-compact-memory.sh`],
+  SessionEnd: [
+    'session-end-learning', 'session-end-decisions', 'session-end-knowledge-refresh',
+    'sidecar-evaluate', 'dream-evaluate',
+  ].map(runHookSuffix),
 };
+
+/** D-EXACT-HOOK-OWNER: the current memory hook for `marker` (hooks.ts). */
+function isMemoryHook(marker: string): HookPredicate {
+  return devflowHookOwner([marker]);
+}
 
 /**
  * Add all 3 memory hooks (Stop, SessionStart, PreCompact) to settings JSON.
@@ -56,34 +86,10 @@ export function addMemoryHooks(settingsJson: string, devflowDir: string): string
     return settingsJson;
   }
 
-  if (!settings.hooks) {
-    settings.hooks = {};
-  }
-
   for (const [hookType, marker] of Object.entries(MEMORY_HOOK_CONFIG)) {
-    const existing = settings.hooks[hookType] ?? [];
-    const alreadyPresent = existing.some((matcher) =>
-      matcher.hooks.some((h) => h.command.includes(marker)),
-    );
-
-    if (!alreadyPresent) {
-      const hookCommand = path.join(devflowDir, 'scripts', 'hooks', 'run-hook') + ` ${marker}`;
-      const newEntry: HookMatcher = {
-        hooks: [
-          {
-            type: 'command',
-            command: hookCommand,
-            timeout: 10,
-          },
-        ],
-      };
-
-      if (!settings.hooks[hookType]) {
-        settings.hooks[hookType] = [];
-      }
-
-      settings.hooks[hookType].push(newEntry);
-    }
+    ensureHook(settings, hookType, isMemoryHook(marker), {
+      hooks: [{ type: 'command', command: runHookCommand(devflowDir, marker), timeout: 10 }],
+    });
   }
 
   return JSON.stringify(settings, null, 2) + '\n';
@@ -99,44 +105,16 @@ export function removeMemoryHooks(input: string | Settings): string {
   const settingsJson = typeof input === 'string' ? input : JSON.stringify(input);
   const settings: Settings = typeof input === 'string' ? JSON.parse(input) : structuredClone(input);
 
-  if (!settings.hooks) {
-    return settingsJson;
-  }
-
+  // Evaluate every removal into a local — never short-circuit (PF-015).
   let changed = false;
-
   for (const [hookType, marker] of Object.entries(MEMORY_HOOK_CONFIG)) {
-    if (!settings.hooks[hookType]) {
-      continue;
-    }
-
-    const before = settings.hooks[hookType].length;
-    settings.hooks[hookType] = settings.hooks[hookType].filter(
-      (matcher) => !matcher.hooks.some((h) => h.command.includes(marker)),
-    );
-
-    if (settings.hooks[hookType].length !== before) {
-      changed = true;
-    }
-
-    if (settings.hooks[hookType].length === 0) {
-      delete settings.hooks[hookType];
-    }
+    const removed = removeHooks(settings, hookType, isMemoryHook(marker));
+    changed = changed || removed;
   }
-
-  // Remove legacy pre-dream hooks from upgrading users
-  for (const [hookType, markers] of Object.entries(LEGACY_HOOK_MARKERS)) {
-    if (!settings.hooks[hookType]) continue;
-    const before = settings.hooks[hookType].length;
-    settings.hooks[hookType] = settings.hooks[hookType].filter(
-      (matcher) => !matcher.hooks.some((h) => markers.some((m) => h.command.includes(m))),
-    );
-    if (settings.hooks[hookType].length !== before) changed = true;
-    if (settings.hooks[hookType].length === 0) delete settings.hooks[hookType];
-  }
-
-  if (settings.hooks && Object.keys(settings.hooks).length === 0) {
-    delete settings.hooks;
+  // Remove the memory-era hooks of earlier releases from upgrading users
+  for (const [hookType, suffixes] of Object.entries(LEGACY_HOOK_SUFFIXES)) {
+    const removed = removeHooks(settings, hookType, endsWithAny(suffixes));
+    changed = changed || removed;
   }
 
   if (!changed) {
@@ -160,17 +138,9 @@ export function hasMemoryHooks(input: string | Settings): boolean {
 export function countMemoryHooks(input: string | Settings): number {
   const settings: Settings = typeof input === 'string' ? JSON.parse(input) : input;
 
-  if (!settings.hooks) {
-    return 0;
-  }
-
   let count = 0;
-
   for (const [hookType, marker] of Object.entries(MEMORY_HOOK_CONFIG)) {
-    const matchers = settings.hooks[hookType] ?? [];
-    if (matchers.some((matcher) => matcher.hooks.some((h) => h.command.includes(marker)))) {
-      count++;
-    }
+    if (hasHook(settings, hookType, isMemoryHook(marker))) count++;
   }
 
   return count;
