@@ -875,7 +875,7 @@ export function generatedReferenceManifest(): readonly string[] {
  * narrower manifest the overlay converges to.
  *
  * D-INSTALL-SET: the BUILD emits every provider ({@link generatedReferenceManifest},
- * 42 files) because the tarball must be able to serve any selection without a
+ * 47 files) because the tarball must be able to serve any selection without a
  * rebuild. An INSTALL carries `{github} ∪ {selected provider}`:
  *
  *   - the GitHub tree is the FLOOR under every provider, not an optional extra.
