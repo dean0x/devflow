@@ -35,11 +35,12 @@ import { createHash } from 'crypto'
 import { mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, symlinkSync } from 'fs'
 import * as os from 'os'
 import * as path from 'path'
+import { initCommand } from '../src/cli/commands/init.js'
 import { ROOT, loadGolden, requireBuiltCli } from './helpers.js'
 import {
   HOOK_LOCATIONS, HOOK_MATRIX_CONFIG, HOOK_MATRIX_GOLDEN, INSTALL_CONFIGS, SKIPPED_HOOKS, SUBPROCESS_TIMEOUT_MS,
   REINIT_HEADING, UNINSTALL_HEADINGS, baselineSections, buildNormaliser, captureBaseline, captureInstall, captureUninstall,
-  cellHeading, diffTree, findConfig, lineDiff, installGoldenName, installedHooks, matrixNormaliser, normaliseText,
+  cellHeading, diffTree, findConfig, lineDiff, installGoldenName, installedHooks, matrixNormaliser, noSwitchDrift, normaliseText,
   parseCellHeading, parseGolden, pathSlug, readPackageVersion, readSandbox, removeSandbox, renderManifest,
   renderReinitDiff, renderSettings, runCliOk, runHookCell, skippedCellBody, snapshotNormaliser, createSandbox,
   type Baseline, type HookLocation, type InstallConfig, type InstalledHook, type Normaliser, type Sandbox,
@@ -229,6 +230,30 @@ for (const config of INSTALL_CONFIGS.filter(c => c.name !== GENERATOR_CONFIG)) d
 describe('re-init goldens (TP-5, AC-3)', () => {
   it.each(INSTALL_CONFIGS.map(c => c.name))('install-snapshot-%s records no re-init difference', (name) => {
     expect(parseGolden(loadGolden(installGoldenName(findConfig(name)))).get(REINIT_HEADING)).toBe('(none)')
+  })
+})
+
+/**
+ * The all-off config claims to pass every `--no-*` switch `init` accepts. The
+ * accepted set is read from the commander definition itself, not by spawning the
+ * CLI (D-SPAWN-BUDGET), so a new `--no-x` fails here by name.
+ */
+describe('all-off config passes every --no-* switch', () => {
+  const accepted = initCommand.options.flatMap(o => (o.long?.startsWith('--no-') ? [o.long] : []))
+  const allOff = findConfig(GENERATOR_CONFIG).initArgs
+
+  it('init accepts at least one --no-* switch (PF-018: the comparison is not vacuous)', () => {
+    expect(accepted.length).toBeGreaterThan(0)
+  })
+
+  it('the all-off argv passes exactly the --no-* switches init accepts', () => {
+    expect(noSwitchDrift(accepted, allOff)).toEqual({ missing: [], extra: [] })
+  })
+
+  it('names a switch the argv leaves out, and one init does not accept', () => {
+    const [dropped, ...kept] = accepted
+    const argv = [...kept, '--no-such-switch', '--security', 'user']
+    expect(noSwitchDrift(accepted, argv)).toEqual({ missing: [dropped], extra: ['--no-such-switch'] })
   })
 })
 

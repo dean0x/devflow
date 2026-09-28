@@ -68,7 +68,7 @@ export interface InstallConfig {
 
 /**
  * The three install shapes the goldens pin. `all-off` passes every `--no-*` switch
- * `devflow init --help` offers.
+ * `devflow init` accepts; install-snapshot.test.ts holds it to the commander definition.
  */
 export const INSTALL_CONFIGS: readonly InstallConfig[] = [
   { name: 'github', initArgs: ['--recommended', '--security', 'user'] },
@@ -81,6 +81,26 @@ export const INSTALL_CONFIGS: readonly InstallConfig[] = [
     ],
   },
 ]
+
+export interface NoSwitchDrift {
+  /** `--no-*` switches `devflow init` accepts that the argv does not pass. */
+  readonly missing: readonly string[]
+  /** `--no-*` switches the argv passes that `devflow init` does not accept. */
+  readonly extra: readonly string[]
+}
+
+/**
+ * Compare the `--no-*` switches `init` accepts with those an argv passes, each side
+ * sorted, so the all-off guard names the switch a new `--no-x` left out.
+ */
+export function noSwitchDrift(accepted: readonly string[], initArgs: readonly string[]): NoSwitchDrift {
+  const passed = new Set(initArgs.filter(arg => arg.startsWith('--no-')))
+  const known = new Set(accepted)
+  return {
+    missing: [...known].filter(flag => !passed.has(flag)).sort(),
+    extra: [...passed].filter(flag => !known.has(flag)).sort(),
+  }
+}
 
 export const installGoldenName = (config: InstallConfig): string => `install-snapshot-${config.name}.txt`
 
