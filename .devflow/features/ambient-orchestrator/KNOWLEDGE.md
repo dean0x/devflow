@@ -47,9 +47,15 @@ It also exports `df_is_project_root <root>` (D-HOOKS-GIT-ONLY): the marker walk 
 
 ### TypeScript management layer (src/cli/commands/ambient.ts)
 
-Hook registration is centralized through a shared `ensureHook(settings, eventName, marker, entry)` helper: it checks whether any hook command for the event already includes the marker string; if absent, it pushes the entry and returns `true`. Both `addAmbientHook` (preamble + orchestrator) and any future hooks should use this helper rather than duplicating the check-then-push pattern.
+**Exact hook ownership (D-AMBIENT-EXACT-HOOK, #391).** A hook is devflow's only when its command ENDS in one of the suffixes in `AMBIENT_HOOK_SUFFIXES` — `/scripts/hooks/run-hook <marker>` for `preamble`, `session-start-orchestrator`, `session-start-classification` and `ambient-prompt`, plus the pre-run-hook `/scripts/hooks/ambient-prompt.sh` — under any directory, with backslashes read as slashes. Never match by substring: a user's `~/bin/preamble-logger.sh` or `echo preamble` is theirs. The per-hook predicates (`isPreamble`, `isLegacy`, `isAmbient`, `isClassification`, `isOrchestrator`) come from `endsWithAny(suffixes)`.
+
+`filterHookEntries(settings, event, predicate)` removes single HOOKS, not matcher groups: a group keeps the user's sibling hooks and is dropped only when it ends up empty. Hook registration goes through `ensureHook(settings, eventName, predicate, entry)`, which adds the entry unless a hook matching the same predicate is registered — a user hook that merely mentions the word no longer suppresses registration. Both `addAmbientHook` (preamble + orchestrator) and any future hooks should use this helper rather than duplicating the check-then-push pattern.
+
+`convergeAmbientHooks(settingsJson, enabled, devflowDir)` is the one ambient transform `devflow init`'s settings pass applies: remove-then-add with ambient on, remove with it off (mirrors `convergeMemoryHooks`).
 
 `addAmbientHook` additionally sweeps stale `session-start-classification` entries from `SessionStart` (symmetric with `removeAmbientHook`, which has always cleaned them). This makes re-enable and disable symmetric for classification-hook debris from pre-charter installs.
+
+**Canonical directory (D-AMBIENT-CANONICAL-DIR, #391).** `ambient --enable` registers the hooks under `getDevFlowDirectory()` (`$HOME/.devflow`), where init installs `run-hook`. It never infers a directory from settings.json: the first Stop hook is whichever hook the user listed first, and a path derived from it names a `run-hook` that does not exist. The command is built by `createAmbientCommand()` (exported for per-test isolation, like `createHudCommand`); `ambientCommand` is its one instance.
 
 The `ambientCommand` action now parses `settings.json` once up front with a dedicated `try/catch`: a corrupt file logs a clean error and returns without touching the filesystem. The parsed `Settings` object is passed directly to `hasAmbientHook` and `hasOrchestratorHook`, avoiding re-parsing. `hasAmbientHook` is preamble-authoritative (see State Machine section).
 
@@ -138,7 +144,9 @@ This is intentional. SessionStart provably fires (via `SessionStart:clear`) in p
 
 **Adding a third presence-gate separately**: The two hooks are managed together by `addAmbientHook`/`removeAmbientHook`. If a third hook is added to ambient mode, it must be added to both functions (via `ensureHook`) and to the `hasAmbientHook` / `--status` partial-state detection logic. Orphaned hooks that survive `--disable` create noise in settings.json.
 
-**Duplicating the ensureHook check-then-push pattern inline**: The `ensureHook(settings, eventName, marker, entry)` helper exists to avoid duplicating the existence-check logic. Always use it when adding new hook registrations to `addAmbientHook`.
+**Matching a hook by substring**: `h.command.includes(marker)` claims any user hook that mentions the word, and the old group-level filter then deleted every sibling in its matcher group (#391). Match with `endsWithAny` against `AMBIENT_HOOK_SUFFIXES`, and filter per hook.
+
+**Duplicating the ensureHook check-then-push pattern inline**: The `ensureHook(settings, eventName, predicate, entry)` helper exists to avoid duplicating the existence-check logic. Always use it when adding new hook registrations to `addAmbientHook`.
 
 **Pinning a model in the charter's routing table**: The routing table dispatches by kind of work (search/listing, codebase orientation, execution, analysis/design/research, real-scale workflow) — never by model tier. Each roster agent's model comes from its own frontmatter (e.g. Code, Skim and Knowledge are each `model: sonnet` in their agent files), not from the charter. Do not reintroduce a haiku/sonnet/opus routing table into the charter; `docs/commands.md`'s charter line documents this no-pinning behavior and must stay in sync.
 
@@ -152,9 +160,9 @@ This is intentional. SessionStart provably fires (via `SessionStart:clear`) in p
 
 **`addAmbientHook` sweeps session-start-classification symmetrically**: As of the resolve pass, `addAmbientHook` now also calls `filterHookEntries(settings, 'SessionStart', isClassification)`. This makes enable and disable symmetric: both purge the stale classification hook. This was a prior asymmetry — only `removeAmbientHook` did the sweep.
 
-**devflow-dir resolution fallback**: `addAmbientHook` resolves the devflow scripts directory from `getDevFlowDirectory()` with a fallback: if the inferred path from the Stop hook command differs from the canonical default, the inferred path wins. This handles legacy installs where devflow was installed to a non-standard location.
+**devflow-dir resolution**: `ambient --enable` always passes `getDevFlowDirectory()` to `addAmbientHook` (D-AMBIENT-CANONICAL-DIR). Hooks an older install registered under another directory are still recognised by suffix and removed by `--disable` or init's remove-then-add; `--enable` alone does not re-point an existing preamble hook.
 
-**`session-start-classification` is a stale marker**: The `CLASSIFICATION_HOOK_MARKER` constant (`session-start-classification`) refers to a hook from a previous ambient design that no longer exists. Both `addAmbientHook` and `removeAmbientHook` clean it up to handle upgrades from those installs. Do not re-register it.
+**`session-start-classification` is a stale marker**: The `AMBIENT_HOOK_SUFFIXES.classification` suffix (`/scripts/hooks/run-hook session-start-classification`) refers to a hook from a previous ambient design that no longer exists. Both `addAmbientHook` and `removeAmbientHook` clean it up to handle upgrades from those installs. Do not re-register it.
 
 **UserPromptSubmit may not fire for auto-injected plan handoff**: Whether Claude Code fires UserPromptSubmit for its own auto-injected "start-of-plan-session" prompt is an empirical unknown as of this writing. The charter's fallback bullet under SessionStart covers this gap. The preamble fast-path handles explicit user-typed plan handoffs.
 
@@ -164,7 +172,7 @@ This is intentional. SessionStart provably fires (via `SessionStart:clear`) in p
 - `src/assets/scripts/hooks/session-start-orchestrator` — SessionStart hook: charter file read, size guard, hook-log-init injection log, additionalContext output
 - `src/assets/scripts/hooks/assets/orchestrator-charter.md` — Static charter content; the plan-handoff fallback bullet, kind-of-work routing table (no model pinning), self-contained-delegation operating rule, and feature-knowledge operating rule live here
 - `src/assets/scripts/hooks/git-marker` — Sourced pure-bash helper: `df_has_git_marker <dir>` bounded upward walk, plus `df_is_project_root <root>` (marker + physical-path HOME check, zero forks); direct behavioral tests, a no-subprocess source scan, and a PATH-shim fork counter (tests/shell-hooks-tracker.test.ts, TP-22)
-- `src/cli/commands/ambient.ts` — TypeScript management: `ensureHook`, `addAmbientHook`, `removeAmbientHook`, `hasAmbientHook`, `ambientCommand` (parses settings.json once with try/catch)
+- `src/cli/commands/ambient.ts` — TypeScript management: `AMBIENT_HOOK_SUFFIXES` + `endsWithAny` (exact ownership), `filterHookEntries` (per-hook), `ensureHook`, `addAmbientHook`, `removeAmbientHook`, `convergeAmbientHooks` (init's step), `hasAmbientHook`, `createAmbientCommand` / `ambientCommand` (parses settings.json once with try/catch; canonical devflow dir)
 - `docs/commands.md` — "Orchestrator charter" reference line: documents the kind-of-work routing and no-model-pinning behavior; keep in sync with orchestrator-charter.md
 - `tests/fixtures/ambient-templates.ts` — Shared constants: `HANDOFF_TEMPLATE` and `REMINDER_TEMPLATE`; imported by shell-hooks.test.ts and integration tests to keep both test layers byte-synchronized
 - `tests/shell-hooks.test.ts` — Shell integration tests (suites 1–4 for preamble, suite for session-start-orchestrator)
