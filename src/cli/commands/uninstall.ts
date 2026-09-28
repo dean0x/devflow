@@ -1070,15 +1070,25 @@ async function runProjectDataStep(
     return;
   }
 
+  // Each removal is non-fatal: a failure is reported and the remaining cleanup
+  // steps (settings.json hooks above all) still run.
+  const removed: ProjectDataEntry[] = [];
+  const failed: string[] = [];
   for (const entry of plan.remove) {
-    await fs.rm(path.join(plan.dir, entry.name), { recursive: true, force: true });
+    try {
+      await fs.rm(path.join(plan.dir, entry.name), { recursive: true, force: true });
+      removed.push(entry);
+    } catch (err) {
+      failed.push(`${entryLabel(entry)} (${(err as NodeJS.ErrnoException).code ?? (err as Error).message})`);
+    }
   }
-  if (plan.keep.length === 0) {
+  if (plan.keep.length === 0 && failed.length === 0) {
     // Nothing tracked was there: drop the now-empty directory. rmdir refuses a
     // directory something wrote into meanwhile, which is then left in place.
     await fs.rmdir(plan.dir).catch(() => undefined);
   }
-  p.log.success(`Removed from ${shown}: ${entryList(plan.remove)}`);
+  if (removed.length > 0) p.log.success(`Removed from ${shown}: ${entryList(removed)}`);
+  if (failed.length > 0) p.log.warn(`Could not remove from ${shown}: ${failed.join(', ')}`);
   if (plan.keep.length > 0) p.log.info(`Kept: ${entryList(plan.keep)}`);
 }
 

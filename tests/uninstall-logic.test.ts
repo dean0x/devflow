@@ -2709,6 +2709,25 @@ describe('TP-26: confirmed uninstall from a repo subdir keeps the tracked paths 
     expect(out).toContain('Keep (shared via git): conventions.md, features/, policy.json, project.json');
   });
 
+  it('the dry run from the subdir previews exactly what a confirmed cleanup removes, never a tracked path', async () => {
+    const before = await projectTree(devflow);
+    vi.spyOn(process, 'cwd').mockReturnValue(subdir);
+    try {
+      const out = await captureStdout(() => runDryRunPhase({
+        scopesToUninstall: [], isSelectiveUninstall: false, selectedPlugins: [], installedPlugins: [],
+      }));
+
+      const previewed = out.split('\n')
+        .filter((line) => line.includes('(if confirmed)'))
+        .map((line) => line.slice(line.indexOf(devflow)).replace(' (if confirmed)', '').trim());
+      expect(previewed).toEqual(['.root-gitignore-configured-v5', 'config.json', 'docs/', 'memory/']
+        .map((entry) => path.join(devflow, entry)));
+      expect(await projectTree(devflow), 'a dry run writes nothing').toEqual(before);
+    } finally {
+      vi.mocked(process.cwd).mockRestore();
+    }
+  });
+
   it.each([
     ['declined', false],
     ['cancelled', Symbol('clack:cancel')],
@@ -2733,6 +2752,32 @@ describe('TP-26: confirmed uninstall from a repo subdir keeps the tracked paths 
 
     expect(messages).toEqual([]);
     expect(await projectTree(devflow)).toEqual(before);
+  });
+
+  it.skipIf(process.getuid?.() === 0)('an entry it cannot remove is reported and the rest of the cleanup still runs', async () => {
+    // A read-only .devflow/: its entries cannot be unlinked.
+    await fs.chmod(devflow, 0o555);
+    // The legacy repo-local scope's settings.json: the settings step edits it, and
+    // that scope stops before the steps that touch HOME or machine-level files.
+    const settingsPath = path.join(repo, '.claude', 'settings.json');
+    await fs.mkdir(path.dirname(settingsPath), { recursive: true });
+    await fs.writeFile(settingsPath, JSON.stringify({
+      statusLine: { type: 'command', command: path.join(tmpHome, '.devflow', 'scripts', 'hud.sh') },
+    }, null, 2) + '\n', 'utf-8');
+    const { messages, confirm } = recordingConfirm(true);
+    try {
+      const out = await captureStdout(() => runCleanupPhase({
+        scopesToUninstall: ['local'], keepDocs: false, verbose: false, cwd: subdir, isTTY: true, confirm,
+      }));
+
+      expect(messages).toEqual([`Remove the project data listed above from ${devflow}/?`]);
+
+      expect(out).toContain('Could not remove');
+      const settings = JSON.parse(await fs.readFile(settingsPath, 'utf-8'));
+      expect(settings.statusLine, 'the settings step after the project-data step still ran').toBeUndefined();
+    } finally {
+      await fs.chmod(devflow, 0o755);
+    }
   });
 
   it('with only tracked paths present there is nothing to remove and no prompt', async () => {
