@@ -3,7 +3,7 @@
 # ensure-proxy — SessionStart + UserPromptSubmit hook
 # Ensures the Devflow proxy relay is running when external model routing is enabled.
 # NOT git-gated (proxy is a global user-scope feature, not per-project).
-# NOT project-scoped: proxy state lives at $DEVFLOW_DIR/proxy.json (user-scope).
+# NOT project-scoped: proxy state lives at $HOME/.devflow/proxy.json (machine-wide).
 #
 # SessionStart:  probe port → if DOWN attempt spawn → inject additionalContext warning if still down
 # UserPromptSubmit: fast exit (both port-up and port-down) — silent; SessionStart handles all warnings
@@ -55,9 +55,10 @@ if [ "$HOOK_EVENT" = "UserPromptSubmit" ]; then
 fi
 
 # ── Proxy state ────────────────────────────────────────────────────────────────
-# Proxy is user-scope (global), not project-scoped. Use $DEVFLOW_DIR (env) or default.
-DEVFLOW_DIR="${DEVFLOW_DIR:-$HOME/.devflow}"
-PROXY_STATE_FILE="$DEVFLOW_DIR/proxy.json"
+# Proxy is machine-wide, not project-scoped: state lives at the machine root,
+# always $HOME/.devflow (D-ONE-HOME).
+MACHINE_DEVFLOW_DIR="$HOME/.devflow"
+PROXY_STATE_FILE="$MACHINE_DEVFLOW_DIR/proxy.json"
 
 if [ ! -f "$PROXY_STATE_FILE" ]; then
   dbg "EXIT: no proxy state file"
@@ -93,7 +94,7 @@ if [ "${DEVFLOW_HOOK_DEBUG:-}" = "1" ]; then
 fi
 
 # ── Log setup (SessionStart only) ──────────────────────────────────────────────
-LOG_DIR="$DEVFLOW_DIR/logs"
+LOG_DIR="$MACHINE_DEVFLOW_DIR/logs"
 mkdir -p "$LOG_DIR" 2>/dev/null || true
 # SEC-2: harden log directory to 0700 (best-effort; pre-existing dirs may be wider).
 chmod 700 "$LOG_DIR" 2>/dev/null || true
@@ -101,7 +102,7 @@ LOG_FILE="$LOG_DIR/proxy.log"
 
 # Size guard: 2MB max → truncate to 1MB tail (matches hook-log-init guard pattern).
 # Sharing hook-log-init is not feasible here: hook-log-init requires $CWD and targets
-# the per-project log path; ensure-proxy uses the user-scope $DEVFLOW_DIR/logs path.
+# the per-project log path; ensure-proxy uses the machine-wide $MACHINE_DEVFLOW_DIR/logs path.
 # The existence guard is required: wc -c uses a shell redirect whose failure is emitted
 # by bash itself (before wc starts), bypassing 2>/dev/null.
 _LOG_MAX_BYTES=2097152
@@ -268,7 +269,7 @@ fi
 source "$SCRIPT_DIR/get-mtime" 2>/dev/null || true
 source "$SCRIPT_DIR/learning-lock" 2>/dev/null || true
 
-SPAWN_LOCK="$DEVFLOW_DIR/.proxy-spawn.lock"
+SPAWN_LOCK="$MACHINE_DEVFLOW_DIR/.proxy-spawn.lock"
 
 if ! learning_lock_acquire "$SPAWN_LOCK" 2 2>/dev/null; then
   # Another session is racing to start the proxy — give it a moment then re-probe
@@ -324,7 +325,7 @@ log "relay spawned with pid $_RELAY_PID"
 # Best-effort pid record for `devflow proxy --status` — mirrors the CLI enable path.
 # Written unconditionally after spawn (like the CLI): a stale pid from a relay that
 # never came up is harmless, since --status liveness-checks it before display.
-printf '%s' "$_RELAY_PID" > "$DEVFLOW_DIR/proxy.pid" 2>/dev/null || \
+printf '%s' "$_RELAY_PID" > "$MACHINE_DEVFLOW_DIR/proxy.pid" 2>/dev/null || \
   log "warn: could not write proxy.pid (non-fatal)"
 
 # Bounded wait: 80×0.1s = 8s maximum (well within 15s hook timeout)

@@ -105,6 +105,7 @@ function makeSettingsWithNonDevflowStatusLine(command: string): string {
 
 describe('hud --enable self-healing (WS6b)', () => {
   let tmpClaudeDir: string;
+  let tmpHome: string;
   let tmpDevflowDir: string;
 
   // Fresh Command per test via the exported factory — avoids coupling to
@@ -116,12 +117,16 @@ describe('hud --enable self-healing (WS6b)', () => {
 
   beforeEach(async () => {
     tmpClaudeDir = await fs.mkdtemp(path.join(os.tmpdir(), 'hud-enable-claude-'));
-    tmpDevflowDir = await fs.mkdtemp(path.join(os.tmpdir(), 'hud-enable-devflow-'));
+    tmpHome = await fs.mkdtemp(path.join(os.tmpdir(), 'hud-enable-home-'));
+    tmpDevflowDir = path.join(tmpHome, '.devflow');
+    await fs.mkdir(tmpDevflowDir);
 
     // vi.stubEnv tracks mutations; vi.unstubAllEnvs() in afterEach restores
     // them unconditionally — leak-proof even when the test throws.
-    vi.stubEnv('CLAUDE_CODE_DIR', tmpClaudeDir);
-    vi.stubEnv('DEVFLOW_DIR', tmpDevflowDir);
+    // CLAUDE_CONFIG_DIR is the Claude directory (D-CLAUDE-CONFIG-DIR); the devflow
+    // root is always $HOME/.devflow (D-ONE-HOME).
+    vi.stubEnv('CLAUDE_CONFIG_DIR', tmpClaudeDir);
+    vi.stubEnv('HOME', tmpHome);
 
     hudCmd = createHudCommand();
   });
@@ -129,7 +134,7 @@ describe('hud --enable self-healing (WS6b)', () => {
   afterEach(async () => {
     vi.unstubAllEnvs();
     await fs.rm(tmpClaudeDir, { recursive: true, force: true });
-    await fs.rm(tmpDevflowDir, { recursive: true, force: true });
+    await fs.rm(tmpHome, { recursive: true, force: true });
   });
 
   it('already-enabled --enable still updates manifest.hud to true when manifest is drifted', async () => {
@@ -198,6 +203,10 @@ describe('hud --enable self-healing (WS6b)', () => {
     const settings = JSON.parse(settingsContent) as { statusLine?: { command: string } };
     expect(settings.statusLine).toBeDefined();
     expect(settings.statusLine!.command).toContain('hud.sh');
+    // TP-12: the statusLine points at the machine root and the write landed in
+    // CLAUDE_CONFIG_DIR, never in a HOME-based Claude directory.
+    expect(settings.statusLine!.command).toContain(tmpDevflowDir);
+    await expect(fs.access(path.join(tmpHome, '.claude'))).rejects.toThrow();
   });
 
   // ---------------------------------------------------------------------------

@@ -758,7 +758,6 @@ describe('devflow compliance — the built CLI (AC-9, AC-10)', () => {
     const r = spawnSync(process.execPath, [cli, ...o.args], {
       cwd: o.cwd,
       env: scopedEnv(o.home, {
-        CLAUDE_CODE_DIR: path.join(o.home, '.claude'),
         FORCE_COLOR: '0',
         NO_COLOR: '1',
         CI: '1',

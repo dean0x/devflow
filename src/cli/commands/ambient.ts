@@ -1,7 +1,6 @@
 import { Command } from 'commander';
 import { promises as fs } from 'fs';
 import * as path from 'path';
-import * as os from 'os';
 import * as p from '@clack/prompts';
 import color from 'picocolors';
 import { getClaudeDirectory, getDevFlowDirectory } from '../../targets/claude-code/claude-paths.js';
@@ -21,8 +20,10 @@ const ORCHESTRATOR_HOOK_MARKER = 'session-start-orchestrator';
  * The commands rule was removed — this path now exists only to purge the
  * legacy file from prior installs. Managed by ambient.ts directly (not the
  * plugin rules system), so only ambient enable/disable/init paths clean it up.
+ * Resolved under the Claude Code directory (D-CLAUDE-CONFIG-DIR), where the
+ * legacy install wrote it.
  */
-export const COMMANDS_RULE_PATH = path.join(os.homedir(), '.claude', 'rules', 'devflow', 'commands.md');
+export const COMMANDS_RULE_PATH = path.join(getClaudeDirectory(), 'rules', 'devflow', 'commands.md');
 
 /** Filter hook entries from a parsed Settings object for a given event. Returns true if any were removed. */
 function filterHookEntries(
@@ -126,11 +127,16 @@ export async function addAmbientHook(settingsJson: string, devflowDir: string): 
  * Removes preamble + legacy from UserPromptSubmit.
  * Removes session-start-orchestrator from SessionStart.
  * Also removes stale SessionStart classification hook from previous installs.
- * Purges legacy COMMANDS_RULE_PATH if present (runs before early-return).
+ * Purges legacy COMMANDS_RULE_PATH if present (runs before early-return), unless
+ * `options.purgeLegacyRule` is false — a legacy repo-local uninstall edits a repo's
+ * settings and must not touch the user's Claude directory (D-LEGACY-LOCAL-CLEANUP).
  * Idempotent — returns unchanged JSON if no ambient hooks were present.
  * Preserves other hooks. Cleans empty arrays/objects.
  */
-export async function removeAmbientHook(settingsJson: string): Promise<string> {
+export async function removeAmbientHook(
+  settingsJson: string,
+  options: { purgeLegacyRule?: boolean } = {},
+): Promise<string> {
   const settings: Settings = JSON.parse(settingsJson);
   const removedPrompt = filterHookEntries(settings, 'UserPromptSubmit', isAmbient);
   const removedOrchestrator = filterHookEntries(settings, 'SessionStart', isOrchestrator);
@@ -138,7 +144,7 @@ export async function removeAmbientHook(settingsJson: string): Promise<string> {
   const removedClassification = filterHookEntries(settings, 'SessionStart', isClassification);
 
   // Purge legacy commands rule (runs before early-return so stale files are always removed)
-  await removeLegacyCommandsRule();
+  if (options.purgeLegacyRule !== false) await removeLegacyCommandsRule();
 
   if (!removedPrompt && !removedOrchestrator && !removedClassification) return settingsJson;
   return JSON.stringify(settings, null, 2) + '\n';

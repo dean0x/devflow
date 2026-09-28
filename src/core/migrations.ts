@@ -11,7 +11,6 @@
 
 import { promises as fs } from 'fs';
 import * as path from 'path';
-import * as os from 'os';
 import { writeFileAtomicExclusive } from './fs-atomic.js';
 import { getMemoryDir } from './project-paths.js';
 import { LEGACY_AGENT_KEYS, canonicaliseAgentKeys, parseAgentMappingEnvelope } from './agent-models.js';
@@ -173,20 +172,12 @@ interface MigrationsFile {
 }
 
 /**
- * D30: State lives at `~/.devflow/migrations.json` (scope-independent) rather
- * than the install manifest because:
+ * D30: State lives at `~/.devflow/migrations.json` rather than in the install
+ * manifest because migration state is machine-wide: once a global migration runs
+ * on a machine it should never re-run regardless of which project triggered
+ * devflow init.
  *
- * - The install manifest is scope-specific: user-scope manifests live at
- *   `~/.devflow/manifest.json` while local-scope manifests live at
- *   `.devflow/manifest.json` inside the repo. A migration that runs on user-scope
- *   init wouldn't be recorded in a local-scope manifest, so the migration would
- *   re-run on the next local-scope init.
- * - Migration state is machine-wide: once a global migration runs on a machine it
- *   should never re-run regardless of which project or scope triggered devflow init.
- * - `~/.devflow/migrations.json` is always writable (home-dir location), whereas
- *   local-scope devflowDir may be inside a read-only checkout.
- *
- * @param devflowDir - absolute path to `~/.devflow` (always the home-dir location)
+ * @param devflowDir - absolute path to the resolved machine root (`~/.devflow`)
  */
 export async function readAppliedMigrations(devflowDir: string): Promise<string[]> {
   const filePath = path.join(devflowDir, MIGRATIONS_FILE);
@@ -407,7 +398,8 @@ async function runPerProjectMigration(
  * on a fresh machine the loop executes once and writes migrations.json. On
  * subsequent runs the ID is already in the applied set and the loop is a no-op.
  *
- * @param ctx - devflowDir (memoryDir and projectRoot filled per-project)
+ * @param ctx - devflowDir, the resolved machine root (`~/.devflow`) that also holds
+ *   migrations.json; memoryDir and projectRoot are filled per-project
  * @param discoveredProjects - absolute paths to discovered Claude-enabled project roots
  * @param registryOverride - override MIGRATIONS for testing (defaults to module-level MIGRATIONS)
  */
@@ -417,9 +409,9 @@ export async function runMigrations(
   registryOverride?: readonly AnyMigration[],
 ): Promise<RunMigrationsResult> {
   const registry = registryOverride ?? MIGRATIONS;
-  // Always read from home-dir devflow location so state is machine-wide
-  const homeDevflowDir = path.join(os.homedir(), '.devflow');
-  const appliedArray = await readAppliedMigrations(homeDevflowDir);
+  // D-ONE-HOME: state lives in the caller's resolved machine root, never a
+  // second, independently derived home path (D30: machine-wide state).
+  const appliedArray = await readAppliedMigrations(ctx.devflowDir);
   // Convert to Set once for O(1) lookups throughout the loop (issue #9)
   const applied = new Set(appliedArray);
 
@@ -463,7 +455,7 @@ export async function runMigrations(
 
   // Write state once at end, accumulating all newly applied IDs (issue #5 — O(N²) → O(1))
   if (newlyApplied.length > 0) {
-    await writeAppliedMigrations(homeDevflowDir, [...appliedArray, ...newlyApplied]);
+    await writeAppliedMigrations(ctx.devflowDir, [...appliedArray, ...newlyApplied]);
   }
 
   return { newlyApplied, failures, infos, warnings };

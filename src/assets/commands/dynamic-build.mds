@@ -86,7 +86,7 @@ Extract or note:
 - The test plan (for Gate 2) — a plan's TP lines, passed only once they pass this check. Copy the plan's `## Test Plan` section byte for byte into a fresh `mktemp` file with the Write tool, never through an interpolated shell string, and run:
 
 ```bash
-node "${DEVFLOW_DIR:-$HOME/.devflow}/scripts/verify-evidence.cjs" check tp <that file>; echo "exit=$?"
+node "$HOME/.devflow/scripts/verify-evidence.cjs" check tp <that file>; echo "exit=$?"
 ```
 
   Only `exit=0` passes it: pass the section's TP lines, as one string, as `testPlan` when invoking the workflow — a test plan alone still runs the Test agent. Any other result, or a plan with no `## Test Plan` section: omit `testPlan` and note `Test plan: missing or malformed` in the run summary. Nothing is repaired, and a test plan in any other shape — an older JSON one included — is never passed.
@@ -628,7 +628,7 @@ Refs {tracking ref}
    Then check it:
 
 ```bash
-node "${DEVFLOW_DIR:-$HOME/.devflow}/scripts/verify-evidence.cjs" check wave <that file>; echo "exit=$?"
+node "$HOME/.devflow/scripts/verify-evidence.cjs" check wave <that file>; echo "exit=$?"
 ```
 
    Only `exit=0` admits the file's text, verbatim, as `PR_WAVE_BLOCK`. Any other result: no wave PR — record `Wave PR: not opened (wave block refused: <the code on stderr>)` and go to step 4.
@@ -638,8 +638,8 @@ node "${DEVFLOW_DIR:-$HOME/.devflow}/scripts/verify-evidence.cjs" check wave <th
    **(b) The wave test plan.** Take the checked TP lines each merged row's ticket was given in Pre-authoring step 4, in row order; renumber them `TP-1`, `TP-2`, … and prefix each scenario with its row's `T<k>: `. A line is never shortened or reworded: one whose prefixed scenario would pass 200 characters leaves its ticket with no usable test plan. Write `## Test Plan` and those lines, and nothing else, to `"\{integration worktree root\}/.devflow/docs/evidence-wave-\{slug\}.md"` with the Write tool, then run (the path double-quoted; one rewrite from the same lines after a refusal, never a second):
 
 ```bash
-node "${DEVFLOW_DIR:-$HOME/.devflow}/scripts/verify-evidence.cjs" check tp "{integration worktree root}/.devflow/docs/evidence-wave-{slug}.md"; echo "exit=$?"
-node "${DEVFLOW_DIR:-$HOME/.devflow}/scripts/verify-evidence.cjs" render --plan "{integration worktree root}/.devflow/docs/evidence-wave-{slug}.md"; echo "exit=$?"
+node "$HOME/.devflow/scripts/verify-evidence.cjs" check tp "{integration worktree root}/.devflow/docs/evidence-wave-{slug}.md"; echo "exit=$?"
+node "$HOME/.devflow/scripts/verify-evidence.cjs" render --plan "{integration worktree root}/.devflow/docs/evidence-wave-{slug}.md"; echo "exit=$?"
 ```
 
    Only when both exit 0 is `PR_TEST_PLAN_BLOCK` the render's stdout, byte for byte without its `exit=` line; in every other case it is `(none)`.

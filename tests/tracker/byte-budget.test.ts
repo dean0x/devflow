@@ -397,7 +397,7 @@ const PREAMBLE_MAX_LINES = 36;
  * Measured, never hand-typed:
  *   node -e "console.log(require('fs').readFileSync('src/assets/skills/git/references/github-api.md','utf-8').length)"
  */
-const GITHUB_API_MD_CHARS = 21_355;
+const GITHUB_API_MD_CHARS = 21_211;
 
 // ---------------------------------------------------------------------------
 // 1. The four-shape table — RECORDED, not asserted pass/fail
@@ -1012,8 +1012,8 @@ describe('byte budget: the provider-resolution preamble', () => {
     // Standing prohibition (§14.5): references are addressed skill-relatively.
     expect(
       naming[0].includes('~/.claude'),
-      'no generated reference path literal may begin with ~/.claude — CLAUDE_CODE_DIR and ' +
-      'local-scope installs put the skill somewhere else entirely',
+      'no generated reference path literal may begin with ~/.claude — a CLAUDE_CONFIG_DIR ' +
+      'install puts the skill somewhere else entirely',
     ).toBe(false);
   });
 
@@ -1957,8 +1957,8 @@ describe('preamble: provider normalisation (one convergence point, PF-023)', () 
   });
 
   it('no reference path in the compiled agent is addressed through ~/.claude', () => {
-    // A hardcoded ~/.claude/... is simply absent for CLAUDE_CODE_DIR users and
-    // for local-scope installs, and the fail-closed neutral value would then
+    // A hardcoded ~/.claude/... is simply absent for CLAUDE_CONFIG_DIR users, and
+    // the fail-closed neutral value would then
     // cost such a GitHub user their traceability entirely.
     const offenders = GIT_AGENT.content
       .split('\n')

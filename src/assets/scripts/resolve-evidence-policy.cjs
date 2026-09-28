@@ -411,14 +411,13 @@ function readWorktreePolicy(root) {
 }
 
 /**
- * The devflow directory: DEVFLOW_DIR when it is absolute, else ~/.devflow, else
- * null (a home directory that is not absolute would resolve against cwd).
+ * The devflow machine root: ~/.devflow, else null (a home directory that is not
+ * absolute would resolve against cwd). No environment variable relocates it
+ * (D-ONE-HOME in src/targets/claude-code/claude-paths.ts).
  *
  * @returns {string | null}
  */
 function devflowDir() {
-  const fromEnv = process.env.DEVFLOW_DIR;
-  if (typeof fromEnv === 'string' && fromEnv !== '' && path.isAbsolute(fromEnv)) return fromEnv;
   let home;
   try {
     home = os.homedir();

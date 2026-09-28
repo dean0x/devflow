@@ -180,7 +180,7 @@ function runMain(args: readonly string[], deps: MainDeps = {}): Outcome & { stde
 }
 
 /**
- * Run the real script under process.execPath. HOME and DEVFLOW_DIR are a tmp dir,
+ * Run the real script under process.execPath. HOME is a tmp dir,
  * the cwd is named (PF-060), and an optional gh fake goes in front of PATH.
  */
 function runScript(o: {

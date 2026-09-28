@@ -70,4 +70,26 @@ describe('gatherConfigCounts', () => {
     // Only the real file should count — the directory named 'weird.md' must not
     expect(result.rules).toBe(1);
   });
+
+  it('ignores a relative CLAUDE_CONFIG_DIR and reads $HOME/.claude, as the installer does (D-CLAUDE-CONFIG-DIR)', () => {
+    // The relative value resolves to tmpClaudeDir from the process cwd, so a reader
+    // that honoured it would count tmpClaudeDir's rule instead of HOME's two.
+    fs.mkdirSync(path.join(tmpClaudeDir, 'rules'), { recursive: true });
+    fs.writeFileSync(path.join(tmpClaudeDir, 'rules', 'relative.md'), '# Relative');
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), 'hud-config-counts-home-'));
+    const originalHome = process.env.HOME;
+    try {
+      fs.mkdirSync(path.join(home, '.claude', 'rules'), { recursive: true });
+      fs.writeFileSync(path.join(home, '.claude', 'rules', 'one.md'), '# One');
+      fs.writeFileSync(path.join(home, '.claude', 'rules', 'two.md'), '# Two');
+      process.env.HOME = home;
+      process.env.CLAUDE_CONFIG_DIR = path.relative(process.cwd(), tmpClaudeDir);
+      expect(path.isAbsolute(process.env.CLAUDE_CONFIG_DIR)).toBe(false);
+
+      expect(gatherConfigCounts(tmpCwd).rules).toBe(2);
+    } finally {
+      process.env.HOME = originalHome;
+      fs.rmSync(home, { recursive: true, force: true });
+    }
+  });
 });

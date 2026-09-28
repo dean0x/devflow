@@ -17,7 +17,6 @@ Use `--recommended` or `--advanced` flags for non-interactive setup.
 | Option | Description |
 |--------|-------------|
 | `--plugin <names>` | Comma-separated plugin names (e.g., `implement,code-review`) |
-| `--scope <user\|local>` | Installation scope (default: user) |
 | `--ambient` / `--no-ambient` | Enable/disable ambient mode — orchestrator charter + plan handoff (default: on) |
 | `--memory` / `--no-memory` | Enable/disable working memory (default: on) |
 | `--learning` / `--no-learning` | Enable/disable learning agent (default: on) |
@@ -34,10 +33,13 @@ Use `--recommended` or `--advanced` flags for non-interactive setup.
 | `--security <user\|managed\|none>` | Security deny list location (default: user) |
 | `--verbose` | Show detailed output |
 
-### Scopes
+### Install location
 
-- `--scope user` (default) — Install for all projects (`~/.claude/`)
-- `--scope local` — Install for current project only (`.claude/`)
+Devflow installs machine-wide, into the Claude Code directory and `~/.devflow`:
+
+- The Claude Code directory is `$CLAUDE_CONFIG_DIR` when it is set to an absolute path, else `~/.claude` — the same directory Claude Code itself reads.
+- `~/.devflow` is always the machine root. `DEVFLOW_DIR` is ignored.
+- There is no project-local install. `init --scope local` exits 1 and points at `devflow uninstall --scope local`, which removes an old project-local install (`<repo>/.claude` and `<repo>/.devflow` install artifacts) without touching anything under your home directory.
 
 ## Plugin Management
 
@@ -367,7 +369,7 @@ npx devflow-kit uninstall
 
 | Option | Description |
 |--------|-------------|
-| `--scope <user\|local>` | Uninstall scope (default: auto-detect all installed scopes) |
+| `--scope <user\|local>` | Uninstall only the machine-wide install (`user`) or a legacy project-local install in the current repo (`local`; never touches your home directory, and exits 1 with "No legacy project-local install here" outside a git repository or in a repository rooted at your home directory) (default: auto-detect both) |
 | `--plugin <names>` | Selective uninstall by plugin name. Assets are retained on behalf of the plugins the **manifest** records as installed — not the whole registry — so removing a plugin removes exactly its own skills, agents and rules and keeps only what a plugin you actually installed still needs |
 | `--keep-docs` | Preserve `.devflow/docs/` directory |
 | `--dry-run` | Show what would be removed |

@@ -43,11 +43,11 @@ PROJECT_ROOT="$(df_resolve_root "$CWD" 2>/dev/null || true)"
 [ -n "$PROJECT_ROOT" ] || PROJECT_ROOT="$CWD"
 
 # The machine-wide manifest (the memory switch, D-FEATURES-MACHINE-WIDE in
-# queue-append) is user-scope: resolve it from the inherited DEVFLOW_DIR (or
-# ~/.devflow) BEFORE the project-scoped assignment below shadows that value.
-DEVFLOW_MANIFEST="${DEVFLOW_DIR:-$HOME/.devflow}/manifest.json"
-DEVFLOW_DIR="$PROJECT_ROOT/.devflow"
-MEMORY_DIR="$DEVFLOW_DIR/memory"
+# queue-append) lives at the machine root,
+# $HOME/.devflow (D-ONE-HOME).
+DEVFLOW_MANIFEST="$HOME/.devflow/manifest.json"
+PROJECT_DEVFLOW_DIR="$PROJECT_ROOT/.devflow"
+MEMORY_DIR="$PROJECT_DEVFLOW_DIR/memory"
 
 # Normal logging
 source "$SCRIPT_DIR/hook-log-init" "session-start-memory"

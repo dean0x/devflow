@@ -437,7 +437,7 @@ describe('AC-9: /implement writes and checks the test plan before any Code spawn
 
   it('the check and the render run the installed script over the evidence file', () => {
     const lines = implementMd().split('\n')
-    const script = 'node "${DEVFLOW_DIR:-$HOME/.devflow}/scripts/verify-evidence.cjs"'
+    const script = 'node "$HOME/.devflow/scripts/verify-evidence.cjs"'
     expect(lines).toContain(`${script} check tp .devflow/docs/evidence-{branch_slug}.md; echo "exit=$?"`)
     expect(lines).toContain(`${script} render --plan .devflow/docs/evidence-{branch_slug}.md; echo "exit=$?"`)
   })

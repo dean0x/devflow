@@ -6,7 +6,6 @@ import {
   combineSelection,
   shouldRetry,
   substituteSettingsTemplate,
-  computeGitignoreAppend,
   mergeDenyList,
   discoverProjectGitRoots,
   runMigrationsWithFallback,
@@ -238,36 +237,6 @@ describe('settings.json template: AC-C2 complete hook seed shape', () => {
   });
 });
 
-describe('computeGitignoreAppend', () => {
-  it('returns all entries when gitignore is empty', () => {
-    const result = computeGitignoreAppend('', ['.claude/', '.devflow/']);
-    expect(result).toEqual(['.claude/', '.devflow/']);
-  });
-
-  it('filters out existing entries', () => {
-    const existing = '.claude/\nnode_modules/\n';
-    const result = computeGitignoreAppend(existing, ['.claude/', '.devflow/']);
-    expect(result).toEqual(['.devflow/']);
-  });
-
-  it('returns empty array when all entries exist', () => {
-    const existing = '.claude/\n.devflow/\n';
-    const result = computeGitignoreAppend(existing, ['.claude/', '.devflow/']);
-    expect(result).toEqual([]);
-  });
-
-  it('handles entries with surrounding whitespace in gitignore', () => {
-    const existing = '  .claude/  \n';
-    const result = computeGitignoreAppend(existing, ['.claude/', '.devflow/']);
-    expect(result).toEqual(['.devflow/']);
-  });
-
-  it('handles empty entries list', () => {
-    const result = computeGitignoreAppend('something\n', []);
-    expect(result).toEqual([]);
-  });
-});
-
 describe('ensureDevflowGitignore', () => {
   let tmpDir: string;
 
@@ -290,8 +259,7 @@ describe('ensureDevflowGitignore', () => {
     expect(lines(content)).toContain('!.devflow/features/');
     expect(lines(content)).toContain('!.devflow/features/*/KNOWLEDGE.md');
     expect(lines(content)).not.toContain('.devflow/'); // carve-out, not bare wholesale
-    // User-scope installs must NOT gitignore .claude/ — this is the key difference
-    // from updateGitignore (which also adds .claude/).
+    // A project's .claude/ is its own to share or ignore — devflow never adds it.
     expect(content).not.toContain('.claude/');
     expect(content).toContain('# Devflow runtime data');
   });
@@ -1495,7 +1463,7 @@ describe('discoverProjectGitRoots', () => {
     ].join('\n');
     await fs.writeFile(path.join(claudeDir, 'history.jsonl'), lines, 'utf-8');
 
-    const roots = await discoverProjectGitRoots(tmpDir);
+    const roots = await discoverProjectGitRoots(path.join(tmpDir, '.claude'));
     expect(roots).toEqual([projA, projB]);
   });
 
@@ -1514,7 +1482,7 @@ describe('discoverProjectGitRoots', () => {
     ].join('\n');
     await fs.writeFile(path.join(claudeDir, 'history.jsonl'), lines, 'utf-8');
 
-    const roots = await discoverProjectGitRoots(tmpDir);
+    const roots = await discoverProjectGitRoots(path.join(tmpDir, '.claude'));
     expect(roots).toEqual([projGit]);
   });
 
@@ -1525,12 +1493,12 @@ describe('discoverProjectGitRoots', () => {
     const lines = JSON.stringify({ project: path.join(tmpDir, 'gone') });
     await fs.writeFile(path.join(claudeDir, 'history.jsonl'), lines, 'utf-8');
 
-    const roots = await discoverProjectGitRoots(tmpDir);
+    const roots = await discoverProjectGitRoots(path.join(tmpDir, '.claude'));
     expect(roots).toEqual([]);
   });
 
   it('returns empty array when history.jsonl is missing', async () => {
-    const roots = await discoverProjectGitRoots(tmpDir);
+    const roots = await discoverProjectGitRoots(path.join(tmpDir, '.claude'));
     expect(roots).toEqual([]);
   });
 
@@ -1539,7 +1507,7 @@ describe('discoverProjectGitRoots', () => {
     await fs.mkdir(claudeDir, { recursive: true });
     await fs.writeFile(path.join(claudeDir, 'history.jsonl'), '', 'utf-8');
 
-    const roots = await discoverProjectGitRoots(tmpDir);
+    const roots = await discoverProjectGitRoots(path.join(tmpDir, '.claude'));
     expect(roots).toEqual([]);
   });
 
@@ -1557,7 +1525,7 @@ describe('discoverProjectGitRoots', () => {
     ].join('\n');
     await fs.writeFile(path.join(claudeDir, 'history.jsonl'), lines, 'utf-8');
 
-    const roots = await discoverProjectGitRoots(tmpDir);
+    const roots = await discoverProjectGitRoots(path.join(tmpDir, '.claude'));
     expect(roots).toEqual([proj]);
   });
 
@@ -1575,7 +1543,7 @@ describe('discoverProjectGitRoots', () => {
     ].join('\n');
     await fs.writeFile(path.join(claudeDir, 'history.jsonl'), lines, 'utf-8');
 
-    const roots = await discoverProjectGitRoots(tmpDir);
+    const roots = await discoverProjectGitRoots(path.join(tmpDir, '.claude'));
     expect(roots).toEqual([proj]);
   });
 });

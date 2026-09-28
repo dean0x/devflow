@@ -1,4 +1,4 @@
-import { Command } from 'commander';
+import { Command, Option } from 'commander';
 import { promises as fs } from 'fs';
 import * as path from 'path';
 import { execSync } from 'child_process';
@@ -14,9 +14,7 @@ import {
   installManagedSettings,
   installClaudeignore,
   discoverProjectGitRoots,
-  updateGitignore,
   ensureDevflowGitignore,
-  createDocsStructure,
   applyUserSecurityDenyList,
   stripUserDenyList,
   detectDenyState,
@@ -90,7 +88,7 @@ import { convergeFromManifest } from '../../targets/claude-code/compliance-insta
 import * as os from 'os';
 
 // Re-export pure functions for tests (canonical source is post-install.ts)
-export { substituteSettingsTemplate, computeGitignoreAppend, mergeDenyList, discoverProjectGitRoots } from '../../targets/claude-code/post-install.js';
+export { substituteSettingsTemplate, mergeDenyList, discoverProjectGitRoots } from '../../targets/claude-code/post-install.js';
 export { addAmbientHook, removeAmbientHook, hasAmbientHook } from './ambient.js';
 export { addMemoryHooks, removeMemoryHooks, hasMemoryHooks } from './memory.js';
 export { addCaptureHooks, removeCaptureHooks, hasCaptureHooks } from './capture.js';
@@ -527,6 +525,7 @@ export async function persistManifestThenConvergeTracker(opts: {
  * Options for the init command parsed by Commander.js
  */
 interface InitOptions {
+  /** Hidden and retired (D-SCOPE-RETIRED): see {@link resolveRetiredScopeOption}. */
   scope?: string;
   verbose?: boolean;
   plugin?: string;
@@ -594,7 +593,7 @@ export async function drainDisabledFeatureQueues(
  *
  * D-HUD-ONLY-PRESERVE: over a prior install, --hud-only installs the HUD and
  * nothing else, so the manifest keeps every recorded value — plugins, version,
- * scope, installedAt and every feature — and only `features.hud` turns on. The
+ * installedAt and every feature — and only `features.hud` turns on. The
  * earlier shape rewrote the whole record as a HUD-only fresh install (ambient,
  * memory, learning, knowledge, rules and proxy all `false`, plugins `[]`) while
  * leaving those features' artifacts on disk: the record stopped describing the
@@ -610,7 +609,6 @@ export async function drainDisabledFeatureQueues(
 export function buildHudOnlyManifest(
   existing: ManifestData | null,
   version: string,
-  scope: 'user' | 'local',
   now: string,
 ): ManifestData {
   if (existing !== null) {
@@ -623,7 +621,7 @@ export function buildHudOnlyManifest(
   return {
     version,
     plugins: [],
-    scope,
+    scope: 'user',
     features: {
       ambient: false, memory: false, hud: true, knowledge: false,
       learning: false, rules: false, flags: {}, proxy: false,
@@ -637,9 +635,40 @@ export function buildHudOnlyManifest(
   };
 }
 
+/** What `init` does with the retired `--scope` value it was given. */
+export type RetiredScopeDecision =
+  | { kind: 'proceed' }
+  | { kind: 'refuse'; message: string };
+
+/**
+ * Decide what `init --scope <value>` does now that there is one install scope.
+ * Pure — the action performs the exit.
+ *
+ * D-SCOPE-RETIRED: `--scope` is kept as a hidden option so existing scripts keep
+ * parsing. `user` (any case) is exactly the no-flag install. `local` is refused
+ * before anything is written: the repo-local install wrote `<repo>/.claude` and
+ * `<repo>/.devflow` while every hook and prompt read `~/.devflow`, so it never
+ * worked, and the only thing left to do with one is remove it. Any other value
+ * is refused the same way rather than silently treated as `user`.
+ */
+export function resolveRetiredScopeOption(scope: string | undefined): RetiredScopeDecision {
+  if (scope === undefined || scope.toLowerCase() === 'user') return { kind: 'proceed' };
+  if (scope.toLowerCase() === 'local') {
+    return {
+      kind: 'refuse',
+      message: 'Project-local installs are no longer supported: Devflow installs machine-wide only. ' +
+        'To remove an old project-local install, run `devflow uninstall --scope local` to clean up.',
+    };
+  }
+  return {
+    kind: 'refuse',
+    message: `Unknown --scope value "${scope}": Devflow installs machine-wide only (omit --scope).`,
+  };
+}
+
 export const initCommand = new Command('init')
   .description('Initialize Devflow for Claude Code')
-  .option('--scope <type>', 'Installation scope: user or local (project-only)', /^(user|local)$/i)
+  .addOption(new Option('--scope <type>', 'Retired: Devflow installs machine-wide only').hideHelp())
   .option('--verbose', 'Show detailed installation output')
   .option('--plugin <names>', 'Install specific plugin(s), comma-separated (e.g., implement,code-review)')
   .option('--ambient', 'Enable ambient mode (orchestrator charter + plan handoff)')
@@ -687,30 +716,17 @@ export const initCommand = new Command('init')
       process.exit(1);
     }
 
-    // Determine installation scope
-    let scope: 'user' | 'local' = 'user';
-
-    if (options.hudOnly) {
-      // --hud-only: skip scope prompt, always user scope
-      scope = 'user';
-    } else if (options.scope) {
-      const normalizedScope = options.scope.toLowerCase();
-      if (normalizedScope !== 'user' && normalizedScope !== 'local') {
-        p.log.error('Invalid scope. Use "user" or "local"');
-        process.exit(1);
-      }
-      scope = normalizedScope;
-    } else if (!process.stdin.isTTY) {
-      p.log.info('Non-interactive mode detected, using scope: user');
-      scope = 'user';
+    // D-SCOPE-RETIRED: refuse a retired --scope value before anything is written.
+    const scopeDecision = resolveRetiredScopeOption(options.scope);
+    if (scopeDecision.kind === 'refuse') {
+      p.log.error(scopeDecision.message);
+      process.exit(1);
     }
 
     // --hud-only: install only HUD (skip plugins, hooks, extras)
     if (options.hudOnly) {
       // Resolve paths
-      const paths = await getInstallationPaths(scope);
-      const claudeDir = paths.claudeDir;
-      const devflowDir = paths.devflowDir;
+      const { claudeDir, devflowDir } = getInstallationPaths();
 
       // Save HUD config
       const existingHud = loadHudConfig();
@@ -751,7 +767,7 @@ export const initCommand = new Command('init')
       try {
         await writeManifest(
           devflowDir,
-          buildHudOnlyManifest(existingHudManifest, version, scope, new Date().toISOString()),
+          buildHudOnlyManifest(existingHudManifest, version, new Date().toISOString()),
         );
       } catch { /* non-fatal */ }
 
@@ -771,9 +787,9 @@ export const initCommand = new Command('init')
     let earlySettingsJson: string | null = null;
     let earlyGitRoot: string | null = null;
     try {
-      const earlyPaths = await getInstallationPaths(scope);
+      const earlyPaths = getInstallationPaths();
       existingManifest = await readManifest(earlyPaths.devflowDir);
-      earlyGitRoot = earlyPaths.gitRoot ?? await getGitRoot();
+      earlyGitRoot = await getGitRoot();
       if (earlyGitRoot) {
         earlyProjectConfig = await readConfigIfPresent(earlyGitRoot);
       }
@@ -1157,11 +1173,11 @@ export const initCommand = new Command('init')
       }
 
       // Run independent I/O in parallel: project discovery + safe-delete version check
-      const needsDiscovery = earlyGitRoot && scope === 'user';
+      const needsDiscovery = earlyGitRoot !== null;
       const needsVersionCheck = safeDeleteBlock && profilePath;
 
       const [discoveredResult, installedVersionResult] = await Promise.all([
-        needsDiscovery ? discoverProjectGitRoots() : Promise.resolve([] as string[]),
+        needsDiscovery ? discoverProjectGitRoots(getInstallationPaths().claudeDir) : Promise.resolve([] as string[]),
         needsVersionCheck ? getInstalledVersion(profilePath) : Promise.resolve(0),
       ]);
 
@@ -1465,48 +1481,30 @@ export const initCommand = new Command('init')
 
       // .claudeignore prompt
       if (earlyGitRoot) {
-        if (scope === 'user') {
-          discoveredProjects = await discoverProjectGitRoots();
-          p.note(
-            'Scans all projects Claude has worked on and creates a\n' +
-            '.claudeignore in each git repository. Excludes secrets,\n' +
-            'API keys, dependencies, and build artifacts from context.',
-            '.claudeignore',
-          );
-          if (discoveredProjects.length > 0) {
-            const maxShow = 5;
-            const projectLines = discoveredProjects.slice(0, maxShow).join('\n');
-            const overflow = discoveredProjects.length > maxShow
-              ? `\n... (${discoveredProjects.length - maxShow} more)`
-              : '';
-            p.note(projectLines + overflow, `Discovered ${discoveredProjects.length} projects`);
-            const claudeignoreChoice = await p.confirm({
-              message: `Install .claudeignore to ${discoveredProjects.length} projects? (Recommended)`,
-              initialValue: true,
-            });
-            if (p.isCancel(claudeignoreChoice)) {
-              p.cancel('Installation cancelled.');
-              process.exit(0);
-            }
-            claudeignoreEnabled = claudeignoreChoice;
-          } else {
-            const claudeignoreChoice = await p.confirm({
-              message: 'Create .claudeignore? (Recommended)',
-              initialValue: true,
-            });
-            if (p.isCancel(claudeignoreChoice)) {
-              p.cancel('Installation cancelled.');
-              process.exit(0);
-            }
-            claudeignoreEnabled = claudeignoreChoice;
+        discoveredProjects = await discoverProjectGitRoots(getInstallationPaths().claudeDir);
+        p.note(
+          'Scans all projects Claude has worked on and creates a\n' +
+          '.claudeignore in each git repository. Excludes secrets,\n' +
+          'API keys, dependencies, and build artifacts from context.',
+          '.claudeignore',
+        );
+        if (discoveredProjects.length > 0) {
+          const maxShow = 5;
+          const projectLines = discoveredProjects.slice(0, maxShow).join('\n');
+          const overflow = discoveredProjects.length > maxShow
+            ? `\n... (${discoveredProjects.length - maxShow} more)`
+            : '';
+          p.note(projectLines + overflow, `Discovered ${discoveredProjects.length} projects`);
+          const claudeignoreChoice = await p.confirm({
+            message: `Install .claudeignore to ${discoveredProjects.length} projects? (Recommended)`,
+            initialValue: true,
+          });
+          if (p.isCancel(claudeignoreChoice)) {
+            p.cancel('Installation cancelled.');
+            process.exit(0);
           }
+          claudeignoreEnabled = claudeignoreChoice;
         } else {
-          p.note(
-            'Creates a .claudeignore in this project that excludes\n' +
-            'secrets, API keys, dependencies, and build artifacts from\n' +
-            'Claude\'s context window.',
-            '.claudeignore',
-          );
           const claudeignoreChoice = await p.confirm({
             message: 'Create .claudeignore? (Recommended)',
             initialValue: true,
@@ -1551,8 +1549,8 @@ export const initCommand = new Command('init')
         }
       }
 
-      // Security deny list placement (user scope + TTY only)
-      if (scope === 'user' && process.stdin.isTTY) {
+      // Security deny list placement (TTY only)
+      if (process.stdin.isTTY) {
         p.note(
           'Devflow includes a security deny list that blocks dangerous\n' +
           'commands (rm -rf, sudo, eval, etc). It can be installed as a\n' +
@@ -1618,10 +1616,10 @@ export const initCommand = new Command('init')
     let gitRoot: string | null = null;
 
     try {
-      const paths = await getInstallationPaths(scope);
+      const paths = getInstallationPaths();
       claudeDir = paths.claudeDir;
       devflowDir = paths.devflowDir;
-      gitRoot = paths.gitRoot ?? earlyGitRoot;
+      gitRoot = earlyGitRoot;
     } catch (error) {
       s.stop('Path resolution failed');
       p.log.error(`Path configuration error: ${error instanceof Error ? error.message : error}`);
@@ -1688,23 +1686,13 @@ export const initCommand = new Command('init')
     // Validate target directory
     s.message('Validating target directory');
 
-    if (scope === 'local') {
-      try {
-        await fs.mkdir(claudeDir, { recursive: true });
-      } catch (error) {
-        s.stop('Installation failed');
-        p.log.error(`Failed to create ${claudeDir}: ${error}`);
-        process.exit(1);
-      }
-    } else {
-      try {
-        await fs.access(claudeDir);
-      } catch {
-        s.stop('Installation failed');
-        p.log.error(`Claude Code not detected at ${claudeDir}`);
-        p.log.info('Install from: https://claude.ai/download');
-        process.exit(1);
-      }
+    try {
+      await fs.access(claudeDir);
+    } catch {
+      s.stop('Installation failed');
+      p.log.error(`Claude Code not detected at ${claudeDir}`);
+      p.log.info('Install from: https://claude.ai/download');
+      process.exit(1);
     }
 
     // Resolve plugins and deduplication maps
@@ -1734,15 +1722,14 @@ export const initCommand = new Command('init')
     // Migrations clean up ~/.devflow runtime data and never touch the installer's copy
     // targets, so their position relative to installViaFileCopy carries no dependency.
     // Migrations are always-run-unapplied: helpers short-circuit when the target data is
-    // absent, so fresh installs are safe no-ops. State lives at the home-dir ~/.devflow
-    // location regardless of install scope (D30).
+    // absent, so fresh installs are safe no-ops. State lives at the machine root
+    // ~/.devflow (D30).
     {
       const { runMigrations } = await import('../../core/migrations.js');
-      const userDevflowDir = path.join(os.homedir(), '.devflow');
       await runMigrationsWithFallback(
         discoveredProjects,
         gitRoot,
-        userDevflowDir,
+        devflowDir,
         { warn: p.log.warn, info: p.log.info, success: p.log.success },
         verbose,
         runMigrations,
@@ -2204,7 +2191,7 @@ export const initCommand = new Command('init')
 
     // File extras
     if (claudeignoreEnabled) {
-      if (scope === 'user' && discoveredProjects.length > 0) {
+      if (discoveredProjects.length > 0) {
         const results = await Promise.all(
           discoveredProjects.map(root => installClaudeignore(root, rootDir, verbose)),
         );
@@ -2219,17 +2206,11 @@ export const initCommand = new Command('init')
       }
     }
     // Deterministically ensure .devflow/ is gitignored at the repo root — independent
-    // of install scope and every feature toggle. The always-on ensure-root-gitignore
+    // of every feature toggle. The always-on ensure-root-gitignore
     // hook covers projects that never re-run init; this covers the init-time path so a
     // fresh install never tracks .devflow/. Decoupled from memory (avoids PF-014).
     if (gitRoot) {
       await ensureDevflowGitignore(gitRoot, verbose);
-    }
-    if (scope === 'local' && gitRoot) {
-      await updateGitignore(gitRoot, verbose);
-    }
-    if (scope === 'local') {
-      await createDocsStructure(verbose);
     }
 
     // Safe-delete execution (decision was captured during prompt phase)
@@ -2438,7 +2419,6 @@ export const initCommand = new Command('init')
 
       p.note(pluginsList, 'Installed plugins');
 
-      p.log.info(`Scope: ${scope}`);
       p.log.info(`Claude dir: ${claudeDir}`);
       p.log.info(`Devflow dir: ${devflowDir}`);
 
@@ -2456,7 +2436,7 @@ export const initCommand = new Command('init')
       // derived from it — one binding, so the manifest can never record a
       // selection other than the one the assets were installed for.
       plugins: effectivePluginNames,
-      scope,
+      scope: 'user' as const,
       // Snapshot of known plugin names at this install — used by resolveSeedPlugins on next init
       // to detect new non-optional plugins and auto-adopt them.
       knownPlugins: DEVFLOW_PLUGINS.map(p => p.name),

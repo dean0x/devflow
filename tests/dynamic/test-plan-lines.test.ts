@@ -47,7 +47,7 @@ const TEST_AGENT = resolveAgentSource('test').content
 const CONTRACT_SOURCE = fs.readFileSync(path.join(ROOT, 'src', 'assets', 'commands', '_partials', '_plan_contract.mds'), 'utf-8')
 
 /** The one spelling every command uses to run the check (plan.mds and implement.mds share it). */
-const CHECK_TP = 'node "${DEVFLOW_DIR:-$HOME/.devflow}/scripts/verify-evidence.cjs" check tp <that file>; echo "exit=$?"'
+const CHECK_TP = 'node "$HOME/.devflow/scripts/verify-evidence.cjs" check tp <that file>; echo "exit=$?"'
 
 /** Every start offset of a non-empty `needle` in `text`. */
 function offsetsOf(text: string, needle: string): number[] {

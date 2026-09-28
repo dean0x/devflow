@@ -12,7 +12,7 @@ import { addMemoryHooks, removeMemoryHooks, hasMemoryHooks, countMemoryHooks, cl
  * which calls `devflow_log_dir` and so `mkdir -p "$HOME/.devflow/logs/<slug>"`
  * unconditionally; `session-start-context` additionally reads user-scope state —
  * the global learning.json, and the tracker manifest and its `.tracker.enabled`
- * sentinel — out of `${DEVFLOW_DIR:-$HOME/.devflow}`. Every invocation therefore
+ * sentinel — out of `$HOME/.devflow`. Every invocation therefore
  * passes an explicit HOME, so no assertion here writes to, or is decided by, the
  * developer's real machine (PF-060).
  *
@@ -27,13 +27,11 @@ async function mkTmpHome(): Promise<string> {
 }
 
 /**
- * Hook environment: an explicit HOME and DEVFLOW_DIR on every invocation.
- *
- * `''` is treated as unset by `${DEVFLOW_DIR:-…}`, so this both neutralises a
- * DEVFLOW_DIR exported in the developer's shell and exercises the fallback.
+ * Hook environment: an explicit HOME on every invocation — the hooks resolve
+ * user-scope state from `$HOME/.devflow` and nothing else (D-ONE-HOME).
  */
 function hookEnv(home: string): NodeJS.ProcessEnv {
-  return { ...process.env, HOME: home, DEVFLOW_DIR: '' };
+  return { ...process.env, HOME: home };
 }
 
 describe('addMemoryHooks', () => {

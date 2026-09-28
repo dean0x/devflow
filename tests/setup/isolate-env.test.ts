@@ -12,9 +12,10 @@
  *     DEVFLOW_DIR in a parent env, a worker-style `node dist/cli.js init` is
  *     spawned from that env after the setup file's isolation, and the canary stays
  *     empty while the temp HOME receives the install. The RED PROBE runs the same
- *     spawn with the redirects left in place and shows the canary filling — so the
- *     green arm is empty because of the isolation, not because init wrote nothing
- *     or ignores the variables.
+ *     spawn with the redirects left in place and shows the canary filling through
+ *     CLAUDE_CONFIG_DIR — so the green arm is empty because of the isolation, not
+ *     because init wrote nothing or ignores the variable. (DEVFLOW_DIR is ignored by
+ *     devflow itself since #389, D-ONE-HOME; the probe pins that too.)
  *
  * Every spawn uses a fresh temp HOME and `--security user`, which never touches
  * the absolute managed-settings path a HOME sandbox cannot redirect (PF-060).
@@ -196,8 +197,12 @@ describe('AC-1: an exported CLAUDE_CONFIG_DIR / DEVFLOW_DIR canary stays empty',
     spawnInit({ ...exportedEnv(probeCanary), HOME: home }, home);
 
     const written = filesUnder(probeCanary);
-    expect(written).toContain(path.join('devflow', 'manifest.json'));
+    // CLAUDE_CONFIG_DIR is honoured (D-CLAUDE-CONFIG-DIR), so the Claude half of an
+    // un-isolated init lands in the canary...
     expect(written).toContain(path.join('claude', 'settings.json'));
-    expect(existsSync(path.join(home, '.devflow', 'manifest.json'))).toBe(false);
+    expect(existsSync(path.join(home, '.claude', 'settings.json'))).toBe(false);
+    // ...while DEVFLOW_DIR is ignored (D-ONE-HOME): the machine root stays $HOME/.devflow.
+    expect(written.filter(f => f.startsWith(`devflow${path.sep}`))).toEqual([]);
+    expect(existsSync(path.join(home, '.devflow', 'manifest.json'))).toBe(true);
   }, SUBPROCESS_TIMEOUT_MS);
 });

@@ -31,8 +31,8 @@ const MEMORY_WORKER = path.join(HOOKS_DIR, 'memory-worker');
 
 /**
  * The shared runHook (stdin-EPIPE safe: the DEVFLOW_BG_UPDATER guards below exit
- * before reading stdin) with an explicit empty DEVFLOW_DIR, overridable per call:
- * a developer's exported value must never decide which manifest the gates read.
+ * before reading stdin). The gates read the manifest at $HOME/.devflow only
+ * (D-ONE-HOME), so HOME alone decides which manifest they see.
  */
 function runHook(
   hookPath: string,
@@ -40,7 +40,7 @@ function runHook(
   homeDir: string,
   extraEnv: Record<string, string> = {},
 ): { stdout: string; stderr: string; exitCode: number } {
-  return runSharedHook(hookPath, input, homeDir, { DEVFLOW_DIR: '', ...extraEnv });
+  return runSharedHook(hookPath, input, homeDir, extraEnv);
 }
 
 function runHookWithPath(
@@ -587,14 +587,14 @@ describe('memory-worker', () => {
     expect(fs.statSync(triggerFile).mtimeMs).toBeGreaterThan(Date.now() - 15000);
   });
 
-  it('hands the spawned worker the devflow-global manifest, not one under the project .devflow', async () => {
-    // The worker re-reads the switch after spawn. memory-worker has shadowed
-    // DEVFLOW_DIR with the project path by then, so the worker must use the
-    // manifest path it is handed — a decoy "off" under the project .devflow
-    // proves it did not re-derive the path from the shadowed variable.
+  it('hands the spawned worker the machine-root manifest, not one under the project .devflow or an exported DEVFLOW_DIR', async () => {
+    // The worker re-reads the switch after spawn against the manifest path it is
+    // handed ($HOME/.devflow, D-ONE-HOME). Decoy "off" manifests under the project
+    // .devflow and under an exported DEVFLOW_DIR prove it read neither.
     const overrideDir = fs.mkdtempSync(path.join(os.tmpdir(), 'mem-worker-override-'));
     try {
-      writeManifestFeatures(overrideDir, { learning: true });
+      writeManifestFeatures(path.join(homeDir, '.devflow'), { learning: true });
+      writeManifestFeatures(overrideDir, { memory: false });
       writeManifestFeatures(path.join(projectDir, '.devflow'), { memory: false });
       const invokedMarker = path.join(shimDir, 'claude-invoked');
       fs.writeFileSync(path.join(shimDir, 'claude'), `#!/bin/bash\necho invoked >> "${invokedMarker}"\nexit 1\n`);
@@ -646,13 +646,14 @@ describe('background-memory-update: machine-wide memory switch (D-FEATURES-MACHI
     for (const dir of [projectDir, homeDir, shimDir]) fs.rmSync(dir, { recursive: true, force: true });
   });
 
-  function runWorker(devflowDirEnv: string, manifestArg?: string): void {
+  /** `retiredDevflowDir`, when given, is exported as DEVFLOW_DIR — which the worker must ignore. */
+  function runWorker(retiredDevflowDir?: string, manifestArg?: string): void {
     const args = manifestArg === undefined ? `"${projectDir}"` : `"${projectDir}" "${manifestArg}"`;
     execSync(`bash "${BG_UPDATER}" ${args}`, {
       env: {
         ...process.env,
         HOME: homeDir,
-        DEVFLOW_DIR: devflowDirEnv,
+        ...(retiredDevflowDir === undefined ? {} : { DEVFLOW_DIR: retiredDevflowDir }),
         PATH: `${shimDir}:${process.env.PATH ?? '/usr/bin:/bin'}`,
         // A run that gets past the gate reaches the claude watchdog: 2s, not 120s.
         DEVFLOW_BG_WATCHDOG_SECS: '2',
@@ -664,7 +665,7 @@ describe('background-memory-update: machine-wide memory switch (D-FEATURES-MACHI
   it('aborts before resolving claude when the manifest switches memory off, although the repo config says true', () => {
     writeManifestFeatures(path.join(homeDir, '.devflow'), { memory: false });
 
-    runWorker('');
+    runWorker();
 
     expect(fs.readFileSync(workerLogPath(projectDir, homeDir, 'background-memory-update'), 'utf-8'))
       .toContain('ABORT: memory disabled');
@@ -676,7 +677,7 @@ describe('background-memory-update: machine-wide memory switch (D-FEATURES-MACHI
   it('a stale repo config memory:false does not abort the worker', () => {
     writeFeatureConfig(projectDir, { memory: false });
 
-    runWorker('');
+    runWorker();
 
     expect(fs.existsSync(invokedMarker)).toBe(true);
     expect(fs.readFileSync(workerLogPath(projectDir, homeDir, 'background-memory-update'), 'utf-8'))
@@ -690,7 +691,7 @@ describe('background-memory-update: machine-wide memory switch (D-FEATURES-MACHI
       // A decoy under $HOME that would say "on" if the argument were ignored.
       writeManifestFeatures(path.join(homeDir, '.devflow'), { memory: true });
 
-      runWorker('', path.join(overrideDir, 'manifest.json'));
+      runWorker(undefined, path.join(overrideDir, 'manifest.json'));
 
       expect(fs.readFileSync(workerLogPath(projectDir, homeDir, 'background-memory-update'), 'utf-8'))
         .toContain('ABORT: memory disabled');
@@ -700,7 +701,26 @@ describe('background-memory-update: machine-wide memory switch (D-FEATURES-MACHI
     }
   });
 
-  it('without that argument, falls back to the inherited DEVFLOW_DIR', () => {
+  it('without that argument, reads $HOME/.devflow and ignores an exported DEVFLOW_DIR (D-ONE-HOME, AC-10)', () => {
+    const overrideDir = fs.mkdtempSync(path.join(os.tmpdir(), 'bmu-switch-override-'));
+    try {
+      writeManifestFeatures(overrideDir, { memory: false });
+      writeManifestFeatures(path.join(homeDir, '.devflow'), { memory: false });
+
+      runWorker(overrideDir);
+
+      // The machine root's "off" governs...
+      expect(fs.readFileSync(workerLogPath(projectDir, homeDir, 'background-memory-update'), 'utf-8'))
+        .toContain('ABORT: memory disabled');
+      expect(fs.existsSync(invokedMarker)).toBe(false);
+      // ...and the exported directory is never written to.
+      expect(fs.readdirSync(overrideDir).sort()).toEqual(['manifest.json']);
+    } finally {
+      fs.rmSync(overrideDir, { recursive: true, force: true });
+    }
+  });
+
+  it('an exported DEVFLOW_DIR whose manifest says off does not stop a worker the machine root allows', () => {
     const overrideDir = fs.mkdtempSync(path.join(os.tmpdir(), 'bmu-switch-override-'));
     try {
       writeManifestFeatures(overrideDir, { memory: false });
@@ -708,9 +728,9 @@ describe('background-memory-update: machine-wide memory switch (D-FEATURES-MACHI
 
       runWorker(overrideDir);
 
+      expect(fs.existsSync(invokedMarker)).toBe(true);
       expect(fs.readFileSync(workerLogPath(projectDir, homeDir, 'background-memory-update'), 'utf-8'))
-        .toContain('ABORT: memory disabled');
-      expect(fs.existsSync(invokedMarker)).toBe(false);
+        .not.toContain('ABORT: memory disabled');
     } finally {
       fs.rmSync(overrideDir, { recursive: true, force: true });
     }
@@ -770,9 +790,8 @@ describe('capture hooks read the machine-wide memory and learning switches only'
     fs.rmSync(homeDir, { recursive: true, force: true });
   });
 
-  // Explicit here as well as in the harness default: these assertions are about
-  // which manifest is read.
-  const ENV = { DEVFLOW_DIR: '' };
+  // These assertions are about which manifest is read; HOME alone decides it.
+  const ENV = {};
   const learningQueue = () => path.join(projectDir, '.devflow', 'learning', '.pending-turns.jsonl');
   const memoryQueue = () => path.join(projectDir, '.devflow', 'memory', '.pending-turns.jsonl');
 
@@ -862,16 +881,17 @@ describe('capture hooks read the machine-wide memory and learning switches only'
     });
   }
 
-  it('the manifest is read from an inherited DEVFLOW_DIR override, not the project .devflow', () => {
+  it('the manifest is read from $HOME/.devflow; an exported DEVFLOW_DIR is ignored and stays empty (D-ONE-HOME, AC-10)', () => {
     const overrideDir = fs.mkdtempSync(path.join(os.tmpdir(), 'cap-switch-override-'));
     try {
+      // A decoy under the retired override that would say "off" if it were read.
       writeManifestFeatures(overrideDir, { learning: false });
-      // A decoy under $HOME that would say "on" if the override were ignored.
       writeManifestFeatures(path.join(homeDir, '.devflow'), { learning: true });
 
       runHook(CAPTURE_PROMPT, { cwd: projectDir, prompt: 'hello' }, homeDir, { DEVFLOW_DIR: overrideDir });
-      expect(fs.existsSync(learningQueue())).toBe(false);
+      expect(readJsonl(learningQueue())).toHaveLength(1);
       expect(readJsonl(memoryQueue())).toHaveLength(1);
+      expect(fs.readdirSync(overrideDir).sort()).toEqual(['manifest.json']);
     } finally {
       fs.rmSync(overrideDir, { recursive: true, force: true });
     }

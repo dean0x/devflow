@@ -38,13 +38,10 @@ let sessionsDirCreated = false;
 let cachedAggregation: { value: CostAggregation | null; expiresAt: number } | null = null;
 
 /**
- * Returns the paths used for cost storage.
- * Respects DEVFLOW_DIR env for testability.
+ * Returns the paths used for cost storage, under $HOME/.devflow (D-ONE-HOME).
  */
 export function getCostFilePaths(): { sessionsDir: string; archivePath: string } {
-  const devflowDir =
-    process.env.DEVFLOW_DIR ||
-    path.join(process.env.HOME || homedir(), '.devflow');
+  const devflowDir = path.join(process.env.HOME || homedir(), '.devflow');
   const sessionsDir = path.join(devflowDir, 'costs', 'sessions');
   const archivePath = path.join(devflowDir, 'costs', 'archive.jsonl');
   return { sessionsDir, archivePath };

@@ -1788,12 +1788,12 @@ describe('git agent — static content guards (PF-018)', () => {
     ).toContain('## Comment-sink scrub (D11)');
   });
 
-  it('D11: redact-secrets.cjs script path with DEVFLOW_DIR prefix is present', () => {
+  it('D11: redact-secrets.cjs script path with the machine-root prefix is present', () => {
     expect(content, 'D11: redact-secrets.cjs not referenced').toContain('redact-secrets.cjs');
     expect(
       content,
-      'D11: ${DEVFLOW_DIR:-$HOME/.devflow}/scripts/ prefix not present — changing the install path silently breaks the scrubber invocation',
-    ).toContain('${DEVFLOW_DIR:-$HOME/.devflow}/scripts/');
+      'D11: $HOME/.devflow/scripts/ prefix not present — changing the install path silently breaks the scrubber invocation',
+    ).toContain('$HOME/.devflow/scripts/');
   });
 
   it('D11: DO NOT POST and TRACEABILITY: DEGRADED (redaction unavailable) are present', () => {

@@ -148,6 +148,8 @@ The `commands` array lists slash-command names (e.g., `'/implement'`). The insta
 
 ## Installation Paths
 
+Devflow has one install location per machine. `~/.claude` below is the Claude Code directory: `$CLAUDE_CONFIG_DIR` when it is set to an absolute path, else `~/.claude` (D-CLAUDE-CONFIG-DIR). `~/.devflow` is always the machine root; no environment variable relocates it (D-ONE-HOME).
+
 | Asset | Path | Notes |
 |-------|------|-------|
 | Commands | `~/.claude/commands/devflow/` | Namespaced; installed from `dist/commands/*.md` |
@@ -196,9 +198,9 @@ All 17 agents (`git`, `synthesize`, `skim`, `simplify`, `code`, `review`, `triag
 
 The installer resolves each declared agent over `agentSourceDirs()` in `src/core/assets.ts` — `dist/agents/`, then `src/assets/agents/` — and copies the first hit, so a compiled artifact supersedes a hand-authored file of the same name. When neither directory has the agent, the install throws naming both candidate paths and `npm run build:mds` rather than silently skipping it. `npm run build:cli` alone (TypeScript) does not produce installable agents; `npm run build` runs both steps.
 
-## Settings Override
+## Settings
 
-`devflow init --override-settings` replaces `~/.claude/settings.json`.
+`devflow init` writes `~/.claude/settings.json` from `src/targets/claude-code/templates/settings.json` when none exists, and otherwise merges into it (never overwriting it wholesale). The template's `${DEVFLOW_DIR}` placeholder is an install-time token, replaced with the machine root (`~/.devflow`) as the file is written; it is not read from the environment.
 
 Included settings:
 - `statusLine` - Configurable HUD with presets (replaces legacy statusline.sh)

@@ -32,23 +32,23 @@ function fullInstall(): ManifestData {
 describe('buildHudOnlyManifest', () => {
   it('over a prior install keeps every value and turns only the HUD on', () => {
     const prior = fullInstall();
-    const result = buildHudOnlyManifest(prior, '9.9.9', 'user', NOW);
+    const result = buildHudOnlyManifest(prior, '9.9.9', NOW);
     expect(result).toEqual({ ...prior, features: { ...prior.features, hud: true }, updatedAt: NOW });
   });
 
   it('keeps the prior version — --hud-only reinstalls no plugin', () => {
-    expect(buildHudOnlyManifest(fullInstall(), '9.9.9', 'user', NOW).version).toBe('3.1.0');
+    expect(buildHudOnlyManifest(fullInstall(), '9.9.9', NOW).version).toBe('3.1.0');
   });
 
   it('never mutates the manifest it was given', () => {
     const prior = fullInstall();
     const snapshot = JSON.stringify(prior);
-    buildHudOnlyManifest(prior, '9.9.9', 'user', NOW);
+    buildHudOnlyManifest(prior, '9.9.9', NOW);
     expect(JSON.stringify(prior)).toBe(snapshot);
   });
 
   it('with no prior install records a HUD-only fresh install', () => {
-    const result = buildHudOnlyManifest(null, '9.9.9', 'user', NOW);
+    const result = buildHudOnlyManifest(null, '9.9.9', NOW);
     expect(result).toMatchObject({
       version: '9.9.9',
       plugins: [],

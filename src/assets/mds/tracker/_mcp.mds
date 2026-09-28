@@ -87,7 +87,7 @@ the define, and this paragraph is the reason.
 The tool-call contract governs {scope}; this operation names its steps and restates none of its rules.
 
 1. Compose this post's own content into `$DEVFLOW_BODY_RAW` — a fresh `mktemp` per invocation, under D11's removal `trap`.{compose_tail}
-2. Run `node "$\{DEVFLOW_DIR:-$HOME/.devflow\}/scripts/redact-secrets.cjs" --emit "$DEVFLOW_BODY_RAW"`.
+2. Run `node "$HOME/.devflow/scripts/redact-secrets.cjs" --emit "$DEVFLOW_BODY_RAW"`.
 3. Require line 1 to be `D11-OK`; verify `<bytes>` against the received body's byte length; echo `SCRUB: N [type:count,…]`; and when N > 0 also emit `SECRET-EXPOSED (rotate \{type\} credential — the source file still holds it)`.
 @end
 
@@ -232,7 +232,7 @@ framing line instead.
 ```bash
 DEVFLOW_BODY_RAW="$(mktemp)"
 # …compose the body into "$DEVFLOW_BODY_RAW"…
-node "${DEVFLOW_DIR:-$HOME/.devflow}/scripts/redact-secrets.cjs" --emit "$DEVFLOW_BODY_RAW"
+node "$HOME/.devflow/scripts/redact-secrets.cjs" --emit "$DEVFLOW_BODY_RAW"
 ```
 
 Line 1 of that result is the framing:

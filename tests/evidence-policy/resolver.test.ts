@@ -692,7 +692,7 @@ describe('SOURCES and WARNINGS exhaustiveness', SUBPROCESS_TIMEOUT, () => {
       exec: () => { throw new Error('seeded'); },
     }).source);
     // exit 5 (in-process): the output gate refuses a hostile formatter
-    vi.stubEnv('DEVFLOW_DIR', path.join(home, '.devflow'));
+    vi.stubEnv('HOME', home);
     vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
     const refused = RESOLVER.main(['node', RESOLVER_SCRIPT, root], {
       exec: scriptedExec(scenarioCalls({ root })).exec,
@@ -1100,7 +1100,7 @@ describe('fail-closed when local git does not answer', () => {
   });
 
   it('main(): git missing at step 1 ⇒ exit 4 with FAIL_CLOSED_LINE', () => {
-    vi.stubEnv('DEVFLOW_DIR', path.join(home, '.devflow'));
+    vi.stubEnv('HOME', home);
     vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
     const { exec } = scriptedExec(withFailure(scenarioCalls({ root }), ARGV.toplevel, 'ENOENT'));
     expect(RESOLVER.main(['node', RESOLVER_SCRIPT, root], { exec }))
@@ -1219,7 +1219,7 @@ describe('exit arms', SUBPROCESS_TIMEOUT, () => {
 
   function stubHome(): void {
     vi.stubEnv('HOME', home);
-    vi.stubEnv('DEVFLOW_DIR', path.join(home, '.devflow'));
+    vi.stubEnv('HOME', home);
     vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
   }
 
@@ -1427,7 +1427,7 @@ describe('bounds', SUBPROCESS_TIMEOUT, () => {
 // The manifest — the compliance state the script reads for itself
 // ---------------------------------------------------------------------------
 
-describe('manifest read (subprocess; HOME and DEVFLOW_DIR are tmp)', SUBPROCESS_TIMEOUT, () => {
+describe('manifest read (subprocess; HOME is tmp)', SUBPROCESS_TIMEOUT, () => {
   const NOT_A_REPO: ScriptedCall[] = [{ tool: 'git', args: ARGV.toplevel, exit: 128, stderr: 'fatal: not a git repository\n' }];
 
   function writeManifest(dir: string, compliance: unknown): string {
@@ -1454,18 +1454,19 @@ describe('manifest read (subprocess; HOME and DEVFLOW_DIR are tmp)', SUBPROCESS_
     expect(fieldOf(expectOneGrammarLine(e2e(NOT_A_REPO).stdout), 'EVIDENCE_POLICY')).toBe('standard');
   });
 
-  it('a relative DEVFLOW_DIR is ignored in favour of HOME/.devflow', () => {
+  it('a relative DEVFLOW_DIR is ignored in favour of HOME/.devflow (D-ONE-HOME)', () => {
     writeManifest(path.join(home, '.devflow'), ENABLED_ZERO);
     const run = e2e(NOT_A_REPO, { extraEnv: { DEVFLOW_DIR: 'relative/devflow' } });
     expect(fieldOf(expectOneGrammarLine(run.stdout), 'EVIDENCE_POLICY')).toBe('required');
   });
 
-  it('an absolute DEVFLOW_DIR wins over HOME/.devflow', () => {
+  it('an absolute DEVFLOW_DIR is ignored: HOME/.devflow governs and the exported dir is untouched (D-ONE-HOME, AC-10)', () => {
     writeManifest(path.join(home, '.devflow'), DISABLED);
     const custom = path.join(tmp, 'custom-devflow');
     writeManifest(custom, ENABLED_ZERO);
     const run = e2e(NOT_A_REPO, { extraEnv: { DEVFLOW_DIR: custom } });
-    expect(fieldOf(expectOneGrammarLine(run.stdout), 'EVIDENCE_POLICY')).toBe('required');
+    expect(fieldOf(expectOneGrammarLine(run.stdout), 'EVIDENCE_POLICY')).toBe('standard');
+    expect(fs.readdirSync(custom)).toEqual(['manifest.json']);
   });
 
   it('a manifest over 1 MiB is not read (treated as absent)', () => {

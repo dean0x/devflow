@@ -36,6 +36,64 @@ import { stripDevflowTeammateModeFromJson } from '../../core/teammate-mode-clean
 import { getPackageRoot, isContainedIn } from '../../core/paths.js';
 
 /**
+ * Which install `uninstall` acts on: the machine-wide install (`user`), or a
+ * leftover repo-local install from the retired local scope (`local`).
+ */
+export type UninstallScope = 'user' | 'local';
+
+/** The directories one install scope occupies. */
+interface ScopeInstallPaths {
+  claudeDir: string;
+  devflowDir: string;
+}
+
+/**
+ * Where a retired repo-local install lives: `<gitRoot>/.claude` and `<gitRoot>/.devflow`.
+ *
+ * D-LEGACY-LOCAL-CLEANUP: `init --scope local` no longer exists (D-SCOPE-RETIRED
+ * in claude-paths.ts), but repos installed by it still carry its assets, so
+ * `uninstall` keeps detecting and removing them. This is the ONLY place a
+ * repo-local install path is derived, and it is private to uninstall: nothing
+ * installs there any more. A local-only uninstall never reaches the user's
+ * settings.json or anything else under HOME — the settings strip edits
+ * `<gitRoot>/.claude/settings.json`, the legacy commands-rule purge is skipped,
+ * and the machine-wide steps (security deny list, safe-delete) run only when
+ * the user scope is being uninstalled too.
+ *
+ * Returns null when either repo-local directory IS a machine-wide one — a
+ * repository rooted at HOME (a dotfiles repo) puts `<gitRoot>/.claude` and
+ * `<gitRoot>/.devflow` on `~/.claude` and `~/.devflow`, and a "local" removal
+ * there would be a machine-wide uninstall under another name.
+ */
+async function legacyLocalInstallPaths(gitRoot: string): Promise<ScopeInstallPaths | null> {
+  const legacy = {
+    claudeDir: path.join(gitRoot, '.claude'),
+    devflowDir: path.join(gitRoot, '.devflow'),
+  };
+  const machine = getInstallationPaths();
+  if (await isSameLocation(legacy.claudeDir, machine.claudeDir)) return null;
+  if (await isSameLocation(legacy.devflowDir, machine.devflowDir)) return null;
+  return legacy;
+}
+
+/** Whether two paths name one location — realpaths where they exist, so a symlinked HOME still matches. */
+async function isSameLocation(a: string, b: string): Promise<boolean> {
+  const canonical = (target: string): Promise<string> =>
+    fs.realpath(target).catch(() => path.resolve(target));
+  const [left, right] = await Promise.all([canonical(a), canonical(b)]);
+  return left === right;
+}
+
+/**
+ * The directories for `scope`, or null for a local scope with no repo-local
+ * install to act on: outside a git repository, or in one rooted at HOME.
+ */
+async function scopeInstallPaths(scope: UninstallScope, gitRoot: string | null): Promise<ScopeInstallPaths | null> {
+  if (scope === 'user') return getInstallationPaths();
+  return gitRoot === null ? null : legacyLocalInstallPaths(gitRoot);
+}
+
+/**
  * The plugins the manifest records as installed, as registry definitions.
  *
  * Falls back to the whole registry when there is no readable manifest, or when
@@ -191,7 +249,7 @@ export function resolveProjectDataCleanup(answer: boolean | symbol): boolean {
  *   1. basename(devflowDir) must be '.devflow'
  *   2. devflowDir must not equal homeDir
  *   3. devflowDir must not be the filesystem root '/'
- *   4. devflowDir must reside inside $HOME (guards DEVFLOW_DIR env overrides)
+ *   4. devflowDir must reside inside $HOME
  *
  * Returns:
  *   - 'artifacts-only' — remove only manifest.json; leave the directory intact
@@ -208,21 +266,21 @@ export function resolveProjectDataCleanup(answer: boolean | symbol): boolean {
  * --keep-docs from triggering prompts about skill shadows or preference-profile.md.
  */
 export function resolveDevflowDirCleanup(opts: {
-  scope: 'user' | 'local';
+  scope: UninstallScope;
   isTTY: boolean;
   userContent: string[];
   devflowDir: string;
   homeDir: string;
   keepDocs?: boolean;
 }): 'artifacts-only' | 'prompt' {
-  // Local scope never removes project data — only install artifacts.
+  // A legacy local install never removes project data — only install artifacts.
   if (opts.scope !== 'user') return 'artifacts-only';
 
   // --keep-docs: suppress the full cleanup prompt entirely; artifacts-only.
   if (opts.keepDocs) return 'artifacts-only';
 
   // Precondition guard: devflowDir must be a well-known, safe-to-rm path.
-  // Any anomalous value (DEVFLOW_DIR override, bare homedir, filesystem root)
+  // Any anomalous value (bare homedir, filesystem root, a path outside HOME)
   // resolves to artifacts-only — never throw in business logic (engineering rule).
   const isBasenameValid = path.basename(opts.devflowDir) === '.devflow';
   const isNotHomeDir = opts.devflowDir !== opts.homeDir;
@@ -646,7 +704,7 @@ export async function enumerateDryRunExtras(claudeDir: string, devflowDir: strin
  *   describes an outcome the removal does not produce.
  */
 export async function runDryRunPhase(opts: {
-  scopesToUninstall: ReadonlyArray<'user' | 'local'>;
+  scopesToUninstall: ReadonlyArray<UninstallScope>;
   isSelectiveUninstall: boolean;
   selectedPlugins: PluginDefinition[];
   installedPlugins: PluginDefinition[];
@@ -669,13 +727,11 @@ export async function runDryRunPhase(opts: {
     // skills sweep. Enumerate what is actually on disk for each detected scope
     // rather than computing from the registry (which misses legacy/orphaned assets).
     const extras: string[] = [];
+    const gitRoot = scopesToUninstall.includes('local') ? await getGitRoot() : null;
     for (const scope of [...scopesToUninstall]) {
-      try {
-        const paths = await getInstallationPaths(scope);
-        const { claudeDir: cd, devflowDir: dd } = paths;
-        const moreExtras = await enumerateDryRunExtras(cd, dd);
-        extras.push(...moreExtras);
-      } catch { /* scope path resolution failed */ }
+      const paths = await scopeInstallPaths(scope, gitRoot);
+      if (paths === null) continue;
+      extras.push(...await enumerateDryRunExtras(paths.claudeDir, paths.devflowDir));
     }
     // Project .devflow/ data dir
     const devflowDataDir = path.join(process.cwd(), '.devflow');
@@ -705,8 +761,15 @@ export async function runSelectivePhaseForScope(opts: {
   verbose: boolean;
   /** What the manifest records as installed — the retained set is computed from it. */
   installedPlugins?: PluginDefinition[];
+  /**
+   * The scope these directories belong to (default `user`). A `local` scope never
+   * purges the legacy commands rule under the user's Claude directory
+   * (D-LEGACY-LOCAL-CLEANUP).
+   */
+  scope?: UninstallScope;
 }): Promise<void> {
   const { claudeDir, devflowDir, selectedPlugins, verbose } = opts;
+  const scope = opts.scope ?? 'user';
   const installedPlugins = opts.installedPlugins ?? DEVFLOW_PLUGINS;
 
   // Revert GPT agent frontmatter BEFORE removing agent files — strips GPT model
@@ -731,7 +794,7 @@ export async function runSelectivePhaseForScope(opts: {
     const settingsPath = path.join(claudeDir, 'settings.json');
     try {
       const settings = await fs.readFile(settingsPath, 'utf-8');
-      const updated = await removeAmbientHook(settings);
+      const updated = await removeAmbientHook(settings, { purgeLegacyRule: scope === 'user' });
       if (updated !== settings) {
         await fs.writeFile(settingsPath, updated, 'utf-8');
         if (verbose) {
@@ -751,7 +814,7 @@ export async function runSelectivePhaseForScope(opts: {
  * User scope: interactive TTY with user-authored content → confirm before wiping
  *   ~/.devflow/; non-interactive or no user content → artifacts-only.
  *
- * @param opts.scope            - 'user' or 'local'.
+ * @param opts.scope            - 'user' or a legacy 'local' install.
  * @param opts.claudeDir        - Target Claude Code directory for this scope.
  * @param opts.devflowDir       - Devflow data directory for this scope.
  * @param opts.devflowScriptsDir - scripts/ sub-directory removed by removeAllDevFlow.
@@ -762,7 +825,7 @@ export async function runSelectivePhaseForScope(opts: {
  *   resolveDevflowDirCleanup) instead of an ambient global a test cannot control.
  */
 export async function runFullPhaseForScope(opts: {
-  scope: 'user' | 'local';
+  scope: UninstallScope;
   claudeDir: string;
   devflowDir: string;
   devflowScriptsDir: string;
@@ -862,7 +925,11 @@ export async function runFullPhaseForScope(opts: {
  * would leave every destructive prompt gated on a global the caller cannot set,
  * which under a TTY test runner points the prompts at the developer's real files.
  *
- * @param opts.scopesToUninstall - Scopes processed by the scope loop.
+ * @param opts.scopesToUninstall - Scopes processed by the scope loop. Steps 4 and 5
+ *                                 edit machine-wide files under HOME, so they run
+ *                                 only when this includes `user` — a legacy
+ *                                 local-only uninstall never touches HOME
+ *                                 (D-LEGACY-LOCAL-CLEANUP).
  * @param opts.keepDocs          - When true, .devflow/ and security prompts are suppressed.
  * @param opts.verbose           - Whether to emit verbose log lines.
  * @param opts.cwd               - Working directory for project-local path resolution
@@ -871,7 +938,7 @@ export async function runFullPhaseForScope(opts: {
  *                                 prompt in this phase is gated on it.
  */
 export async function runCleanupPhase(opts: {
-  scopesToUninstall: ReadonlyArray<'user' | 'local'>;
+  scopesToUninstall: ReadonlyArray<UninstallScope>;
   keepDocs: boolean;
   verbose: boolean;
   cwd: string;
@@ -965,12 +1032,13 @@ export async function runCleanupPhase(opts: {
   // 3. settings.json (Devflow hooks)
   for (const scope of [...scopesToUninstall]) {
     try {
-      const paths = await getInstallationPaths(scope);
+      const paths = await scopeInstallPaths(scope, gitRoot);
+      if (paths === null) continue;
       const settingsPath = path.join(paths.claudeDir, 'settings.json');
       const originalContent = await fs.readFile(settingsPath, 'utf-8');
 
       // Remove all Devflow hooks and flags in one pass (idempotent)
-      let settingsContent = await removeAmbientHook(originalContent);
+      let settingsContent = await removeAmbientHook(originalContent, { purgeLegacyRule: scope === 'user' });
       settingsContent = removeMemoryHooks(settingsContent);
       settingsContent = removeCaptureHooks(settingsContent);
       settingsContent = removeDreamHook(settingsContent);
@@ -1008,6 +1076,10 @@ export async function runCleanupPhase(opts: {
       // settings.json doesn't exist or can't be parsed — skip
     }
   }
+
+  // Steps 4 and 5 edit the user's settings.json and shell profile: a legacy
+  // local-only uninstall stops here (D-LEGACY-LOCAL-CLEANUP).
+  if (!scopesToUninstall.includes('user')) return;
 
   // 4. Security deny list
 
@@ -1113,7 +1185,7 @@ export async function runCleanupPhase(opts: {
 export const uninstallCommand = new Command('uninstall')
   .description('Uninstall Devflow from Claude Code')
   .option('--keep-docs', 'Keep .devflow/ directory and project data')
-  .option('--scope <type>', 'Uninstall from specific scope only (default: auto-detect all)', /^(user|local)$/i)
+  .option('--scope <type>', 'Uninstall from one scope only: user, or local to remove a legacy project-local install (default: auto-detect both)', /^(user|local)$/i)
   .option('--plugin <names>', 'Uninstall specific plugin(s), comma-separated (e.g., implement,code-review)')
   .option('--verbose', 'Show detailed uninstall output')
   .option('--dry-run', 'Show what would be removed without actually removing anything')
@@ -1154,28 +1226,30 @@ export const uninstallCommand = new Command('uninstall')
       : [];
 
     // Determine which scopes to uninstall
-    let scopesToUninstall: ('user' | 'local')[] = [];
+    let scopesToUninstall: UninstallScope[] = [];
+    const gitRoot = await getGitRoot();
 
     if (options.scope) {
-      scopesToUninstall = [options.scope.toLowerCase() as 'user' | 'local'];
+      scopesToUninstall = [options.scope.toLowerCase() as UninstallScope];
+      // A local-only uninstall with no repo-local install to act on stops here,
+      // before its cleanup phase can reach the cwd — HOME, in a repo rooted there.
+      if (scopesToUninstall[0] === 'local' && await scopeInstallPaths('local', gitRoot) === null) {
+        p.log.error('No legacy project-local install here: not in a git repository, or the repository root holds the machine-wide install');
+        process.exit(1);
+      }
     } else {
-      const userClaudeDir = getClaudeDirectory();
-      const gitRoot = await getGitRoot();
-
-      if (await isDevFlowInstalled(userClaudeDir)) {
+      if (await isDevFlowInstalled(getClaudeDirectory())) {
         scopesToUninstall.push('user');
       }
 
-      if (gitRoot) {
-        const localClaudeDir = path.join(gitRoot, '.claude');
-        if (await isDevFlowInstalled(localClaudeDir)) {
-          scopesToUninstall.push('local');
-        }
+      const legacyPaths = gitRoot === null ? null : await legacyLocalInstallPaths(gitRoot);
+      if (legacyPaths !== null && await isDevFlowInstalled(legacyPaths.claudeDir)) {
+        scopesToUninstall.push('local');
       }
 
       if (scopesToUninstall.length === 0) {
         p.log.error('No Devflow installation found');
-        p.log.info('Checked user scope (~/.claude/) and local scope (git-root/.claude/)');
+        p.log.info(`Checked user scope (${getClaudeDirectory()}/) and legacy local scope (git-root/.claude/)`);
         process.exit(1);
       }
 
@@ -1185,7 +1259,7 @@ export const uninstallCommand = new Command('uninstall')
             message: 'Found Devflow in multiple scopes. Uninstall from:',
             options: [
               { value: 'both', label: 'Both', hint: 'user + local' },
-              { value: 'user', label: 'User scope', hint: '~/.claude/' },
+              { value: 'user', label: 'User scope', hint: `${getClaudeDirectory()}/` },
               { value: 'local', label: 'Local scope', hint: 'git-root/.claude/' },
             ],
           });
@@ -1196,7 +1270,7 @@ export const uninstallCommand = new Command('uninstall')
           }
 
           if (scopeChoice !== 'both') {
-            scopesToUninstall = [scopeChoice as 'user' | 'local'];
+            scopesToUninstall = [scopeChoice as UninstallScope];
           }
         } else {
           p.log.info('Multiple scopes detected, uninstalling from both...');
@@ -1209,10 +1283,10 @@ export const uninstallCommand = new Command('uninstall')
       // One resolution, handed to the dry-run and (below) to the real removal,
       // so the preview and the outcome are computed from the same list.
       let dryRunInstalled: PluginDefinition[] = DEVFLOW_PLUGINS;
-      try {
-        const paths = await getInstallationPaths(scopesToUninstall[0]);
-        dryRunInstalled = await resolveInstalledPlugins(paths.devflowDir);
-      } catch { /* scope path resolution failed — fall back to the registry */ }
+      const dryRunPaths = await scopeInstallPaths(scopesToUninstall[0], gitRoot);
+      if (dryRunPaths !== null) {
+        dryRunInstalled = await resolveInstalledPlugins(dryRunPaths.devflowDir);
+      }
       await runDryRunPhase({
         scopesToUninstall,
         isSelectiveUninstall,
@@ -1236,7 +1310,8 @@ export const uninstallCommand = new Command('uninstall')
     if (!isSelectiveUninstall) {
       for (const scope of scopesToUninstall) {
         try {
-          const paths = await getInstallationPaths(scope);
+          const paths = await scopeInstallPaths(scope, gitRoot);
+          if (paths === null) continue;
           if (await proxyJsonExists(paths.devflowDir)) {
             const proxyState = await readProxyState(paths.devflowDir);
             if (proxyState.ok) managedProxyPorts.set(scope, proxyState.value.port);
@@ -1247,24 +1322,18 @@ export const uninstallCommand = new Command('uninstall')
 
     // Uninstall from each scope
     for (const scope of scopesToUninstall) {
-      let claudeDir: string;
-      let devflowScriptsDir: string;
-      let devflowDir: string;
-
-      try {
-        const paths = await getInstallationPaths(scope);
-        claudeDir = paths.claudeDir;
-        devflowDir = paths.devflowDir;
-        devflowScriptsDir = path.join(paths.devflowDir, 'scripts');
-
-        if (scope === 'user') {
-          p.log.step('Uninstalling user scope (~/.claude/)');
-        } else {
-          p.log.step('Uninstalling local scope (git-root/.claude/)');
-        }
-      } catch (error) {
-        p.log.warn(`Cannot uninstall ${scope} scope: ${error instanceof Error ? error.message : error}`);
+      const paths = await scopeInstallPaths(scope, gitRoot);
+      if (paths === null) {
+        p.log.warn(`Cannot uninstall ${scope} scope: no repo-local install here`);
         continue;
+      }
+      const { claudeDir, devflowDir } = paths;
+      const devflowScriptsDir = path.join(devflowDir, 'scripts');
+
+      if (scope === 'user') {
+        p.log.step(`Uninstalling user scope (${claudeDir})`);
+      } else {
+        p.log.step('Uninstalling legacy local scope (git-root/.claude/)');
       }
 
       if (isSelectiveUninstall) {
@@ -1274,6 +1343,7 @@ export const uninstallCommand = new Command('uninstall')
           selectedPlugins,
           verbose,
           installedPlugins: await resolveInstalledPlugins(devflowDir),
+          scope,
         });
       } else {
         await runFullPhaseForScope({ scope, claudeDir, devflowDir, devflowScriptsDir, verbose, keepDocs: !!options.keepDocs, isTTY: !!process.stdin.isTTY });

@@ -206,7 +206,6 @@ describe('devflow tracker --status re-arms the attempt counter (D-F)', () => {
       env: {
         ...process.env,
         HOME: tmpHome,
-        DEVFLOW_DIR: devflowDir,
         FORCE_COLOR: '0',
         NO_COLOR: '1',
         CI: '1',
@@ -280,7 +279,6 @@ describe('devflow tracker --set converges every tracker artifact', () => {
       env: {
         ...process.env,
         HOME: tmpHome,
-        DEVFLOW_DIR: devflowDir,
         FORCE_COLOR: '0',
         NO_COLOR: '1',
         CI: '1',

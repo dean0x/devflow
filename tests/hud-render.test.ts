@@ -1,7 +1,11 @@
 import { describe, it, expect } from 'vitest';
+import * as fs from 'node:fs';
+import * as os from 'node:os';
+import * as path from 'node:path';
 import { render } from '../src/hud/render.js';
 import {
   HUD_COMPONENTS,
+  getConfigPath,
   loadConfig,
   resolveComponents,
 } from '../src/hud/config.js';
@@ -165,19 +169,31 @@ describe('render', () => {
 
 describe('config', () => {
   it('loadConfig returns default when no file exists', () => {
-    // Point to a non-existent directory
-    const originalEnv = process.env.DEVFLOW_DIR;
-    process.env.DEVFLOW_DIR = '/tmp/nonexistent-devflow-test-dir';
+    // Point HOME at a directory with no .devflow (the HUD reads $HOME/.devflow only).
+    const originalHome = process.env.HOME;
+    process.env.HOME = '/tmp/nonexistent-devflow-test-home';
     try {
       const config = loadConfig();
       expect(config.enabled).toBe(true);
       expect(config.detail).toBe(false);
     } finally {
-      if (originalEnv !== undefined) {
-        process.env.DEVFLOW_DIR = originalEnv;
-      } else {
-        delete process.env.DEVFLOW_DIR;
-      }
+      process.env.HOME = originalHome;
+    }
+  });
+
+  it('getConfigPath resolves under $HOME/.devflow and ignores an exported DEVFLOW_DIR (D-ONE-HOME, AC-10)', () => {
+    const originalHome = process.env.HOME;
+    const canary = fs.mkdtempSync(path.join(os.tmpdir(), 'hud-config-canary-'));
+    process.env.HOME = '/tmp/hud-config-home';
+    process.env.DEVFLOW_DIR = canary;
+    try {
+      expect(getConfigPath()).toBe(path.join('/tmp/hud-config-home', '.devflow', 'hud.json'));
+      loadConfig();
+      expect(fs.readdirSync(canary)).toEqual([]);
+    } finally {
+      process.env.HOME = originalHome;
+      delete process.env.DEVFLOW_DIR;
+      fs.rmSync(canary, { recursive: true, force: true });
     }
   });
 

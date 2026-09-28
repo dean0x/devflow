@@ -297,7 +297,7 @@ export const memoryCommand = new Command('memory')
       p.intro(color.bgCyan(color.white(' Memory Cleanup ')));
 
       // Discover current project and all known projects in parallel
-      const [gitRoots, gitRoot] = await Promise.all([discoverProjectGitRoots(), getGitRoot()]);
+      const [gitRoots, gitRoot] = await Promise.all([discoverProjectGitRoots(getClaudeDirectory()), getGitRoot()]);
       const [projectsWithMemory, currentProjectHasMem] = await Promise.all([
         filterProjectsWithMemory(gitRoots),
         gitRoot ? hasMemoryDir(gitRoot) : Promise.resolve(false),

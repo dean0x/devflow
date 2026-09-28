@@ -188,6 +188,33 @@ describe('runMigrations', () => {
     expect(persisted).toContain('test-record-stub');
   });
 
+  it('reads and writes migration state in ctx.devflowDir, the one resolved home', async () => {
+    // The caller resolves the install root once (D-ONE-HOME); state must follow it,
+    // never a second, independently derived location.
+    const resolvedDevflowDir = path.join(tmpDir, 'resolved', '.devflow');
+    const otherHomeDevflowDir = path.join(tmpDir, 'home', '.devflow');
+    const skipped: Migration = {
+      id: 'test-ctx-skip',
+      description: 'already applied in ctx.devflowDir',
+      scope: 'global',
+      run: async () => { throw new Error('should not run'); },
+    };
+    const fresh: Migration = {
+      id: 'test-ctx-fresh',
+      description: 'applied now',
+      scope: 'global',
+      run: async () => ({ infos: [], warnings: [] }),
+    };
+    await writeAppliedMigrations(resolvedDevflowDir, ['test-ctx-skip']);
+
+    const result = await runMigrations({ devflowDir: resolvedDevflowDir }, [], [skipped, fresh]);
+
+    expect(result.failures).toEqual([]);
+    expect(result.newlyApplied).toEqual(['test-ctx-fresh']);
+    expect(await readAppliedMigrations(resolvedDevflowDir)).toEqual(['test-ctx-skip', 'test-ctx-fresh']);
+    expect(await readAppliedMigrations(otherHomeDevflowDir)).toEqual([]);
+  });
+
   it('does not mark global migration applied when it fails, continues with other migrations', async () => {
     const fakeHome = path.join(tmpDir, 'home', '.devflow');
 

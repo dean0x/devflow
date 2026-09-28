@@ -35,7 +35,7 @@ interface RunResult {
   stderr: string;
 }
 
-function makeRunner(tmpHome: string, devflowDir: string) {
+function makeRunner(tmpHome: string) {
   return function runCli(...args: string[]): RunResult {
     const result = spawnSync('node', [CLI, ...args], {
       encoding: 'utf-8',
@@ -48,7 +48,6 @@ function makeRunner(tmpHome: string, devflowDir: string) {
       env: {
         ...process.env,
         HOME: tmpHome,
-        DEVFLOW_DIR: devflowDir,
         FORCE_COLOR: '0',
         NO_COLOR: '1',
         // Suppress interactive mode in non-TTY
@@ -107,7 +106,7 @@ describe('S1: fresh init --recommended → disabled compliance manifest', () => 
     claudeDir = path.join(tmpHome, '.claude');
     // PF-018: seed .claude so init doesn't bail with "Claude Code not detected"
     await fs.mkdir(claudeDir, { recursive: true });
-    run = makeRunner(tmpHome, devflowDir);
+    run = makeRunner(tmpHome);
   });
 
   afterEach(async () => { await fs.rm(tmpHome, { recursive: true, force: true }); });
@@ -139,7 +138,7 @@ describe('S2: compliance --set gdpr,soc2 → artifacts installed', () => {
     devflowDir = path.join(tmpHome, '.devflow');
     claudeDir = path.join(tmpHome, '.claude');
     await fs.mkdir(claudeDir, { recursive: true });
-    run = makeRunner(tmpHome, devflowDir);
+    run = makeRunner(tmpHome);
     // Setup: init to create manifest
     const initResult = run('init', '--recommended');
     expect(initResult.status, `init failed:\n${initResult.stderr}`).toBe(0);
@@ -199,7 +198,7 @@ describe('S3: from S2 state + --set hipaa → skill updated, rule stamped HIPAA 
     devflowDir = path.join(tmpHome, '.devflow');
     claudeDir = path.join(tmpHome, '.claude');
     await fs.mkdir(claudeDir, { recursive: true });
-    run = makeRunner(tmpHome, devflowDir);
+    run = makeRunner(tmpHome);
     expect(run('init', '--recommended').status).toBe(0);
     expect(run('compliance', '--set', 'gdpr,soc2').status).toBe(0);
   });
@@ -259,7 +258,7 @@ describe('S4: from S3 state + --disable → artifacts gone, frameworks remembere
     devflowDir = path.join(tmpHome, '.devflow');
     claudeDir = path.join(tmpHome, '.claude');
     await fs.mkdir(claudeDir, { recursive: true });
-    run = makeRunner(tmpHome, devflowDir);
+    run = makeRunner(tmpHome);
     expect(run('init', '--recommended').status).toBe(0);
     expect(run('compliance', '--set', 'hipaa').status).toBe(0);
   });
@@ -292,7 +291,7 @@ describe('S5: from S4 state + --enable → hipaa restored exactly', () => {
     devflowDir = path.join(tmpHome, '.devflow');
     claudeDir = path.join(tmpHome, '.claude');
     await fs.mkdir(claudeDir, { recursive: true });
-    run = makeRunner(tmpHome, devflowDir);
+    run = makeRunner(tmpHome);
     expect(run('init', '--recommended').status).toBe(0);
     expect(run('compliance', '--set', 'hipaa').status).toBe(0);
     expect(run('compliance', '--disable').status).toBe(0);
@@ -349,7 +348,7 @@ describe('S6: from S2 state + rules --disable → skill present, rule absent', (
     devflowDir = path.join(tmpHome, '.devflow');
     claudeDir = path.join(tmpHome, '.claude');
     await fs.mkdir(claudeDir, { recursive: true });
-    run = makeRunner(tmpHome, devflowDir);
+    run = makeRunner(tmpHome);
     expect(run('init', '--recommended').status).toBe(0);
     expect(run('compliance', '--set', 'gdpr,soc2').status).toBe(0);
   });
@@ -392,7 +391,7 @@ describe('S7: from S6 state + rules --enable → compliance rule restored with G
     devflowDir = path.join(tmpHome, '.devflow');
     claudeDir = path.join(tmpHome, '.claude');
     await fs.mkdir(claudeDir, { recursive: true });
-    run = makeRunner(tmpHome, devflowDir);
+    run = makeRunner(tmpHome);
     expect(run('init', '--recommended').status).toBe(0);
     expect(run('compliance', '--set', 'gdpr,soc2').status).toBe(0);
     expect(run('rules', '--disable').status).toBe(0);
@@ -428,7 +427,7 @@ describe('S8: rules off + compliance --set pci-dss → skill yes, rule no', () =
     devflowDir = path.join(tmpHome, '.devflow');
     claudeDir = path.join(tmpHome, '.claude');
     await fs.mkdir(claudeDir, { recursive: true });
-    run = makeRunner(tmpHome, devflowDir);
+    run = makeRunner(tmpHome);
     expect(run('init', '--recommended').status).toBe(0);
     expect(run('rules', '--disable').status).toBe(0);
   });
@@ -464,7 +463,7 @@ describe('S9: from S2 state + full init → artifacts survive sweep+converge', (
     devflowDir = path.join(tmpHome, '.devflow');
     claudeDir = path.join(tmpHome, '.claude');
     await fs.mkdir(claudeDir, { recursive: true });
-    run = makeRunner(tmpHome, devflowDir);
+    run = makeRunner(tmpHome);
     expect(run('init', '--recommended').status).toBe(0);
     expect(run('compliance', '--set', 'gdpr,soc2').status).toBe(0);
   });
@@ -507,7 +506,7 @@ describe('S10: from S2 state + init --plugin=devflow-code-review → compliance 
     devflowDir = path.join(tmpHome, '.devflow');
     claudeDir = path.join(tmpHome, '.claude');
     await fs.mkdir(claudeDir, { recursive: true });
-    run = makeRunner(tmpHome, devflowDir);
+    run = makeRunner(tmpHome);
     expect(run('init', '--recommended').status).toBe(0);
     expect(run('compliance', '--set', 'gdpr,soc2').status).toBe(0);
   });
@@ -545,7 +544,7 @@ describe('S11: legacy manifest with devflow-compliance → pruned on init', () =
     claudeDir = path.join(tmpHome, '.claude');
     await fs.mkdir(claudeDir, { recursive: true });
     await fs.mkdir(devflowDir, { recursive: true });
-    run = makeRunner(tmpHome, devflowDir);
+    run = makeRunner(tmpHome);
   });
 
   afterEach(async () => { await fs.rm(tmpHome, { recursive: true, force: true }); });
@@ -591,7 +590,7 @@ describe('S11: legacy manifest with devflow-compliance → pruned on init', () =
 
   it('S11: devflow-compliance in manifest.plugins is pruned by DELETED_PLUGIN_NAMES on init', async () => {
     // Craft a legacy manifest that includes devflow-compliance as a plugin.
-    // Must include `version` and `scope` — readManifest returns null without them,
+    // Must include `version` — readManifest returns null without it,
     // which collapses seed.features.compliance to FEATURE_DEFAULTS (disabled).
     const legacyManifest = {
       version: '2.0.0',
@@ -646,7 +645,7 @@ describe('S12: from S2 state + init --reset → compliance off, artifacts gone',
     devflowDir = path.join(tmpHome, '.devflow');
     claudeDir = path.join(tmpHome, '.claude');
     await fs.mkdir(claudeDir, { recursive: true });
-    run = makeRunner(tmpHome, devflowDir);
+    run = makeRunner(tmpHome);
     expect(run('init', '--recommended').status).toBe(0);
     expect(run('compliance', '--set', 'gdpr,soc2').status).toBe(0);
   });
@@ -683,7 +682,7 @@ describe('S13a: --advanced in non-TTY exits 1', () => {
     devflowDir = path.join(tmpHome, '.devflow');
     claudeDir = path.join(tmpHome, '.claude');
     await fs.mkdir(claudeDir, { recursive: true });
-    run = makeRunner(tmpHome, devflowDir);
+    run = makeRunner(tmpHome);
     // Establish a fresh install so seedManifest is non-null (re-init path)
     expect(run('init', '--recommended').status).toBe(0);
   });
@@ -710,7 +709,7 @@ describe('S13b: --recommended re-init preserves prior compliance state (promptle
     devflowDir = path.join(tmpHome, '.devflow');
     claudeDir = path.join(tmpHome, '.claude');
     await fs.mkdir(claudeDir, { recursive: true });
-    run = makeRunner(tmpHome, devflowDir);
+    run = makeRunner(tmpHome);
     // Install, then enable compliance with two frameworks
     expect(run('init', '--recommended').status).toBe(0);
     expect(run('compliance', '--set', 'gdpr,sox').status).toBe(0);
@@ -741,7 +740,7 @@ describe('S13c: --recommended --compliance hipaa → framework applied without p
     devflowDir = path.join(tmpHome, '.devflow');
     claudeDir = path.join(tmpHome, '.claude');
     await fs.mkdir(claudeDir, { recursive: true });
-    run = makeRunner(tmpHome, devflowDir);
+    run = makeRunner(tmpHome);
   });
 
   afterEach(async () => { await fs.rm(tmpHome, { recursive: true, force: true }); });
@@ -789,7 +788,7 @@ describe('S14: from S2 state + uninstall --plugin=devflow-plan → compliance re
     devflowDir = path.join(tmpHome, '.devflow');
     claudeDir = path.join(tmpHome, '.claude');
     await fs.mkdir(claudeDir, { recursive: true });
-    run = makeRunner(tmpHome, devflowDir);
+    run = makeRunner(tmpHome);
     expect(run('init', '--recommended').status).toBe(0);
     expect(run('compliance', '--set', 'gdpr,soc2').status).toBe(0);
   });
@@ -821,7 +820,7 @@ describe('S15: from S2 state + bare compliance decoy + full uninstall', () => {
     devflowDir = path.join(tmpHome, '.devflow');
     claudeDir = path.join(tmpHome, '.claude');
     await fs.mkdir(claudeDir, { recursive: true });
-    run = makeRunner(tmpHome, devflowDir);
+    run = makeRunner(tmpHome);
     expect(run('init', '--recommended').status).toBe(0);
     expect(run('compliance', '--set', 'gdpr,soc2').status).toBe(0);
   });
@@ -869,7 +868,7 @@ describe('S16: shadowed skill + rule shadow + --set gdpr → shadow SKILL.md ver
     devflowDir = path.join(tmpHome, '.devflow');
     claudeDir = path.join(tmpHome, '.claude');
     await fs.mkdir(claudeDir, { recursive: true });
-    run = makeRunner(tmpHome, devflowDir);
+    run = makeRunner(tmpHome);
     expect(run('init', '--recommended').status).toBe(0);
   });
 
@@ -920,7 +919,7 @@ describe('S16b: rule shadow WITH placeholder → shadow stamped on --set and rul
     devflowDir = path.join(tmpHome, '.devflow');
     claudeDir = path.join(tmpHome, '.claude');
     await fs.mkdir(claudeDir, { recursive: true });
-    run = makeRunner(tmpHome, devflowDir);
+    run = makeRunner(tmpHome);
     expect(run('init', '--recommended').status).toBe(0);
   });
 
@@ -974,7 +973,7 @@ describe('S17: invalid framework IDs → non-zero exit, disk unchanged', () => {
     devflowDir = path.join(tmpHome, '.devflow');
     claudeDir = path.join(tmpHome, '.claude');
     await fs.mkdir(claudeDir, { recursive: true });
-    run = makeRunner(tmpHome, devflowDir);
+    run = makeRunner(tmpHome);
     expect(run('init', '--recommended').status).toBe(0);
   });
 
@@ -1012,7 +1011,7 @@ describe('S18: fresh non-TTY --enable with no prior frameworks → generic-only'
     devflowDir = path.join(tmpHome, '.devflow');
     claudeDir = path.join(tmpHome, '.claude');
     await fs.mkdir(claudeDir, { recursive: true });
-    run = makeRunner(tmpHome, devflowDir);
+    run = makeRunner(tmpHome);
     expect(run('init', '--recommended').status).toBe(0);
     // Do NOT set any frameworks — fresh state with frameworks:[]
   });
@@ -1073,7 +1072,7 @@ describe('S19: manifest writeback deduplicates frameworks', () => {
     claudeDir = path.join(tmpHome, '.claude');
     await fs.mkdir(claudeDir, { recursive: true });
     await fs.mkdir(devflowDir, { recursive: true });
-    run = makeRunner(tmpHome, devflowDir);
+    run = makeRunner(tmpHome);
   });
 
   afterEach(async () => { await fs.rm(tmpHome, { recursive: true, force: true }); });
@@ -1130,7 +1129,7 @@ describe('S21: all-six frameworks → SKILL.md fully composed; rule bullets with
     devflowDir = path.join(tmpHome, '.devflow');
     claudeDir = path.join(tmpHome, '.claude');
     await fs.mkdir(claudeDir, { recursive: true });
-    run = makeRunner(tmpHome, devflowDir);
+    run = makeRunner(tmpHome);
     expect(run('init', '--recommended').status).toBe(0);
   });
 
@@ -1181,7 +1180,7 @@ describe('S22: --status flags composition-skipped skill shadow', () => {
     devflowDir = path.join(tmpHome, '.devflow');
     const claudeDir = path.join(tmpHome, '.claude');
     await fs.mkdir(claudeDir, { recursive: true });
-    run = makeRunner(tmpHome, devflowDir);
+    run = makeRunner(tmpHome);
     expect(run('init', '--recommended').status).toBe(0);
     expect(run('compliance', '--set', 'gdpr').status).toBe(0);
   });
@@ -1238,7 +1237,7 @@ describe('S20: compliance skill lifecycle is managed by converge, not the orphan
     devflowDir = path.join(tmpHome, '.devflow');
     claudeDir = path.join(tmpHome, '.claude');
     await fs.mkdir(claudeDir, { recursive: true });
-    run = makeRunner(tmpHome, devflowDir);
+    run = makeRunner(tmpHome);
     // Base state: init with compliance enabled (gdpr)
     expect(run('init', '--recommended').status).toBe(0);
     expect(run('compliance', '--set', 'gdpr').status).toBe(0);
@@ -1295,7 +1294,7 @@ describe('T1: init --reset collapses the provider and converges every tracker ar
     devflowDir = path.join(tmpHome, '.devflow');
     // PF-018: seed .claude so init doesn't bail with "Claude Code not detected"
     await fs.mkdir(path.join(tmpHome, '.claude'), { recursive: true });
-    run = makeRunner(tmpHome, devflowDir);
+    run = makeRunner(tmpHome);
   });
 
   afterEach(async () => { await fs.rm(tmpHome, { recursive: true, force: true }); });
@@ -1348,7 +1347,7 @@ describe('T2: a failed manifest write converges no tracker artifact', () => {
     tmpHome = await fs.mkdtemp(path.join(os.tmpdir(), 'df-e2e-t2-'));
     devflowDir = path.join(tmpHome, '.devflow');
     await fs.mkdir(path.join(tmpHome, '.claude'), { recursive: true });
-    run = makeRunner(tmpHome, devflowDir);
+    run = makeRunner(tmpHome);
   });
 
   afterEach(async () => { await fs.rm(tmpHome, { recursive: true, force: true }); });
@@ -1390,7 +1389,7 @@ describe('T3: --hud-only preserves the tracker selection it did not ask about', 
     tmpHome = await fs.mkdtemp(path.join(os.tmpdir(), 'df-e2e-t3-'));
     devflowDir = path.join(tmpHome, '.devflow');
     await fs.mkdir(path.join(tmpHome, '.claude'), { recursive: true });
-    run = makeRunner(tmpHome, devflowDir);
+    run = makeRunner(tmpHome);
   });
 
   afterEach(async () => { await fs.rm(tmpHome, { recursive: true, force: true }); });

@@ -170,7 +170,7 @@ describe('composeScripts', () => {
     expect(pkg.type, 'the pin is only meaningful under the ESM package marker').toBe('module');
 
     // A non-git directory: the scripted git fake answers "not a repository", so the
-    // run makes no gh call and needs no network. HOME/DEVFLOW_DIR are tmp (PF-060).
+    // run makes no gh call and needs no network. HOME is tmp (PF-060).
     const home = path.join(tmpDir, 'home');
     await fs.mkdir(path.join(home, '.devflow'), { recursive: true });
     const shim = buildScriptedShim(createFakeBin(tmpDir), tmpDir, [

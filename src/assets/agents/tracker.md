@@ -61,11 +61,11 @@ disagree with the first — and the disagreement fails closed and silently.
 
 Only when the prompt names no devflow directory, resolve it with the expression
 below. It is byte-for-byte the one the session-start gate resolves the same
-directory with — the `DEVFLOW_DIR` override when it is set, `$HOME/.devflow`
-otherwise — so the fallback cannot land anywhere the gate would not have:
+directory with — always `$HOME/.devflow` — so the fallback cannot land anywhere
+the gate would not have:
 
 ```bash
-TRACKER_DEVFLOW_DIR="${DEVFLOW_DIR:-$HOME/.devflow}"
+TRACKER_DEVFLOW_DIR="$HOME/.devflow"
 TRACKER_FILE="$TRACKER_DEVFLOW_DIR/tracker.md"
 TRACKER_CLAIM="$TRACKER_DEVFLOW_DIR/.tracker.processing"
 TRACKER_ATTEMPTS_FILE="$TRACKER_DEVFLOW_DIR/.tracker.attempts"
@@ -383,7 +383,7 @@ Every part of that is load-bearing:
   verdict — an exit code read after a later command is not evidence about the
   earlier one.
 - **The scrubber is addressed through `$TRACKER_DEVFLOW_DIR`**, the one resolution
-  `## Environment` performs — never a second `${DEVFLOW_DIR:-$HOME/.devflow}` here.
+  `## Environment` performs — never a second `$HOME/.devflow` here.
   A second site can disagree with the first, and the disagreement fails closed
   and silently: the scrubber is looked up under one root while the file is written
   under another, `node` exits non-zero, and inference never writes anything.

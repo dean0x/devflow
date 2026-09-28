@@ -3,16 +3,15 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import * as os from 'node:os';
 
-// Must set DEVFLOW_DIR before importing to control getCostFilePaths.
-// cost-history.ts has module-level singletons (sessionsDirCreated, cachedAggregation)
-// that must be reset between tests. vi.resetModules() clears the module cache so each
-// dynamic import gets a fresh module instance with those singletons reset to initial values.
+// getCostFilePaths resolves $HOME/.devflow at call time (D-ONE-HOME), so each test
+// points HOME at a fresh temp dir. cost-history.ts has module-level singletons
+// (sessionsDirCreated, cachedAggregation) that must be reset between tests.
+// vi.resetModules() clears the module cache so each dynamic import gets a fresh
+// module instance with those singletons reset to initial values.
 
+let tmpHome: string;
+/** The devflow machine root under the temp HOME. */
 let tmpDir: string;
-
-function setDevflowDir(dir: string): void {
-  process.env.DEVFLOW_DIR = dir;
-}
 
 function getSessionsDir(): string {
   return path.join(tmpDir, 'costs', 'sessions');
@@ -23,31 +22,43 @@ function getArchivePath(): string {
 }
 
 beforeEach(() => {
-  tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'cost-history-test-'));
-  setDevflowDir(tmpDir);
+  tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), 'cost-history-test-'));
+  tmpDir = path.join(tmpHome, '.devflow');
+  vi.stubEnv('HOME', tmpHome);
   // Reset module cache so module-level singletons (sessionsDirCreated, cachedAggregation)
   // are re-initialized on the next dynamic import.
   vi.resetModules();
 });
 
 afterEach(() => {
-  fs.rmSync(tmpDir, { recursive: true, force: true });
-  delete process.env.DEVFLOW_DIR;
+  vi.unstubAllEnvs();
+  fs.rmSync(tmpHome, { recursive: true, force: true });
 });
 
-// Dynamic imports so DEVFLOW_DIR is respected
 async function importCostHistory() {
-  // Dynamic import — getCostFilePaths reads DEVFLOW_DIR at call time
-  const mod = await import('../src/hud/cost-history.js');
-  return mod;
+  return import('../src/hud/cost-history.js');
 }
 
 describe('getCostFilePaths', () => {
-  it('uses DEVFLOW_DIR env var', async () => {
+  it('resolves under $HOME/.devflow', async () => {
     const { getCostFilePaths } = await importCostHistory();
     const { sessionsDir, archivePath } = getCostFilePaths();
     expect(sessionsDir).toBe(path.join(tmpDir, 'costs', 'sessions'));
     expect(archivePath).toBe(path.join(tmpDir, 'costs', 'archive.jsonl'));
+  });
+
+  it('ignores an exported DEVFLOW_DIR (D-ONE-HOME, AC-10)', async () => {
+    const canary = fs.mkdtempSync(path.join(os.tmpdir(), 'cost-history-canary-'));
+    try {
+      vi.stubEnv('DEVFLOW_DIR', canary);
+      const { getCostFilePaths, persistSessionCost } = await importCostHistory();
+      expect(getCostFilePaths().sessionsDir).toBe(path.join(tmpDir, 'costs', 'sessions'));
+      persistSessionCost('session-canary', 0.5, '/test/cwd');
+      expect(fs.readdirSync(canary)).toEqual([]);
+      expect(fs.existsSync(path.join(getSessionsDir(), 'session-canary.json'))).toBe(true);
+    } finally {
+      fs.rmSync(canary, { recursive: true, force: true });
+    }
   });
 });
 

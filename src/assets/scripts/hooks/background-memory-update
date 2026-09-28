@@ -12,7 +12,7 @@
 # Usage: background-memory-update <CWD> [<manifest_path>]
 #   <manifest_path> — the devflow-global manifest whose `features.memory` is the
 #   machine-wide switch (D-FEATURES-MACHINE-WIDE). memory-worker passes it; when
-#   absent it resolves from ${DEVFLOW_DIR:-$HOME/.devflow}.
+#   absent it resolves from the machine root, $HOME/.devflow (D-ONE-HOME).
 #
 # Success:      removes .pending-turns.processing; touches .last-refresh-ok
 # Failure:      leaves .pending-turns.processing; this worker is the PRIMARY recovery owner —
@@ -36,8 +36,8 @@ if [ "${DEVFLOW_BG_UPDATER:-}" = "1" ]; then
 fi
 
 CWD="$1"
-# Resolved before DEVFLOW_DIR is shadowed with the project-scoped .devflow below.
-DEVFLOW_MANIFEST="${2:-${DEVFLOW_DIR:-$HOME/.devflow}/manifest.json}"
+# The machine-wide manifest: memory-worker's argument, else the machine root.
+DEVFLOW_MANIFEST="${2:-$HOME/.devflow/manifest.json}"
 if [ -z "$CWD" ] || [ ! -d "$CWD" ]; then
   echo "background-memory-update: CWD missing or not a directory: '$CWD'" >&2
   exit 1
@@ -66,8 +66,8 @@ log "Starting (CWD=$CWD)"
 source "$SCRIPT_DIR/resolve-project-root" 2>/dev/null || true
 PROJECT_ROOT="$(df_resolve_root "$CWD" 2>/dev/null || true)"
 [ -n "$PROJECT_ROOT" ] || PROJECT_ROOT="$CWD"
-DEVFLOW_DIR="$PROJECT_ROOT/.devflow"
-MEMORY_DIR="$DEVFLOW_DIR/memory"
+PROJECT_DEVFLOW_DIR="$PROJECT_ROOT/.devflow"
+MEMORY_DIR="$PROJECT_DEVFLOW_DIR/memory"
 QUEUE_FILE="$MEMORY_DIR/.pending-turns.jsonl"
 PROCESSING_FILE="$MEMORY_DIR/.pending-turns.processing"
 MEMORY_FILE="$MEMORY_DIR/WORKING-MEMORY.md"

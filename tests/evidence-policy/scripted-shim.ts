@@ -27,7 +27,7 @@
  * per row while the argv/bounds tests still run the real spawnSync.
  *
  * Environment hygiene (PF-060): every spawn in tests/evidence-policy/ takes its
- * env from scopedEnv(), which points HOME and DEVFLOW_DIR at a tmp dir — otherwise
+ * env from scopedEnv(), which points HOME at a tmp dir — otherwise
  * the developer's real ~/.devflow/manifest.json decides the compliance default —
  * and names its cwd, so none inherits vitest's (the developer's repository). A
  * source guard in resolver.test.ts (collectUnscopedSpawns) fails any spawn call in
@@ -67,8 +67,9 @@ const INHERITED_LEAKS = [
 ] as const;
 
 /**
- * THE spawn environment for this suite. HOME, DEVFLOW_DIR and the git/gh config
- * roots all point under `home`, a tmp dir the test owns.
+ * THE spawn environment for this suite. HOME (and so the devflow machine root,
+ * `$HOME/.devflow`) and the git/gh config roots all point under `home`, a tmp dir
+ * the test owns.
  */
 export function scopedEnv(
   home: string,
@@ -81,7 +82,6 @@ export function scopedEnv(
     HOME: home,
     USERPROFILE: home,
     XDG_CONFIG_HOME: path.join(home, '.config'),
-    DEVFLOW_DIR: path.join(home, '.devflow'),
     GIT_CONFIG_GLOBAL: '/dev/null',
     GIT_CONFIG_NOSYSTEM: '1',
     ...GIT_IDENTITY,
@@ -397,7 +397,7 @@ export function scriptedExec(calls: readonly ScriptedCall[]): { exec: ExecFn; re
 // ---------------------------------------------------------------------------
 
 export interface RunOptions {
-  /** The tmp dir that becomes HOME (and holds DEVFLOW_DIR). */
+  /** The tmp dir that becomes HOME (and holds the machine root, `.devflow`). */
   readonly home: string;
   /** Arguments after the script path. */
   readonly args: readonly string[];
