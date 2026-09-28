@@ -49,6 +49,7 @@ import { installViaFileCopy, type Spinner } from '../src/targets/claude-code/ins
 import { DEVFLOW_PLUGINS, buildAssetMaps, buildRulesMap, getAllAgentNames, getAllCommandNames } from '../src/core/plugins.js';
 import type { RunMigrationsResult } from '../src/core/migrations.js';
 import { LEGACY_SKILL_NAMES } from '../src/targets/claude-code/legacy.js';
+import { convergeAmbientHooks } from '../src/cli/commands/ambient.js';
 
 describe('parsePluginSelection', () => {
   it('parses comma-separated plugin names', () => {
@@ -2346,3 +2347,60 @@ describe('init.ts structural guard — the Advanced --tracker arm emits its outc
     expect(overrideArmBody(`${ADVANCED_ANCHOR}\n// but no override arm`)).toBeNull()
   })
 })
+
+/**
+ * TP-25 (AC-21, D-AMBIENT-EXACT-HOOK): init's settings pass converges the ambient
+ * hooks through `convergeAmbientHooks` — remove-then-add with ambient on, remove
+ * with it off. A user's hook that merely contains the word "preamble", and every
+ * sibling in its matcher group, must come through every init byte-identically.
+ */
+describe('init ambient convergence keeps user hooks (TP-25)', () => {
+  const DEVFLOW = '/home/user/.devflow';
+  const USER_GROUP = {
+    hooks: [
+      { type: 'command', command: '~/bin/preamble-logger.sh', timeout: 3 },
+      { type: 'command', command: 'echo "preamble" >> /tmp/prompts.log' },
+      { type: 'command', command: '/usr/local/bin/notify-prompt' },
+    ],
+  };
+  const withUserGroup = (): string =>
+    JSON.stringify({ hooks: { UserPromptSubmit: [USER_GROUP] }, model: 'opus' }, null, 2) + '\n';
+  const promptGroups = (json: string): unknown[] =>
+    (JSON.parse(json).hooks?.UserPromptSubmit ?? []) as unknown[];
+
+  beforeEach(() => {
+    // The legacy commands-rule purge unlinks under the (setup-isolated) HOME; keep it off disk.
+    vi.spyOn(fs, 'unlink').mockResolvedValue(undefined);
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('init --no-ambient leaves settings holding only the user group byte-identical', async () => {
+    const input = withUserGroup();
+    expect(await convergeAmbientHooks(input, false, DEVFLOW)).toBe(input);
+  });
+
+  it('init with ambient on registers devflow\'s preamble beside the byte-identical user group', async () => {
+    const out = await convergeAmbientHooks(withUserGroup(), true, DEVFLOW);
+    const groups = promptGroups(out);
+    expect(groups).toHaveLength(2);
+    expect(JSON.stringify(groups[0])).toBe(JSON.stringify(USER_GROUP));
+    expect(groups[1]).toEqual({ hooks: [{ type: 'command', command: `${DEVFLOW}/scripts/hooks/run-hook preamble`, timeout: 5 }] });
+  });
+
+  it('repeated inits, toggling ambient, never touch the user group and settle back byte-identical', async () => {
+    const on = await convergeAmbientHooks(withUserGroup(), true, DEVFLOW);
+    const reinit = await convergeAmbientHooks(on, true, DEVFLOW);
+    const off = await convergeAmbientHooks(reinit, false, DEVFLOW);
+
+    expect(reinit, 'a re-init with the same options changes nothing').toBe(on);
+    expect(off).toBe(withUserGroup());
+  });
+
+  it('init.ts routes its ambient step through convergeAmbientHooks', async () => {
+    const source = await fs.readFile(new URL('../src/cli/commands/init.ts', import.meta.url), 'utf-8');
+    expect(source).toContain('await convergeAmbientHooks(content, ambientEnabled, devflowDir)');
+  });
+});

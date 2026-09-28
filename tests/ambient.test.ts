@@ -75,7 +75,7 @@ describe('addAmbientHook', () => {
   it('preserves existing SessionStart hooks (session-start-memory) and adds orchestrator', async () => {
     const input = JSON.stringify({
       hooks: {
-        SessionStart: [{ hooks: [{ type: 'command', command: '/path/to/run-hook session-start-memory' }] }],
+        SessionStart: [{ hooks: [{ type: 'command', command: '/path/to/.devflow/scripts/hooks/run-hook session-start-memory' }] }],
       },
     });
     const result = await addAmbientHook(input, '/home/user/.devflow');
@@ -90,7 +90,7 @@ describe('addAmbientHook', () => {
   it('partial repair — adds orchestrator when preamble already present', async () => {
     const withPreambleOnly = JSON.stringify({
       hooks: {
-        UserPromptSubmit: [{ hooks: [{ type: 'command', command: '/path/to/run-hook preamble' }] }],
+        UserPromptSubmit: [{ hooks: [{ type: 'command', command: '/path/to/.devflow/scripts/hooks/run-hook preamble' }] }],
       },
     });
     const result = await addAmbientHook(withPreambleOnly, '/home/user/.devflow');
@@ -105,7 +105,7 @@ describe('addAmbientHook', () => {
   it('partial repair — adds preamble when only orchestrator present', async () => {
     const withOrchestratorOnly = JSON.stringify({
       hooks: {
-        SessionStart: [{ hooks: [{ type: 'command', command: '/path/to/run-hook session-start-orchestrator' }] }],
+        SessionStart: [{ hooks: [{ type: 'command', command: '/path/to/.devflow/scripts/hooks/run-hook session-start-orchestrator' }] }],
       },
     });
     const result = await addAmbientHook(withOrchestratorOnly, '/home/user/.devflow');
@@ -168,7 +168,7 @@ describe('addAmbientHook', () => {
     const input = JSON.stringify({
       hooks: {
         UserPromptSubmit: [
-          { hooks: [{ type: 'command', command: '/path/to/run-hook ambient-prompt' }] },
+          { hooks: [{ type: 'command', command: '/path/to/.devflow/scripts/hooks/run-hook ambient-prompt' }] },
         ],
       },
     });
@@ -186,7 +186,7 @@ describe('addAmbientHook', () => {
       hooks: {
         UserPromptSubmit: [
           { hooks: [{ type: 'command', command: 'other-hook.sh' }] },
-          { hooks: [{ type: 'command', command: '/path/to/run-hook ambient-prompt' }] },
+          { hooks: [{ type: 'command', command: '/path/to/.devflow/scripts/hooks/run-hook ambient-prompt' }] },
         ],
       },
     });
@@ -202,7 +202,7 @@ describe('addAmbientHook', () => {
     const input = JSON.stringify({
       hooks: {
         SessionStart: [
-          { hooks: [{ type: 'command', command: '/path/to/run-hook session-start-classification' }] },
+          { hooks: [{ type: 'command', command: '/path/to/.devflow/scripts/hooks/run-hook session-start-classification' }] },
         ],
       },
     });
@@ -222,7 +222,7 @@ describe('addAmbientHook', () => {
     // addAmbientHook must sweep the stale hook and return new JSON (not take the early-return path).
     const withBoth = JSON.parse(await addAmbientHook('{}', '/home/user/.devflow'));
     withBoth.hooks.SessionStart.push({
-      hooks: [{ type: 'command', command: '/path/to/run-hook session-start-classification' }],
+      hooks: [{ type: 'command', command: '/path/to/.devflow/scripts/hooks/run-hook session-start-classification' }],
     });
     const inputWithStale = JSON.stringify(withBoth);
 
@@ -265,11 +265,11 @@ describe('removeAmbientHook', () => {
     const input = JSON.stringify({
       hooks: {
         SessionStart: [
-          { hooks: [{ type: 'command', command: '/path/to/run-hook session-start-memory' }] },
-          { hooks: [{ type: 'command', command: '/path/to/run-hook session-start-classification' }] },
+          { hooks: [{ type: 'command', command: '/path/to/.devflow/scripts/hooks/run-hook session-start-memory' }] },
+          { hooks: [{ type: 'command', command: '/path/to/.devflow/scripts/hooks/run-hook session-start-classification' }] },
         ],
         UserPromptSubmit: [
-          { hooks: [{ type: 'command', command: '/path/to/preamble' }] },
+          { hooks: [{ type: 'command', command: '/path/to/.devflow/scripts/hooks/run-hook preamble' }] },
         ],
       },
     });
@@ -286,7 +286,7 @@ describe('removeAmbientHook', () => {
     const input = JSON.stringify({
       hooks: {
         SessionStart: [
-          { hooks: [{ type: 'command', command: '/path/to/run-hook session-start-orchestrator' }] },
+          { hooks: [{ type: 'command', command: '/path/to/.devflow/scripts/hooks/run-hook session-start-orchestrator' }] },
         ],
       },
     });
@@ -300,12 +300,12 @@ describe('removeAmbientHook', () => {
     const input = JSON.stringify({
       hooks: {
         SessionStart: [
-          { hooks: [{ type: 'command', command: '/path/to/run-hook session-start-memory' }] },
-          { hooks: [{ type: 'command', command: '/path/to/run-hook session-start-classification' }] },
-          { hooks: [{ type: 'command', command: '/path/to/run-hook session-start-orchestrator' }] },
+          { hooks: [{ type: 'command', command: '/path/to/.devflow/scripts/hooks/run-hook session-start-memory' }] },
+          { hooks: [{ type: 'command', command: '/path/to/.devflow/scripts/hooks/run-hook session-start-classification' }] },
+          { hooks: [{ type: 'command', command: '/path/to/.devflow/scripts/hooks/run-hook session-start-orchestrator' }] },
         ],
         UserPromptSubmit: [
-          { hooks: [{ type: 'command', command: '/path/to/run-hook preamble' }] },
+          { hooks: [{ type: 'command', command: '/path/to/.devflow/scripts/hooks/run-hook preamble' }] },
         ],
       },
     });
@@ -323,7 +323,7 @@ describe('removeAmbientHook', () => {
       hooks: {
         UserPromptSubmit: [
           { hooks: [{ type: 'command', command: 'other-hook.sh' }] },
-          { hooks: [{ type: 'command', command: '/path/to/preamble' }] },
+          { hooks: [{ type: 'command', command: '/path/to/.devflow/scripts/hooks/run-hook preamble' }] },
         ],
       },
     });
@@ -338,7 +338,7 @@ describe('removeAmbientHook', () => {
     const input = JSON.stringify({
       hooks: {
         UserPromptSubmit: [
-          { hooks: [{ type: 'command', command: '/path/to/preamble' }] },
+          { hooks: [{ type: 'command', command: '/path/to/.devflow/scripts/hooks/run-hook preamble' }] },
         ],
       },
     });
@@ -353,7 +353,7 @@ describe('removeAmbientHook', () => {
       hooks: {
         Stop: [{ hooks: [{ type: 'command', command: 'stop.sh' }] }],
         UserPromptSubmit: [
-          { hooks: [{ type: 'command', command: '/path/to/preamble' }] },
+          { hooks: [{ type: 'command', command: '/path/to/.devflow/scripts/hooks/run-hook preamble' }] },
         ],
       },
     });
@@ -387,7 +387,7 @@ describe('removeAmbientHook', () => {
       statusLine: { type: 'command' },
       hooks: {
         UserPromptSubmit: [
-          { hooks: [{ type: 'command', command: '/path/to/preamble' }] },
+          { hooks: [{ type: 'command', command: '/path/to/.devflow/scripts/hooks/run-hook preamble' }] },
         ],
       },
     });
@@ -401,7 +401,7 @@ describe('removeAmbientHook', () => {
     const input = JSON.stringify({
       hooks: {
         UserPromptSubmit: [
-          { hooks: [{ type: 'command', command: '/path/to/run-hook ambient-prompt' }] },
+          { hooks: [{ type: 'command', command: '/path/to/.devflow/scripts/hooks/run-hook ambient-prompt' }] },
         ],
       },
     });
@@ -415,8 +415,8 @@ describe('removeAmbientHook', () => {
     const input = JSON.stringify({
       hooks: {
         UserPromptSubmit: [
-          { hooks: [{ type: 'command', command: '/path/to/run-hook ambient-prompt' }] },
-          { hooks: [{ type: 'command', command: '/path/to/run-hook preamble' }] },
+          { hooks: [{ type: 'command', command: '/path/to/.devflow/scripts/hooks/run-hook ambient-prompt' }] },
+          { hooks: [{ type: 'command', command: '/path/to/.devflow/scripts/hooks/run-hook preamble' }] },
           { hooks: [{ type: 'command', command: 'other-hook.sh' }] },
         ],
       },
@@ -435,7 +435,7 @@ describe('removeAmbientHook', () => {
     const input = JSON.stringify({
       hooks: {
         SessionStart: [
-          { hooks: [{ type: 'command', command: '/path/to/run-hook session-start-classification' }] },
+          { hooks: [{ type: 'command', command: '/path/to/.devflow/scripts/hooks/run-hook session-start-classification' }] },
         ],
       },
     });
@@ -507,7 +507,7 @@ describe('hasAmbientHook', () => {
       hooks: {
         UserPromptSubmit: [
           { hooks: [{ type: 'command', command: 'other-hook.sh' }] },
-          { hooks: [{ type: 'command', command: '/path/to/preamble' }] },
+          { hooks: [{ type: 'command', command: '/path/to/.devflow/scripts/hooks/run-hook preamble' }] },
         ],
       },
     });
@@ -518,7 +518,7 @@ describe('hasAmbientHook', () => {
     const input = JSON.stringify({
       hooks: {
         UserPromptSubmit: [
-          { hooks: [{ type: 'command', command: '/path/to/run-hook ambient-prompt' }] },
+          { hooks: [{ type: 'command', command: '/path/to/.devflow/scripts/hooks/run-hook ambient-prompt' }] },
         ],
       },
     });
@@ -530,7 +530,7 @@ describe('hasAmbientHook', () => {
     const input = JSON.stringify({
       hooks: {
         SessionStart: [
-          { hooks: [{ type: 'command', command: '/path/to/run-hook session-start-classification' }] },
+          { hooks: [{ type: 'command', command: '/path/to/.devflow/scripts/hooks/run-hook session-start-classification' }] },
         ],
       },
     });
@@ -542,7 +542,7 @@ describe('hasAmbientHook', () => {
     const input = JSON.stringify({
       hooks: {
         SessionStart: [
-          { hooks: [{ type: 'command', command: '/path/to/run-hook session-start-orchestrator' }] },
+          { hooks: [{ type: 'command', command: '/path/to/.devflow/scripts/hooks/run-hook session-start-orchestrator' }] },
         ],
       },
     });
@@ -552,6 +552,110 @@ describe('hasAmbientHook', () => {
   it('returns true when both preamble and orchestrator hooks are present', async () => {
     const withBoth = await addAmbientHook('{}', '/home/user/.devflow');
     expect(hasAmbientHook(withBoth)).toBe(true);
+  });
+});
+
+/**
+ * D-AMBIENT-EXACT-HOOK: a hook is devflow's ambient hook only when its command ends
+ * in `/scripts/hooks/run-hook <marker>` (or the pre-run-hook `ambient-prompt.sh`),
+ * under any directory. A user's hook that merely contains the word is not, and
+ * filterHookEntries removes single hooks, dropping a matcher group only when it
+ * ends up empty — so a user's siblings in a shared group survive.
+ */
+describe('ambient hook ownership is exact (TP-25, AC-21)', () => {
+  const DEVFLOW = '/home/user/.devflow';
+  /** A user's own group: every hook mentions a marker word, none is devflow's. */
+  const USER_PROMPT_GROUP = {
+    hooks: [
+      { type: 'command', command: '~/bin/preamble-logger.sh', timeout: 3 },
+      { type: 'command', command: 'echo "preamble" >> /tmp/prompts.log' },
+      { type: 'command', command: '/opt/tools/run-hook preamble' },
+      { type: 'command', command: '/usr/local/bin/notify-prompt' },
+    ],
+  };
+  const USER_SESSION_GROUP = {
+    matcher: 'startup',
+    hooks: [
+      { type: 'command', command: 'my-session-start-orchestrator --quiet' },
+      { type: 'command', command: 'echo ambient-prompt' },
+    ],
+  };
+  const userSettings = (): string => JSON.stringify({
+    hooks: { UserPromptSubmit: [USER_PROMPT_GROUP], SessionStart: [USER_SESSION_GROUP] },
+  }, null, 2) + '\n';
+  const groups = (json: string, event: string): unknown[] =>
+    (JSON.parse(json).hooks?.[event] ?? []) as unknown[];
+
+  beforeEach(() => {
+    vi.spyOn(fs, 'unlink').mockResolvedValue(undefined);
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('a user hook containing the word preamble is not an ambient hook', () => {
+    expect(hasAmbientHook(userSettings())).toBe(false);
+  });
+
+  it('enable registers devflow\'s preamble and orchestrator next to the user groups, which stay byte-identical', async () => {
+    const enabled = await addAmbientHook(userSettings(), DEVFLOW);
+
+    const prompt = groups(enabled, 'UserPromptSubmit');
+    expect(JSON.stringify(prompt[0])).toBe(JSON.stringify(USER_PROMPT_GROUP));
+    expect(prompt).toHaveLength(2);
+    expect(prompt[1]).toEqual({ hooks: [{ type: 'command', command: `${DEVFLOW}/scripts/hooks/run-hook preamble`, timeout: 5 }] });
+    const session = groups(enabled, 'SessionStart');
+    expect(JSON.stringify(session[0])).toBe(JSON.stringify(USER_SESSION_GROUP));
+    expect(session).toHaveLength(2);
+    expect(hasAmbientHook(enabled)).toBe(true);
+  });
+
+  it('enable, disable and enable again never touch the user groups', async () => {
+    const on = await addAmbientHook(userSettings(), DEVFLOW);
+    const off = await removeAmbientHook(on);
+    const onAgain = await addAmbientHook(off, DEVFLOW);
+
+    expect(off).toBe(userSettings());
+    for (const json of [on, onAgain]) {
+      expect(JSON.stringify(groups(json, 'UserPromptSubmit')[0])).toBe(JSON.stringify(USER_PROMPT_GROUP));
+      expect(JSON.stringify(groups(json, 'SessionStart')[0])).toBe(JSON.stringify(USER_SESSION_GROUP));
+    }
+  });
+
+  it('disable on settings holding only user groups is a byte-identical no-op', async () => {
+    const input = userSettings();
+    expect(await removeAmbientHook(input)).toBe(input);
+  });
+
+  it('removes only devflow\'s hook from a shared matcher group and keeps the siblings', async () => {
+    const input = JSON.stringify({
+      hooks: {
+        UserPromptSubmit: [{
+          hooks: [
+            { type: 'command', command: '/usr/local/bin/notify-prompt' },
+            { type: 'command', command: `${DEVFLOW}/scripts/hooks/run-hook preamble`, timeout: 5 },
+          ],
+        }],
+      },
+    });
+
+    const settings = JSON.parse(await removeAmbientHook(input));
+
+    expect(settings.hooks.UserPromptSubmit).toEqual([
+      { hooks: [{ type: 'command', command: '/usr/local/bin/notify-prompt' }] },
+    ]);
+  });
+
+  it.each([
+    ['current run-hook preamble', '/srv/old/.devflow/scripts/hooks/run-hook preamble'],
+    ['run-hook ambient-prompt', '/srv/old/.devflow/scripts/hooks/run-hook ambient-prompt'],
+    ['pre-run-hook ambient-prompt.sh', '/srv/old/.devflow/scripts/hooks/ambient-prompt.sh'],
+    ['a Windows path', 'C:\\Users\\u\\.devflow\\scripts\\hooks\\run-hook preamble'],
+  ])('still recognises and removes an old install\'s %s hook', async (_label, command) => {
+    const input = JSON.stringify({ hooks: { UserPromptSubmit: [{ hooks: [{ type: 'command', command }] }] } });
+    expect(hasAmbientHook(input)).toBe(true);
+    expect(JSON.parse(await removeAmbientHook(input)).hooks).toBeUndefined();
   });
 });
 

@@ -30,7 +30,7 @@ import { DEVFLOW_PLUGINS, LEGACY_PLUGIN_NAMES, LEGACY_COMMAND_NAMES, LEGACY_RULE
 import { LEGACY_SKILL_NAMES } from '../../targets/claude-code/legacy.js';
 import { detectPlatform, detectShell, getProfilePath, getSafeDeleteInfo, hasSafeDelete } from '../../core/safe-delete.js';
 import { generateSafeDeleteBlock, installToProfile, removeFromProfile, getInstalledVersion, SAFE_DELETE_BLOCK_VERSION } from '../../core/safe-delete-install.js';
-import { addAmbientHook, removeAmbientHook } from './ambient.js';
+import { convergeAmbientHooks } from './ambient.js';
 import { convergeMemoryHooks, drainMemoryQueue } from './memory.js';
 import { addCaptureHooks, removeCaptureHooks } from './capture.js';
 import { removeDreamHook } from './legacy-hooks.js';
@@ -2082,9 +2082,8 @@ export const initCommand = new Command('init')
       let content = await fs.readFile(settingsPath, 'utf-8');
       const original = content;
 
-      // Ambient hook — always remove-then-add to upgrade from legacy ambient-prompt → preamble
-      const cleanedForAmbient = await removeAmbientHook(content);
-      content = ambientEnabled ? await addAmbientHook(cleanedForAmbient, devflowDir) : cleanedForAmbient;
+      // Ambient hooks — remove-then-add, upgrading a legacy ambient-prompt hook to preamble
+      content = await convergeAmbientHooks(content, ambientEnabled, devflowDir);
 
       // Capture hooks — always-on (like the context hook below), remove-then-add for
       // upgrade safety. Queue-append only (capture-prompt/capture-turn/capture-question);
