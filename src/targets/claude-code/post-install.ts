@@ -100,6 +100,24 @@ const DEVFLOW_GITIGNORE_BLOCK_LINES = [
 export const DEVFLOW_GITIGNORE_BLOCK = DEVFLOW_GITIGNORE_BLOCK_LINES.join('\n');
 
 /**
+ * The entries directly under a repository's `.devflow/` that the team shares
+ * through git (a trailing `/` marks a directory): the feature knowledge bases,
+ * the naming conventions, the evidence policy and the committed project settings.
+ *
+ * D-UNINSTALL-CARVE-OUT: uninstall's project-data step never deletes these — a
+ * confirmed removal takes everything else under `.devflow/` and keeps them
+ * byte-identical, because an uncommitted edit to a tracked file is not
+ * recoverable from git. Kept next to the gitignore block it mirrors: every path
+ * the block re-includes must appear here (pinned by tests/uninstall-logic.test.ts).
+ */
+export const DEVFLOW_TRACKED_PATHS: readonly string[] = Object.freeze([
+  'features/',
+  'conventions.md',
+  'policy.json',
+  'project.json',
+]);
+
+/**
  * The carve-out block without its final `.claudeignore` line — emitted instead of
  * the full block when the target .gitignore already carries a `.claudeignore` or
  * `!.claudeignore` entry of the user's own.

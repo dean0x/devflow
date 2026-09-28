@@ -4,7 +4,7 @@ import * as os from 'os';
 import * as path from 'path';
 import * as p from '@clack/prompts';
 import color from 'picocolors';
-import { getInstallationPaths, getClaudeDirectory, getManagedSettingsPath } from '../../targets/claude-code/claude-paths.js';
+import { getInstallationPaths, getClaudeDirectory, getHomeDirectory, getManagedSettingsPath } from '../../targets/claude-code/claude-paths.js';
 import { getGitRoot } from '../../core/git.js';
 import { DEVFLOW_PLUGINS, SKILL_NAMESPACE, getAllSkillNames, getAllAgentNames, getAllCommandNames, parsePluginSelection, resolveFeatureRedirect, prefixSkillName, unprefixSkillName, skillsOf, FEATURE_OWNED_SKILLS, type PluginDefinition } from '../../core/plugins.js';
 import { readManifest } from '../../core/manifest.js';
@@ -29,7 +29,7 @@ import { revertExternalAgents } from '../../core/agent-models.js';
 import type { Settings } from '../../targets/claude-code/hooks.js';
 import { detectShell, getProfilePath } from '../../core/safe-delete.js';
 import { isAlreadyInstalled, removeFromProfile } from '../../core/safe-delete-install.js';
-import { removeManagedSettings, stripUserDenyList, detectDenyState, DEVFLOW_HISTORICAL_DENY } from '../../targets/claude-code/post-install.js';
+import { removeManagedSettings, stripUserDenyList, detectDenyState, DEVFLOW_HISTORICAL_DENY, DEVFLOW_TRACKED_PATHS } from '../../targets/claude-code/post-install.js';
 import { writeFileAtomicExclusive } from '../../core/fs-atomic.js';
 import { stripFlags } from '../../core/flags.js';
 import { stripDevflowTeammateModeFromJson } from '../../core/teammate-mode-cleanup.js';
@@ -241,6 +241,115 @@ export function resolveSecurityRemovalDecision(opts: {
 export function resolveProjectDataCleanup(answer: boolean | symbol): boolean {
   return answer === true;
 }
+
+/** One entry directly under a repository's `.devflow/`. */
+export interface ProjectDataEntry {
+  name: string;
+  isDir: boolean;
+}
+
+/** What the project-data step would do to `<gitRoot>/.devflow`. */
+export interface ProjectDataPlan {
+  /** `<gitRoot>/.devflow`. */
+  dir: string;
+  /** Entries a confirmed cleanup deletes, sorted by name. */
+  remove: ReadonlyArray<ProjectDataEntry>;
+  /** Tracked entries (DEVFLOW_TRACKED_PATHS) present under `dir`; they always stay. */
+  keep: ReadonlyArray<ProjectDataEntry>;
+}
+
+/**
+ * Why the project-data step does nothing: no git root, a git root that is HOME,
+ * a `.devflow` that is the machine-wide devflow directory, or no `.devflow` at all.
+ */
+export type ProjectDataSkipReason = 'no-git-root' | 'home-root' | 'machine-dir' | 'absent';
+
+export type ProjectDataResolution =
+  | { kind: 'plan'; plan: ProjectDataPlan }
+  | { kind: 'skip'; reason: ProjectDataSkipReason };
+
+/** Tracked entries by name and kind: `features/` is a directory, the rest are files. */
+const TRACKED_ENTRIES: ReadonlyArray<ProjectDataEntry> = DEVFLOW_TRACKED_PATHS.map((tracked) => ({
+  name: tracked.replace(/\/$/, ''),
+  isDir: tracked.endsWith('/'),
+}));
+
+/**
+ * Split the entries under a repository's `.devflow/` into what a confirmed cleanup
+ * removes and what it keeps (D-UNINSTALL-CARVE-OUT). An entry is kept only when both
+ * its name and its kind match a tracked path, so a stray FILE named `features` is
+ * not mistaken for the tracked directory. PURE — both lists sorted by name.
+ */
+export function partitionProjectData(entries: ReadonlyArray<ProjectDataEntry>): {
+  remove: ProjectDataEntry[];
+  keep: ProjectDataEntry[];
+} {
+  const isTracked = (entry: ProjectDataEntry): boolean =>
+    TRACKED_ENTRIES.some((t) => t.name === entry.name && t.isDir === entry.isDir);
+  const byName = (a: ProjectDataEntry, b: ProjectDataEntry): number => a.name.localeCompare(b.name);
+  return {
+    remove: entries.filter((e) => !isTracked(e)).sort(byName),
+    keep: entries.filter(isTracked).sort(byName),
+  };
+}
+
+/**
+ * Resolve the project-data step's target: `<gitRoot>/.devflow`, partitioned.
+ *
+ * D-UNINSTALL-CARVE-OUT: the step acts on the repository's `.devflow` at its git
+ * root — the directory devflow's hooks write — never on whatever `.devflow` the
+ * cwd happens to hold. It is skipped with no git root, and when the git root is
+ * HOME or its `.devflow` is the machine-wide devflow directory (a dotfiles repo):
+ * there `.devflow` is the install itself, not project data. Both comparisons use
+ * realpaths, so macOS's `/var` → `/private/var` and a symlinked HOME still match.
+ */
+export async function resolveProjectDataPlan(opts: {
+  gitRoot: string | null;
+  homeDir: string;
+  machineDevflowDir: string;
+}): Promise<ProjectDataResolution> {
+  if (opts.gitRoot === null) return { kind: 'skip', reason: 'no-git-root' };
+  if (await isSameLocation(opts.gitRoot, opts.homeDir)) return { kind: 'skip', reason: 'home-root' };
+
+  const dir = path.join(opts.gitRoot, '.devflow');
+  if (await isSameLocation(dir, opts.machineDevflowDir)) return { kind: 'skip', reason: 'machine-dir' };
+
+  let dirents;
+  try {
+    dirents = await fs.readdir(dir, { withFileTypes: true });
+  } catch {
+    return { kind: 'skip', reason: 'absent' };
+  }
+  const { remove, keep } = partitionProjectData(
+    dirents.map((d) => ({ name: d.name, isDir: d.isDirectory() })),
+  );
+  return { kind: 'plan', plan: { dir, remove, keep } };
+}
+
+/** An entry as the prompt shows it: directories carry a trailing `/`. */
+function entryLabel(entry: ProjectDataEntry): string {
+  return entry.isDir ? `${entry.name}/` : entry.name;
+}
+
+/** Comma-separated labels, or `(none)`. */
+function entryList(entries: ReadonlyArray<ProjectDataEntry>): string {
+  return entries.length === 0 ? '(none)' : entries.map(entryLabel).join(', ');
+}
+
+/**
+ * The lines shown before the project-data confirm: what is removed and what is
+ * kept. PURE.
+ */
+export function formatProjectDataPlan(plan: ProjectDataPlan): string[] {
+  return [
+    `Project data in ${plan.dir}/:`,
+    `  Remove: ${entryList(plan.remove)}`,
+    `  Keep (shared via git): ${entryList(plan.keep)}`,
+  ];
+}
+
+/** A confirm prompt: `p.confirm` unless a caller injects one. */
+export type ConfirmPrompt = (opts: { message: string; initialValue?: boolean }) => Promise<boolean | symbol>;
 
 /**
  * Determine the appropriate cleanup action for the user-scope devflow directory on
@@ -737,9 +846,18 @@ export async function runDryRunPhase(opts: {
       if (paths === null) continue;
       extras.push(...await enumerateDryRunExtras(paths.claudeDir, paths.devflowDir));
     }
-    // Project .devflow/ data dir
-    const devflowDataDir = path.join(process.cwd(), '.devflow');
-    try { await fs.access(devflowDataDir); extras.push(`${devflowDataDir} (if confirmed)`); } catch { /* noop */ }
+    // Project data under <gitRoot>/.devflow — the same plan the real cleanup phase
+    // resolves, so the preview lists exactly what a confirmed removal deletes.
+    const projectData = await resolveProjectDataPlan({
+      gitRoot: await getGitRoot(process.cwd()),
+      homeDir: getHomeDirectory(),
+      machineDevflowDir: getInstallationPaths().devflowDir,
+    });
+    if (projectData.kind === 'plan') {
+      for (const entry of projectData.plan.remove) {
+        extras.push(`${path.join(projectData.plan.dir, entryLabel(entry))} (if confirmed)`);
+      }
+    }
     extras.push('hooks removed from settings.json');
 
     for (const line of extras) {
@@ -914,10 +1032,62 @@ export async function runFullPhaseForScope(opts: {
 }
 
 /**
+ * The project-data step of the cleanup phase: list what a confirmed cleanup removes
+ * from `<gitRoot>/.devflow` and what it keeps, then remove on an explicit yes.
+ *
+ * D-UNINSTALL-CARVE-OUT: DEVFLOW_TRACKED_PATHS are never removed. `--keep-docs`,
+ * a non-interactive run, a decline and a cancel all leave the directory untouched,
+ * and a cancel continues the uninstall rather than exiting (avoids PF-014). The
+ * directory itself is removed only when nothing tracked was in it.
+ */
+async function runProjectDataStep(
+  plan: ProjectDataPlan,
+  gates: { keepDocs: boolean; isTTY: boolean; confirm: ConfirmPrompt },
+): Promise<void> {
+  const shown = `${plan.dir}/`;
+  if (plan.remove.length === 0) {
+    p.log.info(`${shown} preserved (holds only files shared via git)`);
+    return;
+  }
+  if (gates.keepDocs) {
+    p.log.info(`${shown} preserved (--keep-docs)`);
+    return;
+  }
+  if (!gates.isTTY) {
+    p.log.info(`${shown} preserved (non-interactive mode)`);
+    return;
+  }
+
+  for (const line of formatProjectDataPlan(plan)) p.log.info(line);
+  const answer = await gates.confirm({
+    message: `Remove the project data listed above from ${shown}?`,
+    initialValue: false,
+  });
+  if (!resolveProjectDataCleanup(answer)) {
+    p.log.info(p.isCancel(answer)
+      ? `${shown} preserved (prompt cancelled — continuing cleanup)`
+      : `${shown} preserved`);
+    return;
+  }
+
+  for (const entry of plan.remove) {
+    await fs.rm(path.join(plan.dir, entry.name), { recursive: true, force: true });
+  }
+  if (plan.keep.length === 0) {
+    // Nothing tracked was there: drop the now-empty directory. rmdir refuses a
+    // directory something wrote into meanwhile, which is then left in place.
+    await fs.rmdir(plan.dir).catch(() => undefined);
+  }
+  p.log.success(`Removed from ${shown}: ${entryList(plan.remove)}`);
+  if (plan.keep.length > 0) p.log.info(`Kept: ${entryList(plan.keep)}`);
+}
+
+/**
  * CLEANUP PHASE: post-loop extras run only on full uninstall.
  *
  * Steps (all non-fatal, every interactive path gated on opts.isTTY):
- *   1. .devflow/ project data directory
+ *   1. Project data under `<gitRoot>/.devflow`, minus DEVFLOW_TRACKED_PATHS
+ *      (resolveProjectDataPlan; skipped outside a repo and in one rooted at HOME)
  *   2. .claudeignore
  *   3. settings.json — remove all Devflow hooks and flags
  *   4. Security deny list
@@ -934,10 +1104,11 @@ export async function runFullPhaseForScope(opts: {
  *                                 only when this includes `user` — a legacy
  *                                 local-only uninstall never touches HOME
  *                                 (D-LEGACY-LOCAL-CLEANUP).
- * @param opts.keepDocs          - When true, .devflow/ and security prompts are suppressed.
+ * @param opts.keepDocs          - When true, the project-data and security prompts are suppressed.
  * @param opts.verbose           - Whether to emit verbose log lines.
- * @param opts.cwd               - Working directory for project-local path resolution
- *                                 (.devflow/, git root, .claudeignore fallback).
+ * @param opts.cwd               - Working directory the git root is resolved from; it
+ *                                 locates `<gitRoot>/.devflow` and `.claudeignore`
+ *                                 (the cwd itself is the `.claudeignore` fallback).
  * @param opts.isTTY             - Whether the session is interactive. Every confirm
  *                                 prompt in this phase is gated on it.
  */
@@ -955,53 +1126,26 @@ export async function runCleanupPhase(opts: {
    * A scope with no entry means proxy.json did not exist — the env vars are not
    * Devflow's to remove and only the hooks come out (D-STRIP-1). */
   managedProxyPorts?: ReadonlyMap<string, number>;
+  /** The prompt every confirm in this phase goes through (default `p.confirm`). */
+  confirm?: ConfirmPrompt;
 }): Promise<void> {
   const { scopesToUninstall, keepDocs, verbose, cwd, isTTY } = opts;
+  const confirm: ConfirmPrompt = opts.confirm ?? p.confirm;
   // Resolve the git root from the injected cwd, not process.cwd(): otherwise
   // .devflow/ resolves under `cwd` while .claudeignore resolves under the process
   // directory, and the two halves of this phase act on different repositories.
   const gitRoot = await getGitRoot(cwd);
 
-  // 1. .devflow/ project data directory (contains docs/, memory/, learning/, features/, etc.)
-  const devflowDataDir = path.join(cwd, '.devflow');
-  let devflowDataExists = false;
-  try {
-    await fs.access(devflowDataDir);
-    devflowDataExists = true;
-  } catch { /* .devflow doesn't exist */ }
-
-  if (devflowDataExists) {
-    let shouldRemoveDevflow = false;
-    // Tracks whether a specific "preserved" log was already emitted (e.g. the
-    // cancel-path message below) to avoid printing the generic one twice. (F10)
-    let preservedLogged = false;
-
-    if (keepDocs) {
-      shouldRemoveDevflow = false;
-    } else if (isTTY) {
-      const removeDevflow = await p.confirm({
-        message: '.devflow/ directory found. Remove project data (docs, memory, learning)?',
-        initialValue: false,
-      });
-
-      if (p.isCancel(removeDevflow)) {
-        // Treat cancel as decline: preserve .devflow/ and continue cleanup.
-        // avoids PF-014: process.exit() here would skip claudeignore, hooks,
-        // and safe-delete removal — removeAllDevFlow has already run.
-        // applies ADR-003: clean end-state on every path.
-        p.log.info('.devflow/ preserved (prompt cancelled — continuing cleanup)');
-        preservedLogged = true;
-      }
-
-      shouldRemoveDevflow = resolveProjectDataCleanup(removeDevflow);
-    }
-
-    if (shouldRemoveDevflow) {
-      await fs.rm(devflowDataDir, { recursive: true, force: true });
-      p.log.success('.devflow/ removed');
-    } else if (!preservedLogged) {
-      p.log.info('.devflow/ preserved');
-    }
+  // 1. Project data under <gitRoot>/.devflow (D-UNINSTALL-CARVE-OUT)
+  const projectData = await resolveProjectDataPlan({
+    gitRoot,
+    homeDir: getHomeDirectory(),
+    machineDevflowDir: getInstallationPaths().devflowDir,
+  });
+  if (projectData.kind === 'plan') {
+    await runProjectDataStep(projectData.plan, { keepDocs, isTTY, confirm });
+  } else if (projectData.reason === 'home-root' || projectData.reason === 'machine-dir') {
+    p.log.info(`Project data step skipped: ${gitRoot}/.devflow/ is the machine-wide devflow directory`);
   }
 
   // 2. .claudeignore
@@ -1017,7 +1161,7 @@ export async function runCleanupPhase(opts: {
 
   if (claudeignoreExists) {
     if (isTTY) {
-      const removeClaudeignore = await p.confirm({
+      const removeClaudeignore = await confirm({
         message: '.claudeignore found. Remove it? (may contain custom rules)',
         initialValue: false,
       });
@@ -1121,7 +1265,7 @@ export async function runCleanupPhase(opts: {
     let shouldRemoveSecurity = false;
 
     if (securityDecision === 'prompt') {
-      const removeDenyConfirm = await p.confirm({
+      const removeDenyConfirm = await confirm({
         message: `Remove Devflow security deny list from ${locationLabel}?`,
         initialValue: false,
       });
@@ -1165,7 +1309,7 @@ export async function runCleanupPhase(opts: {
   const profilePath = getProfilePath(shell);
   if (profilePath && await isAlreadyInstalled(profilePath)) {
     if (isTTY) {
-      const removeSafeDelete = await p.confirm({
+      const removeSafeDelete = await confirm({
         message: `Remove safe-delete function from ${profilePath}?`,
         initialValue: false,
       });
