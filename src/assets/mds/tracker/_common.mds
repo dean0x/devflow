@@ -79,7 +79,7 @@ hoisting it would re-indent one of the three, and indentation is list grammar
 rather than whitespace here (PF-063). Normalising those lists is its own edit.
 
 @define state_batch_line(subject, subject_ref, ref_token):
-2b. Render each issue's {subject} as a `**State**: \{state\}` line of its own, between that issue's `### Issue {ref_token}:` heading and its `<untrusted-issue-body>` marker — OUTSIDE the wrapper, because {subject_ref} is an enum the tracker computed, not remote prose. A caller refreshing a batch reads it to see a ticket closed out of band.
+2b. Render each issue's {{subject}} as a `**State**: {state}` line of its own, between that issue's `### Issue {{ref_token}}:` heading and its `<untrusted-issue-body>` marker — OUTSIDE the wrapper, because {{subject_ref}} is an enum the tracker computed, not remote prose. A caller refreshing a batch reads it to see a ticket closed out of band.
 @end
 
 @define bare_number_rule():
@@ -87,19 +87,19 @@ A **bare number** ⇒ `TRACEABILITY: DEGRADED (ambiguous issue reference)` — u
 @end
 
 @define ref_preflight_single(provider, grammar, normalise = "", forms = "", tail = ""):
-{normalise}Shape-gate it against {grammar}, anchored at both ends{forms}. {bare_number_rule()} Any other shape ⇒ `TRACEABILITY: DEGRADED (issue reference "\{ref\}" does not match {provider} reference grammar)`.{tail}
+{{normalise}}Shape-gate it against {{grammar}}, anchored at both ends{{forms}}. {{bare_number_rule()}} Any other shape ⇒ `TRACEABILITY: DEGRADED (issue reference "{ref}" does not match {{provider}} reference grammar)`.{{tail}}
 @end
 
 @define ref_preflight_list(provider, grammar, normalise = "", forms = "", tail = ""):
-{normalise}Pre-flight the list against {grammar}, anchored at both ends{forms}, and **drop** every entry that fails, reporting each as `TRACEABILITY: DEGRADED (issue reference "\{ref\}" does not match {provider} reference grammar)` — a bare number among them goes with them, in silence: `ambiguous issue reference` answers a reference a caller named, not one line of a list nobody chose. Every entry dropped ⇒ `TRACEABILITY: DEGRADED (no parseable refs for provider \{p\})`{tail}
+{{normalise}}Pre-flight the list against {{grammar}}, anchored at both ends{{forms}}, and **drop** every entry that fails, reporting each as `TRACEABILITY: DEGRADED (issue reference "{ref}" does not match {{provider}} reference grammar)` — a bare number among them goes with them, in silence: `ambiguous issue reference` answers a reference a caller named, not one line of a list nobody chose. Every entry dropped ⇒ `TRACEABILITY: DEGRADED (no parseable refs for provider {p})`{{tail}}
 @end
 
 @define ref_preflight_entry(provider, grammar, normalise = "", forms = ""):
-{normalise}Every entry of `SHIPPED_ISSUES` must satisfy {grammar}, anchored at both ends of the STRING (a newline fails it){forms} — this provider's grammar is what the entry gate's shape requirement means here, and the anchored form is what keeps a ref out of a query or a command. **Drop** every entry that fails and report it as `TRACEABILITY: DEGRADED (issue reference "\{ref\}" does not match {provider} reference grammar)`.
+{{normalise}}Every entry of `SHIPPED_ISSUES` must satisfy {{grammar}}, anchored at both ends of the STRING (a newline fails it){{forms}} — this provider's grammar is what the entry gate's shape requirement means here, and the anchored form is what keeps a ref out of a query or a command. **Drop** every entry that fails and report it as `TRACEABILITY: DEGRADED (issue reference "{ref}" does not match {{provider}} reference grammar)`.
 @end
 
 @define ref_preflight_branch(match_phrase):
-extract the segment {match_phrase} and verify it with the *fetch by key* capability. If the call fails, or the issue is not open, **skip silently** — never render a link for an unverified reference. A branch name can carry a token that merely looks like one, and the existence check is the guard.
+extract the segment {{match_phrase}} and verify it with the *fetch by key* capability. If the call fails, or the issue is not open, **skip silently** — never render a link for an unverified reference. A branch name can carry a token that merely looks like one, and the existence check is the guard.
 @end
 
 @define traceable_issue_rules():
@@ -129,15 +129,15 @@ extract the segment {match_phrase} and verify it with the *fetch by key* capabil
 @end
 
 @define handoff_values(id_form, link_form):
-**Handoff Values:** `Issue ID` = {id_form}; `PR link line` = `{link_form}`.
+**Handoff Values:** `Issue ID` = {{id_form}}; `PR link line` = `{{link_form}}`.
 @end
 
 @define last_release_tag_step():
-1a. **Last release tag.** Step 1's `git describe` can return a non-release marker tag. From `WORKTREE_PATH` (else cwd), run `node "$HOME/.devflow/scripts/release-trace.cjs" last-tag`: `LAST_TAG <tag>` ⇒ that tag is `\{last_tag\}`; `LAST_TAG none` ⇒ step 1's initial-commit rule; anything else ⇒ keep step 1's tag and report status `INDETERMINATE (last release tag unresolved)`.
+1a. **Last release tag.** Step 1's `git describe` can return a non-release marker tag. From `WORKTREE_PATH` (else cwd), run `node "$HOME/.devflow/scripts/release-trace.cjs" last-tag`: `LAST_TAG <tag>` ⇒ that tag is `{last_tag}`; `LAST_TAG none` ⇒ step 1's initial-commit rule; anything else ⇒ keep step 1's tag and report status `INDETERMINATE (last release tag unresolved)`.
 @end
 
 @define trace_map_step(args, arm):
-6. **Per-commit trace map.** {arm}From `WORKTREE_PATH` (else cwd), run `node "$HOME/.devflow/scripts/release-trace.cjs" map --from \{last_tag\} {args}; echo "exit=$?"`. Accept only `exit=0` after a first line `TRACE from:<ref> scanned:<n> traced:<n> untraced:<n> exempt:<n> unmatched:<n> bound:<ok|hit>`; copy every line above `exit=0` verbatim under `### TRACE_MAP`. Anything else ⇒ `TRACEABILITY: DEGRADED (trace map unavailable)`, `### TRACE_MAP` = `(unavailable)`, status `INDETERMINATE (trace map unavailable)`. `bound:hit` ⇒ status `INDETERMINATE (trace scan bound 500 hit)`. An `INDETERMINATE` status outranks every other.
+6. **Per-commit trace map.** {{arm}}From `WORKTREE_PATH` (else cwd), run `node "$HOME/.devflow/scripts/release-trace.cjs" map --from {last_tag} {{args}}; echo "exit=$?"`. Accept only `exit=0` after a first line `TRACE from:<ref> scanned:<n> traced:<n> untraced:<n> exempt:<n> unmatched:<n> bound:<ok|hit>`; copy every line above `exit=0` verbatim under `### TRACE_MAP`. Anything else ⇒ `TRACEABILITY: DEGRADED (trace map unavailable)`, `### TRACE_MAP` = `(unavailable)`, status `INDETERMINATE (trace map unavailable)`. `bound:hit` ⇒ status `INDETERMINATE (trace scan bound 500 hit)`. An `INDETERMINATE` status outranks every other.
 @end
 
 @export state_batch_line

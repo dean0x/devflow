@@ -68,7 +68,7 @@ The script body cannot perform this read — you (the main model) do it before a
 
 ### Handoff convention for sequential Code agents within a ticket
 
-When a ticket requires multiple sequential Code agent phases, each Code agent writes `.devflow/docs/handoff-\{branch_slug\}.md` (branch-scoped to prevent concurrent session clobber). The next Code agent reads it via HANDOFF_FILE input. PRIOR_PHASE_SUMMARY is the compact in-context form; the handoff file is the durable form that survives context compaction. Always read the handoff file directly — code is authoritative, summaries are supplementary.
+When a ticket requires multiple sequential Code agent phases, each Code agent writes `.devflow/docs/handoff-{branch_slug}.md` (branch-scoped to prevent concurrent session clobber). The next Code agent reads it via HANDOFF_FILE input. PRIOR_PHASE_SUMMARY is the compact in-context form; the handoff file is the durable form that survives context compaction. Always read the handoff file directly — code is authoritative, summaries are supplementary.
 
 ### IRON RULE (ADR-008: LLM-vs-plumbing)
 

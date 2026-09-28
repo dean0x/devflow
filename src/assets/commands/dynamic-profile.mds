@@ -4,8 +4,7 @@ argument-hint: "[--dry-run]"
 output-dir: dist/commands
 ---
 @import { authoring_preamble } from "./_partials/_preamble.mds"
-
-{authoring_preamble()}
+{{authoring_preamble()}}
 
 ---
 

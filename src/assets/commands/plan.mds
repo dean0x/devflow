@@ -8,7 +8,6 @@ output-dir: dist/commands
 @import { evidence_policy } from "./_partials/_evidence_policy.mds"
 @import { test_plan_line } from "./_partials/_plan_contract.mds"
 @import { issue_ref_grammar, issue_capture_contract } from "./_partials/_tracker.mds"
-
 # Plan Command
 
 Orchestrate design planning from requirements discovery through gap analysis to implementation design. Produces a machine-readable design artifact consumed by `/implement`.
@@ -32,7 +31,7 @@ The orchestrator only spawns agents and gates — all analytical work is done by
 - Other text → feature description
 - Empty → use conversation context
 
-{issue_ref_grammar()}
+{{issue_ref_grammar()}}
 
 ## Clarification Gates
 
@@ -71,7 +70,7 @@ Explore the user's intent through focused Socratic questioning before spawning a
   ```
   Agent(subagent_type="Git"):
   "OPERATION: fetch-issue
-  ISSUE_INPUT: \{ref\}
+  ISSUE_INPUT: {ref}
   Return issue title, body, labels, acceptance criteria, and dependencies."
   ```
 
@@ -80,15 +79,15 @@ Explore the user's intent through focused Socratic questioning before spawning a
   ```
   Agent(subagent_type="Git"):
   "OPERATION: fetch-issues-batch
-  ISSUE_REFS: \{space-separated refs\}
+  ISSUE_REFS: {space-separated refs}
   Return issue titles, bodies, labels, acceptance criteria, and cross-issue relationships."
   ```
 
-{issue_capture_contract()}
+{{issue_capture_contract()}}
 
 Seed the discovery below with `ISSUE_CONTENT` and `ACCEPTANCE_CRITERIA` (every issue's, on the batch path); skip Gate 0 questions they already answer (applies the **Skip discovery when** rule above).
 
-If the Git agent returns only a `TRACEABILITY: DEGRADED (\{reason\})` line and no issue content, warn the user, carry that exact line verbatim into the report's traceability section, and proceed to Gate 0 discovery using the raw candidate token as the sole context. Never treat the `TRACEABILITY: DEGRADED` status line as issue content — no title, body, or acceptance criteria may be inferred from it.
+If the Git agent returns only a `TRACEABILITY: DEGRADED ({reason})` line and no issue content, warn the user, carry that exact line verbatim into the report's traceability section, and proceed to Gate 0 discovery using the raw candidate token as the sole context. Never treat the `TRACEABILITY: DEGRADED` status line as issue content — no title, body, or acceptance criteria may be inferred from it.
 
 1. **First question**: Confirm your understanding of the core problem and expected outcome. Frame as multiple choice when 2-3 interpretations exist.
 2. **Follow-up questions** (if ambiguity remains): Probe constraints, scope boundaries, or tradeoffs via AskUserQuestion.
@@ -121,11 +120,11 @@ Run rskim on source directories (NOT repo root) to identify:
 Return codebase context for requirements analysis."
 ```
 
-{decisions_load()}
+{{decisions_load()}}
 
 This produces a compact index of active ADR/PF entries. Pass Skim agent context and `DECISIONS_CONTEXT` to all subsequent agents — prior decisions constrain design, known pitfalls inform gap analysis. Agents use `devflow:apply-decisions` to Read full entry bodies on demand.
 
-{knowledge_load()}
+{{knowledge_load()}}
 
 Pass `FEATURE_KNOWLEDGE` alongside `DECISIONS_CONTEXT` to Explore and Design agents.
 
@@ -167,7 +166,7 @@ Combine into: user needs, similar features, constraints, failure modes"
 **Produces:** GAP_OUTPUTS, COMPLIANCE_SKILL_INSTALLED
 **Requires:** EXPLORATION_SYNTHESIS, SKIM_CONTEXT, DECISIONS_CONTEXT
 
-{compliance_gate()}
+{{compliance_gate()}}
 
 **Single-issue**: Spawn 4 Design agents **in a single message** (**5 when COMPLIANCE_SKILL_INSTALLED**):
 
@@ -360,7 +359,7 @@ Use AskUserQuestion to present:
 
 **Test plan lines.** Gate 2 shows the test plan in the one shape `/implement` and the evidence scripts read. Word each scenario in plain words, with no `#`, `@` or `/`: name the files it covers in `files:`, never an issue, a person or a URL. The TP-line contract:
 
-{test_plan_line()}
+{{test_plan_line()}}
 
 User can:
 - **Accept** — proceed to output phases
@@ -381,9 +380,9 @@ User can:
 **Store design artifact:**
 
 **Pre-compute the artifact path** from the slug (it never changes after this):
-- If one issue: `.devflow/docs/design/\{ISSUE_ID\}-\{topic-slug\}.\{YYYY-MM-DD_HHMM\}.md` (the `docs-framework` skill's design-document pattern, e.g. `42-jwt-auth.2026-04-07_1430.md`)
-- If multi-issue: `.devflow/docs/design/multi-\{topic-slug\}.\{YYYY-MM-DD_HHMM\}.md`, frontmatter `issue: pending` — a batch fetch returns no issue ID to name it by
-- If no issue: `.devflow/docs/design/\{topic-slug\}.\{YYYY-MM-DD_HHMM\}.md`
+- If one issue: `.devflow/docs/design/{ISSUE_ID}-{topic-slug}.{YYYY-MM-DD_HHMM}.md` (the `docs-framework` skill's design-document pattern, e.g. `42-jwt-auth.2026-04-07_1430.md`)
+- If multi-issue: `.devflow/docs/design/multi-{topic-slug}.{YYYY-MM-DD_HHMM}.md`, frontmatter `issue: pending` — a batch fetch returns no issue ID to name it by
+- If no issue: `.devflow/docs/design/{topic-slug}.{YYYY-MM-DD_HHMM}.md`
 
 Create parent directory if needed.
 
@@ -441,7 +440,7 @@ Required sections:
 Closes {ISSUE_REF}
 ```
 
-Under `github`, `\{ISSUE_REF\}` is `#`-prefixed, so that line renders `Closes #\{n\}`.
+Under `github`, `{ISSUE_REF}` is `#`-prefixed, so that line renders `Closes #{n}`.
 
 **Check the test plan before the artifact exists:** place the `## Test Plan` section's lines in a fresh temp file and run:
 
@@ -451,9 +450,9 @@ node "$HOME/.devflow/scripts/verify-evidence.cjs" check tp <that file>; echo "ex
 
 `exit=0` passes. On any other result, correct the lines once — the script names the failing line and its code on stderr — and check again. Still failing ⇒ keep the section as it stands and say so in the report: `/implement` re-checks it before any Code spawn.
 
-**Write the artifact now** — frontmatter `issue: \{ISSUE_ID\}` if an issue is already known, else `issue: pending`.
+**Write the artifact now** — frontmatter `issue: {ISSUE_ID}` if an issue is already known, else `issue: pending`.
 
-{evidence_policy()}
+{{evidence_policy()}}
 
 **Create or enrich tracker issue:**
 
@@ -479,18 +478,18 @@ Return the issue number."
 
 Capture `ISSUE_NUMBER` from the Git agent output for use in the completion report and the `/implement` hand-off suggestion.
 
-**Patch the frontmatter `issue:` line in place** — when it still reads `issue: pending` and the spawn returned an issue (`CREATED` or `ENRICHED`), replace only that one line inside the leading `---` block with `issue: \{ISSUE_NUMBER\}` — bare, no `#` (`issue: #42` parses as YAML null) — using the Edit tool. Never rename the artifact, never rewrite it, never spawn `ensure-traceable-issue` again. Declined or DEGRADED ⇒ leave `issue: pending`.
+**Patch the frontmatter `issue:` line in place** — when it still reads `issue: pending` and the spawn returned an issue (`CREATED` or `ENRICHED`), replace only that one line inside the leading `---` block with `issue: {ISSUE_NUMBER}` — bare, no `#` (`issue: #42` parses as YAML null) — using the Edit tool. Never rename the artifact, never rewrite it, never spawn `ensure-traceable-issue` again. Declined or DEGRADED ⇒ leave `issue: pending`.
 
-Surface any `TRACEABILITY: DEGRADED (\{reason\})` lines from the Git agent output in the report.
+Surface any `TRACEABILITY: DEGRADED ({reason})` lines from the Git agent output in the report.
 
 **Report:**
 
 Display completion summary:
 - Design artifact path
-- Issue URL (if created or enriched) — and any `TRACEABILITY: DEGRADED (\{reason\})` lines from the Git agent
+- Issue URL (if created or enriched) — and any `TRACEABILITY: DEGRADED ({reason})` lines from the Git agent
 - Gap analysis summary (N blocking, M should-address)
 - Design review summary (N anti-patterns found, M mitigated in plan)
-- Suggested next step: `/implement \{artifact-path\}` or `/implement #\{issue-number\}`
+- Suggested next step: `/implement {artifact-path}` or `/implement #{issue-number}`
 
 ---
 

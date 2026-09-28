@@ -8,8 +8,7 @@ output-dir: dist/commands
 @import { ticket_body_template } from "./_partials/_ticket_template.mds"
 @import { factory_shape } from "./_partials/_factory.mds"
 @import { evidence_policy } from "./_partials/_evidence_policy.mds"
-
-{authoring_preamble()}
+{{authoring_preamble()}}
 
 ---
 
@@ -17,14 +16,14 @@ output-dir: dist/commands
 
 This command instructs you to construct and run a Claude Code dynamic Workflow that converts an initiative description or specification document into a fully reviewed, wave-structured ticket slate — reusing devflow's agents via `agentType`.
 
-{agent_roster()}
+{{agent_roster()}}
 
-{agent_caveats()}
+{{agent_caveats()}}
 
 ---
 
 **Requires:** initiative description or spec document path; tracker access only for filing the issues, which the Git agent resolves
-**Produces:** ticket `.md` files at `.devflow/docs/tickets/\{slug\}/\{ts\}/`, `tracking-issue.md`
+**Produces:** ticket `.md` files at `.devflow/docs/tickets/{slug}/{ts}/`, `tracking-issue.md`
 
 ---
 
@@ -34,8 +33,8 @@ Before authoring, verify:
 
 1. **Workflow tool available:** if the `Workflow` tool is not in your available tools, STOP and tell the user: "The Workflow tool is not available in this session. dynamic-tickets requires Claude Code's dynamic workflow runtime."
 2. **`agentType` support:** confirmed available (spike F5, 2026-06-11). If spawned agents return no results, check that devflow is installed (`devflow init` has been run).
-3. **Tracker paths:** filing, when it runs, happens after the workflow and through the Git agent, which resolves the configured tracker and its access itself and reports `TRACEABILITY: DEGRADED (\{reason\})` for an issue it cannot file — that ticket stays a local `.md` file. No tracker CLI is checked here.
-4. **No-remote path:** with no remote, the ticket files are still written to `.devflow/docs/tickets/\{slug\}/\{ts\}/`; whatever the Git agent cannot file without one, it reports as DEGRADED.
+3. **Tracker paths:** filing, when it runs, happens after the workflow and through the Git agent, which resolves the configured tracker and its access itself and reports `TRACEABILITY: DEGRADED ({reason})` for an issue it cannot file — that ticket stays a local `.md` file. No tracker CLI is checked here.
+4. **No-remote path:** with no remote, the ticket files are still written to `.devflow/docs/tickets/{slug}/{ts}/`; whatever the Git agent cannot file without one, it reports as DEGRADED.
 
 ---
 
@@ -47,7 +46,7 @@ Before you write the workflow script:
 
 **Produces:** EVIDENCE_POLICY, ISSUE_REQUIRED, APPLY_CONVENTIONS, REQUIRE_NON_AUTHOR_APPROVAL
 
-{evidence_policy()}
+{{evidence_policy()}}
 
 **1. Apply decisions context**
 
@@ -194,7 +193,7 @@ The six-phase pipeline above never files an issue. Filing happens here, at the c
 1. **Order and bound.** The tracking issue first, then each ticket file in dependency order: a ticket after every ticket its `**Depends on:**` line names, slate order (the workflow's `ticketPaths`) otherwise. One Git spawn at a time, never in parallel, and at most 50 spawns in all: a file past the cap is reported `not filed (cap 50)`.
 2. **Spawn**, once per file. A ticket's `REQUIREMENTS` opens with the two lines the wave reads from its issue body, each on its own line:
    - `**Wave:** N` — the file's wave number when it is digits only, else no Wave line.
-   - `**Depends on:**` with each entry, a ticket title or file name, replaced by the reference step 3 wrote as that ticket's `**Issue:**` line — comma-separated, or `none`. An entry naming no ticket already filed in this run — unfiled, unknown, or written as a reference — ⇒ `TRACEABILITY: DEGRADED (unresolved dependency "\{entry\}")`, and that ticket is not filed: a dependency is never dropped.
+   - `**Depends on:**` with each entry, a ticket title or file name, replaced by the reference step 3 wrote as that ticket's `**Issue:**` line — comma-separated, or `none`. An entry naming no ticket already filed in this run — unfiled, unknown, or written as a reference — ⇒ `TRACEABILITY: DEGRADED (unresolved dependency "{entry}")`, and that ticket is not filed: a dependency is never dropped.
 
    Its `## Summary` paragraph follows, less any line opening with either label.
 
@@ -207,9 +206,9 @@ PLAN_ARTIFACT_PATH: {the ticket or tracking-issue file path}
 WORKTREE_PATH: {WORKTREE_PATH when provided; omit otherwise}"
 ```
 
-3. **Capture** `**Issue**: \{ISSUE_REF\}` and `**Status**:` from the spawn's `## Issue Traced` Output.
-   - `CREATED` or `ENRICHED`, with a reference that matches `^(#[1-9][0-9]\{0,8\}|[A-Z][A-Z0-9_]\{0,9\}-[1-9][0-9]\{0,8\})$` as a whole ⇒ insert `**Issue:** \{ISSUE_REF\}` with the Edit tool: in a ticket file as the line directly after its `**Depends on:**` line, in `tracking-issue.md` as the line directly after its H1. Change nothing else in the file.
-   - A reference of any other shape ⇒ `TRACEABILITY: DEGRADED (issue reference "\{ref\}" does not match any tracker reference grammar)`, and no line.
+3. **Capture** `**Issue**: {ISSUE_REF}` and `**Status**:` from the spawn's `## Issue Traced` Output.
+   - `CREATED` or `ENRICHED`, with a reference that matches `^(#[1-9][0-9]{0,8}|[A-Z][A-Z0-9_]{0,9}-[1-9][0-9]{0,8})$` as a whole ⇒ insert `**Issue:** {ISSUE_REF}` with the Edit tool: in a ticket file as the line directly after its `**Depends on:**` line, in `tracking-issue.md` as the line directly after its H1. Change nothing else in the file.
+   - A reference of any other shape ⇒ `TRACEABILITY: DEGRADED (issue reference "{ref}" does not match any tracker reference grammar)`, and no line.
    - `DEGRADED (rate limited)` ⇒ stop filing: this file and every file after it are reported `not filed`. Any other DEGRADED ⇒ that file gets no line; report it and go on to the next.
 4. **Report** each file's `**Issue:**` reference, or `not filed` and why, with every `TRACEABILITY: DEGRADED` line step 2 and the spawns produced.
 
@@ -221,7 +220,7 @@ WORKTREE_PATH: {WORKTREE_PATH when provided; omit otherwise}"
 
 Every ticket artifact must use this shape:
 
-{ticket_body_template()}
+{{ticket_body_template()}}
 
 ---
 
@@ -229,17 +228,17 @@ Every ticket artifact must use this shape:
 
 The pipeline above implements this general shape:
 
-{factory_shape()}
+{{factory_shape()}}
 
 ---
 
 ### Artifact paths
 
-Tickets → `.devflow/docs/tickets/\{slug\}/\{ts\}/\{ticket-slug\}.md`
+Tickets → `.devflow/docs/tickets/{slug}/{ts}/{ticket-slug}.md`
 
-Tracking issue → `.devflow/docs/tickets/\{slug\}/\{ts\}/tracking-issue.md`
+Tracking issue → `.devflow/docs/tickets/{slug}/{ts}/tracking-issue.md`
 
-Honor the `WORKTREE_PATH` prefix when provided: all artifact paths become `\{WORKTREE_PATH\}/.devflow/docs/tickets/...`.
+Honor the `WORKTREE_PATH` prefix when provided: all artifact paths become `{WORKTREE_PATH}/.devflow/docs/tickets/...`.
 
 Timestamps follow the devflow `YYYY-MM-DD_HHMM` convention (date and time separated by an underscore, e.g. `2026-06-12_1148`). The `ts` variable in the workflow script generates this format.
 

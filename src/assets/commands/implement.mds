@@ -8,7 +8,6 @@ output-dir: dist/commands
 @import { issue_ref_grammar, issue_capture_contract } from "./_partials/_tracker.mds"
 @import { test_plan_line } from "./_partials/_plan_contract.mds"
 @import { publication_gate } from "./_partials/_publication.mds"
-
 # Implement Command
 
 Orchestrate a single task through implementation by spawning specialized agents. The orchestrator only spawns agents and passes context - all work is done by agents.
@@ -30,7 +29,7 @@ Orchestrate a single task through implementation by spawning specialized agents.
 - Task description: "implement JWT auth"
 - Empty: use conversation context
 
-{issue_ref_grammar()}
+{{issue_ref_grammar()}}
 
 > **Tip**: For best results, run `/plan` first to produce a design artifact, then pass it to `/implement`.
 
@@ -42,7 +41,7 @@ When the user explicitly asks to re-validate, re-check, or re-run quality gates 
 
 1. **Branch safety check**: If on a protected branch (main, master, develop, etc.), run Phase 1 to create/switch to a work branch. If already on a work branch, skip Phase 1.
 2. **Skip Phase 2** — no Code agent needed, user already made changes.
-3. **Detect FILES_CHANGED**: `git diff --name-only \{base_branch\}...HEAD`
+3. **Detect FILES_CHANGED**: `git diff --name-only {base_branch}...HEAD`
 4. **Run Phases 3-8** — full quality gate pipeline on detected changes.
 5. **Proceed to Phase 10** (Create PR), **Phase 10b** (Evidence) and **Phase 11** (Report).
 
@@ -56,7 +55,7 @@ If the user prompt does NOT match re-validation, proceed with the full pipeline 
 
 Record the current branch name as `BASE_BRANCH` - this will be the PR target.
 
-{evidence_policy()}
+{{evidence_policy()}}
 
 **Plan Document Handling** (when $ARGUMENTS is a path ending in `.md`):
 1. Read the plan document from the path provided
@@ -118,21 +117,21 @@ visible, a silently discarded request is not.
 - `BASE_BRANCH`: Branch this feature was created from (for PR target)
 - `ISSUE_NUMBER`: the provider-canonical issue identifier for this task — the same value the Git agent emits as `ISSUE_ID` (if provided, or created by the Git agent's issue-first step in setup-task)
 
-{issue_capture_contract()}
+{{issue_capture_contract()}}
 
 **Ticket link, only when `ISSUE_REQUIRED` is `true`:** when the capture above holds no `ISSUE_PR_LINK` (absent, or `(none)`), ask with AskUserQuestion before any Code spawn — "No tracker issue is linked to this task. Record a self-attested exception, or stop?" — offering exactly these two options:
 - **Record an exception** — the user gives the reason as free text. Render it with the grammar below, as kind `ticket-link`; when the rendered reason is empty, ask for it once more, and stop as below if it is empty again.
-- **Stop** — report `BLOCKED (no ticket link)`, name the branch setup-task created (`TASK_ID`) and `BASE_BRANCH` so it can be reused or removed, and give the remedy: create or link the tracker issue and re-run `/implement` with its reference, or — for a team that does not want ticket links — commit `.devflow/policy.json` as `\{"version":1,"evidencePolicy":"standard"\}` on the default branch; a machine with compliance enabled still resolves `required` whatever that file says. Spawn nothing further.
+- **Stop** — report `BLOCKED (no ticket link)`, name the branch setup-task created (`TASK_ID`) and `BASE_BRANCH` so it can be reused or removed, and give the remedy: create or link the tracker issue and re-run `/implement` with its reference, or — for a team that does not want ticket links — commit `.devflow/policy.json` as `{"version":1,"evidencePolicy":"standard"}` on the default branch; a machine with compliance enabled still resolves `required` whatever that file says. Spawn nothing further.
 
-{evidence_exception()}
+{{evidence_exception()}}
 
-**Record the exception at once**, before any Code spawn: write the rendered section as the `## Evidence Exceptions` section of `.devflow/docs/handoff-\{branch_slug\}.md`, creating the file if absent, and set `PR_EXCEPTIONS` to that section. The file is its one home until the PR exists: every later write to the file keeps the section byte-identical, every PR-creating Code spawn passes it verbatim as `PR_EXCEPTIONS`, and the file is deleted only once the PR exists — after the PR-creating Phase 2 Code agent under SINGLE_CODE_AGENT and SEQUENTIAL_CODE_AGENTS, after Phase 10 under PARALLEL_CODE_AGENTS. With no exception recorded, `PR_EXCEPTIONS` is `(none)`.
+**Record the exception at once**, before any Code spawn: write the rendered section as the `## Evidence Exceptions` section of `.devflow/docs/handoff-{branch_slug}.md`, creating the file if absent, and set `PR_EXCEPTIONS` to that section. The file is its one home until the PR exists: every later write to the file keeps the section byte-identical, every PR-creating Code spawn passes it verbatim as `PR_EXCEPTIONS`, and the file is deleted only once the PR exists — after the PR-creating Phase 2 Code agent under SINGLE_CODE_AGENT and SEQUENTIAL_CODE_AGENTS, after Phase 10 under PARALLEL_CODE_AGENTS. With no exception recorded, `PR_EXCEPTIONS` is `(none)`.
 
-**Test plan.** Before any Code spawn, give the task a test plan in the evidence file `.devflow/docs/evidence-\{branch_slug\}.md` (`EVIDENCE_FILE`) — unlike the handoff file, it stays after the PR exists. It holds up to three sections, in this order and nothing else: `## Test Plan`; `## Evidence Exceptions`, a byte copy of `PR_EXCEPTIONS` present only while that is not `(none)`; and `## Claims`, always last, so every claim is appended at the end of the file. Create the file if absent; if it exists, replace its `## Test Plan` and `## Evidence Exceptions` sections and keep `## Claims` byte-identical.
+**Test plan.** Before any Code spawn, give the task a test plan in the evidence file `.devflow/docs/evidence-{branch_slug}.md` (`EVIDENCE_FILE`) — unlike the handoff file, it stays after the PR exists. It holds up to three sections, in this order and nothing else: `## Test Plan`; `## Evidence Exceptions`, a byte copy of `PR_EXCEPTIONS` present only while that is not `(none)`; and `## Claims`, always last, so every claim is appended at the end of the file. Create the file if absent; if it exists, replace its `## Test Plan` and `## Evidence Exceptions` sections and keep `## Claims` byte-identical.
 
 Write the `## Test Plan` section: when `$ARGUMENTS` is a plan document with a `## Test Plan` section, copy that section's lines verbatim; otherwise write one TP line per acceptance criterion the plan, the issue or the task text states, numbered from `TP-1`. Never invent a criterion, and word every scenario yourself in plain words: the lines reach the PR body, so a scenario holds no `#`, `@` or `/` — no issue reference, mention, closing keyword target or URL — and the files a TP covers go in its `files:` field. Each line follows the TP-line contract:
 
-{test_plan_line()}
+{{test_plan_line()}}
 
 Check the section:
 
@@ -143,8 +142,8 @@ node "$HOME/.devflow/scripts/verify-evidence.cjs" check tp .devflow/docs/evidenc
 `exit=0` passes. On any other result, rewrite the section once — the script names the failing line and its code on stderr — and check again. Still failing, or no line to write, means the test plan is **missing**: drop the `## Test Plan` section from the file.
 
 **Missing test plan, only when `EVIDENCE_POLICY` is `required`:** when the check above leaves the test plan missing, ask with AskUserQuestion before any Code spawn — "No test plan could be written for this task. Record a self-attested exception, or stop?" — offering exactly these two options:
-- **Record an exception** — the user gives the reason as free text. Render it with the exception grammar above, as kind `test-plan`; when the rendered reason is empty, ask for it once more, and stop as below if it is empty again. Add the rendered line to the `## Evidence Exceptions` section of `.devflow/docs/handoff-\{branch_slug\}.md` — after any `ticket-link` line, creating the section and the file when absent — and set `PR_EXCEPTIONS` to that section, under the same rules as the record above.
-- **Stop** — report `BLOCKED (no test plan)`, name `TASK_ID` and `BASE_BRANCH` so the branch can be reused or removed, and give the remedy: state the acceptance criteria in the task, the issue or a `/plan` document (its `## Test Plan` section is copied) and re-run `/implement`, or — for a team that does not want test plans enforced — commit `.devflow/policy.json` as `\{"version":1,"evidencePolicy":"standard"\}` on the default branch; a machine with compliance enabled still resolves `required` whatever that file says. Spawn nothing further.
+- **Record an exception** — the user gives the reason as free text. Render it with the exception grammar above, as kind `test-plan`; when the rendered reason is empty, ask for it once more, and stop as below if it is empty again. Add the rendered line to the `## Evidence Exceptions` section of `.devflow/docs/handoff-{branch_slug}.md` — after any `ticket-link` line, creating the section and the file when absent — and set `PR_EXCEPTIONS` to that section, under the same rules as the record above.
+- **Stop** — report `BLOCKED (no test plan)`, name `TASK_ID` and `BASE_BRANCH` so the branch can be reused or removed, and give the remedy: state the acceptance criteria in the task, the issue or a `/plan` document (its `## Test Plan` section is copied) and re-run `/implement`, or — for a team that does not want test plans enforced — commit `.devflow/policy.json` as `{"version":1,"evidencePolicy":"standard"}` on the default branch; a machine with compliance enabled still resolves `required` whatever that file says. Spawn nothing further.
 
 When `EVIDENCE_POLICY` is `standard`, a missing test plan is never asked about: carry `Test plan: missing` to the Phase 11 report.
 
@@ -156,16 +155,16 @@ When `EVIDENCE_POLICY` is `standard`, a missing test plan is never asked about: 
 node "$HOME/.devflow/scripts/verify-evidence.cjs" render --plan .devflow/docs/evidence-{branch_slug}.md; echo "exit=$?"
 ```
 
-- `EVIDENCE_FILE` — `.devflow/docs/evidence-\{branch_slug\}.md`, its `## Evidence Exceptions` section now a byte copy of `PR_EXCEPTIONS` (absent when that is `(none)`).
+- `EVIDENCE_FILE` — `.devflow/docs/evidence-{branch_slug}.md`, its `## Evidence Exceptions` section now a byte copy of `PR_EXCEPTIONS` (absent when that is `(none)`).
 
-{publication_gate()}
+{{publication_gate()}}
 Phase 10b passes the resolved value to `update-pr-evidence`, which decides what each value means for the evidence comment.
 
-{decisions_load()}
+{{decisions_load()}}
 
 Pass to Code agent (Phase 2) and Scrutinize agent (Phase 5).
 
-{knowledge_load()}
+{{knowledge_load()}}
 
 ### Phase 2: Implement
 
@@ -254,7 +253,7 @@ HANDOFF_REQUIRED: {true if not last phase}
 HANDOFF_FILE: .devflow/docs/handoff-{branch_slug}.md"
 ```
 
-**Handoff Protocol**: Each sequential Code agent receives the prior Code agent's implementation summary via PRIOR_PHASE_SUMMARY and FILES_FROM_PRIOR_PHASE. The Code agent's built-in branch orientation step handles git log scanning, file reading, and pattern discovery automatically. After each Code agent with HANDOFF_REQUIRED=true completes, write its phase summary to `.devflow/docs/handoff-\{branch_slug\}.md` using the Write tool (survives context compaction), keeping any `## Evidence Exceptions` section byte-identical. Delete `.devflow/docs/handoff-\{branch_slug\}.md` once the PR exists — after the final Code agent, which creates it, completes (cleanup).
+**Handoff Protocol**: Each sequential Code agent receives the prior Code agent's implementation summary via PRIOR_PHASE_SUMMARY and FILES_FROM_PRIOR_PHASE. The Code agent's built-in branch orientation step handles git log scanning, file reading, and pattern discovery automatically. After each Code agent with HANDOFF_REQUIRED=true completes, write its phase summary to `.devflow/docs/handoff-{branch_slug}.md` using the Write tool (survives context compaction), keeping any `## Evidence Exceptions` section byte-identical. Delete `.devflow/docs/handoff-{branch_slug}.md` once the PR exists — after the final Code agent, which creates it, completes (cleanup).
 
 ---
 
@@ -319,14 +318,14 @@ Run build, typecheck, lint, test. Report pass/fail with failure details."
    - Spawn Code agent with fix context:
    ```
    Agent(subagent_type="Code"):
-   "TASK_ID: \{task-id\}
+   "TASK_ID: {task-id}
    TASK_DESCRIPTION: Fix validation failures
    OPERATION: validation-fix
-   VALIDATION_FAILURES: \{parsed failures from Validate agent\}
+   VALIDATION_FAILURES: {parsed failures from Validate agent}
    SCOPE: Fix only the listed failures, no other changes
    CREATE_PR: false
-   ISSUE_NUMBER: \{ISSUE_ID captured in Phase 1, or (none)\}
-   ISSUE_PR_LINK: \{ISSUE_PR_LINK captured in Phase 1, or (none)\}"
+   ISSUE_NUMBER: {ISSUE_ID captured in Phase 1, or (none)}
+   ISSUE_PR_LINK: {ISSUE_PR_LINK captured in Phase 1, or (none)}"
    ```
    - Loop back to Phase 3 (re-validate)
 4. If `validation_retry_count > 2`: Report failures to user and halt
@@ -421,19 +420,19 @@ Validate alignment with request and plan. Report ALIGNED or MISALIGNED with deta
    - Spawn Code agent to fix misalignments:
    ```
    Agent(subagent_type="Code"):
-   "TASK_ID: \{task-id\}
+   "TASK_ID: {task-id}
    TASK_DESCRIPTION: Fix alignment issues
    OPERATION: alignment-fix
-   MISALIGNMENTS: \{structured misalignments from Evaluate agent\}
+   MISALIGNMENTS: {structured misalignments from Evaluate agent}
    SCOPE: Fix only the listed misalignments, no other changes
    CREATE_PR: false
-   ISSUE_NUMBER: \{ISSUE_ID captured in Phase 1, or (none)\}
-   ISSUE_PR_LINK: \{ISSUE_PR_LINK captured in Phase 1, or (none)\}"
+   ISSUE_NUMBER: {ISSUE_ID captured in Phase 1, or (none)}
+   ISSUE_PR_LINK: {ISSUE_PR_LINK captured in Phase 1, or (none)}"
    ```
    - Spawn Validate agent to verify fix didn't break tests:
    ```
    Agent(subagent_type="Validate", model="haiku"):
-   "FILES_CHANGED: \{files modified by fix Code agent\}
+   "FILES_CHANGED: {files modified by fix Code agent}
    VALIDATION_SCOPE: changed-only"
    ```
    - If Validate agent FAIL: Report to user
@@ -468,19 +467,19 @@ After every Test agent run — PASS or FAIL, first run or retry — append its T
    - Spawn Code agent to fix QA failures:
    ```
    Agent(subagent_type="Code"):
-   "TASK_ID: \{task-id\}
+   "TASK_ID: {task-id}
    TASK_DESCRIPTION: Fix QA test failures
    OPERATION: qa-fix
-   QA_FAILURES: \{structured failures from Test agent\}
+   QA_FAILURES: {structured failures from Test agent}
    SCOPE: Fix only the listed failures, no other changes
    CREATE_PR: false
-   ISSUE_NUMBER: \{ISSUE_ID captured in Phase 1, or (none)\}
-   ISSUE_PR_LINK: \{ISSUE_PR_LINK captured in Phase 1, or (none)\}"
+   ISSUE_NUMBER: {ISSUE_ID captured in Phase 1, or (none)}
+   ISSUE_PR_LINK: {ISSUE_PR_LINK captured in Phase 1, or (none)}"
    ```
    - Spawn Validate agent to verify fix didn't break tests:
    ```
    Agent(subagent_type="Validate", model="haiku"):
-   "FILES_CHANGED: \{files modified by fix Code agent\}
+   "FILES_CHANGED: {files modified by fix Code agent}
    VALIDATION_SCOPE: changed-only"
    ```
    - If Validate agent FAIL: Report to user
@@ -555,7 +554,7 @@ REVIEW_PUBLICATION: {REVIEW_PUBLICATION resolved in Phase 1, or auto}
 Update the PR's test-plan block and post its evidence comment."
 ```
 
-Omit the `EVIDENCE_FILE` line when that file does not exist. Capture the op's `## PR Evidence` block — its `EVIDENCE` line and its `**Body**:` / `**Comment**:` line — as `EVIDENCE_RESULT`, or its `TRACEABILITY: DEGRADED (\{reason\})` line. It never blocks: whatever it returns, continue to Phase 11.
+Omit the `EVIDENCE_FILE` line when that file does not exist. Capture the op's `## PR Evidence` block — its `EVIDENCE` line and its `**Body**:` / `**Comment**:` line — as `EVIDENCE_RESULT`, or its `TRACEABILITY: DEGRADED ({reason})` line. It never blocks: whatever it returns, continue to Phase 11.
 
 ### Phase 11: Report
 
@@ -563,13 +562,13 @@ Omit the `EVIDENCE_FILE` line when that file does not exist. Capture the op's `#
 
 Display completion summary with phase status, PR info, and next steps.
 
-Show the test plan's evidence from Phase 10b: `Test plan: \{VERIFIED-CI + ATTESTED-LOCAL\}/\{total\} verified (VERIFIED-CI \{n\}, ATTESTED-LOCAL \{n\})`, read from the `EVIDENCE` line and never inferred, then its `**Body**:` / `**Comment**:` line verbatim. Without an `EVIDENCE` line, show `Test plan: evidence unavailable`; with no test plan, `Test plan: missing`.
+Show the test plan's evidence from Phase 10b: `Test plan: {VERIFIED-CI + ATTESTED-LOCAL}/{total} verified (VERIFIED-CI {n}, ATTESTED-LOCAL {n})`, read from the `EVIDENCE` line and never inferred, then its `**Body**:` / `**Comment**:` line verbatim. Without an `EVIDENCE` line, show `Test plan: evidence unavailable`; with no test plan, `Test plan: missing`.
 
-If any Git agent output emitted `TRACEABILITY: DEGRADED (\{reason\})` lines during the run, or Phase 10b's push recorded one, surface them verbatim in the report under a `### Traceability` subsection so the user can act on them.
+If any Git agent output emitted `TRACEABILITY: DEGRADED ({reason})` lines during the run, or Phase 10b's push recorded one, surface them verbatim in the report under a `### Traceability` subsection so the user can act on them.
 
 If Phase 1 recorded an evidence exception, show its `## Evidence Exceptions` lines in the report.
 
-{knowledge_writeback()}
+{{knowledge_writeback()}}
 
 ## Architecture
 

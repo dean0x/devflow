@@ -10,7 +10,7 @@ sub-directory come from `PR_HOST_OPS` / `PR_HOST_DESTINATION_ROOT` in
 build fails. Everything above the first section marker is module-level prose and
 is emitted nowhere.
 
-Why `pr/` is not `tracker/\{provider\}/`: pull requests, PR reviews and PR checks
+Why `pr/` is not `tracker/{provider}/`: pull requests, PR reviews and PR checks
 stay on GitHub under every issue-tracker provider, so these steps are the SAME
 file whatever `TRACKER_PROVIDER` resolves to. A copy per provider would be one
 identical tree per registered provider; a row under `tracker/github/` would make
@@ -55,15 +55,15 @@ Load for `ensure-pr-ready` under every tracker provider.
    - **Caller blocks**, in order: `PR_WAVE_BLOCK` (`check wave`), then `PR_TEST_PLAN_BLOCK` (`check block`), each when given and not `(none)`. Write it byte for byte to a fresh `mktemp` file with the Write tool, never via a shell string, and run `node "$HOME/.devflow/scripts/verify-evidence.cjs" check <wave|block> <file>; echo "exit=$?"`. Only `exit=0` admits it, verbatim; else omit it, never repaired or partly pasted, and emit `TRACEABILITY: DEGRADED (wave block does not match its grammar)` or `TRACEABILITY: DEGRADED (test-plan block does not match its grammar)` with steps 4b/4c's lines. An admitted wave block is the body's only `## Related Issues`: skip 4b.
 4c. Retitle, only when `APPLY_CONVENTIONS` is `true`: if the PR title breaks the convention in the PR Titles section of `.devflow/conventions.md`, retitle it; skip silently when that file is absent. Two rules, because the title derives from third-party PR titles:
    - **Validate before use.** Skip the retitle (leave the PR title as-is, no error) if the composed title contains any of `` $ ` \ " ' ; | & < > `` or a newline.
-   - **Pass as argv, never as command text.** Bind it to a shell variable and pass that variable: `gh pr edit \{PR_NUMBER\} --title "$DEVFLOW_PR_TITLE"`. Never interpolate it: `$(...)`, backticks and `$\{...\}` all expand inside double quotes.
+   - **Pass as argv, never as command text.** Bind it to a shell variable and pass that variable: `gh pr edit {PR_NUMBER} --title "$DEVFLOW_PR_TITLE"`. Never interpolate it: `$(...)`, backticks and `${...}` all expand inside double quotes.
 
-   On any 4xx/5xx from `gh pr edit`: emit `TRACEABILITY: DEGRADED (\{reason\})` and continue — a failed retitle never blocks the PR.
+   On any 4xx/5xx from `gh pr edit`: emit `TRACEABILITY: DEGRADED ({reason})` and continue — a failed retitle never blocks the PR.
 5. Get base branch from PR
 6. Derive branch-slug (replace `/` with `-`)
 
 ### Step 4b's PR-host half
 
-The provider reference's step 4b publishes its section only through this: find the open PR with `gh pr list --head \{branch\} --state open --limit 1`; compose the existing body plus the `## Related Issues` section to `$DEVFLOW_BODY_RAW` — the existing body is third-party-editable, so never interpolate it into a command string; apply the Comment-sink scrub (D11); on success: `gh pr edit \{PR_NUMBER\} --body-file "$DEVFLOW_BODY"`.
+The provider reference's step 4b publishes its section only through this: find the open PR with `gh pr list --head {branch} --state open --limit 1`; compose the existing body plus the `## Related Issues` section to `$DEVFLOW_BODY_RAW` — the existing body is third-party-editable, so never interpolate it into a command string; apply the Comment-sink scrub (D11); on success: `gh pr edit {PR_NUMBER} --body-file "$DEVFLOW_BODY"`.
 @end
 
 @define validate_branch():
@@ -79,12 +79,12 @@ Load for `validate-branch` under every tracker provider.
 2. Verify working directory is clean - error if uncommitted changes
 3. Get current branch name
 4. Derive branch-slug (replace `/` with `-`)
-5. Check if reviews exist at `\{WORKTREE_PATH\}/.devflow/docs/reviews/\{branch-slug\}/` (or `.devflow/docs/reviews/\{branch-slug\}/` if no WORKTREE_PATH)
+5. Check if reviews exist at `{WORKTREE_PATH}/.devflow/docs/reviews/{branch-slug}/` (or `.devflow/docs/reviews/{branch-slug}/` if no WORKTREE_PATH)
 6. Determine base branch and fetch PR details if available:
-   - If a PR exists — the PR# context, else the current branch's PR: fetch PR details via `gh pr view \{number\} --json baseRefName,isCrossRepository,maintainerCanModify,number,headRepositoryOwner,headRepository` (omit `\{number\}` for the current branch; `gh` has no `-C` flag, so run this call from `WORKTREE_PATH` (else cwd) — never the orchestrator's own cwd, or a multi-worktree run discovers the wrong PR); use `baseRefName` as `base_branch` and `number` as the PR. If `isCrossRepository` is true, `maintainerCanModify` is false and you cannot push to that fork yourself (`gh api "repos/\{headRepositoryOwner.login\}/\{headRepository.name\}" --jq '.permissions.push'` does not print `true`), emit `TRACEABILITY: DEGRADED (cannot push to fork)`: the caller skips pushes, while PR comments and body edits still run.
-   - If no PR exists: resolve the default remote branch via `git -C \{worktree\} rev-parse --abbrev-ref origin/HEAD 2>/dev/null | sed 's|origin/||'`; if that fails, probe common defaults (`main`, then `master`) via `git -C \{worktree\} rev-parse --verify \{default\} 2>/dev/null`
+   - If a PR exists — the PR# context, else the current branch's PR: fetch PR details via `gh pr view {number} --json baseRefName,isCrossRepository,maintainerCanModify,number,headRepositoryOwner,headRepository` (omit `{number}` for the current branch; `gh` has no `-C` flag, so run this call from `WORKTREE_PATH` (else cwd) — never the orchestrator's own cwd, or a multi-worktree run discovers the wrong PR); use `baseRefName` as `base_branch` and `number` as the PR. If `isCrossRepository` is true, `maintainerCanModify` is false and you cannot push to that fork yourself (`gh api "repos/{headRepositoryOwner.login}/{headRepository.name}" --jq '.permissions.push'` does not print `true`), emit `TRACEABILITY: DEGRADED (cannot push to fork)`: the caller skips pushes, while PR comments and body edits still run.
+   - If no PR exists: resolve the default remote branch via `git -C {worktree} rev-parse --abbrev-ref origin/HEAD 2>/dev/null | sed 's|origin/||'`; if that fails, probe common defaults (`main`, then `master`) via `git -C {worktree} rev-parse --verify {default} 2>/dev/null`
    - If `base_branch` still cannot be determined: emit an intentional empty `### Diff Scope` block (so `DIFF_FILES=""` is a deliberate conservative degrade, not a silent error); skip step 7
-7. Compute diff scope (only if `base_branch` was resolved): `git -C \{worktree\} diff \{base_branch\}...HEAD --name-only` → newline-separated file list
+7. Compute diff scope (only if `base_branch` was resolved): `git -C {worktree} diff {base_branch}...HEAD --name-only` → newline-separated file list
 @end
 
 @define post_review_summary():
@@ -98,37 +98,37 @@ Load for `post-review-summary` under every tracker provider.
 
 1. Check for existing comment with this run's marker (author-filtered — a third party posting the marker string must not suppress devflow's comment):
    - Fetch viewer login: `gh api user --jq '.login'` → store as VIEWER_LOGIN
-   - `gh pr view \{PR_NUMBER\} --json comments --jq '[.comments[] | select(.author.login == "'"$VIEWER_LOGIN"'")] | .[].body'`
-   - Search for `<!-- devflow:review-summary cycle:\{CYCLE_NUMBER\} ts:\{REVIEW_TIMESTAMP\}` in the viewer-authored comment bodies only (full pair match)
-   - If found: skip — report `Skipped: already posted for cycle \{CYCLE_NUMBER\} ts:\{REVIEW_TIMESTAMP\}`
+   - `gh pr view {PR_NUMBER} --json comments --jq '[.comments[] | select(.author.login == "'"$VIEWER_LOGIN"'")] | .[].body'`
+   - Search for `<!-- devflow:review-summary cycle:{CYCLE_NUMBER} ts:{REVIEW_TIMESTAMP}` in the viewer-authored comment bodies only (full pair match)
+   - If found: skip — report `Skipped: already posted for cycle {CYCLE_NUMBER} ts:{REVIEW_TIMESTAMP}`
 2. Load `references/publication-gate.md` and resolve `REVIEW_PUBLICATION` by its step 2; `off` ends the op without posting.
 3. Probe (if mode not yet determined): `gh repo view --json visibility --jq '.visibility'`, case-insensitive. `PRIVATE`/`INTERNAL` → FULL; `PUBLIC` → `STUB (public repository)`; empty output, an error or any other value → `STUB (visibility undeterminable)`. **Fail-closed: on any error or unrecognised value, treat as PUBLIC (mode STUB).**
 4. Read `REVIEW_SUMMARY_PATH` — repo-relative; read it under `WORKTREE_PATH` (else cwd).
 5. Compose body:
    - **FULL mode:**
      ```
-     <!-- devflow:review-summary cycle:\{CYCLE_NUMBER\} ts:\{REVIEW_TIMESTAMP\} -->
-     ## Code Review — Cycle \{CYCLE_NUMBER\}
+     <!-- devflow:review-summary cycle:{CYCLE_NUMBER} ts:{REVIEW_TIMESTAMP} -->
+     ## Code Review — Cycle {CYCLE_NUMBER}
 
-     \{full content of review-summary.md\}
+     {full content of review-summary.md}
 
      ---
-     *Posted by [devflow](https://github.com/dean0x/devflow) · cycle \{CYCLE_NUMBER\}*
+     *Posted by [devflow](https://github.com/dean0x/devflow) · cycle {CYCLE_NUMBER}*
      ```
    - **STUB mode** (excluded: finding titles, file:line references, Blocking/Escalations/Third-Party/Verification sections, merge recommendation):
      ```
-     <!-- devflow:review-summary cycle:\{CYCLE_NUMBER\} ts:\{REVIEW_TIMESTAMP\} -->
-     ## Code Review — Cycle \{CYCLE_NUMBER\}
+     <!-- devflow:review-summary cycle:{CYCLE_NUMBER} ts:{REVIEW_TIMESTAMP} -->
+     ## Code Review — Cycle {CYCLE_NUMBER}
 
      Full summary withheld (public repository).
 
-     \{counts-by-severity table verbatim from local artifact; if unparseable: "Counts unavailable — see the local artifact."\}
+     {counts-by-severity table verbatim from local artifact; if unparseable: "Counts unavailable — see the local artifact."}
 
-     Full report: \{REVIEW_SUMMARY_PATH\} (not committed; ask the author)
-     *Posted by [devflow](https://github.com/dean0x/devflow) · cycle \{CYCLE_NUMBER\}*
+     Full report: {REVIEW_SUMMARY_PATH} (not committed; ask the author)
+     *Posted by [devflow](https://github.com/dean0x/devflow) · cycle {CYCLE_NUMBER}*
      ```
-   Cap body at 60000 characters (GitHub rejects over 65536 with a 422, which the 4xx rule would silently skip). Truncate lowest-value sections first (Suggestions, then Pre-existing), keeping the counts table and every Blocking entry; end with `…truncated — full report in the local review artifact \{REVIEW_SUMMARY_PATH\} (not committed; ask the author)`.
-6. Write body to `$DEVFLOW_BODY_RAW`; apply the Comment-sink scrub (D11) — non-zero exit or missing script → DO NOT POST. Re-check the 60000-char cap on the scrubbed body (redaction may grow it; truncate at a line boundary below 59,800 chars, keeping the truncation pointer sentence; if truncation fires here: emit `NOTE: body exceeded 60k after redaction — truncated/stub posted` in op output and prepend that notice to the body). Post: `gh pr comment \{PR_NUMBER\} --body-file "$DEVFLOW_BODY"`.
+   Cap body at 60000 characters (GitHub rejects over 65536 with a 422, which the 4xx rule would silently skip). Truncate lowest-value sections first (Suggestions, then Pre-existing), keeping the counts table and every Blocking entry; end with `…truncated — full report in the local review artifact {REVIEW_SUMMARY_PATH} (not committed; ask the author)`.
+6. Write body to `$DEVFLOW_BODY_RAW`; apply the Comment-sink scrub (D11) — non-zero exit or missing script → DO NOT POST. Re-check the 60000-char cap on the scrubbed body (redaction may grow it; truncate at a line boundary below 59,800 chars, keeping the truncation pointer sentence; if truncation fires here: emit `NOTE: body exceeded 60k after redaction — truncated/stub posted` in op output and prepend that notice to the body). Post: `gh pr comment {PR_NUMBER} --body-file "$DEVFLOW_BODY"`.
 7. On 5xx: retry once. If still 5xx: `TRACEABILITY: DEGRADED (5xx on post-review-summary)`, warn, return.
 @end
 
@@ -143,7 +143,7 @@ Load for `check-ci-status` under every tracker provider.
 
 1. If `PR_NUMBER` not provided, discover it: `gh pr view --json number --jq '.number' 2>/dev/null`
 2. If no PR found → output status `NO_PR`, stop
-3. Fetch checks: `gh pr checks \{number\} --json name,state,bucket; echo "exit=$?"` — exit 0, or 8 (checks pending), is a result; any other exit is a failure
+3. Fetch checks: `gh pr checks {number} --json name,state,bucket; echo "exit=$?"` — exit 0, or 8 (checks pending), is a result; any other exit is a failure
 4. If the result is `[]`, or the failure says `no checks reported` → output status `NO_CI`; any other failure → output status `INDETERMINATE`
 5. Classify by `bucket` in priority order: any `pending` → `PENDING`; else any `fail` or `cancel` → `FAILING`; else every check `pass` or `skipping` with at least one `pass` → `PASSING`; else → `INDETERMINATE`
 6. List failing/pending checks with names
@@ -166,7 +166,7 @@ Load for `fetch-review-threads` under every tracker provider.
    - (PRIMARY) First comment body contains `<!-- devflow:` marker, OR
    - (SECONDARY) VIEWER_LOGIN matches thread author login AND first comment body does not appear to be a code-style review comment
 4. For each remaining external unresolved thread, create an `ext-*` record:
-   - `id`: `ext-\{sequential-number\}` (e.g., `ext-1`, `ext-2`, ...)
+   - `id`: `ext-{sequential-number}` (e.g., `ext-1`, `ext-2`, ...)
    - `thread_id`: the GraphQL thread `id` (for reply/resolve mutations)
    - `file`: `path` field
    - `line`: `line` field
@@ -195,15 +195,15 @@ Each `THREAD_MAP` entry carries one verdict:
 
 Rate limits: this op fans out, so read the remaining-budget rungs in `references/github-api.md` before the first iteration.
 
-For each `ext-\{N\}` in THREAD_MAP (sequentially, ≤50, 1s between operations). `fetch-review-threads`
+For each `ext-{N}` in THREAD_MAP (sequentially, ≤50, 1s between operations). `fetch-review-threads`
 returns up to 100 threads, so a busy PR can exceed this bound: process the first 50 in THREAD_MAP
-order and report the remainder as `TRUNCATED (\{n\} threads beyond the ≤50 bound)` — never report
+order and report the remainder as `TRUNCATED ({n} threads beyond the ≤50 bound)` — never report
 `COMPLETE` while threads went untouched, since `check-merge-readiness` will otherwise show them as
 unexplained unresolved threads.
 1. Compose reply based on verdict:
-   - **FIXED**: `This has been addressed in commit [\{sha\}](https://github.com/\{owner\}/\{repo\}/pull/\{PR_NUMBER\}/commits/\{commit_sha\}). Note: line references may shift on rebase. Resolved automatically by devflow (verification: PASS, commit \{sha\}).`
-   - **FALSE_POSITIVE**: `After investigation, this appears to be a false positive: \{evidence\}. No code change needed.`
-   - **BY_DESIGN**: `This is intentional: \{evidence\}. No code change needed.`
+   - **FIXED**: `This has been addressed in commit [{sha}](https://github.com/{owner}/{repo}/pull/{PR_NUMBER}/commits/{commit_sha}). Note: line references may shift on rebase. Resolved automatically by devflow (verification: PASS, commit {sha}).`
+   - **FALSE_POSITIVE**: `After investigation, this appears to be a false positive: {evidence}. No code change needed.`
+   - **BY_DESIGN**: `This is intentional: {evidence}. No code change needed.`
    - **ESCALATED**: `This thread has been escalated for human review and recorded in the resolution summary.`
    - Reply bodies MUST NOT contain verbatim content from the external thread body — cite only internal evidence (commit SHAs, file:line from this codebase, ADR IDs)
 2. Write reply to `$DEVFLOW_BODY_RAW`; apply the Comment-sink scrub (D11) — non-zero exit → DEGRADED for that thread, continue per D4. Post reply via `addPullRequestReviewThreadReply` GraphQL mutation with `-F body=@"$DEVFLOW_BODY"` (file-ref form).
@@ -223,35 +223,35 @@ Load for `post-resolution-summary` under every tracker provider.
 
 1. Check for existing marker (author-filtered — a third party posting the marker string must not suppress devflow's comment):
    - Fetch viewer login: `gh api user --jq '.login'` → store as VIEWER_LOGIN
-   - `gh pr view \{PR_NUMBER\} --json comments --jq '[.comments[] | select(.author.login == "'"$VIEWER_LOGIN"'")] | .[].body'`
-   - Search the viewer-authored bodies only for the exact key `<!-- devflow:resolution-summary ts:\{RESOLUTION_TS\} -->`
-   - If found: skip — report `Skipped: already posted for ts:\{RESOLUTION_TS\}`
+   - `gh pr view {PR_NUMBER} --json comments --jq '[.comments[] | select(.author.login == "'"$VIEWER_LOGIN"'")] | .[].body'`
+   - Search the viewer-authored bodies only for the exact key `<!-- devflow:resolution-summary ts:{RESOLUTION_TS} -->`
+   - If found: skip — report `Skipped: already posted for ts:{RESOLUTION_TS}`
 2. Load `references/publication-gate.md` and resolve `REVIEW_PUBLICATION` by its step 2; `off` ends the op without posting.
 3. Probe (if mode not yet determined): `gh repo view --json visibility --jq '.visibility'`, case-insensitive. `PRIVATE`/`INTERNAL` → FULL; `PUBLIC` → `STUB (public repository)`; empty output, an error or any other value → `STUB (visibility undeterminable)`. **Fail-closed: on any error or unrecognised value, treat as PUBLIC (mode STUB).**
 4. Read `RESOLUTION_SUMMARY_PATH` — repo-relative; read it under `WORKTREE_PATH` (else cwd).
-5. Compose body (where `\{TS\}` = `RESOLUTION_TS`):
+5. Compose body (where `{TS}` = `RESOLUTION_TS`):
    - **FULL mode:**
      ```
-     <!-- devflow:resolution-summary ts:\{TS\} -->
-     \{full content of resolution-summary.md\}
+     <!-- devflow:resolution-summary ts:{TS} -->
+     {full content of resolution-summary.md}
 
      ---
      *Posted by [devflow](https://github.com/dean0x/devflow)*
      ```
    - **STUB mode** (excluded: finding titles, file:line references, Blocking/Escalations/Third-Party/Verification sections):
      ```
-     <!-- devflow:resolution-summary ts:\{TS\} -->
+     <!-- devflow:resolution-summary ts:{TS} -->
      ## Resolution Summary
 
      Full summary withheld (public repository).
 
-     \{counts-by-severity table verbatim from local artifact; if unparseable: "Counts unavailable — see the local artifact."\}
+     {counts-by-severity table verbatim from local artifact; if unparseable: "Counts unavailable — see the local artifact."}
 
-     Full report: \{RESOLUTION_SUMMARY_PATH\} (not committed; ask the author)
+     Full report: {RESOLUTION_SUMMARY_PATH} (not committed; ask the author)
      *Posted by [devflow](https://github.com/dean0x/devflow)*
      ```
-   Cap body at 60000 characters (GitHub rejects over 65536 with a 422, which the 4xx rule would silently skip); truncate lowest-value sections first (Suggestions, then Pre-existing), keeping the counts table and every Blocking entry; end with `…truncated — full report in the local review artifact \{RESOLUTION_SUMMARY_PATH\} (not committed; ask the author)`.
-6. Write body to `$DEVFLOW_BODY_RAW`; apply the Comment-sink scrub (D11) — non-zero exit or missing script → DO NOT POST. Re-check the 60000-char cap on the scrubbed body (redaction may grow it; truncate at a line boundary below 59,800 chars, keeping the truncation pointer sentence; if truncation fires here: emit `NOTE: body exceeded 60k after redaction — truncated/stub posted` in op output and prepend that notice to the body). Post: `gh pr comment \{PR_NUMBER\} --body-file "$DEVFLOW_BODY"`.
+   Cap body at 60000 characters (GitHub rejects over 65536 with a 422, which the 4xx rule would silently skip); truncate lowest-value sections first (Suggestions, then Pre-existing), keeping the counts table and every Blocking entry; end with `…truncated — full report in the local review artifact {RESOLUTION_SUMMARY_PATH} (not committed; ask the author)`.
+6. Write body to `$DEVFLOW_BODY_RAW`; apply the Comment-sink scrub (D11) — non-zero exit or missing script → DO NOT POST. Re-check the 60000-char cap on the scrubbed body (redaction may grow it; truncate at a line boundary below 59,800 chars, keeping the truncation pointer sentence; if truncation fires here: emit `NOTE: body exceeded 60k after redaction — truncated/stub posted` in op output and prepend that notice to the body). Post: `gh pr comment {PR_NUMBER} --body-file "$DEVFLOW_BODY"`.
 7. On 5xx: retry once. If still 5xx: `TRACEABILITY: DEGRADED (5xx on post-resolution-summary)`, warn, return.
 @end
 
@@ -264,22 +264,22 @@ Load for `check-merge-readiness` under every tracker provider.
 
 ### Process
 
-1. Fetch unresolved review threads via GraphQL: `reviewThreads(first: 100) \{ nodes \{ isResolved \} totalCount \}`. Count unresolved from nodes (`isResolved == false`). If `totalCount > 100`, report the unresolved count as approximate: prefix with `>` and note `(count approximate — PR has more than 100 threads)`.
-2. Fetch PR review decision: `gh pr view \{PR_NUMBER\} --json reviewDecision --jq '.reviewDecision'`
+1. Fetch unresolved review threads via GraphQL: `reviewThreads(first: 100) { nodes { isResolved } totalCount }`. Count unresolved from nodes (`isResolved == false`). If `totalCount > 100`, report the unresolved count as approximate: prefix with `>` and note `(count approximate — PR has more than 100 threads)`.
+2. Fetch PR review decision: `gh pr view {PR_NUMBER} --json reviewDecision --jq '.reviewDecision'`
    - Values: `APPROVED`, `CHANGES_REQUESTED`, `REVIEW_REQUIRED`, or null
 3. Fetch CI status (same logic as `check-ci-status`)
    Those steps are in `references/pr/check-ci-status.md` — load it and apply them to this `PR_NUMBER`, every arm unchanged.
-4. Read the test-plan evidence at the current head, from `WORKTREE_PATH` (else cwd): `node "$HOME/.devflow/scripts/verify-evidence.cjs" verify --pr \{PR_NUMBER\} --approval; echo "exit=$?"`. The evidence is *known* only on `exit=0` with stdout exactly one `EVIDENCE pr:\{PR_NUMBER\} …` line; otherwise it is *unknown*. From it read `total`, `VERIFIED-CI`, `ATTESTED-LOCAL` (report the two apart), `exceptions` and `approval`; *verified* = `VERIFIED-CI` + `ATTESTED-LOCAL`, never inferred from an absent field. The script re-derives every state at the head and decides `approval` by the trust rule; it prints nothing it read from the PR.
+4. Read the test-plan evidence at the current head, from `WORKTREE_PATH` (else cwd): `node "$HOME/.devflow/scripts/verify-evidence.cjs" verify --pr {PR_NUMBER} --approval; echo "exit=$?"`. The evidence is *known* only on `exit=0` with stdout exactly one `EVIDENCE pr:{PR_NUMBER} …` line; otherwise it is *unknown*. From it read `total`, `VERIFIED-CI`, `ATTESTED-LOCAL` (report the two apart), `exceptions` and `approval`; *verified* = `VERIFIED-CI` + `ATTESTED-LOCAL`, never inferred from an absent field. The script re-derives every state at the head and decides `approval` by the trust rule; it prints nothing it read from the PR.
 5. Classify (first matching rule wins):
-   - `NOT_READY (unresolved threads: \{n\})` — unresolved_threads > 0
+   - `NOT_READY (unresolved threads: {n})` — unresolved_threads > 0
    - `NOT_READY (changes requested)` — reviewDecision == `CHANGES_REQUESTED`
-   - `NOT_READY (CI failing: \{checks\})` — ci_status == `FAILING`
+   - `NOT_READY (CI failing: {checks})` — ci_status == `FAILING`
    - `NOT_READY (CI pending)` — ci_status == `PENDING` (expected after a push; non-alarming)
    - `NOT_READY (no approving review)` — reviewDecision == `REVIEW_REQUIRED` or null
    - `NOT_READY (test-plan evidence unavailable)` — the evidence is unknown
    - `NOT_READY (no non-author approval)` — only when `REQUIRE_NON_AUTHOR_APPROVAL` is `true` and the evidence's `approval` is not `yes`
    - `NOT_READY (no test-plan evidence)` — `total` == 0 and `exceptions` has no `test-plan`
-   - `NOT_READY (test plan: \{v\}/\{t\} verified)` — *verified* < `total`, whatever `exceptions` holds
+   - `NOT_READY (test plan: {v}/{t} verified)` — *verified* < `total`, whatever `exceptions` holds
    - `READY` — only when all hold: unresolved_threads == 0 and not approximate; reviewDecision == `APPROVED`; ci_status == `PASSING` or `NO_CI`; the evidence is known; `approval` is `yes` or `REQUIRE_NON_AUTHOR_APPROVAL` is `false`; *verified* == `total` ≥ 1, or `total` == 0 and `exceptions` has `test-plan`
    - `NOT_READY (status unknown)` — anything else (an `INDETERMINATE` CI status, an approximate thread count, an unrecognised value)
 
@@ -297,35 +297,35 @@ Load for `update-pr-evidence` under every tracker provider.
 
 Run steps 1–4 as ONE Bash invocation from `WORKTREE_PATH` (else cwd) — the trap removes `$S` and the temp files when it exits — with `V="$HOME/.devflow/scripts"`.
 
-1. **Verify.** Set `S=`, arm the D11 trap with `[ -n "$S" ] && \{ rm -- "$S/base" "$S/base.sha256"; rmdir -- "$S"; \} 2>/dev/null` added before its `exit`, then the four `mktemp`s and `S="$(mktemp -d)"`. Run `node "$V/verify-evidence.cjs" verify --pr \{PR_NUMBER\} --state "$S" --block-out "$DEVFLOW_NOTES_RAW" --comment-out "$DEVFLOW_BODY_RAW"`, adding `--publication \{REVIEW_PUBLICATION\}` only when that is `auto`, `full`, `off` or `stub`, and `--evidence "\{EVIDENCE_FILE\}"` when given — only a value matching `^[A-Za-z0-9._/-]\{1,255\}$` reaches the shell; any other is a failed run. Continue only on exit 0 with stdout exactly one line, `EVIDENCE pr:<n> head:<sha> total:<n> VERIFIED-CI:<n> ATTESTED-LOCAL:<n> UNVERIFIED:<n> STALE:<n> FAILED:<n> INDETERMINATE:<n> stale:<ids|none> exceptions:<kinds|none> approval:<yes|no|unchecked> key:<hex> posted:<yes|no|n/a> body:<same|changed>`; otherwise emit `TRACEABILITY: DEGRADED (evidence unavailable)` and stop. The script makes this op's one `gh pr view` read and prints nothing it read from the PR; never read the PR another way.
-2. **Body**, only on `body:changed` (else `UNCHANGED`): `node "$V/redact-secrets.cjs" "$DEVFLOW_NOTES_RAW" "$DEVFLOW_NOTES" && node "$V/verify-evidence.cjs" splice --pr \{PR_NUMBER\} --state "$S" --block "$DEVFLOW_NOTES" --out "$DEVFLOW_BODY" && gh pr edit \{PR_NUMBER\} --body-file "$DEVFLOW_BODY"`. Only the composed block is scrubbed (D11); every byte outside its markers is the PR's own and stays identical. `splice` re-reads the body: unchanged since step 1 → it writes; changed → it splices once onto the fresh body and re-reads; changed again → `SPLICE conflict`: `SKIPPED` and `TRACEABILITY: DEGRADED (concurrent edit)`. Any other non-zero → `DEGRADED (\{reason\})`, naming a printed `SPLICE` token. No edit either way; go to step 4.
-3. **Read back** after an edit: `node "$V/verify-evidence.cjs" readback --pr \{PR_NUMBER\} --expect "$DEVFLOW_BODY"`; anything but `READBACK ok` → `TRACEABILITY: DEGRADED (body read-back mismatch)`, else `EDITED`. GitHub has no conditional body edit: a human edit landing between the last re-read and `gh pr edit` is overwritten (it stays in the PR's edit history), and the read-back proves only that these bytes landed.
-4. **Comment.** `posted:yes` → `SKIPPED`; `posted:n/a` → `OFF`. Otherwise apply the Comment-sink scrub (D11): `node "$V/redact-secrets.cjs" "$DEVFLOW_BODY_RAW" "$DEVFLOW_BODY" && gh pr comment \{PR_NUMBER\} --body-file "$DEVFLOW_BODY"` → `POSTED`. Never edit or delete an evidence comment. On 5xx retry once; still 5xx → `DEGRADED (\{reason\})`.
+1. **Verify.** Set `S=`, arm the D11 trap with `[ -n "$S" ] && { rm -- "$S/base" "$S/base.sha256"; rmdir -- "$S"; } 2>/dev/null` added before its `exit`, then the four `mktemp`s and `S="$(mktemp -d)"`. Run `node "$V/verify-evidence.cjs" verify --pr {PR_NUMBER} --state "$S" --block-out "$DEVFLOW_NOTES_RAW" --comment-out "$DEVFLOW_BODY_RAW"`, adding `--publication {REVIEW_PUBLICATION}` only when that is `auto`, `full`, `off` or `stub`, and `--evidence "{EVIDENCE_FILE}"` when given — only a value matching `^[A-Za-z0-9._/-]{1,255}$` reaches the shell; any other is a failed run. Continue only on exit 0 with stdout exactly one line, `EVIDENCE pr:<n> head:<sha> total:<n> VERIFIED-CI:<n> ATTESTED-LOCAL:<n> UNVERIFIED:<n> STALE:<n> FAILED:<n> INDETERMINATE:<n> stale:<ids|none> exceptions:<kinds|none> approval:<yes|no|unchecked> key:<hex> posted:<yes|no|n/a> body:<same|changed>`; otherwise emit `TRACEABILITY: DEGRADED (evidence unavailable)` and stop. The script makes this op's one `gh pr view` read and prints nothing it read from the PR; never read the PR another way.
+2. **Body**, only on `body:changed` (else `UNCHANGED`): `node "$V/redact-secrets.cjs" "$DEVFLOW_NOTES_RAW" "$DEVFLOW_NOTES" && node "$V/verify-evidence.cjs" splice --pr {PR_NUMBER} --state "$S" --block "$DEVFLOW_NOTES" --out "$DEVFLOW_BODY" && gh pr edit {PR_NUMBER} --body-file "$DEVFLOW_BODY"`. Only the composed block is scrubbed (D11); every byte outside its markers is the PR's own and stays identical. `splice` re-reads the body: unchanged since step 1 → it writes; changed → it splices once onto the fresh body and re-reads; changed again → `SPLICE conflict`: `SKIPPED` and `TRACEABILITY: DEGRADED (concurrent edit)`. Any other non-zero → `DEGRADED ({reason})`, naming a printed `SPLICE` token. No edit either way; go to step 4.
+3. **Read back** after an edit: `node "$V/verify-evidence.cjs" readback --pr {PR_NUMBER} --expect "$DEVFLOW_BODY"`; anything but `READBACK ok` → `TRACEABILITY: DEGRADED (body read-back mismatch)`, else `EDITED`. GitHub has no conditional body edit: a human edit landing between the last re-read and `gh pr edit` is overwritten (it stays in the PR's edit history), and the read-back proves only that these bytes landed.
+4. **Comment.** `posted:yes` → `SKIPPED`; `posted:n/a` → `OFF`. Otherwise apply the Comment-sink scrub (D11): `node "$V/redact-secrets.cjs" "$DEVFLOW_BODY_RAW" "$DEVFLOW_BODY" && gh pr comment {PR_NUMBER} --body-file "$DEVFLOW_BODY"` → `POSTED`. Never edit or delete an evidence comment. On 5xx retry once; still 5xx → `DEGRADED ({reason})`.
 @end
 
 <!-- op: ensure-pr-ready -->
-{ensure_pr_ready()}
+{{ensure_pr_ready()}}
 
 <!-- op: validate-branch -->
-{validate_branch()}
+{{validate_branch()}}
 
 <!-- op: post-review-summary -->
-{post_review_summary()}
+{{post_review_summary()}}
 
 <!-- op: check-ci-status -->
-{check_ci_status()}
+{{check_ci_status()}}
 
 <!-- op: fetch-review-threads -->
-{fetch_review_threads()}
+{{fetch_review_threads()}}
 
 <!-- op: resolve-review-threads -->
-{resolve_review_threads()}
+{{resolve_review_threads()}}
 
 <!-- op: post-resolution-summary -->
-{post_resolution_summary()}
+{{post_resolution_summary()}}
 
 <!-- op: check-merge-readiness -->
-{check_merge_readiness()}
+{{check_merge_readiness()}}
 
 <!-- op: update-pr-evidence -->
-{update_pr_evidence()}
+{{update_pr_evidence()}}

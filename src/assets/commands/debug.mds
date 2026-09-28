@@ -5,7 +5,6 @@ output-dir: dist/commands
 @import { knowledge_writeback } from "./_partials/_knowledge.mds"
 @import { decisions_load } from "./_partials/_decisions.mds"
 @import { issue_ref_grammar, issue_capture_contract } from "./_partials/_tracker.mds"
-
 # Debug Command
 
 Investigate bugs by spawning parallel agents, each pursuing a different hypothesis. Evidence is aggregated and synthesized to identify the root cause.
@@ -33,7 +32,7 @@ Investigate bugs by spawning parallel agents, each pursuing a different hypothes
 
 **Load Companion Skills** — Load via Skill tool: `devflow:test-driven-development`, `devflow:software-design`, `devflow:testing`. If a skill fails to load, continue without it.
 
-{decisions_load()}
+{{decisions_load()}}
 
 The orchestrator uses `DECISIONS_CONTEXT` locally when generating hypotheses (Phase 2) — prior pitfalls and decisions can suggest specific root causes to investigate. Follow `devflow:apply-decisions` to Read full entry bodies on demand. **Do NOT pass `DECISIONS_CONTEXT` to Explore investigators** — decisions context stays in the orchestrator; investigators examine code directly.
 
@@ -46,7 +45,7 @@ The orchestrator uses `DECISIONS_CONTEXT` locally when generating hypotheses (Ph
 
 If `$ARGUMENTS` opens with a candidate issue reference, fetch the issue:
 
-{issue_ref_grammar()}
+{{issue_ref_grammar()}}
 
 ```
 Agent(subagent_type="Git"):
@@ -55,7 +54,7 @@ ISSUE_INPUT: {issue reference}
 Return issue title, body, labels, and any linked error logs."
 ```
 
-{issue_capture_contract()}
+{{issue_capture_contract()}}
 
 If the Git agent returns only a TRACEABILITY: DEGRADED line and no issue content, report that line verbatim to the user and use AskUserQuestion to request the bug description before generating any hypotheses — do not fabricate a description from the raw candidate token alone.
 
@@ -182,7 +181,7 @@ Ask user via AskUserQuestion: "Want me to implement this fix?"
 - **YES** → Load `devflow:patterns` and `devflow:test-driven-development` skills, implement the fix, then spawn `Agent(subagent_type="Simplify")` on changed files.
 - **NO** → Done. Report stands as documentation.
 
-{knowledge_writeback()}
+{{knowledge_writeback()}}
 
 ## Architecture
 

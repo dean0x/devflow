@@ -4,7 +4,6 @@ output-dir: dist/commands
 ---
 @import { knowledge_writeback } from "./_partials/_knowledge.mds"
 @import { decisions_load } from "./_partials/_decisions.mds"
-
 # Explore Command
 
 Explore a codebase area by spawning parallel agents for flow tracing, dependency mapping, and pattern analysis. Findings are synthesized into structured output with file:line references, with optional feature knowledge created as a byproduct.
@@ -30,7 +29,7 @@ Explore a codebase area by spawning parallel agents for flow tracing, dependency
 
 **Produces:** DECISIONS_CONTEXT
 
-{decisions_load()}
+{{decisions_load()}}
 
 The orchestrator uses `DECISIONS_CONTEXT` locally when framing exploration — prior decisions and pitfalls suggest specific areas to investigate. Follow `devflow:apply-decisions` to Read full entry bodies on demand. **Do NOT pass `DECISIONS_CONTEXT` to Explore sub-agents** — decisions context stays in the orchestrator, not in the investigation workers.
 
@@ -87,12 +86,12 @@ Present findings to user. Use AskUserQuestion to offer focused follow-up explora
 **Requires:** MERGED_FINDINGS, DECISIONS_CONTEXT
 **Produces:** FEATURE_KNOWLEDGE_STATUS (created | skipped)
 
-1. Check if matching feature knowledge already exists by reading `\{worktree\}/.devflow/features/index.md` (or globbing frontmatter if absent). If covered → skip
-2. Use AskUserQuestion: "No feature knowledge exists for \{explored area\}. Create one to capture these patterns?"
+1. Check if matching feature knowledge already exists by reading `{worktree}/.devflow/features/index.md` (or globbing frontmatter if absent). If covered → skip
+2. Use AskUserQuestion: "No feature knowledge exists for {explored area}. Create one to capture these patterns?"
 3. If user declines → set FEATURE_KNOWLEDGE_STATUS = skipped
 4. If user accepts: proceed with write-back below.
 
-{knowledge_writeback()}
+{{knowledge_writeback()}}
 
 Set FEATURE_KNOWLEDGE_STATUS = created (if agent spawned) or skipped.
 
