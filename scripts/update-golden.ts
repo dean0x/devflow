@@ -20,7 +20,7 @@
  * golden that asserts nothing".
  *
  * DR-03 lifecycle rule: the fixture is frozen; regenerating it takes --unfreeze
- * AND a fresh explicit authorisation. Six have been granted and all six are
+ * AND a fresh explicit authorisation. Seven have been granted and all seven are
  * spent — see the authorisation log in tests/goldens/github-status-lines.test.ts.
  *
  * `install-snapshot` (#388) writes `install-snapshot-{config}.txt` for every config
@@ -43,8 +43,8 @@ const GOLDENS_DIR = path.join(ROOT, 'tests', 'fixtures', 'golden')
 // The lifecycle rule — printed verbatim on frozen-target refusal (DR-03)
 const FROZEN_LIFECYCLE_RULE =
   'github-status-lines.txt is a frozen fixture: regenerating it requires --unfreeze ' +
-  'AND a fresh explicit authorisation naming the bytes it permits. Six authorisations ' +
-  'have been granted and all six are spent. Pass --unfreeze only under a new one.'
+  'AND a fresh explicit authorisation naming the bytes it permits. Seven authorisations ' +
+  'have been granted and all seven are spent. Pass --unfreeze only under a new one.'
 
 const args = process.argv.slice(2)
 const hasUnfreeze = args.includes('--unfreeze')

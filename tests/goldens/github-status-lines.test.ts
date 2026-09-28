@@ -26,8 +26,8 @@
  * github-status-lines.txt is frozen, and the --unfreeze refusal guard below
  * protects that fixture only. Overriding the freeze takes an explicit, dated user
  * authorisation naming the exact bytes it permits, and each such authorisation is
- * spent by the single commit that uses it. Six have been granted and all six
- * are spent:
+ * spent by the single commit that uses it. Seven have been granted and all
+ * seven are spent:
  *
  *   2026-09-14  e4876e0  the extractor retarget after the mechanics split
  *   2026-09-15  c0b9860  the two `**Mechanics:**` pointer lines, at fixture
@@ -53,6 +53,14 @@
  *                        redact-secrets.cjs"` (was `${DEVFLOW_DIR:-$HOME/
  *                        .devflow}`, D-ONE-HOME); the other 248 lines are
  *                        byte-identical
+ *   2026-09-28  (#383; user)  the seventh re-capture, granted for lines 242,
+ *                        244, 245 and 248 only and spent on all four: the
+ *                        sampler reads dynamic-build.mds and resolve.mds
+ *                        SOURCES, and the @mdscript/mds 0.4.4 migration
+ *                        removed their legacy escapes, so
+ *                        `DEGRADED (\{reason\})` became `DEGRADED ({reason})`
+ *                        — 12 backslashes, nothing else; dist/ is
+ *                        byte-identical and the other 245 lines are too
  *
  * THE AUTHORISATION IS SPENT. Any further change to this fixture requires a new
  * explicit authorisation; none is outstanding.
@@ -149,7 +157,7 @@ export const TOTAL_CHARS = 53_670
 export const TOTAL_LINES = 1_129
 
 // Fixture invariants — these ARE bytes (Buffer.byteLength), not JS .length
-export const FIXTURE_BYTES = 18_404
+export const FIXTURE_BYTES = 18_392
 export const FIXTURE_NEWLINES = 249
 
 describe('golden: github-status-lines frozen fixture (AC-0.9)', () => {
