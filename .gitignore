@@ -33,7 +33,7 @@ Thumbs.db
 
 # Installation logs
 install.log
-# Devflow local scope installation (use --scope local)
+# Claude Code project-local state (settings.local.json, worktrees) and legacy Devflow local-scope installs
 .claude/
 
 # Devflow runtime data — local by default (memory, learning, docs, locks).

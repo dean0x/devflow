@@ -1249,7 +1249,7 @@ export const uninstallCommand = new Command('uninstall')
 
       if (scopesToUninstall.length === 0) {
         p.log.error('No Devflow installation found');
-        p.log.info('Checked user scope (~/.claude/) and local scope (git-root/.claude/)');
+        p.log.info(`Checked user scope (${getClaudeDirectory()}/) and legacy local scope (git-root/.claude/)`);
         process.exit(1);
       }
 
@@ -1259,7 +1259,7 @@ export const uninstallCommand = new Command('uninstall')
             message: 'Found Devflow in multiple scopes. Uninstall from:',
             options: [
               { value: 'both', label: 'Both', hint: 'user + local' },
-              { value: 'user', label: 'User scope', hint: '~/.claude/' },
+              { value: 'user', label: 'User scope', hint: `${getClaudeDirectory()}/` },
               { value: 'local', label: 'Local scope', hint: 'git-root/.claude/' },
             ],
           });
