@@ -2,13 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import * as path from 'path';
 import { isContainedIn } from '../src/core/paths.js';
 
-// Mock git.ts before importing paths.ts
-vi.mock('../src/core/git.js', () => ({
-  getGitRoot: vi.fn(),
-}));
-
 import { getHomeDirectory, getClaudeDirectory, getDevFlowDirectory, getInstallationPaths } from '../src/targets/claude-code/claude-paths.js';
-import { getGitRoot } from '../src/core/git.js';
 
 beforeEach(() => {
   vi.unstubAllEnvs();
@@ -36,39 +30,37 @@ describe('getHomeDirectory', () => {
   });
 });
 
-describe('getClaudeDirectory', () => {
-  it('respects CLAUDE_CODE_DIR env var', () => {
-    vi.stubEnv('CLAUDE_CODE_DIR', '/custom/claude');
+describe('getClaudeDirectory (D-CLAUDE-CONFIG-DIR)', () => {
+  it('honours an absolute CLAUDE_CONFIG_DIR', () => {
+    vi.stubEnv('CLAUDE_CONFIG_DIR', '/custom/claude');
     expect(getClaudeDirectory()).toBe('/custom/claude');
   });
 
-  it('validates CLAUDE_CODE_DIR is absolute', () => {
-    vi.stubEnv('CLAUDE_CODE_DIR', 'relative/path');
-    expect(() => getClaudeDirectory()).toThrow('must be an absolute path');
+  it('ignores a relative CLAUDE_CONFIG_DIR and falls back to ~/.claude (never throws)', () => {
+    vi.stubEnv('CLAUDE_CONFIG_DIR', 'relative/path');
+    expect(getClaudeDirectory()).toBe(path.join(getHomeDirectory(), '.claude'));
   });
 
-  it('defaults to ~/.claude when CLAUDE_CODE_DIR is unset', () => {
-    vi.stubEnv('CLAUDE_CODE_DIR', '');
-    const result = getClaudeDirectory();
-    expect(result).toBe(path.join(getHomeDirectory(), '.claude'));
+  it('defaults to ~/.claude when CLAUDE_CONFIG_DIR is unset or empty', () => {
+    vi.stubEnv('CLAUDE_CONFIG_DIR', '');
+    expect(getClaudeDirectory()).toBe(path.join(getHomeDirectory(), '.claude'));
+  });
+
+  it('ignores the retired CLAUDE_CODE_DIR variable', () => {
+    vi.stubEnv('CLAUDE_CONFIG_DIR', '');
+    vi.stubEnv('CLAUDE_CODE_DIR', '/retired/claude');
+    expect(getClaudeDirectory()).toBe(path.join(getHomeDirectory(), '.claude'));
   });
 });
 
-describe('getDevFlowDirectory', () => {
-  it('respects DEVFLOW_DIR env var', () => {
+describe('getDevFlowDirectory (D-ONE-HOME)', () => {
+  it('is always ~/.devflow', () => {
+    expect(getDevFlowDirectory()).toBe(path.join(getHomeDirectory(), '.devflow'));
+  });
+
+  it('ignores an exported DEVFLOW_DIR (AC-10)', () => {
     vi.stubEnv('DEVFLOW_DIR', '/custom/devflow');
-    expect(getDevFlowDirectory()).toBe('/custom/devflow');
-  });
-
-  it('validates DEVFLOW_DIR is absolute', () => {
-    vi.stubEnv('DEVFLOW_DIR', 'relative/path');
-    expect(() => getDevFlowDirectory()).toThrow('must be an absolute path');
-  });
-
-  it('defaults to ~/.devflow when DEVFLOW_DIR is unset', () => {
-    vi.stubEnv('DEVFLOW_DIR', '');
-    const result = getDevFlowDirectory();
-    expect(result).toBe(path.join(getHomeDirectory(), '.devflow'));
+    expect(getDevFlowDirectory()).toBe(path.join(getHomeDirectory(), '.devflow'));
   });
 });
 
@@ -115,29 +107,22 @@ describe('isContainedIn', () => {
   });
 });
 
-describe('getInstallationPaths', () => {
-  it('user scope returns home-based paths with null gitRoot', async () => {
-    vi.stubEnv('CLAUDE_CODE_DIR', '');
-    vi.stubEnv('DEVFLOW_DIR', '');
-    const { claudeDir, devflowDir, gitRoot } = await getInstallationPaths('user');
+describe('getInstallationPaths (D-SCOPE-RETIRED)', () => {
+  it('returns the machine-wide Claude and devflow directories and takes no scope', () => {
+    vi.stubEnv('CLAUDE_CONFIG_DIR', '');
     const home = getHomeDirectory();
-    expect(claudeDir).toBe(path.join(home, '.claude'));
-    expect(devflowDir).toBe(path.join(home, '.devflow'));
-    expect(gitRoot).toBeNull();
+    expect(getInstallationPaths()).toEqual({
+      claudeDir: path.join(home, '.claude'),
+      devflowDir: path.join(home, '.devflow'),
+    });
   });
 
-  it('local scope requires git root', async () => {
-    const mockedGetGitRoot = vi.mocked(getGitRoot);
-    mockedGetGitRoot.mockResolvedValue(null);
-    await expect(getInstallationPaths('local')).rejects.toThrow('requires a git repository');
-  });
-
-  it('local scope returns git-root-based paths with gitRoot', async () => {
-    const mockedGetGitRoot = vi.mocked(getGitRoot);
-    mockedGetGitRoot.mockResolvedValue('/repo/root');
-    const { claudeDir, devflowDir, gitRoot } = await getInstallationPaths('local');
-    expect(claudeDir).toBe('/repo/root/.claude');
-    expect(devflowDir).toBe('/repo/root/.devflow');
-    expect(gitRoot).toBe('/repo/root');
+  it('follows CLAUDE_CONFIG_DIR for the Claude directory and never relocates the devflow root', () => {
+    vi.stubEnv('CLAUDE_CONFIG_DIR', '/custom/claude');
+    vi.stubEnv('DEVFLOW_DIR', '/custom/devflow');
+    expect(getInstallationPaths()).toEqual({
+      claudeDir: '/custom/claude',
+      devflowDir: path.join(getHomeDirectory(), '.devflow'),
+    });
   });
 });

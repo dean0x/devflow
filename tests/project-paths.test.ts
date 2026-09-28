@@ -42,7 +42,6 @@ import {
   getDesignDir,
   getResearchDir,
   getHandoffPath,
-  getGitignoreEntries,
 } from '../src/core/project-paths.js';
 import * as tsPathsNs from '../src/core/project-paths.js';
 
@@ -167,31 +166,6 @@ describe('project-paths TypeScript module', () => {
     });
   });
 
-  describe('getGitignoreEntries', () => {
-    it('returns an array of strings', () => {
-      const entries = getGitignoreEntries();
-      expect(Array.isArray(entries)).toBe(true);
-      expect(entries.length).toBeGreaterThan(0);
-      for (const e of entries) {
-        expect(typeof e).toBe('string');
-      }
-    });
-
-    it('includes .claude/', () => {
-      expect(getGitignoreEntries()).toContain('.claude/');
-    });
-
-    it('does NOT include .devflow/ — that is managed by ensureDevflowGitignore (carve-out)', () => {
-      // A bare `.devflow/` here would be appended after the carve-out and re-bury it.
-      expect(getGitignoreEntries()).not.toContain('.devflow/');
-      expect(getGitignoreEntries()).not.toContain('.devflow/*');
-    });
-
-    it('does not include old .memory/ entry', () => {
-      expect(getGitignoreEntries()).not.toContain('.memory/');
-    });
-  });
-
   describe('path normalisation', () => {
     it('handles a root path that ends with a slash', () => {
       // path.join strips trailing slashes
@@ -252,10 +226,6 @@ describe('CJS project-paths parity', () => {
 
   it('getHandoffPath — TypeScript and CJS agree', () => {
     expect(cjsPaths.getHandoffPath(ROOT, 'feat-branch')).toBe(getHandoffPath(ROOT, 'feat-branch'));
-  });
-
-  it('getGitignoreEntries — TypeScript and CJS agree', () => {
-    expect(cjsPaths.getGitignoreEntries()).toEqual(getGitignoreEntries());
   });
 
   // TS/CJS parity: getLearningDir and getFeatureConfigPath return the correct paths

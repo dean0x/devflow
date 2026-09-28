@@ -813,7 +813,7 @@ describe('linear module: tool calls only — no HTTP, no CLI, no credential read
     // is a node call on a local script and not a transport.
     expect(
       collectForbiddenTransports(
-        'node "${DEVFLOW_DIR:-$HOME/.devflow}/scripts/redact-secrets.cjs" --emit "$DEVFLOW_BODY_RAW"',
+        'node "$HOME/.devflow/scripts/redact-secrets.cjs" --emit "$DEVFLOW_BODY_RAW"',
       ),
       'the scrub invocation must not be reported — it is the gate, not a transport',
     ).toEqual([]);

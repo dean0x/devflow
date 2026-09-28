@@ -76,7 +76,7 @@ After the workflow completes:
 1. **Check each plan's test plan.** For every path in `planPaths`, copy that plan's `## Test Plan` section — the heading and its TP lines, up to the next `## ` heading — byte for byte into a fresh `mktemp` file with the Write tool, never through an interpolated shell string, and run:
 
 ```bash
-node "${DEVFLOW_DIR:-$HOME/.devflow}/scripts/verify-evidence.cjs" check tp <that file>; echo "exit=$?"
+node "$HOME/.devflow/scripts/verify-evidence.cjs" check tp <that file>; echo "exit=$?"
 ```
 
    Check the section, never the whole plan file: the plan's other `## ` headings are not evidence-file sections, so the script would parse the whole document as the plan. `exit=0` passes. Any other result names that plan `test plan malformed (<code>)` in your summary, `<code>` being the code the script printed on stderr; a plan with no `## Test Plan` section copies as an empty file, which the script refuses. Nothing is repaired: `/devflow:dynamic-build` passes no test plan from that plan.

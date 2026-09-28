@@ -1,10 +1,8 @@
 import { promises as fs, writeFileSync, unlinkSync } from 'fs';
 import { execFileSync } from 'child_process';
 import * as path from 'path';
-import * as os from 'os';
 import * as p from '@clack/prompts';
 import { getManagedSettingsPath } from './claude-paths.js';
-import { getGitignoreEntries, getDocsDir } from '../../core/project-paths.js';
 import { writeFileAtomicExclusive } from '../../core/fs-atomic.js';
 import type { SecurityMode } from '../../core/manifest.js';
 
@@ -25,18 +23,14 @@ function isNodeSystemError(error: unknown): error is NodeSystemError {
 
 /**
  * Replace ${DEVFLOW_DIR} placeholders in a settings template.
+ *
+ * D-ONE-HOME: the settings template's install-time placeholder is the one
+ * surviving spelling of that name. It is a template token substituted here with
+ * the machine root (always ~/.devflow) — not an environment variable, and no
+ * runtime reader resolves it (tests/guards/one-home.test.ts pins both sites).
  */
 export function substituteSettingsTemplate(template: string, devflowDir: string): string {
   return template.replace(/\$\{DEVFLOW_DIR\}/g, devflowDir);
-}
-
-/**
- * Compute which entries need appending to a .gitignore file.
- * Returns only entries not already present.
- */
-export function computeGitignoreAppend(existingContent: string, entries: string[]): string[] {
-  const existingLines = existingContent.split('\n').map(l => l.trim());
-  return entries.filter(entry => !existingLines.includes(entry));
 }
 
 /**
@@ -1100,11 +1094,12 @@ export async function installClaudeignore(
 
 /**
  * Discover git repository roots from Claude's project history.
- * Parses ~/.claude/history.jsonl for unique project paths that are valid git repos.
- * @param homeDir - Override home directory (dependency injection for tests)
+ * Parses `<claudeDir>/history.jsonl` for unique project paths that are valid git repos.
+ * @param claudeDir - The Claude Code directory whose history is read — the caller
+ *   passes getClaudeDirectory() (D-CLAUDE-CONFIG-DIR), tests a sandbox.
  */
-export async function discoverProjectGitRoots(homeDir?: string): Promise<string[]> {
-  const historyPath = path.join(homeDir ?? os.homedir(), '.claude', 'history.jsonl');
+export async function discoverProjectGitRoots(claudeDir: string): Promise<string[]> {
+  const historyPath = path.join(claudeDir, 'history.jsonl');
   let content: string;
   try {
     content = await fs.readFile(historyPath, 'utf-8');
@@ -1140,41 +1135,6 @@ export async function discoverProjectGitRoots(homeDir?: string): Promise<string[
 }
 
 /**
- * Update .gitignore with Devflow entries (for local scope installs).
- */
-export async function updateGitignore(
-  gitRoot: string,
-  verbose: boolean,
-): Promise<void> {
-  try {
-    const gitignorePath = path.join(gitRoot, '.gitignore');
-    const entriesToAdd = getGitignoreEntries();
-
-    let gitignoreContent = '';
-    try {
-      gitignoreContent = await fs.readFile(gitignorePath, 'utf-8');
-    } catch { /* doesn't exist */ }
-
-    const linesToAdd = computeGitignoreAppend(gitignoreContent, entriesToAdd);
-
-    if (linesToAdd.length > 0) {
-      const newContent = gitignoreContent
-        ? `${gitignoreContent.trimEnd()}\n\n# Devflow local installation\n${linesToAdd.join('\n')}\n`
-        : `# Devflow local installation\n${linesToAdd.join('\n')}\n`;
-
-      await fs.writeFile(gitignorePath, newContent, 'utf-8');
-      if (verbose) {
-        p.log.success('.gitignore updated');
-      }
-    }
-  } catch (error) {
-    if (verbose) {
-      p.log.warn(`Could not update .gitignore: ${error instanceof Error ? error.message : error}`);
-    }
-  }
-}
-
-/**
  * Current carve-out marker version. Bump when the block format changes — together
  * with the shell twin's stamp (ensure-root-gitignore) and the ensure-devflow-init
  * fast path, in one commit (D-GITIGNORE-V5).
@@ -1204,14 +1164,14 @@ async function removeLegacyGitignoreMarkers(devflowDir: string): Promise<void> {
  * carve-out (local by default; feature knowledge, conventions.md and the evidence
  * policy shared via git).
  *
- * Manages ONLY `.devflow/` — never `.claude/` — because user-scope installs must
- * not gitignore `.claude/`. This is the init-time counterpart to the always-on
+ * Manages ONLY `.devflow/` — never `.claude/` — because a project's `.claude/`
+ * is its own to share or ignore. This is the init-time counterpart to the always-on
  * src/assets/scripts/hooks/ensure-root-gitignore shell helper; both resolve the same
  * shape for a given .gitignore — DEVFLOW_GITIGNORE_BLOCK, or
  * DEVFLOW_GITIGNORE_BLOCK_WITHOUT_CLAUDEIGNORE when the project owns that entry — and
  * emit identical bytes, so the two paths are byte-compatible and mutually idempotent.
- * Called unconditionally (independent of install scope and every feature toggle)
- * whenever a git root is known.
+ * Called unconditionally (independent of every feature toggle) whenever a git
+ * root is known.
  *
  * Uses a versioned project-local marker file (`.devflow/.root-gitignore-configured-v5`)
  * for fast-path detection — the same pattern as the shell twin. The marker is a claim,
@@ -1275,22 +1235,4 @@ export async function ensureDevflowGitignore(
       p.log.warn(`Could not update .gitignore: ${error instanceof Error ? error.message : error}`);
     }
   }
-}
-
-/**
- * Create .devflow/docs/ directory structure for Devflow artifacts.
- */
-export async function createDocsStructure(verbose: boolean): Promise<void> {
-  const docsDir = getDocsDir(process.cwd());
-
-  try {
-    await Promise.all([
-      fs.mkdir(path.join(docsDir, 'status', 'compact'), { recursive: true }),
-      fs.mkdir(path.join(docsDir, 'reviews'), { recursive: true }),
-      fs.mkdir(path.join(docsDir, 'releases'), { recursive: true }),
-    ]);
-    if (verbose) {
-      p.log.success('.devflow/docs/ structure ready');
-    }
-  } catch { /* may already exist */ }
 }

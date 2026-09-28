@@ -259,8 +259,9 @@ export function collectShellReadsOfTrackerFile(content: string): string[] {
 }
 
 /**
- * Named collector: every site in the agent's SHELL that resolves the devflow
- * directory from the environment.
+ * Named collector: every site in the agent's SHELL that spells the devflow
+ * machine root (`$HOME/.devflow`, D-ONE-HOME) instead of using the one resolved
+ * variable.
  *
  * Scoped to the bash fences, never the prose: `## The write` names the expression
  * in order to forbid a second one, and a whole-file count would read that
@@ -270,7 +271,7 @@ export function collectShellReadsOfTrackerFile(content: string): string[] {
  * written under another.
  */
 export function collectDevflowDirResolutions(fences: readonly string[]): string[] {
-  return [...fences.join('\n').matchAll(/\$\{DEVFLOW_DIR:-[^}]*\}/g)].map(m => m[0]);
+  return [...fences.join('\n').matchAll(/\$HOME\/\.devflow\b/g)].map(m => m[0]);
 }
 
 /**
@@ -394,7 +395,7 @@ function oneFence(label: string, predicate: (fence: string) => boolean): string 
 }
 
 /** `## Environment` — the one resolution of every path the other two fences use. */
-const ENV_FENCE = oneFence('environment', f => f.includes('TRACKER_DEVFLOW_DIR="${DEVFLOW_DIR'));
+const ENV_FENCE = oneFence('environment', f => f.includes('TRACKER_DEVFLOW_DIR="$HOME/.devflow"'));
 /** `## Step 0` — the claim. */
 const CLAIM_FENCE = oneFence('claim', f => f.includes('"$TRACKER_CLAIM"'));
 /** `## The write` — compose, scrub, shape-gate, place. */
@@ -463,9 +464,8 @@ interface ShellRun {
 }
 
 /**
- * Run a script under the sandbox's `$HOME`, with `DEVFLOW_DIR` deliberately unset
- * so `## Environment`'s own `${DEVFLOW_DIR:-$HOME/.devflow}` fallback is the thing
- * under test.
+ * Run a script under the sandbox's `$HOME`, so `## Environment`'s own
+ * `$HOME/.devflow` fallback is the thing under test.
  *
  * `instrument` wraps `mktemp` in a shell function that records every path it hands
  * out. That is how the cleanup claim is checked at the paths mktemp REALLY chose:
@@ -491,16 +491,13 @@ function runShell(
  * The env every run of the agent's shell gets. ONE builder, because `runShell`
  * and `runShellAsync` below must agree byte for byte about it: a second
  * hand-rolled copy is the shadow reimplementation PF-018 names, and the property
- * it would silently drop is the deliberately ABSENT `DEVFLOW_DIR`.
- *
- * Built key by key rather than spread-and-delete, so `DEVFLOW_DIR` is absent
- * rather than empty and `## Environment`'s own `${DEVFLOW_DIR:-$HOME/.devflow}`
- * fallback is what resolves the paths under test.
+ * it would silently drop is the sandbox HOME that `## Environment`'s
+ * `$HOME/.devflow` fallback resolves the paths under test from.
  */
 function shellEnv(sandbox: Sandbox): Record<string, string> {
   const env: Record<string, string> = {};
   for (const [key, value] of Object.entries(process.env)) {
-    if (value !== undefined && key !== 'DEVFLOW_DIR') env[key] = value;
+    if (value !== undefined) env[key] = value;
   }
   env.HOME = sandbox.home;
   return env;
@@ -926,7 +923,7 @@ describe('Tracker agent devflow-directory resolution (PF-066 defect 4)', () => {
   /** The directive's field name, as `session-start-context` spells it. */
   const PROMPT_FIELD = 'Devflow directory:';
   /** The resolution expression, as BOTH sides must spell it. */
-  const FALLBACK_LINE = 'TRACKER_DEVFLOW_DIR="${DEVFLOW_DIR:-$HOME/.devflow}"';
+  const FALLBACK_LINE = 'TRACKER_DEVFLOW_DIR="$HOME/.devflow"';
 
   it('states the precedence ABOVE the fence, which is where a prompt is read from', () => {
     // A prompt is read top-down, so whichever rule appears first is the one that
@@ -955,7 +952,7 @@ describe('Tracker agent devflow-directory resolution (PF-066 defect 4)', () => {
     ).toMatch(/authoritative/i);
   });
 
-  it('resolves the directory from the environment exactly ONCE, in shell', () => {
+  it('spells the machine root exactly ONCE, in shell', () => {
     // Scoped to the fences: `## The write` names the expression in order to FORBID
     // a second one, and a whole-file count would read that prohibition as a hit.
     expect(
@@ -969,7 +966,7 @@ describe('Tracker agent devflow-directory resolution (PF-066 defect 4)', () => {
   it('known-bad probe: the resolution collector reports a second site', () => {
     expect(collectDevflowDirResolutions([
       FALLBACK_LINE,
-      'node "${DEVFLOW_DIR:-$HOME/.devflow}/scripts/redact-secrets.cjs" "$RAW" "$SCRUBBED"',
+      'node "$HOME/.devflow/scripts/redact-secrets.cjs" "$RAW" "$SCRUBBED"',
     ])).toHaveLength(2);
     expect(
       collectDevflowDirResolutions(['node "$TRACKER_DEVFLOW_DIR/scripts/redact-secrets.cjs" x y']),

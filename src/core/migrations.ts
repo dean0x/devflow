@@ -173,18 +173,10 @@ interface MigrationsFile {
 }
 
 /**
- * D30: State lives at `~/.devflow/migrations.json` (scope-independent) rather
- * than the install manifest because:
- *
- * - The install manifest is scope-specific: user-scope manifests live at
- *   `~/.devflow/manifest.json` while local-scope manifests live at
- *   `.devflow/manifest.json` inside the repo. A migration that runs on user-scope
- *   init wouldn't be recorded in a local-scope manifest, so the migration would
- *   re-run on the next local-scope init.
- * - Migration state is machine-wide: once a global migration runs on a machine it
- *   should never re-run regardless of which project or scope triggered devflow init.
- * - `~/.devflow/migrations.json` is always writable (home-dir location), whereas
- *   local-scope devflowDir may be inside a read-only checkout.
+ * D30: State lives at `~/.devflow/migrations.json` rather than in the install
+ * manifest because migration state is machine-wide: once a global migration runs
+ * on a machine it should never re-run regardless of which project triggered
+ * devflow init.
  *
  * @param devflowDir - absolute path to `~/.devflow` (always the home-dir location)
  */

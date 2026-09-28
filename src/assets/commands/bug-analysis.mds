@@ -31,7 +31,7 @@ Render the test-plan block from `/implement`'s evidence file, and from nothing e
 2. Only when `branch_slug` matches `^[A-Za-z0-9._-]\{1,200\}$` and the file exists, run (the path double-quoted):
 
 ```bash
-node "${DEVFLOW_DIR:-$HOME/.devflow}/scripts/verify-evidence.cjs" render --plan ".devflow/docs/evidence-{branch_slug}.md"; echo "exit=$?"
+node "$HOME/.devflow/scripts/verify-evidence.cjs" render --plan ".devflow/docs/evidence-{branch_slug}.md"; echo "exit=$?"
 ```
 
 3. On `exit=0`, `PR_TEST_PLAN_BLOCK` is its stdout byte for byte without that `exit=` line; in every other case it is `(none)`. Nothing here waits on it: the Git agent pastes it only behind its own check, and only into a PR it creates.

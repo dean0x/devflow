@@ -446,7 +446,7 @@ Under `github`, `\{ISSUE_REF\}` is `#`-prefixed, so that line renders `Closes #\
 **Check the test plan before the artifact exists:** place the `## Test Plan` section's lines in a fresh temp file and run:
 
 ```bash
-node "${DEVFLOW_DIR:-$HOME/.devflow}/scripts/verify-evidence.cjs" check tp <that file>; echo "exit=$?"
+node "$HOME/.devflow/scripts/verify-evidence.cjs" check tp <that file>; echo "exit=$?"
 ```
 
 `exit=0` passes. On any other result, correct the lines once — the script names the failing line and its code on stderr — and check again. Still failing ⇒ keep the section as it stands and say so in the report: `/implement` re-checks it before any Code spawn.

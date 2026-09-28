@@ -71,9 +71,8 @@ async function run(): Promise<string> {
   const resolved = resolveComponents(config);
   const components = new Set(resolved);
   const cwd = stdin.cwd || process.cwd();
-  const devflowDir =
-    process.env.DEVFLOW_DIR ||
-    path.join(process.env.HOME || homedir(), '.devflow');
+  // D-ONE-HOME: always $HOME/.devflow — no environment variable relocates it.
+  const devflowDir = path.join(process.env.HOME || homedir(), '.devflow');
 
   // Determine what data to gather based on enabled components
   const needsGit =

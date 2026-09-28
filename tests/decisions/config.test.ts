@@ -128,30 +128,29 @@ describe('applyLearningTuningConfigLayer', () => {
 // ---------------------------------------------------------------------------
 
 describe('loadLearningTuningConfig', () => {
+  let home: string;
+  /** The machine root under the temp HOME — loadLearningTuningConfig's global layer (D-ONE-HOME). */
   let devflowDir: string;
   let projectCwd: string;
-  let originalDevflowDir: string | undefined;
+  let originalHome: string | undefined;
 
   beforeEach(() => {
-    devflowDir = makeTmpDir();
+    home = makeTmpDir();
+    devflowDir = path.join(home, '.devflow');
+    ensureDir(devflowDir);
     projectCwd = makeTmpDir();
     ensureDir(path.join(projectCwd, '.devflow', 'learning'));
 
-    // Override the DEVFLOW_DIR env var so loadLearningTuningConfig reads from our
-    // temp directory instead of ~/.devflow.
-    originalDevflowDir = process.env.DEVFLOW_DIR;
-    process.env.DEVFLOW_DIR = devflowDir;
+    // Point HOME at a temp dir so the global layer is read from its .devflow.
+    originalHome = process.env.HOME;
+    process.env.HOME = home;
   });
 
   afterEach(() => {
-    // Restore env var.
-    if (originalDevflowDir === undefined) {
-      delete process.env.DEVFLOW_DIR;
-    } else {
-      process.env.DEVFLOW_DIR = originalDevflowDir;
-    }
+    if (originalHome === undefined) delete process.env.HOME;
+    else process.env.HOME = originalHome;
     // Clean up temp dirs.
-    fs.rmSync(devflowDir, { recursive: true, force: true });
+    fs.rmSync(home, { recursive: true, force: true });
     fs.rmSync(projectCwd, { recursive: true, force: true });
   });
 

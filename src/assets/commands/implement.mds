@@ -137,7 +137,7 @@ Write the `## Test Plan` section: when `$ARGUMENTS` is a plan document with a `#
 Check the section:
 
 ```bash
-node "${DEVFLOW_DIR:-$HOME/.devflow}/scripts/verify-evidence.cjs" check tp .devflow/docs/evidence-{branch_slug}.md; echo "exit=$?"
+node "$HOME/.devflow/scripts/verify-evidence.cjs" check tp .devflow/docs/evidence-{branch_slug}.md; echo "exit=$?"
 ```
 
 `exit=0` passes. On any other result, rewrite the section once — the script names the failing line and its code on stderr — and check again. Still failing, or no line to write, means the test plan is **missing**: drop the `## Test Plan` section from the file.
@@ -153,7 +153,7 @@ When `EVIDENCE_POLICY` is `standard`, a missing test plan is never asked about: 
 - `PR_TEST_PLAN_BLOCK` — when the test plan is present and this render ends in `exit=0`, its stdout byte for byte without that `exit=` line; `(none)` otherwise:
 
 ```bash
-node "${DEVFLOW_DIR:-$HOME/.devflow}/scripts/verify-evidence.cjs" render --plan .devflow/docs/evidence-{branch_slug}.md; echo "exit=$?"
+node "$HOME/.devflow/scripts/verify-evidence.cjs" render --plan .devflow/docs/evidence-{branch_slug}.md; echo "exit=$?"
 ```
 
 - `EVIDENCE_FILE` — `.devflow/docs/evidence-\{branch_slug\}.md`, its `## Evidence Exceptions` section now a byte copy of `PR_EXCEPTIONS` (absent when that is `(none)`).

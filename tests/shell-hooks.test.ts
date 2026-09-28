@@ -449,7 +449,7 @@ describe('hooks anchor .devflow/ to the project root (no stray nested .devflow/)
       });
       execSync(`bash "${STOP_HOOK}"`, {
         input,
-        env: { ...process.env, HOME: homeDir, DEVFLOW_DIR: '' },
+        env: { ...process.env, HOME: homeDir },
         stdio: ['pipe', 'pipe', 'pipe'],
       });
 
@@ -490,7 +490,7 @@ describe('hook-log-init: first invocation for a fresh log dir', () => {
         '[ -f "$LOG_FILE" ] && echo "exists" || echo "absent"',
       ].join('\n');
       const result = spawnSync('bash', ['-c', script], {
-        env: { ...process.env, HOME: homeDir, DEVFLOW_DIR: '' },
+        env: { ...process.env, HOME: homeDir },
         encoding: 'utf-8',
       });
 
@@ -2372,7 +2372,7 @@ describe('session-start-context: learning maintenance directive (Section 2)', ()
   // alone decides the directive (and the TL;DR) in every repo — the retired
   // per-repo `learning` key decides nothing either way.
   describe('machine-wide learning switch (manifest only)', () => {
-    const ENV = { DEVFLOW_DIR: '' };
+    const ENV = {};
     const TLDR = '<!-- TL;DR: 1 decision. Key: ADR-001 Test -->\n# Architectural Decisions';
 
     function writeManifestFeatures(features: Record<string, unknown>): void {
@@ -2688,7 +2688,7 @@ describe('ensure-proxy behavioral tests', () => {
     // Use spawnSync so we can capture stderr even when the hook exits 0.
     // execSync does not expose stderr for successful invocations.
     writeProxyJson({ enabled: true, port: await allocateFreePort(), binPath: null });
-    // Intentionally do NOT create $DEVFLOW_DIR/logs/proxy.log
+    // Intentionally do NOT create $HOME/.devflow/logs/proxy.log
     const result = spawnSync('bash', [PROXY_HOOK], {
       input: JSON.stringify(SESSION_INPUT),
       env: { ...process.env, HOME: homeDir },

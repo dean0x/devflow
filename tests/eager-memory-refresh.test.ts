@@ -1520,7 +1520,7 @@ describe('S19: session-start-memory cold-path .pending-turns.processing recovery
     fs.writeFileSync(proc, JSON.stringify({ role: 'user', content: 'orphaned', ts: 1 }) + '\n');
     backdateMtime(proc, 600);
 
-    runHook(SESSION_START_MEMORY_HOOK, { cwd: projectDir }, homeDir, { DEVFLOW_DIR: '' });
+    runHook(SESSION_START_MEMORY_HOOK, { cwd: projectDir }, homeDir);
 
     // memory:false gates the whole hook (including the new recovery block) — .processing untouched
     expect(fs.existsSync(proc)).toBe(true);

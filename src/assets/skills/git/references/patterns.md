@@ -252,7 +252,7 @@ Implements JWT-based authentication...
 
 [Full description content]
 EOF
-} && node "${DEVFLOW_DIR:-$HOME/.devflow}/scripts/redact-secrets.cjs" \
+} && node "$HOME/.devflow/scripts/redact-secrets.cjs" \
     "$DEVFLOW_BODY_RAW" "$DEVFLOW_BODY" \
   && gh pr create \
     --base main \

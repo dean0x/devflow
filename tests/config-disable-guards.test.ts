@@ -34,10 +34,10 @@ function sessionInput(tmpDir: string, extra: Record<string, unknown> = {}): stri
  *
  * `session-start-context` reads user-scope state — the global learning.json and,
  * since Section 3, the tracker manifest and its `.tracker.enabled` sentinel — out
- * of `${DEVFLOW_DIR:-$HOME/.devflow}`. Every hook in this file additionally
+ * of `$HOME/.devflow`. Every hook in this file additionally
  * sources `hook-log-init`, whose `devflow_log_dir` does an unconditional
  * `mkdir -p "$HOME/.devflow/logs/<slug>"`. Every hook invocation below therefore
- * passes an explicit HOME and an explicit empty DEVFLOW_DIR, so no assertion in
+ * passes an explicit HOME, so no assertion in
  * this file can be decided by — or leave a directory behind on — the developer's
  * real machine (PF-060).
  *
@@ -82,13 +82,11 @@ function seedTrackerProvider(home: string, provider: string, features: Record<st
 }
 
 /**
- * Hook environment: an explicit HOME and DEVFLOW_DIR on every invocation.
- *
- * `''` is treated as unset by `${DEVFLOW_DIR:-…}`, so this both neutralises a
- * DEVFLOW_DIR exported in the developer's shell and exercises the fallback.
+ * Hook environment: an explicit HOME on every invocation — the hooks resolve
+ * user-scope state from `$HOME/.devflow` and nothing else (D-ONE-HOME).
  */
 function hookEnv(home: string): NodeJS.ProcessEnv {
-  return { ...process.env, HOME: home, DEVFLOW_DIR: '' };
+  return { ...process.env, HOME: home };
 }
 
 /**
@@ -335,7 +333,7 @@ describe('config guard: session-start-context', () => {
   //
   // Both emptiness assertions above ran with NO `env`, so they inherited the
   // developer's real HOME. Since Section 3 reads user-scope tracker state out of
-  // `${DEVFLOW_DIR:-$HOME/.devflow}`, a maintainer who ran `devflow --tracker jira`
+  // `$HOME/.devflow`, a maintainer who ran `devflow --tracker jira`
   // on their own machine turned both of them red locally while CI — whose HOME has
   // no devflow install — stayed green. The temp HOME above is the fix; the two
   // cases below are what keeps it honest.

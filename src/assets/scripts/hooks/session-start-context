@@ -66,14 +66,10 @@ PROJECT_ROOT="$(df_resolve_root "$CWD" 2>/dev/null || true)"
 
 CONTEXT=""
 
-# The devflow-GLOBAL root (~/.devflow), honouring the DEVFLOW_DIR env override —
-# the ensure-proxy:58-60 idiom. Captured HERE, above the project-scoped
-# DEVFLOW_DIR assignment that shadows the inherited value, because Section 3's
-# tracker files and the manifest the learning gate reads are user-scope and not
-# project-scope. (Known divergence,
-# deliberately not propagated: the global learning.json read in Section 2
-# hardcodes $HOME/.devflow and ignores this override.)
-TRACKER_DEVFLOW_DIR="${DEVFLOW_DIR:-$HOME/.devflow}"
+# The devflow machine root, always $HOME/.devflow (D-ONE-HOME): Section 3's
+# tracker files and the manifest the learning gate reads are machine-wide, not
+# project-scoped (the project's own .devflow is PROJECT_DEVFLOW_DIR below).
+TRACKER_DEVFLOW_DIR="$HOME/.devflow"
 
 # The shape gate for every path this hook interpolates into a directive.
 #
@@ -134,8 +130,8 @@ case "$TRACKER_DEVFLOW_DIR" in
     ;;
 esac
 
-DEVFLOW_DIR="$PROJECT_ROOT/.devflow"
-LEARNING_DIR="$DEVFLOW_DIR/learning"
+PROJECT_DEVFLOW_DIR="$PROJECT_ROOT/.devflow"
+LEARNING_DIR="$PROJECT_DEVFLOW_DIR/learning"
 
 # Normal logging
 source "$SCRIPT_DIR/hook-log-init" "session-start-context"
@@ -144,8 +140,8 @@ source "$SCRIPT_DIR/hook-log-init" "session-start-context"
 # D-FEATURES-MACHINE-WIDE (see queue-append): ~/.devflow/manifest.json's
 # features.learning is read by the same helper the capture hooks use, so the
 # directive and the queue it drains can never disagree about whether learning
-# is on. The manifest lives under the devflow-global root captured above, not
-# the project-scoped DEVFLOW_DIR.
+# is on. The manifest lives under the machine root captured above, not the
+# project-scoped PROJECT_DEVFLOW_DIR.
 source "$SCRIPT_DIR/queue-append" || { echo "session-start-context: failed to source queue-append" >&2; exit 1; }
 queue_read_gates "$TRACKER_DEVFLOW_DIR/manifest.json"
 LEARNING_ENABLED="$_QG_LEARNING"
@@ -153,7 +149,7 @@ LEARNING_ENABLED="$_QG_LEARNING"
 # --- Section 1: Project Decisions TL;DR ---
 if [ "$LEARNING_ENABLED" = "true" ]; then
   # Heal older installs that have .devflow/ but not .devflow/learning/
-  if [ -d "$DEVFLOW_DIR" ] && [ ! -d "$LEARNING_DIR" ]; then
+  if [ -d "$PROJECT_DEVFLOW_DIR" ] && [ ! -d "$LEARNING_DIR" ]; then
     mkdir -p "$LEARNING_DIR" 2>/dev/null || true
   fi
   if [ -d "$LEARNING_DIR" ]; then

@@ -54,9 +54,9 @@
 #   Every hook that gates on memory or learning reads it through here: the
 #   capture hooks, session-start-context (Sections 1-2), memory-worker,
 #   session-start-memory, pre-compact-memory and background-memory-update. The
-#   callers resolve <manifest_path> from ${DEVFLOW_DIR:-$HOME/.devflow} BEFORE
-#   they shadow DEVFLOW_DIR with the project-scoped .devflow (memory-worker hands
-#   its resolved path to the background worker it spawns).
+#   callers pass <manifest_path> as $HOME/.devflow/manifest.json, the machine
+#   root (D-ONE-HOME); memory-worker hands its resolved path to the background
+#   worker it spawns.
 
 queue_append_row() {
   local _qar_file="$1" _qar_role="$2" _qar_content="$3" _qar_ts="$4"

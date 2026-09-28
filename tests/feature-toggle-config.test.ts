@@ -71,8 +71,8 @@ function readManifest(): Record<string, unknown> & { features: Record<string, un
 function runToggle(feature: string, flag: string): { status: number | null; out: string } {
   // PF-060: `memory --enable` writes ~/.claude/settings.json, so the sandbox is
   // asserted at the call site rather than trusted — a spawn against the real
-  // HOME never starts. Every path the CLI resolves from the environment is
-  // pinned under it, so an inherited CLAUDE_CODE_DIR or DEVFLOW_DIR cannot leak.
+  // HOME never starts. Every path the CLI resolves from the environment derives
+  // from HOME (the setup file has already unset CLAUDE_CONFIG_DIR).
   // `os.homedir()` is the setup file's temp HOME, so the real home comes from assertTempHome.
   assertTempHome(tmpHome);
   const result = spawnSync(process.execPath, [CLI, feature, flag], {
@@ -82,8 +82,6 @@ function runToggle(feature: string, flag: string): { status: number | null; out:
     env: {
       ...process.env,
       HOME: tmpHome,
-      DEVFLOW_DIR: path.join(tmpHome, '.devflow'),
-      CLAUDE_CODE_DIR: path.join(tmpHome, '.claude'),
       FORCE_COLOR: '0',
       NO_COLOR: '1',
       CI: '1',

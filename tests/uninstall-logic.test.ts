@@ -854,7 +854,7 @@ describe('resolveDevflowDirCleanup', () => {
 
   // === precondition guards — anomalous devflowDir → artifacts-only ===
   // These guards protect the fs.rm(devflowDir, {recursive}) call from running
-  // on unexpected paths (DEVFLOW_DIR env override, misconfiguration, etc.).
+  // on unexpected paths (a path outside HOME, misconfiguration, etc.).
 
   it('returns artifacts-only when devflowDir is outside $HOME (precondition guard)', () => {
     expect(resolveDevflowDirCleanup({
@@ -2085,12 +2085,9 @@ describe('R5: uninstall settings cleanup — attribution shape guard (D27, produ
     settingsPath = path.join(tmpClaudeDir, 'settings.json');
 
     // Sandbox every ambient path root runCleanupPhase can reach: getClaudeDirectory()
-    // honours CLAUDE_CODE_DIR, getDevFlowDirectory() honours DEVFLOW_DIR, and the
-    // shell-profile probe derives from HOME. Keeping the claude dir INSIDE tmpHome
-    // also avoids getClaudeDirectory's "outside home directory" console warning.
+    // and getDevFlowDirectory() resolve under HOME (CLAUDE_CONFIG_DIR is unset by the
+    // setup file), and so does the shell-profile probe.
     vi.stubEnv('HOME', tmpHome);
-    vi.stubEnv('CLAUDE_CODE_DIR', tmpClaudeDir);
-    vi.stubEnv('DEVFLOW_DIR', path.join(tmpHome, '.devflow'));
   });
 
   afterEach(async () => {

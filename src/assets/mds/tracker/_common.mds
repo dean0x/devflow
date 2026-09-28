@@ -133,11 +133,11 @@ extract the segment {match_phrase} and verify it with the *fetch by key* capabil
 @end
 
 @define last_release_tag_step():
-1a. **Last release tag.** Step 1's `git describe` can return a non-release marker tag. From `WORKTREE_PATH` (else cwd), run `node "$\{DEVFLOW_DIR:-$HOME/.devflow\}/scripts/release-trace.cjs" last-tag`: `LAST_TAG <tag>` ⇒ that tag is `\{last_tag\}`; `LAST_TAG none` ⇒ step 1's initial-commit rule; anything else ⇒ keep step 1's tag and report status `INDETERMINATE (last release tag unresolved)`.
+1a. **Last release tag.** Step 1's `git describe` can return a non-release marker tag. From `WORKTREE_PATH` (else cwd), run `node "$HOME/.devflow/scripts/release-trace.cjs" last-tag`: `LAST_TAG <tag>` ⇒ that tag is `\{last_tag\}`; `LAST_TAG none` ⇒ step 1's initial-commit rule; anything else ⇒ keep step 1's tag and report status `INDETERMINATE (last release tag unresolved)`.
 @end
 
 @define trace_map_step(args, arm):
-6. **Per-commit trace map.** {arm}From `WORKTREE_PATH` (else cwd), run `node "$\{DEVFLOW_DIR:-$HOME/.devflow\}/scripts/release-trace.cjs" map --from \{last_tag\} {args}; echo "exit=$?"`. Accept only `exit=0` after a first line `TRACE from:<ref> scanned:<n> traced:<n> untraced:<n> exempt:<n> unmatched:<n> bound:<ok|hit>`; copy every line above `exit=0` verbatim under `### TRACE_MAP`. Anything else ⇒ `TRACEABILITY: DEGRADED (trace map unavailable)`, `### TRACE_MAP` = `(unavailable)`, status `INDETERMINATE (trace map unavailable)`. `bound:hit` ⇒ status `INDETERMINATE (trace scan bound 500 hit)`. An `INDETERMINATE` status outranks every other.
+6. **Per-commit trace map.** {arm}From `WORKTREE_PATH` (else cwd), run `node "$HOME/.devflow/scripts/release-trace.cjs" map --from \{last_tag\} {args}; echo "exit=$?"`. Accept only `exit=0` after a first line `TRACE from:<ref> scanned:<n> traced:<n> untraced:<n> exempt:<n> unmatched:<n> bound:<ok|hit>`; copy every line above `exit=0` verbatim under `### TRACE_MAP`. Anything else ⇒ `TRACEABILITY: DEGRADED (trace map unavailable)`, `### TRACE_MAP` = `(unavailable)`, status `INDETERMINATE (trace map unavailable)`. `bound:hit` ⇒ status `INDETERMINATE (trace scan bound 500 hit)`. An `INDETERMINATE` status outranks every other.
 @end
 
 @export state_batch_line

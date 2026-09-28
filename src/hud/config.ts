@@ -26,8 +26,8 @@ export const HUD_COMPONENTS: readonly ComponentId[] = [
 ];
 
 export function getConfigPath(): string {
-  const devflowDir =
-    process.env.DEVFLOW_DIR || path.join(process.env.HOME || homedir(), '.devflow');
+  // D-ONE-HOME: always $HOME/.devflow — no environment variable relocates it.
+  const devflowDir = path.join(process.env.HOME || homedir(), '.devflow');
   return path.join(devflowDir, 'hud.json');
 }
 

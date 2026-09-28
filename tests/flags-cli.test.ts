@@ -3,7 +3,8 @@
  *
  * Harness follows the hud-enable-selfheal pattern:
  *   - vi.mock @clack/prompts (declared before imports — vitest hoisting requirement)
- *   - vi.stubEnv CLAUDE_CODE_DIR/DEVFLOW_DIR to temp dirs
+ *   - vi.stubEnv CLAUDE_CONFIG_DIR to a temp dir and HOME to a temp home (whose
+ *     .devflow is the machine root, D-ONE-HOME)
  *   - Fresh Command instance per test via createFlagsCommand()
  *   - Real temp files on disk; async fs operations
  *
@@ -89,16 +90,21 @@ function parseSettings(json: string): Record<string, unknown> {
 
 describe('flags CLI — createFlagsCommand factory', () => {
   let tmpClaudeDir: string;
+  let tmpHome: string;
   let tmpDevflowDir: string;
   let flagsCmd: Command;
 
   beforeEach(async () => {
     tmpClaudeDir = await fs.mkdtemp(path.join(os.tmpdir(), 'flags-cli-claude-'));
-    tmpDevflowDir = await fs.mkdtemp(path.join(os.tmpdir(), 'flags-cli-devflow-'));
+    tmpHome = await fs.mkdtemp(path.join(os.tmpdir(), 'flags-cli-home-'));
+    tmpDevflowDir = path.join(tmpHome, '.devflow');
+    await fs.mkdir(tmpDevflowDir);
 
     // vi.stubEnv tracks mutations; vi.unstubAllEnvs() in afterEach restores.
-    vi.stubEnv('CLAUDE_CODE_DIR', tmpClaudeDir);
-    vi.stubEnv('DEVFLOW_DIR', tmpDevflowDir);
+    // CLAUDE_CONFIG_DIR is the Claude directory (D-CLAUDE-CONFIG-DIR); the
+    // devflow root is always $HOME/.devflow (D-ONE-HOME).
+    vi.stubEnv('CLAUDE_CONFIG_DIR', tmpClaudeDir);
+    vi.stubEnv('HOME', tmpHome);
 
     // Fresh command per test — avoids Commander option-value leakage between tests.
     flagsCmd = createFlagsCommand();
@@ -111,7 +117,7 @@ describe('flags CLI — createFlagsCommand factory', () => {
     vi.unstubAllEnvs();
     process.exitCode = 0;
     await fs.rm(tmpClaudeDir, { recursive: true, force: true });
-    await fs.rm(tmpDevflowDir, { recursive: true, force: true });
+    await fs.rm(tmpHome, { recursive: true, force: true });
   });
 
   // ─── --list ───────────────────────────────────────────────────────────────────
@@ -338,6 +344,18 @@ describe('flags CLI — createFlagsCommand factory', () => {
       expect(flags['brief']).toBe(true);
     });
 
+    it('TP-12: acts on CLAUDE_CONFIG_DIR — no Claude directory appears under HOME', async () => {
+      await fs.writeFile(path.join(tmpDevflowDir, 'manifest.json'), makeEmptyFlagsManifest(), 'utf-8');
+
+      await flagsCmd.parseAsync(['--set', 'brief=true'], { from: 'user' });
+      expect(process.exitCode).toBe(0);
+
+      // Non-vacuity: the write landed in the configured directory...
+      await expect(fs.access(path.join(tmpClaudeDir, 'settings.json'))).resolves.toBeUndefined();
+      // ...and nothing was written to the HOME-based default.
+      await expect(fs.access(path.join(tmpHome, '.claude'))).rejects.toThrow();
+    });
+
     it('view-mode=focus: writes viewMode setting + record entry', async () => {
       await fs.writeFile(path.join(tmpDevflowDir, 'manifest.json'), makeEmptyFlagsManifest(), 'utf-8');
 
@@ -397,8 +415,6 @@ describe('flags CLI — createFlagsCommand factory', () => {
 
       // Fresh command instance to avoid state leakage
       const flagsCmd2 = createFlagsCommand();
-      vi.stubEnv('CLAUDE_CODE_DIR', tmpClaudeDir);
-      vi.stubEnv('DEVFLOW_DIR', tmpDevflowDir);
       await flagsCmd2.parseAsync(['--set', 'max-concurrent-subagents=60'], { from: 'user' });
       const settingsAfterSecond = await fs.readFile(path.join(tmpClaudeDir, 'settings.json'), 'utf-8');
 

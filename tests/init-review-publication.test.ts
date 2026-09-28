@@ -47,7 +47,6 @@ function runInit(...args: string[]): { status: number | null; stderr: string } {
     env: {
       ...process.env,
       HOME: tmpHome,
-      DEVFLOW_DIR: path.join(tmpHome, '.devflow'),
       FORCE_COLOR: '0',
       NO_COLOR: '1',
       CI: '1',

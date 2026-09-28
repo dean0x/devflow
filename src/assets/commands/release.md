@@ -61,7 +61,7 @@ Pass both to all subsequent agents via their input contracts.
 **Resolve the evidence policy once per run**, from the repository root, before any step reads the values:
 
 ```bash
-node "${DEVFLOW_DIR:-$HOME/.devflow}/scripts/resolve-evidence-policy.cjs" 2>/dev/null; echo "exit=$?"
+node "$HOME/.devflow/scripts/resolve-evidence-policy.cjs" 2>/dev/null; echo "exit=$?"
 ```
 
 Accept the output only when it is exactly two lines: `exit=0` last and, before it, one line of the form `EVIDENCE_POLICY=<required|standard> SOURCE=<file|worktree|default|invalid|error> REF=<branch|none>[ WARN=<remote-unavailable|invalid-file|raised-by-compliance|pr-changes-policy>[,…]] ISSUE_REQUIRED=<true|false> APPLY_CONVENTIONS=<true|false> REQUIRE_NON_AUTHOR_APPROVAL=<true|false>` — these fields, in this order, nothing else, where `<branch>` is a branch name such as `main`. **Anything else** (a non-zero exit, no line, extra text, or a missing, reordered or unlisted field or value) ⇒ use `EVIDENCE_POLICY=required SOURCE=error REF=none ISSUE_REQUIRED=true APPLY_CONVENTIONS=true REQUIRE_NON_AUTHOR_APPROVAL=true` instead.
@@ -106,7 +106,7 @@ Lazy-init `.release/` directory. Create `.release/.gitignore` with `.progress.js
 **Version determination** (in order):
 1. Explicit version from args → use directly
 2. Bump type from args → compute from current version
-3. `semver-auto` strategy → analyze commits since the last release tag: the tag that `node "${DEVFLOW_DIR:-$HOME/.devflow}/scripts/release-trace.cjs" last-tag`, run from the repository root, prints as `LAST_TAG <tag>` (`LAST_TAG none` ⇒ the initial commit) — never `git describe`, which can return a local marker tag
+3. `semver-auto` strategy → analyze commits since the last release tag: the tag that `node "$HOME/.devflow/scripts/release-trace.cjs" last-tag`, run from the repository root, prints as `LAST_TAG <tag>` (`LAST_TAG none` ⇒ the initial commit) — never `git describe`, which can return a local marker tag
 4. None → use AskUserQuestion
 
 Pre-release checks:

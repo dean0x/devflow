@@ -28,7 +28,15 @@ export type SecurityMode = 'managed' | 'user' | 'none';
 export interface ManifestData {
   version: string;
   plugins: string[];
-  scope: 'user' | 'local';
+  /**
+   * Always `'user'` (D-MANIFEST-SCOPE-PINNED): the field is kept, not removed, so
+   * a manifest this version writes still parses under an older devflow whose
+   * reader requires it (downgrade safety). {@link readManifest} ignores whatever
+   * is on disk — a missing or `'local'` value from the retired repo-local scope
+   * reads with every feature intact — and {@link writeManifest} always records
+   * `'user'`.
+   */
+  scope: 'user';
   /**
    * Snapshot of DEVFLOW_PLUGINS names written at the last install.
    * Used by resolveSeedPlugins to detect new non-optional plugins added
@@ -168,7 +176,6 @@ export async function readManifest(devflowDir: string): Promise<ManifestData | n
     if (
       !data.version ||
       !Array.isArray(data.plugins) ||
-      !data.scope ||
       typeof features !== 'object' ||
       features === null ||
       typeof features.ambient !== 'boolean' ||
@@ -238,7 +245,8 @@ export async function readManifest(devflowDir: string): Promise<ManifestData | n
     const manifest: ManifestData = {
       version: data.version as string,
       plugins: data.plugins as string[],
-      scope: data.scope as 'user' | 'local',
+      // D-MANIFEST-SCOPE-PINNED: the on-disk value is not consulted.
+      scope: 'user',
       knownPlugins,
       features: {
         ambient: features.ambient as boolean,
@@ -298,7 +306,9 @@ export async function readManifest(devflowDir: string): Promise<ManifestData | n
 export async function writeManifest(devflowDir: string, data: ManifestData): Promise<void> {
   await fs.mkdir(devflowDir, { recursive: true });
   const manifestPath = path.join(devflowDir, 'manifest.json');
-  await writeFileAtomicExclusive(manifestPath, JSON.stringify(data, null, 2) + '\n');
+  // D-MANIFEST-SCOPE-PINNED: every write records 'user', whatever the caller holds.
+  const pinned: ManifestData = { ...data, scope: 'user' };
+  await writeFileAtomicExclusive(manifestPath, JSON.stringify(pinned, null, 2) + '\n');
 }
 
 /**

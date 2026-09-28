@@ -1,6 +1,5 @@
 import { homedir, platform } from 'os';
 import * as path from 'path';
-import { getGitRoot } from '../../core/git.js';
 
 /**
  * Get the OS-specific path for Claude Code managed settings.
@@ -36,80 +35,54 @@ export function getHomeDirectory(): string {
 }
 
 /**
- * Get Claude Code directory with environment variable override support
- * Priority: CLAUDE_CODE_DIR env var > ~/.claude
+ * The Claude Code configuration directory: `CLAUDE_CONFIG_DIR` when it is an
+ * absolute path, else `~/.claude`.
  *
- * @throws {Error} If CLAUDE_CODE_DIR is invalid (not absolute, outside home)
+ * D-CLAUDE-CONFIG-DIR: Claude Code itself relocates its whole configuration tree
+ * (settings.json, agents, skills, rules, history.jsonl) to `CLAUDE_CONFIG_DIR`, so
+ * devflow installs into — and uninstalls from — the directory Claude Code actually
+ * reads. devflow's former private Claude-directory variable is gone: it named a
+ * directory Claude Code never read, so an install through it was invisible to
+ * the session.
+ * A relative value is ignored rather than resolved against the cwd: an install
+ * target that moves with the working directory is never the one Claude Code loads.
+ * Never throws — the fallback is always a well-formed path.
  */
 export function getClaudeDirectory(): string {
-  if (process.env.CLAUDE_CODE_DIR) {
-    const customDir = process.env.CLAUDE_CODE_DIR;
-
-    // Validate path is absolute
-    if (!path.isAbsolute(customDir)) {
-      throw new Error('CLAUDE_CODE_DIR must be an absolute path');
-    }
-
-    // Warn if outside home directory (security best practice)
-    const home = getHomeDirectory();
-    if (!customDir.startsWith(home)) {
-      console.warn('⚠️  CLAUDE_CODE_DIR is outside home directory. Ensure this is intentional.');
-    }
-
-    return customDir;
+  const configured = process.env.CLAUDE_CONFIG_DIR;
+  if (configured !== undefined && configured !== '' && path.isAbsolute(configured)) {
+    return configured;
   }
   return path.join(getHomeDirectory(), '.claude');
 }
 
 /**
- * Get Devflow directory with environment variable override support
- * Priority: DEVFLOW_DIR env var > ~/.devflow
+ * The devflow machine root: always `~/.devflow`.
  *
- * @throws {Error} If DEVFLOW_DIR is invalid (not absolute, outside home)
+ * D-ONE-HOME: there is one machine root and no environment variable relocates it.
+ * The CLI, the HUD, every hook and every prompt resolve `$HOME/.devflow` the same
+ * way, so a value exported in one shell can no longer split an install from the
+ * hooks and prompts that read it (the retired devflow-directory override did
+ * exactly that: honoured by some readers, ignored by others). Per-repo data lives
+ * under `<repo>/.devflow`, which is project data, not an install location.
  */
 export function getDevFlowDirectory(): string {
-  if (process.env.DEVFLOW_DIR) {
-    const customDir = process.env.DEVFLOW_DIR;
-
-    // Validate path is absolute
-    if (!path.isAbsolute(customDir)) {
-      throw new Error('DEVFLOW_DIR must be an absolute path');
-    }
-
-    // Warn if outside home directory (security best practice)
-    const home = getHomeDirectory();
-    if (!customDir.startsWith(home)) {
-      console.warn('⚠️  DEVFLOW_DIR is outside home directory. Ensure this is intentional.');
-    }
-
-    return customDir;
-  }
   return path.join(getHomeDirectory(), '.devflow');
 }
 
 /**
- * Get installation paths based on scope (async, non-blocking)
- * @param scope - 'user' or 'local'
- * @returns Object with claudeDir and devflowDir
- * @throws {Error} If local scope selected but not in a git repository
+ * The machine-wide install locations.
+ *
+ * D-SCOPE-RETIRED: devflow has exactly one install scope — the user's machine.
+ * The former repo-local scope wrote into `<repo>/.claude` and `<repo>/.devflow`
+ * while every hook and prompt read `~/.devflow`, so it could not work; `init
+ * --scope local` now refuses and points at `devflow uninstall --scope local`,
+ * the only remaining reader of a repo-local layout (D-LEGACY-LOCAL-CLEANUP in
+ * uninstall.ts).
  */
-export async function getInstallationPaths(scope: 'user' | 'local'): Promise<{ claudeDir: string; devflowDir: string; gitRoot: string | null }> {
-  if (scope === 'user') {
-    return {
-      claudeDir: getClaudeDirectory(),
-      devflowDir: getDevFlowDirectory(),
-      gitRoot: null,
-    };
-  } else {
-    // Local scope - install to git repository root
-    const gitRoot = await getGitRoot();
-    if (!gitRoot) {
-      throw new Error('Local scope requires a git repository. Run "git init" first or use --scope user');
-    }
-    return {
-      claudeDir: path.join(gitRoot, '.claude'),
-      devflowDir: path.join(gitRoot, '.devflow'),
-      gitRoot,
-    };
-  }
+export function getInstallationPaths(): { claudeDir: string; devflowDir: string } {
+  return {
+    claudeDir: getClaudeDirectory(),
+    devflowDir: getDevFlowDirectory(),
+  };
 }

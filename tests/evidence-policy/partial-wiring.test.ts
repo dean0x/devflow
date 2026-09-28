@@ -455,7 +455,7 @@ describe('AC-2: the invocation is identical in all eight command files', () => {
     const distinct = new Set(invocations.flatMap(i => i.lines))
     expect([...distinct], 'the invocation line diverges between command files').toHaveLength(1)
     expect([...distinct][0], 'the invocation must discard stderr and echo the exit code').toBe(
-      'node "${DEVFLOW_DIR:-$HOME/.devflow}/scripts/resolve-evidence-policy.cjs" 2>/dev/null; echo "exit=$?"',
+      'node "$HOME/.devflow/scripts/resolve-evidence-policy.cjs" 2>/dev/null; echo "exit=$?"',
     )
   })
 

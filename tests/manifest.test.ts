@@ -451,7 +451,7 @@ describe('writeManifest', () => {
     const data: ManifestData = {
       version: '1.4.0',
       plugins: [],
-      scope: 'local',
+      scope: 'user',
       features: { ambient: false, memory: false, hud: false, knowledge: false, decisions: false, rules: false, flags: [] },
       installedAt: '2026-03-13T00:00:00.000Z',
       updatedAt: '2026-03-13T00:00:00.000Z',
@@ -459,6 +459,62 @@ describe('writeManifest', () => {
     await writeManifest(nestedDir, data);
     const result = await readManifest(nestedDir);
     expect(result?.version).toBe('1.4.0');
+  });
+});
+
+describe('manifest scope is pinned to user (D-MANIFEST-SCOPE-PINNED, TP-11)', () => {
+  let tmpDir: string;
+
+  beforeEach(async () => {
+    tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'devflow-manifest-scope-'));
+  });
+
+  afterEach(async () => {
+    await fs.rm(tmpDir, { recursive: true, force: true });
+  });
+
+  /** A manifest whose features are all non-default, so a reset would show. */
+  function nonDefaultManifest(scope: unknown): Record<string, unknown> {
+    const base: Record<string, unknown> = {
+      version: '2.4.0',
+      plugins: ['devflow-implement'],
+      features: {
+        ambient: false, memory: false, hud: true, knowledge: false, learning: false, rules: false,
+        flags: {}, proxy: true, tracker: { provider: 'jira' },
+      },
+      installedAt: '2026-01-01T00:00:00.000Z',
+      updatedAt: '2026-01-01T00:00:00.000Z',
+    };
+    return scope === undefined ? base : { ...base, scope };
+  }
+
+  for (const [label, scope] of [['local', 'local'], ['missing', undefined]] as const) {
+    it(`a manifest with scope ${label} reads with every feature intact and scope 'user'`, async () => {
+      await fs.writeFile(path.join(tmpDir, 'manifest.json'), JSON.stringify(nonDefaultManifest(scope)), 'utf-8');
+      const result = await readManifest(tmpDir);
+      expect(result).not.toBeNull();
+      expect(result!.scope).toBe('user');
+      expect(result!.plugins).toEqual(['devflow-implement']);
+      expect(result!.features).toMatchObject({
+        ambient: false, memory: false, hud: true, knowledge: false, learning: false, rules: false,
+        proxy: true, tracker: { provider: 'jira' },
+      });
+    });
+
+    it(`a write after reading a scope-${label} manifest records 'user'`, async () => {
+      await fs.writeFile(path.join(tmpDir, 'manifest.json'), JSON.stringify(nonDefaultManifest(scope)), 'utf-8');
+      await syncManifestFeature(tmpDir, 'hud', false);
+      const onDisk = JSON.parse(await fs.readFile(path.join(tmpDir, 'manifest.json'), 'utf-8')) as Record<string, unknown>;
+      expect(onDisk.scope).toBe('user');
+      expect((onDisk.features as Record<string, unknown>).memory).toBe(false);
+    });
+  }
+
+  it('writeManifest records user whatever scope the caller holds', async () => {
+    const legacy = { ...makeManifest(), scope: 'local' } as unknown as ManifestData;
+    await writeManifest(tmpDir, legacy);
+    const onDisk = JSON.parse(await fs.readFile(path.join(tmpDir, 'manifest.json'), 'utf-8')) as Record<string, unknown>;
+    expect(onDisk.scope).toBe('user');
   });
 });
 

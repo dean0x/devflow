@@ -173,22 +173,3 @@ export function getResearchDir(projectRoot: string): string {
 export function getHandoffPath(projectRoot: string, branchSlug: string): string {
   return path.join(projectRoot, '.devflow', 'docs', `handoff-${branchSlug}.md`);
 }
-
-// ---------------------------------------------------------------------------
-// Gitignore entries (returned as string arrays for updateGitignore callers)
-// ---------------------------------------------------------------------------
-
-/**
- * The canonical list of generic gitignore entries Devflow adds to a project's
- * root .gitignore for LOCAL-scope installs. Currently just `.claude/`.
- *
- * `.devflow/` is intentionally NOT here: it is managed by ensureDevflowGitignore
- * (TS) / ensure-root-gitignore (hook), which write the feature-knowledge carve-out
- * for ALL scopes. Adding a bare `.devflow/` here would append a wholesale-ignore
- * line after the carve-out and re-bury it (last match wins in .gitignore).
- *
- * CJS mirror: src/assets/scripts/hooks/lib/project-paths.cjs getGitignoreEntries().
- */
-export function getGitignoreEntries(): string[] {
-  return ['.claude/'];
-}

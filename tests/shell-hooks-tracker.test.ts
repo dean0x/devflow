@@ -41,8 +41,9 @@ import { HOOKS_DIR, runHook } from './shell-hooks-helpers.js';
 // not choose, so they are admitted on shape by a guard shared with Section 2.
 //
 // Every case here runs with a SEEDED temp HOME (R4/PF-018 — an empty fixture
-// would pass vacuously) and with DEVFLOW_DIR explicitly empty, so the developer's
-// own ~/.devflow can never decide the outcome (AC-3.22).
+// would pass vacuously). The hook reads the machine root at $HOME/.devflow and
+// nowhere else (D-ONE-HOME), so the developer's own ~/.devflow can never decide
+// the outcome (AC-3.22).
 
 describe('session-start-context: tracker setup directive (Section 3)', () => {
   const CONTEXT_HOOK = path.join(HOOKS_DIR, 'session-start-context');
@@ -159,13 +160,12 @@ describe('session-start-context: tracker setup directive (Section 3)', () => {
   }
 
   /**
-   * `DEVFLOW_DIR: ''` on every run. The hook resolves the global root as
-   * `${DEVFLOW_DIR:-$HOME/.devflow}`, so a DEVFLOW_DIR that happens to be
-   * exported in the developer's shell would silently redirect every case in this
-   * describe at the real machine (AC-3.22). Empty is treated as unset by `:-`.
+   * The extra env for a run. The hook resolves the machine root as
+   * `$HOME/.devflow` only (D-ONE-HOME), so the temp HOME each run is given is the
+   * whole of its isolation (AC-3.22).
    */
   function trackerEnv(extra: Record<string, string> = {}): Record<string, string> {
-    return { DEVFLOW_DIR: '', ...extra };
+    return { ...extra };
   }
 
   function contextOf(stdout: string): string {
@@ -236,10 +236,10 @@ describe('session-start-context: tracker setup directive (Section 3)', () => {
     ).toBe(true);
   });
 
-  it('honours the DEVFLOW_DIR override instead of hardcoding $HOME/.devflow', () => {
-    // The ensure-proxy idiom, not session-start-context's own global-learning.json
-    // hardcode. Seeded in a directory that is NOT under HOME, so a hardcoded
-    // $HOME/.devflow read would find no sentinel and emit nothing.
+  it('reads the machine root at $HOME/.devflow and ignores an exported DEVFLOW_DIR (D-ONE-HOME, AC-10)', () => {
+    // The retired override is seeded with full jira tracker state in a directory
+    // NOT under HOME; HOME holds none. A hook that still honoured the override
+    // would emit the directive naming it and burn an attempt there.
     const overrideDir = path.join(tmpDir, 'elsewhere-devflow');
     fs.mkdirSync(overrideDir, { recursive: true });
     fs.writeFileSync(path.join(overrideDir, '.tracker.enabled'), '');
@@ -248,14 +248,18 @@ describe('session-start-context: tracker setup directive (Section 3)', () => {
       installedAt: 'x', updatedAt: 'x',
       features: { ambient: true, memory: true, tracker: { provider: 'jira' } },
     }));
+    const before = fs.readdirSync(overrideDir).sort();
 
     const { stdout } = runHook(CONTEXT_HOOK, sessionStart(tmpDir), homeDir, { DEVFLOW_DIR: overrideDir });
-    const ctx = contextOf(stdout);
+    expect(emittedNothing(stdout)).toBe(true);
+    expect(stdout).not.toContain(overrideDir);
+    expect(fs.readdirSync(overrideDir).sort()).toEqual(before);
+
+    // Non-vacuity: the identical state under HOME does emit, naming $HOME/.devflow.
+    seedTracker(homeDir, { provider: 'jira' });
+    const ctx = contextOf(runHook(CONTEXT_HOOK, sessionStart(tmpDir), homeDir, { DEVFLOW_DIR: overrideDir }).stdout);
     expect(ctx).toContain(BANNER);
-    expect(ctx).toContain(`Devflow directory: ${overrideDir}`);
-    // Non-vacuity for this case: HOME holds no tracker state at all, so the
-    // directive can only have come from the override.
-    expect(fs.existsSync(sentinelOf(homeDir))).toBe(false);
+    expect(ctx).toContain(`Devflow directory: ${path.join(homeDir, '.devflow')}`);
   });
 
   // ---------------------------------------------------------------------------
@@ -1001,15 +1005,15 @@ describe('session-start-context: tracker setup directive (Section 3)', () => {
 
   it('HOME unset: no directive, no writes, empty stdout (EC-10)', () => {
     seedTracker(homeDir, { provider: 'jira' });
-    // `env -u HOME` equivalent: both HOME and DEVFLOW_DIR unresolvable, so
-    // ${DEVFLOW_DIR:-$HOME/.devflow} resolves to /.devflow, which does not exist.
+    // `env -u HOME` equivalent: HOME unresolvable, so $HOME/.devflow resolves to
+    // /.devflow, which does not exist.
     let out = '';
     let code = 0;
     try {
       out = execSync(`bash "${CONTEXT_HOOK}"`, {
         input: JSON.stringify(sessionStart(tmpDir)),
         env: Object.fromEntries(
-          Object.entries(process.env).filter(([k]) => k !== 'HOME' && k !== 'DEVFLOW_DIR'),
+          Object.entries(process.env).filter(([k]) => k !== 'HOME'),
         ) as NodeJS.ProcessEnv,
         stdio: ['pipe', 'pipe', 'pipe'],
       }).toString();
@@ -1519,8 +1523,8 @@ describe('session-start-context: tracker setup directive (Section 3)', () => {
     );
   }
 
-  /** A ~/.devflow at an arbitrary path, seeded for the jira directive. */
-  function seedOverrideDevflow(dir: string): void {
+  /** A ~/.devflow under an arbitrary HOME, seeded for the jira directive. */
+  function seedHomeDevflow(dir: string): void {
     fs.mkdirSync(dir, { recursive: true });
     fs.writeFileSync(path.join(dir, '.tracker.enabled'), '');
     fs.writeFileSync(path.join(dir, 'manifest.json'), JSON.stringify({
@@ -1548,16 +1552,17 @@ describe('session-start-context: tracker setup directive (Section 3)', () => {
     });
 
     it(`no tracker directive when the devflow directory carries ${label}`, () => {
-      const overrideDir = path.join(tmpDir, `devflow${infix}${PATH_PAYLOAD}`);
-      seedOverrideDevflow(overrideDir);
+      // The machine root is $HOME/.devflow (D-ONE-HOME), so a hostile shape
+      // reaches it through HOME.
+      const hostileHome = path.join(tmpDir, `home${infix}${PATH_PAYLOAD}`);
+      const devflowDir = path.join(hostileHome, '.devflow');
+      seedHomeDevflow(devflowDir);
 
-      const { stdout, exitCode } = runHook(
-        CONTEXT_HOOK, sessionStart(tmpDir), homeDir, { DEVFLOW_DIR: overrideDir },
-      );
+      const { stdout, exitCode } = runHook(CONTEXT_HOOK, sessionStart(tmpDir), hostileHome);
       expect(exitCode).toBe(0);
       expect(emittedNothing(stdout)).toBe(true);
       expect(stdout).not.toContain(PATH_PAYLOAD);
-      expect(fs.existsSync(path.join(overrideDir, '.tracker.attempts'))).toBe(false);
+      expect(fs.existsSync(path.join(devflowDir, '.tracker.attempts'))).toBe(false);
     });
   }
 
@@ -1572,13 +1577,12 @@ describe('session-start-context: tracker setup directive (Section 3)', () => {
     expect(viaRoot).toContain('PROJECT DECISIONS');
     expect(viaRoot).toContain(BANNER);
 
-    const cleanOverride = path.join(tmpDir, 'devflow-clean');
-    seedOverrideDevflow(cleanOverride);
-    const viaOverride = contextOf(
-      runHook(CONTEXT_HOOK, sessionStart(tmpDir), homeDir, { DEVFLOW_DIR: cleanOverride }).stdout,
-    );
-    expect(viaOverride).toContain(BANNER);
-    expect(viaOverride).toContain(`Devflow directory: ${cleanOverride}`);
+    const cleanHome = path.join(tmpDir, 'home-clean');
+    const cleanDevflow = path.join(cleanHome, '.devflow');
+    seedHomeDevflow(cleanDevflow);
+    const viaHome = contextOf(runHook(CONTEXT_HOOK, sessionStart(tmpDir), cleanHome).stdout);
+    expect(viaHome).toContain(BANNER);
+    expect(viaHome).toContain(`Devflow directory: ${cleanDevflow}`);
   });
 
   it('the same guard suppresses the LEARNING directive — one control, both sinks', () => {
@@ -1669,11 +1673,12 @@ describe('session-start-context: tracker setup directive (Section 3)', () => {
       '{"role":"user","content":"we chose X over Y","ts":1}\n',
     );
 
-    const hostileDevflow = path.join(tmpDir, 'dev flow home');
-    fs.mkdirSync(hostileDevflow, { recursive: true });
-    fs.writeFileSync(path.join(hostileDevflow, '.tracker.enabled'), '');
+    // The machine root is $HOME/.devflow (D-ONE-HOME): the hostile shape rides in on HOME.
+    const hostileHome = path.join(tmpDir, 'dev flow home');
+    fs.mkdirSync(path.join(hostileHome, '.devflow'), { recursive: true });
+    fs.writeFileSync(path.join(hostileHome, '.devflow', '.tracker.enabled'), '');
 
-    const { stdout, exitCode } = run(sessionStart(cleanRoot), homeDir, { DEVFLOW_DIR: hostileDevflow });
+    const { stdout, exitCode } = run(sessionStart(cleanRoot), hostileHome);
     expect(exitCode).toBe(0);
     const ctx = contextOf(stdout);
     expect(
@@ -1725,7 +1730,7 @@ describe('session-start-context: tracker setup directive (Section 3)', () => {
     // shape this control replaced, and a revert would restore it silently.
     const gate = HOOK_SOURCE.slice(
       HOOK_SOURCE.indexOf(`${ROOT_FLAG}="yes"`),
-      HOOK_SOURCE.indexOf('DEVFLOW_DIR="$PROJECT_ROOT/.devflow"'),
+      HOOK_SOURCE.indexOf('PROJECT_DEVFLOW_DIR="$PROJECT_ROOT/.devflow"'),
     );
     expect(gate.length, 'the gate block must be locatable').toBeGreaterThan(0);
     expect(

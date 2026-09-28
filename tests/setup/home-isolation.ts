@@ -14,10 +14,12 @@ import * as os from 'os';
 import * as path from 'path';
 
 /**
- * The variables that move a devflow or Claude Code write away from `$HOME`:
- * `DEVFLOW_DIR` and `CLAUDE_CODE_DIR` are read by `src/targets/claude-code/claude-paths.ts`,
- * `CLAUDE_CONFIG_DIR` by Claude Code itself and the HUD. A temp HOME is no sandbox
- * while any of them is inherited from the developer's shell.
+ * The variables that move a devflow or Claude Code write away from `$HOME`.
+ * `CLAUDE_CONFIG_DIR` is read by Claude Code itself, the HUD and — since #389 —
+ * `getClaudeDirectory()` in `src/targets/claude-code/claude-paths.ts`. `DEVFLOW_DIR`
+ * and `CLAUDE_CODE_DIR` are retired (devflow ignores both, D-ONE-HOME) but are still
+ * stripped: an older installed devflow a test might reach still honours them. A temp
+ * HOME is no sandbox while any of them is inherited from the developer's shell.
  */
 export const REDIRECT_ENV_VARS = ['DEVFLOW_DIR', 'CLAUDE_CODE_DIR', 'CLAUDE_CONFIG_DIR'] as const;
 
