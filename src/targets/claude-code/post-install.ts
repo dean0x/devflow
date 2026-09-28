@@ -417,6 +417,24 @@ export const DEVFLOW_HISTORICAL_DENY: ReadonlySet<string> = Object.freeze(new Se
   'Read(/etc/shadow)',
   'Read(/etc/sudoers)',
   'Read(/etc/passwd)',
+  // v2 batch — 17 entries: OrbStack VM control, docker pull/delete/prune and whole-disk or privileged runs, curl|wget piped to zsh
+  'Bash(curl * | zsh*)',
+  'Bash(wget * | zsh*)',
+  'Bash(docker run*--privileged*)',
+  'Bash(docker run*-v /:*)',
+  'Bash(docker run*--volume /:*)',
+  'Bash(docker run*--volume=/:*)',
+  'Bash(docker pull *)',
+  'Bash(docker image pull *)',
+  'Bash(docker rm *)',
+  'Bash(docker container rm *)',
+  'Bash(docker rmi *)',
+  'Bash(docker image rm *)',
+  'Bash(docker volume rm *)',
+  'Bash(docker*prune*)',
+  'Bash(orb *)',
+  'Bash(orbctl *)',
+  'Bash(open *OrbStack*)',
 ]));
 
 /**
