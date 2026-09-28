@@ -369,7 +369,7 @@ npx devflow-kit uninstall
 
 | Option | Description |
 |--------|-------------|
-| `--scope <user\|local>` | Uninstall only the machine-wide install (`user`) or a legacy project-local install in the current repo (`local`; never touches your home directory) (default: auto-detect both) |
+| `--scope <user\|local>` | Uninstall only the machine-wide install (`user`) or a legacy project-local install in the current repo (`local`; never touches your home directory, and exits 1 with "No legacy project-local install here" outside a git repository or in a repository rooted at your home directory) (default: auto-detect both) |
 | `--plugin <names>` | Selective uninstall by plugin name. Assets are retained on behalf of the plugins the **manifest** records as installed — not the whole registry — so removing a plugin removes exactly its own skills, agents and rules and keeps only what a plugin you actually installed still needs |
 | `--keep-docs` | Preserve `.devflow/docs/` directory |
 | `--dry-run` | Show what would be removed |
