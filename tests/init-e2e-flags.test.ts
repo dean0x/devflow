@@ -25,12 +25,13 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { promises as fs } from 'fs';
+import { promises as fs, readdirSync, readFileSync, lstatSync } from 'fs';
 import * as path from 'path';
 import * as os from 'os';
-import { spawnSync } from 'child_process';
+import { spawnSync, execFileSync } from 'child_process';
 import { type ManifestData } from '../src/core/manifest.js';
-import { requireBuiltCli } from './helpers.js';
+import { resolveRetiredScopeOption } from '../src/cli/commands/init.js';
+import { requireBuiltCli, sandboxEnv } from './helpers.js';
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -615,4 +616,175 @@ describe('init e2e — suppress-attribution convergence (D27, production path)',
     expect(flags['suppress-attribution']).toBe(false);
     expect((settings.env as Record<string, unknown>).CUSTOM_USER_VAR).toBe('preserved');
   }, SUBPROCESS_TIMEOUT_MS);
+});
+
+// ── One home: --scope retired, CLAUDE_CONFIG_DIR honoured, DEVFLOW_DIR ignored ──
+//
+// #389 (D-SCOPE-RETIRED, D-CLAUDE-CONFIG-DIR, D-ONE-HOME). Each init spawn is ~0.5 s;
+// the block adds six (TP-9: 1, TP-10: 3, TP-12/13: 2).
+
+/** Every path under `root` with its bytes and mode, sorted — the byte-identity oracle. */
+function treeState(root: string): string[] {
+  const out: string[] = [];
+  const walk = (dir: string, rel: string): void => {
+    for (const name of readdirSync(dir).sort()) {
+      const abs = path.join(dir, name);
+      const r = rel ? `${rel}/${name}` : name;
+      const st = lstatSync(abs);
+      if (st.isDirectory()) {
+        out.push(`${r}/ ${st.mode.toString(8)}`);
+        walk(abs, r);
+      } else {
+        out.push(`${r} ${st.mode.toString(8)} ${readFileSync(abs).toString('base64')}`);
+      }
+    }
+  };
+  walk(root, '');
+  return out;
+}
+
+/** Paths only (no bytes), sorted — for comparing two installs made under different HOMEs. */
+function treePaths(root: string): string[] {
+  return treeState(root).map(line => line.split(' ')[0]);
+}
+
+/** Spawn the built CLI under a sandboxed env (PF-060: sandboxEnv asserts HOME is temp). */
+function runCli(
+  args: string[],
+  home: string,
+  opts: { cwd: string; extraEnv?: Record<string, string> },
+): { status: number | null; out: string } {
+  const r = spawnSync(process.execPath, [CLI_PATH, ...args], {
+    cwd: opts.cwd,
+    encoding: 'utf-8',
+    timeout: SUBPROCESS_TIMEOUT_MS,
+    env: sandboxEnv(home, opts.extraEnv ?? {}),
+  });
+  if (r.error) throw r.error;
+  return { status: r.status, out: `${r.stdout ?? ''}${r.stderr ?? ''}` };
+}
+
+const MINIMAL_INIT = ['init', '--recommended', '--no-ambient', '--no-memory', '--no-learning', '--no-knowledge', '--no-rules'];
+
+describe('resolveRetiredScopeOption (D-SCOPE-RETIRED)', () => {
+  it('no flag and `user` in any case proceed', () => {
+    expect(resolveRetiredScopeOption(undefined)).toEqual({ kind: 'proceed' });
+    expect(resolveRetiredScopeOption('user')).toEqual({ kind: 'proceed' });
+    expect(resolveRetiredScopeOption('USER')).toEqual({ kind: 'proceed' });
+  });
+
+  it('`local` in any case is refused with the uninstall pointer', () => {
+    for (const value of ['local', 'Local']) {
+      const decision = resolveRetiredScopeOption(value);
+      expect(decision.kind).toBe('refuse');
+      expect(decision.kind === 'refuse' && decision.message).toContain('devflow uninstall --scope local');
+    }
+  });
+
+  it('any other value is refused rather than read as `user`', () => {
+    expect(resolveRetiredScopeOption('project').kind).toBe('refuse');
+  });
+});
+
+describe('init --scope is retired (TP-9, TP-10)', () => {
+  let repo: string;
+
+  beforeEach(async () => {
+    repo = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'devflow-e2e-scope-repo-')));
+    execFileSync('git', ['init', '-q'], { cwd: repo });
+  });
+
+  afterEach(async () => {
+    await fs.rm(repo, { recursive: true, force: true });
+  });
+
+  it('TP-9: `init --scope local` exits 1 with the uninstall pointer and writes nothing', async () => {
+    await fs.writeFile(path.join(repo, 'README.md'), 'repo\n');
+    const homeBefore = treeState(tmpHome);
+    const repoBefore = treeState(repo);
+
+    const run = runCli([...MINIMAL_INIT, '--scope', 'local'], tmpHome, { cwd: repo });
+
+    expect(run.status, run.out).toBe(1);
+    expect(run.out).toContain('devflow uninstall --scope local');
+    expect(treeState(tmpHome), 'HOME must be untouched').toEqual(homeBefore);
+    expect(treeState(repo), 'the repo must be untouched').toEqual(repoBefore);
+  }, SUBPROCESS_TIMEOUT_MS);
+
+  it('TP-10: `init --help` no longer offers --scope', () => {
+    const run = runCli(['init', '--help'], tmpHome, { cwd: repo });
+    expect(run.status, run.out).toBe(0);
+    expect(run.out).toContain('--recommended');
+    expect(run.out).not.toContain('--scope');
+  }, SUBPROCESS_TIMEOUT_MS);
+
+  it('TP-10: `init --scope user` produces exactly the install of no flag', async () => {
+    const plainHome = await fs.mkdtemp(path.join(os.tmpdir(), 'devflow-e2e-scope-plain-'));
+    try {
+      await fs.mkdir(path.join(plainHome, '.claude'), { recursive: true });
+      const withFlag = runCli([...MINIMAL_INIT, '--scope', 'user'], tmpHome, { cwd: os.tmpdir() });
+      const without = runCli(MINIMAL_INIT, plainHome, { cwd: os.tmpdir() });
+      expect(withFlag.status, withFlag.out).toBe(0);
+      expect(without.status, without.out).toBe(0);
+
+      expect(treePaths(tmpHome)).toEqual(treePaths(plainHome));
+      const settingsOf = async (home: string): Promise<string> =>
+        (await fs.readFile(path.join(home, '.claude', 'settings.json'), 'utf-8')).split(home).join('<HOME>');
+      expect(await settingsOf(tmpHome)).toBe(await settingsOf(plainHome));
+      const manifestOf = async (home: string): Promise<Record<string, unknown>> => {
+        const m = JSON.parse(await fs.readFile(path.join(home, '.devflow', 'manifest.json'), 'utf-8')) as Record<string, unknown>;
+        return { ...m, installedAt: '<T>', updatedAt: '<T>' };
+      };
+      const flagged = await manifestOf(tmpHome);
+      expect(flagged).toEqual(await manifestOf(plainHome));
+      expect(flagged.scope).toBe('user');
+    } finally {
+      await fs.rm(plainHome, { recursive: true, force: true });
+    }
+  }, SUBPROCESS_TIMEOUT_MS * 2);
+});
+
+describe('one home: init and uninstall under exported CLAUDE_CONFIG_DIR and DEVFLOW_DIR (TP-12, TP-13)', () => {
+  let configDir: string;
+  let canary: string;
+
+  beforeEach(async () => {
+    configDir = await fs.mkdtemp(path.join(os.tmpdir(), 'devflow-e2e-claude-config-'));
+    canary = await fs.mkdtemp(path.join(os.tmpdir(), 'devflow-e2e-devflow-canary-'));
+    // The shared lifecycle seeds $HOME/.claude; this block proves init never needs it.
+    await fs.rm(path.join(tmpHome, '.claude'), { recursive: true, force: true });
+  });
+
+  afterEach(async () => {
+    await fs.rm(configDir, { recursive: true, force: true });
+    await fs.rm(canary, { recursive: true, force: true });
+  });
+
+  it('init installs into CLAUDE_CONFIG_DIR and $HOME/.devflow; uninstall removes from there; ~/.claude and DEVFLOW_DIR stay empty', async () => {
+    const env = { CLAUDE_CONFIG_DIR: configDir, DEVFLOW_DIR: canary };
+    const devflowDir = path.join(tmpHome, '.devflow');
+
+    const init = runCli(MINIMAL_INIT, tmpHome, { cwd: os.tmpdir(), extraEnv: env });
+    expect(init.status, init.out).toBe(0);
+
+    // TP-12: the Claude assets and settings land in CLAUDE_CONFIG_DIR...
+    const settingsPath = path.join(configDir, 'settings.json');
+    const settings = await fs.readFile(settingsPath, 'utf-8');
+    expect(readdirSync(path.join(configDir, 'agents', 'devflow')).length).toBeGreaterThan(0);
+    // TP-13: ...and every installed hook points at the machine root, $HOME/.devflow.
+    expect(settings).toContain(`${devflowDir}/scripts/hooks/run-hook`);
+    expect(settings).not.toContain(canary);
+    await expect(fs.access(path.join(devflowDir, 'manifest.json'))).resolves.toBeUndefined();
+    await expect(fs.access(path.join(tmpHome, '.claude')), 'no Claude directory under HOME').rejects.toThrow();
+    expect(readdirSync(canary), 'an exported DEVFLOW_DIR is never written').toEqual([]);
+
+    const uninstall = runCli(['uninstall'], tmpHome, { cwd: os.tmpdir(), extraEnv: env });
+    expect(uninstall.status, uninstall.out).toBe(0);
+    await expect(fs.access(path.join(configDir, 'agents', 'devflow'))).rejects.toThrow();
+    await expect(fs.access(path.join(configDir, 'commands', 'devflow'))).rejects.toThrow();
+    expect(await fs.readFile(settingsPath, 'utf-8')).not.toContain('run-hook');
+    await expect(fs.access(path.join(devflowDir, 'manifest.json'))).rejects.toThrow();
+    await expect(fs.access(path.join(tmpHome, '.claude'))).rejects.toThrow();
+    expect(readdirSync(canary)).toEqual([]);
+  }, SUBPROCESS_TIMEOUT_MS * 2);
 });
