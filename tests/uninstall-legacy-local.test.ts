@@ -281,6 +281,39 @@ describe('legacy local uninstall through the CLI (TP-14, TP-48)', () => {
     await expectLegacyInstallCleaned(repo);
   });
 
+  it('AC-43: in a repository rooted at HOME, `uninstall --scope local` refuses and HOME stays byte-identical', async () => {
+    // A dotfiles repo at HOME puts <gitRoot>/.claude and <gitRoot>/.devflow on the
+    // machine-wide install: a "local" removal there would be a user uninstall.
+    await seedHome(home, { withUserInstall: true });
+    execFileSync('git', ['init', '-q'], { cwd: home });
+    const before = treeState(home);
+
+    const r = spawnSync(process.execPath, [cli, 'uninstall', '--scope', 'local'], {
+      cwd: home, env: sandboxEnv(home, { SHELL: '/bin/zsh' }), encoding: 'utf-8', timeout: SUBPROCESS_TIMEOUT_MS,
+    });
+    if (r.error) throw r.error;
+    const out = `${r.stdout ?? ''}${r.stderr ?? ''}`;
+
+    expect(r.status, out).toBe(1);
+    expect(out).toContain('No legacy project-local install here');
+    expect(treeState(home)).toEqual(before);
+  });
+
+  it('in a repository rooted at HOME, auto-detection finds only the user install, never a "local" one', async () => {
+    await seedHome(home, { withUserInstall: true });
+    execFileSync('git', ['init', '-q'], { cwd: home });
+
+    const r = spawnSync(process.execPath, [cli, 'uninstall', '--dry-run'], {
+      cwd: home, env: sandboxEnv(home, { SHELL: '/bin/zsh' }), encoding: 'utf-8', timeout: SUBPROCESS_TIMEOUT_MS,
+    });
+    if (r.error) throw r.error;
+    const out = `${r.stdout ?? ''}${r.stderr ?? ''}`;
+
+    expect(r.status, out).toBe(0);
+    expect(out).toContain('Scope(s): user ');
+    expect(out).not.toMatch(/Scope\(s\): [^\n]*local/);
+  });
+
   it('TP-14: a plain `uninstall` detects the legacy repo-local install and cleans it, keeping project data', async () => {
     // HOME holds user state but no user-scope install, so detection can only find the repo's.
     await seedHome(home, { withUserInstall: false });

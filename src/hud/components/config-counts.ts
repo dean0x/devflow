@@ -4,14 +4,25 @@ import { homedir } from 'node:os';
 import type { ComponentResult, GatherContext, ConfigCountsData } from '../types.js';
 import { dim } from '../colors.js';
 
+/**
+ * The Claude Code directory: an absolute `CLAUDE_CONFIG_DIR`, else `~/.claude` —
+ * the rule `getClaudeDirectory()` applies (D-CLAUDE-CONFIG-DIR in
+ * src/targets/claude-code/claude-paths.ts), restated here so the HUD's copied
+ * import closure stays within src/hud and src/core. A relative value is ignored,
+ * not resolved against the session cwd, so the HUD counts what devflow installed.
+ */
+function userClaudeDir(): string {
+  const configured = process.env.CLAUDE_CONFIG_DIR;
+  if (configured !== undefined && configured !== '' && path.isAbsolute(configured)) return configured;
+  return path.join(process.env.HOME || homedir(), '.claude');
+}
+
 function countClaudeMdFiles(cwd: string): number {
   let count = 0;
   // Check project CLAUDE.md
   if (fs.existsSync(path.join(cwd, 'CLAUDE.md'))) count++;
   // Check user CLAUDE.md
-  const claudeDir =
-    process.env.CLAUDE_CONFIG_DIR ||
-    path.join(process.env.HOME || homedir(), '.claude');
+  const claudeDir = userClaudeDir();
   if (fs.existsSync(path.join(claudeDir, 'CLAUDE.md'))) count++;
   return count;
 }
@@ -43,9 +54,7 @@ function countFromSettings(settingsPath: string): {
  * Exported for use by the main HUD entry point.
  */
 export function gatherConfigCounts(cwd: string): ConfigCountsData {
-  const claudeDir =
-    process.env.CLAUDE_CONFIG_DIR ||
-    path.join(process.env.HOME || homedir(), '.claude');
+  const claudeDir = userClaudeDir();
   const claudeMdFiles = countClaudeMdFiles(cwd);
 
   // Count rules (.md/.mdc files in .claude/rules)

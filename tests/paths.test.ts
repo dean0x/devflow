@@ -41,6 +41,11 @@ describe('getClaudeDirectory (D-CLAUDE-CONFIG-DIR)', () => {
     expect(getClaudeDirectory()).toBe(path.join(getHomeDirectory(), '.claude'));
   });
 
+  it('treats a `~`-prefixed CLAUDE_CONFIG_DIR as relative (no shell expansion) and falls back to ~/.claude', () => {
+    vi.stubEnv('CLAUDE_CONFIG_DIR', '~/custom-claude');
+    expect(getClaudeDirectory()).toBe(path.join(getHomeDirectory(), '.claude'));
+  });
+
   it('defaults to ~/.claude when CLAUDE_CONFIG_DIR is unset or empty', () => {
     vi.stubEnv('CLAUDE_CONFIG_DIR', '');
     expect(getClaudeDirectory()).toBe(path.join(getHomeDirectory(), '.claude'));

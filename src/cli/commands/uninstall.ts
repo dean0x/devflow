@@ -59,19 +59,36 @@ interface ScopeInstallPaths {
  * `<gitRoot>/.claude/settings.json`, the legacy commands-rule purge is skipped,
  * and the machine-wide steps (security deny list, safe-delete) run only when
  * the user scope is being uninstalled too.
+ *
+ * Returns null when either repo-local directory IS a machine-wide one — a
+ * repository rooted at HOME (a dotfiles repo) puts `<gitRoot>/.claude` and
+ * `<gitRoot>/.devflow` on `~/.claude` and `~/.devflow`, and a "local" removal
+ * there would be a machine-wide uninstall under another name.
  */
-function legacyLocalInstallPaths(gitRoot: string): ScopeInstallPaths {
-  return {
+async function legacyLocalInstallPaths(gitRoot: string): Promise<ScopeInstallPaths | null> {
+  const legacy = {
     claudeDir: path.join(gitRoot, '.claude'),
     devflowDir: path.join(gitRoot, '.devflow'),
   };
+  const machine = getInstallationPaths();
+  if (await isSameLocation(legacy.claudeDir, machine.claudeDir)) return null;
+  if (await isSameLocation(legacy.devflowDir, machine.devflowDir)) return null;
+  return legacy;
+}
+
+/** Whether two paths name one location — realpaths where they exist, so a symlinked HOME still matches. */
+async function isSameLocation(a: string, b: string): Promise<boolean> {
+  const canonical = (target: string): Promise<string> =>
+    fs.realpath(target).catch(() => path.resolve(target));
+  const [left, right] = await Promise.all([canonical(a), canonical(b)]);
+  return left === right;
 }
 
 /**
- * The directories for `scope`, or null for a local scope outside a git repository
- * (there is no repo-local install to act on).
+ * The directories for `scope`, or null for a local scope with no repo-local
+ * install to act on: outside a git repository, or in one rooted at HOME.
  */
-function scopeInstallPaths(scope: UninstallScope, gitRoot: string | null): ScopeInstallPaths | null {
+async function scopeInstallPaths(scope: UninstallScope, gitRoot: string | null): Promise<ScopeInstallPaths | null> {
   if (scope === 'user') return getInstallationPaths();
   return gitRoot === null ? null : legacyLocalInstallPaths(gitRoot);
 }
@@ -712,7 +729,7 @@ export async function runDryRunPhase(opts: {
     const extras: string[] = [];
     const gitRoot = scopesToUninstall.includes('local') ? await getGitRoot() : null;
     for (const scope of [...scopesToUninstall]) {
-      const paths = scopeInstallPaths(scope, gitRoot);
+      const paths = await scopeInstallPaths(scope, gitRoot);
       if (paths === null) continue;
       extras.push(...await enumerateDryRunExtras(paths.claudeDir, paths.devflowDir));
     }
@@ -1015,7 +1032,7 @@ export async function runCleanupPhase(opts: {
   // 3. settings.json (Devflow hooks)
   for (const scope of [...scopesToUninstall]) {
     try {
-      const paths = scopeInstallPaths(scope, gitRoot);
+      const paths = await scopeInstallPaths(scope, gitRoot);
       if (paths === null) continue;
       const settingsPath = path.join(paths.claudeDir, 'settings.json');
       const originalContent = await fs.readFile(settingsPath, 'utf-8');
@@ -1214,15 +1231,20 @@ export const uninstallCommand = new Command('uninstall')
 
     if (options.scope) {
       scopesToUninstall = [options.scope.toLowerCase() as UninstallScope];
+      // A local-only uninstall with no repo-local install to act on stops here,
+      // before its cleanup phase can reach the cwd — HOME, in a repo rooted there.
+      if (scopesToUninstall[0] === 'local' && await scopeInstallPaths('local', gitRoot) === null) {
+        p.log.error('No legacy project-local install here: not in a git repository, or the repository root holds the machine-wide install');
+        process.exit(1);
+      }
     } else {
       if (await isDevFlowInstalled(getClaudeDirectory())) {
         scopesToUninstall.push('user');
       }
 
-      if (gitRoot) {
-        if (await isDevFlowInstalled(legacyLocalInstallPaths(gitRoot).claudeDir)) {
-          scopesToUninstall.push('local');
-        }
+      const legacyPaths = gitRoot === null ? null : await legacyLocalInstallPaths(gitRoot);
+      if (legacyPaths !== null && await isDevFlowInstalled(legacyPaths.claudeDir)) {
+        scopesToUninstall.push('local');
       }
 
       if (scopesToUninstall.length === 0) {
@@ -1261,7 +1283,7 @@ export const uninstallCommand = new Command('uninstall')
       // One resolution, handed to the dry-run and (below) to the real removal,
       // so the preview and the outcome are computed from the same list.
       let dryRunInstalled: PluginDefinition[] = DEVFLOW_PLUGINS;
-      const dryRunPaths = scopeInstallPaths(scopesToUninstall[0], gitRoot);
+      const dryRunPaths = await scopeInstallPaths(scopesToUninstall[0], gitRoot);
       if (dryRunPaths !== null) {
         dryRunInstalled = await resolveInstalledPlugins(dryRunPaths.devflowDir);
       }
@@ -1288,7 +1310,7 @@ export const uninstallCommand = new Command('uninstall')
     if (!isSelectiveUninstall) {
       for (const scope of scopesToUninstall) {
         try {
-          const paths = scopeInstallPaths(scope, gitRoot);
+          const paths = await scopeInstallPaths(scope, gitRoot);
           if (paths === null) continue;
           if (await proxyJsonExists(paths.devflowDir)) {
             const proxyState = await readProxyState(paths.devflowDir);
@@ -1300,9 +1322,9 @@ export const uninstallCommand = new Command('uninstall')
 
     // Uninstall from each scope
     for (const scope of scopesToUninstall) {
-      const paths = scopeInstallPaths(scope, gitRoot);
+      const paths = await scopeInstallPaths(scope, gitRoot);
       if (paths === null) {
-        p.log.warn(`Cannot uninstall ${scope} scope: not in a git repository`);
+        p.log.warn(`Cannot uninstall ${scope} scope: no repo-local install here`);
         continue;
       }
       const { claudeDir, devflowDir } = paths;
