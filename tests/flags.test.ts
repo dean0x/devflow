@@ -2109,6 +2109,29 @@ describe('convergeFlagsIntoSettings — D-KEY-ORDER: key order survives a re-run
     expect(keys.at(-1), 'a new managed key lands after every key that was already there').toBe('viewMode');
     expect(keys.slice(0, -1)).toEqual(Object.keys(JSON.parse(settings) as Record<string, unknown>));
   });
+
+  it('a key the record turns off is dropped and every other key keeps its place', () => {
+    const { settings, record } = firstRun();
+    const changed: FlagsRecord = { ...record, 'show-turn-duration': false };
+    const out = convergeFlagsIntoSettings(settings, changed, { viewModeExplicit: false, ownedRecord: record });
+    const expected = Object.keys(JSON.parse(settings) as Record<string, unknown>).filter(k => k !== 'showTurnDuration');
+    expect(Object.keys(JSON.parse(out.settings) as Record<string, unknown>)).toEqual(expected);
+  });
+
+  it('inside env, a newly set managed var is appended after a user var and a dropped one leaves no gap', () => {
+    const { settings, record } = firstRun();
+    const parsed = JSON.parse(settings) as { env: Record<string, string> };
+    // The user var sits between managed vars, so a strip-then-apply order would move it first.
+    const [firstManaged, ...restManaged] = Object.entries(parsed.env);
+    parsed.env = Object.fromEntries([firstManaged, ['MY_OWN_VAR', '1'], ...restManaged]);
+    const before = JSON.stringify(parsed, null, 2) + '\n';
+    const changed: FlagsRecord = { ...record, 'tool-search': false, brief: true };
+    const out = convergeFlagsIntoSettings(before, changed, { viewModeExplicit: false, ownedRecord: record });
+    const envKeys = Object.keys((JSON.parse(out.settings) as { env: Record<string, string> }).env);
+    const kept = Object.keys(parsed.env).filter(k => k !== 'ENABLE_TOOL_SEARCH');
+    expect(envKeys).toEqual([...kept, 'CLAUDE_CODE_BRIEF']);
+    expect(Object.keys(JSON.parse(out.settings) as Record<string, unknown>)).toEqual(Object.keys(parsed));
+  });
 });
 
 // ─── convergeFlagsIntoSettings — D-ATTR-ADOPT: guarded boolean adoption ──────
