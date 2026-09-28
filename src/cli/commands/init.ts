@@ -51,7 +51,7 @@ import { writeFileAtomicExclusive } from '../../core/fs-atomic.js';
 import { writeManagedConfig, readConfigIfPresent, DEFAULT_CONFIG, type FeatureConfig } from '../../core/feature-config.js';
 import { drainLearningQueue } from '../../core/learning-queue-cleanup.js';
 import { removeManagedDenyList, describeManagedDenyRemoval } from './security.js';
-import { resolveInitSeed, applyCliToggles, resolveResetGatedInputs } from './init-seed.js';
+import { resolveInitSeed, applyCliToggles, resolveResetGatedInputs, resolvePluginsToInstall } from './init-seed.js';
 import { parseFrameworkList, normalizeFrameworks, type ComplianceFeatureState } from '../../core/compliance.js';
 import {
   formatComplianceSummary,
@@ -1710,19 +1710,7 @@ export const initCommand = new Command('init')
     s.message('Installing components');
     const rootDir = getPackageRoot();
 
-    let pluginsToInstall = selectedPlugins.length > 0
-      ? DEVFLOW_PLUGINS.filter(p => selectedPlugins.includes(p.name))
-      : DEVFLOW_PLUGINS.filter(p => !p.optional);
-
-    const coreSkillsPlugin = DEVFLOW_PLUGINS.find(p => p.name === 'devflow-core-skills');
-    if (pluginsToInstall.length > 0 && coreSkillsPlugin && !pluginsToInstall.includes(coreSkillsPlugin)) {
-      pluginsToInstall = [coreSkillsPlugin, ...pluginsToInstall];
-    }
-
-    const ambientPlugin = DEVFLOW_PLUGINS.find(p => p.name === 'devflow-ambient');
-    if (ambientEnabled && ambientPlugin && !pluginsToInstall.includes(ambientPlugin)) {
-      pluginsToInstall.push(ambientPlugin);
-    }
+    const pluginsToInstall = resolvePluginsToInstall(selectedPlugins, ambientEnabled, DEVFLOW_PLUGINS);
 
     // The EFFECTIVE selection — what the manifest will record, resolved here
     // rather than at manifest-write time because the skills install set is
