@@ -312,7 +312,7 @@ describe('AC-7: a real release shows the untraced and exempt commits before it a
 
 const PARTIAL_SOURCE = path.join(ROOT, 'src', 'assets', 'commands', '_partials', '_evidence_policy.mds')
 
-/** The three rendering bullets of `evidence_exception()`, braces unescaped as the compiler emits them. */
+/** The three rendering bullets of `evidence_exception()`, as written (they compile to themselves under MDS 0.4). */
 function renderingBullets(): string[] {
   const lines = readFileSync(PARTIAL_SOURCE, 'utf-8').split('\n')
   const start = lines.indexOf('@define evidence_exception():')
@@ -320,7 +320,6 @@ function renderingBullets(): string[] {
   if (start === -1 || end === -1) throw new Error('_evidence_policy.mds: no evidence_exception() define')
   return lines.slice(start + 1, end)
     .filter(l => l.startsWith('- `@<login>`') || l.startsWith('- `<utc>`') || l.startsWith('- `<reason>`'))
-    .map(l => l.replace(/\\([{}])/g, '$1'))
 }
 
 /** Named collector: each bullet a text does not hold exactly once. */
@@ -357,7 +356,7 @@ function exceptionsTemplate(text: string): string[] {
 }
 
 describe('AC-8: `## Traceability exceptions` — rendering, persistence and sink', () => {
-  it('the three rendering bullets are copied byte-identically (the adopter proves the unescape model)', () => {
+  it('the three rendering bullets are copied byte-identically (the adopter proves the as-written model)', () => {
     const bullets = renderingBullets()
     expect(bullets, 'the login, time and reason bullets').toHaveLength(3)
     expect(collectRenderingDrift(requireDistFile('implement.md'), bullets), 'the compiled adopter').toEqual([])

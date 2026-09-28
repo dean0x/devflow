@@ -88,7 +88,7 @@ describe('commit recipes place -m before the -- pathspec separator', () => {
   it('known-bad probe: the pattern reads the broken shapes and passes the working ones', () => {
     const broken: ReadonlyArray<readonly [string, string]> = [
       ['knowledge shape', '`git -C "{worktree}" commit --only -- a.md b.md -m "docs: x"`'],
-      ['conventions shape', '`git -C "\\{worktree\\}" commit --only -- .devflow/conventions.md -m "docs(devflow): x"`'],
+      ['conventions shape', '`git -C "{worktree}" commit --only -- .devflow/conventions.md -m "docs(devflow): x"`'],
       ['long option', 'git commit -- a.md --message="x"'],
     ];
     const missed = broken.filter(([, text]) => !MESSAGE_AFTER_SEPARATOR_RE.test(text)).map(([l]) => l);

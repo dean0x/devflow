@@ -369,14 +369,14 @@ const CONDITION_SHAPES: ReadonlyArray<readonly [string, RegExp]> = [
   ['state after the name', new RegExp(`\\b${NAME_ALT}\\b\`?\\s*(?:\\?|AND\\b|is\\b|false\\b|true\\b|===)`)],
 ]
 
-/** The body of `@define {name}():` … `@end` in an MDS source, braces unescaped as the compiler emits them. */
+/** The body of `@define {name}():` … `@end` in an MDS source, as written (single braces are literal text under MDS 0.4). */
 function defineLines(sourcePath: string, name: string): string[] {
   const source = readFileSync(path.join(ROOT, sourcePath), 'utf-8')
   const open = `@define ${name}():\n`
   const start = source.indexOf(open)
   const end = source.indexOf('\n@end', start)
   if (start === -1 || end === -1) throw new Error(`${sourcePath}: no \`@define ${name}()\` block`)
-  return source.slice(start + open.length, end).replace(/\\([{}])/g, '$1').split('\n')
+  return source.slice(start + open.length, end).split('\n')
 }
 
 /**

@@ -956,8 +956,8 @@ export function collectDegradedReasons(text: string): string[] {
     .map(m => m[1].replace(/\s+/g, ' ').trim());
 }
 
-/** The D4 contract's own placeholder, in both MDS spellings. Not a reason. */
-const REASON_PLACEHOLDERS: readonly string[] = ['{reason}', '\\{reason\\}'];
+/** The D4 contract's own placeholder (literal text under MDS 0.4). Not a reason. */
+const REASON_PLACEHOLDERS: readonly string[] = ['{reason}'];
 
 /**
  * Named collector: every `DEGRADED (…)` reason in a corpus that no registry
@@ -1099,7 +1099,7 @@ describe('[DR-04] DEGRADED literal registry: forward direction', () => {
     const reason = 'not a wave branch';
     const commands = commandCorpus();
     expect(commands.some(e => e.content.includes(`DEGRADED (${reason})`)), 'the emitter must be in the corpus').toBe(true);
-    const stripped = commands.map(e => ({ ...e, content: e.content.split(`DEGRADED (${reason})`).join('DEGRADED (\\{reason\\})') }));
+    const stripped = commands.map(e => ({ ...e, content: e.content.split(`DEGRADED (${reason})`).join('DEGRADED ({reason})') }));
     expect(collectUnemittedReasons([reason], [...gitAgentSinkCorpus(), ...stripped])).toEqual([reason]);
     expect(collectUnemittedReasons([reason], [...gitAgentSinkCorpus(), ...commands])).toEqual([]);
   });

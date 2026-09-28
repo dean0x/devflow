@@ -324,14 +324,14 @@ describe('G1: the tag-date binding', () => {
 
 const COMMON_SOURCE = path.join(ROOT, 'src', 'assets', 'mds', 'tracker', '_common.mds')
 
-/** The body line of `@define {name}(…):` in `_common.mds`, braces unescaped as the compiler emits them. */
+/** The body line of `@define {name}(…):` in `_common.mds`, as written (single braces are literal text under MDS 0.4). */
 function commonDefineLine(name: string): string {
   const source = readFileSync(COMMON_SOURCE, 'utf-8')
   const open = source.split('\n').findIndex(line => line.startsWith(`@define ${name}(`))
   if (open === -1) throw new Error(`_common.mds: no \`@define ${name}(\``)
   const body = source.split('\n')[open + 1]
   if (body === undefined || body === '@end') throw new Error(`_common.mds: ${name} has an empty body`)
-  return body.replace(/\\([{}])/g, '$1')
+  return body
 }
 
 /** Named collector: the one line of a gather reference that opens with `prefix`, or null. */
@@ -345,7 +345,7 @@ export function collectGatherStep(text: string, prefix: string): string | null {
  * the two parameters — that a provider's step 6 does NOT carry, in order.
  */
 export function collectMissingStep6Fragments(step: string, defineLine: string): string[] {
-  const fragments = defineLine.split(/\{(?:arm|args)\}/).filter(f => f !== '')
+  const fragments = defineLine.split(/\{\{(?:arm|args)\}\}/).filter(f => f !== '')
   const missing: string[] = []
   let from = 0
   for (const fragment of fragments) {
@@ -389,7 +389,7 @@ describe('#364: steps 1a and 6 are _common.mds text in every gather reference (A
 
   it('step 6 carries every fixed fragment of the define, in order, with this provider\'s arguments', () => {
     const define = commonDefineLine('trace_map_step')
-    expect(define.split(/\{(?:arm|args)\}/).length, 'the define must take both parameters').toBe(3)
+    expect(define.split(/\{\{(?:arm|args)\}\}/).length, 'the define must take both parameters').toBe(3)
     for (const p of PROVIDERS) {
       const step = collectGatherStep(gatherRef(p), STEP_6)
       expect(step, `${p}: exactly one step 6`).not.toBeNull()

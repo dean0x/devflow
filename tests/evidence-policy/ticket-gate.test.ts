@@ -84,13 +84,13 @@ function codeMd(): string {
   return resolveAgentSource('code').content
 }
 
-/** A define's body, braces unescaped the way the compiler emits them. */
+/** A define's body as written — under MDS 0.4 a body with no `{{…}}` compiles to itself. */
 function defineBody(name: string): string {
   const lines = readFileSync(PARTIAL_PATH, 'utf-8').split('\n')
   const start = lines.indexOf(`@define ${name}():`)
   const end = lines.indexOf('@end', start + 1)
   if (start === -1 || end === -1) throw new Error(`${PARTIAL_PATH}: no \`@define ${name}():\` … \`@end\` block`)
-  return lines.slice(start + 1, end).join('\n').replace(/\\([{}])/g, '$1')
+  return lines.slice(start + 1, end).join('\n')
 }
 
 // ---------------------------------------------------------------------------
@@ -644,7 +644,7 @@ describe('code.md: the PR_EXCEPTIONS paste gate', () => {
 function collectExceptionUsers(sources: ReadonlyArray<{ name: string; content: string }>): string[] {
   return sources
     .filter(s => s.name !== '_evidence_policy')
-    .filter(s => /^@import\b[^\n]*\bevidence_exception\b/m.test(s.content) || s.content.includes(`{${DEFINE}()}`))
+    .filter(s => /^@import\b[^\n]*\bevidence_exception\b/m.test(s.content) || s.content.includes(`{{${DEFINE}()}}`))
     .map(s => s.name)
     .sort()
 }
@@ -661,7 +661,7 @@ describe('the exception grammar has one caller in #362: /implement', () => {
 
   it('known-bad probe: a second caller is reported', () => {
     expect(collectExceptionUsers([
-      { name: 'implement', content: `{${DEFINE}()}` },
+      { name: 'implement', content: `{{${DEFINE}()}}` },
       { name: 'code-review', content: `@import { ${DEFINE} } from "./_partials/_evidence_policy.mds"` },
     ])).toEqual(['code-review', 'implement'])
   })

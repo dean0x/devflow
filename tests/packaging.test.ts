@@ -51,7 +51,7 @@ const SUBSWITCH_VERSION = '0.5.0';
  * Expected exact-pinned version of the MDS compiler.
  * Hoisted so the next bump is a one-line change.
  */
-const MDS_VERSION = '0.2.0';
+const MDS_VERSION = '0.4.4';
 
 // ---------------------------------------------------------------------------
 // Guard 3: dependency pin integrity
@@ -221,6 +221,20 @@ describe('Guard 3b (MDS pin): compiler pinned to an exact version in devDependen
     ).toMatch(/^sha512-/);
 
     expect(node!.dev, 'the lock entry must agree that this is a dev-only dependency').toBe(true);
+
+    // The compiler resolves a backend at runtime (native addon, WASM fallback), so a
+    // backend package left on another version would compile with a different engine
+    // than the pin names. Every @mdscript/* lock node moves with the pin.
+    const backends = Object.entries(lockJson.packages ?? {}).filter(([key]) =>
+      key.startsWith('node_modules/@mdscript/'),
+    );
+    expect(
+      backends.map(([key]) => key),
+      'the lockfile must carry the native (mds-napi) and WASM (mds-wasm) backends',
+    ).toEqual(expect.arrayContaining(['node_modules/@mdscript/mds-napi', 'node_modules/@mdscript/mds-wasm']));
+    for (const [key, entry] of backends) {
+      expect(entry.version, `${key} must resolve to the pinned ${MDS_VERSION}`).toBe(MDS_VERSION);
+    }
   });
 
   it('known-bad probe: a caret range and an absent entry both fail the same collector', () => {
