@@ -23,3 +23,40 @@ jobs:
       - run: npm run build
       - run: npm test
       - run: npm run test:integration
+
+  # The hooks ship to macOS, whose /bin/bash is 3.2 — no associative arrays, no
+  # `${var,,}`, no `mapfile`. Ubuntu's bash 5 cannot catch a 4.x-only construct,
+  # so this job runs the shell-hook suites and the installed-hook matrix with
+  # /bin/bash first on PATH, and refuses to run anything under any other bash.
+  macos-bash32-hooks:
+    runs-on: macos-latest
+
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+      - name: Put /bin/bash (3.2) first on PATH
+        run: |
+          mkdir -p "$RUNNER_TEMP/bash32"
+          ln -s /bin/bash "$RUNNER_TEMP/bash32/bash"
+          echo "$RUNNER_TEMP/bash32" >> "$GITHUB_PATH"
+      - name: Require bash 3.2
+        run: |
+          command -v bash
+          first="$(bash --version | sed -n 1p)"
+          echo "$first"
+          case "$first" in
+            *"version 3.2."*) ;;
+            *) echo "::error::bash on PATH is not 3.2: $first"; exit 1 ;;
+          esac
+      - run: npm ci
+      - run: npm run build
+      - name: Shell-hook suites and hook matrix under bash 3.2
+        run: |
+          # tests/install-snapshot.test.ts carries the installed-hook matrix.
+          suites="tests/shell-hooks.test.ts tests/shell-hooks-helpers.test.ts tests/shell-hooks-tracker.test.ts tests/capture-hooks.test.ts tests/queue-append.test.ts tests/install-snapshot.test.ts"
+          # One file at a time: these suites spawn hundreds of hook processes, and in
+          # parallel on a 3-core runner the load alone times tests out (5 s default).
+          npx vitest run --no-file-parallelism $suites

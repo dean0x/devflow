@@ -6,6 +6,7 @@ import {
   resolveSeedFeatures,
   resolveSeedFlags,
   resolveSeedPlugins,
+  resolvePluginsToInstall,
   resolveInitSeed,
   resolveExistingAttributionSuppression,
   applyCliToggles,
@@ -276,6 +277,36 @@ describe('resolveSeedPlugins', () => {
     const all = [...workflowPlugins, ...languagePlugins];
     expect(all).not.toContain('devflow-core-skills');
     expect(all).toContain('devflow-implement');
+  });
+});
+
+// ── resolvePluginsToInstall ───────────────────────────────────────────────────
+
+describe('resolvePluginsToInstall', () => {
+  const names = (plugins: readonly { name: string }[]): string[] => plugins.map(p => p.name);
+
+  it('fresh default selection with ambient OFF does not install devflow-ambient', () => {
+    expect(names(resolvePluginsToInstall([], false, DEVFLOW_PLUGINS))).not.toContain('devflow-ambient');
+  });
+
+  it('fresh default selection with ambient ON installs devflow-ambient', () => {
+    expect(names(resolvePluginsToInstall([], true, DEVFLOW_PLUGINS))).toContain('devflow-ambient');
+  });
+
+  it('an explicit selection always gains devflow-core-skills, and devflow-ambient only when ambient is on', () => {
+    expect(names(resolvePluginsToInstall(['devflow-implement'], false, DEVFLOW_PLUGINS)))
+      .toEqual(['devflow-core-skills', 'devflow-implement']);
+    expect(names(resolvePluginsToInstall(['devflow-implement'], true, DEVFLOW_PLUGINS)))
+      .toEqual(['devflow-core-skills', 'devflow-implement', 'devflow-ambient']);
+  });
+
+  it.each([true, false])('a re-init seeded from the first install installs the same list (ambient %s, #388 AC-3)', (ambient) => {
+    const first = names(resolvePluginsToInstall([], ambient, DEVFLOW_PLUGINS));
+    const seed = resolveSeedPlugins(first, DEVFLOW_PLUGINS.map(p => p.name), DEVFLOW_PLUGINS);
+    const second = names(resolvePluginsToInstall(
+      [...seed.workflowPlugins, ...seed.languagePlugins], ambient, DEVFLOW_PLUGINS,
+    ));
+    expect(second).toEqual(first);
   });
 });
 

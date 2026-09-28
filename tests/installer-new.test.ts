@@ -97,6 +97,35 @@ describe('composeScripts', () => {
     ).toBe(true);
   });
 
+  it.skipIf(process.platform === 'win32')(
+    'a second call leaves every file on the mode the first call gave it — package.json never gains an exec bit',
+    async () => {
+      // Only the verbatim src/assets/scripts/ tree is made executable. A re-run must not
+      // widen what the first run wrote beside it (package.json, the mirrored dist/hud/
+      // closure): re-init is expected to be a no-op on disk (#388 AC-3).
+      const target = path.join(tmpDir, 'scripts');
+      const modes = async (): Promise<Map<string, number>> => {
+        const out = new Map<string, number>();
+        const walk = async (dir: string): Promise<void> => {
+          for (const entry of await fs.readdir(dir, { withFileTypes: true })) {
+            const full = path.join(dir, entry.name);
+            if (entry.isDirectory()) await walk(full);
+            else out.set(path.relative(target, full), (await fs.stat(full)).mode & 0o777);
+          }
+        };
+        await walk(target);
+        return out;
+      };
+
+      await composeScripts(target);
+      const first = await modes();
+      expect(first.get('package.json')! & 0o111, 'package.json is data, not a script').toBe(0);
+
+      await composeScripts(target);
+      expect(Object.fromEntries(await modes())).toEqual(Object.fromEntries(first));
+    },
+  );
+
   it('copies redact-secrets.cjs to the target alongside hud.sh (install path pin)', async () => {
     // composeScripts copies src/assets/scripts/ verbatim (hooks/ + top-level entry scripts)
     // via copyDirectory. A top-level redact-secrets.cjs is picked up automatically — no

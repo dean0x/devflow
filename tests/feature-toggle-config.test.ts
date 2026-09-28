@@ -14,6 +14,7 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { requireBuiltCli } from './helpers.js';
+import { assertTempHome } from './setup/home-isolation.js';
 
 const CLI = requireBuiltCli();
 
@@ -72,10 +73,8 @@ function runToggle(feature: string, flag: string): { status: number | null; out:
   // asserted at the call site rather than trusted — a spawn against the real
   // HOME never starts. Every path the CLI resolves from the environment is
   // pinned under it, so an inherited CLAUDE_CODE_DIR or DEVFLOW_DIR cannot leak.
-  expect(path.resolve(tmpHome), 'a toggle must never run against the real HOME').not.toBe(
-    path.resolve(os.homedir()),
-  );
-  expect(tmpHome.startsWith(os.tmpdir() + path.sep), `HOME ${tmpHome} is not a scratch dir`).toBe(true);
+  // `os.homedir()` is the setup file's temp HOME, so the real home comes from assertTempHome.
+  assertTempHome(tmpHome);
   const result = spawnSync(process.execPath, [CLI, feature, flag], {
     encoding: 'utf-8',
     timeout: 60_000,

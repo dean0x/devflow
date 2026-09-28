@@ -173,7 +173,7 @@ export function resolveSeedFlags(
  *   - Otherwise → split + adopt newly-added non-optional selectable plugins
  *     whose name is ∉ knownPlugins and ∉ manifestPlugins
  *
- * Always-installed plugins (devflow-core-skills, devflow-ambient) are filtered
+ * The plugins init adds itself (devflow-core-skills, devflow-ambient) are filtered
  * out by partitionSelectablePlugins and never appear in the returned buckets.
  */
 export function resolveSeedPlugins(
@@ -220,6 +220,49 @@ export function resolveSeedPlugins(
   }
 
   return { workflowPlugins, languagePlugins };
+}
+
+/**
+ * The plugins an init run installs, from the selection and the ambient switch.
+ *
+ * `selectedPlugins` is empty when nothing picked a selection (a fresh
+ * non-interactive install), and then every non-optional plugin is installed.
+ * `devflow-core-skills` is always added; `devflow-ambient` is added exactly
+ * when ambient mode is on.
+ *
+ * D-AMBIENT-FOLLOWS-SWITCH: `devflow-ambient` is installed iff ambient mode is
+ * on, on EVERY path. It is not a selectable plugin (`EXCLUDED` keeps it out of
+ * both multiselect buckets and out of the re-init seed, see
+ * {@link resolveSeedPlugins}); since #150 the ambient switch is what includes
+ * it, and #150's own test plan reads "`init --no-ambient` — confirm ambient
+ * plugin NOT installed". The fresh default branch used to take every
+ * non-optional plugin, ambient included, so a first `init --no-ambient`
+ * recorded `devflow-ambient` in the manifest and the re-init — seeded without
+ * it — dropped it: the first install was the wrong one, not the re-init
+ * (#388 AC-3). The default branch therefore leaves ambient out and lets the
+ * switch below add it, exactly as it does for an explicit selection.
+ *
+ * Pure function — no I/O; returns a new array, never mutates its inputs.
+ */
+export function resolvePluginsToInstall(
+  selectedPlugins: readonly string[],
+  ambientEnabled: boolean,
+  allPlugins: readonly PluginDefinition[],
+): PluginDefinition[] {
+  let pluginsToInstall = selectedPlugins.length > 0
+    ? allPlugins.filter(p => selectedPlugins.includes(p.name))
+    : allPlugins.filter(p => !p.optional && p.name !== 'devflow-ambient');
+
+  const coreSkillsPlugin = allPlugins.find(p => p.name === 'devflow-core-skills');
+  if (pluginsToInstall.length > 0 && coreSkillsPlugin && !pluginsToInstall.includes(coreSkillsPlugin)) {
+    pluginsToInstall = [coreSkillsPlugin, ...pluginsToInstall];
+  }
+
+  const ambientPlugin = allPlugins.find(p => p.name === 'devflow-ambient');
+  if (ambientEnabled && ambientPlugin && !pluginsToInstall.includes(ambientPlugin)) {
+    pluginsToInstall = [...pluginsToInstall, ambientPlugin];
+  }
+  return pluginsToInstall;
 }
 
 /**

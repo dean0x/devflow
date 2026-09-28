@@ -26,10 +26,12 @@ import * as path from 'path';
 import { spawnSync } from 'child_process';
 
 import { requireBuiltCli } from './helpers.js';
+import { assertTempHome } from './setup/home-isolation.js';
 import { installedReferenceManifest } from '../src/core/mds-variants.js';
 import { DEVFLOW_PLUGINS, prefixSkillName, skillsOf, getAllSkillNames } from '../src/core/plugins.js';
 
 const CLI_PATH = requireBuiltCli();
+/** Shared by every spawn and every `it()`: a test chains several CLI runs, each well past 5 s under load. */
 const SUBPROCESS_TIMEOUT_MS = 120_000;
 
 let tmpHome: string;
@@ -122,8 +124,8 @@ beforeEach(async () => {
   tmpHome = await makeScratchHome('devflow-scoped-e2e-');
   // Prove the binding before anything runs: an install against the real HOME is
   // the one failure this file must make impossible.
-  expect(tmpHome.startsWith(os.tmpdir())).toBe(true);
-  expect(tmpHome).not.toBe(os.homedir());
+  // `os.homedir()` is the setup file's temp HOME, so the real home comes from assertTempHome.
+  expect(() => assertTempHome(tmpHome)).not.toThrow();
 });
 
 afterEach(async () => {
@@ -151,7 +153,7 @@ describe('devflow init installs {github} ∪ {selected provider}', () => {
       result.stdout,
       'nothing put an agent there, so nothing may report having taken one away',
     ).not.toContain('tracker agent');
-  });
+  }, SUBPROCESS_TIMEOUT_MS);
 
   it('a second github init still says nothing about the agent', () => {
     expect(init().status).toBe(0);
@@ -161,7 +163,7 @@ describe('devflow init installs {github} ∪ {selected provider}', () => {
       second.stdout,
       'a steady-state github re-run has no agent to install and none to remove',
     ).not.toContain('tracker agent');
-  });
+  }, SUBPROCESS_TIMEOUT_MS);
 
   it.each(['jira', 'linear'] as const)('--tracker %s adds its tree, _mcp.md, the agent and the sentinel', async (provider) => {
     const result = init(['--tracker', provider]);
@@ -179,7 +181,7 @@ describe('devflow init installs {github} ∪ {selected provider}', () => {
       result.stdout,
       'the agent is installed by this run, so the summary has to say so',
     ).toContain('tracker agent installed');
-  });
+  }, SUBPROCESS_TIMEOUT_MS);
 
   it('the jira install differs from the github one by exactly the jira tree, _mcp.md and the agent', async () => {
     const github = init();
@@ -202,14 +204,14 @@ describe('devflow init installs {github} ∪ {selected provider}', () => {
       await fs.rm(tmpHome, { recursive: true, force: true });
       tmpHome = firstHome;
     }
-  });
+  }, SUBPROCESS_TIMEOUT_MS);
 
   it('the default install carries the non-optional closure, not every registry skill', async () => {
     expect(init().status).toBe(0);
     const expected = [...skillsOf(DEVFLOW_PLUGINS.filter(p => !p.optional))].map(prefixSkillName).sort();
     expect(await listSkills()).toEqual(expected);
     expect(expected.length, 'scoping must actually narrow something').toBeLessThan(getAllSkillNames().length);
-  });
+  }, SUBPROCESS_TIMEOUT_MS);
 
   /**
    * A re-init that changes nothing must SAY nothing.
@@ -246,13 +248,13 @@ describe('devflow init installs {github} ∪ {selected provider}', () => {
       second.stdout,
       'the agent was already converged by the first run and is unchanged by this one',
     ).not.toContain('tracker agent');
-  });
+  }, SUBPROCESS_TIMEOUT_MS);
 
   it('the summary names the active provider', () => {
     const result = init(['--tracker', 'linear']);
     expect(result.status).toBe(0);
     expect(result.stdout).toContain('Tracker: linear');
-  });
+  }, SUBPROCESS_TIMEOUT_MS);
 });
 
 // ---------------------------------------------------------------------------
@@ -278,7 +280,7 @@ describe('devflow tracker --set converges the bundle both ways', () => {
     ).toEqual(fresh);
     expect(await exists(trackerAgent())).toBe(false);
     expect(await exists(sentinel())).toBe(false);
-  });
+  }, SUBPROCESS_TIMEOUT_MS);
 
   it('jira → linear swaps the provider tree and keeps the github floor', async () => {
     expect(init(['--tracker', 'jira']).status).toBe(0);
@@ -291,7 +293,7 @@ describe('devflow tracker --set converges the bundle both ways', () => {
     expect(refs.some(r => r.startsWith('tracker/linear/'))).toBe(true);
     expect(refs.some(r => r.startsWith('tracker/github/'))).toBe(true);
     expect(refs).toEqual(trackerManifest('linear'));
-  });
+  }, SUBPROCESS_TIMEOUT_MS);
 
   it('--status reports the installed mechanics', () => {
     expect(init(['--tracker', 'jira']).status).toBe(0);
@@ -300,7 +302,7 @@ describe('devflow tracker --set converges the bundle both ways', () => {
     expect(status.stdout).toContain('Mechanics:');
     expect(status.stdout).toContain('installed (');
     expect(status.stdout).not.toContain('MISSING');
-  });
+  }, SUBPROCESS_TIMEOUT_MS);
 });
 
 // ---------------------------------------------------------------------------
@@ -324,7 +326,7 @@ describe('partial install and selective uninstall', () => {
       expect(after, `${skill} must survive an add-one run`).toContain(skill);
     }
     expect(after).toContain(prefixSkillName('typescript'));
-  });
+  }, SUBPROCESS_TIMEOUT_MS);
 
   it('uninstall --plugin removes only what no remaining INSTALLED plugin needs', async () => {
     expect(init(['--plugin=devflow-core-skills,devflow-explore']).status).toBe(0);
@@ -340,5 +342,5 @@ describe('partial install and selective uninstall', () => {
       'git is core-skills\' own, and core-skills is still installed',
     ).toContain(prefixSkillName('git'));
     expect(after.length).toBeLessThan(before.length);
-  });
+  }, SUBPROCESS_TIMEOUT_MS);
 });

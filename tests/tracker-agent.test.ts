@@ -41,12 +41,13 @@ import {
   statSync,
   writeFileSync,
 } from 'fs';
-import { homedir, tmpdir } from 'os';
+import { tmpdir } from 'os';
 import * as path from 'path';
 
 import { scriptsDir } from '../src/core/assets.js';
 import { DEVFLOW_PLUGINS, getAllAgentNames } from '../src/core/plugins.js';
 import { loadShippedDefaults } from '../src/core/agent-models.js';
+import { assertTempHome } from './setup/home-isolation.js';
 import {
   ROOT,
   TRACKER_SCHEMA_FRONTMATTER_KEYS,
@@ -437,9 +438,8 @@ const SANDBOXES: string[] = [];
 
 function makeSandbox(): Sandbox {
   const home = mkdtempSync(path.join(tmpdir(), 'devflow-tracker-agent-'));
-  if (home === homedir() || !home.startsWith(tmpdir())) {
-    throw new Error(`refusing to run the agent's write chain against ${home} — not a temp root`);
-  }
+  // Throws on a real home or a non-temp root (`os.homedir()` is the setup file’s temp HOME).
+  assertTempHome(home);
   SANDBOXES.push(home);
   const devflowDir = path.join(home, '.devflow');
   mkdirSync(path.join(devflowDir, 'scripts'), { recursive: true });

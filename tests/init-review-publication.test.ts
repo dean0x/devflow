@@ -24,6 +24,7 @@ import { promises as fs } from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { requireBuiltCli } from './helpers.js';
+import { assertTempHome } from './setup/home-isolation.js';
 
 const CLI = requireBuiltCli();
 
@@ -37,9 +38,8 @@ let tmpRepo: string;
 function runInit(...args: string[]): { status: number | null; stderr: string } {
   // PF-060: init converges a machine-wide tree, so the sandbox is asserted at the
   // call site rather than trusted — a spawn against the real HOME never starts.
-  expect(path.resolve(tmpHome), 'init must never run against the real HOME').not.toBe(
-    path.resolve(os.homedir()),
-  );
+  // `os.homedir()` is the setup file's temp HOME, so the real home comes from assertTempHome.
+  assertTempHome(tmpHome);
   const result = spawnSync('node', [CLI, 'init', ...args], {
     encoding: 'utf-8',
     timeout: SUBPROCESS_TIMEOUT_MS,

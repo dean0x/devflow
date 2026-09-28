@@ -14,9 +14,10 @@
  * These drive the REAL compiled CLI and the INSTALLED hook scripts (not the
  * source tree), so the assertion is about what a user's machine actually runs.
  *
- * PF-060: every spawn gets a temp HOME and an explicit DEVFLOW_DIR under it, and
- * the sandbox is asserted at the call site — a run against the real HOME never
- * starts. Requires a build (`npm run build`).
+ * PF-060: every spawn gets its env from the shared `sandboxEnv(tmpHome)` — an
+ * allowlist with HOME pinned to a temp dir, so no inherited DEVFLOW_DIR or
+ * CLAUDE_* redirect reaches the child — and the helper asserts that HOME is not a
+ * real home before a run can start. Requires a build (`npm run build`).
  */
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
@@ -24,7 +25,7 @@ import { spawnSync, execFileSync } from 'child_process';
 import { promises as fs, existsSync, readFileSync, accessSync, constants as fsConstants } from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import { requireBuiltCli } from './helpers.js';
+import { requireBuiltCli, sandboxEnv } from './helpers.js';
 import { hasMemoryHooks } from '../src/cli/commands/memory.js';
 import { hasAmbientHook } from '../src/cli/commands/ambient.js';
 import { hasHudStatusLine } from '../src/cli/commands/hud.js';
@@ -50,26 +51,12 @@ const devflowDir = (): string => path.join(tmpHome, '.devflow');
 const claudeDir = (): string => path.join(tmpHome, '.claude');
 const installedHook = (name: string): string => path.join(devflowDir(), 'scripts', 'hooks', name);
 
-function sandboxEnv(extra: Record<string, string> = {}): NodeJS.ProcessEnv {
-  // PF-060: asserted, not trusted.
-  expect(path.resolve(tmpHome), 'must never run against the real HOME').not.toBe(path.resolve(os.homedir()));
-  return {
-    ...process.env,
-    HOME: tmpHome,
-    DEVFLOW_DIR: devflowDir(),
-    FORCE_COLOR: '0',
-    NO_COLOR: '1',
-    CI: '1',
-    ...extra,
-  };
-}
-
 function runCli(cwd: string, ...args: string[]): { status: number | null; out: string } {
   const result = spawnSync('node', [CLI, ...args], {
     encoding: 'utf-8',
     timeout: SUBPROCESS_TIMEOUT_MS,
     cwd,
-    env: sandboxEnv(),
+    env: sandboxEnv(tmpHome),
   });
   if (result.error) throw result.error;
   return { status: result.status, out: `${result.stdout ?? ''}${result.stderr ?? ''}` };
@@ -88,8 +75,7 @@ function runInstalledHook(name: string, input: object): { stdout: string; exitCo
   try {
     const stdout = execFileSync('bash', [hook], {
       input: JSON.stringify(input),
-      // An EMPTY DEVFLOW_DIR makes the hooks take the ~/.devflow default path.
-      env: sandboxEnv({ DEVFLOW_DIR: '' }),
+      env: sandboxEnv(tmpHome),
       stdio: ['pipe', 'pipe', 'pipe'],
     }).toString();
     return { stdout, exitCode: 0 };

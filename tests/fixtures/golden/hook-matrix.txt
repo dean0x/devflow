@@ -1,0 +1,322 @@
+# hook-matrix golden — what every installed hook writes, per location (#388 AC-5, TP-7)
+# install: devflow init --recommended --security user; each hook runs as sh -c <settings.json command>, JSON payload on stdin
+# Locations: root = repo/, subdir = repo/sub/, worktree = wt/ (git worktree add), non-git = nongit/. Paths are relative to the sandbox root.
+# Each cell starts from the same post-install tree (restored after every cell). A = added, M = modified, D = removed; .git is not walked.
+# This records TODAY's behaviour, bugs included: a later PR that changes a cell says why in its fixture-only test(snapshot): commit.
+# Regenerate: npm run test:golden:update -- install-snapshot
+
+## root · preamble (UserPromptSubmit)
+exit 0
+(no writes)
+
+## root · capture-prompt (UserPromptSubmit)
+exit 0
+A home/.devflow/logs/
+A home/.devflow/logs/<SANDBOX>-repo/
+A home/.devflow/logs/<SANDBOX>-repo/.capture-prompt.log
+A repo/.devflow/docs/
+A repo/.devflow/features/
+A repo/.devflow/learning/
+A repo/.devflow/learning/.pending-turns.jsonl
+A repo/.devflow/memory/
+A repo/.devflow/memory/.pending-turns.jsonl
+
+## root · capture-turn (Stop)
+exit 0
+A home/.devflow/logs/
+A home/.devflow/logs/<SANDBOX>-repo/
+A home/.devflow/logs/<SANDBOX>-repo/.capture-turn.log
+A repo/.devflow/docs/
+A repo/.devflow/features/
+A repo/.devflow/learning/
+A repo/.devflow/learning/.pending-turns.jsonl
+A repo/.devflow/memory/
+A repo/.devflow/memory/.pending-turns.jsonl
+
+## root · memory-worker (Stop)
+SKIPPED: launches a detached claude -p worker that outlives the hook; its writes are not the hook's
+
+## root · session-start-orchestrator (SessionStart)
+exit 0
+A home/.devflow/logs/
+A home/.devflow/logs/<SANDBOX>-repo/
+A home/.devflow/logs/<SANDBOX>-repo/.session-start-orchestrator.log
+
+## root · session-start-memory (SessionStart)
+exit 0
+A home/.devflow/logs/
+A home/.devflow/logs/<SANDBOX>-repo/
+
+## root · session-start-context (SessionStart)
+exit 0
+A home/.devflow/logs/
+A home/.devflow/logs/<SANDBOX>-repo/
+A repo/.devflow/learning/
+
+## root · capture-question (PostToolUse AskUserQuestion)
+exit 0
+A home/.devflow/logs/
+A home/.devflow/logs/<SANDBOX>-repo/
+A home/.devflow/logs/<SANDBOX>-repo/.capture-question.log
+A repo/.devflow/docs/
+A repo/.devflow/features/
+A repo/.devflow/learning/
+A repo/.devflow/learning/.pending-turns.jsonl
+A repo/.devflow/memory/
+A repo/.devflow/memory/.pending-turns.jsonl
+
+## root · pre-compact-memory (PreCompact)
+exit 0
+A home/.devflow/logs/
+A home/.devflow/logs/<SANDBOX>-repo/
+A home/.devflow/logs/<SANDBOX>-repo/.pre-compact-memory.log
+A repo/.devflow/docs/
+A repo/.devflow/features/
+A repo/.devflow/learning/
+A repo/.devflow/memory/
+A repo/.devflow/memory/WORKING-MEMORY.md
+A repo/.devflow/memory/backup.json
+
+## subdir · preamble (UserPromptSubmit)
+exit 0
+(no writes)
+
+## subdir · capture-prompt (UserPromptSubmit)
+exit 0
+A home/.devflow/logs/
+A home/.devflow/logs/<SANDBOX>-repo-sub/
+A home/.devflow/logs/<SANDBOX>-repo-sub/.capture-prompt.log
+A repo/.devflow/docs/
+A repo/.devflow/features/
+A repo/.devflow/learning/
+A repo/.devflow/learning/.pending-turns.jsonl
+A repo/.devflow/memory/
+A repo/.devflow/memory/.pending-turns.jsonl
+
+## subdir · capture-turn (Stop)
+exit 0
+A home/.devflow/logs/
+A home/.devflow/logs/<SANDBOX>-repo-sub/
+A home/.devflow/logs/<SANDBOX>-repo-sub/.capture-turn.log
+A repo/.devflow/docs/
+A repo/.devflow/features/
+A repo/.devflow/learning/
+A repo/.devflow/learning/.pending-turns.jsonl
+A repo/.devflow/memory/
+A repo/.devflow/memory/.pending-turns.jsonl
+
+## subdir · memory-worker (Stop)
+SKIPPED: launches a detached claude -p worker that outlives the hook; its writes are not the hook's
+
+## subdir · session-start-orchestrator (SessionStart)
+exit 0
+A home/.devflow/logs/
+A home/.devflow/logs/<SANDBOX>-repo-sub/
+A home/.devflow/logs/<SANDBOX>-repo-sub/.session-start-orchestrator.log
+
+## subdir · session-start-memory (SessionStart)
+exit 0
+A home/.devflow/logs/
+A home/.devflow/logs/<SANDBOX>-repo-sub/
+
+## subdir · session-start-context (SessionStart)
+exit 0
+A home/.devflow/logs/
+A home/.devflow/logs/<SANDBOX>-repo-sub/
+A repo/.devflow/learning/
+
+## subdir · capture-question (PostToolUse AskUserQuestion)
+exit 0
+A home/.devflow/logs/
+A home/.devflow/logs/<SANDBOX>-repo-sub/
+A home/.devflow/logs/<SANDBOX>-repo-sub/.capture-question.log
+A repo/.devflow/docs/
+A repo/.devflow/features/
+A repo/.devflow/learning/
+A repo/.devflow/learning/.pending-turns.jsonl
+A repo/.devflow/memory/
+A repo/.devflow/memory/.pending-turns.jsonl
+
+## subdir · pre-compact-memory (PreCompact)
+exit 0
+A home/.devflow/logs/
+A home/.devflow/logs/<SANDBOX>-repo-sub/
+A home/.devflow/logs/<SANDBOX>-repo-sub/.pre-compact-memory.log
+A repo/.devflow/docs/
+A repo/.devflow/features/
+A repo/.devflow/learning/
+A repo/.devflow/memory/
+A repo/.devflow/memory/WORKING-MEMORY.md
+A repo/.devflow/memory/backup.json
+
+## worktree · preamble (UserPromptSubmit)
+exit 0
+(no writes)
+
+## worktree · capture-prompt (UserPromptSubmit)
+exit 0
+A home/.devflow/logs/
+A home/.devflow/logs/<SANDBOX>-wt/
+A home/.devflow/logs/<SANDBOX>-wt/.capture-prompt.log
+A wt/.devflow/
+A wt/.devflow/.root-gitignore-configured-v5
+A wt/.devflow/docs/
+A wt/.devflow/features/
+A wt/.devflow/learning/
+A wt/.devflow/learning/.pending-turns.jsonl
+A wt/.devflow/memory/
+A wt/.devflow/memory/.pending-turns.jsonl
+A wt/.gitignore
+
+## worktree · capture-turn (Stop)
+exit 0
+A home/.devflow/logs/
+A home/.devflow/logs/<SANDBOX>-wt/
+A home/.devflow/logs/<SANDBOX>-wt/.capture-turn.log
+A wt/.devflow/
+A wt/.devflow/.root-gitignore-configured-v5
+A wt/.devflow/docs/
+A wt/.devflow/features/
+A wt/.devflow/learning/
+A wt/.devflow/learning/.pending-turns.jsonl
+A wt/.devflow/memory/
+A wt/.devflow/memory/.pending-turns.jsonl
+A wt/.gitignore
+
+## worktree · memory-worker (Stop)
+SKIPPED: launches a detached claude -p worker that outlives the hook; its writes are not the hook's
+
+## worktree · session-start-orchestrator (SessionStart)
+exit 0
+A home/.devflow/logs/
+A home/.devflow/logs/<SANDBOX>-wt/
+A home/.devflow/logs/<SANDBOX>-wt/.session-start-orchestrator.log
+
+## worktree · session-start-memory (SessionStart)
+exit 0
+A home/.devflow/logs/
+A home/.devflow/logs/<SANDBOX>-wt/
+
+## worktree · session-start-context (SessionStart)
+exit 0
+A home/.devflow/logs/
+A home/.devflow/logs/<SANDBOX>-wt/
+A wt/.devflow/
+A wt/.devflow/.root-gitignore-configured-v5
+A wt/.devflow/learning/
+A wt/.gitignore
+
+## worktree · capture-question (PostToolUse AskUserQuestion)
+exit 0
+A home/.devflow/logs/
+A home/.devflow/logs/<SANDBOX>-wt/
+A home/.devflow/logs/<SANDBOX>-wt/.capture-question.log
+A wt/.devflow/
+A wt/.devflow/.root-gitignore-configured-v5
+A wt/.devflow/docs/
+A wt/.devflow/features/
+A wt/.devflow/learning/
+A wt/.devflow/learning/.pending-turns.jsonl
+A wt/.devflow/memory/
+A wt/.devflow/memory/.pending-turns.jsonl
+A wt/.gitignore
+
+## worktree · pre-compact-memory (PreCompact)
+exit 0
+A home/.devflow/logs/
+A home/.devflow/logs/<SANDBOX>-wt/
+A home/.devflow/logs/<SANDBOX>-wt/.pre-compact-memory.log
+A wt/.devflow/
+A wt/.devflow/.root-gitignore-configured-v5
+A wt/.devflow/docs/
+A wt/.devflow/features/
+A wt/.devflow/learning/
+A wt/.devflow/memory/
+A wt/.devflow/memory/WORKING-MEMORY.md
+A wt/.devflow/memory/backup.json
+A wt/.gitignore
+
+## non-git · preamble (UserPromptSubmit)
+exit 0
+(no writes)
+
+## non-git · capture-prompt (UserPromptSubmit)
+exit 0
+A home/.devflow/logs/
+A home/.devflow/logs/<SANDBOX>-nongit/
+A home/.devflow/logs/<SANDBOX>-nongit/.capture-prompt.log
+A nongit/.devflow/
+A nongit/.devflow/.root-gitignore-configured-v5
+A nongit/.devflow/docs/
+A nongit/.devflow/features/
+A nongit/.devflow/learning/
+A nongit/.devflow/learning/.pending-turns.jsonl
+A nongit/.devflow/memory/
+A nongit/.devflow/memory/.pending-turns.jsonl
+A nongit/.gitignore
+
+## non-git · capture-turn (Stop)
+exit 0
+A home/.devflow/logs/
+A home/.devflow/logs/<SANDBOX>-nongit/
+A home/.devflow/logs/<SANDBOX>-nongit/.capture-turn.log
+A nongit/.devflow/
+A nongit/.devflow/.root-gitignore-configured-v5
+A nongit/.devflow/docs/
+A nongit/.devflow/features/
+A nongit/.devflow/learning/
+A nongit/.devflow/learning/.pending-turns.jsonl
+A nongit/.devflow/memory/
+A nongit/.devflow/memory/.pending-turns.jsonl
+A nongit/.gitignore
+
+## non-git · memory-worker (Stop)
+SKIPPED: launches a detached claude -p worker that outlives the hook; its writes are not the hook's
+
+## non-git · session-start-orchestrator (SessionStart)
+exit 0
+A home/.devflow/logs/
+A home/.devflow/logs/<SANDBOX>-nongit/
+
+## non-git · session-start-memory (SessionStart)
+exit 0
+A home/.devflow/logs/
+A home/.devflow/logs/<SANDBOX>-nongit/
+
+## non-git · session-start-context (SessionStart)
+exit 0
+A home/.devflow/logs/
+A home/.devflow/logs/<SANDBOX>-nongit/
+A nongit/.devflow/
+A nongit/.devflow/.root-gitignore-configured-v5
+A nongit/.devflow/learning/
+A nongit/.gitignore
+
+## non-git · capture-question (PostToolUse AskUserQuestion)
+exit 0
+A home/.devflow/logs/
+A home/.devflow/logs/<SANDBOX>-nongit/
+A home/.devflow/logs/<SANDBOX>-nongit/.capture-question.log
+A nongit/.devflow/
+A nongit/.devflow/.root-gitignore-configured-v5
+A nongit/.devflow/docs/
+A nongit/.devflow/features/
+A nongit/.devflow/learning/
+A nongit/.devflow/learning/.pending-turns.jsonl
+A nongit/.devflow/memory/
+A nongit/.devflow/memory/.pending-turns.jsonl
+A nongit/.gitignore
+
+## non-git · pre-compact-memory (PreCompact)
+exit 0
+A home/.devflow/logs/
+A home/.devflow/logs/<SANDBOX>-nongit/
+A home/.devflow/logs/<SANDBOX>-nongit/.pre-compact-memory.log
+A nongit/.devflow/
+A nongit/.devflow/.root-gitignore-configured-v5
+A nongit/.devflow/docs/
+A nongit/.devflow/features/
+A nongit/.devflow/learning/
+A nongit/.devflow/memory/
+A nongit/.devflow/memory/backup.json
+A nongit/.gitignore

@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **Running `devflow init` again with the same options no longer changes anything** ([#388](https://github.com/dean0x/devflow/issues/388)). A second run used to leave three differences: `~/.devflow/scripts/package.json` became executable, because the scripts step made the whole scripts directory executable rather than just the scripts it copied. `~/.claude/settings.json` had `permissions` moved above the Claude Code flag keys, because re-applying the flags pushed each flag key to the end; they now keep their places, and `devflow flags` benefits too. And a first non-interactive `init --no-ambient` recorded `devflow-ambient` as installed, which the next `init` then dropped. The ambient plugin is now installed only when ambient mode is on, first run included, as it already was on every other path.
+
+### Tests
+
+- **The unit suite can no longer write to your real install** ([#388](https://github.com/dean0x/devflow/issues/388)) — every test file now runs under its own temp `HOME` with `DEVFLOW_DIR`, `CLAUDE_CODE_DIR` and `CLAUDE_CONFIG_DIR` unset (`tests/setup/isolate-env.ts`), and it fails loudly if that `HOME` is ever the real one. Spawned CLIs and hooks get their env from a shared `sandboxEnv(home)` allowlist rather than a copy of `process.env`. A canary test proves that an exported `CLAUDE_CONFIG_DIR` / `DEVFLOW_DIR` stays empty while `init` runs, and a red probe proves those variables really do redirect writes when left in place.
+- **CI runs the shell-hook suites under macOS `/bin/bash` 3.2** — a new `macos-bash32-hooks` job puts `/bin/bash` first on `PATH` and refuses to run unless `bash --version` reports 3.2, so a bash-4-only construct in a hook fails in CI instead of on a Mac.
+- **Install snapshots and an installed-hook matrix pin what devflow writes** ([#388](https://github.com/dean0x/devflow/issues/388)) — `tests/install-snapshot.test.ts` installs the built CLI into temp sandboxes for three configs (`--recommended`; `--tracker jira --compliance hipaa`; every `--no-*` switch) and compares normalised goldens: the HOME and repo walks with exec bits, `settings.json`, the manifest, what a second `init` changes, and what a non-interactive `uninstall` leaves behind. Every installed hook command also runs via `sh -c` in a repo root, a subdirectory, a linked worktree and a non-git directory, one test per cell, against `hook-matrix.txt`. A second `init` with the same argv must change nothing the snapshot records. The goldens record today's behaviour, bugs included: hooks create `.devflow/` and `.gitignore` in a non-git directory and in a linked worktree. Regenerate with `npm run test:golden:update -- install-snapshot`.
+
 ---
 
 ## [2.5.0] - 2026-09-27

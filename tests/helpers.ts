@@ -8,6 +8,7 @@ import { getAllAgentNames } from '../src/core/plugins.js'
 import { agentSourceDirs, compiledSkillRefsDir } from '../src/core/assets.js'
 import { MAX_REFERENCE_SWEEP_DEPTH } from '../src/core/reference-sweep.js'
 import { PR_HOST_DESTINATION_ROOT } from '../src/core/mds-variants.js'
+import { assertTempHome } from './setup/home-isolation.js'
 
 export const ROOT = path.resolve(import.meta.dirname, '..')
 
@@ -140,6 +141,32 @@ export function requireBuiltCli(root: string = ROOT): string {
     )
   }
   return cliPath
+}
+
+/**
+ * The only parent variables a sandboxed child inherits: what locates binaries,
+ * temp space and locale. Nothing here can redirect a devflow or Claude Code write.
+ */
+export const SANDBOX_ENV_ALLOWLIST = [
+  'PATH', 'TMPDIR', 'TMP', 'TEMP', 'LANG', 'LC_ALL', 'LC_CTYPE', 'TZ', 'TERM', 'SHELL', 'USER', 'LOGNAME',
+] as const
+
+/**
+ * Build a child-process env for a spawned devflow CLI or hook with HOME pinned to
+ * `home` (D-TEST-HOME-ISOLATION). Built from `SANDBOX_ENV_ALLOWLIST`, never by
+ * spreading `process.env`, so an inherited `DEVFLOW_DIR`, `CLAUDE_CODE_DIR` or
+ * `CLAUDE_CONFIG_DIR` cannot reach the child. Throws when `home` is a real home or
+ * lies outside `os.tmpdir()` (PF-060: asserted, not trusted). `extra` is applied
+ * last, so a caller that deliberately sets a variable does so in plain sight.
+ */
+export function sandboxEnv(home: string, extra: Readonly<Record<string, string>> = {}): NodeJS.ProcessEnv {
+  assertTempHome(home)
+  const inherited: Record<string, string> = {}
+  for (const key of SANDBOX_ENV_ALLOWLIST) {
+    const value = process.env[key]
+    if (value !== undefined) inherited[key] = value
+  }
+  return { ...inherited, HOME: home, USERPROFILE: home, FORCE_COLOR: '0', NO_COLOR: '1', CI: '1', ...extra }
 }
 
 export function loadFile(relPath: string): string {

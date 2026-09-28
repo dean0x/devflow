@@ -1636,11 +1636,22 @@ export async function composeScripts(scriptsTarget: string): Promise<void> {
   await fs.mkdir(scriptsTarget, { recursive: true });
 
   // (a) src/assets/scripts/ verbatim
+  //
+  // D-SCRIPTS-EXEC-SCOPE: only what this step copied is made executable — each of the
+  // source tree's top-level entries, at its destination. A chmod over the whole target
+  // would also reach what (b) and (c) wrote there on an earlier run (package.json, the
+  // mirrored dist/hud/ closure), so a re-run gave package.json an exec bit the first
+  // run never did and re-init stopped being a no-op on disk (#388 AC-3). Scoping the
+  // chmod to the copied entries makes the first and every later run agree.
   const srcScripts = scriptsDir();
   try {
     await copyDirectory(srcScripts, scriptsTarget);
     if (process.platform !== 'win32') {
-      await chmodRecursive(scriptsTarget, 0o755);
+      for (const entry of await fs.readdir(srcScripts, { withFileTypes: true })) {
+        const copied = path.join(scriptsTarget, entry.name);
+        if (entry.isDirectory()) await chmodRecursive(copied, 0o755);
+        else if (entry.isFile()) await fs.chmod(copied, 0o755);
+      }
     }
   } catch { /* scripts dir may not exist yet during development */ }
 

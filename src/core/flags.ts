@@ -1460,7 +1460,40 @@ export function convergeFlagsIntoSettings(
 
   // ── Step 3: strip all managed keys, then apply the folded record ──────────
   const stripped = stripFlags(settingsJson);
-  const settings = applyFlags(stripped, folded);
+  const applied = JSON.parse(applyFlags(stripped, folded)) as Record<string, unknown>;
 
-  return { settings, record: folded };
+  // ── Step 4: restore the pre-strip key order (D-KEY-ORDER) ────────────────
+  const ordered = orderKeysLike(parsed, applied);
+  const beforeEnv = asPlainObject(parsed.env);
+  const afterEnv = asPlainObject(ordered.env);
+  const settings = beforeEnv && afterEnv
+    ? { ...ordered, env: orderKeysLike(beforeEnv, afterEnv) }
+    : ordered;
+
+  return { settings: JSON.stringify(settings, null, 2) + '\n', record: folded };
+}
+
+/**
+ * Return `after`'s entries ordered as `before` had them: every key `before` held,
+ * in `before`'s order, then the keys only `after` holds, in `after`'s order.
+ *
+ * D-KEY-ORDER: strip-then-apply deletes every managed key and re-adds it, so each
+ * one lands after whatever key followed it on disk. init merges the security deny
+ * list AFTER the flags, which appends `permissions` behind them; a second init then
+ * moved the flags behind `permissions` and re-init stopped being a no-op on disk
+ * (#388 AC-3). Keeping the pre-converge order makes the first run's order the stable
+ * one: a key that stays keeps its place, a key the record newly sets is appended, a
+ * key it drops is simply absent. Values are `after`'s — only the order is borrowed.
+ *
+ * `Object.fromEntries` defines each key as an own data property, so a `__proto__`
+ * key parsed from settings.json stays a key rather than becoming the prototype.
+ */
+function orderKeysLike(
+  before: Record<string, unknown>,
+  after: Record<string, unknown>,
+): Record<string, unknown> {
+  const has = (o: Record<string, unknown>, k: string): boolean => Object.prototype.hasOwnProperty.call(o, k);
+  const kept = Object.keys(before).filter(k => has(after, k));
+  const added = Object.keys(after).filter(k => !has(before, k));
+  return Object.fromEntries([...kept, ...added].map(k => [k, after[k]]));
 }

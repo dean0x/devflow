@@ -5,6 +5,7 @@
  * Usage: npm run test:golden:update -- <target>
  *        npm run test:golden:update -- github-status-lines --unfreeze  (frozen fixture)
  *        npm run test:golden:update -- <target> --out-dir <dir>
+ *        npm run test:golden:update -- install-snapshot [--only <config>[,<config>]]
  *
  * A target is required. Without one, exits non-zero and prints usage.
  * The target `github-status-lines` is a frozen fixture and is refused without
@@ -21,12 +22,19 @@
  * DR-03 lifecycle rule: the fixture is frozen; regenerating it takes --unfreeze
  * AND a fresh explicit authorisation. Three have been granted and all three are
  * spent — see the authorisation log in tests/goldens/github-status-lines.test.ts.
+ *
+ * `install-snapshot` (#388) writes `install-snapshot-{config}.txt` for every config
+ * in INSTALL_CONFIGS plus `hook-matrix.txt`, by installing the BUILT CLI into temp
+ * sandboxes (run `npm run build` first). `--only` narrows it to named configs; the
+ * matrix is written only when its config (github) is among them. Its goldens change
+ * only in fixture-only `test(snapshot):` commits.
  */
 
 import { writeFileSync, mkdirSync } from 'fs'
 import * as path from 'path'
 import { fileURLToPath } from 'url'
 import { extractStatusLines, resolveAgentSource } from '../tests/helpers.js'
+import { INSTALL_CONFIGS, findConfig, writeInstallSnapshotGoldens } from '../tests/install-snapshot-helpers.js'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const ROOT = path.resolve(__dirname, '..')
@@ -41,17 +49,23 @@ const FROZEN_LIFECYCLE_RULE =
 const args = process.argv.slice(2)
 const hasUnfreeze = args.includes('--unfreeze')
 
-// --out-dir consumes the following argument, so it must not be mistaken for the
-// target. Parse it out before picking the positional target.
-const outDirIndex = args.indexOf('--out-dir')
-const outDirArg = outDirIndex === -1 ? null : args[outDirIndex + 1]
-if (outDirIndex !== -1 && (!outDirArg || outDirArg.startsWith('--'))) {
-  console.error('Error: --out-dir requires a directory argument.')
-  process.exit(1)
+// --out-dir and --only consume the following argument, so neither value may be
+// mistaken for the target. Parse them out before picking the positional target.
+function valueFlag(name: string, what: string): { value: string | null; valueIndex: number } {
+  const index = args.indexOf(name)
+  if (index === -1) return { value: null, valueIndex: -1 }
+  const value = args[index + 1]
+  if (!value || value.startsWith('--')) {
+    console.error(`Error: ${name} requires ${what}.`)
+    process.exit(1)
+  }
+  return { value, valueIndex: index + 1 }
 }
-const outDirValueIndex = outDirIndex === -1 ? -1 : outDirIndex + 1
+const outDir = valueFlag('--out-dir', 'a directory argument')
+const only = valueFlag('--only', 'a comma-separated config list')
+const outDirArg = outDir.value
 const positional = args.filter(
-  (a: string, i: number) => !a.startsWith('--') && i !== outDirValueIndex,
+  (a: string, i: number) => !a.startsWith('--') && i !== outDir.valueIndex && i !== only.valueIndex,
 )
 const targetArg = positional[0]
 
@@ -64,8 +78,14 @@ if (!targetArg) {
   console.error('Usage: npm run test:golden:update -- <target>')
   console.error('       npm run test:golden:update -- git-agent')
   console.error('       npm run test:golden:update -- github-status-lines --unfreeze')
+  console.error('       npm run test:golden:update -- install-snapshot [--only <config>[,<config>]]')
   console.error('')
-  console.error('Available targets: git-agent, github-status-lines')
+  console.error('Available targets: git-agent, github-status-lines, install-snapshot')
+  process.exit(1)
+}
+
+if (only.value !== null && targetArg !== 'install-snapshot') {
+  console.error('Error: --only applies to the install-snapshot target alone.')
   process.exit(1)
 }
 
@@ -96,8 +116,11 @@ if (targetArg === 'git-agent') {
   const dst = path.join(destDir, 'github-status-lines.txt')
   writeFileSync(dst, content, 'utf-8')
   console.log(`Written: ${dst} (${content.length} chars)`)
+} else if (targetArg === 'install-snapshot') {
+  const configs = only.value === null ? INSTALL_CONFIGS : only.value.split(',').map(findConfig)
+  for (const dst of writeInstallSnapshotGoldens(destDir, configs)) console.log(`Written: ${dst}`)
 } else {
   console.error(`Unknown target: '${targetArg}'`)
-  console.error('Available targets: git-agent, github-status-lines')
+  console.error('Available targets: git-agent, github-status-lines, install-snapshot')
   process.exit(1)
 }

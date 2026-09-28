@@ -944,9 +944,9 @@ export const WORKFLOW_ORDER: readonly string[] = [
 
 /**
  * Plugin names excluded from the init multiselect buckets.
- * These are always installed regardless of user selection:
+ * init adds them itself rather than offering them:
  *   - devflow-core-skills  (always installed, non-optional)
- *   - devflow-ambient      (always installed, non-optional)
+ *   - devflow-ambient      (installed iff ambient mode is on — D-AMBIENT-FOLLOWS-SWITCH)
  *
  * Invariant: EXCLUDED ∩ optional === ∅ — no optional plugin may be excluded from
  * the init UI without a re-init carry mechanism to preserve it across full reinstalls.
@@ -960,7 +960,7 @@ export const EXCLUDED: ReadonlySet<string> = new Set(['devflow-core-skills', 'de
  *
  * Excluded from both buckets (not selectable at init):
  *   - devflow-core-skills  (always installed)
- *   - devflow-ambient      (always installed)
+ *   - devflow-ambient      (installed iff ambient mode is on)
  *
  * Pure function — does not mutate the input array; preserves DEVFLOW_PLUGINS
  * ordering within each bucket; deterministic; no I/O.
