@@ -72,8 +72,8 @@ AND `.devflow/config.json` `features.<name>` (personal, per worktree), where onl
   `tests/fixtures/settings-switch-table.ts` runs against both (TP-49).
 - The CLI's `--status` via `readMachineFeature(devflowDir, feature)`, plus an
   `Effective here: disabled (<file>)` line when a repository file narrows.
-- The knowledge write-back gate via the `knowledge_writeback` MDS partial (manifest only until
-  it consumes the settings line's `KNOWLEDGE=`).
+- The knowledge write-back gate via the `knowledge_writeback` MDS partial, which takes
+  `KNOWLEDGE=` from the settings line (`_partials/_settings.mds`) and reads no file itself.
 
 **Why narrow-only**: per-repo toggles were a leftover of the per-repo-install era — `init --no-<feature>`
 recorded "off" in one repo's manifest while every OTHER repo, reading its own
@@ -520,7 +520,7 @@ Do not rename them: `decisions.md`/`pitfalls.md` (rendered output), `decisions-l
 | `src/cli/commands/init.ts` | `drainDisabledFeatureQueues` (D-INIT-DRAIN-AFTER-SWITCH), `D-HUD-ONLY-PRESERVE`, the one `manifestData.features` write site |
 | `src/hud/components/learning-counts.ts` | HUD counts from `decisions-ledger.jsonl` |
 | `src/core/ledger-root.ts` | `getLedgerRoot` — the CLI/HUD twin of the hooks' `DF_LEDGER_ROOT` |
-| `src/assets/commands/_partials/_knowledge.mds` | `knowledge_load()`/`knowledge_writeback()` — write-back reads `features.knowledge` directly |
+| `src/assets/commands/_partials/_knowledge.mds` | `knowledge_load()`/`knowledge_writeback()` — write-back takes `KNOWLEDGE=` from the settings line |
 | `src/assets/commands/_partials/_decisions.mds` | `decisions_load()` macro (plain file Read per ADR-007) |
 | `src/assets/scripts/hooks/decisions-usage-scan.cjs` | Citation counter (D29 grep-first gate) |
 | `tests/seams/tracker-key-path.test.ts`, `tests/seams/tracker-claim-staleness.test.ts` | Pin key-path parity and the shared claim-staleness bound |
@@ -541,6 +541,6 @@ Do not rename them: `decisions.md`/`pitfalls.md` (rendered output), `decisions-l
 - **PF-045** — simulating a missing shell tool via `PATH` subtraction is platform-dependent; `tests/seams/tracker-key-path.test.ts` avoids it with a backend variable-switch override
 - **PF-062** — document the shape of any file that gates a suppressing action, and keep absent and malformed distinct from a value; the `.tracker.attempts` parse follows this directly
 - **PF-035** — a shell rewrite hook can silently substitute a lossy view for a literal file read; the load-bearing surface is exactly the Learning/Tracker agents' direct `.devflow` data-file consumption
-- `.devflow/features/feature-knowledge-system/KNOWLEDGE.md` — Knowledge agent write-back pattern (parallel write-through system); its opt-out gate now reads the same `features.knowledge` manifest key this KB documents
+- `.devflow/features/feature-knowledge-system/KNOWLEDGE.md` — Knowledge agent write-back pattern (parallel write-through system); its opt-out gate takes `KNOWLEDGE=` from the settings line, which folds the same `features.knowledge` switch this KB documents with the two repo files
 - `.devflow/features/ambient-orchestrator/KNOWLEDGE.md` — Ambient orchestrator that also uses `session-start-context` for charter injection
 - `.devflow/features/tracker-feature/KNOWLEDGE.md` — owns the tracker feature's full story (provider selection, the Tracker agent's schema/domain, the Git agent's reader-side preamble); this KB owns only the hook plumbing and the directive pattern shared with Section 2

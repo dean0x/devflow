@@ -129,14 +129,15 @@ That's it. The interactive wizard offers Recommended defaults or an Advanced flo
 
 ## Privacy & Sharing
 
-Everything Devflow generates lives under `.devflow/` — working memory, decisions and pitfalls, feature knowledge bases, naming conventions, docs and transient locks. On first use Devflow appends one block to your project's root `.gitignore`. It keeps per-developer runtime state on your machine and shares three things through git: the feature knowledge bases, the learned naming conventions and the team's [evidence policy](#evidence-policy):
+Everything Devflow generates lives under `.devflow/` — working memory, decisions and pitfalls, feature knowledge bases, naming conventions, docs and transient locks. On first use Devflow appends one block to your project's root `.gitignore`. It keeps per-developer runtime state on your machine and shares four things through git: the feature knowledge bases, the learned naming conventions, the team's [evidence policy](#evidence-policy) and the team's settings in `.devflow/project.json`:
 
 ```gitignore
 # Devflow runtime data — local by default (memory, learning, docs, locks).
 # Shared via git: feature knowledge bases under .devflow/features/ (index.md and
-# every {slug}/KNOWLEDGE.md), .devflow/conventions.md (naming authority) and
-# .devflow/policy.json (evidence policy). To stop sharing the first two, re-add
-# `.devflow/features/` or `.devflow/conventions.md` to your own .gitignore.
+# every {slug}/KNOWLEDGE.md), .devflow/conventions.md (naming authority),
+# .devflow/policy.json (evidence policy) and .devflow/project.json (team settings).
+# To stop sharing the first two, re-add `.devflow/features/` or
+# `.devflow/conventions.md` to your own .gitignore.
 .devflow/*
 !.devflow/features/
 .devflow/features/*
@@ -146,6 +147,7 @@ Everything Devflow generates lives under `.devflow/` — working memory, decisio
 !.devflow/features/*/KNOWLEDGE.md
 !.devflow/conventions.md
 !.devflow/policy.json
+!.devflow/project.json
 .claudeignore
 ```
 
@@ -174,17 +176,34 @@ To keep the knowledge bases or conventions local, add `.devflow/features/` or `.
 
 See [docs/commands.md](https://github.com/dean0x/devflow/blob/main/docs/commands.md) for detailed usage.
 
-**PR-comment publication** for `/code-review` and `/resolve` is visibility-gated (counts-only stub on public repos by default) and every posted body is secret-scrubbed before it leaves your machine. Configure via `reviewPublication` (`auto`, `full` or `off`) in `.devflow/config.json`. Under a `required` evidence policy, `off` still posts the counts-only stub, so a record reaches the PR. The [test-plan evidence](#test-plan-evidence) comment is a stub unless `reviewPublication` is `full` — details in [docs/commands.md](https://github.com/dean0x/devflow/blob/main/docs/commands.md).
+**PR-comment publication** for `/code-review` and `/resolve` is visibility-gated (counts-only stub on public repos by default) and every posted body is secret-scrubbed before it leaves your machine. Configure via `reviewPublication` (`auto`, `full` or `off`) in your personal `.devflow/config.json`; a team value in [`.devflow/project.json`](#team-settings) is a ceiling yours cannot raise. Under a `required` evidence policy, `off` still posts the counts-only stub, so a record reaches the PR. The [test-plan evidence](#test-plan-evidence) comment is a stub unless `reviewPublication` is `full` — details in [docs/commands.md](https://github.com/dean0x/devflow/blob/main/docs/commands.md).
+
+## Team settings
+
+A repository can commit `.devflow/project.json` to settle team-wide choices. Every key is optional, unknown keys are ignored, and devflow never writes the file:
+
+```json
+{"version":1,"evidence":"required","compliance":["hipaa"],
+ "tracker":{"provider":"jira","site":"https://acme.atlassian.net","key":"ACME"},
+ "reviewPublication":"auto","features":{"learning":false}}
+```
+
+- `evidence` is the [evidence policy](#evidence-policy); `compliance` names the regulatory frameworks the repository answers to, and its presence raises the evidence floor to `required`.
+- `tracker` selects the repository's issue tracker. Your personal `.devflow/config.json` may only narrow it, to `github` or to the same provider.
+- `reviewPublication` is a ceiling: your personal value can lower it, never raise it.
+- `features` can switch memory, learning or knowledge off for this repository, never back on. Your personal `config.json` can do the same for you.
+
+Each key is checked on its own, so one bad value never disables the rest: a bad `evidence` resolves to `required`, a bad `reviewPublication` to `off`, a bad `compliance` list to the generic lens. Commands never read the file themselves — one local resolver folds it with your `config.json` and the machine settings, without touching the network.
 
 ## Evidence policy
 
-How much evidence a change must carry is a team decision, so it lives in a file the team commits: `.devflow/policy.json`, read from the repository's default branch.
+How much evidence a change must carry is a team decision, so it lives in a file the team commits, read from the repository's default branch: the `evidence` key of [`.devflow/project.json`](#team-settings), or `.devflow/policy.json` where `project.json` has no `evidence` key.
 
 ```json
 {"version":1,"evidencePolicy":"required"}
 ```
 
-The file holds exactly two keys: `version`, always `1`, and `evidencePolicy`, either `required` or `standard`. Anything else — another key, a duplicate key, a byte-order mark, more than 4 KiB — makes the file invalid, and an invalid file resolves to `required`.
+`policy.json` holds exactly two keys: `version`, always `1`, and `evidencePolicy`, either `required` or `standard`. Anything else — another key, a duplicate key, a byte-order mark, more than 4 KiB — makes the file invalid, and an invalid file resolves to `required`.
 
 | | `standard` | `required` |
 |---|---|---|
@@ -201,9 +220,10 @@ The file holds exactly two keys: `version`, always `1`, and `evidencePolicy`, ei
 
 **The stricter value wins.** The default branch's copy is the authority, so a feature branch that commits a weaker policy is still judged by the default branch's; the difference shows as a `pr-changes-policy` warning. Local sources can raise the policy but never lower it: enabled compliance raises a committed `standard` to `required` on that machine. Every failure — git not answering, an invalid file, a resolver that cannot run — resolves to `required`. Offline, devflow reads the local copies instead and flags the result `remote-unavailable`.
 
-**Commit it yourself.** The CLI never writes `policy.json`. `devflow compliance --enable` and `--set` print the file for you to commit, and `devflow compliance --status` shows the policy resolved for the current repository and where it came from. The `.gitignore` block above keeps the file shareable. Guard it like any other policy file, for example with a CODEOWNERS entry:
+**Commit it yourself.** The CLI never writes `project.json` or `policy.json`. `devflow compliance --enable` and `--set` print a `project.json` for you to commit, and `devflow compliance --status` shows the policy resolved for the current repository and where it came from. The `.gitignore` block above keeps both files shareable. Guard it like any other policy file, for example with a CODEOWNERS entry:
 
 ```text
+/.devflow/project.json @your-org/maintainers
 /.devflow/policy.json @your-org/maintainers
 ```
 
@@ -253,7 +273,7 @@ npx devflow-kit init                    # Install (interactive wizard)
 npx devflow-kit init --plugin=implement # Install specific plugin
 npx devflow-kit ambient --enable        # Toggle ambient mode (orchestrator)
 npx devflow-kit learning --enable       # Toggle decision/pitfall tracking (all projects)
-npx devflow-kit compliance --enable     # Enable compliance (pick frameworks); prints the policy.json to commit
+npx devflow-kit compliance --enable     # Enable compliance (pick frameworks); prints the project.json to commit
 npx devflow-kit compliance --status     # Show compliance state and this repo's evidence policy
 npx devflow-kit tracker --set jira       # Pick the issue tracker (github | jira | linear)
 npx devflow-kit tracker --status         # Show provider, learned conventions, installed mechanics

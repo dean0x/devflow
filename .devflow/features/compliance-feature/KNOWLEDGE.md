@@ -160,7 +160,7 @@ Shared helpers for the compliance step in `devflow init`. All prompt-rendering l
 
 ### COMPLIANCE_SKILL_INSTALLED gate (partial-based)
 
-All host commands import `compliance_gate()` from `src/assets/commands/_partials/_compliance.mds`. The partial expands to a single file-existence check against `~/.claude/skills/devflow:compliance/SKILL.md`. This replaced 8 inline copies of the same check — a single-source guarantee that the check logic cannot drift between commands.
+All host commands import `compliance_gate()` from `src/assets/commands/_partials/_compliance.mds`. The partial expands to a single file-existence check against `~/.claude/skills/devflow:compliance/SKILL.md`, then resolves the settings line (`_partials/_settings.mds`, alias-imported) and sets `COMPLIANCE` from it — `off`, `generic`, or the machine ∪ repository framework ids. Since #392 nothing gates on `COMPLIANCE` yet: the review lens still keys on `COMPLIANCE_SKILL_INSTALLED`, and per-id reference loading is PR6's (#393). This replaced 8 inline copies of the same check — a single-source guarantee that the check logic cannot drift between commands.
 
 Host command usage:
 
@@ -396,7 +396,7 @@ Step 5 composes the release notes body: `CHANGELOG_CONTENT` first, then an optio
 | `src/cli/commands/compliance-prompts.ts` | Shared wizard helpers: `shouldRunComplianceStep`, `runComplianceStep`, `CompliancePromptIO`, `buildClackCompliancePrompts`, `frameworkChoices`, `FRAMEWORK_SELECT_MESSAGE`, `formatComplianceSummary` |
 | `src/core/plugins.ts` | `FEATURE_OWNED_SKILLS`, `FEATURE_OWNED_RULES`, `DELETED_PLUGIN_NAMES`, `resolveFeatureRedirect` |
 | `src/cli/commands/rules.ts` | `seedRuleShadow` (Tier 1 skipped for FEATURE_OWNED_RULES; Tier 2 = canonical source preserves placeholder) |
-| `src/assets/commands/_partials/_compliance.mds` | `compliance_gate()` partial — single-source COMPLIANCE_SKILL_INSTALLED resolution for all 4 host commands |
+| `src/assets/commands/_partials/_compliance.mds` | `compliance_gate()` partial — single-source COMPLIANCE_SKILL_INSTALLED resolution, plus `COMPLIANCE` from the settings line |
 | `src/assets/agents/git.mds` (compiles to `dist/agents/git.md`) | The traceability **contract**: D4/D11 legend, D4 invariants, D9 gate, D3 legend row, per-op `**Input:**`/`**Output:**`/`**Mechanics:**`/`**PR mechanics:**` pointers, Tracker provider resolution + input contract preamble |
 | `src/assets/mds/tracker/_github.mds` | The GitHub **mechanics** for the 10 `TRACKER_GITHUB_OPS` — `### Process` bodies, `### Provider signals (GitHub)` (D4 detectors, D11 scrub-then-post chain), `### Traceability Issue Template (D3)` |
 | `src/assets/mds/git/_pr.mds` (compiles to `dist/skills/git/references/pr/{op}.md`) | The provider-independent **PR-host mechanics** for the 8 `PR_HOST_OPS` (`ensure-pr-ready`, `validate-branch`, `post-review-summary`, `check-ci-status`, `fetch-review-threads`, `resolve-review-threads`, `post-resolution-summary`, `check-merge-readiness`) — installed under every provider; added by #326 / PR #353 |
