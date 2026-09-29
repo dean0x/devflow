@@ -397,6 +397,64 @@ describe('hasProxyHooks', () => {
   });
 });
 
+// ─── D-EXACT-HOOK-OWNER: ensure-proxy is matched exactly (#391) ─────────────
+
+describe('ensure-proxy hook ownership is exact (#391)', () => {
+  const RUN = `${DEVFLOW_DIR}/scripts/hooks/run-hook ensure-proxy`;
+  /** User groups whose every hook mentions ensure-proxy; none is devflow's. */
+  const USER_SESSION = { matcher: 'startup', hooks: [
+    { type: 'command', command: '~/bin/ensure-proxy.sh', timeout: 3 },
+    { type: 'command', command: '/opt/tools/run-hook ensure-proxy' },
+  ] };
+  const USER_PROMPT = { hooks: [{ type: 'command', command: 'echo ensure-proxy >> /tmp/log' }] };
+  const userSettings = (): Settings => ({ hooks: { SessionStart: [USER_SESSION], UserPromptSubmit: [USER_PROMPT] } });
+
+  it('user hooks that contain the word ensure-proxy are not the proxy hook', () => {
+    expect(hasProxyHooks(userSettings())).toBe(false);
+  });
+
+  it('disable on settings holding only user groups changes nothing', () => {
+    const settings = userSettings();
+    expect(removeProxyHooks(settings)).toBe(false);
+    expect(settings).toEqual(userSettings());
+  });
+
+  it('enable registers devflow\'s hook on both events after the untouched user groups; disable restores them', () => {
+    const settings = userSettings();
+
+    expect(addProxyHooks(settings, DEVFLOW_DIR)).toBe(true);
+    expect(settings.hooks?.SessionStart).toEqual([USER_SESSION, { hooks: [{ type: 'command', command: RUN, timeout: 15 }] }]);
+    expect(settings.hooks?.UserPromptSubmit).toEqual([USER_PROMPT, { hooks: [{ type: 'command', command: RUN, timeout: 15 }] }]);
+
+    expect(removeProxyHooks(settings)).toBe(true);
+    expect(settings).toEqual(userSettings());
+  });
+
+  it('removes only devflow\'s hook from a shared group and keeps the siblings in order', () => {
+    const settings: Settings = { hooks: { SessionStart: [{ hooks: [
+      { type: 'command', command: 'say hello' },
+      { type: 'command', command: RUN, timeout: 15 },
+      { type: 'command', command: 'say ready' },
+    ] }] } };
+
+    expect(removeProxyHooks(settings)).toBe(true);
+    expect(settings.hooks?.SessionStart).toEqual([{ hooks: [
+      { type: 'command', command: 'say hello' },
+      { type: 'command', command: 'say ready' },
+    ] }]);
+  });
+
+  it.each([
+    ['another directory', '/srv/old/.devflow/scripts/hooks/run-hook ensure-proxy'],
+    ['a Windows path', 'C:\\Users\\u\\.devflow\\scripts\\hooks\\run-hook ensure-proxy'],
+  ])('still recognises and removes devflow\'s hook registered under %s', (_label, command) => {
+    const settings: Settings = { hooks: { UserPromptSubmit: [{ hooks: [{ type: 'command', command }] }] } };
+    expect(hasProxyHooks(settings)).toBe(true);
+    expect(removeProxyHooks(settings)).toBe(true);
+    expect(settings.hooks).toBeUndefined();
+  });
+});
+
 // ─── applyDisableToSettings ──────────────────────────────────────────────────
 //
 // Regression for the || short-circuit bug: when hooks were present, the old

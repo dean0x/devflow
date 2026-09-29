@@ -1,5 +1,10 @@
-import * as path from 'path';
-import type { Settings, HookMatcher } from '../../targets/claude-code/hooks.js';
+import {
+  devflowHookOwner,
+  hasHook,
+  removeHooks,
+  runHookCommand,
+  type Settings,
+} from '../../targets/claude-code/hooks.js';
 
 // ─── Context hook utilities ────────────────────────────────────────────────
 //
@@ -7,6 +12,14 @@ import type { Settings, HookMatcher } from '../../targets/claude-code/hooks.js';
 // init, removed by uninstall). It has internal sentinel awareness per feature.
 
 const CONTEXT_HOOK_MARKER = 'session-start-context';
+
+/**
+ * D-EXACT-HOOK-OWNER: the context hook is devflow's only when its command ends in
+ * `/scripts/hooks/run-hook session-start-context` (hooks.ts), under any directory.
+ * It has been registered through run-hook since it first shipped, so there is no
+ * legacy form to recognise.
+ */
+const isContextHook = devflowHookOwner([CONTEXT_HOOK_MARKER]);
 
 /**
  * Add the session-start-context hook to SessionStart in settings JSON.
@@ -18,27 +31,11 @@ export function addContextHook(settingsJson: string, devflowDir: string): string
   }
 
   const settings: Settings = JSON.parse(settingsJson);
-
-  if (!settings.hooks) {
-    settings.hooks = {};
-  }
-
-  const hookCommand = path.join(devflowDir, 'scripts', 'hooks', 'run-hook') + ` ${CONTEXT_HOOK_MARKER}`;
-  const newEntry: HookMatcher = {
-    hooks: [
-      {
-        type: 'command',
-        command: hookCommand,
-        timeout: 10,
-      },
-    ],
-  };
-
-  if (!settings.hooks.SessionStart) {
-    settings.hooks.SessionStart = [];
-  }
-
-  settings.hooks.SessionStart.push(newEntry);
+  settings.hooks ??= {};
+  settings.hooks.SessionStart ??= [];
+  settings.hooks.SessionStart.push({
+    hooks: [{ type: 'command', command: runHookCommand(devflowDir, CONTEXT_HOOK_MARKER), timeout: 10 }],
+  });
 
   return JSON.stringify(settings, null, 2) + '\n';
 }
@@ -46,32 +43,14 @@ export function addContextHook(settingsJson: string, devflowDir: string): string
 /**
  * Remove the session-start-context hook from settings JSON.
  * Idempotent — returns unchanged JSON if hook not present.
- * Preserves all other SessionStart hooks.
+ * Removes the single hook, so the other hooks of its matcher group and every
+ * other SessionStart group stay in place (D-EXACT-HOOK-OWNER).
  */
 export function removeContextHook(settingsJson: string): string {
   const settings: Settings = JSON.parse(settingsJson);
-
-  if (!settings.hooks?.SessionStart) {
+  if (!removeHooks(settings, 'SessionStart', isContextHook)) {
     return settingsJson;
   }
-
-  const before = settings.hooks.SessionStart.length;
-  settings.hooks.SessionStart = settings.hooks.SessionStart.filter(
-    (matcher) => !matcher.hooks.some((h) => h.command.includes(CONTEXT_HOOK_MARKER)),
-  );
-
-  if (settings.hooks.SessionStart.length === before) {
-    return settingsJson;
-  }
-
-  if (settings.hooks.SessionStart.length === 0) {
-    delete settings.hooks.SessionStart;
-  }
-
-  if (Object.keys(settings.hooks).length === 0) {
-    delete settings.hooks;
-  }
-
   return JSON.stringify(settings, null, 2) + '\n';
 }
 
@@ -81,7 +60,5 @@ export function removeContextHook(settingsJson: string): string {
  */
 export function hasContextHook(input: string | Settings): boolean {
   const settings: Settings = typeof input === 'string' ? JSON.parse(input) : input;
-  return settings.hooks?.SessionStart?.some(
-    (matcher) => matcher.hooks.some((h) => h.command.includes(CONTEXT_HOOK_MARKER)),
-  ) ?? false;
+  return hasHook(settings, 'SessionStart', isContextHook);
 }

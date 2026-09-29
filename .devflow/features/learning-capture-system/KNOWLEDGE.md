@@ -315,6 +315,21 @@ mismatch). **`devflow knowledge --enable/--disable/--status`** (`knowledge/toggl
 router into `handleToggle` for `features.knowledge`; the CRUD subcommands (create/check/refresh/
 remove) are deleted — KBs are created only via write-through from `knowledge_writeback`.
 
+**Hook ownership (D-EXACT-HOOK-OWNER, #391).** `memory.ts`, `capture.ts`, `context.ts` and
+`legacy-hooks.ts` identify their hooks through the shared helpers in
+`src/targets/claude-code/hooks.ts`: a hook is devflow's only when its command ENDS in
+`/scripts/hooks/run-hook <marker>` (`devflowHookOwner`) under any directory, never because it
+contains the marker word, and `removeHooks` takes single hooks out of a matcher group, dropping
+the group only when it ends up empty. `memory.ts`'s `LEGACY_HOOK_SUFFIXES` names each ending an
+earlier release registered, per event: the v1 (<= v1.2) direct scripts
+`/scripts/hooks/{stop-update-memory,session-start-memory,pre-compact-memory}.sh` and the retired
+run-hook markers (prompt-capture-memory, stop-update-memory, stop-update-learning,
+session-end-learning, session-end-decisions, session-end-knowledge-refresh, sidecar-*, dream-*).
+Those are removed on every converge but never counted as a current memory hook. Capture, context
+and spawn-dream-worker only ever shipped through run-hook, so they have no legacy form. Remove-then-add
+keeps a user's group in place and appends devflow's hook after it, so the Stop-array
+append-before-spawn order (capture-turn before memory-worker) still holds.
+
 ### devflow init and the Machine-Wide Switches
 
 **D-INIT-DRAIN-AFTER-SWITCH**: `drainDisabledFeatureQueues` drains this repo's memory/learning
@@ -474,7 +489,8 @@ Do not rename them: `decisions.md`/`pitfalls.md` (rendered output), `decisions-l
 | `src/core/learning-tuning-config.ts` | Tuning config merge (project → global → defaults) — unrelated to the on/off switch |
 | `src/core/project-paths.ts` | Path construction — single source of truth, mirrored in `src/assets/scripts/hooks/lib/project-paths.cjs` |
 | `src/cli/commands/learning.ts` | `devflow learning` CLI — `writeMachineFeature`/`readMachineFeature` |
-| `src/cli/commands/memory.ts` | `devflow memory` CLI — `convergeMemoryHooks` + `writeMachineFeature`; `drainMemoryQueue` |
+| `src/cli/commands/memory.ts` | `devflow memory` CLI — `convergeMemoryHooks` + `writeMachineFeature`; `drainMemoryQueue`; `LEGACY_HOOK_SUFFIXES` |
+| `src/targets/claude-code/hooks.ts` | Shared hook types + D-EXACT-HOOK-OWNER helpers: `devflowHookOwner`, `endsWithAny`, `removeHooks`, `hasHook`, `ensureHook`, `runHookCommand` |
 | `src/cli/commands/knowledge/toggle.ts` | `devflow knowledge --enable/--disable/--status` |
 | `src/cli/commands/init.ts` | `drainDisabledFeatureQueues` (D-INIT-DRAIN-AFTER-SWITCH), `D-HUD-ONLY-PRESERVE`, the one `manifestData.features` write site |
 | `src/hud/components/learning-counts.ts` | HUD counts from `decisions-ledger.jsonl` |

@@ -1,5 +1,13 @@
-import * as path from 'path';
-import type { Settings, HookMatcher } from '../../targets/claude-code/hooks.js';
+import {
+  devflowHookOwner,
+  ensureHook,
+  hasHook,
+  removeHooks,
+  runHookCommand,
+  type HookMatcher,
+  type HookPredicate,
+  type Settings,
+} from '../../targets/claude-code/hooks.js';
 
 // ─── Capture hook utilities ────────────────────────────────────────────────
 //
@@ -25,7 +33,7 @@ const CAPTURE_QUESTION_MARKER = 'capture-question';
 const CAPTURE_QUESTION_MATCHER = 'AskUserQuestion';
 
 /**
- * Map of hook event type → filename marker for the capture hooks.
+ * Map of hook event type → run-hook marker for the capture hooks.
  * Three hooks total: UserPromptSubmit, Stop, PostToolUse (matcher-scoped).
  */
 const CAPTURE_HOOK_CONFIG: Record<string, string> = {
@@ -33,6 +41,16 @@ const CAPTURE_HOOK_CONFIG: Record<string, string> = {
   Stop: CAPTURE_TURN_MARKER,
   PostToolUse: CAPTURE_QUESTION_MARKER,
 };
+
+/**
+ * D-EXACT-HOOK-OWNER: a capture hook is devflow's only when its command ends in
+ * `/scripts/hooks/run-hook <marker>` (hooks.ts), under any directory. The capture
+ * hooks have been registered through run-hook since they first shipped, so there
+ * is no legacy form to recognise.
+ */
+function isCaptureHook(marker: string): HookPredicate {
+  return devflowHookOwner([marker]);
+}
 
 /**
  * Add all 3 capture hooks (UserPromptSubmit, Stop, PostToolUse) to settings JSON.
@@ -47,38 +65,14 @@ export function addCaptureHooks(settingsJson: string, devflowDir: string): strin
     return settingsJson;
   }
 
-  if (!settings.hooks) {
-    settings.hooks = {};
-  }
-
   for (const [hookType, marker] of Object.entries(CAPTURE_HOOK_CONFIG)) {
-    const existing = settings.hooks[hookType] ?? [];
-    const alreadyPresent = existing.some((matcher) =>
-      matcher.hooks.some((h) => h.command.includes(marker)),
-    );
-
-    if (!alreadyPresent) {
-      const hookCommand = path.join(devflowDir, 'scripts', 'hooks', 'run-hook') + ` ${marker}`;
-      const newEntry: HookMatcher = {
-        hooks: [
-          {
-            type: 'command',
-            command: hookCommand,
-            timeout: 10,
-          },
-        ],
-      };
-
-      if (hookType === 'PostToolUse') {
-        newEntry.matcher = CAPTURE_QUESTION_MATCHER;
-      }
-
-      if (!settings.hooks[hookType]) {
-        settings.hooks[hookType] = [];
-      }
-
-      settings.hooks[hookType].push(newEntry);
+    const newEntry: HookMatcher = {
+      hooks: [{ type: 'command', command: runHookCommand(devflowDir, marker), timeout: 10 }],
+    };
+    if (hookType === 'PostToolUse') {
+      newEntry.matcher = CAPTURE_QUESTION_MATCHER;
     }
+    ensureHook(settings, hookType, isCaptureHook(marker), newEntry);
   }
 
   return JSON.stringify(settings, null, 2) + '\n';
@@ -99,33 +93,11 @@ export function removeCaptureHooks(input: string | Settings): string {
     typeof input === 'string' ? input : JSON.stringify(input, null, 2) + '\n';
   const settings: Settings = typeof input === 'string' ? JSON.parse(input) : structuredClone(input);
 
-  if (!settings.hooks) {
-    return settingsJson;
-  }
-
   let changed = false;
-
   for (const [hookType, marker] of Object.entries(CAPTURE_HOOK_CONFIG)) {
-    if (!settings.hooks[hookType]) {
-      continue;
-    }
-
-    const before = settings.hooks[hookType].length;
-    settings.hooks[hookType] = settings.hooks[hookType].filter(
-      (matcher) => !matcher.hooks.some((h) => h.command.includes(marker)),
-    );
-
-    if (settings.hooks[hookType].length !== before) {
-      changed = true;
-    }
-
-    if (settings.hooks[hookType].length === 0) {
-      delete settings.hooks[hookType];
-    }
-  }
-
-  if (settings.hooks && Object.keys(settings.hooks).length === 0) {
-    delete settings.hooks;
+    // Evaluate every removal — never short-circuit (PF-015).
+    const removed = removeHooks(settings, hookType, isCaptureHook(marker));
+    changed = changed || removed;
   }
 
   if (!changed) {
@@ -149,17 +121,9 @@ export function hasCaptureHooks(input: string | Settings): boolean {
 export function countCaptureHooks(input: string | Settings): number {
   const settings: Settings = typeof input === 'string' ? JSON.parse(input) : input;
 
-  if (!settings.hooks) {
-    return 0;
-  }
-
   let count = 0;
-
   for (const [hookType, marker] of Object.entries(CAPTURE_HOOK_CONFIG)) {
-    const matchers = settings.hooks[hookType] ?? [];
-    if (matchers.some((matcher) => matcher.hooks.some((h) => h.command.includes(marker)))) {
-      count++;
-    }
+    if (hasHook(settings, hookType, isCaptureHook(marker))) count++;
   }
 
   return count;

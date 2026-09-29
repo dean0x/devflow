@@ -6,14 +6,46 @@ import color from 'picocolors';
 import { getClaudeDirectory, getDevFlowDirectory } from '../../targets/claude-code/claude-paths.js';
 import { syncManifestFeature } from '../../core/manifest.js';
 import { writeFileAtomicExclusive } from '../../core/fs-atomic.js';
-import type { HookMatcher, Settings } from '../../targets/claude-code/hooks.js';
+import {
+  HOOKS_DIR_SUFFIX,
+  endsWithAny,
+  ensureHook,
+  hasHook,
+  removeHooks,
+  runHookCommand,
+  runHookSuffix,
+  type HookPredicate,
+  type Settings,
+} from '../../targets/claude-code/hooks.js';
 
 const PREAMBLE_HOOK_MARKER = 'preamble';
-const LEGACY_HOOK_MARKER = 'ambient-prompt';
-/** Stale marker from previous installs — cleaned on disable/re-enable */
-const CLASSIFICATION_HOOK_MARKER = 'session-start-classification';
 /** SessionStart orchestrator charter hook — presence-gated by ambient toggle */
 const ORCHESTRATOR_HOOK_MARKER = 'session-start-orchestrator';
+
+/**
+ * The command endings of each ambient hook devflow has ever registered.
+ *
+ * D-AMBIENT-EXACT-HOOK — the ambient instance of D-EXACT-HOOK-OWNER (hooks.ts): a
+ * hook is devflow's when its command ENDS in one of these, under any directory — so
+ * installs made under a custom or repo-local devflow directory are still recognised —
+ * and never because it merely contains a marker word: a user's
+ * `~/bin/preamble-logger.sh` or `echo preamble` is theirs (applies ADR-024). The
+ * legacy forms are the pre-preamble `ambient-prompt` hook (first a bare
+ * `ambient-prompt.sh`, then through `run-hook`) and the retired
+ * `session-start-classification` hook, both still swept on enable and disable.
+ */
+const AMBIENT_HOOK_SUFFIXES = {
+  preamble: [runHookSuffix(PREAMBLE_HOOK_MARKER)],
+  legacyPrompt: [runHookSuffix('ambient-prompt'), `${HOOKS_DIR_SUFFIX}ambient-prompt.sh`],
+  classification: [runHookSuffix('session-start-classification')],
+  orchestrator: [runHookSuffix(ORCHESTRATOR_HOOK_MARKER)],
+} as const satisfies Record<string, readonly string[]>;
+
+const isPreamble = endsWithAny(AMBIENT_HOOK_SUFFIXES.preamble);
+const isLegacy = endsWithAny(AMBIENT_HOOK_SUFFIXES.legacyPrompt);
+const isAmbient = endsWithAny([...AMBIENT_HOOK_SUFFIXES.preamble, ...AMBIENT_HOOK_SUFFIXES.legacyPrompt]);
+const isClassification = endsWithAny(AMBIENT_HOOK_SUFFIXES.classification);
+const isOrchestrator = endsWithAny(AMBIENT_HOOK_SUFFIXES.orchestrator);
 
 /**
  * Path where the legacy commands rule was installed.
@@ -24,59 +56,6 @@ const ORCHESTRATOR_HOOK_MARKER = 'session-start-orchestrator';
  * legacy install wrote it.
  */
 export const COMMANDS_RULE_PATH = path.join(getClaudeDirectory(), 'rules', 'devflow', 'commands.md');
-
-/** Filter hook entries from a parsed Settings object for a given event. Returns true if any were removed. */
-function filterHookEntries(
-  settings: Settings,
-  eventName: string,
-  shouldRemove: (matcher: HookMatcher) => boolean,
-): boolean {
-  if (!settings.hooks?.[eventName]) return false;
-
-  const before = settings.hooks[eventName].length;
-  settings.hooks[eventName] = settings.hooks[eventName].filter(
-    (matcher) => !shouldRemove(matcher),
-  );
-
-  if (settings.hooks[eventName].length === before) return false;
-
-  if (settings.hooks[eventName].length === 0) {
-    delete settings.hooks[eventName];
-  }
-  if (Object.keys(settings.hooks).length === 0) {
-    delete settings.hooks;
-  }
-  return true;
-}
-
-/** Add a hook entry for an event if the marker is not already present. Returns true when an entry was added. */
-function ensureHook(settings: Settings, eventName: string, marker: string, entry: HookMatcher): boolean {
-  if (settings.hooks?.[eventName]?.some((m) => m.hooks.some((h) => h.command.includes(marker)))) {
-    return false;
-  }
-  settings.hooks ??= {};
-  settings.hooks[eventName] ??= [];
-  settings.hooks[eventName].push(entry);
-  return true;
-}
-
-function isLegacy(matcher: HookMatcher): boolean {
-  return matcher.hooks.some((h) => h.command.includes(LEGACY_HOOK_MARKER));
-}
-
-function isAmbient(matcher: HookMatcher): boolean {
-  return matcher.hooks.some((h) =>
-    h.command.includes(PREAMBLE_HOOK_MARKER) || h.command.includes(LEGACY_HOOK_MARKER),
-  );
-}
-
-function isClassification(matcher: HookMatcher): boolean {
-  return matcher.hooks.some((h) => h.command.includes(CLASSIFICATION_HOOK_MARKER));
-}
-
-function isOrchestrator(matcher: HookMatcher): boolean {
-  return matcher.hooks.some((h) => h.command.includes(ORCHESTRATOR_HOOK_MARKER));
-}
 
 /**
  * Remove the legacy commands awareness rule file left by prior installs.
@@ -96,29 +75,53 @@ export async function removeLegacyCommandsRule(): Promise<void> {
 }
 
 /**
+ * A predicate matching devflow's own hook (`isOurs`) registered with any command
+ * other than `canonical` — i.e. under a directory other than the one `canonical` names.
+ */
+function isMisdirected(isOurs: HookPredicate, canonical: string): HookPredicate {
+  return (hook) => isOurs(hook) && (hook.command ?? '').trim() !== canonical;
+}
+
+/**
  * Add the ambient hooks (preamble UserPromptSubmit + session-start-orchestrator SessionStart)
  * and remove any legacy commands rule. Removes any legacy `ambient-prompt` hook first.
  * Idempotent — each hook is checked before adding so enable repairs partial states.
  * Legacy rule purge runs unconditionally to ensure stale files are always cleaned up.
+ *
+ * D-AMBIENT-CANONICAL-DIR: enable converges on `devflowDir`. A preamble or
+ * orchestrator hook devflow registered under another directory (an earlier enable
+ * that inferred its directory from a user's Stop hook, or a retired custom
+ * directory) is removed and the hook re-registered at `devflowDir`. Only hooks
+ * matched exactly (D-AMBIENT-EXACT-HOOK) are touched, one hook at a time, so the
+ * user's hooks and their matcher-group siblings keep their places.
  */
 export async function addAmbientHook(settingsJson: string, devflowDir: string): Promise<string> {
   const settings: Settings = JSON.parse(settingsJson);
-  const removedLegacy = filterHookEntries(settings, 'UserPromptSubmit', isLegacy);
+  const preambleCommand = runHookCommand(devflowDir, PREAMBLE_HOOK_MARKER);
+  const orchestratorCommand = runHookCommand(devflowDir, ORCHESTRATOR_HOOK_MARKER);
+
+  const removedLegacy = removeHooks(settings, 'UserPromptSubmit', isLegacy);
   // Sweep stale classification hook from prior installs — symmetric with removeAmbientHook
-  const removedClassification = filterHookEntries(settings, 'SessionStart', isClassification);
+  const removedClassification = removeHooks(settings, 'SessionStart', isClassification);
+  const removedMisdirected = [
+    removeHooks(settings, 'UserPromptSubmit', isMisdirected(isPreamble, preambleCommand)),
+    removeHooks(settings, 'SessionStart', isMisdirected(isOrchestrator, orchestratorCommand)),
+  ].some(Boolean);
   const addedPreamble = ensureHook(
-    settings, 'UserPromptSubmit', PREAMBLE_HOOK_MARKER,
-    { hooks: [{ type: 'command', command: path.join(devflowDir, 'scripts', 'hooks', 'run-hook') + ' preamble', timeout: 5 }] },
+    settings, 'UserPromptSubmit', isPreamble,
+    { hooks: [{ type: 'command', command: preambleCommand, timeout: 5 }] },
   );
   const addedOrchestrator = ensureHook(
-    settings, 'SessionStart', ORCHESTRATOR_HOOK_MARKER,
-    { hooks: [{ type: 'command', command: path.join(devflowDir, 'scripts', 'hooks', 'run-hook') + ' session-start-orchestrator', timeout: 10 }] },
+    settings, 'SessionStart', isOrchestrator,
+    { hooks: [{ type: 'command', command: orchestratorCommand, timeout: 10 }] },
   );
 
   // Purge legacy commands rule (runs before early-return so stale files are always removed)
   await removeLegacyCommandsRule();
 
-  if (!removedLegacy && !removedClassification && !addedPreamble && !addedOrchestrator) return settingsJson;
+  if (!removedLegacy && !removedClassification && !removedMisdirected && !addedPreamble && !addedOrchestrator) {
+    return settingsJson;
+  }
   return JSON.stringify(settings, null, 2) + '\n';
 }
 
@@ -138,10 +141,10 @@ export async function removeAmbientHook(
   options: { purgeLegacyRule?: boolean } = {},
 ): Promise<string> {
   const settings: Settings = JSON.parse(settingsJson);
-  const removedPrompt = filterHookEntries(settings, 'UserPromptSubmit', isAmbient);
-  const removedOrchestrator = filterHookEntries(settings, 'SessionStart', isOrchestrator);
+  const removedPrompt = removeHooks(settings, 'UserPromptSubmit', isAmbient);
+  const removedOrchestrator = removeHooks(settings, 'SessionStart', isOrchestrator);
   // Clean up stale classification hooks from previous installs (no longer registered)
-  const removedClassification = filterHookEntries(settings, 'SessionStart', isClassification);
+  const removedClassification = removeHooks(settings, 'SessionStart', isClassification);
 
   // Purge legacy commands rule (runs before early-return so stale files are always removed)
   if (options.purgeLegacyRule !== false) await removeLegacyCommandsRule();
@@ -151,17 +154,27 @@ export async function removeAmbientHook(
 }
 
 /**
+ * Converge the ambient hooks in a settings JSON string to `enabled`.
+ *
+ * The one ambient transform `devflow init` applies inside its single settings
+ * read-modify-write pass: always remove-then-add, which upgrades a legacy
+ * `ambient-prompt` hook and re-points devflow's hooks at `devflowDir`. Both halves
+ * match hooks exactly (D-AMBIENT-EXACT-HOOK), so a user's own hooks — and their
+ * siblings in a shared matcher group — come through byte-identical.
+ */
+export async function convergeAmbientHooks(settingsJson: string, enabled: boolean, devflowDir: string): Promise<string> {
+  const cleaned = await removeAmbientHook(settingsJson);
+  return enabled ? addAmbientHook(cleaned, devflowDir) : cleaned;
+}
+
+/**
  * Check if the ambient hook (legacy or current) is registered in settings JSON or parsed Settings object.
  * Preamble-authoritative: returns true iff the UserPromptSubmit preamble hook is present.
  * Orchestrator-only (without preamble) is broken partial state → treated as disabled.
  */
 export function hasAmbientHook(input: string | Settings): boolean {
   const settings: Settings = typeof input === 'string' ? JSON.parse(input) : input;
-  return settings.hooks?.UserPromptSubmit?.some((matcher) =>
-    matcher.hooks.some((h) =>
-      h.command.includes(PREAMBLE_HOOK_MARKER) || h.command.includes(LEGACY_HOOK_MARKER),
-    ),
-  ) ?? false;
+  return hasHook(settings, 'UserPromptSubmit', isAmbient);
 }
 
 /**
@@ -169,9 +182,7 @@ export function hasAmbientHook(input: string | Settings): boolean {
  */
 function hasOrchestratorHook(input: string | Settings): boolean {
   const settings: Settings = typeof input === 'string' ? JSON.parse(input) : input;
-  return settings.hooks?.SessionStart?.some((matcher) =>
-    matcher.hooks.some((h) => h.command.includes(ORCHESTRATOR_HOOK_MARKER)),
-  ) ?? false;
+  return hasHook(settings, 'SessionStart', isOrchestrator);
 }
 
 interface AmbientOptions {
@@ -180,7 +191,13 @@ interface AmbientOptions {
   status?: boolean;
 }
 
-export const ambientCommand = new Command('ambient')
+/**
+ * Build a fresh Commander Command for the `ambient` subcommand.
+ * Exported for tests that need per-test isolation (Commander keeps parsed option
+ * values on the instance, so a reused command leaks options between runs).
+ */
+export function createAmbientCommand(): Command {
+  return new Command('ambient')
   .description('Enable or disable ambient mode (orchestrator charter + plan handoff)')
   .option('--enable', 'Register ambient mode hooks')
   .option('--disable', 'Remove ambient mode hooks')
@@ -238,25 +255,12 @@ export const ambientCommand = new Command('ambient')
       return;
     }
 
-    // Resolve devflow scripts directory.
-    // Primary: getDevFlowDirectory() — purpose-built, not coupled to hook path layout.
-    // Fallback: infer from Stop hook command path (legacy installs where getDevFlowDirectory
-    //   may not yet reflect the correct location).
-    let devflowDir: string = getDevFlowDirectory();
-    try {
-      const stopHook = parsedSettings.hooks?.Stop?.[0]?.hooks?.[0]?.command;
-      if (stopHook) {
-        const hookBinary = stopHook.split(' ')[0];
-        const inferred = path.resolve(hookBinary, '..', '..', '..');
-        // Only use inferred path when it differs from the canonical default —
-        // this handles legacy installs where the hook was installed to a non-standard location.
-        if (inferred !== devflowDir) {
-          devflowDir = inferred;
-        }
-      }
-    } catch (err) {
-      p.log.warn(`Could not resolve devflow directory from Stop hook: ${(err as Error).message}`);
-    }
+    // D-AMBIENT-CANONICAL-DIR: the hooks always point at the canonical devflow
+    // directory, where init installs run-hook. Never infer it from settings.json:
+    // the first Stop hook is whichever hook the user listed first (a notification
+    // sound, say), and a path derived from it names a run-hook that does not
+    // exist, so every prompt would fail.
+    const devflowDir = getDevFlowDirectory();
 
     if (options.enable) {
       const updated = await addAmbientHook(settingsContent, devflowDir);
@@ -266,7 +270,7 @@ export const ambientCommand = new Command('ambient')
         return;
       }
       await writeFileAtomicExclusive(settingsPath, updated);
-      await syncManifestFeature(getDevFlowDirectory(), 'ambient', true);
+      await syncManifestFeature(devflowDir, 'ambient', true);
       p.log.success('Ambient mode enabled — orchestrator hooks registered');
       p.log.info(color.dim('Charter at session start, reminder per prompt, plan handoffs auto-run devflow:implement (git repos only)'));
     }
@@ -278,7 +282,10 @@ export const ambientCommand = new Command('ambient')
         return;
       }
       await writeFileAtomicExclusive(settingsPath, updated);
-      await syncManifestFeature(getDevFlowDirectory(), 'ambient', false);
+      await syncManifestFeature(devflowDir, 'ambient', false);
       p.log.success('Ambient mode disabled — hooks removed');
     }
   });
+}
+
+export const ambientCommand = createAmbientCommand();

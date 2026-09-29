@@ -42,8 +42,8 @@ describe('addCaptureHooks', () => {
   it('adds only missing hooks when partial state (1 hook missing)', () => {
     const input = JSON.stringify({
       hooks: {
-        UserPromptSubmit: [{ hooks: [{ type: 'command', command: '/path/capture-prompt', timeout: 10 }] }],
-        Stop: [{ hooks: [{ type: 'command', command: '/path/capture-turn', timeout: 10 }] }],
+        UserPromptSubmit: [{ hooks: [{ type: 'command', command: '/path/.devflow/scripts/hooks/run-hook capture-prompt', timeout: 10 }] }],
+        Stop: [{ hooks: [{ type: 'command', command: '/path/.devflow/scripts/hooks/run-hook capture-turn', timeout: 10 }] }],
       },
     });
     const result = addCaptureHooks(input, '/home/user/.devflow');
@@ -59,7 +59,7 @@ describe('addCaptureHooks', () => {
   it('preserves existing ambient preamble hook on UserPromptSubmit when adding capture-prompt', () => {
     const input = JSON.stringify({
       hooks: {
-        UserPromptSubmit: [{ hooks: [{ type: 'command', command: '/path/run-hook preamble' }] }],
+        UserPromptSubmit: [{ hooks: [{ type: 'command', command: '/path/.devflow/scripts/hooks/run-hook preamble' }] }],
       },
     });
     const result = addCaptureHooks(input, '/home/user/.devflow');
@@ -125,7 +125,7 @@ describe('removeCaptureHooks', () => {
       hooks: {
         UserPromptSubmit: [
           { hooks: [{ type: 'command', command: 'preamble' }] },
-          { hooks: [{ type: 'command', command: '/path/capture-prompt' }] },
+          { hooks: [{ type: 'command', command: '/path/.devflow/scripts/hooks/run-hook capture-prompt' }] },
         ],
       },
     });
@@ -140,8 +140,8 @@ describe('removeCaptureHooks', () => {
     const input = JSON.stringify({
       hooks: {
         Stop: [
-          { hooks: [{ type: 'command', command: '/path/capture-turn' }] },
-          { hooks: [{ type: 'command', command: '/path/memory-worker' }] },
+          { hooks: [{ type: 'command', command: '/path/.devflow/scripts/hooks/run-hook capture-turn' }] },
+          { hooks: [{ type: 'command', command: '/path/.devflow/scripts/hooks/run-hook memory-worker' }] },
         ],
       },
     });
@@ -161,12 +161,12 @@ describe('removeCaptureHooks', () => {
     const input = JSON.stringify({
       hooks: {
         UserPromptSubmit: [
-          { hooks: [{ type: 'command', command: '/path/run-hook dream-dispatch', timeout: 10 }] },
-          { hooks: [{ type: 'command', command: '/path/run-hook capture-prompt', timeout: 10 }] },
+          { hooks: [{ type: 'command', command: '/path/.devflow/scripts/hooks/run-hook dream-dispatch', timeout: 10 }] },
+          { hooks: [{ type: 'command', command: '/path/.devflow/scripts/hooks/run-hook capture-prompt', timeout: 10 }] },
         ],
         Stop: [
-          { hooks: [{ type: 'command', command: '/path/run-hook dream-capture', timeout: 10 }] },
-          { hooks: [{ type: 'command', command: '/path/run-hook capture-turn', timeout: 10 }] },
+          { hooks: [{ type: 'command', command: '/path/.devflow/scripts/hooks/run-hook dream-capture', timeout: 10 }] },
+          { hooks: [{ type: 'command', command: '/path/.devflow/scripts/hooks/run-hook capture-turn', timeout: 10 }] },
         ],
       },
     });
@@ -200,7 +200,7 @@ describe('removeCaptureHooks', () => {
   it('accepts a parsed Settings object and does not mutate the original', () => {
     const settings = {
       hooks: {
-        Stop: [{ hooks: [{ type: 'command' as const, command: '/path/capture-turn', timeout: 10 }] }],
+        Stop: [{ hooks: [{ type: 'command' as const, command: '/path/.devflow/scripts/hooks/run-hook capture-turn', timeout: 10 }] }],
       },
     };
     const result = removeCaptureHooks(settings);
@@ -249,8 +249,8 @@ describe('hasCaptureHooks / countCaptureHooks', () => {
   it('returns false/partial-count when only 2 of 3 present', () => {
     const input = JSON.stringify({
       hooks: {
-        UserPromptSubmit: [{ hooks: [{ type: 'command', command: '/path/capture-prompt' }] }],
-        Stop: [{ hooks: [{ type: 'command', command: '/path/capture-turn' }] }],
+        UserPromptSubmit: [{ hooks: [{ type: 'command', command: '/path/.devflow/scripts/hooks/run-hook capture-prompt' }] }],
+        Stop: [{ hooks: [{ type: 'command', command: '/path/.devflow/scripts/hooks/run-hook capture-turn' }] }],
       },
     });
     expect(hasCaptureHooks(input)).toBe(false);
@@ -260,12 +260,108 @@ describe('hasCaptureHooks / countCaptureHooks', () => {
   it('accepts a parsed Settings object (not just JSON string)', () => {
     const settings = {
       hooks: {
-        UserPromptSubmit: [{ hooks: [{ type: 'command' as const, command: '/path/capture-prompt', timeout: 10 }] }],
-        Stop: [{ hooks: [{ type: 'command' as const, command: '/path/capture-turn', timeout: 10 }] }],
-        PostToolUse: [{ matcher: 'AskUserQuestion', hooks: [{ type: 'command' as const, command: '/path/capture-question', timeout: 10 }] }],
+        UserPromptSubmit: [{ hooks: [{ type: 'command' as const, command: '/path/.devflow/scripts/hooks/run-hook capture-prompt', timeout: 10 }] }],
+        Stop: [{ hooks: [{ type: 'command' as const, command: '/path/.devflow/scripts/hooks/run-hook capture-turn', timeout: 10 }] }],
+        PostToolUse: [{ matcher: 'AskUserQuestion', hooks: [{ type: 'command' as const, command: '/path/.devflow/scripts/hooks/run-hook capture-question', timeout: 10 }] }],
       },
     };
     expect(countCaptureHooks(settings)).toBe(3);
     expect(hasCaptureHooks(settings)).toBe(true);
+  });
+});
+
+/**
+ * D-EXACT-HOOK-OWNER: a capture hook is devflow's only when its command ends in
+ * `/scripts/hooks/run-hook capture-{prompt,turn,question}`, under any directory.
+ * A user's hook that merely contains the marker word is theirs, and removal takes
+ * devflow's single hook out of a shared matcher group, keeping the siblings.
+ */
+describe('capture hook ownership is exact (#391)', () => {
+  const DEVFLOW = '/home/user/.devflow';
+  const run = (marker: string) => `${DEVFLOW}/scripts/hooks/run-hook ${marker}`;
+  /** User groups: every hook mentions a capture marker, none is devflow's. */
+  const USER_PROMPT = { hooks: [
+    { type: 'command', command: '~/bin/capture-prompt.sh', timeout: 3 },
+    { type: 'command', command: 'echo capture-prompt >> /tmp/log' },
+    { type: 'command', command: '/opt/tools/run-hook capture-prompt' },
+  ] };
+  const USER_STOP = { hooks: [
+    { type: 'command', command: 'afplay /System/Library/Sounds/Glass.aiff' },
+    { type: 'command', command: '~/bin/capture-turn --notify' },
+  ] };
+  const USER_QUESTION = { matcher: 'AskUserQuestion', hooks: [
+    { type: 'command', command: 'my-capture-question-logger' },
+  ] };
+  const userSettings = (): string => JSON.stringify({
+    hooks: { UserPromptSubmit: [USER_PROMPT], Stop: [USER_STOP], PostToolUse: [USER_QUESTION] },
+  }, null, 2) + '\n';
+  const groups = (json: string, event: string): unknown[] =>
+    (JSON.parse(json).hooks?.[event] ?? []) as unknown[];
+
+  it('user hooks that contain a capture marker word are not capture hooks', () => {
+    expect(countCaptureHooks(userSettings())).toBe(0);
+  });
+
+  it('enable registers devflow\'s three hooks next to the user groups, which stay byte-identical', () => {
+    const enabled = addCaptureHooks(userSettings(), DEVFLOW);
+
+    expect(countCaptureHooks(enabled)).toBe(3);
+    for (const [event, group, marker] of [
+      ['UserPromptSubmit', USER_PROMPT, 'capture-prompt'],
+      ['Stop', USER_STOP, 'capture-turn'],
+      ['PostToolUse', USER_QUESTION, 'capture-question'],
+    ] as const) {
+      const registered = groups(enabled, event);
+      expect(registered).toHaveLength(2);
+      expect(JSON.stringify(registered[0])).toBe(JSON.stringify(group));
+      expect((registered[1] as { hooks: { command: string }[] }).hooks[0].command).toBe(run(marker));
+    }
+  });
+
+  it('disable on settings holding only user groups is a byte-identical no-op', () => {
+    const input = userSettings();
+    expect(removeCaptureHooks(input)).toBe(input);
+  });
+
+  it('enable → disable → init (remove-then-add) never touches the user groups', () => {
+    const on = addCaptureHooks(userSettings(), DEVFLOW);
+    const off = removeCaptureHooks(on);
+    const reinit = addCaptureHooks(removeCaptureHooks(on), DEVFLOW);
+
+    expect(off).toBe(userSettings());
+    expect(reinit).toBe(on);
+  });
+
+  it('removes only devflow\'s hook from a shared matcher group and keeps the siblings in order', () => {
+    const input = JSON.stringify({ hooks: {
+      Stop: [{ hooks: [
+        { type: 'command', command: 'say before' },
+        { type: 'command', command: run('capture-turn'), timeout: 10 },
+        { type: 'command', command: 'say after' },
+      ] }],
+      PostToolUse: [{ matcher: 'AskUserQuestion', hooks: [
+        { type: 'command', command: run('capture-question'), timeout: 10 },
+        { type: 'command', command: 'my-question-hook' },
+      ] }],
+    } });
+
+    const settings = JSON.parse(removeCaptureHooks(input));
+
+    expect(settings.hooks.Stop).toEqual([{ hooks: [
+      { type: 'command', command: 'say before' },
+      { type: 'command', command: 'say after' },
+    ] }]);
+    expect(settings.hooks.PostToolUse).toEqual([
+      { matcher: 'AskUserQuestion', hooks: [{ type: 'command', command: 'my-question-hook' }] },
+    ]);
+  });
+
+  it.each([
+    ['another directory', '/srv/old/.devflow/scripts/hooks/run-hook capture-turn'],
+    ['a Windows path', 'C:\\Users\\u\\.devflow\\scripts\\hooks\\run-hook capture-turn'],
+  ])('still recognises and removes devflow\'s hook registered under %s', (_label, command) => {
+    const input = JSON.stringify({ hooks: { Stop: [{ hooks: [{ type: 'command', command }] }] } });
+    expect(countCaptureHooks(input)).toBe(1);
+    expect(JSON.parse(removeCaptureHooks(input)).hooks).toBeUndefined();
   });
 });

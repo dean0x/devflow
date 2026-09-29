@@ -3,11 +3,12 @@ import { promises as fs } from 'fs';
 import { execFileSync } from 'child_process';
 import * as os from 'os';
 import * as path from 'path';
-import { computeAssetsToRemove, formatDryRunPlan, resolveSecurityRemovalDecision, enumerateUserDevFlowContent, userContentPaths, resolveDevflowDirCleanup, resolveProjectDataCleanup, removeDevFlowInstallArtifacts, installArtifactPaths, resolveInstallArtifactPaths, enumerateDryRunExtras, removeAllDevFlow, removeSelectedPlugins, sweepDevflowNamespaces, isDevFlowInstalled, runDryRunPhase, runSelectivePhaseForScope, runFullPhaseForScope, runCleanupPhase, resolveInstalledPlugins, isSameLocation } from '../src/cli/commands/uninstall.js';
+import { formatProjectDataPlan, partitionProjectData, resolveProjectDataPlan, computeAssetsToRemove, formatDryRunPlan, resolveSecurityRemovalDecision, enumerateUserDevFlowContent, userContentPaths, resolveDevflowDirCleanup, resolveProjectDataCleanup, removeDevFlowInstallArtifacts, installArtifactPaths, resolveInstallArtifactPaths, enumerateDryRunExtras, removeAllDevFlow, removeSelectedPlugins, sweepDevflowNamespaces, isDevFlowInstalled, runDryRunPhase, runSelectivePhaseForScope, runFullPhaseForScope, runCleanupPhase, resolveInstalledPlugins, isSameLocation } from '../src/cli/commands/uninstall.js';
 import { DEVFLOW_PLUGINS, getAllAgentNames, parsePluginSelection, skillsOf, type PluginDefinition } from '../src/core/plugins.js';
 import { TRACKER_CONVENTIONS_BACKUP_NAMES, TRACKER_STAGED_PREFIX } from '../src/core/tracker.js';
 import { modelCacheDir } from '../src/core/cache.js';
 import { LEGACY_SKILL_NAMES } from '../src/targets/claude-code/legacy.js';
+import { DEVFLOW_GITIGNORE_BLOCK, DEVFLOW_TRACKED_PATHS } from '../src/targets/claude-code/post-install.js';
 
 describe('computeAssetsToRemove: the retained set comes from what is INSTALLED', () => {
   const byName = (name: string) => DEVFLOW_PLUGINS.find(p => p.name === name)!;
@@ -2532,5 +2533,463 @@ describe('isSameLocation compares physical paths (TP-50, D-HOOKS-GIT-ONLY)', () 
     await fs.mkdir(path.join(base, 'a'));
     await fs.mkdir(path.join(base, 'b'));
     expect(await isSameLocation(path.join(base, 'a'), path.join(base, 'b'))).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// D-UNINSTALL-CARVE-OUT: the project-data step (runCleanupPhase step 1) acts on
+// `<gitRoot>/.devflow`, never on HOME, and never deletes DEVFLOW_TRACKED_PATHS.
+// ---------------------------------------------------------------------------
+
+/** Every file under `root` with its bytes, sorted — the byte-identity oracle. */
+async function projectTree(root: string): Promise<string[]> {
+  const out: string[] = [];
+  const walk = async (dir: string, rel: string): Promise<void> => {
+    for (const name of (await fs.readdir(dir)).sort()) {
+      const abs = path.join(dir, name);
+      const r = rel ? `${rel}/${name}` : name;
+      const st = await fs.lstat(abs);
+      if (st.isDirectory()) {
+        out.push(`${r}/`);
+        await walk(abs, r);
+      } else {
+        out.push(`${r} ${(await fs.readFile(abs)).toString('base64')}`);
+      }
+    }
+  };
+  await walk(root, '');
+  return out;
+}
+
+/** Records every confirm message and answers with `answer`. */
+function recordingConfirm(answer: boolean | symbol): {
+  messages: string[];
+  confirm: (opts: { message: string; initialValue?: boolean }) => Promise<boolean | symbol>;
+} {
+  const messages: string[] = [];
+  return {
+    messages,
+    confirm: async (opts) => {
+      messages.push(opts.message);
+      return answer;
+    },
+  };
+}
+
+/** Run `fn` with stdout captured; returns what was written. */
+async function captureStdout(fn: () => Promise<void>): Promise<string> {
+  const written: string[] = [];
+  const spy = vi.spyOn(process.stdout, 'write').mockImplementation((chunk: unknown) => {
+    written.push(String(chunk));
+    return true;
+  });
+  try {
+    await fn();
+  } finally {
+    spy.mockRestore();
+  }
+  return written.join('');
+}
+
+describe('DEVFLOW_TRACKED_PATHS (D-UNINSTALL-CARVE-OUT)', () => {
+  it('names the four tracked paths', () => {
+    expect([...DEVFLOW_TRACKED_PATHS]).toEqual(['features/', 'conventions.md', 'policy.json', 'project.json']);
+  });
+
+  it('covers every path the gitignore carve-out re-includes under .devflow/', () => {
+    const tracked = new Set(DEVFLOW_TRACKED_PATHS.map((p) => p.replace(/\/$/, '')));
+    const reincluded = DEVFLOW_GITIGNORE_BLOCK.split('\n')
+      .filter((line) => line.startsWith('!.devflow/'))
+      .map((line) => line.slice('!.devflow/'.length).split('/')[0]);
+    // Non-vacuity: the block re-includes features, conventions.md and policy.json.
+    expect(new Set(reincluded)).toEqual(new Set(['features', 'conventions.md', 'policy.json']));
+    for (const name of reincluded) expect(tracked.has(name), `${name} must be kept by uninstall`).toBe(true);
+  });
+});
+
+describe('partitionProjectData', () => {
+  it('keeps the tracked entries and removes everything else, sorted', () => {
+    const { remove, keep } = partitionProjectData([
+      { name: 'memory', isDir: true },
+      { name: 'policy.json', isDir: false },
+      { name: 'features', isDir: true },
+      { name: 'config.json', isDir: false },
+      { name: 'project.json', isDir: false },
+      { name: 'conventions.md', isDir: false },
+      { name: '.root-gitignore-configured-v5', isDir: false },
+    ]);
+    expect(remove.map((e) => e.name)).toEqual(['.root-gitignore-configured-v5', 'config.json', 'memory']);
+    expect(keep.map((e) => e.name)).toEqual(['conventions.md', 'features', 'policy.json', 'project.json']);
+  });
+
+  it('a FILE named features is not the tracked features/ directory', () => {
+    const { remove, keep } = partitionProjectData([{ name: 'features', isDir: false }]);
+    expect(remove.map((e) => e.name)).toEqual(['features']);
+    expect(keep).toEqual([]);
+  });
+});
+
+describe('formatProjectDataPlan', () => {
+  it('lists what is removed and what is kept', () => {
+    const lines = formatProjectDataPlan({
+      dir: '/repo/.devflow',
+      remove: [{ name: 'config.json', isDir: false }, { name: 'memory', isDir: true }],
+      keep: [{ name: 'features', isDir: true }, { name: 'policy.json', isDir: false }],
+    });
+    expect(lines).toEqual([
+      'Project data in /repo/.devflow/:',
+      '  Remove: config.json, memory/',
+      '  Keep (shared via git): features/, policy.json',
+    ]);
+  });
+
+  it('says so when nothing tracked is present', () => {
+    const lines = formatProjectDataPlan({ dir: '/repo/.devflow', remove: [{ name: 'memory', isDir: true }], keep: [] });
+    expect(lines[2]).toBe('  Keep (shared via git): (none)');
+  });
+});
+
+describe('TP-26: confirmed uninstall from a repo subdir keeps the tracked paths (AC-22)', () => {
+  let tmpHome: string;
+  let repo: string;
+  let subdir: string;
+  let devflow: string;
+
+  beforeEach(async () => {
+    tmpHome = await fs.mkdtemp(path.join(os.tmpdir(), 'devflow-tp26-home-'));
+    vi.stubEnv('HOME', tmpHome);
+    repo = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'devflow-tp26-repo-')));
+    execFileSync('git', ['init', '-q'], { cwd: repo });
+    subdir = path.join(repo, 'packages', 'app');
+    await fs.mkdir(subdir, { recursive: true });
+    devflow = path.join(repo, '.devflow');
+    await fs.mkdir(path.join(devflow, 'features', 'auth'), { recursive: true });
+    await fs.writeFile(path.join(devflow, 'features', 'index.md'), '# Features\n- auth\n');
+    await fs.writeFile(path.join(devflow, 'features', 'auth', 'KNOWLEDGE.md'), '# Auth\nuncommitted edit\n');
+    await fs.writeFile(path.join(devflow, 'conventions.md'), '# Conventions\n');
+    await fs.writeFile(path.join(devflow, 'policy.json'), '{"evidence":"required"}\n');
+    await fs.writeFile(path.join(devflow, 'project.json'), '{"features":{}}\n');
+    await fs.mkdir(path.join(devflow, 'memory'), { recursive: true });
+    await fs.writeFile(path.join(devflow, 'memory', 'WORKING-MEMORY.md'), '## Now\n');
+    await fs.mkdir(path.join(devflow, 'docs'), { recursive: true });
+    await fs.writeFile(path.join(devflow, 'docs', 'plan.md'), '# plan\n');
+    await fs.writeFile(path.join(devflow, 'config.json'), '{}\n');
+    await fs.writeFile(path.join(devflow, '.root-gitignore-configured-v5'), '');
+  });
+
+  afterEach(async () => {
+    vi.unstubAllEnvs();
+    await fs.rm(repo, { recursive: true, force: true });
+    await fs.rm(tmpHome, { recursive: true, force: true });
+  });
+
+  async function trackedTrees(): Promise<string[][]> {
+    return [
+      await projectTree(path.join(devflow, 'features')),
+      [await fs.readFile(path.join(devflow, 'conventions.md'), 'utf-8')],
+      [await fs.readFile(path.join(devflow, 'policy.json'), 'utf-8')],
+      [await fs.readFile(path.join(devflow, 'project.json'), 'utf-8')],
+    ];
+  }
+
+  it('removes everything else, keeps the four tracked paths byte-identical, and lists both sets', async () => {
+    const before = await trackedTrees();
+    const { messages, confirm } = recordingConfirm(true);
+
+    const out = await captureStdout(() => runCleanupPhase({
+      scopesToUninstall: [], keepDocs: false, verbose: false, cwd: subdir, isTTY: true, confirm,
+    }));
+
+    expect(await trackedTrees()).toEqual(before);
+    expect((await fs.readdir(devflow)).sort()).toEqual(['conventions.md', 'features', 'policy.json', 'project.json']);
+    // The prompt: one confirm, naming the git root's .devflow, after both lists.
+    expect(messages).toEqual([`Remove the project data listed above from ${devflow}/?`]);
+    expect(out).toContain(`Project data in ${devflow}/:`);
+    expect(out).toContain('Remove: .root-gitignore-configured-v5, config.json, docs/, memory/');
+    expect(out).toContain('Keep (shared via git): conventions.md, features/, policy.json, project.json');
+  });
+
+  it('the dry run from the subdir previews exactly what a confirmed cleanup removes, never a tracked path', async () => {
+    const before = await projectTree(devflow);
+    vi.spyOn(process, 'cwd').mockReturnValue(subdir);
+    try {
+      const out = await captureStdout(() => runDryRunPhase({
+        scopesToUninstall: [], isSelectiveUninstall: false, selectedPlugins: [], installedPlugins: [],
+      }));
+
+      const previewed = out.split('\n')
+        .filter((line) => line.includes('(if confirmed)'))
+        .map((line) => line.slice(line.indexOf(devflow)).replace(' (if confirmed)', '').trim());
+      expect(previewed).toEqual(['.root-gitignore-configured-v5', 'config.json', 'docs/', 'memory/']
+        .map((entry) => path.join(devflow, entry)));
+      expect(await projectTree(devflow), 'a dry run writes nothing').toEqual(before);
+    } finally {
+      vi.mocked(process.cwd).mockRestore();
+    }
+  });
+
+  it.each([
+    ['declined', false],
+    ['cancelled', Symbol('clack:cancel')],
+  ])('when the prompt is %s, nothing under .devflow/ changes', async (_label, answer) => {
+    const before = await projectTree(devflow);
+    const { messages, confirm } = recordingConfirm(answer as boolean | symbol);
+
+    await runCleanupPhase({ scopesToUninstall: [], keepDocs: false, verbose: false, cwd: subdir, isTTY: true, confirm });
+
+    expect(messages).toHaveLength(1);
+    expect(await projectTree(devflow)).toEqual(before);
+  });
+
+  it.each([
+    ['--keep-docs', { keepDocs: true, isTTY: true }],
+    ['non-interactive', { keepDocs: false, isTTY: false }],
+  ])('%s never prompts and changes nothing', async (_label, gates) => {
+    const before = await projectTree(devflow);
+    const { messages, confirm } = recordingConfirm(true);
+
+    await runCleanupPhase({ scopesToUninstall: [], verbose: false, cwd: subdir, confirm, ...gates });
+
+    expect(messages).toEqual([]);
+    expect(await projectTree(devflow)).toEqual(before);
+  });
+
+  it.skipIf(process.getuid?.() === 0)('an entry it cannot remove is reported and the rest of the cleanup still runs', async () => {
+    // A read-only .devflow/: its entries cannot be unlinked.
+    await fs.chmod(devflow, 0o555);
+    // The legacy repo-local scope's settings.json: the settings step edits it, and
+    // that scope stops before the steps that touch HOME or machine-level files.
+    const settingsPath = path.join(repo, '.claude', 'settings.json');
+    await fs.mkdir(path.dirname(settingsPath), { recursive: true });
+    await fs.writeFile(settingsPath, JSON.stringify({
+      statusLine: { type: 'command', command: path.join(tmpHome, '.devflow', 'scripts', 'hud.sh') },
+    }, null, 2) + '\n', 'utf-8');
+    const { messages, confirm } = recordingConfirm(true);
+    try {
+      const out = await captureStdout(() => runCleanupPhase({
+        scopesToUninstall: ['local'], keepDocs: false, verbose: false, cwd: subdir, isTTY: true, confirm,
+      }));
+
+      expect(messages).toEqual([`Remove the project data listed above from ${devflow}/?`]);
+
+      expect(out).toContain('Could not remove');
+      const settings = JSON.parse(await fs.readFile(settingsPath, 'utf-8'));
+      expect(settings.statusLine, 'the settings step after the project-data step still ran').toBeUndefined();
+    } finally {
+      await fs.chmod(devflow, 0o755);
+    }
+  });
+
+  it('with only tracked paths present there is nothing to remove and no prompt', async () => {
+    for (const name of ['memory', 'docs', 'config.json', '.root-gitignore-configured-v5']) {
+      await fs.rm(path.join(devflow, name), { recursive: true });
+    }
+    const before = await projectTree(devflow);
+    const { messages, confirm } = recordingConfirm(true);
+
+    await runCleanupPhase({ scopesToUninstall: [], keepDocs: false, verbose: false, cwd: subdir, isTTY: true, confirm });
+
+    expect(messages).toEqual([]);
+    expect(await projectTree(devflow)).toEqual(before);
+  });
+
+  it('with no tracked path present a confirmed cleanup removes .devflow/ itself', async () => {
+    for (const name of ['features', 'conventions.md', 'policy.json', 'project.json']) {
+      await fs.rm(path.join(devflow, name), { recursive: true });
+    }
+    const { confirm } = recordingConfirm(true);
+
+    await runCleanupPhase({ scopesToUninstall: [], keepDocs: false, verbose: false, cwd: subdir, isTTY: true, confirm });
+
+    await expect(fs.access(devflow)).rejects.toThrow();
+  });
+
+  it('outside a git repository the step is skipped even when cwd holds a .devflow/', async () => {
+    const nonGit = await fs.mkdtemp(path.join(os.tmpdir(), 'devflow-tp26-nongit-'));
+    try {
+      await fs.mkdir(path.join(nonGit, '.devflow', 'memory'), { recursive: true });
+      const before = await projectTree(nonGit);
+      const { messages, confirm } = recordingConfirm(true);
+
+      await runCleanupPhase({ scopesToUninstall: [], keepDocs: false, verbose: false, cwd: nonGit, isTTY: true, confirm });
+
+      expect(messages).toEqual([]);
+      expect(await projectTree(nonGit)).toEqual(before);
+    } finally {
+      await fs.rm(nonGit, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('TP-27: uninstall run from HOME never touches the machine devflow dir (AC-23)', () => {
+  let realHome: string;
+
+  beforeEach(async () => {
+    realHome = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'devflow-tp27-home-')));
+    // A dotfiles repo: HOME itself is the git root.
+    execFileSync('git', ['init', '-q'], { cwd: realHome });
+    const machine = path.join(realHome, '.devflow');
+    await fs.mkdir(path.join(machine, 'scripts', 'hooks'), { recursive: true });
+    await fs.writeFile(path.join(machine, 'scripts', 'hooks', 'run-hook'), '#!/bin/sh\n');
+    await fs.writeFile(path.join(machine, 'manifest.json'), '{"version":"2.5.0"}\n');
+    await fs.writeFile(path.join(machine, 'hud.json'), '{"enabled":true}\n');
+    await fs.mkdir(path.join(machine, 'skills', 'my-shadow'), { recursive: true });
+    await fs.writeFile(path.join(machine, 'skills', 'my-shadow', 'SKILL.md'), '# mine\n');
+    await fs.mkdir(path.join(realHome, 'notes'), { recursive: true });
+  });
+
+  afterEach(async () => {
+    vi.unstubAllEnvs();
+    await fs.rm(realHome, { recursive: true, force: true });
+  });
+
+  async function runFromHome(homeEnv: string, cwd: string): Promise<string[]> {
+    vi.stubEnv('HOME', homeEnv);
+    const { messages, confirm } = recordingConfirm(true);
+    await runCleanupPhase({ scopesToUninstall: [], keepDocs: false, verbose: false, cwd, isTTY: true, confirm });
+    return messages;
+  }
+
+  it.each([
+    ['HOME', (home: string) => home],
+    ['a HOME subdirectory', (home: string) => path.join(home, 'notes')],
+  ])('run from %s, interactive and answered yes, leaves ~/.devflow byte-identical', async (_label, cwdOf) => {
+    const machine = path.join(realHome, '.devflow');
+    const before = await projectTree(machine);
+
+    const messages = await runFromHome(realHome, cwdOf(realHome));
+
+    expect(messages).toEqual([]);
+    expect(await projectTree(machine)).toEqual(before);
+  });
+
+  it('a symlinked HOME is compared by realpath and still skipped', async () => {
+    const link = `${realHome}-link`;
+    await fs.symlink(realHome, link);
+    try {
+      const machine = path.join(realHome, '.devflow');
+      const before = await projectTree(machine);
+
+      const messages = await runFromHome(link, link);
+
+      expect(messages).toEqual([]);
+      expect(await projectTree(machine)).toEqual(before);
+    } finally {
+      await fs.unlink(link);
+    }
+  });
+
+  it('resolveProjectDataPlan skips a repo whose .devflow is the machine devflow dir', async () => {
+    const repo = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'devflow-tp27-repo-')));
+    try {
+      await fs.symlink(path.join(realHome, '.devflow'), path.join(repo, '.devflow'));
+      const resolution = await resolveProjectDataPlan({
+        gitRoot: repo,
+        homeDir: realHome,
+        machineDevflowDir: path.join(realHome, '.devflow'),
+      });
+      expect(resolution).toEqual({ kind: 'skip', reason: 'machine-dir' });
+    } finally {
+      await fs.rm(repo, { recursive: true, force: true });
+    }
+  });
+
+  it('non-vacuity: the same fixture in a repo that is not HOME does prompt', async () => {
+    const repo = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'devflow-tp27-other-')));
+    try {
+      execFileSync('git', ['init', '-q'], { cwd: repo });
+      await fs.mkdir(path.join(repo, '.devflow', 'memory'), { recursive: true });
+
+      const messages = await runFromHome(realHome, repo);
+
+      expect(messages).toHaveLength(1);
+    } finally {
+      await fs.rm(repo, { recursive: true, force: true });
+    }
+  });
+});
+
+/**
+ * ADR-024 (remove only what devflow can prove it wrote), D-UNINSTALL-CARVE-OUT: a
+ * repository whose `.devflow` is a symbolic link — to anything but the machine
+ * devflow dir, which is skipped as `machine-dir` — is not followed. The link's
+ * target is somewhere devflow cannot prove it owns, so a confirmed cleanup skips
+ * the project-data step and says why, and the dry run says the same.
+ */
+describe('a symlinked <gitRoot>/.devflow is never followed (#391)', () => {
+  let tmpHome: string;
+  let repo: string;
+  let target: string;
+  let link: string;
+
+  beforeEach(async () => {
+    tmpHome = await fs.mkdtemp(path.join(os.tmpdir(), 'devflow-symlink-home-'));
+    vi.stubEnv('HOME', tmpHome);
+    repo = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'devflow-symlink-repo-')));
+    execFileSync('git', ['init', '-q'], { cwd: repo });
+    target = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'devflow-symlink-target-')));
+    await fs.mkdir(path.join(target, 'memory'), { recursive: true });
+    await fs.writeFile(path.join(target, 'memory', 'WORKING-MEMORY.md'), '## Now\n');
+    await fs.writeFile(path.join(target, 'config.json'), '{}\n');
+    await fs.writeFile(path.join(target, 'notes.txt'), 'not devflow\'s\n');
+    link = path.join(repo, '.devflow');
+    await fs.symlink(target, link);
+  });
+
+  afterEach(async () => {
+    vi.unstubAllEnvs();
+    for (const dir of [repo, target, tmpHome]) await fs.rm(dir, { recursive: true, force: true });
+  });
+
+  it('resolveProjectDataPlan skips it as a symlink', async () => {
+    const resolution = await resolveProjectDataPlan({
+      gitRoot: repo,
+      homeDir: tmpHome,
+      machineDevflowDir: path.join(tmpHome, '.devflow'),
+    });
+    expect(resolution).toEqual({ kind: 'skip', reason: 'symlink' });
+  });
+
+  it('a confirmed cleanup never prompts, leaves the link and its target byte-identical, and says why', async () => {
+    const before = await projectTree(target);
+    const { messages, confirm } = recordingConfirm(true);
+
+    const out = await captureStdout(() => runCleanupPhase({
+      scopesToUninstall: [], keepDocs: false, verbose: false, cwd: repo, isTTY: true, confirm,
+    }));
+
+    expect(messages).toEqual([]);
+    expect(await projectTree(target)).toEqual(before);
+    expect((await fs.lstat(link)).isSymbolicLink(), 'the link itself stays').toBe(true);
+    expect(out).toContain(`Project data step skipped: ${link} is a symbolic link`);
+  });
+
+  it('the dry run says the same and previews no project-data removal', async () => {
+    const before = await projectTree(target);
+    vi.spyOn(process, 'cwd').mockReturnValue(repo);
+    try {
+      const out = await captureStdout(() => runDryRunPhase({
+        scopesToUninstall: [], isSelectiveUninstall: false, selectedPlugins: [], installedPlugins: [],
+      }));
+
+      expect(out).toContain(`Project data step skipped: ${link} is a symbolic link`);
+      expect(out).not.toContain('(if confirmed)');
+      expect(await projectTree(target)).toEqual(before);
+    } finally {
+      vi.mocked(process.cwd).mockRestore();
+    }
+  });
+
+  it('non-vacuity: the same content as a real directory is planned for removal', async () => {
+    await fs.unlink(link);
+    await fs.cp(target, link, { recursive: true });
+
+    const resolution = await resolveProjectDataPlan({
+      gitRoot: repo,
+      homeDir: tmpHome,
+      machineDevflowDir: path.join(tmpHome, '.devflow'),
+    });
+
+    expect(resolution.kind).toBe('plan');
   });
 });
