@@ -1,7 +1,13 @@
 @define knowledge_load():
 ### Load Feature Knowledge
 
-Resolve the worktree root using the `devflow:worktree-support` algorithm (use WORKTREE_PATH if provided, otherwise cwd). All paths below are relative to `{worktree}`.
+Resolve `{worktree}` as the checkout's toplevel, because feature knowledge bases are committed with the branch (D-PROMPT-ROOT): from the start directory — `WORKTREE_PATH` if provided, otherwise cwd (`devflow:worktree-support`) — run
+
+```bash
+git -C "{start}" rev-parse --show-toplevel
+```
+
+and use its one-line output. If the command fails (outside a git repository), `{worktree}` is the start directory itself. All paths below are relative to `{worktree}`.
 
 **Step 1 — Read the index cache:**
 
@@ -36,7 +42,7 @@ Concatenate the selected KNOWLEDGE.md files under slug headers:
 
 If no KBs exist, no KBs are relevant, or `.devflow/features/` is absent, set `FEATURE_KNOWLEDGE` to `(none)`.
 
-**No subprocess, no git calls, no `.cjs` script.** This entire step is direct file reads — 1 index read (or N frontmatter reads on fallback), bounded by KB count.
+**One git call, then direct file reads — no `.cjs` script.** After resolving `{worktree}`, this step is 1 index read (or N frontmatter reads on fallback), bounded by KB count.
 @end
 
 @export knowledge_load
@@ -44,7 +50,13 @@ If no KBs exist, no KBs are relevant, or `.devflow/features/` is absent, set `FE
 @define knowledge_writeback():
 ### Feature Knowledge Write-Back (Conditional)
 
-Resolve the worktree root using the `devflow:worktree-support` algorithm (use WORKTREE_PATH if provided, otherwise cwd). All paths below are relative to `{worktree}`.
+Resolve `{worktree}` as the checkout's toplevel, because feature knowledge bases are committed with the branch (D-PROMPT-ROOT): from the start directory — `WORKTREE_PATH` if provided, otherwise cwd (`devflow:worktree-support`) — run
+
+```bash
+git -C "{start}" rev-parse --show-toplevel
+```
+
+and use its one-line output. If the command fails (outside a git repository), `{worktree}` is the start directory itself. All paths below are relative to `{worktree}`.
 
 **Step 1 — Check the opt-out gate:**
 
@@ -88,6 +100,10 @@ The frontmatter in KNOWLEDGE.md is the source of truth — index.md is only a ca
 
 After writing, commit the two files to the current worktree branch yourself by running git via your Bash tool (do not use a script). Stage ONLY .devflow/features/index.md and .devflow/features/{slug}/KNOWLEDGE.md, then commit just those paths with a docs(knowledge): message. Do NOT push, do NOT force, do NOT stage anything else. Follow your Commit Protocol — it is non-blocking, so if any git step fails, report KB_COMMIT and finish normally."
 ```
+
+**Step 4 — Surface an uncommitted knowledge base:**
+
+When the Knowledge agent reports `KB_COMMIT: skipped (detached HEAD)`, the files were written but deliberately not committed — a commit on a detached HEAD becomes unreachable once HEAD moves. Tell the user in the workflow's final report, in one line, that the knowledge base was written but not committed, and name the uncommitted paths the agent listed, so they can commit them on a branch before the worktree is removed. Never commit them yourself.
 
 **Failure handling**: Non-blocking. If the Knowledge agent fails, log the failure and continue — the workflow outcome is not affected by write-back success.
 @end

@@ -6,6 +6,7 @@ import * as p from '@clack/prompts';
 import color from 'picocolors';
 import { getInstallationPaths } from '../../targets/claude-code/claude-paths.js';
 import { getGitRoot } from '../../core/git.js';
+import { getLedgerRoot } from '../../core/ledger-root.js';
 import { installViaFileCopy, composeScripts, type InstallReport } from '../../targets/claude-code/installer.js';
 import { formatOverlaySummary, formatSkillScopeSummary, formatTrackerAssetSummary, isPluginListUnchanged, type SummaryLine } from './install-report.js';
 import { convergeTrackerArtifacts, type ConvergeTrackerArtifactsResult, type TrackerAgentState } from '../../targets/claude-code/tracker-install.js';
@@ -561,7 +562,7 @@ interface InitOptions {
 /** The queue drains `drainDisabledFeatureQueues` performs — injected for tests. */
 export interface DisabledQueueDrainIO {
   drainMemoryQueue(projectRoot: string): Promise<void>;
-  drainLearningQueue(gitRoot: string): Promise<void>;
+  drainLearningQueue(ledgerRoot: string): Promise<void>;
 }
 
 /**
@@ -578,14 +579,24 @@ export interface DisabledQueueDrainIO {
  * concurrent session, still reading the old "on", appended turns that then
  * survived the disable. When the manifest write failed the feature is still on
  * everywhere, so its queue is live and is left alone.
+ *
+ * D-LEDGER-MAIN-WORKTREE: each queue drains where the hooks write it — memory at
+ * this checkout's toplevel (`gitRoot`), learning at the ledger root (`ledgerRoot`,
+ * getLedgerRoot), which in a linked worktree is the main checkout.
  */
 export async function drainDisabledFeatureQueues(
-  opts: { gitRoot: string | null; memoryEnabled: boolean; learningEnabled: boolean; manifestWritten: boolean },
+  opts: {
+    gitRoot: string | null;
+    ledgerRoot: string | null;
+    memoryEnabled: boolean;
+    learningEnabled: boolean;
+    manifestWritten: boolean;
+  },
   io: DisabledQueueDrainIO = { drainMemoryQueue, drainLearningQueue },
 ): Promise<void> {
-  if (!opts.manifestWritten || opts.gitRoot === null) return;
-  if (!opts.memoryEnabled) await io.drainMemoryQueue(opts.gitRoot);
-  if (!opts.learningEnabled) await io.drainLearningQueue(opts.gitRoot);
+  if (!opts.manifestWritten) return;
+  if (!opts.memoryEnabled && opts.gitRoot !== null) await io.drainMemoryQueue(opts.gitRoot);
+  if (!opts.learningEnabled && opts.ledgerRoot !== null) await io.drainLearningQueue(opts.ledgerRoot);
 }
 
 /**
@@ -2487,6 +2498,7 @@ export const initCommand = new Command('init')
     // Only now that the machine-wide switch is on disk (D-INIT-DRAIN-AFTER-SWITCH).
     await drainDisabledFeatureQueues({
       gitRoot,
+      ledgerRoot: learningEnabled ? null : await getLedgerRoot(),
       memoryEnabled,
       learningEnabled,
       manifestWritten: trackerLifecycle.manifestWritten,

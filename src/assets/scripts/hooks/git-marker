@@ -14,3 +14,39 @@ df_has_git_marker() {
   done
   return 1
 }
+
+# df_is_project_root <root> — returns 0 when <root> may hold per-project devflow
+# data: it sits inside a git checkout (df_has_git_marker) AND it is not the home
+# directory.
+#
+# D-HOOKS-GIT-ONLY: the hooks that scaffold `.devflow/` and the root `.gitignore`
+# carve-out — session-start-context and ensure-devflow-init, which every capture
+# and memory hook reaches — run only for a git project. Outside one there is no
+# repository for the carve-out to protect and no branch for memory to describe,
+# and scaffolding there would leave `.devflow/` and a `.gitignore` block in `~`,
+# Downloads or a folder of repos — wherever Claude Code happened to start.
+# A repository rooted at HOME (a dotfiles repo) is refused too: its `.devflow` IS
+# the machine root, so per-project data would land inside `~/.devflow` and its
+# carve-out in the user's home `.gitignore`.
+#
+# The comparison is between PHYSICAL paths, because the two sides reach it by
+# different routes: git reports a toplevel with every symlink resolved, while
+# $HOME is whatever the login shell was handed — on macOS the temp tree is
+# /var → /private/var, and a home directory can itself sit behind a symlink. A
+# textual compare would miss exactly the case it exists for.
+#
+# Zero forks, like the marker walk above: `cd -P` resolves a path physically and
+# publishes it in $PWD, both shell builtins, so no `$(...)` subshell and no
+# realpath/readlink binary is involved. The caller's directory is restored before
+# returning. An unresolvable <root> is refused (fail closed: nothing is written);
+# an unset or unresolvable HOME cannot equal a resolved root, so it refuses nothing.
+df_is_project_root() {
+  local _root="$1" _back="$PWD" _root_real="" _home_real=""
+  [ -n "$_root" ] || return 1
+  df_has_git_marker "$_root" || return 1
+  if cd -P "$_root" 2>/dev/null; then _root_real="$PWD"; fi
+  if [ -n "${HOME:-}" ] && cd -P "$HOME" 2>/dev/null; then _home_real="$PWD"; fi
+  cd "$_back" 2>/dev/null || true
+  [ -n "$_root_real" ] || return 1
+  [ "$_root_real" != "$_home_real" ]
+}

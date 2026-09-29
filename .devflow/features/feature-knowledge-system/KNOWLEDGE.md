@@ -18,7 +18,7 @@ directories:
   - tests/build-mds-generator-hosts.test.ts
   - tests/guards/dist-agents.test.ts
 created: 2026-06-21
-updated: 2026-09-23
+updated: 2026-09-29
 ---
 
 # Feature Knowledge Base System
@@ -110,13 +110,14 @@ Gates write-back ONLY — load is ungated (harmless). No sentinel file.
 
 Invoked at the start of applicable workflows via `knowledge_load()` MDS call site.
 
+0. **Resolve the root** — `{worktree}` is the checkout's toplevel from one `git -C "{start}" rev-parse --show-toplevel` (start = WORKTREE_PATH or cwd), else the start directory (D-PROMPT-ROOT). Knowledge bases are committed per branch, so a linked worktree reads its OWN toplevel, not the main worktree's — unlike `decisions_load`, which reads the main worktree's ledger. A session started in `packages/app` therefore loads, and writes back, at the repository root.
 1. **Read cache** — read `.devflow/features/index.md` if present
 2. **Fallback** — if absent or thin, glob `features/*/KNOWLEDGE.md` frontmatter
 3. **Select** — pick relevant KBs by comparing task area against each entry's `description` + `directories`
 4. **Read bodies** — Read each selected `KNOWLEDGE.md`, verify-against-code on mismatch
 5. **Set FEATURE_KNOWLEDGE** — concatenate under `--- Feature knowledge: {slug} ---` headers; `(none)` if no KBs found
 
-**Zero subprocess calls** — load is pure file I/O; no git calls, no node scripts.
+**One git call, then file I/O** — the root resolution above, then direct reads; no node scripts.
 
 **Asymmetry** (hard requirement):
 - `knowledge_load` used by: implement, plan, resolve, code-review, self-review, research, bug-analysis
@@ -126,13 +127,14 @@ Invoked at the start of applicable workflows via `knowledge_load()` MDS call sit
 
 Invoked at the end of applicable workflows via `knowledge_writeback()` MDS call site.
 
-1. **Gate** — if `.devflow/config.json` `knowledge` is `false`, skip entirely
+1. **Gate** — if `features.knowledge` in `~/.devflow/manifest.json` is `false`, skip entirely (machine-wide, D-FEATURES-MACHINE-WIDE)
 2. **Check scope** — if this workflow changed a documented area OR found durable cross-cutting knowledge, proceed
 3. **Spawn Knowledge agent** — `Agent(subagent_type="Knowledge")` with WORKTREE_PATH, FEATURE_SLUG, FEATURE_NAME, DIRECTORIES, FILES_CHANGED, DECISIONS_CONTEXT, EXISTING_KB, EXPLORATION_OUTPUTS
 4. **Agent writes KNOWLEDGE.md** — directly to `.devflow/features/{slug}/KNOWLEDGE.md`
 5. **Agent updates index.md** — read-modify-write `index.md`; replace existing slug line or append; create file if absent
    - Line format: `- **{slug}** — {areas} — {Use-when description}`
 6. **No result file** — no `.create-result.json`, no handoff artifact
+7. **Commit, or surface why not** — the agent commits the two paths to the current branch. On a detached HEAD it never commits (the commit would be unreachable once HEAD moves) and reports `KB_COMMIT: skipped (detached HEAD) — uncommitted: <paths>`; `knowledge_writeback` Step 4 makes the calling workflow name those paths to the user in its final report (D-DETACHED-HEAD, #382 P02; pinned by tests/commands/knowledge-detached.test.ts)
 
 ### Flow 3: MDS build-time compilation
 

@@ -7,7 +7,7 @@ import { gatherGitStatus } from './git.js';
 import { parseTranscript } from './transcript.js';
 import { persistSessionCost, aggregateCosts } from './cost-history.js';
 import { gatherConfigCounts } from './components/config-counts.js';
-import { gatherLearningCounts } from './components/learning-counts.js';
+import { gatherLedgerLearningCounts } from './components/learning-counts.js';
 import { render } from './render.js';
 import type { GatherContext, StdinData, UsageData } from './types.js';
 
@@ -88,12 +88,14 @@ async function run(): Promise<string> {
   const needsLearningCounts = components.has('learningCounts');
   const needsSessionCost = components.has('sessionCost');
 
-  // Parallel data gathering — only fetch what's needed
-  const [git, transcript] = await Promise.all([
+  // Parallel data gathering — only fetch what's needed. The learning counts
+  // ride here because resolving the ledger root is one git call.
+  const [git, transcript, learningCountsData] = await Promise.all([
     needsGit ? gatherGitStatus(cwd) : Promise.resolve(null),
     needsTranscript && stdin.transcript_path
       ? parseTranscript(stdin.transcript_path)
       : Promise.resolve(null),
+    needsLearningCounts ? gatherLedgerLearningCounts(cwd) : Promise.resolve(null),
   ]);
 
   // Extract usage quota from stdin rate_limits (replaces OAuth fetch)
@@ -111,11 +113,6 @@ async function run(): Promise<string> {
   // Config counts (fast, synchronous filesystem reads)
   const configCountsData = needsConfigCounts
     ? gatherConfigCounts(cwd)
-    : null;
-
-  // Decisions/pitfalls counts (fast, synchronous filesystem read)
-  const learningCountsData = needsLearningCounts
-    ? gatherLearningCounts(cwd)
     : null;
 
   // Cost tracking: persist current session cost, aggregate for weekly/monthly

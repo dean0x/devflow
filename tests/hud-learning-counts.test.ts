@@ -8,8 +8,10 @@ import { createRequire } from 'node:module';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import * as os from 'node:os';
+import { execSync } from 'node:child_process';
 import learningCounts, {
   gatherLearningCounts,
+  gatherLedgerLearningCounts,
 } from '../src/hud/components/learning-counts.js';
 import { stripAnsi } from '../src/hud/colors.js';
 import type { LearningCountsData, GatherContext } from '../src/hud/types.js';
@@ -131,6 +133,59 @@ describe('gatherLearningCounts', () => {
     );
 
     expect(gatherLearningCounts(tmpDir)).toEqual({ decisions: 0, pitfalls: 0 });
+  });
+});
+
+// D-LEDGER-MAIN-WORKTREE: the HUD counts the ledger the hooks write. In a
+// linked worktree that is the main checkout's; from a subdirectory it is the
+// repository root's — never the session cwd's own (nonexistent) ledger.
+describe('gatherLedgerLearningCounts resolves the ledger root like the hooks', { timeout: 30_000 }, () => {
+  let base: string;
+  let main: string;
+  let wt: string;
+  let outside: string;
+
+  beforeEach(() => {
+    base = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'hud-ledger-root-')));
+    main = path.join(base, 'main');
+    fs.mkdirSync(main);
+    execSync('git init -q', { cwd: main, stdio: 'pipe' });
+    execSync('git -c user.email=t@t -c user.name=t commit -q --allow-empty -m init', { cwd: main, stdio: 'pipe' });
+    wt = path.join(base, 'wt');
+    execSync(`git worktree add -q "${wt}" -b feat`, { cwd: main, stdio: 'pipe' });
+    fs.mkdirSync(path.join(main, '.devflow', 'learning'), { recursive: true });
+    fs.writeFileSync(
+      path.join(main, '.devflow', 'learning', 'decisions-ledger.jsonl'),
+      [makeRow('decision'), makeRow('pitfall')].join('\n') + '\n',
+    );
+    outside = path.join(base, 'outside');
+    fs.mkdirSync(path.join(outside, '.devflow', 'learning'), { recursive: true });
+    fs.writeFileSync(
+      path.join(outside, '.devflow', 'learning', 'decisions-ledger.jsonl'),
+      makeRow('decision') + '\n',
+    );
+  });
+
+  afterEach(() => {
+    fs.rmSync(base, { recursive: true, force: true });
+  });
+
+  it('counts the main checkout\'s ledger from a linked worktree', async () => {
+    expect(await gatherLedgerLearningCounts(wt, { home: outside })).toEqual({ decisions: 1, pitfalls: 1 });
+  });
+
+  it('counts the repository root\'s ledger from a subdirectory', async () => {
+    const sub = path.join(main, 'packages', 'app');
+    fs.mkdirSync(sub, { recursive: true });
+    expect(await gatherLedgerLearningCounts(sub, { home: outside })).toEqual({ decisions: 1, pitfalls: 1 });
+  });
+
+  it('keeps the worktree\'s own ledger when the main checkout is HOME', async () => {
+    expect(await gatherLedgerLearningCounts(wt, { home: main })).toBeNull();
+  });
+
+  it('outside a git repository counts the cwd\'s ledger (the prior behaviour)', async () => {
+    expect(await gatherLedgerLearningCounts(outside, { home: main })).toEqual({ decisions: 1, pitfalls: 0 });
   });
 });
 

@@ -2354,3 +2354,76 @@ describe('refresh-anchor — pre-existing corpus fixture (REG-S1, avoids PF-044)
     expect(pitfallsMd).toMatch(/- \*\*Resolution\*\*: .+/);
   });
 });
+
+// ---------------------------------------------------------------------------
+// D-LEDGER-MAIN-WORKTREE (TP-17): the ledger ops run where the directive points
+// ---------------------------------------------------------------------------
+//
+// The Learning agent runs every ledger op from the "Project root:" its spawn
+// directive names. In a linked worktree session-start-context names the MAIN
+// worktree (resolve-project-root's df_resolve_roots), so an op minted from a
+// worktree session continues the repository's numbering. From the worktree's own
+// toplevel the ledger would be empty and the op would restart at ADR-001 —
+// colliding with main's ADR-001, which is the defect this pins shut.
+
+// Real git + a hook + a node op per case: ≤6 spawns at ≤5 s each on a loaded machine.
+describe('D-LEDGER-MAIN-WORKTREE: a worktree session mints into the main ledger (TP-17)', { timeout: 30_000 }, () => {
+  const CONTEXT_HOOK = path.join(ROOT, 'src/assets/scripts/hooks/session-start-context');
+  let base: string;
+  let main: string;
+  let wt: string;
+  let homeDir: string;
+
+  beforeEach(() => {
+    base = fs.mkdtempSync(path.join(os.tmpdir(), 'ledger-worktree-'));
+    main = path.join(base, 'main');
+    fs.mkdirSync(main);
+    execSync('git init -q', { cwd: main, stdio: 'pipe' });
+    execSync('git -c user.email=t@t -c user.name=t commit -q --allow-empty -m init', { cwd: main, stdio: 'pipe' });
+    wt = path.join(base, 'wt');
+    execSync(`git worktree add -q "${wt}" -b feat`, { cwd: main, stdio: 'pipe' });
+    homeDir = path.join(base, 'home');
+    fs.mkdirSync(path.join(homeDir, '.devflow', 'logs'), { recursive: true });
+
+    // The main ledger already holds ADR-001..003, and a turn is pending.
+    writeLedger(main, [1, 2, 3].map(n => makeLedgerRow({ id: `obs_main_${n}`, anchor_id: `ADR-00${n}` })));
+    writeLog(main, [makeObsRow({ id: 'obs_wt_new', type: 'decision', status: 'ready' })]);
+    fs.writeFileSync(
+      path.join(main, '.devflow', 'learning', '.pending-turns.jsonl'),
+      '{"role":"user","content":"we chose X over Y","ts":1}\n',
+    );
+  });
+
+  afterEach(() => {
+    fs.rmSync(base, { recursive: true, force: true });
+  });
+
+  /** The "Project root:" the Learning directive names for a session started in `cwd`. */
+  function directiveRoot(cwd: string): string {
+    const stdout = execSync(`bash "${CONTEXT_HOOK}"`, {
+      input: JSON.stringify({ cwd, source: 'startup' }),
+      env: { ...process.env, HOME: homeDir },
+      encoding: 'utf8',
+      stdio: ['pipe', 'pipe', 'pipe'],
+    });
+    const ctx = JSON.parse(stdout).hookSpecificOutput.additionalContext as string;
+    const match = /Project root: ([^"]+)"/.exec(ctx);
+    return match?.[1] ?? '(no directive)';
+  }
+
+  it('the directive from the worktree names the main root, and assign-anchor there continues at ADR-004', () => {
+    const root = directiveRoot(wt);
+    expect(root).toBe(fs.realpathSync(main));
+
+    const result = runHelper('assign-anchor decision obs_wt_new', root);
+    expect(result.code).toBe(0);
+    expect(result.stdout.trim()).toBe('ADR-004');
+  });
+
+  it('known-bad probe: the same op run from the worktree toplevel restarts the numbering', () => {
+    // Why the directive must not name the checkout: the worktree has no ledger.
+    writeLog(wt, [makeObsRow({ id: 'obs_wt_new', type: 'decision', status: 'ready' })]);
+    const result = runHelper('assign-anchor decision obs_wt_new', wt);
+    expect(result.stdout.trim()).toBe('ADR-001');
+  });
+});

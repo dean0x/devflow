@@ -206,12 +206,14 @@ describe('init --no-<feature> switches the feature off in every project', () => 
     expect(await readManifestFeatures()).toMatchObject({ memory: false });
     expect(hasMemoryHooks(await readSettings())).toBe(false);
 
-    for (const dir of [repoB, nonGit]) {
-      captureTurn(dir);
-      expect(linesOf(memoryQueue(dir)), `memory captured in ${dir} after init --no-memory`).toBe(0);
-      // Non-vacuity: the hooks ran and learning (still on) captured the turn.
-      expect(queueLines(dir), `the capture hooks did not run in ${dir}`).toBe(2);
-    }
+    captureTurn(repoB);
+    expect(linesOf(memoryQueue(repoB)), 'memory captured in a second repo after init --no-memory').toBe(0);
+    // Non-vacuity: the hooks ran and learning (still on) captured the turn.
+    expect(queueLines(repoB), 'the capture hooks did not run in the second repo').toBe(2);
+    // A non-git cwd captures nothing at all, whatever the switches say (D-HOOKS-GIT-ONLY).
+    captureTurn(nonGit);
+    expect(linesOf(memoryQueue(nonGit))).toBe(0);
+    expect(queueLines(nonGit)).toBe(0);
     expect(runCli(repoB, 'memory', '--status').out).toContain('Working memory: disabled');
 
     // init --memory from another directory restores it everywhere.
@@ -219,6 +221,31 @@ describe('init --no-<feature> switches the feature off in every project', () => 
     expect(hasMemoryHooks(await readSettings())).toBe(true);
     captureTurn(repoB);
     expect(linesOf(memoryQueue(repoB))).toBe(2);
+  }, MULTI_RUN_TIMEOUT_MS);
+
+  it('from a linked worktree: drains the main checkout\'s learning queue and this checkout\'s memory queue (D-LEDGER-MAIN-WORKTREE)', async () => {
+    // The hooks queue learning turns into the main checkout's ledger (DF_LEDGER_ROOT)
+    // but keep working memory per checkout, so init drains each where it is written.
+    execFileSync('git', ['-c', 'user.email=t@t', '-c', 'user.name=t', 'commit', '-q', '--allow-empty', '-m', 'init'], { cwd: repoA });
+    const wtParent = await fs.mkdtemp(path.join(os.tmpdir(), 'df-switch-wt-'));
+    const wt = path.join(wtParent, 'wt');
+    try {
+      execFileSync('git', ['worktree', 'add', '-q', wt, '-b', 'feat'], { cwd: repoA });
+      await seedLearningQueue(repoA);
+      await fs.mkdir(path.dirname(memoryQueue(repoA)), { recursive: true });
+      await fs.writeFile(memoryQueue(repoA), '{"role":"user"}\n', 'utf-8');
+      await fs.mkdir(path.dirname(memoryQueue(wt)), { recursive: true });
+      await fs.writeFile(memoryQueue(wt), '{"role":"user"}\n', 'utf-8');
+
+      runInit(wt, '--recommended', '--no-learning', '--no-memory');
+
+      expect(existsSync(learningQueue(repoA)), 'the main checkout\'s learning queue survived init --no-learning').toBe(false);
+      expect(existsSync(memoryQueue(wt)), 'this checkout\'s memory queue survived init --no-memory').toBe(false);
+      // Memory is per checkout: the main checkout's own queue is not this run's to drain.
+      expect(existsSync(memoryQueue(repoA))).toBe(true);
+    } finally {
+      await fs.rm(wtParent, { recursive: true, force: true });
+    }
   }, MULTI_RUN_TIMEOUT_MS);
 
   it('a re-init keeps the machine-wide choice even from a repo whose config says true (ADR-014)', async () => {
@@ -375,11 +402,11 @@ describe('older manifests agree with the runtime gates', () => {
     await seedLearningQueue(repoB);
 
     expect(sessionContext(repoB)).not.toContain('LEARNING MAINTENANCE');
-    const before = queueLines(nonGit);
-    captureTurn(nonGit);
-    expect(queueLines(nonGit), 'learning captured under a legacy decisions:false').toBe(before);
+    const before = queueLines(repoB);
+    captureTurn(repoB);
+    expect(queueLines(repoB), 'learning captured under a legacy decisions:false').toBe(before);
     // Non-vacuity: the capture hooks ran — memory (still on) captured the turn.
-    expect(linesOf(memoryQueue(nonGit))).toBe(2);
+    expect(linesOf(memoryQueue(repoB))).toBe(2);
     expect(runCli(repoA, 'learning', '--status').out).toContain('Learning: disabled');
 
     // An explicit learning value wins over the legacy key.

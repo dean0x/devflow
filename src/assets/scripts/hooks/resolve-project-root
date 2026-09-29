@@ -9,13 +9,19 @@
 # side anchors identically.
 #
 # Sourced by: the memory/learning/session hooks and ensure-devflow-init.
-# Sourced helper: uses `return`-free pure function; _-prefixed locals (never
+# Sourced helper: uses `return`-free pure functions; _-prefixed locals (never
 # clobbers caller vars). Safe under `set -e` (git failure is guarded with || true).
 #
 # Usage:
 #   source resolve-project-root
-#   PROJECT_ROOT="$(df_resolve_root "$CWD")"
+#   PROJECT_ROOT="$(df_resolve_root "$CWD")"      # one root
+#   df_resolve_roots "$CWD"                        # sets DF_ROOT and DF_LEDGER_ROOT
 #
+# df_resolve_roots needs df_is_project_root, so this helper sources its sibling
+# git-marker itself rather than trusting every caller to have done so first.
+
+source "${BASH_SOURCE[0]%/*}/git-marker" 2>/dev/null || true
+
 # df_resolve_root <cwd> prints the project root for <cwd>:
 #   1. git top-level — git walks up to the real repo root even from a
 #      .devflow/-nested subdir, so the nested case is fixed for git repos.
@@ -27,11 +33,96 @@ df_resolve_root() {
   # the caller (e.g. a non-git path). Empty output then routes to the fallback.
   _root="$(git -C "$_cwd" rev-parse --show-toplevel 2>/dev/null || true)"
   if [ -z "$_root" ]; then
-    case "$_cwd" in
-      */.devflow/*) _root="${_cwd%%/.devflow/*}" ;;
-      */.devflow)   _root="${_cwd%/.devflow}" ;;
-      *)            _root="$_cwd" ;;
-    esac
+    _df_nongit_root "$_cwd"
+    _root="$_DF_NONGIT_ROOT"
   fi
   printf '%s\n' "$_root"
+}
+
+# _df_nongit_root <cwd> sets _DF_NONGIT_ROOT to the non-git fallback root: <cwd>
+# with its first /.devflow/ segment onward (or a trailing /.devflow) stripped.
+# A variable rather than stdout, so a caller pays no `$(...)` subshell for it.
+_df_nongit_root() {
+  case "$1" in
+    */.devflow/*) _DF_NONGIT_ROOT="${1%%/.devflow/*}" ;;
+    */.devflow)   _DF_NONGIT_ROOT="${1%/.devflow}" ;;
+    *)            _DF_NONGIT_ROOT="$1" ;;
+  esac
+}
+
+# df_resolve_roots <cwd> sets TWO roots in the caller's scope, from ONE git call:
+#   DF_ROOT        — the checkout's toplevel: where per-checkout data lives
+#                    (memory, the .gitignore carve-out, the knowledge bases).
+#   DF_LEDGER_ROOT — where the learning ledger and its queue live.
+#
+# D-LEDGER-MAIN-WORKTREE: a linked worktree (`git worktree add`, `claude
+# --worktree`) has its own toplevel, so a ledger anchored there restarts at
+# ADR-001 — main's decisions are invisible in it, and the IDs it mints collide
+# with main's (in a repo whose collision guard refuses, the Learning agent stops
+# for good). The ledger is one per REPOSITORY, not per checkout: DF_LEDGER_ROOT
+# is the main worktree — the parent of `--git-common-dir` — when that common dir
+# is a `<dir>/.git` directory AND `<dir>/.devflow` already exists; otherwise it is
+# DF_ROOT. The existence test keeps a main checkout that never ran devflow from
+# being scaffolded by a worktree session. A main worktree at HOME (a dotfiles
+# repository) is refused as well (df_is_project_root, D-HOOKS-GIT-ONLY): its
+# `.devflow` is the machine root, which always exists, so the existence test alone
+# would put the ledger inside `~/.devflow`. A common dir that is not `/.git`
+# (a bare repository, `--separate-git-dir`, a submodule's modules/ dir) has no
+# main checkout to name, so it stays per checkout. Memory stays at DF_ROOT on
+# purpose: working memory describes the branch in front of you. A worktree that
+# already grew its own ledger before this rule keeps it — local data is left in
+# place, and the worktree simply stops appending to it.
+#
+# The one call asks for both answers at once:
+#   git rev-parse --path-format=absolute --show-toplevel --git-common-dir
+# and its output is accepted only when it is EXACTLY two lines, each an absolute
+# path. `--path-format` arrived in git 2.31; an older git echoes the unknown
+# flag back as a line of its own (three lines, the first not absolute), and that
+# falls back to df_resolve_root, so the ledger stays at the toplevel exactly as
+# before this rule. A failed call prints nothing: `--show-toplevel` itself failed
+# (not a work tree), so asking git again could only fail the same way, and the
+# non-git fallback applies directly. Parsing is parameter expansion and `case`
+# only: one git call on the success path and on the non-git path alike.
+df_resolve_roots() {
+  local _cwd="$1" _out="" _top="" _common="" _main=""
+  DF_ROOT=""
+  DF_LEDGER_ROOT=""
+  _out="$(git -C "$_cwd" rev-parse --path-format=absolute --show-toplevel --git-common-dir 2>/dev/null || true)"
+  _top="${_out%%$'\n'*}"
+  if [ "$_top" != "$_out" ]; then
+    _common="${_out#*$'\n'}"
+  fi
+  case "$_top" in /*) ;; *) _top="" ;; esac
+  case "$_common" in
+    *$'\n'*) _common="" ;;
+    /*) ;;
+    *) _common="" ;;
+  esac
+  if [ -z "$_out" ]; then
+    _df_nongit_root "$_cwd"
+    DF_ROOT="$_DF_NONGIT_ROOT"
+    [ -n "$DF_ROOT" ] || DF_ROOT="$_cwd"
+    DF_LEDGER_ROOT="$DF_ROOT"
+    return 0
+  fi
+  if [ -z "$_top" ] || [ -z "$_common" ]; then
+    DF_ROOT="$(df_resolve_root "$_cwd")"
+    [ -n "$DF_ROOT" ] || DF_ROOT="$_cwd"
+    DF_LEDGER_ROOT="$DF_ROOT"
+    return 0
+  fi
+  DF_ROOT="$_top"
+  DF_LEDGER_ROOT="$_top"
+  case "$_common" in
+    */.git)
+      _main="${_common%/.git}"
+      # df_is_project_root forks nothing (builtin `cd -P` walks). Unavailable —
+      # git-marker failed to source — it is a command not found, which keeps the
+      # ledger in this checkout: the conservative answer.
+      if [ -n "$_main" ] && [ -d "$_main/.devflow" ] && df_is_project_root "$_main" 2>/dev/null; then
+        DF_LEDGER_ROOT="$_main"
+      fi
+      ;;
+  esac
+  return 0
 }

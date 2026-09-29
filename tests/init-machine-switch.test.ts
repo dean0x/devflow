@@ -78,29 +78,37 @@ describe('drainDisabledFeatureQueues (D-INIT-DRAIN-AFTER-SWITCH)', () => {
 
   it('drains the queue of every feature switched off once the switch is persisted', async () => {
     const { calls, io } = recorder();
-    await drainDisabledFeatureQueues({ gitRoot: ROOT, memoryEnabled: false, learningEnabled: false, manifestWritten: true }, io);
+    await drainDisabledFeatureQueues({ gitRoot: ROOT, ledgerRoot: ROOT, memoryEnabled: false, learningEnabled: false, manifestWritten: true }, io);
     expect(calls).toEqual([`memory:${ROOT}`, `learning:${ROOT}`]);
   });
 
   it('drains only the features that are off', async () => {
     const memOff = recorder();
-    await drainDisabledFeatureQueues({ gitRoot: ROOT, memoryEnabled: false, learningEnabled: true, manifestWritten: true }, memOff.io);
+    await drainDisabledFeatureQueues({ gitRoot: ROOT, ledgerRoot: ROOT, memoryEnabled: false, learningEnabled: true, manifestWritten: true }, memOff.io);
     expect(memOff.calls).toEqual([`memory:${ROOT}`]);
 
     const learnOff = recorder();
-    await drainDisabledFeatureQueues({ gitRoot: ROOT, memoryEnabled: true, learningEnabled: false, manifestWritten: true }, learnOff.io);
+    await drainDisabledFeatureQueues({ gitRoot: ROOT, ledgerRoot: ROOT, memoryEnabled: true, learningEnabled: false, manifestWritten: true }, learnOff.io);
     expect(learnOff.calls).toEqual([`learning:${ROOT}`]);
+  });
+
+  it('drains learning at the ledger root and memory at this checkout (D-LEDGER-MAIN-WORKTREE)', async () => {
+    // In a linked worktree the hooks queue learning turns into the main
+    // checkout's ledger, while working memory stays per checkout.
+    const { calls, io } = recorder();
+    await drainDisabledFeatureQueues({ gitRoot: '/repo-wt', ledgerRoot: '/repo', memoryEnabled: false, learningEnabled: false, manifestWritten: true }, io);
+    expect(calls).toEqual(['memory:/repo-wt', 'learning:/repo']);
   });
 
   it('drains nothing when the manifest was not written — the switch is still on, so the turns are live', async () => {
     const { calls, io } = recorder();
-    await drainDisabledFeatureQueues({ gitRoot: ROOT, memoryEnabled: false, learningEnabled: false, manifestWritten: false }, io);
+    await drainDisabledFeatureQueues({ gitRoot: ROOT, ledgerRoot: ROOT, memoryEnabled: false, learningEnabled: false, manifestWritten: false }, io);
     expect(calls).toEqual([]);
   });
 
   it('drains nothing outside a git repository', async () => {
     const { calls, io } = recorder();
-    await drainDisabledFeatureQueues({ gitRoot: null, memoryEnabled: false, learningEnabled: false, manifestWritten: true }, io);
+    await drainDisabledFeatureQueues({ gitRoot: null, ledgerRoot: null, memoryEnabled: false, learningEnabled: false, manifestWritten: true }, io);
     expect(calls).toEqual([]);
   });
 

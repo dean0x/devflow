@@ -234,6 +234,8 @@ d .claude/skills/devflow:testing/references/
 - .claude/skills/devflow:testing/references/violations.md
 d .claude/skills/devflow:worktree-support/
 - .claude/skills/devflow:worktree-support/SKILL.md
+d .claude/skills/devflow:worktree-support/references/
+- .claude/skills/devflow:worktree-support/references/roots.md
 d .devflow/
 - .devflow/hud.json
 - .devflow/manifest.json
@@ -244,6 +246,7 @@ d .devflow/scripts/core/
 - .devflow/scripts/core/cache.js
 - .devflow/scripts/core/fs-atomic.js
 - .devflow/scripts/core/git.js
+- .devflow/scripts/core/ledger-root.js
 - .devflow/scripts/core/paths.js
 - .devflow/scripts/core/project-paths.js
 d .devflow/scripts/hooks/

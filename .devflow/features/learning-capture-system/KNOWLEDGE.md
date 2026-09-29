@@ -18,7 +18,7 @@ directories:
   - src/hud/components/learning-counts.ts
   - src/assets/commands/_partials
 created: 2026-07-15
-updated: 2026-09-27
+updated: 2026-09-29
 ---
 
 # Learning & Capture System
@@ -114,6 +114,10 @@ field). It round-trips through `coerceConfig`/`mergeManagedConfig` byte-for-byte
 only sanctioned reader, returning `{absent | valid | invalid}` — see `tracker-feature` KB for the
 Git agent's resolution order.
 
+### Project Roots (D-HOOKS-GIT-ONLY, D-LEDGER-MAIN-WORKTREE)
+
+Hooks resolve roots from git, never from cwd. `resolve-project-root`'s `df_resolve_roots <cwd>` makes ONE `git rev-parse --path-format=absolute --show-toplevel --git-common-dir` call, accepts exactly two absolute lines (else falls back to `df_resolve_root` — git < 2.31 echoes the flag as a third line), and sets `DF_ROOT` (the checkout toplevel: memory, carve-out, KBs) and `DF_LEDGER_ROOT` (the main worktree = parent of a `…/.git` common dir, when `$MAIN/.devflow` already exists and the main worktree is not HOME — `df_is_project_root "$MAIN"`, a physical-path compare, since a dotfiles repo's `~/.devflow` is the machine root and always exists; else `DF_ROOT`). The capture hooks append learning turns under `DF_LEDGER_ROOT` and pass it to `decisions-usage-scan.cjs`; `session-start-context` reads the TL;DR, the queue and `learning.json` there and names it in the directive; memory stays at `DF_ROOT`. A worktree ledger created before this rule stays on disk, unused. `ensure-devflow-init` scaffolds `learning/` only when `DF_LEDGER_ROOT` is `DF_ROOT`: a linked worktree whose ledger is at main gets no `learning/`, and the capture hooks create the ledger's own `learning/` when they append. `ensure-devflow-init` and `session-start-context` both refuse per-project work unless `df_is_project_root` (git-marker) passes — a git marker AND a physical path that is not HOME's — so memory and learning stop together outside git and in a HOME-rooted repo. `ensure-root-gitignore` itself stays ungated (PF-059 parity suite runs it in plain dirs).
+
 ### Capture Hook Protocol
 
 All three capture hooks enforce in order: (1) **re-entrancy guard**
@@ -130,7 +134,12 @@ delimiter for the combined `cwd+field` in `json_extract_cwd_field` — one subpr
 ### session-start-context Directive
 
 Emits `--- LEARNING MAINTENANCE ---` when `.pending-turns.jsonl` is non-empty OR
-`.pending-turns.processing` is stale (>= 900s); a fresh `.processing` suppresses it. Gated by the
+`.pending-turns.processing` is stale (>= 900s); a fresh `.processing` suppresses it. It embeds
+`$LEDGER_ROOT` only when `DIRECTIVE_LEDGER_SAFE` admits it — the positive shape
+`^[A-Za-z0-9/._+-]+$` (`+` for Claude Code's `feat+x` worktrees), one `case` per embedded value
+(ledger root for Section 2; project root + `~/.devflow` for Section 3). A refused root with
+pending work emits the fixed single-quoted `--- LEARNING PAUSED ---` notice, which interpolates
+nothing. Gated by the
 same `queue_read_gates` read, resolved from `$TRACKER_DEVFLOW_DIR/manifest.json`
 (`TRACKER_DEVFLOW_DIR="$HOME/.devflow"`, the machine root; the project root's `.devflow` is
 `PROJECT_DEVFLOW_DIR` — the global `learning.json` read spells `$HOME/.devflow` too, so the two
@@ -254,8 +263,12 @@ untrusted data blocks are wrapped in named XML tags with a DATA-not-instructions
 **`is-hex-sha`** (sourced, no forks, PF-008-safe): `is_hex_sha <value> [min=7] [max=40]`.
 `background-memory-update`/`session-start-memory` use the default 7–40; `pre-compact-memory`
 requires exactly 40 (a full SHA). **pre-compact-memory** bootstraps `WORKING-MEMORY.md` only
-when `is_hex_sha "$GIT_HEAD_SHA" 40 40` AND `GIT_BRANCH` is non-empty (detached HEAD or an
-unborn branch both fail); the bootstrap is noclobber-atomic (`set -o noclobber; : >
+when `is_hex_sha "$GIT_HEAD_SHA" 40 40` (an unborn branch fails); a detached HEAD is labelled
+`(detached)` first (D-DETACHED-HEAD), so it bootstraps with `branch: (detached)`, a Context line
+`- Branch: (detached) @ <short-sha>` and `git.branch: "(detached)"` in backup.json, and
+`background-memory-update` stamps the same label. `session-start-memory` renders the header's
+location as `on <branch>`, `detached @ <short-sha>`, or `on unknown` only when unreadable. The
+bootstrap is noclobber-atomic (`set -o noclobber; : >
 "$MEMORY_FILE"`, REL-5) so a worker CAS `mv` landing in the narrow window fails `noclobber`
 rather than truncating. **session-start-memory**'s `detect_refresh_failing()` (B4) counts
 BOTH `.pending-turns.jsonl` and `.pending-turns.processing` additively, so an orphaned
@@ -263,8 +276,12 @@ BOTH `.pending-turns.jsonl` and `.pending-turns.processing` additively, so an or
 
 ### decisions_load() and index.md Consumption
 
-`decisions_load()` instructs the main model to read `.devflow/learning/index.md` directly — no
-subprocess, no script (ADR-007). Absent/empty → `DECISIONS_CONTEXT` is `(none)`. Consuming
+`decisions_load()` has the main model run ONE `git -C "{start}" rev-parse --path-format=absolute
+--show-toplevel --git-common-dir` and read `{ledger}/.devflow/learning/index.md`, where `{ledger}`
+is the main worktree (when its `.devflow/` exists and it is not HOME), else the toplevel (on git < 2.31, the line
+after the echoed `--path-format=absolute`), else the start directory —
+the hooks' D-LEDGER-MAIN-WORKTREE rule (D-PROMPT-ROOT). No script (ADR-007). Absent/empty →
+`DECISIONS_CONTEXT` is `(none)`. Consuming
 commands use `devflow:apply-decisions`: scan index → Read entry bodies on demand → cite verbatim
 IDs. Never parse `decisions-ledger.jsonl` directly.
 
@@ -273,6 +290,16 @@ IDs. Never parse `decisions-ledger.jsonl` directly.
 `src/hud/components/learning-counts.ts` reads `decisions-ledger.jsonl` and counts rows where
 `anchor_id` is set and `decisions_status` is not in `{Deprecated, Superseded, Retired}` (D309 —
 avoids HUD coupling to markdown format).
+
+The HUD (`gatherLedgerLearningCounts`, run inside the git-status `Promise.all`, 1 s git budget)
+and `devflow learning --status/--list/--clear/--reset` plus the `--disable` drain locate the
+ledger with `getLedgerRoot` (`src/core/ledger-root.ts`) — the TypeScript twin of
+`DF_LEDGER_ROOT`: one `rev-parse --path-format=absolute --show-toplevel --git-common-dir`,
+main worktree when `<main>/.devflow` is a directory and `<main>` is not HOME (realpath compare),
+else the toplevel (git < 2.31's echo included), `null` outside git (the caller keeps its cwd
+fallback). Parity with `df_resolve_roots` is pinned by `tests/core/ledger-root.test.ts`, which
+runs the shell helper on the same fixtures. `--configure` writes the project `learning.json` at `getLedgerRoot()` (cwd outside git), where `session-start-context` reads it; `init --no-learning` drains the learning queue there too.
+Memory is never resolved this way — it stays per checkout (`getGitRoot`).
 
 All three feature CLIs share the `writeMachineFeature`/`readMachineFeature` shape, plus their
 own per-repo side effects: **`devflow learning --enable/--disable`** writes `features.learning`
@@ -390,8 +417,13 @@ Do not rename them: `decisions.md`/`pitfalls.md` (rendered output), `decisions-l
 - **CAS CONFLICT heartbeat-touches `.processing`**: distinct from the claim-time touch; removing
   it would let the cold path reclaim a live retry batch after 300s.
 
-- **Pre-compact bootstrap skips detached HEAD and unborn branches**: both the SHA gate and the
-  branch gate must pass.
+- **Pre-compact bootstrap skips only unborn branches**: a detached HEAD bootstraps with the
+  `(detached)` label (D-DETACHED-HEAD). `(detached)` is a legal git branch name, so the label is a
+  name, never a decision input beyond the session-start mismatch note.
+
+- **The learning queue is not always under the session's own root**: in a linked worktree it is
+  the main worktree's (`DF_LEDGER_ROOT`). Tests seeding a queue for a worktree session must seed
+  main's.
 
 - **`compute_commits_since_note()` outcome literals are a test contract**: exact strings, do not
   fail loudly if changed.
@@ -423,6 +455,8 @@ Do not rename them: `decisions.md`/`pitfalls.md` (rendered output), `decisions-l
 | `src/assets/scripts/hooks/capture-turn` | Stop: dual-queue assistant turn + usage scanner |
 | `src/assets/scripts/hooks/capture-question` | PostToolUse: AskUserQuestion Q&A row append |
 | `src/assets/scripts/hooks/queue-append` | Shared JSONL append + overflow truncation + `queue_read_gates` |
+| `src/assets/scripts/hooks/resolve-project-root` | `df_resolve_root` (toplevel) and `df_resolve_roots` (one git call → `DF_ROOT` + `DF_LEDGER_ROOT`) |
+| `src/assets/scripts/hooks/git-marker` | `df_has_git_marker`, `df_is_project_root` — the zero-fork git-only gate |
 | `src/assets/scripts/hooks/learning-lock` | mkdir-based lock (30s stale-break) |
 | `src/assets/scripts/hooks/is-hex-sha` | Pure-shell hex-SHA check; sourced by three memory hooks with different bounds |
 | `src/assets/scripts/hooks/session-start-context` | Learning directive (Section 2) + tracker-setup directive (Section 3) |
@@ -444,6 +478,7 @@ Do not rename them: `decisions.md`/`pitfalls.md` (rendered output), `decisions-l
 | `src/cli/commands/knowledge/toggle.ts` | `devflow knowledge --enable/--disable/--status` |
 | `src/cli/commands/init.ts` | `drainDisabledFeatureQueues` (D-INIT-DRAIN-AFTER-SWITCH), `D-HUD-ONLY-PRESERVE`, the one `manifestData.features` write site |
 | `src/hud/components/learning-counts.ts` | HUD counts from `decisions-ledger.jsonl` |
+| `src/core/ledger-root.ts` | `getLedgerRoot` — the CLI/HUD twin of the hooks' `DF_LEDGER_ROOT` |
 | `src/assets/commands/_partials/_knowledge.mds` | `knowledge_load()`/`knowledge_writeback()` — write-back reads `features.knowledge` directly |
 | `src/assets/commands/_partials/_decisions.mds` | `decisions_load()` macro (plain file Read per ADR-007) |
 | `src/assets/scripts/hooks/decisions-usage-scan.cjs` | Citation counter (D29 grep-first gate) |

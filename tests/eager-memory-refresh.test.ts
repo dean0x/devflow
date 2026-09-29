@@ -2084,23 +2084,24 @@ describe('S22: pre-compact bootstrap stamp and canonical sections (B2)', () => {
     expect(fs.readFileSync(memFile, 'utf-8')).toBe(originalContent);
   });
 
-  // Item 3 — detached HEAD and unborn branch bootstrap gate
-  // pre-compact-memory requires BOTH a non-empty branch AND a 40-hex sha — detached HEAD
-  // and unborn branches are skipped to avoid embedding "branch: " (blank) in the stamp.
+  // Item 3 — the unborn-branch bootstrap gate, and detached HEAD (D-DETACHED-HEAD)
+  // pre-compact-memory bootstraps only with a 40-hex HEAD sha. A detached HEAD HAS
+  // one, and is labelled `(detached)` (#382 P02), so the first compaction there
+  // still leaves memory to restore. An unborn branch has no sha and is skipped. The full detached contract is
+  // pinned in tests/shell-hooks.test.ts (TP-53).
 
-  it('detached HEAD: bootstrap is skipped — no WORKING-MEMORY.md created (Item 3)', () => {
-    // Detached HEAD: git rev-parse HEAD returns a sha (non-empty) but
-    // git branch --show-current returns "" (empty) — gate must require non-empty branch.
-    // Without the branch gate, the stamp embeds "branch: " (empty) which recreates
-    // the "synced @ unknown" / blank-branch defect on the very first session.
+  it('detached HEAD: bootstrap stamps `branch: (detached)` — never a blank branch (Item 3, D-DETACHED-HEAD)', () => {
+    // `git branch --show-current` prints "" on a detached HEAD. A blank branch in the
+    // stamp would recreate the "synced @ unknown" defect; the explicit label keeps the
+    // stamp well-formed.
     initGitRepo(projectDir);
     execSync('git checkout --detach', { cwd: projectDir });
     const memFile = path.join(projectDir, '.devflow', 'memory', 'WORKING-MEMORY.md');
 
     runHook(PRE_COMPACT_HOOK, { cwd: projectDir }, homeDir);
 
-    // Detached HEAD has no branch name — bootstrap must be skipped
-    expect(fs.existsSync(memFile)).toBe(false);
+    expect(fs.readFileSync(memFile, 'utf-8').split('\n')[0])
+      .toMatch(/^<!-- memory-head: [0-9a-f]{40} branch: \(detached\) -->$/);
   });
 
   it('unborn branch (git init, no commits): bootstrap is skipped — no WORKING-MEMORY.md created (Item 3)', () => {
