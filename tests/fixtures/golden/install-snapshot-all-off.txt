@@ -234,6 +234,8 @@ d .claude/skills/devflow:testing/references/
 - .claude/skills/devflow:testing/references/violations.md
 d .claude/skills/devflow:worktree-support/
 - .claude/skills/devflow:worktree-support/SKILL.md
+d .claude/skills/devflow:worktree-support/references/
+- .claude/skills/devflow:worktree-support/references/roots.md
 d .devflow/
 - .devflow/hud.json
 - .devflow/manifest.json

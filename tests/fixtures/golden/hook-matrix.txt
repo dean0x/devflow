@@ -158,12 +158,13 @@ exit 0
 A home/.devflow/logs/
 A home/.devflow/logs/<SANDBOX>-wt/
 A home/.devflow/logs/<SANDBOX>-wt/.capture-prompt.log
+A repo/.devflow/learning/
+A repo/.devflow/learning/.pending-turns.jsonl
 A wt/.devflow/
 A wt/.devflow/.root-gitignore-configured-v5
 A wt/.devflow/docs/
 A wt/.devflow/features/
 A wt/.devflow/learning/
-A wt/.devflow/learning/.pending-turns.jsonl
 A wt/.devflow/memory/
 A wt/.devflow/memory/.pending-turns.jsonl
 A wt/.gitignore
@@ -173,12 +174,13 @@ exit 0
 A home/.devflow/logs/
 A home/.devflow/logs/<SANDBOX>-wt/
 A home/.devflow/logs/<SANDBOX>-wt/.capture-turn.log
+A repo/.devflow/learning/
+A repo/.devflow/learning/.pending-turns.jsonl
 A wt/.devflow/
 A wt/.devflow/.root-gitignore-configured-v5
 A wt/.devflow/docs/
 A wt/.devflow/features/
 A wt/.devflow/learning/
-A wt/.devflow/learning/.pending-turns.jsonl
 A wt/.devflow/memory/
 A wt/.devflow/memory/.pending-turns.jsonl
 A wt/.gitignore
@@ -201,9 +203,9 @@ A home/.devflow/logs/<SANDBOX>-wt/
 exit 0
 A home/.devflow/logs/
 A home/.devflow/logs/<SANDBOX>-wt/
+A repo/.devflow/learning/
 A wt/.devflow/
 A wt/.devflow/.root-gitignore-configured-v5
-A wt/.devflow/learning/
 A wt/.gitignore
 
 ## worktree · capture-question (PostToolUse AskUserQuestion)
@@ -211,12 +213,13 @@ exit 0
 A home/.devflow/logs/
 A home/.devflow/logs/<SANDBOX>-wt/
 A home/.devflow/logs/<SANDBOX>-wt/.capture-question.log
+A repo/.devflow/learning/
+A repo/.devflow/learning/.pending-turns.jsonl
 A wt/.devflow/
 A wt/.devflow/.root-gitignore-configured-v5
 A wt/.devflow/docs/
 A wt/.devflow/features/
 A wt/.devflow/learning/
-A wt/.devflow/learning/.pending-turns.jsonl
 A wt/.devflow/memory/
 A wt/.devflow/memory/.pending-turns.jsonl
 A wt/.gitignore
@@ -244,31 +247,11 @@ exit 0
 exit 0
 A home/.devflow/logs/
 A home/.devflow/logs/<SANDBOX>-nongit/
-A home/.devflow/logs/<SANDBOX>-nongit/.capture-prompt.log
-A nongit/.devflow/
-A nongit/.devflow/.root-gitignore-configured-v5
-A nongit/.devflow/docs/
-A nongit/.devflow/features/
-A nongit/.devflow/learning/
-A nongit/.devflow/learning/.pending-turns.jsonl
-A nongit/.devflow/memory/
-A nongit/.devflow/memory/.pending-turns.jsonl
-A nongit/.gitignore
 
 ## non-git · capture-turn (Stop)
 exit 0
 A home/.devflow/logs/
 A home/.devflow/logs/<SANDBOX>-nongit/
-A home/.devflow/logs/<SANDBOX>-nongit/.capture-turn.log
-A nongit/.devflow/
-A nongit/.devflow/.root-gitignore-configured-v5
-A nongit/.devflow/docs/
-A nongit/.devflow/features/
-A nongit/.devflow/learning/
-A nongit/.devflow/learning/.pending-turns.jsonl
-A nongit/.devflow/memory/
-A nongit/.devflow/memory/.pending-turns.jsonl
-A nongit/.gitignore
 
 ## non-git · memory-worker (Stop)
 SKIPPED: launches a detached claude -p worker that outlives the hook; its writes are not the hook's
@@ -287,36 +270,13 @@ A home/.devflow/logs/<SANDBOX>-nongit/
 exit 0
 A home/.devflow/logs/
 A home/.devflow/logs/<SANDBOX>-nongit/
-A nongit/.devflow/
-A nongit/.devflow/.root-gitignore-configured-v5
-A nongit/.devflow/learning/
-A nongit/.gitignore
 
 ## non-git · capture-question (PostToolUse AskUserQuestion)
 exit 0
 A home/.devflow/logs/
 A home/.devflow/logs/<SANDBOX>-nongit/
-A home/.devflow/logs/<SANDBOX>-nongit/.capture-question.log
-A nongit/.devflow/
-A nongit/.devflow/.root-gitignore-configured-v5
-A nongit/.devflow/docs/
-A nongit/.devflow/features/
-A nongit/.devflow/learning/
-A nongit/.devflow/learning/.pending-turns.jsonl
-A nongit/.devflow/memory/
-A nongit/.devflow/memory/.pending-turns.jsonl
-A nongit/.gitignore
 
 ## non-git · pre-compact-memory (PreCompact)
 exit 0
 A home/.devflow/logs/
 A home/.devflow/logs/<SANDBOX>-nongit/
-A home/.devflow/logs/<SANDBOX>-nongit/.pre-compact-memory.log
-A nongit/.devflow/
-A nongit/.devflow/.root-gitignore-configured-v5
-A nongit/.devflow/docs/
-A nongit/.devflow/features/
-A nongit/.devflow/learning/
-A nongit/.devflow/memory/
-A nongit/.devflow/memory/backup.json
-A nongit/.gitignore
