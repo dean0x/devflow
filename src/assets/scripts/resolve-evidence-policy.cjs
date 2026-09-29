@@ -3,14 +3,16 @@
 //
 // Resolves EVIDENCE_POLICY for a repository and prints it on ONE line together
 // with the three mechanism inputs that operations receive. Installed as a
-// top-level sibling of hud.sh and redact-secrets.cjs under ~/.devflow/scripts/.
+// top-level sibling of hud.sh and redact-secrets.cjs under ~/.devflow/scripts/,
+// with its parser beside it in lib/project-config.cjs.
 //
 // Usage: node resolve-evidence-policy.cjs [<dir>]      (<dir> defaults to cwd)
 //
 // The policy is plumbing, decided once by the caller: this script prints it plus
 // the mechanism inputs, and operations only ever see the inputs. It WRITES NOTHING
-// — no file, no git ref, no remote state — so `.devflow/policy.json` stays a
-// team-owned file that only the team commits.
+// — no file, no git ref, no remote state — so `.devflow/project.json` (and the
+// legacy `.devflow/policy.json` it falls back to) stay team-owned files that only
+// the team commits (applies ADR-024).
 //
 // stdout is exactly one line plus "\n", or empty (D-POLICY-LINE):
 //   EVIDENCE_POLICY=<required|standard> SOURCE=<file|worktree|default|invalid|error>
@@ -47,8 +49,8 @@
 
 const fs = require('fs');
 const path = require('path');
-const os = require('os');
 const childProcess = require('child_process');
+const projectConfig = require('./lib/project-config.cjs');
 
 // ---------------------------------------------------------------------------
 // Closed vocabularies
@@ -116,11 +118,11 @@ const MECHANISM_INPUTS = Object.freeze({
 /** The mechanism-input keys, in line order. */
 const INPUT_KEYS = Object.freeze(['ISSUE_REQUIRED', 'APPLY_CONVENTIONS', 'REQUIRE_NON_AUTHOR_APPROVAL']);
 
-/** Largest policy file read, in bytes. A policy is two keys; nothing valid approaches this. */
-const MAX_POLICY_BYTES = 4096;
-
-/** Largest manifest read, in bytes. */
-const MAX_MANIFEST_BYTES = 1048576;
+/**
+ * Largest policy or project file read, in bytes — the shared parser's bound, so
+ * both files obey one limit. A policy is two keys; nothing valid approaches this.
+ */
+const MAX_POLICY_BYTES = projectConfig.MAX_CONFIG_BYTES;
 
 /**
  * A branch name this script will put into argv or onto stdout: an alphanumeric
@@ -158,8 +160,11 @@ const BLOB_MAX_BUFFER = 65536;
 /** rev-parse and ls-remote print one short line each. */
 const LINE_MAX_BUFFER = 4096;
 
-/** The repository-relative path of the policy file, in git and API spelling. */
+/** The repository-relative path of the legacy policy file, in git and API spelling. */
 const POLICY_REL = '.devflow/policy.json';
+
+/** The repository-relative path of the team config file, in git and API spelling. */
+const PROJECT_REL = '.devflow/project.json';
 
 /** `git ls-remote --symref origin HEAD`, first line. Bounded class, no backtracking. */
 const LS_REMOTE_SYMREF_RE = /^ref: refs\/heads\/([^\t\n]{1,255})\tHEAD$/;
@@ -261,8 +266,9 @@ const POLICY_GRAMMAR_RE =
  * Classify policy-file bytes. `null`/`undefined` is "no file" (absent); everything
  * else is valid or invalid, never absent — an empty committed file is invalid.
  *
- * The byte checks run before decoding (size, then a UTF-8 BOM, which is invalid
- * rather than skipped), decoding is fatal on a malformed sequence, and after the
+ * The byte checks run before decoding (lib/project-config.cjs decodeConfigBytes:
+ * size, then a UTF-8 BOM, which is invalid rather than skipped, then a decode
+ * that is fatal on a malformed sequence), and after the
  * grammar gate the parsed object must hold exactly the own keys
  * {version, evidencePolicy} with version === 1. A duplicate key passes the
  * grammar but collapses in the parse, so the key-set check refuses it.
@@ -271,19 +277,12 @@ const POLICY_GRAMMAR_RE =
  * @returns {ParsedPolicy}
  */
 function parsePolicyBytes(buf) {
-  if (buf === null || buf === undefined) return ABSENT;
-  if (!(buf instanceof Uint8Array)) return INVALID;
-  if (buf.length > MAX_POLICY_BYTES) return INVALID;
-  if (buf.length >= 3 && buf[0] === 0xef && buf[1] === 0xbb && buf[2] === 0xbf) return INVALID;
-
-  let text;
-  try {
-    // TextDecoder would silently strip a leading BOM; the byte check above is
-    // what makes one invalid.
-    text = new TextDecoder('utf-8', { fatal: true }).decode(buf);
-  } catch (_) {
-    return INVALID;
-  }
+  // The byte rules (size, BOM, fatal UTF-8) come from decodeConfigBytes, so the
+  // policy file and project.json can never disagree about what bytes are.
+  const decoded = projectConfig.decodeConfigBytes(buf);
+  if (decoded.kind === 'absent') return ABSENT;
+  if (decoded.kind === 'invalid') return INVALID;
+  const text = decoded.text;
   if (!POLICY_GRAMMAR_RE.test(text)) return INVALID;
 
   let parsed;
@@ -340,60 +339,8 @@ function complianceDefault(rawFeatureValue) {
 // Bounded file reads
 // ---------------------------------------------------------------------------
 
-/**
- * Read a regular file of at most `maxBytes`, or say why not.
- *
- * The stat runs first and decides without opening: a non-regular file (with
- * `followSymlinks` false this includes a symlink; always a directory, FIFO,
- * socket or device) is refused unopened, and an oversize one unread. The open
- * then adds O_NONBLOCK (a FIFO swapped in after the stat cannot block) and, when
- * not following, O_NOFOLLOW (a symlink swapped in fails the open); the fstat
- * re-checks the opened object. The read loop is bounded by the byte count.
- *
- * @param {string} filePath
- * @param {number} maxBytes
- * @param {boolean} followSymlinks
- * @returns {{ kind: 'absent' } | { kind: 'refused' } | { kind: 'ok', bytes: Buffer }}
- */
-function readBoundedRegularFile(filePath, maxBytes, followSymlinks) {
-  let st;
-  try {
-    st = followSymlinks ? fs.statSync(filePath) : fs.lstatSync(filePath);
-  } catch (/** @type {any} */ err) {
-    return err && (err.code === 'ENOENT' || err.code === 'ENOTDIR') ? { kind: 'absent' } : { kind: 'refused' };
-  }
-  if (!st.isFile() || st.size > maxBytes) return { kind: 'refused' };
-
-  const flags = fs.constants.O_RDONLY
-    | (fs.constants.O_NONBLOCK || 0)
-    | (followSymlinks ? 0 : (fs.constants.O_NOFOLLOW || 0));
-  let fd;
-  try {
-    fd = fs.openSync(filePath, flags);
-  } catch (_) {
-    return { kind: 'refused' };
-  }
-  try {
-    const fst = fs.fstatSync(fd);
-    if (!fst.isFile() || fst.size > maxBytes) return { kind: 'refused' };
-    // One byte past the stat'd size: a file that grew between the stat and the
-    // read is refused rather than truncated into something that parses.
-    const buf = Buffer.alloc(fst.size + 1);
-    let total = 0;
-    for (let i = 0; i < buf.length; i++) {
-      const n = fs.readSync(fd, buf, total, buf.length - total, null);
-      if (n === 0) break;
-      total += n;
-      if (total === buf.length) break;
-    }
-    if (total > fst.size) return { kind: 'refused' };
-    return { kind: 'ok', bytes: buf.subarray(0, total) };
-  } catch (_) {
-    return { kind: 'refused' };
-  } finally {
-    try { fs.closeSync(fd); } catch (_) { /* the read already decided; a close error changes nothing */ }
-  }
-}
+/** Bounded, never-writing file read — the shared one (lib/project-config.cjs). */
+const readBoundedRegularFile = projectConfig.readBoundedRegularFile;
 
 /**
  * W — the working tree's policy file. lstat-refused, never followed: a symlink,
@@ -410,46 +357,103 @@ function readWorktreePolicy(root) {
   return parsePolicyBytes(read.bytes);
 }
 
+// ---------------------------------------------------------------------------
+// Source readings (D-POLICY-SOURCE-PRECEDENCE, D-COMPLIANCE-REPO-FLOOR)
+// ---------------------------------------------------------------------------
+
 /**
- * The devflow machine root: ~/.devflow, else null (a home directory that is not
- * absolute would resolve against cwd). No environment variable relocates it
- * (D-ONE-HOME in src/targets/claude-code/claude-paths.ts).
+ * @typedef {{ evidence: ParsedPolicy, compliance: boolean }} SourceReading
+ *   What one source (R, T, H or W) says: its evidence policy, and whether its
+ *   project.json declares repository compliance.
  *
- * @returns {string | null}
+ * @typedef {{ evidence: ParsedPolicy | null, compliance: boolean }} ProjectReading
+ *   `evidence` null ⇒ project.json does not decide it, so the legacy policy file
+ *   at the same source does.
+ *
+ * @typedef {{ kind: 'absent' } | { kind: 'invalid' } | { kind: 'parsed', evidence: { kind: string, value?: unknown }, compliance: { kind: string } }} ProjectConfigView
+ *   The part of lib/project-config.cjs ProjectConfig this script reads.
  */
-function devflowDir() {
-  let home;
-  try {
-    home = os.homedir();
-  } catch (_) {
-    // No HOME and no passwd entry: there is no manifest to read, which is not an error.
-    return null;
+
+/** @type {ProjectConfigView} */
+const PROJECT_ABSENT = Object.freeze({ kind: 'absent' });
+/** @type {ProjectConfigView} */
+const PROJECT_INVALID = Object.freeze({ kind: 'invalid' });
+
+/**
+ * D-POLICY-SOURCE-PRECEDENCE: at every source, `project.json` decides the
+ * evidence policy when it can, and the legacy `policy.json` at the SAME source
+ * only when it cannot — project.json absent, or present without an `evidence`
+ * key. A present-but-malformed or duplicated `evidence` decides `invalid`
+ * (⇒ required) and is never rescued by the legacy file, and a project.json that
+ * is not a JSON object at all is invalid outright. The precedence is per source,
+ * so each source still says ONE thing and foldPolicy folds them exactly as it
+ * always has; with no project.json anywhere, every output line is byte-identical
+ * to the policy-file-only resolver (AC-24).
+ *
+ * D-COMPLIANCE-REPO-FLOOR: a `compliance` key in project.json at R, T or W — any
+ * value, an empty list and a malformed one included — makes the repository's
+ * compliance default `required`, folded with the machine's as
+ * stricter(C_machine, C_repo). A machine with compliance on at zero frameworks is
+ * already `required`, and a repository that declares compliance is held to the
+ * same floor. A project.json that cannot be read counts as declaring it (fail
+ * closed).
+ *
+ * @param {ProjectConfigView} project
+ * @returns {ProjectReading}
+ */
+function projectReading(project) {
+  if (project.kind === 'absent') return { evidence: null, compliance: false };
+  if (project.kind === 'invalid') return { evidence: INVALID, compliance: true };
+  const compliance = project.compliance.kind !== 'absent';
+  const evidence = project.evidence;
+  if (evidence.kind === 'valid' && POLICIES.includes(/** @type {Policy} */ (evidence.value))) {
+    return { evidence: Object.freeze({ kind: 'valid', policy: /** @type {Policy} */ (evidence.value) }), compliance };
   }
-  return typeof home === 'string' && path.isAbsolute(home) ? path.join(home, '.devflow') : null;
+  if (evidence.kind === 'absent') return { evidence: null, compliance };
+  return { evidence: INVALID, compliance };
 }
 
 /**
- * The raw `features.compliance` value from the manifest, or undefined. Read
- * directly — never through the CLI's manifest reader, which heal-writes — as a
- * regular file of at most 1 MiB. Anything unreadable or malformed is "no state",
- * which complianceDefault maps to disabled; since C only ever raises, a missing C
- * can never lower the result below the governing file.
+ * Complete a project reading with the legacy file's evidence when project.json
+ * did not decide it.
+ *
+ * @param {ProjectReading} reading
+ * @param {() => ParsedPolicy} readLegacy  called only when needed
+ * @returns {SourceReading}
+ */
+function withLegacyFallback(reading, readLegacy) {
+  return { evidence: reading.evidence === null ? readLegacy() : reading.evidence, compliance: reading.compliance };
+}
+
+/**
+ * W — the working tree's project.json, then its policy.json. Both are
+ * lstat-refused, never followed: a symlink, directory, FIFO or device is invalid
+ * unopened, and an oversize file invalid unread.
+ *
+ * @param {string} root
+ * @returns {SourceReading}
+ */
+function readWorktreeSource(root) {
+  const read = readBoundedRegularFile(path.join(root, '.devflow', 'project.json'), MAX_POLICY_BYTES, false);
+  const project = read.kind === 'ok' ? projectConfig.parseProjectBytes(read.bytes)
+    : read.kind === 'absent' ? PROJECT_ABSENT : PROJECT_INVALID;
+  return withLegacyFallback(projectReading(project), () => readWorktreePolicy(root));
+}
+
+/**
+ * The raw `features.compliance` value from the machine manifest, or undefined.
+ * The manifest is read by the shared reader (lib/project-config.cjs
+ * readMachineManifest) — never through the CLI's manifest reader, which
+ * heal-writes. Anything unreadable or malformed is "no state", which
+ * complianceDefault maps to disabled; since C only ever raises, a missing C can
+ * never lower the result below the governing file.
  *
  * @returns {unknown}
  */
 function readManifestCompliance() {
-  const dir = devflowDir();
-  if (dir === null) return undefined;
-  const read = readBoundedRegularFile(path.join(dir, 'manifest.json'), MAX_MANIFEST_BYTES, true);
-  if (read.kind !== 'ok') return undefined;
-  let parsed;
-  try {
-    parsed = JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(read.bytes));
-  } catch (_) {
-    return undefined;
-  }
+  const parsed = projectConfig.readMachineManifest();
   if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) return undefined;
-  const features = parsed.features;
+  const features = /** @type {any} */ (parsed).features;
   if (features === null || typeof features !== 'object' || Array.isArray(features)) return undefined;
   return Object.prototype.hasOwnProperty.call(features, 'compliance') ? features.compliance : undefined;
 }
@@ -564,15 +568,20 @@ function probeDefaultBranch(ctx, root) {
 }
 
 /**
- * Step 3: R, the default branch's policy file — or null when the remote turned
- * out to be unavailable after all.
+ * @typedef {{ kind: 'bytes', bytes: Buffer } | { kind: 'absent' } | { kind: 'overflow' }} RemoteFile
+ */
+
+/**
+ * Step 3: one file on the default branch — or null when the remote turned out to
+ * be unavailable after all.
  *
  * `--method GET` is mandatory: gh sends POST whenever a field is added. stdout is
  * file content ONLY on exit 0 — a 404 prints gh's JSON error body on stdout, so
  * it is classified from stderr and the exit code and its stdout is never parsed.
- *   ENOBUFS                              ⇒ invalid (never unavailable, or a huge
- *                                          file would hand control to the worktree)
- *   exit 0                               ⇒ parse the bytes
+ *   ENOBUFS                              ⇒ overflow — invalid, never unavailable,
+ *                                          or a huge file would hand control to
+ *                                          the worktree
+ *   exit 0                               ⇒ the bytes
  *   exit ≠ 0 and stderr has `(HTTP 404)` ⇒ absent — the probe already succeeded,
  *                                          so 404 means "no file", not "no access"
  *   anything else (403/429, 5xx, timeout, spawn error) ⇒ unavailable
@@ -580,17 +589,40 @@ function probeDefaultBranch(ctx, root) {
  * @param {CallContext} ctx
  * @param {string} root
  * @param {string} ref
- * @returns {ParsedPolicy | null}
+ * @param {string} rel  PROJECT_REL or POLICY_REL — a constant, never input
+ * @returns {RemoteFile | null}
  */
-function fetchRemotePolicy(ctx, root, ref) {
+function fetchRemoteFile(ctx, root, ref, rel) {
   const r = runCall(ctx, 'gh', [
-    'api', '--method', 'GET', 'repos/{owner}/{repo}/contents/' + POLICY_REL,
+    'api', '--method', 'GET', 'repos/{owner}/{repo}/contents/' + rel,
     '-f', 'ref=' + ref, '-H', 'Accept: application/vnd.github.raw+json',
   ], root, GH_TIMEOUT_MS, BLOB_MAX_BUFFER);
-  if (r.errorCode === 'ENOBUFS') return INVALID;
-  if (r.ok) return parsePolicyBytes(r.stdout);
-  if (r.errorCode === null && r.status !== null && r.status !== 0 && r.stderr.includes('(HTTP 404)')) return ABSENT;
+  if (r.errorCode === 'ENOBUFS') return { kind: 'overflow' };
+  if (r.ok) return { kind: 'bytes', bytes: r.stdout };
+  if (r.errorCode === null && r.status !== null && r.status !== 0 && r.stderr.includes('(HTTP 404)')) return { kind: 'absent' };
   return null;
+}
+
+/**
+ * R — the default branch's project.json, then (only when it is a 404 or has no
+ * `evidence`) its policy.json. Null when either call finds the remote
+ * unavailable: a half-read default branch is not a default branch.
+ *
+ * @param {CallContext} ctx
+ * @param {string} root
+ * @param {string} ref
+ * @returns {SourceReading | null}
+ */
+function remoteSource(ctx, root, ref) {
+  const projectFile = fetchRemoteFile(ctx, root, ref, PROJECT_REL);
+  if (projectFile === null) return null;
+  const reading = projectReading(projectFile.kind === 'bytes' ? projectConfig.parseProjectBytes(projectFile.bytes)
+    : projectFile.kind === 'absent' ? PROJECT_ABSENT : PROJECT_INVALID);
+  if (reading.evidence !== null) return { evidence: reading.evidence, compliance: reading.compliance };
+  const policyFile = fetchRemoteFile(ctx, root, ref, POLICY_REL);
+  if (policyFile === null) return null;
+  return withLegacyFallback(reading, () => (policyFile.kind === 'bytes' ? parsePolicyBytes(policyFile.bytes)
+    : policyFile.kind === 'absent' ? ABSENT : INVALID));
 }
 
 /**
@@ -611,11 +643,27 @@ function lsRemoteDefaultBranch(ctx, root) {
 }
 
 /**
- * Steps 4 and 7: a policy blob at a revision (HEAD, or the tracking ref).
- * Exit 0 ⇒ parse; an answered non-zero exit (the path does not exist there, an
- * unborn HEAD) ⇒ absent; an unanswered call (ENOBUFS included) ⇒ invalid — never
- * absent, or a git that timed out would silently drop the default branch's copy
- * from the fold.
+ * Steps 4 and 7: one blob at a revision (HEAD, or the tracking ref).
+ * Exit 0 ⇒ the bytes; an answered non-zero exit (the path does not exist there,
+ * an unborn HEAD) ⇒ absent; an unanswered call (ENOBUFS included) ⇒ unanswered,
+ * which every caller reads as invalid — never absent, or a git that timed out
+ * would silently drop the default branch's copy from the fold.
+ *
+ * @param {CallContext} ctx
+ * @param {string} root
+ * @param {string} revision
+ * @param {string} rel  PROJECT_REL or POLICY_REL — a constant, never input
+ * @returns {{ kind: 'bytes', bytes: Buffer } | { kind: 'absent' } | { kind: 'unanswered' }}
+ */
+function catFileBlob(ctx, root, revision, rel) {
+  const r = runCall(ctx, 'git', ['cat-file', 'blob', revision + ':' + rel], root,
+    GIT_LOCAL_TIMEOUT_MS, BLOB_MAX_BUFFER);
+  if (r.ok) return { kind: 'bytes', bytes: r.stdout };
+  return answered(r) ? { kind: 'absent' } : { kind: 'unanswered' };
+}
+
+/**
+ * The legacy policy blob at a revision: parsed, absent, or invalid when unanswered.
  *
  * @param {CallContext} ctx
  * @param {string} root
@@ -623,15 +671,30 @@ function lsRemoteDefaultBranch(ctx, root) {
  * @returns {ParsedPolicy}
  */
 function catFilePolicy(ctx, root, revision) {
-  const r = runCall(ctx, 'git', ['cat-file', 'blob', revision + ':' + POLICY_REL], root,
-    GIT_LOCAL_TIMEOUT_MS, BLOB_MAX_BUFFER);
-  if (r.ok) return parsePolicyBytes(r.stdout);
-  return answered(r) ? ABSENT : INVALID;
+  const blob = catFileBlob(ctx, root, revision, POLICY_REL);
+  if (blob.kind === 'bytes') return parsePolicyBytes(blob.bytes);
+  return blob.kind === 'absent' ? ABSENT : INVALID;
+}
+
+/**
+ * T or H: a revision's project.json, then (only when it is absent or has no
+ * `evidence`) its policy.json.
+ *
+ * @param {CallContext} ctx
+ * @param {string} root
+ * @param {string} revision
+ * @returns {SourceReading}
+ */
+function revisionSource(ctx, root, revision) {
+  const blob = catFileBlob(ctx, root, revision, PROJECT_REL);
+  const project = blob.kind === 'bytes' ? projectConfig.parseProjectBytes(blob.bytes)
+    : blob.kind === 'absent' ? PROJECT_ABSENT : PROJECT_INVALID;
+  return withLegacyFallback(projectReading(project), () => catFilePolicy(ctx, root, revision));
 }
 
 /**
  * Steps 6 and 7 (offline, D known): T, the local tracking copy of the default
- * branch's file. The ref check decides whether T can stand for the default branch
+ * branch's files. The ref check decides whether T can stand for the default branch
  * at all — a ref git ANSWERS is missing is "B unknown" (null), which a failed blob
  * read could not tell apart from "file absent". A ref check git does not answer is
  * not knowing, so T is invalid (it raises) rather than unknown (it would not).
@@ -639,14 +702,14 @@ function catFilePolicy(ctx, root, revision) {
  * @param {CallContext} ctx
  * @param {string} root
  * @param {string} ref
- * @returns {ParsedPolicy | null}
+ * @returns {SourceReading | null}
  */
-function trackingPolicy(ctx, root, ref) {
+function trackingSource(ctx, root, ref) {
   const trackingRef = 'refs/remotes/origin/' + ref;
   const r = runCall(ctx, 'git', ['rev-parse', '--verify', '--quiet', trackingRef], root,
     GIT_LOCAL_TIMEOUT_MS, LINE_MAX_BUFFER);
-  if (r.ok) return catFilePolicy(ctx, root, trackingRef);
-  return answered(r) ? null : INVALID;
+  if (r.ok) return revisionSource(ctx, root, trackingRef);
+  return answered(r) ? null : { evidence: INVALID, compliance: false };
 }
 
 // ---------------------------------------------------------------------------
@@ -663,27 +726,32 @@ function trackingPolicy(ctx, root, ref) {
  *   head: ParsedPolicy | null,
  *   compliance: Policy,
  * }} Facts
- *   remote   R — set iff reachable
- *   tracking T — set iff offline and refs/remotes/origin/<D> exists (or git could
- *            not answer whether it does — then invalid)
- *   head     H — set iff B (R online, T offline) is known
+ *   remote     R — set iff reachable
+ *   tracking   T — set iff offline and refs/remotes/origin/<D> exists (or git
+ *              could not answer whether it does — then invalid)
+ *   head       H — set iff B (R online, T offline) is known
+ *   compliance stricter(C_machine, C_repo) — D-COMPLIANCE-REPO-FLOOR
  */
 
 /**
- * Run the fixed call sequence. The only calls ever made, in order:
- *   git rev-parse --show-toplevel                         (cwd = <dir>)
+ * Run the fixed call sequence (D-POLICY-PROBE). The only calls ever made, in order:
+ *   git rev-parse --show-toplevel                           (cwd = <dir>)
  *   gh api repos/{owner}/{repo} --jq .default_branch
- *   gh api --method GET …/contents/.devflow/policy.json   (only if reachable)
- *   git ls-remote --symref origin HEAD                    (offline, D unknown)
- *   git rev-parse --verify --quiet refs/remotes/origin/D  (offline, D known)
- *   git cat-file blob refs/remotes/origin/D:…             (that ref exists)
- *   git cat-file blob HEAD:…                              (B known)
+ *   gh api --method GET …/contents/.devflow/project.json    (the probe named D)
+ *   gh api --method GET …/contents/.devflow/policy.json     (… and project.json is
+ *                                                            a 404 or has no evidence)
+ *   git ls-remote --symref origin HEAD                      (offline, D unknown)
+ *   git rev-parse --verify --quiet refs/remotes/origin/D    (offline, D known)
+ *   git cat-file blob refs/remotes/origin/D:…/project.json  (that ref exists)
+ *   git cat-file blob refs/remotes/origin/D:…/policy.json   (… no evidence there)
+ *   git cat-file blob HEAD:…/project.json                   (B known)
+ *   git cat-file blob HEAD:…/policy.json                    (… no evidence there)
  *
  * Returns null when git cannot say whether <dir> is in a repository at all (see
  * gitToplevel): nothing below can be trusted then, and resolve() fails closed.
  *
  * @param {string} dir
- * @param {Policy} compliance
+ * @param {Policy} compliance  C_machine
  * @param {ExecFn} exec
  * @returns {Facts | null}
  */
@@ -701,20 +769,32 @@ function gatherFacts(dir, compliance, exec) {
   }
   const root = toplevel.root;
 
-  const worktree = readWorktreePolicy(root);
+  const worktree = readWorktreeSource(root);
   let ref = probeDefaultBranch(ctx, root);
-  const remote = ref === null ? null : fetchRemotePolicy(ctx, root, ref);
+  const remote = ref === null ? null : remoteSource(ctx, root, ref);
   const reachable = remote !== null;
 
+  /** @type {SourceReading | null} */
   let tracking = null;
   if (!reachable) {
     if (ref === null) ref = lsRemoteDefaultBranch(ctx, root);
-    if (ref !== null) tracking = trackingPolicy(ctx, root, ref);
+    if (ref !== null) tracking = trackingSource(ctx, root, ref);
   }
 
   const baseKnown = reachable || tracking !== null;
-  const head = baseKnown ? catFilePolicy(ctx, root, 'HEAD') : null;
-  return { reachable, ref, remote, worktree, tracking, head, compliance };
+  const head = baseKnown ? revisionSource(ctx, root, 'HEAD') : null;
+  const repoCompliance = worktree.compliance
+    || (remote !== null && remote.compliance)
+    || (tracking !== null && tracking.compliance);
+  return {
+    reachable,
+    ref,
+    remote: remote === null ? null : remote.evidence,
+    worktree: worktree.evidence,
+    tracking: tracking === null ? null : tracking.evidence,
+    head: head === null ? null : head.evidence,
+    compliance: stricter(compliance, repoCompliance ? 'required' : 'standard'),
+  };
 }
 
 // ---------------------------------------------------------------------------

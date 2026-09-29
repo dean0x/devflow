@@ -29,6 +29,7 @@ import * as path from 'path';
 import { normalizeComplianceFeature } from '../../src/core/compliance.js';
 import {
   ARGV,
+  PROJECT_CONFIG_LIB,
   RESOLVER_SCRIPT,
   buildScriptedShim,
   collectUnscopedSpawns,
@@ -1546,6 +1547,7 @@ describe('real git (gh faked unavailable, git real)', SUBPROCESS_TIMEOUT, () => 
 
 describe('source guards', () => {
   const SOURCE = fs.readFileSync(RESOLVER_SCRIPT, 'utf8');
+  const LIB_SOURCE = fs.readFileSync(PROJECT_CONFIG_LIB, 'utf8');
 
   /** Code lines only: `//` tails and JSDoc/block-comment lines are stripped, so prose naming a rule is not a violation of it. */
   function codeLines(source: string): string[] {
@@ -1590,11 +1592,22 @@ describe('source guards', () => {
     expect(collectFsWrites(`${SOURCE}\nconst f = fs.constants.O_WRONLY;\n`)).toHaveLength(1);
   });
 
-  it('requires Node built-ins only (fs, path, os, child_process) — and a seeded one is reported', () => {
+  it('requires Node built-ins and its own parser only — and a seeded one is reported', () => {
     const required = collectRequires(SOURCE);
     expect(required.length).toBeGreaterThan(0);
-    expect([...new Set(required)].sort()).toEqual(['child_process', 'fs', 'os', 'path']);
+    expect([...new Set(required)].sort()).toEqual(['./lib/project-config.cjs', 'child_process', 'fs', 'path']);
+    expect([...new Set(collectRequires(LIB_SOURCE))].sort()).toEqual(['fs', 'os', 'path']);
     expect(collectRequires(`${SOURCE}\nconst h = require('https');\n`)).toContain('https');
+    expect(collectRequires(`${LIB_SOURCE}\nconst c = require('child_process');\n`)).toContain('child_process');
+  });
+
+  it('the shared parser writes nothing, prints nothing, exits nothing and spawns nothing', () => {
+    expect(LIB_SOURCE).toContain("'use strict';");
+    expect(collectFsWrites(LIB_SOURCE)).toEqual([]);
+    expect(collectStdoutWrites(LIB_SOURCE)).toEqual([]);
+    expect(collectProcessExitCalls(LIB_SOURCE)).toEqual([]);
+    expect(collectExitCodeSetters(LIB_SOURCE)).toEqual([]);
+    expect(collectFsWrites(`${LIB_SOURCE}\nfs.renameSync(a, b);\n`)).toHaveLength(1);
   });
 
   it('never enables a shell, and never names a write-side git command in code', () => {
@@ -1612,8 +1625,12 @@ describe('source guards', () => {
     for (const marker of [
       'D-POLICY-LINE', 'D-POLICY-PROBE', 'D-POLICY-STRICT-SCHEMA',
       'D-POLICY-FOLD', 'D-POLICY-CHANGE-DETECT', 'D-POLICY-PLUMBING',
+      'D-POLICY-SOURCE-PRECEDENCE', 'D-COMPLIANCE-REPO-FLOOR',
     ]) {
       expect(SOURCE, `${marker} missing`).toContain(marker);
+    }
+    for (const marker of ['D-PROJECT-CONFIG', 'D-PROJECT-STRICT-KEYS', 'ADR-024', 'PF-023']) {
+      expect(LIB_SOURCE, `${marker} missing from the shared parser`).toContain(marker);
     }
   });
 });
