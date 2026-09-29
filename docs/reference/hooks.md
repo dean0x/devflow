@@ -13,7 +13,7 @@ The hook-driven subsystems: working memory, ambient mode, the learning pipeline,
 | Root | Holds | Value |
 |------|-------|-------|
 | `DF_ROOT` | Working memory, the `.gitignore` carve-out, feature knowledge bases | This checkout's toplevel |
-| `DF_LEDGER_ROOT` | The learning queue and ledger (`.devflow/learning/`) | The main worktree when this is a linked worktree and the main checkout already has `.devflow/`; otherwise `DF_ROOT` |
+| `DF_LEDGER_ROOT` | The learning queue and ledger (`.devflow/learning/`) | The main worktree when this is a linked worktree, the main checkout already has `.devflow/`, and the main worktree is not HOME; otherwise `DF_ROOT` |
 
 One ledger per repository (D-LEDGER-MAIN-WORKTREE) keeps ADR/PF numbering continuous: a ledger anchored at a worktree's own toplevel restarted at ADR-001 and collided with main's. The capture hooks append learning turns to the main queue, the Learning directive names the main root, and `decisions_load` reads the main index (D-PROMPT-ROOT). `knowledge_load` and the knowledge write-back use the checkout's toplevel, because knowledge bases are committed per branch. A worktree that already grew its own ledger keeps it on disk; sessions there stop appending to it. The personal `.devflow/config.json` stays per worktree by decision: a new worktree does not inherit the source checkout's personal settings.
 

@@ -8,7 +8,7 @@ Devflow's per-project data does not all live in the same checkout.
 
 | Data | Root | Why |
 |------|------|-----|
-| Learning ledger and queue (`.devflow/learning/`) | The main worktree, when its `.devflow/` exists; else this checkout's toplevel | One ledger per repository, so ADR/PF numbers never restart or collide in a linked worktree (D-LEDGER-MAIN-WORKTREE) |
+| Learning ledger and queue (`.devflow/learning/`) | The main worktree, when its `.devflow/` exists and the main worktree is not HOME; else this checkout's toplevel | One ledger per repository, so ADR/PF numbers never restart or collide in a linked worktree (D-LEDGER-MAIN-WORKTREE) |
 | Working memory (`.devflow/memory/`) | This checkout's toplevel | Memory describes the branch in front of you |
 | Feature knowledge bases (`.devflow/features/`) | This checkout's toplevel | They are committed per branch (D-PROMPT-ROOT) |
 | Personal `.devflow/config.json` | This checkout's toplevel | Per-worktree by decision: a new worktree does not inherit the source checkout's personal settings |
