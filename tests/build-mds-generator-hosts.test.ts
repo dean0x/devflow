@@ -227,7 +227,8 @@ async function realAgentShape(): Promise<{ frontmatter: string; bodyHead: string
     throw new Error(`${realPath} has no leading frontmatter block — fixture cannot be derived`);
   }
   // First few body lines only: the strip semantics are what is under test, and
-  // git.md's full body contains {…} spans that MDS would treat as interpolation.
+  // re-feeding git.md's whole compiled body to the compiler would test its brace
+  // and fence handling instead.
   const bodyHead = fm.body.split('\n').slice(0, 4).join('\n') + '\n';
   return { frontmatter: fm.block, bodyHead };
 }
@@ -606,6 +607,36 @@ describe('refusals are aggregated, not exited mid-loop', () => {
       expect(collected.healthyCompiled, `the healthy host must still be compiled.\n${run.combined}`).toBe(true);
       expect(collected.aggregated).toBe(true);
       expect(run.combined).toMatch(/invalid-charset/);
+    });
+  });
+
+  it('a host that compiles to chat messages is refused by name and does not abort the healthy host', async () => {
+    // compileFile returns a markdown | messages union (MDS >= 0.3.0). Every devflow
+    // asset is Markdown, so an `@message` host must fail the build by name — not
+    // crash on the missing `output`, write `undefined`, or be skipped.
+    await withFakeRoot(async fakeRoot => {
+      const dir = path.join(fakeRoot, 'src', 'assets', 'commands');
+      await fs.mkdir(dir, { recursive: true });
+      await fs.writeFile(
+        path.join(dir, 'aa-messages.mds'),
+        '---\ndescription: neg\noutput-dir: dist/commands\n---\n@message system:\nYou are a probe.\n@end\n',
+        'utf-8',
+      );
+      await writeCommandHost(fakeRoot, 'zz-healthy', 'description: ok\noutput-dir: dist/commands\n');
+
+      const run = runBuild(fakeRoot);
+      const healthy = await readIfPresent(path.join(fakeRoot, 'dist', 'commands', 'zz-healthy.md'));
+      const refused = await readIfPresent(path.join(fakeRoot, 'dist', 'commands', 'aa-messages.md'));
+      const collected = collectAggregation(run, healthy);
+
+      expect(collected.status, `expected exit 1.\n${run.combined}`).toBe(1);
+      expect(collected.healthyCompiled, `the healthy host must still be compiled.\n${run.combined}`).toBe(true);
+      expect(collected.aggregated).toBe(true);
+      expect(run.combined).toMatch(
+        /src\/assets\/commands\/aa-messages\.mds: compiled to a "messages" result, not Markdown/,
+      );
+      expect(run.combined).toContain('MDS: 1 compiled, 1 error(s), 0 warning(s)');
+      expect(refused, 'nothing may be written for the refused host').toBeNull();
     });
   });
 

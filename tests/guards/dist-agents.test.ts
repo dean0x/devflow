@@ -9,8 +9,8 @@
  *       `catch { return }` + `if (distFiles.length === 0) return` shape is
  *       deliberately NOT copied: a guard that skips itself on a missing build
  *       verifies nothing on exactly the tree where it matters (PF-018).
- *   (b) no leaked `\{` / `\}` — MDS escapes braces in prose, and a missed or
- *       doubled escape reaches the artifact rather than the compiler (PF-024).
+ *   (b) no leaked `\{` / `\}` — MDS 0.4.4 has no brace escape, so a 0.2.0-era
+ *       `\{` in a source reaches the artifact rather than the compiler (PF-024).
  *   (c) no `.md` shadowing an `.mds` host: two sources for one agent means the
  *       dist-preferred resolver silently picks a winner.
  *
@@ -150,11 +150,10 @@ describe('dist/agents ↔ src generator-host parity (fail-loud, both directions)
 /**
  * Named collector: compiled agent files containing a literal backslash-brace.
  *
- * MDS interpolates `{…}` everywhere except column-0 triple-backtick fences, so
- * prose braces are written `\{` / `\}` in the .mds source and compile back to
- * `{` / `}`. A missed escape is a compile error; a DOUBLED escape is silent —
- * `\{` reaches the artifact and every downstream `{PLACEHOLDER}` contract at
- * that site is dead text (PF-024).
+ * Under `@mdscript/mds` 0.4.4 a single-brace `{…}` is literal text and only
+ * `{{…}}` interpolates; there is no backslash escape. A `\{` / `\}` left in a
+ * .mds source compiles silently and ships its backslash, so every downstream
+ * `{PLACEHOLDER}` contract at that site is dead text (PF-024).
  */
 function collectEscapedBraceLeaks(files: Array<{ name: string; content: string }>): string[] {
   const leaks: string[] = []

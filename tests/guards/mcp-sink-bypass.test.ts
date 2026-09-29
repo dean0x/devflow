@@ -52,11 +52,10 @@
  * exists, which is a different claim (the build emits what was authored) and is
  * kept separate for that reason.
  *
- * MDS ESCAPE ASYMMETRY: in an `.mds` source a brace in PROSE is written `\{`, and
- * raw inside a column-0 fence. The same literal therefore has two spellings in
- * one file, and a guard matching only one of them would pass or fail on where the
- * author happened to put the sentence. `unescapeMds` normalises before matching,
- * and a probe proves it.
+ * ONE SPELLING: since MDS 0.4 a single-brace placeholder such as
+ * `{SCRUBBED_BODY}` is literal text in prose and fences alike, so a source and its
+ * generated file spell it the same way and the arms match the text as read. (A
+ * legacy `\{` would ship its backslash; tests/build-mds.test.ts reports that leak.)
  */
 
 import { describe, it, expect } from 'vitest';
@@ -81,17 +80,6 @@ import {
 // Source reading
 // ---------------------------------------------------------------------------
 
-/**
- * Collapse MDS's prose brace escapes so one literal has one spelling.
- *
- * Only `\{` and `\}` — deliberately not a general unescape. Widening it would
- * start rewriting the module's own backslashes and the guard would be matching
- * text that appears in no artifact.
- */
-export function unescapeMds(source: string): string {
-  return source.replace(/\\\{/g, '{').replace(/\\\}/g, '}');
-}
-
 /** The contract module's source, fail-loud. Never the generated file [E2]. */
 function contractSource(): string {
   const abs = path.join(ROOT, MCP_CONTRACT_MODULE.source);
@@ -101,7 +89,7 @@ function contractSource(): string {
       `about, so there is nothing to assert. It is authored in 3a-4 (P3a-S12).`,
     );
   }
-  return unescapeMds(readFileSync(abs, 'utf-8'));
+  return readFileSync(abs, 'utf-8');
 }
 
 // ---------------------------------------------------------------------------
@@ -237,15 +225,6 @@ describe('tool-call contract: the source module states every D11 clause [E2]', (
       'them, and every posting mechanic that names this file invokes a rule it no longer contains',
     ).toEqual([]);
   });
-
-  it('unescapeMds normalises the prose spelling, and only the brace escapes', () => {
-    expect(unescapeMds('spells `\\{SCRUBBED_BODY\\}` in prose')).toContain('{SCRUBBED_BODY}');
-    expect(unescapeMds('a fenced {SCRUBBED_BODY}')).toContain('{SCRUBBED_BODY}');
-    expect(
-      unescapeMds('a literal backslash \\n and \\`tick\\`'),
-      'a general unescape would rewrite text that appears in no artifact',
-    ).toBe('a literal backslash \\n and \\`tick\\`');
-  });
 });
 
 // ---------------------------------------------------------------------------
@@ -327,7 +306,7 @@ const GATED_ANAPHOR = /^the same gated value\b/i;
 export function collectBypassSites(corpus: readonly CorpusEntry[]): string[] {
   const sites: string[] = [];
   for (const entry of corpus) {
-    const lines = unescapeMds(entry.content).split('\n');
+    const lines = entry.content.split('\n');
     for (let i = 0; i < lines.length; i++) {
       const line = lines[i];
       const report = (): void => {
@@ -387,7 +366,7 @@ const RAW_REF = /RAW\b/;
 export function collectRawRefOnPostingLine(corpus: readonly CorpusEntry[]): string[] {
   const offenders: string[] = [];
   for (const entry of corpus) {
-    for (const [i, line] of unescapeMds(entry.content).split('\n').entries()) {
+    for (const [i, line] of entry.content.split('\n').entries()) {
       if (POSTING_VERBS.test(line) && RAW_REF.test(line)) {
         offenders.push(`${entry.path}:${i + 1}: ${line.trim().slice(0, 100)}`);
       }
@@ -432,16 +411,16 @@ describe('bypass regex: red on every shape that posts an ungated body', () => {
     ).toEqual([]);
   });
 
-  it('the gated spelling is the ONLY accepted right-hand side, in both MDS spellings', () => {
+  it('the gated spelling is the ONLY accepted right-hand side', () => {
     for (const line of [
       'create_comment(body: {SCRUBBED_BODY})',
-      'addCommentToIssue(body: \\{SCRUBBED_BODY\\})',
+      'addCommentToIssue(body: {SCRUBBED_BODY})',
       'description: {SCRUBBED_BODY}',
       // The prose shape, gated the two ways it can be: by naming the placeholder,
       // and by referring back to one the same line already named.
       'with the description field carrying {SCRUBBED_BODY}',
       'Post through the *add comment* capability with arguments (issue key, body: ' +
-      '\\{SCRUBBED_BODY\\}), or on a new issue through the *create issue* capability with the ' +
+      '{SCRUBBED_BODY}), or on a new issue through the *create issue* capability with the ' +
       'description field carrying the same gated value.',
     ]) {
       expect(
@@ -449,6 +428,11 @@ describe('bypass regex: red on every shape that posts an ungated body', () => {
         `"${line}" uses the gate and must not be reported`,
       ).toEqual([]);
     }
+    // The legacy 0.2.0 escape is no longer the gate: under MDS 0.4 it ships its
+    // backslashes, so the emitted argument is not the placeholder at all.
+    expect(
+      collectBypassSites([{ path: 'seed.md', content: 'addCommentToIssue(body: \\{SCRUBBED_BODY\\})' }]),
+    ).toHaveLength(1);
   });
 
   it('no file in the live sink class posts an ungated body', () => {
@@ -565,7 +549,7 @@ function postingMechanicCorpus(): CorpusEntry[] {
 export function collectUngatedPostingMechanics(corpus: readonly CorpusEntry[]): string[] {
   const violations: string[] = [];
   for (const entry of corpus) {
-    const text = unescapeMds(entry.content);
+    const text = entry.content;
     if (!text.includes('{SCRUBBED_BODY}')) continue;
     for (const missing of collectMissingClauses(text)) {
       violations.push(`${entry.path}: missing ${missing}`);
@@ -603,7 +587,7 @@ describe('forward arm: every posting mechanic names every clause [DR-01][DR-06]'
       ).toBe(true);
     }
 
-    const posting = corpus.filter(e => unescapeMds(e.content).includes('{SCRUBBED_BODY}'));
+    const posting = corpus.filter(e => e.content.includes('{SCRUBBED_BODY}'));
     expect(
       posting.map(e => e.path),
       'the corpus holds no file that spells the gated body placeholder, so every clause arm below ' +
@@ -712,7 +696,7 @@ const FLAGGED_RM = /\brm\s+-{1,2}[A-Za-z]/;
  * reporting "missing" about a line the search simply failed to locate.
  */
 export function d11RemovalLine(agent: string): string {
-  const line = unescapeMds(agent)
+  const line = agent
     .split('\n')
     .find(l => l.includes('trap ') && l.includes('rm -- '));
   if (line === undefined) {
@@ -786,7 +770,7 @@ export function collectMissingRemovalClaims(line: string): string[] {
 export function collectFlaggedRemovals(corpus: readonly CorpusEntry[]): string[] {
   const offenders: string[] = [];
   for (const entry of corpus) {
-    for (const [i, line] of unescapeMds(entry.content).split('\n').entries()) {
+    for (const [i, line] of entry.content.split('\n').entries()) {
       if (!FLAGGED_RM.test(line)) continue;
       if (!D11_STAGING_FILES.some(f => line.includes(f))) continue;
       offenders.push(`${entry.path}:${i + 1}: ${line.trim().slice(0, 100)}`);
@@ -878,7 +862,7 @@ describe('residue: the D11 staging files are removed, in a shape that runs (PF-0
       'success about nothing (PF-018)',
     ).toBeGreaterThan(0);
     expect(
-      corpus.some(e => unescapeMds(e.content).includes('rm -- ')),
+      corpus.some(e => e.content.includes('rm -- ')),
       'no file in the sink class removes a staging file at all, so the flagged-form arm below ' +
       'is an absence claim over ground that carries no removals',
     ).toBe(true);

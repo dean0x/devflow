@@ -7,7 +7,6 @@ output-dir: dist/commands
 @import { compliance_gate } from "./_partials/_compliance.mds"
 @import { evidence_policy } from "./_partials/_evidence_policy.mds"
 @import { publication_gate } from "./_partials/_publication.mds"
-
 # Code Review Command
 
 Run a comprehensive code review of the current branch by spawning parallel review agents, then synthesizing results into PR comments. Supports incremental reviews, timestamped report directories, and multi-worktree auto-discovery.
@@ -35,20 +34,20 @@ Run a comprehensive code review of the current branch by spawning parallel revie
 2. **If `--path` flag provided:** use only that worktree, skip discovery
    **`--path` validation**: Before proceeding, verify the path exists as a directory and appears in `git worktree list` output. If not: report error and stop.
 3. **If only 1 reviewable worktree** (the common case): proceed as single-worktree flow — zero behavior change
-4. **If multiple reviewable worktrees:** report "Found N worktrees with reviewable branches: \{list with paths and branches\}" and proceed with multi-worktree flow
+4. **If multiple reviewable worktrees:** report "Found N worktrees with reviewable branches: {list with paths and branches}" and proceed with multi-worktree flow
 
 #### Step 0b: Resolve COMPLIANCE_SKILL_INSTALLED
 
 **Produces:** COMPLIANCE_SKILL_INSTALLED
 
-{compliance_gate()}
+{{compliance_gate()}}
 Reuse this result for every worktree and every downstream phase.
 
 #### Step 0b-ii: Resolve the evidence policy
 
 **Produces:** EVIDENCE_POLICY, ISSUE_REQUIRED, APPLY_CONVENTIONS, REQUIRE_NON_AUTHOR_APPROVAL
 
-{evidence_policy()}
+{{evidence_policy()}}
 
 #### Step 0c: Per-Worktree Pre-Flight (Git Agent)
 
@@ -56,14 +55,14 @@ Reuse this result for every worktree and every downstream phase.
 **Requires:** WORKTREES
 
 Discover PR description guidance from plan artifact (per worktree):
-1. List `\{worktree\}/.devflow/docs/design/*.md` files
+1. List `{worktree}/.devflow/docs/design/*.md` files
 2. Sort by timestamp in filename (descending -- timestamps are YYYY-MM-DD_HHMM, naturally sortable)
 3. Read the most recent file, extract `## PR Description Guidance` section
 4. If no plan files exist or section not found, set `PR_DESCRIPTION_GUIDANCE` to `(none)`
 
 Render the test-plan block (per worktree) from `/implement`'s evidence file, and from nothing else:
-1. `branch_slug` is `git -C "\{worktree\}" branch --show-current` with every `/` replaced by `-`.
-2. Only when `branch_slug` matches `^[A-Za-z0-9._-]\{1,200\}$` and the file exists, run (the path double-quoted):
+1. `branch_slug` is `git -C "{worktree}" branch --show-current` with every `/` replaced by `-`.
+2. Only when `branch_slug` matches `^[A-Za-z0-9._-]{1,200}$` and the file exists, run (the path double-quoted):
 
 ```bash
 node "$HOME/.devflow/scripts/verify-evidence.cjs" render --plan "{worktree}/.devflow/docs/evidence-{branch_slug}.md"; echo "exit=$?"
@@ -104,15 +103,15 @@ If `pr_number` is absent or the command fails, set `PR_DESCRIPTION` to `(none)`.
 For each worktree:
 
 1. Generate timestamp: `YYYY-MM-DD_HHMM`. If directory already exists (same-minute collision), append seconds (`YYYY-MM-DD_HHMMSS`).
-2. Create timestamped review directory: `mkdir -p \{worktree\}/.devflow/docs/reviews/\{branch-slug\}/\{timestamp\}/`
-3. Check if `\{worktree\}/.devflow/docs/reviews/\{branch-slug\}/.last-review-head` exists:
+2. Create timestamped review directory: `mkdir -p {worktree}/.devflow/docs/reviews/{branch-slug}/{timestamp}/`
+3. Check if `{worktree}/.devflow/docs/reviews/{branch-slug}/.last-review-head` exists:
    - **If yes AND `--full` NOT set:**
      - Read the SHA from the file
-     - Verify reachable: `git -C \{worktree\} cat-file -t \{sha\}` (handles rebases — if unreachable, fallback to full)
+     - Verify reachable: `git -C {worktree} cat-file -t {sha}` (handles rebases — if unreachable, fallback to full)
      - Check if SHA == current HEAD → if so, skip review: "No new commits since last review. Use --full for a full re-review."
-     - Set `DIFF_RANGE` to `\{last-review-sha\}...HEAD`
+     - Set `DIFF_RANGE` to `{last-review-sha}...HEAD`
    - **If no (first review), or `--full`:**
-     - Set `DIFF_RANGE` to `\{base_branch\}...HEAD`
+     - Set `DIFF_RANGE` to `{base_branch}...HEAD`
 
 #### Step 0e-i: Load Prior Resolution and Count Cycles
 
@@ -120,10 +119,10 @@ For each worktree:
 **Requires:** BRANCH_INFO
 
 For each worktree, perform a single pass over timestamped directories:
-1. List timestamped directories in `\{worktree\}/.devflow/docs/reviews/\{branch-slug\}/` sorted descending: `ls -1d \{worktree\}/.devflow/docs/reviews/\{branch-slug\}/20* 2>/dev/null | sort -r`
+1. List timestamped directories in `{worktree}/.devflow/docs/reviews/{branch-slug}/` sorted descending: `ls -1d {worktree}/.devflow/docs/reviews/{branch-slug}/20* 2>/dev/null | sort -r`
 2. Iterate once: accumulate CYCLE_NUMBER count for each directory containing `resolution-summary.md`; capture the first (most-recent) such directory as PRIOR_DIR.
 3. If CYCLE_NUMBER = 0: set PRIOR_RESOLUTIONS=(none), CYCLE_NUMBER=1, proceed.
-4. Otherwise: set CYCLE_NUMBER = count + 1. Read `\{PRIOR_DIR\}/resolution-summary.md` as PRIOR_RESOLUTIONS.
+4. Otherwise: set CYCLE_NUMBER = count + 1. Read `{PRIOR_DIR}/resolution-summary.md` as PRIOR_RESOLUTIONS.
 5. If `--full`: still load PRIOR_RESOLUTIONS (valuable for Review agent cross-cycle awareness).
 
 #### Step 0e-ii: Convergence Assessment
@@ -134,7 +133,7 @@ For each worktree, perform a single pass over timestamped directories:
 MAX_REVIEW_CYCLES = 10
 
 1. If CYCLE_NUMBER > MAX_REVIEW_CYCLES:
-   Warn in output: "⚠️ Review pipeline has run \{CYCLE_NUMBER-1\} cycles (exceeds MAX_REVIEW_CYCLES=10). Consider merging or manual inspection."
+   Warn in output: "⚠️ Review pipeline has run {CYCLE_NUMBER-1} cycles (exceeds MAX_REVIEW_CYCLES=10). Consider merging or manual inspection."
    Continue with review.
 2. Parse Statistics table from PRIOR_RESOLUTIONS:
    - Extract False Positive, Fixed, Deferred counts
@@ -143,7 +142,7 @@ MAX_REVIEW_CYCLES = 10
    - If denominator = 0: fp_ratio = 0, skip warning
    - If parsing fails: fp_ratio = 0, skip warning; note in output: "Warning: Could not parse Statistics table from prior resolution. FP ratio unavailable — convergence tracking degraded."
 3. If fp_ratio > 0.7 AND CYCLE_NUMBER >= 3:
-   Warn in output: "⚠️ Convergence: \{ratio\}% false positives in cycle \{N-1\}. Consider merging or manual inspection."
+   Warn in output: "⚠️ Convergence: {ratio}% false positives in cycle {N-1}. Consider merging or manual inspection."
    Continue with review.
 
 **Decision table — Step 0e-ii paths:**
@@ -161,7 +160,7 @@ MAX_REVIEW_CYCLES = 10
 
 For each reviewable worktree, call:
 
-{publication_gate()}
+{{publication_gate()}}
 
 ### Phase 1: Analyze Changed Files
 
@@ -187,7 +186,7 @@ Per worktree, detect file types in diff using `DIFF_RANGE` to determine conditio
 
 If `COMPLIANCE_SKILL_INSTALLED` AND the diff touches regulated surface (data models, auth flows, logging/observability, payments, IaC, retention): add `compliance` to REVIEW_FOCUS_LIST for this worktree.
 
-**Language focus presence gate.** The eight language focuses — `typescript`, `react`, `accessibility`, `ui-design`, `go`, `java`, `python`, `rust` — ship with optional plugins, so their pattern skills are installed only when the user selected that plugin. Gate them exactly as `compliance` is gated: for each language focus the table above would add, check whether `~/.claude/skills/devflow:\{focus\}/SKILL.md` exists (one file-existence check per candidate focus, read-only, silent). If it does not exist, do NOT add that focus to `REVIEW_FOCUS_LIST` and do NOT spawn a Review agent for it — the file-type condition alone never spawns a language focus. The eight core focuses are unconditional and are never presence-gated.
+**Language focus presence gate.** The eight language focuses — `typescript`, `react`, `accessibility`, `ui-design`, `go`, `java`, `python`, `rust` — ship with optional plugins, so their pattern skills are installed only when the user selected that plugin. Gate them exactly as `compliance` is gated: for each language focus the table above would add, check whether `~/.claude/skills/devflow:{focus}/SKILL.md` exists (one file-existence check per candidate focus, read-only, silent). If it does not exist, do NOT add that focus to `REVIEW_FOCUS_LIST` and do NOT spawn a Review agent for it — the file-type condition alone never spawns a language focus. The eight core focuses are unconditional and are never presence-gated.
 
 ### Phase 1b: Load Decisions Index
 
@@ -195,11 +194,11 @@ If `COMPLIANCE_SKILL_INSTALLED` AND the diff touches regulated surface (data mod
 
 **Load Companion Skills** — Load via Skill tool: `devflow:quality-gates`, `devflow:software-design`. If a skill fails to load, continue without it.
 
-{decisions_load()}
+{{decisions_load()}}
 
 This produces a compact index of active ADR/PF entries. Pass `DECISIONS_CONTEXT` to all Review agents. Review agents use `devflow:apply-decisions` to Read full entry bodies on demand.
 
-{knowledge_load()}
+{{knowledge_load()}}
 
 Pass `FEATURE_KNOWLEDGE` to all Review agents alongside `DECISIONS_CONTEXT`.
 
@@ -294,7 +293,7 @@ Posts the consolidated review-summary comment (marker-deduped by the operation o
 **Requires:** BRANCH_INFO, REVIEW_DIR
 
 Per worktree, after successful completion:
-1. Write current HEAD SHA to `\{worktree_path\}/.devflow/docs/reviews/\{branch-slug\}/.last-review-head`
+1. Write current HEAD SHA to `{worktree_path}/.devflow/docs/reviews/{branch-slug}/.last-review-head`
 2. Display results from all agents:
    - Merge recommendation (from Synthesize agent)
    - Issue counts by category (🔴 blocking / ⚠️ should-fix / ℹ️ pre-existing)
@@ -350,7 +349,7 @@ In multi-worktree mode, report results per worktree.
 | Worktree pre-flight fails | Report failure, continue with other worktrees |
 | `--full` in multi-worktree mode | Applies to all worktrees (global modifier) |
 | Many worktrees (5+) | Report count and proceed — user manages their worktree count |
-| Review comment already posted | Git agent matches its own marker on the `\{cycle, timestamp\}` pair → skip silently (D7); a re-review in the same cycle (different timestamp) posts its own comment. The marker's format belongs to the operation; this caller passes the pair and never restates the literal |
+| Review comment already posted | Git agent matches its own marker on the `{cycle, timestamp}` pair → skip silently (D7); a re-review in the same cycle (different timestamp) posts its own comment. The marker's format belongs to the operation; this caller passes the pair and never restates the literal |
 | First review (no prior resolution) | PRIOR_RESOLUTIONS=(none), no convergence check |
 | fp_ratio denominator = 0 | fp_ratio = 0, no warning |
 | `--full` flag | Bypass incremental detection (Step 0d), still load PRIOR_RESOLUTIONS for cross-cycle awareness |
@@ -362,7 +361,7 @@ In multi-worktree mode, report results per worktree.
 ## Backwards Compatibility
 
 - **Single worktree**: Auto-discovery finds only one worktree → proceeds exactly as before. Zero behavior change.
-- **Legacy flat layout**: If `.devflow/docs/reviews/\{branch-slug\}/` contains flat `*.md` files (no timestamped subdirectories), new runs create timestamped subdirectories. Old flat files remain untouched.
+- **Legacy flat layout**: If `.devflow/docs/reviews/{branch-slug}/` contains flat `*.md` files (no timestamped subdirectories), new runs create timestamped subdirectories. Old flat files remain untouched.
 
 ## Principles
 

@@ -302,9 +302,9 @@ The pre-flight self-check writes the authored script to a scratch path, runs `no
 ### MDS literal braces and template expressions
 
 In `.mds` source files:
-- Literal `{` and `}` in prose MUST be escaped as `\{` and `\}` — otherwise MDS interprets them as partial call sites. This applies to every `{ISSUE_REF}`/`{ISSUE_ID}`/`{ISSUE_PR_LINK}` mention inside a `.mds` source (compare `_ticket_template.mds`'s `\{ISSUE_REF\}` against the unescaped `{ISSUE_REF}` in the compiled `.md` output and in non-MDS files like `docs-framework/SKILL.md`).
-- `${...}` template expressions are only valid inside `js` fences. Outside a js fence, `${}` is treated as a literal string.
-- Fences (`` ``` ``) MUST start at column 0 — indented fences are not recognized as code blocks by the MDS compiler and leak as prose.
+- Literal `{…}` (e.g. `{ISSUE_REF}`) is plain text under `@mdscript/mds` 0.4.4; only `{{name}}` / `{{helper()}}` interpolate. There is no `\{` escape — it ships its backslash (caught by the backslash-leak guard in `tests/build-mds.test.ts`).
+- `${...}` is literal text everywhere under 0.4.4 — in prose and inside a `js` fence alike; MDS never evaluates it.
+- Every fence kind (column-0, indented, tilde, blockquote) is passthrough under 0.4.4 — nothing inside a fence is interpolated.
 - `output-dir:` MUST be the LAST key in the frontmatter block. No non-blank lines may follow it inside the `---` block.
 
 ### Wave Design Agent Reader Must Be Opus Tier

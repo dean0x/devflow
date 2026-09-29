@@ -18,7 +18,7 @@ that reason.
 @define decision_markers():
 ## Decision Markers
 
-The `D\{N\}` labels used throughout the Git agent. **D4 (degradation contract) and
+The `D{N}` labels used throughout the Git agent. **D4 (degradation contract) and
 D11 (comment-sink scrub) are NOT here** — their definitions stay inline in the
 agent, because they are the only two whose controls every spawn must already have
 loaded before it can act. The rest are glossary entries: a reader consults them to
@@ -62,15 +62,15 @@ already written, and never overwrites it.
    - Branches: `git branch -r --format='%(refname:short)' | head -50` — detect prefix/separator patterns
    - Tags: `git tag --sort=-version:refname | head -20` — detect version name patterns (e.g., `v1.2.3`, `1.2.3`)
    - Merged PR titles: `gh pr list --state merged --limit 30 --json title --jq '.[].title'` — detect PR title convention
-   - Integration branch: of the ≤5 candidates `main`, `master`, `develop`, `integration`, `trunk`, whichever exists on the remote with the most merge commits — one `git rev-list --count --merges --max-count=200 origin/\{candidate\}` per candidate (bounded to 200 merges — sufficient for heuristic ordering), at most 5 commands.
+   - Integration branch: of the ≤5 candidates `main`, `master`, `develop`, `integration`, `trunk`, whichever exists on the remote with the most merge commits — one `git rev-list --count --merges --max-count=200 origin/{candidate}` per candidate (bounded to 200 merges — sufficient for heuristic ordering), at most 5 commands.
 3. For each section, apply heuristics with a 50% majority rule. If no clear pattern: apply compliance defaults:
-   - Branch Naming: `\{type\}/\{description\}` (types: feat/fix/docs/refactor/chore)
-   - PR Titles: `\{type\}(\{scope\}): \{description\}` (conventional commits)
-   - Version PR Titles: `chore(release): v\{version\}`
-   - Version Names: `v\{semver\}` (e.g., `v1.2.3`)
+   - Branch Naming: `{type}/{description}` (types: feat/fix/docs/refactor/chore)
+   - PR Titles: `{type}({scope}): {description}` (conventional commits)
+   - Version PR Titles: `chore(release): v{version}`
+   - Version Names: `v{semver}` (e.g., `v1.2.3`)
    - Branching Model: trunk-based (main as integration branch)
-4. Write `.devflow/conventions.md`. Every `\{...\}` below is a **pattern shape written in
-   placeholder tokens** (`\{type\}`, `\{description\}`, `\{scope\}`, `\{semver\}`) — never a
+4. Write `.devflow/conventions.md`. Every `{...}` below is a **pattern shape written in
+   placeholder tokens** (`{type}`, `{description}`, `{scope}`, `{semver}`) — never a
    verbatim scanned branch name, tag or PR title. Illustrative examples must be
    synthesized from the placeholder tokens (e.g. `feat/add-login`), never lifted from the
    scan. If a convention cannot be expressed as a shape, write the step-3 default rather
@@ -79,19 +79,19 @@ already written, and never overwrites it.
    # Project Conventions
 
    ## Branch Naming
-   \{detected or default pattern and examples\}
+   {detected or default pattern and examples}
 
    ## PR Titles
-   \{detected or default pattern and examples\}
+   {detected or default pattern and examples}
 
    ## Version PR Titles
-   \{detected or default pattern and examples\}
+   {detected or default pattern and examples}
 
    ## Version Names
-   \{detected or default pattern and examples\}
+   {detected or default pattern and examples}
 
    ## Branching Model
-   \{detected branching model description\}
+   {detected branching model description}
    ```
 5. Post-composition verification: after composing the file content in step 4 and before writing it to disk, scan the composed content against the raw strings collected in step 2 (branch names, tag names, PR titles). Assert that no output line reproduces any scanned string verbatim (shape-derived patterns only). If a match is found, replace that line with the step-3 generic default for that section and note the substitution in the op's output under `### Substitutions`. If no matches are found, write the file.
 @end
@@ -117,19 +117,19 @@ Applies to **`post-review-summary` and `post-resolution-summary` only.** No othe
 
 Who counts as a trusted author of a PR comment, review thread or review. `fetch-review-threads` applies it to a thread's first comment; the evidence scripts implement it (`trust()` in `pr-evidence.cjs`) for the evidence record and the approval check, and a test holds both to these terms.
 
-- **Trusted:** `VIEWER_LOGIN` always; otherwise only when `authorAssociation` is `OWNER`, `MEMBER` or `COLLABORATOR` **and** `gh api "repos/\{owner\}/\{repo\}/collaborators/\{login\}/permission" --jq .permission` prints `admin` or `write`. The `maintain` role prints `write`; `triage` and `read` print `read`. Any other association is untrusted, with no lookup; any other output, a 404 or an error is untrusted.
-- **The association arm never trusts:** a login ending in `[bot]`; a login outside `^[A-Za-z0-9][A-Za-z0-9-]\{0,38\}$`; the PR author when `isCrossRepository` is true or unknown.
+- **Trusted:** `VIEWER_LOGIN` always; otherwise only when `authorAssociation` is `OWNER`, `MEMBER` or `COLLABORATOR` **and** `gh api "repos/{owner}/{repo}/collaborators/{login}/permission" --jq .permission` prints `admin` or `write`. The `maintain` role prints `write`; `triage` and `read` print `read`. Any other association is untrusted, with no lookup; any other output, a 404 or an error is untrusted.
+- **The association arm never trusts:** a login ending in `[bot]`; a login outside `^[A-Za-z0-9][A-Za-z0-9-]{0,38}$`; the PR author when `isCrossRepository` is true or unknown.
 - **Bounded:** look up only a login the association arm can still trust, each at most once per spawn and at most 20 in total; a login past the cap is untrusted. `VIEWER_LOGIN` is never looked up.
 @end
 
 <!-- op: decision-markers -->
-{decision_markers()}
+{{decision_markers()}}
 
 <!-- op: learn-conventions -->
-{learn_conventions()}
+{{learn_conventions()}}
 
 <!-- op: publication-gate -->
-{publication_gate()}
+{{publication_gate()}}
 
 <!-- op: trust-rule -->
-{trust_rule()}
+{{trust_rule()}}

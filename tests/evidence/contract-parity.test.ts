@@ -87,16 +87,15 @@ function defineBody(source: string, name: string): string | null {
   return lines.slice(start + 1, end).join('\n')
 }
 
-/** Resolve prose brace escapes the way the MDS compiler emits them (`\{` → `{`); the expansion arm checks this model. */
-function unescapeMds(text: string): string {
-  return text.replace(/\\([{}])/g, '$1')
-}
-
-/** The define's built text: what each adopter expands to. */
+/**
+ * The define's built text: what each adopter expands to — the body as written,
+ * since under MDS 0.4 a body with no `{{…}}` compiles to itself. The expansion arm
+ * checks this model against the built adopters.
+ */
 function contractText(source: string = partialSource()): string {
   const body = defineBody(source, TP_DEFINE)
   if (body === null) throw new Error(`${PARTIAL_PATH}: no \`@define ${TP_DEFINE}():\` … \`@end\` block`)
-  return unescapeMds(body)
+  return body
 }
 
 /** Escape a literal for a RegExp source — valid under the `u` flag, so `-` is left bare (outside a class it is literal). */
@@ -392,7 +391,7 @@ describe('AC-2: the _plan_contract partial', () => {
   it('the contract define calls test_plan_line() exactly once', () => {
     const body = defineBody(partialSource(), CONTRACT_DEFINE) ?? ''
     expect(body.length, 'the contract define is empty').toBeGreaterThan(500)
-    expect(body.split('\n').filter(l => l.trim() === `{${TP_DEFINE}()}`)).toHaveLength(1)
+    expect(body.split('\n').filter(l => l.trim() === `{{${TP_DEFINE}()}}`)).toHaveLength(1)
   })
 
   it('is imported by exactly the adopter hosts', () => {

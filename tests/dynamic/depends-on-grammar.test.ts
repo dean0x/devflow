@@ -42,8 +42,8 @@ const TICKETS_MD = requireDistFile('dynamic-tickets.md')
 /** One named source in the corpus: a label for messages and the text itself. */
 type NamedSource = readonly [label: string, source: string]
 
-/** The provider-canonical rendered reference, as an .mds source escapes it. */
-const GRAMMAR_TOKEN = '\\{ISSUE_REF\\}'
+/** The provider-canonical rendered reference, as an .mds source spells it (literal text under MDS 0.4). */
+const GRAMMAR_TOKEN = '{ISSUE_REF}'
 
 /** The GitHub-bound placeholder the grammar token replaced. */
 const RETIRED_PLACEHOLDER = '#issue-number'
@@ -188,7 +188,7 @@ describe('Depends on: — _ticket_template.mds writer ↔ _wave.mds reader', () 
     expect(
       WAVE,
       'the reader must name the canonical reason so an unparseable dependency is neither silently dropped nor silently treated as a blocker',
-    ).toContain('TRACEABILITY: DEGRADED (foreign issue reference \\{ref\\})')
+    ).toContain('TRACEABILITY: DEGRADED (foreign issue reference {ref})')
     expect(
       TICKET_TEMPLATE,
       'the writer must NOT carry the reader-side verdict — a rule stated on both sides is a rule with two authorities (PF-023)',
@@ -302,7 +302,7 @@ describe('artifact naming — plan.mds writer ↔ docs-framework reader', () => 
     expect(
       PLAN_MDS,
       'plan.mds writes the artifact; it must name the filesystem-safe identifier, not a rendered reference',
-    ).toContain('\\{ISSUE_ID\\}-\\{topic-slug\\}')
+    ).toContain('{ISSUE_ID}-{topic-slug}')
     expect(
       DOCS_FRAMEWORK,
       'docs-framework records the naming convention; a stale {issue} there is a second, wrong authority',
@@ -326,7 +326,7 @@ describe('artifact naming — plan.mds writer ↔ docs-framework reader', () => 
 
   it('known-bad probe: the retired first-issue `{ISSUE_ID}-multi` name is reported', () => {
     const line = multiIssueLine(PLAN_MDS)!
-    const retired = '- If multi-issue: `.devflow/docs/design/\\{ISSUE_ID\\}-multi.\\{YYYY-MM-DD_HHMM\\}.md`, using the first issue\'s `ISSUE_ID`'
+    const retired = '- If multi-issue: `.devflow/docs/design/{ISSUE_ID}-multi.{YYYY-MM-DD_HHMM}.md`, using the first issue\'s `ISSUE_ID`'
     expect(collectMultiIssueNamingDefects(PLAN_MDS.replace(line, retired))).toEqual([
       'the multi-issue name is not multi-{topic-slug}.{ts}.md',
       'the multi-issue name does not set `issue: pending`',
@@ -350,7 +350,7 @@ function collectMultiIssueNamingDefects(source: string): string[] {
   const line = multiIssueLine(source)
   if (line === undefined) return ['no multi-issue naming line']
   const defects: string[] = []
-  if (!line.includes('`.devflow/docs/design/multi-\\{topic-slug\\}.\\{YYYY-MM-DD_HHMM\\}.md`')) {
+  if (!line.includes('`.devflow/docs/design/multi-{topic-slug}.{YYYY-MM-DD_HHMM}.md`')) {
     defects.push('the multi-issue name is not multi-{topic-slug}.{ts}.md')
   }
   if (!line.includes('`issue: pending`')) defects.push('the multi-issue name does not set `issue: pending`')
@@ -770,7 +770,7 @@ describe('Depends on: — the /dynamic-tickets filing step writer ↔ _wave.mds 
       gate: '^(#[1-9][0-9]{0,8}|[A-Z][A-Z0-9_]{0,9}-[1-9][0-9]{0,8})$',
     })
     expect(WAVE, 'the reader reads the field from the pre-fetched bodies').toContain('`Depends on:` and `Wave:` fields from the pre-fetched bodies')
-    expect(WAVE).toContain('`Depends on:` carries **zero or more** comma-separated `\\{ISSUE_REF\\}` entries, or the literal `none`')
+    expect(WAVE).toContain('`Depends on:` carries **zero or more** comma-separated `{ISSUE_REF}` entries, or the literal `none`')
   })
 
   it('executed: dependencies are filed first, and the reader sees every edge as the refs they were filed as', () => {

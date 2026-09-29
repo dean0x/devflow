@@ -17,12 +17,13 @@
     "CHANGELOG.md"
   ],
   "scripts": {
-    "build": "rm -rf dist && npm run build:cli && npm run build:mds",
+    "build": "rm -rf dist && npm run build:cli && npm run typecheck:scripts && npm run build:mds",
     "build:cli": "tsc",
+    "typecheck:scripts": "tsc -p tsconfig.scripts.json",
     "build:mds": "npx tsx scripts/build-mds.ts",
     "dev": "tsc --watch",
     "cli": "node dist/cli.js",
-    "prepublishOnly": "rm -rf dist && npm run build:cli && npm run build:mds && chmod +x dist/cli.js",
+    "prepublishOnly": "rm -rf dist && npm run build:cli && npm run typecheck:scripts && npm run build:mds && chmod +x dist/cli.js",
     "version:bump": "npx tsx scripts/bump-version.ts",
     "test": "vitest run",
     "test:watch": "vitest",
@@ -67,7 +68,7 @@
     "subswitch": "0.5.0"
   },
   "devDependencies": {
-    "@mdscript/mds": "0.2.0",
+    "@mdscript/mds": "0.4.4",
     "@types/node": "^22.0.0",
     "tsx": "^4.7.0",
     "typescript": "^5.3.3",

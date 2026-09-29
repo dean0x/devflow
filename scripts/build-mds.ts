@@ -798,6 +798,15 @@ async function compileHost(host: HostEntry, plan: HostPlan): Promise<CompileOutc
   fs.mkdirSync(outAbs, { recursive: true });
 
   const result = await compileFile(host.file);
+  // Every devflow asset is Markdown. A `@message` host compiles to a chat-messages
+  // result with no `output` at all, so it is refused by name here and aggregated
+  // with the other failures rather than written, crashed on, or skipped.
+  if (result.kind !== "markdown") {
+    throw new Error(
+      `${path.relative(ROOT, host.file)}: compiled to a "${result.kind}" result, not Markdown. ` +
+      `Devflow assets are Markdown only — remove the @message block(s).`,
+    );
+  }
   // Generator hosts shed their whole steering block; reference modules shed it
   // too and must expose no second block; command hosts shed only the build-owned
   // keys so every other byte of their frontmatter is preserved.

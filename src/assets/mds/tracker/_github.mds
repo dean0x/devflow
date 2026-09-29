@@ -43,23 +43,23 @@ Load when the resolved tracker provider is `github` and the operation is `setup-
 
 ### Process
 
-1. **`ISSUE_INPUT` pre-flight**, when provided: it must satisfy `^#?[1-9][0-9]\{0,8\}$`, anchored at both ends; strip one leading `#` — the digits are the issue number steps 1c and 3 use. Anything else ⇒ `TRACEABILITY: DEGRADED (issue reference "\{ref\}" does not match github reference grammar)`, and the task proceeds with no issue.
-{common.conventions_step()}
+1. **`ISSUE_INPUT` pre-flight**, when provided: it must satisfy `^#?[1-9][0-9]{0,8}$`, anchored at both ends; strip one leading `#` — the digits are the issue number steps 1c and 3 use. Anything else ⇒ `TRACEABILITY: DEGRADED (issue reference "{ref}" does not match github reference grammar)`, and the task proceeds with no issue.
+{{common.conventions_step()}}
 1c. Issue-first, only when `ISSUE_REQUIRED` is `true`: before branch derivation, ensure a GitHub issue exists for this task:
-   - Preconditions: remote reachable AND `gh` authenticated. If either fails → emit `TRACEABILITY: DEGRADED (\{reason\})` and continue to step 2 (convention still applies; no issue number is set).
+   - Preconditions: remote reachable AND `gh` authenticated. If either fails → emit `TRACEABILITY: DEGRADED ({reason})` and continue to step 2 (convention still applies; no issue number is set).
    - If `ISSUE_INPUT` was provided, step 1 alone decides the number.
    - Otherwise: invoke `ensure-traceable-issue` with `TASK_DESCRIPTION` (and `PLAN_ARTIFACT_PATH` if provided) to create or find an issue. Capture the returned issue number.
-   - Issue number drives the branch name in step 3: `\{type\}/\{number\}-\{slug\}`.
-{common.branch_detection_step()}
+   - Issue number drives the branch name in step 3: `{type}/{number}-{slug}`.
+{{common.branch_detection_step()}}
 3. **Derive branch name** (using detected convention):
-   - If issue number is known (from step 1 or 1c): fetch issue via GitHub API, then derive branch name as `\{type\}/\{number\}-\{slug\}` where:
+   - If issue number is known (from step 1 or 1c): fetch issue via GitHub API, then derive branch name as `{type}/{number}-{slug}` where:
      - `type` is inferred from issue labels: `bug` → `fix`, `documentation` or `docs` → `docs`, `refactor` → `refactor`, `chore` or `maintenance` → `chore`, default → `feature`
      - `slug` is the issue title: lowercased, non-alphanumeric replaced with hyphens, consecutive hyphens collapsed, trimmed, max 40 characters
      - Before placing fetched content in the output, neutralise any `</untrusted-issue-body>` in it (Principle 8 marker neutralisation).
-   - If `TASK_DESCRIPTION` provided (no issue): infer type from description keywords (e.g., "fix login bug" → `fix`, "refactor auth" → `refactor`, "add JWT" → `feature`, "update docs" → `docs`, "chore: cleanup" → `chore`), then slugify description as `\{type\}/\{slug\}` (max 40 chars)
-   - If neither: fallback to `task-\{YYYY-MM-DD_HHMM\}`
+   - If `TASK_DESCRIPTION` provided (no issue): infer type from description keywords (e.g., "fix login bug" → `fix`, "refactor auth" → `refactor`, "add JWT" → `feature`, "update docs" → `docs`, "chore: cleanup" → `chore`), then slugify description as `{type}/{slug}` (max 40 chars)
+   - If neither: fallback to `task-{YYYY-MM-DD_HHMM}`
 
-{common.handoff_values("`{n}` (bare, never `#{n}`)", "Closes #{n}")}
+{{common.handoff_values("`{n}` (bare, never `#{n}`)", "Closes #{n}")}}
 @end
 
 @define fetch_issue():
@@ -71,11 +71,11 @@ Load when the resolved tracker provider is `github` and the operation is `fetch-
 
 ### Process
 
-1b. **Ref pre-flight.** The numeric path is taken only when `ISSUE_INPUT` satisfies `^#?[1-9][0-9]\{0,8\}$` — this provider's anchored reference grammar, stated with its strip-one-leading-`#` normalisation and the shell-comment reason it exists for in this operation's sibling `backlink-shipped-issues` reference. Interpolate only the digits that survive the strip. Anything the grammar rejects is a SEARCH TERM and takes the text path, so it never reaches a command.
+1b. **Ref pre-flight.** The numeric path is taken only when `ISSUE_INPUT` satisfies `^#?[1-9][0-9]{0,8}$` — this provider's anchored reference grammar, stated with its strip-one-leading-`#` normalisation and the shell-comment reason it exists for in this operation's sibling `backlink-shipped-issues` reference. Interpolate only the digits that survive the strip. Anything the grammar rejects is a SEARCH TERM and takes the text path, so it never reaches a command.
 2. Fetch full issue data (title, body, labels, assignees, milestone, comments)
 3. Extract acceptance criteria and dependencies from body; neutralise any `</untrusted-issue-body>` in the body before wrapping (Principle 8 marker neutralisation).
 
-{common.handoff_values("`{n}` (bare, never `#{n}`)", "Closes #{n}")}
+{{common.handoff_values("`{n}` (bare, never `#{n}`)", "Closes #{n}")}}
 
 ### Fetch Issue with All Details
 
@@ -108,13 +108,13 @@ Load when the resolved tracker provider is `github` and the operation is `fetch-
 
 2. Fetch all issues in a **single** GraphQL query using per-issue aliases (dynamically constructed for the resolved list); resolve owner/repo from the git remote context:
    ```
-   gh api graphql -f query='query \{ repository(owner:"OWNER", name:"REPO") \{
-     i1: issue(number:N1) \{ number title state body labels(first:10)\{nodes\{name\}\} assignees(first:5)\{nodes\{login\}\} milestone\{title\} \}
-     i2: issue(number:N2) \{ number title state body labels(first:10)\{nodes\{name\}\} assignees(first:5)\{nodes\{login\}\} milestone\{title\} \}
+   gh api graphql -f query='query { repository(owner:"OWNER", name:"REPO") {
+     i1: issue(number:N1) { number title state body labels(first:10){nodes{name}} assignees(first:5){nodes{login}} milestone{title} }
+     i2: issue(number:N2) { number title state body labels(first:10){nodes{name}} assignees(first:5){nodes{login}} milestone{title} }
      ...
-   \}\}'
+   }}'
    ```
-{common.state_batch_line("`state` (`OPEN` or `CLOSED`)", "`state`", "{ISSUE_REF}")}
+{{common.state_batch_line("`state` (`OPEN` or `CLOSED`)", "`state`", "{ISSUE_REF}")}}
 @end
 
 @define manage_debt():
@@ -129,12 +129,12 @@ Load when the resolved tracker provider is `github` and the operation is `manage
 1. Find or create "Tech Debt Backlog" issue with `tech-debt` label
 2. Check issue body size; archive if > 60000 chars (per devflow:git)
 3. Extract items to add:
-   - `## Fix Separately` entries from `\{REVIEW_DIR\}/resolution-summary.md` (FIX_SEPARATE from Triage agent)
-   - `## Deferred to Tech Debt` entries from `\{REVIEW_DIR\}/resolution-summary.md` (TECH_DEBT from Triage agent)
+   - `## Fix Separately` entries from `{REVIEW_DIR}/resolution-summary.md` (FIX_SEPARATE from Triage agent)
+   - `## Deferred to Tech Debt` entries from `{REVIEW_DIR}/resolution-summary.md` (TECH_DEBT from Triage agent)
    - Pre-existing issues (Category 3) from review reports
 4. Deduplicate against existing items using semantic matching
 5. Remove items that have been fixed (verify in codebase)
-6. Compose updated issue body to `$DEVFLOW_BODY_RAW`; apply the Comment-sink scrub (D11) and post via `gh issue edit \{number\} --body-file "$DEVFLOW_BODY"`
+6. Compose updated issue body to `$DEVFLOW_BODY_RAW`; apply the Comment-sink scrub (D11) and post via `gh issue edit {number} --body-file "$DEVFLOW_BODY"`
 7. Return the backlog issue number for Tracked field backfill in resolution-summary.md
 
 ### Tech Debt Issue Management
@@ -232,7 +232,7 @@ Load when the resolved tracker provider is `github` and the operation is `create
 
 Inside step 5 (compose release notes):
 
-   - If `SHIPPED_ISSUES` provided: append a `## Closed Issues` section with issue references — **first ≤50 issues** (the same bound `backlink-shipped-issues` applies); if truncated, add a final `…and \{n\} more issues` line (D4 degrade if enrichment fails)
+   - If `SHIPPED_ISSUES` provided: append a `## Closed Issues` section with issue references — **first ≤50 issues** (the same bound `backlink-shipped-issues` applies); if truncated, add a final `…and {n} more issues` line (D4 degrade if enrichment fails)
 @end
 
 @define gather_release_evidence():
@@ -244,17 +244,17 @@ Load when the resolved tracker provider is `github` and the operation is `gather
 
 ### Process
 
-{common.last_release_tag_step()}
-{common.closing_keyword_rule()}
-3b. **This provider's history grammar** is `^#[1-9][0-9]\{0,8\}$`. A bare number is not a reference here either: a keyword-anchored candidate must carry the `#`, and step 4 renders every number it reads from a merged PR as `#\{n\}` before step 5's gate.
+{{common.last_release_tag_step()}}
+{{common.closing_keyword_rule()}}
+3b. **This provider's history grammar** is `^#[1-9][0-9]{0,8}$`. A bare number is not a reference here either: a keyword-anchored candidate must carry the `#`, and step 4 renders every number it reads from a merged PR as `#{n}` before step 5's gate.
 4. If `gh` is authenticated and remote is reachable, resolve which issues the range's merged PRs close — **one listing, never one call per commit** — and merge the result with the commit-message set:
-   - **Once, before the listing:** this repo's identity, `gh api 'repos/\{owner\}/\{repo\}' --jq '.owner.login + "/" + .name'`, and the tag's UTC date, `TAG_DATE=$(TZ=UTC git log -1 --date=format-local:%Y-%m-%d --format=%cd \{last_tag\})`, shape-gated `^[0-9]\{4\}-[0-9]\{2\}-[0-9]\{2\}$` — a local date can drop a PR merged just after the tag. If `TAG_DATE` fails this gate, treat it as **the listing fails** below: emit `TRACEABILITY: DEGRADED (\{reason\})` and go straight to that bullet's ≤25-PR fallback.
+   - **Once, before the listing:** this repo's identity, `gh api 'repos/{owner}/{repo}' --jq '.owner.login + "/" + .name'`, and the tag's UTC date, `TAG_DATE=$(TZ=UTC git log -1 --date=format-local:%Y-%m-%d --format=%cd {last_tag})`, shape-gated `^[0-9]{4}-[0-9]{2}-[0-9]{2}$` — a local date can drop a PR merged just after the tag. If `TAG_DATE` fails this gate, treat it as **the listing fails** below: emit `TRACEABILITY: DEGRADED ({reason})` and go straight to that bullet's ≤25-PR fallback.
    - **The listing:** `gh pr list --state merged --search "merged:>=$TAG_DATE" --limit 200 --json number,mergeCommit,closingIssuesReferences`; with no tag, omit `--search`.
-   - **Map locally, with no further call:** keep a listed PR when its `mergeCommit.oid` is in `git rev-list \{last_tag\}..HEAD`, or when a range commit's subject ends `(#N)` naming it. Keep only references whose `repository.owner.login`/`name` equal this repo's identity — any other ⇒ `TRACEABILITY: DEGRADED (foreign issue reference \{ref\})`. Render each kept number `#\{n\}`.
+   - **Map locally, with no further call:** keep a listed PR when its `mergeCommit.oid` is in `git rev-list {last_tag}..HEAD`, or when a range commit's subject ends `(#N)` naming it. Keep only references whose `repository.owner.login`/`name` equal this repo's identity — any other ⇒ `TRACEABILITY: DEGRADED (foreign issue reference {ref})`. Render each kept number `#{n}`.
    - **Coverage:** a range subject carries a PR marker (`(#N)` or `Merge pull request #N`) but no listed PR maps into the range ⇒ `TRACEABILITY: DEGRADED (merged-PR listing did not cover the range)`. A listing of exactly 200 ⇒ status `INDETERMINATE (merged-PR listing hit its 200 cap)`, returning what was collected.
-   - **The listing fails** (an older `gh` reports `Unknown JSON field`) ⇒ `TRACEABILITY: DEGRADED (\{reason\})`, then fall back to `gh pr view N --json closingIssuesReferences` over the PR numbers in `(#N)` / `Merge pull request #N` subjects — after a listing that succeeds, also over each range `(#N)` naming no listed PR — each N gated `^[1-9][0-9]\{0,8\}$`, filtered and rendered as above, bounded at ≤25 PRs; report the remainder as `THROTTLED (\{n\} not processed)` and never report the enrichment as complete while PRs went unresolved.
+   - **The listing fails** (an older `gh` reports `Unknown JSON field`) ⇒ `TRACEABILITY: DEGRADED ({reason})`, then fall back to `gh pr view N --json closingIssuesReferences` over the PR numbers in `(#N)` / `Merge pull request #N` subjects — after a listing that succeeds, also over each range `(#N)` naming no listed PR — each N gated `^[1-9][0-9]{0,8}$`, filtered and rendered as above, bounded at ≤25 PRs; report the remainder as `THROTTLED ({n} not processed)` and never report the enrichment as complete while PRs went unresolved.
    - On any 4xx → DEGRADED for that item, continue. On 5xx → 1 retry; still 5xx → DEGRADED for that item, continue. On the secondary rate limit of `### Provider signals (GitHub)` in this operation's `backlink-shipped-issues` reference → stop GitHub enrichment immediately, report remaining as `THROTTLED`.
-{common.trace_map_step("--grammar github --traced-file \"$T\"", "In one shell: `trap 'rm -- \"$T\"' EXIT; T=\"$(mktemp)\"`, then one 40-hex SHA per line into `$T` — each range commit step 4 tied to a PR with ≥1 kept reference (its `mergeCommit.oid`, or a subject naming it). ")}
+{{common.trace_map_step("--grammar github --traced-file \"$T\"", "In one shell: `trap 'rm -- \"$T\"' EXIT; T=\"$(mktemp)\"`, then one 40-hex SHA per line into `$T` — each range commit step 4 tied to a PR with ≥1 kept reference (its `mergeCommit.oid`, or a subject naming it). ")}}
 @end
 
 @define backlink_shipped_issues():
@@ -282,21 +282,21 @@ node "$HOME/.devflow/scripts/redact-secrets.cjs" "$DEVFLOW_BODY_RAW" "$DEVFLOW_B
 
 ### Process
 
-**Ref pre-flight (the always-loaded entry gate, instantiated for this provider).** Every entry of `SHIPPED_ISSUES` must satisfy `^#?[1-9][0-9]\{0,8\}$`, anchored at both ends of the STRING (a newline fails it) — this provider's reference grammar is what the entry gate's shape requirement means here, and the anchored form is what keeps a reference out of the commands below. **Then normalise once, before the loop, never inside it:** strip **exactly one** leading `#` from every admitted entry (`#42` ≡ `42`) and interpolate only the stripped digits. The grammar admits both spellings because both are how a reference is written here, but a `#` at word start opens a shell comment — an un-stripped `#42` would truncate `gh issue view`, `gh issue comment` and every other command below at the reference, so the stripped form is the only one that reaches a command. **Drop** every entry that fails and report it as `TRACEABILITY: DEGRADED (issue reference "\{ref\}" does not match github reference grammar)`. If every entry is dropped, emit `TRACEABILITY: DEGRADED (no parseable refs for provider \{p\})`, post nothing, and **never report the status as `COMPLETE`**.
+**Ref pre-flight (the always-loaded entry gate, instantiated for this provider).** Every entry of `SHIPPED_ISSUES` must satisfy `^#?[1-9][0-9]{0,8}$`, anchored at both ends of the STRING (a newline fails it) — this provider's reference grammar is what the entry gate's shape requirement means here, and the anchored form is what keeps a reference out of the commands below. **Then normalise once, before the loop, never inside it:** strip **exactly one** leading `#` from every admitted entry (`#42` ≡ `42`) and interpolate only the stripped digits. The grammar admits both spellings because both are how a reference is written here, but a `#` at word start opens a shell comment — an un-stripped `#42` would truncate `gh issue view`, `gh issue comment` and every other command below at the reference, so the stripped form is the only one that reaches a command. **Drop** every entry that fails and report it as `TRACEABILITY: DEGRADED (issue reference "{ref}" does not match github reference grammar)`. If every entry is dropped, emit `TRACEABILITY: DEGRADED (no parseable refs for provider {p})`, post nothing, and **never report the status as `COMPLETE`**.
 
 **Setup (once, before the loop):** Fetch viewer login: `gh api user --jq '.login'` → store as VIEWER_LOGIN
 
 Then, per issue, within the operation's ≤50 bound:
 
-1. Fetch existing comments authored by the viewer: `gh issue view \{number\} --json comments --jq '[.comments[] | select(.author.login == "'"$VIEWER_LOGIN"'")] | .[].body'`
-2. Check if `<!-- devflow:shipped v\{BARE_VERSION\} -->` already present in viewer-authored comments. If yes: skip.
+1. Fetch existing comments authored by the viewer: `gh issue view {number} --json comments --jq '[.comments[] | select(.author.login == "'"$VIEWER_LOGIN"'")] | .[].body'`
+2. Check if `<!-- devflow:shipped v{BARE_VERSION} -->` already present in viewer-authored comments. If yes: skip.
 3. Write the two-line body to `$DEVFLOW_BODY_RAW` — a real newline, not a `\n` escape (bash does not
    expand `\n` inside double quotes, so an inline `--body` would post a single literal line):
    ```
-   <!-- devflow:shipped v\{BARE_VERSION\} -->
-   This was shipped in v\{BARE_VERSION\}.
+   <!-- devflow:shipped v{BARE_VERSION} -->
+   This was shipped in v{BARE_VERSION}.
    ```
-   Apply the Comment-sink scrub (D11) and post via `gh issue comment \{number\} --body-file "$DEVFLOW_BODY"`.
+   Apply the Comment-sink scrub (D11) and post via `gh issue comment {number} --body-file "$DEVFLOW_BODY"`.
 4. Wait 1s between issues.
 @end
 
@@ -309,14 +309,14 @@ Load when the resolved tracker provider is `github` and the operation is `associ
 
 ### Process
 
-**Ref pre-flight (the always-loaded entry gate, instantiated for this provider).** Every entry of `SHIPPED_ISSUES` must satisfy `^#?[1-9][0-9]\{0,8\}$`, anchored at both ends of the STRING; strip exactly one leading `#` once, and interpolate only the digits. Drop each failure as `TRACEABILITY: DEGRADED (issue reference "\{ref\}" does not match github reference grammar)`. Every entry dropped ⇒ `TRACEABILITY: DEGRADED (no parseable refs for provider \{p\})`, no call, and **never report the status as `COMPLETE`**.
+**Ref pre-flight (the always-loaded entry gate, instantiated for this provider).** Every entry of `SHIPPED_ISSUES` must satisfy `^#?[1-9][0-9]{0,8}$`, anchored at both ends of the STRING; strip exactly one leading `#` once, and interpolate only the digits. Drop each failure as `TRACEABILITY: DEGRADED (issue reference "{ref}" does not match github reference grammar)`. Every entry dropped ⇒ `TRACEABILITY: DEGRADED (no parseable refs for provider {p})`, no call, and **never report the status as `COMPLETE`**.
 
 Steps 1, 3 and 4 each run in ONE shell that opens with `trap 'rm -- "$F"' EXIT; F="$(mktemp)"`.
 
-1. **Create first**, once: `gh api --method POST "repos/\{owner\}/\{repo\}/milestones" -f title="v\{BARE_VERSION\}" > "$F"; echo "exit=$?"`, then read `$F` raw — never `--jq` over an error body. `exit=0` ⇒ `created`; keep its `number` and `node_id`.
-2. **HTTP 422 whose `errors[].code` includes `already_exists`** ⇒ `existing`: `gh api --method GET "repos/\{owner\}/\{repo\}/milestones" -f state=all -f per_page=100 -f page=N`, N = 1…10, stopping at the first page under 100 items; keep the one exact `title` match. None found ⇒ `TRACEABILITY: DEGRADED (release marker unavailable)`; its `state` `closed` ⇒ `TRACEABILITY: DEGRADED (release marker closed)`. Any other failure of step 1 or 2 ⇒ `TRACEABILITY: DEGRADED (release marker unavailable)`. Each of these makes no item call.
-3. **Read**, one query: write `query($owner:String!, $name:String!)\{ repository(owner:$owner, name:$name)\{ … \} \}` to `$F`, one alias per item, `iN: issue(number:N)\{ id milestone\{ number \} \}`, and run `gh api graphql -F owner='\{owner\}' -F name='\{repo\}' -F query=@"$F"`. Read every alias even when `gh` exits 1: a null or absent alias ⇒ that item DEGRADED; this milestone's number ⇒ Already set; another ⇒ Kept other release, left untouched.
-4. **Assign**, one mutation over the items with no milestone: gate every node ID, the milestone's too, against `^[A-Za-z0-9_=-]\{1,100\}$`; write one `mutation` to `$F` with `mN: updateIssue(input:\{id:"<id>", milestoneId:"<node_id>"\})\{ issue\{ number \} \}` per item, and run `gh api graphql -F query=@"$F"`. Parse every alias even when `gh` exits 1: `data.mN` non-null ⇒ Added, null ⇒ that item DEGRADED.
+1. **Create first**, once: `gh api --method POST "repos/{owner}/{repo}/milestones" -f title="v{BARE_VERSION}" > "$F"; echo "exit=$?"`, then read `$F` raw — never `--jq` over an error body. `exit=0` ⇒ `created`; keep its `number` and `node_id`.
+2. **HTTP 422 whose `errors[].code` includes `already_exists`** ⇒ `existing`: `gh api --method GET "repos/{owner}/{repo}/milestones" -f state=all -f per_page=100 -f page=N`, N = 1…10, stopping at the first page under 100 items; keep the one exact `title` match. None found ⇒ `TRACEABILITY: DEGRADED (release marker unavailable)`; its `state` `closed` ⇒ `TRACEABILITY: DEGRADED (release marker closed)`. Any other failure of step 1 or 2 ⇒ `TRACEABILITY: DEGRADED (release marker unavailable)`. Each of these makes no item call.
+3. **Read**, one query: write `query($owner:String!, $name:String!){ repository(owner:$owner, name:$name){ … } }` to `$F`, one alias per item, `iN: issue(number:N){ id milestone{ number } }`, and run `gh api graphql -F owner='{owner}' -F name='{repo}' -F query=@"$F"`. Read every alias even when `gh` exits 1: a null or absent alias ⇒ that item DEGRADED; this milestone's number ⇒ Already set; another ⇒ Kept other release, left untouched.
+4. **Assign**, one mutation over the items with no milestone: gate every node ID, the milestone's too, against `^[A-Za-z0-9_=-]{1,100}$`; write one `mutation` to `$F` with `mN: updateIssue(input:{id:"<id>", milestoneId:"<node_id>"}){ issue{ number } }` per item, and run `gh api graphql -F query=@"$F"`. Parse every alias even when `gh` exits 1: `data.mN` non-null ⇒ Added, null ⇒ that item DEGRADED.
 
 **Residual race, not closed:** a milestone set on an item between steps 3 and 4 is overwritten — GitHub has no conditional update. On backpressure, follow `### Provider signals (GitHub)` in this operation's `backlink-shipped-issues` reference.
 @end
@@ -328,25 +328,25 @@ Load when the resolved tracker provider is `github` and the operation is `ensure
 
 **Mechanics held here:** the `**Process:**` body — issue creation, and posting the design artifact as a collapsed comment; and the D3 issue template below, whose section headings are GitHub's Markdown, not every tracker's.
 
-{common.traceable_issue_rules()}
+{{common.traceable_issue_rules()}}
 
 ### Process
 
 1. If `ISSUE_INPUT` is provided (numeric = existing issue; text = search for it):
-   - Compose structured comment to `$DEVFLOW_BODY_RAW` (NEVER rewrite the issue body); apply the Comment-sink scrub (D11) and post via `gh issue comment \{number\} --body-file "$DEVFLOW_BODY"`. Comment template:
+   - Compose structured comment to `$DEVFLOW_BODY_RAW` (NEVER rewrite the issue body); apply the Comment-sink scrub (D11) and post via `gh issue comment {number} --body-file "$DEVFLOW_BODY"`. Comment template:
      ```markdown
      ## Devflow Traceability Update
-     **Initial Request**: \{TASK_DESCRIPTION or "(see issue body)"\}
+     **Initial Request**: {TASK_DESCRIPTION or "(see issue body)"}
      **Status**: Linked to branch for implementation
      ```
-   - If `PLAN_ARTIFACT_PATH` provided: read the design artifact, cap the body at 60000 characters (if larger, truncate and end with `…truncated — full report in the local plan artifact \{PLAN_ARTIFACT_PATH\} (not committed; ask the author)`), compose to `$DEVFLOW_BODY_RAW`; apply the Comment-sink scrub (D11) and post as a collapsed `<details>` comment via `gh issue comment \{number\} --body-file "$DEVFLOW_BODY"`, then reference the comment URL from the `## Implementation Plan` section in a follow-up comment.
+   - If `PLAN_ARTIFACT_PATH` provided: read the design artifact, cap the body at 60000 characters (if larger, truncate and end with `…truncated — full report in the local plan artifact {PLAN_ARTIFACT_PATH} (not committed; ask the author)`), compose to `$DEVFLOW_BODY_RAW`; apply the Comment-sink scrub (D11) and post as a collapsed `<details>` comment via `gh issue comment {number} --body-file "$DEVFLOW_BODY"`, then reference the comment URL from the `## Implementation Plan` section in a follow-up comment.
    - Return the issue number.
 2. If no `ISSUE_INPUT`: create a new issue using the D3 template:
    - Title: derived from `TASK_DESCRIPTION` (same slug logic as setup-task); bind to a shell variable: `DEVFLOW_ISSUE_TITLE="..."`.
    - Compose the issue body to `$DEVFLOW_BODY_RAW` using the D3 template in the `### Traceability Issue Template (D3)` section below. `TASK_DESCRIPTION`, `INITIAL_REQUEST`, and `REQUIREMENTS` are caller-supplied and untrusted — never interpolate them into the command string. Apply the Comment-sink scrub (D11) — non-zero exit → DEGRADED, do not create issue.
    - If `LABELS` provided: bind to a shell variable `DEVFLOW_LABELS`; create with `gh issue create --title "$DEVFLOW_ISSUE_TITLE" --body-file "$DEVFLOW_BODY" --label "$DEVFLOW_LABELS"`. Label values are third-party input — never interpolate them into the command string.
    - If `LABELS` not provided: create with `gh issue create --title "$DEVFLOW_ISSUE_TITLE" --body-file "$DEVFLOW_BODY"`.
-   - If `PLAN_ARTIFACT_PATH` provided: read the design artifact, cap the body at 60000 characters (if larger, truncate and end with `…truncated — full report in the local plan artifact \{PLAN_ARTIFACT_PATH\} (not committed; ask the author)`), compose to `$DEVFLOW_BODY_RAW`; apply the Comment-sink scrub (D11) and post as a collapsed `<details>` comment via `gh issue comment \{number\} --body-file "$DEVFLOW_BODY"`; then reference the comment URL in a follow-up comment to the issue.
+   - If `PLAN_ARTIFACT_PATH` provided: read the design artifact, cap the body at 60000 characters (if larger, truncate and end with `…truncated — full report in the local plan artifact {PLAN_ARTIFACT_PATH} (not committed; ask the author)`), compose to `$DEVFLOW_BODY_RAW`; apply the Comment-sink scrub (D11) and post as a collapsed `<details>` comment via `gh issue comment {number} --body-file "$DEVFLOW_BODY"`; then reference the comment URL in a follow-up comment to the issue.
 3. Return the issue number.
 
 ### Create Issue with Labels and Assignees
@@ -400,23 +400,23 @@ Load when the resolved tracker provider is `github` and the operation is `post-w
 
 **Mechanics held here:** the `**Process:**` body — locating the wave's tracking item and posting or updating the report.
 
-{common.wave_report_inputs()}
+{{common.wave_report_inputs()}}
 
 ### Process
 
 1. Check for existing marker (author-filtered — a third party posting the marker must not suppress the post):
    - Fetch viewer login: `gh api user --jq '.login'` → store as VIEWER_LOGIN
-   - `gh issue view \{TRACKING_ISSUE\} --json comments --jq '[.comments[] | select(.author.login == "'"$VIEWER_LOGIN"'")] | .[].body'`
-   - Search for `<!-- devflow:wave-report wave:\{WAVE_ID\} -->` in viewer-authored comment bodies only
-   - If found: skip — report `Skipped: wave report for \{WAVE_ID\} already posted`
+   - `gh issue view {TRACKING_ISSUE} --json comments --jq '[.comments[] | select(.author.login == "'"$VIEWER_LOGIN"'")] | .[].body'`
+   - Search for `<!-- devflow:wave-report wave:{WAVE_ID} -->` in viewer-authored comment bodies only
+   - If found: skip — report `Skipped: wave report for {WAVE_ID} already posted`
 3. Compose the comment body:
    ```markdown
-   <!-- devflow:wave-report wave:\{WAVE_ID\} -->
-   \{contents of WAVE_REPORT_PATH\}
+   <!-- devflow:wave-report wave:{WAVE_ID} -->
+   {contents of WAVE_REPORT_PATH}
    ```
    Cap the composed body at 60000 characters; if larger, truncate and end with
-   `…truncated — full report in the local wave artifact \{WAVE_REPORT_PATH\} (not committed; ask the author)`.
-4. Write composed body to `$DEVFLOW_BODY_RAW`; apply the Comment-sink scrub (D11) and post via `gh issue comment \{TRACKING_ISSUE\} --body-file "$DEVFLOW_BODY"`.
+   `…truncated — full report in the local wave artifact {WAVE_REPORT_PATH} (not committed; ask the author)`.
+4. Write composed body to `$DEVFLOW_BODY_RAW`; apply the Comment-sink scrub (D11) and post via `gh issue comment {TRACKING_ISSUE} --body-file "$DEVFLOW_BODY"`.
 @end
 
 @define ensure_pr_ready():
@@ -424,49 +424,49 @@ Load when the resolved tracker provider is `github` and the operation is `post-w
 
 Load when the resolved tracker provider is `github` and the operation is `ensure-pr-ready`.
 
-**Mechanics held here:** step 4b's TRACKER half only — the issue-number resolution and its `Closes #\{n\}` line; every other step is in `references/pr/ensure-pr-ready.md`.
+**Mechanics held here:** step 4b's TRACKER half only — the issue-number resolution and its `Closes #{n}` line; every other step is in `references/pr/ensure-pr-ready.md`.
 
 ### Process
 
-4b. (ALWAYS-ON) Ensure PR body contains a `## Related Issues` section with `Closes #\{n\}` link when a verified issue number is known. Resolution order:
+4b. (ALWAYS-ON) Ensure PR body contains a `## Related Issues` section with `Closes #{n}` link when a verified issue number is known. Resolution order:
    a. Prefer the issue number returned by `setup-task` / `ensure-traceable-issue` for this branch.
-   b. If unavailable, fall back to the branch name pattern `\{type\}/\{number\}-\{slug\}`: extract the numeric segment and verify with `gh issue view \{n\} --json number,state`. If the call fails or `.state` is not `"open"`, skip silently — never add a `Closes` link for an unverified number. Branches like `chore/2026-cleanup` or `fix/2fa-login` may produce false matches; the existence check is the guard.
+   b. If unavailable, fall back to the branch name pattern `{type}/{number}-{slug}`: extract the numeric segment and verify with `gh issue view {n} --json number,state`. If the call fails or `.state` is not `"open"`, skip silently — never add a `Closes` link for an unverified number. Branches like `chore/2026-cleanup` or `fix/2fa-login` may produce false matches; the existence check is the guard.
 
    Publish the section through step 4b's PR-host half.
 
    If no verified issue number is discoverable, skip silently.
-   On any 4xx/5xx from `gh pr edit` when updating the body: emit `TRACEABILITY: DEGRADED (\{reason\})` and continue — a failed Related Issues update never blocks the PR.
+   On any 4xx/5xx from `gh pr edit` when updating the body: emit `TRACEABILITY: DEGRADED ({reason})` and continue — a failed Related Issues update never blocks the PR.
 @end
 
 <!-- op: setup-task -->
-{setup_task()}
+{{setup_task()}}
 
 <!-- op: fetch-issue -->
-{fetch_issue()}
+{{fetch_issue()}}
 
 <!-- op: fetch-issues-batch -->
-{fetch_issues_batch()}
+{{fetch_issues_batch()}}
 
 <!-- op: manage-debt -->
-{manage_debt()}
+{{manage_debt()}}
 
 <!-- op: create-release -->
-{create_release()}
+{{create_release()}}
 
 <!-- op: gather-release-evidence -->
-{gather_release_evidence()}
+{{gather_release_evidence()}}
 
 <!-- op: backlink-shipped-issues -->
-{backlink_shipped_issues()}
+{{backlink_shipped_issues()}}
 
 <!-- op: associate-release -->
-{associate_release()}
+{{associate_release()}}
 
 <!-- op: ensure-traceable-issue -->
-{ensure_traceable_issue()}
+{{ensure_traceable_issue()}}
 
 <!-- op: post-wave-report -->
-{post_wave_report()}
+{{post_wave_report()}}
 
 <!-- op: ensure-pr-ready -->
-{ensure_pr_ready()}
+{{ensure_pr_ready()}}

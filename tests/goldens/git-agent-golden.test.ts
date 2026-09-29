@@ -4,8 +4,9 @@
  * The Git agent is resolved dist-preferred, so this guard covers the compiled
  * `dist/agents/git.md` — the artifact that ships and installs. Byte-equality
  * with the fixture is what proves the MDS conversion changed nothing: the
- * generator host escapes braces in prose, and the compiler unescapes them, so
- * a single missed or doubled escape moves bytes and this assertion fails.
+ * generator host spells each interpolation `{{…}}` and every other brace as
+ * literal text (MDS 0.4), so a single mis-spelled brace moves bytes and this
+ * assertion fails.
  *
  * A golden mismatch means the source is wrong, never the fixture (H2).
  * The fixture is regenerated only by a change that moves the compiled agent's

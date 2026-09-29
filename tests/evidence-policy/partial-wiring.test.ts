@@ -120,19 +120,17 @@ function defineBody(source: string, name: string): string | null {
 }
 
 /**
- * Resolve prose brace escapes the way the MDS compiler emits them (`\{` → `{`).
- * This is a model of the compiler. The expansion arm below checks it against every
- * built adopter, so a wrong model fails there instead of passing quietly.
+ * The define's built text: what every adopter expands to and release.md carries.
+ *
+ * The body as written. Under MDS 0.4 a define body with no `{{…}}` compiles to
+ * itself (single braces are literal text). That is a model of the compiler, and
+ * the expansion arm below checks it against every built adopter, so a wrong
+ * model fails there instead of passing quietly.
  */
-function unescapeMds(text: string): string {
-  return text.replace(/\\([{}])/g, '$1')
-}
-
-/** The define's built text: what every adopter expands to and release.md carries. */
 function builtExpansion(): string {
   const body = defineBody(partialSource(), DEFINE)
   if (body === null) throw new Error(`${PARTIAL_PATH}: no \`@define ${DEFINE}():\` … \`@end\` block`)
-  return unescapeMds(body)
+  return body
 }
 
 /** The eight command files that resolve the policy: seven built adopters, then release.md. */
@@ -208,7 +206,7 @@ describe('AC-1: the _evidence_policy partial and its adopters', () => {
 
     expect(collectEvidencePolicyImporters(corpus)).toEqual([...EVIDENCE_POLICY_PARTIAL_ADOPTERS].sort())
 
-    const call = `{${DEFINE}()}`
+    const call = `{{${DEFINE}()}}`
     for (const host of EVIDENCE_POLICY_PARTIAL_ADOPTERS) {
       const source = corpus.find(s => s.name === host)
       expect(source, `${host}.mds is missing from the src/ walk`).toBeDefined()
@@ -470,7 +468,7 @@ describe('AC-2: the invocation is identical in all eight command files', () => {
     const expansion = builtExpansion()
     expect(expansion.length, 'the define body is empty — nothing is being compared').toBeGreaterThan(400)
     expect(expansion.startsWith(RESOLUTION_SENTENCE), 'the define must open with its resolution sentence').toBe(true)
-    // The adopters prove the unescape model of the compiler; release.md is the
+    // The adopters prove the as-written model of the compiler; release.md is the
     // hand-kept copy this arm exists for.
     expect(collectExpansionDefects(policyCommandCorpus(), expansion)).toEqual([])
   })

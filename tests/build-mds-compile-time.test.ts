@@ -34,7 +34,7 @@ import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { promises as fs } from 'fs';
 import * as path from 'path';
 import * as os from 'os';
-import { init, compileFile } from '@mdscript/mds';
+import { init, compileFile, type CompileResult } from '@mdscript/mds';
 import { MDS_REFERENCE_MODULES, MDS_REFERENCE_PARTIALS } from './fixtures/mds-manifest.js';
 
 const ROOT = path.resolve(import.meta.dirname, '..');
@@ -56,11 +56,24 @@ const REFERENCE_SOURCES: readonly string[] = [
   ...MDS_REFERENCE_PARTIALS,
 ];
 
+/**
+ * The Markdown output of a compile result. `compileFile` returns a
+ * `markdown | messages` union; every source here is Markdown, so a `messages`
+ * result is a broken fixture, not a value to compare.
+ */
+function markdownOf(result: CompileResult, label: string): string {
+  if (result.kind !== 'markdown') {
+    throw new Error(`${label}: compiled to a "${result.kind}" result, not Markdown`);
+  }
+  return result.output;
+}
+
 /** Compile one repo-relative source in-process and return its output and elapsed ms. */
 async function timeCompile(relPath: string): Promise<{ output: string; ms: number }> {
   const started = Date.now();
   const result = await compileFile(path.join(ROOT, relPath), {});
-  return { output: result.output, ms: Date.now() - started };
+  const ms = Date.now() - started;
+  return { output: markdownOf(result, relPath), ms };
 }
 
 /**
@@ -83,7 +96,7 @@ export function collectOverBudget(
  * Rewrite a module's ALIAS imports back into the SELECTIVE form, faithfully.
  *
  * Used only by the known-bad probe. The imported names are read off the call
- * sites (`{alias.name(`) rather than listed here, so the probe reconstructs
+ * sites (`{{alias.name(`) rather than listed here, so the probe reconstructs
  * whatever the module actually uses and cannot drift out of step with it.
  *
  * `only` restricts the rewrite to the named aliases. The probe rewrites the
@@ -101,7 +114,7 @@ export function toSelectiveImports(source: string, only?: ReadonlySet<string>): 
   }
 
   const namesByAlias = new Map<string, Set<string>>();
-  for (const m of source.matchAll(/\{([A-Za-z_][A-Za-z0-9_]*)\.([A-Za-z_][A-Za-z0-9_]*)\(/g)) {
+  for (const m of source.matchAll(/\{\{([A-Za-z_][A-Za-z0-9_]*)\.([A-Za-z_][A-Za-z0-9_]*)\(/g)) {
     const [, alias, name] = m;
     if (!aliasToModule.has(alias)) continue;
     const seen = namesByAlias.get(alias) ?? new Set<string>();
@@ -116,7 +129,7 @@ export function toSelectiveImports(source: string, only?: ReadonlySet<string>): 
       new RegExp(String.raw`^@import\s+"${module.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}"\s+as\s+${alias}\s*$`, 'm'),
       `@import { ${names.join(', ')} } from "${module}"`,
     );
-    out = out.replaceAll(`{${alias}.`, '{');
+    out = out.replaceAll(`{{${alias}.`, '{{');
   }
   return out;
 }
@@ -166,7 +179,7 @@ describe('MDS reference modules compile well under the define-capture cliff', ()
       `This is almost always the resolver's define-capture cliff: a SELECTIVE import ` +
       `(\`@import { a, b } from "./x.mds"\`) captures each named function by deep copy, and the ` +
       `captured set is snapshotted again per \`@define\` in the importing module. Convert the ` +
-      `import to the ALIAS form (\`@import "./x.mds" as x\`, call sites \`{x.name()}\`): the ` +
+      `import to the ALIAS form (\`@import "./x.mds" as x\`, call sites \`{{x.name()}}\`): the ` +
       `emitted bytes are identical and the resolve cost stops compounding. A build this slow ` +
       `does not fail locally — it times the ~52 build-spawning suites out on a 2-core CI runner ` +
       `(run 35472010050), where it reads as an unrelated spawnSync ETIMEDOUT.`,
@@ -212,8 +225,9 @@ describe('MDS reference modules compile well under the define-capture cliff', ()
 
     const alias = await timeCompile(shippedRel);
     const probeStarted = Date.now();
-    const probeOut = (await compileFile(probePath, {})).output;
+    const probeResult = await compileFile(probePath, {});
     const probeMs = Date.now() - probeStarted;
+    const probeOut = markdownOf(probeResult, 'probe/_jira.mds');
 
     expect(
       probeOut,

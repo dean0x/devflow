@@ -7,8 +7,7 @@ output-dir: dist/commands
 @import { agent_roster, agent_caveats } from "./_partials/_roster.mds"
 @import { acceptance_criteria_contract } from "./_partials/_plan_contract.mds"
 @import { issue_ref_grammar, issue_capture_contract } from "./_partials/_tracker.mds"
-
-{authoring_preamble()}
+{{authoring_preamble()}}
 
 ---
 
@@ -16,14 +15,14 @@ output-dir: dist/commands
 
 This command instructs you to construct and run a Claude Code dynamic Workflow that plans all tickets in parallel, challenges each plan (gaps, edge cases, side-effects), produces well-structured acceptance criteria and a test plan for each ticket (consumed by `/devflow:dynamic-build`'s Gate 2), runs a cross-plan conflict critic, auto-resolves decisions matching the user's preference profile, and writes per-ticket plan files + one `DECISIONS-NEEDED.md`.
 
-{agent_roster()}
+{{agent_roster()}}
 
-{agent_caveats()}
+{{agent_caveats()}}
 
 ---
 
 **Requires:** ticket files directory or tracker issue list; optional `~/.devflow/preference-profile.md`
-**Produces:** per-ticket plan files + `DECISIONS-NEEDED.md` at `.devflow/docs/design/\{slug\}/\{ts\}/`
+**Produces:** per-ticket plan files + `DECISIONS-NEEDED.md` at `.devflow/docs/design/{slug}/{ts}/`
 
 ---
 
@@ -33,7 +32,7 @@ Before authoring, verify:
 
 1. **Workflow tool available:** if the `Workflow` tool is not in your available tools, STOP and tell the user: "The Workflow tool is not available in this session. dynamic-plan requires Claude Code's dynamic workflow runtime."
 2. **`agentType` support:** confirmed available (spike F5, 2026-06-11).
-3. **Tracker paths:** a list of issue references or URLs is read through the Git agent, which resolves the configured tracker and its access itself and reports `TRACEABILITY: DEGRADED (\{reason\})` when it cannot read an issue — then fall back to reading ticket `.md` files from a local path. No tracker CLI is checked here.
+3. **Tracker paths:** a list of issue references or URLs is read through the Git agent, which resolves the configured tracker and its access itself and reports `TRACEABILITY: DEGRADED ({reason})` when it cannot read an issue — then fall back to reading ticket `.md` files from a local path. No tracker CLI is checked here.
 4. **No-remote path:** if the repo has no remote, read ticket files from the provided local path; the Git agent reports DEGRADED for any issue it cannot reach.
 
 ---
@@ -60,11 +59,11 @@ Determine the ticket source (in priority order):
 - A list of candidate issue references or issue URLs
 - Inline ticket descriptions passed as args
 
-{issue_ref_grammar()}
+{{issue_ref_grammar()}}
 
 Read or note the tickets. The agents will read them in full; you need the list and any key constraints.
 
-{issue_capture_contract()}
+{{issue_capture_contract()}}
 
 ---
 
@@ -230,15 +229,15 @@ Return: { planPaths (array), decisionsNeededPath (string), decisionsNeededCount 
 
 The plan-challenge step (Phase 3 above) MUST produce the acceptance criteria and test plan shape that `/devflow:dynamic-build`'s Gate 2 consumes:
 
-{acceptance_criteria_contract()}
+{{acceptance_criteria_contract()}}
 
 ---
 
 ### Artifact paths
 
-Per-ticket plans → `.devflow/docs/design/\{slug\}/\{ts\}/\{ticket-slug\}-plan.md`
+Per-ticket plans → `.devflow/docs/design/{slug}/{ts}/{ticket-slug}-plan.md`
 
-Decisions needed → `.devflow/docs/design/\{slug\}/\{ts\}/DECISIONS-NEEDED.md`
+Decisions needed → `.devflow/docs/design/{slug}/{ts}/DECISIONS-NEEDED.md`
 
 Honor the `WORKTREE_PATH` prefix when provided.
 

@@ -31,7 +31,7 @@
  */
 
 import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
-import { promises as fs } from 'fs';
+import { promises as fs, readFileSync } from 'fs';
 import * as path from 'path';
 import * as os from 'os';
 import { spawnSync } from 'child_process';
@@ -45,7 +45,9 @@ import {
   ALL_MDS_PARTIALS,
   TRACKER_PARTIAL_ADOPTERS,
   DIST_COMMAND_FILES,
+  MDS_GENERATOR_HOSTS,
 } from './fixtures/mds-manifest.js';
+import { generatedReferenceManifest } from '../src/core/mds-variants.js';
 import {
   splitFrontmatter,
   buildCommittedTree,
@@ -53,6 +55,9 @@ import {
   collectSpawnScoping,
   requireDistFiles,
   gitAgentSinkCorpus,
+  walkFiles,
+  collectBackslashBraceLeaks,
+  type EmittedFile,
 } from './helpers.js';
 
 const ROOT = path.resolve(import.meta.dirname, '..');
@@ -74,6 +79,9 @@ const SELF = import.meta.filename;
  */
 let BUILT_COMMANDS: string;
 
+/** The temp root of that same build — dist/agents/ and dist/skills/ live under it too. */
+let BUILT_ROOT: string;
+
 /**
  * Several tests here spawn `tsx scripts/build-mds.ts`, and the committed-corpus
  * build compiles all 14 outputs. The 5s vitest default is far below what a cold
@@ -85,6 +93,7 @@ vi.setConfig({ testTimeout: 120_000, hookTimeout: 180_000 });
 beforeAll(async () => {
   const { run, root } = await buildCommittedTree();
   expect(run.status, `committed-tree build should exit 0.\n${run.combined}`).toBe(0);
+  BUILT_ROOT = root;
   BUILT_COMMANDS = path.join(root, 'dist', 'commands');
 }, 180_000);
 
@@ -443,32 +452,140 @@ describe('partial expansion in compiled knowledge outputs', () => {
 });
 
 // ---------------------------------------------------------------------------
-// 3a. Escape-regression guard — no dist file contains literal backslash-brace
-//     MDS does NOT process \{ escapes inside plain ``` fences; they ship verbatim.
-//     Escapes belong only in prose outside fences. This guard catches the whole class.
+// 3a. Silent-migration guards over EVERY compiled tree
+//
+// Since @mdscript/mds 0.4 only `{{…}}` interpolates and `\{` is no longer an
+// escape. A source still spelled in 0.2.0 syntax compiles with 0 errors and
+// 0 warnings, and the damage lands only in dist/ (PF-081): each `\{` / `\}` ships
+// its backslash (118 in git.md alone), and each single-brace helper call ships
+// as literal text — every reference module collapsed to its call lines, which
+// the build's empty-section check cannot see. These two guards are what does.
 // ---------------------------------------------------------------------------
 
-describe('escape-regression guard: no dist command contains literal backslash-brace (\\{)', () => {
-  it('no compiled dist/commands/*.md contains the two-character sequence \\{ (backslash-brace)', async () => {
-    // COMMAND_HOSTS scope is correct here (not DIST_FILES): this guard checks MDS compiler
-    // output only.  release.md is hand-authored and not produced by the MDS compiler —
-    // escape-regression is meaningless for it (SG-13 / DIST_FILES vs COMMAND_HOSTS divergence).
-    let scanned = 0;
-    for (const basename of COMMAND_HOSTS) {
-      const outputPath = path.join(BUILT_COMMANDS, `${basename}.md`);
-      let content: string;
-      try {
-        content = await fs.readFile(outputPath, 'utf-8');
-      } catch {
-        continue;
+/**
+ * Every artifact the MDS compiler emits, per output tree, read from a build root.
+ * Each tree is enumerated from its registry (hosts, generator hosts, the
+ * reference manifest), so a missing tree or a missing file fails by name rather
+ * than shrinking the corpus (PF-064: reach is asserted per member). release.md
+ * is hand-authored, not compiled, and is out of scope.
+ */
+async function readCompiledTrees(root: string): Promise<Record<'commands' | 'agents' | 'references', EmittedFile[]>> {
+  const read = async (rel: string): Promise<EmittedFile> => ({
+    name: rel,
+    content: await fs.readFile(path.join(root, rel), 'utf-8'),
+  });
+  return {
+    commands: await Promise.all(COMMAND_HOSTS.map(b => read(`dist/commands/${b}.md`))),
+    agents: await Promise.all(MDS_GENERATOR_HOSTS.map(b => read(`dist/agents/${b}.md`))),
+    references: await Promise.all(
+      generatedReferenceManifest().map(r => read(`dist/skills/git/references/${r}`)),
+    ),
+  };
+}
+
+/** Every `@define NAME(` helper name declared across the given .mds sources. */
+function collectDefinedHelpers(sources: readonly string[]): Set<string> {
+  const names = new Set<string>();
+  for (const src of sources) {
+    for (const m of src.matchAll(/^@define ([A-Za-z_]\w*)\(/gm)) names.add(m[1]);
+  }
+  return names;
+}
+
+/**
+ * Named collector: every unexpanded call to a defined helper in emitted text —
+ * `{name(`, `{{name(`, `{alias.name(` or `{{alias.name(`. Matching only DEFINED
+ * names keeps shipped literals such as `{JSON.stringify(` out of scope.
+ */
+function collectLostExpansions(files: readonly EmittedFile[], helpers: ReadonlySet<string>): string[] {
+  const CALL = /\{\{?\s*(?:[A-Za-z_]\w*\.)?([A-Za-z_]\w*)\(/g;
+  const lost: string[] = [];
+  for (const f of files) {
+    f.content.split('\n').forEach((line, i) => {
+      for (const m of line.matchAll(CALL)) {
+        if (helpers.has(m[1])) lost.push(`${f.name}:${i + 1}: ${m[0]}`);
       }
-      scanned++;
-      expect(
-        content,
-        `${DIST_COMMANDS}/${basename}.md must not contain literal \\{ (MDS escape leak inside plain fence)`,
-      ).not.toContain('\\{');
+    });
+  }
+  return lost;
+}
+
+/** Every .mds source under src/assets/ (hosts, partials, reference modules). */
+function readAllMdsSources(): string[] {
+  return walkFiles(path.join(ROOT, 'src', 'assets'), f => f.endsWith('.mds')).map(f =>
+    readFileSync(f, 'utf-8'),
+  );
+}
+
+describe('silent-migration guards: no escape leak and no lost helper expansion in any compiled tree', () => {
+  let trees: Record<'commands' | 'agents' | 'references', EmittedFile[]>;
+  let helpers: Set<string>;
+
+  beforeAll(async () => {
+    trees = await readCompiledTrees(BUILT_ROOT);
+    helpers = collectDefinedHelpers(readAllMdsSources());
+  });
+
+  it('reaches every compiled artifact in all three trees (per-member reach, not a size floor)', () => {
+    expect(trees.commands.map(f => f.name)).toEqual(COMMAND_HOSTS.map(b => `dist/commands/${b}.md`));
+    expect(trees.agents.map(f => f.name)).toEqual(['dist/agents/git.md']);
+    expect(trees.references).toHaveLength(generatedReferenceManifest().length);
+    for (const tree of Object.values(trees)) {
+      for (const f of tree) expect(f.content.length, `${f.name} is empty`).toBeGreaterThan(0);
     }
-    expect(scanned, 'scanned zero dist commands — guard is vacuous').toBeGreaterThan(0);
+    // The helper roster is what the lost-expansion guard matches against; an empty
+    // or truncated roster would pass every file.
+    for (const known of ['knowledge_load', 'setup_task', 'handoff_values', 'ensure_pr_ready']) {
+      expect(helpers.has(known), `helper roster is missing ${known}`).toBe(true);
+    }
+  });
+
+  for (const tree of ['commands', 'agents', 'references'] as const) {
+    it(`no compiled ${tree} artifact contains a literal \\{ or \\} (legacy escape leak)`, () => {
+      expect(collectBackslashBraceLeaks(trees[tree])).toEqual([]);
+    });
+
+    it(`no compiled ${tree} artifact contains an unexpanded call to a defined helper`, () => {
+      expect(collectLostExpansions(trees[tree], helpers)).toEqual([]);
+    });
+  }
+
+  it('known-bad probe: both collectors report seeded offenders and pass their compliant forms', () => {
+    const seeded: EmittedFile[] = [
+      { name: 'seed/leak.md', content: 'ok line\nDEGRADED (\\{reason\\})\n' },
+      { name: 'seed/lost.md', content: 'x {setup_task()} y\n{{common.handoff_values("a")}}\n' },
+      { name: 'seed/clean.md', content: 'DEGRADED ({reason}) {JSON.stringify(x)} {worktree} }}\n' },
+      { name: 'seed/close-only.md', content: 'tail \\}\n' },
+    ];
+    expect(collectBackslashBraceLeaks(seeded)).toEqual([
+      'seed/leak.md:2: DEGRADED (\\{reason\\})',
+      'seed/close-only.md:1: tail \\}',
+    ]);
+    expect(collectLostExpansions(seeded, new Set(['setup_task', 'handoff_values']))).toEqual([
+      'seed/lost.md:1: {setup_task(',
+      'seed/lost.md:2: {{common.handoff_values(',
+    ]);
+  });
+
+  it('known-bad probe: the installed compiler reproduces the silent failure on 0.2.0 syntax, and the guards see it', async () => {
+    // The real failure mode, not a seeded string: 0.2.0-spelled source through the
+    // installed compiler compiles without error, and both collectors flag the result.
+    // The migrated spelling of the same source compiles clean.
+    await ensureInit();
+    const legacy = compile('@define helper():\nexpanded\n@end\n\nCall {helper()} and \\{literal\\}.\n');
+    const migrated = compile('@define helper():\nexpanded\n@end\n\nCall {{helper()}} and {literal}.\n');
+    if (legacy.kind !== 'markdown' || migrated.kind !== 'markdown') {
+      expect.fail('the probe sources must compile to Markdown');
+    }
+    const probeHelpers = collectDefinedHelpers(['@define helper():\n']);
+    const legacyOut: EmittedFile[] = [{ name: 'legacy', content: legacy.output }];
+    const migratedOut: EmittedFile[] = [{ name: 'migrated', content: migrated.output }];
+
+    expect(collectLostExpansions(legacyOut, probeHelpers)).toEqual(['legacy:2: {helper(']);
+    expect(collectBackslashBraceLeaks(legacyOut)).toHaveLength(1);
+    expect(collectLostExpansions(migratedOut, probeHelpers)).toEqual([]);
+    expect(collectBackslashBraceLeaks(migratedOut)).toEqual([]);
+    expect(migrated.output).toContain('Call expanded and {literal}.');
   });
 });
 
@@ -526,6 +643,8 @@ describe('MDS compiler mechanism', () => {
     await ensureInit();
     const validSource = '# My Command\n\nThis is a valid MDS template.\n';
     const result = compile(validSource);
+    expect(result.kind, 'a Markdown source must compile to a markdown result').toBe('markdown');
+    if (result.kind !== 'markdown') return;
     expect(typeof result.output).toBe('string');
     expect(result.output.length).toBeGreaterThan(0);
     expect(result.output).toContain('My Command');
@@ -534,7 +653,10 @@ describe('MDS compiler mechanism', () => {
 
   it('throws an MdsError for a source that references an undefined variable', async () => {
     await ensureInit();
-    const malformedSource = '# Title\n\n@{UNDEFINED_VAR_THAT_DOES_NOT_EXIST}\n';
+    // `{{…}}` is the 0.4 interpolation form; the old `@{…}` spelling here only
+    // ever raised an unknown-directive syntax error, never the undefined variable
+    // this test is named for.
+    const malformedSource = '# Title\n\n{{UNDEFINED_VAR_THAT_DOES_NOT_EXIST}}\n';
     let threw = false;
     try {
       compile(malformedSource);
@@ -542,7 +664,7 @@ describe('MDS compiler mechanism', () => {
       threw = true;
       expect(isMdsError(err), 'error should be an MdsError with mds:: code').toBe(true);
       if (isMdsError(err)) {
-        expect(err.code).toMatch(/^mds::/);
+        expect(err.code).toBe('mds::undefined_var');
       }
     }
     expect(threw, 'compile() must throw on malformed MDS source').toBe(true);
@@ -766,6 +888,24 @@ describe('npm scripts (C4)', () => {
     expect(build).toContain('build:mds');
     expect(build).not.toContain('build:recipes');
     expect(build).not.toContain('build:knowledge');
+  });
+
+  it('build and prepublishOnly type-check scripts/ against the installed compiler types before build:mds', async () => {
+    // tsconfig.json covers src/ only, so an @mdscript/mds API break in
+    // scripts/build-mds.ts (0.3.0's markdown | messages union) stayed latent until a
+    // dedicated check existed. The check must run before the MDS build it protects.
+    const scripts = pkg['scripts'] as Record<string, string>;
+    expect(scripts['typecheck:scripts']).toBe('tsc -p tsconfig.scripts.json');
+    for (const name of ['build', 'prepublishOnly']) {
+      expect(scripts[name], `${name} must run typecheck:scripts before build:mds`).toMatch(
+        /npm run typecheck:scripts && npm run build:mds/,
+      );
+    }
+    const tsconfig = JSON.parse(
+      await fs.readFile(path.join(ROOT, 'tsconfig.scripts.json'), 'utf-8'),
+    ) as { include?: string[]; compilerOptions?: { noEmit?: boolean } };
+    expect(tsconfig.include).toContain('scripts/**/*.ts');
+    expect(tsconfig.compilerOptions?.noEmit).toBe(true);
   });
 });
 

@@ -89,17 +89,18 @@ export function collectDefineBody(source: string, name: string): string {
 /**
  * Named collector: how many times a module invokes the shared ladder define.
  *
- * Counts `{dedup_ladder()}` and `{mcp.dedup_ladder()}` alike. The provider
+ * Counts `{{dedup_ladder()}}` and `{{mcp.dedup_ladder()}}` alike. The provider
  * modules reach `_mcp.mds` through an ALIAS import — selective imports capture
  * deep and cost the resolver exponential time, see
  * `tests/build-mds-compile-time.test.ts` — and an alias is a lookup path, not a
  * second author, so both spellings are the SAME single invocation this seam
  * requires exactly one of. A bare `dedup_ladder` in prose is not a call site and
- * is not counted, which is what the leading `{` and trailing `()}` carry.
+ * is not counted, which is what the leading `{{` and trailing `()}}` carry; nor
+ * is a single-brace spelling, which MDS 0.4 prints as literal text.
  */
 export function countLadderInvocations(source: string): number {
   return [...source.matchAll(
-    new RegExp(String.raw`\{(?:[A-Za-z_][A-Za-z0-9_]*\.)?${LADDER_DEFINE}\(\)\}`, 'g'),
+    new RegExp(String.raw`\{\{(?:[A-Za-z_][A-Za-z0-9_]*\.)?${LADDER_DEFINE}\(\)\}\}`, 'g'),
   )].length;
 }
 
@@ -214,10 +215,14 @@ describe('tracker dedup ladder seam: the writer records rungs the readers can ac
     // Known-bad, same it: the invocation counter accepts the bare and the
     // alias-prefixed call site as one invocation each, and counts neither the
     // define's own declaration nor a mention of its name in prose.
-    expect(countLadderInvocations(`x {${LADDER_DEFINE}()} y`)).toBe(1);
-    expect(countLadderInvocations(`x {mcp.${LADDER_DEFINE}()} y`)).toBe(1);
+    expect(countLadderInvocations(`x {{${LADDER_DEFINE}()}} y`)).toBe(1);
+    expect(countLadderInvocations(`x {{mcp.${LADDER_DEFINE}()}} y`)).toBe(1);
     expect(
-      countLadderInvocations(`{${LADDER_DEFINE}()}\n{mcp.${LADDER_DEFINE}()}`),
+      countLadderInvocations(`x {mcp.${LADDER_DEFINE}()} y`),
+      'a single-brace spelling is literal text under MDS 0.4, not a call site',
+    ).toBe(0);
+    expect(
+      countLadderInvocations(`{{${LADDER_DEFINE}()}}\n{{mcp.${LADDER_DEFINE}()}}`),
       'two call sites are two invocations however each is spelled — this seam requires exactly one',
     ).toBe(2);
     expect(
@@ -348,7 +353,7 @@ describe('tracker dedup ladder seam: the writer records rungs the readers can ac
       const invocations = countLadderInvocations(source);
       expect(
         invocations,
-        `${name} invokes {${LADDER_DEFINE}()} ${invocations} time(s) — it must be exactly one: none ` +
+        `${name} invokes {{${LADDER_DEFINE}()}} ${invocations} time(s) — it must be exactly one: none ` +
           'means the module states a ladder of its own again, and two means the reference ships it twice',
       ).toBe(1);
 

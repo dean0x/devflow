@@ -233,12 +233,12 @@ see `index.json`, it is a deprecated artifact — run `devflow init` to rename i
 used by the system (staleness detection is removed). Existing KBs may still have it in
 their frontmatter — it is silently ignored. New KBs should omit it.
 
-**De-indenting an MDS fence to "simplify" it**: Column-0 ` ``` ` fences are the only raw
-(non-interpolated) text in an `.mds` source. Indenting a fence — or de-indenting one that
-was deliberately indented — flips its interpolation treatment and is NOT byte-preserving.
-This rule is load-bearing across `git.mds` and every reference module under
-`src/assets/mds/tracker/` and `src/assets/mds/git/`, which carry the same MDS grammar and
-the same escaping discipline for any prose moved between them.
+**Writing 0.2.0-era MDS syntax**: since `@mdscript/mds` 0.4.4 (#383) only `{{…}}`
+interpolates. A single-brace `{helper()}` is emitted as literal call text, and a `\{x\}`
+"escape" ships its backslashes — both compile with 0 errors and 0 warnings, so only the
+lost-expansion and backslash-leak guards in `tests/build-mds.test.ts` catch them. This is
+load-bearing across `git.mds` and every reference module under `src/assets/mds/tracker/`
+and `src/assets/mds/git/`, which share the grammar.
 
 **Adding a new build destination without editing `mds-variants.ts`**: `resolveOutputDir`'s
 allowlist is the single gate on where the build may write. A host declaring an
@@ -261,13 +261,16 @@ treat a missing `index.md` as a problem — write-through creates it lazily.
 (`.devflow/features/.disabled`) is gone via the clean break — no migration removes it
 because it was never deployed on this branch.
 
-**MDS brace-escaping**: In the `.mds` host files, every literal `{…}` in prose (including
-inline code and prose inside indented fences) must be escaped as `\{…\}`; only column-0
-` ``` ` fences are raw. `~~~` fences, inline code, and prose are all interpolated —
-`\{x\}` compiles to the literal `{x}`, an unescaped `{x}` is treated as a param
-reference, and 2+ blank lines collapse to 1 (even inside fences). `stripGeneratorFrontmatter`,
-`stripBuildKeys`, and `stripReferenceFrontmatter` all run on the compiler's OUTPUT, after
-this interpolation has already happened — they never see or touch escape sequences.
+**MDS brace syntax (0.4.4)**: In `.mds` sources `{{name}}`, `{{helper()}}` and
+`{{alias.helper()}}` interpolate; a single-brace `{…}` is literal text in prose, inline code
+and every fence, so a runtime placeholder such as `{worktree}` needs no escaping. There is
+no backslash escape — `\{` ships its backslash. Every fence kind (column-0, indented,
+tilde, blockquote) is passthrough, and blank lines are kept as written, so a command host
+starts its body on the line right after its `@import` block (a blank line there would
+reach the output). `stripGeneratorFrontmatter`, `stripBuildKeys`, and
+`stripReferenceFrontmatter` all run on the compiler's OUTPUT, after interpolation — they
+never see source syntax. `compileFile` returns a `markdown | messages` union; the build
+refuses a `messages` result (an `@message` host) as an aggregated error.
 
 **A verbatim move between `.mds` files is not free of grammar hazards (PF-063)**: prose
 (including headings) relocated out of `git.mds` and its skill body into a reference module

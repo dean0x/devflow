@@ -119,19 +119,6 @@ function linearTree(): string {
   return TRACKER_OPS.map(op => readGenerated(linearRel(op))).join('\n');
 }
 
-/**
- * MDS prose escapes collapsed, so one literal has one spelling.
- *
- * `_linear.mds` writes `\{` in prose and a raw `{` inside a column-0 fence, so a
- * source-side assertion on a braced literal would pass or fail on where the author
- * put the sentence. Same narrow rule as the bypass guard's own `unescapeMds` — only
- * the brace pair, so the module's other backslashes are not rewritten into text
- * that appears in no artifact.
- */
-function unescapeMds(source: string): string {
-  return source.replace(/\\\{/g, '{').replace(/\\\}/g, '}');
-}
-
 // ---------------------------------------------------------------------------
 // 1. Registration — the third provider, on the shared roster
 // ---------------------------------------------------------------------------
@@ -832,7 +819,7 @@ describe('linear module: query safety and the cross-cutting rules it invokes', (
   // is read where it is GUARANTEED to appear instead — the one operation that
   // composes a query, in this provider's emitted mechanics — which is also the
   // side a spawn reads, and the side the sibling arm below already reads.
-  const querySafety = unescapeMds(readGenerated(linearRel('ensure-traceable-issue')));
+  const querySafety = readGenerated(linearRel('ensure-traceable-issue'));
 
   it('structured filter fields are preferred and a built query is value-quoted only', () => {
     expect(querySafety, 'structured filter arguments first (§14.9-10)')

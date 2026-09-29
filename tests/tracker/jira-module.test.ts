@@ -106,19 +106,6 @@ function jiraRel(op: string): string {
   return `${JIRA_SUBDIR}/${op}.md`;
 }
 
-/**
- * MDS prose escapes collapsed, so one literal has one spelling.
- *
- * `_jira.mds` writes `\{` in prose and a raw `{` inside a column-0 fence, so a
- * source-side assertion on `{SCRUBBED_BODY}` would pass or fail on where the
- * author put the sentence. Same narrow rule as the bypass guard's own
- * `unescapeMds` — only the brace pair, so the module's other backslashes are not
- * rewritten into text that appears in no artifact.
- */
-function unescapeMds(source: string): string {
-  return source.replace(/\\\{/g, '{').replace(/\\\}/g, '}');
-}
-
 // ---------------------------------------------------------------------------
 // 1. Registration — the gate this module opens, and the roster it shares
 // ---------------------------------------------------------------------------
@@ -416,7 +403,7 @@ const MODULE_DEFINES: readonly ModuleDefine[] = [
   {
     name: 'pr_link_default',
     providers: ['jira', 'linear'],
-    bodyShape: /^Refs \\\{[A-Z]+\\\}-\\\{n\\\}$/,
+    bodyShape: /^Refs \{[A-Z]+\}-\{n\}$/,
     why:
       'the documented Reference Rendering default. A provider FACT, like the cap beside it: the ' +
       'rule that routes to it is the tool-call contract\'s and is provider-independent, but the ' +
@@ -1144,7 +1131,7 @@ describe('jira module: query safety and the cross-cutting rules it invokes', () 
   // is read where it is GUARANTEED to appear instead — the one operation that
   // composes a query, in this provider's emitted mechanics — which is also the
   // side a spawn reads, and the side the sibling arm below already reads.
-  const querySafety = unescapeMds(readGenerated(jiraRel('ensure-traceable-issue')));
+  const querySafety = readGenerated(jiraRel('ensure-traceable-issue'));
 
   it('structured filter arguments are preferred and a built query is value-quoted only', () => {
     expect(querySafety, 'structured filter arguments first (§14.9-10)')
