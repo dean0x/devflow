@@ -298,7 +298,7 @@ ledger with `getLedgerRoot` (`src/core/ledger-root.ts`) — the TypeScript twin 
 main worktree when `<main>/.devflow` is a directory and `<main>` is not HOME (realpath compare),
 else the toplevel (git < 2.31's echo included), `null` outside git (the caller keeps its cwd
 fallback). Parity with `df_resolve_roots` is pinned by `tests/core/ledger-root.test.ts`, which
-runs the shell helper on the same fixtures. `--configure` still writes `learning.json` under cwd.
+runs the shell helper on the same fixtures. `--configure` writes the project `learning.json` at `getLedgerRoot()` (cwd outside git), where `session-start-context` reads it; `init --no-learning` drains the learning queue there too.
 Memory is never resolved this way — it stays per checkout (`getGitRoot`).
 
 All three feature CLIs share the `writeMachineFeature`/`readMachineFeature` shape, plus their
