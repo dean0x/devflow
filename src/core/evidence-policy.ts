@@ -136,7 +136,7 @@ export interface RepoSettings {
   /** The worktree project.json's own ids, or null when it declares none. */
   readonly repoCompliance: readonly string[] | null;
   /** The worktree holds the retired `.devflow/policy.json`. */
-  readonly legacyPolicyFile: boolean;
+  readonly retiredPolicyFile: boolean;
   /**
    * The repository layer whose file exists but is unreadable — the whole-file
    * rule then fails every field closed (`ok` false) except the compliance lens,
@@ -437,7 +437,7 @@ export function repoComplianceStatusLines(loaded: SettingsLoad, opts: RepoSettin
     const ids = settings.repoCompliance.length > 0 ? settings.repoCompliance.join(', ') : 'generic controls only';
     lines.push(`Repository: ${ids} (${PROJECT_FILE})`);
   }
-  if (settings.legacyPolicyFile) lines.push(...retiredPolicyHint(loaded.value));
+  if (settings.retiredPolicyFile) lines.push(...retiredPolicyHint(loaded.value));
   return lines;
 }
 

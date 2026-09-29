@@ -235,8 +235,8 @@ describe('loadSettingsModule — the package copy of resolve-settings.cjs, shape
 
 describe('the --status helpers over the settings layer (D-FEATURES-NARROW-ONLY)', () => {
   const BASE: RepoSettings = (NODE_REQUIRE(SETTINGS_SCRIPT) as {
-    foldSettings(i: { project: unknown; personal: unknown; manifest: unknown; legacyPolicyFile: boolean }): RepoSettings;
-  }).foldSettings({ project: { kind: 'absent' }, personal: { kind: 'absent' }, manifest: undefined, legacyPolicyFile: false });
+    foldSettings(i: { project: unknown; personal: unknown; manifest: unknown; retiredPolicyFile: boolean }): RepoSettings;
+  }).foldSettings({ project: { kind: 'absent' }, personal: { kind: 'absent' }, manifest: undefined, retiredPolicyFile: false });
 
   /** A loaded module whose resolveSettings returns `settings`, recording the options it was given. */
   function stub(settings: RepoSettings, seen: unknown[] = []): SettingsLoad {
@@ -335,7 +335,7 @@ describe('the --status helpers over the settings layer (D-FEATURES-NARROW-ONLY)'
       .toEqual(['Repository: gdpr, hipaa (.devflow/project.json)']);
     expect(repoComplianceStatusLines(stub({ ...BASE, repoCompliance: [] }), { dir: tmp }))
       .toEqual(['Repository: generic controls only (.devflow/project.json)']);
-    expect(repoComplianceStatusLines(stub({ ...BASE, legacyPolicyFile: true }), { dir: tmp })).toEqual([
+    expect(repoComplianceStatusLines(stub({ ...BASE, retiredPolicyFile: true }), { dir: tmp })).toEqual([
       'Migration:  .devflow/policy.json is not read. While .devflow/project.json has no "evidence",',
       '            its presence alone holds this repository at required. Commit its value',
       '            to .devflow/project.json as "evidence", then delete .devflow/policy.json:',
