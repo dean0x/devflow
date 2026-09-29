@@ -52,8 +52,8 @@ const CLAUDEIGNORE_LINE = '.claudeignore';
 const CLAUDEIGNORE_NEGATION = '!.claudeignore';
 
 /**
- * Re-includes the team-owned evidence policy file (D-GITIGNORE-V5). A COMPLETION
- * line, never a presence sentinel: users may author it themselves, so its presence
+ * Re-includes the retired evidence-policy file (D-GITIGNORE-V5,
+ * D-POLICY-JSON-RETIRED). A COMPLETION line, never a presence sentinel: users may author it themselves, so its presence
  * proves nothing about the devflow block (avoids PF-059). It sits after `.devflow/*`
  * (which it overrides under last-match-wins) and before `.claudeignore`, so the
  * block's final line stays `.claudeignore`.
