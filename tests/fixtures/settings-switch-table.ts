@@ -22,6 +22,14 @@
  * edges — its bounded read (4096 bytes, a NUL), its text match (escapes, nesting,
  * key order) and the parser rules it defers to (BOM, duplicates) — so the shell
  * and the resolver are held to the same answer on each.
+ *
+ * A row marked `unreadable` holds a file that EXISTS but is not a JSON object
+ * within the parser's byte rules (unparseable, not an object, a BOM, a NUL, over
+ * 4096 bytes), and names the first such layer. Such a file narrows nothing, so
+ * `expect` is what the fold — and so every hook gate — reaches. resolveSettings
+ * itself goes further: an unreadable file fails the WHOLE resolution closed
+ * (D-SETTINGS-LINE, whole-file rule), so settings-mode.test.ts holds those rows
+ * to the fail-closed switches instead.
  */
 
 /** A project.json of exactly `bytes` UTF-8 bytes that narrows memory when parsed. */
@@ -42,6 +50,8 @@ export interface SwitchRow {
   readonly project: string | null;
   readonly personal: string | null;
   readonly expect: { readonly memory: boolean; readonly learning: boolean; readonly knowledge: boolean };
+  /** The first repository layer whose file exists but cannot be read as a JSON object. */
+  readonly unreadable?: 'project' | 'personal';
 }
 
 const ALL_ON = { memory: true, learning: true, knowledge: true } as const;
@@ -128,6 +138,31 @@ export const SETTINGS_SWITCH_TABLE: readonly SwitchRow[] = [
     project: '{"features":{"learning":false}',
     personal: null,
     expect: ALL_ON,
+    unreadable: 'project',
+  },
+  {
+    name: 'an unparseable config.json narrows nothing',
+    manifest: MANIFEST_ON,
+    project: null,
+    personal: '{"features":{"memory":false,"learning":false}',
+    expect: ALL_ON,
+    unreadable: 'personal',
+  },
+  {
+    name: 'a project.json that is a JSON array narrows nothing',
+    manifest: MANIFEST_ON,
+    project: '[{"features":{"memory":false,"learning":false}}]',
+    personal: null,
+    expect: ALL_ON,
+    unreadable: 'project',
+  },
+  {
+    name: 'an unparseable project.json leaves the machine switch deciding',
+    manifest: { features: { memory: false, learning: true, knowledge: true } },
+    project: '{"features":{"learning":false}',
+    personal: null,
+    expect: { memory: false, learning: true, knowledge: true },
+    unreadable: 'project',
   },
   {
     name: 'the machine legacy decisions:false switches learning off',
@@ -184,6 +219,7 @@ export const SETTINGS_SWITCH_TABLE: readonly SwitchRow[] = [
     project: '\uFEFF{"features":{"memory":false}}',
     personal: null,
     expect: ALL_ON,
+    unreadable: 'project',
   },
   {
     name: 'a NUL byte makes the file invalid',
@@ -191,6 +227,7 @@ export const SETTINGS_SWITCH_TABLE: readonly SwitchRow[] = [
     project: '{"features":{"memory":false}}\u0000',
     personal: '{"features":{"learning":\u0000false}}',
     expect: ALL_ON,
+    unreadable: 'project',
   },
   {
     name: 'a file of exactly 4096 bytes still narrows',
@@ -205,6 +242,7 @@ export const SETTINGS_SWITCH_TABLE: readonly SwitchRow[] = [
     project: paddedTo(4097),
     personal: null,
     expect: ALL_ON,
+    unreadable: 'project',
   },
   {
     name: 'multi-byte text past 4096 bytes narrows nothing',
@@ -212,6 +250,7 @@ export const SETTINGS_SWITCH_TABLE: readonly SwitchRow[] = [
     project: paddedTo(4098, '\u00e9'),
     personal: null,
     expect: ALL_ON,
+    unreadable: 'project',
   },
   {
     name: 'machine, project and personal each switch one thing off',

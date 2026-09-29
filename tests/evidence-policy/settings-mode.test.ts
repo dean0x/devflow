@@ -64,6 +64,7 @@ interface Settings {
   readonly switches: { readonly memory: SwitchState; readonly learning: SwitchState; readonly knowledge: SwitchState };
   readonly repoCompliance: readonly string[] | null;
   readonly legacyPolicyFile: boolean;
+  readonly unreadable: 'project' | 'personal' | null;
 }
 
 interface SettingsModule {
@@ -390,11 +391,11 @@ describe('TP-33 (AC-29): review publication = min(team ?? full, personal ?? auto
     expect(settingsFor({}).reviewPublication).toBe('auto');
   });
 
-  it('an unreadable project.json is the lowest ceiling; an unreadable config.json is no preference', () => {
+  it('an unreadable project.json or config.json publishes nothing — the whole resolution fails closed', () => {
     expect(settingsFor({ project: '{"reviewPublication":', personal: '{"reviewPublication":"full"}' }).reviewPublication)
       .toBe('off');
     expect(settingsFor({ project: '{"reviewPublication":"full"}', personal: '{"reviewPublication":' }).reviewPublication)
-      .toBe('auto');
+      .toBe('off');
   });
 
   it('a branch cannot raise publication: a committed team "full" never lifts a run above auto on its own', () => {
@@ -442,14 +443,22 @@ describe('TP-33: feature switches = machine AND project AND personal (only a lit
 });
 
 describe('readRepoLayers: the seam the hooks\' one parser fork reads through (D-FEATURES-NARROW-ONLY)', () => {
-  it('folds to exactly what resolveSettings folds, on every row of the shared table', () => {
+  it('folds to the table on every row, and to exactly what resolveSettings folds on every readable row', () => {
     for (const row of SETTINGS_SWITCH_TABLE) {
       const dir = fs.mkdtempSync(path.join(tmp, 'layers-'));
       if (row.project !== null) writeRepoFile('project.json', row.project, dir);
       if (row.personal !== null) writeRepoFile('config.json', row.personal, dir);
       const viaLayers = SETTINGS.foldSettings({ ...SETTINGS.readRepoLayers(dir), manifest: row.manifest, legacyPolicyFile: false });
+      expect({
+        memory: viaLayers.switches.memory.on,
+        learning: viaLayers.switches.learning.on,
+        knowledge: viaLayers.switches.knowledge.on,
+      }, row.name).toEqual(row.expect);
       const viaResolve = settingsFor({}, row.manifest, dir);
-      expect(viaLayers.switches, row.name).toEqual(viaResolve.switches);
+      // An unreadable file narrows nothing in the fold the hooks run, while
+      // resolveSettings fails the whole resolution closed (whole-file rule).
+      if (row.unreadable === undefined) expect(viaLayers.switches, row.name).toEqual(viaResolve.switches);
+      else expect(SETTINGS.formatSettingsLine(viaResolve), row.name).toBe(FAIL_CLOSED);
     }
   });
 
@@ -476,11 +485,14 @@ describe('TP-49: the shared switch fixture table (tests/fixtures/settings-switch
 
   it.each(SETTINGS_SWITCH_TABLE.map(r => [r.name, r] as const))('%s', (_name, row) => {
     const s = settingsFor({ project: row.project ?? undefined, personal: row.personal ?? undefined }, row.manifest);
+    // An unreadable row resolves to the fail-closed switches (whole-file rule);
+    // its `expect` is the fold's answer, which the readRepoLayers test holds.
     expect({
       memory: s.switches.memory.on,
       learning: s.switches.learning.on,
       knowledge: s.switches.knowledge.on,
-    }).toEqual(row.expect);
+    }).toEqual(row.unreadable === undefined ? row.expect : { memory: true, learning: true, knowledge: false });
+    expect(s.unreadable).toBe(row.unreadable ?? null);
   });
 });
 
@@ -540,10 +552,10 @@ describe('tracker: project selects, personal narrows, machine then github', () =
     ['project provider malformed ⇒ invalid, machine decides', MACHINE('linear'), '{"tracker":{"provider":"gitlab"}}', undefined, 'linear', 'machine', 'invalid', 'none', 'none'],
     ['project site malformed ⇒ invalid, never printed', MACHINE(), '{"tracker":{"provider":"jira","site":"http://x.io","key":"ACME"}}', undefined, 'jira', 'project', 'invalid', 'none', 'ACME'],
     ['project tracker not an object ⇒ invalid', MACHINE(), '{"tracker":"jira"}', undefined, 'github', 'default', 'invalid', 'none', 'none'],
-    ['unreadable project.json ⇒ invalid', MACHINE('jira'), '{"tracker":', undefined, 'jira', 'machine', 'invalid', 'none', 'none'],
+    ['unreadable project.json ⇒ the fail-closed tracker', MACHINE('jira'), '{"tracker":', undefined, 'github', 'default', 'invalid', 'none', 'none'],
     ['project site/key without provider apply to the machine provider', MACHINE('jira'), '{"tracker":{"site":"https://acme.atlassian.net","key":"ACME"}}', undefined, 'jira', 'machine', 'none', 'https://acme.atlassian.net', 'ACME'],
     ['a github project prints no site or key', MACHINE(), '{"tracker":{"provider":"github","site":"https://acme.atlassian.net","key":"ACME"}}', undefined, 'github', 'project', 'none', 'none', 'none'],
-    ['an unreadable personal file is no override', MACHINE('jira'), undefined, '{"tracker":"linear"', 'jira', 'machine', 'none', 'none', 'none'],
+    ['an unreadable personal file ⇒ the fail-closed tracker', MACHINE('jira'), undefined, '{"tracker":"linear"', 'github', 'default', 'invalid', 'none', 'none'],
   ] as const)('%s', (_label, manifest, project, personalBody, tracker, source, warn, site, key) => {
     const line = lineFor({ project, personal: personalBody }, manifest);
     expect(line).toMatch(SETTINGS.SETTINGS_LINE_RE);
@@ -563,17 +575,104 @@ describe('TP-30 (AC-26): a malformed evidence leaves tracker and features in the
   });
 });
 
+// ---------------------------------------------------------------------------
+// The whole-file rule (D-SETTINGS-LINE): a repository file that EXISTS but is
+// not a JSON object fails the whole resolution closed. Individually malformed
+// keys inside a readable object keep their per-key readings (the tables above).
+// ---------------------------------------------------------------------------
+
+describe('whole-file rule: an unreadable project.json or config.json fails the resolution closed', () => {
+  const PADDED = `{"compliance":["hipaa"],"pad":"${'x'.repeat(4097)}"}`;
+  const UNREADABLE: ReadonlyArray<readonly [string, string | Buffer]> = [
+    ['unparseable JSON', '{ this is not json'],
+    ['a truncated object', '{"compliance":["hipaa"]'],
+    ['an empty file', ''],
+    ['a JSON array', '[{"compliance":["hipaa"]}]'],
+    ['a JSON string', '"hipaa"'],
+    ['null', 'null'],
+    ['over 4096 bytes', PADDED],
+    ['a byte-order mark', '﻿{"compliance":["hipaa"]}'],
+    ['invalid UTF-8', Buffer.from([0x7b, 0x22, 0xff, 0x22, 0x3a, 0x31, 0x7d])],
+  ];
+  const COMPLIANCE_OFF_MACHINE = { features: { ...MANIFEST_ON.features, compliance: { enabled: false, frameworks: [] } } };
+
+  it.each(UNREADABLE)('project.json with %s ⇒ the fail-closed line', (_label, body) => {
+    const repo = fs.mkdtempSync(path.join(tmp, 'repo-'));
+    writeRepoFile('project.json', body, repo);
+    writeRepoFile('config.json', '{"reviewPublication":"full"}', repo);
+    const s = settingsFor({}, COMPLIANCE_OFF_MACHINE, repo);
+    expect(s.ok).toBe(false);
+    expect(s.unreadable).toBe('project');
+    expect(SETTINGS.formatSettingsLine(s)).toBe(FAIL_CLOSED);
+  });
+
+  it.each(UNREADABLE)('config.json with %s ⇒ the fail-closed line', (_label, body) => {
+    const repo = fs.mkdtempSync(path.join(tmp, 'repo-'));
+    writeRepoFile('project.json', '{"version":1,"reviewPublication":"full"}', repo);
+    writeRepoFile('config.json', body, repo);
+    const s = settingsFor({}, MANIFEST_ON, repo);
+    expect(s.ok).toBe(false);
+    expect(s.unreadable).toBe('personal');
+    expect(SETTINGS.formatSettingsLine(s)).toBe(FAIL_CLOSED);
+  });
+
+  it('a symlinked config.json is unreadable, never followed', () => {
+    const target = path.join(tmp, 'elsewhere.json');
+    fs.writeFileSync(target, '{"reviewPublication":"full"}');
+    fs.mkdirSync(path.join(root, '.devflow'), { recursive: true });
+    fs.symlinkSync(target, path.join(root, '.devflow', 'config.json'));
+    const s = settingsFor({}, MANIFEST_ON, root);
+    expect(s.unreadable).toBe('personal');
+    expect(SETTINGS.formatSettingsLine(s)).toBe(FAIL_CLOSED);
+  });
+
+  it('an unreadable project.json is named even when config.json is unreadable too', () => {
+    expect(settingsFor({ project: '{', personal: '{' }).unreadable).toBe('project');
+  });
+
+  it('readable files — including ones whose every key is malformed — resolve normally', () => {
+    const s = settingsFor({
+      project: '{"compliance":"hipaa","tracker":42,"reviewPublication":"everyone","features":[]}',
+      personal: '{"tracker":42,"reviewPublication":"everyone"}',
+    });
+    expect(s.ok).toBe(true);
+    expect(s.unreadable).toBeNull();
+    expect(SETTINGS.formatSettingsLine(s)).toBe('TRACKER=github TRACKER_SOURCE=default TRACKER_WARN=invalid SITE=none '
+      + 'KEY=none REVIEW_PUBLICATION=off COMPLIANCE=generic MEMORY=on LEARNING=on KNOWLEDGE=on');
+    expect(settingsFor({}).unreadable).toBeNull();
+  });
+
+  it('main(): exits 2 (input unusable) with the fail-closed line, naming the file on stderr', () => {
+    const stderr = vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
+    writeRepoFile('project.json', '{ this is not json');
+    const out = SETTINGS.main(['node', SETTINGS_SCRIPT, root], { exec: scriptedExec([TOPLEVEL(root)]).exec });
+    expect(out).toEqual({ code: SETTINGS.EXIT_CODES.INPUT_UNUSABLE, line: FAIL_CLOSED });
+    expect(out.code).toBe(2);
+    expect(stderr.mock.calls.map(c => String(c[0])).join('')).toContain('.devflow/project.json');
+  });
+
+  it('the real script: the QA scenario — a broken hipaa project.json never resolves auto or compliance off', { timeout: 20_000 }, () => {
+    writeRepoFile('project.json', '{ "compliance": ["hipaa"], this is not json');
+    const shim = buildScriptedShim(fakeBin, tmp, [TOPLEVEL(root)]);
+    const r = runResolver({ home, args: [root], shim, script: SETTINGS_SCRIPT });
+    expect(r.status).toBe(2);
+    expect(r.stdout).toBe(`${FAIL_CLOSED}\n`);
+    expect(shim.readLog()).toEqual([['git', ...ARGV.toplevel]]);
+  });
+});
+
 describe('repository files are never followed or opened when not regular', () => {
   it.each([
     ['a symlink', (p: string) => { fs.symlinkSync(path.join(tmp, 'elsewhere.json'), p); }],
     ['a directory', (p: string) => { fs.mkdirSync(p); }],
-  ])('a project.json that is %s reads as unreadable', (_label, make) => {
+  ])('a project.json that is %s is unreadable — the whole resolution fails closed', (_label, make) => {
     fs.writeFileSync(path.join(tmp, 'elsewhere.json'), '{"features":{"learning":false}}');
     fs.mkdirSync(path.join(root, '.devflow'), { recursive: true });
     make(path.join(root, '.devflow', 'project.json'));
     const s = settingsFor({}, MANIFEST_ON, root);
-    expect(SETTINGS.formatSettingsLine(s)).toBe('TRACKER=github TRACKER_SOURCE=default TRACKER_WARN=invalid SITE=none '
-      + 'KEY=none REVIEW_PUBLICATION=off COMPLIANCE=generic MEMORY=on LEARNING=on KNOWLEDGE=on');
+    expect(s.ok).toBe(false);
+    expect(s.unreadable).toBe('project');
+    expect(SETTINGS.formatSettingsLine(s)).toBe(FAIL_CLOSED);
   });
 
   it('flags a legacy policy.json in the worktree for the CLI\'s migration hint', () => {

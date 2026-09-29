@@ -16,11 +16,14 @@ import { writeFileAtomicExclusive } from './fs-atomic.js';
  *   effective = machine AND project.json `features.<name>` AND config.json `features.<name>`
  *
  * where only a literal `false` narrows — absent, malformed and unreadable values
- * leave the machine switch deciding. The team-committed `.devflow/project.json`
- * and the personal `.devflow/config.json` are both parsed by the shared
- * lib/project-config.cjs, and the fold lives in resolve-settings.cjs
- * (`MEMORY=`/`LEARNING=`/`KNOWLEDGE=` on its settings line); the CLI's `--status`
- * prints the effective state only when a repo layer narrows it. No repo layer can
+ * leave the machine switch deciding. (An unreadable repository file also fails
+ * the whole settings line closed, so commands read `KNOWLEDGE=off` from it; the
+ * hooks never read that line, and for them it narrows nothing.) The
+ * team-committed `.devflow/project.json` and the personal `.devflow/config.json`
+ * are both parsed by the shared lib/project-config.cjs, and the fold lives in
+ * resolve-settings.cjs (`MEMORY=`/`LEARNING=`/`KNOWLEDGE=` on its settings
+ * line); the CLI's `--status` prints the effective state only when a repo layer
+ * narrows it, or an unreadable repo file closes it. No repo layer can
  * re-enable what the machine turned off, so the #378 split — a repo that kept a
  * feature running after the user switched it off — cannot come back.
  *

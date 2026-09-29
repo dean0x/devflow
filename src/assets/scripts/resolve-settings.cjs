@@ -33,12 +33,18 @@
 //   MEMORY=<on|off> LEARNING=<on|off> KNOWLEDGE=<on|off>
 // (one line on stdout; wrapped here for reading). Every value is a closed token
 // or a SITE/KEY that passed its shape gate, so no other byte of a config file can
-// reach stdout.
+// reach stdout. Whole-file rule: a project.json or config.json that EXISTS but
+// cannot be read as a JSON object — unparseable, empty, not an object, a BOM,
+// not UTF-8, over MAX_CONFIG_BYTES, a symlink or other non-regular file — fails
+// the whole resolution closed (exit 2). Only keys inside a readable object are
+// classified one by one.
 //
 // Exit codes (a caller treats EVERY non-zero code as the fail-closed line):
 //   0  resolved — the line above
 //   1  usage error — stdout entirely empty, usage on stderr
-//   2  input unusable — <dir> missing or not a directory; prints SETTINGS_FAIL_CLOSED_LINE
+//   2  input unusable — <dir> missing or not a directory, or a repository config
+//      file exists but is unreadable (the whole-file rule); prints
+//      SETTINGS_FAIL_CLOSED_LINE
 //   3  never emitted — this script writes no file
 //   4  internal error — or git could not say whether <dir> is in a repository;
 //      prints SETTINGS_FAIL_CLOSED_LINE
@@ -110,6 +116,15 @@ const EXIT_CODES = Object.freeze({
  * consumers. SITE and KEY reuse the parser's own shape gates, so a line can only
  * carry a site or key the parser admitted. COMPLIANCE is `off`, `generic` (the
  * lens with no framework reference), or registry ids joined by commas.
+ *
+ * Whole-file rule: the line is composed only from files that are absent or read
+ * as a JSON object. A repository file that exists and does not (the parser's
+ * `invalid` file) says nothing that can be trusted — a team file meant to declare
+ * `compliance:["hipaa"]` must not read as "no file" — so the resolution is
+ * SETTINGS_FAIL_CLOSED_LINE, exit 2 (INPUT_UNUSABLE), for the team project.json
+ * and the personal config.json alike. A consumer that accepts only exit 0
+ * substitutes the same constant, so both readings agree. Individually malformed
+ * keys inside a readable object keep their per-key readings (AC-26).
  */
 const SETTINGS_LINE_RE = new RegExp(
   '^TRACKER=(?<tracker>' + TRACKER_PROVIDER_IDS.join('|') + ')'
@@ -132,7 +147,8 @@ const SETTINGS_LINE_RE = new RegExp(
  *   COMPLIANCE=generic       the review lens still runs
  *   KNOWLEDGE=off            no knowledge write-back commits into the repository
  *   MEMORY/LEARNING=on       the machine switch is the one that turns them off;
- *                            hooks never consume this line
+ *                            hooks never consume this line (their gate folds an
+ *                            unreadable file as narrowing nothing)
  */
 const SETTINGS_FAIL_CLOSED_LINE =
   'TRACKER=github TRACKER_SOURCE=default TRACKER_WARN=invalid SITE=none KEY=none '
@@ -164,6 +180,7 @@ const LINE_MAX_BUFFER = 4096;
  *   switches: { memory: SwitchState, learning: SwitchState, knowledge: SwitchState },
  *   repoCompliance: readonly string[] | null,
  *   legacyPolicyFile: boolean,
+ *   unreadable: 'project' | 'personal' | null,
  * }} Settings
  *   ok              false only for the fail-closed resolution
  *   compliance      enabled with no frameworks is `generic`
@@ -171,6 +188,9 @@ const LINE_MAX_BUFFER = 4096;
  *                   none (a malformed declaration reads as [] — generic)
  *   legacyPolicyFile  the worktree still holds .devflow/policy.json (the CLI
  *                   prints a migration hint)
+ *   unreadable      the first repository layer whose file exists but is
+ *                   unreadable, which failed the resolution closed (the
+ *                   whole-file rule; project before personal); null otherwise
  *
  * @typedef {{ project: object, personal: object, manifest: unknown, legacyPolicyFile: boolean }} SettingsInputs
  *   project/personal are lib/project-config.cjs ProjectConfig / PersonalConfig.
@@ -199,7 +219,19 @@ const FAIL_CLOSED_SETTINGS = Object.freeze({
   }),
   repoCompliance: null,
   legacyPolicyFile: false,
+  unreadable: null,
 });
+
+/**
+ * The whole-file rule's resolution: the fail-closed values, naming the layer
+ * whose file could not be read.
+ *
+ * @param {'project' | 'personal'} layer
+ * @returns {Settings}
+ */
+function unreadableSettings(layer) {
+  return Object.freeze({ ...FAIL_CLOSED_SETTINGS, unreadable: layer });
+}
 
 const ABSENT_FIELD = Object.freeze({ kind: 'absent' });
 const MALFORMED_FIELD = Object.freeze({ kind: 'malformed' });
@@ -268,6 +300,11 @@ function machineCompliance(manifest) {
 
 // ---------------------------------------------------------------------------
 // The fold (the functional core)
+//
+// The fold reads a file-level `invalid` field by field (fieldIn) so that it never
+// throws on any parser output. resolveSettings never folds such a file — the
+// whole-file rule fails it closed first — so that reading serves only the hooks'
+// switch gate, where an unreadable file narrows nothing.
 // ---------------------------------------------------------------------------
 
 /**
@@ -456,6 +493,7 @@ function foldSettings(inputs) {
     }),
     repoCompliance,
     legacyPolicyFile: inputs.legacyPolicyFile === true,
+    unreadable: null,
   });
 }
 
@@ -552,7 +590,9 @@ function existsNoFollow(filePath) {
 /**
  * Resolve the settings for `opts.dir`. Never throws: a git that cannot say
  * whether `opts.dir` is in a repository, or any internal failure, is the
- * fail-closed resolution, which main() maps to exit 4.
+ * fail-closed resolution, which main() maps to exit 4. A repository file that
+ * exists but is unreadable is the fail-closed resolution too, naming its layer in
+ * `unreadable` (the whole-file rule, D-SETTINGS-LINE), which main() maps to exit 2.
  *
  * @param {ResolveSettingsOptions} opts
  * @param {{ exec?: ExecFn }} [deps]
@@ -569,6 +609,8 @@ function resolveSettings(opts, deps) {
       return foldSettings({ project: none, personal: none, manifest, legacyPolicyFile: false });
     }
     const { project, personal } = readRepoLayers(toplevel.root);
+    if (project.kind === 'invalid') return unreadableSettings('project');
+    if (personal.kind === 'invalid') return unreadableSettings('personal');
     return foldSettings({
       project,
       personal,
@@ -755,6 +797,11 @@ function main(argv, deps) {
     return { code: EXIT_CODES.INPUT_UNUSABLE, line: SETTINGS_FAIL_CLOSED_LINE };
   }
   const settings = resolveSettings({ dir: args.dir }, { exec: d.exec });
+  if (settings.unreadable !== null) {
+    process.stderr.write('resolve-settings: .devflow/' + (settings.unreadable === 'project' ? 'project.json' : 'config.json')
+      + ' exists but is not a readable JSON object — failing closed\n');
+    return { code: EXIT_CODES.INPUT_UNUSABLE, line: SETTINGS_FAIL_CLOSED_LINE };
+  }
   if (!settings.ok) {
     process.stderr.write('resolve-settings: could not resolve (git did not answer, or an internal error) — failing closed\n');
     return { code: EXIT_CODES.INTERNAL_ERROR, line: SETTINGS_FAIL_CLOSED_LINE };

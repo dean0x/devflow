@@ -23,6 +23,15 @@
 // evidence ⇒ required, compliance ⇒ generic, tracker ⇒ TRACKER_WARN=invalid,
 // reviewPublication ⇒ off, a feature switch ⇒ not narrowed.
 //
+// Whole-file rule: that per-key classification applies only INSIDE a file that
+// reads as a JSON object. A file that exists but does not — empty, unparseable,
+// not an object, a BOM, not UTF-8, over MAX_CONFIG_BYTES, too deeply nested, or
+// (at the reader) a symlink or other non-regular file — is `invalid` as a whole,
+// never `absent`, so no key of it can be mistaken for "not set". Each caller
+// fails closed on it: resolve-evidence-policy.cjs resolves `required`,
+// resolve-settings.cjs prints its fail-closed line, and the hooks' switch gate
+// narrows nothing.
+//
 // D-PROJECT-STRICT-KEYS: keys are read with hasOwnProperty (a `__proto__` key is
 // an own data property after JSON.parse, never the prototype), and a key that
 // appears TWICE in the same object is malformed. JSON.parse keeps the last
@@ -30,6 +39,8 @@
 // one; duplicates are therefore found in the raw text (collectDuplicateKeyPaths)
 // before any value is trusted. A duplicate `evidence` is the case that matters —
 // `{"evidence":"required","evidence":"standard"}` must not read as standard.
+// Strictness is per key only inside a readable object: a file that is not one is
+// `invalid` whole (the whole-file rule above), whatever keys it appears to hold.
 
 'use strict';
 

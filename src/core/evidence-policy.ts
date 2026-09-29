@@ -132,6 +132,11 @@ export interface RepoSettings {
   readonly repoCompliance: readonly string[] | null;
   /** The worktree still holds the legacy `.devflow/policy.json`. */
   readonly legacyPolicyFile: boolean;
+  /**
+   * The repository layer whose file exists but is unreadable — the whole-file
+   * rule then fails the resolution closed (`ok` false) — or null.
+   */
+  readonly unreadable: Exclude<SettingsSwitchSource, 'machine'> | null;
 }
 
 /** `ResolveSettingsOptions` typedef. `manifest` undefined makes the script read it itself. */
@@ -352,8 +357,11 @@ export function settingsSourceFile(source: Exclude<SettingsSwitchSource, 'machin
  * The effective state of a feature switch in this repository, ONLY when a repo
  * layer narrows it — `disabled (.devflow/project.json)` — and null otherwise, so a
  * `--status` whose machine switch alone decides prints exactly what it always has
- * (D-FEATURES-NARROW-ONLY). A settings resolver that failed to load or failed
- * closed also yields null: it knows nothing about this repository.
+ * (D-FEATURES-NARROW-ONLY). A repository file that exists but is unreadable fails
+ * the resolution closed, and a switch that closed off is labelled with that file —
+ * `disabled (.devflow/project.json is unreadable)` — since commands act on it. Any
+ * other failure (the resolver failed to load, or git could not answer) yields
+ * null: it knows nothing about this repository.
  */
 export function narrowedSwitchLabel(
   loaded: SettingsLoad,
@@ -362,7 +370,10 @@ export function narrowedSwitchLabel(
 ): string | null {
   if (!loaded.ok) return null;
   const settings = loaded.value.resolveSettings(opts);
-  if (!settings.ok) return null;
+  if (!settings.ok) {
+    if (settings.unreadable === null || settings.switches[feature].on) return null;
+    return `disabled (${settingsSourceFile(settings.unreadable)} is unreadable)`;
+  }
   const state = settings.switches[feature];
   if (state.on || state.source === 'machine') return null;
   return `disabled (${settingsSourceFile(state.source)})`;
@@ -371,14 +382,20 @@ export function narrowedSwitchLabel(
 /**
  * The `compliance --status` lines about the repository in `opts.dir`: the ids its
  * project.json declares (`generic controls only` for an empty or malformed list),
- * and a migration hint while the legacy policy file is still there. Empty when
- * the resolver is unavailable or the repository declares nothing and has no
- * legacy file — the status output is then unchanged.
+ * and a migration hint while the legacy policy file is still there. A repository
+ * file that exists but is unreadable fails the resolution closed to the generic
+ * lens, and says so, naming the file. Empty when the resolver is unavailable or
+ * failed closed for any other reason, or the repository declares nothing and has
+ * no legacy file — the status output is then unchanged.
  */
 export function repoComplianceStatusLines(loaded: SettingsLoad, opts: RepoSettingsOptions): string[] {
   if (!loaded.ok) return [];
   const settings = loaded.value.resolveSettings(opts);
-  if (!settings.ok) return [];
+  if (!settings.ok) {
+    return settings.unreadable === null
+      ? []
+      : [`Repository: generic controls only (${settingsSourceFile(settings.unreadable)} is unreadable)`];
+  }
   const lines: string[] = [];
   if (settings.repoCompliance !== null) {
     const ids = settings.repoCompliance.length > 0 ? settings.repoCompliance.join(', ') : 'generic controls only';

@@ -586,10 +586,29 @@ describe('TP-30 (AC-26): malformed or duplicated evidence gives required', () =>
     ['malformed', PROJECT.malformed],
     ['duplicated', PROJECT.duplicate],
     ['not an object', '["evidence"]'],
+    ['unparseable text around it', '{ "evidence": "standard", this is not json'],
   ])('worktree project.json with %s evidence ⇒ required, SOURCE=invalid', (_label, body) => {
     writeDevflowFile('project.json', body);
     expect(lineFor(scenarioCalls({ root })))
       .toBe(`EVIDENCE_POLICY=required SOURCE=invalid REF=none WARN=remote-unavailable,invalid-file ${REQ}`);
+  });
+
+  it('online: an unparseable remote project.json ⇒ required, SOURCE=invalid — never read as absent', () => {
+    writeDevflowFile('project.json', PROJECT.standard);
+    expect(lineFor(scenarioCalls({
+      root, defaultBranch: 'main',
+      remoteProject: { bytes: '{ "evidence": "standard", this is not json' }, remote: { bytes: POLICY.standard },
+      headProject: { bytes: PROJECT.standard },
+    }))).toBe(`EVIDENCE_POLICY=required SOURCE=invalid REF=main WARN=invalid-file,pr-changes-policy ${REQ}`);
+  });
+
+  it('offline: an unparseable tracking-copy project.json raises the worktree to required, flagged invalid-file', () => {
+    writeDevflowFile('project.json', PROJECT.standard);
+    expect(lineFor(scenarioCalls({
+      root, lsRemoteBranch: 'main',
+      tracking: { bytes: POLICY.standard }, trackingProject: { bytes: '{ this is not json' },
+      head: 'absent', headProject: { bytes: PROJECT.standard },
+    }))).toBe(`EVIDENCE_POLICY=required SOURCE=worktree REF=main WARN=remote-unavailable,invalid-file,pr-changes-policy ${REQ}`);
   });
 
   it('a malformed project.json evidence is never rescued by a valid policy.json beside it', () => {

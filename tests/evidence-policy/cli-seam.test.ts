@@ -260,6 +260,33 @@ describe('the --status helpers over the settings layer (D-FEATURES-NARROW-ONLY)'
     expect(narrowedSwitchLabel(notFound, { dir: tmp }, 'memory')).toBeNull();
     expect(narrowedSwitchLabel(stub({ ...withSwitch('memory', false, 'project'), ok: false }), { dir: tmp }, 'memory')).toBeNull();
     expect(repoComplianceStatusLines(notFound, { dir: tmp })).toEqual([]);
+    expect(repoComplianceStatusLines(stub({ ...BASE, repoCompliance: ['gdpr'], ok: false }), { dir: tmp })).toEqual([]);
+  });
+
+  it('an unreadable repository file names itself: knowledge is disabled by it, the lens is generic', () => {
+    const settings = NODE_REQUIRE(SETTINGS_SCRIPT) as {
+      resolveSettings(o: { dir: string; manifest?: unknown }, d: { exec: ExecFn }): RepoSettings;
+    };
+    const repo = fs.mkdtempSync(path.join(tmp, 'unreadable-'));
+    fs.mkdirSync(path.join(repo, '.devflow'));
+    fs.writeFileSync(path.join(repo, '.devflow', 'project.json'), '{ this is not json');
+    const { exec } = scriptedExec([{ tool: 'git', args: ARGV.toplevel, stdout: `${repo}\n` }]);
+    const failed = settings.resolveSettings({ dir: repo, manifest: { features: {} } }, { exec });
+    expect(failed.ok).toBe(false);
+    expect(failed.unreadable).toBe('project');
+
+    expect(narrowedSwitchLabel(stub(failed), { dir: repo }, 'knowledge'))
+      .toBe('disabled (.devflow/project.json is unreadable)');
+    expect(narrowedSwitchLabel(stub(failed), { dir: repo }, 'memory')).toBeNull();
+    expect(narrowedSwitchLabel(stub(failed), { dir: repo }, 'learning')).toBeNull();
+    expect(repoComplianceStatusLines(stub(failed), { dir: repo }))
+      .toEqual(['Repository: generic controls only (.devflow/project.json is unreadable)']);
+
+    const personal = { ...failed, unreadable: 'personal' as const };
+    expect(narrowedSwitchLabel(stub(personal), { dir: repo }, 'knowledge'))
+      .toBe('disabled (.devflow/config.json is unreadable)');
+    expect(repoComplianceStatusLines(stub(personal), { dir: repo }))
+      .toEqual(['Repository: generic controls only (.devflow/config.json is unreadable)']);
   });
 
   it('passes the caller\'s dir straight through', () => {
