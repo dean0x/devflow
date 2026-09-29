@@ -352,7 +352,7 @@ x .devflow/scripts/verify-evidence.cjs
 ## install: repo
 - .claudeignore
 d .devflow/
-- .devflow/.root-gitignore-configured-v5
+- .devflow/.root-gitignore-configured-v6
 - .devflow/config.json
 - .gitignore
 - README.md
@@ -586,7 +586,7 @@ d <HOME>/.devflow/
 - <HOME>/.devflow/hud.json
 - <REPO>/.claudeignore
 d <REPO>/.devflow/
-- <REPO>/.devflow/.root-gitignore-configured-v5
+- <REPO>/.devflow/.root-gitignore-configured-v6
 - <REPO>/.devflow/config.json
 - <REPO>/.gitignore
 

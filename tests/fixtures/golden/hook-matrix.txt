@@ -161,7 +161,7 @@ A home/.devflow/logs/<SANDBOX>-wt/.capture-prompt.log
 A repo/.devflow/learning/
 A repo/.devflow/learning/.pending-turns.jsonl
 A wt/.devflow/
-A wt/.devflow/.root-gitignore-configured-v5
+A wt/.devflow/.root-gitignore-configured-v6
 A wt/.devflow/docs/
 A wt/.devflow/features/
 A wt/.devflow/memory/
@@ -176,7 +176,7 @@ A home/.devflow/logs/<SANDBOX>-wt/.capture-turn.log
 A repo/.devflow/learning/
 A repo/.devflow/learning/.pending-turns.jsonl
 A wt/.devflow/
-A wt/.devflow/.root-gitignore-configured-v5
+A wt/.devflow/.root-gitignore-configured-v6
 A wt/.devflow/docs/
 A wt/.devflow/features/
 A wt/.devflow/memory/
@@ -203,7 +203,7 @@ A home/.devflow/logs/
 A home/.devflow/logs/<SANDBOX>-wt/
 A repo/.devflow/learning/
 A wt/.devflow/
-A wt/.devflow/.root-gitignore-configured-v5
+A wt/.devflow/.root-gitignore-configured-v6
 A wt/.gitignore
 
 ## worktree · capture-question (PostToolUse AskUserQuestion)
@@ -214,7 +214,7 @@ A home/.devflow/logs/<SANDBOX>-wt/.capture-question.log
 A repo/.devflow/learning/
 A repo/.devflow/learning/.pending-turns.jsonl
 A wt/.devflow/
-A wt/.devflow/.root-gitignore-configured-v5
+A wt/.devflow/.root-gitignore-configured-v6
 A wt/.devflow/docs/
 A wt/.devflow/features/
 A wt/.devflow/memory/
@@ -227,7 +227,7 @@ A home/.devflow/logs/
 A home/.devflow/logs/<SANDBOX>-wt/
 A home/.devflow/logs/<SANDBOX>-wt/.pre-compact-memory.log
 A wt/.devflow/
-A wt/.devflow/.root-gitignore-configured-v5
+A wt/.devflow/.root-gitignore-configured-v6
 A wt/.devflow/docs/
 A wt/.devflow/features/
 A wt/.devflow/memory/
