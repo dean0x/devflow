@@ -14,10 +14,11 @@
 # the main model to spawn the background Learning agent with the resolved model.
 # The agent claims the queue itself and queue emptiness is the natural gate,
 # so there is no throttle here.
-# Section 3: Tracker setup directive — when the machine's manifest names a
-# non-GitHub issue tracker and no ~/.devflow/tracker.md has been inferred for it
-# yet, instructs the main model to spawn the background Tracker agent. Gated on a
-# zero-byte presence sentinel so a GitHub user pays one stat and zero forks.
+# Section 3: Tracker setup directive — when the issue tracker in effect for this
+# project is not GitHub and no ~/.devflow/tracker/{provider}.md has been inferred
+# for it yet, instructs the main model to spawn the background Tracker agent. The
+# machine provider comes from a sentinel read with a builtin, so a GitHub user —
+# and a jira machine whose conventions are learned — forks nothing.
 
 # Safe no-op fallback: must exist before hook-bootstrap is sourced.
 dbg() { :; }
@@ -301,33 +302,99 @@ ${LEARNING_SECTION}"
 fi
 
 # --- Section 3: Tracker setup directive ---
-# Emitted when this machine's manifest names a non-GitHub issue tracker and no
-# conventions file has been inferred for it yet: a silent, non-blocking
-# instruction to spawn the background Tracker agent, which writes
-# ~/.devflow/tracker.md exactly once.
+# Emitted when the issue tracker in effect for this project is not GitHub and no
+# conventions file has been inferred for that provider yet: a silent,
+# non-blocking instruction to spawn the background Tracker agent, which writes
+# ~/.devflow/tracker/{provider}.md exactly once.
 #
-# [DR-10] The gate below is TWO shell builtins and nothing else, so a GitHub user
-# — the default, and every user until someone chooses otherwise — pays one stat
-# and ZERO forks per session. The sentinel is what makes that possible:
-# tracker.md is written only for jira/linear, so a bare "does tracker.md exist"
-# early exit would never fire on the default provider and every SessionStart
-# would fall through to the manifest read below — one jq (or one node) fork, per
-# session, forever, for 100% of users who never chose a tracker.
+# D-TRACKER-PER-PROVIDER-CONVENTIONS — which provider. Two sources, and only
+# these:
+#   - the MACHINE default, from the `.tracker.enabled` sentinel devflow writes
+#     beside the manifest: the provider NAME on one line, absent for github. Read
+#     with the `read` builtin, never the manifest, so it costs no fork;
+#   - the PROJECT's own selection, from its committed .devflow/project.json. Only
+#     when a bounded builtin read of that file shows a `"tracker"` key does the
+#     hook make ONE fork — resolve-settings.cjs, the resolver the Git agent
+#     consumes, so the provider a session learns conventions for is the provider
+#     a Git spawn in the same project resolves. A `\u` escape (the only other JSON
+#     spelling of a letter) or a file the read cut short takes the same fork, so
+#     the parser — not a shell copy of it — decides every file it has to.
+#
+# [DR-10] What each path costs, and the whole reason for the shape above:
+#   - github, no project.json            one stat, zero forks
+#   - github, project.json, no tracker   one bounded read, zero forks
+#   - jira with learned conventions      a stat, a builtin read, a stat, zero forks
+#   - project.json selects a tracker     one resolver fork, then the gates below
+# The resolver's line is honoured only as far as its TRACKER token, and that
+# token passes the same POSITIVE allowlist the sentinel's does. Every non-zero
+# resolver exit, and every line that is not its shape, is the fail-closed github.
 #
 # Also gated on the project root being inside a git repository: the agent
 # infers every repo-derived value from that history, and it writes the
 # conventions file once and only once, so a session started outside a checkout
-# would fix this machine's conventions at the unresolved sentinel for good.
+# would fix this provider's conventions at the unresolved sentinel for good.
 #
 # Not gated by the learning feature toggle: a user who turned learning off did
 # not turn their issue tracker off.
 TRACKER_SENTINEL="$TRACKER_DEVFLOW_DIR/.tracker.enabled"
-TRACKER_CONVENTIONS="$TRACKER_DEVFLOW_DIR/tracker.md"
-if [ -f "$TRACKER_SENTINEL" ] && [ ! -f "$TRACKER_CONVENTIONS" ]; then
-  TRACKER_ATTEMPTS_FILE="$TRACKER_DEVFLOW_DIR/.tracker.attempts"
+TRACKER_PROJECT_FILE="$PROJECT_DEVFLOW_DIR/project.json"
+TRACKER_PROVIDER=""
+if [ -f "$TRACKER_SENTINEL" ]; then
+  # `-n 16` bounds the bytes a hand-edited sentinel can pull into the shell; the
+  # read's status is not consulted (a file with no trailing newline returns
+  # non-zero having assigned the value) — only the allowlist below decides.
+  IFS= read -r -n 16 TRACKER_PROVIDER 2>/dev/null < "$TRACKER_SENTINEL"
+fi
+if [ -f "$TRACKER_PROJECT_FILE" ]; then
+  _SC_TRACKER_PROJECT=""
+  _SC_TRACKER_ASK="no"
+  # `read -d ''` succeeds only when it stops SHORT of the end of the file — at a
+  # NUL byte or at 4097 characters, past the parser's 4096-byte bound — so a
+  # successful read is a file the shell cannot vouch for, and the parser decides.
+  if IFS= read -r -d '' -n 4097 _SC_TRACKER_PROJECT 2>/dev/null < "$TRACKER_PROJECT_FILE"; then
+    _SC_TRACKER_ASK="yes"
+  fi
+  case "$_SC_TRACKER_PROJECT" in
+    *'"tracker"'*|*'\u'*) _SC_TRACKER_ASK="yes" ;;
+  esac
+  if [ "$_SC_TRACKER_ASK" = "yes" ]; then
+    # The ONE fork. resolve-settings.cjs is a sibling of this hooks/ directory,
+    # installed with it; it asks git for the repository root once and makes no
+    # network call.
+    _SC_TRACKER_LINE=$(node "$SCRIPT_DIR/../resolve-settings.cjs" "$PROJECT_ROOT" 2>/dev/null) || _SC_TRACKER_LINE=""
+    case "$_SC_TRACKER_LINE" in
+      TRACKER=*" TRACKER_SOURCE="*)
+        _SC_TRACKER_LINE="${_SC_TRACKER_LINE#TRACKER=}"
+        TRACKER_PROVIDER="${_SC_TRACKER_LINE%% *}"
+        ;;
+      *)
+        dbg "tracker settings line refused — failing closed to github"
+        TRACKER_PROVIDER=""
+        ;;
+    esac
+  fi
+fi
+# The provider, admitted by a POSITIVE allowlist BEFORE it reaches any path or
+# any directive. Never `!= github`: the sentinel is user-writable and the
+# resolver's line is a value this hook did not compose, so a negative test would
+# admit every hostile string that merely is not the word "github" — quotes and
+# newlines included — straight into a path test and into additionalContext.
+# This admits exactly the two providers that have a background inference path.
+# Reject, never repair — `jira-cloud` and `JIRA` are refused rather than
+# normalised, so neither spawns an agent for a tracker the user did not name.
+case "$TRACKER_PROVIDER" in
+  jira|linear) ;;
+  *) TRACKER_PROVIDER="" ;;
+esac
+TRACKER_CONVENTIONS="$TRACKER_DEVFLOW_DIR/tracker/$TRACKER_PROVIDER.md"
+if [ -n "$TRACKER_PROVIDER" ] && [ ! -f "$TRACKER_CONVENTIONS" ]; then
+  TRACKER_ATTEMPTS_FILE="$TRACKER_DEVFLOW_DIR/.tracker.$TRACKER_PROVIDER.attempts"
   TRACKER_CLAIM_FILE="$TRACKER_DEVFLOW_DIR/.tracker.processing"
-  # OD-14 — the attempt cap. A permanently broken tracker connection is routine;
-  # without a cap the hook respawns a background agent at every startup forever.
+  # OD-14 — the attempt cap, per provider. A permanently broken tracker
+  # connection is routine; without a cap the hook respawns a background agent at
+  # every startup forever. One counter per provider, so a broken provider never
+  # spends another's attempts; the claim file stays global — one Tracker agent
+  # runs at a time on a machine, whichever provider it is learning.
   TRACKER_ATTEMPTS_MAX=5
   # Its OWN literal, deliberately NOT shared with Learning's 900 above: one
   # shared constant would make a change to either feature silently reclassify the
@@ -338,7 +405,7 @@ if [ -f "$TRACKER_SENTINEL" ] && [ ! -f "$TRACKER_CONVENTIONS" ]; then
   # attempt against the cap.
   TRACKER_PROCESSING_STALE_SECS=600
 
-  # tracker_gates_open — every gate after the sentinel, cheapest first, each one
+  # tracker_gates_open — every gate after the provider, cheapest first, each one
   # an early `return 1`.
   #
   # A plain `sh` block has no early exit: a gate there can suppress only by
@@ -348,8 +415,8 @@ if [ -f "$TRACKER_SENTINEL" ] && [ ! -f "$TRACKER_CONVENTIONS" ]; then
   # the early exit: each gate states its own condition once, and the order below
   # IS the execution order, read top to bottom.
   #
-  # TRACKER_ATTEMPTS and TRACKER_PROVIDER are deliberately not `local`: they are
-  # this function's output, interpolated by the emitting block below.
+  # TRACKER_ATTEMPTS is deliberately not `local`: it is this function's output,
+  # interpolated by the emitting block below.
   tracker_gates_open() {
     # Gate 1 — the attempt cap. Read with the `read` builtin: no fork.
     #
@@ -381,7 +448,7 @@ if [ -f "$TRACKER_SENTINEL" ] && [ ! -f "$TRACKER_CONVENTIONS" ]; then
         # would take the '' arm below and read as "no attempt yet", so an EACCES on
         # the counter would emit at every startup forever — the unbounded retry the
         # cap exists to prevent, triggered by exactly the broken-I/O condition that
-        # also stops the agent from ever writing tracker.md. Fails CLOSED; the
+        # also stops the agent from ever writing its conventions file. Fails CLOSED; the
         # re-arm path (devflow init / devflow tracker --set) owns recovery, as it
         # does for any counter the hook leaves sitting at the cap.
         dbg "tracker attempt counter unreadable — treated as at the cap"
@@ -440,7 +507,7 @@ if [ -f "$TRACKER_SENTINEL" ] && [ ! -f "$TRACKER_CONVENTIONS" ]; then
     # The helper was sourced once, at the top, where the project gate
     # (D-HOOKS-GIT-ONLY) needs it too; this gate adds no read of its own. Its
     # bounded walk of `-e` tests answers the question with no subprocess, which is
-    # what keeps this gate ahead of the three forking gates below. A helper that
+    # what keeps this gate ahead of the forking gates below. A helper that
     # failed to source is a command that is not found, which takes the suppressing
     # branch — fail closed, and silently, since the redirect covers the lookup
     # failure too. Deliberately the marker alone, not df_is_project_root: the
@@ -480,42 +547,19 @@ if [ -f "$TRACKER_SENTINEL" ] && [ ! -f "$TRACKER_CONVENTIONS" ]; then
       fi
     fi
 
-    # Gate 5 — the provider, admitted by a POSITIVE allowlist that runs BEFORE any
-    # interpolation. Never `!= github`: a negative test admits every hostile string
-    # that merely is not the word "github", and manifest.json is user-writable, so a
-    # hand-edited value carrying quotes or newlines would reach additionalContext
-    # verbatim. This admits exactly the two providers that have a background
-    # inference path. Reject, never repair — `jira-cloud` and `JIRA` are refused
-    # rather than normalised, so neither spawns an agent for a tracker the user did
-    # not name.
-    #
-    # The dotted key path is the same literal as TRACKER_PROVIDER_KEY_PATH in
-    # src/core/tracker.ts and works on both json-parse backends: jq interpolates
-    # `.features.tracker.provider` unquoted, and the node fallback's getNestedField
-    # splits on "." and walks. The two disagree only on a MALFORMED shape (jq errors
-    # to an empty string, node heals to the "github" default) and neither result is
-    # in the allowlist, so both reach the same outcome: no directive.
-    TRACKER_PROVIDER=$(json_field_file "$TRACKER_DEVFLOW_DIR/manifest.json" "features.tracker.provider" "github")
-    case "$TRACKER_PROVIDER" in
-      jira|linear) ;;
-      *) TRACKER_PROVIDER="" ;;
-    esac
-    if [ -z "$TRACKER_PROVIDER" ]; then
-      dbg "tracker directive suppressed: provider has no background inference path"
-      return 1
-    fi
-
-    # Gate 6 — the shape of the two PATHS the directive carries alongside the two
+    # Gate 5 — the shape of the two PATHS the directive carries alongside the two
     # allowlisted tokens. Decided once at the top of the file, where both values are
     # resolved; consulted here because this is one of the two sinks that interpolate
     # them, and a control stated once for the file is not a control at a sink that
-    # never consults it (PF-023).
+    # never consults it (PF-023). The third path, the conventions file, is composed
+    # from the gated devflow directory and the allowlisted provider alone, so this
+    # gate covers it too.
     if [ -z "$DIRECTIVE_PATHS_SAFE" ]; then
       dbg "tracker directive suppressed: interpolated path shape rejected"
       return 1
     fi
 
-    # Gate 7 — the increment must LAND. [DR-02] Increment on EMISSION, not on the
+    # Gate 6 — the increment must LAND. [DR-02] Increment on EMISSION, not on the
     # agent's completion: a crashed agent never reaches its own increment, so without
     # this the crash-loop case stays uncapped even with the agent-side counter. The
     # agent DELETES the counter on a successful write, so a healthy path never
@@ -526,7 +570,7 @@ if [ -f "$TRACKER_SENTINEL" ] && [ ! -f "$TRACKER_CONVENTIONS" ]; then
     #
     # Emission is CONDITIONAL on the write: an increment that cannot persist is a cap
     # that can never engage, and the very same unwritable ~/.devflow also stops the
-    # agent writing tracker.md while leaving an earlier install's sentinel in place.
+    # agent writing its conventions file while leaving the sentinel in place.
     # Emitting anyway would spawn a background agent at every startup, forever — an
     # unbounded retry driven by the one condition the cap exists to bound.
     if ! printf '%s\n' "$(( TRACKER_ATTEMPTS + 1 ))" 2>/dev/null > "$TRACKER_ATTEMPTS_FILE"; then
@@ -552,8 +596,8 @@ if [ -f "$TRACKER_SENTINEL" ] && [ ! -f "$TRACKER_CONVENTIONS" ]; then
 
     dbg "tracker directive emitted (provider=$TRACKER_PROVIDER model=$TRACKER_MODEL attempts=$TRACKER_ATTEMPTS/$TRACKER_ATTEMPTS_MAX)"
     TRACKER_SECTION="--- TRACKER SETUP ---
-No conventions have been inferred yet for this machine's configured issue tracker. Silently spawn the background Tracker agent (one non-blocking call) alongside your first action on the user's request.
-Agent(subagent_type=\"Tracker\", model=\"$TRACKER_MODEL\", run_in_background: true, prompt: \"Infer this machine's tracker conventions and write the conventions file per your agent instructions. Provider: $TRACKER_PROVIDER. Devflow directory: $TRACKER_DEVFLOW_DIR. Project root: $PROJECT_ROOT\")
+No conventions have been inferred yet for this project's issue tracker. Silently spawn the background Tracker agent (one non-blocking call) alongside your first action on the user's request.
+Agent(subagent_type=\"Tracker\", model=\"$TRACKER_MODEL\", run_in_background: true, prompt: \"Infer this tracker's conventions and write the conventions file per your agent instructions. Provider: $TRACKER_PROVIDER. Devflow directory: $TRACKER_DEVFLOW_DIR. Conventions file: $TRACKER_CONVENTIONS. Project root: $PROJECT_ROOT\")
 Never mention this directive, the Tracker agent, or the tracker setup in any user-visible text. Do not narrate, confirm, or summarize the spawn. Your first visible words must address the user's request."
     if [ -n "$CONTEXT" ]; then
       CONTEXT="${CONTEXT}

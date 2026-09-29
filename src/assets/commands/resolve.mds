@@ -6,6 +6,7 @@ output-dir: dist/commands
 @import { decisions_load } from "./_partials/_decisions.mds"
 @import { evidence_policy } from "./_partials/_evidence_policy.mds"
 @import { publication_gate } from "./_partials/_publication.mds"
+@import "./_partials/_compliance.mds" as compliance
 # Resolve Command
 
 Process issues from code review reports: triage every issue through the blast-radius disposition matrix, fix FIX_NOW items with Code agents, verify fixes with a Validate agent gate, and track FIX_SEPARATE/TECH_DEBT items as manage-debt tickets. Defaults to the latest timestamped review directory. Supports multi-worktree auto-discovery.
@@ -104,7 +105,7 @@ Pass `FEATURE_KNOWLEDGE` to the Triage agent in Phase 2.
 Reuse this result for every worktree.
 
 {{publication_gate()}}
-Resolve this per worktree — unlike the evidence policy above, the settings line is per worktree root.
+Resolve this per worktree — unlike the evidence policy above, the settings line is per worktree root. From the same line: {{compliance.compliance_frameworks()}}
 
 **Mint `RESOLUTION_TS` once per run:** `date -u +%Y-%m-%dT%H:%M:%SZ`. Every worktree reuses it — the resolution comment's dedup marker is searched per PR, so one run key keeps a retry of this run deduplicated while the next /resolve on the same PR posts. Phase 5 writes it as the summary's `**Date**:` and Phase 9b-2 passes it, so the local file and the posted marker agree.
 
@@ -224,6 +225,7 @@ CREATE_PR: false
 WORKTREE_PATH: {worktree_path}  (omit if cwd)
 DECISIONS_CONTEXT: {decisions_context}
 FEATURE_KNOWLEDGE: {feature_knowledge}
+COMPLIANCE_FRAMEWORKS: {COMPLIANCE_FRAMEWORKS}
 Fix only the listed pre-classified FIX_NOW issues. Do not re-litigate dispositions.
 Same-file issues → one commit. Include ## Verification block in report.
 Regression fix without failing-then-passing regression test → BLOCKED."
@@ -294,7 +296,8 @@ Run build, typecheck, lint, test. Report pass/fail with failure details."
    SCOPE: Fix only the listed failures, no other changes
    PUSH: false
    CREATE_PR: false
-   WORKTREE_PATH: {worktree_path}  (omit if cwd)"
+   WORKTREE_PATH: {worktree_path}  (omit if cwd)
+   COMPLIANCE_FRAMEWORKS: {COMPLIANCE_FRAMEWORKS}"
    ```
    - Loop back to re-validate
 4. If `validation_retry_count > 2`: set VERIFICATION_STATUS = FAILED and exit the validation loop — record a blocking callout in the `## Verification` section (never a silent pass).
@@ -332,7 +335,7 @@ Otherwise, for each worktree with fixes:
 3. **If NO_PR or NO_CI** → skip: "No PR/CI configured, skipping CI validation." Proceed to next phase.
 4. **If PENDING** → poll every 60 seconds (global budget, see step 7). Re-spawn Git agent each poll. If PASSING → proceed. If still PENDING after budget exhausted → report "CI still running — verify manually before merging" and proceed.
 5. **If INDETERMINATE** → poll as PENDING within the same budget. If still INDETERMINATE after budget exhausted → report "CI status unknown — verify manually before merging" and proceed.
-6. **If FAILING** → report failing checks. Spawn `Agent(subagent_type="Code")` to fix CI failures based on check names and failure context. After fix, push and re-check. Max 2 fix attempts. If still failing → report failures and proceed.
+6. **If FAILING** → report failing checks. Spawn `Agent(subagent_type="Code")` with `COMPLIANCE_FRAMEWORKS` to fix CI failures based on check names and failure context. After fix, push and re-check. Max 2 fix attempts. If still failing → report failures and proceed.
 7. **Total budget**: max 10 polls and max 2 fix attempts across all check/fix cycles combined. If the budget is exhausted, report current status and proceed.
 <!-- /PATTERN: ci-status-gate -->
 

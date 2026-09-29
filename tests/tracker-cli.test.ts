@@ -3,9 +3,16 @@
  *
  * Covers:
  *   - parseTrackerId "Commander parse pin" (error names every valid ID)
- *   - readTrackerProvenance / formatTrackerProvenance (the --status surface)
- *   - the D-F re-arm, driven as a subprocess against a seeded temp HOME
- *   - the [DR-22] / [DR-10] / P3a-S15 call-site assertions for this command
+ *   - readTrackerProvenance / formatTrackerProvenance / formatTrackerStatus (the
+ *     --status surface), over the per-provider conventions file
+ *     (D-TRACKER-PER-PROVIDER-CONVENTIONS)
+ *   - the D-F re-arm and the `Effective:` line, driven as a subprocess against a
+ *     seeded temp HOME
+ *   - `--set` writing only the manifest, the counters and the sentinel
+ *     (D-TRACKER-CONVERGE-SET), driven as a subprocess
+ *   - TP-39: a legacy tracker.md migrated by the real migration is what --status
+ *     then reports, and a re-run moves nothing
+ *   - the [DR-22] / [DR-10] call-site assertions for this command
  *
  * Init-seed tracker seeding coverage (resolveSeedFeatures, applyCliToggles,
  * resolveResetGatedInputs) lives in tests/init-seed.test.ts — tracker seeding
@@ -24,11 +31,21 @@ import { requireBuiltCli } from './helpers.js';
 import {
   readTrackerProvenance,
   formatTrackerProvenance,
+  formatTrackerStatus,
 } from '../src/cli/commands/tracker.js';
-import { TRACKER_PROVIDER_IDS, parseTrackerId } from '../src/core/tracker.js';
+import {
+  TRACKER_PROVIDER_IDS,
+  parseTrackerId,
+  trackerAttemptsPath,
+  trackerConventionsPath,
+} from '../src/core/tracker.js';
+import { runMigrations } from '../src/core/migrations.js';
 
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const TRACKER_CLI_SOURCE = path.join(REPO_ROOT, 'src', 'cli', 'commands', 'tracker.ts');
+
+/** One CLI spawn: node start-up plus the command, under a loaded suite. */
+const CLI_SPAWN_TIMEOUT_MS = 60_000;
 
 // ── Commander parse pin: --set with an unknown ID ──────────────────────────────
 
@@ -53,32 +70,35 @@ describe('parseTrackerId (Commander parse pin)', () => {
 
 // ── --status provenance surface ────────────────────────────────────────────────
 
-describe('tracker.md provenance (--status)', () => {
+describe('conventions provenance (--status)', () => {
   let devflowDir: string;
 
   beforeEach(async () => {
     // PF-060: mkdtemp root; never the developer's real ~/.devflow.
     devflowDir = await fs.mkdtemp(path.join(os.tmpdir(), 'devflow-tracker-cli-'));
+    await fs.mkdir(path.join(devflowDir, 'tracker'));
   });
 
   afterEach(async () => {
     await fs.rm(devflowDir, { recursive: true, force: true });
   });
 
-  it('reports absent when no tracker.md exists', async () => {
-    const provenance = await readTrackerProvenance(devflowDir);
+  const jiraFile = (): string => trackerConventionsPath(devflowDir, 'jira');
+
+  it('reports absent when the provider has no conventions file', async () => {
+    const provenance = await readTrackerProvenance(devflowDir, 'jira');
     expect(provenance.kind).toBe('absent');
     expect(formatTrackerProvenance(provenance)).toContain('not present');
   });
 
-  it('reads provider and inferred-from out of the frontmatter', async () => {
+  it('reads the named provider\'s file, and only that one', async () => {
     await fs.writeFile(
-      path.join(devflowDir, 'tracker.md'),
+      jiraFile(),
       '---\nprovider: jira\ninferred-from: /Users/dev/proj at 2026-09-16T00:00:00Z\n---\n\n## Issue Types\n',
       'utf-8',
     );
 
-    const provenance = await readTrackerProvenance(devflowDir);
+    const provenance = await readTrackerProvenance(devflowDir, 'jira');
 
     expect(provenance.kind).toBe('present');
     if (provenance.kind !== 'present') return;
@@ -87,12 +107,15 @@ describe('tracker.md provenance (--status)', () => {
     const rendered = formatTrackerProvenance(provenance);
     expect(rendered).toContain('jira');
     expect(rendered).toContain('/Users/dev/proj');
+
+    // Another provider's conventions are another file.
+    expect((await readTrackerProvenance(devflowDir, 'linear')).kind).toBe('absent');
   });
 
   it('reports a present file whose frontmatter is unreadable without inventing values', async () => {
-    await fs.writeFile(path.join(devflowDir, 'tracker.md'), 'no frontmatter here\n', 'utf-8');
+    await fs.writeFile(jiraFile(), 'no frontmatter here\n', 'utf-8');
 
-    const provenance = await readTrackerProvenance(devflowDir);
+    const provenance = await readTrackerProvenance(devflowDir, 'jira');
 
     expect(provenance.kind).toBe('present');
     if (provenance.kind !== 'present') return;
@@ -102,29 +125,28 @@ describe('tracker.md provenance (--status)', () => {
   });
 
   it('sanitises hostile frontmatter values before they reach the terminal', async () => {
-    // tracker.md is hand-editable and machine-wide, so its content is
-    // third-party input at every sink — including a status line.
+    // The file is hand-editable and machine-wide, so its content is third-party
+    // input at every sink — including a status line.
     await fs.writeFile(
-      path.join(devflowDir, 'tracker.md'),
-      `---\nprovider: [31mjira\ninferred-from: ${'x'.repeat(400)}\n---\n`,
+      jiraFile(),
+      `---\nprovider: \x1b[31mjira\x07\ninferred-from: ${'x'.repeat(400)}\n---\n`,
       'utf-8',
     );
 
-    const provenance = await readTrackerProvenance(devflowDir);
+    const provenance = await readTrackerProvenance(devflowDir, 'jira');
     expect(provenance.kind).toBe('present');
     const rendered = formatTrackerProvenance(provenance);
-    expect(rendered).not.toContain('');
-    expect(rendered).not.toContain('');
+    expect(rendered).not.toContain('\x1b');
+    expect(rendered).not.toContain('\x07');
     expect(rendered.length).toBeLessThan(200);
   });
 
-  it('bounds the READ, not just the line scan, on an oversized tracker.md', async () => {
-    const trackerMd = path.join(devflowDir, 'tracker.md');
+  it('bounds the READ, not just the line scan, on an oversized conventions file', async () => {
     // A key pushed past the byte bound by one very long line is still inside the
     // 40-line scan, so only a bounded READ can keep it out.
-    await fs.writeFile(trackerMd, `---\n${'x'.repeat(9000)}\nprovider: jira\n---\n`, 'utf-8');
+    await fs.writeFile(jiraFile(), `---\n${'x'.repeat(9000)}\nprovider: jira\n---\n`, 'utf-8');
 
-    const beyond = await readTrackerProvenance(devflowDir);
+    const beyond = await readTrackerProvenance(devflowDir, 'jira');
 
     expect(beyond.kind).toBe('present');
     if (beyond.kind !== 'present') return;
@@ -132,30 +154,113 @@ describe('tracker.md provenance (--status)', () => {
 
     // Non-vacuity: the identical shape inside the bound IS read, so the absence
     // above is the bound and not a parser that stopped reading frontmatter.
-    await fs.writeFile(trackerMd, `---\n${'x'.repeat(10)}\nprovider: jira\n---\n`, 'utf-8');
-    const within = await readTrackerProvenance(devflowDir);
+    await fs.writeFile(jiraFile(), `---\n${'x'.repeat(10)}\nprovider: jira\n---\n`, 'utf-8');
+    const within = await readTrackerProvenance(devflowDir, 'jira');
     expect(within.kind).toBe('present');
     if (within.kind !== 'present') return;
     expect(within.provider).toBe('jira');
   });
 
   it('never throws when the path is a directory rather than a file', async () => {
-    await fs.mkdir(path.join(devflowDir, 'tracker.md'));
-    const provenance = await readTrackerProvenance(devflowDir);
+    await fs.mkdir(jiraFile());
+    const provenance = await readTrackerProvenance(devflowDir, 'jira');
     // A directory is not a readable conventions file — reported, never thrown.
-    expect(['absent', 'present']).toContain(provenance.kind);
+    expect(provenance.kind).toBe('absent');
   });
 });
 
-// ── The D-F re-arm, end to end ───────────────────────────────────
-//
-// Decision D-F: the attempt cap is re-armed by `devflow init` AND by both
-// `devflow tracker` subcommands. `--status` is the command a capped user
-// reaches for to find out why nothing is being learned, so it is the command
-// that has to hand back another five tries. Driven as a subprocess because the
-// Commander `.action()` body is not unit-reachable.
+// ── The --status note (pure) ──────────────────────────────────────────────────
 
-describe('devflow tracker --status re-arms the attempt counter (D-F)', () => {
+describe('formatTrackerStatus', () => {
+  const base = {
+    machine: 'github' as const,
+    conventions: { kind: 'none' } as const,
+    mechanics: { kind: 'installed', count: 47 } as const,
+    inference: 're-armed (5 attempts available)',
+  };
+
+  it('prints no Effective line when no repository layer selects the tracker', () => {
+    const note = formatTrackerStatus({ ...base, selection: null });
+    expect(note).not.toContain('Effective:');
+    expect(note.split('\n').map(l => l.slice(0, 13))).toEqual([
+      'Provider:    ', 'Conventions: ', 'File:        ', 'Mechanics:   ', 'Inference:   ',
+    ]);
+  });
+
+  it('prints `Effective: jira (project)` second when project.json selects it', () => {
+    const note = formatTrackerStatus({
+      ...base,
+      selection: { provider: 'jira', source: 'project' },
+      conventions: { kind: 'learned', file: '/h/.devflow/tracker/jira.md', provenance: { kind: 'absent' } },
+    });
+    const lines = note.split('\n');
+    expect(lines[1]).toMatch(/^Effective:\s+\S*jira\S* \(project\)$/);
+    expect(lines).toHaveLength(6);
+    expect(lines[3]).toBe('File:        /h/.devflow/tracker/jira.md');
+  });
+
+  it('names no conventions file for github, which learns none (main printed the same five labels)', () => {
+    const lines = formatTrackerStatus({ ...base, selection: null }).split('\n');
+    expect(lines[1]).toBe('Conventions: none (GitHub needs no learned conventions)');
+    expect(lines[2]).toBe('File:        none');
+  });
+
+  it('a learned provider names its file and what the file reports', () => {
+    const lines = formatTrackerStatus({
+      ...base,
+      machine: 'linear',
+      selection: null,
+      conventions: {
+        kind: 'learned',
+        file: '/h/.devflow/tracker/linear.md',
+        provenance: { kind: 'present', provider: 'linear' },
+      },
+    }).split('\n');
+    expect(lines[1]).toBe('Conventions: present — provider: linear');
+    expect(lines[2]).toBe('File:        /h/.devflow/tracker/linear.md');
+  });
+});
+
+// ── Subprocess helpers ─────────────────────────────────────────────────────────
+
+function manifestBody(provider: string): string {
+  return JSON.stringify({
+    version: '2.0.0',
+    scope: 'user',
+    installedAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+    plugins: ['devflow-core-skills'],
+    features: {
+      ambient: false,
+      memory: false,
+      learning: false,
+      knowledge: false,
+      hud: false,
+      rules: false,
+      proxy: false,
+      tracker: { provider },
+    },
+  }, null, 2);
+}
+
+function runCli(cli: string, tmpHome: string, args: string[], cwd: string = os.tmpdir()) {
+  return spawnSync('node', [cli, 'tracker', ...args], {
+    cwd,
+    encoding: 'utf-8',
+    timeout: CLI_SPAWN_TIMEOUT_MS,
+    env: {
+      ...process.env,
+      HOME: tmpHome,
+      FORCE_COLOR: '0',
+      NO_COLOR: '1',
+      CI: '1',
+    },
+  });
+}
+
+// ── --status, driven for real ──────────────────────────────────────────────────
+
+describe('devflow tracker --status', () => {
   let cli: string;
   let tmpHome: string;
   let devflowDir: string;
@@ -166,125 +271,113 @@ describe('devflow tracker --status re-arms the attempt counter (D-F)', () => {
     tmpHome = await fs.mkdtemp(path.join(os.tmpdir(), 'devflow-tracker-status-'));
     devflowDir = path.join(tmpHome, '.devflow');
     await fs.mkdir(devflowDir, { recursive: true });
-    await fs.writeFile(
-      path.join(devflowDir, 'manifest.json'),
-      JSON.stringify({
-        version: '2.0.0',
-        scope: 'user',
-        installedAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
-        plugins: ['devflow-core-skills'],
-        features: {
-          ambient: false,
-          memory: false,
-          learning: false,
-          knowledge: false,
-          hud: false,
-          rules: false,
-          proxy: false,
-          tracker: { provider: 'jira' },
-        },
-      }, null, 2),
-      'utf-8',
-    );
   });
 
   afterEach(async () => {
     await fs.rm(tmpHome, { recursive: true, force: true });
   });
 
-  it('removes a counter sitting at the cap while leaving the selection alone', async () => {
-    const attempts = path.join(devflowDir, '.tracker.attempts');
-    await fs.writeFile(attempts, '5\n', 'utf-8');
+  it('re-arms every provider\'s counter while leaving the selection alone (D-F)', async () => {
+    await fs.writeFile(path.join(devflowDir, 'manifest.json'), manifestBody('jira'), 'utf-8');
+    for (const provider of TRACKER_PROVIDER_IDS) {
+      await fs.writeFile(trackerAttemptsPath(devflowDir, provider), '5\n', 'utf-8');
+    }
     // PF-018: the counter must exist before the run, or its absence afterwards
     // is the state the temp dir started in and proves nothing.
-    await expect(fs.readFile(attempts, 'utf-8')).resolves.toBe('5\n');
+    await expect(fs.readFile(trackerAttemptsPath(devflowDir, 'jira'), 'utf-8')).resolves.toBe('5\n');
 
-    const result = spawnSync('node', [cli, 'tracker', '--status'], {
-      encoding: 'utf-8',
-      timeout: 60000,
-      env: {
-        ...process.env,
-        HOME: tmpHome,
-        FORCE_COLOR: '0',
-        NO_COLOR: '1',
-        CI: '1',
-      },
-    });
+    const result = runCli(cli, tmpHome, ['--status']);
 
     expect(result.status, `tracker --status failed:\n${result.stderr}`).toBe(0);
-    expect(result.stdout + result.stderr).toContain('jira');
-
+    const out = result.stdout + result.stderr;
+    expect(out).toContain('jira');
     // The write is disclosed in the report the user asked for: a --status that
     // re-arms silently is a machine-state change with no receipt.
-    expect(result.stdout + result.stderr).toMatch(/Inference:\s+re-armed \(5 attempts available\)/);
+    expect(out).toMatch(/Inference:\s+re-armed \(5 attempts available\)/);
+    // Outside a repository no layer selects anything: no Effective line, and the
+    // conventions reported are the machine provider's.
+    expect(out).not.toContain('Effective:');
+    expect(out).toContain(trackerConventionsPath(devflowDir, 'jira'));
 
-    // The counter is gone: the next session start gets another five tries.
-    await expect(fs.access(attempts)).rejects.toThrow();
-
-    // Re-arming is the ONLY write --status makes; the selection is untouched.
+    for (const provider of TRACKER_PROVIDER_IDS) {
+      await expect(fs.access(trackerAttemptsPath(devflowDir, provider))).rejects.toThrow();
+    }
     const manifest = JSON.parse(
       await fs.readFile(path.join(devflowDir, 'manifest.json'), 'utf-8'),
     ) as { features: { tracker: { provider: string } } };
     expect(manifest.features.tracker.provider).toBe('jira');
-  });
+  }, CLI_SPAWN_TIMEOUT_MS);
+
+  it('on github with no repository layer, names no conventions file — none exists to learn', async () => {
+    await fs.writeFile(path.join(devflowDir, 'manifest.json'), manifestBody('github'), 'utf-8');
+
+    const result = runCli(cli, tmpHome, ['--status']);
+
+    expect(result.status, `tracker --status failed:\n${result.stderr}`).toBe(0);
+    const out = result.stdout + result.stderr;
+    expect(out).toMatch(/Provider:\s+github \(default\)/);
+    expect(out).not.toContain('Effective:');
+    expect(out).toMatch(/Conventions:\s+none \(GitHub needs no learned conventions\)/);
+    expect(out).toMatch(/File:\s+none/);
+    expect(out, 'a github conventions file is never written, so it is never named').not.toContain(
+      trackerConventionsPath(devflowDir, 'github'),
+    );
+    expect(out).toMatch(/Inference:\s+re-armed \(5 attempts available\)/);
+  }, CLI_SPAWN_TIMEOUT_MS);
+
+  it('names the repository\'s own provider on an Effective line, and its conventions (TP-37)', async () => {
+    await fs.writeFile(path.join(devflowDir, 'manifest.json'), manifestBody('github'), 'utf-8');
+    const repo = await fs.mkdtemp(path.join(os.tmpdir(), 'devflow-tracker-status-repo-'));
+    try {
+      expect(spawnSync('git', ['init', '-q', repo]).status).toBe(0);
+      await fs.mkdir(path.join(repo, '.devflow'));
+      await fs.writeFile(
+        path.join(repo, '.devflow', 'project.json'),
+        '{"version":1,"tracker":{"provider":"linear"}}\n',
+        'utf-8',
+      );
+
+      const result = runCli(cli, tmpHome, ['--status'], repo);
+
+      expect(result.status, `tracker --status failed:\n${result.stderr}`).toBe(0);
+      const out = result.stdout + result.stderr;
+      expect(out).toMatch(/Provider:\s+github \(default\)/);
+      expect(out).toMatch(/Effective:\s+linear \(project\)/);
+      expect(out, 'the conventions a session here learns are linear\'s').toContain(
+        trackerConventionsPath(devflowDir, 'linear'),
+      );
+    } finally {
+      await fs.rm(repo, { recursive: true, force: true });
+    }
+  }, CLI_SPAWN_TIMEOUT_MS);
+
+  it('TP-39: reports the conventions the migration moved, and a re-run moves nothing', async () => {
+    await fs.writeFile(path.join(devflowDir, 'manifest.json'), manifestBody('jira'), 'utf-8');
+    const body = '---\nprovider: jira\ninferred-from: /legacy @ 2026-01-01T00:00:00Z\n---\n\n## Project\nkey: ACME\n';
+    await fs.writeFile(path.join(devflowDir, 'tracker.md'), body, 'utf-8');
+
+    const first = await runMigrations({ devflowDir }, []);
+    expect(first.failures).toEqual([]);
+    expect(first.newlyApplied).toContain('tracker-conventions-per-provider-v1');
+    await expect(fs.readFile(trackerConventionsPath(devflowDir, 'jira'), 'utf-8')).resolves.toBe(body);
+
+    const result = runCli(cli, tmpHome, ['--status']);
+    expect(result.status, `tracker --status failed:\n${result.stderr}`).toBe(0);
+    expect(result.stdout + result.stderr).toMatch(/Conventions:\s+present — provider: jira — inferred from: \/legacy/);
+
+    // A re-run is a no-op: the id is applied, and nothing is moved again.
+    const second = await runMigrations({ devflowDir }, []);
+    expect(second.newlyApplied).toEqual([]);
+    await expect(fs.readFile(trackerConventionsPath(devflowDir, 'jira'), 'utf-8')).resolves.toBe(body);
+  }, CLI_SPAWN_TIMEOUT_MS);
 });
 
-// ── `devflow tracker --set`, end to end ───────────────────────────────────────
-//
-// The Set branch drives four owners in one order — rename → persist → re-arm →
-// sentinel — and the ordering is the whole contract. Driven as a subprocess for
-// the same reason as the --status arm above: the Commander `.action()` body is
-// not unit-reachable, and the resolver unit tests at the top of this file end at
-// `nextState`, so every file the branch touches is otherwise unexercised.
-//
-// Each arm asserts the WHOLE end-state of the devflow dir (PF-015): a per-step
-// boolean cannot see a half-converged directory, which is exactly the shape a
-// dropped owner leaves behind.
+// ── --set, driven for real ─────────────────────────────────────────────────────
 
-describe('devflow tracker --set converges every tracker artifact', () => {
+describe('devflow tracker --set writes the manifest, the counters and the sentinel', () => {
   let cli: string;
   let tmpHome: string;
   let devflowDir: string;
-
-  /** Seed a manifest whose tracker selection is `provider`. */
-  async function seedManifest(provider: string): Promise<void> {
-    await fs.writeFile(
-      path.join(devflowDir, 'manifest.json'),
-      JSON.stringify({
-        version: '2.0.0',
-        scope: 'user',
-        installedAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
-        plugins: ['devflow-core-skills'],
-        features: {
-          ambient: false,
-          memory: false,
-          learning: false,
-          knowledge: false,
-          hud: false,
-          rules: false,
-          proxy: false,
-          tracker: { provider },
-        },
-      }, null, 2),
-      'utf-8',
-    );
-  }
-
-  function runSet(provider: string) {
-    return spawnSync('node', [cli, 'tracker', '--set', provider], {
-      encoding: 'utf-8',
-      timeout: 60000,
-      env: {
-        ...process.env,
-        HOME: tmpHome,
-        FORCE_COLOR: '0',
-        NO_COLOR: '1',
-        CI: '1',
-      },
-    });
-  }
 
   /** The persisted selection, read back from disk. */
   async function persistedProvider(): Promise<string> {
@@ -300,96 +393,71 @@ describe('devflow tracker --set converges every tracker artifact', () => {
     tmpHome = await fs.mkdtemp(path.join(os.tmpdir(), 'devflow-tracker-set-'));
     devflowDir = path.join(tmpHome, '.devflow');
     await fs.mkdir(devflowDir, { recursive: true });
-    // --set converges the reference subtree into devflow:git, and refuses when
-    // that skill is absent rather than creating an invisible husk under a skill
-    // nothing installed. Seed it so these arms exercise the converging path.
-    const gitSkill = path.join(tmpHome, '.claude', 'skills', 'devflow:git');
-    await fs.mkdir(gitSkill, { recursive: true });
-    await fs.writeFile(path.join(gitSkill, 'SKILL.md'), '# git\n', 'utf-8');
   });
 
   afterEach(async () => {
     await fs.rm(tmpHome, { recursive: true, force: true });
   });
 
-  it('jira → github: conventions moved aside, counter re-armed, sentinel removed', async () => {
-    await seedManifest('jira');
-    const conventions = path.join(devflowDir, 'tracker.md');
-    const backup = path.join(devflowDir, 'tracker.md.jira.bak');
-    const attempts = path.join(devflowDir, '.tracker.attempts');
+  it('jira → github: counters re-armed, sentinel removed, conventions left where they are', async () => {
+    await fs.writeFile(path.join(devflowDir, 'manifest.json'), manifestBody('jira'), 'utf-8');
+    const conventions = trackerConventionsPath(devflowDir, 'jira');
     const sentinel = path.join(devflowDir, '.tracker.enabled');
     const seededConventions = '---\nprovider: jira\ninferred-from: seed\n---\n\n## Project\nsite: example\n';
+    await fs.mkdir(path.dirname(conventions), { recursive: true });
     await fs.writeFile(conventions, seededConventions, 'utf-8');
-    await fs.writeFile(attempts, '5\n', 'utf-8');
-    await fs.writeFile(sentinel, '', 'utf-8');
+    await fs.writeFile(trackerAttemptsPath(devflowDir, 'jira'), '5\n', 'utf-8');
+    await fs.writeFile(sentinel, 'jira\n', 'utf-8');
 
-    // PF-018: every artifact this run must change has to EXIST first, or its
-    // absence afterwards is the state the temp dir started in.
-    await expect(fs.readFile(conventions, 'utf-8')).resolves.toBe(seededConventions);
-    await expect(fs.readFile(attempts, 'utf-8')).resolves.toBe('5\n');
+    // PF-018: every artifact this run must change has to EXIST first.
     await expect(fs.access(sentinel)).resolves.toBeUndefined();
-    await expect(fs.access(backup)).rejects.toThrow();
 
-    const result = runSet('github');
+    const result = runCli(cli, tmpHome, ['--set', 'github']);
     expect(result.status, `tracker --set github failed:\n${result.stderr}`).toBe(0);
 
     expect(await persistedProvider()).toBe('github');
-    // The stale conventions survive under the previous provider's name — the
-    // rename never destroys the user's inferred site and key (OD-15).
-    await expect(fs.readFile(backup, 'utf-8')).resolves.toBe(seededConventions);
-    await expect(fs.access(conventions)).rejects.toThrow();
+    // D-TRACKER-PER-PROVIDER-CONVENTIONS: a provider change moves nothing aside —
+    // jira's conventions stay correct for every repository that uses jira.
+    await expect(fs.readFile(conventions, 'utf-8')).resolves.toBe(seededConventions);
+    await expect(fs.access(path.join(devflowDir, 'tracker.md.jira.bak'))).rejects.toThrow();
     // [DR-22] the cap is handed back; [DR-10] github removes the sentinel, so
     // the next SessionStart forks nothing.
-    await expect(fs.access(attempts)).rejects.toThrow();
+    await expect(fs.access(trackerAttemptsPath(devflowDir, 'jira'))).rejects.toThrow();
     await expect(fs.access(sentinel)).rejects.toThrow();
-    // The move is disclosed: a file that changed name with no receipt is a
-    // change the user cannot audit.
-    expect(result.stdout + result.stderr).toContain('tracker.md.jira.bak');
-  });
+  }, CLI_SPAWN_TIMEOUT_MS);
 
-  it('github → linear: the sentinel is written, which is the other direction [DR-10]', async () => {
-    await seedManifest('github');
+  it('github → linear: the sentinel names the provider, which is the other direction [DR-10]', async () => {
+    await fs.writeFile(path.join(devflowDir, 'manifest.json'), manifestBody('github'), 'utf-8');
     const sentinel = path.join(devflowDir, '.tracker.enabled');
-    const attempts = path.join(devflowDir, '.tracker.attempts');
-    await fs.writeFile(attempts, '5\n', 'utf-8');
     await expect(fs.access(sentinel)).rejects.toThrow();
 
-    const result = runSet('linear');
+    const result = runCli(cli, tmpHome, ['--set', 'linear']);
     expect(result.status, `tracker --set linear failed:\n${result.stderr}`).toBe(0);
 
     expect(await persistedProvider()).toBe('linear');
-    // Zero-byte presence sentinel — the hook's only gate reads its existence.
-    await expect(fs.stat(sentinel)).resolves.toMatchObject({ size: 0 });
-    await expect(fs.access(attempts)).rejects.toThrow();
-    // No conventions file was seeded, so the rename had nothing to move and
-    // must not have invented a backup.
-    await expect(fs.access(path.join(devflowDir, 'tracker.md.github.bak'))).rejects.toThrow();
-  });
+    // The hook reads the name with a builtin: one line, nothing else.
+    await expect(fs.readFile(sentinel, 'utf-8')).resolves.toBe('linear\n');
+    // --set installs nothing: every provider's mechanics and the agent come from init.
+    await expect(fs.access(path.join(tmpHome, '.claude')), '--set wrote under ~/.claude').rejects.toThrow();
+  }, CLI_SPAWN_TIMEOUT_MS);
 
   it('a rejected ID exits non-zero and leaves every artifact untouched', async () => {
-    await seedManifest('linear');
+    await fs.writeFile(path.join(devflowDir, 'manifest.json'), manifestBody('linear'), 'utf-8');
     const sentinel = path.join(devflowDir, '.tracker.enabled');
-    await fs.writeFile(sentinel, '', 'utf-8');
+    await fs.writeFile(sentinel, 'linear\n', 'utf-8');
 
-    const result = runSet('jira-cloud');
+    const result = runCli(cli, tmpHome, ['--set', 'jira-cloud']);
     expect(result.status, 'a near-miss ID must not exit 0').toBe(1);
     expect(result.stdout + result.stderr).toContain('jira-cloud');
 
     // Parse-at-the-boundary: the rejection happens before any I/O, so the
     // selection and the sentinel it converged are exactly as they were.
     expect(await persistedProvider()).toBe('linear');
-    await expect(fs.access(sentinel)).resolves.toBeUndefined();
-  });
+    await expect(fs.readFile(sentinel, 'utf-8')).resolves.toBe('linear\n');
+  }, CLI_SPAWN_TIMEOUT_MS);
 });
 
-// ── Call-site assertions for this command ─────────────────────────────────────
-//
-// [DR-22] The attempt counter has exactly ONE owner (rearmTrackerInference);
-// each of this command's two branches calls it exactly once (D-F). [DR-10] the
-// sentinel has one owner and one call site. P3a-S15's rename transition is
-// reachable from here too. These are source-level assertions because the
-// Commander `.action()` body is not unit-reachable; they go red if someone
-// inlines an `fs.rm`/`fs.writeFile` here or duplicates a call.
+// ── Call sites ─────────────────────────────────────────────────────────────────
 
 describe('devflow tracker call sites', () => {
   it('re-arms once from the --status branch and once through the --set adapter [DR-22, D-F]', async () => {
@@ -408,7 +476,7 @@ describe('devflow tracker call sites', () => {
     const statusBranch = source.slice(statusStart, source.indexOf('// ── Set ─', statusStart));
     expect((adapter.match(/rearmTrackerInference[,(]/g) ?? []).length).toBe(1);
     expect((statusBranch.match(/rearmTrackerInference\(/g) ?? []).length).toBe(1);
-    expect(source).not.toMatch(/\.tracker\.attempts/);
+    expect(source).not.toMatch(/\.tracker\.[a-z]*\.?attempts/);
   });
 
   it('discloses the re-arm in the --status help text and in the note it prints [D-F]', async () => {
@@ -420,11 +488,9 @@ describe('devflow tracker call sites', () => {
     expect(statusOption, 'the --status option declaration must be findable').not.toBeNull();
     expect(statusOption?.[1] ?? '').toMatch(/re-arm/i);
 
-    const statusStart = source.indexOf('if (options.status) {');
-    const setStart = source.indexOf('// ── Set ─');
-    expect(statusStart, 'the --status branch guard must be findable').toBeGreaterThan(0);
-    expect(setStart, 'the Set separator must follow the --status branch').toBeGreaterThan(statusStart);
-    expect(source.slice(statusStart, setStart)).toContain('Inference:');
+    const formatStart = source.indexOf('export function formatTrackerStatus(');
+    expect(formatStart, 'the --status note renderer must be findable').toBeGreaterThan(0);
+    expect(source.slice(formatStart)).toContain('Inference:');
   });
 
   it('converges the sentinel through applyTrackerSentinel, bound exactly once [DR-10]', async () => {
@@ -438,13 +504,7 @@ describe('devflow tracker call sites', () => {
     expect(source).not.toMatch(/\.tracker\.enabled/);
   });
 
-  it('invokes the provider-change rename transition, bound exactly once', async () => {
-    const source = await fs.readFile(TRACKER_CLI_SOURCE, 'utf-8');
-    expect((source.match(/renameStaleConventions: renameStaleTrackerConventions/g) ?? []).length).toBe(1);
-    expect((source.match(/io\.renameStaleConventions\(/g) ?? []).length).toBe(1);
-  });
-
-  it('reaches every file-lifecycle owner through the adapter, never inline', async () => {
+  it('reaches every file-lifecycle owner through the adapter, and no retired one at all', async () => {
     // The --set orchestrator takes its I/O as an injected seam so the step
     // ORDER is assertable (D-TRACKER-CONVERGE-SET). A call that went direct
     // would bypass the recorder and be invisible to the order test.
@@ -454,15 +514,12 @@ describe('devflow tracker call sites', () => {
       source.indexOf('interface TrackerOptions'),
     );
     expect(body.length, 'the orchestrator body must be locatable').toBeGreaterThan(0);
-    for (const direct of [
-      'renameStaleTrackerConventions(',
-      'rearmTrackerInference(',
-      'applyTrackerSentinel(',
-      'syncManifestFeature(',
-      'convergeTrackerArtifacts(',
-      'overlayInstalledReferences(',
-    ]) {
+    for (const direct of ['rearmTrackerInference(', 'applyTrackerSentinel(', 'syncManifestFeature(']) {
       expect(body, `runTrackerSet must reach ${direct} through io, not directly`).not.toContain(direct);
+    }
+    // --set no longer converges the reference tree, the agent or the conventions.
+    for (const retired of ['overlayInstalledReferences', 'convergeTrackerArtifacts', 'renameStaleTrackerConventions']) {
+      expect(source, `tracker.ts must not reach ${retired}`).not.toContain(retired);
     }
   });
 

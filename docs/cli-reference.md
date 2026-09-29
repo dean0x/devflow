@@ -25,7 +25,7 @@ Use `--recommended` or `--advanced` flags for non-interactive setup.
 | `--hud` / `--no-hud` | Enable/disable HUD status line (default: on) |
 | `--proxy` / `--no-proxy` | Enable/disable external model routing — GPT models via OpenAI/Codex subscription (default: off; Advanced-only, requires Codex auth) |
 | `--compliance <list>` / `--no-compliance` | Enable compliance with comma-separated framework IDs (e.g., `gdpr,hipaa`) / disable preserving frameworks (default: off; bypasses the wizard entirely when passed) |
-| `--tracker <id>` | Issue tracker provider: `github`, `jira`, or `linear` (default: `github`). Suppresses the tracker wizard question on both init paths. There is no `--no-tracker` — `--tracker github` is the off switch |
+| `--tracker <id>` | The machine's default issue tracker provider: `github`, `jira`, or `linear` (default: `github`); a repository's `.devflow/project.json` can select its own. Suppresses the tracker wizard question on both init paths. There is no `--no-tracker` — `--tracker github` is the default |
 | `--hud-only` | Install only the HUD (no plugins, hooks, or extras) |
 | `--recommended` | Apply recommended defaults after plugin selection (skip advanced prompts) |
 | `--advanced` | Show all configuration prompts |
@@ -113,19 +113,21 @@ npx devflow-kit knowledge --status          # Show current status
 
 ## Compliance
 
-Manage regulatory compliance framework reference files installed in the compliance skill.
+Manage this machine's compliance frameworks: the always-on compliance rule and the frameworks stamped into the compliance skill.
 
 ```bash
 npx devflow-kit compliance --status                    # Show frameworks, skill/rule state and the repo's evidence policy
-npx devflow-kit compliance --enable                    # Enable compliance feature (install skill + rule)
-npx devflow-kit compliance --disable                   # Disable compliance feature
+npx devflow-kit compliance --enable                    # Enable compliance on this machine (installs the stamped rule)
+npx devflow-kit compliance --disable                   # Disable it (removes the rule; frameworks remembered)
 npx devflow-kit compliance --set gdpr,hipaa            # Set active frameworks (comma-separated IDs)
 npx devflow-kit compliance --set ""                    # Zero frameworks: generic controls only (stays enabled)
 ```
 
 Available frameworks: `gdpr`, `hipaa`, `pci-dss`, `soc2`, `iso-27001`, `sox`
 
-The compliance skill and compliance rule are feature-owned (not plugin-scoped); installed when compliance is enabled (`devflow compliance --enable` or `devflow init --compliance <list>`); opt-in, off by default. Active frameworks are determined by which `references/{id}.md` files are present in the installed skill directory. SKILL.md and the rule are **dynamically composed** at install time from per-framework fragments — only the selected frameworks appear in the installed artifacts. `--status` shows `[shadowed]` when a skill shadow is present; `[shadowed, composition skipped — per-framework sections absent]` when the shadow has no composition tokens (C1 passthrough).
+The compliance skill and compliance rule are feature-owned (not plugin-scoped); compliance is off by default. **Every install carries the skill and all six framework references**, whatever this machine selects, because a repository can declare its own frameworks. The machine switch owns only two things: the **rule** — installed and stamped with your frameworks when compliance is on, absent when it is off — and the **stamp** on the skill's SKILL.md (your frameworks, or a neutral stamp when off). SKILL.md and the rule are **dynamically composed** at install time from per-framework fragments. `--status` shows `[shadowed]` when a skill shadow is present; `[shadowed, composition skipped — per-framework sections absent]` when the shadow has no composition tokens (C1 passthrough), and names any framework id in the manifest that the registry does not know.
+
+**The review lens is per repository.** `/code-review` and `/plan` run the compliance review from the local settings line's `COMPLIANCE` field: this machine's frameworks plus the ids in the repository's `.devflow/project.json` `compliance` list — `generic` controls only when either declares compliance with no ids, and no lens at all when neither declares it. The reviewing agent loads `references/{id}.md` for those ids and no others, so a repository declaring `hipaa` gets a HIPAA review on a machine with compliance off, and that machine's rule is never installed or changed by it. `/implement` and `/resolve` pass the same ids to their Code agents.
 
 **Evidence policy.** Enabled compliance — at any framework count, zero included — makes `required` the floor of the evidence policy on this machine: a repository with no committed evidence setting (`evidence` in `.devflow/project.json`, or a legacy `.devflow/policy.json`) resolves `required`, and a committed `standard` is raised to it. A repository is held to the same floor when its `.devflow/project.json` — on the default branch, its tracking branch or the working tree, never HEAD alone — carries a `compliance` key, whatever its value. `--status` also shows the policy resolved for the current directory's repository, as `Evidence policy: <required|standard> (source: <file|worktree|default|invalid|error>)` plus any warnings (`remote-unavailable`, `invalid-file`, `raised-by-compliance`, `pr-changes-policy`). When the repository's `.devflow/project.json` declares `compliance`, `--status` adds `Repository: <ids> (.devflow/project.json)` under `Frameworks:` — `generic controls only` for an empty or malformed list — and while a legacy `.devflow/policy.json` is still present it adds a `Migration:` hint to move that policy into `project.json` as `evidence`. `--enable` and `--set` print a `.devflow/project.json` to commit on the default branch — `{"version":1,"evidence":"required","compliance":[…]}` with this machine's frameworks — so the policy applies to everyone working in the repository. The CLI never writes that file: the team owns it.
 
@@ -134,21 +136,21 @@ The compliance skill and compliance rule are feature-owned (not plugin-scoped); 
 Select which issue tracker devflow's traceability speaks to. `github` is the default and needs no configuration.
 
 ```bash
-npx devflow-kit tracker --status            # Show the provider and conventions; re-arms inference
-npx devflow-kit tracker --set jira          # Select the issue tracker provider
-npx devflow-kit tracker --set github        # Turn the rest off (there is no --no-tracker)
+npx devflow-kit tracker --status            # Show the provider, this repo's effective one and conventions; re-arms inference
+npx devflow-kit tracker --set jira          # Set the machine's default provider
+npx devflow-kit tracker --set github        # Back to the default (there is no --no-tracker)
 npx devflow-kit tracker                     # No flag: print usage and the valid provider IDs
 ```
 
 Valid provider IDs: `github`, `jira`, `linear`. The ID is matched **exactly** — `JIRA`, `jira ` and `jira-cloud` are rejected with an error rather than repaired, so a typo never silently selects a tracker you did not name. `--status` wins when both flags are passed.
 
-The selection is stored in `~/.devflow/manifest.json` under `features.tracker.provider` and is **machine-wide**, not per-project. A malformed value in that file is self-healed to `github` silently on read.
+The machine default is stored in `~/.devflow/manifest.json` under `features.tracker.provider`. A malformed value in that file is self-healed to `github` silently on read.
 
-The selection also decides what gets installed. `github` installs 21 generated reference files under the `devflow:git` skill; `jira` and `linear` install 32, the tool-call contract `references/tracker/_mcp.md` among them, plus the Tracker agent that reads it. Eight of the files are the PR-host mechanics under `references/pr/`, installed whatever the provider, because pull requests stay on GitHub under every tracker. `devflow tracker --set <id>` converges all of that in a fixed order — references, stale-conventions rename, manifest, Tracker agent file, attempt counter, presence sentinel — and it converges **both ways**, so `--set github` removes what `jira` or `linear` installed.
+**A repository can select its own tracker** in its committed `.devflow/project.json` — `{"tracker":{"provider":"jira","site":"https://acme.atlassian.net","key":"ACME"}}` — and devflow follows it there automatically, on every teammate's machine. The provider resolves in this order: the repository's `project.json`, then the machine default, then `github`. Your personal `.devflow/config.json` `tracker` key can only narrow that, to `github` or to the same provider; one that names a different provider makes the Git agent report `TRACEABILITY: DEGRADED (tracker configuration mismatch (repository override))` and make no tracker call. The Git agent learns all of this from the one local settings line (`resolve-settings.cjs`), never by reading the files itself.
 
-Two branches exit 1 and change nothing you can see: `devflow:git` is not installed (there is nowhere for the mechanics to land — run `devflow init --tracker <id>` instead), or the reference overlay failed. In both the manifest, the sentinel and the conventions file are left exactly as they were, so the previous provider stays whole. The overlay is atomic per unit, so a failure reports the units that failed rather than claiming nothing moved at all.
+**Every install carries every provider.** All 47 generated reference files are installed under the `devflow:git` skill — every provider's mechanics, the tool-call contract `references/tracker/_mcp.md` and the PR-host mechanics — plus the Tracker agent. `devflow tracker --set <id>` therefore installs nothing: it writes the manifest, re-arms the attempt counters and writes the `~/.devflow/.tracker.enabled` sentinel (the provider's name; removed for `github`), in that order.
 
-`devflow tracker --status` prints the provider, where the selection came from, whether `~/.devflow/tracker.md` has been learned yet, and a `Mechanics:` line — `installed (N file(s))`, `MISSING — run devflow init`, or `unreadable (<errno>)`. The three are different facts with different remedies: nothing installed is fixed by an install, a permissions problem is not.
+`devflow tracker --status` prints the machine provider; an `Effective:` line when the current directory's repository selects one — `Effective:   jira (project)`; whether the effective provider's conventions file has been learned, and its path — `none` on GitHub, which learns no conventions; and a `Mechanics:` line — `installed (N file(s))`, `MISSING — run devflow init`, or `unreadable (<errno>)`. The three are different facts with different remedies: nothing installed is fixed by an install, a permissions problem is not.
 
 ### When the wizard asks
 
@@ -166,15 +168,15 @@ Two branches exit 1 and change nothing you can see: `devflow:git` is not install
 
 ### Learned conventions
 
-On a non-`github` provider, a background agent runs once at a session start and writes `~/.devflow/tracker.md` — the project key, issue types, required fields, workflow transitions, assignee policy and reference rendering it could establish, with a `# UNRESOLVED:` line for anything it could not. It is written **once or not at all**, mode `0600`, and it is never overwritten: to re-learn, delete it.
+When a session's provider — the repository's, else the machine's — is not `github`, a background agent runs once at a session start and writes `~/.devflow/tracker/{provider}.md` — the project key, issue types, required fields, workflow transitions, assignee policy and reference rendering it could establish, with a `# UNRESOLVED:` line for anything it could not. It is written **once or not at all**, mode `0600`, and it is never overwritten: to re-learn, delete it. Each provider has its own file, learned from the **first repository that uses that provider**; a second Jira repository with a different project key reads the first one's file, and the key and site in its own `project.json` take precedence over it.
 
-`~/.devflow/tracker.md` is **per-developer, not team-shared.** It lives in your home directory, not the repository, so every teammate on the same Jira or Linear repo gets their own — and it is treated as **your content** on `devflow uninstall`: an artifacts-only sweep keeps it. If its frontmatter `provider:` no longer matches the resolved provider, devflow reports `TRACEABILITY: DEGRADED (tracker configuration mismatch)` and makes no tracker call, rather than acting on stale conventions. Changing the provider moves the old file aside as `tracker.md.{previous}.bak`.
+The conventions files are **per-developer, not team-shared.** They live in your home directory, not the repository, so every teammate gets their own — and they are treated as **your content** on `devflow uninstall`: an artifacts-only sweep keeps them. If a file's frontmatter `provider:` does not name its own provider, devflow reports `TRACEABILITY: DEGRADED (tracker configuration mismatch (conventions file))` and makes no tracker call, rather than acting on stale conventions.
 
-A single repository can override the provider with a `tracker` key in its `.devflow/config.json`. That file is local-only, so the **per-repo override is also per-developer, not team-shared** — each teammate sets it themselves, or relies on the repository's own issue-reference grammar, which resolves the provider without any configuration at all.
+Upgrading moves an existing `~/.devflow/tracker.md` to `~/.devflow/tracker/{provider}.md`, by the provider its frontmatter names, once; a file whose frontmatter names no provider stays where it is, with a warning. Existing `tracker.md.{previous}.bak` files are left alone as your content.
 
 ### The inference attempt cap
 
-Background inference is capped at **5** attempts per machine, counted in `~/.devflow/.tracker.attempts`, so a permanently unreachable tracker cannot respawn a background agent at every session start forever. Every `devflow init` run and both `devflow tracker` subcommands reset the counter and give inference another five tries:
+Background inference is capped at **5** attempts per provider, counted in `~/.devflow/.tracker.{provider}.attempts`, so a permanently unreachable tracker cannot respawn a background agent at every session start forever — and one broken provider cannot use up another's attempts. Every `devflow init` run and both `devflow tracker` subcommands reset every provider's counter and give inference another five tries:
 
 | Command | Re-arms? |
 |---|---|
@@ -182,7 +184,7 @@ Background inference is capped at **5** attempts per machine, counted in `~/.dev
 | `devflow tracker --set <id>` | Yes |
 | `devflow tracker --status` | Yes — asking why nothing is being learned is what hands back another five tries |
 
-Deleting `~/.devflow/.tracker.attempts` by hand has the same effect.
+Deleting a `~/.devflow/.tracker.{provider}.attempts` file by hand has the same effect for that provider.
 
 ### Known Unknowns — Linear
 
@@ -243,6 +245,8 @@ npx devflow-kit skills list                      # List all skills: shadow state
 npx devflow-kit skills unshadow software-design  # Remove override
 ```
 
+A shadow is seeded from the installed copy when there is one, else from the shipped source. The `compliance` skill is the exception: it is always seeded from the shipped source, because its installed copy is already stamped with this machine's frameworks — a shadow seeded from that would freeze the stamp, and a later `devflow compliance --set` could never change it.
+
 ## Rule Shadowing
 
 Override any Devflow rule with your own version. Shadowed rules survive `devflow init` — your version is installed instead of Devflow's.
@@ -259,7 +263,7 @@ The `compliance` skill and rule are dynamically composed at install time from pe
 | Token | Resolved to |
 |-------|------------|
 | `${DEVFLOW_COMPLIANCE_SCOPE}` | Framework clause (`under GDPR, SOC 2`, or `under active compliance frameworks` at zero) appended to the opening body sentence |
-| `${DEVFLOW_COMPLIANCE_ACTIVE}` | Active Frameworks section body listing the selected frameworks |
+| `${DEVFLOW_COMPLIANCE_ACTIVE}` | Active Frameworks section body: this machine's frameworks (a neutral stamp when compliance is off), then the rule that the ids a run is given — never the files present — decide which references load |
 | `${DEVFLOW_COMPLIANCE_MAPPING}` | Full Framework Mapping table (header + one row per selected framework) |
 | `${DEVFLOW_COMPLIANCE_CHECKLIST}` | Per-framework checklist items appended to the Checklist section |
 | `${DEVFLOW_COMPLIANCE_REFERENCES}` | Per-framework `references/{id}.md` rows in the Extended References table |

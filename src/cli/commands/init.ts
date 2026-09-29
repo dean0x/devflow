@@ -64,12 +64,10 @@ import {
   applyTrackerSentinel,
   parseTrackerId,
   rearmTrackerInference,
-  renameStaleTrackerConventions,
   DEFAULT_TRACKER_PROVIDER,
   type TrackerFeatureState,
   type TrackerProvider,
   type TrackerResult,
-  type TrackerTransition,
 } from '../../core/tracker.js';
 import {
   formatTrackerSummary,
@@ -338,27 +336,20 @@ export interface InitLifecycleMessage {
  *
  * Mirrors the DI shape the wizard steps already use (`buildClackTrackerPrompts`):
  * the real adapter is built by `buildTrackerLifecycleIO`, tests substitute a
- * recorder. Each member is one of the four single-owner operations — the manifest
- * writer plus the three tracker file-lifecycle owners in src/core/tracker.ts.
+ * recorder. Each member is one single-owner operation — the manifest writer, the
+ * Tracker agent file, and the two tracker file-lifecycle owners in
+ * src/core/tracker.ts.
  */
 export interface TrackerLifecycleIO {
   writeManifest(devflowDir: string, data: ManifestData): Promise<void>;
-  renameStaleConventions(
-    devflowDir: string,
-    previous: TrackerProvider | undefined,
-    resolved: TrackerProvider,
-  ): Promise<TrackerTransition>;
   /**
-   * The fourth owner: the Tracker agent file, converged against the persisted
-   * provider. The generated reference subtree is the fifth artifact that moves
-   * with a provider change, and it is NOT here — `installViaFileCopy` already
-   * converged it, inside the install, before the manifest was written. That
-   * asymmetry is deliberate and is stated on
-   * {@link persistManifestThenConvergeTracker}.
+   * The Tracker agent file, installed whatever the provider
+   * (D-INSTALL-ALL-PROVIDERS). The generated reference subtree is NOT here —
+   * `installViaFileCopy` already converged it, inside the install, before the
+   * manifest was written.
    */
   convergeArtifacts(
     claudeDir: string,
-    provider: TrackerProvider,
     warn: (msg: string) => void,
   ): Promise<ConvergeTrackerArtifactsResult>;
   rearmInference(devflowDir: string): Promise<TrackerResult<void>>;
@@ -369,9 +360,7 @@ export interface TrackerLifecycleIO {
 export function buildTrackerLifecycleIO(): TrackerLifecycleIO {
   return {
     writeManifest,
-    renameStaleConventions: renameStaleTrackerConventions,
-    convergeArtifacts: (claudeDir, provider, warn) =>
-      convergeTrackerArtifacts({ claudeDir, provider, warn }),
+    convergeArtifacts: (claudeDir, warn) => convergeTrackerArtifacts({ claudeDir, warn }),
     rearmInference: rearmTrackerInference,
     applySentinel: applyTrackerSentinel,
   };
@@ -392,27 +381,20 @@ export interface ManifestTrackerOutcome {
  * Persist the installation manifest, then converge the tracker artifacts against
  * the provider that was actually persisted.
  *
- * D-TRACKER-CONVERGE: the manifest write and the three tracker file-lifecycle
- * owners are ONE unit because their relative order is the invariant, not an
+ * D-TRACKER-CONVERGE: the manifest write and the tracker file-lifecycle owners
+ * are ONE unit because their relative order is the invariant, not an
  * implementation detail (PF-015). The manifest write is explicitly failable —
- * init must not abort on it — so converging the sentinel, the attempt counter or
- * the conventions file ahead of it leaves the artifacts disagreeing in both
- * directions: github→jira writes a sentinel for a provider the manifest never
- * records (a per-session fork cost forever), and jira→github removes the
- * sentinel, renames tracker.md to .bak and leaves the manifest on jira (silent
- * permanent degradation with no re-trigger). Writing first and gating the three
- * owners on `manifestWritten` makes the artifacts converge all-or-none, and puts
- * this call site in the same order as the sibling `devflow tracker --set`
- * (src/cli/commands/tracker.ts): rename → persist → rearm → sentinel.
+ * init must not abort on it — so converging the sentinel ahead of it leaves the
+ * two disagreeing in both directions: github→jira writes a sentinel naming a
+ * provider the manifest never records, and jira→github removes the sentinel while
+ * the manifest stays on jira. Writing first and gating the owners on
+ * `manifestWritten` makes them converge all-or-none, in the same order as the
+ * sibling `devflow tracker --set` (src/cli/commands/tracker.ts): persist → rearm →
+ * sentinel.
  *
  * The provider is read from `manifestData.features.tracker.provider` rather than
- * taken as a separate argument, so there is exactly one binding and the artifacts
- * cannot converge on a value other than the one on disk.
- *
- * `previousProvider` is the caller's REAL prior manifest value, never the
- * --reset-gated seed: under --reset the resolved provider collapses to github
- * while the prior provider is still jira/linear, and that IS a transition the
- * stale-conventions rename has to fire on.
+ * taken as a separate argument, so there is exactly one binding and the sentinel
+ * cannot name a value other than the one on disk.
  *
  * Every step reports rather than aborts (PF-009's isolation posture): a
  * feature-state change must never fail `devflow init`.
@@ -421,10 +403,9 @@ export async function persistManifestThenConvergeTracker(opts: {
   devflowDir: string;
   claudeDir: string;
   manifestData: ManifestData;
-  previousProvider: TrackerProvider | undefined;
   io: TrackerLifecycleIO;
 }): Promise<ManifestTrackerOutcome> {
-  const { devflowDir, claudeDir, manifestData, previousProvider, io } = opts;
+  const { devflowDir, claudeDir, manifestData, io } = opts;
   const provider = manifestData.features.tracker.provider;
   const messages: InitLifecycleMessage[] = [];
 
@@ -441,78 +422,34 @@ export async function persistManifestThenConvergeTracker(opts: {
     });
     messages.push({
       level: 'warn',
-      text: `Tracker selection (${provider}) was not persisted — the sentinel, attempt counter and ` +
-        `conventions file are unchanged. Re-run devflow init, or devflow tracker --set ${provider}.`,
+      text: `Tracker selection (${provider}) was not persisted — the sentinel and attempt counters ` +
+        `are unchanged. Re-run devflow init, or devflow tracker --set ${provider}.`,
     });
     return { manifestWritten: false, converged: false, agent: 'unchanged', messages };
   }
 
-  // Move a now-stale conventions file aside (the writer arm of the provider change).
-  //
-  // D-TRACKER-PARALLEL: the rename stays strictly ahead of the other two. It is
-  // the only step that reads the PREVIOUS provider and the only one that reports
-  // a transition, so keeping it first fixes the message order (the transition
-  // notice always precedes any owner warning) and keeps the sequence readable as
-  // "settle the old provider, then converge the new one". The two that follow
-  // touch disjoint files — the attempt counter and the presence sentinel —
-  // depend on nothing the other writes, and both report through TrackerResult
-  // instead of throwing (PF-014), so they run concurrently and their warnings
-  // are pushed in a fixed order regardless of which settles first.
-  const transition = await io.renameStaleConventions(devflowDir, previousProvider, provider);
-  if (transition.kind === 'renamed') {
-    messages.push({
-      level: 'info',
-      text: `Tracker provider changed — previous ${transition.previous} conventions moved to ` +
-        `${color.dim(transition.to)}`,
-    });
-  } else if (transition.kind === 'failed') {
-    messages.push({ level: 'warn', text: transition.error });
-  }
-
-  // The fourth owner — the Tracker agent file. SEQUENTIAL, and strictly before
-  // the pair below, because the sentinel's WRITE is gated on its outcome: a
-  // sentinel that advertises jira while the agent it would spawn is missing is
-  // the drifted state this whole ordering exists to prevent (design review H6 —
-  // the parallel pair stays a parallel pair, it is not flattened to make room).
+  // The Tracker agent file — installed on every machine (D-INSTALL-ALL-PROVIDERS),
+  // because a repository can select a provider the machine never did.
   const agentWarnings: string[] = [];
-  const artifacts = await io.convergeArtifacts(claudeDir, provider, (msg) => agentWarnings.push(msg));
+  const artifacts = await io.convergeArtifacts(claudeDir, (msg) => agentWarnings.push(msg));
   for (const text of agentWarnings) messages.push({ level: 'warn', text });
 
-  // C2: the sentinel converges in BOTH directions, and only the WRITE is gated.
-  //   provider ≠ github → a write, when a spawnable agent is actually there.
-  //   provider = github → a removal. ALWAYS attempted, because leaving a stale
-  //     sentinel behind costs every future session a fork for a provider the
-  //     user has left, and a failed agent removal is not a reason to keep it.
-  //
-  // The write gate reads `agentPresent`, not `converged`. `converged` answers
-  // "did THIS run copy it", and reading that alone is wrong in both directions:
-  // a re-copy that fails over an already-installed agent would disable a provider
-  // that still works, and merely SUPPRESSING the write leaves the PREVIOUS
-  // provider's sentinel in place — so a jira → linear init whose agent copy
-  // failed goes on advertising jira, which is the state the suppression exists to
-  // prevent. Not-spawnable therefore REMOVES, through the one sentinel owner in
-  // src/core/tracker.ts (D-TRACKER-OWNER), never an inline fs.rm here.
-  const advertisable = provider === DEFAULT_TRACKER_PROVIDER || artifacts.agentPresent;
-
+  // D-TRACKER-PARALLEL: the two owners touch disjoint files — the attempt
+  // counters and the sentinel — depend on nothing the other writes, and both
+  // report through TrackerResult instead of throwing (PF-014), so they run
+  // concurrently and their warnings are pushed in a fixed order regardless of
+  // which settles first.
   const [rearm, sentinel] = await Promise.all([
-    // [DR-22] The documented re-arm path: devflow init resets the attempt counter
+    // [DR-22] The documented re-arm path: devflow init resets the attempt counters
     // so a previously-capped inference gets another five tries.
     io.rearmInference(devflowDir),
-    // [DR-10] Converge the presence sentinel: written for jira/linear, removed for
-    // github. This is what keeps the GitHub SessionStart path at one stat and zero forks.
-    io.applySentinel(devflowDir, advertisable ? provider : DEFAULT_TRACKER_PROVIDER),
+    // [DR-10] Converge the sentinel onto the persisted machine provider: its name
+    // for jira/linear, removed for github. The SessionStart hook reads it with a
+    // builtin, which is what keeps the machine provider free of forks.
+    io.applySentinel(devflowDir, provider),
   ]);
   if (!rearm.ok) messages.push({ level: 'warn', text: rearm.error });
   if (!sentinel.ok) messages.push({ level: 'warn', text: sentinel.error });
-  if (!advertisable) {
-    messages.push({
-      level: 'warn',
-      text:
-        `Tracker sentinel removed — no ${provider} agent is installed, so nothing advertises a ` +
-        `provider whose agent is missing and no session will try to spawn it. ` +
-        `Re-run devflow init, or devflow tracker --set ${provider}.`,
-    });
-  }
 
   return {
     manifestWritten: true,
@@ -547,9 +484,9 @@ interface InitOptions {
   compliance?: string | false;
   /**
    * Issue tracker provider ID (github | jira | linear), parsed by parseTrackerId.
-   * string    → --tracker <id> (select this provider, suppress the wizard prompt)
+   * string    → --tracker <id> (set the machine's default provider, suppress the wizard prompt)
    * undefined → not passed; seed value used
-   * There is no --no-tracker: --tracker github is the off switch (decision D-E).
+   * There is no --no-tracker: --tracker github is the default (decision D-E).
    */
   tracker?: string;
   security?: SecurityMode;
@@ -698,7 +635,7 @@ export const initCommand = new Command('init')
   .option('--no-proxy', 'Disable external model routing')
   .option('--compliance <list>', 'Enable compliance with comma-separated framework IDs (e.g., gdpr,hipaa)')
   .option('--no-compliance', 'Disable compliance (artifacts removed; frameworks remembered for re-enable)')
-  .option('--tracker <id>', 'Issue tracker provider: github, jira, or linear')
+  .option('--tracker <id>', 'The machine\'s default issue tracker provider: github, jira, or linear')
   .option('--security <mode>', 'Security deny list location: user, managed, or none', /^(user|managed|none)$/i)
   .option('--hud-only', 'Install only the HUD (no plugins, hooks, or extras)')
   .option('--recommended', 'Apply recommended defaults after plugin selection (skip advanced prompts)')
@@ -1781,7 +1718,6 @@ export const initCommand = new Command('init')
         skillsMap,
         agentsMap,
         rulesMap,
-        trackerProvider,
         isPartialInstall: !!options.plugin,
         spinner: s,
         // Non-fatal install notices with no other channel (skipped symlinks in the
@@ -1807,14 +1743,14 @@ export const initCommand = new Command('init')
         manifest: { features: { compliance: { enabled: complianceEnabled, frameworks: complianceFrameworks }, rules: rulesEnabled } },
         warn: (msg) => p.log.warn(msg),
       });
-      // I41: emit legacy-upgrade notice when compliance is disabled AND pre-existing artifacts
-      // were found. After I09, the skill dir survives the orphan sweep (knownNames now unions
-      // FEATURE_OWNED_SKILLS), so convergeResult.removedPreexisting correctly fires for the
-      // skill path. hadComplianceRule covers the rule path (wiped by installViaFileCopy before
-      // converge probes on full installs).
+      // I41: emit legacy-upgrade notice when compliance is disabled AND a pre-existing rule
+      // was found. The skill is no signal — converge installs it on every machine
+      // (D-COMPLIANCE-INSTALL-ALWAYS) — so removedPreexisting reports the rule alone, on a
+      // partial install; hadComplianceRule covers full installs, where installViaFileCopy
+      // wipes the rules dir before converge probes it.
       if (!complianceEnabled && (convergeResult.removedPreexisting || hadComplianceRule)) {
         p.log.info(
-          'Compliance artifacts removed — if you previously had devflow-compliance installed, ' +
+          'Compliance rule removed — if you previously had devflow-compliance installed, ' +
           'run `devflow compliance --enable` to re-enable with your framework selection.',
         );
       }
@@ -2374,7 +2310,7 @@ export const initCommand = new Command('init')
 
     // Reference-overlay reporting: the overlay rewrites files inside an installed skill
     // the user may have shadowed, and reports any unit it had to leave alone (PF-015).
-    logSummaryLines(formatOverlaySummary(installReport, trackerProvider));
+    logSummaryLines(formatOverlaySummary(installReport));
 
     // Skill-scoping reporting: a deselected skill is deleted and a dormant shadow
     // is inert, and neither is distinguishable from "never installed" on disk.
@@ -2478,17 +2414,13 @@ export const initCommand = new Command('init')
       updatedAt: now,
     };
     // ── Manifest write + tracker selection lifecycle (the ONE call site) ──────
-    // persistManifestThenConvergeTracker owns the ordering invariant: the three
+    // persistManifestThenConvergeTracker owns the ordering invariant: the
     // tracker file-lifecycle owners in src/core/tracker.ts converge only against
     // a provider the manifest actually persisted (D-TRACKER-CONVERGE, PF-015).
     const trackerLifecycle = await persistManifestThenConvergeTracker({
       devflowDir,
       claudeDir,
       manifestData,
-      // The REAL manifest, not the --reset-gated seed: under --reset the resolved
-      // provider collapses to github while the prior provider is still jira/linear,
-      // and that IS a transition the stale-file rename has to fire on.
-      previousProvider: existingManifest?.features.tracker.provider,
       io: buildTrackerLifecycleIO(),
     });
     for (const msg of trackerLifecycle.messages) {

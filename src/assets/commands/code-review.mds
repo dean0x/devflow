@@ -36,12 +36,12 @@ Run a comprehensive code review of the current branch by spawning parallel revie
 3. **If only 1 reviewable worktree** (the common case): proceed as single-worktree flow — zero behavior change
 4. **If multiple reviewable worktrees:** report "Found N worktrees with reviewable branches: {list with paths and branches}" and proceed with multi-worktree flow
 
-#### Step 0b: Resolve COMPLIANCE_SKILL_INSTALLED
+#### Step 0b: Resolve the compliance lens
 
-**Produces:** COMPLIANCE_SKILL_INSTALLED
+**Produces:** COMPLIANCE_ACTIVE, COMPLIANCE_FRAMEWORKS
 
 {{compliance_gate()}}
-Reuse this result for every worktree and every downstream phase.
+Keep each worktree's values for every downstream phase of that worktree.
 
 #### Step 0b-ii: Resolve the evidence policy
 
@@ -165,7 +165,7 @@ For each reviewable worktree, call:
 ### Phase 1: Analyze Changed Files
 
 **Produces:** REVIEW_FOCUS_LIST
-**Requires:** DIFF_RANGE, COMPLIANCE_SKILL_INSTALLED (from Step 0b)
+**Requires:** DIFF_RANGE, COMPLIANCE_ACTIVE (from Step 0b)
 
 Per worktree, detect file types in diff using `DIFF_RANGE` to determine conditional reviews.
 
@@ -182,15 +182,15 @@ Per worktree, detect file types in diff using `DIFF_RANGE` to determine conditio
 | DB/migration files | database |
 | Dependency files changed | dependencies |
 | Docs or significant code | documentation |
-| COMPLIANCE_SKILL_INSTALLED AND diff touches regulated surface | compliance |
+| COMPLIANCE_ACTIVE AND diff touches regulated surface | compliance |
 
-If `COMPLIANCE_SKILL_INSTALLED` AND the diff touches regulated surface (data models, auth flows, logging/observability, payments, IaC, retention): add `compliance` to REVIEW_FOCUS_LIST for this worktree.
+If `COMPLIANCE_ACTIVE` AND the diff touches regulated surface (data models, auth flows, logging/observability, payments, IaC, retention): add `compliance` to REVIEW_FOCUS_LIST for this worktree.
 
-**Language focus presence gate.** The eight language focuses — `typescript`, `react`, `accessibility`, `ui-design`, `go`, `java`, `python`, `rust` — ship with optional plugins, so their pattern skills are installed only when the user selected that plugin. Gate them exactly as `compliance` is gated: for each language focus the table above would add, check whether `~/.claude/skills/devflow:{focus}/SKILL.md` exists (one file-existence check per candidate focus, read-only, silent). If it does not exist, do NOT add that focus to `REVIEW_FOCUS_LIST` and do NOT spawn a Review agent for it — the file-type condition alone never spawns a language focus. The eight core focuses are unconditional and are never presence-gated.
+**Language focus presence gate.** The eight language focuses — `typescript`, `react`, `accessibility`, `ui-design`, `go`, `java`, `python`, `rust` — ship with optional plugins, so their pattern skills are installed only when the user selected that plugin. Gate them by presence: for each language focus the table above would add, check whether `~/.claude/skills/devflow:{focus}/SKILL.md` exists (one file-existence check per candidate focus, read-only, silent). If it does not exist, do NOT add that focus to `REVIEW_FOCUS_LIST` and do NOT spawn a Review agent for it — the file-type condition alone never spawns a language focus. The eight core focuses are unconditional and are never presence-gated.
 
 ### Phase 1b: Load Decisions Index
 
-**Produces:** DECISIONS_CONTEXT, FEATURE_KNOWLEDGE, COMPLIANCE_SKILL_INSTALLED (carried from Step 0b)
+**Produces:** DECISIONS_CONTEXT, FEATURE_KNOWLEDGE, COMPLIANCE_FRAMEWORKS (carried from Step 0b)
 
 **Load Companion Skills** — Load via Skill tool: `devflow:quality-gates`, `devflow:software-design`. If a skill fails to load, continue without it.
 
@@ -246,6 +246,7 @@ DECISIONS_CONTEXT: {decisions_context}
 FEATURE_KNOWLEDGE: {feature_knowledge}
 PR_DESCRIPTION: <pr-description>{pr_description}</pr-description>
 PRIOR_RESOLUTIONS: <prior-resolution-summary>{prior_resolutions}</prior-resolution-summary>
+COMPLIANCE_FRAMEWORKS: {COMPLIANCE_FRAMEWORKS}  (compliance focus only)
 If PRIOR_RESOLUTIONS is not (none), follow Cross-Cycle Awareness in review.md.
 Follow devflow:apply-decisions to scan the index and Read full ADR/PF bodies on demand.
 Follow devflow:apply-feature-knowledge for FEATURE_KNOWLEDGE — feature-specific patterns and anti-patterns inform findings.
@@ -310,7 +311,7 @@ In multi-worktree mode, report results per worktree.
 │
 ├─ Phase 0: Worktree Discovery & Pre-flight
 │  ├─ Step 0a: git worktree list → filter reviewable
-│  ├─ Step 0b: Resolve COMPLIANCE_SKILL_INSTALLED
+│  ├─ Step 0b: Resolve the compliance lens
 │  ├─ Step 0c: Git agent (ensure-pr-ready) per worktree [parallel]
 │  ├─ Step 0d: Incremental detection + timestamp setup per worktree
 │  ├─ Step 0e-i: Load prior resolution-summary.md

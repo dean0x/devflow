@@ -328,7 +328,6 @@ describe('installViaFileCopy rules report', () => {
         skillsMap: new Map(),
         agentsMap: new Map(),
         rulesMap: new Map([['security', 'devflow-core-skills']]),
-        trackerProvider: 'github',
         isPartialInstall: true,
         spinner: noopSpinner,
       });
@@ -363,7 +362,6 @@ describe('installViaFileCopy rules report', () => {
         skillsMap: new Map(),
         agentsMap: new Map(),
         rulesMap: new Map([['security', 'devflow-core-skills']]),
-        trackerProvider: 'github',
         isPartialInstall: true,
         spinner: noopSpinner,
       });
@@ -395,7 +393,6 @@ describe('installViaFileCopy rules report', () => {
         skillsMap: new Map(),
         agentsMap: new Map(),
         rulesMap: new Map([['security', 'devflow-core-skills']]),
-        trackerProvider: 'github',
         isPartialInstall: true,
         spinner: noopSpinner,
       });
@@ -432,7 +429,6 @@ describe('installViaFileCopy rules report', () => {
           skillsMap: new Map(),
           agentsMap: new Map(),
           rulesMap: new Map([['orphan-rule', 'devflow-core-skills']]),
-          trackerProvider: 'github',
           isPartialInstall: true,
           spinner: noopSpinner,
         }),

@@ -21,7 +21,8 @@
  *     actually reads. Both directions, because either alone is satisfiable by an
  *     accident: a file nothing can name is dead weight installed on every user's
  *     machine (ADR-003), and an op the instruction can name with no file behind it
- *     is the `tracker mechanics unavailable` degradation shipped as the normal path.
+ *     is a reference the agent is told to load that the install does not carry —
+ *     a build defect every spawn running that op would hit.
  */
 
 import { describe, it, expect } from 'vitest';
@@ -428,8 +429,8 @@ describe('generated references: every reference is reachable from the agent (AC-
     const missing = [...reachable].filter(rel => !emitted.includes(rel));
     expect(
       missing,
-      'the agent can name file(s) the build does not emit — every spawn that runs those ops takes ' +
-      'the `tracker mechanics unavailable` degradation as its normal path:\n  ' +
+      'the agent can name file(s) the build does not emit — every spawn that runs those ops loads ' +
+      'a reference the install does not carry:\n  ' +
       missing.join('\n  '),
     ).toEqual([]);
   });
@@ -540,8 +541,8 @@ describe('generated references: every reference is reachable from the agent (AC-
     // provider. Both directions, because the forward one alone lets a stray file
     // ship unreferenced and the reverse one alone lets a listed op emit nothing —
     // and a per-file size floor, because a reference that kept its heading and
-    // lost its body reads downstream as "mechanics unavailable" while the install
-    // reports success (GAP-44).
+    // lost its body hands the agent an operation with no instructions while the
+    // install reports success (GAP-44).
     const emitted = walkFiles(path.join(REFS_DIR, PR_HOST_DESTINATION_ROOT), f => f.endsWith('.md'))
       .map(f => path.relative(REFS_DIR, f).split(path.sep).join('/'))
       .sort();

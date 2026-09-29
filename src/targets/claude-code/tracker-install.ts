@@ -1,16 +1,13 @@
 /**
  * Tracker artifact installer for the Claude Code target.
  *
- * Convergence function for the ONE artifact whose presence advertises the
- * selected tracker provider: the Tracker agent file. The generated reference
- * subtree converges too, but through {@link overlayInstalledReferences} in
- * installer.ts — that is the installer's one overlay spelling, and a mode flag
- * on this function would have made it a second (design review M2).
+ * Convergence function for the Tracker agent file. The generated reference
+ * subtree converges too, but through the installer's one overlay spelling in
+ * installer.ts — a mode flag on this function would have made it a second
+ * (design review M2).
  *
  * Applies ADR-013: I/O orchestration in src/targets/; pure helpers in src/core/.
  * Applies PF-009: warn-not-throw, so one failing artifact never aborts an install.
- * Applies PF-015: the biconditional converges in BOTH directions — selecting a
- * provider installs the agent, returning to github removes it.
  */
 import { promises as fs } from 'fs';
 import * as path from 'path';
@@ -21,16 +18,11 @@ import { mdFileName } from '../../core/orphan-sweep.js';
 // ── Types ──────────────────────────────────────────────────────────────────
 
 /** What this run left the agent file in. */
-export type TrackerAgentState = 'installed' | 'removed' | 'unchanged';
+export type TrackerAgentState = 'installed' | 'unchanged';
 
 export interface ConvergeTrackerArtifactsOptions {
   /** Path to the Claude config dir (e.g. ~/.claude). Must be absolute. */
   claudeDir: string;
-  /**
-   * The RESOLVED tracker provider id. Not trusted as a path segment: it is only
-   * ever compared, never joined — the agent's filename is a constant.
-   */
-  provider: string;
   warn: (msg: string) => void;
   /**
    * Agent source directories, most-preferred first — see agentSourceDirs(),
@@ -42,68 +34,34 @@ export interface ConvergeTrackerArtifactsOptions {
 
 export interface ConvergeTrackerArtifactsResult {
   /**
-   * True when every artifact operation this run attempted completed without
-   * error. False when any warn path was taken.
+   * True when the agent file is byte-identical to its source after this run.
+   * False when any warn path was taken.
    *
    * PF-015: converge is warn-not-throw, so callers cannot detect partial failure
-   * with a catch block. The sentinel write is gated on this field — an
-   * unconverged run must not advertise a provider whose agent is missing.
+   * with a catch block; this field is how they learn of it.
    */
   converged: boolean;
-  /**
-   * Is a spawnable copy of the Tracker agent at the target NOW — whoever put it
-   * there, and whatever this run managed to do?
-   *
-   * Distinct from {@link ConvergeTrackerArtifactsResult.converged}, and the
-   * distinction is what the presence sentinel has to be gated on. `converged`
-   * answers "did this run succeed"; a caller that reads it alone gets both
-   * directions wrong:
-   *
-   *   - a re-copy that fails over an already-installed agent (a transient
-   *     EACCES, a full disk) would disable a provider that can still be spawned;
-   *   - suppressing a sentinel WRITE leaves a previous provider's sentinel
-   *     untouched, so a jira → linear transition whose agent copy failed goes on
-   *     advertising jira. "Nothing advertises a provider whose agent is missing"
-   *     is only true if somebody removes it.
-   *
-   * False when the path could not be probed at all (a non-absolute claudeDir):
-   * a caller must not advertise on an answer this function could not establish.
-   */
-  agentPresent: boolean;
   /** What happened to `{claudeDir}/agents/devflow/tracker.md`. */
   agent: TrackerAgentState;
 }
 
 /**
- * The agent whose presence is conditional on the provider.
+ * The agent this module owns.
  *
- * It stays DECLARED in `devflow-core-skills.agents` and is filtered at install
- * time rather than being lifted into a feature-owned set: the compliance
- * precedent does not transfer, because compliance's plugin was deleted while
- * `devflow-core-skills` is a live, non-optional owner. A feature-owned set would
- * cost three new union sites and a rewrite of the pinned agent-roster floor to
- * solve a problem the agent SWEEP does not have — the sweep keys on the full
- * registry, so it never sees this file as an orphan.
+ * It stays DECLARED in `devflow-core-skills.agents`, so the agent SWEEP — which
+ * keys on the full registry — never sees this file as an orphan, and is converged
+ * here rather than by the installer's generic copy loop, which skips it.
  *
- * Exported because the filter has more than one reader and may have only one
- * authority (D-TRACKER-AGENT-OWNER): {@link convergeTrackerArtifacts} below,
- * which decides whether the file exists, and, in installer.ts, both the generic
- * agent copy loop — which has to skip the one agent it does not own — and the
- * full-install pre-clean, which has to empty the agent directory around it. A
- * second literal at any of those sites is the shape this export exists to forbid.
+ * Exported because the name has more than one reader and may have only one
+ * authority (D-TRACKER-AGENT-OWNER): {@link convergeTrackerArtifacts} below, and,
+ * in installer.ts, both the generic agent copy loop — which has to skip the one
+ * agent it does not own — and the full-install pre-clean, which has to empty the
+ * agent directory around it. A second literal at any of those sites is the shape
+ * this export exists to forbid.
  */
 export const TRACKER_AGENT_NAME = 'tracker';
 
 // ── Internals ──────────────────────────────────────────────────────────────
-
-/**
- * The provider whose mechanics need no Tracker agent.
- *
- * GitHub conventions are not inferred: the Git agent runs `gh`, whose issue
- * grammar this repo already speaks. The agent exists to infer conventions from a
- * connected tool-call server, which is a thing only the other providers have.
- */
-const AGENTLESS_PROVIDER = 'github';
 
 function agentTarget(claudeDir: string): string {
   return path.join(claudeDir, 'agents', 'devflow', mdFileName(TRACKER_AGENT_NAME));
@@ -151,49 +109,40 @@ async function copyWouldChangeNothing(source: string, target: string): Promise<b
 // ── Convergence ────────────────────────────────────────────────────────────
 
 /**
- * Converge the Tracker agent file onto the resolved provider.
+ * Converge the Tracker agent file: install it, whatever the machine's provider.
  *
- * Convergence matrix:
- *   provider !== github → copy the agent in, unless the installed file is already
- *                         byte-identical to the source. Compared rather than trusted
- *                         for existing, so a truncated or hand-edited file self-heals;
- *                         compared rather than re-copied blind, so a run that changes
- *                         nothing reports `unchanged` and the summary stays quiet
- *                         (see {@link copyWouldChangeNothing})
- *   provider === github → remove it, absent or not
+ * D-INSTALL-ALL-PROVIDERS: every install carries the agent. The provider a
+ * session learns conventions for is resolved per repository — a committed
+ * `.devflow/project.json` can select jira on a machine whose default is github —
+ * so the agent the session-start directive names must be spawnable on every
+ * machine, not only on the ones whose manifest chose a tool-call provider. It is
+ * INERT until that directive fires, which happens only for a provider with no
+ * learned conventions.
  *
- * Never throws. A caller gates on `converged`; it does not catch. The one
- * refusal that is not an I/O degradation — a claudeDir that is not absolute —
- * is reported the same way rather than thrown, because it reaches here from a
- * manifest read and an install must not die on it.
+ * Copies the agent in unless the installed file is already byte-identical to the
+ * source. Compared rather than trusted for existing, so a truncated or hand-edited
+ * file self-heals; compared rather than re-copied blind, so a run that changes
+ * nothing reports `unchanged` and the summary stays quiet
+ * (see {@link copyWouldChangeNothing}).
+ *
+ * Never throws. A caller reads `converged`; it does not catch. The one refusal
+ * that is not an I/O degradation — a claudeDir that is not absolute — is reported
+ * the same way rather than thrown, because an install must not die on it.
  */
 export async function convergeTrackerArtifacts(
   opts: ConvergeTrackerArtifactsOptions,
 ): Promise<ConvergeTrackerArtifactsResult> {
-  const { claudeDir, provider, warn } = opts;
+  const { claudeDir, warn } = opts;
 
   // Precondition, asserted in production code rather than only in tests: an
   // empty or relative claudeDir would make the target resolve somewhere
-  // unexpected, and the removal branch runs fs.rm against it.
+  // unexpected.
   if (!path.isAbsolute(claudeDir)) {
     warn(`tracker: claudeDir is not an absolute path ("${claudeDir}") — skipping convergence`);
-    return { converged: false, agentPresent: false, agent: 'unchanged' };
+    return { converged: false, agent: 'unchanged' };
   }
 
   const target = agentTarget(claudeDir);
-
-  if (provider === AGENTLESS_PROVIDER) {
-    const existed = await pathExists(target);
-    if (!existed) return { converged: true, agentPresent: false, agent: 'unchanged' };
-    try {
-      await fs.rm(target, { force: true });
-    } catch (err) {
-      warn(`tracker: failed to remove the Tracker agent (${target}) — ${String(err)}`);
-      return { converged: false, agentPresent: true, agent: 'unchanged' };
-    }
-    return { converged: true, agentPresent: false, agent: 'removed' };
-  }
-
   const dirs = opts.agentSourceDirs ?? agentSourceDirs();
   const candidates = dirs.map(dir => path.join(dir, mdFileName(TRACKER_AGENT_NAME)));
   const source = await firstExisting(candidates);
@@ -202,17 +151,14 @@ export async function convergeTrackerArtifacts(
       `tracker: agent source not found for "${TRACKER_AGENT_NAME}" (searched: ${candidates.join(', ')}) — ` +
       `run \`npm run build:mds\` if it is compiled from an .mds generator host`,
     );
-    // Probed rather than assumed: a previous run may have left a copy that is
-    // still spawnable, and that is the difference between "this run did nothing"
-    // and "there is nothing there".
-    return { converged: false, agentPresent: await pathExists(target), agent: 'unchanged' };
+    return { converged: false, agent: 'unchanged' };
   }
 
   // Already converged — nothing to write, and nothing for the summary to announce.
   // The directory is not created either: an identical file at the target means it is
   // already there (see {@link copyWouldChangeNothing}).
   if (await copyWouldChangeNothing(source, target)) {
-    return { converged: true, agentPresent: true, agent: 'unchanged' };
+    return { converged: true, agent: 'unchanged' };
   }
 
   try {
@@ -220,8 +166,8 @@ export async function convergeTrackerArtifacts(
     await fs.copyFile(source, target);
   } catch (err) {
     warn(`tracker: failed to install the Tracker agent (${target}) — ${String(err)}`);
-    return { converged: false, agentPresent: await pathExists(target), agent: 'unchanged' };
+    return { converged: false, agent: 'unchanged' };
   }
 
-  return { converged: true, agentPresent: true, agent: 'installed' };
+  return { converged: true, agent: 'installed' };
 }

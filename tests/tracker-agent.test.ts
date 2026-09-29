@@ -293,7 +293,7 @@ export function collectDevflowDirResolutions(fences: readonly string[]): string[
  */
 const COUNTER_ADVANCING_VERB =
   /\b(increment|increments|incremented|bump|bumps|bumped|advance|advances|advanced|raise|raises|raised)\b/gi;
-const COUNTER_NAMED = /(\.tracker\.attempts|attempt counter)/i;
+const COUNTER_NAMED = /(\.tracker\.(?:\$TRACKER_PROVIDER\.)?attempts|attempt counter)/i;
 const COUNTER_WINDOW_CHARS = 140;
 
 export function collectCounterIncrementSites(content: string): string[] {
@@ -426,6 +426,19 @@ const COMPOSED_FILE = [
 
 const SCRUBBER = 'redact-secrets.cjs';
 
+/**
+ * The provider token a run is spawned for. The agent binds it from its prompt
+ * before any fence runs, and the environment fence derives the conventions file
+ * and the attempt counter from it — so every executed fence runs behind this
+ * binding, exactly as the agent's own shell does. A token the agent never names
+ * (provider-scope guard), and one the hook's allowlist would never admit, so no
+ * arm here can pass by coinciding with a real provider's file.
+ */
+const PROBE_PROVIDER = 'probe';
+
+/** The environment fence as the agent runs it: behind its provider binding. */
+const BOUND_ENV = `TRACKER_PROVIDER=${PROBE_PROVIDER}\n${ENV_FENCE}`;
+
 interface Sandbox {
   /** An isolated `$HOME`. The chain writes under `$HOME/.devflow`; never the real one (PF-060). */
   home: string;
@@ -448,7 +461,7 @@ function makeSandbox(): Sandbox {
   return {
     home,
     devflowDir,
-    trackerFile: path.join(devflowDir, 'tracker.md'),
+    trackerFile: path.join(devflowDir, 'tracker', `${PROBE_PROVIDER}.md`),
     tmplog: path.join(home, 'mktemp.log'),
   };
 }
@@ -622,7 +635,7 @@ function writeChain(body: string, fence: string = WRITE_FENCE): string {
   const instantiated = body === ''
     ? fence.replace(`${COMPOSED_PLACEHOLDER}\n`, '')
     : fence.replace(COMPOSED_PLACEHOLDER, body);
-  return `${ENV_FENCE}\n${instantiated}`;
+  return `${BOUND_ENV}\n${instantiated}`;
 }
 
 /** The create-exclusive placement the scrub gate must guard. Named once. */
@@ -993,11 +1006,11 @@ describe('Tracker agent devflow-directory resolution (PF-066 defect 4)', () => {
 // ---------------------------------------------------------------------------
 
 describe('Tracker agent claim-file lifecycle (AC-3.17, EC-28)', () => {
-  it('names the claim file and the attempt counter by their shared basenames', () => {
-    // These two basenames are exported constants in src/core/tracker.ts and are
-    // read by 3a-3's hook. Three spellings of one path is the drift PF-021 names.
+  it('names the claim file and the per-provider attempt counter by their shared basenames', () => {
+    // These basenames are exported from src/core/tracker.ts and read by the
+    // session-start hook. Three spellings of one path is the drift PF-021 names.
     expect(TRACKER_TEXT).toContain('.tracker.processing');
-    expect(TRACKER_TEXT).toContain('.tracker.attempts');
+    expect(TRACKER_TEXT).toContain('.tracker.$TRACKER_PROVIDER.attempts');
   });
 
   it('states the loser branch as an OBSERVABLE outcome, not as silence', () => {
@@ -1148,7 +1161,7 @@ describe('Tracker agent claim-file lifecycle (AC-3.17, EC-28)', () => {
       ENV_FENCE,
       'the counter path must be BOUND in the one fence that resolves paths, or the variable ' +
       'every later reference uses expands to nothing and the delete lands on an empty path',
-    ).toContain('TRACKER_ATTEMPTS_FILE="$TRACKER_DEVFLOW_DIR/.tracker.attempts"');
+    ).toContain('TRACKER_ATTEMPTS_FILE="$TRACKER_DEVFLOW_DIR/.tracker.$TRACKER_PROVIDER.attempts"');
   });
 
   it('states the attempt cap in the shape the three-sided seam reads (OD-14)', () => {
@@ -1405,7 +1418,7 @@ const LOST_STATUS = 3;
 describe('Tracker agent claim primitive, executed (PF-068)', () => {
   it(`${CONCURRENT_CLAIMANTS} concurrent claimants: exactly one CLAIMED, every loser LOST and exit ${LOST_STATUS}`, async () => {
     const sandbox = makeSandbox();
-    const script = `${ENV_FENCE}\n${CLAIM_FENCE}`;
+    const script = `${BOUND_ENV}\n${CLAIM_FENCE}`;
     const runs = await Promise.all(
       Array.from({ length: CONCURRENT_CLAIMANTS }, () =>
         runShellAsync(script, sandbox, { instrument: false })),
@@ -1464,7 +1477,7 @@ describe('Tracker agent claim primitive, executed (PF-068)', () => {
     const renameClaim =
       'MARKER="$(command mktemp)"\nif mv "$MARKER" "$TRACKER_CLAIM" 2>/dev/null; then ' +
       'echo CLAIMED; else echo LOST; exit 3; fi';
-    const script = `${ENV_FENCE}\n${renameClaim}`;
+    const script = `${BOUND_ENV}\n${renameClaim}`;
     const runs = await Promise.all(
       Array.from({ length: CONCURRENT_CLAIMANTS }, () =>
         runShellAsync(script, sandbox, { instrument: false })),
@@ -1662,6 +1675,7 @@ describe('Tracker agent write chain, executed (PF-066, AC-3.15)', () => {
 
   it('refuses a path already taken and leaves the winner\'s bytes untouched (ALREADY_EXISTS)', () => {
     const sandbox = makeSandbox();
+    mkdirSync(path.dirname(sandbox.trackerFile), { recursive: true });
     writeFileSync(sandbox.trackerFile, 'the winner wrote this\n');
 
     const run = runShell(writeChain(COMPOSED_FILE), sandbox);

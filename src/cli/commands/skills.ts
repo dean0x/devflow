@@ -28,6 +28,23 @@ function getShadowDir(devflowDir: string, skillName: string): string {
 }
 
 /**
+ * The directory a new shadow of `bareName` is copied from.
+ *
+ * D-COMPLIANCE-SHADOW-SOURCE (mirrors seedRuleShadow's Tier-1 skip in rules.ts):
+ * a FEATURE_OWNED skill always seeds from the shipped SOURCE. Its installed copy
+ * is composed — every `${DEVFLOW_COMPLIANCE_*}` token already replaced with the
+ * frameworks of that moment — and a token-free shadow passes through composition
+ * byte-identical (C1), so seeding from it would freeze that stamp: a later
+ * `devflow compliance --set` could never re-stamp the skill. Every other skill
+ * seeds from its installed copy when there is one, else from source.
+ */
+export function shadowSeedDir(bareName: string, installedDir: string | null): string {
+  const sourceDir = path.join(skillsDir(), bareName);
+  if ((FEATURE_OWNED_SKILLS as readonly string[]).includes(bareName)) return sourceDir;
+  return installedDir ?? sourceDir;
+}
+
+/**
  * Check if a skill has a shadow (personal override).
  */
 export async function hasShadow(skillName: string, devflowDir?: string): Promise<boolean> {
@@ -43,13 +60,14 @@ export async function hasShadow(skillName: string, devflowDir?: string): Promise
  * names one plugin out of several that would each do (D-ALL-OWNERS).
  * FEATURE_OWNED skills have no plugin owner at all and say so, because telling
  * a user to select a plugin for `compliance` would send them looking for one
- * that does not exist.
+ * that does not exist. Compliance is installed on every machine
+ * (D-COMPLIANCE-INSTALL-ALWAYS), so its feature is the whole answer.
  */
 function describeOwners(bareName: string, owners?: readonly string[]): string {
   const declarers = owners ?? skillOwners(bareName);
   if (declarers.length === 0) {
     return (FEATURE_OWNED_SKILLS as readonly string[]).includes(bareName)
-      ? 'its feature (devflow compliance --enable)'
+      ? 'the compliance feature (every install)'
       : 'no plugin';
   }
   return declarers.join(' or ');
@@ -109,7 +127,7 @@ export const skillsCommand = new Command('skills')
       // The shadow is seeded from the shipped source instead and reported as
       // DORMANT — it exists, it is preserved by every future install, and it
       // applies to nothing until the plugin that uses it is selected.
-      const seedDir = installed ? installedSkillDir : path.join(skillsDir(), bareName);
+      const seedDir = shadowSeedDir(bareName, installed ? installedSkillDir : null);
       if (!await dirExists(seedDir)) {
         p.log.error(`No source for ${bareName} — reinstall devflow, then try again.`);
         process.exit(1);

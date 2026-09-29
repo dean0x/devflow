@@ -774,7 +774,7 @@ describe('provider-scope: _mcp.md is generated only behind its gate (AC-2.7 re-s
     expect(
       existsSync(mcp),
       `${mcp} is absent while the gate is open — run \`npm run build\`; the provider mechanics ` +
-      `name this file and would take the \`tracker mechanics unavailable\` path as normal.`,
+      `name this file, so every tool-call operation would load a contract the install does not carry.`,
     ).toBe(true);
     expect(
       generatedReferenceManifest(),

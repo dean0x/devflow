@@ -130,6 +130,12 @@ import type {
  * git.md delta was then -94 ch, and every git.md-carrying row — BUDGET_GIT_MD, the
  * three tracker rows and the PR-host row — fell again to its measurement + 80.
  *
+ * #393 (PR6 of the per-repo config epic #387) moved the Git agent's provider
+ * resolution onto the settings line and retired the mechanics-unavailable rule
+ * (ADR-028). Its git.md delta was -315 ch, and the Jira and Linear site rungs grew
+ * 28 ch each (the settings `SITE` ahead of `## Project`). Every git.md-carrying row
+ * fell again to min(previous ceiling, measurement + 80).
+ *
  * The 80 ch is general headroom, not a reservation: no line of it is spoken for,
  * and an addition still funds itself with a cut. git.md growth lands in every
  * loaded-set row, so every row carries the same 80. The ceilings remain
@@ -144,8 +150,9 @@ import type {
  * agent, #359's condensed release-evidence step, #360's evidence fixes, #362's
  * mechanism inputs, #363's update-pr-evidence op, merge-readiness evidence and
  * CI-status fix, #364's trace map, traceability exceptions and
- * associate-release op, #365's ensure-pr-ready caller-block inputs, and #376's
- * close-out (net -94 ch) — plus the 80 ch general headroom above: 44_243. The next
+ * associate-release op, #365's ensure-pr-ready caller-block inputs, #376's
+ * close-out (net -94 ch), and #393's move onto the settings line (net -315 ch) —
+ * re-measured at 43_832, plus the 80 ch general headroom above: 43_912. The next
  * content addition to git.mds must fund itself with a cut elsewhere.
  *
  * THE RULE: this ceiling is a REGRESSION ALARM, and it is RE-DERIVED ONLY DOWNWARD —
@@ -167,7 +174,7 @@ import type {
  * pattern in the same commit; that is the permitted direction for a ceiling, and the
  * manifest guard's probe still proves an INCREMENT would go red.
  */
-const BUDGET_GIT_MD = 44_243;
+const BUDGET_GIT_MD = 43_912;
 
 /**
  * Design-time derivation: the PRE-SPLIT capture of skills/git/SKILL.md, less the
@@ -204,14 +211,14 @@ const BUDGET_SKILL_MD = 6_600;
  *
  * Derived from a measured 64_914 (the worst spawn is setup-task, whose step 1c hops
  * into ensure-traceable-issue under ISSUE_REQUIRED) plus the 80 ch general headroom
- * above: 64_994. The next addition to the agent or to a github mechanics file must
+ * above: 64_994. Re-derived by #393 from a measured 64_615 (git.md -315 ch): 64_695. The next addition to the agent or to a github mechanics file must
  * fund itself with a cut.
  *
  * MAY BE LOWERED, NEVER RAISED. Registered as `budget-loaded-set` in
  * tests/fixtures/numeric-floors.json; lowering re-pins the value AND the pattern
  * in the same commit.
  */
-const BUDGET_LOADED_SET = 64_994;
+const BUDGET_LOADED_SET = 64_695;
 
 /**
  * THE JIRA-SCOPED loaded-set ceiling — a spawn under the Jira provider.
@@ -235,7 +242,8 @@ const BUDGET_LOADED_SET = 64_994;
  *     [DR-12, D-LOADED-SET-SCOPE, D-BODY-HOP-CLOSURE]
  *
  * Derived from a measured 75_264 (setup-task and its step 1c hop into
- * ensure-traceable-issue) plus the 80 ch general headroom above: 75_344. The next
+ * ensure-traceable-issue) plus the 80 ch general headroom above: 75_344. Re-derived
+ * by #393 from a measured 74_977 (git.md -315 ch, the site rung +28 ch): 75_057. The next
  * addition to the contract or to a Jira mechanics file must fund itself with a cut
  * rather than reach for slack. Trimming
  * `references/tracker/_mcp.md` is the honest first move: it is contract prose, it
@@ -245,7 +253,7 @@ const BUDGET_LOADED_SET = 64_994;
  * MAY BE LOWERED, NEVER RAISED. Registered as `budget-loaded-set-jira` in
  * tests/fixtures/numeric-floors.json.
  */
-const BUDGET_LOADED_SET_JIRA = 75_344;
+const BUDGET_LOADED_SET_JIRA = 75_057;
 
 /**
  * THE LINEAR-SCOPED loaded-set ceiling — a spawn under the Linear provider.
@@ -258,7 +266,8 @@ const BUDGET_LOADED_SET_JIRA = 75_344;
  * [D-LOADED-SET-ONE-SPAWN, D-BODY-HOP-CLOSURE].
  *
  * Derived from a measured 75_860 (setup-task and its step 1c hop into
- * ensure-traceable-issue) plus the 80 ch general headroom above: 75_940. This is the
+ * ensure-traceable-issue) plus the 80 ch general headroom above: 75_940. Re-derived by
+ * #393 from a measured 75_573 (git.md -315 ch, the site rung +28 ch): 75_653. This is the
  * LARGEST of the four ceilings but not the binding one: a character added to git.md
  * is a character added to every row, and every row carries the same headroom. Re-run
  * this file for each row's current headroom.
@@ -278,7 +287,7 @@ const BUDGET_LOADED_SET_JIRA = 75_344;
  * MAY BE LOWERED, NEVER RAISED. Registered as `budget-loaded-set-linear` in
  * tests/fixtures/numeric-floors.json.
  */
-const BUDGET_LOADED_SET_LINEAR = 75_940;
+const BUDGET_LOADED_SET_LINEAR = 75_653;
 
 /**
  * THE PR-HOST loaded-set ceiling — the worst-case cost of a spawn that runs one of
@@ -314,12 +323,13 @@ const BUDGET_LOADED_SET_LINEAR = 75_940;
  *
  * Derived from a measured 58_226 (`post-review-summary`: its PR-host body plus
  * references/publication-gate.md, still the worst op at 4_540) plus the 80 ch
- * general headroom above: 58_306.
+ * general headroom above: 58_306. Re-derived by #393 from a measured 57_943, the same
+ * worst op moved by exactly the git.md delta (-315 ch): 58_023.
  *
  * MAY BE LOWERED, NEVER RAISED. Registered as `budget-loaded-set-pr-host` in
  * tests/fixtures/numeric-floors.json.
  */
-const BUDGET_LOADED_SET_PR_HOST = 58_306;
+const BUDGET_LOADED_SET_PR_HOST = 58_023;
 
 /**
  * THE PER-OP PR-HOST CAP — no single PR-host operation may load more than this,
@@ -367,14 +377,16 @@ const PRICED_PROVIDERS: Readonly<Record<string, number>> = {
  * AC-2.5 [DR-13(a)] — the bound on how much always-loaded prose the provider
  * resolution may occupy, in lines.
  *
- * LOWERED 40 → 36 against a measured 35, which is the permitted direction and the
+ * LOWERED 40 → 36 against a measured 35, then 36 → 34 by #393 against a measured 33
+ * (the settings line replaced the two-rung order and its normalisation rule, and
+ * the mechanics-unavailable rule was retired) — the permitted direction and the
  * one this ceiling has ever moved in: an earlier proposal to raise it to 70 was
  * refused because a `<= 70` assertion is strictly weaker than the one already in
  * place and buys nothing. One line of headroom is deliberate — the preamble is
  * preloaded on every Git spawn, so its length is a per-spawn cost, not a style
  * matter, and the next rule added to it must retire one.
  */
-const PREAMBLE_MAX_LINES = 36;
+const PREAMBLE_MAX_LINES = 34;
 
 /**
  * EQUALITY BASELINE, not a budget — `src/assets/skills/git/references/github-api.md`.
@@ -1855,104 +1867,140 @@ describe('byte budget: written exclusions', () => {
 });
 
 // ---------------------------------------------------------------------------
-// 6. The preamble's provider normalisation (P2-S3 Verify, GAP-10)
+// 6. The preamble's provider selection (P2-S3 Verify, GAP-10; #393)
 // ---------------------------------------------------------------------------
 //
 // Lives here rather than in a file of its own: byte-budget.test.ts is the one
 // tracker test file this subtask owns, and §14.10's naming scheme reserves the
 // other four names for guards that come later.
 //
-// What can be asserted mechanically about a prompt: that the rule is stated
-// exactly once, that the static map it points at is real, and that the rule AS
-// WRITTEN rejects every hostile token and never yields a path derived from the
-// input. The hostile table mirrors compliance-install.test.ts AC-35.
+// The provider token no longer comes from a JSON value the prompt normalises: it
+// is the TRACKER field of resolve-settings.cjs's closed-vocabulary line, which the
+// prompt accepts only in the script's own shape and otherwise replaces with the
+// fail-closed line. What can be asserted mechanically about a prompt: that the
+// shape it writes out is the script's, that the static map it selects from is
+// real, and that the rule AS WRITTEN rejects every hostile line and never yields a
+// path derived from the input. The shape is read from the script, never retyped.
 
-/** The token → directory map, parsed out of the preamble rather than retyped. */
+const SETTINGS_RESOLVER = createRequire(import.meta.url)(
+  path.join(scriptsDir(), 'resolve-settings.cjs'),
+) as { readonly SETTINGS_LINE_RE: RegExp; readonly SETTINGS_FAIL_CLOSED_LINE: string };
+
+/** The fields the Git agent consumes: the first five of the settings line, in order. */
+const TRACKER_FIELDS = ['TRACKER', 'TRACKER_SOURCE', 'TRACKER_WARN', 'SITE', 'KEY'] as const;
+
+/** The token → mechanics directory map, parsed out of the preamble rather than retyped. */
 function parseProviderMap(block: string): Map<string, string> {
   const map = new Map<string, string>();
-  for (const m of block.matchAll(/^\|\s*`([a-z]+)`\s*\|\s*`([a-z/]+\/)`\s*\|\s*$/gm)) {
+  for (const m of block.matchAll(/^\|\s*`([a-z]+)`\s*\|\s*`([a-z/]+\/)`\s*\|[^\n]*\|\s*$/gm)) {
     map.set(m[1], m[2]);
   }
   return map;
 }
 
-/**
- * The preamble's normalisation, implemented exactly as it is written:
- * trim → strip one pair of surrounding quotes → reject any character outside
- * [A-Za-z] → ASCII-lowercase → exact membership in the static map.
- *
- * Returns the mapped DIRECTORY, never anything built from the input — which is
- * the property that matters: a rejected token cannot become a path, and an
- * accepted one selects a hardcoded string rather than being concatenated.
- */
-function resolveProviderAsSpecified(raw: string, map: ReadonlyMap<string, string>): string | null {
-  const trimmed = raw.trim().replace(/^(['"])([\s\S]*)\1$/, '$2');
-  if (!/^[A-Za-z]*$/.test(trimmed)) return null;
-  return map.get(trimmed.toLowerCase()) ?? null;
+/** The accepted-line template the preamble writes out: the one code span that opens with `TRACKER=<`. */
+function acceptedLineTemplate(block: string): string {
+  const spans = [...block.matchAll(/`(TRACKER=<[^`]+)`/g)].map(m => m[1]);
+  expect(spans, 'the preamble must write the accepted line out exactly once').toHaveLength(1);
+  return spans[0];
 }
 
-describe('preamble: provider normalisation (one convergence point, PF-023)', () => {
+/** The fail-closed line the preamble falls back to: the one code span that opens with `TRACKER=github `. */
+function failClosedLine(block: string): string {
+  const spans = [...block.matchAll(/`(TRACKER=github [^`]+)`/g)].map(m => m[1]);
+  expect(spans, 'the preamble must write the fail-closed line out exactly once').toHaveLength(1);
+  return spans[0];
+}
+
+/**
+ * The preamble's acceptance, implemented exactly as it is written: exactly two
+ * lines, `exit=0` last, and before it one settings line — judged here by the
+ * script's own SETTINGS_LINE_RE, the shape the prose transcribes — else the
+ * fail-closed line. Returns the mapped DIRECTORY, never anything built from the
+ * input: a rejected line cannot become a path, and an accepted one selects a
+ * hardcoded string rather than being concatenated.
+ */
+function resolveProviderAsSpecified(output: string, map: ReadonlyMap<string, string>): string | null {
+  const lines = output.split('\n');
+  const accepted = lines.length === 2 && lines[1] === 'exit=0' && SETTINGS_RESOLVER.SETTINGS_LINE_RE.test(lines[0])
+    ? lines[0]
+    : SETTINGS_RESOLVER.SETTINGS_FAIL_CLOSED_LINE;
+  const tracker = /^TRACKER=(\S+) /.exec(accepted)?.[1] ?? '';
+  return map.get(tracker) ?? null;
+}
+
+/** A well-formed settings line naming `provider`, with every other field valid. */
+function settingsLine(provider: string, rest = 'TRACKER_SOURCE=project TRACKER_WARN=none SITE=none KEY=none'): string {
+  return `TRACKER=${provider} ${rest} REVIEW_PUBLICATION=auto COMPLIANCE=off MEMORY=on LEARNING=on KNOWLEDGE=on`;
+}
+
+describe('preamble: provider selection from the settings line (one convergence point, PF-023)', () => {
   const block = preambleBlock(GIT_AGENT.content);
   const map = parseProviderMap(block);
 
-  it('states the normalisation rule exactly once, over a real three-entry map', () => {
-    const occurrences = GIT_AGENT.content.split('**Normalise `TRACKER_PROVIDER`:**').length - 1;
-    expect(
-      occurrences,
-      'the normalisation rule must be stated exactly ONCE — a second statement is a second ' +
-      'authority on what a provider token may be (PF-023 requires one convergence point)',
-    ).toBe(1);
-
+  it('selects from a real three-entry map, and never re-normalises a token itself', () => {
     expect([...map.keys()].sort()).toEqual(['github', 'jira', 'linear']);
     expect([...map.values()]).toEqual(['tracker/github/', 'tracker/jira/', 'tracker/linear/']);
+    expect(
+      GIT_AGENT.content,
+      'a second normalisation rule is a second authority on what a provider token may be ' +
+      '(PF-023 requires one convergence point — the settings line\'s own shape)',
+    ).not.toContain('**Normalise `TRACKER_PROVIDER`:**');
   });
 
-  it('accepts only the three tokens, after trimming, quote-stripping and lowercasing', () => {
-    const ACCEPTED: ReadonlyArray<readonly [string, string]> = [
-      ['github', 'tracker/github/'],
-      ['GitHub', 'tracker/github/'],
-      ['  jira  ', 'tracker/jira/'],
-      ['jira ', 'tracker/jira/'],
-      ['"linear"', 'tracker/linear/'],
-      ["'github'", 'tracker/github/'],
-    ];
-    for (const [raw, expected] of ACCEPTED) {
-      expect(resolveProviderAsSpecified(raw, map), `'${raw}' must resolve to ${expected}`)
-        .toBe(expected);
+  it('writes out the script\'s first five fields, in order, with the same closed value sets', () => {
+    const template = acceptedLineTemplate(block);
+    const fields = [...template.matchAll(/([A-Z][A-Z_]*)=<([^>]*)>/g)].map(m => ({ key: m[1], values: m[2] }));
+    expect(fields.map(f => f.key)).toEqual([...TRACKER_FIELDS]);
+    const re = SETTINGS_RESOLVER.SETTINGS_LINE_RE.source;
+    for (const [key, group] of [['TRACKER', 'tracker'], ['TRACKER_SOURCE', 'trackerSource'], ['TRACKER_WARN', 'trackerWarn']] as const) {
+      const scriptSet = new RegExp(`\\(\\?<${group}>([a-z|]+)\\)`).exec(re)?.[1];
+      expect(scriptSet, `SETTINGS_LINE_RE has no closed (?<${group}>…) group`).toBeDefined();
+      expect(fields.find(f => f.key === key)?.values, `${key}'s value set differs from the script's`).toBe(scriptSet);
     }
   });
 
-  it('known-bad table: every hostile token is REJECTED, and none produces a path', () => {
+  it('falls back to the script\'s own fail-closed line, byte for byte over the fields it names', () => {
+    const fallback = failClosedLine(block);
+    expect(SETTINGS_RESOLVER.SETTINGS_FAIL_CLOSED_LINE.startsWith(`${fallback} `)).toBe(true);
+    expect(fallback.split(' ').map(pair => pair.split('=')[0])).toEqual([...TRACKER_FIELDS]);
+  });
+
+  it('accepts exactly the three providers, each through a mapped directory', () => {
+    const ACCEPTED: ReadonlyArray<readonly [string, string]> = [
+      [`${settingsLine('github')}\nexit=0`, 'tracker/github/'],
+      [`${settingsLine('jira', 'TRACKER_SOURCE=project TRACKER_WARN=none SITE=https://acme.atlassian.net KEY=ACME')}\nexit=0`, 'tracker/jira/'],
+      [`${settingsLine('linear', 'TRACKER_SOURCE=machine TRACKER_WARN=mismatch SITE=none KEY=none')}\nexit=0`, 'tracker/linear/'],
+    ];
+    for (const [output, expected] of ACCEPTED) {
+      expect(resolveProviderAsSpecified(output, map), output).toBe(expected);
+    }
+  });
+
+  it('known-bad table: every hostile line is REJECTED to the fail-closed github, and none produces a path', () => {
     // Reject, never repair. `jira-cloud` is the instructive one: a "closest
     // match" rule would map it onto jira, which is exactly the repair the
     // preamble forbids.
     const HOSTILE: readonly string[] = [
-      '../../../etc/passwd',
-      'github/../../rules/devflow',
-      'jira-cloud',
-      '`id`',
-      'github ' + String.fromCharCode(36) + '(id)',
+      `${settingsLine('../../../etc/passwd')}\nexit=0`,
+      `${settingsLine('jira-cloud')}\nexit=0`,
+      `${settingsLine('JIRA')}\nexit=0`,
+      `${settingsLine('"jira"')}\nexit=0`,
+      `${settingsLine('jira')}\nexit=1`,
+      `${settingsLine('jira')}`,
+      `${settingsLine('jira')} EXTRA=1\nexit=0`,
+      `note: ok\n${settingsLine('jira')}\nexit=0`,
+      `${settingsLine('jira', 'TRACKER_SOURCE=project TRACKER_WARN=none SITE=https://user@acme.atlassian.net KEY=ACME')}\nexit=0`,
+      `${settingsLine('jira', 'TRACKER_SOURCE=project TRACKER_WARN=none SITE=none KEY=acme')}\nexit=0`,
       '',
-      ' ',
-      'a'.repeat(200),
-      'github jira',
-      'github;linear',
+      'exit=0',
     ];
     expect(HOSTILE.length, 'hostile corpus must be non-empty (PF-018)').toBeGreaterThan(0);
-
-    const accepted = HOSTILE.filter(raw => resolveProviderAsSpecified(raw, map) !== null);
-    expect(
-      accepted,
-      `hostile provider token(s) were accepted: ${accepted.join(', ')}`,
-    ).toEqual([]);
-  });
-
-  it('every accepted token yields a map VALUE — never a path built from the input', () => {
     const values = new Set(map.values());
-    for (const raw of ['github', 'GitHub', ' jira ', '"linear"']) {
-      const resolved = resolveProviderAsSpecified(raw, map);
-      expect(resolved, `${raw} must resolve`).not.toBeNull();
-      expect(values.has(resolved!), `${raw} must resolve to a mapped directory`).toBe(true);
+    for (const output of HOSTILE) {
+      const resolved = resolveProviderAsSpecified(output, map);
+      expect(resolved, `a hostile line must fail closed to github: ${JSON.stringify(output)}`).toBe('tracker/github/');
+      expect(values.has(resolved!), 'and resolve to a mapped directory, never a composed one').toBe(true);
     }
   });
 

@@ -63,6 +63,7 @@ import {
   ROOT,
   TOOL_CALL_MECHANICS_CLAIMS,
   collectMissingMechanicsClaims,
+  collectSiteRungProblems,
   collectPerItemFetchVerbs,
   type ProviderCorpus,
   type ProviderRefVocabulary,
@@ -981,5 +982,24 @@ describe('linear module: the clauses AC-3.3, AC-3.11 and §14.3 fix here', () =>
         reported.join('\n  '),
       ).toBe(true);
     }
+  });
+});
+
+describe('linear module: the settings SITE outranks the conventions file (AC-42, TP-47)', () => {
+  it('the compiled setup-task rung names the settings line\'s SITE first, then `## Project`', () => {
+    expect(collectSiteRungProblems(readGenerated(linearRel('setup-task')))).toEqual([]);
+  });
+
+  it('and so does the module source it compiles from', () => {
+    expect(collectSiteRungProblems(readFileSync(path.join(ROOT, LINEAR_MODULE), 'utf-8'))).toEqual([]);
+  });
+
+  it('known-bad probe: a reversed, a one-source and an absent rung are each reported', () => {
+    expect(collectSiteRungProblems(
+      "- **Site.** From `## Project`, else the settings line's `SITE`.",
+    )).toEqual(["the conventions file's `## Project` is consulted before the settings line's `SITE`"]);
+    expect(collectSiteRungProblems('- **Site.** From `## Project` in the configuration.'))
+      .toEqual(["the rung does not name the settings line's `SITE`"]);
+    expect(collectSiteRungProblems('no rung here')).toEqual(['expected one `- **Site.**` rung, found 0']);
   });
 });

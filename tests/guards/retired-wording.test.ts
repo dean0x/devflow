@@ -191,6 +191,12 @@ const RETIRED_LITERALS: ReadonlyArray<RetiredEntry> = [
     ['tracker not reachable', 'conflates an unconfigured tracker with an unreachable one'],
     ['interactive setup required', 'no question step exists — the phrasing promises a prompt that never comes'],
     ['delete .devflow/tracker.md and re-learn', 'superseded; the file is never the remedy'],
+    // #393 (PR6): every install carries every provider's mechanics, so no legitimate
+    // configuration leaves a named mechanics file absent, and a prompt rule for a
+    // damaged install guards nothing (ADR-028). Retired with its rule, not renamed.
+    ['tracker mechanics unavailable', 'no legitimate configuration can produce it once every provider is installed'],
+    // #393 (PR6): conventions moved to one file per provider, so the remedy names that file.
+    ['edit ~/.devflow/tracker.md', 'the conventions file is per provider now, under `~/.devflow/tracker/`'],
   ] as const).map(([literal, why]): RetiredEntry => ({
     literal,
     removedFrom: 'the canonical DEGRADED reason table (retired synonym)',

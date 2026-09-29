@@ -1208,13 +1208,14 @@ describe('compiled dynamic commands: --dry-run removal (C7)', () => {
 });
 
 // ---------------------------------------------------------------------------
-// 14. compliance wiring in compiled host commands (installed-skill gate) and the
+// 14. compliance wiring in compiled host commands (the settings-line lens) and the
 //     mechanism inputs that replaced the op-level COMPLIANCE key (#362)
 //
 // Current guard state:
-//   - code-review.md and plan.md contain COMPLIANCE_SKILL_INSTALLED and the skill
-//     path — the review lens (compliance focus, compliance Design agent), which is
-//     the one command-layer use of the skill check the evidence policy did not take
+//   - code-review.md and plan.md gate the review lens (compliance focus, compliance
+//     Design agent) on COMPLIANCE_ACTIVE, set from the settings line's COMPLIANCE —
+//     never on a skill-file check, since every install carries the skill
+//     (D-COMPLIANCE-INSTALL-ALWAYS, D-COMPLIANCE-REPO-LENS)
 //   - no compiled dist command carries a COMPLIANCE: key (the AC-32 successor):
 //     the Git ops take ISSUE_REQUIRED / APPLY_CONVENTIONS instead
 //   - implement.md passes each mechanism input exactly once, in its Git setup-task
@@ -1273,25 +1274,26 @@ function collectMechanismKeysOutsideGit(basename: string, content: string): { vi
 }
 
 describe('compliance wiring in compiled host commands (review lens) + mechanism inputs (#362)', () => {
-  // The review lens keeps the installed-skill check; nothing else at the command
+  // The review lens is gated on the settings line; nothing else at the command
   // layer gates on it once the evidence policy owns the mechanism inputs.
-  const SKILL_CHECK_HOSTS: Record<string, string> = {
+  const LENS_HOSTS: Record<string, string> = {
     'code-review': DIST_COMMANDS,
     'plan':        DIST_COMMANDS,
   };
 
-  it('code-review.md and plan.md contain COMPLIANCE_SKILL_INSTALLED and the skill path (review lens)', async () => {
-    for (const [basename, destRelDir] of Object.entries(SKILL_CHECK_HOSTS)) {
+  it('code-review.md and plan.md gate the lens on COMPLIANCE_ACTIVE, never on the skill file (D-COMPLIANCE-REPO-LENS)', async () => {
+    for (const [basename, destRelDir] of Object.entries(LENS_HOSTS)) {
       const outputPath = path.join(BUILT_COMMANDS, `${basename}.md`);
       const content = await fs.readFile(outputPath, 'utf-8');
       expect(
         content,
-        `${destRelDir}/${basename}.md must contain COMPLIANCE_SKILL_INSTALLED`,
-      ).toContain('COMPLIANCE_SKILL_INSTALLED');
+        `${destRelDir}/${basename}.md must contain COMPLIANCE_ACTIVE`,
+      ).toContain('COMPLIANCE_ACTIVE');
       expect(
         content,
-        `${destRelDir}/${basename}.md must contain the compliance skill path`,
-      ).toContain('skills/devflow:compliance/SKILL.md');
+        `${destRelDir}/${basename}.md must not decide the lens by the skill file — every install carries it`,
+      ).not.toContain('skills/devflow:compliance/SKILL.md');
+      expect(content, `${basename}.md retired gate variable`).not.toContain('COMPLIANCE_SKILL_INSTALLED');
     }
   });
 
@@ -1439,7 +1441,7 @@ describe('Phase D traceability ops — resolve.md (Part 2, Step 2.4)', () => {
     // evidence policy now decides both.
     const outputPath = path.join(BUILT_COMMANDS, 'resolve.md');
     const content = await fs.readFile(outputPath, 'utf-8');
-    expect(content, 'resolve.md must not resolve COMPLIANCE_SKILL_INSTALLED').not.toContain('COMPLIANCE_SKILL_INSTALLED');
+    expect(content, 'resolve.md must not gate on the compliance lens').not.toContain('COMPLIANCE_ACTIVE');
     expect(content, 'resolve.md must not check the compliance skill path').not.toContain('skills/devflow:compliance/SKILL.md');
     expect(content).toContain('Run this phase only when `EVIDENCE_POLICY` is `required`');
     expect(content).toContain('Run this step only when `EVIDENCE_POLICY` is `required`');
@@ -1519,7 +1521,7 @@ describe('Phase E traceability — implement.md and plan.md (Steps 2.5, 2.6)', (
     const content = await fs.readFile(outputPath, 'utf-8');
     expect(content).toContain('ISSUE_REQUIRED: {ISSUE_REQUIRED}');
     expect(content).toContain('APPLY_CONVENTIONS: {APPLY_CONVENTIONS}');
-    expect(content, 'implement.md must not resolve COMPLIANCE_SKILL_INSTALLED').not.toContain('COMPLIANCE_SKILL_INSTALLED');
+    expect(content, 'implement.md must not gate on the compliance lens').not.toContain('COMPLIANCE_ACTIVE');
   });
 });
 
@@ -1547,7 +1549,7 @@ describe('Phase F traceability — release.md evidence + dynamic-build mechanism
       'release.md must contain backlink-shipped-issues Git op (Step 2.9)',
     ).toContain('backlink-shipped-issues');
     // #362: the evidence and back-link steps key on the evidence policy, not the skill.
-    expect(content, 'release.md must not resolve COMPLIANCE_SKILL_INSTALLED').not.toContain('COMPLIANCE_SKILL_INSTALLED');
+    expect(content, 'release.md must not gate on the compliance lens').not.toContain('COMPLIANCE_ACTIVE');
     expect(content, 'release.md must not check the compliance skill path').not.toContain('skills/devflow:compliance/SKILL.md');
   });
 
@@ -1563,7 +1565,7 @@ describe('Phase F traceability — release.md evidence + dynamic-build mechanism
       content,
       'dynamic-build.md must contain ISSUE_NUMBER (Code-agent issue threading, Step 2.11)',
     ).toContain('ISSUE_NUMBER');
-    expect(content, 'dynamic-build.md must not resolve COMPLIANCE_SKILL_INSTALLED').not.toContain('COMPLIANCE_SKILL_INSTALLED');
+    expect(content, 'dynamic-build.md must not gate on the compliance lens').not.toContain('COMPLIANCE_ACTIVE');
     expect(content, 'setup-task owns the branch convention; the host must not restate it').not.toContain('Branch Naming');
   });
 });
@@ -1645,13 +1647,16 @@ describe('publication_gate adoption in compiled host commands (Phase C)', () => 
 // compiled MDS hosts + 1 hand-authored release.md).
 //
 // compliance_gate() adoption guard: 2 importers (code-review, plan) must use the
-// shared {compliance_gate()} partial — the review lens is the one command-layer use
-// of the skill check left. release.md carries no skill check at all since #362: its
+// shared {compliance_gate()} partial — the review lens is the one command-layer
+// gate on COMPLIANCE_ACTIVE. implement and resolve ALIAS-import the same partial for
+// compliance_frameworks() alone, and dynamic-build for compliance_lens() (the gate
+// minus its COMPLIANCE_ACTIVE sentence): they pass the lens to their Code spawns and
+// gate nothing on it. release.md carries no compliance gate at all since #362: its
 // evidence and back-link steps gate on EVIDENCE_POLICY, resolved by the
 // evidence_policy() text it holds verbatim. hostsScanned === 2 asserts non-vacuity
 // [DR-27a].
-// bug-analysis, dynamic-build and implement dropped the import in #362: their only
-// use of the check was to key a Git spawn, and the evidence policy now supplies the
+// bug-analysis, dynamic-build and implement dropped the selective import in #362: their
+// only use of the check was to key a Git spawn, and the evidence policy now supplies the
 // mechanism inputs those spawns take. resolve dropped it in the same PR: its thread
 // steps gate on EVIDENCE_POLICY and its merge readiness on
 // REQUIRE_NON_AUTHOR_APPROVAL.
@@ -1664,7 +1669,7 @@ describe('DIST_FILES scope (§14.5, P0-S21) + compliance_gate adoption (P0-S22)'
     expect(DIST_FILES).toContain('release.md');
   });
 
-  it('both compliance_gate importers contain COMPLIANCE_SKILL_INSTALLED in their compiled output (P0-S22)', async () => {
+  it('both compliance_gate importers contain COMPLIANCE_ACTIVE in their compiled output (P0-S22)', async () => {
     // The 2 MDS host commands that use {compliance_gate()} from _partials/_compliance.mds.
     // release.md is hand-authored, cannot import, and checks no skill (#362).
     const COMPLIANCE_GATE_IMPORTERS = ['code-review', 'plan'] as const;
@@ -1685,13 +1690,13 @@ describe('DIST_FILES scope (§14.5, P0-S21) + compliance_gate adoption (P0-S22)'
       hostsScanned++;
       expect(
         content,
-        `${DIST_COMMANDS}/${basename}.md must contain COMPLIANCE_SKILL_INSTALLED (compliance_gate expansion)`,
-      ).toContain('COMPLIANCE_SKILL_INSTALLED');
+        `${DIST_COMMANDS}/${basename}.md must contain COMPLIANCE_ACTIVE (compliance_gate expansion)`,
+      ).toContain('COMPLIANCE_ACTIVE');
     }
 
     // hostsScanned === 2: asserts non-vacuity (PF-018, [DR-27a]).
     // Known-bad sample: a host with @import but no {compliance_gate()} call would
-    // produce a compiled output without COMPLIANCE_SKILL_INSTALLED and fail here.
+    // produce a compiled output without COMPLIANCE_ACTIVE and fail here.
     expect(
       hostsScanned,
       `compliance_gate guard is vacuous: expected hostsScanned === 2, got ${hostsScanned}`,
@@ -1700,7 +1705,7 @@ describe('DIST_FILES scope (§14.5, P0-S21) + compliance_gate adoption (P0-S22)'
 
   // GAP-31: the compliance gate must still resolve BEFORE its first consumer in
   // every importer. P2-S9 inserted issue-grammar text into five of the then six
-  // hosts; an insertion above the gate would leave COMPLIANCE_SKILL_INSTALLED
+  // hosts; an insertion above the gate would leave COMPLIANCE_ACTIVE
   // read before it is set, which no other assertion in this file would notice
   // (they all check presence, never order).
   it('the compliance gate resolves before its first consumer in both importers (GAP-31)', async () => {
@@ -1714,7 +1719,7 @@ describe('DIST_FILES scope (§14.5, P0-S21) + compliance_gate adoption (P0-S22)'
     //                                    same two literals as a set)
     //   a heading line                 — names the step, does not read the variable
     function collectGateOrderViolations(basename: string, content: string): string[] {
-      const GATE = 'Resolve `COMPLIANCE_SKILL_INSTALLED` once per run';
+      const GATE = '**Set the compliance lens** from that line';
       const lines = content.split('\n');
       const gateLine = lines.findIndex(l => l.includes(GATE));
       if (gateLine === -1) return [`${basename}: gate resolution sentence absent`];
@@ -1722,11 +1727,11 @@ describe('DIST_FILES scope (§14.5, P0-S21) + compliance_gate adoption (P0-S22)'
       const out: string[] = [];
       for (let i = 0; i < gateLine; i++) {
         const line = lines[i];
-        if (!line.includes('COMPLIANCE_SKILL_INSTALLED')) continue;
+        if (!line.includes('COMPLIANCE_ACTIVE')) continue;
         if (line.startsWith('**Produces:**') || line.startsWith('**Requires:**')) continue;
         if (line.startsWith('#')) continue;
         out.push(
-          `${basename}:${i + 1}: reads COMPLIANCE_SKILL_INSTALLED before the gate resolves it ` +
+          `${basename}:${i + 1}: reads COMPLIANCE_ACTIVE before the gate resolves it ` +
           `at line ${gateLine + 1} — "${line.trim().slice(0, 80)}"`,
         );
       }
@@ -1750,9 +1755,9 @@ describe('DIST_FILES scope (§14.5, P0-S21) + compliance_gate adoption (P0-S22)'
     // Known-bad probe (mechanic 2, H10): the same collector over a seeded corpus
     // where a consumer line sits above the gate.
     const seeded = [
-      '**Produces:** COMPLIANCE_SKILL_INSTALLED',
-      'COMPLIANCE: {COMPLIANCE_SKILL_INSTALLED ? "enabled" : "(none)"}',
-      '**Resolve `COMPLIANCE_SKILL_INSTALLED` once per run:** …',
+      '**Produces:** COMPLIANCE_ACTIVE',
+      'COMPLIANCE: {COMPLIANCE_ACTIVE ? "enabled" : "(none)"}',
+      '**Set the compliance lens** from that line: …',
     ].join('\n');
     expect(
       collectGateOrderViolations('probe.md', seeded),

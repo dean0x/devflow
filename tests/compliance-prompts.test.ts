@@ -5,6 +5,8 @@
  *   - shouldRunComplianceStep: all 8 gate rows from the B1 table
  *   - runComplianceStep: step semantics via fake recorded IO (injectable prompts)
  *   - Shared helpers: frameworkChoices, formatFrameworkCatalogue, formatComplianceSummary
+ *   - TP-43 (AC-37): the compiled prompts that run the compliance lens — gated on the
+ *     settings line, loading only the framework references they are given
  *
  * Per PF-018: assertions cover concrete output values, not types, and every
  * significant branch has a test that can go red when behavior changes.
@@ -12,6 +14,8 @@
  * verify the returned discriminated union drives all caller decisions.
  */
 import { describe, it, expect, vi } from 'vitest';
+import { readFileSync } from 'fs';
+import * as path from 'path';
 import {
   shouldRunComplianceStep,
   runComplianceStep,
@@ -23,6 +27,8 @@ import {
   type PromptOutcome,
 } from '../src/cli/commands/compliance-prompts.js';
 import { COMPLIANCE_FRAMEWORKS } from '../src/core/compliance.js';
+import { composeComplianceSkill } from '../src/core/compliance-compose.js';
+import { ROOT, requireDistFile, requireDistFiles, walkFiles } from './helpers.js';
 
 // ── Fake prompt builder ────────────────────────────────────────────────────────
 
@@ -370,5 +376,209 @@ describe('formatComplianceSummary', () => {
 
   it('returns "enabled (gdpr, soc2)" when enabled with frameworks', () => {
     expect(formatComplianceSummary(true, ['gdpr', 'soc2'])).toBe('enabled (gdpr, soc2)');
+  });
+});
+
+// ── TP-43 (AC-37): the compiled lens reads the settings line, never the file set ──
+//
+// Every install carries all six framework references (D-COMPLIANCE-INSTALL-ALWAYS),
+// so a prompt that let file presence choose frameworks would load all six on every
+// machine. The chain instead runs: settings line `COMPLIANCE` → `COMPLIANCE_FRAMEWORKS`
+// (and `COMPLIANCE_ACTIVE`) in the command → the spawn block → the agent loads
+// `references/{id}.md` for those ids alone (D-COMPLIANCE-REPO-LENS).
+//
+// NOT covered: whether the model obeys the text. That is behaviour, not text; the
+// S23 scenario in compliance-e2e.test.ts pins the resolver's side (a hipaa repo on a
+// compliance-off machine resolves COMPLIANCE=hipaa, and hipaa.md is installed).
+
+/** The one mapping sentence both gate hosts expand, and the two pass-through hosts carry. */
+const FRAMEWORKS_SENTENCE =
+  "`COMPLIANCE_FRAMEWORKS` is the settings line's `COMPLIANCE` with `generic` written `none`: `off`, `none`, or the framework ids the machine and this repository declare.";
+const ACTIVE_SENTENCE = '`COMPLIANCE_ACTIVE` is `true` unless `COMPLIANCE_FRAMEWORKS` is `off`.';
+const SPAWN_KEY = 'COMPLIANCE_FRAMEWORKS: {COMPLIANCE_FRAMEWORKS}';
+
+/**
+ * Named collector: lines that let INSTALLED FILES choose the frameworks — the rule
+ * install-all made false. Shared by the live sweep and the known-bad probe.
+ */
+function collectPresenceSelection(file: string, content: string): string[] {
+  const PRESENCE = [
+    /Active frameworks = the `references\/\{id\}\.md` files present/,
+    /presence in the installed skill directory is the authoritative/i,
+    /identified from installed `references\/\{id\}\.md` files/,
+    /skills\/devflow:compliance\/SKILL\.md` exists/,
+  ];
+  return content.split('\n').flatMap((line, i) =>
+    PRESENCE.some(re => re.test(line)) ? [`${file}:${i + 1}: ${line.trim().slice(0, 100)}`] : []);
+}
+
+/** Compiled commands that spawn Code agents, and the spawn sites each carries today. Floors: may only rise. */
+const CODE_SPAWN_FLOORS: Readonly<Record<string, number>> = {
+  // 9 fences (single, sequential ×2, parallel ×2, validation/alignment/qa-fix, pr-create) + the CI-fix line
+  'implement.md': 10,
+  // the issue-fix and validation-fix fences + the CI-fix line
+  'resolve.md': 3,
+  // implement, validation-fix, alignment-fix, qa-fix, review-fix and final-validation-fix templates
+  'dynamic-build.md': 6,
+};
+
+interface CodeSpawnSite {
+  readonly file: string;
+  /** 1-based line the spawn starts on. */
+  readonly line: number;
+  readonly payload: string;
+}
+
+/**
+ * Named collector: every Code spawn site in a compiled command, in the three shapes the
+ * command layer writes — a fenced spawn (`Agent(subagent_type="Code"):` then a quoted
+ * payload up to its closing quote, indented or not; one fence may hold two spawns), a one-line prose spawn
+ * (Spawn `Agent(subagent_type="Code")` …), and a workflow template literal
+ * (agent(`…`, { agentType: "Code" })). The preamble's `agent("your prompt here", …)`
+ * usage example is not a template literal, so it is not a site.
+ */
+function collectCodeSpawnSites(file: string, text: string): CodeSpawnSite[] {
+  const MAX_SITES = 64;
+  const SHAPES = [
+    /Agent\(subagent_type="Code"\):[^\n]*\n[ \t]*"[\s\S]*?"[ \t]*\n[ \t]*(?:\n|```)/g,
+    /^.*Spawn `Agent\(subagent_type="Code"\)`.*$/gm,
+    /agent\(`(?:(?!agent\(`)[\s\S])*?`, \{ agentType: "Code" \}/g,
+  ];
+  const sites = SHAPES.flatMap(re => [...text.matchAll(re)].map(m => ({
+    file,
+    line: text.slice(0, m.index).split('\n').length,
+    payload: m[0],
+  })));
+  if (sites.length > MAX_SITES) throw new Error(`${file}: more than ${MAX_SITES} Code spawn sites — bound exceeded`);
+  return sites;
+}
+
+/** The sites whose payload hands the Code agent no compliance lens — rendered for the failure message. */
+function collectUnlensedSites(sites: readonly CodeSpawnSite[]): string[] {
+  const LENS = /COMPLIANCE_FRAMEWORKS: \$?\{COMPLIANCE_FRAMEWORKS\}|with `COMPLIANCE_FRAMEWORKS`/;
+  return sites.filter(s => !LENS.test(s.payload)).map(s => `${s.file}:${s.line}`);
+}
+
+function src(rel: string): string {
+  return readFileSync(path.join(ROOT, rel), 'utf-8');
+}
+
+describe('TP-43 (AC-37): the compiled compliance lens loads only the ids the settings line resolves', () => {
+  it('both gate hosts set the lens from the settings line and gate the compliance agent on COMPLIANCE_ACTIVE', () => {
+    for (const host of ['code-review.md', 'plan.md']) {
+      const text = requireDistFile(host);
+      expect(text, `${host}: the mapping sentence`).toContain(FRAMEWORKS_SENTENCE);
+      expect(text, `${host}: COMPLIANCE=off switches the lens off`).toContain(ACTIVE_SENTENCE);
+      expect(text, `${host}: the lens resolves after the settings block`).toMatch(
+        /\*\*Resolve the settings line\*\*[\s\S]*\*\*Set the compliance lens\*\* from that line/,
+      );
+    }
+    expect(requireDistFile('code-review.md')).toContain('| COMPLIANCE_ACTIVE AND diff touches regulated surface | compliance |');
+    expect(requireDistFile('plan.md')).toContain('| compliance | Regulatory gaps');
+    expect(requireDistFile('plan.md')).toContain('(only when COMPLIANCE_ACTIVE) |');
+  });
+
+  it('the compliance Review and Design spawns carry the resolved ids', () => {
+    const reviewFence = requireDistFile('code-review.md').match(/Agent\(subagent_type="Review"[\s\S]*?```/);
+    expect(reviewFence?.[0]).toContain(SPAWN_KEY);
+    const designFence = requireDistFile('plan.md').match(/Agent\(subagent_type="Design"\):\n"Mode: gap-analysis[\s\S]*?```/);
+    expect(designFence?.[0]).toContain(SPAWN_KEY);
+  });
+
+  it('/implement and /resolve pass the lens to their Code spawns without gating on it', () => {
+    for (const host of ['implement.md', 'resolve.md']) {
+      const text = requireDistFile(host);
+      expect(text, `${host}: the mapping sentence`).toContain(FRAMEWORKS_SENTENCE);
+      expect(text, `${host}: a pass-through host never gates on the lens`).not.toContain('COMPLIANCE_ACTIVE');
+    }
+  });
+
+  it('every compiled Code spawn — implementing, fix-phase, CI-fix and pr-create — carries the lens', () => {
+    // Before install-all a fix-phase Code agent found the lens by checking whether the
+    // compliance skill was installed; with every install carrying it, the resolved ids
+    // are the only signal, and a spawn without them runs with the lens `off`.
+    const sites = requireDistFiles().flatMap(f => collectCodeSpawnSites(f, requireDistFile(f)));
+    for (const [host, floor] of Object.entries(CODE_SPAWN_FLOORS)) {
+      const n = sites.filter(s => s.file === host).length;
+      expect(n, `${host}: ${n} Code spawn site(s), floor ${floor} — the collector stopped reading them`).toBeGreaterThanOrEqual(floor);
+    }
+    expect(
+      [...new Set(sites.map(s => s.file))].sort(),
+      'a command outside the named set spawns Code agents — name it in CODE_SPAWN_FLOORS',
+    ).toEqual(Object.keys(CODE_SPAWN_FLOORS).sort());
+    expect(collectUnlensedSites(sites)).toEqual([]);
+  });
+
+  it('known-bad probe: a Code spawn of each shape that drops the lens is reported by the same collector', () => {
+    const implement = requireDistFile('implement.md');
+    // [host, live text, the lens as that shape spells it, what the spawn reads without it]
+    const probes: Array<[string, string, string, string]> = [
+      ['implement.md', implement, '\n   COMPLIANCE_FRAMEWORKS: {COMPLIANCE_FRAMEWORKS}"', '"'], // an indented fix-phase fence
+      ['implement.md', implement, ' with `COMPLIANCE_FRAMEWORKS`', ''],                      // the CI-fix prose spawn
+      ['dynamic-build.md', requireDistFile('dynamic-build.md'), '\nCOMPLIANCE_FRAMEWORKS: ${COMPLIANCE_FRAMEWORKS}', ''], // a template spawn
+    ];
+    for (const [host, real, lens, without] of probes) {
+      expect(collectUnlensedSites(collectCodeSpawnSites(host, real)), `${host}: the live text is clean`).toEqual([]);
+      const seeded = real.replace(lens, without);
+      expect(seeded, `${host}: the seed must land (${lens.trim()})`).not.toBe(real);
+      expect(collectUnlensedSites(collectCodeSpawnSites(host, seeded)), `${host}: dropping ${lens.trim()}`).toHaveLength(1);
+    }
+  });
+
+  it('/dynamic-build resolves the lens before authoring and hands it to its implementing Code agent', () => {
+    // The engine's Code agents lost the presence check with install-all; without the
+    // ids they read an absent COMPLIANCE_FRAMEWORKS as `off` and never load the skill.
+    const text = requireDistFile('dynamic-build.md');
+    expect(text, 'the mapping sentence').toContain(FRAMEWORKS_SENTENCE);
+    expect(text, 'a pass-through host never gates on the lens').not.toContain('COMPLIANCE_ACTIVE');
+    expect(text).toMatch(/\*\*Resolve the settings line\*\*[\s\S]*\*\*Set the compliance lens\*\* from that line/);
+    // Authored in as a shape-gated constant: anything but off, none or a registry-shaped id list is `off`.
+    const constant = /^const COMPLIANCE_FRAMEWORKS = .*args\.complianceFrameworks.*$/m.exec(text)?.[0] ?? '';
+    expect(constant, 'no COMPLIANCE_FRAMEWORKS constant in the SINGLE skeleton').not.toBe('');
+    expect(constant).toContain(': "off"');
+    const implement = /await phase\("implement"[\s\S]*?\{ agentType: "Code" \}/.exec(text)?.[0] ?? '';
+    expect(implement, 'no implement-phase Code spawn found').not.toBe('');
+    expect(implement).toContain('COMPLIANCE_FRAMEWORKS: ${COMPLIANCE_FRAMEWORKS}');
+    // WAVE mode runs the same engine per ticket and must forward the constant.
+    expect(text).toMatch(/runSingleTicketEngine\(\{[^\n]*complianceFrameworks: COMPLIANCE_FRAMEWORKS/);
+  });
+
+  it('the agents and skills that run the lens load references for the given ids only', () => {
+    expect(src('src/assets/agents/review.md')).toContain('- **COMPLIANCE_FRAMEWORKS** (compliance focus)');
+    expect(src('src/assets/agents/review.md')).toContain('Load `references/{id}.md` only for these ids.');
+    expect(src('src/assets/agents/design.md')).toContain('Load `references/{id}.md` only for these ids.');
+    expect(src('src/assets/agents/code.md')).toContain('load `references/{id}.md` only for the ids it lists');
+    expect(src('src/assets/skills/gap-analysis/SKILL.md')).toContain('`references/{id}.md` only for the ids in `COMPLIANCE_FRAMEWORKS`');
+  });
+
+  it('a compliance-off machine\'s skill (neutral stamp) sends a hipaa lens to references/hipaa.md alone', () => {
+    const { content } = composeComplianceSkill(src('src/assets/skills/compliance/SKILL.md'), [], new Map());
+    expect(content).toContain('The machine declares no framework.');
+    expect(content).toContain('(`COMPLIANCE_FRAMEWORKS`, this machine\'s plus the repository\'s) are the frameworks in force.');
+    expect(content).toContain('Load `references/{id}.md` for each given id and no other; `none` means generic controls only.');
+    // No framework is named by the neutral stamp, so nothing but the given ids points anywhere.
+    for (const fw of COMPLIANCE_FRAMEWORKS) expect(content).not.toContain(`references/${fw.id}.md`);
+  });
+
+  it('no compiled command, agent or skill lets installed files choose the frameworks', () => {
+    const corpus: Array<{ file: string; content: string }> = [
+      ...requireDistFiles().map(f => ({ file: `dist/commands/${f}`, content: requireDistFile(f) })),
+      ...walkFiles(path.join(ROOT, 'src', 'assets', 'agents'), f => f.endsWith('.md') || f.endsWith('.mds'))
+        .map(f => ({ file: path.relative(ROOT, f), content: readFileSync(f, 'utf-8') })),
+      ...walkFiles(path.join(ROOT, 'src', 'assets', 'skills'), f => f.endsWith('SKILL.md'))
+        .map(f => ({ file: path.relative(ROOT, f), content: readFileSync(f, 'utf-8') })),
+    ];
+    expect(corpus.length, 'the sweep scanned nothing').toBeGreaterThan(30);
+    expect(corpus.flatMap(({ file, content }) => collectPresenceSelection(file, content))).toEqual([]);
+  });
+
+  it('known-bad probe: the retired presence rules are reported by the same collector', () => {
+    const seeded = [
+      'Active frameworks = the `references/{id}.md` files present in the installed skill; never fabricate.',
+      'File presence in the installed skill directory is the authoritative signal: if a',
+      '- [ ] Active frameworks identified from installed `references/{id}.md` files; controls applied',
+      'When `~/.claude/skills/devflow:compliance/SKILL.md` exists AND the task touches regulated surface',
+    ].join('\n');
+    expect(collectPresenceSelection('probe.md', seeded)).toHaveLength(4);
   });
 });

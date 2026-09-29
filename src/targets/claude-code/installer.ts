@@ -358,11 +358,10 @@ export async function chmodRecursive(dir: string, mode: number, _depth = 0): Pro
  * `tracker/` ({@link TRACKER_DESTINATION_ROOT}) holds the per-provider mechanics and `pr/`
  * ({@link PR_HOST_DESTINATION_ROOT}) the PR/review host bodies; the build emits both
  * wholesale, so anything inside them the manifest does not name is by construction a
- * leftover — a retired op, a provider the selection dropped, a shadow-supplied file, a
+ * leftover — a retired op, a provider the registry dropped, a shadow-supplied file, a
  * staging tree a crashed run stranded — and removing it is the only way the installed
- * tree can equal the manifest. `pr/` is wanted under EVERY provider (applies ADR-026), so
- * a provider switch neither adds nor removes the directory; what it converges is the
- * directory's CONTENTS, exactly as `tracker/`'s are converged. Both entries are the
+ * tree can equal the manifest. Every install carries both whole
+ * (D-INSTALL-ALL-PROVIDERS), so what the prune converges is each directory's CONTENTS. Both entries are the
  * registry's own constants, so a renamed destination root moves the build and the prune
  * together.
  *
@@ -500,8 +499,7 @@ export interface ReferenceOverlayResult {
    * {@link unchangedRefs} instead, never here — see {@link stagedUnitIsAlreadyInstalled}.
    * That is what lets a render site distinguish an install that moved something from a
    * re-run that converged onto a tree already in the right state, and it is the whole
-   * basis of `devflow tracker --set <same provider>`'s `(unchanged)` line and of a
-   * re-init reporting `+0 reference(s)`.
+   * basis of a re-init reporting `+0 reference(s)`.
    */
   overlaidRefs: string[];
   /**
@@ -1457,53 +1455,6 @@ export async function overlayGeneratedReferences(opts: {
   return { overlaidRefs, unchangedRefs, overlayFailures, pruned };
 }
 
-/**
- * Converge the installed `devflow:git` references onto ONE provider's install set.
- *
- * The provider-scoped entry point to {@link overlayGeneratedReferences}: it
- * resolves the install manifest and the target directory from a claudeDir and a
- * provider, and changes nothing else. There is exactly ONE overlay spelling in
- * this codebase and this is its only wrapper — `devflow init` reaches the
- * overlay through `installViaFileCopy`, `devflow tracker --set` reaches it
- * through here, and both converge to the same manifest for the same provider.
- *
- * Convergence is two-directional by construction, because the underlying overlay
- * PRUNES everything under its converged subtrees the manifest does not name: a
- * jira → github change removes the jira tree and `_mcp.md` in the same call that
- * refreshes the github tree (applies PF-015). `references/pr/` is wanted under
- * every provider (applies ADR-026), so a provider change leaves it standing —
- * converged, not removed.
- *
- * Throws on an absent generated tree, exactly as its callee does — that is a
- * build artifact that was never produced, not an I/O degradation, and the
- * refusal lands before the target directory is created so a refused overlay
- * leaves the install as it found it.
- *
- * @param opts.provider - The RESOLVED tracker provider id.
- * @param opts.referencesRoot - The GENERATED tree to install from; defaults to
- *   `compiledSkillRefsDir()`. Injectable so the absent-tree refusal is provable
- *   without deleting `dist/` out from under a concurrent test run (applies
- *   PF-013 — a seam the caller can drive, not a global the test has to break).
- */
-export async function overlayInstalledReferences(opts: {
-  claudeDir: string;
-  provider: string;
-  warn?: (msg: string) => void;
-  referencesRoot?: string;
-}): Promise<ReferenceOverlayResult> {
-  return overlayGeneratedReferences({
-    referencesTarget: path.join(
-      opts.claudeDir,
-      'skills',
-      prefixSkillName(SKILL_REFS_SKILL_NAME),
-      'references',
-    ),
-    sourceRoot: opts.referencesRoot,
-    manifest: installedReferenceManifest({ provider: opts.provider }),
-    warn: opts.warn,
-  });
-}
-
 /** The directory inside an installed skill that the reference overlay converges. */
 const SKILL_REFERENCES_DIRNAME = 'references';
 
@@ -1713,14 +1664,6 @@ export interface FileCopyOptions {
   skillsMap: Map<string, string>;
   agentsMap: Map<string, string>;
   /**
-   * The RESOLVED tracker provider. Required rather than defaulted: the overlay
-   * converges — it PRUNES what the manifest does not name — so a caller that
-   * forgot to pass one would not install a slightly wrong set, it would delete
-   * the previous provider's mechanics on every install. There is no safe
-   * default for a destructive convergence, so the type refuses to guess.
-   */
-  trackerProvider: string;
-  /**
    * The plugins whose skill closure {@link FileCopyOptions.skillsMap} was built
    * from — the removal and dormancy decisions are made against these.
    *
@@ -1871,11 +1814,11 @@ export async function installViaFileCopy(options: FileCopyOptions): Promise<Inst
     // needed (D-OVERLAY-OWNERSHIP), for the same reason. The agent directory is
     // emptied AROUND the one file `convergeTrackerArtifacts` owns: taking it
     // would leave converge with nothing to byte-compare against, so a
-    // steady-state jira re-init would re-copy the agent and announce
+    // steady-state re-init would re-copy the agent and announce
     // `tracker agent installed` on every run. Everything else is removed
     // exactly as the unconditional wipe removed it, and the file is still
-    // converged on this run — under github converge deletes it, and drift in it
-    // is restored, so preserving it strands nothing.
+    // converged on this run — drift in it is restored, so preserving it strands
+    // nothing.
     try {
       await emptyDirectoryExcept(
         path.join(claudeDir, 'agents', 'devflow'),
@@ -1938,9 +1881,7 @@ export async function installViaFileCopy(options: FileCopyOptions): Promise<Inst
   // file — including a reference at the references ROOT, which the overlay may replace
   // but never delete (D-OVERLAY-FLAT-UNIT) — does not survive a full install.
   if (!isPartialInstall) {
-    const overlayOwned = overlayOwnedSkillPaths(
-      installedReferenceManifest({ provider: options.trackerProvider }),
-    );
+    const overlayOwned = overlayOwnedSkillPaths(installedReferenceManifest());
     for (const skill of skillsMap.keys()) {
       // Empty the prefixed directory (its contents are re-created during the install
       // phase), minus whatever another converger owns inside it.
@@ -2012,14 +1953,12 @@ export async function installViaFileCopy(options: FileCopyOptions): Promise<Inst
   // build/packaging failure and throws rather than silently skipping (matches
   // command pattern); the message names the build step as well as the tree.
   //
-  // D-TRACKER-AGENT-OWNER: every declared agent but ONE. The Tracker agent's
-  // presence is conditional on the resolved provider, and `convergeTrackerArtifacts`
-  // owns that decision alone (plan A3) — it runs after this function in init and is
-  // the sole caller in `devflow tracker --set`. Copying it here too made every
-  // install do the work twice and the two owners contradict each other in both
-  // directions: a github run reported `tracker agent removed` for a file only that
-  // same run had written, and a fresh jira install never reported `installed`
-  // because converge found this loop's byte-identical copy already in place.
+  // D-TRACKER-AGENT-OWNER: every declared agent but ONE. The Tracker agent is
+  // converged by `convergeTrackerArtifacts` alone (plan A3), which runs after this
+  // function in init and reports whether this run wrote it. Copying it here too
+  // would make every install do the work twice, and a fresh install would never
+  // report `installed` because converge would find this loop's byte-identical copy
+  // already in place.
   //
   // The name is skipped from the COPY set only. It stays declared in
   // `devflow-core-skills.agents`, so the sweep below — which keys on the full
@@ -2103,10 +2042,9 @@ export async function installViaFileCopy(options: FileCopyOptions): Promise<Inst
     if (skillName === SKILL_REFS_SKILL_NAME) {
       const overlay = await overlayGeneratedReferences({
         referencesTarget: path.join(skillTarget, 'references'),
-        // Only the tracker mechanics this install can reach: {github} ∪ the
-        // selected provider. The overlay converges rather than merges, so a
-        // provider left behind by a previous selection is pruned here.
-        manifest: installedReferenceManifest({ provider: options.trackerProvider }),
+        // Every provider's mechanics (D-INSTALL-ALL-PROVIDERS). The overlay
+        // converges rather than merges, so a retired generated document is pruned.
+        manifest: installedReferenceManifest(),
         warn,
       });
       report.overlaidRefs.push(...overlay.overlaidRefs);

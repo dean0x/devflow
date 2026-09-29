@@ -1,5 +1,5 @@
 /**
- * devflow tracker — Show or set the issue tracker provider.
+ * devflow tracker — Show or set the machine's issue tracker provider.
  *
  * D-TRACKER-PAIR [DR-25]: `src/core/tracker.ts` (domain) +
  *   `src/cli/commands/tracker.ts` (CLI) mirrors the `compliance.ts` pair
@@ -9,41 +9,40 @@
  *
  * Applies ADR-013: CLI-layer module; the provider domain, the strict parser and
  *   the ~/.devflow file lifecycle all live in src/core/tracker.ts.
- * The manifest is the source of truth for the selected provider: tracker is a
- *   manifest-group feature like proxy and compliance, not
- *   .devflow/config.json-gated, so the selection is machine-wide, not per-repo.
+ * The manifest holds the MACHINE default. A repository may select its own
+ *   provider in its committed `.devflow/project.json` (resolved by
+ *   resolve-settings.cjs); `--status` names it on an `Effective:` line when one
+ *   does, and `--set` never touches it.
  * Avoids PF-015: --set converges the sentinel in BOTH directions, so flipping
  *   back to github removes what flipping away wrote.
- * Avoids PF-009: a failed rename/rearm/sentinel step warns, it never aborts.
+ * Avoids PF-009: a failed re-arm or sentinel step warns, it never aborts.
  */
 
 import { Command } from 'commander';
 import { promises as fs } from 'fs';
 import * as path from 'path';
-import type { FileHandle } from 'fs/promises';
 import * as p from '@clack/prompts';
 import color from 'picocolors';
 
 import {
   DEFAULT_TRACKER_PROVIDER,
   TRACKER_ATTEMPTS_MAX,
+  TRACKER_CONVENTIONS_READ_BYTES,
   TRACKER_PROVIDERS,
   applyTrackerSentinel,
   describeTrackerValue,
+  parseTrackerFrontmatter,
   parseTrackerId,
+  readBoundedHead,
   rearmTrackerInference,
-  renameStaleTrackerConventions,
   trackerConventionsPath,
   type TrackerFeatureState,
   type TrackerProvider,
   type TrackerResult,
-  type TrackerTransition,
 } from '../../core/tracker.js';
 import { readManifest, syncManifestFeature } from '../../core/manifest.js';
+import { loadSettingsModule, repoTrackerSelection, type RepoTrackerSelection } from '../../core/evidence-policy.js';
 import { getClaudeDirectory, getDevFlowDirectory } from '../../targets/claude-code/claude-paths.js';
-import { overlayInstalledReferences, overlayUnitLabel, type ReferenceOverlayResult } from '../../targets/claude-code/installer.js';
-import { convergeTrackerArtifacts, type ConvergeTrackerArtifactsResult } from '../../targets/claude-code/tracker-install.js';
-import { describeOverlayFailureState } from './install-report.js';
 import { SKILL_REFS_SKILL_NAME, installedReferenceManifest } from '../../core/mds-variants.js';
 import { prefixSkillName } from '../../core/plugins.js';
 
@@ -57,7 +56,7 @@ export interface TrackerCliActionMessage {
 // ── Provenance (the --status surface) ──────────────────────────────────────────
 
 /**
- * What `~/.devflow/tracker.md` reports about itself.
+ * What one provider's conventions file reports about itself.
  *
  * `present` with both fields undefined is a real, distinct outcome: the file
  * exists but carries no readable frontmatter. Reported as such — never
@@ -67,68 +66,24 @@ export type TrackerProvenance =
   | { kind: 'absent' }
   | { kind: 'present'; provider?: string; inferredFrom?: string };
 
-/** How many leading lines of tracker.md are scanned for frontmatter. */
-const PROVENANCE_SCAN_LINES = 40;
-
 /**
- * How many leading BYTES of tracker.md are read.
+ * Read the provenance header of `~/.devflow/tracker/{provider}.md`.
  *
- * The line cap above bounds the SCAN, not the read: `String.prototype.split`'s
- * limit truncates the resulting array once the whole file is already in memory.
- * tracker.md is hand-editable and machine-wide, so its size is not devflow's to
- * assume — this is the same bound the Tracker agent writes to and the Git agent
- * loads, enforced at the one TypeScript reader (avoids PF-023: a bound is only
- * real at the sink, and a file round-trip launders the writer's promise).
- */
-const PROVENANCE_READ_BYTES = 8000;
-
-/**
- * Read at most `limit` bytes from the head of a file.
- *
- * `undefined` for an absent, unreadable or non-file path — the caller reports
- * that as `absent` (PF-014: never throws).
- */
-async function readBoundedHead(filePath: string, limit: number): Promise<string | undefined> {
-  let handle: FileHandle | undefined;
-  try {
-    handle = await fs.open(filePath, 'r');
-    const buffer = Buffer.alloc(limit);
-    const { bytesRead } = await handle.read(buffer, 0, limit, 0);
-    return buffer.subarray(0, bytesRead).toString('utf-8');
-  } catch {
-    return undefined;
-  } finally {
-    await handle?.close().catch(() => undefined);
-  }
-}
-
-/**
- * Read the provenance header of `~/.devflow/tracker.md`.
- *
- * Never throws (PF-014): an absent, unreadable, or directory path is `absent`.
+ * Never throws (PF-014): an absent, unreadable, or non-regular path is `absent`.
  * Only the bounded head of the file is read and only the leading frontmatter
- * block is scanned, and nothing read here is trusted — every value is rendered
- * through `describeTrackerValue`, because tracker.md is hand-editable and
- * machine-wide, so its content is third-party input at every sink.
+ * block is scanned — through the one frontmatter parser the migration also uses —
+ * and nothing read here is trusted: every value is rendered through
+ * `describeTrackerValue`, because the file is hand-editable and machine-wide, so
+ * its content is third-party input at every sink.
  */
-export async function readTrackerProvenance(devflowDir: string): Promise<TrackerProvenance> {
-  const head = await readBoundedHead(trackerConventionsPath(devflowDir), PROVENANCE_READ_BYTES);
+export async function readTrackerProvenance(
+  devflowDir: string,
+  provider: TrackerProvider,
+): Promise<TrackerProvenance> {
+  const head = await readBoundedHead(trackerConventionsPath(devflowDir, provider), TRACKER_CONVENTIONS_READ_BYTES);
   if (head === undefined) return { kind: 'absent' };
-
-  const lines = head.split('\n', PROVENANCE_SCAN_LINES);
-  if (lines[0]?.trim() !== '---') return { kind: 'present' };
-
-  let provider: string | undefined;
-  let inferredFrom: string | undefined;
-  for (const line of lines.slice(1)) {
-    if (line.trim() === '---') break;
-    const match = /^([A-Za-z-]+):\s*(.*)$/.exec(line);
-    if (match === null) continue;
-    if (match[1] === 'provider' && provider === undefined) provider = match[2].trim();
-    if (match[1] === 'inferred-from' && inferredFrom === undefined) inferredFrom = match[2].trim();
-  }
-
-  return { kind: 'present', provider, inferredFrom };
+  const { provider: named, inferredFrom } = parseTrackerFrontmatter(head);
+  return { kind: 'present', provider: named, inferredFrom };
 }
 
 /**
@@ -144,20 +99,18 @@ export type TrackerMechanicsState =
   | { kind: 'unreadable'; errno: string };
 
 /**
- * Count the installed tracker mechanics for the resolved provider.
+ * Count the installed tracker mechanics.
  *
- * Counts what is PRESENT against the manifest for that provider rather than
- * listing the directory: the question a user asks `--status` is "can the agent
- * load what it is told to load?", and a stray file in the tree is not an answer
- * to it. Never throws (PF-014).
+ * Counts what is PRESENT against the install manifest — every provider's, since
+ * every install carries them all (D-INSTALL-ALL-PROVIDERS) — rather than listing
+ * the directory: the question a user asks `--status` is "can the agent load what
+ * it is told to load?", and a stray file in the tree is not an answer to it.
+ * Never throws (PF-014).
  */
-export async function readTrackerMechanics(
-  claudeDir: string,
-  provider: TrackerProvider,
-): Promise<TrackerMechanicsState> {
+export async function readTrackerMechanics(claudeDir: string): Promise<TrackerMechanicsState> {
   const root = path.join(claudeDir, 'skills', prefixSkillName(SKILL_REFS_SKILL_NAME), 'references');
   let present = 0;
-  for (const rel of installedReferenceManifest({ provider })) {
+  for (const rel of installedReferenceManifest()) {
     try {
       await fs.access(path.join(root, ...rel.split('/')));
       present++;
@@ -203,7 +156,62 @@ export function formatTrackerProvenance(provenance: TrackerProvenance): string {
   return parts.join(' — ');
 }
 
-// ── CLI action ─────────────────────────────────────────────────────────────────
+/**
+ * The conventions of the provider in effect, for the `--status` note.
+ *
+ * GitHub learns none (D-TRACKER-NO-ENABLED: no inference, no background agent,
+ * no conventions file), so it is `none` and names no path — a `tracker/github.md`
+ * would be a file nothing ever writes or reads.
+ */
+export type TrackerStatusConventions =
+  | { readonly kind: 'none' }
+  | { readonly kind: 'learned'; readonly file: string; readonly provenance: TrackerProvenance };
+
+/** Read the conventions `--status` reports for `provider`. Never throws: see readTrackerProvenance. */
+export async function readTrackerStatusConventions(
+  devflowDir: string,
+  provider: TrackerProvider,
+): Promise<TrackerStatusConventions> {
+  if (provider === DEFAULT_TRACKER_PROVIDER) return { kind: 'none' };
+  return {
+    kind: 'learned',
+    file: trackerConventionsPath(devflowDir, provider),
+    provenance: await readTrackerProvenance(devflowDir, provider),
+  };
+}
+
+/**
+ * The `--status` note's lines. Pure.
+ *
+ * The `Effective:` line appears ONLY when a repository layer selects the tracker
+ * (`selection` non-null) — `Effective:   jira (project)` — so a machine whose own
+ * provider decides prints the same five labels it always has. The conventions
+ * lines describe the provider in effect HERE, which is the one whose file a
+ * session in this repository learns and a Git spawn in it reads.
+ */
+export function formatTrackerStatus(input: {
+  readonly machine: TrackerProvider;
+  readonly selection: RepoTrackerSelection | null;
+  readonly conventions: TrackerStatusConventions;
+  readonly mechanics: TrackerMechanicsState;
+  readonly inference: string;
+}): string {
+  const providerLabel = input.machine === DEFAULT_TRACKER_PROVIDER
+    ? `${color.green(input.machine)} ${color.dim('(default)')}`
+    : color.green(input.machine);
+  const lines = [`Provider:    ${providerLabel}`];
+  if (input.selection !== null) {
+    lines.push(`Effective:   ${color.green(input.selection.provider)} (${input.selection.source})`);
+  }
+  lines.push(
+    ...(input.conventions.kind === 'none'
+      ? ['Conventions: none (GitHub needs no learned conventions)', 'File:        none']
+      : [`Conventions: ${formatTrackerProvenance(input.conventions.provenance)}`, `File:        ${input.conventions.file}`]),
+    `Mechanics:   ${formatTrackerMechanics(input.mechanics)}`,
+    `Inference:   ${input.inference}`,
+  );
+  return lines.join('\n');
+}
 
 // ── --set: the convergence sequence ───────────────────────────────────────────
 
@@ -215,24 +223,7 @@ export function formatTrackerProvenance(provenance: TrackerProvenance): string {
  * is assertable. The order is the invariant here, not an implementation detail.
  */
 export interface TrackerSetIO {
-  /** Is `devflow:git` installed? Its `references/` is where the mechanics land. */
-  gitSkillInstalled(claudeDir: string): Promise<boolean>;
-  overlayReferences(
-    claudeDir: string,
-    provider: TrackerProvider,
-    warn: (msg: string) => void,
-  ): Promise<ReferenceOverlayResult>;
-  renameStaleConventions(
-    devflowDir: string,
-    previous: TrackerProvider,
-    resolved: TrackerProvider,
-  ): Promise<TrackerTransition>;
   syncManifest(devflowDir: string, state: TrackerFeatureState): Promise<void>;
-  convergeArtifacts(
-    claudeDir: string,
-    provider: TrackerProvider,
-    warn: (msg: string) => void,
-  ): Promise<ConvergeTrackerArtifactsResult>;
   rearmInference(devflowDir: string): Promise<TrackerResult<void>>;
   applySentinel(devflowDir: string, provider: TrackerProvider): Promise<TrackerResult<void>>;
 }
@@ -240,188 +231,63 @@ export interface TrackerSetIO {
 /** The real adapter — the ONE binding of each operation into the `--set` path. */
 export function buildTrackerSetIO(): TrackerSetIO {
   return {
-    gitSkillInstalled: async (claudeDir) => {
-      try {
-        await fs.access(path.join(claudeDir, 'skills', prefixSkillName(SKILL_REFS_SKILL_NAME), 'SKILL.md'));
-        return true;
-      } catch { return false; }
-    },
-    overlayReferences: (claudeDir, provider, warn) =>
-      overlayInstalledReferences({ claudeDir, provider, warn }),
-    renameStaleConventions: renameStaleTrackerConventions,
     syncManifest: (devflowDir, state) => syncManifestFeature(devflowDir, 'tracker', state),
-    convergeArtifacts: (claudeDir, provider, warn) =>
-      convergeTrackerArtifacts({ claudeDir, provider, warn }),
     rearmInference: rearmTrackerInference,
     applySentinel: applyTrackerSentinel,
   };
 }
 
 export interface TrackerSetOutcome {
-  exitCode: 0 | 1;
-  /** The provider in force when this returned — unchanged on an aborted run. */
+  /** The provider in force when this returned. */
   provider: TrackerProvider;
   messages: TrackerCliActionMessage[];
 }
 
 /**
- * Converge every tracker artifact onto a newly selected provider.
+ * Select the machine's default tracker provider.
  *
- * D-TRACKER-CONVERGE-SET: the step order is the invariant, and it is NOT the
- * same as `devflow init`'s — the two are different call paths obeying one
- * principle, and forcing them through a shared signature would hide the
- * reordering rather than document it.
+ * D-TRACKER-CONVERGE-SET: `--set` writes exactly three things, in this order —
  *
- *   1. probe `devflow:git`  — the mechanics have nowhere to land without it
- *   2. OVERLAY the references  (abort on failure, exit 1)
- *   3. rename stale conventions
- *   4. persist the manifest
- *   5. converge the Tracker AGENT file
- *   6. re-arm the attempt counter
- *   7. converge the sentinel  (write gated on 5; removal unconditional)
+ *   1. the manifest            (the machine default; what every other step names)
+ *   2. the attempt counters    (re-armed, so the new provider gets its five tries)
+ *   3. the sentinel            (the provider's name, or removed for github)
  *
- * The overlay precedes the manifest write, and the agent file follows it. That
- * asymmetry is the point: the reference subtree is INERT — nothing loads it
- * until a Git spawn resolves a provider, and resolving a provider reads the
- * manifest — so installing it early costs nothing and lets a failure abort
- * cleanly with the previous provider still whole. The agent file and the
- * sentinel are ADVERTISING artifacts: they announce a provider, so they must
- * never get ahead of the manifest that records it.
+ * and nothing else. Every provider's mechanics and the Tracker agent are already
+ * installed (D-INSTALL-ALL-PROVIDERS), so a selection change has no reference tree
+ * to swap and no agent to add or remove; and each provider keeps its own
+ * conventions file (D-TRACKER-PER-PROVIDER-CONVENTIONS), so there is nothing to
+ * move aside. The sentinel follows the manifest because it ADVERTISES the value
+ * the manifest records, and must never get ahead of it.
  *
- * Both abort branches — an absent `devflow:git` and a failed overlay — leave the
- * SAME end state and exit 1 (design review C3): manifest, sentinel and
- * conventions unchanged. What the overlay branch cannot claim is that nothing
- * moved at all: the overlay is atomic PER UNIT, so units that succeeded are
- * converged and only the failed ones are reported (design review H1). Saying
- * "nothing else changed" would be the more comfortable sentence and the false
- * one.
- *
- * Never throws, except where its callee does: an absent generated tree is a
- * build artifact that was never produced, and the CLI turns that into exit 1
- * with the build command named — asymmetric against the warn-only rename,
- * re-arm and sentinel steps, because those degrade a working install while an
- * absent tree means there is nothing to install at all.
+ * Never throws, except where the manifest writer does. The re-arm and sentinel
+ * steps warn rather than abort: each degrades a working install, never breaks it.
  */
 export async function runTrackerSet(opts: {
   devflowDir: string;
-  claudeDir: string;
   current: TrackerFeatureState;
   requested: TrackerProvider;
   io: TrackerSetIO;
 }): Promise<TrackerSetOutcome> {
-  const { devflowDir, claudeDir, current, requested, io } = opts;
+  const { devflowDir, current, requested, io } = opts;
   const messages: TrackerCliActionMessage[] = [];
-  const abort = (text: string): TrackerSetOutcome => {
-    messages.push({ level: 'error', text });
-    return { exitCode: 1, provider: current.provider, messages };
-  };
 
-  // 1. Without devflow:git there is no references/ directory to converge into,
-  //    and creating one would leave an invisible husk under a skill that does
-  //    not exist — a directory no sweep looks inside because no skill claims it.
-  if (!await io.gitSkillInstalled(claudeDir)) {
-    return abort(
-      `devflow:git is not installed — run devflow init --tracker ${requested}. ` +
-      `The manifest, sentinel and conventions file are unchanged.`,
-    );
-  }
-
-  // 2. The overlay. Runs even when the provider is unchanged, so a `--set` that
-  //    repeats the current selection self-heals a damaged subtree instead of
-  //    early-returning on an equality check that proves nothing about disk.
-  const overlayWarnings: string[] = [];
-  let overlay: ReferenceOverlayResult;
-  try {
-    overlay = await io.overlayReferences(claudeDir, requested, (msg) => overlayWarnings.push(msg));
-  } catch (error) {
-    return abort(
-      `Tracker: not changed — ${requested} assets could not be installed. ` +
-      `${error instanceof Error ? error.message : String(error)}`,
-    );
-  }
-  for (const text of overlayWarnings) messages.push({ level: 'warn', text });
-
-  if (overlay.overlayFailures.length > 0) {
-    for (const failure of overlay.overlayFailures) {
-      messages.push({
-        level: 'warn',
-        text:
-          `${overlayUnitLabel(failure.unit)}: ${failure.error} — ` +
-          `${describeOverlayFailureState(failure.state)}`,
-      });
-    }
-    return abort(
-      `Tracker: not changed — ${requested} assets could not be installed. The manifest, ` +
-      `sentinel and conventions file are unchanged; the overlay is atomic per unit, so the ` +
-      `units that succeeded are converged and the ${overlay.overlayFailures.length} that failed ` +
-      `are reported above.`,
-    );
-  }
-
-  // 3. A conventions file inferred for the previous provider is stale the moment
-  //    the provider changes — move it aside so it can never be silently
-  //    authoritative, and so the reader-side mismatch guard has nothing to fight.
-  const transition = await io.renameStaleConventions(devflowDir, current.provider, requested);
-  if (transition.kind === 'renamed') {
-    messages.push({
-      level: 'info',
-      text: `Moved the previous ${transition.previous} conventions aside: ${transition.to}`,
-    });
-  } else if (transition.kind === 'failed') {
-    messages.push({ level: 'warn', text: transition.error });
-  }
-
-  // 4. Persist. Everything after this point advertises the persisted value.
   await io.syncManifest(devflowDir, { provider: requested });
 
-  // 5. The Tracker agent file.
-  const agentWarnings: string[] = [];
-  const artifacts = await io.convergeArtifacts(claudeDir, requested, (msg) => agentWarnings.push(msg));
-  for (const text of agentWarnings) messages.push({ level: 'warn', text });
-
-  // 6 + 7. [DR-22] a selection change re-arms the attempt counter; [DR-10] the
-  // sentinel converges in both directions. A removal is always attempted, because
-  // a stale sentinel costs every future session a fork for a provider the user
-  // has left; the WRITE is gated on the agent being SPAWNABLE (design review C2).
-  //
-  // The gate is `agentPresent`, not `converged`. Reading `converged` alone is
-  // wrong in both directions: a re-copy that fails over an already-installed
-  // agent would disable a provider that still works, and merely SUPPRESSING the
-  // write leaves the previous provider's sentinel in place — so a jira → linear
-  // switch whose agent copy failed keeps advertising jira, which is the very
-  // state the suppression exists to prevent. Not-spawnable therefore REMOVES,
-  // through the one sentinel owner in src/core/tracker.ts (D-TRACKER-OWNER) —
-  // never an inline fs.rm here.
+  // [DR-22] a selection change re-arms the attempt counters; [DR-10] the
+  // sentinel converges in both directions.
   const rearm = await io.rearmInference(devflowDir);
   if (!rearm.ok) messages.push({ level: 'warn', text: rearm.error });
 
-  const advertisable = requested === DEFAULT_TRACKER_PROVIDER || artifacts.agentPresent;
-  const sentinel = await io.applySentinel(
-    devflowDir,
-    advertisable ? requested : DEFAULT_TRACKER_PROVIDER,
-  );
+  const sentinel = await io.applySentinel(devflowDir, requested);
   if (!sentinel.ok) messages.push({ level: 'warn', text: sentinel.error });
-  if (!advertisable) {
-    messages.push({
-      level: 'warn',
-      text:
-        `Tracker sentinel removed — no ${requested} agent is installed, so nothing advertises a ` +
-        `provider whose agent is missing and no session will try to spawn it. ` +
-        `Re-run devflow tracker --set ${requested}.`,
-    });
-  }
 
-  const removed = overlay.pruned.removed.length;
-  const agentNote = artifacts.agent === 'unchanged' ? '' : `, tracker agent ${artifacts.agent}`;
-  const moved = overlay.overlaidRefs.length > 0 || removed > 0 || agentNote !== '';
+  const unchanged = requested === current.provider;
   messages.push({
-    level: requested === current.provider ? 'info' : 'success',
-    text: moved
-      ? `Tracker: ${requested} — ${overlay.overlaidRefs.length} installed, ${removed} removed${agentNote}`
-      : `Tracker: ${requested} (unchanged)`,
+    level: unchanged ? 'info' : 'success',
+    text: unchanged ? `Tracker: ${requested} (unchanged)` : `Tracker: ${requested}`,
   });
 
-  return { exitCode: 0, provider: requested, messages };
+  return { provider: requested, messages };
 }
 
 interface TrackerOptions {
@@ -430,12 +296,12 @@ interface TrackerOptions {
 }
 
 export const trackerCommand = new Command('tracker')
-  .description('Show or set the issue tracker provider')
+  .description('Show or set the machine\'s issue tracker provider')
   .option(
     '--status',
-    'Show the selected provider and the learned conventions file, and re-arm background inference',
+    'Show the provider in effect and its learned conventions file, and re-arm background inference',
   )
-  .option('--set <id>', 'Set the issue tracker provider: github, jira, or linear')
+  .option('--set <id>', 'Set the machine\'s default issue tracker provider: github, jira, or linear')
   .action(async (options: TrackerOptions) => {
     const devflowDir = getDevFlowDirectory();
 
@@ -445,11 +311,11 @@ export const trackerCommand = new Command('tracker')
       const validIds = TRACKER_PROVIDERS.map(t => `${t.id} — ${t.hint}`).join('\n  ');
       p.note(
         `${color.cyan('devflow tracker --status')}      Show the provider and learned conventions\n` +
-        `${color.cyan('devflow tracker --set <id>')}    Select the issue tracker provider\n\n` +
+        `${color.cyan('devflow tracker --set <id>')}    Set the machine's default provider\n\n` +
         `Valid provider IDs:\n  ${validIds}`,
         'Usage',
       );
-      p.outro(color.dim('github is the default — devflow tracker --set github turns the rest off'));
+      p.outro(color.dim('github is the default — devflow tracker --set github returns to it'));
       return;
     }
 
@@ -475,10 +341,12 @@ export const trackerCommand = new Command('tracker')
     // ── Status ─────────────────────────────────────────────────────────────────
     // --status wins when both flags are passed, mirroring `devflow compliance`.
     if (options.status) {
-      const provenance = await readTrackerProvenance(devflowDir);
-      const mechanics = await readTrackerMechanics(getClaudeDirectory(), current.provider);
+      const selection = repoTrackerSelection(loadSettingsModule(), { dir: process.cwd() });
+      const effective = selection?.provider ?? current.provider;
+      const conventions = await readTrackerStatusConventions(devflowDir, effective);
+      const mechanics = await readTrackerMechanics(getClaudeDirectory());
 
-      // [D-F] Inspecting the status re-arms the attempt counter. --status is
+      // [D-F] Inspecting the status re-arms the attempt counters. --status is
       // the command a capped user reaches for to find out why nothing is being
       // learned, so it is the command that has to hand back another five
       // tries; the alternative leaves the only escape a hand deletion of an
@@ -492,17 +360,14 @@ export const trackerCommand = new Command('tracker')
         ? `re-armed (${TRACKER_ATTEMPTS_MAX} attempts available)`
         : 're-arm failed — see the warning below';
 
-      const providerLabel = current.provider === DEFAULT_TRACKER_PROVIDER
-        ? `${color.green(current.provider)} ${color.dim('(default)')}`
-        : color.green(current.provider);
       p.note(
-        [
-          `Provider:    ${providerLabel}`,
-          `Conventions: ${formatTrackerProvenance(provenance)}`,
-          `File:        ${trackerConventionsPath(devflowDir)}`,
-          `Mechanics:   ${formatTrackerMechanics(mechanics)}`,
-          `Inference:   ${inference}`,
-        ].join('\n'),
+        formatTrackerStatus({
+          machine: current.provider,
+          selection,
+          conventions,
+          mechanics,
+          inference,
+        }),
         'Tracker Status',
       );
 
@@ -514,7 +379,6 @@ export const trackerCommand = new Command('tracker')
     // ── Set ────────────────────────────────────────────────────────────────────
     const outcome = await runTrackerSet({
       devflowDir,
-      claudeDir: getClaudeDirectory(),
       current,
       requested: setProvider ?? current.provider,
       io: buildTrackerSetIO(),
@@ -528,8 +392,6 @@ export const trackerCommand = new Command('tracker')
         default: p.log.info(msg.text); break;
       }
     }
-
-    if (outcome.exitCode !== 0) process.exit(outcome.exitCode);
 
     if (outcome.provider !== DEFAULT_TRACKER_PROVIDER) {
       p.log.info(color.dim(

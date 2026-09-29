@@ -32,9 +32,6 @@ export interface SummaryLine {
  *
  * Pure function — returns lines, logs nothing (applies ADR-013).
  *
- * @param provider - The resolved tracker provider the overlay converged to. The
- *   count alone cannot say WHICH mechanics are installed, and after the install
- *   became selection-scoped that is the number's whole meaning.
  * @param skillName - Bare name of the skill hosting the generated references,
  *   rendered `devflow:`-prefixed. Defaults to the core constant the build path and
  *   the installer's overlay trigger both read, so the renderer is never a third
@@ -44,18 +41,16 @@ export interface SummaryLine {
  */
 export function formatOverlaySummary(
   report: Pick<InstallReport, 'overlaidRefs' | 'overlayFailures'>,
-  provider?: string,
   skillName: string = SKILL_REFS_SKILL_NAME,
 ): SummaryLine[] {
   const lines: SummaryLine[] = [];
 
   if (report.overlaidRefs.length > 0) {
-    const scope = provider === undefined ? '' : ` (${provider} tracker mechanics)`;
     lines.push({
       level: 'info',
       message:
         `Installed ${report.overlaidRefs.length} generated skill reference(s) for ` +
-        prefixSkillName(skillName) + scope,
+        prefixSkillName(skillName),
     });
   }
 
@@ -119,16 +114,15 @@ export function describeOverlayFailureState(state: OverlayFailureState): string 
 /**
  * The install summary's tracker rows.
  *
- * Two facts the previous summary never stated, and after the install became
- * selection-scoped both of them decide what the user actually has:
+ * Two facts the install has no other visible trace of:
  *
- *   - WHICH provider is active. The install has no other visible trace of it —
- *     the sentinel is a zero-byte dotfile and the mechanics are a directory the
- *     user has no reason to list. `(default)` distinguishes "github because I
- *     chose it" from "github because nothing was chosen"; `(was jira)` is what
- *     makes a self-heal or a `--reset` collapse legible rather than silent.
- *   - WHAT the provider change moved. A provider swap installs one tree and
- *     prunes another, and the agent file appears or disappears with it.
+ *   - WHICH provider is the machine default. The sentinel is a dotfile and every
+ *     provider's mechanics are installed (D-INSTALL-ALL-PROVIDERS), so nothing on
+ *     disk says which one the machine selected. `(default)` distinguishes "github
+ *     because I chose it" from "github because nothing was chosen"; `(was jira)`
+ *     is what makes a self-heal or a `--reset` collapse legible rather than silent.
+ *   - WHAT this run moved: references written or pruned, and the Tracker agent
+ *     when this run wrote it.
  *
  * The delta line is emitted only when something moved: on a steady-state re-init
  * the counts are noise.
@@ -145,7 +139,7 @@ export function formatTrackerAssetSummary(input: {
   readonly isDefault: boolean;
   readonly installedRefs: number;
   readonly removedRefs: number;
-  readonly agent: 'installed' | 'removed' | 'unchanged';
+  readonly agent: 'installed' | 'unchanged';
 }): SummaryLine[] {
   const lines: SummaryLine[] = [];
 

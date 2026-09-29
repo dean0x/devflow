@@ -11,6 +11,7 @@ output-dir: dist/commands
 @import { acceptance_criteria_contract } from "./_partials/_plan_contract.mds"
 @import { issue_ref_grammar, issue_capture_contract } from "./_partials/_tracker.mds"
 @import "./_partials/_publication.mds" as pub
+@import "./_partials/_compliance.mds" as compliance
 {{authoring_preamble()}}
 
 ---
@@ -52,6 +53,14 @@ Before you write the workflow script:
 {{evidence_policy()}}
 
 Author the resolved `ISSUE_REQUIRED` and `APPLY_CONVENTIONS` into the workflow script as constants — pass them as `issueRequired` and `applyConventions` when invoking the workflow — and pass both to the Git `setup-task` spawn.
+
+**0b. Resolve the compliance lens**
+
+**Produces:** COMPLIANCE_FRAMEWORKS
+
+{{compliance.compliance_lens()}}
+
+Pass it as `complianceFrameworks` when invoking the workflow; the engine hands it to every Code agent.
 
 **1. Apply decisions context**
 
@@ -132,6 +141,7 @@ const DECISIONS_CONTEXT = args.decisionsContext || "";  // injected before autho
 const ISSUE_INPUT = args.issueInput || args.issueNumber || "(none)";  // this ticket's OWN raw reference (Pre-authoring step 5; a wave passes issueInput) — setup-task's input, never a Code agent's
 const ISSUE_REQUIRED = String(args.issueRequired) === "false" ? "false" : "true";  // Pre-authoring step 0; only an explicit false turns it off — absent or unrecognised fails closed, like the resolver
 const APPLY_CONVENTIONS = String(args.applyConventions) === "false" ? "false" : "true";
+const COMPLIANCE_FRAMEWORKS = /^(?:off|none|[a-z][a-z0-9-]{0,15}(?:,[a-z][a-z0-9-]{0,15}){0,7})$/.test(String(args.complianceFrameworks)) ? String(args.complianceFrameworks) : "off";  // Pre-authoring step 0b; any other shape is no lens
 
 // Phase 1: Git setup — declare the operation; the agent owns the process, the branch name included
 const setup = await phase("setup", () =>
@@ -175,6 +185,7 @@ ${DECISIONS_CONTEXT}
 
 ISSUE_NUMBER: ${ISSUE_NUMBER}
 ISSUE_PR_LINK: ${ISSUE_PR_LINK}
+COMPLIANCE_FRAMEWORKS: ${COMPLIANCE_FRAMEWORKS}
 
 When you build or run tests to verify your work, use your "Long-running commands" discipline (background-Bash + Monitor poll) for anything that may run silent >120s, and prefer package-scoped commands.
 
@@ -198,6 +209,7 @@ Report: PASS or FAIL with details.`, { agentType: "Validate" });
 ${validation.details}
 ISSUE_NUMBER: ${ISSUE_NUMBER}
 ISSUE_PR_LINK: ${ISSUE_PR_LINK}
+COMPLIANCE_FRAMEWORKS: ${COMPLIANCE_FRAMEWORKS}
 Commit fixes with conventional-commit message.`, { agentType: "Code" });
       const recheck = await agent(`Re-run build, typecheck, lint, tests on branch ${BRANCH}. Report: PASS or FAIL.`, { agentType: "Validate" });
       if (recheck.verdict === "PASS") break;
@@ -241,6 +253,7 @@ Report: PASS or FAIL with rationale.`, { agentType: "Evaluate" }),
 ${panel.filter(p => p.verdict === "FAIL").map(p => p.rationale).join("\n")}
 ISSUE_NUMBER: ${ISSUE_NUMBER}
 ISSUE_PR_LINK: ${ISSUE_PR_LINK}
+COMPLIANCE_FRAMEWORKS: ${COMPLIANCE_FRAMEWORKS}
 Self-verify your fix compiles (background-Bash + Monitor for any build >120s — see your "Long-running commands" discipline). Commit fixes.`, { agentType: "Code" });
       evalVerdict = "FAIL-FIXED";  // issues found, fixes applied, not re-evaluated by design
     }
@@ -260,6 +273,7 @@ Cover: functionality, API contracts, performance, and cover every TEST_PLAN scen
 ${testResult.failures}
 ISSUE_NUMBER: ${ISSUE_NUMBER}
 ISSUE_PR_LINK: ${ISSUE_PR_LINK}
+COMPLIANCE_FRAMEWORKS: ${COMPLIANCE_FRAMEWORKS}
 Self-verify your fix compiles and the scenarios pass (background-Bash + Monitor for any build/test >120s). Commit fixes.`, { agentType: "Code" });
       testVerdict = "FAIL-FIXED";  // issues found, fixes applied, not re-evaluated by design
     }
@@ -373,6 +387,7 @@ ${chunk.map(f => `- ${f.description} (${f.severity})`).join("\n")}
 
 ISSUE_NUMBER: ${ISSUE_NUMBER}
 ISSUE_PR_LINK: ${ISSUE_PR_LINK}
+COMPLIANCE_FRAMEWORKS: ${COMPLIANCE_FRAMEWORKS}
 Fix all findings in this batch. Self-verify your fix compiles (background-Bash + Monitor for any build >120s — see your "Long-running commands" discipline). Commit with conventional-commit message.
 Return: {"status": "fixed"|"blocked", "commitShas": ["<sha>"], "unresolved": ["<description of any finding that could not be fixed>"]}`, { agentType: "Code" });
       chunkResults.push({ chunk, result: r });
@@ -423,6 +438,7 @@ Report: PASS or FAIL with details.`, { agentType: "Validate" });
 ${failureDetails}
 ISSUE_NUMBER: ${ISSUE_NUMBER}
 ISSUE_PR_LINK: ${ISSUE_PR_LINK}
+COMPLIANCE_FRAMEWORKS: ${COMPLIANCE_FRAMEWORKS}
 Self-verify your fix compiles. Commit fixes with conventional-commit message.`, { agentType: "Code" });
       const recheck = await agent(`Re-run build, typecheck, lint, tests on branch ${BRANCH} (background+Monitor for long commands). Report: PASS or FAIL.`, { agentType: "Validate" });
       if (recheck.verdict === "PASS") break;
@@ -555,7 +571,7 @@ Return: {"ready": [...ticket-ids], "blocked": [{"ticket": "id", "namedBlocker": 
     try {
       // ticketId is the ISSUE_REF the pre-fetch heading printed — this ticket's OWN reference: the engine's `ticket` (its TICKET)
       // and its setup-task ISSUE_INPUT; the engine returns the branch that setup-task created, merged below; plans[ticketId] is its own plan, criteria and checked testPlan (Pre-authoring step 4)
-      const engineResult = await runSingleTicketEngine({ ticket: ticketId, baseBranch: INTEGRATION_BRANCH, ...(plans[ticketId] || {}), decisionsContext: DECISIONS_CONTEXT, issueRequired: ISSUE_REQUIRED, applyConventions: APPLY_CONVENTIONS, issueInput: ticketId });
+      const engineResult = await runSingleTicketEngine({ ticket: ticketId, baseBranch: INTEGRATION_BRANCH, ...(plans[ticketId] || {}), decisionsContext: DECISIONS_CONTEXT, issueRequired: ISSUE_REQUIRED, applyConventions: APPLY_CONVENTIONS, complianceFrameworks: COMPLIANCE_FRAMEWORKS, issueInput: ticketId });
       // Check both verdict (engine_output_schema) and overallVerdict (SINGLE skeleton alias).
       // PASS and UNVERIFIED merge; PARTIAL, FAIL, ESCALATED (the ticket-link and branch stops included) or no verdict quarantine.
       if (["PASS", "UNVERIFIED"].includes(engineResult.verdict || engineResult.overallVerdict)) {

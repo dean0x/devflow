@@ -56,6 +56,7 @@ import {
   ROOT,
   TOOL_CALL_MECHANICS_CLAIMS,
   collectMissingMechanicsClaims,
+  collectSiteRungProblems,
   collectPerItemFetchVerbs,
   type ProviderCorpus,
   type ProviderRefVocabulary,
@@ -471,9 +472,9 @@ describe('cross-provider define-set parity, both directions (AC-3.8, §8.11)', (
     // One loop over ORDERED pairs replaces the two hand-written directions: with
     // three providers there are six directions, and writing them out would be six
     // places a message could drift. A define missing from one provider is an op
-    // whose reference for that provider is a heading with no mechanics — which
-    // reads downstream as `tracker mechanics unavailable` shipped as the normal
-    // path — and a define only one provider declares is either a section marker
+    // whose reference for that provider is a heading with no mechanics — the
+    // agent loads that operation and finds no instructions to follow — and a
+    // define only one provider declares is either a section marker
     // nobody emits or an operation one provider invented.
     const asymmetries: string[] = [];
     for (const [from, to] of PAIRS) {
@@ -1296,5 +1297,24 @@ describe('jira module: the clauses AC-3.3, AC-3.11 and §14.3 fix here', () => {
         reported.join('\n  '),
       ).toBe(true);
     }
+  });
+});
+
+describe('jira module: the settings SITE outranks the conventions file (AC-42, TP-47)', () => {
+  it('the compiled setup-task rung names the settings line\'s SITE first, then `## Project`', () => {
+    expect(collectSiteRungProblems(readGenerated(jiraRel('setup-task')))).toEqual([]);
+  });
+
+  it('and so does the module source it compiles from', () => {
+    expect(collectSiteRungProblems(readFileSync(path.join(ROOT, JIRA_MODULE), 'utf-8'))).toEqual([]);
+  });
+
+  it('known-bad probe: a reversed, a one-source and an absent rung are each reported', () => {
+    expect(collectSiteRungProblems(
+      "- **Site.** From `## Project`, else the settings line's `SITE`.",
+    )).toEqual(["the conventions file's `## Project` is consulted before the settings line's `SITE`"]);
+    expect(collectSiteRungProblems('- **Site.** From `## Project` in the configuration.'))
+      .toEqual(["the rung does not name the settings line's `SITE`"]);
+    expect(collectSiteRungProblems('no rung here')).toEqual(['expected one `- **Site.**` rung, found 0']);
   });
 });

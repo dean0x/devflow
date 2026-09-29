@@ -14,6 +14,7 @@ import * as path from 'path';
 import { writeFileAtomicExclusive } from './fs-atomic.js';
 import { getMemoryDir } from './project-paths.js';
 import { LEGACY_AGENT_KEYS, canonicaliseAgentKeys, parseAgentMappingEnvelope } from './agent-models.js';
+import { migrateLegacyTrackerConventions } from './tracker.js';
 
 export type MigrationScope = 'global' | 'per-project';
 
@@ -161,6 +162,40 @@ export const MIGRATIONS: readonly AnyMigration[] = [
         )
       }
       return { infos, warnings }
+    },
+  },
+  {
+    id: 'tracker-conventions-per-provider-v1',
+    description: 'Move ~/.devflow/tracker.md to ~/.devflow/tracker/{provider}.md, the provider its frontmatter names',
+    scope: 'global',
+
+    // D-TRACKER-PER-PROVIDER-CONVENTIONS: conventions became per provider, so the
+    // single machine-wide file moves to the file of the provider it was learned
+    // for. The move and every refusal to move are migrateLegacyTrackerConventions'
+    // (src/core/tracker.ts); this entry maps its outcome onto the runner's
+    // contract. A file it leaves in place is REPORTED, once, and the migration is
+    // marked applied — the file is user content and nothing a re-run could do
+    // differently. An I/O failure THROWS instead: a throwing migration is not
+    // marked applied, so the runner retries it on the next `devflow init` rather
+    // than recording a move that never happened (the retry-forever path the
+    // KNOWN ISSUE above describes is bounded here by what can fail — a rename and
+    // an rm inside ~/.devflow).
+    async run(ctx): Promise<MigrationRunResult> {
+      const outcome = await migrateLegacyTrackerConventions(ctx.devflowDir)
+      switch (outcome.kind) {
+        case 'none':
+          return { infos: [], warnings: [] }
+        case 'moved':
+          return { infos: [`Moved the ${outcome.provider} tracker conventions to ${outcome.to}`], warnings: [] }
+        case 'kept':
+          return { infos: [], warnings: [`tracker-conventions-per-provider-v1: ${outcome.reason}`] }
+        case 'failed':
+          throw new Error(outcome.error)
+        default: {
+          const _exhaustive: never = outcome
+          return _exhaustive
+        }
+      }
     },
   },
 ];
@@ -338,7 +373,7 @@ async function runGlobalMigration(
  * additional projects) can retry the failed projects.
  *
  * D37: runPerProjectMigration is unreachable in production — MIGRATIONS holds
- * only a global migration (`canonicalise-agent-keys-v1`). The vacuous-truth
+ * only global migrations. The vacuous-truth
  * analysis is preserved for correctness: if a per-project migration is ever
  * added, an empty discoveredProjects list marks it applied (empty-discovery-marks-applied
  * intended); the applied-set write is skipped only when newlyApplied is empty,
@@ -394,9 +429,9 @@ async function runPerProjectMigration(
  * Run all unapplied migrations from MIGRATIONS.
  *
  * D32: Always-run-unapplied semantics (no fresh-vs-upgrade branch).
- * MIGRATIONS currently holds one global migration (`canonicalise-agent-keys-v1`);
- * on a fresh machine the loop executes once and writes migrations.json. On
- * subsequent runs the ID is already in the applied set and the loop is a no-op.
+ * MIGRATIONS currently holds only global migrations; on a fresh machine each
+ * executes once and the applied set is written to migrations.json. On subsequent
+ * runs every ID is already in the applied set and the loop is a no-op.
  *
  * @param ctx - devflowDir, the resolved machine root (`~/.devflow`) that also holds
  *   migrations.json; memoryDir and projectRoot are filled per-project

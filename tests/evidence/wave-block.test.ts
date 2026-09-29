@@ -854,10 +854,10 @@ async function gate2Values(statement: string): Promise<Set<string>> {
         const phase = async (_n: string, fn: () => Promise<unknown>): Promise<unknown> => fn()
         const parallel = async (ts: Array<() => Promise<unknown>>): Promise<unknown[]> => Promise.all(ts.map(t => t()))
         const run = new AsyncFunction(
-          'phase', 'agent', 'parallel', 'BRANCH', 'PLAN', 'CRITERIA', 'TEST_PLAN', 'ISSUE_NUMBER', 'ISSUE_PR_LINK',
+          'phase', 'agent', 'parallel', 'BRANCH', 'PLAN', 'CRITERIA', 'TEST_PLAN', 'ISSUE_NUMBER', 'ISSUE_PR_LINK', 'COMPLIANCE_FRAMEWORKS',
           `${statement}\nreturn gate2;`,
         )
-        const g = (await run(phase, agent, parallel, 'ticket/x', input.plan, input.criteria, input.testPlan, '(none)', '(none)')) as Record<string, unknown>
+        const g = (await run(phase, agent, parallel, 'ticket/x', input.plan, input.criteria, input.testPlan, '(none)', '(none)', 'off')) as Record<string, unknown>
         values.add(String(g.evaluateVerdict))
         values.add(String(g.testVerdict))
       }

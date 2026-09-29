@@ -49,7 +49,7 @@ today: `_github.mds`, `_jira.mds`, and `_linear.mds` — three provider modules 
 the SAME shared `TRACKER_OPS` roster, 10 ops apiece — plus `_pr.mds` (8 ops, the shared
 `PR_HOST_OPS` roster, exactly `MIN_VARIANT_PAIRS`, fanning out to `pr/` under every
 provider — pull requests, PR reviews, and PR checks stay on GitHub whatever the issue
-tracker is, applies ADR-026) — plus `_references.mds` (3 named cross-cutting documents) and
+tracker is, and every install carries every provider anyway — ADR-031's install-all) — plus `_references.mds` (3 named cross-cutting documents) and
 `_mcp.mds`, a provider-independent tool-call **contract module** whose generation is gated
 on at least one tool-call-backed provider being registered (`mcpContractIsGenerated`) — the
 gate is open on this tree, so all six sources compile and nothing is deferred). `build-mds.ts` is the single compiler for all three host kinds, so
@@ -448,7 +448,7 @@ covers all three output kinds with the same one property.
 - ADR-013 (pure core modules, I/O at edges) — `src/core/mds-variants.ts` is zero-I/O; `scripts/build-mds.ts` is the shell that owns every filesystem call and `process.exit`.
 - ADR-024 (named collectors + known-bad probes) — `tests/build-mds-generator-hosts.test.ts`, `tests/mds-variants.test.ts`, and `tests/guards/dist-agents.test.ts` all follow this pattern (e.g. `collectAgentParity`, `collectEscapedBraceLeaks`, `collectForbiddenConstructs`, each with a paired known-bad probe).
 - ADR-025 (classify the case, never blanket-widen) — cited directly in `validateContractOutputName`'s own JSDoc as the reason a SECOND name rule was added for `'contract'`-kind ops rather than relaxing `OUTPUT_NAME_RE` for every host variant.
-- ADR-026 (selection-scoped install) — `_pr.mds`'s `pr/` output is wanted under EVERY provider (the PR-host tree is a floor, not a provider-scoped extra), so `installedReferenceManifest` names `PR_HOST_DESTINATION_ROOT` unconditionally and the installer's `CONVERGED_SUBTREES` prune leaves `pr/` standing across a provider switch.
+- ADR-031 (install-all; supersedes ADR-026's selection-scoped tracker bundle) — every install carries everything the build emits, `_pr.mds`'s `pr/` output included, so `installedReferenceManifest` equals the generated manifest and names `PR_HOST_DESTINATION_ROOT` unconditionally and the installer's `CONVERGED_SUBTREES` prune leaves `pr/` standing across a provider switch.
 - PF-011 (delete-then-write ENOENT window) — avoided by the temp-file + `renameSync` write pattern used for every output of all three host variants.
 - PF-073 (MDS compile cost exponential in @define count, multiplicative in selective-import capture graph) — `_pr.mds` is authored import-free specifically to stay off this cliff; see the Gotchas entry above.
 - PF-014 (no `process.exit` in core) — `mds-variants.ts` returns `Result`; only `build-mds.ts` exits.

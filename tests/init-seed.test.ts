@@ -948,13 +948,13 @@ describe('resolveTrackerInitState', () => {
 
 // ── init.ts tracker lifecycle call sites ──────────────────────────────────────
 //
-// [DR-22] / [DR-10] / P3a-S15: the attempt counter, the presence sentinel and the
-// stale-conventions rename each have exactly ONE owner in src/core/tracker.ts,
-// and `devflow init` binds each exactly once — into buildTrackerLifecycleIO, the
-// single adapter persistManifestThenConvergeTracker drives. These are
-// source-level assertions because init.ts's Commander `.action()` body is not
-// unit-reachable; they go red if someone inlines an `fs.rm`, duplicates a
-// binding, drops one, or reaches an owner outside the seam.
+// [DR-22] / [DR-10]: the attempt counters and the machine provider sentinel each
+// have exactly ONE owner in src/core/tracker.ts, and `devflow init` binds each
+// exactly once — into buildTrackerLifecycleIO, the single adapter
+// persistManifestThenConvergeTracker drives. These are source-level assertions
+// because init.ts's Commander `.action()` body is not unit-reachable; they go red
+// if someone inlines an `fs.rm`, duplicates a binding, drops one, or reaches an
+// owner outside the seam.
 //
 // Non-vacuity (PF-018): each "never inlined" assertion is paired with a probe
 // showing the same pattern DOES match src/core/tracker.ts, so a renamed constant
@@ -968,10 +968,10 @@ describe('init.ts tracker lifecycle call sites', () => {
   it('binds rearmTrackerInference exactly once and never inlines the removal [DR-22]', async () => {
     const source = await fs.readFile(INIT_SOURCE, 'utf-8');
     expect((source.match(/rearmInference: rearmTrackerInference,/g) ?? []).length).toBe(1);
-    expect(source).not.toMatch(/\.tracker\.attempts/);
+    expect(source).not.toMatch(/\.tracker\.[a-z${}]*\.?attempts/);
     // Known-bad probe: the literal exists in the owner module, so the absence
     // assertion above is a statement about init.ts, not about a dead pattern.
-    expect(await fs.readFile(TRACKER_SOURCE, 'utf-8')).toMatch(/\.tracker\.attempts/);
+    expect(await fs.readFile(TRACKER_SOURCE, 'utf-8')).toMatch(/\.tracker\.[a-z${}]*\.?attempts/);
   });
 
   it('binds applyTrackerSentinel exactly once and never inlines the sentinel path [DR-10]', async () => {
@@ -981,23 +981,23 @@ describe('init.ts tracker lifecycle call sites', () => {
     expect(await fs.readFile(TRACKER_SOURCE, 'utf-8')).toMatch(/\.tracker\.enabled/);
   });
 
-  it('binds the provider-change rename transition exactly once (P3a-S15)', async () => {
+  it('never moves a conventions file — conventions are per provider (D-TRACKER-PER-PROVIDER-CONVENTIONS)', async () => {
     const source = await fs.readFile(INIT_SOURCE, 'utf-8');
-    expect((source.match(/renameStaleConventions: renameStaleTrackerConventions,/g) ?? []).length).toBe(1);
+    expect(source).not.toMatch(/renameStale|\.bak\b/);
   });
 
   it('reaches every owner through the one injected lifecycle seam', async () => {
     const source = await fs.readFile(INIT_SOURCE, 'utf-8');
-    // Three owner calls in init.ts, each through `io.` — no direct invocation
+    // Two owner calls in init.ts, each through `io.` — no direct invocation
     // that would bypass persistManifestThenConvergeTracker's ordering gate.
-    expect((source.match(/\bio\.(rearmInference|applySentinel|renameStaleConventions)\(/g) ?? []).length).toBe(3);
-    expect((source.match(/\b(rearmTrackerInference|applyTrackerSentinel|renameStaleTrackerConventions)\(/g) ?? []).length).toBe(0);
+    expect((source.match(/\bio\.(rearmInference|applySentinel)\(/g) ?? []).length).toBe(2);
+    expect((source.match(/\b(rearmTrackerInference|applyTrackerSentinel)\(/g) ?? []).length).toBe(0);
   });
 
   it('writes the manifest only inside the tracker lifecycle seam (PF-015)', async () => {
     const source = await fs.readFile(INIT_SOURCE, 'utf-8');
     // The ordering invariant — converge only what the manifest persisted — is
-    // only real while the write and the three owners sit in one function, so the
+    // only real while the write and the owners sit in one function, so the
     // full-install path reaches the writer exclusively through the injected seam.
     expect((source.match(/\bio\.writeManifest\(/g) ?? []).length).toBe(1);
     // One definition, one call site.

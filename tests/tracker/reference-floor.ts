@@ -3,8 +3,8 @@
  *
  * A zero-byte file is already refused by `splitVariantSections`' empty-section
  * arm; this floor catches the next shape up — a section that kept its heading and
- * lost its body, which compiles and ships and reads downstream as `tracker
- * mechanics unavailable` taken as the normal path.
+ * lost its body, which compiles and ships and hands the agent an operation with
+ * no instructions to follow.
  *
  * Three suites measure that one shape, one step apart, which is why they read one
  * constant instead of three:
