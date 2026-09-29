@@ -91,7 +91,6 @@ interface ResolverModule {
   readonly WARNINGS: readonly Warning[];
   readonly EXIT_CODES: Readonly<Record<string, number>>;
   readonly MECHANISM_INPUTS: Readonly<Record<Policy, MechanismInputs>>;
-  readonly MAX_POLICY_BYTES: number;
   readonly SAFE_REF_RE: RegExp;
   readonly OUTPUT_LINE_RE: RegExp;
   readonly FAIL_CLOSED_LINE: string;
@@ -257,7 +256,6 @@ describe('module surface', () => {
     expect(RESOLVER.WARNINGS).toEqual([
       'remote-unavailable', 'invalid-file', 'raised-by-compliance', 'pr-changes-policy',
     ]);
-    expect(RESOLVER.MAX_POLICY_BYTES).toBe(4096);
     for (const registry of [RESOLVER.POLICIES, RESOLVER.SOURCES, RESOLVER.WARNINGS, RESOLVER.EXIT_CODES]) {
       expect(Object.isFrozen(registry)).toBe(true);
     }

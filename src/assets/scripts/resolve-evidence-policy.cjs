@@ -42,7 +42,7 @@
 //   - every subprocess is spawned with an argv array (never a shell), stdin
 //     ignored, a timeout and a maxBuffer; every loop has a fixed bound
 //   - a project.json that is not a regular file is never opened, and one over
-//     MAX_POLICY_BYTES is never read; a working-tree policy.json is never opened
+//     MAX_CONFIG_BYTES is never read; a working-tree policy.json is never opened
 //   - no index-refreshing git command runs (no `status`, no `diff`), so a
 //     repository's configured fsmonitor hook never fires; no fetch, no set-head
 
@@ -52,6 +52,9 @@ const fs = require('fs');
 const path = require('path');
 const childProcess = require('child_process');
 const projectConfig = require('./lib/project-config.cjs');
+
+/** Largest project.json read, in bytes — the shared parser's bound. */
+const { MAX_CONFIG_BYTES } = projectConfig;
 
 // ---------------------------------------------------------------------------
 // Closed vocabularies
@@ -119,12 +122,6 @@ const MECHANISM_INPUTS = Object.freeze({
 
 /** The mechanism-input keys, in line order. */
 const INPUT_KEYS = Object.freeze(['ISSUE_REQUIRED', 'APPLY_CONVENTIONS', 'REQUIRE_NON_AUTHOR_APPROVAL']);
-
-/**
- * Largest project.json read, in bytes — the shared parser's bound
- * (lib/project-config.cjs MAX_CONFIG_BYTES).
- */
-const MAX_POLICY_BYTES = projectConfig.MAX_CONFIG_BYTES;
 
 /**
  * A branch name this script will put into argv or onto stdout: an alphanumeric
@@ -399,7 +396,7 @@ function withRetiredPolicy(reading, probePolicy) {
  * @returns {SourceReading}
  */
 function readWorktreeSource(root) {
-  const read = readBoundedRegularFile(path.join(root, '.devflow', 'project.json'), MAX_POLICY_BYTES, false);
+  const read = readBoundedRegularFile(path.join(root, '.devflow', 'project.json'), MAX_CONFIG_BYTES, false);
   const project = read.kind === 'ok' ? projectConfig.parseProjectBytes(read.bytes)
     : read.kind === 'absent' ? PROJECT_ABSENT : PROJECT_INVALID;
   return withRetiredPolicy(projectReading(project), () => worktreePolicyPresence(root));
@@ -1096,7 +1093,6 @@ module.exports = Object.freeze({
   WARNINGS,
   EXIT_CODES,
   MECHANISM_INPUTS,
-  MAX_POLICY_BYTES,
   SAFE_REF_RE,
   OUTPUT_LINE_RE,
   FAIL_CLOSED_LINE,
