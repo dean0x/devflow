@@ -120,7 +120,8 @@ export const DEVFLOW_GITIGNORE_BLOCK = DEVFLOW_GITIGNORE_BLOCK_LINES.join('\n');
 /**
  * The entries directly under a repository's `.devflow/` that the team shares
  * through git (a trailing `/` marks a directory): the feature knowledge bases,
- * the naming conventions, the evidence policy and the committed project settings.
+ * the naming conventions, the retired evidence-policy file and the committed
+ * project settings.
  *
  * D-UNINSTALL-CARVE-OUT: uninstall's project-data step never deletes these — a
  * confirmed removal takes everything else under `.devflow/` and keeps them

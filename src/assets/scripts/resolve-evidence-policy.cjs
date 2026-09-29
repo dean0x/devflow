@@ -157,7 +157,7 @@ const FAIL_CLOSED_LINE =
 const GH_TIMEOUT_MS = 10000;
 const GIT_REMOTE_TIMEOUT_MS = 10000;
 const GIT_LOCAL_TIMEOUT_MS = 5000;
-/** gh answers and blob reads: generous for a 4 KiB policy, and an overflow is ENOBUFS ⇒ invalid. */
+/** gh answers and blob reads: generous for a 4 KiB project.json, and an overflow is ENOBUFS ⇒ invalid. */
 const BLOB_MAX_BUFFER = 65536;
 /** rev-parse and ls-remote print one short line each. */
 const LINE_MAX_BUFFER = 4096;

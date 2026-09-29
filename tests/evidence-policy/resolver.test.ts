@@ -1576,6 +1576,39 @@ describe('TP-45 (AC-39): a policy.json where project.json has no evidence resolv
     expect(readSpy).not.toHaveBeenCalled();
   });
 
+  it.each([
+    ['a dangling symlink', () => {
+      fs.mkdirSync(path.join(root, '.devflow'), { recursive: true });
+      fs.symlinkSync(path.join(tmp, 'nowhere.json'), worktreeFile(root, 'policy.json'));
+    }],
+    ['a directory', () => fs.mkdirSync(worktreeFile(root, 'policy.json'), { recursive: true })],
+  ] as const)('%s at the working-tree policy.json path is present (lstat, never followed)', (_label, arrange) => {
+    arrange();
+    expect(RESOLVER.formatLine(resolveWith(scenarioCalls({ root }))))
+      .toBe(`EVIDENCE_POLICY=required SOURCE=invalid REF=none WARN=remote-unavailable,invalid-file ${LINE.requiredInputs}`);
+  });
+
+  it('a .devflow that is a regular file holds no policy.json (ENOTDIR is absent)', () => {
+    fs.writeFileSync(path.join(root, '.devflow'), 'not a directory\n');
+    expect(RESOLVER.formatLine(resolveWith(scenarioCalls({ root }))))
+      .toBe(`EVIDENCE_POLICY=standard SOURCE=default REF=none WARN=remote-unavailable ${LINE.standardInputs}`);
+  });
+
+  it.skipIf(process.platform === 'win32' || process.getuid?.() === 0)(
+    'an lstat that fails for any reason but "no such path" cannot prove absence: an unsearchable .devflow reads as present',
+    () => {
+      const devflowDir = path.join(root, '.devflow');
+      fs.mkdirSync(devflowDir, { recursive: true });
+      fs.chmodSync(devflowDir, 0o000);
+      try {
+        expect(RESOLVER.formatLine(resolveWith(scenarioCalls({ root }))))
+          .toBe(`EVIDENCE_POLICY=required SOURCE=invalid REF=none WARN=remote-unavailable,invalid-file ${LINE.requiredInputs}`);
+      } finally {
+        fs.chmodSync(devflowDir, 0o755);
+      }
+    },
+  );
+
   it.skipIf(process.platform === 'win32')('a FIFO at the policy.json path is present, and never opened (so never blocks)', () => {
     fs.mkdirSync(path.join(root, '.devflow'), { recursive: true });
     expect(makeFifo(worktreeFile(root, 'policy.json'), home), 'mkfifo precondition').toBe(true);

@@ -292,7 +292,7 @@ export function formatEvidencePolicyUnavailable(error: EvidencePolicyLoadError):
  * The `compliance --status` line: the resolved policy for `opts.dir`, or the
  * unavailable line when the loader failed — that line is the whole handling
  * (ADR-028). The caller passes the compliance state it already read, so the
- * manifest is never read twice. `resolve()` makes at most two `gh` calls and
+ * manifest is never read twice. `resolve()` makes at most three `gh` calls and
  * bounds every subprocess with a timeout, so an offline machine degrades to a
  * flagged result rather than a hang.
  */
