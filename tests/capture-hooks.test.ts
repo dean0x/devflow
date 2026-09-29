@@ -17,7 +17,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
 import { pollForTerminalLine } from './helpers/poll-for-terminal-line.js';
-import { runHook as runSharedHook } from './shell-hooks-helpers.js';
+import { HOOK_RUN_ALLOWANCE_MS, NODE_EXEC_STALL_MS, runHook as runSharedHook } from './shell-hooks-helpers.js';
 
 const HOOKS_DIR = path.resolve(__dirname, '..', 'src', 'assets', 'scripts', 'hooks');
 const CAPTURE_PROMPT = path.join(HOOKS_DIR, 'capture-prompt');
@@ -973,7 +973,20 @@ describe('capture hooks read the machine-wide memory and learning switches only'
 // TP-34 (AC-30): a repository narrows capture for itself (D-FEATURES-NARROW-ONLY).
 // `features.learning: false` in a committed project.json — or in the worktree's
 // own config.json — silences that queue here while the machine switch stays on.
-describe('capture hooks honour a repository narrowing (D-FEATURES-NARROW-ONLY)', () => {
+
+/**
+ * The budget of every test in the two narrowing groups below: one hook run plus
+ * one node exec that may meet the syspolicyd wait. A repository file that can
+ * narrow costs a hook run exactly one node exec — resolve-settings.cjs's fold
+ * (D-GATES-FAST-PATH, pinned at one fork by TP-34 in queue-append.test.ts) —
+ * and that exec is intended: the parser, not a shell copy of it, decides the
+ * file. The hook's stdin parse is jq when jq is installed; where it falls back
+ * to node, that exec comes first and the fold then meets a drained queue, so a
+ * test still pays the wait at most once.
+ */
+const NARROWING_TEST_BUDGET_MS = HOOK_RUN_ALLOWANCE_MS + NODE_EXEC_STALL_MS;
+
+describe('capture hooks honour a repository narrowing (D-FEATURES-NARROW-ONLY)', { timeout: NARROWING_TEST_BUDGET_MS }, () => {
   let projectDir: string;
   let homeDir: string;
 
@@ -1061,7 +1074,7 @@ describe('capture hooks honour a repository narrowing (D-FEATURES-NARROW-ONLY)',
   });
 });
 
-describe('memory-worker: a repository narrowing stops the spawn (D-FEATURES-NARROW-ONLY)', () => {
+describe('memory-worker: a repository narrowing stops the spawn (D-FEATURES-NARROW-ONLY)', { timeout: NARROWING_TEST_BUDGET_MS }, () => {
   let projectDir: string;
   let homeDir: string;
   let shimDir: string;

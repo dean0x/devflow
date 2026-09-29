@@ -16,6 +16,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
 import { SETTINGS_SWITCH_TABLE, type SwitchRow } from './fixtures/settings-switch-table.js';
+import { HOOK_RUN_ALLOWANCE_MS, NODE_EXEC_STALL_MS } from './shell-hooks-helpers.js';
 
 const HOOKS_DIR = path.resolve(__dirname, '..', 'src', 'assets', 'scripts', 'hooks');
 const QUEUE_APPEND = path.join(HOOKS_DIR, 'queue-append');
@@ -490,7 +491,16 @@ describe('queue_read_gates', () => {
 // The repository layer: queue_read_gates <manifest> <root> (D-FEATURES-NARROW-ONLY)
 // ---------------------------------------------------------------------------
 
-describe('queue_read_gates <manifest> <root>: the repository narrows, never widens', () => {
+/**
+ * The budget of every test in the group below: one sourced queue-append run plus
+ * one node exec that may meet the syspolicyd wait. A gate read execs node at
+ * most once — the resolver's fold when a repository file can narrow, else the
+ * node-backend manifest parse (TP-34 pins it) — and the manifest parse that
+ * follows only a failed fold would meet a drained queue.
+ */
+const GATE_READ_TEST_BUDGET_MS = HOOK_RUN_ALLOWANCE_MS + NODE_EXEC_STALL_MS;
+
+describe('queue_read_gates <manifest> <root>: the repository narrows, never widens', { timeout: GATE_READ_TEST_BUDGET_MS }, () => {
   let tmpDir: string;
   let root: string;
   let manifestPath: string;
