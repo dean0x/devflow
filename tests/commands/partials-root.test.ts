@@ -67,7 +67,8 @@ function worktreeFrom(output: string | null, start: string): string {
   return output === null || output.includes('\n') || !output.startsWith('/') ? start : output;
 }
 
-describe('compiled loaders resolve the repository root, not cwd (D-PROMPT-ROOT, TP-21)', () => {
+// Real git fixtures and ~12 git spawns in all: budgeted past vitest's 5 s default.
+describe('compiled loaders resolve the repository root, not cwd (D-PROMPT-ROOT, TP-21)', { timeout: 30_000 }, () => {
   let base: string;
   let main: string;
   let sub: string;

@@ -760,7 +760,7 @@ describe('session-start-context: tracker setup directive (Section 3)', () => {
     } finally {
       fs.rmSync(nonGit, { recursive: true, force: true });
     }
-  });
+  }, 30_000); // two bash spawns plus a shimmed git: budgeted past the 5 s default under load
 
   it('[DR-10] no read precedes the sentinel — the gate is two shell builtins (source-level)', () => {
     // The runtime differential above proves the current tree by COUNTING forks;

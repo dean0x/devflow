@@ -499,7 +499,14 @@ function collectTree(root: string, exclude: readonly string[] = []): string[] {
   return out.sort();
 }
 
-describe('D-HOOKS-GIT-ONLY: no project scaffolding outside a git project or at HOME (TP-16, TP-50)', () => {
+/**
+ * The #390 cases below each spawn a real `git init`/`git worktree add` plus several
+ * hooks; under a loaded machine that sequence outruns vitest's 5 s default. The
+ * budget is per-spawn arithmetic, not a guess: ≤10 spawns at ≤3 s each.
+ */
+const GIT_FIXTURE_TIMEOUT_MS = 30_000;
+
+describe('D-HOOKS-GIT-ONLY: no project scaffolding outside a git project or at HOME (TP-16, TP-50)', { timeout: GIT_FIXTURE_TIMEOUT_MS }, () => {
   /** SessionStart and UserPromptSubmit, every hook installed on either event. */
   const HOOKS = [
     'session-start-context',
@@ -602,7 +609,7 @@ describe('D-HOOKS-GIT-ONLY: no project scaffolding outside a git project or at H
   });
 });
 
-describe('D-LEDGER-MAIN-WORKTREE: one ledger per repository (TP-17, TP-18, TP-19)', () => {
+describe('D-LEDGER-MAIN-WORKTREE: one ledger per repository (TP-17, TP-18, TP-19)', { timeout: GIT_FIXTURE_TIMEOUT_MS }, () => {
   const RESOLVE = path.join(HOOKS_DIR, 'resolve-project-root');
   const REAL_GIT = ['/usr/bin/git', '/usr/local/bin/git', '/opt/homebrew/bin/git', '/bin/git']
     .find(p => fs.existsSync(p)) ?? 'git';
@@ -733,7 +740,7 @@ describe('D-LEDGER-MAIN-WORKTREE: one ledger per repository (TP-17, TP-18, TP-19
   });
 });
 
-describe('D-DETACHED-HEAD: memory on a detached HEAD (TP-53, TP-54)', () => {
+describe('D-DETACHED-HEAD: memory on a detached HEAD (TP-53, TP-54)', { timeout: GIT_FIXTURE_TIMEOUT_MS }, () => {
   const PRE_COMPACT = path.join(HOOKS_DIR, 'pre-compact-memory');
   const SESSION_MEMORY = path.join(HOOKS_DIR, 'session-start-memory');
 

@@ -2366,7 +2366,8 @@ describe('refresh-anchor — pre-existing corpus fixture (REG-S1, avoids PF-044)
 // toplevel the ledger would be empty and the op would restart at ADR-001 —
 // colliding with main's ADR-001, which is the defect this pins shut.
 
-describe('D-LEDGER-MAIN-WORKTREE: a worktree session mints into the main ledger (TP-17)', () => {
+// Real git + a hook + a node op per case: ≤6 spawns at ≤5 s each on a loaded machine.
+describe('D-LEDGER-MAIN-WORKTREE: a worktree session mints into the main ledger (TP-17)', { timeout: 30_000 }, () => {
   const CONTEXT_HOOK = path.join(ROOT, 'src/assets/scripts/hooks/session-start-context');
   let base: string;
   let main: string;
