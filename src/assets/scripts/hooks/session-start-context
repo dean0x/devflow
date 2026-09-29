@@ -253,8 +253,8 @@ if [ "$LEARNING_ENABLED" = "true" ]; then
     dbg "learning directive suppressed: interpolated path shape rejected — fixed notice emitted"
     LEARNING_WORK=""
     LEARNING_PAUSED_SECTION='--- LEARNING PAUSED ---
-Captured turns are waiting in the learning queue of this project, but the project path contains characters devflow will not place in an agent directive (it admits only letters, digits and / . _ + -), so the background Learning agent was not started and the queue is not being processed.
-Tell the user this once, in one short sentence, alongside your answer to their request: devflow learning is paused for this project until it is opened from a path made only of those characters.'
+Captured turns are waiting in the learning queue of this project, but the path of the project (or of its main checkout, in a linked worktree) contains characters devflow will not place in an agent directive (it admits only letters, digits and / . _ + -), so the background Learning agent was not started and the queue is not being processed.
+Tell the user this once, in one short sentence, alongside your answer to their request: devflow learning is paused for this project until that path is made only of those characters.'
     if [ -n "$CONTEXT" ]; then
       CONTEXT="${CONTEXT}
 

@@ -1779,6 +1779,14 @@ describe('session-start-context: tracker setup directive (Section 3)', () => {
     expect(LEARNING_PAUSED_NOTICE.length).toBeGreaterThan(100);
   });
 
+  it('the paused notice names the main checkout — in a linked worktree the refused root is main', () => {
+    // D-LEDGER-MAIN-WORKTREE puts a linked worktree's ledger at the main checkout,
+    // so the refused path can be main's while the worktree's own path is clean.
+    expect(LEARNING_PAUSED_NOTICE).toContain('or of its main checkout, in a linked worktree');
+    expect(LEARNING_PAUSED_NOTICE, 'the retired "open it from another path" remedy')
+      .not.toContain('until it is opened from a path');
+  });
+
   it('a `feat+x` root — the slash-branch worktree name — gets the learning directive', () => {
     // Claude Code names the worktree for `feat/x` as `feat+x`; the gate admits `+`.
     const plus = path.join(tmpDir, 'feat+extend-flags-registry');
