@@ -186,7 +186,7 @@ export async function readManifest(devflowDir: string): Promise<ManifestData | n
       return null;
     }
 
-    // D-FEATURES-ABSENT-ON (a sub-decision of D-FEATURES-MACHINE-WIDE,
+    // D-FEATURES-ABSENT-ON (a sub-decision of D-FEATURES-NARROW-ONLY,
     // src/core/feature-switch.ts): knowledge and learning are machine-wide
     // switches, and every runtime gate — queue_read_gates in the hooks,
     // isMachineFeatureOn in the CLI, the knowledge write-back prose gate — reads

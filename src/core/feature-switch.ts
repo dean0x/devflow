@@ -3,23 +3,32 @@ import * as path from 'path';
 import { writeFileAtomicExclusive } from './fs-atomic.js';
 
 /**
- * The features that are switched on or off for the WHOLE MACHINE.
+ * The features that are switched on or off for the WHOLE MACHINE, and that a
+ * repository may only narrow.
  *
- * D-FEATURES-MACHINE-WIDE (#378): `features.memory`, `features.learning` and
- * `features.knowledge` in `~/.devflow/manifest.json` are the single source of
- * truth for these three features, in every repository and every non-git cwd.
- * `devflow init` and `devflow memory|learning|knowledge --enable/--disable` both
- * write that one value; every runtime gate reads it — the shell hooks through
- * `queue_read_gates` (queue-append), the knowledge write-back step through the
- * `knowledge_writeback` partial, and the CLI's `--status` through
- * {@link readMachineFeature}.
+ * D-FEATURES-NARROW-ONLY (#392, superseding the machine-only rule of #378):
+ * `features.memory`, `features.learning` and `features.knowledge` in
+ * `~/.devflow/manifest.json` are the MACHINE switch — `devflow init` and
+ * `devflow memory|learning|knowledge --enable/--disable` write that one value,
+ * and {@link readMachineFeature} reads it. A repository adds two layers that can
+ * only turn a feature OFF, never on:
  *
- * There is no per-repo layer. Per-repo feature toggles were a leftover of the
- * per-repo-install era, and the split they created is what #378 reported: init
- * recorded "off" in the manifest while every other repo, reading its own
- * `.devflow/config.json`, kept the feature running. The per-repo keys are retired
- * (RETIRED_CONFIG_KEYS in feature-config.ts): no gate reads them and init's next
- * config write drops them. `.devflow/config.json` holds only facts about a repo.
+ *   effective = machine AND project.json `features.<name>` AND config.json `features.<name>`
+ *
+ * where only a literal `false` narrows — absent, malformed and unreadable values
+ * leave the machine switch deciding. The team-committed `.devflow/project.json`
+ * and the personal `.devflow/config.json` are both parsed by the shared
+ * lib/project-config.cjs, and the fold lives in resolve-settings.cjs
+ * (`MEMORY=`/`LEARNING=`/`KNOWLEDGE=` on its settings line); the CLI's `--status`
+ * prints the effective state only when a repo layer narrows it. No repo layer can
+ * re-enable what the machine turned off, so the #378 split — a repo that kept a
+ * feature running after the user switched it off — cannot come back.
+ *
+ * `features` is a NEW namespace. The per-repo top-level keys of the
+ * per-repo-install era (`memory`, `learning`, `knowledge`, `decisions`) stay
+ * retired (RETIRED_CONFIG_KEYS in feature-config.ts): no reader consults them,
+ * so a stale `learning: false` left in an old config.json never comes back to
+ * life as a switch.
  */
 export type MachineFeature = 'memory' | 'learning' | 'knowledge';
 
@@ -54,7 +63,7 @@ const LEGACY_KEYS: Readonly<Partial<Record<MachineFeature, string>>> = {
  * shell hooks, so the CLI's status and the runtime never disagree about the
  * same file.
  *
- * D-LEARNING-LEGACY-DECISIONS (a sub-decision of D-FEATURES-MACHINE-WIDE):
+ * D-LEARNING-LEGACY-DECISIONS (a sub-decision of D-FEATURES-NARROW-ONLY):
  * `learning` is read as `features.learning` when that is a boolean, else the
  * legacy `features.decisions` when THAT is a boolean, else ON — readManifest's
  * migration precedence exactly. The legacy key is otherwise honoured only once

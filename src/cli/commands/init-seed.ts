@@ -82,9 +82,9 @@ export interface InitSeed {
  * Resolve feature booleans for the init seed: every feature comes from
  * manifest.features, with registry defaults when the manifest is absent.
  *
- * D-FEATURES-MACHINE-WIDE (src/core/feature-switch.ts): memory, learning and
- * knowledge are machine-wide, recorded in the manifest alone, so the seed takes
- * no per-repo input at all. Seeding from whatever repo init happens to run in
+ * D-FEATURES-NARROW-ONLY (src/core/feature-switch.ts): the machine switches for
+ * memory, learning and knowledge are recorded in the manifest alone (a repository
+ * only narrows them at read time), so the seed takes no per-repo input at all. Seeding from whatever repo init happens to run in
  * would flip the switch for EVERY repo as a side effect — a stale per-repo
  * `true` would silently re-enable a feature the user turned off. ADR-014's
  * state-aware re-init preserves the prior machine-wide choice, the manifest's.
