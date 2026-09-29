@@ -61,7 +61,7 @@ After both files are written, **commit them to the current worktree branch yours
 
 Run every command with `git -C "{worktree}"` (never `cd`). Commit **only** the two knowledge files — never stage or commit anything else, so a user's unrelated in-progress work is never swept in.
 
-1. **Guard.** If `git -C "{worktree}" rev-parse --is-inside-work-tree` is not `true`, or `git -C "{worktree}" symbolic-ref -q HEAD` prints nothing (detached HEAD), skip committing and report `KB_COMMIT: skipped (no branch)`. Never commit on a detached HEAD.
+1. **Guard.** If `git -C "{worktree}" rev-parse --is-inside-work-tree` is not `true`, skip committing and report `KB_COMMIT: skipped (no branch)`. If `git -C "{worktree}" symbolic-ref -q HEAD` prints nothing (detached HEAD), run step 2's change check first; if it finds changes, skip committing and report `KB_COMMIT: skipped (detached HEAD) — uncommitted: ` followed by the paths it listed (of `.devflow/features/index.md` and `.devflow/features/{slug}/KNOWLEDGE.md`), so your caller can tell the user which written files still need a commit on a branch. Never commit on a detached HEAD: that commit becomes unreachable as soon as HEAD moves.
 2. **Detect changes.** If `git -C "{worktree}" status --porcelain -- .devflow/features/index.md .devflow/features/{slug}/KNOWLEDGE.md` is empty, the write produced no change — report `KB_COMMIT: skipped (no changes)` and stop.
 3. **Stage only the two paths:** `git -C "{worktree}" add -- .devflow/features/index.md .devflow/features/{slug}/KNOWLEDGE.md`
 4. **Commit only those paths** (the pathspec keeps any other staged work out of the commit): `git -C "{worktree}" commit --only -m "docs(knowledge): {add when created | update when refreshed} {slug} feature knowledge base" -- .devflow/features/index.md .devflow/features/{slug}/KNOWLEDGE.md`
@@ -78,7 +78,7 @@ KB_SLUG: {slug}
 KB_NAME: {name}
 SECTIONS: [list of sections written]
 CROSS_REFERENCES: [ADR/PF entries referenced, if any]
-KB_COMMIT: committed <sha> | skipped (no changes) | skipped (no branch) | failed (<reason>)
+KB_COMMIT: committed <sha> | skipped (no changes) | skipped (no branch) | skipped (detached HEAD) — uncommitted: <paths> | failed (<reason>)
 ```
 
 ## Boundaries
