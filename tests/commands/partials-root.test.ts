@@ -50,14 +50,20 @@ function runFromStart(commandLine: string, start: string): string | null {
   return out.status === 0 ? out.stdout.replace(/\n$/, '') : null;
 }
 
-/** The decisions rule, exactly as the compiled prose states it. */
-function ledgerFrom(output: string | null, start: string): string {
+/**
+ * The decisions rule, exactly as the compiled prose states it. `home` is the
+ * reader's home directory: a main worktree AT home (a dotfiles repository) is
+ * refused, because its `.devflow/` is devflow's machine root, which always
+ * exists — the hooks' df_is_project_root refuses it the same way.
+ */
+function ledgerFrom(output: string | null, start: string, home: string = os.homedir()): string {
   const lines = output === null ? [] : output.split('\n');
   if (lines.length !== 2 || !lines.every(l => l.startsWith('/'))) return start;
   const [top, common] = lines;
   if (common.endsWith('/.git')) {
     const main = common.slice(0, -'/.git'.length);
-    if (fs.existsSync(path.join(main, '.devflow'))) return main;
+    const atHome = fs.existsSync(home) && fs.realpathSync(main) === fs.realpathSync(home);
+    if (fs.existsSync(path.join(main, '.devflow')) && !atHome) return main;
   }
   return top;
 }
@@ -123,6 +129,10 @@ describe('compiled loaders resolve the repository root, not cwd (D-PROMPT-ROOT, 
         .map(arm => section.indexOf(arm));
       expect(order.every(i => i > -1), `${file}: every arm stated`).toBe(true);
       expect([...order].sort((a, b) => a - b), `${file}: arms in order`).toEqual(order);
+      // The main-worktree arm carries the hooks' HOME refusal (df_is_project_root).
+      const mainArm = section.slice(order[0], order[1]);
+      expect(mainArm, `${file}: the main arm refuses a main worktree at HOME`)
+        .toContain('once it is removed is not your home directory');
     }
   });
 
@@ -134,6 +144,17 @@ describe('compiled loaders resolve the repository root, not cwd (D-PROMPT-ROOT, 
     }
     // Outside a repository the command fails and the start directory stands.
     expect(ledgerFrom(runFromStart(command as string, outside), outside)).toBe(outside);
+  });
+
+  it('a dotfiles repository — main worktree at HOME — keeps the ledger in the linked worktree', () => {
+    // HOME's `.devflow/` is the machine root and always exists, so the existence
+    // test alone would name HOME as the ledger. The hooks refuse it; so does the prose.
+    const command = collectGitCommand(sectionOf(requireDistFile(decisionsHosts()[0]), DECISIONS_HEADING));
+    expect(command).not.toBeNull();
+    expect(ledgerFrom(runFromStart(command as string, wt), wt, main), 'worktree').toBe(wt);
+    expect(ledgerFrom(runFromStart(command as string, main), main, main), 'root').toBe(main);
+    // Non-vacuity: the same worktree with a home elsewhere still resolves to main.
+    expect(ledgerFrom(runFromStart(command as string, wt), wt, outside)).toBe(main);
   });
 
   it('every compiled knowledge loader and write-back resolves the checkout toplevel', () => {

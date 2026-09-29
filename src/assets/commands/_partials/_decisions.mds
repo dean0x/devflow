@@ -9,7 +9,7 @@ git -C "{start}" rev-parse --path-format=absolute --show-toplevel --git-common-d
 
 Accept the output only when it is exactly two lines and each begins with `/`: line 1 is the checkout's toplevel, line 2 the repository's common git directory. `{ledger}` is the first of these that applies:
 
-1. **The main worktree** — line 2 without its trailing `/.git`, when line 2 ends in `/.git` and the directory left once it is removed contains a `.devflow/` directory.
+1. **The main worktree** — line 2 without its trailing `/.git`, when line 2 ends in `/.git` and the directory left once it is removed is not your home directory and contains a `.devflow/` directory.
 2. **The toplevel** — line 1.
 3. **The start directory itself** — when the command failed or printed anything other than two absolute lines (outside a git repository, or on a git older than 2.31, which echoes the flag back).
 
