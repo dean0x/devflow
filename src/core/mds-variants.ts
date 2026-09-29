@@ -396,11 +396,10 @@ export const PR_HOST_OPS = [
  * from the module that writes there: it is a fact about where PR mechanics live
  * in the reference tree, not something the registry can work out.
  *
- * Not to be confused with {@link PR_HOST_TRACKER_SUBDIR} (`tracker/github`),
- * which is the TRACKER directory every install carries because PR hosting is on
- * GitHub. This one is the provider-independent `pr/` directory itself — it is
- * under no provider, and every install carries it for the same reason: a jira or
- * linear user still opens pull requests.
+ * It is the provider-independent `pr/` directory, a sibling of the `tracker/`
+ * tree rather than a directory inside it: it is under no provider, and every
+ * install carries it because a jira or linear user still opens pull requests on
+ * GitHub.
  */
 export const PR_HOST_DESTINATION_ROOT = 'pr';
 
@@ -956,8 +955,9 @@ export type VariantSection<T extends OperationNamed> = T & { readonly content: s
  *
  * empty-section is the third arm, and it exists because the other two cannot see
  * it: an op with a marker and no body compiles cleanly and emits a zero-byte
- * reference, which reads downstream as "mechanics unavailable" with no build
- * signal at all (the GAP-44 shape — omission is caught, emptiness is not).
+ * reference, which the agent then loads as an operation with no instructions,
+ * with no build signal at all (the GAP-44 shape — omission is caught, emptiness
+ * is not).
  *
  * Total on success, and immutable: the caller gets back a readonly array of its
  * OWN records, in its own order, each carrying its section. Nothing is looked up
