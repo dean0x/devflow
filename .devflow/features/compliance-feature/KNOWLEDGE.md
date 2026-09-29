@@ -1,7 +1,7 @@
 ---
 feature: compliance-feature
 name: Compliance Feature & SDLC Traceability
-description: "Use when adding or modifying the compliance feature (framework registry, converge contract, CLI, rule stamping), changing how host commands resolve COMPLIANCE_SKILL_INSTALLED, modifying traceability SEMANTICS in the Git agent (D1-D11 decision markers, D4 degradation contract, D9 resolution gate, containment, Handoff Values), or extending the D4 DEGRADED contract. Keywords: compliance, COMPLIANCE_SKILL_INSTALLED, convergeComplianceArtifacts, convergeFromManifest, frameworks, FEATURE_OWNED_SKILLS, traceability, D4, D9, gather-release-evidence, conventions.md, resolve-review-threads, ensure-traceable-issue, stamper, manifest-group, ComplianceFeatureState, Handoff Values, ISSUE_PR_LINK, issue_ref_grammar, issue_capture_contract, _tracker.mds, Provider signals, decision-markers.md, publication-gate.md, learn-conventions.md, tracker/github, PR_HOST_OPS, references/pr, PR mechanics, sinkCorpusWithoutPrHost, gitPlusPrHostCorpus, release-trace.cjs, messageBody, D-TRACE-FULL-MESSAGE, D-TRACE-REVERT-BODY, MESSAGE_LOG_FLAGS, complianceDefault, resolve-evidence-policy, evidence policy floor, review lens only, Branch token."
+description: "Use when adding or modifying the compliance feature (framework registry, converge contract, CLI, rule stamping), changing how host commands resolve the compliance lens (COMPLIANCE_FRAMEWORKS / COMPLIANCE_ACTIVE from the settings line) or how agents load framework references, modifying traceability SEMANTICS in the Git agent (D1-D11 decision markers, D4 degradation contract, D9 resolution gate, containment, Handoff Values), or extending the D4 DEGRADED contract. Keywords: compliance, COMPLIANCE_FRAMEWORKS, COMPLIANCE_ACTIVE, compliance_gate, compliance_frameworks, D-COMPLIANCE-INSTALL-ALWAYS, D-COMPLIANCE-REPO-LENS, D-COMPLIANCE-SHADOW-SOURCE, shadowSeedDir, RUNTIME_SELECTION_LINES, unknownFrameworkIds, convergeComplianceArtifacts, convergeFromManifest, frameworks, FEATURE_OWNED_SKILLS, traceability, D4, D9, gather-release-evidence, conventions.md, resolve-review-threads, ensure-traceable-issue, stamper, manifest-group, ComplianceFeatureState, Handoff Values, ISSUE_PR_LINK, issue_ref_grammar, issue_capture_contract, _tracker.mds, Provider signals, decision-markers.md, publication-gate.md, learn-conventions.md, tracker/github, PR_HOST_OPS, references/pr, PR mechanics, sinkCorpusWithoutPrHost, gitPlusPrHostCorpus, release-trace.cjs, messageBody, D-TRACE-FULL-MESSAGE, D-TRACE-REVERT-BODY, MESSAGE_LOG_FLAGS, complianceDefault, resolve-evidence-policy, evidence policy floor, review lens only, Branch token."
 category: architecture
 directories:
   - src/core/compliance.ts
@@ -21,7 +21,7 @@ directories:
   - src/assets/commands/resolve.mds
   - src/assets/commands/release.md
 created: 2026-08-20
-updated: 2026-09-26
+updated: 2026-09-29
 ---
 
 # Compliance Feature & SDLC Traceability
@@ -31,7 +31,7 @@ updated: 2026-09-26
 Compliance is a built-in feature (not a plugin) that provides two interlinked capabilities:
 (1) a regulatory-framework skill system that applies framework-specific controls during code review, planning, and design; and (2) an SDLC traceability layer — wired into Git agent operations — that ties branches to issues, PR titles to project conventions, review threads to verified fixes, and releases to shipped issues.
 
-The compliance skill is **installed on demand** by `convergeComplianceArtifacts` (not by `installViaFileCopy`). Host commands detect whether it is installed at runtime via the shared `compliance_gate()` partial from `_partials/_compliance.mds` (a single file-existence check). The traceability operations in the Git agent are also gated by `COMPLIANCE`, an input passed from the orchestrator.
+The compliance skill is **installed on every machine** by `convergeComplianceArtifacts` (not by `installViaFileCopy`), with all six framework references (`D-COMPLIANCE-INSTALL-ALWAYS`) — a repository can turn the review lens on by itself (`compliance` in its committed `.devflow/project.json`), so the machine switch cannot decide what is installed. The machine switch owns only the **rule** (the one artifact Claude Code loads into every prompt) and the SKILL.md stamp. Host commands resolve the lens at runtime from the settings line through the shared `_partials/_compliance.mds` (`D-COMPLIANCE-REPO-LENS`): `COMPLIANCE_FRAMEWORKS` is `off`, `none` (generic controls) or framework ids, and an agent loads `references/{id}.md` only for the ids it is given — presence of a file decides nothing. The traceability operations in the Git agent take no compliance input at all: they key on the evidence policy's mechanism inputs (`ISSUE_REQUIRED`, `APPLY_CONVENTIONS`, `REQUIRE_NON_AUTHOR_APPROVAL`).
 
 **Tracker Phase 2 (#324, PR #339)** split the Git agent's traceability text into a provider-independent contract (semantics — stays in `git.mds`) and per-provider GitHub mechanics (generated references, loaded on demand). This KB owns the traceability **semantics** — the D1–D11 decision markers, the D4 degradation contract, the D9 resolution gate, containment discipline, and bounds — and says where each now physically lives. The sibling `.devflow/features/tracker-references/KNOWLEDGE.md` owns the split **mechanics**: the MDS build machinery, the byte budget, the containment oracle, and the installer overlay. Read that KB for "how the split works"; read this one for "what the rules mean and where to find them."
 
@@ -71,6 +71,8 @@ Introduced in A8 to compose SKILL.md and the rule file from per-framework fragme
 
 **5 skill tokens** resolved into the SKILL.md template: `${DEVFLOW_COMPLIANCE_SCOPE}`, `${DEVFLOW_COMPLIANCE_ACTIVE}`, `${DEVFLOW_COMPLIANCE_MAPPING}`, `${DEVFLOW_COMPLIANCE_CHECKLIST}`, `${DEVFLOW_COMPLIANCE_REFERENCES}`.
 
+**The Active Frameworks section is a stamp plus a runtime rule** (`buildActiveSection`): the stamp names the MACHINE's selection — `**Machine frameworks: GDPR, SOC 2.**`, or `The machine declares no framework.` on a compliance-off machine — followed by `RUNTIME_SELECTION_LINES`: every `references/{id}.md` is installed, so presence decides nothing; the ids given (`COMPLIANCE_FRAMEWORKS`, the machine's plus the repository's) are the frameworks in force; load `references/{id}.md` for each given id and no other; `none` means generic controls only; never fabricate guidance for a framework you were not given. The stamp is informational — what a run applies is what its caller passes.
+
 **1 rule token** resolved into the rule template: `${DEVFLOW_COMPLIANCE_RULE_BULLETS}` (per-framework `Apply ...` bullets); `${DEVFLOW_COMPLIANCE_FRAMEWORKS}` is then delegated to `stampComplianceRule`.
 
 **C1 passthrough**: if the template contains no `${DEVFLOW_COMPLIANCE_` tokens (e.g. a user shadow with static content), the function returns the content byte-identical. This is deliberately flagged by `--status` as `[shadowed, composition skipped]`.
@@ -83,15 +85,17 @@ Introduced in A8 to compose SKILL.md and the rule file from per-framework fragme
 
 ### Install orchestrator (`src/targets/claude-code/compliance-install.ts`)
 
-`convergeComplianceArtifacts(opts)` is the single public function. Convergence matrix:
+`convergeComplianceArtifacts(opts)` is the single public function. Convergence matrix (`D-COMPLIANCE-INSTALL-ALWAYS`) — the skill directory is installed in EVERY state, always with `ALWAYS_PRESENT_REFS` plus all six framework references (`references/{id}.md` for every registry id, whatever the machine selected):
 
 | State | Outcome |
 |---|---|
-| `enabled + rulesEnabled` | Install skill dir (selective refs) + stamped rule |
-| `enabled + !rulesEnabled` | Install skill dir only; remove stale rule |
-| `!enabled` | Remove both artifacts (warn-not-throw per PF-009) |
+| `enabled + rulesEnabled` | Skill dir, SKILL.md stamped with the machine's frameworks + stamped rule |
+| `enabled + !rulesEnabled` | Skill dir, machine stamp; remove a stale rule |
+| `!enabled` | Skill dir, the neutral zero-framework stamp; remove the rule (warn-not-throw per PF-009) |
 
-**Return value:** `{ removedPreexisting: boolean; converged: boolean }`.  `removedPreexisting` signals that pre-existing artifacts were found during a disable (init uses this for the legacy-upgrade notice). `converged` is `false` when any warn path was taken — callers cannot detect partial failure via a catch block since the function is warn-not-throw (PF-015); this field makes the outcome truthful.
+Fragments are loaded once per convergence for the STAMPED frameworks only (none on a compliance-off machine) and shared by SKILL.md and the rule.
+
+**Return value:** `{ removedPreexisting: boolean; converged: boolean }`.  `removedPreexisting` is true only when a pre-existing **rule** was found and removed on a compliance-off (disable) convergence — the skill is no signal, since every machine has it (init uses this for the legacy-upgrade notice, "Compliance rule removed — …"). `converged` is `false` when any warn path was taken — callers cannot detect partial failure via a catch block since the function is warn-not-throw (PF-015); this field makes the outcome truthful.
 
 **claudeDir guard:** If `claudeDir` is not an absolute path, warn and return `{ removedPreexisting: false, converged: false }` immediately. This prevents `fs.rm` from resolving to an unexpected location — an assert-preconditions-in-production-code pattern per reliability.md.
 
@@ -99,11 +103,11 @@ Introduced in A8 to compose SKILL.md and the rule file from per-framework fragme
 
 **Legacy-upgrade notice:** `init.ts` probes the compliance rule target **before** `installViaFileCopy` runs (the full install wipes `rules/devflow/` before converge, so a post-install probe would miss it). `hadComplianceRule` combined with `convergeResult.removedPreexisting` drives the notice.
 
-**PF-015 (avoids PF-015):** both artifact operations always execute independently. On disable, two independent try/catch blocks ensure a failure in one does not skip the other. On enable, `installSkillDir` catches its own errors internally.
+**PF-015 (avoids PF-015):** both artifact operations always execute independently: `installSkillDir` catches its own errors internally, so the rule step (install, or probe-then-remove) always runs.
 
 **PF-011:** `installSkillDir` builds the new tree under `{target}.tmp`, then atomically removes old → renames. Orphaned `.tmp` directories from prior crashes are cleaned up at the start of each run.
 
-**Shadow semantics:** SKILL.md source resolves as shadow → canonical (validates via `validateSkillShadow`). Reference files (`{id}.md`, `detection.md`, `sources.md`) always come from canonical source — framework refs are not user-overridable. Fragment files are always loaded from canonical source even when SKILL.md comes from a shadow (fragments are registry-owned content). Rule source resolves as shadow → canonical (validates via `validateRuleShadow`), then `composeComplianceRule` (which delegates `${DEVFLOW_COMPLIANCE_FRAMEWORKS}` to `stampComplianceRule`) is called. C1 passthrough: a token-free shadow passes through byte-identical without composition.
+**Shadow semantics:** SKILL.md source resolves as shadow → canonical (validates via `validateSkillShadow`), and is composed with the stamp frameworks either way. Reference files (`{id}.md`, `detection.md`, `sources.md`) always come from canonical source — framework refs are not user-overridable. Fragment files are always loaded from canonical source even when SKILL.md comes from a shadow (fragments are registry-owned content). Rule source resolves as shadow → canonical (validates via `validateRuleShadow`), then `composeComplianceRule` (which delegates `${DEVFLOW_COMPLIANCE_FRAMEWORKS}` to `stampComplianceRule`) is called. C1 passthrough: a token-free shadow passes through byte-identical without composition.
 
 **Installer sweep and FEATURE_OWNED_SKILLS:** `installViaFileCopy` unions `FEATURE_OWNED_SKILLS` into the known-names set for its orphan sweep. This means `devflow:compliance` is never incorrectly swept as an orphan. The formerly exported `shouldSurfaceFeatureOwnedSkillOrphan` and `filteredSweepReport` functions have been deleted — no caller needed them after the union approach.
 
@@ -114,6 +118,8 @@ Introduced in A8 to compose SKILL.md and the rule file from per-framework fragme
 Disable-keeps-frameworks: `disable` sets `enabled: false` but leaves `frameworks` unchanged. `enable` restores those frameworks. Only `set` replaces the framework list.
 
 Interactive TTY path: when `--enable` is called on a TTY with no prior frameworks, the CLI presents a `@clack/prompts` multiselect before falling through to the `set` action. The multiselect options and prompt message are now imported from `compliance-prompts.ts` (`frameworkChoices()` and `FRAMEWORK_SELECT_MESSAGE`).
+
+`--disable` removes the rule and keeps the frameworks ("Compliance disabled — rule removed, frameworks remembered for re-enable"); the skill stays installed with the neutral stamp. `--status` reports no reference-file drift — every install carries all six references, so an installed file says nothing about the selection; it reports `unknownFrameworkIds(manifestFrameworks, registryIds)` — manifest ids the registry does not know (a hand-edited or newer-devflow manifest), which every install drops and only `--set` removes.
 
 `--status` shadow detection: the `skillShadowState()` helper reads the shadow SKILL.md and checks for any `${DEVFLOW_COMPLIANCE_...}` token. Returns `'none'` (no shadow), `'shadowed'` (shadow with tokens — composition runs), or `'composition-skipped'` (token-free shadow — C1 passthrough). The Skill line in `--status` shows `[shadowed]` or `[shadowed, composition skipped — per-framework sections absent]` accordingly.
 
@@ -156,29 +162,34 @@ Shared helpers for the compliance step in `devflow init`. All prompt-rendering l
 - `${DEVFLOW_COMPLIANCE_RULE_BULLETS}` — replaced with per-framework `Apply ...` bullets (one per selected framework)
 - `${DEVFLOW_COMPLIANCE_FRAMEWORKS}` — delegated to `stampComplianceRule` → `Active frameworks: GDPR, SOC 2 — their controls are binding.` (non-empty) or `Active frameworks: none declared — generic controls only.` (empty)
 
+**The skill shadow mirrors it (`D-COMPLIANCE-SHADOW-SOURCE`).** `devflow skills shadow compliance` seeds through `shadowSeedDir(bareName, installedDir)` (`src/cli/commands/skills.ts`), which returns the shipped SOURCE for every `FEATURE_OWNED_SKILLS` member and the installed copy (else source) for every other skill. The installed compliance SKILL.md is composed — its `${DEVFLOW_COMPLIANCE_*}` tokens already replaced — and a token-free shadow passes composition byte-identical (C1), so seeding from the installed copy would freeze that moment's stamp: a later `devflow compliance --set` could never re-stamp a shadowed skill (AC-38). `devflow skills list` names its provenance `the compliance feature (every install)`.
+
 `seedRuleShadow` in `rules.ts` uses a two-tier strategy for `FEATURE_OWNED_RULES`: it **skips Tier 1** (the installed file) and goes directly to **Tier 2** (canonical source at `src/assets/rules/compliance.md`). This preserves both placeholders in the shadow — if Tier 1 were used, the already-composed file (tokens replaced) would permanently disable per-framework composition whenever the shadow was applied.
 
-### COMPLIANCE_SKILL_INSTALLED gate (partial-based)
+### The compliance lens (`_partials/_compliance.mds`, `D-COMPLIANCE-REPO-LENS`)
 
-All host commands import `compliance_gate()` from `src/assets/commands/_partials/_compliance.mds`. The partial expands to a single file-existence check against `~/.claude/skills/devflow:compliance/SKILL.md`, then resolves the settings line (`_partials/_settings.mds`, alias-imported) and sets `COMPLIANCE` from it — `off`, `generic`, or the machine ∪ repository framework ids. Since #392 nothing gates on `COMPLIANCE` yet: the review lens still keys on `COMPLIANCE_SKILL_INSTALLED`, and per-id reference loading is PR6's (#393). This replaced 8 inline copies of the same check — a single-source guarantee that the check logic cannot drift between commands.
+The lens comes from the settings line (`resolve-settings.cjs`), never from a file check. Its `COMPLIANCE` field is the machine's ids ∪ the worktree's `.devflow/project.json` `compliance` ids: `off` when neither declares compliance, `generic` when one declares it with no ids, else the ids. A project.json or config.json that exists but cannot be read resolves `COMPLIANCE` to the machine's ids, else `generic` — a broken repository file never lowers the lens. `_compliance.mds` exports two defines:
+
+- `compliance_frameworks()` — `COMPLIANCE_FRAMEWORKS` is that `COMPLIANCE` with `generic` written `none`: `off`, `none`, or the framework ids the machine and this repository declare.
+- `compliance_gate()` — the `settings_resolve` block (`_partials/_settings.mds`, alias-imported), then "**Set the compliance lens** from that line: …" (`compliance_frameworks()`), then "`COMPLIANCE_ACTIVE` is `true` unless `COMPLIANCE_FRAMEWORKS` is `off`."
 
 Host command usage:
 
-| Command | Where | Effect when true |
+| Command | How it imports | Effect |
 |---|---|---|
-| `/code-review` | Step 0b (before Phase 0 Git spawn) | Adds `COMPLIANCE` to ensure-pr-ready; adds compliance review focus if regulated surface detected |
-| `/plan` | Phase 7 (gap analysis block) | Adds compliance Design agent; makes issue linking MANDATORY |
-| `/implement` | Phase 1 (Setup) | Passes `COMPLIANCE` to Git setup-task (issue-first gate, branch-naming convention) |
-| `/resolve` | Step 0d | Enables Phase 1b (fetch-review-threads), Phase 9b step 1 (resolve-review-threads), Phase 9c (check-merge-readiness) |
-| `/release` | Phase 1c | Enables gather-release-evidence and `backlink-shipped-issues` |
+| `/code-review` | `compliance_gate()` at Step 0b (per worktree) | Adds the `compliance` Review focus when `COMPLIANCE_ACTIVE` AND the diff touches regulated surface; passes `COMPLIANCE_FRAMEWORKS: {COMPLIANCE_FRAMEWORKS}` in that Review spawn |
+| `/plan` | `compliance_gate()` in the gap-analysis phase | Adds the compliance Design agent when `COMPLIANCE_ACTIVE` (4 → 5 agents single-issue, 6 → 7 multi-issue); passes `COMPLIANCE_FRAMEWORKS` in its spawn |
+| `/implement` | alias-import, `compliance.compliance_frameworks()` | Passes `COMPLIANCE_FRAMEWORKS` to all five implementing Code spawns; gates nothing |
+| `/resolve` | alias-import, `compliance.compliance_frameworks()` (per worktree root) | Passes `COMPLIANCE_FRAMEWORKS` to the issue-fix Code spawn; gates nothing |
+| `/release` | none | No compliance gate; release evidence and back-links key on `EVIDENCE_POLICY` |
 
-`COMPLIANCE` is passed as `"enabled"` (string) or `"(none)"`. It is a **Git agent input only** — the spawn-scoped guard in build-mds §14 asserts that every `COMPLIANCE:` line in every compiled command appears inside a `subagent_type="Git"` spawn block.
+Consumers: `code.md` invokes the Compliance skill only when `COMPLIANCE_FRAMEWORKS` is not `off` (absent means `off`) AND the task touches regulated surface; `review.md` and `design.md` take `COMPLIANCE_FRAMEWORKS` as the compliance focus's input; `gap-analysis` §7 and the compliance SKILL.md checklist load `references/{id}.md` only for the given ids. /resolve's thread steps key on `EVIDENCE_POLICY` and its merge-readiness phase on `REQUIRE_NON_AUTHOR_APPROVAL`, never on the lens. No compiled command passes an op-level `COMPLIANCE:` key to the Git agent (retired by #362 in favour of the evidence policy's mechanism inputs); `tests/build-mds.test.ts` §14 asserts it, with a known-bad probe.
 
 ### Evidence-policy floor vs. review lens
 
 Two independent things sit on `manifest.features.compliance` and must not be conflated:
 
-- **The floor.** `src/assets/scripts/resolve-evidence-policy.cjs`'s `complianceDefault(rawFeatureValue)` mirrors `normalizeComplianceFeature` exactly (a parity test pins this): a well-formed `{enabled: true, frameworks: [...]}` resolves `required` **whatever the framework count** — an enable with zero frameworks selected ("generic controls only") still installs and gates the compliance skill, so which frameworks are listed never matters, only that `enabled` is `true`. Any malformed or `enabled: false` shape resolves `standard`. This compliance-derived value only ever **raises** the resolved policy (`stricter(policy, facts.compliance)`) — it can turn a file/worktree `standard` into `required` (flagged with the `raised-by-compliance` warning) but never lowers a `required` file value.
+- **The floor.** `src/assets/scripts/resolve-evidence-policy.cjs`'s `complianceDefault(rawFeatureValue)` mirrors `normalizeComplianceFeature` exactly (a parity test pins this): a well-formed `{enabled: true, frameworks: [...]}` resolves `required` **whatever the framework count** — an enable with zero frameworks selected ("generic controls only") still turns the review lens on, so which frameworks are listed never matters, only that `enabled` is `true`. Any malformed or `enabled: false` shape resolves `standard`. This compliance-derived value only ever **raises** the resolved policy (`stricter(policy, facts.compliance)`) — it can turn a file/worktree `standard` into `required` (flagged with the `raised-by-compliance` warning) but never lowers a `required` file value.
 - **The repository floor (D-COMPLIANCE-REPO-FLOOR).** A `compliance` key in `.devflow/project.json` at R (the default branch), T (the tracking branch) or W (the worktree) — any value, an empty list and a malformed one included — makes the repository's compliance default `required`, folded with the machine's as `stricter(C_machine, C_repo)`. HEAD alone never contributes. A project.json that cannot be read counts as declaring it (fail closed). So a repository that declares compliance is held to the same floor as a machine with compliance enabled at zero frameworks.
 - **Source precedence (D-POLICY-SOURCE-PRECEDENCE).** At every source, `project.json`'s `evidence` decides the policy when it can; the legacy `.devflow/policy.json` at the SAME source is read only when project.json is absent or has no `evidence` key. A present-but-malformed or duplicated `evidence` decides `invalid` (⇒ `required`) and is never rescued by the legacy file; a project.json that is not a JSON object is invalid outright. The precedence is per source, so each source still says one thing and `foldPolicy` folds them unchanged — with no project.json anywhere, every output line is byte-identical to the policy-file-only resolver.
 - **The lens.** The compliance SKILL.md's own `**Lens only.**` note (Scope Boundary section) states the other half of the boundary: the skill's composed sections shape WHAT a compliance review looks for — regulatory-specific gaps (retention, erasure/data-subject rights, audit-trail completeness, segregation of duties, framework mapping, IaC exposure) — never HOW MUCH evidence a change must carry. Tracker links, test plans, approvals and release traces are governed solely by the resolved evidence policy (`resolve-evidence-policy.cjs`, `pr-evidence.cjs`, `verify-evidence.cjs`), never by a compliance finding. A missing ticket, test plan, or approval must never be reported as a compliance finding — that is the evidence policy's gap to report, not the lens's.
@@ -197,7 +208,7 @@ Two independent things sit on `manifest.features.compliance` and must not be con
 
 `learn-conventions` is a further partial exception, independent of both splits above: its `**Process:**` scan, heuristics, file template, and post-composition verification live in `references/learn-conventions.md` (source: `src/assets/mds/git/_references.mds`), loaded **conditionally** — only when `.devflow/conventions.md` is absent; when the file already exists the operation returns `Status: ALREADY_EXISTS` without reading it.
 
-**The Git agent still resolves the provider once per spawn** via the `## Tracker provider resolution` preamble (between the D4 block and `## Comment-sink scrub (D11)` in `git.md`) — `TRACKER_PROVIDER` normalises to `github`/`jira`/`linear` (reject-never-repair; defaults to `github`) and selects (never concatenates) a hardcoded mechanics directory. This resolution governs `**Mechanics:**` pointers only; a `**PR mechanics:**` pointer names a fixed literal path under `references/pr/` unconditionally and loads the same file under every provider. See `tracker-references` for the full preamble mechanics; this KB only needs the observable contract: an operation with no `**Mechanics:**` pointer loads nothing tracker-specific and can never emit `TRACEABILITY: DEGRADED (tracker mechanics unavailable)`.
+**The Git agent resolves the provider once per spawn** via the `## Tracker provider resolution` preamble (between the D4 block and `## Comment-sink scrub (D11)` in `git.md`) — it takes `TRACKER` from the `resolve-settings.cjs` settings line (accepting only the script's own line shape, else the fail-closed `github` line — reject, never repair) and selects (never concatenates) a hardcoded mechanics directory. This resolution governs `**Mechanics:**` pointers only; a `**PR mechanics:**` pointer names a fixed literal path under `references/pr/` unconditionally and loads the same file under every provider. See `tracker-references` for the full preamble mechanics; this KB only needs the observable contract: an operation with no `**Mechanics:**` pointer loads nothing tracker-specific. There is no mechanics-unavailable DEGRADED at all: every install carries every provider's mechanics, so only a damaged install could leave one absent (ADR-028; `tracker mechanics unavailable` is a retired literal).
 
 ### D1–D11 Decision Marker Legend
 
@@ -275,7 +286,7 @@ Two zero-arg defines, adopted by `plan.mds`, `implement.mds`, `debug.mds`, `dyna
 - `issue_ref_grammar()` — the command-layer (L1) grammar: permissive and provider-blind, forwards raw `ISSUE_REFS` tokens verbatim. Under `github`, a token matching `^#?[1-9][0-9]{0,8}$` is a reference and the Git agent renders it as `#{n}`; any other shape is **never coerced or dropped silently** — the Git agent emits `TRACEABILITY: DEGRADED (issue reference "{ref}" does not match github reference grammar)` and continues with what it could resolve.
 - `issue_capture_contract()` — which operation emits which value: `ISSUE_CONTENT`/`ACCEPTANCE_CRITERIA` from every issue-bearing op; `ISSUE_REF` from the two fetch ops; the Handoff Values trio from `setup-task`/`fetch-issue` only, `(none)` on the batch path.
 
-GitHub rendering stays byte-identical pre/post-split: `Tracked = #{n}`, `Depends on: #{n}`, `42-jwt-auth.{ts}.md` filenames, `issue: 42`. `COMPLIANCE_SKILL_INSTALLED`/`compliance_gate()` ordering relative to this vocabulary is unchanged.
+GitHub rendering stays byte-identical pre/post-split: `Tracked = #{n}`, `Depends on: #{n}`, `42-jwt-auth.{ts}.md` filenames, `issue: 42`. `compliance_gate()` ordering relative to this vocabulary is unchanged.
 
 ### Markers — no restatement in compiled commands
 
@@ -329,11 +340,13 @@ Step 5 composes the release notes body: `CHANGELOG_CONTENT` first, then an optio
 
 ## Anti-Patterns
 
-**Resurrecting the 4-step gate.** The old `devflow-compliance` plugin implemented a 4-step pre-flight gate. This was retired when compliance became a built-in feature. Do not re-introduce step-gated pre-flight logic — the correct model is `compliance_gate()` (from the shared partial) checked once per command, passed as a field to the Git agent, used to gate individual ops.
+**Resurrecting the 4-step gate.** The old `devflow-compliance` plugin implemented a 4-step pre-flight gate. This was retired when compliance became a built-in feature. Do not re-introduce step-gated pre-flight logic — the correct model is the settings-line lens (`compliance_gate()` / `compliance_frameworks()` from the shared partial), resolved once per command (per worktree) and passed as `COMPLIANCE_FRAMEWORKS` to the agents that apply it.
 
-**Using COMPLIANCE_ENABLED.** This retired variable must not appear in any compiled command. The build-mds test (§14) asserts its absence. The current variable is `COMPLIANCE_SKILL_INSTALLED` (resolved by the orchestrator via `compliance_gate()`) and `COMPLIANCE` (the input field passed to the Git agent).
+**Using COMPLIANCE_ENABLED or COMPLIANCE_SKILL_INSTALLED.** Both are retired and must not appear in any compiled command; `tests/build-mds.test.ts` §14 (and, for /release, `tests/tracker/compliance-gate.test.ts`) assert their absence. The current variables are `COMPLIANCE_FRAMEWORKS` and `COMPLIANCE_ACTIVE`, set from the settings line by `_compliance.mds`.
 
-**Putting COMPLIANCE: in a non-Git spawn block.** The spawn-scoped guard (build-mds §14) asserts that every `COMPLIANCE:` line in every compiled command appears inside a `Agent(subagent_type="Git"` fence.
+**Gating the lens on a file's presence.** Every machine carries the compliance skill and all six framework references (`D-COMPLIANCE-INSTALL-ALWAYS`), so `~/.claude/skills/devflow:compliance/SKILL.md` existing says nothing, and a `references/{id}.md` existing says nothing about whether that framework is in force. Gate on `COMPLIANCE_ACTIVE`; load references for the ids in `COMPLIANCE_FRAMEWORKS` and no other.
+
+**Passing an op-level `COMPLIANCE:` key to any spawn.** Retired by #362: the Git agent's traceability ops take the evidence policy's mechanism inputs (`ISSUE_REQUIRED`, `APPLY_CONVENTIONS`, `REQUIRE_NON_AUTHOR_APPROVAL`) instead. The build-mds §14 collector reports any `COMPLIANCE:` spawn line in a compiled command (with a known-bad probe of the retired shapes).
 
 **Echoing external thread body content.** Reply bodies in `resolve-review-threads` must cite only internal evidence (commit SHAs, file:line from the codebase, ADR IDs) — never verbatim content from `<external-thread>` blocks.
 
@@ -342,6 +355,8 @@ Step 5 composes the release notes body: `CHANGELOG_CONTENT` first, then an optio
 **Overwriting conventions.md.** `learn-conventions` checks for file existence first and returns `ALREADY_EXISTS` if present. Never add logic that rewrites it conditionally — delete to force re-learn.
 
 **Seeding FEATURE_OWNED_RULES shadow from the installed file.** The installed compliance rule is already stamped (placeholder replaced). Seeding a shadow from it permanently disables framework stamping. `seedRuleShadow` always uses Tier 2 (canonical source) for `FEATURE_OWNED_RULES`.
+
+**Seeding a FEATURE_OWNED skill shadow from the installed copy.** The same trap for SKILL.md: `shadowSeedDir` returns the shipped source for `FEATURE_OWNED_SKILLS`; seeding `skills shadow compliance` from `~/.claude/skills/devflow:compliance/` would freeze the stamp and make `compliance --set` a no-op on a shadowed skill. Pinned by TP-44 (`tests/skills.test.ts`, `tests/compliance-install.test.ts`, with a known-bad probe).
 
 **Hand-assembling converge options at each call site.** `convergeFromManifest` is the single manifest→options site. Callers that bypass it risk assembling the options struct inconsistently (e.g., forgetting `rulesEnabledOverride`).
 
@@ -359,7 +374,7 @@ Step 5 composes the release notes body: `CHANGELOG_CONTENT` first, then an optio
 
 **Token-free skill shadow suppresses composition.** If a skill shadow's SKILL.md has no `${DEVFLOW_COMPLIANCE_` tokens, `composeComplianceSkill` returns it byte-identical (C1 passthrough). The installed SKILL.md will have no per-framework sections (mapping, active list, checklist, references). `devflow compliance --status` flags this with `[shadowed, composition skipped]`.
 
-**Step 0b ordering is load-bearing in code-review.** `compliance_gate()` (Step 0b) must execute before Step 0c spawns the Git ensure-pr-ready agent. The Git agent receives `COMPLIANCE: {COMPLIANCE_SKILL_INSTALLED ? "enabled" : "(none)"}`.
+**Step 0b resolves the lens per worktree in code-review.** `compliance_gate()` runs at Step 0b and each worktree keeps its own `COMPLIANCE_ACTIVE` / `COMPLIANCE_FRAMEWORKS` for every downstream phase — the settings line reads that worktree's project.json, so two worktrees can resolve different lenses.
 
 **VERIFICATION_STATUS == SKIPPED is treated like FAILED for thread resolution.** SKIPPED means the Validate gate did not run (zero fixes applied). In `resolve-review-threads`, SKIPPED → reply-only, no `resolveReviewThread` mutation.
 
@@ -381,7 +396,9 @@ Step 5 composes the release notes body: `CHANGELOG_CONTENT` first, then an optio
 
 **`release-trace.cjs`'s revert exemption reads the commit BODY, not the full `%B` message.** The reference scan (`findReference`) intentionally reads the whole message, but `classify()`'s revert rule tests `messageBody(commit.message)` only. A commit whose subject merely quotes `This reverts commit <sha>` without an actual git- or GitHub-generated body sentence is `untraced`, not `exempt:revert` — this is by design (`D-TRACE-REVERT-BODY`), not a gap.
 
-**A compliance-enabled repo with zero frameworks selected still floors the evidence policy at `required`.** `resolve-evidence-policy.cjs`'s `complianceDefault()` only checks `enabled: true` — an empty `frameworks: []` array does not fall back to `standard`. Do not "optimize" this to skip the floor when no framework is selected; the compliance skill is already installed and gating at that state.
+**A compliance-enabled repo with zero frameworks selected still floors the evidence policy at `required`.** `resolve-evidence-policy.cjs`'s `complianceDefault()` only checks `enabled: true` — an empty `frameworks: []` array does not fall back to `standard`. Do not "optimize" this to skip the floor when no framework is selected; the review lens is already on (generic controls) at that state.
+
+**The compliance lens and the language-focus gate are different shapes, deliberately.** `/code-review`'s eight language focuses stay presence-gated on `~/.claude/skills/devflow:{focus}/SKILL.md` — a home-based file check, because those skills install only with their optional plugin. The compliance lens is never presence-gated: every machine has its skill, so presence would say nothing. Known limitation: the language-focus check reads the home install, not anything per repository.
 
 **Release notes truncation order matters.** The 60000-char cap on `create-release`'s composed body drops `## Commits` before it ever touches `CHANGELOG_CONTENT`, and when `CHANGELOG_CONTENT` itself must be cut, the cut lands on a line boundary — never mid-line. The cap is also re-applied at step 6 (post-scrub), so a body sized exactly at the cap pre-scrub can still be trimmed again after redaction.
 
@@ -390,27 +407,32 @@ Step 5 composes the release notes body: `CHANGELOG_CONTENT` first, then an optio
 | File | Purpose |
 |---|---|
 | `src/core/compliance.ts` | Framework registry, `ComplianceFeatureState`, `ALWAYS_PRESENT_REFS`, tolerant/strict parsers, self-heal normalizer, rule stamper |
-| `src/core/compliance-compose.ts` | Pure composition: `parseComplianceFragment`, `composeComplianceSkill`, `composeComplianceRule`; `COMPLIANCE_SKILL_TOKENS`, `COMPLIANCE_RULE_TOKENS`, `COMPLIANCE_CONTROL_COLUMNS` |
+| `src/core/compliance-compose.ts` | Pure composition: `parseComplianceFragment`, `composeComplianceSkill`, `composeComplianceRule`; `buildActiveSection` (the machine stamp + `RUNTIME_SELECTION_LINES`); `COMPLIANCE_SKILL_TOKENS`, `COMPLIANCE_RULE_TOKENS`, `COMPLIANCE_CONTROL_COLUMNS` |
 | `src/assets/skills/compliance/frameworks/{id}/fragment.md` | Per-framework composition inputs (6 files): Mapping, Reference, Checklist, Rule sections |
 | `src/assets/skills/compliance/frameworks/{id}/reference.md` | Per-framework reference content (source location; installed as `references/{id}.md`) |
-| `src/targets/claude-code/compliance-install.ts` | `convergeComplianceArtifacts` (returns `{removedPreexisting, converged}`), `convergeFromManifest` wrapper, claudeDir guard, `loadComplianceFragments` |
-| `src/cli/commands/compliance.ts` | CLI: `resolveComplianceCliAction` (pure), Commander command, status/drift detection, `skillShadowState`; imports shared choices/message from `compliance-prompts.ts` |
+| `src/targets/claude-code/compliance-install.ts` | `convergeComplianceArtifacts` (`D-COMPLIANCE-INSTALL-ALWAYS`: skill + every reference always, rule only when enabled && rulesEnabled; returns `{removedPreexisting, converged}`), `convergeFromManifest` wrapper, claudeDir guard, `loadComplianceFragments` |
+| `src/cli/commands/compliance.ts` | CLI: `resolveComplianceCliAction` (pure), Commander command, `--status` (with `unknownFrameworkIds`; no reference-file drift), `skillShadowState`; imports shared choices/message from `compliance-prompts.ts` |
+| `src/cli/commands/skills.ts` | `shadowSeedDir` (`D-COMPLIANCE-SHADOW-SOURCE`: FEATURE_OWNED skills seed from source), the `the compliance feature (every install)` provenance |
 | `src/cli/commands/compliance-prompts.ts` | Shared wizard helpers: `shouldRunComplianceStep`, `runComplianceStep`, `CompliancePromptIO`, `buildClackCompliancePrompts`, `frameworkChoices`, `FRAMEWORK_SELECT_MESSAGE`, `formatComplianceSummary` |
 | `src/core/plugins.ts` | `FEATURE_OWNED_SKILLS`, `FEATURE_OWNED_RULES`, `DELETED_PLUGIN_NAMES`, `resolveFeatureRedirect` |
 | `src/cli/commands/rules.ts` | `seedRuleShadow` (Tier 1 skipped for FEATURE_OWNED_RULES; Tier 2 = canonical source preserves placeholder) |
-| `src/assets/commands/_partials/_compliance.mds` | `compliance_gate()` partial — single-source COMPLIANCE_SKILL_INSTALLED resolution, plus `COMPLIANCE` from the settings line |
+| `src/assets/commands/_partials/_compliance.mds` | `compliance_frameworks()` (`COMPLIANCE_FRAMEWORKS` from the settings line's `COMPLIANCE`, `generic` → `none`) and `compliance_gate()` (settings resolve + the lens + `COMPLIANCE_ACTIVE`) — `D-COMPLIANCE-REPO-LENS` |
+| `src/assets/agents/code.md`, `review.md`, `design.md` · `src/assets/skills/gap-analysis/SKILL.md` §7 · `src/assets/skills/compliance/SKILL.md` checklist | The lens's consumers: `COMPLIANCE_FRAMEWORKS` input; load `references/{id}.md` only for the given ids |
 | `src/assets/agents/git.mds` (compiles to `dist/agents/git.md`) | The traceability **contract**: D4/D11 legend, D4 invariants, D9 gate, D3 legend row, per-op `**Input:**`/`**Output:**`/`**Mechanics:**`/`**PR mechanics:**` pointers, Tracker provider resolution + input contract preamble |
 | `src/assets/mds/tracker/_github.mds` | The GitHub **mechanics** for the 10 `TRACKER_GITHUB_OPS` — `### Process` bodies, `### Provider signals (GitHub)` (D4 detectors, D11 scrub-then-post chain), `### Traceability Issue Template (D3)` |
 | `src/assets/mds/git/_pr.mds` (compiles to `dist/skills/git/references/pr/{op}.md`) | The provider-independent **PR-host mechanics** for the 8 `PR_HOST_OPS` (`ensure-pr-ready`, `validate-branch`, `post-review-summary`, `check-ci-status`, `fetch-review-threads`, `resolve-review-threads`, `post-resolution-summary`, `check-merge-readiness`) — installed under every provider; added by #326 / PR #353 |
 | `src/assets/mds/git/_references.mds` | The 3 cross-cutting glossary/gate documents — `decision-markers.md` (D1–D10 full table), `learn-conventions.md` (D1 scan/heuristics/template), `publication-gate.md` (D10 7-step order) |
 | `src/assets/commands/_partials/_tracker.mds` | `issue_ref_grammar()`, `issue_capture_contract()` — command-layer issue-reference vocabulary |
-| `src/assets/commands/code-review.mds` | Step 0b (imports compliance_gate), Phase 1 regulated-surface gate, Git COMPLIANCE field |
-| `src/assets/commands/resolve.mds` | Phase 1b (fetch-review-threads), Phase 9b (resolve-review-threads), Phase 9c (check-merge-readiness) |
-| `src/assets/commands/plan.mds` | compliance_gate gate for compliance Design agent and mandatory issue linking |
-| `src/assets/commands/implement.mds` | compliance_gate resolution, Git setup-task COMPLIANCE field |
-| `src/assets/commands/release.md` | Phase 1c (COMPLIANCE_SKILL_INSTALLED), gather-release-evidence spawn, backlink-shipped-issues |
+| `src/assets/commands/code-review.mds` | Step 0b (imports `compliance_gate`, per worktree), Phase 1 regulated-surface gate on `COMPLIANCE_ACTIVE`, `COMPLIANCE_FRAMEWORKS` in the compliance Review spawn |
+| `src/assets/commands/resolve.mds` | Phase 1b (fetch-review-threads) and 9b (resolve-review-threads) on `EVIDENCE_POLICY` `required`, Phase 9c (check-merge-readiness) on `REQUIRE_NON_AUTHOR_APPROVAL`; `COMPLIANCE_FRAMEWORKS` to the issue-fix Code spawn |
+| `src/assets/commands/plan.mds` | `compliance_gate()` for the compliance Design agent (`COMPLIANCE_ACTIVE`, `COMPLIANCE_FRAMEWORKS` in its spawn); issue linking is mandatory only under `EVIDENCE_POLICY` `required` |
+| `src/assets/commands/implement.mds` | alias-imports `_compliance.mds`; `COMPLIANCE_FRAMEWORKS` to the five implementing Code spawns (no gate) |
+| `src/assets/commands/release.md` | Phase 1c (the evidence policy), gather-release-evidence and backlink-shipped-issues on `EVIDENCE_POLICY` — no compliance gate |
 | `src/assets/skills/git/SKILL.md` | Extended References table row for `references/tracker/{provider}/{op}.md`; naming-conventions authority pointer to `learn-conventions` |
 | `tests/git-agent.test.ts` | Static guards: required ops list, 60000-char caps, D9 gate, D4 backpressure, D7/D8 dedup markers, AC-0.10 containment (split into issue-body and external-thread guards); reads the joined corpus via `gitAgentSinkCorpus()` for guards whose literal moved, and via `sinkCorpusWithoutPrHost()`/`gitPlusPrHostCorpus()` for PR-host-specific non-vacuity and detection guards (#326) |
+| `tests/compliance-install.test.ts` · `tests/skills.test.ts` | TP-44: the skill and all six references install on every convergence, the rule only when enabled; a shadow seeded from source is re-stamped by `--set` (known-bad probe: a shadow seeded from the installed copy) |
+| `tests/compliance-prompts.test.ts` · `tests/compliance-e2e.test.ts` (S23) | TP-43: the lens from the settings line; a hipaa repository on a compliance-off machine resolves `COMPLIANCE=hipaa` and never installs or changes the machine rule |
+| `tests/scoped-install-e2e.test.ts` · `tests/evidence-policy/disposition.test.ts` | TP-38's `EVERY_INSTALL_CARRIES` includes the compliance skill and its references; the disposition gate names `COMPLIANCE_ACTIVE` as the lens input |
 | `tests/registry-integrity.test.ts` | Guard 6: OPERATION: values in compiled commands ↔ `## Operation:` headings in git.md (spawn↔op integrity) |
 | `src/assets/scripts/release-trace.cjs` | Pure git-history classifier backing `gather-release-evidence`'s trace map and `create-release`'s `LAST_TAG` lookup — `classify`, `messageBody` (D-TRACE-REVERT-BODY), `findReference` (D-TRACE-FULL-MESSAGE), `MESSAGE_LOG_FLAGS` |
 | `src/assets/scripts/resolve-evidence-policy.cjs` | `complianceDefault()` — the compliance-enabled-at-any-framework-count `required` floor, mirroring `normalizeComplianceFeature`; `projectReading()`/`withLegacyFallback()` — the repository floor from a project.json `compliance` key at R/T/W (D-COMPLIANCE-REPO-FLOOR) and project.json-first, per-source policy.json fallback (D-POLICY-SOURCE-PRECEDENCE) |
@@ -434,5 +456,5 @@ Step 5 composes the release notes body: `CHANGELOG_CONTENT` first, then an optio
 - **PF-063** — Byte-identical relocation is not semantics-preserving across a grammar boundary: the direct cause of the `###`-heading-depth rule applied to the moved D3 template.
 - Feature knowledge: **tracker-references** — owns the split mechanics in full detail: MDS build machinery (`VARIANT_MODULES`, `expandVariants`, `splitVariantSections`), the byte budget (`BUDGET_GIT_MD`, `BUDGET_SKILL_MD`, `BUDGET_LOADED_SET`, `PREAMBLE_MAX_LINES`), the single-authority and reachability guards (`SHARED_LITERAL_REGISTRY`, `MCP_SHARED_LITERAL_REGISTRY`, `MIN_RATIONALE_CHARS`), and the installer overlay (`overlayGeneratedReferences`, converge-not-merge, prune). Read it before touching build-side plumbing; read this KB for what the contract means at runtime.
 - Feature knowledge: **installer-shadowing** — shadow resolution for SKILL.md and rule file follows `validateSkillShadow` / `validateRuleShadow` from the installer; `seedRuleShadow` tier logic lives in `rules.ts`.
-- Feature knowledge: **resolve-pipeline** — `/resolve` depends on `COMPLIANCE_SKILL_INSTALLED` for Phase 1b/9b/9c; resolution-summary.md format includes `## Third-Party Threads` section gated by this flag.
+- Feature knowledge: **resolve-pipeline** — `/resolve` gates Phase 1b/9b on `EVIDENCE_POLICY` and 9c on `REQUIRE_NON_AUTHOR_APPROVAL`, and passes `COMPLIANCE_FRAMEWORKS` to its issue-fix Code spawn; resolution-summary.md format includes a `## Third-Party Threads` section.
 </content>

@@ -10,15 +10,16 @@ export type ReviewPublication = 'auto' | 'full' | 'off';
  * resolution order needs all three and no two of them mean the same thing
  * (OD-9, [DR-26]).
  *
- *   absent  — no override. The agent defers to `features.tracker.provider` in the
- *             manifest. This is NOT the same as `github`: a chosen `github` is a
- *             per-repo decision that outranks the manifest, absence defers to it.
- *   valid   — a registered provider id, byte-exact. It NARROWS: the agent honours
- *             it when it names `github` or the manifest's own provider, and
- *             reports `TRACEABILITY: DEGRADED (tracker configuration mismatch)`
- *             for any other, because the machine-wide selection is what gets a
- *             sentinel written and conventions inferred — a repo cannot elect a
- *             provider the machine never selected.
+ *   absent  — no override. The provider is the repository's `project.json`
+ *             selection, else `features.tracker.provider` in the manifest. This is
+ *             NOT the same as `github`: a chosen `github` is a personal decision
+ *             that outranks both, absence defers to them.
+ *   valid   — a registered provider id, byte-exact. It NARROWS: the settings line
+ *             honours it when it names `github` or the provider resolved without
+ *             it, and reports `TRACKER_WARN=mismatch` — the Git agent's
+ *             `TRACEABILITY: DEGRADED (tracker configuration mismatch (repository
+ *             override))` — for any other: a personal file cannot elect a provider
+ *             the repository and the machine did not.
  *   invalid — the key is set to something outside the registry. Carries the raw
  *             value so `TRACEABILITY: DEGRADED (unknown tracker provider)` can
  *             name it (§14.2). Distinct from `absent` precisely so that reason is

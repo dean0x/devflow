@@ -1,7 +1,7 @@
 ---
 feature: learning-capture-system
 name: Learning & Capture System
-description: "Use when modifying capture hooks (capture-prompt/capture-turn/capture-question), the learning or memory pending-turns queues, the Learning agent (src/assets/agents/learning.md), the session-start-context learning or tracker-setup directives, the machine-wide feature switches (memory/learning/knowledge in ~/.devflow/manifest.json), the per-repo tracker override in .devflow/config.json, the learning tuning config, the decisions content files (decisions.md/pitfalls.md/index.md) or their ledger ops, or the devflow learning/memory/knowledge CLI. Keywords: capture-prompt, capture-turn, capture-question, queue-append, pending-turns, memory-worker, Learning agent, learning directive, LEARNING MAINTENANCE, TRACKER SETUP, TRACKER_PROCESSING_STALE_SECS, TRACKER_PROVIDER_KEY_PATH, tracker-section-max-chars, .tracker.attempts, .tracker.enabled, .tracker.processing, hookEnv, DEVFLOW_BG_UPDATER, learning-lock, queue_read_gates, isMachineFeatureOn, readMachineFeature, writeMachineFeature, feature-switch, manifest.json, RETIRED_CONFIG_KEYS, decisions_load, DECISIONS_CONTEXT, feature-config, learning.json, decisions-ledger, assign-anchor, retire-anchor, refresh-anchor, render-decisions, staged-write CAS, WORKING-MEMORY.md.new, segmentDetails, amendments, is-hex-sha, verify_and_swap, compute_commits_since_note, divergence guard, isSafeRawBody."
+description: "Use when modifying capture hooks (capture-prompt/capture-turn/capture-question), the learning or memory pending-turns queues, the Learning agent (src/assets/agents/learning.md), the session-start-context learning or tracker-setup directives, the machine-wide feature switches (memory/learning/knowledge in ~/.devflow/manifest.json), the per-repo tracker override in .devflow/config.json, the learning tuning config, the decisions content files (decisions.md/pitfalls.md/index.md) or their ledger ops, or the devflow learning/memory/knowledge CLI. Keywords: capture-prompt, capture-turn, capture-question, queue-append, pending-turns, memory-worker, Learning agent, learning directive, LEARNING MAINTENANCE, TRACKER SETUP, TRACKER_PROCESSING_STALE_SECS, tracker-section-max-chars, .tracker.{provider}.attempts, .tracker.enabled, .tracker.processing, hookEnv, DEVFLOW_BG_UPDATER, learning-lock, queue_read_gates, isMachineFeatureOn, readMachineFeature, writeMachineFeature, feature-switch, manifest.json, RETIRED_CONFIG_KEYS, decisions_load, DECISIONS_CONTEXT, feature-config, learning.json, decisions-ledger, assign-anchor, retire-anchor, refresh-anchor, render-decisions, staged-write CAS, WORKING-MEMORY.md.new, segmentDetails, amendments, is-hex-sha, verify_and_swap, compute_commits_since_note, divergence guard, isSafeRawBody."
 category: architecture
 directories:
   - src/assets/scripts/hooks
@@ -130,9 +130,11 @@ Config splits along a different line than before #378:
 per-repo provider override, not a boolean toggle (`FeatureConfig.tracker` is `unknown`,
 unvalidated at the field level; ADR-011's neutral-config-home rationale now applies only to this
 field). It round-trips through `coerceConfig`/`mergeManagedConfig` byte-for-byte
-(D-CONFIG-PRESERVE-UNMANAGED). `parseTrackerOverride` (routes through `parseTrackerId`) is the
-only sanctioned reader, returning `{absent | valid | invalid}` — see `tracker-feature` KB for the
-Git agent's resolution order.
+(D-CONFIG-PRESERVE-UNMANAGED). It has two readers that must agree: `parseTrackerOverride`
+(TypeScript, routes through `parseTrackerId`, returning `{absent | valid | invalid}`) and
+`resolve-settings.cjs`'s `parsePersonalBytes`, which folds it into the settings line the Git agent
+consumes — `tests/seams/tracker-key-path.test.ts` pins them to the same verdicts. See
+`tracker-feature` KB for the resolution order.
 
 ### Project Roots (D-HOOKS-GIT-ONLY, D-LEDGER-MAIN-WORKTREE)
 
@@ -173,22 +175,32 @@ interpolation — `learning.json` is user-controlled, so a newline-injected valu
 
 A second, independent directive shares the hook and injection shape but gates a different
 feature and spawns the `Tracker` agent. NOT gated by the `learning` machine switch — tracker
-provider selection is its own manifest field (`features.tracker.provider`), unaffected by #378.
+selection is its own configuration, unaffected by #378.
 
-**Gate order is cheapest-first**: sentinel-present-and-conventions-absent (1–2 `stat`, 0 forks
-— proven, under provider `github`, to fork ZERO subprocesses); attempt cap via `read` (0 forks);
-`source` ∈ {`startup`, `clear`} (1 fork); claim-file freshness (0–2 forks); provider allowlist
-`jira|linear`, never `!= github` (1 fork).
+**Which provider** (`D-TRACKER-PER-PROVIDER-CONVENTIONS`): the machine default from the
+`.tracker.enabled` sentinel — the provider NAME on one line, read with the `read` builtin
+(zero forks; a zero-byte sentinel from an earlier release yields no directive until init
+rewrites it) — overridden by the project's committed `.devflow/project.json` only when a
+bounded builtin read of it shows a `"tracker"` key, which costs ONE fork of
+`resolve-settings.cjs` (the resolver the Git agent consumes). A personal `.devflow/config.json`
+override never triggers that fork. Then a POSITIVE `jira|linear` allowlist (never `!= github`),
+then skip when `~/.devflow/tracker/$P.md` already exists.
 
-**`.tracker.attempts`** is one decimal-integer line and nothing else (PF-062) — absent/malformed
-→ 0, self-healed; 6+ digits treated as already at `TRACKER_ATTEMPTS_MAX=5` (a naive `-ge` on an
-out-of-range value fails OPEN). The hook increments on EMISSION (a crashed agent still burns an
-attempt); the agent deletes the counter only on a successful write, and always deletes the claim
-file last. `TRACKER_PROVIDER_KEY_PATH` must literally match `src/core/tracker.ts`'s exported
-constant (pinned in `tests/seams/tracker-key-path.test.ts`, forcing the node backend via
-`_HAS_JQ=false` rather than editing `PATH`, avoiding PF-045). `TRACKER_PROCESSING_STALE_SECS=600`
-is its own literal, deliberately not shared with Learning's 900s. Capped at
-`tracker-section-max-chars` = 800 (ceiling in `tests/fixtures/numeric-floors.json`).
+**Then the gates, cheapest-first**, inside `tracker_gates_open()`: attempt cap via `read`
+(0 forks); project root carries a git marker (0 forks); `source` ∈ {`startup`, `clear`}
+(1 fork); claim-file freshness (0–2 forks); interpolated path shape; the counter increment
+must land. The GitHub path and a provider whose conventions are learned fork ZERO subprocesses.
+
+**`.tracker.{provider}.attempts`** (one counter per provider; the claim file
+`.tracker.processing` stays global) is one decimal-integer line and nothing else (PF-062) —
+absent/malformed/zero-padded → 0, self-healed; 7+ digits treated as already at
+`TRACKER_ATTEMPTS_MAX=5` (a naive `-ge` on an out-of-range value fails OPEN). The hook
+increments on EMISSION (a crashed agent still burns an attempt); the agent deletes the counter
+only on a successful write and never otherwise touches it, and always deletes the claim file
+last. `tests/seams/tracker-key-path.test.ts` pins the TS sentinel writer against the shell
+reader for every provider. `TRACKER_PROCESSING_STALE_SECS=600` is its own literal, deliberately
+not shared with Learning's 900s. Capped at `tracker-section-max-chars` = 800 (ceiling in
+`tests/fixtures/numeric-floors.json`).
 
 ### Learning Agent
 
@@ -238,7 +250,8 @@ before acquiring the lock, creating `.devflow/learning/` on first run.
 
 `src/assets/agents/tracker.md` (`model: sonnet`, no `tools:` key) is the second hook-spawned
 background agent — the same claim/heartbeat/consume-then-delete shape as Learning, its own 600s
-bound, and its own files (`.tracker.processing`, `.tracker.attempts`). The write is scrub-gated
+bound, and its own files (`.tracker.processing`, `.tracker.{provider}.attempts`); it writes the
+conventions file its directive names, `~/.devflow/tracker/{provider}.md`. The write is scrub-gated
 through `redact-secrets.cjs` and create-exclusive (`umask 077` + `noclobber` + `chmod 600`) —
 schema, domain rules, and the write-chain detail are owned by the `tracker-feature` KB.
 
@@ -538,8 +551,8 @@ Do not rename them: `decisions.md`/`pitfalls.md` (rendered output), `decisions-l
 - **PF-003** — use `unlink` not `rm -f` for the agent's final act
 - **PF-014** — throw inside lock scopes, never `process.exit()`; precondition asserts in `refresh-anchor`
 - **PF-013** — parent directory of lock dir created before acquire (`withDecisionsLock`)
-- **PF-045** — simulating a missing shell tool via `PATH` subtraction is platform-dependent; `tests/seams/tracker-key-path.test.ts` avoids it with a backend variable-switch override
-- **PF-062** — document the shape of any file that gates a suppressing action, and keep absent and malformed distinct from a value; the `.tracker.attempts` parse follows this directly
+- **PF-045** — simulating a missing shell tool via `PATH` subtraction is platform-dependent; `tests/shell-hooks-tracker.test.ts` avoids it with a backend variable-switch override (`_HAS_JQ=false`)
+- **PF-062** — document the shape of any file that gates a suppressing action, and keep absent and malformed distinct from a value; the `.tracker.{provider}.attempts` parse follows this directly
 - **PF-035** — a shell rewrite hook can silently substitute a lossy view for a literal file read; the load-bearing surface is exactly the Learning/Tracker agents' direct `.devflow` data-file consumption
 - `.devflow/features/feature-knowledge-system/KNOWLEDGE.md` — Knowledge agent write-back pattern (parallel write-through system); its opt-out gate takes `KNOWLEDGE=` from the settings line, which folds the same `features.knowledge` switch this KB documents with the two repo files
 - `.devflow/features/ambient-orchestrator/KNOWLEDGE.md` — Ambient orchestrator that also uses `session-start-context` for charter injection

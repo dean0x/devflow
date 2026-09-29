@@ -1,7 +1,7 @@
 ---
 feature: resolve-pipeline
 name: Resolve Pipeline (Triage → Fix → Verify)
-description: "Use when modifying /resolve or /code-review convergence logic, adding or changing Triage disposition rules (including DUPLICATE collapsing), adjusting Code-agent operating modes (issue-fix/validation-fix), touching the resolution-summary.md parser contract, changing the Verification Gate retry loop, understanding how DIFF_FILES flows from git validate-branch into blast-radius triage, or working on traceability operations (fetch-review-threads, resolve-review-threads, post-resolution-summary, check-merge-readiness, THREAD_MAP). Keywords: resolve, triage, disposition matrix, blast-radius, FIX_NOW, FIX_SEPARATE, TECH_DEBT, FALSE_POSITIVE, BY_DESIGN, ESCALATED, DUPLICATE, duplicate-grouping, duplicates-collapse, duplicate_of, resolution-summary, convergence parser, DIFF_FILES, issue-fix, validation-fix, Verification Gate, manage-debt, COMPLIANCE_SKILL_INSTALLED, TRACEABILITY DEGRADED, fetch-review-threads, THREAD_MAP, post-resolution-summary, Third-Party Threads, check-merge-readiness, ext-N, D7, D9, PF-024."
+description: "Use when modifying /resolve or /code-review convergence logic, adding or changing Triage disposition rules (including DUPLICATE collapsing), adjusting Code-agent operating modes (issue-fix/validation-fix), touching the resolution-summary.md parser contract, changing the Verification Gate retry loop, understanding how DIFF_FILES flows from git validate-branch into blast-radius triage, or working on traceability operations (fetch-review-threads, resolve-review-threads, post-resolution-summary, check-merge-readiness, THREAD_MAP). Keywords: resolve, triage, disposition matrix, blast-radius, FIX_NOW, FIX_SEPARATE, TECH_DEBT, FALSE_POSITIVE, BY_DESIGN, ESCALATED, DUPLICATE, duplicate-grouping, duplicates-collapse, duplicate_of, resolution-summary, convergence parser, DIFF_FILES, issue-fix, validation-fix, Verification Gate, manage-debt, EVIDENCE_POLICY gates, TRACEABILITY DEGRADED, fetch-review-threads, THREAD_MAP, post-resolution-summary, Third-Party Threads, check-merge-readiness, ext-N, D7, D9, PF-024."
 category: architecture
 directories: [src/assets/commands/resolve.mds, src/assets/agents/triage.md, src/assets/agents/code.md, src/core/plugins.ts, src/assets/commands/code-review.mds]
 created: 2026-07-08
@@ -46,10 +46,10 @@ Phase 0   Worktree Discovery & Pre-Flight
   Step 0b  Git agent (validate-branch) per worktree [parallel] ← DIFF_FILES
   Step 0c  Target latest review directory per worktree
   Step 0d  Load DECISIONS_CONTEXT + FEATURE_KNOWLEDGE
-           Resolve COMPLIANCE_SKILL_INSTALLED via compliance_gate() — plain boolean
-           (true/false, never "(none)"). One file-existence check, reused for all phases.
+           Resolve EVIDENCE_POLICY (evidence_policy(), once per run) and, per worktree,
+           the settings line: REVIEW_PUBLICATION and COMPLIANCE_FRAMEWORKS.
 Phase 1   Orchestrator parses issues → ISSUES (with reviewer_confidence %)
-Phase 1b  Git agent (fetch-review-threads) → THREAD_MAP  [compliance-gated]
+Phase 1b  Git agent (fetch-review-threads) → THREAD_MAP  [only when EVIDENCE_POLICY is required]
 Phase 2   Single global Triage agent → verdict ledger (one verdict per issue, none vanish)
           Duplicate pre-pass fires FIRST; matrix runs on group primaries only.
           DUPLICATE is a valid bucket; missing duplicate_of or a chained DUPLICATE = Triage failure.
@@ -76,7 +76,7 @@ Phase 10  Display results
 
 **Phase 7 push timing**: The single `git push` fires at the END of Phase 7, whether the gate PASSED or FAILED. This ensures the branch is always visible on remote before CI, debt management, or thread resolution runs. Code agents (Phase 4) and validation-fix Code agents (Phase 7 loop) both receive `PUSH: false`; the orchestrator owns the push.
 
-**Compliance gate** (`compliance_gate()` partial from `_partials/_compliance.mds`): Sets `COMPLIANCE_SKILL_INSTALLED = true` if `~/.claude/skills/devflow:compliance/SKILL.md` exists, `false` otherwise — plain boolean, never `(none)`. When `COMPLIANCE_SKILL_INSTALLED` is false, phases 1b, 9b-1, and 9c are skipped; Phase 9b-2 (post-resolution-summary) still runs if a PR is known.
+**Evidence gates**: Phases 1b and 9b-1 run only when `EVIDENCE_POLICY` is `required`; Phase 9c runs only when `REQUIRE_NON_AUTHOR_APPROVAL` is `true`. Phase 9b-2 (post-resolution-summary) still runs if a PR is known. /resolve takes no compliance gate: from the same settings line as `REVIEW_PUBLICATION` it sets `COMPLIANCE_FRAMEWORKS` (`compliance_frameworks()` from `_partials/_compliance.mds`, alias-imported) and passes it to every issue-fix Code agent, which loads the compliance skill only when it is not `off`.
 
 ### DIFF_FILES Flow
 
@@ -84,13 +84,13 @@ Git agent's `validate-branch` operation emits a `### Diff Scope` block containin
 
 `DIFF_FILES` is not a flag — it's the primary input that drives the FIX_NOW vs FIX_SEPARATE boundary in the Triage agent's blast-radius matrix.
 
-### Traceability Layer (Compliance-Gated)
+### Traceability Layer (Evidence-Policy-Gated)
 
-`COMPLIANCE_SKILL_INSTALLED` is resolved once per run in Step 0d via the `compliance_gate()` partial — a single file-existence read, no subprocess. The result is reused across all phases that gate on it.
+`EVIDENCE_POLICY` is resolved once per run by the `evidence_policy()` partial and reused for every worktree; the phases below key on it (or on `REQUIRE_NON_AUTHOR_APPROVAL`), never on compliance.
 
 **Phase 1b — fetch-review-threads**: Before Triage, the Git agent fetches unresolved external (non-devflow-authored) review threads from the PR via `OPERATION: fetch-review-threads`. Returns a `THREAD_MAP` of `ext-{N}` records (one per external thread). If `TRACEABILITY: DEGRADED` → record reason, set `THREAD_MAP = empty`, continue.
 
-**Phase 9b-1 — resolve-review-threads** (compliance-gated, runs after Phase 9 backfill): Prepares THREAD_MAP with verdicts from Triage/Code results by matching `ext-{N}` to issues by file:line correlation. Unmatched threads default to ESCALATED (human review required). Then spawns Git agent with `OPERATION: resolve-review-threads`.
+**Phase 9b-1 — resolve-review-threads** (only when `EVIDENCE_POLICY` is `required`, runs after Phase 9 backfill): Prepares THREAD_MAP with verdicts from Triage/Code results by matching `ext-{N}` to issues by file:line correlation. Unmatched threads default to ESCALATED (human review required). Then spawns Git agent with `OPERATION: resolve-review-threads`.
 
 **DUPLICATE in THREAD_MAP**: If a matched issue has verdict DUPLICATE, the orchestrator uses the **primary's** verdict and verification status for the thread reply — the DUPLICATE verdict is never exposed to the thread author. This is a caller-side mapping; git.md contracts are unchanged (applies PF-024).
 
@@ -101,9 +101,9 @@ Git agent's `validate-branch` operation emits a `### Diff Scope` block containin
 
 When VERIFICATION_STATUS is FAILED or SKIPPED, the agent replies to every thread without resolving any. If `TRACEABILITY: DEGRADED` → warn, record in `## Third-Party Threads`, continue to 9b-2.
 
-**Phase 9b-2 — post-resolution-summary** (ALWAYS-ON): Spawns Git agent with `OPERATION: post-resolution-summary` whenever a PR is known, regardless of `COMPLIANCE_SKILL_INSTALLED`. Posts a consolidated PR comment with `<!-- devflow:resolution-summary ts:{TS} -->` marker — skipped if already posted. If `TRACEABILITY: DEGRADED` → warn, continue. Updates `## Third-Party Threads` section in resolution-summary.md.
+**Phase 9b-2 — post-resolution-summary** (ALWAYS-ON): Spawns Git agent with `OPERATION: post-resolution-summary` whenever a PR is known, regardless of the evidence policy. Posts a consolidated PR comment with `<!-- devflow:resolution-summary ts:{TS} -->` marker — skipped if already posted. If `TRACEABILITY: DEGRADED` → warn, continue. Updates `## Third-Party Threads` section in resolution-summary.md.
 
-**Phase 9c — check-merge-readiness** (compliance-gated, report-only): Spawns Git agent with `OPERATION: check-merge-readiness`. Returns READY / NOT_READY / DEGRADED / CI-pending as distinct states. Reported in Phase 10 output but **never blocks** the pipeline.
+**Phase 9c — check-merge-readiness** (only when `REQUIRE_NON_AUTHOR_APPROVAL` is `true`, report-only): Spawns Git agent with `OPERATION: check-merge-readiness`. Returns READY / NOT_READY / DEGRADED / CI-pending as distinct states. Reported in Phase 10 output but **never blocks** the pipeline.
 
 **TRACEABILITY: DEGRADED contract**: Any of no-PR, no-gh-auth, no-remote causes the Git agent to return `TRACEABILITY: DEGRADED ({reason})`. All traceability operations skip-and-continue on DEGRADED — they never fail the pipeline.
 
@@ -232,15 +232,15 @@ The section headings and their column layouts:
 
 The caller spawn in code-review.mds passes `REVIEW_TIMESTAMP: {timestamp}` as an input — it does **not** restate the marker literal. The marker format is owned by and defined in the `post-review-summary` operation in git.md (avoids PF-024). `tests/build-mds.test.ts §15` asserts that the compiled code-review.md contains `REVIEW_TIMESTAMP` in the post-review-summary spawn.
 
-**COMPLIANCE_SKILL_INSTALLED ordering in /code-review is load-bearing**: The compliance check happens at Step 0b, explicitly **before** Step 0c spawns the Git agent (`ensure-pr-ready`). The `COMPLIANCE` value is passed to the Git agent in that spawn. Resolving it later (e.g. during Phase 1) would leave the ensure-pr-ready agent without the traceability context it needs to configure PR conventions.
+**Resolution order in /code-review is load-bearing**: Step 0b resolves the compliance lens (`COMPLIANCE_ACTIVE`, `COMPLIANCE_FRAMEWORKS`) from the settings line and Step 0b-ii the evidence policy, both **before** Step 0c spawns the Git agent (`ensure-pr-ready`), which takes `APPLY_CONVENTIONS` from the policy. The lens gates only the compliance Review focus in Phase 1 and never reaches the Git agent.
 
 **comment-pr op retired**: The former `comment-pr` Git agent operation is no longer used. All PR commenting goes through `post-review-summary` (Phase 3b in /code-review) or `post-resolution-summary` (Phase 9b-2 in /resolve).
 
 ## plan.mds ensure-traceable-issue Guard
 
 `/plan` Phase 14 spawns the Git agent with `OPERATION: ensure-traceable-issue` to create or enrich a GitHub issue for the plan. The spawn is **guarded**:
-- When `COMPLIANCE_SKILL_INSTALLED` is **true**: issue linking is **mandatory** (DEGRADED states exempt with a warning in the final summary) — spawn proceeds unconditionally
-- When `COMPLIANCE_SKILL_INSTALLED` is **false**: issue linking is optional — an `AskUserQuestion` prompt asks the user before the spawn; if the user declines, the spawn is skipped entirely
+- When `EVIDENCE_POLICY` is **`required`**: issue linking is **mandatory** (DEGRADED states exempt with a warning in the final summary) — spawn proceeds unconditionally
+- When `EVIDENCE_POLICY` is **`standard`**: issue linking is optional — an `AskUserQuestion` prompt asks the user before the spawn; if the user declines, the spawn is skipped entirely
 
 ## Triage Agent Contract
 
@@ -341,9 +341,9 @@ The following test files provide static content guards that fail loudly when loa
 
 - **manage-debt runs sequentially across worktrees**: In multi-worktree mode, manage-debt cannot run in parallel — GitHub API conflicts arise when creating issues concurrently. Even though other phases (pre-flight, Code agent batches) run in parallel, Phase 9 is always sequential.
 
-- **COMPLIANCE_SKILL_INSTALLED is a plain boolean**: `compliance_gate()` sets it to `true` or `false` — never `(none)`. Guard sites in resolve.mds and code-review.mds check `if COMPLIANCE_SKILL_INSTALLED is false`, not `if (none)`.
+- **The compliance lens is not a /resolve gate**: /code-review and /plan gate their compliance agent on `COMPLIANCE_ACTIVE` (`true` unless `COMPLIANCE_FRAMEWORKS` is `off`); /resolve only passes `COMPLIANCE_FRAMEWORKS` through to its Code agents. Every install carries the compliance skill, so no prompt checks for the skill file.
 
-- **post-resolution-summary (9b-2) is ALWAYS-ON**: Unlike Phase 9b-1, step 9b-2 runs whenever a PR is known, regardless of `COMPLIANCE_SKILL_INSTALLED`. It posts the resolution summary comment to the PR with `<!-- devflow:resolution-summary ts:{TS} -->` dedup. Compliance installation gates only thread-resolution (9b-1) and merge-readiness (9c).
+- **post-resolution-summary (9b-2) is ALWAYS-ON**: Unlike Phase 9b-1, step 9b-2 runs whenever a PR is known, regardless of the evidence policy. It posts the resolution summary comment to the PR with `<!-- devflow:resolution-summary ts:{TS} -->` dedup. The evidence policy gates thread resolution (9b-1); `REQUIRE_NON_AUTHOR_APPROVAL` gates merge readiness (9c).
 
 - **D7 dedup is cycle+timestamp, not cycle alone**: A same-cycle re-review (different timestamp) posts a new comment. Only an exact same-timestamp re-run deduplicates. The REVIEW_TIMESTAMP input to the post-review-summary spawn is load-bearing for this contract.
 
@@ -363,9 +363,9 @@ The following test files provide static content guards that fail loudly when loa
 - `src/assets/agents/triage.md` — Triage agent (opus): duplicate grouping pre-pass, blast-radius disposition matrix, evidence rules, verdict ledger format (7 buckets including DUPLICATE)
 - `src/assets/agents/code.md` — Code agent: `issue-fix`, `validation-fix`, `alignment-fix`, `qa-fix` modes documented in Mode sections
 - `src/assets/agents/git.mds` (compiles to `dist/agents/git.md`) — Git agent: all traceability operations (validate-branch, fetch-review-threads, resolve-review-threads, post-review-summary, post-resolution-summary, check-merge-readiness, manage-debt, check-ci-status); D7/D8/D9 decision markers defined here
-- `src/assets/commands/_partials/_compliance.mds` — `compliance_gate()` partial: sets `COMPLIANCE_SKILL_INSTALLED` as plain boolean
+- `src/assets/commands/_partials/_compliance.mds` — `compliance_frameworks()` (sets `COMPLIANCE_FRAMEWORKS` from the settings line; alias-imported by /resolve) and `compliance_gate()` (adds `COMPLIANCE_ACTIVE`; /code-review and /plan)
 - `src/core/plugins.ts` — DEVFLOW_PLUGINS entry for devflow-resolve: agents registry `[git, triage, code, simplify, validate, knowledge]`
-- `src/assets/commands/code-review.mds` — Contains convergence parser (fp_ratio), Phase 3 sequential synthesis+comment pattern, Step 0b COMPLIANCE_SKILL_INSTALLED resolution, REVIEW_TIMESTAMP spawn input
+- `src/assets/commands/code-review.mds` — Contains convergence parser (fp_ratio), Phase 3 sequential synthesis+comment pattern, Step 0b compliance-lens resolution, REVIEW_TIMESTAMP spawn input
 - `tests/git-agent.test.ts` — Static content guards for git.md: ops, bounds, D9 gate, D4 rate-limit, dedup markers (PF-018)
 - `tests/registry-integrity.test.ts` — Guard 6: forward+reverse OPERATION: ↔ ## Operation: contract with INTERNAL_OPS allowlist (build-gated)
 - `tests/build-mds.test.ts` — §15: REVIEW_TIMESTAMP input assertion; §16: resolve.md traceability ops; §16b: DUPLICATE verdict guards (consumer side — DUPLICATE bucket, duplicate_of, Duplicates Collapsed row, ## Duplicates section); all beforeAll blocks assert exit-0 + non-empty corpus
@@ -382,4 +382,4 @@ The following test files provide static content guards that fail loudly when loa
 - PF-002 (skill re-entrancy): Triage agent skills are loaded via frontmatter — never body-instructed via `Skill()` calls
 - PF-003 (no bare rm in agent instructions): Agent shell operations must use safe-delete patterns
 - Feature knowledge: `dynamic-workflow-engine` — the max-5-per-batch concurrency rule was generalized from the dynamic-build pipeline to /resolve Phase 3
-- Feature knowledge: `compliance-feature` — source of COMPLIANCE_SKILL_INSTALLED, compliance_gate() partial, traceability Git operations, and TRACEABILITY: DEGRADED contract
+- Feature knowledge: `compliance-feature` — source of the settings-line compliance lens (`COMPLIANCE_ACTIVE`, `COMPLIANCE_FRAMEWORKS`), the compliance partial, traceability Git operations, and TRACEABILITY: DEGRADED contract
