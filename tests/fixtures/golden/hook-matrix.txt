@@ -164,7 +164,6 @@ A wt/.devflow/
 A wt/.devflow/.root-gitignore-configured-v5
 A wt/.devflow/docs/
 A wt/.devflow/features/
-A wt/.devflow/learning/
 A wt/.devflow/memory/
 A wt/.devflow/memory/.pending-turns.jsonl
 A wt/.gitignore
@@ -180,7 +179,6 @@ A wt/.devflow/
 A wt/.devflow/.root-gitignore-configured-v5
 A wt/.devflow/docs/
 A wt/.devflow/features/
-A wt/.devflow/learning/
 A wt/.devflow/memory/
 A wt/.devflow/memory/.pending-turns.jsonl
 A wt/.gitignore
@@ -219,7 +217,6 @@ A wt/.devflow/
 A wt/.devflow/.root-gitignore-configured-v5
 A wt/.devflow/docs/
 A wt/.devflow/features/
-A wt/.devflow/learning/
 A wt/.devflow/memory/
 A wt/.devflow/memory/.pending-turns.jsonl
 A wt/.gitignore
@@ -233,7 +230,6 @@ A wt/.devflow/
 A wt/.devflow/.root-gitignore-configured-v5
 A wt/.devflow/docs/
 A wt/.devflow/features/
-A wt/.devflow/learning/
 A wt/.devflow/memory/
 A wt/.devflow/memory/WORKING-MEMORY.md
 A wt/.devflow/memory/backup.json
