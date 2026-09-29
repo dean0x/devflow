@@ -24,6 +24,7 @@
       "Bash(> /dev/nvme*)",
       "Bash(sh -c *)",
       "Bash(bash -c *)",
+      "Bash(zsh -c *)",
       "Bash(bash)",
       "Bash(sh)",
       "Bash(zsh)",

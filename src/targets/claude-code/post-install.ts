@@ -436,8 +436,9 @@ export const DEVFLOW_HISTORICAL_DENY: ReadonlySet<string> = Object.freeze(new Se
   'Read(/etc/shadow)',
   'Read(/etc/sudoers)',
   'Read(/etc/passwd)',
-  // v2 batch (#399) — 24 template entries: a shell reading its script from stdin,
-  // OrbStack VM control, docker pull/delete/prune and whole-disk or privileged runs.
+  // v2 batch (#399) — 25 template entries: a shell reading its script from stdin,
+  // `zsh -c` beside the v1 `sh -c`/`bash -c`, OrbStack VM control, docker
+  // pull/delete/prune and whole-disk or privileged runs.
   'Bash(bash)',
   'Bash(sh)',
   'Bash(zsh)',
@@ -447,6 +448,7 @@ export const DEVFLOW_HISTORICAL_DENY: ReadonlySet<string> = Object.freeze(new Se
   'Bash(bash -s *)',
   'Bash(sh -s *)',
   'Bash(zsh -s *)',
+  'Bash(zsh -c *)',
   'Bash(docker run*--privileged*)',
   'Bash(docker run*-v /:*)',
   'Bash(docker run*--volume /:*)',
