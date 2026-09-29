@@ -127,7 +127,7 @@ Invoked at the start of applicable workflows via `knowledge_load()` MDS call sit
 
 Invoked at the end of applicable workflows via `knowledge_writeback()` MDS call site.
 
-1. **Gate** — if `features.knowledge` in `~/.devflow/manifest.json` is `false`, skip entirely (machine-wide, D-FEATURES-MACHINE-WIDE)
+1. **Gate** — if `features.knowledge` in `~/.devflow/manifest.json` is `false`, skip entirely (the machine switch, D-FEATURES-NARROW-ONLY; the repository `features.knowledge` narrowing reaches this gate once it consumes the settings line's `KNOWLEDGE=`)
 2. **Check scope** — if this workflow changed a documented area OR found durable cross-cutting knowledge, proceed
 3. **Spawn Knowledge agent** — `Agent(subagent_type="Knowledge")` with WORKTREE_PATH, FEATURE_SLUG, FEATURE_NAME, DIRECTORIES, FILES_CHANGED, DECISIONS_CONTEXT, EXISTING_KB, EXPLORATION_OUTPUTS
 4. **Agent writes KNOWLEDGE.md** — directly to `.devflow/features/{slug}/KNOWLEDGE.md`

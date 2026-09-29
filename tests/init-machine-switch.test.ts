@@ -1,6 +1,6 @@
 /**
  * The pure --hud-only manifest (D-HUD-ONLY-PRESERVE) behind init's
- * machine-wide feature record (#378, D-FEATURES-MACHINE-WIDE). The end-to-end
+ * machine-wide feature record (#378, D-FEATURES-NARROW-ONLY). The end-to-end
  * behaviour is pinned in init-machine-switch-e2e.test.ts; these cover the arms a
  * sandboxed CLI run cannot reach cheaply.
  */

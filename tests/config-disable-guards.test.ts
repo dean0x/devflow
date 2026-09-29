@@ -60,7 +60,7 @@ function mkTmpHome(): string {
 
 /**
  * A user-scope manifest holding `features` — where memory, learning and
- * knowledge are switched, machine-wide (D-FEATURES-MACHINE-WIDE).
+ * knowledge are switched for the machine (D-FEATURES-NARROW-ONLY).
  */
 function writeManifest(home: string, features: Record<string, unknown>): void {
   fs.mkdirSync(path.join(home, '.devflow'), { recursive: true });

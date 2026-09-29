@@ -2715,8 +2715,9 @@ describe('session-start-context root .gitignore (memory-independent)', () => {
 // directive instructing the main model to spawn the background Learning agent with
 // the resolved model (project learning.json → global ~/.devflow/learning.json
 // → opus). A FRESH .processing (younger than 900s) means a live agent already
-// owns the batch, so the directive is suppressed. Gate is the machine-wide
-// `features.learning` in ~/.devflow/manifest.json (D-FEATURES-MACHINE-WIDE).
+// owns the batch, so the directive is suppressed. Gate is the machine
+// `features.learning` in ~/.devflow/manifest.json, which the checkout's
+// project.json / config.json can only narrow (D-FEATURES-NARROW-ONLY).
 
 describe('session-start-context: learning maintenance directive (Section 2)', () => {
   const CONTEXT_HOOK = path.join(HOOKS_DIR, 'session-start-context');
@@ -2784,10 +2785,11 @@ describe('session-start-context: learning maintenance directive (Section 2)', ()
     expect(contextOf(stdout)).not.toContain('LEARNING MAINTENANCE');
   });
 
-  // D-FEATURES-MACHINE-WIDE: `devflow init --no-learning` / `devflow learning
+  // D-FEATURES-NARROW-ONLY: `devflow init --no-learning` / `devflow learning
   // --disable` write features.learning:false to ~/.devflow/manifest.json; that
-  // alone decides the directive (and the TL;DR) in every repo — the retired
-  // per-repo `learning` key decides nothing either way.
+  // switches the directive (and the TL;DR) off in every repo, and no repository
+  // file can switch it back on — the retired per-repo `learning` key decides
+  // nothing either way.
   describe('machine-wide learning switch (manifest only)', () => {
     const ENV = {};
     const TLDR = '<!-- TL;DR: 1 decision. Key: ADR-001 Test -->\n# Architectural Decisions';

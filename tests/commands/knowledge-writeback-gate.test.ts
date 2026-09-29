@@ -1,5 +1,5 @@
 /**
- * D-FEATURES-MACHINE-WIDE (#378) — the knowledge write-back gate is prose the
+ * D-FEATURES-NARROW-ONLY (#378, #392) — the knowledge write-back gate is prose the
  * orchestrating model follows, compiled from ONE partial
  * (src/assets/commands/_partials/_knowledge.mds, `knowledge_writeback`) into
  * every command that writes knowledge back. Knowledge is switched for the whole

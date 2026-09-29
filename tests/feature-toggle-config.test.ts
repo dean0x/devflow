@@ -1,9 +1,9 @@
 /**
  * `devflow memory|learning|knowledge --enable|--disable`, run through the
- * compiled CLI (D-FEATURES-MACHINE-WIDE): each toggle writes the one
- * machine-wide switch, `features.<feature>` in ~/.devflow/manifest.json, and
- * never the per-repo `.devflow/config.json` — whose memory/learning/knowledge
- * keys are retired. The config file round-trips byte-for-byte (PF-071: seed,
+ * compiled CLI (D-FEATURES-NARROW-ONLY): each toggle writes the one
+ * machine switch, `features.<feature>` in ~/.devflow/manifest.json, and
+ * never the per-repo `.devflow/config.json` — whose top-level
+ * memory/learning/knowledge keys are retired. The config file round-trips byte-for-byte (PF-071: seed,
  * run the toggle, re-read the file), and the manifest changes only in the one
  * key and `updatedAt`.
  */
