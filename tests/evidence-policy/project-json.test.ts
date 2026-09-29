@@ -526,7 +526,7 @@ describe('TP-29 (AC-25): the default branch\'s project.json governs; a PR worktr
       ['gh', ...ARGV.contentsProject('main')],
       ['git', ...ARGV.headProjectBlob],
     ]);
-  });
+  }, SUBPROCESS_TIMEOUT.timeout);
 
   it('a project.json without evidence falls back to the SAME source\'s policy.json', () => {
     writeDevflowFile('project.json', PROJECT.noEvidence);
