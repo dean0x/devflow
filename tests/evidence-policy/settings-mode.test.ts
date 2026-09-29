@@ -73,6 +73,7 @@ interface SettingsModule {
   readonly SETTINGS_LINE_RE: RegExp;
   readonly SETTINGS_FAIL_CLOSED_LINE: string;
   foldSettings(inputs: { project: unknown; personal: unknown; manifest: unknown; legacyPolicyFile: boolean }): Settings;
+  readRepoLayers(root: string): { project: unknown; personal: unknown };
   resolveSettings(opts: { dir: string; manifest?: unknown }, deps?: { exec?: ExecFn }): Settings;
   formatSettingsLine(s: Settings): string;
   isCoherentSettingsLine(line: unknown): boolean;
@@ -422,6 +423,33 @@ describe('TP-33: feature switches = machine AND project AND personal (only a lit
       for (const other of FEATURES.filter(f => f !== feature)) expect(s.switches[other].on).toBe(true);
     });
   }
+});
+
+describe('readRepoLayers: the seam the hooks\' one parser fork reads through (D-FEATURES-NARROW-ONLY)', () => {
+  it('folds to exactly what resolveSettings folds, on every row of the shared table', () => {
+    for (const row of SETTINGS_SWITCH_TABLE) {
+      const dir = fs.mkdtempSync(path.join(tmp, 'layers-'));
+      if (row.project !== null) writeRepoFile('project.json', row.project, dir);
+      if (row.personal !== null) writeRepoFile('config.json', row.personal, dir);
+      const viaLayers = SETTINGS.foldSettings({ ...SETTINGS.readRepoLayers(dir), manifest: row.manifest, legacyPolicyFile: false });
+      const viaResolve = settingsFor({}, row.manifest, dir);
+      expect(viaLayers.switches, row.name).toEqual(viaResolve.switches);
+    }
+  });
+
+  it('reads nothing from a root with no .devflow, and never throws', () => {
+    const layers = SETTINGS.readRepoLayers(path.join(tmp, 'missing'));
+    expect(layers).toEqual({ project: { kind: 'absent' }, personal: { kind: 'absent' } });
+    expect(Object.isFrozen(layers)).toBe(true);
+  });
+
+  it('refuses a symlinked project.json unopened (invalid, never followed)', () => {
+    const target = path.join(tmp, 'elsewhere.json');
+    fs.writeFileSync(target, '{"features":{"memory":false}}');
+    fs.mkdirSync(path.join(root, '.devflow'), { recursive: true });
+    fs.symlinkSync(target, path.join(root, '.devflow', 'project.json'));
+    expect(SETTINGS.readRepoLayers(root).project).toEqual({ kind: 'invalid' });
+  });
 });
 
 describe('TP-49: the shared switch fixture table (tests/fixtures/settings-switch-table.ts)', () => {

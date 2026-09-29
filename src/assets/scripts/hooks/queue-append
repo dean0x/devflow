@@ -24,32 +24,46 @@
 #   queue is gated independently -- callers compute memory_enabled/learning_enabled
 #   themselves (see queue_read_gates below for the at-most-one-fork read of both).
 #
-# queue_read_gates <manifest_path>
-#   Reads BOTH `features.memory` and `features.learning` from the devflow-global
-#   ~/.devflow/manifest.json in at most ONE subprocess fork (AC-P1 -- at most one
-#   gate-read fork per capture hook, not two; none when D-GATES-FAST-PATH
-#   settles it). Sets _QG_MEMORY and _QG_LEARNING ("true"/"false") in the
-#   caller's scope. The two values are newline-separated
+# queue_read_gates <manifest_path> [<root>]
+#   Reads BOTH switches, `memory` and `learning`, in at most ONE subprocess fork
+#   (AC-P1 -- at most one gate-read fork per capture hook, not two; none when
+#   the fast paths settle it). Sets _QG_MEMORY and _QG_LEARNING ("true"/"false")
+#   in the caller's scope. The two values are newline-separated
 #   rather than using a control-character delimiter: they are always the literal
 #   strings "true"/"false", never arbitrary content, so a plain newline split is
 #   unambiguous and easy to review (no invisible bytes hiding in the source).
 #
-#   D-FEATURES-MACHINE-WIDE (src/core/feature-switch.ts): memory and learning are
-#   switched for the WHOLE MACHINE by the manifest alone -- `devflow init` and
-#   `devflow memory|learning --enable/--disable` both write it -- so the answer is
-#   the same in every repo and every non-git cwd. The per-repo
-#   .devflow/config.json is never read here: its old memory/learning keys are
-#   retired, and reading them is what let a feature keep running in every repo
-#   but the one `init --no-<feature>` ran in (#378). Only an explicit boolean
-#   `false` switches a feature off -- an absent, unreadable or malformed manifest,
-#   a missing key, or a non-boolean value leaves it ON (fail-open, ADR-028), the
-#   same rule isMachineFeatureOn() applies in the CLI.
+#   D-FEATURES-NARROW-ONLY (src/core/feature-switch.ts): a switch is on iff the
+#   machine switch is on AND neither repository file sets `features.<name>` to
+#   the literal `false` -- the rule resolve-settings.cjs folds, held to the same
+#   answers by the shared table tests/fixtures/settings-switch-table.ts (TP-49).
+#   A repository can switch memory or learning off for itself, never back on.
+#     machine   <manifest_path>, the ~/.devflow/manifest.json `devflow init` and
+#               `devflow memory|learning --enable/--disable` write. Only an
+#               explicit boolean `false` switches a feature off -- an absent,
+#               unreadable or malformed manifest, a missing key, or a non-boolean
+#               value leaves it ON (fail-open, ADR-028), the rule
+#               isMachineFeatureOn() applies in the CLI.
+#     project   <root>/.devflow/project.json (team-committed) and
+#     personal  <root>/.devflow/config.json (this worktree's own), read ONLY under
+#               `features.memory` / `features.learning`. The retired top-level
+#               keys (`memory`, `learning`, `decisions`) and `features.decisions`
+#               narrow nothing (#378: reading them let a feature run in every repo
+#               but one). An invalid file -- unparseable, over 4096 bytes, a BOM,
+#               a symlink, a duplicated key -- narrows nothing.
+#   <root> is the checkout's toplevel (DF_ROOT, which every caller holds as
+#   $PROJECT_ROOT), for learning too: project.json is committed per branch and
+#   config.json lives per worktree, so both are read where the session runs, as
+#   resolve-settings.cjs reads them -- never at DF_LEDGER_ROOT, which only says
+#   where the queue lands. Without <root> (or with an empty one) no repository
+#   file is read.
 #
-#   D-LEARNING-LEGACY-DECISIONS: learning reads `features.learning` when it is a
-#   boolean, else the pre-rename `features.decisions` (ADR-011) -- readManifest's
-#   migration precedence exactly, so a legacy `decisions: false` switches
-#   learning off before any command has healed the file. Only a boolean `false`
-#   in whichever key decides is off, as above.
+#   D-LEARNING-LEGACY-DECISIONS: in the MANIFEST only, learning reads
+#   `features.learning` when it is a boolean, else the pre-rename
+#   `features.decisions` (ADR-011) -- readManifest's migration precedence
+#   exactly, so a legacy `decisions: false` switches learning off before any
+#   command has healed the file. Only a boolean `false` in whichever key decides
+#   is off, as above.
 #
 #   Every hook that gates on memory or learning reads it through here: the
 #   capture hooks, session-start-context (Sections 1-2), memory-worker,
@@ -106,8 +120,34 @@ queue_append_both() {
   fi
 }
 
+# _qg_repo_file_can_narrow <file> -- succeeds when <file> COULD set
+# features.memory or features.learning to false, so only the parser can decide
+# it; fails when it certainly cannot. Builtins only: no fork.
+#
+# D-GATES-FAST-PATH (repository files): the read is bounded -- `-n 4097`, which
+# bash 3.2 supports -- and `read -d ''` succeeds only when it stops short of the
+# end of the file: at a NUL byte (never valid in JSON) or at 4097 characters,
+# which is more than MAX_CONFIG_BYTES (4096) bytes. Either way the parser would
+# call the file invalid, and an invalid file narrows nothing. `-f` follows a
+# symlink and refuses a directory or FIFO, so nothing here can block; the parser
+# itself refuses the symlink. A `\u` escape is the only JSON spelling of a
+# letter other than the letter itself, so without one a narrowing file shows
+# `"features"`, then `{`, then `"memory"` or `"learning"`, then `false`,
+# literally and in that order. `.` spans newlines (POSIX ERE without
+# REG_NEWLINE), so the match can only over-report -- an over-report costs one
+# fork and the parser's answer, never a wrong one. No `"decisions"` and no
+# top-level key before `features` is ever matched.
+_qg_repo_file_can_narrow() {
+  local _qgf_text=""
+  local _qgf_re='"features"[[:space:]]*:[[:space:]]*[{].*"(memory|learning)"[[:space:]]*:[[:space:]]*false'
+  [ -f "$1" ] || return 1
+  if IFS= read -r -d '' -n 4097 _qgf_text 2>/dev/null < "$1"; then return 1; fi
+  case "$_qgf_text" in *'\u'*) return 0 ;; esac
+  [[ $_qgf_text =~ $_qgf_re ]]
+}
+
 queue_read_gates() {
-  local _qg_manifest="${1:-}" _qg_text="" _qg_parse="false"
+  local _qg_manifest="${1:-}" _qg_root="${2:-}" _qg_text="" _qg_parse="false" _qg_repo="false" _qg_fields=""
   _QG_MEMORY="true"
   _QG_LEARNING="true"
 
@@ -129,8 +169,38 @@ queue_read_gates() {
     if [[ $_qg_text =~ $_qg_re ]]; then _qg_parse="true"; fi
   fi
 
-  if [ "$_qg_parse" = "true" ]; then
-    local _qg_fields
+  if [ -n "$_qg_root" ]; then
+    if _qg_repo_file_can_narrow "$_qg_root/.devflow/project.json" \
+      || _qg_repo_file_can_narrow "$_qg_root/.devflow/config.json"; then
+      _qg_repo="true"
+    fi
+  fi
+
+  if [ "$_qg_repo" = "true" ]; then
+    # The ONE fork when a repository file can narrow: node on the resolver's own
+    # readRepoLayers + foldSettings (resolve-settings.cjs, a sibling of this
+    # hooks/ directory), so every file rule -- symlink, size, BOM, fatal UTF-8,
+    # duplicate keys -- is the parser's, not a shell copy of it. It folds the
+    # manifest too, read only when the fast path above flagged it (an unflagged
+    # manifest is both-on), so a false in all three layers still costs one fork.
+    # jq cannot see duplicate keys, so this path is node whatever _HAS_JQ says.
+    local _qg_scripts="${BASH_SOURCE[0]%/*}/.." _qg_manifest_arg=""
+    [ "$_qg_parse" = "true" ] && _qg_manifest_arg="$_qg_manifest"
+    _qg_fields=$(node -e "
+      const S = require(require('path').resolve(process.argv[1], 'resolve-settings.cjs'));
+      let m;
+      if (process.argv[2] !== '') {
+        try { m = JSON.parse(require('fs').readFileSync(process.argv[2], 'utf8')); } catch (_) { m = undefined; }
+      }
+      const w = S.foldSettings(Object.assign({ manifest: m }, S.readRepoLayers(process.argv[3]))).switches;
+      process.stdout.write(String(w.memory.on) + String.fromCharCode(10) + String(w.learning.on));
+    " -- "$_qg_scripts" "$_qg_manifest_arg" "$_qg_root" 2>/dev/null) || _qg_fields=""
+  fi
+
+  # The manifest-only parse: when no repository file can narrow, or when the
+  # fork above failed (the manifest's answer still stands; the repository's is
+  # lost, which fails open like every other unreadable layer).
+  if [ -z "$_qg_fields" ] && [ "$_qg_parse" = "true" ]; then
     if [ "$_HAS_JQ" = "true" ]; then
       # `try` covers a manifest whose top level or `features` is not an object; a
       # parse failure empties the output, which reads as "not switched off". The
@@ -150,11 +220,15 @@ queue_read_gates() {
         process.stdout.write(String(on('memory')) + String.fromCharCode(10) + String(on(learnKey)));
       " -- "$_qg_manifest" 2>/dev/null) || _qg_fields=""
     fi
-    if [ -n "$_qg_fields" ]; then
+  fi
+
+  # Only the four well-formed answers are taken; anything else is fail-open.
+  case "$_qg_fields" in
+    true$'\n'true|true$'\n'false|false$'\n'true|false$'\n'false)
       _QG_MEMORY="${_qg_fields%%$'\n'*}"
       _QG_LEARNING="${_qg_fields#*$'\n'}"
-    fi
-  fi
+      ;;
+  esac
 
   # Explicit return: this function's meaning is "populate _QG_* outputs," not a
   # success/failure signal, so its exit status must never leak the truthiness of

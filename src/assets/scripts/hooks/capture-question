@@ -65,7 +65,7 @@ PROJECT_ROOT="${DF_ROOT:-$CWD}"
 # the one the Learning agent drains into the shared ledger. Memory stays per checkout.
 LEDGER_ROOT="${DF_LEDGER_ROOT:-$PROJECT_ROOT}"
 
-# The machine-wide manifest (the memory/learning switches, D-FEATURES-MACHINE-WIDE
+# The machine-wide manifest (the memory/learning switches, D-FEATURES-NARROW-ONLY
 # in queue-append) lives at the machine root,
 # $HOME/.devflow (D-ONE-HOME).
 DEVFLOW_MANIFEST="$HOME/.devflow/manifest.json"
@@ -123,8 +123,10 @@ fi
 
 source "$SCRIPT_DIR/queue-append" || { echo "capture-question: failed to source queue-append" >&2; exit 1; }
 
-# --- AC-P1: exactly ONE gate-read fork for memory + learning (machine-wide) ---
-queue_read_gates "$DEVFLOW_MANIFEST"
+# --- AC-P1: at most ONE gate-read fork for memory + learning ---
+# The machine switch, narrowed by this checkout's project.json/config.json
+# `features` (D-FEATURES-NARROW-ONLY, see queue-append).
+queue_read_gates "$DEVFLOW_MANIFEST" "$PROJECT_ROOT"
 MEMORY_ENABLED="$_QG_MEMORY"
 LEARNING_ENABLED="$_QG_LEARNING"
 

@@ -508,6 +508,25 @@ function readConfigFile(filePath, parse) {
 }
 
 /**
+ * The two repository layers under `<root>/.devflow`, each read and classified by
+ * readConfigFile. Exported for the hooks' one parser fork (queue_read_gates in
+ * scripts/hooks/queue-append, D-FEATURES-NARROW-ONLY): a file the shell fast path
+ * hands over is read by exactly the code resolveSettings reads it with, so the two
+ * cannot disagree about a symlink, a size, a BOM or a duplicated key. Makes no
+ * subprocess; never throws on a missing or unreadable file.
+ *
+ * @param {string} root
+ * @returns {{ project: object, personal: object }}
+ */
+function readRepoLayers(root) {
+  const devflow = path.join(root, '.devflow');
+  return Object.freeze({
+    project: readConfigFile(path.join(devflow, 'project.json'), projectConfig.parseProjectBytes),
+    personal: readConfigFile(path.join(devflow, 'config.json'), projectConfig.parsePersonalBytes),
+  });
+}
+
+/**
  * Whether anything exists at `filePath` (never followed, never opened).
  *
  * @param {string} filePath
@@ -541,12 +560,12 @@ function resolveSettings(opts, deps) {
       const none = projectConfig.parseProjectBytes(null);
       return foldSettings({ project: none, personal: none, manifest, legacyPolicyFile: false });
     }
-    const devflow = path.join(toplevel.root, '.devflow');
+    const { project, personal } = readRepoLayers(toplevel.root);
     return foldSettings({
-      project: readConfigFile(path.join(devflow, 'project.json'), projectConfig.parseProjectBytes),
-      personal: readConfigFile(path.join(devflow, 'config.json'), projectConfig.parsePersonalBytes),
+      project,
+      personal,
       manifest,
-      legacyPolicyFile: existsNoFollow(path.join(devflow, 'policy.json')),
+      legacyPolicyFile: existsNoFollow(path.join(toplevel.root, '.devflow', 'policy.json')),
     });
   } catch (_) {
     return FAIL_CLOSED_SETTINGS;
@@ -776,6 +795,7 @@ module.exports = Object.freeze({
   SETTINGS_FAIL_CLOSED_LINE,
   parseArgs,
   foldSettings,
+  readRepoLayers,
   resolveSettings,
   formatSettingsLine,
   isCoherentSettingsLine,
