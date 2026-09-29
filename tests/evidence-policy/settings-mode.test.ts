@@ -12,6 +12,8 @@
  *   - TP-33 (AC-29): the publication truth table (D-PUBLICATION-CEILING) and the
  *     per-feature switch AND table (D-FEATURES-NARROW-ONLY), with the shared
  *     fixture table (TP-49) the shell gates will also run;
+ *   - TP-37 (AC-32): a github machine's repository that selects jira resolves
+ *     jira from the project (the session-start half is shell-hooks-tracker)
  *   - TP-31 (AC-27): repository compliance ids reach COMPLIANCE, an empty list is
  *     generic;
  *   - the tracker rules, parity with the TypeScript machine-layer readers, the
@@ -282,6 +284,18 @@ describe('TP-32 (AC-28): settings mode is local — one grammar line, zero gh ca
     const r = run([TOPLEVEL(root)]);
     expect(r.stdout).toBe('TRACKER=jira TRACKER_SOURCE=project TRACKER_WARN=none SITE=https://acme.atlassian.net KEY=ACME '
       + 'REVIEW_PUBLICATION=off COMPLIANCE=hipaa MEMORY=on LEARNING=off KNOWLEDGE=on\n');
+  });
+
+  it('TP-37 (AC-32): a github machine whose project.json selects jira resolves jira from the project', () => {
+    // The resolver half of TP-37; the session-start gate half — the directive
+    // naming jira's conventions file — is tests/shell-hooks-tracker.test.ts.
+    fs.writeFileSync(path.join(home, '.devflow', 'manifest.json'), JSON.stringify({
+      features: { tracker: { provider: 'github' } },
+    }));
+    writeRepoFile('project.json', JSON.stringify({ version: 1, tracker: { provider: 'jira' } }));
+    const r = run([TOPLEVEL(root)]);
+    expect(r.status, r.stderr).toBe(0);
+    expect(r.stdout).toMatch(/^TRACKER=jira TRACKER_SOURCE=project TRACKER_WARN=none /);
   });
 
   it('reads the machine manifest from $HOME/.devflow for itself', () => {

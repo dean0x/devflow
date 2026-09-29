@@ -566,21 +566,6 @@ export const MCP_BACKED_PROVIDER_SUBDIRS = ['tracker/jira', 'tracker/linear'] as
 export const TRACKER_DESTINATION_ROOT = 'tracker';
 
 /**
- * The tracker destination every install carries, whatever the user selected.
- *
- * Not a default and not a fallback: PR hosting stays on GitHub under every
- * issue-tracker provider, so a jira or linear user still runs `gh pr` mechanics
- * and still needs the GitHub tree reachable. It is the FLOOR of
- * {@link installedReferenceManifest}'s union.
- *
- * Stated rather than derived, because the fact is about where pull requests
- * live, not about anything the registry knows. A derivation from "the one
- * CLI-backed module" would read as a rule and silently promote the next
- * CLI-backed provider into everyone's install.
- */
-export const PR_HOST_TRACKER_SUBDIR = `${TRACKER_DESTINATION_ROOT}/github`;
-
-/**
  * The provider-independent tool-call contract document.
  *
  * GENERATED only while {@link mcpContractIsGenerated} is true — that is, only
@@ -860,65 +845,42 @@ export function expandVariants(
  * build's own refusal sinks use (scripts/build-mds.ts).
  */
 export function generatedReferenceManifest(): readonly string[] {
-  const expanded = expandVariants();
-  if (!expanded.ok) {
-    throw new Error(
-      `Reference module registry does not expand — ${JSON.stringify(expanded.error)}. ` +
-      `VARIANT_MODULES in src/core/mds-variants.ts is invalid.`,
-    );
-  }
-  return expanded.value.map(pair => pair.relPath);
+  return expandedManifest(resolveVariantModules());
 }
 
 /**
- * The references ONE install carries, for one resolved tracker provider — the
- * narrower manifest the overlay converges to.
+ * The references ONE install carries — the manifest the overlay converges to.
  *
- * D-INSTALL-SET: the BUILD emits every provider ({@link generatedReferenceManifest},
- * 47 files) because the tarball must be able to serve any selection without a
- * rebuild. An INSTALL carries `{github} ∪ {selected provider}`:
+ * D-INSTALL-ALL-PROVIDERS: an install carries exactly what the build emits
+ * ({@link generatedReferenceManifest}): every provider's tree, the PR-host tree,
+ * the cross-cutting documents and `tracker/_mcp.md`, whatever the machine selected.
+ * The provider is no longer a property of the install. A repository selects its
+ * own tracker in its committed `.devflow/project.json`, so one machine meets more
+ * than one provider and a Git spawn must find the mechanics of whichever one the
+ * repository resolves — an install scoped to the machine's selection would leave
+ * every such repository degraded until someone re-ran init for a provider that is
+ * not theirs. The trees are INERT until a spawn resolves a provider and names
+ * one of its files, so carrying all of them costs disk, never context.
  *
- *   - the GitHub tree is the FLOOR under every provider, not an optional extra.
- *     PR hosting stays on GitHub whatever the issue tracker is, so those
- *     mechanics stay reachable for a jira or linear user;
- *   - the cross-cutting documents (`subdir: ''`) are provider-independent and
- *     always land;
- *   - the PR-host tree ({@link PR_HOST_DESTINATION_ROOT}) is provider-independent
- *     for the same reason the GitHub tree is a floor — pull requests, PR reviews
- *     and PR checks stay on GitHub under every issue tracker — but it sits under
- *     no provider directory, so it is named here rather than reached through the
- *     provider union;
- *   - a provider directory the user did not select is 11 files nothing they can
- *     reach ever loads (applies ADR-003 — ship the end state, not every state).
- *
- * `tracker/_mcp.md` rides the same gate its GENERATION does
- * ({@link MCP_BACKED_PROVIDER_SUBDIRS}): it is the transport contract for
- * providers reached by tool call, and GitHub's mechanics are `gh` commands. One
- * predicate, asked of the selection here and of the registry in
- * {@link mcpContractIsGenerated}, so opening the gate and shipping the provider
- * stay the same edit.
- *
- * Derived from the registry rather than a provider table: a provider registered
- * with a `tracker/{id}` subdir is installable by construction, and a literal
- * here would be a second roster to keep in step with VARIANT_MODULES.
+ * The overlay still PRUNES everything under its converged subtrees this manifest
+ * does not name, so a retired generated document leaves on the next install.
  *
  * Asserts rather than degrades on a registry that does not expand, exactly as
  * its sibling does (design review M3): the registry is a compile-time constant,
- * so a refusal is a programming error rather than an install-time degradation —
- * no caller could sensibly continue, and every caller would otherwise carry the
- * same impossible branch.
+ * so a refusal is a programming error rather than an install-time degradation.
  *
- * @param opts.provider - The resolved tracker provider id, used as the
- *   `tracker/{id}` sub-directory key.
- * @param opts.modules - Registry to expand (defaults to the shipped one).
- *   Injectable so both the refusal arm and a provider set this build does not
- *   produce are provable without editing the registry.
+ * @param opts.modules - Registry to expand (defaults to the shipped one, with the
+ *   gated contract module resolved). Injectable so the refusal arm is provable
+ *   without editing the registry.
  */
 export function installedReferenceManifest(opts: {
-  readonly provider: string;
   readonly modules?: readonly VariantModule[];
-}): readonly string[] {
-  const modules = opts.modules ?? resolveVariantModules();
+} = {}): readonly string[] {
+  return expandedManifest(opts.modules ?? resolveVariantModules());
+}
+
+/** Every relPath a registry expands to, or the assertion both manifests share. */
+function expandedManifest(modules: readonly VariantModule[]): readonly string[] {
   const expanded = expandVariants(modules);
   if (!expanded.ok) {
     throw new Error(
@@ -926,40 +888,7 @@ export function installedReferenceManifest(opts: {
       `VARIANT_MODULES in src/core/mds-variants.ts is invalid.`,
     );
   }
-
-  const providerSubdir = `${TRACKER_DESTINATION_ROOT}/${opts.provider}`;
-  const wanted = new Set(['', PR_HOST_DESTINATION_ROOT, PR_HOST_TRACKER_SUBDIR, providerSubdir]);
-
-  const installed = expanded.value
-    .filter(pair => wanted.has(subdirOfRelPath(pair.relPath)))
-    .map(pair => pair.relPath);
-
-  const gated: readonly string[] = MCP_BACKED_PROVIDER_SUBDIRS;
-  if (gated.includes(providerSubdir)) {
-    const contract = contractRelPath(expanded.value);
-    if (contract !== undefined) installed.push(contract);
-  }
-
-  return installed;
-}
-
-/** The directory part of a manifest-relative path; `''` for a file at the root. */
-function subdirOfRelPath(relPath: string): string {
-  const cut = relPath.lastIndexOf('/');
-  return cut < 0 ? '' : relPath.slice(0, cut);
-}
-
-/**
- * The tool-call contract's emitted path, as this registry expands it — read from
- * the expansion rather than composed from the module's fields, so the name can
- * only ever be the one the build actually writes.
- *
- * Takes the already-expanded pairs rather than re-expanding: the caller has
- * already validated the same registry expands cleanly, so a second call would
- * only duplicate that work and reintroduce a refusal branch that can never fire.
- */
-function contractRelPath(pairs: readonly VariantPair[]): string | undefined {
-  return pairs.find(pair => pair.module === MCP_CONTRACT_MODULE.source)?.relPath;
+  return expanded.value.map(pair => pair.relPath);
 }
 
 // ---------------------------------------------------------------------------

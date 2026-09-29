@@ -65,7 +65,6 @@ async function run(opts: {
   plugins: PluginDefinition[];
   effectivePlugins?: PluginDefinition[];
   isPartialInstall: boolean;
-  trackerProvider?: string;
 }) {
   const effective = opts.effectivePlugins ?? opts.plugins;
   return installViaFileCopy({
@@ -75,7 +74,6 @@ async function run(opts: {
     devflowDir,
     skillsMap: buildScopedSkillsMap(effective),
     agentsMap: new Map(),
-    trackerProvider: opts.trackerProvider ?? 'github',
     isPartialInstall: opts.isPartialInstall,
     spinner: noopSpinner,
     warn: (msg) => { warnings.push(msg); },
@@ -465,17 +463,17 @@ describe('formatTrackerAssetSummary', () => {
     expect(moved[1].message).toContain('tracker agent installed');
   });
 
-  it('names the agent removal on the way back to github', () => {
+  it('names no agent movement on a provider change — the agent is installed on every machine', () => {
     const lines = formatTrackerAssetSummary({
       provider: 'github',
       previous: 'linear',
       isDefault: true,
-      installedRefs: 21,
-      removedRefs: 11,
-      agent: 'removed',
+      installedRefs: 0,
+      removedRefs: 0,
+      agent: 'unchanged',
     });
-    expect(lines[1].message).toContain('−11 reference(s)');
-    expect(lines[1].message).toContain('tracker agent removed');
+    expect(lines[0].message).toContain('(was linear)');
+    expect(lines, 'nothing moved on disk, so there is no delta line').toHaveLength(1);
   });
 });
 
@@ -499,34 +497,34 @@ describe('a full re-init leaves the overlay-owned reference tree for the overlay
   const core = (): PluginDefinition[] => [plugin('devflow-core-skills')];
   const refsRoot = (): string =>
     path.join(claudeDir, 'skills', prefixSkillName(SKILL_REFS_SKILL_NAME), 'references');
-  const jiraManifest = (): string[] => [...installedReferenceManifest({ provider: 'jira' })].sort();
+  const fullManifest = (): string[] => [...installedReferenceManifest()].sort();
 
-  async function installJira() {
-    return run({ plugins: core(), isPartialInstall: false, trackerProvider: 'jira' });
+  async function installCore() {
+    return run({ plugins: core(), isPartialInstall: false });
   }
 
   it('the FIRST install writes every reference; the SECOND writes none and reports them unchanged', async () => {
-    const first = await installJira();
-    expect([...first.overlaidRefs].sort(), 'a fresh install writes the whole install set').toEqual(jiraManifest());
+    const first = await installCore();
+    expect([...first.overlaidRefs].sort(), 'a fresh install writes the whole install set').toEqual(fullManifest());
     expect(first.unchangedRefs).toEqual([]);
 
-    const second = await installJira();
+    const second = await installCore();
     expect(
       second.overlaidRefs,
       'nothing changed between the two runs, so nothing may be written',
     ).toEqual([]);
-    expect([...second.unchangedRefs].sort()).toEqual(jiraManifest());
+    expect([...second.unchangedRefs].sort()).toEqual(fullManifest());
   });
 
   it('a hand-edited reference is restored on the next run and REPORTED as written', async () => {
-    await installJira();
-    const edited = jiraManifest().find(r => r.startsWith('tracker/jira/'));
+    await installCore();
+    const edited = fullManifest().find(r => r.startsWith('tracker/jira/'));
     if (edited === undefined) throw new Error('the jira install set has no provider reference');
     const editedPath = path.join(refsRoot(), edited);
     const canonical = await fs.readFile(editedPath, 'utf-8');
     await fs.writeFile(editedPath, 'hand-edited\n', 'utf-8');
 
-    const report = await installJira();
+    const report = await installCore();
 
     expect(await fs.readFile(editedPath, 'utf-8'), 'drift is converged away').toBe(canonical);
     expect(report.overlaidRefs, 'and reported, never hidden behind an unchanged count').toContain(edited);
@@ -534,23 +532,23 @@ describe('a full re-init leaves the overlay-owned reference tree for the overlay
   });
 
   it('a stale file the manifest does not name is pruned from the tracker subtree (converge, not merge)', async () => {
-    await installJira();
+    await installCore();
     const stale = path.join(refsRoot(), 'tracker', 'jira', 'not-in-the-manifest.md');
     await fs.writeFile(stale, 'left by an older build\n', 'utf-8');
 
-    await installJira();
+    await installCore();
 
     await expect(fs.access(stale)).rejects.toThrow();
   });
 
   it('a stale file OUTSIDE the overlay-owned set is still removed by the pre-clean', async () => {
-    await installJira();
+    await installCore();
     const straySkillFile = path.join(claudeDir, 'skills', prefixSkillName(SKILL_REFS_SKILL_NAME), 'SKILL.md.bak');
     const strayReference = path.join(refsRoot(), 'stale.md');
     await fs.writeFile(straySkillFile, 'from a previous install\n', 'utf-8');
     await fs.writeFile(strayReference, 'a reference no manifest names\n', 'utf-8');
 
-    await installJira();
+    await installCore();
 
     await expect(fs.access(straySkillFile)).rejects.toThrow();
     await expect(
@@ -568,15 +566,13 @@ describe('a full re-init leaves the overlay-owned reference tree for the overlay
  * The Tracker agent is `convergeTrackerArtifacts`'s file, not the agent loop's.
  *
  * The agent stays DECLARED in `devflow-core-skills.agents` — the roster floor and the
- * reverse-spawn guards both key on the registry — but its presence on disk is
- * conditional on the provider, and exactly one owner may decide that (plan A3). While
- * the generic copy loop also wrote it, every install did the work twice and the two
- * owners disagreed in both directions: a github re-run reported `tracker agent removed`
- * for a file only that same run had put there, and a fresh jira install never reported
- * `installed` because converge found the loop's byte-identical copy already in place.
+ * reverse-spawn guards both key on the registry — and exactly one owner writes it
+ * (plan A3). While the generic copy loop also wrote it, every install did the work
+ * twice, and a fresh install never reported `installed` because converge found the
+ * loop's byte-identical copy already in place.
  *
- * The arms below pin the split from the loop's side. The converge side — both
- * directions of the biconditional — is tests/tracker-install.test.ts.
+ * The arms below pin the split from the loop's side. The converge side is
+ * tests/tracker-install.test.ts.
  */
 describe('the agent copy loop leaves the Tracker agent to convergeTrackerArtifacts', () => {
   const everyPlugin = (): PluginDefinition[] => [...DEVFLOW_PLUGINS];
@@ -591,7 +587,7 @@ describe('the agent copy loop leaves the Tracker agent to convergeTrackerArtifac
   const everyOtherAgent = (): string[] =>
     getAllAgentNames().filter(name => name !== 'tracker').map(name => `${name}.md`).sort();
 
-  async function installAll(trackerProvider: string) {
+  async function installAll() {
     return installViaFileCopy({
       plugins: everyPlugin(),
       effectivePlugins: everyPlugin(),
@@ -599,36 +595,31 @@ describe('the agent copy loop leaves the Tracker agent to convergeTrackerArtifac
       devflowDir,
       skillsMap: buildScopedSkillsMap(everyPlugin()),
       agentsMap: buildAssetMaps(everyPlugin()).agentsMap,
-      trackerProvider,
       isPartialInstall: false,
       spinner: noopSpinner,
       warn: (msg) => { warnings.push(msg); },
     });
   }
 
-  it.each(['github', 'jira'] as const)(
-    'writes every other agent and never the Tracker agent (provider %s)',
-    async (provider) => {
-      await installAll(provider);
+  it('writes every other agent and never the Tracker agent — converge owns it', async () => {
+    await installAll();
 
-      expect(
-        await exists(trackerAgentFile()),
-        'the loop has no business deciding a provider-conditional file',
-      ).toBe(false);
-      expect(
-        await installedAgents(),
-        'and skipping one agent must not cost any of the others',
-      ).toEqual(everyOtherAgent());
-    },
-  );
+    expect(
+      await exists(trackerAgentFile()),
+      'the loop copies every agent but the one convergeTrackerArtifacts owns',
+    ).toBe(false);
+    expect(
+      await installedAgents(),
+      'and skipping one agent must not cost any of the others',
+    ).toEqual(everyOtherAgent());
+  });
 
-  it('converge is what puts the agent there under jira', async () => {
-    await installAll('jira');
+  it('converge is what puts the agent there', async () => {
+    await installAll();
     expect(await exists(trackerAgentFile())).toBe(false);
 
     const result = await convergeTrackerArtifacts({
       claudeDir,
-      provider: 'jira',
       warn: (msg) => { warnings.push(msg); },
     });
 
@@ -637,11 +628,11 @@ describe('the agent copy loop leaves the Tracker agent to convergeTrackerArtifac
   });
 
   it('a re-install leaves a converged Tracker agent standing for converge to compare', async () => {
-    await installAll('jira');
-    await convergeTrackerArtifacts({ claudeDir, provider: 'jira', warn: () => {} });
+    await installAll();
+    await convergeTrackerArtifacts({ claudeDir, warn: () => {} });
     const converged = await fs.readFile(trackerAgentFile(), 'utf-8');
 
-    await installAll('jira');
+    await installAll();
 
     // Both halves of the carve-out, and the reason for it: converge reports
     // `unchanged` only if there is still an installed copy to compare against.
@@ -651,17 +642,17 @@ describe('the agent copy loop leaves the Tracker agent to convergeTrackerArtifac
     ).toBe(true);
     expect(await fs.readFile(trackerAgentFile(), 'utf-8')).toBe(converged);
 
-    const second = await convergeTrackerArtifacts({ claudeDir, provider: 'jira', warn: () => {} });
+    const second = await convergeTrackerArtifacts({ claudeDir, warn: () => {} });
     expect(second.agent, 'a steady-state re-init has nothing to announce').toBe('unchanged');
   });
 
   it('everything else in the agent directory still goes', async () => {
-    await installAll('jira');
-    await convergeTrackerArtifacts({ claudeDir, provider: 'jira', warn: () => {} });
+    await installAll();
+    await convergeTrackerArtifacts({ claudeDir, warn: () => {} });
     const stray = path.join(claudeDir, 'agents', 'devflow', 'from-an-older-install.md');
     await fs.writeFile(stray, 'from a previous install\n', 'utf-8');
 
-    await installAll('jira');
+    await installAll();
 
     await expect(fs.access(stray)).rejects.toThrow();
     expect(await exists(trackerAgentFile())).toBe(true);

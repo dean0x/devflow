@@ -82,10 +82,11 @@ function writeRepoConfig(base: string, fields: Record<string, unknown>): void {
 /** A user-scope manifest naming `provider` at features.tracker.provider. */
 function seedTrackerProvider(home: string, provider: string, features: Record<string, unknown> = {}): void {
   writeManifest(home, { ambient: true, memory: true, tracker: { provider }, ...features });
-  // The presence sentinel devflow writes whenever the resolved provider is not
-  // github — without it Section 3 stops at a shell builtin and the fixture would
-  // be inert (the exact vacuous-seed shape PF-018 describes).
-  fs.writeFileSync(path.join(home, '.devflow', '.tracker.enabled'), '');
+  // The sentinel devflow writes whenever the machine provider is not github —
+  // the provider's NAME, which is what Section 3 reads; without it Section 3
+  // stops at a shell builtin and the fixture would be inert (the exact
+  // vacuous-seed shape PF-018 describes).
+  fs.writeFileSync(path.join(home, '.devflow', '.tracker.enabled'), `${provider}\n`);
 }
 
 /**

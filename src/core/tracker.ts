@@ -3,9 +3,10 @@
  *
  * Two halves, deliberately in one module:
  *   - The DOMAIN half (registry, TrackerProvider, parseTrackerId,
- *     normalizeTrackerFeature, path derivation) is pure — zero I/O.
+ *     normalizeTrackerFeature, path derivation, the frontmatter parser) is
+ *     pure — zero I/O.
  *   - The LIFECYCLE half (rearmTrackerInference, applyTrackerSentinel,
- *     renameStaleTrackerConventions) owns the three ~/.devflow tracker files.
+ *     migrateLegacyTrackerConventions) owns the ~/.devflow tracker files.
  *     It sits here rather than in a target adapter because ~/.devflow is
  *     devflow-global, not Claude-Code-specific — the same reason manifest.ts's
  *     read/write live in src/core/ (applies ADR-013).
@@ -14,18 +15,20 @@
  *   fallible path returns a Result, so callers own their own error rendering
  *   and a try/finally in a caller is never skipped.
  *
- * D-TRACKER-OWNER [DR-22][DR-10]: the attempt counter and the presence sentinel
- *   have exactly ONE owner each — `rearmTrackerInference` and
+ * D-TRACKER-OWNER [DR-22][DR-10]: the attempt counters and the machine provider
+ *   sentinel have exactly ONE owner each — `rearmTrackerInference` and
  *   `applyTrackerSentinel` — and every command that touches one goes through it.
  *   The sentinel is converged by `devflow init` and `devflow tracker --set`; the
- *   counter is re-armed by those two and by `devflow tracker --status`, which is
- *   the command a capped user reaches for (D-F). A bare "also delete this file"
- *   appended to an eleven-row edit list in a 2,100-line init.ts is the same
- *   policy expressed twice with no owner; these functions are the owner. Never
- *   inline an `fs.rm` at a call site.
+ *   counters are re-armed by those two and by `devflow tracker --status`, which
+ *   is the command a capped user reaches for (D-F). The conventions files are the
+ *   Tracker agent's to write and the user's to edit: no command moves, renames or
+ *   deletes one, and the single legacy file is moved once, by the migration that
+ *   calls `migrateLegacyTrackerConventions`. Never inline an `fs.rm` at a call
+ *   site.
  */
 
 import { promises as fs } from 'fs';
+import type { FileHandle } from 'fs/promises';
 import * as path from 'path';
 
 // ---------------------------------------------------------------------------
@@ -125,44 +128,50 @@ export const TRACKER_PROVIDER_IDS: readonly TrackerProvider[] =
  */
 export const DEFAULT_TRACKER_PROVIDER: TrackerProvider = 'github';
 
-/**
- * The manifest key path, as ONE shared constant.
- *
- * Both readers must agree on this literal: the TypeScript reader
- * (`readManifest().features.tracker.provider`) and the shell reader
- * (`json_field_file "$devflowDir/manifest.json" "features.tracker.provider"`,
- * whose jq and node backends both split the dotted path and walk it). A second
- * spelling in a shell script is exactly the drift this constant prevents.
- */
-export const TRACKER_PROVIDER_KEY_PATH = 'features.tracker.provider';
-
 // ---------------------------------------------------------------------------
 // Artifact basenames — one spelling for every TypeScript reader
 //
 // NOT the only spelling in the repository, and a rename that assumes it is will
-// miss three places these names are hardcoded (PF-013): the SessionStart hook's
+// miss the places these names are hardcoded (PF-013): the SessionStart hook's
 // Section 3 (shell) and the Tracker agent's prompt (prose), neither of which can
-// import from here, and uninstall.ts's install-artifact list, which spells the
-// fixed ~/.devflow entries as literals the way its siblings do. Each is
-// cross-pinned against these constants by tests — shell-hooks, tracker-agent,
-// uninstall-logic and core/tracker — so the spellings cannot drift silently, but
-// they do have to move together.
+// import from here. Each is cross-pinned against these constants by tests —
+// shell-hooks-tracker, tracker-agent, uninstall-logic and core/tracker — so the
+// spellings cannot drift silently, but they do have to move together.
 //
-// Two sets are the exception, and deliberately so, because neither is a fixed
-// list uninstall could keep in step by hand. The conventions backups are
-// one-per-provider, so uninstall imports TRACKER_CONVENTIONS_BACKUP_NAMES rather
-// than listing them: a literal list would fall behind the registry the day a
-// fourth provider lands. The staging files are one-per-invocation under a mktemp
-// name, so uninstall imports TRACKER_STAGED_PREFIX and resolves it against disk.
-// Either spelled by hand leaves a file behind that no uninstall list accounts
-// for, in a directory the run reports as swept.
+// Two families are one-per-provider and are DERIVED from the registry rather
+// than spelled out — the conventions files under TRACKER_CONVENTIONS_DIR and the
+// attempt counters (TRACKER_ATTEMPTS_NAMES) — so a fourth provider is covered the
+// day it joins the registry. The staging files are one-per-invocation under a
+// mktemp name, so uninstall imports TRACKER_STAGED_PREFIX and resolves it against
+// disk.
 // ---------------------------------------------------------------------------
 
-/** `~/.devflow/tracker.md` — the inferred conventions file (USER CONTENT on uninstall). */
-export const TRACKER_CONVENTIONS_FILE = 'tracker.md';
-/** `~/.devflow/.tracker.attempts` — inference attempt counter (install artifact). */
-export const TRACKER_ATTEMPTS_FILE = '.tracker.attempts';
-/** `~/.devflow/.tracker.enabled` — zero-byte presence sentinel (install artifact). */
+/**
+ * `~/.devflow/tracker/` — one inferred conventions file per provider
+ * (USER CONTENT on uninstall).
+ *
+ * D-TRACKER-PER-PROVIDER-CONVENTIONS: conventions are learned per PROVIDER, not
+ * per machine. A repository may select its own tracker in its committed
+ * `.devflow/project.json`, so one machine can meet more than one provider, and a
+ * single machine-wide file would be silently authoritative for whichever provider
+ * did not write it. One file per provider means a provider change moves nothing
+ * aside: the other provider's conventions stay where they are, correct for the
+ * repositories that use it.
+ */
+export const TRACKER_CONVENTIONS_DIR = 'tracker';
+/**
+ * `~/.devflow/tracker.md` — the single machine-wide conventions file releases
+ * before per-provider conventions wrote. The `tracker-conventions-per-provider-v1`
+ * migration moves it to its provider's file; one it cannot place (no provider in
+ * its frontmatter, or that provider's file already exists) stays, as USER CONTENT.
+ */
+export const TRACKER_LEGACY_CONVENTIONS_FILE = 'tracker.md';
+/** `~/.devflow/.tracker.attempts` — the single counter those releases kept; the migration removes it. */
+export const TRACKER_LEGACY_ATTEMPTS_FILE = '.tracker.attempts';
+/**
+ * `~/.devflow/.tracker.enabled` — the machine provider sentinel (install artifact).
+ * Holds the provider NAME on one line; absent for github (see applyTrackerSentinel).
+ */
 export const TRACKER_ENABLED_FILE = '.tracker.enabled';
 /** `~/.devflow/.tracker.processing` — the Tracker agent's atomic claim (install artifact). */
 export const TRACKER_CLAIM_FILE = '.tracker.processing';
@@ -184,6 +193,24 @@ export const TRACKER_CLAIM_FILE = '.tracker.processing';
  * spellings together.
  */
 export const TRACKER_STAGED_PREFIX = '.tracker-staged.';
+
+/**
+ * `.tracker.{provider}.attempts` — one provider's inference attempt counter
+ * (install artifact).
+ *
+ * Per provider, so one provider whose tracker connection is broken spends only
+ * its own attempts: a machine that meets jira in one repository and linear in
+ * another must not have the broken one cap the working one. The claim file stays
+ * global — one Tracker agent runs at a time on a machine, whichever provider it
+ * is learning.
+ */
+export function trackerAttemptsName(provider: TrackerProvider): string {
+  return `.tracker.${provider}.attempts`;
+}
+
+/** Every provider's attempt-counter basename, in registry order — what a re-arm clears and uninstall removes. */
+export const TRACKER_ATTEMPTS_NAMES: readonly string[] =
+  TRACKER_PROVIDER_IDS.map(id => trackerAttemptsName(id));
 
 /**
  * How many background inference attempts a machine gets before the SessionStart
@@ -244,7 +271,7 @@ export function isTrackerProvider(value: unknown): value is TrackerProvider {
  * Takes `unknown`, and a non-string renders as its TYPE: the module's
  * never-throws contract (PF-014) has to hold for what reaches this sink, not
  * only for what the signature says does — `devflow tracker --status` reads
- * `tracker.md`'s hand-editable frontmatter, and a caller-side guard is one edit
+ * a conventions file's hand-editable frontmatter, and a caller-side guard is one edit
  * from being gone. Naming the type also keeps the render total, where `String()`
  * would hand control to a caller-supplied `toString` — itself both a throw path
  * and an echo path this function exists to close.
@@ -324,76 +351,131 @@ export function normalizeTrackerFeature(raw: unknown): TrackerFeatureState {
 // Exported functions — path derivation (pure)
 // ---------------------------------------------------------------------------
 
-/** `{devflowDir}/tracker.md` — the inferred conventions file. */
-export function trackerConventionsPath(devflowDir: string): string {
-  return path.join(devflowDir, TRACKER_CONVENTIONS_FILE);
+/** `{devflowDir}/tracker` — the directory holding one conventions file per provider. */
+export function trackerConventionsDir(devflowDir: string): string {
+  return path.join(devflowDir, TRACKER_CONVENTIONS_DIR);
 }
 
-/** `{devflowDir}/.tracker.attempts` — the inference attempt counter. */
-export function trackerAttemptsPath(devflowDir: string): string {
-  return path.join(devflowDir, TRACKER_ATTEMPTS_FILE);
+/**
+ * `{devflowDir}/tracker/{provider}.md` — one provider's inferred conventions.
+ *
+ * The provider is a registry id (the type admits nothing else), so the segment it
+ * contributes is one of three fixed words, never user input joined into a path.
+ */
+export function trackerConventionsPath(devflowDir: string, provider: TrackerProvider): string {
+  return path.join(trackerConventionsDir(devflowDir), `${provider}.md`);
 }
 
-/** `{devflowDir}/.tracker.enabled` — the zero-byte presence sentinel. */
+/** `{devflowDir}/.tracker.{provider}.attempts` — one provider's inference attempt counter. */
+export function trackerAttemptsPath(devflowDir: string, provider: TrackerProvider): string {
+  return path.join(devflowDir, trackerAttemptsName(provider));
+}
+
+/** `{devflowDir}/.tracker.enabled` — the machine provider sentinel. */
 export function trackerEnabledSentinelPath(devflowDir: string): string {
   return path.join(devflowDir, TRACKER_ENABLED_FILE);
 }
 
-/**
- * `tracker.md.{provider}.bak` — the basename a stale conventions file lands under.
- *
- * EXPORTED deliberately, not by oversight, and so is
- * {@link trackerConventionsBackupPath} below. The `.bak` filename is a
- * user-visible contract: `renameStaleTrackerConventions` writes it, `devflow
- * tracker --status` and the uninstall user-content list both reason about it, and
- * tests/core/tracker.test.ts pins it. Un-exporting would force the pin to
- * re-derive the name from a template beside the real one, which is the
- * shadow-reimplementation a guard is worth nothing without (PF-018).
- */
-export function trackerConventionsBackupName(previous: TrackerProvider): string {
-  return `${TRACKER_CONVENTIONS_FILE}.${previous}.bak`;
-}
-
-/** `{devflowDir}/tracker.md.{provider}.bak` — where a stale conventions file lands. */
-export function trackerConventionsBackupPath(devflowDir: string, previous: TrackerProvider): string {
-  return path.join(devflowDir, trackerConventionsBackupName(previous));
-}
+// ---------------------------------------------------------------------------
+// Exported functions — the conventions file's frontmatter (pure)
+// ---------------------------------------------------------------------------
 
 /**
- * Every backup basename a provider change can leave behind, in registry order.
+ * What a conventions file's leading frontmatter says about itself.
  *
- * D-TRACKER-BACKUP-SET [OD-15]: a backup holds exactly what `tracker.md` held —
- * the user's inferred site and project key — so uninstall classifies the whole
- * set as USER CONTENT beside `tracker.md`, never as install artifacts (@D8 in
- * src/cli/commands/uninstall.ts keeps the two lists disjoint).
- *
- * Derived from `TRACKER_PROVIDER_IDS` rather than spelled out, so a fourth
- * provider is classified the moment it joins the registry instead of leaving a
- * file that survives an uninstall reporting `~/.devflow` swept. `github` is in
- * the set: a hand-written `tracker.md` is moved aside on a github→jira change
- * too, and `renameStaleTrackerConventions` takes `previous` from the whole
- * domain.
+ * `hasFrontmatter: false` is a real, distinct outcome: the file carries no `---`
+ * block at offset 0. Every value is RAW — the file is hand-editable and
+ * machine-wide, so its content is third-party input at every sink, and each
+ * caller gates what it takes (the migration admits only a registry id; `--status`
+ * renders through describeTrackerValue).
  */
-export const TRACKER_CONVENTIONS_BACKUP_NAMES: readonly string[] =
-  TRACKER_PROVIDER_IDS.map(id => trackerConventionsBackupName(id));
+export interface TrackerFrontmatter {
+  hasFrontmatter: boolean;
+  provider?: string;
+  inferredFrom?: string;
+}
+
+/** How many leading lines of a conventions file are scanned for frontmatter. */
+const FRONTMATTER_SCAN_LINES = 40;
+
+/**
+ * Parse the leading frontmatter of a conventions file's head.
+ *
+ * The one parser, shared by `devflow tracker --status` and the
+ * per-provider migration, so the two can never disagree about which provider a
+ * file names. Scans at most {@link FRONTMATTER_SCAN_LINES} lines; the first
+ * occurrence of each key wins.
+ */
+export function parseTrackerFrontmatter(head: string): TrackerFrontmatter {
+  const lines = head.split('\n', FRONTMATTER_SCAN_LINES);
+  if (lines[0]?.trim() !== '---') return { hasFrontmatter: false };
+
+  let provider: string | undefined;
+  let inferredFrom: string | undefined;
+  for (const line of lines.slice(1)) {
+    if (line.trim() === '---') break;
+    const match = /^([A-Za-z-]+):\s*(.*)$/.exec(line);
+    if (match === null) continue;
+    if (match[1] === 'provider' && provider === undefined) provider = match[2].trim();
+    if (match[1] === 'inferred-from' && inferredFrom === undefined) inferredFrom = match[2].trim();
+  }
+  return { hasFrontmatter: true, provider, inferredFrom };
+}
+
+/**
+ * How many leading BYTES of a conventions file any reader takes — the bound the
+ * Tracker agent writes to and the Git agent loads. A line cap alone bounds the
+ * SCAN, not the read: the file's size is not devflow's to assume (avoids PF-023:
+ * a bound is only real at the sink).
+ */
+export const TRACKER_CONVENTIONS_READ_BYTES = 8000;
+
+/**
+ * Read at most `limit` bytes from the head of a REGULAR file.
+ *
+ * `undefined` for an absent, unreadable or non-regular path — a FIFO or a device
+ * is refused before it is opened, so a hostile entry can never block a read.
+ * Follows a symlink to read what it names (a reader cares what the conventions
+ * SAY); it never moves or writes through one. Never throws (PF-014).
+ */
+export async function readBoundedHead(filePath: string, limit: number): Promise<string | undefined> {
+  let handle: FileHandle | undefined;
+  try {
+    if (!(await fs.stat(filePath)).isFile()) return undefined;
+    handle = await fs.open(filePath, 'r');
+    const buffer = Buffer.alloc(limit);
+    const { bytesRead } = await handle.read(buffer, 0, limit, 0);
+    return buffer.subarray(0, bytesRead).toString('utf-8');
+  } catch {
+    return undefined;
+  } finally {
+    await handle?.close().catch(() => undefined);
+  }
+}
 
 // ---------------------------------------------------------------------------
 // Exported functions — file lifecycle
 // ---------------------------------------------------------------------------
 
 /**
- * Re-arm background convention inference by removing the attempt counter.
+ * Re-arm background convention inference by removing every provider's attempt
+ * counter.
  *
  * The documented re-arm path (OD-14 / D-F): `devflow init` AND
- * `devflow tracker --set/--status` both re-arm, so a user whose tracker MCP
- * server was broken for five sessions is not stuck at the cap forever.
+ * `devflow tracker --set/--status` all re-arm, so a user whose tracker server
+ * was broken for five sessions is not stuck at the cap forever. Every provider's
+ * counter, not only the machine's: a repository's committed project.json can
+ * select a provider the machine never did, and its counter is the one a user in
+ * that repository is capped on.
  *
- * Idempotent when the counter is absent; never throws (PF-014). `fs.rm` with
+ * Idempotent when a counter is absent; never throws (PF-014). `fs.rm` with
  * `force` treats an absent file — and an absent parent directory — as success.
  */
 export async function rearmTrackerInference(devflowDir: string): Promise<TrackerResult<void>> {
   try {
-    await fs.rm(trackerAttemptsPath(devflowDir), { force: true });
+    for (const name of TRACKER_ATTEMPTS_NAMES) {
+      await fs.rm(path.join(devflowDir, name), { force: true });
+    }
     return { ok: true, value: undefined };
   } catch (err) {
     return { ok: false, error: `Could not reset the tracker attempt counter: ${errorMessage(err)}` };
@@ -401,13 +483,15 @@ export async function rearmTrackerInference(devflowDir: string): Promise<Tracker
 }
 
 /**
- * Converge the `.tracker.enabled` presence sentinel to the resolved provider.
+ * Converge the `.tracker.enabled` sentinel to the machine provider.
  *
- * [DR-10] Written (zero bytes) whenever the resolved provider is NOT github, and
- * removed when it is. This is the SessionStart hook's cheap gate: without it,
- * every GitHub user's every session would fall through to a manifest read — one
- * `jq` (or `node`) fork per session, forever, for 100% of users on the default
- * provider. With it the GitHub path is one `stat` and zero forks.
+ * [DR-10] Holds the provider NAME, one line, whenever the machine provider is NOT
+ * github, and is removed when it is. The SessionStart hook reads it with the
+ * `read` builtin, so the machine provider costs no fork: a GitHub user pays one
+ * `stat`, and a jira machine whose conventions are already learned pays a stat,
+ * a builtin read and a second stat — zero forks either way. A name rather than a
+ * bare presence marker, so the hook never has to open the manifest to learn which
+ * provider it is gating.
  *
  * Converges unconditionally in both directions (avoids PF-015): a provider
  * flipped back to github removes the sentinel in the same call shape that wrote
@@ -423,7 +507,7 @@ export async function applyTrackerSentinel(
       await fs.rm(sentinel, { force: true });
     } else {
       await fs.mkdir(devflowDir, { recursive: true });
-      await fs.writeFile(sentinel, '', 'utf-8');
+      await fs.writeFile(sentinel, `${provider}\n`, 'utf-8');
     }
     return { ok: true, value: undefined };
   } catch (err) {
@@ -431,81 +515,78 @@ export async function applyTrackerSentinel(
   }
 }
 
-/** What `renameStaleTrackerConventions` did — reported, never thrown. */
-export type TrackerTransition =
+/** What {@link migrateLegacyTrackerConventions} did — reported, never thrown. */
+export type TrackerConventionsMigration =
   | { kind: 'none' }
-  | { kind: 'renamed'; from: string; to: string; previous: TrackerProvider }
+  | { kind: 'moved'; from: string; to: string; provider: TrackerProvider }
+  | { kind: 'kept'; reason: string }
   | { kind: 'failed'; error: string };
 
 /**
- * Move a now-stale `~/.devflow/tracker.md` aside when the provider changes.
+ * Move the pre-per-provider `~/.devflow/tracker.md` to the provider file its
+ * frontmatter names (D-TRACKER-PER-PROVIDER-CONVENTIONS), once.
  *
- * The writer's repair. A conventions file inferred for one
- * provider is silently authoritative for the next one unless it is moved aside,
- * and the reader half (the provider-mismatch guard) then has nothing to disagree
- * with. Landing it at `tracker.md.{old}.bak` keeps the user's inferred content
- * recoverable while the next session re-arms inference for the new provider.
+ *   - no legacy file                         → `none`
+ *   - frontmatter names a registry provider,
+ *     and that provider's file does not exist → `moved`, by `rename(2)`
+ *   - no provider it can name, or the target
+ *     already exists                         → `kept`: the file stays where it is,
+ *                                               user content, with one reason
+ *   - any I/O failure                        → `failed`
  *
- * Every step REPORTS: `devflow init` must never abort on a feature-state change
- * (PF-009's isolation posture), so both callers render a warning and carry on.
+ * `rename(2)` moves a SYMLINK itself, never the file it points at, so a
+ * conventions file kept in a dotfiles repository stays there and only the link
+ * moves. A link's target is resolved relative to the link's directory, so a
+ * RELATIVE link now resolves from one level deeper; an absolute one is unaffected.
+ * rename also replaces an existing destination without a word, which is why the
+ * target is probed first and a present one is never overwritten: that file holds
+ * conventions a user may have corrected by hand, and it is the provider's own.
  *
- * D-TRACKER-BACKUP-EXCLUSIVE [OD-15]: the move is `link` then `unlink`, never
- * `rename`. `rename(2)` replaces an existing destination without a word, so
- * jira→github→jira→github destroyed the first `tracker.md.jira.bak` while init
- * printed a line that reads as preservation — and a `.bak` holds exactly what
- * `tracker.md` holds, which is the hand-correctable content uninstall classifies
- * as user content. `link(2)` fails with EEXIST instead, so a second transition
- * for one provider keeps BOTH copies and says which one blocked the move; the
- * user resolves it by moving one aside, and the next run completes the change.
- * Numbering the backups was the alternative and was rejected: it accumulates
- * without bound and puts names in `~/.devflow` that
- * `TRACKER_CONVENTIONS_BACKUP_NAMES` cannot enumerate, leaving files no uninstall
- * list accounts for. Hard links in this directory are already load-bearing — the
- * Tracker agent places `tracker.md` itself with `ln` for the same
- * create-exclusive property.
- *
- * A provider change with no file on disk, and an unchanged provider, are both
- * `{kind:'none'}` — a transition is a change plus a file.
+ * The legacy single attempt counter is removed on every run that reaches the end:
+ * it carries no user content, the per-provider counters replace it, and a file
+ * nothing reads is one no uninstall list would account for.
  */
-export async function renameStaleTrackerConventions(
-  devflowDir: string,
-  previous: TrackerProvider | undefined,
-  resolved: TrackerProvider,
-): Promise<TrackerTransition> {
-  if (previous === undefined || previous === resolved) return { kind: 'none' };
-
-  const from = trackerConventionsPath(devflowDir);
-  const to = trackerConventionsBackupPath(devflowDir, previous);
-
+export async function migrateLegacyTrackerConventions(devflowDir: string): Promise<TrackerConventionsMigration> {
+  const from = path.join(devflowDir, TRACKER_LEGACY_CONVENTIONS_FILE);
   try {
-    await fs.link(from, to);
-  } catch (err) {
-    switch (errnoCode(err)) {
-      // Nothing to move aside — the common case on a provider change with no
-      // prior inference run.
-      case 'ENOENT':
-        return { kind: 'none' };
-      case 'EEXIST':
-        return {
-          kind: 'failed',
-          error: `Kept the existing ${to} — moving ${from} aside would have destroyed it. ` +
-            `Move or delete one of the two, then re-run to finish the provider change.`,
-        };
-      default:
-        return { kind: 'failed', error: `Could not move the stale tracker.md aside: ${errorMessage(err)}` };
+    await fs.rm(path.join(devflowDir, TRACKER_LEGACY_ATTEMPTS_FILE), { force: true });
+
+    try {
+      await fs.lstat(from);
+    } catch (err) {
+      if (errnoCode(err) === 'ENOENT') return { kind: 'none' };
+      throw err;
     }
-  }
 
-  try {
-    await fs.unlink(from);
+    const head = await readBoundedHead(from, TRACKER_CONVENTIONS_READ_BYTES);
+    if (head === undefined) {
+      return { kind: 'kept', reason: `${from} is not a readable regular file, so it was left in place.` };
+    }
+    const named = parseTrackerFrontmatter(head).provider;
+    if (!isTrackerProvider(named)) {
+      return {
+        kind: 'kept',
+        reason:
+          `${from} names no tracker provider in its frontmatter, so it was left in place — ` +
+          `move it to ${trackerConventionsDir(devflowDir)}/{provider}.md by hand if it is still wanted.`,
+      };
+    }
+
+    const to = trackerConventionsPath(devflowDir, named);
+    try {
+      await fs.lstat(to);
+      return {
+        kind: 'kept',
+        reason: `${from} was left in place — ${to} already exists and is never overwritten.`,
+      };
+    } catch (err) {
+      if (errnoCode(err) !== 'ENOENT') throw err;
+    }
+
+    await fs.mkdir(trackerConventionsDir(devflowDir), { recursive: true });
+    await fs.rename(from, to);
+    return { kind: 'moved', from, to, provider: named };
   } catch (err) {
-    // The backup exists and holds the content; only the stale name is still
-    // there, so the reader's mismatch guard still fires and nothing was lost.
-    return {
-      kind: 'failed',
-      error: `Copied the stale conventions to ${to} but could not remove ${from}: ${errorMessage(err)}`,
-    };
+    return { kind: 'failed', error: `Could not move ${from} to its provider's file: ${errorMessage(err)}` };
   }
-
-  return { kind: 'renamed', from, to, previous };
 }

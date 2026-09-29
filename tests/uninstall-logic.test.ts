@@ -5,7 +5,7 @@ import * as os from 'os';
 import * as path from 'path';
 import { formatProjectDataPlan, partitionProjectData, resolveProjectDataPlan, computeAssetsToRemove, formatDryRunPlan, resolveSecurityRemovalDecision, enumerateUserDevFlowContent, userContentPaths, resolveDevflowDirCleanup, resolveProjectDataCleanup, removeDevFlowInstallArtifacts, installArtifactPaths, resolveInstallArtifactPaths, enumerateDryRunExtras, removeAllDevFlow, removeSelectedPlugins, sweepDevflowNamespaces, isDevFlowInstalled, runDryRunPhase, runSelectivePhaseForScope, runFullPhaseForScope, runCleanupPhase, resolveInstalledPlugins, isSameLocation } from '../src/cli/commands/uninstall.js';
 import { DEVFLOW_PLUGINS, getAllAgentNames, parsePluginSelection, skillsOf, type PluginDefinition } from '../src/core/plugins.js';
-import { TRACKER_CONVENTIONS_BACKUP_NAMES, TRACKER_STAGED_PREFIX } from '../src/core/tracker.js';
+import { TRACKER_ATTEMPTS_NAMES, TRACKER_PROVIDER_IDS, TRACKER_STAGED_PREFIX } from '../src/core/tracker.js';
 import { modelCacheDir } from '../src/core/cache.js';
 import { LEGACY_SKILL_NAMES } from '../src/targets/claude-code/legacy.js';
 import { DEVFLOW_GITIGNORE_BLOCK, DEVFLOW_TRACKED_PATHS } from '../src/targets/claude-code/post-install.js';
@@ -535,8 +535,23 @@ describe('enumerateUserDevFlowContent (WS5)', () => {
 
   // === tracker classification (OD-15) ===
 
-  it('lists tracker.md — it is USER CONTENT, hand-editable and inferred once', async () => {
-    await fs.writeFile(path.join(tmpDir, 'tracker.md'), '---\nprovider: jira\n---\n', 'utf-8');
+  it('lists the per-provider conventions directory — USER CONTENT, hand-editable and inferred once', async () => {
+    await fs.mkdir(path.join(tmpDir, 'tracker'));
+    await fs.writeFile(path.join(tmpDir, 'tracker', 'jira.md'), '---\nprovider: jira\n---\n', 'utf-8');
+
+    const result = await enumerateUserDevFlowContent(tmpDir);
+
+    expect(result).toHaveLength(1);
+    expect(result[0]).toContain(path.join(tmpDir, 'tracker'));
+  });
+
+  it('does not list an EMPTY conventions directory — nothing in it to lose', async () => {
+    await fs.mkdir(path.join(tmpDir, 'tracker'));
+    expect(await enumerateUserDevFlowContent(tmpDir)).toEqual([]);
+  });
+
+  it('lists a legacy tracker.md the migration left in place — USER CONTENT', async () => {
+    await fs.writeFile(path.join(tmpDir, 'tracker.md'), '## Project\nkey: ACME\n', 'utf-8');
 
     const result = await enumerateUserDevFlowContent(tmpDir);
 
@@ -544,23 +559,23 @@ describe('enumerateUserDevFlowContent (WS5)', () => {
     expect(result.some(s => s.includes('tracker.md'))).toBe(true);
   });
 
-  it('does NOT list the tracker install artifacts (claim file, counter, sentinel)', async () => {
-    // @D8 disjointness: these three are removed by every artifacts-only pass, so
+  it('does NOT list the tracker install artifacts (claim file, counters, sentinel)', async () => {
+    // @D8 disjointness: these are removed by every artifacts-only pass, so
     // naming them in the confirm prompt would make the prompt a lie.
     await fs.writeFile(path.join(tmpDir, '.tracker.processing'), '', 'utf-8');
     await fs.writeFile(path.join(tmpDir, '.tracker.attempts'), '2', 'utf-8');
-    await fs.writeFile(path.join(tmpDir, '.tracker.enabled'), '', 'utf-8');
+    for (const name of TRACKER_ATTEMPTS_NAMES) await fs.writeFile(path.join(tmpDir, name), '2', 'utf-8');
+    await fs.writeFile(path.join(tmpDir, '.tracker.enabled'), 'jira\n', 'utf-8');
 
     const result = await enumerateUserDevFlowContent(tmpDir);
 
     expect(result).toEqual([]);
   });
 
-  it('lists a stale tracker.md.{provider}.bak — the backup is USER CONTENT too', async () => {
-    // renameStaleTrackerConventions writes this on every provider change and it
-    // holds what tracker.md held: the user's site and project key. Unlisted, it
-    // survives an uninstall that reports the directory swept, and the confirm
-    // prompt never names it.
+  it('lists a stale tracker.md.{provider}.bak an earlier release left — USER CONTENT too', async () => {
+    // Earlier releases moved the conventions aside on every provider change, and
+    // a backup holds what tracker.md held: the user's site and project key.
+    // Nothing moves or deletes one now, so the confirm prompt still names it.
     await fs.writeFile(path.join(tmpDir, 'tracker.md.jira.bak'), '---\nprovider: jira\n---\n', 'utf-8');
 
     const result = await enumerateUserDevFlowContent(tmpDir);
@@ -570,17 +585,18 @@ describe('enumerateUserDevFlowContent (WS5)', () => {
   });
 
   it('lists a backup for every provider in the registry', async () => {
-    // Registry-derived, not spelled out: a fourth provider is classified the
-    // moment it joins TRACKER_PROVIDERS, with no second edit to remember.
-    expect(TRACKER_CONVENTIONS_BACKUP_NAMES.length).toBeGreaterThan(0);
-    for (const name of TRACKER_CONVENTIONS_BACKUP_NAMES) {
+    // Registry-derived, not spelled out: every provider an earlier release could
+    // have backed up is classified.
+    const names = TRACKER_PROVIDER_IDS.map(id => `tracker.md.${id}.bak`);
+    expect(names.length).toBeGreaterThan(0);
+    for (const name of names) {
       await fs.writeFile(path.join(tmpDir, name), 'stale', 'utf-8');
     }
 
     const result = await enumerateUserDevFlowContent(tmpDir);
 
-    expect(result).toHaveLength(TRACKER_CONVENTIONS_BACKUP_NAMES.length);
-    for (const name of TRACKER_CONVENTIONS_BACKUP_NAMES) {
+    expect(result).toHaveLength(names.length);
+    for (const name of names) {
       expect(result.some(s => s.includes(name)), `${name} must be enumerated as user content`).toBe(true);
     }
   });
@@ -1210,11 +1226,13 @@ describe('removeDevFlowInstallArtifacts — proxy artifact removal (TEST-4)', ()
     // agent-models.json is an install artifact (stale keys silently re-apply to
     // renamed/deleted agents on reinstall — AC-P1-F4), NOT user-authored content.
     await fs.writeFile(path.join(devflowDir, 'agent-models.json'), '{}', 'utf-8');
-    // The three tracker artifacts: the Tracker agent's claim file, its attempt
-    // counter, and the provider presence sentinel. All install artifacts.
+    // The tracker artifacts: the Tracker agent's claim file, the per-provider
+    // attempt counters (and the single one earlier releases kept), and the
+    // machine provider sentinel. All install artifacts.
     await fs.writeFile(path.join(devflowDir, '.tracker.processing'), '', 'utf-8');
     await fs.writeFile(path.join(devflowDir, '.tracker.attempts'), '2', 'utf-8');
-    await fs.writeFile(path.join(devflowDir, '.tracker.enabled'), '', 'utf-8');
+    await fs.writeFile(path.join(devflowDir, '.tracker.jira.attempts'), '2', 'utf-8');
+    await fs.writeFile(path.join(devflowDir, '.tracker.enabled'), 'jira\n', 'utf-8');
 
     // ── User-authored files (must survive) ───────────────────────────────────
     await fs.mkdir(path.join(devflowDir, 'skills', 'my-skill'), { recursive: true });
@@ -1224,9 +1242,11 @@ describe('removeDevFlowInstallArtifacts — proxy artifact removal (TEST-4)', ()
     await fs.writeFile(path.join(devflowDir, 'preference-profile.md'), '# Profile', 'utf-8');
     await fs.writeFile(path.join(devflowDir, 'learning.json'), '{}', 'utf-8');
     await fs.writeFile(path.join(devflowDir, 'hud.json'), '{}', 'utf-8');
-    // tracker.md is USER CONTENT (OD-15) — it must survive an artifacts-only pass,
-    // and so must the backup a provider change leaves beside it: same inferred
-    // content, same classification.
+    // The conventions are USER CONTENT (OD-15) — they must survive an
+    // artifacts-only pass, and so must a legacy tracker.md and a backup an earlier
+    // release left beside it: same inferred content, same classification.
+    await fs.mkdir(path.join(devflowDir, 'tracker'));
+    await fs.writeFile(path.join(devflowDir, 'tracker', 'jira.md'), '---\nprovider: jira\n---\n', 'utf-8');
     await fs.writeFile(path.join(devflowDir, 'tracker.md'), '---\nprovider: jira\n---\n', 'utf-8');
     await fs.writeFile(path.join(devflowDir, 'tracker.md.jira.bak'), '---\nprovider: jira\n---\n', 'utf-8');
 
@@ -1237,7 +1257,7 @@ describe('removeDevFlowInstallArtifacts — proxy artifact removal (TEST-4)', ()
     // Install artifacts must be gone (including agent-models.json — reclassified as artifact)
     for (const artifact of [
       'manifest.json', 'migrations.json', 'proxy.json', 'logs', 'cache', 'costs', 'agent-models.json',
-      '.tracker.processing', '.tracker.attempts', '.tracker.enabled',
+      '.tracker.processing', '.tracker.attempts', '.tracker.jira.attempts', '.tracker.enabled',
     ]) {
       expect(remaining.has(artifact), `install artifact "${artifact}" should be removed but was found in ${devflowDir}`).toBe(false);
     }
@@ -1253,6 +1273,7 @@ describe('removeDevFlowInstallArtifacts — proxy artifact removal (TEST-4)', ()
       'preference-profile.md',
       'learning.json',
       'hud.json',
+      'tracker',
       'tracker.md',
       'tracker.md.jira.bak',
     ]));
@@ -1276,22 +1297,27 @@ describe('removeDevFlowInstallArtifacts — proxy artifact removal (TEST-4)', ()
     // and it must NOT appear in the before/after enumeration.
     await fs.writeFile(path.join(devflowDir, 'agent-models.json'), '{}', 'utf-8');
     await fs.writeFile(path.join(devflowDir, 'hud.json'), '{}', 'utf-8');
-    // tracker.md and the backup a provider change leaves beside it are USER
-    // CONTENT (OD-15); the three .tracker.* files are install artifacts, present
-    // here to prove the artifact pass takes them and leaves the other two — the
-    // @D8 disjointness invariant at its newest boundary.
+    // The conventions directory, a legacy tracker.md and a backup an earlier
+    // release left beside it are USER CONTENT (OD-15); the .tracker.* files are
+    // install artifacts, present here to prove the artifact pass takes them and
+    // leaves the other three — the @D8 disjointness invariant at its newest
+    // boundary.
+    await fs.mkdir(path.join(devflowDir, 'tracker'));
+    await fs.writeFile(path.join(devflowDir, 'tracker', 'linear.md'), '---\nprovider: linear\n---\n', 'utf-8');
     await fs.writeFile(path.join(devflowDir, 'tracker.md'), '---\nprovider: jira\n---\n', 'utf-8');
     await fs.writeFile(path.join(devflowDir, 'tracker.md.jira.bak'), '---\nprovider: jira\n---\n', 'utf-8');
     await fs.writeFile(path.join(devflowDir, '.tracker.processing'), '', 'utf-8');
     await fs.writeFile(path.join(devflowDir, '.tracker.attempts'), '2', 'utf-8');
-    await fs.writeFile(path.join(devflowDir, '.tracker.enabled'), '', 'utf-8');
+    await fs.writeFile(path.join(devflowDir, '.tracker.linear.attempts'), '2', 'utf-8');
+    await fs.writeFile(path.join(devflowDir, '.tracker.enabled'), 'linear\n', 'utf-8');
 
     const before = await enumerateUserDevFlowContent(devflowDir);
     // Non-vacuity: the enumeration found every USER-AUTHORED category on disk.
-    // Count is 7: skill shadows, rule shadows, preference-profile.md, learning.json,
-    // hud.json, tracker.md, tracker.md.jira.bak. agent-models.json and the three
-    // .tracker.* files are absent from the count — they are artifacts, not user content.
-    expect(before.length).toBe(7);
+    // Count is 8: skill shadows, rule shadows, preference-profile.md, learning.json,
+    // hud.json, the tracker/ conventions, tracker.md, tracker.md.jira.bak.
+    // agent-models.json and the .tracker.* files are absent from the count — they
+    // are artifacts, not user content.
+    expect(before.length).toBe(8);
 
     await removeDevFlowInstallArtifacts(devflowDir, false);
 

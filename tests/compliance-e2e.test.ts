@@ -1299,41 +1299,43 @@ describe('T1: init --reset collapses the provider and converges every tracker ar
 
   afterEach(async () => { await fs.rm(tmpHome, { recursive: true, force: true }); });
 
-  it('T1: a jira install + --reset → conventions moved aside, sentinel gone, manifest github', async () => {
-    // Base state: a real jira install, not a hand-written manifest — the
-    // previous provider this run has to notice is the one init itself persisted.
+  it('T1: a jira install + --reset → sentinel gone, manifest github, jira conventions kept', async () => {
+    // Seeded BEFORE the first init: an earlier release's single conventions file,
+    // which that init's migration moves to jira's own file (TP-39, end to end).
+    await fs.mkdir(devflowDir, { recursive: true });
+    const legacy = path.join(devflowDir, 'tracker.md');
+    const conventions = path.join(devflowDir, 'tracker', 'jira.md');
+    const seededConventions = '---\nprovider: jira\ninferred-from: seed\n---\n\n## Project\nsite: example\n';
+    await fs.writeFile(legacy, seededConventions, 'utf-8');
+
+    // Base state: a real jira install, not a hand-written manifest.
     expect(run('init', '--recommended', '--tracker', 'jira').status).toBe(0);
 
     const sentinel = path.join(devflowDir, '.tracker.enabled');
-    const conventions = path.join(devflowDir, 'tracker.md');
-    const backup = path.join(devflowDir, 'tracker.md.jira.bak');
-    const seededConventions = '---\nprovider: jira\ninferred-from: seed\n---\n\n## Project\nsite: example\n';
-    await fs.writeFile(conventions, seededConventions, 'utf-8');
-
     // PF-018: the pre-state is asserted, or the post-state below is the state
     // the temp dir started in and the run proved nothing.
     expect(
       ((await readManifest(devflowDir)).features as Record<string, unknown>).tracker,
     ).toEqual({ provider: 'jira' });
-    await expect(fs.access(sentinel)).resolves.toBeUndefined();
+    await expect(fs.readFile(sentinel, 'utf-8')).resolves.toBe('jira\n');
+    await expect(fs.readFile(conventions, 'utf-8'), 'the migration moved the legacy file')
+      .resolves.toBe(seededConventions);
+    await expect(fs.access(legacy)).rejects.toThrow();
 
     const result = run('init', '--reset');
     expect(result.status, `init --reset failed:\n${result.stderr}`).toBe(0);
 
-    // The provider collapses to the off position…
+    // The provider collapses to the off position, and the sentinel converges on it.
     expect(
       ((await readManifest(devflowDir)).features as Record<string, unknown>).tracker,
     ).toEqual({ provider: 'github' });
-    // …and all three file owners converge against it. The rename fires because
-    // the lifecycle is handed the REAL prior manifest, never the --reset-gated
-    // seed: under --reset the seed already reads github, and github→github is
-    // not a transition, so a seed-fed rename would leave a jira conventions file
-    // sitting authoritative under a github install.
-    await expect(fs.readFile(backup, 'utf-8')).resolves.toBe(seededConventions);
-    await expect(fs.access(conventions)).rejects.toThrow();
     await expect(fs.access(sentinel)).rejects.toThrow();
-    // The move is disclosed — a renamed file with no receipt is unauditable.
-    expect(result.stdout + result.stderr).toContain('tracker.md.jira.bak');
+    // D-TRACKER-PER-PROVIDER-CONVENTIONS: nothing is moved aside. jira's
+    // conventions are jira's, still correct for every repository that uses jira.
+    await expect(fs.readFile(conventions, 'utf-8')).resolves.toBe(seededConventions);
+    await expect(fs.access(path.join(devflowDir, 'tracker.md.jira.bak'))).rejects.toThrow();
+    // D-INSTALL-ALL-PROVIDERS: the agent stays — a repository can still select jira.
+    await expect(fs.access(path.join(tmpHome, '.claude', 'agents', 'devflow', 'tracker.md'))).resolves.toBeUndefined();
   });
 });
 

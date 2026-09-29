@@ -974,91 +974,49 @@ describe('validateContractOutputName — the narrow underscore allowance', () =>
 });
 
 // ---------------------------------------------------------------------------
-// installedReferenceManifest — what one INSTALL carries, vs what the BUILD emits
+// installedReferenceManifest — what one INSTALL carries: everything the BUILD emits
 // ---------------------------------------------------------------------------
 
 /**
- * Files one install carries. Floors, not equalities: a new cross-cutting
- * document raises both; a new provider operation raises the provider count.
- * Registered in tests/fixtures/numeric-floors.json. Re-derived 2026-09-22,
- * when the PR-host tree (8 files, provider-independent) joined both sets:
- * github 21, jira 32, linear 32. Raised by #363 (PR4), which added
- * pr/update-pr-evidence.md and the cross-cutting trust-rule.md to both sets:
- * github 23, jira 34, linear 34. Raised by #364 (PR5), whose associate-release
- * operation adds tracker/github/associate-release.md to both sets and the
- * selected provider's own copy to a jira or linear install: github 24, jira 36,
- * linear 36.
+ * Files one install carries — every provider's tree, the PR-host tree, the
+ * cross-cutting documents and the tool-call contract (D-INSTALL-ALL-PROVIDERS).
+ * A floor, not an equality: a new reference raises it. ONE constant, because the
+ * github and jira/linear installs are now the same install; registered in
+ * tests/fixtures/numeric-floors.json under both of the ids that used to pin them
+ * apart (installed-reference-count-github, installed-reference-count-provider),
+ * which rose from 24 and 36 to meet here.
  */
-const INSTALLED_REFS_GITHUB = 24;
-const INSTALLED_REFS_PROVIDER = 36;
+const INSTALLED_REFS = 47;
 
-describe('installedReferenceManifest — {github} ∪ {selected provider}', () => {
+describe('installedReferenceManifest — every provider, whatever the machine selected', () => {
   const generated = generatedReferenceManifest();
+  const installed = installedReferenceManifest();
 
-  it('github installs the github tree and the cross-cutting documents, nothing else', () => {
-    const installed = installedReferenceManifest({ provider: 'github' });
-    expect(installed.length).toBe(INSTALLED_REFS_GITHUB);
-    for (const rel of installed) {
+  it('an install carries exactly the manifest the build emits', () => {
+    expect(installed.length).toBeGreaterThanOrEqual(INSTALLED_REFS);
+    expect([...installed].sort()).toEqual([...generated].sort());
+  });
+
+  it('carries every provider tree, the PR-host tree and the tool-call contract', () => {
+    for (const provider of ['github', 'jira', 'linear'] as const) {
       expect(
-        rel.startsWith('tracker/github/') || !rel.startsWith('tracker/'),
-        `github must not install ${rel}`,
+        installed.some(r => r.startsWith(`tracker/${provider}/`)),
+        `an install must carry the ${provider} mechanics — a repository can select it`,
       ).toBe(true);
     }
-    expect(installed.some(r => r.startsWith('tracker/jira/'))).toBe(false);
-    expect(installed.some(r => r.startsWith('tracker/linear/'))).toBe(false);
+    expect(installed.some(r => r.startsWith('pr/'))).toBe(true);
+    expect(installed).toContain('tracker/_mcp.md');
   });
 
-  it.each(['jira', 'linear'] as const)('%s installs its own tree on top of github\'s', (provider) => {
-    const installed = installedReferenceManifest({ provider });
-    expect(installed.length).toBe(INSTALLED_REFS_PROVIDER);
-    const github = installedReferenceManifest({ provider: 'github' });
-    for (const rel of github) {
-      expect(installed, `${provider} is a superset of github — github is the floor`).toContain(rel);
-    }
-    expect(installed.some(r => r.startsWith(`tracker/${provider}/`))).toBe(true);
-    const other = provider === 'jira' ? 'linear' : 'jira';
-    expect(
-      installed.some(r => r.startsWith(`tracker/${other}/`)),
-      'an install never carries a provider the user did not select',
-    ).toBe(false);
-  });
-
-  it('_mcp.md is installed iff the selected provider reaches its tracker by tool call', () => {
-    // Biconditional, both directions — the GitHub path's mechanics are `gh`
-    // commands, so the tool-call contract has no reachable consumer there and
-    // installing it would bill every GitHub user for a file nothing loads.
-    expect(installedReferenceManifest({ provider: 'github' })).not.toContain('tracker/_mcp.md');
-    for (const provider of ['jira', 'linear'] as const) {
-      expect(installedReferenceManifest({ provider })).toContain('tracker/_mcp.md');
-    }
-  });
-
-  it('every installed entry is one the build actually emits', () => {
-    for (const provider of ['github', 'jira', 'linear'] as const) {
-      for (const rel of installedReferenceManifest({ provider })) {
-        expect(generated, `${rel} is installed but not generated`).toContain(rel);
-      }
-    }
-  });
-
-  it('the build still emits every provider — the narrowing is install-time only', () => {
-    expect(generated.length).toBe(47);
-    const union = new Set([
-      ...installedReferenceManifest({ provider: 'github' }),
-      ...installedReferenceManifest({ provider: 'jira' }),
-      ...installedReferenceManifest({ provider: 'linear' }),
-    ]);
-    expect([...union].sort()).toEqual([...generated].sort());
-  });
-
-  it('is derived from the registry, not from a hand-listed provider table', () => {
-    // A provider registered with a `tracker/{id}` subdir is installable by
-    // construction. A literal in the function body would be a second roster to
-    // keep in step with VARIANT_MODULES.
+  it('takes no provider — the install is not a function of the selection', () => {
+    // A provider parameter here would be the selection-scoped install coming back
+    // one argument at a time; the body names no provider literal either.
+    expect(installedReferenceManifest.length, 'a declared parameter beyond the options bag').toBeLessThanOrEqual(1);
     const source = readFileSync(path.join(ROOT, 'src', 'core', 'mds-variants.ts'), 'utf-8');
     const body = source.slice(source.indexOf('export function installedReferenceManifest'));
     const fn = body.slice(0, body.indexOf('\n}\n') + 3);
     expect(fn.length, 'the function body must be locatable').toBeGreaterThan(0);
+    expect(fn).not.toContain('provider');
     for (const literal of ['jira', 'linear', 'github']) {
       expect(fn, `installedReferenceManifest must not name "${literal}"`).not.toContain(`'${literal}'`);
     }
@@ -1068,6 +1026,6 @@ describe('installedReferenceManifest — {github} ∪ {selected provider}', () =
     // Same posture as its sibling generatedReferenceManifest: the registry is a
     // compile-time constant, so a refusal is a programming error no caller could
     // sensibly continue past.
-    expect(() => installedReferenceManifest({ provider: 'github', modules: [] })).toThrow(/does not expand/);
+    expect(() => installedReferenceManifest({ modules: [] })).toThrow(/does not expand/);
   });
 });

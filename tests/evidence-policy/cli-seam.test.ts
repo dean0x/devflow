@@ -41,6 +41,7 @@ import {
   loadSettingsModule,
   narrowedSwitchLabel,
   repoComplianceStatusLines,
+  repoTrackerSelection,
   type EvidencePolicyModule,
   type EvidencePolicyResolution,
   type RepoSettings,
@@ -305,6 +306,22 @@ describe('the --status helpers over the settings layer (D-FEATURES-NARROW-ONLY)'
     const seen: unknown[] = [];
     narrowedSwitchLabel(stub(BASE, seen), { dir: '/some/repo' }, 'memory');
     expect(seen).toEqual([{ dir: '/some/repo' }]);
+  });
+
+  it('tracker: the provider a repository layer selects, and null whenever the machine decides', () => {
+    const tracker = (t: RepoSettings['tracker'], source: RepoSettings['trackerSource']): RepoSettings =>
+      ({ ...BASE, tracker: t, trackerSource: source });
+    expect(repoTrackerSelection(stub(tracker('jira', 'project')), { dir: tmp }))
+      .toEqual({ provider: 'jira', source: 'project' });
+    expect(repoTrackerSelection(stub(tracker('github', 'personal')), { dir: tmp }))
+      .toEqual({ provider: 'github', source: 'personal' });
+    // The machine's own selection, or the default, is no repository selection:
+    // `tracker --status` then prints exactly what it always has.
+    expect(repoTrackerSelection(stub(tracker('jira', 'machine')), { dir: tmp })).toBeNull();
+    expect(repoTrackerSelection(stub(tracker('github', 'default')), { dir: tmp })).toBeNull();
+    // A fail-closed github is not a selection anyone made; nor is an absent resolver.
+    expect(repoTrackerSelection(stub({ ...tracker('jira', 'project'), ok: false }), { dir: tmp })).toBeNull();
+    expect(repoTrackerSelection({ ok: false, error: { kind: 'not-found', path: '/x' } }, { dir: tmp })).toBeNull();
   });
 
   it('compliance: the repository ids, generic for an empty list, and the migration hint', () => {

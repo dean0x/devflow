@@ -381,6 +381,30 @@ export function narrowedSwitchLabel(
   return `disabled (${settingsSourceFile(state.source)})`;
 }
 
+/** The tracker a repository layer selected, and which layer did. */
+export interface RepoTrackerSelection {
+  readonly provider: RepoSettings['tracker'];
+  readonly source: Exclude<SettingsSwitchSource, 'machine'>;
+}
+
+/**
+ * The tracker in effect in the repository at `opts.dir`, ONLY when a repository
+ * layer decides it — its committed project.json, or the personal config.json
+ * narrowing — and null otherwise. A machine whose own selection (or the github
+ * default) decides gets null, so `tracker --status` prints exactly what it always
+ * has there. So does a resolver that failed to load or failed closed: it knows
+ * nothing about this repository, and a fail-closed `github` is not a selection
+ * anyone made.
+ */
+export function repoTrackerSelection(loaded: SettingsLoad, opts: RepoSettingsOptions): RepoTrackerSelection | null {
+  if (!loaded.ok) return null;
+  const settings = loaded.value.resolveSettings(opts);
+  if (!settings.ok) return null;
+  const source = settings.trackerSource;
+  if (source !== 'project' && source !== 'personal') return null;
+  return { provider: settings.tracker, source };
+}
+
 /**
  * The `compliance --status` lines about the repository in `opts.dir`: the ids its
  * project.json declares (`generic controls only` for an empty or malformed list),

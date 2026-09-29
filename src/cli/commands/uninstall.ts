@@ -8,7 +8,6 @@ import { getInstallationPaths, getClaudeDirectory, getHomeDirectory, getManagedS
 import { getGitRoot } from '../../core/git.js';
 import { DEVFLOW_PLUGINS, SKILL_NAMESPACE, getAllSkillNames, getAllAgentNames, getAllCommandNames, parsePluginSelection, resolveFeatureRedirect, prefixSkillName, unprefixSkillName, skillsOf, FEATURE_OWNED_SKILLS, type PluginDefinition } from '../../core/plugins.js';
 import { readManifest } from '../../core/manifest.js';
-import { TRACKER_ATTEMPTS_FILE, TRACKER_CLAIM_FILE, TRACKER_ENABLED_FILE } from '../../core/tracker.js';
 import { sweepOrphanedAssets, mdFileName, mdEntryName } from '../../core/orphan-sweep.js';
 import { LEGACY_SKILL_NAMES } from '../../targets/claude-code/legacy.js';
 import { removeAmbientHook } from './ambient.js';
@@ -21,8 +20,13 @@ import { applyProxyTeardownToSettings } from './proxy.js';
 import { readProxyState, proxyJsonExists } from '../../core/proxy-state.js';
 import { hudCacheDir } from '../../core/cache.js';
 import {
-  TRACKER_CONVENTIONS_FILE,
-  TRACKER_CONVENTIONS_BACKUP_NAMES,
+  TRACKER_ATTEMPTS_NAMES,
+  TRACKER_CLAIM_FILE,
+  TRACKER_CONVENTIONS_DIR,
+  TRACKER_ENABLED_FILE,
+  TRACKER_LEGACY_ATTEMPTS_FILE,
+  TRACKER_LEGACY_CONVENTIONS_FILE,
+  TRACKER_PROVIDER_IDS,
   TRACKER_STAGED_PREFIX,
 } from '../../core/tracker.js';
 import { revertExternalAgents } from '../../core/agent-models.js';
@@ -476,35 +480,48 @@ export function userContentPaths(devflowDir: string): ReadonlyArray<UserContentE
     { relPath: 'rules', isDir: true, label: `rule shadows (${path.join(devflowDir, 'rules')})` },
     // preference-profile.md — user-curated decision-preference profile
     { relPath: 'preference-profile.md', label: 'preference-profile.md' },
-    // tracker.md — the inferred, hand-editable issue-tracker conventions file.
+    // tracker/ — the inferred, hand-editable issue-tracker conventions, one file
+    // per provider (D-TRACKER-PER-PROVIDER-CONVENTIONS).
     //
     // USER CONTENT (OD-15), classified the same way as preference-profile.md above
-    // rather than as an install artifact like agent-models.json, because it is
-    // inferred ONCE per machine and then hand-editable: absence is the trigger that
-    // re-runs inference, so deleting it on every decline/cancel/--keep-docs path
-    // would silently discard work the user may have corrected by hand.
+    // rather than as an install artifact like agent-models.json, because each file
+    // is inferred ONCE per machine and then hand-editable: absence is the trigger
+    // that re-runs inference, so deleting one on every decline/cancel/--keep-docs
+    // path would silently discard work the user may have corrected by hand.
     //
     // REVERSAL CONDITION, recorded: this classification is CONDITIONAL on the
     // provider-mismatch guard shipping. agent-models.json was reclassified to an
     // artifact precisely because stale overrides re-apply *silently*; "silently" is
-    // the load-bearing word. A stale tracker.md whose frontmatter provider
+    // the load-bearing word. A conventions file whose frontmatter provider
     // disagrees with the resolved provider produces
     // `TRACEABILITY: DEGRADED (tracker configuration mismatch (conventions file))`
     // and no tracker call — that is what removes the silence, and the reason names
-    // THIS file rather than the per-repo override so the user is told which of the
-    // two to edit. If that guard is ever dropped,
-    // reclassify tracker.md to an install artifact IN THE SAME CHANGE, otherwise a
-    // silently-authoritative stale file survives uninstall.
-    { relPath: TRACKER_CONVENTIONS_FILE, label: `${TRACKER_CONVENTIONS_FILE} (issue tracker conventions)` },
-    // tracker.md.{provider}.bak — what renameStaleTrackerConventions leaves behind
-    // on a provider change. Same inferred content as tracker.md (the user's site
-    // and project key), so the same classification: named by the confirm prompt,
-    // kept by every artifacts-only pass. The names come from the registry, so a
-    // fourth provider is covered the day it lands.
-    ...TRACKER_CONVENTIONS_BACKUP_NAMES.map(name => ({
-      relPath: name,
-      label: `${name} (previous issue tracker conventions)`,
-    })),
+    // THE FILE rather than the per-repo override so the user is told which of the
+    // two to edit. If that guard is ever dropped, reclassify these to install
+    // artifacts IN THE SAME CHANGE, otherwise a silently-authoritative stale file
+    // survives uninstall.
+    {
+      relPath: TRACKER_CONVENTIONS_DIR,
+      isDir: true,
+      label: `issue tracker conventions (${path.join(devflowDir, TRACKER_CONVENTIONS_DIR)})`,
+    },
+    // tracker.md and tracker.md.{provider}.bak — the conventions earlier releases
+    // kept in one machine-wide file, and the copies they moved aside on a provider
+    // change. The per-provider migration moves tracker.md when its frontmatter
+    // names a provider whose file does not exist yet, and leaves it otherwise;
+    // nothing moves or deletes a backup. Both hold what the conventions files
+    // hold — the user's site and project key — so the same classification: named
+    // by the confirm prompt, kept by every artifacts-only pass. The backup names
+    // come from the registry, so every provider an earlier release could have
+    // backed up is covered.
+    {
+      relPath: TRACKER_LEGACY_CONVENTIONS_FILE,
+      label: `${TRACKER_LEGACY_CONVENTIONS_FILE} (issue tracker conventions from an earlier release)`,
+    },
+    ...TRACKER_PROVIDER_IDS.map(id => {
+      const name = `${TRACKER_LEGACY_CONVENTIONS_FILE}.${id}.bak`;
+      return { relPath: name, label: `${name} (previous issue tracker conventions)` };
+    }),
     // learning.json — global learning agent tuning config
     { relPath: 'learning.json', label: 'learning.json' },
     // hud.json — user HUD enable/disable preference and display config
@@ -633,14 +650,16 @@ export function installArtifactPaths(devflowDir: string): ReadonlyArray<InstallA
     { relPath: 'proxy-routing.json' },
     { relPath: 'proxy.pid' },
     { relPath: '.proxy-spawn.lock', isDir: true },
-    // tracker runtime artifacts — the Tracker agent's atomic claim file, its
-    // inference attempt counter, and the provider presence sentinel the
-    // SessionStart hook stats. All three are machine state with no user-authored
-    // content, so they go on this list; `tracker.md` beside them and the
-    // `tracker.md.{provider}.bak` a provider change leaves are USER CONTENT
-    // (OD-15) and are deliberately NOT here (@D8: the two lists stay disjoint).
+    // tracker runtime artifacts — the Tracker agent's atomic claim file, the
+    // per-provider inference attempt counters (and the single counter earlier
+    // releases kept), and the machine provider sentinel the SessionStart hook
+    // reads. All are machine state with no user-authored content, so they go on
+    // this list; the conventions under `tracker/` beside them, and the legacy
+    // `tracker.md` and its backups, are USER CONTENT (OD-15) and are deliberately
+    // NOT here (@D8: the two lists stay disjoint).
     { relPath: TRACKER_CLAIM_FILE },
-    { relPath: TRACKER_ATTEMPTS_FILE },
+    ...TRACKER_ATTEMPTS_NAMES.map(name => ({ relPath: name })),
+    { relPath: TRACKER_LEGACY_ATTEMPTS_FILE },
     { relPath: TRACKER_ENABLED_FILE },
     // The agent's scrubbed staging file, one per invocation under a mktemp name
     // it removes from a trap — a SIGKILL outruns the trap and leaves it behind.
@@ -670,8 +689,8 @@ export function installArtifactPaths(devflowDir: string): ReadonlyArray<InstallA
  * This function runs on the decline, cancel, non-interactive AND --keep-docs paths,
  * so an entry here is deleted even when the user answers "no" to the full wipe.
  * User-authored state (everything in `userContentPaths`: skill/rule shadows,
- * preference-profile.md, tracker.md and its provider backups, learning.json,
- * hud.json) is removed only by the confirmed full-dir rm.
+ * preference-profile.md, the tracker conventions with the legacy tracker.md and
+ * its backups, learning.json, hud.json) is removed only by the confirmed full-dir rm.
  * agent-models.json is an INSTALL ARTIFACT (stale per-agent overrides silently
  * re-apply to renamed/deleted agents on reinstall — AC-P1-F4) and therefore
  * belongs in this list, not in enumerateUserDevFlowContent.

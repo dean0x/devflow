@@ -792,3 +792,128 @@ describe('canonicalise-agent-keys-v1 migration', () => {
     expect(Object.hasOwn(final.agents, 'old-coder')).toBe(false);
   });
 });
+
+// ---------------------------------------------------------------------------
+// tracker-conventions-per-provider-v1 — TP-39 (AC-34), through the real runner
+// ---------------------------------------------------------------------------
+
+/**
+ * D-TRACKER-PER-PROVIDER-CONVENTIONS: the single legacy ~/.devflow/tracker.md
+ * moves, once, to the file of the provider its frontmatter names. Driven through
+ * `runMigrations` with the SHIPPED registry, because the applied-set bookkeeping
+ * is half the contract: a move that throws must stay unapplied and retry, and a
+ * file left in place must be reported once and never again.
+ */
+describe('tracker-conventions-per-provider-v1 migration', () => {
+  const ID = 'tracker-conventions-per-provider-v1';
+  let tmpDir: string;
+
+  beforeEach(async () => {
+    tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'devflow-mig-tracker-'));
+  });
+
+  afterEach(async () => {
+    await fs.rm(tmpDir, { recursive: true, force: true });
+  });
+
+  const legacy = (): string => path.join(tmpDir, 'tracker.md');
+  const providerFile = (provider: string): string => path.join(tmpDir, 'tracker', `${provider}.md`);
+
+  it('is registered as a global migration', () => {
+    const entry = MIGRATIONS.find(m => m.id === ID);
+    expect(entry?.scope).toBe('global');
+  });
+
+  it('migrates exactly once, and a re-run is a no-op', async () => {
+    const body = '---\nprovider: linear\ninferred-from: /r @ t\n---\n\n## Project\nkey: ACME\n';
+    await fs.writeFile(legacy(), body, 'utf-8');
+
+    const first = await runMigrations({ devflowDir: tmpDir }, []);
+    expect(first.failures).toEqual([]);
+    expect(first.newlyApplied).toContain(ID);
+    expect(first.infos.some(i => i.includes(providerFile('linear')))).toBe(true);
+    await expect(fs.readFile(providerFile('linear'), 'utf-8')).resolves.toBe(body);
+    await expect(fs.lstat(legacy())).rejects.toThrow();
+
+    // A legacy file that appears AFTER the migration applied is never moved: the
+    // id is recorded, so the runner does not run it again.
+    await fs.writeFile(legacy(), '---\nprovider: jira\n---\n', 'utf-8');
+    const second = await runMigrations({ devflowDir: tmpDir }, []);
+    expect(second.newlyApplied).toEqual([]);
+    expect(second.infos).toEqual([]);
+    await expect(fs.readFile(legacy(), 'utf-8')).resolves.toBe('---\nprovider: jira\n---\n');
+    await expect(fs.access(providerFile('jira'))).rejects.toThrow();
+  });
+
+  it('never overwrites an existing provider file — one warning, applied, both files intact', async () => {
+    await fs.mkdir(path.join(tmpDir, 'tracker'));
+    await fs.writeFile(providerFile('jira'), 'the provider\'s own\n', 'utf-8');
+    await fs.writeFile(legacy(), '---\nprovider: jira\n---\nlegacy\n', 'utf-8');
+
+    const result = await runMigrations({ devflowDir: tmpDir }, []);
+
+    expect(result.failures).toEqual([]);
+    expect(result.newlyApplied).toContain(ID);
+    expect(result.warnings.filter(w => w.startsWith(ID))).toHaveLength(1);
+    await expect(fs.readFile(providerFile('jira'), 'utf-8')).resolves.toBe('the provider\'s own\n');
+    await expect(fs.readFile(legacy(), 'utf-8')).resolves.toBe('---\nprovider: jira\n---\nlegacy\n');
+  });
+
+  it('does not follow a symlink: the link moves, its target stays', async () => {
+    const outside = await fs.mkdtemp(path.join(os.tmpdir(), 'devflow-mig-tracker-target-'));
+    try {
+      const target = path.join(outside, 'conventions.md');
+      await fs.writeFile(target, '---\nprovider: jira\n---\n', 'utf-8');
+      await fs.symlink(target, legacy());
+
+      const result = await runMigrations({ devflowDir: tmpDir }, []);
+
+      expect(result.failures).toEqual([]);
+      expect((await fs.lstat(providerFile('jira'))).isSymbolicLink()).toBe(true);
+      await expect(fs.readlink(providerFile('jira'))).resolves.toBe(target);
+      expect((await fs.lstat(target)).isFile()).toBe(true);
+      await expect(fs.readFile(target, 'utf-8')).resolves.toBe('---\nprovider: jira\n---\n');
+    } finally {
+      await fs.rm(outside, { recursive: true, force: true });
+    }
+  });
+
+  it('leaves a file whose frontmatter names no provider in place, with ONE warning', async () => {
+    await fs.writeFile(legacy(), '## Project\nkey: ACME\n', 'utf-8');
+
+    const result = await runMigrations({ devflowDir: tmpDir }, []);
+
+    expect(result.failures).toEqual([]);
+    expect(result.newlyApplied).toContain(ID);
+    const warned = result.warnings.filter(w => w.startsWith(ID));
+    expect(warned).toHaveLength(1);
+    expect(warned[0]).toContain('names no tracker provider');
+    await expect(fs.readFile(legacy(), 'utf-8')).resolves.toBe('## Project\nkey: ACME\n');
+  });
+
+  it('an I/O failure THROWS: not marked applied, so the next init retries it', async () => {
+    // A FILE where the conventions directory belongs: the move cannot happen.
+    await fs.writeFile(path.join(tmpDir, 'tracker'), 'not a directory', 'utf-8');
+    await fs.writeFile(legacy(), '---\nprovider: jira\n---\n', 'utf-8');
+
+    const failed = await runMigrations({ devflowDir: tmpDir }, []);
+    expect(failed.failures.map(f => f.id)).toContain(ID);
+    expect(failed.newlyApplied).not.toContain(ID);
+    await expect(fs.readFile(legacy(), 'utf-8')).resolves.toBe('---\nprovider: jira\n---\n');
+
+    // The obstruction cleared, the retry completes the move.
+    await fs.rm(path.join(tmpDir, 'tracker'));
+    const retried = await runMigrations({ devflowDir: tmpDir }, []);
+    expect(retried.newlyApplied).toEqual([ID]);
+    await expect(fs.readFile(providerFile('jira'), 'utf-8')).resolves.toBe('---\nprovider: jira\n---\n');
+  });
+
+  it('leaves the backups an earlier release made exactly where they are', async () => {
+    await fs.writeFile(path.join(tmpDir, 'tracker.md.jira.bak'), 'kept\n', 'utf-8');
+    await fs.writeFile(legacy(), '---\nprovider: linear\n---\n', 'utf-8');
+
+    await runMigrations({ devflowDir: tmpDir }, []);
+
+    await expect(fs.readFile(path.join(tmpDir, 'tracker.md.jira.bak'), 'utf-8')).resolves.toBe('kept\n');
+  });
+});
