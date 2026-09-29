@@ -193,7 +193,7 @@ A repository can commit `.devflow/project.json` to settle team-wide choices. Eve
 - `reviewPublication` is a ceiling only: it can lower your personal value, never raise it. With no personal value you get at most `auto` — a team `off` still lowers it — so a branch that commits `full` cannot switch off the visibility gate for whoever reviews it.
 - `features` can switch memory, learning or knowledge off for this repository, never back on. Your personal `config.json` can do the same for you.
 
-Each key is checked on its own, so one bad value never disables the rest: a bad `evidence` resolves to `required`, a bad `reviewPublication` to `off`, a bad `compliance` list to the generic lens. Commands never read the file themselves — one local resolver folds it with your `config.json` and the machine settings, without touching the network.
+Each key is checked on its own, so one bad value never disables the rest: a bad `evidence` resolves to `required`, a bad `reviewPublication` to `off`, a bad `compliance` list to the generic lens. A `project.json` or `config.json` that exists but is not a JSON object is never read as absent: the settings fail closed (publication off, knowledge write-back off), though your machine's own compliance frameworks still apply — with none, the generic lens runs. Commands never read the file themselves — one local resolver folds it with your `config.json` and the machine settings, without touching the network.
 
 ## Evidence policy
 
