@@ -13,13 +13,19 @@
  * ways, and each is a shape here rather than a word list tuned to one file:
  *
  *   verb      an imperative or gerund read verb — Read, read, reading, open,
- *             load, parse, consult, inspect (and their -ing forms) — BEFORE the
+ *             load, parse, consult, inspect, check, examine, view, extract,
+ *             fetch, "look at/in/into" (and their -ing forms) — BEFORE the
  *             path on the same line, within READ_WINDOW characters: "Read the
  *             current worktree's `.devflow/config.json`", "read rungs 1 and 2 …
  *             (1) the `tracker` key in the project's `.devflow/config.json`".
  *   shell     a reading command or call before the path: cat, head, tail, jq,
- *             readFileSync, readFile — "cat .devflow/config.json".
- *   redirect  input redirection from the path: "< .devflow/project.json".
+ *             grep, rg, sed, awk, readFileSync, readFile, require,
+ *             Get-Content — "cat .devflow/config.json".
+ *   redirect  input redirection from the path: "< .devflow/project.json", and
+ *             the `$(<file)` read.
+ *
+ * Deliberately NOT verbs: `source` and `type`, which prompts use as nouns ("the
+ * only source of these values") beside the paths far more than as commands.
  *
  * The unit is a line, with backslash-continued shell lines joined first, because
  * prompts write a paragraph or a list item as one line and an instruction often
@@ -74,7 +80,7 @@ const CONFIG_PATH_RE = /\.devflow\/(?:project|config)\.json\b/g
 
 /** Imperative and gerund read verbs, and reading commands. `reads`, `read-only` and `thread` never match. */
 const READ_VERB_RE =
-  /(?<![\w-])(?:read|reading|open|opening|load|loading|parse|parsing|consult|consulting|inspect|inspecting|cat|head|tail|jq|readFileSync|readFile)(?![\w-])/gi
+  /(?<![\w-])(?:read|reading|open|opening|load|loading|parse|parsing|consult|consulting|inspect|inspecting|check|checking|examine|examining|view|viewing|extract|extracting|fetch|fetching|look(?:ing)?\s+(?:at|in|into)|cat|head|tail|jq|grep|rg|sed|awk|readFileSync|readFile|require|Get-Content)(?![\w-])/gi
 
 /** Input redirection straight from a config path. */
 const REDIRECT_RE = /<\s*["']?[^\s"'<>|;&]*\.devflow\/(?:project|config)\.json/
@@ -251,6 +257,13 @@ describe('no compiled prompt reads .devflow/project.json or .devflow/config.json
       'while IFS= read -r line; do echo "$line"; done < "$ROOT/.devflow/config.json"',
       'Read(file_path="/repo/.devflow/config.json")',
       'By reading `.devflow/project.json` you learn the tracker site.',
+      'Look at `.devflow/project.json` to find the team tracker.',
+      'Check the `features` key in `{worktree}/.devflow/config.json`.',
+      'Examine `.devflow/project.json` for a `compliance` list.',
+      'grep -o \'"evidence":"[a-z]*"\' .devflow/project.json',
+      'node -p "require(\'./.devflow/project.json\').evidence"',
+      'SETTINGS=$(<"$ROOT/.devflow/config.json")',
+      'Get-Content .devflow/config.json | ConvertFrom-Json',
     ]
     for (const probe of probes) {
       expect(collectConfigReads([{ name: 'probe.md', content: probe }]), probe).toHaveLength(1)
