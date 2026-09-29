@@ -219,9 +219,8 @@ third-party input — to you when you compose it and to every reader afterwards.
 - **≤ 120 lines** and **≤ 8,000 characters.** Over either bound, a reader reads it
   fully anyway and degrades; a partial read is never correct. Stay well inside.
 - Mode `0600`.
-- Readers open it with the **Read tool, using an absolute path** — never `~`,
-  never a shell read. Compose it so that rule stays cheap to follow: one value per
-  line, no continuations.
+- Readers open it with the **Read tool**, never a shell read. Compose it so that
+  rule stays cheap to follow: one value per line, no continuations.
 - **`# UNRESOLVED:` is a hard sentinel**, never shape-validated as a value. A
   **sentinel and an absent section are different outcomes**: an absent section
   means the documented neutral default, a sentinel means the reader degrades and
