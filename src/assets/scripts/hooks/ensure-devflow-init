@@ -12,8 +12,9 @@
 # by a hook or directly by tests). Empty → fall back to "$1" (old behavior).
 _EDI_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$_EDI_DIR/resolve-project-root" 2>/dev/null || true
-_EDI_ROOT="$(df_resolve_root "$1" 2>/dev/null || true)"
-[ -n "$_EDI_ROOT" ] || _EDI_ROOT="$1"
+df_resolve_roots "$1" 2>/dev/null || true
+_EDI_ROOT="${DF_ROOT:-$1}"
+_EDI_LEDGER="${DF_LEDGER_ROOT:-$_EDI_ROOT}"
 
 # D-HOOKS-GIT-ONLY (git-marker): scaffold nothing outside a git project, and
 # nothing at a repository rooted at HOME. This is the one gate every capture and
@@ -29,9 +30,16 @@ df_is_project_root "$_EDI_ROOT" 2>/dev/null || return 1
 
 _DEVFLOW_DIR="$_EDI_ROOT/.devflow"
 
+# learning/ is scaffolded only where the ledger lives. In a linked worktree whose
+# main checkout holds the ledger (D-LEDGER-MAIN-WORKTREE, resolve-project-root) a
+# learning/ here would be an empty directory nothing writes to; the capture hooks
+# create the ledger's own learning/ at the ledger root when they append to it.
+_EDI_LEARNING="$_DEVFLOW_DIR/learning"
+[ "$_EDI_LEDGER" = "$_EDI_ROOT" ] || _EDI_LEARNING=""
+
 # Fast-path: if all subdirectories already exist, skip mkdir and gitignore setup
 if [ -d "$_DEVFLOW_DIR/memory" ] && [ -d "$_DEVFLOW_DIR/docs" ] && \
-   [ -d "$_DEVFLOW_DIR/learning" ] && \
+   { [ -z "$_EDI_LEARNING" ] || [ -d "$_EDI_LEARNING" ]; } && \
    [ -d "$_DEVFLOW_DIR/features" ] && \
    [ -f "$_DEVFLOW_DIR/.root-gitignore-configured-v5" ]; then
   return 0
@@ -40,7 +48,7 @@ fi
 # Create all subdirectories
 mkdir -p \
   "$_DEVFLOW_DIR/memory" \
-  "$_DEVFLOW_DIR/learning" \
+  ${_EDI_LEARNING:+"$_EDI_LEARNING"} \
   "$_DEVFLOW_DIR/features" \
   "$_DEVFLOW_DIR/docs" \
   2>/dev/null || return 1

@@ -597,6 +597,22 @@ describe('D-HOOKS-GIT-ONLY: no project scaffolding outside a git project or at H
     expect(collectTree(tmpHome, ['.devflow/logs'])).toEqual(before);
   });
 
+  it('the decisions usage scanner leaves a legacy non-git ledger untouched', () => {
+    // capture-turn runs the scanner before ensure-devflow-init, so the gate must be
+    // its own: a .devflow/ left by an older devflow in a plain directory is not a
+    // project, and learning stops there like everything else.
+    const nonGit = path.join(base, 'legacy');
+    fs.mkdirSync(path.join(nonGit, '.devflow', 'memory'), { recursive: true });
+    fs.mkdirSync(path.join(nonGit, '.devflow', 'learning'), { recursive: true });
+    const usagePath = path.join(nonGit, '.devflow', 'learning', '.decisions-usage.json');
+    const usage = JSON.stringify({ version: 1, entries: { 'ADR-001': { cites: 0, last_cited: null } } });
+    fs.writeFileSync(usagePath, usage);
+
+    runHook(path.join(HOOKS_DIR, 'capture-turn'), { cwd: nonGit, session_id: 't', last_assistant_message: 'applies ADR-001' }, homeDir);
+
+    expect(fs.readFileSync(usagePath, 'utf-8')).toBe(usage);
+  });
+
   it('non-vacuity: the same hooks in a git project below HOME do scaffold', () => {
     const project = path.join(base, 'project');
     initCommittedRepo(project);
@@ -656,6 +672,52 @@ describe('D-LEDGER-MAIN-WORKTREE: one ledger per repository (TP-17, TP-18, TP-19
     expect(rowsOf(queueOf(wt)), 'the worktree must not start a ledger queue of its own').toHaveLength(0);
     expect(rowsOf(path.join(wt, '.devflow', 'memory', '.pending-turns.jsonl'))).toHaveLength(1);
     expect(fs.existsSync(path.join(main, '.devflow', 'memory')), 'memory is per checkout').toBe(false);
+    // ensure-devflow-init scaffolds per-checkout data only: a learning/ in the
+    // worktree would be an empty directory nothing ever writes to.
+    expect(fs.existsSync(path.join(wt, '.devflow', 'learning')), 'no dead ledger dir in the worktree').toBe(false);
+    expect(fs.existsSync(path.join(wt, '.devflow', 'features'))).toBe(true);
+  });
+
+  it('a repository rooted at HOME never lends its main ledger to a linked worktree — that .devflow is the machine root', () => {
+    // A dotfiles repo at HOME always has `<main>/.devflow` (the machine root), so the
+    // existence test alone would anchor the worktree's ledger inside ~/.devflow.
+    // HOME is left unresolved (/var/… on macOS) while git reports /private/var/…:
+    // the refusal must compare physical paths.
+    const dotHome = path.join(base, 'dothome');
+    initCommittedRepo(dotHome);
+    fs.mkdirSync(path.join(dotHome, '.devflow', 'logs'), { recursive: true });
+    const dotWt = path.join(base, 'dotwt');
+    execSync(`git worktree add -q "${dotWt}" -b dots`, { cwd: dotHome, stdio: 'pipe' });
+    const dotWtReal = fs.realpathSync(dotWt);
+
+    expect(resolveRoots(dotWt, { ...process.env, HOME: dotHome })).toEqual({ root: dotWtReal, ledger: dotWtReal });
+
+    runHook(path.join(HOOKS_DIR, 'capture-prompt'), { cwd: dotWt, prompt: 'we chose X over Y' }, dotHome);
+    expect(fs.existsSync(path.join(dotHome, '.devflow', 'learning')), 'nothing lands in the machine root').toBe(false);
+    expect(rowsOf(queueOf(dotWtReal))).toHaveLength(1);
+
+    const { stdout } = runHook(path.join(HOOKS_DIR, 'session-start-context'), { cwd: dotWt, source: 'startup' }, dotHome);
+    const ctx = JSON.parse(stdout).hookSpecificOutput.additionalContext as string;
+    expect(ctx).toContain(`Project root: ${dotWtReal}")`);
+  });
+
+  it('a non-git directory costs one git call, not a second one that must fail the same way', () => {
+    const nonGit = fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-roots-nongit-'));
+    const shim = fs.mkdtempSync(path.join(base, 'git-shim-'));
+    const log = path.join(shim, 'git.log');
+    fs.writeFileSync(path.join(shim, 'git'), `#!/bin/bash\nprintf '%s\\n' "$*" >> ${JSON.stringify(log)}\nexec ${JSON.stringify(REAL_GIT)} "$@"\n`);
+    fs.chmodSync(path.join(shim, 'git'), 0o755);
+    const env = { ...process.env, PATH: `${shim}:${process.env.PATH ?? ''}` };
+    try {
+      expect(resolveRoots(nonGit, env)).toEqual({ root: nonGit, ledger: nonGit });
+      const nested = path.join(nonGit, '.devflow', 'docs');
+      fs.mkdirSync(nested, { recursive: true });
+      expect(resolveRoots(nested, env), 'the .devflow-nesting fallback still applies')
+        .toEqual({ root: nonGit, ledger: nonGit });
+      expect(rowsOf(log)).toHaveLength(2);
+    } finally {
+      fs.rmSync(nonGit, { recursive: true, force: true });
+    }
   });
 
   it('TP-17: the directive and the TL;DR in the worktree come from the main ledger', () => {

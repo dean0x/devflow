@@ -77,9 +77,13 @@ dbg "MEMORY_ENABLED=$MEMORY_ENABLED LEARNING_ENABLED=$LEARNING_ENABLED"
 
 # --- Decisions usage scanner (independent of the memory/learning queue gates below) ---
 # D29: Grep-first reorder -- cheap in-process citation check gates the scanner call.
+# The scanner writes the ledger's usage file, and it runs before ensure-devflow-init,
+# so it takes the D-HOOKS-GIT-ONLY gate itself (df_is_project_root, git-marker via
+# resolve-project-root; zero forks): a `.devflow/` an older devflow left in a
+# non-git directory, or at HOME, is not a project's ledger.
 SCANNER="$SCRIPT_DIR/decisions-usage-scan.cjs"
 if [ -f "$SCANNER" ] && printf '%s' "$ASSISTANT_MSG" | grep -qE 'ADR-[0-9]+|PF-[0-9]+'; then
-  if [ "$LEARNING_ENABLED" = "true" ]; then
+  if [ "$LEARNING_ENABLED" = "true" ] && df_is_project_root "$PROJECT_ROOT" 2>/dev/null; then
     dbg "Running decisions usage scanner"
     printf '%s' "$ASSISTANT_MSG" | node "$SCANNER" --cwd "$LEDGER_ROOT" 2>/dev/null || true
   fi
