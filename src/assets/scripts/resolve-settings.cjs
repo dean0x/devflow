@@ -36,14 +36,14 @@
 // reach stdout. Whole-file rule: a project.json or config.json that EXISTS but
 // cannot be read as a JSON object — unparseable, empty, not an object, a BOM,
 // not UTF-8, over MAX_CONFIG_BYTES, a symlink or other non-regular file — fails
-// the whole resolution closed (exit 2). Only keys inside a readable object are
+// every field closed except COMPLIANCE, which keeps the machine's own lens
+// (exit 0, the file named on stderr). Only keys inside a readable object are
 // classified one by one.
 //
 // Exit codes (a caller treats EVERY non-zero code as the fail-closed line):
-//   0  resolved — the line above
+//   0  resolved — the line above, including the whole-file rule's line
 //   1  usage error — stdout entirely empty, usage on stderr
-//   2  input unusable — <dir> missing or not a directory, or a repository config
-//      file exists but is unreadable (the whole-file rule); prints
+//   2  input unusable — <dir> missing or not a directory; prints
 //      SETTINGS_FAIL_CLOSED_LINE
 //   3  never emitted — this script writes no file
 //   4  internal error — or git could not say whether <dir> is in a repository;
@@ -117,14 +117,19 @@ const EXIT_CODES = Object.freeze({
  * carry a site or key the parser admitted. COMPLIANCE is `off`, `generic` (the
  * lens with no framework reference), or registry ids joined by commas.
  *
- * Whole-file rule: the line is composed only from files that are absent or read
- * as a JSON object. A repository file that exists and does not (the parser's
+ * Whole-file rule: the line is folded only from files that are absent or read as
+ * a JSON object. A repository file that exists and does not (the parser's
  * `invalid` file) says nothing that can be trusted — a team file meant to declare
- * `compliance:["hipaa"]` must not read as "no file" — so the resolution is
- * SETTINGS_FAIL_CLOSED_LINE, exit 2 (INPUT_UNUSABLE), for the team project.json
- * and the personal config.json alike. A consumer that accepts only exit 0
- * substitutes the same constant, so both readings agree. Individually malformed
- * keys inside a readable object keep their per-key readings (AC-26).
+ * `compliance:["hipaa"]` must not read as "no file" — so every field takes its
+ * SETTINGS_FAIL_CLOSED_LINE value, for the team project.json and the personal
+ * config.json alike, EXCEPT COMPLIANCE. The review lens only adds scrutiny
+ * (compliance = machine ∪ worktree), so a broken repository file must never lower
+ * the machine's own lens: COMPLIANCE is the machine's ids when it has any, else
+ * `generic`. That line prints with exit 0, the unreadable file named on stderr,
+ * so a consumer that accepts only exit 0 acts on it; with no machine lens it is
+ * exactly SETTINGS_FAIL_CLOSED_LINE, and so is an unreadable machine manifest,
+ * which reads as no lens. Individually malformed keys inside a readable object
+ * keep their per-key readings (AC-26).
  */
 const SETTINGS_LINE_RE = new RegExp(
   '^TRACKER=(?<tracker>' + TRACKER_PROVIDER_IDS.join('|') + ')'
@@ -139,8 +144,9 @@ const SETTINGS_LINE_RE = new RegExp(
 );
 
 /**
- * The line every refusal prints (exits 2, 4 and 5), and what a consumer uses in
- * place of any line it cannot accept. A constant, so the boundary can never fail
+ * The line every refusal prints (exits 2, 4 and 5), what a consumer uses in place
+ * of any line it cannot accept, and the whole-file rule's line on a machine with
+ * no compliance lens. A constant, so the boundary can never fail
  * to compose it. Each field is the conservative reading for its consumer:
  *   TRACKER_WARN=invalid     the Git agent degrades rather than guessing a provider
  *   REVIEW_PUBLICATION=off   nothing is published (raised to a stub under required)
@@ -182,15 +188,17 @@ const LINE_MAX_BUFFER = 4096;
  *   legacyPolicyFile: boolean,
  *   unreadable: 'project' | 'personal' | null,
  * }} Settings
- *   ok              false only for the fail-closed resolution
+ *   ok              false only for a fail-closed resolution — the whole-file
+ *                   rule's included, which still carries the machine's lens
  *   compliance      enabled with no frameworks is `generic`
  *   repoCompliance  the worktree project.json's ids, or null when it declares
  *                   none (a malformed declaration reads as [] — generic)
  *   legacyPolicyFile  the worktree still holds .devflow/policy.json (the CLI
  *                   prints a migration hint)
  *   unreadable      the first repository layer whose file exists but is
- *                   unreadable, which failed the resolution closed (the
- *                   whole-file rule; project before personal); null otherwise
+ *                   unreadable, which failed every field but the compliance
+ *                   lens closed (the whole-file rule; project before personal);
+ *                   null otherwise
  *
  * @typedef {{ project: object, personal: object, manifest: unknown, legacyPolicyFile: boolean }} SettingsInputs
  *   project/personal are lib/project-config.cjs ProjectConfig / PersonalConfig.
@@ -222,16 +230,6 @@ const FAIL_CLOSED_SETTINGS = Object.freeze({
   unreadable: null,
 });
 
-/**
- * The whole-file rule's resolution: the fail-closed values, naming the layer
- * whose file could not be read.
- *
- * @param {'project' | 'personal'} layer
- * @returns {Settings}
- */
-function unreadableSettings(layer) {
-  return Object.freeze({ ...FAIL_CLOSED_SETTINGS, unreadable: layer });
-}
 
 const ABSENT_FIELD = Object.freeze({ kind: 'absent' });
 const MALFORMED_FIELD = Object.freeze({ kind: 'malformed' });
@@ -472,6 +470,26 @@ function foldSwitch(project, personal, manifest, feature) {
 }
 
 /**
+ * The whole-file rule's resolution (D-SETTINGS-LINE): the fail-closed values,
+ * naming the layer whose file could not be read, except the compliance lens,
+ * which is the machine's own ids when it has any and `generic` otherwise — a
+ * broken repository file never lowers the machine's lens.
+ *
+ * @param {'project' | 'personal'} layer
+ * @param {unknown} manifest
+ * @returns {Settings}
+ */
+function unreadableSettings(layer, manifest) {
+  const machine = machineCompliance(manifest);
+  const frameworks = machine === null ? [] : COMPLIANCE_IDS.filter(id => machine.includes(id));
+  return Object.freeze({
+    ...FAIL_CLOSED_SETTINGS,
+    compliance: Object.freeze({ enabled: true, frameworks: Object.freeze(frameworks) }),
+    unreadable: layer,
+  });
+}
+
+/**
  * Fold the three layers into Settings. Pure; never throws on any parser output.
  *
  * @param {SettingsInputs} inputs
@@ -591,8 +609,9 @@ function existsNoFollow(filePath) {
  * Resolve the settings for `opts.dir`. Never throws: a git that cannot say
  * whether `opts.dir` is in a repository, or any internal failure, is the
  * fail-closed resolution, which main() maps to exit 4. A repository file that
- * exists but is unreadable is the fail-closed resolution too, naming its layer in
- * `unreadable` (the whole-file rule, D-SETTINGS-LINE), which main() maps to exit 2.
+ * exists but is unreadable fails every field closed but the machine's compliance
+ * lens, naming its layer in `unreadable` (the whole-file rule, D-SETTINGS-LINE);
+ * main() prints that line with exit 0.
  *
  * @param {ResolveSettingsOptions} opts
  * @param {{ exec?: ExecFn }} [deps]
@@ -609,8 +628,8 @@ function resolveSettings(opts, deps) {
       return foldSettings({ project: none, personal: none, manifest, legacyPolicyFile: false });
     }
     const { project, personal } = readRepoLayers(toplevel.root);
-    if (project.kind === 'invalid') return unreadableSettings('project');
-    if (personal.kind === 'invalid') return unreadableSettings('personal');
+    if (project.kind === 'invalid') return unreadableSettings('project', manifest);
+    if (personal.kind === 'invalid') return unreadableSettings('personal', manifest);
     return foldSettings({
       project,
       personal,
@@ -799,10 +818,8 @@ function main(argv, deps) {
   const settings = resolveSettings({ dir: args.dir }, { exec: d.exec });
   if (settings.unreadable !== null) {
     process.stderr.write('resolve-settings: .devflow/' + (settings.unreadable === 'project' ? 'project.json' : 'config.json')
-      + ' exists but is not a readable JSON object — failing closed\n');
-    return { code: EXIT_CODES.INPUT_UNUSABLE, line: SETTINGS_FAIL_CLOSED_LINE };
-  }
-  if (!settings.ok) {
+      + ' exists but is not a readable JSON object — failing closed, keeping the machine compliance lens\n');
+  } else if (!settings.ok) {
     process.stderr.write('resolve-settings: could not resolve (git did not answer, or an internal error) — failing closed\n');
     return { code: EXIT_CODES.INTERNAL_ERROR, line: SETTINGS_FAIL_CLOSED_LINE };
   }

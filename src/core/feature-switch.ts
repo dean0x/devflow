@@ -17,7 +17,7 @@ import { writeFileAtomicExclusive } from './fs-atomic.js';
  *
  * where only a literal `false` narrows — absent, malformed and unreadable values
  * leave the machine switch deciding. (An unreadable repository file also fails
- * the whole settings line closed, so commands read `KNOWLEDGE=off` from it; the
+ * the settings line closed, so commands read `KNOWLEDGE=off` from it; the
  * hooks never read that line, and for them it narrows nothing.) The
  * team-committed `.devflow/project.json` and the personal `.devflow/config.json`
  * are both parsed by the shared lib/project-config.cjs, and the fold lives in

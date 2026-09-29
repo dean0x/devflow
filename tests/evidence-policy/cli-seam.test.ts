@@ -282,6 +282,18 @@ describe('the --status helpers over the settings layer (D-FEATURES-NARROW-ONLY)'
     expect(repoComplianceStatusLines(stub(failed), { dir: repo }))
       .toEqual(['Repository: generic controls only (.devflow/project.json is unreadable)']);
 
+    // The machine's own lens survives the broken repository file; the status line
+    // still describes only the repository layer.
+    const hipaa = settings.resolveSettings(
+      { dir: repo, manifest: { features: { compliance: { enabled: true, frameworks: ['hipaa'] } } } },
+      { exec: scriptedExec([{ tool: 'git', args: ARGV.toplevel, stdout: `${repo}\n` }]).exec },
+    );
+    expect(hipaa.ok).toBe(false);
+    expect(hipaa.unreadable).toBe('project');
+    expect(hipaa.compliance).toEqual({ enabled: true, frameworks: ['hipaa'] });
+    expect(repoComplianceStatusLines(stub(hipaa), { dir: repo }))
+      .toEqual(['Repository: generic controls only (.devflow/project.json is unreadable)']);
+
     const personal = { ...failed, unreadable: 'personal' as const };
     expect(narrowedSwitchLabel(stub(personal), { dir: repo }, 'knowledge'))
       .toBe('disabled (.devflow/config.json is unreadable)');

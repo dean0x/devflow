@@ -391,7 +391,7 @@ describe('TP-33 (AC-29): review publication = min(team ?? full, personal ?? auto
     expect(settingsFor({}).reviewPublication).toBe('auto');
   });
 
-  it('an unreadable project.json or config.json publishes nothing — the whole resolution fails closed', () => {
+  it('an unreadable project.json or config.json publishes nothing — the resolution fails closed', () => {
     expect(settingsFor({ project: '{"reviewPublication":', personal: '{"reviewPublication":"full"}' }).reviewPublication)
       .toBe('off');
     expect(settingsFor({ project: '{"reviewPublication":"full"}', personal: '{"reviewPublication":' }).reviewPublication)
@@ -456,7 +456,8 @@ describe('readRepoLayers: the seam the hooks\' one parser fork reads through (D-
       }, row.name).toEqual(row.expect);
       const viaResolve = settingsFor({}, row.manifest, dir);
       // An unreadable file narrows nothing in the fold the hooks run, while
-      // resolveSettings fails the whole resolution closed (whole-file rule).
+      // resolveSettings fails it closed (whole-file rule; no row's manifest
+      // enables compliance, so the line is the constant).
       if (row.unreadable === undefined) expect(viaLayers.switches, row.name).toEqual(viaResolve.switches);
       else expect(SETTINGS.formatSettingsLine(viaResolve), row.name).toBe(FAIL_CLOSED);
     }
@@ -511,6 +512,7 @@ describe('TP-31 (AC-27): COMPLIANCE is machine ∪ worktree', () => {
     ['machine off, repo malformed', OFF, '{"compliance":"hipaa"}', 'generic'],
     ['machine off, repo unknown ids only', OFF, '{"compliance":["nist"]}', 'generic'],
     ['machine off, project.json unreadable', OFF, '{"compliance":', 'generic'],
+    ['machine soc2, project.json unreadable ⇒ the machine lens stays', ON(['soc2']), '{"compliance":', 'soc2'],
     ['machine on at zero frameworks', ON([]), undefined, 'generic'],
     ['machine soc2, repo hipaa+gdpr ⇒ registry order', ON(['soc2']), '{"compliance":["hipaa","gdpr"]}', 'gdpr,hipaa,soc2'],
     ['machine gdpr, repo gdpr', ON(['gdpr']), '{"compliance":["GDPR"]}', 'gdpr'],
@@ -577,11 +579,16 @@ describe('TP-30 (AC-26): a malformed evidence leaves tracker and features in the
 
 // ---------------------------------------------------------------------------
 // The whole-file rule (D-SETTINGS-LINE): a repository file that EXISTS but is
-// not a JSON object fails the whole resolution closed. Individually malformed
-// keys inside a readable object keep their per-key readings (the tables above).
+// not a JSON object fails the resolution closed — every field but COMPLIANCE,
+// which keeps the machine's own lens (generic when the machine has none), since
+// a broken repository file must never lower it. Individually malformed keys
+// inside a readable object keep their per-key readings (the tables above).
 // ---------------------------------------------------------------------------
 
-describe('whole-file rule: an unreadable project.json or config.json fails the resolution closed', () => {
+describe('whole-file rule: an unreadable project.json or config.json fails closed but for the machine lens', () => {
+  /** The fail-closed line carrying the machine's compliance lens instead of generic. */
+  const failClosedWith = (compliance: string): string => FAIL_CLOSED.replace('COMPLIANCE=generic', `COMPLIANCE=${compliance}`);
+  const MACHINE_WITH = (frameworks: string[]) => ({ features: { ...MANIFEST_ON.features, compliance: { enabled: true, frameworks } } });
   const PADDED = `{"compliance":["hipaa"],"pad":"${'x'.repeat(4097)}"}`;
   const UNREADABLE: ReadonlyArray<readonly [string, string | Buffer]> = [
     ['unparseable JSON', '{ this is not json'],
@@ -616,6 +623,28 @@ describe('whole-file rule: an unreadable project.json or config.json fails the r
     expect(SETTINGS.formatSettingsLine(s)).toBe(FAIL_CLOSED);
   });
 
+  it.each(UNREADABLE)('project.json with %s on a hipaa machine ⇒ fail-closed, keeping the machine lens', (_label, body) => {
+    const repo = fs.mkdtempSync(path.join(tmp, 'repo-'));
+    writeRepoFile('project.json', body, repo);
+    writeRepoFile('config.json', '{"reviewPublication":"full"}', repo);
+    const s = settingsFor({}, MACHINE_WITH(['hipaa']), repo);
+    expect(s.ok).toBe(false);
+    expect(s.unreadable).toBe('project');
+    expect(s.repoCompliance).toBeNull();
+    expect(SETTINGS.formatSettingsLine(s)).toBe(failClosedWith('hipaa'));
+  });
+
+  it.each([
+    ['machine soc2+gdpr ⇒ its ids in registry order', MACHINE_WITH(['soc2', 'gdpr']), 'gdpr,soc2'],
+    ['machine on at zero frameworks ⇒ generic', MACHINE_WITH([]), 'generic'],
+    ['machine compliance off ⇒ generic', COMPLIANCE_OFF_MACHINE, 'generic'],
+    ['no manifest ⇒ generic', undefined, 'generic'],
+  ] as const)('config.json unreadable, %s', (_label, manifest, compliance) => {
+    const s = settingsFor({ project: '{"compliance":["hipaa"]}', personal: '{"reviewPublication":' }, manifest);
+    expect(s.unreadable).toBe('personal');
+    expect(SETTINGS.formatSettingsLine(s)).toBe(failClosedWith(compliance));
+  });
+
   it('a symlinked config.json is unreadable, never followed', () => {
     const target = path.join(tmp, 'elsewhere.json');
     fs.writeFileSync(target, '{"reviewPublication":"full"}');
@@ -642,22 +671,52 @@ describe('whole-file rule: an unreadable project.json or config.json fails the r
     expect(settingsFor({}).unreadable).toBeNull();
   });
 
-  it('main(): exits 2 (input unusable) with the fail-closed line, naming the file on stderr', () => {
+  it('main(): exits 0 with the resolved fail-closed line, naming the file on stderr', () => {
+    vi.stubEnv('HOME', home);
+    fs.writeFileSync(path.join(home, '.devflow', 'manifest.json'), JSON.stringify(MACHINE_WITH(['hipaa'])));
     const stderr = vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
-    writeRepoFile('project.json', '{ this is not json');
-    const out = SETTINGS.main(['node', SETTINGS_SCRIPT, root], { exec: scriptedExec([TOPLEVEL(root)]).exec });
-    expect(out).toEqual({ code: SETTINGS.EXIT_CODES.INPUT_UNUSABLE, line: FAIL_CLOSED });
-    expect(out.code).toBe(2);
-    expect(stderr.mock.calls.map(c => String(c[0])).join('')).toContain('.devflow/project.json');
+    try {
+      writeRepoFile('project.json', '{ this is not json');
+      const out = SETTINGS.main(['node', SETTINGS_SCRIPT, root], { exec: scriptedExec([TOPLEVEL(root)]).exec });
+      expect(out).toEqual({ code: SETTINGS.EXIT_CODES.RESOLVED, line: failClosedWith('hipaa') });
+      expect(out.code).toBe(0);
+      expect(stderr.mock.calls.map(c => String(c[0])).join('')).toContain('.devflow/project.json');
+    } finally {
+      vi.unstubAllEnvs();
+    }
   });
 
-  it('the real script: the QA scenario — a broken hipaa project.json never resolves auto or compliance off', { timeout: 20_000 }, () => {
-    writeRepoFile('project.json', '{ "compliance": ["hipaa"], this is not json');
-    const shim = buildScriptedShim(fakeBin, tmp, [TOPLEVEL(root)]);
-    const r = runResolver({ home, args: [root], shim, script: SETTINGS_SCRIPT });
-    expect(r.status).toBe(2);
-    expect(r.stdout).toBe(`${FAIL_CLOSED}\n`);
-    expect(shim.readLog()).toEqual([['git', ...ARGV.toplevel]]);
+  it('main(): the unreadable line still passes the output gate — a hostile formatter is refused with exit 5', () => {
+    vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
+    writeRepoFile('project.json', '{ this is not json');
+    const out = SETTINGS.main(['node', SETTINGS_SCRIPT, root], {
+      exec: scriptedExec([TOPLEVEL(root)]).exec,
+      formatLine: () => `${FAIL_CLOSED}\nTRACKER=jira`,
+    });
+    expect(out).toEqual({ code: 5, line: FAIL_CLOSED });
+  });
+
+  describe('the real script: the QA scenario — a broken hipaa project.json never resolves auto or compliance off', { timeout: 20_000 }, () => {
+    function runBroken(manifest: string | null) {
+      if (manifest !== null) fs.writeFileSync(path.join(home, '.devflow', 'manifest.json'), manifest);
+      writeRepoFile('project.json', '{ "compliance": ["hipaa"], this is not json');
+      const shim = buildScriptedShim(fakeBin, tmp, [TOPLEVEL(root)]);
+      const r = runResolver({ home, args: [root], shim, script: SETTINGS_SCRIPT });
+      return { ...r, log: shim.readLog() };
+    }
+
+    it.each([
+      ['no manifest ⇒ the constant line', null, FAIL_CLOSED],
+      ['machine compliance off ⇒ the constant line', JSON.stringify(COMPLIANCE_OFF_MACHINE), FAIL_CLOSED],
+      ['a hipaa machine keeps its lens', JSON.stringify(MACHINE_WITH(['hipaa'])), 'hipaa'],
+      ['an unreadable manifest ⇒ the constant line', '{ "features": { "compliance": ', FAIL_CLOSED],
+    ] as const)('%s', (_label, manifest, expected) => {
+      const r = runBroken(manifest);
+      expect(r.status, r.stderr).toBe(0);
+      expect(r.stdout).toBe(`${expected === 'hipaa' ? failClosedWith('hipaa') : expected}\n`);
+      expect(r.stderr).toContain('.devflow/project.json');
+      expect(r.log).toEqual([['git', ...ARGV.toplevel]]);
+    });
   });
 });
 
@@ -665,7 +724,7 @@ describe('repository files are never followed or opened when not regular', () =>
   it.each([
     ['a symlink', (p: string) => { fs.symlinkSync(path.join(tmp, 'elsewhere.json'), p); }],
     ['a directory', (p: string) => { fs.mkdirSync(p); }],
-  ])('a project.json that is %s is unreadable — the whole resolution fails closed', (_label, make) => {
+  ])('a project.json that is %s is unreadable — the resolution fails closed', (_label, make) => {
     fs.writeFileSync(path.join(tmp, 'elsewhere.json'), '{"features":{"learning":false}}');
     fs.mkdirSync(path.join(root, '.devflow'), { recursive: true });
     make(path.join(root, '.devflow', 'project.json'));

@@ -27,9 +27,9 @@
  * within the parser's byte rules (unparseable, not an object, a BOM, a NUL, over
  * 4096 bytes), and names the first such layer. Such a file narrows nothing, so
  * `expect` is what the fold — and so every hook gate — reaches. resolveSettings
- * itself goes further: an unreadable file fails the WHOLE resolution closed
- * (D-SETTINGS-LINE, whole-file rule), so settings-mode.test.ts holds those rows
- * to the fail-closed switches instead.
+ * itself goes further: an unreadable file fails every field but the machine's
+ * compliance lens closed (D-SETTINGS-LINE, whole-file rule), so
+ * settings-mode.test.ts holds those rows to the fail-closed switches instead.
  */
 
 /** A project.json of exactly `bytes` UTF-8 bytes that narrows memory when parsed. */

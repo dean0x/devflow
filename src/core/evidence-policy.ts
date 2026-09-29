@@ -134,7 +134,8 @@ export interface RepoSettings {
   readonly legacyPolicyFile: boolean;
   /**
    * The repository layer whose file exists but is unreadable — the whole-file
-   * rule then fails the resolution closed (`ok` false) — or null.
+   * rule then fails every field closed (`ok` false) except the compliance lens,
+   * which keeps the machine's own frameworks — or null.
    */
   readonly unreadable: Exclude<SettingsSwitchSource, 'machine'> | null;
 }
@@ -358,7 +359,8 @@ export function settingsSourceFile(source: Exclude<SettingsSwitchSource, 'machin
  * layer narrows it — `disabled (.devflow/project.json)` — and null otherwise, so a
  * `--status` whose machine switch alone decides prints exactly what it always has
  * (D-FEATURES-NARROW-ONLY). A repository file that exists but is unreadable fails
- * the resolution closed, and a switch that closed off is labelled with that file —
+ * every field closed but the machine's compliance lens, and a switch that closed
+ * off is labelled with that file —
  * `disabled (.devflow/project.json is unreadable)` — since commands act on it. Any
  * other failure (the resolver failed to load, or git could not answer) yields
  * null: it knows nothing about this repository.
@@ -383,8 +385,8 @@ export function narrowedSwitchLabel(
  * The `compliance --status` lines about the repository in `opts.dir`: the ids its
  * project.json declares (`generic controls only` for an empty or malformed list),
  * and a migration hint while the legacy policy file is still there. A repository
- * file that exists but is unreadable fails the resolution closed to the generic
- * lens, and says so, naming the file. Empty when the resolver is unavailable or
+ * file that exists but is unreadable contributes the generic lens (the machine's
+ * own frameworks still apply), and says so, naming the file. Empty when the resolver is unavailable or
  * failed closed for any other reason, or the repository declares nothing and has
  * no legacy file — the status output is then unchanged.
  */
