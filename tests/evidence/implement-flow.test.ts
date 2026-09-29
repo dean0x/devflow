@@ -19,7 +19,7 @@
  *          Phase 1 — after the ticket ask and the exception record, before any
  *          Code spawn — and, only under a `required` policy, asks about a missing
  *          one: record a `test-plan` exception, or stop with BLOCKED (no test plan)
- *          and the policy-file remedy. `standard` never asks.
+ *          and the project-file remedy. `standard` never asks.
  *   AC-10  Every Code spawn that can create the PR forwards PR_TEST_PLAN_BLOCK.
  *   AC-11  The Phase 8 Test spawn passes TEST_PLAN. Phase 3/6 PASSes and every
  *          Phase 8 run append claims whose shapes CLAIM_LINE_RE admits, and Phase
@@ -56,7 +56,7 @@ import {
   walkFiles,
   type OrderRule,
 } from '../helpers.js'
-import { RESOLVER_SCRIPT } from '../evidence-policy/scripted-shim.js'
+import { PROJECT_CONFIG_LIB, SETTINGS_SCRIPT } from '../evidence-policy/scripted-shim.js'
 import { PR_EVIDENCE_SCRIPT, VERIFY_EVIDENCE_SCRIPT } from './seam.js'
 
 /** Transcribed from the script's JSDoc — only what this suite calls. */
@@ -71,12 +71,17 @@ interface ClaimGrammar {
 }
 const PE = createRequire(import.meta.url)(PR_EVIDENCE_SCRIPT) as ClaimGrammar
 
-/** Transcribed from the resolver's JSDoc: the policy-file parser and serializer. */
-interface PolicyFileApi {
-  parsePolicyBytes(buf: Uint8Array): { kind: string; policy?: string }
-  serializePolicy(policy: unknown): string | null
+/** Transcribed from the settings resolver's JSDoc: the project.json serializer the CLI prints from. */
+interface ProjectSuggestionApi {
+  serializeProjectSuggestion(input: unknown): string | null
 }
-const RESOLVER = createRequire(import.meta.url)(RESOLVER_SCRIPT) as PolicyFileApi
+const SETTINGS = createRequire(import.meta.url)(SETTINGS_SCRIPT) as ProjectSuggestionApi
+
+/** Transcribed from lib/project-config.cjs's JSDoc: the one project.json parser. */
+interface ProjectConfigApi {
+  parseProjectBytes(buf: Uint8Array): { kind: string; evidence?: { kind: string; value?: unknown } }
+}
+const LIB = createRequire(import.meta.url)(PROJECT_CONFIG_LIB) as ProjectConfigApi
 
 const SCRATCH = mkdtempSync(path.join(tmpdir(), 'devflow-implement-flow-'))
 afterAll(() => rmSync(SCRATCH, { recursive: true, force: true }))
@@ -469,7 +474,7 @@ function collectMissingAskDefects(block: string | null): string[] {
   need('the same Evidence Exceptions section of the handoff file', block.includes('`## Evidence Exceptions` section of `.devflow/docs/handoff-{branch_slug}.md`'))
   need('the BLOCKED report', block.includes('`BLOCKED (no test plan)`'))
   need('the branch and BASE_BRANCH', block.includes('`TASK_ID`') && block.includes('`BASE_BRANCH`'))
-  need('the policy-file remedy', block.includes('`.devflow/policy.json`'))
+  need('the project-file remedy', block.includes('`.devflow/project.json`'))
   return out
 }
 
@@ -478,12 +483,12 @@ describe('AC-9: a missing test plan asks only under `required`, and a stop names
     expect(collectMissingAskDefects(missingAskBlock(implementMd()))).toEqual([])
   })
 
-  it('the remedy quotes the canonical standard policy file, and it parses', () => {
+  it('the remedy quotes the canonical standard project file, and it parses', () => {
     const block = missingAskBlock(implementMd())!
     const literal = /`(\{"version":1,[^`]*\})`/.exec(block)?.[1]
-    expect(literal, 'the remedy must quote the policy file').toBeDefined()
-    expect(`${literal}\n`).toBe(RESOLVER.serializePolicy('standard'))
-    expect(RESOLVER.parsePolicyBytes(new TextEncoder().encode(literal!))).toEqual({ kind: 'valid', policy: 'standard' })
+    expect(literal, 'the remedy must quote the project file').toBeDefined()
+    expect(`${literal}\n`).toBe(SETTINGS.serializeProjectSuggestion({ evidence: 'standard' }))
+    expect(LIB.parseProjectBytes(new TextEncoder().encode(literal!)).evidence).toEqual({ kind: 'valid', value: 'standard' })
   })
 
   it('under `standard` the missing plan is reported and never asked about', () => {

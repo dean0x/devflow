@@ -78,9 +78,11 @@ const DEVFLOW_PROJECT_LINE = '!.devflow/project.json';
  *   + committed (the Knowledge agent commits them at workflow end).
  * - conventions.md: naming-convention authority written by the Git learn-conventions
  *   operation; GIT-TRACKED so the team shares a single naming source.
- * - policy.json: the team-owned evidence policy, read from the default branch by
- *   resolve-evidence-policy.cjs; GIT-TRACKED so a team can commit it without `git add -f`.
- *   Devflow never writes it.
+ * - policy.json: the retired evidence-policy file. resolve-evidence-policy.cjs never
+ *   parses it, but where project.json has no `evidence` its presence holds the
+ *   repository at `required` (D-POLICY-JSON-RETIRED); GIT-TRACKED so a team's
+ *   committed copy stays shared until its value moves into project.json. Devflow
+ *   never writes it.
  * - project.json: the team-committed settings (evidence, compliance, tracker, review
  *   publication, narrow-only feature switches) both resolvers read; GIT-TRACKED for
  *   the same reason (D-GITIGNORE-V6). Devflow never writes it.

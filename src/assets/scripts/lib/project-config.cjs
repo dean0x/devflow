@@ -52,7 +52,7 @@ const path = require('path');
 // Closed vocabularies
 // ---------------------------------------------------------------------------
 
-/** Largest config file read or decoded, in bytes — the policy file's bound, shared. */
+/** Largest config file read or decoded, in bytes — one bound for project.json and config.json. */
 const MAX_CONFIG_BYTES = 4096;
 
 /** Every evidence policy value, strictest first (resolve-evidence-policy.cjs POLICIES). */
@@ -150,7 +150,7 @@ function validField(value) {
 }
 
 // ---------------------------------------------------------------------------
-// Bytes → text (the policy file's byte rules, shared)
+// Bytes → text (the byte rules both files share)
 // ---------------------------------------------------------------------------
 
 /**
@@ -159,8 +159,6 @@ function validField(value) {
  *
  * The byte checks run before decoding — size, then a UTF-8 BOM, which is invalid
  * rather than skipped — and decoding is fatal on a malformed sequence.
- * resolve-evidence-policy.cjs parsePolicyBytes runs its policy grammar on the
- * text this returns, so both files obey one set of byte rules.
  *
  * @param {unknown} buf
  * @returns {{ kind: 'absent' } | { kind: 'invalid' } | { kind: 'text', text: string }}

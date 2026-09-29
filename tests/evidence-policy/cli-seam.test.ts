@@ -80,8 +80,11 @@ type ParseProjectBytes = (buf: Uint8Array) => {
   compliance?: { kind: string; value?: unknown };
 };
 
-const REQUIRED_BODY = '{"version":1,"evidencePolicy":"required"}\n';
-const STANDARD_BODY = '{"version":1,"evidencePolicy":"standard"}\n';
+/** A committed project.json stating each evidence policy. */
+const REQUIRED_BODY = '{"version":1,"evidence":"required"}\n';
+const STANDARD_BODY = '{"version":1,"evidence":"standard"}\n';
+/** The retired policy.json — never parsed; its presence is what the migration hint reports. */
+const RETIRED_STANDARD = '{"version":1,"evidencePolicy":"standard"}\n';
 /** The project.json the CLI suggests for compliance on with zero frameworks. */
 const SUGGESTED_ZERO = '{"version":1,"evidence":"required","compliance":[]}\n';
 
@@ -125,8 +128,10 @@ describe('loadEvidencePolicyModule — the package copy, shape-checked, never a 
 
   it('every surface key is exported by the .cjs with the declared kind', () => {
     const raw = NODE_REQUIRE(RESOLVER_SCRIPT) as Record<string, unknown>;
-    const keys = Object.keys(EVIDENCE_POLICY_MODULE_SURFACE);
-    expect(keys.length).toBeGreaterThanOrEqual(9);
+    expect(Object.keys(EVIDENCE_POLICY_MODULE_SURFACE)).toEqual([
+      'POLICIES', 'SOURCES', 'WARNINGS', 'MECHANISM_INPUTS', 'OUTPUT_LINE_RE', 'FAIL_CLOSED_LINE',
+      'complianceDefault', 'resolve',
+    ]);
     for (const [key, kind] of Object.entries(EVIDENCE_POLICY_MODULE_SURFACE)) {
       const value = raw[key];
       switch (kind) {
@@ -168,7 +173,7 @@ describe('loadEvidencePolicyModule — the package copy, shape-checked, never a 
     if (loaded.ok) return;
     expect(loaded.error.kind).toBe('unusable');
     expect(loaded.error.kind === 'unusable' && loaded.error.detail).toMatch(/resolve/);
-    expect(loaded.error.kind === 'unusable' && loaded.error.detail).toMatch(/serializePolicy/);
+    expect(loaded.error.kind === 'unusable' && loaded.error.detail).toMatch(/complianceDefault/);
     expect(loaded.error.kind === 'unusable' && loaded.error.detail).not.toMatch(/POLICIES/);
   });
 
@@ -330,10 +335,13 @@ describe('the --status helpers over the settings layer (D-FEATURES-NARROW-ONLY)'
       .toEqual(['Repository: gdpr, hipaa (.devflow/project.json)']);
     expect(repoComplianceStatusLines(stub({ ...BASE, repoCompliance: [] }), { dir: tmp }))
       .toEqual(['Repository: generic controls only (.devflow/project.json)']);
-    const hint = repoComplianceStatusLines(stub({ ...BASE, legacyPolicyFile: true }), { dir: tmp }).join('\n');
-    expect(hint).toContain('.devflow/policy.json');
-    expect(hint).toContain('.devflow/project.json');
-    expect(hint).toContain('"evidence"');
+    expect(repoComplianceStatusLines(stub({ ...BASE, legacyPolicyFile: true }), { dir: tmp })).toEqual([
+      'Migration:  .devflow/policy.json is not read. While .devflow/project.json has no "evidence",',
+      '            its presence alone holds this repository at required. Commit its value',
+      '            to .devflow/project.json as "evidence", then delete .devflow/policy.json:',
+      '              standard  →  {"version":1,"evidence":"standard"}',
+      '              required  →  {"version":1,"evidence":"required"}',
+    ]);
   });
 });
 
@@ -369,7 +377,7 @@ describe('formatEvidencePolicyStatus', () => {
   it('renders the real resolver output — reachable remote file with a differing HEAD', () => {
     const root = fs.mkdtempSync(path.join(tmp, 'reachable-'));
     const { exec } = scriptedExec(scenarioCalls({
-      root, defaultBranch: 'main', remote: { bytes: STANDARD_BODY }, head: 'absent',
+      root, defaultBranch: 'main', remoteProject: { bytes: STANDARD_BODY }, headProject: 'absent',
     }));
     const resolve = loadedModule().resolve as ResolveWithDeps;
     const r = resolve({ dir: root, compliance: { enabled: false, frameworks: [] } }, { exec });
@@ -974,7 +982,7 @@ describe('devflow compliance — the built CLI (AC-9, AC-10)', () => {
     const home = makeHome({ enabled: true, frameworks: ['soc2'] });
     const repo = makeRepo(home);
     fs.mkdirSync(path.join(repo, '.devflow'));
-    fs.writeFileSync(path.join(repo, '.devflow', 'policy.json'), STANDARD_BODY);
+    fs.writeFileSync(path.join(repo, '.devflow', 'project.json'), STANDARD_BODY);
     const shim = buildScriptedShim(fakeGh, tmp, [
       { tool: 'gh', args: ARGV.probe, exit: 1, stderr: 'To get started with GitHub CLI, please run:  gh auth login\n' },
     ]);
@@ -991,15 +999,12 @@ describe('devflow compliance — the built CLI (AC-9, AC-10)', () => {
     const repo = makeRepo(home);
     const shim = buildScriptedShim(fakeGh, tmp, [
       { tool: 'gh', args: ARGV.probe, stdout: 'main\n' },
-      { tool: 'gh', args: ARGV.contentsProject('main'), exit: 1, stderr: 'gh: Not Found (HTTP 404)\n' },
-      { tool: 'gh', args: ARGV.contents('main'), stdout: REQUIRED_BODY },
+      { tool: 'gh', args: ARGV.contentsProject('main'), stdout: REQUIRED_BODY },
     ]);
     const r = runCli({ home, cwd: repo, args: ['compliance', '--status'], shim });
     expect(r.status, r.out).toBe(0);
     expect(r.out).toContain('Evidence policy: required (source: file) [warn: pr-changes-policy]');
-    expect(shim.readLog()).toEqual([
-      ['gh', ...ARGV.probe], ['gh', ...ARGV.contentsProject('main')], ['gh', ...ARGV.contents('main')],
-    ]);
+    expect(shim.readLog()).toEqual([['gh', ...ARGV.probe], ['gh', ...ARGV.contentsProject('main')]]);
   }, 60_000);
 
   it.each([
@@ -1021,7 +1026,7 @@ describe('devflow compliance — the built CLI (AC-9, AC-10)', () => {
     expect(snapshot(repo)).toEqual(before);
   }, 60_000);
 
-  it('--status in a repository declaring compliance lists its ids; a legacy policy.json adds the migration hint', () => {
+  it('--status in a repository declaring compliance lists its ids; a retired policy.json adds the migration hint', () => {
     const home = makeHome({ enabled: false, frameworks: [] });
     const repo = makeRepo(home);
     fs.mkdirSync(path.join(repo, '.devflow'));
@@ -1036,9 +1041,12 @@ describe('devflow compliance — the built CLI (AC-9, AC-10)', () => {
     // The repository's compliance raises the floor on a compliance-off machine (D-COMPLIANCE-REPO-FLOOR).
     expect(declared.out).toContain('Evidence policy: required (source: default)');
 
-    fs.writeFileSync(path.join(repo, '.devflow', 'policy.json'), STANDARD_BODY);
+    fs.writeFileSync(path.join(repo, '.devflow', 'policy.json'), RETIRED_STANDARD);
     const legacy = runCli({ home, cwd: repo, args: ['compliance', '--status'], shim });
-    expect(legacy.out).toContain('Migration:  .devflow/policy.json is superseded by .devflow/project.json');
+    expect(legacy.out).toContain('Migration:  .devflow/policy.json is not read. While .devflow/project.json has no "evidence",');
+    expect(legacy.out).toContain('standard  →  {"version":1,"evidence":"standard"}');
+    // Presence alone holds the repository at required: the file says standard and is not read.
+    expect(legacy.out).toContain('Evidence policy: required (source: invalid) [warn: remote-unavailable, invalid-file]');
   }, 60_000);
 
   it('--status in a repository that declares nothing prints no repository line', () => {

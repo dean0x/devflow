@@ -10,9 +10,10 @@
 //
 // The policy is plumbing, decided once by the caller: this script prints it plus
 // the mechanism inputs, and operations only ever see the inputs. It WRITES NOTHING
-// — no file, no git ref, no remote state — so `.devflow/project.json` (and the
-// legacy `.devflow/policy.json` it falls back to) stay team-owned files that only
-// the team commits (applies ADR-024).
+// — no file, no git ref, no remote state — so `.devflow/project.json` stays a
+// team-owned file that only the team commits (applies ADR-024). A committed
+// `.devflow/policy.json` is detected by presence and never parsed
+// (D-POLICY-JSON-RETIRED).
 //
 // stdout is exactly one line plus "\n", or empty (D-POLICY-LINE):
 //   EVIDENCE_POLICY=<required|standard> SOURCE=<file|worktree|default|invalid|error>
@@ -40,8 +41,8 @@
 //     exitCode assignment, so nothing is truncated and no cleanup is skipped
 //   - every subprocess is spawned with an argv array (never a shell), stdin
 //     ignored, a timeout and a maxBuffer; every loop has a fixed bound
-//   - a policy file that is not a regular file is never opened, and one over
-//     MAX_POLICY_BYTES is never read
+//   - a project.json that is not a regular file is never opened, and one over
+//     MAX_POLICY_BYTES is never read; a working-tree policy.json is never opened
 //   - no index-refreshing git command runs (no `status`, no `diff`), so a
 //     repository's configured fsmonitor hook never fires; no fetch, no set-head
 
@@ -69,7 +70,8 @@ const SOURCES = Object.freeze(/** @type {Source[]} */ (['file', 'worktree', 'def
 /**
  * Every WARN token, in the order the line prints them.
  *   remote-unavailable    the default branch's file could not be consulted
- *   invalid-file          a folded policy file (remote, worktree or tracking copy) was invalid
+ *   invalid-file          a folded source (remote, worktree or tracking copy) was invalid —
+ *                         its project.json evidence, or the retired policy.json's presence
  *   raised-by-compliance  compliance raised a `standard` file or worktree policy
  *   pr-changes-policy     HEAD or the worktree differs from the default branch (advisory)
  */
@@ -119,8 +121,8 @@ const MECHANISM_INPUTS = Object.freeze({
 const INPUT_KEYS = Object.freeze(['ISSUE_REQUIRED', 'APPLY_CONVENTIONS', 'REQUIRE_NON_AUTHOR_APPROVAL']);
 
 /**
- * Largest policy or project file read, in bytes — the shared parser's bound, so
- * both files obey one limit. A policy is two keys; nothing valid approaches this.
+ * Largest project.json read, in bytes — the shared parser's bound
+ * (lib/project-config.cjs MAX_CONFIG_BYTES).
  */
 const MAX_POLICY_BYTES = projectConfig.MAX_CONFIG_BYTES;
 
@@ -160,7 +162,7 @@ const BLOB_MAX_BUFFER = 65536;
 /** rev-parse and ls-remote print one short line each. */
 const LINE_MAX_BUFFER = 4096;
 
-/** The repository-relative path of the legacy policy file, in git and API spelling. */
+/** The repository-relative path of the retired policy file, in git and API spelling (D-POLICY-JSON-RETIRED). */
 const POLICY_REL = '.devflow/policy.json';
 
 /** The repository-relative path of the team config file, in git and API spelling. */
@@ -247,70 +249,6 @@ function parseArgs(argv) {
 }
 
 // ---------------------------------------------------------------------------
-// parsePolicyBytes (D-POLICY-STRICT-SCHEMA)
-// ---------------------------------------------------------------------------
-
-/**
- * D-POLICY-STRICT-SCHEMA: the grammar gate a policy file must pass BEFORE
- * JSON.parse sees it. Exactly two members, each key `version` or
- * `evidencePolicy`, each value `1`, `"required"` or `"standard"`, and JSON
- * whitespace only — `[ \t\r\n]`, never `\s`, which admits U+FEFF and U+00A0.
- * Each `*` run is separated by a literal, so matching is linear. What it keeps
- * out never reaches the parser: `__proto__`/`constructor` and every other key,
- * `\u`-escaped keys or values, `1.0`, `"1"`, arrays, `null`, trailing bytes.
- */
-const POLICY_GRAMMAR_RE =
-  /^[ \t\r\n]*\{[ \t\r\n]*"(?:version|evidencePolicy)"[ \t\r\n]*:[ \t\r\n]*(?:1|"required"|"standard")[ \t\r\n]*,[ \t\r\n]*"(?:version|evidencePolicy)"[ \t\r\n]*:[ \t\r\n]*(?:1|"required"|"standard")[ \t\r\n]*\}[ \t\r\n]*$/;
-
-/**
- * Classify policy-file bytes. `null`/`undefined` is "no file" (absent); everything
- * else is valid or invalid, never absent — an empty committed file is invalid.
- *
- * The byte checks run before decoding (lib/project-config.cjs decodeConfigBytes:
- * size, then a UTF-8 BOM, which is invalid rather than skipped, then a decode
- * that is fatal on a malformed sequence), and after the
- * grammar gate the parsed object must hold exactly the own keys
- * {version, evidencePolicy} with version === 1. A duplicate key passes the
- * grammar but collapses in the parse, so the key-set check refuses it.
- *
- * @param {Uint8Array | null | undefined} buf
- * @returns {ParsedPolicy}
- */
-function parsePolicyBytes(buf) {
-  // The byte rules (size, BOM, fatal UTF-8) come from decodeConfigBytes, so the
-  // policy file and project.json can never disagree about what bytes are.
-  const decoded = projectConfig.decodeConfigBytes(buf);
-  if (decoded.kind === 'absent') return ABSENT;
-  if (decoded.kind === 'invalid') return INVALID;
-  const text = decoded.text;
-  if (!POLICY_GRAMMAR_RE.test(text)) return INVALID;
-
-  let parsed;
-  try {
-    parsed = JSON.parse(text);
-  } catch (_) {
-    return INVALID;
-  }
-  if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) return INVALID;
-  const keys = Object.keys(parsed);
-  if (keys.length !== 2 || !keys.includes('version') || !keys.includes('evidencePolicy')) return INVALID;
-  if (parsed.version !== 1) return INVALID;
-  if (!POLICIES.includes(parsed.evidencePolicy)) return INVALID;
-  return Object.freeze({ kind: 'valid', policy: parsed.evidencePolicy });
-}
-
-/**
- * The canonical bytes of a policy file — what the CLI suggests a team commit.
- *
- * @param {unknown} policy
- * @returns {string | null}  `{"version":1,"evidencePolicy":"<p>"}\n`, or null outside POLICIES
- */
-function serializePolicy(policy) {
-  if (!POLICIES.includes(/** @type {Policy} */ (policy))) return null;
-  return JSON.stringify({ version: 1, evidencePolicy: policy }) + '\n';
-}
-
-// ---------------------------------------------------------------------------
 // Compliance default
 // ---------------------------------------------------------------------------
 
@@ -343,18 +281,45 @@ function complianceDefault(rawFeatureValue) {
 const readBoundedRegularFile = projectConfig.readBoundedRegularFile;
 
 /**
- * W — the working tree's policy file. lstat-refused, never followed: a symlink,
- * directory, FIFO or device is invalid unopened, and an oversize file invalid
- * unread.
+ * D-POLICY-JSON-RETIRED: `.devflow/policy.json` is never parsed. At a source whose
+ * project.json does not decide the evidence (absent, or present without an
+ * `evidence` key), an existing policy.json makes that source `invalid` — whatever
+ * its bytes say, `standard` and unreadable alike — so the repository resolves
+ * `required` with `invalid-file` until the team states its value as `evidence` in
+ * project.json. With neither file the source is absent. Presence is the whole
+ * signal, and each source probes it with the call it already makes:
+ *   R  the default branch's contents call — exit 0 or an overflow is present, a
+ *      404 absent, anything else the remote unavailable (remoteSource)
+ *   T/H  `git cat-file blob` — exit 0 present, an answered non-zero exit absent,
+ *      an unanswered call invalid (catFilePolicyPresence)
+ *   W  an lstat that never opens the file — ENOENT or ENOTDIR absent, anything
+ *      else present, a symlink or FIFO included (worktreePolicyPresence)
+ * The bytes a call returns are discarded unread, so no value in the file can
+ * lower the policy or reach stdout.
+ *
+ * @param {boolean} present
+ * @returns {ParsedPolicy}
+ */
+function retiredPolicyReading(present) {
+  return present ? INVALID : ABSENT;
+}
+
+/**
+ * W — whether the working tree holds a policy.json. lstat only: the file is never
+ * opened, so a FIFO cannot block and a symlink is never followed. An lstat that
+ * fails for any reason but "no such path" cannot prove absence, so it reads as
+ * present (fail closed).
  *
  * @param {string} root
  * @returns {ParsedPolicy}
  */
-function readWorktreePolicy(root) {
-  const read = readBoundedRegularFile(path.join(root, '.devflow', 'policy.json'), MAX_POLICY_BYTES, false);
-  if (read.kind === 'absent') return ABSENT;
-  if (read.kind === 'refused') return INVALID;
-  return parsePolicyBytes(read.bytes);
+function worktreePolicyPresence(root) {
+  try {
+    fs.lstatSync(path.join(root, '.devflow', 'policy.json'));
+    return retiredPolicyReading(true);
+  } catch (/** @type {any} */ err) {
+    return retiredPolicyReading(!(err && (err.code === 'ENOENT' || err.code === 'ENOTDIR')));
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -367,8 +332,8 @@ function readWorktreePolicy(root) {
  *   project.json declares repository compliance.
  *
  * @typedef {{ evidence: ParsedPolicy | null, compliance: boolean }} ProjectReading
- *   `evidence` null ⇒ project.json does not decide it, so the legacy policy file
- *   at the same source does.
+ *   `evidence` null ⇒ project.json does not decide it, so the presence of the
+ *   retired policy file at the same source does (D-POLICY-JSON-RETIRED).
  *
  * @typedef {{ kind: 'absent' } | { kind: 'invalid' } | { kind: 'parsed', evidence: { kind: string, value?: unknown }, compliance: { kind: string } }} ProjectConfigView
  *   The part of lib/project-config.cjs ProjectConfig this script reads.
@@ -380,15 +345,14 @@ const PROJECT_ABSENT = Object.freeze({ kind: 'absent' });
 const PROJECT_INVALID = Object.freeze({ kind: 'invalid' });
 
 /**
- * D-POLICY-SOURCE-PRECEDENCE: at every source, `project.json` decides the
- * evidence policy when it can, and the legacy `policy.json` at the SAME source
- * only when it cannot — project.json absent, or present without an `evidence`
- * key. A present-but-malformed or duplicated `evidence` decides `invalid`
- * (⇒ required) and is never rescued by the legacy file, and a project.json that
- * is not a JSON object at all is invalid outright. The precedence is per source,
- * so each source still says ONE thing and foldPolicy folds them exactly as it
- * always has; with no project.json anywhere, every output line is byte-identical
- * to the policy-file-only resolver (AC-24).
+ * D-POLICY-SOURCE-PRECEDENCE: at every source, the `evidence` key of
+ * `project.json` is the one authority on the evidence policy. A valid value
+ * decides it, and a present-but-malformed or duplicated `evidence` decides
+ * `invalid` (⇒ required); a project.json that is not a JSON object at all is
+ * invalid outright. Only where project.json is absent, or present without an
+ * `evidence` key, does the same source's retired `policy.json` count — by
+ * presence alone (D-POLICY-JSON-RETIRED). The precedence is per source, so each
+ * source says ONE thing and foldPolicy folds them unchanged.
  *
  * D-COMPLIANCE-REPO-FLOOR: a `compliance` key in project.json at R, T or W — any
  * value, an empty list and a malformed one included — makes the repository's
@@ -414,21 +378,22 @@ function projectReading(project) {
 }
 
 /**
- * Complete a project reading with the legacy file's evidence when project.json
- * did not decide it.
+ * Complete a project reading with the retired policy file's presence when
+ * project.json did not decide the evidence (D-POLICY-JSON-RETIRED).
  *
  * @param {ProjectReading} reading
- * @param {() => ParsedPolicy} readLegacy  called only when needed
+ * @param {() => ParsedPolicy} probePolicy  called only when needed
  * @returns {SourceReading}
  */
-function withLegacyFallback(reading, readLegacy) {
-  return { evidence: reading.evidence === null ? readLegacy() : reading.evidence, compliance: reading.compliance };
+function withRetiredPolicy(reading, probePolicy) {
+  return { evidence: reading.evidence === null ? probePolicy() : reading.evidence, compliance: reading.compliance };
 }
 
 /**
- * W — the working tree's project.json, then its policy.json. Both are
- * lstat-refused, never followed: a symlink, directory, FIFO or device is invalid
- * unopened, and an oversize file invalid unread.
+ * W — the working tree's project.json, then (only when it has no `evidence`)
+ * whether a policy.json is there. project.json is lstat-refused, never followed:
+ * a symlink, directory, FIFO or device is invalid unopened, and an oversize file
+ * invalid unread. policy.json is never opened at all.
  *
  * @param {string} root
  * @returns {SourceReading}
@@ -437,7 +402,7 @@ function readWorktreeSource(root) {
   const read = readBoundedRegularFile(path.join(root, '.devflow', 'project.json'), MAX_POLICY_BYTES, false);
   const project = read.kind === 'ok' ? projectConfig.parseProjectBytes(read.bytes)
     : read.kind === 'absent' ? PROJECT_ABSENT : PROJECT_INVALID;
-  return withLegacyFallback(projectReading(project), () => readWorktreePolicy(root));
+  return withRetiredPolicy(projectReading(project), () => worktreePolicyPresence(root));
 }
 
 /**
@@ -605,8 +570,9 @@ function fetchRemoteFile(ctx, root, ref, rel) {
 
 /**
  * R — the default branch's project.json, then (only when it is a 404 or has no
- * `evidence`) its policy.json. Null when either call finds the remote
- * unavailable: a half-read default branch is not a default branch.
+ * `evidence`) whether its policy.json exists — the contents call's bytes are
+ * discarded unread (D-POLICY-JSON-RETIRED). Null when either call finds the
+ * remote unavailable: a half-read default branch is not a default branch.
  *
  * @param {CallContext} ctx
  * @param {string} root
@@ -621,8 +587,7 @@ function remoteSource(ctx, root, ref) {
   if (reading.evidence !== null) return { evidence: reading.evidence, compliance: reading.compliance };
   const policyFile = fetchRemoteFile(ctx, root, ref, POLICY_REL);
   if (policyFile === null) return null;
-  return withLegacyFallback(reading, () => (policyFile.kind === 'bytes' ? parsePolicyBytes(policyFile.bytes)
-    : policyFile.kind === 'absent' ? ABSENT : INVALID));
+  return withRetiredPolicy(reading, () => retiredPolicyReading(policyFile.kind !== 'absent'));
 }
 
 /**
@@ -663,22 +628,22 @@ function catFileBlob(ctx, root, revision, rel) {
 }
 
 /**
- * The legacy policy blob at a revision: parsed, absent, or invalid when unanswered.
+ * Whether a revision holds the retired policy blob (D-POLICY-JSON-RETIRED): its
+ * bytes are discarded unread, and an unanswered read cannot prove absence, so it
+ * reads as present.
  *
  * @param {CallContext} ctx
  * @param {string} root
  * @param {string} revision
  * @returns {ParsedPolicy}
  */
-function catFilePolicy(ctx, root, revision) {
-  const blob = catFileBlob(ctx, root, revision, POLICY_REL);
-  if (blob.kind === 'bytes') return parsePolicyBytes(blob.bytes);
-  return blob.kind === 'absent' ? ABSENT : INVALID;
+function catFilePolicyPresence(ctx, root, revision) {
+  return retiredPolicyReading(catFileBlob(ctx, root, revision, POLICY_REL).kind !== 'absent');
 }
 
 /**
  * T or H: a revision's project.json, then (only when it is absent or has no
- * `evidence`) its policy.json.
+ * `evidence`) whether its policy.json exists.
  *
  * @param {CallContext} ctx
  * @param {string} root
@@ -689,7 +654,7 @@ function revisionSource(ctx, root, revision) {
   const blob = catFileBlob(ctx, root, revision, PROJECT_REL);
   const project = blob.kind === 'bytes' ? projectConfig.parseProjectBytes(blob.bytes)
     : blob.kind === 'absent' ? PROJECT_ABSENT : PROJECT_INVALID;
-  return withLegacyFallback(projectReading(project), () => catFilePolicy(ctx, root, revision));
+  return withRetiredPolicy(projectReading(project), () => catFilePolicyPresence(ctx, root, revision));
 }
 
 /**
@@ -739,13 +704,14 @@ function trackingSource(ctx, root, ref) {
  *   gh api repos/{owner}/{repo} --jq .default_branch
  *   gh api --method GET …/contents/.devflow/project.json    (the probe named D)
  *   gh api --method GET …/contents/.devflow/policy.json     (… and project.json is
- *                                                            a 404 or has no evidence)
+ *                                                            a 404 or has no evidence;
+ *                                                            presence only)
  *   git ls-remote --symref origin HEAD                      (offline, D unknown)
  *   git rev-parse --verify --quiet refs/remotes/origin/D    (offline, D known)
  *   git cat-file blob refs/remotes/origin/D:…/project.json  (that ref exists)
- *   git cat-file blob refs/remotes/origin/D:…/policy.json   (… no evidence there)
+ *   git cat-file blob refs/remotes/origin/D:…/policy.json   (… no evidence there; presence)
  *   git cat-file blob HEAD:…/project.json                   (B known)
- *   git cat-file blob HEAD:…/policy.json                    (… no evidence there)
+ *   git cat-file blob HEAD:…/policy.json                    (… no evidence there; presence)
  *
  * Returns null when git cannot say whether <dir> is in a repository at all (see
  * gitToplevel): nothing below can be trusted then, and resolve() fails closed.
@@ -1135,10 +1101,8 @@ module.exports = Object.freeze({
   OUTPUT_LINE_RE,
   FAIL_CLOSED_LINE,
   parseArgs,
-  parsePolicyBytes,
   complianceDefault,
   resolve,
   formatLine,
-  serializePolicy,
   main,
 });

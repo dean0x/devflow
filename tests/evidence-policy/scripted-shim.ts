@@ -124,7 +124,8 @@ export interface ScriptedCall {
 /**
  * The resolver's exact argv, written out here independently of the script. The
  * `*Project` entries read `.devflow/project.json`, which every source consults
- * before the legacy `.devflow/policy.json` (D-POLICY-SOURCE-PRECEDENCE).
+ * first; the others probe the retired `.devflow/policy.json` for presence where
+ * project.json has no `evidence` (D-POLICY-SOURCE-PRECEDENCE, D-POLICY-JSON-RETIRED).
  */
 export const ARGV = {
   toplevel: ['rev-parse', '--show-toplevel'],
@@ -156,18 +157,20 @@ export type Blob = { readonly bytes: string | Buffer } | 'absent';
  * A remote/local layout, described in the resolver's own vocabulary.
  *
  * `defaultBranch` undefined ⇒ the gh probe fails like an unauthenticated gh.
- * `remote` is the policy.json contents call's answer: bytes, `'absent'` (the
- * verified gh 404 shape — JSON body on STDOUT, `(HTTP 404)` on stderr, exit 1) or
- * `'forbidden'` (a 403, which must read as unavailable, never absent — and which
- * the project.json call, made first, then answers too: a 403 is repository-wide).
  * `lsRemoteBranch` undefined ⇒ `git ls-remote` fails.
- * `tracking` is refs/remotes/origin/<D>: a blob at an existing ref, or `'no-ref'`.
  *
- * The `*Project` fields are the same sources' `.devflow/project.json`. Each
- * defaults to absent whenever its source is reachable, so a scenario written
- * before project.json existed describes the same repository it always did: the
- * default branch has a 404 for project.json, and HEAD and the tracking ref have
- * no such blob.
+ * The `*Project` fields are each source's `.devflow/project.json` — the file
+ * that carries the evidence policy. The unsuffixed fields are the same sources'
+ * retired `.devflow/policy.json`, which the resolver probes for presence only:
+ * `remote` is its contents call's answer — bytes, `'absent'` (the verified gh 404
+ * shape: JSON body on STDOUT, `(HTTP 404)` on stderr, exit 1) or `'forbidden'` (a
+ * 403, which must read as unavailable, never absent — and which the project.json
+ * call, made first, then answers too: a 403 is repository-wide). `tracking` is
+ * refs/remotes/origin/<D>: a blob at an existing ref, or `'no-ref'`.
+ *
+ * Every file defaults to absent whenever its source is read: the default branch
+ * answers a 404 for both files, and HEAD and the tracking ref hold neither blob.
+ * A `trackingProject` alone therefore implies the tracking ref exists.
  */
 export interface Scenario {
   readonly root: string;
@@ -221,22 +224,23 @@ export function scenarioCalls(s: Scenario): ScriptedCall[] {
   if (s.defaultBranch !== undefined) {
     const project = s.remoteProject ?? (s.remote === 'forbidden' ? 'forbidden' : 'absent');
     calls.push(contentsAnswer(ARGV.contentsProject(s.defaultBranch), project));
-    if (s.remote !== undefined) calls.push(contentsAnswer(ARGV.contents(s.defaultBranch), s.remote));
+    calls.push(contentsAnswer(ARGV.contents(s.defaultBranch), s.remote ?? 'absent'));
   }
 
   if (s.head !== undefined || s.headProject !== undefined) {
     calls.push(blobAnswer('git', ARGV.headProjectBlob, s.headProject ?? 'absent'));
+    calls.push(blobAnswer('git', ARGV.headBlob, s.head ?? 'absent'));
   }
-  if (s.head !== undefined) calls.push(blobAnswer('git', ARGV.headBlob, s.head));
 
   const trackedRef = s.defaultBranch ?? s.lsRemoteBranch;
-  if (s.tracking !== undefined && trackedRef !== undefined) {
-    if (s.tracking === 'no-ref') {
+  const tracking = s.tracking ?? (s.trackingProject !== undefined ? 'absent' : undefined);
+  if (tracking !== undefined && trackedRef !== undefined) {
+    if (tracking === 'no-ref') {
       calls.push({ tool: 'git', args: ARGV.verifyTracking(trackedRef), exit: 1 });
     } else {
       calls.push({ tool: 'git', args: ARGV.verifyTracking(trackedRef), stdout: `${FAKE_SHA}\n` });
       calls.push(blobAnswer('git', ARGV.trackingProjectBlob(trackedRef), s.trackingProject ?? 'absent'));
-      calls.push(blobAnswer('git', ARGV.trackingBlob(trackedRef), s.tracking));
+      calls.push(blobAnswer('git', ARGV.trackingBlob(trackedRef), tracking));
     }
   }
   return calls;
