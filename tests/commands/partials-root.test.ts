@@ -45,9 +45,23 @@ function collectGitCommand(section: string): string | null {
 }
 
 /** Run a compiled command line with `{start}` bound to `start`; stdout, or null on failure. */
-function runFromStart(commandLine: string, start: string): string | null {
-  const out = spawnSync('bash', ['-c', commandLine.replace('{start}', '$1'), '_', start], { encoding: 'utf-8' });
+function runFromStart(commandLine: string, start: string, env: NodeJS.ProcessEnv = process.env): string | null {
+  const out = spawnSync('bash', ['-c', commandLine.replace('{start}', '$1'), '_', start], { encoding: 'utf-8', env });
   return out.status === 0 ? out.stdout.replace(/\n$/, '') : null;
+}
+
+/** What git before 2.31 prints first for the loader's call: the unknown flag, echoed back. */
+const PATH_FORMAT_ECHO = '--path-format=absolute';
+
+/** The hooks' DF_LEDGER_ROOT for `cwd`, from resolve-project-root itself. */
+function hookLedgerRoot(cwd: string, env: NodeJS.ProcessEnv): string {
+  const helper = path.resolve(import.meta.dirname, '..', '..', 'src', 'assets', 'scripts', 'hooks', 'resolve-project-root');
+  const out = spawnSync(
+    'bash',
+    ['-c', 'source "$1"; df_resolve_roots "$2"; printf %s "$DF_LEDGER_ROOT"', '_', helper, cwd],
+    { encoding: 'utf-8', env },
+  );
+  return out.stdout;
 }
 
 /**
@@ -58,6 +72,8 @@ function runFromStart(commandLine: string, start: string): string | null {
  */
 function ledgerFrom(output: string | null, start: string, home: string = os.homedir()): string {
   const lines = output === null ? [] : output.split('\n');
+  // A git before 2.31 echoes the flag back first: the toplevel is the line after it.
+  if (lines.length === 3 && lines[0] === PATH_FORMAT_ECHO && lines[1].startsWith('/')) return lines[1];
   if (lines.length !== 2 || !lines.every(l => l.startsWith('/'))) return start;
   const [top, common] = lines;
   if (common.endsWith('/.git')) {
@@ -133,7 +149,36 @@ describe('compiled loaders resolve the repository root, not cwd (D-PROMPT-ROOT, 
       const mainArm = section.slice(order[0], order[1]);
       expect(mainArm, `${file}: the main arm refuses a main worktree at HOME`)
         .toContain('once it is removed is not your home directory');
+      // A git before 2.31 falls back to the toplevel, as the hooks do (AC-15) —
+      // never to the start directory.
+      const topArm = section.slice(order[1], order[2]);
+      expect(topArm, `${file}: old git reads the toplevel after the echoed flag`)
+        .toContain('the line after the echoed flag');
+      const startArm = section.slice(order[2], section.indexOf('This is the rule'));
+      expect(startArm, `${file}: old git is not a start-directory case`).not.toContain('2.31');
     }
+  });
+
+  it('a git before 2.31 — the flag echoed back — reads the toplevel, as the hooks do', () => {
+    const command = collectGitCommand(sectionOf(requireDistFile(decisionsHosts()[0]), DECISIONS_HEADING));
+    expect(command).not.toBeNull();
+    // Old git prints the unknown flag back as a line of its own, then the answers.
+    const shim = fs.mkdtempSync(path.join(base, 'old-git-'));
+    fs.writeFileSync(path.join(shim, 'git'), [
+      '#!/bin/bash',
+      'case "$*" in',
+      `  *--path-format=absolute*) printf '%s\\n' '${PATH_FORMAT_ECHO}' ${JSON.stringify(main)} '.git' ;;`,
+      `  *--show-toplevel*) printf '%s\\n' ${JSON.stringify(main)} ;;`,
+      '  *) exit 1 ;;',
+      'esac',
+    ].join('\n') + '\n');
+    fs.chmodSync(path.join(shim, 'git'), 0o755);
+    const env = { ...process.env, PATH: `${shim}:${process.env.PATH ?? ''}` };
+
+    const output = runFromStart(command as string, sub, env);
+    expect(output?.split('\n')[0], 'the shim echoes the flag').toBe(PATH_FORMAT_ECHO);
+    expect(ledgerFrom(output, sub)).toBe(main);
+    expect(ledgerFrom(output, sub)).toBe(hookLedgerRoot(sub, env));
   });
 
   it('the decisions command resolves the main ledger from the root, a subdirectory and a linked worktree', () => {

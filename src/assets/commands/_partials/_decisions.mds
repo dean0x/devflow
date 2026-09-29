@@ -7,11 +7,11 @@ The decisions ledger belongs to the repository, not to one checkout: in a linked
 git -C "{start}" rev-parse --path-format=absolute --show-toplevel --git-common-dir
 ```
 
-Accept the output only when it is exactly two lines and each begins with `/`: line 1 is the checkout's toplevel, line 2 the repository's common git directory. `{ledger}` is the first of these that applies:
+Line 1 is the checkout's toplevel, line 2 the repository's common git directory. A git older than 2.31 echoes `--path-format=absolute` back as a line of its own first. `{ledger}` is the first of these that applies:
 
-1. **The main worktree** — line 2 without its trailing `/.git`, when line 2 ends in `/.git` and the directory left once it is removed is not your home directory and contains a `.devflow/` directory.
-2. **The toplevel** — line 1.
-3. **The start directory itself** — when the command failed or printed anything other than two absolute lines (outside a git repository, or on a git older than 2.31, which echoes the flag back).
+1. **The main worktree** — line 2 without its trailing `/.git`, when the output is exactly two lines each beginning with `/`, line 2 ends in `/.git`, and the directory left once it is removed is not your home directory and contains a `.devflow/` directory.
+2. **The toplevel** — line 1, or on an older git the line after the echoed flag.
+3. **The start directory itself** — when the command failed or printed no absolute toplevel (outside a git repository).
 
 This is the rule the learning hooks apply (D-LEDGER-MAIN-WORKTREE, D-PROMPT-ROOT), so you read the index the Learning agent writes.
 
