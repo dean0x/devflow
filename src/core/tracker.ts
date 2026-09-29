@@ -540,9 +540,17 @@ export type TrackerConventionsMigration =
  * RELATIVE link would resolve from one level deeper and name a different path —
  * the conventions would silently vanish behind a dangling link that also blocks
  * the Tracker agent's create-exclusive write. A relative link is therefore `kept`,
- * with its reason; an absolute one moves unaffected. rename also replaces an existing destination without a word, which is why the
- * target is probed first and a present one is never overwritten: that file holds
- * conventions a user may have corrected by hand, and it is the provider's own.
+ * with its reason; an absolute one moves unaffected. rename also replaces an
+ * existing destination without a word, which is why the target is probed first
+ * and a present one is never overwritten: that file holds conventions a user may
+ * have corrected by hand, and it is the provider's own.
+ *
+ * D-TRACKER-MIGRATE-WINDOW: the probe and the rename are two calls, so a Tracker
+ * agent that writes the same provider's file between them is replaced by the
+ * legacy one. Accepted: the window is one syscall wide, only `devflow init` opens
+ * it, and both files hold that provider's conventions. link-then-unlink would
+ * close it but follows a symlink on macOS, fails where hard links are
+ * unsupported, and can leave both names behind.
  *
  * The legacy single attempt counter is removed on every run that reaches the end:
  * it carries no user content, the per-provider counters replace it, and a file
