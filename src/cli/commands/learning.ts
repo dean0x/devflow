@@ -11,7 +11,7 @@ import {
 } from '../../core/project-paths.js';
 import { readMachineFeature, writeMachineFeature } from '../../core/feature-switch.js';
 import { getDevFlowDirectory } from '../../targets/claude-code/claude-paths.js';
-import { getGitRoot } from '../../core/git.js';
+import { getLedgerRoot } from '../../core/ledger-root.js';
 import { sweepLegacyDreamMarkers, drainLearningQueue } from '../../core/learning-queue-cleanup.js';
 import {
   type DecisionsEntryStatus,
@@ -47,16 +47,20 @@ function printUsage(): void {
 }
 
 /**
- * Resolve the git root for a state-mutating subcommand, warning and
+ * Resolve the ledger root for a state-mutating subcommand, warning and
  * returning null if the caller isn't inside a git project. `actionSuffix`
  * completes "Could not resolve git root — {actionSuffix}".
+ *
+ * D-LEDGER-MAIN-WORKTREE: every subcommand here resolves the ledger with
+ * getLedgerRoot — the hooks' DF_LEDGER_ROOT rule — so in a linked worktree it
+ * reads, clears and drains the main checkout's ledger the hooks write.
  */
-async function requireGitRoot(actionSuffix: string): Promise<string | null> {
-  const gitRoot = await getGitRoot();
-  if (!gitRoot) {
+async function requireLedgerRoot(actionSuffix: string): Promise<string | null> {
+  const ledgerRoot = await getLedgerRoot();
+  if (!ledgerRoot) {
     p.log.warn(`Could not resolve git root — ${actionSuffix}`);
   }
-  return gitRoot;
+  return ledgerRoot;
 }
 
 async function handleStatus(): Promise<void> {
@@ -64,12 +68,12 @@ async function handleStatus(): Promise<void> {
   // the same from every directory; only the observation counts are per-project.
   const enabled = await readMachineFeature(getDevFlowDirectory(), 'learning');
   const stateLine = `Learning: ${enabled ? 'enabled' : 'disabled'}`;
-  const gitRoot = await getGitRoot();
-  if (!gitRoot) {
+  const ledgerRoot = await getLedgerRoot();
+  if (!ledgerRoot) {
     p.log.info(`${stateLine}\nObservations: not in a git project`);
     return;
   }
-  const logPath = getDecisionsLogPath(gitRoot);
+  const logPath = getDecisionsLogPath(ledgerRoot);
   const { observations, invalidCount } = await readObservations(logPath);
 
   const decisionObs = observations.filter(o => o.type === 'decision' || o.type === 'pitfall');
@@ -93,12 +97,12 @@ async function handleStatus(): Promise<void> {
 }
 
 async function handleList(): Promise<void> {
-  // Resolve the log from the git root (matches --status, --clear, --reset,
-  // --disable) so `--list` run from a subdirectory finds the real log
-  // instead of a nonexistent one under process.cwd(). Falls back to cwd
-  // when not in a git project, preserving the prior behavior for that case.
-  const gitRoot = await getGitRoot();
-  const logPath = getDecisionsLogPath(gitRoot ?? process.cwd());
+  // Resolve the log from the ledger root (matches --status, --clear, --reset,
+  // --disable) so `--list` run from a subdirectory or a linked worktree finds
+  // the real log instead of a nonexistent one under process.cwd(). Falls back
+  // to cwd when not in a git project, preserving the prior behavior for that case.
+  const ledgerRoot = await getLedgerRoot();
+  const logPath = getDecisionsLogPath(ledgerRoot ?? process.cwd());
 
   let logExists = true;
   try {
@@ -200,10 +204,10 @@ async function handleConfigure(): Promise<void> {
 }
 
 async function handleReset(): Promise<void> {
-  const gitRoot = await requireGitRoot('reset not performed');
-  if (!gitRoot) return;
+  const ledgerRoot = await requireLedgerRoot('reset not performed');
+  if (!ledgerRoot) return;
 
-  const lockDir = getDecisionsLockDir(gitRoot);
+  const lockDir = getDecisionsLockDir(ledgerRoot);
 
   // Ensure the parent directory exists so a second reset (after .devflow/learning/
   // was already removed) does not fail with ENOENT and emit a false contention error.
@@ -233,13 +237,13 @@ async function handleReset(): Promise<void> {
     // Remove the entire learning directory (contains queue files, content files,
     // ledger, and tuning config). Single-dir semantics: all learning state lives here.
     try {
-      await fs.rm(getLearningDir(gitRoot), { recursive: true, force: true });
+      await fs.rm(getLearningDir(ledgerRoot), { recursive: true, force: true });
     } catch { /* best effort */ }
 
     // Clean legacy dream marker-pipeline stamps from old installs.
     // Best-effort: sweeps the now-absent dir silently (ENOENT-tolerant).
     try {
-      await sweepLegacyDreamMarkers(getLearningDir(gitRoot));
+      await sweepLegacyDreamMarkers(getLearningDir(ledgerRoot));
     } catch { /* best effort */ }
 
     p.log.success('Reset complete — removed .devflow/learning/ state.');
@@ -249,10 +253,10 @@ async function handleReset(): Promise<void> {
 }
 
 async function handleClear(): Promise<void> {
-  const gitRoot = await requireGitRoot('clear not performed');
-  if (!gitRoot) return;
+  const ledgerRoot = await requireLedgerRoot('clear not performed');
+  if (!ledgerRoot) return;
 
-  const decisionsLogPath = getDecisionsLogPath(gitRoot);
+  const decisionsLogPath = getDecisionsLogPath(ledgerRoot);
   try {
     await fs.access(decisionsLogPath);
   } catch {
@@ -277,7 +281,7 @@ async function handleClear(): Promise<void> {
   // on the next session — mirrors memory.ts's drain-on-disable behavior for
   // the sibling memory queue. A mid-run Learning agent whose claimed batch
   // vanishes aborts without changes — the desired outcome of clearing.
-  await drainLearningQueue(gitRoot);
+  await drainLearningQueue(ledgerRoot);
 
   p.log.success('Decisions log cleared.');
 }
@@ -305,9 +309,9 @@ async function handleToggle(enabled: boolean): Promise<void> {
   // Drain the current project's learning (decisions-detection) queue so stale
   // turns don't process on re-enable. A mid-run Learning agent whose claimed
   // batch vanishes aborts without changes — the desired outcome of disabling.
-  const gitRoot = await getGitRoot();
-  if (gitRoot) {
-    await drainLearningQueue(gitRoot);
+  const ledgerRoot = await getLedgerRoot();
+  if (ledgerRoot) {
+    await drainLearningQueue(ledgerRoot);
   }
   p.log.success('Learning disabled in every project');
 }

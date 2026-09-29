@@ -26,8 +26,8 @@ vi.mock('../../src/targets/claude-code/claude-paths.js', () => ({
   getDevFlowDirectory: vi.fn(() => '/home/user/.devflow'),
 }));
 
-vi.mock('../../src/core/git.js', () => ({
-  getGitRoot: vi.fn(),
+vi.mock('../../src/core/ledger-root.js', () => ({
+  getLedgerRoot: vi.fn(),
 }));
 
 vi.mock('@clack/prompts', () => ({
@@ -51,7 +51,7 @@ import {
   loadAndCountObservations,
   type LearningObservation,
 } from '../../src/core/observations.js';
-import { getGitRoot } from '../../src/core/git.js';
+import { getLedgerRoot } from '../../src/core/ledger-root.js';
 import { getDevFlowDirectory } from '../../src/targets/claude-code/claude-paths.js';
 import { learningCommand } from '../../src/cli/commands/learning.js';
 import * as p from '@clack/prompts';
@@ -397,7 +397,7 @@ describe('learning --disable drains the learning pending-turns queue', () => {
       installedAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z',
     }));
     vi.mocked(getDevFlowDirectory).mockReturnValue(devflowDir);
-    vi.mocked(getGitRoot).mockResolvedValue(tmpDir);
+    vi.mocked(getLedgerRoot).mockResolvedValue(tmpDir);
     // Commander retains _optionValues across repeated parseAsync() calls on the
     // same Command instance (no built-in reset between calls). Production always
     // starts a fresh process per invocation, so clear state here to match that
@@ -466,7 +466,7 @@ describe('learning --disable drains the learning pending-turns queue', () => {
   });
 
   it('switches learning off outside a git project too (the switch is not per-project)', async () => {
-    vi.mocked(getGitRoot).mockResolvedValue(null);
+    vi.mocked(getLedgerRoot).mockResolvedValue(null);
 
     await learningCommand.parseAsync(['--disable'], { from: 'user' });
 
@@ -475,10 +475,10 @@ describe('learning --disable drains the learning pending-turns queue', () => {
 
   it('drains the resolved git-root paths, not process.cwd() (regression for the cwd class)', async () => {
     writeDreamQueueFiles(tmpDir);
-    // getGitRoot already resolves to tmpDir regardless of the real cwd (exactly as
+    // getLedgerRoot already resolves to tmpDir regardless of the real cwd (exactly as
     // `git rev-parse --show-toplevel` would from any subdirectory). Point cwd at a
     // decoy path to prove the drain never falls back to process.cwd() instead of
-    // the resolved gitRoot.
+    // the resolved ledger root.
     vi.spyOn(process, 'cwd').mockReturnValue('/nonexistent-cwd-decoy-path');
 
     await learningCommand.parseAsync(['--disable'], { from: 'user' });
@@ -500,7 +500,7 @@ describe('decisions --list resolves log path from git root, not process.cwd()', 
 
   beforeEach(() => {
     tmpDir = makeTmpDir();
-    vi.mocked(getGitRoot).mockResolvedValue(tmpDir);
+    vi.mocked(getLedgerRoot).mockResolvedValue(tmpDir);
     (learningCommand as unknown as { _optionValues: Record<string, unknown> })._optionValues = {};
   });
 
@@ -515,10 +515,10 @@ describe('decisions --list resolves log path from git root, not process.cwd()', 
       makeDecisionObs({ id: 'obs_decision_001', type: 'decision', pattern: 'Use Result types' }),
     ]));
 
-    // getGitRoot is mocked to resolve to tmpDir regardless of the real cwd
+    // getLedgerRoot is mocked to resolve to tmpDir regardless of the real cwd
     // (exactly as `git rev-parse --show-toplevel` would from a subdirectory).
     // Point cwd at a decoy path to prove --list never falls back to
-    // process.cwd() instead of the resolved gitRoot.
+    // process.cwd() instead of the resolved ledger root.
     vi.spyOn(process, 'cwd').mockReturnValue('/nonexistent-cwd-decoy-path');
 
     await learningCommand.parseAsync(['--list'], { from: 'user' });
@@ -527,7 +527,7 @@ describe('decisions --list resolves log path from git root, not process.cwd()', 
   });
 
   it('falls back to process.cwd() when not in a git project', async () => {
-    vi.mocked(getGitRoot).mockResolvedValue(null);
+    vi.mocked(getLedgerRoot).mockResolvedValue(null);
     const cwdLogPath = getDecisionsLogPath(tmpDir);
     fs.mkdirSync(path.dirname(cwdLogPath), { recursive: true });
     fs.writeFileSync(cwdLogPath, makeDecisionLog([
@@ -553,7 +553,7 @@ describe('learning --reset is idempotent when learning dir is already gone', () 
 
   beforeEach(() => {
     tmpDir = makeTmpDir();
-    vi.mocked(getGitRoot).mockResolvedValue(tmpDir);
+    vi.mocked(getLedgerRoot).mockResolvedValue(tmpDir);
     (learningCommand as unknown as { _optionValues: Record<string, unknown> })._optionValues = {};
     vi.mocked(p.log.error).mockClear();
     vi.mocked(p.log.success).mockClear();

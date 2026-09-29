@@ -2,6 +2,10 @@ import * as fs from 'node:fs';
 import type { ComponentResult, GatherContext, LearningCountsData } from '../types.js';
 import { dim } from '../colors.js';
 import { getDecisionsLedgerPath } from '../../core/project-paths.js';
+import { getLedgerRoot, type LedgerRootOptions } from '../../core/ledger-root.js';
+
+/** The HUD's per-git-command budget (src/hud/git.ts GIT_TIMEOUT). */
+const LEDGER_ROOT_TIMEOUT_MS = 1000;
 
 /**
  * @devflow-design-decision D309
@@ -70,6 +74,21 @@ export function gatherLearningCounts(cwd: string): LearningCountsData | null {
   }
 
   return parsedAny ? counts : null;
+}
+
+/**
+ * Count the ledger the hooks write for a session started in `cwd`: the ledger
+ * root (getLedgerRoot — the main checkout in a linked worktree, the repository
+ * root from a subdirectory), or `cwd` itself outside a git work tree. One git
+ * call, bounded by the HUD's per-command budget; run it alongside the git
+ * status gather, not after it (D-LEDGER-MAIN-WORKTREE).
+ */
+export async function gatherLedgerLearningCounts(
+  cwd: string,
+  options: Pick<LedgerRootOptions, 'home'> = {},
+): Promise<LearningCountsData | null> {
+  const root = await getLedgerRoot(cwd, { ...options, timeoutMs: LEDGER_ROOT_TIMEOUT_MS });
+  return gatherLearningCounts(root ?? cwd);
 }
 
 /**
