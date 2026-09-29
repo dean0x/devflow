@@ -412,6 +412,53 @@ function collectPresenceSelection(file: string, content: string): string[] {
     PRESENCE.some(re => re.test(line)) ? [`${file}:${i + 1}: ${line.trim().slice(0, 100)}`] : []);
 }
 
+/** Compiled commands that spawn Code agents, and the spawn sites each carries today. Floors: may only rise. */
+const CODE_SPAWN_FLOORS: Readonly<Record<string, number>> = {
+  // 9 fences (single, sequential ×2, parallel ×2, validation/alignment/qa-fix, pr-create) + the CI-fix line
+  'implement.md': 10,
+  // the issue-fix and validation-fix fences + the CI-fix line
+  'resolve.md': 3,
+  // implement, validation-fix, alignment-fix, qa-fix, review-fix and final-validation-fix templates
+  'dynamic-build.md': 6,
+};
+
+interface CodeSpawnSite {
+  readonly file: string;
+  /** 1-based line the spawn starts on. */
+  readonly line: number;
+  readonly payload: string;
+}
+
+/**
+ * Named collector: every Code spawn site in a compiled command, in the three shapes the
+ * command layer writes — a fenced spawn (`Agent(subagent_type="Code"):` then a quoted
+ * payload up to its closing quote, indented or not; one fence may hold two spawns), a one-line prose spawn
+ * (Spawn `Agent(subagent_type="Code")` …), and a workflow template literal
+ * (agent(`…`, { agentType: "Code" })). The preamble's `agent("your prompt here", …)`
+ * usage example is not a template literal, so it is not a site.
+ */
+function collectCodeSpawnSites(file: string, text: string): CodeSpawnSite[] {
+  const MAX_SITES = 64;
+  const SHAPES = [
+    /Agent\(subagent_type="Code"\):[^\n]*\n[ \t]*"[\s\S]*?"[ \t]*\n[ \t]*(?:\n|```)/g,
+    /^.*Spawn `Agent\(subagent_type="Code"\)`.*$/gm,
+    /agent\(`(?:(?!agent\(`)[\s\S])*?`, \{ agentType: "Code" \}/g,
+  ];
+  const sites = SHAPES.flatMap(re => [...text.matchAll(re)].map(m => ({
+    file,
+    line: text.slice(0, m.index).split('\n').length,
+    payload: m[0],
+  })));
+  if (sites.length > MAX_SITES) throw new Error(`${file}: more than ${MAX_SITES} Code spawn sites — bound exceeded`);
+  return sites;
+}
+
+/** The sites whose payload hands the Code agent no compliance lens — rendered for the failure message. */
+function collectUnlensedSites(sites: readonly CodeSpawnSite[]): string[] {
+  const LENS = /COMPLIANCE_FRAMEWORKS: \$?\{COMPLIANCE_FRAMEWORKS\}|with `COMPLIANCE_FRAMEWORKS`/;
+  return sites.filter(s => !LENS.test(s.payload)).map(s => `${s.file}:${s.line}`);
+}
+
 function src(rel: string): string {
   return readFileSync(path.join(ROOT, rel), 'utf-8');
 }
@@ -443,11 +490,38 @@ describe('TP-43 (AC-37): the compiled compliance lens loads only the ids the set
       const text = requireDistFile(host);
       expect(text, `${host}: the mapping sentence`).toContain(FRAMEWORKS_SENTENCE);
       expect(text, `${host}: a pass-through host never gates on the lens`).not.toContain('COMPLIANCE_ACTIVE');
-      const codeFences = [...text.matchAll(/Agent\(subagent_type="Code"\)[^\n]*\n"[\s\S]*?```/g)].map(m => m[0]);
-      // The fix modes are scoped to listed failures and pr-create changes no code.
-      const implementing = codeFences.filter(f => !/OPERATION: (?:(?:validation|alignment|qa)-fix|pr-create)/.test(f));
-      expect(implementing.length, `${host}: no implementing Code fence found`).toBeGreaterThan(0);
-      for (const fence of implementing) expect(fence, `${host}: an implementing Code spawn`).toContain(SPAWN_KEY);
+    }
+  });
+
+  it('every compiled Code spawn — implementing, fix-phase, CI-fix and pr-create — carries the lens', () => {
+    // Before install-all a fix-phase Code agent found the lens by checking whether the
+    // compliance skill was installed; with every install carrying it, the resolved ids
+    // are the only signal, and a spawn without them runs with the lens `off`.
+    const sites = requireDistFiles().flatMap(f => collectCodeSpawnSites(f, requireDistFile(f)));
+    for (const [host, floor] of Object.entries(CODE_SPAWN_FLOORS)) {
+      const n = sites.filter(s => s.file === host).length;
+      expect(n, `${host}: ${n} Code spawn site(s), floor ${floor} — the collector stopped reading them`).toBeGreaterThanOrEqual(floor);
+    }
+    expect(
+      [...new Set(sites.map(s => s.file))].sort(),
+      'a command outside the named set spawns Code agents — name it in CODE_SPAWN_FLOORS',
+    ).toEqual(Object.keys(CODE_SPAWN_FLOORS).sort());
+    expect(collectUnlensedSites(sites)).toEqual([]);
+  });
+
+  it('known-bad probe: a Code spawn of each shape that drops the lens is reported by the same collector', () => {
+    const implement = requireDistFile('implement.md');
+    // [host, live text, the lens as that shape spells it, what the spawn reads without it]
+    const probes: Array<[string, string, string, string]> = [
+      ['implement.md', implement, '\n   COMPLIANCE_FRAMEWORKS: {COMPLIANCE_FRAMEWORKS}"', '"'], // an indented fix-phase fence
+      ['implement.md', implement, ' with `COMPLIANCE_FRAMEWORKS`', ''],                      // the CI-fix prose spawn
+      ['dynamic-build.md', requireDistFile('dynamic-build.md'), '\nCOMPLIANCE_FRAMEWORKS: ${COMPLIANCE_FRAMEWORKS}', ''], // a template spawn
+    ];
+    for (const [host, real, lens, without] of probes) {
+      expect(collectUnlensedSites(collectCodeSpawnSites(host, real)), `${host}: the live text is clean`).toEqual([]);
+      const seeded = real.replace(lens, without);
+      expect(seeded, `${host}: the seed must land (${lens.trim()})`).not.toBe(real);
+      expect(collectUnlensedSites(collectCodeSpawnSites(host, seeded)), `${host}: dropping ${lens.trim()}`).toHaveLength(1);
     }
   });
 

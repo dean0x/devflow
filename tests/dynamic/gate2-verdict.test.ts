@@ -468,11 +468,11 @@ async function runGate2(
   const phase = async (_name: string, fn: () => Promise<unknown>): Promise<unknown> => fn()
   const parallel = async (thunks: Array<() => Promise<unknown>>): Promise<unknown[]> => Promise.all(thunks.map(t => t()))
   const run = new AsyncFunction(
-    'phase', 'agent', 'parallel', 'BRANCH', 'PLAN', 'CRITERIA', 'TEST_PLAN', 'ISSUE_NUMBER', 'ISSUE_PR_LINK',
+    'phase', 'agent', 'parallel', 'BRANCH', 'PLAN', 'CRITERIA', 'TEST_PLAN', 'ISSUE_NUMBER', 'ISSUE_PR_LINK', 'COMPLIANCE_FRAMEWORKS',
     `${statement}\nreturn gate2;`,
   )
   const gate2 = (await run(
-    phase, agent, parallel, 'ticket/p3', inputs.plan, inputs.criteria, inputs.testPlan, '(none)', '(none)',
+    phase, agent, parallel, 'ticket/p3', inputs.plan, inputs.criteria, inputs.testPlan, '(none)', '(none)', 'off',
   )) as Gate2Result
   return { gate2, spawns }
 }

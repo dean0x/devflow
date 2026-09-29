@@ -159,7 +159,7 @@ node "$HOME/.devflow/scripts/verify-evidence.cjs" render --plan .devflow/docs/ev
 - `EVIDENCE_FILE` — `.devflow/docs/evidence-{branch_slug}.md`, its `## Evidence Exceptions` section now a byte copy of `PR_EXCEPTIONS` (absent when that is `(none)`).
 
 {{publication_gate()}}
-Phase 10b passes the resolved value to `update-pr-evidence`, which decides what each value means for the evidence comment. From the same line: {{compliance.compliance_frameworks()}} Pass it to every Phase 2 Code spawn.
+Phase 10b passes the resolved value to `update-pr-evidence`, which decides what each value means for the evidence comment. From the same line: {{compliance.compliance_frameworks()}} Pass it to every Code spawn.
 
 {{decisions_load()}}
 
@@ -331,7 +331,8 @@ Run build, typecheck, lint, test. Report pass/fail with failure details."
    SCOPE: Fix only the listed failures, no other changes
    CREATE_PR: false
    ISSUE_NUMBER: {ISSUE_ID captured in Phase 1, or (none)}
-   ISSUE_PR_LINK: {ISSUE_PR_LINK captured in Phase 1, or (none)}"
+   ISSUE_PR_LINK: {ISSUE_PR_LINK captured in Phase 1, or (none)}
+   COMPLIANCE_FRAMEWORKS: {COMPLIANCE_FRAMEWORKS}"
    ```
    - Loop back to Phase 3 (re-validate)
 4. If `validation_retry_count > 2`: Report failures to user and halt
@@ -433,7 +434,8 @@ Validate alignment with request and plan. Report ALIGNED or MISALIGNED with deta
    SCOPE: Fix only the listed misalignments, no other changes
    CREATE_PR: false
    ISSUE_NUMBER: {ISSUE_ID captured in Phase 1, or (none)}
-   ISSUE_PR_LINK: {ISSUE_PR_LINK captured in Phase 1, or (none)}"
+   ISSUE_PR_LINK: {ISSUE_PR_LINK captured in Phase 1, or (none)}
+   COMPLIANCE_FRAMEWORKS: {COMPLIANCE_FRAMEWORKS}"
    ```
    - Spawn Validate agent to verify fix didn't break tests:
    ```
@@ -480,7 +482,8 @@ After every Test agent run — PASS or FAIL, first run or retry — append its T
    SCOPE: Fix only the listed failures, no other changes
    CREATE_PR: false
    ISSUE_NUMBER: {ISSUE_ID captured in Phase 1, or (none)}
-   ISSUE_PR_LINK: {ISSUE_PR_LINK captured in Phase 1, or (none)}"
+   ISSUE_PR_LINK: {ISSUE_PR_LINK captured in Phase 1, or (none)}
+   COMPLIANCE_FRAMEWORKS: {COMPLIANCE_FRAMEWORKS}"
    ```
    - Spawn Validate agent to verify fix didn't break tests:
    ```
@@ -505,7 +508,7 @@ Strategy-conditional: run when the PR already exists — **SINGLE_CODE_AGENT** a
 3. **If NO_PR or NO_CI** → skip: "No PR/CI configured, skipping CI validation." Proceed to Phase 10.
 4. **If PENDING** → poll every 60 seconds (global budget, see step 7). Re-spawn Git agent each poll. If PASSING → proceed. If still PENDING after budget exhausted → report "CI still running — verify manually before merging" and proceed.
 5. **If INDETERMINATE** → poll as PENDING within the same budget. If still INDETERMINATE after budget exhausted → report "CI status unknown — verify manually before merging" and proceed.
-6. **If FAILING** → report failing checks. Spawn `Agent(subagent_type="Code")` to fix CI failures based on check names and failure context. After fix, push and re-check. Max 2 fix attempts. If still failing → report failures and proceed.
+6. **If FAILING** → report failing checks. Spawn `Agent(subagent_type="Code")` with `COMPLIANCE_FRAMEWORKS` to fix CI failures based on check names and failure context. After fix, push and re-check. Max 2 fix attempts. If still failing → report failures and proceed.
 7. **Total budget**: max 10 polls and max 2 fix attempts across all check/fix cycles combined. If budget exhausted, report current status and proceed.
 <!-- /PATTERN: ci-status-gate -->
 
@@ -529,7 +532,8 @@ PR_DESCRIPTION_GUIDANCE: {pr_description_guidance}
 ISSUE_NUMBER: {ISSUE_ID captured in Phase 1, or (none)}
 ISSUE_PR_LINK: {ISSUE_PR_LINK captured in Phase 1, or (none)}
 PR_EXCEPTIONS: {the ## Evidence Exceptions section of .devflow/docs/handoff-{branch_slug}.md verbatim, or (none)}
-PR_TEST_PLAN_BLOCK: {PR_TEST_PLAN_BLOCK from Phase 1 verbatim, or (none)}"
+PR_TEST_PLAN_BLOCK: {PR_TEST_PLAN_BLOCK from Phase 1 verbatim, or (none)}
+COMPLIANCE_FRAMEWORKS: {COMPLIANCE_FRAMEWORKS}"
 ```
 
 Its Responsibility 7 composes the body, pastes `ISSUE_PR_LINK`, `PR_EXCEPTIONS` and `PR_TEST_PLAN_BLOCK` through their paste gates and scrubs the body (D11) before `gh pr create`. This command renders no link line and creates no PR itself: the Git agent's Phase-1 rendering is the only one, forwarded verbatim.
