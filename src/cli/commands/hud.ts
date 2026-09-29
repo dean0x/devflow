@@ -101,7 +101,8 @@ const DEVFLOW_STATUSLINE_SUFFIXES = [
  * are still recognised. A bare `statusline.sh` (the Claude Code docs' own example,
  * `~/.claude/statusline.sh`) or a path that merely contains a `devflow` segment is
  * the user's (applies ADR-024: remove or replace only what devflow provably wrote).
- * Backslashes are read as slashes so a Windows install is matched the same way.
+ * Backslashes are read as slashes so a Windows install is matched the same way. A
+ * hand-edited command that is not a string is the user's, as in `endsWithAny`.
  *
  * Every caller converges through this one predicate: `addHudStatusLine` (init's
  * settings pass with the HUD on, `init --hud-only`, `hud --enable`),
@@ -110,7 +111,10 @@ const DEVFLOW_STATUSLINE_SUFFIXES = [
  * (`hud --enable`, `hud --status`).
  */
 function isDevFlowStatusLine(statusLine: StatusLine): boolean {
-  const cmd = (statusLine.command ?? '').trim().replace(/\\/g, '/');
+  // Parsed from a hand-editable settings.json, so the declared type is not a guarantee.
+  const raw: unknown = statusLine.command;
+  if (typeof raw !== 'string') return false;
+  const cmd = raw.trim().replace(/\\/g, '/');
   return DEVFLOW_STATUSLINE_SUFFIXES.some((suffix) => cmd.endsWith(suffix));
 }
 

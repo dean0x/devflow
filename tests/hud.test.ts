@@ -253,6 +253,24 @@ describe('hasNonDevFlowStatusLine', () => {
   });
 });
 
+describe('a hand-edited statusLine whose command is not a string', () => {
+  const NON_STRING_COMMANDS: readonly unknown[] = [42, true, ['/home/user/.devflow/scripts/hud.sh'], { path: 'hud.sh' }];
+  const settingsWith = (command: unknown): string =>
+    JSON.stringify({ statusLine: { type: 'command', command }, model: 'opus' }, null, 2) + '\n';
+
+  it.each(NON_STRING_COMMANDS)('is not devflow\'s (command %j)', (command) => {
+    const input = settingsWith(command);
+    expect(hasHudStatusLine(input)).toBe(false);
+    expect(hasNonDevFlowStatusLine(input)).toBe(true);
+  });
+
+  it.each(NON_STRING_COMMANDS)('is left byte-identical by addHudStatusLine and removeHudStatusLine (command %j)', (command) => {
+    const input = settingsWith(command);
+    expect(addHudStatusLine(input, '/home/user/.devflow')).toBe(input);
+    expect(removeHudStatusLine(input)).toBe(input);
+  });
+});
+
 /**
  * TP-23 (AC-19, D-HUD-EXACT-OWNER): a statusLine is devflow's only when its command
  * ends in `/.devflow/scripts/hud.sh` or the legacy `/.devflow/scripts/statusline.sh`.
