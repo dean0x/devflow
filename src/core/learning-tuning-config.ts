@@ -88,13 +88,15 @@ function readConfigFile(filePath: string): string | null {
  * Priority (highest wins): project config → global config → defaults.
  *
  * - Global:  `~/.devflow/learning.json`
- * - Project: `<cwd>/.devflow/learning/learning.json`
+ * - Project: `<ledgerRoot>/.devflow/learning/learning.json` — pass the ledger root
+ *   (getLedgerRoot), where session-start-context reads it and `devflow learning
+ *   --configure` writes it (D-LEDGER-MAIN-WORKTREE).
  *
  * Invalid JSON in either file is silently ignored and treated as absent.
  */
-export function loadLearningTuningConfig(cwd: string): LearningTuningConfig {
+export function loadLearningTuningConfig(ledgerRoot: string): LearningTuningConfig {
   const globalConfigPath = path.join(getDevFlowDirectory(), 'learning.json');
-  const projectConfigPath = getLearningTuningConfigPath(cwd);
+  const projectConfigPath = getLearningTuningConfigPath(ledgerRoot);
 
   let config: LearningTuningConfig = { ...DEFAULTS };
 

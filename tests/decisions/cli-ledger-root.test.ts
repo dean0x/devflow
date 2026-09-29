@@ -36,6 +36,7 @@ import {
   getDecisionsLogPath,
   getLearningDir,
   getLearningPendingTurnsPath,
+  getLearningTuningConfigPath,
 } from '../../src/core/project-paths.js';
 
 const OBS = JSON.stringify({
@@ -115,6 +116,25 @@ describe('devflow learning in a linked worktree acts on the main checkout\'s led
     await learningCommand.parseAsync(['--reset'], { from: 'user' });
     expect(fs.existsSync(getLearningDir(main))).toBe(false);
     expect(fs.existsSync(path.join(wt, '.devflow'))).toBe(false);
+  });
+
+  it('--configure writes the project tuning config where session-start-context reads it: the main checkout\'s ledger', async () => {
+    // The hook resolves the Learning agent's model from $LEDGER_ROOT/.devflow/learning/learning.json.
+    vi.mocked(p.select).mockResolvedValueOnce('sonnet').mockResolvedValueOnce('project');
+    vi.mocked(p.confirm).mockResolvedValueOnce(false);
+    await learningCommand.parseAsync(['--configure'], { from: 'user' });
+    expect(JSON.parse(fs.readFileSync(getLearningTuningConfigPath(main), 'utf-8'))).toEqual({ model: 'sonnet', debug: false });
+    expect(fs.existsSync(path.join(wt, '.devflow'))).toBe(false);
+  });
+
+  it('--configure outside a git project keeps writing under the current directory', async () => {
+    const plain = path.join(base, 'plain');
+    fs.mkdirSync(plain);
+    vi.spyOn(process, 'cwd').mockReturnValue(plain);
+    vi.mocked(p.select).mockResolvedValueOnce('haiku').mockResolvedValueOnce('project');
+    vi.mocked(p.confirm).mockResolvedValueOnce(true);
+    await learningCommand.parseAsync(['--configure'], { from: 'user' });
+    expect(JSON.parse(fs.readFileSync(getLearningTuningConfigPath(plain), 'utf-8'))).toEqual({ model: 'haiku', debug: true });
   });
 
   it('--disable drains the main checkout\'s learning queue', async () => {

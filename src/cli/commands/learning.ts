@@ -193,9 +193,12 @@ async function handleConfigure(): Promise<void> {
     await fs.writeFile(path.join(globalDir, 'learning.json'), configJson, 'utf-8');
     p.log.success(`Global config written to ${color.dim(path.join(globalDir, 'learning.json'))}`);
   } else {
-    const learningDir = getLearningDir(process.cwd());
-    await fs.mkdir(learningDir, { recursive: true });
-    const projectConfigPath = getLearningTuningConfigPath(process.cwd());
+    // D-LEDGER-MAIN-WORKTREE: session-start-context reads the project tuning config
+    // from the ledger ($LEDGER_ROOT/.devflow/learning/), so write it there — the
+    // main checkout in a linked worktree; the current directory outside git.
+    const projectRoot = (await getLedgerRoot()) ?? process.cwd();
+    await fs.mkdir(getLearningDir(projectRoot), { recursive: true });
+    const projectConfigPath = getLearningTuningConfigPath(projectRoot);
     await fs.writeFile(projectConfigPath, configJson, 'utf-8');
     p.log.success(`Project config written to ${color.dim(projectConfigPath)}`);
   }
