@@ -61,6 +61,17 @@ const CLAUDEIGNORE_NEGATION = '!.claudeignore';
 const DEVFLOW_POLICY_LINE = '!.devflow/policy.json';
 
 /**
+ * Re-includes the team-committed project settings file (D-GITIGNORE-V6). The same
+ * contract as the policy line: a COMPLETION line, never a presence sentinel — a
+ * user may author it before devflow ever runs, so its presence proves nothing about
+ * the block (avoids PF-059). It sits after the policy line and before `.claudeignore`,
+ * so a v5 block, which ends in `.claudeignore`, gains it as its last line. Without it
+ * `.devflow/*` ignores `.devflow/project.json`, and a team could only commit it with
+ * `git add -f`. Devflow never writes the file itself (ADR-024).
+ */
+const DEVFLOW_PROJECT_LINE = '!.devflow/project.json';
+
+/**
  * The shared .devflow/ gitignore block. Everything under .devflow/ is local
  * (memory, learning, docs, locks) EXCEPT:
  * - Feature knowledge bases: index.md and every {slug}/KNOWLEDGE.md are tracked
@@ -70,6 +81,9 @@ const DEVFLOW_POLICY_LINE = '!.devflow/policy.json';
  * - policy.json: the team-owned evidence policy, read from the default branch by
  *   resolve-evidence-policy.cjs; GIT-TRACKED so a team can commit it without `git add -f`.
  *   Devflow never writes it.
+ * - project.json: the team-committed settings (evidence, compliance, tracker, review
+ *   publication, narrow-only feature switches) both resolvers read; GIT-TRACKED for
+ *   the same reason (D-GITIGNORE-V6). Devflow never writes it.
  *
  * Re-including files under an ignored tree needs a `dir/*` + `!dir/keep` pair at
  * each level — a bare `.devflow/` excludes the directory so git never descends and
@@ -81,9 +95,10 @@ const DEVFLOW_POLICY_LINE = '!.devflow/policy.json';
 const DEVFLOW_GITIGNORE_BLOCK_LINES = [
   '# Devflow runtime data — local by default (memory, learning, docs, locks).',
   '# Shared via git: feature knowledge bases under .devflow/features/ (index.md and',
-  '# every {slug}/KNOWLEDGE.md), .devflow/conventions.md (naming authority) and',
-  '# .devflow/policy.json (evidence policy). To stop sharing the first two, re-add',
-  '# `.devflow/features/` or `.devflow/conventions.md` to your own .gitignore.',
+  '# every {slug}/KNOWLEDGE.md), .devflow/conventions.md (naming authority),',
+  '# .devflow/policy.json (evidence policy) and .devflow/project.json (team settings).',
+  '# To stop sharing the first two, re-add `.devflow/features/` or',
+  '# `.devflow/conventions.md` to your own .gitignore.',
   '.devflow/*',
   '!.devflow/features/',
   '.devflow/features/*',
@@ -93,6 +108,7 @@ const DEVFLOW_GITIGNORE_BLOCK_LINES = [
   DEVFLOW_GITIGNORE_SENTINEL_V2,
   DEVFLOW_GITIGNORE_SENTINEL_V3,
   DEVFLOW_POLICY_LINE,
+  DEVFLOW_PROJECT_LINE,
   CLAUDEIGNORE_LINE,
 ];
 
@@ -130,13 +146,15 @@ const LEGACY_DEVFLOW_COMMENT = '# Devflow runtime data (local by default; remove
 
 /**
  * PURE: given existing .gitignore content, return the content that ignores
- * `.devflow/` with the feature-knowledge + conventions.md + policy.json carve-out —
- * or `null` when no change is needed. Idempotent: feeding its own output back returns `null`.
+ * `.devflow/` with the feature-knowledge + conventions.md + policy.json + project.json
+ * carve-out — or `null` when no change is needed. Idempotent: feeding its own output
+ * back returns `null`.
  *
- * D-GITIGNORE-V5: the block is detected ONLY by its own devflow-unique sentinel
- * (`!.devflow/conventions.md`). `.claudeignore` and `!.devflow/policy.json` are
- * COMPLETION lines — users legitimately author both themselves — so each is topped up
- * when missing and never read as proof the block exists. A presence check on a
+ * D-GITIGNORE-V5 / D-GITIGNORE-V6: the block is detected ONLY by its own
+ * devflow-unique sentinel (`!.devflow/conventions.md`). `.claudeignore`,
+ * `!.devflow/policy.json` and `!.devflow/project.json` are COMPLETION lines — users
+ * legitimately author all three themselves — so each is topped up when missing and
+ * never read as proof the block exists. A presence check on a
  * user-authored line inverts both halves of the contract: projects that already carry
  * that line are told the block is installed when it is not, and a user's
  * `!.claudeignore` un-ignore is silently reversed by re-appending `.claudeignore`
@@ -144,23 +162,25 @@ const LEGACY_DEVFLOW_COMMENT = '# Devflow runtime data (local by default; remove
  *
  * `hasClaudeignoreEntry` is true when some whole line, trimmed, is exactly
  * `.claudeignore` OR `!.claudeignore`. Treating both forms as "present" both honours
- * an un-ignore and makes every branch converge on re-run. `hasPolicyLine` is true when
- * some whole line, trimmed, is exactly `!.devflow/policy.json`. The missing completion
- * lines, in block order, are [policy line, `.claudeignore` (only when
+ * an un-ignore and makes every branch converge on re-run. `hasPolicyLine` and
+ * `hasProjectLine` are true when some whole line, trimmed, is exactly
+ * `!.devflow/policy.json` / `!.devflow/project.json`. The missing completion lines, in
+ * block order, are [policy line, project line, `.claudeignore` (only when
  * `!hasClaudeignoreEntry`)].
  *
  * 1. A `/.devflow/` line present → `null` (user opt-out; respect manual config).
  * 2. v3 sentinel present → append the missing completion lines; `null` when none are
- *    missing. This is the v4→v5 upgrade: a v4 block gains only the policy line, after
- *    its `.claudeignore` line, and keeps its old comment.
+ *    missing. This is the v4→v6 and v5→v6 upgrade: a v5 block gains only the project
+ *    line and a v4 block the policy and project lines, after its `.claudeignore` line,
+ *    each keeping its old comment.
  * 3. v2 sentinel present, no v3 → append `!.devflow/conventions.md` followed by the
  *    missing completion lines.
  * 4. Legacy bare `.devflow/` present → strip it (+ our old comment), then append the
  *    block; no block at all → append the block. The block is emitted MINUS its final
- *    `.claudeignore` line when `hasClaudeignoreEntry`. A user's own policy line is
- *    duplicated harmlessly here, and the re-run is a no-op.
- * 5. Neither completion line is ever a sentinel. The marker file
- *    (`.devflow/.root-gitignore-configured-v5`) is a fast-path claim, never proof.
+ *    `.claudeignore` line when `hasClaudeignoreEntry`. A user's own policy or project
+ *    line is duplicated harmlessly here, and the re-run is a no-op.
+ * 5. No completion line is ever a sentinel. The marker file
+ *    (`.devflow/.root-gitignore-configured-v6`) is a fast-path claim, never proof.
  *
  * Line matching is whole-line, whitespace-tolerant, exact text — never substring.
  * Both append forms are mirrored byte-for-byte in the shell twin
@@ -175,10 +195,12 @@ export function computeDevflowGitignore(existingContent: string): string | null 
     l => l === CLAUDEIGNORE_LINE || l === CLAUDEIGNORE_NEGATION,
   );
   const hasPolicyLine = trimmed.includes(DEVFLOW_POLICY_LINE);
+  const hasProjectLine = trimmed.includes(DEVFLOW_PROJECT_LINE);
 
   /** The block-completing lines this file lacks, in block order. */
   const missingCompletionLines: readonly string[] = [
     ...(hasPolicyLine ? [] : [DEVFLOW_POLICY_LINE]),
+    ...(hasProjectLine ? [] : [DEVFLOW_PROJECT_LINE]),
     ...(hasClaudeignoreEntry ? [] : [CLAUDEIGNORE_LINE]),
   ];
 
@@ -1216,22 +1238,29 @@ export async function discoverProjectGitRoots(claudeDir: string): Promise<string
 /**
  * Current carve-out marker version. Bump when the block format changes — together
  * with the shell twin's stamp (ensure-root-gitignore) and the ensure-devflow-init
- * fast path, in one commit (D-GITIGNORE-V5).
+ * fast path, in one commit.
+ *
+ * D-GITIGNORE-V6 (#392): v6 adds the `!.devflow/project.json` completion line. A
+ * v5-stamped project misses the v6 fast path once, gains that line (and nothing else
+ * — its comment and every other line stay byte-identical) and is re-stamped v6, so
+ * a team can commit `.devflow/project.json` without `git add -f`. v2–v5 inputs all
+ * converge on the same completion order: policy, project, `.claudeignore`.
  */
-const GITIGNORE_MARKER_V5 = '.root-gitignore-configured-v5';
+const GITIGNORE_MARKER_V6 = '.root-gitignore-configured-v6';
 /**
  * Earlier markers, the unversioned (v1) one included — every one is removed
- * whenever the project is v5-stamped, on the fast path too: an older devflow can
- * re-stamp one beside v5, and the shell twin drops the same four.
+ * whenever the project is v6-stamped, on the fast path too: an older devflow can
+ * re-stamp one beside v6, and the shell twin drops the same five.
  */
 const LEGACY_GITIGNORE_MARKERS = [
+  '.root-gitignore-configured-v5',
   '.root-gitignore-configured-v4',
   '.root-gitignore-configured-v3',
   '.root-gitignore-configured-v2',
   '.root-gitignore-configured',
 ] as const;
 
-/** Remove every legacy marker; an absent one is a no-op. Call only once v5 is stamped. */
+/** Remove every legacy marker; an absent one is a no-op. Call only once v6 is stamped. */
 async function removeLegacyGitignoreMarkers(devflowDir: string): Promise<void> {
   for (const legacy of LEGACY_GITIGNORE_MARKERS) {
     try { await fs.rm(path.join(devflowDir, legacy), { force: true }); } catch { /* ok if absent */ }
@@ -1240,8 +1269,8 @@ async function removeLegacyGitignoreMarkers(devflowDir: string): Promise<void> {
 
 /**
  * Deterministically ensure the project root .gitignore applies the `.devflow/`
- * carve-out (local by default; feature knowledge, conventions.md and the evidence
- * policy shared via git).
+ * carve-out (local by default; feature knowledge, conventions.md, the evidence
+ * policy and the project settings shared via git).
  *
  * Manages ONLY `.devflow/` — never `.claude/` — because a project's `.claude/`
  * is its own to share or ignore. This is the init-time counterpart to the always-on
@@ -1252,11 +1281,11 @@ async function removeLegacyGitignoreMarkers(devflowDir: string): Promise<void> {
  * Called unconditionally (independent of every feature toggle) whenever a git
  * root is known.
  *
- * Uses a versioned project-local marker file (`.devflow/.root-gitignore-configured-v5`)
+ * Uses a versioned project-local marker file (`.devflow/.root-gitignore-configured-v6`)
  * for fast-path detection — the same pattern as the shell twin. The marker is a claim,
  * not proof, so even a marked install re-reads .gitignore and re-runs
  * computeDevflowGitignore; bumping the version forces a re-run once per install, which
- * is how a v4-marked project gains the policy line and is re-stamped v5.
+ * is how a v5-marked project gains the project line and is re-stamped v6.
  *
  * Idempotent: computeDevflowGitignore returns null for a converged file, so a
  * marked install performs one read and no write. Errors are swallowed
@@ -1268,24 +1297,24 @@ export async function ensureDevflowGitignore(
 ): Promise<void> {
   try {
     const devflowDir = path.join(gitRoot, '.devflow');
-    const markerV5 = path.join(devflowDir, GITIGNORE_MARKER_V5);
+    const markerV6 = path.join(devflowDir, GITIGNORE_MARKER_V6);
     const gitignorePath = path.join(gitRoot, '.gitignore');
 
-    // Fast-path with verification: v5 marker normally means the block is installed,
+    // Fast-path with verification: v6 marker normally means the block is installed,
     // but the marker is a claim, not proof — a merge-conflict resolution may have
     // dropped the block. Even when the marker exists, read .gitignore (one cheap
     // read) and run computeDevflowGitignore; write only when it returns non-null.
     // Idempotent: converged file → computeDevflowGitignore returns null → no write.
-    let v5Marked = false;
-    try { await fs.access(markerV5); v5Marked = true; } catch { /* absent */ }
-    if (v5Marked) {
+    let v6Marked = false;
+    try { await fs.access(markerV6); v6Marked = true; } catch { /* absent */ }
+    if (v6Marked) {
       let existingContent = '';
       try { existingContent = await fs.readFile(gitignorePath, 'utf-8'); } catch { /* absent */ }
       const healContent = computeDevflowGitignore(existingContent);
       if (healContent !== null) {
         await fs.writeFile(gitignorePath, healContent, 'utf-8');
         if (verbose) {
-          p.log.success('.gitignore configured (.devflow/ local; feature knowledge + conventions + evidence policy shared)');
+          p.log.success('.gitignore configured (.devflow/ local; feature knowledge + conventions + evidence policy + project settings shared)');
         }
       }
       await removeLegacyGitignoreMarkers(devflowDir);
@@ -1301,13 +1330,13 @@ export async function ensureDevflowGitignore(
     if (newContent !== null) {
       await fs.writeFile(gitignorePath, newContent, 'utf-8');
       if (verbose) {
-        p.log.success('.gitignore configured (.devflow/ local; feature knowledge + conventions + evidence policy shared)');
+        p.log.success('.gitignore configured (.devflow/ local; feature knowledge + conventions + evidence policy + project settings shared)');
       }
     }
 
-    // Stamp v5 marker so subsequent runs fast-path; drop every legacy marker.
+    // Stamp v6 marker so subsequent runs fast-path; drop every legacy marker.
     await fs.mkdir(devflowDir, { recursive: true });
-    await fs.writeFile(markerV5, '', 'utf-8');
+    await fs.writeFile(markerV6, '', 'utf-8');
     await removeLegacyGitignoreMarkers(devflowDir);
   } catch (error) {
     if (verbose) {

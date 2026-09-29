@@ -189,7 +189,7 @@ describe('MDS host discovery', () => {
     }
   });
 
-  it('commands/_partials/ holds exactly the manifest\'s 13 partials (both directions)', async () => {
+  it('commands/_partials/ holds exactly the manifest\'s 14 partials (both directions)', async () => {
     const { partials } = await collectMdsNames(PARTIALS_DIR);
     expect(partials).toEqual([...MDS_PARTIALS].sort());
   });
@@ -224,7 +224,7 @@ describe('MDS host discovery', () => {
     return found.sort();
   }
 
-  it('src/ holds exactly the manifest\'s 14 partials, wherever they live (both directions)', async () => {
+  it('src/ holds exactly the manifest\'s 15 partials, wherever they live (both directions)', async () => {
     const partials = await collectRepoPartials(path.join(ROOT, 'src'));
     expect(
       partials,
@@ -236,7 +236,7 @@ describe('MDS host discovery', () => {
       'the walk must reach outside src/assets/commands/_partials/, or widening it bought nothing',
     ).toContain(MDS_REFERENCE_PARTIALS[0]);
     // Manifest length floor — floors never decrease (numeric-floors.json: partial-count).
-    expect(ALL_MDS_PARTIALS.length).toBeGreaterThanOrEqual(14);
+    expect(ALL_MDS_PARTIALS.length).toBeGreaterThanOrEqual(15);
   });
 
   it('known-bad probe: the repo-wide collector reports a seeded partial and skips a seeded host', async () => {

@@ -610,7 +610,7 @@ export async function drainDisabledFeatureQueues(
  * leaving those features' artifacts on disk: the record stopped describing the
  * machine, the next re-init seeded every feature off (ADR-014), and with
  * memory/learning/knowledge switched by the manifest alone
- * (D-FEATURES-MACHINE-WIDE) a HUD install would have really disabled them
+ * (D-FEATURES-NARROW-ONLY) a HUD install would have really disabled them
  * everywhere. `version` is kept too: --hud-only reinstalls no plugin, and a
  * bumped version would make the next init skip the upgrade it still owes.
  *
@@ -2096,7 +2096,7 @@ export const initCommand = new Command('init')
 
       // Memory hooks — Stop (memory-worker), SessionStart (session-start-memory),
       // PreCompact — through the same transform `devflow memory --enable/--disable`
-      // uses (D-FEATURES-MACHINE-WIDE). Learning agent (spawned via
+      // uses (D-FEATURES-NARROW-ONLY). Learning agent (spawned via
       // session-start-context directive) handles decision/pitfall detection.
       // Knowledge is handled in-command via write-through (knowledge_writeback MDS partial).
       content = convergeMemoryHooks(content, memoryEnabled, devflowDir);
@@ -2178,9 +2178,11 @@ export const initCommand = new Command('init')
       );
     }
 
-    // Write .devflow/config.json — facts about this repo, never a feature switch
-    // (memory/learning/knowledge are the manifest's alone, D-FEATURES-MACHINE-WIDE;
-    // the managed write drops their retired per-repo keys). A managed
+    // Write .devflow/config.json — facts about this repo. The machine switches for
+    // memory/learning/knowledge are the manifest's; a hand-written `features`
+    // object here only narrows them and is carried, never written
+    // (D-FEATURES-NARROW-ONLY; the managed write drops the retired top-level
+    // per-repo keys). A managed
     // read-modify-write, not a whole-file write: init owns only reviewPublication,
     // and every other key in the file — the hand-written per-repo `tracker`
     // override first among them — is carried from disk, under --reset too

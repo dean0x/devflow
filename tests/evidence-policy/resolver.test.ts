@@ -29,6 +29,7 @@ import * as path from 'path';
 import { normalizeComplianceFeature } from '../../src/core/compliance.js';
 import {
   ARGV,
+  PROJECT_CONFIG_LIB,
   RESOLVER_SCRIPT,
   buildScriptedShim,
   collectUnscopedSpawns,
@@ -843,20 +844,26 @@ const CONTENTS_CALL = [
   'gh', 'api', '--method', 'GET', 'repos/{owner}/{repo}/contents/.devflow/policy.json',
   '-f', 'ref=main', '-H', 'Accept: application/vnd.github.raw+json',
 ];
+const CONTENTS_PROJECT_CALL = [
+  'gh', 'api', '--method', 'GET', 'repos/{owner}/{repo}/contents/.devflow/project.json',
+  '-f', 'ref=main', '-H', 'Accept: application/vnd.github.raw+json',
+];
 const HEAD_CALL = ['git', 'cat-file', 'blob', 'HEAD:.devflow/policy.json'];
+const HEAD_PROJECT_CALL = ['git', 'cat-file', 'blob', 'HEAD:.devflow/project.json'];
 const LS_REMOTE_CALL = ['git', 'ls-remote', '--symref', 'origin', 'HEAD'];
 const VERIFY_CALL = ['git', 'rev-parse', '--verify', '--quiet', 'refs/remotes/origin/main'];
 const TRACKING_CALL = ['git', 'cat-file', 'blob', 'refs/remotes/origin/main:.devflow/policy.json'];
+const TRACKING_PROJECT_CALL = ['git', 'cat-file', 'blob', 'refs/remotes/origin/main:.devflow/project.json'];
 
 describe('argv log — exact sequences through the real spawnSync', SUBPROCESS_TIMEOUT, () => {
-  it('reachable + present: probe, contents (GET), HEAD blob — nothing else', () => {
+  it('reachable + present: probe, project.json then policy.json contents (GET), HEAD blobs — nothing else', () => {
     writeWorktree(root, BODY.required);
     const run = e2e(scenarioCalls({
       root, defaultBranch: 'main', remote: { bytes: BODY.required }, head: { bytes: BODY.required },
     }));
     expect(run.status).toBe(0);
     expect(expectOneGrammarLine(run.stdout)).toBe(`EVIDENCE_POLICY=required SOURCE=file REF=main ${LINE.requiredInputs}`);
-    expect(run.log).toEqual([TOPLEVEL_CALL, PROBE_CALL, CONTENTS_CALL, HEAD_CALL]);
+    expect(run.log).toEqual([TOPLEVEL_CALL, PROBE_CALL, CONTENTS_PROJECT_CALL, CONTENTS_CALL, HEAD_PROJECT_CALL, HEAD_CALL]);
     expect(collectForbiddenCalls(run.log)).toEqual([]);
   });
 
@@ -864,11 +871,11 @@ describe('argv log — exact sequences through the real spawnSync', SUBPROCESS_T
     const run = e2e(scenarioCalls({ root, defaultBranch: 'main', remote: 'absent', head: 'absent' }));
     expect(run.status).toBe(0);
     expect(expectOneGrammarLine(run.stdout)).toBe(`EVIDENCE_POLICY=standard SOURCE=default REF=main ${LINE.standardInputs}`);
-    expect(run.log).toEqual([TOPLEVEL_CALL, PROBE_CALL, CONTENTS_CALL, HEAD_CALL]);
+    expect(run.log).toEqual([TOPLEVEL_CALL, PROBE_CALL, CONTENTS_PROJECT_CALL, CONTENTS_CALL, HEAD_PROJECT_CALL, HEAD_CALL]);
     expect(collectForbiddenCalls(run.log)).toEqual([]);
   });
 
-  it('probe fails ⇒ ls-remote, tracking ref, tracking blob, HEAD blob', () => {
+  it('probe fails ⇒ ls-remote, tracking ref, tracking blobs, HEAD blobs', () => {
     writeWorktree(root, BODY.standard);
     const run = e2e(scenarioCalls({
       root, lsRemoteBranch: 'main', tracking: { bytes: BODY.standard }, head: { bytes: BODY.standard },
@@ -876,17 +883,21 @@ describe('argv log — exact sequences through the real spawnSync', SUBPROCESS_T
     expect(run.status).toBe(0);
     expect(expectOneGrammarLine(run.stdout))
       .toBe(`EVIDENCE_POLICY=standard SOURCE=worktree REF=main WARN=remote-unavailable ${LINE.standardInputs}`);
-    expect(run.log).toEqual([TOPLEVEL_CALL, PROBE_CALL, LS_REMOTE_CALL, VERIFY_CALL, TRACKING_CALL, HEAD_CALL]);
+    expect(run.log).toEqual([
+      TOPLEVEL_CALL, PROBE_CALL, LS_REMOTE_CALL, VERIFY_CALL, TRACKING_PROJECT_CALL, TRACKING_CALL, HEAD_PROJECT_CALL, HEAD_CALL,
+    ]);
     expect(collectForbiddenCalls(run.log)).toEqual([]);
   });
 
-  it('contents 403 ⇒ no ls-remote (the probe already named the branch)', () => {
+  it('contents 403 ⇒ no policy.json contents call and no ls-remote (the probe already named the branch)', () => {
     writeWorktree(root, BODY.standard);
     const run = e2e(scenarioCalls({
       root, defaultBranch: 'main', remote: 'forbidden', tracking: { bytes: BODY.standard }, head: { bytes: BODY.standard },
     }));
     expect(run.status).toBe(0);
-    expect(run.log).toEqual([TOPLEVEL_CALL, PROBE_CALL, CONTENTS_CALL, VERIFY_CALL, TRACKING_CALL, HEAD_CALL]);
+    expect(run.log).toEqual([
+      TOPLEVEL_CALL, PROBE_CALL, CONTENTS_PROJECT_CALL, VERIFY_CALL, TRACKING_PROJECT_CALL, TRACKING_CALL, HEAD_PROJECT_CALL, HEAD_CALL,
+    ]);
     expect(collectForbiddenCalls(run.log)).toEqual([]);
   });
 
@@ -945,7 +956,10 @@ describe('argv log — exact sequences through the real spawnSync', SUBPROCESS_T
       ['git', 'status'],
       ['gh', 'api', 'repos/{owner}/{repo}/contents/x', '-f', 'ref=main'],
       ['gh', 'pr', 'view'],
-      ...[TOPLEVEL_CALL, PROBE_CALL, CONTENTS_CALL, HEAD_CALL, LS_REMOTE_CALL, VERIFY_CALL, TRACKING_CALL],
+      ...[
+        TOPLEVEL_CALL, PROBE_CALL, CONTENTS_PROJECT_CALL, CONTENTS_CALL, HEAD_PROJECT_CALL, HEAD_CALL,
+        LS_REMOTE_CALL, VERIFY_CALL, TRACKING_PROJECT_CALL, TRACKING_CALL,
+      ],
     ])).toEqual([
       'git remote set-head origin -a',
       'git fetch origin',
@@ -1546,6 +1560,7 @@ describe('real git (gh faked unavailable, git real)', SUBPROCESS_TIMEOUT, () => 
 
 describe('source guards', () => {
   const SOURCE = fs.readFileSync(RESOLVER_SCRIPT, 'utf8');
+  const LIB_SOURCE = fs.readFileSync(PROJECT_CONFIG_LIB, 'utf8');
 
   /** Code lines only: `//` tails and JSDoc/block-comment lines are stripped, so prose naming a rule is not a violation of it. */
   function codeLines(source: string): string[] {
@@ -1590,11 +1605,22 @@ describe('source guards', () => {
     expect(collectFsWrites(`${SOURCE}\nconst f = fs.constants.O_WRONLY;\n`)).toHaveLength(1);
   });
 
-  it('requires Node built-ins only (fs, path, os, child_process) — and a seeded one is reported', () => {
+  it('requires Node built-ins and its own parser only — and a seeded one is reported', () => {
     const required = collectRequires(SOURCE);
     expect(required.length).toBeGreaterThan(0);
-    expect([...new Set(required)].sort()).toEqual(['child_process', 'fs', 'os', 'path']);
+    expect([...new Set(required)].sort()).toEqual(['./lib/project-config.cjs', 'child_process', 'fs', 'path']);
+    expect([...new Set(collectRequires(LIB_SOURCE))].sort()).toEqual(['fs', 'os', 'path']);
     expect(collectRequires(`${SOURCE}\nconst h = require('https');\n`)).toContain('https');
+    expect(collectRequires(`${LIB_SOURCE}\nconst c = require('child_process');\n`)).toContain('child_process');
+  });
+
+  it('the shared parser writes nothing, prints nothing, exits nothing and spawns nothing', () => {
+    expect(LIB_SOURCE).toContain("'use strict';");
+    expect(collectFsWrites(LIB_SOURCE)).toEqual([]);
+    expect(collectStdoutWrites(LIB_SOURCE)).toEqual([]);
+    expect(collectProcessExitCalls(LIB_SOURCE)).toEqual([]);
+    expect(collectExitCodeSetters(LIB_SOURCE)).toEqual([]);
+    expect(collectFsWrites(`${LIB_SOURCE}\nfs.renameSync(a, b);\n`)).toHaveLength(1);
   });
 
   it('never enables a shell, and never names a write-side git command in code', () => {
@@ -1612,8 +1638,12 @@ describe('source guards', () => {
     for (const marker of [
       'D-POLICY-LINE', 'D-POLICY-PROBE', 'D-POLICY-STRICT-SCHEMA',
       'D-POLICY-FOLD', 'D-POLICY-CHANGE-DETECT', 'D-POLICY-PLUMBING',
+      'D-POLICY-SOURCE-PRECEDENCE', 'D-COMPLIANCE-REPO-FLOOR',
     ]) {
       expect(SOURCE, `${marker} missing`).toContain(marker);
+    }
+    for (const marker of ['D-PROJECT-CONFIG', 'D-PROJECT-STRICT-KEYS', 'ADR-024', 'PF-023']) {
+      expect(LIB_SOURCE, `${marker} missing from the shared parser`).toContain(marker);
     }
   });
 });

@@ -11,8 +11,9 @@
 #
 # Usage: background-memory-update <CWD> [<manifest_path>]
 #   <manifest_path> — the devflow-global manifest whose `features.memory` is the
-#   machine-wide switch (D-FEATURES-MACHINE-WIDE). memory-worker passes it; when
-#   absent it resolves from the machine root, $HOME/.devflow (D-ONE-HOME).
+#   machine switch, which this checkout's project.json / config.json can only
+#   narrow (D-FEATURES-NARROW-ONLY). memory-worker passes it; when absent it
+#   resolves from the machine root, $HOME/.devflow (D-ONE-HOME).
 #
 # Success:      removes .pending-turns.processing; touches .last-refresh-ok
 # Failure:      leaves .pending-turns.processing; this worker is the PRIMARY recovery owner —
@@ -76,13 +77,14 @@ LOCK_DIR="$MEMORY_DIR/.working-memory.lock"
 TRIGGER_FILE="$MEMORY_DIR/.working-memory-last-trigger"
 OK_FILE="$MEMORY_DIR/.last-refresh-ok"
 
-# --- Re-check the machine-wide memory switch at runtime (defense-in-depth: the
-# feature may have been disabled since spawn). Same helper as every other
-# memory/learning gate (D-FEATURES-MACHINE-WIDE, see queue-append).
+# --- Re-check the memory switch at runtime (defense-in-depth: the feature may
+# have been disabled since spawn, or narrowed by a checkout that now carries a
+# `features.memory: false`). Same helper as every other memory/learning gate
+# (D-FEATURES-NARROW-ONLY, see queue-append).
 source "$SCRIPT_DIR/queue-append" || { echo "background-memory-update: failed to source queue-append" >&2; exit 1; }
-queue_read_gates "$DEVFLOW_MANIFEST"
+queue_read_gates "$DEVFLOW_MANIFEST" "$PROJECT_ROOT"
 if [ "$_QG_MEMORY" != "true" ]; then
-  log "ABORT: memory disabled machine-wide (disabled after spawn)"
+  log "ABORT: memory disabled (disabled after spawn)"
   exit 0
 fi
 

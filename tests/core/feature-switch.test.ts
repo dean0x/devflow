@@ -1,8 +1,9 @@
 /**
- * The machine-wide feature switch (D-FEATURES-MACHINE-WIDE).
+ * The machine-wide feature switch (D-FEATURES-NARROW-ONLY).
  *
  * memory, learning and knowledge are switched for the whole machine by
- * `features.<x>` in ~/.devflow/manifest.json and nothing else. Only an explicit
+ * `features.<x>` in ~/.devflow/manifest.json; a repository can only narrow that
+ * (resolve-settings.cjs, queue_read_gates), never widen it. Only an explicit
  * boolean `false` switches a feature off — the same rule the shell hooks apply
  * in queue_read_gates — and a write touches only that one key.
  */

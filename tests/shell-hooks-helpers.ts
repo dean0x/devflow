@@ -16,6 +16,22 @@ import * as path from 'path';
 /** The hook scripts as authored (source tree), never as installed. */
 export const HOOKS_DIR = path.resolve(import.meta.dirname, '..', 'src', 'assets', 'scripts', 'hooks');
 
+/**
+ * One hook-script run's own work — bash, git, jq, the queue appends — on a
+ * loaded machine: the 5 s vitest default that the hook tests which exec no node
+ * already run within.
+ */
+export const HOOK_RUN_ALLOWANCE_MS = 5_000;
+
+/**
+ * On macOS a node exec that follows fork-heavy tests is held until syspolicyd
+ * drains the reports those forks raised: 5-7 s measured on macOS 26.2 for the
+ * first exec, ~30 ms for the next (the full account is D-PROXY-EXEC-BARRIER in
+ * shell-hooks.test.ts). Linux has no such queue. This is the top of the
+ * measured range, paid at most once per test by a test that execs node once.
+ */
+export const NODE_EXEC_STALL_MS = 7_000;
+
 /** What one child run left behind, whatever its verdict. */
 export interface ChildExit {
   readonly stdout: string;

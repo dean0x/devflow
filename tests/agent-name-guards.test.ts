@@ -150,11 +150,11 @@ const RETIRED_ALLOWLIST: ReadonlyArray<AllowlistEntry> = [
     contexts: ['CodeReviewComments'],
   },
   {
-    path: 'src/assets/scripts/resolve-evidence-policy.cjs',
+    path: 'src/assets/scripts/lib/project-config.cjs',
     name: 'Coder',
     reason:
-      'THIRD_PARTY: "TextDecoder" — the WHATWG Encoding API the resolver decodes ' +
-      'policy bytes with (fatal on malformed UTF-8); no agent spawn reference',
+      'THIRD_PARTY: "TextDecoder" — the WHATWG Encoding API the shared config parser ' +
+      'decodes policy, project and manifest bytes with (fatal on malformed UTF-8); no agent spawn reference',
     contexts: ['TextDecoder'],
   },
 

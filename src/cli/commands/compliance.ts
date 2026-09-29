@@ -7,8 +7,8 @@
  * Avoids PF-009: per-artifact failures are warn-not-throw.
  * Avoids PF-015: enable/disable each converge BOTH artifacts unconditionally.
  * The evidence-policy lines (--status, and the --enable/--set suggestion) come
- *   from src/core/evidence-policy.ts, the seam onto the package's own resolver;
- *   the CLI prints .devflow/policy.json and never writes it (applies ADR-024).
+ *   from src/core/evidence-policy.ts, the seam onto the package's own resolvers;
+ *   the CLI prints .devflow/project.json and never writes it (applies ADR-024).
  */
 
 import { Command } from 'commander';
@@ -31,6 +31,8 @@ import {
   evidencePolicySuggestion,
   formatEvidencePolicyUnavailable,
   loadEvidencePolicyModule,
+  loadSettingsModule,
+  repoComplianceStatusLines,
 } from '../../core/evidence-policy.js';
 import { readManifest, writeManifest } from '../../core/manifest.js';
 import { convergeFromManifest } from '../../targets/claude-code/compliance-install.js';
@@ -307,9 +309,16 @@ export const complianceCommand = new Command('compliance')
       const driftInstalled = refIds.filter(id => !manifestSet.has(id));
       const { validMissing, invalidIds } = classifyDriftMissing(current.frameworks, refIds, registrySet);
 
+      // The repository's own declaration (.devflow/project.json) and, while the
+      // legacy policy file is still there, the hint to migrate it. Both come from
+      // the local settings resolver — one git call, no network — and add nothing
+      // when the repository declares nothing (the block is then unchanged).
+      const repoLines = repoComplianceStatusLines(loadSettingsModule(), { dir: process.cwd() });
+
       const lines: string[] = [
         `State:      ${enabledLabel}`,
         `Frameworks: ${fwLabel}`,
+        ...repoLines,
         '',
         `Skill:      ${skillOk ? color.green('installed') : color.dim('not installed')}` +
           (skillShadow === 'composition-skipped'
@@ -420,14 +429,17 @@ export const complianceCommand = new Command('compliance')
       );
     }
 
-    // Suggest the team policy file compliance now implies. Printed, never written:
-    // .devflow/policy.json is team-owned (D-POLICY-NO-WRITE, applies ADR-024).
+    // Suggest the team file compliance now implies. Printed, never written:
+    // .devflow/project.json is team-owned (D-POLICY-NO-WRITE, applies ADR-024).
     if (resolved.nextState.enabled) {
       const policyModule = loadEvidencePolicyModule();
+      const settingsModule = loadSettingsModule();
       if (!policyModule.ok) {
         p.log.warn(formatEvidencePolicyUnavailable(policyModule.error));
+      } else if (!settingsModule.ok) {
+        p.log.warn(formatEvidencePolicyUnavailable(settingsModule.error));
       } else {
-        const suggestion = evidencePolicySuggestion(resolved.nextState, policyModule.value);
+        const suggestion = evidencePolicySuggestion(resolved.nextState, policyModule.value, settingsModule.value);
         if (suggestion !== null) p.note(suggestion, 'Evidence policy');
       }
     }

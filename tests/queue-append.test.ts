@@ -15,12 +15,14 @@ import { execSync } from 'child_process';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
+import { SETTINGS_SWITCH_TABLE, type SwitchRow } from './fixtures/settings-switch-table.js';
+import { HOOK_RUN_ALLOWANCE_MS, NODE_EXEC_STALL_MS } from './shell-hooks-helpers.js';
 
 const HOOKS_DIR = path.resolve(__dirname, '..', 'src', 'assets', 'scripts', 'hooks');
 const QUEUE_APPEND = path.join(HOOKS_DIR, 'queue-append');
 
 /** Source the full dependency chain queue-append needs, then run `script`. */
-function runWithQueueAppend(script: string): { stdout: string; stderr: string; exitCode: number } {
+function runWithQueueAppend(script: string, env?: NodeJS.ProcessEnv): { stdout: string; stderr: string; exitCode: number } {
   const full = `
 set -e
 log() { :; }
@@ -32,7 +34,7 @@ source "${QUEUE_APPEND}"
 ${script}
 `;
   try {
-    const result = execSync(`bash -c '${full.replace(/'/g, "'\\''")}'`, { stdio: ['pipe', 'pipe', 'pipe'] });
+    const result = execSync(`bash -c '${full.replace(/'/g, "'\\''")}'`, { stdio: ['pipe', 'pipe', 'pipe'], env: env ?? process.env });
     return { stdout: result.toString(), stderr: '', exitCode: 0 };
   } catch (e: unknown) {
     const err = e as { stdout?: Buffer; stderr?: Buffer; status?: number };
@@ -345,8 +347,9 @@ describe('queue_read_gates', () => {
     fs.rmSync(tmpDir, { recursive: true, force: true });
   });
 
-  // D-FEATURES-MACHINE-WIDE: the gates read ~/.devflow/manifest.json alone. Raw
-  // file contents (not objects) so malformed JSON is expressible.
+  // The machine layer: ~/.devflow/manifest.json, read with no <root> argument
+  // (D-FEATURES-NARROW-ONLY; the repository layer is covered below). Raw file
+  // contents (not objects) so malformed JSON is expressible.
   type Raw = string | null;
 
   function readGates(manifest: Raw, opts: { noJq?: boolean } = {}): { memory: string; learning: string; exitCode: number } {
@@ -462,7 +465,7 @@ describe('queue_read_gates', () => {
     });
   }
 
-  it('the per-repo config is never read: a stale false beside the manifest decides nothing', () => {
+  it('without a <root>, no repository file is read: a stale false beside the manifest decides nothing', () => {
     // The pre-#378 signature took the repo config first. A stale
     // `.devflow/config.json` saying false must not switch anything off — and
     // passing its path where the manifest belongs must not either.
@@ -481,5 +484,221 @@ describe('queue_read_gates', () => {
     // invokes it as a plain statement.
     expect(readGates(manifestWith({})).exitCode).toBe(0);
     expect(readGates(manifestWith({ memory: false, learning: false })).exitCode).toBe(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The repository layer: queue_read_gates <manifest> <root> (D-FEATURES-NARROW-ONLY)
+// ---------------------------------------------------------------------------
+
+/**
+ * The budget of every test in the group below: one sourced queue-append run plus
+ * one node exec that may meet the syspolicyd wait. A gate read execs node at
+ * most once — the resolver's fold when a repository file can narrow, else the
+ * node-backend manifest parse (TP-34 pins it) — and the manifest parse that
+ * follows only a failed fold would meet a drained queue.
+ */
+const GATE_READ_TEST_BUDGET_MS = HOOK_RUN_ALLOWANCE_MS + NODE_EXEC_STALL_MS;
+
+describe('queue_read_gates <manifest> <root>: the repository narrows, never widens', { timeout: GATE_READ_TEST_BUDGET_MS }, () => {
+  let tmpDir: string;
+  let root: string;
+  let manifestPath: string;
+
+  beforeEach(() => {
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'queue-read-gates-repo-'));
+    root = path.join(tmpDir, 'repo');
+    fs.mkdirSync(path.join(root, '.devflow'), { recursive: true });
+    manifestPath = path.join(tmpDir, 'manifest.json');
+  });
+
+  afterEach(() => {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  function writeLayers(row: Pick<SwitchRow, 'manifest' | 'project' | 'personal'>): void {
+    if (row.manifest !== undefined) fs.writeFileSync(manifestPath, JSON.stringify(row.manifest));
+    if (row.project !== null) fs.writeFileSync(path.join(root, '.devflow', 'project.json'), row.project);
+    if (row.personal !== null) fs.writeFileSync(path.join(root, '.devflow', 'config.json'), row.personal);
+  }
+
+  function gatesAt(opts: { noJq?: boolean; env?: NodeJS.ProcessEnv } = {}): { memory: string; learning: string; exitCode: number } {
+    const { stdout, exitCode } = runWithQueueAppend(`
+      ${opts.noJq ? '_HAS_JQ=false' : ''}
+      queue_read_gates "${manifestPath}" "${root}"
+      echo "MEMORY=$_QG_MEMORY"
+      echo "LEARNING=$_QG_LEARNING"
+    `, opts.env);
+    return {
+      memory: stdout.match(/MEMORY=(\S*)/)?.[1] ?? '',
+      learning: stdout.match(/LEARNING=(\S*)/)?.[1] ?? '',
+      exitCode,
+    };
+  }
+
+  for (const backend of [{ name: 'jq', noJq: false }, { name: 'node fallback', noJq: true }]) {
+    // TP-49: the shared table, run through the shell gates. resolveSettings runs
+    // the same rows in tests/evidence-policy/settings-mode.test.ts, so a row that
+    // passes in both files is an answer the two implementations share.
+    describe(`TP-49 (${backend.name} backend): the shared switch table`, () => {
+      it.each(SETTINGS_SWITCH_TABLE.map((r) => [r.name, r] as const))('%s', (_name, row) => {
+        writeLayers(row);
+        expect(gatesAt({ noJq: backend.noJq })).toEqual({
+          memory: String(row.expect.memory),
+          learning: String(row.expect.learning),
+          exitCode: 0,
+        });
+      });
+    });
+  }
+
+  it('a symlinked project.json narrows nothing (the parser never follows one)', () => {
+    const target = path.join(tmpDir, 'elsewhere.json');
+    fs.writeFileSync(target, '{"features":{"memory":false,"learning":false}}');
+    fs.symlinkSync(target, path.join(root, '.devflow', 'project.json'));
+    expect(gatesAt()).toEqual({ memory: 'true', learning: 'true', exitCode: 0 });
+  });
+
+  it('a directory or FIFO where a file belongs is skipped without blocking', () => {
+    fs.mkdirSync(path.join(root, '.devflow', 'project.json'));
+    execSync(`mkfifo "${path.join(root, '.devflow', 'config.json')}"`);
+    expect(gatesAt()).toEqual({ memory: 'true', learning: 'true', exitCode: 0 });
+  });
+
+  it('an empty <root> reads no repository file', () => {
+    writeLayers({ manifest: undefined, project: '{"features":{"memory":false}}', personal: null });
+    const { stdout } = runWithQueueAppend(`
+      queue_read_gates "${manifestPath}" ""
+      echo "MEMORY=$_QG_MEMORY LEARNING=$_QG_LEARNING"
+    `);
+    expect(stdout).toContain('MEMORY=true LEARNING=true');
+  });
+
+  it('never exits non-zero with a narrowing file (set -e safety)', () => {
+    writeLayers({ manifest: undefined, project: '{"features":{"memory":false,"learning":false}}', personal: null });
+    expect(gatesAt()).toEqual({ memory: 'false', learning: 'false', exitCode: 0 });
+  });
+
+  // TP-34 (AC-30): the fork budget. Every capture hook and session start pays
+  // this read, so a repository file that cannot narrow must cost nothing. The
+  // counter is a PATH shim: `node` and `jq` stand-ins that log each exec and hand
+  // over to the real binary, so every parser fork is seen however it is spelled.
+  describe('TP-34 (AC-30): zero parser forks unless a file can narrow, exactly one when one can', () => {
+    let shimDir: string;
+    let forkLog: string;
+
+    const realBinary = (name: string): string | null => {
+      try {
+        return execSync(`command -v ${name}`, { shell: '/bin/bash' }).toString().trim() || null;
+      } catch {
+        return null;
+      }
+    };
+
+    beforeEach(() => {
+      shimDir = path.join(tmpDir, 'shim');
+      forkLog = path.join(tmpDir, 'forks.log');
+      fs.mkdirSync(shimDir);
+      for (const name of ['node', 'jq']) {
+        const real = realBinary(name);
+        if (real === null) continue;
+        const shim = path.join(shimDir, name);
+        fs.writeFileSync(shim, `#!/bin/bash\necho ${name} >> "${forkLog}"\nexec "${real}" "$@"\n`);
+        fs.chmodSync(shim, 0o755);
+      }
+    });
+
+    const forks = (): string[] => (fs.existsSync(forkLog) ? fs.readFileSync(forkLog, 'utf-8').trim().split('\n').filter(Boolean) : []);
+    const shimEnv = (): NodeJS.ProcessEnv => ({ ...process.env, PATH: `${shimDir}:${process.env.PATH ?? '/usr/bin:/bin'}` });
+    const MANIFEST = { version: '2.5.0', features: { memory: true, learning: true, knowledge: true, proxy: false } };
+
+    for (const backend of [{ name: 'jq', noJq: false }, { name: 'node fallback', noJq: true }]) {
+      describe(`${backend.name} backend`, () => {
+        const probe = () => gatesAt({ noJq: backend.noJq, env: shimEnv() });
+
+        it('no repository files: zero forks', () => {
+          writeLayers({ manifest: MANIFEST, project: null, personal: null });
+          expect(probe()).toEqual({ memory: 'true', learning: 'true', exitCode: 0 });
+          expect(forks()).toEqual([]);
+        });
+
+        it('repository files free of false: zero forks', () => {
+          writeLayers({
+            manifest: MANIFEST,
+            project: JSON.stringify({
+              version: 1, evidence: 'required', compliance: ['gdpr'],
+              tracker: { provider: 'jira', site: 'https://acme.atlassian.net', key: 'ACME' },
+              reviewPublication: 'auto', features: { memory: true, learning: true },
+            }, null, 2),
+            personal: '{"reviewPublication":"full","tracker":"github"}',
+          });
+          expect(probe()).toEqual({ memory: 'true', learning: 'true', exitCode: 0 });
+          expect(forks()).toEqual([]);
+        });
+
+        it('a false that is not a memory or learning switch: zero forks', () => {
+          // The legacy top-level keys sit before `features`, and knowledge and
+          // decisions have no shell gate: none of them can narrow a queue.
+          writeLayers({
+            manifest: MANIFEST,
+            project: '{"memory":false,"learning":false,"decisions":false,"features":{"knowledge":false,"decisions":false}}',
+            personal: '{"memory":false,"features":{"knowledge":false}}',
+          });
+          expect(probe()).toEqual({ memory: 'true', learning: 'true', exitCode: 0 });
+          expect(forks()).toEqual([]);
+        });
+
+        it('project.json features.learning false: exactly one fork, learning off', () => {
+          writeLayers({ manifest: MANIFEST, project: '{"version":1,"features":{"learning":false}}', personal: null });
+          expect(probe()).toEqual({ memory: 'true', learning: 'false', exitCode: 0 });
+          expect(forks()).toEqual(['node']);
+        });
+
+        it('a false in the manifest and in both repository files: still exactly one fork', () => {
+          writeLayers({
+            manifest: { features: { memory: false, learning: true } },
+            project: '{"features":{"learning":false}}',
+            personal: '{"features":{"memory":false}}',
+          });
+          expect(probe()).toEqual({ memory: 'false', learning: 'false', exitCode: 0 });
+          expect(forks()).toEqual(['node']);
+        });
+
+        it('an oversize or NUL-cut file: zero forks (the bounded read already knows it is invalid)', () => {
+          writeLayers({
+            manifest: MANIFEST,
+            project: '{"features":{"memory":false},"pad":"' + 'x'.repeat(5000) + '"}',
+            personal: '{"features":{"learning":false}}\u0000',
+          });
+          expect(probe()).toEqual({ memory: 'true', learning: 'true', exitCode: 0 });
+          expect(forks()).toEqual([]);
+        });
+      });
+    }
+  });
+});
+
+describe('every gate caller hands queue_read_gates its checkout root', () => {
+  // D-FEATURES-NARROW-ONLY: a caller that omits <root> would silently ignore the
+  // repository's narrowing, so the call shape is pinned across all of them.
+  const CALLERS = [
+    'capture-prompt', 'capture-turn', 'capture-question', 'memory-worker',
+    'pre-compact-memory', 'session-start-memory', 'background-memory-update', 'session-start-context',
+  ];
+
+  it('the caller list is every hook that calls the gate', () => {
+    const callers = fs.readdirSync(HOOKS_DIR)
+      .filter((f) => f !== 'queue-append' && fs.statSync(path.join(HOOKS_DIR, f)).isFile())
+      .filter((f) => /^\s*queue_read_gates /m.test(fs.readFileSync(path.join(HOOKS_DIR, f), 'utf-8')))
+      .sort();
+    expect(callers).toEqual([...CALLERS].sort());
+  });
+
+  it.each(CALLERS)('%s passes "$PROJECT_ROOT" as <root>', (hook) => {
+    const calls = fs.readFileSync(path.join(HOOKS_DIR, hook), 'utf-8')
+      .split('\n')
+      .filter((l) => /^\s*queue_read_gates /.test(l));
+    expect(calls.length).toBeGreaterThan(0);
+    for (const call of calls) expect(call.trim()).toMatch(/^queue_read_gates "[^"]+" "\$PROJECT_ROOT"$/);
   });
 });

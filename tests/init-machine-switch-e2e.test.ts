@@ -1,8 +1,9 @@
 /**
  * End-to-end: memory, learning and knowledge are MACHINE-WIDE features (#378,
- * D-FEATURES-MACHINE-WIDE). `devflow init --[no-]<feature>` and `devflow
+ * D-FEATURES-NARROW-ONLY). `devflow init --[no-]<feature>` and `devflow
  * <feature> --enable/--disable` write the one switch — `features.<feature>` in
- * ~/.devflow/manifest.json — and every runtime gate reads that switch alone.
+ * ~/.devflow/manifest.json — and every runtime gate reads that switch; a
+ * repository's `features` can only narrow it, never widen it.
  *
  * The reported bug: `devflow init --no-learning` printed "Learning: disabled"
  * while every OTHER repo — one holding a stale `learning: true` an earlier init
@@ -506,7 +507,7 @@ describe('init on→off re-init transitions', () => {
     expect(await readManifestFeatures()).toMatchObject({
       ambient: false, memory: false, hud: false, rules: false, learning: false, knowledge: false,
     });
-    // The per-repo config holds no feature switch (D-FEATURES-MACHINE-WIDE).
+    // init never writes a feature switch into the per-repo config (D-FEATURES-NARROW-ONLY).
     expect(await readRepoConfig(repoA)).toEqual({ reviewPublication: 'auto' });
     expect(existsSync(memoryQueue(repoA))).toBe(false);
     expect(existsSync(learningQueue(repoA)), 'the learning-off re-init drains the repo learning queue').toBe(false);

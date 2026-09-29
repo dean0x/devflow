@@ -621,8 +621,8 @@ describe('session-start-context: tracker setup directive (Section 3)', () => {
 
     // Baseline: a machine that never chose a tracker — no sentinel, and a
     // manifest with no tracker key. The manifest must be PRESENT in the baseline
-    // too: Sections 1–2 read its machine-wide learning switch
-    // (D-FEATURES-MACHINE-WIDE) on every installed machine, so a manifest-free
+    // too: Sections 1–2 read its machine learning switch
+    // (D-FEATURES-NARROW-ONLY) on every installed machine, so a manifest-free
     // baseline would charge that read to Section 3.
     const bareHome = fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-ctx-tracker-bare-'));
     fs.mkdirSync(path.join(bareHome, '.devflow', 'logs'), { recursive: true });
@@ -920,8 +920,8 @@ describe('session-start-context: tracker setup directive (Section 3)', () => {
   it('the tracker directive is NOT gated by the learning feature toggle', () => {
     // learning:false silences Sections 1 and 2. Section 3 is a different feature
     // and must survive: a user who turned learning off did not turn their tracker off.
-    // The switch is machine-wide (D-FEATURES-MACHINE-WIDE), so it rides in the
-    // same manifest that names the provider.
+    // The machine switch (D-FEATURES-NARROW-ONLY) rides in the same manifest
+    // that names the provider.
     seedTracker(homeDir, { provider: 'jira' });
     const manifest = JSON.parse(fs.readFileSync(manifestOf(homeDir), 'utf-8')) as { features: Record<string, unknown> };
     fs.writeFileSync(manifestOf(homeDir), JSON.stringify({ ...manifest, features: { ...manifest.features, learning: false } }));

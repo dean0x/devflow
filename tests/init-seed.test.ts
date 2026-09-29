@@ -88,7 +88,7 @@ describe('resolveSeedFeatures', () => {
     });
   });
 
-  it('memory, learning and knowledge come from the manifest like every other feature (D-FEATURES-MACHINE-WIDE)', () => {
+  it('memory, learning and knowledge come from the manifest like every other feature (D-FEATURES-NARROW-ONLY)', () => {
     const manifest = makeManifest({
       features: {
         ambient: false,

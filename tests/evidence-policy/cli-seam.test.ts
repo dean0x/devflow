@@ -14,7 +14,7 @@
  *   - source guards, each with a named collector, a non-empty corpus and a
  *     known-bad probe (PF-064): no TS parser copy, no fs write API in the seam, and
  *     no write call anywhere in src/**\/*.ts whose path argument reaches
- *     .devflow/policy.json (D-POLICY-NO-WRITE, applies ADR-024);
+ *     .devflow/policy.json or .devflow/project.json (D-POLICY-NO-WRITE, applies ADR-024);
  *   - the built CLI end to end, from a temp HOME and a temp cwd (PF-060), with gh
  *     faked by the scripted shim so no run touches the network.
  */
@@ -31,18 +31,28 @@ import { normalizeComplianceFeature } from '../../src/core/compliance.js';
 import {
   EVIDENCE_POLICY_MODULE_SURFACE,
   RESOLVER_SCRIPT_NAME,
+  SETTINGS_MODULE_SURFACE,
+  SETTINGS_SCRIPT_NAME,
   evidencePolicyStatusLine,
   evidencePolicySuggestion,
   formatEvidencePolicyStatus,
   formatEvidencePolicyUnavailable,
   loadEvidencePolicyModule,
+  loadSettingsModule,
+  narrowedSwitchLabel,
+  repoComplianceStatusLines,
   type EvidencePolicyModule,
   type EvidencePolicyResolution,
+  type RepoSettings,
+  type SettingsLoad,
+  type SettingsModule,
 } from '../../src/core/evidence-policy.js';
 import { ROOT, makeManifest, requireBuiltCli, walkFiles } from '../helpers.js';
 import {
   ARGV,
+  PROJECT_CONFIG_LIB,
   RESOLVER_SCRIPT,
+  SETTINGS_SCRIPT,
   buildScriptedShim,
   createFakeBin,
   realGit,
@@ -62,11 +72,17 @@ type ResolveWithDeps = (
   deps?: { exec?: ExecFn },
 ) => EvidencePolicyResolution;
 
-/** The .cjs's parsePolicyBytes — used only to prove the suggestion's bytes are a valid file. */
-type ParsePolicyBytes = (buf: Uint8Array) => { kind: string; policy?: string };
+/** The shared parser's parseProjectBytes — used only to prove the suggestion's bytes are a valid file. */
+type ParseProjectBytes = (buf: Uint8Array) => {
+  kind: string;
+  evidence?: { kind: string; value?: unknown };
+  compliance?: { kind: string; value?: unknown };
+};
 
 const REQUIRED_BODY = '{"version":1,"evidencePolicy":"required"}\n';
 const STANDARD_BODY = '{"version":1,"evidencePolicy":"standard"}\n';
+/** The project.json the CLI suggests for compliance on with zero frameworks. */
+const SUGGESTED_ZERO = '{"version":1,"evidence":"required","compliance":[]}\n';
 
 let tmp: string;
 
@@ -81,6 +97,12 @@ afterAll(() => {
 function loadedModule(): EvidencePolicyModule {
   const loaded = loadEvidencePolicyModule();
   if (!loaded.ok) throw new Error(`fixture: the package resolver did not load (${loaded.error.kind})`);
+  return loaded.value;
+}
+
+function loadedSettings(): SettingsModule {
+  const loaded = loadSettingsModule();
+  if (!loaded.ok) throw new Error(`fixture: the package settings resolver did not load (${loaded.error.kind})`);
   return loaded.value;
 }
 
@@ -162,6 +184,139 @@ describe('loadEvidencePolicyModule — the package copy, shape-checked, never a 
     fs.writeFileSync(path.join(dir, RESOLVER_SCRIPT_NAME), "'use strict';\nmodule.exports = 42;\n");
     const loaded = loadEvidencePolicyModule(dir);
     expect(!loaded.ok && loaded.error.kind).toBe('unusable');
+  });
+});
+
+describe('loadSettingsModule — the package copy of resolve-settings.cjs, shape-checked', () => {
+  it('loads join(scriptsDir(), resolve-settings.cjs) — the package copy', () => {
+    const packageCopy = path.join(scriptsDir(), SETTINGS_SCRIPT_NAME);
+    expect(packageCopy).toBe(SETTINGS_SCRIPT);
+    const loaded = loadSettingsModule();
+    expect(loaded.ok).toBe(true);
+    expect(loaded.ok && loaded.value).toBe(NODE_REQUIRE(packageCopy));
+  });
+
+  it('every surface key is exported by the .cjs with the declared kind', () => {
+    const raw = NODE_REQUIRE(SETTINGS_SCRIPT) as Record<string, unknown>;
+    expect(Object.keys(SETTINGS_MODULE_SURFACE)).toEqual([
+      'SETTINGS_LINE_RE', 'SETTINGS_FAIL_CLOSED_LINE', 'resolveSettings', 'serializeProjectSuggestion',
+    ]);
+    expect(raw.SETTINGS_LINE_RE).toBeInstanceOf(RegExp);
+    expect(typeof raw.SETTINGS_FAIL_CLOSED_LINE).toBe('string');
+    expect(typeof raw.resolveSettings).toBe('function');
+    expect(typeof raw.serializeProjectSuggestion).toBe('function');
+  });
+
+  it('a directory without the script ⇒ Err not-found; a partial one ⇒ Err unusable naming each key', () => {
+    const empty = fs.mkdtempSync(path.join(tmp, 'no-settings-'));
+    const missing = loadSettingsModule(empty);
+    expect(!missing.ok && missing.error.kind).toBe('not-found');
+
+    const dir = fs.mkdtempSync(path.join(tmp, 'partial-settings-'));
+    fs.writeFileSync(path.join(dir, SETTINGS_SCRIPT_NAME), "'use strict';\nmodule.exports = { SETTINGS_LINE_RE: /x/ };\n");
+    const partial = loadSettingsModule(dir);
+    expect(!partial.ok && partial.error.kind).toBe('unusable');
+    const detail = !partial.ok && partial.error.kind === 'unusable' ? partial.error.detail : '';
+    expect(detail).toMatch(/resolveSettings/);
+    expect(detail).toMatch(/serializeProjectSuggestion/);
+    expect(detail).not.toMatch(/SETTINGS_LINE_RE/);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The settings layer on --status (narrowedSwitchLabel, repoComplianceStatusLines)
+// ---------------------------------------------------------------------------
+
+describe('the --status helpers over the settings layer (D-FEATURES-NARROW-ONLY)', () => {
+  const BASE: RepoSettings = (NODE_REQUIRE(SETTINGS_SCRIPT) as {
+    foldSettings(i: { project: unknown; personal: unknown; manifest: unknown; legacyPolicyFile: boolean }): RepoSettings;
+  }).foldSettings({ project: { kind: 'absent' }, personal: { kind: 'absent' }, manifest: undefined, legacyPolicyFile: false });
+
+  /** A loaded module whose resolveSettings returns `settings`, recording the options it was given. */
+  function stub(settings: RepoSettings, seen: unknown[] = []): SettingsLoad {
+    return {
+      ok: true,
+      value: { ...loadedSettings(), resolveSettings: (opts) => { seen.push(opts); return settings; } },
+    };
+  }
+  const withSwitch = (feature: keyof RepoSettings['switches'], on: boolean, source: 'machine' | 'project' | 'personal'): RepoSettings => ({
+    ...BASE, switches: { ...BASE.switches, [feature]: { on, source } },
+  });
+
+  it('prints nothing when nothing narrows, or the machine switch itself is off', () => {
+    expect(narrowedSwitchLabel(stub(BASE), { dir: tmp }, 'learning')).toBeNull();
+    expect(narrowedSwitchLabel(stub(withSwitch('learning', false, 'machine')), { dir: tmp }, 'learning')).toBeNull();
+  });
+
+  it('names the file that narrowed it', () => {
+    expect(narrowedSwitchLabel(stub(withSwitch('memory', false, 'project')), { dir: tmp }, 'memory'))
+      .toBe('disabled (.devflow/project.json)');
+    expect(narrowedSwitchLabel(stub(withSwitch('knowledge', false, 'personal')), { dir: tmp }, 'knowledge'))
+      .toBe('disabled (.devflow/config.json)');
+  });
+
+  it('a resolver that failed to load, or failed closed, says nothing about the repository', () => {
+    const notFound: SettingsLoad = { ok: false, error: { kind: 'not-found', path: '/x' } };
+    expect(narrowedSwitchLabel(notFound, { dir: tmp }, 'memory')).toBeNull();
+    expect(narrowedSwitchLabel(stub({ ...withSwitch('memory', false, 'project'), ok: false }), { dir: tmp }, 'memory')).toBeNull();
+    expect(repoComplianceStatusLines(notFound, { dir: tmp })).toEqual([]);
+    expect(repoComplianceStatusLines(stub({ ...BASE, repoCompliance: ['gdpr'], ok: false }), { dir: tmp })).toEqual([]);
+  });
+
+  it('an unreadable repository file names itself: knowledge is disabled by it, the lens is generic', () => {
+    const settings = NODE_REQUIRE(SETTINGS_SCRIPT) as {
+      resolveSettings(o: { dir: string; manifest?: unknown }, d: { exec: ExecFn }): RepoSettings;
+    };
+    const repo = fs.mkdtempSync(path.join(tmp, 'unreadable-'));
+    fs.mkdirSync(path.join(repo, '.devflow'));
+    fs.writeFileSync(path.join(repo, '.devflow', 'project.json'), '{ this is not json');
+    const { exec } = scriptedExec([{ tool: 'git', args: ARGV.toplevel, stdout: `${repo}\n` }]);
+    const failed = settings.resolveSettings({ dir: repo, manifest: { features: {} } }, { exec });
+    expect(failed.ok).toBe(false);
+    expect(failed.unreadable).toBe('project');
+
+    expect(narrowedSwitchLabel(stub(failed), { dir: repo }, 'knowledge'))
+      .toBe('disabled (.devflow/project.json is unreadable)');
+    expect(narrowedSwitchLabel(stub(failed), { dir: repo }, 'memory')).toBeNull();
+    expect(narrowedSwitchLabel(stub(failed), { dir: repo }, 'learning')).toBeNull();
+    expect(repoComplianceStatusLines(stub(failed), { dir: repo }))
+      .toEqual(['Repository: generic controls only (.devflow/project.json is unreadable)']);
+
+    // The machine's own lens survives the broken repository file; the status line
+    // still describes only the repository layer.
+    const hipaa = settings.resolveSettings(
+      { dir: repo, manifest: { features: { compliance: { enabled: true, frameworks: ['hipaa'] } } } },
+      { exec: scriptedExec([{ tool: 'git', args: ARGV.toplevel, stdout: `${repo}\n` }]).exec },
+    );
+    expect(hipaa.ok).toBe(false);
+    expect(hipaa.unreadable).toBe('project');
+    expect(hipaa.compliance).toEqual({ enabled: true, frameworks: ['hipaa'] });
+    expect(repoComplianceStatusLines(stub(hipaa), { dir: repo }))
+      .toEqual(['Repository: generic controls only (.devflow/project.json is unreadable)']);
+
+    const personal = { ...failed, unreadable: 'personal' as const };
+    expect(narrowedSwitchLabel(stub(personal), { dir: repo }, 'knowledge'))
+      .toBe('disabled (.devflow/config.json is unreadable)');
+    expect(repoComplianceStatusLines(stub(personal), { dir: repo }))
+      .toEqual(['Repository: generic controls only (.devflow/config.json is unreadable)']);
+  });
+
+  it('passes the caller\'s dir straight through', () => {
+    const seen: unknown[] = [];
+    narrowedSwitchLabel(stub(BASE, seen), { dir: '/some/repo' }, 'memory');
+    expect(seen).toEqual([{ dir: '/some/repo' }]);
+  });
+
+  it('compliance: the repository ids, generic for an empty list, and the migration hint', () => {
+    expect(repoComplianceStatusLines(stub(BASE), { dir: tmp })).toEqual([]);
+    expect(repoComplianceStatusLines(stub({ ...BASE, repoCompliance: ['gdpr', 'hipaa'] }), { dir: tmp }))
+      .toEqual(['Repository: gdpr, hipaa (.devflow/project.json)']);
+    expect(repoComplianceStatusLines(stub({ ...BASE, repoCompliance: [] }), { dir: tmp }))
+      .toEqual(['Repository: generic controls only (.devflow/project.json)']);
+    const hint = repoComplianceStatusLines(stub({ ...BASE, legacyPolicyFile: true }), { dir: tmp }).join('\n');
+    expect(hint).toContain('.devflow/policy.json');
+    expect(hint).toContain('.devflow/project.json');
+    expect(hint).toContain('"evidence"');
   });
 });
 
@@ -261,49 +416,53 @@ describe('evidencePolicySuggestion — iff the compliance default is required', 
 
   it.each(ROWS)('%s ⇒ suggestion iff normalizeComplianceFeature says enabled', (_label, state) => {
     const mod = loadedModule();
-    const suggestion = evidencePolicySuggestion(state, mod);
+    const suggestion = evidencePolicySuggestion(state, mod, loadedSettings());
     const expectRequired = normalizeComplianceFeature(state).enabled;
     expect(mod.complianceDefault(state)).toBe(expectRequired ? 'required' : 'standard');
     if (expectRequired) {
       expect(suggestion).not.toBeNull();
-      expect(suggestion).toContain(REQUIRED_BODY);
+      expect(suggestion).toContain('"evidence":"required"');
     } else {
       expect(suggestion).toBeNull();
     }
   });
 
   it('the rows cover both outcomes, including enabled with zero frameworks', () => {
-    const mod = loadedModule();
-    const outcomes = ROWS.map(([, s]) => evidencePolicySuggestion(s, mod) !== null);
+    const outcomes = ROWS.map(([, st]) => evidencePolicySuggestion(st, loadedModule(), loadedSettings()) !== null);
     expect(outcomes).toContain(true);
     expect(outcomes).toContain(false);
-    expect(evidencePolicySuggestion({ enabled: true, frameworks: [] }, mod)).not.toBeNull();
+    expect(evidencePolicySuggestion({ enabled: true, frameworks: [] }, loadedModule(), loadedSettings())).toContain(SUGGESTED_ZERO);
+  });
+
+  it('carries this machine\'s frameworks, normalized, and drops unknown ids', () => {
+    const text = evidencePolicySuggestion({ enabled: true, frameworks: ['SOC2', 'iso27001', 'foo'] }, loadedModule(), loadedSettings()) ?? '';
+    expect(text).toContain('{"version":1,"evidence":"required","compliance":["soc2","iso-27001"]}\n');
   });
 
   it('names the file, where it goes, and that devflow never writes it', () => {
-    const text = evidencePolicySuggestion({ enabled: true, frameworks: ['gdpr'] }, loadedModule()) ?? '';
-    expect(text).toContain('.devflow/policy.json');
+    const text = evidencePolicySuggestion({ enabled: true, frameworks: ['gdpr'] }, loadedModule(), loadedSettings()) ?? '';
+    expect(text).toContain('.devflow/project.json');
+    expect(text).not.toContain('.devflow/policy.json');
     expect(text).toContain('default branch');
     expect(text).toMatch(/devflow (?:never|does not) write/);
   });
 
-  it('the suggested bytes are a valid policy file by the resolver\'s own parser', () => {
-    const mod = loadedModule();
-    const parse = (NODE_REQUIRE(RESOLVER_SCRIPT) as { parsePolicyBytes: ParsePolicyBytes }).parsePolicyBytes;
-    for (const policy of mod.POLICIES) {
-      const body = mod.serializePolicy(policy);
-      expect(body).not.toBeNull();
-      expect(parse(Buffer.from(body ?? ''))).toEqual({ kind: 'valid', policy });
-    }
-    const text = evidencePolicySuggestion({ enabled: true, frameworks: [] }, mod) ?? '';
+  it('the suggested bytes are a valid project.json by the shared parser', () => {
+    const parse = (NODE_REQUIRE(PROJECT_CONFIG_LIB) as { parseProjectBytes: ParseProjectBytes }).parseProjectBytes;
+    const text = evidencePolicySuggestion({ enabled: true, frameworks: ['hipaa'] }, loadedModule(), loadedSettings()) ?? '';
     const jsonLine = text.split('\n').find(l => l.startsWith('{'));
     expect(jsonLine).toBeDefined();
-    expect(parse(Buffer.from(`${jsonLine}\n`))).toEqual({ kind: 'valid', policy: 'required' });
+    expect(parse(Buffer.from(`${jsonLine}\n`))).toMatchObject({
+      kind: 'parsed',
+      evidence: { kind: 'valid', value: 'required' },
+      compliance: { kind: 'valid', value: ['hipaa'] },
+    });
   });
 
   it('a serializer that refuses ⇒ no suggestion (nothing half-formed is printed)', () => {
-    const mod = loadedModule();
-    expect(evidencePolicySuggestion({ enabled: true, frameworks: [] }, { ...mod, serializePolicy: () => null })).toBeNull();
+    expect(evidencePolicySuggestion({ enabled: true, frameworks: [] }, loadedModule(), {
+      serializeProjectSuggestion: () => null,
+    })).toBeNull();
   });
 });
 
@@ -387,13 +546,20 @@ function literalBodies(code: string): string[] {
 const isGitignoreLine = (body: string): boolean => /^\s*[!#]/.test(body);
 
 /**
- * A literal that names the policy file as a PATH: it spells `policy.json`, is not
+ * The team-owned files devflow never writes (applies ADR-024): the committed
+ * `project.json` and the legacy `policy.json` it replaces.
+ */
+const TEAM_FILE_RE = /(?:policy|project)\.json/;
+
+/**
+ * A literal that names a team file as a PATH: it spells `policy.json` or
+ * `project.json`, is not
  * a gitignore line, and (template substitutions aside) holds no whitespace — prose
  * that merely mentions the file is not a path.
  */
 function hasPolicyPathLiteral(code: string): boolean {
   return literalBodies(code).some(b =>
-    b.includes('policy.json') && !isGitignoreLine(b) && !/\s/.test(b.replace(/\$\{[^}]*\}/g, 'x')));
+    TEAM_FILE_RE.test(b) && !isGitignoreLine(b) && !/\s/.test(b.replace(/\$\{[^}]*\}/g, 'x')));
 }
 
 /**
@@ -401,7 +567,7 @@ function hasPolicyPathLiteral(code: string): boolean {
  * shell command string or a git pathspec embeds it (`printf x > .devflow/policy.json`).
  */
 function hasPolicyMention(code: string): boolean {
-  return literalBodies(code).some(b => b.includes('policy.json') && !isGitignoreLine(b));
+  return literalBodies(code).some(b => TEAM_FILE_RE.test(b) && !isGitignoreLine(b));
 }
 
 /** Every gitignore-line literal naming the file — proves the matcher reads, and exempts, the carve-out. */
@@ -634,7 +800,7 @@ describe('source guards — no repo write, no parser copy (D-POLICY-NO-WRITE, D-
     expect(collectPolicyAliases(CORPUS).get(CLI_REL)?.has('evidencePolicySuggestion')).toBe(true);
   });
 
-  it('no write call in src/**/*.ts has a path argument that reaches .devflow/policy.json', () => {
+  it('no write call in src/**/*.ts has a path argument that reaches .devflow/policy.json or .devflow/project.json', () => {
     expect(collectPolicyWriteSites(CORPUS)).toEqual([]);
   });
 
@@ -649,6 +815,9 @@ describe('source guards — no repo write, no parser copy (D-POLICY-NO-WRITE, D-
     ['an fs.open handle', "const h = await fs.promises.open(join(root, '.devflow/policy.json'), 'w');"],
     ['a git argv', `${'spawn'}Sync('git', ['add', '.devflow/policy.json'], { cwd: root });`],
     ['a shell redirect', `${'exec'}Sync("printf x > .devflow/policy.json");`],
+    ['a project.json literal path', "await fs.writeFile(path.join(root, '.devflow', 'project.json'), body);"],
+    ['a project.json alias', "const PROJECT = '.devflow/project.json';\nconst abs = join(root, PROJECT);\nwriteFileAtomicExclusive(abs, body);"],
+    ['a project.json git argv', `${'spawn'}Sync('git', ['add', '.devflow/project.json'], { cwd: root });`],
   ])('known-bad probe: %s is reported', (_label, seeded) => {
     expect(collectPolicyWriteSites([...CORPUS, probeFile(seeded)])).toHaveLength(1);
   });
@@ -671,6 +840,7 @@ describe('source guards — no repo write, no parser copy (D-POLICY-NO-WRITE, D-
   it.each([
     ['a gitignore write whose CONTENT carries the carve-out', "const LINE = '!.devflow/policy.json';\nawait fs.writeFile(gitignorePath, appendText(existing, LINE));"],
     ['printing the suggestion', "const suggestion = `commit it as .devflow/policy.json`;\np.note(suggestion, 'Evidence policy');"],
+    ['printing the project.json suggestion', "const suggestion = `commit this as .devflow/project.json on its default branch`;\np.note(suggestion, 'Evidence policy');"],
     ['writing the policy TEXT to another path', "const text = 'see .devflow/policy.json';\nfs.writeFileSync(logPath, text);"],
     ['a function declaration named like a sink', "function writePolicyNote(msg: string) { return msg; }"],
   ])('negative control: %s is not reported', (_label, seeded) => {
@@ -804,29 +974,66 @@ describe('devflow compliance — the built CLI (AC-9, AC-10)', () => {
     const repo = makeRepo(home);
     const shim = buildScriptedShim(fakeGh, tmp, [
       { tool: 'gh', args: ARGV.probe, stdout: 'main\n' },
+      { tool: 'gh', args: ARGV.contentsProject('main'), exit: 1, stderr: 'gh: Not Found (HTTP 404)\n' },
       { tool: 'gh', args: ARGV.contents('main'), stdout: REQUIRED_BODY },
     ]);
     const r = runCli({ home, cwd: repo, args: ['compliance', '--status'], shim });
     expect(r.status, r.out).toBe(0);
     expect(r.out).toContain('Evidence policy: required (source: file) [warn: pr-changes-policy]');
-    expect(shim.readLog()).toEqual([['gh', ...ARGV.probe], ['gh', ...ARGV.contents('main')]]);
+    expect(shim.readLog()).toEqual([
+      ['gh', ...ARGV.probe], ['gh', ...ARGV.contentsProject('main')], ['gh', ...ARGV.contents('main')],
+    ]);
   }, 60_000);
 
   it.each([
-    ['--set gdpr', { enabled: false, frameworks: [] }, ['compliance', '--set', 'gdpr']],
-    ['--set "" (zero frameworks — binding: still required)', { enabled: false, frameworks: [] }, ['compliance', '--set', '']],
-    ['--enable from disabled', { enabled: false, frameworks: ['soc2'] }, ['compliance', '--enable']],
-  ] as const)('%s prints the suggestion and writes nothing into the repository', (_label, state, args) => {
+    ['--set gdpr', { enabled: false, frameworks: [] }, ['compliance', '--set', 'gdpr'], '["gdpr"]'],
+    ['--set "" (zero frameworks — binding: still required)', { enabled: false, frameworks: [] }, ['compliance', '--set', ''], '[]'],
+    ['--enable from disabled', { enabled: false, frameworks: ['soc2'] }, ['compliance', '--enable'], '["soc2"]'],
+  ] as const)('%s prints the project.json suggestion and writes nothing into the repository', (_label, state, args, ids) => {
     const home = makeHome({ enabled: state.enabled, frameworks: [...state.frameworks] });
     const repo = makeRepo(home);
     const before = snapshot(repo);
     const r = runCli({ home, cwd: repo, args });
     expect(r.status, r.out).toBe(0);
     expect(r.out).toContain('Evidence policy');
-    expect(r.out).toContain(REQUIRED_BODY.trimEnd());
-    expect(r.out).toContain('.devflow/policy.json');
-    expect(fs.existsSync(path.join(repo, '.devflow', 'policy.json'))).toBe(false);
+    expect(r.out).toContain(`{"version":1,"evidence":"required","compliance":${ids}}`);
+    expect(r.out).toContain('.devflow/project.json');
+    for (const team of ['policy.json', 'project.json']) {
+      expect(fs.existsSync(path.join(repo, '.devflow', team))).toBe(false);
+    }
     expect(snapshot(repo)).toEqual(before);
+  }, 60_000);
+
+  it('--status in a repository declaring compliance lists its ids; a legacy policy.json adds the migration hint', () => {
+    const home = makeHome({ enabled: false, frameworks: [] });
+    const repo = makeRepo(home);
+    fs.mkdirSync(path.join(repo, '.devflow'));
+    fs.writeFileSync(path.join(repo, '.devflow', 'project.json'), '{"version":1,"compliance":["hipaa","gdpr"]}\n');
+    const shim = buildScriptedShim(fakeGh, tmp, [
+      { tool: 'gh', args: ARGV.probe, exit: 1, stderr: 'To get started with GitHub CLI, please run:  gh auth login\n' },
+    ]);
+    const declared = runCli({ home, cwd: repo, args: ['compliance', '--status'], shim });
+    expect(declared.status, declared.out).toBe(0);
+    expect(declared.out).toContain('Repository: hipaa, gdpr (.devflow/project.json)');
+    expect(declared.out).not.toContain('Migration:');
+    // The repository's compliance raises the floor on a compliance-off machine (D-COMPLIANCE-REPO-FLOOR).
+    expect(declared.out).toContain('Evidence policy: required (source: default)');
+
+    fs.writeFileSync(path.join(repo, '.devflow', 'policy.json'), STANDARD_BODY);
+    const legacy = runCli({ home, cwd: repo, args: ['compliance', '--status'], shim });
+    expect(legacy.out).toContain('Migration:  .devflow/policy.json is superseded by .devflow/project.json');
+  }, 60_000);
+
+  it('--status in a repository that declares nothing prints no repository line', () => {
+    const home = makeHome({ enabled: false, frameworks: [] });
+    const repo = makeRepo(home);
+    const shim = buildScriptedShim(fakeGh, tmp, [
+      { tool: 'gh', args: ARGV.probe, exit: 1, stderr: 'To get started with GitHub CLI, please run:  gh auth login\n' },
+    ]);
+    const r = runCli({ home, cwd: repo, args: ['compliance', '--status'], shim });
+    expect(r.status, r.out).toBe(0);
+    expect(r.out).not.toContain('Repository:');
+    expect(r.out).not.toContain('Migration:');
   }, 60_000);
 
   it('--disable prints no suggestion', () => {

@@ -13,9 +13,10 @@ import {
 /**
  * The per-repo `.devflow/config.json`: facts about one repository
  * (`reviewPublication`, the hand-written `tracker` override) — never a feature
- * switch. D-FEATURES-MACHINE-WIDE retired its `memory`, `learning` and
- * `knowledge` keys (with the older `decisions` / `autoCommit`): no reader
- * surfaces them and a managed write drops them.
+ * switch at the top level. D-FEATURES-NARROW-ONLY keeps its `memory`,
+ * `learning` and `knowledge` keys retired (with the older `decisions` /
+ * `autoCommit`): no reader surfaces them and a managed write drops them. Only
+ * the new `features` namespace can narrow a switch.
  */
 
 /** Create .devflow/ and write data as config.json under projectDir. */

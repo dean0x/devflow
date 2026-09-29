@@ -317,17 +317,20 @@ d .devflow/scripts/hud/components/
 - .devflow/scripts/hud/render.js
 - .devflow/scripts/hud/stdin.js
 - .devflow/scripts/hud/transcript.js
+d .devflow/scripts/lib/
+x .devflow/scripts/lib/project-config.cjs
 - .devflow/scripts/package.json
 x .devflow/scripts/pr-evidence.cjs
 x .devflow/scripts/redact-secrets.cjs
 x .devflow/scripts/release-trace.cjs
 x .devflow/scripts/resolve-evidence-policy.cjs
+x .devflow/scripts/resolve-settings.cjs
 x .devflow/scripts/verify-evidence.cjs
 
 ## install: repo
 - .claudeignore
 d .devflow/
-- .devflow/.root-gitignore-configured-v5
+- .devflow/.root-gitignore-configured-v6
 - .devflow/config.json
 - .gitignore
 - README.md
@@ -559,7 +562,7 @@ d <HOME>/.devflow/
 - <HOME>/.devflow/hud.json
 - <REPO>/.claudeignore
 d <REPO>/.devflow/
-- <REPO>/.devflow/.root-gitignore-configured-v5
+- <REPO>/.devflow/.root-gitignore-configured-v6
 - <REPO>/.devflow/config.json
 - <REPO>/.gitignore
 

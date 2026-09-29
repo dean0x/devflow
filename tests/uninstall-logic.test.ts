@@ -2601,8 +2601,9 @@ describe('DEVFLOW_TRACKED_PATHS (D-UNINSTALL-CARVE-OUT)', () => {
     const reincluded = DEVFLOW_GITIGNORE_BLOCK.split('\n')
       .filter((line) => line.startsWith('!.devflow/'))
       .map((line) => line.slice('!.devflow/'.length).split('/')[0]);
-    // Non-vacuity: the block re-includes features, conventions.md and policy.json.
-    expect(new Set(reincluded)).toEqual(new Set(['features', 'conventions.md', 'policy.json']));
+    // Non-vacuity: the block re-includes features, conventions.md, policy.json and
+    // (D-GITIGNORE-V6) project.json.
+    expect(new Set(reincluded)).toEqual(new Set(['features', 'conventions.md', 'policy.json', 'project.json']));
     for (const name of reincluded) expect(tracked.has(name), `${name} must be kept by uninstall`).toBe(true);
   });
 });

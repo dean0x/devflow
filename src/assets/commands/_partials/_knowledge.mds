@@ -1,3 +1,5 @@
+@import "./_settings.mds" as settings
+
 @define knowledge_load():
 ### Load Feature Knowledge
 
@@ -58,11 +60,11 @@ git -C "{start}" rev-parse --show-toplevel
 
 and use its one-line output. If the command fails (outside a git repository), `{worktree}` is the start directory itself. All paths below are relative to `{worktree}`.
 
-**Step 1 — Check the opt-out gate:**
+**Step 1 — Check the opt-out gate, with `{root}` = `{worktree}`:**
 
-Read `~/.devflow/manifest.json`. If `features.knowledge` is `false`, skip write-back entirely — the user disabled knowledge bases for every project (`devflow init --no-knowledge` or `devflow knowledge --disable`). The project's `.devflow/config.json` is not a gate: knowledge is switched machine-wide only.
+{{settings.settings_resolve()}}
 
-A missing file or a missing field means write-back is allowed (default is enabled).
+If the settings line says `KNOWLEDGE=off`, skip write-back entirely. The machine switch (`devflow knowledge --disable`), the repository and the personal settings can each turn knowledge off, and none can turn it back on (D-FEATURES-NARROW-ONLY). The fail-closed line says `KNOWLEDGE=off` too, so an unresolvable line skips write-back.
 
 **Step 2 — Evaluate whether write-back is warranted:**
 

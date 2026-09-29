@@ -104,7 +104,7 @@ Pass `FEATURE_KNOWLEDGE` to the Triage agent in Phase 2.
 Reuse this result for every worktree.
 
 {{publication_gate()}}
-Resolve this per worktree — unlike the evidence policy above, the config file is per worktree root.
+Resolve this per worktree — unlike the evidence policy above, the settings line is per worktree root.
 
 **Mint `RESOLUTION_TS` once per run:** `date -u +%Y-%m-%dT%H:%M:%SZ`. Every worktree reuses it — the resolution comment's dedup marker is searched per PR, so one run key keeps a retry of this run deduplicated while the next /resolve on the same PR posts. Phase 5 writes it as the summary's `**Date**:` and Phase 9b-2 passes it, so the local file and the posted marker agree.
 

@@ -37,11 +37,14 @@ _DEVFLOW_DIR="$_EDI_ROOT/.devflow"
 _EDI_LEARNING="$_DEVFLOW_DIR/learning"
 [ "$_EDI_LEDGER" = "$_EDI_ROOT" ] || _EDI_LEARNING=""
 
-# Fast-path: if all subdirectories already exist, skip mkdir and gitignore setup
+# Fast-path: if all subdirectories already exist, skip mkdir and gitignore setup.
+# The marker is the CURRENT carve-out version (D-GITIGNORE-V6), bumped with both
+# writers' stamps, so a v5-stamped project misses this once and gains the
+# `!.devflow/project.json` line.
 if [ -d "$_DEVFLOW_DIR/memory" ] && [ -d "$_DEVFLOW_DIR/docs" ] && \
    { [ -z "$_EDI_LEARNING" ] || [ -d "$_EDI_LEARNING" ]; } && \
    [ -d "$_DEVFLOW_DIR/features" ] && \
-   [ -f "$_DEVFLOW_DIR/.root-gitignore-configured-v5" ]; then
+   [ -f "$_DEVFLOW_DIR/.root-gitignore-configured-v6" ]; then
   return 0
 fi
 

@@ -31,12 +31,17 @@ export type TrackerConfigOverride =
   | { kind: 'invalid'; raw: string };
 
 /**
- * The per-repo config: facts ABOUT one repository, never a feature switch.
+ * The per-repo config: facts ABOUT one repository, and the personal narrowing of
+ * the machine's feature switches.
  *
- * D-FEATURES-MACHINE-WIDE (src/core/feature-switch.ts): memory, learning and
- * knowledge are switched in ~/.devflow/manifest.json alone. Their old per-repo
- * keys are retired ({@link RETIRED_CONFIG_KEYS}) — no gate reads them, and the
- * next managed write drops them from the file.
+ * D-FEATURES-NARROW-ONLY (src/core/feature-switch.ts): memory, learning and
+ * knowledge are switched in ~/.devflow/manifest.json, and a hand-written
+ * `features` object here (like the one in the team's `.devflow/project.json`)
+ * may only narrow them — resolve-settings.cjs reads it through the shared
+ * parser; nothing in this module interprets it. devflow never writes `features`:
+ * it is carried verbatim by every managed write, like the `tracker` override. The
+ * old top-level per-repo keys are retired ({@link RETIRED_CONFIG_KEYS}) — no
+ * gate reads them, and the next managed write drops them from the file.
  */
 export interface FeatureConfig {
   reviewPublication: ReviewPublication;
@@ -78,12 +83,14 @@ export type ManagedConfig = Omit<FeatureConfig, 'tracker'>;
  * Keys devflow itself once wrote and has retired. A managed write drops them
  * rather than carrying them; no reader consults them.
  *
- * D-FEATURES-MACHINE-WIDE: `memory`, `learning` and `knowledge` were per-repo
- * feature switches from the per-repo-install era. A feature is now on or off
- * for the whole machine, in the manifest, so a stale per-repo value must
- * neither decide anything nor linger to be mistaken for a switch: carrying it
- * would leave a `learning: false` in the file that no longer does what it says.
- * `decisions` is the pre-rename spelling of `learning`; `autoCommit` is inert.
+ * D-FEATURES-NARROW-ONLY: `memory`, `learning` and `knowledge` were top-level
+ * per-repo feature switches from the per-repo-install era. A repository now
+ * narrows a feature only through the `features` namespace, so a stale top-level
+ * value must neither decide anything nor linger to be mistaken for a switch:
+ * carrying it would leave a `learning: false` in the file that no longer does
+ * what it says. `decisions` is the pre-rename spelling of `learning`;
+ * `autoCommit` is inert. `features` is deliberately NOT here — it is a live key,
+ * carried like any other unmanaged key (avoids PF-071).
  */
 const RETIRED_CONFIG_KEYS: ReadonlySet<string> = new Set([
   'memory', 'learning', 'knowledge', 'decisions', 'autoCommit',
@@ -141,7 +148,7 @@ function isJsonObject(value: unknown): value is Record<string, unknown> {
  * DEFAULT_CONFIG. Pure function — no I/O, no side effects.
  *
  * The retired keys ({@link RETIRED_CONFIG_KEYS}) are ignored: an old config may
- * still hold them, and none of them decides anything (D-FEATURES-MACHINE-WIDE).
+ * still hold them, and none of them decides anything (D-FEATURES-NARROW-ONLY).
  *
  * Returns null when `parsed` is not a plain object (caller falls through to
  * the next candidate path).

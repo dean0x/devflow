@@ -191,7 +191,7 @@ function createPromptCapturingShim(shimDir: string, stagedFile: string): string 
   return stdinCapture;
 }
 
-/** Switch features machine-wide: the devflow-global manifest under `homeDir` (D-FEATURES-MACHINE-WIDE). */
+/** Switch features machine-wide: the devflow-global manifest under `homeDir` (D-FEATURES-NARROW-ONLY). */
 function writeMachineFeatures(homeDir: string, features: Record<string, unknown>): void {
   const dir = path.join(homeDir, '.devflow');
   fs.mkdirSync(dir, { recursive: true });

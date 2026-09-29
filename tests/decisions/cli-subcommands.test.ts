@@ -370,7 +370,7 @@ describe('learning --reset success message', () => {
 });
 
 // ---------------------------------------------------------------------------
-// --disable switches learning off machine-wide (D-FEATURES-MACHINE-WIDE) and
+// --disable switches learning off machine-wide (D-FEATURES-NARROW-ONLY) and
 // drains the current project's learning (decisions-detection) pending-turns
 // queue — mirrors memory.ts's drain-on-disable behavior for the sibling memory
 // queue. Unconditional: a mid-run Learning agent whose claimed batch vanishes

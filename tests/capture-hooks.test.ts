@@ -17,7 +17,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
 import { pollForTerminalLine } from './helpers/poll-for-terminal-line.js';
-import { runHook as runSharedHook } from './shell-hooks-helpers.js';
+import { HOOK_RUN_ALLOWANCE_MS, NODE_EXEC_STALL_MS, runHook as runSharedHook } from './shell-hooks-helpers.js';
 
 const HOOKS_DIR = path.resolve(__dirname, '..', 'src', 'assets', 'scripts', 'hooks');
 const CAPTURE_PROMPT = path.join(HOOKS_DIR, 'capture-prompt');
@@ -82,13 +82,21 @@ function readJsonl(file: string): Record<string, unknown>[] {
 }
 
 /**
- * A per-repo .devflow/config.json. Its memory/learning keys are RETIRED
- * (D-FEATURES-MACHINE-WIDE): tests write them only to prove no gate reads them.
+ * A per-repo .devflow/config.json. Its top-level memory/learning keys are RETIRED
+ * (D-FEATURES-NARROW-ONLY): tests write them only to prove no gate reads them.
+ * Only `features.<name>: false` narrows — see writeRepoFile.
  */
 function writeFeatureConfig(projectDir: string, fields: Record<string, unknown>): void {
   const dir = path.join(projectDir, '.devflow');
   fs.mkdirSync(dir, { recursive: true });
   fs.writeFileSync(path.join(dir, 'config.json'), JSON.stringify(fields));
+}
+
+/** Raw bytes for `<projectDir>/.devflow/<name>` (project.json or config.json). */
+function writeRepoFile(projectDir: string, name: 'project.json' | 'config.json', bytes: string): void {
+  const dir = path.join(projectDir, '.devflow');
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(path.join(dir, name), bytes);
 }
 
 /** A devflow-global manifest.json under `devflowDir` holding `features`. */
@@ -558,7 +566,7 @@ describe('memory-worker', () => {
   });
 
   // ---------------------------------------------------------------------------
-  // D-FEATURES-MACHINE-WIDE — features.memory in ~/.devflow/manifest.json alone
+  // D-FEATURES-NARROW-ONLY — the machine layer: features.memory in ~/.devflow/manifest.json
   // ---------------------------------------------------------------------------
 
   it('manifest memory:false -> no spawn attempted, no trigger touch, although the repo config says true', () => {
@@ -658,7 +666,7 @@ const WORKER_SHELL_BUDGET_MS = 20_000;
  */
 const WORKER_RUN_BOUND_MS = (TEST_WATCHDOG_SECS + WORKER_KILL_GRACE_SECS) * 1000 + WORKER_SHELL_BUDGET_MS;
 
-describe('background-memory-update: machine-wide memory switch (D-FEATURES-MACHINE-WIDE)', { timeout: WORKER_RUN_BOUND_MS + 5_000 }, () => {
+describe('background-memory-update: the memory switch (D-FEATURES-NARROW-ONLY)', { timeout: WORKER_RUN_BOUND_MS + 5_000 }, () => {
   let projectDir: string;
   let homeDir: string;
   let shimDir: string;
@@ -832,7 +840,7 @@ describe('capture-prompt + capture-turn integration', () => {
 });
 
 // =============================================================================
-// D-FEATURES-MACHINE-WIDE — the manifest is the only memory/learning switch
+// D-FEATURES-NARROW-ONLY — the machine layer, and the retired per-repo keys
 // =============================================================================
 // `devflow init --no-learning` / `--no-memory` (and `devflow learning|memory
 // --disable`) record features.learning:false / features.memory:false in
@@ -958,5 +966,136 @@ describe('capture hooks read the machine-wide memory and learning switches only'
     } finally {
       fs.rmSync(overrideDir, { recursive: true, force: true });
     }
+  });
+});
+
+// =============================================================================
+// TP-34 (AC-30): a repository narrows capture for itself (D-FEATURES-NARROW-ONLY).
+// `features.learning: false` in a committed project.json — or in the worktree's
+// own config.json — silences that queue here while the machine switch stays on.
+
+/**
+ * The budget of every test in the two narrowing groups below: one hook run plus
+ * one node exec that may meet the syspolicyd wait. A repository file that can
+ * narrow costs a hook run exactly one node exec — resolve-settings.cjs's fold
+ * (D-GATES-FAST-PATH, pinned at one fork by TP-34 in queue-append.test.ts) —
+ * and that exec is intended: the parser, not a shell copy of it, decides the
+ * file. The hook's stdin parse is jq when jq is installed; where it falls back
+ * to node, that exec comes first and the fold then meets a drained queue, so a
+ * test still pays the wait at most once.
+ */
+const NARROWING_TEST_BUDGET_MS = HOOK_RUN_ALLOWANCE_MS + NODE_EXEC_STALL_MS;
+
+describe('capture hooks honour a repository narrowing (D-FEATURES-NARROW-ONLY)', { timeout: NARROWING_TEST_BUDGET_MS }, () => {
+  let projectDir: string;
+  let homeDir: string;
+
+  beforeEach(() => {
+    projectDir = makeGitProject('cap-narrow-');
+    homeDir = fs.mkdtempSync(path.join(os.tmpdir(), 'cap-narrow-home-'));
+    writeMachineFeatures(homeDir, { memory: true, learning: true });
+  });
+
+  afterEach(() => {
+    fs.rmSync(projectDir, { recursive: true, force: true });
+    fs.rmSync(homeDir, { recursive: true, force: true });
+  });
+
+  const learningQueue = () => path.join(projectDir, '.devflow', 'learning', '.pending-turns.jsonl');
+  const memoryQueue = () => path.join(projectDir, '.devflow', 'memory', '.pending-turns.jsonl');
+
+  const HOOKS: ReadonlyArray<readonly [string, string, () => object]> = [
+    ['capture-prompt', CAPTURE_PROMPT, () => ({ cwd: projectDir, prompt: 'we chose X over Y' })],
+    ['capture-turn', CAPTURE_TURN, () => ({ cwd: projectDir, session_id: 's', last_assistant_message: 'done' })],
+    [
+      'capture-question',
+      CAPTURE_QUESTION,
+      () => ({
+        cwd: projectDir,
+        tool_name: 'AskUserQuestion',
+        tool_input: { questions: [{ question: 'Proceed?' }] },
+        tool_response: { answers: { 'Proceed?': 'yes' } },
+      }),
+    ],
+  ];
+
+  for (const [name, hook, input] of HOOKS) {
+    it(`${name}: project.json features.learning false silences learning capture; memory keeps capturing`, () => {
+      writeRepoFile(projectDir, 'project.json', '{"version":1,"features":{"learning":false}}');
+
+      expect(runHook(hook, input(), homeDir).exitCode).toBe(0);
+      expect(fs.existsSync(learningQueue())).toBe(false);
+      expect(readJsonl(memoryQueue())).toHaveLength(1);
+    });
+
+    it(`${name}: config.json features.memory false silences memory capture; learning keeps capturing`, () => {
+      writeRepoFile(projectDir, 'config.json', '{"features":{"memory":false}}');
+
+      expect(runHook(hook, input(), homeDir).exitCode).toBe(0);
+      expect(fs.existsSync(memoryQueue())).toBe(false);
+      expect(readJsonl(learningQueue())).toHaveLength(1);
+    });
+
+    it(`${name}: a repository true never widens a machine off`, () => {
+      writeMachineFeatures(homeDir, { learning: false });
+      writeRepoFile(projectDir, 'project.json', '{"features":{"learning":true,"memory":true}}');
+
+      runHook(hook, input(), homeDir);
+      expect(fs.existsSync(learningQueue())).toBe(false);
+      expect(readJsonl(memoryQueue())).toHaveLength(1);
+    });
+
+    it(`${name}: the legacy top-level keys in project.json narrow nothing`, () => {
+      writeRepoFile(projectDir, 'project.json', '{"memory":false,"learning":false,"decisions":false}');
+
+      runHook(hook, input(), homeDir);
+      expect(readJsonl(memoryQueue())).toHaveLength(1);
+      expect(readJsonl(learningQueue())).toHaveLength(1);
+    });
+  }
+
+  it('a session started in a subdirectory reads the toplevel\'s project.json', () => {
+    // A real repository, so the root comes from git: PROJECT_ROOT (DF_ROOT) is
+    // the toplevel, not the directory Claude Code was launched in.
+    const repo = fs.mkdtempSync(path.join(os.tmpdir(), 'cap-narrow-repo-'));
+    try {
+      execSync('git init -q', { cwd: repo });
+      const sub = path.join(repo, 'packages', 'app');
+      fs.mkdirSync(sub, { recursive: true });
+      writeRepoFile(repo, 'project.json', '{"features":{"learning":false}}');
+
+      expect(runHook(CAPTURE_PROMPT, { cwd: sub, prompt: 'hello' }, homeDir).exitCode).toBe(0);
+      expect(fs.existsSync(path.join(repo, '.devflow', 'learning', '.pending-turns.jsonl'))).toBe(false);
+      expect(readJsonl(path.join(repo, '.devflow', 'memory', '.pending-turns.jsonl'))).toHaveLength(1);
+      expect(fs.existsSync(path.join(sub, '.devflow'))).toBe(false);
+    } finally {
+      fs.rmSync(repo, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('memory-worker: a repository narrowing stops the spawn (D-FEATURES-NARROW-ONLY)', { timeout: NARROWING_TEST_BUDGET_MS }, () => {
+  let projectDir: string;
+  let homeDir: string;
+  let shimDir: string;
+
+  beforeEach(() => {
+    projectDir = makeGitProject('mem-worker-narrow-');
+    homeDir = fs.mkdtempSync(path.join(os.tmpdir(), 'mem-worker-narrow-home-'));
+    shimDir = fs.mkdtempSync(path.join(os.tmpdir(), 'mem-worker-narrow-shim-'));
+    fs.mkdirSync(path.join(projectDir, '.devflow', 'memory'), { recursive: true });
+    writeMachineFeatures(homeDir, { memory: true });
+  });
+
+  afterEach(() => {
+    for (const dir of [projectDir, homeDir, shimDir]) fs.rmSync(dir, { recursive: true, force: true });
+  });
+
+  it('project.json features.memory false: no trigger touch, no spawn', () => {
+    writeRepoFile(projectDir, 'project.json', '{"features":{"memory":false}}');
+    const triggerFile = path.join(projectDir, '.devflow', 'memory', '.working-memory-last-trigger');
+
+    expect(runHookWithPath(MEMORY_WORKER, { cwd: projectDir }, homeDir, shimDir).exitCode).toBe(0);
+    expect(fs.existsSync(triggerFile)).toBe(false);
   });
 });

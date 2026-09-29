@@ -80,7 +80,7 @@ knowledge partials, the Git agent generator host, AND the reference modules; `cl
 at runtime (the Knowledge agent, model=sonnet) to write KNOWLEDGE.md.
 
 **Toggle**: `devflow knowledge --enable/--disable/--status` or `devflow init --knowledge/--no-knowledge`.
-Feature state lives in `.devflow/config.json` (field `knowledge`, default `true`; see `src/core/feature-config.ts`).
+The machine switch lives in `~/.devflow/manifest.json` (`features.knowledge`, default `true`); a repository's `project.json` or the personal `config.json` can narrow it with `features.knowledge: false` (D-FEATURES-NARROW-ONLY), and the write-back gate reads the folded value from the settings line.
 Gates write-back ONLY — load is ungated (harmless). No sentinel file.
 
 ## Component Architecture
@@ -102,7 +102,7 @@ Gates write-back ONLY — load is ungated (harmless). No sentinel file.
 | Author skill | `src/assets/skills/feature-knowledge/SKILL.md` | 4-phase authoring + KNOWLEDGE.md template + index.md registration |
 | Consumption skill | `src/assets/skills/apply-feature-knowledge/SKILL.md` | 3-step algorithm for agents loading FEATURE_KNOWLEDGE |
 | CLI list | `src/cli/commands/knowledge/list.ts` | Reads index.md / falls back to frontmatter glob; no external scripts |
-| CLI toggle | `src/cli/commands/knowledge/toggle.ts` | Flips `knowledge` key in `.devflow/config.json` via `feature-config.ts`; no sentinel creation |
+| CLI toggle | `src/cli/commands/knowledge/toggle.ts` | Flips `features.knowledge` in `~/.devflow/manifest.json`; no sentinel creation |
 
 ## Component Interactions
 
@@ -127,7 +127,7 @@ Invoked at the start of applicable workflows via `knowledge_load()` MDS call sit
 
 Invoked at the end of applicable workflows via `knowledge_writeback()` MDS call site.
 
-1. **Gate** — if `features.knowledge` in `~/.devflow/manifest.json` is `false`, skip entirely (machine-wide, D-FEATURES-MACHINE-WIDE)
+1. **Gate** — resolve the settings line for `{worktree}` (`_partials/_settings.mds` `settings_resolve()`, alias-imported by `_knowledge.mds`); if it says `KNOWLEDGE=off`, skip entirely. The line ANDs the machine switch with the repository's `project.json` and the personal `config.json` `features.knowledge` (D-FEATURES-NARROW-ONLY), and its fail-closed form says `KNOWLEDGE=off`, so an unresolvable line skips write-back. The gate reads no file itself (`tests/guards/no-config-read.test.ts`, `tests/commands/knowledge-writeback-gate.test.ts`)
 2. **Check scope** — if this workflow changed a documented area OR found durable cross-cutting knowledge, proceed
 3. **Spawn Knowledge agent** — `Agent(subagent_type="Knowledge")` with WORKTREE_PATH, FEATURE_SLUG, FEATURE_NAME, DIRECTORIES, FILES_CHANGED, DECISIONS_CONTEXT, EXISTING_KB, EXPLORATION_OUTPUTS
 4. **Agent writes KNOWLEDGE.md** — directly to `.devflow/features/{slug}/KNOWLEDGE.md`
@@ -210,7 +210,7 @@ build:cli` alone produces no installable agents or references — `npm run build
 
 - **500-line cap**: KNOWLEDGE.md exceeding 500 lines must be split into focused sub-knowledge bases.
 - **index.md line format**: `- **{slug}** — {areas} — {Use-when description}` — frontmatter is authoritative if the line format changes.
-- **No sentinel gating**: The old `.devflow/features/.disabled` sentinel is gone (clean break). Config-only gate per ADR-001 — the `knowledge` key in `.devflow/config.json` is the sole toggle.
+- **No sentinel gating**: The old `.devflow/features/.disabled` sentinel is gone (clean break). Config-only gate per ADR-001 — the settings line's `KNOWLEDGE=` (machine switch AND both repo files) is the sole gate.
 - **No concurrent lock**: `index.md` write-through may clobber concurrent writes, but the frontmatter fallback self-heals. `index.md` is git-tracked (shared), so it can also merge-conflict when two branches add different slugs — resolve by keeping both lines.
 - **Output-dir allowlist is closed, three entries**: `ALLOWED_OUTPUT_DIRS` in `mds-variants.ts` holds `{ dir: 'dist/commands', variant: 'commands' }`, `{ dir: 'dist/agents', variant: 'agents' }`, and `{ dir: 'dist/skills/git/references', variant: 'skill-refs' }` (D-SKILLREFS-ALLOWLIST — the third entry is deliberate: the alternative was letting the build write reference files through a path composed outside `resolveOutputDir`, which would have made the allowlist a partial gate, true for two destinations and bypassed for the third). The generation gate on `_mcp.mds` does NOT add a fourth destination — a gated module still resolves to the same `skill-refs` variant and the same `SKILL_REFS_OUTPUT_DIR` allowlist entry as every other reference module; only its `subdir` (`tracker`, not `tracker/{provider}`) and its op-name rule differ. Adding a fourth *directory* means adding it to the allowlist table — `satisfies` forces the new entry to declare a `HostVariant`, and `_EveryVariantHasADirectory` is the reverse compile-time proof (a `HostVariant` member with no table entry is unreachable and fails to typecheck). Introducing a new variant widens the union and breaks every exhaustive dispatch over it until the new case is handled (that is the intended friction, not an obstacle to route around).
 - **Phase-2 scope fence (AC-1.2, narrowed from Phase 1)**: `tests/guards/dist-agents.test.ts` still forbids `@if` conditionals, a `variants:` YAML key, the `tracker-<provider>.md` filename token, the `{provider}.md` templated output name, and `@import`/`@define` inside a compiled AGENT host — none of these exist on this tree either; the generated tree is `tracker/{provider}/{op}.md`, driven by the typed `VARIANT_MODULES` registry, not by a template or a conditional. Two constructs were deliberately **legalised** and are named in `LEGALISED_IN_PHASE2` rather than silently dropped from the forbidden list (ADR-003 — narrowing must be visible, not silent): the literal strings `expandVariants(` and `(module, op)`, both of which now live in `src/core/mds-variants.ts` and `scripts/build-mds.ts` — the guard's own corpus. A later legalisation must update `LEGALISED_IN_PHASE2` (and the guard has its own test proving the fence still forbids ≥6 constructs after the narrowing).
@@ -250,7 +250,7 @@ message — this is by design, not a bug to route around by hardcoding a path el
 ## Gotchas
 
 **`knowledge_writeback()` is conditional, not unconditional**: The partial always checks
-the config gate AND the area-change condition before spawning the Knowledge agent. A
+the settings-line gate AND the area-change condition before spawning the Knowledge agent. A
 workflow that changes no documented area and finds no cross-cutting knowledge skips the
 agent spawn entirely. This is by design (P2: no unconditional spawns).
 
@@ -258,8 +258,8 @@ agent spawn entirely. This is by design (P2: no unconditional spawns).
 path. If it is stale or absent, frontmatter glob is the authoritative fallback. Never
 treat a missing `index.md` as a problem — write-through creates it lazily.
 
-**The knowledge config key is the sole gate**: ADR-001 requires config-only gates. The
-`knowledge` key in `.devflow/config.json` gates write-back. The old sentinel
+**The settings line is the sole gate**: ADR-001 requires config-only gates. The settings
+line's `KNOWLEDGE=` gates write-back; the prompt never reads a config file itself. The old sentinel
 (`.devflow/features/.disabled`) is gone via the clean break — no migration removes it
 because it was never deployed on this branch.
 
@@ -421,6 +421,7 @@ covers all three output kinds with the same one property.
 ## Key Files
 
 - `src/assets/commands/_partials/_knowledge.mds` — defines and exports `knowledge_load` and `knowledge_writeback` partials; the single authoritative source for both algorithms
+- `src/assets/commands/_partials/_settings.mds` — `settings_resolve()`: runs `resolve-settings.cjs` for a worktree root and accepts only a `SETTINGS_LINE_RE`-shaped line, else the fail-closed line; alias-imported by `_knowledge.mds`, `_publication.mds` and `_compliance.mds` (never by a host)
 - `src/assets/commands/{name}.mds` (9 files) — knowledge host command sources that `@import "_partials/_knowledge.mds"` and call the partials; compiled to `dist/commands/` at build time
 - `scripts/build-mds.ts` — unified frontmatter-driven build script; discovers hosts by `output-dir:` key across the whole-repo walk from the repo root (`DEVFLOW_MDS_ROOT` overrides the root for isolated tests), bucketing each walked reference-module path into `deferred` via `deferredReferenceModuleSources()` before it can become a host; dispatches all three host variants through one exhaustive switch at both the strip step (`stripFrontmatterFor`) and the plan step (`planHost`, dispatching to `planSingleFile`/`planReferenceModule` and returning a `HostPlan` discriminated union on `variant` — the fan-out arm's `outputs: readonly PlannedReference[]` pairs each `dest` with its `(module, op)` pair; `destsOf(plan)` is the one function every uniform-view caller goes through instead of branching on the arm); `referenceModuleFor` resolves a host's registry entry through `resolveVariantModules()`, never the raw `VARIANT_MODULES` constant, so a gated-but-open module is found the same way an unconditional one is; owns the single `process.exit`, reached only from `main()` after the loop; prunes unclaimed `.md` files from `dist/agents/` and `dist/skills/git/references/` (`pruneOrphanAgents` / `pruneOrphanReferences`, sharing the `pruneOrphans` helper, bounded by the shared `MAX_REFERENCE_SWEEP_DEPTH` imported from `src/core/reference-sweep.ts`) once that exit is passed; renders errors from `mds-variants.ts` Result values through per-kind exhaustive switches and throws them for aggregation
 - `src/core/mds-variants.ts` — pure, zero-I/O core module: `validateOutputName` / `validateContractOutputName` (the leading-underscore-mandatory sibling for `'contract'`-kind op names), `resolveOutputDir` (3-entry allowlist, returns `{ variant, abs }` with `HostVariant = 'commands' | 'agents' | 'skill-refs'`), `expandVariants` (registry → flat `(module, op)` pair list, `MIN_VARIANT_PAIRS = 8` floor on fan-out modules — a `too-few-pairs` refusal carries the offending `module`), `splitVariantSections<T extends OperationNamed>` (compiled body + caller's own `{op}`-bearing records → `Result<readonly VariantSection<T>[], SectionSplitError>`, bidirectional parity + empty-section check, no lookup, no non-null assertion), `generatedReferenceManifest()` (every file the shipped, *resolved* registry emits, for the installer's converge manifest — asserts rather than returning a `Result`, since a registry refusal here is a programming error no caller could sensibly continue past). `VARIANT_MODULES` (5 unconditional entries, each `kind: 'fanout' | 'named'` required, not defaulted), `TRACKER_OPS` (the shared 10-op roster all three providers read), `TRACKER_GITHUB_OPS` (an alias of `TRACKER_OPS` for GitHub-scoped call sites — same list, two readings), `PR_HOST_OPS` (the shared 8-op roster `_pr.mds` reads, exactly `MIN_VARIANT_PAIRS`), `PR_HOST_DESTINATION_ROOT` (`'pr'`, the provider-independent subdir), `GIT_CROSS_CUTTING_DOCS`, `MCP_CONTRACT_MODULE` (`kind: 'contract'`, the 6th, gated entry), `MCP_BACKED_PROVIDER_SUBDIRS`, `mcpContractIsGenerated`, `resolveVariantModules`, `deferredReferenceModuleSources`, `GATED_REFERENCE_MODULE_SOURCES`. Exports `AGENTS_OUTPUT_DIR`, `SKILL_REFS_OUTPUT_DIR`, `SKILL_REFS_SKILL_NAME` (`'git'`). Returns `Result<T, E>`, never throws for expected refusals and never calls `process.exit`
@@ -436,7 +437,7 @@ covers all three output kinds with the same one property.
 - `src/assets/skills/feature-knowledge/SKILL.md` — Iron Law, 4-phase authoring, KNOWLEDGE.md template, index.md registration instructions
 - `src/assets/skills/apply-feature-knowledge/SKILL.md` — 3-step consumption algorithm, skip guard, verify-against-code freshness
 - `src/cli/commands/knowledge/list.ts` — reads index.md directly or falls back to frontmatter glob; no external scripts
-- `src/cli/commands/knowledge/toggle.ts` — flips `knowledge` in `.devflow/config.json` (`feature-config.ts`); no sentinel creation/deletion
+- `src/cli/commands/knowledge/toggle.ts` — flips `features.knowledge` in `~/.devflow/manifest.json`; no sentinel creation/deletion
 
 ## Related
 

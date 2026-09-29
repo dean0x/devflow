@@ -43,27 +43,45 @@ provider selection and the agent's schema). The content the Learning agent produ
 **deliberately keeps its "decisions" naming** even though the system is called "learning" (see
 Naming Boundary).
 
-**`memory`, `learning`, and `knowledge` are machine-wide-only switches**
-(D-FEATURES-MACHINE-WIDE, `src/core/feature-switch.ts`, shipped fixing issue #378) — there is no
-per-repo layer for these three features. See System Architecture for the full model.
+**`memory`, `learning`, and `knowledge` are machine switches a repository can only narrow**
+(D-FEATURES-NARROW-ONLY, `src/core/feature-switch.ts`; #378 made them machine-wide, #392 added
+the narrow-only repository layer). See System Architecture for the full model.
 
 ## System Architecture
 
-### Machine-Wide Feature Switches (D-FEATURES-MACHINE-WIDE)
+### Feature Switches: Machine, Narrowed by the Repository (D-FEATURES-NARROW-ONLY)
 
 `features.memory`, `features.learning`, and `features.knowledge` in `~/.devflow/manifest.json`
-are the single source of truth, in every repository and every non-git cwd. `devflow init` and
-`devflow memory|learning|knowledge --enable/--disable` write that one value; every runtime gate
-reads it — the shell hooks via `queue_read_gates <manifest_path>` (memory/learning only), the
-CLI's `--status` via `readMachineFeature(devflowDir, feature)`, and the knowledge write-back
-gate via the `knowledge_writeback` MDS partial reading the manifest directly (no shell mirror).
+are the MACHINE switch. `devflow init` and `devflow memory|learning|knowledge
+--enable/--disable` write that one value. A repository adds two layers that can only turn a
+feature OFF: effective = machine AND `.devflow/project.json` `features.<name>` (team-committed)
+AND `.devflow/config.json` `features.<name>` (personal, per worktree), where only a literal
+`false` narrows. `features` is a new namespace — the retired top-level keys never narrow, and
+`features.decisions` in a repository file is not a switch. Readers:
+- `resolve-settings.cjs` folds all three (`MEMORY=`/`LEARNING=`/`KNOWLEDGE=`), parsed by the
+  shared `scripts/lib/project-config.cjs`.
+- The shell hooks via `queue_read_gates <manifest_path> <root>` (memory/learning only). Every
+  caller passes `$PROJECT_ROOT` (= `DF_ROOT`, the checkout toplevel) as `<root>`, for learning
+  too — the files are per branch/worktree, the ledger root only says where the queue lands.
+  D-GATES-FAST-PATH: each repository file gets a bounded builtin read (`read -r -d '' -n 4097`);
+  a cut-short read (NUL or > 4096 bytes) is invalid and narrows nothing; a text with no `\u` and
+  no `"features"…{…"memory|learning"…false` sequence cannot narrow. Zero forks then. Otherwise
+  exactly ONE `node` fork runs `resolve-settings.cjs`'s `readRepoLayers` + `foldSettings`
+  (folding the manifest too when its own fast path flagged it), so every file rule — symlink,
+  size, BOM, fatal UTF-8, duplicate keys — is the parser's. The shared table
+  `tests/fixtures/settings-switch-table.ts` runs against both (TP-49).
+- The CLI's `--status` via `readMachineFeature(devflowDir, feature)`, plus an
+  `Effective here: disabled (<file>)` line when a repository file narrows.
+- The knowledge write-back gate via the `knowledge_writeback` MDS partial, which takes
+  `KNOWLEDGE=` from the settings line (`_partials/_settings.mds`) and reads no file itself.
 
-**Why**: per-repo toggles were a leftover of the per-repo-install era — `init --no-<feature>`
+**Why narrow-only**: per-repo toggles were a leftover of the per-repo-install era — `init --no-<feature>`
 recorded "off" in one repo's manifest while every OTHER repo, reading its own
 `.devflow/config.json`, kept the feature running (#378). Those keys are retired:
 `RETIRED_CONFIG_KEYS` in `feature-config.ts` (`memory`, `learning`, `knowledge`, `decisions`,
 `autoCommit`) — no gate reads them, and `mergeManagedConfig`/`writeManagedConfig` drop them on
-the next managed write. The old `updateFeature`/`isFeatureEnabled` pair is deleted outright —
+the next managed write. A repository layer that can only narrow cannot reintroduce #378: no repo
+can keep a feature running that the machine switched off. The old `updateFeature`/`isFeatureEnabled` pair is deleted outright —
 only `readMachineFeature`/`writeMachineFeature` remain.
 
 **D-FEATURES-ABSENT-ON (fail-open)**: only an explicit boolean `false` switches a feature off —
@@ -93,7 +111,8 @@ effect of a one-key toggle. Refuses `{ok: false, error: 'not-installed'}` when n
 
 All three hooks source `queue-append` and call `queue_append_both`, which gates each write
 independently via `_QG_MEMORY`/`_QG_LEARNING` flags from a single
-`queue_read_gates "$DEVFLOW_MANIFEST"` call (AC-P1 — one subprocess per hook invocation).
+`queue_read_gates "$DEVFLOW_MANIFEST" "$PROJECT_ROOT"` call (AC-P1 — at most one subprocess per
+hook invocation, none when the fast paths settle it).
 `$DEVFLOW_MANIFEST` is `$HOME/.devflow/manifest.json` — the machine root, which no environment
 variable relocates (D-ONE-HOME, #389). The project's own `.devflow` is a separate hook-local,
 `PROJECT_DEVFLOW_DIR="$PROJECT_ROOT/.devflow"`.
@@ -103,7 +122,8 @@ Config splits along a different line than before #378:
 | What | File | Contains |
 |------|------|---------|
 | Feature on/off | `~/.devflow/manifest.json` (machine-wide) | `{features: {memory, learning, knowledge, ...}}` |
-| Per-repo facts | `.devflow/config.json` (project root) | `{reviewPublication, tracker?}` — no feature switches |
+| Team narrowing + facts | `.devflow/project.json` (committed, never devflow-written) | `{version, evidence, compliance, tracker, reviewPublication, features}` — `features.<x>: false` only narrows; `reviewPublication` only lowers (a ceiling, never a default: `min(team ?? full, personal ?? auto)`) |
+| Per-repo facts | `.devflow/config.json` (project root, per worktree) | `{reviewPublication, tracker?, features?}` — `features.<x>: false` only narrows; top-level switch keys retired |
 | Agent tuning | `.devflow/learning/learning.json` → `~/.devflow/learning.json` | `{model, debug}`, project overrides global |
 
 `.devflow/config.json`'s only feature-adjacent field left is the optional `tracker` key — a
@@ -123,7 +143,8 @@ Hooks resolve roots from git, never from cwd. `resolve-project-root`'s `df_resol
 All three capture hooks enforce in order: (1) **re-entrancy guard**
 (`if [ "${DEVFLOW_BG_UPDATER:-}" = "1" ]; then exit 0; fi`, before `hook-bootstrap`, prevents
 double-capture of the memory worker's own claude session); (2) **single config fork** via
-`queue_read_gates "$DEVFLOW_MANIFEST"` (the machine-root manifest); (3) **JSONL
+`queue_read_gates "$DEVFLOW_MANIFEST" "$PROJECT_ROOT"` (the machine-root manifest, narrowed by the
+checkout's repository files; zero forks unless one could narrow); (3) **JSONL
 append** via `jq` or `node JSON.stringify` (never string concatenation), `umask 077`;
 (4) **overflow guard** (>200 lines → truncate to newest 100, under `learning_lock_acquire`, 2s
 timeout). `capture-turn` also runs `decisions-usage-scan.cjs` before append when the assistant
@@ -140,7 +161,7 @@ Emits `--- LEARNING MAINTENANCE ---` when `.pending-turns.jsonl` is non-empty OR
 (ledger root for Section 2; project root + `~/.devflow` for Section 3). A refused root with
 pending work emits the fixed single-quoted `--- LEARNING PAUSED ---` notice, which interpolates
 nothing. Gated by the
-same `queue_read_gates` read, resolved from `$TRACKER_DEVFLOW_DIR/manifest.json`
+same `queue_read_gates` read, resolved from `$TRACKER_DEVFLOW_DIR/manifest.json` and `$PROJECT_ROOT`
 (`TRACKER_DEVFLOW_DIR="$HOME/.devflow"`, the machine root; the project root's `.devflow` is
 `PROJECT_DEVFLOW_DIR` — the global `learning.json` read spells `$HOME/.devflow` too, so the two
 no longer diverge). Model resolves bash-side (project → global → `"opus"`)
@@ -330,7 +351,7 @@ and spawn-dream-worker only ever shipped through run-hook, so they have no legac
 keeps a user's group in place and appends devflow's hook after it, so the Stop-array
 append-before-spawn order (capture-turn before memory-worker) still holds.
 
-### devflow init and the Machine-Wide Switches
+### devflow init and the Machine Switches
 
 **D-INIT-DRAIN-AFTER-SWITCH**: `drainDisabledFeatureQueues` drains this repo's memory/learning
 queues for each feature `init` switched off — the same drains the standalone `--disable`
@@ -359,7 +380,7 @@ Do not rename them: `decisions.md`/`pitfalls.md` (rendered output), `decisions-l
 `index.md` (pre-rendered compact index), `decisions_status` (ledger field),
 `DECISIONS_CONTEXT`/`decisions_load()` (macros), `render-decisions.cjs`/`decisions-format.cjs`/
 `decisions-usage-scan.cjs` (scripts), ADR-NNN/PF-NNN (anchor ID format). The directory is
-`learning/`, the feature toggle is `features.learning` (manifest-only), the agent is `Learning`
+`learning/`, the feature toggle is `features.learning` (manifest, repo-narrowable), the agent is `Learning`
 — but everything it produces uses "decisions" identifiers. Intentional; do not "fix" the mismatch.
 
 ## Anti-Patterns
@@ -367,10 +388,14 @@ Do not rename them: `decisions.md`/`pitfalls.md` (rendered output), `decisions-l
 - **Reading feature flags with two separate `json_field_file` calls**: use `queue_read_gates`
   (AC-P1 — one subprocess). Two forks double overhead on every hook invocation.
 
-- **Reading or writing `.devflow/config.json` for memory/learning/knowledge on/off state**: those
-  keys are retired (`RETIRED_CONFIG_KEYS`); no gate reads them. Use
+- **Reading or writing top-level `.devflow/config.json` keys for memory/learning/knowledge on/off
+  state**: those keys are retired (`RETIRED_CONFIG_KEYS`); no gate reads them. Use
   `readMachineFeature`/`writeMachineFeature` against `~/.devflow/manifest.json` instead — this is
-  exactly the bug #378 fixed.
+  exactly the bug #378 fixed. The only repository switch is `features.<x>: false`, and it only
+  narrows.
+
+- **Omitting `<root>` from a `queue_read_gates` call**: the repository's narrowing is then silently
+  ignored. `tests/queue-append.test.ts` pins every caller's shape.
 
 - **Resolving the manifest path from the project root**: the manifest lives at the machine root
   (`$HOME/.devflow/manifest.json`), never under `PROJECT_DEVFLOW_DIR`. A gate pointed at the
@@ -495,7 +520,7 @@ Do not rename them: `decisions.md`/`pitfalls.md` (rendered output), `decisions-l
 | `src/cli/commands/init.ts` | `drainDisabledFeatureQueues` (D-INIT-DRAIN-AFTER-SWITCH), `D-HUD-ONLY-PRESERVE`, the one `manifestData.features` write site |
 | `src/hud/components/learning-counts.ts` | HUD counts from `decisions-ledger.jsonl` |
 | `src/core/ledger-root.ts` | `getLedgerRoot` — the CLI/HUD twin of the hooks' `DF_LEDGER_ROOT` |
-| `src/assets/commands/_partials/_knowledge.mds` | `knowledge_load()`/`knowledge_writeback()` — write-back reads `features.knowledge` directly |
+| `src/assets/commands/_partials/_knowledge.mds` | `knowledge_load()`/`knowledge_writeback()` — write-back takes `KNOWLEDGE=` from the settings line |
 | `src/assets/commands/_partials/_decisions.mds` | `decisions_load()` macro (plain file Read per ADR-007) |
 | `src/assets/scripts/hooks/decisions-usage-scan.cjs` | Citation counter (D29 grep-first gate) |
 | `tests/seams/tracker-key-path.test.ts`, `tests/seams/tracker-claim-staleness.test.ts` | Pin key-path parity and the shared claim-staleness bound |
@@ -509,13 +534,13 @@ Do not rename them: `decisions.md`/`pitfalls.md` (rendered output), `decisions-l
 - **PF-042** — `segmentDetails` anchored-key approach avoids delimiter-regex truncation
 - **PF-040** — pointer-vs-citation gate for missing-path signals in decisions/evidence
 - **ADR-007** — `index.md` consumption via plain Read; no subprocess
-- **ADR-011** — original rationale for a neutral, feature-agnostic config home for multi-feature toggles; superseded for memory/learning/knowledge by D-FEATURES-MACHINE-WIDE (`src/core/feature-switch.ts`, #378) — now applies only to the per-repo `tracker` override, the one field still living in `.devflow/config.json`
+- **ADR-011** — original rationale for a neutral, feature-agnostic config home for multi-feature toggles; superseded for memory/learning/knowledge by D-FEATURES-NARROW-ONLY (`src/core/feature-switch.ts`, #378/#392: machine switch, repository narrows via the new `features` namespace) — its top-level toggles stay retired
 - **PF-003** — use `unlink` not `rm -f` for the agent's final act
 - **PF-014** — throw inside lock scopes, never `process.exit()`; precondition asserts in `refresh-anchor`
 - **PF-013** — parent directory of lock dir created before acquire (`withDecisionsLock`)
 - **PF-045** — simulating a missing shell tool via `PATH` subtraction is platform-dependent; `tests/seams/tracker-key-path.test.ts` avoids it with a backend variable-switch override
 - **PF-062** — document the shape of any file that gates a suppressing action, and keep absent and malformed distinct from a value; the `.tracker.attempts` parse follows this directly
 - **PF-035** — a shell rewrite hook can silently substitute a lossy view for a literal file read; the load-bearing surface is exactly the Learning/Tracker agents' direct `.devflow` data-file consumption
-- `.devflow/features/feature-knowledge-system/KNOWLEDGE.md` — Knowledge agent write-back pattern (parallel write-through system); its opt-out gate now reads the same `features.knowledge` manifest key this KB documents
+- `.devflow/features/feature-knowledge-system/KNOWLEDGE.md` — Knowledge agent write-back pattern (parallel write-through system); its opt-out gate takes `KNOWLEDGE=` from the settings line, which folds the same `features.knowledge` switch this KB documents with the two repo files
 - `.devflow/features/ambient-orchestrator/KNOWLEDGE.md` — Ambient orchestrator that also uses `session-start-context` for charter injection
 - `.devflow/features/tracker-feature/KNOWLEDGE.md` — owns the tracker feature's full story (provider selection, the Tracker agent's schema/domain, the Git agent's reader-side preamble); this KB owns only the hook plumbing and the directive pattern shared with Section 2

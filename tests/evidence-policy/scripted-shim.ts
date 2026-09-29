@@ -44,6 +44,18 @@ export const RESOLVER_SCRIPT = path.resolve(
   '../../src/assets/scripts/resolve-evidence-policy.cjs',
 );
 
+/** The local settings resolver — the package's own copy, never ~/.devflow/scripts. */
+export const SETTINGS_SCRIPT = path.resolve(
+  import.meta.dirname,
+  '../../src/assets/scripts/resolve-settings.cjs',
+);
+
+/** The shared per-repo config parser both resolvers require (lib/project-config.cjs). */
+export const PROJECT_CONFIG_LIB = path.resolve(
+  import.meta.dirname,
+  '../../src/assets/scripts/lib/project-config.cjs',
+);
+
 /** Exit status a fake returns for an argv no scenario scripted. */
 export const UNSCRIPTED_EXIT = 97;
 
@@ -109,7 +121,11 @@ export interface ScriptedCall {
   readonly spawnError?: string;
 }
 
-/** The resolver's exact argv, written out here independently of the script. */
+/**
+ * The resolver's exact argv, written out here independently of the script. The
+ * `*Project` entries read `.devflow/project.json`, which every source consults
+ * before the legacy `.devflow/policy.json` (D-POLICY-SOURCE-PRECEDENCE).
+ */
 export const ARGV = {
   toplevel: ['rev-parse', '--show-toplevel'],
   probe: ['api', 'repos/{owner}/{repo}', '--jq', '.default_branch'],
@@ -117,10 +133,18 @@ export const ARGV = {
     'api', '--method', 'GET', 'repos/{owner}/{repo}/contents/.devflow/policy.json',
     '-f', `ref=${ref}`, '-H', 'Accept: application/vnd.github.raw+json',
   ],
+  contentsProject: (ref: string): string[] => [
+    'api', '--method', 'GET', 'repos/{owner}/{repo}/contents/.devflow/project.json',
+    '-f', `ref=${ref}`, '-H', 'Accept: application/vnd.github.raw+json',
+  ],
   headBlob: ['cat-file', 'blob', 'HEAD:.devflow/policy.json'],
+  headProjectBlob: ['cat-file', 'blob', 'HEAD:.devflow/project.json'],
   lsRemote: ['ls-remote', '--symref', 'origin', 'HEAD'],
   verifyTracking: (ref: string): string[] => ['rev-parse', '--verify', '--quiet', `refs/remotes/origin/${ref}`],
   trackingBlob: (ref: string): string[] => ['cat-file', 'blob', `refs/remotes/origin/${ref}:.devflow/policy.json`],
+  trackingProjectBlob: (ref: string): string[] => [
+    'cat-file', 'blob', `refs/remotes/origin/${ref}:.devflow/project.json`,
+  ],
 } as const;
 
 const FAKE_SHA = '0123456789abcdef0123456789abcdef01234567';
@@ -132,25 +156,48 @@ export type Blob = { readonly bytes: string | Buffer } | 'absent';
  * A remote/local layout, described in the resolver's own vocabulary.
  *
  * `defaultBranch` undefined ⇒ the gh probe fails like an unauthenticated gh.
- * `remote` is the contents call's answer: bytes, `'absent'` (the verified gh 404
- * shape — JSON body on STDOUT, `(HTTP 404)` on stderr, exit 1) or `'forbidden'`
- * (a 403, which must read as unavailable, never absent).
+ * `remote` is the policy.json contents call's answer: bytes, `'absent'` (the
+ * verified gh 404 shape — JSON body on STDOUT, `(HTTP 404)` on stderr, exit 1) or
+ * `'forbidden'` (a 403, which must read as unavailable, never absent — and which
+ * the project.json call, made first, then answers too: a 403 is repository-wide).
  * `lsRemoteBranch` undefined ⇒ `git ls-remote` fails.
  * `tracking` is refs/remotes/origin/<D>: a blob at an existing ref, or `'no-ref'`.
+ *
+ * The `*Project` fields are the same sources' `.devflow/project.json`. Each
+ * defaults to absent whenever its source is reachable, so a scenario written
+ * before project.json existed describes the same repository it always did: the
+ * default branch has a 404 for project.json, and HEAD and the tracking ref have
+ * no such blob.
  */
 export interface Scenario {
   readonly root: string;
   readonly defaultBranch?: string;
   readonly remote?: Blob | 'forbidden';
+  readonly remoteProject?: Blob | 'forbidden';
   readonly head?: Blob;
+  readonly headProject?: Blob;
   readonly lsRemoteBranch?: string;
   readonly tracking?: Blob | 'no-ref';
+  readonly trackingProject?: Blob;
 }
 
 function blobAnswer(tool: Tool, args: readonly string[], blob: Blob): ScriptedCall {
   return blob === 'absent'
     ? { tool, args, exit: 128, stderr: "fatal: path '.devflow/policy.json' does not exist in 'HEAD'\n" }
     : { tool, args, stdout: blob.bytes, exit: 0 };
+}
+
+/** A contents call's scripted answer: bytes, the verified 404 shape, or a 403. */
+function contentsAnswer(args: readonly string[], answer: Blob | 'forbidden'): ScriptedCall {
+  if (answer === 'forbidden') return { tool: 'gh', args, exit: 1, stderr: 'gh: API rate limit exceeded (HTTP 403)\n' };
+  if (answer === 'absent') {
+    return {
+      tool: 'gh', args, exit: 1,
+      stdout: '{"message":"Not Found","documentation_url":"https://docs.github.com/rest","status":"404"}',
+      stderr: 'gh: Not Found (HTTP 404)\n',
+    };
+  }
+  return { tool: 'gh', args, stdout: answer.bytes };
 }
 
 /** Expand a Scenario into the scripted calls the resolver may make against it. */
@@ -171,21 +218,15 @@ export function scenarioCalls(s: Scenario): ScriptedCall[] {
       : { tool: 'git', args: ARGV.lsRemote, stdout: `ref: refs/heads/${s.lsRemoteBranch}\tHEAD\n${FAKE_SHA}\tHEAD\n` },
   ];
 
-  if (s.defaultBranch !== undefined && s.remote !== undefined) {
-    const args = ARGV.contents(s.defaultBranch);
-    if (s.remote === 'forbidden') {
-      calls.push({ tool: 'gh', args, exit: 1, stderr: 'gh: API rate limit exceeded (HTTP 403)\n' });
-    } else if (s.remote === 'absent') {
-      calls.push({
-        tool: 'gh', args, exit: 1,
-        stdout: '{"message":"Not Found","documentation_url":"https://docs.github.com/rest","status":"404"}',
-        stderr: 'gh: Not Found (HTTP 404)\n',
-      });
-    } else {
-      calls.push({ tool: 'gh', args, stdout: s.remote.bytes });
-    }
+  if (s.defaultBranch !== undefined) {
+    const project = s.remoteProject ?? (s.remote === 'forbidden' ? 'forbidden' : 'absent');
+    calls.push(contentsAnswer(ARGV.contentsProject(s.defaultBranch), project));
+    if (s.remote !== undefined) calls.push(contentsAnswer(ARGV.contents(s.defaultBranch), s.remote));
   }
 
+  if (s.head !== undefined || s.headProject !== undefined) {
+    calls.push(blobAnswer('git', ARGV.headProjectBlob, s.headProject ?? 'absent'));
+  }
   if (s.head !== undefined) calls.push(blobAnswer('git', ARGV.headBlob, s.head));
 
   const trackedRef = s.defaultBranch ?? s.lsRemoteBranch;
@@ -194,6 +235,7 @@ export function scenarioCalls(s: Scenario): ScriptedCall[] {
       calls.push({ tool: 'git', args: ARGV.verifyTracking(trackedRef), exit: 1 });
     } else {
       calls.push({ tool: 'git', args: ARGV.verifyTracking(trackedRef), stdout: `${FAKE_SHA}\n` });
+      calls.push(blobAnswer('git', ARGV.trackingProjectBlob(trackedRef), s.trackingProject ?? 'absent'));
       calls.push(blobAnswer('git', ARGV.trackingBlob(trackedRef), s.tracking));
     }
   }

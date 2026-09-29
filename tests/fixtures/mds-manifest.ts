@@ -21,8 +21,12 @@
  *                                         agents, and the shipped .mds sources, inside the tarball
  *   - tests/mds-variants.test.ts
  *       "validateOutputName"            — every basename the build owns is accepted by the name rule
+ *   - tests/commands/settings-partial.test.ts
+ *       SETTINGS_BLOCK_HOSTS            — the compiled commands that carry the settings block
+ *   - tests/guards/provider-scope.test.ts
+ *       SETTINGS_BLOCK_HOSTS            — the files whose settings-line shape may name every provider
  *
- * Length floors (`>= 13` hosts, `>= 14` partials) are asserted alongside the set-equality in
+ * Length floors (`>= 13` hosts, `>= 15` partials) are asserted alongside the set-equality in
  * tests/build-mds.test.ts and registered in tests/fixtures/numeric-floors.json.
  * A floor never decreases; a manifest entry may only be added or renamed in step
  * with the file on disk.
@@ -56,7 +60,7 @@ export const MDS_COMMAND_HOSTS = [
 ] as const;
 
 /**
- * The 13 partials in src/assets/commands/_partials/, by BASENAME. A partial
+ * The 14 partials in src/assets/commands/_partials/, by BASENAME. A partial
  * declares no `output-dir:`, so the build skips it — it is imported by hosts
  * instead. The `_` prefix is the partial convention (and is refused by
  * validateOutputName, so a partial can never become an output filename by
@@ -76,6 +80,7 @@ export const MDS_PARTIALS = [
   '_preamble',
   '_publication',
   '_roster',
+  '_settings',
   '_ticket_template',
   '_tracker',
   '_wave',
@@ -149,6 +154,27 @@ export const EVIDENCE_POLICY_PARTIAL_ADOPTERS = [
   'plan',
   'resolve',
 ] as const;
+
+/**
+ * The hosts whose compiled text carries the `_partials/_settings.mds` block (#392).
+ * No host imports the partial: each inherits it through a gate partial that does
+ * — `_compliance` (code-review, plan), `_publication` (code-review, dynamic-build,
+ * implement, resolve) and `_knowledge`'s write-back (debug, explore, implement,
+ * resolve, self-review). Named as a set for the same reason as the rosters above:
+ * the provider-scope guard allowlists the block's closed provider set in exactly
+ * these files, and tests/commands/settings-partial.test.ts holds the set to the
+ * build.
+ */
+export const SETTINGS_BLOCK_HOSTS = [
+  'code-review',
+  'debug',
+  'dynamic-build',
+  'explore',
+  'implement',
+  'plan',
+  'resolve',
+  'self-review',
+] as const
 
 /**
  * Generator hosts: .mds sources outside src/assets/commands/ that compile to a

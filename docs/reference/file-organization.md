@@ -73,10 +73,12 @@ devflow/
 │       └── scripts/                  # Installed verbatim to ~/.devflow/scripts/
 │           ├── hud.sh                # HUD status-line entry script
 │           ├── redact-secrets.cjs    # D11 secret scrubber for every posted body and notes file
-│           ├── resolve-evidence-policy.cjs # Resolves EVIDENCE_POLICY from .devflow/policy.json; writes nothing
+│           ├── resolve-evidence-policy.cjs # Resolves EVIDENCE_POLICY from .devflow/project.json `evidence` (legacy .devflow/policy.json fallback per source); writes nothing
+│           ├── resolve-settings.cjs  # Local settings resolver: folds project.json, config.json and the machine manifest into one settings line; no network, writes nothing
 │           ├── pr-evidence.cjs       # Pure core of test-plan evidence: grammars, markers, the state ladder
 │           ├── verify-evidence.cjs   # I/O half of test-plan evidence: check, render, verify, splice, readback
 │           ├── release-trace.cjs     # Git-only release trace: last release tag + per-commit trace map
+│           ├── lib/project-config.cjs # The one parser of .devflow/project.json and .devflow/config.json (installed beside its two callers)
 │           └── hooks/                # Capture + memory + learning + ambient hooks
 │               ├── capture-prompt        # UserPromptSubmit hook: appends user turn to memory + learning queues (independently gated)
 │               ├── capture-turn          # Stop hook: appends assistant turn to memory + learning queues; never spawns
@@ -172,7 +174,7 @@ Assets live once in `src/assets/` and install to the user's `~/.claude/` — no 
 | Rules | `src/assets/rules/{name}.md` | `~/.claude/rules/devflow/{name}.md` | None — edit → init |
 | Commands | `dist/commands/{name}.md` | `~/.claude/commands/devflow/{name}.md` | `npm run build:mds` |
 | Skill references (generated) | `src/assets/mds/**/*.mds` → `dist/skills/git/references/**` | `~/.claude/skills/devflow:git/references/**` | `npm run build:mds` |
-| Scripts (root) | `src/assets/scripts/*.cjs`, `hud.sh` | `~/.devflow/scripts/` | None — edit → init |
+| Scripts (root) | `src/assets/scripts/*.cjs`, `lib/`, `hud.sh` | `~/.devflow/scripts/` | None — edit → init |
 | Scripts (hooks) | `src/assets/scripts/hooks/` | `~/.devflow/scripts/hooks/` | None — edit → init |
 
 ### Packaging
@@ -212,7 +214,7 @@ Included settings:
 
 ## Capture + Learning Hooks
 
-A capture/spawn split across always-on shell-script hooks. Queue-append (`capture-prompt`/`capture-turn`/`capture-question`) is unconditional; each queue write is independently gated by its machine-wide switch in `~/.devflow/manifest.json` (`features.memory` / `features.learning`; a missing manifest or key means on — D-FEATURES-MACHINE-WIDE). Memory refresh is toggleable via `devflow memory --enable/--disable/--status` or `devflow init --memory/--no-memory`; learning detection/curation via `devflow learning --enable/--disable/--status` or `devflow init --learning/--no-learning`.
+A capture/spawn split across always-on shell-script hooks. Queue-append (`capture-prompt`/`capture-turn`/`capture-question`) is unconditional; each queue write is independently gated by its machine-wide switch in `~/.devflow/manifest.json` (`features.memory` / `features.learning`; a missing manifest or key means on), which the checkout's `.devflow/project.json` or `.devflow/config.json` can narrow with a literal `features.<name>: false` but never widen (D-FEATURES-NARROW-ONLY). Memory refresh is toggleable via `devflow memory --enable/--disable/--status` or `devflow init --memory/--no-memory`; learning detection/curation via `devflow learning --enable/--disable/--status` or `devflow init --learning/--no-learning`.
 
 | Hook / Worker | Event | Purpose |
 |---------------|-------|---------|

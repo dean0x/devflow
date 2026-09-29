@@ -43,7 +43,7 @@ source "$SCRIPT_DIR/resolve-project-root" 2>/dev/null || true
 PROJECT_ROOT="$(df_resolve_root "$CWD" 2>/dev/null || true)"
 [ -n "$PROJECT_ROOT" ] || PROJECT_ROOT="$CWD"
 
-# The machine-wide manifest (the memory switch, D-FEATURES-MACHINE-WIDE in
+# The machine-wide manifest (the memory switch, D-FEATURES-NARROW-ONLY in
 # queue-append) lives at the machine root,
 # $HOME/.devflow (D-ONE-HOME).
 DEVFLOW_MANIFEST="$HOME/.devflow/manifest.json"
@@ -53,13 +53,13 @@ MEMORY_DIR="$PROJECT_DEVFLOW_DIR/memory"
 # Normal logging
 source "$SCRIPT_DIR/hook-log-init" "pre-compact-memory"
 
-# Memory gate: the machine-wide switch, read by the helper every memory/learning
-# gate shares (D-FEATURES-MACHINE-WIDE, see queue-append). The per-repo config
-# is never consulted.
+# Memory gate: the machine switch, narrowed by this checkout's project.json /
+# config.json `features.memory`, read by the helper every memory/learning gate
+# shares (D-FEATURES-NARROW-ONLY, see queue-append).
 source "$SCRIPT_DIR/queue-append" || { echo "pre-compact-memory: failed to source queue-append" >&2; exit 1; }
-queue_read_gates "$DEVFLOW_MANIFEST"
+queue_read_gates "$DEVFLOW_MANIFEST" "$PROJECT_ROOT"
 if [ "$_QG_MEMORY" != "true" ]; then
-  dbg "EXIT: memory disabled machine-wide"
+  dbg "EXIT: memory disabled"
   exit 0
 fi
 
