@@ -13,7 +13,7 @@ Devflow's per-project data does not all live in the same checkout.
 | Feature knowledge bases (`.devflow/features/`) | This checkout's toplevel | They are committed per branch (D-PROMPT-ROOT) |
 | Personal `.devflow/config.json` | This checkout's toplevel | Per-worktree by decision: a new worktree does not inherit the source checkout's personal settings |
 
-Hooks and loaders resolve the root from git, never from cwd, so a session started in a subdirectory uses the repository root. Outside a git repository, and in a repository rooted at HOME, no hook creates `.devflow/` or a `.gitignore` (D-HOOKS-GIT-ONLY). A worktree that grew its own ledger before the main-worktree rule keeps it on disk; sessions there stop appending to it.
+Hooks, loaders, the `devflow learning` CLI and the HUD resolve the root from git, never from cwd, so a session started in a subdirectory uses the repository root. Outside a git repository, and in a repository rooted at HOME, no hook creates `.devflow/` or a `.gitignore` (D-HOOKS-GIT-ONLY). A worktree that grew its own ledger before the main-worktree rule keeps it on disk; sessions there stop appending to it.
 
 ---
 

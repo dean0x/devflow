@@ -278,7 +278,8 @@ BOTH `.pending-turns.jsonl` and `.pending-turns.processing` additively, so an or
 
 `decisions_load()` has the main model run ONE `git -C "{start}" rev-parse --path-format=absolute
 --show-toplevel --git-common-dir` and read `{ledger}/.devflow/learning/index.md`, where `{ledger}`
-is the main worktree (when its `.devflow/` exists and it is not HOME), else the toplevel, else the start directory —
+is the main worktree (when its `.devflow/` exists and it is not HOME), else the toplevel (on git < 2.31, the line
+after the echoed `--path-format=absolute`), else the start directory —
 the hooks' D-LEDGER-MAIN-WORKTREE rule (D-PROMPT-ROOT). No script (ADR-007). Absent/empty →
 `DECISIONS_CONTEXT` is `(none)`. Consuming
 commands use `devflow:apply-decisions`: scan index → Read entry bodies on demand → cite verbatim
@@ -289,6 +290,16 @@ IDs. Never parse `decisions-ledger.jsonl` directly.
 `src/hud/components/learning-counts.ts` reads `decisions-ledger.jsonl` and counts rows where
 `anchor_id` is set and `decisions_status` is not in `{Deprecated, Superseded, Retired}` (D309 —
 avoids HUD coupling to markdown format).
+
+The HUD (`gatherLedgerLearningCounts`, run inside the git-status `Promise.all`, 1 s git budget)
+and `devflow learning --status/--list/--clear/--reset` plus the `--disable` drain locate the
+ledger with `getLedgerRoot` (`src/core/ledger-root.ts`) — the TypeScript twin of
+`DF_LEDGER_ROOT`: one `rev-parse --path-format=absolute --show-toplevel --git-common-dir`,
+main worktree when `<main>/.devflow` is a directory and `<main>` is not HOME (realpath compare),
+else the toplevel (git < 2.31's echo included), `null` outside git (the caller keeps its cwd
+fallback). Parity with `df_resolve_roots` is pinned by `tests/core/ledger-root.test.ts`, which
+runs the shell helper on the same fixtures. `--configure` still writes `learning.json` under cwd.
+Memory is never resolved this way — it stays per checkout (`getGitRoot`).
 
 All three feature CLIs share the `writeMachineFeature`/`readMachineFeature` shape, plus their
 own per-repo side effects: **`devflow learning --enable/--disable`** writes `features.learning`
@@ -467,6 +478,7 @@ Do not rename them: `decisions.md`/`pitfalls.md` (rendered output), `decisions-l
 | `src/cli/commands/knowledge/toggle.ts` | `devflow knowledge --enable/--disable/--status` |
 | `src/cli/commands/init.ts` | `drainDisabledFeatureQueues` (D-INIT-DRAIN-AFTER-SWITCH), `D-HUD-ONLY-PRESERVE`, the one `manifestData.features` write site |
 | `src/hud/components/learning-counts.ts` | HUD counts from `decisions-ledger.jsonl` |
+| `src/core/ledger-root.ts` | `getLedgerRoot` — the CLI/HUD twin of the hooks' `DF_LEDGER_ROOT` |
 | `src/assets/commands/_partials/_knowledge.mds` | `knowledge_load()`/`knowledge_writeback()` — write-back reads `features.knowledge` directly |
 | `src/assets/commands/_partials/_decisions.mds` | `decisions_load()` macro (plain file Read per ADR-007) |
 | `src/assets/scripts/hooks/decisions-usage-scan.cjs` | Citation counter (D29 grep-first gate) |
