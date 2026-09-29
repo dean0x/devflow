@@ -129,7 +129,7 @@ That's it. The interactive wizard offers Recommended defaults or an Advanced flo
 
 ## Privacy & Sharing
 
-Everything Devflow generates lives under `.devflow/` — working memory, decisions and pitfalls, feature knowledge bases, naming conventions, docs and transient locks. On first use Devflow appends one block to your project's root `.gitignore`. It keeps per-developer runtime state on your machine and shares four things through git: the feature knowledge bases, the learned naming conventions, the team's [evidence policy](#evidence-policy) and the team's settings in `.devflow/project.json`:
+Everything Devflow generates lives under `.devflow/` — working memory, decisions and pitfalls, feature knowledge bases, naming conventions, docs and transient locks. On first use Devflow appends one block to your project's root `.gitignore`. It keeps per-developer runtime state on your machine and shares three things through git: the feature knowledge bases, the learned naming conventions and the team's settings in `.devflow/project.json`, which carry its [evidence policy](#evidence-policy):
 
 ```gitignore
 # Devflow runtime data — local by default (memory, learning, docs, locks).
@@ -151,7 +151,7 @@ Everything Devflow generates lives under `.devflow/` — working memory, decisio
 .claudeignore
 ```
 
-The paired lines — `!.devflow/features/` then `.devflow/features/*` — are required: git never descends into an excluded directory to reach a re-included file. The final `.claudeignore` line is left out when your `.gitignore` already has its own `.claudeignore` or `!.claudeignore` entry.
+The `!.devflow/policy.json` line keeps a retired policy file shared until its value moves into `project.json` (see [Evidence policy](#evidence-policy)). The paired lines — `!.devflow/features/` then `.devflow/features/*` — are required: git never descends into an excluded directory to reach a re-included file. The final `.claudeignore` line is left out when your `.gitignore` already has its own `.claudeignore` or `!.claudeignore` entry.
 
 To keep the knowledge bases or conventions local, add `.devflow/features/` or `.devflow/conventions.md` to your own `.gitignore`. A `/.devflow/` line of your own opts the whole project out: Devflow then leaves your `.gitignore` alone.
 
@@ -197,13 +197,15 @@ Each key is checked on its own, so one bad value never disables the rest: a bad 
 
 ## Evidence policy
 
-How much evidence a change must carry is a team decision, so it lives in a file the team commits, read from the repository's default branch: the `evidence` key of [`.devflow/project.json`](#team-settings), or `.devflow/policy.json` where `project.json` has no `evidence` key.
+How much evidence a change must carry is a team decision, so it lives in the file the team commits, read from the repository's default branch: the `evidence` key of [`.devflow/project.json`](#team-settings).
 
 ```json
-{"version":1,"evidencePolicy":"required"}
+{"version":1,"evidence":"required"}
 ```
 
-`policy.json` holds exactly two keys: `version`, always `1`, and `evidencePolicy`, either `required` or `standard`. Anything else — another key, a duplicate key, a byte-order mark, more than 4 KiB — makes the file invalid, and an invalid file resolves to `required`.
+`evidence` is `required` or `standard`. A malformed or duplicated value, or a `project.json` that is not a JSON object, resolves to `required`.
+
+**`.devflow/policy.json` is retired.** devflow never reads it. Where `project.json` has no `evidence` key, a committed `policy.json` holds the repository at `required` whatever it says, with an `invalid-file` warning. To migrate, move its value into `.devflow/project.json` — `{"version":1,"evidencePolicy":"standard"}` becomes `{"version":1,"evidence":"standard"}` — and delete `policy.json`. `devflow compliance --status` prints the same hint while the file is there.
 
 | | `standard` | `required` |
 |---|---|---|
@@ -216,15 +218,14 @@ How much evidence a change must carry is a team decision, so it lives in a file 
 | `reviewPublication: off` | no PR comment | the counts-only stub still posts |
 | `/dynamic-tickets` | files no issues | files the tracking issue and one issue per ticket |
 
-**Defaults.** With no committed file the policy is `standard`, unless compliance is enabled on the machine running devflow — at any framework count — which makes it `required` there.
+**Defaults.** With no committed `evidence` and no `policy.json` the policy is `standard`, unless compliance is enabled on the machine running devflow — at any framework count — which makes it `required` there.
 
 **The stricter value wins.** The default branch's copy is the authority, so a feature branch that commits a weaker policy is still judged by the default branch's; the difference shows as a `pr-changes-policy` warning. Local sources can raise the policy but never lower it: enabled compliance raises a committed `standard` to `required` on that machine. Every failure — git not answering, an invalid file, a resolver that cannot run — resolves to `required`. Offline, devflow reads the local copies instead and flags the result `remote-unavailable`.
 
-**Commit it yourself.** The CLI never writes `project.json` or `policy.json`. `devflow compliance --enable` and `--set` print a `project.json` for you to commit, and `devflow compliance --status` shows the policy resolved for the current repository and where it came from. The `.gitignore` block above keeps both files shareable. Guard it like any other policy file, for example with a CODEOWNERS entry:
+**Commit it yourself.** The CLI never writes `project.json` or `policy.json`. `devflow compliance --enable` and `--set` print a `project.json` for you to commit, and `devflow compliance --status` shows the policy resolved for the current repository and where it came from. The `.gitignore` block above keeps `project.json` shareable. Guard it like any other policy file, for example with a CODEOWNERS entry:
 
 ```text
 /.devflow/project.json @your-org/maintainers
-/.devflow/policy.json @your-org/maintainers
 ```
 
 ## Test-plan evidence
