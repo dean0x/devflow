@@ -150,7 +150,7 @@ The machine default is stored in `~/.devflow/manifest.json` under `features.trac
 
 **Every install carries every provider.** All 47 generated reference files are installed under the `devflow:git` skill — every provider's mechanics, the tool-call contract `references/tracker/_mcp.md` and the PR-host mechanics — plus the Tracker agent. `devflow tracker --set <id>` therefore installs nothing: it writes the manifest, re-arms the attempt counters and writes the `~/.devflow/.tracker.enabled` sentinel (the provider's name; removed for `github`), in that order.
 
-`devflow tracker --status` prints the machine provider; an `Effective:` line when the current directory's repository selects one — `Effective:   jira (project)`; whether the effective provider's conventions file has been learned, and its path; and a `Mechanics:` line — `installed (N file(s))`, `MISSING — run devflow init`, or `unreadable (<errno>)`. The three are different facts with different remedies: nothing installed is fixed by an install, a permissions problem is not.
+`devflow tracker --status` prints the machine provider; an `Effective:` line when the current directory's repository selects one — `Effective:   jira (project)`; whether the effective provider's conventions file has been learned, and its path — `none` on GitHub, which learns no conventions; and a `Mechanics:` line — `installed (N file(s))`, `MISSING — run devflow init`, or `unreadable (<errno>)`. The three are different facts with different remedies: nothing installed is fixed by an install, a permissions problem is not.
 
 ### When the wizard asks
 

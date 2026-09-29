@@ -157,19 +157,42 @@ export function formatTrackerProvenance(provenance: TrackerProvenance): string {
 }
 
 /**
+ * The conventions of the provider in effect, for the `--status` note.
+ *
+ * GitHub learns none (D-TRACKER-NO-ENABLED: no inference, no background agent,
+ * no conventions file), so it is `none` and names no path — a `tracker/github.md`
+ * would be a file nothing ever writes or reads.
+ */
+export type TrackerStatusConventions =
+  | { readonly kind: 'none' }
+  | { readonly kind: 'learned'; readonly file: string; readonly provenance: TrackerProvenance };
+
+/** Read the conventions `--status` reports for `provider`. Never throws: see readTrackerProvenance. */
+export async function readTrackerStatusConventions(
+  devflowDir: string,
+  provider: TrackerProvider,
+): Promise<TrackerStatusConventions> {
+  if (provider === DEFAULT_TRACKER_PROVIDER) return { kind: 'none' };
+  return {
+    kind: 'learned',
+    file: trackerConventionsPath(devflowDir, provider),
+    provenance: await readTrackerProvenance(devflowDir, provider),
+  };
+}
+
+/**
  * The `--status` note's lines. Pure.
  *
  * The `Effective:` line appears ONLY when a repository layer selects the tracker
  * (`selection` non-null) — `Effective:   jira (project)` — so a machine whose own
- * provider decides prints exactly the lines it always has. The conventions lines
- * describe the provider in effect HERE, which is the one whose file a session in
- * this repository learns and a Git spawn in it reads.
+ * provider decides prints the same five labels it always has. The conventions
+ * lines describe the provider in effect HERE, which is the one whose file a
+ * session in this repository learns and a Git spawn in it reads.
  */
 export function formatTrackerStatus(input: {
   readonly machine: TrackerProvider;
   readonly selection: RepoTrackerSelection | null;
-  readonly conventionsFile: string;
-  readonly provenance: TrackerProvenance;
+  readonly conventions: TrackerStatusConventions;
   readonly mechanics: TrackerMechanicsState;
   readonly inference: string;
 }): string {
@@ -181,8 +204,9 @@ export function formatTrackerStatus(input: {
     lines.push(`Effective:   ${color.green(input.selection.provider)} (${input.selection.source})`);
   }
   lines.push(
-    `Conventions: ${formatTrackerProvenance(input.provenance)}`,
-    `File:        ${input.conventionsFile}`,
+    ...(input.conventions.kind === 'none'
+      ? ['Conventions: none (GitHub needs no learned conventions)', 'File:        none']
+      : [`Conventions: ${formatTrackerProvenance(input.conventions.provenance)}`, `File:        ${input.conventions.file}`]),
     `Mechanics:   ${formatTrackerMechanics(input.mechanics)}`,
     `Inference:   ${input.inference}`,
   );
@@ -320,7 +344,7 @@ export const trackerCommand = new Command('tracker')
     if (options.status) {
       const selection = repoTrackerSelection(loadSettingsModule(), { dir: process.cwd() });
       const effective = selection?.provider ?? current.provider;
-      const provenance = await readTrackerProvenance(devflowDir, effective);
+      const conventions = await readTrackerStatusConventions(devflowDir, effective);
       const mechanics = await readTrackerMechanics(getClaudeDirectory());
 
       // [D-F] Inspecting the status re-arms the attempt counters. --status is
@@ -341,8 +365,7 @@ export const trackerCommand = new Command('tracker')
         formatTrackerStatus({
           machine: current.provider,
           selection,
-          conventionsFile: trackerConventionsPath(devflowDir, effective),
-          provenance,
+          conventions,
           mechanics,
           inference,
         }),

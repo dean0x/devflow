@@ -174,8 +174,7 @@ describe('conventions provenance (--status)', () => {
 describe('formatTrackerStatus', () => {
   const base = {
     machine: 'github' as const,
-    conventionsFile: '/h/.devflow/tracker/github.md',
-    provenance: { kind: 'absent' } as const,
+    conventions: { kind: 'none' } as const,
     mechanics: { kind: 'installed', count: 47 } as const,
     inference: 're-armed (5 attempts available)',
   };
@@ -189,10 +188,36 @@ describe('formatTrackerStatus', () => {
   });
 
   it('prints `Effective: jira (project)` second when project.json selects it', () => {
-    const note = formatTrackerStatus({ ...base, selection: { provider: 'jira', source: 'project' } });
+    const note = formatTrackerStatus({
+      ...base,
+      selection: { provider: 'jira', source: 'project' },
+      conventions: { kind: 'learned', file: '/h/.devflow/tracker/jira.md', provenance: { kind: 'absent' } },
+    });
     const lines = note.split('\n');
     expect(lines[1]).toMatch(/^Effective:\s+\S*jira\S* \(project\)$/);
     expect(lines).toHaveLength(6);
+    expect(lines[3]).toBe('File:        /h/.devflow/tracker/jira.md');
+  });
+
+  it('names no conventions file for github, which learns none (main printed the same five labels)', () => {
+    const lines = formatTrackerStatus({ ...base, selection: null }).split('\n');
+    expect(lines[1]).toBe('Conventions: none (GitHub needs no learned conventions)');
+    expect(lines[2]).toBe('File:        none');
+  });
+
+  it('a learned provider names its file and what the file reports', () => {
+    const lines = formatTrackerStatus({
+      ...base,
+      machine: 'linear',
+      selection: null,
+      conventions: {
+        kind: 'learned',
+        file: '/h/.devflow/tracker/linear.md',
+        provenance: { kind: 'present', provider: 'linear' },
+      },
+    }).split('\n');
+    expect(lines[1]).toBe('Conventions: present — provider: linear');
+    expect(lines[2]).toBe('File:        /h/.devflow/tracker/linear.md');
   });
 });
 
@@ -281,6 +306,23 @@ describe('devflow tracker --status', () => {
       await fs.readFile(path.join(devflowDir, 'manifest.json'), 'utf-8'),
     ) as { features: { tracker: { provider: string } } };
     expect(manifest.features.tracker.provider).toBe('jira');
+  }, CLI_SPAWN_TIMEOUT_MS);
+
+  it('on github with no repository layer, names no conventions file — none exists to learn', async () => {
+    await fs.writeFile(path.join(devflowDir, 'manifest.json'), manifestBody('github'), 'utf-8');
+
+    const result = runCli(cli, tmpHome, ['--status']);
+
+    expect(result.status, `tracker --status failed:\n${result.stderr}`).toBe(0);
+    const out = result.stdout + result.stderr;
+    expect(out).toMatch(/Provider:\s+github \(default\)/);
+    expect(out).not.toContain('Effective:');
+    expect(out).toMatch(/Conventions:\s+none \(GitHub needs no learned conventions\)/);
+    expect(out).toMatch(/File:\s+none/);
+    expect(out, 'a github conventions file is never written, so it is never named').not.toContain(
+      trackerConventionsPath(devflowDir, 'github'),
+    );
+    expect(out).toMatch(/Inference:\s+re-armed \(5 attempts available\)/);
   }, CLI_SPAWN_TIMEOUT_MS);
 
   it('names the repository\'s own provider on an Effective line, and its conventions (TP-37)', async () => {
