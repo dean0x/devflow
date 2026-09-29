@@ -3140,6 +3140,35 @@ describe('ensure-proxy behavioral tests', () => {
   let tmpDir: string;
   let homeDir: string;
 
+  /**
+   * D-PROXY-EXEC-BARRIER: this group execs `node` (relay stubs, the CONS-5 health
+   * stub, json-parse's node fallback), and on macOS a node exec that follows the
+   * fork-heavy hook tests above it waits on syspolicyd. The shell forks of a hook
+   * spawned from this node worker are reported to syspolicyd against node
+   * ("violates validation category policy") — 100 `bash -c` runs with two command
+   * substitutions each produced ~1,700 reports — and syspolicyd drains ~200/s,
+   * while an exec of node itself is held at `_dyld_start` until the queue ahead
+   * of it clears. Measured on macOS 26.2: the first exec here waits
+   * 5-7 s — past the 5 s test timeout of whichever test happens to be first — and
+   * the next one takes ~30 ms. Paying that once, here, keeps every test's budget
+   * measuring the hook rather than the OS queue. Linux has no such queue, so
+   * there this costs one ~30 ms exec.
+   *
+   * The bound: this file raises ~4,200 reports per run, so a queue holding all
+   * of them drains in ~21 s at the measured rate; 30 s covers it. A barrier that
+   * still times out fails here, naming the cause, instead of as a timeout inside
+   * an unrelated test.
+   */
+  const NODE_EXEC_BARRIER_MS = 30000;
+
+  beforeAll(() => {
+    const warm = spawnSync(process.execPath, ['-e', '0'], { timeout: NODE_EXEC_BARRIER_MS });
+    expect(
+      warm.status,
+      `a node exec did not complete within ${NODE_EXEC_BARRIER_MS} ms: ${warm.error?.message ?? `signal ${warm.signal}`}`,
+    ).toBe(0);
+  }, NODE_EXEC_BARRIER_MS + 5000);
+
   beforeEach(() => {
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-proxy-test-'));
     homeDir = path.join(tmpDir, 'home');
@@ -3185,6 +3214,33 @@ describe('ensure-proxy behavioral tests', () => {
       });
       srv.on('error', reject);
     });
+  }
+
+  /**
+   * D-PROXY-HERMETIC-PATH: the child env for a run whose binPath is null or stale.
+   *
+   * Such a run takes the hook's binPath re-resolution (D-FIX4), which looks for a
+   * `devflow` CLI on PATH, walks up to its `node_modules/subswitch` and execs
+   * `node -p` to read the bin field — then falls back to a `subswitch` on PATH.
+   * The inherited PATH carries the developer's global `devflow` install and the
+   * repo's own `node_modules/.bin/subswitch`, so without this the test reads the
+   * developer's installation, heals binPath and lands on a different warning
+   * than the one it names — and pays a `node` exec it never asked for (the exec
+   * that met the D-PROXY-EXEC-BARRIER queue before that barrier existed).
+   *
+   * The returned PATH drops every directory that holds `devflow` or `subswitch`
+   * and puts back only `node` (a symlink to this process's own binary), so the
+   * hook still finds node and jq, and re-resolution fails the way it does on a
+   * machine with neither installed — deterministically, with no node exec.
+   */
+  function withoutRelayResolvers(): Record<string, string> {
+    const nodeOnlyBin = path.join(tmpDir, 'node-only-bin');
+    fs.mkdirSync(nodeOnlyBin);
+    fs.symlinkSync(process.execPath, path.join(nodeOnlyBin, 'node'));
+    const kept = (process.env.PATH ?? '')
+      .split(path.delimiter)
+      .filter((dir) => dir !== '' && !['devflow', 'subswitch'].some((bin) => fs.existsSync(path.join(dir, bin))));
+    return { PATH: [nodeOnlyBin, ...kept].join(path.delimiter) };
   }
 
   const SESSION_INPUT = {
@@ -3246,7 +3302,7 @@ describe('ensure-proxy behavioral tests', () => {
 
   it('always exits with code 0 regardless of state', async () => {
     writeProxyJson({ enabled: true, port: await allocateFreePort(), binPath: null });
-    const { exitCode } = runHook(PROXY_HOOK, SESSION_INPUT, homeDir);
+    const { exitCode } = runHook(PROXY_HOOK, SESSION_INPUT, homeDir, withoutRelayResolvers());
     expect(exitCode).toBe(0);
   });
 
@@ -3254,23 +3310,25 @@ describe('ensure-proxy behavioral tests', () => {
 
   it('emits SessionStart additionalContext warning when binPath is null', async () => {
     writeProxyJson({ enabled: true, port: await allocateFreePort(), binPath: null });
-    const { exitCode, stdout } = runHook(PROXY_HOOK, SESSION_INPUT, homeDir);
+    const { exitCode, stdout } = runHook(PROXY_HOOK, SESSION_INPUT, homeDir, withoutRelayResolvers());
     expect(exitCode).toBe(0);
     // Should emit JSON envelope for the model context
     const parsed = JSON.parse(stdout) as Record<string, unknown>;
     expect(parsed).toHaveProperty('hookSpecificOutput');
     const output = parsed['hookSpecificOutput'] as Record<string, unknown>;
     expect((output['additionalContext'] as string)).toContain('[Devflow proxy]');
+    expect((output['additionalContext'] as string)).toContain('relay binary not found');
     expect((output['additionalContext'] as string)).not.toContain('subswitch');
   });
 
   it('emits SessionStart warning when binPath points to nonexistent file', async () => {
     writeProxyJson({ enabled: true, port: await allocateFreePort(), binPath: '/this/does/not/exist/relay.js' });
-    const { exitCode, stdout } = runHook(PROXY_HOOK, SESSION_INPUT, homeDir);
+    const { exitCode, stdout } = runHook(PROXY_HOOK, SESSION_INPUT, homeDir, withoutRelayResolvers());
     expect(exitCode).toBe(0);
     const parsed = JSON.parse(stdout) as Record<string, unknown>;
     const output = parsed['hookSpecificOutput'] as Record<string, unknown>;
     expect(output['additionalContext'] as string).toContain('[Devflow proxy]');
+    expect(output['additionalContext'] as string).toContain('relay binary not found');
   });
 
   it('emits SessionStart warning when configPath is null (bin exists)', async () => {
@@ -3325,7 +3383,7 @@ describe('ensure-proxy behavioral tests', () => {
     // Intentionally do NOT create $HOME/.devflow/logs/proxy.log
     const result = spawnSync('bash', [PROXY_HOOK], {
       input: JSON.stringify(SESSION_INPUT),
-      env: { ...process.env, HOME: homeDir },
+      env: { ...process.env, HOME: homeDir, ...withoutRelayResolvers() },
       encoding: 'utf-8',
     });
     expect(result.status).toBe(0);
@@ -3336,7 +3394,7 @@ describe('ensure-proxy behavioral tests', () => {
 
   it('warning messages never contain the internal package name "subswitch"', async () => {
     writeProxyJson({ enabled: true, port: await allocateFreePort(), binPath: null });
-    const { stdout } = runHook(PROXY_HOOK, SESSION_INPUT, homeDir);
+    const { stdout } = runHook(PROXY_HOOK, SESSION_INPUT, homeDir, withoutRelayResolvers());
     expect(stdout).not.toContain('subswitch');
   });
 
