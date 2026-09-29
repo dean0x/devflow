@@ -21,7 +21,7 @@ import { buildAssetMaps } from '../src/core/plugins.js';
 import type { PluginDefinition } from '../src/core/plugins.js';
 import { agentsDir, compiledAgentsDir, type AgentSourceDirs } from '../src/core/assets.js';
 import { resolveAgentSource, splitFrontmatter } from './helpers.js';
-import { RESOLVER_SCRIPT, buildScriptedShim, createFakeBin, runResolver } from './evidence-policy/scripted-shim.js';
+import { RESOLVER_SCRIPT, SETTINGS_SCRIPT, buildScriptedShim, createFakeBin, runResolver } from './evidence-policy/scripted-shim.js';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -185,6 +185,32 @@ describe('composeScripts', () => {
     expect(lines[0]).toMatch(OUTPUT_LINE_RE);
     // Budget: a directory copy plus a node + bash-fake spawn — well under 5 s alone,
     // but spawns slow to seconds under full-suite load (same as the resolver suite).
+  }, 20_000);
+
+  it('copies resolve-settings.cjs to the top level and lib/project-config.cjs beside it, and the INSTALLED settings resolver loads its parser (install path pin)', async () => {
+    // Both resolvers require ./lib/project-config.cjs through __dirname, so the
+    // pair only works when lib/ lands under the scripts dir with them. Running the
+    // installed copy is what proves the relative require resolves after install.
+    const target = path.join(tmpDir, 'scripts');
+    await composeScripts(target);
+
+    for (const rel of ['resolve-settings.cjs', path.join('lib', 'project-config.cjs')]) {
+      const installed = path.join(target, rel);
+      await expect(fs.access(installed), `${rel} not found in the scripts dir`).resolves.toBeUndefined();
+      expect((await fs.readFile(installed, 'utf-8')).length, `${rel} must be non-empty (PF-018)`).toBeGreaterThan(0);
+    }
+
+    const home = path.join(tmpDir, 'home');
+    await fs.mkdir(path.join(home, '.devflow'), { recursive: true });
+    const shim = buildScriptedShim(createFakeBin(tmpDir), tmpDir, [
+      { tool: 'git', args: ['rev-parse', '--show-toplevel'], exit: 128, stderr: 'fatal: not a git repository\n' },
+    ]);
+    const run = runResolver({ home, args: [home], script: path.join(target, 'resolve-settings.cjs'), shim });
+    expect(run.status, run.stderr).toBe(0);
+    const lines = run.stdout.split('\n');
+    expect(lines, 'exactly one \\n-terminated line').toHaveLength(2);
+    const { SETTINGS_LINE_RE } = createRequire(import.meta.url)(SETTINGS_SCRIPT) as { SETTINGS_LINE_RE: RegExp };
+    expect(lines[0]).toMatch(SETTINGS_LINE_RE);
   }, 20_000);
 
   it('copies pr-evidence.cjs and verify-evidence.cjs to the top level, and the INSTALLED verify-evidence.cjs loads its sibling under the composed {"type":"module"} package (install path pin)', async () => {

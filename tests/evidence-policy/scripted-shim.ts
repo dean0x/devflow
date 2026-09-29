@@ -44,6 +44,12 @@ export const RESOLVER_SCRIPT = path.resolve(
   '../../src/assets/scripts/resolve-evidence-policy.cjs',
 );
 
+/** The local settings resolver — the package's own copy, never ~/.devflow/scripts. */
+export const SETTINGS_SCRIPT = path.resolve(
+  import.meta.dirname,
+  '../../src/assets/scripts/resolve-settings.cjs',
+);
+
 /** The shared per-repo config parser both resolvers require (lib/project-config.cjs). */
 export const PROJECT_CONFIG_LIB = path.resolve(
   import.meta.dirname,
