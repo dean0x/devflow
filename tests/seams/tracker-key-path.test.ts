@@ -20,19 +20,20 @@
  * if it is not github. Hostile sentinel bytes are shell-hooks-tracker.test.ts's
  * table; this file owns the property that the WRITER and the READER agree.
  *
- * Section 4 — TS ↔ prompt seam: the per-repo `tracker` key in the project's
+ * Section 4 — TS ↔ resolver seam: the personal `tracker` key in the project's
  * `.devflow/config.json`. Its readers are `readConfig` + `parseTrackerOverride`
- * in TypeScript and the Git agent PROMPT, a generated artifact tsc never sees
- * (the untyped-seam shape PF-024 names). The prompt reads the FILE, so the
- * TypeScript side owes it two things and the second is the one a reader is
- * likely to miss: classify the same bytes the same way, AND leave those bytes on
- * disk — `writeManagedConfig` (devflow init's write) is a read-modify-write over
- * the whole file, so a value its write drops is a value the prompt can never see
- * again.
+ * in TypeScript and `resolve-settings.cjs` (through `parsePersonalBytes`), whose
+ * line the Git agent PROMPT consumes — the prompt never reads the file itself
+ * (D-SETTINGS-LINE). The script reads the FILE, so the TypeScript side owes it
+ * two things and the second is the one a reader is likely to miss: classify the
+ * same bytes the same way, AND leave those bytes on disk — `writeManagedConfig`
+ * (devflow init's write) is a read-modify-write over the whole file, so a value
+ * its write drops is a value the resolver can never see again.
  */
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import * as fs from 'fs';
+import { createRequire } from 'module';
 import * as os from 'os';
 import * as path from 'path';
 
@@ -204,13 +205,18 @@ describe('tracker sentinel: the TS writer and the shell reader agree on every pr
 
 const GIT_AGENT_HOST = path.join(ROOT, 'src', 'assets', 'agents', 'git.mds');
 
+/** The resolver the prompt consumes, and the parser it classifies the personal file with. */
+const SETTINGS_RESOLVER = path.join(scriptsDir(), 'resolve-settings.cjs');
+const { parsePersonalBytes } = createRequire(import.meta.url)(
+  path.join(scriptsDir(), 'lib', 'project-config.cjs'),
+) as { parsePersonalBytes: (buf: Buffer) => { kind: string; tracker?: { kind: 'absent' | 'valid' | 'malformed' } } };
+
 /**
  * Named collector: the prompt lines that name the per-repo config file.
  *
- * Unlike `collectKeyPathReadSites` above, comment lines are NOT skipped — the
- * whole prompt is prose, and the contract this seam checks is stated in it. The
- * collector exists so the two assertions below quote what the prompt says rather
- * than restating it here, where it could drift.
+ * Unlike `collectManifestProviderReads` above, comment lines are NOT skipped — the
+ * whole prompt is prose. The prompt must name the file NOWHERE: the resolver
+ * folds it, and a prompt that named it would be describing a read of its own.
  */
 export function collectPerRepoKeySites(source: string): string[] {
   return source
@@ -219,29 +225,35 @@ export function collectPerRepoKeySites(source: string): string[] {
     .map(line => line.trim());
 }
 
-describe('per-repo tracker key: the prompt states the contract the parser implements', () => {
-  const sites = collectPerRepoKeySites(fs.readFileSync(GIT_AGENT_HOST, 'utf-8'));
+/** The resolver's verdict on a personal file, in the TypeScript reader's vocabulary. */
+function resolverVerdict(bytes: Buffer): 'absent' | 'valid' | 'invalid' {
+  const parsed = parsePersonalBytes(bytes);
+  if (parsed.kind !== 'parsed' || parsed.tracker === undefined) return 'invalid';
+  return parsed.tracker.kind === 'malformed' ? 'invalid' : parsed.tracker.kind;
+}
 
-  it('the prompt names the key as a step of its resolution order', () => {
+describe('per-repo tracker key: the prompt consumes it through the settings line', () => {
+  const host = fs.readFileSync(GIT_AGENT_HOST, 'utf-8');
+
+  it('the prompt runs the resolver and never names the file', () => {
     expect(
-      sites.length,
-      'the Git agent prompt never names .devflow/config.json — the per-repo key has no reader ' +
-      'and the parser below has no consumer',
-    ).toBeGreaterThan(0);
+      host,
+      'the Git agent prompt no longer runs resolve-settings.cjs — the per-repo key has no reader',
+    ).toContain(`node "$HOME/.devflow/scripts/${path.basename(SETTINGS_RESOLVER)}" "{root}"`);
     expect(
-      sites.some(line => line.includes('Resolution order')),
-      `no resolution-order line names .devflow/config.json:\n  ${sites.join('\n  ')}`,
-    ).toBe(true);
+      collectPerRepoKeySites(host),
+      'the prompt names .devflow/config.json — the resolver is its only reader (D-SETTINGS-LINE)',
+    ).toEqual([]);
   });
 
-  it('the prompt gives an out-of-map value its own DEGRADED reason', () => {
+  it('the prompt gives an invalid value its own DEGRADED reason', () => {
     // This line is what makes `invalid` a state rather than a synonym for
-    // `absent`. If the prompt stopped naming it, the parser's third arm would
-    // have nothing downstream that can tell the two apart.
-    expect(
-      sites.some(line => line.includes('DEGRADED (unknown tracker provider)')),
-      `no line pairs .devflow/config.json with the unknown-provider DEGRADED:\n  ${sites.join('\n  ')}`,
-    ).toBe(true);
+    // `absent`. The resolver flags it `TRACKER_WARN=invalid`; if the prompt
+    // stopped mapping that, the parser's third arm would have nothing downstream
+    // that can tell the two apart.
+    const line = host.split('\n').find(l => l.includes('`TRACKER_WARN=invalid`'));
+    expect(line, 'no prompt line consumes TRACKER_WARN=invalid').toBeDefined();
+    expect(line).toContain('`TRACKER_WARN=invalid` ⇒ `TRACEABILITY: DEGRADED (unknown tracker provider)`');
   });
 
   it('known-bad probe: the collector reports a live mention and stays empty otherwise', () => {
@@ -310,6 +322,10 @@ describe('per-repo tracker key: the verdict survives an unrelated CLI toggle', (
         parseTrackerOverride((await readConfig(root)).tracker).kind,
         `the TypeScript reader classified ${shape.label} differently from the table`,
       ).toBe(shape.verdict);
+      expect(
+        resolverVerdict(fs.readFileSync(configPath(root))),
+        `the resolver the prompt consumes classified ${shape.label} differently from the table`,
+      ).toBe(shape.verdict);
 
       await writeManagedConfig(root, { reviewPublication: 'off' });
       const onDisk = JSON.parse(fs.readFileSync(configPath(root), 'utf-8')) as Record<string, unknown>;
@@ -317,7 +333,7 @@ describe('per-repo tracker key: the verdict survives an unrelated CLI toggle', (
       expect(onDisk.reviewPublication, 'the write must still take effect').toBe('off');
       expect(
         Object.prototype.hasOwnProperty.call(onDisk, 'tracker'),
-        'an unrelated write changed whether the key exists on disk — the prompt reads the ' +
+        'an unrelated write changed whether the key exists on disk — the resolver reads the ' +
         'FILE, so a key the CLI drops is a key the prompt can never see again',
       ).toBe(shape.present !== false);
       if (shape.present !== false) {
@@ -327,6 +343,10 @@ describe('per-repo tracker key: the verdict survives an unrelated CLI toggle', (
       expect(
         parseTrackerOverride((await readConfig(root)).tracker).kind,
         'the verdict changed across a toggle that has nothing to do with the tracker',
+      ).toBe(shape.verdict);
+      expect(
+        resolverVerdict(fs.readFileSync(configPath(root))),
+        'the resolver\'s verdict changed across a toggle that has nothing to do with the tracker',
       ).toBe(shape.verdict);
     });
   }

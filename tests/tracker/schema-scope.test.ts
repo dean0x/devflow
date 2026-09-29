@@ -299,16 +299,20 @@ describe('[DR-21] writer ↔ reader heading equality, both directions', () => {
 /**
  * Named collector: sites that name the tracker configuration file.
  *
- * `tracker\.md(?![a-z])` is not fussiness — `_tracker.mds` (the command partial,
- * imported by five command hosts) CONTAINS the substring `tracker.md`, so a bare
- * match reports every one of those imports and the guard would be permanently red
- * for a reason that has nothing to do with reading the file.
+ * Two spellings: the per-provider `tracker/{provider}.md` the file is now, and the
+ * machine-wide `tracker.md` it was — a prompt reaching for the retired path is a
+ * second reader too. `tracker\.md(?![a-z])` is not fussiness — `_tracker.mds` (the
+ * command partial, imported by five command hosts) CONTAINS the substring
+ * `tracker.md`, so a bare match reports every one of those imports and the guard
+ * would be permanently red for a reason that has nothing to do with reading the
+ * file. The per-provider arm admits one path segment only, so a generated
+ * reference path (`tracker/jira/setup-task.md`, `tracker/_mcp.md`) is not a hit.
  */
 export function collectTrackerFileReaders(corpus: readonly CorpusEntry[]): string[] {
   const sites: string[] = [];
   for (const entry of corpus) {
     for (const [i, line] of entry.content.split('\n').entries()) {
-      if (/tracker\.md(?![a-z])/.test(line)) {
+      if (/tracker\.md(?![a-z])|tracker\/(?:[a-z]+|\{provider\})\.md(?![a-z])/.test(line)) {
         sites.push(`${entry.path}:${i + 1}: ${line.trim().slice(0, 100)}`);
       }
     }
@@ -316,24 +320,42 @@ export function collectTrackerFileReaders(corpus: readonly CorpusEntry[]): strin
   return sites;
 }
 
+/** The provider-resolution preamble: from its heading to the input contract that follows it. */
+function resolutionPreambleBlock(content: string = GIT_MD): string {
+  const start = content.indexOf('## Tracker provider resolution');
+  const end = content.indexOf(PREAMBLE_CONTRACT_HEADING);
+  if (start === -1 || end === -1 || end < start) {
+    throw new Error(`the provider-resolution preamble is not bounded in ${GIT_AGENT.path}`);
+  }
+  return content.slice(start, end);
+}
+
 describe('AC-3.16: the tracker configuration file has exactly ONE reader', () => {
-  it('positive arm: the Git-agent preamble names it, with an absolute-path Read', () => {
+  it('positive arm: the Git-agent preamble names each provider\'s file, read with the Read tool', () => {
     // The sweep below is an absence. Without this arm it would be satisfied by a
     // tree in which nothing reads the file at all — which is also the state in
     // which the whole feature is inert (PF-064).
     const block = preambleContractBlock();
     expect(block, 'the reader must name the Read tool').toContain('Read tool');
-    expect(block, 'and require an absolute path').toContain('absolute path');
-    expect(
-      block,
-      'and forbid `~`: the Read tool does not expand it, only Bash does, so a `~` path resolves ' +
-      'to a literal directory name (PF-035)',
-    ).toMatch(/never `~`/);
     expect(
       block,
       'and forbid cat/head/tail: a shell rewrite can substitute a truncated structural view for ' +
       'the real bytes, and a partial read is indistinguishable from a missing section',
     ).toMatch(/cat`\/`head`\/`tail`|`cat`, `head`|cat`\/`head/);
+    expect(
+      block,
+      'and must not restate the retired claim that the Read tool leaves `~` unexpanded — ' +
+      'Claude Code 2.1.283 expands it (docs/reference/platform-assumptions.md)',
+    ).not.toMatch(/does not expand|never `~`/);
+    // The file is per provider, so it is SELECTED from the static map, never
+    // composed from the token: one hardcoded row per provider that has conventions.
+    const preamble = resolutionPreambleBlock();
+    for (const provider of ['jira', 'linear']) {
+      expect(preamble, `the static map must name ${provider}'s conventions file as a literal`)
+        .toMatch(new RegExp(`^\\| \`${provider}\` \\| \`tracker/${provider}/\` \\| \`~/\\.devflow/tracker/${provider}\\.md\` \\|$`, 'm'));
+    }
+    expect(preamble, 'github has no conventions file, and its row says so')
+      .toMatch(/^\| `github` \| `tracker\/github\/` \| none \|$/m);
   });
 
   it('no operation section of the agent reads it — enumerated over all 10 tracker ops', () => {
@@ -398,6 +420,20 @@ describe('AC-3.16: the tracker configuration file has exactly ONE reader', () =>
     expect(
       collectTrackerFileReaders([{ path: 'seed.md', content: 'Read ~/.devflow/tracker.md first.' }]),
     ).toEqual(['seed.md:1: Read ~/.devflow/tracker.md first.']);
+    expect(
+      collectTrackerFileReaders([{
+        path: 'seed.md',
+        content: 'Read ~/.devflow/tracker/jira.md first.\nthen ~/.devflow/tracker/{provider}.md',
+      }]),
+      'the per-provider file, literal or templated, is a read of the same file',
+    ).toHaveLength(2);
+    expect(
+      collectTrackerFileReaders([{
+        path: 'seed.md',
+        content: 'load `references/tracker/jira/setup-task.md` and `references/tracker/_mcp.md`',
+      }]),
+      'a generated mechanics path is not the configuration file',
+    ).toEqual([]);
     expect(
       collectTrackerFileReaders([{
         path: 'seed.mds',
@@ -607,9 +643,10 @@ const LIVE_REASONS: readonly string[] = [
   // to edit, which is the whole point of naming a reason.
   'tracker configuration mismatch (repository override)',
   'tracker configuration mismatch (conventions file)',
-  'tracker mechanics unavailable',
   'tracker not configured',
-  'tracker.md required fields incomplete — edit ~/.devflow/tracker.md',
+  // #393 (PR6): the conventions file is one per provider, so the remedy names the
+  // directory; the provider is on the `- **Tracker**:` line beside it.
+  'tracker.md required fields incomplete — edit the conventions file in ~/.devflow/tracker/',
   'ambiguous issue reference',
   'redaction unavailable',
   // Both of these were listed as deferred on first draft and the mirror arm below
@@ -920,6 +957,13 @@ const RETIRED_REASONS: readonly string[] = [
   'tracker not reachable',
   'interactive setup required — run /plan in an interactive session',
   'tracker.md required fields incomplete — delete .devflow/tracker.md and re-learn',
+  // #393 (PR6): moved here from LIVE_REASONS, never deleted. Every install carries
+  // every provider's mechanics, so no legitimate configuration leaves a named
+  // mechanics file absent, and a prompt rule for a damaged install guards nothing
+  // (ADR-028).
+  'tracker mechanics unavailable',
+  // #393 (PR6): the pre-per-provider remedy — the file it names no longer exists.
+  'tracker.md required fields incomplete — edit ~/.devflow/tracker.md',
 ];
 
 /** Phase-3 status-line literals that share the registry [DR-01]. */
@@ -1016,10 +1060,18 @@ describe('[DR-04] DEGRADED literal registry: forward direction', () => {
       // (+2 -1), the plan artifact's cap (+1) and the two-server ambiguity (+1).
       // 25 since #364 (PR5): the trace map (+1) and associate-release's three
       // marker reasons (+3). 26 since #365 (PR6): the wave PR's branch check (+1).
-      // A floor rises with the table and never falls — a shorter table is a
-      // narrowed registry, whatever the reason given.
-      '§14.2 fixes 26 non-`(none)` reasons; a shorter table is a narrowed registry',
-    ).toBeGreaterThanOrEqual(26);
+      // 25 since #393 (PR6): `tracker mechanics unavailable` RETIRED (ADR-028) —
+      // moved to RETIRED_REASONS, whose arm is the stricter one (absent
+      // everywhere), and the union floor below is what stops a row leaving both.
+      '§14.2 fixes 25 non-`(none)` reasons; a shorter table is a narrowed registry',
+    ).toBeGreaterThanOrEqual(25);
+    expect(
+      CANONICAL_REASONS.length + RETIRED_REASONS.length,
+      // 26 live + 7 retired before #393; a retirement moves a row between the two
+      // lists (#393 moved one and retired one old remedy spelling: 25 + 9). A row
+      // that leaves the table without being retired shrinks this number.
+      'every reason ever canonical is either live or retired — a row that left both is a narrowed registry',
+    ).toBeGreaterThanOrEqual(34);
     // The instantiation rule is a NARROWING, not a wildcard: only `{provider}` is
     // instantiated, only with tokens the registry carries, and a reason without the
     // placeholder still matches itself and nothing else.
@@ -1335,7 +1387,7 @@ describe('[DR-04] DEGRADED literal registry: reverse direction', () => {
       }
     }
     expect(survivors, `retired reason(s) still present:\n  ${survivors.join('\n  ')}`).toEqual([]);
-    expect(RETIRED_REASONS.length, 'the retired list is empty (PF-018)').toBeGreaterThanOrEqual(7);
+    expect(RETIRED_REASONS.length, 'the retired list shrank (PF-018)').toBeGreaterThanOrEqual(9);
   });
 
   it('known-bad probe: the reason collector reads real and nested parentheses', () => {
@@ -1345,9 +1397,9 @@ describe('[DR-04] DEGRADED literal registry: reverse direction', () => {
     expect(collectDegradedReasons('DEGRADED (unsupported by jira) then DEGRADED (rate limited)'))
       .toEqual(['unsupported by jira', 'rate limited']);
     expect(
-      collectDegradedReasons('DEGRADED (tracker.md required fields incomplete — edit ~/.devflow/tracker.md)'),
+      collectDegradedReasons('DEGRADED (tracker.md required fields incomplete — edit the conventions file in ~/.devflow/tracker/)'),
       'a reason containing a path and an em-dash must come back whole',
-    ).toEqual(['tracker.md required fields incomplete — edit ~/.devflow/tracker.md']);
+    ).toEqual(['tracker.md required fields incomplete — edit the conventions file in ~/.devflow/tracker/']);
     expect(collectDegradedReasons('no degradation here')).toEqual([]);
     expect(
       collectDegradedReasons('DEGRADED (tracker configuration mismatch (repository override))'),

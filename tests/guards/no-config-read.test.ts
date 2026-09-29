@@ -57,11 +57,12 @@
  * skills and rules. A non-empty total says nothing about a class that went
  * missing, so every class is asserted by name (PF-064 amendment).
  *
- * THE ONE EXEMPTION is `dist/agents/git.md`: its tracker resolution still reads
- * the `tracker` key from `.devflow/config.json` until PR6 (#393) moves the Git
- * agent onto the settings line. The exemption must stay LIVE — the file must
- * still hit — so the list cannot outlive the read it excuses; PR6 empties it and
- * TP-42 asserts it empty.
+ * NO EXEMPTIONS (TP-42). The Git agent, the last reader, resolves its tracker
+ * provider, site and key from the settings line like every other prompt. The
+ * list stays declared and asserted empty, so re-admitting a reader is a visible
+ * edit to this file rather than a quiet filter, and a git.md carrying the
+ * settings line is asserted positively below, so an empty result is not an
+ * agent that stopped resolving its tracker at all.
  */
 
 import { describe, it, expect } from 'vitest'
@@ -180,13 +181,8 @@ function promptSurface(): CorpusClass[] {
   ]
 }
 
-/**
- * The one exemption, removed by PR6 (#393) when the Git agent resolves its
- * tracker from the settings line; TP-42 then asserts this list empty.
- */
-const EXEMPT: ReadonlyMap<string, string> = new Map([
-  ['dist/agents/git.md', 'tracker resolution rung 1 reads `.devflow/config.json` until PR6 (#393)'],
-])
+/** Files excused from the rule, with the reason. Empty since the Git agent moved onto the settings line (TP-42). */
+const EXEMPT: ReadonlyMap<string, string> = new Map()
 
 // ---------------------------------------------------------------------------
 // The guard
@@ -220,15 +216,18 @@ describe('no compiled prompt reads .devflow/project.json or .devflow/config.json
     expect(unexempt.map(r => `${r.file}:${r.line}: ${r.text}`)).toEqual([])
   })
 
-  it('exactly one exemption, and it is live: the exempted file still reads the config', () => {
-    expect([...EXEMPT.keys()]).toEqual(['dist/agents/git.md'])
-    const reads = collectConfigReads(promptSurface().flatMap(c => c.files))
-    for (const file of EXEMPT.keys()) {
-      expect(
-        reads.filter(r => r.file === file).length,
-        `${file} no longer reads the config — remove its exemption (PR6, #393)`,
-      ).toBeGreaterThan(0)
-    }
+  it('the exemption list is empty (TP-42)', () => {
+    expect([...EXEMPT.keys()]).toEqual([])
+  })
+
+  it('the Git agent resolves its tracker from the settings line, and reads neither file', () => {
+    // The positive half of the empty exemption list: git.md is in the corpus AND
+    // carries the resolver invocation, so a clean result is an agent that moved,
+    // not one that stopped resolving its tracker.
+    const git = promptSurface().find(c => c.label === 'agents')!.files.find(f => f.name === 'dist/agents/git.md')!
+    expect(git, 'dist/agents/git.md is not in the agents class').toBeDefined()
+    expect(git.content).toContain('node "$HOME/.devflow/scripts/resolve-settings.cjs" "{root}" 2>/dev/null; echo "exit=$?"')
+    expect(collectConfigReads([git])).toEqual([])
   })
 
   it('red probe: a seeded config read in a real compiled command is reported by the same collector', () => {

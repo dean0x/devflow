@@ -1803,6 +1803,31 @@ export interface ProviderCorpus {
 }
 
 /**
+ * Named collector: what is wrong with a tool-call provider's site rung (AC-42).
+ *
+ * The rung is the `- **Site.**` line of a setup-task reference. A team that
+ * commits `tracker.site` in `.devflow/project.json` must get that site ahead of
+ * the one the conventions file's `## Project` recorded, so the rung names the
+ * settings line's `SITE` FIRST and the conventions section as its fallback.
+ * Returns the problems found — empty is the healthy answer — so a rung that lost
+ * either source, or put them in the wrong order, is reported by name.
+ */
+export function collectSiteRungProblems(reference: string): string[] {
+  const rungs = reference.split('\n').filter(line => line.startsWith('- **Site.**'))
+  if (rungs.length !== 1) return [`expected one \`- **Site.**\` rung, found ${rungs.length}`]
+  const rung = rungs[0]
+  const settings = rung.indexOf("settings line's `SITE`")
+  const conventions = rung.indexOf('`## Project`')
+  const problems: string[] = []
+  if (settings === -1) problems.push("the rung does not name the settings line's `SITE`")
+  if (conventions === -1) problems.push('the rung does not name the conventions file\'s `## Project`')
+  if (settings !== -1 && conventions !== -1 && settings > conventions) {
+    problems.push("the conventions file's `## Project` is consulted before the settings line's `SITE`")
+  }
+  return problems
+}
+
+/**
  * Named collector: claims a tool-call provider's generated mechanics do not make.
  */
 export function collectMissingMechanicsClaims(
