@@ -20,10 +20,10 @@
 // resolve-evidence-policy.cjs's job (it runs over the network, from commands).
 // This script reads the WORKTREE's copy, so a branch that edits project.json
 // changes what it resolves for that branch: the compliance lens and the feature
-// switches can only gain scrutiny or narrow, but the tracker (provider, site,
-// key) and the team's review publication are taken as the branch states them —
-// a branch's `reviewPublication: "full"` is the default publication for a run in
-// that worktree (D-PUBLICATION-CEILING), bounded only by a personal value. It
+// switches can only gain scrutiny or narrow, and the team's review publication
+// can only lower it (D-PUBLICATION-CEILING) — a branch's `reviewPublication:
+// "full"` raises nothing, since only a personal value asks for more than `auto`.
+// The tracker (provider, site, key) is taken as the branch states it. It
 // WRITES NOTHING (applies ADR-024).
 //
 // stdout is exactly one line plus "\n", or empty (D-SETTINGS-LINE):
@@ -358,12 +358,16 @@ function foldTracker(project, personal, manifest) {
 
 /**
  * D-PUBLICATION-CEILING: review publication is
- *   min(team ?? full, personal ?? team ?? auto)   over off < auto < full.
- * The team value is a CEILING no personal value can raise, and the default a
- * personal value starts from; with neither, the historical default `auto`. A
- * malformed team value (or an unreadable project.json) is `off` — a ceiling
- * that cannot be read is the lowest one. A malformed personal value is ignored,
- * as readConfig ignores it.
+ *   min(team ?? full, personal ?? auto)   over off < auto < full.
+ * The team value is a CEILING only — never a default. It can lower what the
+ * personal value asks for, but it cannot raise a run above `auto`: this script
+ * reads the worktree's project.json, so a contributor's branch committing
+ * `"reviewPublication":"full"` would otherwise make a maintainer's local review
+ * of that branch skip the visibility gate on a public repository. Only the
+ * uncommitted personal value asks for `full`. A malformed team value (or an
+ * unreadable project.json) is `off` — a ceiling that cannot be read is the
+ * lowest one. A malformed personal value is ignored, as readConfig ignores it,
+ * and so resolves `auto`.
  *
  * @param {any} project
  * @param {any} personal
@@ -377,7 +381,7 @@ function foldPublication(project, personal) {
   /** @type {Publication | null} */
   const own = personalField.kind === 'valid' ? personalField.value : null;
   const ceiling = team === null ? 'full' : team;
-  const wanted = own !== null ? own : team !== null ? team : 'auto';
+  const wanted = own !== null ? own : 'auto';
   return PUBLICATIONS.indexOf(wanted) <= PUBLICATIONS.indexOf(ceiling) ? wanted : ceiling;
 }
 

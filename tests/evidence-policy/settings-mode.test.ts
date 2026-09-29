@@ -342,7 +342,7 @@ describe('fail-closed in-process', () => {
 // TP-33 (AC-29) — the publication truth table (D-PUBLICATION-CEILING)
 // ---------------------------------------------------------------------------
 
-describe('TP-33 (AC-29): review publication = min(team ?? full, personal ?? team ?? auto)', () => {
+describe('TP-33 (AC-29): review publication = min(team ?? full, personal ?? auto)', () => {
   type Value = 'off' | 'auto' | 'full' | 'absent' | 'malformed';
   const RAW: Record<Exclude<Value, 'absent'>, string> = {
     off: '"off"', auto: '"auto"', full: '"full"', malformed: '"everyone"',
@@ -367,12 +367,14 @@ describe('TP-33 (AC-29): review publication = min(team ?? full, personal ?? team
     ['auto', 'auto', 'auto'],
     ['auto', 'full', 'auto'],
     ['auto', 'malformed', 'auto'],
-    ['full', 'absent', 'full'],
+    ['full', 'absent', 'auto'],
     ['full', 'off', 'off'],
     ['full', 'auto', 'auto'],
     ['full', 'full', 'full'],
-    ['full', 'malformed', 'full'],
+    ['full', 'malformed', 'auto'],
     ['malformed', 'absent', 'off'],
+    ['malformed', 'off', 'off'],
+    ['malformed', 'auto', 'off'],
     ['malformed', 'full', 'off'],
     ['malformed', 'malformed', 'off'],
   ];
@@ -392,7 +394,21 @@ describe('TP-33 (AC-29): review publication = min(team ?? full, personal ?? team
     expect(settingsFor({ project: '{"reviewPublication":', personal: '{"reviewPublication":"full"}' }).reviewPublication)
       .toBe('off');
     expect(settingsFor({ project: '{"reviewPublication":"full"}', personal: '{"reviewPublication":' }).reviewPublication)
+      .toBe('auto');
+  });
+
+  it('a branch cannot raise publication: a committed team "full" never lifts a run above auto on its own', () => {
+    // A contributor's PR that commits `"reviewPublication":"full"` must not make
+    // a maintainer's local run of that branch skip the visibility gate.
+    for (const personal of [undefined, '{}', '{"reviewPublication":"auto"}', '{"reviewPublication":"everyone"}']) {
+      expect(settingsFor({ project: '{"reviewPublication":"full"}', personal }).reviewPublication, String(personal))
+        .toBe('auto');
+    }
+    // Only the personal layer asks for full, and the team can still lower it.
+    expect(settingsFor({ project: '{"reviewPublication":"full"}', personal: '{"reviewPublication":"full"}' }).reviewPublication)
       .toBe('full');
+    expect(settingsFor({ project: '{"reviewPublication":"auto"}', personal: '{"reviewPublication":"full"}' }).reviewPublication)
+      .toBe('auto');
   });
 });
 
