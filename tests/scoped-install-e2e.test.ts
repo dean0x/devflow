@@ -36,7 +36,8 @@ import { spawnSync } from 'child_process';
 import { requireBuiltCli } from './helpers.js';
 import { assertTempHome } from './setup/home-isolation.js';
 import { installedReferenceManifest } from '../src/core/mds-variants.js';
-import { DEVFLOW_PLUGINS, prefixSkillName, skillsOf, getAllSkillNames } from '../src/core/plugins.js';
+import { DEVFLOW_PLUGINS, FEATURE_OWNED_SKILLS, prefixSkillName, skillsOf, getAllSkillNames } from '../src/core/plugins.js';
+import { ALWAYS_PRESENT_REFS, COMPLIANCE_FRAMEWORKS } from '../src/core/compliance.js';
 
 const CLI_PATH = requireBuiltCli();
 /** One CLI spawn, well past 5 s under load. A test's budget is this times its spawns. */
@@ -79,11 +80,16 @@ const sentinel = (): string => path.join(devflowDir(), '.tracker.enabled');
 /**
  * Paths under ~/.claude every install must carry, whatever its tracker, beyond the
  * generated reference manifest (which is asserted in full on its own). The one
- * list a new always-installed artifact is added to.
+ * list a new always-installed artifact is added to. These installs run with
+ * compliance off, so the compliance skill and all six framework references are here
+ * too (D-COMPLIANCE-INSTALL-ALWAYS): a repository can turn the lens on by itself.
  */
 const EVERY_INSTALL_CARRIES: readonly string[] = [
   'agents/devflow/tracker.md',
   'skills/devflow:git/references/tracker/_mcp.md',
+  'skills/devflow:compliance/SKILL.md',
+  ...ALWAYS_PRESENT_REFS.map(ref => `skills/devflow:compliance/references/${ref}`),
+  ...COMPLIANCE_FRAMEWORKS.map(fw => `skills/devflow:compliance/references/${fw.id}.md`),
 ];
 
 async function listSkills(): Promise<string[]> {
@@ -210,7 +216,10 @@ describe('devflow init installs every provider (D-INSTALL-ALL-PROVIDERS)', () =>
 
   it('the default install carries the non-optional closure, not every registry skill', async () => {
     expect(init().status).toBe(0);
-    const expected = [...skillsOf(DEVFLOW_PLUGINS.filter(p => !p.optional))].map(prefixSkillName).sort();
+    // Plus the feature-owned compliance skill, which converge installs on every
+    // machine (D-COMPLIANCE-INSTALL-ALWAYS) — it belongs to no plugin.
+    const expected = [...skillsOf(DEVFLOW_PLUGINS.filter(p => !p.optional)), ...FEATURE_OWNED_SKILLS]
+      .map(prefixSkillName).sort();
     expect(await listSkills()).toEqual(expected);
     expect(expected.length, 'scoping must actually narrow something').toBeLessThan(getAllSkillNames().length);
   }, SUBPROCESS_TIMEOUT_MS);

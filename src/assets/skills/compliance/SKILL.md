@@ -99,13 +99,13 @@ resource "aws_s3_bucket_logging" "data" { target_bucket = var.audit_bucket_id }
 | **CRITICAL** | Plaintext regulated data exposed; public IaC exposure of regulated stores |
 | **HIGH** | Missing audit trail on regulated mutations; PII in logs or errors |
 | **MEDIUM** | Missing retention/erasure paths; weak traceability (no actor/purpose) |
-| **LOW** | No active framework reference files installed; documentation/annotation gaps |
+| **LOW** | Documentation/annotation gaps |
 
 ${DEVFLOW_COMPLIANCE_MAPPING}
 
 ## Checklist
 
-- [ ] Active frameworks identified from installed `references/{id}.md` files; controls applied
+- [ ] Frameworks in force are the ids given (`COMPLIANCE_FRAMEWORKS`); their controls applied
 - [ ] No PII/PHI/payment data in logs, errors, or analytics events
 - [ ] Regulated data encrypted in transit (TLS 1.2+) and at rest
 - [ ] Every regulated mutation has an append-only audit entry (actor, purpose, timestamp)

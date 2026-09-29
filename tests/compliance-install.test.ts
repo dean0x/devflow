@@ -1,7 +1,9 @@
 /**
  * Tests for src/targets/claude-code/compliance-install.ts
  *
- * Step 1.3 — TDD: write failing tests first.
+ * D-COMPLIANCE-INSTALL-ALWAYS: every convergence installs the skill with every
+ * framework reference; the machine switch owns only the rule and the SKILL.md
+ * stamp (machine frameworks when on, the neutral zero-framework stamp when off).
  *
  * All tests use injected tmp dirs — never real HOME.
  */
@@ -10,7 +12,8 @@ import { promises as fs } from 'fs';
 import * as path from 'path';
 import * as os from 'os';
 import { convergeComplianceArtifacts } from '../src/targets/claude-code/compliance-install.js';
-import { ALWAYS_PRESENT_REFS, COMPLIANCE_RULE_PLACEHOLDER } from '../src/core/compliance.js';
+import { ALWAYS_PRESENT_REFS, COMPLIANCE_FRAMEWORKS, COMPLIANCE_RULE_PLACEHOLDER } from '../src/core/compliance.js';
+import { shadowSeedDir } from '../src/cli/commands/skills.js';
 
 // ---------------------------------------------------------------------------
 // Test setup
@@ -22,6 +25,20 @@ let devflowDir: string;
 
 const SKILL_NAME = 'devflow:compliance';
 const RULE_REL = 'rules/devflow/compliance.md';
+
+/** What every install carries, whatever the selection: SKILL.md and every reference. */
+const EVERY_SKILL_FILE: readonly string[] = [
+  'SKILL.md',
+  ...ALWAYS_PRESENT_REFS.map(r => `references/${r}`),
+  ...COMPLIANCE_FRAMEWORKS.map(fw => `references/${fw.id}.md`),
+].sort();
+
+/** The neutral stamp a compliance-off machine's SKILL.md carries. */
+const NEUTRAL_STAMP = 'The machine declares no framework.';
+
+async function installedSkillMd(): Promise<string> {
+  return fs.readFile(path.join(claudeDir, 'skills', SKILL_NAME, 'SKILL.md'), 'utf-8');
+}
 
 async function skillTargetDir() {
   return path.join(claudeDir, 'skills', SKILL_NAME);
@@ -83,11 +100,11 @@ afterEach(async () => {
 });
 
 // ---------------------------------------------------------------------------
-// Step 1: Selective reference install
+// Step 1: Every reference installed; the stamp follows the machine selection
 // ---------------------------------------------------------------------------
 
-describe('selective reference install', () => {
-  it('enable+[gdpr,soc2] → skill dir contains exactly SKILL.md, references/gdpr.md, references/soc2.md, references/detection.md, references/sources.md', async () => {
+describe('install every reference (D-COMPLIANCE-INSTALL-ALWAYS)', () => {
+  it('enable+[gdpr,soc2] → every reference installed; SKILL.md stamped GDPR, SOC 2', async () => {
     const warn = vi.fn();
     await convergeComplianceArtifacts({
       claudeDir,
@@ -98,67 +115,55 @@ describe('selective reference install', () => {
       warn,
     });
 
-    expect(await skillExists()).toBe(true);
-    const files = await listSkillFiles();
-    expect(files).toEqual([
-      'SKILL.md',
-      'references/detection.md',
-      'references/gdpr.md',
-      'references/soc2.md',
-      'references/sources.md',
-    ]);
+    expect(await listSkillFiles()).toEqual(EVERY_SKILL_FILE);
     expect(warn).not.toHaveBeenCalled();
 
-    // Composed SKILL.md must have no unresolved tokens and contain active framework refs.
-    const skillContent = await fs.readFile(
-      path.join(claudeDir, 'skills', SKILL_NAME, 'SKILL.md'),
-      'utf-8',
-    );
+    // Composed SKILL.md: no unresolved tokens; the stamp and the reference rows name
+    // the machine's selection only.
+    const skillContent = await installedSkillMd();
     expect(skillContent).not.toContain('${DEVFLOW_COMPLIANCE_');
-    expect(skillContent).toContain('references/gdpr.md');
-    expect(skillContent).toContain('references/soc2.md');
+    expect(skillContent).toContain('**Machine frameworks: GDPR, SOC 2.**');
+    expect(skillContent).toContain('| `references/gdpr.md` |');
+    expect(skillContent).toContain('| `references/soc2.md` |');
+    expect(skillContent).not.toContain('| `references/hipaa.md` |');
   });
 
-  it('all six frameworks → all six ref files present plus detection+sources', async () => {
-    const warn = vi.fn();
+  it('all six frameworks → the same file set', async () => {
     await convergeComplianceArtifacts({
       claudeDir,
       devflowDir,
       enabled: true,
-      frameworks: ['gdpr', 'hipaa', 'pci-dss', 'soc2', 'iso-27001', 'sox'],
+      frameworks: COMPLIANCE_FRAMEWORKS.map(fw => fw.id),
       rulesEnabled: true,
-      warn,
+      warn: vi.fn(),
     });
 
-    const files = await listSkillFiles();
-    expect(files).toContain('references/gdpr.md');
-    expect(files).toContain('references/hipaa.md');
-    expect(files).toContain('references/pci-dss.md');
-    expect(files).toContain('references/soc2.md');
-    expect(files).toContain('references/iso-27001.md');
-    expect(files).toContain('references/sox.md');
-    expect(files).toContain('references/detection.md');
-    expect(files).toContain('references/sources.md');
-    expect(files).toContain('SKILL.md');
+    expect(await listSkillFiles()).toEqual(EVERY_SKILL_FILE);
   });
 
-  it('zero frameworks → SKILL.md + detection.md + sources.md only (generic controls)', async () => {
-    const warn = vi.fn();
+  it('zero frameworks → the same file set, neutral stamp (generic controls)', async () => {
     await convergeComplianceArtifacts({
       claudeDir,
       devflowDir,
       enabled: true,
       frameworks: [],
       rulesEnabled: true,
-      warn,
+      warn: vi.fn(),
     });
 
-    const files = await listSkillFiles();
-    expect(files).toEqual([
-      'SKILL.md',
-      'references/detection.md',
-      'references/sources.md',
-    ]);
+    expect(await listSkillFiles()).toEqual(EVERY_SKILL_FILE);
+    expect(await installedSkillMd()).toContain(NEUTRAL_STAMP);
+  });
+
+  it('every SKILL.md routes reference loading through the ids the caller passes (D-COMPLIANCE-REPO-LENS)', async () => {
+    await convergeComplianceArtifacts({
+      claudeDir, devflowDir, enabled: true, frameworks: ['gdpr'], rulesEnabled: false, warn: vi.fn(),
+    });
+    const skill = await installedSkillMd();
+    expect(skill).toContain('(`COMPLIANCE_FRAMEWORKS`');
+    expect(skill).toContain('Load `references/{id}.md` for each given id and no other');
+    // Presence is no longer a selection signal — the old instruction must be gone.
+    expect(skill).not.toMatch(/presence in the installed skill directory is the authoritative/i);
   });
 
   it('rule is installed and stamped when enabled+rulesEnabled', async () => {
@@ -199,60 +204,38 @@ describe('selective reference install', () => {
 // ---------------------------------------------------------------------------
 
 describe('recompose exactness (--set semantics)', () => {
-  it('re-converge [gdpr,soc2] → [hipaa]: gdpr/soc2 refs gone, hipaa present, detection+sources stay', async () => {
+  it('re-converge [gdpr,soc2] → [hipaa]: file set unchanged, SKILL.md re-stamped HIPAA', async () => {
     const warn = vi.fn();
-    // Initial install with gdpr+soc2
     await convergeComplianceArtifacts({
       claudeDir, devflowDir, enabled: true, frameworks: ['gdpr', 'soc2'], rulesEnabled: false, warn,
     });
-
-    // Re-converge with hipaa only
     await convergeComplianceArtifacts({
       claudeDir, devflowDir, enabled: true, frameworks: ['hipaa'], rulesEnabled: false, warn,
     });
 
-    const files = await listSkillFiles();
-    expect(files).not.toContain('references/gdpr.md');
-    expect(files).not.toContain('references/soc2.md');
-    expect(files).toContain('references/hipaa.md');
-    expect(files).toContain('references/detection.md');
-    expect(files).toContain('references/sources.md');
-    expect(files).toContain('SKILL.md');
-
-    // Composed SKILL.md reflects the new selection.
-    const skillContent = await fs.readFile(
-      path.join(claudeDir, 'skills', SKILL_NAME, 'SKILL.md'),
-      'utf-8',
-    );
-    // Dynamic sections mention only the active framework.
-    expect(skillContent).toContain('**Active: HIPAA.**');
-    expect(skillContent).toContain('references/hipaa.md');
-    // GDPR-specific references must not appear in dynamic sections.
-    expect(skillContent).not.toContain('references/gdpr.md');
+    expect(await listSkillFiles()).toEqual(EVERY_SKILL_FILE);
+    const skillContent = await installedSkillMd();
+    expect(skillContent).toContain('**Machine frameworks: HIPAA.**');
+    expect(skillContent).toContain('| `references/hipaa.md` |');
+    expect(skillContent).not.toContain('| `references/gdpr.md` |');
     expect(skillContent).not.toContain('${DEVFLOW_COMPLIANCE_');
   });
 
-  it('recompose does not leave stale files from prior install', async () => {
+  it('recompose leaves no stale files and no tmp sibling', async () => {
     const warn = vi.fn();
-    // Install all 6
     await convergeComplianceArtifacts({
       claudeDir, devflowDir, enabled: true,
-      frameworks: ['gdpr', 'hipaa', 'pci-dss', 'soc2', 'iso-27001', 'sox'],
+      frameworks: COMPLIANCE_FRAMEWORKS.map(fw => fw.id),
       rulesEnabled: false, warn,
     });
+    await fs.writeFile(path.join(await skillTargetDir(), 'references', 'stale.md'), 'stale', 'utf-8');
 
-    // Narrow to just sox
     await convergeComplianceArtifacts({
       claudeDir, devflowDir, enabled: true, frameworks: ['sox'], rulesEnabled: false, warn,
     });
 
-    const files = await listSkillFiles();
-    expect(files).toEqual([
-      'SKILL.md',
-      'references/detection.md',
-      'references/sources.md',
-      'references/sox.md',
-    ]);
+    expect(await listSkillFiles()).toEqual(EVERY_SKILL_FILE);
+    await expect(fs.access(`${await skillTargetDir()}.tmp`)).rejects.toThrow();
   });
 
   it('rule re-stamped with new frameworks on re-converge', async () => {
@@ -332,22 +315,25 @@ describe('shadow paths', () => {
 });
 
 // ---------------------------------------------------------------------------
-// Step 4: Disable path removes both artifacts
+// Step 4: Disable path keeps the skill (neutral stamp) and removes the rule
 // ---------------------------------------------------------------------------
 
 describe('disable path', () => {
-  it('disabled → skill dir removed', async () => {
-    // First install
+  it('disabled → skill kept with every reference and the neutral stamp', async () => {
     await convergeComplianceArtifacts({
       claudeDir, devflowDir, enabled: true, frameworks: ['gdpr'], rulesEnabled: true, warn: vi.fn(),
     });
-    expect(await skillExists()).toBe(true);
 
-    // Now disable
     await convergeComplianceArtifacts({
-      claudeDir, devflowDir, enabled: false, frameworks: [], rulesEnabled: true, warn: vi.fn(),
+      claudeDir, devflowDir, enabled: false, frameworks: ['gdpr'], rulesEnabled: true, warn: vi.fn(),
     });
-    expect(await skillExists()).toBe(false);
+
+    expect(await listSkillFiles()).toEqual(EVERY_SKILL_FILE);
+    const skill = await installedSkillMd();
+    expect(skill).toContain(NEUTRAL_STAMP);
+    // The remembered selection never reaches an off machine's stamp.
+    expect(skill).not.toContain('Machine frameworks:');
+    expect(skill).not.toContain('| `references/gdpr.md` |');
   });
 
   it('disabled → rule removed', async () => {
@@ -362,15 +348,15 @@ describe('disable path', () => {
     expect(await ruleExists()).toBe(false);
   });
 
-  it('disabled → no-op when already absent (idempotent)', async () => {
+  it('disabled from nothing → skill installed, no rule, no warning (idempotent)', async () => {
     const warn = vi.fn();
-    // Never installed — should succeed silently
-    await convergeComplianceArtifacts({
-      claudeDir, devflowDir, enabled: false, frameworks: [], rulesEnabled: true, warn,
-    });
-    expect(await skillExists()).toBe(false);
+    for (let i = 0; i < 2; i++) {
+      await convergeComplianceArtifacts({
+        claudeDir, devflowDir, enabled: false, frameworks: [], rulesEnabled: true, warn,
+      });
+    }
+    expect(await listSkillFiles()).toEqual(EVERY_SKILL_FILE);
     expect(await ruleExists()).toBe(false);
-    // No throws, warn called 0 times (absent = no-op, not an error)
     expect(warn).not.toHaveBeenCalled();
   });
 });
@@ -380,8 +366,7 @@ describe('disable path', () => {
 // ---------------------------------------------------------------------------
 
 describe('PF-015: both artifacts converge unconditionally (avoids PF-015)', () => {
-  it('disable: rule removed even when skill dir was already absent', async () => {
-    // Only rule is present, skill dir is not
+  it('disable: rule removed and skill installed when only a rule was present', async () => {
     await fs.mkdir(path.join(claudeDir, 'rules', 'devflow'), { recursive: true });
     await fs.writeFile(await ruleTargetPath(), 'rule content', 'utf-8');
 
@@ -389,25 +374,22 @@ describe('PF-015: both artifacts converge unconditionally (avoids PF-015)', () =
       claudeDir, devflowDir, enabled: false, frameworks: [], rulesEnabled: true, warn: vi.fn(),
     });
 
-    // Skill was already absent: still absent
-    expect(await skillExists()).toBe(false);
-    // Rule was present: now removed
+    expect(await listSkillFiles()).toEqual(EVERY_SKILL_FILE);
     expect(await ruleExists()).toBe(false);
   });
 
-  it('disable: skill dir removed even when rule was already absent', async () => {
-    // Only skill is present
+  it('disable: skill re-stamped neutral when the rule was already absent', async () => {
     await convergeComplianceArtifacts({
       claudeDir, devflowDir, enabled: true, frameworks: ['gdpr'], rulesEnabled: false, warn: vi.fn(),
     });
-    expect(await skillExists()).toBe(true);
+    expect(await installedSkillMd()).toContain('**Machine frameworks: GDPR.**');
     expect(await ruleExists()).toBe(false);
 
     await convergeComplianceArtifacts({
       claudeDir, devflowDir, enabled: false, frameworks: [], rulesEnabled: false, warn: vi.fn(),
     });
 
-    expect(await skillExists()).toBe(false);
+    expect(await installedSkillMd()).toContain(NEUTRAL_STAMP);
     expect(await ruleExists()).toBe(false);
   });
 
@@ -425,7 +407,7 @@ describe('PF-015: both artifacts converge unconditionally (avoids PF-015)', () =
     expect(await ruleExists()).toBe(true);
   });
 
-  it('disable: skill dir removed even when rule removal fails — EISDIR directory obstacle (step isolation)', async () => {
+  it('disable: skill still converges when rule removal fails — EISDIR directory obstacle (step isolation)', async () => {
     // Portability rationale: fs.rm(path, {force:true}) without {recursive:true} throws
     // ERR_FS_EISDIR when the target is a directory. Replacing the rule FILE with a
     // DIRECTORY of the same name induces this error without chmod (chmod 000 is a no-op
@@ -437,7 +419,6 @@ describe('PF-015: both artifacts converge unconditionally (avoids PF-015)', () =
       claudeDir, devflowDir, enabled: true, frameworks: ['gdpr'], rulesEnabled: true,
       warn: vi.fn(),
     });
-    expect(await skillExists()).toBe(true);
     expect(await ruleExists()).toBe(true);
 
     // Replace the rule FILE with a DIRECTORY of the same name (EISDIR obstacle).
@@ -449,19 +430,17 @@ describe('PF-015: both artifacts converge unconditionally (avoids PF-015)', () =
       warn: (m) => warns.push(m),
     });
 
-    // (a) Skill dir was still removed — step isolation held despite rule removal failure.
-    expect(await skillExists()).toBe(false);
+    // (a) The skill converged to the neutral stamp despite the rule failure.
+    expect(await installedSkillMd()).toContain(NEUTRAL_STAMP);
     // (b) warn was called with the rule-removal failure.
-    expect(warns.length).toBeGreaterThanOrEqual(1);
     expect(warns.some(w => w.includes('rule'))).toBe(true);
-    // (c) Call resolved without throwing — result was returned normally above.
-    // (d) converged is false because a warn path was taken.
+    // (c) converged is false because a warn path was taken.
     expect(result.converged).toBe(false);
   });
 });
 
 // ---------------------------------------------------------------------------
-// Step 6: removedPreexisting — pre-existing plugin-form artifacts
+// Step 6: removedPreexisting — a pre-existing rule on a disable convergence
 // ---------------------------------------------------------------------------
 
 describe('removedPreexisting', () => {
@@ -473,8 +452,9 @@ describe('removedPreexisting', () => {
     expect(result.converged).toBe(true);
   });
 
-  it('returns true and removes pre-existing skill dir when feature disabled', async () => {
-    // Simulate old plugin-form install: create a skill dir as if the plugin installed it
+  it('returns false for a pre-existing skill dir alone, and replaces it with the neutral install', async () => {
+    // Old plugin-form install: a skill dir, no rule. The skill is installed on every
+    // machine now, so its presence is no removal signal.
     const skillDir = path.join(claudeDir, 'skills', SKILL_NAME);
     await fs.mkdir(path.join(skillDir, 'references'), { recursive: true });
     await fs.writeFile(path.join(skillDir, 'SKILL.md'), '# old install', 'utf-8');
@@ -483,8 +463,8 @@ describe('removedPreexisting', () => {
       claudeDir, devflowDir, enabled: false, frameworks: [], rulesEnabled: true, warn: vi.fn(),
     });
 
-    expect(result.removedPreexisting).toBe(true);
-    expect(await skillExists()).toBe(false);
+    expect(result.removedPreexisting).toBe(false);
+    expect(await installedSkillMd()).toContain(NEUTRAL_STAMP);
   });
 
   it('returns true and removes pre-existing rule when feature disabled', async () => {
@@ -503,6 +483,15 @@ describe('removedPreexisting', () => {
       claudeDir, devflowDir, enabled: true, frameworks: ['gdpr'], rulesEnabled: true, warn: vi.fn(),
     });
     expect(result.removedPreexisting).toBe(false);
+  });
+
+  it('returns false when enabled with rules off removes a stale rule (not a disable)', async () => {
+    await fs.writeFile(await ruleTargetPath(), 'stale rule', 'utf-8');
+    const result = await convergeComplianceArtifacts({
+      claudeDir, devflowDir, enabled: true, frameworks: ['gdpr'], rulesEnabled: false, warn: vi.fn(),
+    });
+    expect(result.removedPreexisting).toBe(false);
+    expect(await ruleExists()).toBe(false);
   });
 });
 
@@ -596,15 +585,12 @@ describe('AC-35: unvalidated framework IDs never reach an fs path', () => {
     // Nothing was written outside the skill dir.
     await expect(fs.access(escapeTarget)).rejects.toThrow();
 
-    // …and the valid part of the selection still installed normally: one bad ID in a
-    // manifest must degrade to "that framework is dropped", not "no skill installed".
-    expect(await skillExists()).toBe(true);
-    expect(await listSkillFiles()).toEqual([
-      'SKILL.md',
-      'references/detection.md',
-      'references/gdpr.md',
-      'references/sources.md',
-    ]);
+    // …and the install is otherwise normal: one bad ID in a manifest degrades to
+    // "that framework is dropped", not "no skill installed" — and never adds a file.
+    expect(await listSkillFiles()).toEqual(EVERY_SKILL_FILE);
+    const skill = await installedSkillMd();
+    expect(skill).toContain('**Machine frameworks: GDPR.**');
+    expect(skill).not.toContain('rules/compliance');
   });
 
   it('an unknown ID is dropped and the rule is stamped without it', async () => {
@@ -638,12 +624,8 @@ describe('AC-35: unvalidated framework IDs never reach an fs path', () => {
       warn,
     });
 
-    expect(await skillExists()).toBe(true);
-    expect(await listSkillFiles()).toEqual([
-      'SKILL.md',
-      'references/detection.md',
-      'references/sources.md',
-    ]);
+    expect(await listSkillFiles()).toEqual(EVERY_SKILL_FILE);
+    expect(await installedSkillMd()).toContain(NEUTRAL_STAMP);
     const rule = await fs.readFile(await ruleTargetPath(), 'utf-8');
     expect(rule).toContain('none declared — generic controls only');
   });
@@ -764,20 +746,73 @@ describe('ALWAYS_PRESENT_REFS: exported from src/core/compliance.ts (I11)', () =
     expect(ALWAYS_PRESENT_REFS).toHaveLength(2);
   });
 
-  it('zero-framework install contains exactly the ALWAYS_PRESENT_REFS + SKILL.md', async () => {
-    // Cross-checks that the installer and the CLI status helper agree on which refs
-    // are unconditional: the install produces exactly ALWAYS_PRESENT_REFS, and
-    // installedRefIds (in compliance.ts) filters them out so they don't appear as
-    // "installed frameworks" in the drift display.
+  it('zero-framework install carries the ALWAYS_PRESENT_REFS alongside every framework reference', async () => {
     await convergeComplianceArtifacts({
       claudeDir, devflowDir, enabled: true, frameworks: [], rulesEnabled: false, warn: vi.fn(),
     });
     const files = await listSkillFiles();
-    const alwaysPresentInRefs = ALWAYS_PRESENT_REFS.map(r => `references/${r}`);
-    for (const ref of alwaysPresentInRefs) {
-      expect(files).toContain(ref);
-    }
-    // Only SKILL.md + always-present refs — no framework refs
-    expect(files).toEqual(['SKILL.md', ...alwaysPresentInRefs].sort());
+    for (const ref of ALWAYS_PRESENT_REFS) expect(files).toContain(`references/${ref}`);
+    expect(files).toEqual(EVERY_SKILL_FILE);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Step 12: TP-44 (AC-38) — a shadow seeded from source is stamped by a later set
+// ---------------------------------------------------------------------------
+
+describe('TP-44 (AC-38): a shadowed compliance skill is re-stamped by a later convergence', () => {
+  /** Seed the shadow as `devflow skills shadow compliance` does. */
+  async function seedShadow(installedDir: string | null): Promise<string> {
+    const shadowDir = path.join(devflowDir, 'skills', 'compliance');
+    await fs.cp(shadowSeedDir('compliance', installedDir), shadowDir, { recursive: true });
+    return shadowDir;
+  }
+
+  it('the compliance shadow is seeded from source, never from the stamped installed copy', async () => {
+    await convergeComplianceArtifacts({
+      claudeDir, devflowDir, enabled: true, frameworks: ['gdpr'], rulesEnabled: false, warn: vi.fn(),
+    });
+    const shadowDir = await seedShadow(await skillTargetDir());
+
+    const seeded = await fs.readFile(path.join(shadowDir, 'SKILL.md'), 'utf-8');
+    expect(seeded, 'the seed must still carry the composition tokens').toContain('${DEVFLOW_COMPLIANCE_ACTIVE}');
+    expect(seeded).not.toContain('**Machine frameworks: GDPR.**');
+  });
+
+  it('a later convergence stamps the shadowed skill with the new frameworks', async () => {
+    await convergeComplianceArtifacts({
+      claudeDir, devflowDir, enabled: true, frameworks: ['gdpr'], rulesEnabled: false, warn: vi.fn(),
+    });
+    await seedShadow(await skillTargetDir());
+
+    // `devflow compliance --set hipaa` converges with the new selection.
+    await convergeComplianceArtifacts({
+      claudeDir, devflowDir, enabled: true, frameworks: ['hipaa'], rulesEnabled: false, warn: vi.fn(),
+    });
+
+    const skill = await installedSkillMd();
+    expect(skill).toContain('**Machine frameworks: HIPAA.**');
+    expect(skill).not.toContain('| `references/gdpr.md` |');
+  });
+
+  it('known-bad probe: a shadow copied from the installed copy freezes the old stamp', async () => {
+    await convergeComplianceArtifacts({
+      claudeDir, devflowDir, enabled: true, frameworks: ['gdpr'], rulesEnabled: false, warn: vi.fn(),
+    });
+    const shadowDir = path.join(devflowDir, 'skills', 'compliance');
+    await fs.cp(await skillTargetDir(), shadowDir, { recursive: true });
+
+    await convergeComplianceArtifacts({
+      claudeDir, devflowDir, enabled: true, frameworks: ['hipaa'], rulesEnabled: false, warn: vi.fn(),
+    });
+
+    // The defect #9 fixed: the token-free shadow passes through byte-identical (C1).
+    expect(await installedSkillMd()).toContain('**Machine frameworks: GDPR.**');
+  });
+
+  it('a skill that is not feature-owned still seeds from its installed copy', () => {
+    const installed = path.join(claudeDir, 'skills', 'devflow:security');
+    expect(shadowSeedDir('security', installed)).toBe(installed);
+    expect(shadowSeedDir('security', null)).not.toBe(installed);
   });
 });

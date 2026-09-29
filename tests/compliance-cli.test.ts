@@ -4,7 +4,7 @@
  * Covers:
  *   - resolveComplianceCliAction pure resolver matrix
  *   - parseFrameworkList "Commander parse pin" (error message names every valid ID)
- *   - classifyDriftMissing invalid-ID classification
+ *   - unknownFrameworkIds invalid-ID classification
  *
  * Init-seed compliance seeding coverage (resolveSeedFeatures, applyCliToggles,
  * resolveResetGatedInputs) lives in tests/init-seed.test.ts — compliance seeding section.
@@ -12,7 +12,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   resolveComplianceCliAction,
-  classifyDriftMissing,
+  unknownFrameworkIds,
 } from '../src/cli/commands/compliance.js';
 import {
   COMPLIANCE_FRAMEWORKS,
@@ -166,48 +166,28 @@ describe('parseFrameworkList (Commander parse pin)', () => {
   });
 });
 
-// ── classifyDriftMissing — invalid-ID reporting path ─────────────────────────────
+// ── unknownFrameworkIds — invalid-ID reporting path ──────────────────────────────
+//
+// Installed reference files are no drift signal any more: every install carries all
+// six (D-COMPLIANCE-INSTALL-ALWAYS). The one manifest defect --status still reports is
+// an ID the registry does not know.
 
-describe('classifyDriftMissing', () => {
+describe('unknownFrameworkIds', () => {
   const REGISTRY = new Set(COMPLIANCE_FRAMEWORKS.map(fw => fw.id));
 
-  it('all manifest IDs installed → both lists empty', () => {
-    const result = classifyDriftMissing(['gdpr', 'hipaa'], ['gdpr', 'hipaa'], REGISTRY);
-    expect(result.validMissing).toEqual([]);
-    expect(result.invalidIds).toEqual([]);
+  it('all manifest IDs known → empty', () => {
+    expect(unknownFrameworkIds(['gdpr', 'hipaa'], REGISTRY)).toEqual([]);
   });
 
-  it('valid ID in manifest not installed → validMissing (--enable can reconcile)', () => {
-    const result = classifyDriftMissing(['gdpr', 'soc2'], ['gdpr'], REGISTRY);
-    expect(result.validMissing).toEqual(['soc2']);
-    expect(result.invalidIds).toEqual([]);
+  it('unknown ID in manifest → listed (--set required to remove)', () => {
+    expect(unknownFrameworkIds(['gdpr', 'not-a-framework'], REGISTRY)).toEqual(['not-a-framework']);
   });
 
-  it('unknown ID in manifest → invalidIds (--set required to remove)', () => {
-    const result = classifyDriftMissing(['gdpr', 'not-a-framework'], ['gdpr'], REGISTRY);
-    expect(result.validMissing).toEqual([]);
-    expect(result.invalidIds).toEqual(['not-a-framework']);
+  it('keeps manifest order and lists every unknown ID', () => {
+    expect(unknownFrameworkIds(['foo', 'gdpr', 'bar'], REGISTRY)).toEqual(['foo', 'bar']);
   });
 
-  it('mixed: one valid missing + one invalid → split across both lists', () => {
-    const result = classifyDriftMissing(
-      ['gdpr', 'sox', 'hand-edited-id'],
-      ['gdpr'],
-      REGISTRY,
-    );
-    expect(result.validMissing).toEqual(['sox']);
-    expect(result.invalidIds).toEqual(['hand-edited-id']);
-  });
-
-  it('empty manifest → both lists empty', () => {
-    const result = classifyDriftMissing([], ['gdpr'], REGISTRY);
-    expect(result.validMissing).toEqual([]);
-    expect(result.invalidIds).toEqual([]);
-  });
-
-  it('all manifest IDs are invalid → validMissing empty, invalidIds lists all', () => {
-    const result = classifyDriftMissing(['foo', 'bar'], [], REGISTRY);
-    expect(result.validMissing).toEqual([]);
-    expect(result.invalidIds).toEqual(['foo', 'bar']);
+  it('empty manifest → empty', () => {
+    expect(unknownFrameworkIds([], REGISTRY)).toEqual([]);
   });
 });

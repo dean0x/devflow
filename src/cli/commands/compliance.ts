@@ -18,7 +18,6 @@ import * as p from '@clack/prompts';
 import color from 'picocolors';
 
 import {
-  ALWAYS_PRESENT_REFS,
   COMPLIANCE_FRAMEWORKS,
   normalizeFrameworks,
   parseFrameworkList,
@@ -104,7 +103,7 @@ export function resolveComplianceCliAction(
         messages: [
           {
             level: 'success',
-            text: 'Compliance disabled — artifacts removed, frameworks remembered for re-enable',
+            text: 'Compliance disabled — rule removed, frameworks remembered for re-enable',
           },
         ],
       };
@@ -136,28 +135,21 @@ export function resolveComplianceCliAction(
   }
 }
 
-// ── Drift classification ───────────────────────────────────────────────────────
+// ── Manifest classification ────────────────────────────────────────────────────
 
 /**
- * Classify a list of manifest framework IDs that are not currently installed.
- * Separates valid (registry-known) IDs from invalid (unknown) IDs so the status
- * display can recommend the correct remediation for each class.
+ * The manifest framework IDs the registry does not know — a hand-edited or
+ * newer-devflow manifest. Every install drops them (normalizeFrameworks), so
+ * `--status` names them with the one remedy that removes them: `--set`.
  *
- * Called by the --status handler to compute drift between the manifest and
- * installed artifacts. Also exported to allow unit testing of the classification
- * logic in isolation.
+ * Installed reference files are no drift signal: every install carries all six
+ * (D-COMPLIANCE-INSTALL-ALWAYS), whatever the manifest selects.
  */
-export function classifyDriftMissing(
+export function unknownFrameworkIds(
   manifestFrameworks: readonly string[],
-  installedRefIds: readonly string[],
   registryIds: ReadonlySet<string>,
-): { validMissing: string[]; invalidIds: string[] } {
-  const installedSet = new Set(installedRefIds);
-  const missing = manifestFrameworks.filter(id => !installedSet.has(id));
-  return {
-    validMissing: missing.filter(id => registryIds.has(id)),
-    invalidIds: missing.filter(id => !registryIds.has(id)),
-  };
+): string[] {
+  return manifestFrameworks.filter(id => !registryIds.has(id));
 }
 
 // ── Status helpers ─────────────────────────────────────────────────────────────
@@ -169,23 +161,6 @@ async function skillInstalled(claudeDir: string): Promise<boolean> {
     return true;
   } catch {
     return false;
-  }
-}
-
-/** Returns the set of installed framework reference IDs from the skill dir. */
-async function installedRefIds(claudeDir: string): Promise<string[]> {
-  const refDir = path.join(claudeDir, 'skills', 'devflow:compliance', 'references');
-  try {
-    const entries = await fs.readdir(refDir);
-    return entries
-      .filter(e => e.endsWith('.md') && !ALWAYS_PRESENT_REFS.includes(e))
-      .map(e => path.basename(e, '.md'))
-      // S58: sanitize — keep only entries whose basename matches the expected id
-      // shape (lowercase letters, digits, hyphens). Strips terminal-escape sequences
-      // or path segments that could be injected via a crafted filename.
-      .filter(id => /^[a-z0-9-]+$/.test(id));
-  } catch {
-    return [];
   }
 }
 
@@ -242,7 +217,7 @@ interface ComplianceOptions {
 export const complianceCommand = new Command('compliance')
   .description('Enable, disable, or configure the compliance feature')
   .option('--enable', 'Enable compliance (restores previously selected frameworks)')
-  .option('--disable', 'Disable compliance (artifacts removed; frameworks remembered for re-enable)')
+  .option('--disable', 'Disable compliance (rule removed; frameworks remembered for re-enable)')
   .option('--status', 'Show compliance state: manifest, installed artifacts, shadow presence, and the evidence policy for the current repository')
   .option('--set <list>', 'Set active frameworks (comma-separated IDs); enables compliance. Use --set "" for zero frameworks (generic controls only)')
   .action(async (options: ComplianceOptions) => {
@@ -292,22 +267,17 @@ export const complianceCommand = new Command('compliance')
         : color.dim('none declared');
 
       const rulesEnabled = manifest.features.rules;
-      const [skillOk, refIds, ruleOk, isRuleShadowed, skillShadow] = await Promise.all([
+      const [skillOk, ruleOk, isRuleShadowed, skillShadow] = await Promise.all([
         skillInstalled(claudeDir),
-        installedRefIds(claudeDir),
         ruleInstalled(claudeDir),
         ruleShadowed(devflowDir),
         skillShadowState(devflowDir),
       ]);
 
-      // Detect framework drift: manifest says X, installed refs say Y.
-      // Invalid IDs (not in the registry) are reported separately from valid-but-missing
-      // IDs so the suggested remediation is correct: --enable can reconcile valid IDs,
-      // but only --set can remove IDs that are not in the registry.
-      const registrySet = new Set(COMPLIANCE_FRAMEWORKS.map(fw => fw.id));
-      const manifestSet = new Set(current.frameworks);
-      const driftInstalled = refIds.filter(id => !manifestSet.has(id));
-      const { validMissing, invalidIds } = classifyDriftMissing(current.frameworks, refIds, registrySet);
+      const invalidIds = unknownFrameworkIds(
+        current.frameworks,
+        new Set(COMPLIANCE_FRAMEWORKS.map(fw => fw.id)),
+      );
 
       // The repository's own declaration (.devflow/project.json) and, while the
       // legacy policy file is still there, the hint to migrate it. Both come from
@@ -338,17 +308,8 @@ export const complianceCommand = new Command('compliance')
         evidencePolicyStatusLine(loadEvidencePolicyModule(), { dir: process.cwd(), compliance: current }),
       ];
 
-      if (driftInstalled.length > 0 || validMissing.length > 0 || invalidIds.length > 0) {
+      if (invalidIds.length > 0) {
         lines.push('');
-        if (driftInstalled.length > 0 || validMissing.length > 0) {
-          lines.push(color.yellow('Artifact drift detected (run devflow compliance --enable to reconcile):'));
-          if (driftInstalled.length > 0) {
-            lines.push(`  Installed not in manifest: ${driftInstalled.join(', ')}`);
-          }
-          if (validMissing.length > 0) {
-            lines.push(`  In manifest but not installed: ${validMissing.join(', ')}`);
-          }
-        }
         for (const id of invalidIds) {
           lines.push(color.red(`  unknown framework id in manifest (ignored): ${id} — remove with --set`));
         }

@@ -41,7 +41,7 @@ const INVOCATION = 'node "$HOME/.devflow/scripts/resolve-settings.cjs" "{root}" 
 
 /** The gates that consume the line, by the sentence each compiles to right after the block. */
 const CONSUMER_ANCHORS: ReadonlyArray<readonly [string, string]> = [
-  ['_compliance', 'Set `COMPLIANCE` from the settings line'],
+  ['_compliance', '**Set the compliance lens** from that line'],
   ['_knowledge', 'If the settings line says `KNOWLEDGE=off`'],
   ['_publication', '**Resolve `REVIEW_PUBLICATION` per worktree:**'],
 ]

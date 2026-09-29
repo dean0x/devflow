@@ -103,3 +103,52 @@ describe('devflow skills CLI, end to end under a scratch HOME', () => {
     expect(stdout + stderr).toContain('Unknown skill');
   });
 });
+
+// ---------------------------------------------------------------------------
+// TP-44 (AC-38): shadowing compliance, then `compliance --set`, stamps the
+// installed SKILL.md with the new frameworks (D-COMPLIANCE-SHADOW-SOURCE).
+// ---------------------------------------------------------------------------
+
+describe('TP-44 (AC-38): a shadowed compliance skill follows a later compliance --set', () => {
+  let cli: string;
+  let tmpHome: string;
+
+  const run = (...args: string[]) =>
+    spawnSync('node', [cli, ...args], {
+      encoding: 'utf-8',
+      timeout: 60000,
+      // PF-060: a scratch HOME bound into the command, and a cwd outside any repository,
+      // so `init` touches neither the developer's home nor a checkout.
+      cwd: tmpHome,
+      env: { ...process.env, HOME: tmpHome, FORCE_COLOR: '0', NO_COLOR: '1', CI: '1' },
+    });
+
+  const installedSkill = () =>
+    fs.readFile(path.join(tmpHome, '.claude', 'skills', 'devflow:compliance', 'SKILL.md'), 'utf-8');
+
+  beforeEach(async () => {
+    cli = requireBuiltCli();
+    tmpHome = await fs.mkdtemp(path.join(os.tmpdir(), 'devflow-skills-tp44-'));
+    await fs.mkdir(path.join(tmpHome, '.claude'), { recursive: true });
+    expect(run('init', '--recommended').status).toBe(0);
+    expect(run('compliance', '--set', 'gdpr').status).toBe(0);
+  });
+
+  afterEach(async () => {
+    await fs.rm(tmpHome, { recursive: true, force: true });
+  });
+
+  it('the shadow is seeded unstamped, and --set hipaa re-stamps the installed skill', async () => {
+    expect(await installedSkill()).toContain('**Machine frameworks: GDPR.**');
+
+    const shadow = run('skills', 'shadow', 'compliance');
+    expect(shadow.status, `skills shadow compliance failed:\n${shadow.stdout}${shadow.stderr}`).toBe(0);
+    const seeded = await fs.readFile(path.join(tmpHome, '.devflow', 'skills', 'compliance', 'SKILL.md'), 'utf-8');
+    expect(seeded, 'the shadow must keep the composition tokens').toContain('${DEVFLOW_COMPLIANCE_ACTIVE}');
+
+    expect(run('compliance', '--set', 'hipaa').status).toBe(0);
+    const skill = await installedSkill();
+    expect(skill).toContain('**Machine frameworks: HIPAA.**');
+    expect(skill).not.toContain('**Machine frameworks: GDPR.**');
+  });
+});

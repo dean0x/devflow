@@ -1,8 +1,18 @@
 /**
  * Compliance artifact installer for the Claude Code target.
  *
- * Convergence function: installs or removes the compliance skill directory
- * and rule file based on the current feature state.
+ * Convergence function: installs the compliance skill directory on every
+ * machine and installs or removes the rule file based on the current feature state.
+ *
+ * D-COMPLIANCE-INSTALL-ALWAYS: the skill and all six framework references are
+ * installed whatever the machine's own selection, because a repository can turn
+ * the review lens on by itself (`compliance` in `.devflow/project.json`, folded
+ * into the `COMPLIANCE` field of the settings line). What the machine switch still
+ * owns is the RULE — the one artifact Claude Code loads into every prompt — and
+ * the stamp on SKILL.md: the machine's frameworks when compliance is on, the
+ * neutral zero-framework stamp when it is off. Which references a run loads is
+ * decided by the ids its caller passes (D-COMPLIANCE-REPO-LENS), never by which
+ * files are present.
  *
  * Applies ADR-013: I/O orchestration in src/targets/; pure helpers in src/core/.
  * Applies PF-009: warn-not-throw for per-item failures.
@@ -13,7 +23,7 @@ import { promises as fs } from 'fs';
 import * as path from 'path';
 
 import { skillsDir, rulesDir } from '../../core/assets.js';
-import { ALWAYS_PRESENT_REFS, normalizeFrameworks, type ComplianceFeatureState } from '../../core/compliance.js';
+import { ALWAYS_PRESENT_REFS, COMPLIANCE_FRAMEWORKS, normalizeFrameworks, type ComplianceFeatureState } from '../../core/compliance.js';
 import { parseComplianceFragment, composeComplianceSkill, composeComplianceRule, type ComplianceFragment } from '../../core/compliance-compose.js';
 import { validateSkillShadow, validateRuleShadow } from './installer.js';
 
@@ -40,9 +50,11 @@ export interface ConvergeComplianceArtifactsOptions {
 
 export interface ConvergeComplianceArtifactsResult {
   /**
-   * True when pre-existing compliance artifacts were found and removed during a
-   * disable convergence. Init can use this to print a legacy plugin-form upgrade
-   * notice ("Compliance is now a built-in feature — re-enable with
+   * True when a pre-existing compliance rule was found and removed during a
+   * disable convergence. The skill is not part of this signal: it is installed on
+   * every machine (D-COMPLIANCE-INSTALL-ALWAYS), so its presence says nothing about
+   * a prior selection. Init uses this to print a legacy plugin-form upgrade notice
+   * ("Compliance is now a built-in feature — re-enable with
    * `devflow compliance --enable`").
    */
   removedPreexisting: boolean;
@@ -60,6 +72,9 @@ export interface ConvergeComplianceArtifactsResult {
 }
 
 // ── Path helpers ───────────────────────────────────────────────────────────
+
+/** Every registry framework id — the reference set every install carries. */
+const ALL_FRAMEWORK_IDS: readonly string[] = COMPLIANCE_FRAMEWORKS.map(fw => fw.id);
 
 /** Installed compliance skill dir: {claudeDir}/skills/devflow:compliance/ */
 function skillTarget(claudeDir: string): string {
@@ -119,13 +134,15 @@ async function loadComplianceFragments(
 // ── Skill installer ────────────────────────────────────────────────────────
 
 /**
- * Install the compliance skill directory (selective references).
+ * Install the compliance skill directory (every reference).
  *
  * SKILL.md source: shadow at {devflowDir}/skills/compliance/SKILL.md (when valid),
- * otherwise canonical src/assets/skills/compliance/SKILL.md.
+ * otherwise canonical src/assets/skills/compliance/SKILL.md. It is composed with
+ * `stampFrameworks` — the machine's selection, or none for the neutral stamp.
  *
- * Reference files installed: ALWAYS_PRESENT_REFS + one {id}.md per selected framework.
- * References always come from the canonical source — framework refs are not user-overridable.
+ * Reference files installed: ALWAYS_PRESENT_REFS + one {id}.md for EVERY registry
+ * framework (D-COMPLIANCE-INSTALL-ALWAYS). References always come from the canonical
+ * source — framework refs are not user-overridable.
  *
  * `fragments` is loaded once by convergeComplianceArtifacts and shared with the rule
  * installer — the SKILL.md and the rule compose from the same parsed set.
@@ -136,7 +153,7 @@ async function loadComplianceFragments(
 async function installSkillDir(
   claudeDir: string,
   devflowDir: string,
-  frameworks: readonly string[],
+  stampFrameworks: readonly string[],
   fragments: ReadonlyMap<string, ComplianceFragment>,
   warn: (msg: string) => void,
 ): Promise<void> {
@@ -165,7 +182,7 @@ async function installSkillDir(
     const templateContent = await fs.readFile(skillMdSrc, 'utf-8');
     const { content: composedSkill, warnings: skillWarnings } = composeComplianceSkill(
       templateContent,
-      frameworks,
+      stampFrameworks,
       fragments,
     );
     for (const w of skillWarnings) warn(`compliance: ${w}`);
@@ -188,9 +205,10 @@ async function installSkillDir(
 
     // Per-framework reference files: source is frameworks/{id}/reference.md,
     // destination is references/{id}.md (installed artifact layout unchanged — C1
-    // for consumers). Every id here is a registry-validated bare name — no separator,
-    // no traversal — from normalizeFrameworks in convergeComplianceArtifacts.
-    for (const fw of frameworks) {
+    // for consumers). Every registry id, whatever the machine selected: a repository
+    // may declare any of them. The ids come from the static registry — no separator,
+    // no traversal. C7: bounded by the registry's six entries.
+    for (const fw of ALL_FRAMEWORK_IDS) {
       const srcRef = path.join(canonicalSrc, 'frameworks', fw, 'reference.md');
       const dstRef = path.join(refDst, `${fw}.md`);
       try {
@@ -261,10 +279,10 @@ async function installRuleFile(
 /**
  * Converge compliance artifacts in the Claude Code install target.
  *
- * Convergence matrix:
- *   enabled + rulesEnabled  → install skill dir (selective refs) + stamped rule
- *   enabled + !rulesEnabled → install skill dir only; remove stale rule
- *   !enabled                → remove both artifacts (warn-not-throw per PF-009)
+ * Convergence matrix (D-COMPLIANCE-INSTALL-ALWAYS):
+ *   enabled + rulesEnabled  → skill dir (every ref, machine stamp) + stamped rule
+ *   enabled + !rulesEnabled → skill dir (every ref, machine stamp); remove stale rule
+ *   !enabled                → skill dir (every ref, neutral stamp); remove rule
  *
  * PF-015: both artifact operations execute unconditionally — no || short-circuits.
  * PF-011: skill dir write uses temp-sibling+rename to avoid ENOENT windows.
@@ -302,73 +320,38 @@ export async function convergeComplianceArtifacts(
     warn(msg);
   };
 
-  // ── Disable path ─────────────────────────────────────────────────────────
-  if (!enabled) {
-    // Detect pre-existing artifacts BEFORE removal (to set removedPreexisting).
-    const skillExisted = await pathExists(skillTarget(claudeDir));
-    const ruleExisted = await pathExists(ruleTarget(claudeDir));
-
-    // PF-015: collect results independently — one failure must not skip the other.
-    let skillErr: string | null = null;
-    let ruleErr: string | null = null;
-
-    // Step 1: attempt skill dir removal
-    try {
-      if (skillExisted) {
-        await fs.rm(skillTarget(claudeDir), { recursive: true, force: true });
-      }
-    } catch (err) {
-      skillErr = String(err);
-    }
-
-    // Step 2: attempt rule removal (runs regardless of Step 1 outcome — PF-015)
-    try {
-      if (ruleExisted) {
-        await fs.rm(ruleTarget(claudeDir), { force: true });
-      }
-    } catch (err) {
-      ruleErr = String(err);
-    }
-
-    // PF-009: warn after BOTH attempts so neither failure blocks the other.
-    if (skillErr !== null) {
-      trackingWarn(`compliance: failed to remove skill dir — ${skillErr}`);
-    }
-    if (ruleErr !== null) {
-      trackingWarn(`compliance: failed to remove rule — ${ruleErr}`);
-    }
-
-    return { removedPreexisting: skillExisted || ruleExisted, converged };
-  }
-
-  // ── Enable path ──────────────────────────────────────────────────────────
-  //
-  // PF-015: installSkillDir and the rule step are independent operations.
-  // An error in installSkillDir is caught internally and reported via trackingWarn,
-  // so execution always continues to the rule step.
-
   // Fragments are read and parsed once per convergence and shared by both artifacts:
   // they are the same registry-owned files either way, so parsing twice would only
-  // duplicate the I/O and report each malformed fragment twice.
+  // duplicate the I/O and report each malformed fragment twice. Only the stamped
+  // frameworks need one — a compliance-off machine stamps none.
+  const stampFrameworks = enabled ? safeFrameworks : [];
   const fragments = await loadComplianceFragments(
     path.join(skillsDir(), 'compliance'),
-    safeFrameworks,
+    stampFrameworks,
     trackingWarn,
   );
 
-  await installSkillDir(claudeDir, devflowDir, safeFrameworks, fragments, trackingWarn);
+  // PF-015: the skill and the rule are independent operations. An error in
+  // installSkillDir is caught internally and reported via trackingWarn, so
+  // execution always continues to the rule step.
+  await installSkillDir(claudeDir, devflowDir, stampFrameworks, fragments, trackingWarn);
 
-  if (rulesEnabled) {
+  if (enabled && rulesEnabled) {
     await installRuleFile(claudeDir, devflowDir, safeFrameworks, fragments, trackingWarn);
-  } else {
-    // Rules disabled: remove any stale rule left from a prior enabled run.
-    // Ignore ENOENT (force: true) — absence is the desired end state.
-    try {
-      await fs.rm(ruleTarget(claudeDir), { force: true });
-    } catch { /* absent = already in desired end state */ }
+    return { removedPreexisting: false, converged };
   }
 
-  return { removedPreexisting: false, converged };
+  // Compliance off, or rules off: no rule. Probe first so a disable convergence
+  // can report that it removed one; absence is already the desired end state.
+  const ruleExisted = await pathExists(ruleTarget(claudeDir));
+  if (ruleExisted) {
+    try {
+      await fs.rm(ruleTarget(claudeDir), { force: true });
+    } catch (err) {
+      trackingWarn(`compliance: failed to remove rule — ${String(err)}`);
+    }
+  }
+  return { removedPreexisting: !enabled && ruleExisted, converged };
 }
 
 // ── Manifest-slice wrapper ─────────────────────────────────────────────────

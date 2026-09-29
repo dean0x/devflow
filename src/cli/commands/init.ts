@@ -1743,14 +1743,14 @@ export const initCommand = new Command('init')
         manifest: { features: { compliance: { enabled: complianceEnabled, frameworks: complianceFrameworks }, rules: rulesEnabled } },
         warn: (msg) => p.log.warn(msg),
       });
-      // I41: emit legacy-upgrade notice when compliance is disabled AND pre-existing artifacts
-      // were found. After I09, the skill dir survives the orphan sweep (knownNames now unions
-      // FEATURE_OWNED_SKILLS), so convergeResult.removedPreexisting correctly fires for the
-      // skill path. hadComplianceRule covers the rule path (wiped by installViaFileCopy before
-      // converge probes on full installs).
+      // I41: emit legacy-upgrade notice when compliance is disabled AND a pre-existing rule
+      // was found. The skill is no signal — converge installs it on every machine
+      // (D-COMPLIANCE-INSTALL-ALWAYS) — so removedPreexisting reports the rule alone, on a
+      // partial install; hadComplianceRule covers full installs, where installViaFileCopy
+      // wipes the rules dir before converge probes it.
       if (!complianceEnabled && (convergeResult.removedPreexisting || hadComplianceRule)) {
         p.log.info(
-          'Compliance artifacts removed — if you previously had devflow-compliance installed, ' +
+          'Compliance rule removed — if you previously had devflow-compliance installed, ' +
           'run `devflow compliance --enable` to re-enable with your framework selection.',
         );
       }

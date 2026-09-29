@@ -24,8 +24,22 @@ import { promises as fs } from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { requireBuiltCli } from './helpers.js';
+import { ALWAYS_PRESENT_REFS, COMPLIANCE_FRAMEWORKS } from '../src/core/compliance.js';
 
 const CLI = requireBuiltCli();
+
+/**
+ * What every install carries, whatever the selection (D-COMPLIANCE-INSTALL-ALWAYS):
+ * SKILL.md and every reference. The machine switch owns the rule and the stamp.
+ */
+const EVERY_SKILL_FILE: readonly string[] = [
+  'SKILL.md',
+  ...ALWAYS_PRESENT_REFS.map(r => `references/${r}`),
+  ...COMPLIANCE_FRAMEWORKS.map(fw => `references/${fw.id}.md`),
+].sort();
+
+/** The neutral stamp a compliance-off machine's SKILL.md carries. */
+const NEUTRAL_STAMP = 'The machine declares no framework.';
 
 // ── Shared helper ─────────────────────────────────────────────────────────────
 
@@ -111,7 +125,7 @@ describe('S1: fresh init --recommended → disabled compliance manifest', () => 
 
   afterEach(async () => { await fs.rm(tmpHome, { recursive: true, force: true }); });
 
-  it('S1: manifest has compliance {enabled:false, frameworks:[]} and no artifacts', async () => {
+  it('S1: manifest has compliance {enabled:false, frameworks:[]}; skill neutral, no rule', async () => {
     const result = run('init', '--recommended');
     expect(result.status, `init failed:\n${result.stderr}`).toBe(0);
 
@@ -119,9 +133,12 @@ describe('S1: fresh init --recommended → disabled compliance manifest', () => 
     const features = (manifest as Record<string, unknown>).features as Record<string, unknown>;
     expect(features.compliance).toEqual({ enabled: false, frameworks: [] });
 
-    // No compliance artifacts installed (convergeComplianceArtifacts removes them when disabled)
+    // The skill and every reference are installed on a compliance-off machine too — a
+    // repository can turn the lens on by itself — with the neutral stamp; no rule.
     const COMPLIANCE_SKILL = ['devflow', 'compliance'].join(':');
-    await expect(fs.access(path.join(claudeDir, 'skills', COMPLIANCE_SKILL))).rejects.toThrow();
+    const skillDir = path.join(claudeDir, 'skills', COMPLIANCE_SKILL);
+    expect(await listDir(skillDir)).toEqual(EVERY_SKILL_FILE);
+    expect(await fs.readFile(path.join(skillDir, 'SKILL.md'), 'utf-8')).toContain(NEUTRAL_STAMP);
     await expect(fs.access(path.join(claudeDir, 'rules', 'devflow', 'compliance.md'))).rejects.toThrow();
   });
 });
@@ -153,13 +170,7 @@ describe('S2: compliance --set gdpr,soc2 → artifacts installed', () => {
     const COMPLIANCE_SKILL = ['devflow', 'compliance'].join(':');
     const skillDir = path.join(claudeDir, 'skills', COMPLIANCE_SKILL);
     const files = await listDir(skillDir);
-    expect(files).toEqual([
-      'SKILL.md',
-      'references/detection.md',
-      'references/gdpr.md',
-      'references/soc2.md',
-      'references/sources.md',
-    ]);
+    expect(files).toEqual(EVERY_SKILL_FILE);
 
     const ruleContent = await fs.readFile(
       path.join(claudeDir, 'rules', 'devflow', 'compliance.md'),
@@ -173,6 +184,7 @@ describe('S2: compliance --set gdpr,soc2 → artifacts installed', () => {
       'utf-8',
     );
     expect(skillContent).not.toContain('${DEVFLOW_COMPLIANCE_');
+    expect(skillContent).toContain('**Machine frameworks: GDPR, SOC 2.**');
     expect(skillContent).toContain('references/gdpr.md');
     expect(skillContent).toContain('references/soc2.md');
     // Rule: per-framework bullets composed; no unresolved tokens.
@@ -187,7 +199,7 @@ describe('S2: compliance --set gdpr,soc2 → artifacts installed', () => {
 });
 
 // ── S3 ────────────────────────────────────────────────────────────────────────
-describe('S3: from S2 state + --set hipaa → skill updated, rule stamped HIPAA only', () => {
+describe('S3: from S2 state + --set hipaa → skill re-stamped, rule stamped HIPAA only', () => {
   let tmpHome: string;
   let devflowDir: string;
   let claudeDir: string;
@@ -205,19 +217,14 @@ describe('S3: from S2 state + --set hipaa → skill updated, rule stamped HIPAA 
 
   afterEach(async () => { await fs.rm(tmpHome, { recursive: true, force: true }); });
 
-  it('S3: skill dir has exactly hipaa+always-present refs; rule stamped HIPAA only', async () => {
+  it('S3: skill re-stamped HIPAA with every reference kept; rule stamped HIPAA only', async () => {
     const result = run('compliance', '--set', 'hipaa');
     expect(result.status, `compliance --set hipaa failed:\n${result.stderr}`).toBe(0);
 
     const COMPLIANCE_SKILL = ['devflow', 'compliance'].join(':');
     const skillDir = path.join(claudeDir, 'skills', COMPLIANCE_SKILL);
     const files = await listDir(skillDir);
-    expect(files).toEqual([
-      'SKILL.md',
-      'references/detection.md',
-      'references/hipaa.md',
-      'references/sources.md',
-    ]);
+    expect(files).toEqual(EVERY_SKILL_FILE);
 
     const ruleContent = await fs.readFile(
       path.join(claudeDir, 'rules', 'devflow', 'compliance.md'),
@@ -227,7 +234,7 @@ describe('S3: from S2 state + --set hipaa → skill updated, rule stamped HIPAA 
     expect(ruleContent).not.toContain('GDPR');
     expect(ruleContent).not.toContain('SOC 2');
 
-    // Composed SKILL.md: only hipaa ref; gdpr/soc2 refs absent; no unresolved tokens.
+    // Composed SKILL.md: only the hipaa reference row; no unresolved tokens.
     const skillContent = await fs.readFile(
       path.join(skillDir, 'SKILL.md'),
       'utf-8',
@@ -247,7 +254,7 @@ describe('S3: from S2 state + --set hipaa → skill updated, rule stamped HIPAA 
 });
 
 // ── S4 ────────────────────────────────────────────────────────────────────────
-describe('S4: from S3 state + --disable → artifacts gone, frameworks remembered', () => {
+describe('S4: from S3 state + --disable → rule gone, skill neutral, frameworks remembered', () => {
   let tmpHome: string;
   let devflowDir: string;
   let claudeDir: string;
@@ -265,12 +272,16 @@ describe('S4: from S3 state + --disable → artifacts gone, frameworks remembere
 
   afterEach(async () => { await fs.rm(tmpHome, { recursive: true, force: true }); });
 
-  it('S4: --disable removes artifacts; manifest.frameworks still lists hipaa', async () => {
+  it('S4: --disable removes the rule and re-stamps the skill neutral; manifest.frameworks still lists hipaa', async () => {
     const result = run('compliance', '--disable');
     expect(result.status, `compliance --disable failed:\n${result.stderr}`).toBe(0);
 
     const COMPLIANCE_SKILL = ['devflow', 'compliance'].join(':');
-    await expect(fs.access(path.join(claudeDir, 'skills', COMPLIANCE_SKILL))).rejects.toThrow();
+    const skillDir = path.join(claudeDir, 'skills', COMPLIANCE_SKILL);
+    expect(await listDir(skillDir)).toEqual(EVERY_SKILL_FILE);
+    const skill = await fs.readFile(path.join(skillDir, 'SKILL.md'), 'utf-8');
+    expect(skill).toContain(NEUTRAL_STAMP);
+    expect(skill, 'the remembered selection never reaches an off machine\'s stamp').not.toContain('HIPAA.**');
     await expect(fs.access(path.join(claudeDir, 'rules', 'devflow', 'compliance.md'))).rejects.toThrow();
 
     const manifest = await readManifest(devflowDir);
@@ -306,12 +317,7 @@ describe('S5: from S4 state + --enable → hipaa restored exactly', () => {
     const COMPLIANCE_SKILL = ['devflow', 'compliance'].join(':');
     const skillDir = path.join(claudeDir, 'skills', COMPLIANCE_SKILL);
     const files = await listDir(skillDir);
-    expect(files).toEqual([
-      'SKILL.md',
-      'references/detection.md',
-      'references/hipaa.md',
-      'references/sources.md',
-    ]);
+    expect(files).toEqual(EVERY_SKILL_FILE);
 
     const ruleContent = await fs.readFile(
       path.join(claudeDir, 'rules', 'devflow', 'compliance.md'),
@@ -478,13 +484,7 @@ describe('S9: from S2 state + full init → artifacts survive sweep+converge', (
     const COMPLIANCE_SKILL = ['devflow', 'compliance'].join(':');
     const skillDir = path.join(claudeDir, 'skills', COMPLIANCE_SKILL);
     const files = await listDir(skillDir);
-    expect(files).toEqual([
-      'SKILL.md',
-      'references/detection.md',
-      'references/gdpr.md',
-      'references/soc2.md',
-      'references/sources.md',
-    ]);
+    expect(files).toEqual(EVERY_SKILL_FILE);
 
     const ruleContent = await fs.readFile(
       path.join(claudeDir, 'rules', 'devflow', 'compliance.md'),
@@ -521,13 +521,7 @@ describe('S10: from S2 state + init --plugin=devflow-code-review → compliance 
     const COMPLIANCE_SKILL = ['devflow', 'compliance'].join(':');
     const skillDir = path.join(claudeDir, 'skills', COMPLIANCE_SKILL);
     const files = await listDir(skillDir);
-    expect(files).toEqual([
-      'SKILL.md',
-      'references/detection.md',
-      'references/gdpr.md',
-      'references/soc2.md',
-      'references/sources.md',
-    ]);
+    expect(files).toEqual(EVERY_SKILL_FILE);
   });
 });
 
@@ -634,7 +628,7 @@ describe('S11: legacy manifest with devflow-compliance → pruned on init', () =
 });
 
 // ── S12 ───────────────────────────────────────────────────────────────────────
-describe('S12: from S2 state + init --reset → compliance off, artifacts gone', () => {
+describe('S12: from S2 state + init --reset → compliance off, rule gone, skill neutral', () => {
   let tmpHome: string;
   let devflowDir: string;
   let claudeDir: string;
@@ -652,7 +646,7 @@ describe('S12: from S2 state + init --reset → compliance off, artifacts gone',
 
   afterEach(async () => { await fs.rm(tmpHome, { recursive: true, force: true }); });
 
-  it('S12: init --reset resets compliance to disabled and removes artifacts', async () => {
+  it('S12: init --reset resets compliance to disabled, removes the rule and re-stamps the skill neutral', async () => {
     const result = run('init', '--reset');
     expect(result.status, `init --reset failed:\n${result.stderr}`).toBe(0);
 
@@ -661,7 +655,9 @@ describe('S12: from S2 state + init --reset → compliance off, artifacts gone',
     expect(features.compliance).toEqual({ enabled: false, frameworks: [] });
 
     const COMPLIANCE_SKILL = ['devflow', 'compliance'].join(':');
-    await expect(fs.access(path.join(claudeDir, 'skills', COMPLIANCE_SKILL))).rejects.toThrow();
+    const skillDir = path.join(claudeDir, 'skills', COMPLIANCE_SKILL);
+    expect(await listDir(skillDir)).toEqual(EVERY_SKILL_FILE);
+    expect(await fs.readFile(path.join(skillDir, 'SKILL.md'), 'utf-8')).toContain(NEUTRAL_STAMP);
     await expect(fs.access(path.join(claudeDir, 'rules', 'devflow', 'compliance.md'))).rejects.toThrow();
   });
 });
@@ -979,7 +975,11 @@ describe('S17: invalid framework IDs → non-zero exit, disk unchanged', () => {
 
   afterEach(async () => { await fs.rm(tmpHome, { recursive: true, force: true }); });
 
-  it('S17: --set gdrp,hippa exits non-zero and leaves no artifacts on disk', async () => {
+  it('S17: --set gdrp,hippa exits non-zero and leaves the disk unchanged', async () => {
+    const COMPLIANCE_SKILL = ['devflow', 'compliance'].join(':');
+    const skillMd = path.join(claudeDir, 'skills', COMPLIANCE_SKILL, 'SKILL.md');
+    const skillBefore = await fs.readFile(skillMd, 'utf-8');
+
     const result = run('compliance', '--set', 'gdrp,hippa');
     expect(result.status, 'invalid IDs must produce non-zero exit').not.toBe(0);
 
@@ -987,9 +987,9 @@ describe('S17: invalid framework IDs → non-zero exit, disk unchanged', () => {
     const output = result.stdout + result.stderr;
     expect(output).toMatch(/gdpr|hipaa/i);
 
-    // No artifacts on disk (command must fail before writing any files)
-    const COMPLIANCE_SKILL = ['devflow', 'compliance'].join(':');
-    await expect(fs.access(path.join(claudeDir, 'skills', COMPLIANCE_SKILL))).rejects.toThrow();
+    // Disk unchanged (command must fail before writing any files): the neutral skill
+    // the first init installed is byte-identical, and no rule appeared.
+    expect(await fs.readFile(skillMd, 'utf-8')).toBe(skillBefore);
     await expect(fs.access(path.join(claudeDir, 'rules', 'devflow', 'compliance.md'))).rejects.toThrow();
 
     // Manifest unchanged (enabled:false, frameworks:[])
@@ -1225,8 +1225,8 @@ describe('S22: --status flags composition-skipped skill shadow', () => {
 describe('S20: compliance skill lifecycle is managed by converge, not the orphan sweep', () => {
   // After I09: the installer's knownNames unions FEATURE_OWNED_SKILLS, so devflow:compliance
   // is never swept as an orphan. Its lifecycle is owned exclusively by convergeComplianceArtifacts:
-  // converge installs when enabled, converge removes when disabled. The sweep report must
-  // never mention compliance in either case.
+  // converge installs it in both states (D-COMPLIANCE-INSTALL-ALWAYS) and removes only the rule
+  // when disabled. The sweep report must never mention compliance in either case.
   let tmpHome: string;
   let devflowDir: string;
   let claudeDir: string;
@@ -1261,19 +1261,106 @@ describe('S20: compliance skill lifecycle is managed by converge, not the orphan
     ).resolves.not.toThrow();
   });
 
-  it('S20b: re-init with --no-compliance removes compliance skill (via converge, not sweep)', async () => {
+  it('S20b: re-init with --no-compliance keeps the skill neutral and removes the rule (via converge, not sweep)', async () => {
     // After I09: compliance skill is NOT swept by the orphan sweep (FEATURE_OWNED_SKILLS guards it).
-    // Removal is owned by converge's disable path. The sweep report must NOT mention compliance.
+    // The disable path is converge's. The sweep report must NOT mention compliance.
     const result = run('init', '--no-compliance');
     expect(result.status, `init --no-compliance failed:\n${result.stderr}`).toBe(0);
 
     const combined = result.stdout + result.stderr;
     // Sweep report must not surface compliance — it is no longer a sweep target (I09).
     expect(combined).not.toMatch(/no longer in the registry:[^\n]*skill compliance/);
-    // Compliance skill must be gone (removed by converge disable path, not by sweep).
-    let exists = false;
-    try { await fs.access(path.join(claudeDir, 'skills', 'devflow:compliance')); exists = true; } catch {}
-    expect(exists, 'compliance skill must be removed after --no-compliance').toBe(false);
+    // The skill stays, re-stamped neutral; the rule is gone (converge disable path, not sweep).
+    const skillMd = await fs.readFile(path.join(claudeDir, 'skills', 'devflow:compliance', 'SKILL.md'), 'utf-8');
+    expect(skillMd).toContain(NEUTRAL_STAMP);
+    await expect(fs.access(path.join(claudeDir, 'rules', 'devflow', 'compliance.md'))).rejects.toThrow();
+  });
+});
+
+// ── S23 (TP-43, AC-37) ─────────────────────────────────────────────────────────
+//
+// A repository declares hipaa on a machine whose own compliance is off. The lens
+// comes from the settings line (COMPLIANCE=hipaa), the installed skill carries
+// references/hipaa.md for the reviewer to load, and the MACHINE rule — the one
+// artifact Claude Code loads into every prompt — is untouched: absent on an off
+// machine, byte-identical on an on machine, however often init runs from the repo.
+describe('S23 (TP-43, AC-37): a hipaa repository never changes the machine compliance rule', () => {
+  let tmpHome: string;
+  let claudeDir: string;
+  let repo: string;
+  let run: ReturnType<typeof makeRunner>;
+  const RULE = () => path.join(claudeDir, 'rules', 'devflow', 'compliance.md');
+
+  /** `init` run from inside the repository — the strongest place for a repo layer to leak. */
+  function initFromRepo(...args: string[]): RunResult {
+    const result = spawnSync('node', [CLI, 'init', ...args], {
+      encoding: 'utf-8',
+      timeout: 60000,
+      cwd: repo,
+      env: { ...process.env, HOME: tmpHome, FORCE_COLOR: '0', NO_COLOR: '1', CI: '1' },
+    });
+    return { status: result.status, stdout: result.stdout ?? '', stderr: result.stderr ?? '' };
+  }
+
+  /** The installed settings resolver, run as a prompt runs it. */
+  function settingsLine(): string {
+    const result = spawnSync('node', [path.join(tmpHome, '.devflow', 'scripts', 'resolve-settings.cjs'), repo], {
+      encoding: 'utf-8',
+      timeout: 30000,
+      cwd: repo,
+      env: { ...process.env, HOME: tmpHome },
+    });
+    expect(result.status, `resolve-settings failed:\n${result.stderr}`).toBe(0);
+    return result.stdout.trim();
+  }
+
+  beforeEach(async () => {
+    tmpHome = await fs.mkdtemp(path.join(os.tmpdir(), 'df-e2e-s23-'));
+    claudeDir = path.join(tmpHome, '.claude');
+    await fs.mkdir(claudeDir, { recursive: true });
+    run = makeRunner(tmpHome);
+    repo = path.join(tmpHome, 'repo');
+    await fs.mkdir(path.join(repo, '.devflow'), { recursive: true });
+    expect(spawnSync('git', ['init', '-q'], { cwd: repo }).status).toBe(0);
+    await fs.writeFile(
+      path.join(repo, '.devflow', 'project.json'),
+      JSON.stringify({ version: 1, compliance: ['hipaa'] }),
+      'utf-8',
+    );
+  });
+
+  afterEach(async () => { await fs.rm(tmpHome, { recursive: true, force: true }); });
+
+  it('S23a: compliance-off machine — lens is hipaa, hipaa.md is installed, and no rule ever appears', async () => {
+    expect(run('init', '--recommended').status).toBe(0);
+    await expect(fs.access(RULE())).rejects.toThrow();
+
+    const line = settingsLine();
+    expect(line).toMatch(/ COMPLIANCE=hipaa /);
+
+    const skillDir = path.join(claudeDir, 'skills', 'devflow:compliance');
+    expect(await listDir(skillDir)).toContain('references/hipaa.md');
+    const skill = await fs.readFile(path.join(skillDir, 'SKILL.md'), 'utf-8');
+    expect(skill).toContain(NEUTRAL_STAMP);
+    expect(skill).toContain('Load `references/{id}.md` for each given id and no other');
+
+    const reinit = initFromRepo('--recommended');
+    expect(reinit.status, `init from the repository failed:\n${reinit.stderr}`).toBe(0);
+    await expect(fs.access(RULE()), 'the repository must never install the machine rule').rejects.toThrow();
+  });
+
+  it('S23b: compliance-on machine (gdpr) — the lens folds hipaa in, and the rule bytes are unchanged', async () => {
+    expect(run('init', '--recommended').status).toBe(0);
+    expect(run('compliance', '--set', 'gdpr').status).toBe(0);
+    const before = await fs.readFile(RULE());
+
+    expect(settingsLine()).toMatch(/ COMPLIANCE=gdpr,hipaa /);
+
+    const reinit = initFromRepo('--recommended');
+    expect(reinit.status, `init from the repository failed:\n${reinit.stderr}`).toBe(0);
+    const after = await fs.readFile(RULE());
+    expect(after.equals(before), 'the machine rule must stay byte-identical').toBe(true);
+    expect(after.toString('utf-8')).not.toContain('HIPAA');
   });
 });
 

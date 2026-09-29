@@ -228,47 +228,46 @@ function collectMissingFragmentWarnings(
 }
 
 /**
+ * How a consumer picks framework references at run time (D-COMPLIANCE-REPO-LENS).
+ *
+ * Every framework reference is installed on every machine
+ * (D-COMPLIANCE-INSTALL-ALWAYS), so file presence no longer says which
+ * frameworks apply. The caller hands the agent `COMPLIANCE_FRAMEWORKS` — the
+ * `COMPLIANCE` field of the settings line, which folds this machine's selection
+ * with the repository's `.devflow/project.json` — and those ids alone are in force.
+ */
+const RUNTIME_SELECTION_LINES: readonly string[] = [
+  'Every `references/{id}.md` is installed, so presence decides nothing: the ids you were given',
+  "(`COMPLIANCE_FRAMEWORKS`, this machine's plus the repository's) are the frameworks in force.",
+  'Load `references/{id}.md` for each given id and no other; `none` means generic controls only.',
+  'Apply generic controls always.',
+  '',
+  'NEVER fabricate framework-specific guidance for a framework you were not given.',
+];
+
+/**
  * Build the ${DEVFLOW_COMPLIANCE_ACTIVE} substitution — the body of the
  * Active Frameworks section.
  *
- * Active: lists frameworks + instructs loading reference files.
- * Zero: informs that generic controls only apply.
- *
- * File presence corroborates: note preserved so the agent keeps checking files.
+ * The stamp names the machine's own selection; zero frameworks is the neutral
+ * stamp a compliance-off machine's skill carries. Either way the section ends in
+ * RUNTIME_SELECTION_LINES, because the frameworks a run applies are the ids its
+ * caller passes, not the stamp.
  *
  * C5: a framework with no fragment still appears here — only its mapping row,
  * checklist item and reference row are omitted.
  *
- * Frameworks the registry cannot label are dropped entirely: neither the label nor the
- * `references/{id}.md` path is emitted (see resolveRegistryFrameworks).
+ * Frameworks the registry cannot label are dropped entirely: no label is emitted
+ * (see resolveRegistryFrameworks).
  */
 function buildActiveSection(
   activeFrameworks: readonly string[],
 ): string {
   const resolved = resolveRegistryFrameworks(activeFrameworks);
-  if (resolved.length === 0) {
-    return [
-      'No framework-specific reference files are active. Apply generic controls only.',
-      '',
-      'NEVER fabricate framework-specific guidance for absent `references/{id}.md` files.',
-      'If no reference file is present for a framework, apply generic controls only.',
-    ].join('\n');
-  }
-
-  const labels = resolved.map(fw => fw.label);
-  const refList = resolved.map(fw => `\`references/${fw.id}.md\``).join(' and ');
-
-  return [
-    `**Active: ${labels.join(', ')}.**`,
-    '',
-    `Load ${refList} for framework-specific controls. Apply generic controls always.`,
-    '',
-    'File presence in the installed skill directory is the authoritative signal: if a',
-    '`references/{id}.md` file is absent, treat that framework as inactive regardless of',
-    'this list.',
-    '',
-    'NEVER fabricate framework-specific guidance for absent `references/{id}.md` files.',
-  ].join('\n');
+  const stamp = resolved.length === 0
+    ? 'The machine declares no framework.'
+    : `**Machine frameworks: ${resolved.map(fw => fw.label).join(', ')}.**`;
+  return [stamp, '', ...RUNTIME_SELECTION_LINES].join('\n');
 }
 
 /**

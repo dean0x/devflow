@@ -7,7 +7,7 @@
  * ask, #363 PR4, which keys on the policy as /plan's issue step does): each one now
  * gates on a mechanism input (`ISSUE_REQUIRED`, `APPLY_CONVENTIONS`,
  * `REQUIRE_NON_AUTHOR_APPROVAL`), on `EVIDENCE_POLICY` itself at a caller, or
- * stays on `COMPLIANCE_SKILL_INSTALLED` because it is the review lens rather than
+ * stays on `COMPLIANCE_ACTIVE` because it is the review lens rather than
  * evidence. `DISPOSITION` below is that table as data.
  *
  *   Direction 1  every row's sites are where the table says, and each located
@@ -50,7 +50,7 @@ const GATE_NAMES = [
   'ISSUE_REQUIRED',
   'APPLY_CONVENTIONS',
   'REQUIRE_NON_AUTHOR_APPROVAL',
-  'COMPLIANCE_SKILL_INSTALLED',
+  'COMPLIANCE_ACTIVE',
 ] as const
 type GateName = (typeof GATE_NAMES)[number]
 
@@ -189,16 +189,16 @@ const DISPOSITION: readonly DispositionRow[] = [
   {
     row: 8,
     subject: 'review lens — compliance review focus and compliance Design agent',
-    inputs: ['COMPLIANCE_SKILL_INSTALLED'],
+    inputs: ['COMPLIANCE_ACTIVE'],
     on: 'add the compliance lens',
     off: 'no compliance lens',
     sites: [
-      { file: 'commands/code-review.md', anchor: '| COMPLIANCE_SKILL_INSTALLED AND diff touches', phrase: 'COMPLIANCE_SKILL_INSTALLED AND' },
-      { file: 'commands/code-review.md', anchor: 'If `COMPLIANCE_SKILL_INSTALLED` AND the diff', phrase: 'If `COMPLIANCE_SKILL_INSTALLED` AND' },
-      { file: 'commands/plan.md', anchor: '**Single-issue**: Spawn 4 Design agents', phrase: '5 when COMPLIANCE_SKILL_INSTALLED' },
-      { file: 'commands/plan.md', anchor: '| compliance | Regulatory gaps', phrase: 'only when COMPLIANCE_SKILL_INSTALLED' },
-      { file: 'commands/plan.md', anchor: '**Multi-issue**: Spawn 6 Design agents', phrase: '7 when COMPLIANCE_SKILL_INSTALLED' },
-      { file: 'commands/plan.md', anchor: 'Design agent: compliance (', phrase: 'only when COMPLIANCE_SKILL_INSTALLED' },
+      { file: 'commands/code-review.md', anchor: '| COMPLIANCE_ACTIVE AND diff touches', phrase: 'COMPLIANCE_ACTIVE AND' },
+      { file: 'commands/code-review.md', anchor: 'If `COMPLIANCE_ACTIVE` AND the diff', phrase: 'If `COMPLIANCE_ACTIVE` AND' },
+      { file: 'commands/plan.md', anchor: '**Single-issue**: Spawn 4 Design agents', phrase: '5 when COMPLIANCE_ACTIVE' },
+      { file: 'commands/plan.md', anchor: '| compliance | Regulatory gaps', phrase: 'only when COMPLIANCE_ACTIVE' },
+      { file: 'commands/plan.md', anchor: '**Multi-issue**: Spawn 6 Design agents', phrase: '7 when COMPLIANCE_ACTIVE' },
+      { file: 'commands/plan.md', anchor: 'Design agent: compliance (', phrase: 'only when COMPLIANCE_ACTIVE' },
     ],
   },
   {
@@ -381,8 +381,8 @@ function defineLines(sourcePath: string, name: string): string[] {
 
 /**
  * NOT A GATE: the resolution text of the two command partials. They SET the
- * names ("Accept the output only when it is exactly two lines …", "Set
- * `COMPLIANCE_SKILL_INSTALLED = true` if the file exists"), they gate nothing,
+ * names ("Accept the output only when it is exactly two lines …", "`COMPLIANCE_ACTIVE`
+ * is `true` unless `COMPLIANCE_FRAMEWORKS` is `off`"), they gate nothing,
  * and they are byte-pinned by their own guards. Exempted by exact line equality
  * with the define bodies, so no other line can hide behind the exemption.
  */

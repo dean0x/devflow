@@ -1,11 +1,18 @@
 @import "./_settings.mds" as settings
 
+@define compliance_frameworks():
+`COMPLIANCE_FRAMEWORKS` is the settings line's `COMPLIANCE` with `generic` written `none`: `off`, `none`, or the framework ids the machine and this repository declare.
+@end
+
 @define compliance_gate():
-**Resolve `COMPLIANCE_SKILL_INSTALLED` once per run:** Check whether `~/.claude/skills/devflow:compliance/SKILL.md` exists (one file-existence check, read-only, silent). Set `COMPLIANCE_SKILL_INSTALLED = true` if the file exists, `false` otherwise.
+**Resolve the compliance lens** for each worktree root, from its settings line (every framework reference is installed on every machine, so no file check decides it):
 
 {{settings.settings_resolve()}}
 
-Set `COMPLIANCE` from the settings line: `off`, `generic`, or the framework ids the machine and this repository declare.
+**Set the compliance lens** from that line: {{compliance_frameworks()}}
+
+`COMPLIANCE_ACTIVE` is `true` unless `COMPLIANCE_FRAMEWORKS` is `off`.
 @end
 
+@export compliance_frameworks
 @export compliance_gate
