@@ -472,9 +472,9 @@ describe('cross-provider define-set parity, both directions (AC-3.8, §8.11)', (
     // One loop over ORDERED pairs replaces the two hand-written directions: with
     // three providers there are six directions, and writing them out would be six
     // places a message could drift. A define missing from one provider is an op
-    // whose reference for that provider is a heading with no mechanics — which
-    // reads downstream as `tracker mechanics unavailable` shipped as the normal
-    // path — and a define only one provider declares is either a section marker
+    // whose reference for that provider is a heading with no mechanics — the
+    // agent loads that operation and finds no instructions to follow — and a
+    // define only one provider declares is either a section marker
     // nobody emits or an operation one provider invented.
     const asymmetries: string[] = [];
     for (const [from, to] of PAIRS) {
