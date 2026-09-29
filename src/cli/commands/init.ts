@@ -484,9 +484,9 @@ interface InitOptions {
   compliance?: string | false;
   /**
    * Issue tracker provider ID (github | jira | linear), parsed by parseTrackerId.
-   * string    → --tracker <id> (select this provider, suppress the wizard prompt)
+   * string    → --tracker <id> (set the machine's default provider, suppress the wizard prompt)
    * undefined → not passed; seed value used
-   * There is no --no-tracker: --tracker github is the off switch (decision D-E).
+   * There is no --no-tracker: --tracker github is the default (decision D-E).
    */
   tracker?: string;
   security?: SecurityMode;
@@ -635,7 +635,7 @@ export const initCommand = new Command('init')
   .option('--no-proxy', 'Disable external model routing')
   .option('--compliance <list>', 'Enable compliance with comma-separated framework IDs (e.g., gdpr,hipaa)')
   .option('--no-compliance', 'Disable compliance (artifacts removed; frameworks remembered for re-enable)')
-  .option('--tracker <id>', 'Issue tracker provider: github, jira, or linear')
+  .option('--tracker <id>', 'The machine\'s default issue tracker provider: github, jira, or linear')
   .option('--security <mode>', 'Security deny list location: user, managed, or none', /^(user|managed|none)$/i)
   .option('--hud-only', 'Install only the HUD (no plugins, hooks, or extras)')
   .option('--recommended', 'Apply recommended defaults after plugin selection (skip advanced prompts)')

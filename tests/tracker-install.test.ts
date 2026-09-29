@@ -226,7 +226,7 @@ describe('runTrackerSet: the convergence order is the invariant', () => {
     const { calls, io } = makeRecorder();
     const outcome = await run(io, 'github', 'jira');
 
-    expect(outcome.exitCode).toBe(0);
+    expect(outcome.provider).toBe('jira');
     expect(calls).toEqual(['manifest:jira', 'rearm', 'sentinel:jira']);
     expect(outcome.messages.at(-1)).toEqual({ level: 'success', text: 'Tracker: jira' });
   });
@@ -245,7 +245,7 @@ describe('runTrackerSet: the convergence order is the invariant', () => {
     const { calls, io } = makeRecorder();
     const outcome = await run(io, 'jira', 'jira');
 
-    expect(outcome.exitCode).toBe(0);
+    expect(outcome.provider).toBe('jira');
     expect(calls, 'a repeat self-heals a missing sentinel rather than early-returning').toContain('sentinel:jira');
     expect(outcome.messages.at(-1)).toEqual({ level: 'info', text: 'Tracker: jira (unchanged)' });
   });
@@ -257,7 +257,7 @@ describe('runTrackerSet: the convergence order is the invariant', () => {
     });
     const outcome = await run(io, 'github', 'jira');
 
-    expect(outcome.exitCode).toBe(0);
+    expect(outcome.provider).toBe('jira');
     expect(calls).toHaveLength(3);
     const warned = outcome.messages.filter(m => m.level === 'warn').map(m => m.text);
     expect(warned).toEqual(['could not reset the attempt counter', 'could not update the sentinel']);
@@ -304,7 +304,7 @@ describe('runTrackerSet through buildTrackerSetIO', () => {
 
     const outcome = await set('github', 'jira');
 
-    expect(outcome.exitCode).toBe(0);
+    expect(outcome.provider).toBe('jira');
     expect((await readManifest(devflowDir))?.features.tracker.provider).toBe('jira');
     await expect(fs.readFile(trackerEnabledSentinelPath(devflowDir), 'utf-8')).resolves.toBe('jira\n');
     for (const provider of TRACKER_PROVIDER_IDS) {

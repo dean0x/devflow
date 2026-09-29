@@ -238,7 +238,6 @@ export function buildTrackerSetIO(): TrackerSetIO {
 }
 
 export interface TrackerSetOutcome {
-  exitCode: 0 | 1;
   /** The provider in force when this returned. */
   provider: TrackerProvider;
   messages: TrackerCliActionMessage[];
@@ -288,7 +287,7 @@ export async function runTrackerSet(opts: {
     text: unchanged ? `Tracker: ${requested} (unchanged)` : `Tracker: ${requested}`,
   });
 
-  return { exitCode: 0, provider: requested, messages };
+  return { provider: requested, messages };
 }
 
 interface TrackerOptions {
@@ -302,7 +301,7 @@ export const trackerCommand = new Command('tracker')
     '--status',
     'Show the provider in effect and its learned conventions file, and re-arm background inference',
   )
-  .option('--set <id>', 'Set the issue tracker provider: github, jira, or linear')
+  .option('--set <id>', 'Set the machine\'s default issue tracker provider: github, jira, or linear')
   .action(async (options: TrackerOptions) => {
     const devflowDir = getDevFlowDirectory();
 
@@ -312,11 +311,11 @@ export const trackerCommand = new Command('tracker')
       const validIds = TRACKER_PROVIDERS.map(t => `${t.id} — ${t.hint}`).join('\n  ');
       p.note(
         `${color.cyan('devflow tracker --status')}      Show the provider and learned conventions\n` +
-        `${color.cyan('devflow tracker --set <id>')}    Select the issue tracker provider\n\n` +
+        `${color.cyan('devflow tracker --set <id>')}    Set the machine's default provider\n\n` +
         `Valid provider IDs:\n  ${validIds}`,
         'Usage',
       );
-      p.outro(color.dim('github is the default — devflow tracker --set github turns the rest off'));
+      p.outro(color.dim('github is the default — devflow tracker --set github returns to it'));
       return;
     }
 
@@ -393,8 +392,6 @@ export const trackerCommand = new Command('tracker')
         default: p.log.info(msg.text); break;
       }
     }
-
-    if (outcome.exitCode !== 0) process.exit(outcome.exitCode);
 
     if (outcome.provider !== DEFAULT_TRACKER_PROVIDER) {
       p.log.info(color.dim(
