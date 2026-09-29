@@ -17,10 +17,14 @@
 // D-SETTINGS-LOCAL-ONLY: exactly ONE subprocess — `git rev-parse
 // --show-toplevel` — and never gh, never the network, never a git command that
 // refreshes the index. The team's evidence FLOOR is the default branch's and is
-// resolve-evidence-policy.cjs's job (it runs over the network, from commands);
-// what this script resolves only ever adds scrutiny or narrows a switch, so the
-// worktree's own copy is the right one to read and a branch that edits it can
-// only change its own lens. It WRITES NOTHING (applies ADR-024).
+// resolve-evidence-policy.cjs's job (it runs over the network, from commands).
+// This script reads the WORKTREE's copy, so a branch that edits project.json
+// changes what it resolves for that branch: the compliance lens and the feature
+// switches can only gain scrutiny or narrow, but the tracker (provider, site,
+// key) and the team's review publication are taken as the branch states them —
+// a branch's `reviewPublication: "full"` is the default publication for a run in
+// that worktree (D-PUBLICATION-CEILING), bounded only by a personal value. It
+// WRITES NOTHING (applies ADR-024).
 //
 // stdout is exactly one line plus "\n", or empty (D-SETTINGS-LINE):
 //   TRACKER=<github|jira|linear> TRACKER_SOURCE=<project|personal|machine|default>
