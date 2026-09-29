@@ -271,12 +271,15 @@ export function mergeDenyList(
  * Load-time assertion below verifies this is a superset of the current template.
  */
 // D-SECURITY-01: frozen at module load — any future template entry must appear here too.
-// D-SECURITY-02 (#399): the eleven piped rules (`Bash(curl * | bash*)` and kin) are
+// D-SECURITY-02 (#399): the nine v1 piped rules (`Bash(curl * | bash*)` and kin) are
 // RETIRED — kept here, dropped from the template. Claude Code splits a Bash command at
 // `|` (and `&&`, `||`, `;`, `|&`, `&`, newlines) and matches every rule against each
 // subcommand alone, so a rule holding ` | ` can never match anything. The exact
 // shell-on-stdin denies in the v2 batch (`Bash(bash)`, `Bash(sh -s *)`, ...) match the
 // shell subcommand of such a pipeline instead.
+// Only entries a release actually shipped belong here: removal and install convergence
+// strip every entry this set names that the template does not, so a rule Devflow never
+// shipped would be taken from a user who wrote it (ADR-024, prove-you-wrote-it).
 export const DEVFLOW_HISTORICAL_DENY: ReadonlySet<string> = Object.freeze(new Set<string>([
   // v1 batch — 154 entries shipped in src/targets/claude-code/templates/managed-settings.json
   'Bash(rm -rf /*)',
@@ -435,9 +438,6 @@ export const DEVFLOW_HISTORICAL_DENY: ReadonlySet<string> = Object.freeze(new Se
   'Read(/etc/passwd)',
   // v2 batch (#399) — 24 template entries: a shell reading its script from stdin,
   // OrbStack VM control, docker pull/delete/prune and whole-disk or privileged runs.
-  // The two zsh piped rules below are retired with the v1 piped rules (D-SECURITY-02).
-  'Bash(curl * | zsh*)',
-  'Bash(wget * | zsh*)',
   'Bash(bash)',
   'Bash(sh)',
   'Bash(zsh)',
@@ -470,6 +470,12 @@ export const DEVFLOW_HISTORICAL_DENY: ReadonlySet<string> = Object.freeze(new Se
  *
  * An empty template (loadTemplateDenyEntries' failure value) retires nothing — an
  * unreadable template must never read as "Devflow dropped every entry it ever shipped".
+ *
+ * Accepted trade-off (ADR-024): a deny entry is a bare string, so a user who typed a
+ * retired entry themselves is indistinguishable from Devflow's copy and loses it on the
+ * next install, exactly as `security --disable` and uninstall already strip every
+ * historical entry. Retire an entry only when losing a user's identical copy is
+ * harmless; the #399 piped rules qualify because none could ever match (D-SECURITY-02).
  */
 export function retiredDenyEntries(templateEntries: readonly string[]): ReadonlySet<string> {
   if (templateEntries.length === 0) return new Set();
