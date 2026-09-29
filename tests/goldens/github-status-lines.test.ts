@@ -139,7 +139,7 @@ export const GIT_MD_LINES = 824
 // to make a red test green on its own.
 export const SKILL_GIT_CHARS = 6_581
 export const SKILL_GIT_LINES = 213
-export const SKILL_WORKTREE_CHARS = 2_942
+export const SKILL_WORKTREE_CHARS = 2_990
 export const SKILL_WORKTREE_LINES = 92
 /**
  * The preloaded set's total size across the three files above — pinned literals,
@@ -153,7 +153,7 @@ export const SKILL_WORKTREE_LINES = 92
  * golden-regeneration commit that moves the parts, never on their own to clear a
  * red assertion.
  */
-export const TOTAL_CHARS = 53_670
+export const TOTAL_CHARS = 53_718
 export const TOTAL_LINES = 1_129
 
 // Fixture invariants — these ARE bytes (Buffer.byteLength), not JS .length

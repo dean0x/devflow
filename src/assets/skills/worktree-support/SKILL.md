@@ -49,7 +49,7 @@ Extract: `worktree {path}`, `HEAD {sha}`, `branch refs/heads/{name}`
 
 Exclude:
 - **Bare worktrees** (no branch)
-- **Detached HEAD** (no named branch)
+- **Detached HEAD** (no named branch; roots and detached HEAD: `references/roots.md`)
 - **Protected branches**: `main`, `master`, `develop`, `integration`, `trunk`, `release/*`, `staging`, `production`
 - **Mid-rebase or mid-merge**: check `git -C {path} status` for "rebase in progress" or "merging"
 

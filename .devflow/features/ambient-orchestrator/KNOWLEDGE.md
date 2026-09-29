@@ -5,7 +5,7 @@ description: "Use when modifying the ambient mode hooks (preamble, session-start
 category: architecture
 directories: [src/assets/scripts/hooks, src/cli/commands/ambient.ts, src/core/plugins.ts]
 created: 2026-07-04
-updated: 2026-09-26
+updated: 2026-09-29
 ---
 
 # Ambient Orchestrator Mode
@@ -42,6 +42,8 @@ A static markdown file at `src/assets/scripts/hooks/assets/orchestrator-charter.
 ### git-marker (sourced helper)
 
 `src/assets/scripts/hooks/git-marker` exports `df_has_git_marker <dir>`. Pure bash — no subprocess, no `git` binary invocation — making it safe on the UserPromptSubmit hot path. Bounded 64-level upward walk using `-e $dir/.git` (works for both `.git` directories and `.git` files from worktrees/submodules).
+
+It also exports `df_is_project_root <root>` (D-HOOKS-GIT-ONLY): the marker walk AND "the root's physical path is not HOME's physical path". The physical paths come from `cd -P` + `$PWD` (builtins; the caller's directory is restored), because git reports toplevels with symlinks resolved while `$HOME` keeps its given spelling (macOS `/var` → `/private/var`, a symlinked home). Zero forks, like the walk. `session-start-context` (carve-out + Sections 1–2) and `ensure-devflow-init` (every capture/memory hook) gate on it, so no hook scaffolds `.devflow/` or a `.gitignore` outside a git project or in a HOME-rooted repo. The ambient hooks keep the plain marker gate.
 
 ### TypeScript management layer (src/cli/commands/ambient.ts)
 
@@ -161,7 +163,7 @@ This is intentional. SessionStart provably fires (via `SessionStart:clear`) in p
 - `src/assets/scripts/hooks/preamble` — UserPromptSubmit hook: dispatch logic, plan-handoff fast-path, orchestrator reminder
 - `src/assets/scripts/hooks/session-start-orchestrator` — SessionStart hook: charter file read, size guard, hook-log-init injection log, additionalContext output
 - `src/assets/scripts/hooks/assets/orchestrator-charter.md` — Static charter content; the plan-handoff fallback bullet, kind-of-work routing table (no model pinning), self-contained-delegation operating rule, and feature-knowledge operating rule live here
-- `src/assets/scripts/hooks/git-marker` — Sourced pure-bash helper: `df_has_git_marker <dir>` bounded upward walk; direct behavioral tests + no-subprocess source scan in test suite
+- `src/assets/scripts/hooks/git-marker` — Sourced pure-bash helper: `df_has_git_marker <dir>` bounded upward walk, plus `df_is_project_root <root>` (marker + physical-path HOME check, zero forks); direct behavioral tests, a no-subprocess source scan, and a PATH-shim fork counter (tests/shell-hooks-tracker.test.ts, TP-22)
 - `src/cli/commands/ambient.ts` — TypeScript management: `ensureHook`, `addAmbientHook`, `removeAmbientHook`, `hasAmbientHook`, `ambientCommand` (parses settings.json once with try/catch)
 - `docs/commands.md` — "Orchestrator charter" reference line: documents the kind-of-work routing and no-model-pinning behavior; keep in sync with orchestrator-charter.md
 - `tests/fixtures/ambient-templates.ts` — Shared constants: `HANDOFF_TEMPLATE` and `REMINDER_TEMPLATE`; imported by shell-hooks.test.ts and integration tests to keep both test layers byte-synchronized
