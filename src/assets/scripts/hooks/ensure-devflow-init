@@ -2,6 +2,7 @@
 # Ensures .devflow/ and all subdirectories exist and the project root .gitignore
 # ignores .devflow/. Called from capture-prompt, capture-turn, capture-question,
 # memory-worker, and pre-compact-memory. Idempotent.
+# Returns non-zero, having written nothing, outside a git project or at HOME.
 # Usage: source ensure-devflow-init "$CWD"
 
 [ -z "$1" ] && return 1
@@ -13,6 +14,18 @@ _EDI_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$_EDI_DIR/resolve-project-root" 2>/dev/null || true
 _EDI_ROOT="$(df_resolve_root "$1" 2>/dev/null || true)"
 [ -n "$_EDI_ROOT" ] || _EDI_ROOT="$1"
+
+# D-HOOKS-GIT-ONLY (git-marker): scaffold nothing outside a git project, and
+# nothing at a repository rooted at HOME. This is the one gate every capture and
+# memory caller (capture-prompt, capture-turn, capture-question, memory-worker,
+# pre-compact-memory) passes through before it writes, and each of them treats a
+# non-zero return as "stop" (`|| exit 0`), so memory and learning stop together
+# in a non-git directory. ensure-root-gitignore itself stays ungated: it is a
+# pure writer its parity suite runs in plain directories (PF-059), and both of
+# its callers now decide before reaching it. A helper that failed to source is a
+# command not found — the refusing branch, so the failure mode writes nothing.
+source "$_EDI_DIR/git-marker" 2>/dev/null || true
+df_is_project_root "$_EDI_ROOT" 2>/dev/null || return 1
 
 _DEVFLOW_DIR="$_EDI_ROOT/.devflow"
 

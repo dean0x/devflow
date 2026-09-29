@@ -468,6 +468,345 @@ describe('hooks anchor .devflow/ to the project root (no stray nested .devflow/)
   });
 });
 
+// =============================================================================
+// #390 — git-only scaffolding, the worktree ledger at main, detached HEAD
+// =============================================================================
+
+/** A repository with one commit, so worktrees and detached checkouts are possible. */
+function initCommittedRepo(dir: string): void {
+  fs.mkdirSync(dir, { recursive: true });
+  execSync('git init -q', { cwd: dir, stdio: 'pipe' });
+  execSync('git -c user.email=t@t -c user.name=t commit -q --allow-empty -m init', { cwd: dir, stdio: 'pipe' });
+}
+
+/**
+ * Named collector: every path under `root`, relative and sorted, with `.git`
+ * internals and any `exclude` prefix dropped. The listing IS the assertion for
+ * "wrote nothing", so it walks the whole tree rather than probing known names.
+ */
+function collectTree(root: string, exclude: readonly string[] = []): string[] {
+  const out: string[] = [];
+  const walk = (dir: string, rel: string): void => {
+    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+      const relPath = rel ? `${rel}/${entry.name}` : entry.name;
+      if (relPath === '.git' || relPath.startsWith('.git/')) continue;
+      if (exclude.some(p => relPath === p || relPath.startsWith(`${p}/`))) continue;
+      out.push(entry.isDirectory() ? `${relPath}/` : relPath);
+      if (entry.isDirectory() && !entry.isSymbolicLink()) walk(path.join(dir, entry.name), relPath);
+    }
+  };
+  walk(root, '');
+  return out.sort();
+}
+
+describe('D-HOOKS-GIT-ONLY: no project scaffolding outside a git project or at HOME (TP-16, TP-50)', () => {
+  /** SessionStart and UserPromptSubmit, every hook installed on either event. */
+  const HOOKS = [
+    'session-start-context',
+    'session-start-memory',
+    'session-start-orchestrator',
+    'preamble',
+    'capture-prompt',
+  ] as const;
+
+  let base: string;
+  let homeDir: string;
+
+  beforeEach(() => {
+    base = fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-gitonly-'));
+    homeDir = path.join(base, 'home');
+    fs.mkdirSync(path.join(homeDir, '.devflow', 'logs'), { recursive: true });
+  });
+
+  afterEach(() => {
+    fs.rmSync(base, { recursive: true, force: true });
+  });
+
+  function runSessionAndPrompt(cwd: string, home: string): void {
+    for (const hook of HOOKS) {
+      const { exitCode } = runHook(
+        path.join(HOOKS_DIR, hook),
+        { cwd, prompt: 'we chose X over Y', source: 'startup', session_id: 'gitonly' },
+        home,
+      );
+      expect(exitCode, `${hook} exit status`).toBe(0);
+    }
+  }
+
+  it('a non-git directory is left exactly as it was', () => {
+    const nonGit = path.join(base, 'downloads');
+    fs.mkdirSync(nonGit);
+    fs.writeFileSync(path.join(nonGit, 'notes.txt'), 'x');
+    const before = collectTree(nonGit);
+
+    runSessionAndPrompt(nonGit, homeDir);
+
+    expect(collectTree(nonGit)).toEqual(before);
+  });
+
+  it('a repository rooted at HOME (a dotfiles repo) gets no project .devflow data and no .gitignore', () => {
+    const dotfiles = path.join(base, 'dotfiles');
+    initCommittedRepo(dotfiles);
+    // Its .devflow IS the machine root; logs are machine data and are excluded.
+    fs.mkdirSync(path.join(dotfiles, '.devflow', 'logs'), { recursive: true });
+    const before = collectTree(dotfiles, ['.devflow/logs']);
+
+    runSessionAndPrompt(dotfiles, dotfiles);
+
+    expect(collectTree(dotfiles, ['.devflow/logs'])).toEqual(before);
+    expect(fs.existsSync(path.join(dotfiles, '.gitignore'))).toBe(false);
+  });
+
+  it('TP-50: HOME reached through a symlink is compared by realpath, in both directions', () => {
+    const realHome = path.join(base, 'real-home');
+    initCommittedRepo(realHome);
+    fs.mkdirSync(path.join(realHome, '.devflow', 'logs'), { recursive: true });
+    const linkHome = path.join(base, 'link-home');
+    fs.symlinkSync(realHome, linkHome);
+    const before = collectTree(realHome, ['.devflow/logs']);
+
+    // HOME is the link, the session starts in the real directory …
+    runSessionAndPrompt(realHome, linkHome);
+    // … and HOME is real while the session starts through the link.
+    runSessionAndPrompt(linkHome, realHome);
+
+    expect(collectTree(realHome, ['.devflow/logs'])).toEqual(before);
+  });
+
+  it('TP-50: a repo under the macOS /var → /private/var temp tree still matches its HOME', () => {
+    // git reports every toplevel physically (/private/var/...) while HOME keeps the
+    // spelling it was handed (/var/...). On Linux the temp tree has no such link,
+    // and the explicit symlink case above carries the property there.
+    const tmpHome = path.join(base, 'tmp-home');
+    initCommittedRepo(tmpHome);
+    fs.mkdirSync(path.join(tmpHome, '.devflow', 'logs'), { recursive: true });
+    if (process.platform === 'darwin') {
+      expect(fs.realpathSync(tmpHome), 'the fixture must exercise the /var link').not.toBe(tmpHome);
+    }
+    const before = collectTree(tmpHome, ['.devflow/logs']);
+
+    runSessionAndPrompt(tmpHome, tmpHome);
+
+    expect(collectTree(tmpHome, ['.devflow/logs'])).toEqual(before);
+  });
+
+  it('non-vacuity: the same hooks in a git project below HOME do scaffold', () => {
+    const project = path.join(base, 'project');
+    initCommittedRepo(project);
+
+    runSessionAndPrompt(project, homeDir);
+
+    expect(fs.existsSync(path.join(project, '.gitignore'))).toBe(true);
+    expect(fs.existsSync(path.join(project, '.devflow', 'learning', '.pending-turns.jsonl'))).toBe(true);
+    expect(fs.existsSync(path.join(project, '.devflow', 'memory', '.pending-turns.jsonl'))).toBe(true);
+  });
+});
+
+describe('D-LEDGER-MAIN-WORKTREE: one ledger per repository (TP-17, TP-18, TP-19)', () => {
+  const RESOLVE = path.join(HOOKS_DIR, 'resolve-project-root');
+  const REAL_GIT = ['/usr/bin/git', '/usr/local/bin/git', '/opt/homebrew/bin/git', '/bin/git']
+    .find(p => fs.existsSync(p)) ?? 'git';
+
+  let base: string;
+  let homeDir: string;
+  let main: string;
+  let wt: string;
+
+  beforeEach(() => {
+    base = fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-ledger-'));
+    homeDir = path.join(base, 'home');
+    fs.mkdirSync(path.join(homeDir, '.devflow', 'logs'), { recursive: true });
+    main = path.join(base, 'main');
+    initCommittedRepo(main);
+    wt = path.join(base, 'wt');
+    execSync(`git worktree add -q "${wt}" -b feat`, { cwd: main, stdio: 'pipe' });
+    main = fs.realpathSync(main);
+    wt = fs.realpathSync(wt);
+  });
+
+  afterEach(() => {
+    fs.rmSync(base, { recursive: true, force: true });
+  });
+
+  const queueOf = (root: string) => path.join(root, '.devflow', 'learning', '.pending-turns.jsonl');
+  const rowsOf = (file: string): string[] =>
+    fs.existsSync(file) ? fs.readFileSync(file, 'utf-8').split('\n').filter(Boolean) : [];
+
+  /** Source resolve-project-root and print both roots for `cwd`. */
+  function resolveRoots(cwd: string, env: NodeJS.ProcessEnv = process.env): { root: string; ledger: string } {
+    const out = spawnSync('bash', ['-c', 'source "$1"; df_resolve_roots "$2"; printf "%s\\n%s\\n" "$DF_ROOT" "$DF_LEDGER_ROOT"', '_', RESOLVE, cwd], { env, encoding: 'utf-8' });
+    const [root = '', ledger = ''] = out.stdout.split('\n');
+    return { root, ledger };
+  }
+
+  it('TP-17: capture in the worktree appends to the main queue; memory stays in the worktree', () => {
+    fs.mkdirSync(path.join(main, '.devflow', 'learning'), { recursive: true });
+
+    const { exitCode } = runHook(path.join(HOOKS_DIR, 'capture-prompt'), { cwd: wt, prompt: 'we chose X over Y' }, homeDir);
+    expect(exitCode).toBe(0);
+
+    expect(rowsOf(queueOf(main))).toHaveLength(1);
+    expect(rowsOf(queueOf(wt)), 'the worktree must not start a ledger queue of its own').toHaveLength(0);
+    expect(rowsOf(path.join(wt, '.devflow', 'memory', '.pending-turns.jsonl'))).toHaveLength(1);
+    expect(fs.existsSync(path.join(main, '.devflow', 'memory')), 'memory is per checkout').toBe(false);
+  });
+
+  it('TP-17: the directive and the TL;DR in the worktree come from the main ledger', () => {
+    fs.mkdirSync(path.join(main, '.devflow', 'learning'), { recursive: true });
+    fs.writeFileSync(path.join(main, '.devflow', 'learning', 'decisions.md'), '<!-- TL;DR: 3 decisions. Key: ADR-003 Main -->\n# Decisions\n');
+    fs.writeFileSync(queueOf(main), '{"role":"user","content":"we chose X over Y","ts":1}\n');
+
+    const { stdout } = runHook(path.join(HOOKS_DIR, 'session-start-context'), { cwd: wt, source: 'startup' }, homeDir);
+    const ctx = JSON.parse(stdout).hookSpecificOutput.additionalContext as string;
+
+    expect(ctx).toContain('--- LEARNING MAINTENANCE ---');
+    expect(ctx).toContain(`Project root: ${main}")`);
+    expect(ctx).not.toContain(`Project root: ${wt}`);
+    expect(ctx).toContain('ADR-003 Main');
+  });
+
+  it('a main checkout that never ran devflow keeps the ledger in the worktree, and is not scaffolded', () => {
+    const { exitCode } = runHook(path.join(HOOKS_DIR, 'capture-prompt'), { cwd: wt, prompt: 'we chose X over Y' }, homeDir);
+    expect(exitCode).toBe(0);
+
+    expect(rowsOf(queueOf(wt))).toHaveLength(1);
+    expect(fs.existsSync(path.join(main, '.devflow'))).toBe(false);
+  });
+
+  it('TP-18: exactly one rev-parse per resolution, in the root, a subdirectory and the worktree', () => {
+    fs.mkdirSync(path.join(main, '.devflow'), { recursive: true });
+    const sub = path.join(main, 'packages', 'app');
+    fs.mkdirSync(sub, { recursive: true });
+    const shim = fs.mkdtempSync(path.join(base, 'git-shim-'));
+    const log = path.join(shim, 'git.log');
+    fs.writeFileSync(path.join(shim, 'git'), `#!/bin/bash\nprintf '%s\\n' "$*" >> ${JSON.stringify(log)}\nexec ${JSON.stringify(REAL_GIT)} "$@"\n`);
+    fs.chmodSync(path.join(shim, 'git'), 0o755);
+    const env = { ...process.env, PATH: `${shim}:${process.env.PATH ?? ''}` };
+
+    const cases: ReadonlyArray<readonly [string, string, string, string]> = [
+      ['root', main, main, main],
+      ['subdir', sub, main, main],
+      ['worktree', wt, wt, main],
+    ];
+    for (const [label, cwd, root, ledger] of cases) {
+      if (fs.existsSync(log)) fs.rmSync(log);
+      expect(resolveRoots(cwd, env), label).toEqual({ root, ledger });
+      const calls = rowsOf(log);
+      expect(calls, `${label}: git calls`).toHaveLength(1);
+      expect(calls[0]).toContain('rev-parse --path-format=absolute --show-toplevel --git-common-dir');
+    }
+  });
+
+  it('TP-19: a pre-2.31 git that echoes the flag falls back to the toplevel for BOTH roots', () => {
+    fs.mkdirSync(path.join(main, '.devflow'), { recursive: true });
+    const shim = fs.mkdtempSync(path.join(base, 'old-git-'));
+    // Old git prints an unknown `--path-format=...` back as a line of its own, then
+    // the answers — three lines, the first not absolute, the last relative.
+    fs.writeFileSync(path.join(shim, 'git'), [
+      '#!/bin/bash',
+      'case "$*" in',
+      `  *--path-format=absolute*) printf '%s\\n' '--path-format=absolute' ${JSON.stringify(wt)} '.git' ;;`,
+      `  *--show-toplevel*) printf '%s\\n' ${JSON.stringify(wt)} ;;`,
+      '  *) exit 1 ;;',
+      'esac',
+    ].join('\n') + '\n');
+    fs.chmodSync(path.join(shim, 'git'), 0o755);
+    const env = { ...process.env, PATH: `${shim}:${process.env.PATH ?? ''}` };
+
+    expect(resolveRoots(wt, env)).toEqual({ root: wt, ledger: wt });
+  });
+
+  it('TP-19: empty and single-line git output fall back the same way', () => {
+    for (const body of ['exit 128', `printf '%s\\n' ${JSON.stringify(wt)}`]) {
+      const shim = fs.mkdtempSync(path.join(base, 'odd-git-'));
+      fs.writeFileSync(path.join(shim, 'git'), [
+        '#!/bin/bash',
+        'case "$*" in',
+        `  *--path-format=absolute*) ${body} ;;`,
+        `  *--show-toplevel*) printf '%s\\n' ${JSON.stringify(wt)} ;;`,
+        'esac',
+      ].join('\n') + '\n');
+      fs.chmodSync(path.join(shim, 'git'), 0o755);
+      const env = { ...process.env, PATH: `${shim}:${process.env.PATH ?? ''}` };
+      expect(resolveRoots(wt, env), body).toEqual({ root: wt, ledger: wt });
+    }
+  });
+});
+
+describe('D-DETACHED-HEAD: memory on a detached HEAD (TP-53, TP-54)', () => {
+  const PRE_COMPACT = path.join(HOOKS_DIR, 'pre-compact-memory');
+  const SESSION_MEMORY = path.join(HOOKS_DIR, 'session-start-memory');
+
+  let base: string;
+  let homeDir: string;
+  let repo: string;
+  let sha: string;
+
+  beforeEach(() => {
+    base = fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-detached-'));
+    homeDir = path.join(base, 'home');
+    fs.mkdirSync(path.join(homeDir, '.devflow', 'logs'), { recursive: true });
+    repo = path.join(base, 'repo');
+    initCommittedRepo(repo);
+    sha = execSync('git rev-parse HEAD', { cwd: repo, encoding: 'utf-8' }).trim();
+  });
+
+  afterEach(() => {
+    fs.rmSync(base, { recursive: true, force: true });
+  });
+
+  const memoryFile = () => path.join(repo, '.devflow', 'memory', 'WORKING-MEMORY.md');
+
+  function sessionContext(): string {
+    const { stdout } = runHook(SESSION_MEMORY, { cwd: repo }, homeDir);
+    return JSON.parse(stdout).hookSpecificOutput.additionalContext as string;
+  }
+
+  it('TP-53: a first compaction on a detached HEAD bootstraps memory stamped `(detached)`, keyed on the commit', () => {
+    execSync('git checkout -q --detach', { cwd: repo });
+
+    runHook(PRE_COMPACT, { cwd: repo }, homeDir);
+
+    const lines = fs.readFileSync(memoryFile(), 'utf-8').split('\n');
+    expect(lines[0]).toBe(`<!-- memory-head: ${sha} branch: (detached) -->`);
+    expect(lines).toContain(`- Branch: (detached) @ ${sha.slice(0, 7)}`);
+    const backup = JSON.parse(fs.readFileSync(path.join(repo, '.devflow', 'memory', 'backup.json'), 'utf-8'));
+    expect(backup.git.branch, 'the backup names the state instead of leaving it blank').toBe('(detached)');
+  });
+
+  it('TP-53: an unborn branch still bootstraps nothing — there is no commit to key on', () => {
+    const unborn = path.join(base, 'unborn');
+    fs.mkdirSync(unborn);
+    execSync('git init -q', { cwd: unborn });
+
+    runHook(PRE_COMPACT, { cwd: unborn }, homeDir);
+
+    expect(fs.existsSync(path.join(unborn, '.devflow', 'memory', 'WORKING-MEMORY.md'))).toBe(false);
+  });
+
+  it('TP-54: SessionStart on a detached HEAD labels the header `detached @ <short-sha>`', () => {
+    fs.mkdirSync(path.dirname(memoryFile()), { recursive: true });
+    fs.writeFileSync(memoryFile(), `<!-- memory-head: ${sha} branch: main -->\n## Now\n- x\n`);
+    execSync('git checkout -q --detach', { cwd: repo });
+
+    const ctx = sessionContext();
+
+    expect(ctx).toContain(`synced @ ${sha} detached @ ${sha.slice(0, 7)},`);
+    expect(ctx).not.toContain('on unknown');
+  });
+
+  it('TP-54: on a branch the header keeps `on <branch>`, and a detached stamp is named as a state', () => {
+    const branch = execSync('git branch --show-current', { cwd: repo, encoding: 'utf-8' }).trim();
+    fs.mkdirSync(path.dirname(memoryFile()), { recursive: true });
+    fs.writeFileSync(memoryFile(), `<!-- memory-head: ${sha} branch: (detached) -->\n## Now\n- x\n`);
+
+    const ctx = sessionContext();
+
+    expect(ctx).toContain(`synced @ ${sha} on ${branch},`);
+    expect(ctx).toContain(`Memory was written on a detached HEAD; you are now on ${branch}.`);
+  });
+});
+
 describe('hook-log-init: first invocation for a fresh log dir', () => {
   const HOOK_LOG_INIT = path.join(HOOKS_DIR, 'hook-log-init');
 
@@ -1187,6 +1526,10 @@ describe('ensure-devflow-init behavioral', () => {
 
   beforeEach(() => {
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-features-test-'));
+    // A `.git` marker: ensure-devflow-init scaffolds only inside a git project
+    // (D-HOOKS-GIT-ONLY). An empty directory satisfies df_has_git_marker and is not a
+    // repository to `git rev-parse`, so the root stays tmpDir itself.
+    fs.mkdirSync(path.join(tmpDir, '.git'));
   });
 
   afterEach(() => {
@@ -2263,6 +2606,8 @@ describe('session-start-context root .gitignore (memory-independent)', () => {
 
   beforeEach(() => {
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-ctx-ignore-'));
+    // The carve-out is project work, written only inside a git project (D-HOOKS-GIT-ONLY).
+    fs.mkdirSync(path.join(tmpDir, '.git'));
     homeDir = fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-ctx-ignore-home-'));
     fs.mkdirSync(path.join(homeDir, '.devflow', 'logs'), { recursive: true });
   });
@@ -2312,6 +2657,9 @@ describe('session-start-context: learning maintenance directive (Section 2)', ()
 
   beforeEach(() => {
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-ctx-learning-'));
+    // Learning is project work, active only inside a git project (D-HOOKS-GIT-ONLY).
+    // An empty `.git` is a marker, not a repository, so the root stays tmpDir.
+    fs.mkdirSync(path.join(tmpDir, '.git'));
     homeDir = fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-ctx-learning-home-'));
     fs.mkdirSync(path.join(homeDir, '.devflow', 'logs'), { recursive: true });
     fs.mkdirSync(path.join(tmpDir, '.devflow', 'learning'), { recursive: true });
@@ -2348,7 +2696,7 @@ describe('session-start-context: learning maintenance directive (Section 2)', ()
     expect(ctx).toContain('Never mention');
     expect(ctx).toContain('first visible words');
     // The prompt names the project root the agent must operate from
-    // (non-git tmp dir → df_resolve_root falls back to the cwd as given).
+    // (a marker-only `.git` → df_resolve_roots falls back to the cwd as given).
     expect(ctx).toContain(`Project root: ${tmpDir}`);
     // The directive never spawns anything itself — the queue is untouched.
     expect(fs.existsSync(queuePath(tmpDir))).toBe(true);

@@ -39,8 +39,12 @@ devflow_debug_set_cwd "$CWD"
 # Anchor .devflow/ to the project root (prevents a stray nested .devflow/ when this
 # hook runs with a CWD inside .devflow/...). Empty → fall back to CWD.
 source "$SCRIPT_DIR/resolve-project-root" 2>/dev/null || true
-PROJECT_ROOT="$(df_resolve_root "$CWD" 2>/dev/null || true)"
-[ -n "$PROJECT_ROOT" ] || PROJECT_ROOT="$CWD"
+df_resolve_roots "$CWD" 2>/dev/null || true
+PROJECT_ROOT="${DF_ROOT:-$CWD}"
+# The learning queue is the repository's, not the checkout's: in a linked worktree
+# it is the main worktree's queue (D-LEDGER-MAIN-WORKTREE, resolve-project-root),
+# the one the Learning agent drains into the shared ledger. Memory stays per checkout.
+LEDGER_ROOT="${DF_LEDGER_ROOT:-$PROJECT_ROOT}"
 
 # The machine-wide manifest (the memory/learning switches, D-FEATURES-MACHINE-WIDE
 # in queue-append) lives at the machine root,
@@ -48,7 +52,7 @@ PROJECT_ROOT="$(df_resolve_root "$CWD" 2>/dev/null || true)"
 DEVFLOW_MANIFEST="$HOME/.devflow/manifest.json"
 PROJECT_DEVFLOW_DIR="$PROJECT_ROOT/.devflow"
 MEMORY_DIR="$PROJECT_DEVFLOW_DIR/memory"
-LEARNING_DIR="$PROJECT_DEVFLOW_DIR/learning"
+LEARNING_DIR="$LEDGER_ROOT/.devflow/learning"
 
 if [ -z "$PROMPT" ]; then
   dbg "EXIT: empty PROMPT"

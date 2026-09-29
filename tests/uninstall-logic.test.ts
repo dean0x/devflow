@@ -3,7 +3,7 @@ import { promises as fs } from 'fs';
 import { execFileSync } from 'child_process';
 import * as os from 'os';
 import * as path from 'path';
-import { computeAssetsToRemove, formatDryRunPlan, resolveSecurityRemovalDecision, enumerateUserDevFlowContent, userContentPaths, resolveDevflowDirCleanup, resolveProjectDataCleanup, removeDevFlowInstallArtifacts, installArtifactPaths, resolveInstallArtifactPaths, enumerateDryRunExtras, removeAllDevFlow, removeSelectedPlugins, sweepDevflowNamespaces, isDevFlowInstalled, runDryRunPhase, runSelectivePhaseForScope, runFullPhaseForScope, runCleanupPhase, resolveInstalledPlugins } from '../src/cli/commands/uninstall.js';
+import { computeAssetsToRemove, formatDryRunPlan, resolveSecurityRemovalDecision, enumerateUserDevFlowContent, userContentPaths, resolveDevflowDirCleanup, resolveProjectDataCleanup, removeDevFlowInstallArtifacts, installArtifactPaths, resolveInstallArtifactPaths, enumerateDryRunExtras, removeAllDevFlow, removeSelectedPlugins, sweepDevflowNamespaces, isDevFlowInstalled, runDryRunPhase, runSelectivePhaseForScope, runFullPhaseForScope, runCleanupPhase, resolveInstalledPlugins, isSameLocation } from '../src/cli/commands/uninstall.js';
 import { DEVFLOW_PLUGINS, getAllAgentNames, parsePluginSelection, skillsOf, type PluginDefinition } from '../src/core/plugins.js';
 import { TRACKER_CONVENTIONS_BACKUP_NAMES, TRACKER_STAGED_PREFIX } from '../src/core/tracker.js';
 import { modelCacheDir } from '../src/core/cache.js';
@@ -2495,5 +2495,42 @@ describe('FEATURE_OWNED_SKILLS: sweepDevflowNamespaces spares devflow:compliance
       fs.access(compliancePrefixedDir),
       'devflow:compliance must survive sweepDevflowNamespaces (FEATURE_OWNED_SKILLS in knownNames)',
     ).resolves.not.toThrow();
+  });
+});
+
+describe('isSameLocation compares physical paths (TP-50, D-HOOKS-GIT-ONLY)', () => {
+  let base: string;
+
+  beforeEach(async () => {
+    base = await fs.mkdtemp(path.join(os.tmpdir(), 'same-location-'));
+  });
+
+  afterEach(async () => {
+    await fs.rm(base, { recursive: true, force: true });
+  });
+
+  it('a HOME reached through a symlink is the same location as its target', async () => {
+    const realHome = path.join(base, 'real-home');
+    await fs.mkdir(path.join(realHome, '.devflow'), { recursive: true });
+    const linkHome = path.join(base, 'link-home');
+    await fs.symlink(realHome, linkHome);
+
+    expect(await isSameLocation(path.join(linkHome, '.devflow'), path.join(realHome, '.devflow'))).toBe(true);
+  });
+
+  it('a tmp path spelled under /var matches its /private/var realpath (macOS)', async () => {
+    const dir = path.join(base, 'repo');
+    await fs.mkdir(dir);
+    const physical = await fs.realpath(dir);
+    if (process.platform === 'darwin') {
+      expect(physical, 'the fixture must exercise the /var link').not.toBe(dir);
+    }
+    expect(await isSameLocation(dir, physical)).toBe(true);
+  });
+
+  it('two different directories are not the same location', async () => {
+    await fs.mkdir(path.join(base, 'a'));
+    await fs.mkdir(path.join(base, 'b'));
+    expect(await isSameLocation(path.join(base, 'a'), path.join(base, 'b'))).toBe(false);
   });
 });

@@ -709,6 +709,59 @@ describe('session-start-context: tracker setup directive (Section 3)', () => {
     return violations;
   }
 
+  it('TP-22: the project gate (D-HOOKS-GIT-ONLY) forks nothing — marker walk and realpath HOME compare', () => {
+    // Every session passes df_is_project_root before Sections 1–2 and the carve-out,
+    // so it must cost what the marker walk costs: no subprocess. The realpath compare
+    // is `cd -P` + $PWD (builtins), never realpath/readlink/pwd binaries or a `$(...)`.
+    const watched = [...FORKABLE_TOOLS, 'git', 'realpath', 'readlink', 'pwd', 'dirname', 'cat', 'ls'];
+    const shimDir = fs.mkdtempSync(path.join(tmpDir, 'fork-shim-'));
+    const logPath = path.join(shimDir, 'invocations.log');
+    const shimmed: string[] = [];
+    for (const tool of watched) {
+      const real = tool === 'node'
+        ? process.execPath
+        : ['/usr/bin', '/bin', '/usr/local/bin', '/opt/homebrew/bin']
+          .map(p => path.join(p, tool))
+          .find(p => fs.existsSync(p));
+      if (!real) continue;
+      const wrapper = path.join(shimDir, tool);
+      fs.writeFileSync(
+        wrapper,
+        `#!/bin/bash\nprintf '%s\\n' ${tool} >> ${JSON.stringify(logPath)}\nexec ${JSON.stringify(real)} "$@"\n`,
+      );
+      fs.chmodSync(wrapper, 0o755);
+      shimmed.push(tool);
+    }
+    expect(shimmed, 'the shim must observe git and the realpath tools').toEqual(
+      expect.arrayContaining(['git', 'pwd', 'readlink']),
+    );
+
+    const project = path.join(tmpDir, 'proj');
+    fs.mkdirSync(project);
+    const home = path.join(tmpDir, 'home');
+    fs.mkdirSync(path.join(home, '.git'), { recursive: true });
+    const nonGit = fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-tp22-nongit-'));
+    try {
+      const env = { ...process.env, HOME: home, PATH: `${shimDir}:${process.env.PATH ?? ''}` };
+      const gate = spawnSync('bash', ['-c', [
+        'source "$1"',
+        'df_is_project_root "$2"; echo "project=$?"',
+        'df_is_project_root "$3"; echo "home=$?"',
+        'df_is_project_root "$4"; echo "nongit=$?"',
+      ].join('\n'), '_', path.join(HOOKS_DIR, 'git-marker'), project, home, nonGit], { env, encoding: 'utf-8' });
+      expect(gate.stdout.trim().split('\n')).toEqual(['project=0', 'home=1', 'nongit=1']);
+      expect(collectShimInvocations(logPath), 'the project gate forked').toEqual([]);
+
+      // Non-vacuity: the same farm DOES see the root resolution's one git call.
+      const roots = spawnSync('bash', ['-c', 'source "$1"; df_resolve_roots "$2"', '_',
+        path.join(HOOKS_DIR, 'resolve-project-root'), project], { env, encoding: 'utf-8' });
+      expect(roots.status).toBe(0);
+      expect(collectShimInvocations(logPath)).toContain('git');
+    } finally {
+      fs.rmSync(nonGit, { recursive: true, force: true });
+    }
+  });
+
   it('[DR-10] no read precedes the sentinel — the gate is two shell builtins (source-level)', () => {
     // The runtime differential above proves the current tree by COUNTING forks;
     // this pins the mechanism, so a rewrite that put a read before the gate is
@@ -987,20 +1040,18 @@ describe('session-start-context: tracker setup directive (Section 3)', () => {
     expect(section).not.toMatch(/\bgit\s+(-C|rev-parse|status)\b/);
   });
 
-  it('git-marker is reached only inside the sentinel gate — the GitHub path pays nothing for it', () => {
-    // [DR-10]: a GitHub user pays one stat and zero forks. Sourcing the helper is
-    // a file read, so every mention of it must sit BEHIND the sentinel, not above.
-    const gateAt = HOOK_SOURCE.indexOf('if [ -f "$TRACKER_SENTINEL"');
-    expect(gateAt, 'the sentinel gate was renamed').toBeGreaterThan(-1);
-    const mentions: number[] = [];
-    for (const m of HOOK_SOURCE.matchAll(/git-marker/g)) {
-      if (m.index !== undefined) mentions.push(m.index);
-    }
-    expect(mentions.length, 'the hook never names git-marker').toBeGreaterThan(0);
-    for (const at of mentions) {
-      expect(at, `git-marker is named at index ${at}, ahead of the sentinel gate`)
-        .toBeGreaterThan(gateAt);
-    }
+  it('git-marker is sourced once, above Section 1 — Section 3 adds no read of its own', () => {
+    // [DR-10]: Section 3 costs a GitHub user one stat and zero forks. The helper is
+    // now sourced at the top, because the project gate every session passes
+    // (D-HOOKS-GIT-ONLY) needs it — so the read is paid once by that gate, and
+    // Section 3 must not add a second one, in front of its sentinel or behind it.
+    const sources = [...HOOK_SOURCE.matchAll(/^\s*source\s+"\$SCRIPT_DIR\/git-marker"/gm)]
+      .map(m => m.index ?? -1);
+    expect(sources, 'git-marker must be sourced exactly once').toHaveLength(1);
+    const section1At = HOOK_SOURCE.indexOf('# --- Section 1:');
+    expect(section1At, 'Section 1 not found').toBeGreaterThan(-1);
+    expect(sources[0], 'the one source must sit above Section 1, where the project gate runs')
+      .toBeLessThan(section1At);
   });
 
   it('HOME unset: no directive, no writes, empty stdout (EC-10)', () => {
@@ -1598,6 +1649,8 @@ describe('session-start-context: tracker setup directive (Section 3)', () => {
     const ctx = contextOf(stdout);
     expect(ctx).toContain('PROJECT DECISIONS');
     expect(ctx).not.toContain('--- LEARNING MAINTENANCE ---');
+    // Refused, but not silently: the fixed notice, which carries no path.
+    expect(ctx).toContain(LEARNING_PAUSED_NOTICE);
     expect(stdout).not.toContain(PATH_PAYLOAD);
 
     // Non-vacuity: the identical fixture under a clean root does emit it.
@@ -1631,6 +1684,12 @@ describe('session-start-context: tracker setup directive (Section 3)', () => {
    */
   const ROOT_FLAG = 'DIRECTIVE_ROOT_SAFE';
   const GUARD_FLAG = 'DIRECTIVE_PATHS_SAFE';
+  /**
+   * Section 2's flag. The Learning directive embeds the LEDGER root — the main
+   * worktree's in a linked worktree (D-LEDGER-MAIN-WORKTREE) — not the checkout's
+   * own, so its gate is over that value and no other.
+   */
+  const LEDGER_FLAG = 'DIRECTIVE_LEDGER_SAFE';
 
   function collectGuardedSections(
     source: string,
@@ -1642,9 +1701,10 @@ describe('session-start-context: tracker setup directive (Section 3)', () => {
     const preamble = s1 > 0 ? source.slice(0, s1) : '';
     return {
       preambleDecides:
+        preamble.includes(`${LEDGER_FLAG}="yes"`) &&
         preamble.includes(`${ROOT_FLAG}="yes"`) &&
         preamble.includes(`${GUARD_FLAG}="$${ROOT_FLAG}"`),
-      section2: s2 > 0 && s3 > s2 && consults(source.slice(s2, s3), ROOT_FLAG),
+      section2: s2 > 0 && s3 > s2 && consults(source.slice(s2, s3), LEDGER_FLAG),
       section3: s3 > 0 && consults(source.slice(s3), GUARD_FLAG),
     };
   }
@@ -1652,10 +1712,10 @@ describe('session-start-context: tracker setup directive (Section 3)', () => {
   it('each directive section consults the flag covering exactly what it interpolates', () => {
     expect(
       collectGuardedSections(HOOK_SOURCE),
-      `Both flags must be decided once, above Section 1, with ${GUARD_FLAG} seeded ` +
+      `Every flag must be decided once, above Section 1, with ${GUARD_FLAG} seeded ` +
       `from ${ROOT_FLAG} so it can only be narrower. Section 2 interpolates ` +
-      `$PROJECT_ROOT alone and must consult ${ROOT_FLAG}; Section 3 interpolates ` +
-      `$TRACKER_DEVFLOW_DIR as well and must consult ${GUARD_FLAG}. A section that ` +
+      `$LEDGER_ROOT alone and must consult ${LEDGER_FLAG}; Section 3 interpolates ` +
+      `$PROJECT_ROOT and $TRACKER_DEVFLOW_DIR and must consult ${GUARD_FLAG}. A section that ` +
       `reads neither interpolates a value no gate saw; a section that reads the ` +
       `wider flag is suppressed by a value it never embeds.`,
     ).toEqual({ preambleDecides: true, section2: true, section3: true });
@@ -1698,6 +1758,42 @@ describe('session-start-context: tracker setup directive (Section 3)', () => {
    * only by accident of what the model happens to do with it. An allowlist
    * refuses them by construction; the denylist admitted all four.
    */
+  /**
+   * The fixed `--- LEARNING PAUSED ---` notice, read off the hook source: the one
+   * thing a refused Learning root may put in the context. Pinned as a single-quoted
+   * literal with no `$` in it, so no refused value can ride into the context on it.
+   */
+  const LEARNING_PAUSED_NOTICE = ((): string => {
+    const open = "LEARNING_PAUSED_SECTION='";
+    const at = HOOK_SOURCE.indexOf(open);
+    if (at === -1) return '(notice literal not found)';
+    const body = HOOK_SOURCE.slice(at + open.length);
+    return body.slice(0, body.indexOf("'"));
+  })();
+
+  it('the paused notice is a fixed literal that interpolates nothing', () => {
+    expect(LEARNING_PAUSED_NOTICE.startsWith('--- LEARNING PAUSED ---\n')).toBe(true);
+    expect(LEARNING_PAUSED_NOTICE, 'a `$` would make the notice a sink for the value it refused')
+      .not.toContain('$');
+    expect(LEARNING_PAUSED_NOTICE).not.toContain('`');
+    expect(LEARNING_PAUSED_NOTICE.length).toBeGreaterThan(100);
+  });
+
+  it('a `feat+x` root — the slash-branch worktree name — gets the learning directive', () => {
+    // Claude Code names the worktree for `feat/x` as `feat+x`; the gate admits `+`.
+    const plus = path.join(tmpDir, 'feat+extend-flags-registry');
+    fs.mkdirSync(path.join(plus, '.devflow', 'learning'), { recursive: true });
+    fs.writeFileSync(
+      path.join(plus, '.devflow', 'learning', '.pending-turns.jsonl'),
+      '{"role":"user","content":"we chose X over Y","ts":1}\n',
+    );
+
+    const ctx = contextOf(run(sessionStart(plus)).stdout);
+    expect(ctx).toContain('--- LEARNING MAINTENANCE ---');
+    expect(ctx).toContain(`Project root: ${plus}`);
+    expect(ctx).not.toContain('--- LEARNING PAUSED ---');
+  });
+
   const OUTSIDE_ALLOWLIST: ReadonlyArray<readonly [string, string]> = [
     ['space', 'proj name'],
     ['command substitution', 'proj$(whoami)'],
@@ -1722,6 +1818,9 @@ describe('session-start-context: tracker setup directive (Section 3)', () => {
       expect(ctx, 'the directive must not carry a path the allowlist never admitted')
         .not.toContain('--- LEARNING MAINTENANCE ---');
       expect(ctx).not.toContain(BANNER);
+      // Only the fixed notice speaks for the pending work, and the path appears nowhere.
+      expect(ctx).toContain(LEARNING_PAUSED_NOTICE);
+      expect(ctx).not.toContain(infix);
     });
   }
 
@@ -1729,22 +1828,23 @@ describe('session-start-context: tracker setup directive (Section 3)', () => {
     // Read off the source: a denylist of specific hostile characters is the
     // shape this control replaced, and a revert would restore it silently.
     const gate = HOOK_SOURCE.slice(
-      HOOK_SOURCE.indexOf(`${ROOT_FLAG}="yes"`),
+      HOOK_SOURCE.indexOf(`${LEDGER_FLAG}="yes"`),
       HOOK_SOURCE.indexOf('PROJECT_DEVFLOW_DIR="$PROJECT_ROOT/.devflow"'),
     );
     expect(gate.length, 'the gate block must be locatable').toBeGreaterThan(0);
     expect(
       gate,
       'the matcher must be a negated character class over the admitted set',
-    ).toContain('*[!A-Za-z0-9/._-]*');
+    ).toContain('*[!A-Za-z0-9/._+-]*');
     expect(gate, 'an empty value must be refused explicitly, not read as "nothing forbidden"').toContain("''|");
-    // Both values are gated, each in its own `case`. One `case` over their
-    // concatenation is the coupling defect, and it reads as a single matcher.
+    // Every value is gated in its own `case`. One `case` over a concatenation is
+    // the coupling defect, and it reads as a single matcher.
     expect(
-      gate.match(/\*\[!A-Za-z0-9\/\._-\]\*/g)?.length,
+      gate.match(/\*\[!A-Za-z0-9\/\._\+-\]\*/g)?.length,
       'each gated value needs its own matcher — one over a concatenation suppresses ' +
       'a section by a value that section never interpolates',
-    ).toBe(2);
+    ).toBe(3);
+    expect(gate, 'the ledger root is gated on its own').toContain('case "$LEDGER_ROOT" in');
     expect(gate, 'the project root is gated on its own').toContain('case "$PROJECT_ROOT" in');
     expect(gate, 'the global root is gated on its own').toContain('case "$TRACKER_DEVFLOW_DIR" in');
   });
@@ -1753,6 +1853,7 @@ describe('session-start-context: tracker setup directive (Section 3)', () => {
     // The seeded defect IS the coupling regression: Section 2 consults the wider
     // flag, so a ~/.devflow shape it never interpolates would silence it.
     const coupled = [
+      `${LEDGER_FLAG}="yes"`,
       `${ROOT_FLAG}="yes"`,
       `${GUARD_FLAG}="$${ROOT_FLAG}"`,
       '# --- Section 1: decisions ---',
@@ -1767,11 +1868,12 @@ describe('session-start-context: tracker setup directive (Section 3)', () => {
     // And the original defect the collector was built for: a section consulting
     // no flag at all.
     const unguarded = [
+      `${LEDGER_FLAG}="yes"`,
       `${ROOT_FLAG}="yes"`,
       `${GUARD_FLAG}="$${ROOT_FLAG}"`,
       '# --- Section 1: decisions ---',
       '# --- Section 2: learning ---',
-      `  if [ -z "$${ROOT_FLAG}" ]; then LEARNING_WORK=""; fi`,
+      `  if [ -z "$${LEDGER_FLAG}" ]; then LEARNING_WORK=""; fi`,
       '# --- Section 3: tracker ---',
       '  TRACKER_SECTION="Project root: $PROJECT_ROOT"',
     ].join('\n');
@@ -1782,6 +1884,14 @@ describe('session-start-context: tracker setup directive (Section 3)', () => {
     // from it could let the two drift apart.
     const underived = unguarded.replace(`${GUARD_FLAG}="$${ROOT_FLAG}"`, `${GUARD_FLAG}="yes"`);
     expect(collectGuardedSections(underived).preambleDecides).toBe(false);
+
+    // The worktree regression: Section 2 gated on the CHECKOUT's root while it
+    // embeds the ledger root — a value the gate never saw reaches the directive.
+    const checkoutGated = unguarded.replace(
+      `  if [ -z "$${LEDGER_FLAG}" ]; then LEARNING_WORK=""; fi`,
+      `  if [ -z "$${ROOT_FLAG}" ]; then LEARNING_WORK=""; fi`,
+    );
+    expect(collectGuardedSections(checkoutGated).section2).toBe(false);
 
     expect(collectGuardedSections('nothing here'))
       .toEqual({ preambleDecides: false, section2: false, section3: false });

@@ -385,6 +385,11 @@ COMMITS_SINCE_NOTE="(no stamp found in existing memory — full synthesis)"
 if cd "$CWD" 2>/dev/null && git rev-parse --git-dir >/dev/null 2>&1; then
   HEAD_SHA=$(git rev-parse HEAD 2>/dev/null || echo "")
   BRANCH=$(git branch --show-current 2>/dev/null || echo "")
+  # D-DETACHED-HEAD (pre-compact-memory): a detached HEAD stamps `(detached)`, the
+  # same label the PreCompact bootstrap writes, never `unknown` — the state is known.
+  if [ -z "$BRANCH" ] && [ -n "$HEAD_SHA" ]; then
+    BRANCH="(detached)"
+  fi
   GIT_STATUS=$(git status --short 2>/dev/null | head -20)
   GIT_LOG=$(git log --oneline -5 2>/dev/null || echo "")
   GIT_DIFF=$(git diff --stat HEAD 2>/dev/null | tail -10)

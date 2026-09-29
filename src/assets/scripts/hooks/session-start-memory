@@ -225,30 +225,49 @@ if [ -f "$MEMORY_FILE" ]; then
   dbg "COMMITS=$COMMITS"
 
   # --- Branch mismatch warning (shown for any state) ---
+  # A `(detached)` stamp (pre-compact-memory's D-DETACHED-HEAD bootstrap) names no
+  # branch, so it is worded as the state it is rather than as a branch called that.
   BRANCH_MISMATCH_NOTE=""
   if [ -n "$STAMP_BRANCH" ] && [ -n "$BRANCH" ] && [ "$STAMP_BRANCH" != "$BRANCH" ]; then
-    BRANCH_MISMATCH_NOTE="⚠ Memory was written on branch ${STAMP_BRANCH}; you are now on ${BRANCH}.
+    if [ "$STAMP_BRANCH" = "(detached)" ]; then
+      BRANCH_MISMATCH_NOTE="⚠ Memory was written on a detached HEAD; you are now on ${BRANCH}.
 "
+    else
+      BRANCH_MISMATCH_NOTE="⚠ Memory was written on branch ${STAMP_BRANCH}; you are now on ${BRANCH}.
+"
+    fi
   fi
 
   # --- State C detection: refresh failing ---
   detect_refresh_failing "$NOW" "$MEMORY_DIR" "$LOG_DIR"
 
   # --- Build state-specific header ---
+  # D-DETACHED-HEAD: where the session is, as one phrase. On a branch it is
+  # `on <branch>`; on a detached HEAD — a commit checked out rather than a branch,
+  # for which `git branch --show-current` prints nothing — it is
+  # `detached @ <short-sha>`, naming the commit instead of rendering "unknown" as if
+  # the state could not be read. HEAD passes the same hex gate the stamp does before
+  # it is sliced into the header. Only an unreadable state is `on unknown`.
   _STAMP_LABEL="${STAMP_SHA:-unknown}"
-  _BRANCH_LABEL="${BRANCH:-unknown}"
+  if [ -n "$BRANCH" ]; then
+    _WHERE_LABEL="on ${BRANCH}"
+  elif [ -n "$HEAD" ] && is_hex_sha "$HEAD"; then
+    _WHERE_LABEL="detached @ ${HEAD:0:7}"
+  else
+    _WHERE_LABEL="on unknown"
+  fi
 
   if [ -z "$STAMP_SHA" ]; then
     # No stamp (legacy / killed mid-write) — render as A "synced @ unknown"
-    MEMORY_HEADER="--- WORKING MEMORY (synced @ unknown on ${_BRANCH_LABEL}, ${AGE_MIN}m ago) ---"
+    MEMORY_HEADER="--- WORKING MEMORY (synced @ unknown ${_WHERE_LABEL}, ${AGE_MIN}m ago) ---"
     dbg "State A (no stamp)"
   elif [ "$COMMITS" -le 0 ]; then
     # State A: in-sync
-    MEMORY_HEADER="--- WORKING MEMORY (synced @ ${_STAMP_LABEL} on ${_BRANCH_LABEL}, ${AGE_MIN}m ago) ---"
+    MEMORY_HEADER="--- WORKING MEMORY (synced @ ${_STAMP_LABEL} ${_WHERE_LABEL}, ${AGE_MIN}m ago) ---"
     dbg "State A: in-sync"
   else
     # State B: drifted — _DRIFT_LOG already populated from the single rev-walk above
-    MEMORY_HEADER="--- WORKING MEMORY (${COMMITS} commit(s) ago @ ${_STAMP_LABEL} on ${_BRANCH_LABEL}, ${AGE_MIN}m ago — ⚠ reconcile) ---
+    MEMORY_HEADER="--- WORKING MEMORY (${COMMITS} commit(s) ago @ ${_STAMP_LABEL} ${_WHERE_LABEL}, ${AGE_MIN}m ago — ⚠ reconcile) ---
 Commits since memory was written:
 ${_DRIFT_LOG}"
     dbg "State B: drifted COMMITS=$COMMITS"

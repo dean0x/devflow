@@ -76,8 +76,12 @@ async function legacyLocalInstallPaths(gitRoot: string): Promise<ScopeInstallPat
   return legacy;
 }
 
-/** Whether two paths name one location — realpaths where they exist, so a symlinked HOME still matches. */
-async function isSameLocation(a: string, b: string): Promise<boolean> {
+/**
+ * Whether two paths name one location — realpaths where they exist, so a symlinked
+ * HOME, or macOS's /var → /private/var temp tree, still matches. The shell hooks make
+ * the same physical comparison in git-marker's df_is_project_root (D-HOOKS-GIT-ONLY).
+ */
+export async function isSameLocation(a: string, b: string): Promise<boolean> {
   const canonical = (target: string): Promise<string> =>
     fs.realpath(target).catch(() => path.resolve(target));
   const [left, right] = await Promise.all([canonical(a), canonical(b)]);

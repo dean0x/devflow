@@ -16,8 +16,15 @@ const HOOKS_DIR = path.resolve(__dirname, '..', 'src', 'assets', 'scripts', 'hoo
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
+/**
+ * A temp project inside a git checkout: the hooks scaffold and inject project
+ * context only in a git project (D-HOOKS-GIT-ONLY). An empty `.git` is a marker,
+ * not a repository, so the resolved root is the directory itself.
+ */
 function mkTmpDir(): string {
-  return fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-config-disable-guards-test-'));
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-config-disable-guards-test-'));
+  fs.mkdirSync(path.join(dir, '.git'));
+  return dir;
 }
 
 function mkMemoryDir(base: string): void {
@@ -359,10 +366,9 @@ describe('config guard: session-start-context', () => {
     try {
       seedTrackerProvider(tmpHome, 'jira');
       mkMemoryDir(tmpDir);
-      // Section 3 is gated on the project root being inside a repository; an
-      // empty `.git` satisfies df_has_git_marker's `-e` walk without being a
-      // repository to `git rev-parse`.
-      fs.mkdirSync(path.join(tmpDir, '.git'));
+      // Section 3 is gated on the project root being inside a repository: the
+      // `.git` marker mkTmpDir() seeds satisfies df_has_git_marker's `-e` walk
+      // without being a repository to `git rev-parse`.
 
       // (a) Identical output across a bare HOME and a tracker-configured one.
       const bare = runContextHook(sessionInput(tmpDir), otherHome);

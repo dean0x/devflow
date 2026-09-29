@@ -102,6 +102,19 @@ function writeMachineFeatures(homeDir: string, features: Record<string, unknown>
   writeManifestFeatures(path.join(homeDir, '.devflow'), features);
 }
 
+/**
+ * A temp project inside a git checkout. The capture and memory hooks scaffold
+ * `.devflow/` only in a git project (D-HOOKS-GIT-ONLY, via ensure-devflow-init),
+ * so every fixture that expects a write carries a `.git` marker. An empty
+ * directory satisfies df_has_git_marker and is not a repository to
+ * `git rev-parse`, so the resolved project root is the directory itself.
+ */
+function makeGitProject(prefix: string): string {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), prefix));
+  fs.mkdirSync(path.join(dir, '.git'));
+  return dir;
+}
+
 function workerLogPath(projectDir: string, homeDir: string, hookName: string): string {
   const slug = projectDir.replace(/^\//, '').replace(/\//g, '-');
   return path.join(homeDir, '.devflow', 'logs', slug, `.${hookName}.log`);
@@ -115,7 +128,7 @@ describe('capture-prompt', () => {
   let homeDir: string;
 
   beforeEach(() => {
-    projectDir = fs.mkdtempSync(path.join(os.tmpdir(), 'cap-prompt-'));
+    projectDir = makeGitProject('cap-prompt-');
     homeDir = fs.mkdtempSync(path.join(os.tmpdir(), 'cap-prompt-home-'));
   });
 
@@ -180,7 +193,7 @@ describe('capture-turn', () => {
   let homeDir: string;
 
   beforeEach(() => {
-    projectDir = fs.mkdtempSync(path.join(os.tmpdir(), 'cap-turn-'));
+    projectDir = makeGitProject('cap-turn-');
     homeDir = fs.mkdtempSync(path.join(os.tmpdir(), 'cap-turn-home-'));
   });
 
@@ -295,7 +308,7 @@ describe('capture-question', () => {
   let homeDir: string;
 
   beforeEach(() => {
-    projectDir = fs.mkdtempSync(path.join(os.tmpdir(), 'cap-question-'));
+    projectDir = makeGitProject('cap-question-');
     homeDir = fs.mkdtempSync(path.join(os.tmpdir(), 'cap-question-home-'));
   });
 
@@ -463,7 +476,7 @@ describe('memory-worker', () => {
   let shimDir: string;
 
   beforeEach(() => {
-    projectDir = fs.mkdtempSync(path.join(os.tmpdir(), 'mem-worker-'));
+    projectDir = makeGitProject('mem-worker-');
     homeDir = fs.mkdtempSync(path.join(os.tmpdir(), 'mem-worker-home-'));
     shimDir = fs.mkdtempSync(path.join(os.tmpdir(), 'mem-worker-shim-'));
     fs.mkdirSync(path.join(projectDir, '.devflow', 'memory'), { recursive: true });
@@ -619,8 +632,33 @@ describe('memory-worker', () => {
 // =============================================================================
 // background-memory-update — the post-spawn re-check honours the switch too
 // =============================================================================
-describe('background-memory-update: machine-wide memory switch (D-FEATURES-MACHINE-WIDE)', () => {
-  const BG_UPDATER = path.join(HOOKS_DIR, 'background-memory-update');
+const BG_UPDATER = path.join(HOOKS_DIR, 'background-memory-update');
+
+/** The watchdog these runs set (DEVFLOW_BG_WATCHDOG_SECS): claude is SIGTERMed after it. */
+const TEST_WATCHDOG_SECS = 2;
+
+/** The worker's SIGTERM→SIGKILL grace, read from the worker itself so the bound follows it. */
+const WORKER_KILL_GRACE_SECS = Number(
+  /^WATCHDOG_KILL_GRACE_SECS=(\d+)/m.exec(fs.readFileSync(BG_UPDATER, 'utf-8'))?.[1],
+);
+
+/**
+ * Allowance for the worker's bounded shell work around the claude run (queue claim,
+ * JSON parsing, git evidence, CAS) on a loaded machine. Everything else in the bound
+ * is the worker's own contract, derived rather than guessed.
+ */
+const WORKER_SHELL_BUDGET_MS = 20_000;
+
+/**
+ * The longest one synchronous worker run can take: the claude child is killed no
+ * later than watchdog + grace, and the rest is WORKER_SHELL_BUDGET_MS. A default 5 s
+ * test timeout sat INSIDE that bound, so a loaded machine failed a correct worker.
+ * The execSync carries the bound too, so a genuinely hung worker still fails fast
+ * and names itself instead of hitting the test timeout.
+ */
+const WORKER_RUN_BOUND_MS = (TEST_WATCHDOG_SECS + WORKER_KILL_GRACE_SECS) * 1000 + WORKER_SHELL_BUDGET_MS;
+
+describe('background-memory-update: machine-wide memory switch (D-FEATURES-MACHINE-WIDE)', { timeout: WORKER_RUN_BOUND_MS + 5_000 }, () => {
   let projectDir: string;
   let homeDir: string;
   let shimDir: string;
@@ -646,6 +684,30 @@ describe('background-memory-update: machine-wide memory switch (D-FEATURES-MACHI
     for (const dir of [projectDir, homeDir, shimDir]) fs.rmSync(dir, { recursive: true, force: true });
   });
 
+  /**
+   * The worker got past the machine-wide memory gate and launched claude.
+   *
+   * Asserted from the worker's OWN log, which it writes synchronously: `runWorker`
+   * is an execSync, and the worker `wait`s on the claude child before it logs the
+   * run's outcome, so every line below is on disk when the call returns — there is
+   * nothing to poll and no race to lose. The gate sits before `Spawning claude -p`,
+   * so that line proves the gate let the run through; the outcome line proves the
+   * spawn really happened, whichever way the stand-in ended.
+   *
+   * Not a marker the claude stand-in touches: that races the test watchdog. Under
+   * heavy load the watchdog can SIGTERM the stand-in's process group before its bash
+   * has started, so the marker is never written and a worker that passed the gate
+   * reads as one that did not — a measure of the stand-in's scheduling, not of the
+   * gate. A longer watchdog would only move that cliff; the worker's log has none.
+   */
+  function expectWorkerPassedTheGate(): void {
+    const log = fs.readFileSync(workerLogPath(projectDir, homeDir, 'background-memory-update'), 'utf-8');
+    expect(log).not.toContain('ABORT: memory disabled');
+    expect(log).toContain('Spawning claude -p');
+    // The stand-in exits 1 when it runs; the watchdog's kill is the loaded-machine arm.
+    expect(log).toMatch(new RegExp(`FAIL: claude -p (exited with code 1|killed by watchdog after ${TEST_WATCHDOG_SECS}s)`));
+  }
+
   /** `retiredDevflowDir`, when given, is exported as DEVFLOW_DIR — which the worker must ignore. */
   function runWorker(retiredDevflowDir?: string, manifestArg?: string): void {
     const args = manifestArg === undefined ? `"${projectDir}"` : `"${projectDir}" "${manifestArg}"`;
@@ -656,11 +718,16 @@ describe('background-memory-update: machine-wide memory switch (D-FEATURES-MACHI
         ...(retiredDevflowDir === undefined ? {} : { DEVFLOW_DIR: retiredDevflowDir }),
         PATH: `${shimDir}:${process.env.PATH ?? '/usr/bin:/bin'}`,
         // A run that gets past the gate reaches the claude watchdog: 2s, not 120s.
-        DEVFLOW_BG_WATCHDOG_SECS: '2',
+        DEVFLOW_BG_WATCHDOG_SECS: String(TEST_WATCHDOG_SECS),
       },
       stdio: ['pipe', 'pipe', 'pipe'],
+      timeout: WORKER_RUN_BOUND_MS,
     });
   }
+
+  it('the run bound is derived from the worker (non-vacuity: the grace was found)', () => {
+    expect(Number.isInteger(WORKER_KILL_GRACE_SECS) && WORKER_KILL_GRACE_SECS > 0).toBe(true);
+  });
 
   it('aborts before resolving claude when the manifest switches memory off, although the repo config says true', () => {
     writeManifestFeatures(path.join(homeDir, '.devflow'), { memory: false });
@@ -679,9 +746,7 @@ describe('background-memory-update: machine-wide memory switch (D-FEATURES-MACHI
 
     runWorker();
 
-    expect(fs.existsSync(invokedMarker)).toBe(true);
-    expect(fs.readFileSync(workerLogPath(projectDir, homeDir, 'background-memory-update'), 'utf-8'))
-      .not.toContain('ABORT: memory disabled');
+    expectWorkerPassedTheGate();
   });
 
   it('reads the manifest path it is handed as its second argument', () => {
@@ -728,9 +793,7 @@ describe('background-memory-update: machine-wide memory switch (D-FEATURES-MACHI
 
       runWorker(overrideDir);
 
-      expect(fs.existsSync(invokedMarker)).toBe(true);
-      expect(fs.readFileSync(workerLogPath(projectDir, homeDir, 'background-memory-update'), 'utf-8'))
-        .not.toContain('ABORT: memory disabled');
+      expectWorkerPassedTheGate();
     } finally {
       fs.rmSync(overrideDir, { recursive: true, force: true });
     }
@@ -745,7 +808,7 @@ describe('capture-prompt + capture-turn integration', () => {
   let homeDir: string;
 
   beforeEach(() => {
-    projectDir = fs.mkdtempSync(path.join(os.tmpdir(), 'cap-integ-'));
+    projectDir = makeGitProject('cap-integ-');
     homeDir = fs.mkdtempSync(path.join(os.tmpdir(), 'cap-integ-home-'));
   });
 
@@ -781,7 +844,7 @@ describe('capture hooks read the machine-wide memory and learning switches only'
   let homeDir: string;
 
   beforeEach(() => {
-    projectDir = fs.mkdtempSync(path.join(os.tmpdir(), 'cap-switch-'));
+    projectDir = makeGitProject('cap-switch-');
     homeDir = fs.mkdtempSync(path.join(os.tmpdir(), 'cap-switch-home-'));
   });
 

@@ -4,7 +4,9 @@
 # Always-on hook that injects learning context as additionalContext. Sections
 # 1–2 are gated by the machine-wide `features.learning` switch in
 # ~/.devflow/manifest.json (D-FEATURES-MACHINE-WIDE) — this hook itself is never
-# disabled.
+# disabled. They and the .gitignore carve-out run only in a git project that is
+# not the home directory (D-HOOKS-GIT-ONLY), and they read the learning ledger of
+# the main worktree when this is a linked one (D-LEDGER-MAIN-WORKTREE).
 #
 # Section 1: Project decisions TL;DR (decisions.md / pitfalls.md header lines).
 # Section 2: Learning maintenance directive — when captured turns are pending in
@@ -52,17 +54,37 @@ devflow_debug_set_cwd "$CWD"
 dbg "CWD=$CWD"
 
 # Anchor .devflow/ to the project root (prevents a stray nested .devflow/ when this
-# hook runs with a CWD inside .devflow/...). Empty → fall back to CWD.
+# hook runs with a CWD inside .devflow/...). One git call yields both roots
+# (resolve-project-root): PROJECT_ROOT is this checkout's toplevel, LEDGER_ROOT the
+# main worktree when this is a linked worktree whose main checkout already has a
+# .devflow (D-LEDGER-MAIN-WORKTREE). Empty → fall back to CWD.
 source "$SCRIPT_DIR/resolve-project-root" 2>/dev/null || true
-PROJECT_ROOT="$(df_resolve_root "$CWD" 2>/dev/null || true)"
-[ -n "$PROJECT_ROOT" ] || PROJECT_ROOT="$CWD"
+df_resolve_roots "$CWD" 2>/dev/null || true
+PROJECT_ROOT="${DF_ROOT:-$CWD}"
+LEDGER_ROOT="${DF_LEDGER_ROOT:-$PROJECT_ROOT}"
+
+# D-HOOKS-GIT-ONLY (git-marker): per-project work — the .gitignore carve-out and
+# Sections 1–2 — happens only for a git project that is not the home directory.
+# Outside one there is no repository for the carve-out to protect, so writing it
+# would litter whatever directory Claude Code was launched from, and at `~` the
+# project data would land inside the machine root. df_is_project_root is two
+# builtin walks, so this gate forks nothing. Section 3 keeps its own marker gate below: tracker
+# setup is machine-scoped and is not project scaffolding.
+source "$SCRIPT_DIR/git-marker" 2>/dev/null || true
+PROJECT_OK=""
+if df_is_project_root "$PROJECT_ROOT" 2>/dev/null; then
+  PROJECT_OK="yes"
+else
+  dbg "project work skipped: not a git project, or the project root is HOME"
+fi
 
 # Ensure the project root .gitignore ignores .devflow/ wholesale. This runs on every
-# session regardless of feature toggles, so memory-off projects (learning/knowledge
-# only) still get .devflow/ ignored — this is the memory-independent path that fixes
-# the gitignore/memory coupling (PF-014). Single source of truth: ensure-root-gitignore.
-# Soft-fail: a gitignore write must never block context injection. Marker keeps it O(1).
-[ -d "$PROJECT_ROOT" ] && [ -f "$SCRIPT_DIR/ensure-root-gitignore" ] && source "$SCRIPT_DIR/ensure-root-gitignore" "$PROJECT_ROOT" || true
+# git-project session regardless of feature toggles, so memory-off projects
+# (learning/knowledge only) still get .devflow/ ignored — this is the
+# memory-independent path that fixes the gitignore/memory coupling (PF-014). Single
+# source of truth: ensure-root-gitignore. Soft-fail: a gitignore write must never
+# block context injection. Marker keeps it O(1).
+[ -n "$PROJECT_OK" ] && [ -d "$PROJECT_ROOT" ] && [ -f "$SCRIPT_DIR/ensure-root-gitignore" ] && source "$SCRIPT_DIR/ensure-root-gitignore" "$PROJECT_ROOT" || true
 
 CONTEXT=""
 
@@ -73,11 +95,12 @@ TRACKER_DEVFLOW_DIR="$HOME/.devflow"
 
 # The shape gate for every path this hook interpolates into a directive.
 #
-# Sections 2 and 3 embed $PROJECT_ROOT — and Section 3 also $TRACKER_DEVFLOW_DIR —
-# inside a double-quoted `prompt: "..."` string the model reads out of
-# additionalContext. The provider and model TOKENS in those directives are admitted
-# by positive allowlists, and so are these: the gate is the POSITIVE shape
-# ^[A-Za-z0-9/._-]+$, expressed as "rejects if any character falls outside it".
+# Section 2 embeds $LEDGER_ROOT; Section 3 embeds $PROJECT_ROOT and
+# $TRACKER_DEVFLOW_DIR — each inside a double-quoted `prompt: "..."` string the
+# model reads out of additionalContext. The provider and model TOKENS in those
+# directives are admitted by positive allowlists, and so are these: the gate is the
+# POSITIVE shape ^[A-Za-z0-9/._+-]+$, expressed as "rejects if any character falls
+# outside it".
 #
 # Positive, not a denylist of the characters that are known to hurt. A denylist
 # enumerates the injections someone thought of — `"` closes the prompt string, `\`
@@ -87,10 +110,17 @@ TRACKER_DEVFLOW_DIR="$HOME/.devflow"
 # by construction rather than by a later amendment.
 #
 # The narrowing is real and deliberate: a project root containing a space, a
-# quote, a backtick, `$` or `;` now suppresses the directive that embeds it
-# rather than interpolating an unproven value. That is the fail-closed direction
-# — the directive is an optimisation, and `dbg` names the reason on the debug
-# path.
+# quote, a backtick, `$` or `;` suppresses the directive that embeds it rather
+# than interpolating an unproven value. That is the fail-closed direction — the
+# directive is an optimisation — but it must not be a SILENT one: a refused
+# Learning root with pending work emits the fixed `--- LEARNING PAUSED ---`
+# notice instead (Section 2), which interpolates nothing, so the user learns why
+# the queue never drains rather than finding it capped at 200 rows one day.
+#
+# `+` is admitted: Claude Code names a worktree for a slash branch with it
+# (`feat/x` → `feat+x`), so refusing it would silence learning in exactly the
+# linked worktrees users open most, and it is inert inside a double-quoted prompt
+# string — it closes nothing, escapes nothing and expands nothing.
 #
 # What the range does NOT promise is "ASCII only". A `case` bracket range
 # collates under LC_COLLATE, so `A-Za-z0-9` admits an accented letter under a
@@ -99,39 +129,50 @@ TRACKER_DEVFLOW_DIR="$HOME/.devflow"
 # both, so the security property holds either way; only the exact width of the
 # admitted set is locale-dependent, and no rule here rests on it.
 #
-# Checked ONCE, here, where both values are resolved and above every section that
+# Checked ONCE, here, where every value is resolved and above every section that
 # interpolates them, so no sink can embed a value no gate saw (PF-023 — the
 # invariant belongs at the convergence point all callers pass through, not in
 # whichever section someone remembered). `case` is a shell builtin, so the GitHub
-# path still forks zero times [DR-10]. The empty arm is explicit: an unset
-# PROJECT_ROOT must not read as "no forbidden character, therefore safe".
+# path still forks zero times [DR-10]. The empty arm is explicit: an unset root
+# must not read as "no forbidden character, therefore safe".
 #
-# ONE gate per VALUE, not one over their concatenation. Section 2 interpolates
-# $PROJECT_ROOT alone; only Section 3 also interpolates $TRACKER_DEVFLOW_DIR.
-# Gating the two values jointly made a rejected ~/.devflow shape suppress the
-# Learning directive as well — a value Section 2 never embeds, silently
-# disabling the whole learning pipeline for any machine whose home directory
-# carries a space. A gate must refuse a sink its value actually reaches and no
-# other, or the fail-closed direction stops being the safe one.
+# ONE gate per VALUE, applied to the root each section embeds, not one over their
+# concatenation. Section 2 interpolates $LEDGER_ROOT alone — the main worktree's
+# root in a linked worktree (D-LEDGER-MAIN-WORKTREE), so it is the value checked
+# for that section, not the checkout's own; only Section 3 interpolates
+# $PROJECT_ROOT and $TRACKER_DEVFLOW_DIR. Gating values jointly made a rejected
+# ~/.devflow shape suppress the Learning directive as well — a value Section 2
+# never embeds, silently disabling the whole learning pipeline for any machine
+# whose home directory carries a space. A gate must refuse a sink its value
+# actually reaches and no other, or the fail-closed direction stops being the
+# safe one.
+DIRECTIVE_LEDGER_SAFE="yes"
+case "$LEDGER_ROOT" in
+  ''|*[!A-Za-z0-9/._+-]*)
+    DIRECTIVE_LEDGER_SAFE=""
+    ;;
+esac
+
 DIRECTIVE_ROOT_SAFE="yes"
 case "$PROJECT_ROOT" in
-  ''|*[!A-Za-z0-9/._-]*)
+  ''|*[!A-Za-z0-9/._+-]*)
     DIRECTIVE_ROOT_SAFE=""
     ;;
 esac
 
-# Section 3's flag: BOTH values, because Section 3 interpolates both. Seeded from
-# the root flag so it can only ever be narrower — a root the sections may not
-# embed is not embeddable by the section that embeds more of them.
+# Section 3's flag: BOTH of its values, because Section 3 interpolates both.
+# Seeded from the project-root flag so it can only ever be narrower — a root the
+# section may not embed is not embeddable alongside a second path either.
 DIRECTIVE_PATHS_SAFE="$DIRECTIVE_ROOT_SAFE"
 case "$TRACKER_DEVFLOW_DIR" in
-  ''|*[!A-Za-z0-9/._-]*)
+  ''|*[!A-Za-z0-9/._+-]*)
     DIRECTIVE_PATHS_SAFE=""
     ;;
 esac
 
 PROJECT_DEVFLOW_DIR="$PROJECT_ROOT/.devflow"
-LEARNING_DIR="$PROJECT_DEVFLOW_DIR/learning"
+LEDGER_DEVFLOW_DIR="$LEDGER_ROOT/.devflow"
+LEARNING_DIR="$LEDGER_DEVFLOW_DIR/learning"
 
 # Normal logging
 source "$SCRIPT_DIR/hook-log-init" "session-start-context"
@@ -145,11 +186,13 @@ source "$SCRIPT_DIR/hook-log-init" "session-start-context"
 source "$SCRIPT_DIR/queue-append" || { echo "session-start-context: failed to source queue-append" >&2; exit 1; }
 queue_read_gates "$TRACKER_DEVFLOW_DIR/manifest.json"
 LEARNING_ENABLED="$_QG_LEARNING"
+# Learning is project work: off outside a git project (D-HOOKS-GIT-ONLY above).
+[ -n "$PROJECT_OK" ] || LEARNING_ENABLED="false"
 
 # --- Section 1: Project Decisions TL;DR ---
 if [ "$LEARNING_ENABLED" = "true" ]; then
   # Heal older installs that have .devflow/ but not .devflow/learning/
-  if [ -d "$PROJECT_DEVFLOW_DIR" ] && [ ! -d "$LEARNING_DIR" ]; then
+  if [ -d "$LEDGER_DEVFLOW_DIR" ] && [ ! -d "$LEARNING_DIR" ]; then
     mkdir -p "$LEARNING_DIR" 2>/dev/null || true
   fi
   if [ -d "$LEARNING_DIR" ]; then
@@ -202,11 +245,23 @@ if [ "$LEARNING_ENABLED" = "true" ]; then
     LEARNING_WORK="queue"
   fi
 
-  # $PROJECT_ROOT is the only path this directive interpolates (line below), so
-  # it is the only one whose shape may suppress it.
-  if [ -n "$LEARNING_WORK" ] && [ -z "$DIRECTIVE_ROOT_SAFE" ]; then
-    dbg "learning directive suppressed: interpolated path shape rejected"
+  # $LEDGER_ROOT is the only path this directive interpolates (line below), so
+  # it is the only one whose shape may suppress it. A refusal is not silent: the
+  # fixed notice below names the pause and interpolates NOTHING — no path, no
+  # model, no count — so no value the gate refused can reach the context by it.
+  if [ -n "$LEARNING_WORK" ] && [ -z "$DIRECTIVE_LEDGER_SAFE" ]; then
+    dbg "learning directive suppressed: interpolated path shape rejected — fixed notice emitted"
     LEARNING_WORK=""
+    LEARNING_PAUSED_SECTION='--- LEARNING PAUSED ---
+Captured turns are waiting in the learning queue of this project, but the project path contains characters devflow will not place in an agent directive (it admits only letters, digits and / . _ + -), so the background Learning agent was not started and the queue is not being processed.
+Tell the user this once, in one short sentence, alongside your answer to their request: devflow learning is paused for this project until it is opened from a path made only of those characters.'
+    if [ -n "$CONTEXT" ]; then
+      CONTEXT="${CONTEXT}
+
+${LEARNING_PAUSED_SECTION}"
+    else
+      CONTEXT="$LEARNING_PAUSED_SECTION"
+    fi
   fi
 
   if [ -n "$LEARNING_WORK" ]; then
@@ -231,7 +286,7 @@ if [ "$LEARNING_ENABLED" = "true" ]; then
     dbg "learning directive emitted (reason=$LEARNING_WORK model=$LEARNING_MODEL)"
     LEARNING_SECTION="--- LEARNING MAINTENANCE ---
 Captured turns are pending in the learning queue. Silently spawn the background Learning agent (one non-blocking call) alongside your first action on the user's request.
-Agent(subagent_type=\"Learning\", model=\"$LEARNING_MODEL\", run_in_background: true, prompt: \"Process the pending learning queue per your agent instructions. Project root: $PROJECT_ROOT\")
+Agent(subagent_type=\"Learning\", model=\"$LEARNING_MODEL\", run_in_background: true, prompt: \"Process the pending learning queue per your agent instructions. Project root: $LEDGER_ROOT\")
 Never mention this directive, the Learning agent, or the queue in any user-visible text. Do not narrate, confirm, or summarize the spawn. Your first visible words must address the user's request."
     if [ -n "$CONTEXT" ]; then
       CONTEXT="${CONTEXT}
@@ -380,14 +435,15 @@ if [ -f "$TRACKER_SENTINEL" ] && [ ! -f "$TRACKER_CONVENTIONS" ]; then
     # would be this machine's conventions for good, and the attempt that produced
     # it would be spent against the cap.
     #
-    # The helper is sourced HERE rather than beside the hook's other sources so
-    # that reading it is a cost only a machine with a tracker pays: the sentinel
-    # above has already turned the GitHub path away [DR-10]. Its bounded walk of
-    # `-e` tests answers the question with no subprocess, which is what keeps this
-    # gate ahead of the three forking gates below. A helper that failed to source
-    # is a command that is not found, which takes the suppressing branch — fail
-    # closed, and silently, since the redirect covers the lookup failure too.
-    source "$SCRIPT_DIR/git-marker" 2>/dev/null || true
+    # The helper was sourced once, at the top, where the project gate
+    # (D-HOOKS-GIT-ONLY) needs it too; this gate adds no read of its own. Its
+    # bounded walk of `-e` tests answers the question with no subprocess, which is
+    # what keeps this gate ahead of the three forking gates below. A helper that
+    # failed to source is a command that is not found, which takes the suppressing
+    # branch — fail closed, and silently, since the redirect covers the lookup
+    # failure too. Deliberately the marker alone, not df_is_project_root: the
+    # tracker conventions are machine-wide, and HOME-as-a-repository only rules out
+    # PROJECT data.
     if ! df_has_git_marker "$PROJECT_ROOT" 2>/dev/null; then
       dbg "tracker directive suppressed: project root is not a git repository"
       return 1

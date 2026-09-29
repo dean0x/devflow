@@ -206,12 +206,14 @@ describe('init --no-<feature> switches the feature off in every project', () => 
     expect(await readManifestFeatures()).toMatchObject({ memory: false });
     expect(hasMemoryHooks(await readSettings())).toBe(false);
 
-    for (const dir of [repoB, nonGit]) {
-      captureTurn(dir);
-      expect(linesOf(memoryQueue(dir)), `memory captured in ${dir} after init --no-memory`).toBe(0);
-      // Non-vacuity: the hooks ran and learning (still on) captured the turn.
-      expect(queueLines(dir), `the capture hooks did not run in ${dir}`).toBe(2);
-    }
+    captureTurn(repoB);
+    expect(linesOf(memoryQueue(repoB)), 'memory captured in a second repo after init --no-memory').toBe(0);
+    // Non-vacuity: the hooks ran and learning (still on) captured the turn.
+    expect(queueLines(repoB), 'the capture hooks did not run in the second repo').toBe(2);
+    // A non-git cwd captures nothing at all, whatever the switches say (D-HOOKS-GIT-ONLY).
+    captureTurn(nonGit);
+    expect(linesOf(memoryQueue(nonGit))).toBe(0);
+    expect(queueLines(nonGit)).toBe(0);
     expect(runCli(repoB, 'memory', '--status').out).toContain('Working memory: disabled');
 
     // init --memory from another directory restores it everywhere.
@@ -375,11 +377,11 @@ describe('older manifests agree with the runtime gates', () => {
     await seedLearningQueue(repoB);
 
     expect(sessionContext(repoB)).not.toContain('LEARNING MAINTENANCE');
-    const before = queueLines(nonGit);
-    captureTurn(nonGit);
-    expect(queueLines(nonGit), 'learning captured under a legacy decisions:false').toBe(before);
+    const before = queueLines(repoB);
+    captureTurn(repoB);
+    expect(queueLines(repoB), 'learning captured under a legacy decisions:false').toBe(before);
     // Non-vacuity: the capture hooks ran — memory (still on) captured the turn.
-    expect(linesOf(memoryQueue(nonGit))).toBe(2);
+    expect(linesOf(memoryQueue(repoB))).toBe(2);
     expect(runCli(repoA, 'learning', '--status').out).toContain('Learning: disabled');
 
     // An explicit learning value wins over the legacy key.

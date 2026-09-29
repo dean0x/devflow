@@ -591,6 +591,9 @@ describe('session-start-context hook integration', () => {
   beforeEach(async () => {
     tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'devflow-context-hook-test-'));
     tmpHome = await mkTmpHome();
+    // Project context is injected only in a git project (D-HOOKS-GIT-ONLY); an
+    // empty `.git` is a marker, not a repository, so the root stays tmpDir.
+    await fs.mkdir(path.join(tmpDir, '.git'));
     await fs.mkdir(path.join(tmpDir, '.devflow', 'learning'), { recursive: true });
   });
 
