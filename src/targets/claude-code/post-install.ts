@@ -235,8 +235,12 @@ export function computeDevflowGitignore(existingContent: string): string | null 
 
 /**
  * Merge Devflow deny entries into an existing settings JSON object.
- * Preserves existing entries (including allow and sibling keys), deduplicates,
- * and returns the merged JSON string with trailing newline.
+ * Preserves existing entries (including allow and sibling keys) except those named
+ * in `retired`, deduplicates, and returns the merged JSON string with trailing newline.
+ *
+ * `retired` is how an install converges an older one: pass retiredDenyEntries(template)
+ * so entries Devflow once shipped and has since dropped do not linger. An entry that
+ * `newDenyEntries` carries is never dropped, whatever `retired` says.
  *
  * PURE + idempotent: calling with the same inputs always yields byte-equal output.
  * Non-array `deny` (e.g. a string, null) is treated as empty — neither throws nor spreads chars.
@@ -244,23 +248,38 @@ export function computeDevflowGitignore(existingContent: string): string | null 
  * @throws {SyntaxError} on malformed JSON — callers must pre-validate (e.g. via detectDenyState)
  *   or wrap in try/catch.
  */
-export function mergeDenyList(existingJson: string, newDenyEntries: string[]): string {
+export function mergeDenyList(
+  existingJson: string,
+  newDenyEntries: string[],
+  retired: ReadonlySet<string> = new Set(),
+): string {
   const existing = JSON.parse(existingJson) as Record<string, unknown>;
   const rawDeny = (existing.permissions as Record<string, unknown> | undefined)?.deny;
   const currentDeny: string[] = Array.isArray(rawDeny) ? rawDeny as string[] : [];
-  const merged = [...new Set([...currentDeny, ...newDenyEntries])];
+  const kept = currentDeny.filter(e => !retired.has(e));
+  const merged = [...new Set([...kept, ...newDenyEntries])];
   existing.permissions = { ...(existing.permissions as Record<string, unknown> ?? {}), deny: merged };
   return JSON.stringify(existing, null, 2) + '\n';
 }
 
 /**
  * Historical superset of every deny entry Devflow has ever shipped.
- * Append every future entry here; never remove entries.
- * Used by stripUserDenyList to identify Devflow-managed entries in legacy installs.
+ * Append every future entry here; never remove entries — a retired template entry
+ * stays here so removal (stripUserDenyList, removeManagedSettings) and install
+ * convergence (retiredDenyEntries) still recognise it in an older install.
  *
  * Load-time assertion below verifies this is a superset of the current template.
  */
 // D-SECURITY-01: frozen at module load — any future template entry must appear here too.
+// D-SECURITY-02 (#399): the nine v1 piped rules (`Bash(curl * | bash*)` and kin) are
+// RETIRED — kept here, dropped from the template. Claude Code splits a Bash command at
+// `|` (and `&&`, `||`, `;`, `|&`, `&`, newlines) and matches every rule against each
+// subcommand alone, so a rule holding ` | ` can never match anything. The exact
+// shell-on-stdin denies in the v2 batch (`Bash(bash)`, `Bash(sh -s *)`, ...) match the
+// shell subcommand of such a pipeline instead.
+// Only entries a release actually shipped belong here: removal and install convergence
+// strip every entry this set names that the template does not, so a rule Devflow never
+// shipped would be taken from a user who wrote it (ADR-024, prove-you-wrote-it).
 export const DEVFLOW_HISTORICAL_DENY: ReadonlySet<string> = Object.freeze(new Set<string>([
   // v1 batch — 154 entries shipped in src/targets/claude-code/templates/managed-settings.json
   'Bash(rm -rf /*)',
@@ -417,7 +436,54 @@ export const DEVFLOW_HISTORICAL_DENY: ReadonlySet<string> = Object.freeze(new Se
   'Read(/etc/shadow)',
   'Read(/etc/sudoers)',
   'Read(/etc/passwd)',
+  // v2 batch (#399) — 25 template entries: a shell reading its script from stdin,
+  // `zsh -c` beside the v1 `sh -c`/`bash -c`, OrbStack VM control, docker
+  // pull/delete/prune and whole-disk or privileged runs.
+  'Bash(bash)',
+  'Bash(sh)',
+  'Bash(zsh)',
+  'Bash(bash - *)',
+  'Bash(sh - *)',
+  'Bash(zsh - *)',
+  'Bash(bash -s *)',
+  'Bash(sh -s *)',
+  'Bash(zsh -s *)',
+  'Bash(zsh -c *)',
+  'Bash(docker run*--privileged*)',
+  'Bash(docker run*-v /:*)',
+  'Bash(docker run*--volume /:*)',
+  'Bash(docker run*--volume=/:*)',
+  'Bash(docker pull *)',
+  'Bash(docker image pull *)',
+  'Bash(docker rm *)',
+  'Bash(docker container rm *)',
+  'Bash(docker rmi *)',
+  'Bash(docker image rm *)',
+  'Bash(docker volume rm *)',
+  'Bash(docker*prune*)',
+  'Bash(orb *)',
+  'Bash(orbctl *)',
+  'Bash(open *OrbStack*)',
 ]));
+
+/**
+ * The Devflow deny entries an older install may carry that the current template no
+ * longer ships: DEVFLOW_HISTORICAL_DENY minus the template. PURE.
+ *
+ * An empty template (loadTemplateDenyEntries' failure value) retires nothing — an
+ * unreadable template must never read as "Devflow dropped every entry it ever shipped".
+ *
+ * Accepted trade-off (ADR-024): a deny entry is a bare string, so a user who typed a
+ * retired entry themselves is indistinguishable from Devflow's copy and loses it on the
+ * next install, exactly as `security --disable` and uninstall already strip every
+ * historical entry. Retire an entry only when losing a user's identical copy is
+ * harmless; the #399 piped rules qualify because none could ever match (D-SECURITY-02).
+ */
+export function retiredDenyEntries(templateEntries: readonly string[]): ReadonlySet<string> {
+  if (templateEntries.length === 0) return new Set();
+  const current = new Set(templateEntries);
+  return new Set([...DEVFLOW_HISTORICAL_DENY].filter(e => !current.has(e)));
+}
 
 /**
  * Assert that DEVFLOW_HISTORICAL_DENY is a superset of the provided template entries.
@@ -625,8 +691,8 @@ export function resolveSecurityAction(
 
 /**
  * Load the deny entry array from the managed-settings.json template.
- * Canonical single-source helper used by installManagedSettings, removeManagedSettings,
- * init.ts's security step, and security.ts's --enable/--disable paths.
+ * Canonical single-source helper used by installManagedSettings, init.ts's security
+ * step, and security.ts's --enable path. Removal keys on DEVFLOW_HISTORICAL_DENY instead.
  *
  * Defensive read: treats file as `Record<string, unknown>`, guards with Array.isArray,
  * coerces each element to string. Returns [] on any read or parse failure (never throws).
@@ -676,7 +742,7 @@ export async function installManagedSettings(
   let content: string;
   try {
     const existing = await fs.readFile(managedPath, 'utf-8');
-    content = mergeDenyList(existing, newDenyEntries);
+    content = mergeDenyList(existing, newDenyEntries, retiredDenyEntries(newDenyEntries));
   } catch {
     // File doesn't exist — use template as-is
     content = JSON.stringify({ permissions: { deny: newDenyEntries } }, null, 2) + '\n';
@@ -765,16 +831,11 @@ export async function removeManagedSettings(
     return false; // File doesn't exist
   }
 
-  // Load our deny entries to identify which to remove
-  const devflowDenyEntries = await loadTemplateDenyEntries(rootDir);
-  if (devflowDenyEntries.length === 0) {
-    return false;
-  }
-
+  // Key on every entry Devflow has ever shipped, not the current template: an install
+  // from an older release carries entries the template has since retired (D-SECURITY-02).
   const existing = JSON.parse(existingContent);
   const currentDeny: string[] = existing.permissions?.deny ?? [];
-  const devflowSet = new Set(devflowDenyEntries);
-  const remaining = currentDeny.filter(entry => !devflowSet.has(entry));
+  const remaining = currentDeny.filter(entry => !DEVFLOW_HISTORICAL_DENY.has(entry));
 
   // Determine the target action: delete file entirely or write updated content
   let shouldDelete = false;
@@ -877,7 +938,7 @@ export async function applyUserSecurityDenyList(
   } catch {
     existing = '{}';
   }
-  const merged = mergeDenyList(existing, currentTemplateDeny);
+  const merged = mergeDenyList(existing, currentTemplateDeny, retiredDenyEntries(currentTemplateDeny));
   await writeFileAtomicExclusive(settingsPath, merged);
   return merged;
 }

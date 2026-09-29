@@ -466,7 +466,7 @@ d sub/
   "showTurnDuration": true,
   "showClearContextOnPlanAccept": true,
   "permissions": {
-    "deny": "<154 entries>"
+    "deny": "<170 entries>"
   }
 }
 
@@ -593,6 +593,6 @@ d <REPO>/.devflow/
 ## uninstall: settings.json (permissions.deny collapsed to a count)
 {
   "permissions": {
-    "deny": "<154 entries>"
+    "deny": "<170 entries>"
   }
 }

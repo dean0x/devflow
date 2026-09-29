@@ -14,7 +14,7 @@ import { promises as fs, existsSync } from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { removeManagedDenyList, describeManagedDenyRemoval } from '../src/cli/commands/security.js';
-import { loadTemplateDenyEntries } from '../src/targets/claude-code/post-install.js';
+import { loadTemplateDenyEntries, DEVFLOW_HISTORICAL_DENY } from '../src/targets/claude-code/post-install.js';
 import { getPackageRoot } from '../src/core/paths.js';
 
 const ROOT = getPackageRoot();
@@ -62,6 +62,19 @@ describe('removeManagedDenyList', () => {
     const after = JSON.parse(await fs.readFile(managedPath, 'utf-8')) as { model: string; permissions: { deny: string[] } };
     expect(after.model).toBe('opus');
     expect(after.permissions.deny).toEqual([own]);
+  });
+
+  it('removes entries an older release shipped and the template has since retired (#399)', async () => {
+    const template = await templateDeny();
+    const retired = [...DEVFLOW_HISTORICAL_DENY].filter(e => !template.includes(e));
+    // Non-vacuous: #399 retired the piped rules, so an install from v2.5.0 carries some.
+    expect(retired).toContain('Bash(curl * | bash*)');
+    await fs.writeFile(managedPath, JSON.stringify({ permissions: { deny: [...template, ...retired] } }));
+
+    const outcome = await removeManagedDenyList(ROOT, false, managedPath);
+
+    expect(outcome).toEqual({ kind: 'removed', path: managedPath });
+    expect(existsSync(managedPath)).toBe(false);
   });
 
   it('reports absent — and throws nothing — when there is no managed file', async () => {
