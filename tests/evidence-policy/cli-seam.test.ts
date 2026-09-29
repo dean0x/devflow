@@ -804,12 +804,15 @@ describe('devflow compliance — the built CLI (AC-9, AC-10)', () => {
     const repo = makeRepo(home);
     const shim = buildScriptedShim(fakeGh, tmp, [
       { tool: 'gh', args: ARGV.probe, stdout: 'main\n' },
+      { tool: 'gh', args: ARGV.contentsProject('main'), exit: 1, stderr: 'gh: Not Found (HTTP 404)\n' },
       { tool: 'gh', args: ARGV.contents('main'), stdout: REQUIRED_BODY },
     ]);
     const r = runCli({ home, cwd: repo, args: ['compliance', '--status'], shim });
     expect(r.status, r.out).toBe(0);
     expect(r.out).toContain('Evidence policy: required (source: file) [warn: pr-changes-policy]');
-    expect(shim.readLog()).toEqual([['gh', ...ARGV.probe], ['gh', ...ARGV.contents('main')]]);
+    expect(shim.readLog()).toEqual([
+      ['gh', ...ARGV.probe], ['gh', ...ARGV.contentsProject('main')], ['gh', ...ARGV.contents('main')],
+    ]);
   }, 60_000);
 
   it.each([
