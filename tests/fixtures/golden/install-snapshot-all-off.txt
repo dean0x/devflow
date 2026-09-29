@@ -71,6 +71,17 @@ d .claude/skills/devflow:complexity/references/
 - .claude/skills/devflow:complexity/references/detection.md
 - .claude/skills/devflow:complexity/references/patterns.md
 - .claude/skills/devflow:complexity/references/violations.md
+d .claude/skills/devflow:compliance/
+- .claude/skills/devflow:compliance/SKILL.md
+d .claude/skills/devflow:compliance/references/
+- .claude/skills/devflow:compliance/references/detection.md
+- .claude/skills/devflow:compliance/references/gdpr.md
+- .claude/skills/devflow:compliance/references/hipaa.md
+- .claude/skills/devflow:compliance/references/iso-27001.md
+- .claude/skills/devflow:compliance/references/pci-dss.md
+- .claude/skills/devflow:compliance/references/soc2.md
+- .claude/skills/devflow:compliance/references/sources.md
+- .claude/skills/devflow:compliance/references/sox.md
 d .claude/skills/devflow:consistency/
 - .claude/skills/devflow:consistency/SKILL.md
 d .claude/skills/devflow:consistency/references/
