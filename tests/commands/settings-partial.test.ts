@@ -177,8 +177,8 @@ describe('settings partial wiring (PF-073)', () => {
       expect(blocks, `${file}: ${blocks} settings blocks for ${gates} consuming gates`).toBe(gates)
       consumers += gates
     }
-    // code-review 2, implement 2, resolve 2, plan 1, dynamic-build 1, debug 1, explore 1, self-review 1.
-    expect(consumers).toBe(11)
+    // code-review 2, implement 2, resolve 2, dynamic-build 2, plan 1, debug 1, explore 1, self-review 1.
+    expect(consumers).toBe(12)
   })
 
   it('exactly the SETTINGS_BLOCK_HOSTS roster carries the block (both directions)', () => {
@@ -190,7 +190,7 @@ describe('settings partial wiring (PF-073)', () => {
     const lines = requireDistFiles()
       .flatMap(f => requireDistFile(f).split('\n'))
       .filter(l => l.includes('resolve-settings.cjs'))
-    expect(lines.length).toBe(11)
+    expect(lines.length).toBe(12)
     expect([...new Set(lines)]).toEqual([INVOCATION])
   })
 })

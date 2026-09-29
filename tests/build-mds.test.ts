@@ -1649,13 +1649,14 @@ describe('publication_gate adoption in compiled host commands (Phase C)', () => 
 // compliance_gate() adoption guard: 2 importers (code-review, plan) must use the
 // shared {compliance_gate()} partial — the review lens is the one command-layer
 // gate on COMPLIANCE_ACTIVE. implement and resolve ALIAS-import the same partial for
-// compliance_frameworks() alone: they pass the lens to their Code spawns and gate
-// nothing on it. release.md carries no compliance gate at all since #362: its
+// compliance_frameworks() alone, and dynamic-build for compliance_lens() (the gate
+// minus its COMPLIANCE_ACTIVE sentence): they pass the lens to their Code spawns and
+// gate nothing on it. release.md carries no compliance gate at all since #362: its
 // evidence and back-link steps gate on EVIDENCE_POLICY, resolved by the
 // evidence_policy() text it holds verbatim. hostsScanned === 2 asserts non-vacuity
 // [DR-27a].
-// bug-analysis, dynamic-build and implement dropped the import in #362: their only
-// use of the check was to key a Git spawn, and the evidence policy now supplies the
+// bug-analysis, dynamic-build and implement dropped the selective import in #362: their
+// only use of the check was to key a Git spawn, and the evidence policy now supplies the
 // mechanism inputs those spawns take. resolve dropped it in the same PR: its thread
 // steps gate on EVIDENCE_POLICY and its merge readiness on
 // REQUIRE_NON_AUTHOR_APPROVAL.

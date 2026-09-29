@@ -260,11 +260,11 @@ async function runWave(
   }
   const run = new AsyncFunction(
     'agent', 'runSingleTicketEngine', 'remainingTickets', 'INTEGRATION_BRANCH', 'plans', 'DECISIONS_CONTEXT',
-    'ISSUE_REQUIRED', 'APPLY_CONVENTIONS', 'ISSUE_NUMBER', 'ISSUE_PR_LINK', waveBody,
+    'ISSUE_REQUIRED', 'APPLY_CONVENTIONS', 'COMPLIANCE_FRAMEWORKS', 'ISSUE_NUMBER', 'ISSUE_PR_LINK', waveBody,
   )
   const order = world.order ?? Object.keys(world.tickets)
   const out = (await run(
-    agent, engine, [...order], INTEGRATION, plans, '(none)', issueRequired, 'true', TRACKING, `Closes ${TRACKING}`,
+    agent, engine, [...order], INTEGRATION, plans, '(none)', issueRequired, 'true', 'off', TRACKING, `Closes ${TRACKING}`,
   )) as { tickets: WaveRow[]; quarantined: Array<{ ticket: string; reason: string }> }
   return { ...out, spawns, engines }
 }

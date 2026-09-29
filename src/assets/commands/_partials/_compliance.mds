@@ -4,15 +4,20 @@
 `COMPLIANCE_FRAMEWORKS` is the settings line's `COMPLIANCE` with `generic` written `none`: `off`, `none`, or the framework ids the machine and this repository declare.
 @end
 
-@define compliance_gate():
+@define compliance_lens():
 **Resolve the compliance lens** for each worktree root, from its settings line (every framework reference is installed on every machine, so no file check decides it):
 
 {{settings.settings_resolve()}}
 
 **Set the compliance lens** from that line: {{compliance_frameworks()}}
+@end
+
+@define compliance_gate():
+{{compliance_lens()}}
 
 `COMPLIANCE_ACTIVE` is `true` unless `COMPLIANCE_FRAMEWORKS` is `off`.
 @end
 
 @export compliance_frameworks
+@export compliance_lens
 @export compliance_gate
