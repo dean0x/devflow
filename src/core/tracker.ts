@@ -537,8 +537,10 @@ export type TrackerConventionsMigration =
  * `rename(2)` moves a SYMLINK itself, never the file it points at, so a
  * conventions file kept in a dotfiles repository stays there and only the link
  * moves. A link's target is resolved relative to the link's directory, so a
- * RELATIVE link now resolves from one level deeper; an absolute one is unaffected.
- * rename also replaces an existing destination without a word, which is why the
+ * RELATIVE link would resolve from one level deeper and name a different path —
+ * the conventions would silently vanish behind a dangling link that also blocks
+ * the Tracker agent's create-exclusive write. A relative link is therefore `kept`,
+ * with its reason; an absolute one moves unaffected. rename also replaces an existing destination without a word, which is why the
  * target is probed first and a present one is never overwritten: that file holds
  * conventions a user may have corrected by hand, and it is the provider's own.
  *
@@ -551,11 +553,20 @@ export async function migrateLegacyTrackerConventions(devflowDir: string): Promi
   try {
     await fs.rm(path.join(devflowDir, TRACKER_LEGACY_ATTEMPTS_FILE), { force: true });
 
+    let isLink: boolean;
     try {
-      await fs.lstat(from);
+      isLink = (await fs.lstat(from)).isSymbolicLink();
     } catch (err) {
       if (errnoCode(err) === 'ENOENT') return { kind: 'none' };
       throw err;
+    }
+    if (isLink && !path.isAbsolute(await fs.readlink(from))) {
+      return {
+        kind: 'kept',
+        reason:
+          `${from} is a symbolic link with a relative target, which would no longer resolve from ` +
+          `${trackerConventionsDir(devflowDir)}, so it was left in place — re-create it there by hand.`,
+      };
     }
 
     const head = await readBoundedHead(from, TRACKER_CONVENTIONS_READ_BYTES);

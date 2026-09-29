@@ -658,6 +658,23 @@ describe('tracker file lifecycle', () => {
     }
   });
 
+  it('leaves a RELATIVE symlink in place — one level deeper it would no longer resolve', async () => {
+    // A dotfiles-managed conventions file linked by a relative path: rename(2)
+    // moves the link text verbatim, so from ~/.devflow/tracker/ the same text
+    // names a different path and the conventions would silently vanish.
+    const target = path.join(devflowDir, 'dotfiles-tracker.md');
+    await fs.writeFile(target, '---\nprovider: jira\n---\n## Project\n', 'utf-8');
+    await fs.symlink('dotfiles-tracker.md', legacyOf(devflowDir));
+
+    const outcome = await migrateLegacyTrackerConventions(devflowDir);
+
+    expect(outcome.kind).toBe('kept');
+    if (outcome.kind !== 'kept') return;
+    expect(outcome.reason).toContain('relative');
+    await expect(fs.readlink(legacyOf(devflowDir))).resolves.toBe('dotfiles-tracker.md');
+    await expect(fs.lstat(trackerConventionsPath(devflowDir, 'jira'))).rejects.toThrow();
+  });
+
   it('leaves a file whose frontmatter names no provider in place, with one reason', async () => {
     for (const body of ['## Project\nkey: ACME\n', '---\ninferred-from: x\n---\n', '---\nprovider: jira-cloud\n---\n']) {
       await fs.writeFile(legacyOf(devflowDir), body, 'utf-8');
