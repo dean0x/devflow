@@ -5,7 +5,7 @@ import color from 'picocolors';
 import { getClaudeDirectory, getDevFlowDirectory, getManagedSettingsPath } from '../../targets/claude-code/claude-paths.js';
 import { readManifest, syncManifestFeature } from '../../core/manifest.js';
 import {
-  mergeDenyList,
+  applyUserSecurityDenyList,
   stripUserDenyList,
   detectDenyState,
   DEVFLOW_HISTORICAL_DENY,
@@ -237,15 +237,8 @@ export const securityCommand = new Command('security')
         }
 
       } else {
-        // User mode: merge into ~/.claude/settings.json
-        let existing: string;
-        try {
-          existing = await fs.readFile(userSettingsPath, 'utf-8');
-        } catch {
-          existing = '{}';
-        }
-        const merged = mergeDenyList(existing, templateDeny);
-        await writeFileAtomicExclusive(userSettingsPath, merged);
+        // User mode: merge into ~/.claude/settings.json, converging retired entries
+        const merged = await applyUserSecurityDenyList(userSettingsPath, templateDeny);
         const count = countDenyEntries(merged);
         p.log.success(`Security deny list applied to user settings (${count} entries)`);
         p.log.info(`  Location: ${color.dim(userSettingsPath)}`);
