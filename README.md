@@ -190,7 +190,7 @@ A repository can commit `.devflow/project.json` to settle team-wide choices. Eve
 
 - `evidence` is the [evidence policy](#evidence-policy); `compliance` names the regulatory frameworks the repository answers to, and its presence raises the evidence floor to `required`.
 - `tracker` selects the repository's issue tracker. Your personal `.devflow/config.json` may only narrow it, to `github` or to the same provider.
-- `reviewPublication` is a ceiling only: it can lower your personal value, never raise it. With no personal value you get `auto` whatever this file says, so a branch that commits `full` cannot switch off the visibility gate for whoever reviews it.
+- `reviewPublication` is a ceiling only: it can lower your personal value, never raise it. With no personal value you get at most `auto` — a team `off` still lowers it — so a branch that commits `full` cannot switch off the visibility gate for whoever reviews it.
 - `features` can switch memory, learning or knowledge off for this repository, never back on. Your personal `config.json` can do the same for you.
 
 Each key is checked on its own, so one bad value never disables the rest: a bad `evidence` resolves to `required`, a bad `reviewPublication` to `off`, a bad `compliance` list to the generic lens. Commands never read the file themselves — one local resolver folds it with your `config.json` and the machine settings, without touching the network.
