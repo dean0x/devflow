@@ -122,7 +122,7 @@ Config splits along a different line than before #378:
 | What | File | Contains |
 |------|------|---------|
 | Feature on/off | `~/.devflow/manifest.json` (machine-wide) | `{features: {memory, learning, knowledge, ...}}` |
-| Team narrowing + facts | `.devflow/project.json` (committed, never devflow-written) | `{version, evidence, compliance, tracker, reviewPublication, features}` — `features.<x>: false` only narrows |
+| Team narrowing + facts | `.devflow/project.json` (committed, never devflow-written) | `{version, evidence, compliance, tracker, reviewPublication, features}` — `features.<x>: false` only narrows; `reviewPublication` only lowers (a ceiling, never a default: `min(team ?? full, personal ?? auto)`) |
 | Per-repo facts | `.devflow/config.json` (project root, per worktree) | `{reviewPublication, tracker?, features?}` — `features.<x>: false` only narrows; top-level switch keys retired |
 | Agent tuning | `.devflow/learning/learning.json` → `~/.devflow/learning.json` | `{model, debug}`, project overrides global |
 
