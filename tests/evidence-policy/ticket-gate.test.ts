@@ -53,17 +53,22 @@ import {
   walkFiles,
   type OrderRule,
 } from '../helpers.js'
-import { RESOLVER_SCRIPT } from './scripted-shim.js'
+import { PROJECT_CONFIG_LIB, SETTINGS_SCRIPT } from './scripted-shim.js'
 
 const PARTIAL_PATH = path.join(ROOT, 'src', 'assets', 'commands', '_partials', '_evidence_policy.mds')
 const DEFINE = 'evidence_exception'
 
-/** Transcribed from the script's JSDoc: the policy-file parser and serializer. */
-interface PolicyFileApi {
-  parsePolicyBytes(buf: Uint8Array | null | undefined): { kind: string; policy?: string }
-  serializePolicy(policy: unknown): string | null
+/** Transcribed from the settings resolver's JSDoc: the project.json serializer the CLI prints from. */
+interface ProjectSuggestionApi {
+  serializeProjectSuggestion(input: unknown): string | null
 }
-const RESOLVER = createRequire(import.meta.url)(RESOLVER_SCRIPT) as PolicyFileApi
+const SETTINGS = createRequire(import.meta.url)(SETTINGS_SCRIPT) as ProjectSuggestionApi
+
+/** Transcribed from lib/project-config.cjs's JSDoc: the one project.json parser. */
+interface ProjectConfigApi {
+  parseProjectBytes(buf: Uint8Array): { kind: string; evidence?: { kind: string; value?: unknown } }
+}
+const LIB = createRequire(import.meta.url)(PROJECT_CONFIG_LIB) as ProjectConfigApi
 
 // ---------------------------------------------------------------------------
 // The texts under test
@@ -187,7 +192,7 @@ function collectAskDefects(block: string | null): string[] {
   need('a bounded re-ask for an empty reason', /ask for it once more, and stop/.test(block))
   need('the BLOCKED report', block.includes('`BLOCKED (no ticket link)`'))
   need('the created branch and BASE_BRANCH', block.includes('`TASK_ID`') && block.includes('`BASE_BRANCH`'))
-  need('the policy-file remedy', block.includes('`.devflow/policy.json`'))
+  need('the project-file remedy', block.includes('`.devflow/project.json`'))
   need('no ISSUE_INPUT: key line (the single-ISSUE_INPUT pin)', !/^\s*ISSUE_INPUT:/m.test(block))
   return out
 }
@@ -197,12 +202,12 @@ describe('AC-10: the ask offers an exception or a stop, and a stop names its rem
     expect(collectAskDefects(askBlock(implementMd()))).toEqual([])
   })
 
-  it('the policy-file remedy is the canonical standard policy, and it parses', () => {
+  it('the project-file remedy is the canonical standard evidence, and it parses', () => {
     const block = askBlock(implementMd())!
     const literal = /`(\{"version":1,[^`]*\})`/.exec(block)?.[1]
-    expect(literal, 'the remedy must quote the policy file').toBeDefined()
-    expect(`${literal}\n`).toBe(RESOLVER.serializePolicy('standard'))
-    expect(RESOLVER.parsePolicyBytes(new TextEncoder().encode(literal!))).toEqual({ kind: 'valid', policy: 'standard' })
+    expect(literal, 'the remedy must quote the project file').toBeDefined()
+    expect(`${literal}\n`).toBe(SETTINGS.serializeProjectSuggestion({ evidence: 'standard' }))
+    expect(LIB.parseProjectBytes(new TextEncoder().encode(literal!)).evidence).toEqual({ kind: 'valid', value: 'standard' })
   })
 
   it('known-bad probes: a third option, a missing stop report and a missing block are reported', () => {

@@ -280,7 +280,7 @@ export const complianceCommand = new Command('compliance')
       );
 
       // The repository's own declaration (.devflow/project.json) and, while the
-      // legacy policy file is still there, the hint to migrate it. Both come from
+      // retired policy file is in the working tree, the hint to migrate it. Both come from
       // the local settings resolver — one git call, no network — and add nothing
       // when the repository declares nothing (the block is then unchanged).
       const repoLines = repoComplianceStatusLines(loadSettingsModule(), { dir: process.cwd() });
@@ -304,7 +304,7 @@ export const complianceCommand = new Command('compliance')
         '',
         // The repository in cwd, resolved by the package's own resolver with the
         // compliance state already read above (D-POLICY-CJS-SEAM). Bounded: at most
-        // two `gh` calls, each with a timeout, so offline degrades to a flagged line.
+        // three `gh` calls, each with a timeout, so offline degrades to a flagged line.
         evidencePolicyStatusLine(loadEvidencePolicyModule(), { dir: process.cwd(), compliance: current }),
       ];
 

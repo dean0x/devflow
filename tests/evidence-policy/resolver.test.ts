@@ -2,13 +2,15 @@
  * tests/evidence-policy/resolver.test.ts
  *
  * Suite for src/assets/scripts/resolve-evidence-policy.cjs — the plumbing script
- * that resolves EVIDENCE_POLICY from the default branch's .devflow/policy.json,
- * folds the worktree and compliance state in raise-only, and prints one framed
- * line plus the three mechanism inputs.
+ * that resolves EVIDENCE_POLICY from the `evidence` key of the default branch's
+ * .devflow/project.json, folds the worktree and compliance state in raise-only,
+ * and prints one framed line plus the three mechanism inputs. The fixtures state
+ * each source's evidence in project.json; the retired .devflow/policy.json is
+ * exercised where its presence is the subject (argv, TP-45, TP-46).
  *
  * Shape of the suite:
- *   - pure helpers through require() (parseArgs, parsePolicyBytes, complianceDefault,
- *     formatLine, serializePolicy and the exported grammars);
+ *   - pure helpers through require() (parseArgs, complianceDefault, formatLine
+ *     and the exported grammars);
  *   - resolve() in-process with the scripted exec twin — the 40-row fold matrix,
  *     SOURCE/WARNINGS exhaustiveness, change detection, per-call bounds;
  *   - the real script as a subprocess with the scripted bash fakes on PATH — the
@@ -46,6 +48,7 @@ import {
   type Scenario,
   type ScriptedCall,
 } from './scripted-shim.js';
+import { walkFiles } from '../helpers.js';
 
 // ---------------------------------------------------------------------------
 // The .cjs seam
@@ -73,11 +76,6 @@ interface Resolution {
   readonly inputs: MechanismInputs;
 }
 
-type ParsedPolicy =
-  | { readonly kind: 'absent' }
-  | { readonly kind: 'invalid' }
-  | { readonly kind: 'valid'; readonly policy: Policy };
-
 type ParsedArgs =
   | { readonly kind: 'resolve'; readonly dir: string }
   | { readonly kind: 'usage'; readonly usage: string };
@@ -93,16 +91,13 @@ interface ResolverModule {
   readonly WARNINGS: readonly Warning[];
   readonly EXIT_CODES: Readonly<Record<string, number>>;
   readonly MECHANISM_INPUTS: Readonly<Record<Policy, MechanismInputs>>;
-  readonly MAX_POLICY_BYTES: number;
   readonly SAFE_REF_RE: RegExp;
   readonly OUTPUT_LINE_RE: RegExp;
   readonly FAIL_CLOSED_LINE: string;
   parseArgs(argv: readonly string[]): ParsedArgs;
-  parsePolicyBytes(buf: Uint8Array | null | undefined): ParsedPolicy;
   complianceDefault(raw: unknown): Policy;
   resolve(opts: { dir: string; compliance?: unknown }, deps?: { exec?: ExecFn }): Resolution;
   formatLine(r: Resolution): string;
-  serializePolicy(policy: unknown): string | null;
   main(argv: readonly string[], deps?: { exec?: ExecFn; formatLine?: (r: Resolution) => unknown }): MainOutcome;
 }
 
@@ -115,7 +110,19 @@ const CJS_FS = NODE_REQUIRE('fs') as typeof import('fs');
 // Fixtures
 // ---------------------------------------------------------------------------
 
+/** A source's evidence as the team commits it: the `evidence` key of `.devflow/project.json`. */
 const BODY = {
+  required: '{"version":1,"evidence":"required"}\n',
+  standard: '{"version":1,"evidence":"standard"}\n',
+  invalid: '{"version":1,"evidence":"REQUIRED"}\n',
+} as const;
+
+/**
+ * The retired `.devflow/policy.json` in the shapes teams committed — a valid
+ * value either way, and invalid bytes. The resolver never parses it
+ * (D-POLICY-JSON-RETIRED), so every one of these is the same presence.
+ */
+const RETIRED = {
   required: '{"version":1,"evidencePolicy":"required"}\n',
   standard: '{"version":1,"evidencePolicy":"standard"}\n',
   invalid: '{"version":1,"evidencePolicy":"REQUIRED"}\n',
@@ -174,13 +181,20 @@ afterEach(() => {
   fs.rmSync(tmp, { recursive: true, force: true });
 });
 
-function worktreePolicyPath(dir: string): string {
-  return path.join(dir, '.devflow', 'policy.json');
+function worktreeFile(dir: string, name: 'project.json' | 'policy.json'): string {
+  return path.join(dir, '.devflow', name);
 }
 
+/** The working tree's project.json — the evidence a source states. */
 function writeWorktree(dir: string, bytes: string | Buffer): void {
   fs.mkdirSync(path.join(dir, '.devflow'), { recursive: true });
-  fs.writeFileSync(worktreePolicyPath(dir), bytes);
+  fs.writeFileSync(worktreeFile(dir, 'project.json'), bytes);
+}
+
+/** The working tree's retired policy.json — presence only. */
+function writeWorktreePolicy(dir: string, bytes: string | Buffer): void {
+  fs.mkdirSync(path.join(dir, '.devflow'), { recursive: true });
+  fs.writeFileSync(worktreeFile(dir, 'policy.json'), bytes);
 }
 
 /** resolve() in-process. `compliance` is ALWAYS explicit, so no real manifest is read. */
@@ -242,7 +256,6 @@ describe('module surface', () => {
     expect(RESOLVER.WARNINGS).toEqual([
       'remote-unavailable', 'invalid-file', 'raised-by-compliance', 'pr-changes-policy',
     ]);
-    expect(RESOLVER.MAX_POLICY_BYTES).toBe(4096);
     for (const registry of [RESOLVER.POLICIES, RESOLVER.SOURCES, RESOLVER.WARNINGS, RESOLVER.EXIT_CODES]) {
       expect(Object.isFrozen(registry)).toBe(true);
     }
@@ -356,82 +369,6 @@ describe('parseArgs', () => {
 });
 
 // ---------------------------------------------------------------------------
-// parsePolicyBytes (D-POLICY-STRICT-SCHEMA)
-// ---------------------------------------------------------------------------
-
-describe('parsePolicyBytes', () => {
-  const COMPACT = '{"version":1,"evidencePolicy":"required"}';
-  const padTo = (s: string, n: number): string => s + ' '.repeat(n - Buffer.byteLength(s));
-
-  const VALID: ReadonlyArray<readonly [string, string | Buffer, Policy]> = [
-    ['compact required', COMPACT, 'required'],
-    ['compact standard', '{"version":1,"evidencePolicy":"standard"}', 'standard'],
-    ['pretty-printed', '{\n  "version": 1,\n  "evidencePolicy": "standard"\n}\n', 'standard'],
-    ['CRLF pretty-printed', '{\r\n  "version": 1,\r\n  "evidencePolicy": "required"\r\n}\r\n', 'required'],
-    ['swapped key order', '{"evidencePolicy":"standard","version":1}', 'standard'],
-    ['tabs', '{\t"version"\t:\t1\t,\t"evidencePolicy":"required"}', 'required'],
-    ['exactly 4096 bytes (padded)', padTo(COMPACT, 4096), 'required'],
-  ];
-
-  it.each(VALID)('accepts %s', (_label, bytes, policy) => {
-    expect(RESOLVER.parsePolicyBytes(Buffer.from(bytes))).toEqual({ kind: 'valid', policy });
-  });
-
-  const INVALID: ReadonlyArray<readonly [string, string | Buffer]> = [
-    ['"REQUIRED"', '{"version":1,"evidencePolicy":"REQUIRED"}'],
-    ['"Required"', '{"version":1,"evidencePolicy":"Required"}'],
-    ['an empty array', '[]'],
-    ['an array of the object', `[${COMPACT}]`],
-    ['null', 'null'],
-    ['a __proto__ key', '{"__proto__":{"evidencePolicy":"standard"},"version":1}'],
-    ['a constructor extra key', '{"version":1,"evidencePolicy":"required","constructor":1}'],
-    ['any extra key', '{"version":1,"evidencePolicy":"required","x":1}'],
-    ['a missing key', '{"version":1}'],
-    ['BOM + valid', Buffer.concat([Buffer.from([0xef, 0xbb, 0xbf]), Buffer.from(COMPACT)])],
-    ['4097 bytes', padTo(COMPACT, 4097)],
-    ['version 2', '{"version":2,"evidencePolicy":"required"}'],
-    ['version "1"', '{"version":"1","evidencePolicy":"required"}'],
-    ['version 1.0', '{"version":1.0,"evidencePolicy":"required"}'],
-    ['a policy value in the version slot', '{"version":"required","evidencePolicy":1}'],
-    ['a duplicate key', '{"version":1,"version":1}'],
-    ['a duplicate policy key', '{"evidencePolicy":"required","evidencePolicy":"standard"}'],
-    ['a unicode-escaped key', '{"\\u0076ersion":1,"evidencePolicy":"required"}'],
-    ['a unicode-escaped value', '{"version":1,"evidencePolicy":"requ\\u0069red"}'],
-    ['NBSP whitespace', '{\u00a0"version":1,"evidencePolicy":"required"}'],
-    ['invalid UTF-8', Buffer.concat([Buffer.from(COMPACT), Buffer.from([0xff])])],
-    ['empty', ''],
-    ['trailing garbage', `${COMPACT}x`],
-    ['a hostile embedded line', '{"version":1,"evidencePolicy":"required\\nSOURCE=file"}'],
-  ];
-
-  it.each(INVALID)('rejects %s', (_label, bytes) => {
-    expect(RESOLVER.parsePolicyBytes(Buffer.from(bytes))).toEqual({ kind: 'invalid' });
-  });
-
-  it('reports absent only for no bytes at all, and invalid for a non-buffer', () => {
-    expect(RESOLVER.parsePolicyBytes(null)).toEqual({ kind: 'absent' });
-    expect(RESOLVER.parsePolicyBytes(undefined)).toEqual({ kind: 'absent' });
-    expect(RESOLVER.parsePolicyBytes(COMPACT as unknown as Uint8Array)).toEqual({ kind: 'invalid' });
-  });
-});
-
-describe('serializePolicy', () => {
-  it('round-trips through the strict parser for both policies', () => {
-    for (const p of RESOLVER.POLICIES) {
-      const text = RESOLVER.serializePolicy(p);
-      expect(text).toBe(`{"version":1,"evidencePolicy":"${p}"}\n`);
-      expect(RESOLVER.parsePolicyBytes(Buffer.from(text ?? ''))).toEqual({ kind: 'valid', policy: p });
-    }
-  });
-
-  it('returns null for anything outside POLICIES', () => {
-    for (const bad of ['REQUIRED', '', null, undefined, 1, {}]) {
-      expect(RESOLVER.serializePolicy(bad)).toBeNull();
-    }
-  });
-});
-
-// ---------------------------------------------------------------------------
 // Compliance default
 // ---------------------------------------------------------------------------
 
@@ -495,7 +432,7 @@ describe('fold matrix — R × W × C', () => {
     const reachable = r !== 'unavailable';
     // H = W: the branch has committed its worktree, so change detection sees W≠B only.
     const scenario: Scenario = reachable
-      ? { root, defaultBranch: 'main', remote: r === 'absent' ? 'absent' : { bytes: BODY[r] }, head: blobOf(w) }
+      ? { root, defaultBranch: 'main', remoteProject: r === 'absent' ? 'absent' : { bytes: BODY[r] }, headProject: blobOf(w) }
       : { root };
     const res = resolveWith(scenarioCalls(scenario), c === 'required' ? ENABLED_ZERO : DISABLED);
 
@@ -548,55 +485,55 @@ describe('named rows — exact lines', () => {
   }> = [
     {
       name: 'remote required, branch in sync',
-      scenario: d => ({ root: d, defaultBranch: 'main', remote: { bytes: BODY.required }, head: { bytes: BODY.required } }),
+      scenario: d => ({ root: d, defaultBranch: 'main', remoteProject: { bytes: BODY.required }, headProject: { bytes: BODY.required } }),
       w: BODY.required,
       line: `EVIDENCE_POLICY=required SOURCE=file REF=main ${LINE.requiredInputs}`,
     },
     {
       name: 'remote standard, branch in sync',
-      scenario: d => ({ root: d, defaultBranch: 'main', remote: { bytes: BODY.standard }, head: { bytes: BODY.standard } }),
+      scenario: d => ({ root: d, defaultBranch: 'main', remoteProject: { bytes: BODY.standard }, headProject: { bytes: BODY.standard } }),
       w: BODY.standard,
       line: `EVIDENCE_POLICY=standard SOURCE=file REF=main ${LINE.standardInputs}`,
     },
     {
       name: 'remote standard raised by compliance',
-      scenario: d => ({ root: d, defaultBranch: 'main', remote: { bytes: BODY.standard }, head: { bytes: BODY.standard } }),
+      scenario: d => ({ root: d, defaultBranch: 'main', remoteProject: { bytes: BODY.standard }, headProject: { bytes: BODY.standard } }),
       w: BODY.standard,
       compliance: ENABLED_ZERO,
       line: `EVIDENCE_POLICY=required SOURCE=file REF=main WARN=raised-by-compliance ${LINE.requiredInputs}`,
     },
     {
       name: 'remote absent (404), compliance off',
-      scenario: d => ({ root: d, defaultBranch: 'main', remote: 'absent', head: 'absent' }),
+      scenario: d => ({ root: d, defaultBranch: 'main', remoteProject: 'absent', headProject: 'absent' }),
       line: `EVIDENCE_POLICY=standard SOURCE=default REF=main ${LINE.standardInputs}`,
     },
     {
       name: 'remote absent, compliance on — the default IS compliance, not a raise',
-      scenario: d => ({ root: d, defaultBranch: 'main', remote: 'absent', head: 'absent' }),
+      scenario: d => ({ root: d, defaultBranch: 'main', remoteProject: 'absent', headProject: 'absent' }),
       compliance: ENABLED_ZERO,
       line: `EVIDENCE_POLICY=required SOURCE=default REF=main ${LINE.requiredInputs}`,
     },
     {
       name: 'remote invalid',
-      scenario: d => ({ root: d, defaultBranch: 'main', remote: { bytes: BODY.invalid }, head: { bytes: BODY.invalid } }),
+      scenario: d => ({ root: d, defaultBranch: 'main', remoteProject: { bytes: BODY.invalid }, headProject: { bytes: BODY.invalid } }),
       w: BODY.invalid,
       line: `EVIDENCE_POLICY=required SOURCE=invalid REF=main WARN=invalid-file ${LINE.requiredInputs}`,
     },
     {
       name: 'uncommitted worktree raise',
-      scenario: d => ({ root: d, defaultBranch: 'main', remote: { bytes: BODY.standard }, head: { bytes: BODY.standard } }),
+      scenario: d => ({ root: d, defaultBranch: 'main', remoteProject: { bytes: BODY.standard }, headProject: { bytes: BODY.standard } }),
       w: BODY.required,
       line: `EVIDENCE_POLICY=required SOURCE=file REF=main WARN=pr-changes-policy ${LINE.requiredInputs}`,
     },
     {
       name: 'a branch that lowers the policy cannot lower it',
-      scenario: d => ({ root: d, defaultBranch: 'main', remote: { bytes: BODY.required }, head: { bytes: BODY.standard } }),
+      scenario: d => ({ root: d, defaultBranch: 'main', remoteProject: { bytes: BODY.required }, headProject: { bytes: BODY.standard } }),
       w: BODY.standard,
       line: `EVIDENCE_POLICY=required SOURCE=file REF=main WARN=pr-changes-policy ${LINE.requiredInputs}`,
     },
     {
       name: 'remote standard, worktree invalid',
-      scenario: d => ({ root: d, defaultBranch: 'main', remote: { bytes: BODY.standard }, head: { bytes: BODY.standard } }),
+      scenario: d => ({ root: d, defaultBranch: 'main', remoteProject: { bytes: BODY.standard }, headProject: { bytes: BODY.standard } }),
       w: BODY.invalid,
       line: `EVIDENCE_POLICY=required SOURCE=file REF=main WARN=invalid-file,pr-changes-policy ${LINE.requiredInputs}`,
     },
@@ -666,7 +603,7 @@ describe('SOURCES and WARNINGS exhaustiveness', SUBPROCESS_TIMEOUT, () => {
       return resolveWith(scenarioCalls({ root: dir }), DISABLED, dir);
     }
     const remote = state === 'absent' ? 'absent' : { bytes: BODY[state] };
-    return resolveWith(scenarioCalls({ root: dir, defaultBranch: 'main', remote, head: 'absent' }), DISABLED, dir);
+    return resolveWith(scenarioCalls({ root: dir, defaultBranch: 'main', remoteProject: remote, headProject: 'absent' }), DISABLED, dir);
   }
 
   it('each of the 8 (reachability × governing state) combinations maps to its defined SOURCE', () => {
@@ -715,7 +652,7 @@ describe('SOURCES and WARNINGS exhaustiveness', SUBPROCESS_TIMEOUT, () => {
     };
     drive(d => ({ root: d }), BODY.standard, ENABLED_ZERO);  // remote-unavailable, raised-by-compliance
     drive(d => ({ root: d }), BODY.invalid, DISABLED);       // invalid-file
-    drive(d => ({ root: d, defaultBranch: 'main', remote: { bytes: BODY.required }, head: { bytes: BODY.standard } }),
+    drive(d => ({ root: d, defaultBranch: 'main', remoteProject: { bytes: BODY.required }, headProject: { bytes: BODY.standard } }),
       BODY.standard, DISABLED);                              // pr-changes-policy
 
     expect(observed.length).toBeGreaterThan(0);
@@ -737,7 +674,7 @@ describe('pr-changes-policy — semantic, advisory, never lowering', () => {
   it('fires when HEAD differs from the default branch, even with the worktree back in sync', () => {
     writeWorktree(root, BODY.standard);
     const res = resolveWith(scenarioCalls({
-      root, defaultBranch: 'main', remote: { bytes: BODY.standard }, head: { bytes: BODY.required },
+      root, defaultBranch: 'main', remoteProject: { bytes: BODY.standard }, headProject: { bytes: BODY.required },
     }));
     expect(res.warnings).toContain('pr-changes-policy');
     expect(res.policy).toBe('standard');
@@ -746,17 +683,17 @@ describe('pr-changes-policy — semantic, advisory, never lowering', () => {
   it('fires when the worktree differs, and the worktree still cannot lower a remote required', () => {
     writeWorktree(root, BODY.standard);
     const res = resolveWith(scenarioCalls({
-      root, defaultBranch: 'main', remote: { bytes: BODY.required }, head: { bytes: BODY.required },
+      root, defaultBranch: 'main', remoteProject: { bytes: BODY.required }, headProject: { bytes: BODY.required },
     }));
     expect(res.warnings).toContain('pr-changes-policy');
     expect(res.policy).toBe('required');
   });
 
   it('does not fire on a CRLF / reformatting-only difference', () => {
-    const crlfPretty = '{\r\n  "evidencePolicy": "standard",\r\n  "version": 1\r\n}\r\n';
+    const crlfPretty = '{\r\n  "evidence": "standard",\r\n  "version": 1\r\n}\r\n';
     writeWorktree(root, crlfPretty);
     const res = resolveWith(scenarioCalls({
-      root, defaultBranch: 'main', remote: { bytes: BODY.standard }, head: { bytes: crlfPretty },
+      root, defaultBranch: 'main', remoteProject: { bytes: BODY.standard }, headProject: { bytes: crlfPretty },
     }));
     expect(res.warnings).not.toContain('pr-changes-policy');
     expect(res.policy).toBe('standard');
@@ -765,7 +702,7 @@ describe('pr-changes-policy — semantic, advisory, never lowering', () => {
   it('offline: folds the tracking copy in when it fires, so the branch cannot lower it', () => {
     writeWorktree(root, BODY.standard);
     const res = resolveWith(scenarioCalls({
-      root, lsRemoteBranch: 'main', tracking: { bytes: BODY.required }, head: { bytes: BODY.standard },
+      root, lsRemoteBranch: 'main', trackingProject: { bytes: BODY.required }, headProject: { bytes: BODY.standard },
     }));
     expect(RESOLVER.formatLine(res)).toBe(
       `EVIDENCE_POLICY=required SOURCE=worktree REF=main WARN=remote-unavailable,pr-changes-policy ${LINE.requiredInputs}`,
@@ -774,7 +711,7 @@ describe('pr-changes-policy — semantic, advisory, never lowering', () => {
 
   it('offline: deleting the file on the branch cannot lower it either', () => {
     const res = resolveWith(scenarioCalls({
-      root, lsRemoteBranch: 'main', tracking: { bytes: BODY.required }, head: 'absent',
+      root, lsRemoteBranch: 'main', trackingProject: { bytes: BODY.required }, headProject: 'absent',
     }));
     expect(RESOLVER.formatLine(res)).toBe(
       `EVIDENCE_POLICY=required SOURCE=default REF=main WARN=remote-unavailable,pr-changes-policy ${LINE.requiredInputs}`,
@@ -784,7 +721,7 @@ describe('pr-changes-policy — semantic, advisory, never lowering', () => {
   it('offline: an invalid tracking copy raises and flags invalid-file', () => {
     writeWorktree(root, BODY.standard);
     const res = resolveWith(scenarioCalls({
-      root, lsRemoteBranch: 'main', tracking: { bytes: BODY.invalid }, head: { bytes: BODY.standard },
+      root, lsRemoteBranch: 'main', trackingProject: { bytes: BODY.invalid }, headProject: { bytes: BODY.standard },
     }));
     expect(res.policy).toBe('required');
     expect(res.warnings).toEqual(['remote-unavailable', 'invalid-file', 'pr-changes-policy']);
@@ -793,7 +730,7 @@ describe('pr-changes-policy — semantic, advisory, never lowering', () => {
   it('stale branch (documented): a default-branch edit after the branch was cut fires it', () => {
     writeWorktree(root, BODY.standard);
     const res = resolveWith(scenarioCalls({
-      root, defaultBranch: 'main', remote: { bytes: BODY.required }, head: { bytes: BODY.standard },
+      root, defaultBranch: 'main', remoteProject: { bytes: BODY.required }, headProject: { bytes: BODY.standard },
     }));
     expect(res.warnings).toContain('pr-changes-policy');
     expect(res.policy).toBe('required');
@@ -802,12 +739,12 @@ describe('pr-changes-policy — semantic, advisory, never lowering', () => {
   it('offline with no tracking ref: B is unknown, so nothing fires and HEAD is never read', () => {
     writeWorktree(root, BODY.standard);
     const { exec, recorded } = scriptedExec(scenarioCalls({
-      root, lsRemoteBranch: 'main', tracking: 'no-ref', head: { bytes: BODY.required },
+      root, lsRemoteBranch: 'main', tracking: 'no-ref', headProject: { bytes: BODY.required },
     }));
     const res = RESOLVER.resolve({ dir: root, compliance: DISABLED }, { exec });
     expect(res.warnings).toEqual(['remote-unavailable']);
     expect(res.ref).toBe('main');
-    expect(recorded.map(c => c.args.join(' '))).not.toContain(ARGV.headBlob.join(' '));
+    expect(recorded.map(c => c.args.join(' '))).not.toContain(ARGV.headProjectBlob.join(' '));
   });
 });
 
@@ -857,18 +794,20 @@ const TRACKING_PROJECT_CALL = ['git', 'cat-file', 'blob', 'refs/remotes/origin/m
 
 describe('argv log — exact sequences through the real spawnSync', SUBPROCESS_TIMEOUT, () => {
   it('reachable + present: probe, project.json then policy.json contents (GET), HEAD blobs — nothing else', () => {
-    writeWorktree(root, BODY.required);
+    // Only the retired policy.json is committed, so every source probes it — for presence.
+    writeWorktreePolicy(root, RETIRED.required);
     const run = e2e(scenarioCalls({
-      root, defaultBranch: 'main', remote: { bytes: BODY.required }, head: { bytes: BODY.required },
+      root, defaultBranch: 'main', remote: { bytes: RETIRED.required }, head: { bytes: RETIRED.required },
     }));
     expect(run.status).toBe(0);
-    expect(expectOneGrammarLine(run.stdout)).toBe(`EVIDENCE_POLICY=required SOURCE=file REF=main ${LINE.requiredInputs}`);
+    expect(expectOneGrammarLine(run.stdout))
+      .toBe(`EVIDENCE_POLICY=required SOURCE=invalid REF=main WARN=invalid-file ${LINE.requiredInputs}`);
     expect(run.log).toEqual([TOPLEVEL_CALL, PROBE_CALL, CONTENTS_PROJECT_CALL, CONTENTS_CALL, HEAD_PROJECT_CALL, HEAD_CALL]);
     expect(collectForbiddenCalls(run.log)).toEqual([]);
   });
 
   it('reachable + 404: the stdout JSON body of a 404 is never parsed as the file', () => {
-    const run = e2e(scenarioCalls({ root, defaultBranch: 'main', remote: 'absent', head: 'absent' }));
+    const run = e2e(scenarioCalls({ root, defaultBranch: 'main', remoteProject: 'absent', headProject: 'absent' }));
     expect(run.status).toBe(0);
     expect(expectOneGrammarLine(run.stdout)).toBe(`EVIDENCE_POLICY=standard SOURCE=default REF=main ${LINE.standardInputs}`);
     expect(run.log).toEqual([TOPLEVEL_CALL, PROBE_CALL, CONTENTS_PROJECT_CALL, CONTENTS_CALL, HEAD_PROJECT_CALL, HEAD_CALL]);
@@ -876,13 +815,14 @@ describe('argv log — exact sequences through the real spawnSync', SUBPROCESS_T
   });
 
   it('probe fails ⇒ ls-remote, tracking ref, tracking blobs, HEAD blobs', () => {
-    writeWorktree(root, BODY.standard);
+    // Only the retired policy.json is committed, so every source probes it — for presence.
+    writeWorktreePolicy(root, RETIRED.standard);
     const run = e2e(scenarioCalls({
-      root, lsRemoteBranch: 'main', tracking: { bytes: BODY.standard }, head: { bytes: BODY.standard },
+      root, lsRemoteBranch: 'main', tracking: { bytes: RETIRED.standard }, head: { bytes: RETIRED.standard },
     }));
     expect(run.status).toBe(0);
     expect(expectOneGrammarLine(run.stdout))
-      .toBe(`EVIDENCE_POLICY=standard SOURCE=worktree REF=main WARN=remote-unavailable ${LINE.standardInputs}`);
+      .toBe(`EVIDENCE_POLICY=required SOURCE=invalid REF=main WARN=remote-unavailable,invalid-file ${LINE.requiredInputs}`);
     expect(run.log).toEqual([
       TOPLEVEL_CALL, PROBE_CALL, LS_REMOTE_CALL, VERIFY_CALL, TRACKING_PROJECT_CALL, TRACKING_CALL, HEAD_PROJECT_CALL, HEAD_CALL,
     ]);
@@ -890,9 +830,9 @@ describe('argv log — exact sequences through the real spawnSync', SUBPROCESS_T
   });
 
   it('contents 403 ⇒ no policy.json contents call and no ls-remote (the probe already named the branch)', () => {
-    writeWorktree(root, BODY.standard);
+    writeWorktreePolicy(root, RETIRED.standard);
     const run = e2e(scenarioCalls({
-      root, defaultBranch: 'main', remote: 'forbidden', tracking: { bytes: BODY.standard }, head: { bytes: BODY.standard },
+      root, defaultBranch: 'main', remote: 'forbidden', tracking: { bytes: RETIRED.standard }, head: { bytes: RETIRED.standard },
     }));
     expect(run.status).toBe(0);
     expect(run.log).toEqual([
@@ -917,7 +857,7 @@ describe('argv log — exact sequences through the real spawnSync', SUBPROCESS_T
     // …and a 404 is absent from stderr alone, whatever stdout carries.
     const notFound = resolveWith([
       { tool: 'gh', args: ARGV.contents('main'), exit: 1, stdout: '', stderr: 'gh: Not Found (HTTP 404)\n' },
-      ...scenarioCalls({ root, defaultBranch: 'main', head: { bytes: BODY.required } }),
+      ...scenarioCalls({ root, defaultBranch: 'main', headProject: { bytes: BODY.required } }),
     ]);
     expect(notFound.source).toBe('default');
     expect(notFound.warnings).not.toContain('remote-unavailable');
@@ -974,7 +914,7 @@ describe('per-call bounds (in-process recording)', () => {
   it('every call carries its timeout, maxBuffer, ignored stdin, no shell and the no-prompt env', () => {
     writeWorktree(root, BODY.standard);
     const calls = [
-      ...scenarioCalls({ root, defaultBranch: 'main', remote: 'forbidden', tracking: { bytes: BODY.standard }, head: { bytes: BODY.standard } }),
+      ...scenarioCalls({ root, defaultBranch: 'main', remote: 'forbidden', trackingProject: { bytes: BODY.standard }, headProject: { bytes: BODY.standard } }),
       { tool: 'git' as const, args: ARGV.lsRemote, stdout: 'ref: refs/heads/main\tHEAD\n' },
     ];
     const { exec, recorded } = scriptedExec(calls);
@@ -1079,7 +1019,7 @@ describe('fail-closed when local git does not answer', () => {
     (code) => {
       writeWorktree(root, BODY.standard);
       const base = scenarioCalls({
-        root, lsRemoteBranch: 'main', tracking: { bytes: BODY.required }, head: { bytes: BODY.standard },
+        root, lsRemoteBranch: 'main', trackingProject: { bytes: BODY.required }, headProject: { bytes: BODY.standard },
       });
       const res = resolveWith(withFailure(base, ARGV.verifyTracking('main'), code));
       expect(RESOLVER.formatLine(res)).toBe(
@@ -1091,24 +1031,24 @@ describe('fail-closed when local git does not answer', () => {
   it('offline: the tracking blob read timing out ⇒ T invalid (never absent)', () => {
     writeWorktree(root, BODY.standard);
     const base = scenarioCalls({
-      root, lsRemoteBranch: 'main', tracking: { bytes: BODY.required }, head: { bytes: BODY.standard },
+      root, lsRemoteBranch: 'main', trackingProject: { bytes: BODY.required }, headProject: { bytes: BODY.standard },
     });
-    const res = resolveWith(withFailure(base, ARGV.trackingBlob('main'), 'ETIMEDOUT'));
+    const res = resolveWith(withFailure(base, ARGV.trackingProjectBlob('main'), 'ETIMEDOUT'));
     expect(res.policy).toBe('required');
     expect(res.warnings).toEqual(['remote-unavailable', 'invalid-file', 'pr-changes-policy']);
   });
 
   it('control: an ANSWERED missing tracking ref is "B unknown" — the worktree governs, nothing raises', () => {
     writeWorktree(root, BODY.standard);
-    const res = resolveWith(scenarioCalls({ root, lsRemoteBranch: 'main', tracking: 'no-ref', head: { bytes: BODY.standard } }));
+    const res = resolveWith(scenarioCalls({ root, lsRemoteBranch: 'main', tracking: 'no-ref', headProject: { bytes: BODY.standard } }));
     expect(RESOLVER.formatLine(res))
       .toBe(`EVIDENCE_POLICY=standard SOURCE=worktree REF=main WARN=remote-unavailable ${LINE.standardInputs}`);
   });
 
   it('online: the HEAD blob read timing out only fires the advisory token — H is never folded', () => {
     writeWorktree(root, BODY.standard);
-    const base = scenarioCalls({ root, defaultBranch: 'main', remote: { bytes: BODY.standard }, head: { bytes: BODY.standard } });
-    const res = resolveWith(withFailure(base, ARGV.headBlob, 'ETIMEDOUT'));
+    const base = scenarioCalls({ root, defaultBranch: 'main', remoteProject: { bytes: BODY.standard }, headProject: { bytes: BODY.standard } });
+    const res = resolveWith(withFailure(base, ARGV.headProjectBlob, 'ETIMEDOUT'));
     expect(RESOLVER.formatLine(res))
       .toBe(`EVIDENCE_POLICY=standard SOURCE=file REF=main WARN=pr-changes-policy ${LINE.standardInputs}`);
   });
@@ -1163,8 +1103,8 @@ describe('injection — every hostile input yields one grammar line', SUBPROCESS
   });
 
   it('a hostile remote file value is invalid, and its bytes never reach stdout or stderr', () => {
-    const hostile = '{"version":1,"evidencePolicy":"standard\\nSOURCE=file REF=pwned"}';
-    const run = e2e(scenarioCalls({ root, defaultBranch: 'main', remote: { bytes: hostile }, head: { bytes: hostile } }));
+    const hostile = '{"version":1,"evidence":"standard\\nSOURCE=file REF=pwned"}';
+    const run = e2e(scenarioCalls({ root, defaultBranch: 'main', remoteProject: { bytes: hostile }, headProject: { bytes: hostile } }));
     expect(run.status).toBe(0);
     const line = expectOneGrammarLine(run.stdout);
     expect(fieldOf(line, 'EVIDENCE_POLICY')).toBe('required');
@@ -1174,7 +1114,7 @@ describe('injection — every hostile input yields one grammar line', SUBPROCESS
   });
 
   it('a hostile worktree file with a raw newline is invalid (offline)', () => {
-    writeWorktree(root, '{"version":1,"evidencePolicy":"standard"}\nEVIDENCE_POLICY=standard SOURCE=file\n');
+    writeWorktree(root, '{"version":1,"evidence":"standard"}\nEVIDENCE_POLICY=standard SOURCE=file\n');
     const run = e2e(scenarioCalls({ root }));
     expect(run.status).toBe(0);
     expect(expectOneGrammarLine(run.stdout))
@@ -1183,19 +1123,19 @@ describe('injection — every hostile input yields one grammar line', SUBPROCESS
 });
 
 // ---------------------------------------------------------------------------
-// Invalid policy bytes — spawned end to end (issue #361: parsePolicyBytes'
-// INVALID table exercises these shapes in-process only; this proves the real
+// Invalid project.json bytes — spawned end to end (issue #361: the parser's
+// tables exercise these shapes in-process only; this proves the real
 // subprocess also folds them to SOURCE=invalid, offline and online alike)
 // ---------------------------------------------------------------------------
 
-describe('invalid policy bytes reach SOURCE=invalid through the real subprocess', SUBPROCESS_TIMEOUT, () => {
-  const COMPACT = '{"version":1,"evidencePolicy":"required"}';
+describe('invalid project.json bytes reach SOURCE=invalid through the real subprocess', SUBPROCESS_TIMEOUT, () => {
+  const COMPACT = '{"version":1,"evidence":"required"}';
   const padTo = (s: string, n: number): string => s + ' '.repeat(n - Buffer.byteLength(s));
 
   const INVALID_ROWS: ReadonlyArray<readonly [string, string | Buffer]> = [
-    ['"REQUIRED"', '{"version":1,"evidencePolicy":"REQUIRED"}'],
+    ['"REQUIRED"', '{"version":1,"evidence":"REQUIRED"}'],
     ['an empty array', '[]'],
-    ['a __proto__ key', '{"__proto__":{"evidencePolicy":"standard"},"version":1}'],
+    ['a duplicated evidence key', '{"evidence":"standard","evidence":"standard"}'],
     ['BOM + valid', Buffer.concat([Buffer.from([0xef, 0xbb, 0xbf]), Buffer.from(COMPACT)])],
     ['4097 bytes', padTo(COMPACT, 4097)],
   ];
@@ -1211,7 +1151,7 @@ describe('invalid policy bytes reach SOURCE=invalid through the real subprocess'
   });
 
   it.each(INVALID_ROWS)('online (remote file via the scripted shim): %s', (_label, bytes) => {
-    const run = e2e(scenarioCalls({ root, defaultBranch: 'main', remote: { bytes }, head: { bytes } }));
+    const run = e2e(scenarioCalls({ root, defaultBranch: 'main', remoteProject: { bytes }, headProject: { bytes } }));
     expect(run.status).toBe(0);
     const line = expectOneGrammarLine(run.stdout);
     expect(fieldOf(line, 'EVIDENCE_POLICY')).toBe('required');
@@ -1364,7 +1304,7 @@ describe('exit arms', SUBPROCESS_TIMEOUT, () => {
 });
 
 // ---------------------------------------------------------------------------
-// Bounds — the worktree file is lstat-refused before it is opened or read
+// Bounds — the worktree project.json is lstat-refused before it is opened or read
 // ---------------------------------------------------------------------------
 
 describe('bounds', SUBPROCESS_TIMEOUT, () => {
@@ -1372,50 +1312,50 @@ describe('bounds', SUBPROCESS_TIMEOUT, () => {
     return spy.mock.calls.map(c => String(c[0]));
   }
 
-  it('an oversize worktree policy is invalid and is never opened or read', () => {
-    writeWorktree(root, `${'{"version":1,"evidencePolicy":"standard"}'}${' '.repeat(4096)}`);
+  it('an oversize worktree project.json is invalid and is never opened or read', () => {
+    writeWorktree(root, `${'{"version":1,"evidence":"standard"}'}${' '.repeat(4096)}`);
     const openSpy = vi.spyOn(CJS_FS, 'openSync');
     const readSpy = vi.spyOn(CJS_FS, 'readSync');
     const res = resolveWith(scenarioCalls({ root }));
     expect(res.source).toBe('invalid');
     expect(res.policy).toBe('required');
-    expect(openedPaths(openSpy)).not.toContain(worktreePolicyPath(root));
+    expect(openedPaths(openSpy)).not.toContain(worktreeFile(root, 'project.json'));
     expect(readSpy).not.toHaveBeenCalled();
   });
 
-  it('a symlinked worktree policy is invalid and is never opened', () => {
+  it('a symlinked worktree project.json is invalid and is never opened', () => {
     const target = path.join(tmp, 'elsewhere.json');
     fs.writeFileSync(target, BODY.standard);
     fs.mkdirSync(path.join(root, '.devflow'), { recursive: true });
-    fs.symlinkSync(target, worktreePolicyPath(root));
+    fs.symlinkSync(target, worktreeFile(root, 'project.json'));
     const openSpy = vi.spyOn(CJS_FS, 'openSync');
     const res = resolveWith(scenarioCalls({ root }));
     expect(res.source).toBe('invalid');
-    expect(openedPaths(openSpy)).not.toContain(worktreePolicyPath(root));
+    expect(openedPaths(openSpy)).not.toContain(worktreeFile(root, 'project.json'));
   });
 
-  it('a directory at the policy path is invalid', () => {
-    fs.mkdirSync(worktreePolicyPath(root), { recursive: true });
+  it('a directory at the project.json path is invalid', () => {
+    fs.mkdirSync(worktreeFile(root, 'project.json'), { recursive: true });
     expect(resolveWith(scenarioCalls({ root })).source).toBe('invalid');
   });
 
-  it('a valid worktree policy IS opened and read (the spies above are not vacuous)', () => {
+  it('a valid worktree project.json IS opened and read (the spies above are not vacuous)', () => {
     writeWorktree(root, BODY.standard);
     const openSpy = vi.spyOn(CJS_FS, 'openSync');
     const res = resolveWith(scenarioCalls({ root }));
     expect(res.source).toBe('worktree');
-    expect(openedPaths(openSpy)).toContain(worktreePolicyPath(root));
+    expect(openedPaths(openSpy)).toContain(worktreeFile(root, 'project.json'));
   });
 
-  it.skipIf(process.platform === 'win32')('a FIFO at the policy path is invalid and is never opened', () => {
+  it.skipIf(process.platform === 'win32')('a FIFO at the project.json path is invalid and is never opened', () => {
     fs.mkdirSync(path.join(root, '.devflow'), { recursive: true });
-    expect(makeFifo(worktreePolicyPath(root), home), 'mkfifo precondition').toBe(true);
-    expect(fs.lstatSync(worktreePolicyPath(root)).isFIFO()).toBe(true);
+    expect(makeFifo(worktreeFile(root, 'project.json'), home), 'mkfifo precondition').toBe(true);
+    expect(fs.lstatSync(worktreeFile(root, 'project.json')).isFIFO()).toBe(true);
 
     const openSpy = vi.spyOn(CJS_FS, 'openSync');
     const res = resolveWith(scenarioCalls({ root }));
     expect(res.source).toBe('invalid');
-    expect(openedPaths(openSpy)).not.toContain(worktreePolicyPath(root));
+    expect(openedPaths(openSpy)).not.toContain(worktreeFile(root, 'project.json'));
 
     // Opening a writer-less FIFO blocks forever, so a subprocess that finishes is
     // evidence the script never tried.
@@ -1424,9 +1364,9 @@ describe('bounds', SUBPROCESS_TIMEOUT, () => {
     expect(fieldOf(expectOneGrammarLine(run.stdout), 'SOURCE')).toBe('invalid');
   });
 
-  it('a remote file over 64 KiB is ENOBUFS ⇒ invalid ⇒ required (never "unavailable")', () => {
+  it('a remote policy.json over 64 KiB is ENOBUFS ⇒ present ⇒ required (never "unavailable")', () => {
     const run = e2e(scenarioCalls({
-      root, defaultBranch: 'main', remote: { bytes: 'x'.repeat(70_000) }, head: 'absent',
+      root, defaultBranch: 'main', remote: { bytes: 'x'.repeat(70_000) }, headProject: 'absent',
     }));
     expect(run.status).toBe(0);
     const line = expectOneGrammarLine(run.stdout);
@@ -1511,8 +1451,8 @@ describe('real git (gh faked unavailable, git real)', SUBPROCESS_TIMEOUT, () => 
     realGit(tmp, home, ['init', '--quiet', '--bare', '-b', 'main', bare]);
     realGit(tmp, home, ['init', '--quiet', '-b', 'main', work]);
     writeWorktree(work, initial);
-    realGit(work, home, ['add', '-f', '.devflow/policy.json']);
-    realGit(work, home, ['commit', '--quiet', '-m', 'policy']);
+    realGit(work, home, ['add', '-f', '.devflow/project.json']);
+    realGit(work, home, ['commit', '--quiet', '-m', 'project']);
     realGit(work, home, ['remote', 'add', 'origin', bare]);
     realGit(work, home, ['push', '--quiet', 'origin', 'main']);
     realGit(work, home, ['checkout', '--quiet', '-b', 'feat']);
@@ -1535,9 +1475,9 @@ describe('real git (gh faked unavailable, git real)', SUBPROCESS_TIMEOUT, () => 
     expect(run.log).toEqual([PROBE_CALL]);
   });
 
-  it('a branch that deletes the policy (real cat-file exit 128 ⇒ absent) cannot lower it', () => {
+  it('a branch that deletes the project.json (real cat-file exit 128 ⇒ absent) cannot lower it', () => {
     const work = repoWithOrigin(BODY.required);
-    realGit(work, home, ['rm', '--quiet', '.devflow/policy.json']);
+    realGit(work, home, ['rm', '--quiet', '.devflow/project.json']);
     realGit(work, home, ['commit', '--quiet', '-m', 'delete']);
     const run = runReal(work);
     expect(run.status, run.stderr).toBe(0);
@@ -1551,6 +1491,232 @@ describe('real git (gh faked unavailable, git real)', SUBPROCESS_TIMEOUT, () => 
     expect(run.status, run.stderr).toBe(0);
     expect(expectOneGrammarLine(run.stdout))
       .toBe(`EVIDENCE_POLICY=standard SOURCE=worktree REF=main WARN=remote-unavailable ${LINE.standardInputs}`);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The retired policy.json (D-POLICY-JSON-RETIRED) — TP-45 (AC-39), TP-46 (AC-40)
+// ---------------------------------------------------------------------------
+
+describe('TP-45 (AC-39): a policy.json where project.json has no evidence resolves required, never parsed', SUBPROCESS_TIMEOUT, () => {
+  /** Every shape a committed policy.json took — two valid values and invalid bytes — and more. */
+  const SHAPES: ReadonlyArray<readonly [string, string | Buffer]> = [
+    ['saying standard', RETIRED.standard],
+    ['saying required', RETIRED.required],
+    ['with invalid bytes', RETIRED.invalid],
+    ['that is empty', ''],
+    ['that is not UTF-8', Buffer.from([0xff, 0xfe, 0x00, 0x7b])],
+  ];
+
+  it.each(SHAPES)('online: a default-branch policy.json %s ⇒ required, SOURCE=invalid, invalid-file', (_label, bytes) => {
+    writeWorktreePolicy(root, bytes);
+    const res = resolveWith(scenarioCalls({ root, defaultBranch: 'main', remote: { bytes }, head: { bytes } }));
+    expect(RESOLVER.formatLine(res))
+      .toBe(`EVIDENCE_POLICY=required SOURCE=invalid REF=main WARN=invalid-file ${LINE.requiredInputs}`);
+  });
+
+  it.each(SHAPES)('offline: a working-tree policy.json %s ⇒ required, SOURCE=invalid, invalid-file', (_label, bytes) => {
+    writeWorktreePolicy(root, bytes);
+    expect(RESOLVER.formatLine(resolveWith(scenarioCalls({ root }))))
+      .toBe(`EVIDENCE_POLICY=required SOURCE=invalid REF=none WARN=remote-unavailable,invalid-file ${LINE.requiredInputs}`);
+  });
+
+  it('a project.json WITHOUT an evidence key leaves the same source to the policy.json beside it — presence, not value', () => {
+    const noEvidence = '{"version":1,"reviewPublication":"off"}\n';
+    writeWorktree(root, noEvidence);
+    writeWorktreePolicy(root, RETIRED.standard);
+    const res = resolveWith(scenarioCalls({
+      root, defaultBranch: 'main',
+      remoteProject: { bytes: noEvidence }, remote: { bytes: RETIRED.standard },
+      headProject: { bytes: noEvidence }, head: { bytes: RETIRED.standard },
+    }));
+    expect(RESOLVER.formatLine(res))
+      .toBe(`EVIDENCE_POLICY=required SOURCE=invalid REF=main WARN=invalid-file ${LINE.requiredInputs}`);
+  });
+
+  it('offline: a tracking copy holding a policy.json raises a branch that deleted it', () => {
+    const res = resolveWith(scenarioCalls({
+      root, lsRemoteBranch: 'main', tracking: { bytes: RETIRED.standard }, headProject: 'absent',
+    }));
+    expect(RESOLVER.formatLine(res)).toBe(
+      `EVIDENCE_POLICY=required SOURCE=default REF=main WARN=remote-unavailable,invalid-file,pr-changes-policy ${LINE.requiredInputs}`,
+    );
+  });
+
+  it('an unanswered policy blob read cannot prove absence: the tracking copy reads as present (fail closed)', () => {
+    writeWorktree(root, BODY.standard);
+    const base = scenarioCalls({
+      root, lsRemoteBranch: 'main', tracking: 'absent', headProject: { bytes: BODY.standard },
+    });
+    const res = resolveWith([{ tool: 'git', args: ARGV.trackingBlob('main'), spawnError: 'ETIMEDOUT' }, ...base]);
+    expect(RESOLVER.formatLine(res)).toBe(
+      `EVIDENCE_POLICY=required SOURCE=worktree REF=main WARN=remote-unavailable,invalid-file,pr-changes-policy ${LINE.requiredInputs}`,
+    );
+  });
+
+  it('control: with neither file anywhere the sources are absent and the line is the compliance default', () => {
+    expect(RESOLVER.formatLine(resolveWith(scenarioCalls({ root, defaultBranch: 'main', remoteProject: 'absent', headProject: 'absent' }))))
+      .toBe(`EVIDENCE_POLICY=standard SOURCE=default REF=main ${LINE.standardInputs}`);
+    expect(RESOLVER.formatLine(resolveWith(scenarioCalls({ root }))))
+      .toBe(`EVIDENCE_POLICY=standard SOURCE=default REF=none WARN=remote-unavailable ${LINE.standardInputs}`);
+  });
+
+  it('the working-tree policy.json is never opened or read — its bytes cannot matter', () => {
+    writeWorktreePolicy(root, RETIRED.standard);
+    const openSpy = vi.spyOn(CJS_FS, 'openSync');
+    const readSpy = vi.spyOn(CJS_FS, 'readSync');
+    const readFileSpy = vi.spyOn(CJS_FS, 'readFileSync');
+    const res = resolveWith(scenarioCalls({ root }));
+    expect(res.source).toBe('invalid');
+    const policyPath = worktreeFile(root, 'policy.json');
+    expect(openSpy.mock.calls.map(c => String(c[0]))).not.toContain(policyPath);
+    expect(readFileSpy.mock.calls.map(c => String(c[0]))).not.toContain(policyPath);
+    expect(readSpy).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['a dangling symlink', () => {
+      fs.mkdirSync(path.join(root, '.devflow'), { recursive: true });
+      fs.symlinkSync(path.join(tmp, 'nowhere.json'), worktreeFile(root, 'policy.json'));
+    }],
+    ['a directory', () => fs.mkdirSync(worktreeFile(root, 'policy.json'), { recursive: true })],
+  ] as const)('%s at the working-tree policy.json path is present (lstat, never followed)', (_label, arrange) => {
+    arrange();
+    expect(RESOLVER.formatLine(resolveWith(scenarioCalls({ root }))))
+      .toBe(`EVIDENCE_POLICY=required SOURCE=invalid REF=none WARN=remote-unavailable,invalid-file ${LINE.requiredInputs}`);
+  });
+
+  it('a .devflow that is a regular file holds no policy.json (ENOTDIR is absent)', () => {
+    fs.writeFileSync(path.join(root, '.devflow'), 'not a directory\n');
+    expect(RESOLVER.formatLine(resolveWith(scenarioCalls({ root }))))
+      .toBe(`EVIDENCE_POLICY=standard SOURCE=default REF=none WARN=remote-unavailable ${LINE.standardInputs}`);
+  });
+
+  it.skipIf(process.platform === 'win32' || process.getuid?.() === 0)(
+    'an lstat that fails for any reason but "no such path" cannot prove absence: an unsearchable .devflow reads as present',
+    () => {
+      const devflowDir = path.join(root, '.devflow');
+      fs.mkdirSync(devflowDir, { recursive: true });
+      fs.chmodSync(devflowDir, 0o000);
+      try {
+        expect(RESOLVER.formatLine(resolveWith(scenarioCalls({ root }))))
+          .toBe(`EVIDENCE_POLICY=required SOURCE=invalid REF=none WARN=remote-unavailable,invalid-file ${LINE.requiredInputs}`);
+      } finally {
+        fs.chmodSync(devflowDir, 0o755);
+      }
+    },
+  );
+
+  it.skipIf(process.platform === 'win32')('a FIFO at the policy.json path is present, and never opened (so never blocks)', () => {
+    fs.mkdirSync(path.join(root, '.devflow'), { recursive: true });
+    expect(makeFifo(worktreeFile(root, 'policy.json'), home), 'mkfifo precondition').toBe(true);
+    const run = e2e(scenarioCalls({ root }));
+    expect(run.status).toBe(0);
+    expect(expectOneGrammarLine(run.stdout))
+      .toBe(`EVIDENCE_POLICY=required SOURCE=invalid REF=none WARN=remote-unavailable,invalid-file ${LINE.requiredInputs}`);
+  });
+
+  it('the real subprocess agrees: a policy.json saying standard resolves required, on the argv it always made', () => {
+    writeWorktreePolicy(root, RETIRED.standard);
+    const run = e2e(scenarioCalls({
+      root, defaultBranch: 'main', remote: { bytes: RETIRED.standard }, head: { bytes: RETIRED.standard },
+    }));
+    expect(run.status, run.stderr).toBe(0);
+    expect(expectOneGrammarLine(run.stdout))
+      .toBe(`EVIDENCE_POLICY=required SOURCE=invalid REF=main WARN=invalid-file ${LINE.requiredInputs}`);
+    expect(run.log).toEqual([TOPLEVEL_CALL, PROBE_CALL, CONTENTS_PROJECT_CALL, CONTENTS_CALL, HEAD_PROJECT_CALL, HEAD_CALL]);
+  });
+
+  it('the resolver exports no policy-file parser, grammar or serializer', () => {
+    const exported = Object.keys(RESOLVER);
+    expect(exported.length).toBeGreaterThan(5);
+    for (const name of ['parsePolicyBytes', 'POLICY_GRAMMAR_RE', 'serializePolicy']) {
+      expect(exported, name).not.toContain(name);
+    }
+  });
+});
+
+/** The production tree TP-46's guard reads. */
+const SRC_ROOT = path.resolve(import.meta.dirname, '../../src');
+
+/** The retired policy-file API — parser, grammar and serializer. */
+const RETIRED_POLICY_API_RE = /\b(?:parsePolicyBytes|POLICY_GRAMMAR_RE|serializePolicy)\b/;
+
+/** Named collector: every line of a production source that names the retired policy-file API. */
+function collectRetiredPolicyApi(files: ReadonlyArray<{ rel: string; content: string }>): string[] {
+  return files.flatMap(f => f.content.split('\n')
+    .map((line, i) => ({ line, i }))
+    .filter(({ line }) => RETIRED_POLICY_API_RE.test(line))
+    .map(({ line, i }) => `${f.rel}:${i + 1}: ${line.trim()}`));
+}
+
+describe('TP-46 (AC-40): project.json resolves as it did, and no production caller of the retired parser remains', () => {
+  const EVIDENCE_ROWS: ReadonlyArray<readonly [keyof typeof BODY, string, string]> = [
+    ['standard', `EVIDENCE_POLICY=standard SOURCE=file REF=main ${LINE.standardInputs}`,
+      `EVIDENCE_POLICY=standard SOURCE=worktree REF=main WARN=remote-unavailable ${LINE.standardInputs}`],
+    ['required', `EVIDENCE_POLICY=required SOURCE=file REF=main ${LINE.requiredInputs}`,
+      `EVIDENCE_POLICY=required SOURCE=worktree REF=main WARN=remote-unavailable ${LINE.requiredInputs}`],
+    ['invalid', `EVIDENCE_POLICY=required SOURCE=invalid REF=main WARN=invalid-file ${LINE.requiredInputs}`,
+      `EVIDENCE_POLICY=required SOURCE=invalid REF=main WARN=remote-unavailable,invalid-file ${LINE.requiredInputs}`],
+  ];
+
+  it.each(EVIDENCE_ROWS)('a migrated project.json evidence %s resolves the same with a policy.json beside it at every source, which is never probed', (state, online, offline) => {
+    const body = BODY[state];
+    writeWorktree(root, body);
+    const migrated = resolveWith(scenarioCalls({
+      root, defaultBranch: 'main', remoteProject: { bytes: body }, headProject: { bytes: body },
+    }));
+    const offlineMigrated = resolveWith(scenarioCalls({
+      root, lsRemoteBranch: 'main', trackingProject: { bytes: body }, headProject: { bytes: body },
+    }));
+
+    writeWorktreePolicy(root, RETIRED.standard);
+    const online2 = scriptedExec(scenarioCalls({
+      root, defaultBranch: 'main',
+      remoteProject: { bytes: body }, remote: { bytes: RETIRED.standard },
+      headProject: { bytes: body }, head: { bytes: RETIRED.standard },
+    }));
+    const withPolicy = RESOLVER.resolve({ dir: root, compliance: DISABLED }, { exec: online2.exec });
+    const offline2 = scriptedExec(scenarioCalls({
+      root, lsRemoteBranch: 'main',
+      trackingProject: { bytes: body }, tracking: { bytes: RETIRED.standard },
+      headProject: { bytes: body }, head: { bytes: RETIRED.standard },
+    }));
+    const offlineWithPolicy = RESOLVER.resolve({ dir: root, compliance: DISABLED }, { exec: offline2.exec });
+
+    expect(RESOLVER.formatLine(migrated)).toBe(online);
+    expect(RESOLVER.formatLine(withPolicy)).toBe(online);
+    expect(RESOLVER.formatLine(offlineMigrated)).toBe(offline);
+    expect(RESOLVER.formatLine(offlineWithPolicy)).toBe(offline);
+    const policyCalls = [ARGV.contents('main'), ARGV.headBlob, ARGV.trackingBlob('main')].map(a => a.join(' '));
+    const made = [...online2.recorded, ...offline2.recorded].map(c => c.args.join(' '));
+    expect(made.filter(c => policyCalls.includes(c))).toEqual([]);
+  });
+
+  it('no production source under src/ names the retired policy-file parser, grammar or serializer', () => {
+    const files = walkFiles(SRC_ROOT, () => true)
+      .map(f => ({ rel: path.relative(SRC_ROOT, f), content: fs.readFileSync(f, 'utf8') }));
+    expect(files.length, 'the src/ corpus must be non-empty').toBeGreaterThan(100);
+    expect(files.map(f => f.rel), 'the corpus must include the resolver and the TS seam')
+      .toEqual(expect.arrayContaining([
+        path.join('assets', 'scripts', 'resolve-evidence-policy.cjs'),
+        path.join('core', 'evidence-policy.ts'),
+      ]));
+    expect(collectRetiredPolicyApi(files)).toEqual([]);
+  });
+
+  it('red probe: each seeded name is reported, and a lookalike is not', () => {
+    const seeded = [
+      { rel: 'probe-a.cjs', content: 'const r = parsePolicyBytes(buf);' },
+      { rel: 'probe-b.cjs', content: "if (!POLICY_GRAMMAR_RE.test(text)) return 'x';" },
+      { rel: 'probe-c.ts', content: '  serializePolicy: \'function\',' },
+      { rel: 'probe-d.ts', content: 'serializeProjectSuggestion({ evidence: "standard" }); parsePolicyBytesX();' },
+    ];
+    expect(collectRetiredPolicyApi(seeded)).toEqual([
+      'probe-a.cjs:1: const r = parsePolicyBytes(buf);',
+      "probe-b.cjs:1: if (!POLICY_GRAMMAR_RE.test(text)) return 'x';",
+      "probe-c.ts:1: serializePolicy: 'function',",
+    ]);
   });
 });
 
@@ -1636,7 +1802,7 @@ describe('source guards', () => {
 
   it('carries every phase-A design decision at its code site (AC-12)', () => {
     for (const marker of [
-      'D-POLICY-LINE', 'D-POLICY-PROBE', 'D-POLICY-STRICT-SCHEMA',
+      'D-POLICY-LINE', 'D-POLICY-PROBE', 'D-POLICY-JSON-RETIRED',
       'D-POLICY-FOLD', 'D-POLICY-CHANGE-DETECT', 'D-POLICY-PLUMBING',
       'D-POLICY-SOURCE-PRECEDENCE', 'D-COMPLIANCE-REPO-FLOOR',
     ]) {

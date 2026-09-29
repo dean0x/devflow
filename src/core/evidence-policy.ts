@@ -17,11 +17,17 @@
  * the personal `.devflow/config.json` and the machine manifest. Its shapes are
  * transcribed the same way, and there is no TypeScript copy of its fold either.
  *
- * D-POLICY-NO-WRITE (applies ADR-024): `.devflow/project.json` (and the legacy
- * `.devflow/policy.json`) are team-owned, and devflow never writes or replaces a
- * shared file it cannot prove it wrote. This module therefore imports no fs API;
- * the CLI only PRINTS the bytes a team may choose to commit
- * (`evidencePolicySuggestion`).
+ * D-POLICY-NO-WRITE (applies ADR-024): `.devflow/project.json` is team-owned, and
+ * devflow never writes or replaces a shared file it cannot prove it wrote. This
+ * module therefore imports no fs API; the CLI only PRINTS the bytes a team may
+ * choose to commit (`evidencePolicySuggestion`, and the migration lines of
+ * `repoComplianceStatusLines`), all from the settings resolver's project.json
+ * serializer.
+ *
+ * D-POLICY-JSON-RETIRED: the evidence resolver never parses `.devflow/policy.json`;
+ * at a source whose project.json has no `evidence`, the file's presence alone
+ * resolves `required` (see the resolver's own note). This side neither reads nor
+ * serializes it — it only names it in the migration hint.
  */
 
 import { createRequire } from 'module';
@@ -39,8 +45,8 @@ export const SETTINGS_SCRIPT_NAME = 'resolve-settings.cjs';
 /** The team file the CLI suggests committing, relative to a repository root. */
 const PROJECT_FILE = '.devflow/project.json';
 
-/** The legacy team file project.json replaces, relative to a repository root. */
-const LEGACY_POLICY_FILE = '.devflow/policy.json';
+/** The retired team file project.json's `evidence` replaces, relative to a repository root. */
+const RETIRED_POLICY_FILE = '.devflow/policy.json';
 
 /** `Policy` typedef. */
 export type EvidencePolicy = 'required' | 'standard';
@@ -91,7 +97,6 @@ export interface EvidencePolicyModule {
   readonly FAIL_CLOSED_LINE: string;
   complianceDefault(rawFeatureValue: unknown): EvidencePolicy;
   resolve(opts: EvidencePolicyResolveOptions): EvidencePolicyResolution;
-  serializePolicy(policy: unknown): string | null;
 }
 
 // ── Transcribed shapes (resolve-settings.cjs JSDoc) ────────────────────────────
@@ -130,8 +135,8 @@ export interface RepoSettings {
   };
   /** The worktree project.json's own ids, or null when it declares none. */
   readonly repoCompliance: readonly string[] | null;
-  /** The worktree still holds the legacy `.devflow/policy.json`. */
-  readonly legacyPolicyFile: boolean;
+  /** The worktree holds the retired `.devflow/policy.json`. */
+  readonly retiredPolicyFile: boolean;
   /**
    * The repository layer whose file exists but is unreadable — the whole-file
    * rule then fails every field closed (`ok` false) except the compliance lens,
@@ -173,7 +178,6 @@ export const EVIDENCE_POLICY_MODULE_SURFACE = Object.freeze({
   FAIL_CLOSED_LINE: 'string',
   complianceDefault: 'function',
   resolve: 'function',
-  serializePolicy: 'function',
 } as const satisfies Record<keyof EvidencePolicyModule, SurfaceKind>);
 
 /** Every key of SettingsModule and the runtime kind the loader requires of it. */
@@ -288,7 +292,7 @@ export function formatEvidencePolicyUnavailable(error: EvidencePolicyLoadError):
  * The `compliance --status` line: the resolved policy for `opts.dir`, or the
  * unavailable line when the loader failed — that line is the whole handling
  * (ADR-028). The caller passes the compliance state it already read, so the
- * manifest is never read twice. `resolve()` makes at most two `gh` calls and
+ * manifest is never read twice. `resolve()` makes at most three `gh` calls and
  * bounds every subprocess with a timeout, so an offline machine degrades to a
  * flagged result rather than a hang.
  */
@@ -408,11 +412,17 @@ export function repoTrackerSelection(loaded: SettingsLoad, opts: RepoSettingsOpt
 /**
  * The `compliance --status` lines about the repository in `opts.dir`: the ids its
  * project.json declares (`generic controls only` for an empty or malformed list),
- * and a migration hint while the legacy policy file is still there. A repository
- * file that exists but is unreadable contributes the generic lens (the machine's
- * own frameworks still apply), and says so, naming the file. Empty when the resolver is unavailable or
- * failed closed for any other reason, or the repository declares nothing and has
- * no legacy file — the status output is then unchanged.
+ * and a migration hint while the retired policy file is in the working tree. A
+ * repository file that exists but is unreadable contributes the generic lens (the
+ * machine's own frameworks still apply), and says so, naming the file. Empty when
+ * the resolver is unavailable or failed closed for any other reason, or the
+ * repository declares nothing and holds no policy file — the status output is then
+ * unchanged.
+ *
+ * The hint states the rule (D-POLICY-JSON-RETIRED): the file is not read, and
+ * while project.json has no `evidence` its presence holds the repository at
+ * `required`. The value is not read either, so the hint shows the project.json
+ * line for each value the file may hold, from the settings resolver's serializer.
  */
 export function repoComplianceStatusLines(loaded: SettingsLoad, opts: RepoSettingsOptions): string[] {
   if (!loaded.ok) return [];
@@ -427,9 +437,27 @@ export function repoComplianceStatusLines(loaded: SettingsLoad, opts: RepoSettin
     const ids = settings.repoCompliance.length > 0 ? settings.repoCompliance.join(', ') : 'generic controls only';
     lines.push(`Repository: ${ids} (${PROJECT_FILE})`);
   }
-  if (settings.legacyPolicyFile) {
-    lines.push(`Migration:  ${LEGACY_POLICY_FILE} is superseded by ${PROJECT_FILE} — move its policy into`);
-    lines.push(`            ${PROJECT_FILE} as "evidence" (the legacy file is read for one more release)`);
-  }
+  if (settings.retiredPolicyFile) lines.push(...retiredPolicyHint(loaded.value));
   return lines;
+}
+
+/** The policies the hint maps, in the order it prints them. */
+const HINT_POLICIES: readonly EvidencePolicy[] = ['standard', 'required'];
+
+/**
+ * The migration hint for a working tree holding the retired policy file: what the
+ * file does now, and the project.json line that states each value it may hold.
+ * A value whose line the serializer refuses is left out rather than hand-built.
+ */
+function retiredPolicyHint(settings: Pick<SettingsModule, 'serializeProjectSuggestion'>): string[] {
+  const mappings = HINT_POLICIES.flatMap((policy) => {
+    const body = settings.serializeProjectSuggestion({ evidence: policy });
+    return body === null ? [] : [`              ${policy.padEnd(8)}  →  ${body.trimEnd()}`];
+  });
+  return [
+    `Migration:  ${RETIRED_POLICY_FILE} is not read. While ${PROJECT_FILE} has no "evidence",`,
+    '            its presence alone holds this repository at required. Commit its value',
+    `            to ${PROJECT_FILE} as "evidence", then delete ${RETIRED_POLICY_FILE}:`,
+    ...mappings,
+  ];
 }

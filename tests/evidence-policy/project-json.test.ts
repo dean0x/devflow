@@ -3,14 +3,15 @@
  *
  * The committed team file `.devflow/project.json`:
  *   - lib/project-config.cjs — the ONE parser of project.json and the personal
- *     config.json (D-PROJECT-CONFIG, D-PROJECT-STRICT-KEYS): the byte rules it
- *     shares with the policy file, per-key absent/valid/malformed classification,
+ *     config.json (D-PROJECT-CONFIG, D-PROJECT-STRICT-KEYS): the byte rules both
+ *     files share, per-key absent/valid/malformed classification,
  *     duplicate keys found in the raw text, and parity with the TypeScript
  *     registries it transcribes;
  *   - resolve-evidence-policy.cjs default mode reading it at every source
  *     (D-POLICY-SOURCE-PRECEDENCE, D-COMPLIANCE-REPO-FLOOR) — TP-29, TP-30, TP-31.
  *
- * The existing policy-file-only rows live, unchanged, in resolver.test.ts (TP-28).
+ * The fold rows live in resolver.test.ts, and so do the retired policy.json's
+ * presence rows (TP-45, TP-46 — D-POLICY-JSON-RETIRED).
  */
 
 import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach, vi } from 'vitest';
@@ -103,7 +104,6 @@ interface Resolution {
 
 interface ResolverModule {
   readonly OUTPUT_LINE_RE: RegExp;
-  parsePolicyBytes(buf: unknown): { kind: string };
   resolve(opts: { dir: string; compliance?: unknown }, deps?: { exec?: unknown }): Resolution;
   formatLine(r: Resolution): string;
 }
@@ -171,7 +171,7 @@ describe('lib/project-config.cjs — parity with the TypeScript registries', () 
     }
   });
 
-  it('shares its byte bound with the policy file', () => {
+  it('bounds every config file at 4096 bytes, and freezes its registries', () => {
     expect(LIB.MAX_CONFIG_BYTES).toBe(4096);
     expect(Object.isFrozen(LIB)).toBe(true);
     for (const registry of [LIB.POLICIES, LIB.PUBLICATIONS, LIB.TRACKER_PROVIDER_IDS, LIB.COMPLIANCE_IDS, LIB.FEATURE_SWITCHES]) {
@@ -181,10 +181,10 @@ describe('lib/project-config.cjs — parity with the TypeScript registries', () 
 });
 
 // ---------------------------------------------------------------------------
-// Byte rules — the policy file's, shared
+// Byte rules — one set for project.json and config.json
 // ---------------------------------------------------------------------------
 
-describe('byte rules shared with the policy file', () => {
+describe('byte rules shared by project.json and config.json', () => {
   const COMPACT = '{"evidence":"required"}';
   const INVALID_BYTES: ReadonlyArray<readonly [string, unknown]> = [
     ['a string, not bytes', COMPACT],
@@ -193,11 +193,10 @@ describe('byte rules shared with the policy file', () => {
     ['a malformed UTF-8 sequence', Buffer.concat([bytes('{"x":"'), Buffer.from([0xc3, 0x28]), bytes('"}')])],
   ];
 
-  it.each(INVALID_BYTES)('%s is invalid for project.json, config.json and policy.json alike', (_label, buf) => {
+  it.each(INVALID_BYTES)('%s is invalid for project.json and config.json alike', (_label, buf) => {
     expect(LIB.decodeConfigBytes(buf)).toEqual({ kind: 'invalid' });
     expect(LIB.parseProjectBytes(buf)).toEqual({ kind: 'invalid' });
     expect(LIB.parsePersonalBytes(buf)).toEqual({ kind: 'invalid' });
-    expect(RESOLVER.parsePolicyBytes(buf)).toEqual({ kind: 'invalid' });
   });
 
   it('exactly 4096 bytes is read', () => {
@@ -528,14 +527,14 @@ describe('TP-29 (AC-25): the default branch\'s project.json governs; a PR worktr
     ]);
   }, SUBPROCESS_TIMEOUT.timeout);
 
-  it('a project.json without evidence falls back to the SAME source\'s policy.json', () => {
+  it('a project.json without evidence leaves the SAME source to its policy.json — by presence, so required and invalid', () => {
     writeDevflowFile('project.json', PROJECT.noEvidence);
-    writeDevflowFile('policy.json', POLICY.required);
+    writeDevflowFile('policy.json', POLICY.standard);
     expect(lineFor(scenarioCalls({
       root, defaultBranch: 'main',
-      remoteProject: { bytes: PROJECT.noEvidence }, remote: { bytes: POLICY.required },
-      headProject: { bytes: PROJECT.noEvidence }, head: { bytes: POLICY.required },
-    }))).toBe(`EVIDENCE_POLICY=required SOURCE=file REF=main ${REQ}`);
+      remoteProject: { bytes: PROJECT.noEvidence }, remote: { bytes: POLICY.standard },
+      headProject: { bytes: PROJECT.noEvidence }, head: { bytes: POLICY.standard },
+    }))).toBe(`EVIDENCE_POLICY=required SOURCE=invalid REF=main WARN=invalid-file ${REQ}`);
   });
 
   it('offline: the tracking copy\'s project.json raises a branch that lowered it', () => {
@@ -564,7 +563,7 @@ describe('TP-29 (AC-25): the default branch\'s project.json governs; a PR worktr
   });
 
   it('a 404 on project.json and a 403 on policy.json is unavailable (a half-read default branch is none)', () => {
-    writeDevflowFile('policy.json', POLICY.standard);
+    writeDevflowFile('project.json', PROJECT.standard);
     const res = RESOLVER.resolve({ dir: root, compliance: DISABLED }, {
       exec: scriptedExec(scenarioCalls({ root, defaultBranch: 'main', remoteProject: 'absent', remote: 'forbidden', tracking: 'no-ref' })).exec,
     });

@@ -73,7 +73,7 @@ devflow/
 │       └── scripts/                  # Installed verbatim to ~/.devflow/scripts/
 │           ├── hud.sh                # HUD status-line entry script
 │           ├── redact-secrets.cjs    # D11 secret scrubber for every posted body and notes file
-│           ├── resolve-evidence-policy.cjs # Resolves EVIDENCE_POLICY from .devflow/project.json `evidence` (legacy .devflow/policy.json fallback per source); writes nothing
+│           ├── resolve-evidence-policy.cjs # Resolves EVIDENCE_POLICY from .devflow/project.json `evidence` (a retired .devflow/policy.json counts by presence only: required); writes nothing
 │           ├── resolve-settings.cjs  # Local settings resolver: folds project.json, config.json and the machine manifest into one settings line; no network, writes nothing
 │           ├── pr-evidence.cjs       # Pure core of test-plan evidence: grammars, markers, the state ladder
 │           ├── verify-evidence.cjs   # I/O half of test-plan evidence: check, render, verify, splice, readback

@@ -8,8 +8,9 @@
 #    {slug}/KNOWLEDGE.md (tracked, committed by the Knowledge agent at workflow end).
 # 2. .devflow/conventions.md — naming-convention authority written by the Git
 #    learn-conventions operation; shared so the team uses one naming source.
-# 3. .devflow/policy.json — the team-owned evidence policy, read from the default
-#    branch by resolve-evidence-policy.cjs. Devflow never writes it.
+# 3. .devflow/policy.json — the retired evidence-policy file: never parsed, but
+#    where project.json has no `evidence` its presence holds the repository at
+#    required (D-POLICY-JSON-RETIRED). Devflow never writes it.
 # 4. .devflow/project.json — the team-committed settings both resolvers read
 #    (D-GITIGNORE-V6). Devflow never writes it.
 #

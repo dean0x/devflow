@@ -59,7 +59,7 @@ validate version format
 
 ## Traceability Evidence (Evidence Policy)
 
-When the repository's evidence policy resolves `required` — `.devflow/policy.json` on the default branch, or compliance enabled on the releasing machine — the `/release` command gathers and ships additional evidence. `/release --dry-run` gathers and shows the same evidence under either policy, without asking anything or writing a resume checkpoint.
+When the repository's evidence policy resolves `required` — `evidence` in `.devflow/project.json` on the default branch, a committed retired `.devflow/policy.json` where that project.json has no `evidence` key, a repository `compliance` key, or compliance enabled on the releasing machine — the `/release` command gathers and ships additional evidence. `/release --dry-run` gathers and shows the same evidence under either policy, without asking anything or writing a resume checkpoint.
 
 **Last release tag** — `release-trace.cjs last-tag` picks the highest merged tag matching `^v?X.Y.Z$`, compared numerically, so a marker tag (such as `sdlc-baseline-2026-09-24`) or a prerelease tag never counts as the last release. Version analysis uses the same tag under either policy.
 

@@ -58,3 +58,4 @@ install.log
 # Competitive analysis codenames (private)
 .competitive-codenames.json
 release-notes.md
+!.devflow/project.json

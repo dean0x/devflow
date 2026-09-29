@@ -65,7 +65,7 @@ interface Settings {
   readonly compliance: { readonly enabled: boolean; readonly frameworks: readonly string[] };
   readonly switches: { readonly memory: SwitchState; readonly learning: SwitchState; readonly knowledge: SwitchState };
   readonly repoCompliance: readonly string[] | null;
-  readonly legacyPolicyFile: boolean;
+  readonly retiredPolicyFile: boolean;
   readonly unreadable: 'project' | 'personal' | null;
 }
 
@@ -75,7 +75,7 @@ interface SettingsModule {
   readonly EXIT_CODES: Readonly<Record<string, number>>;
   readonly SETTINGS_LINE_RE: RegExp;
   readonly SETTINGS_FAIL_CLOSED_LINE: string;
-  foldSettings(inputs: { project: unknown; personal: unknown; manifest: unknown; legacyPolicyFile: boolean }): Settings;
+  foldSettings(inputs: { project: unknown; personal: unknown; manifest: unknown; retiredPolicyFile: boolean }): Settings;
   readRepoLayers(root: string): { project: unknown; personal: unknown };
   resolveSettings(opts: { dir: string; manifest?: unknown }, deps?: { exec?: ExecFn }): Settings;
   formatSettingsLine(s: Settings): string;
@@ -462,7 +462,7 @@ describe('readRepoLayers: the seam the hooks\' one parser fork reads through (D-
       const dir = fs.mkdtempSync(path.join(tmp, 'layers-'));
       if (row.project !== null) writeRepoFile('project.json', row.project, dir);
       if (row.personal !== null) writeRepoFile('config.json', row.personal, dir);
-      const viaLayers = SETTINGS.foldSettings({ ...SETTINGS.readRepoLayers(dir), manifest: row.manifest, legacyPolicyFile: false });
+      const viaLayers = SETTINGS.foldSettings({ ...SETTINGS.readRepoLayers(dir), manifest: row.manifest, retiredPolicyFile: false });
       expect({
         memory: viaLayers.switches.memory.on,
         learning: viaLayers.switches.learning.on,
@@ -749,9 +749,9 @@ describe('repository files are never followed or opened when not regular', () =>
   });
 
   it('flags a legacy policy.json in the worktree for the CLI\'s migration hint', () => {
-    expect(settingsFor({}, MANIFEST_ON, root).legacyPolicyFile).toBe(false);
+    expect(settingsFor({}, MANIFEST_ON, root).retiredPolicyFile).toBe(false);
     writeRepoFile('policy.json', '{"version":1,"evidencePolicy":"required"}\n');
-    expect(settingsFor({}, MANIFEST_ON, root).legacyPolicyFile).toBe(true);
+    expect(settingsFor({}, MANIFEST_ON, root).retiredPolicyFile).toBe(true);
   });
 });
 

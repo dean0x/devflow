@@ -185,7 +185,7 @@ const LINE_MAX_BUFFER = 4096;
  *   compliance: { enabled: boolean, frameworks: readonly string[] },
  *   switches: { memory: SwitchState, learning: SwitchState, knowledge: SwitchState },
  *   repoCompliance: readonly string[] | null,
- *   legacyPolicyFile: boolean,
+ *   retiredPolicyFile: boolean,
  *   unreadable: 'project' | 'personal' | null,
  * }} Settings
  *   ok              false only for a fail-closed resolution — the whole-file
@@ -193,14 +193,14 @@ const LINE_MAX_BUFFER = 4096;
  *   compliance      enabled with no frameworks is `generic`
  *   repoCompliance  the worktree project.json's ids, or null when it declares
  *                   none (a malformed declaration reads as [] — generic)
- *   legacyPolicyFile  the worktree still holds .devflow/policy.json (the CLI
- *                   prints a migration hint)
+ *   retiredPolicyFile  the worktree holds the retired .devflow/policy.json (the
+ *                   CLI prints a migration hint)
  *   unreadable      the first repository layer whose file exists but is
  *                   unreadable, which failed every field but the compliance
  *                   lens closed (the whole-file rule; project before personal);
  *                   null otherwise
  *
- * @typedef {{ project: object, personal: object, manifest: unknown, legacyPolicyFile: boolean }} SettingsInputs
+ * @typedef {{ project: object, personal: object, manifest: unknown, retiredPolicyFile: boolean }} SettingsInputs
  *   project/personal are lib/project-config.cjs ProjectConfig / PersonalConfig.
  *
  * @typedef {{ status: number | null, stdout?: Buffer | string, error?: { code?: string } }} ExecResult
@@ -226,7 +226,7 @@ const FAIL_CLOSED_SETTINGS = Object.freeze({
     knowledge: Object.freeze({ on: false, source: /** @type {SwitchSource} */ ('machine') }),
   }),
   repoCompliance: null,
-  legacyPolicyFile: false,
+  retiredPolicyFile: false,
   unreadable: null,
 });
 
@@ -510,7 +510,7 @@ function foldSettings(inputs) {
       knowledge: foldSwitch(project, personal, manifest, 'knowledge'),
     }),
     repoCompliance,
-    legacyPolicyFile: inputs.legacyPolicyFile === true,
+    retiredPolicyFile: inputs.retiredPolicyFile === true,
     unreadable: null,
   });
 }
@@ -625,7 +625,7 @@ function resolveSettings(opts, deps) {
     if (toplevel.kind === 'unknown') return FAIL_CLOSED_SETTINGS;
     if (toplevel.kind === 'none') {
       const none = projectConfig.parseProjectBytes(null);
-      return foldSettings({ project: none, personal: none, manifest, legacyPolicyFile: false });
+      return foldSettings({ project: none, personal: none, manifest, retiredPolicyFile: false });
     }
     const { project, personal } = readRepoLayers(toplevel.root);
     if (project.kind === 'invalid') return unreadableSettings('project', manifest);
@@ -634,7 +634,7 @@ function resolveSettings(opts, deps) {
       project,
       personal,
       manifest,
-      legacyPolicyFile: existsNoFollow(path.join(toplevel.root, '.devflow', 'policy.json')),
+      retiredPolicyFile: existsNoFollow(path.join(toplevel.root, '.devflow', 'policy.json')),
     });
   } catch (_) {
     return FAIL_CLOSED_SETTINGS;

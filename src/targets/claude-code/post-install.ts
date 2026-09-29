@@ -52,8 +52,8 @@ const CLAUDEIGNORE_LINE = '.claudeignore';
 const CLAUDEIGNORE_NEGATION = '!.claudeignore';
 
 /**
- * Re-includes the team-owned evidence policy file (D-GITIGNORE-V5). A COMPLETION
- * line, never a presence sentinel: users may author it themselves, so its presence
+ * Re-includes the retired evidence-policy file (D-GITIGNORE-V5,
+ * D-POLICY-JSON-RETIRED). A COMPLETION line, never a presence sentinel: users may author it themselves, so its presence
  * proves nothing about the devflow block (avoids PF-059). It sits after `.devflow/*`
  * (which it overrides under last-match-wins) and before `.claudeignore`, so the
  * block's final line stays `.claudeignore`.
@@ -78,9 +78,11 @@ const DEVFLOW_PROJECT_LINE = '!.devflow/project.json';
  *   + committed (the Knowledge agent commits them at workflow end).
  * - conventions.md: naming-convention authority written by the Git learn-conventions
  *   operation; GIT-TRACKED so the team shares a single naming source.
- * - policy.json: the team-owned evidence policy, read from the default branch by
- *   resolve-evidence-policy.cjs; GIT-TRACKED so a team can commit it without `git add -f`.
- *   Devflow never writes it.
+ * - policy.json: the retired evidence-policy file. resolve-evidence-policy.cjs never
+ *   parses it, but where project.json has no `evidence` its presence holds the
+ *   repository at `required` (D-POLICY-JSON-RETIRED); GIT-TRACKED so a team's
+ *   committed copy stays shared until its value moves into project.json. Devflow
+ *   never writes it.
  * - project.json: the team-committed settings (evidence, compliance, tracker, review
  *   publication, narrow-only feature switches) both resolvers read; GIT-TRACKED for
  *   the same reason (D-GITIGNORE-V6). Devflow never writes it.
@@ -118,7 +120,8 @@ export const DEVFLOW_GITIGNORE_BLOCK = DEVFLOW_GITIGNORE_BLOCK_LINES.join('\n');
 /**
  * The entries directly under a repository's `.devflow/` that the team shares
  * through git (a trailing `/` marks a directory): the feature knowledge bases,
- * the naming conventions, the evidence policy and the committed project settings.
+ * the naming conventions, the retired evidence-policy file and the committed
+ * project settings.
  *
  * D-UNINSTALL-CARVE-OUT: uninstall's project-data step never deletes these — a
  * confirmed removal takes everything else under `.devflow/` and keeps them
