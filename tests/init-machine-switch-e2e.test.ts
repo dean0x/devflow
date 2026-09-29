@@ -223,6 +223,31 @@ describe('init --no-<feature> switches the feature off in every project', () => 
     expect(linesOf(memoryQueue(repoB))).toBe(2);
   }, MULTI_RUN_TIMEOUT_MS);
 
+  it('from a linked worktree: drains the main checkout\'s learning queue and this checkout\'s memory queue (D-LEDGER-MAIN-WORKTREE)', async () => {
+    // The hooks queue learning turns into the main checkout's ledger (DF_LEDGER_ROOT)
+    // but keep working memory per checkout, so init drains each where it is written.
+    execFileSync('git', ['-c', 'user.email=t@t', '-c', 'user.name=t', 'commit', '-q', '--allow-empty', '-m', 'init'], { cwd: repoA });
+    const wtParent = await fs.mkdtemp(path.join(os.tmpdir(), 'df-switch-wt-'));
+    const wt = path.join(wtParent, 'wt');
+    try {
+      execFileSync('git', ['worktree', 'add', '-q', wt, '-b', 'feat'], { cwd: repoA });
+      await seedLearningQueue(repoA);
+      await fs.mkdir(path.dirname(memoryQueue(repoA)), { recursive: true });
+      await fs.writeFile(memoryQueue(repoA), '{"role":"user"}\n', 'utf-8');
+      await fs.mkdir(path.dirname(memoryQueue(wt)), { recursive: true });
+      await fs.writeFile(memoryQueue(wt), '{"role":"user"}\n', 'utf-8');
+
+      runInit(wt, '--recommended', '--no-learning', '--no-memory');
+
+      expect(existsSync(learningQueue(repoA)), 'the main checkout\'s learning queue survived init --no-learning').toBe(false);
+      expect(existsSync(memoryQueue(wt)), 'this checkout\'s memory queue survived init --no-memory').toBe(false);
+      // Memory is per checkout: the main checkout's own queue is not this run's to drain.
+      expect(existsSync(memoryQueue(repoA))).toBe(true);
+    } finally {
+      await fs.rm(wtParent, { recursive: true, force: true });
+    }
+  }, MULTI_RUN_TIMEOUT_MS);
+
   it('a re-init keeps the machine-wide choice even from a repo whose config says true (ADR-014)', async () => {
     runInit(repoA, '--recommended', '--no-learning', '--no-knowledge', '--no-memory');
     await writeRepoConfig(repoB, STALE_ON);
