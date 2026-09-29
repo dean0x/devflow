@@ -610,10 +610,11 @@ describe('row 13 caller side: the publication stub is one rule, reported by the 
     expect(collectStubRuleSites(corpus)).toEqual([...PUBLICATION_HOSTS])
   })
 
-  it('`stub` is never a config value: the partial still accepts only `auto`, `full` and `off` from the file', () => {
+  it('`stub` is never a config value: the gate takes only `off`, `auto` or `full` from the settings line', () => {
     for (const host of PUBLICATION_HOSTS) {
       const content = corpus.find(f => f.file === host)!.content
-      expect(content, `${host}: the config read`).toContain('is one of `auto`, `full`, or `off`')
+      expect(content, `${host}: the settings-line value`).toContain('from that worktree\'s settings line')
+      expect(content, `${host}: the closed set`).toContain('so it is `off`, `auto` or `full`')
       expect(content, `${host}: a configured stub is unrecognised`).toContain('`stub` is never a config value')
     }
   })

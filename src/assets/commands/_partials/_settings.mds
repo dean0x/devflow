@@ -1,0 +1,28 @@
+A partial: the one way a prompt learns the repository's settings (D-SETTINGS-LINE,
+#392). Prompts never read `project.json`, the personal `config.json` or the
+machine manifest for a value this line carries — `resolve-settings.cjs` folds all
+three, and `tests/guards/no-config-read.test.ts` holds every compiled prompt to it.
+
+Imported by `_publication.mds`, `_compliance.mds` and `_knowledge.mds` themselves,
+as ALIAS imports (PF-073: a selective import deep-clones this module's scope into
+every define of the importer). A command that runs two of those gates carries the
+block twice; the text says "reuse a line this run already resolved for the same
+root", so the second copy costs bytes and never a second resolution.
+
+The accepted shape below is `SETTINGS_LINE_RE` written out, and the fallback is
+`SETTINGS_FAIL_CLOSED_LINE`, both exported by `resolve-settings.cjs`;
+`tests/commands/settings-partial.test.ts` pins both to the script.
+
+@define settings_resolve():
+**Resolve the settings line** once per worktree root, reusing a line this run already resolved for the same root. `{root}` is the worktree the values are for — the repository root when the run has one worktree:
+
+```bash
+node "$HOME/.devflow/scripts/resolve-settings.cjs" "{root}" 2>/dev/null; echo "exit=$?"
+```
+
+Accept the output only when it is exactly two lines: `exit=0` last and, before it, one line of the form `TRACKER=<github|jira|linear> TRACKER_SOURCE=<project|personal|machine|default> TRACKER_WARN=<none|mismatch|invalid> SITE=<none|https://<host>> KEY=<none|<key>> REVIEW_PUBLICATION=<off|auto|full> COMPLIANCE=<off|generic|<id>[,<id>…]> MEMORY=<on|off> LEARNING=<on|off> KNOWLEDGE=<on|off>` — these fields, in this order, nothing else, where `<host>` is a lowercase dotted host name alone, `<key>` is 2–10 of `A-Z`, `0-9` and `_` starting with a letter, and each `<id>` is one of `gdpr`, `hipaa`, `pci-dss`, `soc2`, `iso-27001`, `sox`. **Anything else** (a non-zero exit, no line, extra text, or a missing, reordered or unlisted field or value) ⇒ use `TRACKER=github TRACKER_SOURCE=default TRACKER_WARN=invalid SITE=none KEY=none REVIEW_PUBLICATION=off COMPLIANCE=generic MEMORY=on LEARNING=on KNOWLEDGE=off` instead.
+
+The accepted line is the only source of these values: the script alone folds the committed `.devflow/project.json`, the personal `.devflow/config.json` and the machine manifest.
+@end
+
+@export settings_resolve

@@ -54,6 +54,7 @@ import {
   resolveVariantModules,
 } from '../../src/core/mds-variants.js';
 import { resolveAgentSource, splitFrontmatter, walkFiles, ROOT, type CorpusEntry } from '../helpers.js';
+import { SETTINGS_BLOCK_HOSTS } from '../fixtures/mds-manifest.js';
 
 const DIST_COMMANDS = path.join(ROOT, 'dist', 'commands');
 const DIST_SKILLS = path.join(ROOT, 'dist', 'skills');
@@ -164,6 +165,19 @@ const ALLOWLISTED_PROVIDER_REGIONS: readonly AllowlistedRegion[] = [
       'enumerated once, inside the gate, and a value is pasted when it matches any one row — the ' +
       'agent never resolves a provider, which is what keeps this a sink check and not a second ' +
       'convergence point.',
+  },
+  {
+    label: "the settings partial's accepted-line shape",
+    files: SETTINGS_BLOCK_HOSTS.flatMap(h => [`src/assets/commands/${h}.md`, `dist/commands/${h}.md`]),
+    from: 'one line of the form `TRACKER=<',
+    to: ' — these fields, in this order, nothing else',
+    justification:
+      'A command accepts the resolve-settings.cjs line only when it matches the script\'s ' +
+      'SETTINGS_LINE_RE, and a closed value set cannot be written without naming its members. ' +
+      'It is a sink check on a value the script already resolved, like the Code agent\'s paste ' +
+      'gate: the command never chooses a provider from it, so this is no second convergence ' +
+      'point (PF-023). The block expands once per gate that consumes it, so a file can carry it ' +
+      'more than once, and every copy is stripped.',
   },
 ];
 
@@ -294,17 +308,23 @@ function ownsToken(path: string, token: string): boolean {
   return PROVIDER_OWNED_PATHS.some(owned => owned.token === token && path.startsWith(owned.prefix));
 }
 
-/** Remove every allowlisted block that lives in this file; identity elsewhere. */
+/**
+ * Remove every allowlisted block that lives in this file, every copy of it;
+ * identity elsewhere. Each pass removes one copy and shortens the text, so the
+ * loop is bounded by the number of copies.
+ */
 function stripAllowlistedRegion(entry: CorpusEntry): string {
   let content = entry.content;
   for (const region of ALLOWLISTED_PROVIDER_REGIONS) {
     if (!region.files.includes(entry.path)) continue;
-    const start = content.indexOf(region.from);
-    if (start === -1) continue;
-    const end = content.indexOf(region.to, start);
-    content = end === -1
-      ? content.slice(0, start)
-      : content.slice(0, start) + content.slice(end);
+    for (let start = content.indexOf(region.from); start !== -1; start = content.indexOf(region.from, start)) {
+      const end = content.indexOf(region.to, start);
+      if (end === -1) {
+        content = content.slice(0, start);
+        break;
+      }
+      content = content.slice(0, start) + content.slice(end);
+    }
   }
   return content;
 }
