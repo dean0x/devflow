@@ -1550,7 +1550,7 @@ describe('byte budget: body-hop closure (D-BODY-HOP-CLOSURE)', () => {
 
   it('the required-policy chain: `required` sets ISSUE_REQUIRED, which takes setup-task 1c into ensure-traceable-issue — priced on every provider', () => {
     // The hop that made this model necessary is not a corner case: under the `required`
-    // evidence policy (this repo's own, .devflow/policy.json) ISSUE_REQUIRED is true, so
+    // evidence policy (this repo's own, .devflow/project.json) ISSUE_REQUIRED is true, so
     // every setup-task spawn without an ISSUE_INPUT runs ensure-traceable-issue's
     // mechanics in the same context window. Pinned as a named set per provider, never a
     // count, so a chain that loses or gains a file goes red naming it.
