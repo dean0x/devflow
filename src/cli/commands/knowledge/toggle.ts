@@ -1,11 +1,11 @@
 /**
  * Handle the enable/disable/status toggle actions for `devflow knowledge`.
  *
- * D-FEATURES-MACHINE-WIDE (src/core/feature-switch.ts): knowledge write-back is
+ * D-FEATURES-NARROW-ONLY (src/core/feature-switch.ts): knowledge write-back is
  * switched for the whole machine by `features.knowledge` in
  * ~/.devflow/manifest.json. `--enable`/`--disable` write that value — the same
  * one `devflow init --knowledge / --no-knowledge` writes — and `--status`
- * reports it.
+ * reports it, plus the repository's narrowing when a repo layer narrows it.
  */
 import { promises as fs } from 'fs';
 import * as path from 'path';
@@ -14,6 +14,7 @@ import color from 'picocolors';
 import { getGitRoot } from '../../../core/git.js';
 import { getDevFlowDirectory } from '../../../targets/claude-code/claude-paths.js';
 import { readMachineFeature, writeMachineFeature } from '../../../core/feature-switch.js';
+import { loadSettingsModule, narrowedSwitchLabel } from '../../../core/evidence-policy.js';
 import { getFeaturesDir } from '../../../core/project-paths.js';
 
 async function getWorktreePath(): Promise<string> {
@@ -49,6 +50,8 @@ export async function handleToggle(options: { enable?: boolean; disable?: boolea
     const enabled = await readMachineFeature(devflowDir, 'knowledge');
     const kbCount = await countKnowledgeBases(await getWorktreePath());
     p.log.info(`Status: ${enabled ? color.green('enabled') : color.yellow('disabled')}`);
+    const narrowed = enabled ? narrowedSwitchLabel(loadSettingsModule(), { dir: process.cwd() }, 'knowledge') : null;
+    if (narrowed !== null) p.log.info(`Effective here: ${color.yellow(narrowed)}`);
     p.log.info(`Knowledge bases: ${kbCount}`);
     p.outro('');
     return;

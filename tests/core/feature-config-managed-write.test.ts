@@ -6,12 +6,13 @@
  * devflow owns one key — reviewPublication — and nothing else. Every other key
  * in the file (the hand-written per-repo `tracker` override, a key a newer
  * devflow or the user added) belongs to the FILE, so it must survive the write
- * byte-for-byte, carried by key presence and never by type. The keys devflow
- * itself once wrote and has retired are the exception: `memory`, `learning` and
- * `knowledge` (per-repo feature switches until D-FEATURES-MACHINE-WIDE made
- * those features machine-wide), `decisions` and `autoCommit`. Carrying them
- * would leave a stale `learning: false` in the file that no longer does what it
- * says, so the write drops them.
+ * byte-for-byte, carried by key presence and never by type — the personal
+ * `features` narrowing object included (D-FEATURES-NARROW-ONLY). The keys devflow
+ * itself once wrote and has retired are the exception: the TOP-LEVEL `memory`,
+ * `learning` and `knowledge` (per-repo switches of the per-repo-install era),
+ * `decisions` and `autoCommit`. Carrying them would leave a stale
+ * `learning: false` in the file that no longer does what it says, so the write
+ * drops them.
  *
  * The file round trip is asserted, not only the pure merge, because PF-071's
  * lesson is that a direct call exercises an input path no user has.
@@ -101,6 +102,13 @@ describe('mergeManagedConfig: the managed keys come from init, every other key f
     expect(mergeManagedConfig({ tracker: 'linear' }, binding).tracker).toBe('linear');
   });
 
+  it('carries the personal `features` narrowing verbatim — it is a live key, never a retired one (PF-071)', () => {
+    const features = { memory: false, learning: false, knowledge: 'false', extra: [1] };
+    const merged = mergeManagedConfig({ reviewPublication: 'full', features, ...RETIRED }, MANAGED);
+
+    expect(merged).toEqual({ ...MANAGED, features });
+  });
+
   it('drops the retired keys devflow itself once wrote — the old per-repo feature switches included', () => {
     const merged = mergeManagedConfig({ ...RETIRED, teamNote: 'kept' }, MANAGED);
 
@@ -147,6 +155,15 @@ describe('writeManagedConfig: the read-modify-write through the file', () => {
 
     expect(readRaw()).toEqual({ ...MANAGED, tracker: 'jira', teamNote: { tags: ['a'] } });
     expect((await readConfig(tmpDir)).tracker).toBe('jira');
+  });
+
+  it('★ keeps a hand-written `features` object on disk through the managed write (PF-071)', async () => {
+    const body = { reviewPublication: 'full', features: { learning: false, knowledge: false }, tracker: 'jira' };
+    seedConfig(JSON.stringify(body));
+
+    await writeManagedConfig(tmpDir, MANAGED);
+
+    expect(readRaw()).toEqual({ ...body, ...MANAGED });
   });
 
   it('★ drops a stale per-repo feature switch an earlier init or toggle wrote', async () => {

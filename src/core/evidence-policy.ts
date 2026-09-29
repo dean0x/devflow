@@ -12,10 +12,16 @@
  * `~/.devflow/scripts` copy is never loaded: it may be older than this CLI. There
  * is deliberately no TypeScript copy of the parser, the fold or the grammar.
  *
- * D-POLICY-NO-WRITE (applies ADR-024): `.devflow/policy.json` is team-owned, and
- * devflow never writes or replaces a shared file it cannot prove it wrote. This
- * module therefore imports no fs API; the CLI only PRINTS the bytes a team may
- * choose to commit (`evidencePolicySuggestion`).
+ * The same seam loads the sibling `resolve-settings.cjs` (loadSettingsModule),
+ * the local resolver of the per-repository settings layer — `.devflow/project.json`,
+ * the personal `.devflow/config.json` and the machine manifest. Its shapes are
+ * transcribed the same way, and there is no TypeScript copy of its fold either.
+ *
+ * D-POLICY-NO-WRITE (applies ADR-024): `.devflow/project.json` (and the legacy
+ * `.devflow/policy.json`) are team-owned, and devflow never writes or replaces a
+ * shared file it cannot prove it wrote. This module therefore imports no fs API;
+ * the CLI only PRINTS the bytes a team may choose to commit
+ * (`evidencePolicySuggestion`).
  */
 
 import { createRequire } from 'module';
@@ -27,8 +33,14 @@ import { scriptsDir } from './assets.js';
 /** Basename of the resolver under src/assets/scripts/ (and ~/.devflow/scripts/). */
 export const RESOLVER_SCRIPT_NAME = 'resolve-evidence-policy.cjs';
 
+/** Basename of the settings resolver under src/assets/scripts/ (and ~/.devflow/scripts/). */
+export const SETTINGS_SCRIPT_NAME = 'resolve-settings.cjs';
+
 /** The team file the CLI suggests committing, relative to a repository root. */
-const POLICY_FILE = '.devflow/policy.json';
+const PROJECT_FILE = '.devflow/project.json';
+
+/** The legacy team file project.json replaces, relative to a repository root. */
+const LEGACY_POLICY_FILE = '.devflow/policy.json';
 
 /** `Policy` typedef. */
 export type EvidencePolicy = 'required' | 'standard';
@@ -82,6 +94,64 @@ export interface EvidencePolicyModule {
   serializePolicy(policy: unknown): string | null;
 }
 
+// ── Transcribed shapes (resolve-settings.cjs JSDoc) ────────────────────────────
+
+/** `TrackerSource` typedef — who decided TRACKER. */
+export type SettingsTrackerSource = 'project' | 'personal' | 'machine' | 'default';
+
+/** `TrackerWarn` typedef. */
+export type SettingsTrackerWarn = 'none' | 'mismatch' | 'invalid';
+
+/** `SwitchSource` typedef — the layer that decided a feature switch. */
+export type SettingsSwitchSource = 'machine' | 'project' | 'personal';
+
+/** `SwitchState` typedef. */
+export interface SettingsSwitchState {
+  readonly on: boolean;
+  readonly source: SettingsSwitchSource;
+}
+
+/** `Settings` typedef — what `resolveSettings()` returns (frozen). */
+export interface RepoSettings {
+  /** False only for the fail-closed resolution. */
+  readonly ok: boolean;
+  readonly tracker: 'github' | 'jira' | 'linear';
+  readonly trackerSource: SettingsTrackerSource;
+  readonly trackerWarn: SettingsTrackerWarn;
+  readonly site: string | null;
+  readonly key: string | null;
+  readonly reviewPublication: 'off' | 'auto' | 'full';
+  /** Enabled with no frameworks is the generic lens. */
+  readonly compliance: { readonly enabled: boolean; readonly frameworks: readonly string[] };
+  readonly switches: {
+    readonly memory: SettingsSwitchState;
+    readonly learning: SettingsSwitchState;
+    readonly knowledge: SettingsSwitchState;
+  };
+  /** The worktree project.json's own ids, or null when it declares none. */
+  readonly repoCompliance: readonly string[] | null;
+  /** The worktree still holds the legacy `.devflow/policy.json`. */
+  readonly legacyPolicyFile: boolean;
+}
+
+/** `ResolveSettingsOptions` typedef. `manifest` undefined makes the script read it itself. */
+export interface RepoSettingsOptions {
+  readonly dir: string;
+  readonly manifest?: unknown;
+}
+
+/**
+ * The part of the settings resolver's `module.exports` the CLI relies on.
+ * `resolveSettings()` never throws: an internal failure, or a git that cannot say
+ * whether `dir` is a repository, is the fail-closed resolution (`ok: false`).
+ */
+export interface SettingsModule {
+  readonly SETTINGS_LINE_RE: RegExp;
+  readonly SETTINGS_FAIL_CLOSED_LINE: string;
+  resolveSettings(opts: RepoSettingsOptions): RepoSettings;
+  serializeProjectSuggestion(input: unknown): string | null;
+}
+
 type SurfaceKind = 'string-array' | 'object' | 'regexp' | 'string' | 'function';
 
 /**
@@ -100,6 +170,14 @@ export const EVIDENCE_POLICY_MODULE_SURFACE = Object.freeze({
   serializePolicy: 'function',
 } as const satisfies Record<keyof EvidencePolicyModule, SurfaceKind>);
 
+/** Every key of SettingsModule and the runtime kind the loader requires of it. */
+export const SETTINGS_MODULE_SURFACE = Object.freeze({
+  SETTINGS_LINE_RE: 'regexp',
+  SETTINGS_FAIL_CLOSED_LINE: 'string',
+  resolveSettings: 'function',
+  serializeProjectSuggestion: 'function',
+} as const satisfies Record<keyof SettingsModule, SurfaceKind>);
+
 // ── Loader ─────────────────────────────────────────────────────────────────────
 
 type Result<T, E> = { readonly ok: true; readonly value: T } | { readonly ok: false; readonly error: E };
@@ -110,6 +188,8 @@ export type EvidencePolicyLoadError =
   | { readonly kind: 'unusable'; readonly path: string; readonly detail: string };
 
 export type EvidencePolicyLoad = Result<EvidencePolicyModule, EvidencePolicyLoadError>;
+
+export type SettingsLoad = Result<SettingsModule, EvidencePolicyLoadError>;
 
 function hasKind(value: unknown, kind: SurfaceKind): boolean {
   switch (kind) {
@@ -126,21 +206,21 @@ function hasKind(value: unknown, kind: SurfaceKind): boolean {
 }
 
 /** Surface keys that are absent or of the wrong kind on `value`, in surface order. */
-function surfaceMismatches(value: unknown): string[] {
-  if (typeof value !== 'object' || value === null) return Object.keys(EVIDENCE_POLICY_MODULE_SURFACE);
+function surfaceMismatches(value: unknown, surface: Readonly<Record<string, SurfaceKind>>): string[] {
+  if (typeof value !== 'object' || value === null) return Object.keys(surface);
   const record = value as Record<string, unknown>;
-  return Object.entries(EVIDENCE_POLICY_MODULE_SURFACE)
+  return Object.entries(surface)
     .filter(([key, kind]) => !hasKind(record[key], kind))
     .map(([key]) => key);
 }
 
 /**
- * Load the resolver from `dir` (default: the package's own scripts directory) and
- * shape-check its surface. Never throws: a missing file is `not-found`; a module
- * that throws on load or lacks a surface key is `unusable`.
+ * require() one package script and shape-check it against `surface`. Never
+ * throws: a missing file is `not-found`; a module that throws on load or lacks a
+ * surface key is `unusable`. The caller's type parameter is justified by the
+ * surface check, which `satisfies` ties to the interface's keys.
  */
-export function loadEvidencePolicyModule(dir: string = scriptsDir()): EvidencePolicyLoad {
-  const file = join(dir, RESOLVER_SCRIPT_NAME);
+function loadScript<T>(file: string, surface: Readonly<Record<string, SurfaceKind>>): Result<T, EvidencePolicyLoadError> {
   let loaded: unknown;
   try {
     loaded = createRequire(import.meta.url)(file);
@@ -150,11 +230,28 @@ export function loadEvidencePolicyModule(dir: string = scriptsDir()): EvidencePo
     const detail = err instanceof Error ? err.message : String(err);
     return { ok: false, error: { kind: 'unusable', path: file, detail } };
   }
-  const mismatches = surfaceMismatches(loaded);
+  const mismatches = surfaceMismatches(loaded, surface);
   if (mismatches.length > 0) {
     return { ok: false, error: { kind: 'unusable', path: file, detail: `missing or mistyped: ${mismatches.join(', ')}` } };
   }
-  return { ok: true, value: loaded as EvidencePolicyModule };
+  return { ok: true, value: loaded as T };
+}
+
+/**
+ * Load the evidence resolver from `dir` (default: the package's own scripts
+ * directory) and shape-check its surface.
+ */
+export function loadEvidencePolicyModule(dir: string = scriptsDir()): EvidencePolicyLoad {
+  return loadScript<EvidencePolicyModule>(join(dir, RESOLVER_SCRIPT_NAME), EVIDENCE_POLICY_MODULE_SURFACE);
+}
+
+/**
+ * Load the settings resolver from `dir` (default: the package's own scripts
+ * directory) and shape-check its surface. A `resolveSettings()` call makes one
+ * local `git` call and no network call (D-SETTINGS-LOCAL-ONLY).
+ */
+export function loadSettingsModule(dir: string = scriptsDir()): SettingsLoad {
+  return loadScript<SettingsModule>(join(dir, SETTINGS_SCRIPT_NAME), SETTINGS_MODULE_SURFACE);
 }
 
 // ── Presentation (pure) ────────────────────────────────────────────────────────
@@ -195,27 +292,101 @@ export function evidencePolicyStatusLine(loaded: EvidencePolicyLoad, opts: Evide
 }
 
 /**
- * What `--enable`/`--set` print when compliance is on: the file a team may commit
- * to pin the policy it now gets by default. Returned only when the resolver's own
- * `complianceDefault` says `required` (compliance enabled, at any framework
- * count); `null` otherwise. The bytes come from the resolver's `serializePolicy`,
- * so they always parse as a valid policy file. Nothing is written
- * (D-POLICY-NO-WRITE).
+ * The frameworks a compliance state names, for the suggestion: the raw list when
+ * the state is well-formed, else none. The settings resolver's serializer
+ * normalizes and drops unknown ids, so no id reaches the printed bytes unchecked.
+ */
+function suggestedFrameworks(complianceState: unknown): readonly string[] {
+  if (typeof complianceState !== 'object' || complianceState === null) return [];
+  const frameworks = (complianceState as { frameworks?: unknown }).frameworks;
+  return Array.isArray(frameworks) && frameworks.every(f => typeof f === 'string') ? frameworks : [];
+}
+
+/**
+ * What `--enable`/`--set` print when compliance is on: the `.devflow/project.json`
+ * a team may commit to hold every developer to what this machine now gets by
+ * default — the required evidence policy and this machine's frameworks. Returned
+ * only when the evidence resolver's own `complianceDefault` says `required`
+ * (compliance enabled, at any framework count); `null` otherwise. The bytes come
+ * from the settings resolver's `serializeProjectSuggestion`, which returns them
+ * only when they read back through the shared parser as exactly what was asked.
+ * Nothing is written (D-POLICY-NO-WRITE, applies ADR-024).
  */
 export function evidencePolicySuggestion(
   complianceState: unknown,
-  mod: Pick<EvidencePolicyModule, 'complianceDefault' | 'serializePolicy'>,
+  policy: Pick<EvidencePolicyModule, 'complianceDefault'>,
+  settings: Pick<SettingsModule, 'serializeProjectSuggestion'>,
 ): string | null {
-  if (mod.complianceDefault(complianceState) !== 'required') return null;
-  const body = mod.serializePolicy('required');
+  if (policy.complianceDefault(complianceState) !== 'required') return null;
+  const body = settings.serializeProjectSuggestion({
+    evidence: 'required',
+    compliance: suggestedFrameworks(complianceState),
+  });
   if (body === null) return null;
   return [
     'Compliance is enabled on this machine, so repositories without a committed',
-    'policy default to the required evidence policy here. To apply it for everyone',
-    `working in a repository, commit this as ${POLICY_FILE} on its default branch:`,
+    'evidence setting default to the required evidence policy here. To apply it for',
+    `everyone working in a repository, commit this as ${PROJECT_FILE} on its default branch:`,
     '',
     `${body}`,
     'devflow never writes this file: the team owns it, and once committed it applies',
     'repo-wide.',
   ].join('\n');
+}
+
+// ── The settings layer, for `--status` (pure) ──────────────────────────────────
+
+/** A repo layer's file, as a `--status` line names it. */
+export function settingsSourceFile(source: Exclude<SettingsSwitchSource, 'machine'>): string {
+  switch (source) {
+    case 'project': return PROJECT_FILE;
+    case 'personal': return '.devflow/config.json';
+    default: {
+      const exhaustive: never = source;
+      return exhaustive;
+    }
+  }
+}
+
+/**
+ * The effective state of a feature switch in this repository, ONLY when a repo
+ * layer narrows it — `disabled (.devflow/project.json)` — and null otherwise, so a
+ * `--status` whose machine switch alone decides prints exactly what it always has
+ * (D-FEATURES-NARROW-ONLY). A settings resolver that failed to load or failed
+ * closed also yields null: it knows nothing about this repository.
+ */
+export function narrowedSwitchLabel(
+  loaded: SettingsLoad,
+  opts: RepoSettingsOptions,
+  feature: keyof RepoSettings['switches'],
+): string | null {
+  if (!loaded.ok) return null;
+  const settings = loaded.value.resolveSettings(opts);
+  if (!settings.ok) return null;
+  const state = settings.switches[feature];
+  if (state.on || state.source === 'machine') return null;
+  return `disabled (${settingsSourceFile(state.source)})`;
+}
+
+/**
+ * The `compliance --status` lines about the repository in `opts.dir`: the ids its
+ * project.json declares (`generic controls only` for an empty or malformed list),
+ * and a migration hint while the legacy policy file is still there. Empty when
+ * the resolver is unavailable or the repository declares nothing and has no
+ * legacy file — the status output is then unchanged.
+ */
+export function repoComplianceStatusLines(loaded: SettingsLoad, opts: RepoSettingsOptions): string[] {
+  if (!loaded.ok) return [];
+  const settings = loaded.value.resolveSettings(opts);
+  if (!settings.ok) return [];
+  const lines: string[] = [];
+  if (settings.repoCompliance !== null) {
+    const ids = settings.repoCompliance.length > 0 ? settings.repoCompliance.join(', ') : 'generic controls only';
+    lines.push(`Repository: ${ids} (${PROJECT_FILE})`);
+  }
+  if (settings.legacyPolicyFile) {
+    lines.push(`Migration:  ${LEGACY_POLICY_FILE} is superseded by ${PROJECT_FILE} — move its policy into`);
+    lines.push(`            ${PROJECT_FILE} as "evidence" (the legacy file is read for one more release)`);
+  }
+  return lines;
 }

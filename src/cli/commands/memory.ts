@@ -25,6 +25,7 @@ import {
   type Settings,
 } from '../../targets/claude-code/hooks.js';
 import { readMachineFeature, writeMachineFeature } from '../../core/feature-switch.js';
+import { loadSettingsModule, narrowedSwitchLabel } from '../../core/evidence-policy.js';
 
 /**
  * Map of hook event type → filename marker for the memory hooks.
@@ -149,7 +150,7 @@ export function countMemoryHooks(input: string | Settings): number {
 /**
  * Converge the memory hooks in a settings JSON string to `enabled`. Pure.
  *
- * D-FEATURES-MACHINE-WIDE: the ONE settings transform for the memory feature,
+ * D-FEATURES-NARROW-ONLY: the ONE settings transform for the memory feature,
  * shared by `devflow init` (inside its single settings read-modify-write pass)
  * and `devflow memory --enable/--disable`, so the two controls of the same
  * machine-wide switch leave settings.json byte-for-byte alike. Always
@@ -332,8 +333,10 @@ export const memoryCommand = new Command('memory')
     }
 
     if (options.status) {
-      // D-FEATURES-MACHINE-WIDE: one switch, the manifest's. The hook count is
-      // reported beside it because the hooks are how that switch takes effect.
+      // D-FEATURES-NARROW-ONLY: the machine switch, the manifest's, is reported
+      // first. The hook count is reported beside it because the hooks are how that
+      // switch takes effect. A repository layer can only narrow it, and says so on
+      // a line of its own — only when it does, so the output is otherwise unchanged.
       const enabled = await readMachineFeature(devflowDir, 'memory');
       const count = countMemoryHooks(settingsContent);
       const total = Object.keys(MEMORY_HOOK_CONFIG).length;
@@ -347,11 +350,13 @@ export const memoryCommand = new Command('memory')
           `run ${color.cyan('devflow memory --enable')} to fix`,
         );
       }
+      const narrowed = enabled ? narrowedSwitchLabel(loadSettingsModule(), { dir: process.cwd() }, 'memory') : null;
+      if (narrowed !== null) p.log.info(`Effective here: ${color.yellow(narrowed)}`);
       return;
     }
 
     // --enable / --disable: the machine-wide switch, converged exactly as
-    // `devflow init --memory / --no-memory` converges it (D-FEATURES-MACHINE-WIDE).
+    // `devflow init --memory / --no-memory` converges it (D-FEATURES-NARROW-ONLY).
     // The settings transform runs FIRST: it is the step that can reject its
     // input (malformed JSON), and the switch must not be recorded unless the
     // hooks that enact it can follow.

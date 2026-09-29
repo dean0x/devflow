@@ -10,6 +10,7 @@ import {
   getDecisionsLockDir,
 } from '../../core/project-paths.js';
 import { readMachineFeature, writeMachineFeature } from '../../core/feature-switch.js';
+import { loadSettingsModule, narrowedSwitchLabel } from '../../core/evidence-policy.js';
 import { getDevFlowDirectory } from '../../targets/claude-code/claude-paths.js';
 import { getLedgerRoot } from '../../core/ledger-root.js';
 import { sweepLegacyDreamMarkers, drainLearningQueue } from '../../core/learning-queue-cleanup.js';
@@ -64,10 +65,13 @@ async function requireLedgerRoot(actionSuffix: string): Promise<string | null> {
 }
 
 async function handleStatus(): Promise<void> {
-  // D-FEATURES-MACHINE-WIDE: the one switch is the manifest's, so the state is
-  // the same from every directory; only the observation counts are per-project.
+  // D-FEATURES-NARROW-ONLY: the machine switch is the manifest's and reads the
+  // same from every directory; a repository layer can only narrow it, and adds a
+  // line only when it does. The observation counts are per-project.
   const enabled = await readMachineFeature(getDevFlowDirectory(), 'learning');
-  const stateLine = `Learning: ${enabled ? 'enabled' : 'disabled'}`;
+  const narrowed = enabled ? narrowedSwitchLabel(loadSettingsModule(), { dir: process.cwd() }, 'learning') : null;
+  const stateLine = `Learning: ${enabled ? 'enabled' : 'disabled'}`
+    + (narrowed === null ? '' : `\nEffective here: ${narrowed}`);
   const ledgerRoot = await getLedgerRoot();
   if (!ledgerRoot) {
     p.log.info(`${stateLine}\nObservations: not in a git project`);
@@ -290,7 +294,7 @@ async function handleClear(): Promise<void> {
 }
 
 /**
- * `--enable` / `--disable`: the machine-wide switch (D-FEATURES-MACHINE-WIDE),
+ * `--enable` / `--disable`: the machine-wide switch (D-FEATURES-NARROW-ONLY),
  * converged exactly as `devflow init --learning / --no-learning` converges it —
  * the manifest value, and on disable a drained queue in the current project.
  * Never requires a git root: the switch is not a per-project setting.
