@@ -23,7 +23,7 @@
 
 import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 
@@ -819,7 +819,12 @@ describe('gatherGitStatus — dirty-tree ahead/filesChanged asymmetry (Shape M)'
       .filter(args => args.includes('status'));
 
     expect(statusCalls).toHaveLength(1);
-    expect(statusCalls[0]).toEqual(['--no-optional-locks', 'status', '--porcelain']);
+    // Ahead of the flag sits only the fsmonitor override, or nothing when the
+    // machine's core.fsmonitor is the built-in daemon (D-NO-FSMONITOR carve-out,
+    // pinned per setting in tests/hud-git-fsmonitor.test.ts).
+    const flagAt = statusCalls[0].indexOf('--no-optional-locks');
+    expect([[], ['-c', 'core.fsmonitor=false']]).toContainEqual(statusCalls[0].slice(0, flagAt));
+    expect(statusCalls[0].slice(flagAt)).toEqual(['--no-optional-locks', 'status', '--porcelain']);
     // The flag must not break the command: a rejected option would yield '' → clean.
     expect(live?.dirty).toBe(true);
     expect(live?.staged).toBe(true);
@@ -914,6 +919,88 @@ describe('gatherGitStatus — maxBuffer overflow degrades gracefully', () => {
       // Restore pass-through so subsequent tests are unaffected.
       mockedExecFile.mockImplementation(passthroughImpl);
       mockedExecFile.mockClear();
+    }
+  });
+});
+
+describe('gatherGitStatus — never runs the repository\'s core.fsmonitor hook (D-NO-FSMONITOR)', () => {
+  /**
+   * git runs the command a repository's config names in `core.fsmonitor` whenever
+   * it reads the index — the HUD's `status` and `diff` included — and the HUD runs
+   * in whatever repository the status line is drawn in, on every prompt. The fixture
+   * hook records its own run; the HUD must report a dirty tree and its diff without
+   * running it, and a known-bad unguarded `status` in the same repository must.
+   */
+  it('reports a dirty tree and its diff with the hook never run', async () => {
+    const base = mkdtempSync(join(tmpdir(), 'hud-fsmonitor-'));
+    const repo = join(base, 'repo');
+    const home = join(base, 'home');
+    const marker = join(base, 'fsmonitor-ran');
+    const hook = join(base, 'fsmonitor-hook.sh');
+    try {
+      mkdirSync(repo);
+      mkdirSync(home);
+      git(repo, ['init', '-q', '-b', 'main']);
+      writeFileSync(join(repo, 'tracked.txt'), 'one\n');
+      git(repo, ['add', 'tracked.txt']);
+      git(repo, ['commit', '-q', '-m', 'init']);
+      // A feature branch, so the HUD compares against main and runs its diff too.
+      git(repo, ['switch', '-q', '-c', 'feature']);
+      writeFileSync(join(repo, 'tracked.txt'), 'one\ntwo\n');
+      // An untracked file makes the tree dirty on a `??` line, which the status
+      // parse reads independently of the modified tracked file's line.
+      writeFileSync(join(repo, 'untracked-probe.txt'), 'new\n');
+      writeFileSync(hook, `#!/bin/sh\necho ran >> '${marker}'\nexit 1\n`, { mode: 0o755 });
+      git(repo, ['config', 'core.fsmonitor', hook]);
+
+      vi.stubEnv('HOME', home);
+      vi.stubEnv('GIT_CONFIG_NOSYSTEM', '1');
+      vi.stubEnv('GIT_CONFIG_GLOBAL', '/dev/null');
+      const status = await gatherGitStatus(repo);
+
+      expect(existsSync(marker), 'the HUD ran the fsmonitor hook').toBe(false);
+      expect(status?.branch).toBe('feature');
+      expect(status?.dirty).toBe(true);
+      expect(status?.filesChanged).toBe(1);
+
+      // Known-bad probe: the same index read without the override runs the hook.
+      git(repo, ['status', '--porcelain']);
+      expect(existsSync(marker), 'the fixture hook is live').toBe(true);
+    } finally {
+      vi.unstubAllEnvs();
+      rmSync(base, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('gatherGitStatus — porcelain status keeps its leading column', () => {
+  /**
+   * `git status --porcelain` prints an unstaged edit as ` M path` — a blank index
+   * column, then the worktree column. Trimming the whole output removes the first
+   * line's leading blank, shifting `M` into the index column: an unstaged-only
+   * edit then reads as staged and the tree as clean.
+   */
+  it('an unstaged edit to a tracked file alone reads dirty and unstaged, not staged', async () => {
+    const base = mkdtempSync(join(tmpdir(), 'hud-porcelain-'));
+    const repo = join(base, 'repo');
+    try {
+      mkdirSync(repo);
+      git(repo, ['init', '-q', '-b', 'main']);
+      writeFileSync(join(repo, 'tracked.txt'), 'one\n');
+      git(repo, ['add', 'tracked.txt']);
+      git(repo, ['commit', '-q', '-m', 'init']);
+      writeFileSync(join(repo, 'tracked.txt'), 'one\ntwo\n');
+
+      vi.stubEnv('HOME', join(base, 'home'));
+      vi.stubEnv('GIT_CONFIG_NOSYSTEM', '1');
+      vi.stubEnv('GIT_CONFIG_GLOBAL', '/dev/null');
+      const status = await gatherGitStatus(repo);
+
+      expect(status?.dirty).toBe(true);
+      expect(status?.staged).toBe(false);
+    } finally {
+      vi.unstubAllEnvs();
+      rmSync(base, { recursive: true, force: true });
     }
   });
 });

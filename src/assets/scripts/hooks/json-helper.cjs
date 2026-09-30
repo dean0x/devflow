@@ -199,11 +199,16 @@ function isCollisionScanExcluded(relPath) {
  * project root is not a git working tree or the `git` binary is unavailable;
  * callers fall back to `listFsWalkFiles`.
  *
+ * D-NO-FSMONITOR: `ls-files` reads the index, and reading the index runs the
+ * command a repository's config names in `core.fsmonitor` — code chosen by the
+ * repository this hook runs inside. The call turns it off for itself
+ * (`-c core.fsmonitor=false`), so the listing stays a pure read.
+ *
  * @param {string} projectRoot
  * @returns {string[]} project-relative paths
  */
 function listGitTrackedFiles(projectRoot) {
-  const out = execFileSync('git', ['ls-files', '-z'], {
+  const out = execFileSync('git', ['-c', 'core.fsmonitor=false', 'ls-files', '-z'], {
     cwd: projectRoot,
     stdio: ['ignore', 'pipe', 'ignore'],
   });

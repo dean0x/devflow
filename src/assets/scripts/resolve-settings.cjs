@@ -671,8 +671,8 @@ function gitToplevel(exec, dir) {
  * which reads the index without refreshing or writing it. Reading the index
  * runs a configured `core.fsmonitor` hook — an arbitrary command from the
  * repository's config, and on macOS the builtin daemon's start-up — so the
- * call turns it off for itself (`-c core.fsmonitor=false`): this resolver runs
- * from session hooks and must stay a pure read.
+ * call turns it off for itself (`-c core.fsmonitor=false`, D-NO-FSMONITOR):
+ * this resolver runs from session hooks and must stay a pure read.
  *   tracked    exit 0
  *   untracked  any other answered exit (1: no such index entry; outside a
  *              repository git answers 128, and there is nothing to track)
