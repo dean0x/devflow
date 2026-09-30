@@ -33,8 +33,18 @@
 # fast path also requires the block's own sentinel, the policy line, the project
 # line AND a .claudeignore entry to be present; a .gitignore that lost any of them (a
 # merge resolution, a hand edit) is healed on the next run. A v5-marked project
-# misses the fast path, gains the project line and is re-stamped v6 (D-GITIGNORE-V6);
-# a v4-marked one gains the policy and project lines.
+# misses the fast path, gains the project line just before its .claudeignore line
+# and is re-stamped v6 (D-GITIGNORE-V6); a v4-marked one gains the policy and
+# project lines.
+#
+# D-GITIGNORE-IN-BLOCK: a line topped up into an existing block goes INSIDE the
+# block, where a fresh block holds it, never at the end of the file. gitignore is
+# last-match-wins, so a `!.devflow/project.json` appended after a user's own later
+# `.devflow/project.json` would silently override their re-ignore. The missing
+# lines are inserted as one run, in block order, right after the block sentinel
+# and the block lines that precede the first missing one in a fresh block (at most
+# three: the sentinel, the policy line, the project line). Every other byte of the
+# file is kept.
 #
 # D-GITIGNORE-V5 / D-GITIGNORE-V6: the block is detected ONLY by its devflow-unique
 # sentinel `!.devflow/conventions.md` — NEVER by `.claudeignore`,
@@ -108,7 +118,7 @@ printf -v _ERG_BLOCK_NO_CI '%s\n' \
   '# Devflow runtime data — local by default (memory, learning, docs, locks).' \
   '# Shared via git: feature knowledge bases under .devflow/features/ (index.md and' \
   '# every {slug}/KNOWLEDGE.md), .devflow/conventions.md (naming authority),' \
-  '# .devflow/policy.json (evidence policy) and .devflow/project.json (team settings).' \
+  '# .devflow/policy.json (retired; presence only) and .devflow/project.json (team settings).' \
   '# To stop sharing the first two, re-add `.devflow/features/` or' \
   '# `.devflow/conventions.md` to your own .gitignore.' \
   '.devflow/*' \
@@ -150,10 +160,24 @@ if [ "$_ERG_HAS_CI" = 0 ]; then
   _ERG_COMPLETION="$_ERG_COMPLETION$_ERG_LINE_CLAUDEIGNORE"
 fi
 
+# The block lines a top-up run is inserted after: the sentinel, then whichever of
+# the policy and project lines precede the first missing line in a fresh block.
+# Mirrors blockRunBefore in the TS twin.
+if [ "$_ERG_HAS_POLICY" = 0 ]; then
+  _ERG_RUN_RE='^[[:space:]]*(!\.devflow/conventions\.md)[[:space:]]*$'
+elif [ "$_ERG_HAS_PROJECT" = 0 ]; then
+  _ERG_RUN_RE='^[[:space:]]*(!\.devflow/conventions\.md|!\.devflow/policy\.json)[[:space:]]*$'
+else
+  _ERG_RUN_RE='^[[:space:]]*(!\.devflow/conventions\.md|!\.devflow/policy\.json|!\.devflow/project\.json)[[:space:]]*$'
+fi
+
 # Classify: noop (nothing to do) | continue (extend an existing block) |
 # block (install a fresh block) | fail (a rewrite failed; leave the file alone).
+# continue inserts _ERG_APPEND after the first line matching _ERG_ANCHOR_RE and the
+# run of lines matching _ERG_RUN_RE right after it (empty: no run).
 _ERG_MODE=noop
 _ERG_APPEND=''
+_ERG_ANCHOR_RE=''
 if grep -qE "$_ERG_RE_OPTOUT" "$_ERG_GITIGNORE" 2>/dev/null; then
   # User-authored `/.devflow/` (leading slash) — respect it; don't force the carve-out.
   # Checked FIRST so a file containing both it and a sentinel keeps the user's entry.
@@ -163,11 +187,15 @@ elif grep -qE "$_ERG_RE_SENTINEL" "$_ERG_GITIGNORE" 2>/dev/null; then
   if [ -n "$_ERG_COMPLETION" ]; then
     _ERG_MODE=continue
     _ERG_APPEND="$_ERG_COMPLETION"
+    _ERG_ANCHOR_RE="$_ERG_RE_SENTINEL"
   fi
 elif grep -qE "$_ERG_RE_SENTINEL_V2" "$_ERG_GITIGNORE" 2>/dev/null; then
-  # v2 block installed — append the lines it lacks, in block order.
+  # v2 block installed — insert the lines it lacks, in block order, right after
+  # its sentinel, the last carve-out line it has.
   _ERG_MODE=continue
   _ERG_APPEND="$_ERG_LINE_SENTINEL$_ERG_COMPLETION"
+  _ERG_ANCHOR_RE="$_ERG_RE_SENTINEL_V2"
+  _ERG_RUN_RE=''
 else
   # No devflow block — install one, omitting the .claudeignore line the user owns.
   _ERG_MODE=block
@@ -196,21 +224,52 @@ else
   fi
 fi
 
-# The two append shapes, mirrored byte-for-byte by the TS twin's appendLines and
-# appendBlock. `tail -c 1` yields the empty string when the file already ends in a
-# newline (command substitution strips it), so a file whose last byte is not a
-# newline gets one before the appended text fuses onto its last line. Existing
-# trailing newlines are preserved verbatim — no trimming, no blank-line dedupe.
+# _erg_insert_in_block <anchor-ERE> <run-ERE or ''> <text> — rewrite the file with
+# <text> inserted after the first line matching <anchor-ERE> and the run of up to
+# three lines matching <run-ERE> right after it (D-GITIGNORE-IN-BLOCK). Mirrors
+# insertInBlock in the TS twin byte for byte: head and tail copy every other byte
+# unchanged, and when the run ends on a last line with no newline, one is added
+# before <text>. Each read ends in a trailing `x`, so command substitution cannot
+# strip the file's own trailing newlines. The file is rewritten in place with one
+# `>`, as the TS twin's writeFile does, so a symlinked .gitignore keeps its link.
+# Returns non-zero, having written nothing, when the anchor line cannot be found.
+_erg_insert_in_block() {
+  local _anchor="$1" _run="$2" _text="$3" _hit="" _n="" _next="" _line="" _i=0 _head="" _tail=""
+  _hit="$(grep -n -m 1 -E "$_anchor" "$_ERG_GITIGNORE" 2>/dev/null)" || return 1
+  _n="${_hit%%:*}"
+  case "$_n" in ''|*[!0-9]*) return 1 ;; esac
+  if [ -n "$_run" ]; then
+    _next="$(sed -n "$((_n + 1)),$((_n + 3))p" "$_ERG_GITIGNORE" 2>/dev/null)"
+    while [ "$_i" -lt 3 ] && [ -n "$_next" ]; do
+      _line="${_next%%$'\n'*}"
+      if [ "$_line" = "$_next" ]; then _next=''; else _next="${_next#*$'\n'}"; fi
+      [[ $_line =~ $_run ]] || break
+      _n=$((_n + 1))
+      _i=$((_i + 1))
+    done
+  fi
+  # The `x` is printed only when the read succeeded, so a failed read leaves none
+  # and nothing is written — never a truncated file.
+  _head="$(head -n "$_n" "$_ERG_GITIGNORE" 2>/dev/null && printf x)"
+  case "$_head" in *x) _head="${_head%x}" ;; *) return 1 ;; esac
+  _tail="$(tail -n "+$((_n + 1))" "$_ERG_GITIGNORE" 2>/dev/null && printf x)"
+  case "$_tail" in *x) _tail="${_tail%x}" ;; *) return 1 ;; esac
+  case "$_head" in *$'\n') ;; *) _head="$_head"$'\n' ;; esac
+  printf '%s%s%s' "$_head" "$_text" "$_tail" > "$_ERG_GITIGNORE"
+}
+
+# The fresh-block append shape, mirrored byte-for-byte by the TS twin's appendBlock.
+# `tail -c 1` yields the empty string when the file already ends in a newline
+# (command substitution strips it), so a file whose last byte is not a newline gets
+# one before the appended text fuses onto its last line. Existing trailing newlines
+# are preserved verbatim — no trimming, no blank-line dedupe.
 _ERG_OK=0
 case "$_ERG_MODE" in
   noop)
     _ERG_OK=1
     ;;
   continue)
-    if [ -n "$(tail -c 1 "$_ERG_GITIGNORE" 2>/dev/null)" ]; then
-      printf '\n' >> "$_ERG_GITIGNORE"
-    fi
-    printf '%s' "$_ERG_APPEND" >> "$_ERG_GITIGNORE" && _ERG_OK=1
+    _erg_insert_in_block "$_ERG_ANCHOR_RE" "$_ERG_RUN_RE" "$_ERG_APPEND" && _ERG_OK=1
     ;;
   block)
     if [ ! -s "$_ERG_GITIGNORE" ]; then
