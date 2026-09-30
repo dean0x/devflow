@@ -379,11 +379,13 @@ function suggestedFrameworks(complianceState: unknown): readonly string[] {
 }
 
 /**
- * What `--enable`/`--set` print when compliance is on: the `.devflow/project.json`
- * a team may commit to hold every developer to what this machine now gets by
- * default — the required evidence policy and this machine's frameworks. Returned
- * only when the evidence resolver's own `complianceDefault` says `required`
- * (compliance enabled, at any framework count); `null` otherwise. The bytes come
+ * What `--enable`/`--set` print when compliance is on: the keys to add to a
+ * repository's `.devflow/project.json` on its default branch — merged into the
+ * file when it already has one, never replacing it — to hold every developer to
+ * what this machine now gets by default: the required evidence policy and this
+ * machine's frameworks. Returned only when the evidence resolver's own
+ * `complianceDefault` says `required` (compliance enabled, at any framework
+ * count); `null` otherwise. The bytes come
  * from the settings resolver's `serializeProjectSuggestion`, which returns them
  * only when they read back through the shared parser as exactly what was asked.
  * Nothing is written (D-POLICY-NO-WRITE, applies ADR-024).
