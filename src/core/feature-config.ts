@@ -199,11 +199,13 @@ export async function readConfig(projectRoot: string): Promise<FeatureConfig> {
  *
  *   absent      — no file.
  *   object      — a JSON object with no key repeated anywhere in it.
- *   malformed   — a file the resolvers cannot read as a config: not UTF-8, a
+ *   malformed   — bytes the resolvers cannot read as a config: not UTF-8, a
  *                 BOM, over the size bound, not JSON, not an object, too deeply
  *                 nested, or a key repeated in one object.
- *   unreadable  — the bytes could not be read (an I/O error other than a
- *                 missing file), or the parser itself could not be loaded.
+ *   unreadable  — the bytes could not be read: an I/O error other than a
+ *                 missing file, a path that is not a regular file within the
+ *                 size bound (a symlink included, D-CONFIG-NO-FOLLOW), or a
+ *                 parser that could not be loaded.
  */
 export type ConfigBody =
   | { readonly kind: 'absent' }
@@ -246,20 +248,30 @@ function objectOf(body: ConfigBody): Record<string, unknown> | undefined {
  * Read and classify a project's config file. Every read of the file goes
  * through here, so readConfig, readConfigIfPresent and writeManagedConfig agree
  * on what an unusable file means. Never throws.
+ *
+ * D-CONFIG-NO-FOLLOW: the bytes come from the resolvers' own bounded read
+ * (lib/project-config.cjs readBoundedRegularFile, `followSymlinks` false — the
+ * read resolve-settings' readConfigFile makes), so devflow and the settings line
+ * never disagree about which file configures the repository. A symlink —
+ * dangling or not — a directory, a FIFO or a file over MAX_CONFIG_BYTES is
+ * refused unopened and reads as `unreadable`: readers configure nothing from it,
+ * and writeManagedConfig leaves it in place (D-CONFIG-NO-REPAIR) rather than
+ * writing through the link or renaming a regular file over it.
  */
 async function readConfigBody(
   projectRoot: string,
   lib: ProjectConfigLibLoad = loadProjectConfigLib(),
 ): Promise<ConfigBody> {
   if (!lib.ok) return { kind: 'unreadable', detail: `config parser unavailable: ${lib.error.path}` };
-  let bytes: Buffer;
-  try {
-    bytes = await fs.readFile(getFeatureConfigPath(projectRoot));
-  } catch (err: unknown) {
-    if ((err as NodeJS.ErrnoException).code === 'ENOENT') return { kind: 'absent' };
-    return { kind: 'unreadable', detail: err instanceof Error ? err.message : String(err) };
+  const read = lib.value.readBoundedRegularFile(getFeatureConfigPath(projectRoot), lib.value.MAX_CONFIG_BYTES, false);
+  if (read.kind === 'absent') return { kind: 'absent' };
+  if (read.kind === 'refused') {
+    return {
+      kind: 'unreadable',
+      detail: `not a regular file of at most ${lib.value.MAX_CONFIG_BYTES} bytes; a symlink is never followed`,
+    };
   }
-  return classifyConfigBytes(bytes, lib.value);
+  return classifyConfigBytes(read.bytes, lib.value);
 }
 
 /**

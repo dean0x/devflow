@@ -189,15 +189,28 @@ export type DecodedConfigBytes =
   | { readonly kind: 'invalid' }
   | { readonly kind: 'text'; readonly text: string };
 
+/** `readBoundedRegularFile`'s verdict: no file, a file it refused unread, or the bytes. */
+export type BoundedRead =
+  | { readonly kind: 'absent' }
+  | { readonly kind: 'refused' }
+  | { readonly kind: 'ok'; readonly bytes: Buffer };
+
 /** The part of the shared parser's `module.exports` the CLI relies on. */
 export interface ProjectConfigLib {
+  /** The byte bound on every repository config file. */
+  readonly MAX_CONFIG_BYTES: number;
   /** Size, BOM and UTF-8 checks on a config file's bytes (`null` is no file). */
   decodeConfigBytes(buf: unknown): DecodedConfigBytes;
+  /**
+   * Read a regular file of at most `maxBytes`; with `followSymlinks` false a
+   * symlink, like any non-regular file, is refused unopened.
+   */
+  readBoundedRegularFile(filePath: string, maxBytes: number, followSymlinks: boolean): BoundedRead;
   /** Every duplicated member path of valid JSON text, or null when it is too deep to scan. */
   collectDuplicateKeyPaths(text: string): ReadonlySet<string> | null;
 }
 
-type SurfaceKind = 'string-array' | 'object' | 'regexp' | 'string' | 'function';
+type SurfaceKind = 'string-array' | 'object' | 'regexp' | 'string' | 'number' | 'function';
 
 /**
  * Every key of EvidencePolicyModule and the runtime kind the loader requires of
@@ -224,7 +237,9 @@ export const SETTINGS_MODULE_SURFACE = Object.freeze({
 
 /** Every key of ProjectConfigLib and the runtime kind the loader requires of it. */
 export const PROJECT_CONFIG_LIB_SURFACE = Object.freeze({
+  MAX_CONFIG_BYTES: 'number',
   decodeConfigBytes: 'function',
+  readBoundedRegularFile: 'function',
   collectDuplicateKeyPaths: 'function',
 } as const satisfies Record<keyof ProjectConfigLib, SurfaceKind>);
 
@@ -249,6 +264,7 @@ function hasKind(value: unknown, kind: SurfaceKind): boolean {
     case 'object': return typeof value === 'object' && value !== null;
     case 'regexp': return value instanceof RegExp;
     case 'string': return typeof value === 'string';
+    case 'number': return typeof value === 'number' && Number.isFinite(value);
     case 'function': return typeof value === 'function';
     default: {
       const exhaustive: never = kind;
