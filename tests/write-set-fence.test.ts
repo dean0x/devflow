@@ -163,7 +163,7 @@ export const FENCE_ROWS: readonly FenceRow[] = [
   { args: ['compliance', '--set', ''], allow: [MANIFEST, COMPLIANCE_RULE, COMPLIANCE_SKILL], mustWrite: true },
   { args: ['compliance', '--disable'], allow: [MANIFEST, COMPLIANCE_RULE, COMPLIANCE_SKILL], mustWrite: true },
   { args: ['compliance', '--enable'], allow: [MANIFEST, COMPLIANCE_RULE, COMPLIANCE_SKILL], mustWrite: true },
-  { args: ['compliance', '--disable'], allow: [MANIFEST, COMPLIANCE_RULE, COMPLIANCE_SKILL], mustWrite: true },
+  { args: ['compliance', '--disable'], allow: [MANIFEST, COMPLIANCE_RULE, COMPLIANCE_SKILL], mustWrite: true, label: 'after --enable' },
   { args: ['compliance', '--status'], allow: NONE, mustWrite: false },
 
   // Already installed by init's `--security user`: re-enabling may restamp the manifest only.
@@ -254,6 +254,12 @@ export function allowlistSize(rows: readonly FenceRow[]): number {
 const rowName = (row: FenceRow): string =>
   `devflow ${row.args.map(a => (a === '' ? '""' : a)).join(' ')}${row.label ? ` (${row.label})` : ''}`
 
+/** Every test name more than one row would register; a repeat needs a `label`. */
+function duplicateRowNames(rows: readonly FenceRow[]): string[] {
+  const names = rows.map(rowName)
+  return [...new Set(names.filter((name, i) => names.indexOf(name) !== i))]
+}
+
 // ── Tests ───────────────────────────────────────────────────────────────────
 
 describe('write-set fence check', () => {
@@ -309,6 +315,14 @@ describe('write-set fence coverage', () => {
       const command = COMMANDS.find(c => c.name() === name)
       expect(command?.options.map(o => o.long), action).toContain(option)
     }
+  })
+
+  it('every row registers a test name no other row has', () => {
+    expect(duplicateRowNames(FENCE_ROWS)).toEqual([])
+    // Red probe: two unlabelled rows with the same args are caught.
+    const twin: FenceRow = { args: ['hud', '--status'], allow: NONE, mustWrite: false }
+    expect(duplicateRowNames([twin, twin])).toEqual(['devflow hud --status'])
+    expect(duplicateRowNames([twin, { ...twin, label: 'again' }])).toEqual([])
   })
 
   it('the table and its footprint stay registered in numeric-floors.json', () => {
