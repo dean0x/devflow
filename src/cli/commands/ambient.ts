@@ -5,7 +5,7 @@ import * as p from '@clack/prompts';
 import color from 'picocolors';
 import { getClaudeDirectory, getDevFlowDirectory } from '../../targets/claude-code/claude-paths.js';
 import { syncManifestFeature } from '../../core/manifest.js';
-import { writeFileAtomicExclusive } from '../../core/fs-atomic.js';
+import { writeSettingsFileAtomic } from '../../core/fs-atomic.js';
 import {
   HOOKS_DIR_SUFFIX,
   endsWithAny,
@@ -269,7 +269,7 @@ export function createAmbientCommand(): Command {
         p.log.info('Ambient mode already enabled');
         return;
       }
-      await writeFileAtomicExclusive(settingsPath, updated);
+      await writeSettingsFileAtomic(settingsPath, updated);
       await syncManifestFeature(devflowDir, 'ambient', true);
       p.log.success('Ambient mode enabled — orchestrator hooks registered');
       p.log.info(color.dim('Charter at session start, reminder per prompt, plan handoffs auto-run devflow:implement (git repos only)'));
@@ -281,7 +281,7 @@ export function createAmbientCommand(): Command {
         p.log.info('Ambient mode already disabled');
         return;
       }
-      await writeFileAtomicExclusive(settingsPath, updated);
+      await writeSettingsFileAtomic(settingsPath, updated);
       await syncManifestFeature(devflowDir, 'ambient', false);
       p.log.success('Ambient mode disabled — hooks removed');
     }

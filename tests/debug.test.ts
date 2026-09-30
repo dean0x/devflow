@@ -1,53 +1,72 @@
 /**
- * Tests for the devflow debug CLI pure functions.
+ * Tests for `devflow debug`.
  *
- * Strategy: import the exported pure functions from debug.ts and test them
- * directly — no I/O, no commander, no environment setup required. Each test
- * operates on plain JSON strings so behavior is unambiguous.
+ * The pure half (applyDebugTrace / stripDebugTrace / readDebugStatus) is tested
+ * on plain JSON strings. The command itself is driven through the built CLI
+ * under a temp HOME (PF-060, `sandboxEnv`), because what matters there is what
+ * lands on disk: a rejected settings file keeps its bytes, and an accepted one
+ * is swapped in by a rename (D-SETTINGS-ATOMIC), through a symlink when it is one.
  */
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { promises as fs } from 'fs';
 import * as path from 'path';
 import * as os from 'os';
-import { applyDebugTrace, stripDebugTrace, readDebugStatus } from '../src/cli/commands/debug.js';
+import { spawnSync } from 'child_process';
+import {
+  applyDebugTrace,
+  stripDebugTrace,
+  readDebugStatus,
+  type DebugSettingsEdit,
+} from '../src/cli/commands/debug.js';
+import { requireBuiltCli, sandboxEnv } from './helpers.js';
+
+const SUBPROCESS_TIMEOUT_MS = 60_000;
+
+/** The edited settings, parsed; fails the test on a rejected edit. */
+function edited(result: DebugSettingsEdit): Record<string, unknown> {
+  if (!result.ok) throw new Error(`edit rejected: ${result.error.kind}`);
+  return JSON.parse(result.value) as Record<string, unknown>;
+}
 
 // ─── applyDebugTrace ──────────────────────────────────────────────────────────
 
 describe('applyDebugTrace', () => {
   it('sets DEVFLOW_HOOK_DEBUG=1 in env', () => {
-    const result = JSON.parse(applyDebugTrace(JSON.stringify({ hooks: {} })));
+    const result = edited(applyDebugTrace(JSON.stringify({ hooks: {} })));
     expect((result.env as Record<string, string>).DEVFLOW_HOOK_DEBUG).toBe('1');
   });
 
   it('preserves existing env vars when enabling', () => {
     const input = JSON.stringify({ hooks: {}, env: { EXISTING_VAR: 'keep' } });
-    const result = JSON.parse(applyDebugTrace(input));
-    const env = result.env as Record<string, string>;
+    const env = edited(applyDebugTrace(input)).env as Record<string, string>;
     expect(env.DEVFLOW_HOOK_DEBUG).toBe('1');
     expect(env.EXISTING_VAR).toBe('keep');
   });
 
   it('creates env object when settings has none', () => {
-    const result = JSON.parse(applyDebugTrace(JSON.stringify({})));
+    const result = edited(applyDebugTrace(JSON.stringify({})));
     expect((result.env as Record<string, string>).DEVFLOW_HOOK_DEBUG).toBe('1');
   });
 
   it('is idempotent — double apply keeps DEVFLOW_HOOK_DEBUG=1', () => {
     const once = applyDebugTrace(JSON.stringify({ hooks: {} }));
-    const twice = applyDebugTrace(once);
-    const result = JSON.parse(twice);
+    if (!once.ok) throw new Error('first apply rejected');
+    const result = edited(applyDebugTrace(once.value));
     expect((result.env as Record<string, string>).DEVFLOW_HOOK_DEBUG).toBe('1');
   });
 
-  it('does not mutate input — returns new serialized string', () => {
-    const input = JSON.stringify({ hooks: {} });
-    applyDebugTrace(input);
-    // input is unchanged (string is immutable — this confirms no side effect)
-    expect(JSON.parse(input).env).toBeUndefined();
+  it('is malformed, never a throw, on invalid JSON or a non-object document', () => {
+    expect(applyDebugTrace('not json')).toEqual({ ok: false, error: { kind: 'malformed' } });
+    expect(applyDebugTrace('[]')).toEqual({ ok: false, error: { kind: 'malformed' } });
   });
 
-  it('throws on malformed JSON', () => {
-    expect(() => applyDebugTrace('not json')).toThrow(SyntaxError);
+  it.each([
+    ['an array', []],
+    ['null', null],
+    ['a string', 'DEVFLOW_HOOK_DEBUG=1'],
+    ['a number', 1],
+  ])('rejects an env that is %s rather than writing through or replacing it (D-DEBUG-ENV-OBJECT)', (_label, env) => {
+    expect(applyDebugTrace(JSON.stringify({ env }))).toEqual({ ok: false, error: { kind: 'env-not-object' } });
   });
 });
 
@@ -56,34 +75,33 @@ describe('applyDebugTrace', () => {
 describe('stripDebugTrace', () => {
   it('removes DEVFLOW_HOOK_DEBUG from env', () => {
     const input = JSON.stringify({ hooks: {}, env: { DEVFLOW_HOOK_DEBUG: '1', OTHER_VAR: 'keep' } });
-    const result = JSON.parse(stripDebugTrace(input));
-    const env = result.env as Record<string, unknown>;
+    const env = edited(stripDebugTrace(input)).env as Record<string, unknown>;
     expect(env.DEVFLOW_HOOK_DEBUG).toBeUndefined();
     expect(env.OTHER_VAR).toBe('keep');
   });
 
   it('removes env object entirely when DEVFLOW_HOOK_DEBUG was the only key', () => {
     const input = JSON.stringify({ hooks: {}, env: { DEVFLOW_HOOK_DEBUG: '1' } });
-    const result = JSON.parse(stripDebugTrace(input));
+    const result = edited(stripDebugTrace(input));
     expect(result.env).toBeUndefined();
+    expect(result.hooks).toEqual({});
   });
 
   it('is a no-op when DEVFLOW_HOOK_DEBUG was not set', () => {
     const input = JSON.stringify({ hooks: {}, env: { OTHER_VAR: 'keep' } });
-    const result = JSON.parse(stripDebugTrace(input));
-    const env = result.env as Record<string, string>;
-    expect(env.DEVFLOW_HOOK_DEBUG).toBeUndefined();
-    expect(env.OTHER_VAR).toBe('keep');
+    expect(edited(stripDebugTrace(input))).toEqual({ hooks: {}, env: { OTHER_VAR: 'keep' } });
   });
 
-  it('does not mutate input — returns new serialized string', () => {
-    const input = JSON.stringify({ env: { DEVFLOW_HOOK_DEBUG: '1' } });
-    stripDebugTrace(input);
-    expect((JSON.parse(input).env as Record<string, string>).DEVFLOW_HOOK_DEBUG).toBe('1');
+  it('leaves a settings file with no env without one', () => {
+    expect(edited(stripDebugTrace('{}'))).toEqual({});
   });
 
-  it('throws on malformed JSON', () => {
-    expect(() => stripDebugTrace('not json')).toThrow(SyntaxError);
+  it('is malformed, never a throw, on invalid JSON', () => {
+    expect(stripDebugTrace('not json')).toEqual({ ok: false, error: { kind: 'malformed' } });
+  });
+
+  it('rejects a non-object env', () => {
+    expect(stripDebugTrace(JSON.stringify({ env: [] }))).toEqual({ ok: false, error: { kind: 'env-not-object' } });
   });
 });
 
@@ -124,93 +142,76 @@ describe('readDebugStatus', () => {
 
 describe('applyDebugTrace → stripDebugTrace roundtrip', () => {
   it('removes the key after enable-then-disable', () => {
-    const base = JSON.stringify({ hooks: {} });
-    const enabled = applyDebugTrace(base);
-    expect(readDebugStatus(enabled)).toBe(true);
-    const disabled = stripDebugTrace(enabled);
-    expect(readDebugStatus(disabled)).toBe(false);
+    const enabled = applyDebugTrace(JSON.stringify({ hooks: {} }));
+    if (!enabled.ok) throw new Error('apply rejected');
+    expect(readDebugStatus(enabled.value)).toBe(true);
+    const disabled = stripDebugTrace(enabled.value);
+    if (!disabled.ok) throw new Error('strip rejected');
+    expect(readDebugStatus(disabled.value)).toBe(false);
   });
 });
 
-// ─── I/O integration: missing file, malformed JSON ───────────────────────────
+// ─── The command, through the built CLI ──────────────────────────────────────
 
-describe('I/O integration — missing settings.json', () => {
-  let tmpDir: string;
+describe('devflow debug — the built CLI', () => {
+  const cli = requireBuiltCli();
+  let home: string;
+  let settingsPath: string;
+
+  function runDebug(flag: string): { status: number | null; out: string } {
+    const r = spawnSync(process.execPath, [cli, 'debug', flag], {
+      cwd: home, env: sandboxEnv(home), encoding: 'utf-8', timeout: SUBPROCESS_TIMEOUT_MS,
+    });
+    if (r.error) throw r.error;
+    return { status: r.status, out: `${r.stdout ?? ''}${r.stderr ?? ''}` };
+  }
 
   beforeEach(async () => {
-    tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'devflow-debug-test-'));
+    home = await fs.mkdtemp(path.join(os.tmpdir(), 'devflow-debug-home-'));
+    await fs.mkdir(path.join(home, '.claude'));
+    settingsPath = path.join(home, '.claude', 'settings.json');
   });
 
   afterEach(async () => {
-    await fs.rm(tmpDir, { recursive: true, force: true });
+    await fs.rm(home, { recursive: true, force: true });
   });
 
-  it('enable from missing file — creates settings.json with DEVFLOW_HOOK_DEBUG=1', async () => {
-    const settingsPath = path.join(tmpDir, 'settings.json');
-    // No file — applyDebugTrace('{}') simulates what the command does on ENOENT
-    const updated = applyDebugTrace('{}');
-    await fs.writeFile(settingsPath, updated, 'utf-8');
-    const settings = JSON.parse(await fs.readFile(settingsPath, 'utf-8'));
-    expect((settings.env as Record<string, string>).DEVFLOW_HOOK_DEBUG).toBe('1');
-  });
+  it.each(['--enable', '--disable'])('%s with "env": [] exits 1 and leaves the bytes untouched', async (flag) => {
+    const body = '{\n  "env": [],\n  "hooks": {}\n}\n';
+    await fs.writeFile(settingsPath, body);
 
-  it('disable from missing file — stripDebugTrace({}) produces no env key', async () => {
-    const settingsPath = path.join(tmpDir, 'settings.json');
-    // Simulate the command: ENOENT → settingsJson = '{}' → stripDebugTrace
-    const updated = stripDebugTrace('{}');
-    await fs.writeFile(settingsPath, updated, 'utf-8');
-    const settings = JSON.parse(await fs.readFile(settingsPath, 'utf-8'));
-    expect(settings.env).toBeUndefined();
-  });
-});
+    const run = runDebug(flag);
 
-describe('malformed settings.json — enable path', () => {
-  let tmpDir: string;
+    expect(run.status, run.out).toBe(1);
+    expect(run.out).toContain('"env" that is not an object');
+    expect(await fs.readFile(settingsPath, 'utf-8')).toBe(body);
+  }, SUBPROCESS_TIMEOUT_MS);
 
-  beforeEach(async () => {
-    tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'devflow-debug-test-'));
-  });
+  it('--enable swaps the file in by rename: a hard link to the old file keeps the old bytes', async () => {
+    const before = JSON.stringify({ env: { KEEP: '1' } });
+    await fs.writeFile(settingsPath, before);
+    const hardLink = path.join(home, 'settings.before');
+    await fs.link(settingsPath, hardLink);
 
-  afterEach(async () => {
-    await fs.rm(tmpDir, { recursive: true, force: true });
-  });
+    const run = runDebug('--enable');
 
-  it('enable does not overwrite malformed settings.json', async () => {
-    const settingsPath = path.join(tmpDir, 'settings.json');
-    const malformed = 'this is not json';
-    await fs.writeFile(settingsPath, malformed, 'utf-8');
+    expect(run.status, run.out).toBe(0);
+    expect(JSON.parse(await fs.readFile(settingsPath, 'utf-8'))).toEqual({ env: { KEEP: '1', DEVFLOW_HOOK_DEBUG: '1' } });
+    // An in-place write would have changed the shared inode; a rename leaves it alone.
+    expect(await fs.readFile(hardLink, 'utf-8')).toBe(before);
+  }, SUBPROCESS_TIMEOUT_MS);
 
-    // The command catches SyntaxError and returns early — file must be untouched.
-    // We verify the pure function throws and verify the file guard logic separately.
-    expect(() => applyDebugTrace(malformed)).toThrow(SyntaxError);
+  it('--enable keeps a symlinked settings.json a symlink and writes its target', async () => {
+    const dotfiles = path.join(home, 'dotfiles');
+    await fs.mkdir(dotfiles);
+    const target = path.join(dotfiles, 'claude-settings.json');
+    await fs.writeFile(target, '{}');
+    await fs.symlink(target, settingsPath);
 
-    // File stays malformed because the command never wrote to it.
-    const content = await fs.readFile(settingsPath, 'utf-8');
-    expect(content).toBe(malformed);
-  });
-});
+    const run = runDebug('--enable');
 
-describe('malformed settings.json — disable path', () => {
-  let tmpDir: string;
-
-  beforeEach(async () => {
-    tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'devflow-debug-test-'));
-  });
-
-  afterEach(async () => {
-    await fs.rm(tmpDir, { recursive: true, force: true });
-  });
-
-  it('disable does not overwrite malformed settings.json', async () => {
-    const settingsPath = path.join(tmpDir, 'settings.json');
-    const malformed = 'this is not json';
-    await fs.writeFile(settingsPath, malformed, 'utf-8');
-
-    // The pure function throws on malformed JSON.
-    expect(() => stripDebugTrace(malformed)).toThrow(SyntaxError);
-
-    // File stays malformed because the command never wrote to it.
-    const content = await fs.readFile(settingsPath, 'utf-8');
-    expect(content).toBe(malformed);
-  });
+    expect(run.status, run.out).toBe(0);
+    expect((await fs.lstat(settingsPath)).isSymbolicLink()).toBe(true);
+    expect(JSON.parse(await fs.readFile(target, 'utf-8'))).toEqual({ env: { DEVFLOW_HOOK_DEBUG: '1' } });
+  }, SUBPROCESS_TIMEOUT_MS);
 });

@@ -40,7 +40,7 @@ import {
   type FlagsRecordValue,
 } from '../../core/flags.js';
 import { readManifest, writeManifest } from '../../core/manifest.js';
-import { writeFileAtomicExclusive } from '../../core/fs-atomic.js';
+import { writeSettingsFileAtomic } from '../../core/fs-atomic.js';
 import { sanitizeCell } from '../tui/cells.js';
 // Static imports for pure view-state helpers — no TTY machinery (applies PF-017).
 // runFlagsTui stays lazily imported in handleBare to keep TTY module out of
@@ -151,7 +151,7 @@ async function persistFlagConfig(
   // Settings write — independent error path (avoids PF-015 fan-out).
   const settingsPath = path.join(claudeDir, 'settings.json');
   try {
-    await writeFileAtomicExclusive(settingsPath, updatedSettings);
+    await writeSettingsFileAtomic(settingsPath, updatedSettings);
   } catch (err) {
     p.log.error(`Failed to write settings.json: ${err instanceof Error ? err.message : String(err)}`);
     failed.push('settings');
@@ -587,7 +587,7 @@ async function handleBare(
       // The read captured before runFlagsTui is a stale snapshot by the time the
       // user saves — any concurrent writer (proxy enable, devflow agents, Claude
       // Code /config) that ran during the session would be silently overwritten by
-      // the atomic rename in writeFileAtomicExclusive. Re-reading rebases the flag
+      // the atomic rename in writeSettingsFileAtomic. Re-reading rebases the flag
       // write onto current content and ensures convergeFlagsIntoSettings sees the
       // fresh viewMode (applies PF-022 — file state, not config state, is reality).
       const freshSettings = await readSettingsSafe(path.join(claudeDir, 'settings.json'));

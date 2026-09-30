@@ -69,3 +69,30 @@ export async function writeFileAtomicExclusive(filePath: string, data: string): 
 
   await fs.rename(tmp, filePath);
 }
+
+/**
+ * Write a Claude Code settings file (`settings.json`) atomically.
+ *
+ * D-SETTINGS-ATOMIC: every write of a Claude settings file goes through this one
+ * helper, so no command can leave a half-written file for Claude Code — or a
+ * concurrent devflow command — to read: the bytes land in a sibling temp file
+ * and one rename swaps them in ({@link writeFileAtomicExclusive}).
+ *
+ * A settings file that is a symbolic link (a dotfiles-managed `settings.json`)
+ * stays one: the temp file and the rename target the link's resolved file, so
+ * the link keeps pointing where the user pointed it. A dangling link has no file
+ * to resolve and is replaced like a missing file.
+ */
+export async function writeSettingsFileAtomic(filePath: string, data: string): Promise<void> {
+  await writeFileAtomicExclusive(await resolveLinkedFile(filePath), data);
+}
+
+/** `filePath`, or the file it resolves to when it is a symbolic link that resolves. */
+async function resolveLinkedFile(filePath: string): Promise<string> {
+  try {
+    if (!(await fs.lstat(filePath)).isSymbolicLink()) return filePath;
+    return await fs.realpath(filePath);
+  } catch {
+    return filePath;
+  }
+}

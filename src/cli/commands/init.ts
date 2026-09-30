@@ -47,7 +47,7 @@ import { loadConfig as loadHudConfig, saveConfig as saveHudConfig } from '../../
 import { readManifest, writeManifest, resolvePluginList, detectUpgrade, type ManifestData } from '../../core/manifest.js';
 import { convergeFlagsIntoSettings, countActiveFlags, readViewMode, type FlagsRecord } from '../../core/flags.js';
 import { addContextHook, removeContextHook, hasContextHook } from './context.js';
-import { writeFileAtomicExclusive } from '../../core/fs-atomic.js';
+import { writeSettingsFileAtomic } from '../../core/fs-atomic.js';
 import { writeManagedConfig, readConfigIfPresent, DEFAULT_CONFIG, type FeatureConfig, type ManagedConfigWriteError } from '../../core/feature-config.js';
 import { drainLearningQueue } from '../../core/learning-queue-cleanup.js';
 import { removeManagedDenyList, describeManagedDenyRemoval } from './security.js';
@@ -724,7 +724,7 @@ export const initCommand = new Command('init')
           content = '{}';
         }
         const updated = addHudStatusLine(content, devflowDir);
-        await fs.writeFile(settingsPath, updated, 'utf-8');
+        await writeSettingsFileAtomic(settingsPath, updated);
       } catch (error) {
         p.log.error(`Failed to update settings: ${error instanceof Error ? error.message : error}`);
         process.exit(1);
@@ -2115,7 +2115,7 @@ export const initCommand = new Command('init')
       if (proxyEnabled) content = applyProxyEnv(content, effectivePort);
 
       if (content !== original) {
-        await fs.writeFile(settingsPath, content, 'utf-8');
+        await writeSettingsFileAtomic(settingsPath, content);
         if (verbose) {
           if (ambientEnabled) p.log.success('Ambient mode hook installed');
           p.log.info(`Working memory ${memoryEnabled ? 'enabled' : 'disabled'}`);

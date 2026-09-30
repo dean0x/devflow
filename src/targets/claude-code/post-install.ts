@@ -3,7 +3,7 @@ import { execFileSync } from 'child_process';
 import * as path from 'path';
 import * as p from '@clack/prompts';
 import { getManagedSettingsPath } from './claude-paths.js';
-import { writeFileAtomicExclusive } from '../../core/fs-atomic.js';
+import { writeSettingsFileAtomic } from '../../core/fs-atomic.js';
 import type { SecurityMode } from '../../core/manifest.js';
 
 /**
@@ -1002,7 +1002,7 @@ export async function applyUserSecurityDenyList(
     existing = '{}';
   }
   const merged = mergeDenyList(existing, currentTemplateDeny, retiredDenyEntries(currentTemplateDeny));
-  await writeFileAtomicExclusive(settingsPath, merged);
+  await writeSettingsFileAtomic(settingsPath, merged);
   return merged;
 }
 
@@ -1011,7 +1011,7 @@ export async function applyUserSecurityDenyList(
  * Colocated with applyUserSecurityDenyList — the remove-side counterpart.
  *
  * Sequence: read → stripUserDenyList → guard (stripped !== existing) →
- *   writeFileAtomicExclusive → return { removed }.
+ *   writeSettingsFileAtomic → return { removed }.
  * Atomic write (temp+rename) upholds the never-truncate-on-crash invariant.
  * ENOENT is swallowed (file absent = nothing to strip). Other errors propagate.
  *
@@ -1037,7 +1037,7 @@ export async function stripUserSecurityDenyList(
   if (stripped === existing) {
     return null;
   }
-  await writeFileAtomicExclusive(settingsPath, stripped);
+  await writeSettingsFileAtomic(settingsPath, stripped);
   return { removed };
 }
 
@@ -1161,7 +1161,7 @@ export async function installSettings(
     }
 
     if (!settingsExists) {
-      await fs.writeFile(settingsPath, settingsContent, 'utf-8');
+      await writeSettingsFileAtomic(settingsPath, settingsContent);
       if (verbose) {
         p.log.success('Settings configured');
       }
@@ -1194,7 +1194,7 @@ export async function installSettings(
       return;
     }
 
-    await writeFileAtomicExclusive(settingsPath, JSON.stringify(existingParsed, null, 2) + '\n');
+    await writeSettingsFileAtomic(settingsPath, JSON.stringify(existingParsed, null, 2) + '\n');
     if (verbose) {
       p.log.success('Settings updated with Devflow hooks and HUD');
     }

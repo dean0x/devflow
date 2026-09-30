@@ -35,7 +35,7 @@ import type { Settings } from '../../targets/claude-code/hooks.js';
 import { detectShell, getProfilePath } from '../../core/safe-delete.js';
 import { isAlreadyInstalled, removeFromProfile } from '../../core/safe-delete-install.js';
 import { removeManagedSettings, stripUserDenyList, detectDenyState, DEVFLOW_HISTORICAL_DENY, DEVFLOW_TRACKED_PATHS } from '../../targets/claude-code/post-install.js';
-import { writeFileAtomicExclusive } from '../../core/fs-atomic.js';
+import { writeSettingsFileAtomic } from '../../core/fs-atomic.js';
 import { stripFlags } from '../../core/flags.js';
 import { stripDevflowTeammateModeFromJson } from '../../core/teammate-mode-cleanup.js';
 import { getPackageRoot, isContainedIn } from '../../core/paths.js';
@@ -961,7 +961,7 @@ export async function runSelectivePhaseForScope(opts: {
       const settings = await fs.readFile(settingsPath, 'utf-8');
       const updated = await removeAmbientHook(settings, { purgeLegacyRule: scope === 'user' });
       if (updated !== settings) {
-        await fs.writeFile(settingsPath, updated, 'utf-8');
+        await writeSettingsFileAtomic(settingsPath, updated);
         if (verbose) {
           p.log.success('Ambient mode hooks removed from settings.json');
         }
@@ -1264,7 +1264,7 @@ export async function runCleanupPhase(opts: {
       }
 
       if (settingsContent !== originalContent) {
-        await fs.writeFile(settingsPath, settingsContent, 'utf-8');
+        await writeSettingsFileAtomic(settingsPath, settingsContent);
         if (verbose) {
           p.log.success(`Devflow hooks removed from settings.json (${scope})`);
         }
@@ -1348,7 +1348,7 @@ export async function runCleanupPhase(opts: {
           DEVFLOW_HISTORICAL_DENY,
         );
         if (removed.length > 0) {
-          await writeFileAtomicExclusive(userSettingsPathForSecurity, stripped);
+          await writeSettingsFileAtomic(userSettingsPathForSecurity, stripped);
           p.log.success(`Security deny list removed from user settings (${removed.length} entries)`);
         }
       }

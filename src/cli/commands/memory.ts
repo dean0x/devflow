@@ -4,7 +4,7 @@ import * as path from 'path';
 import * as p from '@clack/prompts';
 import color from 'picocolors';
 import { getClaudeDirectory, getDevFlowDirectory } from '../../targets/claude-code/claude-paths.js';
-import { writeFileAtomicExclusive } from '../../core/fs-atomic.js';
+import { writeSettingsFileAtomic } from '../../core/fs-atomic.js';
 import { discoverProjectGitRoots } from '../../targets/claude-code/post-install.js';
 import { getGitRoot } from '../../core/git.js';
 import {
@@ -378,7 +378,7 @@ export const memoryCommand = new Command('memory')
     }
 
     if (converged !== settingsContent) {
-      await writeFileAtomicExclusive(settingsPath, converged);
+      await writeSettingsFileAtomic(settingsPath, converged);
     }
 
     if (enabled) {
