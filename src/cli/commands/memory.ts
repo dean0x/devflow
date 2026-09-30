@@ -245,7 +245,7 @@ export async function cleanQueueFiles(projectPaths: string[]): Promise<{ cleaned
 
 export const memoryCommand = new Command('memory')
   .description('Enable, disable, or clean up working memory (session context preservation)')
-  .option('--enable', 'Enable working memory in every project')
+  .option('--enable', 'Enable working memory in every project (a repository can opt out)')
   .option('--disable', 'Disable working memory in every project')
   .option('--status', 'Show current state')
   .option('--clear', 'Clean up queue files from projects')
@@ -254,7 +254,7 @@ export const memoryCommand = new Command('memory')
     if (!hasFlag) {
       p.intro(color.bgCyan(color.white(' Working Memory ')));
       p.note(
-        `${color.cyan('devflow memory --enable')}   Enable working memory (every project)\n` +
+        `${color.cyan('devflow memory --enable')}   Enable working memory (every project; a repository can opt out)\n` +
         `${color.cyan('devflow memory --disable')}  Disable working memory (every project)\n` +
         `${color.cyan('devflow memory --status')}   Check current state\n` +
         `${color.cyan('devflow memory --clear')}    Clean up queue files`,
@@ -382,7 +382,7 @@ export const memoryCommand = new Command('memory')
     }
 
     if (enabled) {
-      p.log.success('Working memory enabled in every project');
+      p.log.success('Working memory enabled in every project (a repository can opt out)');
       p.log.info(color.dim('Session context will be automatically preserved across conversations'));
       return;
     }

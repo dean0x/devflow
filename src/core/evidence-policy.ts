@@ -374,7 +374,8 @@ export function evidencePolicySuggestion(
   return [
     'Compliance is enabled on this machine, so repositories without a committed',
     'evidence setting default to the required evidence policy here. To apply it for',
-    `everyone working in a repository, commit this as ${PROJECT_FILE} on its default branch:`,
+    `everyone working in a repository, add these keys to its ${PROJECT_FILE} on its`,
+    'default branch — merged into the file when it already has one, never replacing it:',
     '',
     `${body}`,
     'devflow never writes this file: the team owns it, and once committed it applies',
@@ -494,8 +495,9 @@ function retiredPolicyHint(settings: Pick<SettingsModule, 'serializeProjectSugge
   });
   return [
     `Migration:  ${RETIRED_POLICY_FILE} is not read. While ${PROJECT_FILE} has no "evidence",`,
-    '            its presence alone holds this repository at required. Commit its value',
-    `            to ${PROJECT_FILE} as "evidence", then delete ${RETIRED_POLICY_FILE}:`,
+    '            its presence alone holds this repository at required. Add its value to',
+    `            ${PROJECT_FILE} as "evidence", and keep ${RETIRED_POLICY_FILE} until every`,
+    `            teammate runs devflow 3.0 or later; only then delete it:`,
     ...mappings,
   ];
 }

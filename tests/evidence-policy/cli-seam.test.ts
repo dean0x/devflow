@@ -337,8 +337,9 @@ describe('the --status helpers over the settings layer (D-FEATURES-NARROW-ONLY)'
       .toEqual(['Repository: generic controls only (.devflow/project.json)']);
     expect(repoComplianceStatusLines(stub({ ...BASE, retiredPolicyFile: true }), { dir: tmp })).toEqual([
       'Migration:  .devflow/policy.json is not read. While .devflow/project.json has no "evidence",',
-      '            its presence alone holds this repository at required. Commit its value',
-      '            to .devflow/project.json as "evidence", then delete .devflow/policy.json:',
+      '            its presence alone holds this repository at required. Add its value to',
+      '            .devflow/project.json as "evidence", and keep .devflow/policy.json until every',
+      '            teammate runs devflow 3.0 or later; only then delete it:',
       '              standard  →  {"version":1,"evidence":"standard"}',
       '              required  →  {"version":1,"evidence":"required"}',
     ]);
@@ -470,6 +471,10 @@ describe('evidencePolicySuggestion — iff the compliance default is required', 
     expect(text).not.toContain('.devflow/policy.json');
     expect(text).toContain('default branch');
     expect(text).toMatch(/devflow (?:never|does not) write/);
+    // Adding keys, never overwriting a project.json the team already committed.
+    expect(text).toContain('add these keys to its .devflow/project.json');
+    expect(text).toContain('never replacing it');
+    expect(text).not.toMatch(/commit this as/i);
   });
 
   it('the suggested bytes are a valid project.json by the shared parser', () => {

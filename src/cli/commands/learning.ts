@@ -35,7 +35,7 @@ export type { DecisionsEntryStatus };
 function printUsage(): void {
   p.intro(color.bgCyan(color.black(' Learning ')));
   p.note(
-    `${color.cyan('devflow learning --enable')}      Enable learning in every project\n` +
+    `${color.cyan('devflow learning --enable')}      Enable learning in every project (a repository can opt out)\n` +
     `${color.cyan('devflow learning --disable')}     Disable learning in every project (drains this project's queue)\n` +
     `${color.cyan('devflow learning --status')}      Show learning status\n` +
     `${color.cyan('devflow learning --list')}        Show all observations\n` +
@@ -308,7 +308,7 @@ async function handleToggle(enabled: boolean): Promise<void> {
   }
 
   if (enabled) {
-    p.log.success('Learning enabled in every project');
+    p.log.success('Learning enabled in every project (a repository can opt out)');
     p.log.info(color.dim('Architectural decisions and pitfalls will be detected from your sessions'));
     return;
   }
@@ -339,7 +339,7 @@ interface LearningOptions {
 
 export const learningCommand = new Command('learning')
   .description('Enable or disable learning (decision/pitfall detection) in every project')
-  .option('--enable', 'Enable learning in every project')
+  .option('--enable', 'Enable learning in every project (a repository can opt out)')
   .option('--disable', 'Disable learning in every project')
   .option('--status', 'Show learning status and observation counts')
   .option('--list', 'Show all decision/pitfall observations sorted by confidence')

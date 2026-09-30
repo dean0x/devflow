@@ -69,7 +69,7 @@ export async function handleToggle(options: { enable?: boolean; disable?: boolea
   }
 
   if (enabled) {
-    p.log.success('Feature knowledge bases enabled in every project');
+    p.log.success('Feature knowledge bases enabled in every project (a repository can opt out)');
     p.log.info('Knowledge bases are created automatically when workflows detect documented area changes.');
   } else {
     p.log.success('Feature knowledge bases disabled in every project');
