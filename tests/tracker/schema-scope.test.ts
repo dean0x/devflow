@@ -609,7 +609,7 @@ describe('AC-3.18: no HTTP fallback and no credential read in the Git spawn surf
     // …and does not fire on the legitimate neighbours it sits beside.
     expect(collectForbiddenIo([{
       path: 'seed.md',
-      content: 'gh issue comment 5 --body-file "$DEVFLOW_BODY"\nSet DEVFLOW_DIR before the call.',
+      content: 'gh issue comment 5 --body-file "$DEVFLOW_BODY"\nSet DEVFLOW_BODY before the call.',
     }])).toEqual([]);
   });
 });
