@@ -236,7 +236,7 @@ describe('MDS host discovery', () => {
       'the walk must reach outside src/assets/commands/_partials/, or widening it bought nothing',
     ).toContain(MDS_REFERENCE_PARTIALS[0]);
     // Manifest length floor — floors never decrease (numeric-floors.json: partial-count).
-    expect(ALL_MDS_PARTIALS.length).toBeGreaterThanOrEqual(15);
+    expect(ALL_MDS_PARTIALS.length).toBeGreaterThanOrEqual(16);
   });
 
   it('known-bad probe: the repo-wide collector reports a seeded partial and skips a seeded host', async () => {
