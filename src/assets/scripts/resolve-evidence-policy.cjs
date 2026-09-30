@@ -610,14 +610,14 @@ function lsRemoteDefaultBranch(ctx, root) {
  * Step 5b (offline, D still unknown after ls-remote) — D-OFFLINE-ORIGIN-HEAD:
  * the default branch this clone last recorded for origin, read LOCALLY with
  * `git symbolic-ref --quiet refs/remotes/origin/HEAD` (no network, no index
- * refresh). Without it an unreachable origin left the worktree's own file
- * governing, so a branch that set `evidence:"standard"` resolved standard while
- * main said required; naming D here lets trackingSource fold main's tracking copy
- * in, and the branch can no longer lower it.
+ * refresh). With D unnamed an unreachable origin leaves the worktree's own file
+ * governing, so a branch that sets `evidence:"standard"` would resolve standard
+ * while main says required; naming D here lets trackingSource fold main's
+ * tracking copy in, so the branch cannot lower it.
  *   ref      exit 0 with one `refs/remotes/origin/<SAFE_REF_RE>` line
  *   none     an answered non-zero exit (origin/HEAD not recorded) or an answer
  *            that names no safe branch — the residual case: the worktree file
- *            governs, WARN=remote-unavailable, exactly as before
+ *            governs, WARN=remote-unavailable
  *   unknown  git did not answer — not knowing whether a base exists, which
  *            gatherFacts reads as an invalid base (it raises; avoids PF-075)
  *

@@ -7,9 +7,9 @@ import * as path from 'path';
  * The cap on the hooks' per-directory log folders.
  *
  * D-LOG-DIR-CAP: every hook logs under `~/.devflow/logs/<slug>/`, one directory
- * per working directory a session ran in (`log-paths`' devflow_log_dir), and
- * nothing ever removed one — a machine was found holding 31k of them, most left
- * by test runs in throwaway temp directories. `devflow init` now keeps the
+ * per working directory a session ran in (`log-paths`' devflow_log_dir). Left
+ * uncapped they pile up — a machine was found holding 31k of them, most left by
+ * test runs in throwaway temp directories — so `devflow init` keeps the
  * {@link MAX_HOOK_LOG_DIRS} most recently written and removes the rest, oldest
  * first. A folder's recency is the newest mtime among the folder and the log
  * files in it: a log that is only ever appended to leaves the folder's own mtime

@@ -630,15 +630,15 @@ ${TRACKER_SECTION}"
 fi
 
 # --- Section 4: Legacy project-local install notice ---
-# D-LEGACY-LOCAL-NOTICE: \`devflow init --scope local\` is retired, but a repository
+# D-LEGACY-LOCAL-NOTICE: `devflow init --scope local` is retired, but a repository
 # it installed into still registers devflow hooks in <root>/.claude/settings.json,
 # so every hook runs twice — once from there, once machine-wide — until the user
-# removes it with \`devflow uninstall --scope local\`. One line says so.
+# removes it with `devflow uninstall --scope local`. One line says so.
 #
 # Recognised by devflow's exact hook-ownership shape (D-EXACT-HOOK-OWNER,
 # src/targets/claude-code/hooks.ts): a command string ENDING in
-# \`/scripts/hooks/run-hook <marker>\` for a marker devflow registered, or in one of
-# the direct \`.sh\` hooks of v1 — never a mere mention of a marker word. The list
+# `/scripts/hooks/run-hook <marker>` for a marker devflow registered, or in one of
+# the direct `.sh` hooks of v1 — never a mere mention of a marker word. The list
 # is closed on purpose: no new project-local install can be made, so the markers
 # such an install carries are exactly these.
 #

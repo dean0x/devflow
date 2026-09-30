@@ -3,7 +3,7 @@
  * (D-FEATURES-NARROW-ONLY), run through the compiled CLI from a temp HOME and a
  * temp git repository (PF-060).
  *
- * The machine switch is reported exactly as before. A repository layer — the
+ * The machine switch line is the same in every directory. A repository layer — the
  * team's `.devflow/project.json` or the personal `.devflow/config.json` — can
  * only narrow it, and `--status` adds ONE line naming the effective state and
  * the file that narrowed it, only when that happens. Every other run is
