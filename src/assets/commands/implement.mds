@@ -4,6 +4,7 @@ output-dir: dist/commands
 ---
 @import { knowledge_load, knowledge_writeback } from "./_partials/_knowledge.mds"
 @import { decisions_load } from "./_partials/_decisions.mds"
+@import { docs_root } from "./_partials/_docs_root.mds"
 @import { evidence_policy, evidence_exception } from "./_partials/_evidence_policy.mds"
 @import { issue_ref_grammar, issue_capture_contract } from "./_partials/_tracker.mds"
 @import { test_plan_line } from "./_partials/_plan_contract.mds"
@@ -55,6 +56,8 @@ If the user prompt does NOT match re-validation, proceed with the full pipeline 
 **Load Companion Skills** — Load via Skill tool: `devflow:test-driven-development`, `devflow:patterns`, `devflow:dependency-research`. If a skill fails to load, continue without it.
 
 Record the current branch name as `BASE_BRANCH` - this will be the PR target.
+
+{{docs_root()}}
 
 {{evidence_policy()}}
 
@@ -126,9 +129,9 @@ visible, a silently discarded request is not.
 
 {{evidence_exception()}}
 
-**Record the exception at once**, before any Code spawn: write the rendered section as the `## Evidence Exceptions` section of `.devflow/docs/handoff-{branch_slug}.md`, creating the file if absent, and set `PR_EXCEPTIONS` to that section. The file is its one home until the PR exists: every later write to the file keeps the section byte-identical, every PR-creating Code spawn passes it verbatim as `PR_EXCEPTIONS`, and the file is deleted only once the PR exists — after the PR-creating Phase 2 Code agent under SINGLE_CODE_AGENT and SEQUENTIAL_CODE_AGENTS, after Phase 10 under PARALLEL_CODE_AGENTS. With no exception recorded, `PR_EXCEPTIONS` is `(none)`.
+**Record the exception at once**, before any Code spawn: write the rendered section as the `## Evidence Exceptions` section of `{worktree}/.devflow/docs/handoff-{branch_slug}.md`, creating the file if absent, and set `PR_EXCEPTIONS` to that section. The file is its one home until the PR exists: every later write to the file keeps the section byte-identical, every PR-creating Code spawn passes it verbatim as `PR_EXCEPTIONS`, and the file is deleted only once the PR exists — after the PR-creating Phase 2 Code agent under SINGLE_CODE_AGENT and SEQUENTIAL_CODE_AGENTS, after Phase 10 under PARALLEL_CODE_AGENTS. With no exception recorded, `PR_EXCEPTIONS` is `(none)`.
 
-**Test plan.** Before any Code spawn, give the task a test plan in the evidence file `.devflow/docs/evidence-{branch_slug}.md` (`EVIDENCE_FILE`) — unlike the handoff file, it stays after the PR exists. It holds up to three sections, in this order and nothing else: `## Test Plan`; `## Evidence Exceptions`, a byte copy of `PR_EXCEPTIONS` present only while that is not `(none)`; and `## Claims`, always last, so every claim is appended at the end of the file. Create the file if absent; if it exists, replace its `## Test Plan` and `## Evidence Exceptions` sections and keep `## Claims` byte-identical.
+**Test plan.** Before any Code spawn, give the task a test plan in the evidence file `{worktree}/.devflow/docs/evidence-{branch_slug}.md` (`EVIDENCE_FILE`) — unlike the handoff file, it stays after the PR exists. It holds up to three sections, in this order and nothing else: `## Test Plan`; `## Evidence Exceptions`, a byte copy of `PR_EXCEPTIONS` present only while that is not `(none)`; and `## Claims`, always last, so every claim is appended at the end of the file. Create the file if absent; if it exists, replace its `## Test Plan` and `## Evidence Exceptions` sections and keep `## Claims` byte-identical.
 
 Write the `## Test Plan` section: when `$ARGUMENTS` is a plan document with a `## Test Plan` section, copy that section's lines verbatim; otherwise write one TP line per acceptance criterion the plan, the issue or the task text states, numbered from `TP-1`. Never invent a criterion, and word every scenario yourself in plain words: the lines reach the PR body, so a scenario holds no `#`, `@` or `/` — no issue reference, mention, closing keyword target or URL — and the files a TP covers go in its `files:` field. Each line follows the TP-line contract:
 
@@ -137,13 +140,13 @@ Write the `## Test Plan` section: when `$ARGUMENTS` is a plan document with a `#
 Check the section:
 
 ```bash
-node "$HOME/.devflow/scripts/verify-evidence.cjs" check tp .devflow/docs/evidence-{branch_slug}.md; echo "exit=$?"
+node "$HOME/.devflow/scripts/verify-evidence.cjs" check tp "{worktree}/.devflow/docs/evidence-{branch_slug}.md"; echo "exit=$?"
 ```
 
 `exit=0` passes. On any other result, rewrite the section once — the script names the failing line and its code on stderr — and check again. Still failing, or no line to write, means the test plan is **missing**: drop the `## Test Plan` section from the file.
 
 **Missing test plan, only when `EVIDENCE_POLICY` is `required`:** when the check above leaves the test plan missing, ask with AskUserQuestion before any Code spawn — "No test plan could be written for this task. Record a self-attested exception, or stop?" — offering exactly these two options:
-- **Record an exception** — the user gives the reason as free text. Render it with the exception grammar above, as kind `test-plan`; when the rendered reason is empty, ask for it once more, and stop as below if it is empty again. Add the rendered line to the `## Evidence Exceptions` section of `.devflow/docs/handoff-{branch_slug}.md` — after any `ticket-link` line, creating the section and the file when absent — and set `PR_EXCEPTIONS` to that section, under the same rules as the record above.
+- **Record an exception** — the user gives the reason as free text. Render it with the exception grammar above, as kind `test-plan`; when the rendered reason is empty, ask for it once more, and stop as below if it is empty again. Add the rendered line to the `## Evidence Exceptions` section of `{worktree}/.devflow/docs/handoff-{branch_slug}.md` — after any `ticket-link` line, creating the section and the file when absent — and set `PR_EXCEPTIONS` to that section, under the same rules as the record above.
 - **Stop** — report `BLOCKED (no test plan)`, name `TASK_ID` and `BASE_BRANCH` so the branch can be reused or removed, and give the remedy: state the acceptance criteria in the task, the issue or a `/plan` document (its `## Test Plan` section is copied) and re-run `/implement`, or — for a team that does not want test plans enforced — commit `.devflow/project.json` as `{"version":1,"evidence":"standard"}` on the default branch; a machine with compliance enabled still resolves `required` whatever that file says. Spawn nothing further.
 
 When `EVIDENCE_POLICY` is `standard`, a missing test plan is never asked about: carry `Test plan: missing` to the Phase 11 report.
@@ -153,10 +156,10 @@ When `EVIDENCE_POLICY` is `standard`, a missing test plan is never asked about: 
 - `PR_TEST_PLAN_BLOCK` — when the test plan is present and this render ends in `exit=0`, its stdout byte for byte without that `exit=` line; `(none)` otherwise:
 
 ```bash
-node "$HOME/.devflow/scripts/verify-evidence.cjs" render --plan .devflow/docs/evidence-{branch_slug}.md; echo "exit=$?"
+node "$HOME/.devflow/scripts/verify-evidence.cjs" render --plan "{worktree}/.devflow/docs/evidence-{branch_slug}.md"; echo "exit=$?"
 ```
 
-- `EVIDENCE_FILE` — `.devflow/docs/evidence-{branch_slug}.md`, its `## Evidence Exceptions` section now a byte copy of `PR_EXCEPTIONS` (absent when that is `(none)`).
+- `EVIDENCE_FILE` — `{worktree}/.devflow/docs/evidence-{branch_slug}.md`, its `## Evidence Exceptions` section now a byte copy of `PR_EXCEPTIONS` (absent when that is `(none)`).
 
 {{publication_gate()}}
 Phase 10b passes the resolved value to `update-pr-evidence`, which decides what each value means for the evidence comment. From the same line: {{compliance.compliance_frameworks()}} Pass it to every Code spawn.
@@ -203,7 +206,7 @@ COMPLIANCE_FRAMEWORKS: {COMPLIANCE_FRAMEWORKS}
 PR_DESCRIPTION_GUIDANCE: {pr_description_guidance}
 ISSUE_NUMBER: {ISSUE_ID captured in Phase 1, or (none)}
 ISSUE_PR_LINK: {ISSUE_PR_LINK captured in Phase 1, or (none)}
-PR_EXCEPTIONS: {the ## Evidence Exceptions section of .devflow/docs/handoff-{branch_slug}.md verbatim, or (none)}
+PR_EXCEPTIONS: {the ## Evidence Exceptions section of {worktree}/.devflow/docs/handoff-{branch_slug}.md verbatim, or (none)}
 PR_TEST_PLAN_BLOCK: {PR_TEST_PLAN_BLOCK from Phase 1 verbatim, or (none)}"
 ```
 
@@ -230,7 +233,7 @@ PR_DESCRIPTION_GUIDANCE: {pr_description_guidance}
 ISSUE_NUMBER: {ISSUE_ID captured in Phase 1, or (none)}
 ISSUE_PR_LINK: {ISSUE_PR_LINK captured in Phase 1, or (none)}
 HANDOFF_REQUIRED: true
-HANDOFF_FILE: .devflow/docs/handoff-{branch_slug}.md"
+HANDOFF_FILE: {worktree}/.devflow/docs/handoff-{branch_slug}.md"
 ```
 
 **Phase 2+ Code agents** (after prior phase completes):
@@ -251,13 +254,13 @@ COMPLIANCE_FRAMEWORKS: {COMPLIANCE_FRAMEWORKS}
 PR_DESCRIPTION_GUIDANCE: {pr_description_guidance}
 ISSUE_NUMBER: {ISSUE_ID captured in Phase 1, or (none)}
 ISSUE_PR_LINK: {ISSUE_PR_LINK captured in Phase 1, or (none)}
-PR_EXCEPTIONS: {the ## Evidence Exceptions section of .devflow/docs/handoff-{branch_slug}.md verbatim, or (none)}
+PR_EXCEPTIONS: {the ## Evidence Exceptions section of {worktree}/.devflow/docs/handoff-{branch_slug}.md verbatim, or (none)}
 PR_TEST_PLAN_BLOCK: {PR_TEST_PLAN_BLOCK from Phase 1 verbatim, or (none)}
 HANDOFF_REQUIRED: {true if not last phase}
-HANDOFF_FILE: .devflow/docs/handoff-{branch_slug}.md"
+HANDOFF_FILE: {worktree}/.devflow/docs/handoff-{branch_slug}.md"
 ```
 
-**Handoff Protocol**: Each sequential Code agent receives the prior Code agent's implementation summary via PRIOR_PHASE_SUMMARY and FILES_FROM_PRIOR_PHASE. The Code agent's built-in branch orientation step handles git log scanning, file reading, and pattern discovery automatically. After each Code agent with HANDOFF_REQUIRED=true completes, write its phase summary to `.devflow/docs/handoff-{branch_slug}.md` using the Write tool (survives context compaction), keeping any `## Evidence Exceptions` section byte-identical. Delete `.devflow/docs/handoff-{branch_slug}.md` once the PR exists — after the final Code agent, which creates it, completes (cleanup).
+**Handoff Protocol**: Each sequential Code agent receives the prior Code agent's implementation summary via PRIOR_PHASE_SUMMARY and FILES_FROM_PRIOR_PHASE. The Code agent's built-in branch orientation step handles git log scanning, file reading, and pattern discovery automatically. After each Code agent with HANDOFF_REQUIRED=true completes, write its phase summary to `{worktree}/.devflow/docs/handoff-{branch_slug}.md` using the Write tool (survives context compaction), keeping any `## Evidence Exceptions` section byte-identical. Delete `{worktree}/.devflow/docs/handoff-{branch_slug}.md` once the PR exists — after the final Code agent, which creates it, completes (cleanup).
 
 ---
 
@@ -531,7 +534,7 @@ CREATE_PR: true
 PR_DESCRIPTION_GUIDANCE: {pr_description_guidance}
 ISSUE_NUMBER: {ISSUE_ID captured in Phase 1, or (none)}
 ISSUE_PR_LINK: {ISSUE_PR_LINK captured in Phase 1, or (none)}
-PR_EXCEPTIONS: {the ## Evidence Exceptions section of .devflow/docs/handoff-{branch_slug}.md verbatim, or (none)}
+PR_EXCEPTIONS: {the ## Evidence Exceptions section of {worktree}/.devflow/docs/handoff-{branch_slug}.md verbatim, or (none)}
 PR_TEST_PLAN_BLOCK: {PR_TEST_PLAN_BLOCK from Phase 1 verbatim, or (none)}
 COMPLIANCE_FRAMEWORKS: {COMPLIANCE_FRAMEWORKS}"
 ```
@@ -561,6 +564,7 @@ Agent(subagent_type="Git"):
 PR_NUMBER: {number from PR_URL}
 EVIDENCE_FILE: .devflow/docs/evidence-{branch_slug}.md
 REVIEW_PUBLICATION: {REVIEW_PUBLICATION resolved in Phase 1, or auto}
+WORKTREE_PATH: {worktree}
 Update the PR's test-plan block and post its evidence comment."
 ```
 

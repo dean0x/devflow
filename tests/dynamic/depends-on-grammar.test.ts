@@ -326,7 +326,7 @@ describe('artifact naming — plan.mds writer ↔ docs-framework reader', () => 
 
   it('known-bad probe: the retired first-issue `{ISSUE_ID}-multi` name is reported', () => {
     const line = multiIssueLine(PLAN_MDS)!
-    const retired = '- If multi-issue: `.devflow/docs/design/{ISSUE_ID}-multi.{YYYY-MM-DD_HHMM}.md`, using the first issue\'s `ISSUE_ID`'
+    const retired = '- If multi-issue: `{worktree}/.devflow/docs/design/{ISSUE_ID}-multi.{YYYY-MM-DD_HHMM}.md`, using the first issue\'s `ISSUE_ID`'
     expect(collectMultiIssueNamingDefects(PLAN_MDS.replace(line, retired))).toEqual([
       'the multi-issue name is not multi-{topic-slug}.{ts}.md',
       'the multi-issue name does not set `issue: pending`',
@@ -338,7 +338,7 @@ describe('artifact naming — plan.mds writer ↔ docs-framework reader', () => 
 
 /** The Phase 14 naming bullet for a multi-issue plan, as the source spells it. */
 function multiIssueLine(source: string): string | undefined {
-  return source.split('\n').find(l => l.startsWith('- If multi-issue: `.devflow/docs/design/'))
+  return source.split('\n').find(l => l.startsWith('- If multi-issue: `{worktree}/.devflow/docs/design/'))
 }
 
 /**
@@ -350,7 +350,7 @@ function collectMultiIssueNamingDefects(source: string): string[] {
   const line = multiIssueLine(source)
   if (line === undefined) return ['no multi-issue naming line']
   const defects: string[] = []
-  if (!line.includes('`.devflow/docs/design/multi-{topic-slug}.{YYYY-MM-DD_HHMM}.md`')) {
+  if (!line.includes('`{worktree}/.devflow/docs/design/multi-{topic-slug}.{YYYY-MM-DD_HHMM}.md`')) {
     defects.push('the multi-issue name is not multi-{topic-slug}.{ts}.md')
   }
   if (!line.includes('`issue: pending`')) defects.push('the multi-issue name does not set `issue: pending`')

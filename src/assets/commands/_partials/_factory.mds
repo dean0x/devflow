@@ -209,7 +209,7 @@ Output: write to the artifact path and return { path, title }.`, {
 - The `initiative` variable is the raw user input (a description, a spec doc path, or inline text) — read it and distill before passing to agents.
 - The `constraints` variable is optional: any cross-cutting rules (naming discipline, scope filters, authority order) the user supplied.
 - Emit artifact files using the `ticket_body_template()` shape (from `_ticket_template.mds`) for each ticket — write inside agents, since the script body has no filesystem access.
-- Tracking-issue doc goes to `.devflow/docs/tickets/{slug}/{ts}/tracking-issue.md` (agents do the writing).
+- Tracking-issue doc goes to `${ROOT}/.devflow/docs/tickets/{slug}/{ts}/tracking-issue.md`, `ROOT` being the workflow's `root` argument (agents do the writing).
 - For large initiatives (more than ~8 tickets), chunk the `parallel(map())` fan-outs into batches (e.g. `for` loop over slices, `await`-ing each batch) so agent concurrency stays bounded and provider rate limits are respected.
 @end
 

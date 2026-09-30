@@ -8,6 +8,7 @@ output-dir: dist/commands
 @import { ticket_body_template } from "./_partials/_ticket_template.mds"
 @import { factory_shape } from "./_partials/_factory.mds"
 @import { evidence_policy } from "./_partials/_evidence_policy.mds"
+@import { docs_root } from "./_partials/_docs_root.mds"
 {{authoring_preamble()}}
 
 ---
@@ -23,7 +24,7 @@ This command instructs you to construct and run a Claude Code dynamic Workflow t
 ---
 
 **Requires:** initiative description or spec document path; tracker access only for filing the issues, which the Git agent resolves
-**Produces:** ticket `.md` files at `.devflow/docs/tickets/{slug}/{ts}/`, `tracking-issue.md`
+**Produces:** ticket `.md` files at `{worktree}/.devflow/docs/tickets/{slug}/{ts}/`, `tracking-issue.md`
 
 ---
 
@@ -34,7 +35,7 @@ Before authoring, verify:
 1. **Workflow tool available:** if the `Workflow` tool is not in your available tools, STOP and tell the user: "The Workflow tool is not available in this session. dynamic-tickets requires Claude Code's dynamic workflow runtime."
 2. **`agentType` support:** confirmed available (spike F5, 2026-06-11). If spawned agents return no results, check that devflow is installed (`devflow init` has been run).
 3. **Tracker paths:** filing, when it runs, happens after the workflow and through the Git agent, which resolves the configured tracker and its access itself and reports `TRACEABILITY: DEGRADED ({reason})` for an issue it cannot file — that ticket stays a local `.md` file. No tracker CLI is checked here.
-4. **No-remote path:** with no remote, the ticket files are still written to `.devflow/docs/tickets/{slug}/{ts}/`; whatever the Git agent cannot file without one, it reports as DEGRADED.
+4. **No-remote path:** with no remote, the ticket files are still written to `{worktree}/.devflow/docs/tickets/{slug}/{ts}/`; whatever the Git agent cannot file without one, it reports as DEGRADED.
 
 ---
 
@@ -47,6 +48,10 @@ Before you write the workflow script:
 **Produces:** EVIDENCE_POLICY, ISSUE_REQUIRED, APPLY_CONVENTIONS, REQUIRE_NON_AUTHOR_APPROVAL
 
 {{evidence_policy()}}
+
+{{docs_root()}}
+
+Pass `{worktree}` to the workflow as its `root` argument.
 
 **1. Apply decisions context**
 
@@ -91,7 +96,8 @@ const constraints = args.constraints || "";
 const DECISIONS_CONTEXT = args.decisionsContext || "";   // injected before authoring
 const slug = args.slug || initiative.toLowerCase().replace(/[^a-z0-9]+/g, '-').slice(0, 40);
 const ts = new Date().toISOString().slice(0,16).replace(/[-:T]/g, (c) => c === 'T' ? '_' : c === ':' ? '' : c);
-const OUTDIR = `.devflow/docs/tickets/${slug}/${ts}`;
+const ROOT = args.root;  // {worktree} from Pre-authoring setup: the checkout's toplevel, never cwd
+const OUTDIR = `${ROOT}/.devflow/docs/tickets/${slug}/${ts}`;
 
 // Phase 1: Draft — one Design agent per ticket, all in parallel
 const drafts = await phase("draft", () =>
@@ -202,8 +208,8 @@ Agent(subagent_type="Git"):
 "OPERATION: ensure-traceable-issue
 TASK_DESCRIPTION: {the ticket's title, or the tracking issue's H1}
 REQUIREMENTS: {the ticket's **Wave:** and **Depends on:** lines, then its ## Summary paragraph; or the tracking issue's ## Context}
-PLAN_ARTIFACT_PATH: {the ticket or tracking-issue file path}
-WORKTREE_PATH: {WORKTREE_PATH when provided; omit otherwise}"
+PLAN_ARTIFACT_PATH: {the ticket or tracking-issue file path, relative to {worktree}}
+WORKTREE_PATH: {worktree}"
 ```
 
 3. **Capture** `**Issue**: {ISSUE_REF}` and `**Status**:` from the spawn's `## Issue Traced` Output.
@@ -234,11 +240,11 @@ The pipeline above implements this general shape:
 
 ### Artifact paths
 
-Tickets → `.devflow/docs/tickets/{slug}/{ts}/{ticket-slug}.md`
+Tickets → `{worktree}/.devflow/docs/tickets/{slug}/{ts}/{ticket-slug}.md`
 
-Tracking issue → `.devflow/docs/tickets/{slug}/{ts}/tracking-issue.md`
+Tracking issue → `{worktree}/.devflow/docs/tickets/{slug}/{ts}/tracking-issue.md`
 
-Honor the `WORKTREE_PATH` prefix when provided: all artifact paths become `{WORKTREE_PATH}/.devflow/docs/tickets/...`.
+`{worktree}` is the docs root resolved in Pre-authoring setup (it honours `WORKTREE_PATH` when provided).
 
 Timestamps follow the devflow `YYYY-MM-DD_HHMM` convention (date and time separated by an underscore, e.g. `2026-06-12_1148`). The `ts` variable in the workflow script generates this format.
 

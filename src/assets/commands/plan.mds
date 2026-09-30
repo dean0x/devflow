@@ -4,6 +4,7 @@ output-dir: dist/commands
 ---
 @import { knowledge_load } from "./_partials/_knowledge.mds"
 @import { decisions_load } from "./_partials/_decisions.mds"
+@import { docs_root } from "./_partials/_docs_root.mds"
 @import { compliance_gate } from "./_partials/_compliance.mds"
 @import { evidence_policy } from "./_partials/_evidence_policy.mds"
 @import { test_plan_line } from "./_partials/_plan_contract.mds"
@@ -119,6 +120,8 @@ Run rskim on source directories (NOT repo root) to identify:
 - Test patterns and coverage approach
 Return codebase context for requirements analysis."
 ```
+
+{{docs_root()}}
 
 {{decisions_load()}}
 
@@ -382,9 +385,9 @@ User can:
 **Store design artifact:**
 
 **Pre-compute the artifact path** from the slug (it never changes after this):
-- If one issue: `.devflow/docs/design/{ISSUE_ID}-{topic-slug}.{YYYY-MM-DD_HHMM}.md` (the `docs-framework` skill's design-document pattern, e.g. `42-jwt-auth.2026-04-07_1430.md`)
-- If multi-issue: `.devflow/docs/design/multi-{topic-slug}.{YYYY-MM-DD_HHMM}.md`, frontmatter `issue: pending` — a batch fetch returns no issue ID to name it by
-- If no issue: `.devflow/docs/design/{topic-slug}.{YYYY-MM-DD_HHMM}.md`
+- If one issue: `{worktree}/.devflow/docs/design/{ISSUE_ID}-{topic-slug}.{YYYY-MM-DD_HHMM}.md` (the `docs-framework` skill's design-document pattern, e.g. `42-jwt-auth.2026-04-07_1430.md`)
+- If multi-issue: `{worktree}/.devflow/docs/design/multi-{topic-slug}.{YYYY-MM-DD_HHMM}.md`, frontmatter `issue: pending` — a batch fetch returns no issue ID to name it by
+- If no issue: `{worktree}/.devflow/docs/design/{topic-slug}.{YYYY-MM-DD_HHMM}.md`
 
 Create parent directory if needed.
 
@@ -471,7 +474,8 @@ ISSUE_INPUT: {the raw candidate token from $ARGUMENTS if /plan was invoked with 
 TASK_DESCRIPTION: {Gate 0 confirmed scope — one-line title}
 INITIAL_REQUEST: {the Gate 0 confirmed scope statement}
 REQUIREMENTS: {discovered requirements summary from Phase 6 gap synthesis}
-PLAN_ARTIFACT_PATH: {the design artifact path written above}
+PLAN_ARTIFACT_PATH: {the design artifact path written above, relative to {worktree} — never absolute}
+WORKTREE_PATH: {worktree}
 LABELS: feature
 The Git agent will create a tracker issue (or enrich an existing one) using the D3 template,
 post the design artifact as a collapsed details comment, and link it from the Implementation Plan section.
@@ -553,7 +557,7 @@ Display completion summary:
 │
 ├─ Block 6: Output
 │  └─ Phase 14: Output
-│     ├─ Store design artifact (.devflow/docs/design/)
+│     ├─ Store design artifact ({worktree}/.devflow/docs/design/)
 │     ├─ Create tracker issue (optional)
 │     └─ Report summary + next step
 │
@@ -574,4 +578,4 @@ Display completion summary:
 - If any agent fails, report the phase, agent type, and error
 - If user selects "Revise" at Gate 2, loop back to Phase 10 with user's constraints
 - If user selects "Cancel" at any gate, stop gracefully without writing artifact
-- If `.devflow/docs/design/` does not exist, create it in Phase 14
+- If `{worktree}/.devflow/docs/design/` does not exist, create it in Phase 14

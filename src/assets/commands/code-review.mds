@@ -368,7 +368,7 @@ In multi-worktree mode, report results per worktree.
 ## Backwards Compatibility
 
 - **Single worktree**: Auto-discovery finds only one worktree → proceeds exactly as before. Zero behavior change.
-- **Legacy flat layout**: If `.devflow/docs/reviews/{branch-slug}/` contains flat `*.md` files (no timestamped subdirectories), new runs create timestamped subdirectories. Old flat files remain untouched.
+- **Legacy flat layout**: If `{worktree}/.devflow/docs/reviews/{branch-slug}/` contains flat `*.md` files (no timestamped subdirectories), new runs create timestamped subdirectories. Old flat files remain untouched.
 
 ## Principles
 

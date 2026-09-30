@@ -272,7 +272,7 @@ const FILING_SEEDS: ReadonlyArray<readonly [label: string, from: string, to: str
   ['sequential', 'One Git spawn at a time, never in parallel', 'All Git spawns in parallel'],
   ['bounded', 'at most 50 spawns in all', 'as many spawns as needed'],
   ['rate limit', '`DEGRADED (rate limited)` ⇒ stop filing', '`DEGRADED (rate limited)` ⇒ retry'],
-  ['spawn', 'PLAN_ARTIFACT_PATH: {the ticket or tracking-issue file path}\n', ''],
+  ['spawn', 'PLAN_ARTIFACT_PATH: {the ticket or tracking-issue file path, relative to {worktree}}\n', ''],
   ['edit', 'Change nothing else in the file.', 'Rewrite the file.'],
   ['drafted lines', 'Before any spawn, remove each such line using the Edit tool', 'Before any spawn, keep each such line'],
 ]
