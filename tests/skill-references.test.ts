@@ -29,8 +29,14 @@ function extractPrefixedRefs(content: string): string[] {
 }
 
 /** Extract install path references (~/.claude/skills/devflow:NAME/SKILL.md). */
+/**
+ * Extract install path references to a named skill (…/skills/devflow:NAME/SKILL.md),
+ * whatever spells the Claude Code directory in front of it — `~/.claude`, a
+ * `{claude_dir}` placeholder or a shell variable. A templated name such as
+ * `{focus}` is not a skill name and is not captured.
+ */
 function extractInstallPaths(content: string): string[] {
-  const matches = content.matchAll(/~\/\.claude\/skills\/devflow:([\w:-]+)\/SKILL\.md/g);
+  const matches = content.matchAll(/\/skills\/devflow:([\w:-]+)\/SKILL\.md/g);
   return [...matches].map(m => m[1]);
 }
 
@@ -340,8 +346,33 @@ describe('Format 3: Install path references', () => {
       }
     }
 
-    // code-review, resolve commands both have install path references
-    expect(totalRefs, 'dist/commands/ files should have install path references').toBeGreaterThanOrEqual(2);
+    // Commands name no skill by install path: the worktree-support pointers are
+    // directory-neutral, and the one path a command builds — /code-review's
+    // language presence gate — is templated on the focus under the Claude Code
+    // directory the installer resolves (D-CLAUDE-DIR-PROMPTS). So the loop above
+    // may see nothing; non-vacuity comes from the extractor and the gate instead.
+    expect(totalRefs, 'a command names a skill by install path again').toBe(0);
+  });
+
+  it('the extractor captures a named install path under any directory spelling, never a template', () => {
+    expect(extractInstallPaths(
+      '`~/.claude/skills/devflow:go/SKILL.md` `{claude_dir}/skills/devflow:rust/SKILL.md` '
+      + '"$d/skills/devflow:{focus}/SKILL.md"',
+    )).toEqual(['go', 'rust']);
+  });
+
+  it("/code-review's language presence gate probes installed skills, and every focus it names is canonical", () => {
+    const canonicalSkills = new Set(getAllSkillNames());
+    requireDistFiles();
+    const content = readFileSync(path.join(ROOT, 'dist', 'commands', 'code-review.md'), 'utf-8');
+    expect(content).toContain('/skills/devflow:{focus}/SKILL.md');
+    const gate = /\*\*Language focus presence gate\.\*\* The eight language focuses — ([^\n]*?) — ship with/.exec(content);
+    expect(gate, 'the presence gate paragraph').not.toBeNull();
+    const focuses = [...(gate?.[1] ?? '').matchAll(/`([\w-]+)`/g)].map(m => m[1]);
+    expect(focuses).toHaveLength(8);
+    for (const focus of focuses) {
+      expect(canonicalSkills.has(focus), `language focus '${focus}' is not a canonical skill`).toBe(true);
+    }
   });
 });
 
