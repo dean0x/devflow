@@ -14,16 +14,49 @@ function shellExec(cmd: string, args: string[], cwd: string): Promise<string> {
 }
 
 /**
- * Every HUD git call: `-c core.fsmonitor=false` first.
+ * The override that stops git running a repository's `core.fsmonitor` command.
  *
- * D-NO-FSMONITOR: `status` and `diff` read the index, and reading the index
- * runs the command a repository's config names in `core.fsmonitor` — code
- * chosen by whatever repository the status line is drawn in, on every prompt.
- * The override keeps each call a pure read; calls that never touch the index
- * carry it too, so no new call can forget it.
+ * D-NO-FSMONITOR: git runs the command a repository's config names in
+ * `core.fsmonitor` whenever it reads the index — code chosen by whatever
+ * repository the status line is drawn in, on every prompt. Every HUD git call
+ * carries this override (`gitExec`), except the index reads' carve-out below.
+ */
+const FSMONITOR_OFF: readonly string[] = ['-c', 'core.fsmonitor=false'];
+
+/** `core.fsmonitor` as git itself reads it, without touching the index. */
+const FSMONITOR_CONFIG_READ: readonly string[] = ['config', '--type=bool', '--get', 'core.fsmonitor'];
+
+/**
+ * Every HUD git call except the index reads: the override first, so no call
+ * that never needs fsmonitor can run a repository's hook.
  */
 function gitExec(args: string[], cwd: string): Promise<string> {
   return shellExec('git', ['-c', 'core.fsmonitor=false', ...args], cwd);
+}
+
+/**
+ * D-NO-FSMONITOR carve-out: the override for an index read, given the
+ * trimmed stdout of `git config --type=bool --get core.fsmonitor`.
+ *
+ * `true` is the built-in fsmonitor daemon — git's own code, not a command from
+ * the repository — and it is what keeps `status` fast in huge repositories,
+ * where the HUD's 1s timeout would otherwise expire and draw a clean tree. Only
+ * that exact answer drops the override. A hook path (which `--type=bool`
+ * refuses), any other value, an unset key and a failed read all come back as
+ * something else, and keep it: the carve-out fails closed.
+ *
+ * @param fsmonitorConfig - the config read's trimmed stdout; '' when it failed
+ */
+export function fsmonitorOverride(fsmonitorConfig: string): readonly string[] {
+  return fsmonitorConfig === 'true' ? [] : FSMONITOR_OFF;
+}
+
+/**
+ * The HUD's index reads (`status`, `diff`): the override unless this refresh's
+ * `core.fsmonitor` read named the built-in daemon (`fsmonitorOverride`).
+ */
+function gitIndexRead(args: string[], cwd: string, fsmonitorConfig: string): Promise<string> {
+  return shellExec('git', [...fsmonitorOverride(fsmonitorConfig), ...args], cwd);
 }
 
 /**
@@ -35,8 +68,13 @@ export async function gatherGitStatus(cwd: string): Promise<GitStatus | null> {
   const topLevel = await gitExec(['rev-parse', '--show-toplevel'], cwd);
   if (!topLevel) return null;
 
-  // Branch name — 'HEAD' means detached HEAD state
-  const branch = await gitExec(['rev-parse', '--abbrev-ref', 'HEAD'], cwd);
+  // Branch name — 'HEAD' means detached HEAD state. core.fsmonitor is read once
+  // per refresh, never cached (the setting can change between prompts), and
+  // without the override, which would answer for it.
+  const [branch, fsmonitorConfig] = await Promise.all([
+    gitExec(['rev-parse', '--abbrev-ref', 'HEAD'], cwd),
+    shellExec('git', [...FSMONITOR_CONFIG_READ], cwd),
+  ]);
   if (!branch) return null;
 
   // Dirty check — porcelain v1: two-char XY status prefix per path.
@@ -44,9 +82,10 @@ export async function gatherGitStatus(cwd: string): Promise<GitStatus | null> {
   // `git status --no-optional-locks` is rejected as an unknown option, which makes
   // shellExec return '' and silently reports every tree as clean. Keeping the flag
   // (in the right position) stops the HUD from writing .git/index on every prompt.
-  const statusOutput = await gitExec(
+  const statusOutput = await gitIndexRead(
     ['--no-optional-locks', 'status', '--porcelain'],
     cwd,
+    fsmonitorConfig,
   );
   let dirty = false;
   let staged = false;
@@ -89,7 +128,7 @@ export async function gatherGitStatus(cwd: string): Promise<GitStatus | null> {
       // NOTE: diff includes the working tree; ahead/behind counts commits only. This asymmetry is
       // deliberate — both reference the same merge base but differ in working-tree inclusion.
       if (mergeBase) {
-        const diffStat = await gitExec(['diff', '--shortstat', mergeBase], cwd);
+        const diffStat = await gitIndexRead(['diff', '--shortstat', mergeBase], cwd, fsmonitorConfig);
         const filesMatch = diffStat.match(/(\d+)\s+file/);
         const addMatch = diffStat.match(/(\d+)\s+insertion/);
         const delMatch = diffStat.match(/(\d+)\s+deletion/);

@@ -819,7 +819,12 @@ describe('gatherGitStatus — dirty-tree ahead/filesChanged asymmetry (Shape M)'
       .filter(args => args.includes('status'));
 
     expect(statusCalls).toHaveLength(1);
-    expect(statusCalls[0]).toEqual(['-c', 'core.fsmonitor=false', '--no-optional-locks', 'status', '--porcelain']);
+    // Ahead of the flag sits only the fsmonitor override, or nothing when the
+    // machine's core.fsmonitor is the built-in daemon (D-NO-FSMONITOR carve-out,
+    // pinned per setting in tests/hud-git-fsmonitor.test.ts).
+    const flagAt = statusCalls[0].indexOf('--no-optional-locks');
+    expect([[], ['-c', 'core.fsmonitor=false']]).toContainEqual(statusCalls[0].slice(0, flagAt));
+    expect(statusCalls[0].slice(flagAt)).toEqual(['--no-optional-locks', 'status', '--porcelain']);
     // The flag must not break the command: a rejected option would yield '' → clean.
     expect(live?.dirty).toBe(true);
     expect(live?.staged).toBe(true);

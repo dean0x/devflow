@@ -24,7 +24,16 @@
  *     git-named wrapper, `git(io, [ ..., '<sub>'` / `gitExec([ ..., '<sub>'`;
  *   - a call through a wrapper whose own body prepends the override
  *     (`'git', ['-c', 'core.fsmonitor=false', ...args]`), which covers every
- *     call made through that wrapper name in that file.
+ *     call made through that wrapper name in that file;
+ *   - the one audited carve-out: a wrapper in `src/hud/git.ts` whose body
+ *     spawns `'git', [...fsmonitorOverride(x), ...args]`. It drops the override
+ *     only when `core.fsmonitor` is the built-in daemon (git's own code, not a
+ *     repository command). The carve-out is closed three ways: it is honoured
+ *     in that file alone (the same spelling anywhere else is unguarded), the
+ *     file must define `fsmonitorOverride` itself rather than import one, and
+ *     the live arm runs that function and requires it to keep the override for
+ *     every answer but the literal `true`. Its argv behaviour per setting is
+ *     pinned in tests/hud-git-fsmonitor.test.ts.
  *
  * What a green run does NOT prove (PF-064)
  * ----------------------------------------
@@ -39,6 +48,7 @@ import { readFileSync } from 'fs';
 import * as path from 'path';
 
 import { ROOT, walkFiles, type CorpusEntry } from '../helpers.js';
+import { fsmonitorOverride } from '../../src/hud/git.js';
 
 // ---------------------------------------------------------------------------
 // The rule
@@ -81,7 +91,14 @@ const JS_ARGV_CALL = new RegExp(
 );
 
 /** A function whose body spawns git with the override prepended to its argv. */
-const GUARDED_WRAPPER = /function\s+(\w+)\s*\([^)]*\)[^{]*\{(?:(?!\n\})[\s\S])*?(['"])git\2\s*,\s*\[\s*(['"])-c\3\s*,\s*(['"])core\.fsmonitor=false\4\s*,\s*\.\.\.\w+/g;
+const GUARDED_WRAPPER = /function\s+(\w+)\s*\([^)]*\)[^{]*\{(?:(?!\n\}|\bfunction\b)[\s\S])*?(['"])git\2\s*,\s*\[\s*(['"])-c\3\s*,\s*(['"])core\.fsmonitor=false\4\s*,\s*\.\.\.\w+/g;
+
+/** A wrapper that spawns git with the carve-out classifier's answer prepended. */
+const CARVE_OUT_WRAPPER = /function\s+(\w+)\s*\([^)]*\)[^{]*\{(?:(?!\n\}|\bfunction\b)[\s\S])*?(['"])git\2\s*,\s*\[\s*\.\.\.fsmonitorOverride\(\s*\w+\s*\)\s*,\s*\.\.\.\w+\s*\]/g;
+
+/** The one file whose carve-out wrapper is honoured, and the classifier it must define. */
+const CARVE_OUT_FILE = 'src/hud/git.ts';
+const CARVE_OUT_CLASSIFIER_DEFINITION = /\bexport\s+function\s+fsmonitorOverride\s*\(/;
 
 interface UnguardedRead {
   path: string;
@@ -104,9 +121,17 @@ function onCommentLine(content: string, index: number, opener: RegExp): boolean 
 const SHELL_COMMENT = /^\s*#/;
 const JS_COMMENT = /^\s*(?:\*|\/\/|\/\*)/;
 
-/** Names of the wrappers in `content` that prepend the override themselves. */
-function guardedWrappers(content: string): Set<string> {
-  return new Set([...content.matchAll(GUARDED_WRAPPER)].map(m => m[1]));
+/**
+ * Names of the wrappers in `entry` that guard their calls: those that prepend
+ * the override, and — in the carve-out file only, and only while it defines the
+ * classifier itself — those that prepend the classifier's answer.
+ */
+function guardedWrappers(entry: CorpusEntry): Set<string> {
+  const names = [...entry.content.matchAll(GUARDED_WRAPPER)].map(m => m[1]);
+  if (entry.path === CARVE_OUT_FILE && CARVE_OUT_CLASSIFIER_DEFINITION.test(entry.content)) {
+    names.push(...[...entry.content.matchAll(CARVE_OUT_WRAPPER)].map(m => m[1]));
+  }
+  return new Set(names);
 }
 
 /**
@@ -131,7 +156,7 @@ function findUnguardedIndexReads(corpus: readonly CorpusEntry[]): UnguardedRead[
       if (onCommentLine(content, m.index, JS_COMMENT)) continue;
       if (!SHELL_OVERRIDE.test(m[2])) report(m.index, m[0]);
     }
-    const wrappers = guardedWrappers(content);
+    const wrappers = guardedWrappers(entry);
     for (const m of content.matchAll(JS_ARGV_CALL)) {
       const callee = m[2];
       if (callee !== undefined && wrappers.has(callee)) continue;
@@ -189,6 +214,16 @@ describe('every index-reading git call turns core.fsmonitor off (D-NO-FSMONITOR)
       findUnguardedIndexReads(corpus).map(o => `${o.path}:${o.line}: \`${o.call}\` — add -c core.fsmonitor=false before the subcommand`),
     ).toEqual([]);
   });
+
+  it('the carve-out file defines its classifier, which keeps the override for every answer but `true`', () => {
+    const hud = corpus.find(e => e.path === CARVE_OUT_FILE);
+    expect(hud?.content).toMatch(CARVE_OUT_CLASSIFIER_DEFINITION);
+    expect([...(hud?.content ?? '').matchAll(CARVE_OUT_WRAPPER)].length, 'the carve-out wrapper is live').toBe(1);
+    expect(fsmonitorOverride('true')).toEqual([]);
+    for (const answer of ['', 'false', 'TRUE', 'yes', '1', ' true', 'true\n', '/tmp/hook.sh']) {
+      expect(fsmonitorOverride(answer), JSON.stringify(answer)).toEqual(['-c', 'core.fsmonitor=false']);
+    }
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -241,5 +276,31 @@ describe('no-fsmonitor-index-read guard: seeded probes', () => {
       { path: 'src/cli/x.ts', content: "const ACTIONS = ['enable', 'disable', 'status'];\nexecFileSync('sudo', ['rm', p]);" },
     ];
     expect(findUnguardedIndexReads(clean)).toEqual([]);
+  });
+
+  const CARVE_OUT = [
+    'export function fsmonitorOverride(v: string): readonly string[] { return v === \'true\' ? [] : OFF; }',
+    'function gitIndexRead(args: string[], cwd: string, cfg: string) {',
+    '  return shellExec(\'git\', [...fsmonitorOverride(cfg), ...args], cwd);',
+    '}',
+    "gitIndexRead(['--no-optional-locks', 'status', '--porcelain'], cwd, cfg);",
+  ].join('\n');
+
+  it('honours the carve-out wrapper in its own file', () => {
+    expect(findUnguardedIndexReads([{ path: CARVE_OUT_FILE, content: CARVE_OUT }])).toEqual([]);
+  });
+
+  it('reports the carve-out spelling in any other file', () => {
+    expect(findUnguardedIndexReads([{ path: 'src/core/elsewhere.ts', content: CARVE_OUT }])).toHaveLength(1);
+  });
+
+  it('reports the carve-out wrapper when its file imports the classifier instead of defining it', () => {
+    const imported = CARVE_OUT.replace(/^export function fsmonitorOverride[^\n]*\n/, "import { fsmonitorOverride } from './x.js';\n");
+    expect(findUnguardedIndexReads([{ path: CARVE_OUT_FILE, content: imported }])).toHaveLength(1);
+  });
+
+  it('reports a wrapper that prepends some other function\'s answer', () => {
+    const other = CARVE_OUT.replace('[...fsmonitorOverride(cfg), ...args]', '[...maybeOverride(cfg), ...args]');
+    expect(findUnguardedIndexReads([{ path: CARVE_OUT_FILE, content: other }])).toHaveLength(1);
   });
 });
