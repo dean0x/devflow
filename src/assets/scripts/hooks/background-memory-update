@@ -399,9 +399,11 @@ if cd "$CWD" 2>/dev/null && git rev-parse --git-dir >/dev/null 2>&1; then
   if [ -z "$BRANCH" ] && [ -n "$HEAD_SHA" ]; then
     BRANCH="(detached)"
   fi
-  GIT_STATUS=$(git status --short 2>/dev/null | head -20)
+  # D-NO-FSMONITOR (pre-compact-memory): the index reads turn off the
+  # repository's `core.fsmonitor` command, which git would otherwise run.
+  GIT_STATUS=$(git -c core.fsmonitor=false status --short 2>/dev/null | head -20)
   GIT_LOG=$(git log --oneline -5 2>/dev/null || echo "")
-  GIT_DIFF=$(git diff --stat HEAD 2>/dev/null | tail -10)
+  GIT_DIFF=$(git -c core.fsmonitor=false diff --stat HEAD 2>/dev/null | tail -10)
   GIT_STATE="Branch: ${BRANCH}
 HEAD: ${HEAD_SHA}
 Recent commits:

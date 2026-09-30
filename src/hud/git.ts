@@ -13,8 +13,17 @@ function shellExec(cmd: string, args: string[], cwd: string): Promise<string> {
   });
 }
 
+/**
+ * Every HUD git call: `-c core.fsmonitor=false` first.
+ *
+ * D-NO-FSMONITOR: `status` and `diff` read the index, and reading the index
+ * runs the command a repository's config names in `core.fsmonitor` — code
+ * chosen by whatever repository the status line is drawn in, on every prompt.
+ * The override keeps each call a pure read; calls that never touch the index
+ * carry it too, so no new call can forget it.
+ */
 function gitExec(args: string[], cwd: string): Promise<string> {
-  return shellExec('git', args, cwd);
+  return shellExec('git', ['-c', 'core.fsmonitor=false', ...args], cwd);
 }
 
 /**

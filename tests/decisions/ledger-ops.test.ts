@@ -13,7 +13,7 @@
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { createRequire } from 'module';
-import { execSync } from 'child_process';
+import { execFileSync, execSync, spawnSync } from 'child_process';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
@@ -1648,6 +1648,45 @@ describe('E4: pre-mint collision guard', () => {
 
     const after = fs.readFileSync(ledgerPath);
     expect(after.equals(before)).toBe(true);
+  });
+
+  it('lists tracked files without running the repository\'s core.fsmonitor hook (D-NO-FSMONITOR)', () => {
+    writeLedger(tmpDir, [makeLedgerRow({ anchor_id: 'ADR-001' })]);
+    // A gitignored file citing the same id: the fs-walk fallback would report it,
+    // `git ls-files` never does — so its absence proves the git listing answered.
+    fs.writeFileSync(path.join(tmpDir, '.gitignore'), 'ignored/\n');
+    fs.mkdirSync(path.join(tmpDir, 'ignored'), { recursive: true });
+    fs.writeFileSync(path.join(tmpDir, 'ignored', 'scratch.md'), 'ADR-002 scribble.\n');
+    initGitRepoWithFile(tmpDir, 'docs/design.md', 'See ADR-002 for the rationale.\n');
+    writeLog(tmpDir, [makeObsRow({ id: 'obs_fsmonitor', type: 'decision', status: 'ready' })]);
+
+    const outside = fs.mkdtempSync(path.join(os.tmpdir(), 'aa-fsmonitor-hook-'));
+    const home = path.join(outside, 'home');
+    fs.mkdirSync(home);
+    const marker = path.join(outside, 'fsmonitor-ran');
+    const hook = path.join(outside, 'fsmonitor-hook.sh');
+    fs.writeFileSync(hook, `#!/bin/sh\necho ran >> '${marker}'\nexit 1\n`);
+    fs.chmodSync(hook, 0o755);
+    const env = { ...COLLISION_GIT_ENV, HOME: home };
+    execFileSync('git', ['config', 'core.fsmonitor', hook], { cwd: tmpDir, env });
+
+    try {
+      const run = spawnSync('node', [JSON_HELPER_BIN, 'assign-anchor', 'decision', 'obs_fsmonitor'], {
+        cwd: tmpDir,
+        env,
+        encoding: 'utf8',
+      });
+      expect(run.status).not.toBe(0);
+      expect(run.stderr).toContain('docs/design.md:1');
+      expect(run.stderr).not.toContain('scratch.md');
+      expect(fs.existsSync(marker), 'assign-anchor ran the fsmonitor hook').toBe(false);
+
+      // Known-bad probe: the same index read without the override runs the hook.
+      execFileSync('git', ['ls-files', '-z'], { cwd: tmpDir, env, stdio: 'ignore' });
+      expect(fs.existsSync(marker)).toBe(true);
+    } finally {
+      fs.rmSync(outside, { recursive: true, force: true });
+    }
   });
 
   it('refuses to mint when the candidate id is cited in a non-git project (fs-walk fallback)', () => {

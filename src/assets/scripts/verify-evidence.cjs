@@ -517,7 +517,7 @@ function gh(io, args, maxBuffer) {
 
 /**
  * Every git call: `-c core.fsmonitor=false` first, so no repository-configured
- * hook runs, and bounded by the deadline.
+ * hook runs (D-NO-FSMONITOR), and bounded by the deadline.
  *
  * @param {Io} io
  * @param {readonly string[]} args
