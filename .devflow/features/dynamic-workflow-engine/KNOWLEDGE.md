@@ -1,7 +1,7 @@
 ---
 feature: dynamic-workflow-engine
 name: Dynamic Workflow Engine
-description: "Use when authoring or modifying the dynamic-* commands (dynamic-build, dynamic-plan, dynamic-tickets, dynamic-profile), the shared engine/wave/preamble/factory/tracker MDS partials, or the build-mds test suite that pins doctrine literals. Keywords: dynamic-build, dynamic-plan, dynamic-tickets, dynamic-profile, Workflow tool, agentType, Gate 1, Gate 2, review pass, wave, tickets→plan→build, MDS, _engine.mds, _wave.mds, _tracker.mds, issue_ref_grammar, issue_capture_contract, ISSUE_REF, ISSUE_ID, ISSUE_PR_LINK, depends-on-grammar, marker negative guard, 12 partials, 16 hosts, fetch-issues-batch, NOT_FOUND, Tracker paths, parseWaveBlock, branch-missing, wave PR evidence, update-pr-evidence, publication_gate."
+description: "Use when authoring or modifying the dynamic-* commands (dynamic-build, dynamic-plan, dynamic-tickets, dynamic-profile), the shared engine/wave/preamble/factory/tracker MDS partials, or the build-mds test suite that pins doctrine literals. Keywords: dynamic-build, dynamic-plan, dynamic-tickets, dynamic-profile, Workflow tool, agentType, Gate 1, Gate 2, review pass, wave, tickets→plan→build, MDS, _engine.mds, _wave.mds, _tracker.mds, issue_ref_grammar, issue_capture_contract, ISSUE_REF, ISSUE_ID, ISSUE_PR_LINK, depends-on-grammar, marker negative guard, 15 partials, 20 hosts, fetch-issues-batch, NOT_FOUND, Tracker paths, parseWaveBlock, branch-missing, wave PR evidence, update-pr-evidence, publication_gate."
 category: architecture
 directories:
   - src/assets/commands/dynamic-build.mds
@@ -357,7 +357,7 @@ A writer-only guard (does `_ticket_template.mds` emit the grammar token?) stays 
 - `src/assets/scripts/pr-evidence.cjs` — the evidence plumbing core; `parseWaveBlock` is the wave-block grammar dynamic-build's step 3 composition must satisfy, and `verify-evidence.cjs check wave` is its CLI front door — not owned by any feature KB today; this KB covers only the wave-block shape as consumed by dynamic-build
 - `tests/guards/provider-scope.test.ts` — `collectHostIssueLiterals` (Tracker paths preflight, 8-artifact scan) and the wider provider-neutrality guards
 - `tests/dynamic/wave-flow.test.ts` — the wave workflow's branch binding (`setup.branch` verbatim, no fallback) and the two ESCALATED stops
-- `scripts/build-mds.ts` — unified MDS compiler for all three host kinds (command hosts → `dist/commands/`, generator hosts → `dist/agents/`, reference modules → `dist/skills/git/references/`); see the count-rule table above for what 13/12/16/14/14 each count. The pipeline itself — discovery, destination validation, the frontmatter strips, pruning — is documented in the `feature-knowledge-system` KB
+- `scripts/build-mds.ts` — unified MDS compiler for all three host kinds (command hosts → `dist/commands/`, generator hosts → `dist/agents/`, reference modules → `dist/skills/git/references/`); see the count-rule table above for what 13/15/20/14/14 each count. The pipeline itself — discovery, destination validation, the frontmatter strips, pruning — is documented in the `feature-knowledge-system` KB
 - `tests/fixtures/mds-manifest.ts` — shared name manifest for the suite: `MDS_COMMAND_HOSTS`, `MDS_GENERATOR_HOSTS` (`['git']`), `MDS_PARTIALS`, `MDS_REFERENCE_MODULES`, `TRACKER_PARTIAL_ADOPTERS`, `HAND_AUTHORED_COMMAND_FILES`, `DIST_COMMAND_FILES`, `ALL_MDS_HOSTS`, `ALL_DISCOVERED_HOSTS` — tests derive counts from these instead of pinning literals
 
 ## Deliberate Exceptions (AC-0.4 gh-issue scope guard)
