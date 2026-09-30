@@ -21,9 +21,11 @@
  * or — when the change is intended — regenerate in a fixture-only `test(snapshot):`
  * commit whose PR body justifies each hunk.
  *
- * D-SPAWN-BUDGET: PR1 allows 12 CLI spawns across the unit suite. This file spends
- * 9 — init, re-init and uninstall for github and jira-hipaa in-process, and the
- * same three for all-off inside TP-8's generator run — plus 32 hook spawns.
+ * D-SPAWN-BUDGET: every CLI spawn here is a full install, so each config runs
+ * init, re-init and uninstall exactly once — 9 CLI spawns: the three for github and
+ * jira-hipaa in-process, and the same three for all-off inside TP-8's generator run
+ * — plus 32 hook spawns (the matrix's 36 cells less its 4 skipped memory-worker
+ * cells). No counter enforces the number; the file's structure holds it.
  * `all-off` has no in-process describe: TP-8 regenerates exactly that config and
  * compares the WHOLE file byte-for-byte, so its TP-2, TP-5 and TP-6 claims are all
  * proven there, through the generator's own path, for no extra spawn.
