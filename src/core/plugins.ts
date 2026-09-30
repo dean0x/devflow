@@ -552,7 +552,8 @@ export const FEATURE_OWNED_RULES = ['compliance'] as const satisfies readonly st
  * command-less plugin, so a reference to one is a reference to something the
  * user may deliberately not have. The referencing prompts are written to probe
  * first and proceed without it — `/code-review` checks
- * `~/.claude/skills/devflow:{focus}/SKILL.md` before spawning that focus, the
+ * `skills/devflow:{focus}/SKILL.md` under Claude Code's directory (`CLAUDE_CONFIG_DIR`
+ * when absolute, else `~/.claude` — D-CLAUDE-DIR-PROMPTS) before spawning that focus, the
  * Review and Code agents continue when the Skill invocation fails. Putting them
  * in a `requires` would reinstate the universal install for exactly the eight
  * skills the selection prompt exists to let a user decline (AC-25).

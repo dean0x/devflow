@@ -366,7 +366,10 @@ describe('requires structure', () => {
     const body = await fs.readFile(path.join(COMMANDS_DIR, 'code-review.md'), 'utf-8');
     const gate = body.split('\n').find(line => line.includes('Language focus presence gate'));
     expect(gate, 'dist/commands/code-review.md must carry the language focus presence gate').toBeDefined();
-    expect(gate).toContain('~/.claude/skills/devflow:{focus}/SKILL.md');
+    expect(gate).toContain('{claude_dir}/skills/devflow:{focus}/SKILL.md');
+    // The probe resolves Claude Code's directory as the installer does
+    // (D-CLAUDE-DIR-PROMPTS); tests/guards/claude-dir.test.ts owns its spelling.
+    expect(body).toContain('test -f "$d/skills/devflow:{focus}/SKILL.md"; echo "exit=$?"');
     for (const focus of PRESENCE_GATED_SKILLS) {
       expect(gate, `the gate must name the ${focus} focus`).toContain(`\`${focus}\``);
       expect(
