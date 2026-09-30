@@ -6,6 +6,7 @@ import * as p from '@clack/prompts';
 import color from 'picocolors';
 import { getInstallationPaths, getClaudeDirectory, getHomeDirectory, getManagedSettingsPath } from '../../targets/claude-code/claude-paths.js';
 import { getGitRoot } from '../../core/git.js';
+import { isSameLocation } from '../../core/same-location.js';
 import { DEVFLOW_PLUGINS, SKILL_NAMESPACE, getAllSkillNames, getAllAgentNames, getAllCommandNames, parsePluginSelection, resolveFeatureRedirect, prefixSkillName, unprefixSkillName, skillsOf, FEATURE_OWNED_SKILLS, type PluginDefinition } from '../../core/plugins.js';
 import { readManifest } from '../../core/manifest.js';
 import { sweepOrphanedAssets, mdFileName, mdEntryName } from '../../core/orphan-sweep.js';
@@ -78,18 +79,6 @@ async function legacyLocalInstallPaths(gitRoot: string): Promise<ScopeInstallPat
   if (await isSameLocation(legacy.claudeDir, machine.claudeDir)) return null;
   if (await isSameLocation(legacy.devflowDir, machine.devflowDir)) return null;
   return legacy;
-}
-
-/**
- * Whether two paths name one location — realpaths where they exist, so a symlinked
- * HOME, or macOS's /var → /private/var temp tree, still matches. The shell hooks make
- * the same physical comparison in git-marker's df_is_project_root (D-HOOKS-GIT-ONLY).
- */
-export async function isSameLocation(a: string, b: string): Promise<boolean> {
-  const canonical = (target: string): Promise<string> =>
-    fs.realpath(target).catch(() => path.resolve(target));
-  const [left, right] = await Promise.all([canonical(a), canonical(b)]);
-  return left === right;
 }
 
 /**

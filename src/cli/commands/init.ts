@@ -6,6 +6,7 @@ import * as p from '@clack/prompts';
 import color from 'picocolors';
 import { resolveInstallationPaths } from '../../targets/claude-code/claude-paths.js';
 import { getGitRoot } from '../../core/git.js';
+import { isSameLocation, withoutHomeRoots } from '../../core/same-location.js';
 import { getLedgerRoot } from '../../core/ledger-root.js';
 import { installViaFileCopy, composeScripts, type InstallReport } from '../../targets/claude-code/installer.js';
 import { formatOverlaySummary, formatSkillScopeSummary, formatTrackerAssetSummary, isPluginListUnchanged, type SummaryLine } from './install-report.js';
@@ -614,6 +615,14 @@ export function resolveRetiredScopeOption(scope: string | undefined): RetiredSco
   };
 }
 
+/**
+ * The git repositories Claude has worked in, as project roots: every
+ * history.jsonl project with a `.git`, less any rooted at HOME (D-INIT-NOT-HOME).
+ */
+async function discoverRepoRoots(claudeDir: string, homeDir: string): Promise<string[]> {
+  return withoutHomeRoots(await discoverProjectGitRoots(claudeDir), homeDir);
+}
+
 export const initCommand = new Command('init')
   .description('Initialize Devflow for Claude Code')
   .addOption(new Option('--scope <type>', 'Retired: Devflow installs machine-wide only').hideHelp())
@@ -677,7 +686,7 @@ export const initCommand = new Command('init')
       p.log.error(resolvedPaths.error);
       process.exit(1);
     }
-    const { claudeDir, devflowDir } = resolvedPaths.value;
+    const { homeDir, claudeDir, devflowDir } = resolvedPaths.value;
 
     // --hud-only: install only HUD (skip plugins, hooks, extras)
     if (options.hudOnly) {
@@ -735,7 +744,16 @@ export const initCommand = new Command('init')
     try {
       existingManifest = await readManifest(devflowDir);
     } catch { /* unreadable manifest — seeded as a fresh install */ }
-    const gitRoot = await getGitRoot();
+    // D-INIT-NOT-HOME (same-location.ts): a repository rooted at HOME is no
+    // project, so init treats it as no repository — no .devflow/config.json (that
+    // would be the machine root's), no .claudeignore, no .gitignore block, no
+    // per-project migration or queue drain.
+    const cwdGitRoot = await getGitRoot();
+    const homeRootedRepo = cwdGitRoot !== null && await isSameLocation(cwdGitRoot, homeDir);
+    const gitRoot = homeRootedRepo ? null : cwdGitRoot;
+    if (homeRootedRepo) {
+      p.log.info('This git repository is rooted at your home directory, so init writes no per-repository files here.');
+    }
     const earlyProjectConfig: FeatureConfig | null = gitRoot
       ? await readConfigIfPresent(gitRoot)
       : null;
@@ -1121,7 +1139,7 @@ export const initCommand = new Command('init')
       const needsVersionCheck = safeDeleteBlock && profilePath;
 
       const [discoveredResult, installedVersionResult] = await Promise.all([
-        needsDiscovery ? discoverProjectGitRoots(claudeDir) : Promise.resolve([] as string[]),
+        needsDiscovery ? discoverRepoRoots(claudeDir, homeDir) : Promise.resolve([] as string[]),
         needsVersionCheck ? getInstalledVersion(profilePath) : Promise.resolve(0),
       ]);
 
@@ -1425,7 +1443,7 @@ export const initCommand = new Command('init')
 
       // .claudeignore prompt
       if (gitRoot) {
-        discoveredProjects = await discoverProjectGitRoots(claudeDir);
+        discoveredProjects = await discoverRepoRoots(claudeDir, homeDir);
         p.note(
           'Scans all projects Claude has worked on and creates a\n' +
           '.claudeignore in each git repository. Excludes secrets,\n' +
@@ -2410,7 +2428,7 @@ export const initCommand = new Command('init')
     // Only now that the machine-wide switch is on disk (D-INIT-DRAIN-AFTER-SWITCH).
     await drainDisabledFeatureQueues({
       gitRoot,
-      ledgerRoot: learningEnabled ? null : await getLedgerRoot(),
+      ledgerRoot: learningEnabled || gitRoot === null ? null : await getLedgerRoot(),
       memoryEnabled,
       learningEnabled,
       manifestWritten: trackerLifecycle.manifestWritten,
