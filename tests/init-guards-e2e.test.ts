@@ -45,13 +45,13 @@ const MINIMAL_INIT = [
 
 let home: string;
 
-function runInit(cwd: string, extra: readonly string[] = []): { status: number | null; out: string } {
+function runInit(cwd: string, extra: readonly string[] = []): { status: number | null; stdout: string; out: string } {
   const env = sandboxEnv(home);
   const r = spawnSync(process.execPath, [CLI, ...MINIMAL_INIT, ...extra], {
     cwd, env, encoding: 'utf-8', timeout: SUBPROCESS_TIMEOUT_MS,
   });
   if (r.error) throw r.error;
-  return { status: r.status, out: `${r.stdout ?? ''}${r.stderr ?? ''}` };
+  return { status: r.status, stdout: r.stdout ?? '', out: `${r.stdout ?? ''}${r.stderr ?? ''}` };
 }
 
 beforeEach(async () => {
@@ -71,6 +71,8 @@ describe('D-INIT-NOT-HOME: init in a repository rooted at HOME', () => {
     const toplevel = execFileSync('git', ['rev-parse', '--show-toplevel'], { cwd: home, env: sandboxEnv(home), encoding: 'utf-8' }).trim();
     expect(await fs.realpath(toplevel)).toBe(await fs.realpath(home));
 
+    expect(existsSync(path.join(home, '.devflow', 'manifest.json')), 'a cold first install').toBe(false);
+
     const run = runInit(home);
     expect(run.status, run.out).toBe(0);
 
@@ -78,7 +80,16 @@ describe('D-INIT-NOT-HOME: init in a repository rooted at HOME', () => {
     expect(existsSync(path.join(home, '.devflow', 'config.json'))).toBe(false);
     expect(existsSync(path.join(home, '.claudeignore'))).toBe(false);
     expect(existsSync(path.join(home, '.gitignore'))).toBe(false);
-    expect(run.out).toContain('rooted at your home directory');
+
+    // The notice reaches piped stdout once, ahead of the migration and spinner
+    // sequence a first install runs, so nothing drawn later can overwrite it.
+    const notice = 'This git repository is rooted at your home directory, so init writes no per-repository files here.';
+    expect(run.stdout.split(notice).length - 1, run.stdout).toBe(1);
+    const migrations = run.stdout.search(/Applied \d+ migration\(s\)/);
+    const done = run.stdout.indexOf('Installation complete');
+    expect(migrations, 'non-vacuity: the first-install migrations ran').toBeGreaterThan(-1);
+    expect(done, 'non-vacuity: the install spinner ran').toBeGreaterThan(-1);
+    expect(run.stdout.indexOf(notice)).toBeLessThan(Math.min(migrations, done));
   }, SUBPROCESS_TIMEOUT_MS);
 
   it('still writes the per-repository files in an ordinary repository (the red probe)', async () => {
