@@ -789,35 +789,10 @@ describe('resolveDevflowDirCleanup', () => {
   const VALID_DIR = `${HOME}/.devflow`;
   const SOME_CONTENT = ['skill shadows (/Users/testuser/.devflow/skills)'];
 
-  // === local scope: never prompt ===
-  // The local-scope invariant: .devflow/ under a git root holds project data
-  // (memory, learning, docs). It must NEVER be a candidate for full rm.
-
-  it('returns artifacts-only for local scope regardless of isTTY or user content', () => {
-    expect(resolveDevflowDirCleanup({
-      scope: 'local',
-      isTTY: true,
-      userContent: SOME_CONTENT,
-      devflowDir: VALID_DIR,
-      homeDir: HOME,
-    })).toBe('artifacts-only');
-  });
-
-  it('returns artifacts-only for local scope even when non-interactive and no content', () => {
-    expect(resolveDevflowDirCleanup({
-      scope: 'local',
-      isTTY: false,
-      userContent: [],
-      devflowDir: VALID_DIR,
-      homeDir: HOME,
-    })).toBe('artifacts-only');
-  });
-
   // === user scope + interactive + user content → prompt ===
 
   it('returns prompt for user scope when interactive and user content is present', () => {
     expect(resolveDevflowDirCleanup({
-      scope: 'user',
       isTTY: true,
       userContent: SOME_CONTENT,
       devflowDir: VALID_DIR,
@@ -827,7 +802,6 @@ describe('resolveDevflowDirCleanup', () => {
 
   it('returns prompt for user scope with multiple user content items', () => {
     expect(resolveDevflowDirCleanup({
-      scope: 'user',
       isTTY: true,
       userContent: ['skill shadows (...)', 'rule shadows (...)', 'learning.json'],
       devflowDir: VALID_DIR,
@@ -840,7 +814,6 @@ describe('resolveDevflowDirCleanup', () => {
 
   it('returns artifacts-only for user scope when non-interactive (isTTY=false)', () => {
     expect(resolveDevflowDirCleanup({
-      scope: 'user',
       isTTY: false,
       userContent: SOME_CONTENT,
       devflowDir: VALID_DIR,
@@ -850,7 +823,6 @@ describe('resolveDevflowDirCleanup', () => {
 
   it('returns artifacts-only for user scope when non-interactive even with no user content', () => {
     expect(resolveDevflowDirCleanup({
-      scope: 'user',
       isTTY: false,
       userContent: [],
       devflowDir: VALID_DIR,
@@ -862,7 +834,6 @@ describe('resolveDevflowDirCleanup', () => {
 
   it('returns artifacts-only when user content is empty even if interactive', () => {
     expect(resolveDevflowDirCleanup({
-      scope: 'user',
       isTTY: true,
       userContent: [],
       devflowDir: VALID_DIR,
@@ -876,7 +847,6 @@ describe('resolveDevflowDirCleanup', () => {
 
   it('returns artifacts-only when devflowDir is outside $HOME (precondition guard)', () => {
     expect(resolveDevflowDirCleanup({
-      scope: 'user',
       isTTY: true,
       userContent: SOME_CONTENT,
       devflowDir: '/tmp/.devflow',
@@ -886,7 +856,6 @@ describe('resolveDevflowDirCleanup', () => {
 
   it('returns artifacts-only when devflowDir basename is not .devflow (precondition guard)', () => {
     expect(resolveDevflowDirCleanup({
-      scope: 'user',
       isTTY: true,
       userContent: SOME_CONTENT,
       devflowDir: `${HOME}/custom-dir`,
@@ -896,7 +865,6 @@ describe('resolveDevflowDirCleanup', () => {
 
   it('returns artifacts-only when devflowDir is the home directory itself (precondition guard)', () => {
     expect(resolveDevflowDirCleanup({
-      scope: 'user',
       isTTY: true,
       userContent: SOME_CONTENT,
       devflowDir: HOME,
@@ -906,7 +874,6 @@ describe('resolveDevflowDirCleanup', () => {
 
   it('returns artifacts-only when devflowDir is the filesystem root (precondition guard)', () => {
     expect(resolveDevflowDirCleanup({
-      scope: 'user',
       isTTY: true,
       userContent: SOME_CONTENT,
       devflowDir: '/',
@@ -918,14 +885,12 @@ describe('resolveDevflowDirCleanup', () => {
 
   it('covers both return values (artifacts-only and prompt)', () => {
     const artifactsOnly = resolveDevflowDirCleanup({
-      scope: 'user',
       isTTY: false,
       userContent: SOME_CONTENT,
       devflowDir: VALID_DIR,
       homeDir: HOME,
     });
     const prompt = resolveDevflowDirCleanup({
-      scope: 'user',
       isTTY: true,
       userContent: SOME_CONTENT,
       devflowDir: VALID_DIR,
@@ -943,7 +908,6 @@ describe('resolveDevflowDirCleanup', () => {
 
   it('(9d) returns artifacts-only when keepDocs is true even with interactive TTY and user content', () => {
     expect(resolveDevflowDirCleanup({
-      scope: 'user',
       isTTY: true,
       userContent: SOME_CONTENT,
       devflowDir: VALID_DIR,
@@ -954,7 +918,6 @@ describe('resolveDevflowDirCleanup', () => {
 
   it('(9d) returns artifacts-only when keepDocs is true and no user content', () => {
     expect(resolveDevflowDirCleanup({
-      scope: 'user',
       isTTY: true,
       userContent: [],
       devflowDir: VALID_DIR,
@@ -966,7 +929,6 @@ describe('resolveDevflowDirCleanup', () => {
   it('(9d) keepDocs:false does not suppress the prompt (normal behavior preserved)', () => {
     // Explicit false is same as omitting the field — prompt path still reachable.
     expect(resolveDevflowDirCleanup({
-      scope: 'user',
       isTTY: true,
       userContent: SOME_CONTENT,
       devflowDir: VALID_DIR,

@@ -403,16 +403,12 @@ export type ConfirmPrompt = (opts: { message: string; initialValue?: boolean }) 
  * --keep-docs from triggering prompts about skill shadows or preference-profile.md.
  */
 export function resolveDevflowDirCleanup(opts: {
-  scope: UninstallScope;
   isTTY: boolean;
   userContent: string[];
   devflowDir: string;
   homeDir: string;
   keepDocs?: boolean;
 }): 'artifacts-only' | 'prompt' {
-  // A legacy local install never removes project data — only install artifacts.
-  if (opts.scope !== 'user') return 'artifacts-only';
-
   // --keep-docs: suppress the full cleanup prompt entirely; artifacts-only.
   if (opts.keepDocs) return 'artifacts-only';
 
@@ -1032,7 +1028,6 @@ export async function runFullPhaseForScope(opts: {
     // Non-interactive, no user content, or precondition guard failure → artifacts-only.
     const userContent = await enumerateUserDevFlowContent(devflowDir);
     const cleanupDecision = resolveDevflowDirCleanup({
-      scope: 'user',
       isTTY,
       userContent,
       devflowDir,
