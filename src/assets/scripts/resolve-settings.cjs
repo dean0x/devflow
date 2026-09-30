@@ -448,10 +448,10 @@ function foldTracker(project, personal, manifest) {
  * `"reviewPublication":"full"` would otherwise make a maintainer's local review
  * of that branch skip the visibility gate on a public repository. Only the
  * uncommitted personal value asks for `full` — and a config.json git tracks is
- * not personal, so it never reaches this fold (D-PERSONAL-UNTRACKED). A malformed team value (or an
- * unreadable project.json) is `off` — a ceiling that cannot be read is the
- * lowest one. A malformed personal value is ignored, as readConfig ignores it,
- * and so resolves `auto`.
+ * not personal, so it never reaches this fold (D-PERSONAL-UNTRACKED). A
+ * malformed team value (or an unreadable project.json) is `off` — a ceiling
+ * that cannot be read is the lowest one. A malformed personal value is
+ * ignored, as readConfig ignores it, and so resolves `auto`.
  *
  * @param {any} project
  * @param {any} personal

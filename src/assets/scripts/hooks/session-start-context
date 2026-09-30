@@ -358,28 +358,26 @@ if [ -f "$TRACKER_SENTINEL" ]; then
   IFS= read -r -n 16 TRACKER_PROVIDER 2>/dev/null < "$TRACKER_SENTINEL"
 fi
 _SC_TRACKER_ASK="no"
-# `read -d ''` succeeds only when it stops SHORT of the end of the file — at a
-# NUL byte or at 4097 characters, past the parser's 4096-byte bound — so a
-# successful read is a file the shell cannot vouch for, and the parser decides.
-if [ -f "$TRACKER_PROJECT_FILE" ]; then
-  _SC_TRACKER_PROJECT=""
-  if IFS= read -r -d '' -n 4097 _SC_TRACKER_PROJECT 2>/dev/null < "$TRACKER_PROJECT_FILE"; then
+# _sc_tracker_file_asks <file> — sets _SC_TRACKER_ASK=yes when a bounded builtin
+# read of <file> shows a `"tracker"` key (or `\u`, the only other JSON spelling of
+# a letter) or was cut short. `read -d ''` succeeds only when it stops SHORT of
+# the end of the file — at a NUL byte or at 4097 characters, past the parser's
+# 4096-byte bound — so a successful read is a file the shell cannot vouch for,
+# and the parser decides.
+_sc_tracker_file_asks() {
+  local _text=""
+  if IFS= read -r -d '' -n 4097 _text 2>/dev/null < "$1"; then
     _SC_TRACKER_ASK="yes"
   fi
-  case "$_SC_TRACKER_PROJECT" in
+  case "$_text" in
     *'"tracker"'*|*'\u'*) _SC_TRACKER_ASK="yes" ;;
   esac
-fi
+}
+[ -f "$TRACKER_PROJECT_FILE" ] && _sc_tracker_file_asks "$TRACKER_PROJECT_FILE"
 # The personal file can only narrow what the machine names, so it is read only
 # when the sentinel named something and project.json has not already asked.
 if [ -n "$TRACKER_PROVIDER" ] && [ "$_SC_TRACKER_ASK" = "no" ] && [ -f "$TRACKER_PERSONAL_FILE" ]; then
-  _SC_TRACKER_PERSONAL=""
-  if IFS= read -r -d '' -n 4097 _SC_TRACKER_PERSONAL 2>/dev/null < "$TRACKER_PERSONAL_FILE"; then
-    _SC_TRACKER_ASK="yes"
-  fi
-  case "$_SC_TRACKER_PERSONAL" in
-    *'"tracker"'*|*'\u'*) _SC_TRACKER_ASK="yes" ;;
-  esac
+  _sc_tracker_file_asks "$TRACKER_PERSONAL_FILE"
 fi
 if [ "$_SC_TRACKER_ASK" = "yes" ]; then
   # The ONE fork. resolve-settings.cjs is a sibling of this hooks/ directory,
