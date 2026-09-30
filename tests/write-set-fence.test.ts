@@ -17,7 +17,8 @@
  * top-level command in `devflow --help` has a row or a reason in UNFENCED_COMMANDS,
  * and every `--enable` / `--disable` / `--set` option a command defines has a row
  * or a reason in UNFENCED_ACTIONS. Every spawn runs under `sandboxEnv`'s temp HOME
- * (PF-060); no row reaches a real `claude` (the sandbox's fake records any call).
+ * (PF-060); no row reaches a real `claude` (the sandbox's fake records any call) or a
+ * real `gh` (the sandbox's fake fails like an unauthenticated one and writes nothing).
  */
 
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
@@ -27,8 +28,8 @@ import * as path from 'path'
 import type { Command } from 'commander'
 import { requireBuiltCli } from './helpers.js'
 import {
-  SUBPROCESS_TIMEOUT_MS, createSandbox, diffTree, excludeGit, readTree, removeSandbox, runCli, runCliOk,
-  sandboxChildEnv, type Sandbox,
+  SUBPROCESS_TIMEOUT_MS, createSandbox, diffTree, excludeGit, readTree, removeSandbox, resolveOnPath, runCli,
+  runCliOk, sandboxChildEnv, type Sandbox,
 } from './install-snapshot-helpers.js'
 import { initCommand } from '../src/cli/commands/init.js'
 import { uninstallCommand } from '../src/cli/commands/uninstall.js'
@@ -342,8 +343,10 @@ describe('write-set fence: every toggle writes only inside its allowlist', () =>
   beforeAll(() => {
     sb = createSandbox()
     runCliOk(sb, ['init', '--recommended', '--security', 'user'])
-    // Non-vacuity: the child env really is the sandbox HOME, never the real one.
+    // Non-vacuity: the child env really is the sandbox HOME, never the real one, and
+    // its gh is the sandbox's fake, never a machine gh whose first run writes to HOME.
     expect(sandboxChildEnv(sb).HOME).toBe(sb.home)
+    expect(resolveOnPath('gh', sandboxChildEnv(sb))).toBe(path.join(sb.bin, 'gh'))
   }, SUBPROCESS_TIMEOUT_MS)
 
   afterAll(() => removeSandbox(sb))

@@ -10,8 +10,9 @@
  * `home/` (the child's `$HOME`, with an empty `.claude/` so init sees Claude Code),
  * `repo/` (a git repo with one commit, where init and uninstall run), `repo/sub/`,
  * `wt/` (a real `git worktree add` of `repo`), `nongit/`, `bin/` (a fake `claude`
- * first on PATH) and `tmp/` (the hooks' TMPDIR, so a temp write is a recorded write
- * rather than an escape). Every CLI and hook env comes from `sandboxEnv`, which
+ * and a fake `gh`, first on PATH, so no spawn reaches a machine binary whose version
+ * decides what it writes) and `tmp/` (the hooks' TMPDIR, so a temp write is a
+ * recorded write rather than an escape). Every CLI and hook env comes from `sandboxEnv`, which
  * asserts the HOME is a temp dir and never the real one (PF-060), and every init
  * passes `--security user`: the managed-settings path is absolute and cannot be
  * sandboxed, so the snapshot never touches it.
@@ -44,8 +45,8 @@
 
 import { spawnSync } from 'child_process'
 import {
-  chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync,
-  readlinkSync, realpathSync, rmSync, symlinkSync, writeFileSync,
+  accessSync, chmodSync, constants, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync,
+  readlinkSync, realpathSync, rmSync, statSync, symlinkSync, writeFileSync,
 } from 'fs'
 import * as os from 'os'
 import * as path from 'path'
@@ -163,6 +164,15 @@ export function createSandbox(): Sandbox {
   writeFileSync(fakeClaude, `#!/bin/sh\nprintf '%s\\n' "$*" >> '${path.join(root, 'fake-claude.calls')}'\nexit 0\n`)
   chmodSync(fakeClaude, 0o755)
 
+  // A fake `gh` answers every call the way an unauthenticated gh does (exit 4,
+  // nothing on stdout), so a resolver that probes GitHub takes its offline path.
+  // It writes nothing: a real gh seeds `$HOME/.local/state/gh/device-id` on its
+  // first run, and whether it does depends on the gh release installed on the
+  // machine — third-party state no fence or golden may depend on.
+  const fakeGh = path.join(sb.bin, 'gh')
+  writeFileSync(fakeGh, `#!/bin/sh\necho 'gh: To use GitHub CLI in automation, set the GH_TOKEN environment variable.' >&2\nexit 4\n`)
+  chmodSync(fakeGh, 0o755)
+
   const gitEnv = sandboxEnv(sb.home, { GIT_CONFIG_NOSYSTEM: '1' })
   run('git', [...GIT_IDENTITY, 'init', '-q'], sb.repo, gitEnv)
   run('git', [...GIT_IDENTITY, 'add', '-A'], sb.repo, gitEnv)
@@ -176,8 +186,8 @@ export function removeSandbox(sb: Sandbox | undefined): void {
 }
 
 /**
- * The child env for CLI and hook spawns: sandboxed HOME, fake `claude` first on PATH,
- * and no SHELL. With a known SHELL, init writes a safe-delete block into that shell's
+ * The child env for CLI and hook spawns: sandboxed HOME, the fake `claude` and `gh`
+ * first on PATH, and no SHELL. With a known SHELL, init writes a safe-delete block into that shell's
  * profile whenever the platform's trash tool is on PATH (`trash` on macOS, `trash-put`
  * on Linux) — a machine fact, not an install fact, so it is kept out of the golden.
  */
@@ -185,6 +195,21 @@ export function sandboxChildEnv(sb: Sandbox, extra: Readonly<Record<string, stri
   const env = sandboxEnv(sb.home, { PATH: `${sb.bin}${path.delimiter}${process.env.PATH ?? '/usr/bin:/bin'}`, ...extra })
   delete env.SHELL
   return env
+}
+
+/** The executable a child with `env` runs for a bare `name`: the first on its PATH, or null. */
+export function resolveOnPath(name: string, env: NodeJS.ProcessEnv): string | null {
+  for (const dir of (env.PATH ?? '').split(path.delimiter).filter(d => d !== '')) {
+    const candidate = path.join(dir, name)
+    if (!existsSync(candidate) || !statSync(candidate).isFile()) continue
+    try {
+      accessSync(candidate, constants.X_OK)
+      return candidate
+    } catch {
+      // Present but not executable: a spawn skips it, so the lookup does too.
+    }
+  }
+  return null
 }
 
 export interface CliRun {

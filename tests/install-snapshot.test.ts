@@ -44,7 +44,8 @@ import {
   REINIT_HEADING, UNINSTALL_HEADINGS, baselineSections, buildNormaliser, captureBaseline, captureInstall, captureUninstall,
   cellHeading, diffTree, findConfig, lineDiff, installGoldenName, installedHooks, matrixNormaliser, noSwitchDrift, normaliseText,
   parseCellHeading, parseGolden, pathSlug, readPackageVersion, readSandbox, removeSandbox, renderManifest,
-  renderReinitDiff, renderSettings, runCliOk, runHookCell, skippedCellBody, snapshotNormaliser, createSandbox,
+  renderReinitDiff, renderSettings, resolveOnPath, runCliOk, runHookCell, sandboxChildEnv, skippedCellBody,
+  snapshotNormaliser, createSandbox,
   type Baseline, type HookLocation, type InstallConfig, type InstalledHook, type Normaliser, type Sandbox,
   type Section, type TreeState,
 } from './install-snapshot-helpers.js'
@@ -69,6 +70,36 @@ const MATRIX = parseGolden(loadGolden(HOOK_MATRIX_GOLDEN))
 function expectSections(sections: readonly Section[], golden: ReadonlyMap<string, string>): void {
   for (const s of sections) expect(s.body, `## ${s.heading}`).toBe(golden.get(s.heading))
 }
+
+describe('sandbox PATH (D-SNAPSHOT-SANDBOX)', () => {
+  let sb: Sandbox | undefined
+  const sandbox = (): Sandbox => {
+    if (!sb) throw new Error('the sandbox was not created — see the beforeAll failure')
+    return sb
+  }
+  beforeAll(() => { sb = createSandbox() }, SUBPROCESS_TIMEOUT_MS)
+  afterAll(() => removeSandbox(sb))
+
+  it('resolves claude and gh to the sandbox fakes, never to a machine binary', () => {
+    const s = sandbox()
+    const env = sandboxChildEnv(s)
+    for (const name of ['claude', 'gh']) expect(resolveOnPath(name, env), name).toBe(path.join(s.bin, name))
+  })
+
+  it('the fake gh fails like an unauthenticated gh and writes nothing, so a first-run gh cannot seed HOME', () => {
+    const s = sandbox()
+    const before = readSandbox(s)
+    // The evidence-policy resolver's own probe (resolve-evidence-policy.cjs, D-POLICY-PROBE).
+    const r = spawnSync('gh', ['api', 'repos/{owner}/{repo}', '--jq', '.default_branch'], {
+      cwd: s.repo, env: sandboxChildEnv(s), encoding: 'utf-8', timeout: SUBPROCESS_TIMEOUT_MS,
+    })
+    if (r.error) throw r.error
+    expect(r.status).toBe(4)
+    expect(r.stdout).toBe('')
+    const { added, modified, removed } = diffTree(before, readSandbox(s))
+    expect([...added, ...modified, ...removed]).toEqual([])
+  })
+})
 
 describe('snapshot normaliser (TP-3)', () => {
   it('maps a sandbox path in its logical and realpath forms, and in its log slug', () => {
