@@ -5,7 +5,7 @@ description: "Use when adding a new guard test, modifying the agent-source resol
 category: conventions
 directories: [tests/helpers.ts, tests/git-agent.test.ts, tests/seams, tests/goldens, tests/guards, tests/fixtures, scripts/update-golden.ts, tests/integration, tests/tracker, tests/dynamic, tests/installer, tests/evidence, tests/provider-literals.test.ts, tests/tracker-agent.test.ts]
 created: 2026-09-06
-updated: 2026-09-26
+updated: 2026-09-30
 ---
 
 # Test Harness
@@ -328,6 +328,13 @@ Mechanises the file-residue half of the prefix-shippability clause (ii) acceptan
 
 CI's `macos-bash32-hooks` job (`.github/workflows/ci.yml`) re-runs the shell-hook suites (`shell-hooks`, `shell-hooks-helpers`, `shell-hooks-tracker`, `capture-hooks`, `queue-append`) and `install-snapshot.test.ts` — the hook matrix — with `/bin/bash` 3.2 first on PATH. A step fails the job unless `bash --version` reports 3.2, and vitest runs with `--no-file-parallelism`, one file at a time, because these suites spawn hundreds of hook processes and in parallel on a 3-core runner the load alone times tests out.
 
+### Write-set fence and the init location matrix (#406)
+
+These complete the regression net ADR-031 required before any scope change, alongside the install snapshots above. Both run the BUILT CLI (`npm run build` first) in `install-snapshot-helpers` sandboxes under `sandboxEnv`'s temp HOME (PF-060), with a fake `claude` first on PATH.
+
+- **`tests/write-set-fence.test.ts` (D-WRITE-SET-FENCE).** `FENCE_ROWS` holds one row per CLI toggle action — every `--enable`, `--disable` and `--set` a command defines, plus the state-clearing and read-only actions beside them — each with an `allow` list (`<HOME>/…`, `<REPO>/…`, `<SANDBOX>/…`, a trailing `/**` admitting a subtree), `mustWrite` (PF-018: a toggle that silently stopped writing fails) and an optional `seed`. The rows run once, in table order, against ONE sandbox installed by `init --recommended --security user`; around each, the whole sandbox (HOME, repo, subdirectory, worktree, non-git dir, TMPDIR, the fake claude's call log; `.git` excluded) is walked with contents and every added, modified or removed path must be allowed. The table leaves each toggle flipped back, so every row starts from the installed state. Coverage is held to the CLI's own definitions, not to the table: every top-level command in `devflow --help` has a row or a reason in `UNFENCED_COMMANDS`, and every `--enable`/`--disable`/`--set` option a command defines has a row or a reason in `UNFENCED_ACTIONS`. Row count, fenced-command count and allowlist size are floors in `numeric-floors.json`.
+- **`tests/init-location-invariance.test.ts` (D-INIT-LOCATION-INVARIANCE).** The same non-interactive init (the github install-snapshot argv) runs once per `INIT_LOCATIONS` entry, each in a fresh sandbox: repo root, subdirectory, linked worktree, non-git directory, a repository path with a space, a symlinked HOME, and a HOME that is itself a repository. The machine side (every entry under HOME, settings.json and the manifest, normalised) must equal the root run's in every location, and per-repository writes land only at the checkout's toplevel — none in a subdirectory, none outside git, none at a HOME repository (D-INIT-NOT-HOME). The space sits in the repository path only: a HOME with a space is not a supported layout (hook commands carry HOME unquoted). `init-location-count` is its floor.
+
 ### CLI-spawning config tests (init-review-publication.test.ts, feature-toggle-config.test.ts)
 
 Both spawn the real compiled CLI against a throwaway `$HOME` AND a throwaway git repo (`mkdtempSync`, never the real ones — see the Code Organization Principles gotcha above), and both share the `SUBPROCESS_TIMEOUT_MS` convention. `feature-toggle-config.test.ts` proves each `devflow {memory,learning,knowledge} --enable/--disable`'s OWN write path preserves unmanaged config keys (`D-CONFIG-PRESERVE-UNMANAGED`) by a real file round trip; `tests/core/feature-config-managed-write.test.ts` is its unit-level sibling, driving `mergeManagedConfig`/`updateFeature` directly without a spawn — the two are deliberately paired because a direct call exercises an input path no user actually has (PF-071).
@@ -400,7 +407,13 @@ Both spawn the real compiled CLI against a throwaway `$HOME` AND a throwaway git
 - `tests/guards/extended-references.test.ts` — SKILL.md Extended References table integrity
 - `tests/guards/capability-hoist.test.ts` — [DR-11] no session-scoped capability probe inside a loop; `capability-hoist-block-floor` = 63
 - `tests/guards/provider-scope.test.ts` — `PROVIDER_OWNED_PATHS`/`FORBIDDEN_SCOPES` (now including `dist/skills/git/references/pr/`); `collectHostIssueLiterals` (#376) over `/plan` + the three dynamic commands
-- `tests/guards/heredoc-quoting.test.ts` — unquoted `<<EOF` heredoc scan
+- `tests/guards/heredoc-quoting.test.ts` — unquoted `<<EOF` heredoc scan; its frozen exclusions are `file:line`, so a comment added above an excluded heredoc moves it and the guard reports both a "new" heredoc and a stale exclusion — re-pin the line numbers in the same change
+- `tests/guards/claude-dir.test.ts` — (D-CLAUDE-DIR-PROMPTS) no compiled command, agent, reference, skill or rule reads a path under the home `.claude` directory, or the bare directory without the installer's rule (`CLAUDE_CONFIG_DIR` when absolute, else `$HOME/.claude`); red probes plus a behavioural run of the sanctioned line
+- `tests/guards/docs-root.test.ts` — (D-DOCS-ROOT) every `.devflow/docs` path in a compiled command is rooted at `{worktree}` (`_partials/_docs_root.mds`), relative only in an agent field that travels with `WORKTREE_PATH`, or a named live exemption; `tests/commands/partials-root.test.ts` runs the resolution on real git
+- `tests/guards/settings-atomic-write.test.ts` — (D-SETTINGS-ATOMIC) every `settings.json` write under `src/` goes through `writeSettingsFileAtomic`
+- `tests/guards/no-config-read.test.ts` — no prompt reads `project.json`/`config.json` itself; the scan covers compiled commands, agents, references, skills, rules, the ambient charter and every directive a hook emits, and it fails when `dist/` is older than its sources rather than scan a stale build
+- `tests/hook-log-paths.test.ts` — (D-LOG-DIR-CAP, hook side) `devflow_log_dir` and the debug trace's folder creation prune to the cap under a temp HOME; the shell cap is pinned equal to `MAX_HOOK_LOG_DIRS`
+- `tests/skill-references.test.ts` Format 3 — compiled commands name no skill by install path (D-CLAUDE-DIR-PROMPTS); non-vacuity comes from an extractor probe and `/code-review`'s presence gate naming eight canonical focuses (`language-gate-focuses` floor)
 - `tests/guards/mcp-sink-bypass.test.ts` — D11-clause + bypass-shape guard over the tool-call sink class
 - `tests/guards/no-control-bytes.test.ts` — raw-control-byte absence guard over shipped `src/`
 - `tests/provider-literals.test.ts` (repo root) — AC-3.13 cross-provider literal matrix

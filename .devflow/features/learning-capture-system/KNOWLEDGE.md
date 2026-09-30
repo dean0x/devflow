@@ -138,7 +138,7 @@ consumes — `tests/seams/tracker-key-path.test.ts` pins them to the same verdic
 
 ### Project Roots (D-HOOKS-GIT-ONLY, D-LEDGER-MAIN-WORKTREE)
 
-Hooks resolve roots from git, never from cwd. `resolve-project-root`'s `df_resolve_roots <cwd>` makes ONE `git rev-parse --path-format=absolute --show-toplevel --git-common-dir` call, accepts exactly two absolute lines (else falls back to `df_resolve_root` — git < 2.31 echoes the flag as a third line), and sets `DF_ROOT` (the checkout toplevel: memory, carve-out, KBs) and `DF_LEDGER_ROOT` (the main worktree = parent of a `…/.git` common dir, when `$MAIN/.devflow` already exists and the main worktree is not HOME — `df_is_project_root "$MAIN"`, a physical-path compare, since a dotfiles repo's `~/.devflow` is the machine root and always exists; else `DF_ROOT`). The capture hooks append learning turns under `DF_LEDGER_ROOT` and pass it to `decisions-usage-scan.cjs`; `session-start-context` reads the TL;DR, the queue and `learning.json` there and names it in the directive; memory stays at `DF_ROOT`. A worktree ledger created before this rule stays on disk, unused. `ensure-devflow-init` scaffolds `learning/` only when `DF_LEDGER_ROOT` is `DF_ROOT`: a linked worktree whose ledger is at main gets no `learning/`, and the capture hooks create the ledger's own `learning/` when they append. `ensure-devflow-init` and `session-start-context` both refuse per-project work unless `df_is_project_root` (git-marker) passes — a git marker AND a physical path that is not HOME's — so memory and learning stop together outside git and in a HOME-rooted repo. `ensure-root-gitignore` itself stays ungated (PF-059 parity suite runs it in plain dirs).
+Hooks resolve roots from git, never from cwd. `resolve-project-root`'s `df_resolve_roots <cwd>` makes ONE `git rev-parse --path-format=absolute --show-toplevel --git-common-dir` call, accepts exactly two absolute lines (else falls back to `df_resolve_root` — git < 2.31 echoes the flag as a third line), and sets `DF_ROOT` (the checkout toplevel: memory, carve-out, KBs) and `DF_LEDGER_ROOT` (the main worktree = parent of a `…/.git` common dir, when `$MAIN/.devflow` already exists and the main worktree is not HOME — `df_is_project_root "$MAIN"`, a physical-path compare, since a dotfiles repo's `~/.devflow` is the machine root and always exists; else `DF_ROOT`). The capture hooks append learning turns under `DF_LEDGER_ROOT` and pass it to `decisions-usage-scan.cjs`; `session-start-context` reads the TL;DR, the queue and `learning.json` there and names it in the directive; memory stays at `DF_ROOT`. A worktree ledger created before this rule stays on disk, unused. `ensure-devflow-init` scaffolds `learning/` only when `DF_LEDGER_ROOT` is `DF_ROOT`: a linked worktree whose ledger is at main gets no `learning/`, and the capture hooks create the ledger's own `learning/` when they append. `ensure-devflow-init` and `session-start-context` both refuse per-project work unless `df_is_project_root` (git-marker) passes — a `.git` entry AT the root (a directory, or a linked worktree's or submodule's file; never one found by walking up, D-HOOKS-TOPLEVEL-ONLY) AND a physical path that is not HOME's — so memory and learning stop together outside git and in a HOME-rooted repo, and when `git rev-parse` fails from a subdirectory (dubious ownership, `GIT_CEILING_DIRECTORIES`) the raw-cwd fallback root is refused rather than scaffolded. `ensure-root-gitignore` itself stays ungated (PF-059 parity suite runs it in plain dirs).
 
 ### Capture Hook Protocol
 
@@ -180,10 +180,13 @@ selection is its own configuration, unaffected by #378.
 **Which provider** (`D-TRACKER-PER-PROVIDER-CONVENTIONS`): the machine default from the
 `.tracker.enabled` sentinel — the provider NAME on one line, read with the `read` builtin
 (zero forks; a zero-byte sentinel from an earlier release yields no directive until init
-rewrites it) — overridden by the project's committed `.devflow/project.json` only when a
-bounded builtin read of it shows a `"tracker"` key, which costs ONE fork of
-`resolve-settings.cjs` (the resolver the Git agent consumes). A personal `.devflow/config.json`
-override never triggers that fork. Then a POSITIVE `jira|linear` allowlist (never `!= github`),
+rewrites it) — overridden by the project's committed `.devflow/project.json`, or narrowed by the personal
+`.devflow/config.json`, only when a bounded builtin read of either shows a `"tracker"` key —
+config.json is read only where the sentinel names a provider, since a personal override can
+only narrow (to `github` or the provider in effect) — which costs ONE fork of
+`resolve-settings.cjs` (the resolver the Git agent consumes). So a personal `"tracker":"github"`
+silences a jira machine's directive in that repository, and a config.json git tracks is ignored
+there as the resolver ignores it (D-PERSONAL-UNTRACKED). Then a POSITIVE `jira|linear` allowlist (never `!= github`),
 then skip when `~/.devflow/tracker/$P.md` already exists.
 
 **Then the gates, cheapest-first**, inside `tracker_gates_open()`: attempt cap via `read`
@@ -201,6 +204,15 @@ last. `tests/seams/tracker-key-path.test.ts` pins the TS sentinel writer against
 reader for every provider. `TRACKER_PROCESSING_STALE_SECS=600` is its own literal, deliberately
 not shared with Learning's 900s. Capped at `tracker-section-max-chars` = 800 (ceiling in
 `tests/fixtures/numeric-floors.json`).
+
+### Section 4: Legacy Project-Local Install Notice (D-LEGACY-LOCAL-NOTICE)
+
+When `<root>/.claude/settings.json` registers a devflow hook — matched by the exact ownership
+shape, a command ending in `/scripts/hooks/run-hook <marker>` for a marker devflow registers or
+a v1 `.sh` hook — a fresh session gets one line asking the model to tell the user, once, to run
+`devflow uninstall --scope local` there (the retired `init --scope local` left it, and its hooks
+run twice). Never for the machine-wide Claude Code directory; a `settings.json` with no devflow
+hook costs a builtin read and no subprocess. `tests/session-start-legacy-install.test.ts`.
 
 ### Learning Agent
 
@@ -285,6 +297,15 @@ for D56c cold-path recovery). `cksum` must be on PATH at startup or the worker e
 run without a CAS guard; a `cksum` failure on the target file forces `conflict` (fail-closed).
 The stale-staged-file cleanup (`rm -f WORKING-MEMORY.md.new`) runs at the START of each run.
 
+**User-only queue is kept (D-QUEUE-NO-ORPHAN-DELETE).** Claude Code runs one event's hooks in
+PARALLEL — settings.json array position sequences nothing at run time — so `memory-worker` can
+spawn the worker after `capture-prompt` appended the user row and before `capture-turn` appends
+the assistant row. A queue with no `assistant`/`qa` row therefore exits with no LLM run (no
+fabrication) and is LEFT in place: the next run takes the whole turn once the assistant row
+lands, and queue-append's overflow guard caps the file. Deleting it (the old orphan auto-clean)
+lost that turn's prompt. init and `memory --enable` still register capture before memory in the
+Stop array, but only so the two produce identical settings.json.
+
 `compute_commits_since_note()` sets `COMMITS_SINCE_NOTE` in caller scope. Five exact outcome
 literals form a **test contract**: no-stamp full-synthesis, invalid-SHA-format,
 SHA-not-ancestor-of-HEAD, none-current-as-of-HEAD, and `N commit(s)... (showing newest 20)`
@@ -361,8 +382,9 @@ run-hook markers (prompt-capture-memory, stop-update-memory, stop-update-learnin
 session-end-learning, session-end-decisions, session-end-knowledge-refresh, sidecar-*, dream-*).
 Those are removed on every converge but never counted as a current memory hook. Capture, context
 and spawn-dream-worker only ever shipped through run-hook, so they have no legacy form. Remove-then-add
-keeps a user's group in place and appends devflow's hook after it, so the Stop-array
-append-before-spawn order (capture-turn before memory-worker) still holds.
+keeps a user's group in place and appends devflow's hook after it, so memory-worker still
+lands after capture-turn in the Stop array — a stable settings.json, not a run-time order: the
+Stop hooks run in parallel (see Memory Worker).
 
 ### devflow init and the Machine Switches
 
@@ -377,6 +399,19 @@ feature on everywhere, so its queue is correctly left alone; other repos never n
 manifest value — plugins, version, scope, `installedAt`, every `features.*` — changing only
 `features.hud`. With memory/learning/knowledge living ONLY in the manifest, a HUD-only install
 that reset those would really disable them everywhere.
+
+### Hook Log Folders (D-LOG-DIR-CAP)
+
+Hooks log under `~/.devflow/logs/<cwd-slug>/`, one folder per working directory (31k observed on
+one machine). `devflow init` prunes to `MAX_HOOK_LOG_DIRS` = 200 (`src/core/hook-log-dirs.ts`),
+oldest first by the newest mtime among a folder and its logs, reading at most 100,000 folders
+and removing at most 10,000 per run. `log-paths`' `devflow_log_dir` prunes too, but ONLY when it
+creates a new folder (the common path costs nothing): one `ls -1At`, at most 50 removed per
+call, bash 3.2, no node, a candidate spared when any of its first 64 entries is newer than the
+oldest kept folder (`-nt`). `debug-trace`'s `devflow_debug_set_cwd` takes its per-project folder
+from `devflow_log_dir` (sourcing `log-paths` beside it when the hook has not), so a debug-created
+folder is capped too. Root files (`proxy.log`) and symlinks are never counted or removed.
+`_DF_MAX_HOOK_LOG_DIRS` is pinned equal to `MAX_HOOK_LOG_DIRS` by `tests/hook-log-paths.test.ts`.
 
 ### Locking
 
@@ -509,7 +544,8 @@ Do not rename them: `decisions.md`/`pitfalls.md` (rendered output), `decisions-l
 | `src/assets/scripts/hooks/capture-question` | PostToolUse: AskUserQuestion Q&A row append |
 | `src/assets/scripts/hooks/queue-append` | Shared JSONL append + overflow truncation + `queue_read_gates` |
 | `src/assets/scripts/hooks/resolve-project-root` | `df_resolve_root` (toplevel) and `df_resolve_roots` (one git call → `DF_ROOT` + `DF_LEDGER_ROOT`) |
-| `src/assets/scripts/hooks/git-marker` | `df_has_git_marker`, `df_is_project_root` — the zero-fork git-only gate |
+| `src/assets/scripts/hooks/git-marker` | `df_has_git_marker`, `df_is_project_root` — the zero-fork git-only gate; `.git` must be at the root (D-HOOKS-TOPLEVEL-ONLY) |
+| `src/assets/scripts/hooks/log-paths` · `src/core/hook-log-dirs.ts` | `devflow_log_dir` and its create-time prune; init's exact prune (D-LOG-DIR-CAP) |
 | `src/assets/scripts/hooks/learning-lock` | mkdir-based lock (30s stale-break) |
 | `src/assets/scripts/hooks/is-hex-sha` | Pure-shell hex-SHA check; sourced by three memory hooks with different bounds |
 | `src/assets/scripts/hooks/session-start-context` | Learning directive (Section 2) + tracker-setup directive (Section 3) |
