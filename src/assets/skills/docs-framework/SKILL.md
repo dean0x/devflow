@@ -117,15 +117,14 @@ TOPIC_SLUG=$(echo "$TOPIC" | tr '[:upper:]' '[:lower:]' | tr ' ' '-' | sed 's/[^
 
 ## Helper Functions
 
-Source helpers for consistent naming:
+Define these inline, in the Bash call that needs them, for consistent naming. `.devflow/docs/` lives at the checkout's toplevel, never under a subdirectory the session started in:
 
 ```bash
-source .devflow/scripts/docs-helpers.sh 2>/dev/null || {
-    get_timestamp() { date +%Y-%m-%d_%H%M; }
-    get_branch_slug() { git branch --show-current 2>/dev/null | sed 's/\//-/g' || echo "standalone"; }
-    get_topic_slug() { echo "$1" | tr '[:upper:]' '[:lower:]' | tr ' ' '-' | sed 's/[^a-z0-9-]//g' | cut -c1-50; }
-    ensure_docs_dir() { mkdir -p ".devflow/docs/$1"; }
-}
+get_timestamp() { date +%Y-%m-%d_%H%M; }
+get_branch_slug() { git branch --show-current 2>/dev/null | sed 's/\//-/g' || echo "standalone"; }
+get_topic_slug() { echo "$1" | tr '[:upper:]' '[:lower:]' | tr ' ' '-' | sed 's/[^a-z0-9-]//g' | cut -c1-50; }
+get_docs_root() { git rev-parse --show-toplevel 2>/dev/null || pwd; }
+ensure_docs_dir() { mkdir -p "$(get_docs_root)/.devflow/docs/$1"; }
 ```
 
 ---

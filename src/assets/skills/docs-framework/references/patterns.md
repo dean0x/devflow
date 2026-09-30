@@ -150,12 +150,9 @@ Always lowercase:
 
 ## Helper Functions
 
-Full implementation for `.devflow/scripts/docs-helpers.sh`:
+Full implementations, defined inline in the Bash call that needs them. `.devflow/docs/` lives at the checkout's toplevel, never under a subdirectory the session started in:
 
 ```bash
-#!/bin/bash
-# .devflow/scripts/docs-helpers.sh
-
 # Get current timestamp in standard format
 get_timestamp() {
     date +%Y-%m-%d_%H%M
@@ -182,10 +179,15 @@ get_topic_slug() {
         cut -c1-50
 }
 
+# The checkout's toplevel, else the working directory outside git
+get_docs_root() {
+    git rev-parse --show-toplevel 2>/dev/null || pwd
+}
+
 # Ensure docs directory exists
 ensure_docs_dir() {
     local subdir="$1"
-    mkdir -p ".devflow/docs/$subdir"
+    mkdir -p "$(get_docs_root)/.devflow/docs/$subdir"
 }
 
 # Get full output path for a document
@@ -193,7 +195,7 @@ get_doc_path() {
     local subdir="$1"
     local filename="$2"
     ensure_docs_dir "$subdir"
-    echo ".devflow/docs/$subdir/$filename"
+    echo "$(get_docs_root)/.devflow/docs/$subdir/$filename"
 }
 
 # Create timestamped status log path
@@ -211,23 +213,14 @@ get_review_path() {
     branch_slug=$(get_branch_slug)
     timestamp=$(get_timestamp)
     ensure_docs_dir "reviews/$branch_slug/$timestamp"
-    echo ".devflow/docs/reviews/$branch_slug/$timestamp/${focus}.md"
+    echo "$(get_docs_root)/.devflow/docs/reviews/$branch_slug/$timestamp/${focus}.md"
 }
 ```
 
 ### Usage Example
 
 ```bash
-# Source helpers
-source .devflow/scripts/docs-helpers.sh 2>/dev/null || {
-    # Inline fallback if script not found
-    get_timestamp() { date +%Y-%m-%d_%H%M; }
-    get_branch_slug() { git branch --show-current 2>/dev/null | sed 's/\//-/g' || echo "standalone"; }
-    get_topic_slug() { echo "$1" | tr '[:upper:]' '[:lower:]' | tr ' ' '-' | sed 's/[^a-z0-9-]//g' | cut -c1-50; }
-    ensure_docs_dir() { mkdir -p ".devflow/docs/$1"; }
-}
-
-# Use helpers
+# Define the helpers above in the same Bash call, then use them
 TIMESTAMP=$(get_timestamp)
 BRANCH_SLUG=$(get_branch_slug)
 ensure_docs_dir "reviews/$BRANCH_SLUG"
