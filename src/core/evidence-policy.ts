@@ -414,8 +414,8 @@ export function settingsSourceFile(source: Exclude<SettingsSwitchSource, 'machin
  * layer narrows it — `disabled (.devflow/project.json)` — and null otherwise, so a
  * `--status` whose machine switch alone decides prints exactly what it always has
  * (D-FEATURES-NARROW-ONLY). A repository file that exists but is unreadable fails
- * every field closed but the machine's compliance lens, and a switch that closed
- * off is labelled with that file —
+ * every field closed but the compliance lens, and a switch that closed off is
+ * labelled with that file —
  * `disabled (.devflow/project.json is unreadable)` — since commands act on it. Any
  * other failure (the resolver failed to load, or git could not answer) yields
  * null: it knows nothing about this repository.
