@@ -40,6 +40,7 @@ import {
   loadEvidencePolicyModule,
   loadSettingsModule,
   narrowedSwitchLabel,
+  personalConfigTrackedWarning,
   repoComplianceStatusLines,
   repoTrackerSelection,
   type EvidencePolicyModule,
@@ -56,6 +57,8 @@ import {
   SETTINGS_SCRIPT,
   buildScriptedShim,
   createFakeBin,
+  warmFakeBin,
+  WARM_HOOK_TIMEOUT_MS,
   realGit,
   scenarioCalls,
   scopedEnv,
@@ -286,10 +289,9 @@ describe('the --status helpers over the settings layer (D-FEATURES-NARROW-ONLY)'
     expect(narrowedSwitchLabel(stub(failed), { dir: repo }, 'memory')).toBeNull();
     expect(narrowedSwitchLabel(stub(failed), { dir: repo }, 'learning')).toBeNull();
     expect(repoComplianceStatusLines(stub(failed), { dir: repo }))
-      .toEqual(['Repository: generic controls only (.devflow/project.json is unreadable)']);
+      .toEqual(['Repository: generic controls only (.devflow/project.json is unreadable)', 'Effective here: generic controls only (this machine + the default branch + this checkout)']);
 
-    // The machine's own lens survives the broken repository file; the status line
-    // still describes only the repository layer.
+    // The machine's own lens survives the broken repository file (D-LENS-UNION).
     const hipaa = settings.resolveSettings(
       { dir: repo, manifest: { features: { compliance: { enabled: true, frameworks: ['hipaa'] } } } },
       { exec: scriptedExec([{ tool: 'git', args: ARGV.toplevel, stdout: `${repo}\n` }]).exec },
@@ -298,13 +300,44 @@ describe('the --status helpers over the settings layer (D-FEATURES-NARROW-ONLY)'
     expect(hipaa.unreadable).toBe('project');
     expect(hipaa.compliance).toEqual({ enabled: true, frameworks: ['hipaa'] });
     expect(repoComplianceStatusLines(stub(hipaa), { dir: repo }))
-      .toEqual(['Repository: generic controls only (.devflow/project.json is unreadable)']);
+      .toEqual(['Repository: generic controls only (.devflow/project.json is unreadable)', 'Effective here: hipaa (this machine + the default branch + this checkout)']);
 
-    const personal = { ...failed, unreadable: 'personal' as const };
+    // A broken config.json owns no compliance: the readable project.json and the
+    // default branch still declare theirs, and the lines are a readable file's.
+    const personal: RepoSettings = {
+      ...failed,
+      unreadable: 'personal',
+      repoCompliance: ['hipaa'],
+      defaultBranchCompliance: ['soc2'],
+      compliance: { enabled: true, frameworks: ['hipaa', 'soc2'] },
+    };
     expect(narrowedSwitchLabel(stub(personal), { dir: repo }, 'knowledge'))
       .toBe('disabled (.devflow/config.json is unreadable)');
-    expect(repoComplianceStatusLines(stub(personal), { dir: repo }))
-      .toEqual(['Repository: generic controls only (.devflow/config.json is unreadable)']);
+    expect(repoComplianceStatusLines(stub(personal), { dir: repo })).toEqual([
+      'Repository: hipaa (.devflow/project.json)',
+      'Default branch: soc2 (its .devflow/project.json)',
+      'Effective here: hipaa, soc2 (this machine + the default branch + this checkout)',
+    ]);
+    expect(repoComplianceStatusLines(stub(personal), { dir: repo }).join('\n')).not.toContain('config.json');
+  });
+
+  it('compliance: the default branch\'s ids join the lens, and a branch cannot drop them (D-LENS-UNION)', () => {
+    // The branch deleted its compliance key; the default branch still declares hipaa.
+    const settings: RepoSettings = {
+      ...BASE, defaultBranchCompliance: ['hipaa'], compliance: { enabled: true, frameworks: ['hipaa'] },
+    };
+    expect(repoComplianceStatusLines(stub(settings), { dir: tmp })).toEqual([
+      'Default branch: hipaa (its .devflow/project.json)',
+      'Effective here: hipaa (this machine + the default branch + this checkout)',
+    ]);
+  });
+
+  it('a tracked .devflow/config.json gets a warning naming the fix (D-PERSONAL-UNTRACKED)', () => {
+    expect(personalConfigTrackedWarning(stub(BASE), { dir: tmp })).toBeNull();
+    expect(personalConfigTrackedWarning({ ok: false, error: { kind: 'not-found', path: '/x' } }, { dir: tmp })).toBeNull();
+    const warning = personalConfigTrackedWarning(stub({ ...BASE, personalTracked: true }), { dir: tmp });
+    expect(warning).toContain('.devflow/config.json is tracked by git');
+    expect(warning).toContain('git rm --cached .devflow/config.json');
   });
 
   it('passes the caller\'s dir straight through', () => {
@@ -331,14 +364,16 @@ describe('the --status helpers over the settings layer (D-FEATURES-NARROW-ONLY)'
 
   it('compliance: the repository ids, generic for an empty list, and the migration hint', () => {
     expect(repoComplianceStatusLines(stub(BASE), { dir: tmp })).toEqual([]);
-    expect(repoComplianceStatusLines(stub({ ...BASE, repoCompliance: ['gdpr', 'hipaa'] }), { dir: tmp }))
-      .toEqual(['Repository: gdpr, hipaa (.devflow/project.json)']);
-    expect(repoComplianceStatusLines(stub({ ...BASE, repoCompliance: [] }), { dir: tmp }))
-      .toEqual(['Repository: generic controls only (.devflow/project.json)']);
+    const lens = (frameworks: string[]): RepoSettings['compliance'] => ({ enabled: true, frameworks });
+    expect(repoComplianceStatusLines(stub({ ...BASE, repoCompliance: ['gdpr', 'hipaa'], compliance: lens(['gdpr', 'hipaa']) }), { dir: tmp }))
+      .toEqual(['Repository: gdpr, hipaa (.devflow/project.json)', 'Effective here: gdpr, hipaa (this machine + the default branch + this checkout)']);
+    expect(repoComplianceStatusLines(stub({ ...BASE, repoCompliance: [], compliance: lens([]) }), { dir: tmp }))
+      .toEqual(['Repository: generic controls only (.devflow/project.json)', 'Effective here: generic controls only (this machine + the default branch + this checkout)']);
     expect(repoComplianceStatusLines(stub({ ...BASE, retiredPolicyFile: true }), { dir: tmp })).toEqual([
       'Migration:  .devflow/policy.json is not read. While .devflow/project.json has no "evidence",',
-      '            its presence alone holds this repository at required. Commit its value',
-      '            to .devflow/project.json as "evidence", then delete .devflow/policy.json:',
+      '            its presence alone holds this repository at required. Add its value to',
+      '            .devflow/project.json as "evidence", and keep .devflow/policy.json until every',
+      '            teammate runs devflow 3.0 or later; only then delete it:',
       '              standard  →  {"version":1,"evidence":"standard"}',
       '              required  →  {"version":1,"evidence":"required"}',
     ]);
@@ -470,6 +505,10 @@ describe('evidencePolicySuggestion — iff the compliance default is required', 
     expect(text).not.toContain('.devflow/policy.json');
     expect(text).toContain('default branch');
     expect(text).toMatch(/devflow (?:never|does not) write/);
+    // Adding keys, never overwriting a project.json the team already committed.
+    expect(text).toContain('add these keys to its .devflow/project.json');
+    expect(text).toContain('never replacing it');
+    expect(text).not.toMatch(/commit this as/i);
   });
 
   it('the suggested bytes are a valid project.json by the shared parser', () => {
@@ -923,7 +962,8 @@ describe('devflow compliance — the built CLI (AC-9, AC-10)', () => {
   beforeAll(() => {
     cli = requireBuiltCli();
     fakeGh = createFakeBin(tmp, ['gh']);
-  });
+    warmFakeBin(fakeGh, tmp);
+  }, WARM_HOOK_TIMEOUT_MS);
 
   /** A fresh temp HOME (never the developer's) holding a manifest with this compliance state. */
   function makeHome(compliance: { enabled: boolean; frameworks: string[] }): string {

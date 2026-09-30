@@ -4,8 +4,10 @@ import * as path from 'path';
 import { execSync } from 'child_process';
 import * as p from '@clack/prompts';
 import color from 'picocolors';
-import { getInstallationPaths } from '../../targets/claude-code/claude-paths.js';
+import { resolveInstallationPaths } from '../../targets/claude-code/claude-paths.js';
 import { getGitRoot } from '../../core/git.js';
+import { isSameLocation, withoutHomeRoots } from '../../core/same-location.js';
+import { pruneHookLogDirs, MAX_HOOK_LOG_DIRS, type LogDirPruneReport } from '../../core/hook-log-dirs.js';
 import { getLedgerRoot } from '../../core/ledger-root.js';
 import { installViaFileCopy, composeScripts, type InstallReport } from '../../targets/claude-code/installer.js';
 import { formatOverlaySummary, formatSkillScopeSummary, formatTrackerAssetSummary, isPluginListUnchanged, type SummaryLine } from './install-report.js';
@@ -43,11 +45,11 @@ import { SKILL_REFS_SKILL_NAME } from '../../core/mds-variants.js';
 // Settings/HookMatcher types used by hook utilities — each in their own module
 import { addHudStatusLine, removeHudStatusLine } from './hud.js';
 import { loadConfig as loadHudConfig, saveConfig as saveHudConfig } from '../../hud/config.js';
-import { readManifest, writeManifest, resolvePluginList, detectUpgrade, type ManifestData } from '../../core/manifest.js';
+import { readManifest, writeManifest, resolvePluginList, detectUpgrade, type ManifestData, type UpgradeInfo } from '../../core/manifest.js';
 import { convergeFlagsIntoSettings, countActiveFlags, readViewMode, type FlagsRecord } from '../../core/flags.js';
 import { addContextHook, removeContextHook, hasContextHook } from './context.js';
-import { writeFileAtomicExclusive } from '../../core/fs-atomic.js';
-import { writeManagedConfig, readConfigIfPresent, DEFAULT_CONFIG, type FeatureConfig } from '../../core/feature-config.js';
+import { writeSettingsFileAtomic } from '../../core/fs-atomic.js';
+import { writeManagedConfig, readConfigIfPresent, DEFAULT_CONFIG, type FeatureConfig, type ManagedConfigWriteError } from '../../core/feature-config.js';
 import { drainLearningQueue } from '../../core/learning-queue-cleanup.js';
 import { removeManagedDenyList, describeManagedDenyRemoval } from './security.js';
 import { resolveInitSeed, applyCliToggles, resolveResetGatedInputs, resolvePluginsToInstall } from './init-seed.js';
@@ -614,6 +616,58 @@ export function resolveRetiredScopeOption(scope: string | undefined): RetiredSco
   };
 }
 
+/** The line init prints after removing old hook log folders (D-LOG-DIR-CAP). Pure. */
+export function formatLogPruneLine(report: LogDirPruneReport): string {
+  const base = `Removed ${report.removed} old hook log folder${report.removed === 1 ? '' : 's'} ` +
+    `(keeping the ${MAX_HOOK_LOG_DIRS} most recent)`;
+  return report.overCap > 0 ? `${base}; ${report.overCap} more go on the next init` : base;
+}
+
+/**
+ * The warning init prints when the running CLI is older than the one that last
+ * installed this machine, or null. Pure.
+ *
+ * D-INIT-DOWNGRADE-WARN: a downgrade is allowed — an older CLI installs a
+ * consistent older devflow — but never silent: its install sweeps every skill,
+ * agent and command the newer version added as an orphan, and settings the newer
+ * version wrote may mean nothing to it. The warning names both versions and how
+ * to get back; nothing blocks.
+ */
+export function formatDowngradeWarning(upgrade: UpgradeInfo, version: string): string | null {
+  if (!upgrade.isDowngrade || upgrade.previousVersion === null) return null;
+  return `Downgrading: this machine was installed by devflow v${upgrade.previousVersion}, newer than this CLI (v${version}). ` +
+    'Assets only the newer version ships will be removed. To keep them, run the newer CLI instead ' +
+    '(npx devflow-kit@latest init).';
+}
+
+/**
+ * The warning init prints when it leaves a repository's `.devflow/config.json`
+ * alone (D-CONFIG-NO-REPAIR). Pure.
+ */
+export function formatManagedConfigWriteError(error: ManagedConfigWriteError): string {
+  switch (error.kind) {
+    case 'malformed':
+      return `${error.path} is not a valid config (not a JSON object, or a key appears twice) — left unchanged. ` +
+        'Fix it by hand; until then devflow treats it as unreadable.';
+    case 'unreadable':
+      return `${error.path} could not be read (${error.detail}) — left unchanged.`;
+    case 'write-failed':
+      return `Could not write ${error.path}: ${error.detail}`;
+    default: {
+      const exhaustive: never = error;
+      return exhaustive;
+    }
+  }
+}
+
+/**
+ * The git repositories Claude has worked in, as project roots: every
+ * history.jsonl project with a `.git`, less any rooted at HOME (D-INIT-NOT-HOME).
+ */
+async function discoverRepoRoots(claudeDir: string, homeDir: string): Promise<string[]> {
+  return withoutHomeRoots(await discoverProjectGitRoots(claudeDir), homeDir);
+}
+
 export const initCommand = new Command('init')
   .description('Initialize Devflow for Claude Code')
   .addOption(new Option('--scope <type>', 'Retired: Devflow installs machine-wide only').hideHelp())
@@ -634,7 +688,7 @@ export const initCommand = new Command('init')
   .option('--proxy', 'Enable external model routing (GPT models via your OpenAI/Codex subscription)')
   .option('--no-proxy', 'Disable external model routing')
   .option('--compliance <list>', 'Enable compliance with comma-separated framework IDs (e.g., gdpr,hipaa)')
-  .option('--no-compliance', 'Disable compliance (artifacts removed; frameworks remembered for re-enable)')
+  .option('--no-compliance', 'Disable compliance (removes the rule; the skill and framework references stay installed; frameworks remembered for re-enable)')
   .option('--tracker <id>', 'The machine\'s default issue tracker provider: github, jira, or linear')
   .option('--security <mode>', 'Security deny list location: user, managed, or none', /^(user|managed|none)$/i)
   .option('--hud-only', 'Install only the HUD (no plugins, hooks, or extras)')
@@ -671,11 +725,16 @@ export const initCommand = new Command('init')
       process.exit(1);
     }
 
+    // The install locations, resolved once. They fail only with no home directory.
+    const resolvedPaths = resolveInstallationPaths();
+    if (!resolvedPaths.ok) {
+      p.log.error(resolvedPaths.error);
+      process.exit(1);
+    }
+    const { homeDir, claudeDir, devflowDir } = resolvedPaths.value;
+
     // --hud-only: install only HUD (skip plugins, hooks, extras)
     if (options.hudOnly) {
-      // Resolve paths
-      const { claudeDir, devflowDir } = getInstallationPaths();
-
       // Save HUD config
       const existingHud = loadHudConfig();
       saveHudConfig({ enabled: true, detail: existingHud.detail });
@@ -690,7 +749,7 @@ export const initCommand = new Command('init')
           content = '{}';
         }
         const updated = addHudStatusLine(content, devflowDir);
-        await fs.writeFile(settingsPath, updated, 'utf-8');
+        await writeSettingsFileAtomic(settingsPath, updated);
       } catch (error) {
         p.log.error(`Failed to update settings: ${error instanceof Error ? error.message : error}`);
         process.exit(1);
@@ -725,28 +784,28 @@ export const initCommand = new Command('init')
       return;
     }
 
-    // ── Hoist reads: resolve paths early to compute InitSeed for pre-seeded prompts (Phase 4) ──
-    // Best-effort: if path resolution fails here, seed falls back to fresh-install defaults.
-    // The authoritative error gate for failed path resolution remains at the install-begins
-    // spinner (see "Resolving paths" below). Hoisted above multiselect so Phase 4 can
-    // pre-seed plugin/flag/feature prompts.
+    // ── Hoisted reads: the prior state that seeds the prompts (InitSeed, Phase 4) ──
     let existingManifest: ManifestData | null = null;
-    let earlyProjectConfig: FeatureConfig | null = null;
-    let earlySettingsJson: string | null = null;
-    let earlyGitRoot: string | null = null;
     try {
-      const earlyPaths = getInstallationPaths();
-      existingManifest = await readManifest(earlyPaths.devflowDir);
-      earlyGitRoot = await getGitRoot();
-      if (earlyGitRoot) {
-        earlyProjectConfig = await readConfigIfPresent(earlyGitRoot);
-      }
-      try {
-        earlySettingsJson = await fs.readFile(
-          path.join(earlyPaths.claudeDir, 'settings.json'), 'utf-8',
-        );
-      } catch { /* settings.json absent — treated as empty */ }
-    } catch { /* path resolution deferred to install-begins gate */ }
+      existingManifest = await readManifest(devflowDir);
+    } catch { /* unreadable manifest — seeded as a fresh install */ }
+    // D-INIT-NOT-HOME (same-location.ts): a repository rooted at HOME is no
+    // project, so init treats it as no repository — no .devflow/config.json (that
+    // would be the machine root's), no .claudeignore, no .gitignore block, no
+    // per-project migration or queue drain.
+    const cwdGitRoot = await getGitRoot();
+    const homeRootedRepo = cwdGitRoot !== null && await isSameLocation(cwdGitRoot, homeDir);
+    const gitRoot = homeRootedRepo ? null : cwdGitRoot;
+    if (homeRootedRepo) {
+      p.log.info('This git repository is rooted at your home directory, so init writes no per-repository files here.');
+    }
+    const earlyProjectConfig: FeatureConfig | null = gitRoot
+      ? await readConfigIfPresent(gitRoot)
+      : null;
+    let earlySettingsJson: string | null = null;
+    try {
+      earlySettingsJson = await fs.readFile(path.join(claudeDir, 'settings.json'), 'utf-8');
+    } catch { /* settings.json absent — treated as empty */ }
     // --reset: factory reset — treat as a fresh install for all seeding and routing decisions.
     // The REAL existingManifest / earlySettingsJson are still used below for installedAt
     // preservation, upgrade messaging, and security deny-state detection. resolveResetGatedInputs
@@ -985,7 +1044,7 @@ export const initCommand = new Command('init')
     // --reset empties the settings snapshot via resolveResetGatedInputs so seed.flags['view-mode']
     // collapses to 'default', and explicit=true makes it take effect at settings write time.
     let viewModeExplicit = !!options.reset;
-    let claudeignoreEnabled = !!earlyGitRoot;
+    let claudeignoreEnabled = !!gitRoot;
     let discoveredProjects: string[] = [];
     let safeDeleteAction: 'install' | 'upgrade' | 'skip' = 'skip';
     let safeDeleteBlock: string | null = null;
@@ -1121,11 +1180,11 @@ export const initCommand = new Command('init')
       }
 
       // Run independent I/O in parallel: project discovery + safe-delete version check
-      const needsDiscovery = earlyGitRoot !== null;
+      const needsDiscovery = gitRoot !== null;
       const needsVersionCheck = safeDeleteBlock && profilePath;
 
       const [discoveredResult, installedVersionResult] = await Promise.all([
-        needsDiscovery ? discoverProjectGitRoots(getInstallationPaths().claudeDir) : Promise.resolve([] as string[]),
+        needsDiscovery ? discoverRepoRoots(claudeDir, homeDir) : Promise.resolve([] as string[]),
         needsVersionCheck ? getInstalledVersion(profilePath) : Promise.resolve(0),
       ]);
 
@@ -1428,8 +1487,8 @@ export const initCommand = new Command('init')
       }
 
       // .claudeignore prompt
-      if (earlyGitRoot) {
-        discoveredProjects = await discoverProjectGitRoots(getInstallationPaths().claudeDir);
+      if (gitRoot) {
+        discoveredProjects = await discoverRepoRoots(claudeDir, homeDir);
         p.note(
           'Scans all projects Claude has worked on and creates a\n' +
           '.claudeignore in each git repository. Excludes secrets,\n' +
@@ -1555,33 +1614,16 @@ export const initCommand = new Command('init')
     // │  All prompts collected — installation begins             │
     // ╰──────────────────────────────────────────────────────────╯
 
+    const upgrade = existingManifest ? detectUpgrade(version, existingManifest.version) : null;
+    const downgradeWarning = upgrade === null ? null : formatDowngradeWarning(upgrade, version);
+    if (downgradeWarning !== null) p.log.warn(downgradeWarning);
+
     const s = p.spinner();
-    s.start('Resolving paths');
-
-    // Get installation paths
-    let claudeDir: string;
-    let devflowDir: string;
-    let gitRoot: string | null = null;
-
-    try {
-      const paths = getInstallationPaths();
-      claudeDir = paths.claudeDir;
-      devflowDir = paths.devflowDir;
-      gitRoot = earlyGitRoot;
-    } catch (error) {
-      s.stop('Path resolution failed');
-      p.log.error(`Path configuration error: ${error instanceof Error ? error.message : error}`);
-      process.exit(1);
-    }
-
-    // existingManifest was read early above (hoisted for seed computation); use it here for upgrade detection
-    if (existingManifest) {
-      const upgrade = detectUpgrade(version, existingManifest.version);
-      if (upgrade.isUpgrade) {
-        s.message(`Upgrading from v${upgrade.previousVersion} to v${version}`);
-      } else if (upgrade.isSameVersion) {
-        s.message('Reinstalling same version');
-      }
+    s.start('Installing');
+    if (upgrade?.isUpgrade) {
+      s.message(`Upgrading from v${upgrade.previousVersion} to v${version}`);
+    } else if (upgrade?.isSameVersion) {
+      s.message('Reinstalling same version');
     }
 
     // Detect current deny list state in user settings (read-only; write happens in security step)
@@ -2024,9 +2066,10 @@ export const initCommand = new Command('init')
       // Capture hooks — always-on (like the context hook below), remove-then-add for
       // upgrade safety. Queue-append only (capture-prompt/capture-turn/capture-question);
       // each script gates its own per-queue write on the machine-wide switch, so there
-      // is no CLI-level enable/disable toggle here. MUST run before convergeMemoryHooks below
-      // so capture-turn lands before memory-worker in the Stop array (AC-C2 ordering:
-      // append-before-spawn).
+      // is no CLI-level enable/disable toggle here. Runs before convergeMemoryHooks below
+      // so capture-turn lands before memory-worker in the Stop array, matching what
+      // `devflow memory --enable` produces (AC-C2). The Stop hooks still run in
+      // parallel; the memory worker tolerates a not-yet-appended turn.
       const cleanedForCapture = removeCaptureHooks(content);
       content = addCaptureHooks(cleanedForCapture, devflowDir);
 
@@ -2098,7 +2141,7 @@ export const initCommand = new Command('init')
       if (proxyEnabled) content = applyProxyEnv(content, effectivePort);
 
       if (content !== original) {
-        await fs.writeFile(settingsPath, content, 'utf-8');
+        await writeSettingsFileAtomic(settingsPath, content);
         if (verbose) {
           if (ambientEnabled) p.log.success('Ambient mode hook installed');
           p.log.info(`Working memory ${memoryEnabled ? 'enabled' : 'disabled'}`);
@@ -2123,14 +2166,16 @@ export const initCommand = new Command('init')
     // and every other key in the file — the hand-written per-repo `tracker`
     // override first among them — is carried from disk, under --reset too
     // (D-CONFIG-PRESERVE-UNMANAGED in feature-config.ts, avoids PF-071).
+    // A malformed or unreadable file is left untouched and named (D-CONFIG-NO-REPAIR).
     if (gitRoot) {
-      await writeManagedConfig(gitRoot, {
+      const configWrite = await writeManagedConfig(gitRoot, {
         // reviewPublication has no prompt, so it is carried over from the
         // reset-gated snapshot rather than re-read from disk: seedConfig is null
         // under --reset, which is what collapses the field back to 'auto' with
         // every other feature (PF-015 — read the post-gate binding, not the file).
         reviewPublication: seedConfig?.reviewPublication ?? DEFAULT_CONFIG.reviewPublication,
       });
+      if (!configWrite.ok) p.log.warn(formatManagedConfigWriteError(configWrite.error));
     }
 
     // Configure HUD
@@ -2431,11 +2476,21 @@ export const initCommand = new Command('init')
     // Only now that the machine-wide switch is on disk (D-INIT-DRAIN-AFTER-SWITCH).
     await drainDisabledFeatureQueues({
       gitRoot,
-      ledgerRoot: learningEnabled ? null : await getLedgerRoot(),
+      ledgerRoot: learningEnabled || gitRoot === null ? null : await getLedgerRoot(),
       memoryEnabled,
       learningEnabled,
       manifestWritten: trackerLifecycle.manifestWritten,
     });
+
+    // The hooks' per-directory log folders, capped (D-LOG-DIR-CAP): one pass
+    // clears every folder it scans beyond the cap; only a backlog beyond the
+    // scan bound (MAX_LOG_DIRS_SCANNED, 100,000) waits for the next init.
+    const logPrune = await pruneHookLogDirs(path.join(devflowDir, 'logs'));
+    if (!logPrune.ok) {
+      if (verbose) p.log.warn(`Could not prune hook log folders: ${logPrune.error}`);
+    } else if (logPrune.value.removed > 0) {
+      p.log.info(formatLogPruneLine(logPrune.value));
+    }
 
     // Name the active provider and what the selection moved. The reference
     // counts come from the install report rather than being recomputed: the

@@ -89,6 +89,18 @@ const MAX_SITE_LENGTH = 261;
 /** A tracker project key: the Jira key shape, which the Linear team key also fits. */
 const TRACKER_KEY_RE = /^[A-Z][A-Z0-9_]{1,9}$/;
 
+/**
+ * A branch name either resolver will put into argv or onto stdout: an
+ * alphanumeric first character (so never an option and never a hidden path), then
+ * at most 254 of `[A-Za-z0-9._/-]`, and never `..`. The lookahead is bounded by
+ * the same class, so the scan is linear (no unbounded `.*`). No `:` is admitted,
+ * so `<ref>:<path>` revision syntax built from it names exactly that path.
+ */
+const SAFE_REF_RE = /^(?![A-Za-z0-9._/-]{0,254}\.\.)[A-Za-z0-9][A-Za-z0-9._/-]{0,254}$/;
+
+/** The ref namespace of origin's remote-tracking branches, as `git symbolic-ref` prints it. */
+const ORIGIN_TRACKING_PREFIX = 'refs/remotes/origin/';
+
 /** Largest machine manifest read, in bytes. */
 const MAX_MANIFEST_BYTES = 1048576;
 
@@ -393,6 +405,24 @@ function normalizeComplianceId(s) {
 }
 
 /**
+ * The default branch a `git symbolic-ref --quiet refs/remotes/origin/HEAD` answer
+ * names — the branch `git clone` (or `git remote set-head`) last recorded for
+ * origin, read with no network call. Exactly one line, `refs/remotes/origin/`
+ * followed by a SAFE_REF_RE branch; anything else (another remote, a second line,
+ * a hostile name) is null. Pure: the caller runs git and hands over its stdout.
+ *
+ * @param {unknown} stdout
+ * @returns {string | null}
+ */
+function parseOriginHeadRef(stdout) {
+  if (typeof stdout !== 'string') return null;
+  const line = stdout.endsWith('\n') ? stdout.slice(0, -1) : stdout;
+  if (!line.startsWith(ORIGIN_TRACKING_PREFIX)) return null;
+  const branch = line.slice(ORIGIN_TRACKING_PREFIX.length);
+  return SAFE_REF_RE.test(branch) ? branch : null;
+}
+
+/**
  * The registry ids a framework list names — src/core/compliance.ts
  * normalizeFrameworks exactly, behind a parity test: normalized, unknown ids
  * dropped, first occurrence kept.
@@ -589,12 +619,15 @@ module.exports = Object.freeze({
   FEATURE_SWITCHES,
   TRACKER_SITE_RE,
   TRACKER_KEY_RE,
+  SAFE_REF_RE,
+  ORIGIN_TRACKING_PREFIX,
   decodeConfigBytes,
   readBoundedRegularFile,
   machineDevflowDir,
   readMachineManifest,
   collectDuplicateKeyPaths,
   normalizeComplianceIds,
+  parseOriginHeadRef,
   parseProjectBytes,
   parsePersonalBytes,
 });

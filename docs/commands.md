@@ -52,7 +52,7 @@ Multi-perspective code review with up to 20 specialized Review agents running in
 
 **Always active:** Security, Architecture, Performance, Complexity, Consistency, Regression, Testing, Reliability
 
-**Conditionally active** (when relevant files detected): TypeScript, React, Accessibility, UI Design, Go, Python, Java, Rust, Database, Dependencies, Documentation. The eight language focuses run only when their optional plugin's skill is installed.
+**Conditionally active** (when relevant files detected): TypeScript, React, Accessibility, UI Design, Go, Python, Java, Rust, Database, Dependencies, Documentation. The eight language focuses run only when their optional plugin's skill is installed in Claude Code's directory (`$CLAUDE_CONFIG_DIR` when it is an absolute path, else `~/.claude`).
 
 **Diff-driven** (when compliance skill installed and diff touches regulated surface): Compliance
 
@@ -241,7 +241,7 @@ Executes the devflow implement→review→verify pipeline for one ticket or all 
 
 Decision-preference profile distiller — mine past session transcripts across all projects to write `~/.devflow/preference-profile.md`.
 
-Scans Claude Code session transcripts from all known projects, extracts repeated design and implementation preferences (style choices, library selections, architectural patterns), and writes a structured preference profile. Consumed by `/dynamic-plan` to auto-resolve common decisions without human intervention.
+Scans Claude Code session transcripts from all known projects (under `$CLAUDE_CONFIG_DIR` when it is an absolute path, else `~/.claude`), extracts repeated design and implementation preferences (style choices, library selections, architectural patterns), and writes a structured preference profile. Consumed by `/dynamic-plan` to auto-resolve common decisions without human intervention.
 
 ```
 /dynamic-profile

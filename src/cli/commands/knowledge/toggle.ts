@@ -14,7 +14,7 @@ import color from 'picocolors';
 import { getGitRoot } from '../../../core/git.js';
 import { getDevFlowDirectory } from '../../../targets/claude-code/claude-paths.js';
 import { readMachineFeature, writeMachineFeature } from '../../../core/feature-switch.js';
-import { loadSettingsModule, narrowedSwitchLabel } from '../../../core/evidence-policy.js';
+import { loadSettingsModule, narrowedSwitchLabel, personalConfigTrackedWarning } from '../../../core/evidence-policy.js';
 import { getFeaturesDir } from '../../../core/project-paths.js';
 
 async function getWorktreePath(): Promise<string> {
@@ -50,8 +50,11 @@ export async function handleToggle(options: { enable?: boolean; disable?: boolea
     const enabled = await readMachineFeature(devflowDir, 'knowledge');
     const kbCount = await countKnowledgeBases(await getWorktreePath());
     p.log.info(`Status: ${enabled ? color.green('enabled') : color.yellow('disabled')}`);
-    const narrowed = enabled ? narrowedSwitchLabel(loadSettingsModule(), { dir: process.cwd() }, 'knowledge') : null;
+    const settingsModule = loadSettingsModule();
+    const narrowed = enabled ? narrowedSwitchLabel(settingsModule, { dir: process.cwd() }, 'knowledge') : null;
     if (narrowed !== null) p.log.info(`Effective here: ${color.yellow(narrowed)}`);
+    const trackedWarning = personalConfigTrackedWarning(settingsModule, { dir: process.cwd() });
+    if (trackedWarning !== null) p.log.warn(trackedWarning);
     p.log.info(`Knowledge bases: ${kbCount}`);
     p.outro('');
     return;
@@ -69,7 +72,7 @@ export async function handleToggle(options: { enable?: boolean; disable?: boolea
   }
 
   if (enabled) {
-    p.log.success('Feature knowledge bases enabled in every project');
+    p.log.success('Feature knowledge bases enabled in every project (a repository can opt out)');
     p.log.info('Knowledge bases are created automatically when workflows detect documented area changes.');
   } else {
     p.log.success('Feature knowledge bases disabled in every project');

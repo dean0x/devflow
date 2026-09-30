@@ -302,7 +302,7 @@ describe('ensureDevflowGitignore', () => {
   });
 });
 
-describe('ensureDevflowGitignore — v6 carve-out (.claudeignore + evidence policy + project settings)', () => {
+describe('ensureDevflowGitignore — v6 carve-out (.claudeignore + retired policy.json + project settings)', () => {
   let tmpDir: string;
 
   beforeEach(async () => {
@@ -366,14 +366,17 @@ describe('ensureDevflowGitignore — v6 carve-out (.claudeignore + evidence poli
 
     await ensureDevflowGitignore(tmpDir, false);
 
-    // User lines and the old comment are untouched; only the two missing lines are appended.
-    expect(await read()).toBe(`${seeded}${POLICY_LINE}\n${PROJECT_LINE}\n`);
+    // User lines and the old comment are untouched; only the two missing lines are
+    // inserted, inside the block, where a fresh block holds them (D-GITIGNORE-IN-BLOCK).
+    const upgraded = `node_modules/\n\n${v4Block.replace('!.devflow/conventions.md\n', `!.devflow/conventions.md\n${POLICY_LINE}\n${PROJECT_LINE}\n`)}\n`;
+    expect(upgraded.split('\n').slice(-4)).toEqual([POLICY_LINE, PROJECT_LINE, '.claudeignore', '']);
+    expect(await read()).toBe(upgraded);
     await expect(fs.access(markerV6())).resolves.toBeUndefined();
     await expect(fs.access(markerV4())).rejects.toThrow();
 
     // A second run (now v6-marked) re-reads, finds nothing missing and writes nothing.
     await ensureDevflowGitignore(tmpDir, false);
-    expect(await read()).toBe(`${seeded}${POLICY_LINE}\n${PROJECT_LINE}\n`);
+    expect(await read()).toBe(upgraded);
   });
 
   it('upgrades a v5-marked install: gains only the project line, is stamped v6, v5 marker removed (D-GITIGNORE-V6)', async () => {
@@ -402,12 +405,15 @@ describe('ensureDevflowGitignore — v6 carve-out (.claudeignore + evidence poli
 
     await ensureDevflowGitignore(tmpDir, false);
 
-    expect(await read()).toBe(`${seeded}${PROJECT_LINE}\n`);
+    // The project line lands just before the block's .claudeignore line, not at EOF.
+    const upgraded = seeded.replace(`${POLICY_LINE}\n.claudeignore\n`, `${POLICY_LINE}\n${PROJECT_LINE}\n.claudeignore\n`);
+    expect(upgraded).not.toBe(seeded);
+    expect(await read()).toBe(upgraded);
     await expect(fs.access(markerV6())).resolves.toBeUndefined();
     await expect(fs.access(markerV5())).rejects.toThrow();
 
     await ensureDevflowGitignore(tmpDir, false);
-    expect(await read()).toBe(`${seeded}${PROJECT_LINE}\n`);
+    expect(await read()).toBe(upgraded);
   });
 
   it('v6-marked install that lost its project line is healed (the marker is a claim, not proof)', async () => {
@@ -418,7 +424,8 @@ describe('ensureDevflowGitignore — v6 carve-out (.claudeignore + evidence poli
 
     await ensureDevflowGitignore(tmpDir, false);
 
-    expect(await read()).toBe(`${withoutProject}${PROJECT_LINE}\n`);
+    // Healed in place: the line goes back where it was, so the file is the converged one.
+    expect(await read()).toBe(converged);
   });
 
   it('v6-marked install that lost its policy line is healed (the marker is a claim, not proof)', async () => {
@@ -429,7 +436,7 @@ describe('ensureDevflowGitignore — v6 carve-out (.claudeignore + evidence poli
 
     await ensureDevflowGitignore(tmpDir, false);
 
-    expect(await read()).toBe(`${withoutPolicy}${POLICY_LINE}\n`);
+    expect(await read()).toBe(converged);
   });
 
   it('upgrades a v2-marked install once (appends conventions.md, policy, project and .claudeignore lines, writes v6 marker)', async () => {
@@ -597,8 +604,8 @@ describe('computeDevflowGitignore — branch-order and byte-identity', () => {
     expect(computeDevflowGitignore(content)).toBeNull();
   });
 
-  // byte-identity: v2→v6 upgrade appends every missing line, in block order
-  it('byte-identity: v2→v6 upgrade appends after existing trailing newline (no trimEnd)', () => {
+  // byte-identity: v2→v6 upgrade inserts every missing line after the v2 sentinel, in block order
+  it('byte-identity: v2→v6 upgrade inserts after the sentinel and keeps the trailing newline (no trimEnd)', () => {
     // A file ending with a single newline — upgrade must preserve that newline,
     // not collapse it. Shell uses `tail -c 1` guard (same behavior).
     const input = `${V2_BLOCK}\n`;
@@ -607,12 +614,13 @@ describe('computeDevflowGitignore — branch-order and byte-identity', () => {
     expect(result).toBe(`${V2_BLOCK}\n${V3_SENTINEL}\n${POLICY_LINE}\n${PROJECT_LINE}\n${CLAUDEIGNORE_LINE}\n`);
   });
 
-  it('byte-identity: v2→v6 upgrade preserves extra trailing newlines', () => {
-    // A file ending with two newlines — both preserved (trimEnd would collapse to one).
+  it('byte-identity: v2→v6 upgrade preserves extra trailing newlines, below the inserted lines', () => {
+    // A file ending with two newlines — both preserved (trimEnd would collapse to one),
+    // and the lines go inside the block, above the blank line (D-GITIGNORE-IN-BLOCK).
     const input = `${V2_BLOCK}\n\n`;
     const result = computeDevflowGitignore(input);
     expect(result).not.toBeNull();
-    expect(result).toBe(`${V2_BLOCK}\n\n${V3_SENTINEL}\n${POLICY_LINE}\n${PROJECT_LINE}\n${CLAUDEIGNORE_LINE}\n`);
+    expect(result).toBe(`${V2_BLOCK}\n${V3_SENTINEL}\n${POLICY_LINE}\n${PROJECT_LINE}\n${CLAUDEIGNORE_LINE}\n\n`);
   });
 
   it('byte-identity: v2→v6 upgrade adds newline separator when file lacks trailing newline', () => {
@@ -638,17 +646,48 @@ describe('computeDevflowGitignore — branch-order and byte-identity', () => {
     expect(result).toBe(`${V3_BLOCK}\n${POLICY_LINE}\n${PROJECT_LINE}\n${CLAUDEIGNORE_LINE}\n`);
   });
 
-  // byte-identity: v4→v6 upgrade appends only the policy and project lines
-  it('byte-identity: v4→v6 upgrade appends only the policy and project lines', () => {
-    expect(computeDevflowGitignore(`${V4_BLOCK}\n`)).toBe(`${V4_BLOCK}\n${POLICY_LINE}\n${PROJECT_LINE}\n`);
-    expect(computeDevflowGitignore(V4_BLOCK)).toBe(`${V4_BLOCK}\n${POLICY_LINE}\n${PROJECT_LINE}\n`);
+  // byte-identity: v4→v6 upgrade inserts only the policy and project lines, before .claudeignore
+  it('byte-identity: v4→v6 upgrade inserts only the policy and project lines, after the sentinel', () => {
+    expect(computeDevflowGitignore(`${V4_BLOCK}\n`)).toBe(`${V3_BLOCK}\n${POLICY_LINE}\n${PROJECT_LINE}\n${CLAUDEIGNORE_LINE}\n`);
+    // The .claudeignore line below keeps its missing newline: only inserted bytes are added.
+    expect(computeDevflowGitignore(V4_BLOCK)).toBe(`${V3_BLOCK}\n${POLICY_LINE}\n${PROJECT_LINE}\n${CLAUDEIGNORE_LINE}`);
   });
 
-  // byte-identity: v5→v6 upgrade appends only the project line (D-GITIGNORE-V6)
-  it('byte-identity: v5→v6 upgrade appends only the project line, after .claudeignore', () => {
-    expect(computeDevflowGitignore(`${V5_BLOCK}\n`)).toBe(`${V5_BLOCK}\n${PROJECT_LINE}\n`);
-    expect(computeDevflowGitignore(V5_BLOCK)).toBe(`${V5_BLOCK}\n${PROJECT_LINE}\n`);
+  // byte-identity: v5→v6 upgrade inserts only the project line (D-GITIGNORE-V6, D-GITIGNORE-IN-BLOCK)
+  it('byte-identity: v5→v6 upgrade inserts only the project line, just before .claudeignore', () => {
+    expect(computeDevflowGitignore(`${V5_BLOCK}\n`)).toBe(`${V3_BLOCK}\n${POLICY_LINE}\n${PROJECT_LINE}\n${CLAUDEIGNORE_LINE}\n`);
+    expect(computeDevflowGitignore(V5_BLOCK)).toBe(`${V3_BLOCK}\n${POLICY_LINE}\n${PROJECT_LINE}\n${CLAUDEIGNORE_LINE}`);
     expect(computeDevflowGitignore(`${V5_BLOCK}\n${PROJECT_LINE}\n`)).toBeNull();
+    // The upgraded v5 block is the current block, byte for byte.
+    expect(computeDevflowGitignore(`${V5_BLOCK}\n`)).toBe(`${DEVFLOW_GITIGNORE_BLOCK}\n`);
+  });
+
+  it('a user re-ignore of project.json below the block is never overridden by the upgrade (D-GITIGNORE-IN-BLOCK)', () => {
+    // gitignore is last-match-wins: a `!.devflow/project.json` appended at EOF would
+    // come after the user's `.devflow/project.json` and silently re-include the file.
+    const input = `node_modules/\n\n${V5_BLOCK}\n\n# keep our settings local\n.devflow/project.json\n`;
+    const result = computeDevflowGitignore(input);
+    expect(result).toBe(
+      `node_modules/\n\n${V3_BLOCK}\n${POLICY_LINE}\n${PROJECT_LINE}\n${CLAUDEIGNORE_LINE}\n\n# keep our settings local\n.devflow/project.json\n`,
+    );
+    const out = result!.split('\n');
+    expect(out.lastIndexOf('.devflow/project.json')).toBeGreaterThan(out.indexOf(PROJECT_LINE));
+    expect(computeDevflowGitignore(result!)).toBeNull();
+  });
+
+  it('the insertion run follows whitespace-padded block lines and stops at the first foreign line', () => {
+    // A padded policy line directly below the sentinel is part of the run; the project
+    // line goes after it, above the .claudeignore line.
+    const padded = `${V3_BLOCK}\n  ${POLICY_LINE}\t\n${CLAUDEIGNORE_LINE}\n`;
+    expect(computeDevflowGitignore(padded)).toBe(`${V3_BLOCK}\n  ${POLICY_LINE}\t\n${PROJECT_LINE}\n${CLAUDEIGNORE_LINE}\n`);
+    // A foreign line between the sentinel and the policy line ends the run at the sentinel.
+    const split = `${V3_BLOCK}\n# user note\n${POLICY_LINE}\n${CLAUDEIGNORE_LINE}\n`;
+    expect(computeDevflowGitignore(split)).toBe(`${V3_BLOCK}\n${PROJECT_LINE}\n# user note\n${POLICY_LINE}\n${CLAUDEIGNORE_LINE}\n`);
+    // CRLF: the carriage return is whitespace to the matcher and every byte is kept.
+    const crlf = `${V3_BLOCK.split('\n').join('\r\n')}\r\n${POLICY_LINE}\r\n${CLAUDEIGNORE_LINE}\r\n`;
+    expect(computeDevflowGitignore(crlf)).toBe(
+      `${V3_BLOCK.split('\n').join('\r\n')}\r\n${POLICY_LINE}\r\n${PROJECT_LINE}\n${CLAUDEIGNORE_LINE}\r\n`,
+    );
   });
 
   it('converged: v3 sentinel, policy and project lines and a .claudeignore line all present → null (no-op) (P0-S24)', () => {
@@ -710,7 +749,9 @@ describe('computeDevflowGitignore — branch-order and byte-identity', () => {
     expect(computeDevflowGitignore(input)).toBeNull();
     // Substring is NOT a match: a longer path or a comment mentioning it does not count.
     const lookalike = `${V4_BLOCK}\n!.devflow/policy.json.bak\n# ${POLICY_LINE}\n${PROJECT_LINE}\n`;
-    expect(computeDevflowGitignore(lookalike)).toBe(`${lookalike}${POLICY_LINE}\n`);
+    expect(computeDevflowGitignore(lookalike)).toBe(
+      `${V3_BLOCK}\n${POLICY_LINE}\n${CLAUDEIGNORE_LINE}\n!.devflow/policy.json.bak\n# ${POLICY_LINE}\n${PROJECT_LINE}\n`,
+    );
   });
 
   it('project line is a completion line, never a presence sentinel: alone it still gets the full block (D-GITIGNORE-V6)', () => {
@@ -724,7 +765,9 @@ describe('computeDevflowGitignore — branch-order and byte-identity', () => {
     const input = `${V5_BLOCK}\n\t${PROJECT_LINE}  \n`;
     expect(computeDevflowGitignore(input)).toBeNull();
     const lookalike = `${V5_BLOCK}\n!.devflow/project.json.bak\n# ${PROJECT_LINE}\n`;
-    expect(computeDevflowGitignore(lookalike)).toBe(`${lookalike}${PROJECT_LINE}\n`);
+    expect(computeDevflowGitignore(lookalike)).toBe(
+      `${V3_BLOCK}\n${POLICY_LINE}\n${PROJECT_LINE}\n${CLAUDEIGNORE_LINE}\n!.devflow/project.json.bak\n# ${PROJECT_LINE}\n`,
+    );
   });
 
   // ---------------------------------------------------------------------------
@@ -771,7 +814,8 @@ describe('computeDevflowGitignore — branch-order and byte-identity', () => {
     const input = `${V2_BLOCK}\n${CLAUDEIGNORE_LINE}\n`;
     const result = computeDevflowGitignore(input);
 
-    expect(result).toBe(`${input}${V3_SENTINEL}\n${POLICY_LINE}\n${PROJECT_LINE}\n`);
+    // Inserted right after the v2 sentinel, so the user's .claudeignore line stays last.
+    expect(result).toBe(`${V2_BLOCK}\n${V3_SENTINEL}\n${POLICY_LINE}\n${PROJECT_LINE}\n${CLAUDEIGNORE_LINE}\n`);
     expectIdempotent(result);
   });
 

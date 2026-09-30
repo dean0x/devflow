@@ -4,7 +4,7 @@ import * as path from 'path';
 import * as p from '@clack/prompts';
 import color from 'picocolors';
 import { getClaudeDirectory, getDevFlowDirectory } from '../../targets/claude-code/claude-paths.js';
-import { writeFileAtomicExclusive } from '../../core/fs-atomic.js';
+import { writeSettingsFileAtomic } from '../../core/fs-atomic.js';
 import { discoverProjectGitRoots } from '../../targets/claude-code/post-install.js';
 import { getGitRoot } from '../../core/git.js';
 import {
@@ -25,7 +25,7 @@ import {
   type Settings,
 } from '../../targets/claude-code/hooks.js';
 import { readMachineFeature, writeMachineFeature } from '../../core/feature-switch.js';
-import { loadSettingsModule, narrowedSwitchLabel } from '../../core/evidence-policy.js';
+import { loadSettingsModule, narrowedSwitchLabel, personalConfigTrackedWarning } from '../../core/evidence-policy.js';
 
 /**
  * Map of hook event type → filename marker for the memory hooks.
@@ -36,10 +36,11 @@ import { loadSettingsModule, narrowedSwitchLabel } from '../../core/evidence-pol
  * at the hook-registration level), and decisions detection is a SessionStart-spawned
  * detached worker rather than a SessionEnd hook (see legacy-hooks.ts).
  *
- * Stop-array ordering contract: memory-worker MUST be registered AFTER capture-turn
- * in the Stop hook array (append-before-spawn — memory-worker's throttle/spawn
- * decision assumes the current turn was already appended by capture-turn earlier
- * in the same Stop event). Enforced by init.ts's registration order, not here.
+ * Stop-event concurrency: Claude Code runs one event's hooks in parallel, so
+ * memory-worker can spawn background-memory-update before capture-turn has
+ * appended this turn's assistant row. The worker tolerates that — a queue that
+ * holds only user rows is left in place and the LLM run skipped
+ * (D-QUEUE-NO-ORPHAN-DELETE) — so nothing here depends on hook order.
  */
 const MEMORY_HOOK_CONFIG: Record<string, string> = {
   Stop: 'memory-worker',
@@ -157,10 +158,12 @@ export function countMemoryHooks(input: string | Settings): number {
  * remove-then-add, which also upgrades an older hook format (e.g. `.sh` →
  * `run-hook`) in place.
  *
- * Stop-array ordering (AC-C2): memory-worker is appended after whatever the
- * Stop array already holds, so it lands after capture-turn as long as the
- * capture hooks are registered first — init registers them earlier in the same
- * pass, and on a standalone toggle they are already present.
+ * Stop-array position (AC-C2): memory-worker is appended after whatever the
+ * Stop array already holds, so it lands after capture-turn — init registers the
+ * capture hooks earlier in the same pass, and on a standalone toggle they are
+ * already present. The position keeps settings.json identical across init and
+ * the toggle; it sequences nothing at run time, where the Stop hooks run in
+ * parallel.
  */
 export function convergeMemoryHooks(settingsJson: string, enabled: boolean, devflowDir: string): string {
   const cleaned = removeMemoryHooks(settingsJson);
@@ -245,7 +248,7 @@ export async function cleanQueueFiles(projectPaths: string[]): Promise<{ cleaned
 
 export const memoryCommand = new Command('memory')
   .description('Enable, disable, or clean up working memory (session context preservation)')
-  .option('--enable', 'Enable working memory in every project')
+  .option('--enable', 'Enable working memory in every project (a repository can opt out)')
   .option('--disable', 'Disable working memory in every project')
   .option('--status', 'Show current state')
   .option('--clear', 'Clean up queue files from projects')
@@ -254,7 +257,7 @@ export const memoryCommand = new Command('memory')
     if (!hasFlag) {
       p.intro(color.bgCyan(color.white(' Working Memory ')));
       p.note(
-        `${color.cyan('devflow memory --enable')}   Enable working memory (every project)\n` +
+        `${color.cyan('devflow memory --enable')}   Enable working memory (every project; a repository can opt out)\n` +
         `${color.cyan('devflow memory --disable')}  Disable working memory (every project)\n` +
         `${color.cyan('devflow memory --status')}   Check current state\n` +
         `${color.cyan('devflow memory --clear')}    Clean up queue files`,
@@ -350,8 +353,11 @@ export const memoryCommand = new Command('memory')
           `run ${color.cyan('devflow memory --enable')} to fix`,
         );
       }
-      const narrowed = enabled ? narrowedSwitchLabel(loadSettingsModule(), { dir: process.cwd() }, 'memory') : null;
+      const settingsModule = loadSettingsModule();
+      const narrowed = enabled ? narrowedSwitchLabel(settingsModule, { dir: process.cwd() }, 'memory') : null;
       if (narrowed !== null) p.log.info(`Effective here: ${color.yellow(narrowed)}`);
+      const trackedWarning = personalConfigTrackedWarning(settingsModule, { dir: process.cwd() });
+      if (trackedWarning !== null) p.log.warn(trackedWarning);
       return;
     }
 
@@ -378,11 +384,11 @@ export const memoryCommand = new Command('memory')
     }
 
     if (converged !== settingsContent) {
-      await writeFileAtomicExclusive(settingsPath, converged);
+      await writeSettingsFileAtomic(settingsPath, converged);
     }
 
     if (enabled) {
-      p.log.success('Working memory enabled in every project');
+      p.log.success('Working memory enabled in every project (a repository can opt out)');
       p.log.info(color.dim('Session context will be automatically preserved across conversations'));
       return;
     }

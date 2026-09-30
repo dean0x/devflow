@@ -8,7 +8,9 @@
  * (D-LEDGER-MAIN-WORKTREE), so a command reads the index the Learning agent
  * writes. `knowledge_load`/`knowledge_writeback` (_knowledge.mds) resolve the
  * checkout's toplevel, else the start directory: knowledge bases are committed
- * per branch. Both used to read from cwd, so a session started in `packages/app`
+ * per branch. `docs_root` (_docs_root.mds, D-DOCS-ROOT) applies the knowledge rule
+ * to every `.devflow/docs/` artifact a command reads or writes — tests/guards/
+ * docs-root.test.ts holds the paths to it, and this file runs its command. Both used to read from cwd, so a session started in `packages/app`
  * loaded `(none)` and a write-back committed `packages/app/.devflow/features`.
  *
  * The rule is prose an LLM follows around ONE git command. The test extracts that
@@ -28,6 +30,7 @@ import { requireDistFile, requireDistFiles } from '../helpers.js';
 const DECISIONS_HEADING = '### Load DECISIONS_CONTEXT';
 const KNOWLEDGE_HEADING = '### Load Feature Knowledge';
 const WRITEBACK_HEADING = '### Feature Knowledge Write-Back (Conditional)';
+const DOCS_ROOT_LEAD = '**Docs root (D-DOCS-ROOT).**';
 
 /** The section of `text` that starts at `heading`, up to the next `### ` heading. */
 function sectionOf(text: string, heading: string): string {
@@ -212,6 +215,24 @@ describe('compiled loaders resolve the repository root, not cwd (D-PROMPT-ROOT, 
     }
     const command = collectGitCommand(sectionOf(requireDistFile(knowledgeHosts(KNOWLEDGE_HEADING)[0]), KNOWLEDGE_HEADING));
     // Knowledge bases are per branch: a worktree reads its OWN toplevel, not main's.
+    for (const [label, start, expected] of [['root', main, main], ['subdir', sub, main], ['worktree', wt, wt]] as const) {
+      expect(worktreeFrom(runFromStart(command as string, start), start), label).toBe(expected);
+    }
+    expect(worktreeFrom(runFromStart(command as string, outside), outside)).toBe(outside);
+  });
+
+  it('every compiled docs root resolves the checkout toplevel, from a root, a subdirectory and a worktree', () => {
+    const hosts = knowledgeHosts(DOCS_ROOT_LEAD);
+    // Non-vacuity (PF-018): the seven docs-writing commands carry it.
+    expect(hosts.length).toBeGreaterThanOrEqual(7);
+    for (const file of hosts) {
+      const section = sectionOf(requireDistFile(file), DOCS_ROOT_LEAD);
+      expect(collectGitCommand(section), `${file}: the docs-root command`).toBe('git -C "{start}" rev-parse --show-toplevel');
+      expect(section, `${file}: outside git the start directory stands`)
+        .toContain('If the command fails (outside a git repository), `{worktree}` is the start directory itself.');
+    }
+    const command = collectGitCommand(sectionOf(requireDistFile(hosts[0]), DOCS_ROOT_LEAD));
+    // Docs artifacts are per checkout, like knowledge bases: a worktree writes its OWN.
     for (const [label, start, expected] of [['root', main, main], ['subdir', sub, main], ['worktree', wt, wt]] as const) {
       expect(worktreeFrom(runFromStart(command as string, start), start), label).toBe(expected);
     }

@@ -233,7 +233,7 @@ function collectHandoffPersistenceGaps(content: string): string[] {
   const out: string[] = []
   const record = askBlock(content) ?? ''
   const protocol = content.split('\n').find(l => l.startsWith('**Handoff Protocol**')) ?? ''
-  const handoff = '`.devflow/docs/handoff-{branch_slug}.md`'
+  const handoff = '`{worktree}/.devflow/docs/handoff-{branch_slug}.md`'
   if (!record.includes(`section of ${handoff}`)) out.push('record: the section is not written to the handoff file')
   if (!record.includes('before any Code spawn')) out.push('record: not written before any Code spawn')
   if (!record.includes('keeps the section byte-identical')) out.push('record: later writes may drop the section')
@@ -274,7 +274,7 @@ describe('AC-10: the exception survives in the handoff file until the PR exists'
 
 /** The value every forwarding line carries: the handoff section verbatim, or `(none)`. */
 const FORWARD_LINE =
-  'PR_EXCEPTIONS: {the ## Evidence Exceptions section of .devflow/docs/handoff-{branch_slug}.md verbatim, or (none)}'
+  'PR_EXCEPTIONS: {the ## Evidence Exceptions section of {worktree}/.devflow/docs/handoff-{branch_slug}.md verbatim, or (none)}'
 
 /**
  * Named collector: Code spawns that can create the PR (`CREATE_PR: true`, or the

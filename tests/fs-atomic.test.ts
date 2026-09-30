@@ -17,7 +17,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { promises as fs } from 'fs';
 import * as path from 'path';
 import * as os from 'os';
-import { writeFileAtomicExclusive } from '../src/core/fs-atomic.js';
+import { writeFileAtomicExclusive, writeSettingsFileAtomic } from '../src/core/fs-atomic.js';
 
 const IS_WIN32 = process.platform === 'win32';
 
@@ -125,4 +125,56 @@ describe('writeFileAtomicExclusive', () => {
       expect(content).toBe('{}');
     },
   );
+});
+
+describe('writeSettingsFileAtomic (D-SETTINGS-ATOMIC)', () => {
+  let dir: string;
+
+  beforeEach(async () => {
+    dir = await fs.mkdtemp(path.join(os.tmpdir(), 'devflow-fs-atomic-settings-'));
+  });
+
+  afterEach(async () => {
+    await fs.rm(dir, { recursive: true, force: true });
+  });
+
+  it('replaces the file by rename — a hard link to the old file keeps the old bytes', async () => {
+    const target = path.join(dir, 'settings.json');
+    await fs.writeFile(target, 'old');
+    await fs.link(target, path.join(dir, 'old-link'));
+
+    await writeSettingsFileAtomic(target, 'new');
+
+    expect(await fs.readFile(target, 'utf-8')).toBe('new');
+    expect(await fs.readFile(path.join(dir, 'old-link'), 'utf-8')).toBe('old');
+  });
+
+  it('writes through a symlinked settings file and leaves the link in place', async () => {
+    const real = path.join(dir, 'dotfiles-settings.json');
+    const link = path.join(dir, 'settings.json');
+    await fs.writeFile(real, '{}');
+    await fs.symlink(real, link);
+
+    await writeSettingsFileAtomic(link, '{"a":1}');
+
+    expect((await fs.lstat(link)).isSymbolicLink()).toBe(true);
+    expect(await fs.readFile(real, 'utf-8')).toBe('{"a":1}');
+    expect(await fs.readdir(dir)).toEqual(['dotfiles-settings.json', 'settings.json']);
+  });
+
+  it('replaces a dangling symlink with the file, as for a missing one', async () => {
+    const link = path.join(dir, 'settings.json');
+    await fs.symlink(path.join(dir, 'gone.json'), link);
+
+    await writeSettingsFileAtomic(link, '{}');
+
+    expect((await fs.lstat(link)).isFile()).toBe(true);
+    expect(await fs.readFile(link, 'utf-8')).toBe('{}');
+  });
+
+  it('creates a missing settings file', async () => {
+    const target = path.join(dir, 'settings.json');
+    await writeSettingsFileAtomic(target, '{}');
+    expect(await fs.readFile(target, 'utf-8')).toBe('{}');
+  });
 });

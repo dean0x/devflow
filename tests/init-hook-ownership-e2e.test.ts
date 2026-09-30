@@ -111,7 +111,9 @@ afterEach(async () => {
 
 describe('init and the feature toggles keep user hooks that mention devflow marker words (#391)', () => {
   it('init, init --no-memory, memory --enable and ambient --disable touch only devflow\'s own hooks', async () => {
-    const common = ['--recommended', '--ambient', '--no-proxy', '--security', 'none'];
+    // `--security user`: the deny list lands in the sandboxed settings, beside the
+    // hooks under test; `none` would reach the real managed file (D-TESTS-NO-SYSTEM-MANAGED).
+    const common = ['--recommended', '--ambient', '--no-proxy', '--security', 'user'];
     const ours = (marker: string): string => `${runHook()} ${marker}`;
 
     runCli('init', ...common, '--memory');

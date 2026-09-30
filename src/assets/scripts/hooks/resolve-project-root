@@ -81,7 +81,10 @@ _df_nongit_root() {
 # falls back to df_resolve_root, so the ledger stays at the toplevel exactly as
 # before this rule. A failed call prints nothing: `--show-toplevel` itself failed
 # (not a work tree), so asking git again could only fail the same way, and the
-# non-git fallback applies directly. Parsing is parameter expansion and `case`
+# non-git fallback applies directly. Inside a checkout git refuses (dubious
+# ownership, GIT_CEILING_DIRECTORIES) that fallback is the raw cwd, which may be a
+# subdirectory; df_is_project_root refuses any root without its own `.git`
+# (D-HOOKS-TOPLEVEL-ONLY), so no hook scaffolds there. Parsing is parameter expansion and `case`
 # only: one git call on the success path and on the non-git path alike.
 df_resolve_roots() {
   local _cwd="$1" _out="" _top="" _common="" _main=""

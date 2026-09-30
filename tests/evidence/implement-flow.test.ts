@@ -408,7 +408,7 @@ const PHASE1_ORDER: readonly OrderRule[] = [
   { label: 'the policy resolves before setup-task', before: 'resolve-evidence-policy.cjs', after: 'OPERATION: setup-task' },
   { label: 'setup-task runs before the ticket ask', before: 'OPERATION: setup-task', after: TICKET_ASK },
   { label: 'the ticket exception is recorded before the test-plan step', before: RECORD, after: TEST_PLAN_STEP },
-  { label: 'the test plan is checked before it can be missing', before: 'check tp .devflow/docs/evidence-{branch_slug}.md', after: MISSING_ASK },
+  { label: 'the test plan is checked before it can be missing', before: 'check tp "{worktree}/.devflow/docs/evidence-{branch_slug}.md"', after: MISSING_ASK },
   { label: 'the missing-plan ask precedes the outputs', before: MISSING_ASK, after: OUTPUTS },
   { label: 'the outputs are set before Phase 2', before: OUTPUTS, after: '### Phase 2: Implement' },
 ]
@@ -443,8 +443,8 @@ describe('AC-9: /implement writes and checks the test plan before any Code spawn
   it('the check and the render run the installed script over the evidence file', () => {
     const lines = implementMd().split('\n')
     const script = 'node "$HOME/.devflow/scripts/verify-evidence.cjs"'
-    expect(lines).toContain(`${script} check tp .devflow/docs/evidence-{branch_slug}.md; echo "exit=$?"`)
-    expect(lines).toContain(`${script} render --plan .devflow/docs/evidence-{branch_slug}.md; echo "exit=$?"`)
+    expect(lines).toContain(`${script} check tp "{worktree}/.devflow/docs/evidence-{branch_slug}.md"; echo "exit=$?"`)
+    expect(lines).toContain(`${script} render --plan "{worktree}/.devflow/docs/evidence-{branch_slug}.md"; echo "exit=$?"`)
   })
 })
 
@@ -471,7 +471,7 @@ function collectMissingAskDefects(block: string | null): string[] {
   need(`exactly the two options (found: ${options.join(', ')})`, options.join('|') === 'Record an exception|Stop')
   need('renders the exception as kind `test-plan`', block.includes('as kind `test-plan`'))
   need('a bounded re-ask for an empty reason', /ask for it once more, and stop/.test(block))
-  need('the same Evidence Exceptions section of the handoff file', block.includes('`## Evidence Exceptions` section of `.devflow/docs/handoff-{branch_slug}.md`'))
+  need('the same Evidence Exceptions section of the handoff file', block.includes('`## Evidence Exceptions` section of `{worktree}/.devflow/docs/handoff-{branch_slug}.md`'))
   need('the BLOCKED report', block.includes('`BLOCKED (no test plan)`'))
   need('the branch and BASE_BRANCH', block.includes('`TASK_ID`') && block.includes('`BASE_BRANCH`'))
   need('the project-file remedy', block.includes('`.devflow/project.json`'))
@@ -654,6 +654,8 @@ function collectEvidenceSpawnDefects(content: string): string[] {
     if (!keys.includes(key)) out.push(`the spawn does not pass ${key}`)
   }
   if (!spawns[0].includes('EVIDENCE_FILE: .devflow/docs/evidence-{branch_slug}.md')) out.push('EVIDENCE_FILE is not the evidence file')
+  // Repo-relative by the op's shape gate (no space admitted), so it travels with the root it is relative to (D-DOCS-ROOT).
+  if (!spawns[0].includes('WORKTREE_PATH: {worktree}')) out.push('EVIDENCE_FILE travels without the WORKTREE_PATH it is relative to')
   const phase = content.slice(content.indexOf(PHASE10B), content.indexOf('### Phase 11: Report'))
   if (!phase.includes('under every strategy')) out.push('Phase 10b does not run under every strategy')
   if (!phase.includes('It never blocks')) out.push('Phase 10b may block')

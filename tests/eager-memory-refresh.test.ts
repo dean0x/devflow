@@ -630,12 +630,16 @@ describe('S5: AC-P3 — double-spawn blocked by .working-memory.lock/', () => {
 });
 
 // =============================================================================
-// S6 — AC-F5: User-only queue (no assistant turn) skips LLM
+// S6 — AC-F5 + D-QUEUE-NO-ORPHAN-DELETE: a user-only queue skips the LLM and
+// is left in place. Stop hooks run in parallel, so the worker can read the queue
+// after capture-prompt appended the user row and before capture-turn appends the
+// assistant row; deleting it then would lose that turn's prompt.
 // =============================================================================
-describe('S6: AC-F5 — user-only queue skips LLM', () => {
+describe('S6: AC-F5 — user-only queue skips LLM and keeps the queue', () => {
   let projectDir: string;
   let homeDir: string;
   let shimDir: string;
+  let seeded: string;
 
   beforeEach(() => {
     projectDir = fs.mkdtempSync(path.join(os.tmpdir(), 'emr-s6-'));
@@ -647,16 +651,11 @@ describe('S6: AC-F5 — user-only queue skips LLM', () => {
 
     // ONLY user turns — no assistant turn
     const ts = Math.floor(Date.now() / 1000);
-    fs.writeFileSync(
-      path.join(projectDir, '.devflow', 'memory', '.pending-turns.jsonl'),
-      [
-        JSON.stringify({ role: 'user', content: 'do the thing', ts }),
-        JSON.stringify({ role: 'user', content: 'please now', ts: ts + 1 }),
-      ].join('\n') + '\n'
-    );
-
-    const memFile = path.join(projectDir, '.devflow', 'memory', 'WORKING-MEMORY.md');
-    createFakeClaudeShim(shimDir, memFile);
+    seeded = [
+      JSON.stringify({ role: 'user', content: 'do the thing', ts }),
+      JSON.stringify({ role: 'user', content: 'please now', ts: ts + 1 }),
+    ].join('\n') + '\n';
+    fs.writeFileSync(path.join(projectDir, '.devflow', 'memory', '.pending-turns.jsonl'), seeded);
   });
 
   afterEach(() => {
@@ -665,16 +664,41 @@ describe('S6: AC-F5 — user-only queue skips LLM', () => {
     fs.rmSync(shimDir, { recursive: true, force: true });
   });
 
-  it('WORKING-MEMORY.md NOT written, queue cleaned up', () => {
-    runWorker(projectDir, homeDir, shimDir);
-
+  it('WORKING-MEMORY.md NOT written, and every queued user row survives untouched', () => {
     const memFile = path.join(projectDir, '.devflow', 'memory', 'WORKING-MEMORY.md');
-    expect(fs.existsSync(memFile)).toBe(false);
+    createFakeClaudeShim(shimDir, memFile);
 
+    const { exitCode } = runWorker(projectDir, homeDir, shimDir);
+    expect(exitCode).toBe(0);
+
+    expect(fs.existsSync(memFile)).toBe(false);
     const queueFile = path.join(projectDir, '.devflow', 'memory', '.pending-turns.jsonl');
     const processingFile = path.join(projectDir, '.devflow', 'memory', '.pending-turns.processing');
-    expect(fs.existsSync(queueFile)).toBe(false);
+    expect(fs.readFileSync(queueFile, 'utf-8')).toBe(seeded);
     expect(fs.existsSync(processingFile)).toBe(false);
+    expect(fs.readFileSync(workerLogPath(projectDir, homeDir), 'utf-8'))
+      .toContain('User-only queue (no assistant/qa turn) — leaving it for the next run');
+  });
+
+  it('the next run, once the assistant row has landed, hands the kept prompt to the LLM', () => {
+    const memFile = path.join(projectDir, '.devflow', 'memory', 'WORKING-MEMORY.md');
+    const stdinCapture = createPromptCapturingShim(shimDir, `${memFile}.new`);
+    const queueFile = path.join(projectDir, '.devflow', 'memory', '.pending-turns.jsonl');
+
+    // Run 1 races ahead of capture-turn: the queue holds only the user rows.
+    runWorker(projectDir, homeDir, shimDir);
+    expect(fs.existsSync(stdinCapture)).toBe(false);
+
+    // capture-turn's append lands; run 2 sees the whole turn.
+    const ts = Math.floor(Date.now() / 1000);
+    fs.appendFileSync(queueFile, JSON.stringify({ role: 'assistant', content: 'thing done', ts: ts + 2 }) + '\n');
+    const { exitCode } = runWorker(projectDir, homeDir, shimDir);
+    expect(exitCode).toBe(0);
+
+    const prompt = fs.readFileSync(stdinCapture, 'utf-8');
+    expect(prompt).toContain('do the thing');
+    expect(prompt).toContain('thing done');
+    expect(fs.existsSync(memFile)).toBe(true);
   });
 });
 
@@ -1195,7 +1219,7 @@ describe('S16: queue-claim lost-race — mv failure takes SKIP path, queue prese
 // When both jq and node are absent from PATH, json-parse sets _JSON_AVAILABLE=false.
 // The worker then:
 //   (1) passes the `command -v claude` binary gate (fake claude shim is on PATH)
-//   (2) skips the orphan-only guard (conservative: no blind truncation when JSON unavailable)
+//   (2) skips the orphan-only guard (conservative: it cannot tell a user-only queue without JSON)
 //   (3) claims the queue (mv to .processing)
 //   (4) attempts degraded shell extraction (EXTRACTED="" on macOS BSD tools,
 //       may extract partial data on Linux GNU tools)
@@ -1357,7 +1381,7 @@ describe('S18: AC-F10 — qa rows in background-memory-update (orphan gate + TUR
     fs.rmSync(shimDir, { recursive: true, force: true });
   });
 
-  it('user + qa (no assistant) is NOT truncated as user-only — a real run is attempted', () => {
+  it('user + qa (no assistant) is NOT skipped as user-only — a real run is attempted', () => {
     const memFile = path.join(projectDir, '.devflow', 'memory', 'WORKING-MEMORY.md');
     createFakeClaudeShim(shimDir, memFile);
 
@@ -1372,7 +1396,7 @@ describe('S18: AC-F10 — qa rows in background-memory-update (orphan gate + TUR
 
     runWorker(projectDir, homeDir, shimDir);
 
-    // WORKING-MEMORY.md written proves the orphan gate did NOT truncate the queue
+    // WORKING-MEMORY.md written proves the orphan gate did NOT skip the run
     // (the "no assistant turn" auto-clean path never invokes claude at all).
     expect(fs.existsSync(memFile)).toBe(true);
     const processingFile = path.join(projectDir, '.devflow', 'memory', '.pending-turns.processing');
@@ -1414,24 +1438,23 @@ exit 0
     expect(capturedStdin).toContain('ship now');
   });
 
-  it('regression: pure user-only queue (no qa, no assistant) is STILL truncated without an LLM run', () => {
+  it('regression: pure user-only queue (no qa, no assistant) still skips the LLM run, and is kept', () => {
     const memFile = path.join(projectDir, '.devflow', 'memory', 'WORKING-MEMORY.md');
     createFakeClaudeShim(shimDir, memFile);
 
     const ts = Math.floor(Date.now() / 1000);
-    fs.writeFileSync(
-      path.join(projectDir, '.devflow', 'memory', '.pending-turns.jsonl'),
-      JSON.stringify({ role: 'user', content: 'just a question', ts }) + '\n'
-    );
+    const row = JSON.stringify({ role: 'user', content: 'just a question', ts }) + '\n';
+    fs.writeFileSync(path.join(projectDir, '.devflow', 'memory', '.pending-turns.jsonl'), row);
 
     runWorker(projectDir, homeDir, shimDir);
 
-    // Orphan gate must still fire for a genuinely user-only queue — claude never invoked.
+    // Orphan gate must still fire for a genuinely user-only queue — claude never invoked —
+    // and leave the row for the run that follows capture-turn (D-QUEUE-NO-ORPHAN-DELETE).
     expect(fs.existsSync(memFile)).toBe(false);
-    expect(fs.existsSync(path.join(projectDir, '.devflow', 'memory', '.pending-turns.jsonl'))).toBe(false);
+    expect(fs.readFileSync(path.join(projectDir, '.devflow', 'memory', '.pending-turns.jsonl'), 'utf-8')).toBe(row);
   });
 
-  it('qa-only queue (no user, no assistant) is NOT truncated as user-only', () => {
+  it('qa-only queue (no user, no assistant) is NOT skipped as user-only', () => {
     const memFile = path.join(projectDir, '.devflow', 'memory', 'WORKING-MEMORY.md');
     createFakeClaudeShim(shimDir, memFile);
 
@@ -2437,8 +2460,8 @@ describe('S24: State-C counts orphaned .processing toward queue depth (B4)', () 
 //        path measures worker liveness, not queue-file turn age.
 // REL-3: cksum absent from PATH (startup assert) and cksum-fails-for-file (CKSUM_FAILED)
 //        must both refuse to swap — fail-closed, never false-success.
-// REG-3: orphan-only auto-clean must be gated on the absence of a retry .processing batch
-//        so a CONFLICT batch is not stranded while a user-only .jsonl is drained.
+// REG-3: the orphan-only skip must be gated on the absence of a retry .processing batch
+//        so a CONFLICT batch is not stranded while a user-only .jsonl holds the run back.
 // =============================================================================
 describe('S25: CAS heartbeat, fail-closed checksum, and orphan-gate retry-batch guard', () => {
   let projectDir: string;
@@ -2592,8 +2615,8 @@ exit 0
     expect(exitCode).toBe(0);
 
     const log = fs.readFileSync(workerLogPath(projectDir, homeDir), 'utf-8');
-    // Orphan gate must NOT have fired — worker did not drain+exit at the user-only check
-    expect(log).not.toContain('User-only queue (no assistant/qa turn) — truncating without LLM run');
+    // Orphan gate must NOT have fired — worker did not exit at the user-only check
+    expect(log).not.toContain('User-only queue (no assistant/qa turn)');
     // Merge path ran and LLM was invoked — merged .processing has assistant turns from conflict batch
     expect(log).toContain('staged file valid, real file unchanged — swap complete');
   });

@@ -305,6 +305,39 @@ export function createFakeBin(base: string, tools: readonly Tool[] = ['gh', 'git
   return { dir };
 }
 
+/**
+ * Most one warm-up exec may take: the top of the measured syspolicyd stall
+ * (NODE_EXEC_STALL_MS, 7 s) with room for a queue behind it. A test file's
+ * beforeAll that warms passes WARM_HOOK_TIMEOUT_MS, which covers two fakes.
+ */
+const WARM_EXEC_TIMEOUT_MS = 15_000;
+export const WARM_HOOK_TIMEOUT_MS = 40_000;
+
+/**
+ * Run every fake in `bin` once, against an empty table (each exits
+ * UNSCRIPTED_EXIT), so the first-exec cost is paid here and never inside a
+ * resolver call. macOS scans a newly written executable on its first run —
+ * ~0.2 s alone, several seconds with syspolicyd queued under the full suite —
+ * and the resolvers bound each git call at 5 s (GIT_LOCAL_TIMEOUT_MS,
+ * GIT_TIMEOUT_MS), so an unwarmed first fake could time out, read as "git did
+ * not answer" and fail the row closed (exit 4) though the resolver was right.
+ * Throws (a setup failure) when a fake does not answer as scripted.
+ */
+export function warmFakeBin(bin: FakeBin, home: string): void {
+  const empty = fs.mkdtempSync(path.join(bin.dir, '..', 'warm-table-'));
+  for (const tool of fs.readdirSync(bin.dir)) {
+    const r = spawnSync(path.join(bin.dir, tool), ['warm-up'], {
+      cwd: home,
+      env: scopedEnv(home, { [TABLE_ENV]: empty }),
+      stdio: 'ignore',
+      timeout: WARM_EXEC_TIMEOUT_MS,
+    });
+    if (r.status !== UNSCRIPTED_EXIT) {
+      throw new Error(`scripted-shim: warm-up of ${tool} did not answer (${r.status}, ${r.error?.message ?? r.signal})`);
+    }
+  }
+}
+
 export interface ScriptedShim {
   /** Prepend this to PATH. */
   readonly dir: string;

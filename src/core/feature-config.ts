@@ -2,6 +2,7 @@ import * as path from 'path';
 import { promises as fs } from 'fs';
 import { getFeatureConfigPath } from './project-paths.js';
 import { parseTrackerId, type TrackerProvider } from './tracker.js';
+import { loadProjectConfigLib, type ProjectConfigLib, type ProjectConfigLibLoad } from './evidence-policy.js';
 
 export type ReviewPublication = 'auto' | 'full' | 'off';
 
@@ -187,25 +188,90 @@ function coerceConfig(parsed: unknown): FeatureConfig | null {
 
 /**
  * Read the per-repo config for a project root.
- * Returns DEFAULT_CONFIG when the file is missing or unreadable.
+ * Returns DEFAULT_CONFIG when the file is missing or unusable.
  */
 export async function readConfig(projectRoot: string): Promise<FeatureConfig> {
-  return coerceConfig(await readConfigBody(projectRoot)) ?? { ...DEFAULT_CONFIG };
+  return coerceConfig(objectOf(await readConfigBody(projectRoot))) ?? { ...DEFAULT_CONFIG };
 }
 
 /**
- * The parsed JSON body of a project's config file, or `undefined` when the file
- * is absent, unreadable or malformed. Every read of the file goes through here,
- * so readConfig, readConfigIfPresent and writeManagedConfig agree on what an
- * unusable file means.
+ * What a project's config file holds, judged by the shared strict parser.
+ *
+ *   absent      — no file.
+ *   object      — a JSON object with no key repeated anywhere in it.
+ *   malformed   — bytes the resolvers cannot read as a config: not UTF-8, a
+ *                 BOM, over the size bound, not JSON, not an object, too deeply
+ *                 nested, or a key repeated in one object.
+ *   unreadable  — the bytes could not be read: an I/O error other than a
+ *                 missing file, a path that is not a regular file within the
+ *                 size bound (a symlink included, D-CONFIG-NO-FOLLOW), or a
+ *                 parser that could not be loaded.
  */
-async function readConfigBody(projectRoot: string): Promise<unknown> {
+export type ConfigBody =
+  | { readonly kind: 'absent' }
+  | { readonly kind: 'object'; readonly value: Record<string, unknown> }
+  | { readonly kind: 'malformed' }
+  | { readonly kind: 'unreadable'; readonly detail: string };
+
+/**
+ * Classify a config file's bytes (`null` is no file). Pure.
+ *
+ * D-CONFIG-STRICT-PARSE: `.devflow/config.json` is judged by the one parser the
+ * resolvers use (lib/project-config.cjs, D-PROJECT-STRICT-KEYS), never by a bare
+ * `JSON.parse`. The two disagreed where it mattered: `JSON.parse` keeps the
+ * LAST of two duplicate keys silently, while the resolvers read the file as
+ * saying two things and fail its keys closed — so devflow could rewrite a file
+ * into a meaning it never had. A file the parser rejects is `malformed`.
+ */
+export function classifyConfigBytes(buf: Uint8Array | null, lib: ProjectConfigLib): ConfigBody {
+  const decoded = lib.decodeConfigBytes(buf);
+  if (decoded.kind === 'absent') return { kind: 'absent' };
+  if (decoded.kind === 'invalid') return { kind: 'malformed' };
+  let parsed: unknown;
   try {
-    return JSON.parse(await fs.readFile(getFeatureConfigPath(projectRoot), 'utf-8'));
+    parsed = JSON.parse(decoded.text);
   } catch {
-    // ENOENT (absent) or SyntaxError (malformed) — treat as not present
-    return undefined;
+    return { kind: 'malformed' };
   }
+  if (!isJsonObject(parsed)) return { kind: 'malformed' };
+  const duplicates = lib.collectDuplicateKeyPaths(decoded.text);
+  if (duplicates === null || duplicates.size > 0) return { kind: 'malformed' };
+  return { kind: 'object', value: parsed };
+}
+
+/** The object a config body holds, or undefined for any other body. */
+function objectOf(body: ConfigBody): Record<string, unknown> | undefined {
+  return body.kind === 'object' ? body.value : undefined;
+}
+
+/**
+ * Read and classify a project's config file. Every read of the file goes
+ * through here, so readConfig, readConfigIfPresent and writeManagedConfig agree
+ * on what an unusable file means. Never throws.
+ *
+ * D-CONFIG-NO-FOLLOW: the bytes come from the resolvers' own bounded read
+ * (lib/project-config.cjs readBoundedRegularFile, `followSymlinks` false — the
+ * read resolve-settings' readConfigFile makes), so devflow and the settings line
+ * never disagree about which file configures the repository. A symlink —
+ * dangling or not — a directory, a FIFO or a file over MAX_CONFIG_BYTES is
+ * refused unopened and reads as `unreadable`: readers configure nothing from it,
+ * and writeManagedConfig leaves it in place (D-CONFIG-NO-REPAIR) rather than
+ * writing through the link or renaming a regular file over it.
+ */
+async function readConfigBody(
+  projectRoot: string,
+  lib: ProjectConfigLibLoad = loadProjectConfigLib(),
+): Promise<ConfigBody> {
+  if (!lib.ok) return { kind: 'unreadable', detail: `config parser unavailable: ${lib.error.path}` };
+  const read = lib.value.readBoundedRegularFile(getFeatureConfigPath(projectRoot), lib.value.MAX_CONFIG_BYTES, false);
+  if (read.kind === 'absent') return { kind: 'absent' };
+  if (read.kind === 'refused') {
+    return {
+      kind: 'unreadable',
+      detail: `not a regular file of at most ${lib.value.MAX_CONFIG_BYTES} bytes; a symlink is never followed`,
+    };
+  }
+  return classifyConfigBytes(read.bytes, lib.value);
 }
 
 /**
@@ -236,8 +302,8 @@ async function writeConfigBody(projectRoot: string, body: object): Promise<void>
  * `managed`, by name, so a caller holding a whole FeatureConfig still cannot
  * overwrite the file's override with its in-memory copy. The retired keys in
  * RETIRED_CONFIG_KEYS are dropped, not carried. A body that is
- * not a JSON object (absent, malformed, an array) reads as empty, exactly as
- * readConfigIfPresent treats it.
+ * not a JSON object reads as empty, exactly as readConfigIfPresent treats it;
+ * writeManagedConfig never reaches here with a malformed file.
  *
  * This holds under `devflow init --reset` too: a factory reset returns
  * devflow's own settings to their defaults through `managed`, and leaves the
@@ -253,18 +319,49 @@ export function mergeManagedConfig(existing: unknown, managed: ManagedConfig): R
   };
 }
 
+/** Why writeManagedConfig left the file alone. */
+export type ManagedConfigWriteError =
+  | { readonly kind: 'malformed'; readonly path: string }
+  | { readonly kind: 'unreadable'; readonly path: string; readonly detail: string }
+  | { readonly kind: 'write-failed'; readonly path: string; readonly detail: string };
+
+export type ManagedConfigWrite =
+  | { readonly ok: true }
+  | { readonly ok: false; readonly error: ManagedConfigWriteError };
+
 /**
  * Write devflow's managed keys to a project's config, keeping every key it
- * does not manage (D-CONFIG-PRESERVE-UNMANAGED).
+ * does not manage (D-CONFIG-PRESERVE-UNMANAGED). Never throws.
+ *
+ * D-CONFIG-NO-REPAIR: a file that exists but is malformed or unreadable
+ * (D-CONFIG-STRICT-PARSE) is left byte-for-byte as it is, and the Result says
+ * why. The file is the user's: a syntax error in it still holds their
+ * hand-written keys — the `tracker` override first among them — and a rewrite
+ * from an empty merge would delete them silently. The resolvers fail its keys
+ * closed meanwhile, so leaving it costs nothing but the managed key.
  *
  * D1: Non-atomic read-modify-write. A concurrent writer could lose the other's
  * change. Acceptable because init is a single-threaded, user-initiated command
  * and the window is milliseconds on a local filesystem; the file swap itself is
  * atomic (temp + rename), so a reader never sees a partial file.
  */
-export async function writeManagedConfig(projectRoot: string, managed: ManagedConfig): Promise<void> {
-  const existing = await readConfigBody(projectRoot);
-  await writeConfigBody(projectRoot, mergeManagedConfig(existing, managed));
+export async function writeManagedConfig(
+  projectRoot: string,
+  managed: ManagedConfig,
+  lib: ProjectConfigLibLoad = loadProjectConfigLib(),
+): Promise<ManagedConfigWrite> {
+  const configPath = getFeatureConfigPath(projectRoot);
+  const existing = await readConfigBody(projectRoot, lib);
+  if (existing.kind === 'malformed') return { ok: false, error: { kind: 'malformed', path: configPath } };
+  if (existing.kind === 'unreadable') {
+    return { ok: false, error: { kind: 'unreadable', path: configPath, detail: existing.detail } };
+  }
+  try {
+    await writeConfigBody(projectRoot, mergeManagedConfig(objectOf(existing), managed));
+  } catch (err: unknown) {
+    return { ok: false, error: { kind: 'write-failed', path: configPath, detail: err instanceof Error ? err.message : String(err) } };
+  }
+  return { ok: true };
 }
 
 /**
@@ -277,6 +374,6 @@ export async function writeManagedConfig(projectRoot: string, managed: ManagedCo
  * distinction to carry a repo's own reviewPublication across a re-init.
  */
 export async function readConfigIfPresent(projectRoot: string): Promise<FeatureConfig | null> {
-  // null when the file is absent or malformed, or its JSON is not a plain object
-  return coerceConfig(await readConfigBody(projectRoot));
+  // null when the file is absent, malformed or unreadable
+  return coerceConfig(objectOf(await readConfigBody(projectRoot)));
 }

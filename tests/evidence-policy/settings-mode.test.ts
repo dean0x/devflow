@@ -8,16 +8,17 @@
  *
  *   - the grammar and the fail-closed line;
  *   - TP-32 (AC-28): the real script prints one line matching SETTINGS_LINE_RE,
- *     and the argv log holds exactly one git call and no gh call;
+ *     and the argv log holds only local git reads and no gh call;
  *   - TP-33 (AC-29): the publication truth table (D-PUBLICATION-CEILING) and the
  *     per-feature switch AND table (D-FEATURES-NARROW-ONLY), with the shared
  *     fixture table (TP-49) the shell gates will also run;
  *   - TP-37 (AC-32): a github machine's repository that selects jira resolves
  *     jira from the project (the session-start half is shell-hooks-tracker)
  *   - TP-31 (AC-27): repository compliance ids reach COMPLIANCE, an empty list is
- *     generic;
+ *     generic; D-LENS-UNION: the default branch's tracking copy stays in the lens;
+ *   - D-PERSONAL-UNTRACKED: a config.json git tracks is ignored, with a warning;
  *   - the tracker rules, parity with the TypeScript machine-layer readers, the
- *     project.json suggestion, and source guards.
+ *     project.json suggestion, and the design-decision markers.
  */
 
 import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach, vi } from 'vitest';
@@ -36,6 +37,9 @@ import {
   SETTINGS_SCRIPT,
   buildScriptedShim,
   createFakeBin,
+  warmFakeBin,
+  WARM_HOOK_TIMEOUT_MS,
+  realGit,
   runResolver,
   scriptedExec,
   type ExecFn,
@@ -65,8 +69,16 @@ interface Settings {
   readonly compliance: { readonly enabled: boolean; readonly frameworks: readonly string[] };
   readonly switches: { readonly memory: SwitchState; readonly learning: SwitchState; readonly knowledge: SwitchState };
   readonly repoCompliance: readonly string[] | null;
+  readonly defaultBranchCompliance: readonly string[] | null;
+  readonly personalTracked: boolean;
   readonly retiredPolicyFile: boolean;
   readonly unreadable: 'project' | 'personal' | null;
+}
+
+interface RepoLayers {
+  readonly project: unknown;
+  readonly personal: unknown;
+  readonly personalTracked: boolean;
 }
 
 interface SettingsModule {
@@ -76,7 +88,7 @@ interface SettingsModule {
   readonly SETTINGS_LINE_RE: RegExp;
   readonly SETTINGS_FAIL_CLOSED_LINE: string;
   foldSettings(inputs: { project: unknown; personal: unknown; manifest: unknown; retiredPolicyFile: boolean }): Settings;
-  readRepoLayers(root: string): { project: unknown; personal: unknown };
+  readRepoLayers(root: string, deps?: { exec?: ExecFn }): RepoLayers;
   resolveSettings(opts: { dir: string; manifest?: unknown }, deps?: { exec?: ExecFn }): Settings;
   formatSettingsLine(s: Settings): string;
   isCoherentSettingsLine(line: unknown): boolean;
@@ -114,7 +126,8 @@ let fakeBin: FakeBin;
 beforeAll(() => {
   binRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-settings-bin-'));
   fakeBin = createFakeBin(binRoot);
-});
+  warmFakeBin(fakeBin, binRoot);
+}, WARM_HOOK_TIMEOUT_MS);
 
 afterAll(() => {
   fs.rmSync(binRoot, { recursive: true, force: true });
@@ -135,6 +148,38 @@ afterEach(() => {
 
 const TOPLEVEL = (dir: string): ScriptedCall => ({ tool: 'git', args: ARGV.toplevel, stdout: `${dir}\n` });
 const NOT_A_REPO: ScriptedCall = { tool: 'git', args: ARGV.toplevel, exit: 128, stderr: 'fatal: not a git repository\n' };
+
+// The resolver's other local reads, written out independently of the script.
+/** D-PERSONAL-UNTRACKED: is .devflow/config.json in the index? */
+const ARGV_TRACKED = ['-c', 'core.fsmonitor=false', 'ls-files', '--error-unmatch', '--', '.devflow/config.json'];
+/** D-LENS-UNION: the default branch this clone recorded for origin. */
+const ARGV_ORIGIN_HEAD = ['symbolic-ref', '--quiet', 'refs/remotes/origin/HEAD'];
+
+const TRACKED: ScriptedCall = { tool: 'git', args: ARGV_TRACKED, stdout: '.devflow/config.json\n' };
+const UNTRACKED: ScriptedCall = {
+  tool: 'git', args: ARGV_TRACKED, exit: 1,
+  stderr: "error: pathspec '.devflow/config.json' did not match any file(s) known to git\n",
+};
+const ORIGIN_HEAD_UNSET: ScriptedCall = { tool: 'git', args: ARGV_ORIGIN_HEAD, exit: 1 };
+const ORIGIN_HEAD = (branch: string): ScriptedCall => ({ tool: 'git', args: ARGV_ORIGIN_HEAD, stdout: `refs/remotes/origin/${branch}\n` });
+/** The default branch's tracking copy of project.json: its bytes, or absent at that ref. */
+const TRACKING_PROJECT = (branch: string, body: string | null): ScriptedCall => (body === null
+  ? { tool: 'git', args: ARGV.trackingProjectBlob(branch), exit: 128, stderr: "fatal: path '.devflow/project.json' does not exist\n" }
+  : { tool: 'git', args: ARGV.trackingProjectBlob(branch), stdout: body });
+
+/**
+ * Named collector: every logged call that is not one of the resolver's LOCAL git
+ * reads (D-SETTINGS-LOCAL-ONLY) — any gh call, any other git subcommand (fetch,
+ * ls-remote, status, a write), and a cat-file of anything but a tracking copy's
+ * project.json.
+ */
+function collectNonLocalCalls(log: readonly string[][]): string[] {
+  const LOCAL = new Set([ARGV.toplevel, ARGV_TRACKED, ARGV_ORIGIN_HEAD].map(a => a.join(' ')));
+  const TRACKING_READ = /^cat-file blob refs\/remotes\/origin\/[A-Za-z0-9._/-]+:\.devflow\/project\.json$/;
+  return log
+    .filter(([tool, ...args]) => tool !== 'git' || !(LOCAL.has(args.join(' ')) || TRACKING_READ.test(args.join(' '))))
+    .map(call => call.join(' '));
+}
 
 function writeRepoFile(name: 'project.json' | 'config.json' | 'policy.json', body: string | Buffer, dir = root): void {
   fs.mkdirSync(path.join(dir, '.devflow'), { recursive: true });
@@ -160,6 +205,16 @@ function lineFor(files: { project?: string; personal?: string }, manifest: unkno
 function fieldOf(line: string, key: string): string {
   const m = new RegExp(`(?:^| )${key}=([^ ]*)`).exec(line);
   return m === null ? '' : m[1];
+}
+
+/** The COMPLIANCE token a resolution prints. */
+function complianceTokenOf(s: Settings): string {
+  return fieldOf(SETTINGS.formatSettingsLine(s), 'COMPLIANCE');
+}
+
+/** A settings line with its COMPLIANCE field blanked — every field a broken file owns. */
+function withoutCompliance(line: string): string {
+  return line.replace(/ COMPLIANCE=[^ ]*/, ' COMPLIANCE=*');
 }
 
 // ---------------------------------------------------------------------------
@@ -235,7 +290,7 @@ describe('module surface and SETTINGS_LINE_RE', () => {
 // TP-32 (AC-28) — the real script: one line, one git call, zero gh calls
 // ---------------------------------------------------------------------------
 
-describe('TP-32 (AC-28): settings mode is local — one grammar line, zero gh calls', { timeout: 20_000 }, () => {
+describe('TP-32 (AC-28): settings mode is local — one grammar line, local git reads only, zero gh calls', { timeout: 20_000 }, () => {
   function run(calls: readonly ScriptedCall[], args: readonly string[] = [root]) {
     const shim = buildScriptedShim(fakeBin, tmp, calls);
     const r = runResolver({ home, args, shim, script: SETTINGS_SCRIPT });
@@ -243,7 +298,7 @@ describe('TP-32 (AC-28): settings mode is local — one grammar line, zero gh ca
   }
 
   const SCENARIOS: ReadonlyArray<readonly [string, () => ScriptedCall[]]> = [
-    ['an empty repository', () => [TOPLEVEL(root)]],
+    ['an empty repository', () => [TOPLEVEL(root), ORIGIN_HEAD_UNSET]],
     ['a repository selecting jira with every key set', () => {
       writeRepoFile('project.json', JSON.stringify({
         version: 1, evidence: 'required', compliance: ['hipaa'],
@@ -251,12 +306,12 @@ describe('TP-32 (AC-28): settings mode is local — one grammar line, zero gh ca
         reviewPublication: 'off', features: { learning: false },
       }));
       writeRepoFile('config.json', '{"reviewPublication":"full","tracker":"linear"}');
-      return [TOPLEVEL(root)];
+      return [TOPLEVEL(root), UNTRACKED, ORIGIN_HEAD('main'), TRACKING_PROJECT('main', '{"compliance":["gdpr"]}')];
     }],
     ['hostile bytes in every file', () => {
       writeRepoFile('project.json', '{"tracker":{"provider":"jira\\nTRACKER=github","site":"https://x.io KEY=PWNED"}}');
       writeRepoFile('config.json', '{"tracker":"github SITE=https://evil.io"}');
-      return [TOPLEVEL(root)];
+      return [TOPLEVEL(root), UNTRACKED, ORIGIN_HEAD('main'), TRACKING_PROJECT('main', '{"compliance":["x\\nKEY=PWNED"]}')];
     }],
     ['not a repository', () => [NOT_A_REPO]],
   ];
@@ -269,10 +324,53 @@ describe('TP-32 (AC-28): settings mode is local — one grammar line, zero gh ca
     const lines = r.stdout.split('\n');
     expect(lines).toHaveLength(2);
     expect(lines[0]).toMatch(SETTINGS.SETTINGS_LINE_RE);
+    expect(r.log.length).toBeGreaterThan(0);
     expect(r.log.filter(call => call[0] === 'gh')).toEqual([]);
-    expect(r.log).toEqual([['git', ...ARGV.toplevel]]);
+    expect(collectNonLocalCalls(r.log)).toEqual([]);
     expect(r.stdout).not.toContain('PWNED');
     expect(r.stdout).not.toContain('evil');
+  });
+
+  it('known-bad probe: the collector reports gh, a network or index-refreshing git call and a symref write', () => {
+    const bad = [
+      ['gh', 'api', 'repos/{owner}/{repo}'],
+      ['git', 'fetch', 'origin'],
+      ['git', 'ls-remote', '--symref', 'origin', 'HEAD'],
+      ['git', 'status', '--porcelain'],
+      ['git', 'symbolic-ref', 'refs/remotes/origin/HEAD', 'refs/remotes/origin/x'],
+      ['git', 'cat-file', 'blob', 'HEAD:.devflow/project.json'],
+    ];
+    expect(collectNonLocalCalls([...bad, ['git', ...ARGV.toplevel]])).toHaveLength(bad.length);
+  });
+
+  it('the exact local sequences: config.json is checked for tracking only when it exists; the tracking copy only when origin/HEAD names it', () => {
+    expect(run([TOPLEVEL(root), ORIGIN_HEAD_UNSET]).log)
+      .toEqual([['git', ...ARGV.toplevel], ['git', ...ARGV_ORIGIN_HEAD]]);
+
+    writeRepoFile('config.json', '{"reviewPublication":"off"}');
+    expect(run([TOPLEVEL(root), UNTRACKED, ORIGIN_HEAD('main'), TRACKING_PROJECT('main', null)]).log).toEqual([
+      ['git', ...ARGV.toplevel],
+      ['git', ...ARGV_TRACKED],
+      ['git', ...ARGV_ORIGIN_HEAD],
+      ['git', ...ARGV.trackingProjectBlob('main')],
+    ]);
+
+    expect(run([NOT_A_REPO]).log).toEqual([['git', ...ARGV.toplevel]]);
+  });
+
+  it('writes nothing: the repository and HOME are unchanged by a run', () => {
+    writeRepoFile('project.json', '{"version":1,"compliance":["hipaa"]}');
+    writeRepoFile('config.json', '{"reviewPublication":"full"}');
+    const snapshot = (dir: string): string[] => fs.readdirSync(dir, { recursive: true, withFileTypes: true })
+      .map(e => {
+        const full = path.join(e.parentPath, e.name);
+        return `${path.relative(dir, full)} ${e.isFile() ? fs.readFileSync(full, 'utf8') : ''}`;
+      })
+      .sort();
+    const before = [snapshot(root), snapshot(home)];
+    const r = run([TOPLEVEL(root), UNTRACKED, ORIGIN_HEAD_UNSET]);
+    expect(r.status, r.stderr).toBe(0);
+    expect([snapshot(root), snapshot(home)]).toEqual(before);
   });
 
   it('the jira repository resolves exactly — the project selects the provider on a github machine', () => {
@@ -281,7 +379,7 @@ describe('TP-32 (AC-28): settings mode is local — one grammar line, zero gh ca
       tracker: { provider: 'jira', site: 'https://acme.atlassian.net', key: 'ACME' },
       reviewPublication: 'off', features: { learning: false },
     }));
-    const r = run([TOPLEVEL(root)]);
+    const r = run([TOPLEVEL(root), ORIGIN_HEAD_UNSET]);
     expect(r.stdout).toBe('TRACKER=jira TRACKER_SOURCE=project TRACKER_WARN=none SITE=https://acme.atlassian.net KEY=ACME '
       + 'REVIEW_PUBLICATION=off COMPLIANCE=hipaa MEMORY=on LEARNING=off KNOWLEDGE=on\n');
   });
@@ -293,7 +391,7 @@ describe('TP-32 (AC-28): settings mode is local — one grammar line, zero gh ca
       features: { tracker: { provider: 'github' } },
     }));
     writeRepoFile('project.json', JSON.stringify({ version: 1, tracker: { provider: 'jira' } }));
-    const r = run([TOPLEVEL(root)]);
+    const r = run([TOPLEVEL(root), ORIGIN_HEAD_UNSET]);
     expect(r.status, r.stderr).toBe(0);
     expect(r.stdout).toMatch(/^TRACKER=jira TRACKER_SOURCE=project TRACKER_WARN=none /);
   });
@@ -302,7 +400,7 @@ describe('TP-32 (AC-28): settings mode is local — one grammar line, zero gh ca
     fs.writeFileSync(path.join(home, '.devflow', 'manifest.json'), JSON.stringify({
       features: { memory: false, tracker: { provider: 'linear' }, compliance: { enabled: true, frameworks: ['soc2'] } },
     }));
-    const r = run([TOPLEVEL(root)]);
+    const r = run([TOPLEVEL(root), ORIGIN_HEAD_UNSET]);
     expect(r.stdout).toBe('TRACKER=linear TRACKER_SOURCE=machine TRACKER_WARN=none SITE=none KEY=none '
       + 'REVIEW_PUBLICATION=auto COMPLIANCE=soc2 MEMORY=off LEARNING=on KNOWLEDGE=on\n');
   });
@@ -428,6 +526,121 @@ describe('TP-33 (AC-29): review publication = min(team ?? full, personal ?? auto
 });
 
 // ---------------------------------------------------------------------------
+// D-PERSONAL-UNTRACKED — a config.json git tracks is not personal
+// ---------------------------------------------------------------------------
+
+describe('D-PERSONAL-UNTRACKED: a tracked .devflow/config.json is ignored, with a warning', () => {
+  /** resolveSettings over a fresh repo, config.json tracked or not per `tracking`. */
+  function resolveWith(files: { project?: string; personal: string }, tracking: ScriptedCall, manifest: unknown = MANIFEST_ON): Settings {
+    const repo = fs.mkdtempSync(path.join(tmp, 'tracked-'));
+    if (files.project !== undefined) writeRepoFile('project.json', files.project, repo);
+    writeRepoFile('config.json', files.personal, repo);
+    return SETTINGS.resolveSettings({ dir: repo, manifest }, { exec: scriptedExec([TOPLEVEL(repo), tracking]).exec });
+  }
+
+  it('a committed reviewPublication "full" resolves the ceiling default, auto', () => {
+    const tracked = resolveWith({ personal: '{"reviewPublication":"full"}' }, TRACKED);
+    expect(tracked.reviewPublication).toBe('auto');
+    expect(tracked.personalTracked).toBe(true);
+    expect(tracked.ok).toBe(true);
+    // Control: the same bytes untracked are the user's own and ask for full.
+    const own = resolveWith({ personal: '{"reviewPublication":"full"}' }, UNTRACKED);
+    expect(own.reviewPublication).toBe('full');
+    expect(own.personalTracked).toBe(false);
+  });
+
+  it('is ignored entirely — tracker override and switch narrowing too, exactly as if absent', () => {
+    const JIRA = '{"tracker":{"provider":"jira","key":"ACME"}}';
+    const personal = '{"tracker":"github","reviewPublication":"off","features":{"knowledge":false}}';
+    const tracked = resolveWith({ project: JIRA, personal }, TRACKED);
+    const absent = settingsFor({ project: JIRA });
+    expect(SETTINGS.formatSettingsLine(tracked)).toBe(SETTINGS.formatSettingsLine(absent));
+  });
+
+  it('a tracked copy is ignored even when its bytes are unreadable — it is never read', () => {
+    const s = resolveWith({ personal: '{ this is not json' }, TRACKED);
+    expect(s.ok).toBe(true);
+    expect(s.unreadable).toBeNull();
+    expect(s.personalTracked).toBe(true);
+    expect(SETTINGS.formatSettingsLine(s)).toBe(DEFAULT_LINE);
+  });
+
+  it('a tracking check git does not answer fails the personal fields closed', () => {
+    const s = resolveWith({ personal: '{"reviewPublication":"full"}' },
+      { tool: 'git', args: ARGV_TRACKED, spawnError: 'ETIMEDOUT' });
+    expect(s.unreadable).toBe('personal');
+    expect(s.reviewPublication).toBe('off');
+  });
+
+  it('main(): the line resolves auto and stderr tells the user to untrack the file', () => {
+    const stderr = vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
+    writeRepoFile('config.json', '{"reviewPublication":"full"}');
+    const out = SETTINGS.main(['node', SETTINGS_SCRIPT, root], {
+      exec: scriptedExec([TOPLEVEL(root), TRACKED, ORIGIN_HEAD_UNSET]).exec,
+    });
+    expect(out.code).toBe(0);
+    expect(fieldOf(out.line, 'REVIEW_PUBLICATION')).toBe('auto');
+    const text = stderr.mock.calls.map(c => String(c[0])).join('');
+    expect(text).toContain('.devflow/config.json is tracked by git');
+    expect(text).toContain('git rm --cached .devflow/config.json');
+  });
+
+  it('main(): an untracked config.json prints no warning', () => {
+    const stderr = vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
+    writeRepoFile('config.json', '{"reviewPublication":"full"}');
+    const out = SETTINGS.main(['node', SETTINGS_SCRIPT, root], {
+      exec: scriptedExec([TOPLEVEL(root), UNTRACKED, ORIGIN_HEAD_UNSET]).exec,
+    });
+    expect(fieldOf(out.line, 'REVIEW_PUBLICATION')).toBe('full');
+    expect(stderr.mock.calls.map(c => String(c[0])).join('')).toBe('');
+  });
+
+  describe('the real script over a real repository', { timeout: 30_000 }, () => {
+    it('the #406 repro: a config.json committed with git add -f no longer prints REVIEW_PUBLICATION=full', () => {
+      const repo = fs.mkdtempSync(path.join(tmp, 'real-tracked-'));
+      realGit(repo, home, ['init', '-q', '-b', 'main']);
+      fs.writeFileSync(path.join(repo, '.gitignore'), '.devflow/\n');
+      writeRepoFile('config.json', '{"reviewPublication":"full"}\n', repo);
+      realGit(repo, home, ['add', '-f', '.devflow/config.json']);
+      realGit(repo, home, ['commit', '-q', '-m', 'sneak a personal file in']);
+
+      const tracked = runResolver({ home, args: [repo], script: SETTINGS_SCRIPT });
+      expect(tracked.status, tracked.stderr).toBe(0);
+      expect(fieldOf(tracked.stdout.trim(), 'REVIEW_PUBLICATION')).toBe('auto');
+      expect(tracked.stderr).toContain('git rm --cached .devflow/config.json');
+
+      // Untracked (the remedy the warning names), the same bytes are personal again.
+      realGit(repo, home, ['rm', '-q', '--cached', '.devflow/config.json']);
+      const own = runResolver({ home, args: [repo], script: SETTINGS_SCRIPT });
+      expect(fieldOf(own.stdout.trim(), 'REVIEW_PUBLICATION')).toBe('full');
+      expect(own.stderr).toBe('');
+    });
+
+    it('the tracking check never runs the repository\'s core.fsmonitor hook — a plain ls-files would', () => {
+      const repo = fs.mkdtempSync(path.join(tmp, 'real-fsmonitor-'));
+      const marker = path.join(tmp, 'fsmonitor-ran');
+      const hook = path.join(tmp, 'fsmonitor-hook.sh');
+      fs.writeFileSync(hook, `#!/bin/sh\necho ran >> '${marker}'\nexit 1\n`);
+      fs.chmodSync(hook, 0o755);
+      realGit(repo, home, ['init', '-q', '-b', 'main']);
+      writeRepoFile('config.json', '{"reviewPublication":"full"}\n', repo);
+      realGit(repo, home, ['add', '-f', '.devflow/config.json']);
+      realGit(repo, home, ['commit', '-q', '-m', 'tracked personal file']);
+      realGit(repo, home, ['config', 'core.fsmonitor', hook]);
+
+      const run = runResolver({ home, args: [repo], script: SETTINGS_SCRIPT });
+      expect(run.status, run.stderr).toBe(0);
+      expect(fieldOf(run.stdout.trim(), 'REVIEW_PUBLICATION')).toBe('auto');
+      expect(fs.existsSync(marker), 'the resolver ran the fsmonitor hook').toBe(false);
+
+      // Known-bad probe: the same index read without the override runs the hook.
+      realGit(repo, home, ['ls-files', '--error-unmatch', '--', '.devflow/config.json']);
+      expect(fs.existsSync(marker)).toBe(true);
+    });
+  });
+});
+
+// ---------------------------------------------------------------------------
 // TP-33 / TP-49 — the switch AND table (D-FEATURES-NARROW-ONLY)
 // ---------------------------------------------------------------------------
 
@@ -470,17 +683,37 @@ describe('readRepoLayers: the seam the hooks\' one parser fork reads through (D-
       }, row.name).toEqual(row.expect);
       const viaResolve = settingsFor({}, row.manifest, dir);
       // An unreadable file narrows nothing in the fold the hooks run, while
-      // resolveSettings fails it closed (whole-file rule; no row's manifest
-      // enables compliance, so the line is the constant).
+      // resolveSettings fails its fields closed (whole-file rule) — all but the
+      // compliance lens, which is whatever the readable layers fold to.
       if (row.unreadable === undefined) expect(viaLayers.switches, row.name).toEqual(viaResolve.switches);
-      else expect(SETTINGS.formatSettingsLine(viaResolve), row.name).toBe(FAIL_CLOSED);
+      else expect(withoutCompliance(SETTINGS.formatSettingsLine(viaResolve)), row.name).toBe(withoutCompliance(FAIL_CLOSED));
     }
   });
 
   it('reads nothing from a root with no .devflow, and never throws', () => {
     const layers = SETTINGS.readRepoLayers(path.join(tmp, 'missing'));
-    expect(layers).toEqual({ project: { kind: 'absent' }, personal: { kind: 'absent' } });
+    expect(layers).toEqual({ project: { kind: 'absent' }, personal: { kind: 'absent' }, personalTracked: false });
     expect(Object.isFrozen(layers)).toBe(true);
+  });
+
+  it('D-PERSONAL-UNTRACKED: a config.json git tracks is absent to the hooks\' fold too', () => {
+    writeRepoFile('config.json', '{"features":{"memory":false}}');
+    const tracked = SETTINGS.readRepoLayers(root, { exec: scriptedExec([TRACKED]).exec });
+    expect(tracked).toEqual({ project: { kind: 'absent' }, personal: { kind: 'absent' }, personalTracked: true });
+    const folded = SETTINGS.foldSettings({ ...tracked, manifest: MANIFEST_ON, retiredPolicyFile: false });
+    expect(folded.switches.memory).toEqual({ on: true, source: 'machine' });
+
+    const untracked = SETTINGS.readRepoLayers(root, { exec: scriptedExec([UNTRACKED]).exec });
+    expect(untracked.personalTracked).toBe(false);
+    expect(SETTINGS.foldSettings({ ...untracked, manifest: MANIFEST_ON, retiredPolicyFile: false }).switches.memory)
+      .toEqual({ on: false, source: 'personal' });
+  });
+
+  it('makes no git call at all when there is no config.json', () => {
+    const { exec, recorded } = scriptedExec([]);
+    writeRepoFile('project.json', '{"features":{"memory":false}}');
+    SETTINGS.readRepoLayers(root, { exec });
+    expect(recorded).toEqual([]);
   });
 
   it('refuses a symlinked project.json unopened (invalid, never followed)', () => {
@@ -543,6 +776,92 @@ describe('TP-31 (AC-27): COMPLIANCE is machine ∪ worktree', () => {
 });
 
 // ---------------------------------------------------------------------------
+// D-LENS-UNION — machine ∪ default branch (its local tracking copy) ∪ worktree
+// ---------------------------------------------------------------------------
+
+describe('D-LENS-UNION: the default branch\'s compliance ids stay in the lens', () => {
+  const OFF = { features: { ...MANIFEST_ON.features, compliance: { enabled: false, frameworks: [] } } };
+  const ON = (frameworks: string[]) => ({ features: { ...MANIFEST_ON.features, compliance: { enabled: true, frameworks } } });
+
+  /** resolveSettings over a fresh repo whose worktree holds `project`, with scripted default-branch reads. */
+  function lensFor(project: string | undefined, defaultBranch: readonly ScriptedCall[], manifest: unknown = OFF): Settings {
+    const repo = fs.mkdtempSync(path.join(tmp, 'lens-'));
+    if (project !== undefined) writeRepoFile('project.json', project, repo);
+    return SETTINGS.resolveSettings({ dir: repo, manifest }, { exec: scriptedExec([TOPLEVEL(repo), ...defaultBranch]).exec });
+  }
+  const onMain = (body: string | null): ScriptedCall[] => [ORIGIN_HEAD('main'), TRACKING_PROJECT('main', body)];
+
+  it('a PR whose worktree deletes compliance:["hipaa"] still resolves hipaa from the tracking copy', () => {
+    const s = lensFor('{"version":1}', onMain('{"version":1,"compliance":["hipaa"]}'));
+    expect(complianceTokenOf(s)).toBe('hipaa');
+    expect(s.repoCompliance).toBeNull();
+    expect(s.defaultBranchCompliance).toEqual(['hipaa']);
+  });
+
+  it.each([
+    ['a branch adds a framework', '{"compliance":["gdpr"]}', onMain('{"compliance":["hipaa"]}'), OFF, 'gdpr,hipaa'],
+    ['machine ∪ default ∪ worktree, registry order', '{"compliance":["sox"]}', onMain('{"compliance":["hipaa"]}'), ON(['soc2']), 'hipaa,soc2,sox'],
+    ['a branch that deletes the whole file', undefined, onMain('{"compliance":["pci-dss"]}'), OFF, 'pci-dss'],
+    ['an empty default-branch list is generic', undefined, onMain('{"compliance":[]}'), OFF, 'generic'],
+    ['main without compliance leaves the worktree\'s', '{"compliance":["gdpr"]}', onMain('{"version":1}'), OFF, 'gdpr'],
+    ['main with no project.json at all', undefined, onMain(null), OFF, 'off'],
+    ['no origin/HEAD recorded ⇒ machine ∪ worktree, as before', '{"compliance":["gdpr"]}', [ORIGIN_HEAD_UNSET], OFF, 'gdpr'],
+    ['no origin/HEAD and nothing declared ⇒ off', undefined, [ORIGIN_HEAD_UNSET], OFF, 'off'],
+  ] as const)('%s ⇒ %s', (_label, project, calls, manifest, expected) => {
+    expect(complianceTokenOf(lensFor(project, calls, manifest))).toBe(expected);
+  });
+
+  // A default-branch copy that cannot be read never LOWERS the lens: it reads as
+  // a malformed declaration — generic — on top of whatever else declares.
+  const OVERSIZE = `{"compliance":["hipaa"],"pad":"${'x'.repeat(4097)}"}`;
+  it.each([
+    ['an unparseable tracking copy', onMain('{ "compliance": ["hipaa"], this is not json')],
+    ['a malformed compliance value', onMain('{"compliance":"hipaa"}')],
+    ['a duplicated compliance key', onMain('{"compliance":[],"compliance":["hipaa"]}')],
+    ['a tracking copy over 4096 bytes', onMain(OVERSIZE)],
+    ['an origin/HEAD read git does not answer', [{ tool: 'git', args: ARGV_ORIGIN_HEAD, spawnError: 'ETIMEDOUT' }]],
+    ['a blob read git does not answer', [ORIGIN_HEAD('main'), { tool: 'git', args: ARGV.trackingProjectBlob('main'), spawnError: 'ETIMEDOUT' }]],
+    ['an origin/HEAD naming a hostile branch', [{ tool: 'git', args: ARGV_ORIGIN_HEAD, stdout: 'refs/remotes/origin/-x\n' }]],
+    ['an origin/HEAD naming another remote', [{ tool: 'git', args: ARGV_ORIGIN_HEAD, stdout: 'refs/remotes/upstream/main\n' }]],
+  ] as const)('%s is generic — never lower than a declaration', (_label, calls) => {
+    expect(complianceTokenOf(lensFor(undefined, calls))).toBe('generic');
+    expect(complianceTokenOf(lensFor('{"compliance":["gdpr"]}', calls))).toBe('gdpr');
+    expect(complianceTokenOf(lensFor(undefined, calls, ON(['soc2'])))).toBe('soc2');
+  });
+
+  it('the tracking copy is read at the branch origin/HEAD names, with a bounded buffer', () => {
+    const repo = fs.mkdtempSync(path.join(tmp, 'lens-'));
+    const { exec, recorded } = scriptedExec([TOPLEVEL(repo), ORIGIN_HEAD('trunk'), TRACKING_PROJECT('trunk', '{"compliance":["sox"]}')]);
+    const s = SETTINGS.resolveSettings({ dir: repo, manifest: OFF }, { exec });
+    expect(complianceTokenOf(s)).toBe('sox');
+    const blobCall = recorded.find(c => c.args[0] === 'cat-file');
+    expect(blobCall?.args).toEqual(ARGV.trackingProjectBlob('trunk'));
+    expect(blobCall?.opts.maxBuffer).toBe(4097);
+    expect(blobCall?.opts.cwd).toBe(repo);
+  });
+
+  describe('the real script over a real repository', { timeout: 30_000 }, () => {
+    it('a branch that deleted main\'s hipaa still resolves COMPLIANCE=hipaa, offline', () => {
+      const repo = fs.mkdtempSync(path.join(tmp, 'real-lens-'));
+      realGit(repo, home, ['init', '-q', '-b', 'main']);
+      writeRepoFile('project.json', '{"version":1,"compliance":["hipaa"]}\n', repo);
+      realGit(repo, home, ['add', '.devflow/project.json']);
+      realGit(repo, home, ['commit', '-q', '-m', 'team settings']);
+      // What a clone records: origin/main and origin/HEAD pointing at it — local refs only.
+      realGit(repo, home, ['update-ref', 'refs/remotes/origin/main', 'HEAD']);
+      realGit(repo, home, ['symbolic-ref', 'refs/remotes/origin/HEAD', 'refs/remotes/origin/main']);
+      realGit(repo, home, ['checkout', '-q', '-b', 'feat/drop-hipaa']);
+      writeRepoFile('project.json', '{"version":1}\n', repo);
+      realGit(repo, home, ['commit', '-q', '-am', 'drop hipaa']);
+
+      const r = runResolver({ home, args: [repo], script: SETTINGS_SCRIPT });
+      expect(r.status, r.stderr).toBe(0);
+      expect(fieldOf(r.stdout.trim(), 'COMPLIANCE')).toBe('hipaa');
+    });
+  });
+});
+
+// ---------------------------------------------------------------------------
 // Tracker rules
 // ---------------------------------------------------------------------------
 
@@ -599,8 +918,8 @@ describe('TP-30 (AC-26): a malformed evidence leaves tracker and features in the
 // inside a readable object keep their per-key readings (the tables above).
 // ---------------------------------------------------------------------------
 
-describe('whole-file rule: an unreadable project.json or config.json fails closed but for the machine lens', () => {
-  /** The fail-closed line carrying the machine's compliance lens instead of generic. */
+describe('whole-file rule: an unreadable project.json or config.json fails its own fields closed, never the lens', () => {
+  /** The fail-closed line carrying another compliance lens instead of generic. */
   const failClosedWith = (compliance: string): string => FAIL_CLOSED.replace('COMPLIANCE=generic', `COMPLIANCE=${compliance}`);
   const MACHINE_WITH = (frameworks: string[]) => ({ features: { ...MANIFEST_ON.features, compliance: { enabled: true, frameworks } } });
   const PADDED = `{"compliance":["hipaa"],"pad":"${'x'.repeat(4097)}"}`;
@@ -627,14 +946,14 @@ describe('whole-file rule: an unreadable project.json or config.json fails close
     expect(SETTINGS.formatSettingsLine(s)).toBe(FAIL_CLOSED);
   });
 
-  it.each(UNREADABLE)('config.json with %s ⇒ the fail-closed line', (_label, body) => {
+  it.each(UNREADABLE)('config.json with %s ⇒ its fields fail closed; the lens is the readable layers\' (off here)', (_label, body) => {
     const repo = fs.mkdtempSync(path.join(tmp, 'repo-'));
     writeRepoFile('project.json', '{"version":1,"reviewPublication":"full"}', repo);
     writeRepoFile('config.json', body, repo);
     const s = settingsFor({}, MANIFEST_ON, repo);
     expect(s.ok).toBe(false);
     expect(s.unreadable).toBe('personal');
-    expect(SETTINGS.formatSettingsLine(s)).toBe(FAIL_CLOSED);
+    expect(SETTINGS.formatSettingsLine(s)).toBe(failClosedWith('off'));
   });
 
   it.each(UNREADABLE)('project.json with %s on a hipaa machine ⇒ fail-closed, keeping the machine lens', (_label, body) => {
@@ -648,15 +967,41 @@ describe('whole-file rule: an unreadable project.json or config.json fails close
     expect(SETTINGS.formatSettingsLine(s)).toBe(failClosedWith('hipaa'));
   });
 
+  // A broken personal file affects only the keys it owns (tracker override,
+  // publication, switches): the readable project.json's frameworks stay in the lens.
   it.each([
-    ['machine soc2+gdpr ⇒ its ids in registry order', MACHINE_WITH(['soc2', 'gdpr']), 'gdpr,soc2'],
-    ['machine on at zero frameworks ⇒ generic', MACHINE_WITH([]), 'generic'],
-    ['machine compliance off ⇒ generic', COMPLIANCE_OFF_MACHINE, 'generic'],
-    ['no manifest ⇒ generic', undefined, 'generic'],
+    ['machine soc2+gdpr ⇒ machine ∪ project, registry order', MACHINE_WITH(['soc2', 'gdpr']), 'gdpr,hipaa,soc2'],
+    ['machine on at zero frameworks ⇒ the project\'s hipaa', MACHINE_WITH([]), 'hipaa'],
+    ['machine compliance off ⇒ the project\'s hipaa', COMPLIANCE_OFF_MACHINE, 'hipaa'],
+    ['no manifest ⇒ the project\'s hipaa', undefined, 'hipaa'],
   ] as const)('config.json unreadable, %s', (_label, manifest, compliance) => {
     const s = settingsFor({ project: '{"compliance":["hipaa"]}', personal: '{"reviewPublication":' }, manifest);
     expect(s.unreadable).toBe('personal');
+    expect(s.repoCompliance).toEqual(['hipaa']);
     expect(SETTINGS.formatSettingsLine(s)).toBe(failClosedWith(compliance));
+  });
+
+  it('config.json unreadable: the default branch\'s frameworks stay in the lens too (D-LENS-UNION)', () => {
+    const repo = fs.mkdtempSync(path.join(tmp, 'repo-'));
+    writeRepoFile('project.json', '{"compliance":["gdpr"]}', repo);
+    writeRepoFile('config.json', '{"reviewPublication":', repo);
+    const s = SETTINGS.resolveSettings({ dir: repo, manifest: COMPLIANCE_OFF_MACHINE }, {
+      exec: scriptedExec([TOPLEVEL(repo), ORIGIN_HEAD('main'), TRACKING_PROJECT('main', '{"compliance":["hipaa"]}')]).exec,
+    });
+    expect(s.unreadable).toBe('personal');
+    expect(SETTINGS.formatSettingsLine(s)).toBe(failClosedWith('gdpr,hipaa'));
+  });
+
+  it('project.json unreadable: the default branch\'s frameworks stay in the lens (D-LENS-UNION)', () => {
+    const repo = fs.mkdtempSync(path.join(tmp, 'repo-'));
+    writeRepoFile('project.json', '{ this is not json', repo);
+    const s = SETTINGS.resolveSettings({ dir: repo, manifest: COMPLIANCE_OFF_MACHINE }, {
+      exec: scriptedExec([TOPLEVEL(repo), ORIGIN_HEAD('main'), TRACKING_PROJECT('main', '{"compliance":["hipaa"]}')]).exec,
+    });
+    expect(s.unreadable).toBe('project');
+    expect(s.repoCompliance).toBeNull();
+    expect(s.defaultBranchCompliance).toEqual(['hipaa']);
+    expect(SETTINGS.formatSettingsLine(s)).toBe(failClosedWith('hipaa'));
   });
 
   it('a symlinked config.json is unreadable, never followed', () => {
@@ -666,7 +1011,7 @@ describe('whole-file rule: an unreadable project.json or config.json fails close
     fs.symlinkSync(target, path.join(root, '.devflow', 'config.json'));
     const s = settingsFor({}, MANIFEST_ON, root);
     expect(s.unreadable).toBe('personal');
-    expect(SETTINGS.formatSettingsLine(s)).toBe(FAIL_CLOSED);
+    expect(SETTINGS.formatSettingsLine(s)).toBe(failClosedWith('off'));
   });
 
   it('an unreadable project.json is named even when config.json is unreadable too', () => {
@@ -714,7 +1059,7 @@ describe('whole-file rule: an unreadable project.json or config.json fails close
     function runBroken(manifest: string | null) {
       if (manifest !== null) fs.writeFileSync(path.join(home, '.devflow', 'manifest.json'), manifest);
       writeRepoFile('project.json', '{ "compliance": ["hipaa"], this is not json');
-      const shim = buildScriptedShim(fakeBin, tmp, [TOPLEVEL(root)]);
+      const shim = buildScriptedShim(fakeBin, tmp, [TOPLEVEL(root), ORIGIN_HEAD_UNSET]);
       const r = runResolver({ home, args: [root], shim, script: SETTINGS_SCRIPT });
       return { ...r, log: shim.readLog() };
     }
@@ -729,7 +1074,7 @@ describe('whole-file rule: an unreadable project.json or config.json fails close
       expect(r.status, r.stderr).toBe(0);
       expect(r.stdout).toBe(`${expected === 'hipaa' ? failClosedWith('hipaa') : expected}\n`);
       expect(r.stderr).toContain('.devflow/project.json');
-      expect(r.log).toEqual([['git', ...ARGV.toplevel]]);
+      expect(r.log).toEqual([['git', ...ARGV.toplevel], ['git', ...ARGV_ORIGIN_HEAD]]);
     });
   });
 });
@@ -842,51 +1187,19 @@ describe('serializeProjectSuggestion', () => {
 // Source guards (PF-064: non-empty corpus, known-bad probes)
 // ---------------------------------------------------------------------------
 
-describe('source guards (D-SETTINGS-LOCAL-ONLY)', () => {
+describe('design decisions at their code sites', () => {
   const SOURCE = fs.readFileSync(SETTINGS_SCRIPT, 'utf8');
-  const codeLines = (source: string): string[] => source.split('\n')
-    .map(l => l.replace(/\/\/.*$/, ''))
-    .filter(l => !/^\s*(\*|\/\*)/.test(l));
-  const code = (source: string): string => codeLines(source).join('\n');
-
-  const collectSpawnTools = (s: string): string[] =>
-    [...code(s).matchAll(/\bexec\(\s*'([^']+)'/g)].map(m => m[1]);
-  const collectGhMentions = (s: string): string[] => codeLines(s).filter(l => /['"]gh['"]/.test(l));
-  const collectRequires = (s: string): string[] =>
-    [...code(s).matchAll(/require\(\s*['"]([^'"]+)['"]\s*\)/g)].map(m => m[1]);
 
   it('the corpus is the real script', () => {
     expect(SOURCE.startsWith('#!/usr/bin/env node')).toBe(true);
     expect(SOURCE.length).toBeGreaterThan(1000);
   });
 
-  it('exactly one subprocess, and it is git — a seeded gh spawn is reported', () => {
-    expect(collectSpawnTools(SOURCE)).toEqual(['git']);
-    expect(collectGhMentions(SOURCE)).toEqual([]);
-    const seeded = `${SOURCE}\nconst r = exec('gh', ['api'], {});\n`;
-    expect(collectSpawnTools(seeded)).toEqual(['git', 'gh']);
-    expect(collectGhMentions(seeded)).toHaveLength(1);
-  });
-
-  it('spawnSync appears once (defaultExec), never with a shell', () => {
-    expect(code(SOURCE).match(/spawnSync\(/g)).toHaveLength(1);
-    expect(code(SOURCE)).not.toMatch(/shell:\s*true/);
-  });
-
-  it('one stdout write, one exitCode setter, no process.exit, no fs write', () => {
-    expect(codeLines(SOURCE).filter(l => /process\.stdout\.write/.test(l))).toHaveLength(1);
-    expect(codeLines(SOURCE).filter(l => /process\.exitCode\s*=/.test(l))).toHaveLength(1);
-    expect(codeLines(SOURCE).filter(l => /process\.exit\s*\(/.test(l))).toEqual([]);
-    expect(codeLines(SOURCE).filter(l => /\bfs\.(?:write|append|rename|unlink|rm|mkdir|copyFile|symlink|chmod)\w*\s*\(/.test(l)))
-      .toEqual([]);
-  });
-
-  it('requires Node built-ins and the shared parser only', () => {
-    expect([...new Set(collectRequires(SOURCE))].sort()).toEqual(['./lib/project-config.cjs', 'child_process', 'fs', 'path']);
-  });
-
   it('carries its design decisions at their code sites', () => {
-    for (const marker of ['D-SETTINGS-LINE', 'D-SETTINGS-LOCAL-ONLY', 'D-PUBLICATION-CEILING', 'D-FEATURES-NARROW-ONLY', 'ADR-024']) {
+    for (const marker of [
+      'D-SETTINGS-LINE', 'D-SETTINGS-LOCAL-ONLY', 'D-PUBLICATION-CEILING', 'D-FEATURES-NARROW-ONLY', 'ADR-024',
+      'D-LENS-UNION', 'D-PERSONAL-UNTRACKED',
+    ]) {
       expect(SOURCE, marker).toContain(marker);
     }
   });

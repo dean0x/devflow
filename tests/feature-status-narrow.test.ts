@@ -3,7 +3,7 @@
  * (D-FEATURES-NARROW-ONLY), run through the compiled CLI from a temp HOME and a
  * temp git repository (PF-060).
  *
- * The machine switch is reported exactly as before. A repository layer — the
+ * The machine switch line is the same in every directory. A repository layer — the
  * team's `.devflow/project.json` or the personal `.devflow/config.json` — can
  * only narrow it, and `--status` adds ONE line naming the effective state and
  * the file that narrowed it, only when that happens. Every other run is
@@ -116,5 +116,25 @@ describe('--status prints the effective state only when a repo layer narrows (D-
     const layered = status(feature, makeRepo({ project: `{"features":{"${feature}":false}}` }));
     expect(bare).not.toMatch(EFFECTIVE);
     expect(layered).toBe(bare);
+  }, 120_000);
+});
+
+describe('--status warns about a tracked .devflow/config.json (D-PERSONAL-UNTRACKED)', () => {
+  it.each(FEATURES)('%s: a tracked config.json is named as ignored, with the untrack command', (feature) => {
+    seedManifest({});
+    const repo = makeRepo({ personal: `{"features":{"${feature}":false}}` });
+    execFileSync('git', ['add', '-f', '.devflow/config.json'], { cwd: repo, stdio: 'ignore' });
+
+    const out = status(feature, repo);
+
+    expect(out).toContain('.devflow/config.json is tracked by git, so devflow ignores it');
+    expect(out).toContain('git rm --cached .devflow/config.json');
+    // Ignored means absent: its features:false narrows nothing.
+    expect(out).not.toMatch(EFFECTIVE);
+  }, 120_000);
+
+  it('an untracked config.json gets no warning', () => {
+    seedManifest({});
+    expect(status('memory', makeRepo({ personal: '{"features":{"memory":false}}' }))).not.toContain('tracked by git');
   }, 120_000);
 });

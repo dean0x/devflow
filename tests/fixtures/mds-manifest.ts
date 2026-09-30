@@ -60,7 +60,7 @@ export const MDS_COMMAND_HOSTS = [
 ] as const;
 
 /**
- * The 14 partials in src/assets/commands/_partials/, by BASENAME. A partial
+ * The 15 partials in src/assets/commands/_partials/, by BASENAME. A partial
  * declares no `output-dir:`, so the build skips it — it is imported by hosts
  * instead. The `_` prefix is the partial convention (and is refused by
  * validateOutputName, so a partial can never become an output filename by
@@ -72,6 +72,7 @@ export const MDS_COMMAND_HOSTS = [
 export const MDS_PARTIALS = [
   '_compliance',
   '_decisions',
+  '_docs_root',
   '_engine',
   '_evidence_policy',
   '_factory',

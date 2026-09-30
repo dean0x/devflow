@@ -451,6 +451,17 @@ const RETIRED_LITERALS: ReadonlyArray<RetiredEntry> = [
       'state. This branch spent the third authorisation, so the sentence was already wrong when ' +
       'it was read.',
   },
+  {
+    literal: 'docs-helpers.sh',
+    // The skill's own tree. CHANGELOG.md names the file it stopped sourcing, a
+    // true record of the fix that must keep naming it.
+    scope: ['src/assets/skills/docs-framework/'],
+    removedFrom: 'src/assets/skills/docs-framework/SKILL.md, src/assets/skills/docs-framework/references/patterns.md',
+    justification:
+      'The skill told agents to `source .devflow/scripts/docs-helpers.sh`, a repo-local install ' +
+      'path that no install provides since the local scope was retired (#406). The helpers are ' +
+      'defined inline, and ensure_docs_dir roots .devflow/docs at the checkout toplevel (D-DOCS-ROOT).',
+  },
 ];
 
 // ---------------------------------------------------------------------------

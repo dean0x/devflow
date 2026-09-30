@@ -34,7 +34,7 @@ import {
   DEFAULT_PROXY_PORT,
 } from '../../core/proxy-state.js';
 import { syncManifestFeature, readManifest } from '../../core/manifest.js';
-import { writeFileAtomicExclusive } from '../../core/fs-atomic.js';
+import { writeSettingsFileAtomic } from '../../core/fs-atomic.js';
 import { scrubChildEnv, openProxyLog, rotateProxyLogIfLarge } from '../../core/proxy-log.js';
 import { inspectCodexAuth, classifyCodexAuthReadError, type CodexAuthState } from '../../core/codex-auth-inspect.js';
 import { stripAnsi } from '../../hud/colors.js';
@@ -963,7 +963,7 @@ export async function runPostSpawnVerification(
  * Perform the single atomic settings.json pass for enable:
  * strip old hooks + env, then apply new hooks + env in one write.
  *
- * The writeFileAtomicExclusive call is guarded — ENOSPC/EACCES returns Err
+ * The writeSettingsFileAtomic call is guarded — ENOSPC/EACCES returns Err
  * instead of crashing with an unhandled rejection.
  *
  * Returns Ok(undefined) on success, Err(reason) on hard failure.
@@ -998,7 +998,7 @@ async function applyEnableSettingsPass(
   _applyProxyEnvToObject(parsedSettings, port);
 
   try {
-    await writeFileAtomicExclusive(settingsPath, JSON.stringify(parsedSettings, null, 2) + '\n');
+    await writeSettingsFileAtomic(settingsPath, JSON.stringify(parsedSettings, null, 2) + '\n');
   } catch (err) {
     return Err(
       `Could not write settings.json: ${err instanceof Error ? err.message : String(err)}`,
@@ -1794,7 +1794,7 @@ async function runDisable(): Promise<void> {
   if (changed) {
     // Guard ENOSPC/EACCES — unhandled rejection leaves proxy in partial state
     try {
-      await writeFileAtomicExclusive(settingsPath, JSON.stringify(parsedSettings, null, 2) + '\n');
+      await writeSettingsFileAtomic(settingsPath, JSON.stringify(parsedSettings, null, 2) + '\n');
     } catch (err) {
       p.log.error(
         `Could not write settings.json: ${err instanceof Error ? err.message : String(err)}`,

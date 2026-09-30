@@ -6,6 +6,7 @@ import * as p from '@clack/prompts';
 import color from 'picocolors';
 import { getInstallationPaths, getClaudeDirectory, getHomeDirectory, getManagedSettingsPath } from '../../targets/claude-code/claude-paths.js';
 import { getGitRoot } from '../../core/git.js';
+import { isSameLocation } from '../../core/same-location.js';
 import { DEVFLOW_PLUGINS, SKILL_NAMESPACE, getAllSkillNames, getAllAgentNames, getAllCommandNames, parsePluginSelection, resolveFeatureRedirect, prefixSkillName, unprefixSkillName, skillsOf, FEATURE_OWNED_SKILLS, type PluginDefinition } from '../../core/plugins.js';
 import { readManifest } from '../../core/manifest.js';
 import { sweepOrphanedAssets, mdFileName, mdEntryName } from '../../core/orphan-sweep.js';
@@ -34,7 +35,7 @@ import type { Settings } from '../../targets/claude-code/hooks.js';
 import { detectShell, getProfilePath } from '../../core/safe-delete.js';
 import { isAlreadyInstalled, removeFromProfile } from '../../core/safe-delete-install.js';
 import { removeManagedSettings, stripUserDenyList, detectDenyState, DEVFLOW_HISTORICAL_DENY, DEVFLOW_TRACKED_PATHS } from '../../targets/claude-code/post-install.js';
-import { writeFileAtomicExclusive } from '../../core/fs-atomic.js';
+import { writeSettingsFileAtomic } from '../../core/fs-atomic.js';
 import { stripFlags } from '../../core/flags.js';
 import { stripDevflowTeammateModeFromJson } from '../../core/teammate-mode-cleanup.js';
 import { getPackageRoot, isContainedIn } from '../../core/paths.js';
@@ -78,18 +79,6 @@ async function legacyLocalInstallPaths(gitRoot: string): Promise<ScopeInstallPat
   if (await isSameLocation(legacy.claudeDir, machine.claudeDir)) return null;
   if (await isSameLocation(legacy.devflowDir, machine.devflowDir)) return null;
   return legacy;
-}
-
-/**
- * Whether two paths name one location — realpaths where they exist, so a symlinked
- * HOME, or macOS's /var → /private/var temp tree, still matches. The shell hooks make
- * the same physical comparison in git-marker's df_is_project_root (D-HOOKS-GIT-ONLY).
- */
-export async function isSameLocation(a: string, b: string): Promise<boolean> {
-  const canonical = (target: string): Promise<string> =>
-    fs.realpath(target).catch(() => path.resolve(target));
-  const [left, right] = await Promise.all([canonical(a), canonical(b)]);
-  return left === right;
 }
 
 /**
@@ -414,16 +403,12 @@ export type ConfirmPrompt = (opts: { message: string; initialValue?: boolean }) 
  * --keep-docs from triggering prompts about skill shadows or preference-profile.md.
  */
 export function resolveDevflowDirCleanup(opts: {
-  scope: UninstallScope;
   isTTY: boolean;
   userContent: string[];
   devflowDir: string;
   homeDir: string;
   keepDocs?: boolean;
 }): 'artifacts-only' | 'prompt' {
-  // A legacy local install never removes project data — only install artifacts.
-  if (opts.scope !== 'user') return 'artifacts-only';
-
   // --keep-docs: suppress the full cleanup prompt entirely; artifacts-only.
   if (opts.keepDocs) return 'artifacts-only';
 
@@ -972,7 +957,7 @@ export async function runSelectivePhaseForScope(opts: {
       const settings = await fs.readFile(settingsPath, 'utf-8');
       const updated = await removeAmbientHook(settings, { purgeLegacyRule: scope === 'user' });
       if (updated !== settings) {
-        await fs.writeFile(settingsPath, updated, 'utf-8');
+        await writeSettingsFileAtomic(settingsPath, updated);
         if (verbose) {
           p.log.success('Ambient mode hooks removed from settings.json');
         }
@@ -1043,7 +1028,6 @@ export async function runFullPhaseForScope(opts: {
     // Non-interactive, no user content, or precondition guard failure → artifacts-only.
     const userContent = await enumerateUserDevFlowContent(devflowDir);
     const cleanupDecision = resolveDevflowDirCleanup({
-      scope: 'user',
       isTTY,
       userContent,
       devflowDir,
@@ -1275,7 +1259,7 @@ export async function runCleanupPhase(opts: {
       }
 
       if (settingsContent !== originalContent) {
-        await fs.writeFile(settingsPath, settingsContent, 'utf-8');
+        await writeSettingsFileAtomic(settingsPath, settingsContent);
         if (verbose) {
           p.log.success(`Devflow hooks removed from settings.json (${scope})`);
         }
@@ -1359,7 +1343,7 @@ export async function runCleanupPhase(opts: {
           DEVFLOW_HISTORICAL_DENY,
         );
         if (removed.length > 0) {
-          await writeFileAtomicExclusive(userSettingsPathForSecurity, stripped);
+          await writeSettingsFileAtomic(userSettingsPathForSecurity, stripped);
           p.log.success(`Security deny list removed from user settings (${removed.length} entries)`);
         }
       }

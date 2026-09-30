@@ -12,8 +12,8 @@
     },
     {
       "id": "partial-count",
-      "floor": 15,
-      "pattern": "ALL_MDS_PARTIALS.length).toBeGreaterThanOrEqual(15)",
+      "floor": 16,
+      "pattern": "ALL_MDS_PARTIALS.length).toBeGreaterThanOrEqual(16)",
       "occurrences": 1,
       "sourceFile": "tests/build-mds.test.ts",
       "description": "Number of .mds partial files anywhere under src/ (ALL_MDS_PARTIALS = MDS_PARTIALS under src/assets/commands/_partials/, plus MDS_REFERENCE_PARTIALS elsewhere). The discovery assertion is a set-equality against tests/fixtures/mds-manifest.ts over a repo-wide walk that classifies by the build's own rule -- no output-dir: key -- so a partial parked outside _partials/ is named rather than merely counted; this floor is its length. Floors rise with the roster, never fall — a partial deleted rather than inlined takes its callers with it silently."
@@ -67,12 +67,12 @@
       "description": "Minimum number of DEVFLOW_PLUGINS registry entries"
     },
     {
-      "id": "install-path-refs",
-      "floor": 2,
-      "pattern": "toBeGreaterThanOrEqual(2)",
+      "id": "language-gate-focuses",
+      "floor": 8,
+      "pattern": "expect(focuses).toHaveLength(8)",
       "occurrences": 1,
       "sourceFile": "tests/skill-references.test.ts",
-      "description": "Minimum install-path references in dist/commands/ files"
+      "description": "Language focuses /code-review's presence gate names, each held to a canonical skill. Compiled commands name no skill by install path (D-CLAUDE-DIR-PROMPTS): the gate is the one install path a command builds, templated on the focus under the Claude Code directory the installer resolves, so this count is what keeps the Format 3 compiled-command check from passing on an empty set."
     },
     {
       "id": "d11-posting-ops",
@@ -241,6 +241,30 @@
       "occurrences": 1,
       "sourceFile": "tests/git-agent.test.ts",
       "description": "AC-0.6b: REQUIRED_OPS detected as doing remote I/O, over git.md UNIONED with the PR-host references (the corpus #326's move made necessary — a git.md-only read silently narrows the set by one because post-resolution-summary's gh indicators all moved with its body). Replaces a bare `> 0` non-vacuity check, which one detected op satisfies and which therefore cannot tell a corpus narrowing from a real removal. Zero headroom at 16 (14 + #363's update-pr-evidence + #364's associate-release): the D4 evidence half of the same guard stays git.md-only (PF-027 — a degradation clause a spawn can decline to load is not a contract), so the two halves read different corpora on purpose."
+    },
+    {
+      "id": "write-fence-row-count",
+      "floor": 52,
+      "pattern": "FENCE_ROWS.length).toBeGreaterThanOrEqual(52)",
+      "occurrences": 1,
+      "sourceFile": "tests/write-set-fence.test.ts",
+      "description": "Rows in the write-set fence table (FENCE_ROWS, D-WRITE-SET-FENCE, #406 item 19): one per CLI toggle action plus the state-clearing and read-only actions beside them, each walked before and after against its allowlist. The coverage tests hold the table to the CLI's own --help roster and every --enable/--disable/--set a command defines, so a row can only leave by an UNFENCED_* reason; this floor stops the table shrinking behind them. Floors rise, never fall."
+    },
+    {
+      "id": "write-fence-command-count",
+      "floor": 15,
+      "pattern": "args[0])).size).toBeGreaterThanOrEqual(15)",
+      "occurrences": 1,
+      "sourceFile": "tests/write-set-fence.test.ts",
+      "description": "Distinct top-level commands with at least one write-set fence row (every registered command except init and uninstall, whose write sets are the install-snapshot goldens). Floors rise, never fall."
+    },
+    {
+      "id": "init-location-count",
+      "floor": 7,
+      "pattern": "INIT_LOCATIONS.length).toBeGreaterThanOrEqual(7)",
+      "occurrences": 1,
+      "sourceFile": "tests/init-location-invariance.test.ts",
+      "description": "Locations `devflow init` is run from in the location-invariance matrix (D-INIT-LOCATION-INVARIANCE, #406 item 19): repo root, subdirectory, linked worktree, non-git directory, a repository path with a space, a symlinked HOME and a repository rooted at HOME. Each must install the identical machine side and write per-repository files only at the checkout toplevel. Floors rise, never fall."
     }
   ],
   "ceilings": [
@@ -331,6 +355,14 @@
       "occurrences": 1,
       "sourceFile": "tests/docs/claude-md-tracker-section.test.ts",
       "description": "Max characters of the CLAUDE.md Tracker block — every consecutive bold-lead paragraph whose lead begins with Tracker, plus the blank lines between them. CLAUDE.md is loaded into every session in this repository, so the block length is a recurring per-session cost, and it is the paragraph run most likely to absorb every new tracker detail: a paragraph that grows a sentence per change has no natural stopping point. Measured 3,458 at the pin, headroom 42. May be LOWERED after a pass that cuts the text, never raised: a cap raised to fit whatever the block grew into is not a cap."
+    },
+    {
+      "id": "write-fence-allowlist-size",
+      "ceiling": 11,
+      "pattern": "allowlistSize(FENCE_ROWS)).toBeLessThanOrEqual(11)",
+      "occurrences": 1,
+      "sourceFile": "tests/write-set-fence.test.ts",
+      "description": "Distinct allowlist entries across the write-set fence table — the machine-wide footprint the CLI toggles may write (audit appendix 09-tests.md strategy item 9). A new path a toggle writes must be added to a row, and this ceiling says so out loud; it may be LOWERED as the footprint shrinks, never raised."
     }
   ]
 }

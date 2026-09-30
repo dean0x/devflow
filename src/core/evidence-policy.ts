@@ -16,6 +16,9 @@
  * the local resolver of the per-repository settings layer — `.devflow/project.json`,
  * the personal `.devflow/config.json` and the machine manifest. Its shapes are
  * transcribed the same way, and there is no TypeScript copy of its fold either.
+ * It also loads the shared strict parser both resolvers use,
+ * `lib/project-config.cjs` (loadProjectConfigLib), so the CLI judges a config
+ * file's bytes exactly as the resolvers do.
  *
  * D-POLICY-NO-WRITE (applies ADR-024): `.devflow/project.json` is team-owned, and
  * devflow never writes or replaces a shared file it cannot prove it wrote. This
@@ -41,6 +44,9 @@ export const RESOLVER_SCRIPT_NAME = 'resolve-evidence-policy.cjs';
 
 /** Basename of the settings resolver under src/assets/scripts/ (and ~/.devflow/scripts/). */
 export const SETTINGS_SCRIPT_NAME = 'resolve-settings.cjs';
+
+/** The shared strict config parser, relative to src/assets/scripts/ (and ~/.devflow/scripts/). */
+export const PROJECT_CONFIG_LIB_NAME = join('lib', 'project-config.cjs');
 
 /** The team file the CLI suggests committing, relative to a repository root. */
 const PROJECT_FILE = '.devflow/project.json';
@@ -135,12 +141,24 @@ export interface RepoSettings {
   };
   /** The worktree project.json's own ids, or null when it declares none. */
   readonly repoCompliance: readonly string[] | null;
+  /**
+   * The default branch's project.json ids (its local tracking copy), or null when
+   * it declares none or there is no tracking copy (D-LENS-UNION).
+   */
+  readonly defaultBranchCompliance: readonly string[] | null;
+  /**
+   * `.devflow/config.json` is tracked by git, so the resolver ignored it as if it
+   * were absent (D-PERSONAL-UNTRACKED).
+   */
+  readonly personalTracked: boolean;
   /** The worktree holds the retired `.devflow/policy.json`. */
   readonly retiredPolicyFile: boolean;
   /**
    * The repository layer whose file exists but is unreadable — the whole-file
    * rule then fails every field closed (`ok` false) except the compliance lens,
-   * which keeps the machine's own frameworks — or null.
+   * which stays the union of every readable layer (D-LENS-UNION): an unreadable
+   * config.json owns no compliance, and an unreadable project.json reads as a
+   * malformed declaration, the generic lens — or null.
    */
   readonly unreadable: Exclude<SettingsSwitchSource, 'machine'> | null;
 }
@@ -163,7 +181,36 @@ export interface SettingsModule {
   serializeProjectSuggestion(input: unknown): string | null;
 }
 
-type SurfaceKind = 'string-array' | 'object' | 'regexp' | 'string' | 'function';
+// ── Transcribed shapes (lib/project-config.cjs JSDoc) ──────────────────────────
+
+/** `decodeConfigBytes`'s verdict: no file, bytes that are no config text, or the text. */
+export type DecodedConfigBytes =
+  | { readonly kind: 'absent' }
+  | { readonly kind: 'invalid' }
+  | { readonly kind: 'text'; readonly text: string };
+
+/** `readBoundedRegularFile`'s verdict: no file, a file it refused unread, or the bytes. */
+export type BoundedRead =
+  | { readonly kind: 'absent' }
+  | { readonly kind: 'refused' }
+  | { readonly kind: 'ok'; readonly bytes: Buffer };
+
+/** The part of the shared parser's `module.exports` the CLI relies on. */
+export interface ProjectConfigLib {
+  /** The byte bound on every repository config file. */
+  readonly MAX_CONFIG_BYTES: number;
+  /** Size, BOM and UTF-8 checks on a config file's bytes (`null` is no file). */
+  decodeConfigBytes(buf: unknown): DecodedConfigBytes;
+  /**
+   * Read a regular file of at most `maxBytes`; with `followSymlinks` false a
+   * symlink, like any non-regular file, is refused unopened.
+   */
+  readBoundedRegularFile(filePath: string, maxBytes: number, followSymlinks: boolean): BoundedRead;
+  /** Every duplicated member path of valid JSON text, or null when it is too deep to scan. */
+  collectDuplicateKeyPaths(text: string): ReadonlySet<string> | null;
+}
+
+type SurfaceKind = 'string-array' | 'object' | 'regexp' | 'string' | 'number' | 'function';
 
 /**
  * Every key of EvidencePolicyModule and the runtime kind the loader requires of
@@ -188,6 +235,14 @@ export const SETTINGS_MODULE_SURFACE = Object.freeze({
   serializeProjectSuggestion: 'function',
 } as const satisfies Record<keyof SettingsModule, SurfaceKind>);
 
+/** Every key of ProjectConfigLib and the runtime kind the loader requires of it. */
+export const PROJECT_CONFIG_LIB_SURFACE = Object.freeze({
+  MAX_CONFIG_BYTES: 'number',
+  decodeConfigBytes: 'function',
+  readBoundedRegularFile: 'function',
+  collectDuplicateKeyPaths: 'function',
+} as const satisfies Record<keyof ProjectConfigLib, SurfaceKind>);
+
 // ── Loader ─────────────────────────────────────────────────────────────────────
 
 type Result<T, E> = { readonly ok: true; readonly value: T } | { readonly ok: false; readonly error: E };
@@ -201,12 +256,15 @@ export type EvidencePolicyLoad = Result<EvidencePolicyModule, EvidencePolicyLoad
 
 export type SettingsLoad = Result<SettingsModule, EvidencePolicyLoadError>;
 
+export type ProjectConfigLibLoad = Result<ProjectConfigLib, EvidencePolicyLoadError>;
+
 function hasKind(value: unknown, kind: SurfaceKind): boolean {
   switch (kind) {
     case 'string-array': return Array.isArray(value) && value.every(v => typeof v === 'string');
     case 'object': return typeof value === 'object' && value !== null;
     case 'regexp': return value instanceof RegExp;
     case 'string': return typeof value === 'string';
+    case 'number': return typeof value === 'number' && Number.isFinite(value);
     case 'function': return typeof value === 'function';
     default: {
       const exhaustive: never = kind;
@@ -264,6 +322,14 @@ export function loadSettingsModule(dir: string = scriptsDir()): SettingsLoad {
   return loadScript<SettingsModule>(join(dir, SETTINGS_SCRIPT_NAME), SETTINGS_MODULE_SURFACE);
 }
 
+/**
+ * Load the shared strict config parser from `dir` (default: the package's own
+ * scripts directory) and shape-check its surface.
+ */
+export function loadProjectConfigLib(dir: string = scriptsDir()): ProjectConfigLibLoad {
+  return loadScript<ProjectConfigLib>(join(dir, PROJECT_CONFIG_LIB_NAME), PROJECT_CONFIG_LIB_SURFACE);
+}
+
 // ── Presentation (pure) ────────────────────────────────────────────────────────
 
 /** `Evidence policy: <policy> (source: <source>)`, plus ` [warn: a, b]` when warnings exist. */
@@ -313,11 +379,13 @@ function suggestedFrameworks(complianceState: unknown): readonly string[] {
 }
 
 /**
- * What `--enable`/`--set` print when compliance is on: the `.devflow/project.json`
- * a team may commit to hold every developer to what this machine now gets by
- * default — the required evidence policy and this machine's frameworks. Returned
- * only when the evidence resolver's own `complianceDefault` says `required`
- * (compliance enabled, at any framework count); `null` otherwise. The bytes come
+ * What `--enable`/`--set` print when compliance is on: the keys to add to a
+ * repository's `.devflow/project.json` on its default branch — merged into the
+ * file when it already has one, never replacing it — to hold every developer to
+ * what this machine now gets by default: the required evidence policy and this
+ * machine's frameworks. Returned only when the evidence resolver's own
+ * `complianceDefault` says `required` (compliance enabled, at any framework
+ * count); `null` otherwise. The bytes come
  * from the settings resolver's `serializeProjectSuggestion`, which returns them
  * only when they read back through the shared parser as exactly what was asked.
  * Nothing is written (D-POLICY-NO-WRITE, applies ADR-024).
@@ -336,7 +404,8 @@ export function evidencePolicySuggestion(
   return [
     'Compliance is enabled on this machine, so repositories without a committed',
     'evidence setting default to the required evidence policy here. To apply it for',
-    `everyone working in a repository, commit this as ${PROJECT_FILE} on its default branch:`,
+    `everyone working in a repository, add these keys to its ${PROJECT_FILE} on its`,
+    'default branch — merged into the file when it already has one, never replacing it:',
     '',
     `${body}`,
     'devflow never writes this file: the team owns it, and once committed it applies',
@@ -363,8 +432,8 @@ export function settingsSourceFile(source: Exclude<SettingsSwitchSource, 'machin
  * layer narrows it — `disabled (.devflow/project.json)` — and null otherwise, so a
  * `--status` whose machine switch alone decides prints exactly what it always has
  * (D-FEATURES-NARROW-ONLY). A repository file that exists but is unreadable fails
- * every field closed but the machine's compliance lens, and a switch that closed
- * off is labelled with that file —
+ * every field closed but the compliance lens, and a switch that closed off is
+ * labelled with that file —
  * `disabled (.devflow/project.json is unreadable)` — since commands act on it. Any
  * other failure (the resolver failed to load, or git could not answer) yields
  * null: it knows nothing about this repository.
@@ -409,15 +478,25 @@ export function repoTrackerSelection(loaded: SettingsLoad, opts: RepoSettingsOpt
   return { provider: settings.tracker, source };
 }
 
+/** A declared id list as a `--status` line shows it. */
+function idsLabel(ids: readonly string[]): string {
+  return ids.length > 0 ? ids.join(', ') : 'generic controls only';
+}
+
 /**
- * The `compliance --status` lines about the repository in `opts.dir`: the ids its
- * project.json declares (`generic controls only` for an empty or malformed list),
- * and a migration hint while the retired policy file is in the working tree. A
- * repository file that exists but is unreadable contributes the generic lens (the
- * machine's own frameworks still apply), and says so, naming the file. Empty when
- * the resolver is unavailable or failed closed for any other reason, or the
- * repository declares nothing and holds no policy file — the status output is then
- * unchanged.
+ * The `compliance --status` lines about the repository in `opts.dir`, mirroring
+ * the resolver's lens fold (D-LENS-UNION: machine ∪ default branch ∪ worktree):
+ * the ids this checkout's project.json declares (`generic controls only` for an
+ * empty or malformed list), the ids the default branch's copy declares, the
+ * effective lens those add up to with the machine's, and a migration hint while
+ * the retired policy file is in the working tree.
+ *
+ * A broken file affects only the keys it owns. An unreadable project.json is a
+ * malformed declaration — generic — and says so, naming the file; an unreadable
+ * config.json owns no compliance, so the lines are those of a readable one. Empty
+ * when the resolver is unavailable or failed closed for any other reason, or no
+ * repository layer declares anything and there is no policy file — the status
+ * output is then unchanged.
  *
  * The hint states the rule (D-POLICY-JSON-RETIRED): the file is not read, and
  * while project.json has no `evidence` its presence holds the repository at
@@ -427,18 +506,36 @@ export function repoTrackerSelection(loaded: SettingsLoad, opts: RepoSettingsOpt
 export function repoComplianceStatusLines(loaded: SettingsLoad, opts: RepoSettingsOptions): string[] {
   if (!loaded.ok) return [];
   const settings = loaded.value.resolveSettings(opts);
-  if (!settings.ok) {
-    return settings.unreadable === null
-      ? []
-      : [`Repository: generic controls only (${settingsSourceFile(settings.unreadable)} is unreadable)`];
-  }
+  if (!settings.ok && settings.unreadable === null) return [];
   const lines: string[] = [];
-  if (settings.repoCompliance !== null) {
-    const ids = settings.repoCompliance.length > 0 ? settings.repoCompliance.join(', ') : 'generic controls only';
-    lines.push(`Repository: ${ids} (${PROJECT_FILE})`);
+  if (settings.unreadable === 'project') {
+    lines.push(`Repository: generic controls only (${PROJECT_FILE} is unreadable)`);
+  } else if (settings.repoCompliance !== null) {
+    lines.push(`Repository: ${idsLabel(settings.repoCompliance)} (${PROJECT_FILE})`);
+  }
+  if (settings.defaultBranchCompliance !== null) {
+    lines.push(`Default branch: ${idsLabel(settings.defaultBranchCompliance)} (its ${PROJECT_FILE})`);
+  }
+  if (lines.length > 0) {
+    const lens = settings.compliance;
+    lines.push(`Effective here: ${lens.enabled ? idsLabel(lens.frameworks) : 'off'} (this machine + the default branch + this checkout)`);
   }
   if (settings.retiredPolicyFile) lines.push(...retiredPolicyHint(loaded.value));
   return lines;
+}
+
+/**
+ * The warning a `--status` prints when this checkout's `.devflow/config.json` is
+ * tracked by git, or null (D-PERSONAL-UNTRACKED). The resolver ignores such a file
+ * and says so on stderr, but prompts run it with stderr discarded, so a status
+ * command is where the user sees why their personal settings have no effect.
+ */
+export function personalConfigTrackedWarning(loaded: SettingsLoad, opts: RepoSettingsOptions): string | null {
+  if (!loaded.ok) return null;
+  if (!loaded.value.resolveSettings(opts).personalTracked) return null;
+  const file = settingsSourceFile('personal');
+  return `${file} is tracked by git, so devflow ignores it — it holds personal settings. ` +
+    `Untrack it with: git rm --cached ${file}`;
 }
 
 /** The policies the hint maps, in the order it prints them. */
@@ -456,8 +553,9 @@ function retiredPolicyHint(settings: Pick<SettingsModule, 'serializeProjectSugge
   });
   return [
     `Migration:  ${RETIRED_POLICY_FILE} is not read. While ${PROJECT_FILE} has no "evidence",`,
-    '            its presence alone holds this repository at required. Commit its value',
-    `            to ${PROJECT_FILE} as "evidence", then delete ${RETIRED_POLICY_FILE}:`,
+    '            its presence alone holds this repository at required. Add its value to',
+    `            ${PROJECT_FILE} as "evidence", and keep ${RETIRED_POLICY_FILE} until every`,
+    `            teammate runs devflow 3.0 or later; only then delete it:`,
     ...mappings,
   ];
 }

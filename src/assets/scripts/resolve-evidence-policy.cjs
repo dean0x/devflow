@@ -124,12 +124,10 @@ const MECHANISM_INPUTS = Object.freeze({
 const INPUT_KEYS = Object.freeze(['ISSUE_REQUIRED', 'APPLY_CONVENTIONS', 'REQUIRE_NON_AUTHOR_APPROVAL']);
 
 /**
- * A branch name this script will put into argv or onto stdout: an alphanumeric
- * first character (so never an option and never a hidden path), then at most 254
- * of `[A-Za-z0-9._/-]`, and never `..`. The lookahead is bounded by the same
- * class, so the scan is linear (no unbounded `.*`).
+ * A branch name this script will put into argv or onto stdout — the shared gate
+ * (lib/project-config.cjs), so the settings resolver reads the same branch names.
  */
-const SAFE_REF_RE = /^(?![A-Za-z0-9._/-]{0,254}\.\.)[A-Za-z0-9][A-Za-z0-9._/-]{0,254}$/;
+const { SAFE_REF_RE } = projectConfig;
 
 /**
  * D-POLICY-LINE: the exported output grammar — anchored, closed alternations
@@ -605,6 +603,42 @@ function lsRemoteDefaultBranch(ctx, root) {
 }
 
 /**
+ * @typedef {{ kind: 'ref', ref: string } | { kind: 'none' } | { kind: 'unreadable' }} OriginHead
+ */
+
+/**
+ * Step 5b (offline, D still unknown after ls-remote) — D-OFFLINE-ORIGIN-HEAD:
+ * the default branch this clone last recorded for origin, read LOCALLY with
+ * `git symbolic-ref --quiet refs/remotes/origin/HEAD` (no network, no index
+ * refresh). With D unnamed an unreachable origin leaves the worktree's own file
+ * governing, so a branch that sets `evidence:"standard"` would resolve standard
+ * while main says required; naming D here lets trackingSource fold main's
+ * tracking copy in, so the branch cannot lower it.
+ *   ref         exit 0 with one `refs/remotes/origin/<SAFE_REF_RE>` line
+ *   none        an answered non-zero exit: origin/HEAD is not recorded — the
+ *               residual case, where the worktree file governs with
+ *               WARN=remote-unavailable
+ *   unreadable  git did not answer, or origin/HEAD exists but its answer names
+ *               no safe branch (another remote, a hostile or unparseable name).
+ *               Either is a failure, never the residual case: gatherFacts reads
+ *               it as an invalid base, which resolves required (avoids PF-075).
+ *               resolve-settings' defaultBranchCompliance fails the same answer
+ *               closed, to `generic`.
+ *
+ * @param {CallContext} ctx
+ * @param {string} root
+ * @returns {OriginHead}
+ */
+function localOriginHead(ctx, root) {
+  const r = runCall(ctx, 'git', ['symbolic-ref', '--quiet', 'refs/remotes/origin/HEAD'], root,
+    GIT_LOCAL_TIMEOUT_MS, LINE_MAX_BUFFER);
+  if (!answered(r)) return { kind: 'unreadable' };
+  if (!r.ok) return { kind: 'none' };
+  const ref = projectConfig.parseOriginHeadRef(r.stdout.toString('utf8'));
+  return ref === null ? { kind: 'unreadable' } : { kind: 'ref', ref };
+}
+
+/**
  * Steps 4 and 7: one blob at a revision (HEAD, or the tracking ref).
  * Exit 0 ⇒ the bytes; an answered non-zero exit (the path does not exist there,
  * an unborn HEAD) ⇒ absent; an unanswered call (ENOBUFS included) ⇒ unanswered,
@@ -690,7 +724,8 @@ function trackingSource(ctx, root, ref) {
  * }} Facts
  *   remote     R — set iff reachable
  *   tracking   T — set iff offline and refs/remotes/origin/<D> exists (or git
- *              could not answer whether it does — then invalid)
+ *              could not answer whether it does, or origin/HEAD is unreadable —
+ *              then invalid)
  *   head       H — set iff B (R online, T offline) is known
  *   compliance stricter(C_machine, C_repo) — D-COMPLIANCE-REPO-FLOOR
  */
@@ -704,6 +739,7 @@ function trackingSource(ctx, root, ref) {
  *                                                            a 404 or has no evidence;
  *                                                            presence only)
  *   git ls-remote --symref origin HEAD                      (offline, D unknown)
+ *   git symbolic-ref --quiet refs/remotes/origin/HEAD       (… and ls-remote named none)
  *   git rev-parse --verify --quiet refs/remotes/origin/D    (offline, D known)
  *   git cat-file blob refs/remotes/origin/D:…/project.json  (that ref exists)
  *   git cat-file blob refs/remotes/origin/D:…/policy.json   (… no evidence there; presence)
@@ -741,6 +777,11 @@ function gatherFacts(dir, compliance, exec) {
   let tracking = null;
   if (!reachable) {
     if (ref === null) ref = lsRemoteDefaultBranch(ctx, root);
+    if (ref === null) {
+      const originHead = localOriginHead(ctx, root);
+      if (originHead.kind === 'ref') ref = originHead.ref;
+      if (originHead.kind === 'unreadable') tracking = { evidence: INVALID, compliance: false };
+    }
     if (ref !== null) tracking = trackingSource(ctx, root, ref);
   }
 

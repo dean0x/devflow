@@ -41,7 +41,7 @@ import {
   type TrackerResult,
 } from '../../core/tracker.js';
 import { readManifest, syncManifestFeature } from '../../core/manifest.js';
-import { loadSettingsModule, repoTrackerSelection, type RepoTrackerSelection } from '../../core/evidence-policy.js';
+import { loadSettingsModule, personalConfigTrackedWarning, repoTrackerSelection, type RepoTrackerSelection } from '../../core/evidence-policy.js';
 import { getClaudeDirectory, getDevFlowDirectory } from '../../targets/claude-code/claude-paths.js';
 import { SKILL_REFS_SKILL_NAME, installedReferenceManifest } from '../../core/mds-variants.js';
 import { prefixSkillName } from '../../core/plugins.js';
@@ -341,7 +341,8 @@ export const trackerCommand = new Command('tracker')
     // ── Status ─────────────────────────────────────────────────────────────────
     // --status wins when both flags are passed, mirroring `devflow compliance`.
     if (options.status) {
-      const selection = repoTrackerSelection(loadSettingsModule(), { dir: process.cwd() });
+      const settingsModule = loadSettingsModule();
+      const selection = repoTrackerSelection(settingsModule, { dir: process.cwd() });
       const effective = selection?.provider ?? current.provider;
       const conventions = await readTrackerStatusConventions(devflowDir, effective);
       const mechanics = await readTrackerMechanics(getClaudeDirectory());
@@ -372,6 +373,8 @@ export const trackerCommand = new Command('tracker')
       );
 
       if (!statusRearm.ok) p.log.warn(statusRearm.error);
+      const trackedWarning = personalConfigTrackedWarning(settingsModule, { dir: process.cwd() });
+      if (trackedWarning !== null) p.log.warn(trackedWarning);
 
       return;
     }

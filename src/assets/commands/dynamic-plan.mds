@@ -4,6 +4,7 @@ argument-hint: "[tickets-dir | issue-list]"
 output-dir: dist/commands
 ---
 @import { authoring_preamble } from "./_partials/_preamble.mds"
+@import { docs_root } from "./_partials/_docs_root.mds"
 @import { agent_roster, agent_caveats } from "./_partials/_roster.mds"
 @import { acceptance_criteria_contract } from "./_partials/_plan_contract.mds"
 @import { issue_ref_grammar, issue_capture_contract } from "./_partials/_tracker.mds"
@@ -22,7 +23,7 @@ This command instructs you to construct and run a Claude Code dynamic Workflow t
 ---
 
 **Requires:** ticket files directory or tracker issue list; optional `~/.devflow/preference-profile.md`
-**Produces:** per-ticket plan files + `DECISIONS-NEEDED.md` at `.devflow/docs/design/{slug}/{ts}/`
+**Produces:** per-ticket plan files + `DECISIONS-NEEDED.md` at `{worktree}/.devflow/docs/design/{slug}/{ts}/`
 
 ---
 
@@ -38,6 +39,10 @@ Before authoring, verify:
 ---
 
 ### Pre-authoring setup
+
+{{docs_root()}}
+
+Pass `{worktree}` to the workflow as its `root` argument.
 
 **1. Apply decisions context**
 
@@ -79,7 +84,7 @@ node "$HOME/.devflow/scripts/verify-evidence.cjs" check tp <that file>; echo "ex
 ```
 
    Check the section, never the whole plan file: the plan's other `## ` headings are not evidence-file sections, so the script would parse the whole document as the plan. `exit=0` passes. Any other result names that plan `test plan malformed (<code>)` in your summary, `<code>` being the code the script printed on stderr; a plan with no `## Test Plan` section copies as an empty file, which the script refuses. Nothing is repaired: `/devflow:dynamic-build` passes no test plan from that plan.
-2. Read the `decisionsNeededPath` returned by the workflow (e.g. `.devflow/docs/design/<slug>/<ts>/DECISIONS-NEEDED.md`). Always use the OUTDIR-scoped path the workflow wrote — never the flat `.devflow/docs/design/DECISIONS-NEEDED.md`.
+2. Read the `decisionsNeededPath` returned by the workflow (e.g. `{worktree}/.devflow/docs/design/<slug>/<ts>/DECISIONS-NEEDED.md`). Always use the OUTDIR-scoped path the workflow wrote — never the flat `{worktree}/.devflow/docs/design/DECISIONS-NEEDED.md`.
 3. First surface the **Auto-Resolved Decisions** section (decision → resolution → source) for audit, then surface ALL open **Decisions Needed** to the user in ONE batched `AskUserQuestion` (never one-at-a-time).
 4. The user's answers feed into their own plan edits or a follow-up `/devflow:dynamic-plan` run.
 
@@ -106,7 +111,8 @@ const PREFERENCE_PROFILE = args.preferenceProfile || "";  // injected before aut
 const TP_CONTRACT = args.tpContract || "";  // the "Test-plan line (TP)" contract below — its paragraph and four bullets — passed verbatim as tpContract when invoking the workflow, never pasted into this script (it holds backticks)
 const slug = args.slug || "wave";
 const ts = new Date().toISOString().slice(0,16).replace(/[-:T]/g, (c) => c === 'T' ? '_' : c === ':' ? '' : c);
-const OUTDIR = `.devflow/docs/design/${slug}/${ts}`;
+const ROOT = args.root;  // {worktree} from Pre-authoring setup: the checkout's toplevel, never cwd
+const OUTDIR = `${ROOT}/.devflow/docs/design/${slug}/${ts}`;
 
 // Phase 1: Read all tickets
 const tickets = await phase("read-tickets", () =>
@@ -235,11 +241,11 @@ The plan-challenge step (Phase 3 above) MUST produce the acceptance criteria and
 
 ### Artifact paths
 
-Per-ticket plans → `.devflow/docs/design/{slug}/{ts}/{ticket-slug}-plan.md`
+Per-ticket plans → `{worktree}/.devflow/docs/design/{slug}/{ts}/{ticket-slug}-plan.md`
 
-Decisions needed → `.devflow/docs/design/{slug}/{ts}/DECISIONS-NEEDED.md`
+Decisions needed → `{worktree}/.devflow/docs/design/{slug}/{ts}/DECISIONS-NEEDED.md`
 
-Honor the `WORKTREE_PATH` prefix when provided.
+`{worktree}` is the docs root resolved in Pre-authoring setup (it honours `WORKTREE_PATH` when provided).
 
 ---
 

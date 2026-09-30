@@ -42,6 +42,8 @@ import {
   runResolver,
   scenarioCalls,
   scriptedExec,
+  warmFakeBin,
+  WARM_HOOK_TIMEOUT_MS,
   type ExecFn,
   type FakeBin,
   type RunResult,
@@ -161,7 +163,9 @@ beforeAll(() => {
   binRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-evidence-bin-'));
   fakeBin = createFakeBin(binRoot);
   ghOnlyBin = createFakeBin(binRoot, ['gh']);
-});
+  warmFakeBin(fakeBin, binRoot);
+  warmFakeBin(ghOnlyBin, binRoot);
+}, WARM_HOOK_TIMEOUT_MS * 2);
 
 afterAll(() => {
   fs.rmSync(binRoot, { recursive: true, force: true });
@@ -755,15 +759,23 @@ describe('pr-changes-policy — semantic, advisory, never lowering', () => {
 const ALLOWED_GIT_SUBCOMMANDS = new Set(['rev-parse', 'cat-file', 'ls-remote']);
 
 /**
+ * The one symbolic-ref call allowed (D-OFFLINE-ORIGIN-HEAD): its READ form. With
+ * a second ref argument, or `--delete`, the same subcommand WRITES a symref.
+ */
+const ORIGIN_HEAD_READ = ['git', 'symbolic-ref', '--quiet', 'refs/remotes/origin/HEAD'];
+
+/**
  * Named collector: calls the resolver must never make. A git subcommand outside
  * the read-only allowlist (which is what keeps `set-head`, `fetch` and every
- * index-refreshing command out), a gh subcommand other than `api`, and a gh call
- * that adds a field without `--method GET` — gh defaults such a call to POST.
+ * index-refreshing command out), a symbolic-ref other than the exact read of
+ * origin/HEAD, a gh subcommand other than `api`, and a gh call that adds a field
+ * without `--method GET` — gh defaults such a call to POST.
  */
 function collectForbiddenCalls(log: readonly string[][]): string[] {
   return log.filter((call) => {
     const [tool, sub] = call;
     if (call.includes('set-head') || call.includes('fetch')) return true;
+    if (tool === 'git' && sub === 'symbolic-ref') return call.join(' ') !== ORIGIN_HEAD_READ.join(' ');
     if (tool === 'git') return !ALLOWED_GIT_SUBCOMMANDS.has(sub);
     if (tool === 'gh') {
       if (sub !== 'api') return true;
@@ -1485,6 +1497,42 @@ describe('real git (gh faked unavailable, git real)', SUBPROCESS_TIMEOUT, () => 
       .toBe(`EVIDENCE_POLICY=required SOURCE=default REF=main WARN=remote-unavailable,pr-changes-policy ${LINE.requiredInputs}`);
   });
 
+  it('D-OFFLINE-ORIGIN-HEAD: origin gone, the clone\'s recorded origin/HEAD still names main — a lower branch is raised', () => {
+    // A real clone records refs/remotes/origin/HEAD; then origin disappears, so gh
+    // and ls-remote both fail and only the local symref names the default branch.
+    repoWithOrigin(BODY.required);
+    const bare = path.join(tmp, 'origin.git');
+    const clone = path.join(tmp, 'clone');
+    realGit(tmp, home, ['clone', '--quiet', bare, clone]);
+    expect(realGit(clone, home, ['symbolic-ref', '--quiet', 'refs/remotes/origin/HEAD'])).toBe('refs/remotes/origin/main\n');
+    realGit(clone, home, ['checkout', '--quiet', '-b', 'lower']);
+    writeWorktree(clone, BODY.standard);
+    realGit(clone, home, ['commit', '--quiet', '-am', 'lower']);
+    fs.renameSync(bare, path.join(tmp, 'origin-gone.git'));
+
+    const run = runReal(clone);
+    expect(run.status, run.stderr).toBe(0);
+    expect(expectOneGrammarLine(run.stdout))
+      .toBe(`EVIDENCE_POLICY=required SOURCE=worktree REF=main WARN=remote-unavailable,pr-changes-policy ${LINE.requiredInputs}`);
+
+    // Control — the residual case: with origin/HEAD unrecorded nothing names main,
+    // so the branch's own file governs. The symref alone made the difference above.
+    realGit(clone, home, ['symbolic-ref', '--delete', 'refs/remotes/origin/HEAD']);
+    const residual = runReal(clone);
+    expect(residual.status, residual.stderr).toBe(0);
+    expect(expectOneGrammarLine(residual.stdout))
+      .toBe(`EVIDENCE_POLICY=standard SOURCE=worktree REF=none WARN=remote-unavailable ${LINE.standardInputs}`);
+
+    // A recorded origin/HEAD that names no safe branch is a failure, not the
+    // residual case: git accepts `@` in a ref name, SAFE_REF_RE does not.
+    realGit(clone, home, ['symbolic-ref', 'refs/remotes/origin/HEAD', 'refs/remotes/origin/weird@name']);
+    expect(realGit(clone, home, ['symbolic-ref', '--quiet', 'refs/remotes/origin/HEAD'])).toBe('refs/remotes/origin/weird@name\n');
+    const unsafe = runReal(clone);
+    expect(unsafe.status, unsafe.stderr).toBe(0);
+    expect(expectOneGrammarLine(unsafe.stdout))
+      .toBe(`EVIDENCE_POLICY=required SOURCE=worktree REF=none WARN=remote-unavailable,invalid-file,pr-changes-policy ${LINE.requiredInputs}`);
+  });
+
   it('a branch in sync with the tracking copy fires nothing', () => {
     const work = repoWithOrigin(BODY.standard);
     const run = runReal(work);
@@ -1559,19 +1607,6 @@ describe('TP-45 (AC-39): a policy.json where project.json has no evidence resolv
       .toBe(`EVIDENCE_POLICY=standard SOURCE=default REF=main ${LINE.standardInputs}`);
     expect(RESOLVER.formatLine(resolveWith(scenarioCalls({ root }))))
       .toBe(`EVIDENCE_POLICY=standard SOURCE=default REF=none WARN=remote-unavailable ${LINE.standardInputs}`);
-  });
-
-  it('the working-tree policy.json is never opened or read — its bytes cannot matter', () => {
-    writeWorktreePolicy(root, RETIRED.standard);
-    const openSpy = vi.spyOn(CJS_FS, 'openSync');
-    const readSpy = vi.spyOn(CJS_FS, 'readSync');
-    const readFileSpy = vi.spyOn(CJS_FS, 'readFileSync');
-    const res = resolveWith(scenarioCalls({ root }));
-    expect(res.source).toBe('invalid');
-    const policyPath = worktreeFile(root, 'policy.json');
-    expect(openSpy.mock.calls.map(c => String(c[0]))).not.toContain(policyPath);
-    expect(readFileSpy.mock.calls.map(c => String(c[0]))).not.toContain(policyPath);
-    expect(readSpy).not.toHaveBeenCalled();
   });
 
   it.each([
@@ -1790,9 +1825,17 @@ describe('source guards', () => {
   });
 
   it('never enables a shell, and never names a write-side git command in code', () => {
+    // symbolic-ref appears once, in its read form only (D-OFFLINE-ORIGIN-HEAD).
+    const READ_FORM = "['symbolic-ref', '--quiet', 'refs/remotes/origin/HEAD']";
+    const writeSide = (source: string): string[] => codeLines(source)
+      .map(l => l.split(READ_FORM).join(''))
+      .filter(l => /['"](?:set-head|fetch|remote|push|update-ref|symbolic-ref)['"]/.test(l));
     const code = codeLines(SOURCE).join('\n');
     expect(code).not.toMatch(/shell:\s*true/);
-    expect(code).not.toMatch(/['"](?:set-head|fetch|remote|push|update-ref|symbolic-ref)['"]/);
+    expect(code.split(READ_FORM)).toHaveLength(2);
+    expect(writeSide(SOURCE)).toEqual([]);
+    expect(writeSide(`${SOURCE}\nrunCall(ctx, 'git', ['symbolic-ref', 'refs/remotes/origin/HEAD', 'refs/remotes/origin/x']);\n`))
+      .toHaveLength(1);
   });
 
   it('documents every exit code in the header, 3 as never emitted', () => {
@@ -1804,7 +1847,7 @@ describe('source guards', () => {
     for (const marker of [
       'D-POLICY-LINE', 'D-POLICY-PROBE', 'D-POLICY-JSON-RETIRED',
       'D-POLICY-FOLD', 'D-POLICY-CHANGE-DETECT', 'D-POLICY-PLUMBING',
-      'D-POLICY-SOURCE-PRECEDENCE', 'D-COMPLIANCE-REPO-FLOOR',
+      'D-POLICY-SOURCE-PRECEDENCE', 'D-COMPLIANCE-REPO-FLOOR', 'D-OFFLINE-ORIGIN-HEAD',
     ]) {
       expect(SOURCE, `${marker} missing`).toContain(marker);
     }

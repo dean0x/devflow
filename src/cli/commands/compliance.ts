@@ -8,7 +8,8 @@
  * Avoids PF-015: enable/disable each converge BOTH artifacts unconditionally.
  * The evidence-policy lines (--status, and the --enable/--set suggestion) come
  *   from src/core/evidence-policy.ts, the seam onto the package's own resolvers;
- *   the CLI prints .devflow/project.json and never writes it (applies ADR-024).
+ *   the CLI prints the keys to add to .devflow/project.json and never writes it
+ *   (applies ADR-024).
  */
 
 import { Command } from 'commander';

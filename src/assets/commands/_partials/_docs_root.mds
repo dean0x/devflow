@@ -1,0 +1,35 @@
+A partial: where a command's `.devflow/docs/` artifacts live (D-DOCS-ROOT, #406).
+
+D-DOCS-ROOT extends D-PROMPT-ROOT from the decisions and knowledge loaders to
+every docs artifact a command reads or writes — design documents, research
+output, bug-analysis and wave directories, ticket sets, and `/implement`'s
+handoff and evidence files. They belong to the checkout, not to the directory
+the session started in: a relative `.devflow/docs/…` path written from
+`packages/app` scattered a second `.devflow/docs/` tree there, which no later
+run found. The rule is the knowledge loader's — the toplevel, else the start
+directory — because docs artifacts are per checkout like knowledge bases, not
+per repository like the decisions ledger.
+
+A path handed to an agent in repo-relative form (the fields the Git agent's
+operations print into a PR or issue comment, where an absolute path would leak
+the author's filesystem) travels with a `WORKTREE_PATH` naming the checkout it is
+relative to, which the receiving agent resolves it under.
+`tests/guards/docs-root.test.ts` holds every compiled command to one of those two
+forms; `tests/commands/partials-root.test.ts` runs the resolution command below
+from a root, a subdirectory and a worktree.
+
+One define, imported selectively: the capture cost PF-073 describes is paid over
+the importer's scope, and a single define with no imports of its own adds one
+node to it.
+
+@define docs_root():
+**Docs root (D-DOCS-ROOT).** Every `.devflow/docs/` path this command reads or writes lives at the checkout's toplevel, never under the directory the session started in. Resolve `{worktree}` from the start directory — `WORKTREE_PATH` if provided, otherwise cwd (`devflow:worktree-support`) — by running
+
+```bash
+git -C "{start}" rev-parse --show-toplevel
+```
+
+and using its one-line output. If the command fails (outside a git repository), `{worktree}` is the start directory itself. Every docs path below is written `{worktree}/.devflow/docs/…`; a repo-relative docs path handed to an agent always travels with a `WORKTREE_PATH` naming the checkout it is relative to.
+@end
+
+@export docs_root

@@ -5,7 +5,7 @@ import * as p from '@clack/prompts';
 import color from 'picocolors';
 import { getClaudeDirectory, getDevFlowDirectory } from '../../targets/claude-code/claude-paths.js';
 import { syncManifestFeature } from '../../core/manifest.js';
-import { writeFileAtomicExclusive } from '../../core/fs-atomic.js';
+import { writeSettingsFileAtomic } from '../../core/fs-atomic.js';
 import {
   HUD_COMPONENTS,
   loadConfig,
@@ -244,7 +244,7 @@ export function createHudCommand(): Command {
         }
 
         const updated = addHudStatusLine(settingsContent, devflowDir);
-        await writeFileAtomicExclusive(settingsPath, updated);
+        await writeSettingsFileAtomic(settingsPath, updated);
       }
 
       // Always update config and sync manifest — removing the already-enabled
@@ -287,7 +287,7 @@ export function createHudCommand(): Command {
         const settingsContent = await fs.readFile(settingsPath, 'utf-8');
         const updated = removeHudStatusLine(settingsContent);
         if (updated !== settingsContent) {
-          await writeFileAtomicExclusive(settingsPath, updated);
+          await writeSettingsFileAtomic(settingsPath, updated);
           statusLineRemoved = true;
         }
       } catch {

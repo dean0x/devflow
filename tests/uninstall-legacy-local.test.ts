@@ -303,6 +303,33 @@ describe('legacy local uninstall through the CLI (TP-14, TP-48)', () => {
     expect(treeState(home)).toEqual(before);
   }, SUBPROCESS_TIMEOUT_MS);
 
+  it('outside any git repository, `uninstall --scope local` refuses and HOME stays byte-identical', async () => {
+    // With no repository there is no repo-local install to act on, and the cleanup
+    // phase must never fall back to the cwd.
+    await seedHome(home, { withUserInstall: true });
+    const nonGit = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'devflow-legacy-nongit-')));
+    try {
+      await fs.mkdir(path.join(nonGit, '.claude'));
+      await fs.mkdir(path.join(nonGit, '.devflow'));
+      await fs.writeFile(path.join(nonGit, '.devflow', 'manifest.json'), '{}');
+      const before = treeState(home);
+      const cwdBefore = treeState(nonGit);
+
+      const r = spawnSync(process.execPath, [cli, 'uninstall', '--scope', 'local'], {
+        cwd: nonGit, env: sandboxEnv(home, { SHELL: '/bin/zsh' }), encoding: 'utf-8', timeout: SUBPROCESS_TIMEOUT_MS,
+      });
+      if (r.error) throw r.error;
+      const out = `${r.stdout ?? ''}${r.stderr ?? ''}`;
+
+      expect(r.status, out).toBe(1);
+      expect(out).toContain('No legacy project-local install here');
+      expect(treeState(home)).toEqual(before);
+      expect(treeState(nonGit)).toEqual(cwdBefore);
+    } finally {
+      await fs.rm(nonGit, { recursive: true, force: true });
+    }
+  }, SUBPROCESS_TIMEOUT_MS);
+
   it('in a repository rooted at HOME, auto-detection finds only the user install, never a "local" one', async () => {
     await seedHome(home, { withUserInstall: true });
     execFileSync('git', ['init', '-q'], { cwd: home });

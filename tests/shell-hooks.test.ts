@@ -1656,7 +1656,8 @@ describe('ensure-devflow-init behavioral', () => {
 
     execSync(`bash -c 'source "${ENSURE_DEVFLOW}" "${tmpDir}"'`, { stdio: 'pipe' });
 
-    expect(fs.readFileSync(path.join(tmpDir, '.gitignore'), 'utf-8')).toBe(`${v4Block}!.devflow/policy.json\n!.devflow/project.json\n`);
+    // Inserted inside the block, before its .claudeignore line (D-GITIGNORE-IN-BLOCK).
+    expect(fs.readFileSync(path.join(tmpDir, '.gitignore'), 'utf-8')).toBe(v4Block.replace('!.devflow/conventions.md\n', '!.devflow/conventions.md\n!.devflow/policy.json\n!.devflow/project.json\n'));
     expect(fs.existsSync(path.join(tmpDir, '.devflow', '.root-gitignore-configured-v6'))).toBe(true);
     expect(fs.existsSync(path.join(tmpDir, '.devflow', '.root-gitignore-configured-v4'))).toBe(false);
   });
@@ -1684,7 +1685,8 @@ describe('ensure-devflow-init behavioral', () => {
 
     execSync(`bash -c 'source "${ENSURE_DEVFLOW}" "${tmpDir}"'`, { stdio: 'pipe' });
 
-    expect(fs.readFileSync(path.join(tmpDir, '.gitignore'), 'utf-8')).toBe(`${v5Block}!.devflow/project.json\n`);
+    // Just before its .claudeignore line, never at EOF (D-GITIGNORE-IN-BLOCK).
+    expect(fs.readFileSync(path.join(tmpDir, '.gitignore'), 'utf-8')).toBe(v5Block.replace('!.devflow/policy.json\n.claudeignore\n', '!.devflow/policy.json\n!.devflow/project.json\n.claudeignore\n'));
     expect(fs.existsSync(path.join(tmpDir, '.devflow', '.root-gitignore-configured-v6'))).toBe(true);
     expect(fs.existsSync(path.join(tmpDir, '.devflow', '.root-gitignore-configured-v5'))).toBe(false);
   });
@@ -1902,7 +1904,7 @@ describe('ensure-root-gitignore behavioral', () => {
     expect(lines).toContain('node_modules/');
   });
 
-  it('v6 marker present but only the project line dropped: the fast path refuses and the line is re-appended', () => {
+  it('v6 marker present but only the project line dropped: the fast path refuses and the line is restored in place', () => {
     // D-GITIGNORE-V6: the fast path requires the project line too.
     execSync(`bash -c 'source "${ENSURE_ROOT}" "${tmpDir}"'`, { stdio: 'pipe' });
     const gitignore = path.join(tmpDir, '.gitignore');
@@ -1912,10 +1914,10 @@ describe('ensure-root-gitignore behavioral', () => {
 
     execSync(`bash -c 'source "${ENSURE_ROOT}" "${tmpDir}"'`, { stdio: 'pipe' });
 
-    expect(fs.readFileSync(gitignore, 'utf-8')).toBe(`${withoutProject}!.devflow/project.json\n`);
+    expect(fs.readFileSync(gitignore, 'utf-8')).toBe(converged);
   });
 
-  it('v6 marker present but only the policy line dropped: the fast path refuses and the line is re-appended', () => {
+  it('v6 marker present but only the policy line dropped: the fast path refuses and the line is restored in place', () => {
     // The fast path requires the policy line too, so a converged-looking file that lost
     // it (a hand edit, a merge resolution) is completed on the next run.
     execSync(`bash -c 'source "${ENSURE_ROOT}" "${tmpDir}"'`, { stdio: 'pipe' });
@@ -1926,7 +1928,7 @@ describe('ensure-root-gitignore behavioral', () => {
 
     execSync(`bash -c 'source "${ENSURE_ROOT}" "${tmpDir}"'`, { stdio: 'pipe' });
 
-    expect(fs.readFileSync(gitignore, 'utf-8')).toBe(`${withoutPolicy}!.devflow/policy.json\n`);
+    expect(fs.readFileSync(gitignore, 'utf-8')).toBe(converged);
   });
 
   it('upgrades a legacy install: replaces bare .devflow/ with the carve-out and bumps v1 → v6', () => {
@@ -2024,7 +2026,7 @@ describe('ensure-root-gitignore behavioral', () => {
     expect(fs.readFileSync(path.join(tmpDir, '.gitignore'), 'utf-8')).toBe(afterFirst);
   });
 
-  it('upgrades a v4 install: appends only the policy and project lines, bumps v4 → v6, and is idempotent', () => {
+  it('upgrades a v4 install: inserts only the policy and project lines, bumps v4 → v6, and is idempotent', () => {
     // The shipped v4 block (f3a2198), retyped verbatim because it is history.
     const v4Block = [
       '# Devflow runtime data — local by default (memory, learning, docs, locks).',
@@ -2050,18 +2052,21 @@ describe('ensure-root-gitignore behavioral', () => {
     execSync(`bash -c 'source "${ENSURE_ROOT}" "${tmpDir}"'`, { stdio: 'pipe' });
 
     const gitignore = path.join(tmpDir, '.gitignore');
-    // User lines and the old comment stay untouched; only the missing lines are appended.
-    expect(fs.readFileSync(gitignore, 'utf-8')).toBe(`${seeded}!.devflow/policy.json\n!.devflow/project.json\n`);
+    // User lines and the old comment stay untouched; only the missing lines are
+    // inserted, inside the block, before its .claudeignore line (D-GITIGNORE-IN-BLOCK).
+    const upgraded = seeded.replace('!.devflow/conventions.md\n', '!.devflow/conventions.md\n!.devflow/policy.json\n!.devflow/project.json\n');
+    expect(upgraded).not.toBe(seeded);
+    expect(fs.readFileSync(gitignore, 'utf-8')).toBe(upgraded);
     expect(fs.existsSync(path.join(tmpDir, '.devflow', '.root-gitignore-configured-v6'))).toBe(true);
     expect(fs.existsSync(path.join(tmpDir, '.devflow', '.root-gitignore-configured-v4'))).toBe(false);
 
-    // Idempotent with the marker dropped, so the fast path cannot mask a re-append.
+    // Idempotent with the marker dropped, so the fast path cannot mask a re-insert.
     fs.rmSync(path.join(tmpDir, '.devflow', '.root-gitignore-configured-v6'));
     execSync(`bash -c 'source "${ENSURE_ROOT}" "${tmpDir}"'`, { stdio: 'pipe' });
-    expect(fs.readFileSync(gitignore, 'utf-8')).toBe(`${seeded}!.devflow/policy.json\n!.devflow/project.json\n`);
+    expect(fs.readFileSync(gitignore, 'utf-8')).toBe(upgraded);
   });
 
-  it('upgrades a v5 install: appends only the project line, bumps v5 → v6, and is idempotent (D-GITIGNORE-V6)', () => {
+  it('upgrades a v5 install: inserts only the project line before .claudeignore, bumps v5 → v6, and is idempotent (D-GITIGNORE-V6)', () => {
     // The shipped v5 block (through #400), retyped verbatim because it is history.
     const v5Block = [
       '# Devflow runtime data — local by default (memory, learning, docs, locks).',
@@ -2088,13 +2093,41 @@ describe('ensure-root-gitignore behavioral', () => {
     execSync(`bash -c 'source "${ENSURE_ROOT}" "${tmpDir}"'`, { stdio: 'pipe' });
 
     const gitignore = path.join(tmpDir, '.gitignore');
-    expect(fs.readFileSync(gitignore, 'utf-8')).toBe(`${seeded}!.devflow/project.json\n`);
+    const upgraded = seeded.replace('!.devflow/policy.json\n.claudeignore\n', '!.devflow/policy.json\n!.devflow/project.json\n.claudeignore\n');
+    expect(upgraded).not.toBe(seeded);
+    expect(fs.readFileSync(gitignore, 'utf-8')).toBe(upgraded);
     expect(fs.existsSync(path.join(tmpDir, '.devflow', '.root-gitignore-configured-v6'))).toBe(true);
     expect(fs.existsSync(path.join(tmpDir, '.devflow', '.root-gitignore-configured-v5'))).toBe(false);
 
     fs.rmSync(path.join(tmpDir, '.devflow', '.root-gitignore-configured-v6'));
     execSync(`bash -c 'source "${ENSURE_ROOT}" "${tmpDir}"'`, { stdio: 'pipe' });
-    expect(fs.readFileSync(gitignore, 'utf-8')).toBe(`${seeded}!.devflow/project.json\n`);
+    expect(fs.readFileSync(gitignore, 'utf-8')).toBe(upgraded);
+  });
+
+  it('the v5 → v6 upgrade never overrides a user re-ignore of project.json, as git itself reads the file (D-GITIGNORE-IN-BLOCK)', () => {
+    // gitignore is last-match-wins. Asked of real git, not of the text: with the
+    // project line inside the block, the user's later `.devflow/project.json` still
+    // decides; without the re-ignore the upgraded block shares the file.
+    const v5Tail = [
+      '.devflow/*',
+      '!.devflow/conventions.md',
+      '!.devflow/policy.json',
+      '.claudeignore',
+    ].join('\n');
+    const probe = (gitignoreContent: string): boolean => {
+      const repo = fs.mkdtempSync(path.join(tmpDir, 'repo-'));
+      execSync(`git init -q "${repo}"`, { stdio: 'pipe', env: { ...process.env, HOME: tmpDir } });
+      fs.writeFileSync(path.join(repo, '.gitignore'), gitignoreContent);
+      execSync(`bash -c 'source "${ENSURE_ROOT}" "${repo}"'`, { stdio: 'pipe' });
+      expect(fs.readFileSync(path.join(repo, '.gitignore'), 'utf-8').split('\n')).toContain('!.devflow/project.json');
+      const check = spawnSync('git', ['-C', repo, 'check-ignore', '-q', '.devflow/project.json'], {
+        env: { ...process.env, HOME: tmpDir },
+      });
+      return check.status === 0; // 0 = ignored, 1 = not ignored
+    };
+
+    expect(probe(`${v5Tail}\n\n# keep our settings local\n.devflow/project.json\n`), 'the user re-ignore must win').toBe(true);
+    expect(probe(`${v5Tail}\n`), 'non-vacuity: the upgraded block alone shares project.json').toBe(false);
   });
 
   it('returns non-zero and creates nothing when called with an empty argument', () => {
@@ -2324,7 +2357,11 @@ describe('ensure-root-gitignore × computeDevflowGitignore cross-implementation 
       ? `${block}\n`
       : `${body}${body.endsWith('\n') ? '' : '\n'}\n${block}\n`;
 
-  /** Continue an existing devflow block with the lines it lacks: no blank separator. */
+  /**
+   * Continue an existing devflow block whose run ends the file with the lines it
+   * lacks: no blank separator, one newline guard. Rows whose block is followed by
+   * other lines spell the inserted bytes out instead (D-GITIGNORE-IN-BLOCK).
+   */
   const appendLines = (body: string, block: string): string =>
     `${body}${body.endsWith('\n') ? '' : '\n'}${block}\n`;
 
@@ -2395,7 +2432,7 @@ describe('ensure-root-gitignore × computeDevflowGitignore cross-implementation 
       blockPresent: true,
     },
     {
-      label: '(j) v2-format block present (conventions.md, policy, project and .claudeignore lines appended, block not re-added)',
+      label: '(j) v2-format block present (conventions.md, policy, project and .claudeignore lines inserted after its sentinel, block not re-added)',
       input: `${V2_BLOCK_SEED}\n`,
       expected: appendLines(`${V2_BLOCK_SEED}\n`, `${V3_SENTINEL}\n${POLICY_LINE}\n${PROJECT_LINE}\n${CLAUDEIGNORE_LINE}`),
       changed: true,
@@ -2403,7 +2440,7 @@ describe('ensure-root-gitignore × computeDevflowGitignore cross-implementation 
       claudeignoreLinePresent: true,
       policyLinePresent: true,
       projectLinePresent: true,
-      blockPresent: false, // only the missing lines are appended, not the whole block
+      blockPresent: false, // only the missing lines are inserted, not the whole block
     },
     {
       label: 'current block minus its .claudeignore line (.claudeignore appended, completing the block)',
@@ -2455,9 +2492,9 @@ describe('ensure-root-gitignore × computeDevflowGitignore cross-implementation 
       blockPresent: false,
     },
     {
-      label: '(c) v2 block + user .claudeignore entry — conventions.md, policy and project lines appended',
+      label: '(c) v2 block + user .claudeignore entry — conventions.md, policy and project lines inserted above it',
       input: `${V2_BLOCK_SEED}\n${CLAUDEIGNORE_LINE}\n`,
-      expected: appendLines(`${V2_BLOCK_SEED}\n${CLAUDEIGNORE_LINE}\n`, `${V3_SENTINEL}\n${POLICY_LINE}\n${PROJECT_LINE}`),
+      expected: `${V2_BLOCK_SEED}\n${V3_SENTINEL}\n${POLICY_LINE}\n${PROJECT_LINE}\n${CLAUDEIGNORE_LINE}\n`,
       changed: true,
       devflowSentinelPresent: true,
       claudeignoreLinePresent: true,
@@ -2529,20 +2566,20 @@ describe('ensure-root-gitignore × computeDevflowGitignore cross-implementation 
     // missing, never a presence sentinel — users may author it themselves (PF-059).
     // -------------------------------------------------------------------------
     {
-      label: '(g) shipped v4 block — the policy and project lines appended (the v4→v6 upgrade)',
+      label: '(g) shipped v4 block — the policy and project lines inserted before .claudeignore (the v4→v6 upgrade)',
       input: `${V4_BLOCK_SEED}\n`,
-      expected: appendLines(`${V4_BLOCK_SEED}\n`, `${POLICY_LINE}\n${PROJECT_LINE}`),
+      expected: `${V3_BLOCK_SEED}\n${POLICY_LINE}\n${PROJECT_LINE}\n${CLAUDEIGNORE_LINE}\n`,
       changed: true,
       devflowSentinelPresent: true,
       claudeignoreLinePresent: true,
       policyLinePresent: true,
       projectLinePresent: true,
-      blockPresent: false, // the old comment stays; the line lands after .claudeignore
+      blockPresent: false, // the old comment stays
     },
     {
-      label: '(h) shipped v4 block minus .claudeignore + user !.claudeignore — only the policy and project lines appended',
+      label: '(h) shipped v4 block minus .claudeignore + user !.claudeignore — only the policy and project lines inserted, above the un-ignore',
       input: `${V3_BLOCK_SEED}\n!${CLAUDEIGNORE_LINE}\n`,
-      expected: appendLines(`${V3_BLOCK_SEED}\n!${CLAUDEIGNORE_LINE}\n`, `${POLICY_LINE}\n${PROJECT_LINE}`),
+      expected: `${V3_BLOCK_SEED}\n${POLICY_LINE}\n${PROJECT_LINE}\n!${CLAUDEIGNORE_LINE}\n`,
       changed: true,
       devflowSentinelPresent: true,
       claudeignoreLinePresent: false, // the user's un-ignore is never reversed
@@ -2585,9 +2622,9 @@ describe('ensure-root-gitignore × computeDevflowGitignore cross-implementation 
       blockPresent: true,
     },
     {
-      label: '(m) v2 block + user-authored policy line — conventions.md, project and .claudeignore appended, policy not duplicated',
+      label: '(m) v2 block + user-authored policy line — conventions.md, project and .claudeignore inserted after the v2 sentinel, policy not duplicated',
       input: `${V2_BLOCK_SEED}\n${POLICY_LINE}\n`,
-      expected: appendLines(`${V2_BLOCK_SEED}\n${POLICY_LINE}\n`, `${V3_SENTINEL}\n${PROJECT_LINE}\n${CLAUDEIGNORE_LINE}`),
+      expected: `${V2_BLOCK_SEED}\n${V3_SENTINEL}\n${PROJECT_LINE}\n${CLAUDEIGNORE_LINE}\n${POLICY_LINE}\n`,
       changed: true,
       devflowSentinelPresent: true,
       claudeignoreLinePresent: true,
@@ -2596,9 +2633,9 @@ describe('ensure-root-gitignore × computeDevflowGitignore cross-implementation 
       blockPresent: false,
     },
     {
-      label: '(n) shipped v4 block + user-authored policy line elsewhere — only the project line appended, policy not duplicated',
+      label: '(n) shipped v4 block + user-authored policy line elsewhere — only the project line inserted after the sentinel, policy not duplicated',
       input: `${V4_BLOCK_SEED}\n\n# team files\n${POLICY_LINE}\n`,
-      expected: appendLines(`${V4_BLOCK_SEED}\n\n# team files\n${POLICY_LINE}\n`, PROJECT_LINE),
+      expected: `${V3_BLOCK_SEED}\n${PROJECT_LINE}\n${CLAUDEIGNORE_LINE}\n\n# team files\n${POLICY_LINE}\n`,
       changed: true,
       devflowSentinelPresent: true,
       claudeignoreLinePresent: true,
@@ -2611,20 +2648,20 @@ describe('ensure-root-gitignore × computeDevflowGitignore cross-implementation 
     // line — topped up when missing, never a presence sentinel (avoids PF-059).
     // -------------------------------------------------------------------------
     {
-      label: '(o) shipped v5 block — only the project line appended (the v5→v6 upgrade)',
+      label: '(o) shipped v5 block — only the project line inserted, just before .claudeignore (the v5→v6 upgrade)',
       input: `${V5_BLOCK_SEED}\n`,
-      expected: appendLines(`${V5_BLOCK_SEED}\n`, PROJECT_LINE),
+      expected: `${V5_BLOCK_SEED_NO_CI}\n${PROJECT_LINE}\n${CLAUDEIGNORE_LINE}\n`,
       changed: true,
       devflowSentinelPresent: true,
       claudeignoreLinePresent: true,
       policyLinePresent: true,
       projectLinePresent: true,
-      blockPresent: false, // the v5 comment stays; the line lands after .claudeignore
+      blockPresent: false, // the v5 comment stays
     },
     {
-      label: '(p) shipped v5 block minus .claudeignore + user !.claudeignore — only the project line appended',
+      label: '(p) shipped v5 block minus .claudeignore + user !.claudeignore — only the project line inserted, above the un-ignore',
       input: `${V5_BLOCK_SEED_NO_CI}\n!${CLAUDEIGNORE_LINE}\n`,
-      expected: appendLines(`${V5_BLOCK_SEED_NO_CI}\n!${CLAUDEIGNORE_LINE}\n`, PROJECT_LINE),
+      expected: `${V5_BLOCK_SEED_NO_CI}\n${PROJECT_LINE}\n!${CLAUDEIGNORE_LINE}\n`,
       changed: true,
       devflowSentinelPresent: true,
       claudeignoreLinePresent: false, // the user's un-ignore is never reversed
@@ -2666,6 +2703,77 @@ describe('ensure-root-gitignore × computeDevflowGitignore cross-implementation 
       projectLinePresent: true,
       blockPresent: false,
     },
+    // -------------------------------------------------------------------------
+    // D-GITIGNORE-IN-BLOCK: a topped-up line goes inside the block, never at EOF,
+    // and every byte around it is kept.
+    // -------------------------------------------------------------------------
+    {
+      // gitignore is last-match-wins: an EOF append would override the re-ignore.
+      label: '(t) shipped v5 block + a later user re-ignore of project.json — the project line stays above it',
+      input: `${V5_BLOCK_SEED}\n\n# keep our settings local\n.devflow/project.json\n`,
+      expected: `${V5_BLOCK_SEED_NO_CI}\n${PROJECT_LINE}\n${CLAUDEIGNORE_LINE}\n\n# keep our settings local\n.devflow/project.json\n`,
+      changed: true,
+      devflowSentinelPresent: true,
+      claudeignoreLinePresent: true,
+      policyLinePresent: true,
+      projectLinePresent: true,
+      blockPresent: false,
+    },
+    {
+      label: '(u) shipped v5 block minus .claudeignore, no trailing newline — the run ends the file, so a newline is added first',
+      input: V5_BLOCK_SEED_NO_CI,
+      expected: `${V5_BLOCK_SEED_NO_CI}\n${PROJECT_LINE}\n${CLAUDEIGNORE_LINE}\n`,
+      changed: true,
+      devflowSentinelPresent: true,
+      claudeignoreLinePresent: true,
+      policyLinePresent: true,
+      projectLinePresent: true,
+      blockPresent: false,
+    },
+    {
+      label: '(v) shipped v4 block, no trailing newline — lines inserted, the last line keeps its missing newline',
+      input: V4_BLOCK_SEED,
+      expected: `${V3_BLOCK_SEED}\n${POLICY_LINE}\n${PROJECT_LINE}\n${CLAUDEIGNORE_LINE}`,
+      changed: true,
+      devflowSentinelPresent: true,
+      claudeignoreLinePresent: true,
+      policyLinePresent: true,
+      projectLinePresent: true,
+      blockPresent: false,
+    },
+    {
+      label: '(w) CRLF v5 block — the project line inserted after the policy line, every CR kept',
+      input: `${V5_BLOCK_SEED_LINES.join('\r\n')}\r\n`,
+      expected: `${V5_BLOCK_SEED_LINES.slice(0, -1).join('\r\n')}\r\n${PROJECT_LINE}\n${CLAUDEIGNORE_LINE}\r\n`,
+      changed: true,
+      devflowSentinelPresent: true,
+      claudeignoreLinePresent: true,
+      policyLinePresent: true,
+      projectLinePresent: true,
+      blockPresent: false,
+    },
+    {
+      label: '(x) whitespace-padded policy line under the sentinel — part of the run, the project line goes after it',
+      input: `${V3_BLOCK_SEED}\n  ${POLICY_LINE}\t\n${CLAUDEIGNORE_LINE}\n`,
+      expected: `${V3_BLOCK_SEED}\n  ${POLICY_LINE}\t\n${PROJECT_LINE}\n${CLAUDEIGNORE_LINE}\n`,
+      changed: true,
+      devflowSentinelPresent: true,
+      claudeignoreLinePresent: true,
+      policyLinePresent: true,
+      projectLinePresent: true,
+      blockPresent: false,
+    },
+    {
+      label: '(y) a foreign line between the sentinel and the policy line — the run stops at the sentinel',
+      input: `${V3_BLOCK_SEED}\n# user note\n${POLICY_LINE}\n${CLAUDEIGNORE_LINE}\n`,
+      expected: `${V3_BLOCK_SEED}\n${PROJECT_LINE}\n# user note\n${POLICY_LINE}\n${CLAUDEIGNORE_LINE}\n`,
+      changed: true,
+      devflowSentinelPresent: true,
+      claudeignoreLinePresent: true,
+      policyLinePresent: true,
+      projectLinePresent: true,
+      blockPresent: false,
+    },
 ];
 
   it('PARITY_CASES covers every v5 and v6 upgrade row and keeps the completion lines out of every no-sentinel row', () => {
@@ -2673,15 +2781,15 @@ describe('ensure-root-gitignore × computeDevflowGitignore cross-implementation 
     // and D-GITIGNORE-V6 migrations depend on exist, and the only row with no block
     // sentinel in its result is the user opt-out.
     const labels = PARITY_CASES.map(r => r.label);
-    for (const tag of ['(g)', '(h)', '(i)', '(j)', '(k)', '(l)', '(m)', '(n)', '(o)', '(p)', '(q)', '(r)', '(s)']) {
+    for (const tag of ['(g)', '(h)', '(i)', '(j)', '(k)', '(l)', '(m)', '(n)', '(o)', '(p)', '(q)', '(r)', '(s)', '(t)', '(u)', '(v)', '(w)', '(x)', '(y)']) {
       expect(labels.filter(l => l.startsWith(tag)), `row ${tag}`).toHaveLength(1);
     }
-    expect(PARITY_CASES.length).toBeGreaterThanOrEqual(27);
+    expect(PARITY_CASES.length).toBeGreaterThanOrEqual(33);
     // The v5 history literal really is v5: the policy line, no project line.
     expect(V5_BLOCK_SEED_LINES).toContain(POLICY_LINE);
     expect(V5_BLOCK_SEED_LINES).not.toContain(PROJECT_LINE);
     // The current block is v6: the project line sits after the policy line and
-    // before `.claudeignore`, the order both twins append completion lines in.
+    // before `.claudeignore`, the order both twins insert completion lines in.
     const current = DEVFLOW_GITIGNORE_BLOCK.split('\n');
     expect(current.slice(-3)).toEqual([POLICY_LINE, PROJECT_LINE, CLAUDEIGNORE_LINE]);
     expect(PARITY_CASES.filter(r => !r.devflowSentinelPresent).map(r => r.label))

@@ -10,7 +10,7 @@ import {
   getDecisionsLockDir,
 } from '../../core/project-paths.js';
 import { readMachineFeature, writeMachineFeature } from '../../core/feature-switch.js';
-import { loadSettingsModule, narrowedSwitchLabel } from '../../core/evidence-policy.js';
+import { loadSettingsModule, narrowedSwitchLabel, personalConfigTrackedWarning } from '../../core/evidence-policy.js';
 import { getDevFlowDirectory } from '../../targets/claude-code/claude-paths.js';
 import { getLedgerRoot } from '../../core/ledger-root.js';
 import { sweepLegacyDreamMarkers, drainLearningQueue } from '../../core/learning-queue-cleanup.js';
@@ -35,7 +35,7 @@ export type { DecisionsEntryStatus };
 function printUsage(): void {
   p.intro(color.bgCyan(color.black(' Learning ')));
   p.note(
-    `${color.cyan('devflow learning --enable')}      Enable learning in every project\n` +
+    `${color.cyan('devflow learning --enable')}      Enable learning in every project (a repository can opt out)\n` +
     `${color.cyan('devflow learning --disable')}     Disable learning in every project (drains this project's queue)\n` +
     `${color.cyan('devflow learning --status')}      Show learning status\n` +
     `${color.cyan('devflow learning --list')}        Show all observations\n` +
@@ -69,9 +69,12 @@ async function handleStatus(): Promise<void> {
   // same from every directory; a repository layer can only narrow it, and adds a
   // line only when it does. The observation counts are per-project.
   const enabled = await readMachineFeature(getDevFlowDirectory(), 'learning');
-  const narrowed = enabled ? narrowedSwitchLabel(loadSettingsModule(), { dir: process.cwd() }, 'learning') : null;
+  const settingsModule = loadSettingsModule();
+  const narrowed = enabled ? narrowedSwitchLabel(settingsModule, { dir: process.cwd() }, 'learning') : null;
   const stateLine = `Learning: ${enabled ? 'enabled' : 'disabled'}`
     + (narrowed === null ? '' : `\nEffective here: ${narrowed}`);
+  const trackedWarning = personalConfigTrackedWarning(settingsModule, { dir: process.cwd() });
+  if (trackedWarning !== null) p.log.warn(trackedWarning);
   const ledgerRoot = await getLedgerRoot();
   if (!ledgerRoot) {
     p.log.info(`${stateLine}\nObservations: not in a git project`);
@@ -308,7 +311,7 @@ async function handleToggle(enabled: boolean): Promise<void> {
   }
 
   if (enabled) {
-    p.log.success('Learning enabled in every project');
+    p.log.success('Learning enabled in every project (a repository can opt out)');
     p.log.info(color.dim('Architectural decisions and pitfalls will be detected from your sessions'));
     return;
   }
@@ -339,7 +342,7 @@ interface LearningOptions {
 
 export const learningCommand = new Command('learning')
   .description('Enable or disable learning (decision/pitfall detection) in every project')
-  .option('--enable', 'Enable learning in every project')
+  .option('--enable', 'Enable learning in every project (a repository can opt out)')
   .option('--disable', 'Disable learning in every project')
   .option('--status', 'Show learning status and observation counts')
   .option('--list', 'Show all decision/pitfall observations sorted by confidence')

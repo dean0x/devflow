@@ -3,7 +3,7 @@ import { execFileSync } from 'child_process';
 import * as path from 'path';
 import * as p from '@clack/prompts';
 import { getManagedSettingsPath } from './claude-paths.js';
-import { writeFileAtomicExclusive } from '../../core/fs-atomic.js';
+import { writeSettingsFileAtomic } from '../../core/fs-atomic.js';
 import type { SecurityMode } from '../../core/manifest.js';
 
 /**
@@ -65,7 +65,8 @@ const DEVFLOW_POLICY_LINE = '!.devflow/policy.json';
  * contract as the policy line: a COMPLETION line, never a presence sentinel — a
  * user may author it before devflow ever runs, so its presence proves nothing about
  * the block (avoids PF-059). It sits after the policy line and before `.claudeignore`,
- * so a v5 block, which ends in `.claudeignore`, gains it as its last line. Without it
+ * so a v5 block, which ends in `.claudeignore`, gains it just before that line
+ * (D-GITIGNORE-IN-BLOCK, computeDevflowGitignore). Without it
  * `.devflow/*` ignores `.devflow/project.json`, and a team could only commit it with
  * `git add -f`. Devflow never writes the file itself (ADR-024).
  */
@@ -98,7 +99,7 @@ const DEVFLOW_GITIGNORE_BLOCK_LINES = [
   '# Devflow runtime data — local by default (memory, learning, docs, locks).',
   '# Shared via git: feature knowledge bases under .devflow/features/ (index.md and',
   '# every {slug}/KNOWLEDGE.md), .devflow/conventions.md (naming authority),',
-  '# .devflow/policy.json (evidence policy) and .devflow/project.json (team settings).',
+  '# .devflow/policy.json (retired; presence only) and .devflow/project.json (team settings).',
   '# To stop sharing the first two, re-add `.devflow/features/` or',
   '# `.devflow/conventions.md` to your own .gitignore.',
   '.devflow/*',
@@ -148,6 +149,13 @@ export const DEVFLOW_GITIGNORE_BLOCK_WITHOUT_CLAUDEIGNORE =
 const LEGACY_DEVFLOW_COMMENT = '# Devflow runtime data (local by default; remove to share via git)';
 
 /**
+ * The most lines a top-up run extends below its anchor — one per line the run may
+ * hold (the sentinel, the policy line, the project line). The shell twin's loop has
+ * the same bound.
+ */
+const BLOCK_RUN_MAX = 3;
+
+/**
  * PURE: given existing .gitignore content, return the content that ignores
  * `.devflow/` with the feature-knowledge + conventions.md + policy.json + project.json
  * carve-out — or `null` when no change is needed. Idempotent: feeding its own output
@@ -172,12 +180,12 @@ const LEGACY_DEVFLOW_COMMENT = '# Devflow runtime data (local by default; remove
  * `!hasClaudeignoreEntry`)].
  *
  * 1. A `/.devflow/` line present → `null` (user opt-out; respect manual config).
- * 2. v3 sentinel present → append the missing completion lines; `null` when none are
- *    missing. This is the v4→v6 and v5→v6 upgrade: a v5 block gains only the project
- *    line and a v4 block the policy and project lines, after its `.claudeignore` line,
- *    each keeping its old comment.
- * 3. v2 sentinel present, no v3 → append `!.devflow/conventions.md` followed by the
- *    missing completion lines.
+ * 2. v3 sentinel present → insert the missing completion lines into the block;
+ *    `null` when none are missing. This is the v4→v6 and v5→v6 upgrade: a v5 block
+ *    gains only the project line, just before its `.claudeignore` line, and a v4
+ *    block the policy and project lines, each keeping its old comment.
+ * 3. v2 sentinel present, no v3 → insert `!.devflow/conventions.md` followed by the
+ *    missing completion lines right after the v2 sentinel.
  * 4. Legacy bare `.devflow/` present → strip it (+ our old comment), then append the
  *    block; no block at all → append the block. The block is emitted MINUS its final
  *    `.claudeignore` line when `hasClaudeignoreEntry`. A user's own policy or project
@@ -185,8 +193,16 @@ const LEGACY_DEVFLOW_COMMENT = '# Devflow runtime data (local by default; remove
  * 5. No completion line is ever a sentinel. The marker file
  *    (`.devflow/.root-gitignore-configured-v6`) is a fast-path claim, never proof.
  *
+ * D-GITIGNORE-IN-BLOCK: lines topped up into an existing block (2 and 3) go INSIDE
+ * it, where a fresh block holds them — never at the end of the file. gitignore is
+ * last-match-wins, so a `!.devflow/project.json` appended after a user's own later
+ * `.devflow/project.json` would silently override their re-ignore. The missing
+ * lines are inserted as one run, in block order, after the first sentinel line and
+ * the lines right after it that a fresh block places before the first missing line
+ * (blockRunBefore; at most three). Every other byte of the file is kept.
+ *
  * Line matching is whole-line, whitespace-tolerant, exact text — never substring.
- * Both append forms are mirrored byte-for-byte in the shell twin
+ * The insert and the append form are mirrored byte-for-byte in the shell twin
  * (src/assets/scripts/hooks/ensure-root-gitignore), which is what the cross-implementation
  * parity table in tests/shell-hooks.test.ts pins.
  */
@@ -208,11 +224,31 @@ export function computeDevflowGitignore(existingContent: string): string | null 
   ];
 
   /**
-   * Continue an existing devflow block with the lines it is missing. One newline
-   * guard, no blank separator — the appended lines belong to the block above them.
+   * The block lines a top-up run follows: the v3 sentinel, then whichever of the
+   * policy and project lines a fresh block places before the first missing line.
+   * Mirrors `_ERG_RUN_RE` in the shell twin.
    */
-  const appendLines = (body: string, block: string): string =>
-    `${body}${body.endsWith('\n') ? '' : '\n'}${block}\n`;
+  const blockRunBefore: readonly string[] = !hasPolicyLine
+    ? [DEVFLOW_GITIGNORE_SENTINEL_V3]
+    : !hasProjectLine
+      ? [DEVFLOW_GITIGNORE_SENTINEL_V3, DEVFLOW_POLICY_LINE]
+      : [DEVFLOW_GITIGNORE_SENTINEL_V3, DEVFLOW_POLICY_LINE, DEVFLOW_PROJECT_LINE];
+
+  /**
+   * Insert `inserted` into an existing devflow block: after the first line whose
+   * trimmed text is `anchor`, and after up to BLOCK_RUN_MAX lines right below it
+   * whose trimmed text is in `run`. Every other byte is kept. A run that ends on a
+   * last line with no newline gets one first, so the inserted lines never fuse onto
+   * it. Mirrors `_erg_insert_in_block` in the shell twin (D-GITIGNORE-IN-BLOCK).
+   */
+  const insertInBlock = (anchor: string, run: readonly string[], inserted: readonly string[]): string => {
+    let end = trimmed.indexOf(anchor);
+    for (let k = 0; k < BLOCK_RUN_MAX && end + 1 < lines.length && run.includes(trimmed[end + 1]); k++) {
+      end++;
+    }
+    if (end === lines.length - 1) return `${existingContent}\n${inserted.join('\n')}\n`;
+    return [...lines.slice(0, end + 1), ...inserted, ...lines.slice(end + 1)].join('\n');
+  };
 
   /**
    * Start a new block after unrelated content: one blank separator line. Existing
@@ -231,14 +267,16 @@ export function computeDevflowGitignore(existingContent: string): string | null 
   if (trimmed.includes(DEVFLOW_GITIGNORE_SENTINEL_V3)) {
     return missingCompletionLines.length === 0
       ? null
-      : appendLines(existingContent, missingCompletionLines.join('\n'));
+      : insertInBlock(DEVFLOW_GITIGNORE_SENTINEL_V3, blockRunBefore, missingCompletionLines);
   }
 
-  // 3. v2 block installed — append the lines it lacks, in block order.
+  // 3. v2 block installed — insert the lines it lacks, in block order, right after
+  //    its sentinel, the last carve-out line it has.
   if (trimmed.includes(DEVFLOW_GITIGNORE_SENTINEL_V2)) {
-    return appendLines(
-      existingContent,
-      [DEVFLOW_GITIGNORE_SENTINEL_V3, ...missingCompletionLines].join('\n'),
+    return insertInBlock(
+      DEVFLOW_GITIGNORE_SENTINEL_V2,
+      [],
+      [DEVFLOW_GITIGNORE_SENTINEL_V3, ...missingCompletionLines],
     );
   }
 
@@ -964,7 +1002,7 @@ export async function applyUserSecurityDenyList(
     existing = '{}';
   }
   const merged = mergeDenyList(existing, currentTemplateDeny, retiredDenyEntries(currentTemplateDeny));
-  await writeFileAtomicExclusive(settingsPath, merged);
+  await writeSettingsFileAtomic(settingsPath, merged);
   return merged;
 }
 
@@ -973,7 +1011,7 @@ export async function applyUserSecurityDenyList(
  * Colocated with applyUserSecurityDenyList — the remove-side counterpart.
  *
  * Sequence: read → stripUserDenyList → guard (stripped !== existing) →
- *   writeFileAtomicExclusive → return { removed }.
+ *   writeSettingsFileAtomic → return { removed }.
  * Atomic write (temp+rename) upholds the never-truncate-on-crash invariant.
  * ENOENT is swallowed (file absent = nothing to strip). Other errors propagate.
  *
@@ -999,7 +1037,7 @@ export async function stripUserSecurityDenyList(
   if (stripped === existing) {
     return null;
   }
-  await writeFileAtomicExclusive(settingsPath, stripped);
+  await writeSettingsFileAtomic(settingsPath, stripped);
   return { removed };
 }
 
@@ -1123,7 +1161,7 @@ export async function installSettings(
     }
 
     if (!settingsExists) {
-      await fs.writeFile(settingsPath, settingsContent, 'utf-8');
+      await writeSettingsFileAtomic(settingsPath, settingsContent);
       if (verbose) {
         p.log.success('Settings configured');
       }
@@ -1156,7 +1194,7 @@ export async function installSettings(
       return;
     }
 
-    await writeFileAtomicExclusive(settingsPath, JSON.stringify(existingParsed, null, 2) + '\n');
+    await writeSettingsFileAtomic(settingsPath, JSON.stringify(existingParsed, null, 2) + '\n');
     if (verbose) {
       p.log.success('Settings updated with Devflow hooks and HUD');
     }
@@ -1317,7 +1355,7 @@ export async function ensureDevflowGitignore(
       if (healContent !== null) {
         await fs.writeFile(gitignorePath, healContent, 'utf-8');
         if (verbose) {
-          p.log.success('.gitignore configured (.devflow/ local; feature knowledge + conventions + evidence policy + project settings shared)');
+          p.log.success('.gitignore configured (.devflow/ local; feature knowledge + conventions + retired policy.json + project settings shared)');
         }
       }
       await removeLegacyGitignoreMarkers(devflowDir);
@@ -1333,7 +1371,7 @@ export async function ensureDevflowGitignore(
     if (newContent !== null) {
       await fs.writeFile(gitignorePath, newContent, 'utf-8');
       if (verbose) {
-        p.log.success('.gitignore configured (.devflow/ local; feature knowledge + conventions + evidence policy + project settings shared)');
+        p.log.success('.gitignore configured (.devflow/ local; feature knowledge + conventions + retired policy.json + project settings shared)');
       }
     }
 

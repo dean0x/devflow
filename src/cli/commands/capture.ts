@@ -19,13 +19,14 @@ import {
 // queue-append's queue_read_gates). Follows the context.ts add/remove/has
 // pattern rather than memory.ts's toggle pattern.
 //
-// IMPORTANT — Stop-array ordering contract: capture-turn MUST be registered
-// BEFORE memory-worker in the Stop hook array (see memory.ts). Settings.json
-// hook arrays run in array order, and memory-worker's throttle/spawn decision
-// assumes the current turn has already been appended to the queue by
-// capture-turn earlier in the same Stop event (append-before-spawn). This
-// module only ever pushes capture-turn; callers (init.ts) must register the
-// capture bundle before the memory bundle to preserve this ordering.
+// Stop-event concurrency contract: Claude Code runs the hooks of one event in
+// parallel, so array position in settings.json orders nothing at run time —
+// memory-worker can spawn background-memory-update before capture-turn has
+// appended this turn's assistant row. The worker tolerates that: a queue that
+// holds only user rows is left in place and the LLM run skipped
+// (D-QUEUE-NO-ORPHAN-DELETE in background-memory-update), so the next run
+// takes the whole turn. init.ts still registers the capture bundle before the
+// memory bundle, which keeps settings.json stable across re-inits.
 
 const CAPTURE_PROMPT_MARKER = 'capture-prompt';
 const CAPTURE_TURN_MARKER = 'capture-turn';

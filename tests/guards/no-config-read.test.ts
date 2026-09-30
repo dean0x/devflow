@@ -48,14 +48,23 @@
  * (`.devflow/` + a variable file name), a glob (`.devflow/*.json`), a passive
  * instruction ("… is read at step 1"), a verb that follows its object, a read
  * named on a different line from its path ("read that file"), and any prompt
- * outside the corpus below — hooks and scripts are plumbing, not prompts, and
- * read these files by design.
+ * outside the corpus below. Hooks and scripts are plumbing and read these files
+ * by design, so only the TEXT a hook hands a model is corpus, never its code.
  *
  * THE CORPUS is the installed prompt surface by class, each with a sentinel:
  * compiled commands, every agent as installed (dist-first, so the compiled
- * `dist/agents/git.md`), the compiled git references, and the hand-authored
- * skills and rules. A non-empty total says nothing about a class that went
- * missing, so every class is asserted by name (PF-064 amendment).
+ * `dist/agents/git.md`), the compiled git references, the hand-authored
+ * skills and rules, the ambient orchestrator charter the session-start hook
+ * injects, and the directive text the hooks emit (#406): the quoted
+ * `*_SECTION` / `*_NOTE` / `*_HEADER` / `CONTEXT` literals, the
+ * `json_prompt_output` arguments and the `$(cat <<EOF …)` prompt bodies —
+ * extracted from the hook source, whose own shell stays out of scope. A
+ * non-empty total says nothing about a class that went missing, so every class
+ * is asserted by name (PF-064 amendment).
+ *
+ * THE COMPILED CLASSES MUST BE CURRENT. A dist/ older than its sources is a
+ * clean scan of text nobody ships, so the guard first fails by name on any
+ * compiled prompt older than an input it is compiled from (#406).
  *
  * NO EXEMPTIONS (TP-42). The Git agent, the last reader, resolves its tracker
  * provider, site and key from the settings line like every other prompt. The
@@ -66,7 +75,8 @@
  */
 
 import { describe, it, expect } from 'vitest'
-import { readFileSync } from 'fs'
+import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, utimesSync, writeFileSync } from 'fs'
+import { tmpdir } from 'os'
 import * as path from 'path'
 
 import { ROOT, requireDistFile, requireDistFiles, resolveAllAgents, walkFiles } from '../helpers.js'
@@ -168,6 +178,72 @@ function readTree(dir: string): PromptFile[] {
   return walkFiles(path.join(ROOT, dir), f => f.endsWith('.md')).map(f => ({ name: rel(f), content: readFileSync(f, 'utf-8') }))
 }
 
+const HOOKS_DIR = 'src/assets/scripts/hooks'
+const CHARTER = `${HOOKS_DIR}/assets/orchestrator-charter.md`
+
+/** Where a directive literal opens: an assignment to a directive variable, or the prompt-output helper's argument. */
+const DIRECTIVE_OPENER_RE = /(?:(?<![A-Za-z0-9_])(?:[A-Z][A-Z0-9_]*_(?:SECTION|NOTE|HEADER)|CONTEXT)=|json_prompt_output\s+)(["'])/g
+
+/** A prompt body captured from a heredoc: `X=$(cat <<EOF` … `EOF`. */
+const HEREDOC_PROMPT_RE = /\$\(cat <<-?\s*['"]?(\w+)['"]?\n([\s\S]*?)\n\1\n/g
+
+/** The longest literal read before giving up on a closing quote. */
+const MAX_LITERAL = 20_000
+
+/**
+ * The body of the shell string literal opening at `start` (just past its quote).
+ * Single quotes end at the next quote; double quotes honour backslash escapes and
+ * skip quotes nested inside `$( … )`. Bounded by MAX_LITERAL.
+ */
+function readLiteral(source: string, start: number, quote: string): string {
+  const end = Math.min(source.length, start + MAX_LITERAL)
+  let depth = 0
+  for (let i = start; i < end; i++) {
+    const c = source[i]
+    if (quote === "'") {
+      if (c === "'") return source.slice(start, i)
+      continue
+    }
+    if (c === '\\') {
+      i++
+      continue
+    }
+    if (c === '$' && source[i + 1] === '(') {
+      depth++
+      i++
+      continue
+    }
+    if (depth > 0) {
+      if (c === ')') depth--
+      continue
+    }
+    if (c === '"') return source.slice(start, i)
+  }
+  return source.slice(start, end)
+}
+
+/** Named collector: the text a hook hands a model — its directive literals and heredoc prompt bodies. */
+function collectDirectiveText(source: string): string[] {
+  const out: string[] = []
+  for (const m of source.matchAll(DIRECTIVE_OPENER_RE)) {
+    const body = readLiteral(source, (m.index ?? 0) + m[0].length, m[1])
+    // Prose only: `CONTEXT=""` and `X_NOTE="$Y"` hand a model no words of their own.
+    if (/[A-Za-z]{3,}\s+[A-Za-z]{2,}/.test(body)) out.push(body)
+  }
+  for (const m of source.matchAll(HEREDOC_PROMPT_RE)) out.push(m[2])
+  return out
+}
+
+/** One corpus entry per hook that emits directive text. */
+function hookDirectives(): PromptFile[] {
+  const dir = path.join(ROOT, HOOKS_DIR)
+  return readdirSync(dir, { withFileTypes: true })
+    .filter(e => e.isFile() && path.extname(e.name) === '')
+    .map(e => ({ name: `${HOOKS_DIR}/${e.name}#directives`, text: collectDirectiveText(readFileSync(path.join(dir, e.name), 'utf-8')) }))
+    .filter(h => h.text.length > 0)
+    .map(h => ({ name: h.name, content: h.text.join('\n') }))
+}
+
 /** The installed prompt surface, by class. */
 function promptSurface(): CorpusClass[] {
   const commands = requireDistFiles().map(n => ({ name: `dist/commands/${n}`, content: requireDistFile(n) }))
@@ -178,7 +254,77 @@ function promptSurface(): CorpusClass[] {
     { label: 'references', files: readTree('dist/skills'), sentinel: 'dist/skills/git/references/publication-gate.md', floor: 20 },
     { label: 'skills', files: readTree('src/assets/skills'), sentinel: 'src/assets/skills/git/SKILL.md', floor: 30 },
     { label: 'rules', files: readTree('src/assets/rules'), sentinel: 'src/assets/rules/security.md', floor: 4 },
+    { label: 'charter', files: [{ name: CHARTER, content: readFileSync(path.join(ROOT, CHARTER), 'utf-8') }], sentinel: CHARTER, floor: 1 },
+    { label: 'hook directives', files: hookDirectives(), sentinel: `${HOOKS_DIR}/session-start-context#directives`, floor: 4 },
   ]
+}
+
+// ---------------------------------------------------------------------------
+// Currency: the compiled classes are built from the sources under review
+// ---------------------------------------------------------------------------
+
+/**
+ * Where agent generator hosts live. Assembled, not spelt: the literal-agent-path
+ * guard reserves that spelling for resolveAgentSource, and this is a source
+ * directory for an mtime, never an agent read.
+ */
+const AGENT_HOSTS_DIR = ['src', 'assets', 'agents'].join('/')
+/** The Git agent's generator host, for the hermetic currency probe. */
+const GIT_HOST = `${AGENT_HOSTS_DIR}/git.mds`
+
+/** A compiled prompt and the sources it is compiled from, repo-relative. */
+interface CompiledPrompt {
+  readonly output: string
+  readonly inputs: readonly string[]
+}
+
+/** Repo-relative files under `root/dir` passing `keep`; none when the directory is absent. */
+function listFiles(root: string, dir: string, keep: (file: string) => boolean): string[] {
+  try {
+    return walkFiles(path.join(root, dir), keep).map(f => path.relative(root, f).split(path.sep).join('/'))
+  } catch {
+    return []
+  }
+}
+
+/**
+ * Every compiled prompt under `root` with its inputs: a command host with every
+ * command partial (a partial edit can move any host that imports it), release.md
+ * with its hand-authored source, the Git agent with its host, and each generated
+ * reference with every reference module.
+ */
+function compiledPrompts(root: string): CompiledPrompt[] {
+  const partials = listFiles(root, 'src/assets/commands/_partials', f => f.endsWith('.mds'))
+  const hosts = new Set(listFiles(root, 'src/assets/commands', f => f.endsWith('.mds')))
+  const modules = listFiles(root, 'src/assets/mds', f => f.endsWith('.mds'))
+  const commands = listFiles(root, 'dist/commands', f => f.endsWith('.md')).map(output => {
+    const base = path.basename(output, '.md')
+    const host = `src/assets/commands/${base}.mds`
+    return { output, inputs: hosts.has(host) ? [host, ...partials] : [`src/assets/commands/${base}.md`] }
+  })
+  const agents = listFiles(root, 'dist/agents', f => f.endsWith('.md'))
+    .map(output => ({ output, inputs: [`${AGENT_HOSTS_DIR}/${path.basename(output, '.md')}.mds`] }))
+  const references = listFiles(root, 'dist/skills', f => f.endsWith('.md')).map(output => ({ output, inputs: modules }))
+  return [...commands, ...agents, ...references]
+}
+
+/** Named collector: each compiled prompt older than one of its inputs, naming the first such input. */
+function collectStaleOutputs(root: string): string[] {
+  const mtime = (rel: string): number | null => {
+    try {
+      return statSync(path.join(root, rel)).mtimeMs
+    } catch {
+      return null
+    }
+  }
+  const out: string[] = []
+  for (const { output, inputs } of compiledPrompts(root)) {
+    const built = mtime(output)
+    if (built === null) continue
+    const newer = inputs.filter(i => (mtime(i) ?? -Infinity) > built)
+    if (newer.length > 0) out.push(`${output} is STALE: ${newer[0]} changed after it was built`)
+  }
+  return out
 }
 
 /** Files excused from the rule, with the reason. Empty since the Git agent moved onto the settings line (TP-42). */
@@ -187,6 +333,47 @@ const EXEMPT: ReadonlyMap<string, string> = new Map()
 // ---------------------------------------------------------------------------
 // The guard
 // ---------------------------------------------------------------------------
+
+describe('the compiled prompt corpus is current (#406)', () => {
+  it('no compiled command, agent or reference is older than a source it is compiled from', () => {
+    expect(compiledPrompts(ROOT).length, 'no compiled prompt found — run `npm run build:mds`').toBeGreaterThanOrEqual(40)
+    expect(
+      collectStaleOutputs(ROOT),
+      'dist/ is older than its sources, so every scan below reads text nobody ships — run `npm run build:mds`',
+    ).toEqual([])
+  })
+
+  it('red probe: sources edited after the build are reported against every output compiled from them', () => {
+    // Hermetic: a temp root with hand-stamped mtimes — an order, never a wait (PF-055).
+    const root = mkdtempSync(path.join(tmpdir(), 'no-config-read-currency-'))
+    const at = (rel: string, seconds: number): void => {
+      const file = path.join(root, ...rel.split('/'))
+      mkdirSync(path.dirname(file), { recursive: true })
+      writeFileSync(file, 'probe\n')
+      utimesSync(file, seconds, seconds)
+    }
+    try {
+      for (const src of ['src/assets/commands/plan.mds', 'src/assets/commands/release.md', 'src/assets/commands/_partials/_docs_root.mds', GIT_HOST, 'src/assets/mds/git/_pr.mds']) {
+        at(src, 1_700_000_000)
+      }
+      for (const out of ['dist/commands/plan.md', 'dist/commands/release.md', 'dist/agents/git.md', 'dist/skills/git/references/pr/x.md']) {
+        at(out, 1_700_001_000)
+      }
+      expect(collectStaleOutputs(root), 'built after every source: current').toEqual([])
+      for (const src of ['src/assets/commands/_partials/_docs_root.mds', 'src/assets/commands/release.md', GIT_HOST, 'src/assets/mds/git/_pr.mds']) {
+        at(src, 1_700_002_000)
+      }
+      expect(collectStaleOutputs(root)).toEqual([
+        'dist/commands/plan.md is STALE: src/assets/commands/_partials/_docs_root.mds changed after it was built',
+        'dist/commands/release.md is STALE: src/assets/commands/release.md changed after it was built',
+        `dist/agents/git.md is STALE: ${GIT_HOST} changed after it was built`,
+        'dist/skills/git/references/pr/x.md is STALE: src/assets/mds/git/_pr.mds changed after it was built',
+      ])
+    } finally {
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
+})
 
 describe('no compiled prompt reads .devflow/project.json or .devflow/config.json (AC-41)', () => {
   it('reads a real corpus: every class is present, by sentinel and by floor', () => {
@@ -198,6 +385,36 @@ describe('no compiled prompt reads .devflow/project.json or .devflow/config.json
     }
     // Total floor across classes (PF-018): a corpus this size or larger was read.
     expect(surface.flatMap(c => c.files).length).toBeGreaterThanOrEqual(120)
+  })
+
+  it('reaches the hook-emitted text: every directive a hook hands a model, and the charter', () => {
+    const directives = promptSurface().find(c => c.label === 'hook directives')!.files
+    const text = directives.map(f => f.content).join('\n')
+    // One marker per emitter, so an extractor that stopped reading one fails by name.
+    for (const marker of [
+      '--- TRACKER SETUP ---', '--- LEARNING MAINTENANCE ---', '--- LEARNING PAUSED ---',
+      '--- PRE-COMPACT SNAPSHOT', 'Orchestrator reminder:', 'The user\'s prompt is a plan handoff',
+      'You are a working memory updater',
+    ]) {
+      expect(text, `hook directive text is missing ${marker}`).toContain(marker)
+    }
+    // …and no hook CODE: the extractor reads literals, never the shell around them.
+    expect(text).not.toContain('TRACKER_PROJECT_FILE=')
+    const charter = promptSurface().find(c => c.label === 'charter')!.files[0]
+    expect(charter.content).toContain('--- ORCHESTRATOR CHARTER ---')
+  })
+
+  it('red probe: a config read seeded into a hook directive literal is reported, and hook code is not', () => {
+    const hook = [
+      'TRACKER_PROJECT_FILE="$PROJECT_DEVFLOW_DIR/project.json"',
+      'grep -q \'"tracker"\' "$PROJECT_DEVFLOW_DIR/.devflow/project.json" && fork=1',
+      'TRACKER_SECTION="--- TRACKER SETUP ---',
+      'Read `.devflow/config.json` to learn the personal \\"tracker\\" override before the spawn."',
+    ].join('\n')
+    const entry = { name: 'src/assets/scripts/hooks/probe#directives', content: collectDirectiveText(hook).join('\n') }
+    expect(collectConfigReads([entry]).map(r => r.file)).toEqual(['src/assets/scripts/hooks/probe#directives'])
+    // The same read as hook CODE is plumbing and never becomes corpus.
+    expect(collectDirectiveText(hook.split('\n').slice(0, 2).join('\n'))).toEqual([])
   })
 
   it('reaches the consumers: the settings partial and its three gates are compiled into the corpus', () => {

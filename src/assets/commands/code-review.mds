@@ -30,7 +30,7 @@ Run a comprehensive code review of the current branch by spawning parallel revie
 
 1. **Discover reviewable worktrees** using the `devflow:worktree-support` skill discovery algorithm:
    - Run `git worktree list --porcelain` → parse, filter (skip protected/detached/mid-rebase), dedup by branch, sort by recent commit
-   - See `~/.claude/skills/devflow:worktree-support/SKILL.md` for the full 7-step algorithm and canonical protected branch list
+   - See the `devflow:worktree-support` skill for the full 7-step algorithm and canonical protected branch list
 2. **If `--path` flag provided:** use only that worktree, skip discovery
    **`--path` validation**: Before proceeding, verify the path exists as a directory and appears in `git worktree list` output. If not: report error and stop.
 3. **If only 1 reviewable worktree** (the common case): proceed as single-worktree flow — zero behavior change
@@ -186,7 +186,13 @@ Per worktree, detect file types in diff using `DIFF_RANGE` to determine conditio
 
 If `COMPLIANCE_ACTIVE` AND the diff touches regulated surface (data models, auth flows, logging/observability, payments, IaC, retention): add `compliance` to REVIEW_FOCUS_LIST for this worktree.
 
-**Language focus presence gate.** The eight language focuses — `typescript`, `react`, `accessibility`, `ui-design`, `go`, `java`, `python`, `rust` — ship with optional plugins, so their pattern skills are installed only when the user selected that plugin. Gate them by presence: for each language focus the table above would add, check whether `~/.claude/skills/devflow:{focus}/SKILL.md` exists (one file-existence check per candidate focus, read-only, silent). If it does not exist, do NOT add that focus to `REVIEW_FOCUS_LIST` and do NOT spawn a Review agent for it — the file-type condition alone never spawns a language focus. The eight core focuses are unconditional and are never presence-gated.
+**Language focus presence gate.** The eight language focuses — `typescript`, `react`, `accessibility`, `ui-design`, `go`, `java`, `python`, `rust` — ship with optional plugins, so their pattern skills are installed only when the user selected that plugin. Gate them by presence: for each language focus the table above would add, check whether `{claude_dir}/skills/devflow:{focus}/SKILL.md` exists, `{claude_dir}` being Claude Code's directory as the installer resolves it — `CLAUDE_CONFIG_DIR` when that is set to an absolute path, else `$HOME/.claude` (D-CLAUDE-DIR-PROMPTS). Run one read-only, silent check per candidate focus:
+
+```bash
+d="${CLAUDE_CONFIG_DIR:-}"; case "$d" in /*) ;; *) d="$HOME/.claude" ;; esac; test -f "$d/skills/devflow:{focus}/SKILL.md"; echo "exit=$?"
+```
+
+Only `exit=0` means the skill is installed. On any other result, do NOT add that focus to `REVIEW_FOCUS_LIST` and do NOT spawn a Review agent for it — the file-type condition alone never spawns a language focus. The eight core focuses are unconditional and are never presence-gated.
 
 ### Phase 1b: Load Decisions Index
 
@@ -362,7 +368,7 @@ In multi-worktree mode, report results per worktree.
 ## Backwards Compatibility
 
 - **Single worktree**: Auto-discovery finds only one worktree → proceeds exactly as before. Zero behavior change.
-- **Legacy flat layout**: If `.devflow/docs/reviews/{branch-slug}/` contains flat `*.md` files (no timestamped subdirectories), new runs create timestamped subdirectories. Old flat files remain untouched.
+- **Legacy flat layout**: If `{worktree}/.devflow/docs/reviews/{branch-slug}/` contains flat `*.md` files (no timestamped subdirectories), new runs create timestamped subdirectories. Old flat files remain untouched.
 
 ## Principles
 

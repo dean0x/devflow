@@ -14,7 +14,7 @@ import {
   loadTemplateDenyEntries,
   stripUserSecurityDenyList,
 } from '../../targets/claude-code/post-install.js';
-import { writeFileAtomicExclusive } from '../../core/fs-atomic.js';
+import { writeSettingsFileAtomic } from '../../core/fs-atomic.js';
 import { promises as fs } from 'fs';
 import { getPackageRoot } from '../../core/paths.js';
 
@@ -265,7 +265,7 @@ export const securityCommand = new Command('security')
 
         const { json: stripped, removed } = stripUserDenyList(userSettingsJson, DEVFLOW_HISTORICAL_DENY);
         if (removed.length > 0) {
-          await writeFileAtomicExclusive(userSettingsPath, stripped);
+          await writeSettingsFileAtomic(userSettingsPath, stripped);
           p.log.success(`Removed ${removed.length} entries from user settings:`);
           for (const entry of removed) {
             p.log.info(`  ${color.dim(entry)}`);

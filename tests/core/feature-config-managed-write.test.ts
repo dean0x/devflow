@@ -19,16 +19,19 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { mkdtempSync, rmSync, mkdirSync, writeFileSync, readFileSync, existsSync } from 'fs';
+import { mkdtempSync, rmSync, mkdirSync, writeFileSync, readFileSync, existsSync, chmodSync, symlinkSync, lstatSync, readlinkSync } from 'fs';
 import { tmpdir } from 'os';
 import * as path from 'path';
 
 import {
+  classifyConfigBytes,
   mergeManagedConfig,
   readConfig,
+  readConfigIfPresent,
   writeManagedConfig,
   type ManagedConfig,
 } from '../../src/core/feature-config.js';
+import { loadProjectConfigLib, type ProjectConfigLib } from '../../src/core/evidence-policy.js';
 
 const MANAGED: ManagedConfig = {
   reviewPublication: 'off',
@@ -182,11 +185,130 @@ describe('writeManagedConfig: the read-modify-write through the file', () => {
     expect(readRaw()).toEqual(MANAGED);
   });
 
-  it('replaces a malformed file with the managed keys instead of failing', async () => {
-    seedConfig('{ "tracker": "jira", ');
+  it('reports success on the happy-path merge', async () => {
+    seedConfig(JSON.stringify({ reviewPublication: 'full', tracker: 'jira' }));
 
-    await writeManagedConfig(tmpDir, MANAGED);
+    expect(await writeManagedConfig(tmpDir, MANAGED)).toEqual({ ok: true });
+    expect(readRaw()).toEqual({ ...MANAGED, tracker: 'jira' });
+  });
+});
 
-    expect(readRaw()).toEqual(MANAGED);
+// D-CONFIG-STRICT-PARSE / D-CONFIG-NO-REPAIR: a file the shared strict parser
+// rejects is the user's to fix — devflow leaves its bytes exactly as they are.
+describe('writeManagedConfig: a malformed file is never rewritten', () => {
+  it.each([
+    ['a syntax error', '{ "tracker": "jira", '],
+    ['a duplicate top-level key (JSON.parse would keep the last)', '{"tracker":"jira","reviewPublication":"off","tracker":"github"}\n'],
+    ['a duplicate nested key', '{"features":{"memory":false,"memory":true}}\n'],
+    ['a JSON array', '[{"tracker":"jira"}]\n'],
+    ['an empty file', ''],
+    ['a UTF-8 byte-order mark', '\uFEFF{"tracker":"jira"}\n'],
+  ])('%s: bytes stay identical and the Result names the file', async (_label, body) => {
+    seedConfig(body);
+    const before = readFileSync(configPath());
+
+    const result = await writeManagedConfig(tmpDir, MANAGED);
+
+    expect(result).toEqual({ ok: false, error: { kind: 'malformed', path: configPath() } });
+    expect(readFileSync(configPath()).equals(before)).toBe(true);
+    // Readers fall back as before: a malformed file configures nothing.
+    expect(await readConfigIfPresent(tmpDir)).toBeNull();
+  });
+
+  it('an unreadable file is left alone, reported as unreadable', async () => {
+    if (process.platform === 'win32' || process.getuid?.() === 0) return;
+    seedConfig(JSON.stringify({ tracker: 'jira' }));
+    chmodSync(configPath(), 0o000);
+    try {
+      const result = await writeManagedConfig(tmpDir, MANAGED);
+      expect(result.ok).toBe(false);
+      expect(!result.ok && result.error.kind).toBe('unreadable');
+    } finally {
+      chmodSync(configPath(), 0o600);
+    }
+    expect(JSON.parse(readFileSync(configPath(), 'utf-8'))).toEqual({ tracker: 'jira' });
+  });
+
+  it('with no strict parser to judge it, an existing file is left alone', async () => {
+    seedConfig(JSON.stringify({ tracker: 'jira' }));
+    const before = readFileSync(configPath());
+
+    const result = await writeManagedConfig(tmpDir, MANAGED, {
+      ok: false, error: { kind: 'not-found', path: '/nowhere/lib/project-config.cjs' },
+    });
+
+    expect(result.ok).toBe(false);
+    expect(!result.ok && result.error.kind).toBe('unreadable');
+    expect(readFileSync(configPath()).equals(before)).toBe(true);
+  });
+});
+
+// D-CONFIG-NO-FOLLOW: config.json is read the way the resolvers read it
+// (lib/project-config.cjs readBoundedRegularFile, never followed), so a symlink
+// configures nothing here either — and D-CONFIG-NO-REPAIR leaves it in place.
+describe('a symlinked config.json is refused, never followed and never replaced', () => {
+  const skip = process.platform === 'win32';
+
+  /** Plant `.devflow/config.json` as a symlink to `target`; returns the link path. */
+  function seedSymlink(target: string): string {
+    mkdirSync(path.join(tmpDir, '.devflow'), { recursive: true });
+    symlinkSync(target, configPath());
+    return configPath();
+  }
+
+  it('a symlink to a valid config: readers configure nothing, the write is refused as unreadable', async () => {
+    if (skip) return;
+    const target = path.join(tmpDir, 'elsewhere.json');
+    writeFileSync(target, JSON.stringify({ reviewPublication: 'off', tracker: 'jira' }), 'utf-8');
+    const targetBefore = readFileSync(target);
+    seedSymlink(target);
+
+    expect(await readConfigIfPresent(tmpDir)).toBeNull();
+    expect(await readConfig(tmpDir)).toEqual({ reviewPublication: 'auto' });
+
+    const result = await writeManagedConfig(tmpDir, { reviewPublication: 'full' });
+    expect(result.ok).toBe(false);
+    expect(!result.ok && result.error).toMatchObject({ kind: 'unreadable', path: configPath() });
+    expect(!result.ok && result.error.kind === 'unreadable' && result.error.detail).toMatch(/symlink/);
+
+    // Neither written through nor replaced: the link and its target are as they were.
+    expect(lstatSync(configPath()).isSymbolicLink()).toBe(true);
+    expect(readlinkSync(configPath())).toBe(target);
+    expect(readFileSync(target).equals(targetBefore)).toBe(true);
+  });
+
+  it('a dangling symlink is not an absent file — the write does not replace it', async () => {
+    if (skip) return;
+    const target = path.join(tmpDir, 'missing.json');
+    seedSymlink(target);
+
+    const result = await writeManagedConfig(tmpDir, MANAGED);
+
+    expect(result.ok).toBe(false);
+    expect(!result.ok && result.error.kind).toBe('unreadable');
+    expect(lstatSync(configPath()).isSymbolicLink()).toBe(true);
+    expect(existsSync(target)).toBe(false);
+    expect(await readConfigIfPresent(tmpDir)).toBeNull();
+  });
+});
+
+describe('classifyConfigBytes: the shared strict parser decides', () => {
+  const lib = ((): ProjectConfigLib => {
+    const loaded = loadProjectConfigLib();
+    if (!loaded.ok) throw new Error(`strict parser failed to load: ${loaded.error.path}`);
+    return loaded.value;
+  })();
+
+  it('no file is absent; a strict JSON object is its value', () => {
+    expect(classifyConfigBytes(null, lib)).toEqual({ kind: 'absent' });
+    expect(classifyConfigBytes(Buffer.from('{"tracker":"jira","features":{"memory":false}}'), lib))
+      .toEqual({ kind: 'object', value: { tracker: 'jira', features: { memory: false } } });
+  });
+
+  it('a duplicate key anywhere, or bytes over the parser bound, are malformed', () => {
+    expect(classifyConfigBytes(Buffer.from('{"a":1,"a":2}'), lib)).toEqual({ kind: 'malformed' });
+    expect(classifyConfigBytes(Buffer.from('{"x":[{"a":1,"a":2}]}'), lib)).toEqual({ kind: 'malformed' });
+    const oversize = Buffer.from(JSON.stringify({ note: 'x'.repeat(8192) }));
+    expect(classifyConfigBytes(oversize, lib)).toEqual({ kind: 'malformed' });
   });
 });

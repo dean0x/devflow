@@ -2,7 +2,14 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import * as path from 'path';
 import { isContainedIn } from '../src/core/paths.js';
 
-import { getHomeDirectory, getClaudeDirectory, getDevFlowDirectory, getInstallationPaths } from '../src/targets/claude-code/claude-paths.js';
+import {
+  getHomeDirectory,
+  getClaudeDirectory,
+  getDevFlowDirectory,
+  getInstallationPaths,
+  readHomeDirectory,
+  resolveInstallationPaths,
+} from '../src/targets/claude-code/claude-paths.js';
 
 beforeEach(() => {
   vi.unstubAllEnvs();
@@ -26,6 +33,37 @@ describe('getHomeDirectory', () => {
       expect(result.length).toBeGreaterThan(0);
     } catch (e) {
       expect((e as Error).message).toContain('Unable to determine home directory');
+    }
+  });
+});
+
+describe('resolveInstallationPaths — the paths as a Result', () => {
+  it('returns the home directory and the install locations under it', () => {
+    vi.stubEnv('HOME', '/custom/home');
+    vi.stubEnv('CLAUDE_CONFIG_DIR', '');
+    expect(resolveInstallationPaths()).toEqual({
+      ok: true,
+      value: { homeDir: '/custom/home', claudeDir: '/custom/home/.claude', devflowDir: '/custom/home/.devflow' },
+    });
+  });
+
+  it('readHomeDirectory is null, never a throw, when neither HOME nor the passwd entry names one', () => {
+    const throwing = (): string => { throw new Error('no passwd entry'); };
+    expect(readHomeDirectory({}, throwing)).toBeNull();
+    expect(readHomeDirectory({ HOME: '' }, () => '')).toBeNull();
+    expect(readHomeDirectory({ HOME: '' }, () => '/from/passwd')).toBe('/from/passwd');
+    expect(readHomeDirectory({ HOME: '/from/env' }, throwing)).toBe('/from/env');
+  });
+
+  it('resolveInstallationPaths reports the missing home directory as an error', () => {
+    vi.stubEnv('HOME', '');
+    // os.homedir() may still answer from the passwd entry; either outcome is a
+    // Result, never a throw.
+    const resolved = resolveInstallationPaths();
+    if (resolved.ok) {
+      expect(path.isAbsolute(resolved.value.homeDir)).toBe(true);
+    } else {
+      expect(resolved.error).toContain('Unable to determine home directory');
     }
   });
 });

@@ -16,8 +16,8 @@ df_has_git_marker() {
 }
 
 # df_is_project_root <root> — returns 0 when <root> may hold per-project devflow
-# data: it sits inside a git checkout (df_has_git_marker) AND it is not the home
-# directory.
+# data: it is a checkout's toplevel — it holds its own `.git` entry — AND it is not
+# the home directory.
 #
 # D-HOOKS-GIT-ONLY: the hooks that scaffold `.devflow/` and the root `.gitignore`
 # carve-out — session-start-context and ensure-devflow-init, which every capture
@@ -29,21 +29,33 @@ df_has_git_marker() {
 # the machine root, so per-project data would land inside `~/.devflow` and its
 # carve-out in the user's home `.gitignore`.
 #
+# D-HOOKS-TOPLEVEL-ONLY: the `.git` entry must sit AT <root>, not merely above it.
+# Callers pass the root df_resolve_roots resolved, and when `git rev-parse` fails
+# from inside a checkout — the repository has dubious ownership, or
+# GIT_CEILING_DIRECTORIES stops git's search — that root is the raw cwd, possibly a
+# subdirectory. An ancestor walk would still find the checkout's `.git` and admit
+# it, and `.devflow/` plus a `.gitignore` block would land in that subdirectory.
+# Requiring the marker at the root makes the gate and the resolver agree: git's
+# toplevel always holds `.git` (a directory, or the file a linked worktree or
+# submodule carries), a subdirectory never does. A directory that holds its own
+# `.git` still passes when git cannot read it — the marker contract is the zero-fork
+# one above, and writing there scatters nothing, because it is the checkout's root.
+#
 # The comparison is between PHYSICAL paths, because the two sides reach it by
 # different routes: git reports a toplevel with every symlink resolved, while
 # $HOME is whatever the login shell was handed — on macOS the temp tree is
 # /var → /private/var, and a home directory can itself sit behind a symlink. A
 # textual compare would miss exactly the case it exists for.
 #
-# Zero forks, like the marker walk above: `cd -P` resolves a path physically and
-# publishes it in $PWD, both shell builtins, so no `$(...)` subshell and no
-# realpath/readlink binary is involved. The caller's directory is restored before
+# Zero forks, like the marker walk above: a builtin `-e` test, then `cd -P`, which
+# resolves a path physically and publishes it in $PWD — both shell builtins, so no
+# `$(...)` subshell and no realpath/readlink binary is involved. The caller's directory is restored before
 # returning. An unresolvable <root> is refused (fail closed: nothing is written);
 # an unset or unresolvable HOME cannot equal a resolved root, so it refuses nothing.
 df_is_project_root() {
   local _root="$1" _back="$PWD" _root_real="" _home_real=""
   [ -n "$_root" ] || return 1
-  df_has_git_marker "$_root" || return 1
+  [ -e "$_root/.git" ] || return 1
   if cd -P "$_root" 2>/dev/null; then _root_real="$PWD"; fi
   if [ -n "${HOME:-}" ] && cd -P "$HOME" 2>/dev/null; then _home_real="$PWD"; fi
   cd "$_back" 2>/dev/null || true
