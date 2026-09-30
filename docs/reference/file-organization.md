@@ -210,7 +210,7 @@ Included settings:
 - `env.ENABLE_TOOL_SEARCH` - Deferred MCP tool loading (~85% token savings)
 - `env.ENABLE_LSP_TOOL` - Language Server Protocol support
 - `env.CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS` - Agent Teams (not in settings template by default; enabled on demand via the optional `agent-teams` Claude Code flag — `devflow flags --enable agent-teams`)
-- `permissions.deny` - Security deny list (170 blocked operations) + sensitive file patterns
+- `permissions.deny` - Security deny list: 170 entries (145 blocked `Bash` operations + 25 sensitive-file `Read` patterns)
 
 ## Capture + Learning Hooks
 
