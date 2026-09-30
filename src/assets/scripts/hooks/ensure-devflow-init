@@ -17,7 +17,10 @@ _EDI_ROOT="${DF_ROOT:-$1}"
 _EDI_LEDGER="${DF_LEDGER_ROOT:-$_EDI_ROOT}"
 
 # D-HOOKS-GIT-ONLY (git-marker): scaffold nothing outside a git project, and
-# nothing at a repository rooted at HOME. This is the one gate every capture and
+# nothing at a repository rooted at HOME. D-HOOKS-TOPLEVEL-ONLY (git-marker): nor
+# below a checkout's toplevel — when git refuses the cwd (dubious ownership,
+# GIT_CEILING_DIRECTORIES) the root above is that cwd, and a subdirectory holds no
+# `.git` of its own, so it is refused rather than scaffolded. This is the one gate every capture and
 # memory caller (capture-prompt, capture-turn, capture-question, memory-worker,
 # pre-compact-memory) passes through before it writes, and each of them treats a
 # non-zero return as "stop" (`|| exit 0`), so memory and learning stop together
