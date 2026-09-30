@@ -1522,6 +1522,15 @@ describe('real git (gh faked unavailable, git real)', SUBPROCESS_TIMEOUT, () => 
     expect(residual.status, residual.stderr).toBe(0);
     expect(expectOneGrammarLine(residual.stdout))
       .toBe(`EVIDENCE_POLICY=standard SOURCE=worktree REF=none WARN=remote-unavailable ${LINE.standardInputs}`);
+
+    // A recorded origin/HEAD that names no safe branch is a failure, not the
+    // residual case: git accepts `@` in a ref name, SAFE_REF_RE does not.
+    realGit(clone, home, ['symbolic-ref', 'refs/remotes/origin/HEAD', 'refs/remotes/origin/weird@name']);
+    expect(realGit(clone, home, ['symbolic-ref', '--quiet', 'refs/remotes/origin/HEAD'])).toBe('refs/remotes/origin/weird@name\n');
+    const unsafe = runReal(clone);
+    expect(unsafe.status, unsafe.stderr).toBe(0);
+    expect(expectOneGrammarLine(unsafe.stdout))
+      .toBe(`EVIDENCE_POLICY=required SOURCE=worktree REF=none WARN=remote-unavailable,invalid-file,pr-changes-policy ${LINE.requiredInputs}`);
   });
 
   it('a branch in sync with the tracking copy fires nothing', () => {

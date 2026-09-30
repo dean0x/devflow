@@ -607,9 +607,21 @@ describe('TP-29 (AC-25): the default branch\'s project.json governs; a PR worktr
       ['another remote', 'refs/remotes/upstream/main\n'],
       ['an embedded second line', 'refs/remotes/origin/main\nEVIDENCE_POLICY=standard\n'],
       ['empty', '\n'],
-    ])('a hostile origin/HEAD (%s) names nothing — the residual case', (_label, stdout) => {
+    ])('an origin/HEAD that exists but names no safe branch (%s) is a failure — the base reads invalid and raises', (_label, stdout) => {
       writeDevflowFile('project.json', PROJECT.standard);
-      expect(lineFor([{ tool: 'git', args: ARGV_ORIGIN_HEAD, stdout }, ...scenarioCalls({ root })]))
+      const { exec, recorded } = scriptedExec([
+        { tool: 'git', args: ARGV_ORIGIN_HEAD, stdout },
+        ...scenarioCalls({ root, headProject: { bytes: PROJECT.standard } }),
+      ]);
+      expect(RESOLVER.formatLine(RESOLVER.resolve({ dir: root, compliance: DISABLED }, { exec })))
+        .toBe(`EVIDENCE_POLICY=required SOURCE=worktree REF=none WARN=remote-unavailable,invalid-file,pr-changes-policy ${REQ}`);
+      // Nothing names a branch, so no tracking ref is ever consulted.
+      expect(recorded.some(c => c.args[0] === 'rev-parse' && c.args.includes('--verify'))).toBe(false);
+    });
+
+    it('an origin/HEAD that is not recorded (answered exit 1) is the residual case — the worktree governs', () => {
+      writeDevflowFile('project.json', PROJECT.standard);
+      expect(lineFor([ORIGIN_HEAD_UNSET, ...scenarioCalls({ root })]))
         .toBe(`EVIDENCE_POLICY=standard SOURCE=worktree REF=none WARN=remote-unavailable ${STD}`);
     });
 

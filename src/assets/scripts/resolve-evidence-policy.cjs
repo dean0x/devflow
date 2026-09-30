@@ -603,7 +603,7 @@ function lsRemoteDefaultBranch(ctx, root) {
 }
 
 /**
- * @typedef {{ kind: 'ref', ref: string } | { kind: 'none' } | { kind: 'unknown' }} OriginHead
+ * @typedef {{ kind: 'ref', ref: string } | { kind: 'none' } | { kind: 'unreadable' }} OriginHead
  */
 
 /**
@@ -614,12 +614,16 @@ function lsRemoteDefaultBranch(ctx, root) {
  * governing, so a branch that sets `evidence:"standard"` would resolve standard
  * while main says required; naming D here lets trackingSource fold main's
  * tracking copy in, so the branch cannot lower it.
- *   ref      exit 0 with one `refs/remotes/origin/<SAFE_REF_RE>` line
- *   none     an answered non-zero exit (origin/HEAD not recorded) or an answer
- *            that names no safe branch — the residual case: the worktree file
- *            governs, WARN=remote-unavailable
- *   unknown  git did not answer — not knowing whether a base exists, which
- *            gatherFacts reads as an invalid base (it raises; avoids PF-075)
+ *   ref         exit 0 with one `refs/remotes/origin/<SAFE_REF_RE>` line
+ *   none        an answered non-zero exit: origin/HEAD is not recorded — the
+ *               residual case, where the worktree file governs with
+ *               WARN=remote-unavailable
+ *   unreadable  git did not answer, or origin/HEAD exists but its answer names
+ *               no safe branch (another remote, a hostile or unparseable name).
+ *               Either is a failure, never the residual case: gatherFacts reads
+ *               it as an invalid base, which resolves required (avoids PF-075).
+ *               resolve-settings' defaultBranchCompliance fails the same answer
+ *               closed, to `generic`.
  *
  * @param {CallContext} ctx
  * @param {string} root
@@ -628,9 +632,10 @@ function lsRemoteDefaultBranch(ctx, root) {
 function localOriginHead(ctx, root) {
   const r = runCall(ctx, 'git', ['symbolic-ref', '--quiet', 'refs/remotes/origin/HEAD'], root,
     GIT_LOCAL_TIMEOUT_MS, LINE_MAX_BUFFER);
-  if (!answered(r)) return { kind: 'unknown' };
-  const ref = r.ok ? projectConfig.parseOriginHeadRef(r.stdout.toString('utf8')) : null;
-  return ref === null ? { kind: 'none' } : { kind: 'ref', ref };
+  if (!answered(r)) return { kind: 'unreadable' };
+  if (!r.ok) return { kind: 'none' };
+  const ref = projectConfig.parseOriginHeadRef(r.stdout.toString('utf8'));
+  return ref === null ? { kind: 'unreadable' } : { kind: 'ref', ref };
 }
 
 /**
@@ -719,7 +724,8 @@ function trackingSource(ctx, root, ref) {
  * }} Facts
  *   remote     R — set iff reachable
  *   tracking   T — set iff offline and refs/remotes/origin/<D> exists (or git
- *              could not answer whether it, or origin/HEAD, does — then invalid)
+ *              could not answer whether it does, or origin/HEAD is unreadable —
+ *              then invalid)
  *   head       H — set iff B (R online, T offline) is known
  *   compliance stricter(C_machine, C_repo) — D-COMPLIANCE-REPO-FLOOR
  */
@@ -774,7 +780,7 @@ function gatherFacts(dir, compliance, exec) {
     if (ref === null) {
       const originHead = localOriginHead(ctx, root);
       if (originHead.kind === 'ref') ref = originHead.ref;
-      if (originHead.kind === 'unknown') tracking = { evidence: INVALID, compliance: false };
+      if (originHead.kind === 'unreadable') tracking = { evidence: INVALID, compliance: false };
     }
     if (ref !== null) tracking = trackingSource(ctx, root, ref);
   }
