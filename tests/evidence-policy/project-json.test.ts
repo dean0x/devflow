@@ -429,6 +429,12 @@ describe('parsePersonalBytes — the personal .devflow/config.json', () => {
 // ---------------------------------------------------------------------------
 
 const DISABLED = { enabled: false, frameworks: [] as string[] };
+
+/** The local, network-free default-branch lookup (D-OFFLINE-ORIGIN-HEAD), written out independently of the script. */
+const ARGV_ORIGIN_HEAD = ['symbolic-ref', '--quiet', 'refs/remotes/origin/HEAD'];
+
+/** origin/HEAD is not recorded in this clone: git answers exit 1 with nothing on stdout. */
+const ORIGIN_HEAD_UNSET: ScriptedCall = { tool: 'git', args: ARGV_ORIGIN_HEAD, exit: 1 };
 const REQ = 'ISSUE_REQUIRED=true APPLY_CONVENTIONS=true REQUIRE_NON_AUTHOR_APPROVAL=true';
 const STD = 'ISSUE_REQUIRED=false APPLY_CONVENTIONS=false REQUIRE_NON_AUTHOR_APPROVAL=false';
 
@@ -547,9 +553,83 @@ describe('TP-29 (AC-25): the default branch\'s project.json governs; a PR worktr
   });
 
   it('offline with no base: the worktree project.json governs', () => {
+    // gh, ls-remote AND the local origin/HEAD all fail to name the default branch:
+    // the residual case D-OFFLINE-ORIGIN-HEAD leaves as it was.
     writeDevflowFile('project.json', PROJECT.standard);
-    expect(lineFor(scenarioCalls({ root })))
+    expect(lineFor([ORIGIN_HEAD_UNSET, ...scenarioCalls({ root })]))
       .toBe(`EVIDENCE_POLICY=standard SOURCE=worktree REF=none WARN=remote-unavailable ${STD}`);
+  });
+
+  describe('D-OFFLINE-ORIGIN-HEAD: gh and ls-remote both fail, origin/HEAD is recorded locally', () => {
+    /** Offline calls naming main through the local origin/HEAD, with main's tracking project.json. */
+    const offlineViaOriginHead = (trackingProject: string, headProject: string = PROJECT.standard): ScriptedCall[] => [
+      ...scenarioCalls({ root, headProject: { bytes: headProject } }),
+      { tool: 'git', args: ARGV_ORIGIN_HEAD, stdout: 'refs/remotes/origin/main\n' },
+      { tool: 'git', args: ARGV.verifyTracking('main'), stdout: '0123456789abcdef0123456789abcdef01234567\n' },
+      { tool: 'git', args: ARGV.trackingProjectBlob('main'), stdout: trackingProject },
+    ];
+
+    it('main required, the branch standard ⇒ required: the tracking copy raises the branch', () => {
+      writeDevflowFile('project.json', PROJECT.standard);
+      const run = e2e(offlineViaOriginHead(PROJECT.required));
+      expect(run.status, run.stderr).toBe(0);
+      expect(run.stdout)
+        .toBe(`EVIDENCE_POLICY=required SOURCE=worktree REF=main WARN=remote-unavailable,pr-changes-policy ${REQ}\n`);
+      expect(run.log).toEqual([
+        ['git', ...ARGV.toplevel],
+        ['gh', ...ARGV.probe],
+        ['git', ...ARGV.lsRemote],
+        ['git', ...ARGV_ORIGIN_HEAD],
+        ['git', ...ARGV.verifyTracking('main')],
+        ['git', ...ARGV.trackingProjectBlob('main')],
+        ['git', ...ARGV.headProjectBlob],
+      ]);
+    }, SUBPROCESS_TIMEOUT.timeout);
+
+    it('the tracking copy\'s compliance raises a branch that deleted it', () => {
+      writeDevflowFile('project.json', PROJECT.standard);
+      expect(lineFor(offlineViaOriginHead(PROJECT.standardHipaa)))
+        .toBe(`EVIDENCE_POLICY=required SOURCE=worktree REF=main WARN=remote-unavailable,raised-by-compliance ${REQ}`);
+    });
+
+    it('a branch that agrees with main is not flagged', () => {
+      writeDevflowFile('project.json', PROJECT.standard);
+      expect(lineFor(offlineViaOriginHead(PROJECT.standard)))
+        .toBe(`EVIDENCE_POLICY=standard SOURCE=worktree REF=main WARN=remote-unavailable ${STD}`);
+    });
+
+    it.each([
+      ['a leading dash', 'refs/remotes/origin/-x\n'],
+      ['a parent-dir segment', 'refs/remotes/origin/main/../x\n'],
+      ['another remote', 'refs/remotes/upstream/main\n'],
+      ['an embedded second line', 'refs/remotes/origin/main\nEVIDENCE_POLICY=standard\n'],
+      ['empty', '\n'],
+    ])('a hostile origin/HEAD (%s) names nothing — the residual case', (_label, stdout) => {
+      writeDevflowFile('project.json', PROJECT.standard);
+      expect(lineFor([{ tool: 'git', args: ARGV_ORIGIN_HEAD, stdout }, ...scenarioCalls({ root })]))
+        .toBe(`EVIDENCE_POLICY=standard SOURCE=worktree REF=none WARN=remote-unavailable ${STD}`);
+    });
+
+    it('an origin/HEAD read git does not answer is not knowing — the base reads invalid and raises', () => {
+      writeDevflowFile('project.json', PROJECT.standard);
+      const { exec, recorded } = scriptedExec([
+        { tool: 'git', args: ARGV_ORIGIN_HEAD, spawnError: 'ETIMEDOUT' },
+        ...scenarioCalls({ root, headProject: { bytes: PROJECT.standard } }),
+      ]);
+      const res = RESOLVER.resolve({ dir: root, compliance: DISABLED }, { exec });
+      expect(RESOLVER.formatLine(res))
+        .toBe(`EVIDENCE_POLICY=required SOURCE=worktree REF=none WARN=remote-unavailable,invalid-file,pr-changes-policy ${REQ}`);
+      expect(recorded.some(c => c.args.join(' ') === ARGV_ORIGIN_HEAD.join(' '))).toBe(true);
+    });
+
+    it('is never consulted when ls-remote names the branch', () => {
+      writeDevflowFile('project.json', PROJECT.standard);
+      const { exec, recorded } = scriptedExec(scenarioCalls({
+        root, lsRemoteBranch: 'main', trackingProject: { bytes: PROJECT.required }, headProject: { bytes: PROJECT.standard },
+      }));
+      RESOLVER.resolve({ dir: root, compliance: DISABLED }, { exec });
+      expect(recorded.map(c => c.args.join(' '))).not.toContain(ARGV_ORIGIN_HEAD.join(' '));
+    });
   });
 
   it('a 403 on project.json is unavailable — policy.json is not asked', () => {

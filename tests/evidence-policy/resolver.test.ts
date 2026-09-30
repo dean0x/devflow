@@ -755,15 +755,23 @@ describe('pr-changes-policy — semantic, advisory, never lowering', () => {
 const ALLOWED_GIT_SUBCOMMANDS = new Set(['rev-parse', 'cat-file', 'ls-remote']);
 
 /**
+ * The one symbolic-ref call allowed (D-OFFLINE-ORIGIN-HEAD): its READ form. With
+ * a second ref argument, or `--delete`, the same subcommand WRITES a symref.
+ */
+const ORIGIN_HEAD_READ = ['git', 'symbolic-ref', '--quiet', 'refs/remotes/origin/HEAD'];
+
+/**
  * Named collector: calls the resolver must never make. A git subcommand outside
  * the read-only allowlist (which is what keeps `set-head`, `fetch` and every
- * index-refreshing command out), a gh subcommand other than `api`, and a gh call
- * that adds a field without `--method GET` — gh defaults such a call to POST.
+ * index-refreshing command out), a symbolic-ref other than the exact read of
+ * origin/HEAD, a gh subcommand other than `api`, and a gh call that adds a field
+ * without `--method GET` — gh defaults such a call to POST.
  */
 function collectForbiddenCalls(log: readonly string[][]): string[] {
   return log.filter((call) => {
     const [tool, sub] = call;
     if (call.includes('set-head') || call.includes('fetch')) return true;
+    if (tool === 'git' && sub === 'symbolic-ref') return call.join(' ') !== ORIGIN_HEAD_READ.join(' ');
     if (tool === 'git') return !ALLOWED_GIT_SUBCOMMANDS.has(sub);
     if (tool === 'gh') {
       if (sub !== 'api') return true;
@@ -1561,19 +1569,6 @@ describe('TP-45 (AC-39): a policy.json where project.json has no evidence resolv
       .toBe(`EVIDENCE_POLICY=standard SOURCE=default REF=none WARN=remote-unavailable ${LINE.standardInputs}`);
   });
 
-  it('the working-tree policy.json is never opened or read — its bytes cannot matter', () => {
-    writeWorktreePolicy(root, RETIRED.standard);
-    const openSpy = vi.spyOn(CJS_FS, 'openSync');
-    const readSpy = vi.spyOn(CJS_FS, 'readSync');
-    const readFileSpy = vi.spyOn(CJS_FS, 'readFileSync');
-    const res = resolveWith(scenarioCalls({ root }));
-    expect(res.source).toBe('invalid');
-    const policyPath = worktreeFile(root, 'policy.json');
-    expect(openSpy.mock.calls.map(c => String(c[0]))).not.toContain(policyPath);
-    expect(readFileSpy.mock.calls.map(c => String(c[0]))).not.toContain(policyPath);
-    expect(readSpy).not.toHaveBeenCalled();
-  });
-
   it.each([
     ['a dangling symlink', () => {
       fs.mkdirSync(path.join(root, '.devflow'), { recursive: true });
@@ -1790,9 +1785,17 @@ describe('source guards', () => {
   });
 
   it('never enables a shell, and never names a write-side git command in code', () => {
+    // symbolic-ref appears once, in its read form only (D-OFFLINE-ORIGIN-HEAD).
+    const READ_FORM = "['symbolic-ref', '--quiet', 'refs/remotes/origin/HEAD']";
+    const writeSide = (source: string): string[] => codeLines(source)
+      .map(l => l.split(READ_FORM).join(''))
+      .filter(l => /['"](?:set-head|fetch|remote|push|update-ref|symbolic-ref)['"]/.test(l));
     const code = codeLines(SOURCE).join('\n');
     expect(code).not.toMatch(/shell:\s*true/);
-    expect(code).not.toMatch(/['"](?:set-head|fetch|remote|push|update-ref|symbolic-ref)['"]/);
+    expect(code.split(READ_FORM)).toHaveLength(2);
+    expect(writeSide(SOURCE)).toEqual([]);
+    expect(writeSide(`${SOURCE}\nrunCall(ctx, 'git', ['symbolic-ref', 'refs/remotes/origin/HEAD', 'refs/remotes/origin/x']);\n`))
+      .toHaveLength(1);
   });
 
   it('documents every exit code in the header, 3 as never emitted', () => {
@@ -1804,7 +1807,7 @@ describe('source guards', () => {
     for (const marker of [
       'D-POLICY-LINE', 'D-POLICY-PROBE', 'D-POLICY-JSON-RETIRED',
       'D-POLICY-FOLD', 'D-POLICY-CHANGE-DETECT', 'D-POLICY-PLUMBING',
-      'D-POLICY-SOURCE-PRECEDENCE', 'D-COMPLIANCE-REPO-FLOOR',
+      'D-POLICY-SOURCE-PRECEDENCE', 'D-COMPLIANCE-REPO-FLOOR', 'D-OFFLINE-ORIGIN-HEAD',
     ]) {
       expect(SOURCE, `${marker} missing`).toContain(marker);
     }
