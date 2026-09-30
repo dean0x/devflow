@@ -2482,8 +2482,9 @@ export const initCommand = new Command('init')
       manifestWritten: trackerLifecycle.manifestWritten,
     });
 
-    // The hooks' per-directory log folders, capped (D-LOG-DIR-CAP): one bounded
-    // pass, so a large backlog is worked off over successive inits.
+    // The hooks' per-directory log folders, capped (D-LOG-DIR-CAP): one pass
+    // clears every folder it scans beyond the cap; only a backlog beyond the
+    // scan bound (MAX_LOG_DIRS_SCANNED, 100,000) waits for the next init.
     const logPrune = await pruneHookLogDirs(path.join(devflowDir, 'logs'));
     if (!logPrune.ok) {
       if (verbose) p.log.warn(`Could not prune hook log folders: ${logPrune.error}`);
