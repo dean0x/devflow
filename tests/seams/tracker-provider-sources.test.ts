@@ -52,8 +52,15 @@ const CONTEXT_HOOK = path.join(scriptsDir(), 'hooks', 'session-start-context');
 // conventions-file half too — a refusal asserted to carry a reason that names the
 // other file.
 const MISMATCH_REASON = 'tracker configuration mismatch (repository override)';
-/** The command that re-opens the path the mismatch closes. */
-const REMEDY = 'devflow tracker --set';
+/**
+ * The edit that re-opens the path the mismatch closes. The refused value is the
+ * personal override itself, so the remedy names that key and that file: `devflow
+ * tracker --set` moves only the machine default, which a repository's project.json
+ * selection outranks, so naming it sent a user to a command that changed nothing.
+ */
+const REMEDY = 'the personal `config.json` `tracker` key';
+/** The superseded remedy — the machine-default command. */
+const RETIRED_REMEDY = 'devflow tracker --set';
 
 /** The one resolver both sides must consult. */
 const SETTINGS_SCRIPT = 'resolve-settings.cjs';
@@ -116,7 +123,7 @@ export function collectMissingRefusalParts(preamble: string): string[] {
     ['the narrowing statement', /narrow/i.test(line)],
     ['the admitted default (`github`)', line.includes('`github`')],
     [`the canonical reason (${MISMATCH_REASON})`, line.includes(`DEGRADED (${MISMATCH_REASON})`)],
-    [`the remedy (${REMEDY})`, line.includes(REMEDY)],
+    [`the remedy (${REMEDY})`, line.includes(REMEDY) && !line.includes(RETIRED_REMEDY)],
   ];
   return parts.filter(([, present]) => !present).map(([name]) => name);
 }
@@ -229,10 +236,17 @@ describe('tracker provider sources: the reader admits no source the writer never
     expect(
       collectMissingRefusalParts(
         '- `TRACKER_WARN=mismatch` ⇒ `TRACEABILITY: DEGRADED (tracker configuration mismatch ' +
-          '(conventions file))`: the override NARROWS only, to `github`; remedy `devflow tracker --set {id}`.',
+          '(conventions file))`: the override NARROWS only, to `github`; remedy: correct or drop the personal `config.json` `tracker` key.',
       ),
       'the conventions-file cause must NOT satisfy the refusal\'s reason requirement',
     ).toEqual([`the canonical reason (${MISMATCH_REASON})`]);
+    expect(
+      collectMissingRefusalParts(
+        `- \`TRACKER_WARN=mismatch\` ⇒ \`TRACEABILITY: DEGRADED (${MISMATCH_REASON})\`: the override NARROWS only, ` +
+          'to `github`; remedy `devflow tracker --set {id}` or drop the override.',
+      ),
+      'the machine-default command is not the remedy for a refused personal override',
+    ).toEqual([`the remedy (${REMEDY})`]);
     expect(collectMissingRefusalParts('')).toHaveLength(5);
   });
 });
