@@ -33,6 +33,8 @@ Learned by `/release` on 2026-08-23 from: `package.json`, `.github/workflows/rel
    aborted-bump residue ships old notes (bump-version.ts fails loudly on this since 2.0.1)
 7. `RELEASE_TOKEN` age via `gh secret list` — the fine-grained PAT expires silently and
    kills the run at checkout ("could not read Username"); rotate before dispatch if old
+8. Every `(#N)` squash commit since the last tag has an `[Unreleased]` entry — #409 was
+   missed in 3.0.0 and added pre-dispatch as a `docs(changelog):` commit
 
 ## Changelog
 
@@ -67,6 +69,10 @@ with extracted notes → restore `[Unreleased]`.
 ## Post-release
 
 - `git pull` main (CI adds 1–2 commits: version bump if needed + `[Unreleased]` restore)
-- Verify: `npm view devflow-kit version`, `gh release view v{VERSION}`
-- Compliance-gated extras (commit list, shipped-issue back-links): skipped unless
-  `~/.claude/skills/devflow:compliance/SKILL.md` exists
+- Verify: `npm view devflow-kit dist-tags`, `gh release view v{VERSION}` (plain
+  `npm view devflow-kit version` lagged right after CI in 3.0.0)
+- Evidence extras run when EVIDENCE_POLICY=required (this repo: `.devflow/project.json`
+  `evidence: required`): CI creates the GitHub release, then the Git agent appends
+  Commits / Shipped Issues / Traceability exceptions to its body (CHANGELOG-derived notes
+  kept byte-for-byte, exceptions block last), back-links each shipped issue and adds them
+  to a `vX.Y.Z` milestone
