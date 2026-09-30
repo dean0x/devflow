@@ -18,7 +18,7 @@ import { spawnSync } from 'child_process';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import { HOOK_RUN_ALLOWANCE_MS, HOOKS_DIR, runHook } from './shell-hooks-helpers.js';
+import { HOOK_RUN_ALLOWANCE_MS, HOOKS_DIR, NODE_EXEC_STALL_MS, runHook } from './shell-hooks-helpers.js';
 
 const CONTEXT_HOOK = path.join(HOOKS_DIR, 'session-start-context');
 const REMEDY = '`devflow uninstall --scope local`';
@@ -165,7 +165,7 @@ describe('session-start-context: legacy project-local install notice (Section 4)
     fs.rmSync(logPath);
     run(repo, 'startup', withShim);
     expect(invocations(), 'Section 4 forked for a settings.json with no devflow hook').toEqual(baseline);
-  }, HOOK_RUN_ALLOWANCE_MS * 3);
+  }, HOOK_RUN_ALLOWANCE_MS * 3 + NODE_EXEC_STALL_MS); // three hook runs; fresh shim executables pay the exec stall once
 
   it('the notice interpolates nothing from the repository — no path, no marker', () => {
     const odd = path.join(tmp, 'repo-with-a-long-name');
