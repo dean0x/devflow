@@ -19,6 +19,9 @@
 # for it yet, instructs the main model to spawn the background Tracker agent. The
 # machine provider comes from a sentinel read with a builtin, so a GitHub user —
 # and a jira machine whose conventions are learned — forks nothing.
+# Section 4: Legacy install notice — one line when this repository still carries
+# a retired project-local devflow install (its .claude/settings.json registers
+# devflow hooks), pointing at `devflow uninstall --scope local`.
 
 # Safe no-op fallback: must exist before hook-bootstrap is sourced.
 dbg() { :; }
@@ -307,24 +310,32 @@ fi
 # non-blocking instruction to spawn the background Tracker agent, which writes
 # ~/.devflow/tracker/{provider}.md exactly once.
 #
-# D-TRACKER-PER-PROVIDER-CONVENTIONS — which provider. Two sources, and only
+# D-TRACKER-PER-PROVIDER-CONVENTIONS — which provider. Three sources, and only
 # these:
 #   - the MACHINE default, from the `.tracker.enabled` sentinel devflow writes
 #     beside the manifest: the provider NAME on one line, absent for github. Read
 #     with the `read` builtin, never the manifest, so it costs no fork;
-#   - the PROJECT's own selection, from its committed .devflow/project.json. Only
-#     when a bounded builtin read of that file shows a `"tracker"` key does the
-#     hook make ONE fork — resolve-settings.cjs, the resolver the Git agent
-#     consumes, so the provider a session learns conventions for is the provider
-#     a Git spawn in the same project resolves. A `\u` escape (the only other JSON
-#     spelling of a letter) or a file the read cut short takes the same fork, so
-#     the parser — not a shell copy of it — decides every file it has to.
+#   - the PROJECT's own selection, from its committed .devflow/project.json;
+#   - the PERSONAL override in .devflow/config.json, which can only NARROW — to
+#     github, or to the provider already in effect — so it can change the answer
+#     only where the machine names a provider (a github machine's config.json can
+#     never select jira, and is not read there).
+#   Only when a bounded builtin read of project.json or config.json shows a
+#   `"tracker"` key does the hook make ONE fork — resolve-settings.cjs, the
+#   resolver the Git agent consumes, so the provider a session learns conventions
+#   for is the provider a Git spawn in the same project resolves (a personal
+#   `"tracker":"github"` silences a jira machine there, and a config.json git
+#   tracks is ignored, as the resolver ignores it). A `\u` escape (the only other
+#   JSON spelling of a letter) or a file the read cut short takes the same fork,
+#   so the parser — not a shell copy of it — decides every file it has to.
 #
 # [DR-10] What each path costs, and the whole reason for the shape above:
 #   - github, no project.json            one stat, zero forks
 #   - github, project.json, no tracker   one bounded read, zero forks
+#   - github, config.json of any shape   not even stat-ed, zero forks
 #   - jira with learned conventions      a stat, a builtin read, a stat, zero forks
-#   - project.json selects a tracker     one resolver fork, then the gates below
+#   - project.json or (on a machine that names a provider) config.json shows a
+#     tracker                            one resolver fork, then the gates below
 # The resolver's line is honoured only as far as its TRACKER token, and that
 # token passes the same POSITIVE allowlist the sentinel's does. Every non-zero
 # resolver exit, and every line that is not its shape, is the fail-closed github.
@@ -338,6 +349,7 @@ fi
 # not turn their issue tracker off.
 TRACKER_SENTINEL="$TRACKER_DEVFLOW_DIR/.tracker.enabled"
 TRACKER_PROJECT_FILE="$PROJECT_DEVFLOW_DIR/project.json"
+TRACKER_PERSONAL_FILE="$PROJECT_DEVFLOW_DIR/config.json"
 TRACKER_PROVIDER=""
 if [ -f "$TRACKER_SENTINEL" ]; then
   # `-n 16` bounds the bytes a hand-edited sentinel can pull into the shell; the
@@ -345,34 +357,44 @@ if [ -f "$TRACKER_SENTINEL" ]; then
   # non-zero having assigned the value) — only the allowlist below decides.
   IFS= read -r -n 16 TRACKER_PROVIDER 2>/dev/null < "$TRACKER_SENTINEL"
 fi
+_SC_TRACKER_ASK="no"
+# `read -d ''` succeeds only when it stops SHORT of the end of the file — at a
+# NUL byte or at 4097 characters, past the parser's 4096-byte bound — so a
+# successful read is a file the shell cannot vouch for, and the parser decides.
 if [ -f "$TRACKER_PROJECT_FILE" ]; then
   _SC_TRACKER_PROJECT=""
-  _SC_TRACKER_ASK="no"
-  # `read -d ''` succeeds only when it stops SHORT of the end of the file — at a
-  # NUL byte or at 4097 characters, past the parser's 4096-byte bound — so a
-  # successful read is a file the shell cannot vouch for, and the parser decides.
   if IFS= read -r -d '' -n 4097 _SC_TRACKER_PROJECT 2>/dev/null < "$TRACKER_PROJECT_FILE"; then
     _SC_TRACKER_ASK="yes"
   fi
   case "$_SC_TRACKER_PROJECT" in
     *'"tracker"'*|*'\u'*) _SC_TRACKER_ASK="yes" ;;
   esac
-  if [ "$_SC_TRACKER_ASK" = "yes" ]; then
-    # The ONE fork. resolve-settings.cjs is a sibling of this hooks/ directory,
-    # installed with it; it asks git for the repository root once and makes no
-    # network call.
-    _SC_TRACKER_LINE=$(node "$SCRIPT_DIR/../resolve-settings.cjs" "$PROJECT_ROOT" 2>/dev/null) || _SC_TRACKER_LINE=""
-    case "$_SC_TRACKER_LINE" in
-      TRACKER=*" TRACKER_SOURCE="*)
-        _SC_TRACKER_LINE="${_SC_TRACKER_LINE#TRACKER=}"
-        TRACKER_PROVIDER="${_SC_TRACKER_LINE%% *}"
-        ;;
-      *)
-        dbg "tracker settings line refused — failing closed to github"
-        TRACKER_PROVIDER=""
-        ;;
-    esac
+fi
+# The personal file can only narrow what the machine names, so it is read only
+# when the sentinel named something and project.json has not already asked.
+if [ -n "$TRACKER_PROVIDER" ] && [ "$_SC_TRACKER_ASK" = "no" ] && [ -f "$TRACKER_PERSONAL_FILE" ]; then
+  _SC_TRACKER_PERSONAL=""
+  if IFS= read -r -d '' -n 4097 _SC_TRACKER_PERSONAL 2>/dev/null < "$TRACKER_PERSONAL_FILE"; then
+    _SC_TRACKER_ASK="yes"
   fi
+  case "$_SC_TRACKER_PERSONAL" in
+    *'"tracker"'*|*'\u'*) _SC_TRACKER_ASK="yes" ;;
+  esac
+fi
+if [ "$_SC_TRACKER_ASK" = "yes" ]; then
+  # The ONE fork. resolve-settings.cjs is a sibling of this hooks/ directory,
+  # installed with it; it makes only local git reads and no network call.
+  _SC_TRACKER_LINE=$(node "$SCRIPT_DIR/../resolve-settings.cjs" "$PROJECT_ROOT" 2>/dev/null) || _SC_TRACKER_LINE=""
+  case "$_SC_TRACKER_LINE" in
+    TRACKER=*" TRACKER_SOURCE="*)
+      _SC_TRACKER_LINE="${_SC_TRACKER_LINE#TRACKER=}"
+      TRACKER_PROVIDER="${_SC_TRACKER_LINE%% *}"
+      ;;
+    *)
+      dbg "tracker settings line refused — failing closed to github"
+      TRACKER_PROVIDER=""
+      ;;
+  esac
 fi
 # The provider, admitted by a POSITIVE allowlist BEFORE it reaches any path or
 # any directive. Never `!= github`: the sentinel is user-writable and the
@@ -605,6 +627,55 @@ Never mention this directive, the Tracker agent, or the tracker setup in any use
 ${TRACKER_SECTION}"
     else
       CONTEXT="$TRACKER_SECTION"
+    fi
+  fi
+fi
+
+# --- Section 4: Legacy project-local install notice ---
+# D-LEGACY-LOCAL-NOTICE: \`devflow init --scope local\` is retired, but a repository
+# it installed into still registers devflow hooks in <root>/.claude/settings.json,
+# so every hook runs twice — once from there, once machine-wide — until the user
+# removes it with \`devflow uninstall --scope local\`. One line says so.
+#
+# Recognised by devflow's exact hook-ownership shape (D-EXACT-HOOK-OWNER,
+# src/targets/claude-code/hooks.ts): a command string ENDING in
+# \`/scripts/hooks/run-hook <marker>\` for a marker devflow registered, or in one of
+# the direct \`.sh\` hooks of v1 — never a mere mention of a marker word. The list
+# is closed on purpose: no new project-local install can be made, so the markers
+# such an install carries are exactly these.
+#
+# Project work only (PROJECT_OK: a git project that is not HOME, whose .claude IS
+# the machine-wide one), and only for a session that starts fresh. Cost: one stat
+# on every session; a bounded builtin read only when that settings.json exists;
+# forks only when it matches.
+LEGACY_SETTINGS_FILE="$PROJECT_ROOT/.claude/settings.json"
+if [ -n "$PROJECT_OK" ] && [ -f "$LEGACY_SETTINGS_FILE" ]; then
+  _SC_LEGACY_TEXT=""
+  IFS= read -r -d '' -n 65536 _SC_LEGACY_TEXT 2>/dev/null < "$LEGACY_SETTINGS_FILE"
+  _SC_LEGACY_MARKERS='capture-prompt|capture-turn|capture-question|session-start-context|session-start-memory|pre-compact-memory|memory-worker|preamble|session-start-orchestrator|session-start-classification|ambient-prompt|ensure-proxy|spawn-dream-worker|prompt-capture-memory|stop-update-memory|stop-update-learning|session-end-learning|session-end-decisions|session-end-knowledge-refresh|sidecar-dispatch|sidecar-capture|sidecar-evaluate|dream-dispatch|dream-capture|dream-evaluate'
+  _SC_LEGACY_RE="/scripts/hooks/(run-hook ($_SC_LEGACY_MARKERS)|(stop-update-memory|session-start-memory|pre-compact-memory|ambient-prompt)\\.sh)[[:space:]]*\""
+  if [[ $_SC_LEGACY_TEXT =~ $_SC_LEGACY_RE ]]; then
+    # The machine-wide Claude Code directory is never "legacy", even when a repo
+    # holds it ($CLAUDE_CONFIG_DIR, honoured only when absolute).
+    _SC_MACHINE_CLAUDE="$HOME/.claude"
+    case "${CLAUDE_CONFIG_DIR:-}" in /*) _SC_MACHINE_CLAUDE="$CLAUDE_CONFIG_DIR" ;; esac
+    _SC_LEGACY_REAL=$(cd -P "$PROJECT_ROOT/.claude" 2>/dev/null && pwd -P) || _SC_LEGACY_REAL=""
+    _SC_MACHINE_REAL=$(cd -P "$_SC_MACHINE_CLAUDE" 2>/dev/null && pwd -P) || _SC_MACHINE_REAL=""
+    _SC_LEGACY_SOURCE=$(printf '%s' "$INPUT" | json_field "source" "")
+    if [ -n "$_SC_LEGACY_REAL" ] && [ "$_SC_LEGACY_REAL" != "$_SC_MACHINE_REAL" ]; then
+      case "$_SC_LEGACY_SOURCE" in
+        startup|clear)
+          dbg "legacy project-local install notice emitted"
+          LEGACY_SECTION='Devflow notice: this repository still holds a retired project-local devflow install (its .claude/settings.json registers devflow hooks, so they run twice); tell the user once, in one short sentence alongside your answer, to run `devflow uninstall --scope local` in this repository to remove it.'
+          if [ -n "$CONTEXT" ]; then
+            CONTEXT="${CONTEXT}
+
+${LEGACY_SECTION}"
+          else
+            CONTEXT="$LEGACY_SECTION"
+          fi
+          ;;
+      esac
     fi
   fi
 fi

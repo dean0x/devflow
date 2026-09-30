@@ -24,7 +24,9 @@ import { HOOK_RUN_ALLOWANCE_MS, HOOKS_DIR, NODE_EXEC_STALL_MS, runHook } from '.
 //   - the machine default, from the `.tracker.enabled` sentinel — the provider
 //     NAME, read with the `read` builtin, never the manifest;
 //   - the project's own selection — ONE resolve-settings.cjs fork, taken only when
-//     a bounded read of .devflow/project.json shows a "tracker" key.
+//     a bounded read of .devflow/project.json shows a "tracker" key;
+//   - the personal narrowing in .devflow/config.json — the same fork, taken when
+//     the sentinel names a provider and a bounded read of config.json shows one.
 //
 // Independent gates stand in front of the directive, each asserted here on its
 // own:
@@ -784,6 +786,80 @@ describe('session-start-context: tracker setup directive (Section 3)', () => {
     }
   }, HOOK_RUN_ALLOWANCE_MS + NODE_EXEC_STALL_MS);
 
+  /** A real commit in `repo` (identity passed inline — the test HOME has no git config). */
+  function commitAll(repo: string, files: readonly string[]): void {
+    const git = (args: string[]) => spawnSync('git', ['-c', 'user.name=devflow-test', '-c', 'user.email=t@example.invalid', ...args], {
+      cwd: repo, encoding: 'utf-8',
+    });
+    const add = git(['add', '-f', ...files]);
+    expect(add.status, `git add failed: ${add.stderr}`).toBe(0);
+    const commit = git(['commit', '-q', '-m', 'fixture']);
+    expect(commit.status, `git commit failed: ${commit.stderr}`).toBe(0);
+  }
+
+  it('#406: a personal config.json narrowing to github silences a jira machine in that repository', () => {
+    // No project.json at all: before, only a project.json tracker key forked the
+    // resolver, so the directive still said Provider: jira here.
+    const repo = makeGitRepo('devflow-ctx-tracker-personal-');
+    try {
+      fs.writeFileSync(path.join(repo, '.devflow', 'config.json'), '{"tracker":"github"}');
+      seedTracker(homeDir, { provider: 'jira' });
+      const { stdout, exitCode } = run(sessionStart(repo));
+      expect(exitCode).toBe(0);
+      expect(emittedNothing(stdout)).toBe(true);
+      expect(fs.existsSync(attemptsOf(homeDir, 'jira')), 'no attempt is spent').toBe(false);
+    } finally {
+      fs.rmSync(repo, { recursive: true, force: true });
+    }
+  }, HOOK_RUN_ALLOWANCE_MS + NODE_EXEC_STALL_MS);
+
+  it('a personal config.json naming the machine\'s own provider keeps the directive', () => {
+    const repo = makeGitRepo('devflow-ctx-tracker-personal-same-');
+    try {
+      fs.writeFileSync(path.join(repo, '.devflow', 'config.json'), '{"tracker":"jira"}');
+      seedTracker(homeDir, { provider: 'jira' });
+      const ctx = contextOf(run(sessionStart(repo)).stdout);
+      expect(ctx).toContain(BANNER);
+      expect(ctx).toContain('Provider: jira.');
+    } finally {
+      fs.rmSync(repo, { recursive: true, force: true });
+    }
+  }, HOOK_RUN_ALLOWANCE_MS + NODE_EXEC_STALL_MS);
+
+  it('D-PERSONAL-UNTRACKED: a config.json git TRACKS is ignored, so its github narrowing does not silence jira', () => {
+    const repo = makeGitRepo('devflow-ctx-tracker-personal-tracked-');
+    try {
+      fs.writeFileSync(path.join(repo, '.devflow', 'config.json'), '{"tracker":"github"}');
+      commitAll(repo, ['.devflow/config.json']);
+      seedTracker(homeDir, { provider: 'jira' });
+      const ctx = contextOf(run(sessionStart(repo)).stdout);
+      expect(ctx).toContain(BANNER);
+      expect(ctx).toContain('Provider: jira.');
+    } finally {
+      fs.rmSync(repo, { recursive: true, force: true });
+    }
+  }, HOOK_RUN_ALLOWANCE_MS + NODE_EXEC_STALL_MS);
+
+  it('[DR-10] a config.json with a tracker key forks nothing on a github machine — it can only narrow', () => {
+    const shim = buildRecordingShim(tmpDir);
+    const withShim = { PATH: `${shim.dir}:${process.env.PATH ?? ''}` };
+    const repo = makeGitRepo('devflow-ctx-tracker-personal-gh-');
+    try {
+      seedTracker(homeDir, { provider: 'github', sentinel: false });
+      run(sessionStart(repo), homeDir, withShim);
+      const baseline = collectShimInvocations(shim.logPath).length;
+      expect(baseline).toBeGreaterThan(0);
+
+      fs.writeFileSync(path.join(repo, '.devflow', 'config.json'), '{"tracker":"jira"}');
+      fs.rmSync(shim.logPath);
+      const { stdout } = run(sessionStart(repo), homeDir, withShim);
+      expect(collectShimInvocations(shim.logPath).length - baseline).toBe(0);
+      expect(emittedNothing(stdout)).toBe(true);
+    } finally {
+      fs.rmSync(repo, { recursive: true, force: true });
+    }
+  }, HOOK_RUN_ALLOWANCE_MS * 2);
+
   it('a project.json selecting github silences a jira machine in that repository', () => {
     const repo = makeGitRepo('devflow-ctx-tracker-gh-');
     try {
@@ -869,7 +945,8 @@ describe('session-start-context: tracker setup directive (Section 3)', () => {
     );
 
     const project = path.join(tmpDir, 'proj');
-    fs.mkdirSync(project);
+    // Its own `.git`: a project root is a toplevel (D-HOOKS-TOPLEVEL-ONLY).
+    fs.mkdirSync(path.join(project, '.git'), { recursive: true });
     const home = path.join(tmpDir, 'home');
     fs.mkdirSync(path.join(home, '.git'), { recursive: true });
     const nonGit = fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-tp22-nongit-'));
@@ -903,16 +980,17 @@ describe('session-start-context: tracker setup directive (Section 3)', () => {
    * one the runtime differential counts, but the property the section buys is
    * wider: the GitHub path — every user until someone chooses otherwise — reaches
    * the early exit having touched nothing but `[ -f ]` tests. So each READ must
-   * sit behind an existence test of the very file it reads, and only two files
-   * may be read at all: the sentinel and the project's project.json. The ONE fork
-   * the section may make before the gate is the settings resolver.
+   * sit behind an existence test of the very file it reads, and only three files
+   * may be read at all: the sentinel, the project's project.json and its personal
+   * config.json. The ONE fork the section may make before the gate is the
+   * settings resolver.
    */
   const PRE_GATE_WORK: ReadonlyArray<readonly [string, RegExp]> = [
     ['a command substitution', /\$\((?![^\n]*resolve-settings\.cjs)/],
     ['a backtick substitution', /`/],
     ['a JSON field read', /json_field/],
-    ['an input redirect', /(?<![<>0-9])<(?!<)(?!\s*"\$TRACKER_(SENTINEL|PROJECT_FILE)")/],
-    ['the read builtin', /\bread\b(?![^\n]*<\s*"\$TRACKER_(SENTINEL|PROJECT_FILE)")/],
+    ['an input redirect', /(?<![<>0-9])<(?!<)(?!\s*"\$TRACKER_(SENTINEL|PROJECT_FILE|PERSONAL_FILE)")/],
+    ['the read builtin', /\bread\b(?![^\n]*<\s*"\$TRACKER_(SENTINEL|PROJECT_FILE|PERSONAL_FILE)")/],
     ['a sourced file', /^\s*(?:source|\.)\s+\S/],
   ];
 
@@ -1786,7 +1864,8 @@ describe('session-start-context: tracker setup directive (Section 3)', () => {
   for (const { label, infix } of HOSTILE_PATH_CHARS) {
     it(`no tracker directive when the project root carries ${label}`, () => {
       const hostile = path.join(tmpDir, `proj${infix}${PATH_PAYLOAD}`);
-      fs.mkdirSync(hostile, { recursive: true });
+      // Its own `.git`: a project root is a toplevel (D-HOOKS-TOPLEVEL-ONLY).
+      fs.mkdirSync(path.join(hostile, '.git'), { recursive: true });
       seedDecisionsTldr(hostile);
       seedTracker(homeDir, { provider: 'jira' });
 
@@ -1820,7 +1899,8 @@ describe('session-start-context: tracker setup directive (Section 3)', () => {
     // Both hostile tables above would pass against a hook that had simply stopped
     // emitting. This is the probe that says they did not.
     const cleanRoot = path.join(tmpDir, 'proj-clean');
-    fs.mkdirSync(cleanRoot, { recursive: true });
+    // Its own `.git`: a project root is a toplevel (D-HOOKS-TOPLEVEL-ONLY).
+    fs.mkdirSync(path.join(cleanRoot, '.git'), { recursive: true });
     seedDecisionsTldr(cleanRoot);
     seedTracker(homeDir, { provider: 'jira' });
     const viaRoot = contextOf(run(sessionStart(cleanRoot)).stdout);
@@ -1837,6 +1917,8 @@ describe('session-start-context: tracker setup directive (Section 3)', () => {
 
   it('the same guard suppresses the LEARNING directive — one control, both sinks', () => {
     const hostile = path.join(tmpDir, `proj\n${PATH_PAYLOAD}`);
+    // Its own `.git`: a project root is a toplevel (D-HOOKS-TOPLEVEL-ONLY).
+    fs.mkdirSync(path.join(hostile, '.git'), { recursive: true });
     fs.mkdirSync(path.join(hostile, '.devflow', 'learning'), { recursive: true });
     seedDecisionsTldr(hostile);
     fs.writeFileSync(
@@ -1854,6 +1936,7 @@ describe('session-start-context: tracker setup directive (Section 3)', () => {
 
     // Non-vacuity: the identical fixture under a clean root does emit it.
     const clean = path.join(tmpDir, 'proj-learning-clean');
+    fs.mkdirSync(path.join(clean, '.git'), { recursive: true });
     fs.mkdirSync(path.join(clean, '.devflow', 'learning'), { recursive: true });
     fs.writeFileSync(
       path.join(clean, '.devflow', 'learning', '.pending-turns.jsonl'),
@@ -1925,6 +2008,8 @@ describe('session-start-context: tracker setup directive (Section 3)', () => {
     // never embeds $TRACKER_DEVFLOW_DIR, so its shape must not silence it — while
     // Section 3, which does embed it, must still refuse.
     const cleanRoot = path.join(tmpDir, 'clean-root');
+    // Its own `.git`: a project root is a toplevel (D-HOOKS-TOPLEVEL-ONLY).
+    fs.mkdirSync(path.join(cleanRoot, '.git'), { recursive: true });
     fs.mkdirSync(path.join(cleanRoot, '.devflow', 'learning'), { recursive: true });
     seedDecisionsTldr(cleanRoot);
     fs.writeFileSync(
@@ -1989,6 +2074,8 @@ describe('session-start-context: tracker setup directive (Section 3)', () => {
   it('a `feat+x` root — the slash-branch worktree name — gets the learning directive', () => {
     // Claude Code names the worktree for `feat/x` as `feat+x`; the gate admits `+`.
     const plus = path.join(tmpDir, 'feat+extend-flags-registry');
+    // Its own `.git`: a project root is a toplevel (D-HOOKS-TOPLEVEL-ONLY).
+    fs.mkdirSync(path.join(plus, '.git'), { recursive: true });
     fs.mkdirSync(path.join(plus, '.devflow', 'learning'), { recursive: true });
     fs.writeFileSync(
       path.join(plus, '.devflow', 'learning', '.pending-turns.jsonl'),
@@ -2011,6 +2098,8 @@ describe('session-start-context: tracker setup directive (Section 3)', () => {
   for (const [label, infix] of OUTSIDE_ALLOWLIST) {
     it(`a path carrying a ${label} is refused by the positive shape gate`, () => {
       const hostile = path.join(tmpDir, `${infix}-root`);
+      // Its own `.git`: a project root is a toplevel (D-HOOKS-TOPLEVEL-ONLY).
+      fs.mkdirSync(path.join(hostile, '.git'), { recursive: true });
       fs.mkdirSync(path.join(hostile, '.devflow', 'learning'), { recursive: true });
       seedDecisionsTldr(hostile);
       fs.writeFileSync(
