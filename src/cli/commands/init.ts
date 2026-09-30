@@ -4,7 +4,7 @@ import * as path from 'path';
 import { execSync } from 'child_process';
 import * as p from '@clack/prompts';
 import color from 'picocolors';
-import { getInstallationPaths } from '../../targets/claude-code/claude-paths.js';
+import { resolveInstallationPaths } from '../../targets/claude-code/claude-paths.js';
 import { getGitRoot } from '../../core/git.js';
 import { getLedgerRoot } from '../../core/ledger-root.js';
 import { installViaFileCopy, composeScripts, type InstallReport } from '../../targets/claude-code/installer.js';
@@ -671,11 +671,16 @@ export const initCommand = new Command('init')
       process.exit(1);
     }
 
+    // The install locations, resolved once. They fail only with no home directory.
+    const resolvedPaths = resolveInstallationPaths();
+    if (!resolvedPaths.ok) {
+      p.log.error(resolvedPaths.error);
+      process.exit(1);
+    }
+    const { claudeDir, devflowDir } = resolvedPaths.value;
+
     // --hud-only: install only HUD (skip plugins, hooks, extras)
     if (options.hudOnly) {
-      // Resolve paths
-      const { claudeDir, devflowDir } = getInstallationPaths();
-
       // Save HUD config
       const existingHud = loadHudConfig();
       saveHudConfig({ enabled: true, detail: existingHud.detail });
@@ -725,28 +730,19 @@ export const initCommand = new Command('init')
       return;
     }
 
-    // ── Hoist reads: resolve paths early to compute InitSeed for pre-seeded prompts (Phase 4) ──
-    // Best-effort: if path resolution fails here, seed falls back to fresh-install defaults.
-    // The authoritative error gate for failed path resolution remains at the install-begins
-    // spinner (see "Resolving paths" below). Hoisted above multiselect so Phase 4 can
-    // pre-seed plugin/flag/feature prompts.
+    // ── Hoisted reads: the prior state that seeds the prompts (InitSeed, Phase 4) ──
     let existingManifest: ManifestData | null = null;
-    let earlyProjectConfig: FeatureConfig | null = null;
-    let earlySettingsJson: string | null = null;
-    let earlyGitRoot: string | null = null;
     try {
-      const earlyPaths = getInstallationPaths();
-      existingManifest = await readManifest(earlyPaths.devflowDir);
-      earlyGitRoot = await getGitRoot();
-      if (earlyGitRoot) {
-        earlyProjectConfig = await readConfigIfPresent(earlyGitRoot);
-      }
-      try {
-        earlySettingsJson = await fs.readFile(
-          path.join(earlyPaths.claudeDir, 'settings.json'), 'utf-8',
-        );
-      } catch { /* settings.json absent — treated as empty */ }
-    } catch { /* path resolution deferred to install-begins gate */ }
+      existingManifest = await readManifest(devflowDir);
+    } catch { /* unreadable manifest — seeded as a fresh install */ }
+    const gitRoot = await getGitRoot();
+    const earlyProjectConfig: FeatureConfig | null = gitRoot
+      ? await readConfigIfPresent(gitRoot)
+      : null;
+    let earlySettingsJson: string | null = null;
+    try {
+      earlySettingsJson = await fs.readFile(path.join(claudeDir, 'settings.json'), 'utf-8');
+    } catch { /* settings.json absent — treated as empty */ }
     // --reset: factory reset — treat as a fresh install for all seeding and routing decisions.
     // The REAL existingManifest / earlySettingsJson are still used below for installedAt
     // preservation, upgrade messaging, and security deny-state detection. resolveResetGatedInputs
@@ -985,7 +981,7 @@ export const initCommand = new Command('init')
     // --reset empties the settings snapshot via resolveResetGatedInputs so seed.flags['view-mode']
     // collapses to 'default', and explicit=true makes it take effect at settings write time.
     let viewModeExplicit = !!options.reset;
-    let claudeignoreEnabled = !!earlyGitRoot;
+    let claudeignoreEnabled = !!gitRoot;
     let discoveredProjects: string[] = [];
     let safeDeleteAction: 'install' | 'upgrade' | 'skip' = 'skip';
     let safeDeleteBlock: string | null = null;
@@ -1121,11 +1117,11 @@ export const initCommand = new Command('init')
       }
 
       // Run independent I/O in parallel: project discovery + safe-delete version check
-      const needsDiscovery = earlyGitRoot !== null;
+      const needsDiscovery = gitRoot !== null;
       const needsVersionCheck = safeDeleteBlock && profilePath;
 
       const [discoveredResult, installedVersionResult] = await Promise.all([
-        needsDiscovery ? discoverProjectGitRoots(getInstallationPaths().claudeDir) : Promise.resolve([] as string[]),
+        needsDiscovery ? discoverProjectGitRoots(claudeDir) : Promise.resolve([] as string[]),
         needsVersionCheck ? getInstalledVersion(profilePath) : Promise.resolve(0),
       ]);
 
@@ -1428,8 +1424,8 @@ export const initCommand = new Command('init')
       }
 
       // .claudeignore prompt
-      if (earlyGitRoot) {
-        discoveredProjects = await discoverProjectGitRoots(getInstallationPaths().claudeDir);
+      if (gitRoot) {
+        discoveredProjects = await discoverProjectGitRoots(claudeDir);
         p.note(
           'Scans all projects Claude has worked on and creates a\n' +
           '.claudeignore in each git repository. Excludes secrets,\n' +
@@ -1556,25 +1552,8 @@ export const initCommand = new Command('init')
     // ╰──────────────────────────────────────────────────────────╯
 
     const s = p.spinner();
-    s.start('Resolving paths');
+    s.start('Installing');
 
-    // Get installation paths
-    let claudeDir: string;
-    let devflowDir: string;
-    let gitRoot: string | null = null;
-
-    try {
-      const paths = getInstallationPaths();
-      claudeDir = paths.claudeDir;
-      devflowDir = paths.devflowDir;
-      gitRoot = earlyGitRoot;
-    } catch (error) {
-      s.stop('Path resolution failed');
-      p.log.error(`Path configuration error: ${error instanceof Error ? error.message : error}`);
-      process.exit(1);
-    }
-
-    // existingManifest was read early above (hoisted for seed computation); use it here for upgrade detection
     if (existingManifest) {
       const upgrade = detectUpgrade(version, existingManifest.version);
       if (upgrade.isUpgrade) {

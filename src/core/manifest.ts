@@ -29,10 +29,9 @@ export interface ManifestData {
   version: string;
   plugins: string[];
   /**
-   * Always `'user'` (D-MANIFEST-SCOPE-PINNED): the field is kept, not removed, so
-   * a manifest this version writes still parses under an older devflow whose
-   * reader requires it (downgrade safety). {@link readManifest} ignores whatever
-   * is on disk — a missing or `'local'` value from the retired repo-local scope
+   * Always `'user'` (D-MANIFEST-SCOPE-PINNED): an older devflow's reader requires
+   * the field, so every manifest this version writes carries it (downgrade
+   * safety). {@link readManifest} ignores the value on disk — any value, or none,
    * reads with every feature intact — and {@link writeManifest} always records
    * `'user'`.
    */
