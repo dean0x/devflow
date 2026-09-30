@@ -42,6 +42,8 @@ import {
   runResolver,
   scenarioCalls,
   scriptedExec,
+  warmFakeBin,
+  WARM_HOOK_TIMEOUT_MS,
   type ExecFn,
   type FakeBin,
   type RunResult,
@@ -161,7 +163,9 @@ beforeAll(() => {
   binRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-evidence-bin-'));
   fakeBin = createFakeBin(binRoot);
   ghOnlyBin = createFakeBin(binRoot, ['gh']);
-});
+  warmFakeBin(fakeBin, binRoot);
+  warmFakeBin(ghOnlyBin, binRoot);
+}, WARM_HOOK_TIMEOUT_MS * 2);
 
 afterAll(() => {
   fs.rmSync(binRoot, { recursive: true, force: true });

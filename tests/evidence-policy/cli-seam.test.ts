@@ -57,6 +57,8 @@ import {
   SETTINGS_SCRIPT,
   buildScriptedShim,
   createFakeBin,
+  warmFakeBin,
+  WARM_HOOK_TIMEOUT_MS,
   realGit,
   scenarioCalls,
   scopedEnv,
@@ -960,7 +962,8 @@ describe('devflow compliance — the built CLI (AC-9, AC-10)', () => {
   beforeAll(() => {
     cli = requireBuiltCli();
     fakeGh = createFakeBin(tmp, ['gh']);
-  });
+    warmFakeBin(fakeGh, tmp);
+  }, WARM_HOOK_TIMEOUT_MS);
 
   /** A fresh temp HOME (never the developer's) holding a manifest with this compliance state. */
   function makeHome(compliance: { enabled: boolean; frameworks: string[] }): string {

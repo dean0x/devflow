@@ -28,6 +28,8 @@ import {
   RESOLVER_SCRIPT,
   buildScriptedShim,
   createFakeBin,
+  warmFakeBin,
+  WARM_HOOK_TIMEOUT_MS,
   runResolver,
   scenarioCalls,
   scriptedExec,
@@ -465,7 +467,8 @@ let fakeBin: FakeBin;
 beforeAll(() => {
   binRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-project-json-bin-'));
   fakeBin = createFakeBin(binRoot);
-});
+  warmFakeBin(fakeBin, binRoot);
+}, WARM_HOOK_TIMEOUT_MS);
 
 afterAll(() => {
   fs.rmSync(binRoot, { recursive: true, force: true });
