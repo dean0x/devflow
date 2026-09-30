@@ -44,7 +44,7 @@ import { SKILL_REFS_SKILL_NAME } from '../../core/mds-variants.js';
 // Settings/HookMatcher types used by hook utilities — each in their own module
 import { addHudStatusLine, removeHudStatusLine } from './hud.js';
 import { loadConfig as loadHudConfig, saveConfig as saveHudConfig } from '../../hud/config.js';
-import { readManifest, writeManifest, resolvePluginList, detectUpgrade, type ManifestData } from '../../core/manifest.js';
+import { readManifest, writeManifest, resolvePluginList, detectUpgrade, type ManifestData, type UpgradeInfo } from '../../core/manifest.js';
 import { convergeFlagsIntoSettings, countActiveFlags, readViewMode, type FlagsRecord } from '../../core/flags.js';
 import { addContextHook, removeContextHook, hasContextHook } from './context.js';
 import { writeSettingsFileAtomic } from '../../core/fs-atomic.js';
@@ -613,6 +613,23 @@ export function resolveRetiredScopeOption(scope: string | undefined): RetiredSco
     kind: 'refuse',
     message: `Unknown --scope value "${scope}": Devflow installs machine-wide only (omit --scope).`,
   };
+}
+
+/**
+ * The warning init prints when the running CLI is older than the one that last
+ * installed this machine, or null. Pure.
+ *
+ * D-INIT-DOWNGRADE-WARN: a downgrade is allowed — an older CLI installs a
+ * consistent older devflow — but never silent: its install sweeps every skill,
+ * agent and command the newer version added as an orphan, and settings the newer
+ * version wrote may mean nothing to it. The warning names both versions and how
+ * to get back; nothing blocks.
+ */
+export function formatDowngradeWarning(upgrade: UpgradeInfo, version: string): string | null {
+  if (!upgrade.isDowngrade || upgrade.previousVersion === null) return null;
+  return `Downgrading: this machine was installed by devflow v${upgrade.previousVersion}, newer than this CLI (v${version}). ` +
+    'Assets only the newer version ships will be removed. To keep them, run the newer CLI instead ' +
+    '(npx devflow-kit@latest init).';
 }
 
 /**
@@ -1589,16 +1606,16 @@ export const initCommand = new Command('init')
     // │  All prompts collected — installation begins             │
     // ╰──────────────────────────────────────────────────────────╯
 
+    const upgrade = existingManifest ? detectUpgrade(version, existingManifest.version) : null;
+    const downgradeWarning = upgrade === null ? null : formatDowngradeWarning(upgrade, version);
+    if (downgradeWarning !== null) p.log.warn(downgradeWarning);
+
     const s = p.spinner();
     s.start('Installing');
-
-    if (existingManifest) {
-      const upgrade = detectUpgrade(version, existingManifest.version);
-      if (upgrade.isUpgrade) {
-        s.message(`Upgrading from v${upgrade.previousVersion} to v${version}`);
-      } else if (upgrade.isSameVersion) {
-        s.message('Reinstalling same version');
-      }
+    if (upgrade?.isUpgrade) {
+      s.message(`Upgrading from v${upgrade.previousVersion} to v${version}`);
+    } else if (upgrade?.isSameVersion) {
+      s.message('Reinstalling same version');
     }
 
     // Detect current deny list state in user settings (read-only; write happens in security step)

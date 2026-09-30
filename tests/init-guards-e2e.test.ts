@@ -6,6 +6,9 @@
  *   writes no per-repository file: no `~/.devflow/config.json` (the machine
  *   root's), no `~/.claudeignore`, no devflow block in `~/.gitignore`.
  *
+ *   D-INIT-DOWNGRADE-WARN — when the manifest was written by a newer devflow
+ *   than the running CLI, init warns, naming both versions, and still installs.
+ *
  * Every spawn runs under a temp HOME built by `sandboxEnv`, which refuses a real
  * home before anything runs (PF-060). Requires a build (`requireBuiltCli`).
  */
@@ -15,8 +18,10 @@ import { spawnSync, execFileSync } from 'child_process';
 import { existsSync, promises as fs } from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import { requireBuiltCli, sandboxEnv } from './helpers.js';
+import { makeManifest, requireBuiltCli, sandboxEnv } from './helpers.js';
 import { withoutHomeRoots } from '../src/core/same-location.js';
+import { formatDowngradeWarning } from '../src/cli/commands/init.js';
+import { detectUpgrade } from '../src/core/manifest.js';
 
 const CLI = requireBuiltCli();
 
@@ -98,4 +103,45 @@ describe('withoutHomeRoots', () => {
       await fs.unlink(link);
     }
   });
+});
+
+describe('D-INIT-DOWNGRADE-WARN', () => {
+  it('formatDowngradeWarning names both versions only for a downgrade', () => {
+    const warning = formatDowngradeWarning(detectUpgrade('2.5.0', '3.1.0'), '2.5.0');
+    expect(warning).toContain('v3.1.0');
+    expect(warning).toContain('v2.5.0');
+    expect(formatDowngradeWarning(detectUpgrade('3.1.0', '2.5.0'), '3.1.0')).toBeNull();
+    expect(formatDowngradeWarning(detectUpgrade('2.5.0', '2.5.0'), '2.5.0')).toBeNull();
+    expect(formatDowngradeWarning(detectUpgrade('2.5.0', 'not-a-version'), '2.5.0')).toBeNull();
+  });
+
+  it('init over a manifest from a newer devflow warns and still installs', async () => {
+    await fs.mkdir(path.join(home, '.devflow'), { recursive: true });
+    await fs.writeFile(
+      path.join(home, '.devflow', 'manifest.json'),
+      JSON.stringify(makeManifest({ version: '99.0.0' }), null, 2),
+    );
+    const nonGit = await fs.mkdtemp(path.join(os.tmpdir(), 'df-init-guards-cwd-'));
+    try {
+      const run = runInit(nonGit);
+      expect(run.status, run.out).toBe(0);
+      expect(run.out).toContain('Downgrading: this machine was installed by devflow v99.0.0');
+    } finally {
+      await fs.rm(nonGit, { recursive: true, force: true });
+    }
+  }, SUBPROCESS_TIMEOUT_MS);
+
+  it('a same-version re-init prints no downgrade warning', async () => {
+    const version = (JSON.parse(await fs.readFile(path.join(import.meta.dirname, '..', 'package.json'), 'utf-8')) as { version: string }).version;
+    await fs.mkdir(path.join(home, '.devflow'), { recursive: true });
+    await fs.writeFile(path.join(home, '.devflow', 'manifest.json'), JSON.stringify(makeManifest({ version }), null, 2));
+    const nonGit = await fs.mkdtemp(path.join(os.tmpdir(), 'df-init-guards-cwd-'));
+    try {
+      const run = runInit(nonGit);
+      expect(run.status, run.out).toBe(0);
+      expect(run.out).not.toContain('Downgrading');
+    } finally {
+      await fs.rm(nonGit, { recursive: true, force: true });
+    }
+  }, SUBPROCESS_TIMEOUT_MS);
 });
