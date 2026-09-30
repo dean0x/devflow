@@ -22,7 +22,7 @@
 
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { spawnSync } from 'child_process'
-import { mkdirSync, writeFileSync } from 'fs'
+import { mkdirSync, readFileSync, writeFileSync } from 'fs'
 import * as path from 'path'
 import type { Command } from 'commander'
 import { requireBuiltCli } from './helpers.js'
@@ -93,6 +93,32 @@ const seedLearningState = (sb: Sandbox): void => {
   seedFile(sb, '.devflow/learning/.pending-turns.jsonl', `${JSON.stringify({ role: 'user', content: 'fence', ts: 1 })}\n`)
 }
 
+function rewriteHomeJson(sb: Sandbox, rel: string, edit: (json: Record<string, unknown>) => void): void {
+  const abs = path.join(sb.home, rel)
+  const json = JSON.parse(readFileSync(abs, 'utf-8')) as Record<string, unknown>
+  edit(json)
+  writeFileSync(abs, `${JSON.stringify(json, null, 2)}\n`)
+}
+
+/**
+ * The state `init --security none` leaves in HOME: no deny list in the user
+ * settings and `none` in the manifest. Seeded rather than installed because
+ * `init --security none` also strips the Devflow deny list from the platform
+ * managed-settings file, an absolute system path the sandbox cannot redirect.
+ */
+const seedNoDenyList = (sb: Sandbox): void => {
+  rewriteHomeJson(sb, '.claude/settings.json', settings => {
+    const permissions = settings.permissions as Record<string, unknown> | undefined
+    // Non-vacuity: init's `--security user` really installed the list being removed.
+    const deny = permissions?.deny
+    expect(Array.isArray(deny) && deny.length > 0).toBe(true)
+    if (permissions) delete permissions.deny
+  })
+  rewriteHomeJson(sb, '.devflow/manifest.json', manifest => {
+    (manifest.features as Record<string, unknown>).security = 'none'
+  })
+}
+
 /**
  * One row per toggle action, in run order. Each enable/disable (and set) pair
  * leaves the install where it found it.
@@ -140,6 +166,8 @@ export const FENCE_ROWS: readonly FenceRow[] = [
 
   // Already installed by init's `--security user`: re-enabling may restamp the manifest only.
   { args: ['security', '--enable', '--user'], allow: [SETTINGS, MANIFEST], mustWrite: false },
+  // From no deny list: enabling installs it in the user settings and records `user`.
+  { args: ['security', '--enable', '--user'], allow: [SETTINGS, MANIFEST], mustWrite: true, seed: seedNoDenyList },
   { args: ['security', '--status'], allow: NONE, mustWrite: false },
 
   { args: ['flags', '--disable', 'tui'], allow: [SETTINGS, MANIFEST], mustWrite: true },
@@ -173,7 +201,11 @@ export const UNFENCED_COMMANDS: Readonly<Record<string, string>> = {
 
 /** Toggle actions a command defines that have no row, each with the reason. */
 export const UNFENCED_ACTIONS: Readonly<Record<string, string>> = {
-  'security --disable': 'removes the deny list from the managed-settings file too, an absolute system path the sandbox cannot redirect',
+  'security --disable':
+    'after stripping the user settings it removes every Devflow deny entry from the platform managed-settings file ' +
+    '(getManagedSettingsPath: /Library/Application Support/ClaudeCode or /etc/claude-code), an absolute system path ' +
+    'with no seam the sandbox can redirect; on a machine whose managed file carries the deny list, a run would strip ' +
+    'that machine\'s protection (or prompt for sudo), and the walk could not see the write anyway',
   'proxy --enable': 'starts the relay process, whose writes outlive the command',
   'proxy --disable': 'stops the relay process started by --enable',
   'safe-delete --enable': 'writes the shell profile only when the platform trash tool is on PATH, a machine fact the table cannot pin',
@@ -277,7 +309,7 @@ describe('write-set fence coverage', () => {
   })
 
   it('the table and its footprint stay registered in numeric-floors.json', () => {
-    expect(FENCE_ROWS.length).toBeGreaterThanOrEqual(51)
+    expect(FENCE_ROWS.length).toBeGreaterThanOrEqual(52)
     expect(new Set(FENCE_ROWS.map(row => row.args[0])).size).toBeGreaterThanOrEqual(15)
     expect(allowlistSize(FENCE_ROWS)).toBeLessThanOrEqual(11)
   })
