@@ -322,7 +322,7 @@ describe('devflow memory|learning|knowledge --enable/--disable are machine-wide'
     expect(JSON.parse(await readSettings())).toEqual(JSON.parse(viaCommand));
   }, MULTI_RUN_TIMEOUT_MS);
 
-  it('memory --enable registers the hooks after capture-turn (append-before-spawn) and resumes capture', async () => {
+  it('memory --enable registers the hooks after capture-turn (the position init uses) and resumes capture', async () => {
     runInit(repoA, '--recommended', '--no-memory');
 
     const enabled = runCli(nonGit, 'memory', '--enable');

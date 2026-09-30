@@ -5,9 +5,9 @@
 # learning queue, each independently gated by its own feature flag (AC-F4). Runs
 # the decisions usage scanner (D29 grep-first) regardless of which queue is
 # gated on/off -- memory-disabled projects still run the usage scanner. The
-# 120s-throttle/nohup-spawn block lives in memory-worker, registered
-# separately in the Stop hook array AFTER this hook so append-before-spawn
-# ordering is preserved by array position, not by anything in this script.
+# 120s-throttle/nohup-spawn block lives in memory-worker, a separate Stop
+# hook that Claude Code runs in parallel with this one; the worker tolerates a
+# queue this hook has not appended to yet (D-QUEUE-NO-ORPHAN-DELETE).
 # This hook never spawns a process (AC-F5).
 
 # Safe no-op fallback: must exist before set -e and before hook-bootstrap is sourced.

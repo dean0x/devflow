@@ -36,10 +36,11 @@ import { loadSettingsModule, narrowedSwitchLabel, personalConfigTrackedWarning }
  * at the hook-registration level), and decisions detection is a SessionStart-spawned
  * detached worker rather than a SessionEnd hook (see legacy-hooks.ts).
  *
- * Stop-array ordering contract: memory-worker MUST be registered AFTER capture-turn
- * in the Stop hook array (append-before-spawn — memory-worker's throttle/spawn
- * decision assumes the current turn was already appended by capture-turn earlier
- * in the same Stop event). Enforced by init.ts's registration order, not here.
+ * Stop-event concurrency: Claude Code runs one event's hooks in parallel, so
+ * memory-worker can spawn background-memory-update before capture-turn has
+ * appended this turn's assistant row. The worker tolerates that — a queue that
+ * holds only user rows is left in place and the LLM run skipped
+ * (D-QUEUE-NO-ORPHAN-DELETE) — so nothing here depends on hook order.
  */
 const MEMORY_HOOK_CONFIG: Record<string, string> = {
   Stop: 'memory-worker',
@@ -157,10 +158,12 @@ export function countMemoryHooks(input: string | Settings): number {
  * remove-then-add, which also upgrades an older hook format (e.g. `.sh` →
  * `run-hook`) in place.
  *
- * Stop-array ordering (AC-C2): memory-worker is appended after whatever the
- * Stop array already holds, so it lands after capture-turn as long as the
- * capture hooks are registered first — init registers them earlier in the same
- * pass, and on a standalone toggle they are already present.
+ * Stop-array position (AC-C2): memory-worker is appended after whatever the
+ * Stop array already holds, so it lands after capture-turn — init registers the
+ * capture hooks earlier in the same pass, and on a standalone toggle they are
+ * already present. The position keeps settings.json identical across init and
+ * the toggle; it sequences nothing at run time, where the Stop hooks run in
+ * parallel.
  */
 export function convergeMemoryHooks(settingsJson: string, enabled: boolean, devflowDir: string): string {
   const cleaned = removeMemoryHooks(settingsJson);

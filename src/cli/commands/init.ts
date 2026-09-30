@@ -2066,9 +2066,10 @@ export const initCommand = new Command('init')
       // Capture hooks — always-on (like the context hook below), remove-then-add for
       // upgrade safety. Queue-append only (capture-prompt/capture-turn/capture-question);
       // each script gates its own per-queue write on the machine-wide switch, so there
-      // is no CLI-level enable/disable toggle here. MUST run before convergeMemoryHooks below
-      // so capture-turn lands before memory-worker in the Stop array (AC-C2 ordering:
-      // append-before-spawn).
+      // is no CLI-level enable/disable toggle here. Runs before convergeMemoryHooks below
+      // so capture-turn lands before memory-worker in the Stop array, matching what
+      // `devflow memory --enable` produces (AC-C2). The Stop hooks still run in
+      // parallel; the memory worker tolerates a not-yet-appended turn.
       const cleanedForCapture = removeCaptureHooks(content);
       content = addCaptureHooks(cleanedForCapture, devflowDir);
 
