@@ -2,10 +2,87 @@
 # Shared log path computation for Devflow hooks.
 # Source this file to get devflow_log_dir function.
 
+# D-LOG-DIR-CAP (hook side). Every hook logs under ~/.devflow/logs/<cwd-slug>/,
+# one folder per working directory, and `devflow init` prunes them to the
+# MAX_HOOK_LOG_DIRS most recent (src/core/hook-log-dirs.ts). A machine that never
+# re-inits would still grow without bound, so devflow_log_dir also prunes — but
+# ONLY when it creates a new folder, which is rare: the common path (the folder
+# already exists) pays nothing. The pass is bounded (one `ls`, at most
+# _DF_LOG_DIRS_SCANNED_MAX entries read, _DF_LOG_DIRS_PRUNED_PER_CALL removed in
+# one `rm`), bash 3.2 compatible, and never spawns node. Only directories are
+# counted or removed: root files (proxy.log) and symbolic links are left alone.
+#
+# Recency: folders are ranked by their own mtime (`ls -t`), which an append to a
+# log inside does not move, so a candidate is spared when any of its first
+# _DF_LOG_FILES_READ_PER_DIR entries is newer than the oldest folder the cap
+# keeps (`-nt`, a shell builtin). A spared folder can leave the count briefly
+# above the cap; init's exact prune settles it.
+#
+# _DF_MAX_HOOK_LOG_DIRS must equal MAX_HOOK_LOG_DIRS (tests/hook-log-paths.test.ts).
+_DF_MAX_HOOK_LOG_DIRS=200
+_DF_LOG_DIRS_PRUNED_PER_CALL=50
+_DF_LOG_DIRS_SCANNED_MAX=100000
+_DF_LOG_FILES_READ_PER_DIR=64
+
 # Cache the computed log dir path to avoid spawning 4 subprocesses (sed+tr+mkdir+chmod)
 # on every call within the same hook process.
 _LOG_DIR_CACHED=""
 _LOG_DIR_CACHED_CWD=""
+
+# _df_log_dir_is_recent <dir> <cutoff>
+# True when one of the first _DF_LOG_FILES_READ_PER_DIR entries in <dir> is newer
+# than <cutoff>. Globbing must be on.
+_df_log_dir_is_recent() {
+  local _dir="$1" _cutoff="$2" _f _read=0
+  for _f in "$_dir"/.[!.]* "$_dir"/..?* "$_dir"/*; do
+    [ "$_read" -lt "$_DF_LOG_FILES_READ_PER_DIR" ] || break
+    [ -e "$_f" ] || [ -L "$_f" ] || continue
+    _read=$((_read + 1))
+    if [ "$_f" -nt "$_cutoff" ]; then return 0; fi
+  done
+  return 1
+}
+
+# _df_prune_log_dirs <logs-root> <just-created-dir>
+# Remove the oldest folders beyond _DF_MAX_HOOK_LOG_DIRS, at most
+# _DF_LOG_DIRS_PRUNED_PER_CALL of them. Never fails the caller.
+_df_prune_log_dirs() {
+  local _logs="$1" _new="$2"
+  local _listing _name _n=0 _i _removed=0 _cutoff _d _glob_off=0
+  local -a _dirs _batch
+  _listing=$(ls -1At "$_logs" 2>/dev/null) || return 0
+
+  case $- in *f*) _glob_off=1 ;; esac
+  local IFS='
+'
+  set -f
+  for _name in $_listing; do
+    [ "$_n" -lt "$_DF_LOG_DIRS_SCANNED_MAX" ] || break
+    case "$_name" in */*) continue ;; esac
+    [ -L "$_logs/$_name" ] && continue
+    [ -d "$_logs/$_name" ] || continue
+    _dirs[_n]="$_logs/$_name"
+    _n=$((_n + 1))
+  done
+  set +f
+
+  if [ "$_n" -gt "$_DF_MAX_HOOK_LOG_DIRS" ]; then
+    _cutoff="${_dirs[_DF_MAX_HOOK_LOG_DIRS - 1]}"
+    _i=$((_n - 1))
+    while [ "$_i" -ge "$_DF_MAX_HOOK_LOG_DIRS" ] && [ "$_removed" -lt "$_DF_LOG_DIRS_PRUNED_PER_CALL" ]; do
+      _d="${_dirs[_i]}"
+      if [ "$_d" != "$_new" ] && ! _df_log_dir_is_recent "$_d" "$_cutoff"; then
+        _batch[_removed]="$_d"
+        _removed=$((_removed + 1))
+      fi
+      _i=$((_i - 1))
+    done
+    if [ "$_removed" -gt 0 ]; then rm -rf -- "${_batch[@]}" 2>/dev/null || true; fi
+  fi
+
+  if [ "$_glob_off" = 1 ]; then set -f; fi
+  return 0
+}
 
 devflow_log_dir() {
   local cwd="$1"
@@ -16,8 +93,11 @@ devflow_log_dir() {
   local slug
   slug=$(echo "$cwd" | sed 's|^/||' | tr '/' '-')
   local dir="$HOME/.devflow/logs/$slug"
+  local created=0
+  [ -d "$dir" ] || created=1
   mkdir -p "$dir"
   chmod 700 "$dir"
+  if [ "$created" = 1 ]; then _df_prune_log_dirs "$HOME/.devflow/logs" "$dir" || true; fi
   _LOG_DIR_CACHED="$dir"
   _LOG_DIR_CACHED_CWD="$cwd"
   echo "$dir"
