@@ -777,7 +777,7 @@ describe('resolveInstallArtifactPaths (the staged-file family)', () => {
 });
 
 // ---------------------------------------------------------------------------
-// resolveDevflowDirCleanup — pure decision function for user-scope ~/.devflow/ cleanup
+// resolveDevflowDirCleanup — pure decision function for ~/.devflow/ cleanup
 //
 // Mirrors the resolveSecurityRemovalDecision pattern. No I/O inside the function;
 // the .action() caller performs all I/O and prompt rendering. Tests express intended
@@ -789,9 +789,9 @@ describe('resolveDevflowDirCleanup', () => {
   const VALID_DIR = `${HOME}/.devflow`;
   const SOME_CONTENT = ['skill shadows (/Users/testuser/.devflow/skills)'];
 
-  // === user scope + interactive + user content → prompt ===
+  // === interactive + user content → prompt ===
 
-  it('returns prompt for user scope when interactive and user content is present', () => {
+  it('returns prompt when interactive and user content is present', () => {
     expect(resolveDevflowDirCleanup({
       isTTY: true,
       userContent: SOME_CONTENT,
@@ -800,7 +800,7 @@ describe('resolveDevflowDirCleanup', () => {
     })).toBe('prompt');
   });
 
-  it('returns prompt for user scope with multiple user content items', () => {
+  it('returns prompt with multiple user content items', () => {
     expect(resolveDevflowDirCleanup({
       isTTY: true,
       userContent: ['skill shadows (...)', 'rule shadows (...)', 'learning.json'],
@@ -809,10 +809,10 @@ describe('resolveDevflowDirCleanup', () => {
     })).toBe('prompt');
   });
 
-  // === user scope + non-interactive → artifacts-only ===
+  // === non-interactive → artifacts-only ===
   // Non-interactive sessions must never prompt for or perform full-dir removal.
 
-  it('returns artifacts-only for user scope when non-interactive (isTTY=false)', () => {
+  it('returns artifacts-only when non-interactive (isTTY=false)', () => {
     expect(resolveDevflowDirCleanup({
       isTTY: false,
       userContent: SOME_CONTENT,
@@ -821,7 +821,7 @@ describe('resolveDevflowDirCleanup', () => {
     })).toBe('artifacts-only');
   });
 
-  it('returns artifacts-only for user scope when non-interactive even with no user content', () => {
+  it('returns artifacts-only when non-interactive even with no user content', () => {
     expect(resolveDevflowDirCleanup({
       isTTY: false,
       userContent: [],
