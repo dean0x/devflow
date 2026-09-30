@@ -21,7 +21,8 @@
 // D-SETTINGS-LOCAL-ONLY: local git subprocesses only, and never gh, never the
 // network, never a git command that refreshes the index. At most four, in order:
 //   git rev-parse --show-toplevel                         always
-//   git ls-files --error-unmatch -- .devflow/config.json  only when config.json exists
+//   git -c core.fsmonitor=false ls-files --error-unmatch -- .devflow/config.json
+//                                                         only when config.json exists
 //   git symbolic-ref --quiet refs/remotes/origin/HEAD     in a repository
 //   git cat-file blob refs/remotes/origin/<D>:.devflow/project.json
 //                                                         only when origin/HEAD names D
@@ -667,7 +668,11 @@ function gitToplevel(exec, dir) {
  * otherwise lift a maintainer's local run of that branch past the publication
  * ceiling. A tracked copy is ignored entirely, exactly as if absent, and main()
  * tells the user to untrack it. The check is `git ls-files --error-unmatch`,
- * which reads the index without refreshing it (no fsmonitor, no write):
+ * which reads the index without refreshing or writing it. Reading the index
+ * runs a configured `core.fsmonitor` hook — an arbitrary command from the
+ * repository's config, and on macOS the builtin daemon's start-up — so the
+ * call turns it off for itself (`-c core.fsmonitor=false`): this resolver runs
+ * from session hooks and must stay a pure read.
  *   tracked    exit 0
  *   untracked  any other answered exit (1: no such index entry; outside a
  *              repository git answers 128, and there is nothing to track)
@@ -679,7 +684,7 @@ function gitToplevel(exec, dir) {
  * @returns {'tracked' | 'untracked' | 'unknown'}
  */
 function personalTracking(exec, root) {
-  const res = runGit(exec, root, ['ls-files', '--error-unmatch', '--', PERSONAL_REL], LINE_MAX_BUFFER);
+  const res = runGit(exec, root, ['-c', 'core.fsmonitor=false', 'ls-files', '--error-unmatch', '--', PERSONAL_REL], LINE_MAX_BUFFER);
   if (!res.answered) return 'unknown';
   return res.ok ? 'tracked' : 'untracked';
 }

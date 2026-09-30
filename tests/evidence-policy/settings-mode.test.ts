@@ -37,6 +37,8 @@ import {
   SETTINGS_SCRIPT,
   buildScriptedShim,
   createFakeBin,
+  warmFakeBin,
+  WARM_HOOK_TIMEOUT_MS,
   realGit,
   runResolver,
   scriptedExec,
@@ -124,7 +126,8 @@ let fakeBin: FakeBin;
 beforeAll(() => {
   binRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-settings-bin-'));
   fakeBin = createFakeBin(binRoot);
-});
+  warmFakeBin(fakeBin, binRoot);
+}, WARM_HOOK_TIMEOUT_MS);
 
 afterAll(() => {
   fs.rmSync(binRoot, { recursive: true, force: true });
@@ -148,7 +151,7 @@ const NOT_A_REPO: ScriptedCall = { tool: 'git', args: ARGV.toplevel, exit: 128, 
 
 // The resolver's other local reads, written out independently of the script.
 /** D-PERSONAL-UNTRACKED: is .devflow/config.json in the index? */
-const ARGV_TRACKED = ['ls-files', '--error-unmatch', '--', '.devflow/config.json'];
+const ARGV_TRACKED = ['-c', 'core.fsmonitor=false', 'ls-files', '--error-unmatch', '--', '.devflow/config.json'];
 /** D-LENS-UNION: the default branch this clone recorded for origin. */
 const ARGV_ORIGIN_HEAD = ['symbolic-ref', '--quiet', 'refs/remotes/origin/HEAD'];
 
@@ -611,6 +614,28 @@ describe('D-PERSONAL-UNTRACKED: a tracked .devflow/config.json is ignored, with 
       const own = runResolver({ home, args: [repo], script: SETTINGS_SCRIPT });
       expect(fieldOf(own.stdout.trim(), 'REVIEW_PUBLICATION')).toBe('full');
       expect(own.stderr).toBe('');
+    });
+
+    it('the tracking check never runs the repository\'s core.fsmonitor hook — a plain ls-files would', () => {
+      const repo = fs.mkdtempSync(path.join(tmp, 'real-fsmonitor-'));
+      const marker = path.join(tmp, 'fsmonitor-ran');
+      const hook = path.join(tmp, 'fsmonitor-hook.sh');
+      fs.writeFileSync(hook, `#!/bin/sh\necho ran >> '${marker}'\nexit 1\n`);
+      fs.chmodSync(hook, 0o755);
+      realGit(repo, home, ['init', '-q', '-b', 'main']);
+      writeRepoFile('config.json', '{"reviewPublication":"full"}\n', repo);
+      realGit(repo, home, ['add', '-f', '.devflow/config.json']);
+      realGit(repo, home, ['commit', '-q', '-m', 'tracked personal file']);
+      realGit(repo, home, ['config', 'core.fsmonitor', hook]);
+
+      const run = runResolver({ home, args: [repo], script: SETTINGS_SCRIPT });
+      expect(run.status, run.stderr).toBe(0);
+      expect(fieldOf(run.stdout.trim(), 'REVIEW_PUBLICATION')).toBe('auto');
+      expect(fs.existsSync(marker), 'the resolver ran the fsmonitor hook').toBe(false);
+
+      // Known-bad probe: the same index read without the override runs the hook.
+      realGit(repo, home, ['ls-files', '--error-unmatch', '--', '.devflow/config.json']);
+      expect(fs.existsSync(marker)).toBe(true);
     });
   });
 });
