@@ -33,10 +33,14 @@ const CLI = requireBuiltCli();
 // runs well past vitest's 5 s default).
 const SUBPROCESS_TIMEOUT_MS = 60_000;
 
-/** The minimal non-interactive init: no feature that would add unrelated writes. */
+/**
+ * The minimal non-interactive init: no feature that would add unrelated writes.
+ * `--security user` keeps the deny list in the sandboxed ~/.claude/settings.json;
+ * `none` would reach the real system managed-settings file (D-TESTS-NO-SYSTEM-MANAGED).
+ */
 const MINIMAL_INIT = [
   'init', '--recommended', '--no-ambient', '--no-memory', '--no-learning', '--no-knowledge',
-  '--no-rules', '--no-hud', '--no-proxy', '--no-compliance', '--security', 'none',
+  '--no-rules', '--no-hud', '--no-proxy', '--no-compliance', '--security', 'user',
 ];
 
 let home: string;

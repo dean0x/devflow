@@ -23,17 +23,17 @@
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { spawnSync, execFileSync } from 'child_process';
-import { promises as fs, existsSync, readFileSync, accessSync, constants as fsConstants } from 'fs';
+import { promises as fs, existsSync, readFileSync } from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { requireBuiltCli, sandboxEnv } from './helpers.js';
+import { systemManagedSettingsAtRisk } from './helpers/managed-settings.js';
 import { hasMemoryHooks } from '../src/cli/commands/memory.js';
 import { hasAmbientHook } from '../src/cli/commands/ambient.js';
 import { hasHudStatusLine } from '../src/cli/commands/hud.js';
 import { addProxyHooks, applyProxyEnv, hasProxyHooks } from '../src/cli/commands/proxy.js';
 import { writeProxyState, buildProxyState, DEFAULT_PROXY_PORT } from '../src/core/proxy-state.js';
 import { DEVFLOW_HISTORICAL_DENY } from '../src/targets/claude-code/post-install.js';
-import { getManagedSettingsPath } from '../src/targets/claude-code/claude-paths.js';
 import type { Settings } from '../src/targets/claude-code/hooks.js';
 
 const CLI = requireBuiltCli();
@@ -462,26 +462,6 @@ describe('init --hud-only over a full install (D-HUD-ONLY-PRESERVE)', () => {
 // TP-8/TP-9 — on→off re-init transitions converge every artifact (PF-015)
 // ─────────────────────────────────────────────────────────────────────────────
 
-/** True when this process could modify the real managed-settings file (PF-060). */
-function managedSettingsWritable(): boolean {
-  let managedPath: string;
-  try {
-    managedPath = getManagedSettingsPath();
-  } catch {
-    return false; // Unsupported platform: the CLI treats the managed file as absent.
-  }
-  // A missing path is not writable; the directory covers the unlink and a file
-  // appearing later.
-  return [managedPath, path.dirname(managedPath)].some((target) => {
-    try {
-      accessSync(target, fsConstants.W_OK);
-      return true;
-    } catch {
-      return false;
-    }
-  });
-}
-
 describe('init on→off re-init transitions', () => {
   it('memory, ambient, HUD, rules, learning and knowledge all turn off on re-init', async () => {
     runInit(repoA, '--recommended', '--ambient', '--memory', '--hud', '--rules', '--learning', '--knowledge');
@@ -521,10 +501,11 @@ describe('init on→off re-init transitions', () => {
   // holds Devflow entries: the direct attempt rewrites that file or, when nothing
   // else is left in it, unlinks it. That attempt fails EACCES only while neither
   // the file nor its directory is writable by this process, and with no TTY no
-  // sudo is tried — so the test runs only then, and never as root. The managed
+  // sudo is tried — so the test runs only then, and never as root
+  // (D-TESTS-NO-SYSTEM-MANAGED, tests/helpers/managed-settings.ts). The managed
   // arm is pinned structurally in init-machine-switch.test.ts and by the
   // injected-path unit tests.
-  it.skipIf(process.getuid?.() === 0 || managedSettingsWritable())('security: a `--security none` re-init over a user-mode install strips every Devflow deny entry', async () => {
+  it.skipIf(systemManagedSettingsAtRisk())('security: a `--security none` re-init over a user-mode install strips every Devflow deny entry', async () => {
     runInit(repoA, '--recommended', '--security', 'user');
     const devflowDeny = (json: string): string[] =>
       ((JSON.parse(json) as { permissions?: { deny?: string[] } }).permissions?.deny ?? [])
