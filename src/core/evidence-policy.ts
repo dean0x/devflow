@@ -16,6 +16,9 @@
  * the local resolver of the per-repository settings layer — `.devflow/project.json`,
  * the personal `.devflow/config.json` and the machine manifest. Its shapes are
  * transcribed the same way, and there is no TypeScript copy of its fold either.
+ * It also loads the shared strict parser both resolvers use,
+ * `lib/project-config.cjs` (loadProjectConfigLib), so the CLI judges a config
+ * file's bytes exactly as the resolvers do.
  *
  * D-POLICY-NO-WRITE (applies ADR-024): `.devflow/project.json` is team-owned, and
  * devflow never writes or replaces a shared file it cannot prove it wrote. This
@@ -41,6 +44,9 @@ export const RESOLVER_SCRIPT_NAME = 'resolve-evidence-policy.cjs';
 
 /** Basename of the settings resolver under src/assets/scripts/ (and ~/.devflow/scripts/). */
 export const SETTINGS_SCRIPT_NAME = 'resolve-settings.cjs';
+
+/** The shared strict config parser, relative to src/assets/scripts/ (and ~/.devflow/scripts/). */
+export const PROJECT_CONFIG_LIB_NAME = join('lib', 'project-config.cjs');
 
 /** The team file the CLI suggests committing, relative to a repository root. */
 const PROJECT_FILE = '.devflow/project.json';
@@ -163,6 +169,22 @@ export interface SettingsModule {
   serializeProjectSuggestion(input: unknown): string | null;
 }
 
+// ── Transcribed shapes (lib/project-config.cjs JSDoc) ──────────────────────────
+
+/** `decodeConfigBytes`'s verdict: no file, bytes that are no config text, or the text. */
+export type DecodedConfigBytes =
+  | { readonly kind: 'absent' }
+  | { readonly kind: 'invalid' }
+  | { readonly kind: 'text'; readonly text: string };
+
+/** The part of the shared parser's `module.exports` the CLI relies on. */
+export interface ProjectConfigLib {
+  /** Size, BOM and UTF-8 checks on a config file's bytes (`null` is no file). */
+  decodeConfigBytes(buf: unknown): DecodedConfigBytes;
+  /** Every duplicated member path of valid JSON text, or null when it is too deep to scan. */
+  collectDuplicateKeyPaths(text: string): ReadonlySet<string> | null;
+}
+
 type SurfaceKind = 'string-array' | 'object' | 'regexp' | 'string' | 'function';
 
 /**
@@ -188,6 +210,12 @@ export const SETTINGS_MODULE_SURFACE = Object.freeze({
   serializeProjectSuggestion: 'function',
 } as const satisfies Record<keyof SettingsModule, SurfaceKind>);
 
+/** Every key of ProjectConfigLib and the runtime kind the loader requires of it. */
+export const PROJECT_CONFIG_LIB_SURFACE = Object.freeze({
+  decodeConfigBytes: 'function',
+  collectDuplicateKeyPaths: 'function',
+} as const satisfies Record<keyof ProjectConfigLib, SurfaceKind>);
+
 // ── Loader ─────────────────────────────────────────────────────────────────────
 
 type Result<T, E> = { readonly ok: true; readonly value: T } | { readonly ok: false; readonly error: E };
@@ -200,6 +228,8 @@ export type EvidencePolicyLoadError =
 export type EvidencePolicyLoad = Result<EvidencePolicyModule, EvidencePolicyLoadError>;
 
 export type SettingsLoad = Result<SettingsModule, EvidencePolicyLoadError>;
+
+export type ProjectConfigLibLoad = Result<ProjectConfigLib, EvidencePolicyLoadError>;
 
 function hasKind(value: unknown, kind: SurfaceKind): boolean {
   switch (kind) {
@@ -262,6 +292,14 @@ export function loadEvidencePolicyModule(dir: string = scriptsDir()): EvidencePo
  */
 export function loadSettingsModule(dir: string = scriptsDir()): SettingsLoad {
   return loadScript<SettingsModule>(join(dir, SETTINGS_SCRIPT_NAME), SETTINGS_MODULE_SURFACE);
+}
+
+/**
+ * Load the shared strict config parser from `dir` (default: the package's own
+ * scripts directory) and shape-check its surface.
+ */
+export function loadProjectConfigLib(dir: string = scriptsDir()): ProjectConfigLibLoad {
+  return loadScript<ProjectConfigLib>(join(dir, PROJECT_CONFIG_LIB_NAME), PROJECT_CONFIG_LIB_SURFACE);
 }
 
 // ── Presentation (pure) ────────────────────────────────────────────────────────

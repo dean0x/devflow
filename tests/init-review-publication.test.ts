@@ -35,7 +35,7 @@ const SUBPROCESS_TIMEOUT_MS = 60_000;
 let tmpHome: string;
 let tmpRepo: string;
 
-function runInit(...args: string[]): { status: number | null; stderr: string } {
+function runInit(...args: string[]): { status: number | null; stderr: string; out: string } {
   // PF-060: init converges a machine-wide tree, so the sandbox is asserted at the
   // call site rather than trusted — a spawn against the real HOME never starts.
   // `os.homedir()` is the setup file's temp HOME, so the real home comes from assertTempHome.
@@ -52,7 +52,7 @@ function runInit(...args: string[]): { status: number | null; stderr: string } {
       CI: '1',
     },
   });
-  return { status: result.status, stderr: result.stderr ?? '' };
+  return { status: result.status, stderr: result.stderr ?? '', out: `${result.stdout ?? ''}${result.stderr ?? ''}` };
 }
 
 async function writeProjectConfig(reviewPublication: string): Promise<void> {
@@ -176,5 +176,21 @@ describe('devflow init — keys devflow does not manage survive the config write
     expect(config.reviewPublication).toBe('auto');
     expect(config.tracker, 'a factory reset of devflow state deleted a hand-written override').toBe('linear');
     expect(config.teamNote).toEqual(TEAM_NOTE);
+  }, SUBPROCESS_TIMEOUT_MS);
+});
+
+describe('devflow init — a malformed config is never rewritten (D-CONFIG-NO-REPAIR)', () => {
+  it('a duplicate-key config.json keeps its bytes, and init names the file', async () => {
+    // JSON.parse would read this as tracker "github"; the strict parser, like the
+    // resolvers, reads it as saying two things.
+    const body = '{"tracker":"jira","reviewPublication":"off","tracker":"github"}\n';
+    await fs.mkdir(path.join(tmpRepo, '.devflow'), { recursive: true });
+    await fs.writeFile(path.join(tmpRepo, '.devflow', 'config.json'), body, 'utf-8');
+
+    const result = runInit('--recommended');
+    expect(result.status, `init failed:\n${result.out}`).toBe(0);
+
+    expect(await fs.readFile(path.join(tmpRepo, '.devflow', 'config.json'), 'utf-8')).toBe(body);
+    expect(result.out).toContain('config.json is not a valid config');
   }, SUBPROCESS_TIMEOUT_MS);
 });

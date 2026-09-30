@@ -48,7 +48,7 @@ import { readManifest, writeManifest, resolvePluginList, detectUpgrade, type Man
 import { convergeFlagsIntoSettings, countActiveFlags, readViewMode, type FlagsRecord } from '../../core/flags.js';
 import { addContextHook, removeContextHook, hasContextHook } from './context.js';
 import { writeFileAtomicExclusive } from '../../core/fs-atomic.js';
-import { writeManagedConfig, readConfigIfPresent, DEFAULT_CONFIG, type FeatureConfig } from '../../core/feature-config.js';
+import { writeManagedConfig, readConfigIfPresent, DEFAULT_CONFIG, type FeatureConfig, type ManagedConfigWriteError } from '../../core/feature-config.js';
 import { drainLearningQueue } from '../../core/learning-queue-cleanup.js';
 import { removeManagedDenyList, describeManagedDenyRemoval } from './security.js';
 import { resolveInitSeed, applyCliToggles, resolveResetGatedInputs, resolvePluginsToInstall } from './init-seed.js';
@@ -613,6 +613,26 @@ export function resolveRetiredScopeOption(scope: string | undefined): RetiredSco
     kind: 'refuse',
     message: `Unknown --scope value "${scope}": Devflow installs machine-wide only (omit --scope).`,
   };
+}
+
+/**
+ * The warning init prints when it leaves a repository's `.devflow/config.json`
+ * alone (D-CONFIG-NO-REPAIR). Pure.
+ */
+export function formatManagedConfigWriteError(error: ManagedConfigWriteError): string {
+  switch (error.kind) {
+    case 'malformed':
+      return `${error.path} is not a valid config (not a JSON object, or a key appears twice) — left unchanged. ` +
+        'Fix it by hand; until then devflow treats it as unreadable.';
+    case 'unreadable':
+      return `${error.path} could not be read (${error.detail}) — left unchanged.`;
+    case 'write-failed':
+      return `Could not write ${error.path}: ${error.detail}`;
+    default: {
+      const exhaustive: never = error;
+      return exhaustive;
+    }
+  }
 }
 
 /**
@@ -2120,14 +2140,16 @@ export const initCommand = new Command('init')
     // and every other key in the file — the hand-written per-repo `tracker`
     // override first among them — is carried from disk, under --reset too
     // (D-CONFIG-PRESERVE-UNMANAGED in feature-config.ts, avoids PF-071).
+    // A malformed or unreadable file is left untouched and named (D-CONFIG-NO-REPAIR).
     if (gitRoot) {
-      await writeManagedConfig(gitRoot, {
+      const configWrite = await writeManagedConfig(gitRoot, {
         // reviewPublication has no prompt, so it is carried over from the
         // reset-gated snapshot rather than re-read from disk: seedConfig is null
         // under --reset, which is what collapses the field back to 'auto' with
         // every other feature (PF-015 — read the post-gate binding, not the file).
         reviewPublication: seedConfig?.reviewPublication ?? DEFAULT_CONFIG.reviewPublication,
       });
+      if (!configWrite.ok) p.log.warn(formatManagedConfigWriteError(configWrite.error));
     }
 
     // Configure HUD
