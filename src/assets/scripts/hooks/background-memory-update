@@ -17,12 +17,13 @@
 #
 # Success:      removes .pending-turns.processing; touches .last-refresh-ok
 # Failure:      leaves .pending-turns.processing; this worker is the PRIMARY recovery owner —
-#               on its next spawn it merges leftover .processing back into the queue (lines ~141-156).
+#               on its next spawn it merges leftover .processing back into the queue ("Claim queue atomically").
 #               session-start-memory's own cold-path recovery is the fallback for when this
 #               worker never re-spawns (e.g. memory disabled mid-flight, host offline); it applies a
 #               300s age gate before acting on .processing. No action needed here — the two paths
 #               are correctly separated by the lock boundary.
-# User-only:    truncates queue without LLM run (no fabrication)
+# User-only:    exits without an LLM run (no fabrication) and leaves the queue in place
+#               for the next run (D-QUEUE-NO-ORPHAN-DELETE)
 
 set -e
 
@@ -160,13 +161,20 @@ fi
 # mv-ed to the real path on the NEXT run's CAS check (applies ADR-023).
 rm -f "$STAGED_FILE" 2>/dev/null || true
 
-# --- Orphan-only auto-clean: if queue has no assistant/qa turn, truncate and exit ---
+# --- Orphan-only skip: if queue has no assistant/qa turn, exit and leave the queue ---
 # This prevents fabrication-prone LLM runs with only user turns in the queue.
 # A qa row (captured Q&A pair) counts as content-bearing here too — it carries
 # the same synthesis-worthy signal as an assistant turn (AC-F10). This check
 # and the TURNS_TEXT extraction loop below must agree on that.
 # When neither jq nor node is available (_JSON_AVAILABLE=false) we skip the check
-# and allow the run to proceed — conservative: better to attempt than to truncate blindly.
+# and allow the run to proceed — conservative: better to attempt than to skip blindly.
+#
+# D-QUEUE-NO-ORPHAN-DELETE: the queue is never deleted here. Claude Code runs a
+# Stop event's hooks in parallel, so this worker can read the queue after
+# capture-prompt appended the user row and before capture-turn appends the
+# assistant row; deleting it then loses that turn's prompt. Leaving it costs
+# nothing: the run is still skipped, the next run takes the whole turn once the
+# assistant row lands, and queue-append caps the file (200 -> newest 100 lines).
 if [ ! -f "$PROCESSING_FILE" ] && [ -f "$QUEUE_FILE" ] && [ -s "$QUEUE_FILE" ] && [ "$_JSON_AVAILABLE" = "true" ]; then
   if [ "$_HAS_JQ" = "true" ]; then
     _HAS_CONTENT=$(jq -r 'select(.role=="assistant" or .role=="qa") | .role' "$QUEUE_FILE" 2>/dev/null | head -1 || echo "")
@@ -182,8 +190,7 @@ if [ ! -f "$PROCESSING_FILE" ] && [ -f "$QUEUE_FILE" ] && [ -s "$QUEUE_FILE" ] &
     ' "$QUEUE_FILE" 2>/dev/null || echo "")
   fi
   if [ -z "$_HAS_CONTENT" ]; then
-    log "User-only queue (no assistant/qa turn) — truncating without LLM run"
-    rm -f "$QUEUE_FILE" 2>/dev/null || true
+    log "User-only queue (no assistant/qa turn) — leaving it for the next run"
     exit 0
   fi
 fi
