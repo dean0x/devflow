@@ -135,7 +135,7 @@ Everything Devflow generates lives under `.devflow/` — working memory, decisio
 # Devflow runtime data — local by default (memory, learning, docs, locks).
 # Shared via git: feature knowledge bases under .devflow/features/ (index.md and
 # every {slug}/KNOWLEDGE.md), .devflow/conventions.md (naming authority),
-# .devflow/policy.json (evidence policy) and .devflow/project.json (team settings).
+# .devflow/policy.json (retired; presence only) and .devflow/project.json (team settings).
 # To stop sharing the first two, re-add `.devflow/features/` or
 # `.devflow/conventions.md` to your own .gitignore.
 .devflow/*
@@ -151,7 +151,7 @@ Everything Devflow generates lives under `.devflow/` — working memory, decisio
 .claudeignore
 ```
 
-The `!.devflow/policy.json` line keeps a retired policy file shared until its value moves into `project.json` (see [Evidence policy](#evidence-policy)). The paired lines — `!.devflow/features/` then `.devflow/features/*` — are required: git never descends into an excluded directory to reach a re-included file. The final `.claudeignore` line is left out when your `.gitignore` already has its own `.claudeignore` or `!.claudeignore` entry.
+The `!.devflow/policy.json` line keeps a retired policy file shared while teammates on an older devflow still read it (see [Evidence policy](#evidence-policy)). When your block predates a line, the next hook run or `devflow init` inserts the missing line inside the block, where a fresh block holds it — never at the end of the file, so a re-ignore of your own further down still wins. The paired lines — `!.devflow/features/` then `.devflow/features/*` — are required: git never descends into an excluded directory to reach a re-included file. The final `.claudeignore` line is left out when your `.gitignore` already has its own `.claudeignore` or `!.claudeignore` entry.
 
 To keep the knowledge bases or conventions local, add `.devflow/features/` or `.devflow/conventions.md` to your own `.gitignore`. A `/.devflow/` line of your own opts the whole project out: Devflow then leaves your `.gitignore` alone.
 
@@ -193,7 +193,11 @@ A repository can commit `.devflow/project.json` to settle team-wide choices. Eve
 - `reviewPublication` is a ceiling only: it can lower your personal value, never raise it. With no personal value you get at most `auto` — a team `off` still lowers it — so a branch that commits `full` cannot switch off the visibility gate for whoever reviews it.
 - `features` can switch memory, learning or knowledge off for this repository, never back on. Your personal `config.json` can do the same for you.
 
-Each key is checked on its own, so one bad value never disables the rest: a bad `evidence` resolves to `required`, a bad `reviewPublication` to `off`, a bad `compliance` list to the generic lens. A `project.json` or `config.json` that exists but is not a JSON object is never read as absent: the settings fail closed (publication off, knowledge write-back off), though your machine's own compliance frameworks still apply — with none, the generic lens runs. Commands never read the file themselves — one local resolver folds it with your `config.json` and the machine settings, without touching the network.
+**Adopting it.** Commit `project.json` on the default branch. `evidence` is always read from the default branch, so a feature branch cannot lower the bar it is judged by. Every other key — `tracker` with its `site` and `key`, `features` and the `reviewPublication` ceiling — is read from the branch you have checked out, so a branch that edits them sees the change at once. `compliance` is read from both and joined with your machine's frameworks: a branch can add a framework, never remove one, so a pull request that deletes `"compliance":["hipaa"]` is still reviewed under HIPAA. The default branch's copy is read from your clone's tracking branch, as fresh as your last fetch, never over the network.
+
+Each key is checked on its own, so one bad value never disables the rest: a bad `evidence` resolves to `required`, a bad `reviewPublication` to `off`, a bad `compliance` list to the generic lens. A `project.json` or `config.json` that exists but is not a JSON object is never read as absent: the settings fail closed (publication off, knowledge write-back off, the tracker reported as invalid). The compliance lens is the exception, because it only adds scrutiny: it keeps every framework a readable layer declares, and an unreadable `project.json` counts as the generic lens. Memory and learning capture fail open instead: the hooks read an unreadable file as narrowing nothing, so capture runs as your machine's switch says.
+
+`config.json` is personal, so it must not be committed. A `config.json` that git tracks is ignored as if it were absent — otherwise a branch could commit `"reviewPublication":"full"` for whoever reviews it — and `devflow tracker|memory|learning|knowledge --status` say so, with the fix: `git rm --cached .devflow/config.json`. Commands never read the file themselves — one local resolver folds it with your `config.json` and the machine settings, without touching the network.
 
 ## Evidence policy
 
@@ -205,7 +209,7 @@ How much evidence a change must carry is a team decision, so it lives in the fil
 
 `evidence` is `required` or `standard`. A malformed or duplicated value, or a `project.json` that is not a JSON object, resolves to `required`.
 
-**`.devflow/policy.json` is retired.** devflow never reads it. Where `project.json` has no `evidence` key, a committed `policy.json` holds the repository at `required` whatever it says, with an `invalid-file` warning. To migrate, move its value into `.devflow/project.json` — `{"version":1,"evidencePolicy":"standard"}` becomes `{"version":1,"evidence":"standard"}` — and delete `policy.json`. `devflow compliance --status` prints the same hint while the file is there.
+**`.devflow/policy.json` is retired.** devflow never reads it. Where `project.json` has no `evidence` key, a committed `policy.json` holds the repository at `required` whatever it says, with an `invalid-file` warning. To migrate, add its value to `.devflow/project.json` — `{"version":1,"evidencePolicy":"standard"}` becomes `{"version":1,"evidence":"standard"}` — and keep `policy.json` until every teammate runs devflow 3.0 or later. It is harmless on 3.0, which never looks at it once `project.json` has `evidence`, while an older devflow reads only `policy.json`; delete it after that. `devflow compliance --status` prints the same hint while the file is there.
 
 | | `standard` | `required` |
 |---|---|---|
@@ -218,9 +222,9 @@ How much evidence a change must carry is a team decision, so it lives in the fil
 | `reviewPublication: off` | no PR comment | the counts-only stub still posts |
 | `/dynamic-tickets` | files no issues | files the tracking issue and one issue per ticket |
 
-**Defaults.** With no committed `evidence` and no `policy.json` the policy is `standard`, unless compliance is enabled on the machine running devflow — at any framework count — which makes it `required` there.
+**Defaults.** With no committed `evidence` and no `policy.json` the policy is `standard`, unless compliance is enabled on the machine running devflow — at any framework count — which makes it `required` there, or the repository's `project.json` carries a `compliance` key — on the default branch, its tracking copy or the working tree, whatever its value — which makes it `required` everywhere.
 
-**The stricter value wins.** The default branch's copy is the authority, so a feature branch that commits a weaker policy is still judged by the default branch's; the difference shows as a `pr-changes-policy` warning. Local sources can raise the policy but never lower it: enabled compliance raises a committed `standard` to `required` on that machine. Every failure — git not answering, an invalid file, a resolver that cannot run — resolves to `required`. Offline, devflow reads the local copies instead and flags the result `remote-unavailable`.
+**The stricter value wins.** The default branch's copy is the authority, so a feature branch that commits a weaker policy is still judged by the default branch's; the difference shows as a `pr-changes-policy` warning. Local sources can raise the policy but never lower it: enabled compliance raises a committed `standard` to `required` on that machine. Every failure — git not answering, an invalid file, a resolver that cannot run — resolves to `required`. Offline, devflow takes the default branch's name from your clone's `origin/HEAD` and reads that branch's local tracking copy instead, so a branch still cannot lower the policy, and flags the result `remote-unavailable`. A clone that never recorded `origin/HEAD` has only the working tree to go on, which then decides; `git remote set-head origin --auto` records it.
 
 **Commit it yourself.** The CLI never writes `project.json` or `policy.json`. `devflow compliance --enable` and `--set` print a `project.json` for you to commit, and `devflow compliance --status` shows the policy resolved for the current repository and where it came from. The `.gitignore` block above keeps `project.json` shareable. Guard it like any other policy file, for example with a CODEOWNERS entry:
 

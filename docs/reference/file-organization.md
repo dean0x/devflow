@@ -84,7 +84,7 @@ devflow/
 │               ├── capture-turn          # Stop hook: appends assistant turn to memory + learning queues; never spawns
 │               ├── capture-question      # PostToolUse hook (matcher: AskUserQuestion): appends answered questions to both queues
 │               ├── queue-append          # Shared helper: queue_append_row / queue_append_both / queue_read_gates
-│               ├── memory-worker         # Stop hook (registered after capture-turn): 120s throttle, spawns background-memory-update
+│               ├── memory-worker         # Stop hook (runs in parallel with capture-turn): 120s throttle, spawns background-memory-update
 │               ├── background-memory-update # Detached claude -p sonnet 4.6 worker: drains queue → staged write → CAS swap to WORKING-MEMORY.md (spawned by memory-worker)
 │               ├── learning-lock         # Shared helper: mkdir-based locking
 │               ├── session-start-memory  # SessionStart hook: injects memory + git state; recovers orphaned .pending-turns.processing itself
@@ -210,7 +210,7 @@ Included settings:
 - `env.ENABLE_TOOL_SEARCH` - Deferred MCP tool loading (~85% token savings)
 - `env.ENABLE_LSP_TOOL` - Language Server Protocol support
 - `env.CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS` - Agent Teams (not in settings template by default; enabled on demand via the optional `agent-teams` Claude Code flag — `devflow flags --enable agent-teams`)
-- `permissions.deny` - Security deny list (140 blocked operations) + sensitive file patterns
+- `permissions.deny` - Security deny list (170 blocked operations) + sensitive file patterns
 
 ## Capture + Learning Hooks
 
@@ -221,7 +221,7 @@ A capture/spawn split across always-on shell-script hooks. Queue-append (`captur
 | `capture-prompt` | UserPromptSubmit | Appends the user turn to `.devflow/memory/.pending-turns.jsonl` and `.devflow/learning/.pending-turns.jsonl` (each gated independently); emits no directive |
 | `capture-turn` | Stop | Appends the assistant turn to both queues; runs the decisions usage scanner; never spawns anything |
 | `capture-question` | PostToolUse (matcher: `AskUserQuestion`) | Appends each answered question as a `{role:"qa"}` row to both queues |
-| `memory-worker` | Stop (registered after `capture-turn` — append-before-spawn ordering) | After the 120s throttle (keyed by `.working-memory-last-trigger` mtime), spawns `background-memory-update` as a detached `nohup` worker (`claude -p --model claude-sonnet-4-6`) |
+| `memory-worker` | Stop (runs in parallel with `capture-turn`; the worker leaves a queue holding only user rows for its next run) | After the 120s throttle (keyed by `.working-memory-last-trigger` mtime), spawns `background-memory-update` as a detached `nohup` worker (`claude -p --model claude-sonnet-4-6`) |
 | `background-memory-update` | Detached worker (spawned by `memory-worker`) | Drains `.pending-turns.jsonl` → calls `claude -p --model claude-sonnet-4-6` (prompt on stdin, reconciliation-aware: bounded git evidence since last stamp, DONE definition) → model writes to `WORKING-MEMORY.md.new` only. CAS verify-and-swap: if `WORKING-MEMORY.md` is byte-identical to the pre-run snapshot, renames `.new` → `WORKING-MEMORY.md` (UPDATED), removes `.processing`, touches `.last-refresh-ok`. CONFLICT (human edited file during run): keeps human's version, discards `.new`, leaves `.processing` for retry. FAIL (staged file absent or un-stamped): leaves `.processing` for crash recovery at next SessionStart. |
 | `session-start-memory` | SessionStart | Reads the already-fresh `WORKING-MEMORY.md` and injects it as `additionalContext` with a git-reconciled 3-state header (A in-sync / B drifted / C refresh-failing banner); also recovers an orphaned `.pending-turns.processing` itself (self-contained cold path) |
 | `session-start-context` | SessionStart | Injects the decisions TL;DR and, when the learning queue is non-empty (or a crashed run left a stale `.processing` batch), a `--- LEARNING MAINTENANCE ---` directive instructing the main model to **silently** spawn the background Learning agent with the resolved model (project `.devflow/learning/learning.json` → global `~/.devflow/learning.json` → `opus` default) |
@@ -321,9 +321,9 @@ Skills are removed individually rather than by namespace directory, because `~/.
 | Manifest | `~/.devflow/manifest.json` | Plugin/feature state |
 | Migrations | `~/.devflow/migrations.json` | Run-once migration state |
 | Agent overrides | `~/.devflow/agent-models.json` | Stale keys re-apply to renamed agents on reinstall |
-| Logs | `~/.devflow/logs/` | Per-project hook logs + `proxy.log` |
+| Logs | `~/.devflow/logs/` | Per-project hook logs (capped at the 200 most recently written folders) + `proxy.log` |
 | Costs | `~/.devflow/costs/` | Session cost history |
 | Cache | `~/.devflow/cache/` | Model-discovery and HUD component caches |
 | Proxy state | `~/.devflow/proxy.json`, `proxy-routing.json`, `proxy.pid`, `.proxy-spawn.lock/` | Relay runtime state |
 
-User-authored files (`~/.devflow/skills/`, `~/.devflow/rules/`, `preference-profile.md`, `learning.json`, `hud.json`) are **never** removed by `removeDevFlowInstallArtifacts` — only by a confirmed full `~/.devflow/` wipe in an interactive session.
+User-authored files (`~/.devflow/skills/`, `~/.devflow/rules/`, `preference-profile.md`, the per-provider tracker conventions in `~/.devflow/tracker/`, an earlier release's `tracker.md` and its `tracker.md.{provider}.bak` copies, `learning.json`, `hud.json`) are **never** removed by `removeDevFlowInstallArtifacts` — only by a confirmed full `~/.devflow/` wipe in an interactive session.
