@@ -3,28 +3,38 @@
 //
 // Resolves the per-repository SETTINGS a prompt or the CLI acts on — tracker,
 // review publication, compliance lens and the three feature switches — from
-// three LOCAL layers, and prints them on ONE closed-vocabulary line. Installed as
-// a top-level sibling of resolve-evidence-policy.cjs under ~/.devflow/scripts/,
+// LOCAL layers, and prints them on ONE closed-vocabulary line. Installed as a
+// top-level sibling of resolve-evidence-policy.cjs under ~/.devflow/scripts/,
 // sharing its parser (lib/project-config.cjs).
 //
 // Usage: node resolve-settings.cjs [<dir>]      (<dir> defaults to cwd)
 //
 // The layers, in the order they are folded:
 //   project   <toplevel>/.devflow/project.json  team-committed, this worktree's copy
-//   personal  <toplevel>/.devflow/config.json   uncommitted, narrow-only
+//   default   refs/remotes/origin/<D>:.devflow/project.json
+//                                               the default branch's tracking copy —
+//                                               its compliance ids only (D-LENS-UNION)
+//   personal  <toplevel>/.devflow/config.json   untracked, narrow-only — a copy git
+//                                               tracks is ignored (D-PERSONAL-UNTRACKED)
 //   machine   ~/.devflow/manifest.json          the machine-wide install
 //
-// D-SETTINGS-LOCAL-ONLY: exactly ONE subprocess — `git rev-parse
-// --show-toplevel` — and never gh, never the network, never a git command that
-// refreshes the index. The team's evidence FLOOR is the default branch's and is
+// D-SETTINGS-LOCAL-ONLY: local git subprocesses only, and never gh, never the
+// network, never a git command that refreshes the index. At most four, in order:
+//   git rev-parse --show-toplevel                         always
+//   git ls-files --error-unmatch -- .devflow/config.json  only when config.json exists
+//   git symbolic-ref --quiet refs/remotes/origin/HEAD     in a repository
+//   git cat-file blob refs/remotes/origin/<D>:.devflow/project.json
+//                                                         only when origin/HEAD names D
+// The team's evidence FLOOR is the default branch's and is
 // resolve-evidence-policy.cjs's job (it runs over the network, from commands).
-// This script reads the WORKTREE's copy, so a branch that edits project.json
-// changes what it resolves for that branch: the compliance lens and the feature
-// switches can only gain scrutiny or narrow, and the team's review publication
-// can only lower it (D-PUBLICATION-CEILING) — a branch's `reviewPublication:
-// "full"` raises nothing, since only a personal value asks for more than `auto`.
-// The tracker (provider, site, key) is taken as the branch states it. It
-// WRITES NOTHING (applies ADR-024).
+// This script reads the WORKTREE's copy for every other key, so a branch that
+// edits project.json changes what it resolves for that branch: the feature
+// switches can only narrow, the compliance lens can only gain scrutiny — the
+// default branch's ids stay in it (D-LENS-UNION) — and the team's review
+// publication can only lower it (D-PUBLICATION-CEILING) — a branch's
+// `reviewPublication: "full"` raises nothing, since only a personal value asks
+// for more than `auto`. The tracker (provider, site, key) is taken as the
+// branch states it. It WRITES NOTHING (applies ADR-024).
 //
 // stdout is exactly one line plus "\n", or empty (D-SETTINGS-LINE):
 //   TRACKER=<github|jira|linear> TRACKER_SOURCE=<project|personal|machine|default>
@@ -36,9 +46,9 @@
 // reach stdout. Whole-file rule: a project.json or config.json that EXISTS but
 // cannot be read as a JSON object — unparseable, empty, not an object, a BOM,
 // not UTF-8, over MAX_CONFIG_BYTES, a symlink or other non-regular file — fails
-// every field closed except COMPLIANCE, which keeps the machine's own lens
-// (exit 0, the file named on stderr). Only keys inside a readable object are
-// classified one by one.
+// every field closed except COMPLIANCE, which keeps every lens a readable layer
+// declares (exit 0, the file named on stderr). Only keys inside a readable object
+// are classified one by one.
 //
 // Exit codes (a caller treats EVERY non-zero code as the fail-closed line):
 //   0  resolved — the line above, including the whole-file rule's line
@@ -55,7 +65,7 @@
 //   - main() returns {code, line} and never calls process.exit; the single
 //     `require.main === module` boundary is the only stdout write and the only
 //     exitCode assignment
-//   - the one subprocess is spawned with an argv array (never a shell), stdin
+//   - every subprocess is spawned with an argv array (never a shell), stdin
 //     ignored, a timeout and a maxBuffer
 //   - a config file that is not a regular file is never opened, and one over
 //     MAX_CONFIG_BYTES is never read
@@ -123,13 +133,16 @@ const EXIT_CODES = Object.freeze({
  * `compliance:["hipaa"]` must not read as "no file" — so every field takes its
  * SETTINGS_FAIL_CLOSED_LINE value, for the team project.json and the personal
  * config.json alike, EXCEPT COMPLIANCE. The review lens only adds scrutiny
- * (compliance = machine ∪ worktree), so a broken repository file must never lower
- * the machine's own lens: COMPLIANCE is the machine's ids when it has any, else
+ * (D-LENS-UNION), and a broken file affects only the keys it owns, so it never
+ * lowers a lens another layer declares: COMPLIANCE is the fold of the readable
+ * layers — the machine's ids, the default branch's, and the worktree
+ * project.json's when only config.json is broken (a personal file declares no
+ * compliance) — with an unreadable project.json read as a malformed declaration,
  * `generic`. That line prints with exit 0, the unreadable file named on stderr,
- * so a consumer that accepts only exit 0 acts on it; with no machine lens it is
- * exactly SETTINGS_FAIL_CLOSED_LINE, and so is an unreadable machine manifest,
- * which reads as no lens. Individually malformed keys inside a readable object
- * keep their per-key readings (AC-26).
+ * so a consumer that accepts only exit 0 acts on it; an unreadable project.json
+ * with no other lens anywhere is exactly SETTINGS_FAIL_CLOSED_LINE, and an
+ * unreadable machine manifest reads as no lens. Individually malformed keys
+ * inside a readable object keep their per-key readings (AC-26).
  */
 const SETTINGS_LINE_RE = new RegExp(
   '^TRACKER=(?<tracker>' + TRACKER_PROVIDER_IDS.join('|') + ')'
@@ -160,10 +173,21 @@ const SETTINGS_FAIL_CLOSED_LINE =
   'TRACKER=github TRACKER_SOURCE=default TRACKER_WARN=invalid SITE=none KEY=none '
   + 'REVIEW_PUBLICATION=off COMPLIANCE=generic MEMORY=on LEARNING=on KNOWLEDGE=off';
 
-/** Bound on the one git call. */
+/** Bound on each local git call. */
 const GIT_TIMEOUT_MS = 5000;
-/** rev-parse prints one short line. */
+/** rev-parse, ls-files and symbolic-ref print one short line. */
 const LINE_MAX_BUFFER = 4096;
+/**
+ * The tracking-copy read: one byte past the parser's bound, so an oversize blob
+ * either arrives whole and is refused by the parser, or overflows (ENOBUFS) and
+ * reads as unanswered — never truncated into something that parses.
+ */
+const BLOB_MAX_BUFFER = MAX_CONFIG_BYTES + 1;
+
+/** The personal file, repository-relative, in git's spelling. */
+const PERSONAL_REL = '.devflow/config.json';
+/** The team file, repository-relative, in git's spelling. */
+const PROJECT_REL = '.devflow/project.json';
 
 // ---------------------------------------------------------------------------
 // Shapes
@@ -185,14 +209,20 @@ const LINE_MAX_BUFFER = 4096;
  *   compliance: { enabled: boolean, frameworks: readonly string[] },
  *   switches: { memory: SwitchState, learning: SwitchState, knowledge: SwitchState },
  *   repoCompliance: readonly string[] | null,
+ *   defaultBranchCompliance: readonly string[] | null,
+ *   personalTracked: boolean,
  *   retiredPolicyFile: boolean,
  *   unreadable: 'project' | 'personal' | null,
  * }} Settings
  *   ok              false only for a fail-closed resolution — the whole-file
- *                   rule's included, which still carries the machine's lens
+ *                   rule's included, which still carries every readable lens
  *   compliance      enabled with no frameworks is `generic`
  *   repoCompliance  the worktree project.json's ids, or null when it declares
  *                   none (a malformed declaration reads as [] — generic)
+ *   defaultBranchCompliance  the default branch's tracking copy's ids, the same
+ *                   way — null when it declares none or there is no tracking copy
+ *   personalTracked .devflow/config.json is tracked by git and was ignored
+ *                   (D-PERSONAL-UNTRACKED); main() tells the user to untrack it
  *   retiredPolicyFile  the worktree holds the retired .devflow/policy.json (the
  *                   CLI prints a migration hint)
  *   unreadable      the first repository layer whose file exists but is
@@ -200,10 +230,25 @@ const LINE_MAX_BUFFER = 4096;
  *                   lens closed (the whole-file rule; project before personal);
  *                   null otherwise
  *
- * @typedef {{ project: object, personal: object, manifest: unknown, retiredPolicyFile: boolean }} SettingsInputs
+ * @typedef {{
+ *   project: object,
+ *   personal: object,
+ *   manifest: unknown,
+ *   retiredPolicyFile: boolean,
+ *   defaultBranch?: ComplianceField,
+ *   personalTracked?: boolean,
+ * }} SettingsInputs
  *   project/personal are lib/project-config.cjs ProjectConfig / PersonalConfig.
+ *   defaultBranch is the tracking copy's `compliance` field (absent when omitted).
+ *
+ * @typedef {{ kind: 'absent' } | { kind: 'malformed' } | { kind: 'valid', value: readonly string[] }} ComplianceField
+ *
+ * @typedef {{ project: object, personal: object, personalTracked: boolean }} RepoLayers
  *
  * @typedef {{ status: number | null, stdout?: Buffer | string, error?: { code?: string } }} ExecResult
+ * @typedef {{ answered: boolean, ok: boolean, stdout: Buffer }} GitAnswer
+ *   answered  git ran and exited on its own (no spawn error, timeout or overflow)
+ *   ok        answered with exit 0
  * @typedef {(file: string, args: string[], opts: object) => ExecResult} ExecFn
  * @typedef {{ dir: string, manifest?: unknown }} ResolveSettingsOptions
  *   `manifest` is an already-parsed ~/.devflow/manifest.json; omitted
@@ -226,6 +271,8 @@ const FAIL_CLOSED_SETTINGS = Object.freeze({
     knowledge: Object.freeze({ on: false, source: /** @type {SwitchSource} */ ('machine') }),
   }),
   repoCompliance: null,
+  defaultBranchCompliance: null,
+  personalTracked: false,
   retiredPolicyFile: false,
   unreadable: null,
 });
@@ -300,9 +347,10 @@ function machineCompliance(manifest) {
 // The fold (the functional core)
 //
 // The fold reads a file-level `invalid` field by field (fieldIn) so that it never
-// throws on any parser output. resolveSettings never folds such a file — the
-// whole-file rule fails it closed first — so that reading serves only the hooks'
-// switch gate, where an unreadable file narrows nothing.
+// throws on any parser output. resolveSettings folds such a file for the
+// compliance lens alone — an unreadable project.json is a malformed declaration,
+// `generic` — and fails every other field closed first (the whole-file rule); the
+// hooks' switch gate folds it whole, where an unreadable file narrows nothing.
 // ---------------------------------------------------------------------------
 
 /**
@@ -399,7 +447,8 @@ function foldTracker(project, personal, manifest) {
  * reads the worktree's project.json, so a contributor's branch committing
  * `"reviewPublication":"full"` would otherwise make a maintainer's local review
  * of that branch skip the visibility gate on a public repository. Only the
- * uncommitted personal value asks for `full`. A malformed team value (or an
+ * uncommitted personal value asks for `full` — and a config.json git tracks is
+ * not personal, so it never reaches this fold (D-PERSONAL-UNTRACKED). A malformed team value (or an
  * unreadable project.json) is `off` — a ceiling that cannot be read is the
  * lowest one. A malformed personal value is ignored, as readConfig ignores it,
  * and so resolves `auto`.
@@ -421,27 +470,57 @@ function foldPublication(project, personal) {
 }
 
 /**
- * Compliance lens: machine ∪ worktree. `off` only when the machine is off AND
- * the worktree declares nothing; a malformed worktree declaration (or an
- * unreadable project.json) is `generic` — the lens runs with no framework
- * reference, never silently not at all. The lens only adds scrutiny, so the
- * worktree's copy is the right one: a branch that deletes its key drops only its
- * own lens, and the evidence floor still comes from the default branch.
+ * The ids a compliance field declares: its registry ids when valid, [] (generic)
+ * when malformed, null when absent.
+ *
+ * @param {ComplianceField} field
+ * @returns {readonly string[] | null}
+ */
+function declaredIds(field) {
+  if (field.kind === 'valid') return field.value;
+  return field.kind === 'malformed' ? Object.freeze([]) : null;
+}
+
+/**
+ * D-LENS-UNION: the compliance lens is
+ *   machine ∪ default branch ∪ worktree
+ * — the machine's ids, the default branch's project.json ids (its local tracking
+ * copy, refs/remotes/origin/<D>), and the worktree project.json's. The lens only
+ * adds scrutiny, so no layer can take a framework away from another: a branch can
+ * ADD a framework in its own project.json, and can never REMOVE one the default
+ * branch declares — a PR that deletes `compliance:["hipaa"]` is still reviewed
+ * under hipaa. The default branch's copy is read locally, never over the network
+ * (D-SETTINGS-LOCAL-ONLY), so it is as fresh as the last fetch; with no tracking
+ * copy the lens is machine ∪ worktree. `off` only when no layer declares
+ * anything; a malformed declaration in either repository copy — an unreadable
+ * file, or a tracking copy git could not read — is `generic`: the lens runs with
+ * no framework reference, never silently not at all. The evidence floor is not
+ * this lens's to decide (resolve-evidence-policy.cjs).
  *
  * @param {any} project
  * @param {unknown} manifest
- * @returns {{ compliance: Settings['compliance'], repoCompliance: readonly string[] | null }}
+ * @param {ComplianceField} defaultBranch
+ * @returns {{ compliance: Settings['compliance'], repoCompliance: readonly string[] | null, defaultBranchCompliance: readonly string[] | null }}
  */
-function foldCompliance(project, manifest) {
+function foldCompliance(project, manifest, defaultBranch) {
   const machine = machineCompliance(manifest);
-  const repoField = fieldIn(project, 'compliance', 'malformed');
-  /** @type {readonly string[] | null} */
-  const repo = repoField.kind === 'valid' ? repoField.value : repoField.kind === 'malformed' ? Object.freeze([]) : null;
-  if (machine === null && repo === null) {
-    return { compliance: Object.freeze({ enabled: false, frameworks: Object.freeze([]) }), repoCompliance: null };
+  const repo = declaredIds(fieldIn(project, 'compliance', 'malformed'));
+  const base = declaredIds(defaultBranch);
+  if (machine === null && repo === null && base === null) {
+    return {
+      compliance: Object.freeze({ enabled: false, frameworks: Object.freeze([]) }),
+      repoCompliance: null,
+      defaultBranchCompliance: null,
+    };
   }
-  const union = COMPLIANCE_IDS.filter(id => (machine !== null && machine.includes(id)) || (repo !== null && repo.includes(id)));
-  return { compliance: Object.freeze({ enabled: true, frameworks: Object.freeze(union) }), repoCompliance: repo };
+  /** @param {readonly string[] | null} ids @param {string} id */
+  const has = (ids, id) => ids !== null && ids.includes(id);
+  const union = COMPLIANCE_IDS.filter(id => has(machine, id) || has(base, id) || has(repo, id));
+  return {
+    compliance: Object.freeze({ enabled: true, frameworks: Object.freeze(union) }),
+    repoCompliance: repo,
+    defaultBranchCompliance: base,
+  };
 }
 
 /**
@@ -471,26 +550,32 @@ function foldSwitch(project, personal, manifest, feature) {
 
 /**
  * The whole-file rule's resolution (D-SETTINGS-LINE): the fail-closed values,
- * naming the layer whose file could not be read, except the compliance lens,
- * which is the machine's own ids when it has any and `generic` otherwise — a
- * broken repository file never lowers the machine's lens.
+ * naming the layer whose file could not be read, except the compliance lens —
+ * a broken file affects only the keys it owns, so the lens stays the fold of
+ * every readable layer (D-LENS-UNION). An unreadable project.json declares
+ * nothing readable of its own (repoCompliance null) but reads as a malformed
+ * declaration, so its lens is at least `generic`; an unreadable config.json
+ * owns no compliance at all, so the worktree project.json's ids still count.
  *
  * @param {'project' | 'personal'} layer
- * @param {unknown} manifest
+ * @param {SettingsInputs} inputs
  * @returns {Settings}
  */
-function unreadableSettings(layer, manifest) {
-  const machine = machineCompliance(manifest);
-  const frameworks = machine === null ? [] : COMPLIANCE_IDS.filter(id => machine.includes(id));
+function unreadableSettings(layer, inputs) {
+  const defaultBranch = inputs.defaultBranch === undefined ? ABSENT_FIELD : inputs.defaultBranch;
+  const lens = foldCompliance(inputs.project, inputs.manifest, defaultBranch);
   return Object.freeze({
     ...FAIL_CLOSED_SETTINGS,
-    compliance: Object.freeze({ enabled: true, frameworks: Object.freeze(frameworks) }),
+    compliance: lens.compliance,
+    repoCompliance: layer === 'project' ? null : lens.repoCompliance,
+    defaultBranchCompliance: lens.defaultBranchCompliance,
+    personalTracked: inputs.personalTracked === true,
     unreadable: layer,
   });
 }
 
 /**
- * Fold the three layers into Settings. Pure; never throws on any parser output.
+ * Fold the layers into Settings. Pure; never throws on any parser output.
  *
  * @param {SettingsInputs} inputs
  * @returns {Settings}
@@ -498,18 +583,20 @@ function unreadableSettings(layer, manifest) {
 function foldSettings(inputs) {
   const { project, personal, manifest } = inputs;
   const tracker = foldTracker(project, personal, manifest);
-  const { compliance, repoCompliance } = foldCompliance(project, manifest);
+  const lens = foldCompliance(project, manifest, inputs.defaultBranch === undefined ? ABSENT_FIELD : inputs.defaultBranch);
   return Object.freeze({
     ok: true,
     ...tracker,
     reviewPublication: foldPublication(project, personal),
-    compliance,
+    compliance: lens.compliance,
     switches: Object.freeze({
       memory: foldSwitch(project, personal, manifest, 'memory'),
       learning: foldSwitch(project, personal, manifest, 'learning'),
       knowledge: foldSwitch(project, personal, manifest, 'knowledge'),
     }),
-    repoCompliance,
+    repoCompliance: lens.repoCompliance,
+    defaultBranchCompliance: lens.defaultBranchCompliance,
+    personalTracked: inputs.personalTracked === true,
     retiredPolicyFile: inputs.retiredPolicyFile === true,
     unreadable: null,
   });
@@ -529,7 +616,33 @@ function defaultExec(file, args, opts) {
 }
 
 /**
- * THE one subprocess: the repository root of `dir`.
+ * One bounded local git call, normalized. The argv is a fresh copy, so an exec
+ * cannot mutate a caller's constant.
+ *
+ * @param {ExecFn} exec
+ * @param {string} cwd
+ * @param {readonly string[]} args
+ * @param {number} maxBuffer
+ * @returns {GitAnswer}
+ */
+function runGit(exec, cwd, args, maxBuffer) {
+  const res = exec('git', [...args], {
+    cwd,
+    env: Object.assign({}, process.env, { GIT_TERMINAL_PROMPT: '0' }),
+    stdio: ['ignore', 'pipe', 'pipe'],
+    timeout: GIT_TIMEOUT_MS,
+    maxBuffer,
+    windowsHide: true,
+    shell: false,
+  });
+  const answered = Boolean(res) && !res.error && typeof res.status === 'number';
+  const raw = res ? res.stdout : undefined;
+  const stdout = Buffer.isBuffer(raw) ? raw : typeof raw === 'string' ? Buffer.from(raw, 'utf8') : Buffer.alloc(0);
+  return { answered, ok: answered && res.status === 0, stdout };
+}
+
+/**
+ * The repository root of `dir`.
  *   root     exit 0 with exactly one absolute path plus its newline
  *   none     git ANSWERED non-zero — not a repository; only the machine layer applies
  *   unknown  git did not answer, or answered 0 with an unusable path ⇒ fail closed
@@ -539,21 +652,36 @@ function defaultExec(file, args, opts) {
  * @returns {{ kind: 'root', root: string } | { kind: 'none' } | { kind: 'unknown' }}
  */
 function gitToplevel(exec, dir) {
-  const res = exec('git', ['rev-parse', '--show-toplevel'], {
-    cwd: dir,
-    env: Object.assign({}, process.env, { GIT_TERMINAL_PROMPT: '0' }),
-    stdio: ['ignore', 'pipe', 'pipe'],
-    timeout: GIT_TIMEOUT_MS,
-    maxBuffer: LINE_MAX_BUFFER,
-    windowsHide: true,
-    shell: false,
-  });
-  if (!res || res.error || typeof res.status !== 'number') return { kind: 'unknown' };
-  if (res.status !== 0) return { kind: 'none' };
-  const out = Buffer.isBuffer(res.stdout) ? res.stdout.toString('utf8') : typeof res.stdout === 'string' ? res.stdout : '';
-  const text = out.replace(/\r?\n$/, '');
+  const res = runGit(exec, dir, ['rev-parse', '--show-toplevel'], LINE_MAX_BUFFER);
+  if (!res.answered) return { kind: 'unknown' };
+  if (!res.ok) return { kind: 'none' };
+  const text = res.stdout.toString('utf8').replace(/\r?\n$/, '');
   if (text === '' || /[\r\n\0]/.test(text) || !path.isAbsolute(text)) return { kind: 'unknown' };
   return { kind: 'root', root: text };
+}
+
+/**
+ * D-PERSONAL-UNTRACKED: `.devflow/config.json` holds PERSONAL settings — the one
+ * layer that may ask for `reviewPublication: "full"` — so a copy git TRACKS is
+ * not personal: a contributor's branch that commits one (`git add -f`) would
+ * otherwise lift a maintainer's local run of that branch past the publication
+ * ceiling. A tracked copy is ignored entirely, exactly as if absent, and main()
+ * tells the user to untrack it. The check is `git ls-files --error-unmatch`,
+ * which reads the index without refreshing it (no fsmonitor, no write):
+ *   tracked    exit 0
+ *   untracked  any other answered exit (1: no such index entry; outside a
+ *              repository git answers 128, and there is nothing to track)
+ *   unknown    git did not answer — whether the file is personal cannot be
+ *              known, so it is unreadable and its keys fail closed
+ *
+ * @param {ExecFn} exec
+ * @param {string} root
+ * @returns {'tracked' | 'untracked' | 'unknown'}
+ */
+function personalTracking(exec, root) {
+  const res = runGit(exec, root, ['ls-files', '--error-unmatch', '--', PERSONAL_REL], LINE_MAX_BUFFER);
+  if (!res.answered) return 'unknown';
+  return res.ok ? 'tracked' : 'untracked';
 }
 
 /**
@@ -572,25 +700,6 @@ function readConfigFile(filePath, parse) {
 }
 
 /**
- * The two repository layers under `<root>/.devflow`, each read and classified by
- * readConfigFile. Exported for the hooks' one parser fork (queue_read_gates in
- * scripts/hooks/queue-append, D-FEATURES-NARROW-ONLY): a file the shell fast path
- * hands over is read by exactly the code resolveSettings reads it with, so the two
- * cannot disagree about a symlink, a size, a BOM or a duplicated key. Makes no
- * subprocess; never throws on a missing or unreadable file.
- *
- * @param {string} root
- * @returns {{ project: object, personal: object }}
- */
-function readRepoLayers(root) {
-  const devflow = path.join(root, '.devflow');
-  return Object.freeze({
-    project: readConfigFile(path.join(devflow, 'project.json'), projectConfig.parseProjectBytes),
-    personal: readConfigFile(path.join(devflow, 'config.json'), projectConfig.parsePersonalBytes),
-  });
-}
-
-/**
  * Whether anything exists at `filePath` (never followed, never opened).
  *
  * @param {string} filePath
@@ -606,11 +715,66 @@ function existsNoFollow(filePath) {
 }
 
 /**
+ * The two repository layers under `<root>/.devflow`, each read and classified by
+ * readConfigFile. Exported for the hooks' one parser fork (queue_read_gates in
+ * scripts/hooks/queue-append, D-FEATURES-NARROW-ONLY): a file the shell fast path
+ * hands over is read by exactly the code resolveSettings reads it with, so the two
+ * cannot disagree about a symlink, a size, a BOM, a duplicated key — or a
+ * config.json git tracks (D-PERSONAL-UNTRACKED), which is absent to both. Its only
+ * subprocess is that tracking check, made only when config.json exists; never
+ * throws on a missing or unreadable file.
+ *
+ * @param {string} root
+ * @param {{ exec?: ExecFn }} [deps]
+ * @returns {RepoLayers}
+ */
+function readRepoLayers(root, deps) {
+  const exec = deps && typeof deps.exec === 'function' ? deps.exec : defaultExec;
+  const devflow = path.join(root, '.devflow');
+  const project = readConfigFile(path.join(devflow, 'project.json'), projectConfig.parseProjectBytes);
+  const personalPath = path.join(devflow, 'config.json');
+  const tracking = existsNoFollow(personalPath) ? personalTracking(exec, root) : 'untracked';
+  const personal = tracking === 'tracked' ? projectConfig.parsePersonalBytes(null)
+    : tracking === 'unknown' ? Object.freeze({ kind: 'invalid' })
+      : readConfigFile(personalPath, projectConfig.parsePersonalBytes);
+  return Object.freeze({ project, personal, personalTracked: tracking === 'tracked' });
+}
+
+/**
+ * The default branch's `compliance` declaration, from its LOCAL tracking copy
+ * (D-LENS-UNION, D-SETTINGS-LOCAL-ONLY): origin/HEAD names the branch D, and
+ * `refs/remotes/origin/<D>:.devflow/project.json` is read through the same
+ * parser. The lens only adds, so every state that cannot be read is a malformed
+ * declaration (`generic`), never "declares nothing" (avoids PF-075):
+ *   absent     origin/HEAD is not recorded, or D holds no project.json
+ *   malformed  a git call did not answer, origin/HEAD names no safe branch, the
+ *              blob overflows its bound, the file is unreadable, or its
+ *              `compliance` value is malformed
+ *   valid      the registry ids it declares
+ *
+ * @param {ExecFn} exec
+ * @param {string} root
+ * @returns {ComplianceField}
+ */
+function defaultBranchCompliance(exec, root) {
+  const head = runGit(exec, root, ['symbolic-ref', '--quiet', 'refs/remotes/origin/HEAD'], LINE_MAX_BUFFER);
+  if (!head.answered) return MALFORMED_FIELD;
+  if (!head.ok) return ABSENT_FIELD;
+  const branch = projectConfig.parseOriginHeadRef(head.stdout.toString('utf8'));
+  if (branch === null) return MALFORMED_FIELD;
+  const blob = runGit(exec, root,
+    ['cat-file', 'blob', projectConfig.ORIGIN_TRACKING_PREFIX + branch + ':' + PROJECT_REL], BLOB_MAX_BUFFER);
+  if (!blob.answered) return MALFORMED_FIELD;
+  if (!blob.ok) return ABSENT_FIELD;
+  return fieldIn(projectConfig.parseProjectBytes(blob.stdout), 'compliance', 'malformed');
+}
+
+/**
  * Resolve the settings for `opts.dir`. Never throws: a git that cannot say
  * whether `opts.dir` is in a repository, or any internal failure, is the
  * fail-closed resolution, which main() maps to exit 4. A repository file that
- * exists but is unreadable fails every field closed but the machine's compliance
- * lens, naming its layer in `unreadable` (the whole-file rule, D-SETTINGS-LINE);
+ * exists but is unreadable fails every field closed but the compliance lens,
+ * naming its layer in `unreadable` (the whole-file rule, D-SETTINGS-LINE);
  * main() prints that line with exit 0.
  *
  * @param {ResolveSettingsOptions} opts
@@ -627,15 +791,19 @@ function resolveSettings(opts, deps) {
       const none = projectConfig.parseProjectBytes(null);
       return foldSettings({ project: none, personal: none, manifest, retiredPolicyFile: false });
     }
-    const { project, personal } = readRepoLayers(toplevel.root);
-    if (project.kind === 'invalid') return unreadableSettings('project', manifest);
-    if (personal.kind === 'invalid') return unreadableSettings('personal', manifest);
-    return foldSettings({
-      project,
-      personal,
+    const layers = readRepoLayers(toplevel.root, { exec });
+    /** @type {SettingsInputs} */
+    const inputs = {
+      project: layers.project,
+      personal: layers.personal,
+      personalTracked: layers.personalTracked,
       manifest,
+      defaultBranch: defaultBranchCompliance(exec, toplevel.root),
       retiredPolicyFile: existsNoFollow(path.join(toplevel.root, '.devflow', 'policy.json')),
-    });
+    };
+    if (layers.project.kind === 'invalid') return unreadableSettings('project', inputs);
+    if (layers.personal.kind === 'invalid') return unreadableSettings('personal', inputs);
+    return foldSettings(inputs);
   } catch (_) {
     return FAIL_CLOSED_SETTINGS;
   }
@@ -816,9 +984,14 @@ function main(argv, deps) {
     return { code: EXIT_CODES.INPUT_UNUSABLE, line: SETTINGS_FAIL_CLOSED_LINE };
   }
   const settings = resolveSettings({ dir: args.dir }, { exec: d.exec });
+  if (settings.personalTracked) {
+    process.stderr.write('resolve-settings: warning: ' + PERSONAL_REL + ' is tracked by git, so it is ignored'
+      + ' — it holds personal settings; untrack it with: git rm --cached ' + PERSONAL_REL + '\n');
+  }
   if (settings.unreadable !== null) {
-    process.stderr.write('resolve-settings: .devflow/' + (settings.unreadable === 'project' ? 'project.json' : 'config.json')
-      + ' exists but is not a readable JSON object — failing closed, keeping the machine compliance lens\n');
+    process.stderr.write('resolve-settings: ' + (settings.unreadable === 'project' ? PROJECT_REL : PERSONAL_REL)
+      + ' exists but could not be read (not a JSON object, or git could not say whether it is tracked)'
+      + ' — failing its fields closed, keeping every readable compliance lens\n');
   } else if (!settings.ok) {
     process.stderr.write('resolve-settings: could not resolve (git did not answer, or an internal error) — failing closed\n');
     return { code: EXIT_CODES.INTERNAL_ERROR, line: SETTINGS_FAIL_CLOSED_LINE };
