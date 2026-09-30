@@ -63,6 +63,8 @@ export interface FenceRow {
   readonly mustWrite: boolean
   /** State the row needs before its before-walk, e.g. a queue to clear. */
   readonly seed?: (sb: Sandbox) => void
+  /** Names the row apart from another row with the same args. */
+  readonly label?: string
 }
 
 const SETTINGS = '<HOME>/.claude/settings.json'
@@ -167,7 +169,7 @@ export const FENCE_ROWS: readonly FenceRow[] = [
   // Already installed by init's `--security user`: re-enabling may restamp the manifest only.
   { args: ['security', '--enable', '--user'], allow: [SETTINGS, MANIFEST], mustWrite: false },
   // From no deny list: enabling installs it in the user settings and records `user`.
-  { args: ['security', '--enable', '--user'], allow: [SETTINGS, MANIFEST], mustWrite: true, seed: seedNoDenyList },
+  { args: ['security', '--enable', '--user'], allow: [SETTINGS, MANIFEST], mustWrite: true, seed: seedNoDenyList, label: 'from no deny list' },
   { args: ['security', '--status'], allow: NONE, mustWrite: false },
 
   { args: ['flags', '--disable', 'tui'], allow: [SETTINGS, MANIFEST], mustWrite: true },
@@ -249,7 +251,8 @@ export function allowlistSize(rows: readonly FenceRow[]): number {
   return new Set(rows.flatMap(r => r.allow)).size
 }
 
-const rowName = (row: FenceRow): string => `devflow ${row.args.map(a => (a === '' ? '""' : a)).join(' ')}`
+const rowName = (row: FenceRow): string =>
+  `devflow ${row.args.map(a => (a === '' ? '""' : a)).join(' ')}${row.label ? ` (${row.label})` : ''}`
 
 // ── Tests ───────────────────────────────────────────────────────────────────
 
