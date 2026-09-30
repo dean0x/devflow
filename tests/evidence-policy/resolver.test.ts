@@ -1497,6 +1497,33 @@ describe('real git (gh faked unavailable, git real)', SUBPROCESS_TIMEOUT, () => 
       .toBe(`EVIDENCE_POLICY=required SOURCE=default REF=main WARN=remote-unavailable,pr-changes-policy ${LINE.requiredInputs}`);
   });
 
+  it('D-OFFLINE-ORIGIN-HEAD: origin gone, the clone\'s recorded origin/HEAD still names main — a lower branch is raised', () => {
+    // A real clone records refs/remotes/origin/HEAD; then origin disappears, so gh
+    // and ls-remote both fail and only the local symref names the default branch.
+    repoWithOrigin(BODY.required);
+    const bare = path.join(tmp, 'origin.git');
+    const clone = path.join(tmp, 'clone');
+    realGit(tmp, home, ['clone', '--quiet', bare, clone]);
+    expect(realGit(clone, home, ['symbolic-ref', '--quiet', 'refs/remotes/origin/HEAD'])).toBe('refs/remotes/origin/main\n');
+    realGit(clone, home, ['checkout', '--quiet', '-b', 'lower']);
+    writeWorktree(clone, BODY.standard);
+    realGit(clone, home, ['commit', '--quiet', '-am', 'lower']);
+    fs.renameSync(bare, path.join(tmp, 'origin-gone.git'));
+
+    const run = runReal(clone);
+    expect(run.status, run.stderr).toBe(0);
+    expect(expectOneGrammarLine(run.stdout))
+      .toBe(`EVIDENCE_POLICY=required SOURCE=worktree REF=main WARN=remote-unavailable,pr-changes-policy ${LINE.requiredInputs}`);
+
+    // Control — the residual case: with origin/HEAD unrecorded nothing names main,
+    // so the branch's own file governs. The symref alone made the difference above.
+    realGit(clone, home, ['symbolic-ref', '--delete', 'refs/remotes/origin/HEAD']);
+    const residual = runReal(clone);
+    expect(residual.status, residual.stderr).toBe(0);
+    expect(expectOneGrammarLine(residual.stdout))
+      .toBe(`EVIDENCE_POLICY=standard SOURCE=worktree REF=none WARN=remote-unavailable ${LINE.standardInputs}`);
+  });
+
   it('a branch in sync with the tracking copy fires nothing', () => {
     const work = repoWithOrigin(BODY.standard);
     const run = runReal(work);
