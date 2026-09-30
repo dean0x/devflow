@@ -5,10 +5,19 @@ import type { GitStatus } from './types.js';
 const GIT_TIMEOUT = 1000; // 1s per command
 const GIT_MAXBUFFER = 16 * 1024 * 1024; // 16 MiB — covers >500k refs at ~30 B/ref
 
-function shellExec(cmd: string, args: string[], cwd: string): Promise<string> {
+/**
+ * How a call's stdout is cleaned. `both` trims the whole output — right for a
+ * single value (a ref, a count, a config answer). `trailing` keeps leading
+ * whitespace, for `status --porcelain`, whose first column is data: an unstaged
+ * edit prints ` M path`, and a full trim would shift `M` into the index column.
+ */
+type StdoutTrim = 'both' | 'trailing';
+
+function shellExec(cmd: string, args: string[], cwd: string, trim: StdoutTrim = 'both'): Promise<string> {
   return new Promise((resolve) => {
     execFile(cmd, args, { cwd, timeout: GIT_TIMEOUT, maxBuffer: GIT_MAXBUFFER }, (err, stdout) => {
-      resolve(err ? '' : stdout.trim());
+      if (err) return resolve('');
+      resolve(trim === 'trailing' ? stdout.trimEnd() : stdout.trim());
     });
   });
 }
@@ -55,8 +64,13 @@ export function fsmonitorOverride(fsmonitorConfig: string): readonly string[] {
  * The HUD's index reads (`status`, `diff`): the override unless this refresh's
  * `core.fsmonitor` read named the built-in daemon (`fsmonitorOverride`).
  */
-function gitIndexRead(args: string[], cwd: string, fsmonitorConfig: string): Promise<string> {
-  return shellExec('git', [...fsmonitorOverride(fsmonitorConfig), ...args], cwd);
+function gitIndexRead(
+  args: string[],
+  cwd: string,
+  fsmonitorConfig: string,
+  trim: StdoutTrim = 'both',
+): Promise<string> {
+  return shellExec('git', [...fsmonitorOverride(fsmonitorConfig), ...args], cwd, trim);
 }
 
 /**
@@ -86,6 +100,7 @@ export async function gatherGitStatus(cwd: string): Promise<GitStatus | null> {
     ['--no-optional-locks', 'status', '--porcelain'],
     cwd,
     fsmonitorConfig,
+    'trailing',
   );
   let dirty = false;
   let staged = false;

@@ -972,3 +972,35 @@ describe('gatherGitStatus — never runs the repository\'s core.fsmonitor hook (
     }
   });
 });
+
+describe('gatherGitStatus — porcelain status keeps its leading column', () => {
+  /**
+   * `git status --porcelain` prints an unstaged edit as ` M path` — a blank index
+   * column, then the worktree column. Trimming the whole output removes the first
+   * line's leading blank, shifting `M` into the index column: an unstaged-only
+   * edit then reads as staged and the tree as clean.
+   */
+  it('an unstaged edit to a tracked file alone reads dirty and unstaged, not staged', async () => {
+    const base = mkdtempSync(join(tmpdir(), 'hud-porcelain-'));
+    const repo = join(base, 'repo');
+    try {
+      mkdirSync(repo);
+      git(repo, ['init', '-q', '-b', 'main']);
+      writeFileSync(join(repo, 'tracked.txt'), 'one\n');
+      git(repo, ['add', 'tracked.txt']);
+      git(repo, ['commit', '-q', '-m', 'init']);
+      writeFileSync(join(repo, 'tracked.txt'), 'one\ntwo\n');
+
+      vi.stubEnv('HOME', join(base, 'home'));
+      vi.stubEnv('GIT_CONFIG_NOSYSTEM', '1');
+      vi.stubEnv('GIT_CONFIG_GLOBAL', '/dev/null');
+      const status = await gatherGitStatus(repo);
+
+      expect(status?.dirty).toBe(true);
+      expect(status?.staged).toBe(false);
+    } finally {
+      vi.unstubAllEnvs();
+      rmSync(base, { recursive: true, force: true });
+    }
+  });
+});
