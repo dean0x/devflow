@@ -6,7 +6,9 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { promises as fs } from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import { pruneHookLogDirs, MAX_HOOK_LOG_DIRS } from '../../src/core/hook-log-dirs.js';
+import {
+  pruneHookLogDirs, MAX_HOOK_LOG_DIRS, MAX_LOG_DIRS_PRUNED_PER_RUN, MAX_LOG_DIRS_SCANNED,
+} from '../../src/core/hook-log-dirs.js';
 
 let root: string;
 let logs: string;
@@ -69,6 +71,17 @@ describe('pruneHookLogDirs', () => {
 
     const second = await pruneHookLogDirs(logs, { keep: 2, maxRemovals: 100 });
     expect(second).toEqual({ ok: true, value: { removed: 5, overCap: 0 } });
+    expect(await remaining()).toEqual(['d0', 'd1']);
+  });
+
+  it('one run with the default bounds clears every scanned folder beyond the cap', async () => {
+    // The removal bound is the scan bound, so a backlog one init can read is gone after that init.
+    expect(MAX_LOG_DIRS_PRUNED_PER_RUN).toBe(MAX_LOG_DIRS_SCANNED);
+    for (let i = 0; i < 12; i++) await seedDir(`d${i}`, i + 1);
+
+    const result = await pruneHookLogDirs(logs, { keep: 2 });
+
+    expect(result).toEqual({ ok: true, value: { removed: 10, overCap: 0 } });
     expect(await remaining()).toEqual(['d0', 'd1']);
   });
 

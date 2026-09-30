@@ -405,7 +405,8 @@ that reset those would really disable them everywhere.
 Hooks log under `~/.devflow/logs/<cwd-slug>/`, one folder per working directory (31k observed on
 one machine). `devflow init` prunes to `MAX_HOOK_LOG_DIRS` = 200 (`src/core/hook-log-dirs.ts`),
 oldest first by the newest mtime among a folder and its logs, reading at most 100,000 folders
-and removing at most 10,000 per run. `log-paths`' `devflow_log_dir` prunes too, but ONLY when it
+a run and removing every one of them beyond the cap (removal bound = scan bound), so one init
+clears the backlog it read. `log-paths`' `devflow_log_dir` prunes too, but ONLY when it
 creates a new folder (the common path costs nothing): one `ls -1At`, at most 50 removed per
 call, bash 3.2, no node, a candidate spared when any of its first 64 entries is newer than the
 oldest kept folder (`-nt`). `debug-trace`'s `devflow_debug_set_cwd` takes its per-project folder

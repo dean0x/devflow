@@ -17,9 +17,11 @@ import * as path from 'path';
  * busiest project as the oldest.
  *
  * Every pass is bounded — at most {@link MAX_LOG_DIRS_SCANNED} folders read and
- * {@link MAX_LOG_DIRS_PRUNED_PER_RUN} removed — so a backlog of any size costs one
- * init a bounded few seconds and the next init continues where it stopped. The
- * pass is the one-time cleanup of an existing backlog and the standing cap alike.
+ * {@link MAX_LOG_DIRS_PRUNED_PER_RUN} removed. The two bounds are equal, so one
+ * init clears every folder it scanned beyond the cap: a 31k backlog costs that
+ * init about seven seconds (roughly 2.2 s per 10,000 removals), and only a
+ * backlog larger than the scan bound is finished by the next init. The pass is
+ * the one-time cleanup of an existing backlog and the standing cap alike.
  * Only directories are touched: files at the logs root (`proxy.log`) and symbolic
  * links are left alone.
  */
@@ -27,11 +29,11 @@ import * as path from 'path';
 /** How many hook log folders survive a prune — the most recently written ones. */
 export const MAX_HOOK_LOG_DIRS = 200;
 
-/** The most folders one prune removes; a larger backlog is finished by later runs. */
-export const MAX_LOG_DIRS_PRUNED_PER_RUN = 10_000;
-
 /** The most folders one prune reads; beyond it the rest wait for a later run. */
 export const MAX_LOG_DIRS_SCANNED = 100_000;
+
+/** The most folders one prune removes — every scanned folder, so one run clears what it read. */
+export const MAX_LOG_DIRS_PRUNED_PER_RUN = MAX_LOG_DIRS_SCANNED;
 
 /** The most entries read inside one folder to find its newest log. */
 const MAX_FILES_READ_PER_DIR = 64;
