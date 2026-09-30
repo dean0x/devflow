@@ -7,6 +7,7 @@ import color from 'picocolors';
 import { resolveInstallationPaths } from '../../targets/claude-code/claude-paths.js';
 import { getGitRoot } from '../../core/git.js';
 import { isSameLocation, withoutHomeRoots } from '../../core/same-location.js';
+import { pruneHookLogDirs, MAX_HOOK_LOG_DIRS, type LogDirPruneReport } from '../../core/hook-log-dirs.js';
 import { getLedgerRoot } from '../../core/ledger-root.js';
 import { installViaFileCopy, composeScripts, type InstallReport } from '../../targets/claude-code/installer.js';
 import { formatOverlaySummary, formatSkillScopeSummary, formatTrackerAssetSummary, isPluginListUnchanged, type SummaryLine } from './install-report.js';
@@ -613,6 +614,13 @@ export function resolveRetiredScopeOption(scope: string | undefined): RetiredSco
     kind: 'refuse',
     message: `Unknown --scope value "${scope}": Devflow installs machine-wide only (omit --scope).`,
   };
+}
+
+/** The line init prints after removing old hook log folders (D-LOG-DIR-CAP). Pure. */
+export function formatLogPruneLine(report: LogDirPruneReport): string {
+  const base = `Removed ${report.removed} old hook log folder${report.removed === 1 ? '' : 's'} ` +
+    `(keeping the ${MAX_HOOK_LOG_DIRS} most recent)`;
+  return report.overCap > 0 ? `${base}; ${report.overCap} more go on the next init` : base;
 }
 
 /**
@@ -2472,6 +2480,15 @@ export const initCommand = new Command('init')
       learningEnabled,
       manifestWritten: trackerLifecycle.manifestWritten,
     });
+
+    // The hooks' per-directory log folders, capped (D-LOG-DIR-CAP): one bounded
+    // pass, so a large backlog is worked off over successive inits.
+    const logPrune = await pruneHookLogDirs(path.join(devflowDir, 'logs'));
+    if (!logPrune.ok) {
+      if (verbose) p.log.warn(`Could not prune hook log folders: ${logPrune.error}`);
+    } else if (logPrune.value.removed > 0) {
+      p.log.info(formatLogPruneLine(logPrune.value));
+    }
 
     // Name the active provider and what the selection moved. The reference
     // counts come from the install report rather than being recomputed: the

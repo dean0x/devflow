@@ -9,6 +9,9 @@
  *   D-INIT-DOWNGRADE-WARN — when the manifest was written by a newer devflow
  *   than the running CLI, init warns, naming both versions, and still installs.
  *
+ *   D-LOG-DIR-CAP — init trims ~/.devflow/logs to the MAX_HOOK_LOG_DIRS most
+ *   recently written hook log folders.
+ *
  * Every spawn runs under a temp HOME built by `sandboxEnv`, which refuses a real
  * home before anything runs (PF-060). Requires a build (`requireBuiltCli`).
  */
@@ -22,6 +25,7 @@ import { makeManifest, requireBuiltCli, sandboxEnv } from './helpers.js';
 import { withoutHomeRoots } from '../src/core/same-location.js';
 import { formatDowngradeWarning } from '../src/cli/commands/init.js';
 import { detectUpgrade } from '../src/core/manifest.js';
+import { MAX_HOOK_LOG_DIRS } from '../src/core/hook-log-dirs.js';
 
 const CLI = requireBuiltCli();
 
@@ -143,5 +147,36 @@ describe('D-INIT-DOWNGRADE-WARN', () => {
     } finally {
       await fs.rm(nonGit, { recursive: true, force: true });
     }
+  }, SUBPROCESS_TIMEOUT_MS);
+});
+
+describe('D-LOG-DIR-CAP: init caps the hook log folders', () => {
+  it('removes the oldest folders beyond the cap and keeps the newest', async () => {
+    const logs = path.join(home, '.devflow', 'logs');
+    const extra = 5;
+    for (let i = 0; i < MAX_HOOK_LOG_DIRS + extra; i++) {
+      const dir = path.join(logs, `var-folders-test-${String(i).padStart(4, '0')}`);
+      await fs.mkdir(dir, { recursive: true });
+      await fs.writeFile(path.join(dir, '.capture-turn.log'), 'x\n');
+      // Folder i is i minutes old: the highest indices are the oldest.
+      const at = new Date(Date.now() - i * 60_000);
+      await fs.utimes(path.join(dir, '.capture-turn.log'), at, at);
+      await fs.utimes(dir, at, at);
+    }
+    await fs.writeFile(path.join(logs, 'proxy.log'), 'proxy\n');
+    const nonGit = await fs.mkdtemp(path.join(os.tmpdir(), 'df-init-guards-cwd-'));
+    try {
+      const run = runInit(nonGit);
+      expect(run.status, run.out).toBe(0);
+      expect(run.out).toContain(`Removed ${extra} old hook log folders`);
+    } finally {
+      await fs.rm(nonGit, { recursive: true, force: true });
+    }
+
+    const left = (await fs.readdir(logs, { withFileTypes: true })).filter(e => e.isDirectory()).map(e => e.name);
+    expect(left).toHaveLength(MAX_HOOK_LOG_DIRS);
+    expect(left).toContain('var-folders-test-0000');
+    expect(left).not.toContain(`var-folders-test-${String(MAX_HOOK_LOG_DIRS + extra - 1).padStart(4, '0')}`);
+    expect(existsSync(path.join(logs, 'proxy.log'))).toBe(true);
   }, SUBPROCESS_TIMEOUT_MS);
 });
