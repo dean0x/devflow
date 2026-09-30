@@ -10,7 +10,7 @@ import {
   getDecisionsLockDir,
 } from '../../core/project-paths.js';
 import { readMachineFeature, writeMachineFeature } from '../../core/feature-switch.js';
-import { loadSettingsModule, narrowedSwitchLabel } from '../../core/evidence-policy.js';
+import { loadSettingsModule, narrowedSwitchLabel, personalConfigTrackedWarning } from '../../core/evidence-policy.js';
 import { getDevFlowDirectory } from '../../targets/claude-code/claude-paths.js';
 import { getLedgerRoot } from '../../core/ledger-root.js';
 import { sweepLegacyDreamMarkers, drainLearningQueue } from '../../core/learning-queue-cleanup.js';
@@ -69,9 +69,12 @@ async function handleStatus(): Promise<void> {
   // same from every directory; a repository layer can only narrow it, and adds a
   // line only when it does. The observation counts are per-project.
   const enabled = await readMachineFeature(getDevFlowDirectory(), 'learning');
-  const narrowed = enabled ? narrowedSwitchLabel(loadSettingsModule(), { dir: process.cwd() }, 'learning') : null;
+  const settingsModule = loadSettingsModule();
+  const narrowed = enabled ? narrowedSwitchLabel(settingsModule, { dir: process.cwd() }, 'learning') : null;
   const stateLine = `Learning: ${enabled ? 'enabled' : 'disabled'}`
     + (narrowed === null ? '' : `\nEffective here: ${narrowed}`);
+  const trackedWarning = personalConfigTrackedWarning(settingsModule, { dir: process.cwd() });
+  if (trackedWarning !== null) p.log.warn(trackedWarning);
   const ledgerRoot = await getLedgerRoot();
   if (!ledgerRoot) {
     p.log.info(`${stateLine}\nObservations: not in a git project`);

@@ -25,7 +25,7 @@ import {
   type Settings,
 } from '../../targets/claude-code/hooks.js';
 import { readMachineFeature, writeMachineFeature } from '../../core/feature-switch.js';
-import { loadSettingsModule, narrowedSwitchLabel } from '../../core/evidence-policy.js';
+import { loadSettingsModule, narrowedSwitchLabel, personalConfigTrackedWarning } from '../../core/evidence-policy.js';
 
 /**
  * Map of hook event type → filename marker for the memory hooks.
@@ -350,8 +350,11 @@ export const memoryCommand = new Command('memory')
           `run ${color.cyan('devflow memory --enable')} to fix`,
         );
       }
-      const narrowed = enabled ? narrowedSwitchLabel(loadSettingsModule(), { dir: process.cwd() }, 'memory') : null;
+      const settingsModule = loadSettingsModule();
+      const narrowed = enabled ? narrowedSwitchLabel(settingsModule, { dir: process.cwd() }, 'memory') : null;
       if (narrowed !== null) p.log.info(`Effective here: ${color.yellow(narrowed)}`);
+      const trackedWarning = personalConfigTrackedWarning(settingsModule, { dir: process.cwd() });
+      if (trackedWarning !== null) p.log.warn(trackedWarning);
       return;
     }
 

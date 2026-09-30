@@ -118,3 +118,23 @@ describe('--status prints the effective state only when a repo layer narrows (D-
     expect(layered).toBe(bare);
   }, 120_000);
 });
+
+describe('--status warns about a tracked .devflow/config.json (D-PERSONAL-UNTRACKED)', () => {
+  it.each(FEATURES)('%s: a tracked config.json is named as ignored, with the untrack command', (feature) => {
+    seedManifest({});
+    const repo = makeRepo({ personal: `{"features":{"${feature}":false}}` });
+    execFileSync('git', ['add', '-f', '.devflow/config.json'], { cwd: repo, stdio: 'ignore' });
+
+    const out = status(feature, repo);
+
+    expect(out).toContain('.devflow/config.json is tracked by git, so devflow ignores it');
+    expect(out).toContain('git rm --cached .devflow/config.json');
+    // Ignored means absent: its features:false narrows nothing.
+    expect(out).not.toMatch(EFFECTIVE);
+  }, 120_000);
+
+  it('an untracked config.json gets no warning', () => {
+    seedManifest({});
+    expect(status('memory', makeRepo({ personal: '{"features":{"memory":false}}' }))).not.toContain('tracked by git');
+  }, 120_000);
+});

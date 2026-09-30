@@ -141,12 +141,24 @@ export interface RepoSettings {
   };
   /** The worktree project.json's own ids, or null when it declares none. */
   readonly repoCompliance: readonly string[] | null;
+  /**
+   * The default branch's project.json ids (its local tracking copy), or null when
+   * it declares none or there is no tracking copy (D-LENS-UNION).
+   */
+  readonly defaultBranchCompliance: readonly string[] | null;
+  /**
+   * `.devflow/config.json` is tracked by git, so the resolver ignored it as if it
+   * were absent (D-PERSONAL-UNTRACKED).
+   */
+  readonly personalTracked: boolean;
   /** The worktree holds the retired `.devflow/policy.json`. */
   readonly retiredPolicyFile: boolean;
   /**
    * The repository layer whose file exists but is unreadable — the whole-file
    * rule then fails every field closed (`ok` false) except the compliance lens,
-   * which keeps the machine's own frameworks — or null.
+   * which stays the union of every readable layer (D-LENS-UNION): an unreadable
+   * config.json owns no compliance, and an unreadable project.json reads as a
+   * malformed declaration, the generic lens — or null.
    */
   readonly unreadable: Exclude<SettingsSwitchSource, 'machine'> | null;
 }
@@ -448,15 +460,25 @@ export function repoTrackerSelection(loaded: SettingsLoad, opts: RepoSettingsOpt
   return { provider: settings.tracker, source };
 }
 
+/** A declared id list as a `--status` line shows it. */
+function idsLabel(ids: readonly string[]): string {
+  return ids.length > 0 ? ids.join(', ') : 'generic controls only';
+}
+
 /**
- * The `compliance --status` lines about the repository in `opts.dir`: the ids its
- * project.json declares (`generic controls only` for an empty or malformed list),
- * and a migration hint while the retired policy file is in the working tree. A
- * repository file that exists but is unreadable contributes the generic lens (the
- * machine's own frameworks still apply), and says so, naming the file. Empty when
- * the resolver is unavailable or failed closed for any other reason, or the
- * repository declares nothing and holds no policy file — the status output is then
- * unchanged.
+ * The `compliance --status` lines about the repository in `opts.dir`, mirroring
+ * the resolver's lens fold (D-LENS-UNION: machine ∪ default branch ∪ worktree):
+ * the ids this checkout's project.json declares (`generic controls only` for an
+ * empty or malformed list), the ids the default branch's copy declares, the
+ * effective lens those add up to with the machine's, and a migration hint while
+ * the retired policy file is in the working tree.
+ *
+ * A broken file affects only the keys it owns. An unreadable project.json is a
+ * malformed declaration — generic — and says so, naming the file; an unreadable
+ * config.json owns no compliance, so the lines are those of a readable one. Empty
+ * when the resolver is unavailable or failed closed for any other reason, or no
+ * repository layer declares anything and there is no policy file — the status
+ * output is then unchanged.
  *
  * The hint states the rule (D-POLICY-JSON-RETIRED): the file is not read, and
  * while project.json has no `evidence` its presence holds the repository at
@@ -466,18 +488,36 @@ export function repoTrackerSelection(loaded: SettingsLoad, opts: RepoSettingsOpt
 export function repoComplianceStatusLines(loaded: SettingsLoad, opts: RepoSettingsOptions): string[] {
   if (!loaded.ok) return [];
   const settings = loaded.value.resolveSettings(opts);
-  if (!settings.ok) {
-    return settings.unreadable === null
-      ? []
-      : [`Repository: generic controls only (${settingsSourceFile(settings.unreadable)} is unreadable)`];
-  }
+  if (!settings.ok && settings.unreadable === null) return [];
   const lines: string[] = [];
-  if (settings.repoCompliance !== null) {
-    const ids = settings.repoCompliance.length > 0 ? settings.repoCompliance.join(', ') : 'generic controls only';
-    lines.push(`Repository: ${ids} (${PROJECT_FILE})`);
+  if (settings.unreadable === 'project') {
+    lines.push(`Repository: generic controls only (${PROJECT_FILE} is unreadable)`);
+  } else if (settings.repoCompliance !== null) {
+    lines.push(`Repository: ${idsLabel(settings.repoCompliance)} (${PROJECT_FILE})`);
+  }
+  if (settings.defaultBranchCompliance !== null) {
+    lines.push(`Default branch: ${idsLabel(settings.defaultBranchCompliance)} (its ${PROJECT_FILE})`);
+  }
+  if (lines.length > 0) {
+    const lens = settings.compliance;
+    lines.push(`Effective here: ${lens.enabled ? idsLabel(lens.frameworks) : 'off'} (this machine + the default branch + this checkout)`);
   }
   if (settings.retiredPolicyFile) lines.push(...retiredPolicyHint(loaded.value));
   return lines;
+}
+
+/**
+ * The warning a `--status` prints when this checkout's `.devflow/config.json` is
+ * tracked by git, or null (D-PERSONAL-UNTRACKED). The resolver ignores such a file
+ * and says so on stderr, but prompts run it with stderr discarded, so a status
+ * command is where the user sees why their personal settings have no effect.
+ */
+export function personalConfigTrackedWarning(loaded: SettingsLoad, opts: RepoSettingsOptions): string | null {
+  if (!loaded.ok) return null;
+  if (!loaded.value.resolveSettings(opts).personalTracked) return null;
+  const file = settingsSourceFile('personal');
+  return `${file} is tracked by git, so devflow ignores it — it holds personal settings. ` +
+    `Untrack it with: git rm --cached ${file}`;
 }
 
 /** The policies the hint maps, in the order it prints them. */
