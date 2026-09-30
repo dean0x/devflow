@@ -61,12 +61,17 @@ devflow_debug_init() {
 devflow_debug_set_cwd() {
   local cwd="$1"
   if [ -z "$cwd" ] || [ "${DEVFLOW_HOOK_DEBUG:-}" != "1" ]; then return; fi
-  # Phase 2: switch to per-project log (only when debug is active)
-  local slug
-  slug=$(echo "$cwd" | sed 's|^/||' | tr '/' '-')
-  local project_log_dir="$HOME/.devflow/logs/$slug"
-  mkdir -p "$project_log_dir" 2>/dev/null || true
-  chmod 700 "$project_log_dir" 2>/dev/null || true
+  # Phase 2: switch to per-project log (only when debug is active). The folder
+  # comes from log-paths' devflow_log_dir, so a folder created here goes through
+  # the same D-LOG-DIR-CAP prune as every other hook log folder. log-paths sits
+  # beside this file; a hook that already sourced it is not re-sourced (that
+  # would reset its cached log dir).
+  if ! declare -F devflow_log_dir >/dev/null 2>&1; then
+    source "$(dirname "${BASH_SOURCE[0]}")/log-paths" 2>/dev/null || return 0
+  fi
+  local project_log_dir
+  project_log_dir=$(devflow_log_dir "$cwd" 2>/dev/null) || project_log_dir=""
+  [ -n "$project_log_dir" ] || return 0
   _DEVFLOW_DBG_LOG="$project_log_dir/.hook-debug.log"
   _devflow_dbg_size_guard "$_DEVFLOW_DBG_LOG"
   dbg() {

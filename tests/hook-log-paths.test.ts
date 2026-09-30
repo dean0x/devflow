@@ -18,6 +18,7 @@ import { MAX_HOOK_LOG_DIRS } from '../src/core/hook-log-dirs.js'
 
 const LOG_PATHS = path.resolve(import.meta.dirname, '..', 'src', 'assets', 'scripts', 'hooks', 'log-paths')
 const LOG_PATHS_SOURCE = readFileSync(LOG_PATHS, 'utf-8')
+const DEBUG_TRACE = path.resolve(import.meta.dirname, '..', 'src', 'assets', 'scripts', 'hooks', 'debug-trace')
 
 /** One shell constant from log-paths, e.g. `_DF_MAX_HOOK_LOG_DIRS=200`. */
 function shellConstant(name: string): number {
@@ -41,6 +42,23 @@ function logDirFor(cwd: string): string {
   if (r.error) throw r.error
   expect(r.status, r.stderr).toBe(0)
   return r.stdout.trim()
+}
+
+/**
+ * Switch a debug-enabled hook to `cwd`'s per-project log exactly as a hook does
+ * (debug-trace sourced on its own, as hook-bootstrap sources it), write one trace
+ * line, and return the log file it chose.
+ */
+function debugLogFor(cwd: string): string {
+  const script = 'dbg() { :; }; source "$1" && devflow_debug_init t && devflow_debug_set_cwd "$2" && dbg traced && printf %s "$_DEVFLOW_DBG_LOG"'
+  const r = spawnSync('bash', ['-c', script, 'debug-trace-test', DEBUG_TRACE, cwd], {
+    env: sandboxEnv(home, { DEVFLOW_HOOK_DEBUG: '1' }),
+    encoding: 'utf-8',
+    timeout: 30_000,
+  })
+  if (r.error) throw r.error
+  expect(r.status, r.stderr).toBe(0)
+  return r.stdout
 }
 
 /**
@@ -180,5 +198,32 @@ describe('D-LOG-DIR-CAP: devflow_log_dir caps the log folders when it creates on
 
     expect(existsSync(dir)).toBe(true)
     expect((await fs.stat(dir)).mode & 0o777).toBe(0o700)
+  }, 30_000)
+})
+
+describe('D-LOG-DIR-CAP: the debug trace creates its per-project folder through the cap', () => {
+  it('trims to the cap when devflow_debug_set_cwd creates a new folder', async () => {
+    const extra = 3
+    const seeded = await seedDirs(MAX_HOOK_LOG_DIRS + extra)
+
+    const log = debugLogFor('/work/debugged')
+
+    expect(log).toBe(path.join(logs, 'work-debugged', '.hook-debug.log'))
+    expect(readFileSync(log, 'utf-8')).toContain('t: traced')
+    const left = await logFolders()
+    expect(left).toHaveLength(MAX_HOOK_LOG_DIRS)
+    expect(left).toContain('work-debugged')
+    for (const gone of seeded.slice(0, extra + 1)) expect(left).not.toContain(gone)
+    expect((await fs.stat(path.dirname(log))).mode & 0o777).toBe(0o700)
+  }, 30_000)
+
+  it('creates no per-project folder when debug is off', async () => {
+    const r = spawnSync('bash', ['-c', 'dbg() { :; }; source "$1" && devflow_debug_init t && devflow_debug_set_cwd "$2"', 'debug-trace-test', DEBUG_TRACE, '/work/quiet'], {
+      env: sandboxEnv(home),
+      encoding: 'utf-8',
+      timeout: 30_000,
+    })
+    expect(r.status, r.stderr).toBe(0)
+    expect(await logFolders()).not.toContain('work-quiet')
   }, 30_000)
 })
