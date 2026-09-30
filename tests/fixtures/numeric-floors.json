@@ -67,12 +67,12 @@
       "description": "Minimum number of DEVFLOW_PLUGINS registry entries"
     },
     {
-      "id": "install-path-refs",
-      "floor": 2,
-      "pattern": "toBeGreaterThanOrEqual(2)",
+      "id": "language-gate-focuses",
+      "floor": 8,
+      "pattern": "expect(focuses).toHaveLength(8)",
       "occurrences": 1,
       "sourceFile": "tests/skill-references.test.ts",
-      "description": "Minimum install-path references in dist/commands/ files"
+      "description": "Language focuses /code-review's presence gate names, each held to a canonical skill. Compiled commands name no skill by install path (D-CLAUDE-DIR-PROMPTS): the gate is the one install path a command builds, templated on the focus under the Claude Code directory the installer resolves, so this count is what keeps the Format 3 compiled-command check from passing on an empty set."
     },
     {
       "id": "d11-posting-ops",
