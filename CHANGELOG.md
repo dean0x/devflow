@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **The three whole-disk docker mount rules now match, and Claude Code no longer warns about them at startup**. 3.0.0 shipped `Bash(docker run*-v /:*)`, `Bash(docker run*--volume /:*)` and `Bash(docker run*--volume=/:*)`. A trailing `:*` is Claude Code's legacy prefix syntax, which turns the rest of the rule into a literal prefix: the `*` after `docker run` was never expanded, so none of the three blocked anything, and each produced a "mixes * with the trailing :* prefix syntax" warning on every start. They are now `Bash(docker run*-v /:/*)`, `Bash(docker run*--volume /:/*)` and `Bash(docker run*--volume=/:/*)`, which deny any mount of the host root (`-v /:/host`, `-v /:/host:ro`) wherever the flag sits, while ordinary mounts such as `-v /home/me/proj:/app` or `-v $(pwd):/app` stay allowed. The list stays at 170 entries. Re-run `devflow init` to apply: it replaces the old entries, and `devflow security --disable` and `devflow uninstall` still recognise both forms as devflow's.
+
 ---
 
 ## [3.0.0] - 2026-09-30

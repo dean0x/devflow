@@ -340,6 +340,13 @@ export function mergeDenyList(
 // subcommand alone, so a rule holding ` | ` can never match anything. The exact
 // shell-on-stdin denies in the v2 batch (`Bash(bash)`, `Bash(sh -s *)`, ...) match the
 // shell subcommand of such a pipeline instead.
+// D-SECURITY-03: the three 3.0.0 root-mount rules (`Bash(docker run*-v /:*)` and the
+// two `--volume` spellings) are RETIRED too. A trailing `:*` is Claude Code's legacy
+// prefix syntax, which makes the rest of the rule a literal prefix — the `*` after
+// `docker run` is never expanded — so they matched nothing and drew a startup warning.
+// Their replacements end `/:/*` instead: a container path is always absolute, so `/:/`
+// follows every mount of the host root, while an ordinary `-v /home/me/proj:/app` never
+// holds it. (Claude Code's own suggestion, `-v /*`, would deny every absolute mount.)
 // Only entries a release actually shipped belong here: removal and install convergence
 // strip every entry this set names that the template does not, so a rule Devflow never
 // shipped would be taken from a user who wrote it (ADR-024, prove-you-wrote-it).
@@ -499,9 +506,10 @@ export const DEVFLOW_HISTORICAL_DENY: ReadonlySet<string> = Object.freeze(new Se
   'Read(/etc/shadow)',
   'Read(/etc/sudoers)',
   'Read(/etc/passwd)',
-  // v2 batch (#399) — 25 template entries: a shell reading its script from stdin,
-  // `zsh -c` beside the v1 `sh -c`/`bash -c`, OrbStack VM control, docker
-  // pull/delete/prune and whole-disk or privileged runs.
+  // v2 batch (#399) — 25 entries shipped in 3.0.0: a shell reading its script from
+  // stdin, `zsh -c` beside the v1 `sh -c`/`bash -c`, OrbStack VM control, docker
+  // pull/delete/prune and whole-disk or privileged runs. Its three `:*` root-mount
+  // rules are retired (D-SECURITY-03); the other 22 are still template entries.
   'Bash(bash)',
   'Bash(sh)',
   'Bash(zsh)',
@@ -527,6 +535,11 @@ export const DEVFLOW_HISTORICAL_DENY: ReadonlySet<string> = Object.freeze(new Se
   'Bash(orb *)',
   'Bash(orbctl *)',
   'Bash(open *OrbStack*)',
+  // Root-mount rules in wildcard form — 3 template entries replacing the v2 batch's
+  // three `:*` root-mount rules 1:1 (D-SECURITY-03), so the template stays at 170.
+  'Bash(docker run*-v /:/*)',
+  'Bash(docker run*--volume /:/*)',
+  'Bash(docker run*--volume=/:/*)',
 ]));
 
 /**
@@ -540,7 +553,8 @@ export const DEVFLOW_HISTORICAL_DENY: ReadonlySet<string> = Object.freeze(new Se
  * retired entry themselves is indistinguishable from Devflow's copy and loses it on the
  * next install, exactly as `security --disable` and uninstall already strip every
  * historical entry. Retire an entry only when losing a user's identical copy is
- * harmless; the #399 piped rules qualify because none could ever match (D-SECURITY-02).
+ * harmless; the #399 piped rules and the 3.0.0 `:*` root-mount rules qualify because
+ * none could ever match (D-SECURITY-02, D-SECURITY-03).
  */
 export function retiredDenyEntries(templateEntries: readonly string[]): ReadonlySet<string> {
   if (templateEntries.length === 0) return new Set();

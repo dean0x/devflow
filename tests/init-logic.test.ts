@@ -1242,7 +1242,7 @@ describe('assertHistoricalDenySuperset', () => {
     expect(() => assertHistoricalDenySuperset(templateDeny)).not.toThrow();
   });
 
-  it('ships the v2 batch (#399) in both the template and the historical set', async () => {
+  it('ships the v2 batch (#399, root-mount rules in their wildcard form) in both the template and the historical set', async () => {
     const v2Batch = [
       'Bash(bash)',
       'Bash(sh)',
@@ -1255,9 +1255,7 @@ describe('assertHistoricalDenySuperset', () => {
       'Bash(zsh -s *)',
       'Bash(zsh -c *)',
       'Bash(docker run*--privileged*)',
-      'Bash(docker run*-v /:*)',
-      'Bash(docker run*--volume /:*)',
-      'Bash(docker run*--volume=/:*)',
+      ...ROOT_MOUNT_RULES,
       'Bash(docker pull *)',
       'Bash(docker image pull *)',
       'Bash(docker rm *)',
@@ -1278,13 +1276,18 @@ describe('assertHistoricalDenySuperset', () => {
     }
   });
 
-  it('retires every piped rule: kept in the historical set, gone from the template', async () => {
+  it('retires every piped and legacy-prefix root-mount rule: kept in the historical set, gone from the template', async () => {
     const templateDeny = await loadTemplateDenyEntries(path.resolve(__dirname, '..'));
-    for (const entry of RETIRED_PIPE_RULES) {
+    const retired = [...RETIRED_PIPE_RULES, ...RETIRED_ROOT_MOUNT_RULES];
+    for (const entry of retired) {
       expect(DEVFLOW_HISTORICAL_DENY.has(entry)).toBe(true);
       expect(templateDeny).not.toContain(entry);
     }
-    expect([...retiredDenyEntries(templateDeny)].sort()).toEqual([...RETIRED_PIPE_RULES].sort());
+    // Exactly 12: the nine piped rules (#399) plus the three `:*` root-mount rules
+    // 3.0.0 shipped. Each could never match, so a user's identical copy loses nothing
+    // when an install retires it (ADR-024's accepted trade-off).
+    expect(retired).toHaveLength(12);
+    expect([...retiredDenyEntries(templateDeny)].sort()).toEqual([...retired].sort());
   });
 });
 
@@ -1296,7 +1299,12 @@ describe('assertHistoricalDenySuperset', () => {
  *    deny rule applies when ANY subcommand matches it;
  *  - a rule with no `*` matches one exact command;
  *  - `*` matches any text, and a trailing ` *` that is the rule's only wildcard
- *    also matches the bare command (`Bash(ls *)` matches `ls`, not `lsof`).
+ *    also matches the bare command (`Bash(ls *)` matches `ls`, not `lsof`);
+ *  - the legacy `:*` suffix is recognised only at the end of a pattern and is
+ *    equivalent to a trailing ` *` (`Bash(ls:*)` matches what `Bash(ls *)` does).
+ *    It makes the rest of the pattern a literal prefix: a `*` before it is not
+ *    expanded, which is what Claude Code's startup warning ("mixes * with the
+ *    trailing :* prefix syntax, so it is matched as a literal prefix") reports.
  * The model is anchored to the docs' own example rows below, so it cannot drift
  * into agreeing with whatever the template happens to say.
  */
@@ -1309,6 +1317,10 @@ function subcommandsOf(command: string): string[] {
 function bashRuleMatches(rule: string, subcommand: string): boolean {
   const body = /^Bash\((.*)\)$/s.exec(rule)?.[1];
   if (body === undefined) return false;
+  if (body.endsWith(':*')) {
+    const literalPrefix = body.slice(0, -2);
+    return subcommand === literalPrefix || subcommand.startsWith(`${literalPrefix} `);
+  }
   if (!body.includes('*')) return subcommand === body;
   const escaped = body.split('*').map(part => part.replace(/[.+?^${}()|[\]\\]/g, '\\$&'));
   if (new RegExp(`^${escaped.join('.*')}$`, 's').test(subcommand)) return true;
@@ -1326,6 +1338,55 @@ function holdsCommandSeparator(rule: string): boolean {
   const body = /^Bash\((.*)\)$/s.exec(rule)?.[1];
   return body !== undefined && /[|;&\n]/.test(body);
 }
+
+/**
+ * A rule that ends in the legacy `:*` prefix suffix while also holding a `*` before it.
+ * Claude Code matches such a rule as a literal prefix — the earlier `*` is not
+ * expanded — and warns about it at every startup, so the rule is noisy and can
+ * effectively never match. Tool-agnostic: any `Tool(...)` rule shape is checked.
+ */
+function mixesWildcardWithLegacyPrefix(rule: string): boolean {
+  const body = /^[A-Za-z_]+\((.*)\)$/s.exec(rule)?.[1];
+  return body !== undefined && body.endsWith(':*') && body.slice(0, -2).includes('*');
+}
+
+/** Every permission rule (allow, ask, deny, ...) a shipped settings template carries. */
+async function templatePermissionRules(): Promise<string[]> {
+  const templatesDir = path.resolve(__dirname, '..', 'src', 'targets', 'claude-code', 'templates');
+  const rules: string[] = [];
+  for (const file of ['managed-settings.json', 'settings.json']) {
+    const parsed = JSON.parse(await fs.readFile(path.join(templatesDir, file), 'utf-8')) as {
+      permissions?: Record<string, unknown>;
+    };
+    for (const list of Object.values(parsed.permissions ?? {})) {
+      if (Array.isArray(list)) rules.push(...list.filter((e): e is string => typeof e === 'string'));
+    }
+  }
+  return rules;
+}
+
+/**
+ * The three whole-disk mount rules 3.0.0 shipped (#399). Each ends in the legacy `:*`
+ * suffix, so the `*` after `docker run` was never expanded: the rule was a literal
+ * prefix no real command starts with, and Claude Code warned about it at startup.
+ */
+const RETIRED_ROOT_MOUNT_RULES = [
+  'Bash(docker run*-v /:*)',
+  'Bash(docker run*--volume /:*)',
+  'Bash(docker run*--volume=/:*)',
+] as const;
+
+/**
+ * Their replacements. A container path is always absolute, so `/:/` follows every
+ * mount of the host root (`-v /:/host`, `-v /:/host:ro`), while an ordinary project
+ * mount such as `-v /home/me/proj:/app` never holds it. The broader `-v /*` Claude
+ * Code suggests would deny every absolute-path mount.
+ */
+const ROOT_MOUNT_RULES = [
+  'Bash(docker run*-v /:/*)',
+  'Bash(docker run*--volume /:/*)',
+  'Bash(docker run*--volume=/:/*)',
+] as const;
 
 /**
  * The nine piped rules shipped through v2.5.0, retired because Claude Code splits at `|` (#399).
@@ -1364,6 +1425,10 @@ describe('managed deny template — Bash rule semantics (#399)', () => {
     expect(bashRuleMatches('Bash(* --help *)', 'npm --help x')).toBe(true);
     expect(bashRuleMatches('Bash(* --help *)', 'npm --help')).toBe(false);
     expect(bashRuleMatches('Bash(git log * main)', 'git log main')).toBe(false);
+    expect(bashRuleMatches('Bash(ls:*)', 'ls -la')).toBe(true);
+    expect(bashRuleMatches('Bash(ls:*)', 'ls')).toBe(true);
+    expect(bashRuleMatches('Bash(ls:*)', 'lsof')).toBe(false);
+    expect(bashRuleMatches('Bash(git:* push)', 'git push')).toBe(false);
     expect(subcommandsOf('a && b || c; d | e |& f & g\nh')).toEqual(['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h']);
   });
 
@@ -1371,6 +1436,53 @@ describe('managed deny template — Bash rule semantics (#399)', () => {
     const templateDeny = await loadTemplateDenyEntries(path.resolve(__dirname, '..'));
     expect(templateDeny.filter(holdsCommandSeparator)).toEqual([]);
     expect(templateDeny.filter(e => e.startsWith('Bash(') && e.includes(' | '))).toEqual([]);
+  });
+
+  it('no template permission rule mixes a `*` with the trailing legacy `:*` prefix suffix', async () => {
+    const rules = await templatePermissionRules();
+    expect(rules.length).toBeGreaterThan(0);
+    expect(rules.filter(mixesWildcardWithLegacyPrefix)).toEqual([]);
+  });
+
+  it('red probe: the legacy-prefix predicate finds exactly the retired root-mount rules in the historical set', () => {
+    // PF-064: prove the absence check has teeth on real shipped history, not a seed.
+    expect([...DEVFLOW_HISTORICAL_DENY].filter(mixesWildcardWithLegacyPrefix).sort())
+      .toEqual([...RETIRED_ROOT_MOUNT_RULES].sort());
+    expect(mixesWildcardWithLegacyPrefix('Bash(ls:*)')).toBe(false);
+    expect(mixesWildcardWithLegacyPrefix('Bash(docker run*-v /:/*)')).toBe(false);
+  });
+
+  it('red probe: every retired root-mount rule failed to match the root mount it was written for', () => {
+    const mounts: Record<string, string> = {
+      'Bash(docker run*-v /:*)': 'docker run --rm -v /:/host alpine',
+      'Bash(docker run*--volume /:*)': 'docker run --rm --volume /:/host alpine',
+      'Bash(docker run*--volume=/:*)': 'docker run --rm --volume=/:/host alpine',
+    };
+    expect(Object.keys(mounts).sort()).toEqual([...RETIRED_ROOT_MOUNT_RULES].sort());
+    for (const [rule, command] of Object.entries(mounts)) {
+      expect(deniedBy([rule], command)).toEqual([]);
+    }
+  });
+
+  it.each([
+    ['docker run --rm -v /:/host alpine', 'Bash(docker run*-v /:/*)'],
+    ['docker run -it --rm -v /:/host:ro alpine', 'Bash(docker run*-v /:/*)'],
+    ['docker run --rm --volume /:/mnt alpine', 'Bash(docker run*--volume /:/*)'],
+    ['docker run --rm --volume /:/host:ro alpine', 'Bash(docker run*--volume /:/*)'],
+    ['docker run --rm --volume=/:/mnt alpine', 'Bash(docker run*--volume=/:/*)'],
+    ['docker run --rm --volume=/:/host:ro alpine', 'Bash(docker run*--volume=/:/*)'],
+  ])('a root-mount rule denies a whole-disk mount: %s', (command, rule) => {
+    expect(deniedBy(ROOT_MOUNT_RULES, command)).toEqual([rule]);
+  });
+
+  it.each([
+    'docker run --rm -v /home/u/proj:/app alpine',
+    'docker run --rm -v $(pwd):/app alpine',
+    'docker run --rm --volume /home/u/proj:/app alpine',
+    'docker run --rm --volume=/srv/data:/data alpine',
+    'docker run --rm -v /tmp/:/scratch alpine',
+  ])('the root-mount rules leave an ordinary project mount allowed: %s', (command) => {
+    expect(deniedBy(ROOT_MOUNT_RULES, command)).toEqual([]);
   });
 
   it('red probe: the separator predicate finds exactly the retired piped rules in the historical set', () => {
@@ -1461,6 +1573,8 @@ describe('managed deny template — Bash rule semantics (#399)', () => {
     'docker run -it --rm -v /:/mnt alpine',
     'docker run --rm --volume /:/mnt alpine',
     'docker run --rm --volume=/:/mnt alpine',
+    'docker run --rm -v /:/host:ro alpine',
+    'docker run --rm --volume /:/host:ro alpine',
   ])('blocks OrbStack control and destructive or whole-disk docker work: %s', async (command) => {
     const templateDeny = await loadTemplateDenyEntries(path.resolve(__dirname, '..'));
     expect(deniedBy(templateDeny, command)).not.toEqual([]);
@@ -1475,6 +1589,9 @@ describe('managed deny template — Bash rule semantics (#399)', () => {
     'docker run --rm alpine echo hi',
     'docker run --rm -v "$PWD":/app -w /app node:20 npm test',
     'docker run --rm -v /tmp/cache:/cache alpine',
+    'docker run --rm -v /home/u/proj:/app alpine',
+    'docker run --rm -v $(pwd):/app alpine',
+    'docker run --rm --volume=/home/u/proj:/app alpine',
     'docker images',
     'docker inspect web',
     'orbstack-helper --version',
