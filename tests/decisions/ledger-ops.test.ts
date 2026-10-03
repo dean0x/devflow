@@ -269,7 +269,7 @@ describe('assign-anchor CLI op', () => {
 
   it('sets date on pitfall rows — all entry types stamped, no decision/pitfall asymmetry', () => {
     // assign-anchor passes date unconditionally for both decisions and pitfalls.
-    // Pitfall ledger rows carry a date so refresh-anchor can re-project them (ADR-022).
+    // Pitfall ledger rows carry a date so refresh-anchor can re-project them.
     writeLog(tmpDir, [makeObsRow({ id: 'obs_pf_005', type: 'pitfall', status: 'ready' })]);
     runHelper('assign-anchor pitfall obs_pf_005', tmpDir);
     const rows = readLedger(tmpDir);
@@ -677,7 +677,7 @@ describe('rotateObservations — internal function', () => {
 });
 
 // ---------------------------------------------------------------------------
-// refresh-anchor CLI op (ADR-022 — log-authority re-projection)
+// refresh-anchor CLI op (log-authority re-projection)
 // ---------------------------------------------------------------------------
 
 describe('refresh-anchor CLI op', () => {
@@ -695,7 +695,7 @@ describe('refresh-anchor CLI op', () => {
   it('re-projects the log obs onto the ledger row (updates details from log)', () => {
     // Seed ledger with old details; log obs has reinforced details (append, not replace).
     // The log is always a superset of the ledger — the divergence guard passes when
-    // the ledger content is contained in the log content (per PF-044).
+    // the ledger content is contained in the log content.
     const oldDetails = 'context: old; decision: old decision; rationale: old';
     const newDetails = oldDetails + '; context: updated; decision: updated decision; rationale: updated rationale';
     writeLog(tmpDir, [
@@ -762,7 +762,7 @@ describe('refresh-anchor CLI op', () => {
   });
 
   it('re-renders decisions.md after refresh', () => {
-    // Log must be a superset of ledger (per PF-044 divergence guard).
+    // Log must be a superset of ledger (divergence guard).
     // Reinforcement appends; the ledger's prior content is a prefix of the log content.
     const baseDetails = 'context: existing; decision: approach A; rationale: initial';
     const newDetails = baseDetails + '; context: refreshed; decision: new approach; rationale: better';
@@ -804,8 +804,8 @@ describe('refresh-anchor CLI op', () => {
     // Pre-existing log rows were written before assign-anchor added anchor_id write-back.
     // They have no anchor_id field — only the id that matches the ledger row's id field.
     // The log obs is resolved by the LEDGER ROW's id, not by anchor_id — this covers
-    // pre-write-back rows that never had anchor_id stamped in the log (avoids PF-041).
-    // Log is a superset of ledger (per PF-044). Ledger holds the prior base content;
+    // pre-write-back rows that never had anchor_id stamped in the log.
+    // Log is a superset of ledger. Ledger holds the prior base content;
     // log has the base plus the sharpened reinforcement appended to it.
     const basePart = 'context: initial; decision: basic; rationale: simple';
     const sharpDetails = basePart + '; context: sharpened; decision: use Result types; rationale: functional error handling';
@@ -835,8 +835,8 @@ describe('refresh-anchor CLI op', () => {
 
   it('pitfall-anchor refresh re-renders pitfalls.md and index.md', () => {
     // Pitfall obs has no anchor_id field (pre-existing style) — resolves by ledger id.
-    // id-based lookup covers both pre-existing and new-style rows uniformly (avoids PF-041).
-    // Log is a superset of ledger (per PF-044). The ledger holds the base content;
+    // id-based lookup covers both pre-existing and new-style rows uniformly.
+    // Log is a superset of ledger. The ledger holds the base content;
     // log has base + the sharper reinforcement appended. Neither uses the word 'stale'
     // so the post-refresh pitfalls.md assertion (not.toContain('stale')) holds.
     const basePart = 'area: hooks; issue: retry loops; fix: initial mitigation';
@@ -910,7 +910,7 @@ describe('refresh-anchor CLI op', () => {
 
   it('date-pin: dateless legacy ledger row stays dateless after refresh (D5: no backfill)', () => {
     // date: rfExistingRow.date — undefined propagates for dateless legacy rows; no backfill.
-    // The obs date is not used — a fabricated date would be worse than an unprotected entry (ADR-022).
+    // The obs date is not used — a fabricated date would be worse than an unprotected entry.
     writeLog(tmpDir, [
       makeObsRow({
         id: 'obs_dateless',
@@ -984,7 +984,7 @@ describe('refresh-anchor CLI op', () => {
     writeLog(tmpDir, [
       makeObsRow({ id: 'obs_ra_lock', type: 'decision', status: 'created', anchor_id: 'ADR-001', details: newDetails }),
     ]);
-    // Ledger must not carry content absent from the log (PF-044 divergence guard).
+    // Ledger must not carry content absent from the log (divergence guard).
     // Set ledger details explicitly to match the log so the guard passes.
     writeLedger(tmpDir, [makeLedgerRow({ anchor_id: 'ADR-001', id: 'obs_ra_lock', decisions_status: 'Accepted', details: newDetails })]);
     const result = runHelper('refresh-anchor ADR-001', tmpDir);
@@ -1008,7 +1008,7 @@ describe('refresh-anchor CLI op', () => {
   });
 });
 
-describe('ADR-011 straggler: refresh-anchor on bare project directory', () => {
+describe('learning-rename straggler: refresh-anchor on bare project directory', () => {
   it('refresh-anchor on bare dir gives controlled error — not ENOENT crash — ledger-not-found message', () => {
     // SEC-S3 guard fires before mkdir: no ledger at cwd → throw with clear message.
     // The guard prevents a stray .devflow/learning/ tree from being created before
@@ -1029,10 +1029,10 @@ describe('ADR-011 straggler: refresh-anchor on bare project directory', () => {
 });
 
 // ---------------------------------------------------------------------------
-// refresh-anchor divergence guard — REG-1 (avoids PF-044)
+// refresh-anchor divergence guard — REG-1
 // ---------------------------------------------------------------------------
 
-describe('refresh-anchor divergence guard — REG-1 (avoids PF-044)', () => {
+describe('refresh-anchor divergence guard — REG-1', () => {
   let tmpDir: string;
 
   beforeEach(() => {
@@ -1082,7 +1082,7 @@ describe('refresh-anchor divergence guard — REG-1 (avoids PF-044)', () => {
     // Guard harmonization: pattern replacement is sanctioned per D3. Consumers match
     // '## (ADR|PF)-NNN:' anchor anchors, never titles, so the agent may sharpen the log
     // pattern to update the rendered heading. The pattern divergence guard was removed;
-    // only DETAILS divergence is still protected (REG-1 / avoids PF-044).
+    // only DETAILS divergence is still protected (REG-1).
     const oldPattern = 'Use exceptions for error handling';
     const newPattern = 'Prefer explicit error channels over exception propagation';
     const sharedDetails = 'context: original; decision: base rule; rationale: consistency';
@@ -1191,7 +1191,7 @@ describe('refresh-anchor guard harmonization — D4 raw_body-lost succeeds', () 
   });
 
   it('refresh succeeds when the log row lost raw_body and the entry renders formatter-generated', () => {
-    // ADR-022 D4: a log row that lost raw_body un-freezes the entry to formatter-rendered
+    // D4: a log row that lost raw_body un-freezes the entry to formatter-rendered
     // output by design. The refresh must not throw on the absent field.
     const details = 'context: test; decision: use formatter; rationale: clean output';
     writeLog(tmpDir, [
@@ -1228,7 +1228,7 @@ describe('refresh-anchor guard harmonization — D4 raw_body-lost succeeds', () 
   });
 
   it('D4 mirror: refresh preserves raw_body when the log row carries a safe one', () => {
-    // ADR-022 D4 mirror case: a log row that carries a safe raw_body propagates it
+    // D4 mirror case: a log row that carries a safe raw_body propagates it
     // into the refreshed ledger row. The ledger row started without raw_body.
     const details = 'context: raw_body present; decision: preserve verbatim body; rationale: migration';
     const safeRawBody = '\n## ADR-002: Preserve verbatim body\n\n- **Status**: Accepted\n- **Context**: preserved\n';
@@ -1979,10 +1979,10 @@ describe('rotateObservations — archive dedup by id (interrupt-retry safety)', 
 
 // ---------------------------------------------------------------------------
 // AC-P2: assign-anchor O(anchored) — structural check (no N^2 scan)
-// Per ADR-014: ratio/bounded-delta methodology, not absolute ms.
+// Ratio/bounded-delta methodology, not absolute ms.
 // ---------------------------------------------------------------------------
 
-describe('AC-P2: assign-anchor O(anchored) performance (ratio methodology, per ADR-014)', () => {
+describe('AC-P2: assign-anchor O(anchored) performance (ratio methodology)', () => {
   it('nextAnchorFromLedger is O(N) — 10x rows yields <15x time', () => {
     // expect.assertions(2) guarantees this test never passes with zero assertions:
     // the ratio check may be skipped on sub-0.01ms runs, but the absolute ceiling
@@ -2176,18 +2176,18 @@ describe('locking discipline: assign-anchor and render under single .decisions.l
 });
 
 // ---------------------------------------------------------------------------
-// ADR-011 straggler fix: fresh project directory layout
+// Learning-rename straggler fix: fresh project directory layout
 //
 // Before the fix both assign-anchor and retire-anchor called:
 //   fs.mkdirSync(path.join(projectRoot, '.devflow', 'decisions'), { recursive: true })
-// — the obsolete path from the pre-ADR-011 rename. This created the wrong dir
+// — the obsolete path from before the learning rename. This created the wrong dir
 // and then immediately crashed because acquireMkdirLock tried to mkdir
 // '.devflow/learning/.decisions.lock' with recursive:false while
 // '.devflow/learning/' did not yet exist (ENOENT re-throw from mkdirSync
-// non-EEXIST guard). applies ADR-011
+// non-EEXIST guard).
 // ---------------------------------------------------------------------------
 
-describe('ADR-011 straggler fix: assign-anchor / retire-anchor on a bare project directory', () => {
+describe('learning-rename straggler fix: assign-anchor / retire-anchor on a bare project directory', () => {
   it('assign-anchor on bare dir exits with controlled "not found" error — not an ENOENT crash — and creates .devflow/learning/, not .devflow/decisions/', () => {
     // bare dir — no .devflow/ at all (simulates a fresh project)
     const bareDir = fs.mkdtempSync(path.join(os.tmpdir(), 'aa-bare-'));
@@ -2319,17 +2319,17 @@ describe('lock release on early-exit error paths', () => {
 });
 
 // ---------------------------------------------------------------------------
-// Pre-existing corpus fixture — REG-S1 (PF-044: fixtures derived from real corpus)
+// Pre-existing corpus fixture — REG-S1 (fixtures derived from real corpus)
 //
 // Frozen copies of actual anchored rows from .devflow/learning/decisions-ledger.jsonl
 // at time of authoring. Used to pin that refresh-anchor succeeds against real-world
 // rows and that the rendered output has non-empty body fields.
 //
-// These fixtures are FROZEN IN-FILE per PF-035 and PF-044 — not live-file reads.
+// These fixtures are FROZEN IN-FILE, not live-file reads: the live ledger is per-machine and gitignored.
 // Derived from decisions-ledger.jsonl rows ADR-001 and PF-001.
 // ---------------------------------------------------------------------------
 
-describe('refresh-anchor — pre-existing corpus fixture (REG-S1, avoids PF-044)', () => {
+describe('refresh-anchor — pre-existing corpus fixture (REG-S1)', () => {
   let tmpDir: string;
 
   beforeEach(() => {

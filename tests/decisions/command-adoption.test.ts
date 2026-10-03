@@ -22,7 +22,7 @@ describe('Command surfaces — index.md direct read', () => {
       const content = loadFile(relPath)
       // Must reference the pre-rendered index.md artifact (now under learning/)
       expect(content).toContain('.devflow/learning/index.md')
-      // Must NOT reference decisions-index.cjs in any form (ADR-007: retired)
+      // Must NOT reference decisions-index.cjs in any form (the script is retired)
       expect(content).not.toContain('decisions-index.cjs')
     })
   }

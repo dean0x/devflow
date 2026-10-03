@@ -411,8 +411,8 @@ describe('segmentDetails — internal semicolons in pitfall fields', () => {
     expect(result).toContain('- **Resolution**: step 1; step 2\n');
   });
 
-  it('reissue: does NOT false-match issue: key (PF-014-shaped specimen)', () => {
-    // PF-014 bug: /issue:\s*([^;]+)/i is unanchored; it finds "issue:" inside
+  it('reissue: does NOT false-match issue: key (realistic pitfall specimen)', () => {
+    // Bug: /issue:\s*([^;]+)/i is unanchored; it finds "issue:" inside
     // "reissue:" at string offset 2 and captures the wrong value.
     // Expected: issue = "process.exit skips finally" (from the actual issue: segment)
     const row = {
@@ -614,7 +614,7 @@ describe('formatAmendmentsLine — { date, note } object shape (the schema-decla
     expect(result).not.toContain('[object Object]');
   });
 
-  it('amendment text never leaks into the compact index line (applies ADR-007)', () => {
+  it('amendment text never leaks into the compact index line', () => {
     const row = {
       anchor_id: 'ADR-005',
       type: 'decision',
@@ -633,8 +633,8 @@ describe('formatAmendmentsLine — { date, note } object shape (the schema-decla
     expect(index).not.toContain('Amendments');
   });
 
-  it('PF-043 cross-check: the canonical { date, note } fixture passes isLearningObservation AND formatAmendmentsLine renders it correctly', () => {
-    // PF-043 Resolution: derive fixtures from the runtime type guard and run at least
+  it('type-guard cross-check: the canonical { date, note } fixture passes isLearningObservation AND formatAmendmentsLine renders it correctly', () => {
+    // Derive fixtures from the runtime type guard and run at least
     // one through the guard inside the consuming test so the two suites cannot drift.
     // Previously this was only described in a comment; this test enforces it.
     const amendments = [{ date: '2026-02-01', note: 'Reinforced' }];
@@ -1029,7 +1029,7 @@ describe('Learning agent creation-bar contract', () => {
     expect(agentContent).toContain('NEVER invent an ADR-NNN/PF-NNN number');
   });
 
-  it('has no numeric confidence gate (ADR-008)', () => {
+  it('has no numeric confidence gate', () => {
     // Must not contain a numeric confidence threshold that acts as a gate
     expect(agentContent).not.toMatch(/confidence\s*[>=]+\s*0\.\d+/);
     expect(agentContent).not.toContain('0.65');
@@ -1174,7 +1174,7 @@ describe('segmentDetails — REG-2: recovery pass for legacy corpus rows', () =>
   const PF_KEYS = ['area', 'issue', 'impact', 'resolution'] as const;
   const ADR_KEYS = ['context', 'decision', 'rationale'] as const;
 
-  it('PF-009-shaped: keys embedded mid-segment after ". " are recovered by recovery pass', () => {
+  it('legacy pitfall row: keys embedded mid-segment after ". " are recovered by recovery pass', () => {
     // Legacy corpus rows (before the ';'-grammar was documented) use '. ' as
     // the field separator — the anchored pass only captures 'area:' (at segment
     // start), and the recovery pass fills 'issue:', 'impact:', 'resolution:'.
@@ -1192,8 +1192,8 @@ describe('segmentDetails — REG-2: recovery pass for legacy corpus rows', () =>
     expect(result.resolution).toContain('wrap in try/catch');
   });
 
-  it('ADR-004-shaped: decision and rationale embedded mid-segment are recovered', () => {
-    // ADR-004 uses '. ' separators; 'decision:' and 'rationale:' appear
+  it('legacy decision row: decision and rationale embedded mid-segment are recovered', () => {
+    // This legacy decision row uses '. ' separators; 'decision:' and 'rationale:' appear
     // mid-segment after the context value — the recovery pass is required.
     const details =
       'context: ambient mode churned through two designs. decision: pivot to always-on orchestrator charter. rationale: graded orchestrator is simpler';
@@ -1305,12 +1305,12 @@ describe('segmentDetails — SEC-S1: duplicate-key policy is last-match-wins', (
 });
 
 // ---------------------------------------------------------------------------
-// toLedgerRow sink validation — SEC-1 / PF-023
+// toLedgerRow sink validation — SEC-1
 // Validate at the convergence point so assign-anchor, refresh-anchor, and any
 // future op inherit the guards without repeating them.
 // ---------------------------------------------------------------------------
 
-describe('toLedgerRow sink validation — SEC-1 / PF-023', () => {
+describe('toLedgerRow sink validation — SEC-1', () => {
   const formatModule = require(
     path.join(ROOT, 'src/assets/scripts/hooks/lib/decisions-format.cjs')
   ) as {
@@ -1328,7 +1328,7 @@ describe('toLedgerRow sink validation — SEC-1 / PF-023', () => {
     // A newline in pattern would emit '- **Status**: Forged\n' above the real Status
     // line inside formatDecisionBody. The line-anchored /^- \*\*Status\*\*:/m regex
     // would match the FIRST occurrence — the forged one. Collapsing at toLedgerRow
-    // prevents this class of heading/field injection (PF-023 sink).
+    // prevents this class of heading/field injection at the sink.
     const obs = {
       id: 'obs_sec1_pat',
       type: 'decision',
