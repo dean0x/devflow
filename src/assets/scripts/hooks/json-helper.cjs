@@ -3,13 +3,14 @@
 // src/assets/scripts/hooks/json-helper.cjs
 // Provides jq-equivalent operations for hooks when jq is not installed, and the
 // learning ops the Learning agent runs from the project root.
-// SECURITY: This is a local CLI helper invoked only by shell hooks with controlled arguments.
-// File path arguments come from hook-owned variables, not from external/untrusted input.
+// SECURITY: This is a local CLI helper invoked only by shell hooks and the
+// Learning agent with controlled arguments. No operation takes a file path: a
+// file's content arrives on stdin (json-parse redirects it), and the learning ops
+// build every path from the current directory.
 // Usage: node json-helper.cjs <operation> [args...]
 //
 // Operations:
 //   get-field <field> [default]           Read field from stdin JSON
-//   get-field-file <file> <field> [def]   Read field from JSON file
 //   validate                              Exit 0 if stdin is valid JSON, 1 otherwise
 //   compact                               Compact stdin JSON to single line
 //   construct <json-template> [--arg k v] Build JSON object with args
@@ -18,8 +19,8 @@
 //   extract-cwd-field <field>             Extract cwd + arbitrary field, SOH-byte delimited
 //   extract-text-messages                 Extract text content from Claude message format
 //   merge-evidence                        Flatten, dedupe, limit to 10 from stdin JSON
-//   slurp-sort <file> <field> [limit]     Read JSONL, sort by field desc, limit results
-//   slurp-cap <file> <field> <limit>      Read JSONL, sort by field desc, output limit lines
+//   slurp-sort <field> [limit]            Read stdin JSONL, sort by field desc, limit results
+//   slurp-cap <field> [limit]             Read stdin JSONL, sort by field desc, output limit lines
 //   array-length <path>                   Get length of array at dotted path in stdin JSON
 //   array-item <path> <index>             Get item at index from array at path in stdin JSON
 //   session-output <context>              Build SessionStart output envelope
@@ -50,8 +51,6 @@ const { execFileSync } = require('child_process');
 
 const op = process.argv[2];
 const args = process.argv.slice(3);
-
-const { safePath } = require('./lib/safe-path.cjs');
 
 /** The learning modules, once loaded; see learning(). */
 let learningModules = null;
@@ -93,8 +92,9 @@ function getNestedField(obj, field) {
   return current;
 }
 
-function parseJsonl(file) {
-  const lines = fs.readFileSync(safePath(file), 'utf8').trim().split('\n').filter(Boolean);
+/** The JSON values of a JSONL text's lines; a line that does not parse is skipped. */
+function parseJsonlText(text) {
+  const lines = text.split('\n').filter(Boolean);
   return lines.map(l => {
     try { return JSON.parse(l); } catch { return null; }
   }).filter(Boolean);
@@ -346,17 +346,6 @@ try {
       break;
     }
 
-    case 'get-field-file': {
-      const file = safePath(args[0]);
-      const field = args[1];
-      const def = args[2] || '';
-      const content = fs.readFileSync(file, 'utf8').trim();
-      const input = JSON.parse(content);
-      const val = getNestedField(input, field);
-      console.log(val != null ? String(val) : def);
-      break;
-    }
-
     case 'validate': {
       try {
         const text = readStdin();
@@ -448,10 +437,9 @@ try {
     }
 
     case 'slurp-sort': {
-      const file = args[0];
-      const field = args[1];
-      const limit = parseInt(args[2]) || 30;
-      const parsed = parseJsonl(file);
+      const field = args[0];
+      const limit = parseInt(args[1]) || 30;
+      const parsed = parseJsonlText(readStdin());
       parsed.sort((a, b) => (b[field] || 0) - (a[field] || 0));
       console.log(JSON.stringify(parsed.slice(0, limit)));
       break;
@@ -459,10 +447,9 @@ try {
 
     case 'slurp-cap': {
       // Read JSONL, sort by field desc, output top N as JSONL (one per line)
-      const file = args[0];
-      const field = args[1];
-      const limit = parseInt(args[2]) || 100;
-      const parsed = parseJsonl(file);
+      const field = args[0];
+      const limit = parseInt(args[1]) || 100;
+      const parsed = parseJsonlText(readStdin());
       parsed.sort((a, b) => (b[field] || 0) - (a[field] || 0));
       for (const item of parsed.slice(0, limit)) {
         console.log(JSON.stringify(item));

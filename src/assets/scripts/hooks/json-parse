@@ -34,12 +34,13 @@ json_field() {
 
 # Extract a field from a JSON file. Usage: json_field_file "/path/to/file.json" "field" "default"
 # Note: uses if/then/else to preserve boolean false (jq // operator would replace false with default)
+# The node fallback reads the file on stdin: json-helper takes no file path.
 json_field_file() {
   local file="$1" field="$2" default="${3:-}"
   if [ "$_HAS_JQ" = "true" ]; then
     jq -r "if (.$field | type) == \"null\" then \"$default\" else (.$field | tostring) end" "$file" 2>/dev/null
   else
-    node "$_JSON_HELPER" get-field-file "$file" "$field" "$default"
+    node "$_JSON_HELPER" get-field "$field" "$default" < "$file"
   fi
 }
 
@@ -132,7 +133,7 @@ json_slurp_cap() {
   if [ "$_HAS_JQ" = "true" ]; then
     jq -c '.' "$file" | jq -s "sort_by(.$field) | reverse | .[0:$limit][]" 2>/dev/null
   else
-    node "$_JSON_HELPER" slurp-cap "$file" "$field" "$limit"
+    node "$_JSON_HELPER" slurp-cap "$field" "$limit" < "$file"
   fi
 }
 

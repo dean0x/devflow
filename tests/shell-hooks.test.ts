@@ -267,28 +267,23 @@ describe('json-helper.js operations', () => {
     expect(parsed).toEqual(['a', 'b', 'c', 'd']);
   });
 
-  it('slurp-sort reads JSONL, sorts, and limits', () => {
-    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-test-'));
-    const file = path.join(tmpDir, 'test.jsonl');
+  const SLURP_INPUT = [
+    JSON.stringify({ id: 'a', confidence: 0.3 }),
+    JSON.stringify({ id: 'b', confidence: 0.9 }),
+    'not json',
+    JSON.stringify({ id: 'c', confidence: 0.5 }),
+  ].join('\n');
 
-    try {
-      fs.writeFileSync(file, [
-        JSON.stringify({ id: 'a', confidence: 0.3 }),
-        JSON.stringify({ id: 'b', confidence: 0.9 }),
-        JSON.stringify({ id: 'c', confidence: 0.5 }),
-      ].join('\n'));
+  it('slurp-sort reads JSONL on stdin, sorts by the field, and limits', () => {
+    const run = spawnSync(process.execPath, [JSON_HELPER, 'slurp-sort', 'confidence', '2'], { input: SLURP_INPUT, encoding: 'utf8' });
+    expect(run.status, run.stderr).toBe(0);
+    expect(JSON.parse(run.stdout).map((row: { id: string }) => row.id)).toEqual(['b', 'c']);
+  });
 
-      const result = execSync(
-        `node "${JSON_HELPER}" slurp-sort "${file}" confidence 2`,
-        { stdio: 'pipe' },
-      ).toString().trim();
-      const parsed = JSON.parse(result);
-      expect(parsed).toHaveLength(2);
-      expect(parsed[0].id).toBe('b');
-      expect(parsed[1].id).toBe('c');
-    } finally {
-      fs.rmSync(tmpDir, { recursive: true, force: true });
-    }
+  it('slurp-cap reads JSONL on stdin and prints the top rows one per line', () => {
+    const run = spawnSync(process.execPath, [JSON_HELPER, 'slurp-cap', 'confidence', '2'], { input: SLURP_INPUT, encoding: 'utf8' });
+    expect(run.status, run.stderr).toBe(0);
+    expect(run.stdout.trim().split('\n').map(line => JSON.parse(line).id)).toEqual(['b', 'c']);
   });
 
   it('session-output builds correct envelope', () => {
@@ -390,6 +385,29 @@ describe('json-parse wrapper', () => {
       { stdio: 'pipe' },
     ).toString().trim();
     expect(result).toBe('val');
+  });
+
+  it('json_field_file reads a field from a file through the node fallback, a boolean false included', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'json-field-file-'));
+    try {
+      const file = path.join(dir, 'state.json');
+      fs.writeFileSync(file, JSON.stringify({ enabled: false, port: 4141, nested: { model: 'opus' } }));
+      const read = (field: string, fallback: string): string => {
+        const run = spawnSync('bash', [
+          '-c', 'source "$1" && _HAS_JQ=false && json_field_file "$2" "$3" "$4"',
+          '_', path.join(HOOKS_DIR, 'json-parse'), file, field, fallback,
+        ], { encoding: 'utf8' });
+        expect(run.status, run.stderr).toBe(0);
+        return run.stdout.trim();
+      };
+
+      expect(read('enabled', 'true')).toBe('false');
+      expect(read('port', '0')).toBe('4141');
+      expect(read('nested.model', '')).toBe('opus');
+      expect(read('missing', 'fallback')).toBe('fallback');
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
   });
 });
 
