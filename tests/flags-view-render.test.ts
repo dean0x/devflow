@@ -143,8 +143,9 @@ describe('flags-view-render — renderFrame basic contract', () => {
 
 describe('flags-view-render — per-kind value display', () => {
   it('boolean flag shows "on" when true', () => {
-    // Applies PF-018 mechanism 7: assert the SPECIFIC cursor row, not the joined
-    // frame. D-EFFDV: vocabulary is 'on'/'off', never 'enabled'/'disabled'.
+    // Assert the SPECIFIC cursor row, not the joined frame, where another line
+    // could supply the same text.
+    // D-EFFDV: vocabulary is 'on'/'off', never 'enabled'/'disabled'.
     const rows = buildFlagRows({ tui: true });
     const state = makeState({ rows, cursor: 0, viewportOffset: 0 });
     const lines = renderFrame(state, DIMS_80x24);
@@ -155,8 +156,9 @@ describe('flags-view-render — per-kind value display', () => {
   });
 
   it('boolean flag shows "off" when false', () => {
-    // Applies PF-018 mechanism 7: assert the SPECIFIC cursor row, not the joined
-    // frame. D-EFFDV: vocabulary is 'on'/'off', never 'enabled'/'disabled'.
+    // Assert the SPECIFIC cursor row, not the joined frame, where another line
+    // could supply the same text.
+    // D-EFFDV: vocabulary is 'on'/'off', never 'enabled'/'disabled'.
     const rows = buildFlagRows({ tui: false });
     const state = makeState({ rows, cursor: 0, viewportOffset: 0 });
     const lines = renderFrame(state, DIMS_80x24);
@@ -177,7 +179,7 @@ describe('flags-view-render — per-kind value display', () => {
   });
 
   it('view-mode shows neutralValue "default" when null (D-EFFDV: never "unset")', () => {
-    // Applies PF-018 mechanism 7: assert the specific cursor row.
+    // Assert the specific cursor row — another line could supply the same text.
     // D-EFFDV: enum null → neutralValue text; view-mode neutralValue is 'default'.
     const rows = buildFlagRows({}); // view-mode absent → null (TUI neutral)
     const vmIdx = rows.findIndex(r => r.id === 'view-mode');
@@ -192,7 +194,7 @@ describe('flags-view-render — per-kind value display', () => {
   });
 
   it('number flag shows value when set', () => {
-    // Applies PF-018 mechanism 7: assert the cursor row, not the joined frame.
+    // Assert the cursor row, not the joined frame.
     // The frame always includes '40' from the devflow-default for max-concurrent-subagents.
     const rows = buildFlagRows({ 'max-concurrent-subagents': 40 });
     const mcIdx = rows.findIndex(r => r.id === 'max-concurrent-subagents');
@@ -205,7 +207,7 @@ describe('flags-view-render — per-kind value display', () => {
   });
 
   it('number flag shows upstream default with "(default)" suffix when null (D-EFFDV: never "unset")', () => {
-    // Applies PF-018 mechanism 7: assert the specific cursor row.
+    // Assert the specific cursor row — another line could supply the same text.
     // D-EFFDV: number null → effectiveDisplay → upstreamDefault text + ' (default)' suffix.
     // subagent-spawn-depth has no devflow defaultValue but upstreamDefault: 3.
     const rows = buildFlagRows({ 'subagent-spawn-depth': null });
@@ -241,7 +243,7 @@ describe('flags-view-render — dirty dot', () => {
   });
 
   it('no dirty indicator when clean', () => {
-    // Applies PF-018 mechanism 4: Array.isArray is satisfied by any return value.
+    // Array.isArray is satisfied by any return value.
     // render.ts:162 pins the dirty indicator to yellow('● ') (exactly '●' in plain
     // text), so assert its absence when configuredValue === originalValue.
     const rows = buildFlagRows({ tui: true });
@@ -258,7 +260,7 @@ describe('flags-view-render — dirty dot', () => {
 
 describe('flags-view-render — cursor indicator', () => {
   it('selected row shows ❯ prefix; no other row shares it', () => {
-    // Applies PF-018 mechanism 7: the browse-hint line always contains '→', making
+    // The browse-hint line always contains '→', making
     // the disjunction vacuous. Assert the specific cursor row carries ❯ and that
     // exactly one data row has it (negative control).
     const state = makeState({ cursor: 0 });
@@ -345,7 +347,7 @@ describe('flags-view-render — edit mode', () => {
 
 describe('flags-view-render — viewport overflow indicators', () => {
   it('shows scroll-up indicator when viewportOffset > 0', () => {
-    // Applies PF-018 mechanism 7: '↑' appears in the footer keybinding line
+    // '↑' appears in the footer keybinding line
     // unconditionally. Assert lines[3] — the dedicated upIndicator slot in the
     // frame layout — which is empty when no rows are above and populated otherwise.
     // state.viewportHeight is the single owner (ARCH-M5 fix — see viewportHeight
@@ -368,7 +370,7 @@ describe('flags-view-render — viewport overflow indicators', () => {
   });
 
   it('shows scroll-down indicator when rows extend below viewport', () => {
-    // Applies PF-018 mechanism 7: '↓' and 'v' appear in the footer line
+    // '↓' and 'v' appear in the footer line
     // unconditionally. Assert lines[4+viewportHeight] — the dedicated downIndicator
     // slot — instead of the joined frame.
     const rows = buildFlagRows({});
@@ -616,10 +618,10 @@ describe('flags-view-render — ARCH-M7b: caret survival beyond chevron budget',
 // ---------------------------------------------------------------------------
 
 describe('flags-view-render — ARCH-M7c: deviation signal', () => {
-  it('non-boolean deviating value on non-cursor row uses bold not cyan (applies ADR-016 amendment lesson)', () => {
+  it('non-boolean deviating value on non-cursor row uses bold not cyan (one colour, one semantic)', () => {
     // max-concurrent-subagents devflowDefault=40; value 20 deviates.
     // Before fix: formatValue returns cyan('20'), conflating "focus" and "deviation"
-    //   — one colour, two semantics (ADR-016 amendment lesson).
+    //   — one colour, two semantics.
     // After fix: formatValue returns bold('20'); cyan = focus indicator only (chevrons).
     //
     // cursor at row 0 (not mcIdx) so the max-concurrent-subagents row is non-cursor;

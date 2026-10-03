@@ -11,7 +11,7 @@
  * an exception escaping the render or reduce callbacks. A throw inside an
  * EventEmitter listener does not reject the enclosing promise — it escapes as an
  * uncaughtException — so without an explicit guard the process dies with the
- * terminal still in raw mode (the PF-014 failure class: cleanup that does not run).
+ * terminal still in raw mode (the failure class of cleanup that does not run).
  */
 
 import { describe, it, expect, vi } from 'vitest';
@@ -78,7 +78,7 @@ function expectTerminalRestored(h: Harness, pauseSpy: ReturnType<typeof vi.spyOn
 // ---------------------------------------------------------------------------
 
 // ---------------------------------------------------------------------------
-// TEST-H1: normalizeKey — complete key table (applies PF-018)
+// TEST-H1: normalizeKey — complete key table
 //
 // All 12 named entries in the switch table, plus ctrl-c and the default-branch
 // fallback, are tested via it.each. The existing TS-M5 tests cover the

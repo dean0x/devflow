@@ -911,9 +911,9 @@ describe('resolvePort', () => {
   });
 });
 
-// ─── T7 / AC-F8: disable full post-state — PF-015 whole-end-state assertion ──
+// ─── T7 / AC-F8: disable full post-state — whole-end-state assertion ──
 //
-// PF-015: Toggle correctness is only proven by asserting the WHOLE end-state from
+// Toggle correctness is only proven by asserting the WHOLE end-state from
 // a fully-enabled starting state — not by checking individual artifacts per step.
 //
 // AC-F8: devflow proxy --disable reverts settings (hooks + ANTHROPIC_BASE_URL).
@@ -922,7 +922,7 @@ describe('resolvePort', () => {
 // getExternalModelsCached. All three discovery scenarios (cache hit, cache miss, no
 // binary) produce IDENTICAL Settings post-state.
 
-describe('T7 / AC-F8: disable full post-state — PF-015 whole-end-state assertion', () => {
+describe('T7 / AC-F8: disable full post-state — whole-end-state assertion', () => {
   /** Fully-enabled settings: proxy hooks on both event types + ANTHROPIC_BASE_URL set. */
   function buildFullyEnabledSettings(extraEnv?: Record<string, string>): Settings {
     const s: Settings = {};
@@ -938,7 +938,7 @@ describe('T7 / AC-F8: disable full post-state — PF-015 whole-end-state asserti
     const s = buildFullyEnabledSettings({ EXTRA: 'keep' });
     const changed = applyDisableToSettings(s, DEFAULT_PORT);
 
-    // PF-015: assert the WHOLE final state, not per-step booleans
+    // Assert the WHOLE final state, not per-step booleans
     expect(changed).toBe(true);
     expect(hasProxyHooks(s)).toBe(false);
     const env = (s as Record<string, unknown>).env as Record<string, string> | undefined;
@@ -966,7 +966,7 @@ describe('T7 / AC-F8: disable full post-state — PF-015 whole-end-state asserti
   });
 
   it('unconditional both-operations invariant: all three settings states produce a clean post-state', () => {
-    // PF-015: applyDisableToSettings MUST call removeProxyHooks AND _stripProxyEnvFromObject
+    // applyDisableToSettings MUST call removeProxyHooks AND _stripProxyEnvFromObject
     // unconditionally — regardless of each other's return value.
     //
     // The guarded bug: "removeProxyHooks(s) || _stripProxyEnvFromObject(s, port)" short-circuits
@@ -1020,7 +1020,7 @@ describe('T7 / AC-F8: disable full post-state — PF-015 whole-end-state asserti
   // When proxy --disable runs, revertExternalAgents is called to rewrite installed agent
   // files back to their shipped Claude defaults. This must happen regardless of the prior
   // model-discovery cache state (cache-hit, cache-miss, no cache dir). Proves that
-  // reversion is independent of discovery. (PF-015)
+  // reversion is independent of discovery.
 
   let tmpInstallDir: string;
   let tmpDevflowDir: string;
@@ -1668,7 +1668,7 @@ describe('terminateRelay — kill path (integration)', () => {
 //
 // Strip gate: ANTHROPIC_BASE_URL ownership (port match) gates the URL delete only.
 // UNKNOWN_MODEL_WINDOW_ENV is always removed — Devflow is its only producer so there
-// is no foreign value to protect. (applies PF-015, ADR-003)
+// is no foreign value to protect.
 
 const WINDOW_ENV = 'CLAUDE_CODE_DISABLE_UNKNOWN_MODEL_WINDOW_ENFORCEMENT';
 
@@ -1723,7 +1723,7 @@ describe('Phase 4 / stripProxyEnv: ownership-gated strip of both relay vars', ()
 
   it('foreign URL: ANTHROPIC_BASE_URL NOT removed; window var IS always removed', () => {
     // URL gate protects a foreign url value — but the window var has no foreign value;
-    // Devflow is its only producer so it is always removed. (applies PF-015, ADR-003)
+    // Devflow is its only producer so it is always removed.
     const input = JSON.stringify({
       env: { ANTHROPIC_BASE_URL: 'https://foreign.example.com', [WINDOW_ENV]: '1' },
     });
@@ -1754,7 +1754,7 @@ describe('Phase 4 / stripProxyEnv: ownership-gated strip of both relay vars', ()
   // strip attempt when ANTHROPIC_BASE_URL is present but on a different managed port.
   // Reachable via: port drift between enable/disable, hand-edited URL, or uninstall's
   // DEFAULT_PROXY_PORT fallback.  Both behaviors must be asserted together from a
-  // fully-enabled starting state (PF-015 stated test rule).
+  // fully-enabled starting state.
   it('SEC-M2: port-mismatch strip — window var removed, mismatched ANTHROPIC_BASE_URL untouched', () => {
     const enabledPort = DEFAULT_PORT; // 4141 — the port that was active at enable time
     const disablePort = 9999; // different port — simulates port drift between enable and disable
@@ -1786,7 +1786,7 @@ describe('Phase 4 / T7-extended: fully-enabled state includes UNKNOWN_MODEL_WIND
     return s;
   }
 
-  it('PF-015 whole-end-state: applyDisableToSettings removes hooks, relay URL, AND window var', () => {
+  it('whole-end-state: applyDisableToSettings removes hooks, relay URL, AND window var', () => {
     const s = buildFullyEnabledSettingsP4({ EXTRA: 'keep' });
     const changed = applyDisableToSettings(s, DEFAULT_PORT);
 

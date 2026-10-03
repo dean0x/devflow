@@ -1,13 +1,13 @@
 /**
  * Unit tests for src/cli/tui/cells.ts — shared TUI cell helpers.
  *
- * sanitizeCell is the PF-023 sink for disk-sourced flag values (render.ts:85):
+ * sanitizeCell is the sink for disk-sourced flag values (render.ts:85):
  * the point where a persisted value like `spellcheck=$'a\nb'` is stopped from
  * breaking the one-string-per-terminal-line frame contract. Tests here pin the
  * contract at the sink rather than through two renderers (agents-view and
  * flags-view).
  *
- * avoids PF-018: each assertion names a specific behavior and would fail against
+ * Each assertion names a specific behavior and would fail against
  * a no-op or broken implementation of the named function.
  */
 
@@ -16,7 +16,7 @@ import { sanitizeCell, padToVisible, truncateVisible } from '../src/cli/tui/cell
 import { stripAnsi } from '../src/core/ansi.js';
 
 // ---------------------------------------------------------------------------
-// sanitizeCell — PF-023 sink: collapses layout-breaking whitespace, strips ANSI
+// sanitizeCell — the sanitizing sink: collapses layout-breaking whitespace, strips ANSI
 // ---------------------------------------------------------------------------
 
 describe('sanitizeCell', () => {

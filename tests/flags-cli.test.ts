@@ -8,12 +8,12 @@
  *   - Fresh Command instance per test via createFlagsCommand()
  *   - Real temp files on disk; async fs operations
  *
- * Whole-post-state discipline (applies PF-015 + ADR-003): ONE representative test
+ * Whole-post-state discipline: ONE representative test
  * per mutation verb (--enable, --disable, --set, --unset) asserts the COMPLETE
  * settings.json object and COMPLETE manifest.features.flags record via toEqual.
  * Other tests use key-picks for brevity on non-representative paths.
  *
- * Applies PF-014 (process.exitCode, never process.exit) — every error path sets
+ * Commands use process.exitCode, never process.exit — every error path sets
  * process.exitCode = 1 and returns; tests reset exitCode in beforeEach/afterEach.
  */
 
@@ -54,7 +54,7 @@ import { makeManifest } from './helpers.js';
 import type { FlagsRecord } from '../src/core/flags.js';
 import { readManifest } from '../src/core/manifest.js';
 // Direct import from terminal.js (not index.js) so the REL-M3 mock of index.js
-// does not affect the seam test's runFlagsTui reference (PF-017(c)).
+// does not affect the seam test's runFlagsTui reference.
 import { runFlagsTui } from '../src/cli/flags-view/terminal.js';
 import { buildFlagRows } from '../src/cli/flags-view/state.js';
 
@@ -109,7 +109,7 @@ describe('flags CLI — createFlagsCommand factory', () => {
     // Fresh command per test — avoids Commander option-value leakage between tests.
     flagsCmd = createFlagsCommand();
 
-    // Reset exit code before each test (PF-014: commands set exitCode, not process.exit).
+    // Reset exit code before each test (commands set exitCode, not process.exit).
     process.exitCode = 0;
   });
 
@@ -180,7 +180,7 @@ describe('flags CLI — createFlagsCommand factory', () => {
       await flagsCmd.parseAsync(['--enable', 'tui'], { from: 'user' });
       expect(process.exitCode).toBe(0);
 
-      // Whole-post-state: complete settings.json and complete flags record (PF-015).
+      // Whole-post-state: complete settings.json and complete flags record.
       // convergeFlagsIntoSettings always writes view-mode via resolveFinalViewMode,
       // so the flags record also contains 'view-mode':'default' (neutral → not written
       // to settings.json). toEqual on both artifacts catches unexpected extra writes.
@@ -263,7 +263,7 @@ describe('flags CLI — createFlagsCommand factory', () => {
       await flagsCmd.parseAsync(['--disable', 'tui'], { from: 'user' });
       expect(process.exitCode).toBe(0);
 
-      // Whole-post-state: complete settings.json and complete flags record (PF-015).
+      // Whole-post-state: complete settings.json and complete flags record.
       // tui=false is neutral for boolean flags → tui key deleted from settings;
       // empty result is {} (applyFlags cleans up empty env, same logic applies to root).
       const settings = parseSettings(await fs.readFile(path.join(tmpClaudeDir, 'settings.json'), 'utf-8'));
@@ -295,7 +295,7 @@ describe('flags CLI — createFlagsCommand factory', () => {
       await flagsCmd.parseAsync(['--set', 'max-concurrent-subagents=50'], { from: 'user' });
       expect(process.exitCode).toBe(0);
 
-      // Whole-post-state: complete settings.json and complete flags record (PF-015).
+      // Whole-post-state: complete settings.json and complete flags record.
       // Starting from flags:{} with no settings.json → only the env entry is written.
       // toEqual on the full object catches any unexpected keys written or omitted.
       const settings = parseSettings(await fs.readFile(path.join(tmpClaudeDir, 'settings.json'), 'utf-8'));
@@ -518,7 +518,7 @@ describe('flags CLI — createFlagsCommand factory', () => {
       await flagsCmd.parseAsync(['--unset', 'max-concurrent-subagents'], { from: 'user' });
       expect(process.exitCode).toBe(0);
 
-      // Whole-post-state: complete settings.json and complete flags record (PF-015).
+      // Whole-post-state: complete settings.json and complete flags record.
       // null is neutral for number flags → env key deleted; empty env block deleted too
       // → settings becomes {} (applyFlags cleanup, line ~960-963 in flags.ts).
       const settings = parseSettings(await fs.readFile(path.join(tmpClaudeDir, 'settings.json'), 'utf-8'));
@@ -608,7 +608,7 @@ describe('flags CLI — createFlagsCommand factory', () => {
     });
 
     it('corrupt manifest → hard-refuse, exitCode 1, p.log.error, settings.json not written', async () => {
-      // readManifest returns null for malformed JSON — same as absent (avoids PF-023).
+      // readManifest returns null for malformed JSON — same as absent.
       await fs.writeFile(path.join(tmpDevflowDir, 'manifest.json'), 'not valid json', 'utf-8');
 
       await flagsCmd.parseAsync([], { from: 'user' });
@@ -782,8 +782,8 @@ describe('flags CLI — createFlagsCommand factory', () => {
   // to gate their confirmation output on `process.exitCode === 0`, so on a real
   // run that test was false and `devflow flags --enable X` completed silently —
   // it wrote both artifacts and told the user nothing. The harness normalised away
-  // the exact condition under which production failed (the PF-018 shape: a green
-  // test that cannot observe the defect it is meant to guard).
+  // the exact condition under which production failed (a green test that cannot
+  // observe the defect it is meant to guard).
   //
   // These tests restore exitCode to `undefined` to reproduce a real invocation and
   // assert on the emitted confirmation rather than on the exit code.
@@ -910,7 +910,7 @@ describe('flags CLI — createFlagsCommand factory', () => {
   // handleBare re-reads settings.json AFTER runFlagsTui returns, not before.
   // A concurrent writer (e.g. `devflow proxy --enable` setting ANTHROPIC_BASE_URL)
   // that ran while the TUI was open would be silently clobbered by the stale
-  // pre-TUI snapshot if the re-read were absent (applies PF-022).
+  // pre-TUI snapshot if the re-read were absent.
   //
   // vi.doMock + vi.resetModules() isolate the mock to this describe block; the
   // mock's runFlagsTui simulates a concurrent write before returning {action:'save'}.
@@ -954,7 +954,7 @@ describe('flags CLI — createFlagsCommand factory', () => {
         collectFlagRecord: () => ({}),
         runFlagsTui: async () => {
           // Concurrent write — simulates `devflow proxy --enable` running while the
-          // TUI was open (applies PF-022: file state is reality, not config state).
+          // TUI was open (file state is reality, not config state).
           await fs.writeFile(
             settingsPath,
             JSON.stringify({ env: { ANTHROPIC_BASE_URL: 'http://localhost:9090' } }, null, 2) + '\n',
@@ -1052,14 +1052,14 @@ describe('flags CLI — createFlagsCommand factory', () => {
 
   // ─── applyTuiResult seam — TUI→persist wiring (TEST-M5) ──────────────────────
   //
-  // PF-017(c): an interactive surface has no automated test until a human runs it
+  // An interactive surface has no automated test until a human runs it
   // in a real TTY. applyTuiResult closes this coverage gap: the extracted save
   // handler is called directly with a PassThrough-driven TUI result.
   //
-  // PF-015: both save and cancel paths assert the WHOLE post-state of both
+  // Both save and cancel paths assert the WHOLE post-state of both
   // artifacts (manifest.features.flags + settings.json) — not per-key picks.
 
-  describe('applyTuiResult seam — TUI→persist wiring (PF-015 + PF-017(c))', () => {
+  describe('applyTuiResult seam — TUI→persist wiring', () => {
     function makeStreams() {
       const stdin = new PassThrough();
       const stdout = new PassThrough();
@@ -1102,7 +1102,7 @@ describe('flags CLI — createFlagsCommand factory', () => {
       const outcome = await applyTuiResult(tuiResult, '{}', manifest, tmpClaudeDir, tmpDevflowDir);
       expect(outcome).toBe('saved');
 
-      // Assert whole post-state of both artifacts (PF-015)
+      // Assert whole post-state of both artifacts
       const manifestAfter = JSON.parse(
         await fs.readFile(path.join(tmpDevflowDir, 'manifest.json'), 'utf-8'),
       ) as { features: { flags: FlagsRecord } };
@@ -1141,7 +1141,7 @@ describe('flags CLI — createFlagsCommand factory', () => {
       const outcome = await applyTuiResult(tuiResult, settingsContent, manifest, tmpClaudeDir, tmpDevflowDir);
       expect(outcome).toBe('unchanged');
 
-      // Assert whole post-state — both artifacts must be byte-identical (PF-015)
+      // Assert whole post-state — both artifacts must be byte-identical
       expect(
         await fs.readFile(path.join(tmpDevflowDir, 'manifest.json'), 'utf-8'),
       ).toBe(manifestContent);
