@@ -14,7 +14,7 @@
  *         what `EVIDENCE_LINE_RE` does, over a differential table.
  *
  * Every guard has a named collector, a non-empty-corpus assertion and a known-bad
- * probe through the same collector (PF-064). Every reader reads BUILT artifacts.
+ * probe through the same collector. Every reader reads BUILT artifacts.
  */
 
 import { describe, it, expect } from 'vitest'

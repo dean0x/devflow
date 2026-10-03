@@ -48,7 +48,7 @@ import {
 } from './scripted-shim.js';
 
 // ---------------------------------------------------------------------------
-// The .cjs seam (transcribed from its JSDoc typedefs — PF-043, PF-069)
+// The .cjs seam (transcribed from its JSDoc typedefs)
 // ---------------------------------------------------------------------------
 
 type SwitchSource = 'machine' | 'project' | 'personal';
@@ -1184,7 +1184,7 @@ describe('serializeProjectSuggestion', () => {
 });
 
 // ---------------------------------------------------------------------------
-// Source guards (PF-064: non-empty corpus, known-bad probes)
+// Source guards (non-empty corpus, known-bad probes)
 // ---------------------------------------------------------------------------
 
 describe('design decisions at their code sites', () => {

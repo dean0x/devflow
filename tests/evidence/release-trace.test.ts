@@ -20,8 +20,8 @@
  *     for every class, the bound, the stdout contract and the exit codes.
  *
  * Every guard has a named collector, a non-empty corpus and a known-bad probe
- * run through the same collector (PF-064). Every spawn goes through scopedEnv()
- * and names its cwd (PF-060; verify-evidence.test.ts sweeps this directory).
+ * run through the same collector. Every spawn goes through scopedEnv()
+ * and names its cwd (verify-evidence.test.ts sweeps this directory).
  */
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest'
@@ -173,7 +173,7 @@ function commit(repo: string, spec: CommitSpec): string {
 
 interface Run { stdout: string; stderr: string; status: number | null }
 
-/** Run the real script under process.execPath in `cwd`; HOME is tmp (PF-060). */
+/** Run the real script under process.execPath in `cwd`; HOME is tmp. */
 function run(cwd: string, args: readonly string[], script: string = RELEASE_TRACE_SCRIPT): Run {
   const r = spawnSync(process.execPath, [script, ...args], {
     cwd,
@@ -1187,7 +1187,7 @@ describe('install path pin', SPAWN_BUDGET, () => {
 })
 
 // ---------------------------------------------------------------------------
-// Source guards (PF-064: named collector, non-empty corpus, known-bad probe)
+// Source guards (named collector, non-empty corpus, known-bad probe)
 // ---------------------------------------------------------------------------
 
 function codeLines(source: string): string[] {

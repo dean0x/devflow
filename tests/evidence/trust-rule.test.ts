@@ -18,7 +18,7 @@
  * The constants are required from the script, never transcribed: a hand-copied
  * list is a second authority that agrees with the first only until one of them
  * is edited. Every guard has a named collector, a non-empty-corpus assertion and a
- * known-bad probe through the same collector (PF-064).
+ * known-bad probe through the same collector.
  */
 
 import { describe, it, expect } from 'vitest'

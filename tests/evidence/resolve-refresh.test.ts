@@ -22,7 +22,7 @@
  *           first match stay unique, so none of the new text can shadow them.
  *
  * Every guard has a named collector, a non-empty-corpus assertion and a known-bad
- * probe run through the same collector (PF-064).
+ * probe run through the same collector.
  */
 
 import { describe, it, expect } from 'vitest'

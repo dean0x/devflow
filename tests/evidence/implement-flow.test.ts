@@ -33,7 +33,7 @@
  *          instruction, stays out of Phase 14 (g5-issue-flow's single-write rule).
  *
  * Every guard has a named collector, a non-empty-corpus assertion and a known-bad
- * probe run through the same collector (PF-064).
+ * probe run through the same collector.
  *
  * The block table carries D-TP-SCENARIO's rows: a scenario holding a closing
  * keyword, an issue URL, a mention or a code span fails `check block`, so it never

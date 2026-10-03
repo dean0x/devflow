@@ -6,13 +6,13 @@
  * every behavior-testing assertion fails because the script is absent and Node
  * exits non-zero.
  *
- * PF-018 compliance:
+ * Non-vacuity rules:
  *   - Every assertion is concrete (no typeof checks)
  *   - No assertion sits under a conditional
  *   - No try/catch wraps expectations
  *   - Corpus-scan tests assert the corpus is non-empty
  *
- * PF-023: the scrubber is the SINK-side control — tests verify it is self-contained
+ * The scrubber is the SINK-side control — tests verify it is self-contained
  * and never assumes upstream masking happened.
  */
 
@@ -87,7 +87,7 @@ afterEach(() => {
 });
 
 // ---------------------------------------------------------------------------
-// Slug vocabulary — independent literal pin (PF-018 static declaration)
+// Slug vocabulary — independent literal pin (static declaration)
 // Phase D cross-artifact check: a test inside describe('slug vocabulary')
 // reads src/assets/agents/review.md and asserts every slug from EXPECTED_SLUGS
 // appears in the ## Secret Handling in Findings section (commit 8 added it).
@@ -121,7 +121,7 @@ describe('slug vocabulary', () => {
 
   it('every expected slug appears in SCRUB stdout when all rule types are triggered', () => {
     // One fixture line per rule — ensures the slug list is non-vacuous against
-    // the live script (PF-018: corpus is 8 lines, each triggering one slug).
+    // the live script (corpus is 8 lines, each triggering one slug).
     const multiFixture = [
       '-----BEGIN RSA PRIVATE KEY-----\nMIIEowIBAAKCAQEAtest1234567890abcdefghijklm\n-----END RSA PRIVATE KEY-----',
       'github_pat_' + 'A'.repeat(22),
@@ -564,7 +564,7 @@ describe('exit codes', () => {
       timeout: 5000,
     });
     expect(result.status).toBe(1);
-    // stdout must be empty on usage error (PF-018: concrete check)
+    // stdout must be empty on usage error (concrete check)
     expect(result.stdout ?? '').toBe('');
   });
 
@@ -630,7 +630,7 @@ describe('adversarial backtracking budget', () => {
     const header = '-----BEGIN RSA PRIVATE KEY-----\n';
     const nearMissBody = 'AAAA'.repeat(25_000) + '\n'; // ~100 KB
 
-    // Assert the corpus is non-empty (PF-018)
+    // Assert the corpus is non-empty
     expect(nearMissBody.length).toBeGreaterThan(100_000);
 
     const fixture = header + nearMissBody;
@@ -677,10 +677,10 @@ const NODE_REQUIRE = createRequire(import.meta.url);
 // The .cjs seam
 //
 // redact-secrets.cjs is plain CommonJS, and this tree sits outside every
-// tsconfig the project runs (PF-069), so the interface below is the ONLY shape
+// tsconfig the project runs, so the interface below is the ONLY shape
 // authority for the module's exports on this side. It is transcribed from the
 // module's own JSDoc — open that before changing anything here, because a shape
-// invented on this side is a fixture the runtime rejects (PF-043).
+// invented on this side is a fixture the runtime rejects.
 // ---------------------------------------------------------------------------
 
 /** A per-slug redaction count map. */
@@ -1336,7 +1336,7 @@ describe('--emit: the single stdout boundary is amended, not bypassed (§8.9)', 
       .map(l => l.trim());
   }
 
-  it('no code path calls process.exit() (PF-014 survives the amendment)', () => {
+  it('no code path calls process.exit() (the rule survives the --emit amendment)', () => {
     const offenders = collectProcessExitCalls(SOURCE);
     expect(offenders, `process.exit() sites:\n  ${offenders.join('\n  ')}`).toEqual([]);
   });

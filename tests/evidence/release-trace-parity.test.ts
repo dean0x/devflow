@@ -12,9 +12,9 @@
  * own line regexes by field order and by instantiation.
  *
  * Built artifacts are read, never sources: the MDS escaping of `\(` and `\]` is
- * the kind of defect only the emitted bytes show (PF-018). Every comparison runs
+ * the kind of defect only the emitted bytes show. Every comparison runs
  * through one named collector, which the known-bad probes drive with a drifted
- * reference (PF-064).
+ * reference.
  */
 
 import { describe, it, expect } from 'vitest'

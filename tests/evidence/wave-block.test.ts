@@ -39,7 +39,7 @@
  * the built dynamic-build.md step 3 tells the main model to render (#365 P3).
  *
  * Every guard has a named collector, a non-empty-corpus assertion and a known-bad
- * probe run through the same collector (PF-064).
+ * probe run through the same collector.
  */
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest'
@@ -618,7 +618,7 @@ describe('check wave <file> — stdout empty, exits 0 · 1 · 2 · 5', () => {
   }
 })
 
-describe('check wave through the real process (applies PF-060: tmp HOME, non-repo cwd)', { timeout: 30_000 }, () => {
+describe('check wave through the real process (tmp HOME, non-repo cwd)', { timeout: 30_000 }, () => {
   function runReal(args: readonly string[]): { status: number | null; stdout: string; stderr: string } {
     const home = fs.mkdtempSync(path.join(tmp, 'home-'))
     const r = spawnSync(process.execPath, [VERIFY_EVIDENCE_SCRIPT, ...args], {
@@ -751,7 +751,7 @@ export function schemaEngineVerdicts(text: string): string[] | null {
 /**
  * Every engine verdict the wave can see — the schema's declared domain, read from
  * the built text rather than listed here, so a verdict the schema gains is one the
- * merge-parity arm below decides at once (PF-075: every value has one arm).
+ * merge-parity arm below decides at once (every value has one arm).
  */
 const ENGINE_VERDICTS: readonly string[] = schemaEngineVerdicts(requireDistFile('dynamic-build.md')) ?? []
 

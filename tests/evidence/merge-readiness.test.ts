@@ -2,7 +2,7 @@
  * tests/evidence/merge-readiness.test.ts
  *
  * SDLC-evidence PR4 (#363) phase P5, and #352: the two PR-host classifiers a merge
- * decision rests on, held against their own declared output domains (PF-075).
+ * decision rests on, held against their own declared output domains.
  *
  *   #352   check-ci-status reads CI through a field gh actually has. The frozen
  *          steps asked `gh pr checks --json` for `conclusion`, which gh 2.88.1
@@ -15,7 +15,7 @@
  *          produce exactly the Output enum git.md declares. Step 5 is EXECUTED: a
  *          small interpreter reads its clauses and runs them over every bucket
  *          multiset up to three checks, an undocumented bucket included.
- *   PF-075 Both ci-status-gate blocks (/implement Phase 9, /resolve Phase 8) name
+ *   Gates  Both ci-status-gate blocks (/implement Phase 9, /resolve Phase 8) name
  *          an arm for every status the op can return.
  *   AC-14  check-merge-readiness returns READY only through a positive
  *          conjunction. Its step 4 reads the test-plan evidence at the head from
@@ -26,11 +26,12 @@
  *          statuses, evidence known or unknown, approval, the policy input): every
  *          input selects an arm, every arm is reachable, READY is selected only
  *          when each conjunct holds, and the terminal arm is `NOT_READY (status
- *          unknown)`. The non-author gate sits at its own arm (PF-076); VERIFIED-CI
- *          and ATTESTED-LOCAL are reported apart.
+ *          unknown)`. The non-author gate sits at its own arm, since a gate is
+ *          obeyed reliably only where its step states it; VERIFIED-CI and
+ *          ATTESTED-LOCAL are reported apart.
  *
  * Every guard has a named collector, a non-empty-corpus assertion and a known-bad
- * probe run through the same collector (PF-064); the probes are the 660edc1 text.
+ * probe run through the same collector; the probes are the 660edc1 text.
  *
  * NOT covered: gh's behaviour itself. The JSON field list and the bucket
  * vocabulary are transcribed from `gh pr checks --help` (gh 2.88.1); a gh release
@@ -255,7 +256,7 @@ describe('#352: check-ci-status reads CI through fields gh has, and classifies t
 })
 
 // ---------------------------------------------------------------------------
-// The ci-status-gate blocks: an arm for every status the op returns (PF-075)
+// The ci-status-gate blocks: an arm for every status the op returns
 // ---------------------------------------------------------------------------
 
 const GATE_OPEN = '<!-- PATTERN: ci-status-gate'
@@ -274,7 +275,7 @@ function collectUnhandledCiStatuses(block: string, statuses: readonly string[]):
   return statuses.filter(s => !handled.has(s))
 }
 
-describe('PF-075: each ci-status-gate block has an arm for every status check-ci-status returns', () => {
+describe('each ci-status-gate block has an arm for every status check-ci-status returns', () => {
   const hosts = ['implement.md', 'resolve.md'] as const
 
   it('both blocks name all six statuses', () => {
@@ -297,7 +298,7 @@ describe('PF-075: each ci-status-gate block has an arm for every status check-ci
 })
 
 // ---------------------------------------------------------------------------
-// check-merge-readiness — step 4 and the ladder (AC-14, PF-075, PF-076)
+// check-merge-readiness — step 4 and the ladder (AC-14)
 // ---------------------------------------------------------------------------
 
 const MR = 'check-merge-readiness'
@@ -464,7 +465,7 @@ describe('AC-14: check-merge-readiness reads the evidence at head and is READY o
     expect(collectLadderDefects(prose, LADDER, domain)).toEqual([])
   })
 
-  it('PF-075: every CI status × evidence known/unknown × approval × policy selects an arm, and only PASSING or NO_CI can be READY', () => {
+  it('every CI status × evidence known/unknown × approval × policy selects an arm, and only PASSING or NO_CI can be READY', () => {
     const ready = new Set<string>()
     for (const f of factDomain()) {
       const arm = LADDER.find(a => a.when(f))
