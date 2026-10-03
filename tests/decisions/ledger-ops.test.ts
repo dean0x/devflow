@@ -1,11 +1,12 @@
 // tests/decisions/ledger-ops.test.ts
 //
-// Tests for Phase 3 ledger ops: assign-anchor, retire-anchor, rotate-observations,
-// numbering stability, and locking discipline.
+// Tests for the ledger ops: assign-anchor, refresh-anchor, retire-anchor,
+// restore-anchor, rotate-observations, numbering stability, and locking discipline.
 //
 // AC-A2: assign-anchor mints max+1 over every anchored row of its type, inactive
 //        ones included, skipping each number a tracked file cites; 3-digit-padded
-// AC-A3: retire-anchor flips decisions_status, row otherwise intact, idempotent
+// AC-A3: retire-anchor sets an inactive status and its note, the row otherwise
+//        intact, and refuses an entry that is already inactive
 // AC-F5: retired entries vanish from .md but stay in ledger
 // AC-F7: retired numbers leave gaps, never reused
 // AC-F9: a log row no ledger row carries is archived once 30 days pass since its
@@ -328,7 +329,7 @@ describe('assign-anchor CLI op', { timeout: 30_000 }, () => {
 // retire-anchor CLI op
 // ---------------------------------------------------------------------------
 
-describe('retire-anchor CLI op', () => {
+describe('retire-anchor CLI op', { timeout: 30_000 }, () => {
   let tmpDir: string;
 
   beforeEach(() => {
@@ -340,29 +341,33 @@ describe('retire-anchor CLI op', () => {
     fs.rmSync(tmpDir, { recursive: true, force: true });
   });
 
-  it('flips decisions_status to Retired', () => {
+  /** Run `retire-anchor <anchor> <status>` with `input` as its stdin. */
+  function retire(anchorAndStatus: string, input: unknown) {
+    return runJsonHelper(tmpDir, ['retire-anchor', ...anchorAndStatus.split(' ')], JSON.stringify(input));
+  }
+
+  it('flips decisions_status to Retired, keeping the reason as its note', () => {
     writeLedger(tmpDir, [makeLedgerRow({ anchor_id: 'ADR-001', decisions_status: 'Accepted' })]);
-    const result = runHelper('retire-anchor ADR-001 Retired', tmpDir);
-    expect(result.code).toBe(0);
-    const rows = readLedger(tmpDir);
-    expect(rows[0].decisions_status).toBe('Retired');
+    expect(retire('ADR-001 Retired', { reason: 'A one-off' }).code).toBe(0);
+    expect(readLedger(tmpDir)[0]).toMatchObject({ decisions_status: 'Retired', status_note: 'A one-off' });
   });
 
   it('flips decisions_status to Deprecated', () => {
     writeLedger(tmpDir, [makeLedgerRow({ anchor_id: 'ADR-002', id: 'obs_002', decisions_status: 'Accepted' })]);
-    runHelper('retire-anchor ADR-002 Deprecated', tmpDir);
-    const rows = readLedger(tmpDir);
-    expect(rows[0].decisions_status).toBe('Deprecated');
+    expect(retire('ADR-002 Deprecated', { reason: 'The store moved' }).code).toBe(0);
+    expect(readLedger(tmpDir)[0].decisions_status).toBe('Deprecated');
   });
 
-  it('flips decisions_status to Superseded', () => {
-    writeLedger(tmpDir, [makeLedgerRow({ anchor_id: 'ADR-003', id: 'obs_003', decisions_status: 'Accepted' })]);
-    runHelper('retire-anchor ADR-003 Superseded', tmpDir);
-    const rows = readLedger(tmpDir);
-    expect(rows[0].decisions_status).toBe('Superseded');
+  it('flips decisions_status to Superseded, naming the successor', () => {
+    writeLedger(tmpDir, [
+      makeLedgerRow({ anchor_id: 'ADR-003', id: 'obs_003', decisions_status: 'Accepted' }),
+      makeLedgerRow({ anchor_id: 'ADR-004', id: 'obs_004', decisions_status: 'Accepted' }),
+    ]);
+    expect(retire('ADR-003 Superseded', { by: 'ADR-004' }).code).toBe(0);
+    expect(readLedger(tmpDir)[0]).toMatchObject({ decisions_status: 'Superseded', superseded_by: 'ADR-004' });
   });
 
-  it('row is otherwise byte-intact (other fields unchanged)', () => {
+  it('row is otherwise intact: only the status, its note and retired_on change', () => {
     const original = makeLedgerRow({
       anchor_id: 'ADR-007',
       id: 'obs_007',
@@ -373,24 +378,23 @@ describe('retire-anchor CLI op', () => {
       amendments: [{ date: '2026-04-01', note: 'Amendment' }],
     });
     writeLedger(tmpDir, [original]);
-    runHelper('retire-anchor ADR-007 Retired', tmpDir);
-    const rows = readLedger(tmpDir);
-    const r = rows[0];
-    expect(r.id).toBe('obs_007');
-    expect(r.pattern).toBe('My pattern');
-    expect(r.date).toBe('2026-03-01');
-    expect(r.raw_body).toBe('\n## ADR-007: My pattern\n\n- **Status**: Accepted\n');
-    expect(r.amendments).toEqual([{ date: '2026-04-01', note: 'Amendment' }]);
-    expect(r.decisions_status).toBe('Retired');
+    expect(retire('ADR-007 Retired', { reason: 'A one-off' }).code).toBe(0);
+    expect(readLedger(tmpDir)).toEqual([{
+      ...original,
+      decisions_status: 'Retired',
+      status_note: 'A one-off',
+      retired_on: expect.stringMatching(/^\d{4}-\d{2}-\d{2}$/),
+    }]);
   });
 
-  it('is idempotent — running twice with same status yields same result', () => {
-    writeLedger(tmpDir, [makeLedgerRow({ anchor_id: 'ADR-004', id: 'obs_004', decisions_status: 'Accepted' })]);
-    runHelper('retire-anchor ADR-004 Deprecated', tmpDir);
-    runHelper('retire-anchor ADR-004 Deprecated', tmpDir);
-    const rows = readLedger(tmpDir);
-    expect(rows).toHaveLength(1);
-    expect(rows[0].decisions_status).toBe('Deprecated');
+  it('refuses an entry that is already inactive and leaves it as it was', () => {
+    const ledgerPath = writeLedger(tmpDir, [makeLedgerRow({ anchor_id: 'ADR-004', id: 'obs_004', decisions_status: 'Accepted' })]);
+    expect(retire('ADR-004 Deprecated', { reason: 'The store moved' }).code).toBe(0);
+    const before = fs.readFileSync(ledgerPath, 'utf8');
+    expect(retire('ADR-004 Deprecated', { reason: 'The store moved' })).toEqual({
+      code: 1, stdout: '', stderr: 'retire-anchor: ADR-004 is already Deprecated; nothing was written\n',
+    });
+    expect(fs.readFileSync(ledgerPath, 'utf8')).toBe(before);
   });
 
   it('a retired entry loses its body in rendered decisions.md and is listed under Inactive (AC-F5)', () => {
@@ -398,13 +402,13 @@ describe('retire-anchor CLI op', () => {
       makeLedgerRow({ anchor_id: 'ADR-001', decisions_status: 'Accepted' }),
       makeLedgerRow({ anchor_id: 'ADR-002', id: 'obs_002', pattern: 'To be retired', decisions_status: 'Accepted' }),
     ]);
-    runHelper('retire-anchor ADR-002 Retired', tmpDir);
+    expect(retire('ADR-002 Retired', { reason: 'A one-off' }).code).toBe(0);
     const decisionsPath = path.join(tmpDir, '.devflow', 'learning', 'decisions.md');
     const content = fs.readFileSync(decisionsPath, 'utf8');
     expect(content).toMatch(/^## ADR-001: /m);
     expect(content).not.toMatch(/^## ADR-002:/m);
     expect(content).not.toContain('To be retired');
-    expect(content).toContain('| ADR-002 | Retired | — |\n');
+    expect(content).toContain('| ADR-002 | Retired | A one-off |\n');
   });
 
   it('retired entry stays in the ledger (AC-F5 — ledger is permanent)', () => {
@@ -412,7 +416,7 @@ describe('retire-anchor CLI op', () => {
       makeLedgerRow({ anchor_id: 'ADR-001', decisions_status: 'Accepted' }),
       makeLedgerRow({ anchor_id: 'ADR-002', id: 'obs_002', decisions_status: 'Accepted' }),
     ]);
-    runHelper('retire-anchor ADR-002 Retired', tmpDir);
+    expect(retire('ADR-002 Retired', { reason: 'A one-off' }).code).toBe(0);
     const rows = readLedger(tmpDir);
     expect(rows).toHaveLength(2);
     const retiredRow = rows.find(r => r.anchor_id === 'ADR-002');
@@ -422,15 +426,16 @@ describe('retire-anchor CLI op', () => {
 
   it('exits non-zero when anchor_id not found in ledger', () => {
     writeLedger(tmpDir, [makeLedgerRow({ anchor_id: 'ADR-001', decisions_status: 'Accepted' })]);
-    const result = runHelper('retire-anchor ADR-999 Retired', tmpDir);
+    const result = retire('ADR-999 Retired', { reason: 'A one-off' });
     expect(result.code).not.toBe(0);
-    expect(result.stderr).toContain('ADR-999');
+    expect(result.stderr).toBe('retire-anchor: ADR-999 is not in the ledger; nothing was written\n');
   });
 
   it('exits non-zero for invalid retire status', () => {
     writeLedger(tmpDir, [makeLedgerRow({ anchor_id: 'ADR-001', decisions_status: 'Accepted' })]);
-    const result = runHelper('retire-anchor ADR-001 Invalid', tmpDir);
+    const result = retire('ADR-001 Invalid', { reason: 'A one-off' });
     expect(result.code).not.toBe(0);
+    expect(result.stderr).toContain('retire-anchor: usage');
   });
 });
 
@@ -438,7 +443,7 @@ describe('retire-anchor CLI op', () => {
 // Number stability: retire current-max, then assign-anchor => skip (AC-F7)
 // ---------------------------------------------------------------------------
 
-describe('AC-F7: number stability — retired number is never reused', () => {
+describe('AC-F7: number stability — retired number is never reused', { timeout: 30_000 }, () => {
   let tmpDir: string;
 
   beforeEach(() => {
@@ -457,7 +462,7 @@ describe('AC-F7: number stability — retired number is never reused', () => {
       makeLedgerRow({ anchor_id: 'ADR-005', id: 'obs_005', decisions_status: 'Accepted' }),
     ]);
     // Retire the current max
-    runHelper('retire-anchor ADR-005 Retired', tmpDir);
+    expect(runJsonHelper(tmpDir, ['retire-anchor', 'ADR-005', 'Retired'], '{"reason":"test"}').code).toBe(0);
 
     // Now assign-anchor should give ADR-006, not ADR-005
     writeLog(tmpDir, [makeV2LogRow({ id: 'obs_new' })]);
@@ -472,8 +477,8 @@ describe('AC-F7: number stability — retired number is never reused', () => {
       makeLedgerRow({ anchor_id: 'ADR-002', id: 'obs_002', decisions_status: 'Accepted' }),
       makeLedgerRow({ anchor_id: 'ADR-003', id: 'obs_003', decisions_status: 'Accepted' }),
     ]);
-    runHelper('retire-anchor ADR-002 Deprecated', tmpDir);
-    runHelper('retire-anchor ADR-003 Superseded', tmpDir);
+    expect(runJsonHelper(tmpDir, ['retire-anchor', 'ADR-002', 'Deprecated'], '{"reason":"test"}').code).toBe(0);
+    expect(runJsonHelper(tmpDir, ['retire-anchor', 'ADR-003', 'Superseded'], '{"by":"ADR-001"}').code).toBe(0);
 
     writeLog(tmpDir, [makeV2LogRow({ id: 'obs_gap' })]);
     const result = runHelper('assign-anchor decision obs_gap', tmpDir);
@@ -912,14 +917,14 @@ describe('refresh-anchor quarantines malformed ledger lines (D-QUARANTINE-MALFOR
 // ---------------------------------------------------------------------------
 
 describe('retire-anchor stdout echo — CON-P1', () => {
-  it('retire-anchor echoes the anchor_id to stdout, matching the other three ops', () => {
+  it('retire-anchor prints the status it set and the anchor, as refresh-anchor and restore-anchor print theirs', () => {
     const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'retire-stdout-test-'));
     fs.mkdirSync(path.join(tmpDir, '.devflow', 'learning'), { recursive: true });
     try {
       writeLedger(tmpDir, [makeLedgerRow({ anchor_id: 'ADR-001', decisions_status: 'Accepted' })]);
-      const result = runHelper('retire-anchor ADR-001 Retired', tmpDir);
-      expect(result.code).toBe(0);
-      expect(result.stdout.trim()).toBe('ADR-001');
+      expect(runJsonHelper(tmpDir, ['retire-anchor', 'ADR-001', 'Retired'], '{"reason":"test"}')).toEqual({
+        code: 0, stdout: 'retired ADR-001\n', stderr: '',
+      });
     } finally {
       fs.rmSync(tmpDir, { recursive: true, force: true });
     }
@@ -1269,7 +1274,8 @@ describe('AC-P2: assign-anchor O(anchored) performance (ratio methodology)', () 
 // the absolute ceiling is the primary regression guard.
 // ---------------------------------------------------------------------------
 
-describe('AC-P2b: assign-anchor full write-path performance (CLI-level)', () => {
+// Four spawns, each bounded by the 10 s ceiling below; the test timeout leaves room for them.
+describe('AC-P2b: assign-anchor full write-path performance (CLI-level)', { timeout: 30_000 }, () => {
   let tmpDir: string;
 
   beforeEach(() => {
@@ -1407,13 +1413,17 @@ describe('D-ONE-LEARNING-LOCK: every learning writer takes the one learning lock
   beforeEach(() => {
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'one-lock-test-'));
     probeDir = fs.mkdtempSync(path.join(os.tmpdir(), 'one-lock-probe-'));
-    // The anchored observation's log row is ahead of its entry, so a refresh writes.
+    // The anchored observation's log row is ahead of its entry, so a refresh writes;
+    // a retired entry gives restore-anchor something to restore.
     writeLog(tmpDir, [
       makeV2LogRow({ id: 'obs_one_lock_new' }),
       makeV2LogRow({ id: 'obs_one_lock_old', rule: 'A sharper rule.' }),
       makeObsRow({ id: 'obs_one_lock_stale', status: 'observing', last_seen: '2026-01-01T00:00:00Z' }),
     ]);
-    writeLedger(tmpDir, [makeV2LedgerRow({ id: 'obs_one_lock_old', anchor_id: 'ADR-001' })]);
+    writeLedger(tmpDir, [
+      makeV2LedgerRow({ id: 'obs_one_lock_old', anchor_id: 'ADR-001' }),
+      makeV2LedgerRow({ id: 'obs_one_lock_gone', anchor_id: 'ADR-002', decisions_status: 'Retired', status_note: 'test' }),
+    ]);
   });
 
   afterEach(() => {
@@ -1454,6 +1464,7 @@ describe('D-ONE-LEARNING-LOCK: every learning writer takes the one learning lock
   it.each([
     [['assign-anchor', 'decision', 'obs_one_lock_new']],
     [['retire-anchor', 'ADR-001', 'Retired']],
+    [['restore-anchor', 'ADR-002']],
     [['refresh-anchor', 'ADR-001']],
     [['rotate-observations']],
     [['put-observation', '--update']],
@@ -1472,6 +1483,7 @@ describe('D-NO-STRAY-TREE: a learning writer refuses outside a learning tree', {
   const WRITERS: ReadonlyArray<{ args: readonly string[]; input?: string }> = [
     { args: ['assign-anchor', 'decision', 'obs_stray_one'] },
     { args: ['retire-anchor', 'ADR-001', 'Retired'], input: '{"reason":"test"}' },
+    { args: ['restore-anchor', 'ADR-001'] },
     { args: ['refresh-anchor', 'ADR-001'] },
     { args: ['rotate-observations'] },
     {
@@ -1575,9 +1587,10 @@ describe('lock release on early-exit error paths', () => {
   });
 
   it('retire-anchor: missing ledger — lock dir released after controlled error', () => {
-    // No ledger file — parseLedger returns [], findIndex returns -1 → early-exit path
-    const result = runHelper('retire-anchor ADR-001 Retired', tmpDir);
+    // No ledger file: the anchor is not in the ledger, a refusal made under the lock
+    const result = runJsonHelper(tmpDir, ['retire-anchor', 'ADR-001', 'Retired'], '{"reason":"test"}');
     expect(result.code).not.toBe(0);
+    expect(result.stderr).toContain('ADR-001 is not in the ledger');
     const lockDir = path.join(tmpDir, '.devflow', 'learning', '.decisions.lock');
     expect(fs.existsSync(lockDir)).toBe(false);
   });
@@ -1585,8 +1598,18 @@ describe('lock release on early-exit error paths', () => {
   it('retire-anchor: anchor_id not found in existing ledger — lock dir released after controlled error', () => {
     // Ledger exists but the requested anchor_id is absent
     writeLedger(tmpDir, [makeLedgerRow({ anchor_id: 'ADR-001', decisions_status: 'Accepted' })]);
-    const result = runHelper('retire-anchor ADR-999 Retired', tmpDir);
+    const result = runJsonHelper(tmpDir, ['retire-anchor', 'ADR-999', 'Retired'], '{"reason":"test"}');
     expect(result.code).not.toBe(0);
+    expect(result.stderr).toContain('ADR-999 is not in the ledger');
+    const lockDir = path.join(tmpDir, '.devflow', 'learning', '.decisions.lock');
+    expect(fs.existsSync(lockDir)).toBe(false);
+  });
+
+  it('restore-anchor: an active entry — lock dir released after controlled error', () => {
+    writeLedger(tmpDir, [makeLedgerRow({ anchor_id: 'ADR-001', decisions_status: 'Accepted' })]);
+    const result = runJsonHelper(tmpDir, ['restore-anchor', 'ADR-001']);
+    expect(result.code).not.toBe(0);
+    expect(result.stderr).toContain('ADR-001 is already active');
     const lockDir = path.join(tmpDir, '.devflow', 'learning', '.decisions.lock');
     expect(fs.existsSync(lockDir)).toBe(false);
   });

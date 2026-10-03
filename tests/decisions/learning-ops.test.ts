@@ -15,7 +15,12 @@
 //
 // assign-anchor promotes a v2 observation the ledger does not carry yet: it mints
 // the next number of its type, skipping any number a tracked file cites, stamps
-// the entry verified today and never writes the log.
+// the entry verified today and never writes the log. refresh-anchor re-projects
+// active v2 entries from the log, or stamps them verified, all or nothing.
+//
+// retire-anchor takes each inactive status's stdin contract — a reason, an active
+// successor, or a path and a quote checked at the verify ref — and restore-anchor
+// makes an inactive entry active again, its notes cleared and due for checking.
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { spawnSync } from 'child_process';
@@ -1757,6 +1762,519 @@ describe('refresh-anchor op', { timeout: 30_000 }, () => {
       ['refresh-anchor', 'ADR-1'],
     ]) {
       expect(runJsonHelper(dir, args), args.join(' ')).toEqual({ code: 1, stdout: '', stderr: USAGE });
+    }
+    expect(snapshotTree(dir)).toEqual(before);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// retireAnchor: Retired and Deprecated take a reason
+// ---------------------------------------------------------------------------
+
+describe('retireAnchor: Retired and Deprecated take a reason', () => {
+  let dir: string;
+  let paths: LearningTreePaths;
+
+  beforeEach(() => {
+    dir = makeTmp('learning-ops-retire-');
+    paths = seedLearningTree(dir);
+  });
+
+  afterEach(() => {
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+
+  /** A store retire on the fixture clock. */
+  function retire(anchor: string, status: string, input: unknown) {
+    return store.retireAnchor(dir, anchor, status, input, { now: FIXTURE_NOW });
+  }
+
+  it('sets the status, keeps the reason as the note, stamps retired_on today and lists the entry under Inactive', () => {
+    const prior = makeV2LedgerRow({ last_attempt: '2026-10-02T09:00:00.000Z' });
+    seedLearningTree(dir, { log: [makeV2LogRow()], ledger: [prior, makeV2LedgerRow({ anchor_id: 'ADR-002', id: 'obs_beta' })] });
+
+    expect(retire('ADR-001', 'Retired', { reason: 'A one-off, never seen again' })).toEqual({
+      ok: true,
+      value: { anchor_id: 'ADR-001', status: 'Retired', repointed: [] },
+    });
+    const [row] = rowsOf(paths.ledger);
+    expect(row).toEqual({ ...prior, decisions_status: 'Retired', status_note: 'A one-off, never seen again', retired_on: TODAY });
+    expect(Object.keys(row)).toEqual([...MINTED_KEYS, 'last_attempt', 'status_note', 'retired_on']);
+    const decisionsMd = rendered(paths, 'decisions.md');
+    expect(decisionsMd).toBe(renderDecisionsFile(rowsOf(paths.ledger), 'decisions'));
+    expect(decisionsMd).not.toMatch(/^## ADR-001:/m);
+    expect(decisionsMd).toContain('| ADR-001 | Retired | A one-off, never seen again |\n');
+  });
+
+  it('takes a reason for Deprecated the same way', () => {
+    seedLearningTree(dir, { ledger: [makeV2LedgerRow()] });
+    expect(retire('ADR-001', 'Deprecated', { reason: 'The store moved to Results everywhere' }).ok).toBe(true);
+    expect(rowsOf(paths.ledger)[0]).toMatchObject({
+      decisions_status: 'Deprecated', status_note: 'The store moved to Results everywhere', retired_on: TODAY,
+    });
+  });
+
+  it('retires a v1 entry, its content untouched, after copying a v1 tree aside', () => {
+    const prior = makeV1LedgerRow();
+    seedLearningTree(dir, { log: [makeV1LogRow()], ledger: [prior] });
+    const ledgerBefore = fs.readFileSync(paths.ledger, 'utf8');
+
+    expect(retire('PF-001', 'Deprecated', { reason: 'The hooks moved' }).ok).toBe(true);
+    expect(rowsOf(paths.ledger)).toEqual([{ ...prior, decisions_status: 'Deprecated', status_note: 'The hooks moved', retired_on: TODAY }]);
+    expect(fs.readFileSync(path.join(paths.learningDir, 'decisions-ledger.pre-v2.jsonl'), 'utf8')).toBe(ledgerBefore);
+    expect(rendered(paths, 'pitfalls.md')).toContain('| PF-001 | Deprecated | The hooks moved |\n');
+  });
+
+  it('refuses a missing or over-long reason, another status\'s keys and unknown keys, listing every problem and writing nothing', () => {
+    seedLearningTree(dir, { log: [makeV2LogRow()], ledger: [makeV2LedgerRow()] });
+    const before = snapshotTree(dir);
+
+    expect(retire('ADR-001', 'Retired', { reason: 'r'.repeat(121), by: 'ADR-002', colour: 'red' })).toEqual({
+      ok: false,
+      error: {
+        kind: 'invalid-input',
+        message: [
+          'retire-anchor: the input has 3 problems; nothing was written',
+          '  by: is not taken by Retired, which takes reason',
+          '  colour: is not taken by Retired, which takes reason',
+          '  reason: is 121 characters, over the limit of 120',
+        ].join('\n'),
+        problems: [
+          { field: 'by', message: 'is not taken by Retired, which takes reason' },
+          { field: 'colour', message: 'is not taken by Retired, which takes reason' },
+          { field: 'reason', message: 'is 121 characters, over the limit of 120' },
+        ],
+      },
+    });
+    expect(retire('ADR-001', 'Deprecated', {})).toMatchObject({
+      ok: false, error: { problems: [{ field: 'reason', message: 'is required' }] },
+    });
+    expect(retire('ADR-001', 'Retired', { reason: 'two\nlines' })).toMatchObject({
+      ok: false, error: { problems: [{ field: 'reason', message: 'must be one line with no control characters' }] },
+    });
+    expect(retire('ADR-001', 'Retired', ['a reason'])).toMatchObject({
+      ok: false, error: { problems: [{ field: '(input)', message: 'must be one JSON object' }] },
+    });
+    expect(snapshotTree(dir)).toEqual(before);
+  });
+
+  it('refuses an entry the ledger does not hold, and one already inactive, writing nothing', () => {
+    seedLearningTree(dir, {
+      ledger: [makeV2LedgerRow({ decisions_status: 'Superseded', superseded_by: 'ADR-002' }), makeV2LedgerRow({ anchor_id: 'ADR-002', id: 'obs_beta' })],
+    });
+    const before = snapshotTree(dir);
+    expect(retire('ADR-009', 'Retired', { reason: 'gone' })).toEqual({
+      ok: false, error: { kind: 'not-found', message: 'retire-anchor: ADR-009 is not in the ledger; nothing was written' },
+    });
+    expect(retire('ADR-001', 'Retired', { reason: 'gone' })).toEqual({
+      ok: false, error: { kind: 'already-inactive', message: 'retire-anchor: ADR-001 is already Superseded; nothing was written' },
+    });
+    expect(snapshotTree(dir)).toEqual(before);
+  });
+
+  it('refuses without a learning directory and creates nothing', () => {
+    fs.rmSync(paths.learningDir, { recursive: true });
+    expect(retire('ADR-001', 'Retired', { reason: 'gone' })).toEqual({
+      ok: false,
+      error: { kind: 'no-learning-dir', message: `retire-anchor: no .devflow/learning/ under ${dir} — run from the project root` },
+    });
+    expect(fs.readdirSync(path.join(dir, '.devflow'))).toEqual([]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// retireAnchor: Superseded takes an active successor
+// ---------------------------------------------------------------------------
+
+describe('retireAnchor: Superseded takes an active successor', () => {
+  let dir: string;
+  let paths: LearningTreePaths;
+
+  beforeEach(() => {
+    dir = makeTmp('learning-ops-supersede-');
+    paths = seedLearningTree(dir);
+  });
+
+  afterEach(() => {
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+
+  /** A store retire as Superseded on the fixture clock. */
+  function supersede(anchor: string, input: unknown) {
+    return store.retireAnchor(dir, anchor, 'Superseded', input, { now: FIXTURE_NOW });
+  }
+
+  it('points the entry at its successor and re-points every entry it had superseded', () => {
+    const successor = makeV2LedgerRow({ anchor_id: 'ADR-003', id: 'obs_gamma' });
+    seedLearningTree(dir, {
+      ledger: [
+        makeV2LedgerRow({ anchor_id: 'ADR-002', id: 'obs_beta' }),
+        successor,
+        makeV2LedgerRow({ anchor_id: 'PF-004', id: 'obs_delta', type: 'pitfall', decisions_status: 'Superseded', superseded_by: 'ADR-002', retired_on: '2026-08-02' }),
+        makeV2LedgerRow({ id: 'obs_alpha', decisions_status: 'Superseded', superseded_by: 'ADR-002', retired_on: '2026-08-01' }),
+        makeV2LedgerRow({ anchor_id: 'ADR-005', id: 'obs_epsilon', decisions_status: 'Superseded', superseded_by: 'ADR-003' }),
+      ],
+    });
+
+    expect(supersede('ADR-002', { by: 'ADR-003' })).toEqual({
+      ok: true,
+      value: { anchor_id: 'ADR-002', status: 'Superseded', repointed: ['ADR-001', 'PF-004'] },
+    });
+    const byAnchor = new Map(rowsOf(paths.ledger).map(row => [row.anchor_id, row]));
+    expect(byAnchor.get('ADR-002')).toMatchObject({ decisions_status: 'Superseded', superseded_by: 'ADR-003', retired_on: TODAY });
+    expect(byAnchor.get('ADR-001')).toMatchObject({ decisions_status: 'Superseded', superseded_by: 'ADR-003', retired_on: '2026-08-01' });
+    expect(byAnchor.get('PF-004')).toMatchObject({ superseded_by: 'ADR-003', retired_on: '2026-08-02' });
+    expect(byAnchor.get('ADR-003')).toEqual(successor);
+    expect(rendered(paths, 'decisions.md')).toContain('| ADR-002 | Superseded | superseded by ADR-003 |\n');
+    expect(rendered(paths, 'pitfalls.md')).toContain('| PF-004 | Superseded | superseded by ADR-003 |\n');
+  });
+
+  it('takes a successor of the other type', () => {
+    seedLearningTree(dir, {
+      ledger: [makeV2LedgerRow({ anchor_id: 'ADR-002', id: 'obs_beta' }), makeV2LedgerRow({ anchor_id: 'PF-001', id: 'obs_lesson', type: 'pitfall', decisions_status: 'Active' })],
+    });
+    expect(supersede('ADR-002', { by: 'PF-001' })).toMatchObject({ ok: true, value: { repointed: [] } });
+    expect(rowsOf(paths.ledger)[0]).toMatchObject({ decisions_status: 'Superseded', superseded_by: 'PF-001' });
+  });
+
+  it('refuses the entry itself, a successor that is not an anchor, and one absent or inactive, writing nothing', () => {
+    seedLearningTree(dir, {
+      ledger: [makeV2LedgerRow({ anchor_id: 'ADR-002', id: 'obs_beta' }), makeV2LedgerRow({ anchor_id: 'ADR-003', id: 'obs_gamma', decisions_status: 'Retired' })],
+    });
+    const before = snapshotTree(dir);
+    expect(supersede('ADR-002', { by: 'ADR-002' })).toMatchObject({
+      ok: false, error: { kind: 'invalid-input', problems: [{ field: 'by', message: 'names this entry; an entry cannot supersede itself' }] },
+    });
+    expect(supersede('ADR-002', { by: 'adr-3' })).toMatchObject({
+      ok: false, error: { kind: 'invalid-input', problems: [{ field: 'by', message: 'must be an anchor id' }] },
+    });
+    expect(supersede('ADR-002', { by: 'ADR-009' })).toEqual({
+      ok: false, error: { kind: 'successor-not-found', message: 'retire-anchor: ADR-009, the successor, is not in the ledger; nothing was written' },
+    });
+    expect(supersede('ADR-002', { by: 'ADR-003' })).toEqual({
+      ok: false, error: { kind: 'successor-inactive', message: 'retire-anchor: ADR-003, the successor, is Retired; nothing was written' },
+    });
+    expect(snapshotTree(dir)).toEqual(before);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// retireAnchor: Encoded takes a path and a quote checked at the verify ref
+// (D-ENCODED-QUOTE)
+// ---------------------------------------------------------------------------
+
+describe('retireAnchor: Encoded takes a path and a quote checked at the verify ref (D-ENCODED-QUOTE)', { timeout: 30_000 }, () => {
+  const SOURCE = [
+    'export function put(row) {',
+    '  // Every store function returns a Result',
+    '  // and never throws.',
+    '  return ok(row);',
+    '}',
+    '',
+  ].join('\n');
+  const QUOTE = 'Every store function returns a Result';
+  let dir: string;
+  let paths: LearningTreePaths;
+
+  beforeEach(() => {
+    dir = makeTmp('learning-ops-encoded-');
+  });
+
+  afterEach(() => {
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+
+  /** One active entry, in a repository whose one commit holds src/store.ts; answers that commit. */
+  function seedRepository(): string {
+    const head = initGitRepo(dir, { 'src/store.ts': SOURCE });
+    paths = seedLearningTree(dir, { log: [makeV2LogRow()], ledger: [makeV2LedgerRow()] });
+    return head;
+  }
+
+  /** A store retire as Encoded on the fixture clock. */
+  function encode(input: unknown) {
+    return store.retireAnchor(dir, 'ADR-001', 'Encoded', input, { now: FIXTURE_NOW });
+  }
+
+  it('stores the path, the quote, the ref and the commit, and notes where the lesson now lives', () => {
+    const head = seedRepository();
+    expect(encode({ at: 'src/store.ts', quote: QUOTE })).toEqual({
+      ok: true, value: { anchor_id: 'ADR-001', status: 'Encoded', repointed: [] },
+    });
+    expect(rowsOf(paths.ledger)[0]).toMatchObject({
+      decisions_status: 'Encoded',
+      encoded_at: { path: 'src/store.ts', quote: QUOTE, ref: 'HEAD', commit: head },
+      retired_on: TODAY,
+    });
+    expect(rendered(paths, 'decisions.md')).toContain('| ADR-001 | Encoded | encoded in src/store.ts |\n');
+  });
+
+  it('compares with every run of whitespace collapsed, so a quote may cross a line break', () => {
+    const head = seedRepository();
+    expect(store.quoteAtRef(dir, 'src/store.ts', 'returns  a Result // and never throws.')).toEqual({
+      ok: true,
+      value: { path: 'src/store.ts', quote: 'returns  a Result // and never throws.', ref: 'HEAD', commit: head },
+    });
+  });
+
+  it('checks the quote at origin/HEAD when the repository has one, never at a later local commit or the working tree', () => {
+    const fetched = initGitRepo(dir, { 'src/store.ts': SOURCE });
+    git(dir, ['update-ref', 'refs/remotes/origin/main', fetched]);
+    git(dir, ['symbolic-ref', 'refs/remotes/origin/HEAD', 'refs/remotes/origin/main']);
+    fs.writeFileSync(path.join(dir, 'src', 'store.ts'), `${SOURCE}// A line only the local branch has\n`);
+    git(dir, ['commit', '-q', '-am', 'local work']);
+    fs.writeFileSync(path.join(dir, 'src', 'store.ts'), `${SOURCE}// A line only the working tree has\n`);
+
+    expect(store.quoteAtRef(dir, 'src/store.ts', 'A line only the local branch has')).toEqual({
+      ok: false,
+      error: {
+        kind: 'quote-not-found',
+        message: `retire-anchor: the quote is not in 'src/store.ts' at origin/HEAD ${fetched.slice(0, 12)}; nothing was written`,
+      },
+    });
+    expect(store.quoteAtRef(dir, 'src/store.ts', 'A line only the working tree has')).toMatchObject({ ok: false, error: { kind: 'quote-not-found' } });
+    expect(store.quoteAtRef(dir, 'src/store.ts', QUOTE)).toEqual({
+      ok: true, value: { path: 'src/store.ts', quote: QUOTE, ref: 'origin/HEAD', commit: fetched },
+    });
+  });
+
+  it('refuses a path that is no file at the ref, and a tree with no commit to check, writing nothing', () => {
+    const head = seedRepository();
+    const before = snapshotTree(paths.learningDir);
+    expect(encode({ at: 'src/missing.ts', quote: QUOTE })).toEqual({
+      ok: false,
+      error: {
+        kind: 'not-at-ref',
+        message: `retire-anchor: 'src/missing.ts' is not a file at HEAD ${head.slice(0, 12)}; nothing was written`,
+      },
+    });
+    expect(encode({ at: 'src', quote: QUOTE })).toMatchObject({ ok: false, error: { kind: 'not-at-ref' } });
+    expect(encode({ at: 'src/store.ts', quote: 'A sentence the file never held' })).toMatchObject({ ok: false, error: { kind: 'quote-not-found' } });
+    expect(snapshotTree(paths.learningDir)).toEqual(before);
+
+    expect(store.quoteAtRef(dir, 'src/store.ts', QUOTE, { verifyRef: null })).toEqual({
+      ok: false,
+      error: {
+        kind: 'no-verify-ref',
+        message: 'retire-anchor: there is no commit to check the quote at (not a git repository, or no commit yet); nothing was written',
+      },
+    });
+  });
+
+  it('refuses a malformed path or quote before it asks git, listing every problem', () => {
+    paths = seedLearningTree(dir, { log: [makeV2LogRow()], ledger: [makeV2LedgerRow()] });
+    const before = snapshotTree(dir);
+    const problemsOf = (input: unknown) => {
+      const result = encode(input);
+      return result.ok ? [] : result.error.problems;
+    };
+
+    expect(problemsOf({ at: '/etc/passwd', quote: 'a   b   c   d' })).toEqual([
+      { field: 'at', message: 'must be relative to the repository root' },
+      { field: 'quote', message: 'is 7 characters once its whitespace is collapsed, under the minimum of 12' },
+    ]);
+    expect(problemsOf({ at: 'src/../etc/passwd', quote: 'q'.repeat(201) })).toEqual([
+      { field: 'at', message: 'must not hold an empty, . or .. segment' },
+      { field: 'quote', message: 'is 201 characters, over the limit of 200' },
+    ]);
+    expect(problemsOf({ at: `src/${'d'.repeat(300)}.ts`, quote: QUOTE })).toEqual([
+      { field: 'at', message: 'is 307 characters, over the limit of 300' },
+    ]);
+    expect(problemsOf({ reason: 'it is in the code now' })).toEqual([
+      { field: 'reason', message: 'is not taken by Encoded, which takes at and quote' },
+      { field: 'at', message: 'is required' },
+      { field: 'quote', message: 'is required' },
+    ]);
+    expect(snapshotTree(dir)).toEqual(before);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// restoreAnchor
+// ---------------------------------------------------------------------------
+
+describe('restoreAnchor', () => {
+  let dir: string;
+  let paths: LearningTreePaths;
+
+  beforeEach(() => {
+    dir = makeTmp('learning-ops-restore-');
+    paths = seedLearningTree(dir);
+  });
+
+  afterEach(() => {
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+
+  /** A store restore on the fixture clock. */
+  function restore(anchor: string) {
+    return store.restoreAnchor(dir, anchor, { now: FIXTURE_NOW });
+  }
+
+  it('gives the entry its type\'s active status, clears its notes, last_verified and last_attempt, and renders it again', () => {
+    seedLearningTree(dir, {
+      log: [makeV2LogRow()],
+      ledger: [makeV2LedgerRow({
+        decisions_status: 'Retired', last_attempt: '2026-10-03T11:00:00.000Z', status_note: 'A one-off', retired_on: '2026-09-20',
+      })],
+    });
+    expect(restore('ADR-001')).toEqual({ ok: true, value: { anchor_id: 'ADR-001', status: 'Accepted' } });
+    expect(rowsOf(paths.ledger)).toEqual([makeV2LedgerRow({ last_verified: undefined })]);
+    expect(Object.keys(rowsOf(paths.ledger)[0])).toEqual(MINTED_KEYS.filter(key => key !== 'last_verified'));
+    expect(rendered(paths, 'decisions.md')).toContain('\n## ADR-001: Store functions return a Result\n');
+    expect(rendered(paths, 'decisions.md')).not.toContain('## Inactive');
+  });
+
+  it('clears superseded_by and encoded_at as well, and restores a pitfall as Active', () => {
+    seedLearningTree(dir, {
+      ledger: [
+        makeV2LedgerRow({ decisions_status: 'Superseded', superseded_by: 'ADR-002', retired_on: '2026-09-20' }),
+        makeV2LedgerRow({ anchor_id: 'ADR-002', id: 'obs_beta' }),
+        makeV2LedgerRow({
+          anchor_id: 'PF-003', id: 'obs_lesson', type: 'pitfall', decisions_status: 'Encoded', retired_on: '2026-09-21',
+          encoded_at: { path: 'src/store.ts', quote: 'Every store function returns a Result', ref: 'HEAD', commit: 'a'.repeat(40) },
+        }),
+      ],
+    });
+    expect(restore('ADR-001').ok).toBe(true);
+    expect(restore('PF-003')).toEqual({ ok: true, value: { anchor_id: 'PF-003', status: 'Active' } });
+    const [decision, , pitfall] = rowsOf(paths.ledger);
+    expect(decision).toEqual(makeV2LedgerRow({ last_verified: undefined }));
+    expect(pitfall).toEqual(makeV2LedgerRow({ anchor_id: 'PF-003', id: 'obs_lesson', type: 'pitfall', decisions_status: 'Active', last_verified: undefined }));
+  });
+
+  it('makes the entry due next: claim-due hands it out before every verified entry, whatever lease it had', () => {
+    seedLearningTree(dir, {
+      log: [makeV2LogRow(), makeV2LogRow({ id: 'obs_beta' })],
+      ledger: [
+        makeV2LedgerRow({ anchor_id: 'ADR-002', id: 'obs_beta', last_verified: daysAgoDate(40) }),
+        makeV2LedgerRow({ decisions_status: 'Retired', status_note: 'A one-off', last_attempt: new Date(FIXTURE_NOW - HOUR_MS).toISOString() }),
+      ],
+    });
+    expect(restore('ADR-001').ok).toBe(true);
+    const due = store.claimDue(dir, { now: FIXTURE_NOW, scopeMatches: everyGlobMatches });
+    expect(due.ok && due.value.due.map(entry => [entry.anchor_id, entry.reason])).toEqual([
+      ['ADR-001', 'verify-age'],
+      ['ADR-002', 'verify-age'],
+    ]);
+  });
+
+  it('restores a v1 entry, which renders through the v1 formatter again', () => {
+    seedLearningTree(dir, { ledger: [makeV1LedgerRow({ decisions_status: 'Retired', status_note: 'The hooks moved', retired_on: '2026-09-01' })] });
+    expect(restore('PF-001')).toEqual({ ok: true, value: { anchor_id: 'PF-001', status: 'Active' } });
+    expect(rowsOf(paths.ledger)).toEqual([makeV1LedgerRow()]);
+    expect(rendered(paths, 'pitfalls.md')).toBe(renderDecisionsFile([makeV1LedgerRow()], 'pitfalls'));
+  });
+
+  it('refuses an active entry and one the ledger does not hold, writing nothing', () => {
+    seedLearningTree(dir, { ledger: [makeV2LedgerRow()] });
+    const before = snapshotTree(dir);
+    expect(restore('ADR-001')).toEqual({
+      ok: false, error: { kind: 'already-active', message: 'restore-anchor: ADR-001 is already active; nothing was written' },
+    });
+    expect(restore('ADR-004')).toEqual({
+      ok: false, error: { kind: 'not-found', message: 'restore-anchor: ADR-004 is not in the ledger; nothing was written' },
+    });
+    expect(snapshotTree(dir)).toEqual(before);
+  });
+
+  it('refuses without a learning directory and creates nothing', () => {
+    fs.rmSync(paths.learningDir, { recursive: true });
+    expect(restore('ADR-001')).toEqual({
+      ok: false,
+      error: { kind: 'no-learning-dir', message: `restore-anchor: no .devflow/learning/ under ${dir} — run from the project root` },
+    });
+    expect(fs.readdirSync(path.join(dir, '.devflow'))).toEqual([]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The retire-anchor and restore-anchor ops: argv, stdin and the stdout grammar
+// ---------------------------------------------------------------------------
+
+describe('retire-anchor and restore-anchor ops', { timeout: 30_000 }, () => {
+  const RETIRE_USAGE =
+    'retire-anchor: usage: retire-anchor <anchor> <Encoded|Superseded|Retired|Deprecated> (one JSON object on stdin; run from the project root)\n';
+  const RESTORE_USAGE = 'restore-anchor: usage: restore-anchor <anchor> (run from the project root)\n';
+  let dir: string;
+
+  beforeEach(() => {
+    dir = makeTmp('learning-ops-retire-op-');
+    seedLearningTree(dir);
+  });
+
+  afterEach(() => {
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+
+  it('retire prints the new status and the entry, then each entry re-pointed to the successor', () => {
+    seedLearningTree(dir, {
+      ledger: [
+        makeV2LedgerRow({ anchor_id: 'ADR-002', id: 'obs_beta' }),
+        makeV2LedgerRow({ anchor_id: 'ADR-003', id: 'obs_gamma' }),
+        makeV2LedgerRow({ decisions_status: 'Superseded', superseded_by: 'ADR-002' }),
+      ],
+    });
+    expect(runJsonHelper(dir, ['retire-anchor', 'ADR-002', 'Superseded'], '{"by": "ADR-003"}\n')).toEqual({
+      code: 0, stdout: 'superseded ADR-002\nrepointed ADR-001\n', stderr: '',
+    });
+    expect(runJsonHelper(dir, ['retire-anchor', 'ADR-003', 'Retired'], '{"reason": "A one-off"}')).toEqual({
+      code: 0, stdout: 'retired ADR-003\n', stderr: '',
+    });
+  });
+
+  it('restore prints the entry it restored', () => {
+    seedLearningTree(dir, { ledger: [makeV2LedgerRow({ decisions_status: 'Deprecated', status_note: 'Moved' })] });
+    expect(runJsonHelper(dir, ['restore-anchor', 'ADR-001'])).toEqual({ code: 0, stdout: 'restored ADR-001\n', stderr: '' });
+    expect(runJsonHelper(dir, ['restore-anchor', 'ADR-001'])).toEqual({
+      code: 1, stdout: '', stderr: 'restore-anchor: ADR-001 is already active; nothing was written\n',
+    });
+  });
+
+  it('retire prints every input problem on stderr and exits 1', () => {
+    seedLearningTree(dir, { ledger: [makeV2LedgerRow()] });
+    expect(runJsonHelper(dir, ['retire-anchor', 'ADR-001', 'Deprecated'], '{"because": "x"}')).toEqual({
+      code: 1,
+      stdout: '',
+      stderr: 'retire-anchor: the input has 2 problems; nothing was written\n'
+        + '  because: is not taken by Deprecated, which takes reason\n'
+        + '  reason: is required\n',
+    });
+  });
+
+  it('retire refuses stdin that is not one JSON object, writing nothing', () => {
+    seedLearningTree(dir, { ledger: [makeV2LedgerRow()] });
+    const before = snapshotTree(dir);
+    for (const stdin of ['', 'not json', '["a reason"]', '"a reason"']) {
+      expect(runJsonHelper(dir, ['retire-anchor', 'ADR-001', 'Retired'], stdin), JSON.stringify(stdin)).toEqual({
+        code: 1, stdout: '', stderr: 'retire-anchor: stdin must hold one JSON object\n',
+      });
+    }
+    expect(snapshotTree(dir)).toEqual(before);
+  });
+
+  it('retire takes an anchor and an inactive status, and nothing else', () => {
+    seedLearningTree(dir, { ledger: [makeV2LedgerRow()] });
+    const before = snapshotTree(dir);
+    for (const args of [
+      ['retire-anchor'],
+      ['retire-anchor', 'ADR-001'],
+      ['retire-anchor', 'ADR-001', 'Invalid'],
+      ['retire-anchor', 'ADR-001', 'retired'],
+      ['retire-anchor', 'ADR-001', 'Accepted'],
+      ['retire-anchor', 'ADR-001', 'Retired', 'extra'],
+      ['retire-anchor', 'obs_store_one', 'Retired'],
+    ]) {
+      expect(runJsonHelper(dir, args, '{"reason": "test"}'), args.join(' ')).toEqual({ code: 1, stdout: '', stderr: RETIRE_USAGE });
+    }
+    expect(snapshotTree(dir)).toEqual(before);
+  });
+
+  it('restore takes exactly one anchor', () => {
+    seedLearningTree(dir, { ledger: [makeV2LedgerRow({ decisions_status: 'Retired' })] });
+    const before = snapshotTree(dir);
+    for (const args of [['restore-anchor'], ['restore-anchor', 'ADR-001', 'ADR-002'], ['restore-anchor', 'obs_store_one'], ['restore-anchor', '--all']]) {
+      expect(runJsonHelper(dir, args), args.join(' ')).toEqual({ code: 1, stdout: '', stderr: RESTORE_USAGE });
     }
     expect(snapshotTree(dir)).toEqual(before);
   });

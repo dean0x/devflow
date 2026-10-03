@@ -373,6 +373,32 @@ export type RefreshResult =
   | { ok: true; value: RefreshAnswer }
   | { ok: false; error: { kind: string; message: string; problems?: Array<{ anchor_id: string; message: string }> } };
 
+/** The ref and commit a claim about the code is checked at. */
+export interface VerifyRef {
+  ref: 'origin/HEAD' | 'HEAD';
+  commit: string;
+}
+
+/** Where an Encoded entry's lesson now lives: a path, a quote from it, and the ref and commit it was checked at. */
+export interface EncodedAt {
+  path: string;
+  quote: string;
+  ref: string;
+  commit: string;
+}
+
+/** What retire-anchor answers: the entry, its new status, and the entries re-pointed to its successor. */
+export interface RetireAnswer {
+  anchor_id: string;
+  status: string;
+  repointed: string[];
+}
+
+/** A Result whose refusal of an input lists every problem. */
+export type InputResult<T> =
+  | { ok: true; value: T }
+  | { ok: false; error: { kind: string; message: string; problems?: ValidationError[] } };
+
 /** The learning store's surface as the tests use it. */
 export interface LearningStoreApi {
   SCHEMA_VERSION: number;
@@ -487,6 +513,15 @@ export interface LearningStoreApi {
     anchorIds: readonly string[],
     opts?: { verified?: boolean; now?: number; timeoutMs?: number },
   ): RefreshResult;
+  quoteAtRef(root: string, at: string, quote: string, opts?: { verifyRef?: VerifyRef | null }): Result<EncodedAt>;
+  retireAnchor(
+    root: string,
+    anchorId: string,
+    status: string,
+    input: unknown,
+    opts?: { now?: number; timeoutMs?: number; verifyRef?: VerifyRef | null },
+  ): InputResult<RetireAnswer>;
+  restoreAnchor(root: string, anchorId: string, opts?: { now?: number; timeoutMs?: number }): Result<{ anchor_id: string; status: string }>;
 }
 
 /** Load the learning store CommonJS module. */

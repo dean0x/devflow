@@ -414,6 +414,7 @@ describe('heartbeat: learning ops refresh the claim, other ops never touch it', 
   const LEARNING_OP_RUNS: ReadonlyArray<{ args: readonly string[]; input?: string }> = [
     { args: ['assign-anchor', 'decision', 'obs_heartbeat'] },
     { args: ['retire-anchor', 'ADR-001', 'Retired'], input: '{"reason":"test"}' },
+    { args: ['restore-anchor', 'ADR-001'] },
     { args: ['refresh-anchor', 'ADR-001'] },
     { args: ['rotate-observations'] },
     { args: ['put-observation', '--reinforce'], input: '{"id":"obs_heartbeat"}' },

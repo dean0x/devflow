@@ -6,7 +6,7 @@
 //         Retired entry is listed under Inactive and never rendered.
 // AC-F5: Retire removes an entry's body from .md but keeps it (anchor + Retired) in the committed
 //         ledger; number never reused.
-// AC-F6: A retired entry is recoverable: re-activating status + render restores it identically.
+// AC-F6: A retired entry is recoverable: restore-anchor renders it again, exactly as before.
 // AC-F9: Rotation archives an observation no ledger entry carries once 30 days pass
 //         since its last activity; one an entry carries is never archived.
 //         (Curation SKILL wiring: contract that rotation step is present.)
@@ -20,22 +20,19 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
 
-import { makeV2LogRow, requireLearningStore } from './learning-fixtures.js';
+import { makeV2LogRow, requireLearningStore, runJsonHelper } from './learning-fixtures.js';
 
 const ROOT = path.resolve(import.meta.dirname, '../..');
 const require = createRequire(import.meta.url);
 
-const JSON_HELPER_BIN = path.join(ROOT, 'src/assets/scripts/hooks/json-helper.cjs');
 const RENDER_BIN = path.join(ROOT, 'src/assets/scripts/hooks/lib/render-decisions.cjs');
 
 const {
   renderDecisionsFile,
   parseLedger,
-  renderAndWriteAll,
 } = require(RENDER_BIN) as {
   renderDecisionsFile: (rows: Record<string, unknown>[], kind: 'decisions' | 'pitfalls') => string;
   parseLedger: (ledgerPath: string) => Record<string, unknown>[];
-  renderAndWriteAll: (worktreePath: string, rows: Record<string, unknown>[]) => void;
 };
 
 const store = requireLearningStore();
@@ -86,24 +83,6 @@ function writeLedger(dir: string, rows: Record<string, unknown>[]): string {
   fs.mkdirSync(path.dirname(ledgerPath), { recursive: true });
   fs.writeFileSync(ledgerPath, rows.map(r => JSON.stringify(r)).join('\n') + '\n', 'utf8');
   return ledgerPath;
-}
-
-function runHelper(args: string, cwd: string): { stdout: string; code: number; stderr: string } {
-  try {
-    const stdout = execSync(`node "${JSON_HELPER_BIN}" ${args}`, {
-      cwd,
-      encoding: 'utf8',
-      stdio: ['pipe', 'pipe', 'pipe'],
-    });
-    return { stdout, code: 0, stderr: '' };
-  } catch (e: unknown) {
-    const err = e as { stdout?: string; status?: number; stderr?: string };
-    return {
-      stdout: err.stdout ?? '',
-      code: err.status ?? 1,
-      stderr: err.stderr ?? '',
-    };
-  }
 }
 
 function readDecisionsMd(dir: string): string {
@@ -253,7 +232,7 @@ describe('AC-F4: renderDecisionsFile renders no body for a non-active status', (
 // AC-F5: retire-anchor removes entry from .md, keeps it Retired in ledger
 // ---------------------------------------------------------------------------
 
-describe('AC-F5: retire-anchor hides entry from .md, keeps in ledger', () => {
+describe('AC-F5: retire-anchor hides entry from .md, keeps in ledger', { timeout: 30_000 }, () => {
   let tmpDir: string;
 
   beforeEach(() => {
@@ -265,20 +244,24 @@ describe('AC-F5: retire-anchor hides entry from .md, keeps in ledger', () => {
     fs.rmSync(tmpDir, { recursive: true, force: true });
   });
 
+  /** Retire `anchor` with `status`, a reason on stdin. */
+  function retire(anchor: string, status: string, reason = 'A one-off'): number {
+    return runJsonHelper(tmpDir, ['retire-anchor', anchor, status], JSON.stringify({ reason })).code;
+  }
+
   it('a retired entry loses its body in decisions.md and is listed under Inactive', () => {
     writeLedger(tmpDir, [
       makeLedgerRow({ anchor_id: 'ADR-001', decisions_status: 'Accepted', pattern: 'Keep this' }),
       makeLedgerRow({ anchor_id: 'ADR-002', id: 'obs_002', decisions_status: 'Accepted', pattern: 'Retire this' }),
     ]);
 
-    const result = runHelper('retire-anchor ADR-002 Retired', tmpDir);
-    expect(result.code).toBe(0);
+    expect(retire('ADR-002', 'Retired')).toBe(0);
 
     const md = readDecisionsMd(tmpDir);
     expect(md).toMatch(/^## ADR-001: Keep this$/m);
     expect(md).not.toMatch(/^## ADR-002:/m);
     expect(md).not.toContain('Retire this');
-    expect(md).toContain('| ADR-002 | Retired | — |\n');
+    expect(md).toContain('| ADR-002 | Retired | A one-off |\n');
   });
 
   it('retired entry stays Retired in the ledger', () => {
@@ -287,7 +270,7 @@ describe('AC-F5: retire-anchor hides entry from .md, keeps in ledger', () => {
       makeLedgerRow({ anchor_id: 'ADR-002', id: 'obs_002', decisions_status: 'Accepted' }),
     ]);
 
-    runHelper('retire-anchor ADR-002 Retired', tmpDir);
+    expect(retire('ADR-002', 'Retired')).toBe(0);
 
     const rows = parseLedger(path.join(tmpDir, '.devflow', 'learning', 'decisions-ledger.jsonl'));
     expect(rows).toHaveLength(2);
@@ -302,12 +285,12 @@ describe('AC-F5: retire-anchor hides entry from .md, keeps in ledger', () => {
       makeLedgerRow({ anchor_id: 'ADR-002', id: 'obs_002', decisions_status: 'Accepted' }),
     ]);
 
-    runHelper('retire-anchor ADR-002 Retired', tmpDir);
+    expect(retire('ADR-002', 'Retired')).toBe(0);
 
     // Write a new observation and promote it — should get ADR-003, not ADR-002
     const logPath = path.join(tmpDir, '.devflow', 'learning', 'decisions-log.jsonl');
     fs.writeFileSync(logPath, JSON.stringify(makeV2LogRow({ id: 'obs_new' })) + '\n', 'utf8');
-    const result = runHelper('assign-anchor decision obs_new', tmpDir);
+    const result = runJsonHelper(tmpDir, ['assign-anchor', 'decision', 'obs_new']);
     expect(result.code).toBe(0);
     expect(result.stdout.trim()).toBe('ADR-003');
   });
@@ -318,13 +301,13 @@ describe('AC-F5: retire-anchor hides entry from .md, keeps in ledger', () => {
       makeLedgerRow({ anchor_id: 'ADR-002', id: 'obs_002', decisions_status: 'Accepted', pattern: 'Going Deprecated' }),
     ]);
 
-    runHelper('retire-anchor ADR-002 Deprecated', tmpDir);
+    expect(retire('ADR-002', 'Deprecated', 'The store moved')).toBe(0);
 
     const md = readDecisionsMd(tmpDir);
     expect(md).toMatch(/^## ADR-001: Surviving$/m);
     expect(md).not.toMatch(/^## ADR-002:/m);
     expect(md).not.toContain('Going Deprecated');
-    expect(md).toContain('| ADR-002 | Deprecated | — |\n');
+    expect(md).toContain('| ADR-002 | Deprecated | The store moved |\n');
 
     const rows = parseLedger(path.join(tmpDir, '.devflow', 'learning', 'decisions-ledger.jsonl'));
     const dep = rows.find(r => r.anchor_id === 'ADR-002');
@@ -337,21 +320,18 @@ describe('AC-F5: retire-anchor hides entry from .md, keeps in ledger', () => {
       makeLedgerRow({ anchor_id: 'ADR-002', id: 'obs_002', decisions_status: 'Accepted' }),
     ]);
 
-    // Render initial state: 2 active
-    runHelper('retire-anchor ADR-001 Retired', tmpDir); // only ADR-002 left
-    // Retire ADR-002 as well — 0 active
-    runHelper('retire-anchor ADR-002 Retired', tmpDir);
-
-    const md = readDecisionsMd(tmpDir);
-    expect(md).toContain('<!-- TL;DR: 0 decisions -->');
+    expect(retire('ADR-001', 'Retired')).toBe(0);
+    expect(readDecisionsMd(tmpDir)).toContain('<!-- TL;DR: 1 decisions -->');
+    expect(retire('ADR-002', 'Retired')).toBe(0);
+    expect(readDecisionsMd(tmpDir)).toContain('<!-- TL;DR: 0 decisions -->');
   });
 });
 
 // ---------------------------------------------------------------------------
-// AC-F6: Recoverability — re-activating + render restores entry identically
+// AC-F6: Recoverability — restore-anchor renders a retired entry again
 // ---------------------------------------------------------------------------
 
-describe('AC-F6: retired entry is recoverable — re-activate + render restores it', () => {
+describe('AC-F6: a retired entry is recoverable — restore-anchor renders it again', { timeout: 30_000 }, () => {
   let tmpDir: string;
 
   beforeEach(() => {
@@ -363,7 +343,7 @@ describe('AC-F6: retired entry is recoverable — re-activate + render restores 
     fs.rmSync(tmpDir, { recursive: true, force: true });
   });
 
-  it('render after re-activate restores entry to decisions.md with identical content', () => {
+  it('restore-anchor brings a retired entry back into decisions.md and out of the Inactive table', () => {
     const originalRow = makeLedgerRow({
       anchor_id: 'ADR-002',
       id: 'obs_002',
@@ -371,37 +351,27 @@ describe('AC-F6: retired entry is recoverable — re-activate + render restores 
       decisions_status: 'Accepted',
       raw_body: '\n## ADR-002: Recoverable Decision\n\n- **Date**: 2026-01-01\n- **Status**: Accepted\n- **Context**: test context\n- **Decision**: test decision\n- **Consequences**: test consequences\n- **Source**: self-learning:obs_002\n',
     });
-
     writeLedger(tmpDir, [
       makeLedgerRow({ anchor_id: 'ADR-001', decisions_status: 'Accepted' }),
       originalRow,
     ]);
 
     // Retire ADR-002 — its body leaves the .md and it is listed under Inactive
-    runHelper('retire-anchor ADR-002 Retired', tmpDir);
+    expect(runJsonHelper(tmpDir, ['retire-anchor', 'ADR-002', 'Retired'], '{"reason":"A one-off"}').code).toBe(0);
     const mdAfterRetire = readDecisionsMd(tmpDir);
     expect(mdAfterRetire).not.toMatch(/^## ADR-002:/m);
-    expect(mdAfterRetire).toContain('| ADR-002 | Retired | — |\n');
+    expect(mdAfterRetire).toContain('| ADR-002 | Retired | A one-off |\n');
 
-    // Re-activate: flip decisions_status back to Accepted in the ledger
-    const ledgerPath = path.join(tmpDir, '.devflow', 'learning', 'decisions-ledger.jsonl');
-    const rows = parseLedger(ledgerPath);
-    const updated = rows.map(r =>
-      r.anchor_id === 'ADR-002' ? { ...r, decisions_status: 'Accepted' } : r
-    );
-    fs.writeFileSync(ledgerPath, updated.map(r => JSON.stringify(r)).join('\n') + '\n', 'utf8');
+    expect(runJsonHelper(tmpDir, ['restore-anchor', 'ADR-002'])).toEqual({ code: 0, stdout: 'restored ADR-002\n', stderr: '' });
 
-    // Re-render
-    execSync(`node "${RENDER_BIN}" render "${tmpDir}"`, { cwd: tmpDir, encoding: 'utf8' });
-
-    // Entry restored identically, and no longer listed under Inactive
+    // Entry restored, and no longer listed under Inactive
     const mdAfterRestore = readDecisionsMd(tmpDir);
     expect(mdAfterRestore).toMatch(/^## ADR-002: Recoverable Decision$/m);
     expect(mdAfterRestore).toContain('self-learning:obs_002');
     expect(mdAfterRestore).not.toContain('## Inactive');
   });
 
-  it('restored entry has the same content as before retirement (raw_body round-trip)', () => {
+  it('the restored entry renders exactly as it did before retirement (raw_body round-trip)', () => {
     const rawBody = '\n## ADR-003: Raw Body Test\n\n- **Date**: 2026-03-01\n- **Status**: Accepted\n- **Context**: some context\n- **Decision**: some decision\n- **Consequences**: some consequences\n- **Source**: self-learning:obs_003\n';
     writeLedger(tmpDir, [
       makeLedgerRow({ anchor_id: 'ADR-003', id: 'obs_003', decisions_status: 'Accepted', raw_body: rawBody }),
@@ -411,23 +381,13 @@ describe('AC-F6: retired entry is recoverable — re-activate + render restores 
     execSync(`node "${RENDER_BIN}" render "${tmpDir}"`, { cwd: tmpDir, encoding: 'utf8' });
     const mdBefore = readDecisionsMd(tmpDir);
 
-    // Retire
-    runHelper('retire-anchor ADR-003 Retired', tmpDir);
+    expect(runJsonHelper(tmpDir, ['retire-anchor', 'ADR-003', 'Retired'], '{"reason":"A one-off"}').code).toBe(0);
     const mdRetired = readDecisionsMd(tmpDir);
     expect(mdRetired).not.toMatch(/^## ADR-003:/m);
-    expect(mdRetired).toContain('| ADR-003 | Retired | — |\n');
+    expect(mdRetired).toContain('| ADR-003 | Retired | A one-off |\n');
 
-    // Re-activate + render
-    const ledgerPath = path.join(tmpDir, '.devflow', 'learning', 'decisions-ledger.jsonl');
-    const rows = parseLedger(ledgerPath);
-    const updated = rows.map(r =>
-      r.anchor_id === 'ADR-003' ? { ...r, decisions_status: 'Accepted' } : r
-    );
-    fs.writeFileSync(ledgerPath, updated.map(r => JSON.stringify(r)).join('\n') + '\n', 'utf8');
-    execSync(`node "${RENDER_BIN}" render "${tmpDir}"`, { cwd: tmpDir, encoding: 'utf8' });
-
-    const mdAfter = readDecisionsMd(tmpDir);
-    expect(mdAfter).toBe(mdBefore);
+    expect(runJsonHelper(tmpDir, ['restore-anchor', 'ADR-003']).code).toBe(0);
+    expect(readDecisionsMd(tmpDir)).toBe(mdBefore);
   });
 });
 

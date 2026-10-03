@@ -29,7 +29,11 @@
 //   assign-anchor <decision|pitfall> <obs_id>
 //                                          Promote a v2 observation to the next ADR/PF number,
 //                                          skipping numbers tracked files cite; re-renders
-//   retire-anchor <anchor_id> <status>    Flip ledger row status, re-render both .md files
+//   retire-anchor <anchor> <Encoded|Superseded|Retired|Deprecated>
+//                                          Make an entry inactive with the one JSON object on
+//                                          stdin its status takes; re-renders
+//   restore-anchor <anchor>               Make an inactive entry active again and due for
+//                                          checking next; re-renders
 //   refresh-anchor <anchor>... [--verified]
 //                                          Re-project active v2 entries from the log, or stamp
 //                                          them verified today; re-renders
@@ -60,19 +64,15 @@ const args = process.argv.slice(3);
 let learningModules = null;
 
 /**
- * The learning modules — the store, the path helpers and the renderer — loaded on
- * first use and memoized. The generic ops never call it, so a hook that falls
- * back from jq to node never pays for loading them.
+ * The learning store, loaded on first use and memoized. The generic ops never
+ * call it, so a hook that falls back from jq to node never pays for loading it,
+ * and the store loads the renderer only when an op renders.
  *
- * @returns {{ store: object, paths: object, render: object }}
+ * @returns {{ store: object }}
  */
 function learning() {
   if (learningModules === null) {
-    learningModules = {
-      store: require('./lib/learning-store.cjs'),
-      paths: require('./lib/project-paths.cjs'),
-      render: require('./lib/render-decisions.cjs'),
-    };
+    learningModules = { store: require('./lib/learning-store.cjs') };
   }
   return learningModules;
 }
@@ -206,7 +206,7 @@ const ENTRY_TYPES = new Set(['decision', 'pitfall']);
  * never touch it. A new learning op joins this set.
  */
 const LEARNING_OPS = new Set([
-  'assign-anchor', 'retire-anchor', 'refresh-anchor', 'rotate-observations',
+  'assign-anchor', 'retire-anchor', 'restore-anchor', 'refresh-anchor', 'rotate-observations',
   'put-observation', 'list', 'show', 'claim-due',
 ]);
 
@@ -429,48 +429,43 @@ try {
     }
 
     // -------------------------------------------------------------------------
-    // retire-anchor <anchor_id> <status>
-    // AC-A3, AC-F5, AC-F7: Flip decisions_status on the ledger row. Idempotent.
-    // Re-renders both .md (retired entry vanishes from .md, stays in ledger).
-    //
-    // status must be Deprecated | Superseded | Retired.
+    // retire-anchor <anchor> <Encoded|Superseded|Retired|Deprecated>
+    // Make an active entry inactive with the one JSON object on stdin its status
+    // takes: { reason } for Retired and Deprecated, { by } for Superseded, and
+    // { at, quote } for Encoded, the quote checked at the verify ref
+    // (retireAnchor, learning-store.cjs: D-ENCODED-QUOTE).
+    // stdout: the new status in lower case and the anchor, then `repointed
+    // <anchor>` for each entry re-pointed to the successor
     // -------------------------------------------------------------------------
     case 'retire-anchor': {
-      const retireAnchorId = args[0];
-      const retireStatus = args[1];
-
-      const RETIRE_STATUSES = new Set(['Deprecated', 'Superseded', 'Retired']);
-
-      if (!retireAnchorId || !retireStatus) {
-        process.stderr.write('retire-anchor: usage: retire-anchor <anchor_id> <status>\n');
+      const { store } = learning();
+      if (args.length !== 2 || !store.ANCHOR_ID_RE.test(args[0]) || !store.INACTIVE_STATUSES.includes(args[1])) {
+        process.stderr.write('retire-anchor: usage: retire-anchor <anchor> <Encoded|Superseded|Retired|Deprecated> (one JSON object on stdin; run from the project root)\n');
         process.exit(1);
       }
-      if (!RETIRE_STATUSES.has(retireStatus)) {
-        process.stderr.write(`retire-anchor: status must be Deprecated|Superseded|Retired, got '${retireStatus}'\n`);
+      const raInput = readStdinJson('retire-anchor');
+      const raResult = raInput.ok ? store.retireAnchor(process.cwd(), args[0], args[1], raInput.value) : raInput;
+      process.exitCode = emit(raResult, retired => [
+        `${retired.status.toLowerCase()} ${retired.anchor_id}`,
+        ...retired.repointed.map(anchorId => `repointed ${anchorId}`),
+      ].join('\n'));
+      break;
+    }
+
+    // -------------------------------------------------------------------------
+    // restore-anchor <anchor>
+    // Make an inactive entry active again, its notes, last_verified and
+    // last_attempt cleared so it is due for checking next (restoreAnchor,
+    // learning-store.cjs).
+    // stdout: restored <anchor>
+    // -------------------------------------------------------------------------
+    case 'restore-anchor': {
+      const { store } = learning();
+      if (args.length !== 1 || !store.ANCHOR_ID_RE.test(args[0])) {
+        process.stderr.write('restore-anchor: usage: restore-anchor <anchor> (run from the project root)\n');
         process.exit(1);
       }
-
-      const { store, paths, render } = learning();
-      const raProjectRoot = process.cwd();
-      const raLedgerPath = paths.getDecisionsLedgerPath(raProjectRoot);
-
-      const raResult = store.withDecisionsLock('retire-anchor', raProjectRoot, () => {
-        const raRows = render.parseLedger(raLedgerPath);
-        const raIdx = raRows.findIndex(r => r.anchor_id === retireAnchorId);
-        if (raIdx === -1) {
-          throw new Error(`retire-anchor: anchor_id '${retireAnchorId}' not found in ledger`);
-        }
-
-        // Idempotent: if already set to same status, still write (no-op equivalent)
-        raRows[raIdx] = Object.assign({}, raRows[raIdx], { decisions_status: retireStatus });
-        store.writeJsonlAtomic(raLedgerPath, raRows);
-
-        // Re-render both .md (lock-free — we already hold .decisions.lock)
-        render.renderAndWriteAll(raProjectRoot, raRows);
-        return { ok: true, value: retireAnchorId };
-      });
-      // stdout: the anchor id, matching the other ops (CON-P1)
-      process.exitCode = emit(raResult, anchorId => anchorId);
+      process.exitCode = emit(store.restoreAnchor(process.cwd(), args[0]), restored => `restored ${restored.anchor_id}`);
       break;
     }
 

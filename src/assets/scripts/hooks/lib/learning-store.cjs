@@ -1736,11 +1736,12 @@ function fieldLabel(field) {
   return PLAIN_FIELD_RE.test(field) ? field : cutTo(singleLine(JSON.stringify(field)), 80);
 }
 
-/** The refusal of an input validateObservationInput rejected: every problem, one per line. */
-function invalidInput(problems) {
+/** The refusal of an op's stdin input: every problem, one per line, after the op name. */
+function invalidInput(opName, problems) {
   const count = `${problems.length} problem${problems.length === 1 ? '' : 's'}`;
   const lines = problems.map(problem => `  ${fieldLabel(problem.field)}: ${singleLine(problem.message)}`);
-  return putRefusal('invalid-input', [`the input has ${count}; nothing was written`, ...lines].join('\n'), { problems });
+  const message = [`${opName}: the input has ${count}; nothing was written`, ...lines].join('\n');
+  return { ok: false, error: { kind: 'invalid-input', message, problems } };
 }
 
 /** The refusal of a put on an observation whose entries are all inactive. */
@@ -1819,7 +1820,7 @@ function putUnderLock(root, mode, input, { now, scopeMatches }) {
   const sameId = id === null ? [] : log.rows.filter(row => row.id === id);
   const existing = sameId[0] || null;
   const checked = validateObservationInput(input, { mode, existing, ledgerIds: registry.byAnchor.keys(), scopeMatches });
-  if (!checked.ok) return invalidInput(checked.errors);
+  if (!checked.ok) return invalidInput('put-observation', checked.errors);
   if (sameId.length > 1) {
     return putRefusal('duplicate-log-id', `the log holds ${sameId.length} rows with id '${id}'; nothing was written`);
   }
@@ -2354,16 +2355,28 @@ function assignUnderLock(root, type, obsId, { now, cited }) {
 // ---------------------------------------------------------------------------
 
 /**
- * Why the ledger rows holding one anchor do not make an active v2 entry, or null:
- * the anchor is absent or held twice, the entry is inactive, or it is v1.
+ * The one ledger row carrying `anchorId`, or why there is not exactly one: the
+ * anchor is `not in the ledger`, or `held by <n> ledger rows`.
  *
- * @param {object[]} rows - every ledger row carrying the anchor
+ * @param {object[]} ledgerRows
+ * @param {string} anchorId
+ * @returns {{ row: object } | { kind: 'not-found'|'duplicate-anchor', reason: string }}
+ */
+function rowCarrying(ledgerRows, anchorId) {
+  const rows = ledgerRows.filter(row => row.anchor_id === anchorId);
+  if (rows.length === 1) return { row: rows[0] };
+  return rows.length === 0
+    ? { kind: 'not-found', reason: 'not in the ledger' }
+    : { kind: 'duplicate-anchor', reason: `held by ${rows.length} ledger rows` };
+}
+
+/**
+ * Why ledger row `row` is not an active v2 entry, or null: it is inactive, or v1.
+ *
+ * @param {object} row
  * @returns {string|null}
  */
-function activeV2EntryProblem(rows) {
-  if (rows.length === 0) return 'not in the ledger';
-  if (rows.length > 1) return `held by ${rows.length} ledger rows`;
-  const [row] = rows;
+function activeV2EntryProblem(row) {
   if (!isActive(row)) return `${listingToken(row.decisions_status)}; restore it with restore-anchor first`;
   if (!isV2(row)) return 'a v1 entry; rewrite it with put-observation --update';
   return null;
@@ -2463,13 +2476,13 @@ function refreshUnderLock(root, anchors, { verified, now }) {
   const problems = [];
   const plans = [];
   for (const anchorId of anchors) {
-    const rows = ledger.rows.filter(row => row.anchor_id === anchorId);
-    const entryProblem = activeV2EntryProblem(rows);
+    const found = rowCarrying(ledger.rows, anchorId);
+    const entryProblem = found.row ? activeV2EntryProblem(found.row) : found.reason;
     if (entryProblem) {
       problems.push({ anchor_id: anchorId, message: entryProblem });
       continue;
     }
-    const [prior] = rows;
+    const prior = found.row;
     if (verified) {
       plans.push({ anchor_id: anchorId, prior, next: withLedgerFields(prior, { last_verified: today }) });
       continue;
@@ -2495,6 +2508,306 @@ function refreshUnderLock(root, anchors, { verified, now }) {
   writeJsonlAtomic(ledgerPath, ledgerRows);
   renderAll(root, ledgerRows);
   return { ok: true, value: { refreshed } };
+}
+
+// ---------------------------------------------------------------------------
+// retire-anchor and restore-anchor
+// ---------------------------------------------------------------------------
+
+/** The stdin keys each inactive status takes. */
+const RETIRE_INPUT_KEYS = Object.freeze({
+  Encoded: Object.freeze(['at', 'quote']),
+  Superseded: Object.freeze(['by']),
+  Retired: Object.freeze(['reason']),
+  Deprecated: Object.freeze(['reason']),
+});
+
+/** The ledger-owned fields that say why an entry is inactive: a retirement sets one and retired_on; restore clears them. */
+const RETIREMENT_FIELDS = Object.freeze(['status_note', 'superseded_by', 'encoded_at', 'retired_on']);
+
+/** `keys` mapped to undefined: the withLedgerFields updates that remove them. */
+function removing(keys) {
+  return Object.fromEntries(keys.map(key => [key, undefined]));
+}
+
+/**
+ * `row` with decisions_status `status` and the ledger-owned fields in `updates`
+ * (withLedgerFields). A status key the row has keeps its place; a row without one
+ * takes it after anchor_id, where the projection puts it.
+ *
+ * @param {object} row - a ledger row
+ * @param {string} status
+ * @param {Record<string, unknown>} updates - ledger-owned fields only
+ * @returns {object} a new row
+ */
+function withEntryStatus(row, status, updates) {
+  const next = withLedgerFields(row, updates);
+  if (Object.prototype.hasOwnProperty.call(next, 'decisions_status')) {
+    next.decisions_status = status;
+    return next;
+  }
+  const placed = {};
+  for (const [key, value] of Object.entries(next)) {
+    placed[key] = value;
+    if (key === 'anchor_id') placed.decisions_status = status;
+  }
+  return Object.prototype.hasOwnProperty.call(placed, 'decisions_status') ? placed : { ...placed, decisions_status: status };
+}
+
+/** The problem with an Encoded path, or null: it names a file from the repository root. */
+function encodedPathProblem(at) {
+  if (at.startsWith('/')) return 'must be relative to the repository root';
+  if (at.split('/').some(segment => segment === '' || segment === '.' || segment === '..')) {
+    return 'must not hold an empty, . or .. segment';
+  }
+  return null;
+}
+
+/** The problem with an Encoded quote too short once its whitespace collapses, or null. */
+function quoteLengthProblem(quote) {
+  const length = codePointLength(normalizeWhitespace(quote));
+  return length < FIELD_LIMITS.quoteMin
+    ? `is ${length} characters once its whitespace is collapsed, under the minimum of ${FIELD_LIMITS.quoteMin}`
+    : null;
+}
+
+/** The problem with a Superseded successor's shape, or null. */
+function successorShapeProblem(anchorId, by) {
+  if (typeof by !== 'string' || !ANCHOR_ID_RE.test(by)) return 'must be an anchor id';
+  if (by === anchorId) return 'names this entry; an entry cannot supersede itself';
+  return null;
+}
+
+/**
+ * Every problem with a retire-anchor input for `status`: the keys it does not
+ * take, in input order, then its own fields, each with at most one problem.
+ *
+ * @param {string} anchorId - the entry being retired
+ * @param {string} status - an inactive status
+ * @param {unknown} input - the parsed stdin object
+ * @returns {Array<{ field: string, message: string }>}
+ */
+function retireInputProblems(anchorId, status, input) {
+  if (!isPlainObject(input)) return [{ field: '(input)', message: 'must be one JSON object' }];
+  const accepted = RETIRE_INPUT_KEYS[status];
+  const problems = Object.keys(input)
+    .filter(key => !accepted.includes(key))
+    .map(key => ({ field: key, message: `is not taken by ${status}, which takes ${accepted.join(' and ')}` }));
+  const check = (field, problem) => {
+    if (problem) problems.push({ field, message: problem });
+  };
+  const absent = key => (input[key] === undefined ? 'is required' : null);
+  if (status === 'Encoded') {
+    check('at', absent('at') || textProblem(input.at, FIELD_LIMITS.path) || encodedPathProblem(input.at));
+    check('quote', absent('quote') || textProblem(input.quote, FIELD_LIMITS.quoteMax) || quoteLengthProblem(input.quote));
+  } else if (status === 'Superseded') {
+    check('by', absent('by') || successorShapeProblem(anchorId, input.by));
+  } else {
+    check('reason', absent('reason') || textProblem(input.reason, FIELD_LIMITS.note));
+  }
+  return problems;
+}
+
+/** A retire-anchor refusal: `message` follows the op name. */
+function retireRefusal(kind, message) {
+  return { ok: false, error: { kind, message: `retire-anchor: ${message}` } };
+}
+
+/** A restore-anchor refusal: `message` follows the op name. */
+function restoreRefusal(kind, message) {
+  return { ok: false, error: { kind, message: `restore-anchor: ${message}` } };
+}
+
+/**
+ * Check that `quote` appears in file `at` as committed at the verify ref, and
+ * answer the encoded_at record retire-anchor keeps for it.
+ *
+ * D-ENCODED-QUOTE: an entry is retired as Encoded only with a path and a quote
+ * from that file, and only when the quote, every run of whitespace collapsed to
+ * one space on both sides, appears in the file as committed at the verify ref
+ * (D-VERIFY-REF), read with `git cat-file blob <commit>:<path>`; the entry keeps
+ * the path, the quote, the ref and the commit as encoded_at. Reason: a citation is
+ * a claim that nothing else checks — a path alone can point anywhere — so only a
+ * quote found at a ref every checkout shares shows that the lesson now lives in
+ * that file, and the commit lets a later run look at what was checked.
+ *
+ * @param {string} root - project root
+ * @param {string} at - a path from the repository root
+ * @param {string} quote
+ * @param {{ verifyRef?: { ref: 'origin/HEAD'|'HEAD', commit: string } | null }} [opts]
+ *   verifyRef: default resolveVerifyRef(root); null when there is no commit to check
+ * @returns {{ ok: true, value: { path: string, quote: string, ref: string, commit: string } }
+ *   | { ok: false, error: { kind: 'no-verify-ref'|'not-at-ref'|'git-failed'|'quote-not-found', message: string } }}
+ */
+function quoteAtRef(root, at, quote, { verifyRef } = {}) {
+  const checkedAt = verifyRef === undefined ? resolveVerifyRef(root) : verifyRef;
+  if (checkedAt === null) {
+    return retireRefusal('no-verify-ref', 'there is no commit to check the quote at (not a git repository, or no commit yet); nothing was written');
+  }
+  const where = `${checkedAt.ref} ${checkedAt.commit.slice(0, 12)}`;
+  const shown = singleLine(at);
+  let blob;
+  try {
+    blob = execFileSync('git', ['-c', 'core.fsmonitor=false', 'cat-file', 'blob', `${checkedAt.commit}:${at}`], {
+      cwd: root,
+      timeout: GIT_TIMEOUT_MS,
+      maxBuffer: GIT_MAX_BUFFER,
+      stdio: ['ignore', 'pipe', 'ignore'],
+      encoding: 'utf8',
+    });
+  } catch (err) {
+    if (err && typeof err.status === 'number') {
+      return retireRefusal('not-at-ref', `'${shown}' is not a file at ${where}; nothing was written`);
+    }
+    return retireRefusal('git-failed', `could not read '${shown}' at ${where}: ${singleLine(String(err && err.message))}; nothing was written`);
+  }
+  if (!normalizeWhitespace(blob).includes(normalizeWhitespace(quote))) {
+    return retireRefusal('quote-not-found', `the quote is not in '${shown}' at ${where}; nothing was written`);
+  }
+  return { ok: true, value: { path: at, quote, ref: checkedAt.ref, commit: checkedAt.commit } };
+}
+
+/**
+ * Make an active entry inactive — the retire-anchor op — with the stdin its new
+ * status takes, every problem with that input reported at once:
+ *   Retired, Deprecated  { reason }     at most 120 characters, kept as status_note
+ *   Superseded           { by }         an active entry other than this one, of
+ *                                       either type, kept as superseded_by; every
+ *                                       inactive entry this one superseded is
+ *                                       re-pointed to it
+ *   Encoded              { at, quote }  checked at the verify ref and kept as
+ *                                       encoded_at (D-ENCODED-QUOTE)
+ * Each also sets retired_on to today and clears the other notes; the rest of the
+ * row stays as it is, so a v1 entry stays v1. An entry already inactive, an
+ * anchor the ledger does not hold or holds twice, and a successor absent or
+ * inactive are refused. The input and the quote are checked before the learning
+ * lock is taken; under it the ledger is written once and the files are rendered,
+ * after a v1 tree is backed up (D-V1-BACKUP-ONCE) and malformed ledger lines are
+ * quarantined (D-QUARANTINE-MALFORMED). A refusal writes nothing.
+ *
+ * @param {string} root - project root
+ * @param {string} anchorId
+ * @param {'Encoded'|'Superseded'|'Retired'|'Deprecated'} status
+ * @param {unknown} input - the parsed stdin object
+ * @param {{ now?: number, timeoutMs?: number, verifyRef?: { ref: 'origin/HEAD'|'HEAD', commit: string } | null }} [opts]
+ *   now: epoch ms (default Date.now()); verifyRef: see quoteAtRef
+ * @returns {{ ok: true, value: { anchor_id: string, status: string, repointed: string[] } }
+ *   | { ok: false, error: { kind: string, message: string, problems?: Array<{ field: string, message: string }> } }}
+ *   repointed: the entries re-pointed to the successor, in anchor order. Error
+ *   kinds: invalid-input (with problems), quoteAtRef's, not-found,
+ *   duplicate-anchor, already-inactive, successor-not-found,
+ *   successor-duplicate-anchor, successor-inactive, and withDecisionsLock's
+ *   no-learning-dir and busy.
+ * @throws {TypeError} for a malformed anchorId or a status that is not inactive
+ */
+function retireAnchor(root, anchorId, status, input, { now = Date.now(), timeoutMs, verifyRef } = {}) {
+  if (typeof anchorId !== 'string' || !ANCHOR_ID_RE.test(anchorId)) throw new TypeError('retireAnchor: anchorId must be an anchor id');
+  if (!INACTIVE_STATUSES.includes(status)) {
+    throw new TypeError(`retireAnchor: status must be one of ${INACTIVE_STATUSES.join(', ')}, got '${status}'`);
+  }
+  if (!hasLearningDir(root)) return noLearningDir('retire-anchor', root);
+  const problems = retireInputProblems(anchorId, status, input);
+  if (problems.length > 0) return invalidInput('retire-anchor', problems);
+  let note;
+  if (status === 'Encoded') {
+    const encoded = quoteAtRef(root, input.at, input.quote, { verifyRef });
+    if (!encoded.ok) return encoded;
+    note = { encoded_at: encoded.value };
+  } else if (status === 'Superseded') {
+    note = { superseded_by: input.by };
+  } else {
+    note = { status_note: input.reason };
+  }
+  return withDecisionsLock('retire-anchor', root, () => retireUnderLock(root, anchorId, status, note, { now }), { timeoutMs });
+}
+
+/** retireAnchor's locked body. */
+function retireUnderLock(root, anchorId, status, note, { now }) {
+  const ledgerPath = getDecisionsLedgerPath(root);
+  const ledger = readJsonl(ledgerPath);
+  const found = rowCarrying(ledger.rows, anchorId);
+  if (!found.row) return retireRefusal(found.kind, `${anchorId} is ${found.reason}; nothing was written`);
+  const prior = found.row;
+  if (!isActive(prior)) {
+    return retireRefusal('already-inactive', `${anchorId} is already ${listingToken(prior.decisions_status)}; nothing was written`);
+  }
+  if (status === 'Superseded') {
+    const successor = rowCarrying(ledger.rows, note.superseded_by);
+    if (!successor.row) {
+      return retireRefusal(`successor-${successor.kind}`, `${note.superseded_by}, the successor, is ${successor.reason}; nothing was written`);
+    }
+    if (!isActive(successor.row)) {
+      return retireRefusal(
+        'successor-inactive',
+        `${note.superseded_by}, the successor, is ${listingToken(successor.row.decisions_status)}; nothing was written`,
+      );
+    }
+  }
+
+  const retired = withEntryStatus(prior, status, { ...removing(RETIREMENT_FIELDS), ...note, retired_on: isoDate(now) });
+  const repointed = status === 'Superseded'
+    ? sortedByAnchor(ledger.rows.filter(row => row !== prior && !isActive(row) && row.superseded_by === anchorId))
+    : [];
+  const replaced = new Map([
+    [prior, retired],
+    ...repointed.map(row => [row, withLedgerFields(row, { superseded_by: note.superseded_by })]),
+  ]);
+  ensurePreV2Backup(root, { logRows: readJsonl(getDecisionsLogPath(root)).rows, ledgerRows: ledger.rows });
+  quarantineRejected(ledgerPath, ledger.rejected, { now });
+  const ledgerRows = ledger.rows.map(row => replaced.get(row) || row);
+  writeJsonlAtomic(ledgerPath, ledgerRows);
+  renderAll(root, ledgerRows);
+  return { ok: true, value: { anchor_id: anchorId, status, repointed: repointed.map(row => row.anchor_id) } };
+}
+
+/**
+ * Make an inactive entry active again — the restore-anchor op. The entry takes
+ * its type's active status (Accepted for a decision, Active for a pitfall) and
+ * loses its retirement notes, its last_verified and its last_attempt, so the next
+ * claim-due hands it out ahead of every verified entry (D-DUE-ORDER); its content
+ * and its date stay, and the files are re-rendered. An entry already active, an
+ * anchor the ledger does not hold or holds twice, and a row whose type its anchor
+ * does not name are refused. It writes as retireAnchor does, under the learning
+ * lock; a refusal writes nothing.
+ *
+ * @param {string} root - project root
+ * @param {string} anchorId
+ * @param {{ now?: number, timeoutMs?: number }} [opts] - now: epoch ms (default Date.now())
+ * @returns {{ ok: true, value: { anchor_id: string, status: 'Accepted'|'Active' } }
+ *   | { ok: false, error: { kind: string, message: string } }}
+ *   Error kinds: not-found, duplicate-anchor, already-active, type-mismatch, and
+ *   withDecisionsLock's no-learning-dir and busy.
+ * @throws {TypeError} for a malformed anchorId
+ */
+function restoreAnchor(root, anchorId, { now = Date.now(), timeoutMs } = {}) {
+  if (typeof anchorId !== 'string' || !ANCHOR_ID_RE.test(anchorId)) throw new TypeError('restoreAnchor: anchorId must be an anchor id');
+  return withDecisionsLock('restore-anchor', root, () => restoreUnderLock(root, anchorId, { now }), { timeoutMs });
+}
+
+/** restoreAnchor's locked body. */
+function restoreUnderLock(root, anchorId, { now }) {
+  const ledgerPath = getDecisionsLedgerPath(root);
+  const ledger = readJsonl(ledgerPath);
+  const found = rowCarrying(ledger.rows, anchorId);
+  if (!found.row) return restoreRefusal(found.kind, `${anchorId} is ${found.reason}; nothing was written`);
+  const prior = found.row;
+  if (isActive(prior)) return restoreRefusal('already-active', `${anchorId} is already active; nothing was written`);
+  const prefix = anchorPrefixFor(prior.type);
+  if (prefix === null || !anchorId.startsWith(`${prefix}-`)) {
+    return restoreRefusal(
+      'type-mismatch',
+      `${anchorId} holds a row of type ${listingToken(prior.type)}, which its anchor does not name; nothing was written`,
+    );
+  }
+
+  const status = activeStatusFor(prior.type);
+  const restored = withEntryStatus(prior, status, removing([...RETIREMENT_FIELDS, 'last_verified', 'last_attempt']));
+  ensurePreV2Backup(root, { logRows: readJsonl(getDecisionsLogPath(root)).rows, ledgerRows: ledger.rows });
+  quarantineRejected(ledgerPath, ledger.rejected, { now });
+  const ledgerRows = ledger.rows.map(row => (row === prior ? restored : row));
+  writeJsonlAtomic(ledgerPath, ledgerRows);
+  renderAll(root, ledgerRows);
+  return { ok: true, value: { anchor_id: anchorId, status } };
 }
 
 module.exports = {
@@ -2573,4 +2886,8 @@ module.exports = {
   assignAnchor,
   // refresh-anchor
   refreshAnchors,
+  // retire-anchor and restore-anchor
+  quoteAtRef,
+  retireAnchor,
+  restoreAnchor,
 };

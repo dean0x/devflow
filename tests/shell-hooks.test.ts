@@ -333,9 +333,10 @@ describe('json-helper.js operations', () => {
     expect(parsed.id).toBe('b');
   });
 
-  it('a generic op loads none of the learning modules; a learning op loads them', () => {
+  it('a generic op loads none of the learning modules; a learning op loads the store, and the renderer only to render', () => {
     // Every hook that falls back from jq to node runs a generic op, so the learning
-    // store, renderer and formatter load only when a learning op needs them.
+    // store loads only for a learning op, and the renderer and formatter only when
+    // that op renders.
     const probeDir = fs.mkdtempSync(path.join(os.tmpdir(), 'json-helper-lazy-'));
     try {
       const record = path.join(probeDir, 'loaded.txt');
@@ -361,8 +362,16 @@ describe('json-helper.js operations', () => {
       };
 
       expect(learningModulesLoadedBy(['get-field', 'cwd'], '{"cwd":"/tmp"}')).toEqual([]);
-      // claim-queue answers none outside a learning tree, so it exits 0 here.
-      expect(learningModulesLoadedBy(['claim-queue'], '')).toEqual([
+      // claim-queue answers none outside a learning tree, so it exits 0 here, and renders nothing.
+      expect(learningModulesLoadedBy(['claim-queue'], '')).toEqual(['learning-store.cjs', 'mkdir-lock.cjs', 'project-paths.cjs']);
+      // restore-anchor renders the entry it restores.
+      const learningDir = path.join(probeDir, '.devflow', 'learning');
+      fs.mkdirSync(learningDir, { recursive: true });
+      fs.writeFileSync(
+        path.join(learningDir, 'decisions-ledger.jsonl'),
+        `${JSON.stringify({ id: 'obs_lazy_one', type: 'decision', anchor_id: 'ADR-001', decisions_status: 'Retired' })}\n`,
+      );
+      expect(learningModulesLoadedBy(['restore-anchor', 'ADR-001'], '')).toEqual([
         'decisions-format.cjs', 'learning-store.cjs', 'mkdir-lock.cjs', 'project-paths.cjs', 'render-decisions.cjs',
       ]);
     } finally {
