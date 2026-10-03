@@ -109,7 +109,7 @@ describe('the §14.3 heading oracle cannot silently shrink', () => {
       collectSchemaOracleDefects(renamed),
       'a consistently renamed list is well formed BY DESIGN. Recorded with a probe so a later ' +
       'reader cannot mistake this collector for rename coverage — that is the misreading an ' +
-      'empty absence result invites (PF-064)',
+      'empty absence result invites',
     ).toEqual([]);
   });
 

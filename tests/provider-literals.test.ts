@@ -83,7 +83,7 @@ function readSource(relPath: string): string {
   if (!existsSync(abs)) {
     throw new Error(
       `${relPath} is absent — a provider module named by the registry is not on disk, so every ` +
-      `literal pin for that provider would compare against nothing (PF-018)`,
+      `literal pin for that provider would compare against nothing`,
     );
   }
   return readFileSync(abs, 'utf-8');
@@ -112,7 +112,7 @@ function readGithubApiReference(): string {
   if (!existsSync(abs)) {
     throw new Error(
       `${GITHUB_API_FILE} is absent at ${abs} — it is the only reference a non-tracker GitHub ` +
-      `batch op can reach, so every pin against it would compare against nothing (PF-018)`,
+      `batch op can reach, so every pin against it would compare against nothing`,
     );
   }
   return readFileSync(abs, 'utf-8');
@@ -263,7 +263,7 @@ describe('provider literals: the cross-provider matrix (AC-3.13, GAP-13)', () =>
       PROVIDERS.map(p => p.token).sort(),
       'the provider set must come from the registry, so a provider cannot be silently omitted',
     ).toEqual(['github', 'jira', 'linear']);
-    expect(PROVIDER_LITERALS.length, 'the literal matrix is empty (PF-018)').toBeGreaterThan(0);
+    expect(PROVIDER_LITERALS.length, 'the literal matrix is empty').toBeGreaterThan(0);
     for (const entry of PROVIDER_LITERALS) {
       expect(
         entry.present.length,
@@ -490,7 +490,7 @@ describe('provider literals: fetch-issues-batch is one query on every provider [
       collectPerItemFetchVerbs('## Operation: fetch-issues-batch'),
       'the op anchor line must not be reported — the plural is not the singular',
     ).toEqual([]);
-    expect(PER_ITEM_FETCH_SHAPES.length, 'the shape table is empty (PF-018)').toBeGreaterThan(0);
+    expect(PER_ITEM_FETCH_SHAPES.length, 'the shape table is empty').toBeGreaterThan(0);
   });
 });
 
@@ -661,7 +661,7 @@ describe('provider literals: the github backlink reference, per file (GAP-18)', 
         `removing "${claim.label}" must be reported by the same collector`,
       ).toContain(`wounded: missing ${claim.label}`);
     }
-    expect(GITHUB_BACKLINK_CLAIMS.length, 'the claim table is empty (PF-018)').toBeGreaterThan(0);
+    expect(GITHUB_BACKLINK_CLAIMS.length, 'the claim table is empty').toBeGreaterThan(0);
   });
 
   it('the STOP threshold is stated on the github path ONLY, per file and never in the agent', () => {
@@ -1316,7 +1316,7 @@ describe('provider literals: the github fetch-issue reference, per file', () => 
         `removing "${claim.label}" must be reported by the same collector`,
       ).toContain(`wounded: missing ${claim.label}`);
     }
-    expect(GITHUB_FETCH_CLAIMS.length, 'the claim table is empty (PF-018)').toBeGreaterThan(0);
+    expect(GITHUB_FETCH_CLAIMS.length, 'the claim table is empty').toBeGreaterThan(0);
   });
 
   it('known-bad probe: the pre-regression wording — an unanchored numeric branch — goes red', () => {

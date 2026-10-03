@@ -294,7 +294,7 @@ export function parseValidator(cell: string): Validator {
   if (kinds.length === 0) {
     throw new Error(
       `validator cell declares no recognisable check — every hostile payload for this field ` +
-      `would pass vacuously (PF-018). Cell: ${cell}`,
+      `would pass vacuously. Cell: ${cell}`,
     );
   }
   return { source: cell.trim(), kinds, patterns, closedSet, denied, maxChars };
@@ -422,7 +422,7 @@ describe('hostile values: tracker.md fields (AC-3.7, register row 22)', () => {
     expect(
       HOSTILE_PAYLOADS.length,
       'the payload table is below its floor — the grid above grades whatever is in it, so a ' +
-      'shrunken table is a green suite over fewer sinks (PF-018)',
+      'shrunken table is a green suite over fewer sinks',
     ).toBeGreaterThanOrEqual(MIN_HOSTILE_PAYLOADS);
     // Distinctness is asserted as a RELATION to the table's own length rather than
     // to the floor: a repeat then goes red at any table size.
@@ -711,7 +711,7 @@ describe('hostile values: the agent declares no second provider parser (§14.9 c
       expect(
         scoped,
         `'${phrase}' describes a provider-token repair pipeline. The token arrives validated ` +
-        'in the spawn directive; re-deriving it here adds a second convergence point (PF-023).',
+        'in the spawn directive; re-deriving it here adds a second convergence point.',
       ).not.toContain(phrase);
     }
 
@@ -834,7 +834,7 @@ describe('hostile values: refs per provider (GAP-18, register row 25)', () => {
     expect(
       HOSTILE_REFS.length,
       'the hostile-ref table is below its floor — every grammar below is driven over whatever is ' +
-      'in it, so a shrunken table is a green suite over fewer shapes (PF-018)',
+      'in it, so a shrunken table is a green suite over fewer shapes',
     ).toBeGreaterThanOrEqual(MIN_HOSTILE_REFS);
     expect(
       new Set(HOSTILE_REFS.map(([, r]) => r)).size,
@@ -888,7 +888,7 @@ describe('hostile values: refs per provider (GAP-18, register row 25)', () => {
             `everything passes every row above while making the operation unreachable`,
           ).toBe(true);
         }
-        expect(grammar.accepts.length, 'the accepted corpus is empty (PF-018)').toBeGreaterThan(0);
+        expect(grammar.accepts.length, 'the accepted corpus is empty').toBeGreaterThan(0);
       });
     });
   }
@@ -974,7 +974,7 @@ function escapeReversed(value: string): string {
 describe('hostile values: JQL/filter fields (§14.9 constraint 10)', () => {
   it('both tool-call providers state the rule, in one place each', () => {
     const providers = queryBuildingProviders();
-    expect(providers.length, 'no query-building provider is registered (PF-018)').toBeGreaterThan(1);
+    expect(providers.length, 'no query-building provider is registered').toBeGreaterThan(1);
     for (const provider of providers) {
       const tree = TRACKER_OPS
         .map(op => readGeneratedReference(`tracker/${provider}/${op}.md`))

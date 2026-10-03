@@ -796,7 +796,7 @@ describe('Tracker agent frontmatter', () => {
     expect(keys.length, 'frontmatter parsed to no keys — the shape changed').toBeGreaterThan(0);
     expect(
       keys,
-      'a tools: allowlist here is a silent constraint (PF-031): the tracker server names this ' +
+      'a tools: allowlist here is a silent constraint: the tracker server names this ' +
       'agent must reach are user-configured and cannot be enumerated at authoring time, so any ' +
       'allowlist a reviewer "tightens" it to would kill tracker access at runtime, not at build time',
     ).not.toContain('tools');
@@ -825,7 +825,7 @@ describe('Tracker agent frontmatter', () => {
       if (m) items.push(m[1].trim());
     }
     expect(items.length, 'skills: block is empty').toBeGreaterThan(0);
-    expect(items, 'avoids PF-002: a frontmatter compliance skill silently bails').not.toContain('devflow:compliance');
+    expect(items, 'a frontmatter compliance skill silently bails').not.toContain('devflow:compliance');
   });
 });
 
@@ -900,7 +900,7 @@ describe('Tracker agent read-only boundary (§14.9 constraint 12, EC-69)', () =>
     expect(
       collectQuestionPrimitives('Never ask the user; mark ambiguity with the sentinel instead.\n'),
       'prose about asking is not the primitive — reporting it sends the next reader to narrow ' +
-      'the guard instead of to read the hit (PF-064)',
+      'the guard instead of to read the hit',
     ).toEqual([]);
   });
 
@@ -1304,7 +1304,7 @@ describe('Tracker agent write path (AC-3.9, AC-3.15, §14.9 constraints 3 and 11
     expect(
       WRITE_FENCE,
       'cleanup placed AFTER the chain runs only when the chain returns; this agent is killed ' +
-      'mid-run as a documented outcome (PF-056), and $RAW is the PRE-scrub composition',
+      'mid-run as a documented outcome, and $RAW is the PRE-scrub composition',
     ).toMatch(/^trap '[^']*rm -- "\$RAW" "\$SCRUBBED"[^']*' EXIT INT TERM$/m);
     expect(
       WRITE_FENCE.split('\n').filter(l => /\bmktemp\b/.test(l)),
@@ -1828,7 +1828,7 @@ describe('~/.devflow/tracker.md schema template (§14.3, P3a-S16)', () => {
     expect(TRACKER_TEXT).toMatch(/absolute path/i);
     expect(
       collectShellReadsOfTrackerFile(TRACKER_TEXT),
-      'tracker.md is read with the Read tool, never shelled out (PF-035): a shell read puts its ' +
+      'tracker.md is read with the Read tool, never shelled out: a shell read puts its ' +
       'third-party content through word splitting and truncates silently at the size bound',
     ).toEqual([]);
   });

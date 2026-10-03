@@ -228,7 +228,7 @@ describe('resolution dedupe is keyed on the per-run RESOLUTION_TS (§3.1, AC-2)'
     expect(collectTsBinding(ref), 'step 5 must bind {TS} to the RESOLUTION_TS input').toBe('RESOLUTION_TS')
     expect(
       ref,
-      'the op mints no timestamp of its own — the caller passes the run key (ADR-028: no fallback mint)',
+      'the op mints no timestamp of its own — the caller passes the run key (no fallback mint)',
     ).not.toMatch(/current UTC timestamp|date -u/)
     expect(collectTemplateMarkers(ref)).toEqual([
       '     <!-- devflow:resolution-summary ts:{TS} -->',
@@ -492,7 +492,7 @@ describe('a probe failure is reported as STUB (visibility undeterminable) (§3.3
     for (const step of [soleLine(files.prReview, '3. '), soleLine(files.prResolution, '3. ')]) {
       expect(step).toContain('`PUBLIC` → `STUB (public repository)`')
       expect(step).toContain(`→ \`${UNDETERMINABLE}\``)
-      expect(step, 'the fail-closed rule stays inline in each op (PF-058)').toContain('treat as PUBLIC (mode STUB)')
+      expect(step, 'the fail-closed rule stays inline in each op').toContain('treat as PUBLIC (mode STUB)')
     }
   })
 

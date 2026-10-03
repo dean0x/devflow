@@ -424,7 +424,7 @@ describe('generated references: every reference is reachable from the agent (AC-
     expect(
       unreachable,
       'generated reference file(s) no load instruction can name — installed on every machine and ' +
-      'read by nothing (ADR-003):\n  ' + unreachable.join('\n  '),
+      'read by nothing:\n  ' + unreachable.join('\n  '),
     ).toEqual([]);
 
     const missing = [...reachable].filter(rel => !emitted.includes(rel));
@@ -518,7 +518,7 @@ describe('generated references: every reference is reachable from the agent (AC-
     expect(
       namedInStripped.has(target),
       'the collector must stop seeing the name once its line is gone — otherwise the reachability ' +
-      'direction is green for a document nothing can load (PF-018)',
+      'direction is green for a document nothing can load',
     ).toBe(false);
 
     // …and the same set difference the live check computes now reports it.
@@ -567,7 +567,7 @@ describe('generated references: every reference is reachable from the agent (AC-
         anchorsOnLineOne(body, op),
         `${prHostRel(op)} must OPEN with its own "## Operation: ${op}" anchor on line 1 — every ` +
         'union-mode extraction starts there, and an anchor further down silently truncates the ' +
-        'section to whatever precedes it (PF-063)',
+        'section to whatever precedes it',
       ).toBe(true);
     }
   });
@@ -598,7 +598,7 @@ describe('generated references: every reference is reachable from the agent (AC-
       collectPrHostNames(agent.content),
       'the pr/ paths the agent spells out and the PR_HOST_OPS roster must be the same set — a ' +
       'pointer with no file degrades every spawn of that op, and a file with no pointer is ' +
-      'installed on every machine and read by nothing (ADR-003)',
+      'installed on every machine and read by nothing',
     ).toEqual([...PR_HOST_OPS].map(prHostRel).sort());
   });
 

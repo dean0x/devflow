@@ -519,7 +519,7 @@ describe('cross-provider define-set parity, both directions (AC-3.8, §8.11)', (
     // silently admit any define whose name happens to be in MODULE_DEFINE_NAMES,
     // for any provider — the registry has to bind in both directions or it is a
     // hole with a comment beside it.
-    expect(MODULE_DEFINES.length, 'an empty registry makes the partition a no-op (PF-018)')
+    expect(MODULE_DEFINES.length, 'an empty registry makes the partition a no-op')
       .toBeGreaterThan(0);
     const problems: string[] = [];
     for (const entry of MODULE_DEFINES) {
@@ -863,7 +863,7 @@ describe('jira module: fetch-issues-batch is one query [DR-08]', () => {
       'own capability-first doctrine steers an author towards',
     ).toBeGreaterThan(0);
 
-    expect(PER_ITEM_FETCH_SHAPES.length, 'the shape table is empty (PF-018)').toBeGreaterThan(0);
+    expect(PER_ITEM_FETCH_SHAPES.length, 'the shape table is empty').toBeGreaterThan(0);
   });
 });
 
@@ -955,7 +955,7 @@ describe('jira module: marker dedup (AC-3.14, GAP-20)', () => {
     }
     expect(
       MARKER_NAMESPACES.length,
-      'the namespace table is empty, so the loop above ran zero times (PF-018)',
+      'the namespace table is empty, so the loop above ran zero times',
     ).toBeGreaterThanOrEqual(3);
   });
 
@@ -1117,7 +1117,7 @@ describe('jira module: tool calls only — no HTTP, no CLI, no credential read (
       ),
       'the scrub invocation must not be reported — it is the gate, not a transport',
     ).toEqual([]);
-    expect(FORBIDDEN_TRANSPORTS.length, 'the transport table is empty (PF-018)').toBeGreaterThan(0);
+    expect(FORBIDDEN_TRANSPORTS.length, 'the transport table is empty').toBeGreaterThan(0);
   });
 });
 
@@ -1181,7 +1181,7 @@ describe('jira module: query safety and the cross-cutting rules it invokes', () 
         content,
         `${jiraRel(op)}: a posting mechanic must NOT compose the contract's path. The contract is ` +
         `a per-SPAWN load named once, from the agent preamble; a per-operation path made it look ` +
-        `per-operation, and five of these ten files did not carry it at all (PF-058).`,
+        `per-operation, and five of these ten files did not carry it at all.`,
       ).not.toContain('references/tracker/_mcp.md');
     }
     expect(
@@ -1245,7 +1245,7 @@ describe('jira module: the clauses AC-3.3, AC-3.11 and §14.3 fix here', () => {
       const claims = TOOL_CALL_MECHANICS_CLAIMS.filter(c => c.criterion === criterion);
       expect(
         claims.length,
-        `no claim carries criterion ${criterion} — the arm ranges over nothing (PF-018)`,
+        `no claim carries criterion ${criterion} — the arm ranges over nothing`,
       ).toBeGreaterThan(0);
       const missing = collectMissingMechanicsClaims(JIRA_CORPUS, claims);
       expect(

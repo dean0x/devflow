@@ -252,7 +252,7 @@ describe('shared-literal registry — one authority per normative sentence [DR-1
   it('is non-empty, covers every cross-cutting document, and justifies every entry', () => {
     expect(
       SHARED_LITERAL_REGISTRY.length,
-      'an empty registry makes both arms below pass by checking nothing (PF-018)',
+      'an empty registry makes both arms below pass by checking nothing',
     ).toBeGreaterThan(0);
     expect(
       [...new Set(SHARED_LITERAL_REGISTRY.map(e => e.owner))].sort(),
@@ -477,7 +477,7 @@ describe('tool-call contract: one authority per normative sentence [DR-19]', () 
     ).toContain('tracker/_mcp.md');
     expect(
       MCP_SHARED_LITERAL_REGISTRY.length,
-      'an empty registry makes both arms below pass by checking nothing (PF-018)',
+      'an empty registry makes both arms below pass by checking nothing',
     ).toBeGreaterThan(0);
     expect(
       collectUnderJustified(MCP_SHARED_LITERAL_REGISTRY),
@@ -702,7 +702,7 @@ describe('the project-key alphabet has one authority, quoted identically by all 
     expect(
       collectKeyAlphabets('gate with `^[A-Za-z][A-Za-z0-9_]{0,9}$` here'),
       'the collector must recognise the retired lowercase shape — otherwise the arms above are ' +
-      'green because the collector sees nothing (PF-018)',
+      'green because the collector sees nothing',
     ).toEqual(['^[A-Za-z][A-Za-z0-9_]{0,9}$']);
     expect(
       collectKeyAlphabets(`one ${KEY_ALPHABET} and one ^[A-Za-z][A-Za-z0-9_]{0,9}$`).length,

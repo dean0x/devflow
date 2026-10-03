@@ -159,7 +159,7 @@ function sinkCorpusWithout(prefix: string): CorpusEntry[] {
   if (dropped.length === cachedSinkCorpus().length) {
     throw new Error(
       `sinkCorpusWithout: dropped nothing — no corpus entry sits under references/${prefix}, ` +
-      'so every probe built on this helper is vacuous (PF-018). ' +
+      'so every probe built on this helper is vacuous. ' +
       'Run `npm run build` so the generated references exist.',
     );
   }
@@ -836,7 +836,7 @@ function collectConventionsCommitPlacementViolations(
     if (!setupTask.includes('commit --only -m "docs(devflow): record project conventions" -- .devflow/conventions.md')) {
       violations.push(
         'setup-task: missing \'commit --only -m "docs(devflow): record project conventions" -- .devflow/conventions.md\' — ' +
-        'conventions commit must happen in setup-task step 4b, not inside learn-conventions (PF-030)',
+        'conventions commit must happen in setup-task step 4b, not inside learn-conventions',
       );
     }
     if (!setupTask.includes('CONVENTIONS_COMMIT: skipped (no branch)')) {
@@ -854,7 +854,7 @@ function collectConventionsCommitPlacementViolations(
     if (step4bIdx === -1) {
       violations.push(
         'setup-task: "4b." step is absent — conventions commit step must be present in setup-task, ' +
-        'immediately after the git checkout -b step (PF-030)',
+        'immediately after the git checkout -b step',
       );
     } else if (checkoutIdx === -1) {
       violations.push(
@@ -876,7 +876,7 @@ function collectConventionsCommitPlacementViolations(
   if (learnConventions !== null && learnConventions.includes('commit --only')) {
     violations.push(
       'learn-conventions: contains "commit --only" — the conventions commit must not be inside ' +
-      'learn-conventions; it belongs in setup-task step 4b so it lands on the feature branch (PF-030)',
+      'learn-conventions; it belongs in setup-task step 4b so it lands on the feature branch',
     );
   }
 
@@ -887,7 +887,7 @@ function collectConventionsCommitPlacementViolations(
     if (!fetchBatch.includes('NOT_FOUND ({refs})')) {
       violations.push(
         'fetch-issues-batch: missing "NOT_FOUND ({refs})" — null GraphQL aliases must be reported, ' +
-        'never silently dropped; the batch must never abort on a single missing ref (PF-058)',
+        'never silently dropped; the batch must never abort on a single missing ref',
       );
     }
     if (!fetchBatch.includes('Strip a leading `#`')) {
@@ -1295,7 +1295,7 @@ describe('git agent — static content guards', () => {
       sections.map(s => s.label),
       'the cross-cutting slices changed shape: a new always-loaded `## ` section was added, or ' +
       'one of the two shared trailers was renamed. Name it here — an unnamed section is text ' +
-      'every spawn loads that nothing scans (GAP-03, PF-018)',
+      'every spawn loads that nothing scans (GAP-03)',
     ).toEqual(['(header)', 'Principles', 'Boundaries']);
     expect(
       collectProviderDetectors(sections),
@@ -1412,7 +1412,7 @@ describe('git agent — static content guards', () => {
       expect(
         hits(benign),
         'a word that merely contains `gh ` is not a provider detector; reporting it sends the ' +
-        'next reader to narrow the guard instead of to read the hit (PF-064)',
+        'next reader to narrow the guard instead of to read the hit',
       ).toEqual([]);
     }
   });
@@ -1428,7 +1428,7 @@ describe('git agent — static content guards', () => {
       expect(
         homes.map(f => path.basename(f)),
         `the detector ${JSON.stringify(detector)} must be stated exactly once per provider — ` +
-        'a second copy is a second authority on that provider\'s rate-limit signal (PF-023)',
+        'a second copy is a second authority on that provider\'s rate-limit signal',
       ).toHaveLength(1);
     }
   });
@@ -1460,7 +1460,7 @@ describe('git agent — static content guards', () => {
       `${TOKEN} must be stated only in ${AUTHORITY} — the operation that owns the fan-out and ` +
       'therefore the rung. A restatement in another operation is a second authority on the ' +
       'same threshold, free to drift from it, and it is what AC-3 asks every provider to ' +
-      'replace with a pointer (PF-023):\n  ' +
+      'replace with a pointer:\n  ' +
       naming.map(f => path.relative(trackerRoot, f)).join('\n  '),
     ).toEqual([AUTHORITY]);
 
@@ -1720,7 +1720,7 @@ describe('git agent — static content guards', () => {
     const opNames = collectOpNames(content);
     expect(
       opNames.length,
-      `corpus is only ${opNames.length} ops — expected > 2 for a non-vacuous scope check (PF-018)`,
+      `corpus is only ${opNames.length} ops — expected > 2 for a non-vacuous scope check`,
     ).toBeGreaterThan(2);
     expect(
       collectOpsNamingReference(content, 'publication-gate.md').sort(),
@@ -1914,7 +1914,7 @@ describe('git agent — static content guards', () => {
     expect(
       [...postingOps].sort(),
       `without references/${PR_HOST_DESTINATION_ROOT}/ the posting set must fall from 9 to exactly these 4 ` +
-      'ops — a set that does not move proves the union corpus was never load-bearing (PF-018)',
+      'ops — a set that does not move proves the union corpus was never load-bearing',
     ).toEqual([...EXPECTED_WITHOUT_PR_HOST].sort());
   });
 
@@ -2266,11 +2266,11 @@ describe('git agent — static content guards', () => {
     expect(
       [...inline].sort(),
       'the inline legend must define exactly D4 and D11 — their controls are always-loaded, ' +
-      'so making either definition a file the spawn might not have is PF-027\'s failure mode',
+      'so making either definition a file the spawn might not have lets that control go missing',
     ).toEqual(['D11', 'D4']);
     expect(
       [...inline].filter(label => rehomed.has(label)),
-      'a label is defined in both places — two authorities for one definition (PF-023)',
+      'a label is defined in both places — two authorities for one definition',
     ).toEqual([]);
     expect(rehomed.size, 'decision-markers.md defines nothing — the cut dropped the rows')
       .toBeGreaterThan(0);
@@ -2388,7 +2388,7 @@ describe('git agent — static content guards', () => {
     ).toContain('fetch-issues-batch');
     expect(
       remoteOps.length,
-      'no REQUIRED_OPS detected as remote-I/O — guard is vacuous (PF-018)',
+      'no REQUIRED_OPS detected as remote-I/O — guard is vacuous',
     ).toBeGreaterThan(0);
     // A FLOOR, not a `> 0` shrug. `> 0` is met by one op, so it could not tell a
     // corpus narrowing from a real removal — which is exactly what a 'sole'
@@ -2579,7 +2579,7 @@ describe('git agent — static content guards', () => {
     ).length;
     expect(
       expectedMatchCount,
-      'expected matchCount must be > 0 — otherwise the union guard would be vacuous (PF-018)',
+      'expected matchCount must be > 0 — otherwise the union guard would be vacuous',
     ).toBeGreaterThan(0);
     const { content: sec, matchCount } = extractOpSectionFromCorpus(
       sinkCorpus, 'post-review-summary', { mode: 'union' },

@@ -307,7 +307,7 @@ describe('linear module: marker namespaces (AC-3.14, GAP-20)', () => {
     }
     expect(
       MARKER_NAMESPACES.length,
-      'the namespace table is empty, so the loop above ran zero times (PF-018)',
+      'the namespace table is empty, so the loop above ran zero times',
     ).toBeGreaterThanOrEqual(3);
   });
 
@@ -500,7 +500,7 @@ describe('linear module: the anchored ref grammar and its UUID alternative (§14
     for (const ref of ACCEPTED_REFS) {
       expect(acceptsRef(ref), `${JSON.stringify(ref)} must be accepted`).toBe(true);
     }
-    expect(ACCEPTED_REFS.length, 'the accepted corpus is empty (PF-018)').toBeGreaterThan(0);
+    expect(ACCEPTED_REFS.length, 'the accepted corpus is empty').toBeGreaterThan(0);
   });
 
   it('known-bad table: every hostile ref is REJECTED by the grammar as written', () => {
@@ -513,7 +513,7 @@ describe('linear module: the anchored ref grammar and its UUID alternative (§14
     expect(
       HOSTILE_REFS.length,
       'the hostile corpus is too thin to discriminate — the filter above would be empty for a ' +
-      'grammar that accepted everything (PF-018)',
+      'grammar that accepted everything',
     ).toBeGreaterThanOrEqual(11);
   });
 
@@ -696,7 +696,7 @@ describe('linear module: Known Unknowns and the filed probe issue (P3c-S3, GAP-4
       expect(
         readGenerated(linearRel(op)),
         `${linearRel(op)} carries the Known Unknowns heading — a column-0 \`## \` after line 1 ` +
-        `truncates this op's section for every union-mode guard (PF-063)`,
+        `truncates this op's section for every union-mode guard`,
       ).not.toContain('## Known Unknowns');
     }
   });
@@ -805,7 +805,7 @@ describe('linear module: tool calls only — no HTTP, no CLI, no credential read
       ),
       'the scrub invocation must not be reported — it is the gate, not a transport',
     ).toEqual([]);
-    expect(FORBIDDEN_TRANSPORTS.length, 'the transport table is empty (PF-018)').toBeGreaterThan(0);
+    expect(FORBIDDEN_TRANSPORTS.length, 'the transport table is empty').toBeGreaterThan(0);
   });
 });
 
@@ -866,7 +866,7 @@ describe('linear module: query safety and the cross-cutting rules it invokes', (
         content,
         `${linearRel(op)}: a posting mechanic must NOT compose the contract's path. The contract is ` +
         `a per-SPAWN load named once, from the agent preamble; a per-operation path made it look ` +
-        `per-operation, and five of these ten files did not carry it at all (PF-058).`,
+        `per-operation, and five of these ten files did not carry it at all.`,
       ).not.toContain('references/tracker/_mcp.md');
     }
     expect(
@@ -930,7 +930,7 @@ describe('linear module: the clauses AC-3.3, AC-3.11 and §14.3 fix here', () =>
       const claims = TOOL_CALL_MECHANICS_CLAIMS.filter(c => c.criterion === criterion);
       expect(
         claims.length,
-        `no claim carries criterion ${criterion} — the arm ranges over nothing (PF-018)`,
+        `no claim carries criterion ${criterion} — the arm ranges over nothing`,
       ).toBeGreaterThan(0);
       const missing = collectMissingMechanicsClaims(LINEAR_CORPUS, claims);
       expect(

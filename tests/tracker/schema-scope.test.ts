@@ -131,7 +131,7 @@ describe('schema table: every section has a scope and a documented absent⇒defa
     expect(
       rows.length,
       'the agent\'s schema table parsed to zero rows — every assertion below would be vacuous. ' +
-      'The row shape is `| `## Section` | scope | absent ⇒ | shape gate |` (PF-018).',
+      'The row shape is `| `## Section` | scope | absent ⇒ | shape gate |`.',
     ).toBeGreaterThanOrEqual(TRACKER_SCHEMA_SECTIONS.length);
 
     // `## Project` carries TWO values (site and key), so the table has one row per
@@ -379,7 +379,7 @@ describe('AC-3.16: the tracker configuration file has exactly ONE reader', () =>
       offenders,
       `an operation section reads the tracker configuration file. It is resolved ONCE per spawn in ` +
       `the preamble and passed down; a second read is a second authority on the same values, and ` +
-      `they can disagree within one run (§14.3, PF-023):\n  ${offenders.join('\n  ')}`,
+      `they can disagree within one run (§14.3):\n  ${offenders.join('\n  ')}`,
     ).toEqual([]);
     for (const op of TRACKER_GITHUB_OPS) {
       expect(
@@ -1132,7 +1132,7 @@ describe('[DR-04] DEGRADED literal registry: forward direction', () => {
     ).toBeGreaterThan(0);
     expect(
       LIVE_REASONS.length,
-      'the live half is empty — the forward arm below would assert nothing (PF-018)',
+      'the live half is empty — the forward arm below would assert nothing',
     ).toBeGreaterThan(0);
   });
 
@@ -1190,7 +1190,7 @@ describe('[DR-04] DEGRADED literal registry: forward direction', () => {
     expect(
       alreadyEmitted([seededStale]),
       'the mirror predicate must report a reason that is genuinely emitted — otherwise an empty ' +
-      'deferred half and a broken predicate are the same green (PF-064)',
+      'deferred half and a broken predicate are the same green',
     ).toEqual([seededStale]);
     expect(
       alreadyEmitted(['a reason no site emits — seeded probe']),
@@ -1256,7 +1256,7 @@ describe('[DR-04] DEGRADED literal registry: reverse direction', () => {
     expect(
       GIT_AGENT_LEGACY_REASONS.length,
       'the legacy list is empty — then the exemption branch below is dead and the probe proves ' +
-      'nothing (PF-018)',
+      'nothing',
     ).toBeGreaterThan(0);
 
     // Scope probe: the same literal, in a generated reference, IS reported.
@@ -1279,7 +1279,7 @@ describe('[DR-04] DEGRADED literal registry: reverse direction', () => {
     expect(
       prOnly.length,
       'no PR-host reference is in the corpus — run `npm run build`; without it this whole arm is ' +
-      'a comparison against nothing (PF-018)',
+      'a comparison against nothing',
     ).toBeGreaterThan(0);
 
     const emitted = new Set(prOnly.flatMap(e => collectDegradedReasons(e.content)));
@@ -1293,7 +1293,7 @@ describe('[DR-04] DEGRADED literal registry: reverse direction', () => {
     expect(
       PR_HOST_LEGACY_REASONS.length,
       'the PR-host legacy list is empty — then its exemption branch is dead and this probe proves ' +
-      'nothing (PF-018)',
+      'nothing',
     ).toBeGreaterThan(0);
 
     // Scope probe, both directions of the scoping. A provider reference reaching
@@ -1329,7 +1329,7 @@ describe('[DR-04] DEGRADED literal registry: reverse direction', () => {
     // The same two properties as the legacy arm above, for the live list (#360).
     const prOnly = gitAgentSinkCorpus().filter(e => isPrHostEntryPath(e.path));
     expect(prOnly.length, 'no PR-host reference is in the corpus — run `npm run build`').toBeGreaterThan(0);
-    expect(PR_HOST_REASONS.length, 'the live PR-host list is empty (PF-018)').toBeGreaterThan(0);
+    expect(PR_HOST_REASONS.length, 'the live PR-host list is empty').toBeGreaterThan(0);
 
     const emitted = new Set(prOnly.flatMap(e => collectDegradedReasons(e.content)));
     expect(
@@ -1386,7 +1386,7 @@ describe('[DR-04] DEGRADED literal registry: reverse direction', () => {
       }
     }
     expect(survivors, `retired reason(s) still present:\n  ${survivors.join('\n  ')}`).toEqual([]);
-    expect(RETIRED_REASONS.length, 'the retired list shrank (PF-018)').toBeGreaterThanOrEqual(9);
+    expect(RETIRED_REASONS.length, 'the retired list shrank').toBeGreaterThanOrEqual(9);
   });
 
   it('known-bad probe: the reason collector reads real and nested parentheses', () => {
@@ -1568,7 +1568,7 @@ describe('the reader block states the non-github rendering rule (AC-3.11, §14.1
         `removing "${clause.label}" must be reported by the same collector`,
       ).toContain(`wounded: missing ${clause.label}`);
     }
-    expect(RENDERING_CLAUSES.length, 'the clause table is empty (PF-018)').toBeGreaterThan(0);
+    expect(RENDERING_CLAUSES.length, 'the clause table is empty').toBeGreaterThan(0);
   });
 });
 
@@ -1669,7 +1669,7 @@ describe('the read site carries the `## Reference Rendering` gate it names (secu
       .flatMap(subdir => [`${subdir}/create-release.md`, `${subdir}/ensure-pr-ready.md`])
       .map(rel => rel.split('/').join(path.sep))
       .sort();
-    expect(expected.length, 'no tool-call provider is registered (PF-018)').toBeGreaterThan(0);
+    expect(expected.length, 'no tool-call provider is registered').toBeGreaterThan(0);
     expect(
       sites,
       'the set of references that record a `### Substitutions` discard changed. An operation ' +

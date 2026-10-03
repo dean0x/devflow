@@ -153,7 +153,7 @@ function registeredManifestSizeFloor(): number {
   expect(
     entry,
     `"${MANIFEST_SIZE_FLOOR_ID}" is not registered in tests/fixtures/numeric-floors.json — the ` +
-    'corpus-size assertion has no independent floor to read and would assert nothing (PF-018)',
+    'corpus-size assertion has no independent floor to read and would assert nothing',
   ).toBeDefined();
   expect(
     entry!.floor,
@@ -206,7 +206,7 @@ describe('semantic probe: a fenced `## ` no longer hides a reference tail', () =
     expect(
       content,
       'manage-debt: the archive chain below the fenced `## Items` line is outside the extracted ' +
-      'section — every D11/D4 guard reading this op is examining an empty tail (PF-063)',
+      'section — every D11/D4 guard reading this op is examining an empty tail',
     ).toContain('gh issue close "$old_issue"');
     expect(
       content,
@@ -225,11 +225,11 @@ describe('semantic probe: a fenced `## ` no longer hides a reference tail', () =
     expect(
       content,
       'ensure-traceable-issue: the `gh issue create` recipe below the fenced heredoc headings is ' +
-      'outside the extracted section (PF-063)',
+      'outside the extracted section',
     ).toContain('--assignee "username"');
     expect(
       content,
-      'ensure-traceable-issue: the D3 template block is outside the extracted section (PF-063)',
+      'ensure-traceable-issue: the D3 template block is outside the extracted section',
     ).toContain('### Traceability Issue Template (D3)');
   });
 });
@@ -248,7 +248,7 @@ describe('generated references carry no unfenced `## ` below their own heading',
       `the generated-reference corpus holds ${refs.length} file(s), floor ${floor} ` +
       `(${MANIFEST_SIZE_FLOOR_ID} in tests/fixtures/numeric-floors.json). An emptied or narrowed ` +
       'manifest empties this scan, and the structure arm below then reports zero violations over ' +
-      'nothing (PF-018).',
+      'nothing.',
     ).toBeGreaterThanOrEqual(floor);
     expect(
       refs.map(r => r.relPath),
@@ -282,7 +282,7 @@ describe('generated references carry no unfenced `## ` below their own heading',
       collectStrayUnfencedH2(refs),
       'A column-0 `## ` line outside a code fence terminates the operation section for every guard ' +
       'reading this file through extractOpSectionFromCorpus — everything below it becomes silently ' +
-      'invisible while the bytes stay on disk and containment stays green (PF-063). Demote the ' +
+      'invisible while the bytes stay on disk and containment stays green. Demote the ' +
       'heading to `###`; if it is issue/PR body text that must render as a level-2 heading on the ' +
       'tracker, put it inside a code fence where it belongs.',
     ).toEqual([]);
@@ -315,7 +315,7 @@ describe('reference-structure guard: non-vacuity', () => {
       fenced,
       `only ${fenced} fenced \`## \` lines in the generated tree, floor ${MIN_FENCED_H2}. The fence ` +
       'arm of the boundary rule is then under-exercised by the live corpus and its correctness ' +
-      'rests on the synthetic probes alone (PF-018)',
+      'rests on the synthetic probes alone',
     ).toBeGreaterThanOrEqual(MIN_FENCED_H2);
     expect(carriers, 'the known fenced-heading carriers must both be in the scan').toEqual(
       expect.arrayContaining([
@@ -359,7 +359,7 @@ describe('reference-structure guard: non-vacuity', () => {
       expect(
         () => readGeneratedReferences(empty),
         'an absent generated tree must throw — a structure scan over nothing reports zero ' +
-        'violations and reads as a pass (PF-018)',
+        'violations and reads as a pass',
       ).toThrow(/npm run build/);
       expect(() => readGeneratedReferences(empty)).toThrow(/tracker\/github\//);
     } finally {

@@ -1147,7 +1147,7 @@ describe('byte budget: formula file-set ↔ nameable file-set (both directions)'
     expect(
       collectMissingFrom('(always-loaded)', modelled, scanned),
       'the model declares a cross-cutting reference the agent no longer names — the file is ' +
-      'generated and installed and nothing can load it (ADR-003)',
+      'generated and installed and nothing can load it',
     ).toEqual([]);
     expect(scanned.size, 'the cross-cutting scan found nothing — direction 3 is vacuous')
       .toBeGreaterThan(0);
@@ -1947,7 +1947,7 @@ describe('preamble: provider selection from the settings line (one convergence p
     expect(
       GIT_AGENT.content,
       'a second normalisation rule is a second authority on what a provider token may be ' +
-      '(PF-023 requires one convergence point — the settings line\'s own shape)',
+      '(provider selection has one convergence point — the settings line\'s own shape)',
     ).not.toContain('**Normalise `TRACKER_PROVIDER`:**');
   });
 
@@ -1998,7 +1998,7 @@ describe('preamble: provider selection from the settings line (one convergence p
       '',
       'exit=0',
     ];
-    expect(HOSTILE.length, 'hostile corpus must be non-empty (PF-018)').toBeGreaterThan(0);
+    expect(HOSTILE.length, 'hostile corpus must be non-empty').toBeGreaterThan(0);
     const values = new Set(map.values());
     for (const output of HOSTILE) {
       const resolved = resolveProviderAsSpecified(output, map);
