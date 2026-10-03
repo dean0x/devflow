@@ -146,11 +146,11 @@ describe('mergeDevflowSettingsTemplate — FIX 1 (issue #313)', () => {
   /**
    * Registry-driven single-ownership guard: no flag with target.type === 'setting'
    * may have its target.key present as a top-level key in the settings merge template.
-   * ADR-024: one writer per settings.json key class. D27: attribution (and all
+   * One writer per settings.json key class. D27: attribution (and all
    * other flag-owned keys) are written/removed exclusively by applyFlags/stripFlags.
    * A template key managed by a flag creates a double-write on every fresh install.
    */
-  it('no flag-owned settings key appears as a top-level template key (ADR-024, D27)', async () => {
+  it('no flag-owned settings key appears as a top-level template key (D27)', async () => {
     const templatePath = path.join(REPO_ROOT, 'src/targets/claude-code/templates/settings.json');
     const template = JSON.parse(await fsp.readFile(templatePath, 'utf-8')) as Record<string, unknown>;
 
@@ -256,7 +256,7 @@ describe('mergeDevflowSettingsTemplate — FIX 1 (issue #313)', () => {
     expect(JSON.stringify(existing)).toBe(snapshotAfterFirst);
   });
 
-  // ── Shape guards (PF-023): `existing` is a hand-editable file ──────────────
+  // ── Shape guards: `existing` is a hand-editable file ───────────────────────
   //
   // The merge mutates a user-authored object, so every branch validates shape at
   // the sink. A settings.json that is valid JSON but structurally odd must neither

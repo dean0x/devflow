@@ -50,7 +50,7 @@ describe('agent references', () => {
     // owner of that order and throws with a build hint when neither location
     // has the agent — so the only thing left to assert is that the path it
     // chose is on disk, and the message names that path, not a fixed directory
-    // the agent may not live in (ADR-003: state the end state).
+    // the agent may not live in.
     for (const agent of getAllAgentNames()) {
       const { path: agentFile, origin } = resolveAgentSource(agent);
       expect(
@@ -102,7 +102,7 @@ describe('no orphaned declarations', () => {
 });
 
 // ---------------------------------------------------------------------------
-// agent frontmatter compliance contract (avoids PF-002)
+// agent frontmatter compliance contract
 //
 // Guards that no shared agent lists devflow:compliance in its frontmatter
 // skills: block. The compliance skill is intentionally body-instructed only
@@ -115,7 +115,7 @@ describe('agent frontmatter compliance contract', () => {
   /**
    * Named collector: the frontmatter `skills:` list of each agent, keyed by agent name.
    * Called by the guard AND by both probes below, so a probe can never pass by
-   * re-implementing the parser it is meant to prove (PF-018).
+   * re-implementing the parser it is meant to prove.
    */
   function collectFrontmatterSkills(
     sources: ReadonlyMap<string, { content: string }>,

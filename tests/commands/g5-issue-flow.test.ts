@@ -15,7 +15,7 @@
  * resolution: SINGLE and SEQUENTIAL run the gate (their PR exists from Phase 2);
  * PARALLEL skips it (its unified PR is created in Phase 10).
  *
- * Every guard has the three parts PF-064 asks of an absence-based check: a NAMED
+ * Every guard has the three parts an absence-based check needs: a NAMED
  * collector, an assertion that the text it read is the text it claims to read,
  * and known-bad probes that drive the SAME collector over the `d09da34`
  * spellings each fix replaces — quoted verbatim — and over per-site seeds of the

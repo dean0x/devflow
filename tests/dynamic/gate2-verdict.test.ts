@@ -16,7 +16,7 @@
  * #365 the rule is declared as well as executed: the engine schema lists
  * UNVERIFIED and `_wave.mds` says "On engine PASS or UNVERIFIED: merge".
  *
- * Every guard has the three parts PF-064 asks of an absence-based check: a NAMED
+ * Every guard has the three parts an absence-based check needs: a NAMED
  * collector, an assertion that the text it read is the text it claims to read,
  * and known-bad probes that drive the SAME collector over the `d09da34`
  * spellings — the verdict block quoted verbatim, and one seed per guarded site

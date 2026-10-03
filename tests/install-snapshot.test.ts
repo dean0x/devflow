@@ -128,7 +128,7 @@ describe('snapshot normaliser (TP-3)', () => {
       .toBe('<TIMESTAMP> <TIMESTAMP> <TIMESTAMP>')
   })
 
-  it('renders a release-bumped manifest identically once package.json carries the same bump (PF-079)', () => {
+  it('renders a release-bumped manifest identically once package.json carries the same bump (the release job tests after bumping)', () => {
     const manifest = (version: string): string =>
       JSON.stringify({ version, installedAt: '2026-09-27T21:11:01.985Z', features: { hud: true } })
     const today = renderManifest(manifest(VERSION), buildNormaliser({}, VERSION))
@@ -275,7 +275,7 @@ describe('all-off config passes every --no-* switch', () => {
   const accepted = initCommand.options.flatMap(o => (o.long?.startsWith('--no-') ? [o.long] : []))
   const allOff = findConfig(GENERATOR_CONFIG).initArgs
 
-  it('init accepts at least one --no-* switch (PF-018: the comparison is not vacuous)', () => {
+  it('init accepts at least one --no-* switch (the comparison is not vacuous)', () => {
     expect(accepted.length).toBeGreaterThan(0)
   })
 

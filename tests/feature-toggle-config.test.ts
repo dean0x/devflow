@@ -3,7 +3,7 @@
  * compiled CLI (D-FEATURES-NARROW-ONLY): each toggle writes the one
  * machine switch, `features.<feature>` in ~/.devflow/manifest.json, and
  * never the per-repo `.devflow/config.json` — whose top-level
- * memory/learning/knowledge keys are retired. The config file round-trips byte-for-byte (PF-071: seed,
+ * memory/learning/knowledge keys are retired. The config file round-trips byte-for-byte (seed,
  * run the toggle, re-read the file), and the manifest changes only in the one
  * key and `updatedAt`.
  */
@@ -69,7 +69,7 @@ function readManifest(): Record<string, unknown> & { features: Record<string, un
 }
 
 function runToggle(feature: string, flag: string): { status: number | null; out: string } {
-  // PF-060: `memory --enable` writes ~/.claude/settings.json, so the sandbox is
+  // `memory --enable` writes ~/.claude/settings.json, so the sandbox is
   // asserted at the call site rather than trusted — a spawn against the real
   // HOME never starts. Every path the CLI resolves from the environment derives
   // from HOME (the setup file has already unset CLAUDE_CONFIG_DIR).

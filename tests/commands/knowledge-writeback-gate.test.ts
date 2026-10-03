@@ -14,8 +14,9 @@
  * second, unvalidated parser. The fail-closed line says `KNOWLEDGE=off`, so an
  * unresolvable line skips write-back.
  *
- * PF-064 shape: a NAMED collector, a non-vacuity assertion over what it read,
- * and known-bad probes driving the same collector over the superseded wordings.
+ * The shape an absence-based check needs: a NAMED collector, a non-vacuity
+ * assertion over what it read, and known-bad probes driving the same collector
+ * over the superseded wordings.
  */
 import { describe, it, expect } from 'vitest';
 import { createRequire } from 'module';
@@ -79,7 +80,7 @@ const ALL_MISSING = [
 
 describe('knowledge write-back gate takes KNOWLEDGE from the settings line', () => {
   it('reads a real corpus: the write-back step is compiled into the commands that import it', () => {
-    // Non-vacuity (PF-018): an empty or truncated set would pass every check below.
+    // Non-vacuity: an empty or truncated set would pass every check below.
     expect(writebackCommands().sort()).toEqual(
       ['debug.md', 'explore.md', 'implement.md', 'resolve.md', 'self-review.md'],
     );

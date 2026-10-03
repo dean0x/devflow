@@ -132,7 +132,7 @@ describe('composeScripts', () => {
     // installer code changes required. This test pins the install path so a future rename
     // or move of the script fails RED immediately.
     //
-    // PF-018: assert file exists AND is non-empty (guards against an empty sentinel being
+    // Assert file exists AND is non-empty (guards against an empty sentinel being
     // accidentally installed in place of the real script).
     const target = path.join(tmpDir, 'scripts');
     await composeScripts(target);
@@ -170,7 +170,7 @@ describe('composeScripts', () => {
     expect(pkg.type, 'the pin is only meaningful under the ESM package marker').toBe('module');
 
     // A non-git directory: the scripted git fake answers "not a repository", so the
-    // run makes no gh call and needs no network. HOME is tmp (PF-060).
+    // run makes no gh call and needs no network. HOME is tmp.
     const home = path.join(tmpDir, 'home');
     await fs.mkdir(path.join(home, '.devflow'), { recursive: true });
     const shim = buildScriptedShim(createFakeBin(tmpDir), tmpDir, [
@@ -230,7 +230,7 @@ describe('composeScripts', () => {
     const pkg = JSON.parse(await fs.readFile(path.join(target, 'package.json'), 'utf-8')) as { type?: string };
     expect(pkg.type, 'the pin is only meaningful under the ESM package marker').toBe('module');
 
-    // `render --plan` makes no subprocess call, so no fake is needed; HOME is tmp (PF-060).
+    // `render --plan` makes no subprocess call, so no fake is needed; HOME is tmp.
     const home = path.join(tmpDir, 'home');
     await fs.mkdir(home, { recursive: true });
     const plan = path.join(home, 'plan.md');
@@ -321,7 +321,7 @@ describe('installViaFileCopy — command-missing hard error', () => {
 // WS4: on full install only (!isPartialInstall), installViaFileCopy scans
 // ~/.claude/skills/ and removes any devflow:* dir whose bare name is not in
 // getAllSkillNames(). This prevents stale prefixed dirs from accumulating on
-// upgrade. Bare (pre-namespace) dirs are untouched (avoids PF-012).
+// upgrade. Bare (pre-namespace) dirs are untouched.
 
 describe('installViaFileCopy — prefix-diff sweep', () => {
   // Minimal no-op plugin: no commands, no agents, no skills, no rules.
@@ -398,7 +398,7 @@ describe('installViaFileCopy — prefix-diff sweep', () => {
     ).rejects.toThrow();
   });
 
-  it('leaves a bare (non-prefixed) dir untouched on full install (avoids PF-012)', async () => {
+  it('leaves a bare (non-prefixed) dir untouched on full install', async () => {
     const claudeDir = path.join(tmpDir, 'claude');
     const devflowDir = path.join(tmpDir, 'devflow');
     const skillsDir = path.join(claudeDir, 'skills');
@@ -427,7 +427,7 @@ describe('installViaFileCopy — prefix-diff sweep', () => {
   });
 
   // ---------------------------------------------------------------------------
-  // PF-012: install must not delete a bare skill dir whose name collides with
+  // Install must not delete a bare skill dir whose name collides with
   // a live-registry skill name.  ~/.claude/skills/ is shared with other tools;
   // a bare dir like `security/` may belong to a third-party plugin.
   //
@@ -495,9 +495,9 @@ describe('installViaFileCopy — prefix-diff sweep', () => {
 // per-item degradation. Each of the three asset types must throw a plain Error
 // (matching the command pattern) rather than silently skipping.
 //
-// Shadow validation paths remain tolerant (ADR-010): invalid shadows
+// Shadow validation paths remain tolerant: invalid shadows
 // still warn-and-install-source rather than throwing.
-// Per-item copy failures (EACCES, ENOSPC, etc.) remain isolated (PF-009).
+// Per-item copy failures (EACCES, ENOSPC, etc.) remain isolated.
 
 describe('installViaFileCopy — hard-error on missing declared source (WS6a)', () => {
   const spinner = { start: () => {}, stop: () => {}, message: () => {} };
@@ -858,8 +858,8 @@ describe('installViaFileCopy — dist-preferred agent resolution', () => {
   const AGENT = 'git';
 
   /**
-   * Write an agent fixture derived from the real {AGENT} agent's frontmatter
-   * (PF-043), resolved dist-first with a src fallback, with a marker line
+   * Write an agent fixture derived from the real {AGENT} agent's frontmatter,
+   * resolved dist-first with a src fallback, with a marker line
    * identifying which tree it came from.
    */
   async function writeAgentFixture(dir: string, marker: string): Promise<string> {

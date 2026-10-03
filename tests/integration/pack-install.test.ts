@@ -5,7 +5,7 @@
  * into a fresh directory brings up the CLI, and all runtime-critical assets are
  * present in the install tree.
  *
- * Per PF-008: assert on explicit exit codes and file existence, never on
+ * Assert on explicit exit codes and file existence, never on
  * pipeline tails or partial stdout fragments. Every step captures its own
  * exit code; a non-zero code is a hard failure with a descriptive message.
  *
@@ -42,7 +42,7 @@ afterAll(async () => {
 /**
  * Run a shell command synchronously.
  * Returns { stdout, stderr, exitCode, signal }.
- * Never throws — callers check exitCode explicitly (PF-008).
+ * Never throws — callers check exitCode explicitly.
  *
  * `signal` is populated when execSync kills the process due to a timeout
  * (e.g. 'SIGTERM'). When present, exitCode is 1 (fabricated by ?? 1 because

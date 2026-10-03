@@ -100,8 +100,8 @@ function extractRelativeSkillRefs(content: string): string[] {
  * The references/ walk is RECURSIVE (AC-2.12). The generated tracker mechanics
  * are addressed skill-relatively as `references/tracker/{provider}/{op}.md`, so a
  * flat readdirSync would return zero entries at that depth and every guard built
- * on this collector would be vacuous from birth — passing while scanning nothing
- * (PF-018). Recursion lands in the same commit that creates the nested layout,
+ * on this collector would be vacuous from birth — passing while scanning nothing.
+ * Recursion lands in the same commit that creates the nested layout,
  * not after it.
  *
  * displayPath is always the POSIX path relative to skillBasePath, so a nested
@@ -991,17 +991,16 @@ describe('Cross-component runtime alignment', () => {
 
 // ---------------------------------------------------------------------------
 // Structural invariant: agents never Skill-invoke their own frontmatter skills
-// Permanent regression guard for PF-002 (skill re-entrancy guard).
+// Permanent regression guard against skill re-entrancy.
 // If an agent has `devflow:X` in its frontmatter skills:, it must NOT also
 // contain `Skill(skill="devflow:X")` in its body — frontmatter skills are
 // pre-activated by the runtime and a re-invocation would cause a guard-string
 // return ('already running') or a no-op skip, both of which are bugs.
 // ---------------------------------------------------------------------------
 
-describe('Structural invariant: agents never Skill-invoke their own frontmatter skills (PF-002 guard)', () => {
+describe('Structural invariant: agents never Skill-invoke their own frontmatter skills (re-entrancy guard)', () => {
   it('every agent resolved by resolveAllAgents has zero Skill(skill="devflow:NAME") calls where NAME is in its own frontmatter skills', () => {
     // Enumerated via resolveAllAgents() for completeness — avoids GAP-07 anti-pattern.
-    // avoids PF-002
     const agents = resolveAllAgents();
     expect([...agents.keys()]).toEqual(expect.arrayContaining(getAllAgentNames()));
 
@@ -1039,7 +1038,7 @@ describe('Structural invariant: agents never Skill-invoke their own frontmatter 
 // collectSkillRefFiles. The generated tracker mechanics are addressed
 // skill-relatively as `references/tracker/{provider}/{op}.md`, so with a flat
 // reader those guards would scan zero files at that depth and pass while
-// checking nothing (PF-018).
+// checking nothing.
 //
 // The live src/assets/skills/ tree has no nested references/ file today — the
 // nested layout is produced by the build and installed by the overlay — so the

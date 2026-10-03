@@ -16,7 +16,7 @@
  *                   "yes" (the in-process arm below).
  *
  * The CLI arms spawn the built CLI (two spawns, SUBPROCESS_TIMEOUT_MS each) under
- * `sandboxEnv`, which asserts the HOME is a temp dir before anything runs (PF-060).
+ * `sandboxEnv`, which asserts the HOME is a temp dir before anything runs.
  */
 
 import { describe, it, expect, beforeAll, beforeEach, afterEach, vi } from 'vitest';

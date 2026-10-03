@@ -37,7 +37,7 @@
  * a ticket the wrong reference.
  *
  * Every guard has a named collector, a non-empty-corpus assertion and a known-bad
- * probe driven through the same collector (PF-064).
+ * probe driven through the same collector.
  */
 
 import { describe, it, expect, afterAll } from 'vitest'
@@ -770,7 +770,7 @@ describe('AC-11: with issues required, no Issue ID stops the ticket before imple
 })
 
 // ---------------------------------------------------------------------------
-// AC-12 — every declared engine verdict has exactly one wave arm (PF-075)
+// AC-12 — every declared engine verdict has exactly one wave arm
 // ---------------------------------------------------------------------------
 
 /** The engine schema's verdict domain, as the build expands `engine_output_schema()`; null unless one line. */
@@ -796,7 +796,7 @@ function waveArms(partial: string): { merge: string[]; quarantine: string[]; non
 }
 
 /**
- * Named collector (PF-075): a declared verdict with no arm or two, an arm naming a
+ * Named collector: a declared verdict with no arm or two, an arm naming a
  * verdict the schema does not declare, and any disagreement between the prose
  * arms and the executed merge condition — including the verdict-less result.
  */

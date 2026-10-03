@@ -6,8 +6,8 @@
  * so are the siblings of a devflow hook in a shared matcher group.
  *
  * Drives the REAL compiled CLI with HOME pinned to a temp dir through
- * `sandboxEnv` (PF-060), so the assertion is about init's actual settings pass,
- * not a test's reconstruction of it (PF-015). Requires `npm run build`.
+ * `sandboxEnv`, so the assertion is about init's actual settings pass,
+ * not a test's reconstruction of it. Requires `npm run build`.
  */
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';

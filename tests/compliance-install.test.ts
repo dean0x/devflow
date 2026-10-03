@@ -200,7 +200,7 @@ describe('install every reference (D-COMPLIANCE-INSTALL-ALWAYS)', () => {
 });
 
 // ---------------------------------------------------------------------------
-// Step 2: Recompose exactness (--set semantics, PF-011)
+// Step 2: Recompose exactness (--set semantics)
 // ---------------------------------------------------------------------------
 
 describe('recompose exactness (--set semantics)', () => {
@@ -362,10 +362,10 @@ describe('disable path', () => {
 });
 
 // ---------------------------------------------------------------------------
-// Step 5: PF-015 no-short-circuit (avoids PF-015)
+// Step 5: no short-circuit between the two artifacts
 // ---------------------------------------------------------------------------
 
-describe('PF-015: both artifacts converge unconditionally (avoids PF-015)', () => {
+describe('both artifacts converge unconditionally', () => {
   it('disable: rule removed and skill installed when only a rule was present', async () => {
     await fs.mkdir(path.join(claudeDir, 'rules', 'devflow'), { recursive: true });
     await fs.writeFile(await ruleTargetPath(), 'rule content', 'utf-8');
@@ -496,10 +496,10 @@ describe('removedPreexisting', () => {
 });
 
 // ---------------------------------------------------------------------------
-// Step 7: PF-009 warn-not-throw
+// Step 7: warn-not-throw
 // ---------------------------------------------------------------------------
 
-describe('PF-009: failures warn via injected warn, never throw', () => {
+describe('failures warn via injected warn, never throw', () => {
   it('converge never throws even if the skill source is somehow unavailable (warn instead)', async () => {
     // This test verifies the contract: non-fatal failures use warn, not throw.
     // We test that converge resolves (doesn't reject) on a normal call.
@@ -537,14 +537,14 @@ describe('PF-009: failures warn via injected warn, never throw', () => {
       warn: (m) => warns.push(m),
     });
 
-    // Skill dir installed successfully — the two steps are independent (avoids PF-015
+    // Skill dir installed successfully — the two steps are independent (no
     // short-circuit: rule failure must not suppress skill install).
     expect(await skillExists()).toBe(true);
     const files = await listSkillFiles();
     expect(files).toContain('SKILL.md');
     expect(files).toContain('references/gdpr.md');
 
-    // warn was called with the rule install failure (PF-009: warn not throw).
+    // warn was called with the rule install failure (warn not throw).
     expect(warns.length).toBeGreaterThanOrEqual(1);
     expect(warns.some(w => w.toLowerCase().includes('rule'))).toBe(true);
 

@@ -14,7 +14,7 @@
  * The space sits in the REPOSITORY path only: a HOME containing a space is not a
  * supported layout (the hooks' settings.json commands carry HOME unquoted), so the
  * matrix does not claim it. Every spawn runs under a temp HOME checked by
- * `sandboxEnv` / `assertTempHome` (PF-060); a fake `claude` is first on PATH.
+ * `sandboxEnv` / `assertTempHome`; a fake `claude` is first on PATH.
  */
 
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'

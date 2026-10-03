@@ -556,8 +556,8 @@ describe('computeDevflowGitignore — branch-order and byte-identity', () => {
   const PROJECT_LINE = '!.devflow/project.json';
 
   // Seeds are cut from the exported block rather than retyped, so a block edit can
-  // never leave these fixtures silently describing a shape that no longer ships
-  // (applies PF-043). They are cut BY SENTINEL INDEX, never by negative offset: each
+  // never leave these fixtures silently describing a shape that no longer ships.
+  // They are cut BY SENTINEL INDEX, never by negative offset: each
   // version appends lines after its sentinel, so an offset from the end silently
   // re-shapes the seed one version later (a `slice(0, -2)` "v2" block is v4-shaped
   // once the policy line exists).
@@ -735,7 +735,7 @@ describe('computeDevflowGitignore — branch-order and byte-identity', () => {
   });
 
   it('policy line is a completion line, never a presence sentinel: alone it still gets the full block', () => {
-    // D-GITIGNORE-V5 (avoids PF-059): a user-authored `!.devflow/policy.json` proves
+    // D-GITIGNORE-V5: a user-authored `!.devflow/policy.json` proves
     // nothing about the devflow block, so the block is installed and re-runs converge.
     const input = `node_modules/\n${POLICY_LINE}\n`;
     const result = computeDevflowGitignore(input);
@@ -771,7 +771,7 @@ describe('computeDevflowGitignore — branch-order and byte-identity', () => {
   });
 
   // ---------------------------------------------------------------------------
-  // .claudeignore is a block LINE, never a sentinel (avoids PF-059). A project
+  // .claudeignore is a block LINE, never a sentinel. A project
   // that already ignores (or un-ignores) .claudeignore must still receive the
   // carve-out, and must never have its own entry contradicted.
   // ---------------------------------------------------------------------------
@@ -782,7 +782,7 @@ describe('computeDevflowGitignore — branch-order and byte-identity', () => {
       ? `${block}\n`
       : `${body}${body.endsWith('\n') ? '' : '\n'}\n${block}\n`;
 
-  /** Every non-null result must be a fixed point: re-running converges (applies PF-015). */
+  /** Every non-null result must be a fixed point: re-running converges. */
   const expectIdempotent = (result: string | null): void => {
     if (result === null) return;
     expect(
@@ -1285,7 +1285,7 @@ describe('assertHistoricalDenySuperset', () => {
     }
     // Exactly 12: the nine piped rules (#399) plus the three `:*` root-mount rules
     // 3.0.0 shipped. Each could never match, so a user's identical copy loses nothing
-    // when an install retires it (ADR-024's accepted trade-off).
+    // when an install retires it.
     expect(retired).toHaveLength(12);
     expect([...retiredDenyEntries(templateDeny)].sort()).toEqual([...retired].sort());
   });
@@ -1391,8 +1391,8 @@ const ROOT_MOUNT_RULES = [
 /**
  * The nine piped rules shipped through v2.5.0, retired because Claude Code splits at `|` (#399).
  * Only rules a release actually shipped belong in DEVFLOW_HISTORICAL_DENY: removal strips every
- * historical entry from a user's settings, so a rule devflow never shipped must not be claimed
- * (ADR-024) — the `curl`/`wget` piped-to-`zsh` pair drafted on the #399 branch never shipped.
+ * historical entry from a user's settings, so a rule devflow never shipped must not be claimed —
+ * the `curl`/`wget` piped-to-`zsh` pair drafted on the #399 branch never shipped.
  */
 const RETIRED_PIPE_RULES = [
   'Bash(curl * | bash*)',
@@ -1445,7 +1445,7 @@ describe('managed deny template — Bash rule semantics (#399)', () => {
   });
 
   it('red probe: the legacy-prefix predicate finds exactly the retired root-mount rules in the historical set', () => {
-    // PF-064: prove the absence check has teeth on real shipped history, not a seed.
+    // Prove the absence check has teeth on real shipped history, not a seed.
     expect([...DEVFLOW_HISTORICAL_DENY].filter(mixesWildcardWithLegacyPrefix).sort())
       .toEqual([...RETIRED_ROOT_MOUNT_RULES].sort());
     expect(mixesWildcardWithLegacyPrefix('Bash(ls:*)')).toBe(false);
@@ -1486,7 +1486,7 @@ describe('managed deny template — Bash rule semantics (#399)', () => {
   });
 
   it('red probe: the separator predicate finds exactly the retired piped rules in the historical set', () => {
-    // PF-064: prove the absence check has teeth on real shipped history, not a seed.
+    // Prove the absence check has teeth on real shipped history, not a seed.
     expect([...DEVFLOW_HISTORICAL_DENY].filter(holdsCommandSeparator).sort()).toEqual([...RETIRED_PIPE_RULES].sort());
   });
 
@@ -2307,7 +2307,7 @@ describe('applyUserSecurityDenyList', () => {
     expect(written.permissions.deny).toEqual(['Bash(my-own-rule *)', ...templateDeny]);
   });
 
-  it('keeps a piped rule no release ever shipped — Devflow retires only what it shipped (ADR-024)', async () => {
+  it('keeps a piped rule no release ever shipped — Devflow retires only what it shipped', async () => {
     const settingsPath = path.join(tmpDir, 'settings.json');
     const own = ['Bash(curl * | zsh*)', 'Bash(wget * | zsh*)'];
     await fs.writeFile(settingsPath, JSON.stringify({ permissions: { deny: own } }, null, 2) + '\n', 'utf-8');
@@ -2494,10 +2494,11 @@ describe('formatComplianceSummary', () => {
 // ── persistManifestThenConvergeTracker ───────────────────────────────────────
 
 /**
- * PF-015 seam: the manifest write and the tracker file-lifecycle owners are one
+ * The manifest write and the tracker file-lifecycle owners are one
  * unit whose ORDER is the invariant. These tests drive the shipped function —
  * the ordering under test lives inside it, so nothing here reconstructs a
- * sequence (the failure mode PF-015 records for tests/init-proxy.test.ts:115).
+ * sequence (a re-enacted sequence, as at tests/init-proxy.test.ts:115, proves
+ * the test's model of the order rather than the shipped one).
  *
  * Non-vacuity: every "converges nothing" assertion has a known-good twin on the
  * same recorder that shows every operation firing, so an IO seam that stopped
@@ -2687,13 +2688,13 @@ describe('buildTrackerLifecycleIO', () => {
   })
 })
 
-// ── trackerOverrideMessage + the Advanced --tracker arm (PF-029) ─────────────
+// ── trackerOverrideMessage + the Advanced --tracker arm ──────────────────────
 //
 // `devflow init --advanced --tracker jira` changes the machine-wide provider
 // through the CLI-override arm, which the wizard gate declines to prompt for.
 // The Advanced path prints no end-of-wizard summary, so without a line of its
 // own that arm is a machine-state change with nothing on screen — the
-// invisible-step failure PF-029 records, reached from the flag side.
+// invisible-step failure, reached from the flag side.
 
 describe('trackerOverrideMessage', () => {
   it('names the provider a --tracker override applied', () => {
@@ -2706,7 +2707,7 @@ describe('trackerOverrideMessage', () => {
 
   it('spells the summary the way every other tracker surface does', () => {
     // One formatter behind the Recommended summary row, the wizard step's note
-    // header and this line — not three hand-copied spellings (avoids PF-013).
+    // header and this line — not three hand-copied spellings.
     expect(TRACKER_PROVIDER_IDS.length).toBeGreaterThan(0)
     for (const id of TRACKER_PROVIDER_IDS) {
       expect(trackerOverrideMessage(id).text).toBe(`Tracker: ${formatTrackerSummary(id)}`)

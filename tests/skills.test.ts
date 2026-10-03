@@ -51,7 +51,7 @@ describe('devflow skills CLI, end to end under a scratch HOME', () => {
     spawnSync('node', [cli, 'skills', ...args], {
       encoding: 'utf-8',
       timeout: 60000,
-      // PF-060: a seeded mkdtemp HOME bound INTO the command, never the real one.
+      // A seeded mkdtemp HOME bound INTO the command, never the real one.
       env: { ...process.env, HOME: tmpHome, FORCE_COLOR: '0', NO_COLOR: '1', CI: '1' },
     });
 
@@ -117,7 +117,7 @@ describe('TP-44 (AC-38): a shadowed compliance skill follows a later compliance 
     spawnSync('node', [cli, ...args], {
       encoding: 'utf-8',
       timeout: 60000,
-      // PF-060: a scratch HOME bound into the command, and a cwd outside any repository,
+      // A scratch HOME bound into the command, and a cwd outside any repository,
       // so `init` touches neither the developer's home nor a checkout.
       cwd: tmpHome,
       env: { ...process.env, HOME: tmpHome, FORCE_COLOR: '0', NO_COLOR: '1', CI: '1' },

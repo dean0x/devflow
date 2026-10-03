@@ -178,7 +178,7 @@ describe('resolveSeedFlags', () => {
     // flag-a was known at last install, user disabled it → stays false
     const record: FlagsRecord = { 'flag-a': false, 'flag-b': true, 'flag-c': false, 'flag-d': false };
     const result = resolveSeedFlags(record, MOCK_FLAGS);
-    expect(result['flag-a']).toBe(false); // stays disabled — PF-023: no resurrection
+    expect(result['flag-a']).toBe(false); // stays disabled — no resurrection
     expect(result['flag-b']).toBe(true);
   });
 
@@ -402,11 +402,11 @@ describe('resolveInitSeed', () => {
 
 describe('applyCliToggles', () => {
   // Every FeatureSeed key is present. An incomplete fixture annotated
-  // `: FeatureSeed` is a TS2739 that nothing in this repo reports (PF-069:
-  // tests/ is outside the typechecked project and vitest only transpiles), and
+  // `: FeatureSeed` is a TS2739 that nothing in this repo reports (tests/ is
+  // outside the typechecked project and vitest only transpiles), and
   // at runtime the missing keys come back as `undefined`, which `toEqual`
   // treats as equal to absent — so the manifest-group arms would pass
-  // vacuously (PF-018).
+  // vacuously.
   const base: FeatureSeed = {
     ambient: true,
     memory: true,
@@ -684,7 +684,7 @@ describe('proxy seeding', () => {
 
 // ── compliance seeding (resolveSeedFeatures + applyCliToggles) ────────────────
 // Canonical home for init-seed compliance coverage (moved from compliance-cli.test.ts).
-// Compliance is manifest-gated (like proxy), never config.json-gated (ADR-001).
+// Compliance is manifest-gated (like proxy), never config.json-gated.
 
 describe('compliance seeding', () => {
   /** Manifest fixture with explicit compliance field (required by ManifestData.features). */
@@ -871,7 +871,7 @@ describe('tracker seeding', () => {
 // Driven by CALLING it. The lifecycle assertions below are source-level because
 // Commander's `.action()` body is not unit-reachable, but this function is
 // exported and pure, so a source-level stand-in here would be counting a call
-// site whose behaviour is directly observable (PF-018).
+// site whose behaviour is directly observable.
 
 describe('resolveTrackerInitState', () => {
   /**
@@ -956,7 +956,7 @@ describe('resolveTrackerInitState', () => {
 // if someone inlines an `fs.rm`, duplicates a binding, drops one, or reaches an
 // owner outside the seam.
 //
-// Non-vacuity (PF-018): each "never inlined" assertion is paired with a probe
+// Non-vacuity: each "never inlined" assertion is paired with a probe
 // showing the same pattern DOES match src/core/tracker.ts, so a renamed constant
 // can never make the absence check pass by matching nothing anywhere.
 
@@ -994,7 +994,7 @@ describe('init.ts tracker lifecycle call sites', () => {
     expect((source.match(/\b(rearmTrackerInference|applyTrackerSentinel)\(/g) ?? []).length).toBe(0);
   });
 
-  it('writes the manifest only inside the tracker lifecycle seam (PF-015)', async () => {
+  it('writes the manifest only inside the tracker lifecycle seam', async () => {
     const source = await fs.readFile(INIT_SOURCE, 'utf-8');
     // The ordering invariant — converge only what the manifest persisted — is
     // only real while the write and the owners sit in one function, so the
@@ -1013,7 +1013,7 @@ describe('init.ts tracker lifecycle call sites', () => {
    *
    * Throws rather than returning null — every assertion below reads this call,
    * so a renamed predicate would otherwise leave them examining an empty string
-   * and passing (PF-018).
+   * and passing.
    */
   function trackerGateCall(source: string): string {
     const call = /shouldRunTrackerStep\(\{[\s\S]*?\}\)/.exec(source);
@@ -1031,7 +1031,7 @@ describe('init.ts tracker lifecycle call sites', () => {
     return call.split('\n').map(l => l.trim()).find(l => /^mode\s*[,:]/.test(l)) ?? null;
   }
 
-  it('hands the gate the caller\'s mode, never a literal (PF-029)', async () => {
+  it('hands the gate the caller\'s mode, never a literal', async () => {
     const source = await fs.readFile(INIT_SOURCE, 'utf-8');
     const call = trackerGateCall(source);
 
@@ -1146,15 +1146,15 @@ describe('resolveInitSeed — suppress-attribution seeding (D27)', () => {
     expect(seed.flags['suppress-attribution']).toBe(false);
   });
 
-  it('manifest has suppress-attribution: null (ADR-014 deliberate unset) → resolves to false', () => {
-    // ADR-014: null = known + deliberately unset. For this boolean flag, null and false
+  it('manifest has suppress-attribution: null (deliberate unset) → resolves to false', () => {
+    // null = known + deliberately unset. For this boolean flag, null and false
     // both delete the target settings key; the resolved seed must be exactly false.
     const manifest = makeManifest({
       features: { ...makeManifest().features, flags: { 'suppress-attribution': null, tui: true } },
     });
     const seed = resolveInitSeed(manifest, JSON.stringify({}), DEVFLOW_PLUGINS);
     expect(seed.flags['suppress-attribution']).toBe(false);
-    // Non-vacuity (PF-018): neighbouring flag from prior manifest survives unchanged.
+    // Non-vacuity: neighbouring flag from prior manifest survives unchanged.
     expect(seed.flags['tui']).toBe(true);
   });
 });

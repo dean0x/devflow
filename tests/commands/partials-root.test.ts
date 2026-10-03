@@ -126,7 +126,7 @@ describe('compiled loaders resolve the repository root, not cwd (D-PROMPT-ROOT, 
     requireDistFiles().filter(f => requireDistFile(f).includes(heading));
 
   it('reads a real corpus: the loaders are compiled into their host commands', () => {
-    // Non-vacuity (PF-018): an empty host set would pass every check below.
+    // Non-vacuity: an empty host set would pass every check below.
     expect(decisionsHosts().length).toBeGreaterThanOrEqual(9);
     expect(knowledgeHosts(KNOWLEDGE_HEADING).length).toBeGreaterThanOrEqual(6);
     expect(knowledgeHosts(WRITEBACK_HEADING).sort()).toEqual(
@@ -223,7 +223,7 @@ describe('compiled loaders resolve the repository root, not cwd (D-PROMPT-ROOT, 
 
   it('every compiled docs root resolves the checkout toplevel, from a root, a subdirectory and a worktree', () => {
     const hosts = knowledgeHosts(DOCS_ROOT_LEAD);
-    // Non-vacuity (PF-018): the seven docs-writing commands carry it.
+    // Non-vacuity: the seven docs-writing commands carry it.
     expect(hosts.length).toBeGreaterThanOrEqual(7);
     for (const file of hosts) {
       const section = sectionOf(requireDistFile(file), DOCS_ROOT_LEAD);

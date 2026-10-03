@@ -19,7 +19,7 @@
  *         string (the Gate 2 wiring and routing guards live in gate2-verdict.test.ts).
  *
  * Every guard has a named collector, a non-empty-corpus assertion and a known-bad
- * probe run through the same collector (PF-064); each probe restores the d9d1c8e
+ * probe run through the same collector; each probe restores the d9d1c8e
  * spelling of the site it guards.
  *
  * NOT covered: whether a challenger at runtime obeys the injected contract — that

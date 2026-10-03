@@ -9,7 +9,7 @@
  * with extra steps, and one that removes without the `--plugin` gate silently
  * deletes assets an add-one run was never asked to touch (AC-22).
  *
- * HOME safety (applies PF-060): every test injects an mkdtemp claudeDir and
+ * HOME safety: every test injects an mkdtemp claudeDir and
  * devflowDir. No test reads or writes the real ~/.claude or ~/.devflow, and no
  * test shells out to dist/cli.js.
  */
@@ -211,7 +211,7 @@ describe('removal: scoped, gated, and never beyond the registry', () => {
     expect(await installedSkillDirs()).not.toContain(foreign);
   });
 
-  it('a BARE (pre-namespace) directory is left alone by both mechanisms (avoids PF-012)', async () => {
+  it('a BARE (pre-namespace) directory is left alone by both mechanisms', async () => {
     const bare = 'security';
     await fs.mkdir(path.join(claudeDir, 'skills', bare), { recursive: true });
     await fs.writeFile(path.join(claudeDir, 'skills', bare, 'SKILL.md'), '# not ours\n', 'utf-8');

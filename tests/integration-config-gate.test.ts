@@ -3,7 +3,7 @@
  *
  * The excluded file spawns live `claude` sessions against the developer's own
  * ~/.claude with --dangerously-skip-permissions and has previously committed to
- * this repo mid-run (PF-060, PF-055). A gate that opts in on any non-empty
+ * this repo mid-run. A gate that opts in on any non-empty
  * string turns `DEVFLOW_INTEGRATION_ALL=0` — the spelling a developer reaches
  * for to say "no" — into a live run, so the gate is asserted directly here
  * rather than left to the shape of the expression.

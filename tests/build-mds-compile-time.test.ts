@@ -27,7 +27,7 @@
  * READS ONLY. Every compile here is in-process (`compileFile` returns the output
  * and writes nothing) and the seeded probe is written to a temp directory — the
  * repo's own src/ and dist/ are never touched, so this file cannot repair or
- * corrupt a tree a parallel vitest worker is reading (avoids PF-055).
+ * corrupt a tree a parallel vitest worker is reading.
  */
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
@@ -100,8 +100,8 @@ export function collectOverBudget(
  * whatever the module actually uses and cannot drift out of step with it.
  *
  * `only` restricts the rewrite to the named aliases. The probe rewrites the
- * `_mcp.mds` import alone: the cliff is exponential in the imported graph
- * (PF-073), so rewriting EVERY import made the probe's own cost grow with each
+ * `_mcp.mds` import alone: the cliff is exponential in the imported graph,
+ * so rewriting EVERY import made the probe's own cost grow with each
  * define `_common.mds` gained — at 13 exports (#359) it no longer finished inside
  * its 120 s timeout, although the shipped alias build compiles in ~40 ms. One
  * selective import still lands two orders of magnitude over the alias form and
@@ -153,7 +153,7 @@ describe('MDS reference modules compile well under the define-capture cliff', ()
     if (tmpDir) await fs.rm(tmpDir, { recursive: true, force: true });
   });
 
-  it('the roster this ranges over is real (PF-018)', () => {
+  it('the roster this ranges over is real', () => {
     expect(REFERENCE_SOURCES.length, 'an empty roster measures nothing').toBeGreaterThan(0);
     expect(
       REFERENCE_SOURCES,

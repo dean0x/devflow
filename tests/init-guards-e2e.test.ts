@@ -1,5 +1,5 @@
 /**
- * `devflow init` guards that only the real CLI can prove (PF-018: the green test
+ * `devflow init` guards that only the real CLI can prove (the green test
  * must exercise the shipped path, not a re-implementation of it).
  *
  *   D-INIT-NOT-HOME — in a git repository rooted at HOME (a dotfiles repo), init
@@ -13,7 +13,7 @@
  *   recently written hook log folders.
  *
  * Every spawn runs under a temp HOME built by `sandboxEnv`, which refuses a real
- * home before anything runs (PF-060). Requires a build (`requireBuiltCli`).
+ * home before anything runs. Requires a build (`requireBuiltCli`).
  */
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
