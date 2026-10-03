@@ -8,8 +8,8 @@
  * rule now lives once in `_common.mds` as step 3a of every provider's reference.
  * This file READS the keyword regex and the trailing-strip class out of the BUILT
  * reference and RUNS the procedure the step states — a hand-copied regex here would
- * be a second authority that agrees with the shipped one only until one is edited
- * (PF-018), and the MDS escaping of `\(` and `\]` in prose is exactly the kind of
+ * be a second authority that agrees with the shipped one only until one is edited,
+ * and the MDS escaping of `\(` and `\]` in prose is exactly the kind of
  * defect only an executing reader sees.
  *
  * G1. A squash-merged PR's commit rarely carries a closing keyword, so the only
@@ -206,7 +206,7 @@ export function fallbackCoversUnmappedMarkers(line: string): boolean {
   return line.includes('after a listing that succeeds, also over each range `(#N)` naming no listed PR')
 }
 
-/** The gather Output's declared status domain, as git.md spells it (PF-075). */
+/** The gather Output's declared status domain, as git.md spells it. */
 const GATHER_STATUS_LINE =
   '### Status: READY | PARTIAL ({n} DEGRADED) | TRUNCATED ({n} not processed) | DEGRADED ({reason}) | INDETERMINATE ({reason})'
 
@@ -418,7 +418,7 @@ describe('#364: steps 1a and 6 are _common.mds text in every gather reference (A
 })
 
 // ---------------------------------------------------------------------------
-// PF-075 — every status a gather reference reports is a value of the domain the
+// Every status a gather reference reports is a value of the domain the
 // agent's Output declares. Jira and Linear reported PARTIAL and TRUNCATED for a
 // year under a three-value declaration; /release classifies by that declaration.
 // ---------------------------------------------------------------------------
@@ -454,7 +454,7 @@ export function collectUndeclaredStatuses(text: string, declared: readonly strin
   return [...new Set(reportedStatuses(text).filter(s => !declared.includes(s)))]
 }
 
-describe('PF-075: the gather references report only declared statuses', () => {
+describe('the gather references report only declared statuses', () => {
   const declared = declaredStatuses(GATHER_STATUS_LINE)
 
   it('the declared domain is the five values, and the agent carries it', () => {

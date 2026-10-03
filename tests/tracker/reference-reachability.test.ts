@@ -20,7 +20,7 @@
  *   REACHABILITY — every emitted file can be named by something the agent
  *     actually reads. Both directions, because either alone is satisfiable by an
  *     accident: a file nothing can name is dead weight installed on every user's
- *     machine (ADR-003), and an op the instruction can name with no file behind it
+ *     machine, and an op the instruction can name with no file behind it
  *     is a reference the agent is told to load that the install does not carry —
  *     a build defect every spawn running that op would hit.
  */
@@ -56,7 +56,7 @@ import { MIN_REFERENCE_CHARS } from './reference-floor.js';
 /**
  * Read a file that MUST exist. Throws with a build hint rather than returning an
  * empty string: a reachability scan over an absent tree reports nothing and
- * passes (PF-018).
+ * passes.
  */
 function requireFile(label: string, filePath: string): string {
   try {
@@ -146,7 +146,7 @@ function collectPerCommitFanout(text: string): string[] {
  * collector is proven to recognise the shape it forbids, without the fix ever being
  * un-landed to show red and without keeping a whole pre-rewrite document on disk to
  * hold one line. A collector that stopped matching would make the prohibition above
- * pass by recognising nothing (PF-018).
+ * pass by recognising nothing.
  */
 const PER_COMMIT_FANOUT_SAMPLE =
   '4. If `gh` is authenticated and remote is reachable: for each commit in the range, fetch ' +
@@ -221,7 +221,7 @@ describe('gather-release-evidence: batch-first, never one call per commit [DR-17
 //   consumer names it.
 //
 // The instruction is read out of the compiled agent rather than restated here —
-// restating it would let the two drift and still pass (PF-018).
+// restating it would let the two drift and still pass.
 
 /** The `{provider}` / `{op}` template the preamble's one load instruction composes. */
 const LOAD_INSTRUCTION_TEMPLATE = 'references/tracker/{provider}/{op}.md';
@@ -269,8 +269,9 @@ const CONTRACT_REL = 'tracker/_mcp.md';
  * discipline for every tracker call a non-github spawn makes, but only five of the
  * ten per-operation files happened to name it: the other five ran tracker calls
  * with neither. An extraction that turns a universal obligation into per-consumer
- * opt-in is PF-058 exactly, and "some shipped file names it" could never have
- * caught it — five namers satisfy it as completely as ten do.
+ * opt-in drops it wherever a consumer forgets to opt in, and "some shipped file
+ * names it" could never have caught it — five namers satisfy it as completely as
+ * ten do.
  *
  * It is named from the preamble WITHOUT becoming a second convergence point,
  * because it shares the one existing naming line and is a fixed literal composed
@@ -324,8 +325,8 @@ function collectPrHostNames(content: string): string[] {
  * A function rather than an inline `startsWith` at each site, because the live arm
  * and its known-bad probe must read the SAME rule. Restated inline, the probe
  * asserts only that one hand-written string fails one hand-written check — it stays
- * green after the live arm is weakened (say to `includes`), which is the vacuous
- * pass PF-018 names.
+ * green after the live arm is weakened (say to `includes`), which is a vacuous
+ * pass.
  */
 function anchorsOnLineOne(body: string, op: string): boolean {
   return body.startsWith(`## Operation: ${op}\n`);
@@ -342,7 +343,7 @@ function readEmittedPrBody(rel: string): string | null {
  *
  * FOUR arms, one per module kind the registry carries, and the live check and
  * every known-bad probe drive this one function — a probe that rebuilt the union
- * inline would stay green after an arm was dropped from the real check (PF-018).
+ * inline would stay green after an arm was dropped from the real check.
  *
  *   fanout / tracker    instantiate the preamble's ONE templated instruction;
  *   named               the agent spells the document's path out, once each —
@@ -357,8 +358,8 @@ function readEmittedPrBody(rel: string): string | null {
  *                       templated on purpose: the file is the same under every
  *                       provider, so there is nothing to instantiate — and a
  *                       second templated instruction would be a second path
- *                       composed from the provider token, which is the single
- *                       convergence point PF-023 exists to protect;
+ *                       composed from the provider token, breaking the single
+ *                       convergence point that token's validation relies on;
  *   contract            the preamble names it, as a fixed literal.
  *
  * `readPrBody` is injectable so the hop's probe can take it away.
@@ -452,7 +453,7 @@ describe('generated references: every reference is reachable from the agent (AC-
     );
     // The contract's own rule, asserted rather than assumed: it is in the manifest
     // AND the preamble names it. Either half alone would let an unreachable
-    // contract ship (ADR-003) or a named one go missing.
+    // contract ship or a named one go missing.
     expect(
       contractIsNamedByThePreamble(agent.content),
       'the tool-call contract is in the manifest but the preamble does not name it — it would be ' +
@@ -463,8 +464,8 @@ describe('generated references: every reference is reachable from the agent (AC-
   it('the contract is a FIXED per-spawn load: no generated op file names it', () => {
     // The inverse of the rule above, and the half that makes it a fix rather than a
     // relocation. While the per-operation files were the namers, five of ten named
-    // it and five did not, and every guard in the tree was satisfied by the five
-    // (PF-058). An op file that names it again re-opens exactly that door, so the
+    // it and five did not, and every guard in the tree was satisfied by the five.
+    // An op file that names it again re-opens exactly that door, so the
     // prohibition is absolute rather than a floor on the count.
     expect(
       collectContractNamers(),
@@ -477,7 +478,8 @@ describe('generated references: every reference is reachable from the agent (AC-
 
   it('known-bad probe: a seeded op-file naming line is reported by the same collector', () => {
     // The collector reads the built tree, so the probe re-runs its predicate over a
-    // seeded body rather than writing into dist/ (PF-018 without a side effect).
+    // seeded body rather than writing into dist/ (a non-vacuity check without a
+    // side effect).
     const namesContract = (body: string): boolean => body.includes(CONTRACT_REL);
     expect(
       namesContract('## Operation: setup-task\n\nRead `references/tracker/_mcp.md` first.\n'),
@@ -528,7 +530,7 @@ describe('generated references: every reference is reachable from the agent (AC-
     // Its one naming site is references/pr/fetch-review-threads.md step 2, not the
     // agent. Take the hop's reader away and the SAME collector must lose it — and
     // only it — or the named arm reaches the document some other way and the hop
-    // is declared and never taken (PF-064).
+    // is declared and never taken.
     expect(collectLiteralReferenceNames(agent.content).has('trust-rule.md'), 'the agent must not name it').toBe(false);
     const unhopped = reachableSetFrom(agent.content, () => null);
     expect(generatedReferenceManifest().filter(rel => !unhopped.has(rel))).toEqual(['trust-rule.md']);
@@ -572,7 +574,7 @@ describe('generated references: every reference is reachable from the agent (AC-
 
   it('PR-host parity known-bad probe: an anchor that is not on line 1 is reported', () => {
     // The anchor rule is a prefix check, so on live inputs it is green whether or
-    // not the predicate is live (PF-064). Drive `anchorsOnLineOne` — the SAME
+    // not the predicate is live. Drive `anchorsOnLineOne` — the SAME
     // function the live arm calls — over two seeded bodies instead, both
     // directions, so the probe fails on a predicate that has been weakened to
     // accept a displaced anchor AND on one that has gone constant-false.

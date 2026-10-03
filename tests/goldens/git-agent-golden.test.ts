@@ -29,7 +29,7 @@ import { loadGolden, resolveAgentSource } from '../helpers.js'
  *
  * It pins `stat -f %z tests/fixtures/golden/git-agent.md`, and the assertion
  * below re-derives it from that same fixture rather than measuring it a second
- * way — parallel re-derivation is how derived constants rot (PF-057).
+ * way — parallel re-derivation is how derived constants rot.
  * It moves only in the fixture-only commit that regenerates the golden, and
  * never on its own to clear a red assertion: a baseline edited to match what the
  * artifact happens to be today pins nothing.

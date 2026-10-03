@@ -28,7 +28,7 @@
  * so the evidence policy is never named here either.
  *
  * Every guard below is a NAMED collector over a named corpus, with a known-bad
- * probe driving the same collector (PF-064): a clause table that could not be
+ * probe driving the same collector: a clause table that could not be
  * shown to fire would be a table that can lose a row unnoticed.
  */
 

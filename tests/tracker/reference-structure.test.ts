@@ -1,7 +1,8 @@
 /**
- * Generated-reference structure guard — the structural half of PF-063.
+ * Generated-reference structure guard — the structural half of the fix for text
+ * that keeps its bytes but changes meaning when moved into a generated reference.
  *
- * PF-063 recorded a defect the containment oracle cannot see: a block moved
+ * That defect is one the containment oracle cannot see: a block moved
  * BYTE-IDENTICALLY into a generated reference carried its source's grammar with
  * it. In `SKILL.md` a level-2 heading is just a section; in a generated reference
  * it is a section TERMINATOR, because `extractOpSectionFromCorpus` slices an
@@ -10,7 +11,7 @@
  * diffable and containment-green. Byte equality answers whether these are the
  * same bytes and never whether they still mean the same thing.
  *
- * The pitfall's recorded remedy has two halves. The first is a convention:
+ * The fix has two halves. The first is a convention:
  * demote a heading the grammar rather than the content forces down, `##` → `###`,
  * as it moves. The second is what makes the first hold — "make the rule
  * structural rather than advisory: forbid the reserved token at the destination
@@ -26,10 +27,10 @@
  * to become fence-aware (`collectUnfencedH2` in tests/helpers.ts), and the
  * structural prohibition is stated over UNFENCED headings only.
  *
- * Three claims, kept separate so no one of them can carry the others (PF-064):
+ * Three claims, kept separate so no one of them can carry the others:
  *   1. SEMANTIC REACH — the real extractor, over the real generated tree, returns
  *      the text that used to be hidden below a fenced `## `. This is the probe
- *      PF-063 asks the byte-equality oracle to be paired with.
+ *      the byte-equality oracle has to be paired with.
  *   2. STRUCTURE — no generated reference carries an unfenced column-0 `## ` after
  *      its own leading heading, so no future edit can re-truncate a section.
  *   3. NON-VACUITY — the live corpus actually contains fenced `## ` lines, so
@@ -69,7 +70,7 @@ interface GeneratedReference {
 /**
  * Read every declared generated reference. Throws with a build hint rather than
  * returning an empty list: a structure scan over an absent tree reports zero
- * violations, which is the shape of a guard that is not a guard (PF-018). A build
+ * violations, which is the shape of a guard that is not a guard. A build
  * artifact is a throw, never a `skipIf` — only an external binary the repo cannot
  * produce earns a capability gate.
  *
@@ -102,8 +103,7 @@ function trackerOpRelPath(op: string): string {
  * union-mode extraction depends on, and a `pr/` file is extracted exactly the way
  * a `tracker/{provider}/` one is. Iterating only the tracker roster would leave
  * eight generated files whose line 1 nothing checks — and a displaced anchor there
- * silently truncates every D10, D11 and numeric-bound guard that now reads them
- * (PF-063).
+ * silently truncates every D10, D11 and numeric-bound guard that now reads them.
  */
 const PER_OP_REFERENCES: readonly { readonly op: string; readonly relPath: string }[] = [
   ...TRACKER_GITHUB_OPS.map(op => ({ op, relPath: trackerOpRelPath(op) })),
@@ -137,7 +137,7 @@ interface FloorEntry {
  * The corpus below is built by mapping `generatedReferenceManifest()`, so its size
  * has to be checked against an authority OUTSIDE that call: any assertion phrased in
  * terms of the manifest's own length is equally satisfied by 13 files and by none,
- * and the emptiness it claims to catch is precisely the case it cannot see (PF-018).
+ * and the emptiness it claims to catch is precisely the case it cannot see.
  *
  * That authority is the ratchet manifest, read here rather than re-spelled as a
  * literal. Only the site that `tests/fixtures/numeric-floors.json` names for this entry —
@@ -176,8 +176,7 @@ function registeredManifestSizeFloor(): number {
  * Returns `{relPath}:{line}: {heading}` strings — the file and line a fix needs.
  *
  * Both this collector and the extractor's terminator search call
- * `collectUnfencedH2`, so a probe cannot stay green after the fence rule changes
- * (PF-018).
+ * `collectUnfencedH2`, so a probe cannot stay green after the fence rule changes.
  */
 export function collectStrayUnfencedH2(refs: readonly GeneratedReference[]): string[] {
   const violations: string[] = [];
@@ -194,7 +193,7 @@ export function collectStrayUnfencedH2(refs: readonly GeneratedReference[]): str
 // 1. Semantic reach — the extractor returns what a fenced `## ` used to hide
 // ---------------------------------------------------------------------------
 
-describe('PF-063 semantic probe: a fenced `## ` no longer hides a reference tail', () => {
+describe('semantic probe: a fenced `## ` no longer hides a reference tail', () => {
   it('manage-debt: the whole archive chain is inside the extracted section', () => {
     // `## Items` at manage-debt.md:64 is the successor issue's own body, written
     // inside the archive function's bash fence. Before the boundary rule became
@@ -239,7 +238,7 @@ describe('PF-063 semantic probe: a fenced `## ` no longer hides a reference tail
 // 2. Structure — no generated reference can re-truncate its own section
 // ---------------------------------------------------------------------------
 
-describe('generated references carry no unfenced `## ` below their own heading (PF-063)', () => {
+describe('generated references carry no unfenced `## ` below their own heading', () => {
   const refs = readGeneratedReferences();
 
   it('the corpus clears the registered manifest-size floor and every file has content', () => {
@@ -294,7 +293,7 @@ describe('generated references carry no unfenced `## ` below their own heading (
 // 3. Non-vacuity — the fence rule is exercised, and the collector has teeth
 // ---------------------------------------------------------------------------
 
-describe('reference-structure guard: non-vacuity (PF-018)', () => {
+describe('reference-structure guard: non-vacuity', () => {
   const refs = readGeneratedReferences();
 
   it('the live corpus really does contain fenced `## ` lines', () => {
@@ -354,7 +353,7 @@ describe('reference-structure guard: non-vacuity (PF-018)', () => {
   it('the corpus read fails loud on an unbuilt tree, naming the file and the build step', () => {
     // The manifest is derived from the registry, so an entry with no file is an
     // unbuilt tree, never a skip condition. Driven against an EMPTY temp root so
-    // the throw is exercised without touching the real dist (PF-055).
+    // the throw is exercised without touching the real dist.
     const empty = mkdtempSync(path.join(os.tmpdir(), 'devflow-refs-'));
     try {
       expect(

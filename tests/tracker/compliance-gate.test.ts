@@ -143,7 +143,7 @@ function requireFile(label: string, filePath: string): string {
  * the setup-task and fetch-issue references; this collector keeps that reach on the
  * whole op surface, so widening the corpus never narrowed the token set.
  *
- * NOT covered (PF-064): a compliance gate in synonyms ("only for regulated
+ * NOT covered: a compliance gate in synonyms ("only for regulated
  * projects"), or a conditional clause more than 60 characters, or a sentence
  * boundary, before the word. A clean result means none of these shapes occurred.
  */
@@ -333,7 +333,7 @@ function opSurface(): OpSurfaceFile[] {
 
 /**
  * One sentinel per corpus class, so reach is proven by name rather than by a size
- * floor (PF-064), each paired with the retired text that class used to carry.
+ * floor, each paired with the retired text that class used to carry.
  */
 const CLASS_PROBES: ReadonlyArray<{ readonly cls: string; readonly sentinel: string; readonly seeds: readonly string[] }> = [
   {

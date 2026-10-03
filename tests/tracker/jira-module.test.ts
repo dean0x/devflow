@@ -322,7 +322,7 @@ const KNOWN_UNDEFINED_CELLS: readonly KnownUndefinedCell[] = [
  * `KNOWN_UNDEFINED_CELLS` and not from what the body happens to contain: a
  * predicate satisfied by a header every define carries decides no cell at all, and
  * one that infers `supported` from the ABSENCE of a DEGRADED literal lets a
- * provider drop the literal and stay green (PF-018, PF-064).
+ * provider drop the literal and stay green.
  */
 export function collectBlankMatrixCells(provider: string, source: string): string[] {
   const blanks: string[] = [];
@@ -364,7 +364,7 @@ export function collectBlankMatrixCells(provider: string, source: string): strin
 /**
  * The defines a provider module may declare BESIDES its ten operation sections.
  *
- * A REGISTRY, not a relaxation (ADR-025). The roster arm below still asserts the
+ * A REGISTRY, not a relaxation. The roster arm below still asserts the
  * operation defines are exactly the op roster; this table is asserted in both
  * directions beside it, so a provider that declares a define listed here for
  * another provider is reported, and one that drops a define this table gives it
@@ -605,7 +605,7 @@ describe('cross-provider define-set parity, both directions (AC-3.8, §8.11)', (
     // own: `**Mechanics held here:**` is a header every define carries, so a cell
     // predicate that merely looks for it is satisfied by boilerplate and decides no
     // cell at all, and nothing but a seeded module shows which arms still decide
-    // something (PF-018, PF-064).
+    // something.
     const jira = requireProvider(PROVIDERS, 'jira');
     expect(
       collectBlankMatrixCells('jira', jira.source),
@@ -643,7 +643,7 @@ describe('cross-provider define-set parity, both directions (AC-3.8, §8.11)', (
 
   it('known-bad probe: the same collectors report a dropped and an emptied define', () => {
     // Drives both collectors over seeded modules. Without it, the empty-difference
-    // assertions above are equally green for collectors that return nothing (PF-018).
+    // assertions above are equally green for collectors that return nothing.
     const jiraSource = requireProvider(PROVIDERS, 'jira').source;
     const githubSource = requireProvider(PROVIDERS, 'github').source;
     const dropped = jiraSource.replace(/^@define fetch_issue\(\):/m, '@define fetch_issue_renamed():');
@@ -1127,7 +1127,7 @@ describe('jira module: tool calls only — no HTTP, no CLI, no credential read (
 
 describe('jira module: query safety and the cross-cutting rules it invokes', () => {
   // REPOINTED, per-literal, when `### Query safety` moved into the shared
-  // authoring module `_mcp.mds` (ADR-025): the rule is no longer text this
+  // authoring module `_mcp.mds`: the rule is no longer text this
   // module's source spells, so the source is no longer where it can be read. It
   // is read where it is GUARANTEED to appear instead — the one operation that
   // composes a query, in this provider's emitted mechanics — which is also the
@@ -1226,7 +1226,7 @@ const JIRA_CORPUS: ProviderCorpus = {
  * The map is declared `Map<string, string>` and so is the reader `ProviderCorpus`
  * takes, so a key outside `TRACKER_OPS` is a real possibility rather than one the
  * literal-union inference of `as const` hides behind a `!`. A miss NAMES the op:
- * without it the only signal is a `TypeError` several frames later (PF-069).
+ * without it the only signal is a `TypeError` several frames later.
  */
 function readFromCorpus(corpus: ReadonlyMap<string, string>, op: string): string {
   const text = corpus.get(op);

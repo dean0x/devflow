@@ -14,8 +14,8 @@
  * produces the number past the number itself.
  *
  * Every ceiling here is GREEN and is the number the artifact is held to; none is
- * skipped. A skipped budget asserts nothing and reads as "fine" in a CI log
- * (PF-018), so a ceiling that goes red is answered by cutting the artifact, never
+ * skipped. A skipped budget asserts nothing and reads as "fine" in a CI log,
+ * so a ceiling that goes red is answered by cutting the artifact, never
  * by raising the ceiling or disabling its gate. Each ceiling's own JSDoc records
  * its measurement and its headroom.
  *
@@ -131,8 +131,9 @@ import type {
  * three tracker rows and the PR-host row — fell again to its measurement + 80.
  *
  * #393 (PR6 of the per-repo config epic #387) moved the Git agent's provider
- * resolution onto the settings line and retired the mechanics-unavailable rule
- * (ADR-028). Its git.md delta was -315 ch, and the Jira and Linear site rungs grew
+ * resolution onto the settings line and retired the mechanics-unavailable rule,
+ * which no legitimate configuration can trigger once every provider is installed.
+ * Its git.md delta was -315 ch, and the Jira and Linear site rungs grew
  * 28 ch each (the settings `SITE` ahead of `## Project`). Every git.md-carrying row
  * fell again to min(previous ceiling, measurement + 80).
  *
@@ -162,8 +163,8 @@ import type {
  * agent.
  *
  * NO PER-COMPONENT DECOMPOSITION of the cut is recorded here, and none is welcome:
- * three successive re-derivations of such components disagreed once already
- * (PF-057), and no printed row produces them. Measure the artifact instead —
+ * three successive re-derivations of such components disagreed once already,
+ * and no printed row produces them. Measure the artifact instead —
  *
  *   npm run build && node -e "process.stdout.write(String(require('fs').readFileSync('dist/agents/git.md','utf8').length))"
  *
@@ -316,7 +317,7 @@ const BUDGET_LOADED_SET_LINEAR = 75_653;
  * beside it: it is a file two of these ops loaded long before any split existed,
  * this work moved the line that names it without changing a byte a spawn pays, and
  * charging 21_355 ch of it here would bury the `pr/` bodies this row exists to
- * measure. What the exclusion owes in return (ADR-025) is shape `2c-ex` of the
+ * measure. What the exclusion owes in return is shape `2c-ex` of the
  * four-shape table — the same maximum, RECORDED with the file charged — plus the
  * equality pin GITHUB_API_MD_CHARS, which is what stops an excluded term growing
  * unwatched.
@@ -393,15 +394,15 @@ const PREAMBLE_MAX_LINES = 34;
  *
  * D-LOADED-SET-SCOPE excludes this file from the gate on purpose: it is loaded by
  * `fetch-review-threads`, a NON-tracker op that loaded it long before the split, so
- * it is not a cost the split introduces. ADR-025's amendment is what the exclusion
- * owes in return — the excluded term goes in a RECORDED, non-gating row — and THIS
- * CONSTANT IS THAT ROW'S ANCHOR. Without one the row rots: a figure transcribed into
+ * it is not a cost the split introduces. An exclusion owes a record in return —
+ * the excluded term goes in a RECORDED, non-gating row — and THIS CONSTANT IS
+ * THAT ROW'S ANCHOR. Without one the row rots: a figure transcribed into
  * a PR body or a KNOWLEDGE.md is true when written and silent afterwards, so the
  * excluded term drifts with nothing tracking it.
  *
  * So it is pinned with `toBe`, never `<=`. It is not a ceiling to stay under; it is
  * the number the file IS, and no figure is recorded here beside it — the assertion
- * is the record (PF-057). THE ONLY COMMIT THAT MAY CHANGE IT IS THE COMMIT THAT
+ * is the record. THE ONLY COMMIT THAT MAY CHANGE IT IS THE COMMIT THAT
  * EDITS github-api.md's BYTES, and that commit re-pins it here in the same change —
  * the treatment GIT_MD_CHARS gets in tests/goldens/github-status-lines.test.ts. A
  * red equality pin means "re-measure and re-pin", never "relax the assertion".
@@ -530,7 +531,7 @@ describe('byte budget: four-shape table (recorded)', () => {
         // RECORDED ONLY, never gated [D-LOADED-SET-SCOPE]. The same maximum with the
         // written exclusion CHARGED — what the PR-host row would be if
         // references/github-api.md were treated as a cost this work introduced. This
-        // is what the exclusion owes in return for being excluded (ADR-025): the
+        // is what the exclusion owes in return for being excluded: the
         // term stays visible and attributable instead of vanishing from the record.
         shape: '2c-ex. PR-host spawn + the written exclusion charged (RECORDED, not gated)',
         chars: PRELOADED + worstCasePrHostLoad([]).value,
@@ -643,15 +644,15 @@ describe('byte budget: four-shape table (recorded)', () => {
 // the whole cost. Each `**Mechanics:**` pointer converts prompt bytes the spawn
 // already holds into a fresh, SEQUENTIAL `Read` — an extra tool round trip and an
 // extra inference turn, uncached, where the always-loaded half is a cache read under
-// `prompt-caching-1h`. PF-026 prices a shared prompt as lines × spawns-per-run; the
-// round trip is the term on the other side of that trade, and the budget models none
-// of it. For the smallest references the trade is thin: a few hundred characters
-// saved against a full extra turn.
+// `prompt-caching-1h`. A shared prompt is billed per spawn, so it costs lines ×
+// spawns-per-run; the round trip is the term on the other side of that trade, and the
+// budget models none of it. For the smallest references the trade is thin: a few
+// hundred characters saved against a full extra turn.
 //
 // This is a MEASUREMENT-MODEL GAP recorded for #342 (the devflow-wide prompt diet),
 // NOT a gate. It deliberately sets no ceiling and no floor on the round-trip count:
-// the honest answer to a term the model omits is to print it (ADR-025's amendment —
-// record rather than raise a constant or widen a scan), not to invent a threshold
+// the honest answer to a term the model omits is to print it (record rather than
+// raise a constant or widen a scan), not to invent a threshold
 // for it. It is also NOT licence to re-inline a reference to make the number
 // smaller; that reverses the split decision and spends the budget's headroom.
 
@@ -710,7 +711,7 @@ describe('byte budget: the round-trip term (recorded)', () => {
 
     // The only assertion here is a vacuity floor, not a budget: an unbuilt
     // dist/skills/git/references/ makes referenceChars() answer 0 for everything, and
-    // three zeroes would print as a plausible-looking ranking (PF-018).
+    // three zeroes would print as a plausible-looking ranking.
     expect(
       smallest[0].chars,
       'the smallest generated reference measured 0 — the round-trip rows are vacuous. ' +
@@ -772,7 +773,7 @@ describe('byte budget: component and loaded-set pins (AC-2.5)', () => {
 
     // referenceChars() answers 0 for a file it cannot resolve, so an absent
     // dist/skills/git/references/ drives the term to 0 and this gate passes by
-    // measuring nothing — the PF-018 shape, in the one test whose green is the
+    // measuring nothing — a vacuous pass, in the one test whose green is the
     // phase's headline claim. The non-vacuity floor belongs HERE, not in the
     // four-shape table's `it` (which deliberately tolerates absent rows).
     expect(
@@ -804,7 +805,7 @@ describe('byte budget: component and loaded-set pins (AC-2.5)', () => {
 
     // referenceChars() answers 0 for a file it cannot resolve, so an unbuilt
     // dist/skills/git/references/ drives the term to 0 and this gate passes by
-    // measuring nothing (PF-018).
+    // measuring nothing.
     expect(
       worst.value,
       'no PR-host reference load resolved — the budget summed nothing. Run `npm run build`.',
@@ -812,7 +813,7 @@ describe('byte budget: component and loaded-set pins (AC-2.5)', () => {
 
     // Every written exclusion has to be EXERCISED, or it is a declaration about
     // nothing that would stay green after the file it names stopped being
-    // reachable (PF-064). Each is asserted as the ops that actually reach it,
+    // reachable. Each is asserted as the ops that actually reach it,
     // named rather than counted: a count of 2 is equally satisfied by losing one
     // of these and gaining an unrelated op. Keyed per exclusion, so a new entry
     // on the list cannot ride through unexercised.
@@ -923,7 +924,7 @@ describe('byte budget: component and loaded-set pins (AC-2.5)', () => {
 
       // referenceChars() answers 0 for a file it cannot resolve, so an absent
       // dist/skills/git/references/ drives every term to 0 and this gate passes by
-      // measuring nothing — the PF-018 shape, in the gate whose green is this
+      // measuring nothing — a vacuous pass, in the gate whose green is this
       // subtask's headline claim.
       expect(
         contract,
@@ -991,14 +992,15 @@ describe('byte budget: the provider-resolution preamble', () => {
   });
 
   it('exactly one line in the compiled agent names a references/tracker/ path, inside the preamble', () => {
-    // AC-2.5's scope clause [DR-27(c)]: PF-023 requires ONE convergence point.
+    // AC-2.5's scope clause [DR-27(c)]: a validation invariant is only real at a
+    // sink every caller passes through, so there is ONE convergence point.
     // A second naming line anywhere else is a second place a provider path is
     // composed, which is the ~30-sink shape this phase exists to remove.
     //
     // ONE LINE, TWO PATHS — and the count stays 1 deliberately. That line composes
     // the per-operation mechanics path from the validated provider token AND names
     // the tool-call contract, which is a FIXED literal composed from nothing. The
-    // convergence point PF-023 is about is the COMPOSITION, so a fixed name riding
+    // convergence point that matters is the COMPOSITION, so a fixed name riding
     // on the same line adds no second place a path is built. The arm below is the
     // other half: it holds the fixed literal to that same line, so the two claims
     // cannot be satisfied by two lines between them.
@@ -1033,8 +1035,8 @@ describe('byte budget: the provider-resolution preamble', () => {
     // The contract is read once per SPAWN under every non-github provider, so its
     // naming site has to be the always-loaded preamble. It used to be the
     // per-operation mechanics that named it, and only five of ten did — the other
-    // five ran tracker calls with no transport prohibition and no trust discipline
-    // (PF-058). The reachability suite owns the inverse (no generated op file names
+    // five ran tracker calls with no transport prohibition and no trust discipline.
+    // The reachability suite owns the inverse (no generated op file names
     // it); this arm owns the byte-budget half: it rides the existing line, so the
     // fix costs one clause rather than a second preloaded naming line.
     const naming = collectTrackerNamingLines(GIT_AGENT.content);
@@ -1077,7 +1079,7 @@ describe('byte budget: the provider-resolution preamble', () => {
  *
  * Both directions of the bidirectional check and the known-bad probe below call
  * THIS — a probe that re-spells the comparison inline proves the expectation, not
- * the guard, and stays green while the real one is mis-scoped (PF-018).
+ * the guard, and stays green while the real one is mis-scoped.
  */
 export function collectMissingFrom(
   op: string,
@@ -1228,10 +1230,10 @@ describe('byte budget: formula file-set ↔ nameable file-set (both directions)'
   });
 
   it('known-bad probe: a file named only inside a pr/ body is reported by direction 2', () => {
-    // Seeds the hop's own reader rather than writing into dist/ (PF-055), and
-    // drives the SAME collector both live directions call. Without this, the hop
-    // could stop resolving and every direction-2 assertion would stay green —
-    // an absence check over a corpus nobody perturbs (PF-064).
+    // Seeds the hop's own reader rather than writing into dist/, which other test
+    // files read in parallel, and drives the SAME collector both live directions
+    // call. Without this, the hop could stop resolving and every direction-2
+    // assertion would stay green — an absence check over a corpus nobody perturbs.
     const op = 'post-review-summary';
     const seededNameable = nameableFrom(op, rel =>
       rel === prHostRel(op) ? 'Then read `references/smuggled.md` for the rest.\n' : null);
@@ -1487,7 +1489,8 @@ describe('byte budget: body-hop closure (D-BODY-HOP-CLOSURE)', () => {
       const scanned = new Set(mine.flatMap(c => c.scanned));
       expect(mine.flatMap(c => c.unreadable), `${provider}: a body the scan names did not resolve`)
         .toEqual([]);
-      // Named sentinels, one per surface class, not a size floor (PF-064).
+      // Named sentinels, one per surface class, not a size floor, so reach is
+      // proven by name.
       expect([...scanned].some(rel => rel.startsWith(`tracker/${provider}/`)), `${provider}: no mechanics body read`)
         .toBe(true);
       expect([...scanned].some(rel => rel.startsWith('pr/')), `${provider}: no PR-host body read`).toBe(true);
@@ -1532,7 +1535,7 @@ describe('byte budget: body-hop closure (D-BODY-HOP-CLOSURE)', () => {
   it('every MODEL_TRANSITIVE_REFS row is load-bearing: emptied, the live corpus reports exactly it', () => {
     // The table read two ways: with it emptied, the SAME collector direction A calls must
     // report exactly the files each row adds — so no row is decoration, and direction A's
-    // green is not the scan failing to see the hops it exists for (PF-064).
+    // green is not the scan failing to see the hops it exists for.
     const EMPTY: TransitiveRefs = Object.fromEntries(TRACKER_PROVIDER_IDS.map(p => [p, {}]));
     const reported = LIVE
       .flatMap(({ provider, op, closure }) => collectUnpricedHops(provider, op, closure, EMPTY))
@@ -1609,7 +1612,7 @@ describe('byte budget: body-hop closure (D-BODY-HOP-CLOSURE)', () => {
   });
 
   it('records what each informational mention would cost if it were a load hop (recorded, not gated)', () => {
-    // ADR-025's rule for an exemption: the term it excludes stays on the record. Each
+    // The rule for an exemption: the term it excludes stays on the record. Each
     // row's reclassification cost is the target's own load on the provider(s) whose
     // spawn reads the line — printed, so reopening a row is a decision taken with the
     // figure in front of it.
@@ -1659,8 +1662,8 @@ describe('byte budget: body-hop closure (D-BODY-HOP-CLOSURE)', () => {
 describe('byte budget: body-hop closure — seeded-reader probes (in memory, never dist/)', () => {
   // Each probe seeds ONE body through the closure's own reader and drives the SAME
   // collectors the live arms call, so a scan that stopped seeing a shape takes its probe
-  // red with the guard it backs (PF-018, PF-064). Nothing is written: vitest runs other
-  // files against these exact dist/ paths in parallel workers (PF-055).
+  // red with the guard it backs. Nothing is written: vitest runs other
+  // files against these exact dist/ paths in parallel workers.
   const ALWAYS_FOR_PROBES = alwaysLoadedBodies();
 
   it('P1 — a backticked sibling-op pointer seeded into a tracker body is an unpriced hop', () => {
@@ -1797,7 +1800,7 @@ describe('byte budget: body-hop closure — seeded-reader probes (in memory, nev
 
 describe('byte budget: written exclusions', () => {
   it('## Comment-sink scrub (D11) never moves out of the always-loaded agent', () => {
-    // Making the containment control loadable is precisely PF-027's failure mode:
+    // Making the containment control loadable defeats it:
     // the control that decides whether a body may be posted cannot itself be a
     // file the spawn might not have.
     expect(
@@ -1934,7 +1937,7 @@ function settingsLine(provider: string, rest = 'TRACKER_SOURCE=project TRACKER_W
   return `TRACKER=${provider} ${rest} REVIEW_PUBLICATION=auto COMPLIANCE=off MEMORY=on LEARNING=on KNOWLEDGE=on`;
 }
 
-describe('preamble: provider selection from the settings line (one convergence point, PF-023)', () => {
+describe('preamble: provider selection from the settings line (one convergence point)', () => {
   const block = preambleBlock(GIT_AGENT.content);
   const map = parseProviderMap(block);
 

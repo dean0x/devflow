@@ -147,7 +147,7 @@ export const SKILL_WORKTREE_LINES = 92
  *
  * `TOTAL_CHARS = GIT_MD_CHARS + …` asserted against `GIT_MD_CHARS + …` restates
  * its own definition: it holds for every state of the tree, including one where
- * all three parts drifted, so it pinned nothing (PF-018). The guard below MEASURES
+ * all three parts drifted, so it pinned nothing. The guard below MEASURES
  * the three files and compares the measurement to these literals, which makes them
  * equality baselines like every other constant in this file — re-set in the same
  * golden-regeneration commit that moves the parts, never on their own to clear a
