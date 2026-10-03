@@ -154,14 +154,14 @@ describe('agent frontmatter compliance contract', () => {
     const skillsByAgent = collectFrontmatterSkills(agents);
     expect(
       [...skillsByAgent.keys()],
-      'every registered agent must have had its frontmatter parsed (non-vacuity, PF-018)',
+      'every registered agent must have had its frontmatter parsed (non-vacuity)',
     ).toEqual(expect.arrayContaining(getAllAgentNames()));
 
     for (const [name, skillItems] of skillsByAgent) {
       expect(
         skillItems,
         `${name}: frontmatter skills: must not list devflow:compliance — ` +
-          `use body-instruction only (avoids PF-002: skill re-entrancy silent bail)`,
+          `use body-instruction only (skill re-entrancy silent bail)`,
       ).not.toContain('devflow:compliance');
     }
   });

@@ -1468,7 +1468,7 @@ describe('DUPLICATE verdict guards — resolve.md (§16b)', () => {
   it('resolve.md contains DUPLICATE as a named verdict bucket', () => {
     expect(
       compiled,
-      'resolve.md must name DUPLICATE as a verdict bucket (avoids PF-024 spawn↔op seam)',
+      'resolve.md must name DUPLICATE as a verdict bucket (the verdict enum must match on both sides of the spawn↔op seam)',
     ).toContain('DUPLICATE');
   });
 
@@ -1492,7 +1492,7 @@ describe('DUPLICATE verdict guards — resolve.md (§16b)', () => {
   it('resolve.md contains ## Duplicates section for per-entry traceability', () => {
     expect(
       compiled,
-      'resolve.md must contain ## Duplicates section (additive, safe per ADR-006)',
+      'resolve.md must contain ## Duplicates section (additive, so the convergence parser is unaffected)',
     ).toContain('## Duplicates');
   });
 });
@@ -1601,7 +1601,7 @@ describe('publication_gate adoption in compiled host commands (Phase C)', () => 
         `${destRelDir}/${basename}.md must expand the partial itself, not only name the value`,
       ).toContain('**Resolve `REVIEW_PUBLICATION` per worktree:**');
     }
-    expect(scanned, 'scanned zero publication hosts — guard is vacuous (PF-018)').toBeGreaterThan(0);
+    expect(scanned, 'scanned zero publication hosts — guard is vacuous').toBeGreaterThan(0);
   });
 
   it('every REVIEW_PUBLICATION: line in every compiled command is inside a Git-agent spawn block (spawn-scoped guard)', async () => {
@@ -1636,7 +1636,7 @@ describe('publication_gate adoption in compiled host commands (Phase C)', () => 
         `REVIEW_PUBLICATION: line found in non-Git spawn block(s): ${violations.join(', ')}`,
       ).toHaveLength(0);
     }
-    expect(scanned, 'scanned zero dist commands — guard is vacuous (PF-018)').toBeGreaterThan(0);
+    expect(scanned, 'scanned zero dist commands — guard is vacuous').toBeGreaterThan(0);
   });
 });
 
@@ -1889,7 +1889,7 @@ describe('_tracker.mds adoption + per-define non-emptiness (P2-S9)', () => {
     expect(
       defines,
       'the collector must see the seeded third define — otherwise the equality above is ' +
-      'green because nothing was ever parsed (PF-018)',
+      'green because nothing was ever parsed',
     ).toEqual(['issue_ref_grammar', 'issue_capture_contract', 'smuggled_partial']);
     expect(exports).toEqual(['issue_ref_grammar', 'issue_capture_contract', 'smuggled_partial']);
     expect(
@@ -2086,7 +2086,7 @@ describe('this file never spawns a build against the real repo root', () => {
     const source = await fs.readFile(SELF, 'utf-8');
     const { total, unscoped } = collectSpawnScoping(source);
 
-    expect(total, 'the scan found no spawn site at all — it is measuring nothing (PF-018)')
+    expect(total, 'the scan found no spawn site at all — it is measuring nothing')
       .toBeGreaterThan(0);
     expect(
       unscoped,

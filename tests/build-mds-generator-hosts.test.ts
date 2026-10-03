@@ -390,7 +390,7 @@ describe('13 command outputs byte-unchanged (key-only strip retained)', () => {
 
   it('dist/commands/ holds all 13 compiled outputs (fail-loud when unbuilt)', () => {
     const distFiles = requireDistFiles();
-    expect(distFiles.length, 'dist/commands/ must not be empty (PF-018)').toBeGreaterThan(0);
+    expect(distFiles.length, 'dist/commands/ must not be empty').toBeGreaterThan(0);
     for (const name of COMPILED_COMMANDS) {
       expect(distFiles, `dist/commands/${name}.md missing`).toContain(`${name}.md`);
     }
@@ -398,7 +398,7 @@ describe('13 command outputs byte-unchanged (key-only strip retained)', () => {
 
   it('every command output keeps its frontmatter block minus output-dir:', () => {
     const shapes = collectFrontmatterShapes(realCommandContents());
-    expect(shapes.length, 'command corpus must be non-empty (PF-018)').toBe(COMPILED_COMMANDS.length);
+    expect(shapes.length, 'command corpus must be non-empty').toBe(COMPILED_COMMANDS.length);
     for (const shape of shapes) {
       expect(shape.hasBlock, `${shape.name}.md lost its frontmatter block`).toBe(true);
       expect(shape.hasOutputDir, `${shape.name}.md leaked output-dir:`).toBe(false);
@@ -459,7 +459,7 @@ describe('13 command outputs byte-unchanged (key-only strip retained)', () => {
 
     const diff = diffDistTrees(fresh, onDisk);
     const remedy = 'run `npm run build:mds` — dist/ is out of sync with src/';
-    expect(diff.compared, 'no file was byte-compared (PF-018)')
+    expect(diff.compared, 'no file was byte-compared')
       .toBe(DIST_COMMAND_FILES.length + MDS_GENERATOR_HOSTS.length + EXPECTED_REFERENCE_KEYS.length);
     expect(diff.missingOnDisk, `built from src/ but absent from dist/ — ${remedy}`).toEqual([]);
     expect(diff.orphanOnDisk, `present in dist/ but built by nothing — ${remedy}`).toEqual([]);
@@ -1339,7 +1339,7 @@ describe('dist/skills/git/references orphan prune', () => {
   async function expectGeneratedReferencesPresent(fakeRoot: string): Promise<void> {
     expect(
       EXPECTED_REFERENCE_KEYS.length,
-      'the expected-reference roster is empty — these assertions would be vacuous (PF-018)',
+      'the expected-reference roster is empty — these assertions would be vacuous',
     ).toBeGreaterThan(0);
     for (const key of EXPECTED_REFERENCE_KEYS) {
       const file = path.join(fakeRoot, 'dist', ...key.split('/'));
@@ -1538,7 +1538,7 @@ describe('this file never spawns a build against the real repo root', () => {
     const source = await fs.readFile(SELF, 'utf-8');
     const { total, unscoped } = collectSpawnScoping(source);
 
-    expect(total, 'the scan found no spawn site at all — it is measuring nothing (PF-018)')
+    expect(total, 'the scan found no spawn site at all — it is measuring nothing')
       .toBeGreaterThan(0);
     expect(
       unscoped,
