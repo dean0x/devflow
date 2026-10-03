@@ -1,7 +1,7 @@
 /**
  * Static content guards for the Git agent.
  *
- * Pin the Git agent's safety-critical literals so silent edits fail loud (PF-018).
+ * Pin the Git agent's safety-critical literals so silent edits fail loud.
  * The agent is read through resolveAgentSource, which is dist-preferred: since
  * Phase 1 that means the compiled dist/agents/git.md, the artifact that ships.
  *
@@ -89,7 +89,7 @@ function cachedSinkCorpus(): CorpusEntry[] {
  * mechanics, silently changing the subject of a guard about the agent's own
  * degradation contract. A detection guard must therefore see git.md plus the
  * PR-host half of those operations and no further — widening it to
- * `gitAgentSinkCorpus()` is a blanket widening rather than a classification (ADR-025).
+ * `gitAgentSinkCorpus()` is a blanket widening rather than a classification.
  *
  * The literal-presence guards in this file read the full union on purpose: their
  * op set is fixed by the caller, the corpus only answers whether that op can
@@ -107,7 +107,7 @@ function gitPlusPrHostCorpus(): CorpusEntry[] {
  *
  * Shared by the known-bad probes below that seed a defect into a single
  * `references/pr/{op}.md` entry and drive the live guard's own predicate over
- * the result (PF-018) — the seeding is scaffolding common to both probes, the
+ * the result — the seeding is scaffolding common to both probes, the
  * defect and the predicate are what make each one distinct.
  */
 function seedPrHostFile(op: string, transform: (content: string) => string): CorpusEntry[] {
@@ -120,13 +120,13 @@ function seedPrHostFile(op: string, transform: (content: string) => string): Cor
 
 /**
  * The sink corpus with the PR-host references removed — the known-bad probe every
- * 'union' guard over a PR-host literal is proven live against (PF-018).
+ * 'union' guard over a PR-host literal is proven live against.
  *
  * A widening is only honest if dropping what it widened TO turns the guard red.
  * Without this, `mode: 'union'` is indistinguishable from `mode: 'sole'` on a
- * corpus that happens to still contain the literal somewhere, and ADR-025's
+ * corpus that happens to still contain the literal somewhere, and the per-literal
  * classification collapses into "widen everything until green" — the exact
- * failure that rule exists to forbid.
+ * failure that classification exists to forbid.
  *
  * Path-prefix matching on the corpus entry, not a re-read: every entry's `path`
  * is the absolute file it was read from, so the discriminator is the directory
@@ -150,7 +150,7 @@ function referenceRelPath(entryPath: string): string | null {
  * The sink corpus with every generated reference under `prefix` (relative to the
  * references root, e.g. `pr/` or `tracker/jira/`) removed — the known-bad probe
  * for a literal that moved into that tree. Throws when nothing is dropped: a probe
- * over a tree the build never emitted is vacuous (PF-018).
+ * over a tree the build never emitted is vacuous.
  */
 function sinkCorpusWithout(prefix: string): CorpusEntry[] {
   const dropped = cachedSinkCorpus().filter(
@@ -180,7 +180,7 @@ function sinkCorpusWithout(prefix: string): CorpusEntry[] {
 //       so the unit matched is the command, not the source line;
 //   (b) INLINE_BODY_SHAPES names each posting form separately, so an offender
 //       reports WHICH shape caught it and a probe can prove each arm live on its
-//       own (PF-018/PF-064 — an unnamed alternation inside one regex cannot say
+//       own (an unnamed alternation inside one regex cannot say
 //       which branch carried the match).
 
 /**
@@ -220,7 +220,7 @@ interface InlineBodyShape {
  * strict: only the quoted scrubber variable passes, because `--body-file $X` with
  * any other value posts a file the scrubber never wrote.
  *
- * NOT COVERED, deliberately (PF-064 — an empty offender list proves the WEAKEST of
+ * NOT COVERED, deliberately (an empty offender list proves the WEAKEST of
  * the claims it stacks, so the matcher's edge has to be written down rather than
  * inferred from a green run). `gh` accepts several spellings this table does not
  * read as sinks, each verified absent from the whole scanned corpus at the time it
@@ -244,7 +244,8 @@ interface InlineBodyShape {
  *     stands between that and a silent bypass.
  * Each is a non-goal only while nothing ships it. The moment a recipe adopts one,
  * it is a real bypass: add the shape here WITH its own row in the shape-table probe
- * below, in the same commit as the recipe (ADR-025) — never a silent alternation.
+ * below, in the same commit as the recipe, so the pair is reviewed as one change —
+ * never a silent alternation.
  */
 const INLINE_BODY_SHAPES: readonly InlineBodyShape[] = [
   // `gh pr create … --body "…"`, `gh issue close … --comment "…"`,
@@ -311,7 +312,7 @@ function matchInlineBodyShapes(text: string): { shape: string; match: string }[]
  * Named collector (forward arm): offenders that no entry in `known` accounts for.
  *
  * Parameterised on both inputs so the known-bad probe drives the SAME predicate
- * the live assertion does (PF-018).
+ * the live assertion does.
  */
 function collectUndeclaredOffenders(
   offenders: readonly InlineBodyOffender[],
@@ -335,7 +336,7 @@ function collectStaleExclusions(
  * Named collector: every inline-body form in a corpus.
  *
  * Parameterised on the corpus so the live assertion, the shape probe and the
- * baseline known-bad probe all drive the SAME predicate (PF-018) — the baseline
+ * baseline known-bad probe all drive the SAME predicate — the baseline
  * probe in particular needs a second, permanently-known-bad corpus to run it over.
  */
 function collectInlineBodyOffenders(corpus: readonly CorpusEntry[]): InlineBodyOffender[] {
@@ -519,9 +520,9 @@ interface ProviderDetector {
  * ships one ("… reaches GitHub through `$DEVFLOW_BODY`"). The first time prose like
  * that lands in a cross-cutting section the guard goes red for a word that is not a
  * provider detector at all, and the next reader narrows the guard instead of reading
- * the hit (PF-064, in the false-positive direction).
+ * the hit.
  *
- * NOT COVERED, deliberately (PF-064 — the matcher's edge is written down rather than
+ * NOT COVERED, deliberately (the matcher's edge is written down rather than
  * inferred from a green run). Each was checked absent from BOTH the live agent's
  * cross-cutting text and the pre-split baseline at the time this table was written:
  *   - the provider's NAME in prose (`GitHub`, `github.com`). Always-loaded text may
@@ -532,7 +533,7 @@ interface ProviderDetector {
  *     with no evidence behind it.
  * Each is a non-goal only while nothing ships it. The moment a cross-cutting line
  * adopts one, add the row here WITH its own row in the detector probe below, in the
- * same commit (ADR-025).
+ * same commit, so the pair is reviewed as one change.
  */
 const PROVIDER_DETECTORS: readonly ProviderDetector[] = [
   {
@@ -574,7 +575,7 @@ const PROVIDER_DETECTORS: readonly ProviderDetector[] = [
  * The section starts come from `collectUnfencedH2` rather than a raw
  * `/^## (.+)$/gm` split. A `## ` line inside an operation's fenced Output template
  * is the literal text that operation PRINTS — not a slice of always-loaded agent
- * text (PF-063). Splitting on the raw shape reported 21 "cross-cutting sections"
+ * text. Splitting on the raw shape reported 21 "cross-cutting sections"
  * for a file that has three, because 18 of them were Output-template headings
  * lifted out of operation bodies: the exact opposite of what this docblock claims
  * to scan, and a corpus that would report an operation's own `gh` line as a
@@ -600,7 +601,7 @@ function collectCrossCuttingSections(text: string): Array<{ label: string; body:
  *
  * The matching row is named in the hit, for the same reason `INLINE_BODY_SHAPES`
  * reports which shape caught an offender: a table whose failures cannot say which
- * row fired cannot tell a live row from a dead one (PF-018).
+ * row fired cannot tell a live row from a dead one.
  */
 function collectProviderDetectors(
   sections: ReadonlyArray<{ label: string; body: string }>,
@@ -756,7 +757,7 @@ function unscrubbedPostingCorpus(): CorpusEntry[] {
  * Same provenance and the same job as the posting samples above: D4 says STOP the
  * fan-out and report THROTTLED, and these are the three lines that said wait
  * instead. The GAP-25 rule below is an absence assertion, so it is green over a
- * corpus the collector can no longer read; this is what keeps it honest (PF-018).
+ * corpus the collector can no longer read; this is what keeps it honest.
  */
 const RATE_LIMIT_SLEEP_SAMPLES: readonly string[] = [
   'if [ "$REMAINING" -lt 10 ]; then sleep 60; fi',
@@ -775,11 +776,12 @@ function rateLimitSleepCorpus(): CorpusEntry[] {
 /**
  * Collect conventions-commit placement violations from a corpus.
  *
- * Pins (PF-030, PF-058):
+ * Pins, so the conventions commit lands on the feature branch and a missing batch ref is
+ * reported rather than dropped:
  *   (a) setup-task step 4b commits `.devflow/conventions.md` after branch creation — sole mode;
  *       git.md is the single authority.
  *   (b) learn-conventions contains NO `commit --only` — the commit has moved to setup-task step 4b
- *       (ADR-003: end state only; the old **Commit (non-blocking):** block must not reappear).
+ *       (end state only; the old **Commit (non-blocking):** block must not reappear).
  *   (c) fetch-issues-batch reports `NOT_FOUND ({refs})` and strips #-prefixed refs before parsing.
  *   (d) fetch-issue strips #-prefixed refs in step 1 before the numeric/text branch.
  *
@@ -800,7 +802,7 @@ function rateLimitSleepCorpus(): CorpusEntry[] {
  *     narrowed to git.md would go blind the moment the learn-conventions body
  *     moves into a reference. It stays wide on purpose.
  *
- * Missing op = violation, never a silent pass (PF-018).
+ * Missing op = violation, never a silent pass.
  */
 function collectConventionsCommitPlacementViolations(
   contractCorpus: CorpusEntry[],
@@ -911,7 +913,7 @@ function collectConventionsCommitPlacementViolations(
   return violations;
 }
 
-describe('git agent — static content guards (PF-018)', () => {
+describe('git agent — static content guards', () => {
   // Single-file corpus for operations that have exactly one authority file
   let content: string;
   let soleCorpus: CorpusEntry[];
@@ -975,7 +977,7 @@ describe('git agent — static content guards (PF-018)', () => {
   it('post-review-summary: 60000-char comment cap is present', () => {
     // Mode 'union' [DR-18]: the compose step that states the cap lives in
     // references/pr/post-review-summary.md, so the pin reads the op's union
-    // section (ADR-025 — the mode is named at the call site).
+    // section (the mode is named at the call site).
     const sec = extractOpSection(cachedSinkCorpus(), 'post-review-summary', 'union');
     expect(
       sec,
@@ -984,7 +986,7 @@ describe('git agent — static content guards (PF-018)', () => {
   });
 
   it('post-review-summary: 60000-char cap known-bad probe — dropping the PR-host tree loses it', () => {
-    // PF-018: the union read above is only honest if the literal is gone from
+    // The union read above is only honest if the literal is gone from
     // the narrower corpus. If this ever passes, the cap came back to git.md
     // and the guard should be re-classified 'sole', not left widened.
     expect(
@@ -1049,7 +1051,7 @@ describe('git agent — static content guards (PF-018)', () => {
     // op's `**Output:**` enum in git.md alone (its TRUNCATED arm spells `≤50`), so
     // it would pin an output label and stay green with the loop's bound gone. The
     // guard pins the loop's own sentence instead, which only the PR-host half
-    // carries — the probe below holds it there (ADR-025).
+    // carries — the probe below holds it there.
     const sec = extractOpSection(cachedSinkCorpus(), 'resolve-review-threads', 'union');
     expect(
       sec,
@@ -1093,7 +1095,7 @@ describe('git agent — static content guards (PF-018)', () => {
 
   it('fetch-issues-batch: "## Issues Batch ({n} issues)" output header is present (AC-0.3)', () => {
     // Op-scoped: the header is a `## ` line inside this op's Output fence, and a
-    // fenced heading is payload rather than a section boundary (PF-063), so the
+    // fenced heading is payload rather than a section boundary, so the
     // assertion pins the header to the operation that renders it rather than to
     // the file as a whole.
     const sec = extractOpSection(soleCorpus, 'fetch-issues-batch', 'sole');
@@ -1287,7 +1289,7 @@ describe('git agent — static content guards (PF-018)', () => {
     // scan was simultaneously too wide (operation payload) and unable to say so. The
     // real cross-cutting text is the header — D4, the tracker preamble, D11, the
     // operations table, the marker legend all sit above the first operation — plus
-    // the two shared trailers (ADR-025: the narrower corpus is reclassified here,
+    // the two shared trailers (the narrower corpus is reclassified here,
     // not accommodated by loosening the assertion).
     expect(
       sections.map(s => s.label),
@@ -1303,7 +1305,7 @@ describe('git agent — static content guards (PF-018)', () => {
   });
 
   it('P2-S4 known-bad probe: a fenced `## ` is operation payload, the same heading unfenced is a section', () => {
-    // Both arms drive the real collector (PF-018). The fenced arm is the shape git.md
+    // Both arms drive the real collector. The fenced arm is the shape git.md
     // actually ships — every operation closes with an Output template whose headings
     // are the text the operation prints — and the unfenced arm is the control that
     // stops "ignore every `## ` after the first operation" from passing as fence-aware.
@@ -1374,7 +1376,7 @@ describe('git agent — static content guards (PF-018)', () => {
     // guard was missing: its predecessor matched three substrings, and `'gh '` sits
     // inside `through `, `high `, `enough ` and `although `, so the rule could fail on a
     // line carrying no provider detector at all and the next reader would narrow the
-    // guard rather than read the hit (PF-064). Both halves drive the real collector.
+    // guard rather than read the hit. Both halves drive the real collector.
     const hits = (line: string): string[] =>
       collectProviderDetectors([{ label: '(probe)', body: line }]);
 
@@ -1463,7 +1465,7 @@ describe('git agent — static content guards (PF-018)', () => {
     ).toEqual([AUTHORITY]);
 
     // Non-vacuity: the authority really does carry the token, so an empty result
-    // would be a deleted rung rather than a clean tree (PF-018).
+    // would be a deleted rung rather than a clean tree.
     expect(
       readFileSync(naming[0], 'utf-8'),
       'the authority file must still state the rung it is the authority for',
@@ -1472,7 +1474,7 @@ describe('git agent — static content guards (PF-018)', () => {
 
   it('P2-S4: the D4 and D11 INVARIANTS stay in the always-loaded agent', () => {
     // The other half of the split: nothing that decides whether to stop, or whether a
-    // body may be posted, may become a file the spawn might not have (PF-027).
+    // body may be posted, may become a file the spawn might not have.
     for (const invariant of [
       'STOP the current fan-out operation immediately',
       'THROTTLED ({n} not processed)',
@@ -1512,7 +1514,7 @@ describe('git agent — static content guards (PF-018)', () => {
   });
 
   it('dedup marker FORM known-bad probe — both marker literals left git.md with their steps', () => {
-    // PF-018 for the pair above. Neither marker may survive in git.md:
+    // The non-vacuity probe for the pair above. Neither marker may survive in git.md:
     // an op that restates its own dedup marker in the contract is the GAP-20 shape
     // (two authorities on one idempotency key).
     const narrowed = sinkCorpusWithoutPrHost();
@@ -1547,9 +1549,8 @@ describe('git agent — static content guards (PF-018)', () => {
   // op's UNION section rather than over a whole file, where a file-scoped
   // `toContain` could not say WHICH operation carried the control: the control
   // must be reachable from the operation that applies it, not merely present
-  // somewhere on the spawn surface. PF-058's shape — a
-  // containment control is owed by each op independently — asserted per op rather
-  // than once for the file.
+  // somewhere on the spawn surface. A containment control is owed by each op
+  // independently, so it is asserted per op rather than once for the file.
   const D10_SUMMARY_OPS = ['post-review-summary', 'post-resolution-summary'] as const;
 
   /**
@@ -1557,7 +1558,7 @@ describe('git agent — static content guards (PF-018)', () => {
    * table below, which requires every summary op to reach it, and the known-bad
    * probe, which seeds it away from one of them. Re-spelt at the probe it was a
    * second authority that could keep its own copy of a literal the live guard no
-   * longer checks (PF-018).
+   * longer checks.
    */
   const D10_FAIL_CLOSED_LITERAL = 'treat as PUBLIC';
 
@@ -1583,7 +1584,7 @@ describe('git agent — static content guards (PF-018)', () => {
   /**
    * The D10 per-op containment predicate: can `op` reach `literal` in `corpus`?
    *
-   * Mode 'union' [DR-18] — named here, once (ADR-025). The live guard and its
+   * Mode 'union' [DR-18] — named here, once. The live guard and its
    * known-bad probe both call it, so narrowing the predicate takes the probe red
    * instead of leaving a copy of the old spelling standing behind the guard it is
    * supposed to freeze.
@@ -1603,7 +1604,7 @@ describe('git agent — static content guards (PF-018)', () => {
   });
 
   it('D10 known-bad probe: deleting one literal from ONE pr/ file is reported for that op only', () => {
-    // PF-018. Seeds a corpus in which post-review-summary's PR-host
+    // Seeds a corpus in which post-review-summary's PR-host
     // mechanics have lost the fail-closed rule, and drives the live guard's OWN
     // predicate (d10Reaches) over the result. A file-scoped `toContain` over
     // git.md ∪ references could not report it: the sibling op's copy of the same
@@ -1645,7 +1646,7 @@ describe('git agent — static content guards (PF-018)', () => {
   });
 
   it('D10: REVIEW_PUBLICATION is documented with all four values: auto, full, off, stub', () => {
-    // RE-POINTED, not weakened (applies ADR-025). The three-value enumeration used to
+    // RE-POINTED, not weakened. The three-value enumeration used to
     // be spelled in BOTH summary op sections AND, byte-identically, in
     // references/publication-gate.md — three copies of one enum, each free to drift.
     // The reference is the authority both ops name (the [DR-20](i) arm below proves
@@ -1653,7 +1654,7 @@ describe('git agent — static content guards (PF-018)', () => {
     // are asserted to still route the input into it.
     //
     // What deliberately did NOT move: the fail-closed visibility probe. That is a
-    // containment control, so it stays spelled inline in both ops (PF-058) and the
+    // containment control, so it stays spelled inline in both ops and the
     // [DR-20](ii) arm below is what holds it there.
     //
     // `stub` joined in #362: a caller whose evidence policy turns `off` into a
@@ -1701,7 +1702,7 @@ describe('git agent — static content guards (PF-018)', () => {
   // AC-2.6's guard count rises rather than falls.
   //
   // The scope property is a THREE-site rule, and each site holds the literal for a
-  // different reason (PF-058 — containment is several separate obligations, not one):
+  // different reason (containment is several separate obligations, not one):
   //
   //   publication-gate.md            the gate's own step order, the one authority
   //                                  on how REVIEW_PUBLICATION resolves;
@@ -1710,7 +1711,7 @@ describe('git agent — static content guards (PF-018)', () => {
   //
   // Why the probe is spelled three times rather than deferred to the gate: it is a
   // containment control, and a control an operation must load a SECOND file to
-  // learn is a control that can go missing when that load does not happen (PF-027).
+  // learn is a control that can go missing when that load does not happen.
   // The gate states the resolution order; each operation states the probe it must
   // run itself. `git.md` is NOT a site — both step 3s live in the PR-host
   // references — which is why the set below names files and no op inside git.md.
@@ -1820,13 +1821,13 @@ describe('git agent — static content guards (PF-018)', () => {
    * known-bad probe, which re-asks it over the corpus with the PR-host tree
    * dropped. Re-spelt at the probe, narrowing the live predicate would leave the
    * probe green against a set the guard no longer scans — a frozen copy of a
-   * rule nobody enforces (PF-018).
+   * rule nobody enforces.
    */
   const isPostingSection = (sec: string): boolean =>
     sec.includes('--body-file') || sec.includes('-F body=@');
 
   it('D11: every posting op (--body-file or -F body=@) references D11 (forward guard, ≥9 ops)', () => {
-    // Non-vacuous: assert ≥ 9 posting ops exist AND each one references D11 (PF-018)
+    // Non-vacuous: assert ≥ 9 posting ops exist AND each one references D11
     // Sink corpus = git.md ∪ dist/skills/git/references/*.md (ENOENT-tolerant on dist).
     // Mode 'union' — a posting op's D11 reference may live in a moved mechanics file
     // (Phase 2+); unioning ensures the floor never silently drops below 9 [DR-18, AC-0.8].
@@ -1921,8 +1922,7 @@ describe('git agent — static content guards (PF-018)', () => {
     // The forward guard above only inspects ops that ALREADY use --body-file, so it is
     // blind to a bypass: `gh pr create --body "…"` posts an unscrubbed body and would
     // never be visited. This guard is the reverse check — it fails on any inline body
-    // form anywhere in the scanned corpus, which is exactly how a new sink escapes D11
-    // (PF-023).
+    // form anywhere in the scanned corpus, which is exactly how a new sink escapes D11.
     //
     // #341 widened it again on both axes:
     //   pattern — continuations are folded first and the forms are a named table
@@ -1971,7 +1971,7 @@ describe('git agent — static content guards (PF-018)', () => {
   });
 
   it('D11: shape table probe — each of the five inline-body shapes fires, and the scrubbed forms do not', () => {
-    // One arm per INLINE_BODY_SHAPES entry, each proven live on its own (PF-018):
+    // One arm per INLINE_BODY_SHAPES entry, each proven live on its own:
     // a five-way alternation inside one regex cannot say which branch carried a
     // match, so a dead arm would be invisible behind the four that still work.
     const positives: readonly (readonly [string, string, string])[] = [
@@ -2031,7 +2031,7 @@ describe('git agent — static content guards (PF-018)', () => {
   it('D11: known-bad probe — every unscrubbed posting recipe is reported by the same collector', () => {
     // The live arms above assert an EMPTY offender list, which a collector that
     // matched nothing would also satisfy. This drives the SAME collector over the
-    // known-bad corpus, so a shape that stopped matching is named here (PF-018).
+    // known-bad corpus, so a shape that stopped matching is named here.
     const offenders = collectInlineBodyOffenders(unscrubbedPostingCorpus());
     const reported = new Set(offenders.map(o => o.file));
     const unreported = unscrubbedPostingCorpus()
@@ -2064,7 +2064,7 @@ describe('git agent — static content guards (PF-018)', () => {
   it('D11: the scan reaches the whole installed prompt surface, not just the Git agent neighbourhood', () => {
     const { corpus, agents, generated } = cachedInlineBodyCorpus();
     // Provenance, not a total: a corpus floor met by the skills tree alone would
-    // still claim to scan agents, commands and rules (PF-018).
+    // still claim to scan agents, commands and rules.
     expect(
       agents,
       'every declared agent must be scanned — a missing one is a prompt nobody policed',
@@ -2126,7 +2126,7 @@ describe('git agent — static content guards (PF-018)', () => {
 
   it('D11: known-bad probe — a declared exception that matches nothing is reported by the same reverse collector', () => {
     // The reverse arm ranges over KNOWN_GITHUB_API_INLINE_BODIES, which is empty, so
-    // it is vacuous on the live inputs (PF-018). Seed the list instead and drive the
+    // it is vacuous on the live inputs. Seed the list instead and drive the
     // SAME collector, so the ratchet that forces a stale entry out is proven live.
     const offenders: InlineBodyOffender[] = [
       { file: GITHUB_API_MD_PATH, shape: 'api-field', match: '-f body=' },
@@ -2155,7 +2155,7 @@ describe('git agent — static content guards (PF-018)', () => {
   });
 
   it('D11: ensure-pr-ready known-bad probe — the create sink is in the PR-host tree', () => {
-    // PF-018 for the widening above. The probe asks for the CREATE call
+    // Non-vacuity for the widening above. The probe asks for the CREATE call
     // specifically: `pr/ensure-pr-ready.md` holds two scrubbed writes (4a's create
     // and 4b's edit), and asking for "Comment-sink scrub (D11)" would not say which
     // one the narrowed corpus lost.
@@ -2200,12 +2200,12 @@ describe('git agent — static content guards (PF-018)', () => {
   });
 
   it('GAP-25: the learn-conventions branch bound is stated exactly once', () => {
-    // NOT COVERED, deliberately (PF-064 — the corpus half of the stack is written down
+    // NOT COVERED, deliberately (what the corpus cannot see is written down
     // rather than inferred from a green count). `gitAuthorityCorpus()` is the AUTHORED
     // preload surface only, so it cannot see `dist/skills/git/references/`, where the
     // OPERATIVE bound now lives in its command spelling
-    // (`learn-conventions.md:22`, `… | head -50`). Widening the corpus is refused under
-    // ADR-025: the property here is "one authority within the text a spawn preloads",
+    // (`learn-conventions.md:22`, `… | head -50`). Widening the corpus is refused:
+    // the property here is "one authority within the text a spawn preloads",
     // and a joined corpus would only prove that the literal exists somewhere while
     // losing the scope that makes the count mean anything. The moved spelling is not
     // unpinned by that refusal — `learn-conventions: branch scan bound (head -50) is
@@ -2335,7 +2335,7 @@ describe('git agent — static content guards (PF-018)', () => {
     // indicators below are an explicit list (not derived from op text).
     // D4 scope: all ops that call gh CLI or a remote tracker (posting, mutation, or read-only fetch).
     // G1 added D4 to fetch-issue (~:268) and fetch-issues-batch (~:314) — both fetch remotely via gh.
-    // Two corpora, one per question, and the split is the point (ADR-025):
+    // Two corpora, one per question, and the split is the point:
     //   DETECTION reads git.md ∪ the PR-host references — these ops' `gh` calls
     //     live in references/pr/, and a 'sole' read silently narrows the
     //     remote-I/O set from 15 to 14 (post-resolution-summary's `gh` indicators
@@ -2344,8 +2344,8 @@ describe('git agent — static content guards (PF-018)', () => {
     //     FULL sink corpus `setup-task` would be detected through its provider
     //     mechanics, which is a different guard about a different file.
     //   D4 EVIDENCE stays 'sole' — the degradation contract is the agent's, and a
-    //     clause in a loadable reference is a clause a spawn can decline to load
-    //     (PF-027). git.md alone must answer for it.
+    //     clause in a loadable reference is a clause a spawn can decline to load.
+    //     git.md alone must answer for it.
     const remoteOps: string[] = [];
     const missingD4: string[] = [];
     for (const op of REQUIRED_OPS) {
@@ -2458,7 +2458,7 @@ describe('git agent — static content guards (PF-018)', () => {
    * Declared at describe scope so the negative arm and its known-bad probe read the
    * SAME predicate. Spelling the alternation twice would leave the probe green after
    * the live arm was narrowed — an absence check proven by a regex the live arm no
-   * longer uses proves nothing about the live arm (PF-018).
+   * longer uses proves nothing about the live arm.
    */
   const REMOTE_PLACEHOLDER_RE = /\{body\}|\{description\}|\{title\}/;
 
@@ -2550,10 +2550,11 @@ describe('git agent — static content guards (PF-018)', () => {
   });
 
   it('containment negative arm known-bad probe: a placeholder seeded in a pr/ body is reported', () => {
-    // PF-018 / PF-064. The arm above is an ABSENCE check over a corpus that spans
-    // two files. Seeds `{title}` into the PR-host compose template and drives the
-    // arm's own surface function and predicate over it; the arm's in-scope witness
-    // is what holds the live call on that same surface.
+    // The arm above is an ABSENCE check over a corpus that spans two files, and an
+    // absence proves nothing until a seeded hit is caught. Seeds `{title}` into the
+    // PR-host compose template and drives the arm's own surface function and
+    // predicate over it; the arm's in-scope witness is what holds the live call on
+    // that same surface.
     const seeded = seedPrHostFile(
       'post-review-summary',
       c => `${c}\nEcho the thread {title} verbatim.\n`,
@@ -2622,7 +2623,7 @@ describe('git agent — static content guards (PF-018)', () => {
   });
 
   it('the `## Operation:` anchor is fence-aware at BOTH ends: a fenced heading is a sample, not a match', () => {
-    // The terminator has been fence-aware since PF-063; the start anchor was not, so a
+    // The terminator was already fence-aware; the start anchor was not, so a
     // corpus file quoting an operation heading inside a fence — the shape
     // ensure-traceable-issue's D3 template and manage-debt's successor body already use
     // for their `## ` lines — counted as a second declaring file and made 'sole' mode
@@ -2671,7 +2672,7 @@ describe('git agent — static content guards (PF-018)', () => {
     expect(sec.includes('Comment-sink scrub (D11)'), 'D11 reference must be absent in the known-bad').toBe(false);
   });
 
-  // ── Guard 12: Conventions-commit placement and batch NOT_FOUND rule (PF-030, PF-058) ──
+  // ── Guard 12: Conventions-commit placement and batch NOT_FOUND rule ──
   //
   // Pins the contracts introduced in commit ae62d0a:
   //   (a) setup-task step 4b commits .devflow/conventions.md on the feature branch,
@@ -2680,7 +2681,7 @@ describe('git agent — static content guards (PF-018)', () => {
   //   (c) fetch-issues-batch drops (not aborts on) null GraphQL aliases → NOT_FOUND ({refs}).
   //   (d) fetch-issue and fetch-issues-batch both strip a leading # from their ref inputs.
   //
-  // Named collector + known-bad probe (H10, PF-043): proves detection is live.
+  // Named collector + known-bad probe (H10): proves detection is live.
 
   it('conventions-commit placement and batch NOT_FOUND rule: live corpus has no violations', () => {
     // contract corpus: git.md only (mode 'sole'); sink corpus: git.md ∪ references (arm b).
@@ -2691,9 +2692,10 @@ describe('git agent — static content guards (PF-018)', () => {
     ).toEqual([]);
   });
 
-  it('conventions-commit placement: known-bad synthetic corpus triggers violations (H10, PF-043)', () => {
-    // PF-043: synthetic corpus built from real git.md content (copy + targeted mutation),
-    // never hand-authored. PF-018: calls the same named collector as the live guard.
+  it('conventions-commit placement: known-bad synthetic corpus triggers violations (H10)', () => {
+    // Synthetic corpus built from real git.md content (copy + targeted mutation),
+    // never hand-authored, so it holds only shapes the real file can have. It calls
+    // the same named collector as the live guard.
     //
     // Mutation 1: remove setup-task's 4b step block.
     //   Search from the setup-task marker so ensure-pr-ready's unrelated 4b. (git.md:~113)
@@ -2828,7 +2830,7 @@ describe('git agent: the operation roster is unchanged (registry Guard 6)', () =
  * Deliberately NOT a byte-exact sentence. The defect this exists for was a
  * PARAPHRASE — a second author restating the gate in their own words and getting
  * it wrong — and a byte-exact registry entry matches only the spelling somebody
- * already wrote down. The window is bounded (PF-018) so a file that mentions the
+ * already wrote down. The window is bounded so a file that mentions the
  * status in one paragraph and a verdict three paragraphs later is not reported.
  */
 const D9_RESOLVE_CONDITION = /VERIFICATION_STATUS[\s\S]{0,200}?\b(FIXED|FALSE_POSITIVE|BY_DESIGN)\b/;
@@ -2916,10 +2918,10 @@ describe('git agent: the D9 resolve condition is stated once in the reference tr
 //     (a tracker op resolves its provider per spawn, so one provider carrying it
 //     says nothing about the other two — the check is per tree, never a union);
 //   - the text left git.md, so the obligation has one home rather than two;
-//   - the per-tree check goes red when that tree is absent (PF-018, PF-064).
-// Each literal is wording that exists ONLY in the moved text (ADR-025's
-// correction: a literal the retained half still spells in another role would
-// let the reach arm pass from git.md alone).
+//   - the per-tree check goes red when that tree is absent.
+// Each literal is wording that exists ONLY in the moved text (a literal the
+// retained half still spells in another role would let the reach arm pass from
+// git.md alone).
 // ---------------------------------------------------------------------------
 
 /** One obligation moved into generated references. */
@@ -2954,7 +2956,7 @@ const MOVED_OBLIGATIONS: readonly MovedObligation[] = [
 /**
  * Named collector: every (tree, obligation) pair whose reference does not carry
  * the moved text inside the op's own section — fence-aware, so text stranded
- * below a stray unfenced `## ` would be reported rather than counted (PF-063).
+ * below a stray unfenced `## ` would be reported rather than counted.
  */
 function collectUnreachedObligations(
   corpus: readonly CorpusEntry[],
@@ -2978,7 +2980,7 @@ function collectUnreachedObligations(
 describe('git agent: text moved out of the always-loaded agent still reaches its spawn (#358)', () => {
   const gitOnly: CorpusEntry[] = [{ path: GIT_AGENT_PATH, content: GIT_AGENT_SOURCE.content }];
 
-  it('the obligation set and the tree set are non-empty (PF-018)', () => {
+  it('the obligation set and the tree set are non-empty', () => {
     expect(MOVED_OBLIGATIONS.length, 'no moved obligation is registered').toBeGreaterThan(0);
     expect(
       TRACKER_PROVIDER_TREES,
@@ -3002,7 +3004,7 @@ describe('git agent: text moved out of the always-loaded agent still reaches its
   });
 
   it('known-bad probe: dropping a tree reports every obligation that tree carries', () => {
-    // Probe cardinality matches arm cardinality (PF-064): every tree any
+    // Probe cardinality matches arm cardinality: every tree any
     // obligation names is removed in turn, and each must report exactly the
     // obligations routed through it.
     const trees = [...new Set(MOVED_OBLIGATIONS.flatMap(o => o.trees))];
