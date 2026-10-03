@@ -10,8 +10,8 @@
 // held by withDecisionsLock is released on every path, the throw included.
 //
 // Loading: node built-ins and three sibling libs only. This module never requires
-// decisions-format.cjs or render-decisions.cjs at load time: render-decisions.cjs
-// requires it for the status list.
+// decisions-format.cjs or render-decisions.cjs at load time: both require it, for
+// the status list and the one-line and inactive-note text they share with `list`.
 //
 // Files under <root>/.devflow/learning/:
 //   decisions-log.jsonl          observation rows — the content authority
@@ -185,7 +185,13 @@ function sameJson(a, b) {
   return JSON.stringify(a) === JSON.stringify(b);
 }
 
-/** `text` with each run of control characters collapsed to one space. */
+/**
+ * `text` with each run of control characters collapsed to one space: listings and
+ * the rendered files show every field on one line.
+ *
+ * @param {string} text
+ * @returns {string}
+ */
 function singleLine(text) {
   return text.replace(CONTROL_RUN_RE, ' ');
 }
@@ -988,7 +994,14 @@ function listingTitle(row) {
   return typeof raw === 'string' ? cutTo(singleLine(raw), FIELD_LIMITS.title) : '';
 }
 
-/** Why an inactive entry is inactive, in a few words, or '' when it records nothing. */
+/**
+ * Why an inactive entry is inactive, in a few words, or '' when it records nothing:
+ * `encoded in <path>`, else `superseded by <anchor>`, else the status note. `list`
+ * and the rendered Inactive table both show it.
+ *
+ * @param {object} row - a ledger row
+ * @returns {string}
+ */
 function inactiveNote(row) {
   if (isPlainObject(row.encoded_at) && isNonEmptyString(row.encoded_at.path)) return `encoded in ${row.encoded_at.path}`;
   if (isNonEmptyString(row.superseded_by)) return `superseded by ${row.superseded_by}`;
@@ -1254,6 +1267,9 @@ module.exports = {
   isActive,
   activeStatusFor,
   isV2,
+  // Text shared with the renderer
+  singleLine,
+  inactiveNote,
   // JSONL I/O
   readJsonl,
   rejectedPathFor,

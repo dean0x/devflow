@@ -11,6 +11,7 @@ import { describe, it, expect, beforeAll } from 'vitest';
 import { createRequire } from 'module';
 import * as path from 'path';
 import { isLearningObservation } from '#core/observations.js';
+import { makeV2LedgerRow, requireLearningStore } from './learning-fixtures.js';
 
 const ROOT = path.resolve(import.meta.dirname, '../..');
 const require = createRequire(import.meta.url);
@@ -19,6 +20,9 @@ const {
   initDecisionsContent,
   formatDecisionBody,
   formatPitfallBody,
+  formatEntryBodyV2,
+  formatInactiveTable,
+  formatIndexEntryLineV2,
   buildTldrLine,
   buildIndexContent,
   segmentDetails,
@@ -27,6 +31,9 @@ const {
   initDecisionsContent: (kind: 'decision' | 'pitfall') => string;
   formatDecisionBody: (row: Record<string, unknown>) => string;
   formatPitfallBody: (row: Record<string, unknown>) => string;
+  formatEntryBodyV2: (row: Record<string, unknown>) => string;
+  formatInactiveTable: (rows: Record<string, unknown>[]) => string;
+  formatIndexEntryLineV2: (row: Record<string, unknown>) => string;
   buildTldrLine: (kind: 'decisions' | 'pitfalls', rows: Record<string, unknown>[]) => string;
   buildIndexContent: (
     activeDecisionRows: Record<string, unknown>[],
@@ -866,6 +873,207 @@ describe('buildIndexContent', () => {
     const result = buildIndexContent([row], [], OPTS);
     expect(result).toContain('ADR-099');
     expect(result).toContain('[unknown]');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// v2 entries: the body, the Inactive table and the index line
+// ---------------------------------------------------------------------------
+
+const V2_DECISION = makeV2LedgerRow({
+  anchor_id: 'ADR-002',
+  scope: ['area:learning', 'src/**/*.cjs'],
+});
+
+const V2_PITFALL = makeV2LedgerRow({
+  id: 'obs_store_two',
+  type: 'pitfall',
+  anchor_id: 'PF-003',
+  decisions_status: 'Active',
+  title: 'Writers refuse a missing learning tree',
+  rule: 'A learning writer refuses when the learning directory is absent and never creates it.',
+  why: 'Run from the wrong directory, a writer that creates the tree writes a ledger nobody reads.',
+  scope: ['area:learning'],
+  provenance: 'a stray nested tree in the main checkout',
+  last_verified: undefined,
+});
+
+describe('formatEntryBodyV2', () => {
+  it('renders a decision from its fields, with the verified date on the Status line', () => {
+    expect(formatEntryBodyV2(V2_DECISION)).toBe(
+      '\n## ADR-002: Store functions return a Result\n\n' +
+      '- **Status**: Accepted · verified 2026-09-01\n' +
+      '- **Scope**: `area:learning`, `src/**/*.cjs`\n' +
+      '- **Decision**: Every learning store function returns a Result and never exits or prints.\n' +
+      '- **Why**: An exit inside the lock skips its release, and printing ties the store to one caller.\n' +
+      '- **Source**: learning v2 design review\n',
+    );
+  });
+
+  it('renders a pitfall with Active and a Rule line, and no verified suffix without last_verified', () => {
+    expect(formatEntryBodyV2(V2_PITFALL)).toBe(
+      '\n## PF-003: Writers refuse a missing learning tree\n\n' +
+      '- **Status**: Active\n' +
+      '- **Scope**: `area:learning`\n' +
+      '- **Rule**: A learning writer refuses when the learning directory is absent and never creates it.\n' +
+      '- **Why**: Run from the wrong directory, a writer that creates the tree writes a ledger nobody reads.\n' +
+      '- **Source**: a stray nested tree in the main checkout\n',
+    );
+  });
+
+  it("shows the active status of the entry's type, whatever status the active row carries", () => {
+    expect(formatEntryBodyV2({ ...V2_DECISION, decisions_status: undefined }))
+      .toContain('- **Status**: Accepted · verified 2026-09-01\n');
+    expect(formatEntryBodyV2({ ...V2_PITFALL, decisions_status: 'Accepted' })).toContain('- **Status**: Active\n');
+  });
+
+  it('collapses line terminators and control characters so no field adds a line', () => {
+    const body = formatEntryBodyV2({
+      ...V2_DECISION,
+      title: 'two\nlines',
+      rule: 'a\r\nb',
+      why: 'c d',
+      provenance: 'e f\tg',
+      scope: ['x\ny'],
+      last_verified: '2026-09-01\n## PF-999: forged',
+    });
+    expect(body).toBe(
+      '\n## ADR-002: two lines\n\n' +
+      '- **Status**: Accepted · verified 2026-09-01 ## PF-999: forged\n' +
+      '- **Scope**: `x y`\n' +
+      '- **Decision**: a b\n' +
+      '- **Why**: c d\n' +
+      '- **Source**: e f g\n',
+    );
+    expect(body.match(/^## /gm)).toHaveLength(1);
+  });
+
+  it('keeps its shape for a hand-edited row that lacks a scope and a source', () => {
+    const body = formatEntryBodyV2({ ...V2_DECISION, scope: undefined, provenance: 42 });
+    expect(body).toContain('- **Scope**: \n');
+    expect(body).toContain('- **Source**: \n');
+  });
+});
+
+describe('formatInactiveTable', () => {
+  const store = requireLearningStore();
+  const INACTIVE_ROWS = [
+    makeV2LedgerRow({
+      anchor_id: 'ADR-004',
+      decisions_status: 'Encoded',
+      encoded_at: { path: 'src/core/flags.ts', quote: 'export const FLAGS', ref: 'HEAD', commit: 'a'.repeat(40) },
+    }),
+    makeV2LedgerRow({ anchor_id: 'ADR-005', decisions_status: 'Superseded', superseded_by: 'ADR-002' }),
+    makeV2LedgerRow({ anchor_id: 'ADR-006', decisions_status: 'Retired', status_note: 'a one-off' }),
+    { id: 'obs_legacy', type: 'decision', anchor_id: 'ADR-007', decisions_status: 'Deprecated', pattern: 'Old', details: '' },
+  ];
+
+  it('is empty when no entry is inactive', () => {
+    expect(formatInactiveTable([])).toBe('');
+  });
+
+  it('lists each entry with its status and why it is inactive, in the order given', () => {
+    expect(formatInactiveTable(INACTIVE_ROWS)).toBe(
+      '\n## Inactive\n\n' +
+      '| ID | Status | Note |\n' +
+      '|---|---|---|\n' +
+      '| ADR-004 | Encoded | encoded in src/core/flags.ts |\n' +
+      '| ADR-005 | Superseded | superseded by ADR-002 |\n' +
+      '| ADR-006 | Retired | a one-off |\n' +
+      '| ADR-007 | Deprecated | — |\n',
+    );
+  });
+
+  it('shows the note the learning list shows for the same entry', () => {
+    for (const row of INACTIVE_ROWS) {
+      const listed = store.buildListing([row], []).inactive[0].note || '—';
+      expect(formatInactiveTable([row])).toContain(`| ${listed} |\n`);
+    }
+  });
+
+  it('takes an encoded path over a successor, and a successor over a status note', () => {
+    const row = makeV2LedgerRow({
+      anchor_id: 'ADR-004',
+      decisions_status: 'Superseded',
+      superseded_by: 'ADR-002',
+      status_note: 'replaced',
+      encoded_at: { path: 'src/a.ts' },
+    });
+    expect(formatInactiveTable([row])).toContain('| ADR-004 | Superseded | encoded in src/a.ts |\n');
+    expect(formatInactiveTable([{ ...row, encoded_at: undefined }])).toContain('| ADR-004 | Superseded | superseded by ADR-002 |\n');
+  });
+
+  it('escapes | and turns line terminators into spaces, so a note adds no column and no line', () => {
+    const row = makeV2LedgerRow({ anchor_id: 'ADR-006', decisions_status: 'Retired', status_note: 'a | b\nc\r\nd' });
+    expect(formatInactiveTable([row])).toBe(
+      '\n## Inactive\n\n| ID | Status | Note |\n|---|---|---|\n| ADR-006 | Retired | a \\| b c d |\n',
+    );
+  });
+});
+
+describe('formatIndexEntryLineV2', () => {
+  it('builds the line from the row: anchor, title and scope, with no status tag', () => {
+    expect(formatIndexEntryLineV2(V2_DECISION))
+      .toBe('  ADR-002  Store functions return a Result  —  area:learning, src/**/*.cjs');
+  });
+
+  it('omits the scope suffix when the row has no scope', () => {
+    expect(formatIndexEntryLineV2({ ...V2_DECISION, scope: [] })).toBe('  ADR-002  Store functions return a Result');
+  });
+
+  it('cuts the joined scope to 80 characters plus an ellipsis', () => {
+    const scope = ['area:' + 'a'.repeat(40), 'src/' + 'b'.repeat(60) + '/**'];
+    const joined = scope.join(', ');
+    expect(joined.length).toBeGreaterThan(80);
+    expect(formatIndexEntryLineV2({ ...V2_DECISION, scope }))
+      .toBe(`  ADR-002  Store functions return a Result  —  ${joined.slice(0, 80)}…`);
+  });
+
+  it('never splits a character when it cuts the scope', () => {
+    const scope = ['src/' + 'a'.repeat(75) + '\u{1F600}b/**'];
+    expect(formatIndexEntryLineV2({ ...V2_DECISION, scope })).toMatch(new RegExp(`a{75}\u{1F600}…$`, 'u'));
+  });
+
+  it('keeps the title whole', () => {
+    const title = 'T'.repeat(120);
+    expect(formatIndexEntryLineV2({ ...V2_DECISION, title })).toBe(`  ADR-002  ${title}  —  area:learning, src/**/*.cjs`);
+  });
+
+  it('collapses line terminators in the title and the scope', () => {
+    expect(formatIndexEntryLineV2({ ...V2_DECISION, title: 'a\nb', scope: ['x\ny'] })).toBe('  ADR-002  a b  —  x y');
+  });
+});
+
+describe('buildIndexContent — v2 rows', () => {
+  it('builds each v2 line from its row and keeps each v1 line as the v1 index has it', () => {
+    const v1Decision = makeAdrRow();
+    const v1Pitfall = makePfRow();
+    expect(buildIndexContent([v1Decision, V2_DECISION], [v1Pitfall, V2_PITFALL], OPTS)).toBe(
+      'Decisions (2):\n' +
+      '  ADR-001  Use Result types everywhere  [Accepted]\n' +
+      '  ADR-002  Store functions return a Result  —  area:learning, src/**/*.cjs\n' +
+      '\n' +
+      'Pitfalls (2):\n' +
+      '  PF-002  Editing installed scripts directly  [Active]  —  src/assets/scripts/hooks/\n' +
+      '  PF-003  Writers refuse a missing learning tree  —  area:learning\n' +
+      '\n' +
+      'ADR-NNN entries live in /project/.devflow/learning/decisions.md\n' +
+      'PF-NNN  entries live in /project/.devflow/learning/pitfalls.md\n' +
+      'Read the relevant file and locate the matching `## ADR-NNN:` or `## PF-NNN:` heading for the full body.',
+    );
+    const v1Lines = buildIndexContent([v1Decision], [v1Pitfall], OPTS).split('\n').filter(l => l.startsWith('  '));
+    expect(v1Lines).toHaveLength(2);
+    const mixedLines = buildIndexContent([v1Decision, V2_DECISION], [v1Pitfall, V2_PITFALL], OPTS).split('\n');
+    for (const line of v1Lines) expect(mixedLines).toContain(line);
+  });
+
+  it('reads a v2 line from the row, never from a pre-rendered block', () => {
+    const withBlocks = buildIndexContent([V2_DECISION], [], {
+      ...OPTS,
+      decisionBlocks: ['\n## ADR-002: A different title\n\n- **Status**: Deprecated\n'],
+    });
+    expect(withBlocks).toContain('  ADR-002  Store functions return a Result  —  area:learning, src/**/*.cjs\n');
+    expect(withBlocks).not.toContain('A different title');
   });
 });
 

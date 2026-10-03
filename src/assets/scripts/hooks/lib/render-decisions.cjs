@@ -11,14 +11,16 @@
 // Filtering rules (must match AC-F3):
 //   - anchor_id must be set (unanchored observing rows are excluded)
 //   - type must match kind: 'decision' rows → decisions.md; 'pitfall' rows → pitfalls.md
-//   - the row must be active: isActive from learning-store.cjs, the one status list
+//   - an active row (isActive from learning-store.cjs, the one status list) renders
+//     its body; an inactive one is listed in the file's Inactive table instead
 //
-// Row shape: see LearningObservation in src/core/observations.ts.
+// Row shape: a v2 ledger row (schema 2) or a v1 one; see learning-store.cjs.
 // Ledger file: .devflow/learning/decisions-ledger.jsonl (anchored rows only).
 // If absent, treat as empty corpus.
 //
-// Byte-compat: formatDecisionBody / formatPitfallBody / buildTldrLine /
-// initDecisionsContent — all from decisions-format.cjs (single source of truth).
+// Byte-compat: formatDecisionBody / formatPitfallBody / formatEntryBodyV2 /
+// formatInactiveTable / buildTldrLine / initDecisionsContent — all from
+// decisions-format.cjs (single source of truth).
 
 'use strict';
 
@@ -29,6 +31,8 @@ const {
   initDecisionsContent,
   formatDecisionBody,
   formatPitfallBody,
+  formatEntryBodyV2,
+  formatInactiveTable,
   buildTldrLine,
   buildIndexContent,
 } = require('./decisions-format.cjs');
@@ -41,7 +45,7 @@ const {
 } = require('./project-paths.cjs');
 const { acquireMkdirLock, releaseLock } = require('./mkdir-lock.cjs');
 const { safePath } = require('./safe-path.cjs');
-const { isActive } = require('./learning-store.cjs');
+const { isActive, isV2 } = require('./learning-store.cjs');
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -116,12 +120,35 @@ function selectActiveRows(rows, kind) {
 }
 
 /**
+ * Select the inactive rows of a given kind, sorted by numeric anchor: the rows a
+ * file lists in its Inactive table instead of rendering their bodies.
+ *
+ * @param {object[]} rows - all rows from the ledger (unfiltered)
+ * @param {'decisions'|'pitfalls'} kind
+ * @returns {object[]} filtered + sorted inactive rows
+ */
+function selectInactiveRows(rows, kind) {
+  const type = kind === 'decisions' ? 'decision' : 'pitfall';
+  return rows
+    .filter(r => r.type === type && r.anchor_id && !isActive(r))
+    .sort((a, b) => anchorNumeric(a.anchor_id) - anchorNumeric(b.anchor_id));
+}
+
+/**
  * Build per-row body blocks from already-filtered + sorted active rows.
  * Each block starts with a leading newline (matching the format contract).
  *
  * Per-row content:
- *   - If row.raw_body is truthy → emit verbatim (migrated entries)
- *   - Otherwise → formatDecisionBody / formatPitfallBody from details
+ *   - a v2 row (schema 2) → formatEntryBodyV2 from its fields
+ *   - a v1 row with a truthy raw_body → raw_body verbatim (migrated entries)
+ *   - any other v1 row → formatDecisionBody / formatPitfallBody from details
+ *
+ * D-V1-BYTE-STABLE: a v1 ledger row — any row without schema 2 — renders byte for
+ * byte as it did before v2: its raw_body verbatim when truthy, else
+ * formatDecisionBody or formatPitfallBody, and its index line keeps the v1 shape;
+ * only a schema-2 row takes the v2 body and index line. Reason: the ledger stays
+ * v1 until each entry is rewritten, and a render that moved v1 bytes would show
+ * every untouched entry as changed and alter text nobody revised.
  *
  * Extracted so renderAndWriteAll can compute blocks once and reuse them
  * for both the body files and buildIndexContent, avoiding a second full
@@ -133,6 +160,7 @@ function selectActiveRows(rows, kind) {
  */
 function buildBodyBlocks(activeRows, kind) {
   return activeRows.map(row => {
+    if (isV2(row)) return formatEntryBodyV2(row);
     if (row.raw_body) {
       // Migrated entry: emit verbatim. raw_body must start with \n## so
       // it fits seamlessly after the header preamble.
@@ -145,15 +173,17 @@ function buildBodyBlocks(activeRows, kind) {
 }
 
 /**
- * Assemble the full file content from pre-computed blocks and active rows.
+ * Assemble the full file content: the header with the file's TL;DR line, the
+ * pre-computed active blocks, then the Inactive table.
  * Internal helper — avoids re-computing blocks when the caller already has them.
  *
  * @param {object[]} activeRows - already-filtered + sorted active rows
  * @param {string[]} blocks - pre-rendered per-row blocks (from buildBodyBlocks)
  * @param {'decisions'|'pitfalls'} kind
+ * @param {object[]} inactiveRows - already-filtered + sorted inactive rows
  * @returns {string} complete file content
  */
-function buildFileFromBlocks(activeRows, blocks, kind) {
+function buildFileFromBlocks(activeRows, blocks, kind, inactiveRows) {
   // Build TL;DR line (uses active + sorted rows so last-5 are stable)
   const tldr = buildTldrLine(kind, activeRows);
 
@@ -165,24 +195,7 @@ function buildFileFromBlocks(activeRows, blocks, kind) {
   // Replace only the first line (the TL;DR comment)
   const header = headerWithPlaceholder.replace(/^<!-- TL;DR:[^\n]*-->/, tldr);
 
-  return header + blocks.join('');
-}
-
-/**
- * Build the full file content from already-filtered + sorted active rows.
- * Internal helper — callers that have already run selectActiveRows can pass
- * the result here directly to avoid re-filtering the ledger.
- *
- * Per-row content:
- *   - If row.raw_body is truthy → emit verbatim (migrated entries)
- *   - Otherwise → formatDecisionBody / formatPitfallBody from details
- *
- * @param {object[]} activeRows - already-filtered + sorted active rows
- * @param {'decisions'|'pitfalls'} kind
- * @returns {string} complete file content
- */
-function renderBodyFromActive(activeRows, kind) {
-  return buildFileFromBlocks(activeRows, buildBodyBlocks(activeRows, kind), kind);
+  return header + blocks.join('') + formatInactiveTable(inactiveRows);
 }
 
 /**
@@ -192,13 +205,14 @@ function renderBodyFromActive(activeRows, kind) {
  * Filtering:
  *   - row.type must match kind ('decision' → decisions.md, 'pitfall' → pitfalls.md)
  *   - row.anchor_id must be set
- *   - row must be active (isActive)
+ *   - an active row (isActive) renders its body; an inactive one is listed in the
+ *     Inactive table
  *
  * Output structure:
  *   TL;DR line (line 1)
  *   File header body (title + preamble)
  *   Per-row blocks (sorted by numeric anchor ASC)
- *   (no trailing newline beyond what the blocks naturally include)
+ *   Inactive table (sorted by numeric anchor ASC; omitted when empty)
  *
  * Idempotent and clock-free: no timestamps in output.
  *
@@ -207,7 +221,8 @@ function renderBodyFromActive(activeRows, kind) {
  * @returns {string} complete file content
  */
 function renderDecisionsFile(rows, kind) {
-  return renderBodyFromActive(selectActiveRows(rows, kind), kind);
+  const activeRows = selectActiveRows(rows, kind);
+  return buildFileFromBlocks(activeRows, buildBodyBlocks(activeRows, kind), kind, selectInactiveRows(rows, kind));
 }
 
 // ---------------------------------------------------------------------------
@@ -266,8 +281,12 @@ function renderAndWriteAll(worktreePath, rows) {
   const decisionBlocks = buildBodyBlocks(activeDecisionRows, 'decisions');
   const pitfallBlocks = buildBodyBlocks(activePitfallRows, 'pitfalls');
 
-  const decisionsContent = buildFileFromBlocks(activeDecisionRows, decisionBlocks, 'decisions');
-  const pitfallsContent = buildFileFromBlocks(activePitfallRows, pitfallBlocks, 'pitfalls');
+  const decisionsContent = buildFileFromBlocks(
+    activeDecisionRows, decisionBlocks, 'decisions', selectInactiveRows(rows, 'decisions'),
+  );
+  const pitfallsContent = buildFileFromBlocks(
+    activePitfallRows, pitfallBlocks, 'pitfalls', selectInactiveRows(rows, 'pitfalls'),
+  );
 
   // Write body files first; index last. On a crash between body writes and the
   // index write: on the FIRST render the index is absent (reader falls back to
@@ -350,8 +369,8 @@ if (require.main === module) {
     // reused for both body render and index build.
     const activeDecisionRows = selectActiveRows(rows, 'decisions');
     const activePitfallRows = selectActiveRows(rows, 'pitfalls');
-    const decisionsContent = renderBodyFromActive(activeDecisionRows, 'decisions');
-    const pitfallsContent = renderBodyFromActive(activePitfallRows, 'pitfalls');
+    const decisionsContent = renderDecisionsFile(rows, 'decisions');
+    const pitfallsContent = renderDecisionsFile(rows, 'pitfalls');
     const indexContent = buildIndexContent(activeDecisionRows, activePitfallRows, {
       decisionsFilePath,
       pitfallsFilePath,
@@ -408,6 +427,7 @@ module.exports = {
   renderDecisionsFile,
   renderAndWriteAll,
   selectActiveRows,
+  selectInactiveRows,
   parseLedger,
   isActive,
   anchorNumeric,

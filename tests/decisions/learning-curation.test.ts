@@ -2,9 +2,10 @@
 //
 // Phase 6 tests for the curation skill rewrite and retire-by-status model.
 //
-// AC-F4: Rendered .md contains only active entries — Deprecated/Superseded/Retired never appear.
-// AC-F5: Retire removes an entry from .md but keeps it (anchor + Retired) in the committed ledger;
-//         number never reused.
+// AC-F4: Rendered .md renders a body for active entries only — a Deprecated, Superseded or
+//         Retired entry is listed under Inactive and never rendered.
+// AC-F5: Retire removes an entry's body from .md but keeps it (anchor + Retired) in the committed
+//         ledger; number never reused.
 // AC-F6: A retired entry is recoverable: re-activating status + render restores it identically.
 // AC-F9: Observing rows >30d are archived (rotation); anchored rows never archived.
 //         (Curation SKILL wiring: contract that rotation step is present.)
@@ -205,45 +206,49 @@ describe('Learning agent curation contract (AC-C3)', () => {
 // AC-F4: Rendered .md contains only active entries
 // ---------------------------------------------------------------------------
 
-describe('AC-F4: renderDecisionsFile excludes non-active statuses', () => {
-  it('Deprecated entry does not appear in rendered decisions.md', () => {
+describe('AC-F4: renderDecisionsFile renders no body for a non-active status', () => {
+  it('a Deprecated entry has no body in rendered decisions.md and is listed under Inactive', () => {
     const rows = [
       makeLedgerRow({ anchor_id: 'ADR-001', decisions_status: 'Accepted', pattern: 'Keep this' }),
       makeLedgerRow({ anchor_id: 'ADR-002', id: 'obs_002', decisions_status: 'Deprecated', pattern: 'Deprecated entry' }),
     ];
     const output = renderDecisionsFile(rows, 'decisions');
-    expect(output).toContain('ADR-001');
-    expect(output).not.toContain('ADR-002');
+    expect(output).toMatch(/^## ADR-001: Keep this$/m);
+    expect(output).not.toMatch(/^## ADR-002:/m);
     expect(output).not.toContain('Deprecated entry');
+    expect(output).toContain('| ADR-002 | Deprecated | — |\n');
   });
 
-  it('Superseded entry does not appear in rendered decisions.md', () => {
+  it('a Superseded entry has no body in rendered decisions.md and is listed under Inactive', () => {
     const rows = [
       makeLedgerRow({ anchor_id: 'ADR-001', decisions_status: 'Accepted' }),
       makeLedgerRow({ anchor_id: 'ADR-003', id: 'obs_003', decisions_status: 'Superseded', pattern: 'Old decision' }),
     ];
     const output = renderDecisionsFile(rows, 'decisions');
-    expect(output).not.toContain('ADR-003');
+    expect(output).not.toMatch(/^## ADR-003:/m);
     expect(output).not.toContain('Old decision');
+    expect(output).toContain('| ADR-003 | Superseded | — |\n');
   });
 
-  it('Retired entry does not appear in rendered decisions.md', () => {
+  it('a Retired entry has no body in rendered decisions.md and is listed under Inactive', () => {
     const rows = [
       makeLedgerRow({ anchor_id: 'ADR-001', decisions_status: 'Accepted' }),
       makeLedgerRow({ anchor_id: 'ADR-004', id: 'obs_004', decisions_status: 'Retired', pattern: 'Retired decision' }),
     ];
     const output = renderDecisionsFile(rows, 'decisions');
-    expect(output).not.toContain('ADR-004');
+    expect(output).not.toMatch(/^## ADR-004:/m);
     expect(output).not.toContain('Retired decision');
+    expect(output).toContain('| ADR-004 | Retired | — |\n');
   });
 
-  it('only Active pitfall status appears in rendered pitfalls.md', () => {
+  it('only an Active pitfall has a body in rendered pitfalls.md', () => {
     const pf1 = { ...makeLedgerRow({ anchor_id: 'PF-001', id: 'obs_pf1', type: 'pitfall', decisions_status: 'Active', pattern: 'Active pitfall' }), type: 'pitfall', date: undefined };
     const pf2 = { ...makeLedgerRow({ anchor_id: 'PF-002', id: 'obs_pf2', type: 'pitfall', decisions_status: 'Deprecated', pattern: 'Deprecated pitfall' }), type: 'pitfall', date: undefined };
     const output = renderDecisionsFile([pf1, pf2], 'pitfalls');
-    expect(output).toContain('PF-001');
-    expect(output).not.toContain('PF-002');
+    expect(output).toMatch(/^## PF-001: Active pitfall$/m);
+    expect(output).not.toMatch(/^## PF-002:/m);
     expect(output).not.toContain('Deprecated pitfall');
+    expect(output).toContain('| PF-002 | Deprecated | — |\n');
   });
 });
 
@@ -263,7 +268,7 @@ describe('AC-F5: retire-anchor hides entry from .md, keeps in ledger', () => {
     fs.rmSync(tmpDir, { recursive: true, force: true });
   });
 
-  it('retired entry vanishes from decisions.md', () => {
+  it('a retired entry loses its body in decisions.md and is listed under Inactive', () => {
     writeLedger(tmpDir, [
       makeLedgerRow({ anchor_id: 'ADR-001', decisions_status: 'Accepted', pattern: 'Keep this' }),
       makeLedgerRow({ anchor_id: 'ADR-002', id: 'obs_002', decisions_status: 'Accepted', pattern: 'Retire this' }),
@@ -273,9 +278,10 @@ describe('AC-F5: retire-anchor hides entry from .md, keeps in ledger', () => {
     expect(result.code).toBe(0);
 
     const md = readDecisionsMd(tmpDir);
-    expect(md).toContain('ADR-001');
-    expect(md).not.toContain('ADR-002');
+    expect(md).toMatch(/^## ADR-001: Keep this$/m);
+    expect(md).not.toMatch(/^## ADR-002:/m);
     expect(md).not.toContain('Retire this');
+    expect(md).toContain('| ADR-002 | Retired | — |\n');
   });
 
   it('retired entry stays Retired in the ledger', () => {
@@ -309,7 +315,7 @@ describe('AC-F5: retire-anchor hides entry from .md, keeps in ledger', () => {
     expect(result.stdout.trim()).toBe('ADR-003');
   });
 
-  it('Deprecated entry (via Deprecated status) vanishes from .md, stays in ledger', () => {
+  it('a Deprecated entry loses its body in the .md, is listed under Inactive and stays in the ledger', () => {
     writeLedger(tmpDir, [
       makeLedgerRow({ anchor_id: 'ADR-001', decisions_status: 'Accepted', pattern: 'Surviving' }),
       makeLedgerRow({ anchor_id: 'ADR-002', id: 'obs_002', decisions_status: 'Accepted', pattern: 'Going Deprecated' }),
@@ -318,8 +324,10 @@ describe('AC-F5: retire-anchor hides entry from .md, keeps in ledger', () => {
     runHelper('retire-anchor ADR-002 Deprecated', tmpDir);
 
     const md = readDecisionsMd(tmpDir);
-    expect(md).toContain('ADR-001');
-    expect(md).not.toContain('ADR-002');
+    expect(md).toMatch(/^## ADR-001: Surviving$/m);
+    expect(md).not.toMatch(/^## ADR-002:/m);
+    expect(md).not.toContain('Going Deprecated');
+    expect(md).toContain('| ADR-002 | Deprecated | — |\n');
 
     const rows = parseLedger(path.join(tmpDir, '.devflow', 'learning', 'decisions-ledger.jsonl'));
     const dep = rows.find(r => r.anchor_id === 'ADR-002');
@@ -372,10 +380,11 @@ describe('AC-F6: retired entry is recoverable — re-activate + render restores 
       originalRow,
     ]);
 
-    // Retire ADR-002 — it vanishes from .md
+    // Retire ADR-002 — its body leaves the .md and it is listed under Inactive
     runHelper('retire-anchor ADR-002 Retired', tmpDir);
     const mdAfterRetire = readDecisionsMd(tmpDir);
-    expect(mdAfterRetire).not.toContain('ADR-002');
+    expect(mdAfterRetire).not.toMatch(/^## ADR-002:/m);
+    expect(mdAfterRetire).toContain('| ADR-002 | Retired | — |\n');
 
     // Re-activate: flip decisions_status back to Accepted in the ledger
     const ledgerPath = path.join(tmpDir, '.devflow', 'learning', 'decisions-ledger.jsonl');
@@ -388,11 +397,11 @@ describe('AC-F6: retired entry is recoverable — re-activate + render restores 
     // Re-render
     execSync(`node "${RENDER_BIN}" render "${tmpDir}"`, { cwd: tmpDir, encoding: 'utf8' });
 
-    // Entry restored identically
+    // Entry restored identically, and no longer listed under Inactive
     const mdAfterRestore = readDecisionsMd(tmpDir);
-    expect(mdAfterRestore).toContain('ADR-002');
-    expect(mdAfterRestore).toContain('Recoverable Decision');
+    expect(mdAfterRestore).toMatch(/^## ADR-002: Recoverable Decision$/m);
     expect(mdAfterRestore).toContain('self-learning:obs_002');
+    expect(mdAfterRestore).not.toContain('## Inactive');
   });
 
   it('restored entry has the same content as before retirement (raw_body round-trip)', () => {
@@ -408,7 +417,8 @@ describe('AC-F6: retired entry is recoverable — re-activate + render restores 
     // Retire
     runHelper('retire-anchor ADR-003 Retired', tmpDir);
     const mdRetired = readDecisionsMd(tmpDir);
-    expect(mdRetired).not.toContain('ADR-003');
+    expect(mdRetired).not.toMatch(/^## ADR-003:/m);
+    expect(mdRetired).toContain('| ADR-003 | Retired | — |\n');
 
     // Re-activate + render
     const ledgerPath = path.join(tmpDir, '.devflow', 'learning', 'decisions-ledger.jsonl');

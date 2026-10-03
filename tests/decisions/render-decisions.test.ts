@@ -10,6 +10,8 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
 
+import { makeV2LedgerRow } from './learning-fixtures.js';
+
 const ROOT = path.resolve(import.meta.dirname, '../..');
 const require = createRequire(import.meta.url);
 
@@ -17,6 +19,7 @@ const {
   renderDecisionsFile,
   renderAndWriteAll,
   selectActiveRows,
+  selectInactiveRows,
   parseLedger,
   isActive,
   anchorNumeric,
@@ -24,6 +27,7 @@ const {
   renderDecisionsFile: (rows: Record<string, unknown>[], kind: 'decisions' | 'pitfalls') => string;
   renderAndWriteAll: (worktreePath: string, rows: Record<string, unknown>[]) => void;
   selectActiveRows: (rows: Record<string, unknown>[], kind: 'decisions' | 'pitfalls') => Record<string, unknown>[];
+  selectInactiveRows: (rows: Record<string, unknown>[], kind: 'decisions' | 'pitfalls') => Record<string, unknown>[];
   parseLedger: (ledgerPath: string) => Record<string, unknown>[];
   isActive: (row: Record<string, unknown>) => boolean;
   anchorNumeric: (anchorId: string) => number;
@@ -263,36 +267,48 @@ describe('renderDecisionsFile — golden', () => {
     expect(result).not.toContain('- **Context**: TypeScript project');
   });
 
-  it('excludes Deprecated entries', () => {
+  it('renders no body for a Deprecated entry and lists it under Inactive', () => {
     const rows = [
       makeDecisionRow({ anchor_id: 'ADR-001', decisions_status: 'Accepted' }),
       makeDecisionRow({ anchor_id: 'ADR-002', id: 'obs_deprecated', pattern: 'Old approach', decisions_status: 'Deprecated' }),
     ];
     const result = renderDecisionsFile(rows, 'decisions');
-    expect(result).toContain('ADR-001');
-    expect(result).not.toContain('ADR-002');
+    expect(result).toMatch(/^## ADR-001: /m);
+    expect(result).not.toMatch(/^## ADR-002:/m);
+    expect(result).not.toContain('Old approach');
+    expect(result).toContain('| ADR-002 | Deprecated | — |\n');
     expect(result).toContain('<!-- TL;DR: 1 decisions. Key: ADR-001 -->');
   });
 
-  it('excludes Superseded entries', () => {
+  it('renders no body for a Superseded entry and lists it under Inactive', () => {
     const rows = [
       makeDecisionRow({ anchor_id: 'ADR-003', decisions_status: 'Superseded' }),
       makePitfallRow({ anchor_id: 'PF-001', decisions_status: 'Superseded' }),
     ];
     const decisionsResult = renderDecisionsFile(rows, 'decisions');
     const pitfallsResult = renderDecisionsFile(rows, 'pitfalls');
-    expect(decisionsResult).not.toContain('ADR-003');
-    expect(pitfallsResult).not.toContain('PF-001');
+    expect(decisionsResult).not.toMatch(/^## ADR-003:/m);
+    expect(pitfallsResult).not.toMatch(/^## PF-001:/m);
+    expect(decisionsResult).toContain('| ADR-003 | Superseded | — |\n');
+    expect(pitfallsResult).toContain('| PF-001 | Superseded | — |\n');
   });
 
-  it('excludes Retired entries', () => {
+  it('renders no body for a Retired entry and lists it under Inactive', () => {
     const rows = [
       makeDecisionRow({ anchor_id: 'ADR-001', decisions_status: 'Accepted' }),
-      makeDecisionRow({ anchor_id: 'ADR-002', id: 'obs_ret', pattern: 'Retired', decisions_status: 'Retired' }),
+      makeDecisionRow({ anchor_id: 'ADR-002', id: 'obs_ret', pattern: 'Retired approach', decisions_status: 'Retired' }),
     ];
     const result = renderDecisionsFile(rows, 'decisions');
-    expect(result).toContain('ADR-001');
-    expect(result).not.toContain('ADR-002');
+    expect(result).toMatch(/^## ADR-001: /m);
+    expect(result).not.toMatch(/^## ADR-002:/m);
+    expect(result).not.toContain('Retired approach');
+    expect(result).toContain('| ADR-002 | Retired | — |\n');
+  });
+
+  it('has no Inactive table when every entry is active', () => {
+    const result = renderDecisionsFile([makeDecisionRow({ anchor_id: 'ADR-001' })], 'decisions');
+    expect(result).toMatch(/^## ADR-001: /m);
+    expect(result).not.toContain('## Inactive');
   });
 
   it('excludes rows without anchor_id', () => {
@@ -427,6 +443,134 @@ describe('selectActiveRows', () => {
       makeDecisionRow({ decisions_status: 'Superseded' }),
     ];
     expect(selectActiveRows(rows, 'decisions')).toHaveLength(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// selectInactiveRows — unit tests
+// ---------------------------------------------------------------------------
+
+describe('selectInactiveRows', () => {
+  it('selects the anchored inactive rows of one kind, sorted by number', () => {
+    const rows = [
+      makeDecisionRow({ anchor_id: 'ADR-010', id: 'obs_010', decisions_status: 'Retired' }),
+      makeDecisionRow({ anchor_id: 'ADR-001', decisions_status: 'Accepted' }),
+      makeV2LedgerRow({ anchor_id: 'ADR-002', id: 'obs_002', decisions_status: 'Encoded' }),
+      makePitfallRow({ anchor_id: 'PF-003', id: 'obs_pf3', decisions_status: 'Deprecated' }),
+      { ...makeDecisionRow({ id: 'obs_unanchored', decisions_status: 'Retired' }), anchor_id: undefined },
+    ];
+    expect(selectInactiveRows(rows, 'decisions').map(r => r.anchor_id)).toEqual(['ADR-002', 'ADR-010']);
+    expect(selectInactiveRows(rows, 'pitfalls').map(r => r.anchor_id)).toEqual(['PF-003']);
+  });
+
+  it('selects nothing when every row is active', () => {
+    expect(selectInactiveRows([makeDecisionRow(), makePitfallRow()], 'decisions')).toEqual([]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// renderDecisionsFile — v1 and v2 entries in one file
+// ---------------------------------------------------------------------------
+
+/** A rendered file from its first entry heading on: the bodies and the Inactive table. */
+function bodyOf(file: string): string {
+  const start = file.indexOf('\n## ');
+  return start === -1 ? '' : file.slice(start);
+}
+
+describe('renderDecisionsFile — v1 and v2 entries side by side', () => {
+  const v1First = makeDecisionRow({ anchor_id: 'ADR-001' });
+  const v2Second = makeV2LedgerRow({ anchor_id: 'ADR-002', id: 'obs_v2_second', scope: ['area:learning'] });
+  const v1RawThird = makeDecisionRow({
+    anchor_id: 'ADR-003',
+    id: 'obs_raw_third',
+    raw_body: '\n## ADR-003: Kept verbatim\n\n- **Status**: Accepted\n- **Source**: self-learning:obs_raw_third\n',
+  });
+  const v2Encoded = makeV2LedgerRow({
+    anchor_id: 'ADR-004',
+    id: 'obs_encoded',
+    title: 'Encoded in the code now',
+    decisions_status: 'Encoded',
+    encoded_at: { path: 'src/core/flags.ts', quote: 'export const FLAGS', ref: 'HEAD', commit: 'f'.repeat(40) },
+  });
+  const v1Retired = makeDecisionRow({ anchor_id: 'ADR-005', id: 'obs_gone', pattern: 'Gone for good', decisions_status: 'Retired' });
+  const decisionRows = [v1Retired, v2Encoded, v1RawThird, v2Second, v1First];
+
+  const v2FirstPitfall = makeV2LedgerRow({
+    id: 'obs_pf_v2_first',
+    type: 'pitfall',
+    anchor_id: 'PF-001',
+    decisions_status: 'Active',
+    title: 'Writers refuse a missing learning tree',
+    rule: 'A learning writer refuses when the learning directory is absent and never creates it.',
+    why: 'A writer that creates the tree writes a ledger nobody reads.',
+    scope: ['area:learning', 'src/assets/scripts/hooks/**'],
+    provenance: 'a stray nested tree in the main checkout',
+    last_verified: undefined,
+  });
+  const v1SecondPitfall = makePitfallRow({ anchor_id: 'PF-002' });
+  const v2SupersededPitfall = makeV2LedgerRow({
+    id: 'obs_pf_v2_third',
+    type: 'pitfall',
+    anchor_id: 'PF-003',
+    decisions_status: 'Superseded',
+    superseded_by: 'PF-001',
+  });
+  const v2RetiredPitfall = makeV2LedgerRow({
+    id: 'obs_pf_v2_fourth',
+    type: 'pitfall',
+    anchor_id: 'PF-004',
+    decisions_status: 'Retired',
+    status_note: 'a one-off | not general',
+  });
+  const pitfallRows = [v2RetiredPitfall, v1SecondPitfall, v2SupersededPitfall, v2FirstPitfall];
+
+  it('renders each v1 block as the v1 formatter does and each v2 block from the v2 template', () => {
+    expect(bodyOf(renderDecisionsFile(decisionRows, 'decisions'))).toBe(
+      formatDecisionBody(v1First) +
+      '\n## ADR-002: Store functions return a Result\n\n' +
+      '- **Status**: Accepted · verified 2026-09-01\n' +
+      '- **Scope**: `area:learning`\n' +
+      '- **Decision**: Every learning store function returns a Result and never exits or prints.\n' +
+      '- **Why**: An exit inside the lock skips its release, and printing ties the store to one caller.\n' +
+      '- **Source**: learning v2 design review\n' +
+      v1RawThird.raw_body +
+      '\n## Inactive\n\n' +
+      '| ID | Status | Note |\n' +
+      '|---|---|---|\n' +
+      '| ADR-004 | Encoded | encoded in src/core/flags.ts |\n' +
+      '| ADR-005 | Retired | — |\n',
+    );
+  });
+
+  it('renders pitfalls the same way: v1 blocks unchanged, v2 blocks from the template, then Inactive', () => {
+    expect(bodyOf(renderDecisionsFile(pitfallRows, 'pitfalls'))).toBe(
+      '\n## PF-001: Writers refuse a missing learning tree\n\n' +
+      '- **Status**: Active\n' +
+      '- **Scope**: `area:learning`, `src/assets/scripts/hooks/**`\n' +
+      '- **Rule**: A learning writer refuses when the learning directory is absent and never creates it.\n' +
+      '- **Why**: A writer that creates the tree writes a ledger nobody reads.\n' +
+      '- **Source**: a stray nested tree in the main checkout\n' +
+      formatPitfallBody(v1SecondPitfall) +
+      '\n## Inactive\n\n' +
+      '| ID | Status | Note |\n' +
+      '|---|---|---|\n' +
+      '| PF-003 | Superseded | superseded by PF-001 |\n' +
+      '| PF-004 | Retired | a one-off \\| not general |\n',
+    );
+  });
+
+  it('leaves an Encoded entry out of the bodies and the TL;DR count', () => {
+    const file = renderDecisionsFile(decisionRows, 'decisions');
+    expect(file).not.toMatch(/^## ADR-004:/m);
+    expect(file).not.toContain('Encoded in the code now');
+    expect(file.split('\n')[0]).toMatch(/^<!-- TL;DR: 3 decisions/);
+  });
+
+  it('puts the Inactive table after every active body', () => {
+    const file = renderDecisionsFile(decisionRows, 'decisions');
+    const lastHeading = Math.max(...['ADR-001', 'ADR-002', 'ADR-003'].map(id => file.indexOf(`\n## ${id}: `)));
+    expect(file.indexOf('\n## Inactive\n')).toBeGreaterThan(lastHeading);
   });
 });
 

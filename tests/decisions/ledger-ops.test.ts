@@ -400,7 +400,7 @@ describe('retire-anchor CLI op', () => {
     expect(rows[0].decisions_status).toBe('Deprecated');
   });
 
-  it('retired entry vanishes from rendered decisions.md (AC-F5)', () => {
+  it('a retired entry loses its body in rendered decisions.md and is listed under Inactive (AC-F5)', () => {
     writeLedger(tmpDir, [
       makeLedgerRow({ anchor_id: 'ADR-001', decisions_status: 'Accepted' }),
       makeLedgerRow({ anchor_id: 'ADR-002', id: 'obs_002', pattern: 'To be retired', decisions_status: 'Accepted' }),
@@ -408,8 +408,10 @@ describe('retire-anchor CLI op', () => {
     runHelper('retire-anchor ADR-002 Retired', tmpDir);
     const decisionsPath = path.join(tmpDir, '.devflow', 'learning', 'decisions.md');
     const content = fs.readFileSync(decisionsPath, 'utf8');
-    expect(content).toContain('ADR-001');
-    expect(content).not.toContain('ADR-002');
+    expect(content).toMatch(/^## ADR-001: /m);
+    expect(content).not.toMatch(/^## ADR-002:/m);
+    expect(content).not.toContain('To be retired');
+    expect(content).toContain('| ADR-002 | Retired | — |\n');
   });
 
   it('retired entry stays in the ledger (AC-F5 — ledger is permanent)', () => {

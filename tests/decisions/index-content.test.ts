@@ -21,6 +21,8 @@ import * as path from 'path'
 import * as fs from 'fs'
 import * as os from 'os'
 
+import { makeV2LedgerRow } from './learning-fixtures.js'
+
 const ROOT = path.resolve(import.meta.dirname, '../..')
 const require = createRequire(import.meta.url)
 
@@ -146,6 +148,13 @@ describe('selectActiveRows + buildIndexContent — active-only contract', () => 
     expect(result).toContain('ADR-001')
     expect(result).toContain('ADR-002')
   })
+
+  it('builds the line of a v2 entry from its row: anchor, title and scope', () => {
+    const rows = [makeDecisionRow(), makeV2LedgerRow({ anchor_id: 'ADR-003', scope: ['area:learning', 'src/**'] })]
+    const result = buildIndexContent(selectActiveRows(rows, 'decisions'), selectActiveRows(rows, 'pitfalls'), OPTS)
+    expect(result).toMatch(/^Decisions \(2\):/m)
+    expect(result.split('\n')).toContain('  ADR-003  Store functions return a Result  —  area:learning, src/**')
+  })
 })
 
 // ---------------------------------------------------------------------------
@@ -255,6 +264,26 @@ describe('renderAndWriteAll — index.md integration', () => {
     expect(fs.existsSync(indexPath)).toBe(true)
     const content = fs.readFileSync(indexPath, 'utf8')
     expect(content).toBe('(none)\n')
+  })
+
+  it('index.md lists no inactive entry, while decisions.md and pitfalls.md list them under Inactive', () => {
+    const tmpDir = makeTmp()
+    const rows = [
+      makeDecisionRow({ anchor_id: 'ADR-001' }),
+      makeV2LedgerRow({ anchor_id: 'ADR-002', id: 'obs_encoded', decisions_status: 'Encoded', encoded_at: { path: 'src/core/flags.ts' } }),
+      makePitfallRow({ anchor_id: 'PF-004' }),
+      makePitfallRow({ anchor_id: 'PF-005', id: 'obs_pf5', decisions_status: 'Retired' }),
+    ]
+    renderAndWriteAll(tmpDir, rows)
+    const dir = path.join(tmpDir, '.devflow', 'learning')
+    expect(fs.readFileSync(path.join(dir, 'decisions.md'), 'utf8')).toContain('| ADR-002 | Encoded | encoded in src/core/flags.ts |\n')
+    expect(fs.readFileSync(path.join(dir, 'pitfalls.md'), 'utf8')).toContain('| PF-005 | Retired | — |\n')
+    const index = fs.readFileSync(path.join(dir, 'index.md'), 'utf8')
+    expect(index).toContain('ADR-001')
+    expect(index).toContain('PF-004')
+    expect(index).not.toContain('ADR-002')
+    expect(index).not.toContain('PF-005')
+    expect(index).not.toContain('Inactive')
   })
 
   it('index.md excludes inactive rows (belt-and-suspenders from renderAndWriteAll)', () => {
