@@ -1833,6 +1833,173 @@ function putUnderLock(root, mode, input, { now, scopeMatches }) {
   };
 }
 
+// ---------------------------------------------------------------------------
+// list, show and claim-due
+// ---------------------------------------------------------------------------
+
+/**
+ * The data behind `list`, read-only: buildListing over the ledger and the log as
+ * they are, every glob scope checked against the files git tracks. Malformed
+ * lines are counted, never quarantined (D-QUARANTINE-MALFORMED). Refuses without
+ * .devflow/learning/ (D-NO-STRAY-TREE).
+ *
+ * @param {string} root - project root
+ * @param {{ scopeMatches?: (glob: string) => boolean }} [opts] - default gitScopeMatcher(root)
+ * @returns {{ ok: true, value: { active: object[], inactive: object[], observations: object[], integrity: object[], malformed: { ledger: number, log: number } } }
+ *   | { ok: false, error: { kind: 'no-learning-dir', message: string } }}
+ */
+function readListing(root, { scopeMatches } = {}) {
+  if (!hasLearningDir(root)) return noLearningDir('list', root);
+  const { ledgerRows, logRows, rejected } = readLearningState(root);
+  return {
+    ok: true,
+    value: buildListing(ledgerRows, logRows, { scopeMatches: scopeMatches || gitScopeMatcher(root), rejected }),
+  };
+}
+
+/** A listing token as it prints: itself when it is one word, else `-`. */
+function listingToken(value) {
+  return isNonEmptyString(value) && !/\s/.test(value) && !CONTROL_CHAR_RE.test(value) ? value : '-';
+}
+
+/**
+ * The text `list` prints. Each section opens with its name and count, and each
+ * item is a line indented two spaces whose tokens are separated by one space,
+ * the title last and taking the rest of the line:
+ *
+ *   ACTIVE <n>
+ *     <anchor> <obs_id> v<schema> <title>
+ *   INACTIVE <n>
+ *     <anchor> <obs_id> v<schema> <status> <title>
+ *       note: <note>                    only when the entry records one
+ *   OBSERVATIONS <n>                    the log rows no ledger row carries
+ *     <obs_id> <type> v<schema> observed <count|?> <title>
+ *   INTEGRITY <n>
+ *     <anchor> <obs_id> <flag>[,<flag>…]
+ *   MALFORMED <n>                       only when lines were skipped
+ *     ledger <k>                        each file with skipped lines
+ *     log <k>
+ *
+ * A token that is missing or not one word prints as `-`, and so does an empty
+ * title; titles and notes are already one line (buildListing).
+ *
+ * @param {{ active: object[], inactive: object[], observations: object[], integrity: object[], malformed: { ledger: number, log: number } }} listing - buildListing's result
+ * @returns {string} the lines, with no final newline
+ */
+function formatListing(listing) {
+  const title = text => (text === '' ? '-' : text);
+  const section = (name, items, toLines) => [`${name} ${items.length}`, ...items.flatMap(toLines)];
+  const lines = [
+    ...section('ACTIVE', listing.active, row => [
+      `  ${listingToken(row.anchor_id)} ${listingToken(row.id)} v${row.schema} ${title(row.title)}`,
+    ]),
+    ...section('INACTIVE', listing.inactive, row => [
+      `  ${listingToken(row.anchor_id)} ${listingToken(row.id)} v${row.schema} ${listingToken(row.status)} ${title(row.title)}`,
+      ...(row.note ? [`    note: ${row.note}`] : []),
+    ]),
+    ...section('OBSERVATIONS', listing.observations, row => [
+      `  ${listingToken(row.id)} ${listingToken(row.type)} v${row.schema} observed ${row.observations ?? '?'} ${title(row.title)}`,
+    ]),
+    ...section('INTEGRITY', listing.integrity, entry => [
+      `  ${listingToken(entry.anchor_id)} ${listingToken(entry.id)} ${entry.flags.join(',')}`,
+    ]),
+  ];
+  const skipped = ['ledger', 'log'].filter(file => listing.malformed[file] > 0);
+  if (skipped.length > 0) {
+    lines.push(
+      `MALFORMED ${listing.malformed.ledger + listing.malformed.log}`,
+      ...skipped.map(file => `  ${file} ${listing.malformed[file]}`),
+    );
+  }
+  return lines.join('\n');
+}
+
+/**
+ * The data behind `show <anchor|obs_id>`, read-only: showEntry over the ledger,
+ * the log and the history as they are. When lines were skipped as malformed
+ * (D-QUARANTINE-MALFORMED), a found entry gains `malformed: { ledger, log }` and
+ * a not-found message says a skipped line may hold it. Refuses without
+ * .devflow/learning/ (D-NO-STRAY-TREE).
+ *
+ * @param {string} root - project root
+ * @param {string} key - an anchor id or an observation id
+ * @returns {{ ok: true, value: { key: string, ledger: object[], log: object|null, history_versions: object[], flags: object[], malformed?: { ledger: number, log: number } } }
+ *   | { ok: false, error: { kind: 'no-learning-dir'|'invalid-key'|'not-found', message: string } }}
+ */
+function showByKey(root, key) {
+  if (!hasLearningDir(root)) return noLearningDir('show', root);
+  const { ledgerRows, logRows, rejected } = readLearningState(root);
+  const shown = showEntry(key, ledgerRows, logRows, { historyVersions: id => historyVersions(root, id) });
+  const malformed = { ledger: rejected.ledger.length, log: rejected.log.length };
+  const skipped = malformed.ledger + malformed.log;
+  if (skipped === 0) return shown;
+  if (shown.ok) return { ok: true, value: { ...shown.value, malformed } };
+  if (shown.error.kind !== 'not-found') return shown;
+  const note = `MALFORMED ${skipped} (ledger ${malformed.ledger}, log ${malformed.log}): a skipped line may hold it`;
+  return { ok: false, error: { ...shown.error, message: `${shown.error.message}; ${note}` } };
+}
+
+/**
+ * Ask `scopeMatches` about each glob integrityFlags will ask about for these rows
+ * — the glob scopes of the active v2 entries — so that a memoized matcher answers
+ * from memory, with no git call, once the lock is held.
+ *
+ * @param {object[]} ledgerRows
+ * @param {(glob: string) => boolean} scopeMatches
+ */
+function warmScopeMatcher(ledgerRows, scopeMatches) {
+  for (const row of activeAnchoredRows(ledgerRows)) {
+    if (!isV2(row) || !Array.isArray(row.scope)) continue;
+    for (const entry of row.scope) {
+      if (isNonEmptyString(entry) && !entry.startsWith('area:')) scopeMatches(entry);
+    }
+  }
+}
+
+/**
+ * Hand out the entries maintenance works on next, and lease them.
+ *
+ * Under the learning lock it flags integrity problems and selects the due
+ * entries (D-DUE-ORDER), then stamps each entry it hands out with
+ * `last_attempt` = now: claim-due is the one writer of the field the lease
+ * reads. A hand-out backs up a v1 tree first (D-V1-BACKUP-ONCE) and quarantines
+ * the ledger's malformed lines before it rewrites the ledger
+ * (D-QUARANTINE-MALFORMED); with nothing due it writes nothing. It answers the
+ * ref claims are checked at as well (D-VERIFY-REF). The scope checks' git calls
+ * run before the lock is taken, on the ledger as it stood then; a glob that
+ * appears meanwhile is checked under the lock.
+ *
+ * @param {string} root - project root
+ * @param {{ now?: number, timeoutMs?: number, scopeMatches?: (glob: string) => boolean }} [opts]
+ *   now: epoch ms (default Date.now()); scopeMatches: default gitScopeMatcher(root)
+ * @returns {{ ok: true, value: { ref: { ref: 'origin/HEAD'|'HEAD', commit: string } | null, due: Array<{ anchor_id: string, reason: string, bytes: number }> } }
+ *   | { ok: false, error: { kind: string, message: string } }}
+ *   due is selectDue's answer; errors are withDecisionsLock's no-learning-dir and busy
+ */
+function claimDue(root, { now = Date.now(), timeoutMs, scopeMatches } = {}) {
+  if (!hasLearningDir(root)) return noLearningDir('claim-due', root);
+  const matches = scopeMatches || gitScopeMatcher(root);
+  const ref = resolveVerifyRef(root);
+  warmScopeMatcher(readJsonl(getDecisionsLedgerPath(root)).rows, matches);
+  return withDecisionsLock('claim-due', root, () => {
+    const ledgerPath = getDecisionsLedgerPath(root);
+    const ledger = readJsonl(ledgerPath);
+    const logRows = readJsonl(getDecisionsLogPath(root)).rows;
+    const integrity = integrityFlags(ledger.rows, logRows, { scopeMatches: matches });
+    const due = selectDue(ledger.rows, logRows, { now, integrity });
+    if (due.length > 0) {
+      ensurePreV2Backup(root, { logRows, ledgerRows: ledger.rows });
+      quarantineRejected(ledgerPath, ledger.rejected, { now });
+      const handedOut = new Set(due.map(entry => entry.anchor_id));
+      const attemptedAt = new Date(now).toISOString();
+      writeJsonlAtomic(ledgerPath, ledger.rows.map(row => (
+        handedOut.has(row.anchor_id) && isActive(row) ? { ...row, last_attempt: attemptedAt } : row
+      )));
+    }
+    return { ok: true, value: { ref, due } };
+  }, { timeoutMs });
+}
+
 module.exports = {
   // Constants
   SCHEMA_VERSION,
@@ -1898,4 +2065,8 @@ module.exports = {
   resolveVerifyRef,
   // Entry ops
   putObservation,
+  readListing,
+  formatListing,
+  showByKey,
+  claimDue,
 };

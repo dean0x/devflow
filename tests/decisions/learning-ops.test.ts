@@ -8,6 +8,10 @@
 // entries an observation backs under the same lock, keeps prior content in
 // history, copies a v1 tree aside once and quarantines malformed lines before a
 // rewrite — and an input it refuses writes nothing at all.
+//
+// list and show print the ledger and the log and write nothing. claim-due names
+// the ref claims are checked at, hands out the due entries in order within a
+// count and a byte budget, and leases each one for a day.
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { spawnSync } from 'child_process';
@@ -21,7 +25,10 @@ import {
   GIT_ENV,
   JSON_HELPER,
   ROOT,
+  daysAgoDate,
+  git,
   initGitRepo,
+  learningPaths,
   makeV1LedgerRow,
   makeV1LogRow,
   makeV2LedgerRow,
@@ -42,6 +49,8 @@ const { renderDecisionsFile } = createRequire(import.meta.url)(
 ) as { renderDecisionsFile: (rows: Row[], kind: 'decisions' | 'pitfalls') => string };
 
 const NOW_ISO = new Date(FIXTURE_NOW).toISOString();
+
+const HOUR_MS = 60 * 60 * 1000;
 
 type PutMode = 'create' | 'update' | 'reinforce';
 
@@ -750,6 +759,365 @@ describe('put-observation op', { timeout: 30_000 }, () => {
     seedLearningTree(dir, { log: [makeV2LogRow()] });
     expect(runJsonHelper(dir, ['put-observation', '--reinforce'], '{"id": "obs_store_one"}\n')).toEqual({
       code: 0, stdout: 'reinforced obs_store_one 2\n', stderr: '',
+    });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// list
+// ---------------------------------------------------------------------------
+
+/** A tree with each kind of row list shows: active and inactive entries of both schemas, unpromoted observations and an entry with no log row. */
+const LIST_LEDGER: Row[] = [
+  makeV2LedgerRow({ anchor_id: 'ADR-002', id: 'obs_beta', title: 'Second decision' }),
+  makeV2LedgerRow(),
+  makeV1LedgerRow(),
+  makeV2LedgerRow({ anchor_id: 'ADR-003', id: 'obs_gamma', decisions_status: 'Superseded', superseded_by: 'ADR-001', title: 'Old decision' }),
+  makeV1LedgerRow({ anchor_id: 'PF-002', id: 'obs_old', pattern: 'Old lesson', decisions_status: 'Retired' }),
+  makeV2LedgerRow({ anchor_id: 'PF-003', id: 'obs_orphan', type: 'pitfall', decisions_status: 'Active', title: 'Orphan entry' }),
+];
+
+const LIST_LOG: Row[] = [
+  makeV2LogRow(),
+  makeV2LogRow({ id: 'obs_beta', title: 'Second decision' }),
+  makeV1LogRow(),
+  makeV2LogRow({ id: 'obs_gamma', title: 'Old decision' }),
+  makeV2LogRow({ id: 'obs_zeta', type: 'pitfall', title: 'Unpromoted lesson', observations: 3 }),
+  makeV1LogRow({ id: 'obs_eta', pattern: 'Legacy\nunpromoted', observations: undefined }),
+];
+
+/** What list prints for LIST_LEDGER and LIST_LOG. */
+const LISTING: readonly string[] = [
+  'ACTIVE 4',
+  '  ADR-001 obs_store_one v2 Store functions return a Result',
+  '  ADR-002 obs_beta v2 Second decision',
+  '  PF-001 obs_legacy_one v1 Editing installed hook scripts instead of their source',
+  '  PF-003 obs_orphan v2 Orphan entry',
+  'INACTIVE 2',
+  '  ADR-003 obs_gamma v2 Superseded Old decision',
+  '    note: superseded by ADR-001',
+  '  PF-002 obs_old v1 Retired Old lesson',
+  'OBSERVATIONS 2',
+  '  obs_eta pitfall v1 observed ? Legacy unpromoted',
+  '  obs_zeta pitfall v2 observed 3 Unpromoted lesson',
+  'INTEGRITY 1',
+  '  PF-003 obs_orphan ledger-without-log',
+];
+
+describe('list', { timeout: 30_000 }, () => {
+  let dir: string;
+  let paths: LearningTreePaths;
+
+  beforeEach(() => {
+    dir = makeTmp('learning-ops-list-');
+    paths = learningPaths(dir);
+  });
+
+  afterEach(() => {
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+
+  it('prints the active, inactive, observation and integrity sections', () => {
+    seedLearningTree(dir, { ledger: LIST_LEDGER, log: LIST_LOG });
+    expect(runJsonHelper(dir, ['list'])).toEqual({ code: 0, stdout: `${LISTING.join('\n')}\n`, stderr: '' });
+  });
+
+  it('adds a MALFORMED section only when lines were skipped, and writes nothing', () => {
+    seedLearningTree(dir, { ledger: LIST_LEDGER, log: LIST_LOG });
+    // A writer would back this v1 tree up and quarantine these lines: list may do neither.
+    fs.appendFileSync(paths.ledger, 'not json\n');
+    fs.appendFileSync(paths.log, '[1]\n{"cut":\n');
+    const before = snapshotTree(dir);
+    expect(runJsonHelper(dir, ['list'])).toEqual({
+      code: 0,
+      stdout: `${[...LISTING, 'MALFORMED 3', '  ledger 1', '  log 2'].join('\n')}\n`,
+      stderr: '',
+    });
+    expect(snapshotTree(dir)).toEqual(before);
+  });
+
+  it('flags an entry whose scope matches no file git tracks', () => {
+    initGitRepo(dir, { 'src/app.ts': 'export {};\n' });
+    seedLearningTree(dir, {
+      ledger: [makeV2LedgerRow({ scope: ['src/**', 'gone/**'] })],
+      log: [makeV2LogRow({ scope: ['src/**', 'gone/**'] })],
+    });
+    expect(runJsonHelper(dir, ['list']).stdout).toContain('\nINTEGRITY 1\n  ADR-001 obs_store_one scope-matches-nothing\n');
+  });
+
+  it('prints every section empty for an empty learning tree', () => {
+    seedLearningTree(dir);
+    expect(runJsonHelper(dir, ['list'])).toEqual({
+      code: 0, stdout: 'ACTIVE 0\nINACTIVE 0\nOBSERVATIONS 0\nINTEGRITY 0\n', stderr: '',
+    });
+  });
+
+  it('takes no argument', () => {
+    seedLearningTree(dir);
+    expect(runJsonHelper(dir, ['list', 'ADR-001'])).toEqual({
+      code: 1, stdout: '', stderr: 'list: usage: list (no arguments; run from the project root)\n',
+    });
+  });
+
+  it('refuses without a learning directory and creates nothing', () => {
+    expect(runJsonHelper(dir, ['list'])).toEqual({
+      code: 1, stdout: '', stderr: `list: no .devflow/learning/ under ${dir} — run from the project root\n`,
+    });
+    expect(fs.readdirSync(dir)).toEqual([]);
+  });
+});
+
+describe('formatListing', () => {
+  it('prints a missing or spaced token as -, so every line keeps its fields before the title', () => {
+    const listing = store.buildListing([
+      makeV2LedgerRow({ id: undefined }),
+      makeV2LedgerRow({ anchor_id: 'ADR-002', id: 'obs with spaces', title: '' }),
+    ], []);
+    expect(store.formatListing(listing).split('\n').slice(0, 3)).toEqual([
+      'ACTIVE 2',
+      '  ADR-001 - v2 Store functions return a Result',
+      '  ADR-002 - v2 -',
+    ]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// show
+// ---------------------------------------------------------------------------
+
+describe('show', { timeout: 30_000 }, () => {
+  let dir: string;
+  let paths: LearningTreePaths;
+
+  beforeEach(() => {
+    dir = makeTmp('learning-ops-show-');
+    paths = learningPaths(dir);
+  });
+
+  afterEach(() => {
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+
+  it('prints the entry as pretty JSON: its ledger rows, its log row, its history and its flags', () => {
+    const ledgerRow = makeV2LedgerRow({ rule: 'An older rule kept only in the ledger.' });
+    const logRow = makeV2LogRow();
+    seedLearningTree(dir, { ledger: [ledgerRow], log: [logRow] });
+    store.appendHistory(dir, { id: 'obs_store_one', ledger: [], log: logRow }, { now: FIXTURE_NOW });
+
+    expect(runJsonHelper(dir, ['show', 'ADR-001'])).toEqual({
+      code: 0,
+      stderr: '',
+      stdout: `${JSON.stringify({
+        key: 'ADR-001',
+        ledger: [ledgerRow],
+        log: logRow,
+        history_versions: [{ id: 'obs_store_one', at: NOW_ISO, ledger: [], log: logRow }],
+        flags: [{ anchor_id: 'ADR-001', flag: 'ledger-only-content', fields: ['rule'] }],
+      }, null, 2)}\n`,
+    });
+  });
+
+  it('finds an entry by its observation id, with every entry that carries it', () => {
+    seedLearningTree(dir, { ledger: [makeV1LedgerRow({ anchor_id: 'PF-009' }), makeV1LedgerRow()], log: [makeV1LogRow()] });
+    const shown = JSON.parse(runJsonHelper(dir, ['show', 'obs_legacy_one']).stdout) as { key: string; ledger: Row[] };
+    expect(shown.key).toBe('obs_legacy_one');
+    expect(shown.ledger.map(row => row.anchor_id)).toEqual(['PF-001', 'PF-009']);
+  });
+
+  it('adds the skipped-line counts only when lines were skipped, and writes nothing', () => {
+    seedLearningTree(dir, { ledger: [makeV1LedgerRow()], log: [makeV1LogRow()] });
+    expect(JSON.parse(runJsonHelper(dir, ['show', 'PF-001']).stdout)).not.toHaveProperty('malformed');
+
+    // A writer would back this v1 tree up and quarantine this line: show may do neither.
+    fs.appendFileSync(paths.ledger, 'not json\n');
+    const before = snapshotTree(dir);
+    const shown = JSON.parse(runJsonHelper(dir, ['show', 'PF-001']).stdout) as Row;
+    expect(Object.keys(shown)).toEqual(['key', 'ledger', 'log', 'history_versions', 'flags', 'malformed']);
+    expect(shown.malformed).toEqual({ ledger: 1, log: 0 });
+    expect(snapshotTree(dir)).toEqual(before);
+  });
+
+  it('exits 1 for an entry neither file holds, and says when skipped lines might hold it', () => {
+    seedLearningTree(dir, { ledger: [makeV2LedgerRow()], log: [makeV2LogRow()] });
+    expect(runJsonHelper(dir, ['show', 'ADR-777'])).toEqual({
+      code: 1, stdout: '', stderr: "show: no entry 'ADR-777' in the ledger or the log\n",
+    });
+    fs.appendFileSync(paths.log, 'not json\n');
+    expect(runJsonHelper(dir, ['show', 'obs_missing'])).toEqual({
+      code: 1,
+      stdout: '',
+      stderr: "show: no entry 'obs_missing' in the ledger or the log; MALFORMED 1 (ledger 0, log 1): a skipped line may hold it\n",
+    });
+  });
+
+  it('takes exactly one anchor or observation id', () => {
+    seedLearningTree(dir, { ledger: [makeV2LedgerRow()], log: [makeV2LogRow()] });
+    for (const args of [['show'], ['show', 'ADR-001', 'ADR-001'], ['show', '../etc/passwd'], ['show', 'adr-001'], ['show', '--all']]) {
+      expect(runJsonHelper(dir, args), args.join(' ')).toEqual({
+        code: 1, stdout: '', stderr: 'show: usage: show <anchor|obs_id> (run from the project root)\n',
+      });
+    }
+  });
+
+  it('refuses without a learning directory and creates nothing', () => {
+    expect(runJsonHelper(dir, ['show', 'ADR-001'])).toEqual({
+      code: 1, stdout: '', stderr: `show: no .devflow/learning/ under ${dir} — run from the project root\n`,
+    });
+    expect(fs.readdirSync(dir)).toEqual([]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// claim-due (D-DUE-ORDER)
+// ---------------------------------------------------------------------------
+
+describe('claim-due (D-DUE-ORDER)', { timeout: 30_000 }, () => {
+  let dir: string;
+  let paths: LearningTreePaths;
+
+  beforeEach(() => {
+    dir = makeTmp('learning-ops-due-');
+    paths = learningPaths(dir);
+  });
+
+  afterEach(() => {
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+
+  /** The size claim-due reports for an entry: its ledger row and its log row, as compact JSON. */
+  function sizeOf(ledger: Row[], log: Row[], anchor: string): number {
+    const row = ledger.find(r => r.anchor_id === anchor);
+    if (!row) throw new Error(`no ledger row ${anchor} in the fixture`);
+    return store.entrySize(row, log.find(l => l.id === row.id));
+  }
+
+  /** The anchors a store claim-due hands out at `now`. */
+  function dueAt(now: number, opts: { scopeMatches?: (glob: string) => boolean } = {}): string[] {
+    const result = store.claimDue(dir, { now, ...opts });
+    if (!result.ok) throw new Error(result.error.message);
+    return result.value.due.map(entry => entry.anchor_id);
+  }
+
+  it('prints the verify ref, then each due entry with its reason and size: integrity, legacy, then the oldest verification', () => {
+    const head = initGitRepo(dir, { 'src/app.ts': 'export {};\n' });
+    const now = Date.now();
+    const ledger = [
+      makeV2LedgerRow({ anchor_id: 'ADR-005', id: 'obs_old40', last_verified: daysAgoDate(40, now) }),
+      makeV1LedgerRow({ anchor_id: 'ADR-003', id: 'obs_legacy_a', type: 'decision', decisions_status: 'Accepted' }),
+      makeV2LedgerRow({ anchor_id: 'ADR-006', id: 'obs_never', last_verified: undefined }),
+      makeV1LedgerRow({ anchor_id: 'PF-020', id: 'obs_dup' }),
+      makeV1LedgerRow({ anchor_id: 'PF-004', id: 'obs_dup' }),
+      makeV2LedgerRow({ anchor_id: 'ADR-007', id: 'obs_fresh', last_verified: daysAgoDate(1, now) }),
+    ];
+    const log = ['obs_old40', 'obs_legacy_a', 'obs_never', 'obs_dup', 'obs_fresh'].map(id => makeV2LogRow({ id }));
+    seedLearningTree(dir, { ledger, log });
+
+    expect(runJsonHelper(dir, ['claim-due'])).toEqual({
+      code: 0,
+      stderr: '',
+      stdout: [
+        `ref HEAD ${head.slice(0, 12)}`,
+        `PF-004 duplicate-obs-id ${sizeOf(ledger, log, 'PF-004')}`,
+        `PF-020 duplicate-obs-id ${sizeOf(ledger, log, 'PF-020')}`,
+        `ADR-003 legacy-v1 ${sizeOf(ledger, log, 'ADR-003')}`,
+        `ADR-006 verify-age ${sizeOf(ledger, log, 'ADR-006')}`,
+        `ADR-005 verify-age ${sizeOf(ledger, log, 'ADR-005')}`,
+        '',
+      ].join('\n'),
+    });
+  });
+
+  it('names origin/HEAD when the repository has one, and none outside a repository', () => {
+    seedLearningTree(dir, { ledger: [] });
+    expect(runJsonHelper(dir, ['claim-due'])).toEqual({ code: 0, stdout: 'ref none\ndue none\n', stderr: '' });
+
+    const fetched = initGitRepo(dir, { 'a.txt': 'one\n' });
+    git(dir, ['update-ref', 'refs/remotes/origin/main', fetched]);
+    git(dir, ['symbolic-ref', 'refs/remotes/origin/HEAD', 'refs/remotes/origin/main']);
+    git(dir, ['commit', '-q', '--allow-empty', '-m', 'local work']);
+    expect(runJsonHelper(dir, ['claim-due'])).toEqual({ code: 0, stdout: `ref origin/HEAD ${fetched.slice(0, 12)}\ndue none\n`, stderr: '' });
+  });
+
+  it('stamps last_attempt on the entries it hands out and leaves every other row as it was', () => {
+    const due = makeV1LedgerRow();
+    const fresh = makeV2LedgerRow({ last_verified: daysAgoDate(1) });
+    const retired = makeV2LedgerRow({ anchor_id: 'ADR-002', id: 'obs_retired', decisions_status: 'Retired' });
+    seedLearningTree(dir, { ledger: [fresh, due, retired], log: [makeV2LogRow(), makeV1LogRow()] });
+    const [freshLine, , retiredLine] = linesOf(paths.ledger);
+
+    expect(store.claimDue(dir, { now: FIXTURE_NOW })).toEqual({
+      ok: true,
+      value: { ref: null, due: [{ anchor_id: 'PF-001', reason: 'legacy-v1', bytes: store.entrySize(due, makeV1LogRow()) }] },
+    });
+    const lines = linesOf(paths.ledger);
+    expect(JSON.parse(lines[1])).toEqual({ ...due, last_attempt: NOW_ISO });
+    expect([lines[0], lines[2]]).toEqual([freshLine, retiredLine]);
+  });
+
+  it('skips an entry handed out in the last 24 hours and hands it out again after', () => {
+    seedLearningTree(dir, { ledger: [makeV1LedgerRow()], log: [makeV1LogRow()] });
+    expect(dueAt(FIXTURE_NOW)).toEqual(['PF-001']);
+    expect(dueAt(FIXTURE_NOW + 23 * HOUR_MS)).toEqual([]);
+    expect(dueAt(FIXTURE_NOW + 25 * HOUR_MS)).toEqual(['PF-001']);
+  });
+
+  it('hands out at most five entries, and the next run within the day hands out the rest', () => {
+    const ledger = Array.from({ length: 7 }, (_, i) => makeV1LedgerRow({ anchor_id: `PF-01${i}`, id: `obs_legacy_${i}` }));
+    seedLearningTree(dir, { ledger, log: ledger.map(row => makeV1LogRow({ id: row.id })) });
+
+    const first = runJsonHelper(dir, ['claim-due']).stdout.split('\n').filter(Boolean).slice(1);
+    expect(first.map(line => line.split(' ')[0])).toEqual(['PF-010', 'PF-011', 'PF-012', 'PF-013', 'PF-014']);
+    const second = runJsonHelper(dir, ['claim-due']).stdout.split('\n').filter(Boolean).slice(1);
+    expect(second.map(line => line.split(' ')[0])).toEqual(['PF-015', 'PF-016']);
+    expect(runJsonHelper(dir, ['claim-due']).stdout).toBe('ref none\ndue none\n');
+  });
+
+  it('stops before the byte budget, and always hands out at least one entry', () => {
+    const big = (anchor: string, id: string, ruleBytes: number): Row =>
+      makeV2LedgerRow({ anchor_id: anchor, id, last_verified: undefined, rule: 'r'.repeat(ruleBytes) });
+    seedLearningTree(dir, { ledger: [big('ADR-001', 'obs_one', 25_000), big('ADR-002', 'obs_two', 25_000), big('ADR-003', 'obs_three', 25_000)] });
+    expect(dueAt(FIXTURE_NOW)).toEqual(['ADR-001', 'ADR-002']);
+
+    seedLearningTree(dir, { ledger: [big('ADR-004', 'obs_huge', 70_000)] });
+    expect(dueAt(FIXTURE_NOW)).toEqual(['ADR-004']);
+  });
+
+  it('puts an entry whose scope matches no tracked file ahead of every other reason', () => {
+    seedLearningTree(dir, {
+      ledger: [makeV1LedgerRow(), makeV2LedgerRow({ last_verified: daysAgoDate(1), scope: ['gone/**'] })],
+      log: [makeV1LogRow(), makeV2LogRow({ scope: ['gone/**'] })],
+    });
+    const result = store.claimDue(dir, { now: FIXTURE_NOW, scopeMatches: glob => glob !== 'gone/**' });
+    expect(result.ok && result.value.due.map(entry => [entry.anchor_id, entry.reason])).toEqual([
+      ['ADR-001', 'scope-matches-nothing'],
+      ['PF-001', 'legacy-v1'],
+    ]);
+  });
+
+  it('prints due none and writes nothing when no entry is due', () => {
+    seedLearningTree(dir, { ledger: [makeV2LedgerRow({ last_verified: daysAgoDate(1, Date.now()) })], log: [makeV2LogRow()] });
+    // A writer would quarantine this line: with nothing to hand out, claim-due may not.
+    fs.appendFileSync(paths.ledger, 'not json\n');
+    const before = snapshotTree(dir);
+    expect(runJsonHelper(dir, ['claim-due'])).toEqual({ code: 0, stdout: 'ref none\ndue none\n', stderr: '' });
+    expect(snapshotTree(dir)).toEqual(before);
+  });
+
+  it('copies a v1 tree aside and quarantines the ledger\'s malformed lines before it stamps', () => {
+    seedLearningTree(dir, { ledger: [makeV1LedgerRow()], log: [makeV1LogRow()] });
+    fs.appendFileSync(paths.ledger, 'not json\n');
+    const ledgerBefore = fs.readFileSync(paths.ledger, 'utf8');
+
+    expect(dueAt(FIXTURE_NOW)).toEqual(['PF-001']);
+    expect(fs.readFileSync(path.join(paths.learningDir, 'decisions-ledger.pre-v2.jsonl'), 'utf8')).toBe(ledgerBefore);
+    expect(rowsOf(path.join(paths.learningDir, 'decisions-ledger.rejected.jsonl')).map(row => row.text)).toEqual(['not json']);
+    expect(linesOf(paths.ledger)).toHaveLength(1);
+  });
+
+  it('takes no argument', () => {
+    seedLearningTree(dir);
+    expect(runJsonHelper(dir, ['claim-due', '--all'])).toEqual({
+      code: 1, stdout: '', stderr: 'claim-due: usage: claim-due (no arguments; run from the project root)\n',
     });
   });
 });

@@ -342,6 +342,15 @@ export type PutResult =
   | { ok: true; value: PutAnswer }
   | { ok: false; error: { kind: string; message: string; problems?: ValidationError[] } };
 
+/** What show answers: the shown entry, plus the skipped-line counts when lines were skipped. */
+export type ShowAnswer = ShownEntry & { malformed?: { ledger: number; log: number } };
+
+/** What claim-due answers: the ref claims are checked at, and the entries handed out. */
+export interface DueClaim {
+  ref: { ref: 'origin/HEAD' | 'HEAD'; commit: string } | null;
+  due: DueEntry[];
+}
+
 /** The learning store's surface as the tests use it. */
 export interface LearningStoreApi {
   SCHEMA_VERSION: number;
@@ -435,6 +444,13 @@ export interface LearningStoreApi {
     input: unknown,
     opts?: { now?: number; timeoutMs?: number; scopeMatches?: (glob: string) => boolean },
   ): PutResult;
+  readListing(root: string, opts?: { scopeMatches?: (glob: string) => boolean }): Result<Listing>;
+  formatListing(listing: Listing): string;
+  showByKey(root: string, key: string): Result<ShowAnswer>;
+  claimDue(
+    root: string,
+    opts?: { now?: number; timeoutMs?: number; scopeMatches?: (glob: string) => boolean },
+  ): Result<DueClaim>;
 }
 
 /** Load the learning store CommonJS module. */

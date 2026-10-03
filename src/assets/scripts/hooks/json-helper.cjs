@@ -38,6 +38,10 @@
 //   put-observation --create|--update|--reinforce
 //                                          Store one observation from one JSON object on
 //                                          stdin; re-projects and re-renders its entries
+//   list                                  Read-only: print the ledger and the log by section
+//   show <anchor|obs_id>                  Read-only: print one entry as pretty JSON
+//   claim-due                             Hand out the entries due for maintenance, leased
+//                                          for a day, after the ref their claims are checked at
 //   claim-queue                           Claim the learning queue for this run; prints
 //                                          claimed <token>[ takeover] | busy | none
 //   release-claim <token>                 Release the claim the token owns; prints
@@ -376,7 +380,8 @@ const PUT_MODES = new Map([['--create', 'create'], ['--update', 'update'], ['--r
  * never touch it. A new learning op joins this set.
  */
 const LEARNING_OPS = new Set([
-  'assign-anchor', 'next-anchor', 'retire-anchor', 'refresh-anchor', 'rotate-observations', 'put-observation',
+  'assign-anchor', 'next-anchor', 'retire-anchor', 'refresh-anchor', 'rotate-observations',
+  'put-observation', 'list', 'show', 'claim-due',
 ]);
 
 /** Send the claim heartbeat; a failure is reported on stderr and never stops the op. */
@@ -988,6 +993,59 @@ try {
       process.exitCode = emit(poResult, put => [
         put.outcome === 'reinforced' ? `reinforced ${put.id} ${put.observations}` : `${put.outcome} ${put.id}`,
         ...put.reprojected.map(anchorId => `reprojected ${anchorId}`),
+      ].join('\n'));
+      break;
+    }
+
+    // -------------------------------------------------------------------------
+    // list
+    // Print the ledger and the log by section, read-only (readListing and
+    // formatListing, learning-store.cjs). Takes no argument.
+    // stdout: the ACTIVE, INACTIVE, OBSERVATIONS and INTEGRITY sections, then
+    // MALFORMED when lines were skipped
+    // -------------------------------------------------------------------------
+    case 'list': {
+      if (args.length > 0) {
+        process.stderr.write('list: usage: list (no arguments; run from the project root)\n');
+        process.exit(1);
+      }
+      const { store } = learning();
+      process.exitCode = emit(store.readListing(process.cwd()), store.formatListing);
+      break;
+    }
+
+    // -------------------------------------------------------------------------
+    // show <anchor|obs_id>
+    // Print one entry, read-only (showByKey, learning-store.cjs).
+    // stdout: pretty JSON { key, ledger, log, history_versions, flags }, plus
+    // malformed when lines were skipped
+    // -------------------------------------------------------------------------
+    case 'show': {
+      const { store } = learning();
+      if (args.length !== 1 || !(store.ANCHOR_ID_RE.test(args[0]) || store.OBS_ID_RE.test(args[0]))) {
+        process.stderr.write('show: usage: show <anchor|obs_id> (run from the project root)\n');
+        process.exit(1);
+      }
+      process.exitCode = emit(store.showByKey(process.cwd(), args[0]), shown => JSON.stringify(shown, null, 2));
+      break;
+    }
+
+    // -------------------------------------------------------------------------
+    // claim-due
+    // Hand out the entries due for maintenance and lease each for a day
+    // (claimDue, learning-store.cjs: D-DUE-ORDER, D-VERIFY-REF). Takes no argument.
+    // stdout: ref <origin/HEAD|HEAD> <sha12>, or ref none; then one
+    // `<anchor> <reason> <bytes>` line per entry handed out, or due none
+    // -------------------------------------------------------------------------
+    case 'claim-due': {
+      if (args.length > 0) {
+        process.stderr.write('claim-due: usage: claim-due (no arguments; run from the project root)\n');
+        process.exit(1);
+      }
+      const { store } = learning();
+      process.exitCode = emit(store.claimDue(process.cwd()), ({ ref, due }) => [
+        ref === null ? 'ref none' : `ref ${ref.ref} ${ref.commit.slice(0, 12)}`,
+        ...(due.length > 0 ? due.map(entry => `${store.singleLine(entry.anchor_id)} ${entry.reason} ${entry.bytes}`) : ['due none']),
       ].join('\n'));
       break;
     }

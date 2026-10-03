@@ -2144,6 +2144,7 @@ describe('D-ONE-LEARNING-LOCK: every learning writer takes the one learning lock
     [['refresh-anchor', 'ADR-001']],
     [['rotate-observations']],
     [['put-observation', '--update']],
+    [['claim-due']],
   ])('%j takes .decisions.lock and creates no other directory', args => {
     expect(directoriesCreatedBy(args, STDIN[args[0]] ?? '')).toEqual(['.decisions.lock']);
   });
@@ -2172,6 +2173,7 @@ describe('D-NO-STRAY-TREE: a learning writer refuses outside a learning tree', {
         provenance: 'stray-tree test',
       }),
     },
+    { args: ['claim-due'] },
   ];
   let dir: string;
 
