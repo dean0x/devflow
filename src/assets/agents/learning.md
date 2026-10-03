@@ -40,7 +40,7 @@ are relative to it. The ledger ops live at `$HOME/.devflow/scripts/hooks/json-he
 
 - `assign-anchor <type> <obs_id>` — claims the next ADR/PF number and re-renders all three `.md` files (decisions.md, pitfalls.md, index.md)
 - `retire-anchor <anchor_id> <status>` — flips a ledger row's rendered status and re-renders
-- `refresh-anchor <anchor_id> [<anchor_id>...]` — variadic: re-projects one or more anchored log rows through the same projector as `assign-anchor` in a single lock/parse/render pass; use after reinforcing already-anchored observations (ADR-022)
+- `refresh-anchor <anchor_id> [<anchor_id>...]` — variadic: re-projects one or more anchored log rows through the same projector as `assign-anchor` in a single lock/parse/render pass; use after reinforcing already-anchored observations
 - `rotate-observations` — archives `observing` log rows older than 30 days
 
 Each op self-locks internally. Call them plainly — never wrap them in a lock of your own,
@@ -135,8 +135,7 @@ rewrite the whole file:
   `amendments` array (create the array if absent). The shape is exactly `{date, note}` — the
   schema guard rejects bare strings. Amendments render at the end of the entry body in
   `decisions.md`/`pitfalls.md`; they never appear in `index.md` lines. A follow-up
-  `refresh-anchor <anchor_id>` is required to propagate the addition to the rendered files
-  (ADR-022).
+  `refresh-anchor <anchor_id>` is required to propagate the addition to the rendered files.
 
 - **Reinforce an existing row** — use the Edit tool to replace that row's single line:
   increment `observations`, union `evidence` (dedupe, cap 10), update `last_seen`, and
@@ -186,7 +185,7 @@ ledger (`.devflow/learning/decisions-ledger.jsonl`) is within the past 7 days. T
 is the ledger row's `date` field (YYYY-MM-DD), not anything in the `.md` file. If the ledger
 row lacks a `date` field (pitfall rows promoted before date-stamping was added), use the
 observation log row's `last_seen` date for the window. If `last_seen` is also unavailable, the
-entry predates date-stamping and is outside the protection window (no backfill: a fabricated date would be worse than an unprotected entry — ADR-022).
+entry predates date-stamping and is outside the protection window (no backfill: a fabricated date would be worse than an unprotected entry).
 Example: a pitfall row with no ledger `date` whose log row has `last_seen: "2026-08-27"` → window
 key 2026-08-27 (protected if within 7 days of today); no ledger `date` AND no log `last_seen`
 → outside the window, eligible for curation.
@@ -198,7 +197,7 @@ Ground yourself first, all by direct reads:
   those files still exist (Glob). An entry whose referenced files are gone is a preferred
   retirement candidate — a signal to prefer, not an automatic retirement.
 
-**PF-040 pointer-vs-citation gate**: before acting on a missing-path signal (a file cited in
+**Pointer-vs-citation gate**: before acting on a missing-path signal (a file cited in
 `details`/`evidence` no longer exists), determine whether the reference is a live POINTER (a
 file a reader should follow today) or a HISTORICAL CITATION (the file the entry recorded
 deleting, replacing, or retiring). A missing live pointer is drift — repair the reference. A
@@ -237,7 +236,7 @@ node "$HOME/.devflow/scripts/hooks/json-helper.cjs" retire-anchor <anchor_id> <s
 
 `retire-anchor` is atomic and idempotent. Call it once per entry.
 
-**Citation preservation** (ADR-022 — log is content authority): if an entry being retired
+**Citation preservation**: if an entry being retired
 has inbound `applies ADR-NNN` citations in other entries' `pattern`/`details`, update those
 other entries to reference the surviving entry — do this by editing their **log rows** in
 `decisions-log.jsonl` (one line at a time), then collecting all updated anchor ids and calling
@@ -253,7 +252,7 @@ Never edit the ledger directly for content changes; the log is the authority.
    it twice).
 2. Delete the claim file as your FINAL act, strictly after every other write (`rm -f` is
    denied by devflow's recommended deny-list; `unlink` and a flagless `rm` both pass — use
-   `unlink` (PF-003)):
+   `unlink`):
    `unlink .devflow/learning/.pending-turns.processing`
    If deletion is denied, finish normally and note the leftover claim file in your summary —
    the next run's stale-merge recovery folds it in.

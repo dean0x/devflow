@@ -29,7 +29,7 @@ The orchestrator provides:
 
 ## Apply Decisions
 
-Follow the `devflow:apply-decisions` skill to scan the `DECISIONS_CONTEXT` index, Read full ADR/PF bodies on demand, and cite `applies ADR-NNN` / `avoids PF-NNN` in findings. Skip when `DECISIONS_CONTEXT` is empty or `(none)`.
+Follow the `devflow:apply-decisions` skill to scan the `DECISIONS_CONTEXT` index and Read full ADR/PF bodies on demand. A finding that rests on a decision or pitfall states that rule in words, never its ID: findings feed plans and tickets that are posted to the tracker. Skip when `DECISIONS_CONTEXT` is empty or `(none)`.
 
 ## Modes
 

@@ -4,8 +4,8 @@ machine manifest for a value this line carries — `resolve-settings.cjs` folds 
 three, and `tests/guards/no-config-read.test.ts` holds every compiled prompt to it.
 
 Imported by `_publication.mds`, `_compliance.mds` and `_knowledge.mds` themselves,
-as ALIAS imports (PF-073: a selective import deep-clones this module's scope into
-every define of the importer). A command that runs two of those gates carries the
+as ALIAS imports (a selective import deep-clones this module's scope into every
+define of the importer). A command that runs two of those gates carries the
 block twice; the text says "reuse a line this run already resolved for the same
 root", so the second copy costs bytes and never a second resolution.
 

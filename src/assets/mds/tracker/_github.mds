@@ -26,7 +26,7 @@ the single-authority corpus is the divergence this split exists to prevent.
 Headings below each section's own anchor are `###` by grammar, not by taste: a
 column-0 `## ` line outside a fence terminates the section for every guard that
 reads it through `extractOpSectionFromCorpus`, and everything under it becomes
-invisible while the bytes stay on disk (PF-063).
+invisible while the bytes stay on disk.
 
 `_common.mds` is an ALIAS import (`as common`), as in the other two provider
 modules. A SELECTIVE import deep-copies each named function into every `@define`

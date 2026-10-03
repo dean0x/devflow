@@ -62,12 +62,12 @@ The orchestrator provides:
 
 ## Apply Decisions
 
-Apply the `devflow:apply-decisions` algorithm — scan the `DECISIONS_CONTEXT` index, Read full ADR/PF bodies on demand, and cite `applies ADR-NNN` / `avoids PF-NNN` inline in findings. Skip when `DECISIONS_CONTEXT` is empty or `(none)`.
+Apply the `devflow:apply-decisions` algorithm — scan the `DECISIONS_CONTEXT` index and Read full ADR/PF bodies on demand. A finding that rests on a decision or pitfall states that rule in words, never its ID: findings are posted to the PR. You may name the ID in your final message to the orchestrator. Skip when `DECISIONS_CONTEXT` is empty or `(none)`.
 
 ## Responsibilities
 
 1. **Load focus skill**: Before any analysis, invoke the Skill tool: `Skill(skill="devflow:{FOCUS}")` (substituting your assigned focus area). If the Skill invocation fails, proceed with the review using your built-in knowledge — the focus skill provides additional detection patterns but is not required for a useful review.
-2. **Apply Decisions** - Follow `devflow:apply-decisions` (see section above) to scan the index and cite relevant entries in findings.
+2. **Apply Decisions** - Follow `devflow:apply-decisions` (see section above) to scan the index and state relevant entries in words in findings.
 3. **Identify changed lines** - Get diff against base branch (main/master/develop/integration/trunk)
 4. **Apply 3-category classification** - Sort issues by where they occur
 5. **Apply focus-specific analysis** - Use pattern skill detection rules from the loaded skill file

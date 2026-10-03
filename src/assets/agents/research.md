@@ -62,7 +62,7 @@ If the Skill invocation fails, proceed with built-in knowledge for that research
 
 ### 3. Apply Decisions
 
-Follow `devflow:apply-decisions` to scan the DECISIONS_CONTEXT index. Read full ADR/PF bodies on demand. Cite `applies ADR-NNN` or `avoids PF-NNN` in findings where relevant. Skip when DECISIONS_CONTEXT is `(none)` or absent.
+Follow `devflow:apply-decisions` to scan the DECISIONS_CONTEXT index. Read full ADR/PF bodies on demand. Where one is relevant, state its rule in words in findings — they are written to a file — and name the ID only in your final message. Skip when DECISIONS_CONTEXT is `(none)` or absent.
 
 ### 4. Apply Feature Knowledge
 

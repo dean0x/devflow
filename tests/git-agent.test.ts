@@ -2940,7 +2940,7 @@ const PR_HOST_TREE: readonly string[] = [`${PR_HOST_DESTINATION_ROOT}/`];
 
 const MOVED_OBLIGATIONS: readonly MovedObligation[] = [
   { op: 'resolve-review-threads', literal: '`FALSE_POSITIVE` — not a real issue; requires grep/file:line citation as evidence', trees: PR_HOST_TREE },
-  { op: 'resolve-review-threads', literal: '`BY_DESIGN` — intentional; requires ADR or code citation as evidence', trees: PR_HOST_TREE },
+  { op: 'resolve-review-threads', literal: '`BY_DESIGN` — intentional; requires a recorded decision, stated in words, or code citation as evidence', trees: PR_HOST_TREE },
   { op: 'resolve-review-threads', literal: '`ESCALATED` — requires human review', trees: PR_HOST_TREE },
   { op: 'resolve-review-threads', literal: 'read the remaining-budget rungs in `references/github-api.md` before the first iteration', trees: PR_HOST_TREE },
   { op: 'check-merge-readiness', literal: 'Never take action on the PR', trees: PR_HOST_TREE },

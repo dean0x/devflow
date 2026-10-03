@@ -35,7 +35,7 @@ omission:
 Headings below each section's own anchor are `###` by grammar, not by taste: a
 column-0 `## ` line outside a fence terminates the section for every guard that
 reads it through `extractOpSectionFromCorpus`, and everything under it becomes
-invisible while the bytes stay on disk (PF-063). The `## ` lines inside the two
+invisible while the bytes stay on disk. The `## ` lines inside the two
 summary operations' compose fences are indented payload and stay exactly as they
 were authored.
 
@@ -186,7 +186,7 @@ Load for `resolve-review-threads` under every tracker provider.
 Each `THREAD_MAP` entry carries one verdict:
 - `FIXED` — issue addressed
 - `FALSE_POSITIVE` — not a real issue; requires grep/file:line citation as evidence
-- `BY_DESIGN` — intentional; requires ADR or code citation as evidence
+- `BY_DESIGN` — intentional; requires a recorded decision, stated in words, or code citation as evidence
 - `ESCALATED` — requires human review
 
 (The resolution gate these verdicts feed — D9 — is stated in the agent's own section.)

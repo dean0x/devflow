@@ -43,7 +43,7 @@ The orchestrator provides:
 
 ## Apply Decisions
 
-Apply the `devflow:apply-decisions` algorithm — scan the `DECISIONS_CONTEXT` index, Read full ADR/PF bodies on demand, and cite `applies ADR-NNN` / `avoids PF-NNN` inline in findings. Skip when `DECISIONS_CONTEXT` is `(none)`.
+Apply the `devflow:apply-decisions` algorithm — scan the `DECISIONS_CONTEXT` index and Read full ADR/PF bodies on demand. A finding that rests on a decision or pitfall states that rule in words, never its ID: findings can reach a resolution summary posted to the PR. Skip when `DECISIONS_CONTEXT` is `(none)`.
 
 ## Bug-Hunting Methodology
 

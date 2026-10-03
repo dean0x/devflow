@@ -117,7 +117,7 @@ updated: {ISO date}
 [Most important files with one-line descriptions]
 
 ## Related
-[Links to ADR/PF entries, other feature knowledge entries, key source files]
+[Links to other feature knowledge entries and key source files — never an ADR/PF ID]
 ```
 
 ### Category Templates
@@ -167,8 +167,9 @@ Bad: `"Integration stuff"`
 
 Knowledge files must not exist in isolation. The **Related** section must link to:
 - Other feature knowledge entries that cover related topics
-- ADR/PF entries from DECISIONS_CONTEXT (if provided)
 - Key source files referenced in the knowledge
+
+A decision or pitfall from DECISIONS_CONTEXT that shapes this area is stated in words in the section it governs, never by its ADR/PF ID: KNOWLEDGE.md is git-tracked and shared with every clone, and ledger IDs resolve only on the machine that recorded them.
 
 References should be bidirectional — when creating a new feature knowledge entry that relates to an existing one, note the connection.
 
@@ -230,7 +231,7 @@ Run through this before writing. If any check fails, go back and fix it.
 - [ ] File stays under 500 lines (split if necessary)
 
 **Connections:**
-- [ ] Cross-references to related feature knowledge entries and ADR/PF entries in Related section
+- [ ] Cross-references to related feature knowledge entries in Related section; decisions and pitfalls stated in words, with no ADR/PF ID anywhere in the file
 - [ ] No isolated knowledge islands — file connects to the broader knowledge network
 - [ ] Key source files listed in Key Files section
 
@@ -325,8 +326,8 @@ All constants use `SCREAMING_SNAKE_CASE` with a descriptive prefix. If a value c
 
 ## Related
 
-- ADR-003: Lib/command separation principle
-- PF-001: Config drift when constants are scattered
+- `.devflow/features/cli-commands/KNOWLEDGE.md` — the command side of the lib/command split: catching errors and routing them to `showError()`
+- `src/commands/` — where each integration is wired into a command
 ````
 
 ---

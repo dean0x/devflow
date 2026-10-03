@@ -76,7 +76,7 @@ One line is DELIBERATELY not here. The marker-neutralisation bullet
 NOT in its indentation — five spaces in one module and three in the other two,
 because the surrounding list nests differently. A define emits one string, so
 hoisting it would re-indent one of the three, and indentation is list grammar
-rather than whitespace here (PF-063). Normalising those lists is its own edit.
+rather than whitespace here. Normalising those lists is its own edit.
 
 @define state_batch_line(subject, subject_ref, ref_token):
 2b. Render each issue's {{subject}} as a `**State**: {state}` line of its own, between that issue's `### Issue {{ref_token}}:` heading and its `<untrusted-issue-body>` marker — OUTSIDE the wrapper, because {{subject_ref}} is an enum the tracker computed, not remote prose. A caller refreshing a batch reads it to see a ticket closed out of band.

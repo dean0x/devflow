@@ -739,4 +739,4 @@ Update the wave PR's test-plan block and post its evidence comment."
 
 ### Maintenance note
 
-This recipe encodes the current `/implement` + `/code-review` + `/resolve` orchestration shape as of the authoring date (2026-06-12). When those base commands change their orchestration, update this recipe to match. No tooling detects drift — by design (ADR-008 Iron Rule). The reminder lives in the design doc §16.
+This recipe encodes the current `/implement` + `/code-review` + `/resolve` orchestration shape as of the authoring date (2026-06-12). When those base commands change their orchestration, update this recipe to match. No tooling detects drift — by design (the LLM-vs-plumbing Iron Rule). The reminder lives in the design doc §16.

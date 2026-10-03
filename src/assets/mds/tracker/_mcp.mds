@@ -32,16 +32,17 @@ extraction that turns a universal obligation into per-consumer opt-in is the
 defect, not the saving.
 
 The preamble names it on the SAME physical line that composes the per-operation
-mechanics path, which is what keeps PF-023's single convergence point at exactly
-one line. That is sound rather than a loophole: what PF-023 counts is where a path
-is BUILT, and this one is a fixed literal built from nothing — the validated
+mechanics path, which is what keeps the single convergence point (validation lives
+at the one sink every path passes through, not at each entry) at exactly one line.
+That is sound rather than a loophole: what that rule counts is where a path is
+BUILT, and this one is a fixed literal built from nothing — the validated
 provider token selects the mechanics directory and never reaches this name. A
 per-operation file naming it again is forbidden, and asserted as forbidden.
 
 Headings below the first are `###` by grammar, not by taste: a column-0 `## `
 line outside a fence terminates this file's section for every guard that reads it
 through `extractOpSectionFromCorpus`, and everything under it becomes invisible
-while the bytes stay on disk (PF-063).
+while the bytes stay on disk.
 
 TWO ROLES, AND THE SECOND ONE IS EMITTED NOWHERE. `@define tool_call_contract()`
 below is the artifact: it becomes `tracker/_mcp.md` and is read once per spawn.
@@ -81,7 +82,7 @@ to `_common.mds` cost 1.2 s in total. A rule that belongs here by subject and
 would be the tenth define belongs in `_common.mds` with its audience stated at
 the define, and this paragraph is the reason.
 
-NOTHING MORE GOES INTO THIS MODULE (PF-073). Anything further that wants
+NOTHING MORE GOES INTO THIS MODULE. Anything further that wants
 hoisting goes to `_common.mds`, or this module shrinks first; and every importer
 reaches it by ALIAS (`as mcp`), never by a selective import, whose deep copy per
 importing define is the same cliff. `tests/build-mds-compile-time.test.ts` holds

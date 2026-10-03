@@ -65,6 +65,17 @@ describe('apply-decisions skill — 5-step algorithm', () => {
     expect(content).toMatch(/Cite inline/i)
   })
 
+  it('"Cite inline" confines IDs to in-session handoffs and puts words in committed or posted text', () => {
+    const content = loadSkill()
+    const step4 = content.slice(
+      content.indexOf('### Step 4'),
+      content.indexOf('### Step 5')
+    )
+    expect(step4).toMatch(/in-session handoffs only/)
+    expect(step4).toContain('Anything committed, pushed or posted states the rule in words, never its ID')
+    expect(step4).not.toMatch(/inline comments/i)
+  })
+
   it('contains "verbatim IDs" instruction (hallucination guard)', () => {
     const content = loadSkill()
     expect(content).toMatch(/verbatim IDs?/i)
@@ -76,9 +87,14 @@ describe('apply-decisions skill — 5-step algorithm', () => {
 // -------------------------------------------------------------------------
 
 describe('apply-decisions skill — worked example', () => {
-  it('contains PF-004 in the worked example', () => {
+  it('uses the PF-NNN placeholder in the worked example', () => {
     const content = loadSkill()
-    expect(content).toContain('PF-004')
+    const example = content.slice(
+      content.indexOf('## Worked Example'),
+      content.indexOf('## Skip Guard')
+    )
+    expect(example).toContain('avoids PF-NNN')
+    expect(example).not.toMatch(/\b(?:ADR|PF)-[0-9]{3}\b/)
   })
 })
 
@@ -95,6 +111,11 @@ describe('apply-decisions skill — citation format', () => {
   it('specifies "avoids PF-NNN" citation format', () => {
     const content = loadSkill()
     expect(content).toContain('avoids PF-NNN')
+  })
+
+  it('carries placeholders only — no real ledger ID anywhere in the skill', () => {
+    const content = loadSkill()
+    expect(content).not.toMatch(/\b(?:ADR|PF)-[0-9]{3}\b/)
   })
 })
 
