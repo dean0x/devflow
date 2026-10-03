@@ -3,6 +3,7 @@ import type { ComponentResult, GatherContext, LearningCountsData } from '../type
 import { dim } from '../colors.js';
 import { getDecisionsLedgerPath } from '../../core/project-paths.js';
 import { getLedgerRoot, type LedgerRootOptions } from '../../core/ledger-root.js';
+import { isActiveDecisionsStatus } from '../../core/observations.js';
 
 /** The HUD's per-git-command budget (src/hud/git.ts GIT_TIMEOUT). */
 const LEDGER_ROOT_TIMEOUT_MS = 1000;
@@ -11,13 +12,11 @@ const LEDGER_ROOT_TIMEOUT_MS = 1000;
  * @devflow-design-decision D309
  * Counts come from decisions-ledger.jsonl (the render source of truth), NOT
  * the rendered decisions.md/pitfalls.md, so the HUD never couples to markdown
- * format. Active-row semantics mirror render-decisions.cjs exactly: a row
- * counts when anchor_id is set and decisions_status is absent or outside
- * INACTIVE_STATUSES — so the numbers always equal the entries visible in the
- * rendered files.
+ * format. A row counts when anchor_id is set and isActiveDecisionsStatus calls
+ * its decisions_status active — the one status list, which core/observations.ts
+ * shares with the hooks' learning store and the renderer — so the numbers always
+ * equal the entries visible in the rendered files.
  */
-const INACTIVE_STATUSES = new Set(['Deprecated', 'Superseded', 'Retired']);
-
 interface LedgerCountRow {
   type: 'decision' | 'pitfall';
   anchor_id: string;
@@ -30,11 +29,6 @@ function isLedgerCountRow(val: unknown): val is LedgerCountRow {
   if (o.type !== 'decision' && o.type !== 'pitfall') return false;
   if (typeof o.anchor_id !== 'string' || o.anchor_id.length === 0) return false;
   return o.decisions_status === undefined || typeof o.decisions_status === 'string';
-}
-
-function isActive(row: LedgerCountRow): boolean {
-  if (!row.decisions_status) return true;
-  return !INACTIVE_STATUSES.has(row.decisions_status);
 }
 
 /**
@@ -68,7 +62,7 @@ export function gatherLearningCounts(cwd: string): LearningCountsData | null {
     if (!isLedgerCountRow(parsed)) continue;
     parsedAny = true;
 
-    if (!isActive(parsed)) continue;
+    if (!isActiveDecisionsStatus(parsed.decisions_status)) continue;
     if (parsed.type === 'decision') counts.decisions++;
     else counts.pitfalls++;
   }

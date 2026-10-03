@@ -123,6 +123,21 @@ describe('isActive', () => {
   it('returns false for Retired', () => {
     expect(isActive({ decisions_status: 'Retired' })).toBe(false);
   });
+
+  it('returns false for Encoded', () => {
+    expect(isActive({ decisions_status: 'Encoded' })).toBe(false);
+  });
+
+  it('returns true for a status outside the list', () => {
+    expect(isActive({ decisions_status: 'SomeFutureStatus' })).toBe(true);
+  });
+
+  it('is the learning store\'s isActive, re-exported', () => {
+    const store = require(path.join(ROOT, 'src/assets/scripts/hooks/lib/learning-store.cjs')) as {
+      isActive: (row: Record<string, unknown>) => boolean;
+    };
+    expect(isActive).toBe(store.isActive);
+  });
 });
 
 // ---------------------------------------------------------------------------

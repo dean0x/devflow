@@ -96,6 +96,11 @@ function getDecisionsArchivePath(projectRoot) {
   return path.join(projectRoot, '.devflow', 'learning', 'decisions-log.archive.jsonl');
 }
 
+/** .devflow/learning/decisions-history.jsonl — prior content versions of rewritten entries (learning-store.cjs) */
+function getDecisionsHistoryPath(projectRoot) {
+  return path.join(projectRoot, '.devflow', 'learning', 'decisions-history.jsonl');
+}
+
 /** .devflow/learning/.decisions.lock — mkdir-based lock directory */
 function getDecisionsLockDir(projectRoot) {
   return path.join(projectRoot, '.devflow', 'learning', '.decisions.lock');
@@ -192,6 +197,7 @@ module.exports = {
   getDecisionsLedgerPath,
   getDecisionsLogPath,
   getDecisionsArchivePath,
+  getDecisionsHistoryPath,
   getDecisionsLockDir,
   getObservationsLockDir,
   getDecisionsUsagePath,

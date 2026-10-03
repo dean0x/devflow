@@ -11,8 +11,7 @@
 // Filtering rules (must match AC-F3):
 //   - anchor_id must be set (unanchored observing rows are excluded)
 //   - type must match kind: 'decision' rows → decisions.md; 'pitfall' rows → pitfalls.md
-//   - decisions_status: undefined|'Accepted'|'Active' → included
-//     'Deprecated'|'Superseded'|'Retired' → excluded
+//   - the row must be active: isActive from learning-store.cjs, the one status list
 //
 // Row shape: see LearningObservation in src/core/observations.ts.
 // Ledger file: .devflow/learning/decisions-ledger.jsonl (anchored rows only).
@@ -42,13 +41,11 @@ const {
 } = require('./project-paths.cjs');
 const { acquireMkdirLock, releaseLock } = require('./mkdir-lock.cjs');
 const { safePath } = require('./safe-path.cjs');
+const { isActive } = require('./learning-store.cjs');
 
 // ---------------------------------------------------------------------------
 // Constants
 // ---------------------------------------------------------------------------
-
-/** Statuses that indicate an anchored entry should be HIDDEN from the render. */
-const INACTIVE_STATUSES = new Set(['Deprecated', 'Superseded', 'Retired']);
 
 /** Ledger filename relative to .devflow/learning/ */
 const LEDGER_FILENAME = 'decisions-ledger.jsonl';
@@ -88,18 +85,6 @@ function parseLedger(ledgerPath) {
 // ---------------------------------------------------------------------------
 // Core renderer
 // ---------------------------------------------------------------------------
-
-/**
- * Determine whether a row is "active" for render purposes.
- * Active = decisions_status is undefined OR is one of 'Accepted'/'Active'.
- *
- * @param {object} row
- * @returns {boolean}
- */
-function isActive(row) {
-  if (!row.decisions_status) return true;
-  return !INACTIVE_STATUSES.has(row.decisions_status);
-}
 
 /**
  * Extract the numeric suffix from an anchor_id like "ADR-NNN" or "PF-NNN".
@@ -207,7 +192,7 @@ function renderBodyFromActive(activeRows, kind) {
  * Filtering:
  *   - row.type must match kind ('decision' → decisions.md, 'pitfall' → pitfalls.md)
  *   - row.anchor_id must be set
- *   - row must be active (decisions_status not in INACTIVE_STATUSES)
+ *   - row must be active (isActive)
  *
  * Output structure:
  *   TL;DR line (line 1)

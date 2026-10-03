@@ -96,6 +96,11 @@ export function getDecisionsArchivePath(projectRoot: string): string {
   return path.join(projectRoot, '.devflow', 'learning', 'decisions-log.archive.jsonl');
 }
 
+/** .devflow/learning/decisions-history.jsonl — prior content versions of rewritten entries (learning-store.cjs) */
+export function getDecisionsHistoryPath(projectRoot: string): string {
+  return path.join(projectRoot, '.devflow', 'learning', 'decisions-history.jsonl');
+}
+
 /** .devflow/learning/.decisions.lock — mkdir-based lock directory */
 export function getDecisionsLockDir(projectRoot: string): string {
   return path.join(projectRoot, '.devflow', 'learning', '.decisions.lock');

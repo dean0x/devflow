@@ -28,6 +28,7 @@ import {
   getDecisionsLedgerPath,
   getDecisionsLogPath,
   getDecisionsArchivePath,
+  getDecisionsHistoryPath,
   getDecisionsLockDir,
   getDecisionsUsagePath,
   getDecisionsUsageLockDir,
@@ -103,6 +104,10 @@ describe('project-paths TypeScript module', () => {
 
     it('getDecisionsLogPath returns .devflow/learning/decisions-log.jsonl', () => {
       expect(getDecisionsLogPath(ROOT)).toBe('/some/project/.devflow/learning/decisions-log.jsonl');
+    });
+
+    it('getDecisionsHistoryPath returns .devflow/learning/decisions-history.jsonl', () => {
+      expect(getDecisionsHistoryPath(ROOT)).toBe('/some/project/.devflow/learning/decisions-history.jsonl');
     });
 
     it('getDecisionsLockDir returns .devflow/learning/.decisions.lock', () => {
@@ -203,6 +208,7 @@ describe('CJS project-paths parity', () => {
     { name: 'getDecisionsLedgerPath', ts: getDecisionsLedgerPath, cjs: cjsPaths.getDecisionsLedgerPath },
     { name: 'getDecisionsLogPath', ts: getDecisionsLogPath, cjs: cjsPaths.getDecisionsLogPath },
     { name: 'getDecisionsArchivePath', ts: getDecisionsArchivePath, cjs: cjsPaths.getDecisionsArchivePath },
+    { name: 'getDecisionsHistoryPath', ts: getDecisionsHistoryPath, cjs: cjsPaths.getDecisionsHistoryPath },
     { name: 'getDecisionsLockDir', ts: getDecisionsLockDir, cjs: cjsPaths.getDecisionsLockDir },
     { name: 'getDecisionsUsagePath', ts: getDecisionsUsagePath, cjs: cjsPaths.getDecisionsUsagePath },
     { name: 'getDecisionsUsageLockDir', ts: getDecisionsUsageLockDir, cjs: cjsPaths.getDecisionsUsageLockDir },
