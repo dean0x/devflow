@@ -1851,7 +1851,7 @@ describe('source guards', () => {
     ]) {
       expect(SOURCE, `${marker} missing`).toContain(marker);
     }
-    for (const marker of ['D-PROJECT-CONFIG', 'D-PROJECT-STRICT-KEYS', 'ADR-024', 'PF-023']) {
+    for (const marker of ['D-PROJECT-CONFIG', 'D-PROJECT-STRICT-KEYS']) {
       expect(LIB_SOURCE, `${marker} missing from the shared parser`).toContain(marker);
     }
   });

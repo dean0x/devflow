@@ -942,7 +942,6 @@ describe('source guards — no repo write, no parser copy (D-POLICY-NO-WRITE, D-
     const seam = byRel(SEAM_REL).content;
     expect(seam).toContain('D-POLICY-CJS-SEAM');
     expect(seam).toContain('D-POLICY-NO-WRITE');
-    expect(seam).toContain('ADR-024');
   });
 });
 

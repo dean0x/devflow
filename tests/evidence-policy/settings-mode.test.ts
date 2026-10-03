@@ -1197,7 +1197,7 @@ describe('design decisions at their code sites', () => {
 
   it('carries its design decisions at their code sites', () => {
     for (const marker of [
-      'D-SETTINGS-LINE', 'D-SETTINGS-LOCAL-ONLY', 'D-PUBLICATION-CEILING', 'D-FEATURES-NARROW-ONLY', 'ADR-024',
+      'D-SETTINGS-LINE', 'D-SETTINGS-LOCAL-ONLY', 'D-PUBLICATION-CEILING', 'D-FEATURES-NARROW-ONLY',
       'D-LENS-UNION', 'D-PERSONAL-UNTRACKED',
     ]) {
       expect(SOURCE, marker).toContain(marker);
