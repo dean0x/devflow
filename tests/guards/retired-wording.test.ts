@@ -255,7 +255,7 @@ const RETIRED_LITERALS: ReadonlyArray<RetiredEntry> = [
       'delivery that has shipped, and resolve to nothing for the next reader. Seven sites carried ' +
       'them; each was rewritten to state the rule instead of the phase that introduced it. Scoped ' +
       'to src/ because the plan artifacts, handoffs and knowledge bases under .devflow/ and docs/ ' +
-      'are where that provenance legitimately lives (PF-040).',
+      'are where that provenance legitimately lives.',
   },
 
   // -------------------------------------------------------------------------
@@ -711,7 +711,7 @@ describe('retired-wording guard — denylist of retired literals (GAP-32)', () =
     // Non-vacuity: corpus size must be > 0 so the guard is not trivially green.
     expect(
       corpus.length,
-      `corpus is empty — check src/assets/, dist/, and docs/; guard is vacuous (PF-018)`,
+      `corpus is empty — check src/assets/, dist/, and docs/; guard is vacuous`,
     ).toBeGreaterThan(0);
     // …and the doc half specifically, since a Phase-1 entry was retired from CLAUDE.md
     // and would have gone unchecked while the src/assets half kept the corpus non-empty.

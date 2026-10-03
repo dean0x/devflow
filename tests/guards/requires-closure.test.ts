@@ -404,7 +404,7 @@ describe('classified template exception', () => {
       expect(
         corpus.includes(template.literal),
         `TEMPLATE_SKILL_REFS declares "${template.literal}" but nothing writes it — a stale ` +
-        'exemption is an exemption nobody can lose (PF-067).',
+        'exemption is an exemption nobody can lose.',
       ).toBe(true);
     }
   });

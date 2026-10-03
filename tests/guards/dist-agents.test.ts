@@ -177,7 +177,7 @@ function compiledAgentContents(): Array<{ name: string; content: string }> {
 describe('compiled agents carry no escaped braces', () => {
   it('no dist/agents/*.md contains a literal \\{ or \\}', () => {
     const files = compiledAgentContents()
-    expect(files.length, 'no compiled agent scanned — guard is vacuous (PF-018)').toBeGreaterThan(0)
+    expect(files.length, 'no compiled agent scanned — guard is vacuous').toBeGreaterThan(0)
 
     const leaks = collectEscapedBraceLeaks(files)
     expect(
@@ -233,7 +233,7 @@ function collectAgentHeaderShapes(
 describe('every compiled agent starts with a frontmatter block carrying name:', () => {
   it('no dist/agents/*.md was emitted headerless or nameless', () => {
     const files = compiledAgentContents()
-    expect(files.length, 'no compiled agent scanned — guard is vacuous (PF-018)').toBeGreaterThan(0)
+    expect(files.length, 'no compiled agent scanned — guard is vacuous').toBeGreaterThan(0)
 
     const shapes = collectAgentHeaderShapes(files)
     const headerless = files

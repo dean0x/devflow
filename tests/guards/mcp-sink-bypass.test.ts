@@ -199,7 +199,7 @@ describe('tool-call contract: the source module states every D11 clause [E2]', (
         `dropping "${clause.id}" must be reported`,
       ).toEqual([`${clause.id}: ${clause.literal}`]);
     }
-    expect(CONTRACT_CLAUSES.length, 'the clause registry must be non-empty (PF-018)')
+    expect(CONTRACT_CLAUSES.length, 'the clause registry must be non-empty')
       .toBeGreaterThanOrEqual(5);
   });
 
@@ -398,7 +398,7 @@ describe('bypass regex: red on every shape that posts an ungated body', () => {
   ];
 
   it('every known-bad bypass shape is reported', () => {
-    expect(KNOWN_BAD.length, 'the known-bad corpus must be non-empty (PF-018)').toBeGreaterThan(0);
+    expect(KNOWN_BAD.length, 'the known-bad corpus must be non-empty').toBeGreaterThan(0);
     const missed: string[] = [];
     for (const line of KNOWN_BAD) {
       const found = collectBypassSites([{ path: 'seed.md', content: line }]);
@@ -469,7 +469,7 @@ describe('bypass regex: red on every shape that posts an ungated body', () => {
       corpus.length,
       'empty sink class — run `npm run build`. This arm is an emptiness claim like its sibling, ' +
       'so a corpus of zero files satisfies it while the probe below still passes: the predicate ' +
-      'would be proven live over ground nothing ever read (PF-018)',
+      'would be proven live over ground nothing ever read',
     ).toBeGreaterThan(0);
 
     const offenders = collectRawRefOnPostingLine(corpus);
@@ -703,7 +703,7 @@ export function d11RemovalLine(agent: string): string {
     throw new Error(
       'the always-loaded D11 block states no removal for the staging files it creates. ' +
       '$DEVFLOW_BODY_RAW holds exactly the bytes the scrub exists to delete, so an abandoned ' +
-      'one is a second sink with no gate over it (PF-066).',
+      'one is a second sink with no gate over it.',
     );
   }
   return line;
@@ -736,7 +736,7 @@ const REMOVAL_CLAIMS: readonly RemovalClaim[] = [
     holds: line => line.includes('rm -- ') && !FLAGGED_RM.test(line),
     why:
       'the flagged form is refused by the permission layer these recipes run under, and a ' +
-      'cleanup that cannot run is not one (PF-066: a control written as shell must work as shell)',
+      'cleanup that cannot run is not one (a control written as shell must work as shell)',
   },
   {
     label: "captures the gate's status before removing and exits on it",
@@ -747,7 +747,7 @@ const REMOVAL_CLAIMS: readonly RemovalClaim[] = [
         && line.lastIndexOf('exit "$GATE"') > removed;
     },
     why:
-      'PF-066 defect (3): a removal placed after the gate overwrites `$?`, so the scrubber\'s ' +
+      'a removal placed after the gate overwrites `$?`, so the scrubber\'s ' +
       'refusal is reported as success — the same swallowing the `&&` discipline forbids, ' +
       'arriving by a different route',
   },
@@ -843,7 +843,7 @@ describe('residue: the D11 staging files are removed, in a shape that runs', () 
         `breaking "${label}" must be reported by the same collector`,
       ).toContain(`missing: ${label}`);
     }
-    expect(REMOVAL_CLAIMS.length, 'the claim table is empty (PF-018)').toBeGreaterThanOrEqual(4);
+    expect(REMOVAL_CLAIMS.length, 'the claim table is empty').toBeGreaterThanOrEqual(4);
 
     // …and the case the claims cannot express, because there is no line to test:
     // the ORIGINAL defect, an agent that creates the staging files and removes
@@ -859,7 +859,7 @@ describe('residue: the D11 staging files are removed, in a shape that runs', () 
     expect(
       corpus.length,
       'the sink class is empty — run `npm run build`; an absence arm over zero files reports ' +
-      'success about nothing (PF-018)',
+      'success about nothing',
     ).toBeGreaterThan(0);
     expect(
       corpus.some(e => e.content.includes('rm -- ')),

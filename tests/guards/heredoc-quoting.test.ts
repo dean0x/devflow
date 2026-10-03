@@ -209,7 +209,7 @@ describe('heredoc quoting: no unquoted delimiter ships in src/assets/ (GAP-15, S
       expect(
         seeded.sites.map(s => `${s.file.split('/').pop()}:${s.line}`),
         'the collector must report the seeded unquoted heredoc, and only it — otherwise ' +
-        'the live scan above is green because it never reaches any file (PF-018)',
+        'the live scan above is green because it never reaches any file',
       ).toEqual(['seeded.sh:1']);
     } finally {
       rmSync(dir, { recursive: true, force: true });

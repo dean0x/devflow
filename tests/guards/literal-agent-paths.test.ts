@@ -184,7 +184,7 @@ describe('literal-agent-path guard: no src/assets/agents/ literals in new test f
 
     expect(
       corpus.length,
-      'corpus is empty — scan directories are absent or contain no .ts files; guard is vacuous (PF-018)',
+      'corpus is empty — scan directories are absent or contain no .ts files; guard is vacuous',
     ).toBeGreaterThan(0);
 
     // Filter out self-documented exclusions before running the collector.

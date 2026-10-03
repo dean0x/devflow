@@ -158,7 +158,7 @@ describe('Extended References file-existence guard (P0-S22)', () => {
     // rowsScanned > 0: non-vacuity — asserts the guard actually found and checked rows.
     expect(
       rowsScanned,
-      'rowsScanned === 0 — no Extended References rows were found; guard is vacuous (PF-018)',
+      'rowsScanned === 0 — no Extended References rows were found; guard is vacuous',
     ).toBeGreaterThan(0);
 
     expect(

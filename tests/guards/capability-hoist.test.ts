@@ -128,8 +128,9 @@ export const PROBE_MARKERS: readonly Marker[] = [
     pattern: /gh issue list[^\n]*--(?:label|milestone)\b/i,
     justification:
       'GAP-26\'s wave defect exactly: a per-round re-read of the wave\'s issues. The wave states ' +
-      'that refresh as one `fetch-issues-batch` call per round, and ADR-005 keeps its page bound ' +
-      'an API bound — which only holds while the call is made once per round.',
+      'that refresh as one `fetch-issues-batch` call per round, and never capping how many tickets ' +
+      'a round runs keeps its page bound an API bound — which only holds while the call is made ' +
+      'once per round.',
   },
   {
     label: 'batch-fetch',
@@ -290,7 +291,7 @@ describe('capability-hoist: no capability probe runs inside a loop [DR-11]', () 
     expect(
       blocks.length,
       'processBlocksScanned === 0 — the corpus is absent or the `**Process:**` / `### Process` ' +
-      'opener changed spelling; the guard would pass without reading anything (PF-018)',
+      'opener changed spelling; the guard would pass without reading anything',
     ).toBeGreaterThan(0);
 
     // BOTH corpora must contribute, asserted by provenance rather than by a total.

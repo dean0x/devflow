@@ -148,9 +148,9 @@ const ALLOWLISTED_PROVIDER_REGIONS: readonly AllowlistedRegion[] = [
     from: '## Tracker provider resolution',
     to: '## Comment-sink scrub (D11)',
     justification:
-      'PF-023 requires exactly ONE convergence point where a provider token becomes a path, and a ' +
-      'map with one row decides nothing — the closed set has to be written where the resolution ' +
-      'happens.',
+      'A provider check is only real at the one sink every caller passes through, so exactly ONE ' +
+      'convergence point turns a provider token into a path, and a map with one row decides ' +
+      'nothing — the closed set has to be written where the resolution happens.',
   },
   {
     label: "the Code agent's PR-link paste gate",
@@ -177,7 +177,7 @@ const ALLOWLISTED_PROVIDER_REGIONS: readonly AllowlistedRegion[] = [
       'SETTINGS_LINE_RE, and a closed value set cannot be written without naming its members. ' +
       'It is a sink check on a value the script already resolved, like the Code agent\'s paste ' +
       'gate: the command never chooses a provider from it, so this is no second convergence ' +
-      'point (PF-023). The block expands once per gate that consumes it, so a file can carry it ' +
+      'point. The block expands once per gate that consumes it, so a file can carry it ' +
       'more than once, and every copy is stripped.',
   },
 ];
@@ -261,7 +261,7 @@ const PROVIDER_OWNED_PATHS: readonly ProviderOwnedPath[] = [
     justification:
       'the generated Linear per-op references — the emitted form of the module above. Scanned, ' +
       'not exempted: only the one token is admitted, so a Jira literal here is still reported, ' +
-      'which is the half of ADR-025 that keeps the narrow widening narrow.',
+      'which is what keeps the narrow widening narrow.',
   },
 ];
 
@@ -395,7 +395,7 @@ describe('provider-scope: no Jira or Linear literal outside the provider map (§
           expect(
             token.pattern.test(whole) && !token.pattern.test(stripped),
             `${file}: "${token.name}" is no longer confined to ${region.label} — either it moved ` +
-            `(a second convergence point, PF-023) or the region dropped it and the row is stale`,
+            `(a second convergence point) or the region dropped it and the row is stale`,
           ).toBe(true);
         }
       }
@@ -407,7 +407,7 @@ describe('provider-scope: no Jira or Linear literal outside the provider map (§
     expect(
       violations,
       `A Jira or Linear literal outside the resolution preamble and outside the owning provider's ` +
-      `own mechanics is either a second resolution site (PF-023) or a provider name leaking into ` +
+      `own mechanics is either a second resolution site or a provider name leaking into ` +
       `provider-neutral text:\n  ${violations.join('\n  ')}`,
     ).toEqual([]);
   });
@@ -417,7 +417,7 @@ describe('provider-scope: no Jira or Linear literal outside the provider map (§
     // out of date — the failure mode the inline-body exclusion list taught. Each
     // entry must reach at least one scanned file, and that file must genuinely
     // carry the token, or the entry is deleted rather than carried.
-    expect(PROVIDER_OWNED_PATHS.length, 'the ownership table is empty (PF-018)').toBeGreaterThan(0);
+    expect(PROVIDER_OWNED_PATHS.length, 'the ownership table is empty').toBeGreaterThan(0);
     for (const owned of PROVIDER_OWNED_PATHS) {
       const matched = corpus.filter(e => e.path.startsWith(owned.prefix));
       expect(
@@ -682,7 +682,7 @@ describe('provider-scope: the compiled Git agent declares no tools: key', () => 
     expect(keys.length, 'frontmatter parsed to no keys — the shape changed').toBeGreaterThan(0);
     expect(
       keys,
-      'a tools: allowlist on the Git agent is a silent constraint on HOW it can act (PF-031): the ' +
+      'a tools: allowlist on the Git agent is a silent constraint on HOW it can act: the ' +
       'op bodies instruct Bash and Read, and a frontmatter allowlist that omits either fails at ' +
       'runtime rather than at build time',
     ).not.toContain('tools');
@@ -832,7 +832,7 @@ describe('provider-scope: _mcp.md is generated only behind its gate (AC-2.7 re-s
     ).toEqual([]);
     expect(
       refs.length,
-      'the op roster is empty — the collector above ran over nothing (PF-018)',
+      'the op roster is empty — the collector above ran over nothing',
     ).toBeGreaterThan(0);
   });
 
