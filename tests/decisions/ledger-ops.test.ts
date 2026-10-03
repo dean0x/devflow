@@ -677,7 +677,7 @@ describe('rotateObservations — internal function', () => {
 });
 
 // ---------------------------------------------------------------------------
-// refresh-anchor CLI op (log-authority re-projection)
+// refresh-anchor CLI op (re-projection per D-LOG-CONTENT-AUTHORITY)
 // ---------------------------------------------------------------------------
 
 describe('refresh-anchor CLI op', () => {
@@ -910,7 +910,8 @@ describe('refresh-anchor CLI op', () => {
 
   it('date-pin: dateless legacy ledger row stays dateless after refresh (D5: no backfill)', () => {
     // date: rfExistingRow.date — undefined propagates for dateless legacy rows; no backfill.
-    // The obs date is not used — a fabricated date would be worse than an unprotected entry.
+    // The obs date is not used (D-LOG-CONTENT-AUTHORITY) — a fabricated date would be worse
+    // than an unprotected entry.
     writeLog(tmpDir, [
       makeObsRow({
         id: 'obs_dateless',
@@ -1192,7 +1193,7 @@ describe('refresh-anchor guard harmonization — D4 raw_body-lost succeeds', () 
 
   it('refresh succeeds when the log row lost raw_body and the entry renders formatter-generated', () => {
     // D4: a log row that lost raw_body un-freezes the entry to formatter-rendered
-    // output by design. The refresh must not throw on the absent field.
+    // output by design (D-LOG-CONTENT-AUTHORITY). The refresh must not throw on the absent field.
     const details = 'context: test; decision: use formatter; rationale: clean output';
     writeLog(tmpDir, [
       makeObsRow({

@@ -156,7 +156,8 @@ function buildNoCksumPath(tmpBase: string): string {
  * Create a fake `claude` that writes a deterministic stamped WORKING-MEMORY.md.new
  * (the staged file). When the capture hook spawns background-memory-update with this
  * shim on PATH, the fake claude completes instantly instead of hanging 120s.
- * B1: shim writes to the staged path; the worker's CAS logic mv's it to the real path.
+ * B1: shim writes to the staged path; the worker's CAS logic mv's it to the real path
+ * (D-MEMORY-STAGED-CAS).
  */
 function createFakeClaudeShim(shimDir: string, memFile: string): void {
   const bin = path.join(shimDir, 'claude');
@@ -899,7 +900,7 @@ describe('S13: D56c crash-recovery — leftover .processing merged with new queu
       `#!/bin/bash
 # Record stdin so the test can assert both turn-batches are present
 cat > "${stdinCapture}"
-# Write to staged path; worker CAS-mv's it to the real path
+# Write to staged path; worker CAS-mv's it to the real path (D-MEMORY-STAGED-CAS)
 echo "<!-- memory-head: testsha branch: main -->" > "${memFile}.new"
 echo "## Now" >> "${memFile}.new"
 echo "- crash-recovery test" >> "${memFile}.new"
@@ -959,7 +960,7 @@ exit 0
       `#!/bin/bash
 # Drain stdin (required so the worker's <<< doesn't stall)
 cat > /dev/null
-# Write to staged path; worker CAS-mv's it to the real path
+# Write to staged path; worker CAS-mv's it to the real path (D-MEMORY-STAGED-CAS)
 echo "<!-- memory-head: testsha branch: main -->" > "${memFile}.new"
 echo "## Now" >> "${memFile}.new"
 echo "- overflow cap test" >> "${memFile}.new"
@@ -1107,7 +1108,7 @@ describe('S15: stdin/argv safety — prompt content delivered via STDIN, not arg
 echo "$@" > "${argvLog}"
 # Record stdin (the full prompt)
 cat > "${stdinLog}"
-# Write to staged path; worker CAS-mv's it to the real path
+# Write to staged path; worker CAS-mv's it to the real path (D-MEMORY-STAGED-CAS)
 echo "<!-- memory-head: testsha branch: main -->" > "${memFile}.new"
 echo "## Now" >> "${memFile}.new"
 echo "- stdin safety test" >> "${memFile}.new"
@@ -1410,7 +1411,7 @@ describe('S18: AC-F10 — qa rows in background-memory-update (orphan gate + TUR
       claudeBin,
       `#!/bin/bash
 cat > "${stdinCapture}"
-# Write to staged path; worker CAS-mv's it to the real path
+# Write to staged path; worker CAS-mv's it to the real path (D-MEMORY-STAGED-CAS)
 echo "<!-- memory-head: testsha branch: main -->" > "${memFile}.new"
 echo "## Now" >> "${memFile}.new"
 exit 0
@@ -1596,7 +1597,7 @@ describe('S20: DEVFLOW_BG_UPDATER self-guard (worker re-entrancy)', () => {
 });
 
 // =============================================================================
-// S21 — Staged compare-and-swap verification (B1)
+// S21 — Staged compare-and-swap verification (D-MEMORY-STAGED-CAS, B1)
 //
 // Tests the CAS paths introduced in B1:
 //   - absent-pre-run success: mv staged → real when both pre/post are ABSENT
@@ -1785,9 +1786,10 @@ exit 0
 
   it('prompt never names the REAL path as a write target — only the staged path', () => {
     // The positive half above is satisfied by a prompt that names BOTH paths, because
-    // STAGED_FILE is literally MEMORY_FILE + ".new". The staged-write guarantee is that Claude
-    // can never touch the real path at all, so the write instruction must be pinned
-    // negatively too: no "Write <...>WORKING-MEMORY.md" that is not the .new path.
+    // STAGED_FILE is literally MEMORY_FILE + ".new". The staged-write guarantee
+    // (D-MEMORY-STAGED-CAS) is that Claude can never touch the real path at all, so the
+    // write instruction must be pinned negatively too: no "Write <...>WORKING-MEMORY.md"
+    // that is not the .new path.
     const stdinCapture = path.join(shimDir, 'stdin-captured.txt');
     const claudeBin = path.join(shimDir, 'claude');
     fs.writeFileSync(

@@ -115,7 +115,8 @@ describe('learning agent', () => {
     it('calls assign-anchor, retire-anchor, refresh-anchor, and rotate-observations via json-helper', () => {
       expect(content).toMatch(/json-helper\.cjs" assign-anchor/);
       expect(content).toMatch(/json-helper\.cjs" retire-anchor/);
-      // refresh-anchor: post-promotion reinforcement re-projects the log row into rendered files (D1)
+      // refresh-anchor: post-promotion reinforcement re-projects the log row into rendered files
+      // (D1, D-LOG-CONTENT-AUTHORITY)
       expect(content).toMatch(/json-helper\.cjs" refresh-anchor/);
       expect(content).toMatch(/json-helper\.cjs" rotate-observations/);
     });

@@ -792,7 +792,7 @@ try {
         const aaDate = new Date().toISOString().slice(0, 10);
         const aaActiveStatus = assignType === 'decision' ? 'Accepted' : 'Active';
         // Date stamped on ALL entry types (decisions + pitfalls).  Prefer the
-        // date from the observation (the log is the content authority); fall back
+        // date from the observation (per D-LOG-CONTENT-AUTHORITY); fall back
         // to today. Both types carry a date so refresh-anchor can re-project
         // them correctly (pattern refreshes too — consumers match anchor headings, never titles).
         const aaEntryDate = aaObs.date || aaDate;
@@ -916,7 +916,7 @@ try {
 
     // -------------------------------------------------------------------------
     // refresh-anchor <anchor_id> [<anchor_id>...]
-    // Re-project log observations — the content authority — onto committed ledger rows and
+    // Re-project log observations onto committed ledger rows (D-LOG-CONTENT-AUTHORITY) and
     // re-render all three files (decisions.md, pitfalls.md, index.md).  Each write
     // is atomic; the sequence is not transactional — a crash between writes self-heals
     // on the next ledger op.  Variadic — accepts 1..N anchor ids and performs
@@ -999,7 +999,7 @@ try {
             );
           }
 
-          // Locate the log obs by the LEDGER ROW's id field (the log is the content authority).
+          // Locate the log obs by the LEDGER ROW's id field (D-LOG-CONTENT-AUTHORITY).
           // Matching on id (not anchor_id) covers pre-existing obs written before
           // assign-anchor added anchor_id write-back to the log.
           const rfObs = rfLogEntries.find(r => r.id === rfExistingRow.id);
@@ -1038,7 +1038,7 @@ try {
             );
           }
 
-          // Re-project via toLedgerRow (strict canonical projection).
+          // Re-project via toLedgerRow (strict canonical projection, D-LOG-CONTENT-AUTHORITY).
           // Preserve decisions_status and date from the ledger (ledger-owned fields).
           // expectType passed for sink validation (redundant with the check above,
           // but ensures the guard holds even if future callers bypass the outer check).

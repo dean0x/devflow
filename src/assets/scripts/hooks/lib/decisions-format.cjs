@@ -305,6 +305,19 @@ function formatPitfallBody(row) {
  * first_seen, last_seen, artifact_path, status, …) are intentionally excluded
  * from the committed ledger — they are log-only state.
  *
+ * D-LOG-CONTENT-AUTHORITY: the observation log (decisions-log.jsonl) is the one
+ * home of an entry's content. Its ledger row is a projection of the log row,
+ * re-derived through this function alone: assign-anchor projects it at
+ * promotion, and refresh-anchor re-projects it after a reinforcement changes the
+ * log row. Nothing else may write entry content into decisions-ledger.jsonl — a
+ * change goes to the log row, then through refresh-anchor. The ledger owns only
+ * the anchor number, the decisions_status and the promotion date, which callers
+ * pass in: assign-anchor takes the date from the log row (else today), and
+ * refresh-anchor carries all three over unchanged, so a dateless row stays
+ * dateless. Reason: a ledger row copied once at promotion silently lost every
+ * later sharpening of its entry, and content kept in two places leaves two
+ * authorities that disagree.
+ *
  * D001: The projected shape is a DISTINCT COMMITTED shape, not a full obs copy.
  * This function is the single source of truth for that projection so both the
  * add-path (assign-anchor) and the migration's preserve-verbatim path produce
@@ -347,7 +360,7 @@ function toLedgerRow(obs, { anchorId, status, date, expectType }) {
   };
   // Optional fields — include only when present in the observation or explicitly provided
   if (date !== undefined) row.date = date;
-  // log-sourced raw_body (the log is the content authority) — a log row that lost raw_body
+  // log-sourced raw_body (D-LOG-CONTENT-AUTHORITY) — a log row that lost raw_body
   // un-freezes the entry to formatter-rendered output by design. Gate through isSafeRawBody.
   if (obs.raw_body !== undefined && isSafeRawBody(obs.raw_body, anchorId)) {
     row.raw_body = obs.raw_body;

@@ -73,7 +73,7 @@ MEMORY_DIR="$PROJECT_DEVFLOW_DIR/memory"
 QUEUE_FILE="$MEMORY_DIR/.pending-turns.jsonl"
 PROCESSING_FILE="$MEMORY_DIR/.pending-turns.processing"
 MEMORY_FILE="$MEMORY_DIR/WORKING-MEMORY.md"
-STAGED_FILE="$MEMORY_FILE.new"  # staging path for CAS write
+STAGED_FILE="$MEMORY_FILE.new"  # staging path for CAS write (D-MEMORY-STAGED-CAS)
 LOCK_DIR="$MEMORY_DIR/.working-memory.lock"
 TRIGGER_FILE="$MEMORY_DIR/.working-memory-last-trigger"
 OK_FILE="$MEMORY_DIR/.last-refresh-ok"
@@ -99,8 +99,8 @@ fi
 # --- Assert cksum availability (required for CAS verification — avoids fail-open swap) ---
 # cksum must be on PATH at startup; a missing binary makes both CAS sentinels collapse
 # to the same "ABSENT" literal, compare equal, and swap unconditionally — reinstating
-# the exact clobber of a human edit the CAS was designed to prevent. Fail loudly here
-# rather than silently degrading.
+# the exact clobber of a human edit the CAS was designed to prevent
+# (D-MEMORY-STAGED-CAS). Fail loudly here rather than silently degrading.
 if ! command -v cksum >/dev/null 2>&1; then
   log "SKIP: cksum not on PATH — CAS verification unavailable, refusing to write"
   exit 0
@@ -158,7 +158,7 @@ fi
 
 # Clean up any staged file left by a watchdog-killed prior run.
 # Without this, a stale staged file with a valid stamp would be mistakenly
-# mv-ed to the real path on the NEXT run's CAS check.
+# mv-ed to the real path on the NEXT run's CAS check (D-MEMORY-STAGED-CAS).
 rm -f "$STAGED_FILE" 2>/dev/null || true
 
 # --- Orphan-only skip: if queue has no assistant/qa turn, exit and leave the queue ---
@@ -330,7 +330,7 @@ fi
 
 log "Built $TURN_COUNT turns from queue"
 
-# --- Capture pre-run cksum baseline + read existing memory ---
+# --- Capture pre-run cksum baseline (D-MEMORY-STAGED-CAS) + read existing memory ---
 # Baseline captured BEFORE content read so the cksum reflects the exact bytes we
 # synthesised from. ABSENT sentinel when file missing — resolves toward false-conflict,
 # never false-success (a file created externally during the run triggers CONFLICT,
@@ -555,9 +555,17 @@ elif [ "$CLAUDE_EXIT" -ne 0 ]; then
 fi
 
 # --- CAS verification (staged compare-and-swap) ---
-# Only our own claude run can create STAGED_FILE between lock-acquire and here,
-# so verifying its content proves OUR write succeeded — as opposed to accepting
-# any mtime bump, which could come from a concurrent human edit of the real file.
+# D-MEMORY-STAGED-CAS: claude never writes WORKING-MEMORY.md. The prompt names
+# only STAGED_FILE (WORKING-MEMORY.md.new); this function checks that file and
+# moves it into place only when the real file is byte-identical (cksum) to the
+# pre-run read. A changed real file means someone edited it during the run:
+# CONFLICT keeps their version, discards the staged file, leaves .last-refresh-ok
+# untouched and keeps the batch in .processing for the next run. Reason: only our
+# own claude run can create STAGED_FILE between lock-acquire and here, so a valid
+# staged file proves OUR write succeeded. A check on the real file (an mtime bump,
+# a stamped line 1) passes for a human's edit too, and taking that for success
+# would delete an unprocessed batch; a direct write would also overwrite an edit
+# made mid-run.
 #
 # Sets OUTCOME to one of: updated | conflict | failed
 # Reads PRE_RUN_CKSUM, CKSUM_FAILED, STAGED_FILE, MEMORY_FILE from caller scope.

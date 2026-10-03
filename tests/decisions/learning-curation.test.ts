@@ -148,7 +148,7 @@ describe('Learning agent curation contract (AC-C3)', () => {
   it('routes all ledger writes through assign-anchor/retire-anchor/refresh-anchor/rotate-observations', () => {
     expect(agentContent).toContain('assign-anchor');
     expect(agentContent).toContain('retire-anchor');
-    // refresh-anchor: post-promotion reinforcement op (the log is the content authority)
+    // refresh-anchor: post-promotion reinforcement op (D-LOG-CONTENT-AUTHORITY)
     expect(agentContent).toContain('refresh-anchor');
     expect(agentContent).toContain('rotate-observations');
   });
