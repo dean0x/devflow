@@ -292,6 +292,7 @@ d .devflow/scripts/core/
 - .devflow/scripts/core/fs-atomic.js
 - .devflow/scripts/core/git.js
 - .devflow/scripts/core/ledger-root.js
+- .devflow/scripts/core/observations.js
 - .devflow/scripts/core/paths.js
 - .devflow/scripts/core/project-paths.js
 d .devflow/scripts/hooks/
@@ -316,6 +317,7 @@ x .devflow/scripts/hooks/json-parse
 x .devflow/scripts/hooks/learning-lock
 d .devflow/scripts/hooks/lib/
 x .devflow/scripts/hooks/lib/decisions-format.cjs
+x .devflow/scripts/hooks/lib/learning-store.cjs
 x .devflow/scripts/hooks/lib/mkdir-lock.cjs
 x .devflow/scripts/hooks/lib/project-paths.cjs
 x .devflow/scripts/hooks/lib/render-decisions.cjs
