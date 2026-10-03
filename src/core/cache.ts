@@ -15,8 +15,9 @@
  *   path.join()'s normalization of ".." components. safeEntryPath() enforces
  *   containment and returns null on violation; all callers treat null as a miss.
  *
- * applies ADR-013: core-layer module, no Claude Code adapter concerns.
- * avoids PF-011: entries written via tmp→rename (writeFileAtomicExclusive).
+ * Core-layer module, no Claude Code adapter concerns.
+ * Entries are written via tmp→rename (writeFileAtomicExclusive), so a reader
+ * sees the old entry or the new one, never a missing or partial file.
  */
 
 import * as fs from 'node:fs';
@@ -42,9 +43,9 @@ export const MAX_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 // All callers that write or read the model-discovery catalog AND the uninstall
 // removal target derive their directory paths from these functions. Keeping
 // write-site and removal-site in the same module prevents silent orphaning of
-// cache data on future relocations (avoids PF-013).
+// cache data on future relocations.
 //
-// applies ADR-013: path layout owned by the core module, not scattered across
+// Path layout owned by the core module, not scattered across
 // callers in src/cli/ or src/hud/.
 
 /**
@@ -165,8 +166,6 @@ export function readCache<T>(
  * The single canonical envelope parser — used by readCacheEntry (which adds
  * the expiry check on top) and exported for model-discovery.ts (stale-fallback
  * and prune sorters) so all callers share one parser and cannot drift.
- *
- * applies ADR-003: eliminated private parseEnvelope duplicate; one parser, one truth.
  */
 export function parseRawEnvelope(
   raw: string,
@@ -191,7 +190,7 @@ export function parseRawEnvelope(
  * Write a value to cache with a TTL in milliseconds.
  *
  * - Creates cacheDir at mode 0700 if absent (owner-only access).
- * - Writes the entry via atomic tmp→rename (avoids PF-011 delete-then-write window).
+ * - Writes the entry via atomic tmp→rename (no delete-then-write window).
  * - Hardens the entry to 0600 after the write (owner-only read/write for cache data
  *   that will feed agent frontmatter in later phases).
  * - TTL is clamped to MAX_TTL_MS before storage.
@@ -225,6 +224,6 @@ export async function writeCache<T>(
   }
   // Harden entry to 0600 after the atomic write. writeFileAtomicExclusive
   // preserves the existing mode on re-writes; this chmod bootstraps 0600 on
-  // the first write to a fresh entry. Best-effort, non-fatal (avoids PF-009).
+  // the first write to a fresh entry. Best-effort, non-fatal.
   try { await fsAsync.chmod(filePath, 0o600); } catch { /* non-fatal */ }
 }

@@ -4,7 +4,7 @@
  * Covers:
  *   - TRACKER_PROVIDERS registry shape (+ the "MCP stays out of user-facing text" bound)
  *   - parseTrackerId: strict boundary parser — REJECT, NEVER REPAIR (hostile table)
- *   - normalizeTrackerFeature: tolerant sink normaliser (ADR-014 self-heal)
+ *   - normalizeTrackerFeature: tolerant sink normaliser (self-heal)
  *   - trackerConventionsPath / trackerAttemptsPath / trackerEnabledSentinelPath —
  *     one conventions file and one attempt counter per provider
  *     (D-TRACKER-PER-PROVIDER-CONVENTIONS)
@@ -16,14 +16,14 @@
  *   - migrateLegacyTrackerConventions (TP-39): moves once, never overwrites, moves
  *     a symlink rather than its target, and leaves a provider-less file in place
  *   - the reported-failure arm of every lifecycle owner, each driven by a
- *     deterministic obstruction, so the warn-never-abort posture (PF-009) is
+ *     deterministic obstruction, so the warn-never-abort posture is
  *     exercised rather than asserted about
  *   - TRACKER_ATTEMPTS_MAX: the inference cap, cross-pinned against the hook literal
  *
- * Per PF-018: every table asserts its own row count so a payload deleted from the
+ * Every table asserts its own row count so a payload deleted from the
  * table (or a registry that shrinks to nothing) fails RED instead of passing vacuously.
- * Per PF-014: no helper throws — every fallible path returns a Result.
- * Per PF-060: every filesystem case runs under its own mkdtemp root; no test reads
+ * No helper throws — every fallible path returns a Result.
+ * Every filesystem case runs under its own mkdtemp root; no test reads
  * or writes the developer's real $HOME or ~/.devflow.
  */
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
@@ -65,7 +65,7 @@ const REPO_ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 
 /** The module under test, as source — read by the single-authority guard below. */
 const MODULE_SOURCE = path.join(REPO_ROOT, 'src', 'core', 'tracker.ts');
 
-/** The Tracker agent's prompt — the second spelling of the staging prefix (PF-013). */
+/** The Tracker agent's prompt — the second spelling of the staging prefix. */
 const TRACKER_AGENT_SOURCE = path.join(REPO_ROOT, 'src', 'assets', 'agents', 'tracker.md');
 
 // ── Registry ──────────────────────────────────────────────────────────────────
@@ -110,12 +110,12 @@ describe('TRACKER_PROVIDERS registry', () => {
 
   it('carries one attempt-counter basename per registry provider, in registry order', () => {
     expect(TRACKER_ATTEMPTS_NAMES).toEqual(TRACKER_PROVIDER_IDS.map(id => `.tracker.${id}.attempts`));
-    // PF-018 non-vacuity: a registry that shrank to nothing would empty the set.
+    // Non-vacuity: a registry that shrank to nothing would empty the set.
     expect(TRACKER_ATTEMPTS_NAMES.length).toBe(TRACKER_PROVIDER_IDS.length);
     expect(TRACKER_ATTEMPTS_NAMES.length).toBeGreaterThan(0);
   });
 
-  it('the per-provider paths are the ones the hook and the Tracker agent spell (PF-013)', async () => {
+  it('the per-provider paths are the ones the hook and the Tracker agent spell', async () => {
     // Neither the hook nor the agent can import from here, so each spells the
     // conventions file and the counter from the provider variable it holds.
     const hook = await fs.readFile(
@@ -130,7 +130,7 @@ describe('TRACKER_PROVIDERS registry', () => {
     expect(trackerAttemptsPath('/d', 'jira')).toBe(path.join('/d', '.tracker.jira.attempts'));
   });
 
-  it('the staged prefix is the one the Tracker agent stages under (PF-013)', async () => {
+  it('the staged prefix is the one the Tracker agent stages under', async () => {
     // The agent's prompt cannot import from here, so the mktemp template is a
     // second spelling; an uninstall sweep keyed to a prefix the agent no longer
     // uses walks past every orphaned stage while reporting ~/.devflow swept.
@@ -142,13 +142,13 @@ describe('TRACKER_PROVIDERS registry', () => {
   });
 });
 
-// ── The registry is the ONE authority on the provider domain (PF-049) ─────────
+// ── The registry is the ONE authority on the provider domain ──────────────────
 //
 // `TrackerProvider` is a projection of TRACKER_PROVIDERS, so the type domain and
 // the runtime domain are the same set by construction. Nothing at RUNTIME can
 // tell a derived union from a hand-listed one — both produce identical values —
 // so the guard is over the DECLARATIONS, each collector carrying a known-bad
-// probe so it cannot pass vacuously (PF-018).
+// probe so it cannot pass vacuously.
 
 /**
  * Named collector: the right-hand side of the exported `TrackerProvider` alias.
@@ -180,7 +180,7 @@ function registryDeclaration(source: string): string | null {
   return source.slice(start, end + 1);
 }
 
-describe('the provider domain is derived from the registry (PF-049)', () => {
+describe('the provider domain is derived from the registry', () => {
   let source: string;
 
   beforeEach(async () => {
@@ -359,7 +359,7 @@ describe('describeTrackerValue', () => {
     expect([...rendered]).toHaveLength(41);
   });
 
-  // ── the never-throws contract, at the sink that has to honour it (PF-014) ───
+  // ── the never-throws contract, at the sink that has to honour it ────────────
   //
   // The module header promises nothing here throws. This is the display sink
   // every rejected value passes through, and `raw.replace` on a non-string makes
@@ -401,7 +401,7 @@ describe('describeTrackerValue', () => {
   });
 });
 
-// ── normalizeTrackerFeature — tolerant sink (ADR-014 self-heal) ───────────────
+// ── normalizeTrackerFeature — tolerant sink (self-heal) ───────────────────────
 
 describe('normalizeTrackerFeature (tolerant sink normaliser)', () => {
   const MALFORMED: Array<[label: string, raw: unknown]> = [
@@ -448,7 +448,7 @@ describe('tracker file lifecycle', () => {
   let devflowDir: string;
 
   beforeEach(async () => {
-    // PF-060: a mkdtemp root, never the developer's real ~/.devflow.
+    // A mkdtemp root, never the developer's real ~/.devflow.
     devflowDir = await fs.mkdtemp(path.join(os.tmpdir(), 'devflow-core-tracker-'));
   });
 
@@ -499,7 +499,7 @@ describe('tracker file lifecycle', () => {
   it('rearmTrackerInference reports a removal it cannot make, and never throws', async () => {
     // The failure arm, driven rather than asserted about: `force` swallows an
     // absent file but not a DIRECTORY sitting where the counter file belongs, so
-    // the rm rejects. Without this the whole warn-never-abort posture (PF-009) is
+    // the rm rejects. Without this the whole warn-never-abort posture is
     // untested for this owner.
     await fs.mkdir(trackerAttemptsPath(devflowDir, 'jira'));
 
@@ -558,7 +558,7 @@ describe('tracker file lifecycle', () => {
   it('applyTrackerSentinel reports a sentinel it cannot write, and never throws', async () => {
     // The failure arm, driven rather than asserted about: a devflow dir whose
     // parent is a FILE cannot be created (ENOTDIR), so the write rejects. Without
-    // this the warn-never-abort posture (PF-009) is untested for this owner.
+    // this the warn-never-abort posture is untested for this owner.
     const blocker = path.join(devflowDir, 'not-a-dir');
     await fs.writeFile(blocker, '', 'utf-8');
 
@@ -707,7 +707,7 @@ describe('tracker file lifecycle', () => {
 
 // -- TRACKER_ATTEMPTS_MAX -- the cap, shared with the SessionStart hook --------
 //
-// The hook is the enforcer and cannot import from here (PF-013), so the literal
+// The hook is the enforcer and cannot import from here, so the literal
 // exists twice; `devflow tracker --status` quotes the constant, and this pin is
 // what stops it quoting a number the hook no longer enforces.
 

@@ -445,7 +445,7 @@ function isChangelogOnly(paths) {
 /**
  * D-TRACE-CLASSIFY: one first-parent commit's class. First match wins, in
  * CLASSES order, and the terminal arm is `untraced` — an input no rule
- * recognises surfaces in the confirm rather than passing silently (avoids PF-075).
+ * recognises surfaces in the confirm rather than passing silently.
  *
  * @param {Commit} commit
  * @param {ClassifyContext} ctx

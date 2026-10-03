@@ -9,7 +9,7 @@
  * WHERE THE VALIDATORS COME FROM. They are read out of the Tracker agent's own
  * schema/validator table, not re-spelled here. A test that restated the shapes
  * would prove its own copy rejects the payloads while the agent quietly drifted
- * to something laxer (PF-018) — and the agent is the only writer, so its table
+ * to something laxer — and the agent is the only writer, so its table
  * is the authority. Adding a schema field without a validator therefore fails
  * this file rather than silently escaping it.
  *
@@ -24,7 +24,8 @@
  *     table over two of three providers is register row 25 with a hole in it.
  *   - `JQL/filter fields` (§14.9 constraint 10) needed a provider module that
  *     builds a query, which both tool-call providers now do.
- * Each was written in the commit that created the thing it constrains (ADR-025).
+ * Each was written in the commit that created the thing it constrains, so the
+ * pair is reviewable as one change.
  * The provider-token arm (register row 21) is NOT duplicated here:
  * `tests/core/tracker.test.ts` already drives the 13-payload table through
  * `parseTrackerId`, the single owner of provider parsing, and a second copy of that
@@ -55,7 +56,7 @@ const TRACKER_TEXT = resolveAgentSource('tracker').content;
  * A generated per-op reference, read fail-loud.
  *
  * Never ENOENT-tolerant: a grammar table graded against an absent tree reports no
- * violations, which is the shape of a guard that is not a guard (PF-018, R3).
+ * violations, which is the shape of a guard that is not a guard (R3).
  */
 function readGeneratedReference(relPath: string): string {
   const abs = path.join(compiledSkillRefsDir(), ...relPath.split('/'));
@@ -198,7 +199,7 @@ const IDENTITY_REASON = 'matches the denied identity shape';
  * enum, or anything matching …". Splitting on that marker is what keeps the grading
  * honest. Merged into one validator the two arms report the STRICT arm's rejection
  * for a value the lax arm admits, so "rejected for at least one stated reason" stays
- * true over exactly the change this file exists to catch (PF-018, PF-064).
+ * true over exactly the change this file exists to catch.
  */
 const ALTERNATIVE_ARM = /;\s*(?=or\s)|\s+OR\s+/;
 
@@ -293,7 +294,7 @@ export function parseValidator(cell: string): Validator {
   if (kinds.length === 0) {
     throw new Error(
       `validator cell declares no recognisable check — every hostile payload for this field ` +
-      `would pass vacuously (PF-018). Cell: ${cell}`,
+      `would pass vacuously. Cell: ${cell}`,
     );
   }
   return { source: cell.trim(), kinds, patterns, closedSet, denied, maxChars };
@@ -382,7 +383,7 @@ function sectionOf(row: TrackerSchemaRow): string {
  *
  * Pinned, because the split decides which rows the payload table covers: a row that
  * lost its shape would otherwise slip out of that table and stop grading nine
- * payloads while the coverage arm above still counted its section (PF-018).
+ * payloads while the coverage arm above still counted its section.
  */
 const TOTAL_REJECTION_ONLY_SECTIONS: readonly string[] = [
   '## Iteration Policy',
@@ -421,7 +422,7 @@ describe('hostile values: tracker.md fields (AC-3.7, register row 22)', () => {
     expect(
       HOSTILE_PAYLOADS.length,
       'the payload table is below its floor — the grid above grades whatever is in it, so a ' +
-      'shrunken table is a green suite over fewer sinks (PF-018)',
+      'shrunken table is a green suite over fewer sinks',
     ).toBeGreaterThanOrEqual(MIN_HOSTILE_PAYLOADS);
     // Distinctness is asserted as a RELATION to the table's own length rather than
     // to the floor: a repeat then goes red at any table size.
@@ -688,7 +689,7 @@ describe('hostile values: the agent declares no second provider parser (§14.9 c
     // resolution preamble is the one prompt-side spelling. A third pipeline in this
     // prompt would be a repair path in a reject-never-repair design.
     //
-    // SUBJECT: the PROVIDER TOKEN, and only it (SOFTENED in scope, applies ADR-025).
+    // SUBJECT: the PROVIDER TOKEN, and only it (SOFTENED in scope).
     // It arrives validated in the spawn directive and is copied verbatim, so any
     // normalisation of it here is a second parser. The project KEY is a different
     // value with a different provenance — inferred from the repo, hand-editable in
@@ -710,7 +711,7 @@ describe('hostile values: the agent declares no second provider parser (§14.9 c
       expect(
         scoped,
         `'${phrase}' describes a provider-token repair pipeline. The token arrives validated ` +
-        'in the spawn directive; re-deriving it here adds a second convergence point (PF-023).',
+        'in the spawn directive; re-deriving it here adds a second convergence point.',
       ).not.toContain(phrase);
     }
 
@@ -745,7 +746,7 @@ describe('hostile values: the agent declares no second provider parser (§14.9 c
 // not a formatting one. The grammars are therefore pinned from §14.1 and driven
 // against the register's payload table — and each pinned form is separately
 // asserted to appear VERBATIM in that provider's own shipped mechanics, so the
-// table cannot drift away from the artifact it claims to describe (PF-018).
+// table cannot drift away from the artifact it claims to describe.
 //
 // Pinned rather than parsed out of the modules: a scan for "the anchored regexes
 // in this file" cannot tell a reference grammar from the site-URL shape gate that
@@ -833,7 +834,7 @@ describe('hostile values: refs per provider (GAP-18, register row 25)', () => {
     expect(
       HOSTILE_REFS.length,
       'the hostile-ref table is below its floor — every grammar below is driven over whatever is ' +
-      'in it, so a shrunken table is a green suite over fewer shapes (PF-018)',
+      'in it, so a shrunken table is a green suite over fewer shapes',
     ).toBeGreaterThanOrEqual(MIN_HOSTILE_REFS);
     expect(
       new Set(HOSTILE_REFS.map(([, r]) => r)).size,
@@ -843,7 +844,8 @@ describe('hostile values: refs per provider (GAP-18, register row 25)', () => {
 
   it('every pinned grammar appears verbatim in that provider\'s own shipped mechanics', () => {
     // The two-sided half. Without it the table is a restatement of §14.1 that the
-    // artifact is free to diverge from, which is the shape PF-018 names.
+    // artifact is free to diverge from, so its green would prove nothing about the
+    // artifact.
     for (const grammar of PROVIDER_REF_GRAMMARS) {
       const tree = TRACKER_OPS
         .map(op => readGeneratedReference(`tracker/${grammar.provider}/${op}.md`))
@@ -886,7 +888,7 @@ describe('hostile values: refs per provider (GAP-18, register row 25)', () => {
             `everything passes every row above while making the operation unreachable`,
           ).toBe(true);
         }
-        expect(grammar.accepts.length, 'the accepted corpus is empty (PF-018)').toBeGreaterThan(0);
+        expect(grammar.accepts.length, 'the accepted corpus is empty').toBeGreaterThan(0);
       });
     });
   }
@@ -972,7 +974,7 @@ function escapeReversed(value: string): string {
 describe('hostile values: JQL/filter fields (§14.9 constraint 10)', () => {
   it('both tool-call providers state the rule, in one place each', () => {
     const providers = queryBuildingProviders();
-    expect(providers.length, 'no query-building provider is registered (PF-018)').toBeGreaterThan(1);
+    expect(providers.length, 'no query-building provider is registered').toBeGreaterThan(1);
     for (const provider of providers) {
       const tree = TRACKER_OPS
         .map(op => readGeneratedReference(`tracker/${provider}/${op}.md`))

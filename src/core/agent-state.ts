@@ -2,10 +2,10 @@
  * Agent installation-state classification.
  *
  * Single source of truth for the STATE column shared by `--list` and the TUI.
- * Centralised here (core layer) per ADR-013 so neither cli/commands nor
+ * Centralised here (core layer) so neither cli/commands nor
  * cli/agents-view owns the vocabulary.
  *
- * applies ADR-013: pure core-layer module, no CLI-adapter concerns.
+ * Pure core-layer module, no CLI-adapter concerns.
  */
 
 import { isDormantExternalModel } from './external-models.js';

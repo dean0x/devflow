@@ -25,7 +25,7 @@
  * hosts' side and the "exceptions are /implement-only" arm.
  *
  * Every guard has a named collector, a non-empty-corpus assertion and a known-bad
- * probe run through the same collector (PF-064). The grammar is read out of the
+ * probe run through the same collector. The grammar is read out of the
  * partial and out of code.md and EXECUTED, never re-typed here: a hand-copied
  * pattern is a second authority that agrees with the first only until one of them
  * is edited.

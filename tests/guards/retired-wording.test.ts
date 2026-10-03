@@ -10,7 +10,7 @@
  *
  * A widened corpus only raises detection when the VOCABULARY widens with it. Two
  * documentation literals once survived a sweep purely by being spelled differently
- * in files the corpus already scanned (PF-025), so the response to residue found
+ * in files the corpus already scanned, so the response to residue found
  * outside the shipping assets is to widen the corpus and register the spelling —
  * never to loosen the denylist to fit what is there (R2).
  *
@@ -46,7 +46,7 @@ interface RetiredEntry {
    * Reserved for residue whose members are not enumerable in advance — a wave
    * coordinate is minted by whoever writes the next wave, so a fixed list would go
    * stale the moment it mattered. Everything with a knowable spelling stays a
-   * literal, individually classified (applies ADR-025).
+   * literal, individually classified.
    */
   pattern?: RegExp;
   /**
@@ -193,7 +193,7 @@ const RETIRED_LITERALS: ReadonlyArray<RetiredEntry> = [
     ['delete .devflow/tracker.md and re-learn', 'superseded; the file is never the remedy'],
     // #393 (PR6): every install carries every provider's mechanics, so no legitimate
     // configuration leaves a named mechanics file absent, and a prompt rule for a
-    // damaged install guards nothing (ADR-028). Retired with its rule, not renamed.
+    // damaged install guards nothing. Retired with its rule, not renamed.
     ['tracker mechanics unavailable', 'no legitimate configuration can produce it once every provider is installed'],
     // #393 (PR6): conventions moved to one file per provider, so the remedy names that file.
     ['edit ~/.devflow/tracker.md', 'the conventions file is per provider now, under `~/.devflow/tracker/`'],
@@ -212,7 +212,7 @@ const RETIRED_LITERALS: ReadonlyArray<RetiredEntry> = [
   // two command trees. This corpus is a strict superset of all four AND reaches
   // `src/assets/agents/`, `src/assets/skills/`, `src/assets/mds/`, `docs/` and
   // the root prose — which is exactly where a retired heading survives a sweep by
-  // being restated in documentation rather than in an op body (PF-025). One list,
+  // being restated in documentation rather than in an op body. One list,
   // because two lists is how one goes stale.
   //
   // `.devflow/features/*/KNOWLEDGE.md` stays out of the corpus (see the note
@@ -237,8 +237,7 @@ const RETIRED_LITERALS: ReadonlyArray<RetiredEntry> = [
   // Comments that date a line to the wave that wrote it ("P3a-S15: move a
   // now-stale conventions file aside") describe the transition, not the end
   // state, and a reader six months on cannot resolve the label to anything. The
-  // rationale itself is worth keeping — only the coordinate goes (applies
-  // ADR-003).
+  // rationale itself is worth keeping — only the coordinate goes.
   //
   // A pattern rather than seven literals because the members are not enumerable:
   // the next wave mints its own labels, and a fixed list would pass over exactly
@@ -256,46 +255,24 @@ const RETIRED_LITERALS: ReadonlyArray<RetiredEntry> = [
       'delivery that has shipped, and resolve to nothing for the next reader. Seven sites carried ' +
       'them; each was rewritten to state the rule instead of the phase that introduced it. Scoped ' +
       'to src/ because the plan artifacts, handoffs and knowledge bases under .devflow/ and docs/ ' +
-      'are where that provenance legitimately lives (PF-040).',
+      'are where that provenance legitimately lives.',
   },
 
   // -------------------------------------------------------------------------
   // Internal identifiers and delivery coordinates cut from the Git agent's prompt.
   //
-  // The agent's text is read by a model, not by a maintainer: an `ADR-NNN`, a
-  // `PF-NNN` or a phase coordinate resolves to nothing there, so it is cost with
-  // no reader. The RULE each one annotated is kept and stated plainly in place —
+  // The agent's text is read by a model, not by a maintainer: a decision-record
+  // anchor or a phase coordinate resolves to nothing there, so it is cost with no
+  // reader. The RULE each one annotated is kept and stated plainly in place —
   // only the pointer goes.
   //
-  // Each is scoped to the two files that carry the prompt (the .mds source and
-  // its compiled artifact) rather than registered repo-wide. `ADR-007` and
-  // `PF-003` are legitimate — and load-bearing — in CLAUDE.md, in docs/, in the
-  // other agents and in the learning ledger, which is where a decision record is
-  // supposed to be cited (applies ADR-025: classified individually, not swept).
+  // A scoped entry names the prompt files that carry it rather than registering
+  // the spelling repo-wide, because the same anchor is legitimate where a
+  // maintainer can follow it; each case is classified individually, not swept.
+  // Learning-ledger IDs need no row here: they resolve only on the machine that
+  // wrote them, and tests/guards/no-ledger-citations.test.ts holds them out of the
+  // sources, the docs and test commentary.
   // -------------------------------------------------------------------------
-  {
-    literal: 'ADR-007',
-    removedFrom: 'src/assets/agents/git.mds (the "Neutral values" heading)',
-    scope: ['src/assets/agents/git.mds', 'dist/agents/git.md'],
-    justification:
-      'The neutral-value discipline was cited by anchor in the always-loaded preamble. The rule ' +
-      'it names — a missing artifact degrades to a neutral value, never to a fallback path — is ' +
-      'stated in the same sentence, so the anchor added a lookup the reader of a prompt cannot ' +
-      'perform. Scoped to the prompt because citing ADR-007 in CLAUDE.md and in the decisions ' +
-      'ledger is exactly what that anchor is for.',
-  },
-  {
-    literal: 'PF-003',
-    removedFrom:
-      'src/assets/agents/git.mds (Principle 7, "avoids PF-003") and ' +
-      'src/assets/agents/tracker.md (`## Finishing` step 3)',
-    scope: ['src/assets/agents/git.mds', 'dist/agents/git.md', 'src/assets/agents/tracker.md'],
-    justification:
-      'Both prompts forbid a flagged `rm` and then cited the pitfall they avoid. The prohibition ' +
-      'is the whole content; the citation is provenance for a maintainer, and the maintainer ' +
-      'reads pitfalls.md. Scoped to the two prompts — learning.md and json-helper.cjs cite ' +
-      'PF-003 legitimately and are not retired from it here.',
-  },
   {
     literal: '[DR-02]',
     removedFrom: 'src/assets/agents/tracker.md (`## Finishing` step 1)',
@@ -333,7 +310,7 @@ const RETIRED_LITERALS: ReadonlyArray<RetiredEntry> = [
   // that is not in this repo. The hooks' comments are read by whoever has the
   // shell open and a session misbehaving in front of them, which is the one
   // audience that cannot follow the pointer — and the rule each coordinate
-  // annotated is stated in the same sentence, so only the pointer goes (ADR-003).
+  // annotated is stated in the same sentence, so only the pointer goes.
   //
   // A pattern rather than two literals: the members are not enumerable — the
   // section numbering belongs to whichever document is current — and a fixed list
@@ -343,7 +320,7 @@ const RETIRED_LITERALS: ReadonlyArray<RetiredEntry> = [
   // and `redact-secrets.cjs` carry the same coordinates in JSDoc, where the
   // audience is a maintainer reading the source with the repo checked out; that
   // is a different argument with a different answer, and sweeping both under one
-  // entry would settle it by omission (applies ADR-025).
+  // entry would settle it by omission.
   // -------------------------------------------------------------------------
   {
     literal: '§14.x design-document coordinates',
@@ -367,7 +344,7 @@ const RETIRED_LITERALS: ReadonlyArray<RetiredEntry> = [
   // #359, which moved the parallel PR into a Code `pr-create` spawn: no command
   // renders a link line now. A gated occurrence is still admitted by the pattern
   // rather than excluded by a hand-written filter, so the guard needs no second
-  // list to keep in sync with this one (PF-067).
+  // list to keep in sync with this one.
   // -------------------------------------------------------------------------
   {
     literal: 'an ungated `Closes #{ISSUE_NUMBER}`',
@@ -473,7 +450,7 @@ const RETIRED_LITERALS: ReadonlyArray<RetiredEntry> = [
 //
 // .devflow/features/*/KNOWLEDGE.md is deliberately NOT in the corpus. Those files
 // record what each literal WAS and why it was retired; a residue grep must not
-// demand that provenance be deleted (PF-040).
+// demand that provenance be deleted.
 // ---------------------------------------------------------------------------
 
 function buildCorpus(): Array<{ relPath: string; content: string }> {
@@ -693,7 +670,7 @@ describe('retired-wording guard — denylist of retired literals (GAP-32)', () =
     // depend on which entry happened to sort first and on that entry's scope not
     // naming whatever tree the probe used for "outside" — both of which a later
     // entry can change, turning a real guard red for a reason that is about the
-    // probe (PF-064). The outside path is synthetic for the same reason: no scope
+    // probe. The outside path is synthetic for the same reason: no scope
     // prefix in the denylist can match it, whoever writes the next entry.
     const scopedEntries = RETIRED_LITERALS.filter(e => e.scope !== undefined);
     expect(
@@ -734,7 +711,7 @@ describe('retired-wording guard — denylist of retired literals (GAP-32)', () =
     // Non-vacuity: corpus size must be > 0 so the guard is not trivially green.
     expect(
       corpus.length,
-      `corpus is empty — check src/assets/, dist/, and docs/; guard is vacuous (PF-018)`,
+      `corpus is empty — check src/assets/, dist/, and docs/; guard is vacuous`,
     ).toBeGreaterThan(0);
     // …and the doc half specifically, since a Phase-1 entry was retired from CLAUDE.md
     // and would have gone unchecked while the src/assets half kept the corpus non-empty.

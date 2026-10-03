@@ -1,7 +1,7 @@
 /**
  * Shared TUI cell helpers — shared by agents-view and flags-view.
  *
- * Applies PF-017: generified into a shared module rather than copy-adapted per consumer.
+ * Generified into a shared module rather than copy-adapted per consumer.
  * Pure functions, no I/O.
  */
 

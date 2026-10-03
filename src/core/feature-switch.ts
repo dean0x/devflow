@@ -48,7 +48,7 @@ function isJsonObject(value: unknown): value is Record<string, unknown> {
 
 /**
  * The pre-rename key each machine feature was stored under, where one exists:
- * `learning` was `decisions` (ADR-011) and `knowledge` was `kb`. A manifest no
+ * `learning` was `decisions` and `knowledge` was `kb`. A manifest no
  * command has rewritten since the rename can still hold only the legacy key.
  * `memory` was never renamed.
  */
@@ -62,7 +62,7 @@ const LEGACY_KEYS: Readonly<Partial<Record<MachineFeature, string>>> = {
  *
  * Only an explicit boolean `false` switches a feature off. A missing key, a
  * non-boolean value, or anything that is not a manifest-shaped object reads as
- * ON — fail-open (ADR-028), and the exact rule `queue_read_gates` applies in the
+ * ON — fail-open, and the exact rule `queue_read_gates` applies in the
  * shell hooks, so the CLI's status and the runtime never disagree about the
  * same file.
  *
@@ -80,7 +80,7 @@ const LEGACY_KEYS: Readonly<Partial<Record<MachineFeature, string>>> = {
  * precedence exactly, so `devflow knowledge --status` reports a `kb: false`
  * as disabled. queue_read_gates never reads knowledge, so there is no shell
  * mirror. The knowledge write-back prose gate deliberately does not learn the
- * legacy key (ADR-028: no prompt text for a state only an un-upgraded install
+ * legacy key (no prompt text for a state only an un-upgraded install
  * can hold); readManifest rewrites `kb` to `knowledge` on the next CLI run
  * that loads the manifest, after which that gate reads the healed key.
  *

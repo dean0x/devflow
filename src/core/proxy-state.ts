@@ -2,8 +2,8 @@
  * Proxy state persistence and routing config helpers for the Devflow external
  * model routing feature.
  *
- * applies ADR-013: pure core-layer module — no Claude Code adapter concerns.
- * avoids PF-014: never call process.exit() inside finally-guarded scopes; all
+ * Pure core-layer module — no Claude Code adapter concerns.
+ * Never call process.exit() inside finally-guarded scopes; all
  *   fallible operations return Result instead of throwing.
  *
  * State file: ~/.devflow/proxy.json
@@ -195,7 +195,7 @@ const ROUTING_CONFIG_REJECTED_SUBKEYS: Readonly<Record<'anthropic' | 'limits', r
  *
  * If `existingContent` is missing or malformed, falls back to a port-only config.
  *
- * applies ADR-013: pure core-layer function — no I/O.
+ * Pure core-layer function — no I/O.
  * @D-EFR-4: see note above for the strict top-key constraint.
  */
 export function buildRoutingConfigJson(port: number, existingContent?: string): string {

@@ -245,9 +245,9 @@ Knowledge files in `.devflow/learning/` capture decisions and pitfalls that agen
 | `pitfalls.md` | PF-NNN (sequential) | Learning agent via `assign-anchor` or `refresh-anchor` (renders via `render-decisions.cjs`) | Known gotchas, fragile areas, past bugs |
 | `index.md` | Compact ADR/PF index | Rendered by `render-decisions.cjs` from `decisions-ledger.jsonl` alongside `decisions.md`/`pitfalls.md` | Compact write-time index consumed by workflow commands via plain Read |
 
-Entry content reaches the ledger through exactly two ops: `assign-anchor` (first promotion) and `refresh-anchor` (post-promotion re-projection) — both project a `decisions-log.jsonl` row through `toLedgerRow`, then re-render all three files. `retire-anchor` flips `decisions_status` on the committed row in place and re-renders; it never re-projects content. `rotate-observations` touches only the log and its archive (under `.observations.lock`) and neither writes the ledger nor renders. The log is the content authority (ADR-022); the ledger is the anchor registry only.
+Entry content reaches the ledger through exactly two ops: `assign-anchor` (first promotion) and `refresh-anchor` (post-promotion re-projection) — both project a `decisions-log.jsonl` row through `toLedgerRow`, then re-render all three files. `retire-anchor` flips `decisions_status` on the committed row in place and re-renders; it never re-projects content. `rotate-observations` touches only the log and its archive (under `.observations.lock`) and neither writes the ledger nor renders. The log is the content authority; the ledger is the anchor registry only.
 
-`decisions.md` and `pitfalls.md` each have a `<!-- TL;DR: ... -->` comment on line 1; SessionStart injects these TL;DR headers only (~30-50 tokens). Agents read full files when relevant to their work. Cap: 50 entries per file. `index.md` has no TL;DR line and is not injected at SessionStart — it is the write-time artifact consumed via plain Read by workflow commands at invocation time (applies ADR-007).
+`decisions.md` and `pitfalls.md` each have a `<!-- TL;DR: ... -->` comment on line 1; SessionStart injects these TL;DR headers only (~30-50 tokens). Agents read full files when relevant to their work. Cap: 50 entries per file. `index.md` has no TL;DR line and is not injected at SessionStart — it is the write-time artifact consumed via plain Read by workflow commands at invocation time.
 
 ## HUD (Heads-Up Display)
 
@@ -281,7 +281,7 @@ An orphan is an installed asset whose name is no longer in the plugin registry �
 1. Read the directory listing for the target namespace.
 2. Apply a name extractor (strips `.md` for agents/commands; strips `devflow:` prefix for skills).
 3. Delete every entry whose extracted name is **not** in the `knownNames` set.
-4. Return a `SweepResult` with counts and per-item errors — failures are non-fatal (avoids PF-009).
+4. Return a `SweepResult` with counts and per-item errors — failures are non-fatal.
 
 **When it runs** (`src/targets/claude-code/installer.ts: installViaFileCopy` and `src/cli/commands/uninstall.ts: sweepDevflowNamespaces`):
 
@@ -302,7 +302,7 @@ rm -rf ~/.claude/rules/devflow/
 rm -rf ~/.devflow/scripts/
 ```
 
-Skills are removed individually rather than by namespace directory, because `~/.claude/skills/` is shared with other tools. Two separate passes run to avoid deleting foreign dirs (avoids PF-012):
+Skills are removed individually rather than by namespace directory, because `~/.claude/skills/` is shared with other tools. Two separate passes run to avoid deleting foreign dirs:
 - **Prefixed** (`devflow:name`): removed for every skill in the live registry ∪ `LEGACY_SKILL_NAMES`.
 - **Bare** (unprefixed): removed only for entries in the frozen `LEGACY_SKILL_NAMES` list. A bare dir whose name matches a current registry skill is by construction foreign to Devflow (the `devflow:` namespace shipped in commit dcecda3, 2026-03-30) and must not be deleted.
 

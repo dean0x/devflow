@@ -9,9 +9,9 @@
  *     migrateLegacyTrackerConventions) owns the ~/.devflow tracker files.
  *     It sits here rather than in a target adapter because ~/.devflow is
  *     devflow-global, not Claude-Code-specific — the same reason manifest.ts's
- *     read/write live in src/core/ (applies ADR-013).
+ *     read/write live in src/core/.
  *
- * avoids PF-014: nothing here calls process.exit() and nothing throws; every
+ * Nothing here calls process.exit() and nothing throws; every
  *   fallible path returns a Result, so callers own their own error rendering
  *   and a try/finally in a caller is never skipped.
  *
@@ -39,7 +39,7 @@ import * as path from 'path';
  * Local Result. The error channel is a human-readable message rather than a
  * second error taxonomy: `parseFrameworkList` (src/core/compliance.ts) already
  * establishes `{ok:false; error: string}` for a boundary parser, and a named
- * error interface with no consumer would be residue (applies ADR-003).
+ * error interface with no consumer would be residue.
  */
 export type TrackerResult<T> =
   | { ok: true; value: T }
@@ -70,7 +70,7 @@ export interface TrackerProviderDefinition {
 /**
  * Canonical issue-tracker provider registry.
  *
- * D-TRACKER-ONE-DOMAIN [PF-049]: this table is the SINGLE authority on the closed
+ * D-TRACKER-ONE-DOMAIN: this table is the SINGLE authority on the closed
  * provider set, and `TrackerProvider` below is a projection of it. A provider
  * therefore exists for the type system exactly when it has a row here: there is no
  * hand-listed union that can admit an id `parseTrackerId` rejects and the wizard
@@ -132,7 +132,7 @@ export const DEFAULT_TRACKER_PROVIDER: TrackerProvider = 'github';
 // Artifact basenames — one spelling for every TypeScript reader
 //
 // NOT the only spelling in the repository, and a rename that assumes it is will
-// miss the places these names are hardcoded (PF-013): the SessionStart hook's
+// miss the places these names are hardcoded: the SessionStart hook's
 // Section 3 (shell) and the Tracker agent's prompt (prose), neither of which can
 // import from here. Each is cross-pinned against these constants by tests —
 // shell-hooks-tracker, tracker-agent, uninstall-logic and core/tracker — so the
@@ -187,7 +187,7 @@ export const TRACKER_CLAIM_FILE = '.tracker.processing';
  * no user-authored content (it is a scrubbed, unplaced copy of what the agent
  * was about to write), so it is an install artifact, never user content.
  *
- * Spelled twice for the reason the basenames above are (PF-013): the agent's
+ * Spelled twice for the reason the basenames above are: the agent's
  * prompt cannot import from here, so the mktemp template is also a literal in
  * src/assets/agents/tracker.md, and tests/core/tracker.test.ts pins the two
  * spellings together.
@@ -216,7 +216,7 @@ export const TRACKER_ATTEMPTS_NAMES: readonly string[] =
  * How many background inference attempts a machine gets before the SessionStart
  * hook stops emitting the setup directive.
  *
- * Spelled twice for the reason the basenames above are (PF-013): the hook is the
+ * Spelled twice for the reason the basenames above are: the hook is the
  * enforcer and cannot import from here, so `TRACKER_ATTEMPTS_MAX=5` is also a
  * literal in src/assets/scripts/hooks/session-start-context. This constant is the
  * number `devflow tracker --status` quotes back when it re-arms the counter, and
@@ -269,7 +269,7 @@ export function isTrackerProvider(value: unknown): value is TrackerProvider {
  * `parseTrackerId`'s error text and by `devflow tracker --status`.
  *
  * Takes `unknown`, and a non-string renders as its TYPE: the module's
- * never-throws contract (PF-014) has to hold for what reaches this sink, not
+ * never-throws contract has to hold for what reaches this sink, not
  * only for what the signature says does — `devflow tracker --status` reads
  * a conventions file's hand-editable frontmatter, and a caller-side guard is one edit
  * from being gone. Naming the type also keeps the render total, where `String()`
@@ -325,12 +325,12 @@ export function parseTrackerId(input: string): TrackerResult<TrackerProvider> {
  * Tolerant sink normaliser for a raw `manifest.features.tracker` value.
  *
  * Absent, null, malformed, a bare string, or an unknown provider → the default
- * `{provider:'github'}` (applies ADR-014 self-heal). Drop-not-error: a manifest
+ * `{provider:'github'}` (self-heal). Drop-not-error: a manifest
  * written by a newer devflow, or hand-edited, degrades to what this build
  * understands instead of failing the read.
  *
  * D-TRACKER-SELF-HEAL [DR-26]: self-healing here is SILENT and emits no
- * DEGRADED — that is the correct ADR-014 behaviour, and it is a different
+ * DEGRADED — that is the correct self-heal behaviour, and it is a different
  * condition from a per-repo config value outside the domain (which does emit
  * `unknown tracker provider`). The two must not be conflated.
  */
@@ -425,8 +425,8 @@ export function parseTrackerFrontmatter(head: string): TrackerFrontmatter {
 /**
  * How many leading BYTES of a conventions file any reader takes — the bound the
  * Tracker agent writes to and the Git agent loads. A line cap alone bounds the
- * SCAN, not the read: the file's size is not devflow's to assume (avoids PF-023:
- * a bound is only real at the sink).
+ * SCAN, not the read: the file's size is not devflow's to assume
+ * (a bound is only real at the sink).
  */
 export const TRACKER_CONVENTIONS_READ_BYTES = 8000;
 
@@ -436,7 +436,7 @@ export const TRACKER_CONVENTIONS_READ_BYTES = 8000;
  * `undefined` for an absent, unreadable or non-regular path — a FIFO or a device
  * is refused before it is opened, so a hostile entry can never block a read.
  * Follows a symlink to read what it names (a reader cares what the conventions
- * SAY); it never moves or writes through one. Never throws (PF-014).
+ * SAY); it never moves or writes through one. Never throws.
  */
 export async function readBoundedHead(filePath: string, limit: number): Promise<string | undefined> {
   let handle: FileHandle | undefined;
@@ -468,7 +468,7 @@ export async function readBoundedHead(filePath: string, limit: number): Promise<
  * select a provider the machine never did, and its counter is the one a user in
  * that repository is capped on.
  *
- * Idempotent when a counter is absent; never throws (PF-014). `fs.rm` with
+ * Idempotent when a counter is absent; never throws. `fs.rm` with
  * `force` treats an absent file — and an absent parent directory — as success.
  */
 export async function rearmTrackerInference(devflowDir: string): Promise<TrackerResult<void>> {
@@ -493,7 +493,7 @@ export async function rearmTrackerInference(devflowDir: string): Promise<Tracker
  * bare presence marker, so the hook never has to open the manifest to learn which
  * provider it is gating.
  *
- * Converges unconditionally in both directions (avoids PF-015): a provider
+ * Converges unconditionally in both directions: a provider
  * flipped back to github removes the sentinel in the same call shape that wrote
  * it, so there is no "enable wrote it, disable forgot it" asymmetry.
  */

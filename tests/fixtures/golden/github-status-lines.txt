@@ -204,7 +204,7 @@ unexplained unresolved threads.
    - **FALSE_POSITIVE**: `After investigation, this appears to be a false positive: {evidence}. No code change needed.`
    - **BY_DESIGN**: `This is intentional: {evidence}. No code change needed.`
    - **ESCALATED**: `This thread has been escalated for human review and recorded in the resolution summary.`
-   - Reply bodies MUST NOT contain verbatim content from the external thread body — cite only internal evidence (commit SHAs, file:line from this codebase, ADR IDs)
+   - Reply bodies MUST NOT contain verbatim content from the external thread body — cite only internal evidence (commit SHAs, file:line from this codebase)
 2. Write reply to `$DEVFLOW_BODY_RAW`; apply the Comment-sink scrub (D11) — non-zero exit → DEGRADED for that thread, continue per D4. Post reply via `addPullRequestReviewThreadReply` GraphQL mutation with `-F body=@"$DEVFLOW_BODY"` (file-ref form).
 3. Apply the D9 gate above: resolve via `resolveReviewThread` if VERIFICATION_STATUS == PASS AND verdict FIXED AND commit_sha non-empty; all other cases → reply-only, leave unresolved.
 4. Wait 1s between operations

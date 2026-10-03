@@ -179,7 +179,7 @@ function formatMdsError(err: unknown, sourcePath: string): string {
  * It is a bound that fails, not a filter that truncates. A host skipped for
  * being too deep compiles nothing while the build still prints its counts and
  * exits 0 — the artifact is simply missing, and no test can see the difference
- * between "not there" and "never looked" (avoids PF-018). Exceeding the bound
+ * between "not there" and "never looked". Exceeding the bound
  * therefore throws, naming the bound and the offending directory.
  */
 const MAX_WALK_DEPTH = 12;
@@ -352,7 +352,7 @@ function stripGeneratorFrontmatter(compiled: string, sourcePath: string): string
  * agent that already has its own header.
  *
  * Both ends are verified, for the same reason stripGeneratorFrontmatter verifies
- * both (PF-061):
+ * both:
  *   - PRE: a leading block must exist — discovery found `output-dir:` in exactly
  *     this block, so its absence means the compiler moved bytes it emits verbatim.
  *   - POST: a SECOND block must NOT be what the slice exposes. An author copying
@@ -815,7 +815,7 @@ async function compileHost(host: HostEntry, plan: HostPlan): Promise<CompileOutc
 
   // Atomic write: write to a temp file then rename into place so concurrent
   // readers (e.g. ambient.test.ts running in a parallel vitest worker) never
-  // observe a missing file between the old and new content. (avoids PF-011)
+  // observe a missing file between the old and new content.
   // Clean up the .tmp on rename failure so no orphan is left behind.
   for (const { dest, content } of outputs) {
     fs.mkdirSync(path.dirname(dest), { recursive: true });

@@ -46,7 +46,7 @@
  *
  * Non-vacuity: every collector is driven by the guard AND by an inline known-bad
  * sample in the same `it`, so no negative can pass because an extractor silently
- * stopped returning anything (PF-018). A side that states no number yields `null` /
+ * stopped returning anything. A side that states no number yields `null` /
  * `[]` and is REPORTED as unstated rather than read as agreement.
  */
 
@@ -123,7 +123,10 @@ export function collectAgentAttemptCaps(source: string): number[] {
   return [...source.matchAll(/\*\*(\d+) attempts?\*\*/g)].map(m => Number(m[1]));
 }
 
-/** How far past `**Heartbeat**` the refresh may be stated. Bounded (PF-018). */
+/**
+ * How far past `**Heartbeat**` the refresh may be stated. Bounded, so a later
+ * step's text is never read as this one's.
+ */
 const HEARTBEAT_WINDOW_CHARS = 400;
 
 /**
@@ -151,7 +154,7 @@ const HEARTBEAT_WINDOW_CHARS = 400;
  *
  * Whitespace is normalised first because the agent hard-wraps: `once per` lands
  * across a line break in the shipped text, and pinning where a sentence happens to
- * break is what PF-057 warns against.
+ * break would pin the layout rather than the rule.
  */
 export function collectHeartbeatCadenceUnits(source: string): string[] {
   const block = heartbeatBlock(source);
@@ -301,7 +304,7 @@ describe('tracker claim-staleness seam: the hook and the Tracker agent agree on 
 // closes earlier than the prompt says it will, with no user-visible error.
 //
 // This is the staleness seam two constants over, so it is asserted the same way —
-// an unstated bound is REPORTED as unstated rather than read as agreement (PF-018),
+// an unstated bound is REPORTED as unstated rather than read as agreement,
 // and every collector is driven by a known-bad sample in the same `it`.
 
 describe('tracker attempt-cap seam: the hook, the Tracker agent and src/core agree on one cap', () => {

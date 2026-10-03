@@ -21,7 +21,7 @@
  * the reader resolves while the writer never sees it gets no Tracker run, no
  * conventions file is ever written, and every op reports the same
  * `TRACEABILITY: DEGRADED (tracker not configured)` with no command that can clear
- * it — PF-023's shape, an invariant asserted at one end and enforced at neither.
+ * it — an invariant asserted at one end and enforced at neither.
  *
  * The personal override stays usable because the SCRIPT narrows it — to `github`
  * or the provider already resolved — and flags anything else `TRACKER_WARN=mismatch`,
@@ -31,9 +31,9 @@
  * refusal is, because that is where the user is told how to leave the state.
  *
  * Both sides are read from the shipped files — the agent host (a generated
- * artifact tsc never sees, PF-024) and the hook. Every collector is driven by a
+ * artifact tsc never sees) and the hook. Every collector is driven by a
  * known-bad sample in the same `it`, so no arm can pass because an extractor
- * silently stopped returning anything (PF-018).
+ * silently stopped returning anything.
  */
 
 import { describe, it, expect } from 'vitest';
@@ -175,7 +175,7 @@ describe('tracker provider sources: the reader admits no source the writer never
     expect(
       collectReaderSources(preamble),
       'the preamble must resolve the provider from resolve-settings.cjs and name no config file ' +
-        'as a source of its own — a second source is a second, unvalidated parser (PF-023)',
+        'as a source of its own — a second source is a second, unvalidated parser',
     ).toEqual(['settings-line']);
 
     // Known-bad, same it: the pre-#393 two-rung order is classified source by

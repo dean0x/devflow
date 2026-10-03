@@ -8,16 +8,16 @@
  * the canonical skill-install branches: a user who shadows `devflow:git` must still
  * receive the canonical GitHub mechanics (UAC-28 — a release blocker, AC-2.11).
  *
- * Fixtures are staged from the REAL generated references (avoids PF-043: a fixture built
+ * Fixtures are staged from the REAL generated references (a fixture built
  * from a shape the runtime never produces proves nothing). `requireBuiltReferences()`
  * fails loud with a build hint rather than skipping when `dist/` is absent.
  *
- * HOME safety (avoids PF-060): every test passes an explicit mkdtemp `claudeDir` /
+ * HOME safety: every test passes an explicit mkdtemp `claudeDir` /
  * `devflowDir` / `referencesTarget`. No test reads or writes the real Claude or Devflow
  * config directories under the user's home, and no test shells out to `dist/cli.js init`.
  *
  * Non-vacuity: every assertion below also pins the POSITIVE outcome — an overlay that
- * did nothing at all would fail these tests, not pass them (avoids PF-018).
+ * did nothing at all would fail these tests, not pass them.
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
@@ -85,7 +85,7 @@ async function requireBuiltReferences(): Promise<readonly string[]> {
  *
  * An entry the GitHub-only build does not produce (a fixture-only provider directory)
  * is staged from a real generated reference, so even the synthetic units carry a shape
- * the build actually emits (avoids PF-043).
+ * the build actually emits.
  */
 async function stageSource(root: string, manifest: readonly string[]): Promise<void> {
   const donor = abs(REAL_REFS, 'tracker/github/setup-task.md');
@@ -185,7 +185,7 @@ describe('overlay unit classification (D-OVERLAY-PROVIDER-SHAPE)', () => {
    * mis-bucketed whole-subtree rename of `tracker/` runs BEFORE the provider units promote
    * back into it and every file is present at the end either way — so the classification
    * is the observation that separates them, and an arm asserting it is only a regression
-   * guard if the two rules really disagree on the input it uses (avoids PF-018).
+   * guard if the two rules really disagree on the input it uses.
    */
   function shapeBlindKind(subdir: string): OverlayUnit['kind'] {
     return subdir === '' ? 'cross-cutting' : 'provider';
@@ -220,7 +220,7 @@ describe('overlay unit classification (D-OVERLAY-PROVIDER-SHAPE)', () => {
     const units = planOverlayUnits(await requireBuiltReferences());
 
     // The synthetic manifest above states the contract; this pins it to the shapes the
-    // build actually emits, so neither arm can pass on a shape nothing produces (PF-043).
+    // build actually emits, so neither arm can pass on a shape nothing produces.
     expect(
       units.flatMap(u => (u.kind === 'cross-cutting' && u.dir === 'tracker' ? [u.files] : [])),
       'the real manifest carries no flat set in tracker/ — the shape under test is absent',
@@ -539,7 +539,7 @@ describe('converge-not-merge staged swap (GAP-24)', () => {
     expect(await exists(path.join(target, 'tracker', 'probe-provider'))).toBe(false);
     expect(
       second.pruned.scanned,
-      'a prune that scanned nothing proves nothing (avoids PF-018)',
+      'a prune that scanned nothing proves nothing',
     ).toBeGreaterThan(0);
     // Named from the references ROOT, not from the subtree that was swept: the prune
     // merges one sweep per converged subtree, and a bare `probe-provider` would not say
@@ -623,7 +623,7 @@ describe('converge-not-merge staged swap (GAP-24)', () => {
 
     expect(
       staged.length,
-      'no staging path was observed — every assertion below would be vacuous (PF-018)',
+      'no staging path was observed — every assertion below would be vacuous',
     ).toBeGreaterThanOrEqual(2);
 
     const trackerRoot = path.join(target, 'tracker');
@@ -746,13 +746,13 @@ describe('converge-not-merge staged swap (GAP-24)', () => {
 
     // ...and the run says so, naming the directory and the bound, through the channel the
     // overlay already renders for mode normalisation. A bound that returned quietly would
-    // leave this run indistinguishable from one that normalised the whole tree (PF-018).
+    // leave this run indistinguishable from one that normalised the whole tree.
     const breach = modeWarnings();
     expect(breach, 'a breached bound must be reported exactly once').toHaveLength(1);
     expect(breach[0]).toContain(String(MAX_REFERENCE_SWEEP_DEPTH));
     expect(breach[0]).toContain(tooDeep);
 
-    // Positive half: an install is not abandoned over one unwalked subtree (avoids PF-009).
+    // Positive half: an install is not abandoned over one unwalked subtree.
     expect(result.overlayFailures).toEqual([]);
     expect([...result.overlaidRefs].sort()).toEqual([...manifest].sort());
   });
@@ -853,7 +853,7 @@ describe('the PR-host subtree converges like the tracker subtree (D-CONVERGED-SU
     }
     expect(
       second.pruned.scanned,
-      'a prune that scanned nothing proves nothing (avoids PF-018)',
+      'a prune that scanned nothing proves nothing',
     ).toBeGreaterThan(0);
     // Named from the references ROOT: `pr/x.md`, never a bare `x.md` that could as well
     // have come out of `tracker/`.
@@ -1118,7 +1118,7 @@ describe('atomic per-unit swap (AC-2.4b, DR-05, risk P2-g)', () => {
       // Running as root, or a filesystem that ignores mode bits: the premise of the
       // test cannot be established, so asserting on it would be theatre. Report it
       // as SKIPPED via vitest's ctx.skip() — a bare `return` here masked an
-      // unestablished premise as a PASS, the PF-018 vacuous-green shape.
+      // unestablished premise as a PASS, the vacuous-green shape.
       ctx.skip();
       return;
     }
@@ -1157,7 +1157,7 @@ describe('atomic per-unit swap (AC-2.4b, DR-05, risk P2-g)', () => {
     const residue = (await walkTree(target)).filter(p => p.includes('.tmp'));
     expect(residue, 'a failed unit must leave no .tmp tree behind').toEqual([]);
 
-    // 5. the failure reaches a render site (PF-015)
+    // 5. the failure reaches a render site
     const lines = formatOverlaySummary({
       overlaidRefs: second.overlaidRefs,
       overlayFailures: second.overlayFailures,
@@ -1175,7 +1175,7 @@ describe('atomic per-unit swap (AC-2.4b, DR-05, risk P2-g)', () => {
     // agent reads, and — unlike `.tmp` — it holds a full previous copy.
     const residue = (await walkTree(target)).filter(p => p.includes('.old') || p.includes('.tmp'));
     expect(residue, 'a completed swap must leave neither backup nor staging residue').toEqual([]);
-    // Positive outcome: the swap actually happened (avoids PF-018).
+    // Positive outcome: the swap actually happened.
     expect(result.overlaidRefs).toContain('tracker/github/setup-task.md');
   });
 
@@ -1194,7 +1194,7 @@ describe('atomic per-unit swap (AC-2.4b, DR-05, risk P2-g)', () => {
     // the installed unit has already been moved aside — the window a rm-then-rename
     // promotion cannot survive, because by then it has deleted the only copy. Driving
     // the real promotion step is what makes this a known-bad probe rather than a
-    // restatement of the implementation (PF-018).
+    // restatement of the implementation.
     const missingStaging = abs(target, 'tracker/probe-provider') + '.tmp';
     expect(await exists(missingStaging), 'the staging tree must be absent for this probe').toBe(false);
 
@@ -1417,7 +1417,7 @@ describe('atomic per-unit swap (AC-2.4b, DR-05, risk P2-g)', () => {
     expect(await exists(live)).toBe(false);
 
     // 3. the skipped prune is reported, not silent — nothing claims convergence over
-    //    ground it did not cover (PF-009, PF-015).
+    //    ground it did not cover.
     expect(result.pruned.removed).toEqual([]);
     expect(result.pruned.failed).toHaveLength(1);
     expect(result.pruned.failed[0].name).toBe('tracker');
@@ -1501,8 +1501,9 @@ describe('atomic per-unit swap (AC-2.4b, DR-05, risk P2-g)', () => {
   it('known-bad probe: one absent unit directory under a present root is reported, never thrown', async () => {
     // The boundary the whole-tree refusal must not cross. Hoisting that `stat` into the
     // unit loop passes the probe above and fails this one: a single unbuilt provider
-    // would abort the entire install, which is the blast radius PF-009 exists to keep
-    // out of this path. The root is present here; exactly one unit's directory is not.
+    // would abort the entire install, which is the blast radius per-unit failure
+    // isolation exists to keep out of this path. The root is present here; exactly
+    // one unit's directory is not.
     await fs.rm(abs(sourceRoot, 'tracker/probe-provider'), { recursive: true });
 
     const result = await overlayGeneratedReferences({ referencesTarget: target, sourceRoot, manifest: wide });
@@ -1550,8 +1551,7 @@ describe('unchanged units are reported separately (AC-23)', () => {
    *
    * Every promotion path installs a file by renaming a freshly COPIED staging entry into
    * place, so a re-promoted document always arrives with a new inode even when its bytes
-   * are identical. The report alone would be a label; this is the observation behind it
-   * (avoids PF-018).
+   * are identical. The report alone would be a label; this is the observation behind it.
    */
   const inodes = (): Promise<number[]> =>
     Promise.all(manifest.map(async rel => (await fs.stat(abs(target, rel))).ino));
@@ -1634,10 +1634,10 @@ describe('unchanged units are reported separately (AC-23)', () => {
 });
 
 // ---------------------------------------------------------------------------
-// Render site — a report field with no render site is not a report (PF-015)
+// Render site — a report field with no render site is not a report
 // ---------------------------------------------------------------------------
 
-describe('formatOverlaySummary render site (PF-015)', () => {
+describe('formatOverlaySummary render site', () => {
   it('renders nothing when the overlay did nothing and failed at nothing', () => {
     expect(formatOverlaySummary({ overlaidRefs: [], overlayFailures: [] })).toEqual([]);
   });
@@ -1770,7 +1770,7 @@ describe('sweepOrphanedReferences — path-keyed prune collector', () => {
     expect(result.failed).toEqual([]);
   });
 
-  it('an absent root is a no-op, not an error (avoids PF-009)', async () => {
+  it('an absent root is a no-op, not an error', async () => {
     const result = await sweepOrphanedReferences(path.join(root, 'nope'), new Set(['a.md']));
     expect(result).toEqual({ scanned: 0, removed: [], failed: [] });
   });
@@ -1779,7 +1779,7 @@ describe('sweepOrphanedReferences — path-keyed prune collector', () => {
   // breached at `depth > MAX_REFERENCE_SWEEP_DEPTH`, counting the swept root as depth 0.
   // The pair below is a known-bad probe and its in-bounds twin: the same orphan beside
   // the same manifest path, one directory apart. A bound that returned quietly would
-  // hand back a result indistinguishable from the converged one (avoids PF-018).
+  // hand back a result indistinguishable from the converged one.
   const nested = (levels: number): string =>
     Array.from({ length: levels }, (_, i) => `d${i + 1}`).join('/');
 

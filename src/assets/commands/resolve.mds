@@ -180,14 +180,14 @@ Wait for Triage agent to complete before proceeding. Parse verdict ledger from T
 - **ESCALATED**: Security issues requiring human escalation
 - **FIX_NOW**: Valid issues assigned to Code agents (with risk tier: Standard | Careful)
 - **FALSE_POSITIVE**: Issues the Review agent got wrong (with cited evidence)
-- **BY_DESIGN**: Intentional code (with ADR or code doc citation)
+- **BY_DESIGN**: Intentional code (with a recorded decision, stated in words, or a code doc citation)
 - **FIX_SEPARATE**: Valid but out of blast-radius scope (must become manage-debt ticket)
 - **TECH_DEBT**: Architectural overhaul only — LAST RESORT
 - **DUPLICATE**: Collapsed duplicate issue — carries `duplicate_of: <primary-id>` referencing the non-DUPLICATE primary; inherits the primary's outcome
 
-Collect all decisions citations (ADR-NNN / PF-NNN) from Triage agent Reasoning columns.
+Collect every decision and pitfall the Triage agent's Reasoning columns state, in its words — the resolution summary is posted, so it never carries an ADR/PF ID.
 
-**Triage agent completeness assertion (avoids PF-002):** Verify the parsed ledger against ISSUES before proceeding:
+**Triage agent completeness assertion:** Verify the parsed ledger against ISSUES before proceeding:
 1. Every issue `id` from ISSUES must appear in exactly one verdict bucket — none may vanish, none may appear in multiple buckets. DUPLICATE is a valid bucket; a valid DUPLICATE entry must name its `duplicate_of` primary (the `Duplicate Of` column of the ledger's DUPLICATE table) and that primary must be a non-DUPLICATE issue id. A missing `duplicate_of` or one that chains to another DUPLICATE is a **Triage agent failure** (retry-then-abort as below).
 2. If the Triage agent output is empty, contains a skill re-entrancy guard string (e.g., contains `already running`), or is missing any issue IDs from ISSUES: treat as a **Triage agent failure**:
    - Retry the Triage agent once with the same inputs.
@@ -401,7 +401,7 @@ Run this step only when `EVIDENCE_POLICY` is `required` and THREAD_MAP is non-em
 
 Prepare THREAD_MAP with verdicts from triage/code agent results:
 - For each `ext-{N}`: match to an issue verdict (FIXED, FALSE_POSITIVE, BY_DESIGN, ESCALATED) by `file:line` correlation
-- If the matched issue has verdict DUPLICATE, use the **primary's** verdict and verification status for the reply — do not expose DUPLICATE to the thread author (avoids PF-024; caller-side mapping — git.md contracts unchanged)
+- If the matched issue has verdict DUPLICATE, use the **primary's** verdict and verification status for the reply — do not expose DUPLICATE to the thread author (caller-side mapping: the Git agent's verdict set has no DUPLICATE, so its contract stays unchanged)
 - Include `commit_sha` from Code agent results for FIXED verdicts
 - If `fork_no_push` is set: drop FIXED entries from THREAD_MAP — their commits never reached the PR — and record each as `DEGRADED` in `## Third-Party Threads`
 - Unmatched threads: ESCALATED (human review)
@@ -642,8 +642,7 @@ Written in Phase 5 (Collect Results) to `{TARGET_DIR}/resolution-summary.md`:
 
 ## Decisions Citations
 
-- applies ADR-{NNN} — {batch-id}, {issue-id}
-- avoids PF-{NNN} — {batch-id}, {issue-id}
+- {decision applied or pitfall avoided, stated in words — never its ID} — {batch-id}, {issue-id}
 
 (Omit section if no citations were made)
 
@@ -681,9 +680,9 @@ Final gate: PASS | FAILED after {n} attempts
 | {description} | {file}:{line} | {why} |
 
 ## By Design
-| Issue | File:Line | Rationale (ADR/doc) |
-|-------|-----------|---------------------|
-| {description} | {file}:{line} | {applies ADR-NNN or code comment} |
+| Issue | File:Line | Rationale (decision/doc) |
+|-------|-----------|--------------------------|
+| {description} | {file}:{line} | {the decision, in words, or code comment} |
 
 ## Fix Separately
 | Issue | File:Line | Reason | Tracked |

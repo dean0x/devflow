@@ -1,6 +1,6 @@
 ---
 name: apply-decisions
-description: Canonical algorithm for consuming DECISIONS_CONTEXT index — scan index, identify relevant entries, Read full bodies on demand, cite verbatim IDs inline.
+description: Canonical algorithm for consuming DECISIONS_CONTEXT index — scan index, identify relevant entries, Read full bodies on demand, cite verbatim IDs in-session and state the rule in words in anything committed or posted.
 user-invocable: false
 allowed-tools: Read
 ---
@@ -27,12 +27,12 @@ Read through all entries in `DECISIONS_CONTEXT`. The index format is:
 
 ```
 Decisions (N):
-  ADR-001  Title truncated to 60 chars  [Active]
-  ADR-002  Another decision             [Active]
+  ADR-NNN  Title truncated to 60 chars  [Active]
+  ADR-NNN  Another decision             [Active]
 
 Pitfalls (M):
-  PF-004  Background hook god scripts  [Active]  —  src/assets/scripts/hooks/foo.cjs
-  PF-011  DECISIONS_CONTEXT fan-out    [Active]  —  src/assets/commands/...
+  PF-NNN  Background hook god scripts  [Active]  —  src/assets/scripts/hooks/foo.cjs
+  PF-NNN  DECISIONS_CONTEXT fan-out    [Active]  —  src/assets/commands/...
 
 ADR-NNN entries live in {worktree}/.devflow/learning/decisions.md
 PF-NNN  entries live in {worktree}/.devflow/learning/pitfalls.md
@@ -62,9 +62,11 @@ Use the exact paths from the DECISIONS_CONTEXT footer, e.g.:
 
 Only cite an entry after you have read its full body and confirmed it applies.
 
-### Step 4: Cite inline
+### Step 4: Cite inline — in-session handoffs only
 
-When applying a prior decision, cite as `applies ADR-NNN` in your reasoning or output. When avoiding a known pitfall, cite as `avoids PF-NNN`. Place citations in the Reasoning column of decision tables, in inline comments, or in your structured output — wherever your agent's output format captures rationale.
+When applying a prior decision, cite as `applies ADR-NNN`. When avoiding a known pitfall, cite as `avoids PF-NNN`. Place these citations only where they stay in the session: your reasoning, decision tables, prompts to downstream agents, and your report back to the caller.
+
+Anything committed, pushed or posted states the rule in words, never its ID: code, comments, tests, docs, KNOWLEDGE.md files, commit messages, PR and issue text, review and PR comments, resolution summaries — and any report a later step copies into one of those. The ledger is gitignored and numbered per machine, so no other clone can resolve an ID, and numbers get reused.
 
 ### Step 5: Use verbatim IDs only
 
@@ -76,11 +78,11 @@ Cite only IDs that appear verbatim in `DECISIONS_CONTEXT`. Do not guess at IDs t
 
 **Scenario**: Reviewing `src/assets/scripts/hooks/background-learning` for issues.
 
-1. **Scan** — Index shows `PF-004  Background hook god scripts  [Active]  —  src/assets/scripts/hooks/foo.cjs`
+1. **Scan** — Index shows `PF-NNN  Background hook god scripts  [Active]  —  src/assets/scripts/hooks/foo.cjs`
 2. **Identify** — Area field includes `src/assets/scripts/hooks/` which overlaps with the file under review
-3. **Read** — Open the pitfalls file at the path given in the DECISIONS_CONTEXT footer (e.g., `<worktree>/.devflow/learning/pitfalls.md`), find `## PF-004:` section, read full body
-4. **Cite** — If the file shows signs of the god-script pattern, note `avoids PF-004` in reasoning
-5. **Verbatim** — ID `PF-004` appeared in the index; citation is valid
+3. **Read** — Open the pitfalls file at the path given in the DECISIONS_CONTEXT footer (e.g., `<worktree>/.devflow/learning/pitfalls.md`), find `## PF-NNN:` section, read full body
+4. **Cite** — If the file shows signs of the god-script pattern, note `avoids PF-NNN` in reasoning; a comment you commit for the fix says why in words ("hooks stay thin dispatchers"), never the ID
+5. **Verbatim** — ID `PF-NNN` appeared in the index; citation is valid
 
 ---
 
@@ -98,3 +100,4 @@ When `DECISIONS_CONTEXT` is empty, `(none)`, or not provided: skip this skill en
 | Avoiding a known pitfall | `avoids PF-NNN` |
 | Entry not in index | (no citation — silence is correct) |
 | Entry in index but not read yet | (no citation — read first) |
+| Text that is committed, pushed or posted | (no ID — state the rule in words) |

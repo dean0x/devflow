@@ -1,8 +1,8 @@
 /**
  * Pure TUI frame renderer for the devflow flags view.
  *
- * applies ADR-013: CLI-layer view module; zero fs/tty imports.
- * avoids PF-014: pure function, no process.exit(), no I/O.
+ * CLI-layer view module; zero fs/tty imports.
+ * Pure function, no process.exit(), no I/O.
  *
  * Layout (FIXED_ROWS = 10, viewport = state.viewportHeight — single owner):
  *   1  Title "  Devflow Flags"
@@ -78,14 +78,14 @@ export function computeViewportHeight(termRows: number): number {
  *   non-boolean at devflow default → plain string
  *   non-boolean deviating from devflow default → bold string
  *
- * Colour vocabulary (one colour, one semantic — applies ADR-016's amendment lesson):
+ * Colour vocabulary (one colour, one semantic):
  *   cyan   = focus indicator (chevron wrapper ‹ › on the cursor row only)
  *   yellow = dirty indicator (unconditional ●) and boolean 'off'
  *   green  = boolean 'on'
  *   bold   = non-boolean value deviating from devflow default
  *
  * disk-sourced values are routed through sanitizeCell to prevent TAB/LF
- * layout breaks inside the fixed-width TUI cell (avoids PF-023).
+ * layout breaks inside the fixed-width TUI cell.
  */
 function formatValue(row: FlagRow): string {
   const v = row.configuredValue;
@@ -195,7 +195,7 @@ function renderRow(
   // so an inner RESET (e.g. from green('on')) does not kill the outer cyan.
   //   cyan('‹ ') + <styled-or-plain content> + cyan(' ›')
   // rather than cyan(`‹ ${content} ›`), which terminates the outer cyan at the
-  // inner RESET, leaving the closing chevron unstyled (applies ADR-016 amendment lesson).
+  // inner RESET, leaving the closing chevron unstyled.
   const chevronBudget = valueW - 4;
   let valueCell: string;
   if (isCursor && isEditing) {

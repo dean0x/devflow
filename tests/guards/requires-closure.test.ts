@@ -24,7 +24,7 @@
  * Cloned from registry-integrity.test.ts Guard 1 (forward) / Guard 2 (reverse),
  * including its named-collector + synthetic-probe shape: every assertion runs
  * through the same collector the known-bad probe exercises, so a collector that
- * silently sees nothing cannot make the guard pass (PF-018).
+ * silently sees nothing cannot make the guard pass.
  */
 
 import { describe, it, expect } from 'vitest';
@@ -245,7 +245,7 @@ describe('requires closure (forward): every skill reference resolves in scope', 
  * plugin's corpus references.
  *
  * Extracted so the known-bad probe can drive THE SAME predicate the live arm
- * drives (PF-018). The probe it replaced asserted only that
+ * drives. The probe it replaced asserted only that
  * `collectPluginRefs({empty plugin})` does not contain a made-up name — which an
  * empty corpus satisfies tautologically, so it passed for a gutted collector,
  * never constructed a violation, and never exercised the loop or its
@@ -404,7 +404,7 @@ describe('classified template exception', () => {
       expect(
         corpus.includes(template.literal),
         `TEMPLATE_SKILL_REFS declares "${template.literal}" but nothing writes it — a stale ` +
-        'exemption is an exemption nobody can lose (PF-067).',
+        'exemption is an exemption nobody can lose.',
       ).toBe(true);
     }
   });

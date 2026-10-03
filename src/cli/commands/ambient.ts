@@ -29,7 +29,7 @@ const ORCHESTRATOR_HOOK_MARKER = 'session-start-orchestrator';
  * hook is devflow's when its command ENDS in one of these, under any directory — so
  * installs made under a custom or repo-local devflow directory are still recognised —
  * and never because it merely contains a marker word: a user's
- * `~/bin/preamble-logger.sh` or `echo preamble` is theirs (applies ADR-024). The
+ * `~/bin/preamble-logger.sh` or `echo preamble` is theirs. The
  * legacy forms are the pre-preamble `ambient-prompt` hook (first a bare
  * `ambient-prompt.sh`, then through `run-hook`) and the retired
  * `session-start-classification` hook, both still swept on enable and disable.

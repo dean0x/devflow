@@ -3,8 +3,8 @@
  *
  * Prompts never read the repository's config files. The committed
  * `.devflow/project.json` and the personal `.devflow/config.json` are folded by
- * `resolve-settings.cjs` alone (the shared parser is their only validator,
- * PF-023), and a prompt learns their values from the one closed-vocabulary
+ * `resolve-settings.cjs` alone (the shared parser is their only validator),
+ * and a prompt learns their values from the one closed-vocabulary
  * line `_partials/_settings.mds` accepts. A prompt that read either file itself
  * would be a second, unvalidated parser — the divergence the settings line exists
  * to remove.
@@ -44,7 +44,7 @@
  * Each of these is a negative control below, so loosening the matcher to pass
  * them is a visible change rather than a silent one.
  *
- * WHAT A CLEAN RESULT DOES NOT COVER (PF-064): a path assembled from parts
+ * WHAT A CLEAN RESULT DOES NOT COVER: a path assembled from parts
  * (`.devflow/` + a variable file name), a glob (`.devflow/*.json`), a passive
  * instruction ("… is read at step 1"), a verb that follows its object, a read
  * named on a different line from its path ("read that file"), and any prompt
@@ -60,7 +60,7 @@
  * `json_prompt_output` arguments and the `$(cat <<EOF …)` prompt bodies —
  * extracted from the hook source, whose own shell stays out of scope. A
  * non-empty total says nothing about a class that went missing, so every class
- * is asserted by name (PF-064 amendment).
+ * is asserted by name.
  *
  * THE COMPILED CLASSES MUST BE CURRENT. A dist/ older than its sources is a
  * clean scan of text nobody ships, so the guard first fails by name on any
@@ -344,7 +344,7 @@ describe('the compiled prompt corpus is current (#406)', () => {
   })
 
   it('red probe: sources edited after the build are reported against every output compiled from them', () => {
-    // Hermetic: a temp root with hand-stamped mtimes — an order, never a wait (PF-055).
+    // Hermetic: a temp root with hand-stamped mtimes — an order, never a wait.
     const root = mkdtempSync(path.join(tmpdir(), 'no-config-read-currency-'))
     const at = (rel: string, seconds: number): void => {
       const file = path.join(root, ...rel.split('/'))
@@ -383,7 +383,7 @@ describe('no compiled prompt reads .devflow/project.json or .devflow/config.json
       expect(names, `${label}: sentinel ${sentinel} not in the corpus — the class was not read`).toContain(sentinel)
       expect(files.length, `${label}: ${files.length} files, below the floor of ${floor}`).toBeGreaterThanOrEqual(floor)
     }
-    // Total floor across classes (PF-018): a corpus this size or larger was read.
+    // Total floor across classes: a corpus this size or larger was read.
     expect(surface.flatMap(c => c.files).length).toBeGreaterThanOrEqual(120)
   })
 

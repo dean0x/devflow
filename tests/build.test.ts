@@ -50,7 +50,7 @@ describe('agent references', () => {
     // owner of that order and throws with a build hint when neither location
     // has the agent — so the only thing left to assert is that the path it
     // chose is on disk, and the message names that path, not a fixed directory
-    // the agent may not live in (ADR-003: state the end state).
+    // the agent may not live in.
     for (const agent of getAllAgentNames()) {
       const { path: agentFile, origin } = resolveAgentSource(agent);
       expect(
@@ -72,9 +72,9 @@ describe('rule references', () => {
 });
 
 describe('no orphaned declarations', () => {
-  // Skills that intentionally exist in src/assets/skills/ but are not distributed to any plugin.
-  // These are format specifications consumed by background processes, not by agents or commands.
-  // See D9 in .devflow/learning/decisions.md for rationale.
+  // Every skill directory and agent file under src/assets/ must be declared by a plugin in
+  // DEVFLOW_PLUGINS, since installs select assets by plugin. The one exception is the
+  // compliance skill, which the compliance feature installs rather than a plugin.
 
   it('all skills in src/assets/skills/ are referenced by at least one plugin', async () => {
     const skillDirs = await fs.readdir(path.join(ASSETS_DIR, 'skills'));
@@ -102,7 +102,7 @@ describe('no orphaned declarations', () => {
 });
 
 // ---------------------------------------------------------------------------
-// agent frontmatter compliance contract (avoids PF-002)
+// agent frontmatter compliance contract
 //
 // Guards that no shared agent lists devflow:compliance in its frontmatter
 // skills: block. The compliance skill is intentionally body-instructed only
@@ -115,7 +115,7 @@ describe('agent frontmatter compliance contract', () => {
   /**
    * Named collector: the frontmatter `skills:` list of each agent, keyed by agent name.
    * Called by the guard AND by both probes below, so a probe can never pass by
-   * re-implementing the parser it is meant to prove (PF-018).
+   * re-implementing the parser it is meant to prove.
    */
   function collectFrontmatterSkills(
     sources: ReadonlyMap<string, { content: string }>,
@@ -154,14 +154,14 @@ describe('agent frontmatter compliance contract', () => {
     const skillsByAgent = collectFrontmatterSkills(agents);
     expect(
       [...skillsByAgent.keys()],
-      'every registered agent must have had its frontmatter parsed (non-vacuity, PF-018)',
+      'every registered agent must have had its frontmatter parsed (non-vacuity)',
     ).toEqual(expect.arrayContaining(getAllAgentNames()));
 
     for (const [name, skillItems] of skillsByAgent) {
       expect(
         skillItems,
         `${name}: frontmatter skills: must not list devflow:compliance — ` +
-          `use body-instruction only (avoids PF-002: skill re-entrancy silent bail)`,
+          `use body-instruction only (skill re-entrancy silent bail)`,
       ).not.toContain('devflow:compliance');
     }
   });

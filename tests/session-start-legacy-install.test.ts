@@ -9,7 +9,7 @@
  * a v1 `.sh` hook) and points at `devflow uninstall --scope local`, once per fresh
  * session, never for the machine-wide directory itself.
  *
- * Every run gets its own temp HOME (PF-060) and a neutral CLAUDE_CONFIG_DIR, so
+ * Every run gets its own temp HOME and a neutral CLAUDE_CONFIG_DIR, so
  * the developer's own install never decides an outcome.
  */
 
@@ -134,8 +134,9 @@ describe('session-start-context: legacy project-local install notice (Section 4)
   }, HOOK_RUN_ALLOWANCE_MS * 2);
 
   it('a settings.json that registers no devflow hook costs a builtin read — no subprocess', () => {
-    // Additive recording shim (PF-045): wrappers in FRONT of PATH that log, then
-    // exec the real tool. The differential is a repo with no settings.json.
+    // Additive recording shim (portable, unlike subtracting a tool from PATH):
+    // wrappers in FRONT of PATH that log, then exec the real tool. The
+    // differential is a repo with no settings.json.
     const shimDir = fs.mkdtempSync(path.join(tmp, 'shim-'));
     const logPath = path.join(shimDir, 'invocations.log');
     const shimmed: string[] = [];

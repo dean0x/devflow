@@ -310,7 +310,7 @@ describe('formatDryRunPlan', () => {
 
 describe('resolveSecurityRemovalDecision', () => {
   // === Non-interactive preserve invariant (SAFETY PROPERTY) ===
-  // When isTTY is false the deny list must NEVER be removed — avoids PF-004
+  // When isTTY is false the deny list must NEVER be removed — avoids the
   // half-applied-state hazard during scripted/CI uninstalls.
 
   it('returns preserve when security is present and isTTY is false (non-interactive invariant)', () => {
@@ -392,7 +392,7 @@ describe('resolveSecurityRemovalDecision', () => {
 //
 // Before this fix uninstall's --plugin flag had its own inline parser that
 // did NOT apply LEGACY_PLUGIN_NAMES, so `--plugin frontend-design` reported
-// "Unknown plugin" instead of resolving to devflow-ui-design. avoids PF-012
+// "Unknown plugin" instead of resolving to devflow-ui-design.
 // ---------------------------------------------------------------------------
 
 describe('legacy plugin name resolution in uninstall (parsePluginSelection shared from plugins.ts)', () => {
@@ -639,7 +639,7 @@ describe('enumerateUserDevFlowContent (WS5)', () => {
 // Test 9f proves the BEHAVIOUR (every enumerated item survives an artifact pass)
 // from files seeded by hand. This pair proves the SETS, derived from the two
 // production functions, so an entry added to either list is covered the day it
-// lands without anyone remembering to seed a fixture (avoids PF-018).
+// lands without anyone remembering to seed a fixture.
 
 describe('@D8: userContentPaths and installArtifactPaths are disjoint', () => {
   const intersect = (a: readonly string[], b: readonly string[]): string[] =>
@@ -697,7 +697,7 @@ describe('resolveInstallArtifactPaths (the staged-file family)', () => {
   let tmpDir: string;
 
   beforeEach(async () => {
-    // PF-060: a mkdtemp root, never the developer's real ~/.devflow.
+    // A mkdtemp root, never the developer's real ~/.devflow.
     tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'devflow-staged-'));
   });
 
@@ -751,7 +751,7 @@ describe('resolveInstallArtifactPaths (the staged-file family)', () => {
     const orphan = path.join(tmpDir, `${TRACKER_STAGED_PREFIX}Kj03Lm`);
     await fs.writeFile(orphan, 'scrubbed but never placed', 'utf-8');
     await fs.writeFile(path.join(tmpDir, 'tracker.md'), '---\nprovider: jira\n---\n', 'utf-8');
-    // PF-018: both must be on disk before the pass, or their state afterwards is
+    // Both must be on disk before the pass, or their state afterwards is
     // the state the temp dir started in.
     await expect(fs.access(orphan)).resolves.toBeUndefined();
 
@@ -781,7 +781,7 @@ describe('resolveInstallArtifactPaths (the staged-file family)', () => {
 //
 // Mirrors the resolveSecurityRemovalDecision pattern. No I/O inside the function;
 // the .action() caller performs all I/O and prompt rendering. Tests express intended
-// BEHAVIOR not implementation details (avoids PF-009 per-item coupling).
+// BEHAVIOR not implementation details.
 // ---------------------------------------------------------------------------
 
 describe('resolveDevflowDirCleanup', () => {
@@ -954,7 +954,7 @@ describe('resolveProjectDataCleanup (A7)', () => {
   it('returns false for a symbol (cancel sentinel — treated as decline, not abort)', () => {
     // The cancel symbol is what p.confirm() returns when the user presses Ctrl-C.
     // It must be treated as decline so the remaining cleanup steps still run
-    // (avoids PF-014: process.exit here would skip claudeignore, hooks, safe-delete).
+    // (process.exit here would skip claudeignore, hooks, safe-delete).
     expect(resolveProjectDataCleanup(Symbol('clack-cancel'))).toBe(false);
   });
 
@@ -1067,13 +1067,13 @@ describe('removeDevFlowInstallArtifacts — proxy artifact removal (TEST-4)', ()
     await expect(fs.access(path.join(logsDir, 'proxy.log'))).rejects.toThrow();
   });
 
-  it('PF-009: each missing artifact is non-fatal — all absent, function completes cleanly', async () => {
+  it('each missing artifact is non-fatal — all absent, function completes cleanly', async () => {
     // Empty devflowDir — none of the proxy artifacts exist.
     // Must complete without throwing.
     await expect(removeDevFlowInstallArtifacts(devflowDir, false)).resolves.not.toThrow();
   });
 
-  it('PF-009: missing proxy.json does not prevent removal of other artifacts', async () => {
+  it('missing proxy.json does not prevent removal of other artifacts', async () => {
     // Only proxy-routing.json is present; proxy.json is absent.
     await fs.writeFile(path.join(devflowDir, 'proxy-routing.json'), '{}', 'utf-8');
     await removeDevFlowInstallArtifacts(devflowDir, false);
@@ -1081,7 +1081,7 @@ describe('removeDevFlowInstallArtifacts — proxy artifact removal (TEST-4)', ()
     await expect(fs.access(path.join(devflowDir, 'proxy-routing.json'))).rejects.toThrow();
   });
 
-  it('PF-009: missing logs/proxy.log does not prevent removal of other artifacts', async () => {
+  it('missing logs/proxy.log does not prevent removal of other artifacts', async () => {
     // Only proxy.json present; logs/ dir absent entirely.
     await fs.writeFile(path.join(devflowDir, 'proxy.json'), '{"enabled":false}', 'utf-8');
     await removeDevFlowInstallArtifacts(devflowDir, false);
@@ -1112,7 +1112,7 @@ describe('removeDevFlowInstallArtifacts — proxy artifact removal (TEST-4)', ()
     await expect(fs.access(cacheDir)).rejects.toThrow();
   });
 
-  it('PF-009: missing cache/models does not prevent removal of other artifacts', async () => {
+  it('missing cache/models does not prevent removal of other artifacts', async () => {
     // cache/models is absent; only proxy.json is present.
     await fs.writeFile(path.join(devflowDir, 'proxy.json'), '{}', 'utf-8');
     await removeDevFlowInstallArtifacts(devflowDir, false);
@@ -1148,15 +1148,15 @@ describe('removeDevFlowInstallArtifacts — proxy artifact removal (TEST-4)', ()
     }
   });
 
-  // ─── PF-013 linkage: removal target == write target via modelCacheDir accessor ───
+  // ─── Path linkage: removal target == write target via modelCacheDir accessor ─────
   //
   // This test pins the uninstall removal path to modelCacheDir — the single
   // authoritative path accessor from src/core/cache.ts. If uninstall.ts reverts
   // to an independent hardcoded literal that diverges from modelCacheDir, this
   // test fails: the directory written via the accessor survives uninstall.
   //
-  // avoids PF-013 (hardcoded path residue surviving a module relocation)
-  it('PF-013: removal target byte-matches modelCacheDir — write-site and removal-site cannot drift', async () => {
+  // Avoids hardcoded path residue surviving a module relocation.
+  it('removal target byte-matches modelCacheDir — write-site and removal-site cannot drift', async () => {
     // Write a sentinel into the path that model-discovery callers use.
     const writePath = modelCacheDir(devflowDir);
     await fs.mkdir(writePath, { recursive: true });
@@ -1349,7 +1349,7 @@ describe('installArtifactPaths (A4)', () => {
 //   retired and user-dropped files.
 // ---------------------------------------------------------------------------
 //
-// PF-018: these tests call the exported function directly — no CLI spawn, so
+// These tests call the exported function directly — no CLI spawn, so
 // no ~/.claude guard is needed.
 
 describe('removeAllDevFlow — full uninstall (TEST-9a)', () => {
@@ -1587,7 +1587,7 @@ describe('runDryRunPhase (A8)', () => {
 // ---------------------------------------------------------------------------
 // A5 regression: enumerateDryRunExtras — production dry-run enumeration path
 //
-// PF-018: the A4 tests pinned the pure helpers (installArtifactPaths, etc.)
+// The A4 tests pinned the pure helpers (installArtifactPaths, etc.)
 // but not the production enumeration path. This suite exercises
 // enumerateDryRunExtras — the function that runDryRunPhase calls — with a
 // seeded fake install to verify truthfulness.
@@ -1650,7 +1650,7 @@ describe('enumerateDryRunExtras (A5 regression)', () => {
   });
 
   // -------------------------------------------------------------------------
-  // PF-012: enumerateDryRunExtras bare-skill safety
+  // enumerateDryRunExtras bare-skill safety
   //
   // Before fix: the bare pass iterated getAllSkillNames() ∪ LEGACY_SKILL_NAMES,
   // so bare security/ (a foreign dir colliding with a live-registry name) was
@@ -1663,7 +1663,7 @@ describe('enumerateDryRunExtras (A5 regression)', () => {
   // Discriminating: the "does NOT contain bare security" assertion fails RED
   // before the fix and passes GREEN after.
   // -------------------------------------------------------------------------
-  it('(PF-012) dry-run list CONTAINS bare codebase-navigation but NOT bare security', async () => {
+  it('dry-run list CONTAINS bare codebase-navigation but NOT bare security', async () => {
     const skillsDir = path.join(claudeDir, 'skills');
 
     // Seed both dirs so the existence guard (fs.access) includes them when present.
@@ -1825,7 +1825,7 @@ describe('AC-26: dry-run and real selective uninstall agree on the retained set'
     expect(
       formatDryRunPlan(planned),
       'a plan of "Nothing to remove." over a seeded install would make every comparison below ' +
-      'vacuously true (PF-018)',
+      'vacuously true',
     ).not.toBe('Nothing to remove.');
 
     // THE OUTCOME. A SECOND, independent resolution — exactly as the real branch
@@ -2051,7 +2051,7 @@ describe('runCleanupPhase (A8)', () => {
 // ---------------------------------------------------------------------------
 // R5 / D27: attribution cleanup through the PRODUCTION uninstall path.
 //
-// PF-018: every other runCleanupPhase test passes `scopesToUninstall: []`, which
+// Every other runCleanupPhase test passes `scopesToUninstall: []`, which
 // makes the settings.json loop a no-op — so stripFlags was never reached by any
 // behavioural test. These drive the real phase with a non-empty scope against a
 // sandboxed HOME so the shape guard is exercised where it actually runs, not just
@@ -2125,7 +2125,7 @@ describe('R5: uninstall settings cleanup — attribution shape guard (D27, produ
     const after = JSON.parse(await fs.readFile(settingsPath, 'utf-8'));
     expect(after.attribution).toEqual({ commit: 'Acme Corp', pr: 'Acme' });
     expect(after.model).toBe('opus');
-    // Non-vacuity anchor (PF-018): ENABLE_TOOL_SEARCH is a FLAG_REGISTRY env-target that
+    // Non-vacuity anchor: ENABLE_TOOL_SEARCH is a FLAG_REGISTRY env-target that
     // stripFlags must remove. If the settings loop never ran, the key would survive and
     // this assertion would fail, catching the vacuous-pass case.
     expect(after.env?.ENABLE_TOOL_SEARCH, 'managed env flag stripped → settings loop ran').toBeUndefined();
@@ -2142,7 +2142,7 @@ describe('R5: uninstall settings cleanup — attribution shape guard (D27, produ
 
     const after = JSON.parse(await fs.readFile(settingsPath, 'utf-8'));
     expect(after.attribution).toEqual({ commit: '', pr: '', coAuthor: 'nobody' });
-    // Non-vacuity anchor (PF-018): the managed env flag must be stripped, proving
+    // Non-vacuity anchor: the managed env flag must be stripped, proving
     // the settings loop ran; an early-exit would leave ENABLE_TOOL_SEARCH intact.
     expect(after.env?.ENABLE_TOOL_SEARCH, 'managed env flag stripped → settings loop ran').toBeUndefined();
   });
@@ -2158,7 +2158,7 @@ describe('R5: uninstall settings cleanup — attribution shape guard (D27, produ
     const after = JSON.parse(await fs.readFile(settingsPath, 'utf-8'));
     expect(after).not.toHaveProperty('attribution');
     expect(after.model).toBe('opus');
-    // Non-vacuity anchor (PF-018): without this, asserting 'attribution' absent is
+    // Non-vacuity anchor: without this, asserting 'attribution' absent is
     // unconditionally vacuous — the fixture never had it. The managed env flag was
     // seeded and must be stripped; an early-exit would leave ENABLE_TOOL_SEARCH '1'.
     expect(after.env?.ENABLE_TOOL_SEARCH, 'managed env flag stripped → settings loop ran').toBeUndefined();
@@ -2294,7 +2294,7 @@ describe('F11: sweepDevflowNamespaces spares a registry devflow:* skill dir', ()
 });
 
 // ---------------------------------------------------------------------------
-// PF-012: removeAllDevFlow bare-skill safety
+// removeAllDevFlow bare-skill safety
 //
 // Before fix: removeAllDevFlow iterated getAllSkillNames() ∪ LEGACY_SKILL_NAMES
 // for BOTH the prefixed AND the bare pass. A bare ~/.claude/skills/security/
@@ -2308,11 +2308,11 @@ describe('F11: sweepDevflowNamespaces spares a registry devflow:* skill dir', ()
 // Discriminating: the sentinel-content assertion on security/ fails RED before
 // the fix (rmdir wipes it) and passes GREEN after.
 // ---------------------------------------------------------------------------
-describe('removeAllDevFlow: bare skill dir safety (PF-012)', () => {
+describe('removeAllDevFlow: bare skill dir safety', () => {
   let claudeDir: string;
 
   beforeEach(async () => {
-    claudeDir = await fs.mkdtemp(path.join(os.tmpdir(), 'devflow-pf012-test-'));
+    claudeDir = await fs.mkdtemp(path.join(os.tmpdir(), 'devflow-baredir-test-'));
   });
 
   afterEach(async () => {
@@ -2359,7 +2359,7 @@ describe('removeAllDevFlow: bare skill dir safety (PF-012)', () => {
 });
 
 // ---------------------------------------------------------------------------
-// PF-012: removeSelectedPlugins bare-skill safety
+// removeSelectedPlugins bare-skill safety
 //
 // Before fix: for each skill in the removal set, removeSelectedPlugins tried to
 // delete bare `skill` and legacy `devflow-${skill}` variants in addition to the
@@ -2371,11 +2371,11 @@ describe('removeAllDevFlow: bare skill dir safety (PF-012)', () => {
 // Discriminating: the sentinel check on bare security/ fails RED before the fix
 // (rmdir wipes it) and passes GREEN after.
 // ---------------------------------------------------------------------------
-describe('removeSelectedPlugins: bare skill dir safety (PF-012)', () => {
+describe('removeSelectedPlugins: bare skill dir safety', () => {
   let claudeDir: string;
 
   beforeEach(async () => {
-    claudeDir = await fs.mkdtemp(path.join(os.tmpdir(), 'devflow-pf012-selective-'));
+    claudeDir = await fs.mkdtemp(path.join(os.tmpdir(), 'devflow-baredir-selective-'));
   });
 
   afterEach(async () => {
@@ -2900,7 +2900,7 @@ describe('TP-27: uninstall run from HOME never touches the machine devflow dir (
 });
 
 /**
- * ADR-024 (remove only what devflow can prove it wrote), D-UNINSTALL-CARVE-OUT: a
+ * D-UNINSTALL-CARVE-OUT (remove only what devflow can prove it wrote): a
  * repository whose `.devflow` is a symbolic link — to anything but the machine
  * devflow dir, which is skipped as `machine-dir` — is not followed. The link's
  * target is somewhere devflow cannot prove it owns, so a confirmed cleanup skips

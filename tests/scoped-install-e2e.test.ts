@@ -14,7 +14,7 @@
  * mistake between the CLI and the installer. Every claim this file makes about
  * what a user ends up with is a claim about this path.
  *
- * HOME safety (applies PF-060): every invocation binds `HOME` to an mkdtemp
+ * HOME safety: every invocation binds `HOME` to an mkdtemp
  * directory INSIDE the spawn env, and the working directory is os.tmpdir() so
  * no git root is discovered. A prior agent wiped a developer's real ~/.claude by
  * running init without this; nothing here may reach it.

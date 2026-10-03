@@ -9,7 +9,7 @@
  *         untraced count of zero or more lands on at least one arm, on exactly
  *         one when the header is sound and nothing is untraced, and every unknown
  *         — a status outside the declared five included — lands on arm 1
- *         (PF-075: a gate that reaches its permissive verdict by exhaustion fails
+ *         (a gate that reaches its permissive verdict by exhaustion fails
  *         open). A `--dry-run` never asks and leaves no checkpoint to resume;
  *         a real release shows the untraced and exempt commits before it asks.
  *   AC-8  `## Traceability exceptions` renders with `evidence_exception()`'s
@@ -22,7 +22,7 @@
  * The classifier is not re-implemented from memory: its arms are parsed from
  * release.md and its status domain from git.md, so either file drifting moves
  * the model with it — and the known-bad probes drive the same parser with a
- * seeded arm deleted (PF-018, PF-064).
+ * seeded arm deleted.
  */
 
 import { describe, it, expect } from 'vitest'
@@ -68,7 +68,7 @@ const HEADER_PHRASES: Readonly<Record<Exclude<HeaderState, 'ok'>, RegExp>> = {
  * Arm 1's catch-all for a status outside the declared domain. The gather is prose
  * an agent executes, so a value nobody declared (its own fallback's `THROTTLED`, a
  * habitual `COMPLETE`) can still arrive — and without this clause it would match no
- * arm, and /release would reach its confirm without asking (PF-075).
+ * arm, and /release would reach its confirm without asking.
  */
 const UNDECLARED_PHRASE = /a status that is none of the five/
 

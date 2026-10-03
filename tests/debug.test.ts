@@ -3,7 +3,7 @@
  *
  * The pure half (applyDebugTrace / stripDebugTrace / readDebugStatus) is tested
  * on plain JSON strings. The command itself is driven through the built CLI
- * under a temp HOME (PF-060, `sandboxEnv`), because what matters there is what
+ * under a temp HOME (`sandboxEnv`), because what matters there is what
  * lands on disk: a rejected settings file keeps its bytes, and an accepted one
  * is swapped in by a rename (D-SETTINGS-ATOMIC), through a symlink when it is one.
  */

@@ -525,7 +525,7 @@ describe('reapplyAgentMapping', async () => {
     //
     // Proof method: seed both shapes, call reapplyAgentMapping({proxyEnabled:false}),
     // assert installed files contain shipped defaults — no mocking of isDormantExternalModel
-    // or isClaudeModelName (per PF-016: mocking the predicate would test our assumption,
+    // or isClaudeModelName (mocking the predicate would test our assumption,
     // not the production guard).
 
     const mapping: AgentMappingFile = {
@@ -1145,7 +1145,7 @@ describe('loadShippedDefaults — compiled over source merge', () => {
 // shape that produces it is ordinary — `npm run build:cli` leaves dist/agents/
 // unbuilt while the generated agent has no .md in the source tree — and its
 // worst consequence is that disabling the proxy silently fails to revert a
-// GPT-pinned agent (avoids PF-022: a feature is OFF when its files say so).
+// GPT-pinned agent (a feature is OFF when its files say so).
 // The installer throws on the same invariant; a read path that must keep
 // rendering warns instead.
 

@@ -81,7 +81,7 @@ describe('Guard 2 (reverse/orphan): every on-disk asset is claimed by a plugin',
   it('every dir in src/assets/skills/ is declared in DEVFLOW_PLUGINS', async () => {
     // Union FEATURE_OWNED skills — compliance asset stays in src/assets/skills/ but is
     // managed by the feature system, not any plugin (step 1.5 de-registration).
-    // Independent literal per EXCLUDED-as-oracle trap (avoids PF-018 pattern).
+    // Independent literal per EXCLUDED-as-oracle trap.
     const referencedSkills = new Set([...getAllSkillNames(), 'compliance']);
     const skillDirs = await fs.readdir(path.join(ASSETS_DIR, 'skills'));
 
@@ -101,7 +101,7 @@ describe('Guard 2 (reverse/orphan): every on-disk asset is claimed by a plugin',
    * Both are sources, so both must be claimed by a plugin.
    *
    * Used by the orphan assertion AND by the known-bad probe below, so the probe
-   * exercises the real collector rather than a shadow re-implementation (PF-018).
+   * exercises the real collector rather than a shadow re-implementation.
    */
   function collectAgentSourceNames(entries: readonly string[]): string[] {
     return entries
@@ -145,7 +145,7 @@ describe('Guard 2 (reverse/orphan): every on-disk asset is claimed by a plugin',
   it('every file in src/assets/rules/ is declared in DEVFLOW_PLUGINS', async () => {
     // Union FEATURE_OWNED rules — compliance rule stays in src/assets/rules/ but is
     // managed by the feature system, not any plugin (step 1.5 de-registration).
-    // Independent literal per EXCLUDED-as-oracle trap (avoids PF-018 pattern).
+    // Independent literal per EXCLUDED-as-oracle trap.
     const referencedRules = new Set([...getAllRuleNames(), 'compliance']);
     const ruleFiles = await fs.readdir(path.join(ASSETS_DIR, 'rules'));
 

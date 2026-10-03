@@ -40,19 +40,19 @@
 //      posted" from "the script broke": the first is final, the second is retried.
 //
 // Design constraints (binding):
-//   PF-011  the file sink — the one file this script writes — goes via
-//           temp-sibling + rename (atomic same-fs write; readers see old-or-new,
-//           never a momentarily absent file). `--emit` prints to stdout and
-//           touches no file, so it has nothing to protect
-//   PF-014  never call process.exit() inside any scope with pending cleanup or
-//           buffered output; main() returns an exit code; the single top-level
-//           boundary writes stdout SYNCHRONOUSLY then sets process.exitCode so
-//           nothing is truncated and no finally block is skipped
-//   PF-018  all regexes are bounded (no unbounded [\s\S]*); skip-list checked
-//           before any replacement; the unterminated-header pattern uses a
-//           character class instead of a lazy quantifier for bounded scan
-//   PF-023  self-contained sink-side control — never assumes upstream masking
-//           happened; the scrubber is authoritative for its own rule set
+//   - the file sink — the one file this script writes — goes via
+//     temp-sibling + rename (atomic same-fs write; readers see old-or-new,
+//     never a momentarily absent file). `--emit` prints to stdout and
+//     touches no file, so it has nothing to protect
+//   - never call process.exit() inside any scope with pending cleanup or
+//     buffered output; main() returns an exit code; the single top-level
+//     boundary writes stdout SYNCHRONOUSLY then sets process.exitCode so
+//     nothing is truncated and no finally block is skipped
+//   - all regexes are bounded (no unbounded [\s\S]*); skip-list checked
+//     before any replacement; the unterminated-header pattern uses a
+//     character class instead of a lazy quantifier for bounded scan
+//   - self-contained sink-side control — never assumes upstream masking
+//     happened; the scrubber is authoritative for its own rule set
 
 'use strict';
 
@@ -98,7 +98,7 @@ const NONCE_HEX_CHARS = 32;
  * rule then describes a property of every body this script can emit, instead of
  * an obligation nine documents have to restate correctly.
  *
- * PF-018: bounded — a fixed alternation over two literals, anchored per line by
+ * Bounded — a fixed alternation over two literals, anchored per line by
  * the `m` flag, with no quantifier to backtrack through. The trailing space is
  * load-bearing: it is what keeps prose such as `D11-FAILURE` out of the refusal.
  */
@@ -268,7 +268,7 @@ function hasMixedAlphanumerics(s) {
 // Scrubbing pass
 //
 // Rules are applied in the declared order. Each rule uses a bounded regex to
-// avoid catastrophic backtracking (PF-018). The final secret-assignment rule
+// avoid catastrophic backtracking. The final secret-assignment rule
 // operates line-by-line and applies entropy + character-class heuristics to
 // avoid false positives on config references.
 // ---------------------------------------------------------------------------
@@ -375,7 +375,7 @@ function scrub(content) {
   // (`this.apiToken`, `api-key`). Without these the rule only ever fired on a
   // bare column-0 assignment, which is the rarest form inside a review finding.
   // The declarator group is bounded {0,3} and each iteration must consume a
-  // literal keyword, so the added alternation cannot backtrack (PF-018).
+  // literal keyword, so the added alternation cannot backtrack.
   //
   // Conditions for replacement (all must hold):
   //   (a) The KEY matches SECRET_KEY_RE — not merely the line, so a prose line
@@ -590,7 +590,7 @@ function frameEmit(scrubbed, scrubLine, nonceSource) {
 // ---------------------------------------------------------------------------
 // main — returns an exit code (never calls process.exit() internally)
 //
-// PF-014: no process.exit() inside any scope that has pending cleanup or
+// No process.exit() inside any scope that has pending cleanup or
 // buffered output. main() returns a numeric code for error paths or an
 // object {scrubLine} for the success path. The single top-level boundary
 // writes stdout synchronously and sets process.exitCode — nothing is
@@ -656,7 +656,7 @@ function readInput(inputPath) {
 function runFileMode(args, content) {
   const { result, counts } = scrub(content);
 
-  // ---- atomic write (PF-011: temp-sibling + rename) ----
+  // ---- atomic write (temp-sibling + rename) ----
   const tmpPath = args.outputPath + '.tmp';
   try {
     fs.writeFileSync(tmpPath, result, 'utf8');
@@ -686,7 +686,7 @@ function runFileMode(args, content) {
  * prints them, so there is nothing for a write discipline to protect: a scrubbed
  * comment body put on disk is a second copy with the input directory's lifetime,
  * and proving that directory writable would let a filesystem property refuse a
- * clean, fully gated body. The file mode's temp-sibling + rename (PF-011) guards
+ * clean, fully gated body. The file mode's temp-sibling + rename guards
  * the one file this script does write.
  *
  * @param {string} content
@@ -762,7 +762,7 @@ function main(argv, deps) {
 //
 // This is the ONLY place that writes to stdout and sets process.exitCode.
 // No other code path may call process.exit() or write to stdout.
-// (PF-014: single synchronous write, no pending cleanup, no buffered output)
+// (single synchronous write, no pending cleanup, no buffered output)
 //
 // AMENDED for --emit, not bypassed. main()'s return widened from
 // `number | {scrubLine}` to also carry `{emitLine, body, code}`, and the write

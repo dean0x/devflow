@@ -1,7 +1,7 @@
 /**
  * `devflow memory|learning|knowledge --status` over the per-repository layer
  * (D-FEATURES-NARROW-ONLY), run through the compiled CLI from a temp HOME and a
- * temp git repository (PF-060).
+ * temp git repository.
  *
  * The machine switch line is the same in every directory. A repository layer — the
  * team's `.devflow/project.json` or the personal `.devflow/config.json` — can

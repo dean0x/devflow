@@ -69,7 +69,7 @@ function getExtRefSection(content: string): string | null {
   const start = content.indexOf(anchor);
   if (start === -1) return null;
   // Section ends at the next UNFENCED `## ` heading, or end of file. A `## ` line
-  // inside a fenced sample is payload, not structure (PF-063) — the boundary rule
+  // inside a fenced sample is payload, not structure — the boundary rule
   // is owned by collectUnfencedH2 so this guard and the op-section extractor
   // cannot drift apart.
   const terminator = collectUnfencedH2(content).find(h => h.index - 1 >= start + anchor.length);
@@ -158,7 +158,7 @@ describe('Extended References file-existence guard (P0-S22)', () => {
     // rowsScanned > 0: non-vacuity — asserts the guard actually found and checked rows.
     expect(
       rowsScanned,
-      'rowsScanned === 0 — no Extended References rows were found; guard is vacuous (PF-018)',
+      'rowsScanned === 0 — no Extended References rows were found; guard is vacuous',
     ).toBeGreaterThan(0);
 
     expect(

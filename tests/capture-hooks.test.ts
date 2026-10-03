@@ -62,7 +62,7 @@ function createFakeClaudeShim(shimDir: string, memFile: string): void {
   fs.writeFileSync(
     bin,
     `#!/bin/bash
-# Writes to staged path (ADR-023); worker CAS-mv's it to the real path
+# Writes to staged path; worker CAS-mv's it to the real path (D-MEMORY-STAGED-CAS)
 echo "<!-- memory-head: testsha branch: main -->" > "${stagedFile}"
 echo "## Now" >> "${stagedFile}"
 exit 0
@@ -294,7 +294,7 @@ describe('capture-turn', () => {
   });
 
   it('ignores legacy response_text field — only last_assistant_message gates capture', () => {
-    // Regression guard (PF-006 lineage): a payload carrying only the old field name
+    // Regression guard: a payload carrying only the old field name
     // (response_text) and not last_assistant_message must produce zero appends.
     runHook(CAPTURE_TURN, { cwd: projectDir, session_id: 't', response_text: 'this should be ignored' }, homeDir);
     expect(fs.existsSync(path.join(projectDir, '.devflow'))).toBe(false);

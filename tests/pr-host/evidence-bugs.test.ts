@@ -2,10 +2,11 @@
  * SDLC-evidence PR2 (#360), phase P1 — the PR-host evidence defects, executed
  * and structurally pinned.
  *
- * Every guard in this file has the three parts PF-064 asks of an absence-based
- * check: a NAMED collector, an assertion that the corpus it read is non-empty
- * (or exactly the size the property ranges over), and a known-bad probe that
- * drives the SAME collector over a seeded or historical text and must go red.
+ * Every guard in this file has the three parts an absence-based check needs
+ * before finding nothing means anything: a NAMED collector, an assertion that
+ * the corpus it read is non-empty (or exactly the size the property ranges
+ * over), and a known-bad probe that drives the SAME collector over a seeded or
+ * historical text and must go red.
  * The historical texts are the `d09da34` spellings each fix replaces, quoted
  * verbatim, so the probes prove the teeth on real history rather than on seeds
  * alone.
@@ -131,14 +132,14 @@ describe('collectOrderViolations — the shared order collector', () => {
 })
 
 // ---------------------------------------------------------------------------
-// 1. Resolution dedupe keyed on the run (§3.1; applies D8, avoids PF-033)
+// 1. Resolution dedupe keyed on the run (§3.1; applies D8)
 // ---------------------------------------------------------------------------
 //
 // `post-resolution-summary` skipped whenever ANY viewer comment held the bare
 // prefix `<!-- devflow:resolution-summary ts:`, and the ts was minted at post
 // time — so the first /resolve on a PR satisfied the guard for every later cycle,
 // and cycles 2+ reported "already posted" while posting nothing. A dedup key must
-// carry the discriminator of the unit of work it protects (PF-033 instance 2):
+// carry the discriminator of the unit of work it protects:
 // here the per-run RESOLUTION_TS /resolve mints once and passes in.
 
 /** Each summary op's step-1 search literal must carry this run key. */
@@ -227,7 +228,7 @@ describe('resolution dedupe is keyed on the per-run RESOLUTION_TS (§3.1, AC-2)'
     expect(collectTsBinding(ref), 'step 5 must bind {TS} to the RESOLUTION_TS input').toBe('RESOLUTION_TS')
     expect(
       ref,
-      'the op mints no timestamp of its own — the caller passes the run key (ADR-028: no fallback mint)',
+      'the op mints no timestamp of its own — the caller passes the run key (no fallback mint)',
     ).not.toMatch(/current UTC timestamp|date -u/)
     expect(collectTemplateMarkers(ref)).toEqual([
       '     <!-- devflow:resolution-summary ts:{TS} -->',
@@ -307,7 +308,7 @@ const D09DA34_9B_TAIL = [
 
 /** Each Evidence Posts row and the statuses it must be able to report. */
 const EVIDENCE_POST_ROWS: ReadonlyArray<{ readonly row: string; readonly statuses: readonly string[] }> = [
-  // Every documented edge case needs an arm (PF-075): `reviewPublication: off` and
+  // Every documented edge case needs an arm: `reviewPublication: off` and
   // "no PR" end 9b-2 without a post, and a run that fixed nothing has nothing to push.
   {
     row: '- Resolution comment:',
@@ -491,7 +492,7 @@ describe('a probe failure is reported as STUB (visibility undeterminable) (§3.3
     for (const step of [soleLine(files.prReview, '3. '), soleLine(files.prResolution, '3. ')]) {
       expect(step).toContain('`PUBLIC` → `STUB (public repository)`')
       expect(step).toContain(`→ \`${UNDETERMINABLE}\``)
-      expect(step, 'the fail-closed rule stays inline in each op (PF-058)').toContain('treat as PUBLIC (mode STUB)')
+      expect(step, 'the fail-closed rule stays inline in each op').toContain('treat as PUBLIC (mode STUB)')
     }
   })
 
@@ -660,15 +661,15 @@ describe('`full` is decided by the publication gate alone (§3.5, AC-8)', () => 
 // fetch-review-threads step 3's PRIMARY predicate excludes any thread whose first
 // comment contains `<!-- devflow:`, whoever wrote it — so anyone could hide their
 // own review thread from /resolve by pasting the marker. Step 2 names who is
-// trusted, from fields the SAME single GraphQL call selects (avoids PF-064: the
-// predicate is written against the value that carries the property — the author's
+// trusted, from fields the SAME single GraphQL call selects (the predicate is
+// written against the value that carries the property — the author's
 // association — not against the marker text a stranger can type).
 //
 // #363 (PR4, P3) moved the rule's BODY into the generated cross-cutting document
 // `references/trust-rule.md`, its one prose statement, which the evidence scripts'
 // `trust()` implements. Step 2 keeps the anchor and names the document. So the
-// collector's corpus widened to step 2 + trust-rule.md and no further (ADR-025:
-// the literals moved, and only they): the TRUST_TERMS are read from the document,
+// collector's corpus widened to step 2 + trust-rule.md and no further (the
+// literals moved, and only they): the TRUST_TERMS are read from the document,
 // and step 2 is held to naming it WITHOUT restating it — a second statement is the
 // divergence the single document exists to prevent. The `660edc1` step 2 (the rule
 // inline, no document) is the probe that proves the second half has teeth.

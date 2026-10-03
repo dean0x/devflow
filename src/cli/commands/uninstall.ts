@@ -206,7 +206,7 @@ export function formatDryRunPlan(
  *   - "prompt"  — interactive (isTTY=true); caller should ask the user
  *
  * @D1 Non-interactive-preserve invariant: when isTTY is false the result is
- * always "preserve", never "prompt" — avoids PF-004 half-applied-state hazard.
+ * always "preserve", never "prompt" — avoids a half-applied-state hazard.
  */
 export function resolveSecurityRemovalDecision(opts: {
   anySecurityPresent: boolean;
@@ -224,7 +224,7 @@ export function resolveSecurityRemovalDecision(opts: {
  *
  * A cancel (user presses Ctrl-C on this prompt) is treated as decline: the
  * .devflow/ directory is preserved and the uninstall continues with the remaining
- * steps rather than aborting via process.exit() (applies PF-014, applies ADR-003).
+ * steps rather than aborting via process.exit().
  *
  * PURE — no I/O, fully testable.
  *
@@ -298,8 +298,8 @@ export function partitionProjectData(entries: ReadonlyArray<ProjectDataEntry>): 
  * realpaths, so macOS's `/var` → `/private/var` and a symlinked HOME still match.
  *
  * A `.devflow` that is a symbolic link to anywhere else is skipped too, and never
- * followed: its target is a directory devflow cannot prove it wrote (applies
- * ADR-024), so a confirmed cleanup must not empty it — nor unlink a link the user made.
+ * followed: its target is a directory devflow cannot prove it wrote, so a
+ * confirmed cleanup must not empty it — nor unlink a link the user made.
  */
 export async function resolveProjectDataPlan(opts: {
   gitRoot: string | null;
@@ -395,9 +395,9 @@ export type ConfirmPrompt = (opts: { message: string; initialValue?: boolean }) 
  * @D5 Precondition guard: any anomalous devflowDir falls back to 'artifacts-only' rather
  * than throwing — business logic must not throw (engineering rule). The explicit guard
  * makes the invariant present in production code, not only in tests (reliability rule).
- * @D6 avoids PF-014: the caller must NOT process.exit() after a cancel/decline response;
+ * @D6 The caller must NOT process.exit() after a cancel/decline response;
  * removeAllDevFlow has already run by the time the prompt fires, so removeDevFlowInstallArtifacts
- * must execute on every non-confirm path to leave a clean end-state (applies ADR-003).
+ * must execute on every non-confirm path to leave a clean end-state.
  * @D7 keepDocs gate: when the caller passes --keep-docs, the entire ~/.devflow dir cleanup
  * prompt is suppressed — artifacts-only regardless of isTTY or userContent. This prevents
  * --keep-docs from triggering prompts about skill shadows or preference-profile.md.
@@ -628,7 +628,7 @@ export function installArtifactPaths(devflowDir: string): ReadonlyArray<InstallA
     { relPath: 'agent-models.json' },
     // cost history — auto-generated session telemetry, not user-authored.
     // The whole costs/ tree is removed so sessions/ and archive.jsonl cannot
-    // drift from their write sites in src/hud/cost-history.ts (avoids PF-013).
+    // drift from their write sites in src/hud/cost-history.ts.
     { relPath: 'costs', isDir: true },
     // proxy artifacts
     { relPath: 'proxy.json' },
@@ -656,7 +656,7 @@ export function installArtifactPaths(devflowDir: string): ReadonlyArray<InstallA
     { relPath: 'logs', isDir: true },
     // Model-discovery + HUD component caches. hudCacheDir() is the authoritative
     // accessor for the cache/ parent (modelCacheDir() resolves beneath it), so the
-    // removal site stays byte-locked to the write sites (avoids PF-013).
+    // removal site stays byte-locked to the write sites.
     { relPath: path.relative(devflowDir, hudCacheDir(devflowDir)), isDir: true },
   ];
 }
@@ -691,7 +691,7 @@ export async function removeDevFlowInstallArtifacts(devflowDir: string, verbose:
     p.log.warn(`Could not remove manifest.json: ${error}`);
   }
 
-  // Proxy install artifacts — remove non-fatally (per-item failure isolation, avoids PF-009)
+  // Proxy install artifacts — remove non-fatally (per-item failure isolation)
   // Inform the user if a proxy relay process is still running (never kill — informational only).
   try {
     const pidContent = await fs.readFile(path.join(devflowDir, 'proxy.pid'), 'utf-8');
@@ -707,7 +707,7 @@ export async function removeDevFlowInstallArtifacts(devflowDir: string, verbose:
     }
   } catch { /* proxy.pid absent or unreadable — non-fatal */ }
 
-  // All install artifacts removed non-fatally (avoids PF-009). Resolved against
+  // All install artifacts removed non-fatally. Resolved against
   // disk first, so a per-run staging basename is a real path by the time the
   // containment guard below sees it.
   for (const artifact of await resolveInstallArtifactPaths(devflowDir)) {
@@ -767,7 +767,7 @@ export async function isDevFlowInstalled(claudeDir: string): Promise<boolean> {
  * scope directories, intersected with what actually exists on disk.
  *
  * Extracted from the dry-run loop body so the enumeration logic is
- * independently testable (avoids PF-018: tests must exercise the production
+ * independently testable (tests must exercise the production
  * path, not only the pure helper functions).
  *
  * Coverage matches removeAllDevFlow exactly:
@@ -777,7 +777,7 @@ export async function isDevFlowInstalled(claudeDir: string): Promise<boolean> {
  *      - Prefixed (devflow:name): live registry ∪ LEGACY_SKILL_NAMES.
  *      - Bare (name or devflow-name legacy): LEGACY_SKILL_NAMES ONLY.
  *        ~/.claude/skills/ is shared; bare dirs for live-registry skill names
- *        are by construction foreign to Devflow (avoids PF-012).
+ *        are by construction foreign to Devflow.
  *   3. manifest.json (removed separately in removeDevFlowInstallArtifacts).
  *   4. Every artifact path from installArtifactPaths(devflowDir) — the single
  *      source of truth shared with the real removal loop.
@@ -799,7 +799,7 @@ export async function enumerateDryRunExtras(claudeDir: string, devflowDir: strin
   }
 
   // 2. Skills: enumerate ALL removal candidates that exist on disk.
-  // Mirrors removeAllDevFlow's split-pass approach (avoids PF-012 + PF-018):
+  // Mirrors removeAllDevFlow's split-pass approach:
   //   Prefixed: live registry ∪ LEGACY_SKILL_NAMES ∪ FEATURE_OWNED_SKILLS
   //   Bare: LEGACY_SKILL_NAMES only — shared skills/ dir; live-registry bare
   //         dirs are by construction foreign to Devflow.
@@ -1054,7 +1054,7 @@ export async function runFullPhaseForScope(opts: {
 
       if (p.isCancel(confirmFullCleanup)) {
         // removeAllDevFlow already ran — clean up the manifest to leave a consistent
-        // state. avoids PF-014: process.exit() here would skip removeDevFlowInstallArtifacts,
+        // state. process.exit() here would skip removeDevFlowInstallArtifacts,
         // leaving a stale manifest.json that points to assets no longer on disk.
         await removeDevFlowInstallArtifacts(devflowDir, verbose);
         p.log.info(`${devflowDir} preserved (full removal cancelled; removing scripts and install artifacts only)`);
@@ -1075,7 +1075,7 @@ export async function runFullPhaseForScope(opts: {
  *
  * D-UNINSTALL-CARVE-OUT: DEVFLOW_TRACKED_PATHS are never removed. `--keep-docs`,
  * a non-interactive run, a decline and a cancel all leave the directory untouched,
- * and a cancel continues the uninstall rather than exiting (avoids PF-014). The
+ * and a cancel continues the uninstall rather than exiting. The
  * directory itself is removed only when nothing tracked was in it.
  */
 async function runProjectDataStep(
@@ -1590,7 +1590,7 @@ export async function removeAllDevFlow(
 
   // Remove Devflow skill directories.
   // ~/.claude/skills/ is shared with other tools; the two passes use different
-  // name sets to avoid deleting foreign dirs (avoids PF-012):
+  // name sets to avoid deleting foreign dirs:
   //
   //   Prefixed pass (devflow:name): live registry ∪ LEGACY_SKILL_NAMES ∪ FEATURE_OWNED_SKILLS.
   //     prefixSkillName() is idempotent for already-prefixed legacy entries.
@@ -1599,7 +1599,7 @@ export async function removeAllDevFlow(
   //   Bare pass (name or devflow-name legacy): LEGACY_SKILL_NAMES ONLY.
   //     A bare dir whose name matches a live-registry skill is by construction
   //     foreign to Devflow (the devflow: namespace shipped in dcecda3, 2026-03-30).
-  //     A bare 'compliance/' dir is also foreign (not in LEGACY_SKILL_NAMES) — PF-012.
+  //     A bare 'compliance/' dir is also foreign (not in LEGACY_SKILL_NAMES).
   const prefixedSkillNames = new Set([...getAllSkillNames(), ...LEGACY_SKILL_NAMES, ...FEATURE_OWNED_SKILLS]);
   const skillsDir = path.join(claudeDir, 'skills');
 
@@ -1652,7 +1652,7 @@ export async function removeAllDevFlow(
  * cleaned up promptly rather than accumulating on disk.
  *
  * knownNames spans ALL plugins for each asset type so assets belonging to
- * plugins NOT being uninstalled are never swept (avoids PF-012).
+ * plugins NOT being uninstalled are never swept.
  *
  * Removals are announced only under `verbose`, but removal FAILURES always warn:
  * a swept-but-not-actually-removed agent or command keeps loading in Claude Code,
@@ -1747,7 +1747,7 @@ export async function removeSelectedPlugins(
     // exclusively by the frozen LEGACY_SKILL_NAMES pass in removeAllDevFlow and
     // in init.ts; live-registry skills never had bare installs (the devflow:
     // namespace shipped in dcecda3, 2026-03-30), so a bare dir for a current
-    // registry name is by construction foreign (avoids PF-012).
+    // registry name is by construction foreign.
     try {
       await fs.rm(path.join(skillsDir, prefixSkillName(skill)), { recursive: true, force: true });
     } catch { /* Skill might not exist */ }
@@ -1769,6 +1769,6 @@ export async function removeSelectedPlugins(
   // Registry-diff sweep: agents, commands, AND skills — named step (A6).
   // Removes any orphaned files whose names left the registry (retired, renamed,
   // or deleted from all plugins). Spans ALL plugins so assets belonging to
-  // non-selected plugins are never swept (avoids PF-012).
+  // non-selected plugins are never swept.
   await sweepDevflowNamespaces(claudeDir, verbose);
 }

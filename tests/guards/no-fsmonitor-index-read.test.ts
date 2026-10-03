@@ -35,8 +35,8 @@
  *     every answer but the literal `true`. Its argv behaviour per setting is
  *     pinned in tests/hud-git-fsmonitor.test.ts.
  *
- * What a green run does NOT prove (PF-064)
- * ----------------------------------------
+ * What a green run does NOT prove
+ * -------------------------------
  * The matcher reads calls as they are spelled. An argv assembled at run time
  * (`[sub, ...rest]`, an argv held in a named constant), a wrapper not named for
  * git, and `describe --dirty` (the one index read `describe` makes, and never
@@ -227,7 +227,7 @@ describe('every index-reading git call turns core.fsmonitor off (D-NO-FSMONITOR)
 });
 
 // ---------------------------------------------------------------------------
-// Seeded probes (PF-064): red on every spelling, green on prose and guards.
+// Seeded probes: red on every spelling, green on prose and guards.
 // ---------------------------------------------------------------------------
 
 describe('no-fsmonitor-index-read guard: seeded probes', () => {

@@ -8,7 +8,7 @@
  * that writes knowledge back must tell the user about them in its final report
  * (src/assets/commands/_partials/_knowledge.mds, `knowledge_writeback` Step 4).
  * Two halves of one contract, so both are checked here, each by a named collector
- * with a known-bad probe over the wording it replaced (PF-064).
+ * with a known-bad probe over the wording it replaced.
  */
 import { describe, it, expect } from 'vitest';
 import * as fs from 'fs';

@@ -21,7 +21,7 @@
  *     refs/pull/7/head — for the Cartesian table and the stdout contract.
  *
  * Every guard has a named collector, a non-empty-corpus assertion and a known-bad
- * probe run through the same collector (PF-064).
+ * probe run through the same collector.
  */
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest'
@@ -181,7 +181,7 @@ function runMain(args: readonly string[], deps: MainDeps = {}): Outcome & { stde
 
 /**
  * Run the real script under process.execPath. HOME is a tmp dir,
- * the cwd is named (PF-060), and an optional gh fake goes in front of PATH.
+ * the cwd is named, and an optional gh fake goes in front of PATH.
  */
 function runScript(o: {
   readonly args: readonly string[]
@@ -1900,7 +1900,7 @@ describe('STALE Cartesian over a real repository (AC-3)', SPAWN_BUDGET, () => {
 
   /**
    * `inproc` runs main() with an exec that is the REAL spawnSync — real git over the
-   * real repository, the gh fake in front of PATH, HOME scoped (PF-060) and the cwd
+   * real repository, the gh fake in front of PATH, HOME scoped and the cwd
    * named — without paying a node process start per table (seconds each on a loaded
    * machine). `spawn` runs the real script end to end, boundary included.
    */
@@ -2155,7 +2155,7 @@ describe('source guards (verify-evidence.cjs)', () => {
   })
 })
 
-describe('spawn environment hygiene (applies PF-060)', () => {
+describe('spawn environment hygiene', () => {
   it('every spawn in tests/evidence/ passes through scopedEnv() and names its cwd', () => {
     const files = fs.readdirSync(import.meta.dirname).filter(f => f.endsWith('.ts'))
     let sites = 0

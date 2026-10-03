@@ -58,17 +58,17 @@ export function realHomes(env: NodeJS.ProcessEnv = process.env): string[] {
 
 /**
  * Throw unless `home` is a directory under `os.tmpdir()` and none of the account's
- * real homes. PF-060: asserted at the call site, never trusted from a brief.
+ * real homes. Asserted at the call site, never trusted from a brief.
  */
 export function assertTempHome(home: string, env: NodeJS.ProcessEnv = process.env): void {
   const target = canonical(home);
   const real = realHomes(env);
   if (real.includes(target)) {
-    throw new Error(`refusing to use the real home ${home} as a test HOME (PF-060)`);
+    throw new Error(`refusing to use the real home ${home} as a test HOME`);
   }
   const tmpRoot = canonical(os.tmpdir());
   if (!target.startsWith(tmpRoot + path.sep)) {
-    throw new Error(`refusing to use ${home} as a test HOME — it is not under ${tmpRoot} (PF-060)`);
+    throw new Error(`refusing to use ${home} as a test HOME — it is not under ${tmpRoot}`);
   }
 }
 

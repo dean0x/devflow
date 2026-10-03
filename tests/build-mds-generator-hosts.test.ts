@@ -28,8 +28,8 @@
  *
  * EVERY build this file spawns — negatives, positives, and the whole-repo census
  * alike — runs against an isolated DEVFLOW_MDS_ROOT temp tree, so the real
- * src/assets/ and dist/ trees are only ever READ (avoids PF-011 and PF-055: no
- * mutating shared state other vitest workers are reading concurrently).
+ * src/assets/ and dist/ trees are only ever READ (no mutating shared state
+ * other vitest workers are reading concurrently).
  * Scenario 12 is the mechanical proof of that claim rather than this sentence.
  */
 
@@ -218,7 +218,7 @@ function diffDistTrees(fresh: Map<string, string>, onDisk: Map<string, string>):
  * Split the real git agent into its frontmatter block and body. Resolved
  * dist-first with a src fallback, so the fixture keeps working whether the
  * agent is compiled from a generator host or hand-authored.
- * Fixtures are derived from this real runtime shape rather than invented (PF-043).
+ * Fixtures are derived from this real runtime shape rather than invented.
  */
 async function realAgentShape(): Promise<{ frontmatter: string; bodyHead: string }> {
   const { path: realPath, content: real } = resolveAgentSource('git');
@@ -390,7 +390,7 @@ describe('13 command outputs byte-unchanged (key-only strip retained)', () => {
 
   it('dist/commands/ holds all 13 compiled outputs (fail-loud when unbuilt)', () => {
     const distFiles = requireDistFiles();
-    expect(distFiles.length, 'dist/commands/ must not be empty (PF-018)').toBeGreaterThan(0);
+    expect(distFiles.length, 'dist/commands/ must not be empty').toBeGreaterThan(0);
     for (const name of COMPILED_COMMANDS) {
       expect(distFiles, `dist/commands/${name}.md missing`).toContain(`${name}.md`);
     }
@@ -398,7 +398,7 @@ describe('13 command outputs byte-unchanged (key-only strip retained)', () => {
 
   it('every command output keeps its frontmatter block minus output-dir:', () => {
     const shapes = collectFrontmatterShapes(realCommandContents());
-    expect(shapes.length, 'command corpus must be non-empty (PF-018)').toBe(COMPILED_COMMANDS.length);
+    expect(shapes.length, 'command corpus must be non-empty').toBe(COMPILED_COMMANDS.length);
     for (const shape of shapes) {
       expect(shape.hasBlock, `${shape.name}.md lost its frontmatter block`).toBe(true);
       expect(shape.hasOutputDir, `${shape.name}.md leaked output-dir:`).toBe(false);
@@ -420,12 +420,12 @@ describe('13 command outputs byte-unchanged (key-only strip retained)', () => {
    * needs a mechanical proof that outlives the PR that made the claim. The
    * pre-S1 SHA-256 list was captured and compared by hand and is recorded in the
    * PR #334 body; it is not in the repo, so it cannot re-run and is a claim, not
-   * evidence (PF-019).
+   * evidence.
    *
    * A byte-IDEMPOTENCE check does not stand in for it: agreeing with itself
    * across two runs is a property of the build, not of the artifacts, and it
    * passes just as green over a dist/ tree that no longer matches src/ at all
-   * (PF-057 — a golden must freeze what it says it freezes).
+   * (a golden must freeze what it says it freezes).
    *
    * What this pins instead: the dist/ tree on disk is byte-for-byte what the
    * committed src/ tree compiles to. Combined with the hand-verified pre-S1
@@ -444,7 +444,7 @@ describe('13 command outputs byte-unchanged (key-only strip retained)', () => {
     const onDisk = await hashDistTree(ROOT);
 
     // Non-vacuity: the fresh tree must hold every artifact the manifest names,
-    // or an empty/partial build would compare zero files and pass (PF-018).
+    // or an empty/partial build would compare zero files and pass.
     for (const file of DIST_COMMAND_FILES) {
       expect([...fresh.keys()], `commands/${file} missing from the fresh build`)
         .toContain(`commands/${file}`);
@@ -459,7 +459,7 @@ describe('13 command outputs byte-unchanged (key-only strip retained)', () => {
 
     const diff = diffDistTrees(fresh, onDisk);
     const remedy = 'run `npm run build:mds` — dist/ is out of sync with src/';
-    expect(diff.compared, 'no file was byte-compared (PF-018)')
+    expect(diff.compared, 'no file was byte-compared')
       .toBe(DIST_COMMAND_FILES.length + MDS_GENERATOR_HOSTS.length + EXPECTED_REFERENCE_KEYS.length);
     expect(diff.missingOnDisk, `built from src/ but absent from dist/ — ${remedy}`).toEqual([]);
     expect(diff.orphanOnDisk, `present in dist/ but built by nothing — ${remedy}`).toEqual([]);
@@ -788,7 +788,7 @@ describe('IGNORE_DIRS covers tests/ and coverage/', () => {
 describe('printed host/partial counts agree with the manifest (AC-1.8)', () => {
   /**
    * Named collector: the two counts the build prints. Throws when either line is
-   * absent — a missing line must fail loudly, never parse as 0 (PF-018).
+   * absent — a missing line must fail loudly, never parse as 0.
    * Called by the committed-tree assertion AND by the seeded-tree probe below.
    */
   function parsePrintedCounts(output: string): { hosts: number; partials: number; deferred: number } {
@@ -862,7 +862,7 @@ describe('printed host/partial counts agree with the manifest (AC-1.8)', () => {
       ).toContain(`deferred: ${source}`);
     }
 
-    // PF-064: the loop above ranges over an empty set on this tree, so the arm
+    // The loop above ranges over an empty set on this tree, so the arm
     // that keeps it honest is a PRESENCE arm on the predicate rather than a floor
     // on the roster. Ask the same owner about a registry with the tool-call
     // provider removed: the contract module must then be deferred. Without this,
@@ -1084,7 +1084,7 @@ describe('two hosts may not claim one destination', () => {
 // The generator strip removes the leading block unconditionally. On a host with
 // only ONE block — the shape every hand-authored agent has — that block IS the
 // artifact's frontmatter (name:/description:/model:), and removing it produced a
-// headerless agent while the build reported success (PF-061: a delete-a-block
+// headerless agent while the build reported success (a delete-a-block
 // transform verified its pre-condition and not its post-condition).
 
 describe('a generator host must carry TWO frontmatter blocks', () => {
@@ -1130,7 +1130,7 @@ describe('a generator host must carry TWO frontmatter blocks', () => {
 // Discovery recurses the whole repo, so it carries a fixed upper bound like
 // every other loop in the project. The bound throws rather than truncating: a
 // host silently skipped for being too deep compiles nothing while the build
-// still reports success, which is a vacuous green (avoids PF-018).
+// still reports success, which is a vacuous green.
 
 describe('the whole-repo walk is depth-bounded', () => {
   /** Plant a compilable command host in `<fakeRoot>/d1/d2/…/d{levels}`. */
@@ -1325,7 +1325,7 @@ describe('dist/skills/git/references orphan prune', () => {
    * The reference modules are a closed registry keyed by repo-relative source
    * path (`VARIANT_MODULES`), so a synthetic module would be refused by the
    * build and could never produce a claimed destination to contrast an orphan
-   * against. The fixture is therefore the real committed modules (PF-043), read
+   * against. The fixture is therefore the real committed modules, read
    * through the same helper the census probes use.
    */
   async function withReferenceTree<T>(fn: (fakeRoot: string) => Promise<T>): Promise<T> {
@@ -1339,7 +1339,7 @@ describe('dist/skills/git/references orphan prune', () => {
   async function expectGeneratedReferencesPresent(fakeRoot: string): Promise<void> {
     expect(
       EXPECTED_REFERENCE_KEYS.length,
-      'the expected-reference roster is empty — these assertions would be vacuous (PF-018)',
+      'the expected-reference roster is empty — these assertions would be vacuous',
     ).toBeGreaterThan(0);
     for (const key of EXPECTED_REFERENCE_KEYS) {
       const file = path.join(fakeRoot, 'dist', ...key.split('/'));
@@ -1486,7 +1486,7 @@ describe('dist/skills/git/references orphan prune', () => {
   // depths planted below are derived from it, so raising the bound moves the probe with
   // it instead of leaving a mirrored literal to drift. The assertion is on the message
   // the build throws, naming that bound: a descent that stopped and one that silently
-  // truncated are indistinguishable from the outside (avoids PF-018).
+  // truncated are indistinguishable from the outside.
 
   /** `d1/d2/…/d{levels}/{name}` under the references tree, planted. */
   async function plantRefAtDepth(fakeRoot: string, levels: number, name: string): Promise<string> {
@@ -1531,14 +1531,14 @@ describe('dist/skills/git/references orphan prune', () => {
 // reintroduces is invisible locally: an unscoped build rewrites the real dist/
 // while parallel vitest workers read it, so a stale tree is silently repaired
 // mid-suite and whichever reader lost the race reports a flake instead of the
-// staleness (PF-055). A prose invariant cannot detect that, so it is scanned.
+// staleness. A prose invariant cannot detect that, so it is scanned.
 
 describe('this file never spawns a build against the real repo root', () => {
   it('every spawned build is scoped to a temp DEVFLOW_MDS_ROOT', async () => {
     const source = await fs.readFile(SELF, 'utf-8');
     const { total, unscoped } = collectSpawnScoping(source);
 
-    expect(total, 'the scan found no spawn site at all — it is measuring nothing (PF-018)')
+    expect(total, 'the scan found no spawn site at all — it is measuring nothing')
       .toBeGreaterThan(0);
     expect(
       unscoped,

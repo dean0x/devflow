@@ -85,7 +85,7 @@ fi
 # Ensure the project root .gitignore ignores .devflow/ wholesale. This runs on every
 # git-project session regardless of feature toggles, so memory-off projects
 # (learning/knowledge only) still get .devflow/ ignored — this is the
-# memory-independent path that fixes the gitignore/memory coupling (PF-014). Single
+# memory-independent path that fixes the gitignore/memory coupling. Single
 # source of truth: ensure-root-gitignore. Soft-fail: a gitignore write must never
 # block context injection. Marker keeps it O(1).
 [ -n "$PROJECT_OK" ] && [ -d "$PROJECT_ROOT" ] && [ -f "$SCRIPT_DIR/ensure-root-gitignore" ] && source "$SCRIPT_DIR/ensure-root-gitignore" "$PROJECT_ROOT" || true
@@ -134,7 +134,7 @@ TRACKER_DEVFLOW_DIR="$HOME/.devflow"
 # admitted set is locale-dependent, and no rule here rests on it.
 #
 # Checked ONCE, here, where every value is resolved and above every section that
-# interpolates them, so no sink can embed a value no gate saw (PF-023 — the
+# interpolates them, so no sink can embed a value no gate saw (the
 # invariant belongs at the convergence point all callers pass through, not in
 # whichever section someone remembered). `case` is a shell builtin, so the GitHub
 # path still forks zero times [DR-10]. The empty arm is explicit: an unset root
@@ -440,8 +440,8 @@ if [ -n "$TRACKER_PROVIDER" ] && [ ! -f "$TRACKER_CONVENTIONS" ]; then
   tracker_gates_open() {
     # Gate 1 — the attempt cap. Read with the `read` builtin: no fork.
     #
-    # The counter's shape is ONE decimal integer line and nothing else (PF-062 —
-    # document the shape of any file that gates an action, and keep absent and
+    # The counter's shape is ONE decimal integer line and nothing else
+    # (document the shape of any file that gates an action, and keep absent and
     # malformed distinct from a value). Absent means "no attempt yet" = 0.
     # Malformed self-heals to 0 and is overwritten with a well-formed count on
     # emission below, so a stray byte can never recur: refusing forever would
@@ -571,7 +571,7 @@ if [ -n "$TRACKER_PROVIDER" ] && [ ! -f "$TRACKER_CONVENTIONS" ]; then
     # allowlisted tokens. Decided once at the top of the file, where both values are
     # resolved; consulted here because this is one of the two sinks that interpolate
     # them, and a control stated once for the file is not a control at a sink that
-    # never consults it (PF-023). The third path, the conventions file, is composed
+    # never consults it. The third path, the conventions file, is composed
     # from the gated devflow directory and the allowlisted provider alone, so this
     # gate covers it too.
     if [ -z "$DIRECTIVE_PATHS_SAFE" ]; then

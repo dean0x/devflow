@@ -162,7 +162,7 @@ describe('LEGACY_SKILL_NAMES invariant: frozen pre-namespace bare-skill coverage
 
 // ---------------------------------------------------------------------------
 // Non-vacuity anchor: the registry must contain skills that are NOT in
-// LEGACY_SKILL_NAMES. If this ever becomes empty, the PF-012 safety tests
+// LEGACY_SKILL_NAMES. If this ever becomes empty, the bare-dir safety tests
 // (which use registry names as "foreign" collision names) become vacuous —
 // a registry skill that is also a legacy entry would be legitimately removed
 // by the bare cleanup pass, so there would be no unsafe deletion to guard against.
@@ -176,12 +176,12 @@ describe('non-vacuity anchor: live registry contains skills absent from LEGACY_S
     const registryOnlySkills = getAllSkillNames().filter(n => !LEGACY_SKILL_NAMES.includes(n));
     expect(
       registryOnlySkills.length,
-      'At least one registry skill must be absent from LEGACY_SKILL_NAMES, otherwise the PF-012 safety tests (which use registry names as "foreign" collision names) are vacuous',
+      'At least one registry skill must be absent from LEGACY_SKILL_NAMES, otherwise the bare-dir safety tests (which use registry names as "foreign" collision names) are vacuous',
     ).toBeGreaterThan(0);
   });
 
   it('"security" is in the live registry but NOT in LEGACY_SKILL_NAMES (pins the collision scenario)', () => {
-    // If this assertion ever fails, update the PF-012 tests to use a different collision name.
+    // If this assertion ever fails, update the bare-dir safety tests to use a different collision name.
     expect(getAllSkillNames()).toContain('security');
     expect(LEGACY_SKILL_NAMES).not.toContain('security');
   });
@@ -258,8 +258,8 @@ describe('installViaFileCopy skill lifecycle', () => {
     expect(content.length, 'installed SKILL.md should have non-empty content').toBeGreaterThan(10);
   });
 
-  it('does NOT remove a bare dir for a registry skill (PF-012: bare cleanup is init.ts\'s job)', async () => {
-    // After the PF-012 fix, installViaFileCopy no longer removes bare dirs for
+  it('does NOT remove a bare dir for a registry skill (bare cleanup is init.ts\'s job)', async () => {
+    // installViaFileCopy does not remove bare dirs for
     // live-registry skills. ~/.claude/skills/ is shared; bare dirs for current
     // registry names are by construction foreign to Devflow. Init.ts:1149-1153
     // (LEGACY_SKILL_NAMES only) is the sole owner of bare dir cleanup.
@@ -369,8 +369,8 @@ describe('installViaFileCopy skill lifecycle', () => {
     expect(report.skippedShadows).toHaveLength(0);
   });
 
-  it('partial install only removes prefixed dirs — bare dirs are untouched (PF-012)', async () => {
-    // After the PF-012 fix, the installer's cleanup pass only removes prefixed
+  it('partial install only removes prefixed dirs — bare dirs are untouched', async () => {
+    // The installer's cleanup pass only removes prefixed
     // dirs (devflow:<skill>), never bare dirs. Bare dirs are reserved for the frozen
     // LEGACY_SKILL_NAMES pass in init.ts; live-registry bare dirs are foreign.
     const realSkill = 'software-design';

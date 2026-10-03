@@ -17,7 +17,7 @@
  * Every dist read is fail-loud: an absent artifact throws with a build hint
  * rather than making the budget pass by measuring nothing — and those reads
  * happen at MODULE SCOPE, so an unbuilt tree fails the importing test file at
- * load rather than yielding a green suite over zeroes (PF-018).
+ * load rather than yielding a green suite over zeroes.
  */
 
 import { readFileSync, existsSync } from 'fs';
@@ -242,9 +242,9 @@ export function nameableFrom(
  *
  * Injected rather than read inline so the probe can seed a `pr/` body that names
  * a file nothing models, WITHOUT writing into `dist/` mid-suite: vitest runs
- * other files in parallel workers against those exact paths (PF-055). An absence
- * check over a corpus nobody can perturb is green whether or not the hop runs
- * (PF-064), which is precisely what the probe has to rule out. Exported so the
+ * other files in parallel workers against those exact paths. An absence
+ * check over a corpus nobody can perturb is green whether or not the hop runs,
+ * which is precisely what the probe has to rule out. Exported so the
  * closure scan's seeded-reader probes can wrap it and perturb one body in memory.
  */
 export function readReferenceFromDisk(rel: string): string | null {
@@ -549,7 +549,7 @@ export function worstCaseNonTrackerLoad(): OpMax {
  * would bury what the row does measure — the `pr/` bodies, none of which reaches
  * 4_500 ch — under a term four times their size.
  *
- * What the exclusion owes in return (ADR-025): the excluded term is RECORDED, not
+ * What the exclusion owes in return: the excluded term is RECORDED, not
  * dropped. Shape `2c-ex` of the four-shape table prints the same maximum with
  * this file charged, and the file's own size is pinned by equality as
  * GITHUB_API_MD_CHARS in tests/tracker/byte-budget.test.ts — so an exclusion can
@@ -649,7 +649,7 @@ export function contractTerm(provider: string): number {
  * With every in-spawn hop priced (D-BODY-HOP-CLOSURE) the stand-in is no longer
  * needed, and keeping it would bill every row for a file no spawn loads twice.
  *
- * The term is RECORDED, not dropped (ADR-025): largestTrackerReference() and
+ * The term is RECORDED, not dropped: largestTrackerReference() and
  * largestProviderReference() still print as rows of the shape table, so the size of
  * the biggest single file stays on the record for whoever next edits it.
  */
@@ -668,9 +668,9 @@ export function providerLoadedSet(provider: string): number {
 // spawn loads, finds every op name in it, and takes each one as a load hop unless a
 // row of INFORMATIONAL_OP_MENTIONS explains why it is not: DEFAULT-DENY. A mention
 // nobody classified is priced or it fails, the only direction an absence-based check
-// can be trusted in (PF-064).
+// can be trusted in.
 //
-// WRITTEN NON-GOALS, so a green run is not read as covering them (PF-064):
+// WRITTEN NON-GOALS, so a green run is not read as covering them:
 //   - git.md's own `## Operation:` sections are not scanned. The agent is preloaded
 //     whole on every spawn, so an op named there resolves against text the spawn
 //     already holds (associate-release's "`backlink-shipped-issues`' step 0" is
@@ -765,8 +765,8 @@ export interface InformationalOpMention {
  * the table to five things: every row is consulted by a live scan; its anchor still
  * sits on one line of its file and names its target; the clause around the mention
  * carries no load verb; its reason clears a length floor; and what it would cost if it
- * WERE a hop is printed. A prohibition and its exemption table are one authority
- * (PF-067): the scan that reports an unpriced hop reads this table, and the table is
+ * WERE a hop is printed. A prohibition and its exemption table are one authority:
+ * the scan that reports an unpriced hop reads this table, and the table is
  * checked against the scan, so neither can drift without the other going red.
  *
  * Per provider where the prose differs, so a row exempts one file's line and never a
@@ -931,7 +931,7 @@ export interface BodyHopClosure {
 }
 
 export interface ClosureOptions {
-  /** The body reader — injected so a probe can seed one body in memory (PF-055). */
+  /** The body reader — injected so a probe can seed one body in memory. */
   readonly readReference?: (rel: string) => string | null;
   readonly informational?: readonly InformationalOpMention[];
   readonly stepLimit?: number;

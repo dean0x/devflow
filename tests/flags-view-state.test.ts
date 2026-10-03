@@ -72,7 +72,7 @@ function applyKeys(state: FlagsViewState, keys: string[]): FlagsViewState {
 /**
  * Enter edit mode on a text row and type a sequence of normalized keys.
  * Routes input through the real reducer so the keyboard→buffer path is exercised
- * (applies PF-018 mechanism 7: proves the behaviour named by the test exists).
+ * (proves the behaviour named by the test exists).
  */
 function typeInto(id: string, keys: string[]): FlagsViewState {
   let state = makeState([rowFor(id)]);
@@ -299,7 +299,7 @@ describe('flags-view-state — text row enter edit mode', () => {
 describe('flags-view-state — edit commit valid inputs', () => {
   it('entering a valid number and pressing enter commits it', () => {
     // Routes through the real reducer (typeInto) so the keyboard→buffer path is
-    // exercised (applies PF-018 mechanism 7): enter edit mode pre-fills '40',
+    // exercised: enter edit mode pre-fills '40',
     // clear with backspace, then type the new value.
     let s = reduce(makeState([rowFor('max-concurrent-subagents')]), 'e').state;
     // buffer = '40', caret = 2; clear with backspace then type '50'
@@ -545,8 +545,8 @@ describe('flags-view-state — buffer hard-bound at 64', () => {
       s = reduce(s, 'a').state;
     }
     expect(s.editing).not.toBeNull();
-    // Exact assertions: a no-op insertChar would give length 0, satisfying ≤ 64
-    // (applies PF-018 mechanism 4). Import BUFFER_MAX_LEN so the magic number is
+    // Exact assertions: a no-op insertChar would give length 0, satisfying ≤ 64.
+    // Import BUFFER_MAX_LEN so the magic number is
     // single-sourced and the test breaks if the constant changes.
     expect(s.editing!.buffer.length).toBe(BUFFER_MAX_LEN);
     expect(s.editing!.caret).toBe(BUFFER_MAX_LEN);
@@ -716,8 +716,8 @@ describe('edit mode — typed input', () => {
 //   home, end, left/right clamping at 0 and buffer.length.
 //
 // E1 already covers backspace at caret>0 and insertChar via the commit-path tests;
-// only the remaining boundary/branch cases are added here (applies PF-018: each
-// assertion names a concrete post-caret value so a no-op implementation fails RED).
+// only the remaining boundary/branch cases are added here (each assertion names
+// a concrete post-caret value so a no-op implementation fails RED).
 // ---------------------------------------------------------------------------
 
 describe('edit mode — caret manipulation (TEST-H1)', () => {

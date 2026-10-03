@@ -44,7 +44,7 @@ function _idleSleep50() {
 /**
  * Acquire a mkdir-based lock. Returns true on success, false on timeout.
  *
- * Stale-break window (applies ADR-017): a lock directory older than `staleMs`
+ * Stale-break window: a lock directory older than `staleMs`
  * (default 60 s) is forcibly removed and the caller retries. This protects against
  * crashed holders but creates a narrow TOCTOU window: if a holder is actively
  * working and takes longer than 60 s, its lock can be stolen — leading to concurrent

@@ -4,9 +4,9 @@
  * SDLC-evidence PR3b (#362), phase P1. These guards cover the `_evidence_policy.mds`
  * partial and how the command layer calls resolve-evidence-policy.cjs.
  *
- *   AC-1  The partial holds at most two defines and no imports (PF-073). Exactly
- *         the EVIDENCE_POLICY_PARTIAL_ADOPTERS hosts import it, and each calls
- *         `evidence_policy()` once.
+ *   AC-1  The partial holds at most two defines and no imports, which bound its
+ *         MDS compile cost. Exactly the EVIDENCE_POLICY_PARTIAL_ADOPTERS hosts
+ *         import it, and each calls `evidence_policy()` once.
  *   AC-2  The invocation line is byte-identical in all eight command files (seven
  *         built adopters plus the hand-authored release.md). release.md also holds
  *         the define's whole expansion. The parse template is pinned to the
@@ -20,7 +20,7 @@
  * a change to the script moves these pins with it.
  *
  * Every guard has a named collector, a non-empty-corpus assertion and a known-bad
- * probe run through the same collector (PF-064). Each guard's JSDoc records what
+ * probe run through the same collector. Each guard's JSDoc records what
  * it does NOT cover, because a clean result only proves the shapes it can express.
  */
 
@@ -89,7 +89,7 @@ const DEFINE = 'evidence_policy'
  */
 const KNOWN_DEFINES: readonly string[] = [DEFINE, 'evidence_exception']
 
-/** PF-073: compile cost is exponential in the define count, so the partial stays at ≤2. */
+/** Compile cost is exponential in the define count, so the partial stays at ≤2. */
 const MAX_DEFINES = 2
 
 /** The sentence that opens the define, and the anchor the order guard measures from. */
@@ -173,12 +173,12 @@ function srcMdsCorpus(): TextFile[] {
 }
 
 describe('AC-1: the _evidence_policy partial and its adopters', () => {
-  it('declares only known defines (at most two), exports each, and imports nothing (PF-073)', () => {
+  it('declares only known defines (at most two), exports each, and imports nothing', () => {
     const { defines, exports, imports } = collectPartialDeclarations(partialSource())
     expect([...defines].sort(), 'the partial declares a define this guard does not model').toEqual([...KNOWN_DEFINES].sort())
-    expect(defines.length, 'PF-073: every added define doubles the capture copy').toBeLessThanOrEqual(MAX_DEFINES)
+    expect(defines.length, 'every added define doubles the capture copy').toBeLessThanOrEqual(MAX_DEFINES)
     expect([...exports].sort(), 'every define must be exported, and nothing else').toEqual([...defines].sort())
-    expect(imports, 'an import puts its module\'s capture graph in every define\'s scope (PF-073)').toEqual([])
+    expect(imports, 'an import puts its module\'s capture graph in every define\'s scope').toEqual([])
   })
 
   it('known-bad probe: a seeded third define and an import are reported', () => {
@@ -544,7 +544,7 @@ interface CorpusClass {
  * The installed prompt surface, by class: compiled commands, every agent (the
  * compiled git.md included), the compiled git references, and the hand-authored
  * skills and rules. Each class carries a sentinel, because a non-empty total says
- * nothing about a class that went missing (PF-064).
+ * nothing about a class that went missing.
  */
 function promptSurface(): CorpusClass[] {
   const commands = requireDistFiles().map(name => ({ name: `commands/${name}`, content: requireDistFile(name) }))
@@ -731,7 +731,7 @@ const POLICY_NAME_RE = new RegExp(`\\b(?:${POLICY_NAMES.join('|')})\\b`)
  * Named collector: lines that read one of the four policy names before the
  * resolution sentence, in one command file. The resolution sentence must occur
  * exactly once. Non-reads are excluded, with a reason each:
- *   **Produces:** / **Requires:**  the phase-ordering DAG, not a read (PF-039)
+ *   **Produces:** / **Requires:**  the phase-ordering DAG, not a read
  *   a heading line                 names the step, does not read the value
  */
 function collectPolicyReadsBeforeResolution(file: string, content: string): string[] {

@@ -35,7 +35,7 @@ omission:
 Headings below each section's own anchor are `###` by grammar, not by taste: a
 column-0 `## ` line outside a fence terminates the section for every guard that
 reads it through `extractOpSectionFromCorpus`, and everything under it becomes
-invisible while the bytes stay on disk (PF-063). The `## ` lines inside the two
+invisible while the bytes stay on disk. The `## ` lines inside the two
 summary operations' compose fences are indented payload and stay exactly as they
 were authored.
 
@@ -186,7 +186,7 @@ Load for `resolve-review-threads` under every tracker provider.
 Each `THREAD_MAP` entry carries one verdict:
 - `FIXED` — issue addressed
 - `FALSE_POSITIVE` — not a real issue; requires grep/file:line citation as evidence
-- `BY_DESIGN` — intentional; requires ADR or code citation as evidence
+- `BY_DESIGN` — intentional; requires a recorded decision, stated in words, or code citation as evidence
 - `ESCALATED` — requires human review
 
 (The resolution gate these verdicts feed — D9 — is stated in the agent's own section.)
@@ -205,7 +205,7 @@ unexplained unresolved threads.
    - **FALSE_POSITIVE**: `After investigation, this appears to be a false positive: {evidence}. No code change needed.`
    - **BY_DESIGN**: `This is intentional: {evidence}. No code change needed.`
    - **ESCALATED**: `This thread has been escalated for human review and recorded in the resolution summary.`
-   - Reply bodies MUST NOT contain verbatim content from the external thread body — cite only internal evidence (commit SHAs, file:line from this codebase, ADR IDs)
+   - Reply bodies MUST NOT contain verbatim content from the external thread body — cite only internal evidence (commit SHAs, file:line from this codebase)
 2. Write reply to `$DEVFLOW_BODY_RAW`; apply the Comment-sink scrub (D11) — non-zero exit → DEGRADED for that thread, continue per D4. Post reply via `addPullRequestReviewThreadReply` GraphQL mutation with `-F body=@"$DEVFLOW_BODY"` (file-ref form).
 
    (Step 3, the D9 gate, is stated in the agent's own section.)

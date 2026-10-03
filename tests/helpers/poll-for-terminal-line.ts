@@ -3,8 +3,8 @@
  *
  * Shared bounded poll helper for log-file assertion in hook integration tests.
  * Extracted from eager-memory-refresh.test.ts and capture-hooks.test.ts to
- * keep the 12 s total bound in one place (avoids PF-018(7): duplicated retry
- * loops wearing different names).
+ * keep the 12 s total bound in one place, rather than in duplicated retry
+ * loops wearing different names.
  */
 
 import * as fs from 'fs';

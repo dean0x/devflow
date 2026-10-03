@@ -8,7 +8,7 @@
  * seeds the shape it must report.
  *
  *   1. No Jira/Linear literal outside the resolution preamble and the owning
- *      provider's own mechanics (AC-3.12, ADR-025 per-literal classification)
+ *      provider's own mechanics (AC-3.12, per-literal classification)
  *      — collectForeignProviderLiterals.
  *   2. No `mcp__` / vendor tool literal, and no user-facing "MCP", in anything a
  *      Git spawn can load — collectVendorTokens.
@@ -33,8 +33,8 @@
  * correct response to a literal appearing outside it; loosening the token is not.
  *
  * Foreign provider NAMES are legal in tests (the overlay suite stages a
- * fixture-only provider directory to prove PF-009 isolation); `tests/` is outside
- * the scan by construction.
+ * fixture-only provider directory to prove per-provider failure isolation);
+ * `tests/` is outside the scan by construction.
  */
 
 import { describe, it, expect } from 'vitest';
@@ -105,12 +105,13 @@ function scanCorpus(): CorpusEntry[] {
  * `PROVIDER_MAP_ALLOWLIST` — the provider-resolution preamble, and nothing else.
  *
  * P2-S3's rationale, restated so the allowlist is legible without the artifact:
- * PF-023 requires exactly ONE convergence point where a provider token is turned
- * into a path. The preamble IS that point, and it can only be a convergence point
- * if it enumerates the closed token set — a map with one row would be a map that
- * decides nothing. The three tokens therefore have to be written here in Phase 2,
- * and Phase 3 fills the two directories the map already names rather than adding a
- * second place where a provider is resolved.
+ * a check on a provider token is only real at the one sink every caller passes
+ * through, so there is exactly ONE convergence point where a provider token is
+ * turned into a path. The preamble IS that point, and it can only be a
+ * convergence point if it enumerates the closed token set — a map with one row
+ * would be a map that decides nothing. The three tokens therefore have to be
+ * written here in Phase 2, and Phase 3 fills the two directories the map already
+ * names rather than adding a second place where a provider is resolved.
  *
  * The allowlisted region is the block, not a line: the token set appears three
  * times inside it (the normalisation rule, the map rows, the input contract), and
@@ -133,7 +134,7 @@ interface AllowlistedRegion {
  *
  * A registry rather than one constant because a second such block now exists, and
  * the alternative was a hand-written second condition beside the first — two
- * mechanisms for one rule, which is how one of them goes stale (PF-067). Each row
+ * mechanisms for one rule, which is how one of them goes stale. Each row
  * is still a BLOCK inside a file that must otherwise stay clean, which is what
  * keeps this distinct from `PROVIDER_OWNED_PATHS` below: that one says a whole
  * file belongs to a provider, this one says a bounded region inside a
@@ -147,9 +148,9 @@ const ALLOWLISTED_PROVIDER_REGIONS: readonly AllowlistedRegion[] = [
     from: '## Tracker provider resolution',
     to: '## Comment-sink scrub (D11)',
     justification:
-      'PF-023 requires exactly ONE convergence point where a provider token becomes a path, and a ' +
-      'map with one row decides nothing — the closed set has to be written where the resolution ' +
-      'happens.',
+      'A provider check is only real at the one sink every caller passes through, so exactly ONE ' +
+      'convergence point turns a provider token into a path, and a map with one row decides ' +
+      'nothing — the closed set has to be written where the resolution happens.',
   },
   {
     label: "the Code agent's PR-link paste gate",
@@ -176,7 +177,7 @@ const ALLOWLISTED_PROVIDER_REGIONS: readonly AllowlistedRegion[] = [
       'SETTINGS_LINE_RE, and a closed value set cannot be written without naming its members. ' +
       'It is a sink check on a value the script already resolved, like the Code agent\'s paste ' +
       'gate: the command never chooses a provider from it, so this is no second convergence ' +
-      'point (PF-023). The block expands once per gate that consumes it, so a file can carry it ' +
+      'point. The block expands once per gate that consumes it, so a file can carry it ' +
       'more than once, and every copy is stripped.',
   },
 ];
@@ -203,7 +204,7 @@ const FOREIGN_PROVIDER_TOKENS: readonly ProviderToken[] = [
  * `PROVIDER_OWNED_PATHS` — the files that ARE a provider, and the ONE token each
  * may name.
  *
- * ADR-025 applied literally: the case is classified, and the widening is the
+ * Each case is classified on its own, and the widening is the
  * narrowest one that admits it. A provider's own mechanics module cannot state
  * mechanics without naming its provider — that is what the file IS — but it has
  * no business naming a DIFFERENT one, so ownership is per (path prefix, token)
@@ -218,7 +219,7 @@ const FOREIGN_PROVIDER_TOKENS: readonly ProviderToken[] = [
  *
  * This is deliberately NOT the mechanism `PROVIDER_MAP_ALLOWLIST` uses. That one
  * exempts a BLOCK inside a file that must otherwise stay clean (the resolution
- * preamble, PF-023's single convergence point); this one says a whole file belongs
+ * preamble, the single convergence point); this one says a whole file belongs
  * to a provider. Folding them together would let a provider module quietly acquire
  * the preamble's exemption, or the agent acquire a provider's.
  */
@@ -260,7 +261,7 @@ const PROVIDER_OWNED_PATHS: readonly ProviderOwnedPath[] = [
     justification:
       'the generated Linear per-op references — the emitted form of the module above. Scanned, ' +
       'not exempted: only the one token is admitted, so a Jira literal here is still reported, ' +
-      'which is the half of ADR-025 that keeps the narrow widening narrow.',
+      'which is what keeps the narrow widening narrow.',
   },
 ];
 
@@ -394,7 +395,7 @@ describe('provider-scope: no Jira or Linear literal outside the provider map (§
           expect(
             token.pattern.test(whole) && !token.pattern.test(stripped),
             `${file}: "${token.name}" is no longer confined to ${region.label} — either it moved ` +
-            `(a second convergence point, PF-023) or the region dropped it and the row is stale`,
+            `(a second convergence point) or the region dropped it and the row is stale`,
           ).toBe(true);
         }
       }
@@ -406,7 +407,7 @@ describe('provider-scope: no Jira or Linear literal outside the provider map (§
     expect(
       violations,
       `A Jira or Linear literal outside the resolution preamble and outside the owning provider's ` +
-      `own mechanics is either a second resolution site (PF-023) or a provider name leaking into ` +
+      `own mechanics is either a second resolution site or a provider name leaking into ` +
       `provider-neutral text:\n  ${violations.join('\n  ')}`,
     ).toEqual([]);
   });
@@ -416,7 +417,7 @@ describe('provider-scope: no Jira or Linear literal outside the provider map (§
     // out of date — the failure mode the inline-body exclusion list taught. Each
     // entry must reach at least one scanned file, and that file must genuinely
     // carry the token, or the entry is deleted rather than carried.
-    expect(PROVIDER_OWNED_PATHS.length, 'the ownership table is empty (PF-018)').toBeGreaterThan(0);
+    expect(PROVIDER_OWNED_PATHS.length, 'the ownership table is empty').toBeGreaterThan(0);
     for (const owned of PROVIDER_OWNED_PATHS) {
       const matched = corpus.filter(e => e.path.startsWith(owned.prefix));
       expect(
@@ -495,9 +496,9 @@ describe('provider-scope: no Jira or Linear literal outside the provider map (§
   });
 
   it('known-bad probe: EVERY owned path may name ITS token and no other', () => {
-    // The half ADR-025 is about. Ownership is per (path, token), so the Jira module
-    // naming Linear is still a violation — the narrow widening did not become a
-    // blanket one.
+    // The half that keeps the widening narrow. Ownership is per (path, token), so
+    // the Jira module naming Linear is still a violation — the narrow widening did
+    // not become a blanket one.
     //
     // Driven over EVERY entry, not over PROVIDER_OWNED_PATHS[0]. Probing one member
     // of a table the live arms range over stops discriminating the moment the table
@@ -660,7 +661,7 @@ describe('provider-scope: no vendor tool literal in loadable text (§14.5)', () 
  * Extracted from the assertion below so the guard and its known-bad probe share
  * one extractor. Inline, the negative `.not.toContain('tools')` was green whether
  * the key was truly absent or the extractor had stopped returning keys at all —
- * a regex typo would have read as a pass (PF-018/PF-064).
+ * a regex typo would have read as a pass.
  *
  * Only column-0 keys count: an indented `tools:` is a nested value, not a
  * declaration, and YAML list items never reach column 0.
@@ -681,7 +682,7 @@ describe('provider-scope: the compiled Git agent declares no tools: key', () => 
     expect(keys.length, 'frontmatter parsed to no keys — the shape changed').toBeGreaterThan(0);
     expect(
       keys,
-      'a tools: allowlist on the Git agent is a silent constraint on HOW it can act (PF-031): the ' +
+      'a tools: allowlist on the Git agent is a silent constraint on HOW it can act: the ' +
       'op bodies instruct Bash and Read, and a frontmatter allowlist that omits either fails at ' +
       'runtime rather than at build time',
     ).not.toContain('tools');
@@ -739,7 +740,7 @@ function githubOpReferences(): ReadonlyArray<readonly [string, string]> {
  *
  * Takes the corpus rather than reading it, so the probe below can seed one op and
  * show the collector reports it — the absence arm alone is equally green for a
- * collector that recognises nothing (PF-018, PF-064).
+ * collector that recognises nothing.
  */
 export function collectOpsNamingContract(
   refs: ReadonlyArray<readonly [op: string, text: string]>,
@@ -831,13 +832,13 @@ describe('provider-scope: _mcp.md is generated only behind its gate (AC-2.7 re-s
     ).toEqual([]);
     expect(
       refs.length,
-      'the op roster is empty — the collector above ran over nothing (PF-018)',
+      'the op roster is empty — the collector above ran over nothing',
     ).toBeGreaterThan(0);
   });
 
   it('known-bad probe: the same collector reports a seeded contract reference', () => {
     // An absence result is a statement about what the matcher can express, never
-    // about the property (PF-064), so the collector is driven over the real corpus
+    // about the property, so the collector is driven over the real corpus
     // with one op seeded — no committed file is touched to show red.
     const refs = githubOpReferences();
     const [first, ...rest] = refs;
@@ -855,7 +856,7 @@ describe('provider-scope: _mcp.md is generated only behind its gate (AC-2.7 re-s
   it('the contract module is INSIDE the scanned corpus, so its wording is governed', () => {
     // The module names no provider and no transport, and that is only meaningful
     // while the scan can see it: an exemption was deliberately NOT taken here
-    // (ADR-025 — classify the case, and this case did not need widening), so the
+    // (classify the case, and this case did not need widening), so the
     // guard must prove the file is in scope rather than out of it.
     const corpus = scanCorpus();
     const scanned = corpus.map(e => e.path);
@@ -1089,7 +1090,7 @@ describe('provider-scope: the plan and dynamic commands promise a tracker issue,
 // `#[0-9]+` is GitHub's issue grammar wearing no provider's name at all, so a
 // one-directional guard reported nothing while `gather-release-evidence` parsed
 // GitHub refs out of every commit range under every provider and handed back an
-// empty set (avoids PF-072).
+// empty set.
 //
 // SCOPE: the documents that are provider-neutral BY CONTRACT — the always-loaded
 // agent and the tool-call contract. A provider's own mechanics module is where its

@@ -26,7 +26,7 @@
  * The directory named beside `CLAUDE_CONFIG_DIR` (the sanctioned line, or prose
  * stating the rule: "else `$HOME/.claude`") is the rule, not a bypass of it.
  *
- * WHAT A CLEAN RESULT DOES NOT COVER (PF-064): a path assembled from parts
+ * WHAT A CLEAN RESULT DOES NOT COVER: a path assembled from parts
  * (`$HOME` + `/.claude`), a variable holding the literal, an absolute path spelt
  * with the user's own home (`/Users/x/.claude`), and anything outside the corpus
  * below. Hooks and the TypeScript CLI are not prompts: they resolve the directory

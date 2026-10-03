@@ -65,11 +65,11 @@ export interface FeatureConfig {
    *   - {@link parseTrackerOverride} gives a present-but-wrong-typed value its
    *     own `invalid` verdict. A `string` field would narrow the JSON before the
    *     parser ever saw it, leaving that arm reachable from a direct call and
-   *     unreachable from the file a user actually edits (PF-043).
+   *     unreachable from the file a user actually edits.
    *
    * NEVER consume this field directly — parse it with {@link parseTrackerOverride},
    * which routes through the same `parseTrackerId` the CLI boundary uses so there
-   * is ONE authority on what a provider token may be (PF-023).
+   * is ONE authority on what a provider token may be.
    */
   tracker?: unknown;
 }
@@ -92,7 +92,7 @@ export type ManagedConfig = Omit<FeatureConfig, 'tracker'>;
  * carrying it would leave a `learning: false` in the file that no longer does
  * what it says. `decisions` is the pre-rename spelling of `learning`;
  * `autoCommit` is inert. `features` is deliberately NOT here — it is a live key,
- * carried like any other unmanaged key (avoids PF-071).
+ * carried like any other unmanaged key.
  */
 const RETIRED_CONFIG_KEYS: ReadonlySet<string> = new Set([
   'memory', 'learning', 'knowledge', 'decisions', 'autoCommit',
@@ -159,7 +159,7 @@ function coerceConfig(parsed: unknown): FeatureConfig | null {
   if (!isJsonObject(parsed)) return null;
   const p = parsed;
 
-  // Coerce reviewPublication: any invalid or absent value → 'auto' (self-heal, ADR-014 idiom).
+  // Coerce reviewPublication: any invalid or absent value → 'auto' (self-heal).
   const rp = p.reviewPublication;
   const reviewPublication: ReviewPublication =
     rp === 'auto' || rp === 'full' || rp === 'off' ? rp : 'auto';
@@ -291,7 +291,7 @@ async function writeConfigBody(projectRoot: string, body: object): Promise<void>
  * Merge devflow's managed keys over the config body the file already holds.
  * Pure — returns a new object and never mutates `existing`.
  *
- * D-CONFIG-PRESERVE-UNMANAGED (avoids PF-071): `.devflow/config.json` is a
+ * D-CONFIG-PRESERVE-UNMANAGED: `.devflow/config.json` is a
  * user-editable file that devflow only PARTLY owns. The managed keys come from
  * `managed`; every other key comes from the file, verbatim and by key presence
  * — the hand-written per-repo `tracker` override (whose invalid values must

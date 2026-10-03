@@ -18,7 +18,7 @@
  *      re-running init would silently revert the repo to the manifest provider.
  *      The write carries every unmanaged key from the file
  *      (D-CONFIG-PRESERVE-UNMANAGED). That is the reachable consumer this key has
- *      at the 3a boundary (ADR-003).
+ *      at the 3a boundary.
  *
  * The raw string is what the config file holds and what round-trips; the parsed
  * three-state view is what a consumer reads. They are separate on purpose — a
@@ -101,7 +101,7 @@ describe('parseTrackerOverride: absent, valid and invalid are three distinct sta
       'github jira',
       'a'.repeat(200),
     ];
-    expect(HOSTILE.length, 'hostile corpus must be non-empty (PF-018)').toBeGreaterThan(0);
+    expect(HOSTILE.length, 'hostile corpus must be non-empty').toBeGreaterThan(0);
 
     const repaired: string[] = [];
     for (const raw of HOSTILE) {
@@ -192,7 +192,7 @@ describe('the per-repo tracker key round-trips through the config', () => {
     ).not.toContain('tracker');
   });
 
-  it('★ writeManagedConfig does NOT erase the override (the reachable consumer, ADR-003)', async () => {
+  it('★ writeManagedConfig does NOT erase the override (the reachable consumer)', async () => {
     // The defect the key exists to prevent, stated as a test: the managed write
     // is a read-modify-write over the WHOLE config, so a write that did not carry
     // the key would silently revert a Jira repo to the manifest provider on the
@@ -224,7 +224,7 @@ describe('the per-repo tracker key round-trips through the config', () => {
    * `invalid` verdict. A field that could only carry strings makes that verdict
    * reachable from a direct call and unreachable from the file, so the whole
    * class is silent for every user who can open a text editor — a parse arm
-   * exercised only by inputs the reader cannot produce (PF-043). And because
+   * exercised only by inputs the reader cannot produce. And because
    * the managed write is a read-modify-write, a value it drops is a value
    * DELETED from disk on the next unrelated write, taking the user's edit and
    * the DEGRADED that reports it together.

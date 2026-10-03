@@ -149,7 +149,7 @@ describe('reviewPublication coercion', () => {
 
   it('DEFAULT_CONFIG has reviewPublication "auto" (the fail-closed default)', () => {
     // Assert on the shipped constant — "full" would publish full reports on
-    // public repos by default (PF-018: no locally-declared literal stand-in).
+    // public repos by default (no locally-declared literal stand-in).
     expect(DEFAULT_CONFIG.reviewPublication).toBe('auto');
   });
 });

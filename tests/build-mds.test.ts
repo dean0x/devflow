@@ -26,7 +26,7 @@
  * rebuilding the repo's own dist/ in a beforeAll. Rebuilding it here REPAIRED a
  * stale dist/ mid-suite while parallel vitest workers read those same paths, so
  * the staleness surfaced as a flake in whichever reader lost the race instead of
- * as itself (avoids PF-055). Scenario 22 is the mechanical proof of that claim
+ * as itself. Scenario 22 is the mechanical proof of that claim
  * rather than this sentence.
  */
 
@@ -456,7 +456,7 @@ describe('partial expansion in compiled knowledge outputs', () => {
 //
 // Since @mdscript/mds 0.4 only `{{…}}` interpolates and `\{` is no longer an
 // escape. A source still spelled in 0.2.0 syntax compiles with 0 errors and
-// 0 warnings, and the damage lands only in dist/ (PF-081): each `\{` / `\}` ships
+// 0 warnings, and the damage lands only in dist/: each `\{` / `\}` ships
 // its backslash (118 in git.md alone), and each single-brace helper call ships
 // as literal text — every reference module collapsed to its call lines, which
 // the build's empty-section check cannot see. These two guards are what does.
@@ -466,7 +466,7 @@ describe('partial expansion in compiled knowledge outputs', () => {
  * Every artifact the MDS compiler emits, per output tree, read from a build root.
  * Each tree is enumerated from its registry (hosts, generator hosts, the
  * reference manifest), so a missing tree or a missing file fails by name rather
- * than shrinking the corpus (PF-064: reach is asserted per member). release.md
+ * than shrinking the corpus (reach is asserted per member). release.md
  * is hand-authored, not compiled, and is out of scope.
  */
 async function readCompiledTrees(root: string): Promise<Record<'commands' | 'agents' | 'references', EmittedFile[]>> {
@@ -614,7 +614,7 @@ describe('decisions_load adoption in compiled knowledge command outputs', () => 
     expect(scanned, 'scanned zero dist commands — guard is vacuous').toBeGreaterThan(0);
   });
 
-  it('no compiled knowledge command contains a bare decisions-index.cjs reference (ADR-007: retired)', async () => {
+  it('no compiled knowledge command contains a bare decisions-index.cjs reference (retired)', async () => {
     let scanned = 0;
     for (const basename of KNOWLEDGE_HOSTS) {
       const outputPath = path.join(BUILT_COMMANDS, `${basename}.md`);
@@ -757,7 +757,7 @@ describe('expected-command-set guard (C2)', () => {
     // Read-only companion to the assertion above: the set is checked where the
     // installer actually reads it from. requireDistFiles throws with a build hint
     // rather than skipping, so an unbuilt tree fails here instead of quietly
-    // passing (PF-018) — and nothing in this file repairs it (PF-055). Whether
+    // passing — and nothing in this file repairs it. Whether
     // those bytes still match src/ is a separate, byte-level check, owned by
     // tests/build-mds-generator-hosts.test.ts.
     expect([...requireDistFiles()].sort()).toEqual([...DIST_COMMAND_FILES].sort());
@@ -771,7 +771,7 @@ describe('expected-command-set guard (C2)', () => {
 describe('dest safety negative (C3)', () => {
   it('exits 1 with "typo?" message when output-dir is not the expected dist/commands', async () => {
     // The hazard: writing a temp .mds directly into the real src/assets/commands/
-    // races packaging.test.ts which also reads that directory (avoids PF-011).
+    // races packaging.test.ts which also reads that directory.
     // Fix: create an isolated temp tree and point build-mds.ts there via
     // DEVFLOW_MDS_ROOT so the real command tree is never touched.
     const fakeRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'devflow-mds-dest-test-'));
@@ -919,7 +919,7 @@ describe('ignored-dir walk (P3)', () => {
     // build-mds.ts resolves its fallback root from the script's own location, so
     // spawning with `cwd: tmpRoot` alone would have walked and REWRITTEN the real
     // repo while asserting about a tmpRoot the build never looked at — green for
-    // the wrong reason (avoids PF-018), and a writer into shared dist/ (PF-055).
+    // the wrong reason, and a writer into shared dist/.
     const tmpRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'devflow-walk-'));
     try {
       const fakeNm = path.join(tmpRoot, 'node_modules', 'some-pkg');
@@ -989,7 +989,7 @@ describe('compiled dynamic-build.md: Gate-1-twice cadence + build execution doct
   });
 
   it('spawns Simplify and Scrutinize exactly twice each (Gate 1 #1 + Gate 1 #2)', () => {
-    // applies ADR-003: obsolete-forever strings ('Gate 1 only — no Gate 2 for review-fixes',
+    // Obsolete-forever strings ('Gate 1 only — no Gate 2 for review-fixes',
     // 'Simplify recent fixes', '9-pillar review of recent fixes') dropped; count assertions
     // are the real structural guard under the new single-pass architecture.
     const simplifyCount = (compiled.match(/agentType: "Simplify"/g) ?? []).length;
@@ -1058,11 +1058,11 @@ describe('compiled dynamic-build.md: streamlining doctrine (C1–C9)', () => {
     expect(compiled).not.toContain('for (let cycle');
     expect(compiled).toContain('The pass runs exactly ONCE');
     // rename-guard: the old review_loop export token and prose phrase must be absent
-    // after the review_loop → review_pass rename (ADR-003). Grep confirms these are
+    // after the review_loop → review_pass rename. Grep confirms these are
     // absent in dist today; these assertions would fire if a stray partial re-introduced them.
     expect(compiled).not.toContain('review_loop');
     expect(compiled).not.toMatch(/review[- ]loop/i);
-    // Unique-block pins — avoids PF-018 (deleting either block leaves test green without these)
+    // Unique-block pins (deleting either block leaves test green without these)
     // Invariant #7 unique: appears only in engine_invariants() block, not in review_pass() prose
     expect(compiled).toContain('Never author additional cycles or a delta re-review of fix commits');
     // review_pass() prose unique: appears only in the review → verify → fix doctrine, not in invariant #7
@@ -1468,7 +1468,7 @@ describe('DUPLICATE verdict guards — resolve.md (§16b)', () => {
   it('resolve.md contains DUPLICATE as a named verdict bucket', () => {
     expect(
       compiled,
-      'resolve.md must name DUPLICATE as a verdict bucket (avoids PF-024 spawn↔op seam)',
+      'resolve.md must name DUPLICATE as a verdict bucket (the verdict enum must match on both sides of the spawn↔op seam)',
     ).toContain('DUPLICATE');
   });
 
@@ -1492,7 +1492,7 @@ describe('DUPLICATE verdict guards — resolve.md (§16b)', () => {
   it('resolve.md contains ## Duplicates section for per-entry traceability', () => {
     expect(
       compiled,
-      'resolve.md must contain ## Duplicates section (additive, safe per ADR-006)',
+      'resolve.md must contain ## Duplicates section (additive, so the convergence parser is unaffected)',
     ).toContain('## Duplicates');
   });
 });
@@ -1574,7 +1574,7 @@ describe('Phase F traceability — release.md evidence + dynamic-build mechanism
 // §19  Phase C publication gate wiring — _publication.mds partial (11th partial)
 //      code-review.md, resolve.md, (since #363) implement.md and (since #376)
 //      dynamic-build.md must expand publication_gate() and pass REVIEW_PUBLICATION
-//      only in Git spawns (PF-024) — post-*-summary for the two review hosts,
+//      only in Git spawns — post-*-summary for the two review hosts,
 //      update-pr-evidence for /implement and for the wave PR
 // ---------------------------------------------------------------------------
 
@@ -1601,10 +1601,10 @@ describe('publication_gate adoption in compiled host commands (Phase C)', () => 
         `${destRelDir}/${basename}.md must expand the partial itself, not only name the value`,
       ).toContain('**Resolve `REVIEW_PUBLICATION` per worktree:**');
     }
-    expect(scanned, 'scanned zero publication hosts — guard is vacuous (PF-018)').toBeGreaterThan(0);
+    expect(scanned, 'scanned zero publication hosts — guard is vacuous').toBeGreaterThan(0);
   });
 
-  it('every REVIEW_PUBLICATION: line in every compiled command is inside a Git-agent spawn block (spawn-scoped guard, PF-024)', async () => {
+  it('every REVIEW_PUBLICATION: line in every compiled command is inside a Git-agent spawn block (spawn-scoped guard)', async () => {
     let scanned = 0;
     for (const basename of COMMAND_HOSTS) {
       const outputPath = path.join(BUILT_COMMANDS, `${basename}.md`);
@@ -1636,7 +1636,7 @@ describe('publication_gate adoption in compiled host commands (Phase C)', () => 
         `REVIEW_PUBLICATION: line found in non-Git spawn block(s): ${violations.join(', ')}`,
       ).toHaveLength(0);
     }
-    expect(scanned, 'scanned zero dist commands — guard is vacuous (PF-018)').toBeGreaterThan(0);
+    expect(scanned, 'scanned zero dist commands — guard is vacuous').toBeGreaterThan(0);
   });
 });
 
@@ -1694,7 +1694,7 @@ describe('DIST_FILES scope (§14.5, P0-S21) + compliance_gate adoption (P0-S22)'
       ).toContain('COMPLIANCE_ACTIVE');
     }
 
-    // hostsScanned === 2: asserts non-vacuity (PF-018, [DR-27a]).
+    // hostsScanned === 2: asserts non-vacuity ([DR-27a]).
     // Known-bad sample: a host with @import but no {compliance_gate()} call would
     // produce a compiled output without COMPLIANCE_ACTIVE and fail here.
     expect(
@@ -1715,7 +1715,7 @@ describe('DIST_FILES scope (§14.5, P0-S21) + compliance_gate adoption (P0-S22)'
     //
     // Non-consumer mentions, excluded with a reason each:
     //   **Produces:** / **Requires:**  — the phase-ordering DAG, not a read of the
-    //                                    value (PF-039; the seam test excludes the
+    //                                    value (the seam test excludes the
     //                                    same two literals as a set)
     //   a heading line                 — names the step, does not read the variable
     function collectGateOrderViolations(basename: string, content: string): string[] {
@@ -1795,7 +1795,7 @@ describe('_tracker.mds adoption + per-define non-emptiness (P2-S9)', () => {
       // a one-armed grammar silently drops everything it does not recognise.
       // The phrase pins where adjudication actually happens — in the fetching
       // operation's Output block — so a host cannot re-assert a producer-side
-      // rejection no operation performs (PF-024).
+      // rejection no operation performs.
       requiredPhrase: 'no producer-side grammar check',
       minBytes: 600,
     },
@@ -1889,7 +1889,7 @@ describe('_tracker.mds adoption + per-define non-emptiness (P2-S9)', () => {
     expect(
       defines,
       'the collector must see the seeded third define — otherwise the equality above is ' +
-      'green because nothing was ever parsed (PF-018)',
+      'green because nothing was ever parsed',
     ).toEqual(['issue_ref_grammar', 'issue_capture_contract', 'smuggled_partial']);
     expect(exports).toEqual(['issue_ref_grammar', 'issue_capture_contract', 'smuggled_partial']);
     expect(
@@ -2074,7 +2074,7 @@ describe('gh issue scope guard — no gh issue calls outside Git spawn fences (A
 // reintroduces is invisible locally: an unscoped build rewrites the real dist/
 // while parallel vitest workers read it, so a stale tree is silently repaired
 // mid-suite and whichever reader lost the race reports a flake instead of the
-// staleness (PF-055). A prose invariant cannot detect that, so it is scanned.
+// staleness. A prose invariant cannot detect that, so it is scanned.
 //
 // The scan is deliberately blind to WHERE the root comes from: `cwd:` is not a
 // scope. build-mds.ts resolves its fallback root from the script's own location,
@@ -2086,7 +2086,7 @@ describe('this file never spawns a build against the real repo root', () => {
     const source = await fs.readFile(SELF, 'utf-8');
     const { total, unscoped } = collectSpawnScoping(source);
 
-    expect(total, 'the scan found no spawn site at all — it is measuring nothing (PF-018)')
+    expect(total, 'the scan found no spawn site at all — it is measuring nothing')
       .toBeGreaterThan(0);
     expect(
       unscoped,
@@ -2244,7 +2244,7 @@ describe('dedup-marker ownership — `<!-- devflow:` absent from dist/commands (
 // ---------------------------------------------------------------------------
 
 describe('implement.md forwards the issue argument unclassified (§23)', () => {
-  /** Spellings that classify the argument at the command layer. Each LABELLED (PF-064). */
+  /** Spellings that classify the argument at the command layer. Each LABELLED, so a violation names the spelling it matched. */
   const CLASSIFIER_RULES: ReadonlyArray<readonly [string, RegExp]> = [
     ['a `#` prefix test', /starts with\s*`?#/i],
     ['a `#`-shaped pattern', /#\[0-9\]|#\{?[0-9n]/],

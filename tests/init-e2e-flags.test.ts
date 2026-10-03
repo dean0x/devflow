@@ -4,7 +4,7 @@
  * These tests drive the REAL `node dist/cli.js init --recommended` command with an
  * isolated temp HOME so they never touch the developer's real ~/.claude or ~/.devflow.
  *
- * Applies PF-018: seeded temp HOME, never empty; vacuous-coverage guard.
+ * Seeded temp HOME, never empty; vacuous-coverage guard.
  *
  * Test scenarios:
  *   1. OLD-FORMAT manifest (flags: []) + settings with viewMode:'focus'
@@ -99,7 +99,7 @@ afterEach(async () => {
 
 describe('init e2e — flags Phase 6 integration', () => {
   it('old-format manifest (flags:[]) + viewMode in settings → FlagsRecord + viewMode preserved', async () => {
-    // PF-018: seed a REAL old-format manifest (flags as string array) and settings with viewMode.
+    // Seed a REAL old-format manifest (flags as string array) and settings with viewMode.
     // Non-vacuous: if the bridge removal regressed to string[], flags would be [] in the manifest.
     const oldManifest = {
       version: '2.0.0',
@@ -137,7 +137,7 @@ describe('init e2e — flags Phase 6 integration', () => {
     // capture hooks, memory hooks, HUD, flags, proxy env) in one try/catch that only
     // warns. With a malformed entry the whole pass aborts, settings.json is never
     // touched, and every settings assertion below passes because nothing ran —
-    // the PF-018 shape: a green test that proves nothing.
+    // a green test that proves nothing.
     const seedSettings = {
       viewMode: 'focus',
       env: { CUSTOM_USER_VAR: 'preserved' },
@@ -151,7 +151,7 @@ describe('init e2e — flags Phase 6 integration', () => {
     const result = runInit(tmpHome);
     expect(result.status, `init failed:\nstdout: ${result.stdout}\nstderr: ${result.stderr}`).toBe(0);
 
-    // PF-018 non-vacuity gate: init.ts swallows any failure in its settings pass with a
+    // Non-vacuity gate: init.ts swallows any failure in its settings pass with a
     // warning and a zero exit code. Assert the warning is ABSENT — otherwise every
     // settings assertion below would pass for the wrong reason (the pass never ran).
     expect(
@@ -214,7 +214,7 @@ describe('init e2e — flags Phase 6 integration', () => {
     expect(env.ANTHROPIC_DEFAULT_SONNET_MODEL).toBeUndefined();
     expect(settings).not.toHaveProperty('disableBundledSkills');
 
-    // Deliberate prior disables are PRESERVED, not re-adopted (ADR-014): the old manifest
+    // Deliberate prior disables are PRESERVED, not re-adopted: the old manifest
     // recorded knownFlags ['tui','lsp'] with an empty enabled list, so both stay off and
     // neither writes its payload — while genuinely-new flags above adopt their defaults.
     expect(flagsRecord['tui']).toBe(false);
@@ -225,7 +225,7 @@ describe('init e2e — flags Phase 6 integration', () => {
 
   it('fresh install (no manifest) → FlagsRecord with all flags + number flag defaults applied; no TUI entered', async () => {
 
-    // PF-018: no manifest means fresh install — all flags adopt their defaults.
+    // No manifest means fresh install — all flags adopt their defaults.
     // Non-vacuous: if adoption is broken, max-concurrent-subagents env var would be absent.
     await fs.writeFile(
       path.join(tmpHome, '.claude', 'settings.json'),
@@ -271,7 +271,7 @@ describe('init e2e — flags Phase 6 integration', () => {
   }, SUBPROCESS_TIMEOUT_MS);
 
   it('(b) re-init preserves a modified flag value; adopts defaults only for absent flags', async () => {
-    // Regression guard for D40/ADR-014: re-init must not overwrite a flag value the user
+    // Regression guard for D40: re-init must not overwrite a flag value the user
     // set via `devflow flags`. The manifest already owns the flag; init preserves it and
     // adopts registry defaults only for flags absent from the manifest record.
 
@@ -440,7 +440,7 @@ describe('init e2e — flags Phase 6 integration', () => {
     // removes managed keys from their original positions and applyFlags re-appends them
     // at the end, so key order can legitimately differ between runs while content is identical.
 
-    // PF-018 vacuous guard: this test catches regression where every reinit strips viewMode.
+    // Vacuous-coverage guard: this test catches regression where every reinit strips viewMode.
     const seedSettings = { viewMode: 'verbose', env: { CUSTOM: 'stable' } };
     await fs.writeFile(
       path.join(tmpHome, '.claude', 'settings.json'),
@@ -474,14 +474,14 @@ describe('init e2e — flags Phase 6 integration', () => {
 // ---------------------------------------------------------------------------
 // D27 / R3: suppress-attribution through the REAL init settings pass.
 //
-// PF-018: every other attribution test in the suite is a pure call to applyFlags,
+// Every other attribution test in the suite is a pure call to applyFlags,
 // stripFlags, or resolveExistingAttributionSuppression. None of them proves that
 // init writes the block, that the shape guard survives init's strip-then-apply
 // double pass (convergeFlagsIntoSettings runs stripFlags THEN applyFlags), that
 // the value survives the proxy JSON round-trip and the later security-deny-list
 // rewrite, or that the `content !== original` write guard actually fires.
 //
-// PF-015: each case asserts BOTH artifacts — manifest features.flags and
+// Each case asserts BOTH artifacts — manifest features.flags and
 // settings.json — so a divergence between the two cannot pass.
 // ---------------------------------------------------------------------------
 
@@ -524,7 +524,7 @@ describe('init e2e — suppress-attribution convergence (D27, production path)',
 
     const result = runInit(tmpHome, extraArgs);
     expect(result.status, `init failed:\nstdout: ${result.stdout}\nstderr: ${result.stderr}`).toBe(0);
-    // PF-018 non-vacuity gate: init swallows settings-pass failures with a warning
+    // Non-vacuity gate: init swallows settings-pass failures with a warning
     // and still exits 0. Without this, every assertion below could pass unrun.
     expect(
       result.stdout + result.stderr,
@@ -564,7 +564,7 @@ describe('init e2e — suppress-attribution convergence (D27, production path)',
     // Off-side convergence: manifest says off, the key must be gone from settings.
     expect(out.flags['suppress-attribution']).toBe(false);
     expect(out.settings).not.toHaveProperty('attribution');
-    // Non-vacuity anchor (PF-018): a deletion assertion passes silently when the file
+    // Non-vacuity anchor: a deletion assertion passes silently when the file
     // is never rewritten. The seeded CUSTOM_USER_VAR must survive the init pass,
     // proving settings.json was actually rewritten around the deletion.
     expect((out.settings.env as Record<string, unknown>).CUSTOM_USER_VAR).toBe('preserved');
@@ -648,7 +648,7 @@ function treePaths(root: string): string[] {
   return treeState(root).map(line => line.split(' ')[0]);
 }
 
-/** Spawn the built CLI under a sandboxed env (PF-060: sandboxEnv asserts HOME is temp). */
+/** Spawn the built CLI under a sandboxed env (sandboxEnv asserts HOME is temp). */
 function runCli(
   args: string[],
   home: string,

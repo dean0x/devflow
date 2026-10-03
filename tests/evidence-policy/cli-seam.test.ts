@@ -10,12 +10,12 @@
  * Shape of the suite:
  *   - the loader: it resolves join(scriptsDir(), …) — the PACKAGE copy — shape-
  *     checks the surface, and returns a Result for a missing or unusable module;
- *   - the pure helpers, fixtured from the real resolver's own output (PF-043);
+ *   - the pure helpers, fixtured from the real resolver's own output;
  *   - source guards, each with a named collector, a non-empty corpus and a
- *     known-bad probe (PF-064): no TS parser copy, no fs write API in the seam, and
+ *     known-bad probe: no TS parser copy, no fs write API in the seam, and
  *     no write call anywhere in src/**\/*.ts whose path argument reaches
- *     .devflow/policy.json or .devflow/project.json (D-POLICY-NO-WRITE, applies ADR-024);
- *   - the built CLI end to end, from a temp HOME and a temp cwd (PF-060), with gh
+ *     .devflow/policy.json or .devflow/project.json (D-POLICY-NO-WRITE);
+ *   - the built CLI end to end, from a temp HOME and a temp cwd, with gh
  *     faked by the scripted shim so no run touches the network.
  */
 
@@ -531,7 +531,7 @@ describe('evidencePolicySuggestion — iff the compliance default is required', 
 });
 
 // ---------------------------------------------------------------------------
-// Source guards (PF-064: named collector, non-empty corpus, known-bad probe)
+// Source guards (named collector, non-empty corpus, known-bad probe)
 // ---------------------------------------------------------------------------
 
 interface SourceFile {
@@ -610,7 +610,7 @@ function literalBodies(code: string): string[] {
 const isGitignoreLine = (body: string): boolean => /^\s*[!#]/.test(body);
 
 /**
- * The team-owned files devflow never writes (applies ADR-024): the committed
+ * The team-owned files devflow never writes: the committed
  * `project.json` and the legacy `policy.json` it replaces.
  */
 const TEAM_FILE_RE = /(?:policy|project)\.json/;
@@ -765,7 +765,7 @@ function collectPolicyAliases(files: readonly SourceFile[]): Map<string, Set<str
 }
 
 /**
- * The sink surface (PF-064: derived from what can write, not from offenders seen):
+ * The sink surface (derived from what can write, not from offenders seen):
  * every fs write/move/copy/link/open verb, every project write helper by verb
  * family (writeManifest, writeFileAtomicExclusive, appendLines, copyDirectory …),
  * and every child-process spawn (a shell or git argv can write a file too).
@@ -942,12 +942,11 @@ describe('source guards — no repo write, no parser copy (D-POLICY-NO-WRITE, D-
     const seam = byRel(SEAM_REL).content;
     expect(seam).toContain('D-POLICY-CJS-SEAM');
     expect(seam).toContain('D-POLICY-NO-WRITE');
-    expect(seam).toContain('ADR-024');
   });
 });
 
 // ---------------------------------------------------------------------------
-// The built CLI, end to end (temp HOME, temp cwd, gh faked — PF-060)
+// The built CLI, end to end (temp HOME, temp cwd, gh faked)
 // ---------------------------------------------------------------------------
 
 interface CliRun {
@@ -983,7 +982,7 @@ describe('devflow compliance — the built CLI (AC-9, AC-10)', () => {
   }
 
   function runCli(o: { home: string; cwd: string; args: readonly string[]; shim?: ScriptedShim }): CliRun {
-    // PF-060 echo-check: HOME and cwd must both be under this suite's tmp dir.
+    // Echo-check: HOME and cwd must both be under this suite's tmp dir, never the developer's.
     for (const p of [o.home, o.cwd]) {
       if (!p.startsWith(tmp + path.sep)) throw new Error(`refusing to run the CLI outside the suite tmp dir: ${p}`);
     }

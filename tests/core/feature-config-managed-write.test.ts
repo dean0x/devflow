@@ -1,7 +1,6 @@
 /**
  * devflow's write of `.devflow/config.json` — `devflow init`'s — is a
- * read-modify-write over a user-editable file (D-CONFIG-PRESERVE-UNMANAGED,
- * avoids PF-071).
+ * read-modify-write over a user-editable file (D-CONFIG-PRESERVE-UNMANAGED).
  *
  * devflow owns one key — reviewPublication — and nothing else. Every other key
  * in the file (the hand-written per-repo `tracker` override, a key a newer
@@ -14,8 +13,8 @@
  * `learning: false` in the file that no longer does what it says, so the write
  * drops them.
  *
- * The file round trip is asserted, not only the pure merge, because PF-071's
- * lesson is that a direct call exercises an input path no user has.
+ * The file round trip is asserted, not only the pure merge, because a direct
+ * call exercises an input path no user has.
  */
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
@@ -105,7 +104,7 @@ describe('mergeManagedConfig: the managed keys come from init, every other key f
     expect(mergeManagedConfig({ tracker: 'linear' }, binding).tracker).toBe('linear');
   });
 
-  it('carries the personal `features` narrowing verbatim — it is a live key, never a retired one (PF-071)', () => {
+  it('carries the personal `features` narrowing verbatim — it is a live key, never a retired one', () => {
     const features = { memory: false, learning: false, knowledge: 'false', extra: [1] };
     const merged = mergeManagedConfig({ reviewPublication: 'full', features, ...RETIRED }, MANAGED);
 
@@ -160,7 +159,7 @@ describe('writeManagedConfig: the read-modify-write through the file', () => {
     expect((await readConfig(tmpDir)).tracker).toBe('jira');
   });
 
-  it('★ keeps a hand-written `features` object on disk through the managed write (PF-071)', async () => {
+  it('★ keeps a hand-written `features` object on disk through the managed write', async () => {
     const body = { reviewPublication: 'full', features: { learning: false, knowledge: false }, tracker: 'jira' };
     seedConfig(JSON.stringify(body));
 

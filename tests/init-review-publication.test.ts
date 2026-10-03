@@ -1,18 +1,18 @@
 /**
  * End-to-end guards for the per-repo `.devflow/config.json` across `devflow init`.
  *
- * PF-015: a feature value that fans out across artifacts is only correct when
+ * A feature value that fans out across artifacts is only correct when
  * every write converges on the POST-GATE binding. reviewPublication has no
  * prompt, so init carries it over — and the carry-over must read the
  * reset-gated snapshot, not the file on disk, or `--reset` silently preserves a
  * publication setting the user asked to discard.
  *
- * PF-071: the same write is a read-modify-write over a user-editable file, so
+ * The same write is a read-modify-write over a user-editable file, so
  * the keys devflow does NOT manage — the hand-written per-repo `tracker`
  * override first among them — must come from the file, never from the declared
  * shape, or a re-init silently deletes them.
  *
- * These tests drive the real CLI end to end (PF-015 again: a test that
+ * These tests drive the real CLI end to end (a test that
  * re-implements init's ordering certifies the author's model, not the shipped
  * one). cwd is a throwaway git repo so the suite never writes the developer's
  * own .devflow/config.json.
@@ -36,7 +36,7 @@ let tmpHome: string;
 let tmpRepo: string;
 
 function runInit(...args: string[]): { status: number | null; stderr: string; out: string } {
-  // PF-060: init converges a machine-wide tree, so the sandbox is asserted at the
+  // init converges a machine-wide tree, so the sandbox is asserted at the
   // call site rather than trusted — a spawn against the real HOME never starts.
   // `os.homedir()` is the setup file's temp HOME, so the real home comes from assertTempHome.
   assertTempHome(tmpHome);
@@ -115,7 +115,7 @@ describe('devflow init — reviewPublication carry-over', () => {
     const config = await readProjectConfig();
     expect(
       config.reviewPublication,
-      'init --reset preserved reviewPublication — a factory reset must not carry a publication override forward (PF-015)',
+      'init --reset preserved reviewPublication — a factory reset must not carry a publication override forward',
     ).toBe('auto');
   }, SUBPROCESS_TIMEOUT_MS);
 
@@ -149,7 +149,7 @@ describe('devflow init — keys devflow does not manage survive the config write
     expect(config.reviewPublication).toBe('off');
   }, SUBPROCESS_TIMEOUT_MS);
 
-  it('re-init keeps an INVALID tracker value verbatim — refuse, never repair (PF-071)', async () => {
+  it('re-init keeps an INVALID tracker value verbatim — refuse, never repair', async () => {
     await writeRawProjectConfig({ ...MANAGED, tracker: 42 });
 
     const result = runInit('--recommended');

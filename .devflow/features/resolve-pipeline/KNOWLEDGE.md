@@ -1,7 +1,7 @@
 ---
 feature: resolve-pipeline
 name: Resolve Pipeline (Triage → Fix → Verify)
-description: "Use when modifying /resolve or /code-review convergence logic, adding or changing Triage disposition rules (including DUPLICATE collapsing), adjusting Code-agent operating modes (issue-fix/validation-fix), touching the resolution-summary.md parser contract, changing the Verification Gate retry loop, understanding how DIFF_FILES flows from git validate-branch into blast-radius triage, or working on traceability operations (fetch-review-threads, resolve-review-threads, post-resolution-summary, check-merge-readiness, THREAD_MAP). Keywords: resolve, triage, disposition matrix, blast-radius, FIX_NOW, FIX_SEPARATE, TECH_DEBT, FALSE_POSITIVE, BY_DESIGN, ESCALATED, DUPLICATE, duplicate-grouping, duplicates-collapse, duplicate_of, resolution-summary, convergence parser, DIFF_FILES, issue-fix, validation-fix, Verification Gate, manage-debt, EVIDENCE_POLICY gates, TRACEABILITY DEGRADED, fetch-review-threads, THREAD_MAP, post-resolution-summary, Third-Party Threads, check-merge-readiness, ext-N, D7, D9, PF-024."
+description: "Use when modifying /resolve or /code-review convergence logic, adding or changing Triage disposition rules (including DUPLICATE collapsing), adjusting Code-agent operating modes (issue-fix/validation-fix), touching the resolution-summary.md parser contract, changing the Verification Gate retry loop, understanding how DIFF_FILES flows from git validate-branch into blast-radius triage, or working on traceability operations (fetch-review-threads, resolve-review-threads, post-resolution-summary, check-merge-readiness, THREAD_MAP). Keywords: resolve, triage, disposition matrix, blast-radius, FIX_NOW, FIX_SEPARATE, TECH_DEBT, FALSE_POSITIVE, BY_DESIGN, ESCALATED, DUPLICATE, duplicate-grouping, duplicates-collapse, duplicate_of, resolution-summary, convergence parser, DIFF_FILES, issue-fix, validation-fix, Verification Gate, manage-debt, EVIDENCE_POLICY gates, TRACEABILITY DEGRADED, fetch-review-threads, THREAD_MAP, post-resolution-summary, Third-Party Threads, check-merge-readiness, ext-N, D7, D9."
 category: architecture
 directories: [src/assets/commands/resolve.mds, src/assets/agents/triage.md, src/assets/agents/code.md, src/core/plugins.ts, src/assets/commands/code-review.mds]
 created: 2026-07-08
@@ -92,7 +92,7 @@ Git agent's `validate-branch` operation emits a `### Diff Scope` block containin
 
 **Phase 9b-1 — resolve-review-threads** (only when `EVIDENCE_POLICY` is `required`, runs after Phase 9 backfill): Prepares THREAD_MAP with verdicts from Triage/Code results by matching `ext-{N}` to issues by file:line correlation. Unmatched threads default to ESCALATED (human review required). Then spawns Git agent with `OPERATION: resolve-review-threads`.
 
-**DUPLICATE in THREAD_MAP**: If a matched issue has verdict DUPLICATE, the orchestrator uses the **primary's** verdict and verification status for the thread reply — the DUPLICATE verdict is never exposed to the thread author. This is a caller-side mapping; git.md contracts are unchanged (applies PF-024).
+**DUPLICATE in THREAD_MAP**: If a matched issue has verdict DUPLICATE, the orchestrator uses the **primary's** verdict and verification status for the thread reply — the DUPLICATE verdict is never exposed to the thread author. This is a caller-side mapping; git.md contracts are unchanged.
 
 **D9 gate (single authority in git.md `## Operation: resolve-review-threads`):**
 - `resolveReviewThread` mutation is called **ONLY when `VERIFICATION_STATUS == PASS` AND verdict `FIXED` AND `commit_sha` non-empty**
@@ -230,7 +230,7 @@ The section headings and their column layouts:
 - A re-review within the same cycle (different REVIEW_TIMESTAMP) → posts its own comment
 - A true re-run of the exact same review (same REVIEW_TIMESTAMP) → deduplicates silently
 
-The caller spawn in code-review.mds passes `REVIEW_TIMESTAMP: {timestamp}` as an input — it does **not** restate the marker literal. The marker format is owned by and defined in the `post-review-summary` operation in git.md (avoids PF-024). `tests/build-mds.test.ts §15` asserts that the compiled code-review.md contains `REVIEW_TIMESTAMP` in the post-review-summary spawn.
+The caller spawn in code-review.mds passes `REVIEW_TIMESTAMP: {timestamp}` as an input — it does **not** restate the marker literal. The marker format is owned by and defined in the `post-review-summary` operation in git.md. `tests/build-mds.test.ts §15` asserts that the compiled code-review.md contains `REVIEW_TIMESTAMP` in the post-review-summary spawn.
 
 **Resolution order in /code-review is load-bearing**: Step 0b resolves the compliance lens (`COMPLIANCE_ACTIVE`, `COMPLIANCE_FRAMEWORKS`) from the settings line and Step 0b-ii the evidence policy, both **before** Step 0c spawns the Git agent (`ensure-pr-ready`), which takes `APPLY_CONVENTIONS` from the policy. The lens gates only the compliance Review focus in Phase 1 and never reaches the Git agent.
 
@@ -247,7 +247,7 @@ The caller spawn in code-review.mds passes `REVIEW_TIMESTAMP: {timestamp}` as an
 The Triage agent (opus) is the sole judgment agent. Key constraints in `triage.md`:
 
 - Skills preloaded in frontmatter: `devflow:security`, `devflow:worktree-support`, `devflow:apply-decisions`, `devflow:apply-feature-knowledge`
-- **Never instructed to invoke skills via body text** (avoids PF-002 re-entrancy issue)
+- **Never instructed to invoke skills via body text** (re-invoking a skill already preloaded in frontmatter trips its re-entrancy guard)
 - Reads 30-line context around each reported file:line to verify issues
 - **Runs the Duplicate Grouping Pre-Pass first** — groups same-defect issues, elects primaries (security member is always primary in mixed groups), then runs the matrix on primaries only
 - For FALSE_POSITIVE: must provide grep output or file:line citation — opinion is not evidence
@@ -276,7 +276,7 @@ The single `git push` runs after the Verification Gate regardless of PASS or FAI
 
 ## Test Guards
 
-The following test files provide static content guards that fail loudly when load-bearing literals are silently changed (avoids PF-018). Phase-0 added seven new files (`tests/seams/command-agent-input.test.ts`, `tests/goldens/git-agent-golden.test.ts`, `tests/goldens/github-status-lines.test.ts`, `tests/guards/agent-source-resolver.test.ts`, `tests/guards/retired-wording.test.ts`, `tests/guards/numeric-floor-manifest.test.ts`, `tests/guards/extended-references.test.ts`) alongside the four core guard files listed below:
+The following test files provide static content guards that fail loudly when load-bearing literals are silently changed. Phase-0 added seven new files (`tests/seams/command-agent-input.test.ts`, `tests/goldens/git-agent-golden.test.ts`, `tests/goldens/github-status-lines.test.ts`, `tests/guards/agent-source-resolver.test.ts`, `tests/guards/retired-wording.test.ts`, `tests/guards/numeric-floor-manifest.test.ts`, `tests/guards/extended-references.test.ts`) alongside the four core guard files listed below:
 
 **`tests/git-agent.test.ts`** (source-file guards, no build required):
 - Guard 0: file non-vacuousness
@@ -295,15 +295,15 @@ The following test files provide static content guards that fail loudly when loa
 
 **`tests/build-mds.test.ts §15`** (build-gated, Phase D traceability ops):
 - Asserts that compiled `code-review.md` contains `post-review-summary` reference
-- Asserts that compiled `code-review.md` passes `REVIEW_TIMESTAMP` to the post-review-summary spawn (I44 cycle+ts dedup) — the old guard that pinned the marker literal in the compiled command was dropped; callers pass inputs, operations own their output format (avoids PF-024)
+- Asserts that compiled `code-review.md` passes `REVIEW_TIMESTAMP` to the post-review-summary spawn (I44 cycle+ts dedup) — the old guard that pinned the marker literal in the compiled command was dropped; callers pass inputs, operations own their output format
 - Every `beforeAll` block in §15 asserts the build exits 0 before the file-content checks run
 - Every scan loop asserts `scanned > 0` to prevent vacuous passes
 
 **`tests/build-mds.test.ts §16b`** (build-gated, DUPLICATE verdict guards — consumer side):
-- Pins `DUPLICATE` as a named verdict bucket in compiled `resolve.md` (avoids PF-024 spawn↔op seam)
+- Pins `DUPLICATE` as a named verdict bucket in compiled `resolve.md` (the verdict enum must match on both sides of the spawn↔op seam)
 - Pins `duplicate_of` reference attribute in compiled `resolve.md` — the per-entry attribute Triage must supply for every DUPLICATE verdict
 - Pins `| Duplicates Collapsed | ` Statistics row label — additive extension; existing parser labels unchanged
-- Pins `## Duplicates` section heading in compiled `resolve.md` — additive, safe per ADR-006
+- Pins `## Duplicates` section heading in compiled `resolve.md` — additive, so the convergence parser is unaffected
 
 **`tests/resolve/duplicate-verdict.test.ts`** (source-file guards — producer side):
 - Guards the duplicate grouping pre-pass ordering: `## Duplicate Grouping Pre-Pass` must appear before `## Blast-Radius Disposition Matrix` in `triage.md`
@@ -312,19 +312,19 @@ The following test files provide static content guards that fail loudly when loa
 - Guards matrix scope: pre-pass section must contain "primary only"
 - Guards DUPLICATE ledger bucket: `### DUPLICATE` heading and `Duplicate Of` column must appear in triage.md Output section
 - Guards summary tally: `- DUPLICATE: {n}` must appear in triage.md Output section
-- Guards two-sided PF-024 seam: both `triage.md` and `resolve.mds` must contain `DUPLICATE` and `duplicate_of`
+- Guards the two-sided spawn↔op seam: both `triage.md` and `resolve.mds` must contain `DUPLICATE` and `duplicate_of`
 - Guards section exclusivity: `resolve.mds` must contain "DUPLICATE issues are listed **only** in `## Duplicates`"
 
 ## Anti-Patterns
 
 - **Routing ESCALATED issues to manage-debt**: Security escalations that require human review must appear in `## Escalations` with a display callout. manage-debt would bury them in a ticket backlog with no visibility.
 - **Re-litigating Triage verdicts in Code agent**: The `issue-fix` mode receives pre-classified FIX_NOW issues. The Code agent does not assess whether the issues are real — it fixes what it is told.
-- **Invoking skills in Triage agent via body instructions**: The Triage agent's skills are loaded via frontmatter. Adding `Skill(...)` calls in the Triage agent's body instructions causes re-entrancy (PF-002).
+- **Invoking skills in Triage agent via body instructions**: The Triage agent's skills are loaded via frontmatter. Adding `Skill(...)` calls in the Triage agent's body instructions causes re-entrancy.
 - **Using TECH_DEBT for "touches many files"**: TECH_DEBT is last resort for complete architectural overhauls only. Multi-file changes with clear blast radius → FIX_NOW/Careful or FIX_SEPARATE.
 - **Pushing before Verification Gate**: Code agents run with `PUSH: false`. The orchestrator owns the single push in Phase 7. Pushing before validation means unvalidated commits can reach remote.
 - **Writing resolution-summary.md late**: If written after Phase 6 or later, context compaction during Simplify/Validate can lose the result data. Phase 5 write-early is not optional.
 - **Blocking on traceability operations**: Phases 1b, 9b-1, 9b-2, and 9c are all skip-and-continue on `TRACEABILITY: DEGRADED`. Never treat DEGRADED as a pipeline failure.
-- **Caller spawn blocks restating marker literals**: Callers (resolve.mds, code-review.mds) pass operation inputs only — they do not restate the marker string that the operation writes internally. The operation owns what it writes (avoids PF-024).
+- **Caller spawn blocks restating marker literals**: Callers (resolve.mds, code-review.mds) pass operation inputs only — they do not restate the marker string that the operation writes internally. The operation owns what it writes.
 - **Calling resolveReviewThread for FALSE_POSITIVE or BY_DESIGN**: D9 gate is FIXED-only. Thread authors close their own threads after seeing devflow's evidence reply.
 - **Chaining duplicate_of references**: `duplicate_of` must reference a non-DUPLICATE issue. Chaining (DUPLICATE A → DUPLICATE B → primary C) makes outcome inheritance unresolvable and is treated as a Triage failure.
 - **Listing DUPLICATE issues in outcome sections**: DUPLICATE issues belong exclusively in `## Duplicates`. Placing them in `## Fixed Issues`, `## False Positives`, or any other outcome section causes the Statistics rows and section bodies to disagree, and manage-debt would create spurious debt tickets.
@@ -366,20 +366,20 @@ The following test files provide static content guards that fail loudly when loa
 - `src/assets/commands/_partials/_compliance.mds` — `compliance_frameworks()` (sets `COMPLIANCE_FRAMEWORKS` from the settings line; alias-imported by /resolve) and `compliance_gate()` (adds `COMPLIANCE_ACTIVE`; /code-review and /plan)
 - `src/core/plugins.ts` — DEVFLOW_PLUGINS entry for devflow-resolve: agents registry `[git, triage, code, simplify, validate, knowledge]`
 - `src/assets/commands/code-review.mds` — Contains convergence parser (fp_ratio), Phase 3 sequential synthesis+comment pattern, Step 0b compliance-lens resolution, REVIEW_TIMESTAMP spawn input
-- `tests/git-agent.test.ts` — Static content guards for git.md: ops, bounds, D9 gate, D4 rate-limit, dedup markers (PF-018)
+- `tests/git-agent.test.ts` — Static content guards for git.md: ops, bounds, D9 gate, D4 rate-limit, dedup markers
 - `tests/registry-integrity.test.ts` — Guard 6: forward+reverse OPERATION: ↔ ## Operation: contract with INTERNAL_OPS allowlist (build-gated)
 - `tests/build-mds.test.ts` — §15: REVIEW_TIMESTAMP input assertion; §16: resolve.md traceability ops; §16b: DUPLICATE verdict guards (consumer side — DUPLICATE bucket, duplicate_of, Duplicates Collapsed row, ## Duplicates section); all beforeAll blocks assert exit-0 + non-empty corpus
-- `tests/resolve/duplicate-verdict.test.ts` — DUPLICATE producer-side guards: pre-pass ordering, chaining prohibition, security-primary election, ledger bucket/column, two-sided PF-024 enum seam, section exclusivity
+- `tests/resolve/duplicate-verdict.test.ts` — DUPLICATE producer-side guards: pre-pass ordering, chaining prohibition, security-primary election, ledger bucket/column, two-sided spawn↔op enum seam, section exclusivity
 
 ## Related
 
-- ADR-006 (Triage judges / Code fixes split; resolution-summary schema strictly additive over the convergence parser) — applies to the new ## Duplicates section and Duplicates Collapsed row (additive, parser-safe)
-- PF-024 (spawn↔op seams: enum domains must match both sides) — DUPLICATE verdict seam is pinned by duplicate-verdict.test.ts (producer) and build-mds.test.ts §16b (consumer); DUPLICATE→primary mapping in Phase 9b-1 is caller-side so git.md contracts are unchanged
-- PF-018 (real-path tests): git-agent.test.ts guard suite reads the source file directly for bounds and literal contracts
-- PF-019 (verdict-not-evidence): Triage agent must provide cited evidence (grep/file:line/ADR) not just verdicts; D9 propagates evidence through resolve-review-threads reply composition
-- PF-020 (parallel Code-agent staging): same-file Code agent batches must be sequential; distinct-file batches parallel
-- ADR-003 (leave-the-end-state): Resolver retired with zero tombstones; its installed file is pruned by the registry-diff orphan sweep
-- PF-002 (skill re-entrancy): Triage agent skills are loaded via frontmatter — never body-instructed via `Skill()` calls
-- PF-003 (no bare rm in agent instructions): Agent shell operations must use safe-delete patterns
+- Triage judges / Code fixes split; resolution-summary schema strictly additive over the convergence parser — applies to the new ## Duplicates section and Duplicates Collapsed row (additive, parser-safe)
+- Spawn↔op seams: enum domains must match both sides — DUPLICATE verdict seam is pinned by duplicate-verdict.test.ts (producer) and build-mds.test.ts §16b (consumer); DUPLICATE→primary mapping in Phase 9b-1 is caller-side so git.md contracts are unchanged
+- Real-path tests: git-agent.test.ts guard suite reads the source file directly for bounds and literal contracts
+- Verdict-not-evidence: Triage agent must provide cited evidence (grep/file:line/ADR) not just verdicts; D9 propagates evidence through resolve-review-threads reply composition
+- Parallel Code-agent staging: same-file Code agent batches must be sequential; distinct-file batches parallel
+- Leave-the-end-state: Resolver retired with zero tombstones; its installed file is pruned by the registry-diff orphan sweep
+- Skill re-entrancy: Triage agent skills are loaded via frontmatter — never body-instructed via `Skill()` calls
+- Deleting files in agent instructions: the Recommended deny-list blocks `rm`'s flag spellings (`rm -f`, `rm -rf`, and compounds containing them), not a flagless `rm <path>` or `unlink <path>` — name one of those, keep cleanup failure-tolerant, and after a denial retry once in a narrower form before reporting a leftover
 - Feature knowledge: `dynamic-workflow-engine` — the max-5-per-batch concurrency rule was generalized from the dynamic-build pipeline to /resolve Phase 3
 - Feature knowledge: `compliance-feature` — source of the settings-line compliance lens (`COMPLIANCE_ACTIVE`, `COMPLIANCE_FRAMEWORKS`), the compliance partial, traceability Git operations, and TRACEABILITY: DEGRADED contract

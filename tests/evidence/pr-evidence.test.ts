@@ -11,7 +11,7 @@
  *         passes, and every guard's known-bad probe fires.
  *
  * Every guard has a named collector, a non-empty-corpus assertion and a known-bad
- * probe run through the same collector (PF-064). What a guard does NOT cover is
+ * probe run through the same collector. What a guard does NOT cover is
  * stated beside it, because a clean result only proves the shapes it can express.
  *
  * The contract ↔ export parity (the TP line, the six states, the precedence) lives
@@ -743,7 +743,7 @@ const LADDER: readonly LadderRow[] = [
   { name: 'local PASS without an exit code', tp: LOCAL, claim: claimLine('TP-1', 'PASS', HEAD), facts: atHead, state: 'UNVERIFIED' },
 ]
 
-describe('classify — the §3.3 ladder, first match wins, conservative terminal arm (PF-075)', () => {
+describe('classify — the §3.3 ladder, first match wins, conservative terminal arm', () => {
   it.each(LADDER.map(r => [r.name, r] as const))('%s', (_, row) => {
     const claim = row.claim === null ? null : claimOf(row.claim)
     const verdict = PE.classify(tpOf(row.tp), { ...row.facts, claim })
@@ -1164,7 +1164,7 @@ describe('tpHash and dedupeKey', () => {
 })
 
 // ---------------------------------------------------------------------------
-// splice — only the bytes between the markers are devflow's (ADR-024)
+// splice — only the bytes between the markers are devflow's
 // ---------------------------------------------------------------------------
 
 const BLOCK = unwrap(PE.render(PLAN, null, 'create')).text

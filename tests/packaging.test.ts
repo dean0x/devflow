@@ -164,7 +164,7 @@ describe('Guard 3b (MDS pin): compiler pinned to an exact version in devDependen
   /**
    * Named collector: reasons a version spec fails the exact-pin rule.
    * Used by the live assertion AND by the known-bad probe, so the probe cannot
-   * pass against a re-implementation of the rule (PF-018).
+   * pass against a re-implementation of the rule.
    */
   function collectPinViolations(spec: string | undefined): string[] {
     const violations: string[] = [];
@@ -430,7 +430,7 @@ describe('Guard 5 (files[] coverage): package.json includes required directories
  *  (d) Carry all src/assets/**\/*.mds generator sources, at the pinned count.
  *      Shipping them is decision D-A(a), accepted at Gate 2.
  *
- * Per PF-008: assert on parsed `npm pack --dry-run --json` output (structured
+ * Assert on parsed `npm pack --dry-run --json` output (structured
  * data), not on pipeline tails or partial string matching.
  *
  * Lazy-loads the file list once and caches it across assertions in this describe
@@ -571,7 +571,7 @@ describe('Guard 6 (tarball contents): npm pack --dry-run output excludes source 
     }
     expect(
       GATED_REFERENCE_MODULE_SOURCES.length,
-      'the gated roster is empty — the loop above asserts nothing (PF-064: an absence-based ' +
+      'the gated roster is empty — the loop above asserts nothing (an absence-based ' +
       'roster needs a presence arm)',
     ).toBeGreaterThan(0);
   });

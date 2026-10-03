@@ -1167,7 +1167,7 @@ describe('readViewMode', () => {
 // ─── sanitizeFlagsRecord ─────────────────────────────────────────────────────
 
 describe('sanitizeFlagsRecord', () => {
-  it('drops invalid non-null values — key absent (adopt default on next init, REL-S1 + ADR-014)', () => {
+  it('drops invalid non-null values — key absent (adopt default on next init, REL-S1)', () => {
     // Invalid value (above max) is DROPPED rather than becoming null="deliberately unset"
     const record: FlagsRecord = {
       'max-concurrent-subagents': 200 as unknown as number, // above max
@@ -1177,7 +1177,7 @@ describe('sanitizeFlagsRecord', () => {
     expect(Object.prototype.hasOwnProperty.call(sanitized, 'max-concurrent-subagents')).toBe(false);
   });
 
-  it('preserves explicit null (deliberately unset — ADR-014 key-presence semantics)', () => {
+  it('preserves explicit null (deliberately unset — key-presence semantics)', () => {
     const record: FlagsRecord = {
       'max-concurrent-subagents': null, // explicit null = user deliberately unset this flag
     };
@@ -1366,7 +1366,7 @@ describe('VIEW_MODES', () => {
 //
 // Pipeline invariant: valued flags found in settings.json that devflow does NOT
 // own (absent from ownedRecord) are folded into the record before strip, so they
-// survive the strip+apply pass. Whole-post-state style per PF-015.
+// survive the strip+apply pass. Whole-post-state style.
 
 describe('convergeFlagsIntoSettings — view-mode preservation', () => {
   const baseSettings = JSON.stringify(
@@ -1513,8 +1513,8 @@ describe('convergeFlagsIntoSettings — REG-H1: hand-set managed keys survive', 
 //
 // applyFlags and stripFlags must throw a clear error (not an opaque TypeError)
 // when the settings.json root is not a plain object. This is defence-in-depth
-// for callers that bypass readSettingsSafe (init.ts, uninstall.ts). Applies
-// PF-023: put the guard at the sink that every caller passes through.
+// for callers that bypass readSettingsSafe (init.ts, uninstall.ts). Put the
+// guard at the sink that every caller passes through.
 
 describe('applyFlags — non-object root guard (REL-M2)', () => {
   it('throws on null root', () => {
@@ -2136,7 +2136,7 @@ describe('convergeFlagsIntoSettings — D-KEY-ORDER: key order survives a re-run
 
 // ─── convergeFlagsIntoSettings — D-ATTR-ADOPT: guarded boolean adoption ──────
 //
-// Regression tests for security-01 (PF-050 / ADR-024):
+// Regression tests for security-01:
 // A pre-existing on-disk managed shape must be adopted into the record BEFORE
 // the strip sweep runs, so the block survives on both the init and flags paths.
 // RED state was confirmed by reasoning: the assertions are unsatisfiable

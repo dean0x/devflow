@@ -10,8 +10,9 @@
  * string, the shell-hook tests fail first — the integration tests automatically
  * reflect the new value because they import from here.
  *
- * avoids PF-001: matches by prefix in the preamble hook itself; these constants
- * are the full fixed output strings (not substrings used for detection).
+ * The preamble hook detects a handoff by prefix only, because Claude Code's
+ * handoff payload is undocumented and has changed shape; these constants are
+ * the full fixed output strings (not substrings used for detection).
  */
 
 /** Fixed string emitted by the preamble hook for a plan-handoff prompt. */

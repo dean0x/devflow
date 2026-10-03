@@ -18,9 +18,9 @@ relative to, which the receiving agent resolves it under.
 forms; `tests/commands/partials-root.test.ts` runs the resolution command below
 from a root, a subdirectory and a worktree.
 
-One define, imported selectively: the capture cost PF-073 describes is paid over
-the importer's scope, and a single define with no imports of its own adds one
-node to it.
+One define, imported selectively: MDS deep-clones a module's whole scope into
+every define, so a selective import's capture cost is paid over the importer's
+scope, and a single define with no imports of its own adds one node to it.
 
 @define docs_root():
 **Docs root (D-DOCS-ROOT).** Every `.devflow/docs/` path this command reads or writes lives at the checkout's toplevel, never under the directory the session started in. Resolve `{worktree}` from the start directory — `WORKTREE_PATH` if provided, otherwise cwd (`devflow:worktree-support`) — by running

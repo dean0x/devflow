@@ -8,7 +8,7 @@
  *   1. The Tracker block stays within a character cap. It is the paragraph run
  *      most likely to absorb every new tracker detail, and a paragraph that
  *      grows a sentence per change has no natural stopping point.
- *   2. The Tracker block names no INTERNAL identifier. `ADR-026`, `PF-012`,
+ *   2. The Tracker block names no INTERNAL identifier. `ADR-NNN`, `PF-NNN`,
  *      `DR-10`, `OD-15` and `§14.2` address entries in the learning ledger, in
  *      a design artifact or in a phase brief — none of which a reader of
  *      CLAUDE.md has open. A citation that cannot be followed is decoration,

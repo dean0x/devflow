@@ -1,10 +1,10 @@
 /**
  * Thin adapter — devflow flags TUI shell over the generic runTui driver.
  *
- * applies ADR-013: impure I/O shell in CLI layer; pure logic lives in state.ts/render.ts.
- * avoids PF-014: cleanup wired via Promise resolve — never process.exit() inside
- *   a finally-guarded scope.
- * avoids PF-017: thin adapter over the generic shell (src/cli/tui/terminal.ts).
+ * Impure I/O shell in CLI layer; pure logic lives in state.ts/render.ts.
+ * Cleanup wired via Promise resolve — never process.exit() inside
+ *   a finally-guarded scope (it would skip the finally).
+ * Thin adapter over the generic shell (src/cli/tui/terminal.ts).
  *
  * Public API:
  *   - runFlagsTui(initialRows, io?) → Promise<FlagsTuiResult>

@@ -30,7 +30,7 @@ const PLAN_MD = requireDistFile('plan.md')
 const RESOLVE_MD = requireDistFile('resolve.md')
 const TICKETS_MD = requireDistFile('dynamic-tickets.md')
 
-// ── Named collectors (PF-018/PF-064) ─────────────────────────────────────────
+// ── Named collectors ─────────────────────────────────────────────────────────
 //
 // The token checks below are stated once, as functions, so the positive arm
 // ("both sides carry the grammar token") and the negative arm ("the retired
@@ -80,7 +80,7 @@ function collectSourcesCarrying(sources: readonly NamedSource[], token: string):
 // The wave's per-round refresh names the Git agent capability it uses. Pinning
 // the NOUN proves only that the noun was written — `list_by_filter` was pinned
 // that way and named nothing the agent could run, so the round had no sanctioned
-// way to learn a ticket closed (PF-024, PF-064). The property is what matters:
+// way to learn a ticket closed. The property is what matters:
 // the sentence names an operation the Git agent's roster actually carries. The
 // roster is read from the agent at test time, never copied here — a copy would
 // let this guard agree with a list the agent no longer has.
@@ -155,7 +155,7 @@ describe('Depends on: — _ticket_template.mds writer ↔ _wave.mds reader', () 
     expect(
       collectTokenSites(seeded, RETIRED_PLACEHOLDER).length,
       'the collector must find a seeded retired placeholder — otherwise the negative ' +
-      'assertion above is green because nothing was ever scanned (PF-018)',
+      'assertion above is green because nothing was ever scanned',
     ).toBe(1)
     // And the same collector, read as a corpus question, names the offending side.
     expect(
@@ -191,7 +191,7 @@ describe('Depends on: — _ticket_template.mds writer ↔ _wave.mds reader', () 
     ).toContain('TRACEABILITY: DEGRADED (foreign issue reference {ref})')
     expect(
       TICKET_TEMPLATE,
-      'the writer must NOT carry the reader-side verdict — a rule stated on both sides is a rule with two authorities (PF-023)',
+      'the writer must NOT carry the reader-side verdict — a rule stated on both sides is a rule with two authorities',
     ).not.toContain('foreign issue reference')
   })
 
@@ -206,7 +206,7 @@ describe('Depends on: — _ticket_template.mds writer ↔ _wave.mds reader', () 
   })
 })
 
-describe('wave fetch discipline — one pre-fetch, one state call per round (GAP-26, ADR-005)', () => {
+describe('wave fetch discipline — one pre-fetch, one state call per round (GAP-26)', () => {
   it('the pre-fetch is mandatory and once per wave', () => {
     expect(WAVE, 'an optional pre-fetch is a second, unwrapped path to remote bodies').toContain(
       '**Pre-fetch is MANDATORY and happens exactly ONCE per wave.**',
@@ -218,7 +218,7 @@ describe('wave fetch discipline — one pre-fetch, one state call per round (GAP
     const roster = collectRosterOperations(GIT_AGENT)
     expect(
       roster.length,
-      'the `## Operations` table did not parse — an unread roster makes the naming check below vacuous (PF-018)',
+      'the `## Operations` table did not parse — an unread roster makes the naming check below vacuous',
     ).toBeGreaterThan(10)
 
     const paragraph = roundRefreshParagraph(WAVE)
@@ -227,7 +227,7 @@ describe('wave fetch discipline — one pre-fetch, one state call per round (GAP
       collectRosterOpsNamedIn(paragraph, roster),
       'the per-round refresh must name an operation the Git agent actually carries. A capability ' +
       'noun absent from the roster proves only that the noun was written, not that any agent can ' +
-      'act on it — the round then improvises a fetch or stalls (PF-024, PF-064)',
+      'act on it — the round then improvises a fetch or stalls',
     ).not.toEqual([])
 
     expect(WAVE).toContain('**state only**')
@@ -255,10 +255,10 @@ describe('wave fetch discipline — one pre-fetch, one state call per round (GAP
     ).toContain('fetch-issues-batch')
   })
 
-  it('the bound is declared an API bound, not a fan-out cap (ADR-005)', () => {
+  it('the bound is declared an API bound, not a fan-out cap', () => {
     expect(
       WAVE,
-      'ADR-005: do NOT cap how many tickets a round runs; the bound is on API calls only',
+      'do NOT cap how many tickets a round runs; the bound is on API calls only',
     ).toContain('API bound, not a fan-out cap')
   })
 
@@ -284,7 +284,7 @@ describe('wave fetch discipline — one pre-fetch, one state call per round (GAP
     expect(WAVE).toContain('**Untrusted content — one wrapping site.**')
     expect(WAVE).toContain('<untrusted-issue-body>')
     // The containment marker must appear once in this partial: a second wrapping
-    // site is a second place the rule can drift out of step (PF-023).
+    // site is a second place the rule can drift out of step.
     expect(
       WAVE.split('<untrusted-issue-body>').length - 1,
       'more than one wrapping instruction in the wave partial means more than one authority on containment',
@@ -517,7 +517,7 @@ describe('AC-2.10 — byte-identity of the four github renderings', () => {
         expect(
           collectTokenSites(src, neutral).length,
           `"${neutral}" must be stated exactly once in ${label} — the rendering it expands to is ` +
-          'pinned above, and two statements of the neutral form are two authorities (PF-023)',
+          'pinned above, and two statements of the neutral form are two authorities',
         ).toBe(1)
       })
     }
@@ -526,7 +526,7 @@ describe('AC-2.10 — byte-identity of the four github renderings', () => {
   it('known-bad probe: a seeded second site is reported by the same collector', () => {
     // Both failure directions, driven through collectOffCountSites — the SAME
     // function the four pins above call, so a collector that stopped counting
-    // takes this probe red with the guards it backs (PF-018).
+    // takes this probe red with the guards it backs.
     for (const rendering of AC_2_10_RENDERINGS) {
       const [, firstSrc] = rendering.sources[0]
       const label = rendering.sources[0][0]
@@ -569,7 +569,7 @@ describe('AC-2.10 — byte-identity of the four github renderings', () => {
 // REQUIREMENTS placeholder, its rewrite rule, its unresolved-dependency stop and
 // its Summary strip, each read from the text — and the reader parses the body by
 // the grammar _wave.mds states. A step that drops any of them files differently
-// here, so each has a known-bad probe through the same collector (PF-064).
+// here, so each has a known-bad probe through the same collector.
 
 const FILING_OPEN = '### After the workflow returns — file the issues'
 const FILING_CLOSE = '### Ticket body structure'

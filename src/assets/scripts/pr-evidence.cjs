@@ -898,7 +898,7 @@ function needsDiff(x) {
 /**
  * D-LADDER: the arms, in the order they are tried. PRECEDENCE is derived from
  * this table. Every arm but the last is a POSITIVE match; the last is the
- * conservative default (applies PF-075: a verified state is only ever reached by
+ * conservative default (a verified state is only ever reached by
  * a positive conjunction, never because nothing else matched).
  *
  * @type {readonly Arm[]}
@@ -978,7 +978,7 @@ const ARMS = Object.freeze([
 /**
  * D-LADDER: the order `classify` tries its arms in — first match wins, and the
  * terminal arm is the conservative UNVERIFIED, so no state is ever reached by
- * exhaustion (applies PF-075). DERIVED from ARMS, so the order the contract states
+ * exhaustion. DERIVED from ARMS, so the order the contract states
  * (parity-pinned to this list) and the order the code runs cannot drift apart.
  */
 const PRECEDENCE = Object.freeze(/** @type {State[]} */ (ARMS.map(arm => arm.state)));
@@ -1446,7 +1446,7 @@ function parseEvidenceComment(text) {
 }
 
 // ---------------------------------------------------------------------------
-// splice — only the bytes between the markers are devflow's (applies ADR-024)
+// splice — only the bytes between the markers are devflow's
 // ---------------------------------------------------------------------------
 
 /**

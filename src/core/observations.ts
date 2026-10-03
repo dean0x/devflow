@@ -30,7 +30,7 @@ export type DecisionsEntryStatus = (typeof DECISIONS_ENTRY_STATUSES)[number];
  *
  * Ledger fields (added for decisions-ledger.jsonl — all optional for backward compat):
  *   anchor_id       — assigned once when an observation is promoted to an ADR/PF entry
- *                     (e.g. "ADR-016"). Never recomputed or reused. Lives in the
+ *                     (e.g. "ADR-NNN"). Never recomputed or reused. Lives in the
  *                     anchored ledger (decisions-ledger.jsonl); not set on raw log rows.
  *   date            — ISO date string (YYYY-MM-DD) stamped at assign-anchor time. Both
  *                     decisions and pitfalls carry this field; legacy pre-stamp rows may
@@ -59,7 +59,7 @@ export interface LearningObservation {
   staleReason?: string;
   quality_ok?: boolean;
   // --- Ledger fields (Phase 2: decisions-ledger.jsonl schema extension) ---
-  /** Stable anchor ID once promoted to ADR/PF (e.g. "ADR-016"). */
+  /** Stable anchor ID once promoted to ADR/PF (e.g. "ADR-NNN"). */
   anchor_id?: string;
   /** Promotion date (YYYY-MM-DD). Both decisions and pitfalls carry this field (stamped at assign-anchor time); legacy pre-stamp rows may lack it. */
   date?: string;
@@ -97,7 +97,7 @@ export interface LedgerRow {
   pattern: string;
   /** Full description; parsed into sections by the format helpers. */
   details: string;
-  /** Stable anchor ID (e.g. 'ADR-016'). Set once by assign-anchor, never recomputed. */
+  /** Stable anchor ID (e.g. 'ADR-NNN'). Set once by assign-anchor, never recomputed. */
   anchor_id: string;
   /** Rendered entry status in decisions.md / pitfalls.md. Typed to prevent illegal values. */
   decisions_status: DecisionsEntryStatus;

@@ -83,7 +83,7 @@ function readSource(relPath: string): string {
   if (!existsSync(abs)) {
     throw new Error(
       `${relPath} is absent — a provider module named by the registry is not on disk, so every ` +
-      `literal pin for that provider would compare against nothing (PF-018)`,
+      `literal pin for that provider would compare against nothing`,
     );
   }
   return readFileSync(abs, 'utf-8');
@@ -112,7 +112,7 @@ function readGithubApiReference(): string {
   if (!existsSync(abs)) {
     throw new Error(
       `${GITHUB_API_FILE} is absent at ${abs} — it is the only reference a non-tracker GitHub ` +
-      `batch op can reach, so every pin against it would compare against nothing (PF-018)`,
+      `batch op can reach, so every pin against it would compare against nothing`,
     );
   }
   return readFileSync(abs, 'utf-8');
@@ -263,7 +263,7 @@ describe('provider literals: the cross-provider matrix (AC-3.13, GAP-13)', () =>
       PROVIDERS.map(p => p.token).sort(),
       'the provider set must come from the registry, so a provider cannot be silently omitted',
     ).toEqual(['github', 'jira', 'linear']);
-    expect(PROVIDER_LITERALS.length, 'the literal matrix is empty (PF-018)').toBeGreaterThan(0);
+    expect(PROVIDER_LITERALS.length, 'the literal matrix is empty').toBeGreaterThan(0);
     for (const entry of PROVIDER_LITERALS) {
       expect(
         entry.present.length,
@@ -490,7 +490,7 @@ describe('provider literals: fetch-issues-batch is one query on every provider [
       collectPerItemFetchVerbs('## Operation: fetch-issues-batch'),
       'the op anchor line must not be reported — the plural is not the singular',
     ).toEqual([]);
-    expect(PER_ITEM_FETCH_SHAPES.length, 'the shape table is empty (PF-018)').toBeGreaterThan(0);
+    expect(PER_ITEM_FETCH_SHAPES.length, 'the shape table is empty').toBeGreaterThan(0);
   });
 });
 
@@ -533,8 +533,8 @@ describe('provider literals: fetch-issues-batch is one query on every provider [
 // hypothetical — and a row that pins a whole sentence makes the ceiling and the
 // guard contradict each other. The guard then loses in the only way that matters: it
 // goes RED naming a clause that is still present, because the rewrite moved a comma
-// or split one sentence into two. That is PF-057's mistake one level down, pinning
-// where a sentence happens to break.
+// or split one sentence into two. That pins layout rather than meaning, one level
+// down: where a sentence happens to break.
 //
 // So each row's shape is the shortest phrase that carries its claim, and a claim
 // with two halves is TWO rows rather than one ordered regex with a bridge between
@@ -639,7 +639,7 @@ describe('provider literals: the github backlink reference, per file (GAP-18)', 
   it('known-bad probe: each claim, deleted from a copy, is reported by the same collector', () => {
     // Mechanic (b): the bad shape is built inside this `it` from the shipped bytes,
     // so no committed file is touched to show red. Per ROW rather than once, because
-    // a table is only as good as the shapes it can be SHOWN to express (PF-018) —
+    // a table is only as good as the shapes it can be SHOWN to express —
     // and a row whose pattern drifted off the shipped wording would otherwise sit
     // here matching nothing while the main arm passed on the other four.
     const pristine = readGenerated(GITHUB_BACKLINK_FILE);
@@ -661,7 +661,7 @@ describe('provider literals: the github backlink reference, per file (GAP-18)', 
         `removing "${claim.label}" must be reported by the same collector`,
       ).toContain(`wounded: missing ${claim.label}`);
     }
-    expect(GITHUB_BACKLINK_CLAIMS.length, 'the claim table is empty (PF-018)').toBeGreaterThan(0);
+    expect(GITHUB_BACKLINK_CLAIMS.length, 'the claim table is empty').toBeGreaterThan(0);
   });
 
   it('the STOP threshold is stated on the github path ONLY, per file and never in the agent', () => {
@@ -723,7 +723,7 @@ describe('provider literals: the github backlink reference, per file (GAP-18)', 
 // Non-vacuity: the corpus this file measures is the real one
 // ---------------------------------------------------------------------------
 
-describe('provider literals: the corpus is real (PF-018)', () => {
+describe('provider literals: the corpus is real', () => {
   it('every provider contributes a full op roster to the scan', () => {
     expect(TRACKER_OPS.length, 'empty op roster').toBeGreaterThanOrEqual(MIN_VARIANT_PAIRS);
     for (const provider of PROVIDERS) {
@@ -963,7 +963,7 @@ describe('shared provider-independent rules have exactly one author', () => {
   );
   const providerSources = TOOL_CALL_PROVIDERS.map(p => ({ label: p.source, text: readSource(p.source) }));
 
-  it('the registry and the corpus it ranges over are both real (PF-018)', () => {
+  it('the registry and the corpus it ranges over are both real', () => {
     expect(SHARED_RULES.length, 'an empty registry asserts nothing').toBeGreaterThan(0);
     for (const rule of SHARED_RULES) {
       expect(rule.why.trim().length, `${rule.define}: a row without a reason is a grep`)
@@ -1158,7 +1158,7 @@ describe('the comment-body cap renders one value at every emitted site', () => {
     .map(provider => ({ provider, declared: declaredCap(readSource(provider.source)) }))
     .filter((row): row is { provider: Provider; declared: string } => row.declared !== null);
 
-  it('the arm has owners, and each declares a usable cap (PF-018)', () => {
+  it('the arm has owners, and each declares a usable cap', () => {
     expect(
       owners.map(o => o.provider.token).sort(),
       'the cap define is owned by the tool-call providers — with none of them declaring one, ' +
@@ -1316,7 +1316,7 @@ describe('provider literals: the github fetch-issue reference, per file', () => 
         `removing "${claim.label}" must be reported by the same collector`,
       ).toContain(`wounded: missing ${claim.label}`);
     }
-    expect(GITHUB_FETCH_CLAIMS.length, 'the claim table is empty (PF-018)').toBeGreaterThan(0);
+    expect(GITHUB_FETCH_CLAIMS.length, 'the claim table is empty').toBeGreaterThan(0);
   });
 
   it('known-bad probe: the pre-regression wording — an unanchored numeric branch — goes red', () => {
@@ -1350,7 +1350,7 @@ describe('provider literals: the github fetch-issue reference, per file', () => 
 // there. A define emits one string, so hoisting it would silently re-indent one
 // of the three, and indentation is list GRAMMAR rather than whitespace here: a
 // bullet re-indented out of its parent becomes a sibling, and the containment
-// instruction stops belonging to the fetch step it qualifies (PF-063).
+// instruction stops belonging to the fetch step it qualifies.
 //
 // The exclusion is asserted rather than left as a comment, because a comment is
 // exactly what the next hoisting pass would not read.
@@ -1392,7 +1392,7 @@ export function collectContainmentIndentDrift(
 describe('the marker-neutralisation bullet keeps its own indent in every module', () => {
   const sources = PROVIDERS.map(p => ({ token: p.token, text: readSource(p.source) }));
 
-  it('the table covers every registered provider (PF-018)', () => {
+  it('the table covers every registered provider', () => {
     expect(
       CONTAINMENT_INDENTS.map(i => i.token).sort(),
       'a provider with no declared indent would pass this arm by not being looked at',

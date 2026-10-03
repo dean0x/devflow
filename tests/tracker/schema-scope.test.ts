@@ -10,14 +10,14 @@
  * does not know about degrades to that section's NEUTRAL DEFAULT rather than to
  * DEGRADED, so the agent proceeds confidently on a value nobody wrote.
  *
- * SIX CLAIMS, each able to fail on its own (PF-064):
+ * SIX CLAIMS, each able to fail on its own:
  *   1. SCHEMA TABLE — every section has a scope and an absent⇒default, no blank
  *      cells, read out of the agent's own table.
  *   2. HEADINGS, BOTH DIRECTIONS [DR-21] — writer ↔ reader set equality with a
  *      distinct why-message per direction, over a floor counted in DISTINCT
  *      headings so neither direction is vacuous and neither is satisfied by a
  *      repeat standing in for a dropped section.
- *   3. ADR-007 THREE-WAY SWEEP (AC-3.16) — the configuration file is read in
+ *   3. ONE-READER THREE-WAY SWEEP (AC-3.16) — the configuration file is read in
  *      exactly ONE place. No op section, no generated reference, no command
  *      source and no `dist/commands/*.md` reads it.
  *   4. NO CREDENTIAL, NO HTTP (AC-3.18) — no `curl`, `wget`, `Authorization:` or
@@ -131,7 +131,7 @@ describe('schema table: every section has a scope and a documented absent⇒defa
     expect(
       rows.length,
       'the agent\'s schema table parsed to zero rows — every assertion below would be vacuous. ' +
-      'The row shape is `| `## Section` | scope | absent ⇒ | shape gate |` (PF-018).',
+      'The row shape is `| `## Section` | scope | absent ⇒ | shape gate |`.',
     ).toBeGreaterThanOrEqual(TRACKER_SCHEMA_SECTIONS.length);
 
     // `## Project` carries TWO values (site and key), so the table has one row per
@@ -293,7 +293,7 @@ describe('[DR-21] writer ↔ reader heading equality, both directions', () => {
 });
 
 // ---------------------------------------------------------------------------
-// 3. AC-3.16 — the three-way ADR-007 sweep: ONE reader, enumerated by name
+// 3. AC-3.16 — the three-way sweep: ONE reader, enumerated by name
 // ---------------------------------------------------------------------------
 
 /**
@@ -334,7 +334,7 @@ describe('AC-3.16: the tracker configuration file has exactly ONE reader', () =>
   it('positive arm: the Git-agent preamble names each provider\'s file, read with the Read tool', () => {
     // The sweep below is an absence. Without this arm it would be satisfied by a
     // tree in which nothing reads the file at all — which is also the state in
-    // which the whole feature is inert (PF-064).
+    // which the whole feature is inert.
     const block = preambleContractBlock();
     expect(block, 'the reader must name the Read tool').toContain('Read tool');
     expect(
@@ -379,7 +379,7 @@ describe('AC-3.16: the tracker configuration file has exactly ONE reader', () =>
       offenders,
       `an operation section reads the tracker configuration file. It is resolved ONCE per spawn in ` +
       `the preamble and passed down; a second read is a second authority on the same values, and ` +
-      `they can disagree within one run (§14.3, PF-023):\n  ${offenders.join('\n  ')}`,
+      `they can disagree within one run (§14.3):\n  ${offenders.join('\n  ')}`,
     ).toEqual([]);
     for (const op of TRACKER_GITHUB_OPS) {
       expect(
@@ -493,8 +493,8 @@ export function collectForbiddenIo(corpus: readonly CorpusEntry[]): string[] {
  * Why an exclusion and not a cleverer pattern. A line-scoped "a NEVER on this line
  * means it is a prohibition" predicate breaks on wrapping — the clause's `NEVER`
  * and its `curl` sit on different physical lines already — and pinning where a
- * sentence happens to wrap is PF-057's class of mistake. So the case is classified
- * instead (ADR-025), and the exclusion pays for itself three ways:
+ * sentence happens to wrap pins the file's layout rather than its meaning. So the
+ * case is classified instead, and the exclusion pays for itself three ways:
  *
  *   1. It is named by PATH, not by pattern, so no other file is admitted.
  *   2. Only the two RULES that appear in the prohibition are admitted, so an
@@ -576,7 +576,7 @@ describe('AC-3.18: no HTTP fallback and no credential read in the Git spawn surf
     // D-AC318-SCOPE. `src/assets/skills/git/references/github-api.md` carries a
     // documentation EXAMPLE of an `Authorization:` header (`gh api -H "…"`), which
     // predates this phase and is not a tracker path. It is excluded from the gate
-    // above — and what the exclusion owes in return (ADR-025's amendment) is this:
+    // above — and what the exclusion owes in return is this:
     // the excluded term is asserted to be exactly one file and exactly one rule,
     // so it cannot quietly grow into a second offender or a second file.
     const dir = path.join(skillsDir(), 'git', 'references');
@@ -843,7 +843,7 @@ const GITHUB_ONLY_REASONS: readonly string[] = [
  * DEGRADED reasons this phase added to git.md were registered by review alone.
  *
  * Written in the same register as GITHUB_ONLY_REASONS and for the same reason: a
- * prohibition and its exemption registry are ONE authority (PF-067). An exemption
+ * prohibition and its exemption registry are ONE authority. An exemption
  * that lives in a `.filter` predicate is invisible to anyone reading the rule, and
  * a reader who greps only the rule finds a violation the arm silently permits.
  *
@@ -876,7 +876,7 @@ const GIT_AGENT_LEGACY_REASONS: readonly string[] = [
  * rows back into `GIT_AGENT_LEGACY_REASONS` would exempt the wording ANYWHERE the
  * agent file appears, and vice versa — the shipped property is narrower: each
  * legacy literal is excused in the one tree that emits it and reported everywhere
- * else (applies ADR-025; the classification is per literal, per site).
+ * else (the classification is per literal, per site).
  *
  * Scoped by PATH PREFIX rather than by basename, because `ensure-pr-ready.md`
  * exists under `pr/` and under every provider: a basename scope would quietly
@@ -959,8 +959,7 @@ const RETIRED_REASONS: readonly string[] = [
   'tracker.md required fields incomplete — delete .devflow/tracker.md and re-learn',
   // #393 (PR6): moved here from LIVE_REASONS, never deleted. Every install carries
   // every provider's mechanics, so no legitimate configuration leaves a named
-  // mechanics file absent, and a prompt rule for a damaged install guards nothing
-  // (ADR-028).
+  // mechanics file absent, and a prompt rule for a damaged install guards nothing.
   'tracker mechanics unavailable',
   // #393 (PR6): the pre-per-provider remedy — the file it names no longer exists.
   'tracker.md required fields incomplete — edit ~/.devflow/tracker.md',
@@ -979,8 +978,8 @@ const PHASE3_STATUS_LINES: readonly string[] = [
  * status string and the prose that states it is hard-wrapped. `_mcp.md`'s
  * capability clause wraps mid-reason, so the raw capture was
  * `"no\ntracker tool for {capability}"` — a string matching no registry entry and
- * describing no defect. Normalising here rather than reflowing the source is the
- * choice PF-057 argues for: the alternative pins where a sentence happens to
+ * describing no defect. Normalising here rather than reflowing the source is
+ * deliberate: the alternative pins where a sentence happens to
  * break, and the next reflow re-breaks it somewhere else.
  *
  * Deliberately NOT a general unescape or trim-only: the collapse is what makes a
@@ -995,7 +994,7 @@ export function collectDegradedReasons(text: string): string[] {
   // `tracker configuration mismatch (repository override` — an unregistered
   // spelling of a registered row, reported against the very agent that emits it
   // correctly. Excluding `(` from the outer class is what makes the alternation
-  // reachable (STRENGTHENED, applies ADR-025).
+  // reachable (STRENGTHENED).
   return [...text.matchAll(/DEGRADED \(((?:[^()]|\([^()]*\))*)\)/g)]
     .map(m => m[1].replace(/\s+/g, ' ').trim());
 }
@@ -1008,7 +1007,7 @@ const REASON_PLACEHOLDERS: readonly string[] = ['{reason}'];
  * admits.
  *
  * The three exemption registries are consulted HERE, beside the prohibition, so
- * the rule and its exceptions are one authority (PF-067) instead of a rule in an
+ * the rule and its exceptions are one authority instead of a rule in an
  * `it` and an exception buried in a corpus `.filter`.
  *
  * `GIT_AGENT_LEGACY_REASONS` is scoped to the agent file itself rather than
@@ -1022,7 +1021,7 @@ export function collectUnregisteredReasons(corpus: readonly CorpusEntry[]): stri
     // The parser's blind spot is SILENCE, not a false pass: a reason whose
     // parentheses are unbalanced, or nested two deep, matches nothing and is
     // dropped rather than reported, so the registry arm goes quiet about exactly
-    // the spelling it exists to catch (avoids PF-064 — an absence-based guard
+    // the spelling it exists to catch (an absence-based guard
     // has to know it looked). Every `DEGRADED (` in the corpus must therefore
     // yield a parse.
     const opened = entry.content.match(/DEGRADED \(/g)?.length ?? 0;
@@ -1060,7 +1059,7 @@ describe('[DR-04] DEGRADED literal registry: forward direction', () => {
       // (+2 -1), the plan artifact's cap (+1) and the two-server ambiguity (+1).
       // 25 since #364 (PR5): the trace map (+1) and associate-release's three
       // marker reasons (+3). 26 since #365 (PR6): the wave PR's branch check (+1).
-      // 25 since #393 (PR6): `tracker mechanics unavailable` RETIRED (ADR-028) —
+      // 25 since #393 (PR6): `tracker mechanics unavailable` RETIRED —
       // moved to RETIRED_REASONS, whose arm is the stricter one (absent
       // everywhere), and the union floor below is what stops a row leaving both.
       '§14.2 fixes 25 non-`(none)` reasons; a shorter table is a narrowed registry',
@@ -1133,7 +1132,7 @@ describe('[DR-04] DEGRADED literal registry: forward direction', () => {
     ).toBeGreaterThan(0);
     expect(
       LIVE_REASONS.length,
-      'the live half is empty — the forward arm below would assert nothing (PF-018)',
+      'the live half is empty — the forward arm below would assert nothing',
     ).toBeGreaterThan(0);
   });
 
@@ -1191,7 +1190,7 @@ describe('[DR-04] DEGRADED literal registry: forward direction', () => {
     expect(
       alreadyEmitted([seededStale]),
       'the mirror predicate must report a reason that is genuinely emitted — otherwise an empty ' +
-      'deferred half and a broken predicate are the same green (PF-064)',
+      'deferred half and a broken predicate are the same green',
     ).toEqual([seededStale]);
     expect(
       alreadyEmitted(['a reason no site emits — seeded probe']),
@@ -1257,7 +1256,7 @@ describe('[DR-04] DEGRADED literal registry: reverse direction', () => {
     expect(
       GIT_AGENT_LEGACY_REASONS.length,
       'the legacy list is empty — then the exemption branch below is dead and the probe proves ' +
-      'nothing (PF-018)',
+      'nothing',
     ).toBeGreaterThan(0);
 
     // Scope probe: the same literal, in a generated reference, IS reported.
@@ -1280,7 +1279,7 @@ describe('[DR-04] DEGRADED literal registry: reverse direction', () => {
     expect(
       prOnly.length,
       'no PR-host reference is in the corpus — run `npm run build`; without it this whole arm is ' +
-      'a comparison against nothing (PF-018)',
+      'a comparison against nothing',
     ).toBeGreaterThan(0);
 
     const emitted = new Set(prOnly.flatMap(e => collectDegradedReasons(e.content)));
@@ -1294,7 +1293,7 @@ describe('[DR-04] DEGRADED literal registry: reverse direction', () => {
     expect(
       PR_HOST_LEGACY_REASONS.length,
       'the PR-host legacy list is empty — then its exemption branch is dead and this probe proves ' +
-      'nothing (PF-018)',
+      'nothing',
     ).toBeGreaterThan(0);
 
     // Scope probe, both directions of the scoping. A provider reference reaching
@@ -1330,7 +1329,7 @@ describe('[DR-04] DEGRADED literal registry: reverse direction', () => {
     // The same two properties as the legacy arm above, for the live list (#360).
     const prOnly = gitAgentSinkCorpus().filter(e => isPrHostEntryPath(e.path));
     expect(prOnly.length, 'no PR-host reference is in the corpus — run `npm run build`').toBeGreaterThan(0);
-    expect(PR_HOST_REASONS.length, 'the live PR-host list is empty (PF-018)').toBeGreaterThan(0);
+    expect(PR_HOST_REASONS.length, 'the live PR-host list is empty').toBeGreaterThan(0);
 
     const emitted = new Set(prOnly.flatMap(e => collectDegradedReasons(e.content)));
     expect(
@@ -1387,7 +1386,7 @@ describe('[DR-04] DEGRADED literal registry: reverse direction', () => {
       }
     }
     expect(survivors, `retired reason(s) still present:\n  ${survivors.join('\n  ')}`).toEqual([]);
-    expect(RETIRED_REASONS.length, 'the retired list shrank (PF-018)').toBeGreaterThanOrEqual(9);
+    expect(RETIRED_REASONS.length, 'the retired list shrank').toBeGreaterThanOrEqual(9);
   });
 
   it('known-bad probe: the reason collector reads real and nested parentheses', () => {
@@ -1411,7 +1410,7 @@ describe('[DR-04] DEGRADED literal registry: reverse direction', () => {
     // The parser bounds nesting at one level and requires balance, and both
     // limits fail SILENTLY — the site matches nothing and the registry arm has
     // nothing to object to. A guard that certifies by finding nothing has to
-    // know it actually looked (avoids PF-064).
+    // know it actually looked.
     for (const [label, body] of [
       ['unbalanced', 'emit `TRACEABILITY: DEGRADED (tracker configuration mismatch (repository override)`'],
       ['doubly nested', 'emit `TRACEABILITY: DEGRADED (outer (middle (inner)))`'],
@@ -1457,7 +1456,7 @@ describe('[DR-04] DEGRADED literal registry: reverse direction', () => {
 //
 // It has to live in the always-loaded block and nowhere else. The templates are
 // always loaded, so a rule that only appears in a per-provider mechanics file
-// would be a rule a spawn might not have when it renders the template (PF-058).
+// would be a rule a spawn might not have when it renders the template.
 // That is also why this arm reads the CONTRACT BLOCK rather than the whole file:
 // the clause appearing somewhere in git.md is not the claim.
 
@@ -1549,7 +1548,7 @@ describe('the reader block states the non-github rendering rule (AC-3.11, §14.1
   it('known-bad probe: each clause, deleted from a copy, is reported by the same collector', () => {
     // Mechanic (b) — built from the shipped bytes inside this `it`, per ROW, so a
     // pattern that has drifted off the shipped wording cannot sit here matching
-    // nothing while the arm above passes on the other two (PF-018).
+    // nothing while the arm above passes on the other two.
     const pristine = preambleContractBlock();
     expect(
       collectMissingRenderingClauses('pristine', pristine, RENDERING_CLAUSES),
@@ -1569,7 +1568,7 @@ describe('the reader block states the non-github rendering rule (AC-3.11, §14.1
         `removing "${clause.label}" must be reported by the same collector`,
       ).toContain(`wounded: missing ${clause.label}`);
     }
-    expect(RENDERING_CLAUSES.length, 'the clause table is empty (PF-018)').toBeGreaterThan(0);
+    expect(RENDERING_CLAUSES.length, 'the clause table is empty').toBeGreaterThan(0);
   });
 });
 
@@ -1581,10 +1580,10 @@ describe('the reader block states the non-github rendering rule (AC-3.11, §14.1
 // interpolated into a branch name and into a PR body. `~/.devflow/tracker.md` is
 // hand-editable, machine-wide and written by an LLM, so a token that violates the
 // writer's own schema row is a NORMAL outcome rather than an attack — prose is not
-// prevention (PF-060) — and the gate therefore has to exist on the side that does
+// prevention — and the gate therefore has to exist on the side that does
 // the interpolating. A mechanics file naming "the read-site shape gate" while the
 // shape is stated only in the Tracker agent, which the Git agent never loads, is a
-// control asserted and not implemented (PF-058/PF-023).
+// control asserted and not implemented.
 //
 // The oracle is declared HERE and each side is compared to it, never to the other:
 // two sides that had both lost the denylist would agree with each other perfectly.
@@ -1670,7 +1669,7 @@ describe('the read site carries the `## Reference Rendering` gate it names (secu
       .flatMap(subdir => [`${subdir}/create-release.md`, `${subdir}/ensure-pr-ready.md`])
       .map(rel => rel.split('/').join(path.sep))
       .sort();
-    expect(expected.length, 'no tool-call provider is registered (PF-018)').toBeGreaterThan(0);
+    expect(expected.length, 'no tool-call provider is registered').toBeGreaterThan(0);
     expect(
       sites,
       'the set of references that record a `### Substitutions` discard changed. An operation ' +
@@ -1705,7 +1704,7 @@ describe('the read site carries the `## Reference Rendering` gate it names (secu
 
   it('known-bad probe: each part, removed from a copy, is reported by the same collector', () => {
     // Built from the shipped bytes inside this `it`, per PART, so a predicate that
-    // drifted off the shipped wording cannot sit here matching nothing (PF-018).
+    // drifted off the shipped wording cannot sit here matching nothing.
     const site = renderSiteReferences()[0];
     expect(site, 'no render site to probe').toBeDefined();
     const pristine = site.content;
@@ -1757,7 +1756,7 @@ describe('the read site carries the `## Reference Rendering` gate it names (secu
 // Two connected servers that both offer tracker capabilities is the one
 // configuration in which a write can land in somebody else's tracker and nothing
 // downstream can tell. The contract answers it with SIX clauses, and this is a
-// clause table rather than one substring for the reason PF-018 gives: a rule that
+// clause table rather than one substring for this reason: a rule that
 // kept its DEGRADED literal and lost its affinity clause would satisfy any
 // single-fragment assertion while routing the second half of one operation to the
 // other server.
@@ -1865,7 +1864,7 @@ export function collectMissingScopingClauses(section: string): string[] {
 }
 
 describe('the two-server scoping rule states every clause (AC-13)', () => {
-  it('the registry and the corpus it ranges over are both real (PF-018)', () => {
+  it('the registry and the corpus it ranges over are both real', () => {
     expect(TWO_SERVER_CLAUSES.length, 'an empty clause table asserts nothing').toBeGreaterThan(0);
     for (const clause of TWO_SERVER_CLAUSES) {
       expect(clause.why.trim().length, `${clause.name}: a clause without a reason is a grep`)

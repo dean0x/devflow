@@ -96,7 +96,7 @@ export function removeCaptureHooks(input: string | Settings): string {
 
   let changed = false;
   for (const [hookType, marker] of Object.entries(CAPTURE_HOOK_CONFIG)) {
-    // Evaluate every removal — never short-circuit (PF-015).
+    // Evaluate every removal — never short-circuit.
     const removed = removeHooks(settings, hookType, isCaptureHook(marker));
     changed = changed || removed;
   }

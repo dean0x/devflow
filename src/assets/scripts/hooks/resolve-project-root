@@ -56,8 +56,8 @@ _df_nongit_root() {
 #   DF_LEDGER_ROOT — where the learning ledger and its queue live.
 #
 # D-LEDGER-MAIN-WORKTREE: a linked worktree (`git worktree add`, `claude
-# --worktree`) has its own toplevel, so a ledger anchored there restarts at
-# ADR-001 — main's decisions are invisible in it, and the IDs it mints collide
+# --worktree`) has its own toplevel, so a ledger anchored there restarts its
+# numbering at 001 — main's decisions are invisible in it, and the IDs it mints collide
 # with main's (in a repo whose collision guard refuses, the Learning agent stops
 # for good). The ledger is one per REPOSITORY, not per checkout: DF_LEDGER_ROOT
 # is the main worktree — the parent of `--git-common-dir` — when that common dir

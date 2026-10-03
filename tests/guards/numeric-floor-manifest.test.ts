@@ -137,7 +137,7 @@ function countOccurrences(haystack: string, needle: string): number {
 function checkShape(entries: readonly PinnedEntry[], arrayName: string): void {
   expect(
     entries.length,
-    `${arrayName} array must be non-empty — guard would be vacuous otherwise (PF-018)`,
+    `${arrayName} array must be non-empty — guard would be vacuous otherwise`,
   ).toBeGreaterThan(0);
   for (const entry of entries) {
     expect(entry.id.length, `entry must have a non-empty id`).toBeGreaterThan(0);

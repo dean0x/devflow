@@ -1,15 +1,16 @@
 /**
  * devflow compliance — Enable, disable, set, and check status of the compliance feature.
  *
- * Applies ADR-013: CLI-layer module; pure helpers in src/core/compliance.ts,
+ * CLI-layer module; pure helpers in src/core/compliance.ts,
  *   I/O orchestration in src/targets/claude-code/compliance-install.ts.
- * Applies ADR-001: compliance is manifest-group (like proxy), not config.json-gated.
- * Avoids PF-009: per-artifact failures are warn-not-throw.
- * Avoids PF-015: enable/disable each converge BOTH artifacts unconditionally.
+ * Compliance is manifest-group (like proxy), not config.json-gated.
+ * Per-artifact failures are warn-not-throw, so one failed artifact never aborts the rest.
+ * Enable/disable each converge BOTH artifacts unconditionally, so neither is left
+ *   half-converged.
  * The evidence-policy lines (--status, and the --enable/--set suggestion) come
  *   from src/core/evidence-policy.ts, the seam onto the package's own resolvers;
  *   the CLI prints the keys to add to .devflow/project.json and never writes it
- *   (applies ADR-024).
+ *   (the file is team-owned).
  */
 
 import { Command } from 'commander';
@@ -359,7 +360,7 @@ export const complianceCommand = new Command('compliance')
 
     const resolved = resolveComplianceCliAction(current, action, setFrameworks);
 
-    // Converge artifacts (PF-015: always converge, never short-circuit)
+    // Converge artifacts (always converge, never short-circuit)
     await convergeFromManifest({
       claudeDir,
       devflowDir,
@@ -392,7 +393,7 @@ export const complianceCommand = new Command('compliance')
     }
 
     // Suggest the team file compliance now implies. Printed, never written:
-    // .devflow/project.json is team-owned (D-POLICY-NO-WRITE, applies ADR-024).
+    // .devflow/project.json is team-owned (D-POLICY-NO-WRITE).
     if (resolved.nextState.enabled) {
       const policyModule = loadEvidencePolicyModule();
       const settingsModule = loadSettingsModule();

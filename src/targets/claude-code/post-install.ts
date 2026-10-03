@@ -54,7 +54,7 @@ const CLAUDEIGNORE_NEGATION = '!.claudeignore';
 /**
  * Re-includes the retired evidence-policy file (D-GITIGNORE-V5,
  * D-POLICY-JSON-RETIRED). A COMPLETION line, never a presence sentinel: users may author it themselves, so its presence
- * proves nothing about the devflow block (avoids PF-059). It sits after `.devflow/*`
+ * proves nothing about the devflow block. It sits after `.devflow/*`
  * (which it overrides under last-match-wins) and before `.claudeignore`, so the
  * block's final line stays `.claudeignore`.
  */
@@ -64,11 +64,11 @@ const DEVFLOW_POLICY_LINE = '!.devflow/policy.json';
  * Re-includes the team-committed project settings file (D-GITIGNORE-V6). The same
  * contract as the policy line: a COMPLETION line, never a presence sentinel — a
  * user may author it before devflow ever runs, so its presence proves nothing about
- * the block (avoids PF-059). It sits after the policy line and before `.claudeignore`,
+ * the block. It sits after the policy line and before `.claudeignore`,
  * so a v5 block, which ends in `.claudeignore`, gains it just before that line
  * (D-GITIGNORE-IN-BLOCK, computeDevflowGitignore). Without it
  * `.devflow/*` ignores `.devflow/project.json`, and a team could only commit it with
- * `git add -f`. Devflow never writes the file itself (ADR-024).
+ * `git add -f`. Devflow never writes the file itself.
  */
 const DEVFLOW_PROJECT_LINE = '!.devflow/project.json';
 
@@ -169,7 +169,7 @@ const BLOCK_RUN_MAX = 3;
  * user-authored line inverts both halves of the contract: projects that already carry
  * that line are told the block is installed when it is not, and a user's
  * `!.claudeignore` un-ignore is silently reversed by re-appending `.claudeignore`
- * under last-match-wins (avoids PF-059).
+ * under last-match-wins.
  *
  * `hasClaudeignoreEntry` is true when some whole line, trimmed, is exactly
  * `.claudeignore` OR `!.claudeignore`. Treating both forms as "present" both honours
@@ -349,7 +349,7 @@ export function mergeDenyList(
 // holds it. (Claude Code's own suggestion, `-v /*`, would deny every absolute mount.)
 // Only entries a release actually shipped belong here: removal and install convergence
 // strip every entry this set names that the template does not, so a rule Devflow never
-// shipped would be taken from a user who wrote it (ADR-024, prove-you-wrote-it).
+// shipped would be taken from a user who wrote it (prove-you-wrote-it).
 export const DEVFLOW_HISTORICAL_DENY: ReadonlySet<string> = Object.freeze(new Set<string>([
   // v1 batch — 154 entries shipped in src/targets/claude-code/templates/managed-settings.json
   'Bash(rm -rf /*)',
@@ -549,7 +549,7 @@ export const DEVFLOW_HISTORICAL_DENY: ReadonlySet<string> = Object.freeze(new Se
  * An empty template (loadTemplateDenyEntries' failure value) retires nothing — an
  * unreadable template must never read as "Devflow dropped every entry it ever shipped".
  *
- * Accepted trade-off (ADR-024): a deny entry is a bare string, so a user who typed a
+ * Accepted trade-off: a deny entry is a bare string, so a user who typed a
  * retired entry themselves is indistinguishable from Devflow's copy and loses it on the
  * next install, exactly as `security --disable` and uninstall already strip every
  * historical entry. Retire an entry only when losing a user's identical copy is
@@ -1084,7 +1084,7 @@ function hookCommandsOf(matcher: unknown): string[] {
  *
  * `existing` comes from a hand-editable file, so every branch is shape-guarded:
  * a `hooks` value (or per-event value) that is not the expected object/array shape
- * is left untouched rather than overwritten or thrown on (applies PF-023 — validate
+ * is left untouched rather than overwritten or thrown on (validate
  * at the sink that mutates).
  *
  * Exported for testing.

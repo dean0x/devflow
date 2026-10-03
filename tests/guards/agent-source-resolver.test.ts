@@ -68,14 +68,14 @@ describe('resolveAllAgents ⊇ getAllAgentNames() (17 agents, AC-0.7)', () => {
 
 describe('resolveAgentSource: dist-preferred, src-fallback', () => {
   // Hermetic: writes only into a mkdtempSync root — never into the real dist/.
-  // PF-043: copies the real agent files rather than hand-authoring fixture content.
+  // Copies the real agent files rather than hand-authoring fixture content.
   const SENTINEL = '# DIST SENTINEL\n'
   let tmpRoot: string
 
   beforeAll(() => {
     tmpRoot = mkdtempSync(path.join(os.tmpdir(), 'devflow-resolver-'))
 
-    // Populate src/assets/agents/ with copies of all real agent files (PF-043).
+    // Populate src/assets/agents/ with copies of all real agent files.
     const srcAgentsDir = path.join(tmpRoot, 'src', 'assets', 'agents')
     mkdirSync(srcAgentsDir, { recursive: true })
     for (const name of getAllAgentNames()) {
@@ -231,7 +231,7 @@ describe('extractOpSectionFromCorpus union mode [DR-18]', () => {
 })
 
 // ---------------------------------------------------------------------------
-// Guard: extractOpSectionFromCorpus — the section boundary is fence-aware (PF-063)
+// Guard: extractOpSectionFromCorpus — the section boundary is fence-aware
 // ---------------------------------------------------------------------------
 //
 // A column-0 `## ` line inside a fenced code block is payload, not structure:
@@ -243,7 +243,7 @@ describe('extractOpSectionFromCorpus union mode [DR-18]', () => {
 // the control: it proves the boundary still fires where it must, so a fence rule
 // that swallowed every heading could not pass this block.
 
-describe('extractOpSectionFromCorpus: `## ` boundaries are fence-aware (PF-063)', () => {
+describe('extractOpSectionFromCorpus: `## ` boundaries are fence-aware', () => {
   const FILE = '/fake/refs/probe-op.md'
 
   function section(content: string): string {
@@ -311,7 +311,7 @@ describe('extractOpSectionFromCorpus: `## ` boundaries are fence-aware (PF-063)'
 // every `npm test` through the extractor; the first fires NOWHERE in the shipped
 // corpus, because every call site inside the extractor passes a declared path.
 // Until this block, "the reader refuses an undeclared path" was a claim about
-// code nothing executed — the shape PF-018 names.
+// code nothing executed.
 //
 // These probes live here rather than beside the fixture in tests/goldens/
 // because that file is the golden ritual's fixture-only lane: it is rewritten
@@ -319,7 +319,7 @@ describe('extractOpSectionFromCorpus: `## ` boundaries are fence-aware (PF-063)'
 // would be carried along by a commit that is supposed to touch fixtures only.
 // The refusal is resolver-adjacent contract, which is what this file holds.
 
-describe('statusLineRefReader: undeclared paths are refused (PF-018)', () => {
+describe('statusLineRefReader: undeclared paths are refused', () => {
   // A REAL generated reference that the list does not declare — so the refusal
   // is proven to be about DECLARATION, not about the file being absent.
   const UNDECLARED = 'tracker/github/fetch-issue.md'
@@ -361,14 +361,14 @@ describe('gitAgentSinkCorpus: references/ is walked recursively (Phase 2 prep)',
   beforeAll(() => {
     tmpRoot = mkdtempSync(path.join(os.tmpdir(), 'devflow-corpus-recursive-'))
 
-    // Copy the real git.md (PF-043: real shape, not hand-authored).
+    // Copy the real git.md (real shape, not hand-authored).
     // Use resolveAgentSource().path — no literal src/assets/agents/ path
     // (the literal-agent-paths guard scans this file's parent directory).
     const srcAgentsDir = path.join(tmpRoot, 'src', 'assets', 'agents')
     mkdirSync(srcAgentsDir, { recursive: true })
     copyFileSync(resolveAgentSource('git').path, path.join(srcAgentsDir, 'git.md'))
 
-    // Build probe-op section from the first real operation section in git.md (PF-043):
+    // Build probe-op section from the first real operation section in git.md:
     // slice the section and rename the heading to probe-op.
     const realGitContent = resolveAgentSource('git').content
     const firstOpStart = realGitContent.indexOf('\n## Operation:')
@@ -436,7 +436,7 @@ describe('gitAgentSinkCorpus: references/ is walked recursively (Phase 2 prep)',
  * Named here rather than inlined in each probe so both the at-bound and
  * past-bound cases walk trees built by the same code — a hand-built chain in one
  * probe and a loop in the other is how two cases come to disagree about what
- * "one level past the bound" means (PF-018).
+ * "one level past the bound" means.
  */
 function makeDepthTree(levels: number): { root: string; deepest: string } {
   const root = mkdtempSync(path.join(os.tmpdir(), 'devflow-walkfiles-bound-'))

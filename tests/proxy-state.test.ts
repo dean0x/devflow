@@ -268,7 +268,7 @@ describe('buildRoutingConfigJson — existing config preservation', () => {
   it('preserves other anthropic fields from existing config', () => {
     // maxUpstreamSockets is a live key in the pinned runtime's AnthropicSchema —
     // a preservation fixture has to use a shape the relay actually accepts, or it
-    // pins behaviour that would break the relay at startup (avoids PF-043).
+    // pins behaviour that would break the relay at startup.
     const existing = JSON.stringify({ port: 4141, anthropic: { maxUpstreamSockets: 64 } });
     const obj = JSON.parse(buildRoutingConfigJson(4141, existing)) as Record<string, unknown>;
     const anthropic = obj.anthropic as Record<string, unknown>;

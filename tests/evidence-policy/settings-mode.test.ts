@@ -48,7 +48,7 @@ import {
 } from './scripted-shim.js';
 
 // ---------------------------------------------------------------------------
-// The .cjs seam (transcribed from its JSDoc typedefs — PF-043, PF-069)
+// The .cjs seam (transcribed from its JSDoc typedefs)
 // ---------------------------------------------------------------------------
 
 type SwitchSource = 'machine' | 'project' | 'personal';
@@ -1184,7 +1184,7 @@ describe('serializeProjectSuggestion', () => {
 });
 
 // ---------------------------------------------------------------------------
-// Source guards (PF-064: non-empty corpus, known-bad probes)
+// Source guards (non-empty corpus, known-bad probes)
 // ---------------------------------------------------------------------------
 
 describe('design decisions at their code sites', () => {
@@ -1197,7 +1197,7 @@ describe('design decisions at their code sites', () => {
 
   it('carries its design decisions at their code sites', () => {
     for (const marker of [
-      'D-SETTINGS-LINE', 'D-SETTINGS-LOCAL-ONLY', 'D-PUBLICATION-CEILING', 'D-FEATURES-NARROW-ONLY', 'ADR-024',
+      'D-SETTINGS-LINE', 'D-SETTINGS-LOCAL-ONLY', 'D-PUBLICATION-CEILING', 'D-FEATURES-NARROW-ONLY',
       'D-LENS-UNION', 'D-PERSONAL-UNTRACKED',
     ]) {
       expect(SOURCE, marker).toContain(marker);

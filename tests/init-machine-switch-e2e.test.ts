@@ -15,7 +15,7 @@
  * These drive the REAL compiled CLI and the INSTALLED hook scripts (not the
  * source tree), so the assertion is about what a user's machine actually runs.
  *
- * PF-060: every spawn gets its env from the shared `sandboxEnv(tmpHome)` — an
+ * Every spawn gets its env from the shared `sandboxEnv(tmpHome)` — an
  * allowlist with HOME pinned to a temp dir, so no inherited DEVFLOW_DIR or
  * CLAUDE_* redirect reaches the child — and the helper asserts that HOME is not a
  * real home before a run can start. Requires a build (`npm run build`).
@@ -249,7 +249,7 @@ describe('init --no-<feature> switches the feature off in every project', () => 
     }
   }, MULTI_RUN_TIMEOUT_MS);
 
-  it('a re-init keeps the machine-wide choice even from a repo whose config says true (ADR-014)', async () => {
+  it('a re-init keeps the machine-wide choice even from a repo whose config says true', async () => {
     runInit(repoA, '--recommended', '--no-learning', '--no-knowledge', '--no-memory');
     await writeRepoConfig(repoB, STALE_ON);
 
@@ -459,7 +459,7 @@ describe('init --hud-only over a full install (D-HUD-ONLY-PRESERVE)', () => {
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
-// TP-8/TP-9 — on→off re-init transitions converge every artifact (PF-015)
+// TP-8/TP-9 — on→off re-init transitions converge every artifact
 // ─────────────────────────────────────────────────────────────────────────────
 
 describe('init on→off re-init transitions', () => {

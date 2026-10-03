@@ -8,7 +8,7 @@
  * written through sudo) are a different file with their own writer and are not
  * matched.
  *
- * What a green run does NOT prove (PF-064): the matcher reads the target argument
+ * What a green run does NOT prove: the matcher reads the target argument
  * as spelled, so a settings path held in a variable whose name does not say
  * "settings" is not seen. Every current writer names it `settingsPath` or
  * `userSettingsPath…`; the reach arm below fails by name if that stops being true.

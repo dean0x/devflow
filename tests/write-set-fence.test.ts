@@ -10,14 +10,14 @@
  * walked), and every path the run added, modified or removed must fall inside that
  * row's declared allowlist. A write outside it fails with the path named. A row
  * marked `mustWrite` must also change something, so a toggle that silently
- * stopped writing fails too (PF-018), and the table leaves every toggle flipped
+ * stopped writing fails too, and the table leaves every toggle flipped
  * back to its installed state, so each row starts from a known one.
  *
  * Coverage is held to the CLI's own definitions, not to this table: every
  * top-level command in `devflow --help` has a row or a reason in UNFENCED_COMMANDS,
  * and every `--enable` / `--disable` / `--set` option a command defines has a row
- * or a reason in UNFENCED_ACTIONS. Every spawn runs under `sandboxEnv`'s temp HOME
- * (PF-060); no row reaches a real `claude` (the sandbox's fake records any call) or a
+ * or a reason in UNFENCED_ACTIONS. Every spawn runs under `sandboxEnv`'s temp HOME;
+ * no row reaches a real `claude` (the sandbox's fake records any call) or a
  * real `gh` (the sandbox's fake fails like an unauthenticated one and writes nothing).
  */
 

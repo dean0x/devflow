@@ -1,5 +1,5 @@
 /**
- * command→agent spawn-key seam (PF-024).
+ * command→agent spawn-key seam.
  *
  * Two-sided seam test pinning the command→agent input contract. Complements
  * registry-integrity.test.ts Guard 6 (which checks OPERATION: name accuracy)
@@ -7,7 +7,7 @@
  *
  * This file pins the *caller* side of the seam. registry-integrity.test.ts
  * Guard 6 pins the OPERATION: name side. build-mds.test.ts §16b pins the
- * compiled command literals. Together they form the PF-024 triad.
+ * compiled command literals. Together they check the seam from all three sides.
  *
  * Three directions:
  *   1. Forward  — every KEY: passed in a Git fence is declared in that op's
@@ -20,7 +20,7 @@
  *
  * Exclusions (asserted as a literal set with a rationale comment):
  *   OPERATION   — routing key, not an agent input field
- *   WORKTREE_PATH — cross-cutting optional; excluded by convention (PF-039 analogy)
+ *   WORKTREE_PATH — cross-cutting optional; excluded by convention
  *
  * `COMPLIANCE` was a third exclusion until #362: an op-level key every caller
  * passed and no **Input:** line declared, so no direction could see it. The ops
@@ -28,7 +28,7 @@
  * the seam checks them like any other key; a probe below proves a returning
  * `COMPLIANCE:` key fails the forward direction.
  *
- * **Produces:** / **Requires:** are excluded as a literal set (PF-039, B10(13)):
+ * **Produces:** / **Requires:** are excluded as a literal set (B10(13)):
  * they are a phase-ordering DAG naming principal upstream state, not a
  * spawn-block field contract.
  *
@@ -59,7 +59,7 @@ const DIST_COMMANDS_DIR = path.join(ROOT, 'dist', 'commands')
 // Rationale must be stated per key so the exclusion is never read as accidental.
 const EXCLUDED_KEYS = new Set([
   'OPERATION',    // routing key, not an agent **Input:** field
-  'WORKTREE_PATH', // cross-cutting optional; excluded by convention (PF-039 analogy)
+  'WORKTREE_PATH', // cross-cutting optional; excluded by convention
 ])
 
 // Decision-ledger references restated inside a caller fence as a reminder to the
@@ -69,10 +69,10 @@ const EXCLUDED_KEYS = new Set([
 //
 // Kept as a literal set rather than a /^D\d+$/ class on purpose: a future `D12:`
 // that IS a field must fail loudly here instead of being silently swallowed by a
-// pattern. Same doctrine as EXCLUDED_KEYS and PRODUCES/REQUIRES (PF-039).
+// pattern. Same doctrine as EXCLUDED_KEYS and PRODUCES/REQUIRES.
 const DECISION_ANNOTATION_KEYS = new Set(['D9'])
 
-// Phase-ordering DAG annotations, not spawn-block field contracts (PF-039, B10(13)).
+// Phase-ordering DAG annotations, not spawn-block field contracts (B10(13)).
 const DAG_ANNOTATION_KEYS = new Set(['PRODUCES', 'REQUIRES'])
 
 function isNonFieldKey(key: string): boolean {
@@ -96,7 +96,7 @@ function isNonFieldKey(key: string): boolean {
 // so both anchors must tolerate leading whitespace and the opening double quote.
 // Anchoring at a bare line start (/^OPERATION: /m) matched ZERO of the 15 Git
 // spawn fences in dist/commands/ — keysPassedByOp stayed empty and Directions 1 and 2
-// iterated nothing while every assertion stayed green (PF-018). The
+// iterated nothing while every assertion stayed green. The
 // opMatchedFences invariant below is what makes that failure mode loud.
 const OPERATION_LINE_RE = /^[ \t]*"?OPERATION: (\S+)/m
 const PASSED_KEY_RE = /^[ \t]*"?([A-Z_][A-Z0-9_]*): /gm
@@ -167,7 +167,7 @@ function forwardViolationsFor(section: string, keys: Set<string>): string[] {
 // and called it the producer; that was the defect.
 //
 // ISSUE_URL stays excluded: no URL field is emitted by any Output template, so
-// listing it would violate ADR-003 (no artifact without a reachable producer).
+// listing it would declare an artifact with no reachable producer.
 // ISSUE_ID was excluded for the same reason in c7bff85 and is BACK from Phase 2:
 // the `### Handoff Values` block T2b added to setup-task and fetch-issue emits it
 // under its own label, so it now has a producer. Same for ISSUE_PR_LINK and
@@ -305,7 +305,7 @@ let keysPassedByOp: Map<string, Set<string>>
 let fencesScanned: Map<string, number>
 // Git fences whose text mentions OPERATION: anywhere (the population the parser
 // must cover) vs the ones harvestFence actually parsed. Divergence means the
-// anchors stopped matching the corpus — the vacuity failure mode (PF-018).
+// anchors stopped matching the corpus — the vacuity failure mode.
 let gitFencesMentioningOperation: number
 let gitFencesOpMatched: number
 // Language-tagged recipe fences skipped by the scan (see isRecipeFence).
@@ -396,14 +396,14 @@ describe('non-vacuity: per-agent-type fence counts', () => {
   it('at least one Git agent fence is scanned from DIST_FILES', () => {
     expect(
       fencesScanned.get('Git'),
-      `No Git agent fences found in DIST_FILES — the forward check would pass vacuously (PF-018)`,
+      `No Git agent fences found in DIST_FILES — the forward check would pass vacuously`,
     ).toBeGreaterThan(0)
   })
 
   it('at least one Code agent fence is scanned from DIST_FILES', () => {
     expect(
       fencesScanned.get('Code'),
-      `No Code agent fences found in DIST_FILES — the per-type non-vacuity check would pass vacuously (PF-018)`,
+      `No Code agent fences found in DIST_FILES — the per-type non-vacuity check would pass vacuously`,
     ).toBeGreaterThan(0)
   })
 
@@ -420,7 +420,7 @@ describe('non-vacuity: per-agent-type fence counts', () => {
   it('known-bad probe: the same predicate DOES fire on a seeded Tracker fence', () => {
     // Mechanic (b). Without this, the ceiling above is satisfied by a predicate
     // that recognises nothing — the difference between "no command spawns Tracker"
-    // and "nothing can see a Tracker spawn" is invisible in a green log (PF-018).
+    // and "nothing can see a Tracker spawn" is invisible in a green log.
     // Both spawn spellings isAgentBlock accepts are seeded, and the recipe form
     // too, because the counter above is deliberately read before the recipe skip.
     for (const seeded of [
@@ -455,13 +455,13 @@ describe('non-vacuity: per-agent-type fence counts', () => {
     // stops matching the corpus fails here instead of going quietly vacuous.
     expect(
       gitFencesMentioningOperation,
-      'no Git fence mentions OPERATION: — the corpus shape changed (PF-018)',
+      'no Git fence mentions OPERATION: — the corpus shape changed',
     ).toBeGreaterThan(0)
     expect(
       gitFencesOpMatched,
       `${gitFencesOpMatched}/${gitFencesMentioningOperation} Git fences with an OPERATION: line were parsed. ` +
       'The OPERATION anchor no longer matches the compiled fence shape — the forward/reverse ' +
-      'directions would iterate an empty map and pass vacuously (PF-018).',
+      'directions would iterate an empty map and pass vacuously.',
     ).toBe(gitFencesMentioningOperation)
   })
 
@@ -537,7 +537,7 @@ describe('forward: every KEY: passed is declared in **Input:**', () => {
   // Verbatim pre-A1 text of src/assets/commands/debug.mds:49-53
   // (`git show e726874:src/assets/commands/debug.mds`), including the opening
   // double quote and the `{issue number}` placeholder. Runtime shape, not a
-  // stylised one (PF-043): a stripped-down `ISSUE: 42` fence with the anchor at
+  // stylised one: a stripped-down `ISSUE: 42` fence with the anchor at
   // a bare line start does not occur anywhere in the compiled corpus, so a proof
   // built on it stays green even when the parser matches nothing real.
   //
@@ -549,7 +549,7 @@ describe('forward: every KEY: passed is declared in **Input:**', () => {
    * `harvestFence(...)!` would hand the arm a `null` that surfaces as "cannot read
    * properties of null" at the next `.op`, saying nothing about which fence the
    * parser stopped recognising — and a parser that stopped recognising the sample
-   * is exactly how a known-bad proof goes quietly inert (PF-018).
+   * is exactly how a known-bad proof goes quietly inert.
    */
   const requireHarvest = (fence: string, label: string): { op: string; keys: Set<string> } => {
     const harvested = harvestFence(fence)
@@ -582,7 +582,7 @@ describe('forward: every KEY: passed is declared in **Input:**', () => {
     'Return issue title, body, labels, and any linked error logs."\n' +
     '```'
 
-  it('known-bad sample: pre-A1 debug.mds fence is parsed by the live parser (PF-043 shape)', () => {
+  it('known-bad sample: pre-A1 debug.mds fence is parsed by the live parser (runtime shape)', () => {
     const harvested = harvestFence(KNOWN_BAD_FENCE)
     expect(
       harvested,
@@ -648,7 +648,7 @@ describe('forward: every KEY: passed is declared in **Input:**', () => {
 
   it('setup-task and ensure-pr-ready declare the mechanism inputs as required, never optional (#362)', () => {
     // Required, not optional: the seam's reverse direction then insists a caller
-    // passes them, which is what lets the ops carry no absent-input prose (ADR-028).
+    // passes them, which is what lets the ops carry no absent-input prose.
     const setup = parseInputIdentifiers(requireOpSection('setup-task'))
     expect(setup.required).toEqual(expect.arrayContaining(['ISSUE_REQUIRED', 'APPLY_CONVENTIONS']))
     const prReady = parseInputIdentifiers(requireOpSection('ensure-pr-ready'))
@@ -832,7 +832,7 @@ describe('third direction: every issue_capture_contract() value has a producer i
     // The shape this direction exists to catch: a contract key whose producer line
     // nobody emits. Seeded by stripping the three Handoff Values lines out of a COPY
     // of the live body and driving the REAL collector over it, so a collector that
-    // stopped reporting takes this red too (PF-018) — and so the probe tracks the
+    // stopped reporting takes this red too — and so the probe tracks the
     // live text rather than a snapshot that can only go stale.
     const gitContent = gitCorpus[0]?.content ?? ''
     expect(gitContent.length, 'git.md corpus must be non-empty (non-vacuity)').toBeGreaterThan(1000)

@@ -39,8 +39,8 @@
  * -----------------------------------
  * Claims about the `## Known Unknowns` section are about the SOURCE module: that
  * section is module-level prose, which the build emits nowhere by design (a
- * column-0 `## ` inside a generated reference terminates its operation section —
- * PF-063). Every claim about mechanics is about the GENERATED files, because that
+ * column-0 `## ` inside a generated reference terminates its operation section).
+ * Every claim about mechanics is about the GENERATED files, because that
  * is what a spawn reads. Each assertion names the side it reads, and every dist
  * read is fail-loud with a build hint (R3).
  */
@@ -307,7 +307,7 @@ describe('linear module: marker namespaces (AC-3.14, GAP-20)', () => {
     }
     expect(
       MARKER_NAMESPACES.length,
-      'the namespace table is empty, so the loop above ran zero times (PF-018)',
+      'the namespace table is empty, so the loop above ran zero times',
     ).toBeGreaterThanOrEqual(3);
   });
 
@@ -500,7 +500,7 @@ describe('linear module: the anchored ref grammar and its UUID alternative (§14
     for (const ref of ACCEPTED_REFS) {
       expect(acceptsRef(ref), `${JSON.stringify(ref)} must be accepted`).toBe(true);
     }
-    expect(ACCEPTED_REFS.length, 'the accepted corpus is empty (PF-018)').toBeGreaterThan(0);
+    expect(ACCEPTED_REFS.length, 'the accepted corpus is empty').toBeGreaterThan(0);
   });
 
   it('known-bad table: every hostile ref is REJECTED by the grammar as written', () => {
@@ -513,7 +513,7 @@ describe('linear module: the anchored ref grammar and its UUID alternative (§14
     expect(
       HOSTILE_REFS.length,
       'the hostile corpus is too thin to discriminate — the filter above would be empty for a ' +
-      'grammar that accepted everything (PF-018)',
+      'grammar that accepted everything',
     ).toBeGreaterThanOrEqual(11);
   });
 
@@ -680,7 +680,7 @@ describe('linear module: Known Unknowns and the filed probe issue (P3c-S3, GAP-4
     ).toContain('## Known Unknowns');
   });
 
-  it('the section lives in module prose, which the build emits NOWHERE (PF-063)', () => {
+  it('the section lives in module prose, which the build emits NOWHERE', () => {
     // A column-0 `## ` inside a generated reference terminates its operation section
     // for every guard that reads it through extractOpSectionFromCorpus — everything
     // below goes silently invisible while the bytes stay on disk. The section
@@ -696,7 +696,7 @@ describe('linear module: Known Unknowns and the filed probe issue (P3c-S3, GAP-4
       expect(
         readGenerated(linearRel(op)),
         `${linearRel(op)} carries the Known Unknowns heading — a column-0 \`## \` after line 1 ` +
-        `truncates this op's section for every union-mode guard (PF-063)`,
+        `truncates this op's section for every union-mode guard`,
       ).not.toContain('## Known Unknowns');
     }
   });
@@ -724,7 +724,7 @@ describe('linear module: Known Unknowns and the filed probe issue (P3c-S3, GAP-4
     // the placement predicate that is driven over a seeded copy here, and the seed
     // is the one relocation that matters: a section below the first marker ships the
     // heading into every generated reference and truncates each op's section for
-    // every union-mode guard (PF-063).
+    // every union-mode guard.
     const firstMarker = source.indexOf('<!-- op: ');
     const relocated =
       source.slice(0, firstMarker).split('## Known Unknowns').join('## A heading that is not it') +
@@ -805,7 +805,7 @@ describe('linear module: tool calls only — no HTTP, no CLI, no credential read
       ),
       'the scrub invocation must not be reported — it is the gate, not a transport',
     ).toEqual([]);
-    expect(FORBIDDEN_TRANSPORTS.length, 'the transport table is empty (PF-018)').toBeGreaterThan(0);
+    expect(FORBIDDEN_TRANSPORTS.length, 'the transport table is empty').toBeGreaterThan(0);
   });
 });
 
@@ -815,7 +815,7 @@ describe('linear module: tool calls only — no HTTP, no CLI, no credential read
 
 describe('linear module: query safety and the cross-cutting rules it invokes', () => {
   // REPOINTED, per-literal, when `### Query safety` moved into the shared
-  // authoring module `_mcp.mds` (ADR-025): the rule is no longer text this
+  // authoring module `_mcp.mds`: the rule is no longer text this
   // module's source spells, so the source is no longer where it can be read. It
   // is read where it is GUARANTEED to appear instead — the one operation that
   // composes a query, in this provider's emitted mechanics — which is also the
@@ -866,7 +866,7 @@ describe('linear module: query safety and the cross-cutting rules it invokes', (
         content,
         `${linearRel(op)}: a posting mechanic must NOT compose the contract's path. The contract is ` +
         `a per-SPAWN load named once, from the agent preamble; a per-operation path made it look ` +
-        `per-operation, and five of these ten files did not carry it at all (PF-058).`,
+        `per-operation, and five of these ten files did not carry it at all.`,
       ).not.toContain('references/tracker/_mcp.md');
     }
     expect(
@@ -911,7 +911,7 @@ const LINEAR_CORPUS: ProviderCorpus = {
  * The map is declared `Map<string, string>` and so is the reader `ProviderCorpus`
  * takes, so a key outside `TRACKER_OPS` is a real possibility rather than one the
  * literal-union inference of `as const` hides behind a `!`. A miss NAMES the op:
- * without it the only signal is a `TypeError` several frames later (PF-069).
+ * without it the only signal is a `TypeError` several frames later.
  */
 function readFromCorpus(corpus: ReadonlyMap<string, string>, op: string): string {
   const text = corpus.get(op);
@@ -930,7 +930,7 @@ describe('linear module: the clauses AC-3.3, AC-3.11 and §14.3 fix here', () =>
       const claims = TOOL_CALL_MECHANICS_CLAIMS.filter(c => c.criterion === criterion);
       expect(
         claims.length,
-        `no claim carries criterion ${criterion} — the arm ranges over nothing (PF-018)`,
+        `no claim carries criterion ${criterion} — the arm ranges over nothing`,
       ).toBeGreaterThan(0);
       const missing = collectMissingMechanicsClaims(LINEAR_CORPUS, claims);
       expect(

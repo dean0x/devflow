@@ -11,7 +11,7 @@
  *   - `devflow tracker --set` writes only the manifest, the attempt counters and
  *     the sentinel (D-TRACKER-CONVERGE-SET) — it moves no reference and no agent.
  *
- * HOME safety (applies PF-060): every test injects an mkdtemp claudeDir. No test
+ * HOME safety: every test injects an mkdtemp claudeDir. No test
  * reads or writes the real ~/.claude, and no test shells out to dist/cli.js.
  */
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
@@ -250,7 +250,7 @@ describe('runTrackerSet: the convergence order is the invariant', () => {
     expect(outcome.messages.at(-1)).toEqual({ level: 'info', text: 'Tracker: jira (unchanged)' });
   });
 
-  it('a failed rearm or sentinel warns without aborting (applies PF-009)', async () => {
+  it('a failed rearm or sentinel warns without aborting', async () => {
     const { calls, io } = makeRecorder({
       rearm: { ok: false, error: 'could not reset the attempt counter' },
       sentinel: { ok: false, error: 'could not update the sentinel' },
@@ -268,7 +268,7 @@ describe('runTrackerSet: the convergence order is the invariant', () => {
  * The recorder asserts the ORDER. This describe asserts what the shipped adapter
  * leaves on disk — and what it does NOT touch.
  *
- * HOME safety (applies PF-060): both directories are mkdtemp'd and passed in.
+ * HOME safety: both directories are mkdtemp'd and passed in.
  */
 describe('runTrackerSet through buildTrackerSetIO', () => {
   let devflowDir: string;

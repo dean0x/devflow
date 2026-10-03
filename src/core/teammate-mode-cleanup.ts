@@ -9,7 +9,7 @@
  *
  * Tolerant: malformed JSON is returned unchanged (no-op). Non-object roots
  * (null, arrays, primitives) are treated as a no-op — only object roots can
- * carry the key (avoids PF-004: a TypeError here would escape the function
+ * carry the key (a TypeError here would escape the function
  * and surface as an unhandled error during uninstall).
  */
 export function stripDevflowTeammateModeFromJson(settingsJson: string): string {

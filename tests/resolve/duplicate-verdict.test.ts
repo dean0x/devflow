@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest'
 import { loadFile, extractSection } from '../helpers'
 
 // -------------------------------------------------------------------------
-// triage.md — DUPLICATE verdict contract (agent side of the PF-024 seam)
+// triage.md — DUPLICATE verdict contract (agent side of the command-agent seam)
 //
 // build-mds.test.ts §16b pins the DUPLICATE literals on the *caller* side
 // (compiled dist/commands/resolve.md). Those guards stay green even if the

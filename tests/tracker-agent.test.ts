@@ -7,14 +7,14 @@
  * runtime: nothing downstream fails loudly when the prompt stops saying
  * "increment the counter before deleting the claim file". These guards are the
  * only place that regression is visible, which is why the prompt's safety
- * literals are pinned here rather than described in prose (PF-060: a prose
+ * literals are pinned here rather than described in prose (a prose
  * prohibition is not a guard).
  *
  * Structure mirrors tests/git-agent.test.ts: the agent is read through
  * resolveAgentSource (dist-preferred, src-fallback, fail-loud), never through a
  * literal agent path, and every negative is driven by a NAMED COLLECTOR that a
  * known-bad sample also drives — so a negative can never pass because the
- * extractor silently stopped returning anything (PF-018).
+ * extractor silently stopped returning anything.
  *
  * Two contracts are asserted here that no other file can assert:
  *   - the agent declares NO `tools:` key (G3.2). provider-scope.test.ts pins the
@@ -61,7 +61,7 @@ import {
   splitFrontmatter,
 } from './helpers.js';
 
-/** Registry key, filename stem and (capitalised) frontmatter name are one identity (PF-021). */
+/** Registry key, filename stem and (capitalised) frontmatter name are one identity. */
 const TRACKER_SLUG = 'tracker';
 const TRACKER_NAME = 'Tracker';
 
@@ -99,8 +99,8 @@ export function collectDelegationLiterals(content: string): string[] {
  *
  * Declared beside the collector rather than inside it because a multi-rule absence
  * guard is only as live as its least-exercised rule: a probe that seeds two lines
- * against six patterns certifies the other four by not contradicting them, which is
- * PF-064's first blindness with the corpus shrunk to the rule list. The labels are
+ * against six patterns certifies the other four by not contradicting them — an
+ * absence result vouching for rules it never exercised. The labels are
  * what let the probe below drive ONE seeded line per rule and assert the two lists
  * are the same length, so a seventh rule cannot land unprobed.
  */
@@ -149,7 +149,7 @@ export function collectQuestionPrimitives(content: string): string[] {
  * Git agent's resolution preamble, so this agent must name no provider at all.
  * That is not merely guard-appeasement: the provider token arrives in the spawn
  * directive, so a provider NAME in the prompt would be a second resolution site
- * (PF-023) as well as Phase-3b/3c vocabulary landing early (ADR-003).
+ * as well as Phase-3b/3c vocabulary landing early.
  */
 export const FOREIGN_PROVIDER_RULES: ReadonlyArray<readonly [string, RegExp]> = [
   ['jira', /\bjira\b/i],
@@ -168,15 +168,15 @@ export function collectForeignProviderLiterals(content: string): string[] {
  *
  * `rm -f` is denied by devflow's recommended deny-list, so an agent told to use one
  * stalls on a permission prompt it cannot answer — in the background, holding the
- * claim file, with the next session's gate reading that held claim as a live agent
- * (PF-003). A plain `rm --` is the instruction; this collector is the other half.
+ * claim file, with the next session's gate reading that held claim as a live agent.
+ * A plain `rm --` is the instruction; this collector is the other half.
  *
  * Short and long flags alike: the predicate is a dash after the verb, not a letter
  * after a dash, because `rm --force` is the same denied command as `rm -f` and the
  * narrower spelling let it through.
  *
- * The one dash-shaped token that is NOT a flag is the end-of-options `--`: PF-003's
- * deny rule keys on the destructive SPELLINGS, `--` turns option parsing OFF rather
+ * The one dash-shaped token that is NOT a flag is the end-of-options `--`: the
+ * deny-list keys on the destructive SPELLINGS, `--` turns option parsing OFF rather
  * than adding an option, and it is what every cleanup recipe in the Git corpus uses.
  * So the dash-token is compared for EQUALITY with `--` rather than by a prefix test,
  * which is what keeps `--force` reported. The token stops at a backtick as well as at
@@ -186,10 +186,10 @@ export function collectForeignProviderLiterals(content: string): string[] {
  * Every dash-token on the line is examined, not the first: a line carrying the
  * permitted spelling and a denied one is a denied line.
  *
- * NOT COVERED, deliberately (PF-064): a flag passed AFTER the operand
+ * NOT COVERED, deliberately: a flag passed AFTER the operand
  * (`rm "$X" -f`). It is unnatural in a prompt and has never been written; a new
  * spelling gets a row in the probe below in the same commit as the prose that needs
- * it (ADR-025).
+ * it, so the pair is reviewed as one change.
  */
 export function collectFlaggedRm(content: string): string[] {
   return content
@@ -238,7 +238,7 @@ export function collectUnquotedHeredocs(content: string): string[] {
 /**
  * Named collector: lines that SHELL OUT to read `tracker.md`.
  *
- * Readers open it with the Read tool and an absolute path (PF-035): a shell read
+ * Readers open it with the Read tool and an absolute path: a shell read
  * puts the file's third-party content through word splitting and truncates silently
  * on the size bound the file-level rules set.
  *
@@ -246,7 +246,7 @@ export function collectUnquotedHeredocs(content: string): string[] {
  * variable the agent binds it to — and the verb may carry flags before the operand,
  * which the earlier `\b(cat|head|tail)\s+\S*tracker\.md` anchor forbade: it required
  * the path to be the verb's FIRST word, so `head -5 ~/.devflow/tracker.md` and
- * `cat "$TRACKER_FILE"` both passed (PF-064 — matcher expressiveness).
+ * `cat "$TRACKER_FILE"` both passed (the matcher could not express them).
  *
  * NOT COVERED, deliberately: a read through a variable this agent does not define,
  * and a verb outside the list below.
@@ -265,7 +265,7 @@ export function collectShellReadsOfTrackerFile(content: string): string[] {
  *
  * Scoped to the bash fences, never the prose: `## The write` names the expression
  * in order to forbid a second one, and a whole-file count would read that
- * prohibition as the violation it prohibits. PF-066's fourth defect is a duplicated
+ * prohibition as the violation it prohibits. The defect it guards is a duplicated
  * resolution — two spellings that can disagree, with the disagreement failing closed
  * and silent, because the scrubber is looked up under one root while the file is
  * written under another.
@@ -283,13 +283,13 @@ export function collectDevflowDirResolutions(fences: readonly string[]): string[
  * (by basename or by the phrase the prose uses for it) inside one wrapped sentence,
  * and the text is normalised first because the agent hard-wraps: a line-scoped
  * matcher would miss a verb and its object split across two lines, and pinning
- * where a sentence happens to break is what PF-057 warns against.
+ * where a sentence happens to break pins layout rather than meaning.
  *
- * NOT COVERED, deliberately (PF-064 — an absence guard is only ever as wide as its
+ * NOT COVERED, deliberately (an absence guard is only ever as wide as its
  * matcher, so the edge is written down rather than inferred from a green run): an
  * instruction that names neither a listed verb nor the counter — "write one more
  * than you read" would pass. A new spelling gets a row in the probe below, in the
- * same commit as the prose that needs it (ADR-025).
+ * same commit as the prose that needs it, so the pair is reviewed as one change.
  */
 const COUNTER_ADVANCING_VERB =
   /\b(increment|increments|incremented|bump|bumps|bumped|advance|advances|advanced|raise|raises|raised)\b/gi;
@@ -307,7 +307,10 @@ export function collectCounterIncrementSites(content: string): string[] {
   return sites;
 }
 
-/** How far either side of a `touch` the claim file may be named. Bounded (PF-018). */
+/**
+ * How far either side of a `touch` the claim file may be named. Bounded, so a
+ * `touch` far from any mention of the claim file is not counted as a site.
+ */
 const TOUCH_WINDOW_CHARS = 70;
 const CLAIM_FILE_NAMED = /(claim file|\$\{?TRACKER_CLAIM\b)/i;
 
@@ -325,7 +328,7 @@ const CLAIM_FILE_NAMED = /(claim file|\$\{?TRACKER_CLAIM\b)/i;
  *
  * Windowed rather than line-scoped because the agent hard-wraps: `touch`ing and
  * "the claim file" land on either side of a line break in the shipped text, and
- * pinning where a sentence happens to break is what PF-057 warns against. The
+ * pinning where a sentence happens to break pins layout rather than meaning. The
  * prose at `## Read-only boundary` ("nothing outside it is yours to touch") names
  * no claim file and is correctly not a site.
  */
@@ -348,9 +351,9 @@ const REPEATED_TOUCH = /\b(repeatedly|once per|each time|every time|periodically
  *
  * The agent's security controls are SHELL PROGRAMS that nothing type-checks and
  * that review reads as prose — which is how four classic shell defects shipped
- * together in six lines of the write chain (PF-066). Extracting the fences is what
+ * together in six lines of the write chain. Extracting the fences is what
  * lets the guards below RUN them: a claim primitive is exclusive or it is not, and
- * only an execution can tell the two spellings apart (PF-068 rule 3).
+ * only an execution can tell the two spellings apart.
  *
  * Fences are matched with the <= 3-space indentation bound Markdown itself uses,
  * so a fence nested inside a numbered list item is collected and dedented by its
@@ -440,7 +443,7 @@ const PROBE_PROVIDER = 'probe';
 const BOUND_ENV = `TRACKER_PROVIDER=${PROBE_PROVIDER}\n${ENV_FENCE}`;
 
 interface Sandbox {
-  /** An isolated `$HOME`. The chain writes under `$HOME/.devflow`; never the real one (PF-060). */
+  /** An isolated `$HOME`. The chain writes under `$HOME/.devflow`; never the real one. */
   home: string;
   devflowDir: string;
   trackerFile: string;
@@ -483,10 +486,9 @@ interface ShellRun {
  * `instrument` wraps `mktemp` in a shell function that records every path it hands
  * out. That is how the cleanup claim is checked at the paths mktemp REALLY chose:
  * on macOS mktemp ignores `TMPDIR`, so a harness that points `TMPDIR` at a scratch
- * directory and then inspects it finds nothing and reports the chain clean
- * (PF-045, and the mis-measurement PF-066 records). The wrapper makes the
- * `mktemp` status that of a pipeline, so the one arm that drives a mktemp FAILURE
- * runs uninstrumented.
+ * directory and then inspects it finds nothing and reports the chain clean.
+ * The wrapper makes the `mktemp` status that of a pipeline, so the one arm that
+ * drives a mktemp FAILURE runs uninstrumented.
  */
 function runShell(
   script: string,
@@ -503,7 +505,7 @@ function runShell(
 /**
  * The env every run of the agent's shell gets. ONE builder, because `runShell`
  * and `runShellAsync` below must agree byte for byte about it: a second
- * hand-rolled copy is the shadow reimplementation PF-018 names, and the property
+ * hand-rolled copy is a shadow reimplementation that can drift, and the property
  * it would silently drop is the sandbox HOME that `## Environment`'s
  * `$HOME/.devflow` fallback resolves the paths under test from.
  */
@@ -538,7 +540,7 @@ function shellBody(
  * second one met a path the first had already taken, and an exclusive create
  * satisfies that trivially — so sequencing cannot DISTINGUISH a claim primitive
  * from a non-exclusive one either. A claim primitive is exclusive or it is not,
- * and only genuinely concurrent claimants can tell the two apart (PF-068 rule 3).
+ * and only genuinely concurrent claimants can tell the two apart.
  * Shape copied from tests/queue-append.test.ts's parallel-append harness: spawn
  * N, resolve on `close`, `Promise.all`.
  *
@@ -580,7 +582,7 @@ function runShellAsync(
  * claimant assertion can supply it. `set -o noclobber` yields exactly one winner
  * when run sequentially, and `mv` yields N winners when run sequentially, so the
  * exclusivity arm and its known-bad probe produce their expected results under a
- * serialised harness just as they do under a racing one (PF-018 — a green arm
+ * serialised harness just as they do under a racing one (a green arm
  * that a degenerate harness also satisfies is not evidence).
  */
 function overlapWindow(runs: readonly AsyncShellRun[]): number {
@@ -590,8 +592,8 @@ function overlapWindow(runs: readonly AsyncShellRun[]): number {
 }
 
 /**
- * A `node` that terminates the shell instead of scrubbing — the PF-056 kill,
- * delivered at the exact point the scrubber would run.
+ * A `node` that terminates the shell instead of scrubbing — a background agent
+ * killed mid-run, delivered at the exact point the scrubber would run.
  *
  * A signal sent from outside would be deferred until the foreground command
  * returned, so the stub raises it from inside: deterministic, with no sleep and no
@@ -669,7 +671,7 @@ function joinContinuations(fence: string): string {
  * `mktemp`s and by prose, and said nothing about WHICH commands the operator binds
  * — so a rewrite of the gate as `scrub | tee stage && place`, or as two statements
  * separated by `;`, kept it green while deleting the whole fail-closed property
- * (PF-066: a security control expressed as a shell chain in a prompt is a program
+ * (a security control expressed as a shell chain in a prompt is a program
  * nothing type-checks).
  *
  * The statement is what matters because `&&` guarantees nothing across a statement
@@ -703,7 +705,7 @@ export function collectScrubChain(fence: string): string | null {
  *
  * Quote tracking is deliberately the shell's own rule and nothing more — an
  * opening `'` or `"` runs to its matching partner. Backslash escaping inside
- * double quotes is NOT modelled (PF-064): no recipe in this agent spells one, and
+ * double quotes is NOT modelled: no recipe in this agent spells one, and
  * the failure direction of that omission is a split too EARLY, which is reported
  * rather than silently admitted.
  */
@@ -756,7 +758,7 @@ function breakScrubChain(fence: string): string {
 // ---------------------------------------------------------------------------
 
 describe('Tracker agent frontmatter', () => {
-  it('resolves through the shared resolver and is registry-declared (PF-021)', () => {
+  it('resolves through the shared resolver and is registry-declared', () => {
     expect(
       getAllAgentNames(),
       `'${TRACKER_SLUG}' must be declared in DEVFLOW_PLUGINS — an unregistered agent file is ` +
@@ -788,13 +790,13 @@ describe('Tracker agent frontmatter', () => {
     ).toBe('sonnet');
   });
 
-  it('declares NO tools: key, and says why (EC-69, PF-031)', () => {
+  it('declares NO tools: key, and says why (EC-69)', () => {
     const split = splitFrontmatter(TRACKER_TEXT);
     const keys = collectFrontmatterKeys(split!.inner);
     expect(keys.length, 'frontmatter parsed to no keys — the shape changed').toBeGreaterThan(0);
     expect(
       keys,
-      'a tools: allowlist here is a silent constraint (PF-031): the tracker server names this ' +
+      'a tools: allowlist here is a silent constraint: the tracker server names this ' +
       'agent must reach are user-configured and cannot be enumerated at authoring time, so any ' +
       'allowlist a reviewer "tightens" it to would kill tracker access at runtime, not at build time',
     ).not.toContain('tools');
@@ -823,7 +825,7 @@ describe('Tracker agent frontmatter', () => {
       if (m) items.push(m[1].trim());
     }
     expect(items.length, 'skills: block is empty').toBeGreaterThan(0);
-    expect(items, 'avoids PF-002: a frontmatter compliance skill silently bails').not.toContain('devflow:compliance');
+    expect(items, 'a frontmatter compliance skill silently bails').not.toContain('devflow:compliance');
   });
 });
 
@@ -868,7 +870,7 @@ describe('Tracker agent read-only boundary (§14.9 constraint 12, EC-69)', () =>
     // schema-scope.test.ts's shape table, applied to this collector: a probe that
     // seeds two lines against six patterns certifies the other four by not
     // contradicting them. One seeded line per rule, and the two lists asserted the
-    // same length, is what makes a rule that stopped matching visible (PF-064).
+    // same length, is what makes a rule that stopped matching visible.
     const SHAPES: ReadonlyArray<readonly [string, string]> = [
       ['git commit', 'Then git commit --only tracker.md to record it.'],
       ['git push', 'Finally git push origin HEAD.'],
@@ -898,11 +900,11 @@ describe('Tracker agent read-only boundary (§14.9 constraint 12, EC-69)', () =>
     expect(
       collectQuestionPrimitives('Never ask the user; mark ambiguity with the sentinel instead.\n'),
       'prose about asking is not the primitive — reporting it sends the next reader to narrow ' +
-      'the guard instead of to read the hit (PF-064)',
+      'the guard instead of to read the hit',
     ).toEqual([]);
   });
 
-  it('names no foreign provider literal (PF-023, ADR-003)', () => {
+  it('names no foreign provider literal', () => {
     expect(
       collectForeignProviderLiterals(TRACKER_TEXT),
       'the provider token arrives in the spawn directive; naming a provider here is a second ' +
@@ -932,7 +934,7 @@ describe('Tracker agent read-only boundary (§14.9 constraint 12, EC-69)', () =>
 // `## Environment` — ONE resolution, stated before it is derived from
 // ---------------------------------------------------------------------------
 
-describe('Tracker agent devflow-directory resolution (PF-066 defect 4)', () => {
+describe('Tracker agent devflow-directory resolution', () => {
   /** The directive's field name, as `session-start-context` spells it. */
   const PROMPT_FIELD = 'Devflow directory:';
   /** The resolution expression, as BOTH sides must spell it. */
@@ -942,8 +944,8 @@ describe('Tracker agent devflow-directory resolution (PF-066 defect 4)', () => {
     // A prompt is read top-down, so whichever rule appears first is the one that
     // binds. A fence that derives the directory with the precedence stated four
     // paragraphs BELOW it teaches the fallback as the rule and the authoritative
-    // value as an afterthought — the same duplicated-resolution defect PF-066
-    // records, arriving through reading order rather than through a second spelling.
+    // value as an afterthought — the same duplicated-resolution defect,
+    // arriving through reading order rather than through a second spelling.
     const sites = [...TRACKER_TEXT.matchAll(new RegExp(PROMPT_FIELD, 'g'))].map(m => m.index ?? -1);
     expect(
       sites,
@@ -989,8 +991,8 @@ describe('Tracker agent devflow-directory resolution (PF-066 defect 4)', () => {
 
   it("the fallback expression byte-equals the hook's own resolution of the same directory", () => {
     // The fallback is only safe because it cannot land anywhere the gate would not
-    // have. Both sides are a literal in their own language with no shared import
-    // (PF-013), so this is the only place the two spellings are compared.
+    // have. Both sides are a literal in their own language with no shared import,
+    // so this is the only place the two spellings are compared.
     const hook = readFileSync(path.join(scriptsDir(), 'hooks', 'session-start-context'), 'utf-8');
     expect(ENV_FENCE.split('\n').map(l => l.trim())).toContain(FALLBACK_LINE);
     expect(
@@ -1008,7 +1010,7 @@ describe('Tracker agent devflow-directory resolution (PF-066 defect 4)', () => {
 describe('Tracker agent claim-file lifecycle (AC-3.17, EC-28)', () => {
   it('names the claim file and the per-provider attempt counter by their shared basenames', () => {
     // These basenames are exported from src/core/tracker.ts and read by the
-    // session-start hook. Three spellings of one path is the drift PF-021 names.
+    // session-start hook. Three spellings of one path can drift apart.
     expect(TRACKER_TEXT).toContain('.tracker.processing');
     expect(TRACKER_TEXT).toContain('.tracker.$TRACKER_PROVIDER.attempts');
   });
@@ -1066,7 +1068,7 @@ describe('Tracker agent claim-file lifecycle (AC-3.17, EC-28)', () => {
     ).toHaveLength(1);
   });
 
-  it('deletes the claim file with a plain rm, never a flagged one (PF-003)', () => {
+  it('deletes the claim file with a plain rm, never a flagged one', () => {
     // `rm -f` is denied by devflow's recommended deny-list: an agent instructed to
     // use it stalls on a permission prompt it cannot answer, in the background,
     // leaving the claim file behind and the next session suppressed.
@@ -1124,12 +1126,13 @@ describe('Tracker agent claim-file lifecycle (AC-3.17, EC-28)', () => {
       'emission [DR-02], and two incrementers per cycle silently halve the OD-14 budget',
     ).toEqual([]);
     // Positive half: the agent has to SAY whose increment it is relying on, or the
-    // next reader restores the one this guard deletes. Bounded (PF-018).
+    // next reader restores the one this guard deletes. Bounded, so two unrelated
+    // mentions far apart cannot satisfy it.
     //
     // Pinned on the CLAIM the agent makes, not on the anchor that used to cite it:
     // `[DR-02]` resolves to nothing for the model reading this prompt, and a guard
     // that demanded the anchor would have kept a lookup no reader can perform in
-    // the file purely to stay green (applies ADR-025 — the rule is the content).
+    // the file purely to stay green (the rule is the content).
     expect(TRACKER_TEXT).toMatch(/write-less exit[\s\S]{0,400}?spends one attempt/);
   });
 
@@ -1155,7 +1158,7 @@ describe('Tracker agent claim-file lifecycle (AC-3.17, EC-28)', () => {
     // The counter is addressed as `"$TRACKER_ATTEMPTS_FILE"` everywhere below
     // `## Environment`, which is where the basename is resolved ONCE. A prose
     // template (`{TRACKER_DEVFLOW_DIR}/.tracker.attempts`) is a second spelling of
-    // a path the fence already binds, and the two can disagree (PF-023).
+    // a path the fence already binds, and the two can disagree.
     expect(TRACKER_TEXT).toMatch(/successful write[\s\S]{0,200}?TRACKER_ATTEMPTS_FILE/i);
     expect(
       ENV_FENCE,
@@ -1178,7 +1181,8 @@ describe('Tracker agent claim-file lifecycle (AC-3.17, EC-28)', () => {
       'number at all, and the seam cannot bind to it',
     ).toMatch(/\*\*\d+ attempts?\*\*/);
     // The delegation names a suite that exists and really reads the hook literal —
-    // a cross-suite coverage claim that cannot be greped is PF-018's third mechanism.
+    // a cross-suite coverage claim that cannot be greped is coverage asserted only
+    // in prose.
     const seam = readFileSync(
       path.join(ROOT, 'tests', 'seams', 'tracker-claim-staleness.test.ts'),
       'utf-8',
@@ -1300,7 +1304,7 @@ describe('Tracker agent write path (AC-3.9, AC-3.15, §14.9 constraints 3 and 11
     expect(
       WRITE_FENCE,
       'cleanup placed AFTER the chain runs only when the chain returns; this agent is killed ' +
-      'mid-run as a documented outcome (PF-056), and $RAW is the PRE-scrub composition',
+      'mid-run as a documented outcome, and $RAW is the PRE-scrub composition',
     ).toMatch(/^trap '[^']*rm -- "\$RAW" "\$SCRUBBED"[^']*' EXIT INT TERM$/m);
     expect(
       WRITE_FENCE.split('\n').filter(l => /\bmktemp\b/.test(l)),
@@ -1321,7 +1325,7 @@ describe('Tracker agent write path (AC-3.9, AC-3.15, §14.9 constraints 3 and 11
   it('writes create-exclusively and reports ALREADY_EXISTS, never a lock wait (§14.9 constraint 11)', () => {
     // Each refusing primitive is asserted at ITS OWN site. One `toContain` over the
     // whole file would let the claim's noclobber satisfy a claim about the write —
-    // PF-064's corpus-reach failure, inside a single document.
+    // the wrong corpus answering the claim, inside a single document.
     expect(
       WRITE_FENCE,
       'link(2) publishes a file that is ALREADY complete under a name that must not exist, so ' +
@@ -1364,7 +1368,7 @@ describe('Tracker agent write path (AC-3.9, AC-3.15, §14.9 constraints 3 and 11
   it('known-bad probe: the parent-chmod collector reports every spelling of the directory', () => {
     // The three the earlier `[A-Za-z_]*devflow` anchor measurably missed, plus the
     // variable spelling it did catch and a symbolic mode. An absence guard that
-    // catches one spelling of its target is PF-064's first blindness.
+    // catches one spelling of its target is blind to every other spelling.
     const SPELLINGS = [
       'chmod 700 ~/.devflow',
       'chmod 700 "$HOME/.devflow"',
@@ -1394,12 +1398,11 @@ describe('Tracker agent write path (AC-3.9, AC-3.15, §14.9 constraints 3 and 11
 // Every guard below RUNS the fence it names, against an isolated `$HOME` under the
 // temp root, and asserts the OUTCOME rather than the wording. That is the standing
 // instruction from the two pitfalls this agent wrote: a claim primitive is
-// exclusive or it is not, and only a race can tell the two spellings apart
-// (PF-068); a shell chain inside a prompt is a program nothing type-checks, whose
-// defects are invisible to a reader of the prose and obvious to anyone who runs it
-// (PF-066). Each negative is paired with a known-bad spelling driven through the
-// SAME harness, so a green arm can never mean the harness stopped exercising
-// anything (PF-018).
+// exclusive or it is not, and only a race can tell the two spellings apart; a
+// shell chain inside a prompt is a program nothing type-checks, whose defects are
+// invisible to a reader of the prose and obvious to anyone who runs it. Each
+// negative is paired with a known-bad spelling driven through the SAME harness, so
+// a green arm can never mean the harness stopped exercising anything.
 // ---------------------------------------------------------------------------
 
 /**
@@ -1415,7 +1418,7 @@ const CONCURRENT_CLAIMANTS = 8;
 /** The status a loser exits with, as `## Step 0` spells it. */
 const LOST_STATUS = 3;
 
-describe('Tracker agent claim primitive, executed (PF-068)', () => {
+describe('Tracker agent claim primitive, executed', () => {
   it(`${CONCURRENT_CLAIMANTS} concurrent claimants: exactly one CLAIMED, every loser LOST and exit ${LOST_STATUS}`, async () => {
     const sandbox = makeSandbox();
     const script = `${BOUND_ENV}\n${CLAIM_FENCE}`;
@@ -1515,7 +1518,7 @@ describe('Tracker agent claim primitive, executed (PF-068)', () => {
   });
 });
 
-describe('Tracker agent write chain, executed (PF-066, AC-3.15)', () => {
+describe('Tracker agent write chain, executed (AC-3.15)', () => {
   it('publishes a complete 0600 file and leaves no staging behind', () => {
     const sandbox = makeSandbox();
     const run = runShell(writeChain(COMPOSED_FILE), sandbox);
@@ -1605,7 +1608,7 @@ describe('Tracker agent write chain, executed (PF-066, AC-3.15)', () => {
   it('known-bad probe: with the range link deleted, the same metacharacter IS published', () => {
     // The RED half of the arm above, produced from the REAL fence. Without it,
     // "no file was written" is equally consistent with a chain that refused for
-    // one of the other three reasons (PF-018).
+    // one of the other three reasons.
     const sandbox = makeSandbox();
     const unranged = WRITE_FENCE.split('\n').filter(line => !line.includes(RANGE_LINK)).join('\n');
     expect(unranged, 'the mutation must actually remove the range link').not.toBe(WRITE_FENCE);
@@ -1622,7 +1625,7 @@ describe('Tracker agent write chain, executed (PF-066, AC-3.15)', () => {
 
   it('known-bad probe: with the shape gate deleted, the same empty composition IS published', () => {
     // The RED half of the two arms above. Without it, "no file was written" is
-    // equally consistent with a chain that never ran (PF-018).
+    // equally consistent with a chain that never ran.
     const sandbox = makeSandbox();
     const ungated = WRITE_FENCE.split('\n')
       .filter(line => !/\[ -s "\$SCRUBBED" \]|grep -q/.test(line))
@@ -1654,7 +1657,7 @@ describe('Tracker agent write chain, executed (PF-066, AC-3.15)', () => {
 
   it('known-bad probe: with the scrub `&&` desugared to a statement break, the refusal IS published', () => {
     // The RED half of the arm above, produced from the REAL fence. Without it, "no
-    // file was written" is equally consistent with a chain that never ran (PF-018),
+    // file was written" is equally consistent with a chain that never ran,
     // and nothing distinguishes the `&&` from the `;` that would replace it.
     const sandbox = makeSandbox();
     const unbound = breakScrubChain(WRITE_FENCE);
@@ -1687,7 +1690,7 @@ describe('Tracker agent write chain, executed (PF-066, AC-3.15)', () => {
     expect(stagingResidue(sandbox)).toEqual([]);
   });
 
-  it('removes the PRE-scrub composition when the run is KILLED at the scrub (PF-056)', () => {
+  it('removes the PRE-scrub composition when the run is KILLED at the scrub', () => {
     const sandbox = makeSandbox();
     const run = runShell(writeChain(COMPOSED_FILE), sandbox, { stub: KILLED_MID_SCRUB });
 
@@ -1806,7 +1809,7 @@ describe('~/.devflow/tracker.md schema template (§14.3, P3a-S16)', () => {
     expect(collectTrackerTemplateHeadings(dropped)).not.toEqual([...TRACKER_SCHEMA_SECTIONS]);
   });
 
-  it('declares provider: and inferred-from: and DROPS learned: (ADR-003)', () => {
+  it('declares provider: and inferred-from: and DROPS learned:', () => {
     for (const key of TRACKER_SCHEMA_FRONTMATTER_KEYS) {
       expect(template!, `template frontmatter must declare ${key}:`).toContain(`${key}:`);
     }
@@ -1816,7 +1819,7 @@ describe('~/.devflow/tracker.md schema template (§14.3, P3a-S16)', () => {
     ).not.toContain('learned:');
   });
 
-  it('pins the file-level bounds, the mode, and the Read-tool rule (PF-035)', () => {
+  it('pins the file-level bounds, the mode, and the Read-tool rule', () => {
     expect(TRACKER_TEXT).toContain('120 lines');
     expect(TRACKER_TEXT).toContain('8,000 characters');
     expect(TRACKER_TEXT).toContain('0600');
@@ -1825,7 +1828,7 @@ describe('~/.devflow/tracker.md schema template (§14.3, P3a-S16)', () => {
     expect(TRACKER_TEXT).toMatch(/absolute path/i);
     expect(
       collectShellReadsOfTrackerFile(TRACKER_TEXT),
-      'tracker.md is read with the Read tool, never shelled out (PF-035): a shell read puts its ' +
+      'tracker.md is read with the Read tool, never shelled out: a shell read puts its ' +
       'third-party content through word splitting and truncates silently at the size bound',
     ).toEqual([]);
   });
@@ -1842,7 +1845,7 @@ describe('~/.devflow/tracker.md schema template (§14.3, P3a-S16)', () => {
     }
     // …and not on the chain's own greps over the STAGING file, nor on prose that
     // merely names the file. Reporting either sends the next reader to narrow the
-    // guard instead of to read the hit (PF-064).
+    // guard instead of to read the hit.
     expect(collectShellReadsOfTrackerFile('grep -q \'^provider: \' "$SCRUBBED"\n')).toEqual([]);
     expect(
       collectShellReadsOfTrackerFile('You write exactly one content path: `~/.devflow/tracker.md`.\n'),

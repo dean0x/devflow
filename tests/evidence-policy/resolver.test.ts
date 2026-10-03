@@ -16,7 +16,7 @@
  *   - the real script as a subprocess with the scripted bash fakes on PATH — the
  *     argv log, injection tables, exit arms and the FIFO/ENOBUFS bounds;
  *   - real git against a local bare origin for the offline tracking-copy fold;
- *   - source guards over the script, each with a known-bad probe (PF-064).
+ *   - source guards over the script, each with a known-bad probe.
  *
  * Every assertion is concrete and unconditional; every corpus scan asserts its
  * corpus is non-empty.
@@ -55,8 +55,8 @@ import { walkFiles } from '../helpers.js';
 // ---------------------------------------------------------------------------
 // The .cjs seam
 //
-// resolve-evidence-policy.cjs is plain CommonJS outside every tsconfig (PF-043,
-// PF-069), so this interface is the only shape authority on this side. It is
+// resolve-evidence-policy.cjs is plain CommonJS outside every tsconfig, so
+// this interface is the only shape authority on this side. It is
 // transcribed from the module's JSDoc typedefs — open those before changing it.
 // ---------------------------------------------------------------------------
 
@@ -590,7 +590,7 @@ describe('named rows — exact lines', () => {
 });
 
 // ---------------------------------------------------------------------------
-// Exhaustiveness (avoids PF-075: every declared value reachable, nothing outside it)
+// Exhaustiveness (every declared value reachable, nothing outside it)
 // ---------------------------------------------------------------------------
 
 describe('SOURCES and WARNINGS exhaustiveness', SUBPROCESS_TIMEOUT, () => {
@@ -977,7 +977,7 @@ describe('per-call bounds (in-process recording)', () => {
 });
 
 // ---------------------------------------------------------------------------
-// Fail-closed when local git does not ANSWER (avoids PF-075)
+// Fail-closed when local git does not ANSWER
 //
 // Only an answered non-zero exit is a real "no" (not a repository, no such path,
 // no such ref). A git that is missing, timed out, overflowed or was killed has not
@@ -1756,7 +1756,7 @@ describe('TP-46 (AC-40): project.json resolves as it did, and no production call
 });
 
 // ---------------------------------------------------------------------------
-// Source guards over the script (each with a known-bad probe — PF-064)
+// Source guards over the script (each with a known-bad probe)
 // ---------------------------------------------------------------------------
 
 describe('source guards', () => {
@@ -1851,14 +1851,14 @@ describe('source guards', () => {
     ]) {
       expect(SOURCE, `${marker} missing`).toContain(marker);
     }
-    for (const marker of ['D-PROJECT-CONFIG', 'D-PROJECT-STRICT-KEYS', 'ADR-024', 'PF-023']) {
+    for (const marker of ['D-PROJECT-CONFIG', 'D-PROJECT-STRICT-KEYS']) {
       expect(LIB_SOURCE, `${marker} missing from the shared parser`).toContain(marker);
     }
   });
 });
 
 // ---------------------------------------------------------------------------
-// Environment hygiene (applies PF-060) — every spawn here passes through scopedEnv()
+// Environment hygiene — every spawn here passes through scopedEnv()
 // ---------------------------------------------------------------------------
 
 describe('spawn environment hygiene', () => {

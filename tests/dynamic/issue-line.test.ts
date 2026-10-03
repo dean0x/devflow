@@ -18,7 +18,7 @@
  *            writes only a shape-gated line; the six-phase workflow files nothing.
  *
  * Every guard has a named collector, a non-empty-corpus assertion and a known-bad
- * probe through the same collector (PF-064).
+ * probe through the same collector.
  */
 
 import { describe, it, expect } from 'vitest'

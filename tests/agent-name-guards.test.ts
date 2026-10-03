@@ -982,8 +982,8 @@ describe('GAP-5: no retired agent names in any shipped artifact (fail-loud when 
  * ('old-coder' → 'coder'). Every assertion there runs against a map the test
  * emptied first, so that suite is structurally incapable of noticing that the
  * SHIPPED map went empty — which is exactly how a stale dist/ exporting zero
- * entries stayed green during this wave (avoids PF-018: a green test proves
- * nothing unless it exercised a non-empty target).
+ * entries stayed green during this wave (a green test proves nothing unless
+ * it exercised a non-empty target).
  *
  * These guards read the map as shipped and never mutate it.
  */

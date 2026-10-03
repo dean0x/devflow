@@ -35,7 +35,7 @@
 // publication can only lower it (D-PUBLICATION-CEILING) — a branch's
 // `reviewPublication: "full"` raises nothing, since only a personal value asks
 // for more than `auto`. The tracker (provider, site, key) is taken as the
-// branch states it. It WRITES NOTHING (applies ADR-024).
+// branch states it. It WRITES NOTHING: each layer it folds is changed only by its owner.
 //
 // stdout is exactly one line plus "\n", or empty (D-SETTINGS-LINE):
 //   TRACKER=<github|jira|linear> TRACKER_SOURCE=<project|personal|machine|default>
@@ -750,7 +750,7 @@ function readRepoLayers(root, deps) {
  * (D-LENS-UNION, D-SETTINGS-LOCAL-ONLY): origin/HEAD names the branch D, and
  * `refs/remotes/origin/<D>:.devflow/project.json` is read through the same
  * parser. The lens only adds, so every state that cannot be read is a malformed
- * declaration (`generic`), never "declares nothing" (avoids PF-075):
+ * declaration (`generic`), never "declares nothing":
  *   absent     origin/HEAD is not recorded, or D holds no project.json
  *   malformed  a git call did not answer, origin/HEAD names no safe branch, the
  *              blob overflows its bound, the file is unreadable, or its
@@ -898,7 +898,7 @@ function settleOutcome(outcome) {
 }
 
 // ---------------------------------------------------------------------------
-// The suggestion the CLI prints (never writes — ADR-024)
+// The suggestion the CLI prints (never writes — the team commits it)
 // ---------------------------------------------------------------------------
 
 /**

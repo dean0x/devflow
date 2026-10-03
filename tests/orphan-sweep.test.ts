@@ -9,12 +9,12 @@ import { sweepOrphanedAssets, mdFileName, mdEntryName } from '../src/core/orphan
  *
  * The helper is the single deletion primitive behind both the install pipeline
  * (installer.ts: skills, commands, agents) and the uninstall pipeline
- * (uninstall.ts: agents, commands). Its failure modes are all silent by design
- * (avoids PF-009), so they must be pinned here rather than inferred from the
+ * (uninstall.ts: agents, commands). Its failure modes are all silent by design,
+ * so they must be pinned here rather than inferred from the
  * two call sites.
  *
  * Every test asserts on a NON-EMPTY corpus, or explicitly asserts the returned
- * scanned count to prove the sweep was not vacuous (avoids PF-018).
+ * scanned count to prove the sweep was not vacuous.
  */
 describe('sweepOrphanedAssets', () => {
   let dir: string;
@@ -44,7 +44,7 @@ describe('sweepOrphanedAssets', () => {
 
   it('leaves entries the predicate rejects completely untouched', async () => {
     // A bare (pre-namespace) skill dir stands in for anything the predicate skips:
-    // the sweep must never remove it, whatever the registry says (avoids PF-012).
+    // the sweep must never remove it, whatever the registry says.
     await fs.mkdir(path.join(dir, 'bare-skill'), { recursive: true });
     await fs.writeFile(path.join(dir, 'README.txt'), 'not an asset', 'utf-8');
     await fs.writeFile(path.join(dir, 'retired.md'), 'drop', 'utf-8');
@@ -87,7 +87,7 @@ describe('sweepOrphanedAssets', () => {
     expect(await fs.readdir(dir)).toEqual([]);
   });
 
-  it('PF-013 / PF-009: a MISSING directory is a no-op, not an error', async () => {
+  it('a MISSING directory is a no-op, not an error', async () => {
     // Fresh-project cold path — none of the install directories exist yet.
     const missing = path.join(dir, 'never-created');
     await expect(
@@ -98,12 +98,12 @@ describe('sweepOrphanedAssets', () => {
   });
 
   // A failing rm must degrade silently rather than propagate — one unguarded throw
-  // out of this helper would abort the entire install fan-out (avoids PF-009).
+  // out of this helper would abort the entire install fan-out.
   // Enforced by making the sweep directory unwritable, so readdir succeeds and every
   // rm fails with EACCES. Not meaningful on Windows or as root.
   const canRevokeWrite = process.platform !== 'win32' && process.getuid?.() !== 0;
 
-  it.skipIf(!canRevokeWrite)('PF-009: an rm that fails with EACCES is swallowed, not propagated', async () => {
+  it.skipIf(!canRevokeWrite)('an rm that fails with EACCES is swallowed, not propagated', async () => {
     await fs.writeFile(path.join(dir, 'retired-a.md'), 'x', 'utf-8');
     await fs.writeFile(path.join(dir, 'retired-b.md'), 'x', 'utf-8');
     await fs.chmod(dir, 0o500); // r-x: readdir works, unlink does not
@@ -122,7 +122,7 @@ describe('sweepOrphanedAssets', () => {
     }
   });
 
-  it('PF-009: the sweep never rejects even when the path is a FILE, not a directory', async () => {
+  it('the sweep never rejects even when the path is a FILE, not a directory', async () => {
     const filePath = path.join(dir, 'not-a-directory');
     await fs.writeFile(filePath, 'x', 'utf-8');
 
@@ -153,7 +153,7 @@ describe('sweepOrphanedAssets', () => {
     expect(result.removed).toEqual(['orphan']);
   });
 
-  it.skipIf(!canRevokeWrite)('PF-009: result.failed records per-item rm failures by registry name', async () => {
+  it.skipIf(!canRevokeWrite)('result.failed records per-item rm failures by registry name', async () => {
     await fs.writeFile(path.join(dir, 'retired-a.md'), 'x', 'utf-8');
     await fs.writeFile(path.join(dir, 'retired-b.md'), 'x', 'utf-8');
     await fs.chmod(dir, 0o500);

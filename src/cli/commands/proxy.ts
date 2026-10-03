@@ -2,11 +2,11 @@
  * devflow proxy — Enable, disable, and check status of external model routing
  * (GPT models via your OpenAI/Codex subscription).
  *
- * applies ADR-013: CLI-layer module; all core logic lives in src/core/proxy-state.ts
+ * CLI-layer module; all core logic lives in src/core/proxy-state.ts
  *   and src/core/agent-models.ts.
- * avoids PF-014: never process.exit() inside a finally-guarded scope; use return
- *   from the async action handler for all early-exit paths.
- * avoids PF-001: hook output strings use fixed templates; port number interpolation
+ * Never process.exit() inside a finally-guarded scope (it would skip the finally);
+ *   use return from the async action handler for all early-exit paths.
+ * Hook output strings use fixed templates; port number interpolation
  *   is acceptable (digit-validated integer, not user-controlled content).
  *
  * Branding note: "subswitch" must NEVER appear in user-visible strings. Internal
@@ -163,7 +163,7 @@ const UNKNOWN_MODEL_WINDOW_ENV = 'CLAUDE_CODE_DISABLE_UNKNOWN_MODEL_WINDOW_ENFOR
  * Mutate a parsed Settings object in place: set ANTHROPIC_BASE_URL to our relay
  * and set UNKNOWN_MODEL_WINDOW_ENV to '1'.
  *
- * D-P4-1: Each condition is evaluated independently (PF-015 — no short-circuit that
+ * D-P4-1: Each condition is evaluated independently (no short-circuit that
  * skips the second write when the first reports no change).
  *
  * Returns true when the object was changed by either assignment.
@@ -173,7 +173,7 @@ function _applyProxyEnvToObject(settings: Settings, port: number): boolean {
   s.env = (s.env as Record<string, unknown> | undefined) ?? {};
   const env = s.env as Record<string, unknown>;
   const newUrl = proxyBaseUrl(port);
-  // D-P4-1: evaluate each condition independently before combining (avoids PF-015 short-circuit)
+  // D-P4-1: evaluate each condition independently before combining (no short-circuit)
   const urlChanged = env.ANTHROPIC_BASE_URL !== newUrl;
   const windowVarChanged = env[UNKNOWN_MODEL_WINDOW_ENV] !== '1';
   env.ANTHROPIC_BASE_URL = newUrl;
@@ -196,8 +196,8 @@ function _applyProxyEnvToObject(settings: Settings, port: number): boolean {
  *   - uninstall     → proxy.json.port (or DEFAULT_PROXY_PORT)
  *
  * D-P4-1: URL ownership gates the URL delete only; the window var is always ours to
- * remove (applies PF-015, ADR-003). Each outcome is evaluated into a local and OR-ed
- * afterwards — never short-circuit composed inline (PF-015).
+ * remove. Each outcome is evaluated into a local and OR-ed
+ * afterwards — never short-circuit composed inline.
  *
  * Returns true when the object was changed by either deletion.
  */
@@ -210,7 +210,7 @@ function _stripProxyEnvFromObject(settings: Settings, managedPort: number): bool
   // managed the proxy — `proxyJsonExists()` — and the enable caller is taking ownership
   // of the key anyway, so reaching this line means the value is Devflow's to remove.
   // Removal is therefore unconditional: unlike ANTHROPIC_BASE_URL (port-scoped below),
-  // this key has no foreign value to protect. (applies PF-015, ADR-003)
+  // this key has no foreign value to protect.
   const hadWindowVar = env[UNKNOWN_MODEL_WINDOW_ENV] !== undefined;
   delete env[UNKNOWN_MODEL_WINDOW_ENV];
 
@@ -224,7 +224,7 @@ function _stripProxyEnvFromObject(settings: Settings, managedPort: number): bool
   }
 
   if (Object.keys(env).length === 0) delete s.env;
-  return removedUrl || hadWindowVar; // OR the locals — never compose with || inline (PF-015)
+  return removedUrl || hadWindowVar; // OR the locals — never compose with || inline
 }
 
 // ─── Pure env functions (exported for testing and cross-module reuse) ─────────
@@ -290,7 +290,7 @@ export function readProxyEnvState(
  */
 export function addProxyHooks(settings: Settings, devflowDir: string): boolean {
   const command = runHookCommand(devflowDir, PROXY_HOOK_MARKER);
-  // Evaluate each event into its own local — never short-circuit (PF-015).
+  // Evaluate each event into its own local — never short-circuit.
   const [addedSession, addedPrompt] = PROXY_HOOK_EVENTS.map((event) =>
     ensureHook(settings, event, isProxyHook, { hooks: [{ type: 'command', command, timeout: 15 }] }),
   );
@@ -305,7 +305,7 @@ export function addProxyHooks(settings: Settings, devflowDir: string): boolean {
  * Mutates settings in place. Returns true when any hook was removed.
  */
 export function removeProxyHooks(settings: Settings): boolean {
-  // Evaluate each event into its own local — never short-circuit (PF-015).
+  // Evaluate each event into its own local — never short-circuit.
   const [removedSession, removedPrompt] = PROXY_HOOK_EVENTS.map((event) =>
     removeHooks(settings, event, isProxyHook),
   );
@@ -643,7 +643,7 @@ async function realSpawnDoctor(
   logFile: string,
 ): Promise<number> {
   // openProxyLog: 0700 parent dir + 0600 file creation + best-effort chmod for
-  // pre-existing wider modes (SEC-2). Non-fatal on chmod failure per PF-009.
+  // pre-existing wider modes (SEC-2). Non-fatal on chmod failure.
   const logFd = await openProxyLog(logFile);
   try {
     return await new Promise<number>((resolve) => {
@@ -715,7 +715,7 @@ export interface BuildRealPreflightDepsOptions {
  * Centralises the three private implementations so both runEnable and init.ts
  * can consume them without byte-identical inline copies.
  *
- * applies ADR-013: pure configuration factory; I/O implementations factored once.
+ * Pure configuration factory; I/O implementations factored once.
  */
 export function buildRealPreflightDeps(opts: BuildRealPreflightDepsOptions): ProxyPreflightDeps {
   const { settingsPath, onWarn, swallowSettingsReadError = false } = opts;
@@ -786,7 +786,7 @@ export type SpawnRelayResult =
  *   - OS-level spawn error (EMFILE, ENOMEM, EAGAIN) — always handled via the
  *     injected onError callback, never an uncaught exception
  *
- * avoids PF-014: no process.exit() — returns Result; caller decides error handling.
+ * No process.exit() — returns Result; caller decides error handling.
  */
 export async function spawnRelayAndWaitForPort(
   port: number,
@@ -1027,7 +1027,7 @@ async function applyEnableSettingsPass(
  *   -n  no host-name resolution  -P  no port-name resolution
  *   -sTCP:LISTEN  only LISTEN-state sockets  -t  PIDs only
  *
- * avoids PF-001: fixed argument array — port is validated as a safe integer
+ * Fixed argument array — port is validated as a safe integer
  *   by the caller before this function is invoked; it is never interpolated
  *   into a shell string.
  *
@@ -1118,8 +1118,8 @@ async function readPidFile(pidPath: string): Promise<number | null> {
  *
  * applies D-EFR-5: signal 0 and health check are independent facts; lsof
  *   binds the pid-file PID to the port owner before any signal is sent.
- * avoids PF-009: all sub-operations are non-fatal; a kill failure never aborts disable.
- * avoids PF-014: never process.exit() inside a finally-guarded scope.
+ * All sub-operations are non-fatal; a kill failure never aborts disable.
+ * Never process.exit() inside a finally-guarded scope (it would skip the finally).
  *
  * @param deps  Optional injectable dependencies (default: real lsof implementation).
  *              Provide a stub in tests to exercise every branch without a real binary.
@@ -1507,7 +1507,7 @@ async function runStatus(): Promise<void> {
   }
 
   // External models registry (cache-only, zero spawns — avoids multi-second silent pause in --status)
-  const cacheDir = modelCacheDir(devflowDir); // authoritative path from cache.ts (avoids PF-013)
+  const cacheDir = modelCacheDir(devflowDir); // authoritative path from cache.ts
   const catalog = getExternalModelsCached(cacheDir);
   p.log.info(formatExternalModelsLine(catalog, logPath));
 
@@ -1541,7 +1541,7 @@ async function runEnable(portOption: string | undefined): Promise<void> {
   const configPath = path.join(devflowDir, 'proxy-routing.json');
   const logPath = path.join(devflowDir, 'logs', 'proxy.log');
   const pidPath = path.join(devflowDir, 'proxy.pid');
-  const cacheDir = modelCacheDir(devflowDir); // authoritative path from cache.ts (avoids PF-013)
+  const cacheDir = modelCacheDir(devflowDir); // authoritative path from cache.ts
 
   // Step 1: Read prior proxy.json (remembered port); --port flag overrides
   const priorStateResult = await readProxyState(devflowDir);
@@ -1571,7 +1571,7 @@ async function runEnable(portOption: string | undefined): Promise<void> {
 
   // Read existing routing config to preserve user-added anthropic/limits/logLevel/providers
   // blocks. A missing or malformed file falls back to clean defaults inside
-  // buildRoutingConfigJson (non-fatal; avoids PF-009).
+  // buildRoutingConfigJson (non-fatal).
   let existingRoutingContent: string | undefined;
   try {
     existingRoutingContent = await fs.readFile(configPath, 'utf-8');
@@ -1726,7 +1726,7 @@ async function runEnable(portOption: string | undefined): Promise<void> {
 
   s.stop(color.green('External model routing enabled'));
 
-  // D-P4-1 / PF-022: applies-on-restart — env var takes effect only for new sessions
+  // D-P4-1: applies-on-restart — env var takes effect only for new sessions
   p.log.info(color.dim('Context-window enforcement disabled for relay-routed models — applies to new Claude Code sessions'));
 
   if (adopted) {
@@ -1829,7 +1829,7 @@ async function runDisable(): Promise<void> {
 
   // Step 5: Terminate the relay process.
   // Identity is confirmed via TCP + health before signalling — a recycled PID
-  // must never be killed. avoids PF-009: all sub-operations are non-fatal.
+  // must never be killed. All sub-operations are non-fatal.
   const spawnLockPath = path.join(devflowDir, '.proxy-spawn.lock');
   const terminateResult = await terminateRelay(pidPath, spawnLockPath, managedPort);
   switch (terminateResult) {

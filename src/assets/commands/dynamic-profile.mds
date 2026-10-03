@@ -142,4 +142,4 @@ Next steps:
 
 ### Maintenance note
 
-This command mines ALL projects' history on this machine. The bounded-reading discipline (grep/rg + sample — never full-read) is mandatory and must be preserved in every revision. The agent writes prose; no extraction or clustering algorithm is authored here. Per ADR-008 Iron Rule: the agent does the reading and summarizing — not a script we maintain.
+This command mines ALL projects' history on this machine. The bounded-reading discipline (grep/rg + sample — never full-read) is mandatory and must be preserved in every revision. The agent writes prose; no extraction or clustering algorithm is authored here. Per the LLM-vs-plumbing Iron Rule: the agent does the reading and summarizing — not a script we maintain.

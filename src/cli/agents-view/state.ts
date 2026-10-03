@@ -1,8 +1,8 @@
 /**
  * Pure keypress reducer for the devflow agents TUI.
  *
- * applies ADR-013: CLI-layer view module; consumes src/core/ imports only.
- * avoids PF-014: pure functions only — no process.exit(), no I/O.
+ * CLI-layer view module; consumes src/core/ imports only.
+ * Pure functions only — no process.exit(), no I/O.
  *
  * Model cycle (proxy ON):  default → haiku → sonnet → opus → fable →
  *                          <picker names in registry order> → default

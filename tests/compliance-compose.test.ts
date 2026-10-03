@@ -4,7 +4,7 @@
  * Tests are self-contained: they build synthetic templates and fragments rather
  * than reading the SKILL.md / fragment.md source files (which are added in A8.2).
  *
- * PF-018: tests exercise the production path (composeComplianceSkill /
+ * Tests exercise the production path (composeComplianceSkill /
  * composeComplianceRule / parseComplianceFragment) not just helpers.
  */
 
@@ -923,7 +923,7 @@ describe('composeComplianceSkill — C3 covers every shape C1 admits', () => {
   });
 });
 
-// ── Shipped artifacts as the oracle (PF-018) ──────────────────────────────────
+// ── Shipped artifacts as the oracle ───────────────────────────────────────────
 //
 // Every test above composes a SYNTHETIC template. That proves the composer, not the
 // thing devflow installs. These tests use the shipped SKILL.md / rule / fragment.md

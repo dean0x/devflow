@@ -14,7 +14,7 @@ updated: 2026-09-29
 
 Ambient mode turns the main Claude Code session into a pure orchestrator: it coordinates sub-agents rather than performing work directly. The feature is a two-hook system, both managed by a single `devflow ambient --enable/--disable` toggle: `session-start-orchestrator` (SessionStart) injects a static charter as `additionalContext` at the start of every session, and `preamble` (UserPromptSubmit) reinforces the orchestrator contract per prompt and handles the plan-handoff fast-path. Both hooks are presence-gated — they only fire in git repositories — and share three cross-cutting safety contracts: a `DEVFLOW_BG_UPDATER` re-entrancy guard, a bounded pure-bash git-repo check, and fail-open `exit 0` on all error paths.
 
-This design replaced two previous detection-based approaches (first-word keyword dispatch and 3-marker plan detection) with a simpler charter injection that constructs the model's behavior once at session start, eliminating per-prompt heavyweight detection. Applies ADR-004.
+This design replaced two previous detection-based approaches (first-word keyword dispatch and 3-marker plan detection) with a simpler charter injection that constructs the model's behavior once at session start, eliminating per-prompt heavyweight detection.
 
 ## Component Architecture
 
@@ -181,9 +181,9 @@ This is intentional. SessionStart provably fires (via `SessionStart:clear`) in p
 
 ## Related
 
-- ADR-004: Decision to pivot from detection-based to charter-based ambient mode (applies ADR-004)
-- ADR-003: Leave-the-end-state principle; the old keyword/3-marker detection was deleted clean, no tombstones (applies ADR-003)
-- PF-001: Plan-handoff schema undocumented/mutable — match by prefix only; the `tests/fixtures/ambient-templates.ts` constants are full output strings, not detection substrings (avoids PF-001)
+- Decision to pivot from detection-based to charter-based ambient mode
+- Leave-the-end-state principle; the old keyword/3-marker detection was deleted clean, no tombstones
+- Plan-handoff schema undocumented/mutable — match by prefix only; the `tests/fixtures/ambient-templates.ts` constants are full output strings, not detection substrings
 - Feature knowledge: `learning-capture-system` — the memory worker fires UserPromptSubmit and SessionStart hooks too; the `DEVFLOW_BG_UPDATER` re-entrancy guard is the coupling point between that system and this one
 - Feature knowledge: `feature-knowledge-system` — the charter's feature-knowledge operating rule instructs the orchestrator to load KNOWLEDGE.md entries as FEATURE_KNOWLEDGE and spawn the Knowledge agent after changes; that system's KB covers how those entries are written and consumed
 - `src/assets/scripts/hooks/json-parse` — shared JSON output helpers (`json_prompt_output`, `json_session_output`, `json_extract_cwd_prompt`)

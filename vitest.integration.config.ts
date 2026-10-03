@@ -3,7 +3,7 @@ import { defineConfig, configDefaults } from 'vitest/config';
 /**
  * The one integration test that drives live `claude` sessions against the
  * developer's own ~/.claude with --dangerously-skip-permissions, and that has
- * previously made a commit in this repo mid-run (PF-055, PF-060). It is out of
+ * previously made a commit in this repo mid-run. It is out of
  * the default sweep and only an explicit affirmative brings it back.
  */
 export const LIVE_CLAUDE_TEST = 'tests/integration/subagent-skill-preload.test.ts';

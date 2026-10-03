@@ -23,7 +23,7 @@ tools:
 - **FEATURE_NAME** (required): Human-readable name (e.g., "CLI Command System")
 - **DIRECTORIES** (required): Directory prefixes defining the feature area scope
 - **FILES_CHANGED** (optional): Files changed in the workflow session that triggered write-back
-- **DECISIONS_CONTEXT** (optional): Compact ADR/PF index for cross-referencing in the Related section. When `(none)`, skip citing decisions in the Related section.
+- **DECISIONS_CONTEXT** (optional): Compact ADR/PF index. `(none)` when absent.
 - **EXISTING_KB** (optional): Current KNOWLEDGE.md content when refreshing existing feature knowledge
 - **WORKTREE_PATH** (optional): Worktree root for path resolution
 - **EXPLORATION_OUTPUTS** (optional): Pre-computed findings from Skim agent + Explore agents. When provided, synthesize these instead of exploring from scratch. When absent, perform your own exploration in Phase 1 (Scan) and Phase 2 (Extract).
@@ -33,7 +33,7 @@ tools:
 1. **Resolve worktree path**: Use `devflow:worktree-support` to determine the working directory (WORKTREE_PATH or cwd)
 2. **Orient on feature area**: Read EXPLORATION_OUTPUTS or EXISTING_KB to understand the feature's architecture, patterns, and boundaries
 3. **Follow the feature-knowledge skill**: Execute the 4-phase process (Scan → Extract → Distill → Forge) from `devflow:feature-knowledge`
-4. **Cross-reference decisions**: If DECISIONS_CONTEXT is provided, reference relevant ADR/PF entries in the feature knowledge's "Related" section
+4. **State decisions in words**: If DECISIONS_CONTEXT is provided, state each relevant decision or pitfall in words in the section it governs — never its ADR/PF ID, one already in EXISTING_KB included. The "Related" section links only to other knowledge bases and files.
 5. **Handle refresh**: If EXISTING_KB is provided, update stale sections based on FILES_CHANGED while preserving any manually added content. Don't regenerate from scratch.
 6. **Write KNOWLEDGE.md directly**: Write to `{worktree}/.devflow/features/{FEATURE_SLUG}/KNOWLEDGE.md` (create directory if needed)
 7. **Update index.md directly**: Read-modify-write `{worktree}/.devflow/features/index.md`
@@ -77,7 +77,7 @@ KB_PATH: {worktree}/.devflow/features/{slug}/KNOWLEDGE.md
 KB_SLUG: {slug}
 KB_NAME: {name}
 SECTIONS: [list of sections written]
-CROSS_REFERENCES: [ADR/PF entries referenced, if any]
+CROSS_REFERENCES: [ADR/PF IDs whose rule the knowledge base states in words, if any]
 KB_COMMIT: committed <sha> | skipped (no changes) | skipped (no branch) | skipped (detached HEAD) — uncommitted: <paths> | failed (<reason>)
 ```
 

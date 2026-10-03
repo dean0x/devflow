@@ -128,8 +128,9 @@ export const PROBE_MARKERS: readonly Marker[] = [
     pattern: /gh issue list[^\n]*--(?:label|milestone)\b/i,
     justification:
       'GAP-26\'s wave defect exactly: a per-round re-read of the wave\'s issues. The wave states ' +
-      'that refresh as one `fetch-issues-batch` call per round, and ADR-005 keeps its page bound ' +
-      'an API bound — which only holds while the call is made once per round.',
+      'that refresh as one `fetch-issues-batch` call per round, and never capping how many tickets ' +
+      'a round runs keeps its page bound an API bound — which only holds while the call is made ' +
+      'once per round.',
   },
   {
     label: 'batch-fetch',
@@ -196,7 +197,7 @@ export interface ProcessBlock {
  * Named collector: every `**Process:**` / `### Process` block in a corpus.
  *
  * Both boundaries are resolved through `collectUnfencedLines` — the harness's one
- * fence scanner (PF-063) — rather than by testing each raw line. A column-0
+ * fence scanner — rather than by testing each raw line. A column-0
  * `## `/`### `/`---` inside a fenced block is the literal text an operation prints,
  * not the end of its Process block: `tracker/github/manage-debt.md` already ships
  * a `## Items` inside a bash fence as the body of the successor tech-debt issue.
@@ -204,8 +205,8 @@ export interface ProcessBlock {
  * loops and probes alike — leaves this guard's reach while the bytes stay on disk.
  * No shipped block is closed by a fenced line today, so this is armed rather than
  * hypothetical: the block count and every block's length are unchanged by the
- * rerouting (ADR-025 — nothing to reclassify; the guard is not one fenced
- * heading away from going partly blind).
+ * rerouting (nothing to reclassify; the guard is not one fenced heading away
+ * from going partly blind).
  */
 export function collectProcessBlocks(corpus: CorpusEntry[]): ProcessBlock[] {
   const blocks: ProcessBlock[] = [];
@@ -290,13 +291,13 @@ describe('capability-hoist: no capability probe runs inside a loop [DR-11]', () 
     expect(
       blocks.length,
       'processBlocksScanned === 0 — the corpus is absent or the `**Process:**` / `### Process` ' +
-      'opener changed spelling; the guard would pass without reading anything (PF-018)',
+      'opener changed spelling; the guard would pass without reading anything',
     ).toBeGreaterThan(0);
 
     // BOTH corpora must contribute, asserted by provenance rather than by a total.
     // A count alone cannot say this: git.md declares 18 operations by itself, so any
     // floor at or below 18 is met with the generated tree entirely absent — the guard
-    // would then claim to scan both while scanning one (PF-018).
+    // would then claim to scan both while scanning one.
     const fromReferences = blocks.filter(b => b.file.includes(`${path.sep}references${path.sep}`));
     const fromAgent = blocks.filter(b => !b.file.includes(`${path.sep}references${path.sep}`));
     expect(
@@ -426,7 +427,7 @@ describe('capability-hoist: no capability probe runs inside a loop [DR-11]', () 
   });
 
   it('known-bad probe 4: a fenced `## ` does not close a process block; the same line unfenced does', () => {
-    // The block boundary is structural, not textual (PF-063). `manage-debt` composes a
+    // The block boundary is structural, not textual. `manage-debt` composes a
     // successor issue body containing a column-0 `## Items` inside a bash fence; when that
     // line ends the block, every loop and probe BELOW it silently leaves the guard's reach.
     // Both arms drive the same two collectors the live assertion uses.

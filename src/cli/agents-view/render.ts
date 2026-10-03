@@ -1,8 +1,8 @@
 /**
  * Pure TUI frame renderer for the devflow agents view.
  *
- * applies ADR-013: CLI-layer view module; zero fs/tty imports.
- * avoids PF-014: pure function, no process.exit(), no I/O.
+ * CLI-layer view module; zero fs/tty imports.
+ * Pure function, no process.exit(), no I/O.
  *
  * Layout (fixed lines = 9, viewport = dims.rows - 9):
  *   1  Title "  Devflow Agents" + right "proxy: enabled|disabled"

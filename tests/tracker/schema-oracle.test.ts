@@ -14,7 +14,7 @@
  * every suite that binds to the list inherits it. This file is what makes that check
  * falsifiable: it drives the same collector, and the same throwing wrapper, over each
  * mutation the floor used to admit, and it records with a probe the one mutation the
- * collector is deliberately silent about (PF-064 — an absence result is a statement
+ * collector is deliberately silent about (an absence result is a statement
  * about the shapes the matcher can express, never about the property).
  */
 
@@ -109,7 +109,7 @@ describe('the §14.3 heading oracle cannot silently shrink', () => {
       collectSchemaOracleDefects(renamed),
       'a consistently renamed list is well formed BY DESIGN. Recorded with a probe so a later ' +
       'reader cannot mistake this collector for rename coverage — that is the misreading an ' +
-      'empty absence result invites (PF-064)',
+      'empty absence result invites',
     ).toEqual([]);
   });
 

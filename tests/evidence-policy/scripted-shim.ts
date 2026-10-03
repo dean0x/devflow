@@ -9,7 +9,7 @@
  * binary — so it can count forks but cannot answer for a remote that does not
  * exist. This file keeps its design and nothing else:
  *
- *   ADDITIVE PATH (PF-045). The fake directory goes in FRONT of the inherited PATH
+ *   ADDITIVE PATH. The fake directory goes in FRONT of the inherited PATH
  *   and nothing is subtracted. "gh unavailable" is therefore a fake that exits 1
  *   with an auth error, never a PATH with gh removed — a farm that dropped a tool
  *   would change the environment instead of observing it, and would silently pick
@@ -26,7 +26,7 @@
  * resolver's injected `deps.exec`, so the fold matrix runs without a subprocess
  * per row while the argv/bounds tests still run the real spawnSync.
  *
- * Environment hygiene (PF-060): every spawn in tests/evidence-policy/ takes its
+ * Environment hygiene: every spawn in tests/evidence-policy/ takes its
  * env from scopedEnv(), which points HOME at a tmp dir — otherwise
  * the developer's real ~/.devflow/manifest.json decides the compliance default —
  * and names its cwd, so none inherits vitest's (the developer's repository). A
@@ -525,7 +525,7 @@ export function realGit(cwd: string, home: string, args: readonly string[]): str
 }
 
 // ---------------------------------------------------------------------------
-// Spawn hygiene (applies PF-060) — the one collector both evidence suites run
+// Spawn hygiene — the one collector both evidence suites run
 // ---------------------------------------------------------------------------
 
 const SPAWN_RE = /(?:spawnSync|execFileSync|execSync)\(/g;

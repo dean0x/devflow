@@ -12,11 +12,12 @@
  * wizard paths — a Recommended-only implementation would be dead on every
  * re-init (re-init is Advanced-only by construction).
  *
- * Per PF-029: the gate keys on `modePromptShown`, never on the mode name.
- * Per PF-014: runTrackerStep never calls process.exit and never throws — the
+ * The gate keys on `modePromptShown`, never on the mode name.
+ * runTrackerStep never calls process.exit and never throws — the
  * returned discriminated union drives every caller decision.
- * Per PF-018: the fake IO fails loudly when over-consumed, and the payload
- * tables assert their own row counts.
+ * The fake IO fails loudly when over-consumed, and the payload
+ * tables assert their own row counts, so no test passes without exercising
+ * what it claims to.
  */
 import { describe, it, expect, vi } from 'vitest';
 import {
@@ -40,7 +41,7 @@ import {
 /**
  * Build a fake TrackerPromptIO from queued responses.
  * Responses are consumed in order; the test fails loudly if a prompt is called
- * more times than responses were queued (PF-018: non-vacuous assertions).
+ * more times than responses were queued (non-vacuous assertions).
  */
 function makePrompts(noteFn?: (message: string, title: string) => void) {
   const providerQueue: PromptOutcome<TrackerProvider>[] = [];

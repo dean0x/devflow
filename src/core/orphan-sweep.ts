@@ -50,7 +50,7 @@ export interface SweepResult {
   /** Registry names of entries successfully removed during this sweep. */
   removed: string[];
   /**
-   * Per-item removal failures recorded but not thrown (avoids PF-009).
+   * Per-item removal failures recorded but not thrown.
    * An entry appears here only when fs.rm rejected; successful removals are in {@link removed}.
    */
   failed: ReadonlyArray<{ name: string; error: unknown }>;
@@ -83,8 +83,8 @@ export interface SweepResult {
  *
  * Per-item failure isolation: both the outer readdir and the inner rm are
  * independently try/caught — a missing directory is a no-op and a failed
- * individual removal is recorded in `failed` without aborting the sweep (avoids PF-009).
- * Never writes, only removes (avoids PF-011).
+ * individual removal is recorded in `failed` without aborting the sweep.
+ * Never writes, only removes — no delete-then-write window.
  */
 export async function sweepOrphanedAssets(
   dir: string,
@@ -105,10 +105,10 @@ export async function sweepOrphanedAssets(
           await fs.rm(path.join(dir, entry), { recursive: true, force: true });
           removed.push(registryName);
         } catch (err) {
-          failed.push({ name: registryName, error: err }); /* per-item isolation (avoids PF-009) */
+          failed.push({ name: registryName, error: err }); /* per-item isolation */
         }
       }
     }
-  } catch { /* directory absent or unreadable — not an error (avoids PF-009) */ }
+  } catch { /* directory absent or unreadable — not an error */ }
   return { scanned, removed, failed };
 }

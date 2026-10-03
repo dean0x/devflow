@@ -285,7 +285,7 @@ describe('installRuleFile', () => {
   it('empty shadow file with missing source → throws (WS6a hard-error)', async () => {
     // Shadow exists but is invalid (empty); 'orphan-rule' is not in src/assets/rules/.
     // Previously returned 'skipped'; now throws because the declared source is absent.
-    // ADR-010 shadow tolerance still applies — the shadow is invalid, but the hard-error
+    // Invalid-shadow tolerance still applies — the shadow is invalid, but the hard-error
     // fires for the missing declared source, not for the invalid shadow.
     const shadowDir = path.join(devflowDir, 'rules');
     await fs.mkdir(shadowDir, { recursive: true });

@@ -154,8 +154,8 @@ describe('AC-S1 — rewriteAgentFrontmatter rejects injection payloads', () => {
       // The original content must be unchanged (no partial write).
       const original = makeAgent('sonnet');
       const result = rewriteAgentFrontmatter(original, { ...opts, model: payload });
-      // Unconditional assertion 1: injection gate must always reject (avoids PF-018 —
-      // a conditional guard on result.ok here was the original defect: result.ok is
+      // Unconditional assertion 1: injection gate must always reject (a
+      // conditional guard on result.ok here was the original defect: result.ok is
       // always false for these payloads, so the old assertions NEVER ran).
       expect(result.ok).toBe(false);
       // Unconditional assertion 2: no modified content was produced.

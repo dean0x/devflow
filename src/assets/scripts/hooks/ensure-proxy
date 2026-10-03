@@ -15,8 +15,8 @@
 # Branding: "subswitch" is an internal identifier (health check body match, SUBSWITCH_CONFIG env var,
 # spawn args); it MUST NOT appear in user-visible strings or additionalContext messages.
 #
-# avoids PF-001: port is digit-validated before interpolation into /dev/tcp and context strings.
-# avoids PF-014: hook always exits 0; no fd held across exit.
+# Port is digit-validated, falling back to the default, before reaching /dev/tcp or context strings.
+# Hook always exits 0; no fd held across exit.
 
 # Safe no-op fallback — must exist before hook-bootstrap is sourced
 dbg() { :; }
@@ -71,7 +71,7 @@ if [ "$PROXY_ENABLED" != "true" ]; then
   exit 0
 fi
 
-# Digit-validate port before use in /dev/tcp and string interpolation (avoids PF-001)
+# Digit-validate port before use in /dev/tcp and string interpolation
 PROXY_PORT_RAW=$(json_field_file "$PROXY_STATE_FILE" "port" "4141")
 PROXY_PORT="4141"
 case "$PROXY_PORT_RAW" in
@@ -189,8 +189,7 @@ dbg "PROXY_BIN=$PROXY_BIN PROXY_CONFIG=$PROXY_CONFIG"
 #   b) `command -v subswitch` — globally installed CLI.
 # Re-resolution is best-effort: on failure the existing warning is emitted and the
 # hook exits 0 as before. The healed path is used for this session only; the next
-# successful `devflow proxy --enable` persists it to proxy.json. (avoids PF-001,
-# avoids PF-009: non-fatal on failure, always exits 0)
+# successful `devflow proxy --enable` persists it to proxy.json.
 if [ -z "$PROXY_BIN" ] || [ ! -f "$PROXY_BIN" ]; then
   log "prereq: binPath missing or not a file (${PROXY_BIN:-<empty>}) — attempting re-resolution"
   _RESOLVED_BIN=""
@@ -295,7 +294,7 @@ log "spawning relay: $NODE_BIN $PROXY_BIN serve"
 (umask 077 && touch "$LOG_FILE") 2>/dev/null || true
 chmod 600 "$LOG_FILE" 2>/dev/null || true
 
-# SEC-2 (allowlist): scope the relay's env to exactly what it needs — avoids PF-017.
+# SEC-2 (allowlist): scope the relay's env to exactly what it needs.
 # NODE_EXTRA_CA_CERTS is included when non-empty so corporate-TLS deployments can
 # supply a CA bundle; an unset/empty value is not injected (an empty path causes
 # TLS errors rather than being a no-op). NODE_OPTIONS is deliberately excluded:

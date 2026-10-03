@@ -4,7 +4,7 @@
  *
  *   wiring    Exactly the three gate partials import it — `_compliance`,
  *             `_knowledge` and `_publication` — and each as an ALIAS import
- *             (PF-073: a selective import deep-clones the imported scope into
+ *             (a selective import deep-clones the imported scope into
  *             every define of the importer). No command host imports it: hosts
  *             inherit it through the gates. Each gate expands the block itself,
  *             so a compiled command carries one block per gate it runs.
@@ -145,7 +145,7 @@ function collectGrammarDrift(t: string): string[] {
   return drift
 }
 
-describe('settings partial wiring (PF-073)', () => {
+describe('settings partial wiring', () => {
   it('the partial holds exactly one define and no imports', () => {
     const text = source(PARTIAL)
     expect([...text.matchAll(/^@define (\w+)\(/gm)].map(m => m[1])).toEqual(['settings_resolve'])

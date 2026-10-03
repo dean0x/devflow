@@ -161,7 +161,7 @@ describe('proxy-log', () => {
     const IS_WIN32 = process.platform === 'win32';
     // Must mirror the POSIX_ALLOWLIST in src/core/proxy-log.ts scrubChildEnv().
     // Also mirrored in src/assets/scripts/hooks/ensure-proxy _RELAY_ENV array.
-    // Update all three locations together when this list changes (avoids PF-017).
+    // Update all three locations together when this list changes.
     const POSIX_ALLOWLIST = ['PATH', 'HOME', 'TMPDIR', 'LANG', 'LC_ALL', 'NODE_EXTRA_CA_CERTS'];
     const WIN32_EXTRA = ['SystemRoot', 'APPDATA', 'USERPROFILE', 'ComSpec'];
     const FULL_ALLOWLIST = IS_WIN32
@@ -328,7 +328,7 @@ describe('proxy-log', () => {
       // Both relay spawn paths (TS CLI via scrubChildEnv and bash hook via _RELAY_ENV)
       // must allow the same base vars. This test reads ensure-proxy source and verifies
       // the conditional NODE_EXTRA_CA_CERTS append exists, catching future one-sided
-      // additions that silently break one spawn path (the exact failure mode of PF-017).
+      // additions that silently break one spawn path.
       //
       // The check targets the `if` guard that gates the conditional append — a non-comment
       // line that is structurally absent before the fix. Searching only for the array

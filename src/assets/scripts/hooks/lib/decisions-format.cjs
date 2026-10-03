@@ -9,7 +9,7 @@
 //
 // BYTE-COMPAT CONTRACT (must not change without updating all consumers):
 //   Decision heading:  \n## {anchorId}: {title}\n
-//   Decision fields:   - **Date**: YYYY-MM-DD\n          (empty string when absent — render purity, ADR-022: never clock-read in a formatter)
+//   Decision fields:   - **Date**: YYYY-MM-DD\n          (empty string when absent — render purity: never clock-read in a formatter)
 //                      - **Status**: Accepted\n
 //                      - **Context**: ...\n
 //                      - **Decision**: ...\n
@@ -36,8 +36,8 @@
 // Recovery pass: for any key the anchored pass left unset, an unanchored
 // regex ('(?:^|[.;\\s])key:\\s*([^;]+)') is tried against the full details
 // string — handles legacy corpus rows written before the ';'-delimited grammar
-// was documented, where fields are separated by '. ' rather than ';' (applies
-// PF-044). The recovery pass never overrides an anchored match.
+// was documented, where fields are separated by '. ' rather than ';'.
+// The recovery pass never overrides an anchored match.
 // LineTerminators (\r, \n, \u2028, \u2029) in field values are collapsed to a
 // single space at all five collapse sites (segmentDetails ×2, amendmentToString
 // ×3) — guards the single-line field contract against the full JS LineTerminator
@@ -89,12 +89,11 @@ const LINE_TERMINATORS = /[\r\n\u2028\u2029]/g;
  * that legacy corpus rows written before the ';'-delimited grammar was
  * documented (which embed field keys mid-segment after '. ') are still
  * parsed correctly. The recovery pass never overrides a value the anchored
- * pass already set. applies PF-044 (divergence/migration: legacy rows exist
- * written under the old contract that embedded keys after '. ').
+ * pass already set.
  *
  * D002 (details-parsing): This is the SINGLE parser for structured details
  * strings — both formatDecisionBody and formatPitfallBody delegate here.
- * applies PF-042 (delimiter-regex truncation).
+ * A per-field delimiter regex would silently truncate any value containing ';'.
  *
  * @param {string} detailsStr - raw details string from an observation row
  * @param {readonly string[]} keys - recognised field names
@@ -138,7 +137,7 @@ function segmentDetails(detailsStr, keys) {
   // ';'. The unanchored regex requires the key to be preceded by a
   // word-boundary character (^, '.', ';', or whitespace) so that 'reissue:'
   // still does NOT match 'issue:', and it only fills keys the anchored pass
-  // left unset — never overrides an anchored match. applies PF-044.
+  // left unset — never overrides an anchored match.
   for (const key of keys) {
     if (result[key] !== undefined) continue;
     const m = detailsStr.match(new RegExp('(?:^|[.;\\s])' + key + ':\\s*([^;]+)', 'i'));
@@ -204,13 +203,13 @@ function formatAmendmentsLine(amendments) {
  * headings number exactly one AND match `## ${anchorId}:`.
  *
  * A rejected raw_body is DROPPED from the row — the entry then renders through
- * the sanitised formatDecisionBody/formatPitfallBody — the sanctioned fallback when raw_body is absent or rejected (ADR-022).
+ * the sanitised formatDecisionBody/formatPitfallBody — the sanctioned fallback when raw_body is absent or rejected.
  *
- * Per PF-023: validate at the sink so all callers (assign-anchor, refresh-anchor,
+ * Validate at the sink so all callers (assign-anchor, refresh-anchor,
  * any future op) inherit the guard without repeating it.
  *
  * @param {unknown} body
- * @param {string} anchorId - e.g. 'ADR-001' or 'PF-023'
+ * @param {string} anchorId - e.g. 'ADR-NNN' or 'PF-NNN'
  * @returns {boolean}
  */
 function isSafeRawBody(body, anchorId) {
@@ -249,7 +248,7 @@ function initDecisionsContent(kind) {
 function formatDecisionBody(row) {
   const detailsStr = row.details || '';
   const obsId = row.id || 'unknown';
-  // Render purity (ADR-022): never clock-read inside a formatter.  Absent date
+  // Render purity: never clock-read inside a formatter.  Absent date
   // renders as an empty string so the output is deterministic and idempotent.
   const artDate = row.date || '';
   const anchorId = row.anchor_id || '';
@@ -306,12 +305,25 @@ function formatPitfallBody(row) {
  * first_seen, last_seen, artifact_path, status, …) are intentionally excluded
  * from the committed ledger — they are log-only state.
  *
+ * D-LOG-CONTENT-AUTHORITY: the observation log (decisions-log.jsonl) is the one
+ * home of an entry's content. Its ledger row is a projection of the log row,
+ * re-derived through this function alone: assign-anchor projects it at
+ * promotion, and refresh-anchor re-projects it after a reinforcement changes the
+ * log row. Nothing else may write entry content into decisions-ledger.jsonl — a
+ * change goes to the log row, then through refresh-anchor. The ledger owns only
+ * the anchor number, the decisions_status and the promotion date, which callers
+ * pass in: assign-anchor takes the date from the log row (else today), and
+ * refresh-anchor carries all three over unchanged, so a dateless row stays
+ * dateless. Reason: a ledger row copied once at promotion silently lost every
+ * later sharpening of its entry, and content kept in two places leaves two
+ * authorities that disagree.
+ *
  * D001: The projected shape is a DISTINCT COMMITTED shape, not a full obs copy.
  * This function is the single source of truth for that projection so both the
  * add-path (assign-anchor) and the migration's preserve-verbatim path produce
- * byte-identical committed shapes. applies ADR-008.
+ * byte-identical committed shapes.
  *
- * Validation at the SINK (per PF-023 — validate at convergence so all callers inherit):
+ * Validation at the SINK (validate at convergence so all callers inherit):
  *   - expectType: if provided, obs.type must match or this function throws; prevents
  *     re-projecting across entry types (PF-NNN into decisions.md or vice versa).
  *   - pattern: JS LineTerminators collapsed to a single space — the heading is
@@ -326,7 +338,7 @@ function formatPitfallBody(row) {
  * @returns {object} Canonical ledger row
  */
 function toLedgerRow(obs, { anchorId, status, date, expectType }) {
-  // Type guard — per PF-023: validate at the sink so all callers (assign-anchor,
+  // Type guard — validate at the sink so all callers (assign-anchor,
   // refresh-anchor, any future op) inherit the check without repeating it.
   if (expectType !== undefined && obs.type !== expectType) {
     throw new Error(
@@ -340,7 +352,7 @@ function toLedgerRow(obs, { anchorId, status, date, expectType }) {
     // Heading is single-line by construction — collapse any LLM-injected line terminators
     // so a newline in pattern cannot forge '- **Status**:' lines or second '## ADR-NNN:'
     // headings inside the rendered body (those would be matched first by the line-anchored
-    // index regexes in extractEntryFromBlock). applies PF-023.
+    // index regexes in extractEntryFromBlock).
     pattern: typeof obs.pattern === 'string' ? obs.pattern.replace(LINE_TERMINATORS, ' ').trim() : obs.pattern,
     details: obs.details,  // segmentDetails already collapses line terminators at read time
     anchor_id: anchorId,
@@ -348,8 +360,8 @@ function toLedgerRow(obs, { anchorId, status, date, expectType }) {
   };
   // Optional fields — include only when present in the observation or explicitly provided
   if (date !== undefined) row.date = date;
-  // log-sourced raw_body (ADR-022) — a log row that lost raw_body un-freezes the
-  // entry to formatter-rendered output by design. Gate through isSafeRawBody (PF-023).
+  // log-sourced raw_body (D-LOG-CONTENT-AUTHORITY) — a log row that lost raw_body
+  // un-freezes the entry to formatter-rendered output by design. Gate through isSafeRawBody.
   if (obs.raw_body !== undefined && isSafeRawBody(obs.raw_body, anchorId)) {
     row.raw_body = obs.raw_body;
   }

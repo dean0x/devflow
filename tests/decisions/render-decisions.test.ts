@@ -1,7 +1,7 @@
 // tests/decisions/render-decisions.test.ts
 //
 // Tests for render-decisions.cjs: golden, idempotency, round-trip, empty corpus,
-// --check exit codes, and AC-P1 (O(N) performance, ratio/bounded-delta, per ADR-014).
+// --check exit codes, and AC-P1 (O(N) performance, ratio/bounded-delta).
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { createRequire } from 'module';
@@ -671,7 +671,7 @@ describe('CLI — invalid usage', () => {
 });
 
 // ---------------------------------------------------------------------------
-// AC-P1 performance: O(N) — ratio/bounded-delta methodology (per ADR-014)
+// AC-P1 performance: O(N) — ratio/bounded-delta methodology
 // ---------------------------------------------------------------------------
 
 describe('AC-P1 render performance (ratio/bounded-delta, not absolute ms)', () => {

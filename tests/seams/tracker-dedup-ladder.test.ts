@@ -26,7 +26,7 @@
  * way: the ladder is read from the SOURCE module (the generated contract carries the
  * emitted half only), every collector is driven by a known-bad sample in the same
  * `it`, and a side that states nothing is REPORTED as unstated rather than read as
- * agreement (PF-018).
+ * agreement.
  *
  * §14.4 is asserted too: a rung is named for the CAPABILITY it needs, never for a
  * tool. That is checked against the contract's own capability table rather than

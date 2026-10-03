@@ -4,8 +4,8 @@
  * Pure module — zero I/O. All functions take content strings and return
  * new content strings; callers own file reads and writes.
  *
- * applies ADR-013: pure core-layer module, no Claude Code adapter concerns.
- * avoids PF-014: no process.exit(); all fallible paths return Result.
+ * Pure core-layer module, no Claude Code adapter concerns.
+ * No process.exit(); all fallible paths return Result.
  *
  * Regex scoping guarantee: ALL operations are confined to the FIRST `---…---`
  * block. Model/effort lines in the document body are never touched.
@@ -234,7 +234,7 @@ export function rewriteAgentFrontmatter(
       if (currentEffort !== opts.effort) {
         // Use a replacement function — NOT a string — so that $&, $`, $',
         // and $1 in opts.effort are written verbatim rather than expanded as
-        // replacement patterns (avoids PF-018).
+        // replacement patterns.
         newBody = newBody.replace(EFFORT_RE, () => `effort: ${opts.effort}`);
       }
     } else {

@@ -1,14 +1,16 @@
 /**
- * Tests for attribution-prompts.ts (D27 / PF-029).
+ * Tests for attribution-prompts.ts (D27).
  *
  * Coverage:
- *  - shouldRunAttributionStep: exhaustive gate matrix (PF-029 invariants)
+ *  - shouldRunAttributionStep: exhaustive gate matrix (the step is reachable only on
+ *    the Advanced path with a TTY)
  *  - structural reachability guard: init.ts call site must be in Advanced half with
  *    a non-literal mode binding — test fails when the block is moved or the literal
- *    is restored (applies PF-029, PF-018)
- *  - runAttributionStep: step runner with injected DI seam (PF-014 invariants)
+ *    is restored
+ *  - runAttributionStep: step runner with injected DI seam (never throws, never calls
+ *    process.exit)
  *  - applyAttributionAnswer: immutable merge of wizard answer into FlagsRecord
- *  - attributionSeedFrom: boolean seed derivation from FlagsRecord (PF-018)
+ *  - attributionSeedFrom: boolean seed derivation from FlagsRecord
  */
 
 import { describe, it, expect } from 'vitest';
@@ -27,7 +29,7 @@ import type { FlagsRecord } from '../src/core/flags.js';
 
 // ── shouldRunAttributionStep ──────────────────────────────────────────────────
 
-describe('shouldRunAttributionStep — gate predicate (D27 / PF-029)', () => {
+describe('shouldRunAttributionStep — gate predicate (D27)', () => {
   // ── Advanced-only invariant (D27) ───────────────────────────────────────────
   // The attribution question is reachable from the Advanced path ONLY. Unlike the
   // compliance step, interactive Recommended never asks — it silently applies the
@@ -48,7 +50,7 @@ describe('shouldRunAttributionStep — gate predicate (D27 / PF-029)', () => {
 
 // ── Structural reachability guard ─────────────────────────────────────────────
 
-describe('init.ts structural guard — D27 call site must be in Advanced half, non-literal mode (PF-029 / PF-018)', () => {
+describe('init.ts structural guard — D27 call site must be in Advanced half, non-literal mode', () => {
   const __filename = fileURLToPath(import.meta.url);
   const __dirname = path.dirname(__filename);
   const initTsPath = path.resolve(__dirname, '../src/cli/commands/init.ts');
@@ -58,7 +60,7 @@ describe('init.ts structural guard — D27 call site must be in Advanced half, n
   const SPLIT_ANCHOR = '// ── Advanced path: full interactive flow ──';
   const REC_ANCHOR = 'if (useRecommended) {';
 
-  it('non-empty corpus: source and both halves must be non-empty (PF-018 non-vacuity)', () => {
+  it('non-empty corpus: source and both halves must be non-empty (non-vacuity)', () => {
     const source = fs.readFileSync(initTsPath, 'utf8');
     expect(source.length, 'init.ts is empty — file may have been deleted or renamed').toBeGreaterThan(0);
 
@@ -117,7 +119,7 @@ describe('init.ts structural guard — D27 call site must be in Advanced half, n
 
     // After the fix, the attribution gate call must NOT contain the bare literal
     // `mode: 'advanced'` — that pattern is what made the predicate always-true and
-    // three of the four gate rows unreachable (applies PF-029).
+    // three of the four gate rows unreachable.
     expect(
       attrCallBlock.includes("mode: 'advanced'"),
       "Found bare literal `mode: 'advanced'` at the attribution call site — must be the ternary `mode: useRecommended ? 'recommended' : 'advanced'`",
@@ -144,7 +146,7 @@ function makeIO(selectResult: boolean | 'cancel'): AttributionPromptIO {
   };
 }
 
-describe('runAttributionStep — step runner (PF-014)', () => {
+describe('runAttributionStep — step runner', () => {
   it('user selects Yes (true) → resolved with suppress:true and success message', async () => {
     const result = await runAttributionStep({ seed: false, prompts: makeIO(true) });
     expect(result.kind).toBe('resolved');
@@ -167,7 +169,7 @@ describe('runAttributionStep — step runner (PF-014)', () => {
     }
   });
 
-  it('cancel → kind:cancelled (PF-014: never throws)', async () => {
+  it('cancel → kind:cancelled (never throws)', async () => {
     const result = await runAttributionStep({ seed: false, prompts: makeIO('cancel') });
     expect(result.kind).toBe('cancelled');
   });
@@ -193,7 +195,7 @@ describe('runAttributionStep — step runner (PF-014)', () => {
     expect(noteMsg).toContain('shown (default)');
   });
 
-  it('does not throw — never calls process.exit() (PF-014)', async () => {
+  it('does not throw — never calls process.exit()', async () => {
     // The step runner must return a value, never throw or process.exit.
     await expect(runAttributionStep({ seed: false, prompts: makeIO(false) })).resolves.toBeDefined();
     await expect(runAttributionStep({ seed: false, prompts: makeIO('cancel') })).resolves.toBeDefined();
@@ -271,7 +273,7 @@ describe('applyAttributionAnswer — immutable FlagsRecord merge (D27)', () => {
 
 // ── attributionSeedFrom ───────────────────────────────────────────────────────
 
-describe('attributionSeedFrom — boolean seed from FlagsRecord (PF-018)', () => {
+describe('attributionSeedFrom — boolean seed from FlagsRecord', () => {
   it('true stored → returns true (real boolean)', () => {
     const result = attributionSeedFrom({ 'suppress-attribution': true });
     expect(result).toBe(true);

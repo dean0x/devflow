@@ -107,14 +107,14 @@ describe('safeEntryPath — path containment guard', () => {
     // Create a sibling directory reachable via path traversal so the test
     // genuinely proves the guard, not an incidentally-missing parent directory.
     // If safeEntryPath() were removed, writeCache would succeed here and write
-    // to sibling/payload.json (avoids PF-018: non-empty target).
+    // to sibling/payload.json (non-empty target).
     const sibling = path.join(path.dirname(cacheDir), 'escape-sibling');
     await fs.mkdir(sibling, { recursive: true });
     try {
       await writeCache(cacheDir, '../escape-sibling/payload', { value: 'x' }, 60_000);
       // Assert the file was NOT written outside cacheDir.
       // fileExists is a boolean resolved OUTSIDE any try/catch — a guard
-      // regression propagates as a real test failure (avoids PF-018).
+      // regression propagates as a real test failure.
       const escapedFile = path.join(sibling, 'payload.json');
       const fileExists = await fs.access(escapedFile).then(() => true, () => false);
       expect(fileExists, 'Path traversal guard failed — file was written outside cacheDir').toBe(false);
@@ -308,7 +308,7 @@ describe('parseRawEnvelope', () => {
 });
 
 // ---------------------------------------------------------------------------
-// Path accessors — avoids PF-013 (hardcoded path residue surviving a relocation)
+// Path accessors — avoid hardcoded path residue surviving a relocation
 // ---------------------------------------------------------------------------
 //
 // These tests pin the authoritative cache-directory paths exported from cache.ts.
@@ -316,10 +316,10 @@ describe('parseRawEnvelope', () => {
 // value diverges from the caller and one of the integration tests below fails,
 // making the drift compile-time and runtime visible.
 //
-// applies ADR-013: path layout owned by the core module (cache.ts), not
+// Path layout owned by the core module (cache.ts), not
 // scattered across callers in src/cli/ or src/hud/.
 
-describe('modelCacheDir — path accessor (avoids PF-013)', () => {
+describe('modelCacheDir — path accessor', () => {
   it('returns path.join(devflowDir, "cache", "models")', () => {
     const base = '/tmp/test-devflow';
     expect(modelCacheDir(base)).toBe(path.join(base, 'cache', 'models'));
@@ -332,7 +332,7 @@ describe('modelCacheDir — path accessor (avoids PF-013)', () => {
   });
 });
 
-describe('hudCacheDir — path accessor (avoids PF-013)', () => {
+describe('hudCacheDir — path accessor', () => {
   it('returns path.join(devflowDir, "cache") — parent of model cache', () => {
     const base = '/tmp/test-devflow';
     expect(hudCacheDir(base)).toBe(path.join(base, 'cache'));

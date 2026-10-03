@@ -486,8 +486,8 @@ describe('DELETED_PLUGIN_NAMES consistency', () => {
   // partial reinstall. A LIVE plugin name listed here is therefore silently erased
   // from the user's recorded selection, and resolveSeedPlugins then omits it from
   // the next re-init seed — a plugin the user chose disappears with no error.
-  // Same misread class as PF-012 (deletion manifest that reads like a naming list);
-  // guarded here because the state-aware-init contract forbids it. applies ADR-014
+  // Same misread class as the LEGACY_SKILLS_* lists (deletion manifest that reads like a naming list);
+  // guarded here because the state-aware-init contract forbids it.
   it('contains no name that is still a live plugin in the registry', () => {
     const liveNames = new Set(DEVFLOW_PLUGINS.map(p => p.name));
     expect(liveNames.size, 'registry must be non-empty or this guard is vacuous').toBeGreaterThan(0);
@@ -553,7 +553,7 @@ describe('partitionSelectablePlugins', () => {
   // change to the excluded set itself (dropping devflow-ambient leaves them green
   // while exposing an always-installed plugin as an uncheckable-by-accident entry
   // in the init language multiselect). This literal is the only assertion that
-  // pins WHICH plugins are excluded, so a deliberate change must land here. avoids PF-018
+  // pins WHICH plugins are excluded, so a deliberate change must land here.
   it('EXCLUDED pins exactly the always-installed plugins (independent oracle)', () => {
     expect([...EXCLUDED].sort()).toEqual(['devflow-ambient', 'devflow-core-skills']);
   });

@@ -93,8 +93,8 @@ function newestCompileInput(srcDir: string): CompileInput | null {
  *
  * EXISTENCE IS NOT CURRENCY. This is the gate on the only executable coverage of
  * a `devflow` action BODY, and a `dist/cli.js` older than the sources it was
- * compiled from certifies a build nobody is shipping — PF-018's first mechanism
- * in its quietest form, where the target exists but is not the one under review.
+ * compiled from certifies a build nobody is shipping — a vacuous pass in its
+ * quietest form, where the target exists but is not the one under review.
  * So the artifact is compared against the newest compile input and a stale one
  * fails LOUD, naming the build step, exactly as an absent one does.
  *
@@ -123,7 +123,7 @@ export function requireBuiltCli(root: string = ROOT): string {
     // A hermetic temp root carries a `dist/` and no sources; there is nothing for
     // it to be stale against, and the absence arm above is the only claim it can
     // make. A root that HAS a `src/` and yields no compile input is a scan that
-    // went empty, which would make every currency check below vacuous (PF-018).
+    // went empty, which would make every currency check below vacuous.
     if (!existsSync(srcDir)) return cliPath
     throw new Error(
       `${srcDir} exists but holds no .ts/.json compile input — the currency check below ` +
@@ -156,7 +156,7 @@ export const SANDBOX_ENV_ALLOWLIST = [
  * `home` (D-TEST-HOME-ISOLATION). Built from `SANDBOX_ENV_ALLOWLIST`, never by
  * spreading `process.env`, so an inherited `DEVFLOW_DIR`, `CLAUDE_CODE_DIR` or
  * `CLAUDE_CONFIG_DIR` cannot reach the child. Throws when `home` is a real home or
- * lies outside `os.tmpdir()` (PF-060: asserted, not trusted). `extra` is applied
+ * lies outside `os.tmpdir()` (asserted, not trusted). `extra` is applied
  * last, so a caller that deliberately sets a variable does so in plain sight.
  */
 export function sandboxEnv(home: string, extra: Readonly<Record<string, string>> = {}): NodeJS.ProcessEnv {
@@ -178,8 +178,8 @@ export function loadFile(relPath: string): string {
 // A test that needs compiled artifacts must never get them by rebuilding the
 // real dist/ tree: vitest runs other files in parallel workers that READ those
 // same paths, so an unscoped build silently REPAIRS a stale dist/ mid-suite and
-// whichever reader lost the race reports a flake instead of the staleness
-// (avoids PF-055). Every build spawned from here is redirected to a throwaway
+// whichever reader lost the race reports a flake instead of the staleness.
+// Every build spawned from here is redirected to a throwaway
 // root via DEVFLOW_MDS_ROOT, and the corpus it compiles is a COPY of the
 // committed sources — so the real src/ and dist/ trees are only ever read.
 
@@ -357,14 +357,14 @@ export function resolveAllAgents(root: string = ROOT): Map<string, AgentSource> 
 
 // ── Fenced-code-block awareness for column-0 section boundaries ──────────────
 //
-// D-FENCE-AWARE-BOUNDARY (PF-063). A `## ` line at column 0 inside a fenced code
+// D-FENCE-AWARE-BOUNDARY. A `## ` line at column 0 inside a fenced code
 // block is payload, not structure: `tracker/github/manage-debt.md`'s `## Items`
 // is the literal body of the successor tech-debt issue, and
 // `tracker/github/ensure-traceable-issue.md` carries six such lines across its
 // `gh issue create` heredoc and its D3 template fence. A terminator search that
 // reads them as headings ends the operation's section mid-fence — the bytes stay
 // on disk, containment-green, while every union-mode guard reading that section
-// examines an empty tail. PF-063's recorded remedy is to make the rule structural
+// examines an empty tail. The remedy is to make the rule structural
 // and assert it; `collectUnfencedLines` is the structural half — the ONE fence
 // scanner every "is this column-0 line structure or payload?" question routes
 // through. Its callers: `collectUnfencedH2` (below) for `## ` section
@@ -372,7 +372,7 @@ export function resolveAllAgents(root: string = ROOT): Map<string, AgentSource> 
 // tests/tracker/; and `capability-hoist`'s process-block terminator, which
 // closes on `## `/`### `/`**Output:**`/`---` and had re-derived the rule locally.
 // A collector that re-derives it drifts the moment the rule moves, and its probe
-// stays green while the real rule has changed (PF-018).
+// stays green while the real rule has changed.
 //
 // Fence grammar — a deliberate CommonMark subset:
 //   open  — a line whose first non-space characters, after at most 3 leading
@@ -383,8 +383,8 @@ export function resolveAllAgents(root: string = ROOT): Map<string, AgentSource> 
 //           after it but whitespace;
 //   an unclosed fence runs to the end of the text.
 //
-// Deliberate non-goals, written down rather than inferred from a green run
-// (PF-064): 4-space-indented code blocks, HTML blocks, and fences opened 4+
+// Deliberate non-goals, written down rather than inferred from a green run:
+// 4-space-indented code blocks, HTML blocks, and fences opened 4+
 // spaces deep inside a list item are not modelled. Every `## ` inside one of
 // those is itself indented, so it is not a column-0 `## ` line and could not
 // terminate a section under either the old rule or this one.
@@ -393,7 +393,7 @@ export function resolveAllAgents(root: string = ROOT): Map<string, AgentSource> 
 // tests/guards/fence-grammar.test.ts (one synthetic corpus per rule, each proven
 // red against the inverted rule), and end-to-end through the section extractor
 // in tests/guards/agent-source-resolver.test.ts. A rule with no probe can be
-// inverted with the whole suite still green (PF-018), so a rule added here is a
+// inverted with the whole suite still green, so a rule added here is a
 // probe added there.
 
 const FENCE_MARKER_RE = /^ {0,3}(`{3,}|~{3,})/
@@ -434,7 +434,7 @@ interface FenceScan {
  * either "which column-0 lines are structure?" or "does the text end inside a
  * fence?", and answering both from one scan is what keeps the grammar in one
  * place. A second scanner drifts from this one the moment a rule moves, and its
- * probe stays green while the real rule has changed (PF-018).
+ * probe stays green while the real rule has changed.
  */
 function scanFences(text: string, accept: (line: string) => boolean): FenceScan {
   const sites: UnfencedLine[] = []
@@ -494,8 +494,7 @@ export function collectUnfencedLines(
  *
  * This is the single owner of "is this `## ` structure or payload?" — the
  * section extractor and the generated-reference structure guard must not
- * re-derive it, or a probe can stay green after the real rule changes
- * (PF-018).
+ * re-derive it, or a probe can stay green after the real rule changes.
  */
 export function collectUnfencedH2(text: string): UnfencedH2[] {
   return collectUnfencedLines(text, line => line.startsWith('## '))
@@ -509,8 +508,8 @@ export function collectUnfencedH2(text: string): UnfencedH2[] {
  * every column-0 `## ` is payload, so every union-mode section extraction runs to
  * end of file, every absence assertion over the tail is satisfied for the wrong
  * reason, and the fenced-`## ` non-vacuity floor counts UP as the corpus
- * degrades — all three numbers a reader would check move the reassuring way
- * (PF-018). The corpus-wide assertion that no shipped file is in that state
+ * degrades — all three numbers a reader would check move the reassuring way.
+ * The corpus-wide assertion that no shipped file is in that state
  * lives in tests/guards/fence-grammar.test.ts.
  *
  * Returns at most one entry, which is a property of the grammar and not of this
@@ -520,7 +519,7 @@ export function collectUnfencedH2(text: string): UnfencedH2[] {
  * (`files.flatMap(...)`), and keeps the empty assertion spelled the way every
  * other named collector here spells it.
  *
- * Deliberate non-goal (PF-064): a fence a writer forgot to close, which a later
+ * Deliberate non-goal: a fence a writer forgot to close, which a later
  * unrelated delimiter happens to close, is balanced under this grammar and is not
  * reported. What is asserted is exactly what the rule states — the text does not
  * end inside a fence.
@@ -581,7 +580,7 @@ function unfencedH2Index(text: string): readonly UnfencedH2[] {
  * Both ends of the section come from the SAME unfenced-heading index, so the
  * anchor is line-bounded and fence-aware by construction: the section runs from
  * the operation's own UNFENCED column-0 `## ` line to the next one, or to end of
- * file (D-FENCE-AWARE-BOUNDARY / PF-063 — see `collectUnfencedH2`).
+ * file (D-FENCE-AWARE-BOUNDARY — see `collectUnfencedH2`).
  *
  * Both properties fix a real defect the earlier `indexOf(marker)` start had,
  * where only the terminator was fence-aware:
@@ -762,8 +761,8 @@ export function gitAgentSinkCorpus(root = ROOT): CorpusEntry[] {
 // ONE spelling of where the PR-host mechanics live, read by every suite that
 // builds, filters or seeds a `references/pr/` path. Several local copies of this
 // grammar would let the next directory move update one and silently narrow the
-// corpus of every guard built on the others (PF-018: a corpus that went empty
-// after a move passes by matching nothing).
+// corpus of every guard built on the others (a corpus that went empty after a
+// move passes by matching nothing).
 
 /** The references-root-relative path of an op's PR-host mechanics: `pr/{op}.md`. */
 export function prHostRel(op: string): string {
@@ -788,8 +787,8 @@ export function isPrHostEntryPath(entryPath: string, op?: string): boolean {
 //
 // One collector for the AC-2.5/AC-2.7 single-naming-line claim, shared by the
 // containment and byte-budget suites so both assert over the same definition of
-// "names a reference path" (PF-018: a probe that re-implements the collector
-// proves the copy is live, not the guard).
+// "names a reference path" (a probe that re-implements the collector proves
+// the copy is live, not the guard).
 
 /**
  * Named collector: lines of the compiled agent that name a `references/tracker/`
@@ -813,7 +812,7 @@ export interface EmittedFile {
  *
  * Since `@mdscript/mds` 0.4 a single-brace `{…}` is literal text and there is no
  * backslash escape, so either half of a 0.2.0-era `\{…\}` ships its backslash with
- * a clean build (PF-081). Shared by the compiled-tree guard in
+ * a clean build. Shared by the compiled-tree guard in
  * `tests/build-mds.test.ts` and the installed-package guard in
  * `tests/integration/pack-install.test.ts`, so both apply one definition of a leak.
  */
@@ -912,7 +911,7 @@ export const TRACKER_SCHEMA_SECTION_COUNT = 11
  *   - LONG — more (add-one).
  *
  * WHAT A CLEAN RESULT DOES NOT COVER, recorded beside the rule rather than left
- * to be inferred (PF-064). A heading RENAMED here, in the Tracker agent's
+ * to be inferred. A heading RENAMED here, in the Tracker agent's
  * template and in the Git-agent's reader block, all in one commit, is well
  * formed and passes. That is a declared NON-GOAL, not an oversight: §14.3 is a
  * design artifact under `.devflow/docs/design/`, which is gitignored, so no
@@ -965,7 +964,7 @@ export function requireSchemaOracle(sections: readonly string[]): readonly strin
  * `## Project` carries two values (site and key) and is therefore ONE heading
  * with two validator rows — §14.3's table splits the rows, not the section.
  * `learned:` is deliberately absent from the frontmatter set below: it has no
- * stated consumer, and an unread key is residue (ADR-003).
+ * stated consumer, and an unread key is residue.
  *
  * Its SHAPE is settled here, once, at import: exactly
  * `TRACKER_SCHEMA_SECTION_COUNT` distinct headings, no repeats. A consumer
@@ -1027,8 +1026,7 @@ export interface TrackerSchemaRow {
  * (`enum: \`none\` \| \`self\``) without the row parsing as six cells. The
  * hostile-value suite drives the `validator` cells this returns, so the table in
  * the agent is the single authority for what a value must look like — a second
- * copy of the shapes inside the test would prove the copy, not the agent
- * (PF-018).
+ * copy of the shapes inside the test would prove the copy, not the agent.
  */
 export function collectTrackerSchemaRows(content: string): TrackerSchemaRow[] {
   const rows: TrackerSchemaRow[] = []
@@ -1100,10 +1098,10 @@ function anchorOffsets(content: string, anchor: string): number[] {
  * Named collector: the ordering claims `content` breaks.
  *
  * Each anchor must occur EXACTLY once. An absent anchor is a violation, not a
- * pass — an order check that skips a missing anchor certifies nothing (PF-018).
+ * pass — an order check that skips a missing anchor certifies nothing.
  * A duplicated anchor is a violation too: a first-match reading picks one
  * occurrence and silently ignores the other, which may be the one a reader
- * follows (PF-057's first-match hazard, turned into a report). Only when both
+ * follows (the first-match hazard, turned into a report). Only when both
  * anchors are unique is `before` compared against `after`.
  *
  * Shared across suites so every order guard reads the same definition of "comes
@@ -1144,7 +1142,7 @@ export function collectOrderViolations(
 // ── Golden fixture loader ────────────────────────────────────────────────────
 //
 // Throws with a command hint when the fixture is absent — never self-heals.
-// A guard that silently skips on a missing fixture is not a guard (PF-018).
+// A guard that silently skips on a missing fixture is not a guard.
 // A golden mismatch means the source is wrong, never the fixture (H2).
 
 const GOLDENS_DIR = path.join(ROOT, 'tests', 'fixtures', 'golden')
@@ -1285,7 +1283,7 @@ export interface StatusLineRefReader {
  * closed list that nothing else can fire. Every call site inside the extractor
  * passes a declared path, so a test that only ran the extractor would assert the
  * list's ENFORCEMENT nowhere — "`ref()` refuses an undeclared path" would stay a
- * claim about unexercised code (PF-018). The probe in
+ * claim about unexercised code. The probe in
  * tests/guards/agent-source-resolver.test.ts drives THIS function, not a copy of
  * its membership test.
  *
@@ -1354,7 +1352,7 @@ export function extractStatusLines(gitContent?: string): string {
    *
    * Routed through the harness's one section extractor, so the boundary is the
    * shared rule — line-bounded at the start, cut at the next UNFENCED column-0
-   * `## ` (D-FENCE-AWARE-BOUNDARY / PF-063). A `## ` line inside an Output
+   * `## ` (D-FENCE-AWARE-BOUNDARY). A `## ` line inside an Output
    * template's fence is payload, which is what the hand-rolled slice this
    * replaces used a `\n## Operation:` terminator to approximate: that terminator
    * stopped only at a SIBLING operation, so the last operation's section ran past
@@ -1362,7 +1360,7 @@ export function extractStatusLines(gitContent?: string): string {
    * section silently carried any non-operation heading that followed it. That is
    * the construct Guard 10 was rewritten to escape (667c497) — a region wider
    * than the operation it claims to be — and every `between`/`singleLine` below
-   * inherited it from here. PF-057's class: a slicing rule that pins layout
+   * inherited it from here. The defect class: a slicing rule that pins layout
    * instead of the semantics the fixture is supposed to sample.
    *
    * 'sole' [DR-18]: git.md is the single authority for the sections sampled
@@ -1415,11 +1413,11 @@ export function extractStatusLines(gitContent?: string): string {
     // fetch-issue D4 + output block (baseline lines 268-290)
     // gitOp() scopes both anchors to this operation's own section; the
     // "## Issue #{number}:" heading in its Output template is fenced, so it is
-    // payload and does not cut the section (PF-063).
+    // payload and does not cut the section.
     between(gitOp('fetch-issue'), '**Degradation (D4):** `gh` unauthenticated or absent, tracker unavailable', '{type}/{number}-{slug}'),
     // fetch-issues-batch D4 + output block (baseline lines 314-339)
     // Same scoping as fetch-issue above; its "## Issues Batch ({n} issues)"
-    // heading is fenced too (PF-063).
+    // heading is fenced too.
     between(gitOp('fetch-issues-batch'), '**Degradation (D4):** `gh` unauthenticated or absent, tracker unavailable', '- **Conflicts**: {conflicting requirements if any}'),
     // post-review-summary STUB output template (baseline lines 381-386), whole in
     // the PR-host reference.
@@ -1648,8 +1646,8 @@ export function splitFrontmatter(text: string): FrontmatterSplit | null {
 // A row that pins a whole sentence makes the two forces contradict each other: the
 // ceiling demands the sentence be shortened and the guard forbids it from changing,
 // and the guard loses in the only way that matters — it goes RED reporting a clause
-// that is still present, because the rewrite moved a comma. That is PF-057's
-// mistake one level down: pinning where a sentence happens to break.
+// that is still present, because the rewrite moved a comma. That is the
+// layout-pinning mistake one level down: pinning where a sentence happens to break.
 //
 // So each row's shape recognises the SHORTEST phrase that carries its claim, and a
 // requirement whose halves must co-occur is written as SEVERAL rows over the same
@@ -1683,7 +1681,7 @@ export interface ProviderMechanicsClaim {
    *
    * A non-empty tuple, not `readonly string[]`: the collector below ranges over
    * this list, so an empty one would report nothing while reading not one byte
-   * of any provider's mechanics — a row that can never fail (PF-018). The type
+   * of any provider's mechanics — a row that can never fail. The type
    * refuses to spell it rather than a branch having to notice it.
    */
   readonly ops: readonly [string, ...string[]]

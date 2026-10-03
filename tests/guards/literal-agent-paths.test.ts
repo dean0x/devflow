@@ -83,7 +83,7 @@ interface CorpusEntry {
  * `'tracker.md'` and `` `${name}.md` `` match; `'.md'` in an extension list and
  * `'git.mds'` do not.
  *
- * DELIBERATE NON-GOAL (PF-064): composition split across lines — `const dir =
+ * DELIBERATE NON-GOAL: composition split across lines — `const dir =
  * agentsDir()` on one line and `path.join(dir, 'x.md')` on another — is not read.
  * Tracking the alias would report the directory-walking callers above, which are
  * the majority and are correct. The single-line shape is the one an author
@@ -184,7 +184,7 @@ describe('literal-agent-path guard: no src/assets/agents/ literals in new test f
 
     expect(
       corpus.length,
-      'corpus is empty — scan directories are absent or contain no .ts files; guard is vacuous (PF-018)',
+      'corpus is empty — scan directories are absent or contain no .ts files; guard is vacuous',
     ).toBeGreaterThan(0);
 
     // Filter out self-documented exclusions before running the collector.

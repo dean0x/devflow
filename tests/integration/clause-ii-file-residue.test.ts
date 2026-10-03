@@ -71,7 +71,7 @@ afterAll(async () => {
 /**
  * Run a shell command synchronously.
  * Returns { stdout, stderr, exitCode, signal }.
- * Never throws — callers check exitCode explicitly (PF-008).
+ * Never throws — callers check exitCode explicitly.
  *
  * `signal` is populated when execSync kills the process due to a timeout.
  */
@@ -102,7 +102,7 @@ function runSync(
  *
  * The integration suite runs under the developer's real HOME (its live-`claude`
  * test needs the real ~/.claude), so this is the one place the suite's `init`
- * spawn is sandboxed, and it is sandboxed by construction (PF-060): the env comes
+ * spawn is sandboxed, and it is sandboxed by construction: the env comes
  * from `sandboxEnv`, an allowlist that throws unless HOME is a temp dir and never
  * forwards an inherited DEVFLOW_DIR / CLAUDE_CODE_DIR / CLAUDE_CONFIG_DIR. The
  * resolved HOME is echoed before the spawn so the run is checkable in the log.
@@ -113,7 +113,7 @@ function runDevflowInit(opts: {
   home: string;
 }): { exitCode: number; stdout: string; stderr: string } {
   const env = sandboxEnv(opts.home);
-  console.log(`[PF-060] devflow init HOME=${env.HOME}`);
+  console.log(`[sandbox] devflow init HOME=${env.HOME}`);
   const result = spawnSync(process.execPath, [opts.cliPath, 'init', '--recommended'], {
     cwd: opts.cwd,
     encoding: 'utf-8',

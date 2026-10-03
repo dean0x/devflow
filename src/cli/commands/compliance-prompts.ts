@@ -1,13 +1,13 @@
 /**
  * Compliance prompt helpers for devflow init.
  *
- * CLI-layer module (ADR-013): prompt-rendering logic lives in src/cli/commands/,
+ * CLI-layer module: prompt-rendering logic lives in src/cli/commands/,
  * core business logic stays in src/core/compliance.ts.
  *
- * Applies PF-029: every wizard gate keys on `modePromptShown` (was the Setup-mode
+ * Every wizard gate keys on `modePromptShown` (was the Setup-mode
  * p.select prompt actually shown?), never on the mode name, so --recommended (flag,
  * no prompt) and the non-TTY fallback preserve their promptless contracts.
- * Applies PF-014: runComplianceStep never calls process.exit() or throws — callers
+ * runComplianceStep never calls process.exit() or throws — callers
  * own the cancel idiom (p.cancel + process.exit(0)), keeping try/finally cleanup safe.
  *
  * Shared DI seam (PromptOutcome, WizardPromptIO, clackNote, clackSelect) lives in
@@ -64,7 +64,7 @@ export function formatComplianceSummary(enabled: boolean, frameworks: string[]):
 /**
  * Determines whether the compliance wizard step should run for a given init invocation.
  *
- * Gate table (per PF-029: key on modePromptShown, never on the mode name):
+ * Gate table (key on modePromptShown, never on the mode name):
  *
  *   --recommended flag / !isTTY fallback             → no (promptless contract preserved)
  *   Interactive mode-prompt → Recommended             → yes (modePromptShown=true)
@@ -162,7 +162,7 @@ export type ComplianceStepOutcome = ComplianceStepResolved | ComplianceStepCance
  *   1. Note — "Current setting: …" header then the framework catalogue.
  *   2. Enable select — labeled Yes / No with hints (seeded from prior state);
  *      p.select is immune to Enter-through muscle memory while still preserving
- *      the seeded value (ambient-prompt style — per PF-029).
+ *      the seeded value (ambient-prompt style).
  *   3. If Yes — framework multiselect (seeded, required:false).
  *
  * Returns:
@@ -170,7 +170,7 @@ export type ComplianceStepOutcome = ComplianceStepResolved | ComplianceStepCance
  *     ComplianceFeatureState; `messages` are emitted by the caller.
  *   {kind:'cancelled'} — user pressed Escape; caller runs p.cancel + process.exit(0).
  *
- * Invariants (PF-014):
+ * Invariants:
  *   - Never calls process.exit(), never throws.
  *   - Returned arrays never alias seed arrays (defensive copies throughout).
  *   - All I/O is routed through the `prompts` parameter (injectable for tests).
@@ -207,7 +207,7 @@ export async function runComplianceStep(opts: {
   if (!enabled) {
     return {
       kind: 'resolved',
-      // Never alias seed.frameworks — defensive copy (PF-014).
+      // Never alias seed.frameworks — defensive copy.
       state: { enabled: false, frameworks: [...seed.frameworks] },
       messages: [{
         level: 'info',
@@ -220,7 +220,7 @@ export async function runComplianceStep(opts: {
   const multiselectOutcome = await prompts.multiselect({
     message: FRAMEWORK_SELECT_MESSAGE,
     options: frameworkChoices(),
-    // Defensive copy: never alias seed.frameworks (PF-014).
+    // Defensive copy: never alias seed.frameworks.
     initialValues: [...seed.frameworks],
     required: false,
   });

@@ -28,7 +28,7 @@
  * they create or ensure the PR exactly as they did — and /implement is the only
  * command that records an evidence exception.
  *
- * NOT covered (PF-064): a gate spelled in synonyms ("for regulated projects
+ * NOT covered: a gate spelled in synonyms ("for regulated projects
  * only"), a conditional clause more than 80 characters before the name, and gates
  * outside the three built surfaces (skills, rules, other agents). A clean result
  * means none of the collected shapes is ungoverned — not that no other gate exists.
@@ -228,8 +228,8 @@ const DISPOSITION: readonly DispositionRow[] = [
   {
     // Caller side (#362): /resolve runs Phase 9c only under the input. Op side
     // (#363 PR4): check-merge-readiness takes the input and gates the non-author
-    // approval at its own arm (PF-076) — READY needs a trusted non-author's
-    // approval unless the input is `false`.
+    // approval at its own arm (a gate is obeyed reliably only where its step states
+    // it) — READY needs a trusted non-author's approval unless the input is `false`.
     row: 11,
     subject: '/resolve Phase 9c — merge readiness, and its non-author approval arm',
     inputs: ['REQUIRE_NON_AUTHOR_APPROVAL'],
@@ -249,8 +249,8 @@ const DISPOSITION: readonly DispositionRow[] = [
     // map is classified — and untraced commits asked about — BEFORE the confirm. A
     // `--dry-run` gathers under either policy (the gather site's own clause carries
     // both arms) and halts after Phase 4, so it never reaches the ask or step 4.
-    // Step 4c (P3) is its own spawn, separate from 4b, and states its own gate
-    // (PF-076) — plus a second clause, a non-empty SHIPPED_ISSUES.
+    // Step 4c (P3) is its own spawn, separate from 4b, and states its own gate —
+    // plus a second clause, a non-empty SHIPPED_ISSUES.
     row: 12,
     subject: '/release evidence gather, traceability ask, release-notes enrichment, back-link and release association',
     inputs: ['EVIDENCE_POLICY'],

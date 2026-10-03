@@ -1,13 +1,13 @@
 /**
  * Attribution prompt helpers for devflow init.
  *
- * CLI-layer module (ADR-013): prompt-rendering logic lives in src/cli/commands/,
+ * CLI-layer module: prompt-rendering logic lives in src/cli/commands/,
  * core business logic stays in src/core/.
  *
- * Applies PF-029: the gate is an exported pure predicate with an explicit isTTY guard,
+ * The gate is an exported pure predicate with an explicit isTTY guard,
  * so --recommended (flag, no prompt) and the non-TTY fallback keep their promptless
  * contracts and the reachability rule is unit-testable without a terminal.
- * Applies PF-014: runAttributionStep never calls process.exit() or throws — callers
+ * runAttributionStep never calls process.exit() or throws — callers
  * own the cancel idiom (p.cancel + process.exit(0)), keeping try/finally cleanup safe.
  *
  * D27: suppress-attribution flag — gates Claude Code's AI-attribution injection.
@@ -41,7 +41,7 @@ import type { FlagsRecord } from '../../core/flags.js';
  * Gating on the mode name is sound here because 'advanced' is only ever resolved on an
  * interactive path (the Advanced branch exit-1s on non-TTY), and the explicit isTTY guard
  * keeps the promptless contracts of --recommended and the non-TTY fallback pinned
- * regardless (PF-029).
+ * regardless.
  *
  * There is no CLI override for attribution — it is toggled post-install via
  * `devflow flags --enable/--disable suppress-attribution`.
@@ -109,7 +109,7 @@ export type AttributionStepOutcome = AttributionStepResolved | AttributionStepCa
  *
  * Returns true only when `suppress-attribution` is explicitly set to the boolean
  * true — undefined, null, and false all map to false, giving `p.select` a real
- * boolean rather than an unchecked cast (PF-018: non-vacuous path).
+ * boolean rather than an unchecked cast.
  *
  * Pure function — no side effects, fully testable without a TTY.
  */
@@ -143,14 +143,14 @@ export function applyAttributionAnswer(
  *   1. Note — "Current setting: …" header with context about what the flag does.
  *   2. Enable select — labeled Yes / No with hints (seeded from prior state);
  *      p.select is immune to Enter-through muscle memory while still preserving
- *      the seeded value (ambient-prompt style — per PF-029).
+ *      the seeded value (ambient-prompt style).
  *
  * Returns:
  *   {kind:'resolved', suppress, messages} — step completed; `suppress` is the chosen
  *     boolean; `messages` are emitted by the caller.
  *   {kind:'cancelled'} — user pressed Escape; caller runs p.cancel + process.exit(0).
  *
- * Invariants (PF-014):
+ * Invariants:
  *   - Never calls process.exit(), never throws.
  *   - All I/O is routed through the `prompts` parameter (injectable for tests).
  */
@@ -162,7 +162,7 @@ export async function runAttributionStep(opts: {
 
   const currentStr = seed ? 'suppressed' : 'shown (default)';
   // security-02: name the destructive branch (Yes) BEFORE the user consents.
-  // ADR-024 corollary (b): turning the flag ON replaces any existing attribution
+  // Turning the flag ON replaces any existing attribution
   // value, including a custom one — this is deliberate. Only the exact
   // devflow-managed shape {"commit":"","pr":""} is removed on disable.
   // security-04: surface the org AI-disclosure-policy dimension as a note (not a gate).

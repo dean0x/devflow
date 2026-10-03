@@ -46,9 +46,9 @@ function sessionInput(tmpDir: string, extra: Record<string, unknown> = {}): stri
  * `mkdir -p "$HOME/.devflow/logs/<slug>"`. Every hook invocation below therefore
  * passes an explicit HOME, so no assertion in
  * this file can be decided by — or leave a directory behind on — the developer's
- * real machine (PF-060).
+ * real machine.
  *
- * SEEDED, never empty (PF-018): the directory tree the hook actually reads is
+ * SEEDED, never empty: the directory tree the hook actually reads is
  * created, so a green run here means the hook reached its gates and declined,
  * not that it tripped over a missing path.
  */
@@ -84,8 +84,7 @@ function seedTrackerProvider(home: string, provider: string, features: Record<st
   writeManifest(home, { ambient: true, memory: true, tracker: { provider }, ...features });
   // The sentinel devflow writes whenever the machine provider is not github —
   // the provider's NAME, which is what Section 3 reads; without it Section 3
-  // stops at a shell builtin and the fixture would be inert (the exact
-  // vacuous-seed shape PF-018 describes).
+  // stops at a shell builtin and the fixture would be inert.
   fs.writeFileSync(path.join(home, '.devflow', '.tracker.enabled'), `${provider}\n`);
 }
 
@@ -379,7 +378,7 @@ describe('config guard: session-start-context', () => {
 
       // (b) Non-vacuity: the seeded HOME really is reachable. With `source:
       // startup` the two HOMEs diverge, so (a) is a property of the source gate
-      // rather than a fixture the hook never looked at (PF-018).
+      // rather than a fixture the hook never looked at.
       const startup = sessionInput(tmpDir, { source: 'startup' });
       expect(runContextHook(startup, otherHome)).toBe('');
       const withTracker = runContextHook(startup, tmpHome);

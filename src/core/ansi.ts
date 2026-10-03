@@ -6,9 +6,9 @@
  * feature module (src/hud/). Re-exported verbatim from src/hud/colors.ts
  * so all existing HUD call sites remain untouched.
  *
- * applies ADR-013: src/core/ = agent-neutral logic; ANSI primitives have no
+ * src/core/ = agent-neutral logic; ANSI primitives have no
  * feature coupling and belong here, not in a feature module.
- * applies PF-017 corollary: one shared definition over per-consumer copies.
+ * One shared definition over per-consumer copies.
  */
 
 const ESC = '\x1b[';

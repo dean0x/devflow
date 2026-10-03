@@ -7,7 +7,7 @@
  * D14: Typed registry — flags carry kind (boolean|enum|number|string), target
  * (env|setting), and per-kind defaultValue. Neutral values delete their target
  * key; active values write the appropriate payload. Number 0 is ACTIVE. Sink
- * validation via coerceFlagValue (applies PF-023: validate at the convergence
+ * validation via coerceFlagValue (validate at the convergence
  * point every caller reaches). applyFlags(settingsJson, FlagsRecord) is the
  * sole API; init.ts works directly with FlagsRecord (no legacy string[] bridge).
  */
@@ -32,7 +32,7 @@ export type FlagsRecordValue = FlagValue | null;
  * The complete flag state record. Keys are flag IDs; values are the current
  * value or null (neutral). Unknown keys are forward-compatible (skipped by
  * applyFlags). Absent keys are NOT the same as null — absent = unknown to
- * this install (adopted on next seed per ADR-014 semantics).
+ * this install (adopted on next seed).
  */
 export type FlagsRecord = Record<string, FlagsRecordValue>;
 
@@ -286,7 +286,7 @@ export const FLAG_REGISTRY: readonly ClaudeCodeFlag[] = [
   {
     // Devflow fan-outs routinely exceed the upstream default of 20.
     // Set to 40 by default so parallel Code/Review/Research waves don't
-    // silently queue. upstreamDefault recorded for display. (applies PF-023 bounds)
+    // silently queue. upstreamDefault recorded for display.
     id: 'max-concurrent-subagents',
     label: 'Max concurrent subagents',
     description: 'Maximum number of subagents Claude Code will spawn concurrently',
@@ -297,7 +297,7 @@ export const FLAG_REGISTRY: readonly ClaudeCodeFlag[] = [
     recommended: true,
     defaultValue: 40,
     min: 1,
-    max: 100,         // devflow sanity bound (applies PF-023)
+    max: 100,         // devflow sanity bound
     integer: true,
     upstreamDefault: 20,
   },
@@ -494,7 +494,7 @@ export const FLAG_REGISTRY: readonly ClaudeCodeFlag[] = [
 
   {
     // Domain: unset by default; set only when users want a non-default spawn depth.
-    // upstreamDefault: 3 (recorded for display). PF-023 bounds: max 10.
+    // upstreamDefault: 3 (recorded for display). Sanity bound: max 10.
     id: 'subagent-spawn-depth',
     label: 'Max subagent spawn depth',
     description: 'Maximum depth of nested subagent spawning',
@@ -505,7 +505,7 @@ export const FLAG_REGISTRY: readonly ClaudeCodeFlag[] = [
     recommended: false,
     defaultValue: undefined,
     min: 1,
-    max: 10,          // devflow sanity bound (applies PF-023)
+    max: 10,          // devflow sanity bound
     integer: true,
     upstreamDefault: 3,
   },
@@ -537,7 +537,7 @@ export const FLAG_REGISTRY: readonly ClaudeCodeFlag[] = [
   },
   {
     // Upstream default: 30 min. 0 = disabled (still ACTIVE — written to env).
-    // PF-023 bounds: max 1440 (24h). min 0 (0 = off, explicit value not neutral).
+    // Sanity bounds: max 1440 (24h). min 0 (0 = off, explicit value not neutral).
     id: 'goal-checkin-minutes',
     label: 'Goal check-in interval',
     description: 'Interval in minutes for Claude to check in on task goals',
@@ -548,7 +548,7 @@ export const FLAG_REGISTRY: readonly ClaudeCodeFlag[] = [
     recommended: false,
     defaultValue: undefined,
     min: 0,           // 0 = off (ACTIVE, not neutral — written as "0")
-    max: 1440,        // devflow sanity bound: 24 hours (applies PF-023)
+    max: 1440,        // devflow sanity bound: 24 hours
     integer: true,
     upstreamDefault: 30,
   },
@@ -564,7 +564,7 @@ export const FLAG_REGISTRY: readonly ClaudeCodeFlag[] = [
     recommended: false,
     defaultValue: undefined,
     wrapKey: 'command',
-    maxLength: 256,   // devflow sanity bound (applies PF-023)
+    maxLength: 256,   // devflow sanity bound
   },
   {
     // view-mode folded into the registry; neutralValue 'default' deletes the viewMode key.
@@ -634,7 +634,7 @@ export function isNeutral(flag: ClaudeCodeFlag, value: FlagsRecordValue): boolea
 /**
  * Map a record value to a TUI value.
  *
- * viewMode GLUE RULE (PF-017 one-shared-definition corollary): the mapping lives here,
+ * viewMode GLUE RULE (one shared definition): the mapping lives here,
  * next to neutralValueOf — the definition it depends on — not across a module boundary.
  *   enum with neutralValue: neutralValue → null in TUI (null is the TUI representation
  *   of "use the default"; the key is deleted when persisted).
@@ -653,7 +653,7 @@ export function recordToTui(flag: ClaudeCodeFlag, v: FlagsRecordValue): FlagsRec
 /**
  * Map a TUI value back to a record value.
  *
- * viewMode GLUE RULE (PF-017 one-shared-definition corollary): inverse of recordToTui,
+ * viewMode GLUE RULE (one shared definition): inverse of recordToTui,
  * co-located with that function so the round-trip contract is auditable in one place.
  *   enum with neutralValue: null → neutralValue (e.g. 'default').
  * All other values pass through unchanged.
@@ -669,7 +669,7 @@ export function tuiToRecord(flag: ClaudeCodeFlag, v: FlagsRecordValue): FlagsRec
 
 /**
  * Validate and coerce `raw` to a safe value for `flag` at the sink.
- * Returns null when the value is invalid (hostile-value defence — applies PF-023).
+ * Returns null when the value is invalid (hostile-value defence).
  *
  * Number invariants: finite, within [min, max], integer when required.
  * String invariants: within maxLength, no control characters.
@@ -716,7 +716,7 @@ export function coerceFlagValue(flag: ClaudeCodeFlag, raw: unknown): FlagsRecord
  * Parse a CLI text input to a FlagsRecordValue.
  * 'unset' (literal) → null for any flag.
  *
- * Number branch uses strict decimal grammar (applies PF-023 — invariant at the sink
+ * Number branch uses strict decimal grammar (invariant at the sink
  * every caller reaches, not per-caller): rejects empty, padded, hex, exponent,
  * and leading-zero forms. Equivalent to the TUI's strict parsing so both entry
  * points share one grammar.
@@ -907,7 +907,7 @@ export function readViewMode(record: FlagsRecord): ViewMode {
  * Sanitize a FlagsRecord by coercing each known flag's value through
  * coerceFlagValue.
  *
- * Known flag IDs (applies ADR-014 key-presence semantics):
+ * Known flag IDs (key-presence semantics):
  *   - explicit null input → kept as null (deliberately unset)
  *   - valid non-null input → kept as coerced value
  *   - invalid non-null input → KEY DROPPED (absent = adopt default on next init,
@@ -916,7 +916,7 @@ export function readViewMode(record: FlagsRecord): ViewMode {
  * Unknown flag IDs (forward-compat):
  *   - primitive values (boolean, number, string, null) → kept as-is
  *   - non-primitive values (objects, arrays) → DROPPED to avoid laundering
- *     untrusted shapes into FlagsRecordValue (applies PF-023)
+ *     untrusted shapes into FlagsRecordValue
  *
  * D39: `__proto__`, `constructor`, `prototype` are always skipped.
  */
@@ -983,7 +983,7 @@ export function getDefaultFlagsRecord(): FlagsRecord {
  * Migrate a legacy (string-array) enabled-flags manifest to a typed FlagsRecord.
  * Called by manifest.ts self-healing when it encounters an old string-array manifest.
  *
- * Contract (applies ADR-014 transition semantics):
+ * Contract:
  * - knownIds defined   → knownSet = knownIds ∪ enabledIds
  * - knownIds undefined → knownSet = full current registry ∪ enabledIds
  *   (pre-knownFlags manifests: all flags known, so adopt-nothing is expressed
@@ -1056,7 +1056,7 @@ export function settingValueHoldsManagedShape(flag: ClaudeCodeFlag, value: unkno
 }
 
 /**
- * D-ATTR-GUARD single-source predicate (consistency-01 / ADR-024).
+ * D-ATTR-GUARD single-source predicate (consistency-01).
  *
  * Returns true when the settings.json string contains a value at the flag's
  * target key that equals the flag's managed shape (`settingDeleteGuard`).
@@ -1096,7 +1096,7 @@ export function settingHoldsManagedShape(settingsJson: string, flagId: string): 
  *
  * Delegates to `settingValueHoldsManagedShape` — the single equality oracle for
  * managed-shape comparisons — so there is exactly one `isDeepStrictEqual` call
- * across the entire apply/strip pipeline (ADR-024 mechanism 3).
+ * across the entire apply/strip pipeline.
  *
  * Single-source invariant: both the disable path (applyFlags neutral branch) and
  * the uninstall path (stripFlags) collapse to this predicate.
@@ -1150,7 +1150,7 @@ function buildPayload(flag: ClaudeCodeFlag, value: FlagValue): unknown {
  * Apply a FlagsRecord to a settings JSON string.
  *
  * - Unknown flag IDs are skipped (forward-compatible with future flags).
- * - `coerceFlagValue` is called at the sink before applying (applies PF-023).
+ * - `coerceFlagValue` is called at the sink before applying.
  * - Neutral values delete their target key.
  * - Env payloads for number flags are stringified ('40', never 40).
  * - Setting payloads for string flags with wrapKey are shaped ({ command: v }).
@@ -1158,7 +1158,7 @@ function buildPayload(flag: ClaudeCodeFlag, value: FlagValue): unknown {
  * - `__proto__`, `constructor`, `prototype` keys are silently skipped.
  */
 export function applyFlags(settingsJson: string, flags: FlagsRecord): string {
-  // REL-M2 sink guard (applies PF-023): a non-plain-object root (null, array, scalar)
+  // REL-M2 sink guard: a non-plain-object root (null, array, scalar)
   // would cause a silent no-op or a confusing TypeError deep inside the loop.
   // Throw early with a clear message so every caller path is self-guarding.
   const root = JSON.parse(settingsJson);
@@ -1174,7 +1174,7 @@ export function applyFlags(settingsJson: string, flags: FlagsRecord): string {
     const flag = FLAG_REGISTRY_MAP.get(id);
     if (!flag) continue; // unknown id — skip for forward compat
 
-    // Coerce at the sink (applies PF-023: validate at the convergence point)
+    // Coerce at the sink (validate at the convergence point)
     const safe = coerceFlagValue(flag, value);
 
     if (isNeutral(flag, safe)) {
@@ -1215,7 +1215,7 @@ export function applyFlags(settingsJson: string, flags: FlagsRecord): string {
  * Cleans up empty env object. Strip-then-apply idempotence preserved (INV-1).
  */
 export function stripFlags(settingsJson: string): string {
-  // REL-M2 sink guard (applies PF-023): mirror of applyFlags — throw early on a
+  // REL-M2 sink guard: mirror of applyFlags — throw early on a
   // non-plain-object root so every caller path is self-guarding.
   const root = JSON.parse(settingsJson);
   if (root === null || typeof root !== 'object' || Array.isArray(root)) {
@@ -1305,7 +1305,7 @@ export function resolveFinalViewMode(
 
 /**
  * Fold-before-strip pipeline — the single authoritative entry point for all
- * settings.json mutation paths (applies PF-015, PF-017, ADR-014).
+ * settings.json mutation paths.
  *
  * Both `init.ts` and `persistFlagConfig` (flags.ts) MUST call this instead of
  * invoking `stripFlags` + `applyFlags` directly; the invariant lives in the
@@ -1326,7 +1326,7 @@ export function resolveFinalViewMode(
  *   A flag is "claimed" when it is present and non-null in the claimed set.
  *   Claimed: record value wins (devflow previously set this value).
  *   Unclaimed: fold from settings — if the user has a value in settings.json,
- *   adopt it into the record (ADR-014 adoption, devflow takes ownership).
+ *   adopt it into the record (devflow takes ownership).
  *
  *   Boolean flags: never folded — on/off is always record-driven.
  *
@@ -1356,7 +1356,7 @@ export function convergeFlagsIntoSettings(
   },
 ): { settings: string; record: FlagsRecord } {
   // ── Step 1: fold view-mode (must read pre-strip) ──────────────────────────
-  // PF-015: resolveExistingViewMode reads the viewMode key. stripFlags removes
+  // resolveExistingViewMode reads the viewMode key. stripFlags removes
   // it as part of the view-mode registry entry. Reading after strip silently
   // reverts an externally-set /focus.
   const folded: FlagsRecord = {
@@ -1429,7 +1429,7 @@ export function convergeFlagsIntoSettings(
   }
 
   // ── Step 2b: adopt guarded boolean settings before the strip ─────────────
-  // D-ATTR-ADOPT (PF-050 / ADR-024): a delete guard is evidence about the VALUE,
+  // D-ATTR-ADOPT: a delete guard is evidence about the VALUE,
   // never about the record — a pre-existing on-disk key whose value matches the
   // managed shape means devflow wrote it, so adopt it into the record now, before
   // stripFlags can unconditionally remove it on the next line.

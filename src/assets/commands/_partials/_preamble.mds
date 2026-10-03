@@ -70,7 +70,7 @@ The script body cannot perform this read — you (the main model) do it before a
 
 When a ticket requires multiple sequential Code agent phases, each Code agent writes `{toplevel}/.devflow/docs/handoff-{branch_slug}.md` (branch-scoped to prevent concurrent session clobber), `{toplevel}` being `git rev-parse --show-toplevel` in the checkout the ticket's branch is in — never a subdirectory. The next Code agent reads it via HANDOFF_FILE input. PRIOR_PHASE_SUMMARY is the compact in-context form; the handoff file is the durable form that survives context compaction. Always read the handoff file directly — code is authoritative, summaries are supplementary.
 
-### IRON RULE (ADR-008: LLM-vs-plumbing)
+### IRON RULE (LLM-vs-plumbing)
 
 **Author ZERO deterministic feature code.** No parsers, no schedulers, no topological-sort, no dependency-graph helpers, no confidence formulas. ALL issue reading, dependency reasoning, and scheduling decisions are LLM judgment at runtime, performed by the workflow's agents. The recipe is instructions. The workflow script Claude authors IS the runtime logic — keep it free of hand-coded feature algorithms.
 

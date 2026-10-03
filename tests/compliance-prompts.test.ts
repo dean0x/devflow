@@ -8,9 +8,9 @@
  *   - TP-43 (AC-37): the compiled prompts that run the compliance lens — gated on the
  *     settings line, loading only the framework references they are given
  *
- * Per PF-018: assertions cover concrete output values, not types, and every
+ * Assertions cover concrete output values, not types, and every
  * significant branch has a test that can go red when behavior changes.
- * Per PF-014: runComplianceStep never calls process.exit or throws — tests
+ * runComplianceStep never calls process.exit or throws — tests
  * verify the returned discriminated union drives all caller decisions.
  */
 import { describe, it, expect, vi } from 'vitest';
@@ -35,7 +35,7 @@ import { ROOT, requireDistFile, requireDistFiles, walkFiles } from './helpers.js
 /**
  * Build a fake CompliancePromptIO from queued responses.
  * Responses are consumed in order; the test fails loudly if a prompt is called
- * more times than responses were queued (PF-018: non-vacuous assertions).
+ * more times than responses were queued.
  */
 function makePrompts(noteFn?: (message: string, title: string) => void) {
   const selectQueue: PromptOutcome<boolean>[] = [];

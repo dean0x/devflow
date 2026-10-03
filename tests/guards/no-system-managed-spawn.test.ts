@@ -19,8 +19,8 @@
  * `.skipIf(systemManagedSettingsAtRisk())`. A test that does not need the
  * `none` mode installs with `--security user` instead.
  *
- * What a green run does NOT prove (PF-064)
- * ----------------------------------------
+ * What a green run does NOT prove
+ * -------------------------------
  * The matcher reads the arguments as they are spelled. An argument assembled at
  * runtime (`['--security', mode]`), a shell-string spawn (`execSync('devflow
  * security --disable')`, none of which the suite uses) and prose naming the
@@ -127,7 +127,7 @@ describe('no test spawns the managed-settings removal unguarded (D-TESTS-NO-SYST
 });
 
 // ---------------------------------------------------------------------------
-// Seeded probes (PF-064): the matcher goes red on every spelling a spawn can
+// Seeded probes: the matcher goes red on every spelling a spawn can
 // take, and stays green on prose and on a guarded file.
 // ---------------------------------------------------------------------------
 

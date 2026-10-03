@@ -56,7 +56,7 @@ export interface PluginDefinition {
    * one reference that no mechanical scan can resolve (`devflow:{focus}`, see
    * {@link TEMPLATE_SKILL_REFS}), so a generated closure would be incomplete by
    * construction, and splitting the prohibition from its exemption across two
-   * mechanisms is the shape PF-067 exists to keep out.
+   * mechanisms would let a reader of one half find a violation the other permits.
    *
    * The table is EVIDENCE-DERIVED and bidirectionally guarded
    * (tests/guards/requires-closure.test.ts) over the corpus a selection actually
@@ -522,7 +522,7 @@ export const DELETED_PLUGIN_NAMES: readonly string[] = [
  *   - uninstall.ts sweepDevflowNamespaces: union into knownNames to spare devflow:compliance
  *     from the post-selective-uninstall sweep (nothing converges after selective uninstall)
  *   - skills.ts: union into allSkills for shadow/unshadow/list
- *   - tests: independent literal ['compliance'] (avoids EXCLUDED-as-oracle trap, PF-018)
+ *   - tests: independent literal ['compliance'] (avoids EXCLUDED-as-oracle trap)
  *
  * D-FO-1: FEATURE_OWNED_SKILLS must be disjoint from getAllSkillNames()
  * (guarded by plugins.test.ts FEATURE_OWNED constants describe block).
@@ -536,7 +536,7 @@ export const FEATURE_OWNED_SKILLS = ['compliance'] as const satisfies readonly s
  *
  * Used by:
  *   - rules.ts: union into allRules for shadow/unshadow/list
- *   - tests: independent literal ['compliance'] (avoids EXCLUDED-as-oracle trap, PF-018)
+ *   - tests: independent literal ['compliance'] (avoids EXCLUDED-as-oracle trap)
  *
  * D-FO-2: FEATURE_OWNED_RULES must be disjoint from getAllRuleNames()
  * (guarded by plugins.test.ts FEATURE_OWNED constants describe block).
@@ -584,7 +584,7 @@ export interface TemplateSkillRef {
  * The classified exception to the closure guard — declared HERE, at the
  * declaration site of the field it exempts, and imported by the guard.
  *
- * D-TEMPLATE-EXCEPTION (applies PF-067: one authority for a prohibition and its
+ * D-TEMPLATE-EXCEPTION (one authority for a prohibition and its
  * exemptions). Every other templated reference in the corpus carries a literal
  * prefix and resolves through it — `devflow:research-{RESEARCH_TYPE}` resolves
  * because five in-scope skills start with `research-`. The Review focus skill is
@@ -845,8 +845,7 @@ export interface SkillInstallPlan {
  * add X, not a statement that X is the whole selection, so it may never remove
  * what another plugin contributed (AC-22). {@link FEATURE_OWNED_SKILLS} is
  * subtracted unconditionally: those install and uninstall with their feature,
- * and sweeping them here would delete an artifact this code does not own
- * (applies ADR-024).
+ * and sweeping them here would delete an artifact this code does not own.
  *
  * A shadow is NEVER removed, whatever the selection — `~/.devflow/skills/` is
  * user content. One that falls outside the install set simply applies to

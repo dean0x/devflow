@@ -9,7 +9,7 @@
  *         RegExp that accepts and rejects exactly what TP_LINE_RE does over a
  *         differential table; the Fields prose names the script's own bounds; the
  *         States, Methods and precedence lists equal STATES, METHODS and PRECEDENCE.
- *         The partial stays import-free with two defines (PF-073), and every
+ *         The partial stays import-free with two defines (bounding its compile cost), and every
  *         adopter — the two /dynamic-* commands, /plan (#363 P4: its Gate 2 shows
  *         the TP lines its `## Test Plan` section keeps) and /implement (its Phase 1
  *         authors or copies them) — carries the define's whole expansion exactly once.
@@ -29,7 +29,7 @@
  * second authority that agrees with the first only until one of them is edited.
  *
  * Every guard has a named collector, a non-empty-corpus assertion and a known-bad
- * probe run through the same collector (PF-064).
+ * probe run through the same collector.
  *
  * NOT covered: the scenario's "printable" rule is pinned by the rows it names
  * (controls, bidi and separator characters) rather than by compiling the word —
@@ -63,7 +63,7 @@ const TP_DEFINE = 'test_plan_line'
 const CONTRACT_DEFINE = 'acceptance_criteria_contract'
 const EM = '—'
 
-/** PF-073: compile cost is exponential in the define count; the contract partial holds exactly these. */
+/** Compile cost is exponential in the define count; the contract partial holds exactly these. */
 const KNOWN_DEFINES: readonly string[] = [TP_DEFINE, CONTRACT_DEFINE]
 /** The command hosts that import the contract partial, sorted. */
 const CONTRACT_ADOPTERS: readonly string[] = ['dynamic-build', 'dynamic-plan', 'implement', 'plan']
@@ -347,7 +347,7 @@ function collectGrammarDisagreements(candidate: RegExp, rows: readonly string[])
 }
 
 // ---------------------------------------------------------------------------
-// The partial: shape and adopters (PF-073)
+// The partial: shape and adopters
 // ---------------------------------------------------------------------------
 
 /** Named collector: the `@define`, `@export` and `@import` lines of an MDS source. */
@@ -374,7 +374,7 @@ function collectExpansionDefects(files: readonly TextFile[], expansion: string):
 }
 
 describe('AC-2: the _plan_contract partial', () => {
-  it('declares exactly the two known defines, test_plan_line first, each exported, with no import (PF-073)', () => {
+  it('declares exactly the two known defines, test_plan_line first, each exported, with no import', () => {
     const { defines, exports, imports } = collectDeclarations(partialSource())
     expect(defines, 'MDS captures at definition site, so the called define comes first').toEqual([...KNOWN_DEFINES])
     expect([...exports].sort()).toEqual([...defines].sort())

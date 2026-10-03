@@ -9,7 +9,7 @@
  * finds the ancestor `.git`. The two disagreed, so ensure-devflow-init and
  * session-start-context wrote `.devflow/` and a `.gitignore` into the SUBDIRECTORY.
  *
- * Every run gets its own HOME (a temp dir, never the real one — PF-060), so no
+ * Every run gets its own HOME (a temp dir, never the real one), so no
  * global git config (`safe.directory`) and no machine `~/.devflow` leak in.
  */
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';

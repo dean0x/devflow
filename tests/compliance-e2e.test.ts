@@ -6,9 +6,9 @@
  * assertion rules.
  *
  * Each scenario drives `node dist/cli.js` against an isolated temp HOME so no
- * developer files are touched. Per PF-018: $HOME/.claude is seeded before any
+ * developer files are touched. $HOME/.claude is seeded before any
  * init invocation (unseeded → "Claude Code not detected" → vacuous pass).
- * Per PF-015: assertions check WHOLE end-states (file sets, file content),
+ * Assertions check WHOLE end-states (file sets, file content),
  * never per-step booleans.
  *
  * Skipped:
@@ -57,7 +57,7 @@ function makeRunner(tmpHome: string) {
       // A temp HOME alone does not isolate `init`: a user-scope install resolves the
       // project git root from its cwd, and an inherited cwd is the developer's repo, so
       // every run rewrote that repo's .devflow/config.json, root .gitignore and
-      // .claudeignore (applies PF-060). tmpHome is a fresh mkdtemp, never inside a repo.
+      // .claudeignore. tmpHome is a fresh mkdtemp, never inside a repo.
       cwd: tmpHome,
       env: {
         ...process.env,
@@ -118,7 +118,7 @@ describe('S1: fresh init --recommended → disabled compliance manifest', () => 
     tmpHome = await fs.mkdtemp(path.join(os.tmpdir(), 'df-e2e-s1-'));
     devflowDir = path.join(tmpHome, '.devflow');
     claudeDir = path.join(tmpHome, '.claude');
-    // PF-018: seed .claude so init doesn't bail with "Claude Code not detected"
+    // Seed .claude so init doesn't bail with "Claude Code not detected"
     await fs.mkdir(claudeDir, { recursive: true });
     run = makeRunner(tmpHome);
   });
@@ -1370,7 +1370,7 @@ describe('S23 (TP-43, AC-37): a hipaa repository never changes the machine compl
 //
 // The tracker selection lifecycle, driven through the real entry point.
 //
-// PF-015's rule: a convergence test that reconstructs init's sequence certifies
+// A convergence test that reconstructs init's sequence certifies
 // the author's model of the ordering rather than the shipped ordering, so these
 // arms run `devflow init` and read the directory it left behind.
 describe('T1: init --reset collapses the provider and converges every tracker artifact', () => {
@@ -1381,7 +1381,7 @@ describe('T1: init --reset collapses the provider and converges every tracker ar
   beforeEach(async () => {
     tmpHome = await fs.mkdtemp(path.join(os.tmpdir(), 'df-e2e-t1-'));
     devflowDir = path.join(tmpHome, '.devflow');
-    // PF-018: seed .claude so init doesn't bail with "Claude Code not detected"
+    // Seed .claude so init doesn't bail with "Claude Code not detected"
     await fs.mkdir(path.join(tmpHome, '.claude'), { recursive: true });
     run = makeRunner(tmpHome);
   });
@@ -1401,7 +1401,7 @@ describe('T1: init --reset collapses the provider and converges every tracker ar
     expect(run('init', '--recommended', '--tracker', 'jira').status).toBe(0);
 
     const sentinel = path.join(devflowDir, '.tracker.enabled');
-    // PF-018: the pre-state is asserted, or the post-state below is the state
+    // The pre-state is asserted, or the post-state below is the state
     // the temp dir started in and the run proved nothing.
     expect(
       ((await readManifest(devflowDir)).features as Record<string, unknown>).tracker,
@@ -1458,7 +1458,7 @@ describe('T2: a failed manifest write converges no tracker artifact', () => {
     expect(output).toContain('Failed to write installation manifest');
     expect(output).toContain('was not persisted');
 
-    // The gate (PF-015): an unpersisted selection converges nothing, so the
+    // The gate: an unpersisted selection converges nothing, so the
     // on-disk state stays internally consistent and the next init retries the
     // whole transition from an unchanged starting point. A sentinel written for
     // a provider the manifest never recorded is a per-session fork cost forever.

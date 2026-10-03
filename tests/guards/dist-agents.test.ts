@@ -8,9 +8,9 @@
  *   (a) source ↔ output parity, in BOTH directions and fail-loud. Guard 4's
  *       `catch { return }` + `if (distFiles.length === 0) return` shape is
  *       deliberately NOT copied: a guard that skips itself on a missing build
- *       verifies nothing on exactly the tree where it matters (PF-018).
+ *       verifies nothing on exactly the tree where it matters.
  *   (b) no leaked `\{` / `\}` — MDS 0.4.4 has no brace escape, so a 0.2.0-era
- *       `\{` in a source reaches the artifact rather than the compiler (PF-024).
+ *       `\{` in a source reaches the artifact rather than the compiler.
  *   (c) no `.md` shadowing an `.mds` host: two sources for one agent means the
  *       dist-preferred resolver silently picks a winner.
  *
@@ -22,7 +22,7 @@
  * tracker/{provider}/{op}.md driven by a typed registry, not by a template.
  *
  * Every collector is a named function called by both the assertion and its
- * known-bad probe (PF-018). No literal agent path appears in this file — the
+ * known-bad probe. No literal agent path appears in this file — the
  * directories come from src/core/assets.ts (AC-0.7 / AC-1.10).
  */
 
@@ -101,7 +101,7 @@ describe('dist/agents ↔ src generator-host parity (fail-loud, both directions)
     const parity = collectAgentParity(agentsDir(), compiledAgentsDir())
 
     // Non-vacuity on BOTH sides: a zero on either would make the corresponding
-    // direction pass by iterating nothing (PF-018).
+    // direction pass by iterating nothing.
     expect(parity.compiledCount, 'dist/agents/ holds no .md files — the guard would be vacuous').toBeGreaterThan(0)
     expect(parity.hostCount, 'no .mds generator host found — the guard would be vacuous').toBeGreaterThan(0)
 
@@ -153,7 +153,7 @@ describe('dist/agents ↔ src generator-host parity (fail-loud, both directions)
  * Under `@mdscript/mds` 0.4.4 a single-brace `{…}` is literal text and only
  * `{{…}}` interpolates; there is no backslash escape. A `\{` / `\}` left in a
  * .mds source compiles silently and ships its backslash, so every downstream
- * `{PLACEHOLDER}` contract at that site is dead text (PF-024).
+ * `{PLACEHOLDER}` contract at that site is dead text.
  */
 function collectEscapedBraceLeaks(files: Array<{ name: string; content: string }>): string[] {
   const leaks: string[] = []
@@ -177,7 +177,7 @@ function compiledAgentContents(): Array<{ name: string; content: string }> {
 describe('compiled agents carry no escaped braces', () => {
   it('no dist/agents/*.md contains a literal \\{ or \\}', () => {
     const files = compiledAgentContents()
-    expect(files.length, 'no compiled agent scanned — guard is vacuous (PF-018)').toBeGreaterThan(0)
+    expect(files.length, 'no compiled agent scanned — guard is vacuous').toBeGreaterThan(0)
 
     const leaks = collectEscapedBraceLeaks(files)
     expect(
@@ -209,14 +209,14 @@ interface AgentHeaderShape {
  * Named collector: one row per compiled agent whose leading frontmatter block was
  * actually FOUND — a headerless file contributes no row at all.
  *
- * Counting headers rather than files is the point (PF-018): a collector that
+ * Counting headers rather than files is the point: a collector that
  * emitted a row per input with `hasBlock: false` would let the caller iterate a
  * full-length array of rows and forget to assert on the flag. Here a lost header
  * shows up as a short array, which the caller compares against the file count.
  *
  * The failure this guards is silent by construction: the generator strip removes
  * the leading block, so a source with only ONE block loses its whole frontmatter
- * and produces a plausible-looking markdown file (PF-061).
+ * and produces a plausible-looking markdown file.
  */
 function collectAgentHeaderShapes(
   files: ReadonlyArray<{ name: string; content: string }>,
@@ -233,7 +233,7 @@ function collectAgentHeaderShapes(
 describe('every compiled agent starts with a frontmatter block carrying name:', () => {
   it('no dist/agents/*.md was emitted headerless or nameless', () => {
     const files = compiledAgentContents()
-    expect(files.length, 'no compiled agent scanned — guard is vacuous (PF-018)').toBeGreaterThan(0)
+    expect(files.length, 'no compiled agent scanned — guard is vacuous').toBeGreaterThan(0)
 
     const shapes = collectAgentHeaderShapes(files)
     const headerless = files
@@ -369,7 +369,7 @@ interface ForbiddenConstruct {
   label: string
   /** Anchored matcher — the shape the construct actually takes in source. */
   pattern: RegExp
-  /** A realistic instance of the construct the collector must flag (PF-018). */
+  /** A realistic instance of the construct the collector must flag. */
   probe: string
   appliesTo: 'all' | 'mds'
 }
@@ -495,7 +495,7 @@ describe('AC-1.2 (Phase-2 scope fence): no conditionals or provider-templated fi
   it('the Phase-2 narrowing is explicit: the legalised constructs are named, and gone from the table', () => {
     // A deliberate narrowing must be readable as one. Without this, the two
     // entries could have been deleted in a hurry and nobody could tell a removal
-    // from a rewording (ADR-003 — leave the end state, and say what changed).
+    // from a rewording (leave the end state, and say what changed).
     expect(LEGALISED_IN_PHASE2.length, 'the narrowing must name what it legalised').toBeGreaterThan(0)
     for (const label of LEGALISED_IN_PHASE2) {
       expect(

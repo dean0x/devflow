@@ -170,7 +170,7 @@ describe('code.md — ### Handoff Values consumer', () => {
 //
 // The arms are read OUT of the prompt and RUN here rather than re-typed. A
 // hand-copied grammar in a test is a second authority that agrees with the first
-// only until one of them is edited (PF-018), and an anchored pattern is exactly
+// only until one of them is edited, and an anchored pattern is exactly
 // the kind of literal whose defect — a missing `^`, a `+` where `{0,8}` was
 // meant — is invisible to a reader and obvious to anything that executes it.
 // -------------------------------------------------------------------------
@@ -335,7 +335,7 @@ describe('code.md — the paste gate, one row per tracker grammar', () => {
   // The Code agent sits outside the Git spawn surface and loads no provider
   // mechanics file it could defer to, so a per-provider sink check has to
   // enumerate the closed set once, inside the gate — that is what keeps it a
-  // sink check rather than a second convergence point (PF-023). What it must
+  // sink check rather than a second convergence point. What it must
   // not become is a second AUTHORITY: the shape a `KEY-N` reference takes is
   // stated by each provider's own mechanics, and the project-key alphabet
   // already has an explicit one-authority claim over three readers
@@ -354,7 +354,7 @@ describe('code.md — the paste gate, one row per tracker grammar', () => {
    * state, deduplicated.
    *
    * Read out of the shipped tree, never re-typed here — a literal in this file
-   * would be the fifth authority and the only one nobody ships (PF-018).
+   * would be the fifth authority and the only one nobody ships.
    * Linear's internal-id form is deliberately excluded: it carries no team, so
    * the provider's own history grammar admits the TEAM-KEY form only, and a
    * rendered PR link is always that form.
@@ -447,7 +447,7 @@ describe('handoff seam — git.md producer ↔ code.md consumer', () => {
 // ISSUE_NUMBER without the sibling goes red, which is the drift that actually
 // happens — a ninth fence copied from an older one.
 //
-// Corpus discipline (PF-055): the assertion is about DEPLOYED text, so it reads
+// Corpus discipline: the assertion is about DEPLOYED text, so it reads
 // dist/. It gets dist/ from buildCommittedTree() — a build of a COPY of the
 // committed sources into a temp root — never by rebuilding the repo's own dist/
 // from a test writer, which other parallel workers are concurrently reading.
@@ -524,7 +524,7 @@ describe('ISSUE_PR_LINK forwarding — every Code spawn site carries the sibling
     expect(
       payloads.length,
       `only ${payloads.length} spawn site(s) found, floor ${MIN_FORWARDING_SITES} — a collector ` +
-      'that reached fewer files than it names would pass by scanning nothing (PF-018)',
+      'that reached fewer files than it names would pass by scanning nothing',
     ).toBeGreaterThanOrEqual(MIN_FORWARDING_SITES)
     for (const name of FORWARDING_COMMANDS) {
       expect(
@@ -793,7 +793,7 @@ describe('PR_TEST_PLAN_BLOCK forwarding — every ensure-pr-ready spawn carries 
     const corpus = fs.readdirSync(path.join(root, 'dist', 'commands'))
       .filter(f => f.endsWith('.md'))
       .map(name => ({ name, content: requireDistFile(name, root) }))
-    expect(corpus.length, 'no compiled command — the discovery corpus is empty (PF-018)').toBeGreaterThan(10)
+    expect(corpus.length, 'no compiled command — the discovery corpus is empty').toBeGreaterThan(10)
     expect(
       collectCallerDrift(corpus, ENSURE_PR_READY_CALLERS),
       'an ensure-pr-ready caller outside the named set is a spawn this seam never reads — add it to ' +

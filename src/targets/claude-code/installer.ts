@@ -52,7 +52,7 @@ export interface InstallReport {
   skippedShadows: ShadowSkip[];
   /** Registry names removed by orphan sweeps (skills, commands, agents, references). */
   sweptOrphans: SweptOrphan[];
-  /** Per-item removal failures from orphan sweeps — isolates failures per PF-009. */
+  /** Per-item removal failures from orphan sweeps — isolates failures per item. */
   sweepFailures: SweepFailure[];
   /**
    * Manifest-relative paths of the generated `devflow:git` references this install
@@ -78,7 +78,7 @@ export interface InstallReport {
   unchangedRefs: string[];
   /**
    * Overlay units this run did not refresh, each carrying the state it was left in —
-   * see {@link OverlayFailureState}. The install still succeeds (PF-009); what a unit
+   * see {@link OverlayFailureState}. The install still succeeds; what a unit
    * named here is now running on differs per state, which is exactly what the summary
    * has to say out loud.
    */
@@ -91,7 +91,7 @@ export interface InstallReport {
   removedSkills: string[];
   /**
    * Shadowed skills that fall OUTSIDE the install set. The shadow directory is
-   * user content and is never deleted (applies ADR-024); it simply applies to
+   * user content and is never deleted; it simply applies to
    * nothing until the plugin that uses the skill is selected again. Reported
    * because "inactive" and "ignored" look identical from the filesystem, and a
    * user who wrote a shadow deserves to hear which of the two happened.
@@ -184,9 +184,9 @@ export async function validateRuleShadow(shadowFile: string): Promise<RuleShadow
  *
  * D: Missing declared source is a build/packaging failure — throws rather than
  * silently returning 'skipped' (mirrors command hard-error pattern). Per-item
- * copy failures (EACCES, ENOSPC, etc.) are still isolated (avoids PF-009
- * blast-radius: one bad copy does not abort the whole batch).
- * Invalid shadows still warn-and-install-source (applies ADR-010).
+ * copy failures (EACCES, ENOSPC, etc.) are still isolated
+ * (one bad copy does not abort the whole batch).
+ * Invalid shadows still warn-and-install-source.
  */
 export async function installRuleFile(
   ruleName: string,
@@ -229,7 +229,7 @@ export async function installRuleFile(
     );
   }
 
-  // Copy is isolated per PF-009: a copy failure degrades to 'skipped' so one
+  // Copy is isolated: a copy failure degrades to 'skipped' so one
   // bad rule does not abort the entire installAllRules Promise.all batch.
   try {
     await fs.copyFile(ruleSource, targetFile);
@@ -379,8 +379,8 @@ export async function chmodRecursive(dir: string, mode: number, _depth = 0): Pro
  * converges to empty. The list is also the one thing that lets the pre-clean keep a
  * nested directory whole ({@link overlayOwnedSkillPaths}), so a directory missing from
  * it fails safe — kept file by file, like the root — rather than keeping its stale files
- * forever (avoids PF-074). The cost is one entry per new wholly-generated directory, and
- * that entry is the whole edit: everything downstream reads the list (avoids PF-015).
+ * forever. The cost is one entry per new wholly-generated directory, and
+ * that entry is the whole edit: everything downstream reads the list.
  */
 const CONVERGED_SUBTREES = [TRACKER_DESTINATION_ROOT, PR_HOST_DESTINATION_ROOT] as const;
 
@@ -472,7 +472,7 @@ export interface OverlayFailure {
  * One spelling of a unit's name, for every message about it.
  *
  * Pure function — the installer owns the unit types, so it owns how they are named,
- * rather than leaving each render site to invent its own wording (avoids PF-013).
+ * rather than leaving each render site to invent its own wording.
  */
 export function overlayUnitLabel(unit: OverlayUnitRef): string {
   switch (unit.kind) {
@@ -618,7 +618,7 @@ function isProviderSubdir(subdir: string): boolean {
  * tracker/{provider}`, so a `tracker/` entry mis-bucketed as a provider renames the
  * whole subtree into place BEFORE the provider units promote back into it, and the
  * installed tree ends up complete under either rule. The classification itself is the
- * observation that separates them (avoids PF-018).
+ * observation that separates them.
  */
 export function planOverlayUnits(manifest: readonly string[]): OverlayUnit[] {
   const bySubdir = new Map<string, string[]>();
@@ -789,8 +789,8 @@ function subtreesTouchedBy(referencesTarget: string, unit: OverlayUnit): Converg
  * degradation, and shipping an installer that silently omits the mechanics the agent is
  * told to load would move the failure to every user's first spawn.
  *
- * Applies PF-011 (build under a `.tmp` sibling, pre-cleaning an orphan from a prior
- * crashed run). Applies PF-009 for everything else: a copy that fails aborts this unit
+ * Builds under a `.tmp` sibling, pre-cleaning an orphan from a prior crashed run.
+ * Every other failure is isolated to its unit: a copy that fails aborts this unit
  * and no other.
  */
 async function buildUnitStagingTree(
@@ -1028,7 +1028,7 @@ async function promoteDirectoryUnit(
   // while the report — and the summary line init.ts renders from it — still claims
   // the previously installed files were left unchanged. The backup is what makes
   // that claim true, so a failed promotion is recoverable rather than a silent
-  // deletion (avoids PF-009: a reported failure must describe the state it left).
+  // deletion (a reported failure must describe the state it left).
   //
   // The `.old` backup is pre-cleaned like the `.tmp` tree. A crash that strands
   // either is converged away by a later run's tracker-subtree prune (both names end
@@ -1155,7 +1155,7 @@ async function classifyUntouchedUnit(
  * not cover — and the same root cause the agent resolver in `installViaFileCopy` already
  * throws for, so the two build artifacts are guarded at the same strength.
  *
- * Deliberately ONE `stat` before the unit loop rather than a check inside it (PF-009):
+ * Deliberately ONE `stat` before the unit loop rather than a check inside it:
  * the fan-out has no per-item failure isolation, so a per-unit refusal would let one
  * unbuilt provider abort every other unit's install. A unit directory that is absent
  * under a root that exists stays a per-unit report, exactly as today.
@@ -1204,7 +1204,7 @@ async function requireGeneratedTree(sourceRoot: string, manifest: readonly strin
  *
  * The skip is not silent. The unswept subtree is reported through `failed` — the same
  * channel that module uses for its own depth-bound breach — so nothing claims
- * convergence over ground it did not cover (avoids PF-009, PF-015). Orphans under that
+ * convergence over ground it did not cover. Orphans under that
  * subtree survive this install and the next one converges them.
  *
  * A subtree whose root is not a real directory ({@link convergedRootFault}) is skipped
@@ -1351,8 +1351,8 @@ async function pruneConvergedSubtrees(
  * @param opts.warn - Receives non-fatal notices (skipped symlinks, mode normalisation).
  *
  * @throws on three conditions, each of them a build artifact that was never produced
- *   rather than an I/O degradation. Every other failure is reported, never thrown
- *   (PF-009), and the three are ordered here as the function reaches them:
+ *   rather than an I/O degradation. Every other failure is reported, never thrown,
+ *   and the three are ordered here as the function reaches them:
  *   1. `opts.manifest` omitted AND the reference-module registry does not expand —
  *      raised by {@link generatedReferenceManifest} while resolving the default. A
  *      caller that passes its own manifest cannot reach this one.
@@ -1436,12 +1436,12 @@ export async function overlayGeneratedReferences(opts: {
   // this run installed. copyDirectory preserves source modes, so a hand-authored
   // reference checked in with an odd mode installs with it; a reference is read-only
   // instruction text and 0644 is what every one of them should be. Best-effort: a
-  // filesystem that does not honour mode bits must not fail an install (PF-009).
+  // filesystem that does not honour mode bits must not fail an install.
   //
   // This is the one step that reaches a file the overlay does not own, and it is why the
   // boundary is stated as "never replace or delete" rather than "never touch": the MODE of
   // a hand-authored reference — and of whatever a shadowed skill supplied outside
-  // `tracker/` — is normalised here. ADR-024 corollary (b) permits exactly that: the
+  // `tracker/` — is normalised here. The prove-you-wrote-it rule permits exactly that: the
   // ownership guard protects deletion, not overwrite.
   //
   // It is also the one walk that can breach chmodRecursive's descent bound. The catch is
@@ -1486,9 +1486,9 @@ const SKILL_REFERENCES_DIRNAME = 'references';
  * Deciding the subtree arm by {@link CONVERGED_SUBTREES} rather than by nesting is what
  * makes the two lists agree by construction: a directory is kept whole exactly when a
  * prune owns it, so a fan-out directory registered without a converged entry fails safe
- * instead of surviving every install (avoids PF-074).
+ * instead of surviving every install.
  *
- * Pure function (applies ADR-013). Exported for the one property no installed-tree arm
+ * Pure function. Exported for the one property no installed-tree arm
  * can reach: the build emits no nested directory outside the converged list, so the
  * fail-safe arm is only observable on a manifest the registry does not produce.
  */
@@ -1714,7 +1714,7 @@ async function firstExisting(candidates: readonly string[]): Promise<string | un
  * One readdir of the SHADOW tree, intersected with the registry. Deliberately
  * not a readdir of the installed skills directory: that tree is the thing being
  * converged, and reading it to decide what to remove is how a directory a user
- * put there by hand becomes a deselection (applies ADR-024).
+ * put there by hand becomes a deselection.
  *
  * Whether a shadow is VALID is a separate question, answered per skill by
  * validateSkillShadow at install time. This only answers "did the user write
@@ -1781,7 +1781,7 @@ export async function installViaFileCopy(options: FileCopyOptions): Promise<Inst
   // Pure and registry-driven: the removal set is `skillsOf(all) \ skillsOf(selected)
   // \ FEATURE_OWNED`, never a readdir of the installed skills directory, so an
   // unrelated `devflow:` directory a user put there by hand is not swept as a
-  // deselection (applies ADR-024).
+  // deselection.
   //
   // Computed BEFORE shadows are resolved: a shadow is applied only to a skill the
   // selection installs, so the install set is the question that has to be settled
@@ -1832,7 +1832,7 @@ export async function installViaFileCopy(options: FileCopyOptions): Promise<Inst
   // knownNames spans ALL plugins (getAllSkillNames) so skills from uninstalled
   // plugins survive a partial run. Bare (pre-namespace) dirs are intentionally
   // untouched — they are handled by the frozen LEGACY_SKILLS_* lists in legacy.ts
-  // (avoids PF-012: those lists are deletion manifests for pre-namespace paths and
+  // (those lists are deletion manifests for pre-namespace paths and
   // must not be modified). Shadow dirs (~/.devflow/skills/) are keyed by bare
   // registry name and are unaffected by this sweep.
   // knownNames unions FEATURE_OWNED_SKILLS so feature-owned skills (e.g. devflow:compliance)
@@ -1850,7 +1850,7 @@ export async function installViaFileCopy(options: FileCopyOptions): Promise<Inst
   // ~/.claude/skills/{name} are owned solely by the frozen LEGACY_SKILL_NAMES
   // pass in init.ts (runs immediately after this call). A bare dir whose name
   // matches a current registry skill is by construction foreign to Devflow and
-  // must not be touched here (avoids PF-012).
+  // must not be touched here.
   //
   // The pre-clean is SCOPED to what this run reinstalls and the orphan sweep
   // above is UNSCOPED (the full registry). The opposite scoping is deliberate,
@@ -1899,7 +1899,7 @@ export async function installViaFileCopy(options: FileCopyOptions): Promise<Inst
   // Remove the skills no selected plugin owns or requires — the deselection half
   // of the scoped install. Empty on a partial install by construction
   // (resolveSkillInstallPlan gates it), so `--plugin=X` adds and never subtracts
-  // (AC-22). Failures are per-item and non-fatal (applies PF-009).
+  // (AC-22). Failures are per-item and non-fatal.
   for (const skill of skillPlan.remove) {
     try {
       await fs.rm(path.join(claudeDir, 'skills', prefixSkillName(skill)), { recursive: true, force: true });

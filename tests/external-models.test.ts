@@ -22,7 +22,7 @@ import {
 // Literal GPT model IDs — independent of the deleted hardcoded registry.
 // Canonical registry ids that still route by exact id under subswitch@0.5.0
 // (gpt-5.5 is retired from discovery but remains exact-id routable).
-// applies ADR-003: end-state only — no compatibility imports from deleted exports.
+// End-state only — no compatibility imports from deleted exports.
 const KNOWN_GPT_IDS = ['gpt-5.6-sol', 'gpt-5.6-terra', 'gpt-5.6-luna', 'gpt-5.5'];
 import {
   countExternalMappedAgents,
@@ -228,7 +228,7 @@ describe('countExternalMappedAgents — complement predicate (AC-C6)', () => {
     // AC-C6: isDormantExternalModel is the single dormancy export — no call site may
     // inline its expansion (!isClaudeModelName(model)). If any file outside
     // external-models.ts contains `!isClaudeModelName(`, it has re-implemented the
-    // check inline, creating a divergence risk. (avoids PF-015)
+    // check inline, creating a divergence risk.
     //
     // This test will FAIL if countExternalMappedAgents (or any other call site) ever
     // reverts to the inlined predicate instead of calling isDormantExternalModel.

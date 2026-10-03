@@ -48,7 +48,7 @@ async function spawnAgentAndGetAllPreloads(agentType: string, prompt: string): P
 
     if (preloadResult.kind === 'no-session-dir') {
       if (attempt < MAX_SPAWN_ATTEMPTS) {
-        // Parent answered directly without spawning — one bounded retry (PF-018: no silent vacuous pass).
+        // Parent answered directly without spawning — one bounded retry (no silent vacuous pass).
         console.warn(
           `[attempt ${attempt}/${MAX_SPAWN_ATTEMPTS}] ${agentType}: parent spawned no subagent ` +
           `(exit=${result.exitCode}, ${result.durationMs}ms). Retrying.\n` +

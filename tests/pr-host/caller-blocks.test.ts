@@ -18,7 +18,8 @@
  *     scrub posts neither.
  *
  * Every guard has a named collector, a non-empty-corpus assertion and a known-bad
- * probe run through the same collector (PF-064). The gate is also EXECUTED: the
+ * probe run through the same collector, so a guard that cannot see its subject
+ * fails instead of passing on an empty read. The gate is also EXECUTED: the
  * two subcommands the reference names are run against the real script, so a
  * reference naming a subcommand the script does not route goes red here rather
  * than at a user's PR.

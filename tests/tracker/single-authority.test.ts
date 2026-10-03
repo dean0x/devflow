@@ -25,8 +25,8 @@
  * and the separation is not tidiness: the cross-cutting arm asserts its owners are
  * exactly GIT_CROSS_CUTTING_DOCS, and the contract is a different module KIND
  * behind a different generation gate. Folding it in would have meant relaxing that
- * arm to admit a fourth owner — the blanket widening ADR-025 forbids — instead of
- * classifying the case.
+ * arm to admit a fourth owner — a blanket widening that blinds it to a second
+ * authority — instead of classifying the case.
  */
 
 import { describe, it, expect } from 'vitest';
@@ -50,7 +50,7 @@ import { walkFiles } from '../helpers.js';
 /**
  * Read a file that MUST exist. Throws with a build hint rather than returning an
  * empty string: both arms below scan for a sentence, and a scan over an absent or
- * empty corpus reports nothing and passes (PF-018).
+ * empty corpus reports nothing and passes.
  */
 function requireFile(label: string, filePath: string): string {
   try {
@@ -89,7 +89,7 @@ export const MIN_RATIONALE_CHARS = 40;
  *
  * Parameterised on the entries so the known-bad probe drives the SAME predicate
  * both live arms do — a probe that re-implements the length test proves only that
- * the probe works (PF-018).
+ * the probe works.
  */
 function collectUnderJustified(
   entries: ReadonlyArray<{ readonly sentence: string; readonly justification: string }>,
@@ -149,7 +149,8 @@ function providerReferenceCorpus(
 
 /**
  * Named predicate: did a labelled corpus read the PR-host tree? Shared by the
- * negative arm's provenance check and its known-bad probe (PF-018).
+ * negative arm's provenance check and its known-bad probe, so the probe exercises
+ * the real predicate.
  */
 function readsPrHostTree(corpus: ReadonlyArray<{ label: string }>): boolean {
   return corpus.some(entry => entry.label.startsWith(`${PR_HOST_DESTINATION_ROOT}/`));
@@ -251,7 +252,7 @@ describe('shared-literal registry — one authority per normative sentence [DR-1
   it('is non-empty, covers every cross-cutting document, and justifies every entry', () => {
     expect(
       SHARED_LITERAL_REGISTRY.length,
-      'an empty registry makes both arms below pass by checking nothing (PF-018)',
+      'an empty registry makes both arms below pass by checking nothing',
     ).toBeGreaterThan(0);
     expect(
       [...new Set(SHARED_LITERAL_REGISTRY.map(e => e.owner))].sort(),
@@ -468,7 +469,7 @@ describe('tool-call contract: one authority per normative sentence [DR-19]', () 
     // The contract is generated only while a provider that needs it is registered,
     // and so is the provider tree the negative arm walks. Both halves vanish
     // together, so asserting the gate is open is what distinguishes "no
-    // restatements" from "nothing to restate" (PF-018).
+    // restatements" from "nothing to restate".
     expect(
       generatedReferenceManifest(),
       'the contract must be in the manifest — with the gate shut there is no contract to protect ' +
@@ -476,7 +477,7 @@ describe('tool-call contract: one authority per normative sentence [DR-19]', () 
     ).toContain('tracker/_mcp.md');
     expect(
       MCP_SHARED_LITERAL_REGISTRY.length,
-      'an empty registry makes both arms below pass by checking nothing (PF-018)',
+      'an empty registry makes both arms below pass by checking nothing',
     ).toBeGreaterThan(0);
     expect(
       collectUnderJustified(MCP_SHARED_LITERAL_REGISTRY),
@@ -602,7 +603,7 @@ describe('tool-call contract: one authority per normative sentence [DR-19]', () 
   });
 
   it('known-bad probe: a token justification is reported by the same length rule', () => {
-    // The floor is proven live rather than asserted about (PF-018): the probe drives
+    // The floor is proven live rather than asserted about: the probe drives
     // collectUnderJustified — the SAME predicate both registries' first arm reads —
     // over seeded entries, so a floor that stopped rejecting takes this red too.
     const seeded = [
@@ -701,7 +702,7 @@ describe('the project-key alphabet has one authority, quoted identically by all 
     expect(
       collectKeyAlphabets('gate with `^[A-Za-z][A-Za-z0-9_]{0,9}$` here'),
       'the collector must recognise the retired lowercase shape — otherwise the arms above are ' +
-      'green because the collector sees nothing (PF-018)',
+      'green because the collector sees nothing',
     ).toEqual(['^[A-Za-z][A-Za-z0-9_]{0,9}$']);
     expect(
       collectKeyAlphabets(`one ${KEY_ALPHABET} and one ^[A-Za-z][A-Za-z0-9_]{0,9}$`).length,

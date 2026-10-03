@@ -7,7 +7,7 @@
  * converges the compliance rule when manifest.features.compliance.enabled.
  *
  * Does NOT exercise the full init flow — tests run against tmp dirs,
- * never real HOME (avoids PF-018).
+ * never real HOME.
  */
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { promises as fs } from 'fs';

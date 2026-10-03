@@ -5,7 +5,7 @@
  * into a fresh directory brings up the CLI, and all runtime-critical assets are
  * present in the install tree.
  *
- * Per PF-008: assert on explicit exit codes and file existence, never on
+ * Assert on explicit exit codes and file existence, never on
  * pipeline tails or partial stdout fragments. Every step captures its own
  * exit code; a non-zero code is a hard failure with a descriptive message.
  *
@@ -42,7 +42,7 @@ afterAll(async () => {
 /**
  * Run a shell command synchronously.
  * Returns { stdout, stderr, exitCode, signal }.
- * Never throws — callers check exitCode explicitly (PF-008).
+ * Never throws — callers check exitCode explicitly.
  *
  * `signal` is populated when execSync kills the process due to a timeout
  * (e.g. 'SIGTERM'). When present, exitCode is 1 (fabricated by ?? 1 because
@@ -196,7 +196,7 @@ describe('Guard 6 (pack-install): npm pack produces a working installable packag
     expect(compiledContent, 'compiled agent must carry its model tier').toContain('model:');
     expect(compiledContent, 'compiled agent must not leak the build-steering key').not.toContain('output-dir:');
     const leaks = collectBackslashBraceLeaks([{ name: 'dist/agents/git.md', content: compiledContent }]);
-    expect(leaks, `compiled agent must not leak escaped braces (PF-024):\n  ${leaks.join('\n  ')}`).toEqual([]);
+    expect(leaks, `compiled agent must not leak escaped braces:\n  ${leaks.join('\n  ')}`).toEqual([]);
   });
 
   it('installed package has src/targets/claude-code/templates/ with settings.json', async () => {

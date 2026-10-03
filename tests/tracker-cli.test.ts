@@ -74,7 +74,7 @@ describe('conventions provenance (--status)', () => {
   let devflowDir: string;
 
   beforeEach(async () => {
-    // PF-060: mkdtemp root; never the developer's real ~/.devflow.
+    // An mkdtemp root; never the developer's real ~/.devflow.
     devflowDir = await fs.mkdtemp(path.join(os.tmpdir(), 'devflow-tracker-cli-'));
     await fs.mkdir(path.join(devflowDir, 'tracker'));
   });
@@ -267,7 +267,7 @@ describe('devflow tracker --status', () => {
 
   beforeEach(async () => {
     cli = requireBuiltCli();
-    // PF-060: a seeded mkdtemp HOME; never the developer's real one.
+    // A seeded mkdtemp HOME; never the developer's real one.
     tmpHome = await fs.mkdtemp(path.join(os.tmpdir(), 'devflow-tracker-status-'));
     devflowDir = path.join(tmpHome, '.devflow');
     await fs.mkdir(devflowDir, { recursive: true });
@@ -282,7 +282,7 @@ describe('devflow tracker --status', () => {
     for (const provider of TRACKER_PROVIDER_IDS) {
       await fs.writeFile(trackerAttemptsPath(devflowDir, provider), '5\n', 'utf-8');
     }
-    // PF-018: the counter must exist before the run, or its absence afterwards
+    // The counter must exist before the run, or its absence afterwards
     // is the state the temp dir started in and proves nothing.
     await expect(fs.readFile(trackerAttemptsPath(devflowDir, 'jira'), 'utf-8')).resolves.toBe('5\n');
 
@@ -389,7 +389,7 @@ describe('devflow tracker --set writes the manifest, the counters and the sentin
 
   beforeEach(async () => {
     cli = requireBuiltCli();
-    // PF-060: a seeded mkdtemp HOME; never the developer's real one.
+    // A seeded mkdtemp HOME; never the developer's real one.
     tmpHome = await fs.mkdtemp(path.join(os.tmpdir(), 'devflow-tracker-set-'));
     devflowDir = path.join(tmpHome, '.devflow');
     await fs.mkdir(devflowDir, { recursive: true });
@@ -409,7 +409,8 @@ describe('devflow tracker --set writes the manifest, the counters and the sentin
     await fs.writeFile(trackerAttemptsPath(devflowDir, 'jira'), '5\n', 'utf-8');
     await fs.writeFile(sentinel, 'jira\n', 'utf-8');
 
-    // PF-018: every artifact this run must change has to EXIST first.
+    // Every artifact this run must change has to EXIST first, or its absence
+    // afterwards proves nothing.
     await expect(fs.access(sentinel)).resolves.toBeUndefined();
 
     const result = runCli(cli, tmpHome, ['--set', 'github']);

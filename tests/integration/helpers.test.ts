@@ -5,7 +5,7 @@
  * functions with synthesised fixture data. No `describe.skipIf(!isClaudeAvailable())`
  * guard needed here.
  *
- * Fixture shape note (PF-043): JSONL record fields were copied from a real
+ * Fixture shape note: JSONL record fields were copied from a real
  * `agent-*.jsonl` line observed under ~/.claude/projects/…/subagents/ on this
  * machine. Only the values are synthetic — the shape (camelCase fields, sessionId
  * in each record, preloadedSkills already parsed) matches what the runtime produces.
@@ -16,7 +16,7 @@ import { buildSubagentsPath } from './helpers.js';
 
 describe('buildSubagentsPath', () => {
   it('encodes forward slashes in cwd as hyphens and prepends a leading hyphen', () => {
-    // PF-043: path encoding must match what Claude Code uses for the project directory.
+    // Path encoding must match what Claude Code uses for the project directory.
     // The encoding: replace every '/' with '-', then ensure a leading '-'.
     const result = buildSubagentsPath(
       '/home/user',

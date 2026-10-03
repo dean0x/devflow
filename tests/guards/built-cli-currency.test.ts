@@ -6,15 +6,15 @@
  * the two are different claims: existence is not currency. `requireBuiltCli` gates
  * the only executable coverage of a `devflow` action BODY, so a `dist/cli.js` older
  * than the sources it was compiled from means every subprocess suite downstream
- * certifies a build nobody is shipping — PF-018's first mechanism in its quietest
- * form, where the target exists but is not the one under review.
+ * certifies a build nobody is shipping — a vacuous pass in its quietest form,
+ * where the target exists but is not the one under review.
  *
  * Every arm is HERMETIC: temp roots with hand-stamped mtimes, never the real tree.
  * A probe that measured the repo's own `dist/` would be green or red according to
  * whether somebody had just built, which is the property under test rather than a
  * precondition for testing it. Stamping the times with `utimesSync` also keeps the
  * arms off any sleep — a currency check compared with `<` needs an ORDER, not a
- * delay, and a test that waited for the clock would be the flake PF-055 describes.
+ * delay, and a test that waited for the clock would be a timing flake.
  *
  * The `src/assets` arm is the false-positive half, and it is the one that decides
  * whether this check can live in the suite at all. Agent prompts, skills, commands
@@ -112,10 +112,10 @@ describe('requireBuiltCli currency contract', () => {
     });
   });
 
-  it('a `src/` holding no compile input is REPORTED, not passed over (PF-018)', () => {
-    // A scan that goes empty stops guarding and says nothing — the second mechanism
-    // PF-018 records. A source tree with no `.ts` is not a tree this check can make
-    // any claim about, so it refuses rather than returning.
+  it('a `src/` holding no compile input is REPORTED, not passed over', () => {
+    // A scan that goes empty stops guarding and says nothing. A source tree with
+    // no `.ts` is not a tree this check can make any claim about, so it refuses
+    // rather than returning.
     withRoot({ 'src/assets/skills/git/SKILL.md': NEW }, OLD, root => {
       expect(() => requireBuiltCli(root)).toThrow(/holds no \.ts\/\.json compile input/);
     });

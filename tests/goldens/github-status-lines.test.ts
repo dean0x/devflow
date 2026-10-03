@@ -26,8 +26,8 @@
  * github-status-lines.txt is frozen, and the --unfreeze refusal guard below
  * protects that fixture only. Overriding the freeze takes an explicit, dated user
  * authorisation naming the exact bytes it permits, and each such authorisation is
- * spent by the single commit that uses it. Seven have been granted and all
- * seven are spent:
+ * spent by the single commit that uses it. Eight have been granted and all
+ * eight are spent:
  *
  *   2026-09-14  e4876e0  the extractor retarget after the mechanics split
  *   2026-09-15  c0b9860  the two `**Mechanics:**` pointer lines, at fixture
@@ -61,6 +61,11 @@
  *                        `DEGRADED (\{reason\})` became `DEGRADED ({reason})`
  *                        — 12 backslashes, nothing else; dist/ is
  *                        byte-identical and the other 245 lines are too
+ *   2026-10-03  (#411; user)  the eighth re-capture, granted for line 207
+ *                        only and spent on it: PR-thread reply evidence no
+ *                        longer lists ledger IDs, so the resolve-review-threads
+ *                        reply rule lost `, ADR IDs` — 9 bytes, nothing else;
+ *                        the other 248 lines are byte-identical
  *
  * THE AUTHORISATION IS SPENT. Any further change to this fixture requires a new
  * explicit authorisation; none is outstanding.
@@ -130,7 +135,7 @@ export const PRE_PHASE0_GIT_MD_LINES = 938
 // Phase-0 char baselines (JS `.length`, not bytes) — named constants so Phase-2's
 // byte-budget.test.ts can import them without re-deriving (C6). These are equality
 // baselines: they move only in the same commit as the golden fixture.
-export const GIT_MD_CHARS = 43_832
+export const GIT_MD_CHARS = 43_814
 export const GIT_MD_LINES = 822
 // SKILL_GIT_CHARS/SKILL_GIT_LINES pin src/assets/skills/git/SKILL.md, the
 // preloaded skill file the git-agent golden above cross-references. Like
@@ -147,17 +152,17 @@ export const SKILL_WORKTREE_LINES = 92
  *
  * `TOTAL_CHARS = GIT_MD_CHARS + …` asserted against `GIT_MD_CHARS + …` restates
  * its own definition: it holds for every state of the tree, including one where
- * all three parts drifted, so it pinned nothing (PF-018). The guard below MEASURES
+ * all three parts drifted, so it pinned nothing. The guard below MEASURES
  * the three files and compares the measurement to these literals, which makes them
  * equality baselines like every other constant in this file — re-set in the same
  * golden-regeneration commit that moves the parts, never on their own to clear a
  * red assertion.
  */
-export const TOTAL_CHARS = 53_403
+export const TOTAL_CHARS = 53_385
 export const TOTAL_LINES = 1_127
 
 // Fixture invariants — these ARE bytes (Buffer.byteLength), not JS .length
-export const FIXTURE_BYTES = 18_392
+export const FIXTURE_BYTES = 18_383
 export const FIXTURE_NEWLINES = 249
 
 describe('golden: github-status-lines frozen fixture (AC-0.9)', () => {

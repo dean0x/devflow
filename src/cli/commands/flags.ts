@@ -5,14 +5,14 @@
  *   - createFlagsCommand() factory — fresh Commander instance per call;
  *     used by tests; src/cli.ts consumes the flagsCommand singleton export.
  *   - Persist pipeline: convergeFlagsIntoSettings (fold-before-strip) — the
- *     single pipeline entry point shared with init.ts (ARCH-H1, PF-015/017).
- *   - PF-014 (process.exit swallows async work): all error paths set
+ *     single pipeline entry point shared with init.ts (ARCH-H1).
+ *   - process.exit swallows async work: all error paths set
  *     process.exitCode = 1 and return; never call process.exit().
- *   - PF-015 (multi-artifact fan-out): compute record first; settings write
+ *   - Multi-artifact fan-out: compute record first; settings write
  *     and manifest write handled independently with their own error paths.
- *   - PF-022 (applies-on-restart): bare non-TTY invocation prints status table
+ *   - Applies-on-restart: bare non-TTY invocation prints status table
  *     with a note that changes apply on restart.
- *   - PF-023 (validate at the sink): parseFlagValueInput → coerceFlagValue
+ *   - Validate at the sink: parseFlagValueInput → coerceFlagValue
  *     runs inside the core helpers before any write.
  */
 
@@ -42,7 +42,7 @@ import {
 import { readManifest, writeManifest } from '../../core/manifest.js';
 import { writeSettingsFileAtomic } from '../../core/fs-atomic.js';
 import { sanitizeCell } from '../tui/cells.js';
-// Static imports for pure view-state helpers — no TTY machinery (applies PF-017).
+// Static imports for pure view-state helpers — no TTY machinery.
 // runFlagsTui stays lazily imported in handleBare to keep TTY module out of
 // --list/--status code paths; buildFlagRows and collectFlagRecord are pure.
 import { buildFlagRows, collectFlagRecord } from '../flags-view/state.js';
@@ -56,7 +56,7 @@ import type { FlagsTuiResult } from '../flags-view/terminal.js';
  * Malformed JSON → returns `{ ok: false, reason: string }`.
  *
  * NEVER silently falls back to '{}' on malformed JSON — that would clobber the
- * user's settings. The caller must abort with exit code 1 on !ok (avoids PF-023).
+ * user's settings. The caller must abort with exit code 1 on !ok.
  */
 async function readSettingsSafe(
   settingsPath: string,
@@ -73,7 +73,7 @@ async function readSettingsSafe(
 
   // REL-M2 + PERF-L4: single parse — validate root shape and return raw string.
   // The plain-object guard catches null/array roots before they reach applyFlags/stripFlags
-  // (applies PF-023 — validate at the sink; early rejection gives actionable error messages).
+  // (validate at the sink; early rejection gives actionable error messages).
   let parsed: unknown;
   try {
     parsed = JSON.parse(raw);
@@ -90,7 +90,7 @@ async function readSettingsSafe(
  * Discriminated result for persistFlagConfig.
  *
  * Makes the absent-manifest state unrepresentable as success (TS-H2 / ARCH-H2 /
- * REL-H2 / PF-015). Three distinct outcomes:
+ * REL-H2). Three distinct outcomes:
  *   - ok:true          — both settings.json and manifest.json were written.
  *   - ok:false + failed — one or both artifact writes failed; messages + exitCode
  *                         already set inside the function (per-artifact independence).
@@ -110,18 +110,19 @@ export type PersistResult =
  *
  * Uses `convergeFlagsIntoSettings` (ARCH-H1: fold-before-strip pipeline) so the
  * invariant lives in the pipeline, not at call sites. This ensures that:
- *   - An externally-set /focus survives unless viewModeExplicit is true (PF-015).
+ *   - An externally-set /focus survives unless viewModeExplicit is true.
  *   - Valued flags not yet claimed by devflow (absent from the manifest record)
  *     have their existing settings values preserved rather than stripped (REG-H1,
- *     SEC-M3, ADR-014).
+ *     SEC-M3).
  *
- * PF-015: settings write and manifest write are evaluated independently.
+ * Settings write and manifest write are evaluated independently.
  * Each failure is reported with its own message and exit code 1.
  * The second write is never skipped due to the first succeeding or failing.
  *
  * Returns a discriminated PersistResult (never a boolean — avoids the two-state
  * lie that cannot express the third "manifest absent" outcome). Success is tracked
- * in LOCALS, never read back off `process.exitCode` (avoids PF-014, PF-015).
+ * in LOCALS, never read back off `process.exitCode`, which is process-wide and
+ * may already have been set by an earlier, unrelated failure.
  */
 async function persistFlagConfig(
   claudeDir: string,
@@ -135,7 +136,7 @@ async function persistFlagConfig(
   opts: { viewModeExplicit: boolean } = { viewModeExplicit: false },
 ): Promise<PersistResult> {
   // D15: convergeFlagsIntoSettings is the fold-before-strip pipeline entry point
-  // (applies PF-015, PF-017, REG-H1, ARCH-H1). ownedRecord is omitted so the
+  // (REG-H1, ARCH-H1). ownedRecord is omitted so the
   // `newRecord` (the manifest record) serves as the owned set — a key present in
   // the manifest means devflow previously claimed it; absent = never written by
   // devflow, so the existing settings value is adopted.
@@ -145,10 +146,10 @@ async function persistFlagConfig(
     opts,
   );
 
-  // PF-015: accumulate each artifact's failure independently; combine at the end.
+  // Accumulate each artifact's failure independently; combine at the end.
   const failed: Array<'settings' | 'manifest'> = [];
 
-  // Settings write — independent error path (avoids PF-015 fan-out).
+  // Settings write — independent error path.
   const settingsPath = path.join(claudeDir, 'settings.json');
   try {
     await writeSettingsFileAtomic(settingsPath, updatedSettings);
@@ -156,10 +157,10 @@ async function persistFlagConfig(
     p.log.error(`Failed to write settings.json: ${err instanceof Error ? err.message : String(err)}`);
     failed.push('settings');
     process.exitCode = 1;
-    // PF-015: still attempt the manifest write — evaluate each artifact independently.
+    // Still attempt the manifest write — evaluate each artifact independently.
   }
 
-  // Manifest write — independent error path (avoids PF-015 fan-out).
+  // Manifest write — independent error path.
   // Uses foldedRecord (not newRecord) so adopted values are persisted to the
   // manifest, keeping manifest ↔ settings.json in sync.
   //
@@ -183,7 +184,7 @@ async function persistFlagConfig(
     process.exitCode = 1;
   }
 
-  // PF-015: OR the locals afterwards — never compose required side effects with ||/&&.
+  // OR the locals afterwards — never compose required side effects with ||/&&.
   return failed.length > 0 ? { ok: false, failed } : { ok: true };
 }
 
@@ -199,10 +200,10 @@ interface FlagContext {
  * Load manifest and settings.json for the mutating CLI branches.
  *
  * Returns a discriminated result — never exits itself. The dispatcher or handler
- * reports the reason and sets process.exitCode = 1 on failure (avoids PF-014).
- * One shared load path means a fix lands once, not four times (applies PF-017 —
- * the four copies of the same preamble are exactly the "fix on one site, miss the
- * other three" shape).
+ * reports the reason and sets process.exitCode = 1 on failure.
+ * One shared load path means a fix lands once, not four times (the four copies
+ * of the same preamble are exactly the "fix on one site, miss the other three"
+ * shape).
  */
 async function loadFlagContext(
   claudeDir: string,
@@ -300,7 +301,7 @@ async function handleStatus(devflowDir: string): Promise<void> {
  * Collapsed from two identical 50-line branches into one handler parameterized by
  * `value: boolean` — the only deltas were the record assignment (true vs false)
  * and one error-message string (--set vs --unset as the suggested alternative)
- * (CPLX-H2 — applies PF-017: one fix lands once, not twice).
+ * (CPLX-H2: one fix lands once, not twice).
  */
 async function handleSetBooleans(
   claudeDir: string,
@@ -337,7 +338,7 @@ async function handleSetBooleans(
     return;
   }
 
-  // PF-015: compute new record before any write
+  // Compute new record before any write
   const newRecord: FlagsRecord = { ...ctx.value.manifest.features.flags };
   for (const flag of flagDefs) {
     newRecord[flag.id] = value;
@@ -374,7 +375,7 @@ async function handleSet(
     const id = assignment.slice(0, eqIdx);
     const text = assignment.slice(eqIdx + 1);
 
-    // Prototype pollution guard (applies PF-023)
+    // Prototype pollution guard
     if (id === '__proto__' || id === 'constructor' || id === 'prototype') {
       p.log.error(`Unknown flag: ${color.bold(id)}`);
       process.exitCode = 1;
@@ -410,7 +411,7 @@ async function handleSet(
     return;
   }
 
-  // PF-015: compute final record before any write
+  // Compute final record before any write
   const newRecord: FlagsRecord = { ...ctx.value.manifest.features.flags };
   for (const { id, flag, value } of assignments) {
     // null from parseFlagValueInput for literal 'unset' → use neutral value
@@ -463,7 +464,7 @@ async function handleUnset(
     return;
   }
 
-  // PF-015: compute new record before any write
+  // Compute new record before any write
   const newRecord: FlagsRecord = { ...ctx.value.manifest.features.flags };
   for (const flag of flagDefs) {
     newRecord[flag.id] = neutralValueOf(flag);
@@ -487,9 +488,9 @@ async function handleUnset(
  * Apply a TUI result to disk — the save/persist seam extracted from handleBare.
  *
  * Enables seam testing of the TUI→persist wiring without a real TTY (closes
- * the interactive-surface coverage gap per PF-017(c)). The test drives
+ * the interactive-surface coverage gap). The test drives
  * runFlagsTui with PassThrough streams, feeds its result here, and asserts
- * the whole post-state of both artifacts (manifest + settings.json) per PF-015.
+ * the whole post-state of both artifacts (manifest + settings.json).
  *
  * @param result       TUI result from runFlagsTui — action 'save', 'cancel', or 'abort'.
  * @param freshSettingsContent Settings.json content re-read AFTER the TUI closed
@@ -572,7 +573,8 @@ async function handleBare(
     // ── Launch TUI ────────────────────────────────────────────────────
     const { runFlagsTui } = await import('../flags-view/index.js');
     // Wrap: runTui rejects on initial-render failure or handler throw.
-    // On rejection: log and bail — no settings write (avoids PF-014 process.exit).
+    // On rejection: log and bail — no settings write; set process.exitCode
+    // rather than calling process.exit(), which would skip pending cleanup.
     let result;
     try {
       result = await runFlagsTui(initialRows);
@@ -589,7 +591,7 @@ async function handleBare(
       // Code /config) that ran during the session would be silently overwritten by
       // the atomic rename in writeSettingsFileAtomic. Re-reading rebases the flag
       // write onto current content and ensures convergeFlagsIntoSettings sees the
-      // fresh viewMode (applies PF-022 — file state, not config state, is reality).
+      // fresh viewMode (file state, not config state, is reality).
       const freshSettings = await readSettingsSafe(path.join(claudeDir, 'settings.json'));
       if (!freshSettings.ok) {
         p.log.error(freshSettings.reason);

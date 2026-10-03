@@ -14,10 +14,10 @@
  * decided by the ids its caller passes (D-COMPLIANCE-REPO-LENS), never by which
  * files are present.
  *
- * Applies ADR-013: I/O orchestration in src/targets/; pure helpers in src/core/.
- * Applies PF-009: warn-not-throw for per-item failures.
- * Applies PF-011: temp-sibling+rename for skill dir rewrites.
- * Applies PF-015: both artifacts converge unconditionally (no || short-circuits).
+ * I/O orchestration in src/targets/; pure helpers in src/core/.
+ * Warn-not-throw for per-item failures.
+ * Temp-sibling+rename for skill dir rewrites.
+ * Both artifacts converge unconditionally (no || short-circuits).
  */
 import { promises as fs } from 'fs';
 import * as path from 'path';
@@ -63,7 +63,7 @@ export interface ConvergeComplianceArtifactsResult {
    * without error. False when any warn path was taken (skill install failed,
    * rule install failed, artifact removal failed, or claudeDir is not absolute).
    *
-   * PF-015: converge is warn-not-throw, so callers cannot detect partial failure
+   * Converge is warn-not-throw, so callers cannot detect partial failure
    * via a catch block. This field makes the outcome truthful: callers can surface
    * whether the install fully succeeded rather than assuming `true` after a non-throwing
    * return.
@@ -104,7 +104,7 @@ async function pathExists(p: string): Promise<boolean> {
  * Fragments always come from the canonical source (not user-overridable) — they carry
  * registry-owned content (mapping cells, reference blurbs, checklist items, rule bullets).
  *
- * PF-009: parse errors and unreadable files are reported via warn; the framework is
+ * Parse errors and unreadable files are reported via warn; the framework is
  * silently omitted from the result map (C5 in composeComplianceSkill handles the gap).
  */
 async function loadComplianceFragments(
@@ -147,8 +147,8 @@ async function loadComplianceFragments(
  * `fragments` is loaded once by convergeComplianceArtifacts and shared with the rule
  * installer — the SKILL.md and the rule compose from the same parsed set.
  *
- * Applies PF-011: build under a .tmp sibling, remove old target, rename.
- * Applies PF-009: unexpected I/O failures are reported via warn; never thrown.
+ * Build under a .tmp sibling, remove old target, rename.
+ * Unexpected I/O failures are reported via warn; never thrown.
  */
 async function installSkillDir(
   claudeDir: string,
@@ -173,7 +173,7 @@ async function installSkillDir(
     // Clean up any orphaned tmp from a prior crashed run (best-effort).
     await fs.rm(tmpTarget, { recursive: true, force: true });
 
-    // Build the new directory tree under the tmp sibling (PF-011).
+    // Build the new directory tree under the tmp sibling.
     const refDst = path.join(tmpTarget, 'references');
     await fs.mkdir(refDst, { recursive: true });
 
@@ -191,7 +191,7 @@ async function installSkillDir(
     // Always-present reference files (detection.md, sources.md) from the canonical
     // references/ directory — these are not framework-specific.
     //
-    // PF-009: each copy is isolated. A skill dir missing one reference still works;
+    // Each copy is isolated. A skill dir missing one reference still works;
     // aborting the whole install because one file is unreadable would take out
     // SKILL.md too. Failures warn and the remaining refs still install.
     const alwaysPresentSrc = path.join(canonicalSrc, 'references');
@@ -218,7 +218,7 @@ async function installSkillDir(
       }
     }
 
-    // Atomically swap: remove old target, rename tmp into place.
+    // Swap: remove old target, rename tmp into place (two calls, not atomic).
     await fs.rm(target, { recursive: true, force: true });
     await fs.rename(tmpTarget, target);
   } catch (err) {
@@ -245,7 +245,7 @@ async function installSkillDir(
  * source (never the shadow — fragments are registry-owned) and shared with the skill
  * installer.
  *
- * Applies PF-009: I/O failures are reported via warn; never thrown.
+ * I/O failures are reported via warn; never thrown.
  */
 async function installRuleFile(
   claudeDir: string,
@@ -284,8 +284,10 @@ async function installRuleFile(
  *   enabled + !rulesEnabled → skill dir (every ref, machine stamp); remove stale rule
  *   !enabled                → skill dir (every ref, neutral stamp); remove rule
  *
- * PF-015: both artifact operations execute unconditionally — no || short-circuits.
- * PF-011: skill dir write uses temp-sibling+rename to avoid ENOENT windows.
+ * Both artifact operations execute unconditionally — no || short-circuits.
+ * Skill dir write builds under a temp sibling, then removes the target and renames
+ * the sibling into place, which narrows the ENOENT window to the gap between those
+ * two calls.
  *
  * D: the `warn` callback is injected (not console.warn) so callers control
  * surfacing (init log lines, test spies, etc.) — per the dependency-injection
@@ -313,7 +315,7 @@ export async function convergeComplianceArtifacts(
 
   // I13: Track whether every artifact operation in this run completed without error.
   // `converged` starts true and is set false by the tracking wrapper whenever any warn
-  // path is taken — including inside installSkillDir / installRuleFile (PF-009 paths).
+  // path is taken — including inside installSkillDir / installRuleFile (their per-item warn paths).
   let converged = true;
   const trackingWarn = (msg: string): void => {
     converged = false;
@@ -331,7 +333,7 @@ export async function convergeComplianceArtifacts(
     trackingWarn,
   );
 
-  // PF-015: the skill and the rule are independent operations. An error in
+  // The skill and the rule are independent operations. An error in
   // installSkillDir is caught internally and reported via trackingWarn, so
   // execution always continues to the rule step.
   await installSkillDir(claudeDir, devflowDir, stampFrameworks, fragments, trackingWarn);

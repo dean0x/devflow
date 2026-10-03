@@ -39,7 +39,7 @@ import {
 } from './scripted-shim.js';
 
 // ---------------------------------------------------------------------------
-// The .cjs seams (transcribed from the JSDoc typedefs — PF-043, PF-069)
+// The .cjs seams (transcribed from the JSDoc typedefs)
 // ---------------------------------------------------------------------------
 
 type Field<T> = { readonly kind: 'absent' } | { readonly kind: 'malformed' } | { readonly kind: 'valid'; readonly value: T };

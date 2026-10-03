@@ -44,7 +44,7 @@ function makeAgentFrontmatter(model: string): string {
  * hardcoded registry in external-models.ts (which is deleted in Commit 9).
  * Canonical registry ids that still route by exact id under subswitch@0.5.0
  * (gpt-5.5 is retired from discovery but remains exact-id routable).
- * applies ADR-003: end-state only — no externalModelIds() import.
+ * End-state only — no externalModelIds() import.
  */
 const GPT_IDS = ['gpt-5.6-sol', 'gpt-5.6-terra', 'gpt-5.6-luna', 'gpt-5.5'];
 
@@ -221,8 +221,7 @@ describe('init proxy apply-pass ordering (TEST-5)', () => {
 // branch — the else branch never runs. proxy.json stays enabled:true.
 //
 // FIX: Write proxy.json disabled inside the preflight failure handler so
-// runtime authority (proxy.json) always converges with the final flag value
-// (avoids PF-015 — toggle fan-out convergence; applies ADR-014 re-init).
+// runtime authority (proxy.json) always converges with the final flag value.
 //
 // Test strategy (Careful / test-first): the test mirrors the fixed init.ts
 // flow step-by-step and asserts the post-state invariant. In the RED state
@@ -259,7 +258,7 @@ describe('C2-REG-1: proxy.json convergence on preflight failure', () => {
     // Init reads prior state once before the if (proxyEnabled) block (REG-2 hoisted read).
     const priorState = await readProxyState(devflowDir);
 
-    let proxyEnabled = true; // seeded from manifest (ADR-014)
+    let proxyEnabled = true; // seeded from manifest
 
     // Preflight fails.
     const preflightResult = await runProxyPreflight(
@@ -274,7 +273,7 @@ describe('C2-REG-1: proxy.json convergence on preflight failure', () => {
     // Before this fix proxy.json stayed enabled:true, so isProxyEnabled() returned true
     // and the next TUI save called reapplyAgentMapping({proxyEnabled:true}), writing GPT
     // model IDs into agent frontmatter with no relay — the exact dormancy inversion
-    // commit 42e6f29 was written to prevent. avoids PF-015.
+    // commit 42e6f29 was written to prevent.
     if (!preflightResult.ok) {
       proxyEnabled = false;
       if (priorState.ok && priorState.value.enabled) {
@@ -289,7 +288,7 @@ describe('C2-REG-1: proxy.json convergence on preflight failure', () => {
       }
     }
 
-    // Primary assertion: proxy.json must be disabled (avoids PF-015).
+    // Primary assertion: proxy.json must be disabled.
     const after = await readProxyState(devflowDir);
     expect(after.ok).toBe(true);
     expect(after.value?.enabled).toBe(false);
@@ -347,7 +346,7 @@ describe('C2-REG-1: proxy.json convergence on preflight failure', () => {
 // ─── C2-REG-2: remembered port preserved across re-init ──────────────────────
 //
 // BUG: init hardcodes DEFAULT_PROXY_PORT in three places (routing config write,
-// proxy.json write, and applyProxyEnv call). Under ADR-014 a user who ran
+// proxy.json write, and applyProxyEnv call). Re-init is state-aware, yet a user who ran
 // `devflow proxy --enable --port 8899` silently loses that port on every re-init,
 // orphaning the running relay.
 //

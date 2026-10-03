@@ -8,7 +8,7 @@
  *
  * All exported functions are pure — no I/O, no side effects.
  *
- * Applies ADR-013: seeding helpers are CLI-init-specific logic, so they live
+ * Seeding helpers are CLI-init-specific logic, so they live
  * beside init.ts in src/cli/commands/ rather than in src/core/ (which holds
  * agent-neutral, target-agnostic utilities).
  */
@@ -86,8 +86,8 @@ export interface InitSeed {
  * memory, learning and knowledge are recorded in the manifest alone (a repository
  * only narrows them at read time), so the seed takes no per-repo input at all. Seeding from whatever repo init happens to run in
  * would flip the switch for EVERY repo as a side effect — a stale per-repo
- * `true` would silently re-enable a feature the user turned off. ADR-014's
- * state-aware re-init preserves the prior machine-wide choice, the manifest's.
+ * `true` would silently re-enable a feature the user turned off. State-aware
+ * re-init preserves the prior machine-wide choice, the manifest's.
  */
 export function resolveSeedFeatures(manifest: ManifestData | null): FeatureSeed {
   const ambient = manifest?.features.ambient ?? FEATURE_DEFAULTS.ambient;
@@ -116,7 +116,7 @@ export function resolveSeedFeatures(manifest: ManifestData | null): FeatureSeed 
  * Resolve the flag record for the init seed.
  *
  * Returns a FlagsRecord containing ALL registry flags at their resolved values.
- * FlagsRecord key-presence encodes the "known" concept (ADR-014): present key =
+ * FlagsRecord key-presence encodes the "known" concept: present key =
  * known at last install, absent key = new to this install → adopt default on seed.
  *
  * @param manifestFlags - FlagsRecord from the manifest, or null for fresh install.
@@ -125,11 +125,11 @@ export function resolveSeedFeatures(manifest: ManifestData | null): FeatureSeed 
  * Rules:
  *   - null manifestFlags (fresh install) → all flags at registry defaults
  *   - Entry present                      → keep (coerceFlagValue is applied at read
- *                                          time via sanitizeFlagsRecord; PF-023)
- *   - Entry absent                       → adopt registry default (ADR-014)
+ *                                          time via sanitizeFlagsRecord)
+ *   - Entry absent                       → adopt registry default
  *   - Unknown IDs from old manifest      → pass through unchanged (forward-compat)
  *
- * Applies ADR-014: absent key = unknown to this install → adopt default.
+ * Absent key = unknown to this install → adopt default.
  * view-mode is not set here; resolveInitSeed sets flags['view-mode'] after composing.
  */
 export function resolveSeedFlags(
@@ -295,7 +295,7 @@ export function resolveExistingAttributionSuppression(settingsJson: string): tru
  * view-mode priority: existing settings.json (non-default) → manifest → 'default'.
  * suppress-attribution priority: settings.json exact devflow shape → manifest → false.
  * All flag overrides are encoded into flags so all flag state lives in one FlagsRecord
- * (applying PF-015: fold before strip — the fold happens here).
+ * (fold before strip — the fold happens here).
  *
  * This is the single composition point; callers (init.ts hoist block) call this
  * once and pass `seed` down to prompt wiring.
@@ -318,7 +318,7 @@ export function resolveInitSeed(
     manifestPlugins, seedManifest?.knownPlugins, plugins,
   );
 
-  // Encode the resolved view mode into flags['view-mode'] (PF-015: all flag state in FlagsRecord).
+  // Encode the resolved view mode into flags['view-mode'] (all flag state in FlagsRecord).
   // Priority: existing settings.json (non-default) → flags['view-mode'] from manifest → 'default'.
   // resolveExistingViewMode returns undefined when absent or 'default' — treated as no-opinion.
   const existingViewMode = resolveExistingViewMode(settingsSnapshot);
