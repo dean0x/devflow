@@ -224,7 +224,7 @@ describe('triage.md — Input Context and Apply Decisions section', () => {
     expect(content).toMatch(/Apply Decisions/);
   });
 
-  it('Apply Decisions usage describes citing inline in Reasoning column', () => {
+  it('Apply Decisions usage names the Reasoning column as where a decision is stated', () => {
     // Extract only the Apply Decisions bullet from Responsibilities — triage.md has
     // "Reasoning" columns in three unrelated output tables, so asserting against the
     // whole file is self-ratifying. This scopes the assertion to the actual coupling.
