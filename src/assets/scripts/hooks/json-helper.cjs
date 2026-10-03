@@ -45,7 +45,6 @@ const args = process.argv.slice(3);
 
 const { safePath } = require('./lib/safe-path.cjs');
 const {
-  getDecisionsUsagePath,
   getDecisionsLockDir,
   getDecisionsLedgerPath,
   getDecisionsLogPath,
@@ -308,47 +307,6 @@ function scanForAnchorCollision(projectRoot, id) {
  */
 function formatCollisionHits(hits) {
   return hits.map(h => `  ${h.file}:${h.line}`).join('\n');
-}
-
-/**
- * Read .decisions-usage.json. Returns {version, entries} or empty default.
- * @param {string} projectRoot - Path to project root (cwd)
- * @returns {{version: number, entries: Object}}
- */
-function readUsageFile(projectRoot) {
-  const filePath = getDecisionsUsagePath(projectRoot);
-  try {
-    const raw = fs.readFileSync(filePath, 'utf8');
-    const data = JSON.parse(raw);
-    if (data && data.version === 1 && typeof data.entries === 'object') return data;
-  } catch { /* ENOENT or malformed — return default */ }
-  return { version: 1, entries: {} };
-}
-
-/**
- * Write .decisions-usage.json atomically.
- * @param {string} projectRoot - Path to project root (cwd)
- * @param {{version: number, entries: Object}} data
- */
-function writeUsageFile(projectRoot, data) {
-  writeFileAtomic(getDecisionsUsagePath(projectRoot), JSON.stringify(data, null, 2) + '\n');
-}
-
-/**
- * Register an entry in .decisions-usage.json with initial cite count.
- * @param {string} projectRoot - Path to project root (cwd)
- * @param {string} anchorId - e.g. 'ADR-NNN' or 'PF-NNN'
- */
-function registerUsageEntry(projectRoot, anchorId) {
-  const data = readUsageFile(projectRoot);
-  if (!data.entries[anchorId]) {
-    data.entries[anchorId] = {
-      cites: 0,
-      last_cited: null,
-      created: new Date().toISOString(),
-    };
-    writeUsageFile(projectRoot, data);
-  }
 }
 
 /**
@@ -690,7 +648,7 @@ try {
     // assign-anchor <type> <obs_id> [--allow-collision]
     // AC-A2: Assign next anchor ID for the given type (decision|pitfall) to the
     // observation identified by obs_id in decisions-log.jsonl. Atomic under a
-    // single .decisions.lock acquisition. Registers usage, re-renders both .md.
+    // single .decisions.lock acquisition. Re-renders both .md.
     //
     // E4: before writing, refuses if the candidate id is already cited as a
     // whole word somewhere in tracked source (a pre-mint collision — see
@@ -820,9 +778,6 @@ try {
         aaLogEntries[aaObsIdx] = Object.assign({}, aaObs, { status: 'created', anchor_id: aaAnchorId });
         writeJsonlAtomic(aaLogPath, aaLogEntries);
 
-        // Register usage entry
-        registerUsageEntry(aaProjectRoot, aaAnchorId);
-
         // Re-render both .md files (lock-free — we already hold .decisions.lock).
         // This is the FINAL write in the lock scope — see D002 above.
         renderAndWriteAll(aaProjectRoot, aaNewLedgerRows);
@@ -836,7 +791,7 @@ try {
     // -------------------------------------------------------------------------
     // next-anchor <type>
     // E4: Read-only preview of what assign-anchor would mint next — no lock
-    // acquired, no file written, no usage entry registered. Prints the
+    // acquired and no file written. Prints the
     // candidate id and, when a pre-mint collision guard would fire, its
     // file:line hits — so a caller can check before committing to assign-anchor.
     // -------------------------------------------------------------------------
@@ -1118,9 +1073,6 @@ try {
 // Expose helpers for unit testing (only when required as a module, not run as CLI)
 if (typeof module !== 'undefined' && module.exports) {
   module.exports = {
-    readUsageFile,
-    writeUsageFile,
-    registerUsageEntry,
     writeFileAtomic,
     writeJsonlAtomic,
     initDecisionsContent,

@@ -448,6 +448,23 @@ const RETIRED_LITERALS: ReadonlyArray<RetiredEntry> = [
       'render, and an entry is rewritten in place, so the header says the file is generated and ' +
       'not to be edited, and that retired entries are listed under Inactive.',
   },
+  {
+    literal: 'decisions-usage-scan',
+    // Every tree that shipped or described the scanner. src/cli/ is left out on
+    // purpose: init's LEGACY_HOOK_FILES names the script so that an upgrade deletes
+    // the copy an older install left in ~/.devflow/scripts/hooks.
+    scope: ['src/assets/', 'src/core/', 'src/hud/', 'src/targets/', 'docs/', 'CLAUDE.md', 'README.md'],
+    removedFrom:
+      'src/assets/scripts/hooks/decisions-usage-scan.cjs, src/assets/scripts/hooks/capture-turn, ' +
+      'src/assets/scripts/hooks/lib/decisions-format.cjs, src/core/fs-atomic.ts, ' +
+      'docs/reference/file-organization.md',
+    justification:
+      'The usage scanner counted the anchors each assistant turn cited into .decisions-usage.json, ' +
+      'and assign-anchor registered every new anchor there. Learning v2 maintains entries by their ' +
+      'verification age at the default branch, not by citation counts, and committed text no ' +
+      'longer cites ledger IDs, so the counts measured nothing. The scanner, its capture-turn call, ' +
+      'its project-paths helpers and the registration are gone.',
+  },
 ];
 
 // ---------------------------------------------------------------------------

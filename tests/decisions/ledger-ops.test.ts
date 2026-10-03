@@ -30,7 +30,6 @@ const jsonHelper = require(
 ) as {
   nextAnchorFromLedger: (rows: Record<string, unknown>[], type: 'decision' | 'pitfall') => { anchorId: string; nextN: string };
   rotateObservations: (logPath: string, archivePath: string, nowMs: number) => number;
-  registerUsageEntry: (projectRoot: string, anchorId: string) => void;
   writeJsonlAtomic: (file: string, entries: object[]) => void;
 };
 
@@ -297,16 +296,6 @@ describe('assign-anchor CLI op', () => {
     const result = runHelper('assign-anchor pitfall obs_pf_ind', tmpDir);
     expect(result.code).toBe(0);
     expect(result.stdout.trim()).toBe('PF-001'); // PF sequence starts at 1 regardless of ADR-010
-  });
-
-  it('registers usage entry', () => {
-    writeLog(tmpDir, [makeObsRow({ id: 'obs_usage_01', type: 'decision', status: 'ready' })]);
-    runHelper('assign-anchor decision obs_usage_01', tmpDir);
-    const usagePath = path.join(tmpDir, '.devflow', 'learning', '.decisions-usage.json');
-    expect(fs.existsSync(usagePath)).toBe(true);
-    const usage = JSON.parse(fs.readFileSync(usagePath, 'utf8'));
-    expect(usage.entries['ADR-001']).toBeDefined();
-    expect(usage.entries['ADR-001'].cites).toBe(0);
   });
 
   it('re-renders decisions.md with the new entry', () => {

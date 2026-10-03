@@ -5,7 +5,7 @@
 // decisions.md and pitfalls.md entries.  Every assertion here locks a
 // byte-level contract — any change to the output strings must be deliberate
 // and propagated to all consumers (session-start-context, decisions-index,
-// apply-decisions, decisions-usage-scan, render-decisions).
+// apply-decisions, render-decisions).
 
 import { describe, it, expect, beforeAll } from 'vitest';
 import { createRequire } from 'module';

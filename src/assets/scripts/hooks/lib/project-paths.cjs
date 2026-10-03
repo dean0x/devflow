@@ -106,16 +106,6 @@ function getDecisionsLockDir(projectRoot) {
   return path.join(projectRoot, '.devflow', 'learning', '.decisions.lock');
 }
 
-/** .devflow/learning/.decisions-usage.json */
-function getDecisionsUsagePath(projectRoot) {
-  return path.join(projectRoot, '.devflow', 'learning', '.decisions-usage.json');
-}
-
-/** .devflow/learning/.decisions-usage.lock/ — mkdir-based lock directory for usage file */
-function getDecisionsUsageLockDir(projectRoot) {
-  return path.join(projectRoot, '.devflow', 'learning', '.decisions-usage.lock');
-}
-
 /** .devflow/learning/index.md — pre-rendered compact index written by render-decisions.cjs */
 function getDecisionsIndexPath(projectRoot) {
   return path.join(projectRoot, '.devflow', 'learning', 'index.md');
@@ -200,8 +190,6 @@ module.exports = {
   getDecisionsHistoryPath,
   getDecisionsLockDir,
   getObservationsLockDir,
-  getDecisionsUsagePath,
-  getDecisionsUsageLockDir,
   getDecisionsIndexPath,
   // Memory files
   getWorkingMemoryPath,

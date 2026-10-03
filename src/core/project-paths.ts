@@ -106,16 +106,6 @@ export function getDecisionsLockDir(projectRoot: string): string {
   return path.join(projectRoot, '.devflow', 'learning', '.decisions.lock');
 }
 
-/** .devflow/learning/.decisions-usage.json */
-export function getDecisionsUsagePath(projectRoot: string): string {
-  return path.join(projectRoot, '.devflow', 'learning', '.decisions-usage.json');
-}
-
-/** .devflow/learning/.decisions-usage.lock/ — mkdir-based lock directory for usage file */
-export function getDecisionsUsageLockDir(projectRoot: string): string {
-  return path.join(projectRoot, '.devflow', 'learning', '.decisions-usage.lock');
-}
-
 /** .devflow/learning/index.md — pre-rendered compact index written by render-decisions.cjs */
 export function getDecisionsIndexPath(projectRoot: string): string {
   return path.join(projectRoot, '.devflow', 'learning', 'index.md');

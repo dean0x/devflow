@@ -261,20 +261,6 @@ describe('capture-turn', () => {
     expect(readJsonl(path.join(projectDir, '.devflow', 'learning', '.pending-turns.jsonl'))).toHaveLength(1);
   });
 
-  it('decisions usage scanner still runs when memory is disabled', () => {
-    writeMachineFeatures(homeDir, { memory: false });
-    // decisions-usage-scan.cjs itself no-ops when .devflow/memory/ is absent
-    // (its own guard) — pre-create it, matching config-disable-guards.test.ts's
-    // mkMemoryDir convention.
-    fs.mkdirSync(path.join(projectDir, '.devflow', 'memory'), { recursive: true });
-    fs.mkdirSync(path.join(projectDir, '.devflow', 'learning'), { recursive: true });
-    const usagePath = path.join(projectDir, '.devflow', 'learning', '.decisions-usage.json');
-    fs.writeFileSync(usagePath, JSON.stringify({ version: 1, entries: { 'ADR-001': { cites: 0, last_cited: null } } }));
-    runHook(CAPTURE_TURN, { cwd: projectDir, session_id: 't', last_assistant_message: 'applies ADR-001' }, homeDir);
-    const updated = JSON.parse(fs.readFileSync(usagePath, 'utf-8'));
-    expect(updated.entries['ADR-001'].cites).toBe(1);
-  });
-
   it('AC-F14: DEVFLOW_BG_UPDATER=1 -> exit 0, zero filesystem writes', () => {
     const { exitCode } = runHook(
       CAPTURE_TURN,

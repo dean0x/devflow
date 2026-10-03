@@ -597,22 +597,6 @@ describe('D-HOOKS-GIT-ONLY: no project scaffolding outside a git project or at H
     expect(collectTree(tmpHome, ['.devflow/logs'])).toEqual(before);
   });
 
-  it('the decisions usage scanner leaves a legacy non-git ledger untouched', () => {
-    // capture-turn runs the scanner before ensure-devflow-init, so the gate must be
-    // its own: a .devflow/ left by an older devflow in a plain directory is not a
-    // project, and learning stops there like everything else.
-    const nonGit = path.join(base, 'legacy');
-    fs.mkdirSync(path.join(nonGit, '.devflow', 'memory'), { recursive: true });
-    fs.mkdirSync(path.join(nonGit, '.devflow', 'learning'), { recursive: true });
-    const usagePath = path.join(nonGit, '.devflow', 'learning', '.decisions-usage.json');
-    const usage = JSON.stringify({ version: 1, entries: { 'ADR-001': { cites: 0, last_cited: null } } });
-    fs.writeFileSync(usagePath, usage);
-
-    runHook(path.join(HOOKS_DIR, 'capture-turn'), { cwd: nonGit, session_id: 't', last_assistant_message: 'applies ADR-001' }, homeDir);
-
-    expect(fs.readFileSync(usagePath, 'utf-8')).toBe(usage);
-  });
-
   it('non-vacuity: the same hooks in a git project below HOME do scaffold', () => {
     const project = path.join(base, 'project');
     initCommittedRepo(project);

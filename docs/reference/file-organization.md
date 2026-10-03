@@ -101,7 +101,6 @@ devflow/
 │               ├── log-paths             # Shared helper: per-project log path resolution
 │               ├── ensure-devflow-init   # Shared helper: lazy .devflow/ directory creation
 │               ├── ensure-root-gitignore # Maintains the root .gitignore devflow carve-out block
-│               ├── decisions-usage-scan.cjs # Decisions usage scanning
 │               ├── json-helper.cjs       # Node.js jq-equivalent operations
 │               ├── json-parse            # Shell wrapper: jq with node fallback
 │               ├── assets/               # Static prose assets shipped with hooks
@@ -219,7 +218,7 @@ A capture/spawn split across always-on shell-script hooks. Queue-append (`captur
 | Hook / Worker | Event | Purpose |
 |---------------|-------|---------|
 | `capture-prompt` | UserPromptSubmit | Appends the user turn to `.devflow/memory/.pending-turns.jsonl` and `.devflow/learning/.pending-turns.jsonl` (each gated independently); emits no directive |
-| `capture-turn` | Stop | Appends the assistant turn to both queues; runs the decisions usage scanner; never spawns anything |
+| `capture-turn` | Stop | Appends the assistant turn to both queues; never spawns anything |
 | `capture-question` | PostToolUse (matcher: `AskUserQuestion`) | Appends each answered question as a `{role:"qa"}` row to both queues |
 | `memory-worker` | Stop (runs in parallel with `capture-turn`; the worker leaves a queue holding only user rows for its next run) | After the 120s throttle (keyed by `.working-memory-last-trigger` mtime), spawns `background-memory-update` as a detached `nohup` worker (`claude -p --model claude-sonnet-4-6`) |
 | `background-memory-update` | Detached worker (spawned by `memory-worker`) | Drains `.pending-turns.jsonl` → calls `claude -p --model claude-sonnet-4-6` (prompt on stdin, reconciliation-aware: bounded git evidence since last stamp, DONE definition) → model writes to `WORKING-MEMORY.md.new` only. CAS verify-and-swap: if `WORKING-MEMORY.md` is byte-identical to the pre-run snapshot, renames `.new` → `WORKING-MEMORY.md` (UPDATED), removes `.processing`, touches `.last-refresh-ok`. CONFLICT (human edited file during run): keeps human's version, discards `.new`, leaves `.processing` for retry. FAIL (staged file absent or un-stamped): leaves `.processing` for crash recovery at next SessionStart. |

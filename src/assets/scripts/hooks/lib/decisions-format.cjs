@@ -72,7 +72,6 @@
 // Consumers of these strings:
 //   - session-start-context (Section 1): injects the TL;DR comment's text via sed
 //   - devflow:apply-decisions: reads ## ADR-NNN: / ## PF-NNN: headings
-//   - decisions-usage-scan: scans /(ADR|PF)-\d{3}/ anchors
 //   - buildIndexContent (below): parses ## heading, - **Status**:, - **Area**: lines from rendered v1 blocks
 
 'use strict';
