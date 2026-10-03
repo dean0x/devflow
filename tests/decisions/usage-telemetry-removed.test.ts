@@ -86,6 +86,19 @@ describe('no hook or op counts citations', { timeout: 30_000 }, () => {
     expect(fs.existsSync(usageFilePath(project))).toBe(false);
   });
 
+  it('rotate-observations deletes the usage file and usage lock an older install left', () => {
+    seedLearningTree(project);
+    const usageLock = path.join(project, '.devflow', 'learning', '.decisions-usage.lock');
+    fs.writeFileSync(usageFilePath(project), USAGE_FILE_BYTES);
+    fs.mkdirSync(usageLock);
+
+    const run = runJsonHelper(project, ['rotate-observations']);
+
+    expect(run).toEqual({ code: 0, stdout: 'rotated 0 observations\n', stderr: '' });
+    expect(fs.existsSync(usageFilePath(project))).toBe(false);
+    expect(fs.existsSync(usageLock)).toBe(false);
+  });
+
   it('json-helper exports no usage helper', () => {
     const helper = requireCjs(JSON_HELPER) as Record<string, unknown>;
     expect(Object.keys(helper).filter(name => /usage/i.test(name))).toEqual([]);

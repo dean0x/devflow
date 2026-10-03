@@ -33,7 +33,7 @@
 //                                          any pre-mint collision hits; mutates nothing (E4)
 //   retire-anchor <anchor_id> <status>    Flip ledger row status, re-render both .md files
 //   refresh-anchor <anchor_id>            Re-project log obs onto ledger row, re-render
-//   rotate-observations                   Archive observing rows older than 30 days
+//   rotate-observations                   Archive unreferenced observations idle 30+ days
 
 'use strict';
 
@@ -264,83 +264,6 @@ function scanForAnchorCollision(projectRoot, id) {
  */
 function formatCollisionHits(hits) {
   return hits.map(h => `  ${h.file}:${h.line}`).join('\n');
-}
-
-/**
- * Internal rotation logic for rotate-observations. Separated for testability.
- * Moves rows where status === 'observing' AND no anchor_id AND age > 30 days
- * from logPath to archivePath (append). Returns count of rotated rows.
- *
- * @param {string} logPath - Path to decisions-log.jsonl
- * @param {string} archivePath - Path to decisions-log.archive.jsonl
- * @param {number} nowMs - Current time as epoch ms (injectable for tests)
- * @returns {number} count of rotated rows
- */
-function rotateObservations(logPath, archivePath, nowMs) {
-  const { store, render } = learning();
-  const THIRTY_DAYS_MS = 30 * 24 * 60 * 60 * 1000;
-  const cutoffMs = nowMs - THIRTY_DAYS_MS;
-
-  let logEntries = [];
-  if (fs.existsSync(logPath)) {
-    logEntries = render.parseLedger(logPath);
-  }
-
-  const kept = [];
-  const stale = [];
-
-  for (const row of logEntries) {
-    // Only move 'observing' rows without anchor_id (unanchored)
-    if (row.status !== 'observing' || row.anchor_id) {
-      kept.push(row);
-      continue;
-    }
-    // Check age using last_seen if present, else first_seen
-    const tsField = row.last_seen || row.first_seen;
-    if (!tsField) {
-      kept.push(row);
-      continue;
-    }
-    const rowMs = new Date(tsField).getTime();
-    if (isNaN(rowMs) || rowMs > cutoffMs) {
-      kept.push(row);
-    } else {
-      stale.push(row);
-    }
-  }
-
-  if (stale.length === 0) return 0;
-
-  // D003: Dedup stale rows against the existing archive by id before appending.
-  // An interrupt-then-retry (process killed after archive write but before log
-  // rewrite) would re-classify the same rows as stale and attempt to archive
-  // them a second time. Reading existing archive IDs into a Set and filtering
-  // prevents duplicate rows in the archive. Cost is O(archive) on retry; O(1)
-  // on the normal path when the archive is absent.
-  //
-  // True append (appendFileSync) is used instead of read-entire-archive+rewrite
-  // so cost is O(stale) rather than O(archive) on the write path. The archive
-  // is gitignored/recovery-only, so an incomplete final newline on ENOENT is
-  // safe — parseLedger handles trailing-newline variance.
-  const existingArchiveIds = new Set();
-  if (fs.existsSync(archivePath)) {
-    const existingRows = render.parseLedger(archivePath);
-    for (const r of existingRows) {
-      if (r.id) existingArchiveIds.add(r.id);
-    }
-  }
-
-  const newStale = stale.filter(r => !existingArchiveIds.has(r.id));
-  if (newStale.length > 0) {
-    // True append — O(newStale), not O(archive)
-    const appendContent = newStale.map(r => JSON.stringify(r)).join('\n') + '\n';
-    fs.appendFileSync(archivePath, appendContent, 'utf8');
-  }
-
-  // Write remaining rows back to log
-  store.writeJsonlAtomic(logPath, kept);
-
-  return stale.length;
 }
 
 function parseArgs(argList) {
@@ -966,26 +889,19 @@ try {
 
     // -------------------------------------------------------------------------
     // rotate-observations
-    // AC-F9, AC-P3: Move stale observing rows (>30 days old) to archive.
-    // NEVER moves anchored or created/ready rows — only stale 'observing' rows.
-    // Takes no argument: the log and the archive are the project root's.
+    // Archive the log rows no ledger row carries once 30 days have passed since
+    // their last activity, and delete the usage telemetry's leftovers
+    // (D-ROTATE-UNREFERENCED, learning-store.cjs). Takes no argument: the log and
+    // the archive are the project root's.
+    // stdout: rotated <N> observations
     // -------------------------------------------------------------------------
     case 'rotate-observations': {
       if (args.length > 0) {
         process.stderr.write('rotate-observations: usage: rotate-observations (no arguments; run from the project root)\n');
         process.exit(1);
       }
-      const { store, paths } = learning();
-      const roProjectRoot = process.cwd();
-      const roResult = store.withDecisionsLock('rotate-observations', roProjectRoot, () => ({
-        ok: true,
-        value: rotateObservations(
-          paths.getDecisionsLogPath(roProjectRoot),
-          paths.getDecisionsArchivePath(roProjectRoot),
-          Date.now(),
-        ),
-      }));
-      process.exitCode = emit(roResult, rotated => `rotated ${rotated} observing rows`);
+      const roResult = learning().store.rotateObservations(process.cwd());
+      process.exitCode = emit(roResult, ({ rotated }) => `rotated ${rotated} observations`);
       break;
     }
 
@@ -1003,7 +919,6 @@ try {
 if (typeof module !== 'undefined' && module.exports) {
   module.exports = {
     nextAnchorFromLedger,
-    rotateObservations,
     scanForAnchorCollision,
     isCollisionScanExcluded,
   };

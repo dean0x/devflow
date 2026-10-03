@@ -949,6 +949,93 @@ function ensurePreV2Backup(root, { logRows = [], ledgerRows = [] } = {}) {
 }
 
 // ---------------------------------------------------------------------------
+// Rotation
+// ---------------------------------------------------------------------------
+
+/** Days of inactivity after which an observation no ledger row carries leaves the log (D-ROTATE-UNREFERENCED). */
+const ROTATE_AGE_DAYS = 30;
+
+/** What an older install's usage telemetry left in the learning directory: a file and a lock directory. */
+const USAGE_LEFTOVERS = Object.freeze(['.decisions-usage.json', '.decisions-usage.lock']);
+
+/**
+ * Epoch ms of a row's last activity — its `last_seen`, else `first_seen`, else
+ * `created` — or null when that value is absent or does not parse.
+ *
+ * @param {object} row
+ * @returns {number|null}
+ */
+function lastActivityMs(row) {
+  const value = row.last_seen || row.first_seen || row.created;
+  const at = typeof value === 'string' ? Date.parse(value) : NaN;
+  return Number.isFinite(at) ? at : null;
+}
+
+/**
+ * Move the observations no ledger row carries out of the log once they have been
+ * inactive for ROTATE_AGE_DAYS, and delete what the retired usage telemetry left.
+ *
+ * D-ROTATE-UNREFERENCED: rotation archives every log row that no ledger row
+ * carries once its last activity — last_seen, else first_seen, else created — is
+ * at least ROTATE_AGE_DAYS old, whatever its status; a row any ledger row carries
+ * stays, however old and whatever that ledger row's status. An archived row is
+ * appended to the archive unless a byte-identical copy (in its JSON form) is
+ * already there, and the log is rewritten without it. Reason: only the ledger
+ * records what is promoted (D-LEDGER-REGISTRY), so neither a log status nor an
+ * anchor_id copied onto a log row can say what to keep, and a dedup by id dropped
+ * the newer version of a row whose older version was already archived.
+ *
+ * Under the learning lock it first deletes the usage leftovers. When no row is
+ * due it writes nothing else. When rows are due it backs up a v1 tree
+ * (D-V1-BACKUP-ONCE) and quarantines the log's malformed lines
+ * (D-QUARANTINE-MALFORMED) before it appends to the archive and rewrites the log;
+ * an interrupted run is retried safely, because the identical copy it appended is
+ * skipped.
+ *
+ * @param {string} root - project root
+ * @param {{ now?: number, timeoutMs?: number }} [opts] - now: epoch ms (default Date.now())
+ * @returns {{ ok: true, value: { rotated: number, appended: number } } | { ok: false, error: { kind: string, message: string } }}
+ *   rotated: rows removed from the log; appended: rows added to the archive.
+ *   Errors are withDecisionsLock's no-learning-dir and busy.
+ */
+function rotateObservations(root, { now = Date.now(), timeoutMs } = {}) {
+  return withDecisionsLock('rotate-observations', root, () => {
+    for (const name of USAGE_LEFTOVERS) {
+      fs.rmSync(path.join(getLearningDir(root), name), { recursive: true, force: true });
+    }
+
+    const logPath = getDecisionsLogPath(root);
+    const log = readJsonl(logPath);
+    const ledgerRows = readJsonl(getDecisionsLedgerPath(root)).rows;
+    const carried = ledgerRegistry(ledgerRows).byObsId;
+    const cutoff = now - ROTATE_AGE_DAYS * DAY_MS;
+    const isDue = row => {
+      if (isNonEmptyString(row.id) && carried.has(row.id)) return false;
+      const at = lastActivityMs(row);
+      return at !== null && at <= cutoff;
+    };
+    const due = log.rows.filter(isDue);
+    if (due.length === 0) return { ok: true, value: { rotated: 0, appended: 0 } };
+
+    ensurePreV2Backup(root, { logRows: log.rows, ledgerRows });
+    quarantineRejected(logPath, log.rejected, { now });
+
+    const archivePath = getDecisionsArchivePath(root);
+    const archived = new Set(readJsonl(archivePath).rows.map(row => JSON.stringify(row)));
+    const appended = [];
+    for (const row of due) {
+      const line = JSON.stringify(row);
+      if (archived.has(line)) continue;
+      archived.add(line);
+      appended.push(line);
+    }
+    if (appended.length > 0) appendNoFollow(archivePath, appended.join('\n') + '\n');
+    writeJsonlAtomic(logPath, log.rows.filter(row => !isDue(row)));
+    return { ok: true, value: { rotated: due.length, appended: appended.length } };
+  }, { timeoutMs });
+}
+
+// ---------------------------------------------------------------------------
 // Integrity, listing, due selection and show — all read-only
 // ---------------------------------------------------------------------------
 
@@ -1294,6 +1381,8 @@ module.exports = {
   appendHistory,
   historyVersions,
   ensurePreV2Backup,
+  // Rotation
+  rotateObservations,
   // Integrity, listing, due selection and show
   integrityFlags,
   buildListing,

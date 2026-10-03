@@ -7,7 +7,8 @@
 // AC-F5: Retire removes an entry's body from .md but keeps it (anchor + Retired) in the committed
 //         ledger; number never reused.
 // AC-F6: A retired entry is recoverable: re-activating status + render restores it identically.
-// AC-F9: Observing rows >30d are archived (rotation); anchored rows never archived.
+// AC-F9: Rotation archives an observation no ledger entry carries once 30 days pass
+//         since its last activity; one an entry carries is never archived.
 //         (Curation SKILL wiring: contract that rotation step is present.)
 // Curation SKILL: Iron Law, retire-anchor usage, rotation step, no direct .md edit, ADR-XOR-PF.
 // observation-io: updateDecisionsStatus is removed; module still exports the correct surface.
@@ -37,13 +38,7 @@ const {
   renderAndWriteAll: (worktreePath: string, rows: Record<string, unknown>[]) => void;
 };
 
-const {
-  rotateObservations,
-} = require(JSON_HELPER_BIN) as {
-  rotateObservations: (logPath: string, archivePath: string, nowMs: number) => number;
-};
-
-const { writeJsonlAtomic } = requireLearningStore();
+const store = requireLearningStore();
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -471,37 +466,26 @@ describe('AC-F9: rotation step wired into curation (contract check)', () => {
     expect(agentContent).toContain('archive');
   });
 
-  it('rotateObservations internal function: anchored rows never archived (AC-F9 contract)', () => {
+  it('rotation archives a stale observation no ledger entry carries and keeps one an entry carries (AC-F9 contract)', () => {
     // Verify the op itself still enforces the contract (belt-and-suspenders check)
     const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'rotation-contract-test-'));
-    const decisionsDir = path.join(tmpDir, 'decisions');
-    fs.mkdirSync(decisionsDir, { recursive: true });
+    try {
+      const staleDate = new Date(Date.now() - 31 * 24 * 60 * 60 * 1000).toISOString();
+      writeLedger(tmpDir, [makeLedgerRow({ id: 'obs_stale_anchored', anchor_id: 'ADR-001' })]);
+      const logPath = path.join(tmpDir, '.devflow', 'learning', 'decisions-log.jsonl');
+      store.writeJsonlAtomic(logPath, [
+        makeObsRow({ id: 'obs_stale_unanchored', status: 'observing', last_seen: staleDate }),
+        makeObsRow({ id: 'obs_stale_anchored', status: 'observing', last_seen: staleDate }),
+      ]);
 
-    const THIRTY_ONE_DAYS_MS = 31 * 24 * 60 * 60 * 1000;
-    const NOW = Date.now();
-    const staleDate = new Date(NOW - THIRTY_ONE_DAYS_MS).toISOString();
+      expect(store.rotateObservations(tmpDir)).toEqual({ ok: true, value: { rotated: 1, appended: 1 } });
 
-    const logPath = path.join(decisionsDir, 'decisions-log.jsonl');
-    const archivePath = path.join(decisionsDir, 'decisions-log.archive.jsonl');
-
-    // Stale observing without anchor — should be rotated
-    // Stale observing with anchor_id — must NOT be rotated
-    writeJsonlAtomic(logPath, [
-      makeObsRow({ id: 'obs_stale_unanchored', status: 'observing', last_seen: staleDate }),
-      makeObsRow({ id: 'obs_stale_anchored', status: 'observing', last_seen: staleDate, anchor_id: 'ADR-001' }),
-    ]);
-
-    const rotated = rotateObservations(logPath, archivePath, NOW);
-    expect(rotated).toBe(1); // only the unanchored one
-
-    const archive = parseLedger(archivePath);
-    expect(archive.map(r => r.id)).toContain('obs_stale_unanchored');
-    expect(archive.map(r => r.id)).not.toContain('obs_stale_anchored');
-
-    const remaining = parseLedger(logPath);
-    expect(remaining.map(r => r.id)).toContain('obs_stale_anchored');
-
-    fs.rmSync(tmpDir, { recursive: true, force: true });
+      const archive = parseLedger(path.join(tmpDir, '.devflow', 'learning', 'decisions-log.archive.jsonl'));
+      expect(archive.map(r => r.id)).toEqual(['obs_stale_unanchored']);
+      expect(parseLedger(logPath).map(r => r.id)).toEqual(['obs_stale_anchored']);
+    } finally {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
   });
 });
 

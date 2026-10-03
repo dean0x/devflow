@@ -7,9 +7,9 @@
 // AC-A3: retire-anchor flips decisions_status, row otherwise intact, idempotent
 // AC-F5: retired entries vanish from .md but stay in ledger
 // AC-F7: retired numbers leave gaps, never reused
-// AC-F9: observing rows >30d never promoted are archived; anchored rows never archived
+// AC-F9: a log row no ledger row carries is archived once 30 days pass since its
+//        last activity; a row any ledger row carries never is (D-ROTATE-UNREFERENCED)
 // AC-P2: assign-anchor is O(anchored) — single pass (structural check)
-// AC-P3: rotate-observations bounded (structural/ratio check)
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { createRequire } from 'module';
@@ -18,7 +18,20 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
 
-import { requireLearningStore, runJsonHelper, snapshotTree } from './learning-fixtures.js';
+import {
+  FIXTURE_NOW,
+  daysAgoIso,
+  learningPaths,
+  makeV1LedgerRow,
+  makeV1LogRow,
+  makeV2LedgerRow,
+  makeV2LogRow,
+  requireLearningStore,
+  runJsonHelper,
+  seedLearningTree,
+  snapshotTree,
+  type Row,
+} from './learning-fixtures.js';
 
 const ROOT = path.resolve(import.meta.dirname, '../..');
 const require = createRequire(import.meta.url);
@@ -31,7 +44,6 @@ const jsonHelper = require(
   path.join(ROOT, 'src/assets/scripts/hooks/json-helper.cjs')
 ) as {
   nextAnchorFromLedger: (rows: Record<string, unknown>[], type: 'decision' | 'pitfall') => { anchorId: string; nextN: string };
-  rotateObservations: (logPath: string, archivePath: string, nowMs: number) => number;
 };
 
 const store = requireLearningStore();
@@ -482,191 +494,148 @@ describe('AC-F7: number stability — retired number is never reused', () => {
 });
 
 // ---------------------------------------------------------------------------
-// rotateObservations — unit tests
+// rotateObservations (D-ROTATE-UNREFERENCED) — the store function behind
+// rotate-observations
 // ---------------------------------------------------------------------------
 
-describe('rotateObservations — internal function', () => {
+describe('rotateObservations (D-ROTATE-UNREFERENCED)', () => {
+  const DAY_MS = 24 * 60 * 60 * 1000;
   let tmpDir: string;
+  let paths: ReturnType<typeof learningPaths>;
 
   beforeEach(() => {
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'rotate-obs-test-'));
-    fs.mkdirSync(path.join(tmpDir, 'decisions'), { recursive: true });
+    paths = learningPaths(tmpDir);
   });
 
   afterEach(() => {
     fs.rmSync(tmpDir, { recursive: true, force: true });
   });
 
-  const THIRTY_ONE_DAYS_MS = 31 * 24 * 60 * 60 * 1000;
-  const NOW = new Date('2026-06-10T12:00:00Z').getTime();
-
-  function makeObsLog(dir: string, rows: Record<string, unknown>[]): string {
-    const logPath = path.join(dir, 'decisions', 'decisions-log.jsonl');
-    store.writeJsonlAtomic(logPath, rows);
-    return logPath;
+  /** Seed the learning tree, rotate at FIXTURE_NOW and return the counts. */
+  function rotate(seed: { log?: Row[]; ledger?: Row[]; archive?: Row[] }): { rotated: number; appended: number } {
+    seedLearningTree(tmpDir, seed);
+    const result = store.rotateObservations(tmpDir, { now: FIXTURE_NOW });
+    if (!result.ok) throw new Error(result.error.message);
+    return result.value;
   }
 
-  function makeObsArchive(dir: string): string {
-    return path.join(dir, 'decisions', 'decisions-log.archive.jsonl');
-  }
+  const rowsOf = (file: string): Row[] => store.readJsonl(file).rows;
+  const idsOf = (file: string): unknown[] => rowsOf(file).map(row => row.id);
 
-  it('moves observing rows older than 30 days to archive', () => {
-    const staleDate = new Date(NOW - THIRTY_ONE_DAYS_MS).toISOString();
-    const logPath = makeObsLog(tmpDir, [
-      makeObsRow({ id: 'obs_stale', status: 'observing', last_seen: staleDate }),
-    ]);
-    const archivePath = makeObsArchive(tmpDir);
+  it('archives every unreferenced row whose last activity is 30 days old or more, whatever its status', () => {
+    const old = daysAgoIso(31);
+    const log = [
+      makeV1LogRow({ id: 'obs_old_observing', status: 'observing', last_seen: old }),
+      makeV1LogRow({ id: 'obs_old_created', status: 'created', last_seen: old }),
+      makeV1LogRow({ id: 'obs_old_ready', status: 'ready', last_seen: old }),
+      makeV2LogRow({ id: 'obs_old_v2', last_seen: old }),
+    ];
 
-    const rotated = jsonHelper.rotateObservations(logPath, archivePath, NOW);
-    expect(rotated).toBe(1);
-
-    const archive = parseLedger(archivePath);
-    expect(archive).toHaveLength(1);
-    expect(archive[0].id).toBe('obs_stale');
-
-    const remaining = parseLedger(logPath);
-    expect(remaining).toHaveLength(0);
+    expect(rotate({ log })).toEqual({ rotated: 4, appended: 4 });
+    expect(rowsOf(paths.archive)).toEqual(log);
+    expect(rowsOf(paths.log)).toEqual([]);
   });
 
-  it('keeps observing rows younger than 30 days', () => {
-    const recentDate = new Date(NOW - (15 * 24 * 60 * 60 * 1000)).toISOString();
-    const logPath = makeObsLog(tmpDir, [
-      makeObsRow({ id: 'obs_recent', status: 'observing', last_seen: recentDate }),
-    ]);
-    const archivePath = makeObsArchive(tmpDir);
+  it('keeps a row any ledger row carries, however old and whatever that row\'s status; a copied anchor_id protects nothing', () => {
+    const old = daysAgoIso(400);
+    const log = [
+      makeV1LogRow({ id: 'obs_ref_active', last_seen: old }),
+      makeV1LogRow({ id: 'obs_ref_retired', last_seen: old }),
+      makeV2LogRow({ id: 'obs_ref_v2', last_seen: old }),
+      makeV1LogRow({ id: 'obs_log_claims_anchor', last_seen: old, status: 'created', anchor_id: 'PF-009' }),
+    ];
+    const ledger = [
+      makeV1LedgerRow({ id: 'obs_ref_active', anchor_id: 'PF-001' }),
+      makeV1LedgerRow({ id: 'obs_ref_retired', anchor_id: 'PF-002', decisions_status: 'Retired' }),
+      makeV2LedgerRow({ id: 'obs_ref_v2', anchor_id: 'ADR-001' }),
+    ];
 
-    const rotated = jsonHelper.rotateObservations(logPath, archivePath, NOW);
-    expect(rotated).toBe(0);
-
-    const remaining = parseLedger(logPath);
-    expect(remaining).toHaveLength(1);
-    expect(remaining[0].id).toBe('obs_recent');
+    expect(rotate({ log, ledger })).toEqual({ rotated: 1, appended: 1 });
+    expect(idsOf(paths.log)).toEqual(['obs_ref_active', 'obs_ref_retired', 'obs_ref_v2']);
+    expect(idsOf(paths.archive)).toEqual(['obs_log_claims_anchor']);
   });
 
-  it('never archives anchored rows regardless of age (AC-F9)', () => {
-    const staleDate = new Date(NOW - THIRTY_ONE_DAYS_MS).toISOString();
-    const logPath = makeObsLog(tmpDir, [
-      makeObsRow({ id: 'obs_anchored', status: 'observing', last_seen: staleDate, anchor_id: 'ADR-001' }),
-    ]);
-    const archivePath = makeObsArchive(tmpDir);
+  it('dates a row by last_seen, else first_seen, else created, and keeps a row with no usable date', () => {
+    const log = [
+      makeV1LogRow({ id: 'obs_seen_lately', first_seen: daysAgoIso(90), last_seen: daysAgoIso(5) }),
+      makeV1LogRow({ id: 'obs_first_seen_old', first_seen: daysAgoIso(31), last_seen: undefined }),
+      makeV1LogRow({ id: 'obs_created_old', first_seen: undefined, last_seen: undefined, created: daysAgoIso(40) }),
+      makeV1LogRow({ id: 'obs_undated', first_seen: undefined, last_seen: undefined }),
+      makeV1LogRow({ id: 'obs_unparseable', last_seen: 'not a date', first_seen: daysAgoIso(90) }),
+    ];
 
-    const rotated = jsonHelper.rotateObservations(logPath, archivePath, NOW);
-    expect(rotated).toBe(0);
-
-    const remaining = parseLedger(logPath);
-    expect(remaining).toHaveLength(1);
-    expect(remaining[0].id).toBe('obs_anchored');
+    expect(rotate({ log })).toEqual({ rotated: 2, appended: 2 });
+    expect(idsOf(paths.log)).toEqual(['obs_seen_lately', 'obs_undated', 'obs_unparseable']);
+    expect(idsOf(paths.archive)).toEqual(['obs_first_seen_old', 'obs_created_old']);
   });
 
-  it('never archives created rows regardless of age', () => {
-    const staleDate = new Date(NOW - THIRTY_ONE_DAYS_MS).toISOString();
-    const logPath = makeObsLog(tmpDir, [
-      makeObsRow({ id: 'obs_created', status: 'created', last_seen: staleDate }),
-    ]);
-    const archivePath = makeObsArchive(tmpDir);
+  it('archives a row exactly 30 days old and keeps one a minute younger', () => {
+    const log = [
+      makeV1LogRow({ id: 'obs_thirty_days', last_seen: new Date(FIXTURE_NOW - 30 * DAY_MS).toISOString() }),
+      makeV1LogRow({ id: 'obs_minute_younger', last_seen: new Date(FIXTURE_NOW - 30 * DAY_MS + 60_000).toISOString() }),
+    ];
 
-    const rotated = jsonHelper.rotateObservations(logPath, archivePath, NOW);
-    expect(rotated).toBe(0);
-
-    const remaining = parseLedger(logPath);
-    expect(remaining).toHaveLength(1);
+    expect(rotate({ log })).toEqual({ rotated: 1, appended: 1 });
+    expect(idsOf(paths.archive)).toEqual(['obs_thirty_days']);
+    expect(idsOf(paths.log)).toEqual(['obs_minute_younger']);
   });
 
-  it('never archives ready rows regardless of age', () => {
-    const staleDate = new Date(NOW - THIRTY_ONE_DAYS_MS).toISOString();
-    const logPath = makeObsLog(tmpDir, [
-      makeObsRow({ id: 'obs_ready', status: 'ready', last_seen: staleDate }),
-    ]);
-    const archivePath = makeObsArchive(tmpDir);
+  it('appends after the rows the archive already holds', () => {
+    const archived = makeV1LogRow({ id: 'obs_archived_before', last_seen: daysAgoIso(300) });
+    const due = makeV1LogRow({ id: 'obs_due_now', last_seen: daysAgoIso(60) });
 
-    const rotated = jsonHelper.rotateObservations(logPath, archivePath, NOW);
-    expect(rotated).toBe(0);
-
-    const remaining = parseLedger(logPath);
-    expect(remaining).toHaveLength(1);
+    expect(rotate({ log: [due], archive: [archived] })).toEqual({ rotated: 1, appended: 1 });
+    expect(rowsOf(paths.archive)).toEqual([archived, due]);
   });
 
-  it('no-op when nothing qualifies (idempotent)', () => {
-    const recentDate = new Date(NOW - (5 * 24 * 60 * 60 * 1000)).toISOString();
-    const logPath = makeObsLog(tmpDir, [
-      makeObsRow({ id: 'obs_r1', status: 'observing', last_seen: recentDate }),
-    ]);
-    const archivePath = makeObsArchive(tmpDir);
+  it('skips a byte-identical copy already archived, and appends a changed version of an archived id', () => {
+    // A run that appended and died before rewriting the log leaves the row in both
+    // files: the retry must not archive it twice. A row whose content changed since
+    // an older version was archived is new data, so both versions stay.
+    const retried = makeV1LogRow({ id: 'obs_retried', last_seen: daysAgoIso(45) });
+    const olderVersion = makeV1LogRow({ id: 'obs_rewritten', pattern: 'The first wording', last_seen: daysAgoIso(200) });
+    const newerVersion = makeV1LogRow({ id: 'obs_rewritten', pattern: 'The sharpened wording', last_seen: daysAgoIso(45) });
 
-    const rotated1 = jsonHelper.rotateObservations(logPath, archivePath, NOW);
-    const rotated2 = jsonHelper.rotateObservations(logPath, archivePath, NOW);
-    expect(rotated1).toBe(0);
-    expect(rotated2).toBe(0);
+    expect(rotate({ log: [retried, newerVersion], archive: [retried, olderVersion] })).toEqual({ rotated: 2, appended: 1 });
+    expect(rowsOf(paths.archive)).toEqual([retried, olderVersion, newerVersion]);
+    expect(rowsOf(paths.log)).toEqual([]);
   });
 
-  it('no-op when log file does not exist', () => {
-    const logPath = path.join(tmpDir, 'decisions', 'nonexistent.jsonl');
-    const archivePath = makeObsArchive(tmpDir);
-    const rotated = jsonHelper.rotateObservations(logPath, archivePath, NOW);
-    expect(rotated).toBe(0);
+  it('writes nothing when no row is due', () => {
+    seedLearningTree(tmpDir, {
+      ledger: [makeV1LedgerRow()],
+      log: [makeV1LogRow(), makeV1LogRow({ id: 'obs_fresh_one', last_seen: daysAgoIso(3) })],
+    });
+    fs.appendFileSync(paths.log, 'not json\n');
+    const before = snapshotTree(tmpDir);
+
+    expect(store.rotateObservations(tmpDir, { now: FIXTURE_NOW })).toEqual({ ok: true, value: { rotated: 0, appended: 0 } });
+    expect(snapshotTree(tmpDir)).toEqual(before);
   });
 
-  it('appends to existing archive (does not overwrite)', () => {
-    const staleDate = new Date(NOW - THIRTY_ONE_DAYS_MS).toISOString();
-    const logPath = makeObsLog(tmpDir, [
-      makeObsRow({ id: 'obs_stale2', status: 'observing', last_seen: staleDate }),
-    ]);
-    const archivePath = makeObsArchive(tmpDir);
+  it('backs up a v1 tree and quarantines the log\'s malformed lines before rewriting the log', () => {
+    const due = makeV1LogRow({ id: 'obs_due', last_seen: daysAgoIso(60) });
+    const fresh = makeV1LogRow({ id: 'obs_fresh', last_seen: daysAgoIso(2) });
+    const original = `${JSON.stringify(due)}\nnot json\n${JSON.stringify(fresh)}\n`;
+    fs.mkdirSync(paths.learningDir, { recursive: true });
+    fs.writeFileSync(paths.log, original);
 
-    // Pre-populate archive with existing row
-    store.writeJsonlAtomic(archivePath, [makeObsRow({ id: 'obs_pre_existing' })]);
-
-    jsonHelper.rotateObservations(logPath, archivePath, NOW);
-
-    const archive = parseLedger(archivePath);
-    expect(archive).toHaveLength(2);
-    expect(archive.map((r: Record<string, unknown>) => r.id)).toContain('obs_pre_existing');
-    expect(archive.map((r: Record<string, unknown>) => r.id)).toContain('obs_stale2');
+    expect(store.rotateObservations(tmpDir, { now: FIXTURE_NOW })).toEqual({ ok: true, value: { rotated: 1, appended: 1 } });
+    expect(fs.readFileSync(path.join(paths.learningDir, 'decisions-log.pre-v2.jsonl'), 'utf8')).toBe(original);
+    expect(rowsOf(store.rejectedPathFor(paths.log)).map(record => record.text)).toEqual(['not json']);
+    expect(fs.readFileSync(paths.log, 'utf8')).toBe(`${JSON.stringify(fresh)}\n`);
   });
 
-  it('uses last_seen when present, falls back to first_seen', () => {
-    const staleDate = new Date(NOW - THIRTY_ONE_DAYS_MS).toISOString();
-    const recentDate = new Date(NOW - (5 * 24 * 60 * 60 * 1000)).toISOString();
-
-    const logPath = makeObsLog(tmpDir, [
-      // last_seen recent, first_seen stale — should NOT be rotated
-      makeObsRow({ id: 'obs_recent_last', status: 'observing', first_seen: staleDate, last_seen: recentDate }),
-      // No last_seen, first_seen stale — SHOULD be rotated
-      makeObsRow({ id: 'obs_stale_first', status: 'observing', first_seen: staleDate, last_seen: undefined }),
-    ]);
-    const archivePath = makeObsArchive(tmpDir);
-
-    const rotated = jsonHelper.rotateObservations(logPath, archivePath, NOW);
-    expect(rotated).toBe(1);
-
-    const remaining = parseLedger(logPath);
-    expect(remaining.map(r => r.id)).toContain('obs_recent_last');
-    expect(remaining.map(r => r.id)).not.toContain('obs_stale_first');
-  });
-
-  it('mixed batch: some stale, some not, some anchored — correct split', () => {
-    const staleDate = new Date(NOW - THIRTY_ONE_DAYS_MS).toISOString();
-    const recentDate = new Date(NOW - (5 * 24 * 60 * 60 * 1000)).toISOString();
-
-    const logPath = makeObsLog(tmpDir, [
-      makeObsRow({ id: 'obs_stale_a', status: 'observing', last_seen: staleDate }),
-      makeObsRow({ id: 'obs_recent_b', status: 'observing', last_seen: recentDate }),
-      makeObsRow({ id: 'obs_created_c', status: 'created', last_seen: staleDate }),
-      makeObsRow({ id: 'obs_anchored_d', status: 'observing', last_seen: staleDate, anchor_id: 'ADR-001' }),
-    ]);
-    const archivePath = makeObsArchive(tmpDir);
-
-    const rotated = jsonHelper.rotateObservations(logPath, archivePath, NOW);
-    expect(rotated).toBe(1);
-
-    const archive = parseLedger(archivePath);
-    expect(archive.map(r => r.id)).toContain('obs_stale_a');
-    expect(archive.map(r => r.id)).not.toContain('obs_recent_b');
-    expect(archive.map(r => r.id)).not.toContain('obs_created_c');
-    expect(archive.map(r => r.id)).not.toContain('obs_anchored_d');
-
-    const remaining = parseLedger(logPath);
-    expect(remaining).toHaveLength(3);
+  it('refuses without a learning directory and creates nothing', () => {
+    expect(store.rotateObservations(tmpDir, { now: FIXTURE_NOW })).toEqual({
+      ok: false,
+      error: {
+        kind: 'no-learning-dir',
+        message: `rotate-observations: no .devflow/learning/ under ${tmpDir} — run from the project root`,
+      },
+    });
+    expect(fs.readdirSync(tmpDir)).toEqual([]);
   });
 });
 
@@ -1493,18 +1462,28 @@ describe('rotate-observations CLI op', () => {
   beforeEach(() => {
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'rotate-cli-test-'));
     fs.mkdirSync(path.join(tmpDir, '.devflow', 'learning'), { recursive: true });
-    fs.mkdirSync(path.join(tmpDir, '.devflow', 'dream'), { recursive: true });
   });
 
   afterEach(() => {
     fs.rmSync(tmpDir, { recursive: true, force: true });
   });
 
-  it('exits 0 and prints "rotated N observing rows" summary', () => {
-    // Empty log — 0 rows to rotate
-    const result = runHelper('rotate-observations', tmpDir);
-    expect(result.code).toBe(0);
-    expect(result.stdout).toMatch(/rotated \d+ observing rows/);
+  it('prints "rotated N observations" and exits 0', () => {
+    seedLearningTree(tmpDir, {
+      log: [
+        makeV1LogRow({ id: 'obs_cli_due', last_seen: '2026-01-01T00:00:00.000Z' }),
+        makeV1LogRow({ id: 'obs_cli_fresh', last_seen: new Date().toISOString() }),
+      ],
+    });
+
+    const result = runJsonHelper(tmpDir, ['rotate-observations']);
+
+    expect(result).toEqual({ code: 0, stdout: 'rotated 1 observations\n', stderr: '' });
+    expect(store.readJsonl(learningPaths(tmpDir).archive).rows.map(row => row.id)).toEqual(['obs_cli_due']);
+  });
+
+  it('prints "rotated 0 observations" for an empty learning tree', () => {
+    expect(runJsonHelper(tmpDir, ['rotate-observations'])).toEqual({ code: 0, stdout: 'rotated 0 observations\n', stderr: '' });
   });
 
   it('refuses a path argument and writes nothing: the log and archive are the project root\'s', () => {
@@ -1887,74 +1866,6 @@ describe('toLedgerRow projector — canonical committed shape', () => {
     } finally {
       fs.rmSync(tmpE2e, { recursive: true, force: true });
     }
-  });
-});
-
-// ---------------------------------------------------------------------------
-// rotateObservations dedup — interrupt-then-retry safety (Issue 4)
-// ---------------------------------------------------------------------------
-
-describe('rotateObservations — archive dedup by id (interrupt-retry safety)', () => {
-  let tmpDir: string;
-
-  beforeEach(() => {
-    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'rotate-dedup-test-'));
-    fs.mkdirSync(path.join(tmpDir, 'decisions'), { recursive: true });
-  });
-
-  afterEach(() => {
-    fs.rmSync(tmpDir, { recursive: true, force: true });
-  });
-
-  const THIRTY_ONE_DAYS_MS = 31 * 24 * 60 * 60 * 1000;
-  const NOW = new Date('2026-06-10T12:00:00Z').getTime();
-
-  function makeObsLog2(dir: string, rows: Record<string, unknown>[]): string {
-    const logPath = path.join(dir, 'decisions', 'decisions-log.jsonl');
-    store.writeJsonlAtomic(logPath, rows);
-    return logPath;
-  }
-
-  function makeObsArchive2(dir: string): string {
-    return path.join(dir, 'decisions', 'decisions-log.archive.jsonl');
-  }
-
-  it('does not duplicate archive rows when the same stale row is rotated twice (retry simulation)', () => {
-    const staleDate = new Date(NOW - THIRTY_ONE_DAYS_MS).toISOString();
-
-    // Simulate an interrupted first run: the stale row was appended to the
-    // archive but the log was NOT yet rewritten (crash window between the two
-    // writes). On retry the row would appear stale again.
-    const archivePath = makeObsArchive2(tmpDir);
-    // Pre-seed archive with the row as if the first run partially succeeded
-    const staleRow = makeObsRow({ id: 'obs_interrupted', status: 'observing', last_seen: staleDate });
-    fs.appendFileSync(archivePath, JSON.stringify(staleRow) + '\n', 'utf8');
-
-    // Log still has the row (crash happened before log rewrite)
-    const logPath = makeObsLog2(tmpDir, [staleRow]);
-
-    const rotated = jsonHelper.rotateObservations(logPath, archivePath, NOW);
-    expect(rotated).toBe(1);
-
-    // Archive must contain exactly one copy of the row
-    const archive = parseLedger(archivePath);
-    const ids = archive.map((r: Record<string, unknown>) => r.id);
-    expect(ids.filter((id: unknown) => id === 'obs_interrupted')).toHaveLength(1);
-  });
-
-  it('normal rotation (no prior archive) still works correctly', () => {
-    const staleDate = new Date(NOW - THIRTY_ONE_DAYS_MS).toISOString();
-    const logPath = makeObsLog2(tmpDir, [
-      makeObsRow({ id: 'obs_fresh_dd', status: 'observing', last_seen: staleDate }),
-    ]);
-    const archivePath = makeObsArchive2(tmpDir);
-
-    const rotated = jsonHelper.rotateObservations(logPath, archivePath, NOW);
-    expect(rotated).toBe(1);
-
-    const archive = parseLedger(archivePath);
-    expect(archive).toHaveLength(1);
-    expect(archive[0].id).toBe('obs_fresh_dd');
   });
 });
 

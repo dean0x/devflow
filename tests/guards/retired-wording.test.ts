@@ -463,7 +463,8 @@ const RETIRED_LITERALS: ReadonlyArray<RetiredEntry> = [
       'and assign-anchor registered every new anchor there. Learning v2 maintains entries by their ' +
       'verification age at the default branch, not by citation counts, and committed text no ' +
       'longer cites ledger IDs, so the counts measured nothing. The scanner, its capture-turn call, ' +
-      'its project-paths helpers and the registration are gone.',
+      'its project-paths helpers and the registration are gone, and rotate-observations deletes the ' +
+      'usage file and lock an older install left behind.',
   },
 ];
 

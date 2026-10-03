@@ -401,6 +401,7 @@ export interface LearningStoreApi {
     opts?: { historyVersions?: (id: string) => Row[] },
   ): Result<ShownEntry>;
   resolveVerifyRef(root: string): { ref: 'origin/HEAD' | 'HEAD'; commit: string } | null;
+  rotateObservations(root: string, opts?: { now?: number; timeoutMs?: number }): Result<{ rotated: number; appended: number }>;
 }
 
 /** Load the learning store CommonJS module. */
