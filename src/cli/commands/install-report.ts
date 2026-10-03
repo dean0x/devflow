@@ -1,6 +1,6 @@
 /**
  * Rendering for the post-install summary — pure functions that turn an
- * {@link InstallReport} into lines, logging nothing (applies ADR-013).
+ * {@link InstallReport} into lines, logging nothing.
  *
  * Its own module rather than a section of init.ts because `devflow tracker --set`
  * renders the same overlay outcomes from a different command. A CLI command
@@ -26,18 +26,18 @@ export interface SummaryLine {
  * shadowed, and a unit it could not refresh is left in one of the states
  * {@link OverlayFailureState} enumerates — running on the previous install, half
  * replaced, absent, or recoverable only from a backup path. None of that is visible from
- * the filesystem at a glance, so all of it reaches the summary — PF-015: a report field
+ * the filesystem at a glance, so all of it reaches the summary — a report field
  * with no render site is not a report, and a render site that flattens four states into
  * one sentence is the same defect one layer up.
  *
- * Pure function — returns lines, logs nothing (applies ADR-013).
+ * Pure function — returns lines, logs nothing.
  *
  * @param skillName - Bare name of the skill hosting the generated references,
  *   rendered `devflow:`-prefixed. Defaults to the core constant the build path and
  *   the installer's overlay trigger both read, so the renderer is never a third
- *   independent statement of which skill owns them — the divergence PF-013
- *   describes, where changing the answer means finding every retyped spelling and
- *   nothing fails if one is missed.
+ *   independent statement of which skill owns them — a divergence where changing
+ *   the answer means finding every retyped spelling and nothing fails if one is
+ *   missed.
  */
 export function formatOverlaySummary(
   report: Pick<InstallReport, 'overlaidRefs' | 'overlayFailures'>,
@@ -76,7 +76,7 @@ export function formatOverlaySummary(
  * be told about.
  *
  * Exported because `devflow tracker --set` renders the same states when it aborts
- * on an overlay failure (applies PF-013 — one sentence per state, in one place,
+ * on an overlay failure (one sentence per state, in one place,
  * rather than a second wording that drifts).
  *
  * Exhaustive over {@link OverlayFailureState} — a new state added to the union without a
@@ -127,7 +127,7 @@ export function describeOverlayFailureState(state: OverlayFailureState): string 
  * The delta line is emitted only when something moved: on a steady-state re-init
  * the counts are noise.
  *
- * Pure function — returns lines, logs nothing (applies ADR-013).
+ * Pure function — returns lines, logs nothing.
  *
  * @param previous - The provider recorded by the PRIOR manifest, or undefined on
  *   a first install. Rendered only when it differs from `provider`.
@@ -180,7 +180,7 @@ export function formatTrackerAssetSummary(input: {
  *     how the selection was assembled, and a duplicate name in either list is a
  *     manifest detail rather than a different selection.
  *
- * Pure function (applies ADR-013).
+ * Pure function.
  *
  * @param previousPlugins - `manifest.plugins` as it stands before this run, or
  *   `null` when there is no prior manifest.
@@ -215,7 +215,7 @@ export function isPluginListUnchanged(
  * it is FALSE when there is no prior manifest: a first install removed nothing a
  * user had, so there is no upgrade to explain (design review L2).
  *
- * Pure function — returns lines, logs nothing (applies ADR-013).
+ * Pure function — returns lines, logs nothing.
  */
 export function formatSkillScopeSummary(
   report: Pick<InstallReport, 'removedSkills' | 'dormantShadows'>,

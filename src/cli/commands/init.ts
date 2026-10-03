@@ -148,7 +148,7 @@ export async function runMigrationsWithFallback(
  * or command still loading in Claude Code with no diagnostic at all. Both outcomes
  * have to reach the summary.
  *
- * Pure function — returns lines, logs nothing (applies ADR-013).
+ * Pure function — returns lines, logs nothing.
  */
 export function formatSweepSummary(
   report: Pick<InstallReport, 'sweptOrphans' | 'sweepFailures'>,
@@ -308,7 +308,7 @@ export function resolveTrackerInitState(
 /**
  * The outcome line for a provider that arrived as `--tracker <id>`.
  *
- * D-TRACKER-CLI-SURFACE [PF-029]: the Advanced path prints no end-of-wizard
+ * D-TRACKER-CLI-SURFACE: the Advanced path prints no end-of-wizard
  * summary, and `--tracker` suppresses the wizard step that would otherwise
  * print one, so the CLI-override arm is the only place the selection can
  * surface there. Without this line `devflow init --advanced --tracker jira`
@@ -385,7 +385,7 @@ export interface ManifestTrackerOutcome {
  *
  * D-TRACKER-CONVERGE: the manifest write and the tracker file-lifecycle owners
  * are ONE unit because their relative order is the invariant, not an
- * implementation detail (PF-015). The manifest write is explicitly failable —
+ * implementation detail. The manifest write is explicitly failable —
  * init must not abort on it — so converging the sentinel ahead of it leaves the
  * two disagreeing in both directions: github→jira writes a sentinel naming a
  * provider the manifest never records, and jira→github removes the sentinel while
@@ -398,7 +398,7 @@ export interface ManifestTrackerOutcome {
  * taken as a separate argument, so there is exactly one binding and the sentinel
  * cannot name a value other than the one on disk.
  *
- * Every step reports rather than aborts (PF-009's isolation posture): a
+ * Every step reports rather than aborts: a
  * feature-state change must never fail `devflow init`.
  */
 export async function persistManifestThenConvergeTracker(opts: {
@@ -438,7 +438,7 @@ export async function persistManifestThenConvergeTracker(opts: {
 
   // D-TRACKER-PARALLEL: the two owners touch disjoint files — the attempt
   // counters and the sentinel — depend on nothing the other writes, and both
-  // report through TrackerResult instead of throwing (PF-014), so they run
+  // report through TrackerResult instead of throwing, so they run
   // concurrently and their warnings are pushed in a fixed order regardless of
   // which settles first.
   const [rearm, sentinel] = await Promise.all([
@@ -547,7 +547,7 @@ export async function drainDisabledFeatureQueues(
  * earlier shape rewrote the whole record as a HUD-only fresh install (ambient,
  * memory, learning, knowledge, rules and proxy all `false`, plugins `[]`) while
  * leaving those features' artifacts on disk: the record stopped describing the
- * machine, the next re-init seeded every feature off (ADR-014), and with
+ * machine, the next re-init seeded every feature off, and with
  * memory/learning/knowledge switched by the manifest alone
  * (D-FEATURES-NARROW-ONLY) a HUD install would have really disabled them
  * everywhere. `version` is kept too: --hud-only reinstalls no plugin, and a
@@ -988,7 +988,7 @@ export const initCommand = new Command('init')
     // modePromptShown: true only when the Setup-mode p.select actually ran (i.e. the user
     // was shown a live interactive prompt and made an active choice). Used by
     // shouldRunComplianceStep to preserve the promptless contracts of --recommended and !isTTY
-    // without re-checking the mode name (per PF-029).
+    // without re-checking the mode name.
     let modePromptShown = false;
     let useRecommended: boolean;
     if (options.recommended) {
@@ -1109,7 +1109,7 @@ export const initCommand = new Command('init')
 
       // B4: compliance wizard step — runs only when the Setup-mode prompt actually ran
       // (modePromptShown=true), preserving the promptless contracts of --recommended and !isTTY.
-      // shouldRunComplianceStep gates on modePromptShown rather than the mode name (PF-029).
+      // shouldRunComplianceStep gates on modePromptShown rather than the mode name.
       // Re-init never routes here (seedManifest !== null → banner path → Advanced), so this path
       // always sees fresh-install defaults.
       let wizardCompliance: ComplianceFeatureState | undefined;
@@ -1395,9 +1395,9 @@ export const initCommand = new Command('init')
         isTTY: process.stdin.isTTY,
         hasCliOverride: cliComplianceOverride !== undefined,
       })) {
-        // runComplianceStep: note with "Current setting:" header (legible on re-init per PF-029),
+        // runComplianceStep: note with "Current setting:" header (legible on re-init),
         // labeled Yes/No select (immune to Enter-through muscle memory), and framework multiselect.
-        // Returns {kind:'cancelled'} on Escape — caller owns the cancel idiom (PF-014).
+        // Returns {kind:'cancelled'} on Escape — caller owns the cancel idiom.
         const complianceStep = await runComplianceStep({
           seed: { enabled: complianceEnabled, frameworks: complianceFrameworks },
           prompts: buildClackCompliancePrompts(),
@@ -1447,19 +1447,19 @@ export const initCommand = new Command('init')
       // silently carries the seeded value. The gate stays an explicit predicate call so the
       // documented gate table in attribution-prompts.ts remains the single authority.
       // isTTY is guaranteed true here (the non-TTY guard above exit-1'd); passing it keeps
-      // the promptless contract enforced at the predicate rather than by position (PF-029).
+      // the promptless contract enforced at the predicate rather than by position.
       if (shouldRunAttributionStep({
         // D27-GATE: bind to the resolved mode so all four documented gate-table rows
         // are reachable and the predicate — not lexical placement — enforces Advanced-only.
         // Using useRecommended ? 'recommended' : 'advanced' makes the gate testable from
         // both sides and prevents the Recommended path from accidentally running the step
-        // if this block is ever repositioned (applies PF-029).
+        // if this block is ever repositioned.
         mode: useRecommended ? 'recommended' : 'advanced',
         isTTY: process.stdin.isTTY,
       })) {
         const attributionStep = await runAttributionStep({
           // attributionSeedFrom keeps the seed a real boolean regardless of the stored
-          // FlagsRecord value type — undefined/null/false all map to false (PF-018).
+          // FlagsRecord value type — undefined/null/false all map to false.
           seed: attributionSeedFrom(enabledFlags),
           prompts: buildClackAttributionPrompts(),
         });
@@ -1479,7 +1479,7 @@ export const initCommand = new Command('init')
       /**
        * D40: init applies seeded flag defaults non-interactively. Flags are customized
        * exclusively via `devflow flags`; re-init preserves existing values and adopts
-       * registry defaults only for absent flags (ADR-014). No TUI is opened during init.
+       * registry defaults only for absent flags. No TUI is opened during init.
        */
       {
         const activeCount = countActiveFlags(enabledFlags);
@@ -1773,10 +1773,10 @@ export const initCommand = new Command('init')
       process.exit(1);
     }
 
-    // Converge compliance artifacts (PF-015: always converge, never short-circuit).
+    // Converge compliance artifacts (always converge, never short-circuit).
     // Called unconditionally so that enabling/disabling compliance during init
     // is reflected in the installed artifacts without a separate devflow compliance run.
-    // Wrapped in its own try/catch (PF-009: warn-not-abort).
+    // Wrapped in its own try/catch (warn-not-abort).
     let convergeResult: Awaited<ReturnType<typeof convergeFromManifest>> | null = null;
     try {
       convergeResult = await convergeFromManifest({
@@ -1832,7 +1832,7 @@ export const initCommand = new Command('init')
     }
     // Sweep orphaned *-teams.md workflow command variants left by the Agent Teams
     // refactor. None are ever re-installed, so a blanket sweep is safe on any
-    // install type (the full-install dir wipe only covers full installs). (PF-009)
+    // install type (the full-install dir wipe only covers full installs).
     try {
       for (const f of await fs.readdir(commandsDir)) {
         if (f.endsWith('-teams.md')) {
@@ -1918,7 +1918,7 @@ export const initCommand = new Command('init')
 
     // === Proxy preflight (when enabled) ===
     // Runs before the settings mutation pass so that proxyEnabled reflects reality
-    // (preflight failure forces it off without aborting init — avoids PF-009).
+    // (preflight failure forces it off without aborting init).
     //
     // Read existing proxy state once to recover the remembered port.
     // Init has no --port option; the remembered port from proxy.json always
@@ -1975,7 +1975,7 @@ export const initCommand = new Command('init')
           );
           proxyEnabled = false;
           // Write proxy.json disabled so runtime authority converges with the
-          // failed preflight outcome (avoids PF-015). Without this write,
+          // failed preflight outcome. Without this write,
           // proxy.json stays enabled:true from the prior run, causing
           // reapplyAgentMapping to write GPT model IDs into agent frontmatter
           // with no relay — a dormancy inversion.
@@ -2008,7 +2008,7 @@ export const initCommand = new Command('init')
       }
     } else {
       // Proxy disabled at entry: if proxy.json exists and is enabled, mark it disabled.
-      // avoids PF-015: runtime authority (proxy.json) must converge with proxyEnabled=false.
+      // Runtime authority (proxy.json) must converge with proxyEnabled=false.
       // Check the Result — write errors are surfaced rather than silently ignored
       // (consistent with the enable branch above).
       if (priorProxyStateResult.ok && priorProxyStateResult.value.enabled) {
@@ -2030,7 +2030,7 @@ export const initCommand = new Command('init')
     // MUST run AFTER the proxy preflight block above: preflight can force proxyEnabled=false
     // on failure, and reapply's dormancy (GPT models materialize only while proxy enabled)
     // depends on the FINAL proxyEnabled value — running earlier would leave GPT model lines
-    // in agent frontmatter after a preflight failure. Per-item failures are non-fatal (avoids PF-009).
+    // in agent frontmatter after a preflight failure. Per-item failures are non-fatal.
     //
     // Init-only optimization: skip reapply when mapping is empty AND proxy is off.
     // An empty mapping means every agent uses its shipped default; the file copy already
@@ -2098,7 +2098,7 @@ export const initCommand = new Command('init')
       content = stripDevflowTeammateModeFromJson(content);
 
       // Claude Code flags — convergeFlagsIntoSettings is the single pipeline entry point
-      // (ARCH-H1, applies PF-015/PF-017/ADR-014): fold valued flags and view-mode from
+      // (ARCH-H1): fold valued flags and view-mode from
       // existing settings before strip, then strip all managed keys and apply the folded
       // record. ownedRecord=existingManifest?.features.flags??null distinguishes keys
       // devflow previously wrote (must not be overridden by fold) from keys newly adopted
@@ -2132,7 +2132,7 @@ export const initCommand = new Command('init')
       // would silently delete both their URL and the window-enforcement var.
       // Invariant: proxy.json always reflects the final settled state after the
       // preflight block above — all paths that force proxyEnabled=false also write
-      // proxy.json enabled:false (avoids PF-015), so managedPort == effectivePort.
+      // proxy.json enabled:false, so managedPort == effectivePort.
       if (await proxyJsonExists(devflowDir)) {
         const proxyStateForStrip = await readProxyState(devflowDir);
         const managedPort = proxyStateForStrip.ok ? proxyStateForStrip.value.port : DEFAULT_PROXY_PORT;
@@ -2165,14 +2165,14 @@ export const initCommand = new Command('init')
     // read-modify-write, not a whole-file write: init owns only reviewPublication,
     // and every other key in the file — the hand-written per-repo `tracker`
     // override first among them — is carried from disk, under --reset too
-    // (D-CONFIG-PRESERVE-UNMANAGED in feature-config.ts, avoids PF-071).
+    // (D-CONFIG-PRESERVE-UNMANAGED in feature-config.ts).
     // A malformed or unreadable file is left untouched and named (D-CONFIG-NO-REPAIR).
     if (gitRoot) {
       const configWrite = await writeManagedConfig(gitRoot, {
         // reviewPublication has no prompt, so it is carried over from the
         // reset-gated snapshot rather than re-read from disk: seedConfig is null
         // under --reset, which is what collapses the field back to 'auto' with
-        // every other feature (PF-015 — read the post-gate binding, not the file).
+        // every other feature (read the post-gate binding, not the file).
         reviewPublication: seedConfig?.reviewPublication ?? DEFAULT_CONFIG.reviewPublication,
       });
       if (!configWrite.ok) p.log.warn(formatManagedConfigWriteError(configWrite.error));
@@ -2201,7 +2201,7 @@ export const initCommand = new Command('init')
     // Deterministically ensure .devflow/ is gitignored at the repo root — independent
     // of every feature toggle. The always-on ensure-root-gitignore
     // hook covers projects that never re-run init; this covers the init-time path so a
-    // fresh install never tracks .devflow/. Decoupled from memory (avoids PF-014).
+    // fresh install never tracks .devflow/. Decoupled from memory.
     if (gitRoot) {
       await ensureDevflowGitignore(gitRoot, verbose);
     }
@@ -2254,7 +2254,7 @@ export const initCommand = new Command('init')
           }
           s.start('Finalizing installation...');
         } else {
-          // applies ADR-010: user declined sudo and chose the settings.json fallback.
+          // User declined sudo and chose the settings.json fallback.
           // securityMode is 'managed' (from resolveSecurityAction or interactive choice) but
           // managedSettingsConfirmed is false — honor the "fall back to settings.json" label
           // by writing to user settings. Manifest will record 'user' to match reality.
@@ -2298,7 +2298,7 @@ export const initCommand = new Command('init')
         }
       } else {
         // Exhaustive guard — if TypeScript reaches here, a new SecurityMode variant was added
-        // without a matching branch. avoids PF-009 (stale references after rename/refactor).
+        // without a matching branch — guards against stale references after rename/refactor.
         const _exhaustive: never = securityMode;
         void _exhaustive;
       }
@@ -2354,7 +2354,7 @@ export const initCommand = new Command('init')
     logSummaryLines(formatSweepSummary(installReport));
 
     // Reference-overlay reporting: the overlay rewrites files inside an installed skill
-    // the user may have shadowed, and reports any unit it had to leave alone (PF-015).
+    // the user may have shadowed, and reports any unit it had to leave alone.
     logSummaryLines(formatOverlaySummary(installReport));
 
     // Skill-scoping reporting: a deselected skill is deleted and a dormant shadow
@@ -2440,7 +2440,7 @@ export const initCommand = new Command('init')
         knowledge: knowledgeEnabled,
         learning: learningEnabled,
         rules: rulesEnabled,
-        // FlagsRecord written directly — key-presence encodes "known" (ADR-014).
+        // FlagsRecord written directly — key-presence encodes "known".
         // view-mode is encoded as flags['view-mode'] (the resolved final value).
         flags: enabledFlags,
         security: securityMode,
@@ -2461,7 +2461,7 @@ export const initCommand = new Command('init')
     // ── Manifest write + tracker selection lifecycle (the ONE call site) ──────
     // persistManifestThenConvergeTracker owns the ordering invariant: the
     // tracker file-lifecycle owners in src/core/tracker.ts converge only against
-    // a provider the manifest actually persisted (D-TRACKER-CONVERGE, PF-015).
+    // a provider the manifest actually persisted (D-TRACKER-CONVERGE).
     const trackerLifecycle = await persistManifestThenConvergeTracker({
       devflowDir,
       claudeDir,

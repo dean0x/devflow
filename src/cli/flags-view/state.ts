@@ -1,20 +1,20 @@
 /**
  * Pure keypress reducer for the devflow flags TUI.
  *
- * applies ADR-013: CLI-layer view module; consumes src/core/ imports only.
- * applies ADR-016: one syntax, one semantic — value vocabulary.
- * avoids PF-014: pure functions only — no process.exit(), no I/O.
- * avoids PF-017: generic shell in tui/terminal.ts; this module is pure logic.
+ * CLI-layer view module; consumes src/core/ imports only.
+ * One syntax, one semantic — value vocabulary.
+ * Pure functions only — no process.exit(), no I/O.
+ * Generic shell in tui/terminal.ts; this module is pure logic.
  *
  * viewMode GLUE RULE: view-mode's neutralValue ('default') maps to null in the TUI.
  * `buildFlagRows` maps record value 'default' → null via `recordToTui` (core/flags.ts);
  * `collectFlagRecord` maps null → 'default' via `tuiToRecord` (core/flags.ts).
  * Number 0 is ACTIVE — null ≠ 0. Both functions live next to neutralValueOf, their
- * definition dependency (PF-017 one-shared-definition corollary).
+ * definition dependency, so there is one shared definition rather than per-consumer copies.
  *
  * Strict number parsing: leading/trailing whitespace and leading zeros are
  * invalid ('007' → error, ' 8' → error). This rejects pathological inputs
- * before they reach coerceFlagValue (applies PF-023).
+ * before they reach coerceFlagValue.
  *
  * Buffer hard cap: BUFFER_MAX_LEN = 64 chars (paste-flood guard).
  *
@@ -327,8 +327,8 @@ function enterEdit(state: FlagsViewState): FlagsViewState {
  * Contract:
  *   - Empty buffer + allowUnset → commit null (unset)
  *   - Empty buffer + !allowUnset → error "Value is required"
- *   - For number/string flags: delegate to parseFlagValueInput (applies PF-023 —
- *     strict grammar enforced at the core sink, not per-caller). Error messages
+ *   - For number/string flags: delegate to parseFlagValueInput (strict grammar
+ *     enforced at the core sink, not per-caller). Error messages
  *     distinguish format failures (padded/hex/leading-zeros) from bounds failures.
  *   - parseFlagValueInput returns null on invalid input → stay editing + error
  */
@@ -360,7 +360,7 @@ function commitEdit(state: FlagsViewState): FlagsViewState {
     }
   }
 
-  // Number flag: parseFlagValueInput enforces strict decimal grammar (avoids PF-023).
+  // Number flag: parseFlagValueInput enforces strict decimal grammar.
   // Provide specific error messages to distinguish format from bounds failures.
   if (flagDef.kind === 'number') {
     if (buf !== buf.trim()) {

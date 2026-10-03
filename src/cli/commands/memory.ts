@@ -107,7 +107,7 @@ export function removeMemoryHooks(input: string | Settings): string {
   const settingsJson = typeof input === 'string' ? input : JSON.stringify(input);
   const settings: Settings = typeof input === 'string' ? JSON.parse(input) : structuredClone(input);
 
-  // Evaluate every removal into a local — never short-circuit (PF-015).
+  // Evaluate every removal into a local — never short-circuit.
   let changed = false;
   for (const [hookType, marker] of Object.entries(MEMORY_HOOK_CONFIG)) {
     const removed = removeHooks(settings, hookType, isMemoryHook(marker));

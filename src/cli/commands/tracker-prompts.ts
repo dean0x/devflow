@@ -1,13 +1,13 @@
 /**
  * Tracker prompt helpers for devflow init.
  *
- * CLI-layer module (ADR-013): prompt-rendering logic lives in src/cli/commands/,
+ * CLI-layer module: prompt-rendering logic lives in src/cli/commands/,
  * core business logic stays in src/core/tracker.ts.
  *
- * avoids PF-029: the wizard gate keys on `modePromptShown` (was the Setup-mode
+ * The wizard gate keys on `modePromptShown` (was the Setup-mode
  * p.select prompt actually shown?), never on the mode name, so --recommended
  * (flag, no prompt) and the non-TTY fallback preserve their promptless contracts.
- * avoids PF-014: runTrackerStep never calls process.exit() or throws — callers
+ * runTrackerStep never calls process.exit() or throws — callers
  * own the cancel idiom (p.cancel + process.exit(0)), keeping try/finally safe.
  * The shared DI seam (PromptOutcome, WizardPromptIO, clackNote, clackSelect) is
  * defined once in prompt-io.ts and imported here, never re-declared.
@@ -68,7 +68,7 @@ export function formatTrackerSummary(provider: TrackerProvider): string {
 /**
  * Determines whether the tracker wizard step should run for a given init invocation.
  *
- * Gate table (per PF-029: key on modePromptShown, never on the mode name):
+ * Gate table (key on modePromptShown, never on the mode name):
  *
  *   --recommended flag / !isTTY fallback             → no (promptless contract preserved)
  *   Interactive mode-prompt → Recommended            → yes (modePromptShown=true)
@@ -167,14 +167,14 @@ export type TrackerStepOutcome = TrackerStepResolved | TrackerStepCancelled;
  *   1. Note — "Current setting: …" header then the provider catalogue.
  *   2. Provider select — labelled GitHub / Jira / Linear with hints, seeded from
  *      the prior state. `p.select`, never `p.confirm`: Enter-through must be an
- *      INFORMED keep of a named provider, not a y/N reflex (PF-029).
+ *      INFORMED keep of a named provider, not a y/N reflex.
  *
  * Returns:
  *   {kind:'resolved', state, messages} — step completed; `state` is the chosen
  *     TrackerFeatureState; `messages` are emitted by the caller.
  *   {kind:'cancelled'} — user pressed Escape; caller runs p.cancel + process.exit(0).
  *
- * Invariants (PF-014):
+ * Invariants:
  *   - Never calls process.exit(), never throws.
  *   - The returned state is always a fresh object, never the seed.
  *   - All I/O is routed through the `prompts` parameter (injectable for tests).

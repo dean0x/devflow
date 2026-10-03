@@ -1,7 +1,7 @@
 /**
  * agents-view barrel — re-exports for easy imports from consumers.
  *
- * applies ADR-013: CLI-layer module group.
+ * CLI-layer module group.
  */
 
 export { reduce, buildRow, buildModelCycle, pickerNames, buildPickerNameMap, isDirtyModel, isDirtyEffort, persistedModelFor, persistedEffortFor, unsavedCount, isOffCycle, rowState } from './state.js';

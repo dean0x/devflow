@@ -137,7 +137,7 @@ async function printRulesList(claudeDir: string, devflowDir: string): Promise<vo
  * Returns which tier seeded: 'installed' | 'source' | 'none'.
  * Creates the shadow directory before copying.
  *
- * D35 — seedRuleShadow tiers (applies ADR-010):
+ * D35 — seedRuleShadow tiers:
  *   Tier 1 — installed rule at rulesTarget/{name}.md (fastest path when rules are enabled).
  *             SKIPPED for FEATURE_OWNED_RULES: the installed file is already stamped
  *             (${DEVFLOW_COMPLIANCE_FRAMEWORKS} replaced with label text), so seeding from
@@ -245,9 +245,10 @@ async function handleRuleUnshadow(
  * Compliance convergence runs unconditionally — convergeComplianceArtifacts handles the
  * disabled case by removing stale artifacts, so no enabled-gate is needed here. Running
  * converge regardless of the rules-install outcome ensures that a rules-install failure
- * cannot leave compliance artifacts in a half-converged state (avoids PF-015 violation).
+ * cannot leave compliance artifacts in a half-converged state.
  *
- * Applies PF-009: warn-not-throw on per-item compliance convergence failure.
+ * Warn-not-throw on per-item compliance convergence failure, so a convergence
+ * failure never undoes the rules install.
  */
 export async function runRulesEnable(claudeDir: string, devflowDir: string): Promise<void> {
   const rulesTarget = path.join(claudeDir, 'rules', 'devflow');
@@ -299,7 +300,7 @@ export async function runRulesEnable(claudeDir: string, devflowDir: string): Pro
   // disabled case itself (removes stale artifacts). Running this regardless of installFailed
   // prevents a rules-install failure from leaving the compliance rule in a stale state.
   // rulesEnabledOverride reflects the actual settled state: false when install failed so the
-  // compliance rule is not installed into a wiped, rules-disabled directory (avoids PF-015).
+  // compliance rule is not installed into a wiped, rules-disabled directory.
   try {
     await convergeFromManifest({
       claudeDir,
@@ -309,7 +310,7 @@ export async function runRulesEnable(claudeDir: string, devflowDir: string): Pro
       rulesEnabledOverride: !installFailed,
     });
   } catch (err) {
-    // PF-009: warn-not-abort — compliance convergence failure does not undo rules install
+    // Warn-not-abort — compliance convergence failure does not undo rules install
     p.log.warn(
       `Compliance rule convergence failed — rules installed but compliance rule may be stale: ${err instanceof Error ? err.message : String(err)}`,
     );

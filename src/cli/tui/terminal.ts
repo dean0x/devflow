@@ -1,10 +1,10 @@
 /**
  * Generic TUI shell — shared by agents-view and flags-view.
  *
- * applies ADR-013: impure I/O shell in CLI layer; pure logic lives in state + render.
- * avoids PF-014: cleanup wired via Promise resolve — never process.exit() inside
- *   a finally-guarded scope.
- * avoids PF-017: one generic shell, thin adapters per TUI — not copy-adapted per consumer.
+ * Impure I/O shell in CLI layer; pure logic lives in state + render.
+ * Cleanup wired via Promise resolve — never process.exit() inside
+ *   a finally-guarded scope (it would skip the finally).
+ * One generic shell, thin adapters per TUI — not copy-adapted per consumer.
  *
  * Bounded: MAX_KEYPRESSES = 50_000 hard limit (reliability rule — every loop bounded).
  *
@@ -382,8 +382,8 @@ export async function runTui<S, A extends string, C extends A>(
      * A throw inside an EventEmitter listener does NOT reject the enclosing
      * promise — it escapes as an uncaughtException and kills the process with
      * cleanup() never having run, leaving raw mode and alt-screen set. Routing
-     * every handler failure through here keeps the PF-014 invariant (cleanup
-     * always runs) while still surfacing the error rather than swallowing it.
+     * every handler failure through here keeps the invariant that cleanup
+     * always runs, while still surfacing the error rather than swallowing it.
      */
     function fail(err: unknown): void {
       cleanup();

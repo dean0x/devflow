@@ -1,11 +1,11 @@
 /**
  * Thin adapter — devflow agents TUI shell over the generic runTui driver.
  *
- * applies ADR-013: impure I/O shell in CLI layer; pure logic lives in state.ts/render.ts.
- * avoids PF-014: all cleanup wired via Promise resolve — never process.exit() inside
- *   a finally-guarded scope. Cleanup is idempotent and runs on save, cancel,
- *   SIGINT, SIGTERM, and keypress limit exhaustion.
- * avoids PF-017: this is the thin adapter, not a copy of the generic shell.
+ * Impure I/O shell in CLI layer; pure logic lives in state.ts/render.ts.
+ * All cleanup wired via Promise resolve — never process.exit() inside
+ *   a finally-guarded scope (it would skip the finally). Cleanup is idempotent
+ *   and runs on save, cancel, SIGINT, SIGTERM, and keypress limit exhaustion.
+ * This is the thin adapter, not a copy of the generic shell.
  *
  * Public API (frozen — agents-terminal.test.ts is the acceptance gate):
  *   - runAgentsTui(initialState, io?) → Promise<TuiResult>

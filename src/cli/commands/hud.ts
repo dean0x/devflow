@@ -100,7 +100,7 @@ const DEVFLOW_STATUSLINE_SUFFIXES = [
  * any parent directory — so installs from the custom-directory and local-scope era
  * are still recognised. A bare `statusline.sh` (the Claude Code docs' own example,
  * `~/.claude/statusline.sh`) or a path that merely contains a `devflow` segment is
- * the user's (applies ADR-024: remove or replace only what devflow provably wrote).
+ * the user's (remove or replace only what devflow provably wrote).
  * Backslashes are read as slashes so a Windows install is matched the same way. A
  * hand-edited command that is not a string is the user's, as in `endsWithAny`.
  *

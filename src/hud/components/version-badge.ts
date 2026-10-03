@@ -81,7 +81,7 @@ export default async function versionBadge(
   const current = getCurrentVersion(ctx.devflowDir);
   if (!current) return null;
 
-  const cacheDir = hudCacheDir(ctx.devflowDir); // authoritative path from cache.ts (avoids PF-013)
+  const cacheDir = hudCacheDir(ctx.devflowDir); // authoritative path from cache.ts
 
   // Cache only the npm registry result (expensive); current is always live
   let info = readCache<VersionInfo>(cacheDir, VERSION_CACHE_KEY, validateVersionInfo);

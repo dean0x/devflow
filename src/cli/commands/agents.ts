@@ -1,9 +1,9 @@
 /**
  * devflow agents — Manage per-agent model/effort assignments.
  *
- * applies ADR-013: CLI-layer module; core logic in src/core/agent-models.ts.
- * avoids PF-014: never process.exit() inside a finally-guarded scope (terminal.ts
- *   handles cleanup in Promise resolve, not process.exit).
+ * CLI-layer module; core logic in src/core/agent-models.ts.
+ * Never process.exit() inside a finally-guarded scope: it skips the finally
+ *   (terminal.ts handles cleanup in Promise resolve, not process.exit).
  *
  * Branding note: "subswitch" must NEVER appear in user-visible strings.
  * User-facing vocabulary: "external model routing" / "Devflow proxy" /
@@ -120,7 +120,7 @@ export function validateSetArgs(
   if (model !== undefined) {
     // Charset gate: applied at every trust boundary regardless of catalog state.
     // Rejects injection payloads (newlines, YAML metacharacters) before they can
-    // propagate to agent-models.json or agent frontmatter. avoids PF-017: allowlist
+    // propagate to agent-models.json or agent frontmatter. Allowlist
     // what the callee actually consumes rather than denylist individual bad chars.
     if (!isValidModelName(model)) {
       return Err(
@@ -521,7 +521,7 @@ export const agentsCommand = new Command('agents')
     const claudeDir = getClaudeDirectory();
     const devflowDir = getDevFlowDirectory();
     const installDir = path.join(claudeDir, 'agents', 'devflow');
-    // Cache directory for model discovery — authoritative path from cache.ts (avoids PF-013).
+    // Cache directory for model discovery — authoritative path from cache.ts.
     const cacheDir = modelCacheDir(devflowDir);
     // Log path mirrors proxy.ts for unified proxy diagnostics.
     const logPath = path.join(devflowDir, 'logs', 'proxy.log');
@@ -782,7 +782,8 @@ export const agentsCommand = new Command('agents')
     // Lazy-import terminal to avoid loading readline/tty in non-TTY paths
     const { runAgentsTui } = await import('../agents-view/terminal.js');
     // Wrap: runTui rejects on initial-render failure or handler throw.
-    // On rejection: log and bail — no partial write (avoids PF-014 process.exit).
+    // On rejection: log and bail — no partial write; set process.exitCode
+    // rather than calling process.exit(), which would skip pending cleanup.
     let result;
     try {
       result = await runAgentsTui(tuiState);

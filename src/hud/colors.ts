@@ -1,8 +1,8 @@
 /**
  * ANSI color helpers — re-exported from src/core/ansi.ts.
  *
- * The canonical implementation lives in src/core/ansi.ts (agent-neutral home,
- * applies ADR-013). This file is a re-export barrel so all existing HUD
+ * The canonical implementation lives in src/core/ansi.ts (agent-neutral home).
+ * This file is a re-export barrel so all existing HUD
  * component call sites continue to resolve `../colors.js` without change.
  */
 export {

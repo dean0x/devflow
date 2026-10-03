@@ -3,19 +3,19 @@
  *
  * D-TRACKER-PAIR [DR-25]: `src/core/tracker.ts` (domain) +
  *   `src/cli/commands/tracker.ts` (CLI) mirrors the `compliance.ts` pair
- *   exactly; ADR-013's pure-core / I/O-target split is the reason both names
- *   exist. A reviewer meeting several `tracker*` files in one commit otherwise
- *   has no signal that the duplication is deliberate.
+ *   exactly; the split of pure core logic (src/core/) from the I/O layer is the
+ *   reason both names exist. A reviewer meeting several `tracker*` files in one
+ *   commit otherwise has no signal that the duplication is deliberate.
  *
- * Applies ADR-013: CLI-layer module; the provider domain, the strict parser and
+ * CLI-layer module; the provider domain, the strict parser and
  *   the ~/.devflow file lifecycle all live in src/core/tracker.ts.
  * The manifest holds the MACHINE default. A repository may select its own
  *   provider in its committed `.devflow/project.json` (resolved by
  *   resolve-settings.cjs); `--status` names it on an `Effective:` line when one
  *   does, and `--set` never touches it.
- * Avoids PF-015: --set converges the sentinel in BOTH directions, so flipping
+ * --set converges the sentinel in BOTH directions, so flipping
  *   back to github removes what flipping away wrote.
- * Avoids PF-009: a failed re-arm or sentinel step warns, it never aborts.
+ * A failed re-arm or sentinel step warns, it never aborts.
  */
 
 import { Command } from 'commander';
@@ -69,7 +69,7 @@ export type TrackerProvenance =
 /**
  * Read the provenance header of `~/.devflow/tracker/{provider}.md`.
  *
- * Never throws (PF-014): an absent, unreadable, or non-regular path is `absent`.
+ * Never throws: an absent, unreadable, or non-regular path is `absent`.
  * Only the bounded head of the file is read and only the leading frontmatter
  * block is scanned — through the one frontmatter parser the migration also uses —
  * and nothing read here is trusted: every value is rendered through
@@ -105,7 +105,7 @@ export type TrackerMechanicsState =
  * every install carries them all (D-INSTALL-ALL-PROVIDERS) — rather than listing
  * the directory: the question a user asks `--status` is "can the agent load what
  * it is told to load?", and a stray file in the tree is not an answer to it.
- * Never throws (PF-014).
+ * Never throws.
  */
 export async function readTrackerMechanics(claudeDir: string): Promise<TrackerMechanicsState> {
   const root = path.join(claudeDir, 'skills', prefixSkillName(SKILL_REFS_SKILL_NAME), 'references');
@@ -354,7 +354,7 @@ export const trackerCommand = new Command('tracker')
       // undocumented dotfile. Every other --status in this CLI is a pure read,
       // so this one reports the write it makes as a line of the note below — a
       // machine-state change the output does not mention is a change the user
-      // cannot audit. Non-fatal exactly as on the --set path (avoids PF-009): a
+      // cannot audit. Non-fatal exactly as on the --set path: a
       // failed re-arm warns, it never aborts the report the user asked for.
       const statusRearm = await rearmTrackerInference(devflowDir);
       const inference = statusRearm.ok
