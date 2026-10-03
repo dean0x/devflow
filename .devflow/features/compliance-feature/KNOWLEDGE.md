@@ -107,7 +107,7 @@ Fragments are loaded once per convergence for the STAMPED frameworks only (none 
 
 **Unconditional convergence:** both artifact operations always execute independently: `installSkillDir` catches its own errors internally, so the rule step (install, or probe-then-remove) always runs.
 
-**Temp-sibling+rename:** `installSkillDir` builds the new tree under `{target}.tmp`, then atomically removes old → renames. Orphaned `.tmp` directories from prior crashes are cleaned up at the start of each run.
+**Temp-sibling+rename:** `installSkillDir` builds the new tree under `{target}.tmp`, then removes old → renames. That is two calls, not an atomic swap: it narrows the window with no skill directory to the gap between them. Orphaned `.tmp` directories from prior crashes are cleaned up at the start of each run.
 
 **Shadow semantics:** SKILL.md source resolves as shadow → canonical (validates via `validateSkillShadow`), and is composed with the stamp frameworks either way. Reference files (`{id}.md`, `detection.md`, `sources.md`) always come from canonical source — framework refs are not user-overridable. Fragment files are always loaded from canonical source even when SKILL.md comes from a shadow (fragments are registry-owned content). Rule source resolves as shadow → canonical (validates via `validateRuleShadow`), then `composeComplianceRule` (which delegates `${DEVFLOW_COMPLIANCE_FRAMEWORKS}` to `stampComplianceRule`) is called. C1 passthrough: a token-free shadow passes through byte-identical without composition.
 
@@ -446,7 +446,7 @@ Step 5 composes the release notes body: `CHANGELOG_CONTENT` first, then an optio
 
 - Unconditional convergence: `convergeComplianceArtifacts` applies this for both the disable path (two independent try/catch blocks) and the enable path.
 - Warn-not-throw: per-artifact failures are reported via the injected `warn` callback, never thrown. `converged: false` in the return value surfaces partial failure to callers.
-- Temp-sibling+rename: `installSkillDir` uses `{target}.tmp` to build the new skill directory tree before atomically swapping it into place.
+- Temp-sibling+rename: `installSkillDir` uses `{target}.tmp` to build the new skill directory tree, then removes the old one and renames the new one into place — two calls, not atomic, which narrows the window with no directory to the gap between them.
 - Real-path tests: `git-agent.test.ts` static guards pin the ops list, bounds, D9 gate, and dedup markers in the source file directly (no build step required).
 - Leave-the-end-state-not-the-transition / reachable-consumer bar: the post-split KB describes the end state only — no tombstone notes about where text "used to be"; consult `tracker-references` for transition history.
 - Pure helpers in `src/core/`, I/O orchestration in `src/targets/`: `compliance.ts` is pure; `compliance-install.ts` owns all I/O.
