@@ -34,6 +34,13 @@
 //   retire-anchor <anchor_id> <status>    Flip ledger row status, re-render both .md files
 //   refresh-anchor <anchor_id>            Re-project log obs onto ledger row, re-render
 //   rotate-observations                   Archive unreferenced observations idle 30+ days
+//   claim-queue                           Claim the learning queue for this run; prints
+//                                          claimed <token>[ takeover] | busy | none
+//   release-claim <token>                 Release the claim the token owns; prints
+//                                          released | not-owner | gone
+//
+// Every learning op above except claim-queue and release-claim first refreshes
+// the mtime of an existing queue claim — the heartbeat (D-OWNED-CLAIM).
 
 'use strict';
 
@@ -308,6 +315,19 @@ function emit(result, format) {
   return 1;
 }
 
+/**
+ * The learning ops whose run sends the claim heartbeat first (D-OWNED-CLAIM).
+ * claim-queue and release-claim manage the claim themselves, and the generic ops
+ * never touch it. A new learning op joins this set.
+ */
+const LEARNING_OPS = new Set(['assign-anchor', 'next-anchor', 'retire-anchor', 'refresh-anchor', 'rotate-observations']);
+
+/** Send the claim heartbeat; a failure is reported on stderr and never stops the op. */
+function heartbeat(root) {
+  const beat = learning().store.touchClaim(root);
+  if (!beat.ok) process.stderr.write(`${beat.error.message}\n`);
+}
+
 // The learning ops run from the project root and take no path to a learning file:
 // each builds its paths from the current directory. Every op that writes takes the
 // store's one learning lock through withDecisionsLock (D-ONE-LEARNING-LOCK) and
@@ -315,6 +335,7 @@ function emit(result, format) {
 // A locked body returns its Result; emit prints it once the lock is released.
 if (require.main === module) {
 try {
+  if (LEARNING_OPS.has(op)) heartbeat(process.cwd());
   switch (op) {
     case 'get-field': {
       const input = JSON.parse(readStdin());
@@ -902,6 +923,40 @@ try {
       }
       const roResult = learning().store.rotateObservations(process.cwd());
       process.exitCode = emit(roResult, ({ rotated }) => `rotated ${rotated} observations`);
+      break;
+    }
+
+    // -------------------------------------------------------------------------
+    // claim-queue
+    // Claim the learning queue for this run (D-OWNED-CLAIM, learning-store.cjs).
+    // Takes no argument; mints the token itself.
+    // stdout: claimed <token> | claimed <token> takeover | busy | none
+    // -------------------------------------------------------------------------
+    case 'claim-queue': {
+      if (args.length > 0) {
+        process.stderr.write('claim-queue: usage: claim-queue (no arguments; run from the project root)\n');
+        process.exit(1);
+      }
+      const cqResult = learning().store.claimQueue(process.cwd());
+      process.exitCode = emit(cqResult, claim => (claim.state === 'claimed'
+        ? `claimed ${claim.token}${claim.takeover ? ' takeover' : ''}`
+        : claim.state));
+      break;
+    }
+
+    // -------------------------------------------------------------------------
+    // release-claim <token>
+    // Release the claim the token owns (D-OWNED-CLAIM, learning-store.cjs).
+    // stdout: released | not-owner | gone
+    // -------------------------------------------------------------------------
+    case 'release-claim': {
+      const { store } = learning();
+      if (args.length !== 1 || !store.CLAIM_TOKEN_RE.test(args[0])) {
+        process.stderr.write('release-claim: usage: release-claim <token> (the 16 hex characters claim-queue printed)\n');
+        process.exit(1);
+      }
+      const rcResult = store.releaseClaim(process.cwd(), args[0]);
+      process.exitCode = emit(rcResult, release => release.state);
       break;
     }
 

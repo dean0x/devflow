@@ -321,6 +321,14 @@ export interface Listing {
   malformed: { ledger: number; log: number };
 }
 
+/** What claim-queue answers. */
+export type ClaimAnswer = { state: 'claimed'; token: string; takeover: boolean } | { state: 'busy' } | { state: 'none' };
+
+/** What release-claim answers. */
+export interface ReleaseAnswer {
+  state: 'released' | 'not-owner' | 'gone';
+}
+
 /** The learning store's surface as the tests use it. */
 export interface LearningStoreApi {
   SCHEMA_VERSION: number;
@@ -402,6 +410,12 @@ export interface LearningStoreApi {
   ): Result<ShownEntry>;
   resolveVerifyRef(root: string): { ref: 'origin/HEAD' | 'HEAD'; commit: string } | null;
   rotateObservations(root: string, opts?: { now?: number; timeoutMs?: number }): Result<{ rotated: number; appended: number }>;
+  CLAIM_STALE_SECS: number;
+  CLAIM_TOKEN_RE: RegExp;
+  newClaimToken(): string;
+  claimQueue(root: string, opts?: { now?: number; token?: string; timeoutMs?: number }): Result<ClaimAnswer>;
+  releaseClaim(root: string, token: string, opts?: { timeoutMs?: number }): Result<ReleaseAnswer>;
+  touchClaim(root: string, opts?: { now?: number }): Result<{ touched: boolean }>;
 }
 
 /** Load the learning store CommonJS module. */

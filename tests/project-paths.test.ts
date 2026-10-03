@@ -22,6 +22,7 @@ import {
   getFeatureConfigPath,
   getLearningPendingTurnsPath,
   getLearningPendingTurnsProcessingPath,
+  getLearningClaimOwnerPath,
   getDecisionsFilePath,
   getPitfallsFilePath,
   getLearningTuningConfigPath,
@@ -83,6 +84,10 @@ describe('project-paths TypeScript module', () => {
 
     it('getLearningPendingTurnsProcessingPath returns .devflow/learning/.pending-turns.processing', () => {
       expect(getLearningPendingTurnsProcessingPath(ROOT)).toBe('/some/project/.devflow/learning/.pending-turns.processing');
+    });
+
+    it('getLearningClaimOwnerPath returns .devflow/learning/.pending-turns.owner', () => {
+      expect(getLearningClaimOwnerPath(ROOT)).toBe('/some/project/.devflow/learning/.pending-turns.owner');
     });
   });
 
@@ -187,6 +192,7 @@ describe('CJS project-paths parity', () => {
     { name: 'getFeatureConfigPath', ts: getFeatureConfigPath, cjs: cjsPaths.getFeatureConfigPath },
     { name: 'getLearningPendingTurnsPath', ts: getLearningPendingTurnsPath, cjs: cjsPaths.getLearningPendingTurnsPath },
     { name: 'getLearningPendingTurnsProcessingPath', ts: getLearningPendingTurnsProcessingPath, cjs: cjsPaths.getLearningPendingTurnsProcessingPath },
+    { name: 'getLearningClaimOwnerPath', ts: getLearningClaimOwnerPath, cjs: cjsPaths.getLearningClaimOwnerPath },
     { name: 'getDecisionsFilePath', ts: getDecisionsFilePath, cjs: cjsPaths.getDecisionsFilePath },
     { name: 'getPitfallsFilePath', ts: getPitfallsFilePath, cjs: cjsPaths.getPitfallsFilePath },
     { name: 'getLearningTuningConfigPath', ts: getLearningTuningConfigPath, cjs: cjsPaths.getLearningTuningConfigPath },

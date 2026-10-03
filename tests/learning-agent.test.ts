@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeAll } from 'vitest';
 import { promises as fs } from 'fs';
 import * as fsSync from 'fs';
+import { createRequire } from 'module';
 import * as path from 'path';
 import { fileURLToPath } from 'url';
 
@@ -186,6 +187,15 @@ describe('lockstep: Learning agent 900s staleness matches directive', () => {
   it('learning agent uses 900s freshness threshold (not an older value)', async () => {
     const content = await fs.readFile(AGENT_PATH, 'utf-8');
     expect(content).toContain('900s');
+  });
+
+  it('the claim-queue op takes over a claim at the same threshold the directive treats as stale', async () => {
+    const hookContent = await fs.readFile(SESSION_START_CONTEXT, 'utf-8');
+    const { CLAIM_STALE_SECS } = createRequire(import.meta.url)(
+      path.resolve(ROOT, 'src/assets/scripts/hooks/lib/learning-store.cjs'),
+    ) as { CLAIM_STALE_SECS: number };
+    expect(CLAIM_STALE_SECS).toBe(900);
+    expect(hookContent).toContain(`PROCESSING_STALE_SECS=${CLAIM_STALE_SECS}`);
   });
 });
 

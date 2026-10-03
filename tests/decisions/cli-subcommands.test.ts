@@ -58,6 +58,7 @@ import * as p from '@clack/prompts';
 import {
   getLearningPendingTurnsPath,
   getLearningPendingTurnsProcessingPath,
+  getLearningClaimOwnerPath,
   getPendingTurnsPath,
   getDecisionsLogPath,
 } from '../../src/core/project-paths.js';
@@ -415,9 +416,10 @@ describe('learning --disable drains the learning pending-turns queue', () => {
     fs.mkdirSync(path.join(root, '.devflow', 'learning'), { recursive: true });
     fs.writeFileSync(getLearningPendingTurnsPath(root), '{"role":"user"}\n');
     fs.writeFileSync(getLearningPendingTurnsProcessingPath(root), '{"role":"user"}\n');
+    fs.writeFileSync(getLearningClaimOwnerPath(root), '0123456789abcdef\n');
   }
 
-  it('deletes queue + processing files and switches learning off machine-wide (memory queue untouched)', async () => {
+  it('deletes the queue, the claim and its owner file, and switches learning off machine-wide (memory queue untouched)', async () => {
     writeDreamQueueFiles(tmpDir);
     fs.mkdirSync(path.join(tmpDir, '.devflow', 'memory'), { recursive: true });
     fs.writeFileSync(getPendingTurnsPath(tmpDir), '{"role":"user"}\n');
@@ -426,6 +428,7 @@ describe('learning --disable drains the learning pending-turns queue', () => {
 
     expect(fs.existsSync(getLearningPendingTurnsPath(tmpDir))).toBe(false);
     expect(fs.existsSync(getLearningPendingTurnsProcessingPath(tmpDir))).toBe(false);
+    expect(fs.existsSync(getLearningClaimOwnerPath(tmpDir))).toBe(false);
 
     expect(readLearningSwitch()).toBe(false);
     // The retired per-repo key is never written.
@@ -462,6 +465,7 @@ describe('learning --disable drains the learning pending-turns queue', () => {
 
     expect(fs.existsSync(getLearningPendingTurnsPath(tmpDir))).toBe(true);
     expect(fs.existsSync(getLearningPendingTurnsProcessingPath(tmpDir))).toBe(true);
+    expect(fs.existsSync(getLearningClaimOwnerPath(tmpDir))).toBe(true);
     expect(readLearningSwitch()).toBe(true);
   });
 

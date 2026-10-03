@@ -10,6 +10,7 @@
 import { promises as fs } from 'fs';
 import * as path from 'path';
 import {
+  getLearningClaimOwnerPath,
   getLearningPendingTurnsPath,
   getLearningPendingTurnsProcessingPath,
 } from './project-paths.js';
@@ -32,8 +33,8 @@ function isLegacyPerSessionMarker(name: string): boolean {
 /**
  * Sweep legacy marker-pipeline files from a `.devflow/learning/` directory:
  * the fixed-name stamps above, plus per-session `decisions.*`/`curation.*`
- * markers. Never touches `learning.json` or the live
- * `.pending-turns.jsonl`/`.pending-turns.processing` queue files.
+ * markers. Never touches `learning.json` or the live queue files
+ * (`.pending-turns.jsonl`, `.pending-turns.processing`, `.pending-turns.owner`).
  *
  * ENOENT-idempotent (missing learning dir or already-removed files are not
  * errors). Non-ENOENT errors are rethrown — callers that need best-effort
@@ -81,18 +82,20 @@ export async function sweepLegacyDreamMarkers(learningDir: string): Promise<numb
 // ---------------------------------------------------------------------------
 
 /**
- * Drain the learning (decisions-detection) pending-turns queue so stale turns
- * don't process later — used by both `--clear` and `--disable`. A mid-run
- * Learning agent whose claimed batch vanishes aborts without changes, which is
- * the desired outcome in both cases. ENOENT-tolerant; other errors propagate.
+ * Drain the learning (decisions-detection) pending-turns queue, its claimed
+ * batch and the claim's owner file so stale turns don't process later — used by
+ * both `--clear` and `--disable`. A mid-run Learning agent whose claimed batch
+ * vanishes aborts without changes, which is the desired outcome in both cases.
+ * ENOENT-tolerant; other errors propagate.
  */
 export async function drainLearningQueue(gitRoot: string): Promise<void> {
+  const unlinkIfPresent = (file: string): Promise<void> =>
+    fs.unlink(file).catch((e: NodeJS.ErrnoException) => {
+      if (e.code !== 'ENOENT') throw e;
+    });
   await Promise.all([
-    fs.unlink(getLearningPendingTurnsPath(gitRoot)).catch((e: NodeJS.ErrnoException) => {
-      if (e.code !== 'ENOENT') throw e;
-    }),
-    fs.unlink(getLearningPendingTurnsProcessingPath(gitRoot)).catch((e: NodeJS.ErrnoException) => {
-      if (e.code !== 'ENOENT') throw e;
-    }),
+    unlinkIfPresent(getLearningPendingTurnsPath(gitRoot)),
+    unlinkIfPresent(getLearningPendingTurnsProcessingPath(gitRoot)),
+    unlinkIfPresent(getLearningClaimOwnerPath(gitRoot)),
   ]);
 }

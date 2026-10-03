@@ -227,11 +227,14 @@ ${DECISIONS_SECTION}"
 fi
 
 # --- Section 2: Learning maintenance directive ---
-# Emitted when captured turns are waiting: queue non-empty, or a leftover
-# .processing batch whose owner crashed (stale mtime, 900s threshold — same
-# family the Learning agent itself uses to discriminate live from crashed). A
-# FRESH .processing means a live Learning agent already owns the batch, so the
-# directive is suppressed even if new turns queued since its claim.
+# Emitted when captured turns are waiting: the queue is non-empty, or a
+# .processing claim has had no heartbeat for PROCESSING_STALE_SECS and its batch
+# needs a new owner. A FRESH .processing means a live Learning agent holds the
+# claim, so the directive is suppressed even if new turns queued since. This
+# check is advisory and decides only whether to spawn: the claim itself is taken
+# by json-helper's claim-queue op under the learning lock, which applies the same
+# threshold (D-OWNED-CLAIM, lib/learning-store.cjs), so a spawn that loses a race
+# exits on `busy`.
 if [ "$LEARNING_ENABLED" = "true" ]; then
   QUEUE_FILE="$LEARNING_DIR/.pending-turns.jsonl"
   PROCESSING_FILE="$LEARNING_DIR/.pending-turns.processing"

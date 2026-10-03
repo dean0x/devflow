@@ -16,22 +16,29 @@
 // Files under <root>/.devflow/learning/:
 //   decisions-log.jsonl          observation rows — the content authority
 //   decisions-ledger.jsonl       anchored rows — projections of log rows
-//   decisions-log.archive.jsonl  rotated-out observation rows
+//   decisions-log.archive.jsonl  rotated-out observation rows (D-ROTATE-UNREFERENCED)
 //   decisions-history.jsonl      prior content versions (D-CONTENT-HISTORY)
 //   *.rejected.jsonl             quarantined malformed lines (D-QUARANTINE-MALFORMED)
 //   *.pre-v2.jsonl               one-time copies of the v1 files (D-V1-BACKUP-ONCE)
 //   .decisions.lock/             the one learning lock (D-ONE-LEARNING-LOCK)
+//   .pending-turns.jsonl         the queue the capture hooks append to
+//   .pending-turns.processing    the claimed batch, and .pending-turns.owner its
+//                                owner's token (D-OWNED-CLAIM)
 //
 // TS COUNTERPART: src/core/observations.ts mirrors the status lists (D201).
 
 'use strict';
 
+const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
 const { execFileSync } = require('child_process');
 
 const {
   getLearningDir,
+  getLearningPendingTurnsPath,
+  getLearningPendingTurnsProcessingPath,
+  getLearningClaimOwnerPath,
   getDecisionsLedgerPath,
   getDecisionsLogPath,
   getDecisionsArchivePath,
@@ -1036,6 +1043,249 @@ function rotateObservations(root, { now = Date.now(), timeoutMs } = {}) {
 }
 
 // ---------------------------------------------------------------------------
+// The queue claim
+// ---------------------------------------------------------------------------
+
+/**
+ * Seconds without a heartbeat after which a claim is stale and the next claim
+ * takes it over (D-OWNED-CLAIM). session-start-context's PROCESSING_STALE_SECS
+ * holds the same value; a lockstep test pins the two together.
+ */
+const CLAIM_STALE_SECS = 900;
+
+/** How long a claim waits for the queue's own lock (ms): the wait of queue-append's overflow truncation. */
+const QUEUE_LOCK_TIMEOUT_MS = 2000;
+
+/** Age after which the queue's own lock counts as abandoned (ms): learning-lock's threshold. */
+const QUEUE_LOCK_STALE_MS = 30000;
+
+/** A claim token: 16 lowercase hex characters. */
+const CLAIM_TOKEN_RE = /^[0-9a-f]{16}$/;
+
+/** link(2) errors of a filesystem without hard links; the claim renames instead. */
+const NO_HARD_LINK_CODES = Object.freeze(['EPERM', 'ENOTSUP']);
+
+/**
+ * A fresh claim token: 8 random bytes as 16 hex characters.
+ *
+ * @returns {string}
+ */
+function newClaimToken() {
+  return crypto.randomBytes(8).toString('hex');
+}
+
+/** Throw a TypeError unless `token` is a claim token: a malformed one is a caller error. */
+function assertClaimToken(opName, token) {
+  if (typeof token !== 'string' || !CLAIM_TOKEN_RE.test(token)) {
+    throw new TypeError(`${opName}: a claim token is 16 lowercase hex characters`);
+  }
+}
+
+/**
+ * The Stats of `file` when it is a regular file, null when nothing is there, and
+ * false for anything else — a directory or a symlink — which the claim ops
+ * refuse rather than follow or replace.
+ *
+ * @param {string} file
+ * @returns {fs.Stats|null|false}
+ */
+function regularFileStat(file) {
+  let stat;
+  try {
+    stat = fs.lstatSync(file);
+  } catch (err) {
+    if (err && (err.code === 'ENOENT' || err.code === 'ENOTDIR')) return null;
+    throw err;
+  }
+  return stat.isFile() ? stat : false;
+}
+
+/** The error Result for a claim path holding something other than a regular file. */
+function notRegularFile(opName, file) {
+  return { ok: false, error: { kind: 'not-a-file', message: `${opName}: ${file} is not a regular file; remove it by hand` } };
+}
+
+/** Delete `file`; one that is already gone is fine. */
+function removeIfPresent(file) {
+  try {
+    fs.unlinkSync(file);
+  } catch (err) {
+    if (!err || err.code !== 'ENOENT') throw err;
+  }
+}
+
+/** The token the owner file records, or null when it is absent or holds no token. */
+function readClaimOwner(root) {
+  let text;
+  try {
+    text = fs.readFileSync(getLearningClaimOwnerPath(root), 'utf8');
+  } catch (err) {
+    if (err && err.code === 'ENOENT') return null;
+    throw err;
+  }
+  const token = text.trim();
+  return CLAIM_TOKEN_RE.test(token) ? token : null;
+}
+
+/**
+ * Move the queue to the claim path under the queue's own lock, the lock
+ * queue-append's overflow truncation takes, so a truncation can never rewrite the
+ * queue from rows already claimed. link(2) refuses an existing claim; on a
+ * filesystem without hard links a rename stands in, which is safe because the
+ * caller found the claim path empty under the learning lock. A row a capture hook
+ * appends meanwhile lands in the claimed batch or in the queue formed after it,
+ * never in neither.
+ *
+ * @param {string} queuePath
+ * @param {string} claimPath
+ * @returns {'moved'|'busy'|'none'} busy when the queue lock is held or a claim
+ *   appeared; none when the queue vanished first
+ */
+function moveQueueToClaim(queuePath, claimPath) {
+  const queueLock = `${queuePath}.lock`;
+  if (!acquireMkdirLock(queueLock, QUEUE_LOCK_TIMEOUT_MS, QUEUE_LOCK_STALE_MS)) return 'busy';
+  try {
+    try {
+      fs.linkSync(queuePath, claimPath);
+    } catch (err) {
+      if (err && err.code === 'EEXIST') return 'busy';
+      if (err && err.code === 'ENOENT') return 'none';
+      if (!err || !NO_HARD_LINK_CODES.includes(err.code)) throw err;
+      try {
+        fs.renameSync(queuePath, claimPath);
+      } catch (renameErr) {
+        if (renameErr && renameErr.code === 'ENOENT') return 'none';
+        throw renameErr;
+      }
+      return 'moved';
+    }
+    try {
+      removeIfPresent(queuePath);
+    } catch (err) {
+      // Undo the link, so the rows stay queued once rather than claimed and queued.
+      // The unlink error is the one to report; a failed undo leaves the claim to
+      // go stale and be taken over.
+      try { fs.unlinkSync(claimPath); } catch { /* reported through err */ }
+      throw err;
+    }
+    return 'moved';
+  } finally {
+    releaseLock(queueLock);
+  }
+}
+
+/**
+ * Claim the learning queue for one Learning run.
+ *
+ * D-OWNED-CLAIM: the learning queue is claimed and released only through the
+ * claim-queue and release-claim ops, under the learning lock. A claim moves the
+ * queue to .pending-turns.processing by link(2), under the queue's own lock (a
+ * rename stands in only where the filesystem has no hard links), sets the claim's
+ * mtime to now and records a fresh random token in .pending-turns.owner. A claim
+ * younger than CLAIM_STALE_SECS is busy to every other claimant; an older one is
+ * taken over with a new token, and the waiting queue is left for the next claim.
+ * Release deletes the claim only for the token that owns it, and every json-helper
+ * learning op refreshes an existing claim's mtime before it runs, without ever
+ * creating one. Reason: a check-then-mv claim let two runs claim at once and
+ * clobber a batch, mv kept the queue's old mtime so a fresh claim could look stale
+ * at once, and an unconditional final unlink deleted another run's claim.
+ *
+ * Without .devflow/learning/ it answers none and creates nothing.
+ *
+ * @param {string} root - project root
+ * @param {{ now?: number, token?: string, timeoutMs?: number }} [opts]
+ *   now: epoch ms (default Date.now()); token: the token to record (default a fresh one)
+ * @returns {{ ok: true, value: { state: 'claimed', token: string, takeover: boolean } | { state: 'busy' } | { state: 'none' } }
+ *   | { ok: false, error: { kind: string, message: string } }}
+ * @throws {TypeError} when `token` is not a claim token
+ */
+function claimQueue(root, { now = Date.now(), token = newClaimToken(), timeoutMs } = {}) {
+  assertClaimToken('claimQueue', token);
+  if (!hasLearningDir(root)) return { ok: true, value: { state: 'none' } };
+  return withDecisionsLock('claim-queue', root, () => {
+    const claimPath = getLearningPendingTurnsProcessingPath(root);
+    const queuePath = getLearningPendingTurnsPath(root);
+    const at = new Date(now);
+
+    const claim = regularFileStat(claimPath);
+    if (claim === false) return notRegularFile('claim-queue', claimPath);
+    if (claim !== null) {
+      if (now - claim.mtimeMs < CLAIM_STALE_SECS * 1000) return { ok: true, value: { state: 'busy' } };
+      writeFileAtomic(getLearningClaimOwnerPath(root), `${token}\n`);
+      fs.utimesSync(claimPath, at, at);
+      return { ok: true, value: { state: 'claimed', token, takeover: true } };
+    }
+
+    const queue = regularFileStat(queuePath);
+    if (queue === false) return notRegularFile('claim-queue', queuePath);
+    if (queue === null || queue.size === 0) return { ok: true, value: { state: 'none' } };
+
+    const moved = moveQueueToClaim(queuePath, claimPath);
+    if (moved !== 'moved') return { ok: true, value: { state: moved } };
+    fs.utimesSync(claimPath, at, at);
+    writeFileAtomic(getLearningClaimOwnerPath(root), `${token}\n`);
+    return { ok: true, value: { state: 'claimed', token, takeover: false } };
+  }, { timeoutMs });
+}
+
+/**
+ * Release the claim `token` owns (D-OWNED-CLAIM): delete the claim and the owner
+ * file when the token owns it (released); refuse when another token does
+ * (not-owner); report a claim that is already gone (gone), deleting the owner
+ * file only when it names this token.
+ *
+ * @param {string} root - project root
+ * @param {string} token
+ * @param {{ timeoutMs?: number }} [opts]
+ * @returns {{ ok: true, value: { state: 'released'|'not-owner'|'gone' } } | { ok: false, error: { kind: string, message: string } }}
+ *   errors include withDecisionsLock's no-learning-dir and busy
+ * @throws {TypeError} when `token` is not a claim token
+ */
+function releaseClaim(root, token, { timeoutMs } = {}) {
+  assertClaimToken('releaseClaim', token);
+  return withDecisionsLock('release-claim', root, () => {
+    const claimPath = getLearningPendingTurnsProcessingPath(root);
+    const ownerPath = getLearningClaimOwnerPath(root);
+    const owned = readClaimOwner(root) === token;
+
+    const claim = regularFileStat(claimPath);
+    if (claim === false) return notRegularFile('release-claim', claimPath);
+    if (claim === null) {
+      if (owned) removeIfPresent(ownerPath);
+      return { ok: true, value: { state: 'gone' } };
+    }
+    if (!owned) return { ok: true, value: { state: 'not-owner' } };
+    removeIfPresent(claimPath);
+    removeIfPresent(ownerPath);
+    return { ok: true, value: { state: 'released' } };
+  }, { timeoutMs });
+}
+
+/**
+ * The claim heartbeat (D-OWNED-CLAIM): set an existing claim's mtime to now. It
+ * never creates a claim and never follows a symlink at the claim path, and it
+ * takes no lock — json-helper sends it before each learning op runs.
+ *
+ * @param {string} root - project root
+ * @param {{ now?: number }} [opts] - now: epoch ms (default Date.now())
+ * @returns {{ ok: true, value: { touched: boolean } } | { ok: false, error: { kind: 'heartbeat-failed', message: string } }}
+ */
+function touchClaim(root, { now = Date.now() } = {}) {
+  const claimPath = getLearningPendingTurnsProcessingPath(root);
+  const at = new Date(now);
+  try {
+    fs.lutimesSync(claimPath, at, at);
+  } catch (err) {
+    if (err && (err.code === 'ENOENT' || err.code === 'ENOTDIR')) return { ok: true, value: { touched: false } };
+    return {
+      ok: false,
+      error: { kind: 'heartbeat-failed', message: `heartbeat: could not refresh ${claimPath}: ${err && err.message}` },
+    };
+  }
+  return { ok: true, value: { touched: true } };
+}
+
+// ---------------------------------------------------------------------------
 // Integrity, listing, due selection and show — all read-only
 // ---------------------------------------------------------------------------
 
@@ -1383,6 +1633,13 @@ module.exports = {
   ensurePreV2Backup,
   // Rotation
   rotateObservations,
+  // The queue claim
+  CLAIM_STALE_SECS,
+  CLAIM_TOKEN_RE,
+  newClaimToken,
+  claimQueue,
+  releaseClaim,
+  touchClaim,
   // Integrity, listing, due selection and show
   integrityFlags,
   buildListing,

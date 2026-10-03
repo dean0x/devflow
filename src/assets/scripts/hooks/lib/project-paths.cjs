@@ -57,9 +57,14 @@ function getLearningPendingTurnsPath(projectRoot) {
   return path.join(projectRoot, '.devflow', 'learning', '.pending-turns.jsonl');
 }
 
-/** .devflow/learning/.pending-turns.processing — atomic claim held by the Learning agent while processing */
+/** .devflow/learning/.pending-turns.processing — the claimed batch a Learning run holds while it processes it */
 function getLearningPendingTurnsProcessingPath(projectRoot) {
   return path.join(projectRoot, '.devflow', 'learning', '.pending-turns.processing');
+}
+
+/** .devflow/learning/.pending-turns.owner — the token of the run that holds the claim (learning-store.cjs) */
+function getLearningClaimOwnerPath(projectRoot) {
+  return path.join(projectRoot, '.devflow', 'learning', '.pending-turns.owner');
 }
 
 // ---------------------------------------------------------------------------
@@ -175,6 +180,7 @@ module.exports = {
   // Learning queue files
   getLearningPendingTurnsPath,
   getLearningPendingTurnsProcessingPath,
+  getLearningClaimOwnerPath,
   // Learning content files
   getDecisionsFilePath,
   getPitfallsFilePath,
