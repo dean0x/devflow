@@ -91,13 +91,13 @@ identical rule in shell. Deliberately NOT built on `readManifest()`: that return
 manifest missing required fields (must still read "on" here) and writes heals back to disk,
 which a read-only gate must never do.
 
-**Legacy key coalescing** (`learning`←`decisions`, `knowledge`←`kb`, per ADR-011's rename): a
+**Legacy key coalescing** (`learning`←`decisions`, `knowledge`←`kb`): a
 feature reads its current key when that is a boolean, else its legacy key when THAT is a
 boolean, else ON — `isMachineFeatureOn`'s `LEGACY_KEYS` map and `queue_read_gates`'s jq/node
 fallback apply the identical precedence for `learning`/`decisions` (D-LEARNING-LEGACY-DECISIONS),
 so the hook and the CLI never disagree. `knowledge`/`kb` follows the same rule
 (D-KNOWLEDGE-LEGACY-KB), except `queue_read_gates` never reads knowledge (no shell mirror), and
-`knowledge_writeback` deliberately does not learn the legacy `kb` key (ADR-028: no prompt text
+`knowledge_writeback` deliberately does not learn the legacy `kb` key (no prompt text
 for a state only an un-upgraded install can hold) — some other command's `readManifest()` heals
 it on disk first.
 
@@ -128,7 +128,7 @@ Config splits along a different line than before #378:
 
 `.devflow/config.json`'s only feature-adjacent field left is the optional `tracker` key — a
 per-repo provider override, not a boolean toggle (`FeatureConfig.tracker` is `unknown`,
-unvalidated at the field level; ADR-011's neutral-config-home rationale now applies only to this
+unvalidated at the field level; the original rationale for a neutral config home now applies only to this
 field). It round-trips through `coerceConfig`/`mergeManagedConfig` byte-for-byte
 (D-CONFIG-PRESERVE-UNMANAGED). It has two readers that must agree: `parseTrackerOverride`
 (TypeScript, routes through `parseTrackerId`, returning `{absent | valid | invalid}`) and
@@ -138,7 +138,7 @@ consumes — `tests/seams/tracker-key-path.test.ts` pins them to the same verdic
 
 ### Project Roots (D-HOOKS-GIT-ONLY, D-LEDGER-MAIN-WORKTREE)
 
-Hooks resolve roots from git, never from cwd. `resolve-project-root`'s `df_resolve_roots <cwd>` makes ONE `git rev-parse --path-format=absolute --show-toplevel --git-common-dir` call, accepts exactly two absolute lines (else falls back to `df_resolve_root` — git < 2.31 echoes the flag as a third line), and sets `DF_ROOT` (the checkout toplevel: memory, carve-out, KBs) and `DF_LEDGER_ROOT` (the main worktree = parent of a `…/.git` common dir, when `$MAIN/.devflow` already exists and the main worktree is not HOME — `df_is_project_root "$MAIN"`, a physical-path compare, since a dotfiles repo's `~/.devflow` is the machine root and always exists; else `DF_ROOT`). The capture hooks append learning turns under `DF_LEDGER_ROOT` and pass it to `decisions-usage-scan.cjs`; `session-start-context` reads the TL;DR, the queue and `learning.json` there and names it in the directive; memory stays at `DF_ROOT`. A worktree ledger created before this rule stays on disk, unused. `ensure-devflow-init` scaffolds `learning/` only when `DF_LEDGER_ROOT` is `DF_ROOT`: a linked worktree whose ledger is at main gets no `learning/`, and the capture hooks create the ledger's own `learning/` when they append. `ensure-devflow-init` and `session-start-context` both refuse per-project work unless `df_is_project_root` (git-marker) passes — a `.git` entry AT the root (a directory, or a linked worktree's or submodule's file; never one found by walking up, D-HOOKS-TOPLEVEL-ONLY) AND a physical path that is not HOME's — so memory and learning stop together outside git and in a HOME-rooted repo, and when `git rev-parse` fails from a subdirectory (dubious ownership, `GIT_CEILING_DIRECTORIES`) the raw-cwd fallback root is refused rather than scaffolded. `ensure-root-gitignore` itself stays ungated (PF-059 parity suite runs it in plain dirs).
+Hooks resolve roots from git, never from cwd. `resolve-project-root`'s `df_resolve_roots <cwd>` makes ONE `git rev-parse --path-format=absolute --show-toplevel --git-common-dir` call, accepts exactly two absolute lines (else falls back to `df_resolve_root` — git < 2.31 echoes the flag as a third line), and sets `DF_ROOT` (the checkout toplevel: memory, carve-out, KBs) and `DF_LEDGER_ROOT` (the main worktree = parent of a `…/.git` common dir, when `$MAIN/.devflow` already exists and the main worktree is not HOME — `df_is_project_root "$MAIN"`, a physical-path compare, since a dotfiles repo's `~/.devflow` is the machine root and always exists; else `DF_ROOT`). The capture hooks append learning turns under `DF_LEDGER_ROOT` and pass it to `decisions-usage-scan.cjs`; `session-start-context` reads the TL;DR, the queue and `learning.json` there and names it in the directive; memory stays at `DF_ROOT`. A worktree ledger created before this rule stays on disk, unused. `ensure-devflow-init` scaffolds `learning/` only when `DF_LEDGER_ROOT` is `DF_ROOT`: a linked worktree whose ledger is at main gets no `learning/`, and the capture hooks create the ledger's own `learning/` when they append. `ensure-devflow-init` and `session-start-context` both refuse per-project work unless `df_is_project_root` (git-marker) passes — a `.git` entry AT the root (a directory, or a linked worktree's or submodule's file; never one found by walking up, D-HOOKS-TOPLEVEL-ONLY) AND a physical path that is not HOME's — so memory and learning stop together outside git and in a HOME-rooted repo, and when `git rev-parse` fails from a subdirectory (dubious ownership, `GIT_CEILING_DIRECTORIES`) the raw-cwd fallback root is refused rather than scaffolded. `ensure-root-gitignore` itself stays ungated (the carve-out parity tests run it in plain dirs).
 
 ### Capture Hook Protocol
 
@@ -195,7 +195,7 @@ then skip when `~/.devflow/tracker/$P.md` already exists.
 must land. The GitHub path and a provider whose conventions are learned fork ZERO subprocesses.
 
 **`.tracker.{provider}.attempts`** (one counter per provider; the claim file
-`.tracker.processing` stays global) is one decimal-integer line and nothing else (PF-062) —
+`.tracker.processing` stays global) is one decimal-integer line and nothing else —
 absent/malformed/zero-padded → 0, self-healed; 7+ digits treated as already at
 `TRACKER_ATTEMPTS_MAX=5` (a naive `-ge` on an out-of-range value fails OPEN). The hook
 increments on EMISSION (a crashed agent still burns an attempt); the agent deletes the counter
@@ -223,7 +223,7 @@ shared with `session-start-context`. **Processing**: Part 1 (detection) reads cl
 log, appends/reinforces observations, promotes via `assign-anchor`, calls `refresh-anchor` after
 reinforcing anchored obs; Part 2 (curation) runs `rotate-observations`/`retire-anchor`/
 `refresh-anchor` for citation cleanup, heartbeating `.processing` at the boundary. **Final act**:
-`unlink .pending-turns.processing` (PF-003 — `rm -f` denied; `unlink` passes).
+`unlink .pending-turns.processing` (`rm -f` denied; `unlink` passes).
 
 **Ledger ops** — four, all via `json-helper.cjs`: `assign-anchor`, `retire-anchor`,
 `refresh-anchor`, `rotate-observations`. Each self-locks (`withDecisionsLock`, `.decisions.lock`,
@@ -233,29 +233,29 @@ reinforcing anchored obs; Part 2 (curation) runs `rotate-observations`/`retire-a
 `index.md` (each write atomic; the sequence self-heals on the next op after a crash).
 `assign-anchor` writes `anchor_id` back to the log row (arming a guard against a duplicate call)
 and stamps `date` — older pitfall rows promoted before date-stamping may lack `date` (D5 fallback
-in Gotchas). `refresh-anchor <anchor_id> [...]` (ADR-022 content-update path) is variadic — ONE
+in Gotchas). `refresh-anchor <anchor_id> [...]` (the log-to-ledger content-update path) is variadic — ONE
 lock + ONE parse + ONE render for N anchors, all-or-nothing: locates the log obs by the LEDGER
-ROW's `id` (not `anchor_id` — covers pre-write-back corpora, avoids PF-041), runs the REG-1
+ROW's `id` (not `anchor_id` — covers pre-write-back corpora), runs the REG-1
 details-divergence guard (refuses when ledger `details` carries content absent from the log
 row), re-projects via `toLedgerRow`, asserts row-count unchanged, writes once, renders once. A
 ledger-existence guard refuses before acquiring the lock when no `decisions-ledger.jsonl`
-exists; PF-014 throw-not-exit discipline applies to every error path (`process.exit()` skips
+exists; throw-not-exit discipline applies to every error path (`process.exit()` skips
 `finally` and leaks the lock — the outer `catch` in `require.main === module` prints
 `json-helper error: <message>` and exits 1 instead).
 
-`toLedgerRow` is a positive whitelist projector (ADR-022): committed row is exactly `{id, type,
+`toLedgerRow` is a positive whitelist projector: committed row is exactly `{id, type,
 pattern, details, anchor_id, decisions_status}` plus optional `{date, raw_body, amendments}` —
-sink-validated (PF-023: type-mismatch throws, `pattern` line-terminator collapse prevents forged
+sink-validated (type-mismatch throws, `pattern` line-terminator collapse prevents forged
 `## ADR-NNN:` headings, `raw_body` gated by `isSafeRawBody`). A new ledger field must be added
 here or it never survives projection. **details grammar**: `Key: value;` segments, anchored-key
 detection at segment start (`reissue:` does not match `issue:`); decision keys `context`/
 `decision`/`rationale`, pitfall keys `area`/`issue`/`impact`/`resolution`.
-`decisions-format.cjs#segmentDetails` is the single authority (avoids PF-042); its **recovery
-pass** (PF-044) searches any still-unset key via unanchored regex for legacy mid-segment rows,
+`decisions-format.cjs#segmentDetails` is the single authority (avoids delimiter-regex truncation); its **recovery
+pass** searches any still-unset key via unanchored regex for legacy mid-segment rows,
 never overriding an anchored match. **7-day protection window (D5)**: ledger `date` → log
-`last_seen` → assume outside window — never assume the ledger row has `date`. **PF-040**: before
+`last_seen` → assume outside window — never assume the ledger row has `date`. **Pointer vs. citation**: before
 acting on a missing-path signal, determine live pointer (repair) vs. historical citation (leave
-intact). **Directory bootstrapping** (PF-013): all three write ops `mkdirSync(recursive: true)`
+intact). **Directory bootstrapping**: all three write ops `mkdirSync(recursive: true)`
 before acquiring the lock, creating `.devflow/learning/` on first run.
 
 ### Tracker Agent
@@ -273,9 +273,9 @@ Shared pure formatting helpers (single source of truth for byte-compatible outpu
 `segmentDetails` (anchored-key parser; `LINE_TERMINATORS` `/[\r\n  ]/g` collapses at five sites
 to guard the single-line field contract); `amendmentToString(entry)` (normalises `{date, note}`
 objects — a bare `join` would emit `[object Object]`, load-bearing); `isSafeRawBody(body,
-anchorId)` (PF-023 sink — accepts only a string with exactly one `## ${anchorId}:` heading;
+anchorId)` (the validating sink — accepts only a string with exactly one `## ${anchorId}:` heading;
 rejected bodies render through the sanitised formatter); the `amendments` producer (`{date,
-note}` objects only, schema rejects bare strings, PF-024 — follow with `refresh-anchor` to
+note}` objects only, schema rejects bare strings — follow with `refresh-anchor` to
 propagate). **Date purity**: formatters read `row.date || ''` — no clock reads inside a
 formatter (D5).
 
@@ -287,7 +287,7 @@ as `$2` (`background-memory-update <CWD> [<manifest_path>]`) — the worker re-c
 after spawn against the same manifest. When `$2` is absent, the worker falls back to
 `$HOME/.devflow/manifest.json`. An exported `DEVFLOW_DIR` is ignored everywhere (D-ONE-HOME).
 
-**Staged-write CAS (`verify_and_swap()` — applies ADR-023)**: the model writes ONLY
+**Staged-write CAS (`verify_and_swap()`)**: the model writes ONLY
 `WORKING-MEMORY.md.new`, never the real file; `verify_and_swap()` assigns one OUTCOME —
 `updated` (valid stamp + matching pre/post cksums → atomic `mv`, remove `.processing`, touch
 `.last-refresh-ok`), `conflict` (cksum mismatch or failure → staged file dropped, `.processing`
@@ -310,12 +310,12 @@ Stop array, but only so the two produce identical settings.json.
 literals form a **test contract**: no-stamp full-synthesis, invalid-SHA-format,
 SHA-not-ancestor-of-HEAD, none-current-as-of-HEAD, and `N commit(s)... (showing newest 20)`
 (disclosure only when total > 20; subjects bounded at `%.100s`). **Prompt security**: the four
-untrusted data blocks are wrapped in named XML tags with a DATA-not-instructions preamble
-(PF-023); the prompt is passed via heredoc stdin, never argv (visible to `ps(1)`).
+untrusted data blocks are wrapped in named XML tags with a DATA-not-instructions preamble;
+the prompt is passed via heredoc stdin, never argv (visible to `ps(1)`).
 
 ### Shared Sourced Helpers, Bootstrap, and Refresh-Failing Detection
 
-**`is-hex-sha`** (sourced, no forks, PF-008-safe): `is_hex_sha <value> [min=7] [max=40]`.
+**`is-hex-sha`** (sourced, no forks, no pipe to mask its exit status): `is_hex_sha <value> [min=7] [max=40]`.
 `background-memory-update`/`session-start-memory` use the default 7–40; `pre-compact-memory`
 requires exactly 40 (a full SHA). **pre-compact-memory** bootstraps `WORKING-MEMORY.md` only
 when `is_hex_sha "$GIT_HEAD_SHA" 40 40` (an unborn branch fails); a detached HEAD is labelled
@@ -335,7 +335,7 @@ BOTH `.pending-turns.jsonl` and `.pending-turns.processing` additively, so an or
 --show-toplevel --git-common-dir` and read `{ledger}/.devflow/learning/index.md`, where `{ledger}`
 is the main worktree (when its `.devflow/` exists and it is not HOME), else the toplevel (on git < 2.31, the line
 after the echoed `--path-format=absolute`), else the start directory —
-the hooks' D-LEDGER-MAIN-WORKTREE rule (D-PROMPT-ROOT). No script (ADR-007). Absent/empty →
+the hooks' D-LEDGER-MAIN-WORKTREE rule (D-PROMPT-ROOT). No script. Absent/empty →
 `DECISIONS_CONTEXT` is `(none)`. Consuming
 commands use `devflow:apply-decisions`: scan index → Read entry bodies on demand → cite verbatim
 IDs. Never parse `decisions-ledger.jsonl` directly.
@@ -453,11 +453,11 @@ Do not rename them: `decisions.md`/`pitfalls.md` (rendered output), `decisions-l
 - **Editing `decisions.md`/`pitfalls.md`/`index.md` directly**: exclusively owned by the ledger
   ops; hand-edits get silently overwritten.
 
-- **Editing the ledger directly for content changes**: the log is the content authority
-  (ADR-022); edit the log row then call `refresh-anchor`.
+- **Editing the ledger directly for content changes**: the log is the content authority;
+  edit the log row then call `refresh-anchor`.
 
 - **Using `rm -f` to delete `.pending-turns.processing`**: denied by the recommend deny-list
-  (denial keys on flags, not verb — PF-003). Use `unlink`; a flagless `rm` also passes.
+  (denial keys on flags, not verb). Use `unlink`; a flagless `rm` also passes.
 
 - **Skipping the model allowlist in `session-start-context`**: always apply `case "$LEARNING_MODEL"
   in opus|sonnet|haiku)` before interpolating — the tracker directive applies the identical
@@ -476,7 +476,7 @@ Do not rename them: `decisions.md`/`pitfalls.md` (rendered output), `decisions-l
   `parseTrackerOverride`, not a hand-rolled check.
 
 - **Simulating a missing shell tool by subtracting it from `PATH`** in a hook test:
-  platform-dependent. Force a backend via a variable override (`_HAS_JQ=false`) instead (PF-045).
+  platform-dependent. Force a backend via a variable override (`_HAS_JQ=false`) instead.
 
 ## Gotchas
 
@@ -534,7 +534,7 @@ Do not rename them: `decisions.md`/`pitfalls.md` (rendered output), `decisions-l
   `features.learning: false` on the test machine would otherwise silently gate the test.
 
 - **A shell command-rewrite hook can silently truncate a `cat`/`head` read of a `.devflow` data
-  file**, announced only on stderr — exactness-critical reads need the Read tool (PF-035).
+  file**, announced only on stderr — exactness-critical reads need the Read tool.
 
 ## Key Files
 
@@ -571,26 +571,26 @@ Do not rename them: `decisions.md`/`pitfalls.md` (rendered output), `decisions-l
 | `src/hud/components/learning-counts.ts` | HUD counts from `decisions-ledger.jsonl` |
 | `src/core/ledger-root.ts` | `getLedgerRoot` — the CLI/HUD twin of the hooks' `DF_LEDGER_ROOT` |
 | `src/assets/commands/_partials/_knowledge.mds` | `knowledge_load()`/`knowledge_writeback()` — write-back takes `KNOWLEDGE=` from the settings line |
-| `src/assets/commands/_partials/_decisions.mds` | `decisions_load()` macro (plain file Read per ADR-007) |
+| `src/assets/commands/_partials/_decisions.mds` | `decisions_load()` macro (plain file Read) |
 | `src/assets/scripts/hooks/decisions-usage-scan.cjs` | Citation counter (D29 grep-first gate) |
 | `tests/seams/tracker-key-path.test.ts`, `tests/seams/tracker-claim-staleness.test.ts` | Pin key-path parity and the shared claim-staleness bound |
 
 ## Related
 
-- **ADR-022** — decisions-log.jsonl is the single content authority; the ledger is an anchor registry; ops project log→ledger→rendered .md; `refresh-anchor` is the projection-refresh path
-- **ADR-023** — staged CAS for the memory worker (`WORKING-MEMORY.md.new`); `verify_and_swap()` is the sole CAS decision point; `CKSUM_FAILED` forces conflict (fail-closed)
-- **PF-044** — REG-1 divergence guard in `refresh-anchor`; recovery pass in `segmentDetails` for legacy mid-segment keys
-- **PF-023** — validate at the sink: `isSafeRawBody` in `toLedgerRow`; named XML tags in memory worker prompt
-- **PF-042** — `segmentDetails` anchored-key approach avoids delimiter-regex truncation
-- **PF-040** — pointer-vs-citation gate for missing-path signals in decisions/evidence
-- **ADR-007** — `index.md` consumption via plain Read; no subprocess
-- **ADR-011** — original rationale for a neutral, feature-agnostic config home for multi-feature toggles; superseded for memory/learning/knowledge by D-FEATURES-NARROW-ONLY (`src/core/feature-switch.ts`, #378/#392: machine switch, repository narrows via the new `features` namespace) — its top-level toggles stay retired
-- **PF-003** — use `unlink` not `rm -f` for the agent's final act
-- **PF-014** — throw inside lock scopes, never `process.exit()`; precondition asserts in `refresh-anchor`
-- **PF-013** — parent directory of lock dir created before acquire (`withDecisionsLock`)
-- **PF-045** — simulating a missing shell tool via `PATH` subtraction is platform-dependent; `tests/shell-hooks-tracker.test.ts` avoids it with a backend variable-switch override (`_HAS_JQ=false`)
-- **PF-062** — document the shape of any file that gates a suppressing action, and keep absent and malformed distinct from a value; the `.tracker.{provider}.attempts` parse follows this directly
-- **PF-035** — a shell rewrite hook can silently substitute a lossy view for a literal file read; the load-bearing surface is exactly the Learning/Tracker agents' direct `.devflow` data-file consumption
+- decisions-log.jsonl is the single content authority; the ledger is an anchor registry; ops project log→ledger→rendered .md; `refresh-anchor` is the projection-refresh path
+- Staged CAS for the memory worker (`WORKING-MEMORY.md.new`); `verify_and_swap()` is the sole CAS decision point; `CKSUM_FAILED` forces conflict (fail-closed)
+- REG-1 divergence guard in `refresh-anchor`; recovery pass in `segmentDetails` for legacy mid-segment keys
+- Validate at the sink: `isSafeRawBody` in `toLedgerRow`; named XML tags in memory worker prompt
+- `segmentDetails` anchored-key approach avoids delimiter-regex truncation
+- Pointer-vs-citation gate for missing-path signals in decisions/evidence
+- `index.md` consumption via plain Read; no subprocess
+- Original rationale for a neutral, feature-agnostic config home for multi-feature toggles; superseded for memory/learning/knowledge by D-FEATURES-NARROW-ONLY (`src/core/feature-switch.ts`, #378/#392: machine switch, repository narrows via the new `features` namespace) — its top-level toggles stay retired
+- Use `unlink` not `rm -f` for the agent's final act
+- Throw inside lock scopes, never `process.exit()`; precondition asserts in `refresh-anchor`
+- Parent directory of lock dir created before acquire (`withDecisionsLock`)
+- Simulating a missing shell tool via `PATH` subtraction is platform-dependent; `tests/shell-hooks-tracker.test.ts` avoids it with a backend variable-switch override (`_HAS_JQ=false`)
+- Document the shape of any file that gates a suppressing action, and keep absent and malformed distinct from a value; the `.tracker.{provider}.attempts` parse follows this directly
+- A shell rewrite hook can silently substitute a lossy view for a literal file read; the load-bearing surface is exactly the Learning/Tracker agents' direct `.devflow` data-file consumption
 - `.devflow/features/feature-knowledge-system/KNOWLEDGE.md` — Knowledge agent write-back pattern (parallel write-through system); its opt-out gate takes `KNOWLEDGE=` from the settings line, which folds the same `features.knowledge` switch this KB documents with the two repo files
 - `.devflow/features/ambient-orchestrator/KNOWLEDGE.md` — Ambient orchestrator that also uses `session-start-context` for charter injection
 - `.devflow/features/tracker-feature/KNOWLEDGE.md` — owns the tracker feature's full story (provider selection, the Tracker agent's schema/domain, the Git agent's reader-side preamble); this KB owns only the hook plumbing and the directive pattern shared with Section 2
