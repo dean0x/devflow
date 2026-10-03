@@ -578,16 +578,17 @@ function textProblem(value, limit) {
 }
 
 /**
- * The problem with prose that rots, or null: a ledger anchor the ledger holds
- * (when `ledgerIds` is given), an issue reference (when `issueRefs`), and a
- * file-and-line reference (always).
+ * The problem with title, rule or why prose that rots, or null: an anchor the
+ * ledger holds, an issue reference or a file-and-line reference.
+ *
+ * @param {string} value
+ * @param {Set<string>} ledgerIds - every anchor in the ledger
+ * @returns {string|null}
  */
-function proseProblem(value, { ledgerIds, issueRefs }) {
-  if (ledgerIds) {
-    const named = (value.match(PROSE_ANCHOR_RE) || []).find(anchor => ledgerIds.has(anchor));
-    if (named) return `names ledger entry ${named}; state the rule in words`;
-  }
-  if (issueRefs && ISSUE_REF_RE.test(value)) return 'carries an issue reference; state what it established instead';
+function proseProblem(value, ledgerIds) {
+  const named = (value.match(PROSE_ANCHOR_RE) || []).find(anchor => ledgerIds.has(anchor));
+  if (named) return `names ledger entry ${named}; state the rule in words`;
+  if (ISSUE_REF_RE.test(value)) return 'carries an issue reference; state what it established instead';
   if (FILE_LINE_REF_RE.test(value)) return 'carries a file-and-line reference; name the function or quote the line instead';
   return null;
 }
@@ -636,7 +637,7 @@ function evidenceErrors(evidence) {
   }
   const errors = [];
   evidence.forEach((item, i) => {
-    const problem = textProblem(item, FIELD_LIMITS.evidenceItem) || proseProblem(item, { ledgerIds: null, issueRefs: false });
+    const problem = textProblem(item, FIELD_LIMITS.evidenceItem);
     if (problem) errors.push({ field: `evidence[${i}]`, message: problem });
   });
   return errors;
@@ -655,11 +656,12 @@ function evidenceErrors(evidence) {
  * a counter, a status or an anchor would let the writer forge plumbing state.
  *
  * Field rules: text is one line with no control characters, not blank, and within
- * FIELD_LIMITS. Title, rule and why may not name an anchor the ledger holds or
- * carry an issue reference (`#` and digits after a non-word character other than
- * `&`); no prose field may carry a file-and-line reference. A scope entry is an
- * area tag or a glob that is relative, has no `..` segment, whitespace, backtick or
- * `|`, and matches at least one tracked file.
+ * FIELD_LIMITS. Title, rule and why may not name an anchor the ledger holds, carry
+ * an issue reference (`#` and digits after a non-word character other than `&`) or
+ * carry a file-and-line reference; provenance and evidence record where a lesson
+ * came from and may cite all three. A scope entry is an area tag or a glob that is
+ * relative, has no `..` segment, whitespace, backtick or `|`, and matches at least
+ * one tracked file.
  *
  * @param {unknown} input - the parsed stdin object
  * @param {{
@@ -709,14 +711,14 @@ function validateObservationInput(input, { mode, existing = null, ledgerIds = []
     const ledgerIdSet = new Set(ledgerIds);
     for (const field of ['title', 'rule', 'why']) {
       fieldError(field, missing(field) || (present(field)
-        ? textProblem(input[field], FIELD_LIMITS[field]) || proseProblem(input[field], { ledgerIds: ledgerIdSet, issueRefs: true })
+        ? textProblem(input[field], FIELD_LIMITS[field]) || proseProblem(input[field], ledgerIdSet)
         : null));
     }
     const scopeMissing = missing('scope');
     if (scopeMissing) fieldError('scope', scopeMissing);
     else errors.push(...scopeErrors(input.scope, scopeMatches));
     fieldError('provenance', missing('provenance') || (present('provenance')
-      ? textProblem(input.provenance, FIELD_LIMITS.provenance) || proseProblem(input.provenance, { ledgerIds: null, issueRefs: false })
+      ? textProblem(input.provenance, FIELD_LIMITS.provenance)
       : null));
     errors.push(...evidenceErrors(input.evidence));
   }

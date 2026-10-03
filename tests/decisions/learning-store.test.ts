@@ -669,12 +669,15 @@ describe('validateObservationInput: ledger IDs, issue references and file-and-li
     expect(validate(createInput({ title: 'Escape &#123; and keep C#10 interop' })).ok).toBe(true);
   });
 
-  it('refuses a file-and-line reference in every prose field', () => {
+  it('refuses a file-and-line reference in the title, the rule or the why', () => {
     expect(errorFields(validate(createInput({ title: 'Broken at render-decisions.cjs#L42' })))).toEqual(['title']);
     expect(errorFields(validate(createInput({ rule: 'The guard at json-helper.cjs:781 reads the log row.' })))).toEqual(['rule']);
     expect(errorFields(validate(createInput({ why: 'See src/core/a.ts:12:5 for the call.' })))).toEqual(['why']);
-    expect(errorFields(validate(createInput({ provenance: 'found in README.md:3' })))).toEqual(['provenance']);
-    expect(errorFields(validate(createInput({ evidence: ['quoted from lib/x.py:10'] })))).toEqual(['evidence[0]']);
+  });
+
+  it('allows a file-and-line reference in the provenance and the evidence', () => {
+    expect(validate(createInput({ provenance: 'found in README.md:3' })).ok).toBe(true);
+    expect(validate(createInput({ evidence: ['quoted from lib/x.py:10', 'see render-decisions.cjs#L42'] })).ok).toBe(true);
   });
 
   it('passes a host and port', () => {
