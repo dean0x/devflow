@@ -239,9 +239,11 @@ afterAll(() => {
   }
 })
 
+/** A temporary project root holding an empty `.devflow/learning/`, which renderAndWriteAll requires. */
 function makeTmp(): string {
   const d = fs.mkdtempSync(path.join(os.tmpdir(), 'idx-content-test-'))
   tmpDirs.push(d)
+  fs.mkdirSync(path.join(d, '.devflow', 'learning'), { recursive: true })
   return d
 }
 

@@ -6,7 +6,8 @@
 // DESIGN: Idempotent, clock-free render from anchored ledger rows. No timestamps
 // in output — render is a pure function of the ledger rows. Two consumers:
 //   1. renderDecisionsFile(rows, kind) — exported pure function for testing
-//   2. CLI: `render <worktree>` and `--check <worktree>` subcommands
+//   2. CLI: `render <worktree>` and `--check <worktree>` subcommands, run from the
+//      project root: <worktree> names the current directory
 //
 // Filtering rules (must match AC-F3):
 //   - anchor_id must be set (unanchored observing rows are excluded)
@@ -25,7 +26,6 @@
 'use strict';
 
 const fs = require('fs');
-const path = require('path');
 
 const {
   initDecisionsContent,
@@ -41,49 +41,31 @@ const {
   getDecisionsFilePath,
   getPitfallsFilePath,
   getDecisionsIndexPath,
-  getDecisionsLockDir,
+  getDecisionsLedgerPath,
 } = require('./project-paths.cjs');
-const { acquireMkdirLock, releaseLock } = require('./mkdir-lock.cjs');
 const { safePath } = require('./safe-path.cjs');
-const { isActive, isV2 } = require('./learning-store.cjs');
-
-// ---------------------------------------------------------------------------
-// Constants
-// ---------------------------------------------------------------------------
-
-/** Ledger filename relative to .devflow/learning/ */
-const LEDGER_FILENAME = 'decisions-ledger.jsonl';
+const {
+  isActive,
+  isV2,
+  readJsonl,
+  hasLearningDir,
+  withDecisionsLock,
+} = require('./learning-store.cjs');
 
 // ---------------------------------------------------------------------------
 // Ledger parsing
 // ---------------------------------------------------------------------------
 
 /**
- * Parse a JSONL ledger file into an array of row objects.
- * Skips empty or malformed lines. Returns [] if file is absent.
+ * Read a JSONL ledger file leniently: its rows, skipping any line that is not one
+ * JSON object, or [] when the file is absent. Read-only: a skipped line is never
+ * quarantined (the store's readJsonl reports it for a caller that counts them).
  *
  * @param {string} ledgerPath
  * @returns {object[]}
  */
 function parseLedger(ledgerPath) {
-  let raw;
-  try {
-    raw = fs.readFileSync(ledgerPath, 'utf8');
-  } catch (err) {
-    if (err.code === 'ENOENT') return [];
-    throw err;
-  }
-  const rows = [];
-  for (const line of raw.split('\n')) {
-    const trimmed = line.trim();
-    if (!trimmed) continue;
-    try {
-      rows.push(JSON.parse(trimmed));
-    } catch {
-      // Skip malformed lines
-    }
-  }
-  return rows;
+  return readJsonl(ledgerPath).rows;
 }
 
 // ---------------------------------------------------------------------------
@@ -248,27 +230,21 @@ function writeAtomic(filePath, content) {
 }
 
 // ---------------------------------------------------------------------------
-// Lock-free render+write helper (for callers that already hold .decisions.lock)
+// Render and write
 // ---------------------------------------------------------------------------
 
 /**
- * Render both decisions.md and pitfalls.md from the given ledger rows and write
- * them atomically. Does NOT acquire any lock — callers (assign-anchor, retire-anchor,
- * refresh-anchor) must already hold .decisions.lock. The standalone `render` CLI takes
- * the lock before calling this function.
- *
- * Creates the decisionsDir if it does not exist.
+ * Render decisions.md, pitfalls.md and index.md from the ledger rows, in memory,
+ * in the order they are written: the body files first, the index last. `render`
+ * writes exactly these contents and `--check` compares exactly these.
  *
  * @param {string} worktreePath - Absolute path to the worktree root.
  * @param {object[]} rows - All rows from the ledger (unfiltered).
+ * @returns {Array<{ path: string, content: string }>}
  */
-function renderAndWriteAll(worktreePath, rows) {
-  const decisionsDir = path.join(worktreePath, '.devflow', 'learning');
-  fs.mkdirSync(decisionsDir, { recursive: true });
-
+function renderLearningFiles(worktreePath, rows) {
   const decisionsFilePath = getDecisionsFilePath(worktreePath);
   const pitfallsFilePath = getPitfallsFilePath(worktreePath);
-  const indexFilePath = getDecisionsIndexPath(worktreePath);
 
   // Hoist active-row selection: computed once per kind, reused for both the
   // body render and the index build — avoids two redundant selectActiveRows passes.
@@ -280,35 +256,53 @@ function renderAndWriteAll(worktreePath, rows) {
   const decisionBlocks = buildBodyBlocks(activeDecisionRows, 'decisions');
   const pitfallBlocks = buildBodyBlocks(activePitfallRows, 'pitfalls');
 
-  const decisionsContent = buildFileFromBlocks(
-    activeDecisionRows, decisionBlocks, 'decisions', selectInactiveRows(rows, 'decisions'),
-  );
-  const pitfallsContent = buildFileFromBlocks(
-    activePitfallRows, pitfallBlocks, 'pitfalls', selectInactiveRows(rows, 'pitfalls'),
-  );
+  return [
+    {
+      path: decisionsFilePath,
+      content: buildFileFromBlocks(activeDecisionRows, decisionBlocks, 'decisions', selectInactiveRows(rows, 'decisions')),
+    },
+    {
+      path: pitfallsFilePath,
+      content: buildFileFromBlocks(activePitfallRows, pitfallBlocks, 'pitfalls', selectInactiveRows(rows, 'pitfalls')),
+    },
+    {
+      // Compact index: a write-time artifact consumed via plain Read.
+      path: getDecisionsIndexPath(worktreePath),
+      content: buildIndexContent(activeDecisionRows, activePitfallRows, {
+        decisionsFilePath,
+        pitfallsFilePath,
+        decisionBlocks,
+        pitfallBlocks,
+      }) + '\n',
+    },
+  ];
+}
+
+/**
+ * Render decisions.md, pitfalls.md and index.md from the given ledger rows and
+ * write them atomically. It takes no lock: the caller holds .decisions.lock
+ * (D-ONE-LEARNING-LOCK). It writes only into an existing `.devflow/learning/`:
+ * without one it throws before writing anything (D-NO-STRAY-TREE).
+ *
+ * @param {string} worktreePath - Absolute path to the worktree root.
+ * @param {object[]} rows - All rows from the ledger (unfiltered).
+ * @throws when `<worktreePath>/.devflow/learning/` does not exist, or a write fails
+ */
+function renderAndWriteAll(worktreePath, rows) {
+  if (!hasLearningDir(worktreePath)) {
+    throw new Error(`renderAndWriteAll: no .devflow/learning/ under ${worktreePath}`);
+  }
+  const [decisions, pitfalls, index] = renderLearningFiles(worktreePath, rows);
 
   // Write body files first; index last. On a crash between body writes and the
   // index write: on the FIRST render the index is absent (reader falls back to
   // (none)); on a RE-render the index is stale — one generation behind the new
   // body files — never corrupt. Both cases are benign and self-heal on the next
   // successful render.
-  writeAtomic(decisionsFilePath, decisionsContent);
-  writeAtomic(pitfallsFilePath, pitfallsContent);
-
-  // Build and write compact index (write-time artifact; consumed via plain Read)
-  // Reuses the pre-computed active rows and pre-rendered blocks — no additional
-  // selectActiveRows or format pass.
-  const indexContent = buildIndexContent(activeDecisionRows, activePitfallRows, {
-    decisionsFilePath,
-    pitfallsFilePath,
-    decisionBlocks,
-    pitfallBlocks,
-  });
-  const indexLine = indexContent + '\n';
-  writeAtomic(indexFilePath, indexLine);
+  for (const file of [decisions, pitfalls, index]) writeAtomic(file.path, file.content);
 
   process.stderr.write(
-    `[render-decisions] wrote decisions.md (${Buffer.byteLength(decisionsContent)}B) + pitfalls.md (${Buffer.byteLength(pitfallsContent)}B) + index.md (${Buffer.byteLength(indexLine)}B)\n`
+    `[render-decisions] wrote decisions.md (${Buffer.byteLength(decisions.content)}B) + pitfalls.md (${Buffer.byteLength(pitfalls.content)}B) + index.md (${Buffer.byteLength(index.content)}B)\n`
   );
 }
 
@@ -316,106 +310,142 @@ function renderAndWriteAll(worktreePath, rows) {
 // CLI entry point
 // ---------------------------------------------------------------------------
 
-if (require.main === module) {
-  const argv = process.argv.slice(2);
+/** The name the CLI's messages carry; the lock reports it as the op. */
+const CLI_NAME = 'render-decisions';
 
-  const USAGE =
-    'Usage:\n' +
-    '  render-decisions.cjs render <worktree>          Write both .md files\n' +
-    '  render-decisions.cjs --check <worktree>         Diff without writing; exit 1 on drift\n';
+const USAGE =
+  'Usage (run from the project root; <worktree> names the current directory, e.g. "."):\n' +
+  '  render-decisions.cjs render <worktree>          Write decisions.md, pitfalls.md and index.md\n' +
+  '  render-decisions.cjs --check <worktree>         Compare without writing; exit 1 on drift\n';
 
-  // Parse: `render <worktree>` or `--check <worktree>`
-  let mode; // 'render' | 'check'
-  let worktreePath;
-
-  if (argv[0] === 'render' && argv[1]) {
-    mode = 'render';
-    worktreePath = path.resolve(argv[1]);
-  } else if (argv[0] === '--check' && argv[1]) {
-    mode = 'check';
-    worktreePath = path.resolve(argv[1]);
-  } else {
-    process.stderr.write(USAGE);
-    process.exit(1);
-  }
-
-  // Validate path at trust boundary before any file operations.
-  // safePath rejects null bytes, which path.resolve preserves silently.
+/**
+ * The project root the CLI works in: the current directory, with symlinks
+ * resolved. The CLI runs from the project root, as the json-helper ops do, and
+ * `<worktree>` must name that same directory once resolved (safePath refuses a NUL
+ * byte). The argument is only compared: every path the CLI reads or writes is
+ * built from the current directory, never from argv.
+ *
+ * @param {string} arg - the `<worktree>` argument
+ * @returns {{ ok: true, value: string } | { ok: false, error: { kind: 'invalid-root', message: string } }}
+ */
+function resolveCliRoot(arg) {
+  const invalid = message => ({ ok: false, error: { kind: 'invalid-root', message: `${CLI_NAME}: ${message}` } });
+  let cwd;
+  let named;
   try {
-    worktreePath = safePath(worktreePath);
+    cwd = fs.realpathSync(process.cwd());
+    named = fs.realpathSync(safePath(arg));
   } catch (err) {
-    process.stderr.write(`render-decisions: invalid worktree path: ${err.message}\n`);
-    process.exit(1);
+    return invalid(`invalid worktree path: ${err.message}`);
   }
-
-  const decisionsDir = path.join(worktreePath, '.devflow', 'learning');
-  const ledgerPath = path.join(decisionsDir, LEDGER_FILENAME);
-  const decisionsFilePath = getDecisionsFilePath(worktreePath);
-  const pitfallsFilePath = getPitfallsFilePath(worktreePath);
-  const indexFilePath = getDecisionsIndexPath(worktreePath);
-  const lockDir = getDecisionsLockDir(worktreePath);
-
-  // Ensure decisionsDir exists (needed before lock acquisition and file reads)
-  fs.mkdirSync(decisionsDir, { recursive: true });
-
-  // Read ledger (empty corpus if absent)
-  const rows = parseLedger(ledgerPath);
-
-  if (mode === 'check') {
-    // Render all three files in memory and compare against on-disk content.
-    // Exit non-zero on drift.
-    // Hoist active-row selection (mirrors renderAndWriteAll): computed once per kind,
-    // reused for both body render and index build.
-    const activeDecisionRows = selectActiveRows(rows, 'decisions');
-    const activePitfallRows = selectActiveRows(rows, 'pitfalls');
-    const decisionsContent = renderDecisionsFile(rows, 'decisions');
-    const pitfallsContent = renderDecisionsFile(rows, 'pitfalls');
-    const indexContent = buildIndexContent(activeDecisionRows, activePitfallRows, {
-      decisionsFilePath,
-      pitfallsFilePath,
-    }) + '\n';
-
-    let drift = false;
-    let existingDecisions = '';
-    let existingPitfalls = '';
-    let existingIndex = '';
-    try { existingDecisions = fs.readFileSync(decisionsFilePath, 'utf8'); } catch { drift = true; }
-    try { existingPitfalls = fs.readFileSync(pitfallsFilePath, 'utf8'); } catch { drift = true; }
-    // index.md missing is a drift condition (it should always be present after a render)
-    try { existingIndex = fs.readFileSync(indexFilePath, 'utf8'); } catch { drift = true; }
-
-    if (!drift) {
-      if (existingDecisions !== decisionsContent) {
-        process.stderr.write(`[render-decisions] DRIFT: ${decisionsFilePath}\n`);
-        drift = true;
-      }
-      if (existingPitfalls !== pitfallsContent) {
-        process.stderr.write(`[render-decisions] DRIFT: ${pitfallsFilePath}\n`);
-        drift = true;
-      }
-      if (existingIndex !== indexContent) {
-        process.stderr.write(`[render-decisions] DRIFT: ${indexFilePath}\n`);
-        drift = true;
-      }
-    }
-
-    process.exit(drift ? 1 : 0);
+  if (named !== cwd) {
+    return invalid(`${named} is not the current directory ${cwd} — run from the project root`);
   }
+  return { ok: true, value: cwd };
+}
 
-  // mode === 'render': write atomically under lock
-  if (!acquireMkdirLock(lockDir, 30000, 60000)) {
-    process.stderr.write(`render-decisions: timeout acquiring lock at ${lockDir}\n`);
-    process.exit(1);
-  }
+/** Report on stderr how many ledger lines were not one JSON object, when any were. */
+function reportMalformed(count, ledgerPath) {
+  if (count === 0) return;
+  process.stderr.write(
+    `[render-decisions] MALFORMED: ${count} ledger line${count === 1 ? '' : 's'} skipped (${ledgerPath})\n`
+  );
+}
 
+/** The ledger's rows, reporting its malformed lines on stderr. Read-only. */
+function readLedgerRows(root) {
+  const ledgerPath = getDecisionsLedgerPath(root);
+  const { rows, rejected } = readJsonl(ledgerPath);
+  reportMalformed(rejected.length, ledgerPath);
+  return rows;
+}
+
+/** The file's content, or null when it does not exist. */
+function readIfPresent(file) {
   try {
-    // Use the lock-free helper — we already hold the lock.
-    renderAndWriteAll(worktreePath, rows);
-  } finally {
-    releaseLock(lockDir);
+    return fs.readFileSync(file, 'utf8');
+  } catch (err) {
+    if (err && err.code === 'ENOENT') return null;
+    throw err;
   }
+}
 
-  process.exit(0);
+/**
+ * `render`: read the ledger under .decisions.lock and write the three files from
+ * what it read (D-ONE-LEARNING-LOCK), so a ledger write that lands while it waits
+ * is rendered rather than overwritten. Refuses without the learning directory
+ * (D-NO-STRAY-TREE).
+ *
+ * @param {string} root
+ * @returns {number} exit code
+ */
+function renderCommand(root) {
+  const result = withDecisionsLock(CLI_NAME, root, () => {
+    renderAndWriteAll(root, readLedgerRows(root));
+    return { ok: true, value: null };
+  });
+  if (result.ok) return 0;
+  process.stderr.write(`${result.error.message}\n`);
+  return 1;
+}
+
+/**
+ * `--check`: render in memory and compare with the files on disk, naming each
+ * file that differs or is missing; exit 1 on any drift. It writes nothing and
+ * takes no lock — taking it would create the lock directory — and refuses
+ * without the learning directory (D-NO-STRAY-TREE).
+ *
+ * @param {string} root
+ * @returns {number} exit code
+ */
+function checkCommand(root) {
+  if (!hasLearningDir(root)) {
+    process.stderr.write(`${CLI_NAME}: no .devflow/learning/ under ${root} — run from the project root\n`);
+    return 1;
+  }
+  let drift = false;
+  for (const file of renderLearningFiles(root, readLedgerRows(root))) {
+    const onDisk = readIfPresent(file.path);
+    if (onDisk !== file.content) {
+      process.stderr.write(`[render-decisions] DRIFT: ${file.path}${onDisk === null ? ' (missing)' : ''}\n`);
+      drift = true;
+    }
+  }
+  return drift ? 1 : 0;
+}
+
+/**
+ * Run the CLI on its arguments and return the exit code. Neither mode creates the
+ * learning directory (D-NO-STRAY-TREE).
+ *
+ * @param {string[]} argv - the arguments after the script path
+ * @returns {number}
+ */
+function runCli(argv) {
+  const mode = argv[0] === 'render' || argv[0] === '--check' ? argv[0] : null;
+  if (mode === null || argv.length !== 2 || !argv[1]) {
+    process.stderr.write(USAGE);
+    return 1;
+  }
+  const root = resolveCliRoot(argv[1]);
+  if (!root.ok) {
+    process.stderr.write(`${root.error.message}\n`);
+    return 1;
+  }
+  return mode === 'render' ? renderCommand(root.value) : checkCommand(root.value);
+}
+
+if (require.main === module) {
+  // The one exit, outside every lock: withDecisionsLock has released its lock
+  // before runCli returns or throws.
+  let exitCode;
+  try {
+    exitCode = runCli(process.argv.slice(2));
+  } catch (err) {
+    process.stderr.write(`${CLI_NAME}: ${err && err.message ? err.message : String(err)}\n`);
+    exitCode = 1;
+  }
+  process.exit(exitCode);
 }
 
 // ---------------------------------------------------------------------------

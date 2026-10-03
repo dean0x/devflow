@@ -1,7 +1,8 @@
 // src/assets/scripts/hooks/lib/mkdir-lock.cjs
 //
-// Shared mkdir-based locking helpers used by json-helper.cjs, render-decisions.cjs,
-// and any other CJS hook that needs exclusive access to a shared resource.
+// Shared mkdir-based locking helpers used by json-helper.cjs, learning-store.cjs
+// (whose withDecisionsLock the render CLI takes), and any other CJS hook that needs
+// exclusive access to a shared resource.
 //
 // DESIGN: mkdir is atomic on POSIX — the kernel guarantees that only one caller
 // succeeds on a given path. On EEXIST we check staleness (mtime > staleMs) and
