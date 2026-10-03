@@ -857,6 +857,33 @@ function toLedgerRowV2(logRow, priorLedgerRow, { anchorId, status, date, expectT
   return row;
 }
 
+/**
+ * `row` with the ledger-owned fields in `updates` set; a field set to undefined is
+ * removed. The other keys keep their order, and the ledger-owned keys follow them
+ * in LEDGER_OWNED_KEYS order, the order toLedgerRowV2 writes, so a row two
+ * writers have changed serializes the same as the projection would and a
+ * whole-row comparison still means "nothing changed".
+ *
+ * @param {object} row - a ledger row
+ * @param {Record<string, unknown>} updates - ledger-owned fields only
+ * @returns {object} a new row
+ * @throws {TypeError} when `updates` names a key the ledger does not own
+ */
+function withLedgerFields(row, updates) {
+  for (const key of Object.keys(updates)) {
+    if (!LEDGER_OWNED_KEYS.includes(key)) throw new TypeError(`withLedgerFields: '${key}' is not a ledger-owned field`);
+  }
+  const next = {};
+  for (const [key, value] of Object.entries(row)) {
+    if (!LEDGER_OWNED_KEYS.includes(key)) next[key] = copyJson(value);
+  }
+  for (const key of LEDGER_OWNED_KEYS) {
+    const value = Object.prototype.hasOwnProperty.call(updates, key) ? updates[key] : row[key];
+    if (value !== undefined) next[key] = copyJson(value);
+  }
+  return next;
+}
+
 /** `value` when it is a positive integer, else undefined. */
 function positiveInteger(value) {
   return Number.isInteger(value) && value >= 1 ? value : undefined;
@@ -2322,6 +2349,154 @@ function assignUnderLock(root, type, obsId, { now, cited }) {
   return minted;
 }
 
+// ---------------------------------------------------------------------------
+// refresh-anchor
+// ---------------------------------------------------------------------------
+
+/**
+ * Why the ledger rows holding one anchor do not make an active v2 entry, or null:
+ * the anchor is absent or held twice, the entry is inactive, or it is v1.
+ *
+ * @param {object[]} rows - every ledger row carrying the anchor
+ * @returns {string|null}
+ */
+function activeV2EntryProblem(rows) {
+  if (rows.length === 0) return 'not in the ledger';
+  if (rows.length > 1) return `held by ${rows.length} ledger rows`;
+  const [row] = rows;
+  if (!isActive(row)) return `${listingToken(row.decisions_status)}; restore it with restore-anchor first`;
+  if (!isV2(row)) return 'a v1 entry; rewrite it with put-observation --update';
+  return null;
+}
+
+/**
+ * The log row active entry `row` re-projects from, or why it cannot: it has no
+ * observation id, or the log holds no row, two rows or a v1 row with that id, or
+ * one of a type the entry cannot take.
+ *
+ * @param {object} row - an active v2 ledger row
+ * @param {object[]} logRows
+ * @returns {{ logRow: object } | { problem: string }}
+ */
+function reprojectionSource(row, logRows) {
+  if (!isNonEmptyString(row.id)) return { problem: 'has no observation id' };
+  const sameId = logRows.filter(logRow => logRow.id === row.id);
+  if (sameId.length === 0) return { problem: `no log row has id '${row.id}'; write it back with put-observation --create` };
+  if (sameId.length > 1) return { problem: `the log holds ${sameId.length} rows with id '${row.id}'` };
+  const [logRow] = sameId;
+  if (!isV2(logRow)) return { problem: 'its log row is v1; rewrite it with put-observation --update' };
+  const problem = reprojectionProblem(row, logRow.type);
+  return problem ? { problem: `cannot take its log row: ${problem}` } : { logRow };
+}
+
+/** The refusal of a refresh batch: every refused anchor, one per line, each problem on one line. */
+function refreshRefusal(problems, total) {
+  const listed = problems.map(({ anchor_id, message }) => ({ anchor_id, message: singleLine(message) }));
+  const head = `refresh-anchor: ${listed.length} of ${total} anchor${total === 1 ? '' : 's'} refused; nothing was written`;
+  const lines = listed.map(({ anchor_id, message }) => `  ${anchor_id}: ${message}`);
+  return { ok: false, error: { kind: 'refused', message: [head, ...lines].join('\n'), problems: listed } };
+}
+
+/** True when two ledger rows differ in any projected content field. */
+function projectedContentDiffers(a, b) {
+  return PROJECTED_CONTENT_KEYS.some(key => !sameJson(a[key], b[key]));
+}
+
+/**
+ * Record in history, once per observation, the prior ledger rows and the log row
+ * of each re-projection that changes an entry's content (D-CONTENT-HISTORY).
+ */
+function recordRefreshHistory(root, plans, ledgerRows, { now }) {
+  const carriers = ledgerRegistry(ledgerRows).byObsId;
+  const recorded = new Set();
+  for (const { prior, next, logRow } of plans) {
+    if (recorded.has(logRow.id) || !projectedContentDiffers(prior, next)) continue;
+    recorded.add(logRow.id);
+    appendHistory(root, { id: logRow.id, ledger: carriers.get(logRow.id) || [], log: logRow }, { now });
+  }
+}
+
+/**
+ * Re-project active v2 entries from their log rows, or stamp them verified — the
+ * refresh-anchor op.
+ *
+ * Without `verified`, each entry is re-projected from its log row through
+ * toLedgerRowV2 (D-LOG-CONTENT-AUTHORITY): it takes the log row's content
+ * whatever the ledger held, so a rewrite replaces the old text in place, and the
+ * prior ledger rows go to history first whenever an entry's content changes
+ * (D-CONTENT-HISTORY). With `verified`, each entry's last_verified becomes today
+ * and nothing else changes; no log row is needed.
+ *
+ * The batch is all or nothing: an anchor the ledger does not hold or holds twice,
+ * an inactive entry or a v1 one, and — when re-projecting — an entry with no
+ * observation id or whose log row is missing, doubled, v1 or of a type it cannot
+ * take refuses the whole batch, every refused anchor listed, nothing written. A
+ * batch that changes no row writes nothing. Otherwise, under the learning lock,
+ * it backs up a v1 tree (D-V1-BACKUP-ONCE), quarantines the ledger's malformed
+ * lines (D-QUARANTINE-MALFORMED), then writes the ledger once and renders once.
+ *
+ * @param {string} root - project root
+ * @param {string[]} anchorIds - one or more anchor ids; a repeated one counts once
+ * @param {{ verified?: boolean, now?: number, timeoutMs?: number }} [opts]
+ *   now: epoch ms (default Date.now())
+ * @returns {{ ok: true, value: { refreshed: Array<{ anchor_id: string, state: 'verified'|'reprojected'|'unchanged' }> } }
+ *   | { ok: false, error: { kind: string, message: string, problems?: Array<{ anchor_id: string, message: string }> } }}
+ *   refreshed: each anchor once, in the order given. Error kinds: refused (with
+ *   problems), and withDecisionsLock's no-learning-dir and busy.
+ * @throws {TypeError} when anchorIds is empty or holds anything but anchor ids
+ */
+function refreshAnchors(root, anchorIds, { verified = false, now = Date.now(), timeoutMs } = {}) {
+  const valid = Array.isArray(anchorIds) && anchorIds.length > 0
+    && anchorIds.every(id => typeof id === 'string' && ANCHOR_ID_RE.test(id));
+  if (!valid) throw new TypeError('refreshAnchors: anchorIds must hold one or more anchor ids');
+  const anchors = [...new Set(anchorIds)];
+  return withDecisionsLock('refresh-anchor', root, () => refreshUnderLock(root, anchors, { verified, now }), { timeoutMs });
+}
+
+/** refreshAnchors' locked body. */
+function refreshUnderLock(root, anchors, { verified, now }) {
+  const ledgerPath = getDecisionsLedgerPath(root);
+  const ledger = readJsonl(ledgerPath);
+  const log = readJsonl(getDecisionsLogPath(root));
+  const today = isoDate(now);
+
+  const problems = [];
+  const plans = [];
+  for (const anchorId of anchors) {
+    const rows = ledger.rows.filter(row => row.anchor_id === anchorId);
+    const entryProblem = activeV2EntryProblem(rows);
+    if (entryProblem) {
+      problems.push({ anchor_id: anchorId, message: entryProblem });
+      continue;
+    }
+    const [prior] = rows;
+    if (verified) {
+      plans.push({ anchor_id: anchorId, prior, next: withLedgerFields(prior, { last_verified: today }) });
+      continue;
+    }
+    const source = reprojectionSource(prior, log.rows);
+    if (source.problem) problems.push({ anchor_id: anchorId, message: source.problem });
+    else plans.push({ anchor_id: anchorId, prior, next: reprojectedRow(source.logRow, prior), logRow: source.logRow });
+  }
+  if (problems.length > 0) return refreshRefusal(problems, anchors.length);
+
+  const changed = plans.filter(plan => !sameJson(plan.prior, plan.next));
+  const refreshed = plans.map(plan => ({
+    anchor_id: plan.anchor_id,
+    state: verified ? 'verified' : changed.includes(plan) ? 'reprojected' : 'unchanged',
+  }));
+  if (changed.length === 0) return { ok: true, value: { refreshed } };
+
+  ensurePreV2Backup(root, { logRows: log.rows, ledgerRows: ledger.rows });
+  quarantineRejected(ledgerPath, ledger.rejected, { now });
+  if (!verified) recordRefreshHistory(root, changed, ledger.rows, { now });
+  const replaced = new Map(changed.map(plan => [plan.prior, plan.next]));
+  const ledgerRows = ledger.rows.map(row => replaced.get(row) || row);
+  writeJsonlAtomic(ledgerPath, ledgerRows);
+  renderAll(root, ledgerRows);
+  return { ok: true, value: { refreshed } };
+}
+
 module.exports = {
   // Constants
   SCHEMA_VERSION,
@@ -2396,4 +2571,6 @@ module.exports = {
   nextAnchorFromLedger,
   collectCitedAnchorIds,
   assignAnchor,
+  // refresh-anchor
+  refreshAnchors,
 };

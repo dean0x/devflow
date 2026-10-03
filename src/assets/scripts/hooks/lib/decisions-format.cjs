@@ -2,10 +2,11 @@
 //
 // Shared pure formatting helpers for decisions.md and pitfalls.md output.
 //
-// DESIGN: Shared pure formatting helpers used by assign-anchor (via json-helper.cjs)
-// and render-decisions.cjs so both share the EXACT same format functions. This is
-// the single source of truth for the byte-compat output strings — any drift here
-// will break the renderer/session-start-context TL;DR parser.
+// DESIGN: Shared pure formatting helpers for render-decisions.cjs, the one
+// renderer: its CLI and every learning-store writer render through it, so all of
+// them share the EXACT same format functions. This is the single source of truth
+// for the byte-compat output strings — any drift here will break the
+// renderer/session-start-context TL;DR parser.
 //
 // BYTE-COMPAT CONTRACT (must not change without updating all consumers):
 //   v1 entries — ledger rows without schema 2 — keep these bytes (D-V1-BYTE-STABLE):
@@ -220,27 +221,6 @@ function formatAmendmentsLine(amendments) {
   return `- **Amendments**: ${parts.join('; ')}\n`;
 }
 
-/**
- * Guard against raw_body payloads that could forge a second entry heading or
- * claim a different anchor ID. Accepts only a string whose `^## (ADR|PF)-\d+:`
- * headings number exactly one AND match `## ${anchorId}:`.
- *
- * A rejected raw_body is DROPPED from the row — the entry then renders through
- * the sanitised formatDecisionBody/formatPitfallBody — the sanctioned fallback when raw_body is absent or rejected.
- *
- * Validate at the sink so all callers (assign-anchor, refresh-anchor,
- * any future op) inherit the guard without repeating it.
- *
- * @param {unknown} body
- * @param {string} anchorId - e.g. 'ADR-NNN' or 'PF-NNN'
- * @returns {boolean}
- */
-function isSafeRawBody(body, anchorId) {
-  if (typeof body !== 'string') return false;
-  const headings = body.match(/^## (?:ADR|PF)-\d+:/gm) || [];
-  return headings.length === 1 && headings[0] === `## ${anchorId}:`;
-}
-
 /** Recognised field keys for decision entries. */
 const ADR_KEYS = /** @type {const} */ (['context', 'decision', 'rationale']);
 
@@ -400,79 +380,6 @@ function formatInactiveTable(rows) {
     `| ${tableCell(row.anchor_id)} | ${tableCell(row.decisions_status)} | ${tableCell(inactiveNote(row)) || '—'} |`
   );
   return `\n## Inactive\n\n| ID | Status | Note |\n|---|---|---|\n${lines.join('\n')}\n`;
-}
-
-/**
- * Project a full observation row into the canonical committed-ledger shape.
- * Whitelists ONLY the fields that belong in decisions-ledger.jsonl:
- *   { id, type, pattern, details, anchor_id, decisions_status, date?, raw_body?, amendments? }
- *
- * All observation-lifecycle fields (evidence, confidence, quality_ok, count,
- * first_seen, last_seen, artifact_path, status, …) are intentionally excluded
- * from the committed ledger — they are log-only state.
- *
- * D-LOG-CONTENT-AUTHORITY: the observation log (decisions-log.jsonl) is the one
- * home of an entry's content. Its ledger row is a projection of the log row,
- * re-derived through this function alone: assign-anchor projects it at
- * promotion, and refresh-anchor re-projects it after a reinforcement changes the
- * log row. Nothing else may write entry content into decisions-ledger.jsonl — a
- * change goes to the log row, then through refresh-anchor. The ledger owns only
- * the anchor number, the decisions_status and the promotion date, which callers
- * pass in: assign-anchor takes the date from the log row (else today), and
- * refresh-anchor carries all three over unchanged, so a dateless row stays
- * dateless. Reason: a ledger row copied once at promotion silently lost every
- * later sharpening of its entry, and content kept in two places leaves two
- * authorities that disagree.
- *
- * D001: The projected shape is a DISTINCT COMMITTED shape, not a full obs copy.
- * This function is the single source of truth for that projection so both the
- * add-path (assign-anchor) and the migration's preserve-verbatim path produce
- * byte-identical committed shapes.
- *
- * Validation at the SINK (validate at convergence so all callers inherit):
- *   - expectType: if provided, obs.type must match or this function throws; prevents
- *     re-projecting across entry types (PF-NNN into decisions.md or vice versa).
- *   - pattern: JS LineTerminators collapsed to a single space — the heading is
- *     single-line by construction; a newline in pattern would forge '- **Status**:'
- *     lines or second '## ADR-NNN:' headings that line-anchored index regexes match first.
- *   - raw_body: gated by isSafeRawBody — accepts only a body with exactly one heading
- *     matching anchorId; a rejected body is dropped so the entry renders through the
- *     sanitised formatDecisionBody/formatPitfallBody instead.
- *
- * @param {object} obs - Full observation row from decisions-log.jsonl
- * @param {{ anchorId: string, status: string, date?: string, expectType?: string }} opts
- * @returns {object} Canonical ledger row
- */
-function toLedgerRow(obs, { anchorId, status, date, expectType }) {
-  // Type guard — validate at the sink so all callers (assign-anchor,
-  // refresh-anchor, any future op) inherit the check without repeating it.
-  if (expectType !== undefined && obs.type !== expectType) {
-    throw new Error(
-      `toLedgerRow: type mismatch for ${anchorId} — ledger has '${expectType}', log has '${obs.type}'`
-    );
-  }
-  /** @type {Record<string, unknown>} */
-  const row = {
-    id: obs.id,
-    type: obs.type,
-    // Heading is single-line by construction — collapse any LLM-injected line terminators
-    // so a newline in pattern cannot forge '- **Status**:' lines or second '## ADR-NNN:'
-    // headings inside the rendered body (those would be matched first by the line-anchored
-    // index regexes in extractEntryFromBlock).
-    pattern: typeof obs.pattern === 'string' ? obs.pattern.replace(LINE_TERMINATORS, ' ').trim() : obs.pattern,
-    details: obs.details,  // segmentDetails already collapses line terminators at read time
-    anchor_id: anchorId,
-    decisions_status: status,
-  };
-  // Optional fields — include only when present in the observation or explicitly provided
-  if (date !== undefined) row.date = date;
-  // log-sourced raw_body (D-LOG-CONTENT-AUTHORITY) — a log row that lost raw_body
-  // un-freezes the entry to formatter-rendered output by design. Gate through isSafeRawBody.
-  if (obs.raw_body !== undefined && isSafeRawBody(obs.raw_body, anchorId)) {
-    row.raw_body = obs.raw_body;
-  }
-  if (obs.amendments !== undefined) row.amendments = obs.amendments;
-  return row;
 }
 
 /**
@@ -663,7 +570,5 @@ module.exports = {
   formatInactiveTable,
   formatIndexEntryLineV2,
   buildTldrLine,
-  toLedgerRow,
-  isSafeRawBody,
   buildIndexContent,
 };

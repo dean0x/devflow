@@ -210,7 +210,7 @@ describe('nextAnchorFromLedger', () => {
 // assign-anchor CLI op
 // ---------------------------------------------------------------------------
 
-describe('assign-anchor CLI op', () => {
+describe('assign-anchor CLI op', { timeout: 30_000 }, () => {
   let tmpDir: string;
 
   beforeEach(() => {
@@ -632,7 +632,7 @@ describe('rotateObservations (D-ROTATE-UNREFERENCED)', () => {
 // refresh-anchor CLI op (re-projection per D-LOG-CONTENT-AUTHORITY)
 // ---------------------------------------------------------------------------
 
-describe('refresh-anchor CLI op', () => {
+describe('refresh-anchor CLI op', { timeout: 30_000 }, () => {
   let tmpDir: string;
 
   beforeEach(() => {
@@ -644,286 +644,105 @@ describe('refresh-anchor CLI op', () => {
     fs.rmSync(tmpDir, { recursive: true, force: true });
   });
 
-  it('re-projects the log obs onto the ledger row (updates details from log)', () => {
-    // Seed ledger with old details; log obs has reinforced details (append, not replace).
-    // The log is always a superset of the ledger — the divergence guard passes when
-    // the ledger content is contained in the log content.
-    const oldDetails = 'context: old; decision: old decision; rationale: old';
-    const newDetails = oldDetails + '; context: updated; decision: updated decision; rationale: updated rationale';
-    writeLog(tmpDir, [
-      makeObsRow({
-        id: 'obs_ra_001',
-        type: 'decision',
-        status: 'created',
-        anchor_id: 'ADR-001',
-        details: newDetails,
-      }),
-    ]);
-    writeLedger(tmpDir, [
-      makeLedgerRow({
-        id: 'obs_ra_001',
-        anchor_id: 'ADR-001',
-        decisions_status: 'Accepted',
-        details: oldDetails,
-      }),
-    ]);
+  it('re-projects the log row onto the ledger row, keeping its anchor, status and type', () => {
+    writeLog(tmpDir, [makeV2LogRow({ id: 'obs_ra_001', rule: 'Return a Result from every fallible store call.' })]);
+    writeLedger(tmpDir, [makeV2LedgerRow({ id: 'obs_ra_001', rule: 'An older rule.' })]);
     const result = runHelper('refresh-anchor ADR-001', tmpDir);
     expect(result.code).toBe(0);
 
     const rows = readLedger(tmpDir);
     expect(rows).toHaveLength(1);
-    expect(rows[0].details).toBe(newDetails);
-    // Anchor id, status, type preserved
-    expect(rows[0].anchor_id).toBe('ADR-001');
-    expect(rows[0].decisions_status).toBe('Accepted');
-    expect(rows[0].type).toBe('decision');
+    expect(rows[0].rule).toBe('Return a Result from every fallible store call.');
+    expect(rows[0]).toMatchObject({ anchor_id: 'ADR-001', decisions_status: 'Accepted', type: 'decision' });
   });
 
-  it('strips observation-lifecycle fields (D2 strict re-projection via toLedgerRow)', () => {
-    // The ledger may carry legacy observation fields from old log-verbatim
-    // copies.  refresh-anchor must re-project via toLedgerRow which whitelists
-    // only canonical fields — everything else is stripped.
-    writeLog(tmpDir, [
-      makeObsRow({ id: 'obs_ra_002', type: 'decision', status: 'created', anchor_id: 'ADR-002' }),
-    ]);
-    // Ledger row carries legacy fields that toLedgerRow must strip
-    writeLedger(tmpDir, [
-      makeLedgerRow({
-        id: 'obs_ra_002',
-        anchor_id: 'ADR-002',
-        decisions_status: 'Accepted',
-        confidence: 0.99,   // observation-lifecycle — must be stripped
-        observations: 5,    // observation-lifecycle — must be stripped
-        quality_ok: true,   // observation-lifecycle — must be stripped
-      }),
-    ]);
-    runHelper('refresh-anchor ADR-002', tmpDir);
+  it('keeps only the projection: evidence and the counters stay in the log, and stray keys leave the ledger', () => {
+    writeLog(tmpDir, [makeV2LogRow({ id: 'obs_ra_002' })]);
+    writeLedger(tmpDir, [makeV2LedgerRow({ id: 'obs_ra_002', confidence: 0.99, observations: 5, quality_ok: true })]);
+    expect(runHelper('refresh-anchor ADR-001', tmpDir).code).toBe(0);
 
-    const rows = readLedger(tmpDir);
-    const row = rows.find(r => r.anchor_id === 'ADR-002');
-    expect(row).toBeDefined();
-    // Canonical fields present
-    expect(row?.id).toBe('obs_ra_002');
-    expect(row?.type).toBe('decision');
-    expect(row?.anchor_id).toBe('ADR-002');
-    expect(row?.decisions_status).toBe('Accepted');
-    // Observation-lifecycle fields stripped by toLedgerRow
-    expect(row?.confidence).toBeUndefined();
-    expect(row?.observations).toBeUndefined();
-    expect(row?.quality_ok).toBeUndefined();
+    const [row] = readLedger(tmpDir);
+    expect(row).toEqual(makeV2LedgerRow({ id: 'obs_ra_002' }));
+    expect(row.evidence).toBeUndefined();
   });
 
   it('re-renders decisions.md after refresh', () => {
-    // Log must be a superset of ledger (divergence guard).
-    // Reinforcement appends; the ledger's prior content is a prefix of the log content.
-    const baseDetails = 'context: existing; decision: approach A; rationale: initial';
-    const newDetails = baseDetails + '; context: refreshed; decision: new approach; rationale: better';
-    writeLog(tmpDir, [
-      makeObsRow({
-        id: 'obs_ra_003',
-        type: 'decision',
-        status: 'created',
-        anchor_id: 'ADR-003',
-        pattern: 'Refreshed decision',
-        details: newDetails,
-        date: '2026-08-30',
-      }),
-    ]);
-    writeLedger(tmpDir, [
-      makeLedgerRow({
-        id: 'obs_ra_003',
-        anchor_id: 'ADR-003',
-        decisions_status: 'Accepted',
-        pattern: 'Refreshed decision',
-        details: baseDetails,
-        date: '2026-01-01',
-      }),
-    ]);
-    runHelper('refresh-anchor ADR-003', tmpDir);
+    writeLog(tmpDir, [makeV2LogRow({ id: 'obs_ra_003', title: 'Refreshed decision', rule: 'The refreshed rule.' })]);
+    writeLedger(tmpDir, [makeV2LedgerRow({ id: 'obs_ra_003', anchor_id: 'ADR-003', title: 'Refreshed decision', rule: 'A stale rule.' })]);
+    expect(runHelper('refresh-anchor ADR-003', tmpDir).code).toBe(0);
 
-    const decisionsPath = path.join(tmpDir, '.devflow', 'learning', 'decisions.md');
-    expect(fs.existsSync(decisionsPath)).toBe(true);
-    const content = fs.readFileSync(decisionsPath, 'utf8');
+    const content = fs.readFileSync(path.join(tmpDir, '.devflow', 'learning', 'decisions.md'), 'utf8');
     expect(content).toContain('## ADR-003: Refreshed decision');
-    expect(content).toContain('refreshed');
-    // Old content should not appear
-    expect(content).not.toContain('stale');
-  });
-
-  // ---- Behavioral tests: lookup-key correctness ----
-
-  it('resolves log row by ledger id when log obs has no anchor_id field (pre-existing-style row)', () => {
-    // Pre-existing log rows were written before assign-anchor added anchor_id write-back.
-    // They have no anchor_id field — only the id that matches the ledger row's id field.
-    // The log obs is resolved by the LEDGER ROW's id, not by anchor_id — this covers
-    // pre-write-back rows that never had anchor_id stamped in the log.
-    // Log is a superset of ledger. Ledger holds the prior base content;
-    // log has the base plus the sharpened reinforcement appended to it.
-    const basePart = 'context: initial; decision: basic; rationale: simple';
-    const sharpDetails = basePart + '; context: sharpened; decision: use Result types; rationale: functional error handling';
-    writeLog(tmpDir, [
-      makeObsRow({
-        id: 'obs_pre_exist',
-        type: 'decision',
-        status: 'created',
-        // NO anchor_id field — pre-existing row style
-        details: sharpDetails,
-      }),
-    ]);
-    writeLedger(tmpDir, [
-      makeLedgerRow({
-        id: 'obs_pre_exist',
-        anchor_id: 'ADR-005',
-        decisions_status: 'Accepted',
-        details: basePart,
-      }),
-    ]);
-    const result = runHelper('refresh-anchor ADR-005', tmpDir);
-    expect(result.code).toBe(0);
-    const rows = readLedger(tmpDir);
-    expect(rows[0].details).toBe(sharpDetails);
-    expect(rows[0].anchor_id).toBe('ADR-005');
+    expect(content).toContain('- **Decision**: The refreshed rule.\n');
+    expect(content).not.toContain('A stale rule.');
   });
 
   it('pitfall-anchor refresh re-renders pitfalls.md and index.md', () => {
-    // Pitfall obs has no anchor_id field (pre-existing style) — resolves by ledger id.
-    // id-based lookup covers both pre-existing and new-style rows uniformly.
-    // Log is a superset of ledger. The ledger holds the base content;
-    // log has base + the sharper reinforcement appended. Neither uses the word 'stale'
-    // so the post-refresh pitfalls.md assertion (not.toContain('stale')) holds.
-    const basePart = 'area: hooks; issue: retry loops; fix: initial mitigation';
-    const sharpDetails = basePart + '; area: hooks; issue: unbounded retries; fix: cap at 3 attempts';
+    writeLog(tmpDir, [makeV2LogRow({
+      id: 'obs_pf_refresh', type: 'pitfall', title: 'Unbounded retries in hooks', rule: 'Cap every retry loop at three attempts.',
+    })]);
+    writeLedger(tmpDir, [makeV2LedgerRow({
+      id: 'obs_pf_refresh', type: 'pitfall', anchor_id: 'PF-001', decisions_status: 'Active',
+      title: 'Unbounded retries in hooks', rule: 'An initial mitigation.',
+    })]);
+    expect(runHelper('refresh-anchor PF-001', tmpDir).code).toBe(0);
+
+    const pitfallsContent = fs.readFileSync(path.join(tmpDir, '.devflow', 'learning', 'pitfalls.md'), 'utf8');
+    expect(pitfallsContent).toContain('## PF-001: Unbounded retries in hooks');
+    expect(pitfallsContent).toContain('- **Rule**: Cap every retry loop at three attempts.\n');
+    expect(pitfallsContent).not.toContain('An initial mitigation.');
+
+    const indexContent = fs.readFileSync(path.join(tmpDir, '.devflow', 'learning', 'index.md'), 'utf8');
+    expect(indexContent).toContain('  PF-001  Unbounded retries in hooks');
+  });
+
+  it('date-pin: the ledger row keeps its promotion date, and a dateless row stays dateless', () => {
     writeLog(tmpDir, [
-      makeObsRow({
-        id: 'obs_pf_refresh',
-        type: 'pitfall',
-        status: 'created',
-        // NO anchor_id field — pre-existing style; lookup must use ledger row id
-        pattern: 'Unbounded retries in hooks',
-        details: sharpDetails,
-      }),
+      makeV2LogRow({ id: 'obs_date_pin', rule: 'A sharper rule.' }),
+      makeV2LogRow({ id: 'obs_dateless', rule: 'A sharper rule.' }),
     ]);
     writeLedger(tmpDir, [
-      makeLedgerRow({
-        id: 'obs_pf_refresh',
-        type: 'pitfall',
-        anchor_id: 'PF-001',
-        decisions_status: 'Active',
-        pattern: 'Unbounded retries in hooks',
-        details: basePart,
-      }),
+      makeV2LedgerRow({ id: 'obs_date_pin', anchor_id: 'ADR-007', date: '2026-01-01' }),
+      makeV2LedgerRow({ id: 'obs_dateless', anchor_id: 'ADR-008', date: undefined }),
     ]);
-    const result = runHelper('refresh-anchor PF-001', tmpDir);
-    expect(result.code).toBe(0);
+    expect(runHelper('refresh-anchor ADR-007 ADR-008', tmpDir).code).toBe(0);
 
-    const pitfallsPath = path.join(tmpDir, '.devflow', 'learning', 'pitfalls.md');
-    const indexPath = path.join(tmpDir, '.devflow', 'learning', 'index.md');
-
-    expect(fs.existsSync(pitfallsPath)).toBe(true);
-    expect(fs.existsSync(indexPath)).toBe(true);
-
-    const pitfallsContent = fs.readFileSync(pitfallsPath, 'utf8');
-    expect(pitfallsContent).toContain('## PF-001:');
-    expect(pitfallsContent).toContain('unbounded retries');
-    expect(pitfallsContent).not.toContain('stale');
-
-    const indexContent = fs.readFileSync(indexPath, 'utf8');
-    expect(indexContent).toContain('PF-001');
-  });
-
-  it('date-pin: ledger row date wins over obs date', () => {
-    // refresh-anchor takes date exclusively from the ledger row (rfExistingRow.date).
-    // The obs date is ignored — the promotion date is preserved regardless of obs updates.
-    const ledgerDate = '2026-01-01';
-    const obsDate = '2026-08-30';
-    writeLog(tmpDir, [
-      makeObsRow({
-        id: 'obs_date_pin',
-        type: 'decision',
-        status: 'created',
-        anchor_id: 'ADR-007',
-        date: obsDate,
-      }),
-    ]);
-    writeLedger(tmpDir, [
-      makeLedgerRow({
-        id: 'obs_date_pin',
-        anchor_id: 'ADR-007',
-        decisions_status: 'Accepted',
-        date: ledgerDate,
-      }),
-    ]);
-    const result = runHelper('refresh-anchor ADR-007', tmpDir);
-    expect(result.code).toBe(0);
     const rows = readLedger(tmpDir);
-    // Ledger date preserved; obs date ignored
-    expect(rows[0].date).toBe(ledgerDate);
+    expect(rows[0].date).toBe('2026-01-01');
+    expect(rows[1].date).toBeUndefined();
   });
 
-  it('date-pin: dateless legacy ledger row stays dateless after refresh (D5: no backfill)', () => {
-    // date: rfExistingRow.date — undefined propagates for dateless legacy rows; no backfill.
-    // The obs date is not used (D-LOG-CONTENT-AUTHORITY) — a fabricated date would be worse
-    // than an unprotected entry.
-    writeLog(tmpDir, [
-      makeObsRow({
-        id: 'obs_dateless',
-        type: 'decision',
-        status: 'created',
-        anchor_id: 'ADR-008',
-        date: '2026-08-30', // obs HAS a date — must not backfill into dateless ledger row
-      }),
-    ]);
-    // Dateless legacy ledger row: constructed directly, no date field
-    const datelessLedgerRow: Record<string, unknown> = {
-      id: 'obs_dateless',
-      type: 'decision',
-      pattern: 'Use Result types everywhere',
-      anchor_id: 'ADR-008',
-      decisions_status: 'Accepted',
-      confidence: 0.9,
-      observations: 1,
-      first_seen: '2026-01-01T00:00:00Z',
-      last_seen: '2026-01-01T00:00:00Z',
-      status: 'created',
-      evidence: [],
-      details: 'context: TypeScript project; decision: return Result<T,E>; rationale: functional error handling',
-      quality_ok: true,
-      // NOTE: no `date` field — legacy pre-stamp row
-    };
-    writeLedger(tmpDir, [datelessLedgerRow]);
-    const result = runHelper('refresh-anchor ADR-008', tmpDir);
-    expect(result.code).toBe(0);
-    const rows = readLedger(tmpDir);
-    // Dateless ledger row must remain dateless — D5 no-backfill rule
-    expect(rows[0].date).toBeUndefined();
-  });
-
-  // ---- Updated error-case tests (lookup key: ledger row id, not anchor_id) ----
-
-  it('exits non-zero when no log obs matches the ledger row id', () => {
-    // Log has an obs whose id does not match the ledger row's id field.
-    // (The presence of anchor_id on the log obs is irrelevant — lookup is by id.)
-    writeLog(tmpDir, [
-      makeObsRow({ id: 'obs_ra_missing', type: 'decision', status: 'created', anchor_id: 'ADR-099' }),
-    ]);
-    // Ledger row default id is 'obs_test001' — does not match 'obs_ra_missing' in log
-    writeLedger(tmpDir, [makeLedgerRow({ anchor_id: 'ADR-001', decisions_status: 'Accepted' })]);
+  it('exits non-zero when no log row carries the entry\'s observation', () => {
+    writeLog(tmpDir, [makeV2LogRow({ id: 'obs_ra_missing' })]);
+    writeLedger(tmpDir, [makeV2LedgerRow({ id: 'obs_test001', anchor_id: 'ADR-001' })]);
     const result = runHelper('refresh-anchor ADR-001', tmpDir);
     expect(result.code).not.toBe(0);
-    expect(result.stderr).toContain('ADR-001');
-    expect(result.stderr).toContain('not found');
+    expect(result.stderr).toContain("ADR-001: no log row has id 'obs_test001'");
   });
 
   it('exits non-zero when anchor_id not found in ledger', () => {
-    // Log has the obs but ledger doesn't have that anchor
-    writeLog(tmpDir, [
-      makeObsRow({ id: 'obs_ra_nol', type: 'decision', status: 'created', anchor_id: 'ADR-001' }),
-    ]);
-    writeLedger(tmpDir, [makeLedgerRow({ anchor_id: 'ADR-999', decisions_status: 'Accepted' })]);
+    writeLog(tmpDir, [makeV2LogRow({ id: 'obs_ra_nol' })]);
+    writeLedger(tmpDir, [makeV2LedgerRow({ id: 'obs_ra_nol', anchor_id: 'ADR-999' })]);
     const result = runHelper('refresh-anchor ADR-001', tmpDir);
     expect(result.code).not.toBe(0);
-    expect(result.stderr).toContain('ADR-001');
-    expect(result.stderr).toContain('not found');
+    expect(result.stderr).toContain('ADR-001: not in the ledger');
+  });
+
+  it('a learning tree with no ledger refuses the anchor as not in the ledger', () => {
+    writeLog(tmpDir, [makeV2LogRow()]);
+    expect(runJsonHelper(tmpDir, ['refresh-anchor', 'ADR-001'])).toEqual({
+      code: 1,
+      stdout: '',
+      stderr: 'refresh-anchor: 1 of 1 anchor refused; nothing was written\n  ADR-001: not in the ledger\n',
+    });
+  });
+
+  it('refuses an entry whose log row has the other type', () => {
+    writeLog(tmpDir, [makeV2LogRow({ id: 'obs_prec_003', type: 'pitfall' })]);
+    writeLedger(tmpDir, [makeV2LedgerRow({ id: 'obs_prec_003', anchor_id: 'ADR-003' })]);
+    const result = runHelper('refresh-anchor ADR-003', tmpDir);
+    expect(result.code).not.toBe(0);
+    expect(result.stderr).toContain('ADR-003: cannot take its log row: it is a decision entry and the observation is a pitfall');
   });
 
   it('exits non-zero when called with no argument', () => {
@@ -933,39 +752,28 @@ describe('refresh-anchor CLI op', () => {
   });
 
   it('completes without deadlock and leaves no lock dir behind', () => {
-    const newDetails = 'context: clean; decision: clean; rationale: clean';
-    writeLog(tmpDir, [
-      makeObsRow({ id: 'obs_ra_lock', type: 'decision', status: 'created', anchor_id: 'ADR-001', details: newDetails }),
-    ]);
-    // Ledger must not carry content absent from the log (divergence guard).
-    // Set ledger details explicitly to match the log so the guard passes.
-    writeLedger(tmpDir, [makeLedgerRow({ anchor_id: 'ADR-001', id: 'obs_ra_lock', decisions_status: 'Accepted', details: newDetails })]);
+    writeLog(tmpDir, [makeV2LogRow({ id: 'obs_ra_lock', rule: 'A sharper rule.' })]);
+    writeLedger(tmpDir, [makeV2LedgerRow({ id: 'obs_ra_lock' })]);
     const result = runHelper('refresh-anchor ADR-001', tmpDir);
     expect(result.code).toBe(0);
     const lockDir = path.join(tmpDir, '.devflow', 'learning', '.decisions.lock');
     expect(fs.existsSync(lockDir)).toBe(false);
   });
 
-  it('prints the anchor_id to stdout on success (mirrors assign-anchor contract)', () => {
-    // refresh-anchor echoes the anchor_id to stdout after renderAndWriteAll,
-    // mirroring assign-anchor's contract so callers can confirm which row was refreshed.
-    writeLog(tmpDir, [
-      makeObsRow({ id: 'obs_ra_stdout', type: 'decision', status: 'created', anchor_id: 'ADR-001' }),
-    ]);
-    writeLedger(tmpDir, [makeLedgerRow({ anchor_id: 'ADR-001', id: 'obs_ra_stdout', decisions_status: 'Accepted' })]);
-    const result = runHelper('refresh-anchor ADR-001', tmpDir);
-    expect(result.code).toBe(0);
-    // refresh-anchor must echo the anchor_id to stdout so callers can confirm which
-    // row was refreshed — identical contract to assign-anchor
-    expect(result.stdout.trim()).toBe('ADR-001');
+  it('prints what it did with the anchor on stdout', () => {
+    writeLog(tmpDir, [makeV2LogRow({ id: 'obs_ra_stdout' })]);
+    writeLedger(tmpDir, [makeV2LedgerRow({ id: 'obs_ra_stdout', rule: 'An older rule.' })]);
+    expect(runHelper('refresh-anchor ADR-001', tmpDir).stdout).toBe('reprojected ADR-001\n');
+    expect(runHelper('refresh-anchor ADR-001', tmpDir).stdout).toBe('unchanged ADR-001\n');
+    expect(runHelper('refresh-anchor ADR-001 --verified', tmpDir).stdout).toBe('verified ADR-001\n');
   });
 });
 
 // ---------------------------------------------------------------------------
-// refresh-anchor divergence guard — REG-1
+// refresh-anchor rewrites an entry in place (D-CONTENT-HISTORY)
 // ---------------------------------------------------------------------------
 
-describe('refresh-anchor divergence guard — REG-1', () => {
+describe('refresh-anchor rewrites an entry in place (D-CONTENT-HISTORY)', { timeout: 30_000 }, () => {
   let tmpDir: string;
 
   beforeEach(() => {
@@ -977,218 +785,41 @@ describe('refresh-anchor divergence guard — REG-1', () => {
     fs.rmSync(tmpDir, { recursive: true, force: true });
   });
 
-  it('exits non-zero when ledger details carries AMENDMENT text absent from log', () => {
-    // RED test: ledger row has curated AMENDMENT suffix; log row does not.
-    // refresh-anchor must refuse to silently discard the amendment.
-    const logDetails = 'context: original; decision: use Result types; rationale: functional error handling';
-    const ledgerDetails = logDetails + '; AMENDMENT 2026-08-01: also applies to async paths';
-    writeLog(tmpDir, [
-      makeObsRow({
-        id: 'obs_divg_001',
-        type: 'decision',
-        status: 'created',
-        anchor_id: 'ADR-001',
-        details: logDetails,
-      }),
-    ]);
-    writeLedger(tmpDir, [
-      makeLedgerRow({
-        id: 'obs_divg_001',
-        anchor_id: 'ADR-001',
-        decisions_status: 'Accepted',
-        details: ledgerDetails,
-      }),
-    ]);
-    const beforeRows = readLedger(tmpDir);
-    const result = runHelper('refresh-anchor ADR-001', tmpDir);
-    expect(result.code).not.toBe(0);
-    expect(result.stderr).toContain('ADR-001');
-    expect(result.stderr).toContain('Reconcile the log row first');
-    // Ledger row must be UNCHANGED — the guard must not leave a partial write
-    const afterRows = readLedger(tmpDir);
-    expect(afterRows[0].details).toBe(ledgerDetails);
-    // The divergence guard must also be the only difference — no other ledger mutations
-    expect(afterRows).toHaveLength(beforeRows.length);
-  });
+  it('accepts a shorter text that does not contain the old one, and history holds the prior row', () => {
+    const priorRule = 'Use Result types; AMENDMENT 2026-08-01: async paths return a Result as well, and callers check it.';
+    const newRule = 'Every fallible call returns a Result.';
+    expect(priorRule.includes(newRule) || newRule.includes(priorRule)).toBe(false);
+    const prior = makeV2LedgerRow({ id: 'obs_divg_001', rule: priorRule });
+    writeLog(tmpDir, [makeV2LogRow({ id: 'obs_divg_001', rule: newRule })]);
+    writeLedger(tmpDir, [prior]);
 
-  it('D3: pattern replacement SUCCEEDS and the rendered heading updates to the sharpened title', () => {
-    // Guard harmonization: pattern replacement is sanctioned per D3. Consumers match
-    // '## (ADR|PF)-NNN:' anchor anchors, never titles, so the agent may sharpen the log
-    // pattern to update the rendered heading. The pattern divergence guard was removed;
-    // only DETAILS divergence is still protected (REG-1).
-    const oldPattern = 'Use exceptions for error handling';
-    const newPattern = 'Prefer explicit error channels over exception propagation';
-    const sharedDetails = 'context: original; decision: base rule; rationale: consistency';
-    writeLog(tmpDir, [
-      makeObsRow({
-        id: 'obs_divg_002',
-        type: 'decision',
-        status: 'created',
-        anchor_id: 'ADR-002',
-        pattern: newPattern,
-        details: sharedDetails,
-      }),
-    ]);
-    writeLedger(tmpDir, [
-      makeLedgerRow({
-        id: 'obs_divg_002',
-        anchor_id: 'ADR-002',
-        decisions_status: 'Accepted',
-        pattern: oldPattern,
-        details: sharedDetails,
-      }),
-    ]);
-    const result = runHelper('refresh-anchor ADR-002', tmpDir);
-    expect(result.code).toBe(0);
-    // Ledger row carries the new (sharpened) pattern from the log
-    const rows = readLedger(tmpDir);
-    expect(rows[0].pattern).toBe(newPattern);
-    // Rendered heading uses the sharpened title; old title gone
-    const decisionsMd = fs.readFileSync(
-      path.join(tmpDir, '.devflow', 'learning', 'decisions.md'), 'utf8'
-    );
-    expect(decisionsMd).toContain(`## ADR-002: ${newPattern}`);
-    expect(decisionsMd).not.toContain(oldPattern);
-  });
-
-  it('succeeds when log details is a strict superset of ledger details', () => {
-    // Positive case: log has the ledger content plus more — guard passes.
-    const ledgerDetails = 'context: base; decision: use Result; rationale: functional';
-    const logDetails = ledgerDetails + '; AMENDMENT 2026-08-30: also handles cancellation';
-    writeLog(tmpDir, [
-      makeObsRow({
-        id: 'obs_divg_003',
-        type: 'decision',
-        status: 'created',
-        anchor_id: 'ADR-003',
-        details: logDetails,
-      }),
-    ]);
-    writeLedger(tmpDir, [
-      makeLedgerRow({
-        id: 'obs_divg_003',
-        anchor_id: 'ADR-003',
-        decisions_status: 'Accepted',
-        details: ledgerDetails,
-      }),
-    ]);
-    const result = runHelper('refresh-anchor ADR-003', tmpDir);
-    expect(result.code).toBe(0);
-    // Ledger now carries the log's full details (the superset)
-    const rows = readLedger(tmpDir);
-    expect(rows[0].details).toBe(logDetails);
-  });
-
-  it('succeeds when both details and pattern are identical between log and ledger', () => {
-    // Exact match is trivially a superset — guard must not fire on equal content.
-    const sharedDetails = 'context: foo; decision: bar; rationale: baz';
-    const sharedPattern = 'Some established pattern';
-    writeLog(tmpDir, [
-      makeObsRow({
-        id: 'obs_divg_004',
-        type: 'decision',
-        status: 'created',
-        anchor_id: 'ADR-004',
-        details: sharedDetails,
-        pattern: sharedPattern,
-      }),
-    ]);
-    writeLedger(tmpDir, [
-      makeLedgerRow({
-        id: 'obs_divg_004',
-        anchor_id: 'ADR-004',
-        decisions_status: 'Accepted',
-        details: sharedDetails,
-        pattern: sharedPattern,
-      }),
-    ]);
-    const result = runHelper('refresh-anchor ADR-004', tmpDir);
-    expect(result.code).toBe(0);
-  });
-});
-
-// ---------------------------------------------------------------------------
-// Guard harmonization: D4 — raw_body-lost refresh succeeds
-// ---------------------------------------------------------------------------
-
-describe('refresh-anchor guard harmonization — D4 raw_body-lost succeeds', () => {
-  let tmpDir: string;
-
-  beforeEach(() => {
-    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'rf-d4-test-'));
-    fs.mkdirSync(path.join(tmpDir, '.devflow', 'learning'), { recursive: true });
-  });
-
-  afterEach(() => {
-    fs.rmSync(tmpDir, { recursive: true, force: true });
-  });
-
-  it('refresh succeeds when the log row lost raw_body and the entry renders formatter-generated', () => {
-    // D4: a log row that lost raw_body un-freezes the entry to formatter-rendered
-    // output by design (D-LOG-CONTENT-AUTHORITY). The refresh must not throw on the absent field.
-    const details = 'context: test; decision: use formatter; rationale: clean output';
-    writeLog(tmpDir, [
-      makeObsRow({
-        id: 'obs_d4_001',
-        type: 'decision',
-        status: 'created',
-        anchor_id: 'ADR-001',
-        details,
-        // log row has no raw_body — simulates a row that lost it during editing
-      }),
-    ]);
-    writeLedger(tmpDir, [
-      makeLedgerRow({
-        id: 'obs_d4_001',
-        anchor_id: 'ADR-001',
-        decisions_status: 'Accepted',
-        details,
-        // ledger row originally had raw_body — after refresh it should be dropped
-        raw_body: '\n## ADR-001: Some title\n\n- **Status**: Accepted\n',
-      }),
-    ]);
     const result = runHelper('refresh-anchor ADR-001', tmpDir);
     expect(result.code).toBe(0);
-    // Refreshed ledger row must not carry raw_body (log row has none)
-    const rows = readLedger(tmpDir);
-    expect(rows[0].raw_body).toBeUndefined();
-    // decisions.md must contain formatter-generated output (not raw_body frozen body)
-    const decisionsMd = fs.readFileSync(
-      path.join(tmpDir, '.devflow', 'learning', 'decisions.md'), 'utf8'
-    );
-    expect(decisionsMd).toContain('## ADR-001:');
-    expect(decisionsMd).toContain('- **Status**: Accepted');
+    expect(readLedger(tmpDir)[0].rule).toBe(newRule);
+    expect(store.historyVersions(tmpDir, 'obs_divg_001').map(version => version.ledger)).toEqual([[prior]]);
+    const decisionsMd = fs.readFileSync(path.join(tmpDir, '.devflow', 'learning', 'decisions.md'), 'utf8');
+    expect(decisionsMd).toContain(`- **Decision**: ${newRule}\n`);
+    expect(decisionsMd).not.toContain('AMENDMENT');
   });
 
-  it('D4 mirror: refresh preserves raw_body when the log row carries a safe one', () => {
-    // D4 mirror case: a log row that carries a safe raw_body propagates it
-    // into the refreshed ledger row. The ledger row started without raw_body.
-    const details = 'context: raw_body present; decision: preserve verbatim body; rationale: migration';
-    const safeRawBody = '\n## ADR-002: Preserve verbatim body\n\n- **Status**: Accepted\n- **Context**: preserved\n';
-    writeLog(tmpDir, [
-      makeObsRow({
-        id: 'obs_d4_002',
-        type: 'decision',
-        status: 'created',
-        anchor_id: 'ADR-002',
-        details,
-        raw_body: safeRawBody,
-      }),
-    ]);
-    writeLedger(tmpDir, [
-      makeLedgerRow({
-        id: 'obs_d4_002',
-        anchor_id: 'ADR-002',
-        decisions_status: 'Accepted',
-        details,
-        // ledger row did not previously have raw_body
-      }),
-    ]);
-    const result = runHelper('refresh-anchor ADR-002', tmpDir);
-    expect(result.code).toBe(0);
-    // Refreshed ledger row carries the safe raw_body from the log row
-    const rows = readLedger(tmpDir);
-    expect(rows[0].raw_body).toBe(safeRawBody);
+  it('a sharpened title becomes the rendered heading', () => {
+    const oldTitle = 'Use exceptions for error handling';
+    const newTitle = 'Prefer explicit error channels over exception propagation';
+    writeLog(tmpDir, [makeV2LogRow({ id: 'obs_divg_002', title: newTitle })]);
+    writeLedger(tmpDir, [makeV2LedgerRow({ id: 'obs_divg_002', anchor_id: 'ADR-002', title: oldTitle })]);
+    expect(runHelper('refresh-anchor ADR-002', tmpDir).code).toBe(0);
+
+    expect(readLedger(tmpDir)[0].title).toBe(newTitle);
+    const decisionsMd = fs.readFileSync(path.join(tmpDir, '.devflow', 'learning', 'decisions.md'), 'utf8');
+    expect(decisionsMd).toContain(`## ADR-002: ${newTitle}`);
+    expect(decisionsMd).not.toContain(oldTitle);
+  });
+
+  it('records no history when the entry already holds its log row\'s content', () => {
+    writeLog(tmpDir, [makeV2LogRow({ id: 'obs_divg_004' })]);
+    writeLedger(tmpDir, [makeV2LedgerRow({ id: 'obs_divg_004', anchor_id: 'ADR-004' })]);
+    expect(runHelper('refresh-anchor ADR-004', tmpDir).code).toBe(0);
+    expect(fs.existsSync(path.join(tmpDir, '.devflow', 'learning', 'decisions-history.jsonl'))).toBe(false);
   });
 });
 
@@ -1196,7 +827,7 @@ describe('refresh-anchor guard harmonization — D4 raw_body-lost succeeds', () 
 // refresh-anchor — variadic multi-anchor (PERF-1)
 // ---------------------------------------------------------------------------
 
-describe('refresh-anchor variadic multi-anchor — PERF-1', () => {
+describe('refresh-anchor variadic multi-anchor — PERF-1', { timeout: 30_000 }, () => {
   let tmpDir: string;
 
   beforeEach(() => {
@@ -1208,82 +839,68 @@ describe('refresh-anchor variadic multi-anchor — PERF-1', () => {
     fs.rmSync(tmpDir, { recursive: true, force: true });
   });
 
-  it('multi-anchor happy path: both rows re-projected and files rendered once', () => {
-    // PERF-1: one call, two anchors, files rendered exactly once.
-    const details1 = 'context: a; decision: use Result; rationale: functional';
-    const details2 = 'area: hooks; issue: race; impact: lost data; resolution: lock';
+  it('multi-anchor happy path: both rows re-projected and both files rendered', () => {
     writeLog(tmpDir, [
-      makeObsRow({ id: 'obs_var_001', type: 'decision', status: 'created', anchor_id: 'ADR-001', details: details1, pattern: 'Updated ADR pattern' }),
-      makeObsRow({ id: 'obs_var_002', type: 'pitfall', status: 'created', anchor_id: 'PF-001', details: details2, pattern: 'Updated PF pattern' }),
+      makeV2LogRow({ id: 'obs_var_001', title: 'Updated decision title' }),
+      makeV2LogRow({ id: 'obs_var_002', type: 'pitfall', title: 'Updated pitfall title' }),
     ]);
     writeLedger(tmpDir, [
-      makeLedgerRow({ id: 'obs_var_001', anchor_id: 'ADR-001', decisions_status: 'Accepted', details: details1, pattern: 'Old ADR pattern' }),
-      { id: 'obs_var_002', type: 'pitfall', anchor_id: 'PF-001', decisions_status: 'Active', details: details2, pattern: 'Old PF pattern' },
+      makeV2LedgerRow({ id: 'obs_var_001', anchor_id: 'ADR-001', title: 'Old decision title' }),
+      makeV2LedgerRow({ id: 'obs_var_002', type: 'pitfall', anchor_id: 'PF-001', decisions_status: 'Active', title: 'Old pitfall title' }),
     ]);
     const result = runHelper('refresh-anchor ADR-001 PF-001', tmpDir);
     expect(result.code).toBe(0);
-    // stdout contains both anchor ids (one per line)
-    expect(result.stdout.trim()).toBe('ADR-001\nPF-001');
-    // Both rows updated in ledger
+    expect(result.stdout).toBe('reprojected ADR-001\nreprojected PF-001\n');
+
     const rows = readLedger(tmpDir);
-    expect(rows.find((r: Record<string, unknown>) => r.anchor_id === 'ADR-001')?.pattern).toBe('Updated ADR pattern');
-    expect(rows.find((r: Record<string, unknown>) => r.anchor_id === 'PF-001')?.pattern).toBe('Updated PF pattern');
-    // Both files rendered — decisions.md has ADR-001, pitfalls.md has PF-001
+    expect(rows.find(r => r.anchor_id === 'ADR-001')?.title).toBe('Updated decision title');
+    expect(rows.find(r => r.anchor_id === 'PF-001')?.title).toBe('Updated pitfall title');
     const decisionsMd = fs.readFileSync(path.join(tmpDir, '.devflow', 'learning', 'decisions.md'), 'utf8');
-    expect(decisionsMd).toContain('## ADR-001:');
+    expect(decisionsMd).toContain('## ADR-001: Updated decision title');
     const pitfallsMd = fs.readFileSync(path.join(tmpDir, '.devflow', 'learning', 'pitfalls.md'), 'utf8');
-    expect(pitfallsMd).toContain('## PF-001:');
+    expect(pitfallsMd).toContain('## PF-001: Updated pitfall title');
   });
 
-  it('one-bad-anchor-in-batch: nothing written when any anchor is invalid', () => {
-    // All-or-nothing: ADR-002 does not exist in the ledger — nothing should be written.
-    const details = 'context: x; decision: y; rationale: z';
-    writeLog(tmpDir, [
-      makeObsRow({ id: 'obs_var_003', type: 'decision', status: 'created', anchor_id: 'ADR-001', details, pattern: 'New pattern' }),
-    ]);
-    writeLedger(tmpDir, [
-      makeLedgerRow({ id: 'obs_var_003', anchor_id: 'ADR-001', decisions_status: 'Accepted', details, pattern: 'Old pattern' }),
-    ]);
-    const before = readLedger(tmpDir);
+  it('one-bad-anchor-in-batch: nothing written when any anchor is refused', () => {
+    writeLog(tmpDir, [makeV2LogRow({ id: 'obs_var_003', title: 'New title' })]);
+    writeLedger(tmpDir, [makeV2LedgerRow({ id: 'obs_var_003', title: 'Old title' })]);
+    const before = snapshotTree(tmpDir);
     const result = runHelper('refresh-anchor ADR-001 ADR-002', tmpDir);
     expect(result.code).not.toBe(0);
-    expect(result.stderr).toContain('ADR-002');
-    expect(result.stderr).toContain('not found');
-    // Ledger unchanged — no partial write
-    const after = readLedger(tmpDir);
-    expect(after[0].pattern).toBe(before[0].pattern);
+    expect(result.stderr).toContain('ADR-002: not in the ledger');
+    expect(snapshotTree(tmpDir)).toEqual(before);
   });
 
   it('zero-args usage error exits non-zero with usage message', () => {
     const result = runHelper('refresh-anchor', tmpDir);
     expect(result.code).not.toBe(0);
     expect(result.stderr).toContain('usage');
-    expect(result.stderr).toContain('anchor_id');
+    expect(result.stderr).toContain('<anchor>');
   });
 });
 
 // ---------------------------------------------------------------------------
-// refresh-anchor row-count invariant — REL-6
+// refresh-anchor quarantines malformed ledger lines (D-QUARANTINE-MALFORMED)
 // ---------------------------------------------------------------------------
 
-describe('refresh-anchor row-count invariant — REL-6', () => {
-  it('single-anchor refresh preserves row count (parseLedger drop exposure is bounded)', () => {
-    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'rf-rel6-test-'));
-    fs.mkdirSync(path.join(tmpDir, '.devflow', 'learning'), { recursive: true });
+describe('refresh-anchor quarantines malformed ledger lines (D-QUARANTINE-MALFORMED)', () => {
+  it('moves a malformed ledger line aside before it rewrites the ledger, and keeps every row', () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'rf-quarantine-test-'));
     try {
-      const details = 'context: x; decision: y; rationale: z';
-      writeLog(tmpDir, [
-        makeObsRow({ id: 'obs_rel6_001', type: 'decision', status: 'created', anchor_id: 'ADR-001', details }),
-        makeObsRow({ id: 'obs_rel6_002', type: 'decision', status: 'created', anchor_id: 'ADR-002', details }),
-      ]);
-      writeLedger(tmpDir, [
-        makeLedgerRow({ id: 'obs_rel6_001', anchor_id: 'ADR-001', decisions_status: 'Accepted', details }),
-        makeLedgerRow({ id: 'obs_rel6_002', anchor_id: 'ADR-002', decisions_status: 'Accepted', details }),
-      ]);
+      const { ledger, learningDir } = seedLearningTree(tmpDir, {
+        log: [makeV2LogRow({ id: 'obs_q_001', rule: 'A sharper rule.' }), makeV2LogRow({ id: 'obs_q_002', rule: 'A sharper rule.' })],
+        ledger: [makeV2LedgerRow({ id: 'obs_q_001' }), makeV2LedgerRow({ id: 'obs_q_002', anchor_id: 'ADR-002' })],
+      });
+      fs.appendFileSync(ledger, '{"anchor_id": "ADR-003", "cut off\n');
+
       const result = runHelper('refresh-anchor ADR-001 ADR-002', tmpDir);
       expect(result.code).toBe(0);
-      const rows = readLedger(tmpDir);
-      expect(rows).toHaveLength(2);
+      expect(readLedger(tmpDir).map(row => [row.anchor_id, row.rule])).toEqual([
+        ['ADR-001', 'A sharper rule.'],
+        ['ADR-002', 'A sharper rule.'],
+      ]);
+      const rejected = store.readJsonl(path.join(learningDir, 'decisions-ledger.rejected.jsonl')).rows;
+      expect(rejected.map(record => record.text)).toEqual(['{"anchor_id": "ADR-003", "cut off']);
     } finally {
       fs.rmSync(tmpDir, { recursive: true, force: true });
     }
@@ -1306,138 +923,6 @@ describe('retire-anchor stdout echo — CON-P1', () => {
     } finally {
       fs.rmSync(tmpDir, { recursive: true, force: true });
     }
-  });
-});
-
-// ---------------------------------------------------------------------------
-// refresh-anchor precondition assertions — TS-2
-// ---------------------------------------------------------------------------
-
-describe('refresh-anchor precondition assertions — TS-2', () => {
-  let tmpDir: string;
-
-  beforeEach(() => {
-    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'rf-precond-test-'));
-    fs.mkdirSync(path.join(tmpDir, '.devflow', 'learning'), { recursive: true });
-  });
-
-  afterEach(() => {
-    fs.rmSync(tmpDir, { recursive: true, force: true });
-  });
-
-  it('exits non-zero when ledger row has no id field', () => {
-    // A ledger row without id causes undefined===undefined to bind the wrong log row.
-    writeLog(tmpDir, [
-      makeObsRow({ id: 'obs_prec_001', type: 'decision', status: 'created', anchor_id: 'ADR-001' }),
-    ]);
-    // Hand-craft a ledger row with no id
-    const ledgerPath = path.join(tmpDir, '.devflow', 'learning', 'decisions-ledger.jsonl');
-    fs.writeFileSync(
-      ledgerPath,
-      JSON.stringify({ type: 'decision', pattern: 'P', anchor_id: 'ADR-001', decisions_status: 'Accepted' }) + '\n',
-      'utf8'
-    );
-    const result = runHelper('refresh-anchor ADR-001', tmpDir);
-    expect(result.code).not.toBe(0);
-    expect(result.stderr).toContain('ADR-001');
-    expect(result.stderr).toContain('has no id');
-  });
-
-  it('exits non-zero when ledger row has no decisions_status', () => {
-    // Absent decisions_status would be dropped by JSON.stringify in toLedgerRow,
-    // writing a ledger row that violates the required field.
-    writeLog(tmpDir, [
-      makeObsRow({ id: 'obs_prec_002', type: 'decision', status: 'created', anchor_id: 'ADR-002' }),
-    ]);
-    // Hand-craft a ledger row with no decisions_status
-    const ledgerPath = path.join(tmpDir, '.devflow', 'learning', 'decisions-ledger.jsonl');
-    fs.writeFileSync(
-      ledgerPath,
-      JSON.stringify({ id: 'obs_prec_002', type: 'decision', pattern: 'P', anchor_id: 'ADR-002' }) + '\n',
-      'utf8'
-    );
-    const result = runHelper('refresh-anchor ADR-002', tmpDir);
-    expect(result.code).not.toBe(0);
-    expect(result.stderr).toContain('ADR-002');
-    expect(result.stderr).toContain('has no decisions_status');
-  });
-
-  it('exits non-zero when log obs type does not match ledger row type', () => {
-    // Re-projecting across entry types would move a PF-NNN entry into decisions.md.
-    // Log obs type 'pitfall', ledger row type 'decision' — must refuse.
-    writeLog(tmpDir, [
-      makeObsRow({
-        id: 'obs_prec_003',
-        type: 'pitfall',  // intentionally mismatched
-        status: 'created',
-        anchor_id: 'ADR-003',
-      }),
-    ]);
-    writeLedger(tmpDir, [
-      makeLedgerRow({
-        id: 'obs_prec_003',
-        type: 'decision',  // committed type
-        anchor_id: 'ADR-003',
-        decisions_status: 'Accepted',
-      }),
-    ]);
-    const result = runHelper('refresh-anchor ADR-003', tmpDir);
-    expect(result.code).not.toBe(0);
-    expect(result.stderr).toContain('ADR-003');
-    expect(result.stderr).toContain('does not match committed anchor');
-  });
-});
-
-// ---------------------------------------------------------------------------
-// refresh-anchor ledger-existence guard — SEC-S3
-// ---------------------------------------------------------------------------
-
-describe('refresh-anchor ledger-existence guard — SEC-S3', () => {
-  let tmpDir: string;
-
-  beforeEach(() => {
-    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'rf-ledgerguard-test-'));
-    fs.mkdirSync(path.join(tmpDir, '.devflow', 'learning'), { recursive: true });
-  });
-
-  afterEach(() => {
-    fs.rmSync(tmpDir, { recursive: true, force: true });
-  });
-
-  it('exits non-zero with ledger-not-found message when ledger is absent', () => {
-    // No ledger file exists — guard fires before mkdir, giving a clear error.
-    // (The log can exist; the ledger is the gating file.)
-    writeLog(tmpDir, [
-      makeObsRow({ id: 'obs_sec_001', type: 'decision', status: 'created', anchor_id: 'ADR-001' }),
-    ]);
-    // Remove the ledger if it was created
-    const ledgerPath = path.join(tmpDir, '.devflow', 'learning', 'decisions-ledger.jsonl');
-    if (fs.existsSync(ledgerPath)) fs.rmSync(ledgerPath);
-    const result = runHelper('refresh-anchor ADR-001', tmpDir);
-    expect(result.code).not.toBe(0);
-    expect(result.stderr).toContain('decisions-ledger.jsonl');
-    expect(result.stderr).not.toMatch(/ENOENT/);
-  });
-
-  it('proceeds past the guard when ledger exists', () => {
-    // Ledger present → guard passes, operation proceeds normally.
-    writeLog(tmpDir, [
-      makeObsRow({
-        id: 'obs_sec_002',
-        type: 'decision',
-        status: 'created',
-        anchor_id: 'ADR-001',
-      }),
-    ]);
-    writeLedger(tmpDir, [
-      makeLedgerRow({
-        id: 'obs_sec_002',
-        anchor_id: 'ADR-001',
-        decisions_status: 'Accepted',
-      }),
-    ]);
-    const result = runHelper('refresh-anchor ADR-001', tmpDir);
-    expect(result.code).toBe(0);
   });
 });
 
@@ -1494,7 +979,7 @@ describe('rotate-observations CLI op', () => {
 // assign-anchor: the ledger alone records promotion (D-LEDGER-REGISTRY)
 // ---------------------------------------------------------------------------
 
-describe('assign-anchor: the ledger alone records promotion (D-LEDGER-REGISTRY)', () => {
+describe('assign-anchor: the ledger alone records promotion (D-LEDGER-REGISTRY)', { timeout: 30_000 }, () => {
   let tmpDir: string;
 
   beforeEach(() => {
@@ -1694,103 +1179,6 @@ describe('D-E4-SKIP: assign-anchor skips a number a tracked file cites', { timeo
     expect(result.code).not.toBe(0);
     expect(result.stderr).toContain('unknown operation "next-anchor"');
     expect(fs.existsSync(path.join(tmpDir, '.devflow', 'learning', 'decisions-ledger.jsonl'))).toBe(false);
-  });
-});
-
-// ---------------------------------------------------------------------------
-// toLedgerRow projector: canonical ledger shape (Issue 3)
-// ---------------------------------------------------------------------------
-
-describe('toLedgerRow projector — canonical committed shape', () => {
-  const formatModule = require(
-    path.join(ROOT, 'src/assets/scripts/hooks/lib/decisions-format.cjs')
-  ) as {
-    toLedgerRow: (
-      obs: Record<string, unknown>,
-      opts: { anchorId: string; status: string; date?: string }
-    ) => Record<string, unknown>;
-  };
-  const projector = formatModule.toLedgerRow;
-
-  it('includes only canonical fields for a decision with date', () => {
-    const obs: Record<string, unknown> = {
-      id: 'obs_proj_001',
-      type: 'decision',
-      pattern: 'Use Result types',
-      details: 'context: foo; decision: bar; rationale: baz',
-      // observation-lifecycle fields that must be excluded
-      confidence: 0.9,
-      quality_ok: true,
-      observations: 3,
-      first_seen: '2026-01-01T00:00:00Z',
-      last_seen: '2026-06-01T00:00:00Z',
-      evidence: ['evidence1'],
-      artifact_path: '/some/path',
-      status: 'ready',
-    };
-
-    const row = projector(obs, { anchorId: 'ADR-042', status: 'Accepted', date: '2026-06-11' });
-
-    // Required canonical fields
-    expect(row.id).toBe('obs_proj_001');
-    expect(row.type).toBe('decision');
-    expect(row.pattern).toBe('Use Result types');
-    expect(row.details).toBe('context: foo; decision: bar; rationale: baz');
-    expect(row.anchor_id).toBe('ADR-042');
-    expect(row.decisions_status).toBe('Accepted');
-    expect(row.date).toBe('2026-06-11');
-
-    // Lifecycle fields must be absent
-    expect(row.confidence).toBeUndefined();
-    expect(row.quality_ok).toBeUndefined();
-    expect(row.observations).toBeUndefined();
-    expect(row.first_seen).toBeUndefined();
-    expect(row.last_seen).toBeUndefined();
-    expect(row.evidence).toBeUndefined();
-    expect(row.artifact_path).toBeUndefined();
-    expect(row.status).toBeUndefined();
-  });
-
-  it('omits date field when not provided (pitfall path)', () => {
-    const obs: Record<string, unknown> = {
-      id: 'obs_proj_pf',
-      type: 'pitfall',
-      pattern: 'Some pitfall',
-      details: 'area: test; issue: foo',
-    };
-    const row = projector(obs, { anchorId: 'PF-003', status: 'Active', date: undefined });
-    expect(row.date).toBeUndefined();
-  });
-
-  it('preserves raw_body when present in obs', () => {
-    const obs: Record<string, unknown> = {
-      id: 'obs_proj_rb',
-      type: 'decision',
-      pattern: 'Pattern',
-      details: '',
-      raw_body: '\n## ADR-001: Pattern\n\n- **Status**: Accepted\n',
-    };
-    const row = projector(obs, { anchorId: 'ADR-001', status: 'Accepted', date: '2026-01-01' });
-    expect(row.raw_body).toBe('\n## ADR-001: Pattern\n\n- **Status**: Accepted\n');
-  });
-
-  it('preserves amendments when present in obs', () => {
-    const obs: Record<string, unknown> = {
-      id: 'obs_proj_amd',
-      type: 'decision',
-      pattern: 'Pattern',
-      details: '',
-      amendments: [{ date: '2026-05-01', note: 'Updated' }],
-    };
-    const row = projector(obs, { anchorId: 'ADR-002', status: 'Accepted', date: '2026-01-01' });
-    expect(row.amendments).toEqual([{ date: '2026-05-01', note: 'Updated' }]);
-  });
-
-  it('omits raw_body and amendments when absent from obs', () => {
-    const obs: Record<string, unknown> = { id: 'obs_proj_bare', type: 'decision', pattern: 'P', details: 'd' };
-    const row = projector(obs, { anchorId: 'ADR-003', status: 'Accepted', date: '2026-01-01' });
-    expect(row.raw_body).toBeUndefined();
-    expect(row.amendments).toBeUndefined();
   });
 });
 
@@ -2019,13 +1407,13 @@ describe('D-ONE-LEARNING-LOCK: every learning writer takes the one learning lock
   beforeEach(() => {
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'one-lock-test-'));
     probeDir = fs.mkdtempSync(path.join(os.tmpdir(), 'one-lock-probe-'));
-    const details = 'context: c; decision: d; rationale: r';
+    // The anchored observation's log row is ahead of its entry, so a refresh writes.
     writeLog(tmpDir, [
       makeV2LogRow({ id: 'obs_one_lock_new' }),
-      makeObsRow({ id: 'obs_one_lock_old', type: 'decision', status: 'created', details }),
+      makeV2LogRow({ id: 'obs_one_lock_old', rule: 'A sharper rule.' }),
       makeObsRow({ id: 'obs_one_lock_stale', status: 'observing', last_seen: '2026-01-01T00:00:00Z' }),
     ]);
-    writeLedger(tmpDir, [makeLedgerRow({ id: 'obs_one_lock_old', anchor_id: 'ADR-001', details })]);
+    writeLedger(tmpDir, [makeV2LedgerRow({ id: 'obs_one_lock_old', anchor_id: 'ADR-001' })]);
   });
 
   afterEach(() => {
@@ -2152,9 +1540,9 @@ describe('D-NO-STRAY-TREE: a learning writer refuses outside a learning tree', {
 // Lock release on early-exit error paths (S3b regression)
 //
 // process.exit(1) inside a try/finally block bypasses the finally block in
-// Node.js. Any early-exit path that called process.exit(1) while holding
-// .decisions.lock left a stale lock directory. The fix replaces process.exit
-// with throw inside locked regions so finally always runs and releases the lock.
+// Node.js, so an early exit while holding .decisions.lock would leave a stale
+// lock directory. A locked body returns its refusal as a Result instead, the
+// lock is released in the store's finally, and json-helper exits afterwards.
 // ---------------------------------------------------------------------------
 
 describe('lock release on early-exit error paths', () => {
@@ -2170,7 +1558,7 @@ describe('lock release on early-exit error paths', () => {
   });
 
   it('assign-anchor: missing log file — lock dir released after controlled error', () => {
-    // No log file written — parseLedger returns [], findIndex returns -1 → early-exit path
+    // No log file: the observation is not in the log, a refusal made under the lock
     const result = runHelper('assign-anchor decision obs_missing_log', tmpDir);
     expect(result.code).not.toBe(0);
     const lockDir = path.join(tmpDir, '.devflow', 'learning', '.decisions.lock');
@@ -2204,25 +1592,22 @@ describe('lock release on early-exit error paths', () => {
   });
 
   it('refresh-anchor: missing log obs — lock dir released after controlled error', () => {
-    // Ledger has ADR-001 (id: 'obs_test001') but no log obs with that id
-    writeLedger(tmpDir, [makeLedgerRow({ anchor_id: 'ADR-001', decisions_status: 'Accepted' })]);
-    // No log seeded — obs lookup by ledger row id must fail gracefully
+    // Ledger has ADR-001 (id: 'obs_test001') but no log row with that id
+    writeLedger(tmpDir, [makeV2LedgerRow({ id: 'obs_test001', anchor_id: 'ADR-001' })]);
     const result = runHelper('refresh-anchor ADR-001', tmpDir);
     expect(result.code).not.toBe(0);
-    expect(result.stderr).toContain('not found');
+    expect(result.stderr).toContain("ADR-001: no log row has id 'obs_test001'");
     const lockDir = path.join(tmpDir, '.devflow', 'learning', '.decisions.lock');
     expect(fs.existsSync(lockDir)).toBe(false);
   });
 
   it('refresh-anchor: anchor_id not in ledger — lock dir released after controlled error', () => {
     // Log has the obs but the ledger is missing the anchor
-    writeLog(tmpDir, [
-      makeObsRow({ id: 'obs_ra_lock', type: 'decision', status: 'created', anchor_id: 'ADR-001' }),
-    ]);
-    writeLedger(tmpDir, [makeLedgerRow({ anchor_id: 'ADR-999', decisions_status: 'Accepted' })]);
+    writeLog(tmpDir, [makeV2LogRow({ id: 'obs_ra_lock' })]);
+    writeLedger(tmpDir, [makeV2LedgerRow({ id: 'obs_ra_lock', anchor_id: 'ADR-999' })]);
     const result = runHelper('refresh-anchor ADR-001', tmpDir);
     expect(result.code).not.toBe(0);
-    expect(result.stderr).toContain('not found');
+    expect(result.stderr).toContain('ADR-001: not in the ledger');
     const lockDir = path.join(tmpDir, '.devflow', 'learning', '.decisions.lock');
     expect(fs.existsSync(lockDir)).toBe(false);
   });
@@ -2232,14 +1617,15 @@ describe('lock release on early-exit error paths', () => {
 // Pre-existing corpus fixture — REG-S1 (fixtures derived from real corpus)
 //
 // Frozen copies of actual anchored rows from .devflow/learning/decisions-ledger.jsonl
-// at time of authoring. Used to pin that refresh-anchor succeeds against real-world
-// rows and that the rendered output has non-empty body fields.
+// at time of authoring. They pin that refresh-anchor refuses a real-world v1 entry
+// and writes nothing, and that put-observation --update is how such an entry
+// becomes a v2 entry refresh-anchor accepts.
 //
 // These fixtures are FROZEN IN-FILE, not live-file reads: the live ledger is per-machine and gitignored.
 // Derived from decisions-ledger.jsonl rows ADR-001 and PF-001.
 // ---------------------------------------------------------------------------
 
-describe('refresh-anchor — pre-existing corpus fixture (REG-S1)', () => {
+describe('refresh-anchor — pre-existing corpus fixture (REG-S1)', { timeout: 30_000 }, () => {
   let tmpDir: string;
 
   beforeEach(() => {
@@ -2273,34 +1659,50 @@ describe('refresh-anchor — pre-existing corpus fixture (REG-S1)', () => {
     decisions_status: 'Active',
   };
 
-  it('refresh-anchor on a frozen ADR-001 corpus row succeeds and renders non-empty Consequences', () => {
-    // Derived from live ADR-001 ledger row — log carries identical details (superset check passes).
-    writeLog(tmpDir, [CORPUS_ADR_001]);
-    writeLedger(tmpDir, [CORPUS_ADR_001]);
-    const result = runHelper('refresh-anchor ADR-001', tmpDir);
-    expect(result.code).toBe(0);
-    const decisionsMd = fs.readFileSync(
-      path.join(tmpDir, '.devflow', 'learning', 'decisions.md'), 'utf8'
-    );
-    expect(decisionsMd).toContain('## ADR-001:');
-    // details has both 'context:' and 'decision:' fields — rendered body must be non-empty
-    expect(decisionsMd).toMatch(/- \*\*Context\*\*: .+/);
-    expect(decisionsMd).toMatch(/- \*\*Decision\*\*: .+/);
+  it('refresh-anchor refuses the frozen v1 corpus entries and writes nothing', () => {
+    writeLog(tmpDir, [CORPUS_ADR_001, CORPUS_PF_001]);
+    writeLedger(tmpDir, [CORPUS_ADR_001, CORPUS_PF_001]);
+    const before = snapshotTree(tmpDir);
+
+    expect(runJsonHelper(tmpDir, ['refresh-anchor', 'ADR-001', 'PF-001'])).toEqual({
+      code: 1,
+      stdout: '',
+      stderr: [
+        'refresh-anchor: 2 of 2 anchors refused; nothing was written',
+        '  ADR-001: a v1 entry; rewrite it with put-observation --update',
+        '  PF-001: a v1 entry; rewrite it with put-observation --update',
+        '',
+      ].join('\n'),
+    });
+    expect(snapshotTree(tmpDir)).toEqual(before);
   });
 
-  it('refresh-anchor on a frozen PF-001 corpus row succeeds and renders non-empty Impact and Resolution', () => {
-    // Derived from live PF-001 ledger row — log carries identical details (superset check passes).
-    writeLog(tmpDir, [CORPUS_PF_001]);
-    writeLedger(tmpDir, [CORPUS_PF_001]);
-    const result = runHelper('refresh-anchor PF-001', tmpDir);
-    expect(result.code).toBe(0);
-    const pitfallsMd = fs.readFileSync(
-      path.join(tmpDir, '.devflow', 'learning', 'pitfalls.md'), 'utf8'
-    );
-    expect(pitfallsMd).toContain('## PF-001:');
-    // details has 'impact:' and 'resolution:' fields — rendered body must be non-empty
-    expect(pitfallsMd).toMatch(/- \*\*Impact\*\*: .+/);
-    expect(pitfallsMd).toMatch(/- \*\*Resolution\*\*: .+/);
+  it('put-observation --update converts the frozen v1 entry to v2, after which refresh-anchor accepts it', () => {
+    writeLog(tmpDir, [CORPUS_ADR_001]);
+    const ledgerPath = writeLedger(tmpDir, [CORPUS_ADR_001]);
+    const ledgerBefore = fs.readFileSync(ledgerPath, 'utf8');
+    const rewrite = {
+      id: 'obs_cleanbrk1',
+      type: 'decision',
+      title: 'Ship feature-knowledge v2 as a clean break',
+      rule: 'Delete the old-install cleanup machinery and clean the one affected machine by hand.',
+      why: 'No install upgrades across an unreleased break, so defense code for one would only ever be dead code.',
+      scope: ['area:knowledge'],
+      provenance: 'feature-knowledge v2 review',
+    };
+
+    expect(runJsonHelper(tmpDir, ['put-observation', '--update'], JSON.stringify(rewrite))).toEqual({
+      code: 0, stdout: 'updated obs_cleanbrk1\nreprojected ADR-001\n', stderr: '',
+    });
+    const [converted] = readLedger(tmpDir);
+    expect(converted).toMatchObject({ schema: 2, anchor_id: 'ADR-001', decisions_status: 'Accepted', date: '2026-06-30', title: rewrite.title });
+    expect(converted.details).toBeUndefined();
+    // The v1 rows survive in the pre-v2 backup and in history.
+    expect(fs.readFileSync(path.join(tmpDir, '.devflow', 'learning', 'decisions-ledger.pre-v2.jsonl'), 'utf8')).toBe(ledgerBefore);
+    expect(store.historyVersions(tmpDir, 'obs_cleanbrk1').map(version => version.ledger)).toEqual([[CORPUS_ADR_001]]);
+
+    expect(runJsonHelper(tmpDir, ['refresh-anchor', 'ADR-001'])).toEqual({ code: 0, stdout: 'unchanged ADR-001\n', stderr: '' });
+    expect(runJsonHelper(tmpDir, ['refresh-anchor', '--verified', 'ADR-001'])).toEqual({ code: 0, stdout: 'verified ADR-001\n', stderr: '' });
   });
 });
 

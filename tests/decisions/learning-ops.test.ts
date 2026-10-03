@@ -1482,3 +1482,282 @@ describe('assign-anchor op', { timeout: 30_000 }, () => {
     });
   });
 });
+
+// ---------------------------------------------------------------------------
+// refreshAnchors: re-projection from the log (D-LOG-CONTENT-AUTHORITY)
+// ---------------------------------------------------------------------------
+
+describe('refreshAnchors: re-projection from the log (D-LOG-CONTENT-AUTHORITY)', () => {
+  let dir: string;
+  let paths: LearningTreePaths;
+
+  beforeEach(() => {
+    dir = makeTmp('learning-ops-refresh-');
+    paths = seedLearningTree(dir);
+  });
+
+  afterEach(() => {
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+
+  /** A store refresh on the fixture clock. */
+  function refresh(anchors: readonly string[], verified = false) {
+    return store.refreshAnchors(dir, anchors, { verified, now: FIXTURE_NOW });
+  }
+
+  it('rewrites an entry in place: a shorter rule that does not contain the old one replaces it, and history keeps the prior row', () => {
+    const prior = makeV2LedgerRow({
+      rule: 'Every learning store function returns a Result, never exits, never prints, and every caller checks ok before it reads the value.',
+      last_attempt: '2026-10-02T09:00:00.000Z',
+    });
+    const logRow = makeV2LogRow({ rule: 'Store functions return a Result.' });
+    seedLearningTree(dir, { log: [logRow], ledger: [prior] });
+
+    expect(refresh(['ADR-001'])).toEqual({ ok: true, value: { refreshed: [{ anchor_id: 'ADR-001', state: 'reprojected' }] } });
+    const [row] = rowsOf(paths.ledger);
+    expect(row).toEqual(store.toLedgerRowV2(logRow, prior));
+    expect(row).toMatchObject({ rule: 'Store functions return a Result.', date: '2026-09-01', last_verified: '2026-09-01', last_attempt: '2026-10-02T09:00:00.000Z' });
+    expect(store.historyVersions(dir, 'obs_store_one')).toEqual([{ id: 'obs_store_one', at: NOW_ISO, ledger: [prior], log: logRow }]);
+    expect(rendered(paths, 'decisions.md')).toBe(renderDecisionsFile(rowsOf(paths.ledger), 'decisions'));
+    expect(rendered(paths, 'decisions.md')).toContain('- **Decision**: Store functions return a Result.\n');
+  });
+
+  it('answers unchanged and writes nothing when the entry already holds its log row\'s content', () => {
+    seedLearningTree(dir, { log: [makeV2LogRow()], ledger: [makeV2LedgerRow()] });
+    const before = snapshotTree(dir);
+    expect(refresh(['ADR-001'])).toEqual({ ok: true, value: { refreshed: [{ anchor_id: 'ADR-001', state: 'unchanged' }] } });
+    expect(snapshotTree(dir)).toEqual(before);
+  });
+
+  it('re-projects each anchor of a batch once, in the order given', () => {
+    seedLearningTree(dir, {
+      log: [makeV2LogRow({ title: 'A sharper title' }), makeV2LogRow({ id: 'obs_lesson', type: 'pitfall', title: 'A sharper lesson' })],
+      ledger: [makeV2LedgerRow(), makeV2LedgerRow({ anchor_id: 'PF-002', id: 'obs_lesson', type: 'pitfall', decisions_status: 'Active' })],
+    });
+    expect(refresh(['PF-002', 'ADR-001', 'PF-002'])).toEqual({
+      ok: true,
+      value: { refreshed: [{ anchor_id: 'PF-002', state: 'reprojected' }, { anchor_id: 'ADR-001', state: 'reprojected' }] },
+    });
+    expect(rowsOf(paths.ledger).map(row => row.title)).toEqual(['A sharper title', 'A sharper lesson']);
+    expect(rendered(paths, 'pitfalls.md')).toContain(': A sharper lesson\n');
+    expect(rendered(paths, 'index.md')).toContain('  PF-002  A sharper lesson');
+  });
+
+  it('drops a key the projection does not hold, and gives an entry with no status its type\'s active status', () => {
+    seedLearningTree(dir, {
+      log: [makeV2LogRow()],
+      ledger: [makeV2LedgerRow({ decisions_status: undefined, confidence: 0.9, observations: 4 })],
+    });
+    expect(refresh(['ADR-001'])).toMatchObject({ ok: true, value: { refreshed: [{ state: 'reprojected' }] } });
+    expect(rowsOf(paths.ledger)).toEqual([makeV2LedgerRow()]);
+  });
+
+  it('refuses v1, inactive and absent entries, all or nothing, listing every problem', () => {
+    seedLearningTree(dir, {
+      log: [makeV2LogRow({ title: 'A sharper title' }), makeV1LogRow()],
+      ledger: [
+        makeV2LedgerRow(),
+        makeV1LedgerRow(),
+        makeV2LedgerRow({ anchor_id: 'ADR-002', id: 'obs_gone', decisions_status: 'Superseded', superseded_by: 'ADR-001' }),
+      ],
+    });
+    const before = snapshotTree(dir);
+    expect(refresh(['ADR-001', 'PF-001', 'ADR-002', 'ADR-009'])).toEqual({
+      ok: false,
+      error: {
+        kind: 'refused',
+        message: [
+          'refresh-anchor: 3 of 4 anchors refused; nothing was written',
+          '  PF-001: a v1 entry; rewrite it with put-observation --update',
+          '  ADR-002: Superseded; restore it with restore-anchor first',
+          '  ADR-009: not in the ledger',
+        ].join('\n'),
+        problems: [
+          { anchor_id: 'PF-001', message: 'a v1 entry; rewrite it with put-observation --update' },
+          { anchor_id: 'ADR-002', message: 'Superseded; restore it with restore-anchor first' },
+          { anchor_id: 'ADR-009', message: 'not in the ledger' },
+        ],
+      },
+    });
+    expect(snapshotTree(dir)).toEqual(before);
+  });
+
+  it('refuses an entry whose log row is missing, doubled, v1 or of the other type, writing nothing', () => {
+    seedLearningTree(dir, {
+      log: [
+        makeV2LogRow({ id: 'obs_twice' }),
+        makeV2LogRow({ id: 'obs_twice', rule: 'A second copy.' }),
+        makeV1LogRow({ id: 'obs_old_row', type: 'decision' }),
+        makeV2LogRow({ id: 'obs_switched', type: 'pitfall' }),
+      ],
+      ledger: [
+        makeV2LedgerRow({ anchor_id: 'ADR-001', id: 'obs_missing' }),
+        makeV2LedgerRow({ anchor_id: 'ADR-002', id: 'obs_twice' }),
+        makeV2LedgerRow({ anchor_id: 'ADR-003', id: 'obs_old_row' }),
+        makeV2LedgerRow({ anchor_id: 'ADR-004', id: 'obs_switched' }),
+        makeV2LedgerRow({ anchor_id: 'ADR-005', id: undefined }),
+      ],
+    });
+    const before = snapshotTree(dir);
+    const result = refresh(['ADR-001', 'ADR-002', 'ADR-003', 'ADR-004', 'ADR-005']);
+    expect(result.ok === false && result.error.problems).toEqual([
+      { anchor_id: 'ADR-001', message: "no log row has id 'obs_missing'; write it back with put-observation --create" },
+      { anchor_id: 'ADR-002', message: "the log holds 2 rows with id 'obs_twice'" },
+      { anchor_id: 'ADR-003', message: 'its log row is v1; rewrite it with put-observation --update' },
+      { anchor_id: 'ADR-004', message: 'cannot take its log row: it is a decision entry and the observation is a pitfall' },
+      { anchor_id: 'ADR-005', message: 'has no observation id' },
+    ]);
+    expect(snapshotTree(dir)).toEqual(before);
+  });
+
+  it('refuses an anchor two ledger rows hold', () => {
+    seedLearningTree(dir, { log: [makeV2LogRow()], ledger: [makeV2LedgerRow(), makeV2LedgerRow({ id: 'obs_other' })] });
+    const result = refresh(['ADR-001']);
+    expect(result.ok === false && result.error.problems).toEqual([{ anchor_id: 'ADR-001', message: 'held by 2 ledger rows' }]);
+  });
+
+  it('copies a v1 tree aside and quarantines the ledger\'s malformed lines before it rewrites the ledger', () => {
+    seedLearningTree(dir, { log: [makeV2LogRow({ title: 'A sharper title' })], ledger: [makeV2LedgerRow(), makeV1LedgerRow()] });
+    fs.appendFileSync(paths.ledger, 'not json\n');
+    const ledgerBefore = fs.readFileSync(paths.ledger, 'utf8');
+
+    expect(refresh(['ADR-001']).ok).toBe(true);
+    expect(fs.readFileSync(path.join(paths.learningDir, 'decisions-ledger.pre-v2.jsonl'), 'utf8')).toBe(ledgerBefore);
+    expect(rowsOf(path.join(paths.learningDir, 'decisions-ledger.rejected.jsonl')).map(row => row.text)).toEqual(['not json']);
+    expect(linesOf(paths.ledger)).toHaveLength(2);
+  });
+
+  it('refuses without a learning directory and creates nothing', () => {
+    fs.rmSync(paths.learningDir, { recursive: true });
+    expect(refresh(['ADR-001'])).toEqual({
+      ok: false,
+      error: { kind: 'no-learning-dir', message: `refresh-anchor: no .devflow/learning/ under ${dir} — run from the project root` },
+    });
+    expect(fs.readdirSync(path.join(dir, '.devflow'))).toEqual([]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// refreshAnchors --verified
+// ---------------------------------------------------------------------------
+
+describe('refreshAnchors --verified', () => {
+  let dir: string;
+  let paths: LearningTreePaths;
+
+  beforeEach(() => {
+    dir = makeTmp('learning-ops-verified-');
+    paths = seedLearningTree(dir);
+  });
+
+  afterEach(() => {
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+
+  /** A store refresh --verified on the fixture clock. */
+  function verify(anchors: readonly string[]) {
+    return store.refreshAnchors(dir, anchors, { verified: true, now: FIXTURE_NOW });
+  }
+
+  it('stamps last_verified with today and changes nothing else, not even content the log has moved past', () => {
+    const prior = makeV2LedgerRow({ rule: 'A rule the log has since sharpened.', last_attempt: '2026-10-02T09:00:00.000Z' });
+    seedLearningTree(dir, { log: [makeV2LogRow()], ledger: [prior] });
+    const logBefore = fs.readFileSync(paths.log, 'utf8');
+
+    expect(verify(['ADR-001'])).toEqual({ ok: true, value: { refreshed: [{ anchor_id: 'ADR-001', state: 'verified' }] } });
+    const [row] = rowsOf(paths.ledger);
+    expect(row).toEqual({ ...prior, last_verified: TODAY });
+    expect(Object.keys(row)).toEqual(Object.keys(prior));
+    expect(fs.readFileSync(paths.log, 'utf8')).toBe(logBefore);
+    expect(fs.existsSync(paths.history)).toBe(false);
+    expect(rendered(paths, 'decisions.md')).toContain(`- **Status**: Accepted · verified ${TODAY}\n`);
+  });
+
+  it('puts a first last_verified in its place among the ledger fields, and needs no log row', () => {
+    seedLearningTree(dir, { ledger: [makeV2LedgerRow({ last_verified: undefined, last_attempt: '2026-10-02T09:00:00.000Z' })] });
+    expect(verify(['ADR-001']).ok).toBe(true);
+    expect(Object.keys(rowsOf(paths.ledger)[0]).slice(-3)).toEqual(['date', 'last_verified', 'last_attempt']);
+  });
+
+  it('writes nothing for an entry already verified today', () => {
+    seedLearningTree(dir, { ledger: [makeV2LedgerRow({ last_verified: TODAY })] });
+    const before = snapshotTree(dir);
+    expect(verify(['ADR-001'])).toEqual({ ok: true, value: { refreshed: [{ anchor_id: 'ADR-001', state: 'verified' }] } });
+    expect(snapshotTree(dir)).toEqual(before);
+  });
+
+  it('refuses v1 and inactive entries, all or nothing', () => {
+    seedLearningTree(dir, {
+      ledger: [makeV2LedgerRow(), makeV1LedgerRow(), makeV2LedgerRow({ anchor_id: 'ADR-002', id: 'obs_gone', decisions_status: 'Retired' })],
+    });
+    const before = snapshotTree(dir);
+    const result = verify(['ADR-001', 'PF-001', 'ADR-002']);
+    expect(result.ok === false && result.error.problems).toEqual([
+      { anchor_id: 'PF-001', message: 'a v1 entry; rewrite it with put-observation --update' },
+      { anchor_id: 'ADR-002', message: 'Retired; restore it with restore-anchor first' },
+    ]);
+    expect(snapshotTree(dir)).toEqual(before);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The refresh-anchor op: argv and the stdout grammar
+// ---------------------------------------------------------------------------
+
+describe('refresh-anchor op', { timeout: 30_000 }, () => {
+  const USAGE = 'refresh-anchor: usage: refresh-anchor <anchor> [<anchor>...] [--verified] (run from the project root)\n';
+  let dir: string;
+
+  beforeEach(() => {
+    dir = makeTmp('learning-ops-refresh-op-');
+    seedLearningTree(dir);
+  });
+
+  afterEach(() => {
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+
+  it('prints one line per anchor: reprojected or unchanged, or verified under --verified', () => {
+    seedLearningTree(dir, {
+      log: [makeV2LogRow({ title: 'A sharper title' }), makeV2LogRow({ id: 'obs_lesson', type: 'pitfall' })],
+      ledger: [makeV2LedgerRow(), makeV2LedgerRow({ anchor_id: 'PF-002', id: 'obs_lesson', type: 'pitfall', decisions_status: 'Active' })],
+    });
+    expect(runJsonHelper(dir, ['refresh-anchor', 'ADR-001', 'PF-002'])).toEqual({
+      code: 0, stdout: 'reprojected ADR-001\nunchanged PF-002\n', stderr: '',
+    });
+    expect(runJsonHelper(dir, ['refresh-anchor', '--verified', 'PF-002', 'ADR-001'])).toEqual({
+      code: 0, stdout: 'verified PF-002\nverified ADR-001\n', stderr: '',
+    });
+  });
+
+  it('prints every refused anchor on stderr and exits 1', () => {
+    seedLearningTree(dir, { ledger: [makeV1LedgerRow()] });
+    expect(runJsonHelper(dir, ['refresh-anchor', 'PF-001', 'ADR-004'])).toEqual({
+      code: 1,
+      stdout: '',
+      stderr: [
+        'refresh-anchor: 2 of 2 anchors refused; nothing was written',
+        '  PF-001: a v1 entry; rewrite it with put-observation --update',
+        '  ADR-004: not in the ledger',
+        '',
+      ].join('\n'),
+    });
+  });
+
+  it('takes one or more anchors and --verified at most once, and nothing else', () => {
+    seedLearningTree(dir, { log: [makeV2LogRow()], ledger: [makeV2LedgerRow()] });
+    const before = snapshotTree(dir);
+    for (const args of [
+      ['refresh-anchor'],
+      ['refresh-anchor', '--verified'],
+      ['refresh-anchor', 'ADR-001', '--verified', '--verified'],
+      ['refresh-anchor', 'ADR-001', '--all'],
+      ['refresh-anchor', 'adr-001'],
+      ['refresh-anchor', 'obs_store_one'],
+      ['refresh-anchor', 'ADR-1'],
+    ]) {
+      expect(runJsonHelper(dir, args), args.join(' ')).toEqual({ code: 1, stdout: '', stderr: USAGE });
+    }
+    expect(snapshotTree(dir)).toEqual(before);
+  });
+});

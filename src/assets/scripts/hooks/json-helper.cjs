@@ -30,7 +30,9 @@
 //                                          Promote a v2 observation to the next ADR/PF number,
 //                                          skipping numbers tracked files cite; re-renders
 //   retire-anchor <anchor_id> <status>    Flip ledger row status, re-render both .md files
-//   refresh-anchor <anchor_id>            Re-project log obs onto ledger row, re-render
+//   refresh-anchor <anchor>... [--verified]
+//                                          Re-project active v2 entries from the log, or stamp
+//                                          them verified today; re-renders
 //   rotate-observations                   Archive unreferenced observations idle 30+ days
 //   put-observation --create|--update|--reinforce
 //                                          Store one observation from one JSON object on
@@ -58,18 +60,17 @@ const args = process.argv.slice(3);
 let learningModules = null;
 
 /**
- * The learning modules — the store, the path helpers, the formatter and the
- * renderer — loaded on first use and memoized. The generic ops never call it, so
- * a hook that falls back from jq to node never pays for loading them.
+ * The learning modules — the store, the path helpers and the renderer — loaded on
+ * first use and memoized. The generic ops never call it, so a hook that falls
+ * back from jq to node never pays for loading them.
  *
- * @returns {{ store: object, paths: object, format: object, render: object }}
+ * @returns {{ store: object, paths: object, render: object }}
  */
 function learning() {
   if (learningModules === null) {
     learningModules = {
       store: require('./lib/learning-store.cjs'),
       paths: require('./lib/project-paths.cjs'),
-      format: require('./lib/decisions-format.cjs'),
       render: require('./lib/render-decisions.cjs'),
     };
   }
@@ -474,155 +475,22 @@ try {
     }
 
     // -------------------------------------------------------------------------
-    // refresh-anchor <anchor_id> [<anchor_id>...]
-    // Re-project log observations onto committed ledger rows (D-LOG-CONTENT-AUTHORITY) and
-    // re-render all three files (decisions.md, pitfalls.md, index.md).  Each write
-    // is atomic; the sequence is not transactional — a crash between writes self-heals
-    // on the next ledger op.  Variadic — accepts 1..N anchor ids and performs
-    // ONE lock acquisition, ONE ledger parse, ONE log parse, and ONE render
-    // (PERF-1: collapses N agent turns into 1, N re-renders into 1).
-    //
-    // All-or-nothing semantics: every anchor is validated before any write;
-    // a throw on any anchor leaves the ledger and .md files untouched.
-    //
-    // Algorithm:
-    //   1. Read ledger and log ONCE (outside the per-anchor loop).
-    //   2. For each anchor: locate ledger row, run precondition checks, run
-    //      REG-1 details divergence guard (consumers match anchor headings not
-    //      titles so pattern replacement is sanctioned; only details containment is enforced),
-    //      re-project via toLedgerRow (which carries sink validation for pattern/raw_body/type).
-    //   3. Assert row count unchanged (REL-6 — bounds parseLedger silent-drop exposure).
-    //   4. Write ledger once, render once, echo all ids to stdout (one per line).
+    // refresh-anchor <anchor> [<anchor>...] [--verified]
+    // Re-project active v2 entries from their log rows, or under --verified stamp
+    // them verified today; all or nothing (refreshAnchors, learning-store.cjs).
+    // stdout: `reprojected <anchor>` or `unchanged <anchor>` per anchor, or
+    // `verified <anchor>` under --verified, in the order given
     // -------------------------------------------------------------------------
     case 'refresh-anchor': {
-      const refreshAnchorIds = args.filter(Boolean);
-
-      if (refreshAnchorIds.length === 0) {
-        process.stderr.write('refresh-anchor: usage: refresh-anchor <anchor_id> [<anchor_id>...]\n');
+      const { store } = learning();
+      const rfVerified = args.filter(arg => arg === '--verified').length;
+      const rfAnchors = args.filter(arg => arg !== '--verified');
+      if (rfVerified > 1 || rfAnchors.length === 0 || !rfAnchors.every(arg => store.ANCHOR_ID_RE.test(arg))) {
+        process.stderr.write('refresh-anchor: usage: refresh-anchor <anchor> [<anchor>...] [--verified] (run from the project root)\n');
         process.exit(1);
       }
-
-      const { store, paths, format, render } = learning();
-      const rfProjectRoot = process.cwd();
-      const rfLedgerPath = paths.getDecisionsLedgerPath(rfProjectRoot);
-      const rfLogPath = paths.getDecisionsLogPath(rfProjectRoot);
-
-      const rfResult = store.withDecisionsLock('refresh-anchor', rfProjectRoot, () => {
-        // SEC-S3: a learning tree with no ledger has nothing to refresh; say so,
-        // naming the ledger, rather than reporting each anchor as not found.
-        if (!fs.existsSync(rfLedgerPath)) {
-          throw new Error(
-            `refresh-anchor: no decisions-ledger.jsonl found at '${rfLedgerPath}' — ` +
-            `cannot refresh an entry where no ledger exists`
-          );
-        }
-
-        // (1) Read ledger and log ONCE — shared across all anchor ids (PERF-1).
-        const rfLedgerRows = render.parseLedger(rfLedgerPath);
-        const rfExpectedRowCount = rfLedgerRows.length;
-        const rfLogEntries = render.parseLedger(rfLogPath);
-
-        // (2) Validate and re-project each anchor — all-or-nothing: any throw
-        //     propagates out of withDecisionsLock's fn() before any write occurs.
-        for (const anchorId of refreshAnchorIds) {
-          // Locate the existing ledger row by anchor_id (stable, canonical key).
-          // Miss → throw (not process.exit, which would skip the lock release).
-          const rfLedgerIdx = rfLedgerRows.findIndex(r => r.anchor_id === anchorId);
-          if (rfLedgerIdx === -1) {
-            throw new Error(
-              `refresh-anchor: anchor_id '${anchorId}' not found in ledger — ` +
-              `cannot refresh a row that was never committed`
-            );
-          }
-
-          const rfExistingRow = rfLedgerRows[rfLedgerIdx];
-
-          // Precondition assertions — checked under the lock (assert-preconditions
-          // per reliability rule). Mirrors assign-anchor's pattern.
-          // (a) Ledger row must have an id — undefined===undefined would bind the wrong log row.
-          if (!rfExistingRow.id) {
-            throw new Error(
-              `refresh-anchor: ledger row '${anchorId}' has no id — ` +
-              `cannot resolve its log observation`
-            );
-          }
-          // (b) Ledger row must have decisions_status — toLedgerRow passes it through;
-          //     absent would cause JSON.stringify to drop the key from the projected row.
-          if (!rfExistingRow.decisions_status) {
-            throw new Error(
-              `refresh-anchor: ledger row '${anchorId}' has no decisions_status — ` +
-              `refusing to project a row that would drop it`
-            );
-          }
-
-          // Locate the log obs by the LEDGER ROW's id field (D-LOG-CONTENT-AUTHORITY).
-          // Matching on id (not anchor_id) covers pre-existing obs written before
-          // assign-anchor added anchor_id write-back to the log.
-          const rfObs = rfLogEntries.find(r => r.id === rfExistingRow.id);
-          if (!rfObs) {
-            throw new Error(
-              `refresh-anchor: log obs with id '${rfExistingRow.id}' ` +
-              `(for anchor ${anchorId}) not found in log`
-            );
-          }
-
-          // (c) Type must match the committed anchor — re-projecting across types would move
-          //     a PF-NNN into decisions.md (or vice versa) and corrupt the rendered corpus.
-          //     This check also satisfies toLedgerRow's sink-side expectType guard;
-          //     both fire with their respective messages — this one fires first.
-          if (rfObs.type !== rfExistingRow.type) {
-            throw new Error(
-              `refresh-anchor: log obs '${rfObs.id}' type '${rfObs.type}' does not match committed anchor ` +
-              `${anchorId} type '${rfExistingRow.type}' — refusing to re-project across entry types`
-            );
-          }
-
-          // REG-1: divergence guard — refuse to silently overwrite
-          // ledger-only curation content. Applies to DETAILS only: pattern replacement
-          // is sanctioned (consumers match '## (ADR|PF)-NNN:' anchors, never
-          // titles, so a sharpened log pattern may update the rendered heading).
-          // raw_body is validated at the sink, by isSafeRawBody inside toLedgerRow.
-          const rfNormWS = (/** @type {unknown} */ s) =>
-            typeof s === 'string' ? s.replace(/\s+/g, ' ').trim() : '';
-          const rfLedgerDetails = rfNormWS(rfExistingRow.details);
-          const rfLogDetails = rfNormWS(rfObs.details);
-          if (rfLedgerDetails && !rfLogDetails.includes(rfLedgerDetails)) {
-            throw new Error(
-              `refresh-anchor: ledger row '${anchorId}' carries content absent from log obs ` +
-              `'${rfExistingRow.id}' (details: ledger ${rfLedgerDetails.length}B / log ${rfLogDetails.length}B). ` +
-              `Reconcile the log row first — re-projecting would discard curated content.`
-            );
-          }
-
-          // Re-project via toLedgerRow (strict canonical projection, D-LOG-CONTENT-AUTHORITY).
-          // Preserve decisions_status and date from the ledger (ledger-owned fields).
-          // expectType passed for sink validation (redundant with the check above,
-          // but ensures the guard holds even if future callers bypass the outer check).
-          rfLedgerRows[rfLedgerIdx] = format.toLedgerRow(rfObs, {
-            anchorId,
-            status: rfExistingRow.decisions_status,
-            date: rfExistingRow.date,
-            expectType: rfExistingRow.type,
-          });
-        }
-
-        // (3) REL-6: assert row count unchanged — bounds parseLedger silent-drop
-        //     exposure. A whole-file rewrite that shrank the corpus is always a bug.
-        if (rfLedgerRows.length !== rfExpectedRowCount) {
-          throw new Error(
-            `refresh-anchor: ledger row count changed during re-projection ` +
-            `(${rfExpectedRowCount} → ${rfLedgerRows.length}) — refusing to write a lossy rewrite`
-          );
-        }
-
-        // (4) Write once and render once (PERF-1 — N anchors, one I/O round-trip).
-        store.writeJsonlAtomic(rfLedgerPath, rfLedgerRows);
-        render.renderAndWriteAll(rfProjectRoot, rfLedgerRows);
-        return { ok: true, value: refreshAnchorIds };
-      });
-      // stdout: every refreshed id, one per line, mirroring assign-anchor's contract,
-      // so a caller can confirm which rows were refreshed without parsing stderr.
-      process.exitCode = emit(rfResult, ids => ids.join('\n'));
+      const rfResult = store.refreshAnchors(process.cwd(), rfAnchors, { verified: rfVerified === 1 });
+      process.exitCode = emit(rfResult, ({ refreshed }) => refreshed.map(entry => `${entry.state} ${entry.anchor_id}`).join('\n'));
       break;
     }
 

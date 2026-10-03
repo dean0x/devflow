@@ -363,6 +363,16 @@ export interface AssignAnswer {
   skipped: Array<{ anchor_id: string } & Citation>;
 }
 
+/** What refresh-anchor answers: each anchor once, in the order given, with what happened to it. */
+export interface RefreshAnswer {
+  refreshed: Array<{ anchor_id: string; state: 'verified' | 'reprojected' | 'unchanged' }>;
+}
+
+/** A refresh refusal: every anchor that blocked the batch, with why. */
+export type RefreshResult =
+  | { ok: true; value: RefreshAnswer }
+  | { ok: false; error: { kind: string; message: string; problems?: Array<{ anchor_id: string; message: string }> } };
+
 /** The learning store's surface as the tests use it. */
 export interface LearningStoreApi {
   SCHEMA_VERSION: number;
@@ -472,6 +482,11 @@ export interface LearningStoreApi {
     obsId: string,
     opts?: { now?: number; timeoutMs?: number; citedAnchors?: ReadonlyMap<string, Citation> },
   ): Result<AssignAnswer>;
+  refreshAnchors(
+    root: string,
+    anchorIds: readonly string[],
+    opts?: { verified?: boolean; now?: number; timeoutMs?: number },
+  ): RefreshResult;
 }
 
 /** Load the learning store CommonJS module. */
