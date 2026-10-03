@@ -25,8 +25,8 @@
  * `process.env['DEVFLOW_DIR']`, `${DEVFLOW_DIR:-…}`, `$DEVFLOW_DIR`, a bare word in a
  * comment — and the template token itself outside the exempt files.
  *
- * What a green run does NOT prove (PF-064)
- * ----------------------------------------
+ * What a green run does NOT prove
+ * -------------------------------
  * The matcher reads the token as it is spelled. A name assembled at runtime
  * (`'DEVFLOW_' + 'DIR'`, an indirect `${!name}` in shell) is not representable
  * here, and a reader that relocates the root without naming either variable — a
@@ -116,7 +116,7 @@ function readCorpus(dir: string): CorpusEntry[] {
  * resolver, the HUD, a shell hook (extension-less), a Node script, an MDS module,
  * a compiled command, a compiled agent, a generated reference, a hand-authored
  * agent, a skill reference, the settings template and its compiled substitution site. A class
- * missing from the corpus fails here by name (PF-064: corpus reach).
+ * missing from the corpus fails here by name (corpus reach).
  */
 const REACH_SENTINELS: readonly string[] = [
   'src/targets/claude-code/claude-paths.ts',
@@ -176,7 +176,7 @@ describe('one home: no retired root variable in src/ or dist/ (AC-12)', () => {
 });
 
 // ---------------------------------------------------------------------------
-// Seeded probe (PF-064): the matcher the live arms use must go red on every
+// Seeded probe: the matcher the live arms use must go red on every
 // shape a retired read can take, and stay green on the names it must not match.
 // ---------------------------------------------------------------------------
 

@@ -58,7 +58,7 @@ export function realHomes(env: NodeJS.ProcessEnv = process.env): string[] {
 
 /**
  * Throw unless `home` is a directory under `os.tmpdir()` and none of the account's
- * real homes. PF-060: asserted at the call site, never trusted from a brief.
+ * real homes. Asserted at the call site, never trusted from a brief.
  */
 export function assertTempHome(home: string, env: NodeJS.ProcessEnv = process.env): void {
   const target = canonical(home);

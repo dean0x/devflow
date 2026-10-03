@@ -19,7 +19,7 @@
  * - A NAMED EXEMPTION below, each with its reason, each asserted live so a stale
  *   one fails rather than silently widening the rule.
  *
- * WHAT A CLEAN RESULT DOES NOT COVER (PF-064): a path assembled from parts
+ * WHAT A CLEAN RESULT DOES NOT COVER: a path assembled from parts
  * (`.devflow/` + `docs`), a docs path an agent composes from a relative variable
  * the command set elsewhere, and the agents' own prompts (their WORKTREE_PATH
  * handling is `devflow:worktree-support`'s contract). The partial's resolution
@@ -131,7 +131,7 @@ describe('no compiled command reads or writes a relative .devflow/docs path (D-D
     const corpus = commands()
     expect(corpus.map(c => c.name.replace('dist/commands/', '')).sort()).toEqual([...DIST_COMMAND_FILES].sort())
     const mentions = corpus.reduce((n, c) => n + c.content.split(DOCS).length - 1, 0)
-    // Non-vacuity (PF-018): the corpus carries the paths this guard is about.
+    // Non-vacuity: the corpus carries the paths this guard is about.
     expect(mentions).toBeGreaterThanOrEqual(60)
   })
 

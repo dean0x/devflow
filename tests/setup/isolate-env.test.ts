@@ -1,6 +1,6 @@
 /**
  * TP-1 (AC-1): under an exported CLAUDE_CONFIG_DIR or DEVFLOW_DIR, the unit suite
- * never writes outside its temp HOME (D-TEST-HOME-ISOLATION, PF-060).
+ * never writes outside its temp HOME (D-TEST-HOME-ISOLATION).
  *
  * The proof is in four parts, each covering what the others cannot:
  *  1. this very worker runs under the setup file's temp HOME with every redirect
@@ -18,7 +18,7 @@
  *     devflow itself since #389, D-ONE-HOME; the probe pins that too.)
  *
  * Every spawn uses a fresh temp HOME and `--security user`, which never touches
- * the absolute managed-settings path a HOME sandbox cannot redirect (PF-060).
+ * the absolute managed-settings path a HOME sandbox cannot redirect.
  */
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';

@@ -10,8 +10,8 @@
  * lines, and `grep -c` reports nothing at all. Every repo-wide sweep over
  * `src/core/` then skips that file SILENTLY: the sweep still exits 0, still
  * reports "no violations", and the file it could not read is the one file a
- * reviewer would most want swept (this is PF-018's shape — a green check that
- * exercises nothing — arrived at through the corpus rather than the matcher).
+ * reviewer would most want swept (a green check that exercises nothing,
+ * arrived at through the corpus rather than the matcher).
  *
  * The escaped spelling is also the only reviewable one: a raw US or DEL byte in a
  * diff renders as nothing, so a byte added to or removed from the class is an
@@ -78,7 +78,7 @@ const EXTENSIONLESS_CLASS = '(extension-less, under src/assets/scripts/)';
  * to be genuinely unpopulated: the day a `.js` file lands, the entry goes red and
  * must be deleted, which restores the reach demand. An entry parked here that DOES
  * have members would be an exemption hiding real coverage — the prohibition and
- * its exemption registry are one authority (PF-067), so the exemption has to be
+ * its exemption registry are one authority, so the exemption has to be
  * as falsifiable as the rule.
  */
 const UNPOPULATED_CLASSES: readonly string[] = ['.js'];
@@ -93,7 +93,7 @@ const UNPOPULATED_CLASSES: readonly string[] = ['.js'];
  * `.json` were admitted by `isScannedFile` and probed by nothing — so deleting
  * `.mds` from SCANNED_EXTENSIONS dropped every command source, every reference
  * module and the Git agent's generator host out of the scan with all three arms
- * still green. That is PF-064's corpus claim failing while the matcher claim
+ * still green. That is the guard's corpus reach failing while its matcher
  * holds, and it is the exact failure this file's own preamble describes.
  *
  * The extension-less clause has no extension to derive from, so it is reported

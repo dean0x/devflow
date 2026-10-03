@@ -13,12 +13,12 @@
  * and a fake `gh`, first on PATH, so no spawn reaches a machine binary whose version
  * decides what it writes) and `tmp/` (the hooks' TMPDIR, so a temp write is a
  * recorded write rather than an escape). Every CLI and hook env comes from `sandboxEnv`, which
- * asserts the HOME is a temp dir and never the real one (PF-060), and every init
+ * asserts the HOME is a temp dir and never the real one, and every init
  * passes `--security user`: the managed-settings path is absolute and cannot be
  * sandboxed, so the snapshot never touches it.
  *
  * D-SNAPSHOT-NORMALISE: a golden must hold on Linux and macOS and survive a release
- * bump (PF-079), so the rendered text carries no machine fact. Sandbox paths are
+ * bump, so the rendered text carries no machine fact. Sandbox paths are
  * replaced in both their logical and realpath forms (macOS `/var` → `/private/var`)
  * and in the dash-joined slug hooks use for log directories; ISO timestamps become
  * `<TIMESTAMP>`; the manifest's `version` becomes `<VERSION>` when it equals the

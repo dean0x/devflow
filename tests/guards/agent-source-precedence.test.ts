@@ -12,9 +12,9 @@
  * strings, so a site that spells the policy least-preferred-first still compiles
  * and silently inverts the answer. Only a cross-consumer agreement assertion
  * catches that, and only a reversed-list probe proves the assertion is not
- * order-blind (PF-018).
+ * order-blind.
  *
- * PF-043: every fixture is derived from the real agent files rather than
+ * Every fixture is derived from the real agent files rather than
  * hand-authored, so the tree the assertions run against is a shape the runtime
  * actually produces.
  */
@@ -141,7 +141,7 @@ describe('installer and loadShippedDefaults agree on every registry agent', () =
   /**
    * Write one fixture tree: each named agent's real frontmatter with the model
    * replaced by a sentinel, so the tree an answer came from is observable in the
-   * installed bytes and in the parsed default alike (PF-043).
+   * installed bytes and in the parsed default alike.
    */
   async function writeTree(dir: string, names: readonly string[], model: string): Promise<void> {
     await fs.mkdir(dir, { recursive: true });
@@ -197,7 +197,7 @@ describe('installer and loadShippedDefaults agree on every registry agent', () =
   });
 
   it('known-bad probe: a reversed list flips BOTH consumers, and is detected', async () => {
-    // PF-018 — if the assertion above were order-blind it would also pass here.
+    // If the assertion above were order-blind it would also pass here.
     const reversed: AgentSourceDirs = [srcDir, distDir];
     const installed = await installAll(tmpRoot, reversed);
     const defaults = await loadShippedDefaults(reversed);

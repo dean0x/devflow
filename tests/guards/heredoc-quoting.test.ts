@@ -40,7 +40,7 @@ import { ROOT, walkFiles } from '../helpers.js';
  * Without the pair, `read -r line <<< value` — a bare word after `<<<`, where no
  * delimiter exists at all — would be reported as an unquoted heredoc.
  *
- * NOT COVERED, deliberately (PF-064 — a guard that certifies by finding NOTHING proves
+ * NOT COVERED, deliberately (a guard that certifies by finding NOTHING proves
  * only the weakest reading of what it stacks, so the matcher's edge is written down
  * rather than inferred from a green run). Each was checked absent from `src/assets/`
  * when this was written:
@@ -60,7 +60,7 @@ import { ROOT, walkFiles } from '../helpers.js';
  *     negative on a delimiter nobody writes is the cheaper of the two.
  * Each is a non-goal only while nothing ships it. The moment a recipe adopts one,
  * widen the pattern WITH its own row in the probe below, in the same commit as the
- * recipe (ADR-025) — never a quiet alternation.
+ * recipe — never a quiet alternation.
  */
 const UNQUOTED_HEREDOC_RE = /(?<!<)<<(?!<)-?[ \t]*(?!['"\\])[A-Za-z_][A-Za-z0-9_]*/;
 
@@ -144,7 +144,7 @@ describe('heredoc quoting: no unquoted delimiter ships in src/assets/ (GAP-15, S
     // Labelled rows in BOTH directions, one per spelling. A bare list of `toBe(true)`
     // calls cannot say WHICH spelling stopped matching when someone narrows the
     // pattern, and the RED half alone would be satisfied by a pattern that flagged
-    // every line in the corpus (PF-018).
+    // every line in the corpus.
     const expands: ReadonlyArray<readonly [string, string]> = [
       ['uppercase', 'PROMPT=$(cat <<EOF'],
       ['tab-stripping `<<-`', 'git commit -m "$(cat <<-MSG'],

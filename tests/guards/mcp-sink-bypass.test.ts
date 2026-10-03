@@ -15,7 +15,7 @@
  * the mechanism only holds while every posting mechanic actually uses it. That is
  * a property of PROSE, and prose has no compiler. This file is its compiler.
  *
- * FIVE CLAIMS, kept separate so no one of them can carry the others (PF-064):
+ * FIVE CLAIMS, kept separate so no one of them can carry the others:
  *   1. CONTRACT — the contract module states every clause in CONTRACT_CLAUSES:
  *      the `{SCRUBBED_BODY}` rule, `D11-OK`, `SECRET-EXPOSED` and the `SCRUB: N`
  *      echo that makes it conditional [DR-01], and the `<bytes>` verification
@@ -24,7 +24,7 @@
  *      Two shapes, because a sink has two spellings: the ARGUMENT form
  *      (`body: X`) and the PROSE form (`the description field carrying X`) that
  *      §14.4's select-by-capability-description rule produces. What the matcher
- *      deliberately cannot express is written down on the collector (PF-064).
+ *      deliberately cannot express is written down on the collector.
  *   3. FORWARD — every posting mechanic that spells a body argument names every
  *      clause, and no file in the sink class posts an ungated body. The
  *      corpus is LIVE: a provider mechanics tree exists, so this arm is now
@@ -34,12 +34,12 @@
  *      than passing over a real corpus.
  *   5. RESIDUE — the gate's guarantee is about the SINK, and the staging file is
  *      a second sink: `$DEVFLOW_BODY_RAW` holds precisely the bytes the scrub
- *      exists to delete (PF-066's second defect). So the always-loaded D11 block
+ *      exists to delete. So the always-loaded D11 block
  *      is asserted to REMOVE every staging file it creates, and to remove them in
  *      the one shape that works as shell — armed as a `trap` so a `D11-FAIL` path
  *      is covered too, with a plain `rm` because a permission layer refuses the
  *      flagged form, and with the gate's status captured ahead of the removals
- *      (PF-066's third defect: cleanup that runs after the gate overwrites `$?`
+ *      (cleanup that runs after the gate overwrites `$?`
  *      and reports a refusal as success). Claim 5 is about the file-sink and
  *      tool-call halves alike: one rule, in the block every spawn loads.
  *
@@ -262,8 +262,8 @@ function bypassPattern(): RegExp {
  * body argument arrives inside that sentence. Both shipped
  * `ensure-traceable-issue` mechanics already carry one. A matcher that reads only
  * the argument form is therefore inert against exactly the shape this repo's
- * rules steer authors towards — PF-064's matcher claim, failing on the wording
- * the contract mandates.
+ * rules steer authors towards — the matcher's claim to express every sink shape,
+ * failing on the wording the contract mandates.
  *
  * The right-hand side is captured rather than rejected outright, because one
  * non-placeholder spelling is legitimate: see GATED_ANAPHOR.
@@ -290,8 +290,8 @@ const GATED_ANAPHOR = /^the same gated value\b/i;
 /**
  * Named collector: bypass sites, as `{path}:{line}: {text}`.
  *
- * DELIBERATE NON-GOALS, written down rather than inferred from a green run
- * (PF-064). This matcher reads ONE LINE at a time and ONE named field per match,
+ * DELIBERATE NON-GOALS, written down rather than inferred from a green run.
+ * This matcher reads ONE LINE at a time and ONE named field per match,
  * so it cannot express:
  *   - a body composed across several lines and referenced later by a variable
  *     the mechanic introduced (`$BODY` assigned in step 2, posted in step 5);
@@ -439,7 +439,7 @@ describe('bypass regex: red on every shape that posts an ungated body', () => {
     // The bypass regex, applied to the corpus rather than only to seeds. Until a
     // provider mechanics tree existed there was nothing to apply it to; now there
     // is, and a control that only ever runs against its own known-bad samples is
-    // a control nobody is subject to (PF-064).
+    // a control nobody is subject to.
     const corpus = postingMechanicCorpus();
     expect(corpus.length, 'empty sink class — run `npm run build`').toBeGreaterThan(0);
     const sites = collectBypassSites(corpus);
@@ -560,7 +560,7 @@ export function collectUngatedPostingMechanics(corpus: readonly CorpusEntry[]): 
 
 describe('forward arm: every posting mechanic names every clause [DR-01][DR-06]', () => {
   it('★ the live corpus reaches every tool-call provider and holds a real posting mechanic', () => {
-    // PF-018, in the direction that matters now that a subject exists: every arm
+    // Non-vacuity, in the direction that matters now that a subject exists: every arm
     // below is an empty-difference assertion, and an empty corpus satisfies all of
     // them. So the corpus is asserted to be populated AND to contain a file that
     // actually spells the gated placeholder — a tree of read-only mechanics would
@@ -576,7 +576,7 @@ describe('forward arm: every posting mechanic names every clause [DR-01][DR-06]'
     // length check above is satisfied by any ONE provider, so a tree that failed
     // to generate — or was renamed — leaves every arm in this file green having
     // never read it: the matcher and the predicate are proven over ground the
-    // corpus never covered, which is PF-064's second claim failing on its own.
+    // corpus never covered, which is the corpus-reach claim failing on its own.
     // Named per member rather than counted, because a count is a second number to
     // keep in step with the registry and it names nothing when it goes red.
     for (const subdir of MCP_BACKED_PROVIDER_SUBDIRS) {
@@ -796,7 +796,7 @@ function d11SinkClass(): CorpusEntry[] {
   return corpus;
 }
 
-describe('residue: the D11 staging files are removed, in a shape that runs (PF-066)', () => {
+describe('residue: the D11 staging files are removed, in a shape that runs', () => {
   it('the always-loaded block owns the removal, with every property that makes it work', () => {
     const line = d11RemovalLine(resolveAgentSource('git').content);
     const violations = collectMissingRemovalClaims(line);
@@ -810,7 +810,7 @@ describe('residue: the D11 staging files are removed, in a shape that runs (PF-0
     // Mechanic (b): every bad shape is built from the shipped line inside this
     // `it`, per PROPERTY — a claim whose predicate has drifted off the shipped
     // wording would otherwise sit here matching nothing while the arm above passes
-    // on the other three (PF-018).
+    // on the other three.
     const pristine = d11RemovalLine(resolveAgentSource('git').content);
     expect(
       collectMissingRemovalClaims(pristine),

@@ -26,8 +26,8 @@ export function isClaudeAvailable(): boolean {
 /**
  * Build the absolute path to the `subagents/` directory for a given session.
  *
- * Pure function — no filesystem access — so it can be unit-tested in isolation
- * (PF-043 shape requirement). The encoding mirrors Claude Code's own layout:
+ * Pure function — no filesystem access — so it can be unit-tested in isolation.
+ * The encoding mirrors Claude Code's own layout:
  *   ~/.claude/projects/-{encoded-cwd}/{sessionId}/subagents/
  * where the cwd encoding replaces every '/' with '-' and ensures a leading '-'.
  */

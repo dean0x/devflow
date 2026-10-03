@@ -5,14 +5,15 @@
  * `collectUnfencedLines` (tests/helpers.ts) owns the answer to "is this column-0
  * line structure or payload?" for the operation-section extractor, the
  * generated-reference structure guard, and the capability-hoist process-block
- * terminator. PF-063 records why it exists. PF-018 records why a docblock
- * describing its grammar is not the same thing as a suite that can tell when the
- * grammar changed: three of the four rules that docblock states could be
- * inverted with the whole repo green — a backtick fence's info string may not
- * itself contain a backtick, a closing run must be at least as long as the
- * opening one, and a closing line must carry nothing after the marker but
- * whitespace. Each gets a synthetic corpus below, as does the <=3-space
- * indentation bound the open and close rules share.
+ * terminator. It exists because a search that read a fenced `## ` as a heading
+ * ended an operation's section mid-fence. A docblock describing its grammar is
+ * not the same thing as a suite that can tell when the grammar changed: three
+ * of the four rules that docblock states could be inverted with the whole repo
+ * green — a backtick fence's info string may not itself contain a backtick, a
+ * closing run must be at least as long as the opening one, and a closing line
+ * must carry nothing after the marker but whitespace. Each gets a synthetic
+ * corpus below, as does the <=3-space indentation bound the open and close
+ * rules share.
  *
  * Why here and not beside the extractor's probes. Four probes in
  * tests/guards/agent-source-resolver.test.ts already exercise this grammar END
@@ -182,7 +183,7 @@ describe('fence grammar: a closing line carries nothing after the marker but whi
 
 describe('fence grammar: a delimiter is indented at most three spaces', () => {
   // Four spaces is an indented code block, which the grammar's written non-goals
-  // (PF-064) say are not modelled — and need not be, because every `## ` inside
+  // say are not modelled — and need not be, because every `## ` inside
   // one is itself indented and so was never a column-0 heading.
   const FOUR_SPACES =
     OP_HEADING + '\n' +
@@ -253,7 +254,7 @@ describe('collectUnclosedFences: the text ends inside a fence', () => {
   it('a delimiter that cannot close the open fence leaves it open', () => {
     // Shares the grammar with collectUnfencedLines rather than re-deriving it: a
     // short run and an info-bearing marker are both non-closers above, and both
-    // must leave this collector reporting the original opener (PF-018).
+    // must leave this collector reporting the original opener.
     expect(
       collectUnclosedFences('````markdown\n```\nsample\n').map(fence => fence.text),
       'a shorter run must not satisfy this collector either — the two must read one grammar',
@@ -285,7 +286,7 @@ interface CorpusFile {
  *
  * Manifest-driven and throwing, never a directory walk: a walk over an absent
  * tree returns nothing, and "no unclosed fence in zero files" is the shape of a
- * guard that is not a guard (PF-018). A build artifact is a throw with a build
+ * guard that is not a guard. A build artifact is a throw with a build
  * hint, never a skip.
  */
 function alwaysLoadedGitCorpus(): CorpusFile[] {
@@ -344,7 +345,7 @@ describe('every fence in the always-loaded git corpus closes', () => {
   it('the assertion is non-vacuous: a seeded unclosed fence is reported in every corpus file', () => {
     // Known-bad probe over the REAL content of every file, not one synthetic
     // stand-in: the assertion above is an absence, and an absence is only as
-    // strong as the proof that its collector was live over each member (PF-018).
+    // strong as the proof that its collector was live over each member.
     for (const file of corpus) {
       const seeded = `${file.content}\n${SEED_OPENER}\ngh issue view "$ISSUE"\n`;
       expect(

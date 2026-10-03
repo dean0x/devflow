@@ -6,7 +6,7 @@
  * `~/.claude` and `~/.devflow` and spawns children that inherit `process.env`. A
  * developer shell exporting `DEVFLOW_DIR`, `CLAUDE_CODE_DIR` or `CLAUDE_CONFIG_DIR`
  * — or a test that forgets to sandbox HOME — would otherwise aim those writes at
- * the real install (PF-060). So the redirect is applied once, here, before the
+ * the real install. So the redirect is applied once, here, before the
  * test file is imported, and it fails loudly rather than run against the real home.
  *
  * Vitest runs setup files before EACH test file, so each file gets a fresh HOME,
