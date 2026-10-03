@@ -184,12 +184,11 @@ function buildBodyBlocks(activeRows, kind) {
  * @returns {string} complete file content
  */
 function buildFileFromBlocks(activeRows, blocks, kind, inactiveRows) {
-  // Build TL;DR line (uses active + sorted rows so last-5 are stable)
+  // The TL;DR line counts the active rows.
   const tldr = buildTldrLine(kind, activeRows);
 
-  // Build header: replace placeholder TL;DR in the init content with the real one.
-  // initDecisionsContent returns "<!-- TL;DR: 0 {kind}. Key: -->\n..." so we
-  // replace the TL;DR line at position 0.
+  // Build header: replace the zero-count TL;DR line that opens the init content
+  // ("<!-- TL;DR: 0 {kind} -->\n...") with the real one.
   const initKind = kind === 'decisions' ? 'decision' : 'pitfall';
   const headerWithPlaceholder = initDecisionsContent(initKind);
   // Replace only the first line (the TL;DR comment)

@@ -218,25 +218,27 @@ describe('parseLedger', () => {
 // renderDecisionsFile — golden tests
 // ---------------------------------------------------------------------------
 
+const GENERATED_NOTICE =
+  'Generated from the local learning ledger by devflow; do not edit. ' +
+  'Active entries follow; retired ones are listed under Inactive.\n';
+
 describe('renderDecisionsFile — golden', () => {
-  it('empty corpus: decisions.md header + empty TL;DR', () => {
-    const result = renderDecisionsFile([], 'decisions');
-    expect(result.startsWith('<!-- TL;DR: 0 decisions. Key: -->')).toBe(true);
-    expect(result).toContain('# Architectural Decisions');
-    expect(result).not.toMatch(/## ADR-\d+:/);
+  it('empty corpus: decisions.md is the header alone, with a zero count', () => {
+    expect(renderDecisionsFile([], 'decisions')).toBe(
+      '<!-- TL;DR: 0 decisions -->\n# Architectural Decisions\n\n' + GENERATED_NOTICE,
+    );
   });
 
-  it('empty corpus: pitfalls.md header + empty TL;DR', () => {
-    const result = renderDecisionsFile([], 'pitfalls');
-    expect(result.startsWith('<!-- TL;DR: 0 pitfalls. Key: -->')).toBe(true);
-    expect(result).toContain('# Known Pitfalls');
-    expect(result).not.toMatch(/## PF-\d+:/);
+  it('empty corpus: pitfalls.md is the header alone, with a zero count', () => {
+    expect(renderDecisionsFile([], 'pitfalls')).toBe(
+      '<!-- TL;DR: 0 pitfalls -->\n# Known Pitfalls\n\n' + GENERATED_NOTICE,
+    );
   });
 
   it('renders a single active decision from details', () => {
     const rows = [makeDecisionRow()];
     const result = renderDecisionsFile(rows, 'decisions');
-    expect(result).toContain('<!-- TL;DR: 1 decisions. Key: ADR-001 -->');
+    expect(result).toContain('<!-- TL;DR: 1 decisions -->');
     expect(result).toContain('\n## ADR-001: Use Result types everywhere\n');
     expect(result).toContain('- **Date**: 2026-01-01\n');
     expect(result).toContain('- **Status**: Accepted\n');
@@ -246,7 +248,7 @@ describe('renderDecisionsFile — golden', () => {
   it('renders a single active pitfall from details', () => {
     const rows = [makePitfallRow()];
     const result = renderDecisionsFile(rows, 'pitfalls');
-    expect(result).toContain('<!-- TL;DR: 1 pitfalls. Key: PF-002 -->');
+    expect(result).toContain('<!-- TL;DR: 1 pitfalls -->');
     expect(result).toContain('\n## PF-002: Editing installed scripts directly\n');
     expect(result).toContain('- **Area**: scripts/hooks/');
     expect(result).toContain('- **Status**: Active\n');
@@ -277,7 +279,7 @@ describe('renderDecisionsFile — golden', () => {
     expect(result).not.toMatch(/^## ADR-002:/m);
     expect(result).not.toContain('Old approach');
     expect(result).toContain('| ADR-002 | Deprecated | — |\n');
-    expect(result).toContain('<!-- TL;DR: 1 decisions. Key: ADR-001 -->');
+    expect(result).toContain('<!-- TL;DR: 1 decisions -->');
   });
 
   it('renders no body for a Superseded entry and lists it under Inactive', () => {
@@ -354,7 +356,7 @@ describe('renderDecisionsFile — golden', () => {
     const rows = [makeDecisionRow()];
     const result = renderDecisionsFile(rows, 'decisions');
     const firstLine = result.split('\n')[0];
-    expect(firstLine).toMatch(/^<!-- TL;DR:/);
+    expect(firstLine).toBe('<!-- TL;DR: 1 decisions -->');
   });
 
   it('mixed active/inactive: TL;DR count reflects only active entries', () => {
@@ -364,7 +366,12 @@ describe('renderDecisionsFile — golden', () => {
       makeDecisionRow({ anchor_id: 'ADR-003', id: 'obs_act', pattern: 'Another active', decisions_status: 'Active' }),
     ];
     const result = renderDecisionsFile(rows, 'decisions');
-    expect(result).toContain('<!-- TL;DR: 2 decisions. Key: ADR-001, ADR-003 -->');
+    expect(result.split('\n')[0]).toBe('<!-- TL;DR: 2 decisions -->');
+  });
+
+  it('opens with the generated-file header whatever the corpus holds', () => {
+    const result = renderDecisionsFile([makeDecisionRow()], 'decisions');
+    expect(result.startsWith('<!-- TL;DR: 1 decisions -->\n# Architectural Decisions\n\n' + GENERATED_NOTICE)).toBe(true);
   });
 });
 
@@ -601,11 +608,11 @@ describe('CLI render subcommand', () => {
     expect(fs.existsSync(path.join(decisionsDir, 'index.md'))).toBe(true);
 
     const dContent = fs.readFileSync(path.join(decisionsDir, 'decisions.md'), 'utf8');
-    expect(dContent).toContain('<!-- TL;DR: 0 decisions. Key: -->');
+    expect(dContent).toContain('<!-- TL;DR: 0 decisions -->');
     expect(dContent).toContain('# Architectural Decisions');
 
     const pContent = fs.readFileSync(path.join(decisionsDir, 'pitfalls.md'), 'utf8');
-    expect(pContent).toContain('<!-- TL;DR: 0 pitfalls. Key: -->');
+    expect(pContent).toContain('<!-- TL;DR: 0 pitfalls -->');
     expect(pContent).toContain('# Known Pitfalls');
 
     // Empty corpus index must be "(none)\n"

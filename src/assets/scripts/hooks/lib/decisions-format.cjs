@@ -34,10 +34,10 @@
 //     - **Source**: {provenance}\n
 //   Inactive table, after the active bodies and omitted when no entry is inactive:
 //     \n## Inactive\n\n| ID | Status | Note |\n|---|---|---|\n   then "| {anchorId} | {status} | {note} |\n" per entry
-//   TL;DR line:        <!-- TL;DR: N {decisions|pitfalls}. Key: id1, id2 -->
-//   File headers:
-//     decisions.md: "<!-- TL;DR: 0 decisions. Key: -->\n# Architectural Decisions\n\nAppend-only. Status changes allowed; deletions prohibited.\n"
-//     pitfalls.md:  "<!-- TL;DR: 0 pitfalls. Key: -->\n# Known Pitfalls\n\nArea-specific gotchas, fragile areas, and past bugs.\n"
+//   TL;DR line:        <!-- TL;DR: N {decisions|pitfalls} -->   (N = the file's active entries)
+//   File headers (the renderer swaps in the real TL;DR line):
+//     decisions.md: "<!-- TL;DR: 0 decisions -->\n# Architectural Decisions\n\n{GENERATED_NOTICE}\n"
+//     pitfalls.md:  "<!-- TL;DR: 0 pitfalls -->\n# Known Pitfalls\n\n{GENERATED_NOTICE}\n"
 //   Index lines:
 //     v1: "  {anchorId}  {title cut to 60}  [{status}]"     (+ "  —  {area cut to 80}" when it has one)
 //     v2: "  {anchorId}  {title}"                           (+ "  —  {scope joined ', ' cut to 80}" when it has one)
@@ -70,7 +70,7 @@
 // which would emit `[object Object]` for the schema-declared shape.
 //
 // Consumers of these strings:
-//   - session-start-context (line 57): reads TL;DR comment via sed
+//   - session-start-context (Section 1): injects the TL;DR comment's text via sed
 //   - devflow:apply-decisions: reads ## ADR-NNN: / ## PF-NNN: headings
 //   - decisions-usage-scan: scans /(ADR|PF)-\d{3}/ anchors
 //   - buildIndexContent (below): parses ## heading, - **Status**:, - **Area**: lines from rendered v1 blocks
@@ -248,17 +248,23 @@ const ADR_KEYS = /** @type {const} */ (['context', 'decision', 'rationale']);
 /** Recognised field keys for pitfall entries. */
 const PF_KEYS = /** @type {const} */ (['area', 'issue', 'impact', 'resolution']);
 
+/** The line under each rendered file's title: who writes the file and what it lists. */
+const GENERATED_NOTICE =
+  'Generated from the local learning ledger by devflow; do not edit. ' +
+  'Active entries follow; retired ones are listed under Inactive.';
+
 /**
- * Return the initial header content for a new decisions or pitfalls file.
- * Byte-identical to the initDecisionsContent function in json-helper.cjs.
+ * Return the header of a rendered decisions or pitfalls file: the zero-count
+ * TL;DR line, the title and the generated-file notice. It is the whole file of an
+ * empty corpus; the renderer swaps in the file's real TL;DR line.
  *
  * @param {'decision'|'pitfall'} kind
  * @returns {string}
  */
 function initDecisionsContent(kind) {
   return kind === 'decision'
-    ? '<!-- TL;DR: 0 decisions. Key: -->\n# Architectural Decisions\n\nAppend-only. Status changes allowed; deletions prohibited.\n'
-    : '<!-- TL;DR: 0 pitfalls. Key: -->\n# Known Pitfalls\n\nArea-specific gotchas, fragile areas, and past bugs.\n';
+    ? `${buildTldrLine('decisions', [])}\n# Architectural Decisions\n\n${GENERATED_NOTICE}\n`
+    : `${buildTldrLine('pitfalls', [])}\n# Known Pitfalls\n\n${GENERATED_NOTICE}\n`;
 }
 
 /**
@@ -471,27 +477,17 @@ function toLedgerRow(obs, { anchorId, status, date, expectType }) {
 }
 
 /**
- * Build the TL;DR comment line for a rendered decisions or pitfalls file.
- * Format: `<!-- TL;DR: N {decisions|pitfalls}. Key: id1, id2 -->`
- *
- * Key is the last 5 anchor IDs from the provided active rows (sorted by
- * numeric anchor ascending — same order as the rendered file).
- * When rows is empty, Key is empty string (no trailing space before -->).
+ * Build the TL;DR comment line of a rendered decisions or pitfalls file:
+ * `<!-- TL;DR: N {decisions|pitfalls} -->`, N being the active entries the file
+ * renders. It names no entry: session-start-context injects its text into every
+ * session, and the index lists the entries.
  *
  * @param {'decisions'|'pitfalls'} kind - label used in the comment
- * @param {object[]} rows - active anchored rows (already filtered + sorted)
+ * @param {object[]} rows - the file's active rows
  * @returns {string} complete TL;DR comment line (no trailing newline)
  */
 function buildTldrLine(kind, rows) {
-  const count = rows.length;
-  const last5 = rows.slice(-5).map(r => r.anchor_id);
-  const keyStr = last5.join(', ');
-  // Byte-compat: an empty key list must render `Key: -->` (single space) so the
-  // empty-corpus render is byte-identical to initDecisionsContent's header. A
-  // trailing space before `-->` would diverge from the documented contract and
-  // break the assertion that the render is the SOLE format authority.
-  if (!keyStr) return `<!-- TL;DR: ${count} ${kind}. Key: -->`;
-  return `<!-- TL;DR: ${count} ${kind}. Key: ${keyStr} -->`;
+  return `<!-- TL;DR: ${rows.length} ${kind} -->`;
 }
 
 // ---------------------------------------------------------------------------

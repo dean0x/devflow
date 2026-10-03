@@ -439,6 +439,15 @@ const RETIRED_LITERALS: ReadonlyArray<RetiredEntry> = [
       'path that no install provides since the local scope was retired (#406). The helpers are ' +
       'defined inline, and ensure_docs_dir roots .devflow/docs at the checkout toplevel (D-DOCS-ROOT).',
   },
+  {
+    literal: 'Append-only. Status changes allowed',
+    removedFrom: 'src/assets/scripts/hooks/lib/decisions-format.cjs',
+    justification:
+      'The decisions.md header called the file append-only, with status changes allowed and ' +
+      'deletions prohibited. The file is generated from the learning ledger and rewritten on every ' +
+      'render, and an entry is rewritten in place, so the header says the file is generated and ' +
+      'not to be edited, and that retired entries are listed under Inactive.',
+  },
 ];
 
 // ---------------------------------------------------------------------------

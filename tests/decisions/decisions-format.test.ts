@@ -61,21 +61,23 @@ const {
 // ---------------------------------------------------------------------------
 
 describe('initDecisionsContent', () => {
-  it('decisions header matches byte-compat string', () => {
+  it('decisions header: a zero count, the title and the generated-file notice', () => {
     const result = initDecisionsContent('decision');
     expect(result).toBe(
-      '<!-- TL;DR: 0 decisions. Key: -->\n' +
+      '<!-- TL;DR: 0 decisions -->\n' +
       '# Architectural Decisions\n\n' +
-      'Append-only. Status changes allowed; deletions prohibited.\n'
+      'Generated from the local learning ledger by devflow; do not edit. ' +
+      'Active entries follow; retired ones are listed under Inactive.\n'
     );
   });
 
-  it('pitfalls header matches byte-compat string', () => {
+  it('pitfalls header: the same notice under the pitfalls title', () => {
     const result = initDecisionsContent('pitfall');
     expect(result).toBe(
-      '<!-- TL;DR: 0 pitfalls. Key: -->\n' +
+      '<!-- TL;DR: 0 pitfalls -->\n' +
       '# Known Pitfalls\n\n' +
-      'Area-specific gotchas, fragile areas, and past bugs.\n'
+      'Generated from the local learning ledger by devflow; do not edit. ' +
+      'Active entries follow; retired ones are listed under Inactive.\n'
     );
   });
 });
@@ -670,44 +672,42 @@ describe('formatAmendmentsLine — { date, note } object shape (the schema-decla
 // ---------------------------------------------------------------------------
 
 describe('buildTldrLine', () => {
-  it('decisions TL;DR: correct count and Key list', () => {
+  it('decisions TL;DR is the count of active entries alone', () => {
     const rows = [
       { anchor_id: 'ADR-001' },
       { anchor_id: 'ADR-003' },
       { anchor_id: 'ADR-004' },
     ];
-    const result = buildTldrLine('decisions', rows);
-    expect(result).toBe('<!-- TL;DR: 3 decisions. Key: ADR-001, ADR-003, ADR-004 -->');
+    expect(buildTldrLine('decisions', rows)).toBe('<!-- TL;DR: 3 decisions -->');
   });
 
-  it('pitfalls TL;DR: correct count and Key list', () => {
+  it('pitfalls TL;DR is the count of active entries alone', () => {
     const rows = [
       { anchor_id: 'PF-002' },
       { anchor_id: 'PF-004' },
     ];
-    const result = buildTldrLine('pitfalls', rows);
-    expect(result).toBe('<!-- TL;DR: 2 pitfalls. Key: PF-002, PF-004 -->');
+    expect(buildTldrLine('pitfalls', rows)).toBe('<!-- TL;DR: 2 pitfalls -->');
   });
 
-  it('Key includes only last 5 IDs when more than 5 rows', () => {
+  it('names no entry, however many there are', () => {
     const rows = Array.from({ length: 8 }, (_, i) => ({
       anchor_id: `ADR-${String(i + 1).padStart(3, '0')}`,
     }));
-    const result = buildTldrLine('decisions', rows);
-    // Last 5 should be ADR-004 through ADR-008
-    expect(result).toBe('<!-- TL;DR: 8 decisions. Key: ADR-004, ADR-005, ADR-006, ADR-007, ADR-008 -->');
+    const line = buildTldrLine('decisions', rows);
+    expect(line).toBe('<!-- TL;DR: 8 decisions -->');
+    expect(line).not.toMatch(/(?:ADR|PF)-\d/);
   });
 
-  it('empty corpus: count is 0, Key is empty with single trailing space (byte-compat with initDecisionsContent)', () => {
-    const result = buildTldrLine('decisions', []);
-    // Must be byte-identical to initDecisionsContent's TL;DR (single space before -->)
-    expect(result).toBe('<!-- TL;DR: 0 decisions. Key: -->');
+  it('empty corpus: the zero-count line each header opens with', () => {
+    expect(buildTldrLine('decisions', [])).toBe('<!-- TL;DR: 0 decisions -->');
+    expect(initDecisionsContent('decision').split('\n')[0]).toBe(buildTldrLine('decisions', []));
+    expect(initDecisionsContent('pitfall').split('\n')[0]).toBe(buildTldrLine('pitfalls', []));
   });
 
-  it('Key uses comma+space separator (AC-A5)', () => {
-    const rows = [{ anchor_id: 'ADR-001' }, { anchor_id: 'ADR-002' }];
-    const result = buildTldrLine('decisions', rows);
-    expect(result).toContain('ADR-001, ADR-002');
+  it('gives session-start-context the count between the comment markers', () => {
+    // The hook's sed keeps what lies between "<!-- TL;DR: " and " -->" on line 1.
+    const match = /^<!-- TL;DR: (.*) -->$/.exec(buildTldrLine('pitfalls', [{ anchor_id: 'PF-001' }]));
+    expect(match?.[1]).toBe('1 pitfalls');
   });
 });
 

@@ -346,7 +346,7 @@ describe('AC-F5: retire-anchor hides entry from .md, keeps in ledger', () => {
     runHelper('retire-anchor ADR-002 Retired', tmpDir);
 
     const md = readDecisionsMd(tmpDir);
-    expect(md).toContain('<!-- TL;DR: 0 decisions.');
+    expect(md).toContain('<!-- TL;DR: 0 decisions -->');
   });
 });
 
