@@ -1034,7 +1034,7 @@ try {
             throw new Error(
               `refresh-anchor: ledger row '${anchorId}' carries content absent from log obs ` +
               `'${rfExistingRow.id}' (details: ledger ${rfLedgerDetails.length}B / log ${rfLogDetails.length}B). ` +
-              `Reconcile the log row first — re-projecting would discard curated content (avoids PF-044).`
+              `Reconcile the log row first — re-projecting would discard curated content.`
             );
           }
 
