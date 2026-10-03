@@ -248,7 +248,7 @@ Both arrays share one mechanism, enforced by `tests/guards/numeric-floor-manifes
 - `containment-issue-body-floor` + `containment-external-thread-floor`, each floor 3 — two floors rather than one shared ops floor, so neither set can pass on the other's count.
 
 **Ceiling entries of note (all four `budget-*` git.md/loaded-set rows re-derived DOWNWARD across #326 and again by #376's Slice 4):**
-- `budget-git-md` (`tests/tracker/byte-budget.test.ts`): **44_243** (measured 44_163, #376 Slice 4 — measured + 80, superseding the #326-era 45_150).
+- `budget-git-md` (`tests/tracker/byte-budget.test.ts`): **43_912** (measured 43_814; set by #393 at its measured 43_832 + 80, superseding #376 Slice 4's 44_243 and the #326-era 45_150).
 - `budget-loaded-set` (GitHub path): **64_994** (measured 64_914). `budget-loaded-set-jira`: **75_344** (measured 75_264). `budget-loaded-set-linear`: **75_940** (measured 75_860, still the largest of the four rows).
 - `budget-loaded-set-pr-host` (ceiling **58_306**, measured 58_226) — its own row, for the reason each provider has one (D-LOADED-SET-PER-PROVIDER): `references/pr/` is installed under EVERY tracker, so folding it into a per-provider row would price one cost three times. Formula: preloaded set + `max over PR_HOST_OPS of (chars(pr/{op}.md) + every reference that op's own section names)` — no separate `max_op` term, since a PR-host op's own mechanics file is already inside its one-spawn load. Carries ONE written exclusion, `references/github-api.md` (`LOADED_SET_WRITTEN_EXCLUSIONS` in `tests/tracker/budget-model.ts`), proven load-bearing by a companion test and RECORDED (never hidden) as the `2c-ex` shape in the printed shape table (`shapes.length === 7 + MCP_BACKED_PROVIDERS.length`).
 - **Every #376 ceiling sits at exactly measured + 80 headroom** (`budget-skill-md` 6_600, `pr-host-max-op-load` 4_540, `mcp-contract-max-chars` 7_963 and `preamble-max-lines` 36 were left unchanged — already ≤ 80 headroom). Two ceilings pre-date #376 and are unaffected by its slices: `tracker-section-max-chars` (800) and `claude-md-tracker-block-max-chars` (3_500).
@@ -435,7 +435,7 @@ Both spawn the real compiled CLI against a throwaway `$HOME` AND a throwaway git
 - `tests/installer/reference-overlay.test.ts` — converge-not-merge reference overlay; `probe-provider` fixture self-check; `pr/` converges like `tracker/` (D-CONVERGED-SUBTREES)
 - `tests/goldens/git-agent-golden.test.ts` — byte-equality guard; `GIT_AGENT_BYTES = 44_131`
 - `tests/goldens/github-status-lines.test.ts` — `extractStatusLines()` stability guard; `FIXTURE_BYTES = 18_383`, `FIXTURE_NEWLINES = 249`
-- `tests/fixtures/golden/git-agent.md` — frozen byte-equal snapshot of the resolved `git` agent (822 lines, 43,814 chars, 44,131 bytes)
+- `tests/fixtures/golden/git-agent.md` — byte-equal snapshot of the resolved `git` agent (822 lines, 43,814 chars, 44,131 bytes)
 - `tests/fixtures/golden/github-status-lines.txt` — frozen output of `extractStatusLines()` (18,383 bytes / 249 newlines)
 - `tests/guards/requires-closure.test.ts` — the bidirectional `requires:` closure
 - `tests/installer/install-shape.test.ts` · `tests/tracker-install.test.ts` · `tests/scoped-install-e2e.test.ts` — the scoped install shape, `convergeTrackerArtifacts`, and the real-CLI three-provider diff
