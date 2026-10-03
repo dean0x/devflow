@@ -14,21 +14,22 @@
  * unignored ones, so a new file is checked before anyone stages it. Files with a
  * NUL byte are binary and skipped.
  *
- * 1. FULL BAN. No three-digit ledger ID in any spelling in `src/**`,
+ * 1. FULL BAN. No three-digit ledger ID, wherever it sits, in `src/**`,
  *    `scripts/**`, the root `vitest*.config.ts` files, `docs/**`, the root prose
- *    (`CLAUDE.md`, `README.md`, `CONTRIBUTING.md`, `.devflow/conventions.md`),
- *    the feature knowledge index, every feature `KNOWLEDGE.md`, and
- *    `tests/fixtures/numeric-floors.json`. People and agents on every clone read
- *    these, and none of them is test data.
- * 2. TEST COMMENTARY. In `tests/**\/*.ts` only comments and the title argument
- *    of `describe` / `it` / `test` (through the modifiers in `CHAIN_MODIFIERS`
- *    and `CALLING_MODIFIERS`) are read, and only the shapes a citation takes
- *    are flagged: `applies`, `avoids`, `per` or `see` before an ID, an ID that
- *    opens or closes a parenthesis or a bracket, and an ID in the possessive. A
- *    test's data can legitimately be a ledger ID — the ledger plumbing is
- *    tested on rows that carry them — so string literals in code are never
- *    read, and a title that names the fixture row it describes is data
- *    description, not a citation.
+ *    (`CLAUDE.md`, `README.md`, `CONTRIBUTING.md`, `.devflow/conventions.md`,
+ *    `.release/RELEASE-FLOW.md`), the feature knowledge index, every feature
+ *    `KNOWLEDGE.md`, and `tests/fixtures/numeric-floors.json`. People and agents
+ *    on every clone read these, and none of them is test data.
+ * 2. TEST COMMENTARY. In `tests/**\/*.ts` only the commentary is read: comments,
+ *    the title argument of `describe` / `it` / `test` (through the modifiers in
+ *    `CHAIN_MODIFIERS` and `CALLING_MODIFIERS`), and the message argument of
+ *    `expect(value, message)`. A test's data can legitimately be a ledger ID —
+ *    the ledger plumbing is tested on rows that carry them — so commentary may
+ *    name an ID that the same file also holds as data, outside its commentary,
+ *    to say which fixture row it describes. Any other ID in commentary is
+ *    reported, and so is every ID in a citation shape, data or not: `applies`,
+ *    `avoids`, `per` or `see` before an ID, an ID that opens or closes a
+ *    parenthesis or a bracket, and an ID in the possessive.
  *
  * Excluded everywhere: `CHANGELOG.md` (released history is not rewritten), the
  * golden fixtures under `tests/fixtures/golden/` and any install-snapshot golden
@@ -42,16 +43,20 @@
  *
  * What a green run does NOT prove
  * -------------------------------
- * In test files, an ID with no citation shape — mid-sentence ("the shape it
- * names"), as a leading label, or inside a parenthesised list that it neither
- * opens nor closes — is not matched, and neither is anything in a string
- * literal, assertion messages included. That arm is narrower than the full ban
- * on purpose: test commentary describes fixture rows by their IDs. An ID
+ * The full ban matches the upper-case, ASCII-hyphenated form only: `adr-001`,
+ * `ADR 001` or a non-ASCII hyphen passes. In test files, an ID the same file
+ * holds as data passes in commentary unless it takes a citation shape, so a
+ * citation whose number happens to be one of that file's fixture rows is not
+ * caught. String literals other than titles and assertion messages — error
+ * messages, log labels, helper arguments — are never read, and a title is its
+ * first literal only, so the tail of a concatenated title is not read. An ID
  * assembled at run time is not representable. A regular-expression literal is
  * recognised by the token before it, as JavaScript tooling commonly does without
  * a parser: a literal opening a statement right after `)` is read as a division
- * and the rest of its line as code. Files outside the roots above — CI
- * workflows, package metadata, the other fixtures under `tests/` — are not read.
+ * and the rest of its line as code, and a division right after a postfix `++` /
+ * `--` or a non-null `!` is read as opening a literal. Files outside the roots
+ * above — CI workflows, package metadata, the other fixtures under `tests/` —
+ * are not read.
  */
 
 import { describe, it, expect } from 'vitest';
@@ -89,12 +94,14 @@ const SCANNED_AREAS = [
   { id: 'features-index', label: '.devflow/features/index.md' },
   { id: 'feature-kb', label: '.devflow/features/*/KNOWLEDGE.md' },
   { id: 'numeric-floors', label: 'tests/fixtures/numeric-floors.json' },
-  { id: 'tests', label: 'tests/**/*.ts comments and titles' },
+  { id: 'tests', label: 'tests/**/*.ts comments, titles and assertion messages' },
 ] as const;
 
 type Area = (typeof SCANNED_AREAS)[number]['id'];
 
-const ROOT_PROSE: readonly string[] = ['CLAUDE.md', 'README.md', 'CONTRIBUTING.md', '.devflow/conventions.md'];
+const ROOT_PROSE: readonly string[] = [
+  'CLAUDE.md', 'README.md', 'CONTRIBUTING.md', '.devflow/conventions.md', '.release/RELEASE-FLOW.md',
+];
 
 /** Paths no arm reads, whichever root they sit under. */
 function isExcluded(rel: string): boolean {
@@ -350,21 +357,92 @@ function collectTitles(tokens: readonly CodeToken[]): CodeToken[] {
   return titles;
 }
 
-/** One piece of test commentary: a comment or a title, with its offset in the file. */
+const OPENERS: ReadonlySet<string> = new Set(['(', '[', '{']);
+const CLOSERS: ReadonlySet<string> = new Set([')', ']', '}']);
+
+/**
+ * Every string or template literal in the message argument of an `expect(value,
+ * message)` call: everything after the call's first top-level comma, so each part
+ * of a concatenated message is read. Brackets and braces count toward nesting, so
+ * a comma inside an object or array value never opens the message.
+ */
+function collectAssertionMessages(tokens: readonly CodeToken[]): CodeToken[] {
+  const messages: CodeToken[] = [];
+  for (let k = 0; k < tokens.length; k++) {
+    const isExpect = tokens[k].kind === 'ident' && tokens[k].text === 'expect';
+    if (!isExpect || isPunct(tokens[k - 1], '.') || !isPunct(tokens[k + 1], '(')) continue;
+    let depth = 0;
+    let inMessage = false;
+    for (let j = k + 1; j < tokens.length && j <= k + MAX_ARGUMENT_TOKENS; j++) {
+      const t = tokens[j];
+      if (t.kind === 'punct' && OPENERS.has(t.text)) depth++;
+      else if (t.kind === 'punct' && CLOSERS.has(t.text)) {
+        if (--depth === 0) break;
+      } else if (depth === 1 && isPunct(t, ',')) {
+        if (inMessage) break;
+        inMessage = true;
+      } else if (inMessage && (t.kind === 'string' || t.kind === 'template')) {
+        messages.push(t);
+      }
+    }
+  }
+  return messages;
+}
+
+/** One piece of test commentary: a comment, a title or an assertion message, with its offset in the file. */
 interface Commentary {
   readonly start: number;
   readonly text: string;
 }
 
-/** Every comment and every test title in a test file's source. */
-function extractCommentary(src: string): { comments: Commentary[]; titles: Commentary[] } {
+/** Every comment, test title and assertion message in a test file's source. */
+function extractCommentary(src: string): { comments: Commentary[]; titles: Commentary[]; messages: Commentary[] } {
   const spans: CommentSpan[] = [];
   const tokens: CodeToken[] = [];
   lexCode(src, 0, false, spans, tokens, 0);
   return {
     comments: spans.map(s => ({ start: s.start, text: src.slice(s.start, s.end) })),
     titles: collectTitles(tokens),
+    messages: collectAssertionMessages(tokens),
   };
+}
+
+/**
+ * The ledger IDs a test file holds as data: every ID in its source outside its
+ * commentary, so a title or a message never vouches for an ID it names itself.
+ */
+function idsHeldAsData(src: string, commentary: readonly Commentary[]): ReadonlySet<string> {
+  const ids = new Set<string>();
+  let at = 0;
+  const scan = (end: number): void => {
+    for (const m of src.slice(at, end).matchAll(LEDGER_ID)) ids.add(m[0]);
+  };
+  for (const piece of [...commentary].sort((a, b) => a.start - b.start)) {
+    if (piece.start > at) scan(piece.start);
+    at = Math.max(at, piece.start + piece.text.length);
+  }
+  scan(src.length);
+  return ids;
+}
+
+/**
+ * The violations in a test file's commentary, as offsets into the file: every ID
+ * in a citation shape, and every other ID the file does not also hold as data.
+ */
+function commentaryViolations(src: string): Array<{ offset: number; text: string }> {
+  const { comments, titles, messages } = extractCommentary(src);
+  const commentary = [...comments, ...titles, ...messages];
+  const data = idsHeldAsData(src, commentary);
+  const found = new Map<number, string>();
+  for (const piece of commentary) {
+    const cited = [...piece.text.matchAll(CITATION)];
+    for (const m of cited) found.set(piece.start + m.index, m[0]);
+    for (const m of piece.text.matchAll(LEDGER_ID)) {
+      const inCitation = cited.some(c => m.index >= c.index && m.index < c.index + c[0].length);
+      if (!inCitation && !data.has(m[0])) found.set(piece.start + m.index, m[0]);
+    }
+  }
+  return [...found].map(([offset, text]) => ({ offset, text }));
 }
 
 // ---------------------------------------------------------------------------
@@ -386,8 +464,8 @@ function lineOf(content: string, offset: number): number {
 
 /**
  * Every violation in `corpus`: each entry is routed by `areaOf`, the full ban
- * applies to its whole text, and test files are read for citations in their
- * comments and titles only. Pure — the live arms and the seeded probes run it.
+ * applies to its whole text, and test files are read in their commentary only
+ * (`commentaryViolations`). Pure — the live arms and the seeded probes run it.
  */
 function collectLedgerViolations(corpus: readonly CorpusEntry[]): LedgerViolation[] {
   const found: LedgerViolation[] = [];
@@ -401,10 +479,7 @@ function collectLedgerViolations(corpus: readonly CorpusEntry[]): LedgerViolatio
       for (const m of entry.content.matchAll(LEDGER_ID)) report(m.index, m[0]);
       continue;
     }
-    const { comments, titles } = extractCommentary(entry.content);
-    for (const piece of [...comments, ...titles]) {
-      for (const m of piece.text.matchAll(CITATION)) report(piece.start + m.index, m[0]);
-    }
+    for (const v of commentaryViolations(entry.content)) report(v.offset, v.text);
   }
   return found.sort((a, b) => a.path.localeCompare(b.path) || a.line - b.line);
 }
@@ -485,12 +560,14 @@ describe('no-ledger-citations guard: corpus reach', () => {
     });
   }
 
-  it('the extractor reads comments and test titles out of the real tests corpus', () => {
+  it('the extractor reads comments, test titles and assertion messages out of the real tests corpus', () => {
     const commentary = corpus.filter(e => areaOf(e.path) === 'tests').map(e => extractCommentary(e.content));
     const comments = commentary.reduce((n, c) => n + c.comments.length, 0);
     const titles = commentary.reduce((n, c) => n + c.titles.length, 0);
+    const messages = commentary.reduce((n, c) => n + c.messages.length, 0);
     expect(comments, 'no comment extracted from tests/**/*.ts').toBeGreaterThan(0);
     expect(titles, 'no describe/it/test title extracted from tests/**/*.ts').toBeGreaterThan(0);
+    expect(messages, 'no expect(value, message) message extracted from tests/**/*.ts').toBeGreaterThan(0);
   });
 });
 
@@ -507,8 +584,7 @@ describe('no-ledger-citations guard: seeded probes', () => {
     { name: 'a bare ID in a doc', entry: { path: 'docs/reference/example.md', content: 'The split follows ADR-123.\n' } },
     { name: 'an ID held as data in a script', entry: { path: 'scripts/example.ts', content: "const anchor = 'PF-123';\n" } },
     { name: 'an ID in a vitest config', entry: { path: 'vitest.config.ts', content: '// pool settings, see PF-123\n' } },
-    { name: 'an ID in root prose', entry: { path: 'CLAUDE.md', content: 'Plumbing only (ADR-123).\n' } },
-    { name: 'an ID in the conventions file', entry: { path: '.devflow/conventions.md', content: 'Branch names follow ADR-123.\n' } },
+    ...ROOT_PROSE.map(file => ({ name: `an ID in ${file}`, entry: { path: file, content: 'Plumbing only (ADR-123).\n' } })),
     { name: 'an ID in the features index', entry: { path: '.devflow/features/index.md', content: '| x | per PF-123 |\n' } },
     { name: 'an ID in a feature knowledge base', entry: { path: '.devflow/features/example/KNOWLEDGE.md', content: '- applies ADR-123\n' } },
     { name: 'an ID in a numeric-floor description', entry: { path: 'tests/fixtures/numeric-floors.json', content: '{ "description": "vacuous otherwise (PF-123)" }\n' } },
@@ -540,6 +616,12 @@ describe('no-ledger-citations guard: seeded probes', () => {
     { name: 'a comment inside a template substitution', content: 'const t = `${/* see PF-123 */ 1}`;\n' },
     { name: 'a possessive with a straight apostrophe', content: "// the matcher is PF-123's first claim\n" },
     { name: 'a possessive with a typographic apostrophe', content: '// ADR-123\u2019s split still holds\n' },
+    { name: 'a leading-label comment', content: '// PF-123: the reason\n' },
+    { name: 'an ID mid-sentence in a comment', content: '// the vacuous shape PF-123 names\n' },
+    { name: 'a title that opens with an ID', content: "it('PF-123: warns, never throws', () => {});\n" },
+    { name: 'an assertion message', content: "expect(x, 'vacuous otherwise (PF-123)').toBe(1);\n" },
+    { name: 'a concatenated assertion message', content: "expect(x, 'vacuous ' + 'otherwise, PF-123').toBe(1);\n" },
+    { name: 'a citation of an ID the file holds as data', content: "const row = { anchor: 'ADR-123' };\n// see ADR-123\n" },
   ];
 
   for (const probe of TEST_ARM_BAD) {
@@ -558,13 +640,14 @@ describe('no-ledger-citations guard: seeded probes', () => {
     { name: 'placeholder, glued and four-digit possessives', content: "// PF-NNN's rule, ADR-NNN\u2019s split\n// XPF-123's key, PF-1234's number\n" },
     { name: 'a citing phrase held in a string literal', content: "const s = 'applies ADR-001';\n" },
     { name: 'an ID held as data', content: "const id = 'PF-123';\nconst row = { anchor: 'ADR-123' };\n" },
-    { name: 'an assertion message', content: "expect(x, 'vacuous otherwise (PF-123)').toBe(1);\n" },
+    { name: 'an ID in the value under test', content: "expect(parse('PF-123'), 'parses the row').toEqual({ id: 'PF-123' });\n" },
+    { name: 'an assertion message naming a row the file holds', content: "const id = 'PF-123';\nexpect(render(id, { a: 1, b: 2 }), 'row PF-123 survives').toContain(id);\n" },
     { name: 'a // inside a string', content: "const url = 'https://example.com/x // see PF-123';\n" },
     { name: 'comment-shaped text in a template literal', content: 'const t = `/* (PF-123) */`;\n' },
     { name: 'comment-shaped text in a regex literal', content: 'const re = /\\/\\/ see PF-123/;\n' },
     { name: 'a Jira-style key and a four-digit number', content: '// tracked as PROJ-123 (see PROJ-123)\n// (PF-1234)\n' },
-    { name: 'a title that names the fixture row it describes', content: "it('renders the ADR-123 heading', () => {});\n" },
-    { name: 'a comment that describes a fixture row by its ID', content: '// row ADR-123 is retired in this fixture\n' },
+    { name: 'a title that names the fixture row it describes', content: "const id = 'ADR-123';\nit('renders the ADR-123 heading', () => {});\n" },
+    { name: 'a comment that describes a fixture row by its ID', content: "const rows = [{ anchor: 'ADR-123' }];\n// row ADR-123 is retired in this fixture\n" },
     { name: 'a method that happens to be named test', content: "/x/.test('see PF-123');\nobj.it('(PF-123)');\n" },
   ];
 
