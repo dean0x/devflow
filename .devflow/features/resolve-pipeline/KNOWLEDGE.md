@@ -380,6 +380,6 @@ The following test files provide static content guards that fail loudly when loa
 - Parallel Code-agent staging: same-file Code agent batches must be sequential; distinct-file batches parallel
 - Leave-the-end-state: Resolver retired with zero tombstones; its installed file is pruned by the registry-diff orphan sweep
 - Skill re-entrancy: Triage agent skills are loaded via frontmatter — never body-instructed via `Skill()` calls
-- No bare rm in agent instructions: Agent shell operations must use safe-delete patterns
+- Deleting files in agent instructions: the Recommended deny-list blocks `rm`'s flag spellings (`rm -f`, `rm -rf`, and compounds containing them), not a flagless `rm <path>` or `unlink <path>` — name one of those, keep cleanup failure-tolerant, and after a denial retry once in a narrower form before reporting a leftover
 - Feature knowledge: `dynamic-workflow-engine` — the max-5-per-batch concurrency rule was generalized from the dynamic-build pipeline to /resolve Phase 3
 - Feature knowledge: `compliance-feature` — source of the settings-line compliance lens (`COMPLIANCE_ACTIVE`, `COMPLIANCE_FRAMEWORKS`), the compliance partial, traceability Git operations, and TRACEABILITY: DEGRADED contract
