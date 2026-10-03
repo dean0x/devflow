@@ -28,9 +28,9 @@ The routing runtime is an internal package (`subswitch@0.4.0`, exact-pinned in `
 |------|------|
 | `~/.devflow/proxy.json` | Runtime authority. Tolerant-parsed by `readProxyState()`. ENOENT → default disabled state (not an error). Fields: `enabled`, `port`, `binPath`, `configPath`, `resolvedAt`, `devflowVersion`. |
 | `~/.devflow/proxy-routing.json` | Routing config written by `buildRoutingConfigJson(port, existingContent?)`. Strict 5-key shape accepted by subswitch 0.4.0: `port`, `logLevel`, `anthropic`, `providers`, `limits`. Port-only on a fresh write — no `anthropic` block injected; the relay's own default governs (D-EFR-4). User-set `anthropic` sub-keys are preserved. Strips legacy sub-keys that are hard startup errors in 0.4.0: `anthropic.streamIdleTimeoutMs`, `limits.connectTimeoutMs`, `limits.maxConcurrentRequests`, `limits.maxBodyBytes` (see `ROUTING_CONFIG_REJECTED_SUBKEYS`). Written before preflight runs on enable. |
-| `manifest.features.proxy` | Init/uninstall authority. Seeds from prior manifest on re-init (ADR-014). Never in `config.json` — manifest-group by design, same as `ambient`/`hud`/`rules`. |
+| `manifest.features.proxy` | Init/uninstall authority. Seeds from prior manifest on re-init. Never in `config.json` — manifest-group by design, same as `ambient`/`hud`/`rules`. |
 
-**`isProxyEnabled()` is the sole dormancy authority**: it reads only `proxy.json` (never manifest). This is load-bearing: on preflight failure, `init.ts` converges `proxy.json` to `enabled:false` alongside manifest, hooks, and env — all four artifacts must agree (avoids PF-015). Any path that forces `proxyEnabled=false` must write `proxy.json enabled:false` so that a subsequent `isProxyEnabled()` call in the same process returns false correctly.
+**`isProxyEnabled()` is the sole dormancy authority**: it reads only `proxy.json` (never manifest). This is load-bearing: on preflight failure, `init.ts` converges `proxy.json` to `enabled:false` alongside manifest, hooks, and env — all four artifacts must agree. Any path that forces `proxyEnabled=false` must write `proxy.json enabled:false` so that a subsequent `isProxyEnabled()` call in the same process returns false correctly.
 
 **`proxyJsonExists()` is the evidence discriminator** (D-STRIP-1): `readProxyState()` returns `Ok(defaultState)` on ENOENT — it cannot distinguish "file absent" from "file present with `DEFAULT_PROXY_PORT`". Callers that must gate on Devflow-managed evidence (init.ts env strip, uninstall cleanup phase) use `proxyJsonExists()` instead of inferring file presence from `readProxyState()`.
 
@@ -45,9 +45,9 @@ The routing runtime is an internal package (`subswitch@0.4.0`, exact-pinned in `
 7. Settings pass via `applyEnableSettingsPass()` (internal named function, not exported): `removeProxyHooks` + `_stripProxyEnvFromObject(s, port)` + `addProxyHooks` + `_applyProxyEnvToObject` — **all four calls, then one atomic write** to `~/.claude/settings.json`.
 8. Sync manifest.
 9. `reapplyAgentMapping({ proxyEnabled: true })` — materializes GPT model entries into agent frontmatter.
-10. **Cache warming (fire-and-forget)**: `void discoverExternalModels(cacheDir, logPath).catch(() => {})` — pre-populates the model cache so the next `--status` and agents TUI load instantly. Strictly non-fatal per PF-009 — a discovery failure must never block the enable result or surface an error to the user.
+10. **Cache warming (fire-and-forget)**: `void discoverExternalModels(cacheDir, logPath).catch(() => {})` — pre-populates the model cache so the next `--status` and agents TUI load instantly. Strictly non-fatal — a discovery failure must never block the enable result or surface an error to the user.
 
-Hard failures at any step (steps 1–9) set `process.exitCode = 1` and return — never `process.exit()` (avoids PF-014).
+Hard failures at any step (steps 1–9) set `process.exitCode = 1` and return — never `process.exit()`, which skips pending `finally` cleanup.
 
 ### Disable path (never kills relay)
 
@@ -83,7 +83,7 @@ Uninstall's cleanup phase calls `proxyJsonExists()` to decide whether to pass a 
 - `proxy.json` present → read `proxy.json.port`, pass it as `managedPort` (strip env).
 - `proxy.json` absent → pass `undefined` (hooks only).
 
-`applyDisableToSettings`'s **both-operations invariant** is unchanged when called via the managed path: `removeProxyHooks(s)` and `_stripProxyEnvFromObject(s, port)` both always evaluate — no short-circuit (avoids PF-015).
+`applyDisableToSettings`'s **both-operations invariant** is unchanged when called via the managed path: `removeProxyHooks(s)` and `_stripProxyEnvFromObject(s, port)` both always evaluate — no short-circuit.
 
 ### `applyDisableToSettings` — both-operations invariant
 
@@ -175,7 +175,7 @@ esac
 - **Strategy (a)**: bounded walk from the resolved `devflow` CLI up to its nearest `node_modules/subswitch/package.json` ancestor. Walk guard: `_WALK_GUARD < 6` — at most 6 `dirname` steps. The `bin` field is read via `node -p` (env-var pass avoids quoting issues). Stops at the first `subswitch` dir found regardless of bin result.
 - **Strategy (b)**: `command -v subswitch` — for globally-installed CLI installations.
 
-The healed path is used for the current session only and is never written back to `proxy.json` from the hook. The next `devflow proxy --enable` persists the corrected path. On re-resolution failure the original "relay binary not found" warning is emitted (avoids PF-009 — always exits 0).
+The healed path is used for the current session only and is never written back to `proxy.json` from the hook. The next `devflow proxy --enable` persists the corrected path. On re-resolution failure the original "relay binary not found" warning is emitted (always exits 0).
 
 **curl is guarded** with `command -v curl >/dev/null 2>&1` before the health-check identity call. When curl is absent, the hook assumes the relay is ours and exits 0 (no spurious warning). The CLI `--status` command is the authoritative identity check.
 
@@ -189,7 +189,7 @@ The hook is **not git-gated** (unlike `preamble` and `session-start-orchestrator
 
 The spawn wait uses **80×0.1s = 8s** (hook) vs the CLI's **50×100ms = 5s**. This difference is intentional: the hook fires inside a 15-second platform timeout and needs a wider cold-start window; the CLI user is waiting interactively.
 
-**Relay spawned with `env -i` (SEC-2 allowlist, avoids PF-017)**: `env -i` starts with an empty environment; the relay receives an explicit set of variables via the `_RELAY_ENV` array: `PATH`, `HOME`, `TMPDIR`, `LANG`, `LC_ALL`, `SUBSWITCH_CONFIG`, and — conditionally when non-empty — `NODE_EXTRA_CA_CERTS`. `NODE_OPTIONS` is deliberately excluded (permits arbitrary code execution via `--require`/`--import`). The TypeScript spawn path (`scrubChildEnv()` in `proxy-log.ts`) mirrors this set. Both allowlists must be kept in sync (avoids PF-017); a drift-guard test in `tests/proxy-log.test.ts` asserts the hook contains the conditional append.
+**Relay spawned with `env -i` (SEC-2 allowlist)**: `env -i` starts with an empty environment; the relay receives an explicit set of variables via the `_RELAY_ENV` array: `PATH`, `HOME`, `TMPDIR`, `LANG`, `LC_ALL`, `SUBSWITCH_CONFIG`, and — conditionally when non-empty — `NODE_EXTRA_CA_CERTS`. `NODE_OPTIONS` is deliberately excluded (permits arbitrary code execution via `--require`/`--import`). The TypeScript spawn path (`scrubChildEnv()` in `proxy-log.ts`) mirrors this set. Both allowlists must be kept in sync; a drift-guard test in `tests/proxy-log.test.ts` asserts the hook contains the conditional append.
 
 **Hook spawn path is covered by tests** (tests/shell-hooks.test.ts): a stub relay reads `SUBSWITCH_CONFIG` and binds the port, asserting silent exit (exit 0, no stdout/stderr), a live pid recorded in `proxy.pid`, and spawn lock released. The failure branch (full 8s wait) is intentionally not unit-tested for duration reasons.
 
@@ -200,11 +200,11 @@ The spawn wait uses **80×0.1s = 8s** (hook) vs the CLI's **50×100ms = 5s**. Th
 - **Fresh file**: write the template directly.
 - **Existing file**: call `mergeDevflowSettingsTemplate(existingParsed, templateParsed)` — adds Devflow hook entries absent from the file (idempotent by exact command string), sets `statusLine`/`attribution` only when the user has no existing value.
 - **Parse failure**: warn and skip — the file is left byte-identical. A broken `settings.json` is never clobbered.
-- **Foreign/unexpected hook shapes**: a per-event value that is not an array is left entirely untouched rather than overwritten or thrown on (applies PF-023).
+- **Foreign/unexpected hook shapes**: a per-event value that is not an array is left entirely untouched rather than overwritten or thrown on.
 
 The old "override confirm" prompt is gone. The merge is purely additive (Devflow entries only), so no prompt is needed — declining could not protect user keys that the merge never touches, and the prompt rendered on top of the init spinner.
 
-`mergeDevflowSettingsTemplate` is exported for unit testing. Every shape check is at the mutation sink (not upstream) per PF-023.
+`mergeDevflowSettingsTemplate` is exported for unit testing. Every shape check is at the mutation sink (not upstream).
 
 ## subswitch 0.4.0 Routing Config Contract (D-EFR-4)
 
@@ -231,7 +231,7 @@ The old "override confirm" prompt is gone. The merge is purely additive (Devflow
 | `discoverExternalModels(cacheDir, logPath, deps?)` | Async, spawns subprocess | Writes a versioned cache entry `external-models-v1-<version>.json` under `cacheDir` |
 | `getExternalModelsCached(cacheDir)` | Sync, zero spawns | Reads the newest cache entry regardless of TTL; returns `{ known: false }` on miss. Sets `source: 'cache'` when within TTL, `'stale-cache'` when expired. |
 
-**Cache dir convention**: `modelCacheDir(devflowDir)` from `src/core/cache.ts` — the single authoritative path for the model cache. All callers (write site in model-discovery.ts and removal site in uninstall.ts) route through this function so they cannot drift independently (avoids PF-013). `hudCacheDir(devflowDir)` is the sibling accessor for HUD-related caches under `devflowDir/cache/`.
+**Cache dir convention**: `modelCacheDir(devflowDir)` from `src/core/cache.ts` — the single authoritative path for the model cache. All callers (write site in model-discovery.ts and removal site in uninstall.ts) route through this function so they cannot drift independently. `hudCacheDir(devflowDir)` is the sibling accessor for HUD-related caches under `devflowDir/cache/`.
 
 **Cache key format**: `external-models-v1-<runtimeVersion>`. `resolveProxyBin()` validates the version string against `RUNTIME_VERSION_RE = /^[A-Za-z0-9.+-]{1,32}$/` before it becomes a path component (path-traversal prevention). When validation fails, the version field is absent from the result and callers must treat the cache as unavailable.
 
@@ -256,7 +256,7 @@ The old "override confirm" prompt is gone. The merge is purely additive (Devflow
 **When to use which**:
 - `discoverExternalModels` in the interactive TUI — async, spawns the runtime, gated on `proxyEnabled` (proxy-off sessions resolve immediately to `{ known: false }`); shows a spinner when catalog takes more than 250 ms.
 - `getExternalModelsCached` in `--set` — sync, zero spawns; accepts any model name on cache miss (configure-first-then-enable flow preserved).
-- `discoverExternalModels` fire-and-forget after enable (cache warming, strict non-fatal per PF-009).
+- `discoverExternalModels` fire-and-forget after enable (cache warming, strict non-fatal).
 - `--list`, `--reset` — never touch model discovery. `--status` reads the cached model registry via `getExternalModelsCached` (sync, zero spawns — no live fetch).
 
 **Uninstall**: `cache/models` is in `proxyArtifacts` in `uninstall.ts` — derived from `modelCacheDir(devflowDir)` with `isDir:true` on `devflow uninstall`. The `cache/` parent directory is not removed (the HUD shares it).
@@ -283,7 +283,7 @@ Callers persist the result iff `didMutate` is true. The function is idempotent �
 
 This parser handles BOM (U+FEFF) stripping and whitespace-only files tolerantly. **`readAgentMapping` now routes through `parseAgentMappingEnvelope`** (F1 fix) — the shared parse path gives both `readAgentMapping` and the migration the same BOM tolerance and JSON-parse error handling. Special case: when the envelope returns `kind: 'warn'` with a "non-object agents field" message (e.g., the file has `agents: []`), `readAgentMapping` returns `Ok({ version: 1, agents: {} })` for backward compatibility — the migration path treats the same case as a suspicious-but-tolerated warn. The `readAgentMapping` path applies `canonicaliseAgentKeys` inline on every read, covering all four call sites transparently.
 
-**`readInstalledAgentNames(installDir)`** degrades to an empty `Set<string>` on **any** readdir failure — not just `ENOENT`. A transient permission error or misconfigured path must not prevent the TUI or `--list` from starting (avoids PF-009). The single `fs.readdir` call replaces the previous per-name `fs.access` loop, giving O(dir) instead of O(agents) I/O.
+**`readInstalledAgentNames(installDir)`** degrades to an empty `Set<string>` on **any** readdir failure — not just `ENOENT`. A transient permission error or misconfigured path must not prevent the TUI or `--list` from starting. The single `fs.readdir` call replaces the previous per-name `fs.access` loop, giving O(dir) instead of O(agents) I/O.
 
 **Containment guard in `reapplyAgentMapping`**: before reading or writing any agent file, `reapplyAgentMapping` calls `isContainedIn(opts.installDir, mdFileName(agentName))` from `src/core/paths.ts`. A key that resolves outside the install directory (e.g., a path-traversal key like `../../etc/passwd` from a corrupted `agent-models.json`) is skipped with a warning and placed in the `skippedMissing` bucket — no filesystem access beyond `installDir` is ever attempted.
 
@@ -317,7 +317,7 @@ Both use `Promise.all` for parallel I/O:
 - `loadShippedDefaults(dirs = agentSourceDirs(), opts?)` reads every agent `.md` in each directory of `agentSourceDirs()` concurrently (`readDirDefaults` per directory) and merges them **first-wins**, so `dist/agents/` supersedes `src/assets/agents/` for a name present in both. A missing directory on either side yields an empty map.
 - `reapplyAgentMapping()` processes all agent files concurrently via `Promise.all` over the agent name list. It accepts an optional `agentSourceDirs` (same convention, injectable for tests) and passes its own warning channel down to `loadShippedDefaults`; `revertExternalAgents` forwards both.
 
-**Registry-gap warning**: after the merge, `loadShippedDefaults` compares the resolved names against `getAllAgentNames()` and emits ONE aggregate `onWarning` message naming every registry agent no directory supplied, pointing at `npm run build:mds` (mirrors the installer's throw message, which fires on the same invariant). It does not throw — `devflow agents --list` must still render. This is the disclosure for a real silent failure: in a `build:cli`-only tree `dist/agents/` is absent and the generated agent has no `.md` source, so `resolveEffective` returns `model === undefined`, `reapplyAgentMapping` buckets the agent `'unchanged'`, and **disabling the proxy leaves a GPT-pinned agent unreverted** (PF-022). `devflow agents` passes `p.log.warn` as the channel; `reapplyAgentMapping` routes it into `ReapplyResult.warnings`.
+**Registry-gap warning**: after the merge, `loadShippedDefaults` compares the resolved names against `getAllAgentNames()` and emits ONE aggregate `onWarning` message naming every registry agent no directory supplied, pointing at `npm run build:mds` (mirrors the installer's throw message, which fires on the same invariant). It does not throw — `devflow agents --list` must still render. This is the disclosure for a real silent failure: in a `build:cli`-only tree `dist/agents/` is absent and the generated agent has no `.md` source, so `resolveEffective` returns `model === undefined`, `reapplyAgentMapping` buckets the agent `'unchanged'`, and **disabling the proxy leaves a GPT-pinned agent unreverted**. `devflow agents` passes `p.log.warn` as the channel; `reapplyAgentMapping` routes it into `ReapplyResult.warnings`.
 
 Warning collection is **deterministic**: each parallel task returns its local warnings alongside its bucket result; the outer loop aggregates in `allNamesList` insertion order. Warnings are emitted to `opts.onWarning` immediately for live feedback and also collected for the returned `ReapplyResult.warnings` array.
 
@@ -327,7 +327,7 @@ Warning collection is **deterministic**: each parallel task returns its local wa
 
 ## Agent State Classification (agent-state.ts)
 
-`src/core/agent-state.ts` is a **core leaf module** (applies ADR-013) — no CLI or adapter imports — that provides the single vocabulary for the STATE column shared by `devflow agents --list` and the TUI. Moving the classifier out of `external-models.ts` into its own module gives it a clear single responsibility: map raw installation facts to a human-readable state label.
+`src/core/agent-state.ts` is a **core leaf module** — no CLI or adapter imports — that provides the single vocabulary for the STATE column shared by `devflow agents --list` and the TUI. Moving the classifier out of `external-models.ts` into its own module gives it a clear single responsibility: map raw installation facts to a human-readable state label.
 
 **`AgentState`** — four-way discriminated union:
 ```typescript
@@ -362,11 +362,11 @@ This prevents silent corruption of multi-line YAML values that legitimately cont
 
 ## Agents TUI Architecture
 
-The TUI follows a pure-reducer / pure-renderer / thin-terminal-shell split (applies ADR-013):
+The TUI follows a pure-reducer / pure-renderer / thin-terminal-shell split:
 
 - **`state.ts`** — pure keypress reducer. `reduce(state, key) → {state, intent}`. `buildRow()` calls `isDormantExternalModel()` (from external-models) to set dormancy state; `rowState()` delegates to `classifyAgentState()` (from agent-state.ts) so the TUI STATE column and `--list` share one classification vocabulary. `persistedModelFor(row)` and `persistedEffortFor(row)` are exported predicates consumed by both `rowState` (STATE column display) and `mergeTuiRowsIntoMapping` (save merge) — the two sites cannot drift on what value gets written. All types and dirty helpers exported. No I/O.
 - **`render.ts`** — pure renderer. `renderFrame(state, dims) → string[]`. Exports `FIXED_ROWS` and `computeViewportHeight` — consumed by `terminal.ts` (single source of truth for viewport constants). `COL_STATE = 14` — sized so `'saved-inactive'` (13 chars) renders unclipped at 80-column terminals; row budget is 79 chars total (2 prefix + 18 agent + 32 model + 13 effort + 14 state).
-- **`terminal.ts`** — thin adapter over the shared generic `runTui` driver (`src/cli/tui/`). Calls `runTui` with `signalAction: 'cancel'`, `continueIntent: 'none'`, and an `onResize` callback (updates `viewportHeight`); no `screen` override means the default `'alt'` is used. Alt-screen management, raw mode, SIGINT/SIGTERM, SIGWINCH, and event-loop cleanup are all handled by the generic driver (avoids PF-014).
+- **`terminal.ts`** — thin adapter over the shared generic `runTui` driver (`src/cli/tui/`). Calls `runTui` with `signalAction: 'cancel'`, `continueIntent: 'none'`, and an `onResize` callback (updates `viewportHeight`); no `screen` override means the default `'alt'` is used. Alt-screen management, raw mode, SIGINT/SIGTERM, SIGWINCH, and event-loop cleanup are all handled by the generic driver.
 
 **`TuiIO` injectable seam** (`terminal.ts`): `runAgentsTui(initialState, io?)` accepts an optional `TuiIO` override with fake `stdin`/`stdout` for testing. The default is `process.stdin`/`process.stdout`. Tests pass `PassThrough` streams to drive the TUI without a real TTY.
 
@@ -389,20 +389,20 @@ The TUI follows a pure-reducer / pure-renderer / thin-terminal-shell split (appl
 3. `chmod(tmp, mode)` — best-effort, non-fatal on ENOENT (fresh file) or any other error.
 4. `rename(tmp, filePath)` — POSIX atomic.
 
-A user who hardened `settings.json` to `0600` (to protect `ANTHROPIC_API_KEY`) no longer has it silently widened to the umask default on every proxy enable/disable. The chmod step is non-fatal (avoids PF-009) — write correctness is never sacrificed for mode preservation.
+A user who hardened `settings.json` to `0600` (to protect `ANTHROPIC_API_KEY`) no longer has it silently widened to the umask default on every proxy enable/disable. The chmod step is non-fatal — write correctness is never sacrificed for mode preservation.
 
 ## Anti-Patterns
 
 - **Naming the internal routing runtime in user-visible strings**: use "external model routing" or "Devflow proxy". "subswitch" is acceptable only in code comments, logs, health-check body comparisons, and env var names.
 - **Short-circuiting the disable settings pass with `||`**: `removeProxyHooks(s) || _stripProxyEnvFromObject(s, port)` leaves `ANTHROPIC_BASE_URL` set when hooks are present. Both operations must run unconditionally — see `applyDisableToSettings`.
 - **Running `reapplyAgentMapping` before proxy preflight completes**: preflight can force `proxyEnabled=false`, and the dormancy logic depends on the final resolved value. In init, the guard is placed immediately after the proxy preflight block.
-- **Calling `process.exit()` inside a finally-guarded scope in the TUI**: cleanup must be wired via Promise `resolve()`. Any `process.exit()` inside `finally` terminates without running cleanup and causes event-loop issues (avoids PF-014).
+- **Calling `process.exit()` inside a finally-guarded scope in the TUI**: cleanup must be wired via Promise `resolve()`. Any `process.exit()` inside `finally` terminates without running cleanup and causes event-loop issues.
 - **Using previousModel in agent-models.json**: The mapping has no `previousModel` field. Shipped defaults are always read live from the directories `agentSourceDirs()` names — `compiledAgentsDir()` first, `agentsDir()` as the fallback — so a generator host's compiled artifact is the default for the agents it produces. Caching a previousModel creates stale drift when those agent files are updated.
 - **Duplicating the dormancy predicate**: `isDormantExternalModel(model, proxyEnabled)` from `external-models.ts` is the single source of truth. Do not inline `!isClaudeModelName(model) && !proxyEnabled` at call sites.
 - **Pre-spawn doctor gating (chicken-and-egg)**: The relay's `doctor` subcommand probes the relay port to confirm it is running — a not-yet-started relay makes that probe fail (exit 1). A pre-spawn gate is therefore always unsatisfiable on a cold path and invisible to unit tests that mock doctor exit 0 (found during the first live enable). Doctor must gate post-spawn only, after the relay is confirmed up (D-EFR-2).
-- **D-EFR-3: Never mock the routing-runtime subprocess without a paired real-binary test**: any test that mocks the routing-runtime subprocess must be paired with at least one CI-executed test that does not. The specific trap (PF-016 reproduced exactly): `tests/integration/**` is excluded from `npm test` by `vitest.config.ts` while CI runs only `npm run build && npm test` — a real-binary test placed in `tests/integration/` would never execute in CI. Place real-binary tests in `tests/` (not `tests/integration/`).
+- **D-EFR-3: Never mock the routing-runtime subprocess without a paired real-binary test**: any test that mocks the routing-runtime subprocess must be paired with at least one CI-executed test that does not. The specific trap: `tests/integration/**` is excluded from `npm test` by `vitest.config.ts` while CI runs only `npm run build && npm test` — a real-binary test placed in `tests/integration/` would never execute in CI. Place real-binary tests in `tests/` (not `tests/integration/`).
 - **Calling model discovery from `validateSetArgs` or `--list`/`--reset`**: `validateSetArgs` uses `isValidModelName` (from agent-frontmatter.ts, pure regex) — not model discovery. The zero-spawn constraint for `--list`, `--set`, and `--reset` is a firm requirement pinned by module-boundary spy tests in `tests/agents-command.test.ts`. Importing or calling `discoverExternalModels`/`getExternalModelsCached` from the validation path breaks these tests and violates the configure-first-then-enable flow.
-- **Putting the agent-state classifier in external-models.ts**: `external-models.ts` is a leaf module with a single responsibility (dormancy predicate + Claude alias set). Agent state classification belongs in `src/core/agent-state.ts` (applies ADR-013). Adding classifier logic to external-models.ts would give it two reasons to change and break its leaf-module contract.
+- **Putting the agent-state classifier in external-models.ts**: `external-models.ts` is a leaf module with a single responsibility (dormancy predicate + Claude alias set). Agent state classification belongs in `src/core/agent-state.ts`. Adding classifier logic to external-models.ts would give it two reasons to change and break its leaf-module contract.
 - **Emitting legacy sub-keys into proxy-routing.json**: `anthropic.streamIdleTimeoutMs`, `limits.connectTimeoutMs`, `limits.maxConcurrentRequests`, `limits.maxBodyBytes`, `limits.maxUpstreamSockets`, `limits.streamIdleTimeoutMs`, `limits.requestTimeoutMs`, and `limits.maxSseEventBytes` are hard startup errors in subswitch 0.4.0. Always build the config via `buildRoutingConfigJson` — never construct the JSON manually.
 - **Gating env strip on `isProxyEnabled()` instead of `proxyJsonExists()`**: `readProxyState()` returns `Ok(defaultState)` on ENOENT — it cannot distinguish absence from a present file at the default port. Env strip must be gated on `proxyJsonExists()` (D-STRIP-1) to avoid clobbering a foreign gateway on machines that never had the proxy.
 - **Skipping check ④ on the adopted-relay path**: a healthy relay on the port does not exempt the caller from the foreign-gateway refusal. `checkSettingsEnv(deps, port)` must run before any early-return on adoption (D-EFR-5).
@@ -421,19 +421,19 @@ A user who hardened `settings.json` to `0600` (to protect `ANTHROPIC_API_KEY`) n
 - **env -i corporate-TLS**: `NODE_EXTRA_CA_CERTS` is included in both the hook's `_RELAY_ENV` array and `scrubChildEnv()` in `proxy-log.ts`, so corporate-TLS deployments that supply a CA bundle via this var will have it forwarded to the relay. It is included only when non-empty (an empty path causes TLS errors). `NODE_OPTIONS` remains excluded from both allowlists — it permits arbitrary code execution via `--require`/`--import`. A drift-guard test in `tests/proxy-log.test.ts` asserts the hook's conditional append exists, so a future one-sided change is caught early rather than silently breaking one spawn path.
 - **`classifyCodexAuthReadError` is directly testable**: the ENOENT→`{kind:'absent'}` vs other-error→`{kind:'unreadable'}` classification that used to live inside `runStatus` is now exported from `codex-auth-inspect.ts`. Tests can import and call it with a synthetic error object without needing to mock the filesystem.
 - **`isProxyEnabled()` is the sole dormancy authority**: it reads only `proxy.json`. On preflight failure in `init.ts`, `proxy.json` is explicitly written to `enabled:false` so `isProxyEnabled()` returns the correct value for the `reapplyAgentMapping` call that follows. Any new code path that forces the proxy off must write this file — relying on manifest alone is insufficient.
-- **`readInstalledAgentNames` degrades on any error, not just ENOENT**: the catch block is bare (`catch {}`) — EPERM, ENOTDIR, and any other OS error all return an empty set rather than throwing (avoids PF-009). A misconfigured install path must not crash the TUI or `--list`.
+- **`readInstalledAgentNames` degrades on any error, not just ENOENT**: the catch block is bare (`catch {}`) — EPERM, ENOTDIR, and any other OS error all return an empty set rather than throwing. A misconfigured install path must not crash the TUI or `--list`.
 - **subswitch 0.3.0 `connectTimeoutMs` semantics changed**: in 0.2.0 it was an inactivity/socket timeout that killed long requests; in 0.3.0 it is strictly a DNS+TCP connect budget (armed on socket, disarmed on `'connect'`). It cannot cap a long-running request that has already connected. `buildRoutingConfigJson` no longer injects a default — the relay's own 10 s budget governs, and a user-set value is preserved.
 
 ## Key Files
 
 - `src/core/proxy-state.ts` — ProxyState schema, read/write, `isProxyEnabled()`, `proxyJsonExists()` (evidence discriminator, D-STRIP-1), `resolveProxyBin()`, `buildRoutingConfigJson()` (0.4.0 5-key shape, `ROUTING_CONFIG_REJECTED_SUBKEYS`, user-set anthropic keys preserved; no injection)
 - `src/core/external-models.ts` — `CLAUDE_MODEL_ALIASES` (as const), `ClaudeModelAlias` literal union, `isClaudeModelName()`, `isDormantExternalModel()` (leaf module, no project imports)
-- `src/core/agent-state.ts` — `AgentState` type, `AGENT_STATE_LABELS` record, `classifyAgentState()` — single vocabulary for the STATE column shared by `--list` and the TUI (applies ADR-013; leaf module, imports only external-models.ts)
+- `src/core/agent-state.ts` — `AgentState` type, `AGENT_STATE_LABELS` record, `classifyAgentState()` — single vocabulary for the STATE column shared by `--list` and the TUI (leaf module, imports only external-models.ts)
 - `src/core/agent-frontmatter.ts` — pure frontmatter rewriter, `readFrontmatterModel()`, `rewriteAgentFrontmatter()`, `isValidModelName()` (MODEL_NAME_RE — imported by validateSetArgs for zero-spawn charset validation)
 - `src/core/agent-models.ts` — `EFFORT_LEVELS` (as const), `EffortLevel` literal union, `LEGACY_AGENT_KEYS` (Readonly), `canonicaliseAgentKeys<T>()` (generic, returns `{agents, didMutate, renamed, dropped, guardDropped}`), `parseAgentMappingEnvelope()` (discriminated ok/skip/warn parser), `readAgentMapping()`, `saveAgentMapping()`, `resolveEffective()`, `reapplyAgentMapping()` (with containment guard via `isContainedIn`), `revertExternalAgents()`, `loadShippedDefaults()`
 - `src/core/codex-auth-inspect.ts` — `inspectCodexAuth()` (pure absent/unreadable/present verdict); `classifyCodexAuthReadError(err)` (exported, directly testable ENOENT→absent vs other→unreadable classification). Re-derived rather than imported from the routing runtime, which ships no `exports` map. JWT payload decoded for display only — never signature-verified, no token material returned, account id truncated to 6-char suffix.
 - `src/core/model-discovery.ts` — `discoverExternalModels(cacheDir, logPath, deps?)` (async, spawns runtime); `getExternalModelsCached(cacheDir)` (sync, reads newest cache entry regardless of TTL); `parseModelsJson(raw)` (pure parser); exports `Result`, `ParsedCatalog`, `SPAWN_TIMEOUT_MS`, `SIGKILL_GRACE_MS` for test consumers
-- `src/core/cache.ts` — `modelCacheDir(devflowDir)` and `hudCacheDir(devflowDir)` path accessors (single source of truth for cache layout — avoids PF-013); `parseRawEnvelope()` (single canonical envelope parser, rejects non-finite ttl); `readCache()`, `writeCache()` with 0700/0600 permissions; `pruneOldEntries()` (keeps 3 entries by timestamp, reaps `.json.tmp.*` orphans)
+- `src/core/cache.ts` — `modelCacheDir(devflowDir)` and `hudCacheDir(devflowDir)` path accessors (single source of truth for cache layout); `parseRawEnvelope()` (single canonical envelope parser, rejects non-finite ttl); `readCache()`, `writeCache()` with 0700/0600 permissions; `pruneOldEntries()` (keeps 3 entries by timestamp, reaps `.json.tmp.*` orphans)
 - `src/core/proxy-log.ts` — `scrubChildEnv()` (allowlist-based env for relay spawn; paired with hook's `env -i` allowlist), `openProxyLog()`, `rotateProxyLogIfLarge()`
 - `src/core/fs-atomic.ts` — `writeFileAtomicExclusive()` — mode-preserving atomic write
 - `src/cli/commands/proxy.ts` — `proxyCommand`; exported seams: `buildRealPreflightDeps`, `spawnRelayAndWaitForPort`, `runPostSpawnVerification`, `resolvePort`, `isOurRelayBody`, `runProxyPreflight`, `applyProxyEnv`, `stripProxyEnv`, `applyDisableToSettings`, `applyProxyTeardownToSettings` (unified teardown, D-STRIP-1), `addProxyHooks`, `removeProxyHooks`, `hasProxyHooks`, `readProxyEnvState`, `formatCodexAuthLine`, `realHttpGet`, `PostSpawnDoctorDeps`
@@ -450,13 +450,13 @@ A user who hardened `settings.json` to `0600` (to protect `ANTHROPIC_API_KEY`) n
 
 ## Related
 
-- **ADR-013**: src/core vs src/cli boundary — all state I/O and pure logic in `src/core/`; CLI orchestration and user-facing action handlers in `src/cli/`. The proxy feature is the canonical multi-module example of this split. `src/core/agent-state.ts` is a new application: moving the agent-state classifier out of `external-models.ts` into its own core leaf module gives it a single responsibility and a clear home (applies ADR-013).
-- **ADR-014**: state-aware re-init — `proxy` is seeded from `manifest?.features.proxy ?? FEATURE_DEFAULTS.proxy` in `resolveSeedFeatures`. On `--reset`, seeds as `false`. Never read from `config.json`.
-- **PF-009**: all proxy artifact removals in uninstall/disable are non-fatal; preflight failure warns but never aborts `devflow init` — `proxyEnabled` is simply forced to `false`. Also: `readInstalledAgentNames` degrades to empty set on any error; `writeFileAtomicExclusive` chmod step is non-fatal; ensure-proxy binPath re-resolution is best-effort (always exits 0).
-- **PF-013**: cache path accessors (`modelCacheDir`, `hudCacheDir`) in `cache.ts` prevent write-site/removal-site drift — the canonical PF-013 shape applied to the model-discovery cache.
-- **PF-014**: no `process.exit()` inside finally-guarded scopes — TUI cleanup wired via Promise `resolve()`; hard failures in CLI commands set `process.exitCode = 1` and return.
-- **PF-015**: every path that forces proxy off must converge `proxy.json enabled:false` alongside manifest/hooks/env — `isProxyEnabled()` reads only `proxy.json`, so this file is the load-bearing convergence point. Also: both-operations invariant in `applyDisableToSettings` — neither `removeProxyHooks` nor `_stripProxyEnvFromObject` may be short-circuited.
-- **PF-017**: relay spawn uses `env -i` 6-var allowlist (hook) + `scrubChildEnv()` (CLI spawn) — both allowlists must be kept in sync for corporate-TLS users.
-- **PF-023**: validation at the sink that mutates — `mergeDevflowSettingsTemplate` shape-guards every `hooks` value before touching it; foreign/unexpected hook shapes left untouched rather than overwritten.
-- **PF-001**: port digit-validated before /dev/tcp interpolation in `ensure-proxy`.
+- src/core vs src/cli boundary — all state I/O and pure logic in `src/core/`; CLI orchestration and user-facing action handlers in `src/cli/`. The proxy feature is the canonical multi-module example of this split. `src/core/agent-state.ts` is a new application: moving the agent-state classifier out of `external-models.ts` into its own core leaf module gives it a single responsibility and a clear home.
+- State-aware re-init — `proxy` is seeded from `manifest?.features.proxy ?? FEATURE_DEFAULTS.proxy` in `resolveSeedFeatures`. On `--reset`, seeds as `false`. Never read from `config.json`.
+- All proxy artifact removals in uninstall/disable are non-fatal; preflight failure warns but never aborts `devflow init` — `proxyEnabled` is simply forced to `false`. Also: `readInstalledAgentNames` degrades to empty set on any error; `writeFileAtomicExclusive` chmod step is non-fatal; ensure-proxy binPath re-resolution is best-effort (always exits 0).
+- Cache path accessors (`modelCacheDir`, `hudCacheDir`) in `cache.ts` prevent write-site/removal-site drift — both sites of the model-discovery cache route through one accessor instead of a hardcoded path string.
+- No `process.exit()` inside finally-guarded scopes — TUI cleanup wired via Promise `resolve()`; hard failures in CLI commands set `process.exitCode = 1` and return.
+- Every path that forces proxy off must converge `proxy.json enabled:false` alongside manifest/hooks/env — `isProxyEnabled()` reads only `proxy.json`, so this file is the load-bearing convergence point. Also: both-operations invariant in `applyDisableToSettings` — neither `removeProxyHooks` nor `_stripProxyEnvFromObject` may be short-circuited.
+- Relay spawn uses `env -i` 6-var allowlist (hook) + `scrubChildEnv()` (CLI spawn) — both allowlists must be kept in sync for corporate-TLS users.
+- Validation at the sink that mutates — `mergeDevflowSettingsTemplate` shape-guards every `hooks` value before touching it; foreign/unexpected hook shapes left untouched rather than overwritten.
+- Port digit-validated before /dev/tcp interpolation in `ensure-proxy`.
 - Feature knowledge: `installer-shadowing` — covers `resolveSeedFeatures`, manifest-group feature seeding, and uninstall artifact cleanup patterns that proxy extends.
