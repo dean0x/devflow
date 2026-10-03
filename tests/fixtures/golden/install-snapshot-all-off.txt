@@ -295,7 +295,6 @@ x .devflow/scripts/hooks/capture-prompt
 x .devflow/scripts/hooks/capture-question
 x .devflow/scripts/hooks/capture-turn
 x .devflow/scripts/hooks/debug-trace
-x .devflow/scripts/hooks/decisions-usage-scan.cjs
 x .devflow/scripts/hooks/ensure-devflow-init
 x .devflow/scripts/hooks/ensure-proxy
 x .devflow/scripts/hooks/ensure-root-gitignore
