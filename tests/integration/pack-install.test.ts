@@ -196,7 +196,7 @@ describe('Guard 6 (pack-install): npm pack produces a working installable packag
     expect(compiledContent, 'compiled agent must carry its model tier').toContain('model:');
     expect(compiledContent, 'compiled agent must not leak the build-steering key').not.toContain('output-dir:');
     const leaks = collectBackslashBraceLeaks([{ name: 'dist/agents/git.md', content: compiledContent }]);
-    expect(leaks, `compiled agent must not leak escaped braces (PF-024):\n  ${leaks.join('\n  ')}`).toEqual([]);
+    expect(leaks, `compiled agent must not leak escaped braces:\n  ${leaks.join('\n  ')}`).toEqual([]);
   });
 
   it('installed package has src/targets/claude-code/templates/ with settings.json', async () => {

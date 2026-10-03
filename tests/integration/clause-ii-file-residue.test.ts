@@ -113,7 +113,7 @@ function runDevflowInit(opts: {
   home: string;
 }): { exitCode: number; stdout: string; stderr: string } {
   const env = sandboxEnv(opts.home);
-  console.log(`[PF-060] devflow init HOME=${env.HOME}`);
+  console.log(`[sandbox] devflow init HOME=${env.HOME}`);
   const result = spawnSync(process.execPath, [opts.cliPath, 'init', '--recommended'], {
     cwd: opts.cwd,
     encoding: 'utf-8',
