@@ -5,9 +5,9 @@
 # 120s throttle expires. Drains .pending-turns.jsonl → calls `claude -p` (sonnet 4.6) →
 # rewrites WORKING-MEMORY.md with a git-reconciliation stamp on line 1.
 #
-# Applies ADR-008 (LLM-vs-plumbing): artifact content (WORKING-MEMORY.md) is
+# Applies the LLM-vs-plumbing principle: artifact content (WORKING-MEMORY.md) is
 # authored by the LLM; this script only does plumbing (lock, queue drain, spawn).
-# Avoids PF-006 (does NOT parse Stop hook JSON), PF-007 (edit source only).
+# Does NOT parse Stop hook JSON. Edit this source file, not the installed copy.
 #
 # Usage: background-memory-update <CWD> [<manifest_path>]
 #   <manifest_path> — the devflow-global manifest whose `features.memory` is the
@@ -73,7 +73,7 @@ MEMORY_DIR="$PROJECT_DEVFLOW_DIR/memory"
 QUEUE_FILE="$MEMORY_DIR/.pending-turns.jsonl"
 PROCESSING_FILE="$MEMORY_DIR/.pending-turns.processing"
 MEMORY_FILE="$MEMORY_DIR/WORKING-MEMORY.md"
-STAGED_FILE="$MEMORY_FILE.new"  # staging path for CAS write (applies ADR-023)
+STAGED_FILE="$MEMORY_FILE.new"  # staging path for CAS write
 LOCK_DIR="$MEMORY_DIR/.working-memory.lock"
 TRIGGER_FILE="$MEMORY_DIR/.working-memory-last-trigger"
 OK_FILE="$MEMORY_DIR/.last-refresh-ok"
@@ -99,8 +99,8 @@ fi
 # --- Assert cksum availability (required for CAS verification — avoids fail-open swap) ---
 # cksum must be on PATH at startup; a missing binary makes both CAS sentinels collapse
 # to the same "ABSENT" literal, compare equal, and swap unconditionally — reinstating
-# the exact clobber ADR-023 was designed to prevent. Fail loudly here rather than
-# silently degrading. applies ADR-023
+# the exact clobber of a human edit the CAS was designed to prevent. Fail loudly here
+# rather than silently degrading.
 if ! command -v cksum >/dev/null 2>&1; then
   log "SKIP: cksum not on PATH — CAS verification unavailable, refusing to write"
   exit 0
@@ -158,7 +158,7 @@ fi
 
 # Clean up any staged file left by a watchdog-killed prior run.
 # Without this, a stale staged file with a valid stamp would be mistakenly
-# mv-ed to the real path on the NEXT run's CAS check (applies ADR-023).
+# mv-ed to the real path on the NEXT run's CAS check.
 rm -f "$STAGED_FILE" 2>/dev/null || true
 
 # --- Orphan-only skip: if queue has no assistant/qa turn, exit and leave the queue ---
@@ -180,7 +180,7 @@ if [ ! -f "$PROCESSING_FILE" ] && [ -f "$QUEUE_FILE" ] && [ -s "$QUEUE_FILE" ] &
     _HAS_CONTENT=$(jq -r 'select(.role=="assistant" or .role=="qa") | .role' "$QUEUE_FILE" 2>/dev/null | head -1 || echo "")
   else
     # SECURITY: pass path via argv, never interpolate into node -e source (avoids shell injection
-    # for repo paths containing quotes or special characters — applies ADR-008 plumbing principle)
+    # for repo paths containing quotes or special characters)
     _HAS_CONTENT=$(node -e '
       const f = process.argv[1];
       const lines = require("fs").readFileSync(f, "utf8").split("\n");
@@ -334,7 +334,7 @@ log "Built $TURN_COUNT turns from queue"
 # Baseline captured BEFORE content read so the cksum reflects the exact bytes we
 # synthesised from. ABSENT sentinel when file missing — resolves toward false-conflict,
 # never false-success (a file created externally during the run triggers CONFLICT,
-# which is safer than accepting a write we did not produce). applies ADR-023.
+# which is safer than accepting a write we did not produce).
 #
 # CKSUM_FAILED: if cksum invocation fails (EACCES, missing binary for this path, etc.)
 # on either side, the CAS must treat it as CONFLICT rather than a match — separating
@@ -354,13 +354,13 @@ fi
 
 # Sets COMMITS_SINCE_NOTE in caller scope.
 # Reads EXISTING_MEMORY and HEAD_SHA from caller scope (must be set before call).
-# Pure parameter expansion for stamp parsing (PF-008-safe); git commands are guarded
-# with || echo / || true per set -e discipline (avoids PF-008 on pipeline exits).
+# Pure parameter expansion for stamp parsing (no pipe whose exit status a later stage
+# could mask); git commands are guarded with || echo / || true per set -e discipline.
 compute_commits_since_note() {
   local _stamp_line="${EXISTING_MEMORY%%$'\n'*}" _stamp_sha="" _rest
   case "$_stamp_line" in
     "<!-- memory-head: "[0-9a-f]*" branch: "*)
-      # Extract stamp SHA using pure parameter expansion — no subprocess (PF-008-safe).
+      # Extract stamp SHA using pure parameter expansion — no subprocess.
       _rest="${_stamp_line#<!-- memory-head: }"
       _stamp_sha="${_rest%% *}"
       ;;
@@ -418,7 +418,7 @@ fi
 
 # --- Build prompt (passed via STDIN, not argv — turn content may hold secrets) ---
 # SECURITY: argv is visible to ps(1); all user/assistant content goes via stdin.
-# SECURITY: avoids PF-023 — each untrusted block is wrapped in named XML tags and preceded
+# SECURITY: each untrusted block is wrapped in named XML tags and preceded
 # by an explicit containment declaration so injected prose cannot masquerade as operator
 # instructions regardless of positional ordering.
 PROMPT=$(cat <<EOF
@@ -481,7 +481,6 @@ WATCHDOG_KILL_GRACE_SECS=5  # grace period between SIGTERM and SIGKILL
 # recovery can never evict a still-live worker.  If DEVFLOW_BG_WATCHDOG_SECS is raised above
 # 294 (leaving < 1s margin), this will fail loudly rather than silently corrupt the
 # safety guarantee.  Checked before spawning claude so a bad override is caught early.
-# avoids PF-011
 _WATCHDOG_TOTAL=$(( WATCHDOG_SECS + WATCHDOG_KILL_GRACE_SECS ))
 if [ "$STALE_THRESHOLD" -le "$_WATCHDOG_TOTAL" ]; then
   echo "[background-memory-update] FATAL: STALE_THRESHOLD ($STALE_THRESHOLD) must exceed watchdog total (${WATCHDOG_SECS}+${WATCHDOG_KILL_GRACE_SECS}=${_WATCHDOG_TOTAL})" >&2
@@ -547,7 +546,7 @@ if [ "$CLAUDE_EXIT" -gt 128 ]; then
   # Retry-count ceiling: this worker is rate-bounded to one spawn per 120s by memory-worker's
   # throttle (.working-memory-last-trigger mtime). Persistent failure is surfaced to the user
   # via session-start-memory State C (stale .last-refresh-ok) rather than a retry counter here,
-  # keeping this plumbing script simple (applies ADR-008).
+  # keeping this plumbing script simple.
   exit 0
 elif [ "$CLAUDE_EXIT" -ne 0 ]; then
   log "FAIL: claude -p exited with code $CLAUDE_EXIT"
@@ -555,7 +554,7 @@ elif [ "$CLAUDE_EXIT" -ne 0 ]; then
   exit 0
 fi
 
-# --- CAS verification (applies ADR-023: staged compare-and-swap) ---
+# --- CAS verification (staged compare-and-swap) ---
 # Only our own claude run can create STAGED_FILE between lock-acquire and here,
 # so verifying its content proves OUR write succeeded — as opposed to accepting
 # any mtime bump, which could come from a concurrent human edit of the real file.
@@ -563,7 +562,7 @@ fi
 # Sets OUTCOME to one of: updated | conflict | failed
 # Reads PRE_RUN_CKSUM, CKSUM_FAILED, STAGED_FILE, MEMORY_FILE from caller scope.
 # Each state is assigned exactly once at the point it is decided (single OUTCOME
-# variable, three states). applies ADR-023
+# variable, three states).
 verify_and_swap() {
   [ -f "$STAGED_FILE" ] && [ -s "$STAGED_FILE" ] || {
     log "WARN: staged file missing or empty after claude -p run"; OUTCOME="failed"; return; }
@@ -577,14 +576,13 @@ verify_and_swap() {
   # cksum re-check and the mv would be clobbered; this is accepted — the
   # staged content was synthesised from the pre-run file, so the next run
   # re-synthesises from the then-current content (no net information loss).
-  # applies ADR-023 (staged compare-and-swap)
   local _post="ABSENT" _post_cksum_failed="false"
   if [ -f "$MEMORY_FILE" ]; then
     _post=$(cksum "$MEMORY_FILE" 2>/dev/null) || _post_cksum_failed="true"
   fi
   # If either cksum invocation failed, treat as conflict (fail-closed — resolves toward
   # false-conflict, never false-success; a cksum error must never silently degrade the
-  # CAS to "always overwrite", reinstating the clobber ADR-023 exists to prevent).
+  # CAS to "always overwrite", reinstating the clobber of a human edit it exists to prevent).
   if [ "$CKSUM_FAILED" = "true" ] || [ "$_post_cksum_failed" = "true" ]; then
     rm -f "$STAGED_FILE" 2>/dev/null || true
     log "CONFLICT: cksum failed during CAS verification — leaving .processing for retry (fail-closed)"

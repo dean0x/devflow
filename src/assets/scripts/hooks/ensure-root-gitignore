@@ -26,7 +26,7 @@
 #   - session-start-context (always-on, memory-independent — covers memory-off
 #     projects that still use learning/knowledge)
 # Both reach this one writer so the rule is applied identically everywhere; this
-# decouples git-tracking of .devflow/ from any single feature toggle (avoids PF-014).
+# decouples git-tracking of .devflow/ from any single feature toggle.
 #
 # Idempotent and O(1) after the first run via the .root-gitignore-configured-v6
 # marker under .devflow/ (project-local). The marker is a claim, not proof, so the

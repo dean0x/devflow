@@ -165,7 +165,7 @@ function nextAnchorFromLedger(ledgerRows, type) {
 // ---------------------------------------------------------------------------
 // Pre-mint collision guard (E4).
 //
-// A design doc can cite a design-local number ("PF-017") in tracked source
+// A design doc can cite a design-local number ("PF-NNN") in tracked source
 // before the ledger ever mints that same number for an unrelated entry — the
 // two silently collide and nothing catches it until a human notices the text
 // doesn't match. This scans the project tree for a whole-word citation of the
@@ -250,7 +250,7 @@ function listFsWalkFiles(projectRoot) {
 }
 
 /**
- * Scan the project tree for a whole-word citation of `id` (e.g. `ADR-042`),
+ * Scan the project tree for a whole-word citation of `id` (e.g. `ADR-NNN`),
  * excluding the ledger's own files and common vendored/build directories.
  * Prefers tracked files (`git ls-files`) when the project root is a git
  * working tree; falls back to a bounded fs walk otherwise. Best-effort:
@@ -258,7 +258,7 @@ function listFsWalkFiles(projectRoot) {
  * the scan.
  *
  * @param {string} projectRoot
- * @param {string} id - e.g. 'ADR-042' or 'PF-017'
+ * @param {string} id - e.g. 'ADR-NNN' or 'PF-NNN'
  * @returns {{ file: string, line: number }[]} hits, empty when no collision
  */
 function scanForAnchorCollision(projectRoot, id) {
@@ -337,7 +337,7 @@ function writeUsageFile(projectRoot, data) {
 /**
  * Register an entry in .decisions-usage.json with initial cite count.
  * @param {string} projectRoot - Path to project root (cwd)
- * @param {string} anchorId - e.g. 'ADR-001' or 'PF-003'
+ * @param {string} anchorId - e.g. 'ADR-NNN' or 'PF-NNN'
  */
 function registerUsageEntry(projectRoot, anchorId) {
   const data = readUsageFile(projectRoot);
@@ -460,11 +460,11 @@ const LOCK_STALE_MS = 60000;
 /**
  * Run fn() under .decisions.lock.
  *
- * Never call process.exit() inside fn — throw instead (PF-014): the throw propagates
+ * Never call process.exit() inside fn — throw instead: the throw propagates
  * through the try/finally so releaseLock always runs. process.exit is reserved for
  * the acquire-failure path where no lock is held and no cleanup is needed.
  *
- * PF-013: parent directory of the lock dir is created before acquireMkdirLock is
+ * The parent directory of the lock dir is created before acquireMkdirLock is
  * called so a fresh-project cold-path does not throw ENOENT inside the lock lib.
  *
  * @param {string} opName - operation name for error messages
@@ -473,7 +473,7 @@ const LOCK_STALE_MS = 60000;
  */
 function withDecisionsLock(opName, projectRoot, fn) {
   const lockDir = getDecisionsLockDir(projectRoot);
-  // PF-013: ensure parent directory exists before acquiring lock
+  // Ensure parent directory exists before acquiring lock
   fs.mkdirSync(path.dirname(lockDir), { recursive: true });
   if (!acquireMkdirLock(lockDir, LOCK_ACQUIRE_TIMEOUT_MS, LOCK_STALE_MS)) {
     process.stderr.write(`${opName}: timeout acquiring lock at ${lockDir}\n`);
@@ -788,13 +788,13 @@ try {
         // Build canonical committed-ledger row via toLedgerRow projector.
         // Whitelists only the canonical fields — excludes all observation-lifecycle
         // state (evidence, confidence, quality_ok, count, first_seen, last_seen, …)
-        // that must stay in the log only. applies ADR-008.
+        // that must stay in the log only.
         const aaDate = new Date().toISOString().slice(0, 10);
         const aaActiveStatus = assignType === 'decision' ? 'Accepted' : 'Active';
         // Date stamped on ALL entry types (decisions + pitfalls).  Prefer the
-        // date from the observation (content authority per ADR-022); fall back
+        // date from the observation (the log is the content authority); fall back
         // to today. Both types carry a date so refresh-anchor can re-project
-        // them correctly (pattern refreshes too — consumers match anchor headings, never titles, per ADR-022).
+        // them correctly (pattern refreshes too — consumers match anchor headings, never titles).
         const aaEntryDate = aaObs.date || aaDate;
         const aaLedgerRow = toLedgerRow(aaObs, {
           anchorId: aaAnchorId,
@@ -817,7 +817,6 @@ try {
         // any subsequent assign-anchor call for the same obs_id.  Without this
         // write-back the guard is dead: aaObs.anchor_id would be undefined on
         // a re-read and a second assign would silently mint a duplicate number.
-        // applies ADR-022 (log is content authority; anchor_id written back to arm guard).
         aaLogEntries[aaObsIdx] = Object.assign({}, aaObs, { status: 'created', anchor_id: aaAnchorId });
         writeJsonlAtomic(aaLogPath, aaLogEntries);
 
@@ -917,7 +916,7 @@ try {
 
     // -------------------------------------------------------------------------
     // refresh-anchor <anchor_id> [<anchor_id>...]
-    // ADR-022: Re-project log observations onto committed ledger rows and
+    // Re-project log observations — the content authority — onto committed ledger rows and
     // re-render all three files (decisions.md, pitfalls.md, index.md).  Each write
     // is atomic; the sequence is not transactional — a crash between writes self-heals
     // on the next ledger op.  Variadic — accepts 1..N anchor ids and performs
@@ -930,9 +929,9 @@ try {
     // Algorithm:
     //   1. Read ledger and log ONCE (outside the per-anchor loop).
     //   2. For each anchor: locate ledger row, run precondition checks, run
-    //      REG-1 details divergence guard (ADR-022: consumers match anchor headings not
+    //      REG-1 details divergence guard (consumers match anchor headings not
     //      titles so pattern replacement is sanctioned; only details containment is enforced),
-    //      re-project via toLedgerRow (which carries PF-023 sink validation for pattern/raw_body/type).
+    //      re-project via toLedgerRow (which carries sink validation for pattern/raw_body/type).
     //   3. Assert row count unchanged (REL-6 — bounds parseLedger silent-drop exposure).
     //   4. Write ledger once, render once, echo all ids to stdout (one per line).
     //
@@ -971,7 +970,7 @@ try {
         //     propagates out of withDecisionsLock's fn() before any write occurs.
         for (const anchorId of refreshAnchorIds) {
           // Locate the existing ledger row by anchor_id (stable, canonical key).
-          // Miss → throw (PF-014: throw, not process.exit, inside a lock scope).
+          // Miss → throw (not process.exit, which would skip the lock release).
           const rfLedgerIdx = rfLedgerRows.findIndex(r => r.anchor_id === anchorId);
           if (rfLedgerIdx === -1) {
             throw new Error(
@@ -1000,9 +999,9 @@ try {
             );
           }
 
-          // Locate the log obs by the LEDGER ROW's id field (content authority, ADR-022).
+          // Locate the log obs by the LEDGER ROW's id field (the log is the content authority).
           // Matching on id (not anchor_id) covers pre-existing obs written before
-          // assign-anchor added anchor_id write-back to the log (avoids PF-041).
+          // assign-anchor added anchor_id write-back to the log.
           const rfObs = rfLogEntries.find(r => r.id === rfExistingRow.id);
           if (!rfObs) {
             throw new Error(
@@ -1013,7 +1012,7 @@ try {
 
           // (c) Type must match the committed anchor — re-projecting across types would move
           //     a PF-NNN into decisions.md (or vice versa) and corrupt the rendered corpus.
-          //     This check also satisfies toLedgerRow's expectType guard (PF-023 sink);
+          //     This check also satisfies toLedgerRow's sink-side expectType guard;
           //     both fire with their respective messages — this one fires first.
           if (rfObs.type !== rfExistingRow.type) {
             throw new Error(
@@ -1022,11 +1021,11 @@ try {
             );
           }
 
-          // REG-1 (avoids PF-044): divergence guard — refuse to silently overwrite
+          // REG-1: divergence guard — refuse to silently overwrite
           // ledger-only curation content. Applies to DETAILS only: pattern replacement
-          // is sanctioned (ADR-022 — consumers match '## (ADR|PF)-NNN:' anchors, never
+          // is sanctioned (consumers match '## (ADR|PF)-NNN:' anchors, never
           // titles, so a sharpened log pattern may update the rendered heading).
-          // raw_body is handled by isSafeRawBody inside toLedgerRow (PF-023 sink).
+          // raw_body is validated at the sink, by isSafeRawBody inside toLedgerRow.
           const rfNormWS = (/** @type {unknown} */ s) =>
             typeof s === 'string' ? s.replace(/\s+/g, ' ').trim() : '';
           const rfLedgerDetails = rfNormWS(rfExistingRow.details);
@@ -1039,9 +1038,9 @@ try {
             );
           }
 
-          // Re-project via toLedgerRow (strict canonical projection — ADR-022).
+          // Re-project via toLedgerRow (strict canonical projection).
           // Preserve decisions_status and date from the ledger (ledger-owned fields).
-          // expectType passed for PF-023 sink validation (redundant with the check above,
+          // expectType passed for sink validation (redundant with the check above,
           // but ensures the guard holds even if future callers bypass the outer check).
           rfLedgerRows[rfLedgerIdx] = toLedgerRow(rfObs, {
             anchorId,

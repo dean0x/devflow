@@ -3,7 +3,7 @@
 # Usage: source "$SCRIPT_DIR/is-hex-sha"  then  is_hex_sha <value> [min_len] [max_len]
 # Returns 0 (true) if value consists entirely of lowercase hex chars and has
 # length within [min_len, max_len].  Defaults: min_len=7, max_len=40.
-# Pure shell — no forks (PF-008-safe).
+# Pure shell — no forks.
 
 is_hex_sha() {
   local _v="$1" _min="${2:-7}" _max="${3:-40}" _len

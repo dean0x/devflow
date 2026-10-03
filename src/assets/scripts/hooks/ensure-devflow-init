@@ -25,7 +25,7 @@ _EDI_LEDGER="${DF_LEDGER_ROOT:-$_EDI_ROOT}"
 # pre-compact-memory) passes through before it writes, and each of them treats a
 # non-zero return as "stop" (`|| exit 0`), so memory and learning stop together
 # in a non-git directory. ensure-root-gitignore itself stays ungated: it is a
-# pure writer its parity suite runs in plain directories (PF-059), and both of
+# pure writer its parity suite runs in plain directories, and both of
 # its callers now decide before reaching it. A helper that failed to source is a
 # command not found — the refusing branch, so the failure mode writes nothing.
 source "$_EDI_DIR/git-marker" 2>/dev/null || true

@@ -2,14 +2,14 @@
 //
 // The ONE parser of devflow's per-repository config files — the team-committed
 // `.devflow/project.json` and the personal, uncommitted `.devflow/config.json`
-// (applies PF-023: the invariant lives at the sink every reader passes through).
+// (the invariant lives at the sink every reader passes through).
 // Installed beside its two callers as ~/.devflow/scripts/lib/project-config.cjs:
 //   resolve-evidence-policy.cjs  reads `evidence` and `compliance` at every source
 //   resolve-settings.cjs         reads every key of both files, locally
 //
 // Pure except the two readers (readBoundedRegularFile, readMachineManifest), which
 // only ever read. Nothing here writes, spawns or prints: devflow never writes
-// project.json (applies ADR-024).
+// project.json, which the team owns and commits.
 //
 // D-PROJECT-CONFIG: `.devflow/project.json` is a JSON object whose every key is
 // optional and whose unknown keys are ignored:

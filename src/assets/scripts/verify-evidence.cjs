@@ -459,7 +459,7 @@ function runCall(io, file, args, timeout, maxBuffer) {
 /**
  * Whether a call ran to completion and exited on its own. Only an answered exit
  * is a real "no"; a call that never started, timed out, overflowed or was refused
- * is NOT KNOWING, and never reads as the permissive answer (avoids PF-075).
+ * is NOT KNOWING, and never reads as the permissive answer.
  *
  * @param {CallResult} r
  * @returns {boolean}
@@ -1530,7 +1530,7 @@ function gateEvidenceLine(deps, fields, total) {
 }
 
 // ---------------------------------------------------------------------------
-// splice — the compare-and-swap (D-VERIFY-CAS, applies ADR-023 and ADR-024)
+// splice — the compare-and-swap (D-VERIFY-CAS)
 // ---------------------------------------------------------------------------
 
 /**

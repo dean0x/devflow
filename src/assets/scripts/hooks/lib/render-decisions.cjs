@@ -102,7 +102,7 @@ function isActive(row) {
 }
 
 /**
- * Extract the numeric suffix from an anchor_id like "ADR-016" or "PF-007".
+ * Extract the numeric suffix from an anchor_id like "ADR-NNN" or "PF-NNN".
  * Returns Infinity for unparseable values so they sort to the end.
  *
  * @param {string} anchorId

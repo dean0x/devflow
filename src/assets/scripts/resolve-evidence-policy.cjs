@@ -11,7 +11,7 @@
 // The policy is plumbing, decided once by the caller: this script prints it plus
 // the mechanism inputs, and operations only ever see the inputs. It WRITES NOTHING
 // — no file, no git ref, no remote state — so `.devflow/project.json` stays a
-// team-owned file that only the team commits (applies ADR-024). A committed
+// team-owned file that only the team commits. A committed
 // `.devflow/policy.json` is detected by presence and never parsed
 // (D-POLICY-JSON-RETIRED).
 //
@@ -432,7 +432,7 @@ function readManifestCompliance() {
  * starting (ENOENT), timing out, overflowing its buffer or being killed. Only an
  * answered non-zero exit is a real "no" ("not a repository", "no such path",
  * "no such ref"); an unanswered call is NOT KNOWING, and a local-git step that
- * does not know must not read as the permissive answer (avoids PF-075).
+ * does not know must not read as the permissive answer.
  *
  * @param {CallResult} r
  * @returns {boolean}
@@ -621,7 +621,7 @@ function lsRemoteDefaultBranch(ctx, root) {
  *   unreadable  git did not answer, or origin/HEAD exists but its answer names
  *               no safe branch (another remote, a hostile or unparseable name).
  *               Either is a failure, never the residual case: gatherFacts reads
- *               it as an invalid base, which resolves required (avoids PF-075).
+ *               it as an invalid base, which resolves required.
  *               resolve-settings' defaultBranchCompliance fails the same answer
  *               closed, to `generic`.
  *
