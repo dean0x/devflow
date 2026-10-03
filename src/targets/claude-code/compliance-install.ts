@@ -218,7 +218,7 @@ async function installSkillDir(
       }
     }
 
-    // Atomically swap: remove old target, rename tmp into place.
+    // Swap: remove old target, rename tmp into place (two calls, not atomic).
     await fs.rm(target, { recursive: true, force: true });
     await fs.rename(tmpTarget, target);
   } catch (err) {
@@ -285,7 +285,9 @@ async function installRuleFile(
  *   !enabled                → skill dir (every ref, neutral stamp); remove rule
  *
  * Both artifact operations execute unconditionally — no || short-circuits.
- * Skill dir write uses temp-sibling+rename to avoid ENOENT windows.
+ * Skill dir write builds under a temp sibling, then removes the target and renames
+ * the sibling into place, which narrows the ENOENT window to the gap between those
+ * two calls.
  *
  * D: the `warn` callback is injected (not console.warn) so callers control
  * surfacing (init log lines, test spies, etc.) — per the dependency-injection
