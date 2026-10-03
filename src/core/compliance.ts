@@ -2,7 +2,7 @@
  * Core compliance framework registry and utilities.
  *
  * Pure module — no I/O, no side effects.
- * Applies ADR-013: pure helpers in src/core/, I/O orchestration in src/targets/.
+ * Pure helpers in src/core/, I/O orchestration in src/targets/.
  */
 
 // ---------------------------------------------------------------------------
@@ -60,7 +60,7 @@ export const COMPLIANCE_RULE_PLACEHOLDER = '${DEVFLOW_COMPLIANCE_FRAMEWORKS}';
  *   detection.md — generic detection heuristics
  *   sources.md   — authoritative source index
  *
- * Exported (ADR-013: pure constant in src/core/) so both compliance-install.ts
+ * Exported (pure constant in src/core/) so both compliance-install.ts
  * (install) and compliance.ts CLI (status/drift detection) share a single
  * definition. Adding a third always-present ref requires only one change here.
  */
@@ -98,7 +98,7 @@ function normalizeId(s: string): string {
  * This is the trust boundary for framework IDs that did not come through
  * `parseFrameworkList` — most importantly `manifest.features.compliance.frameworks`,
  * which `normalizeComplianceFeature` only type-checks (it cannot reject unknown IDs
- * without violating the ADR-014 self-heal contract). Every framework ID that is about
+ * without violating the self-heal contract). Every framework ID that is about
  * to become an fs path segment or be written into an installed artifact must pass
  * through here first (AC-35, AC-36).
  *
@@ -155,7 +155,6 @@ export function parseFrameworkList(
  *
  * Absent, null, malformed, or partially-valid → {enabled:false, frameworks:[]}.
  * Preserves valid {enabled: boolean, frameworks: string[]}.
- * (Applies ADR-014 self-heal idiom)
  */
 export function normalizeComplianceFeature(
   raw: unknown,

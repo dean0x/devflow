@@ -1,8 +1,8 @@
 /**
  * Codex credential-file inspection for `devflow proxy --status`.
  *
- * applies ADR-013: pure core-layer module — no Claude Code adapter concerns and
- *   no presentation (colour/format lives with the other CLI formatters).
+ * Pure core-layer module — no Claude Code adapter concerns and
+ * no presentation (colour/format lives with the other CLI formatters).
  *
  * WHY THIS EXISTS RATHER THAN IMPORTING THE ROUTING RUNTIME
  * The routing runtime validates this same file and exposes an equivalent
@@ -84,8 +84,8 @@ function jwtAccountId(token: string): string | undefined {
 /**
  * Classify an I/O error from reading ~/.codex/auth.json into a CodexAuthState.
  *
- * applies ADR-013: pure classification logic belongs in src/core/, not in the
- *   CLI presentation layer that calls it.
+ * Pure classification logic belongs in src/core/, not in the
+ * CLI presentation layer that calls it.
  *
  * ENOENT is the ordinary "not signed in" case: the file has never been written
  * by `codex login`. Every other error (EACCES, EISDIR, EMFILE, …) is a real

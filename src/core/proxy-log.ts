@@ -11,8 +11,8 @@ import * as path from 'path';
  *   - openProxyLog      — 0700-parent + 0600-file open with best-effort chmod (SEC-2)
  *   - rotateProxyLogIfLarge — pre-spawn-only 2MB→1MB rotation that preserves 0600 mode
  *
- * avoids PF-009: every failure path is non-fatal (wrapped in try/catch); one bad
- *   chmod or rotation error must never abort the enable flow.
+ * Every failure path is non-fatal (wrapped in try/catch); one bad
+ * chmod or rotation error must never abort the enable flow.
  */
 
 /** 2 MB max log size before rotation (mirrors ensure-proxy _LOG_MAX_BYTES). */
@@ -32,7 +32,7 @@ export const PROXY_LOG_TAIL_BYTES = 1_048_576;
  * Call sites compose on top of this result to add process-specific vars
  * (e.g. SUBSWITCH_CONFIG for the relay spawn and doctor spawn).
  *
- * applies ADR-003: the prior denylist rationale is gone — on the paths devflow
+ * On the paths devflow
  * invokes (serve, doctor, models) the routing runtime reads ANTHROPIC_API_KEY,
  * FORCE_COLOR, NO_COLOR (dist/tty.js, presence semantics), SUBSWITCH_CONFIG and
  * XDG_CONFIG_HOME (user-config lookup, reached only on an implicit config load —
@@ -46,8 +46,8 @@ export const PROXY_LOG_TAIL_BYTES = 1_048_576;
  * NODE_EXTRA_CA_CERTS is included so corporate-TLS deployments can supply a CA
  * bundle; it is omitted when unset (the absent-→-omit loop handles this).
  * NODE_OPTIONS is deliberately excluded: it permits arbitrary code execution via
- * --require/--import. Mirrored in the ensure-proxy bash hook's _RELAY_ENV array
- * (avoids PF-017); both allowlists must be kept in sync.
+ * --require/--import. Mirrored in the ensure-proxy bash hook's _RELAY_ENV array;
+ * both allowlists must be kept in sync.
  */
 export function scrubChildEnv(): NodeJS.ProcessEnv {
   const POSIX_ALLOWLIST = ['PATH', 'HOME', 'TMPDIR', 'LANG', 'LC_ALL', 'NODE_EXTRA_CA_CERTS'] as const;
@@ -79,7 +79,7 @@ export function scrubChildEnv(): NodeJS.ProcessEnv {
  *   3. best-effort fs.chmod(logPath, 0o600) — widens a pre-existing file
  *      that was created before this guard existed (e.g. mode 0644 on disk).
  *      Non-fatal: a chmod failure (EPERM, ENOENT race) must never prevent the
- *      handle from being returned — avoids PF-009 failure-isolation principle.
+ *      handle from being returned.
  *      Follows the SEC-1 precedent in src/core/fs-atomic.ts (commit 5755d56):
  *      chmod in try/catch, never fatal, with a comment citing the rationale.
  *
@@ -100,7 +100,7 @@ export async function openProxyLog(
 
   // Step 3: best-effort chmod for a pre-existing file that has a wider mode.
   // Non-fatal: chmod failure must not prevent the handle from being returned.
-  // avoids PF-009: failure-isolation — one bad chmod must never abort the enable flow.
+  // Failure isolation — one bad chmod must never abort the enable flow.
   try {
     await fs.chmod(logPath, 0o600);
   } catch {
@@ -133,7 +133,7 @@ export async function openProxyLog(
  *
  * Non-fatal: rotation failure (disk full, EPERM, read error) leaves the
  * original log untouched and the enable proceeds with an oversized log.
- * avoids PF-009: one rotation error must never abort the enable flow.
+ * One rotation error must never abort the enable flow.
  *
  * @param logPath - Absolute path to proxy.log.
  */

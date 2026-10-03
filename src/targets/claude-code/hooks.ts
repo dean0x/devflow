@@ -64,8 +64,8 @@ export function endsWithAny(suffixes: readonly string[]): HookPredicate {
  * `/scripts/hooks/session-start-memory.sh`), under any directory — so installs made
  * under a custom or retired devflow directory are still recognised. It is never
  * devflow's because it merely CONTAINS a marker word: a user's `~/bin/memory-worker`,
- * `echo capture-turn` or `/opt/tools/run-hook preamble` is theirs (applies ADR-024 —
- * remove only what devflow can prove it wrote). Removal goes through `removeHooks`,
+ * `echo capture-turn` or `/opt/tools/run-hook preamble` is theirs
+ * (remove only what devflow can prove it wrote). Removal goes through `removeHooks`,
  * one hook at a time. Every hook module builds its predicates here;
  * D-AMBIENT-EXACT-HOOK is the ambient instance of this rule.
  */

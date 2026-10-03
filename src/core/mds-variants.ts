@@ -4,11 +4,11 @@
  * Pure module — zero I/O. Every question a caller asks about a HOST is answered
  * with a Result; callers own every filesystem call and every process exit.
  *
- * applies ADR-013: pure core-layer module, no build-script or adapter concerns.
+ * Pure core-layer module, no build-script or adapter concerns.
  * The registries below are agent-neutral, so what is DERIVED from them is derived
  * here rather than inside an install target — a target adapter computing a build
  * fact, with tests importing that adapter to learn it, is the seam inverting.
- * avoids PF-014: no process.exit(); every fallible path returns Result. The
+ * No process.exit(); every fallible path returns Result. The
  * exiting shell is scripts/build-mds.ts, which renders these errors into its
  * pre-existing messages.
  *
@@ -106,7 +106,7 @@ export function validateOutputName(name: string): Result<string, OutputNameError
  * `tracker/jira/`, and `tracker/mcp.md` would read as a third provider.
  * Relaxing the shared rule instead would have admitted `_anything.md`
  * as a command or an agent basename too — a widening across all three build
- * destinations to buy a property only this one needs (ADR-025: classify the case,
+ * destinations to buy a property only this one needs (classify the case,
  * never blanket-widen).
  *
  * Every other guarantee is inherited by delegation, so the dot-segment,
@@ -175,8 +175,8 @@ export const AGENTS_OUTPUT_DIR = 'dist/agents';
  * the installer decides which skill install triggers the reference overlay from
  * it, and the init summary renders `prefixSkillName()` of it. Retyped at each of
  * those three sites, moving the references to another skill would mean finding
- * all three spellings with nothing failing if only two were found — the PF-013
- * shape, a hardcoded spelling that still resolves.
+ * all three spellings with nothing failing if only two were found — a hardcoded
+ * spelling that still resolves.
  *
  * Bare, not `devflow:`-prefixed: the build writes to `dist/skills/git/…` while
  * the install target is `skills/devflow:git/`. prefixSkillName is what spans that
@@ -213,7 +213,7 @@ const ALLOWED_OUTPUT_DIRS = [
  *
  * Exported so guards assert the build's refusal text against the table itself
  * rather than against a retyped literal: adding a destination then rewrites both
- * the message and its assertion from one edit (PF-018 — the expectation must
+ * the message and its assertion from one edit (the expectation must
  * come from the thing under test, not a copy of it).
  */
 export const ALLOWED_OUTPUT_DIR_NAMES: readonly string[] = ALLOWED_OUTPUT_DIRS.map(entry => entry.dir);
@@ -310,7 +310,7 @@ export function resolveOutputDir(
  * reverse alone lets a listed op silently emit nothing.
  *
  * The list is long from its first commit on purpose. A one- or two-element list
- * makes every parity assertion over it vacuous (GAP-42, the PF-018 trap) and is
+ * makes every parity assertion over it vacuous (GAP-42) and is
  * structurally identical to the single-arm conditional AC-1.2 forbids, so
  * expandVariants refuses a pair list below MIN_VARIANT_PAIRS.
  */
@@ -372,8 +372,8 @@ export const TRACKER_GITHUB_OPS = TRACKER_OPS;
  * carries one pointer to each.
  *
  * 9 entries, one above {@link MIN_VARIANT_PAIRS}, which is a floor and not a
- * target: a shorter roster makes every parity assertion over it vacuous (GAP-42,
- * the PF-018 trap) and `expandVariants` refuses the build, so the roster can grow
+ * target: a shorter roster makes every parity assertion over it vacuous (GAP-42)
+ * and `expandVariants` refuses the build, so the roster can grow
  * but never drop below 8. `update-pr-evidence` (#363) is the ninth — it edits the
  * PR body and comments on the PR, both GitHub whatever the tracker is.
  */
@@ -743,7 +743,7 @@ export type VariantExpansionError =
  * writes.
  *
  * Pure and total: every refusal is a Result, so the build shell keeps its single
- * exit (avoids PF-014). The expansion is deliberately flat rather than nested —
+ * exit. The expansion is deliberately flat rather than nested —
  * one list of destinations is what the plan pass needs to detect two hosts
  * claiming one file, and a nested shape would have to be flattened there anyway.
  *
@@ -833,14 +833,14 @@ export function expandVariants(
  * Lives beside the registry it reads rather than in the Claude Code installer that
  * consumes it: nothing about the answer is Claude-Code-specific, and the packaging
  * and containment tests that read it are asking the BUILD what it emits, not
- * asking an install target (applies ADR-013).
+ * asking an install target.
  *
  * Asserts where its siblings return a Result. The registry is a compile-time
  * constant, so a refusal is a programming error rather than an install-time
  * degradation: no caller could sensibly continue, and every caller would otherwise
  * carry the same impossible branch. The full refusal is rendered and not just its
  * `kind` — the payload is what names the offending module and op, and a payload
- * nothing reads is a payload nothing maintains (avoids PF-041). Same rendering the
+ * nothing reads is a payload nothing maintains. Same rendering the
  * build's own refusal sinks use (scripts/build-mds.ts).
  */
 export function generatedReferenceManifest(): readonly string[] {
@@ -948,7 +948,7 @@ export type VariantSection<T extends OperationNamed> = T & { readonly content: s
  *
  * Bidirectional, and both directions are load-bearing:
  *   - unknown-section — the body carries a section for an op the registry does
- *     not name, so a file would ship that nothing loads (ADR-003);
+ *     not name, so a file would ship that nothing loads;
  *   - missing-section — the registry names an op the body does not cover, so the
  *     preamble's load instruction resolves to nothing at runtime.
  * A forward-only check passes on either half of that pair.

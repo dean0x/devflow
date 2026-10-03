@@ -36,7 +36,7 @@ export async function writeFileAtomicExclusive(filePath: string, data: string): 
   // PID-scope the tmp name so concurrent writers from different processes
   // (e.g., two Claude Code sessions) never collide on the same .tmp path.
   // mirrors proxy-log.ts rotation at src/core/proxy-log.ts which PID-scopes
-  // for the same reason.  avoids PF-011.
+  // for the same reason.
   const tmp = `${filePath}.tmp.${process.pid}`;
   try {
     await fs.writeFile(tmp, data, { encoding: 'utf-8', flag: 'wx' });
@@ -56,7 +56,7 @@ export async function writeFileAtomicExclusive(filePath: string, data: string): 
   //
   // Non-fatal path: if stat fails (ENOENT → fresh file, or any other I/O
   // error), skip chmod and keep the umask default — the write must still
-  // complete correctly (avoids PF-009 failure-isolation principle).
+  // complete correctly.
   try {
     const { mode } = await fs.stat(filePath);
     // mode includes file-type bits; mask to permission bits only for chmod.

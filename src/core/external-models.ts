@@ -9,7 +9,7 @@
  * in src/core/model-discovery.ts. The TUI picker and --set validation use the
  * ExternalModelCatalog returned by those functions.
  *
- * applies ADR-013: pure core-layer module, no Claude Code adapter concerns.
+ * Pure core-layer module, no Claude Code adapter concerns.
  *
  * NOTE: the internal routing runtime package name must NEVER appear in
  * user-visible strings, CLI output, or error messages. User-facing vocabulary:

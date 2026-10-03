@@ -4,14 +4,14 @@
  * Discovers routable external models from the routing runtime.
  * The only impure piece of the external-model-routing design.
  *
- * applies ADR-013: pure core-layer module — no adapter imports.
- * applies PF-013: cwd = os.tmpdir() so discovery never assumes the devflow
+ * Pure core-layer module — no adapter imports.
+ * cwd = os.tmpdir() so discovery never assumes the devflow
  *   directory exists (the --set read path never mkdirs, so the dir may not
  *   exist; os.tmpdir() also prevents a stale subswitch.config.json in any
  *   particular working directory from causing exit 1 in the routing runtime).
- * avoids PF-009: discoverExternalModels never throws or rejects — every
+ * discoverExternalModels never throws or rejects — every
  *   failure path returns { known: false }.
- * avoids PF-016: real-binary tests (T1–T4) live in tests/, never in
+ * Real-binary tests (T1–T4) live in tests/, never in
  *   tests/integration/ which is excluded from npm test by vitest.config.ts.
  *
  * Branding constraint: the routing runtime package name ("subswitch") must
@@ -161,7 +161,7 @@ export type ExternalModelCatalog =
 // Injectable dependencies (for testing without real processes)
 // ---------------------------------------------------------------------------
 
-/** Return type of resolveProxyBin — derived rather than duplicated (applies ADR-003). */
+/** Return type of resolveProxyBin — derived rather than duplicated. */
 type ResolveProxyBinResult = Awaited<ReturnType<typeof resolveProxyBin>>;
 
 /**
@@ -641,9 +641,9 @@ function buildRealSpawnAndCollect(
  *  - parse failure on live payload → log reason to proxy.log.
  *  - All failures degrade to stale-cache then { known: false } — never throw.
  *
- * applies PF-013: cwd = os.tmpdir() (not devflow dir, which may not exist on
- *   the cold --set path; also prevents legacy subswitch.config.json in cwd
- *   from causing exit 1 in the routing runtime).
+ * cwd = os.tmpdir() (not devflow dir, which may not exist on
+ * the cold --set path; also prevents legacy subswitch.config.json in cwd
+ * from causing exit 1 in the routing runtime).
  *
  * AC-C7: resolveProxyBin() is called live every invocation, never proxy.json.binPath.
  * AC-C8: never throws or rejects.
@@ -660,7 +660,7 @@ export async function discoverExternalModels(
   try {
     return await _discoverInternal(cacheDir, logPath, deps);
   } catch {
-    // Catch-all: discoverExternalModels MUST NOT throw (avoids PF-009).
+    // Catch-all: discoverExternalModels MUST NOT throw.
     return { known: false };
   }
 }

@@ -10,14 +10,14 @@ import type { SweepResult } from './orphan-sweep.js';
  *
  * Sibling of {@link sweepOrphanedAssets} in orphan-sweep.ts and deliberately the same
  * {@link SweepResult} shape — `scanned` is the non-vacuity counter, removals and
- * per-item failures are reported rather than thrown (avoids PF-009).
+ * per-item failures are reported rather than thrown.
  *
  * What is genuinely new is the KEY. `sweepOrphanedAssets` keys a flat directory by
  * registry name through `mdEntryName`, which cannot express `tracker/{provider}/{op}.md`:
  * two providers may legitimately both carry a `comment.md`, so the registry name has to
  * be the relative PATH, and the walk has to descend.
  *
- * Never writes, only removes (avoids PF-011).
+ * Never writes, only removes — no delete-then-write window.
  */
 
 /**
@@ -36,7 +36,7 @@ import type { SweepResult } from './orphan-sweep.js';
  * The two walkers answer a breach differently by design, and both answer out loud: the
  * build throws (a generated tree that deep is a build bug, and dist/ is still the
  * build's own to fail), while this sweep records the unvisited subtree in `failed`
- * (avoids PF-009 — an install is not abandoned over one subtree). Neither returns
+ * (an install is not abandoned over one subtree). Neither returns
  * quietly: a subtree the walk never entered must not be summarised as converged.
  */
 export const MAX_REFERENCE_SWEEP_DEPTH = 8;
@@ -100,7 +100,7 @@ async function sweepDirectory(
   try {
     entries = await fs.readdir(dir, { withFileTypes: true });
   } catch {
-    return; /* absent or unreadable — not an error (avoids PF-009) */
+    return; /* absent or unreadable — not an error */
   }
 
   for (const entry of entries) {
@@ -121,7 +121,7 @@ async function sweepDirectory(
         await fs.rm(fullPath, { recursive: true, force: true });
         acc.removed.push(relPath);
       } catch (err) {
-        acc.failed.push({ name: relPath, error: err }); /* per-item isolation (avoids PF-009) */
+        acc.failed.push({ name: relPath, error: err }); /* per-item isolation */
       }
       continue;
     }
@@ -132,7 +132,7 @@ async function sweepDirectory(
       await fs.rm(fullPath, { force: true });
       acc.removed.push(relPath);
     } catch (err) {
-      acc.failed.push({ name: relPath, error: err }); /* per-item isolation (avoids PF-009) */
+      acc.failed.push({ name: relPath, error: err }); /* per-item isolation */
     }
   }
 }

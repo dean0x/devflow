@@ -12,7 +12,7 @@
  * These lists are FROZEN deletion manifests for names that once shipped: the
  * `*_V2` suffix is the frozen spelling of an era, not a version to bump, and a
  * name is removed from a list only when its pruning window has passed — never
- * renamed to match a current registry name (avoids PF-012).
+ * renamed to match a current registry name.
  */
 
 /** Pre-v1.0.0: devflow- prefixed skill names from the original install scheme. */

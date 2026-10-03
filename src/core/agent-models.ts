@@ -2,8 +2,8 @@
  * Agent model mapping engine — schema, persistence, and convergence for the
  * per-agent model configuration feature.
  *
- * applies ADR-013: pure core-layer module, no Claude Code adapter concerns.
- * avoids PF-014: all fallible operations return Result, no process.exit().
+ * Pure core-layer module, no Claude Code adapter concerns.
+ * All fallible operations return Result, no process.exit().
  *
  * Mapping file: ~/.devflow/agent-models.json
  *   { version: 1, agents: { [name]: { model?, effort? } } }
@@ -65,7 +65,7 @@ export type EffortLevel = typeof EFFORT_LEVELS[number];
 /**
  * Membership set typed as ReadonlySet<string> so .has() accepts a plain
  * string argument without a cast — TypeScript's Set<T>.has() requires T, and
- * EFFORT_LEVELS[number] is a literal union, not string (applies ADR-003).
+ * EFFORT_LEVELS[number] is a literal union, not string.
  */
 const EFFORT_LEVELS_SET: ReadonlySet<string> = new Set(EFFORT_LEVELS);
 
@@ -364,7 +364,7 @@ export async function readAgentMapping(
  * A missing directory returns an empty set rather than throwing (ENOENT is
  * not an error — the install dir may not exist on a fresh machine before
  * `devflow init` runs). Any other OS error also returns an empty set
- * (degrade-not-throw per PF-009) — a transient or misconfigured path must
+ * (degrade-not-throw) — a transient or misconfigured path must
  * not prevent the TUI or --list from starting.
  *
  * @param installDir - Path to ~/.claude/agents/devflow (or equivalent).
@@ -521,7 +521,7 @@ export interface LoadShippedDefaultsOptions {
  * keep rendering (`devflow agents --list`), so it warns instead. Staying silent
  * is what makes the gap dangerous: resolveEffective returns an undefined model,
  * reapplyAgentMapping buckets the agent 'unchanged', and disabling the proxy
- * leaves an externally-pinned agent unreverted with nothing said (PF-022).
+ * leaves an externally-pinned agent unreverted with nothing said.
  *
  * @param dirs - Agent directories, most-preferred first. Injectable so tests can
  *   prove the precedence against a temp tree; all real callers use the default.
@@ -651,7 +651,7 @@ export async function reapplyAgentMapping(opts: ReapplyOptions): Promise<Reapply
       // Guard: reject mapping keys that would read/write outside the install directory.
       // A corrupted or adversarial agent-models.json could contain path-traversal keys
       // such as '../../etc/passwd'; this check prevents any filesystem access beyond
-      // opts.installDir. Per PF-009 (degrade-not-throw), this emits a warning and skips gracefully.
+      // opts.installDir. Degrade-not-throw: this emits a warning and skips gracefully.
       if (!isContainedIn(opts.installDir, mdFileName(agentName))) {
         localWarn(
           `reapplyAgentMapping: agent name "${agentName}" resolves outside the install ` +

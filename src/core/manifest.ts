@@ -57,7 +57,7 @@ export interface ManifestData {
     rules: boolean;
     /**
      * Typed flag state record (keyed by flag id).
-     * Absent key = unknown to this install (adopted on next seed per ADR-014).
+     * Absent key = unknown to this install (adopted on next seed).
      * Null value = known + deliberately unset (neutral).
      * Boolean value = known + explicitly enabled (true) or disabled (false).
      * Old string[] manifests are auto-migrated via migrateLegacyFlagsToRecord on read.
@@ -153,7 +153,7 @@ function parseManifestFlags(
 /**
  * Read and parse the manifest file. Returns null if missing or corrupt.
  *
- * Self-heals the following on-disk inconsistencies (applies ADR-014):
+ * Self-heals the following on-disk inconsistencies:
  * - features.kb → features.knowledge rename (both absent → true, D-FEATURES-ABSENT-ON)
  * - features.decisions → features.learning rename (both absent → true, D-FEATURES-ABSENT-ON)
  * - features.flags as string[] → FlagsRecord (via migrateLegacyFlagsToRecord)
@@ -205,7 +205,7 @@ export async function readManifest(devflowDir: string): Promise<ManifestData | n
     const knowledge = typeof features.knowledge === 'boolean' ? features.knowledge
       : typeof features.kb === 'boolean' ? features.kb as boolean
       : true;
-    // Self-heal: rename features.decisions → features.learning on disk (ADR-011).
+    // Self-heal: rename features.decisions → features.learning on disk.
     // Coalesce: features.learning wins; fall back to features.decisions; default ON.
     // D-LEARNING-LEGACY-DECISIONS: isMachineFeatureOn and queue_read_gates apply
     // this exact precedence, so the legacy key is honoured before the heal lands.
@@ -228,7 +228,7 @@ export async function readManifest(devflowDir: string): Promise<ManifestData | n
     // keeping the needsHeal predicate in lockstep with the parse branch above.
     const { flags: parsedFlags, legacy: flagsWereLegacy } = parseManifestFlags(features, knownFlags);
 
-    // PF-023 + D39: sanitize all values; block prototype pollution keys.
+    // D39: sanitize all values; block prototype pollution keys.
     const sanitizedFlags = sanitizeFlagsRecord(parsedFlags);
 
     // needsHeal when any legacy artifact is present on disk
@@ -264,14 +264,14 @@ export async function readManifest(devflowDir: string): Promise<ManifestData | n
         security: typeof features.security === 'string' && (SECURITY_MODES as readonly string[]).includes(features.security)
           ? features.security as SecurityMode
           : undefined,
-        // Self-heal: absent proxy field defaults to false (applies ADR-014 self-heal idiom)
+        // Self-heal: absent proxy field defaults to false
         proxy: typeof features.proxy === 'boolean' ? features.proxy : false,
         // Self-heal: absent/malformed compliance → {enabled:false, frameworks:[]}
         compliance: normalizeComplianceFeature(features.compliance),
         // Self-heal: absent/malformed/unknown tracker → {provider:'github'} (AC-3.21).
         // Deliberately NOT in the hard-null set above — see the field's doc comment.
         // Healing here is silent and emits no DEGRADED: that is the correct
-        // ADR-014 behaviour, and a different condition from a per-repo config
+        // self-heal behaviour, and a different condition from a per-repo config
         // value outside the domain (which does emit `unknown tracker provider`).
         tracker: normalizeTrackerFeature(features.tracker),
       },

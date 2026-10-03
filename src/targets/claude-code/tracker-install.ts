@@ -6,8 +6,8 @@
  * installer.ts — a mode flag on this function would have made it a second
  * (design review M2).
  *
- * Applies ADR-013: I/O orchestration in src/targets/; pure helpers in src/core/.
- * Applies PF-009: warn-not-throw, so one failing artifact never aborts an install.
+ * I/O orchestration in src/targets/; pure helpers in src/core/.
+ * Warn-not-throw, so one failing artifact never aborts an install.
  */
 import { promises as fs } from 'fs';
 import * as path from 'path';
@@ -37,7 +37,7 @@ export interface ConvergeTrackerArtifactsResult {
    * True when the agent file is byte-identical to its source after this run.
    * False when any warn path was taken.
    *
-   * PF-015: converge is warn-not-throw, so callers cannot detect partial failure
+   * Converge is warn-not-throw, so callers cannot detect partial failure
    * with a catch block; this field is how they learn of it.
    */
   converged: boolean;

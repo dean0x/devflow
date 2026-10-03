@@ -5,8 +5,8 @@
  * fragment files, so installed artifacts differ by selection rather than being
  * static all-six blobs.
  *
- * Applies ADR-013: pure helpers in src/core/, no I/O.
- * Applies PF-009: warn-not-throw for per-item failures.
+ * Pure helpers in src/core/, no I/O.
+ * Warn-not-throw for per-item failures.
  */
 
 import { COMPLIANCE_FRAMEWORKS, stampComplianceRule } from './compliance.js';
@@ -357,7 +357,7 @@ function buildReferences(
  * Strict boundary parser: validates all required sections (## Mapping / ##
  * Reference / ## Checklist / ## Rule) and their structural constraints.
  * CRLF-tolerant: Windows line endings are normalised before parsing.
- * Never throws (PF-009): all errors return { ok: false, error }.
+ * Never throws: all errors return { ok: false, error }.
  */
 export function parseComplianceFragment(
   id: string,
