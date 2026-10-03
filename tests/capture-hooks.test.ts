@@ -294,7 +294,7 @@ describe('capture-turn', () => {
   });
 
   it('ignores legacy response_text field — only last_assistant_message gates capture', () => {
-    // Regression guard (PF-006 lineage): a payload carrying only the old field name
+    // Regression guard: a payload carrying only the old field name
     // (response_text) and not last_assistant_message must produce zero appends.
     runHook(CAPTURE_TURN, { cwd: projectDir, session_id: 't', response_text: 'this should be ignored' }, homeDir);
     expect(fs.existsSync(path.join(projectDir, '.devflow'))).toBe(false);

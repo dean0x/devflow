@@ -5,7 +5,7 @@
  * still stops accumulating folders.
  *
  * Every run sources the real `log-paths` under a temp HOME built by `sandboxEnv`,
- * which refuses a real home before anything runs (PF-060). No `claude` is spawned.
+ * which refuses a real home before anything runs. No `claude` is spawned.
  */
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest'

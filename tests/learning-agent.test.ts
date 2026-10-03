@@ -94,9 +94,9 @@ describe('learning agent', () => {
       expect(content).toMatch(/FINAL act.*unlink \.devflow\/learning\/\.pending-turns\.processing/s);
     });
 
-    it('does not instruct rm -f for claim-file deletion — deny-list blocks flags, not the verb (PF-003)', () => {
+    it('does not instruct rm -f for claim-file deletion — deny-list blocks flags, not the verb', () => {
       // rm -f (flagged rm) is denied; unlink and a flagless rm both pass.
-      // The prose may explain PF-003 using "rm -f" as a counter-example,
+      // The prose may explain the deny-list rule using "rm -f" as a counter-example,
       // but the actual delete command must be unlink, not rm -f.
       expect(content).not.toMatch(/\brm -[rf]+[^\n]*\.pending-turns\.processing/);
     });
@@ -115,7 +115,7 @@ describe('learning agent', () => {
     it('calls assign-anchor, retire-anchor, refresh-anchor, and rotate-observations via json-helper', () => {
       expect(content).toMatch(/json-helper\.cjs" assign-anchor/);
       expect(content).toMatch(/json-helper\.cjs" retire-anchor/);
-      // refresh-anchor: post-promotion reinforcement re-projects the log row into rendered files (D1/ADR-022)
+      // refresh-anchor: post-promotion reinforcement re-projects the log row into rendered files (D1)
       expect(content).toMatch(/json-helper\.cjs" refresh-anchor/);
       expect(content).toMatch(/json-helper\.cjs" rotate-observations/);
     });
@@ -177,8 +177,8 @@ describe('lockstep: Learning agent 900s staleness matches directive', () => {
   it('session-start-context directive also uses 900s as the freshness threshold', async () => {
     // Let readFile throw if the hook is missing — a missing hook is a real failure, not a skip
     const hookContent = await fs.readFile(SESSION_START_CONTEXT, 'utf-8');
-    // Both the agent and the directive must agree on the exact constant (avoids PF-008 —
-    // matching any substring containing "900" is not proof the threshold is the same)
+    // Both the agent and the directive must agree on the exact constant (matching
+    // any substring containing "900" is not proof the threshold is the same)
     expect(hookContent).toContain('PROCESSING_STALE_SECS=900');
   });
 
@@ -197,7 +197,7 @@ describe('lockstep: no shipped artifact references .devflow/dream/ or subagent_t
 
   it('no .md or .mds file in src/assets/ references .devflow/dream/', () => {
     const files = SHIPPED_DIRS.flatMap(dir => findFiles(dir, ['.md', '.mds']));
-    // avoids PF-018 (2): a scan-based test whose corpus went empty after a rename
+    // A scan-based test whose corpus went empty after a rename
     // passes vacuously and silently stops guarding anything.
     expect(files.length).toBeGreaterThan(0);
 
@@ -223,7 +223,7 @@ describe('lockstep: no shipped artifact references .devflow/dream/ or subagent_t
 
   it('no .md or .mds file in src/assets/ references subagent_type="Dream"', () => {
     const files = findFiles(path.join(ROOT, 'src', 'assets'), ['.md', '.mds']);
-    // avoids PF-018 (2): assert the scanned corpus is non-empty (see sibling test).
+    // Assert the scanned corpus is non-empty (see sibling test).
     expect(files.length).toBeGreaterThan(0);
 
     const violations: string[] = [];

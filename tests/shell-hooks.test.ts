@@ -431,7 +431,7 @@ describe('hooks anchor .devflow/ to the project root (no stray nested .devflow/)
     // capture-turn sources hook-log-init, whose devflow_log_dir does an
     // unconditional `mkdir -p "$HOME/.devflow/logs/<slug>"` — one directory per
     // distinct cwd, so an inherited HOME accumulates them on the developer's real
-    // machine forever (PF-060). Seeded, never empty (PF-018).
+    // machine forever. Seeded, never empty, so a green run is not vacuous.
     const homeDir = fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-anchor-home-'));
     fs.mkdirSync(path.join(homeDir, '.devflow', 'logs'), { recursive: true });
     try {
@@ -881,13 +881,13 @@ describe('hook-log-init: first invocation for a fresh log dir', () => {
 
   it('sources silently under set -e when the log file does not exist yet, and sizes it as 0', () => {
     // HOME is a mktemp dir: devflow_log_dir mkdirs $HOME/.devflow/logs/<slug>
-    // unconditionally (PF-060). Seeded, never empty (PF-018). CWD is its own
-    // mktemp dir so its slug's log dir — and the log file — are brand new.
+    // unconditionally. Seeded, never empty, so a green run is not vacuous. CWD is
+    // its own mktemp dir so its slug's log dir — and the log file — are brand new.
     const homeDir = fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-loginit-home-'));
     fs.mkdirSync(path.join(homeDir, '.devflow', 'logs'), { recursive: true });
     const cwdDir = fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-loginit-cwd-'));
     try {
-      // Sourced under `set -e` the way the capture hooks source it (PF-078):
+      // Sourced under `set -e` the way the capture hooks source it:
       // the caller must keep running past the size guard.
       const script = [
         'set -e',
@@ -2229,7 +2229,7 @@ describe('ensure-root-gitignore behavioral', () => {
 // Cross-implementation parity: ensure-root-gitignore (shell) ×
 // computeDevflowGitignore (TS) — both state machines must produce semantically
 // identical outcomes for each branch. Exercises the REAL shell script (no
-// reimplementation in the test — avoids PF-018).
+// reimplementation in the test).
 // =============================================================================
 
 describe('ensure-root-gitignore × computeDevflowGitignore cross-implementation parity', () => {
@@ -2292,7 +2292,7 @@ describe('ensure-root-gitignore × computeDevflowGitignore cross-implementation 
 
   // The CURRENT block minus its final `.claudeignore` line. Taken from the exported
   // constant rather than retyped so a block edit cannot leave this seed silently
-  // describing a shape that no longer ships (applies PF-043).
+  // describing a shape that no longer ships.
   const CURRENT_BLOCK_NO_CI = DEVFLOW_GITIGNORE_BLOCK_WITHOUT_CLAUDEIGNORE;
 
   // The v4 block exactly as shipped at f3a2198 — "Two exceptions" comment, conventions
@@ -2344,7 +2344,7 @@ describe('ensure-root-gitignore × computeDevflowGitignore cross-implementation 
 
   /** The block's devflow-unique presence sentinel. */
   const V3_SENTINEL = '!.devflow/conventions.md';
-  /** A block LINE users also author themselves — never a sentinel (applies PF-059). */
+  /** A block LINE users also author themselves — never a sentinel. */
   const CLAUDEIGNORE_LINE = '.claudeignore';
   /** The v5 completion line — users may author it too, so it is never a sentinel (D-GITIGNORE-V5). */
   const POLICY_LINE = '!.devflow/policy.json';
@@ -2467,7 +2467,7 @@ describe('ensure-root-gitignore × computeDevflowGitignore cross-implementation 
       blockPresent: false,
     },
     // -------------------------------------------------------------------------
-    // .claudeignore is a block LINE, never a presence sentinel (avoids PF-059).
+    // .claudeignore is a block LINE, never a presence sentinel (users author it themselves).
     // -------------------------------------------------------------------------
     {
       label: '(a) user .claudeignore entry — block still installed, minus its .claudeignore line',
@@ -2563,7 +2563,7 @@ describe('ensure-root-gitignore × computeDevflowGitignore cross-implementation 
     },
     // -------------------------------------------------------------------------
     // D-GITIGNORE-V5: `!.devflow/policy.json` is a completion line topped up when
-    // missing, never a presence sentinel — users may author it themselves (PF-059).
+    // missing, never a presence sentinel — users may author it themselves.
     // -------------------------------------------------------------------------
     {
       label: '(g) shipped v4 block — the policy and project lines inserted before .claudeignore (the v4→v6 upgrade)',
@@ -2645,7 +2645,7 @@ describe('ensure-root-gitignore × computeDevflowGitignore cross-implementation 
     },
       // -------------------------------------------------------------------------
     // D-GITIGNORE-V6: `!.devflow/project.json` is a completion line like the policy
-    // line — topped up when missing, never a presence sentinel (avoids PF-059).
+    // line — topped up when missing, never a presence sentinel.
     // -------------------------------------------------------------------------
     {
       label: '(o) shipped v5 block — only the project line inserted, just before .claudeignore (the v5→v6 upgrade)',
@@ -2777,7 +2777,7 @@ describe('ensure-root-gitignore × computeDevflowGitignore cross-implementation 
 ];
 
   it('PARITY_CASES covers every v5 and v6 upgrade row and keeps the completion lines out of every no-sentinel row', () => {
-    // Non-vacuity for the table itself (applies PF-018): the rows the D-GITIGNORE-V5
+    // Non-vacuity for the table itself: the rows the D-GITIGNORE-V5
     // and D-GITIGNORE-V6 migrations depend on exist, and the only row with no block
     // sentinel in its result is the user opt-out.
     const labels = PARITY_CASES.map(r => r.label);
@@ -2808,7 +2808,7 @@ describe('ensure-root-gitignore × computeDevflowGitignore cross-implementation 
       const baseline = input ?? '';
 
       // Byte equality is the contract; the booleans below only name WHY it holds.
-      // Asserting only has-line booleans would hide whitespace divergence (PF-059).
+      // Asserting only has-line booleans would hide whitespace divergence.
       expect(shellResult, 'shell and TS must produce identical bytes').toBe(tsResult);
       expect(shellResult, 'both twins must produce the expected bytes').toBe(expected);
 
@@ -2825,7 +2825,7 @@ describe('ensure-root-gitignore × computeDevflowGitignore cross-implementation 
         expect(result.includes(DEVFLOW_GITIGNORE_BLOCK), `${who}: blockPresent`).toBe(blockPresent);
       }
 
-      // Convergence: every branch must be a fixed point on re-run (applies PF-015).
+      // Convergence: every branch must be a fixed point on re-run.
       expect(computeDevflowGitignore(tsResult), 'TS: re-running over its own output must be a no-op')
         .toBeNull();
       expect(runShell(shellResult), 'shell: re-running over its own output must be a byte no-op')
@@ -2980,7 +2980,7 @@ describe('run-hook behavioral', () => {
 });
 
 // =============================================================================
-// session-start-context: memory-independent root .gitignore write (PF-014 fix)
+// session-start-context: memory-independent root .gitignore write
 // =============================================================================
 //
 // The root .gitignore write must NOT depend on the memory feature toggle. Before
@@ -3009,7 +3009,7 @@ describe('session-start-context root .gitignore (memory-independent)', () => {
   });
 
   it('adds .devflow/ to the root .gitignore even when memory is disabled', () => {
-    // Memory OFF, decisions implicitly ON — the exact gap PF-014 describes.
+    // Memory OFF, decisions implicitly ON — the case the memory-gated writer missed.
     fs.mkdirSync(path.join(tmpDir, '.devflow', 'dream'), { recursive: true });
     fs.writeFileSync(
       path.join(tmpDir, '.devflow', 'dream', 'config.json'),
@@ -3862,7 +3862,7 @@ describe('ensure-proxy behavioral tests', () => {
     // Before the fix, `nohup env -u ANTHROPIC_API_KEY` spread the full parent env so
     // every secret the shell had exported (SSH_AUTH_SOCK, OPENAI_API_KEY, etc.) reached
     // the third-party routing runtime. The fix converts to `env -i` with 5+1 explicit
-    // vars (PATH, HOME, TMPDIR, LANG, LC_ALL, SUBSWITCH_CONFIG). avoids PF-017.
+    // vars (PATH, HOME, TMPDIR, LANG, LC_ALL, SUBSWITCH_CONFIG).
     //
     // Strategy: pass canary vars via extraEnv to the hook process, then have a
     // custom stub relay capture its own process.env to a file BEFORE binding the

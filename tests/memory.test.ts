@@ -14,9 +14,9 @@ import { addMemoryHooks, removeMemoryHooks, hasMemoryHooks, countMemoryHooks, co
  * the global learning.json, and the tracker manifest and its `.tracker.enabled`
  * sentinel — out of `$HOME/.devflow`. Every invocation therefore
  * passes an explicit HOME, so no assertion here writes to, or is decided by, the
- * developer's real machine (PF-060).
+ * developer's real machine.
  *
- * SEEDED, never empty (PF-018): the log directory the hook actually writes into
+ * SEEDED, never empty: the log directory the hook actually writes into
  * is created, so a green run means the hook reached its gates rather than
  * tripping over a missing path.
  */
