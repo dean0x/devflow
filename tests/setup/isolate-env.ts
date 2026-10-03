@@ -38,7 +38,7 @@ for (const key of Object.keys(process.env)) {
 Object.assign(process.env, next);
 
 if (os.homedir() !== home) {
-  throw new Error(`HOME isolation failed: os.homedir() is ${os.homedir()}, expected ${home} (PF-060)`);
+  throw new Error(`HOME isolation failed: os.homedir() is ${os.homedir()}, expected ${home}`);
 }
 
 afterAll(() => {
