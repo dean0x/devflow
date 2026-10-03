@@ -72,9 +72,9 @@ describe('rule references', () => {
 });
 
 describe('no orphaned declarations', () => {
-  // Skills that intentionally exist in src/assets/skills/ but are not distributed to any plugin.
-  // These are format specifications consumed by background processes, not by agents or commands.
-  // See D9 in .devflow/learning/decisions.md for rationale.
+  // Every skill directory and agent file under src/assets/ must be declared by a plugin in
+  // DEVFLOW_PLUGINS, since installs select assets by plugin. The one exception is the
+  // compliance skill, which the compliance feature installs rather than a plugin.
 
   it('all skills in src/assets/skills/ are referenced by at least one plugin', async () => {
     const skillDirs = await fs.readdir(path.join(ASSETS_DIR, 'skills'));
