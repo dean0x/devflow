@@ -175,7 +175,7 @@ describe('tracker provider sources: the reader admits no source the writer never
     expect(
       collectReaderSources(preamble),
       'the preamble must resolve the provider from resolve-settings.cjs and name no config file ' +
-        'as a source of its own — a second source is a second, unvalidated parser (PF-023)',
+        'as a source of its own — a second source is a second, unvalidated parser',
     ).toEqual(['settings-line']);
 
     // Known-bad, same it: the pre-#393 two-rung order is classified source by

@@ -396,14 +396,14 @@ describe('non-vacuity: per-agent-type fence counts', () => {
   it('at least one Git agent fence is scanned from DIST_FILES', () => {
     expect(
       fencesScanned.get('Git'),
-      `No Git agent fences found in DIST_FILES — the forward check would pass vacuously (PF-018)`,
+      `No Git agent fences found in DIST_FILES — the forward check would pass vacuously`,
     ).toBeGreaterThan(0)
   })
 
   it('at least one Code agent fence is scanned from DIST_FILES', () => {
     expect(
       fencesScanned.get('Code'),
-      `No Code agent fences found in DIST_FILES — the per-type non-vacuity check would pass vacuously (PF-018)`,
+      `No Code agent fences found in DIST_FILES — the per-type non-vacuity check would pass vacuously`,
     ).toBeGreaterThan(0)
   })
 
@@ -455,13 +455,13 @@ describe('non-vacuity: per-agent-type fence counts', () => {
     // stops matching the corpus fails here instead of going quietly vacuous.
     expect(
       gitFencesMentioningOperation,
-      'no Git fence mentions OPERATION: — the corpus shape changed (PF-018)',
+      'no Git fence mentions OPERATION: — the corpus shape changed',
     ).toBeGreaterThan(0)
     expect(
       gitFencesOpMatched,
       `${gitFencesOpMatched}/${gitFencesMentioningOperation} Git fences with an OPERATION: line were parsed. ` +
       'The OPERATION anchor no longer matches the compiled fence shape — the forward/reverse ' +
-      'directions would iterate an empty map and pass vacuously (PF-018).',
+      'directions would iterate an empty map and pass vacuously.',
     ).toBe(gitFencesMentioningOperation)
   })
 

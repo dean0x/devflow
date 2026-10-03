@@ -524,7 +524,7 @@ describe('ISSUE_PR_LINK forwarding — every Code spawn site carries the sibling
     expect(
       payloads.length,
       `only ${payloads.length} spawn site(s) found, floor ${MIN_FORWARDING_SITES} — a collector ` +
-      'that reached fewer files than it names would pass by scanning nothing (PF-018)',
+      'that reached fewer files than it names would pass by scanning nothing',
     ).toBeGreaterThanOrEqual(MIN_FORWARDING_SITES)
     for (const name of FORWARDING_COMMANDS) {
       expect(
@@ -793,7 +793,7 @@ describe('PR_TEST_PLAN_BLOCK forwarding — every ensure-pr-ready spawn carries 
     const corpus = fs.readdirSync(path.join(root, 'dist', 'commands'))
       .filter(f => f.endsWith('.md'))
       .map(name => ({ name, content: requireDistFile(name, root) }))
-    expect(corpus.length, 'no compiled command — the discovery corpus is empty (PF-018)').toBeGreaterThan(10)
+    expect(corpus.length, 'no compiled command — the discovery corpus is empty').toBeGreaterThan(10)
     expect(
       collectCallerDrift(corpus, ENSURE_PR_READY_CALLERS),
       'an ensure-pr-ready caller outside the named set is a spawn this seam never reads — add it to ' +
