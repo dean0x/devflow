@@ -85,7 +85,7 @@ function valueOf<T, E>(result: { ok: true; value: T } | { ok: false; error: E })
 // Naming them here rather than inlining them is what makes the completeness
 // probes possible: a probe can narrow a corpus and show the assertion goes red,
 // which is the only evidence that the corpus (not the expectation list) is
-// carrying the load (PF-018).
+// carrying the load.
 
 /** Every name validateOutputName must reject, the empty name included. */
 const NAME_CORPUS: readonly string[] = [
@@ -318,12 +318,12 @@ describe('resolveOutputDir (host variant)', () => {
 // 3. Result error-union completeness
 // ---------------------------------------------------------------------------
 //
-// A union member that no input can produce is dead code (ADR-003).
+// A union member that no input can produce is dead code.
 // The two assertions here are the non-vacuity proof — each declared kind is
 // reached by a concrete input, and no input reaches a kind outside the declared
 // set — and the two probes below prove those assertions can actually go red, in
 // both of the directions that matter: a declared kind nothing reaches, and a
-// corpus that stopped reaching one (PF-018).
+// corpus that stopped reaching one.
 
 describe('Result error-union completeness', () => {
   const NAME_KINDS: ReadonlyArray<OutputNameError['kind']> = [
@@ -663,7 +663,7 @@ describe('VARIANT_MODULES (shipped registry)', () => {
   });
 
   it('carries exactly the provider directories whose modules exist', () => {
-    // ADR-003: a registry entry with no module on disk would be an
+    // A registry entry with no module on disk would be an
     // artifact with no reachable consumer, and the converse — a module on disk with
     // no row — is a file the build refuses. Asserted as a set equality over the
     // provider subdirectories, both directions, rather than as a count: a provider

@@ -1313,7 +1313,7 @@ describe('FlagsRecord heal round-trip (Phase 2)', () => {
     await fs.writeFile(path.join(tmpDir, 'manifest.json'), JSON.stringify(raw), 'utf-8');
     const result = await readManifest(tmpDir);
     expect(result).not.toBeNull();
-    // Deliberate-disable (false) must be preserved — PF-023 sink validation
+    // Deliberate-disable (false) must be preserved by sink validation
     expect(result!.features.flags['tui']).toBe(false);
     expect(result!.features.flags['lsp']).toBe(true);
     expect(result!.features.flags['tool-search']).toBe(false);
@@ -1364,7 +1364,7 @@ describe('FlagsRecord heal round-trip (Phase 2)', () => {
     await fs.writeFile(path.join(tmpDir, 'manifest.json'), JSON.stringify(legacy), 'utf-8');
 
     // Inject failure at the seam: reject the atomic rename so the heal-write fails.
-    // This is UID-independent (avoids PF-018): the old chmod approach was vacuous under
+    // This is UID-independent: the old chmod approach was vacuous under
     // root UID — a container runner's write succeeded and the assertions proved nothing.
     // Proof of RED: removing the try/catch in readManifest around writeManifest causes
     // the outer catch to return null, which fails expect(result).not.toBeNull().
