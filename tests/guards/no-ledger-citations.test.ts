@@ -21,14 +21,14 @@
  *    `tests/fixtures/numeric-floors.json`. People and agents on every clone read
  *    these, and none of them is test data.
  * 2. TEST COMMENTARY. In `tests/**\/*.ts` only comments and the title argument
- *    of `describe` / `it` / `test` (with their `.each`, `.for`, `.skip`,
- *    `.only`, `.todo`, `.concurrent`, `.skipIf` and `.runIf` forms) are read,
- *    and only the shapes a citation takes are flagged: `applies`, `avoids`,
- *    `per` or `see` before an ID, an ID that opens or closes a parenthesis or a
- *    bracket, and an ID in the possessive. A test's data can legitimately be a
- *    ledger ID — the ledger plumbing is tested on rows that carry them — so
- *    string literals in code are never read, and a title that names the fixture
- *    row it describes is data description, not a citation.
+ *    of `describe` / `it` / `test` (through the modifiers in `CHAIN_MODIFIERS`
+ *    and `CALLING_MODIFIERS`) are read, and only the shapes a citation takes
+ *    are flagged: `applies`, `avoids`, `per` or `see` before an ID, an ID that
+ *    opens or closes a parenthesis or a bracket, and an ID in the possessive. A
+ *    test's data can legitimately be a ledger ID — the ledger plumbing is
+ *    tested on rows that carry them — so string literals in code are never
+ *    read, and a title that names the fixture row it describes is data
+ *    description, not a citation.
  *
  * Excluded everywhere: `CHANGELOG.md` (released history is not rewritten), the
  * golden fixtures under `tests/fixtures/golden/` and any install-snapshot golden
@@ -79,19 +79,8 @@ const CITATION =
 
 const REMEDY = 'ledger IDs stay on the machine — state the rule in words (see the apply-decisions skill)';
 
-type Area =
-  | 'src'
-  | 'scripts'
-  | 'vitest-config'
-  | 'docs'
-  | 'root-prose'
-  | 'features-index'
-  | 'feature-kb'
-  | 'numeric-floors'
-  | 'tests';
-
 /** Every scanned root, in report order. `tests` is the commentary arm; the rest are the full ban. */
-const SCANNED_AREAS: ReadonlyArray<{ readonly id: Area; readonly label: string }> = [
+const SCANNED_AREAS = [
   { id: 'src', label: 'src/**' },
   { id: 'scripts', label: 'scripts/**' },
   { id: 'vitest-config', label: 'root vitest*.config.ts' },
@@ -101,7 +90,9 @@ const SCANNED_AREAS: ReadonlyArray<{ readonly id: Area; readonly label: string }
   { id: 'feature-kb', label: '.devflow/features/*/KNOWLEDGE.md' },
   { id: 'numeric-floors', label: 'tests/fixtures/numeric-floors.json' },
   { id: 'tests', label: 'tests/**/*.ts comments and titles' },
-];
+] as const;
+
+type Area = (typeof SCANNED_AREAS)[number]['id'];
 
 const ROOT_PROSE: readonly string[] = ['CLAUDE.md', 'README.md', 'CONTRIBUTING.md', '.devflow/conventions.md'];
 
@@ -154,12 +145,12 @@ const KEYWORDS_BEFORE_REGEX: ReadonlySet<string> = new Set([
 /** Deepest `${…}` nesting the lexer descends into; anything deeper is read as template text. */
 const MAX_SUBSTITUTION_DEPTH = 32;
 
-const IDENT_START = /[A-Za-z_$\u0080-￿]/;
-const IDENT_PART = /[\w$\u0080-￿]/;
+const IDENT_START = /[A-Za-z_$\u0080-\uFFFF]/;
+const IDENT_PART = /[\w$\u0080-\uFFFF]/;
 const NUMBER_PART = /[\w.]/;
 
 function isSpace(c: string): boolean {
-  return c <= ' ' || c === ' ' || c === '﻿';
+  return c <= ' ' || c === '\u00A0' || c === '\uFEFF';
 }
 
 /** A `/` opens a regular expression unless the token before it ends an operand. */
@@ -263,6 +254,7 @@ function lexCode(
       i = end;
       continue;
     }
+    const regexClose = c === '/' && regexAllowed(prev) ? regexEnd(src, i) : -1;
     let kind: CodeToken['kind'];
     let end: number;
     if (c === '\'' || c === '"') {
@@ -271,9 +263,9 @@ function lexCode(
     } else if (c === '`') {
       kind = 'template';
       end = templateEnd(src, i, comments, depth);
-    } else if (c === '/' && regexAllowed(prev) && regexEnd(src, i) !== -1) {
+    } else if (regexClose !== -1) {
       kind = 'regex';
-      end = regexEnd(src, i);
+      end = regexClose;
     } else if (IDENT_START.test(c)) {
       kind = 'ident';
       end = i + 1;
@@ -321,36 +313,39 @@ function afterParens(tokens: readonly CodeToken[], open: number): number {
   return -1;
 }
 
+/**
+ * The title of the call whose callee, a `describe` / `it` / `test` identifier, is
+ * `tokens[callee]`: its first argument, when that is a string or template literal.
+ */
+function titleOfCall(tokens: readonly CodeToken[], callee: number): CodeToken | undefined {
+  let j = callee + 1;
+  for (let step = 0; step < MAX_CHAIN; step++) {
+    if (!isPunct(tokens[j], '.') || tokens[j + 1]?.kind !== 'ident') break;
+    const modifier = tokens[j + 1].text;
+    j += 2;
+    if (CHAIN_MODIFIERS.has(modifier)) continue;
+    if (!CALLING_MODIFIERS.has(modifier)) return undefined;
+    if (tokens[j]?.kind === 'template') {
+      j++;
+      continue;
+    }
+    if (!isPunct(tokens[j], '(')) return undefined;
+    j = afterParens(tokens, j);
+    if (j === -1) return undefined;
+  }
+  if (!isPunct(tokens[j], '(')) return undefined;
+  const first = tokens[j + 1];
+  return first?.kind === 'string' || first?.kind === 'template' ? first : undefined;
+}
+
 /** The title argument of every `describe` / `it` / `test` call, when it is a string or template literal. */
 function collectTitles(tokens: readonly CodeToken[]): CodeToken[] {
   const titles: CodeToken[] = [];
   for (let k = 0; k < tokens.length; k++) {
-    if (tokens[k].kind !== 'ident' || !TEST_FUNCTIONS.has(tokens[k].text)) continue;
-    if (isPunct(tokens[k - 1], '.')) continue;
-    let j = k + 1;
-    let isTestCall = true;
-    for (let step = 0; step < MAX_CHAIN; step++) {
-      if (!isPunct(tokens[j], '.') || tokens[j + 1]?.kind !== 'ident') break;
-      const modifier = tokens[j + 1].text;
-      j += 2;
-      if (CHAIN_MODIFIERS.has(modifier)) continue;
-      if (!CALLING_MODIFIERS.has(modifier)) {
-        isTestCall = false;
-        break;
-      }
-      if (tokens[j]?.kind === 'template') {
-        j++;
-        continue;
-      }
-      j = isPunct(tokens[j], '(') ? afterParens(tokens, j) : -1;
-      if (j === -1) {
-        isTestCall = false;
-        break;
-      }
-    }
-    if (!isTestCall || !isPunct(tokens[j], '(')) continue;
-    const first = tokens[j + 1];
-    if (first?.kind === 'string' || first?.kind === 'template') titles.push(first);
+    const isTestFunction = tokens[k].kind === 'ident' && TEST_FUNCTIONS.has(tokens[k].text);
+    if (!isTestFunction || isPunct(tokens[k - 1], '.')) continue;
+    const title = titleOfCall(tokens, k);
+    if (title !== undefined) titles.push(title);
   }
   return titles;
 }
@@ -368,7 +363,7 @@ function extractCommentary(src: string): { comments: Commentary[]; titles: Comme
   lexCode(src, 0, false, spans, tokens, 0);
   return {
     comments: spans.map(s => ({ start: s.start, text: src.slice(s.start, s.end) })),
-    titles: collectTitles(tokens).map(t => ({ start: t.start, text: t.text })),
+    titles: collectTitles(tokens),
   };
 }
 
