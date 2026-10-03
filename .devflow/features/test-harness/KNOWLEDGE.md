@@ -165,8 +165,8 @@ The correct regex for compiled fences is `/^[ \t]*"?OPERATION: (\S+)/m` — allo
 
 Goldens are committed fixtures that assert file content remains stable. "A golden mismatch means the source is wrong, never the fixture" (H2).
 
-**Fixtures and current metrics (after #376's byte-budget slices — git.md's own operation sections shrank, the frozen fixture did not move):**
-- `tests/fixtures/golden/git-agent.md` — byte-equals the resolved `git` agent (dist-preferred). Current: `GIT_MD_LINES = 824`, `GIT_MD_CHARS = 44_163`, `TOTAL_CHARS = 53_686`, `TOTAL_LINES = 1_129` (`tests/goldens/github-status-lines.test.ts`), `GIT_AGENT_BYTES = 44_486` (`tests/goldens/git-agent-golden.test.ts`). The fixture regenerates in a FIXTURE-ONLY commit, never folded into a prose commit.
+**Fixtures and current metrics (after #376's byte-budget slices — git.md's own operation sections shrank; those slices did not move the frozen fixture):**
+- `tests/fixtures/golden/git-agent.md` — byte-equals the resolved `git` agent (dist-preferred). Current: `GIT_MD_LINES = 822`, `GIT_MD_CHARS = 43_814`, `TOTAL_CHARS = 53_385`, `TOTAL_LINES = 1_127` (`tests/goldens/github-status-lines.test.ts`), `GIT_AGENT_BYTES = 44_131` (`tests/goldens/git-agent-golden.test.ts`). The fixture regenerates in a FIXTURE-ONLY commit, never folded into a prose commit.
 - `tests/fixtures/golden/github-status-lines.txt` — equals `extractStatusLines()` output. Current: `FIXTURE_BYTES = 18_383`, `FIXTURE_NEWLINES = 249`. **FROZEN** — regenerating it needs `--unfreeze` AND a fresh explicit authorisation. Eight have been granted and **all eight are spent**: 2026-09-14 (`e4876e0`, the extractor retarget), 2026-09-15 (`c0b9860`, two `**Mechanics:**` pointer lines), 2026-09-20 (`9a03412`, Refs #350, nine lines), 2026-09-24 (`5965b0d`, Refs #359, two of four granted lines), 2026-09-25 (Refs #352, the check-ci-status bucket-classification lines), 2026-09-27 (#389, line 241, the Code agent's D11 scrub path), 2026-09-28 (#383, four lines, the legacy escapes the MDS 0.4.4 migration removed), 2026-10-03 (#411, line 207, reply evidence that no longer lists ledger IDs). #376 spent none of them — every Slice 1–4 change reached only `git-agent.md`.
 - `tests/fixtures/golden/install-snapshot-{github,jira-hipaa,all-off}.txt` and `hook-matrix.txt` (#388) — not frozen, but they move only through `npm run test:golden:update -- install-snapshot` in a fixture-only `test(snapshot):` commit; see "Install snapshots and the hook matrix" below.
 
@@ -433,9 +433,9 @@ Both spawn the real compiled CLI against a throwaway `$HOME` AND a throwaway git
 - `tests/evidence/release-flow.test.ts` — `collectNotesCapDefects` (#376 S2, the line-boundary release-notes cut)
 - `tests/evidence/wave-block.test.ts` — the wave PR body's related-issues/evidence-table grammar, incl. #376 W3's one leading tracking `Refs` line
 - `tests/installer/reference-overlay.test.ts` — converge-not-merge reference overlay; `probe-provider` fixture self-check; `pr/` converges like `tracker/` (D-CONVERGED-SUBTREES)
-- `tests/goldens/git-agent-golden.test.ts` — byte-equality guard; `GIT_AGENT_BYTES = 44_486`
+- `tests/goldens/git-agent-golden.test.ts` — byte-equality guard; `GIT_AGENT_BYTES = 44_131`
 - `tests/goldens/github-status-lines.test.ts` — `extractStatusLines()` stability guard; `FIXTURE_BYTES = 18_383`, `FIXTURE_NEWLINES = 249`
-- `tests/fixtures/golden/git-agent.md` — frozen byte-equal snapshot of the resolved `git` agent (824 lines, 44,163 chars, 44,486 bytes)
+- `tests/fixtures/golden/git-agent.md` — frozen byte-equal snapshot of the resolved `git` agent (822 lines, 43,814 chars, 44,131 bytes)
 - `tests/fixtures/golden/github-status-lines.txt` — frozen output of `extractStatusLines()` (18,383 bytes / 249 newlines)
 - `tests/guards/requires-closure.test.ts` — the bidirectional `requires:` closure
 - `tests/installer/install-shape.test.ts` · `tests/tracker-install.test.ts` · `tests/scoped-install-e2e.test.ts` — the scoped install shape, `convergeTrackerArtifacts`, and the real-CLI three-provider diff
