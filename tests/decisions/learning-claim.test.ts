@@ -417,6 +417,7 @@ describe('heartbeat: learning ops refresh the claim, other ops never touch it', 
     { args: ['retire-anchor', 'ADR-001', 'Retired'], input: '{"reason":"test"}' },
     { args: ['refresh-anchor', 'ADR-001'] },
     { args: ['rotate-observations'] },
+    { args: ['put-observation', '--reinforce'], input: '{"id":"obs_heartbeat"}' },
   ];
   let dir: string;
   let paths: ClaimPaths;

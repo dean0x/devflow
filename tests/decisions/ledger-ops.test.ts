@@ -2124,14 +2124,28 @@ describe('D-ONE-LEARNING-LOCK: every learning writer takes the one learning lock
     return fs.existsSync(record) ? fs.readFileSync(record, 'utf8').split('\n').filter(Boolean) : [];
   }
 
+  /** The stdin each writer takes; an update rewrites the anchored observation and re-renders its entry. */
+  const STDIN: Readonly<Record<string, string>> = {
+    'retire-anchor': '{"reason":"test"}',
+    'put-observation': JSON.stringify({
+      id: 'obs_one_lock_old',
+      type: 'decision',
+      title: 'Return a Result from every fallible call',
+      rule: 'Fallible functions return a Result value instead of throwing.',
+      why: 'A thrown error skips the cleanup its caller wrote for the failure path.',
+      scope: ['area:learning'],
+      provenance: 'one-lock test',
+    }),
+  };
+
   it.each([
     [['assign-anchor', 'decision', 'obs_one_lock_new']],
     [['retire-anchor', 'ADR-001', 'Retired']],
     [['refresh-anchor', 'ADR-001']],
     [['rotate-observations']],
+    [['put-observation', '--update']],
   ])('%j takes .decisions.lock and creates no other directory', args => {
-    const input = args[0] === 'retire-anchor' ? '{"reason":"test"}' : '';
-    expect(directoriesCreatedBy(args, input)).toEqual(['.decisions.lock']);
+    expect(directoriesCreatedBy(args, STDIN[args[0]] ?? '')).toEqual(['.decisions.lock']);
   });
 });
 
@@ -2146,6 +2160,18 @@ describe('D-NO-STRAY-TREE: a learning writer refuses outside a learning tree', {
     { args: ['retire-anchor', 'ADR-001', 'Retired'], input: '{"reason":"test"}' },
     { args: ['refresh-anchor', 'ADR-001'] },
     { args: ['rotate-observations'] },
+    {
+      args: ['put-observation', '--create'],
+      input: JSON.stringify({
+        id: 'obs_stray_one',
+        type: 'decision',
+        title: 'A title',
+        rule: 'A rule.',
+        why: 'A reason.',
+        scope: ['area:learning'],
+        provenance: 'stray-tree test',
+      }),
+    },
   ];
   let dir: string;
 

@@ -329,6 +329,19 @@ export interface ReleaseAnswer {
   state: 'released' | 'not-owner' | 'gone';
 }
 
+/** What put-observation answers: the outcome, the observation count it left and the anchors it re-projected. */
+export interface PutAnswer {
+  outcome: 'created' | 'updated' | 'unchanged' | 'reinforced';
+  id: string;
+  observations: number;
+  reprojected: string[];
+}
+
+/** A put's Result; a refused input carries every problem. */
+export type PutResult =
+  | { ok: true; value: PutAnswer }
+  | { ok: false; error: { kind: string; message: string; problems?: ValidationError[] } };
+
 /** The learning store's surface as the tests use it. */
 export interface LearningStoreApi {
   SCHEMA_VERSION: number;
@@ -416,6 +429,12 @@ export interface LearningStoreApi {
   claimQueue(root: string, opts?: { now?: number; token?: string; timeoutMs?: number }): Result<ClaimAnswer>;
   releaseClaim(root: string, token: string, opts?: { timeoutMs?: number }): Result<ReleaseAnswer>;
   touchClaim(root: string, opts?: { now?: number }): Result<{ touched: boolean }>;
+  putObservation(
+    root: string,
+    mode: 'create' | 'update' | 'reinforce',
+    input: unknown,
+    opts?: { now?: number; timeoutMs?: number; scopeMatches?: (glob: string) => boolean },
+  ): PutResult;
 }
 
 /** Load the learning store CommonJS module. */

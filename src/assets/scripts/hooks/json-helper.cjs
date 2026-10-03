@@ -35,6 +35,9 @@
 //   retire-anchor <anchor_id> <status>    Flip ledger row status, re-render both .md files
 //   refresh-anchor <anchor_id>            Re-project log obs onto ledger row, re-render
 //   rotate-observations                   Archive unreferenced observations idle 30+ days
+//   put-observation --create|--update|--reinforce
+//                                          Store one observation from one JSON object on
+//                                          stdin; re-projects and re-renders its entries
 //   claim-queue                           Claim the learning queue for this run; prints
 //                                          claimed <token>[ takeover] | busy | none
 //   release-claim <token>                 Release the claim the token owns; prints
@@ -315,12 +318,66 @@ function emit(result, format) {
   return 1;
 }
 
+/** The most stdin a learning op reads: far above any valid input, so a runaway writer is refused, not parsed. */
+const STDIN_JSON_MAX_BYTES = 64 * 1024;
+
+/**
+ * Read stdin from file descriptor 0, keeping at most `maxBytes`. It reads the
+ * descriptor itself: opening /dev/stdin fails on macOS when stdin is a socket, as
+ * a spawned process's is. The loop is bounded: each read takes at least one byte
+ * or ends it, and it ends once the buffer holds one byte more than `maxBytes`.
+ *
+ * @param {number} maxBytes
+ * @returns {string|null} the text, or null when stdin holds more than `maxBytes`
+ */
+function readStdinUpTo(maxBytes) {
+  const buf = Buffer.alloc(maxBytes + 1);
+  let total = 0;
+  while (total < buf.length) {
+    const read = fs.readSync(0, buf, total, buf.length - total, null);
+    if (read === 0) break;
+    total += read;
+  }
+  return total > maxBytes ? null : buf.toString('utf8', 0, total);
+}
+
+/**
+ * A learning op's stdin as one JSON object: the one way text reaches a learning
+ * op, so no field of it ever passes through argv or a shell word. Never throws.
+ *
+ * @param {string} opName - for the message
+ * @returns {{ ok: true, value: object } | { ok: false, error: { kind: 'invalid-input', message: string } }}
+ */
+function readStdinJson(opName) {
+  const refuse = message => ({ ok: false, error: { kind: 'invalid-input', message: `${opName}: ${message}` } });
+  let text;
+  try {
+    text = readStdinUpTo(STDIN_JSON_MAX_BYTES);
+  } catch (err) {
+    return refuse(`stdin could not be read: ${err && err.message ? err.message : String(err)}`);
+  }
+  if (text === null) return refuse(`stdin holds more than ${STDIN_JSON_MAX_BYTES} bytes; it must hold one JSON object`);
+  let value;
+  try {
+    value = JSON.parse(text);
+  } catch {
+    return refuse('stdin must hold one JSON object');
+  }
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) return refuse('stdin must hold one JSON object');
+  return { ok: true, value };
+}
+
+/** put-observation's flags and the store modes they name. */
+const PUT_MODES = new Map([['--create', 'create'], ['--update', 'update'], ['--reinforce', 'reinforce']]);
+
 /**
  * The learning ops whose run sends the claim heartbeat first (D-OWNED-CLAIM).
  * claim-queue and release-claim manage the claim themselves, and the generic ops
  * never touch it. A new learning op joins this set.
  */
-const LEARNING_OPS = new Set(['assign-anchor', 'next-anchor', 'retire-anchor', 'refresh-anchor', 'rotate-observations']);
+const LEARNING_OPS = new Set([
+  'assign-anchor', 'next-anchor', 'retire-anchor', 'refresh-anchor', 'rotate-observations', 'put-observation',
+]);
 
 /** Send the claim heartbeat; a failure is reported on stderr and never stops the op. */
 function heartbeat(root) {
@@ -910,6 +967,28 @@ try {
       }
       const roResult = learning().store.rotateObservations(process.cwd());
       process.exitCode = emit(roResult, ({ rotated }) => `rotated ${rotated} observations`);
+      break;
+    }
+
+    // -------------------------------------------------------------------------
+    // put-observation --create|--update|--reinforce
+    // Store one observation from the JSON object on stdin (D-PUT-NOT-MERGE,
+    // D-PUT-REPROJECTS, learning-store.cjs). Exactly one mode flag; no other argv.
+    // stdout: created <id> | updated <id> | unchanged <id> | reinforced <id> <n>,
+    // then one `reprojected <anchor>` line per entry re-projected
+    // -------------------------------------------------------------------------
+    case 'put-observation': {
+      const poMode = args.length === 1 ? PUT_MODES.get(args[0]) : undefined;
+      if (poMode === undefined) {
+        process.stderr.write('put-observation: usage: put-observation --create|--update|--reinforce (one JSON object on stdin; run from the project root)\n');
+        process.exit(1);
+      }
+      const poInput = readStdinJson('put-observation');
+      const poResult = poInput.ok ? learning().store.putObservation(process.cwd(), poMode, poInput.value) : poInput;
+      process.exitCode = emit(poResult, put => [
+        put.outcome === 'reinforced' ? `reinforced ${put.id} ${put.observations}` : `${put.outcome} ${put.id}`,
+        ...put.reprojected.map(anchorId => `reprojected ${anchorId}`),
+      ].join('\n'));
       break;
     }
 

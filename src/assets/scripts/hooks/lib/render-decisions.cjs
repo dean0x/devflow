@@ -236,7 +236,8 @@ function writeAtomic(filePath, content) {
 /**
  * Render decisions.md, pitfalls.md and index.md from the ledger rows, in memory,
  * in the order they are written: the body files first, the index last. `render`
- * writes exactly these contents and `--check` compares exactly these.
+ * and the learning store's writers write exactly these contents, and `--check`
+ * compares exactly these.
  *
  * @param {string} worktreePath - Absolute path to the worktree root.
  * @param {object[]} rows - All rows from the ledger (unfiltered).
@@ -454,6 +455,7 @@ if (require.main === module) {
 
 module.exports = {
   renderDecisionsFile,
+  renderLearningFiles,
   renderAndWriteAll,
   selectActiveRows,
   selectInactiveRows,

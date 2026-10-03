@@ -460,6 +460,21 @@ function hasLearningDir(root) {
   }
 }
 
+/**
+ * The error Result of an op run where `<root>/.devflow/learning/` is absent
+ * (D-NO-STRAY-TREE).
+ *
+ * @param {string} opName - operation name, for the message
+ * @param {string} root - project root
+ * @returns {{ ok: false, error: { kind: 'no-learning-dir', message: string } }}
+ */
+function noLearningDir(opName, root) {
+  return {
+    ok: false,
+    error: { kind: 'no-learning-dir', message: `${opName}: no .devflow/learning/ under ${root} — run from the project root` },
+  };
+}
+
 /** True for a Result: `{ ok: true, … }` or `{ ok: false, error: { … } }`. */
 function isResult(value) {
   return isPlainObject(value) && (value.ok === true || (value.ok === false && isPlainObject(value.error)));
@@ -490,18 +505,14 @@ function isResult(value) {
  *   fn's Result, or an error of kind `no-learning-dir` or `busy`.
  */
 function withDecisionsLock(opName, root, fn, { timeoutMs = LOCK_ACQUIRE_TIMEOUT_MS, staleMs = LOCK_STALE_MS } = {}) {
-  const noLearningDir = {
-    ok: false,
-    error: { kind: 'no-learning-dir', message: `${opName}: no .devflow/learning/ under ${root} — run from the project root` },
-  };
-  if (!hasLearningDir(root)) return noLearningDir;
+  if (!hasLearningDir(root)) return noLearningDir(opName, root);
   const lockDir = getDecisionsLockDir(root);
   let acquired;
   try {
     acquired = acquireMkdirLock(lockDir, timeoutMs, staleMs);
   } catch (err) {
     // The learning directory went away between the check and the mkdir.
-    if (err && err.code === 'ENOENT') return noLearningDir;
+    if (err && err.code === 'ENOENT') return noLearningDir(opName, root);
     throw err;
   }
   if (!acquired) {
@@ -1584,6 +1595,244 @@ function resolveVerifyRef(root) {
   return head === null ? null : { ref: 'HEAD', commit: head };
 }
 
+// ---------------------------------------------------------------------------
+// Rendering
+// ---------------------------------------------------------------------------
+
+/**
+ * Render decisions.md, pitfalls.md and index.md from `ledgerRows` and write each
+ * atomically, the index last. The caller holds .decisions.lock
+ * (D-ONE-LEARNING-LOCK), so the learning directory exists. render-decisions.cjs
+ * requires this module at load time, so it is required here, on first use. Prints
+ * nothing.
+ *
+ * @param {string} root - project root
+ * @param {object[]} ledgerRows - every ledger row
+ */
+function renderAll(root, ledgerRows) {
+  const { renderLearningFiles } = require('./render-decisions.cjs');
+  for (const file of renderLearningFiles(root, ledgerRows)) writeFileAtomic(file.path, file.content);
+}
+
+// ---------------------------------------------------------------------------
+// put-observation
+// ---------------------------------------------------------------------------
+
+/** The counter keys of a v1 row that the v2 counters replace: count becomes observations, created first_seen. */
+const LEGACY_COUNTER_KEYS = Object.freeze(['count', 'created']);
+
+/** A validation field that prints as it is; any other prints as JSON, on one line. */
+const PLAIN_FIELD_RE = /^[\w.()[\]-]{1,64}$/;
+
+/**
+ * The anchored ledger rows carrying observation `id`, in anchor order: the
+ * entries the observation backs (D-LEDGER-REGISTRY).
+ *
+ * @param {{ byObsId: Map<string, object[]> }} registry
+ * @param {string|null} id
+ * @returns {object[]}
+ */
+function anchoredCarriers(registry, id) {
+  const carriers = id === null ? [] : registry.byObsId.get(id) || [];
+  return sortedByAnchor(carriers.filter(row => isNonEmptyString(row.anchor_id)));
+}
+
+/** True when two rows differ in any CONTENT_KEYS value. */
+function contentDiffers(a, b) {
+  return CONTENT_KEYS.some(key => !sameJson(a[key], b[key]));
+}
+
+/** The log row a create stores: the content after the schema, then one observation, first and last seen now. */
+function createdRow(content, now) {
+  const at = new Date(now).toISOString();
+  return { schema: SCHEMA_VERSION, ...content, observations: 1, first_seen: at, last_seen: at };
+}
+
+/** The log row an update stores: the new content, then `existing`'s counters (a v1 row's converted). */
+function updatedRow(content, existing, now) {
+  return { schema: SCHEMA_VERSION, ...content, ...toV2Counters(existing, { now }) };
+}
+
+/**
+ * `existing` with one more observation, last seen now. Every other key stays,
+ * so a v1 row stays v1; its legacy counters give way to the v2 ones.
+ */
+function reinforcedRow(existing, now) {
+  const counters = toV2Counters(existing, { now });
+  const kept = Object.fromEntries(Object.entries(existing).filter(([key]) => !LEGACY_COUNTER_KEYS.includes(key)));
+  return {
+    ...kept,
+    observations: counters.observations + 1,
+    first_seen: counters.first_seen,
+    last_seen: new Date(now).toISOString(),
+  };
+}
+
+/**
+ * The log row a put stores and the outcome it reports, or null for an update
+ * whose content a v2 row already holds. A v1 row is never unchanged: an update
+ * converts it.
+ */
+function plannedLogRow(mode, content, existing, now) {
+  if (mode === 'reinforce') return { outcome: 'reinforced', logRow: reinforcedRow(existing, now) };
+  if (mode === 'create') return { outcome: 'created', logRow: createdRow(content, now) };
+  if (isV2(existing) && !contentDiffers(existing, content)) return null;
+  return { outcome: 'updated', logRow: updatedRow(content, existing, now) };
+}
+
+/** Why active entry `row` cannot take a log row of `type`, or null when it can. */
+function reprojectionProblem(row, type) {
+  if (row.type !== type) return `it is a ${row.type} entry and the observation is a ${type}`;
+  if (!ANCHOR_ID_RE.test(row.anchor_id) || !row.anchor_id.startsWith(`${anchorPrefixFor(type)}-`)) {
+    return `its anchor does not name a ${type} entry`;
+  }
+  return null;
+}
+
+/**
+ * Active entry `prior` re-projected from `logRow` (D-PUT-REPROJECTS). A status
+ * outside ENTRY_STATUSES — absent or unknown, which still counts as active —
+ * becomes the type's active status; every other ledger-owned key carries over.
+ */
+function reprojectedRow(logRow, prior) {
+  const status = ENTRY_STATUSES.includes(prior.decisions_status) ? undefined : activeStatusFor(logRow.type);
+  return toLedgerRowV2(logRow, prior, { status, expectType: prior.type });
+}
+
+/** A put's refusal: `message` follows the op name, and `extra` joins the error. */
+function putRefusal(kind, message, extra = {}) {
+  return { ok: false, error: { kind, message: `put-observation: ${message}`, ...extra } };
+}
+
+/** How a validation field prints: a plain name as it is, anything else as JSON on one line. */
+function fieldLabel(field) {
+  return PLAIN_FIELD_RE.test(field) ? field : cutTo(singleLine(JSON.stringify(field)), 80);
+}
+
+/** The refusal of an input validateObservationInput rejected: every problem, one per line. */
+function invalidInput(problems) {
+  const count = `${problems.length} problem${problems.length === 1 ? '' : 's'}`;
+  const lines = problems.map(problem => `  ${fieldLabel(problem.field)}: ${singleLine(problem.message)}`);
+  return putRefusal('invalid-input', [`the input has ${count}; nothing was written`, ...lines].join('\n'), { problems });
+}
+
+/** The refusal of a put on an observation whose entries are all inactive. */
+function restoreFirst(id, carriers) {
+  const entries = carriers.map(row => `${row.anchor_id} ${row.decisions_status}`).join(', ');
+  return putRefusal('restore-first', `'${id}' belongs only to inactive entries (${singleLine(entries)}); restore first`);
+}
+
+/**
+ * Store one observation from the put-observation op: create it, replace its
+ * content, or count one more sighting of it.
+ *
+ * D-PUT-REPROJECTS: when a put stores new content for an observation, every
+ * active ledger row carrying the observation's id is re-projected from the new
+ * log row through toLedgerRowV2, and decisions.md, pitfalls.md and index.md are
+ * re-rendered, all under the .decisions.lock the log was written under; a ledger
+ * row carrying the id with an inactive status is written back unchanged.
+ * Reason: an entry's ledger row and rendered text must follow its log row at
+ * once — a separate refresh step can be skipped or interleaved with another
+ * writer, and leaves every reader on the old wording until it runs — while a
+ * retired entry keeps the wording it was retired with.
+ *
+ * Modes, each taking content under D-PUT-NOT-MERGE:
+ *   create     an id the log does not hold, stored with one observation, first
+ *              and last seen now. An active entry already carrying the id is
+ *              re-projected: the repair for an entry that lost its log row.
+ *   update     the whole new content of an id the log holds, never merged with
+ *              the old, of the same type. A v1 row becomes a v2 row, its
+ *              counters converted by toV2Counters; what only v1 held (pattern,
+ *              details, amendments, evidence over the limits) stays in the
+ *              history and the pre-v2 backup. Content equal to a v2 row's is
+ *              `unchanged` and writes nothing.
+ *   reinforce  `{ id }` alone: one more observation, last seen now — no
+ *              history, no re-projection and no render. A v1 row stays v1, its
+ *              counters converted.
+ *
+ * Every mode refuses, writing nothing: an input validation rejects (every
+ * problem at once), an id the log holds twice, an observation whose entries are
+ * all inactive ("restore first"), and an active entry that cannot take the
+ * observation's type. A put that writes backs up a v1 tree first
+ * (D-V1-BACKUP-ONCE), quarantines the malformed lines of each file it rewrites
+ * (D-QUARANTINE-MALFORMED) and records the content it replaces
+ * (D-CONTENT-HISTORY). Entries are found through the ledger alone
+ * (D-LEDGER-REGISTRY).
+ *
+ * @param {string} root - project root
+ * @param {'create'|'update'|'reinforce'} mode
+ * @param {unknown} input - the parsed stdin object
+ * @param {{ now?: number, timeoutMs?: number, scopeMatches?: (glob: string) => boolean }} [opts]
+ *   now: epoch ms (default Date.now()); scopeMatches: default gitScopeMatcher(root)
+ * @returns {{ ok: true, value: { outcome: 'created'|'updated'|'unchanged'|'reinforced', id: string, observations: number, reprojected: string[] } }
+ *   | { ok: false, error: { kind: string, message: string, problems?: Array<{ field: string, message: string }> } }}
+ *   observations: the count the log row holds afterwards; reprojected: the
+ *   anchors re-projected, in anchor order. Error kinds: invalid-input (with
+ *   problems), duplicate-log-id, restore-first, cannot-reproject, and
+ *   withDecisionsLock's no-learning-dir and busy.
+ * @throws {TypeError} when `mode` is not a put mode
+ */
+function putObservation(root, mode, input, { now = Date.now(), timeoutMs, scopeMatches } = {}) {
+  if (!VALIDATION_MODES.includes(mode)) {
+    throw new TypeError(`putObservation: mode must be one of ${VALIDATION_MODES.join(', ')}, got '${mode}'`);
+  }
+  const matches = scopeMatches || gitScopeMatcher(root);
+  return withDecisionsLock('put-observation', root, () => putUnderLock(root, mode, input, { now, scopeMatches: matches }), { timeoutMs });
+}
+
+/** putObservation's locked body. */
+function putUnderLock(root, mode, input, { now, scopeMatches }) {
+  const logPath = getDecisionsLogPath(root);
+  const ledgerPath = getDecisionsLedgerPath(root);
+  const log = readJsonl(logPath);
+  const ledger = readJsonl(ledgerPath);
+  const registry = ledgerRegistry(ledger.rows);
+
+  const id = isPlainObject(input) && typeof input.id === 'string' ? input.id : null;
+  const sameId = id === null ? [] : log.rows.filter(row => row.id === id);
+  const existing = sameId[0] || null;
+  const checked = validateObservationInput(input, { mode, existing, ledgerIds: registry.byAnchor.keys(), scopeMatches });
+  if (!checked.ok) return invalidInput(checked.errors);
+  if (sameId.length > 1) {
+    return putRefusal('duplicate-log-id', `the log holds ${sameId.length} rows with id '${id}'; nothing was written`);
+  }
+  const carriers = anchoredCarriers(registry, id);
+  const active = carriers.filter(row => isActive(row));
+  if (carriers.length > 0 && active.length === 0) return restoreFirst(id, carriers);
+
+  const planned = plannedLogRow(mode, checked.value, existing, now);
+  if (planned === null) {
+    const observations = toV2Counters(existing, { now }).observations;
+    return { ok: true, value: { outcome: 'unchanged', id, observations, reprojected: [] } };
+  }
+  const { outcome, logRow } = planned;
+
+  const reprojecting = mode === 'reinforce' ? [] : active;
+  for (const row of reprojecting) {
+    const problem = reprojectionProblem(row, logRow.type);
+    if (problem) {
+      return putRefusal('cannot-reproject', `${singleLine(String(row.anchor_id))} cannot take this observation: ${problem}; nothing was written`);
+    }
+  }
+  const projected = new Map(reprojecting.map(row => [row, reprojectedRow(logRow, row)]));
+  const replacesContent = mode === 'update' || [...projected].some(([prior, row]) => !sameJson(prior, row));
+
+  ensurePreV2Backup(root, { logRows: log.rows, ledgerRows: ledger.rows });
+  quarantineRejected(logPath, log.rejected, { now });
+  if (replacesContent) appendHistory(root, { id, ledger: registry.byObsId.get(id) || [], log: existing }, { now });
+  writeJsonlAtomic(logPath, existing === null ? [...log.rows, logRow] : log.rows.map(row => (row === existing ? logRow : row)));
+  if (projected.size > 0) {
+    quarantineRejected(ledgerPath, ledger.rejected, { now });
+    const ledgerRows = ledger.rows.map(row => projected.get(row) || row);
+    writeJsonlAtomic(ledgerPath, ledgerRows);
+    renderAll(root, ledgerRows);
+  }
+  return {
+    ok: true,
+    value: { outcome, id, observations: logRow.observations, reprojected: reprojecting.map(row => row.anchor_id) },
+  };
+}
+
 module.exports = {
   // Constants
   SCHEMA_VERSION,
@@ -1647,4 +1896,6 @@ module.exports = {
   selectDue,
   showEntry,
   resolveVerifyRef,
+  // Entry ops
+  putObservation,
 };
