@@ -3,7 +3,7 @@
  * `resolve-evidence-policy.cjs`, never a second implementation of it.
  *
  * D-POLICY-CJS-SEAM: the resolver is plain CommonJS under src/assets/scripts/,
- * outside every tsconfig (PF-043, PF-069), so the interfaces below are
+ * outside every tsconfig, so the interfaces below are
  * TRANSCRIBED from its JSDoc typedefs and are the only shape authority on this
  * side — open those typedefs before changing anything here. The module is loaded
  * with `require()` from `scriptsDir()`, which resolves under the package root both
@@ -20,7 +20,7 @@
  * `lib/project-config.cjs` (loadProjectConfigLib), so the CLI judges a config
  * file's bytes exactly as the resolvers do.
  *
- * D-POLICY-NO-WRITE (applies ADR-024): `.devflow/project.json` is team-owned, and
+ * D-POLICY-NO-WRITE: `.devflow/project.json` is team-owned, and
  * devflow never writes or replaces a shared file it cannot prove it wrote. This
  * module therefore imports no fs API; the CLI only PRINTS the bytes a team may
  * choose to commit (`evidencePolicySuggestion`, and the migration lines of
@@ -357,10 +357,10 @@ export function formatEvidencePolicyUnavailable(error: EvidencePolicyLoadError):
 /**
  * The `compliance --status` line: the resolved policy for `opts.dir`, or the
  * unavailable line when the loader failed — that line is the whole handling
- * (ADR-028). The caller passes the compliance state it already read, so the
- * manifest is never read twice. `resolve()` makes at most three `gh` calls and
- * bounds every subprocess with a timeout, so an offline machine degrades to a
- * flagged result rather than a hang.
+ * (only a damaged package fails the load). The caller passes the compliance
+ * state it already read, so the manifest is never read twice. `resolve()` makes
+ * at most three `gh` calls and bounds every subprocess with a timeout, so an
+ * offline machine degrades to a flagged result rather than a hang.
  */
 export function evidencePolicyStatusLine(loaded: EvidencePolicyLoad, opts: EvidencePolicyResolveOptions): string {
   if (!loaded.ok) return formatEvidencePolicyUnavailable(loaded.error);
@@ -388,7 +388,7 @@ function suggestedFrameworks(complianceState: unknown): readonly string[] {
  * count); `null` otherwise. The bytes come
  * from the settings resolver's `serializeProjectSuggestion`, which returns them
  * only when they read back through the shared parser as exactly what was asked.
- * Nothing is written (D-POLICY-NO-WRITE, applies ADR-024).
+ * Nothing is written (D-POLICY-NO-WRITE).
  */
 export function evidencePolicySuggestion(
   complianceState: unknown,
