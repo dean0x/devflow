@@ -11,7 +11,7 @@ import { describe, it, expect, beforeAll } from 'vitest';
 import { createRequire } from 'module';
 import * as path from 'path';
 import { isLearningObservation } from '#core/observations.js';
-import { makeV2LedgerRow, requireLearningStore } from './learning-fixtures.js';
+import { makeV2LedgerRow, makeV2LogRow, requireLearningStore } from './learning-fixtures.js';
 
 const ROOT = path.resolve(import.meta.dirname, '../..');
 const require = createRequire(import.meta.url);
@@ -1078,13 +1078,13 @@ describe('buildIndexContent — v2 rows', () => {
 });
 
 // ---------------------------------------------------------------------------
-// json-helper.cjs byte-compat: assign-anchor delegates to decisions-format
+// json-helper.cjs byte-compat: assign-anchor renders through decisions-format
 // ---------------------------------------------------------------------------
-// We verify this by seeding an observation row directly (as the Learning agent
-// appends it), promoting via assign-anchor, and checking the output matches
-// what formatDecisionBody/formatPitfallBody would produce. This ensures the
-// write path delegates to decisions-format.cjs correctly (AC-A8: assign-anchor
-// is the sole writer).
+// We verify this by seeding a v2 observation row directly (as put-observation
+// stores it), promoting via assign-anchor, and checking the rendered entry is
+// exactly what formatEntryBodyV2 produces for the ledger row assign-anchor wrote.
+// This ensures the write path renders through decisions-format.cjs (AC-A8:
+// assign-anchor is the sole writer of a new entry).
 
 import { execSync } from 'child_process';
 import * as fs from 'fs';
@@ -1092,92 +1092,45 @@ import * as os from 'os';
 
 const JSON_HELPER = path.join(ROOT, 'src/assets/scripts/hooks/json-helper.cjs');
 
-describe('json-helper.cjs assign-anchor delegates to decisions-format', () => {
-  it('decision entry written via assign-anchor matches formatDecisionBody output', () => {
+describe('json-helper.cjs assign-anchor renders through decisions-format', () => {
+  /** Promote `logRow` with assign-anchor in a fresh learning tree; return the minted ledger row and the rendered file. */
+  function promote(logRow: Record<string, unknown>, file: 'decisions.md' | 'pitfalls.md'): { ledgerRow: Record<string, unknown>; written: string } {
     const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'fmt-compat-test-'));
-    const decisionsDir = path.join(tmpDir, '.devflow', 'learning');
-    fs.mkdirSync(decisionsDir, { recursive: true });
-    const logFile = path.join(decisionsDir, 'decisions-log.jsonl');
-
-    const obs = JSON.stringify({
-      id: 'obs_formattest1',
-      type: 'decision',
-      pattern: 'Use immutable data structures',
-      confidence: 0.9,
-      observations: 1,
-      first_seen: '2026-01-01T00:00:00Z',
-      last_seen: '2026-01-01T00:00:00Z',
-      status: 'observing',
-      evidence: [],
-      details: 'context: all state; decision: always return new objects; rationale: no mutation bugs',
-      quality_ok: true,
-    });
-
+    const learningDir = path.join(tmpDir, '.devflow', 'learning');
+    fs.mkdirSync(learningDir, { recursive: true });
     try {
-      // Seed the observation directly (one JSONL row, as the Learning agent
-      // appends it), then promote via assign-anchor
-      fs.writeFileSync(logFile, obs + '\n', 'utf8');
+      fs.writeFileSync(path.join(learningDir, 'decisions-log.jsonl'), JSON.stringify(logRow) + '\n', 'utf8');
       execSync(
-        `node "${JSON_HELPER}" assign-anchor decision obs_formattest1`,
+        `node "${JSON_HELPER}" assign-anchor ${String(logRow.type)} ${String(logRow.id)}`,
         { cwd: tmpDir, encoding: 'utf8' }
       );
-
-      const written = fs.readFileSync(path.join(decisionsDir, 'decisions.md'), 'utf8');
-      // Heading format
-      expect(written).toContain('\n## ADR-001: Use immutable data structures\n');
-      // Date line present
-      expect(written).toMatch(/- \*\*Date\*\*: \d{4}-\d{2}-\d{2}\n/);
-      // Status
-      expect(written).toContain('- **Status**: Accepted\n');
-      // Source
-      expect(written).toContain('- **Source**: self-learning:obs_formattest1\n');
+      const ledgerRow = JSON.parse(fs.readFileSync(path.join(learningDir, 'decisions-ledger.jsonl'), 'utf8')) as Record<string, unknown>;
+      return { ledgerRow, written: fs.readFileSync(path.join(learningDir, file), 'utf8') };
     } finally {
       fs.rmSync(tmpDir, { recursive: true, force: true });
     }
+  }
+
+  it('a decision promoted via assign-anchor renders as formatEntryBodyV2 of its ledger row', () => {
+    const { ledgerRow, written } = promote(
+      makeV2LogRow({ id: 'obs_formattest1', title: 'Use immutable data structures' }),
+      'decisions.md',
+    );
+    expect(written).toContain(formatEntryBodyV2(ledgerRow));
+    expect(written).toContain('\n## ADR-001: Use immutable data structures\n');
+    expect(written).toMatch(/- \*\*Status\*\*: Accepted · verified \d{4}-\d{2}-\d{2}\n/);
+    expect(written).toContain('- **Decision**: ');
   });
 
-  it('pitfall entry written via assign-anchor matches formatPitfallBody output', () => {
-    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'fmt-compat-pf-test-'));
-    const decisionsDir = path.join(tmpDir, '.devflow', 'learning');
-    fs.mkdirSync(decisionsDir, { recursive: true });
-    const logFile = path.join(decisionsDir, 'decisions-log.jsonl');
-
-    const obs = JSON.stringify({
-      id: 'obs_pfformattest1',
-      type: 'pitfall',
-      pattern: 'Editing installed files directly',
-      confidence: 0.8,
-      observations: 2,
-      first_seen: '2026-01-01T00:00:00Z',
-      last_seen: '2026-01-02T00:00:00Z',
-      status: 'observing',
-      evidence: [],
-      details: 'area: src/assets/scripts/hooks/; issue: changes overwritten on reinstall; impact: lost changes; resolution: edit source + rebuild',
-      quality_ok: true,
-    });
-
-    try {
-      // Seed the observation directly (one JSONL row, as the Learning agent
-      // appends it), then promote via assign-anchor
-      fs.writeFileSync(logFile, obs + '\n', 'utf8');
-      execSync(
-        `node "${JSON_HELPER}" assign-anchor pitfall obs_pfformattest1`,
-        { cwd: tmpDir, encoding: 'utf8' }
-      );
-
-      const written = fs.readFileSync(path.join(decisionsDir, 'pitfalls.md'), 'utf8');
-      // Heading format
-      expect(written).toContain('\n## PF-001: Editing installed files directly\n');
-      // Area present, NO Date
-      expect(written).toContain('- **Area**: src/assets/scripts/hooks/');
-      expect(written).not.toContain('**Date**');
-      // Status
-      expect(written).toContain('- **Status**: Active\n');
-      // Source
-      expect(written).toContain('- **Source**: self-learning:obs_pfformattest1\n');
-    } finally {
-      fs.rmSync(tmpDir, { recursive: true, force: true });
-    }
+  it('a pitfall promoted via assign-anchor renders as formatEntryBodyV2 of its ledger row', () => {
+    const { ledgerRow, written } = promote(
+      makeV2LogRow({ id: 'obs_pfformattest1', type: 'pitfall', title: 'Editing installed files directly' }),
+      'pitfalls.md',
+    );
+    expect(written).toContain(formatEntryBodyV2(ledgerRow));
+    expect(written).toContain('\n## PF-001: Editing installed files directly\n');
+    expect(written).toMatch(/- \*\*Status\*\*: Active · verified \d{4}-\d{2}-\d{2}\n/);
+    expect(written).toContain('- **Rule**: ');
   });
 
   it('decisions-append op is removed — unknown op exits with error', () => {

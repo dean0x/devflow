@@ -12,6 +12,10 @@
 // list and show print the ledger and the log and write nothing. claim-due names
 // the ref claims are checked at, hands out the due entries in order within a
 // count and a byte budget, and leases each one for a day.
+//
+// assign-anchor promotes a v2 observation the ledger does not carry yet: it mints
+// the next number of its type, skipping any number a tracked file cites, stamps
+// the entry verified today and never writes the log.
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { spawnSync } from 'child_process';
@@ -37,6 +41,7 @@ import {
   runJsonHelper,
   seedLearningTree,
   snapshotTree,
+  type Citation,
   type HelperRun,
   type LearningTreePaths,
   type Row,
@@ -1118,6 +1123,362 @@ describe('claim-due (D-DUE-ORDER)', { timeout: 30_000 }, () => {
     seedLearningTree(dir);
     expect(runJsonHelper(dir, ['claim-due', '--all'])).toEqual({
       code: 1, stdout: '', stderr: 'claim-due: usage: claim-due (no arguments; run from the project root)\n',
+    });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// assignAnchor (D-LEDGER-REGISTRY)
+// ---------------------------------------------------------------------------
+
+/** The fixture clock's date, as the ledger's date fields hold it. */
+const TODAY = daysAgoDate(0);
+
+/** The cited-anchor scan's answer for a tree that cites no number. */
+const NOTHING_CITED: ReadonlyMap<string, Citation> = new Map();
+
+/** The key order of a minted ledger row: the projection's, then the two dates assign stamps. */
+const MINTED_KEYS: readonly string[] = [
+  'schema', 'id', 'type', 'anchor_id', 'decisions_status', 'title', 'rule', 'why', 'scope', 'provenance',
+  'date', 'last_verified',
+];
+
+describe('assignAnchor (D-LEDGER-REGISTRY)', () => {
+  let dir: string;
+  let paths: LearningTreePaths;
+
+  beforeEach(() => {
+    dir = makeTmp('learning-ops-assign-');
+    paths = seedLearningTree(dir);
+  });
+
+  afterEach(() => {
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+
+  /** A store assign on the fixture clock; `cited` stands in for the tracked-file scan. */
+  function assign(type: 'decision' | 'pitfall', id: string, cited: ReadonlyMap<string, Citation> = NOTHING_CITED) {
+    return store.assignAnchor(dir, type, id, { now: FIXTURE_NOW, citedAnchors: cited });
+  }
+
+  it('mints the number after the highest of its type, inactive entries included, and projects the v2 row stamped today', () => {
+    const logRow = makeV2LogRow({ id: 'obs_new_one' });
+    seedLearningTree(dir, {
+      log: [logRow],
+      ledger: [
+        makeV2LedgerRow({ anchor_id: 'ADR-002', id: 'obs_beta' }),
+        makeV2LedgerRow({ anchor_id: 'ADR-004', id: 'obs_gone', decisions_status: 'Retired', retired_on: '2026-09-02' }),
+        makeV2LedgerRow({ anchor_id: 'PF-009', id: 'obs_lesson', type: 'pitfall', decisions_status: 'Active' }),
+      ],
+    });
+
+    expect(assign('decision', 'obs_new_one')).toEqual({ ok: true, value: { anchor_id: 'ADR-005', skipped: [] } });
+    const minted = rowsOf(paths.ledger)[3];
+    expect(minted).toEqual({
+      schema: 2,
+      id: 'obs_new_one',
+      type: 'decision',
+      anchor_id: 'ADR-005',
+      decisions_status: 'Accepted',
+      title: logRow.title,
+      rule: logRow.rule,
+      why: logRow.why,
+      scope: logRow.scope,
+      provenance: logRow.provenance,
+      date: TODAY,
+      last_verified: TODAY,
+    });
+    expect(Object.keys(minted)).toEqual(MINTED_KEYS);
+  });
+
+  it('numbers pitfalls on their own sequence and gives them the Active status', () => {
+    seedLearningTree(dir, {
+      log: [makeV2LogRow({ id: 'obs_lesson', type: 'pitfall' })],
+      ledger: [makeV2LedgerRow({ anchor_id: 'ADR-010', id: 'obs_beta' })],
+    });
+    expect(assign('pitfall', 'obs_lesson')).toEqual({ ok: true, value: { anchor_id: 'PF-001', skipped: [] } });
+    expect(rowsOf(paths.ledger)[1]).toMatchObject({ anchor_id: 'PF-001', type: 'pitfall', decisions_status: 'Active' });
+  });
+
+  it('never writes the log, and renders the new entry', () => {
+    seedLearningTree(dir, { log: [makeV2LogRow(), makeV2LogRow({ id: 'obs_other' })] });
+    const logBefore = fs.readFileSync(paths.log, 'utf8');
+
+    expect(assign('decision', 'obs_store_one').ok).toBe(true);
+    expect(fs.readFileSync(paths.log, 'utf8')).toBe(logBefore);
+    const ledgerRows = rowsOf(paths.ledger);
+    expect(rendered(paths, 'decisions.md')).toBe(renderDecisionsFile(ledgerRows, 'decisions'));
+    expect(rendered(paths, 'decisions.md')).toContain('\n## ADR-001: Store functions return a Result\n');
+    expect(rendered(paths, 'index.md')).toContain('  ADR-001  Store functions return a Result');
+  });
+
+  it('refuses an observation any ledger row carries, active or retired, and writes nothing', () => {
+    for (const carrier of [makeV2LedgerRow(), makeV2LedgerRow({ anchor_id: 'ADR-003', decisions_status: 'Retired' })]) {
+      seedLearningTree(dir, { log: [makeV2LogRow()], ledger: [carrier] });
+      const before = snapshotTree(dir);
+      expect(assign('decision', 'obs_store_one')).toEqual({
+        ok: false,
+        error: {
+          kind: 'already-promoted',
+          message: `assign-anchor: 'obs_store_one' is already promoted (${carrier.anchor_id} ${carrier.decisions_status}); nothing was written`,
+        },
+      });
+      expect(snapshotTree(dir)).toEqual(before);
+    }
+  });
+
+  it('promoting one observation twice mints one number: the second call finds the first in the ledger', () => {
+    seedLearningTree(dir, { log: [makeV2LogRow()] });
+    expect(assign('decision', 'obs_store_one')).toMatchObject({ ok: true, value: { anchor_id: 'ADR-001' } });
+    expect(assign('decision', 'obs_store_one')).toMatchObject({ ok: false, error: { kind: 'already-promoted' } });
+    expect(rowsOf(paths.ledger).map(row => row.anchor_id)).toEqual(['ADR-001']);
+  });
+
+  it('an anchor copied onto the log row does not make it promoted: only a ledger row does', () => {
+    seedLearningTree(dir, { log: [makeV2LogRow({ anchor_id: 'ADR-007' })] });
+    expect(assign('decision', 'obs_store_one')).toEqual({ ok: true, value: { anchor_id: 'ADR-001', skipped: [] } });
+  });
+
+  it('refuses a v1 observation, a type the observation does not have, an id the log lacks and one it holds twice, writing nothing', () => {
+    seedLearningTree(dir, {
+      log: [makeV1LogRow(), makeV2LogRow(), makeV2LogRow({ id: 'obs_twice' }), makeV2LogRow({ id: 'obs_twice', rule: 'A second copy.' })],
+    });
+    const before = snapshotTree(dir);
+
+    expect(assign('pitfall', 'obs_legacy_one')).toEqual({
+      ok: false,
+      error: { kind: 'v1-observation', message: "assign-anchor: 'obs_legacy_one' is a v1 observation; rewrite it with put-observation --update first" },
+    });
+    expect(assign('pitfall', 'obs_store_one')).toEqual({
+      ok: false,
+      error: { kind: 'type-mismatch', message: "assign-anchor: 'obs_store_one' is a decision observation, not a pitfall; nothing was written" },
+    });
+    expect(assign('decision', 'obs_absent')).toEqual({
+      ok: false,
+      error: { kind: 'not-in-log', message: "assign-anchor: 'obs_absent' is not in the log; store it with put-observation --create first" },
+    });
+    expect(assign('decision', 'obs_twice')).toEqual({
+      ok: false,
+      error: { kind: 'duplicate-log-id', message: "assign-anchor: the log holds 2 rows with id 'obs_twice'; nothing was written" },
+    });
+    expect(snapshotTree(dir)).toEqual(before);
+  });
+
+  it('copies a v1 tree aside and quarantines the ledger\'s malformed lines before it appends', () => {
+    seedLearningTree(dir, { log: [makeV2LogRow()], ledger: [makeV1LedgerRow()] });
+    fs.appendFileSync(paths.ledger, 'not json\n');
+    const ledgerBefore = fs.readFileSync(paths.ledger, 'utf8');
+
+    expect(assign('decision', 'obs_store_one')).toMatchObject({ ok: true, value: { anchor_id: 'ADR-001' } });
+    expect(fs.readFileSync(path.join(paths.learningDir, 'decisions-ledger.pre-v2.jsonl'), 'utf8')).toBe(ledgerBefore);
+    expect(rowsOf(path.join(paths.learningDir, 'decisions-ledger.rejected.jsonl')).map(row => row.text)).toEqual(['not json']);
+    expect(rowsOf(paths.ledger).map(row => row.anchor_id)).toEqual(['PF-001', 'ADR-001']);
+  });
+
+  it('refuses without a learning directory and creates nothing', () => {
+    fs.rmSync(paths.learningDir, { recursive: true });
+    expect(store.assignAnchor(dir, 'decision', 'obs_store_one', { now: FIXTURE_NOW })).toEqual({
+      ok: false,
+      error: { kind: 'no-learning-dir', message: `assign-anchor: no .devflow/learning/ under ${dir} — run from the project root` },
+    });
+    expect(fs.readdirSync(path.join(dir, '.devflow'))).toEqual([]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// assignAnchor: numbers a tracked file cites (D-E4-SKIP)
+// ---------------------------------------------------------------------------
+
+describe('assignAnchor: numbers a tracked file cites (D-E4-SKIP)', () => {
+  let dir: string;
+  let paths: LearningTreePaths;
+
+  beforeEach(() => {
+    dir = makeTmp('learning-ops-skip-');
+    paths = seedLearningTree(dir, { log: [makeV2LogRow()] });
+  });
+
+  afterEach(() => {
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+
+  /** A citation map naming the first `count` decision numbers, one per line of one file. */
+  function citingDecisions(count: number): Map<string, Citation> {
+    return new Map(Array.from({ length: count }, (_, i) => [
+      `ADR-${String(i + 1).padStart(3, '0')}`,
+      { file: 'docs/numbers.md', line: i + 1 },
+    ]));
+  }
+
+  it('skips each cited number past the highest anchor, in order, and reports where each is cited', () => {
+    seedLearningTree(dir, { ledger: [makeV2LedgerRow({ id: 'obs_beta' })] });
+    const cited = new Map([
+      ['ADR-001', { file: 'docs/old.md', line: 1 }],
+      ['ADR-002', { file: 'docs/design.md', line: 3 }],
+      ['ADR-003', { file: 'docs/plan.md', line: 12 }],
+      ['ADR-005', { file: 'docs/plan.md', line: 40 }],
+      ['PF-002', { file: 'docs/plan.md', line: 41 }],
+    ]);
+    expect(store.assignAnchor(dir, 'decision', 'obs_store_one', { now: FIXTURE_NOW, citedAnchors: cited })).toEqual({
+      ok: true,
+      value: {
+        anchor_id: 'ADR-004',
+        skipped: [
+          { anchor_id: 'ADR-002', file: 'docs/design.md', line: 3 },
+          { anchor_id: 'ADR-003', file: 'docs/plan.md', line: 12 },
+        ],
+      },
+    });
+    expect(rowsOf(paths.ledger).map(row => row.anchor_id)).toEqual(['ADR-001', 'ADR-004']);
+  });
+
+  it('skips at most E4_MAX_SKIPS (100) numbers, and refuses when the one after them is cited too', () => {
+    expect(store.E4_MAX_SKIPS).toBe(100);
+    const before = snapshotTree(dir);
+    expect(store.assignAnchor(dir, 'decision', 'obs_store_one', { now: FIXTURE_NOW, citedAnchors: citingDecisions(101) })).toEqual({
+      ok: false,
+      error: {
+        kind: 'cited-numbers-exhausted',
+        message: 'assign-anchor: ADR-001 to ADR-101 are all cited in tracked files; nothing was written',
+      },
+    });
+    expect(snapshotTree(dir)).toEqual(before);
+
+    const minted = store.assignAnchor(dir, 'decision', 'obs_store_one', { now: FIXTURE_NOW, citedAnchors: citingDecisions(100) });
+    expect(minted.ok && minted.value.anchor_id).toBe('ADR-101');
+    expect(minted.ok && minted.value.skipped.length).toBe(100);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// collectCitedAnchorIds (D-E4-SKIP)
+// ---------------------------------------------------------------------------
+
+describe('collectCitedAnchorIds (D-E4-SKIP)', { timeout: 30_000 }, () => {
+  let dir: string;
+
+  beforeEach(() => {
+    dir = makeTmp('learning-ops-cited-');
+  });
+
+  afterEach(() => {
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+
+  it('maps each anchor the tracked files cite as a whole word to its first citation', () => {
+    initGitRepo(dir, {
+      'docs/a.md': 'Intro.\nSee ADR-007 and PF-012 here.\n',
+      'src/b.ts': '// ADR-007 again\nconst wide = "PF-1234";\nconst glued = "XADR-008";\nconst cut = "PF-01";\n',
+    });
+    expect(store.collectCitedAnchorIds(dir)).toEqual(new Map([
+      ['ADR-007', { file: 'docs/a.md', line: 2 }],
+      ['PF-012', { file: 'docs/a.md', line: 2 }],
+      ['PF-1234', { file: 'src/b.ts', line: 2 }],
+    ]));
+  });
+
+  it('reads what git tracks, outside the learning tree and the vendored and build directories', () => {
+    initGitRepo(dir, {
+      '.gitignore': 'ignored/\n',
+      'ignored/scratch.md': 'ADR-003\n',
+      '.devflow/learning/decisions.md': '## ADR-004: an entry\n',
+      'node_modules/pkg/readme.md': 'ADR-005\n',
+      'dist/app.js': '// ADR-006\n',
+      'crates/target/notes.md': 'ADR-008\n',
+      'docs/kept.md': 'ADR-010\n',
+    });
+    expect([...store.collectCitedAnchorIds(dir).keys()]).toEqual(['ADR-010']);
+  });
+
+  it('walks the directory tree, with the same exclusions, outside a git repository', () => {
+    fs.mkdirSync(path.join(dir, 'docs'));
+    fs.writeFileSync(path.join(dir, 'docs', 'notes.md'), 'Design number ADR-001 was reserved earlier.\n');
+    fs.mkdirSync(path.join(dir, 'node_modules', 'pkg'), { recursive: true });
+    fs.writeFileSync(path.join(dir, 'node_modules', 'pkg', 'readme.md'), 'ADR-002\n');
+    seedLearningTree(dir, { ledger: [makeV2LedgerRow({ anchor_id: 'ADR-003' })] });
+    expect(store.collectCitedAnchorIds(dir)).toEqual(new Map([['ADR-001', { file: 'docs/notes.md', line: 1 }]]));
+  });
+
+  it('reads no binary file, no symbolic link and no file over 5 MB', () => {
+    const outside = makeTmp('learning-ops-cited-outside-');
+    try {
+      fs.writeFileSync(path.join(outside, 'target.md'), 'ADR-002\n');
+      fs.mkdirSync(path.join(dir, 'docs'));
+      fs.writeFileSync(path.join(dir, 'docs', 'binary.dat'), Buffer.from('ADR-001\n\u0000\n', 'utf8'));
+      fs.symlinkSync(path.join(outside, 'target.md'), path.join(dir, 'docs', 'link.md'));
+      fs.writeFileSync(path.join(dir, 'docs', 'big.md'), `ADR-003\n${'x'.repeat(5 * 1024 * 1024)}`);
+      fs.writeFileSync(path.join(dir, 'docs', 'kept.md'), 'ADR-004\n');
+      initGitRepo(dir);
+      expect([...store.collectCitedAnchorIds(dir).keys()]).toEqual(['ADR-004']);
+    } finally {
+      fs.rmSync(outside, { recursive: true, force: true });
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The assign-anchor op: argv and the stdout grammar
+// ---------------------------------------------------------------------------
+
+describe('assign-anchor op', { timeout: 30_000 }, () => {
+  const USAGE = 'assign-anchor: usage: assign-anchor <decision|pitfall> <obs_id> (run from the project root)\n';
+  let dir: string;
+  let paths: LearningTreePaths;
+
+  beforeEach(() => {
+    dir = makeTmp('learning-ops-assign-op-');
+    paths = seedLearningTree(dir);
+  });
+
+  afterEach(() => {
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+
+  it('prints the minted anchor on stdout and each number it skipped on stderr', () => {
+    initGitRepo(dir, { 'docs/design.md': 'See ADR-002 for the rationale.\n' });
+    seedLearningTree(dir, { log: [makeV2LogRow()], ledger: [makeV2LedgerRow({ id: 'obs_beta' })] });
+    expect(runJsonHelper(dir, ['assign-anchor', 'decision', 'obs_store_one'])).toEqual({
+      code: 0,
+      stdout: 'ADR-003\n',
+      stderr: 'assign-anchor: skipped ADR-002, cited in docs/design.md:1\n',
+    });
+  });
+
+  it('prints only the anchor when no number is skipped', () => {
+    seedLearningTree(dir, { log: [makeV2LogRow({ id: 'obs_lesson', type: 'pitfall' })] });
+    expect(runJsonHelper(dir, ['assign-anchor', 'pitfall', 'obs_lesson'])).toEqual({ code: 0, stdout: 'PF-001\n', stderr: '' });
+  });
+
+  it('prints a refusal on stderr and exits 1', () => {
+    seedLearningTree(dir, { log: [makeV2LogRow()], ledger: [makeV2LedgerRow()] });
+    expect(runJsonHelper(dir, ['assign-anchor', 'decision', 'obs_store_one'])).toEqual({
+      code: 1,
+      stdout: '',
+      stderr: "assign-anchor: 'obs_store_one' is already promoted (ADR-001 Accepted); nothing was written\n",
+    });
+  });
+
+  it('takes exactly a type and an observation id: --allow-collision and every other flag are usage errors', () => {
+    seedLearningTree(dir, { log: [makeV2LogRow()] });
+    const before = snapshotTree(dir);
+    for (const args of [
+      ['assign-anchor'],
+      ['assign-anchor', 'decision'],
+      ['assign-anchor', 'decision', 'obs_store_one', '--allow-collision'],
+      ['assign-anchor', '--allow-collision', 'decision', 'obs_store_one'],
+      ['assign-anchor', 'workflow', 'obs_store_one'],
+      ['assign-anchor', 'decision', 'not_an_observation'],
+      ['assign-anchor', 'decision', '../obs_store_one'],
+    ]) {
+      expect(runJsonHelper(dir, args), args.join(' ')).toEqual({ code: 1, stdout: '', stderr: USAGE });
+    }
+    expect(snapshotTree(dir)).toEqual(before);
+    expect(fs.existsSync(paths.ledger)).toBe(false);
+  });
+
+  it('next-anchor is not an op', () => {
+    expect(runJsonHelper(dir, ['next-anchor', 'decision'])).toEqual({
+      code: 1, stdout: '', stderr: 'json-helper: unknown operation "next-anchor"\n',
     });
   });
 });

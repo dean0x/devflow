@@ -361,7 +361,8 @@ describe('json-helper.js operations', () => {
       };
 
       expect(learningModulesLoadedBy(['get-field', 'cwd'], '{"cwd":"/tmp"}')).toEqual([]);
-      expect(learningModulesLoadedBy(['next-anchor', 'decision'], '')).toEqual([
+      // claim-queue answers none outside a learning tree, so it exits 0 here.
+      expect(learningModulesLoadedBy(['claim-queue'], '')).toEqual([
         'decisions-format.cjs', 'learning-store.cjs', 'mkdir-lock.cjs', 'project-paths.cjs', 'render-decisions.cjs',
       ]);
     } finally {

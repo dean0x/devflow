@@ -413,7 +413,6 @@ describe('claim-queue and release-claim ops', { timeout: 30_000 }, () => {
 describe('heartbeat: learning ops refresh the claim, other ops never touch it', { timeout: 30_000 }, () => {
   const LEARNING_OP_RUNS: ReadonlyArray<{ args: readonly string[]; input?: string }> = [
     { args: ['assign-anchor', 'decision', 'obs_heartbeat'] },
-    { args: ['next-anchor', 'decision'] },
     { args: ['retire-anchor', 'ADR-001', 'Retired'], input: '{"reason":"test"}' },
     { args: ['refresh-anchor', 'ADR-001'] },
     { args: ['rotate-observations'] },

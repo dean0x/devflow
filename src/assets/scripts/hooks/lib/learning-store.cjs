@@ -2000,6 +2000,328 @@ function claimDue(root, { now = Date.now(), timeoutMs, scopeMatches } = {}) {
   }, { timeoutMs });
 }
 
+// ---------------------------------------------------------------------------
+// assign-anchor: numbering and the cited-number scan
+// ---------------------------------------------------------------------------
+
+/** The most cited numbers assign-anchor skips before it refuses (D-E4-SKIP). */
+const E4_MAX_SKIPS = 100;
+
+/** Directory names the cited-number scan never reads, at any depth (D-E4-SKIP). */
+const COLLISION_SCAN_EXCLUDED_SEGMENTS = Object.freeze(['.git', 'node_modules', 'target', 'dist']);
+
+/** The largest file the cited-number scan reads (bytes); a larger one is skipped. */
+const COLLISION_SCAN_MAX_FILE_BYTES = 5 * 1024 * 1024;
+
+/** The most directory entries the fallback walk examines; the walk stops there. */
+const COLLISION_SCAN_MAX_ENTRIES = 200000;
+
+/** An anchor cited as a whole word: ADR-NNN or PF-NNN, three or more digits. */
+const CITED_ANCHOR_RE = /\b(?:ADR|PF)-\d{3,}\b/g;
+
+/** Anchor `n` of `prefix`, its number zero-padded to three digits. */
+function formatAnchorId(prefix, n) {
+  return `${prefix}-${String(n).padStart(3, '0')}`;
+}
+
+/** The highest number any ledger row's anchor of `prefix` carries, whatever its status, or 0. */
+function highestAnchorNumber(ledgerRows, prefix) {
+  const anchorRe = new RegExp(`^${prefix}-(\\d+)$`);
+  let highest = 0;
+  for (const row of ledgerRows) {
+    const m = isNonEmptyString(row.anchor_id) ? anchorRe.exec(row.anchor_id) : null;
+    if (m) highest = Math.max(highest, parseInt(m[1], 10));
+  }
+  return highest;
+}
+
+/**
+ * The next anchor of `type`: one past the highest number any anchored ledger row
+ * of that type carries, inactive rows included, so a retired number is never
+ * reused. Decisions and pitfalls number separately. One pass over the rows.
+ *
+ * @param {object[]} ledgerRows
+ * @param {'decision'|'pitfall'} type
+ * @returns {{ anchorId: string, nextN: string }} nextN is the number, zero-padded to three digits
+ * @throws {TypeError} for any other type
+ */
+function nextAnchorFromLedger(ledgerRows, type) {
+  const prefix = anchorPrefixFor(type);
+  if (prefix === null) throw new TypeError(`nextAnchorFromLedger: type must be 'decision' or 'pitfall', got '${type}'`);
+  const anchorId = formatAnchorId(prefix, highestAnchorNumber(ledgerRows, prefix) + 1);
+  return { anchorId, nextN: anchorId.slice(prefix.length + 1) };
+}
+
+/**
+ * True when a project-relative path is one the cited-number scan never reads: the
+ * learning tree, where every entry cites itself, or anything under an excluded
+ * directory segment.
+ *
+ * @param {string} relPath - relative to the project root, either separator style
+ * @returns {boolean}
+ */
+function isCollisionScanExcluded(relPath) {
+  const norm = relPath.split(path.sep).join('/');
+  if (norm === '.devflow/learning' || norm.startsWith('.devflow/learning/')) return true;
+  return norm.split('/').some(segment => COLLISION_SCAN_EXCLUDED_SEGMENTS.includes(segment));
+}
+
+/**
+ * The files git tracks under `root`, relative to it. The argv is a literal array
+ * — never a shell string.
+ *
+ * D-NO-FSMONITOR: `ls-files` reads the index, and reading the index runs the
+ * command a repository's config names in `core.fsmonitor` — code chosen by the
+ * repository this hook runs inside. The call turns it off for itself
+ * (`-c core.fsmonitor=false`), so the listing stays a pure read. Reason: the
+ * learning ops run inside any repository a session opens, and a read that ran
+ * the repository's command would execute it with the user's privileges.
+ *
+ * @param {string} root - project root
+ * @returns {string[]}
+ * @throws when `root` is not in a git working tree, git is missing, or the call
+ *   times out or overflows its buffer; the caller then walks the tree instead
+ */
+function listGitTrackedFiles(root) {
+  const out = execFileSync('git', ['-c', 'core.fsmonitor=false', 'ls-files', '-z'], {
+    cwd: root,
+    timeout: GIT_TIMEOUT_MS,
+    maxBuffer: GIT_MAX_BUFFER,
+    stdio: ['ignore', 'pipe', 'ignore'],
+    encoding: 'utf8',
+  });
+  return out.split('\0').filter(Boolean);
+}
+
+/**
+ * The files under `root` a directory walk finds, relative to it and sorted — the
+ * scan's fallback outside a git working tree. It never descends into an excluded
+ * directory, follows no symbolic link (the directory entry of a link is neither a
+ * file nor a directory) and stops after COLLISION_SCAN_MAX_ENTRIES entries. A
+ * directory it cannot read is skipped.
+ *
+ * @param {string} root - project root
+ * @returns {string[]}
+ */
+function listFsWalkFiles(root) {
+  const results = [];
+  const stack = [''];
+  let budget = COLLISION_SCAN_MAX_ENTRIES;
+  while (stack.length > 0 && budget > 0) {
+    const relDir = stack.pop();
+    let entries;
+    try {
+      entries = fs.readdirSync(relDir ? path.join(root, relDir) : root, { withFileTypes: true });
+    } catch {
+      continue;
+    }
+    for (const entry of entries) {
+      if (budget === 0) break;
+      budget -= 1;
+      const relPath = relDir ? `${relDir}/${entry.name}` : entry.name;
+      if (isCollisionScanExcluded(relPath)) continue;
+      if (entry.isDirectory()) stack.push(relPath);
+      else if (entry.isFile()) results.push(relPath);
+    }
+  }
+  return results.sort();
+}
+
+/**
+ * The text of a file the cited-number scan reads, or null for one it skips: a
+ * file it cannot open or read, anything but a regular file — a symbolic link
+ * included, since it opens with O_NOFOLLOW — a file over
+ * COLLISION_SCAN_MAX_FILE_BYTES, and a binary file (one holding a NUL byte).
+ * O_NONBLOCK keeps a FIFO from blocking the open, and the read never takes more
+ * bytes than the size checked.
+ *
+ * @param {string} file
+ * @returns {string|null}
+ */
+function readScannedText(file) {
+  let fd;
+  try {
+    fd = fs.openSync(file, fs.constants.O_RDONLY | (fs.constants.O_NOFOLLOW || 0) | (fs.constants.O_NONBLOCK || 0));
+  } catch {
+    return null;
+  }
+  try {
+    const stat = fs.fstatSync(fd);
+    if (!stat.isFile() || stat.size > COLLISION_SCAN_MAX_FILE_BYTES) return null;
+    const buf = Buffer.alloc(stat.size);
+    let total = 0;
+    while (total < buf.length) {
+      const read = fs.readSync(fd, buf, total, buf.length - total, total);
+      if (read === 0) break;
+      total += read;
+    }
+    const text = buf.toString('utf8', 0, total);
+    return text.includes('\u0000') ? null : text;
+  } catch {
+    return null;
+  } finally {
+    fs.closeSync(fd);
+  }
+}
+
+/**
+ * Every anchor the project's files cite as a whole word, each mapped to its first
+ * citation: the scan behind D-E4-SKIP. It reads the files git tracks under `root`
+ * (D-NO-FSMONITOR) or, outside a git working tree, the files a directory walk
+ * finds — never the learning tree, an excluded directory, a symbolic link, a
+ * binary file or a file over the size cap. A file it cannot read is passed over.
+ * It writes nothing and takes no lock.
+ *
+ * @param {string} root - project root
+ * @returns {Map<string, { file: string, line: number }>} the file relative to
+ *   `root`, the line 1-based; citations in listing order
+ */
+function collectCitedAnchorIds(root) {
+  let files;
+  try {
+    files = listGitTrackedFiles(root);
+  } catch {
+    files = listFsWalkFiles(root);
+  }
+  const cited = new Map();
+  for (const relPath of files) {
+    if (isCollisionScanExcluded(relPath)) continue;
+    const text = readScannedText(path.join(root, relPath));
+    if (text === null || !(text.includes('ADR-') || text.includes('PF-'))) continue;
+    const lines = text.split('\n');
+    for (let i = 0; i < lines.length; i++) {
+      for (const m of lines[i].matchAll(CITED_ANCHOR_RE)) {
+        if (!cited.has(m[0])) cited.set(m[0], { file: relPath, line: i + 1 });
+      }
+    }
+  }
+  return cited;
+}
+
+/** Today on the clock `now`, as the ledger's date fields hold it: YYYY-MM-DD, UTC. */
+function isoDate(now) {
+  return new Date(now).toISOString().slice(0, 10);
+}
+
+/** An assign-anchor refusal: `message` follows the op name. */
+function assignRefusal(kind, message) {
+  return { ok: false, error: { kind, message: `assign-anchor: ${message}` } };
+}
+
+/**
+ * The anchor assign-anchor mints for `type` (D-E4-SKIP): nextAnchorFromLedger's,
+ * or the first number after it that `citedAnchors` does not hold, skipping at most
+ * E4_MAX_SKIPS numbers.
+ *
+ * @param {object[]} ledgerRows
+ * @param {'decision'|'pitfall'} type
+ * @param {ReadonlyMap<string, { file: string, line: number }>} citedAnchors
+ * @returns {{ ok: true, value: { anchor_id: string, skipped: Array<{ anchor_id: string, file: string, line: number }> } }
+ *   | { ok: false, error: { kind: 'cited-numbers-exhausted', message: string } }}
+ */
+function mintAnchor(ledgerRows, type, citedAnchors) {
+  const prefix = anchorPrefixFor(type);
+  const first = highestAnchorNumber(ledgerRows, prefix) + 1;
+  const skipped = [];
+  for (let n = first; n <= first + E4_MAX_SKIPS; n++) {
+    const anchorId = formatAnchorId(prefix, n);
+    const citation = citedAnchors.get(anchorId);
+    if (!citation) return { ok: true, value: { anchor_id: anchorId, skipped } };
+    skipped.push({ anchor_id: anchorId, file: citation.file, line: citation.line });
+  }
+  const last = formatAnchorId(prefix, first + E4_MAX_SKIPS);
+  return assignRefusal(
+    'cited-numbers-exhausted',
+    `${formatAnchorId(prefix, first)} to ${last} are all cited in tracked files; nothing was written`,
+  );
+}
+
+/**
+ * Promote a v2 observation to a new ledger entry of `type` — the assign-anchor op.
+ *
+ * D-E4-SKIP: assign-anchor scans the project's tracked files once, before it takes
+ * the learning lock, for every anchor they cite as a whole word, and mints the
+ * first number past the type's highest anchored number that no file cites; it
+ * reports each number it skips, skips at most E4_MAX_SKIPS of them and refuses
+ * when the next one is cited too. The scan reads neither the learning tree nor
+ * .git or a vendored or build directory (node_modules, target, dist), nor a
+ * symbolic link, a binary file or a file over 5 MB. Reason: a document can cite a
+ * number the ledger has not minted yet, and minting over it silently binds that
+ * citation to an unrelated entry; refusing stopped the run until a person
+ * renamed the citation, while a skipped number costs only a gap.
+ *
+ * The observation must be one v2 log row of `type` that no ledger row carries,
+ * whatever its status (D-LEDGER-REGISTRY). The new row is its projection
+ * (toLedgerRowV2) with the type's active status and today as both date and
+ * last_verified; it is appended to the ledger and the files are re-rendered, all
+ * under the learning lock. The log is never written. Like every writer it backs
+ * up a v1 tree first (D-V1-BACKUP-ONCE) and quarantines the ledger's malformed
+ * lines before it rewrites the ledger (D-QUARANTINE-MALFORMED); a refusal writes
+ * nothing.
+ *
+ * @param {string} root - project root
+ * @param {'decision'|'pitfall'} type
+ * @param {string} obsId - an observation id
+ * @param {{ now?: number, timeoutMs?: number, citedAnchors?: ReadonlyMap<string, { file: string, line: number }> }} [opts]
+ *   now: epoch ms (default Date.now()); citedAnchors: default collectCitedAnchorIds(root)
+ * @returns {{ ok: true, value: { anchor_id: string, skipped: Array<{ anchor_id: string, file: string, line: number }> } }
+ *   | { ok: false, error: { kind: string, message: string } }}
+ *   Error kinds: not-in-log, duplicate-log-id, already-promoted, v1-observation,
+ *   type-mismatch, cited-numbers-exhausted, and withDecisionsLock's
+ *   no-learning-dir and busy.
+ * @throws {TypeError} for a type other than decision or pitfall, or a malformed obsId
+ */
+function assignAnchor(root, type, obsId, { now = Date.now(), timeoutMs, citedAnchors } = {}) {
+  if (anchorPrefixFor(type) === null) throw new TypeError(`assignAnchor: type must be 'decision' or 'pitfall', got '${type}'`);
+  if (typeof obsId !== 'string' || !OBS_ID_RE.test(obsId)) throw new TypeError('assignAnchor: obsId must be an observation id');
+  if (!hasLearningDir(root)) return noLearningDir('assign-anchor', root);
+  const cited = citedAnchors || collectCitedAnchorIds(root);
+  return withDecisionsLock('assign-anchor', root, () => assignUnderLock(root, type, obsId, { now, cited }), { timeoutMs });
+}
+
+/** assignAnchor's locked body. */
+function assignUnderLock(root, type, obsId, { now, cited }) {
+  const ledgerPath = getDecisionsLedgerPath(root);
+  const ledger = readJsonl(ledgerPath);
+  const log = readJsonl(getDecisionsLogPath(root));
+
+  const sameId = log.rows.filter(row => row.id === obsId);
+  if (sameId.length === 0) {
+    return assignRefusal('not-in-log', `'${obsId}' is not in the log; store it with put-observation --create first`);
+  }
+  if (sameId.length > 1) {
+    return assignRefusal('duplicate-log-id', `the log holds ${sameId.length} rows with id '${obsId}'; nothing was written`);
+  }
+  const carriers = ledgerRegistry(ledger.rows).byObsId.get(obsId) || [];
+  if (carriers.length > 0) {
+    const entries = sortedByAnchor(carriers).map(row => `${listingToken(row.anchor_id)} ${listingToken(row.decisions_status)}`);
+    return assignRefusal('already-promoted', `'${obsId}' is already promoted (${entries.join(', ')}); nothing was written`);
+  }
+  const [logRow] = sameId;
+  if (!isV2(logRow)) {
+    return assignRefusal('v1-observation', `'${obsId}' is a v1 observation; rewrite it with put-observation --update first`);
+  }
+  if (logRow.type !== type) {
+    return assignRefusal('type-mismatch', `'${obsId}' is a ${listingToken(logRow.type)} observation, not a ${type}; nothing was written`);
+  }
+  const minted = mintAnchor(ledger.rows, type, cited);
+  if (!minted.ok) return minted;
+
+  const today = isoDate(now);
+  const row = toLedgerRowV2(logRow, { last_verified: today }, {
+    anchorId: minted.value.anchor_id,
+    status: activeStatusFor(type),
+    date: today,
+    expectType: type,
+  });
+  ensurePreV2Backup(root, { logRows: log.rows, ledgerRows: ledger.rows });
+  quarantineRejected(ledgerPath, ledger.rejected, { now });
+  const ledgerRows = [...ledger.rows, row];
+  writeJsonlAtomic(ledgerPath, ledgerRows);
+  renderAll(root, ledgerRows);
+  return minted;
+}
+
 module.exports = {
   // Constants
   SCHEMA_VERSION,
@@ -2069,4 +2391,9 @@ module.exports = {
   formatListing,
   showByKey,
   claimDue,
+  // assign-anchor
+  E4_MAX_SKIPS,
+  nextAnchorFromLedger,
+  collectCitedAnchorIds,
+  assignAnchor,
 };

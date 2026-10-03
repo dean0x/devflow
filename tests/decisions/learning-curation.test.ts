@@ -20,7 +20,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
 
-import { requireLearningStore } from './learning-fixtures.js';
+import { makeV2LogRow, requireLearningStore } from './learning-fixtures.js';
 
 const ROOT = path.resolve(import.meta.dirname, '../..');
 const require = createRequire(import.meta.url);
@@ -306,7 +306,7 @@ describe('AC-F5: retire-anchor hides entry from .md, keeps in ledger', () => {
 
     // Write a new observation and promote it — should get ADR-003, not ADR-002
     const logPath = path.join(tmpDir, '.devflow', 'learning', 'decisions-log.jsonl');
-    fs.writeFileSync(logPath, JSON.stringify(makeObsRow({ id: 'obs_new', type: 'decision', status: 'ready' })) + '\n', 'utf8');
+    fs.writeFileSync(logPath, JSON.stringify(makeV2LogRow({ id: 'obs_new' })) + '\n', 'utf8');
     const result = runHelper('assign-anchor decision obs_new', tmpDir);
     expect(result.code).toBe(0);
     expect(result.stdout.trim()).toBe('ADR-003');

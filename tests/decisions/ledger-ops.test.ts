@@ -3,13 +3,14 @@
 // Tests for Phase 3 ledger ops: assign-anchor, retire-anchor, rotate-observations,
 // numbering stability, and locking discipline.
 //
-// AC-A2: assign-anchor computes max+1 from ledger incl Retired; 3-digit-padded
+// AC-A2: assign-anchor mints max+1 over every anchored row of its type, inactive
+//        ones included, skipping each number a tracked file cites; 3-digit-padded
 // AC-A3: retire-anchor flips decisions_status, row otherwise intact, idempotent
 // AC-F5: retired entries vanish from .md but stay in ledger
 // AC-F7: retired numbers leave gaps, never reused
 // AC-F9: a log row no ledger row carries is archived once 30 days pass since its
 //        last activity; a row any ledger row carries never is (D-ROTATE-UNREFERENCED)
-// AC-P2: assign-anchor is O(anchored) — single pass (structural check)
+// AC-P2: the next number is one pass over the anchored rows (structural check)
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { createRequire } from 'module';
@@ -39,12 +40,6 @@ const require = createRequire(import.meta.url);
 // ---------------------------------------------------------------------------
 // Helpers: load the modules under test
 // ---------------------------------------------------------------------------
-
-const jsonHelper = require(
-  path.join(ROOT, 'src/assets/scripts/hooks/json-helper.cjs')
-) as {
-  nextAnchorFromLedger: (rows: Record<string, unknown>[], type: 'decision' | 'pitfall') => { anchorId: string; nextN: string };
-};
 
 const store = requireLearningStore();
 
@@ -144,17 +139,17 @@ function runHelper(args: string, cwd: string): { stdout: string; code: number; s
 }
 
 // ---------------------------------------------------------------------------
-// nextAnchorFromLedger — unit tests (the pure function behind assign-anchor)
+// nextAnchorFromLedger — unit tests (the number assign-anchor starts from)
 // ---------------------------------------------------------------------------
 
 describe('nextAnchorFromLedger', () => {
   it('empty ledger => ADR-001 for decisions', () => {
-    const { anchorId } = jsonHelper.nextAnchorFromLedger([], 'decision');
+    const { anchorId } = store.nextAnchorFromLedger([], 'decision');
     expect(anchorId).toBe('ADR-001');
   });
 
   it('empty ledger => PF-001 for pitfalls', () => {
-    const { anchorId } = jsonHelper.nextAnchorFromLedger([], 'pitfall');
+    const { anchorId } = store.nextAnchorFromLedger([], 'pitfall');
     expect(anchorId).toBe('PF-001');
   });
 
@@ -163,7 +158,7 @@ describe('nextAnchorFromLedger', () => {
       makeLedgerRow({ anchor_id: 'ADR-001' }),
       makeLedgerRow({ anchor_id: 'ADR-003', id: 'obs_003', decisions_status: 'Accepted' }),
     ];
-    const { anchorId } = jsonHelper.nextAnchorFromLedger(rows, 'decision');
+    const { anchorId } = store.nextAnchorFromLedger(rows, 'decision');
     expect(anchorId).toBe('ADR-004');
   });
 
@@ -172,7 +167,7 @@ describe('nextAnchorFromLedger', () => {
       makeLedgerRow({ anchor_id: 'ADR-001', decisions_status: 'Accepted' }),
       makeLedgerRow({ anchor_id: 'ADR-005', id: 'obs_005', decisions_status: 'Retired' }),
     ];
-    const { anchorId } = jsonHelper.nextAnchorFromLedger(rows, 'decision');
+    const { anchorId } = store.nextAnchorFromLedger(rows, 'decision');
     expect(anchorId).toBe('ADR-006');
   });
 
@@ -181,7 +176,7 @@ describe('nextAnchorFromLedger', () => {
       makeLedgerRow({ anchor_id: 'ADR-001', decisions_status: 'Accepted' }),
       makeLedgerRow({ anchor_id: 'ADR-007', id: 'obs_007', decisions_status: 'Deprecated' }),
     ];
-    const { anchorId } = jsonHelper.nextAnchorFromLedger(rows, 'decision');
+    const { anchorId } = store.nextAnchorFromLedger(rows, 'decision');
     expect(anchorId).toBe('ADR-008');
   });
 
@@ -190,14 +185,14 @@ describe('nextAnchorFromLedger', () => {
       makeLedgerRow({ anchor_id: 'ADR-009', id: 'obs_a', type: 'decision' }),
       { ...makeLedgerRow({ anchor_id: 'PF-002', id: 'obs_b', type: 'pitfall' }), type: 'pitfall' },
     ];
-    const { anchorId: adrNext } = jsonHelper.nextAnchorFromLedger(rows, 'decision');
-    const { anchorId: pfNext } = jsonHelper.nextAnchorFromLedger(rows, 'pitfall');
+    const { anchorId: adrNext } = store.nextAnchorFromLedger(rows, 'decision');
+    const { anchorId: pfNext } = store.nextAnchorFromLedger(rows, 'pitfall');
     expect(adrNext).toBe('ADR-010');
     expect(pfNext).toBe('PF-003');
   });
 
   it('next N is zero-padded to 3 digits', () => {
-    const { anchorId, nextN } = jsonHelper.nextAnchorFromLedger([], 'decision');
+    const { anchorId, nextN } = store.nextAnchorFromLedger([], 'decision');
     expect(nextN).toBe('001');
     expect(anchorId).toBe('ADR-001');
   });
@@ -206,7 +201,7 @@ describe('nextAnchorFromLedger', () => {
     const rows = Array.from({ length: 100 }, (_, i) =>
       makeLedgerRow({ anchor_id: `ADR-${String(i + 1).padStart(3, '0')}`, id: `obs_${i}` })
     );
-    const { anchorId } = jsonHelper.nextAnchorFromLedger(rows, 'decision');
+    const { anchorId } = store.nextAnchorFromLedger(rows, 'decision');
     expect(anchorId).toBe('ADR-101');
   });
 });
@@ -228,21 +223,21 @@ describe('assign-anchor CLI op', () => {
   });
 
   it('empty ledger => assigns ADR-001 and prints it to stdout', () => {
-    writeLog(tmpDir, [makeObsRow({ id: 'obs_aa_001', type: 'decision', status: 'ready' })]);
+    writeLog(tmpDir, [makeV2LogRow({ id: 'obs_aa_001' })]);
     const result = runHelper('assign-anchor decision obs_aa_001', tmpDir);
     expect(result.code).toBe(0);
     expect(result.stdout.trim()).toBe('ADR-001');
   });
 
   it('empty ledger => assigns PF-001 for pitfall type', () => {
-    writeLog(tmpDir, [makeObsRow({ id: 'obs_pf_001', type: 'pitfall', status: 'ready' })]);
+    writeLog(tmpDir, [makeV2LogRow({ id: 'obs_pf_001', type: 'pitfall' })]);
     const result = runHelper('assign-anchor pitfall obs_pf_001', tmpDir);
     expect(result.code).toBe(0);
     expect(result.stdout.trim()).toBe('PF-001');
   });
 
   it('appends anchored row to ledger', () => {
-    writeLog(tmpDir, [makeObsRow({ id: 'obs_aa_002', type: 'decision', status: 'ready' })]);
+    writeLog(tmpDir, [makeV2LogRow({ id: 'obs_aa_002' })]);
     runHelper('assign-anchor decision obs_aa_002', tmpDir);
     const rows = readLedger(tmpDir);
     expect(rows).toHaveLength(1);
@@ -250,46 +245,39 @@ describe('assign-anchor CLI op', () => {
     expect(rows[0].id).toBe('obs_aa_002');
   });
 
-  it('marks source log row as created', () => {
-    writeLog(tmpDir, [makeObsRow({ id: 'obs_aa_003', type: 'decision', status: 'ready' })]);
-    runHelper('assign-anchor decision obs_aa_003', tmpDir);
-    const logRows = readLog(tmpDir);
-    const row = logRows.find(r => r.id === 'obs_aa_003');
-    expect(row).toBeDefined();
-    expect(row!.status).toBe('created');
+  it('leaves the log as it was: promotion is recorded in the ledger alone', () => {
+    const logPath = writeLog(tmpDir, [makeV2LogRow({ id: 'obs_aa_003' })]);
+    const before = fs.readFileSync(logPath, 'utf8');
+    expect(runHelper('assign-anchor decision obs_aa_003', tmpDir).code).toBe(0);
+    expect(fs.readFileSync(logPath, 'utf8')).toBe(before);
   });
 
   it('sets decisions_status to Accepted for decisions', () => {
-    writeLog(tmpDir, [makeObsRow({ id: 'obs_aa_004', type: 'decision', status: 'ready' })]);
+    writeLog(tmpDir, [makeV2LogRow({ id: 'obs_aa_004' })]);
     runHelper('assign-anchor decision obs_aa_004', tmpDir);
     const rows = readLedger(tmpDir);
     expect(rows[0].decisions_status).toBe('Accepted');
   });
 
   it('sets decisions_status to Active for pitfalls', () => {
-    writeLog(tmpDir, [makeObsRow({ id: 'obs_pf_004', type: 'pitfall', status: 'ready' })]);
+    writeLog(tmpDir, [makeV2LogRow({ id: 'obs_pf_004', type: 'pitfall' })]);
     runHelper('assign-anchor pitfall obs_pf_004', tmpDir);
     const rows = readLedger(tmpDir);
     expect(rows[0].decisions_status).toBe('Active');
   });
 
-  it('sets date for decisions', () => {
-    writeLog(tmpDir, [makeObsRow({ id: 'obs_aa_005', type: 'decision', status: 'ready' })]);
-    runHelper('assign-anchor decision obs_aa_005', tmpDir);
-    const rows = readLedger(tmpDir);
-    expect(typeof rows[0].date).toBe('string');
-    expect(rows[0].date).toMatch(/^\d{4}-\d{2}-\d{2}$/);
-  });
-
-  it('sets date on pitfall rows — all entry types stamped, no decision/pitfall asymmetry', () => {
-    // assign-anchor passes date unconditionally for both decisions and pitfalls.
-    // Pitfall ledger rows carry a date so refresh-anchor can re-project them.
-    writeLog(tmpDir, [makeObsRow({ id: 'obs_pf_005', type: 'pitfall', status: 'ready' })]);
-    runHelper('assign-anchor pitfall obs_pf_005', tmpDir);
-    const rows = readLedger(tmpDir);
-    // pitfall rows now get a date stamp (same as decisions — no asymmetry)
-    expect(typeof rows[0].date).toBe('string');
-    expect(rows[0].date).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+  it('stamps date and last_verified with today on decisions and pitfalls alike', () => {
+    const today = (): string => new Date().toISOString().slice(0, 10);
+    const dayBefore = today();
+    writeLog(tmpDir, [makeV2LogRow({ id: 'obs_aa_005' }), makeV2LogRow({ id: 'obs_pf_005', type: 'pitfall' })]);
+    expect(runHelper('assign-anchor decision obs_aa_005', tmpDir).code).toBe(0);
+    expect(runHelper('assign-anchor pitfall obs_pf_005', tmpDir).code).toBe(0);
+    // A run that crosses midnight UTC may stamp either day.
+    const days = [dayBefore, today()];
+    for (const row of readLedger(tmpDir)) {
+      expect(days, `date of ${String(row.anchor_id)}`).toContain(row.date);
+      expect(row.last_verified, `last_verified of ${String(row.anchor_id)}`).toBe(row.date);
+    }
   });
 
   it('with existing anchors including Retired — assigns max+1, number not reused', () => {
@@ -297,7 +285,7 @@ describe('assign-anchor CLI op', () => {
       makeLedgerRow({ anchor_id: 'ADR-001', decisions_status: 'Accepted' }),
       makeLedgerRow({ anchor_id: 'ADR-005', id: 'obs_retired', decisions_status: 'Retired' }),
     ]);
-    writeLog(tmpDir, [makeObsRow({ id: 'obs_new_006', type: 'decision', status: 'ready' })]);
+    writeLog(tmpDir, [makeV2LogRow({ id: 'obs_new_006' })]);
     const result = runHelper('assign-anchor decision obs_new_006', tmpDir);
     expect(result.code).toBe(0);
     expect(result.stdout.trim()).toBe('ADR-006');
@@ -307,14 +295,14 @@ describe('assign-anchor CLI op', () => {
     writeLedger(tmpDir, [
       makeLedgerRow({ anchor_id: 'ADR-010', id: 'obs_a', type: 'decision', decisions_status: 'Accepted' }),
     ]);
-    writeLog(tmpDir, [makeObsRow({ id: 'obs_pf_ind', type: 'pitfall', status: 'ready' })]);
+    writeLog(tmpDir, [makeV2LogRow({ id: 'obs_pf_ind', type: 'pitfall' })]);
     const result = runHelper('assign-anchor pitfall obs_pf_ind', tmpDir);
     expect(result.code).toBe(0);
     expect(result.stdout.trim()).toBe('PF-001'); // PF sequence starts at 1 regardless of ADR-010
   });
 
   it('re-renders decisions.md with the new entry', () => {
-    writeLog(tmpDir, [makeObsRow({ id: 'obs_render_01', type: 'decision', status: 'ready' })]);
+    writeLog(tmpDir, [makeV2LogRow({ id: 'obs_render_01' })]);
     runHelper('assign-anchor decision obs_render_01', tmpDir);
     const decisionsPath = path.join(tmpDir, '.devflow', 'learning', 'decisions.md');
     expect(fs.existsSync(decisionsPath)).toBe(true);
@@ -324,12 +312,13 @@ describe('assign-anchor CLI op', () => {
 
   it('exits non-zero when obs_id not found in log', () => {
     writeLog(tmpDir, []);
-    const result = runHelper('assign-anchor decision nonexistent_id', tmpDir);
+    const result = runHelper('assign-anchor decision obs_nonexistent', tmpDir);
     expect(result.code).not.toBe(0);
+    expect(result.stderr).toContain("'obs_nonexistent' is not in the log");
   });
 
   it('exits non-zero when type is invalid', () => {
-    writeLog(tmpDir, [makeObsRow({ id: 'obs_bad', status: 'ready' })]);
+    writeLog(tmpDir, [makeV2LogRow({ id: 'obs_bad' })]);
     const result = runHelper('assign-anchor workflow obs_bad', tmpDir);
     expect(result.code).not.toBe(0);
   });
@@ -471,7 +460,7 @@ describe('AC-F7: number stability — retired number is never reused', () => {
     runHelper('retire-anchor ADR-005 Retired', tmpDir);
 
     // Now assign-anchor should give ADR-006, not ADR-005
-    writeLog(tmpDir, [makeObsRow({ id: 'obs_new', type: 'decision', status: 'ready' })]);
+    writeLog(tmpDir, [makeV2LogRow({ id: 'obs_new' })]);
     const result = runHelper('assign-anchor decision obs_new', tmpDir);
     expect(result.code).toBe(0);
     expect(result.stdout.trim()).toBe('ADR-006');
@@ -486,7 +475,7 @@ describe('AC-F7: number stability — retired number is never reused', () => {
     runHelper('retire-anchor ADR-002 Deprecated', tmpDir);
     runHelper('retire-anchor ADR-003 Superseded', tmpDir);
 
-    writeLog(tmpDir, [makeObsRow({ id: 'obs_gap', type: 'decision', status: 'ready' })]);
+    writeLog(tmpDir, [makeV2LogRow({ id: 'obs_gap' })]);
     const result = runHelper('assign-anchor decision obs_gap', tmpDir);
     expect(result.code).toBe(0);
     expect(result.stdout.trim()).toBe('ADR-004');
@@ -1502,10 +1491,10 @@ describe('rotate-observations CLI op', () => {
 });
 
 // ---------------------------------------------------------------------------
-// assign-anchor precondition assertions (Issue 1)
+// assign-anchor: the ledger alone records promotion (D-LEDGER-REGISTRY)
 // ---------------------------------------------------------------------------
 
-describe('assign-anchor precondition assertions', () => {
+describe('assign-anchor: the ledger alone records promotion (D-LEDGER-REGISTRY)', () => {
   let tmpDir: string;
 
   beforeEach(() => {
@@ -1517,47 +1506,40 @@ describe('assign-anchor precondition assertions', () => {
     fs.rmSync(tmpDir, { recursive: true, force: true });
   });
 
-  it('(b) exits non-zero when obs already has an anchor_id set', () => {
-    // The obs in the log already has anchor_id set → double-anchor attempt
-    writeLog(tmpDir, [
-      makeObsRow({ id: 'obs_already_anchored', type: 'decision', status: 'created', anchor_id: 'ADR-001' }),
-    ]);
-    const result = runHelper('assign-anchor decision obs_already_anchored', tmpDir);
+  it('refuses an observation a ledger row already carries, naming that entry, though the log row names no anchor', () => {
+    writeLog(tmpDir, [makeV2LogRow({ id: 'obs_already_anchored', type: 'pitfall' })]);
+    writeLedger(tmpDir, [makeV2LedgerRow({ id: 'obs_already_anchored', type: 'pitfall', anchor_id: 'PF-007', decisions_status: 'Active' })]);
+    const ledgerPath = path.join(tmpDir, '.devflow', 'learning', 'decisions-ledger.jsonl');
+    const before = fs.readFileSync(ledgerPath, 'utf8');
+
+    const result = runHelper('assign-anchor pitfall obs_already_anchored', tmpDir);
     expect(result.code).not.toBe(0);
-    expect(result.stderr).toContain('obs_already_anchored');
-    expect(result.stderr).toContain('already anchored');
+    expect(result.stderr).toContain("'obs_already_anchored' is already promoted (PF-007 Active)");
+    expect(fs.readFileSync(ledgerPath, 'utf8')).toBe(before);
   });
 
-  it('(b) error message names the existing anchor_id', () => {
-    writeLog(tmpDir, [
-      makeObsRow({ id: 'obs_with_anchor', type: 'pitfall', status: 'created', anchor_id: 'PF-007' }),
-    ]);
-    const result = runHelper('assign-anchor pitfall obs_with_anchor', tmpDir);
-    expect(result.code).not.toBe(0);
-    expect(result.stderr).toContain('PF-007');
-  });
-
-  it('(b) live double-assign guard: second assign-anchor on same obs_id is rejected', () => {
-    // assign-anchor writes anchor_id back to the log row after promotion.
-    // A second call on the same obs_id reads aaObs.anchor_id as set and is rejected by guard (b).
-    writeLog(tmpDir, [
-      makeObsRow({ id: 'obs_double_assign', type: 'decision' }),
-    ]);
-    // First assign-anchor: should succeed and mint ADR-001
+  it('a second assign-anchor on the same observation is refused and mints no second number', () => {
+    writeLog(tmpDir, [makeV2LogRow({ id: 'obs_double_assign' })]);
     const first = runHelper('assign-anchor decision obs_double_assign', tmpDir);
     expect(first.code).toBe(0);
     expect(first.stdout.trim()).toBe('ADR-001');
 
-    // Second assign-anchor on the SAME obs_id: guard must reject it.
     const second = runHelper('assign-anchor decision obs_double_assign', tmpDir);
     expect(second.code).not.toBe(0);
-    expect(second.stderr).toContain('already anchored');
-    expect(second.stderr).toContain('obs_double_assign');
+    expect(second.stderr).toContain("'obs_double_assign' is already promoted (ADR-001 Accepted)");
+    expect(readLedger(tmpDir).map(row => row.anchor_id)).toEqual(['ADR-001']);
+  });
+
+  it('refuses a v1 observation and a type the observation does not have', () => {
+    writeLog(tmpDir, [makeObsRow({ id: 'obs_v1_row', type: 'decision' }), makeV2LogRow({ id: 'obs_v2_row' })]);
+    expect(runHelper('assign-anchor decision obs_v1_row', tmpDir).stderr).toContain("'obs_v1_row' is a v1 observation");
+    expect(runHelper('assign-anchor pitfall obs_v2_row', tmpDir).stderr).toContain("'obs_v2_row' is a decision observation, not a pitfall");
+    expect(fs.existsSync(path.join(tmpDir, '.devflow', 'learning', 'decisions-ledger.jsonl'))).toBe(false);
   });
 });
 
 // ---------------------------------------------------------------------------
-// E4: pre-mint collision guard — refuse to mint over an existing citation
+// D-E4-SKIP: assign-anchor never mints a number a tracked file already cites
 // ---------------------------------------------------------------------------
 
 const COLLISION_GIT_ENV = {
@@ -1579,7 +1561,7 @@ function initGitRepoWithFile(dir: string, relFile: string, content: string): voi
   execSync('git commit -q -m init', { cwd: dir, env: COLLISION_GIT_ENV });
 }
 
-describe('E4: pre-mint collision guard', () => {
+describe('D-E4-SKIP: assign-anchor skips a number a tracked file cites', { timeout: 30_000 }, () => {
   let tmpDir: string;
 
   beforeEach(() => {
@@ -1591,23 +1573,20 @@ describe('E4: pre-mint collision guard', () => {
     fs.rmSync(tmpDir, { recursive: true, force: true });
   });
 
-  it('refuses to mint when the candidate id is cited in a git-tracked file; ledger left byte-unchanged', () => {
+  it('skips the next number when a git-tracked file cites it, reporting the citation, and mints the one after', () => {
     writeLedger(tmpDir, [makeLedgerRow({ anchor_id: 'ADR-001' })]);
-    const ledgerPath = path.join(tmpDir, '.devflow', 'learning', 'decisions-ledger.jsonl');
-    const before = fs.readFileSync(ledgerPath);
-
-    // Next candidate for a ledger already holding ADR-001 is ADR-002 — plant that
-    // as a design-local citation with a different meaning, in a tracked file.
+    // The next number for a ledger holding ADR-001 is ADR-002: a design document
+    // already uses it for something else, in a tracked file.
     initGitRepoWithFile(tmpDir, 'docs/design.md', 'See ADR-002 for the rationale.\n');
-    writeLog(tmpDir, [makeObsRow({ id: 'obs_collide', type: 'decision', status: 'ready' })]);
+    writeLog(tmpDir, [makeV2LogRow({ id: 'obs_collide' })]);
 
-    const result = runHelper('assign-anchor decision obs_collide', tmpDir);
-    expect(result.code).not.toBe(0);
-    expect(result.stderr).toContain('ADR-002');
-    expect(result.stderr).toContain('docs/design.md:1');
-
-    const after = fs.readFileSync(ledgerPath);
-    expect(after.equals(before)).toBe(true);
+    const result = runJsonHelper(tmpDir, ['assign-anchor', 'decision', 'obs_collide']);
+    expect(result).toEqual({
+      code: 0,
+      stdout: 'ADR-003\n',
+      stderr: 'assign-anchor: skipped ADR-002, cited in docs/design.md:1\n',
+    });
+    expect(readLedger(tmpDir).map(row => row.anchor_id)).toEqual(['ADR-001', 'ADR-003']);
   });
 
   it('lists tracked files without running the repository\'s core.fsmonitor hook (D-NO-FSMONITOR)', () => {
@@ -1618,7 +1597,7 @@ describe('E4: pre-mint collision guard', () => {
     fs.mkdirSync(path.join(tmpDir, 'ignored'), { recursive: true });
     fs.writeFileSync(path.join(tmpDir, 'ignored', 'scratch.md'), 'ADR-002 scribble.\n');
     initGitRepoWithFile(tmpDir, 'docs/design.md', 'See ADR-002 for the rationale.\n');
-    writeLog(tmpDir, [makeObsRow({ id: 'obs_fsmonitor', type: 'decision', status: 'ready' })]);
+    writeLog(tmpDir, [makeV2LogRow({ id: 'obs_fsmonitor' })]);
 
     const outside = fs.mkdtempSync(path.join(os.tmpdir(), 'aa-fsmonitor-hook-'));
     const home = path.join(outside, 'home');
@@ -1636,7 +1615,8 @@ describe('E4: pre-mint collision guard', () => {
         env,
         encoding: 'utf8',
       });
-      expect(run.status).not.toBe(0);
+      expect(run.status, run.stderr).toBe(0);
+      expect(run.stdout).toBe('ADR-003\n');
       expect(run.stderr).toContain('docs/design.md:1');
       expect(run.stderr).not.toContain('scratch.md');
       expect(fs.existsSync(marker), 'assign-anchor ran the fsmonitor hook').toBe(false);
@@ -1649,50 +1629,56 @@ describe('E4: pre-mint collision guard', () => {
     }
   });
 
-  it('refuses to mint when the candidate id is cited in a non-git project (fs-walk fallback)', () => {
-    writeLog(tmpDir, [makeObsRow({ id: 'obs_collide_nogit', type: 'decision', status: 'ready' })]);
+  it('skips a number cited in a non-git project (fs-walk fallback)', () => {
+    writeLog(tmpDir, [makeV2LogRow({ id: 'obs_collide_nogit' })]);
     fs.mkdirSync(path.join(tmpDir, 'docs'), { recursive: true });
     fs.writeFileSync(path.join(tmpDir, 'docs', 'notes.md'), 'Design number ADR-001 was reserved earlier.\n');
 
-    const result = runHelper('assign-anchor decision obs_collide_nogit', tmpDir);
-    expect(result.code).not.toBe(0);
-    expect(result.stderr).toContain('ADR-001');
-    expect(result.stderr).toContain('notes.md');
+    const result = runJsonHelper(tmpDir, ['assign-anchor', 'decision', 'obs_collide_nogit']);
+    expect(result).toEqual({
+      code: 0,
+      stdout: 'ADR-002\n',
+      stderr: 'assign-anchor: skipped ADR-001, cited in docs/notes.md:1\n',
+    });
+  });
 
-    const ledgerPath = path.join(tmpDir, '.devflow', 'learning', 'decisions-ledger.jsonl');
-    expect(fs.existsSync(ledgerPath)).toBe(false);
+  it('refuses, writing nothing, when the next 101 numbers are all cited', () => {
+    writeLog(tmpDir, [makeV2LogRow({ id: 'obs_crowded' })]);
+    fs.mkdirSync(path.join(tmpDir, 'docs'), { recursive: true });
+    const numbers = Array.from({ length: 101 }, (_, i) => `ADR-${String(i + 1).padStart(3, '0')}`);
+    fs.writeFileSync(path.join(tmpDir, 'docs', 'numbers.md'), `${numbers.join('\n')}\n`);
+    const before = snapshotTree(tmpDir);
+
+    expect(runJsonHelper(tmpDir, ['assign-anchor', 'decision', 'obs_crowded'])).toEqual({
+      code: 1,
+      stdout: '',
+      stderr: 'assign-anchor: ADR-001 to ADR-101 are all cited in tracked files; nothing was written\n',
+    });
+    expect(snapshotTree(tmpDir)).toEqual(before);
   });
 
   it('mints normally when there is no citation anywhere in the tree', () => {
-    writeLog(tmpDir, [makeObsRow({ id: 'obs_clean', type: 'decision', status: 'ready' })]);
+    writeLog(tmpDir, [makeV2LogRow({ id: 'obs_clean' })]);
     const result = runHelper('assign-anchor decision obs_clean', tmpDir);
     expect(result.code).toBe(0);
     expect(result.stdout.trim()).toBe('ADR-001');
   });
 
-  it('--allow-collision mints anyway despite a citation', () => {
-    writeLog(tmpDir, [makeObsRow({ id: 'obs_override', type: 'decision', status: 'ready' })]);
+  it('--allow-collision is not a flag: it is a usage error that writes nothing', () => {
+    writeLog(tmpDir, [makeV2LogRow({ id: 'obs_override' })]);
     fs.mkdirSync(path.join(tmpDir, 'docs'), { recursive: true });
     fs.writeFileSync(path.join(tmpDir, 'docs', 'notes.md'), 'ADR-001 already means something else.\n');
 
     const result = runHelper('assign-anchor decision obs_override --allow-collision', tmpDir);
-    expect(result.code).toBe(0);
-    expect(result.stdout.trim()).toBe('ADR-001');
-  });
-
-  it('rejects an unknown flag before touching the ledger', () => {
-    writeLog(tmpDir, [makeObsRow({ id: 'obs_badflag', type: 'decision', status: 'ready' })]);
-    const result = runHelper('assign-anchor decision obs_badflag --allow-typo', tmpDir);
     expect(result.code).not.toBe(0);
-    expect(result.stderr).toContain('unknown flag');
-    const ledgerPath = path.join(tmpDir, '.devflow', 'learning', 'decisions-ledger.jsonl');
-    expect(fs.existsSync(ledgerPath)).toBe(false);
+    expect(result.stderr).toContain('assign-anchor: usage');
+    expect(fs.existsSync(path.join(tmpDir, '.devflow', 'learning', 'decisions-ledger.jsonl'))).toBe(false);
   });
 
   it('ignores a self-citation inside .devflow/learning (mints normally)', () => {
-    writeLog(tmpDir, [makeObsRow({ id: 'obs_selfcite', type: 'decision', status: 'ready' })]);
+    writeLog(tmpDir, [makeV2LogRow({ id: 'obs_selfcite' })]);
     // A rendered .md file already containing "ADR-001" is the ledger's own
-    // territory (self-citation) and must never trigger the guard.
+    // territory (self-citation) and must never count as a citation.
     fs.writeFileSync(
       path.join(tmpDir, '.devflow', 'learning', 'decisions.md'),
       '## ADR-001: Some prior entry\n'
@@ -1703,34 +1689,11 @@ describe('E4: pre-mint collision guard', () => {
     expect(result.stdout.trim()).toBe('ADR-001');
   });
 
-  describe('next-anchor (read-only)', () => {
-    it('prints the next candidate id and creates no ledger when there is no citation', () => {
-      const ledgerPath = path.join(tmpDir, '.devflow', 'learning', 'decisions-ledger.jsonl');
-      expect(fs.existsSync(ledgerPath)).toBe(false);
-
-      const result = runHelper('next-anchor decision', tmpDir);
-      expect(result.code).toBe(0);
-      expect(result.stdout.trim()).toBe('ADR-001');
-      expect(fs.existsSync(ledgerPath)).toBe(false);
-    });
-
-    it('reports collision hits and exits non-zero without mutating anything', () => {
-      fs.mkdirSync(path.join(tmpDir, 'docs'), { recursive: true });
-      fs.writeFileSync(path.join(tmpDir, 'docs', 'notes.md'), 'ADR-001 is cited here.\n');
-      const ledgerPath = path.join(tmpDir, '.devflow', 'learning', 'decisions-ledger.jsonl');
-
-      const result = runHelper('next-anchor decision', tmpDir);
-      expect(result.code).not.toBe(0);
-      expect(result.stdout.trim()).toBe('ADR-001');
-      expect(result.stderr).toContain('notes.md');
-      expect(fs.existsSync(ledgerPath)).toBe(false);
-    });
-
-    it('type validation matches assign-anchor', () => {
-      const result = runHelper('next-anchor workflow', tmpDir);
-      expect(result.code).not.toBe(0);
-      expect(result.stderr).toContain("must be 'decision' or 'pitfall'");
-    });
+  it('next-anchor is not an op', () => {
+    const result = runHelper('next-anchor decision', tmpDir);
+    expect(result.code).not.toBe(0);
+    expect(result.stderr).toContain('unknown operation "next-anchor"');
+    expect(fs.existsSync(path.join(tmpDir, '.devflow', 'learning', 'decisions-ledger.jsonl'))).toBe(false);
   });
 });
 
@@ -1829,44 +1792,6 @@ describe('toLedgerRow projector — canonical committed shape', () => {
     expect(row.raw_body).toBeUndefined();
     expect(row.amendments).toBeUndefined();
   });
-
-  it('assign-anchor CLI emits only canonical fields in ledger row', () => {
-    // End-to-end: obs has extra lifecycle fields; ledger row must not contain them
-    const tmpE2e = fs.mkdtempSync(path.join(os.tmpdir(), 'aa-proj-test-'));
-    fs.mkdirSync(path.join(tmpE2e, '.devflow', 'learning'), { recursive: true });
-    try {
-      const logPathE2e = path.join(tmpE2e, '.devflow', 'learning', 'decisions-log.jsonl');
-      const obsWithLifecycle = makeObsRow({
-        id: 'obs_e2e_proj',
-        type: 'decision',
-        status: 'ready',
-        confidence: 0.95,
-        quality_ok: true,
-        artifact_path: '/some/file.ts',
-      });
-      fs.writeFileSync(logPathE2e, JSON.stringify(obsWithLifecycle) + '\n', 'utf8');
-
-      const result = runHelper('assign-anchor decision obs_e2e_proj', tmpE2e);
-      expect(result.code).toBe(0);
-
-      const ledgerPath = path.join(tmpE2e, '.devflow', 'learning', 'decisions-ledger.jsonl');
-      const rows = parseLedger(ledgerPath);
-      expect(rows).toHaveLength(1);
-      const r = rows[0];
-      // Required canonical
-      expect(r.anchor_id).toBe('ADR-001');
-      expect(r.id).toBe('obs_e2e_proj');
-      // Excluded lifecycle fields
-      expect(r.confidence).toBeUndefined();
-      expect(r.quality_ok).toBeUndefined();
-      expect(r.artifact_path).toBeUndefined();
-      expect(r.evidence).toBeUndefined();
-      expect(r.first_seen).toBeUndefined();
-      expect(r.last_seen).toBeUndefined();
-    } finally {
-      fs.rmSync(tmpE2e, { recursive: true, force: true });
-    }
-  });
 });
 
 // ---------------------------------------------------------------------------
@@ -1894,15 +1819,15 @@ describe('AC-P2: assign-anchor O(anchored) performance (ratio methodology)', () 
 
     // Warmup
     for (let i = 0; i < WARMUP; i++) {
-      jsonHelper.nextAnchorFromLedger(buildRows(SMALL), 'decision');
-      jsonHelper.nextAnchorFromLedger(buildRows(LARGE), 'decision');
+      store.nextAnchorFromLedger(buildRows(SMALL), 'decision');
+      store.nextAnchorFromLedger(buildRows(LARGE), 'decision');
     }
 
     const smallTimes: number[] = [];
     for (let i = 0; i < RUNS; i++) {
       const rows = buildRows(SMALL);
       const start = performance.now();
-      jsonHelper.nextAnchorFromLedger(rows, 'decision');
+      store.nextAnchorFromLedger(rows, 'decision');
       smallTimes.push(performance.now() - start);
     }
 
@@ -1910,7 +1835,7 @@ describe('AC-P2: assign-anchor O(anchored) performance (ratio methodology)', () 
     for (let i = 0; i < RUNS; i++) {
       const rows = buildRows(LARGE);
       const start = performance.now();
-      jsonHelper.nextAnchorFromLedger(rows, 'decision');
+      store.nextAnchorFromLedger(rows, 'decision');
       largeTimes.push(performance.now() - start);
     }
 
@@ -1943,8 +1868,8 @@ describe('AC-P2: assign-anchor O(anchored) performance (ratio methodology)', () 
 // AC-P2b: full assign-anchor write-path O(anchored) — CLI-level timing
 //
 // The in-memory nextAnchorFromLedger test above validates the scan logic, but
-// the real write path (lock → read ledger → compute next → append → update log
-// → render both .md) dominates runtime in production. This test times full CLI
+// the real write path (cited-number scan → lock → read ledger and log → compute
+// next → append → render all three files) dominates runtime in production. This test times full CLI
 // invocations at ~50 vs ~500 seeded ledger rows to bound the REAL write path's
 // growth.
 //
@@ -1983,7 +1908,7 @@ describe('AC-P2b: assign-anchor full write-path performance (CLI-level)', () => 
     }
 
     function seedLog(dir: string, obsId: string): void {
-      writeLog(dir, [makeObsRow({ id: obsId, status: 'ready', type: 'decision' })]);
+      writeLog(dir, [makeV2LogRow({ id: obsId })]);
     }
 
     function timeAssignAnchor(n: number): number {
@@ -2048,7 +1973,7 @@ describe('locking discipline: assign-anchor and render under single .decisions.l
   });
 
   it('assign-anchor completes without deadlock and leaves no lock dir behind', () => {
-    writeLog(tmpDir, [makeObsRow({ id: 'obs_lock_01', type: 'decision', status: 'ready' })]);
+    writeLog(tmpDir, [makeV2LogRow({ id: 'obs_lock_01' })]);
     const result = runHelper('assign-anchor decision obs_lock_01', tmpDir);
     expect(result.code).toBe(0);
 
@@ -2096,7 +2021,7 @@ describe('D-ONE-LEARNING-LOCK: every learning writer takes the one learning lock
     probeDir = fs.mkdtempSync(path.join(os.tmpdir(), 'one-lock-probe-'));
     const details = 'context: c; decision: d; rationale: r';
     writeLog(tmpDir, [
-      makeObsRow({ id: 'obs_one_lock_new', type: 'decision', status: 'ready' }),
+      makeV2LogRow({ id: 'obs_one_lock_new' }),
       makeObsRow({ id: 'obs_one_lock_old', type: 'decision', status: 'created', details }),
       makeObsRow({ id: 'obs_one_lock_stale', status: 'observing', last_seen: '2026-01-01T00:00:00Z' }),
     ]);
@@ -2211,7 +2136,7 @@ describe('D-NO-STRAY-TREE: a learning writer refuses outside a learning tree', {
     const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'aa-no-decisions-'));
     try {
       fs.mkdirSync(path.join(tmpDir, '.devflow', 'learning'), { recursive: true });
-      writeLog(tmpDir, [makeObsRow({ id: 'obs_nodec_01', type: 'decision', status: 'ready' })]);
+      writeLog(tmpDir, [makeV2LogRow({ id: 'obs_nodec_01' })]);
       const result = runHelper('assign-anchor decision obs_nodec_01', tmpDir);
       expect(result.code).toBe(0);
       // Before fix: fs.mkdirSync('.devflow/decisions', {recursive:true}) was called
@@ -2411,7 +2336,7 @@ describe('D-LEDGER-MAIN-WORKTREE: a worktree session mints into the main ledger 
 
     // The main ledger already holds ADR-001..003, and a turn is pending.
     writeLedger(main, [1, 2, 3].map(n => makeLedgerRow({ id: `obs_main_${n}`, anchor_id: `ADR-00${n}` })));
-    writeLog(main, [makeObsRow({ id: 'obs_wt_new', type: 'decision', status: 'ready' })]);
+    writeLog(main, [makeV2LogRow({ id: 'obs_wt_new' })]);
     fs.writeFileSync(
       path.join(main, '.devflow', 'learning', '.pending-turns.jsonl'),
       '{"role":"user","content":"we chose X over Y","ts":1}\n',
@@ -2446,7 +2371,7 @@ describe('D-LEDGER-MAIN-WORKTREE: a worktree session mints into the main ledger 
 
   it('known-bad probe: the same op run from the worktree toplevel restarts the numbering', () => {
     // Why the directive must not name the checkout: the worktree has no ledger.
-    writeLog(wt, [makeObsRow({ id: 'obs_wt_new', type: 'decision', status: 'ready' })]);
+    writeLog(wt, [makeV2LogRow({ id: 'obs_wt_new' })]);
     const result = runHelper('assign-anchor decision obs_wt_new', wt);
     expect(result.stdout.trim()).toBe('ADR-001');
   });

@@ -351,6 +351,18 @@ export interface DueClaim {
   due: DueEntry[];
 }
 
+/** Where a tracked file first cites an anchor: its path from the project root and its 1-based line. */
+export interface Citation {
+  file: string;
+  line: number;
+}
+
+/** What assign-anchor answers: the anchor it minted, and each cited number it skipped on the way. */
+export interface AssignAnswer {
+  anchor_id: string;
+  skipped: Array<{ anchor_id: string } & Citation>;
+}
+
 /** The learning store's surface as the tests use it. */
 export interface LearningStoreApi {
   SCHEMA_VERSION: number;
@@ -451,6 +463,15 @@ export interface LearningStoreApi {
     root: string,
     opts?: { now?: number; timeoutMs?: number; scopeMatches?: (glob: string) => boolean },
   ): Result<DueClaim>;
+  E4_MAX_SKIPS: number;
+  nextAnchorFromLedger(rows: readonly Row[], type: 'decision' | 'pitfall'): { anchorId: string; nextN: string };
+  collectCitedAnchorIds(root: string): Map<string, Citation>;
+  assignAnchor(
+    root: string,
+    type: 'decision' | 'pitfall',
+    obsId: string,
+    opts?: { now?: number; timeoutMs?: number; citedAnchors?: ReadonlyMap<string, Citation> },
+  ): Result<AssignAnswer>;
 }
 
 /** Load the learning store CommonJS module. */
