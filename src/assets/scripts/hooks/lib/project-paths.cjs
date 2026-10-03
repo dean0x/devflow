@@ -111,11 +111,6 @@ function getDecisionsIndexPath(projectRoot) {
   return path.join(projectRoot, '.devflow', 'learning', 'index.md');
 }
 
-/** .devflow/learning/.observations.lock — mkdir-based lock directory for observation log writes */
-function getObservationsLockDir(projectRoot) {
-  return path.join(projectRoot, '.devflow', 'learning', '.observations.lock');
-}
-
 // ---------------------------------------------------------------------------
 // Memory / working-memory files
 // ---------------------------------------------------------------------------
@@ -189,7 +184,6 @@ module.exports = {
   getDecisionsArchivePath,
   getDecisionsHistoryPath,
   getDecisionsLockDir,
-  getObservationsLockDir,
   getDecisionsIndexPath,
   // Memory files
   getWorkingMemoryPath,

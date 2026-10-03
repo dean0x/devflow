@@ -30,7 +30,6 @@ import {
   getDecisionsArchivePath,
   getDecisionsHistoryPath,
   getDecisionsLockDir,
-  getObservationsLockDir,
   getDecisionsIndexPath,
   getWorkingMemoryPath,
   getBackupPath,
@@ -115,10 +114,6 @@ describe('project-paths TypeScript module', () => {
     it('getDecisionsIndexPath returns .devflow/learning/index.md', () => {
       expect(getDecisionsIndexPath(ROOT)).toBe('/some/project/.devflow/learning/index.md');
     });
-
-    it('getObservationsLockDir returns .devflow/learning/.observations.lock', () => {
-      expect(getObservationsLockDir(ROOT)).toBe('/some/project/.devflow/learning/.observations.lock');
-    });
   });
 
   describe('memory / working-memory files', () => {
@@ -200,7 +195,6 @@ describe('CJS project-paths parity', () => {
     { name: 'getDecisionsArchivePath', ts: getDecisionsArchivePath, cjs: cjsPaths.getDecisionsArchivePath },
     { name: 'getDecisionsHistoryPath', ts: getDecisionsHistoryPath, cjs: cjsPaths.getDecisionsHistoryPath },
     { name: 'getDecisionsLockDir', ts: getDecisionsLockDir, cjs: cjsPaths.getDecisionsLockDir },
-    { name: 'getObservationsLockDir', ts: getObservationsLockDir, cjs: cjsPaths.getObservationsLockDir },
     { name: 'getDecisionsIndexPath', ts: getDecisionsIndexPath, cjs: cjsPaths.getDecisionsIndexPath },
     { name: 'getWorkingMemoryPath', ts: getWorkingMemoryPath, cjs: cjsPaths.getWorkingMemoryPath },
     { name: 'getBackupPath', ts: getBackupPath, cjs: cjsPaths.getBackupPath },

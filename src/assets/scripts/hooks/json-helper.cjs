@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 
 // src/assets/scripts/hooks/json-helper.cjs
-// Provides jq-equivalent operations for hooks when jq is not installed.
+// Provides jq-equivalent operations for hooks when jq is not installed, and the
+// learning ops the Learning agent runs from the project root.
 // SECURITY: This is a local CLI helper invoked only by shell hooks with controlled arguments.
 // File path arguments come from hook-owned variables, not from external/untrusted input.
 // Usage: node json-helper.cjs <operation> [args...]
@@ -32,7 +33,7 @@
 //                                          any pre-mint collision hits; mutates nothing (E4)
 //   retire-anchor <anchor_id> <status>    Flip ledger row status, re-render both .md files
 //   refresh-anchor <anchor_id>            Re-project log obs onto ledger row, re-render
-//   rotate-observations [<log>] [<arch>]  Archive observing rows older than 30 days
+//   rotate-observations                   Archive observing rows older than 30 days
 
 'use strict';
 
@@ -44,22 +45,28 @@ const op = process.argv[2];
 const args = process.argv.slice(3);
 
 const { safePath } = require('./lib/safe-path.cjs');
-const {
-  getDecisionsLockDir,
-  getDecisionsLedgerPath,
-  getDecisionsLogPath,
-  getDecisionsArchivePath,
-  getObservationsLockDir,
-} = require('./lib/project-paths.cjs');
-const {
-  initDecisionsContent,
-  toLedgerRow,
-} = require('./lib/decisions-format.cjs');
-const {
-  renderAndWriteAll,
-  parseLedger,
-} = require('./lib/render-decisions.cjs');
-const { acquireMkdirLock, releaseLock } = require('./lib/mkdir-lock.cjs');
+
+/** The learning modules, once loaded; see learning(). */
+let learningModules = null;
+
+/**
+ * The learning modules — the store, the path helpers, the formatter and the
+ * renderer — loaded on first use and memoized. The generic ops never call it, so
+ * a hook that falls back from jq to node never pays for loading them.
+ *
+ * @returns {{ store: object, paths: object, format: object, render: object }}
+ */
+function learning() {
+  if (learningModules === null) {
+    learningModules = {
+      store: require('./lib/learning-store.cjs'),
+      paths: require('./lib/project-paths.cjs'),
+      format: require('./lib/decisions-format.cjs'),
+      render: require('./lib/render-decisions.cjs'),
+    };
+  }
+  return learningModules;
+}
 
 function readStdin() {
   try {
@@ -84,56 +91,6 @@ function parseJsonl(file) {
   return lines.map(l => {
     try { return JSON.parse(l); } catch { return null; }
   }).filter(Boolean);
-}
-
-/**
- * Strip leading YAML frontmatter from content that the model may have included
- * despite being told not to. Belt-and-suspenders defense against duplicate frontmatter.
- */
-function stripLeadingFrontmatter(text) {
-  if (!text) return '';
-  const trimmed = text.replace(/^\s*\n/, '');
-  if (!trimmed.startsWith('---')) return text;
-  const match = trimmed.match(/^---\s*\n[\s\S]*?\n---\s*\n?/);
-  return match ? trimmed.slice(match[0].length) : text;
-}
-
-/**
- * Write `tmp` with O_EXCL (wx flag) so the kernel rejects the open if a file or
- * symlink already exists at that path, preventing TOCTOU symlink-follow attacks.
- * On EEXIST (stale or attacker-placed .tmp) we unlink and retry once.
- * @param {string} tmp - Path to the temporary file.
- * @param {string} content - Content to write.
- */
-function writeExclusive(tmp, content) {
-  try {
-    fs.writeFileSync(tmp, content, { flag: 'wx' });
-  } catch (err) {
-    if (err.code !== 'EEXIST') throw err;
-    // Stale or attacker-placed .tmp — remove it and retry once.
-    try { fs.unlinkSync(tmp); } catch { /* race — already removed */ }
-    fs.writeFileSync(tmp, content, { flag: 'wx' });
-  }
-}
-
-function writeJsonlAtomic(file, entries) {
-  // PID-scope the tmp name so concurrent writers from different processes
-  // never collide on the same .tmp path.  mirrors fs-atomic.ts and proxy-log.ts.
-  const tmp = file + '.tmp.' + process.pid;
-  const content = entries.length > 0
-    ? entries.map(e => JSON.stringify(e)).join('\n') + '\n'
-    : '';
-  writeExclusive(tmp, content);
-  fs.renameSync(tmp, file);
-}
-
-/** Atomically write a text file via a .tmp sibling and rename. */
-function writeFileAtomic(file, content) {
-  // PID-scope the tmp name so concurrent writers from different processes
-  // never collide on the same .tmp path.  mirrors fs-atomic.ts and proxy-log.ts.
-  const tmp = file + '.tmp.' + process.pid;
-  writeExclusive(tmp, content);
-  fs.renameSync(tmp, file);
 }
 
 /**
@@ -320,12 +277,13 @@ function formatCollisionHits(hits) {
  * @returns {number} count of rotated rows
  */
 function rotateObservations(logPath, archivePath, nowMs) {
+  const { store, render } = learning();
   const THIRTY_DAYS_MS = 30 * 24 * 60 * 60 * 1000;
   const cutoffMs = nowMs - THIRTY_DAYS_MS;
 
   let logEntries = [];
   if (fs.existsSync(logPath)) {
-    logEntries = parseLedger(logPath);
+    logEntries = render.parseLedger(logPath);
   }
 
   const kept = [];
@@ -366,7 +324,7 @@ function rotateObservations(logPath, archivePath, nowMs) {
   // safe — parseLedger handles trailing-newline variance.
   const existingArchiveIds = new Set();
   if (fs.existsSync(archivePath)) {
-    const existingRows = parseLedger(archivePath);
+    const existingRows = render.parseLedger(archivePath);
     for (const r of existingRows) {
       if (r.id) existingArchiveIds.add(r.id);
     }
@@ -380,7 +338,7 @@ function rotateObservations(logPath, archivePath, nowMs) {
   }
 
   // Write remaining rows back to log
-  writeJsonlAtomic(logPath, kept);
+  store.writeJsonlAtomic(logPath, kept);
 
   return stale.length;
 }
@@ -405,50 +363,33 @@ function parseArgs(argList) {
 }
 
 // ---------------------------------------------------------------------------
-// Lock helpers — shared by the three decisions ledger ops (assign-anchor,
-// retire-anchor, refresh-anchor). rotate-observations uses a DIFFERENT lock
-// (.observations.lock) and keeps its own scaffold (avoids over-generalising).
+// Learning-op adapter
 // ---------------------------------------------------------------------------
 
-/** Acquire-timeout for .decisions.lock (ms). Named to avoid magic numbers (COMP-4). */
-const LOCK_ACQUIRE_TIMEOUT_MS = 30000;
-/** Stale-break threshold for .decisions.lock (ms). Named to avoid magic numbers (COMP-4). */
-const LOCK_STALE_MS = 60000;
-
 /**
- * Run fn() under .decisions.lock.
+ * Print a learning op's Result: `format(value)` and a newline on stdout, or the
+ * error message and a newline on stderr. Returns the exit code for the op to set
+ * as process.exitCode, so the process exits once, after the op has returned and
+ * every lock it took is released.
  *
- * Never call process.exit() inside fn — throw instead: the throw propagates
- * through the try/finally so releaseLock always runs. process.exit is reserved for
- * the acquire-failure path where no lock is held and no cleanup is needed.
- *
- * The parent directory of the lock dir is created before acquireMkdirLock is
- * called so a fresh-project cold-path does not throw ENOENT inside the lock lib.
- *
- * @param {string} opName - operation name for error messages
- * @param {string} projectRoot - project root (cwd)
- * @param {() => unknown} fn - body to execute under the lock
+ * @param {{ ok: true, value: unknown } | { ok: false, error: { message: string } }} result
+ * @param {(value: any) => string} format - the stdout text for the value
+ * @returns {0|1}
  */
-function withDecisionsLock(opName, projectRoot, fn) {
-  const lockDir = getDecisionsLockDir(projectRoot);
-  // Ensure parent directory exists before acquiring lock
-  fs.mkdirSync(path.dirname(lockDir), { recursive: true });
-  if (!acquireMkdirLock(lockDir, LOCK_ACQUIRE_TIMEOUT_MS, LOCK_STALE_MS)) {
-    process.stderr.write(`${opName}: timeout acquiring lock at ${lockDir}\n`);
-    process.exit(1);
+function emit(result, format) {
+  if (result.ok) {
+    process.stdout.write(`${format(result.value)}\n`);
+    return 0;
   }
-  try { return fn(); } finally { releaseLock(lockDir); }
+  process.stderr.write(`${result.error.message}\n`);
+  return 1;
 }
 
-/**
- * Serialize ledger rows to a JSONL string with trailing newline.
- * Extracted to avoid repeating the same expression at four sites (COMP-4).
- *
- * @param {object[]} rows
- * @returns {string}
- */
-const serializeLedger = rows => rows.map(r => JSON.stringify(r)).join('\n') + '\n';
-
+// The learning ops run from the project root and take no path to a learning file:
+// each builds its paths from the current directory. Every op that writes takes the
+// store's one learning lock through withDecisionsLock (D-ONE-LEARNING-LOCK) and
+// refuses, creating nothing, when .devflow/learning/ is absent (D-NO-STRAY-TREE).
+// A locked body returns its Result; emit prints it once the lock is released.
 if (require.main === module) {
 try {
   switch (op) {
@@ -656,7 +597,6 @@ try {
     // mints anyway, for the human-ruled case where the citation should be
     // superseded by the ledger's number.
     //
-    // Locking discipline: holds ONLY .decisions.lock (never .observations.lock).
     // O(anchored) — single pass for max numeric suffix (AC-P2).
     // -------------------------------------------------------------------------
     case 'assign-anchor': {
@@ -682,13 +622,14 @@ try {
         process.exit(1);
       }
 
+      const { store, paths, format, render } = learning();
       const aaProjectRoot = process.cwd();
-      const aaLedgerPath = getDecisionsLedgerPath(aaProjectRoot);
-      const aaLogPath = getDecisionsLogPath(aaProjectRoot);
+      const aaLedgerPath = paths.getDecisionsLedgerPath(aaProjectRoot);
+      const aaLogPath = paths.getDecisionsLogPath(aaProjectRoot);
 
-      withDecisionsLock('assign-anchor', aaProjectRoot, () => {
+      const aaResult = store.withDecisionsLock('assign-anchor', aaProjectRoot, () => {
         // Read existing ledger (absent = empty)
-        const aaLedgerRows = parseLedger(aaLedgerPath);
+        const aaLedgerRows = render.parseLedger(aaLedgerPath);
 
         // Compute next anchor — O(anchored), single pass
         const { anchorId: aaAnchorId } = nextAnchorFromLedger(aaLedgerRows, assignType);
@@ -710,7 +651,7 @@ try {
         }
 
         // Read observation from log
-        let aaLogEntries = parseLedger(aaLogPath);
+        let aaLogEntries = render.parseLedger(aaLogPath);
         const aaObsIdx = aaLogEntries.findIndex(e => e.id === assignObsId);
         if (aaObsIdx === -1) {
           throw new Error(`assign-anchor: obs_id '${assignObsId}' not found in ${aaLogPath}`);
@@ -754,7 +695,7 @@ try {
         // to today. Both types carry a date so refresh-anchor can re-project
         // them correctly (pattern refreshes too — consumers match anchor headings, never titles).
         const aaEntryDate = aaObs.date || aaDate;
-        const aaLedgerRow = toLedgerRow(aaObs, {
+        const aaLedgerRow = format.toLedgerRow(aaObs, {
           anchorId: aaAnchorId,
           status: aaActiveStatus,
           date: aaEntryDate,
@@ -769,22 +710,22 @@ try {
         // .md files. The render is kept as the FINAL write under the lock so
         // the window is as narrow as possible.
         const aaNewLedgerRows = [...aaLedgerRows, aaLedgerRow];
-        writeFileAtomic(aaLedgerPath, serializeLedger(aaNewLedgerRows));
+        store.writeJsonlAtomic(aaLedgerPath, aaNewLedgerRows);
 
         // Mark log row as created and stamp anchor_id so guard (b) fires on
         // any subsequent assign-anchor call for the same obs_id.  Without this
         // write-back the guard is dead: aaObs.anchor_id would be undefined on
         // a re-read and a second assign would silently mint a duplicate number.
         aaLogEntries[aaObsIdx] = Object.assign({}, aaObs, { status: 'created', anchor_id: aaAnchorId });
-        writeJsonlAtomic(aaLogPath, aaLogEntries);
+        store.writeJsonlAtomic(aaLogPath, aaLogEntries);
 
         // Re-render both .md files (lock-free — we already hold .decisions.lock).
         // This is the FINAL write in the lock scope — see D002 above.
-        renderAndWriteAll(aaProjectRoot, aaNewLedgerRows);
-
-        // Print assigned anchor id to stdout
-        process.stdout.write(aaAnchorId + '\n');
+        render.renderAndWriteAll(aaProjectRoot, aaNewLedgerRows);
+        return { ok: true, value: aaAnchorId };
       });
+      // stdout: the assigned anchor id
+      process.exitCode = emit(aaResult, anchorId => anchorId);
       break;
     }
 
@@ -807,8 +748,9 @@ try {
         process.exit(1);
       }
 
+      const { paths, render } = learning();
       const naProjectRoot = process.cwd();
-      const naLedgerRows = parseLedger(getDecisionsLedgerPath(naProjectRoot));
+      const naLedgerRows = render.parseLedger(paths.getDecisionsLedgerPath(naProjectRoot));
       const { anchorId: naAnchorId } = nextAnchorFromLedger(naLedgerRows, naType);
       const naHits = scanForAnchorCollision(naProjectRoot, naAnchorId);
 
@@ -829,7 +771,6 @@ try {
     // Re-renders both .md (retired entry vanishes from .md, stays in ledger).
     //
     // status must be Deprecated | Superseded | Retired.
-    // Locking discipline: holds ONLY .decisions.lock.
     // -------------------------------------------------------------------------
     case 'retire-anchor': {
       const retireAnchorId = args[0];
@@ -846,11 +787,12 @@ try {
         process.exit(1);
       }
 
+      const { store, paths, render } = learning();
       const raProjectRoot = process.cwd();
-      const raLedgerPath = getDecisionsLedgerPath(raProjectRoot);
+      const raLedgerPath = paths.getDecisionsLedgerPath(raProjectRoot);
 
-      withDecisionsLock('retire-anchor', raProjectRoot, () => {
-        const raRows = parseLedger(raLedgerPath);
+      const raResult = store.withDecisionsLock('retire-anchor', raProjectRoot, () => {
+        const raRows = render.parseLedger(raLedgerPath);
         const raIdx = raRows.findIndex(r => r.anchor_id === retireAnchorId);
         if (raIdx === -1) {
           throw new Error(`retire-anchor: anchor_id '${retireAnchorId}' not found in ledger`);
@@ -858,14 +800,14 @@ try {
 
         // Idempotent: if already set to same status, still write (no-op equivalent)
         raRows[raIdx] = Object.assign({}, raRows[raIdx], { decisions_status: retireStatus });
-        writeFileAtomic(raLedgerPath, serializeLedger(raRows));
+        store.writeJsonlAtomic(raLedgerPath, raRows);
 
         // Re-render both .md (lock-free — we already hold .decisions.lock)
-        renderAndWriteAll(raProjectRoot, raRows);
-
-        // Echo anchor_id to stdout matching the other three ops (CON-P1).
-        process.stdout.write(retireAnchorId + '\n');
+        render.renderAndWriteAll(raProjectRoot, raRows);
+        return { ok: true, value: retireAnchorId };
       });
+      // stdout: the anchor id, matching the other ops (CON-P1)
+      process.exitCode = emit(raResult, anchorId => anchorId);
       break;
     }
 
@@ -889,8 +831,6 @@ try {
     //      re-project via toLedgerRow (which carries sink validation for pattern/raw_body/type).
     //   3. Assert row count unchanged (REL-6 — bounds parseLedger silent-drop exposure).
     //   4. Write ledger once, render once, echo all ids to stdout (one per line).
-    //
-    // Locking discipline: holds ONLY .decisions.lock.
     // -------------------------------------------------------------------------
     case 'refresh-anchor': {
       const refreshAnchorIds = args.filter(Boolean);
@@ -900,26 +840,25 @@ try {
         process.exit(1);
       }
 
+      const { store, paths, format, render } = learning();
       const rfProjectRoot = process.cwd();
-      const rfLedgerPath = getDecisionsLedgerPath(rfProjectRoot);
-      const rfLogPath = getDecisionsLogPath(rfProjectRoot);
+      const rfLedgerPath = paths.getDecisionsLedgerPath(rfProjectRoot);
+      const rfLogPath = paths.getDecisionsLogPath(rfProjectRoot);
 
-      // SEC-S3: refuse when no ledger exists at the resolved project root. A refresh
-      // is only valid for a project with a committed ledger — invoked from the wrong
-      // cwd withDecisionsLock would otherwise silently materialise a stray
-      // .devflow/learning/ tree before throwing 'not found in ledger'.
-      if (!fs.existsSync(rfLedgerPath)) {
-        throw new Error(
-          `refresh-anchor: no decisions-ledger.jsonl found at '${rfLedgerPath}' — ` +
-          `cannot refresh an entry where no ledger exists`
-        );
-      }
+      const rfResult = store.withDecisionsLock('refresh-anchor', rfProjectRoot, () => {
+        // SEC-S3: a learning tree with no ledger has nothing to refresh; say so,
+        // naming the ledger, rather than reporting each anchor as not found.
+        if (!fs.existsSync(rfLedgerPath)) {
+          throw new Error(
+            `refresh-anchor: no decisions-ledger.jsonl found at '${rfLedgerPath}' — ` +
+            `cannot refresh an entry where no ledger exists`
+          );
+        }
 
-      withDecisionsLock('refresh-anchor', rfProjectRoot, () => {
         // (1) Read ledger and log ONCE — shared across all anchor ids (PERF-1).
-        const rfLedgerRows = parseLedger(rfLedgerPath);
+        const rfLedgerRows = render.parseLedger(rfLedgerPath);
         const rfExpectedRowCount = rfLedgerRows.length;
-        const rfLogEntries = parseLedger(rfLogPath);
+        const rfLogEntries = render.parseLedger(rfLogPath);
 
         // (2) Validate and re-project each anchor — all-or-nothing: any throw
         //     propagates out of withDecisionsLock's fn() before any write occurs.
@@ -997,7 +936,7 @@ try {
           // Preserve decisions_status and date from the ledger (ledger-owned fields).
           // expectType passed for sink validation (redundant with the check above,
           // but ensures the guard holds even if future callers bypass the outer check).
-          rfLedgerRows[rfLedgerIdx] = toLedgerRow(rfObs, {
+          rfLedgerRows[rfLedgerIdx] = format.toLedgerRow(rfObs, {
             anchorId,
             status: rfExistingRow.decisions_status,
             date: rfExistingRow.date,
@@ -1015,48 +954,38 @@ try {
         }
 
         // (4) Write once and render once (PERF-1 — N anchors, one I/O round-trip).
-        writeFileAtomic(rfLedgerPath, serializeLedger(rfLedgerRows));
-        renderAndWriteAll(rfProjectRoot, rfLedgerRows);
-
-        // Echo all refreshed ids to stdout — one per line, mirrors assign-anchor's
-        // contract; callers can confirm which rows were refreshed without parsing stderr.
-        process.stdout.write(refreshAnchorIds.join('\n') + '\n');
+        store.writeJsonlAtomic(rfLedgerPath, rfLedgerRows);
+        render.renderAndWriteAll(rfProjectRoot, rfLedgerRows);
+        return { ok: true, value: refreshAnchorIds };
       });
+      // stdout: every refreshed id, one per line, mirroring assign-anchor's contract,
+      // so a caller can confirm which rows were refreshed without parsing stderr.
+      process.exitCode = emit(rfResult, ids => ids.join('\n'));
       break;
     }
 
     // -------------------------------------------------------------------------
-    // rotate-observations [<log>] [<archive>]
+    // rotate-observations
     // AC-F9, AC-P3: Move stale observing rows (>30 days old) to archive.
     // NEVER moves anchored or created/ready rows — only stale 'observing' rows.
-    // Runs under .observations.lock (NOT .decisions.lock).
-    //
-    // Default paths derived from cwd. Accepts explicit log/archive paths as args.
-    // For testability, _now_ is injectable via the _nowMs parameter in the
-    // internal function; CLI always uses Date.now().
+    // Takes no argument: the log and the archive are the project root's.
     // -------------------------------------------------------------------------
     case 'rotate-observations': {
-      // Args may be: [] | [log] | [log, archive]
-      const roProjectRoot = process.cwd();
-      const roLogPath = args[0] ? safePath(args[0]) : getDecisionsLogPath(roProjectRoot);
-      const roArchivePath = args[1] ? safePath(args[1]) : getDecisionsArchivePath(roProjectRoot);
-      const roLockDir = getObservationsLockDir(roProjectRoot);
-
-      fs.mkdirSync(path.dirname(roLogPath), { recursive: true });
-      fs.mkdirSync(path.dirname(roArchivePath), { recursive: true });
-      fs.mkdirSync(path.dirname(roLockDir), { recursive: true });
-
-      if (!acquireMkdirLock(roLockDir, 30000, 60000)) {
-        process.stderr.write('rotate-observations: timeout acquiring .observations.lock\n');
+      if (args.length > 0) {
+        process.stderr.write('rotate-observations: usage: rotate-observations (no arguments; run from the project root)\n');
         process.exit(1);
       }
-
-      try {
-        const roRotated = rotateObservations(roLogPath, roArchivePath, Date.now());
-        process.stdout.write(`rotated ${roRotated} observing rows\n`);
-      } finally {
-        releaseLock(roLockDir);
-      }
+      const { store, paths } = learning();
+      const roProjectRoot = process.cwd();
+      const roResult = store.withDecisionsLock('rotate-observations', roProjectRoot, () => ({
+        ok: true,
+        value: rotateObservations(
+          paths.getDecisionsLogPath(roProjectRoot),
+          paths.getDecisionsArchivePath(roProjectRoot),
+          Date.now(),
+        ),
+      }));
+      process.exitCode = emit(roResult, rotated => `rotated ${rotated} observing rows`);
       break;
     }
 
@@ -1073,9 +1002,6 @@ try {
 // Expose helpers for unit testing (only when required as a module, not run as CLI)
 if (typeof module !== 'undefined' && module.exports) {
   module.exports = {
-    writeFileAtomic,
-    writeJsonlAtomic,
-    initDecisionsContent,
     nextAnchorFromLedger,
     rotateObservations,
     scanForAnchorCollision,

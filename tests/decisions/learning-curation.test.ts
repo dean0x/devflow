@@ -19,6 +19,8 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
 
+import { requireLearningStore } from './learning-fixtures.js';
+
 const ROOT = path.resolve(import.meta.dirname, '../..');
 const require = createRequire(import.meta.url);
 
@@ -37,11 +39,11 @@ const {
 
 const {
   rotateObservations,
-  writeJsonlAtomic,
 } = require(JSON_HELPER_BIN) as {
   rotateObservations: (logPath: string, archivePath: string, nowMs: number) => number;
-  writeJsonlAtomic: (file: string, entries: object[]) => void;
 };
+
+const { writeJsonlAtomic } = requireLearningStore();
 
 // ---------------------------------------------------------------------------
 // Helpers

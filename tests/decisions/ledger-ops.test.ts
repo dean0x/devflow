@@ -18,6 +18,8 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
 
+import { requireLearningStore, runJsonHelper, snapshotTree } from './learning-fixtures.js';
+
 const ROOT = path.resolve(import.meta.dirname, '../..');
 const require = createRequire(import.meta.url);
 
@@ -30,8 +32,9 @@ const jsonHelper = require(
 ) as {
   nextAnchorFromLedger: (rows: Record<string, unknown>[], type: 'decision' | 'pitfall') => { anchorId: string; nextN: string };
   rotateObservations: (logPath: string, archivePath: string, nowMs: number) => number;
-  writeJsonlAtomic: (file: string, entries: object[]) => void;
 };
+
+const store = requireLearningStore();
 
 const {
   renderDecisionsFile,
@@ -499,7 +502,7 @@ describe('rotateObservations — internal function', () => {
 
   function makeObsLog(dir: string, rows: Record<string, unknown>[]): string {
     const logPath = path.join(dir, 'decisions', 'decisions-log.jsonl');
-    jsonHelper.writeJsonlAtomic(logPath, rows);
+    store.writeJsonlAtomic(logPath, rows);
     return logPath;
   }
 
@@ -611,7 +614,7 @@ describe('rotateObservations — internal function', () => {
     const archivePath = makeObsArchive(tmpDir);
 
     // Pre-populate archive with existing row
-    jsonHelper.writeJsonlAtomic(archivePath, [makeObsRow({ id: 'obs_pre_existing' })]);
+    store.writeJsonlAtomic(archivePath, [makeObsRow({ id: 'obs_pre_existing' })]);
 
     jsonHelper.rotateObservations(logPath, archivePath, NOW);
 
@@ -997,26 +1000,6 @@ describe('refresh-anchor CLI op', () => {
     // refresh-anchor must echo the anchor_id to stdout so callers can confirm which
     // row was refreshed — identical contract to assign-anchor
     expect(result.stdout.trim()).toBe('ADR-001');
-  });
-});
-
-describe('learning-rename straggler: refresh-anchor on bare project directory', () => {
-  it('refresh-anchor on bare dir gives controlled error — not ENOENT crash — ledger-not-found message', () => {
-    // SEC-S3 guard fires before mkdir: no ledger at cwd → throw with clear message.
-    // The guard prevents a stray .devflow/learning/ tree from being created before
-    // the real error (not found in ledger) fires.
-    const bareDir = fs.mkdtempSync(path.join(os.tmpdir(), 'refra-bare-'));
-    try {
-      const result = runHelper('refresh-anchor ADR-001', bareDir);
-      expect(result.code).not.toBe(0);
-      expect(result.stderr).not.toMatch(/ENOENT/);
-      // SEC-S3: error must mention the ledger path (not the old 'not found in ledger')
-      expect(result.stderr).toContain('decisions-ledger.jsonl');
-      // The guard fires before mkdir, so the .devflow/decisions/ residue path must not exist
-      expect(fs.existsSync(path.join(bareDir, '.devflow', 'decisions'))).toBe(false);
-    } finally {
-      fs.rmSync(bareDir, { recursive: true, force: true });
-    }
   });
 });
 
@@ -1524,12 +1507,18 @@ describe('rotate-observations CLI op', () => {
     expect(result.stdout).toMatch(/rotated \d+ observing rows/);
   });
 
-  it('accepts explicit log and archive paths', () => {
-    const logPath = path.join(tmpDir, '.devflow', 'learning', 'decisions-log.jsonl');
-    const archivePath = path.join(tmpDir, '.devflow', 'learning', 'decisions-log.archive.jsonl');
-    fs.writeFileSync(logPath, '');
-    const result = runHelper(`rotate-observations "${logPath}" "${archivePath}"`, tmpDir);
-    expect(result.code).toBe(0);
+  it('refuses a path argument and writes nothing: the log and archive are the project root\'s', () => {
+    const elsewhere = path.join(tmpDir, 'elsewhere');
+    fs.mkdirSync(elsewhere);
+    const logPath = path.join(elsewhere, 'decisions-log.jsonl');
+    fs.writeFileSync(logPath, `${JSON.stringify(makeObsRow({ id: 'obs_elsewhere', last_seen: '2026-01-01T00:00:00Z' }))}\n`);
+    const before = snapshotTree(tmpDir);
+
+    const result = runJsonHelper(tmpDir, ['rotate-observations', logPath, path.join(elsewhere, 'archive.jsonl')]);
+
+    expect(result.code).toBe(1);
+    expect(result.stderr).toContain('rotate-observations: usage');
+    expect(snapshotTree(tmpDir)).toEqual(before);
   });
 });
 
@@ -1922,7 +1911,7 @@ describe('rotateObservations — archive dedup by id (interrupt-retry safety)', 
 
   function makeObsLog2(dir: string, rows: Record<string, unknown>[]): string {
     const logPath = path.join(dir, 'decisions', 'decisions-log.jsonl');
-    jsonHelper.writeJsonlAtomic(logPath, rows);
+    store.writeJsonlAtomic(logPath, rows);
     return logPath;
   }
 
@@ -2159,7 +2148,7 @@ describe('locking discipline: assign-anchor and render under single .decisions.l
 
   it('retire-anchor completes without deadlock and leaves no lock dir behind', () => {
     writeLedger(tmpDir, [makeLedgerRow({ anchor_id: 'ADR-001', decisions_status: 'Accepted' })]);
-    const result = runHelper('retire-anchor ADR-001 Retired', tmpDir);
+    const result = runJsonHelper(tmpDir, ['retire-anchor', 'ADR-001', 'Retired'], '{"reason":"test"}');
     expect(result.code).toBe(0);
 
     const lockDir = path.join(tmpDir, '.devflow', 'learning', '.decisions.lock');
@@ -2168,50 +2157,115 @@ describe('locking discipline: assign-anchor and render under single .decisions.l
 });
 
 // ---------------------------------------------------------------------------
-// Learning-rename straggler fix: fresh project directory layout
-//
-// Before the fix both assign-anchor and retire-anchor called:
-//   fs.mkdirSync(path.join(projectRoot, '.devflow', 'decisions'), { recursive: true })
-// — the obsolete path from before the learning rename. This created the wrong dir
-// and then immediately crashed because acquireMkdirLock tried to mkdir
-// '.devflow/learning/.decisions.lock' with recursive:false while
-// '.devflow/learning/' did not yet exist (ENOENT re-throw from mkdirSync
-// non-EEXIST guard).
+// D-ONE-LEARNING-LOCK: every learning writer takes .decisions.lock, and no
+// writer takes a second lock over the same files.
 // ---------------------------------------------------------------------------
 
-describe('learning-rename straggler fix: assign-anchor / retire-anchor on a bare project directory', () => {
-  it('assign-anchor on bare dir exits with controlled "not found" error — not an ENOENT crash — and creates .devflow/learning/, not .devflow/decisions/', () => {
-    // bare dir — no .devflow/ at all (simulates a fresh project)
-    const bareDir = fs.mkdtempSync(path.join(os.tmpdir(), 'aa-bare-'));
-    try {
-      const result = runHelper('assign-anchor decision any_obs_id', bareDir);
-      // Must fail (obs log absent) but the error must be controlled
-      expect(result.code).not.toBe(0);
-      // Before fix: ENOENT crash from acquireMkdirLock; after fix: controlled
-      // "not found in" error message from the obs-id lookup guard
-      expect(result.stderr).not.toMatch(/ENOENT/);
-      // Fix creates .devflow/learning/ as a side effect of mkdir(path.dirname(lockDir))
-      expect(fs.existsSync(path.join(bareDir, '.devflow', 'learning'))).toBe(true);
-      // Legacy .devflow/decisions/ must NOT be created
-      expect(fs.existsSync(path.join(bareDir, '.devflow', 'decisions'))).toBe(false);
-    } finally {
-      fs.rmSync(bareDir, { recursive: true, force: true });
-    }
+/** A preload that appends the base name of each directory the process creates to `record`, one per line. */
+function recordMkdirPreload(record: string): string {
+  return [
+    "'use strict';",
+    "const fs = require('fs');",
+    "const path = require('path');",
+    'const mkdirSync = fs.mkdirSync;',
+    'fs.mkdirSync = function recordMkdir(target, ...rest) {',
+    `  fs.appendFileSync(${JSON.stringify(record)}, path.basename(String(target)) + '\\n');`,
+    '  return mkdirSync.call(fs, target, ...rest);',
+    '};',
+    '',
+  ].join('\n');
+}
+
+describe('D-ONE-LEARNING-LOCK: every learning writer takes the one learning lock', { timeout: 30_000 }, () => {
+  let tmpDir: string;
+  let probeDir: string;
+
+  beforeEach(() => {
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'one-lock-test-'));
+    probeDir = fs.mkdtempSync(path.join(os.tmpdir(), 'one-lock-probe-'));
+    const details = 'context: c; decision: d; rationale: r';
+    writeLog(tmpDir, [
+      makeObsRow({ id: 'obs_one_lock_new', type: 'decision', status: 'ready' }),
+      makeObsRow({ id: 'obs_one_lock_old', type: 'decision', status: 'created', details }),
+      makeObsRow({ id: 'obs_one_lock_stale', status: 'observing', last_seen: '2026-01-01T00:00:00Z' }),
+    ]);
+    writeLedger(tmpDir, [makeLedgerRow({ id: 'obs_one_lock_old', anchor_id: 'ADR-001', details })]);
   });
 
-  it('retire-anchor on bare dir exits with controlled "not found in ledger" error — not an ENOENT crash — and creates .devflow/learning/, not .devflow/decisions/', () => {
-    const bareDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ra-bare-'));
-    try {
-      const result = runHelper('retire-anchor ADR-001 Retired', bareDir);
-      expect(result.code).not.toBe(0);
-      // Before fix: ENOENT crash; after fix: controlled "not found in ledger"
-      expect(result.stderr).not.toMatch(/ENOENT/);
-      expect(fs.existsSync(path.join(bareDir, '.devflow', 'learning'))).toBe(true);
-      expect(fs.existsSync(path.join(bareDir, '.devflow', 'decisions'))).toBe(false);
-    } finally {
-      fs.rmSync(bareDir, { recursive: true, force: true });
-    }
+  afterEach(() => {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+    fs.rmSync(probeDir, { recursive: true, force: true });
   });
+
+  /** The base names of the directories one op run created, in order. */
+  function directoriesCreatedBy(args: readonly string[], input = ''): string[] {
+    const record = path.join(probeDir, `${args[0]}.mkdir`);
+    const preload = path.join(probeDir, `${args[0]}.preload.cjs`);
+    fs.writeFileSync(preload, recordMkdirPreload(record), 'utf8');
+    const run = spawnSync(process.execPath, ['--require', preload, JSON_HELPER_BIN, ...args], {
+      cwd: tmpDir,
+      input,
+      encoding: 'utf8',
+      timeout: 60_000,
+    });
+    if (run.error) throw run.error;
+    expect(run.status, `${args[0]} exits 0: ${run.stderr}`).toBe(0);
+    return fs.existsSync(record) ? fs.readFileSync(record, 'utf8').split('\n').filter(Boolean) : [];
+  }
+
+  it.each([
+    [['assign-anchor', 'decision', 'obs_one_lock_new']],
+    [['retire-anchor', 'ADR-001', 'Retired']],
+    [['refresh-anchor', 'ADR-001']],
+    [['rotate-observations']],
+  ])('%j takes .decisions.lock and creates no other directory', args => {
+    const input = args[0] === 'retire-anchor' ? '{"reason":"test"}' : '';
+    expect(directoriesCreatedBy(args, input)).toEqual(['.decisions.lock']);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// D-NO-STRAY-TREE: a learning writer refuses outside a learning tree and
+// creates nothing there — no .devflow/, no .devflow/learning/, no lock.
+// ---------------------------------------------------------------------------
+
+describe('D-NO-STRAY-TREE: a learning writer refuses outside a learning tree', { timeout: 30_000 }, () => {
+  const WRITERS: ReadonlyArray<{ args: readonly string[]; input?: string }> = [
+    { args: ['assign-anchor', 'decision', 'obs_stray_one'] },
+    { args: ['retire-anchor', 'ADR-001', 'Retired'], input: '{"reason":"test"}' },
+    { args: ['refresh-anchor', 'ADR-001'] },
+    { args: ['rotate-observations'] },
+  ];
+  let dir: string;
+
+  beforeEach(() => {
+    dir = fs.mkdtempSync(path.join(os.tmpdir(), 'stray-tree-test-'));
+  });
+
+  afterEach(() => {
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+
+  for (const { args, input } of WRITERS) {
+    const op = args[0];
+
+    it(`${op} in a directory with no .devflow/ exits 1, names the missing directory and creates nothing`, () => {
+      const before = snapshotTree(dir);
+      const run = runJsonHelper(dir, args, input);
+      expect(run.code).toBe(1);
+      expect(run.stderr).toBe(`${op}: no .devflow/learning/ under ${fs.realpathSync(dir)} — run from the project root\n`);
+      expect(snapshotTree(dir)).toEqual(before);
+    });
+
+    it(`${op} under a .devflow/ with no learning directory exits 1 and creates nothing`, () => {
+      fs.mkdirSync(path.join(dir, '.devflow'));
+      const before = snapshotTree(dir);
+      const run = runJsonHelper(dir, args, input);
+      expect(run.code).toBe(1);
+      expect(run.stderr).toContain('no .devflow/learning/ under');
+      expect(snapshotTree(dir)).toEqual(before);
+    });
+  }
 
   it('assign-anchor success path never creates .devflow/decisions/ (legacy dir must not appear)', () => {
     // Normal setup — .devflow/learning/ pre-exists; verifies the legacy mkdir is gone

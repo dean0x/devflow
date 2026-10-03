@@ -1,18 +1,27 @@
 // tests/decisions/json-helper-write-exclusive.test.ts
 //
-// TOCTOU hardening tests for json-helper.cjs writeExclusive (via writeFileAtomic).
-//
-// writeExclusive uses O_EXCL (wx flag) so the kernel rejects the open if a file or
-// symlink already exists at the .tmp path. On EEXIST it unlinks and retries once.
-// Tests verify O_EXCL semantics: EEXIST path unlinks and retries once.
+// TOCTOU hardening of the learning writers. json-helper.cjs holds no writer of its
+// own: every learning op writes through the learning store's writeFileAtomic, whose
+// writeExclusive opens the PID-scoped .tmp with O_EXCL (wx), so the kernel rejects
+// the open when a file or symlink already sits at that path; on EEXIST it unlinks
+// and retries once.
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { createRequire } from 'module';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 
-// @ts-expect-error — CJS module without type declarations
-const helpers = require('../../src/assets/scripts/hooks/json-helper.cjs');
+import { JSON_HELPER, requireLearningStore } from './learning-fixtures.js';
+
+const store = requireLearningStore();
+
+describe('json-helper writes only through the learning store', () => {
+  it('exports no writer of its own', () => {
+    const helper = createRequire(import.meta.url)(JSON_HELPER) as Record<string, unknown>;
+    expect(Object.keys(helper).filter(name => /write/i.test(name))).toEqual([]);
+  });
+});
 
 describe('writeFileAtomic (writeExclusive TOCTOU hardening)', () => {
   let tmpDir: string;
@@ -27,7 +36,7 @@ describe('writeFileAtomic (writeExclusive TOCTOU hardening)', () => {
 
   it('writes content to the target file successfully', () => {
     const targetFile = path.join(tmpDir, 'output.json');
-    helpers.writeFileAtomic(targetFile, '{"ok":true}\n');
+    store.writeFileAtomic(targetFile, '{"ok":true}\n');
 
     const content = fs.readFileSync(targetFile, 'utf-8');
     expect(content).toBe('{"ok":true}\n');
@@ -36,7 +45,7 @@ describe('writeFileAtomic (writeExclusive TOCTOU hardening)', () => {
   it('overwrites an existing file correctly', () => {
     const targetFile = path.join(tmpDir, 'output.json');
     fs.writeFileSync(targetFile, 'old-content', 'utf-8');
-    helpers.writeFileAtomic(targetFile, 'new-content');
+    store.writeFileAtomic(targetFile, 'new-content');
 
     expect(fs.readFileSync(targetFile, 'utf-8')).toBe('new-content');
   });
@@ -48,7 +57,7 @@ describe('writeFileAtomic (writeExclusive TOCTOU hardening)', () => {
     // O_EXCL flag rejects such pre-existing paths, then unlinks and retries — the
     // sentinel must remain intact.
     const targetFile = path.join(tmpDir, 'target.json');
-    // PID-scoped: mirrors json-helper.cjs writeFileAtomic behaviour
+    // PID-scoped, as writeFileAtomic names its temp file
     const tmpPath = targetFile + '.tmp.' + process.pid;
 
     const sentinelPath = path.join(tmpDir, 'attacker-controlled.txt');
@@ -56,7 +65,7 @@ describe('writeFileAtomic (writeExclusive TOCTOU hardening)', () => {
     fs.symlinkSync(sentinelPath, tmpPath);
 
     // Act: writeFileAtomic should unlink the stale symlink and complete successfully.
-    helpers.writeFileAtomic(targetFile, '{"written":true}\n');
+    store.writeFileAtomic(targetFile, '{"written":true}\n');
 
     // Assert 1: sentinel was NOT overwritten — the symlink was not followed.
     expect(fs.readFileSync(sentinelPath, 'utf-8')).toBe('original-content');
@@ -72,12 +81,12 @@ describe('writeFileAtomic (writeExclusive TOCTOU hardening)', () => {
     // A stale PID-scoped .tmp (not a symlink) from a previous crash should be
     // cleaned and retried.
     const targetFile = path.join(tmpDir, 'target.json');
-    // PID-scoped: mirrors json-helper.cjs writeFileAtomic behaviour
+    // PID-scoped, as writeFileAtomic names its temp file
     const tmpPath = targetFile + '.tmp.' + process.pid;
 
     fs.writeFileSync(tmpPath, 'stale-tmp-content', 'utf-8');
 
-    helpers.writeFileAtomic(targetFile, 'fresh-content');
+    store.writeFileAtomic(targetFile, 'fresh-content');
 
     expect(fs.readFileSync(targetFile, 'utf-8')).toBe('fresh-content');
     expect(fs.existsSync(tmpPath)).toBe(false);

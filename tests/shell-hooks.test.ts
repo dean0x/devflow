@@ -338,6 +338,41 @@ describe('json-helper.js operations', () => {
     expect(parsed.id).toBe('b');
   });
 
+  it('a generic op loads none of the learning modules; a learning op loads them', () => {
+    // Every hook that falls back from jq to node runs a generic op, so the learning
+    // store, renderer and formatter load only when a learning op needs them.
+    const probeDir = fs.mkdtempSync(path.join(os.tmpdir(), 'json-helper-lazy-'));
+    try {
+      const record = path.join(probeDir, 'loaded.txt');
+      const preload = path.join(probeDir, 'record-loaded.cjs');
+      fs.writeFileSync(preload, [
+        "'use strict';",
+        "const fs = require('fs');",
+        `process.on('exit', () => fs.writeFileSync(${JSON.stringify(record)}, Object.keys(require.cache).join('\\n')));`,
+        '',
+      ].join('\n'));
+      const learningModulesLoadedBy = (args: readonly string[], input: string): string[] => {
+        const run = spawnSync(process.execPath, ['--require', preload, JSON_HELPER, ...args], {
+          cwd: probeDir,
+          input,
+          encoding: 'utf8',
+          timeout: 60_000,
+        });
+        expect(run.status, run.stderr).toBe(0);
+        return fs.readFileSync(record, 'utf8').split('\n')
+          .map(file => path.basename(file))
+          .filter(name => /^(?:learning-store|render-decisions|decisions-format|mkdir-lock|project-paths)\.cjs$/.test(name))
+          .sort();
+      };
+
+      expect(learningModulesLoadedBy(['get-field', 'cwd'], '{"cwd":"/tmp"}')).toEqual([]);
+      expect(learningModulesLoadedBy(['next-anchor', 'decision'], '')).toEqual([
+        'decisions-format.cjs', 'learning-store.cjs', 'mkdir-lock.cjs', 'project-paths.cjs', 'render-decisions.cjs',
+      ]);
+    } finally {
+      fs.rmSync(probeDir, { recursive: true, force: true });
+    }
+  });
 });
 
 describe('json-parse wrapper', () => {

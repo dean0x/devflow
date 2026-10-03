@@ -111,11 +111,6 @@ export function getDecisionsIndexPath(projectRoot: string): string {
   return path.join(projectRoot, '.devflow', 'learning', 'index.md');
 }
 
-/** .devflow/learning/.observations.lock — mkdir-based lock directory for observation log writes */
-export function getObservationsLockDir(projectRoot: string): string {
-  return path.join(projectRoot, '.devflow', 'learning', '.observations.lock');
-}
-
 // ---------------------------------------------------------------------------
 // Memory / working-memory files
 // ---------------------------------------------------------------------------
