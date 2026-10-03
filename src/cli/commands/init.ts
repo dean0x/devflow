@@ -278,7 +278,8 @@ export function resolveComplianceInitState(
 }
 
 // Re-export formatComplianceSummary from compliance-prompts.ts so existing test imports
-// (tests/init-logic.test.ts:1615 — imports from '../src/cli/commands/init.js') keep resolving.
+// (the 'formatComplianceSummary' suite in tests/init-logic.test.ts imports it from
+// '../src/cli/commands/init.js') keep resolving.
 export { formatComplianceSummary } from './compliance-prompts.js';
 
 /**
