@@ -130,7 +130,7 @@ export const PRE_PHASE0_GIT_MD_LINES = 938
 // Phase-0 char baselines (JS `.length`, not bytes) — named constants so Phase-2's
 // byte-budget.test.ts can import them without re-deriving (C6). These are equality
 // baselines: they move only in the same commit as the golden fixture.
-export const GIT_MD_CHARS = 43_832
+export const GIT_MD_CHARS = 43_814
 export const GIT_MD_LINES = 822
 // SKILL_GIT_CHARS/SKILL_GIT_LINES pin src/assets/skills/git/SKILL.md, the
 // preloaded skill file the git-agent golden above cross-references. Like
@@ -153,7 +153,7 @@ export const SKILL_WORKTREE_LINES = 92
  * golden-regeneration commit that moves the parts, never on their own to clear a
  * red assertion.
  */
-export const TOTAL_CHARS = 53_403
+export const TOTAL_CHARS = 53_385
 export const TOTAL_LINES = 1_127
 
 // Fixture invariants — these ARE bytes (Buffer.byteLength), not JS .length
