@@ -1343,7 +1343,7 @@ describe('resolveVerifyRef (D-VERIFY-REF)', { timeout: 30_000 }, () => {
 // Fixtures
 // ---------------------------------------------------------------------------
 
-describe('learning fixtures', () => {
+describe('learning fixtures', { timeout: 30_000 }, () => {
   let tmp: string;
   beforeEach(() => { tmp = makeTmp('learning-store-fixtures-'); });
   afterEach(() => { fs.rmSync(tmp, { recursive: true, force: true }); });
