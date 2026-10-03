@@ -420,7 +420,7 @@ describe('secret-assignment rule', () => {
     // `export export export … =` exercises the bounded {0,3} declarator group against
     // a line the regex can never complete a match on.
     const line = '  ' + 'export '.repeat(7_000) + 'password = ';
-    expect(line.length, 'corpus is empty — guard is vacuous (PF-018)').toBeGreaterThan(49_000);
+    expect(line.length, 'corpus is empty — guard is vacuous').toBeGreaterThan(49_000);
 
     const start = Date.now();
     const r = runWithContent(line, tmpDir, 'assign-adversarial.txt');
@@ -871,7 +871,7 @@ describe('--emit: parseArgs (unit, no subprocess) [DR-14]', () => {
       ['--emit'],
       ['--unknown', '/tmp/in', '/tmp/out'],
     ];
-    expect(ARGVS.length, 'the argv corpus must be non-empty (PF-018)').toBeGreaterThan(0);
+    expect(ARGVS.length, 'the argv corpus must be non-empty').toBeGreaterThan(0);
     expect(ARGVS.map((a) => SCRUBBER.parseArgs(['node', 'script', ...a]).kind))
       .toEqual(['emit', 'file', 'usage', 'usage']);
   });
@@ -886,7 +886,7 @@ describe('--emit: parseArgs (unit, no subprocess) [DR-14]', () => {
       ['--unknown', '/tmp/in', '/tmp/out'],
       ['-e', '/tmp/in'],
     ];
-    expect(WRONG.length, 'the arity corpus must be non-empty (PF-018)').toBeGreaterThan(0);
+    expect(WRONG.length, 'the arity corpus must be non-empty').toBeGreaterThan(0);
     const accepted: string[] = [];
     for (const args of WRONG) {
       const parsed = SCRUBBER.parseArgs(['node', 'script', ...args]);
@@ -986,7 +986,7 @@ describe('--emit: frameEmit — nonce, digest, byte count and the first-pass pay
       () => '',
       () => 42,
     ];
-    expect(BAD_SOURCES.length, 'the nonce-source corpus must be non-empty (PF-018)').toBeGreaterThan(0);
+    expect(BAD_SOURCES.length, 'the nonce-source corpus must be non-empty').toBeGreaterThan(0);
     for (const bad of BAD_SOURCES) {
       const framed = SCRUBBER.frameEmit('body', 'SCRUB: 0 []', bad);
       expect(framed.emitLine, `nonce source ${String(bad)} must not produce a framing`).toBeUndefined();
@@ -1255,7 +1255,7 @@ describe('--emit: NO BODY on any non-zero exit (AC-3.5, §8.9 — every path)', 
       })).emitLine),
     ];
 
-    expect(observed.length, 'the failure-arm corpus must be non-empty (PF-018)').toBeGreaterThan(0);
+    expect(observed.length, 'the failure-arm corpus must be non-empty').toBeGreaterThan(0);
     expect(
       collectUnreachableReasons(SCRUBBER.D11_FAIL_REASONS, observed),
       `reason(s) in the frozen registry that no arm of this mode emits. Observed: ${observed.join(', ')}`,
@@ -1370,7 +1370,7 @@ describe('placeholder-skip narrowing (GAP-54)', () => {
     const fixture = 'api_key = "${DEPLOY_API_KEY_VALUE}"\n';
     const r = runWithContent(fixture, tmpDir, 'gap54-anchored.txt');
     expect(r.exitCode).toBe(0);
-    expect(r.outputContent, 'an author fixture must stay readable (PF-028)').toBe(fixture);
+    expect(r.outputContent, 'an author fixture must stay readable').toBe(fixture);
     expect(r.stdout.trim()).toBe('SCRUB: 0 []');
   });
 

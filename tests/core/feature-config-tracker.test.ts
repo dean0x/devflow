@@ -101,7 +101,7 @@ describe('parseTrackerOverride: absent, valid and invalid are three distinct sta
       'github jira',
       'a'.repeat(200),
     ];
-    expect(HOSTILE.length, 'hostile corpus must be non-empty (PF-018)').toBeGreaterThan(0);
+    expect(HOSTILE.length, 'hostile corpus must be non-empty').toBeGreaterThan(0);
 
     const repaired: string[] = [];
     for (const raw of HOSTILE) {

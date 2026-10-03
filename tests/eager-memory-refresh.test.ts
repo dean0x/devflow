@@ -164,7 +164,7 @@ function createFakeClaudeShim(shimDir: string, memFile: string): void {
   fs.writeFileSync(
     bin,
     `#!/bin/bash
-# Fake claude shim for tests — writes to staged path, not real path (ADR-023)
+# Fake claude shim for tests — writes to staged path, not real path
 echo "<!-- memory-head: testsha branch: main -->" > "${stagedFile}"
 echo "## Now" >> "${stagedFile}"
 echo "- test memory content written by fake claude" >> "${stagedFile}"
@@ -899,7 +899,7 @@ describe('S13: D56c crash-recovery — leftover .processing merged with new queu
       `#!/bin/bash
 # Record stdin so the test can assert both turn-batches are present
 cat > "${stdinCapture}"
-# Write to staged path (ADR-023); worker CAS-mv's it to the real path
+# Write to staged path; worker CAS-mv's it to the real path
 echo "<!-- memory-head: testsha branch: main -->" > "${memFile}.new"
 echo "## Now" >> "${memFile}.new"
 echo "- crash-recovery test" >> "${memFile}.new"
@@ -959,7 +959,7 @@ exit 0
       `#!/bin/bash
 # Drain stdin (required so the worker's <<< doesn't stall)
 cat > /dev/null
-# Write to staged path (ADR-023); worker CAS-mv's it to the real path
+# Write to staged path; worker CAS-mv's it to the real path
 echo "<!-- memory-head: testsha branch: main -->" > "${memFile}.new"
 echo "## Now" >> "${memFile}.new"
 echo "- overflow cap test" >> "${memFile}.new"
@@ -1107,7 +1107,7 @@ describe('S15: stdin/argv safety — prompt content delivered via STDIN, not arg
 echo "$@" > "${argvLog}"
 # Record stdin (the full prompt)
 cat > "${stdinLog}"
-# Write to staged path (ADR-023); worker CAS-mv's it to the real path
+# Write to staged path; worker CAS-mv's it to the real path
 echo "<!-- memory-head: testsha branch: main -->" > "${memFile}.new"
 echo "## Now" >> "${memFile}.new"
 echo "- stdin safety test" >> "${memFile}.new"
@@ -1410,7 +1410,7 @@ describe('S18: AC-F10 — qa rows in background-memory-update (orphan gate + TUR
       claudeBin,
       `#!/bin/bash
 cat > "${stdinCapture}"
-# Write to staged path (ADR-023); worker CAS-mv's it to the real path
+# Write to staged path; worker CAS-mv's it to the real path
 echo "<!-- memory-head: testsha branch: main -->" > "${memFile}.new"
 echo "## Now" >> "${memFile}.new"
 exit 0

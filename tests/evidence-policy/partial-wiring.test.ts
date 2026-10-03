@@ -176,9 +176,9 @@ describe('AC-1: the _evidence_policy partial and its adopters', () => {
   it('declares only known defines (at most two), exports each, and imports nothing', () => {
     const { defines, exports, imports } = collectPartialDeclarations(partialSource())
     expect([...defines].sort(), 'the partial declares a define this guard does not model').toEqual([...KNOWN_DEFINES].sort())
-    expect(defines.length, 'PF-073: every added define doubles the capture copy').toBeLessThanOrEqual(MAX_DEFINES)
+    expect(defines.length, 'every added define doubles the capture copy').toBeLessThanOrEqual(MAX_DEFINES)
     expect([...exports].sort(), 'every define must be exported, and nothing else').toEqual([...defines].sort())
-    expect(imports, 'an import puts its module\'s capture graph in every define\'s scope (PF-073)').toEqual([])
+    expect(imports, 'an import puts its module\'s capture graph in every define\'s scope').toEqual([])
   })
 
   it('known-bad probe: a seeded third define and an import are reported', () => {

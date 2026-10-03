@@ -62,7 +62,7 @@ function createFakeClaudeShim(shimDir: string, memFile: string): void {
   fs.writeFileSync(
     bin,
     `#!/bin/bash
-# Writes to staged path (ADR-023); worker CAS-mv's it to the real path
+# Writes to staged path; worker CAS-mv's it to the real path
 echo "<!-- memory-head: testsha branch: main -->" > "${stagedFile}"
 echo "## Now" >> "${stagedFile}"
 exit 0

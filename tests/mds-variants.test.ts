@@ -167,7 +167,7 @@ describe('validateOutputName', () => {
     // message naming nothing. 'empty' is the one kind with no name to carry and
     // is excluded by the test's own name.
     const nonEmpty = NAME_CORPUS.filter(input => input !== '');
-    expect(nonEmpty.length, 'non-empty rejection corpus must not be empty (PF-018)').toBeGreaterThan(0);
+    expect(nonEmpty.length, 'non-empty rejection corpus must not be empty').toBeGreaterThan(0);
 
     for (const input of nonEmpty) {
       const err = errorOf(validateOutputName(input));
@@ -257,7 +257,7 @@ describe('resolveOutputDir (containment)', () => {
     // The expectation is the exported table, not a retyped copy of it: a new
     // destination must not be able to pass this test by being typed twice.
     expect([...err.allowed]).toEqual([...ALLOWED_OUTPUT_DIR_NAMES]);
-    expect(err.allowed.length, 'allowlist must be non-empty (PF-018)').toBeGreaterThanOrEqual(3);
+    expect(err.allowed.length, 'allowlist must be non-empty').toBeGreaterThanOrEqual(3);
     // The build's message renders the allowlist into the pre-existing template:
     //   output-dir '<declared>' is not the expected '<expected>' — typo?
     expect(err.allowed.join("' or '")).toBe(ALLOWED_OUTPUT_DIR_NAMES.join("' or '"));
@@ -281,7 +281,7 @@ describe('resolveOutputDir (host variant)', () => {
       const result = resolveOutputDir(ROOT, declared);
       if (result.ok) variants.set(declared, result.value.variant);
     }
-    expect(declarations.length, 'declaration corpus must be non-empty (PF-018)').toBeGreaterThan(0);
+    expect(declarations.length, 'declaration corpus must be non-empty').toBeGreaterThan(0);
     return variants;
   }
 
@@ -335,7 +335,7 @@ describe('Result error-union completeness', () => {
 
   /** Named collector: every OutputNameError kind the given corpus produces. */
   function collectNameKinds(corpus: readonly string[] = NAME_CORPUS): Set<string> {
-    expect(corpus.length, 'name corpus must be non-empty (PF-018)').toBeGreaterThan(0);
+    expect(corpus.length, 'name corpus must be non-empty').toBeGreaterThan(0);
     const kinds = new Set<string>();
     for (const input of corpus) {
       const result = validateOutputName(input);
@@ -346,7 +346,7 @@ describe('Result error-union completeness', () => {
 
   /** Named collector: every OutputDirError kind the given corpus produces. */
   function collectDirKinds(corpus: readonly string[] = DIR_CORPUS): Set<string> {
-    expect(corpus.length, 'dir corpus must be non-empty (PF-018)').toBeGreaterThan(0);
+    expect(corpus.length, 'dir corpus must be non-empty').toBeGreaterThan(0);
     const kinds = new Set<string>();
     for (const input of corpus) {
       const result = resolveOutputDir(ROOT, input);
@@ -654,7 +654,7 @@ describe('splitVariantSections', () => {
 
 describe('VARIANT_MODULES (shipped registry)', () => {
   it('names a real source path and a destination under the skill-refs directory', () => {
-    expect(VARIANT_MODULES.length, 'registry must be non-empty (PF-018)').toBeGreaterThan(0);
+    expect(VARIANT_MODULES.length, 'registry must be non-empty').toBeGreaterThan(0);
     for (const mod of VARIANT_MODULES) {
       expect(mod.source.endsWith('.mds'), `${mod.source} must be an .mds source`).toBe(true);
       expect(mod.source.startsWith('src/assets/mds/')).toBe(true);
@@ -764,7 +764,7 @@ describe('the tool-call contract module is gated on a provider that needs it', (
     expect(mcpContractIsGenerated(CLI_ONLY_REGISTRY)).toBe(false);
     expect(
       SYNTHETIC_MCP_PROVIDERS.length,
-      'an empty probe set asserts nothing about the open arm (PF-018)',
+      'an empty probe set asserts nothing about the open arm',
     ).toBeGreaterThan(0);
     for (const provider of SYNTHETIC_MCP_PROVIDERS) {
       expect(
@@ -818,7 +818,7 @@ describe('the tool-call contract module is gated on a provider that needs it', (
       .filter(subdir => !CLI_BACKED_PROVIDER_SUBDIRS.includes(subdir));
     expect(
       registeredProviders.length,
-      'the probe must see registered tool-call providers, or it asserts nothing (PF-018)',
+      'the probe must see registered tool-call providers, or it asserts nothing',
     ).toBeGreaterThan(0);
     expect(
       [...registeredProviders].sort(),
@@ -837,7 +837,7 @@ describe('the tool-call contract module is gated on a provider that needs it', (
     // reports as deferred while it ships.
     expect(
       GATED_REFERENCE_MODULES.length,
-      'an empty gate table asserts nothing about the resolver (PF-018)',
+      'an empty gate table asserts nothing about the resolver',
     ).toBeGreaterThan(0);
     expect(
       GATED_REFERENCE_MODULE_SOURCES,
@@ -949,7 +949,7 @@ describe('validateContractOutputName — the narrow underscore allowance', () =>
       ['__double', 'invalid-charset'],
       ['_' + 'a'.repeat(200), 'invalid-charset'],
     ];
-    expect(REFUSED.length, 'the refusal corpus must be non-empty (PF-018)').toBeGreaterThan(0);
+    expect(REFUSED.length, 'the refusal corpus must be non-empty').toBeGreaterThan(0);
     for (const [name, kind] of REFUSED) {
       const result = validateContractOutputName(name);
       expect(result.ok, `"${name}" must be refused`).toBe(false);
