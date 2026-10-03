@@ -187,7 +187,7 @@ describe('removal: scoped, gated, and never beyond the registry', () => {
     expect(report.removedSkills).not.toContain(FEATURE_OWNED_SKILLS[0]);
     expect(
       await installedSkillDirs(),
-      'the compliance feature owns its own artifact lifecycle (applies ADR-024)',
+      'the compliance feature owns its own artifact lifecycle',
     ).toContain(owned);
   });
 
@@ -305,7 +305,7 @@ describe('shadows: applied in scope, dormant out of scope, never deleted', () =>
     expect(report.shadowedSkills).not.toContain('rust');
     expect(
       await fs.readFile(path.join(devflowDir, 'skills', 'rust', 'SKILL.md'), 'utf-8'),
-      '~/.devflow/skills/ is user content and is never deleted (applies ADR-024)',
+      '~/.devflow/skills/ is user content and is never deleted',
     ).toContain('SHADOW-OUT-OF-SCOPE');
     expect(await installedSkillDirs()).not.toContain(prefixSkillName('rust'));
   });

@@ -539,7 +539,7 @@ describe('converge-not-merge staged swap (GAP-24)', () => {
     expect(await exists(path.join(target, 'tracker', 'probe-provider'))).toBe(false);
     expect(
       second.pruned.scanned,
-      'a prune that scanned nothing proves nothing (avoids PF-018)',
+      'a prune that scanned nothing proves nothing',
     ).toBeGreaterThan(0);
     // Named from the references ROOT, not from the subtree that was swept: the prune
     // merges one sweep per converged subtree, and a bare `probe-provider` would not say
@@ -623,7 +623,7 @@ describe('converge-not-merge staged swap (GAP-24)', () => {
 
     expect(
       staged.length,
-      'no staging path was observed — every assertion below would be vacuous (PF-018)',
+      'no staging path was observed — every assertion below would be vacuous',
     ).toBeGreaterThanOrEqual(2);
 
     const trackerRoot = path.join(target, 'tracker');
@@ -853,7 +853,7 @@ describe('the PR-host subtree converges like the tracker subtree (D-CONVERGED-SU
     }
     expect(
       second.pruned.scanned,
-      'a prune that scanned nothing proves nothing (avoids PF-018)',
+      'a prune that scanned nothing proves nothing',
     ).toBeGreaterThan(0);
     // Named from the references ROOT: `pr/x.md`, never a bare `x.md` that could as well
     // have come out of `tracker/`.

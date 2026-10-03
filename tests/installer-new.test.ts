@@ -146,7 +146,7 @@ describe('composeScripts', () => {
     const content = await fs.readFile(scrubberPath, 'utf-8');
     expect(
       content.length,
-      'redact-secrets.cjs must be non-empty after install (PF-018)',
+      'redact-secrets.cjs must be non-empty after install',
     ).toBeGreaterThan(0);
   });
 
@@ -197,7 +197,7 @@ describe('composeScripts', () => {
     for (const rel of ['resolve-settings.cjs', path.join('lib', 'project-config.cjs')]) {
       const installed = path.join(target, rel);
       await expect(fs.access(installed), `${rel} not found in the scripts dir`).resolves.toBeUndefined();
-      expect((await fs.readFile(installed, 'utf-8')).length, `${rel} must be non-empty (PF-018)`).toBeGreaterThan(0);
+      expect((await fs.readFile(installed, 'utf-8')).length, `${rel} must be non-empty`).toBeGreaterThan(0);
     }
 
     const home = path.join(tmpDir, 'home');
@@ -225,7 +225,7 @@ describe('composeScripts', () => {
       const installed = path.join(target, name);
       await expect(fs.access(installed), `${name} not found at the top level of the scripts dir`).resolves.toBeUndefined();
       const content = await fs.readFile(installed, 'utf-8');
-      expect(content.length, `${name} must be non-empty after install (PF-018)`).toBeGreaterThan(0);
+      expect(content.length, `${name} must be non-empty after install`).toBeGreaterThan(0);
     }
     const pkg = JSON.parse(await fs.readFile(path.join(target, 'package.json'), 'utf-8')) as { type?: string };
     expect(pkg.type, 'the pin is only meaningful under the ESM package marker').toBe('module');

@@ -571,7 +571,7 @@ describe('Guard 6 (tarball contents): npm pack --dry-run output excludes source 
     }
     expect(
       GATED_REFERENCE_MODULE_SOURCES.length,
-      'the gated roster is empty — the loop above asserts nothing (PF-064: an absence-based ' +
+      'the gated roster is empty — the loop above asserts nothing (an absence-based ' +
       'roster needs a presence arm)',
     ).toBeGreaterThan(0);
   });

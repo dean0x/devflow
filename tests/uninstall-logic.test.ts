@@ -1825,7 +1825,7 @@ describe('AC-26: dry-run and real selective uninstall agree on the retained set'
     expect(
       formatDryRunPlan(planned),
       'a plan of "Nothing to remove." over a seeded install would make every comparison below ' +
-      'vacuously true (PF-018)',
+      'vacuously true',
     ).not.toBe('Nothing to remove.');
 
     // THE OUTCOME. A SECOND, independent resolution — exactly as the real branch

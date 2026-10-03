@@ -115,7 +115,7 @@ describe('devflow init — reviewPublication carry-over', () => {
     const config = await readProjectConfig();
     expect(
       config.reviewPublication,
-      'init --reset preserved reviewPublication — a factory reset must not carry a publication override forward (PF-015)',
+      'init --reset preserved reviewPublication — a factory reset must not carry a publication override forward',
     ).toBe('auto');
   }, SUBPROCESS_TIMEOUT_MS);
 

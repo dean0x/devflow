@@ -170,7 +170,7 @@ describe('mergeDevflowSettingsTemplate — FIX 1 (issue #313)', () => {
       const key = flag.target.key;
       expect(
         key in template,
-        `"${key}" (flag: ${flag.id}) is flag-owned — must not appear in the settings merge template (ADR-024, D27)`,
+        `"${key}" (flag: ${flag.id}) is flag-owned — must not appear in the settings merge template (D27)`,
       ).toBe(false);
     }
   });

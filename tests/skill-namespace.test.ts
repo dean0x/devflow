@@ -176,7 +176,7 @@ describe('non-vacuity anchor: live registry contains skills absent from LEGACY_S
     const registryOnlySkills = getAllSkillNames().filter(n => !LEGACY_SKILL_NAMES.includes(n));
     expect(
       registryOnlySkills.length,
-      'At least one registry skill must be absent from LEGACY_SKILL_NAMES, otherwise the PF-012 safety tests (which use registry names as "foreign" collision names) are vacuous',
+      'At least one registry skill must be absent from LEGACY_SKILL_NAMES, otherwise the bare-dir safety tests (which use registry names as "foreign" collision names) are vacuous',
     ).toBeGreaterThan(0);
   });
 
