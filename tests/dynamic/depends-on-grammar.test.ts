@@ -155,7 +155,7 @@ describe('Depends on: — _ticket_template.mds writer ↔ _wave.mds reader', () 
     expect(
       collectTokenSites(seeded, RETIRED_PLACEHOLDER).length,
       'the collector must find a seeded retired placeholder — otherwise the negative ' +
-      'assertion above is green because nothing was ever scanned (PF-018)',
+      'assertion above is green because nothing was ever scanned',
     ).toBe(1)
     // And the same collector, read as a corpus question, names the offending side.
     expect(
@@ -191,7 +191,7 @@ describe('Depends on: — _ticket_template.mds writer ↔ _wave.mds reader', () 
     ).toContain('TRACEABILITY: DEGRADED (foreign issue reference {ref})')
     expect(
       TICKET_TEMPLATE,
-      'the writer must NOT carry the reader-side verdict — a rule stated on both sides is a rule with two authorities (PF-023)',
+      'the writer must NOT carry the reader-side verdict — a rule stated on both sides is a rule with two authorities',
     ).not.toContain('foreign issue reference')
   })
 
@@ -218,7 +218,7 @@ describe('wave fetch discipline — one pre-fetch, one state call per round (GAP
     const roster = collectRosterOperations(GIT_AGENT)
     expect(
       roster.length,
-      'the `## Operations` table did not parse — an unread roster makes the naming check below vacuous (PF-018)',
+      'the `## Operations` table did not parse — an unread roster makes the naming check below vacuous',
     ).toBeGreaterThan(10)
 
     const paragraph = roundRefreshParagraph(WAVE)
@@ -227,7 +227,7 @@ describe('wave fetch discipline — one pre-fetch, one state call per round (GAP
       collectRosterOpsNamedIn(paragraph, roster),
       'the per-round refresh must name an operation the Git agent actually carries. A capability ' +
       'noun absent from the roster proves only that the noun was written, not that any agent can ' +
-      'act on it — the round then improvises a fetch or stalls (PF-024, PF-064)',
+      'act on it — the round then improvises a fetch or stalls',
     ).not.toEqual([])
 
     expect(WAVE).toContain('**state only**')
@@ -258,7 +258,7 @@ describe('wave fetch discipline — one pre-fetch, one state call per round (GAP
   it('the bound is declared an API bound, not a fan-out cap', () => {
     expect(
       WAVE,
-      'ADR-005: do NOT cap how many tickets a round runs; the bound is on API calls only',
+      'do NOT cap how many tickets a round runs; the bound is on API calls only',
     ).toContain('API bound, not a fan-out cap')
   })
 
@@ -517,7 +517,7 @@ describe('AC-2.10 — byte-identity of the four github renderings', () => {
         expect(
           collectTokenSites(src, neutral).length,
           `"${neutral}" must be stated exactly once in ${label} — the rendering it expands to is ` +
-          'pinned above, and two statements of the neutral form are two authorities (PF-023)',
+          'pinned above, and two statements of the neutral form are two authorities',
         ).toBe(1)
       })
     }
