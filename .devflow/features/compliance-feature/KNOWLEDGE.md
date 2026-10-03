@@ -352,7 +352,7 @@ Step 5 composes the release notes body: `CHANGELOG_CONTENT` first, then an optio
 
 **Passing an op-level `COMPLIANCE:` key to any spawn.** Retired by #362: the Git agent's traceability ops take the evidence policy's mechanism inputs (`ISSUE_REQUIRED`, `APPLY_CONVENTIONS`, `REQUIRE_NON_AUTHOR_APPROVAL`) instead. The build-mds §14 collector reports any `COMPLIANCE:` spawn line in a compiled command (with a known-bad probe of the retired shapes).
 
-**Echoing external thread body content.** Reply bodies in `resolve-review-threads` must cite only internal evidence (commit SHAs, file:line from the codebase, ADR IDs) — never verbatim content from `<external-thread>` blocks.
+**Echoing external thread body content.** Reply bodies in `resolve-review-threads` must cite only internal evidence (commit SHAs, file:line from the codebase) — never verbatim content from `<external-thread>` blocks.
 
 **Short-circuiting converge with ||.** `installSkillDir` and the rule step in `convergeComplianceArtifacts` must execute independently. Using `&&` or `||` would let the first operation's result skip the second.
 
