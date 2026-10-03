@@ -2312,7 +2312,7 @@ describe('removeAllDevFlow: bare skill dir safety', () => {
   let claudeDir: string;
 
   beforeEach(async () => {
-    claudeDir = await fs.mkdtemp(path.join(os.tmpdir(), 'devflow-pf012-test-'));
+    claudeDir = await fs.mkdtemp(path.join(os.tmpdir(), 'devflow-baredir-test-'));
   });
 
   afterEach(async () => {
@@ -2375,7 +2375,7 @@ describe('removeSelectedPlugins: bare skill dir safety', () => {
   let claudeDir: string;
 
   beforeEach(async () => {
-    claudeDir = await fs.mkdtemp(path.join(os.tmpdir(), 'devflow-pf012-selective-'));
+    claudeDir = await fs.mkdtemp(path.join(os.tmpdir(), 'devflow-baredir-selective-'));
   });
 
   afterEach(async () => {
