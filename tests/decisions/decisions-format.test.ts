@@ -1197,10 +1197,6 @@ describe('Learning agent creation-bar contract', () => {
     expect(agentContent).not.toContain('0.95');
   });
 
-  it('states confidence is metadata, not a gate', () => {
-    expect(agentContent).toContain('NOT a gate');
-  });
-
   it('Iron Law references assign-anchor and render, not decisions-append', () => {
     // Verify Iron Law line
     expect(agentContent).toContain('assign-anchor OWNS NUMBERING');

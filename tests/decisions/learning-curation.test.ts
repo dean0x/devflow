@@ -93,9 +93,10 @@ function readDecisionsMd(dir: string): string {
 // Learning agent content-presence assertions (AC-C3)
 //
 // The Learning agent (src/assets/agents/learning.md) is the sole decisions processor:
-// it claims the queue, reads the data files directly, and writes through the
-// four ledger ops. These describe pins hold the curation contract strings in
-// place — the same Iron-Law contract the ledger ops enforce at runtime.
+// it claims the queue through claim-queue, reads the claimed turns directly,
+// reads the ledger and the log only through list and show, and writes only
+// through the learning ops. These describe pins hold the curation contract
+// strings in place — the same Iron-Law contract the ledger ops enforce at runtime.
 // ---------------------------------------------------------------------------
 
 describe('Learning agent curation contract (AC-C3)', () => {
@@ -118,16 +119,19 @@ describe('Learning agent curation contract (AC-C3)', () => {
     expect(agentContent).toContain('never hand-edit the .md');
   });
 
-  it('names the inputs the agent reads directly', () => {
-    expect(agentContent).toContain('Inputs (read directly with your Read tool)');
+  it('reads the claimed turns directly and the ledger only through list and show', () => {
+    // \s+ tolerates a line wrap anywhere in the wrapped prose.
+    expect(agentContent).toMatch(/claimed\s+turns\s+are\s+the\s+one\s+input\s+you\s+read\s+directly\s+with\s+your\s+Read\s+tool/);
+    expect(agentContent).toMatch(/Ledger\s+and\s+log\s+data\s+come\s+only\s+through\s+`list`\s+and\s+`show`/);
   });
 
-  it('routes all ledger writes through assign-anchor/retire-anchor/refresh-anchor/rotate-observations', () => {
-    expect(agentContent).toContain('assign-anchor');
-    expect(agentContent).toContain('retire-anchor');
-    // refresh-anchor: post-promotion reinforcement op (D-LOG-CONTENT-AUTHORITY)
-    expect(agentContent).toContain('refresh-anchor');
-    expect(agentContent).toContain('rotate-observations');
+  it('routes every ledger write through the learning ops', () => {
+    for (const op of [
+      'put-observation', 'assign-anchor', 'retire-anchor', 'restore-anchor', 'refresh-anchor',
+      'rotate-observations', 'claim-due',
+    ]) {
+      expect(agentContent, op).toContain(op);
+    }
   });
 
   it('deletes the claim file as the final act (consume-then-delete)', () => {
@@ -155,24 +159,14 @@ describe('Learning agent curation contract (AC-C3)', () => {
     expect(agentContent).toMatch(/dedup|near-duplicate/i);
   });
 
-  it('bounds curation to at most 5 changes per run', () => {
-    // \s+ tolerates an incidental mid-sentence line wrap in the markdown source
-    // (a literal newline between "curation" and "changes", not just a space).
-    expect(agentContent).toMatch(/≤5\s+curation\s+changes/);
-    expect(agentContent).toContain('stop after 5 changes');
+  it('bounds maintenance by the claim-due work list, not by a change cap or a protection window', () => {
+    expect(agentContent).toContain('json-helper.cjs" claim-due');
+    // \s+ tolerates a mid-sentence line wrap, so a re-wrapped cap is still caught.
+    expect(agentContent).not.toMatch(/≤5\s+curation\s+changes/);
+    expect(agentContent).not.toMatch(/7-day\s+protection\s+window/);
   });
 
-  it('7-day protection window is keyed off the ledger date field, with D5 fallback for dateless rows', () => {
-    expect(agentContent).toContain('7-day protection window');
-    expect(agentContent).toContain("ledger row's");
-    expect(agentContent).toContain('date` field');
-    // D5: pitfall rows promoted before date-stamping have no `date` field — fall back to
-    // last_seen from the log row, not treat the entry as always-touchable.
-    expect(agentContent).toContain('pitfall rows promoted before date-stamping was added');
-  });
-
-  it('rotation step is for archiving stale observing rows (AC-F9)', () => {
-    expect(agentContent).toContain('observing');
+  it('rotation step archives observations no entry carries (AC-F9)', () => {
     expect(agentContent).toMatch(/30 days|30-day/);
     expect(agentContent).toMatch(/never touches anchored|never touch.*anchor/i);
   });
@@ -421,7 +415,7 @@ describe('AC-F9: rotation step wired into curation (contract check)', () => {
     expect(agentContent).toMatch(/never wrap them in a lock/i);
   });
 
-  it('agent states rotation archives stale observing rows and never touches anchored rows', () => {
+  it('agent states rotation archives unreferenced observations and never touches anchored ones', () => {
     expect(agentContent).toContain('anchored');
     expect(agentContent).toContain('archive');
   });
