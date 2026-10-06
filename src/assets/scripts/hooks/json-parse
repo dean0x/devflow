@@ -35,12 +35,16 @@ json_field() {
 # Extract a field from a JSON file. Usage: json_field_file "/path/to/file.json" "field" "default"
 # Note: uses if/then/else to preserve boolean false (jq // operator would replace false with default)
 # The node fallback reads the file on stdin: json-helper takes no file path.
+# Both paths are silent on stderr: an unparseable or missing file yields empty
+# output and a failing status, as jq does with its errors discarded. The node
+# path redirects stderr BEFORE stdin, so the shell's own error for a `< "$file"`
+# that cannot open is discarded too.
 json_field_file() {
   local file="$1" field="$2" default="${3:-}"
   if [ "$_HAS_JQ" = "true" ]; then
     jq -r "if (.$field | type) == \"null\" then \"$default\" else (.$field | tostring) end" "$file" 2>/dev/null
   else
-    node "$_JSON_HELPER" get-field "$field" "$default" < "$file"
+    node "$_JSON_HELPER" get-field "$field" "$default" 2>/dev/null < "$file"
   fi
 }
 

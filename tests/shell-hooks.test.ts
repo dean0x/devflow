@@ -397,17 +397,22 @@ describe('json-parse wrapper', () => {
     expect(result).toBe('val');
   });
 
-  it('json_field_file reads a field from a file through the node fallback, a boolean false included', () => {
+  it('json_field_file reads a field from a file through the node fallback, a boolean false included, and prints nothing on stderr', () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'json-field-file-'));
     try {
       const file = path.join(dir, 'state.json');
       fs.writeFileSync(file, JSON.stringify({ enabled: false, port: 4141, nested: { model: 'opus' } }));
-      const read = (field: string, fallback: string): string => {
+      const fieldOf = (target: string, field: string, fallback: string) => {
         const run = spawnSync('bash', [
           '-c', 'source "$1" && _HAS_JQ=false && json_field_file "$2" "$3" "$4"',
-          '_', path.join(HOOKS_DIR, 'json-parse'), file, field, fallback,
+          '_', path.join(HOOKS_DIR, 'json-parse'), target, field, fallback,
         ], { encoding: 'utf8' });
+        return { status: run.status, stdout: run.stdout, stderr: run.stderr };
+      };
+      const read = (field: string, fallback: string): string => {
+        const run = fieldOf(file, field, fallback);
         expect(run.status, run.stderr).toBe(0);
+        expect(run.stderr).toBe('');
         return run.stdout.trim();
       };
 
@@ -415,6 +420,17 @@ describe('json-parse wrapper', () => {
       expect(read('port', '0')).toBe('4141');
       expect(read('nested.model', '')).toBe('opus');
       expect(read('missing', 'fallback')).toBe('fallback');
+
+      // The jq path discards its own errors, so a hook that reads a broken file
+      // stays silent. The node fallback must be silent too: same empty stdout and
+      // failing status as before, nothing on stderr. A missing file covers the
+      // shell's own redirect error, which only a 2>/dev/null placed before the
+      // `< "$file"` silences.
+      const broken = path.join(dir, 'broken.json');
+      fs.writeFileSync(broken, 'not-json{{{');
+      for (const target of [broken, path.join(dir, 'absent.json')]) {
+        expect(fieldOf(target, 'enabled', 'false'), path.basename(target)).toEqual({ status: 1, stdout: '', stderr: '' });
+      }
     } finally {
       fs.rmSync(dir, { recursive: true, force: true });
     }
