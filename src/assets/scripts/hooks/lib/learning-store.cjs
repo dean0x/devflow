@@ -249,6 +249,29 @@ function withJsonlSuffix(file, suffix) {
   return /\.jsonl$/.test(file) ? file.replace(/\.jsonl$/, suffix) : file + suffix;
 }
 
+/**
+ * Run `git <args>` in `root` and return its stdout. The argv is a literal array,
+ * never a shell string, and every call turns `core.fsmonitor` off (D-NO-FSMONITOR,
+ * documented at listGitTrackedFiles): git runs the command a repository's config
+ * names there whenever it reads the index. Each call is bounded by GIT_TIMEOUT_MS
+ * and GIT_MAX_BUFFER, and stderr is discarded.
+ *
+ * @param {string} root - the directory to run in
+ * @param {string[]} args - the git subcommand and its arguments
+ * @returns {string}
+ * @throws when git is missing or `root` is not a working tree, the call times out or
+ *   overflows its buffer, or git exits non-zero (the error's `status` is its exit code)
+ */
+function git(root, args) {
+  return execFileSync('git', ['-c', 'core.fsmonitor=false', ...args], {
+    cwd: root,
+    timeout: GIT_TIMEOUT_MS,
+    maxBuffer: GIT_MAX_BUFFER,
+    stdio: ['ignore', 'pipe', 'ignore'],
+    encoding: 'utf8',
+  });
+}
+
 // ---------------------------------------------------------------------------
 // Status helpers
 // ---------------------------------------------------------------------------
@@ -775,14 +798,7 @@ function gitScopeMatcher(root) {
     if (!isNonEmptyString(glob)) return false;
     let out;
     try {
-      // D-NO-FSMONITOR
-      out = execFileSync('git', ['-c', 'core.fsmonitor=false', 'ls-files', '-z', '--', ':(glob)' + glob], {
-        cwd: root,
-        timeout: GIT_TIMEOUT_MS,
-        maxBuffer: GIT_MAX_BUFFER,
-        stdio: ['ignore', 'pipe', 'ignore'],
-        encoding: 'utf8',
-      });
+      out = git(root, ['ls-files', '-z', '--', ':(glob)' + glob]);
     } catch {
       return false;
     }
@@ -1695,13 +1711,7 @@ function showEntry(key, ledger, log, { historyVersions: versionsOf } = {}) {
 function commitAt(root, ref) {
   let out;
   try {
-    out = execFileSync('git', ['-c', 'core.fsmonitor=false', 'rev-parse', '--verify', '--quiet', `${ref}^{commit}`], {
-      cwd: root,
-      timeout: GIT_TIMEOUT_MS,
-      maxBuffer: GIT_MAX_BUFFER,
-      stdio: ['ignore', 'pipe', 'ignore'],
-      encoding: 'utf8',
-    });
+    out = git(root, ['rev-parse', '--verify', '--quiet', `${ref}^{commit}`]);
   } catch {
     return null;
   }
@@ -2203,8 +2213,7 @@ function isCollisionScanExcluded(relPath) {
 }
 
 /**
- * The files git tracks under `root`, relative to it. The argv is a literal array
- * — never a shell string.
+ * The files git tracks under `root`, relative to it.
  *
  * D-NO-FSMONITOR: `ls-files` reads the index, and reading the index runs the
  * command a repository's config names in `core.fsmonitor` — code chosen by the
@@ -2219,14 +2228,7 @@ function isCollisionScanExcluded(relPath) {
  *   times out or overflows its buffer; the caller then walks the tree instead
  */
 function listGitTrackedFiles(root) {
-  const out = execFileSync('git', ['-c', 'core.fsmonitor=false', 'ls-files', '-z'], {
-    cwd: root,
-    timeout: GIT_TIMEOUT_MS,
-    maxBuffer: GIT_MAX_BUFFER,
-    stdio: ['ignore', 'pipe', 'ignore'],
-    encoding: 'utf8',
-  });
-  return out.split('\0').filter(Boolean);
+  return git(root, ['ls-files', '-z']).split('\0').filter(Boolean);
 }
 
 /**
@@ -2756,13 +2758,7 @@ function quoteAtRef(root, at, quote, { verifyRef } = {}) {
   const shown = singleLine(at);
   let blob;
   try {
-    blob = execFileSync('git', ['-c', 'core.fsmonitor=false', 'cat-file', 'blob', `${checkedAt.commit}:${at}`], {
-      cwd: root,
-      timeout: GIT_TIMEOUT_MS,
-      maxBuffer: GIT_MAX_BUFFER,
-      stdio: ['ignore', 'pipe', 'ignore'],
-      encoding: 'utf8',
-    });
+    blob = git(root, ['cat-file', 'blob', `${checkedAt.commit}:${at}`]);
   } catch (err) {
     if (err && typeof err.status === 'number') {
       return retireRefusal('not-at-ref', `'${shown}' is not a file at ${where}; nothing was written`);
