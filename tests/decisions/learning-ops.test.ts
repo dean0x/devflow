@@ -1814,6 +1814,15 @@ describe('retireAnchor: Retired and Deprecated take a reason', () => {
     });
   });
 
+  it('gives an entry that holds no status key its status right after anchor_id, where the projection puts it', () => {
+    seedLearningTree(dir, { log: [makeV2LogRow()], ledger: [makeV2LedgerRow({ decisions_status: undefined })] });
+
+    expect(retire('ADR-001', 'Retired', { reason: 'A one-off' }).ok).toBe(true);
+    const [row] = rowsOf(paths.ledger);
+    expect(row).toEqual({ ...makeV2LedgerRow(), decisions_status: 'Retired', status_note: 'A one-off', retired_on: TODAY });
+    expect(Object.keys(row)).toEqual([...MINTED_KEYS, 'status_note', 'retired_on']);
+  });
+
   it('retires a v1 entry, its content untouched, after copying a v1 tree aside', () => {
     const prior = makeV1LedgerRow();
     seedLearningTree(dir, { log: [makeV1LogRow()], ledger: [prior] });
