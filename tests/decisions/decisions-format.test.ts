@@ -904,8 +904,8 @@ describe('formatEntryBodyV2', () => {
       ...V2_DECISION,
       title: 'two\nlines',
       rule: 'a\r\nb',
-      why: 'c d',
-      provenance: 'e f\tg',
+      why: 'c\u2028d',
+      provenance: 'e\u2029f\tg',
       scope: ['x\ny'],
       last_verified: '2026-09-01\n## PF-999: forged',
     });
@@ -1373,7 +1373,7 @@ describe('segmentDetails — TS-1: full LineTerminator set collapsed in field va
   });
 
   it('\\u2028 (LS) in a segment value is collapsed to a space', () => {
-    const result = segmentDetails('area: foo bar; issue: baz', PF_KEYS);
+    const result = segmentDetails('area: foo\u2028bar; issue: baz', PF_KEYS);
     expect(result.area).toBe('foo bar');
   });
 
@@ -1386,7 +1386,7 @@ describe('segmentDetails — TS-1: full LineTerminator set collapsed in field va
   });
 
   it('\\u2028 in amendmentToString string form is collapsed to a space', () => {
-    expect(formatAmendmentsLine(['foo bar'])).toBe('- **Amendments**: foo bar\n');
+    expect(formatAmendmentsLine(['foo\u2028bar'])).toBe('- **Amendments**: foo bar\n');
   });
 
   it('\\r in amendmentToString { date, note } object note is collapsed to a space', () => {

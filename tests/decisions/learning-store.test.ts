@@ -616,14 +616,14 @@ describe('validateObservationInput: banned characters', () => {
   it.each([
     ['newline', '\n'],
     ['carriage return', '\r'],
-    ['line separator', ' '],
-    ['paragraph separator', ' '],
+    ['line separator', '\u2028'],
+    ['paragraph separator', '\u2029'],
     ['tab', '\t'],
     ['NUL', '\u0000'],
     ['bell', '\u0007'],
     ['DEL', '\u007f'],
     ['next line', '\u0085'],
-    ['right-to-left override', '‮'],
+    ['right-to-left override', '\u202e'],
   ])('refuses a %s in the title', (_name, ch) => {
     expect(errorFields(validate(createInput({ title: `two${ch}lines` })))).toEqual(['title']);
   });
