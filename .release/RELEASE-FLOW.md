@@ -27,7 +27,12 @@ Learned by `/release` on 2026-08-23 from: `package.json`, `.github/workflows/rel
 1. Clean working tree (`git status --porcelain` empty)
 2. Tag `v{VERSION}` does not exist (local + CI re-checks)
 3. `CHANGELOG.md` has a non-empty `## [Unreleased]` section
-4. Local build + test via Validate agent (`npm run build`, `npm test`)
+4. Local build + test via Validate agent (`npm run build`, `npm test`) — on a busy machine
+   (load average ~9–12) the 3.1.0 run timed out in compliance-e2e, model-discovery,
+   redact-secrets and eager-memory-refresh, each green alone. The release job rebuilds and
+   reruns the full suite before it commits, tags or publishes anything, so a local failure
+   that is only timeouts, in files that pass alone, does not block a release (user
+   decision, 3.1.0)
 5. `gh` authenticated (needed to dispatch the workflow)
 6. No pre-existing `## [{VERSION}]` header below a non-empty `[Unreleased]` — stale
    aborted-bump residue ships old notes (bump-version.ts fails loudly on this since 2.0.1)
@@ -71,8 +76,15 @@ with extracted notes → restore `[Unreleased]`.
 - `git pull` main (CI adds 1–2 commits: version bump if needed + `[Unreleased]` restore)
 - Verify: `npm view devflow-kit dist-tags`, `gh release view v{VERSION}` (plain
   `npm view devflow-kit version` lagged right after CI in 3.0.0)
+- npm kept `latest` at the previous version for ~4 minutes after CI printed
+  `+ devflow-kit@3.1.0`, even with `--prefer-online` and via the registry's
+  `/-/package/devflow-kit/dist-tags` endpoint — poll the dist-tags until `latest` moves,
+  then install
+- The agent cannot run `npm i -g` (a permission rule denies it) — hand the user
+  `! npm i -g devflow-kit@{VERSION}` to run themselves
 - Evidence extras run when EVIDENCE_POLICY=required (this repo: `.devflow/project.json`
-  `evidence: required`): CI creates the GitHub release, then the Git agent appends
-  Commits / Shipped Issues / Traceability exceptions to its body (CHANGELOG-derived notes
-  kept byte-for-byte, exceptions block last), back-links each shipped issue and adds them
-  to a `vX.Y.Z` milestone
+  `evidence: required`): CI creates the tag and the GitHub release; the Git agent only
+  enriches that release with `gh release edit` and never creates a tag or a release. It
+  appends `## Commits`, `## Shipped Issues` and `## Traceability exceptions` to the body
+  (CHANGELOG-derived notes kept byte-for-byte, exceptions block last), back-links each
+  shipped issue and adds them to a `vX.Y.Z` milestone
