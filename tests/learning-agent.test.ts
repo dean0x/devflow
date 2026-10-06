@@ -247,6 +247,20 @@ describe('learning agent', () => {
       expect(format).toMatch(phrase('Never a ledger ID, a `#123` issue reference or a file-and-line reference'));
     });
 
+    it('records the rule and why, never the story of how it was found', () => {
+      const format = sectionOf(content, '## Entry format', '## Part 1');
+      expect(format).toContain('**No incident narrative.**');
+      expect(format).toMatch(phrase('An entry states the rule and why, not the story of how it was found.'));
+    });
+
+    it('records only the workaround of an open defect, and retires the entry once the defect is fixed and guarded', () => {
+      const format = sectionOf(content, '## Entry format', '## Part 1');
+      expect(format).toContain('**An open defect records only its workaround.**');
+      expect(format).toMatch(phrase(
+        'While a defect is unfixed, the entry states how to avoid it; once it is fixed and guarded, the entry is Encoded or Retired.',
+      ));
+    });
+
     it('shows a good and a bad example', () => {
       const format = sectionOf(content, '## Entry format', '## Part 1');
       expect(format).toMatch(/Good:\n\n```json\n\{"id": "obs_[a-z0-9_]+"/);

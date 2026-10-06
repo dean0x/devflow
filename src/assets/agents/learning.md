@@ -155,11 +155,13 @@ Every string is one line. A put carries the whole content every time: an update 
 the content, it never merges, and a key you leave out is gone. A reinforce carries
 `{"id": "<obs_id>"}` alone.
 
-Three rules keep an entry true once the conversation is forgotten:
+These rules keep an entry true once the conversation is forgotten:
 
 - **Self-contained.** It reads correctly alone, on any clone, months later. Name the function, file or op; never write "this", "the bug above", "as discussed" or another entry's number.
 - **No volatile facts.** No count, size, version, line number or date that will change ("all 9 ops", "since v3.0", "the 52 rows"). State the invariant instead.
 - **No references in title, rule or why.** Never a ledger ID, a `#123` issue reference or a file-and-line reference such as `store.cjs:88` — put-observation refuses all three there. Name the thing in words. Provenance and evidence may cite where a lesson came from.
+- **No incident narrative.** An entry states the rule and why, not the story of how it was found.
+- **An open defect records only its workaround.** While a defect is unfixed, the entry states how to avoid it; once it is fixed and guarded, the entry is Encoded or Retired.
 
 Good:
 
