@@ -316,10 +316,9 @@ describe('json-parse wrapper', () => {
       expect(read('missing', 'fallback')).toBe('fallback');
 
       // The jq path discards its own errors, so a hook that reads a broken file
-      // stays silent. The node fallback must be silent too: same empty stdout and
-      // failing status as before, nothing on stderr. A missing file covers the
-      // shell's own redirect error, which only a 2>/dev/null placed before the
-      // `< "$file"` silences.
+      // stays silent. The node fallback must be silent too: empty stdout, a failing
+      // status, nothing on stderr. A missing file covers the shell's own redirect
+      // error, which only a 2>/dev/null placed before the `< "$file"` silences.
       const broken = path.join(dir, 'broken.json');
       fs.writeFileSync(broken, 'not-json{{{');
       for (const target of [broken, path.join(dir, 'absent.json')]) {
@@ -336,15 +335,14 @@ describe('json-parse wrapper', () => {
       ['json_field', ['k', 'fallback']],
       ['json_extract_cwd_field', ['prompt']],
     ];
-    const results = Object.fromEntries(rows.map(([fn, args]) => {
+    for (const [fn, args] of rows) {
       const run = spawnSync('bash', [
         '-c', 'source "$1" && _HAS_JQ=false && fn="$2" && shift 2 && "$fn" "$@"',
         '_', path.join(HOOKS_DIR, 'json-parse'), fn, ...args,
       ], { input: 'not-json{{{', encoding: 'utf8' });
-      return [fn, { status: run.status, stdout: run.stdout, stderr: run.stderr }];
-    }));
-    // Status 1 is each row's non-vacuity: the fallback really reached its error path.
-    expect(results).toEqual(Object.fromEntries(rows.map(([fn]) => [fn, { status: 1, stdout: '', stderr: '' }])));
+      // Status 1 is the non-vacuity: the fallback really reached its error path.
+      expect({ status: run.status, stdout: run.stdout, stderr: run.stderr }, fn).toEqual({ status: 1, stdout: '', stderr: '' });
+    }
   });
 });
 
