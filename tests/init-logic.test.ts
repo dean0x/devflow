@@ -21,6 +21,8 @@ import {
   type TrackerLifecycleIO,
 } from '../src/cli/commands/init.js';
 import { formatTrackerSummary } from '../src/cli/commands/tracker-prompts.js';
+import type { SummaryLine } from '../src/cli/commands/install-report.js';
+import { stripAnsi } from '../src/core/ansi.js';
 import { TRACKER_PROVIDER_IDS } from '../src/core/tracker.js';
 import { writeManifest, type ManifestData } from '../src/core/manifest.js';
 import {
@@ -2183,10 +2185,15 @@ describe('formatSafeDeleteStatus', () => {
   const info = { command: 'trash', installHint: 'brew install trash-cli' };
   const base = { interactive: false, action: 'skip', state: null, available: true, profilePath, info } as const;
   const restart = { level: 'info', message: expect.stringContaining(`source ${profilePath}`) };
+  // The lines as the terminal shows them. picocolors colours the profile path
+  // whenever CI or FORCE_COLOR is set, so a phrase that runs into the path
+  // matches only once the escape codes are removed.
+  const visible = (lines: readonly SummaryLine[]): SummaryLine[] =>
+    lines.map(line => ({ ...line, message: stripAnsi(line.message) }));
 
   it('reports the block this run installed, interactive or not', () => {
     for (const interactive of [false, true]) {
-      expect(formatSafeDeleteStatus({ ...base, interactive, action: 'install', state: 'missing' }), String(interactive)).toEqual([
+      expect(visible(formatSafeDeleteStatus({ ...base, interactive, action: 'install', state: 'missing' })), String(interactive)).toEqual([
         { level: 'success', message: expect.stringContaining(`Safe-delete installed to ${profilePath}`) },
         restart,
       ]);
@@ -2195,7 +2202,7 @@ describe('formatSafeDeleteStatus', () => {
 
   it('reports the block this run upgraded, interactive or not', () => {
     for (const interactive of [false, true]) {
-      expect(formatSafeDeleteStatus({ ...base, interactive, action: 'upgrade', state: 'outdated' }), String(interactive)).toEqual([
+      expect(visible(formatSafeDeleteStatus({ ...base, interactive, action: 'upgrade', state: 'outdated' })), String(interactive)).toEqual([
         { level: 'success', message: expect.stringContaining(`Safe-delete upgraded in ${profilePath}`) },
         restart,
       ]);
@@ -2204,7 +2211,7 @@ describe('formatSafeDeleteStatus', () => {
 
   it('a re-init over the current block says it is already configured, and nothing else', () => {
     for (const interactive of [false, true]) {
-      expect(formatSafeDeleteStatus({ ...base, interactive, state: 'current' }), String(interactive)).toEqual([
+      expect(visible(formatSafeDeleteStatus({ ...base, interactive, state: 'current' })), String(interactive)).toEqual([
         { level: 'info', message: expect.stringContaining(`Safe-delete already configured in ${profilePath}`) },
       ]);
     }
