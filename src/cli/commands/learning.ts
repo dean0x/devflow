@@ -90,6 +90,21 @@ function storeRefusal(error: LearningStoreError, undone: string): string {
   }
 }
 
+/**
+ * Ask `message` on a terminal and say whether to go on, logging `cancelled` when the
+ * answer is no. With no terminal there is no one to ask: a script that passed the
+ * flag has decided.
+ */
+async function confirmOnTerminal(message: string, cancelled: string): Promise<boolean> {
+  if (!process.stdin.isTTY) return true;
+  const confirmed = await p.confirm({ message, initialValue: false });
+  if (p.isCancel(confirmed) || !confirmed) {
+    p.log.info(cancelled);
+    return false;
+  }
+  return true;
+}
+
 /** True when `dir` is a directory; false when nothing, or something else, is there. */
 async function isDirectory(dir: string): Promise<boolean> {
   try {
@@ -345,16 +360,8 @@ async function handleReset(): Promise<void> {
     return;
   }
 
-  if (process.stdin.isTTY) {
-    const confirm = await p.confirm({
-      message: 'Remove all learning state files? This cannot be undone.',
-      initialValue: false,
-    });
-    if (p.isCancel(confirm) || !confirm) {
-      p.log.info('Reset cancelled.');
-      return;
-    }
-  }
+  const proceed = await confirmOnTerminal('Remove all learning state files? This cannot be undone.', 'Reset cancelled.');
+  if (!proceed) return;
 
   const reset = store.resetLearning(ledgerRoot, { timeoutMs: LOCK_WAIT_MS });
   if (!reset.ok) {
@@ -385,16 +392,11 @@ async function handleClear(): Promise<void> {
     return;
   }
 
-  if (process.stdin.isTTY) {
-    const confirm = await p.confirm({
-      message: 'Drop every observation no entry uses? Entries and the observations they use are kept. This cannot be undone.',
-      initialValue: false,
-    });
-    if (p.isCancel(confirm) || !confirm) {
-      p.log.info('Clear cancelled.');
-      return;
-    }
-  }
+  const proceed = await confirmOnTerminal(
+    'Drop every observation no entry uses? Entries and the observations they use are kept. This cannot be undone.',
+    'Clear cancelled.',
+  );
+  if (!proceed) return;
 
   const cleared = store.clearUnreferenced(ledgerRoot, { timeoutMs: LOCK_WAIT_MS });
   if (!cleared.ok) {
