@@ -144,8 +144,12 @@ const CONTROL_CHARS_CLASS = '[\\u0000-\\u001f\\u007f-\\u009f\\u200e\\u200f\\u202
 const CONTROL_CHAR_RE = new RegExp(CONTROL_CHARS_CLASS);
 const CONTROL_RUN_RE = new RegExp(`${CONTROL_CHARS_CLASS}+`, 'g');
 
-/** An anchor named in prose; refused in title, rule and why when the ledger holds it. */
-const PROSE_ANCHOR_RE = /\b(?:ADR|PF)-\d{3,}\b/g;
+/**
+ * An anchor id written as a whole word in free text: ADR-NNN or PF-NNN, three or
+ * more digits. Title, rule and why may not name one the ledger holds, and the
+ * cited-number scan collects the ones tracked files cite.
+ */
+const ANCHOR_WORD_RE = /\b(?:ADR|PF)-\d{3,}\b/g;
 
 /** An issue or PR reference: `#` and digits after the start or a non-word character other than `&`. */
 const ISSUE_REF_RE = /(?:^|[^\w&])#\d+/;
@@ -222,7 +226,8 @@ function anchorPrefixFor(type) {
 /** Sort key of an anchor id: decisions before pitfalls, then by number; anything else last. */
 function anchorOrder(anchorId) {
   const m = typeof anchorId === 'string' ? /^(ADR|PF)-(\d+)$/.exec(anchorId) : null;
-  return m ? [m[1] === 'ADR' ? 0 : 1, parseInt(m[2], 10)] : [2, Infinity];
+  if (!m) return [2, Infinity];
+  return [m[1] === 'ADR' ? 0 : 1, parseInt(m[2], 10)];
 }
 
 /** Comparator for rows by anchor_id (see anchorOrder). */
@@ -232,6 +237,12 @@ function compareByAnchor(a, b) {
   if (rankA !== rankB) return rankA - rankB;
   if (numA !== numB) return numA < numB ? -1 : 1;
   return String(a.anchor_id).localeCompare(String(b.anchor_id));
+}
+
+/** Comparator for strings by UTF-16 code unit, the order `<` gives. */
+function compareText(a, b) {
+  if (a < b) return -1;
+  return a > b ? 1 : 0;
 }
 
 /** A sorted copy of `rows`, by anchor. */
@@ -605,6 +616,18 @@ function ledgerRegistry(ledgerRows) {
   return { byAnchor, byObsId };
 }
 
+/**
+ * A predicate for the log rows some ledger row carries, whatever that row's status
+ * (D-LEDGER-REGISTRY). A log row with no id is carried by none.
+ *
+ * @param {object[]} ledgerRows
+ * @returns {(logRow: object) => boolean}
+ */
+function carriedBy(ledgerRows) {
+  const { byObsId } = ledgerRegistry(ledgerRows);
+  return logRow => isNonEmptyString(logRow.id) && byObsId.has(logRow.id);
+}
+
 // ---------------------------------------------------------------------------
 // Observation validation
 // ---------------------------------------------------------------------------
@@ -636,7 +659,7 @@ function textProblem(value, limit) {
  * @returns {string|null}
  */
 function proseProblem(value, ledgerIds) {
-  const named = (value.match(PROSE_ANCHOR_RE) || []).find(anchor => ledgerIds.has(anchor));
+  const named = (value.match(ANCHOR_WORD_RE) || []).find(anchor => ledgerIds.has(anchor));
   if (named) return `names ledger entry ${named}; state the rule in words`;
   if (ISSUE_REF_RE.test(value)) return 'carries an issue reference; state what it established instead';
   if (FILE_LINE_REF_RE.test(value)) return 'carries a file-and-line reference; name the function or quote the line instead';
@@ -1071,10 +1094,10 @@ function rotateObservations(root, { now = Date.now(), timeoutMs } = {}) {
     const logPath = getDecisionsLogPath(root);
     const log = readJsonl(logPath);
     const ledgerRows = readJsonl(getDecisionsLedgerPath(root)).rows;
-    const carried = ledgerRegistry(ledgerRows).byObsId;
+    const isCarried = carriedBy(ledgerRows);
     const cutoff = now - ROTATE_AGE_DAYS * DAY_MS;
     const isDue = row => {
-      if (isNonEmptyString(row.id) && carried.has(row.id)) return false;
+      if (isCarried(row)) return false;
       const at = lastActivityMs(row);
       return at !== null && at <= cutoff;
     };
@@ -1140,8 +1163,7 @@ function clearUnreferenced(root, { now = Date.now(), timeoutMs } = {}) {
     }
     const logPath = getDecisionsLogPath(root);
     const log = readJsonl(logPath);
-    const carried = ledgerRegistry(ledger.rows).byObsId;
-    const kept = log.rows.filter(row => isNonEmptyString(row.id) && carried.has(row.id));
+    const kept = log.rows.filter(carriedBy(ledger.rows));
     const cleared = log.rows.length - kept.length;
     if (cleared === 0) return { ok: true, value: { cleared: 0, kept: kept.length } };
 
@@ -1546,14 +1568,14 @@ function observationListingRow(row) {
  */
 function buildListing(ledger, log, { scopeMatches, rejected = {} } = {}) {
   const anchored = ledger.filter(row => isNonEmptyString(row.anchor_id));
-  const carried = new Set(ledger.map(row => row.id).filter(isNonEmptyString));
+  const isCarried = carriedBy(ledger);
   return {
     active: sortedByAnchor(anchored.filter(row => isActive(row))).map(listingRow),
     inactive: sortedByAnchor(anchored.filter(row => !isActive(row)))
       .map(row => ({ ...listingRow(row), note: singleLine(inactiveNote(row)) })),
     observations: log
-      .filter(row => isNonEmptyString(row.id) && !carried.has(row.id))
-      .sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
+      .filter(row => isNonEmptyString(row.id) && !isCarried(row))
+      .sort((a, b) => compareText(a.id, b.id))
       .map(observationListingRow),
     integrity: integrityFlags(ledger, log, { scopeMatches }),
     malformed: { ledger: (rejected.ledger || []).length, log: (rejected.log || []).length },
@@ -2154,16 +2176,13 @@ function claimDue(root, { now = Date.now(), timeoutMs, scopeMatches } = {}) {
 const E4_MAX_SKIPS = 100;
 
 /** Directory names the cited-number scan never reads, at any depth (D-E4-SKIP). */
-const COLLISION_SCAN_EXCLUDED_SEGMENTS = Object.freeze(['.git', 'node_modules', 'target', 'dist']);
+const CITED_SCAN_EXCLUDED_SEGMENTS = Object.freeze(['.git', 'node_modules', 'target', 'dist']);
 
 /** The largest file the cited-number scan reads (bytes); a larger one is skipped. */
-const COLLISION_SCAN_MAX_FILE_BYTES = 5 * 1024 * 1024;
+const CITED_SCAN_MAX_FILE_BYTES = 5 * 1024 * 1024;
 
 /** The most directory entries the fallback walk examines; the walk stops there. */
-const COLLISION_SCAN_MAX_ENTRIES = 200000;
-
-/** An anchor cited as a whole word: ADR-NNN or PF-NNN, three or more digits. */
-const CITED_ANCHOR_RE = /\b(?:ADR|PF)-\d{3,}\b/g;
+const CITED_SCAN_MAX_ENTRIES = 200000;
 
 /** Anchor `n` of `prefix`, its number zero-padded to three digits. */
 function formatAnchorId(prefix, n) {
@@ -2206,10 +2225,10 @@ function nextAnchorFromLedger(ledgerRows, type) {
  * @param {string} relPath - relative to the project root, either separator style
  * @returns {boolean}
  */
-function isCollisionScanExcluded(relPath) {
+function isCitedScanExcluded(relPath) {
   const norm = relPath.split(path.sep).join('/');
   if (norm === '.devflow/learning' || norm.startsWith('.devflow/learning/')) return true;
-  return norm.split('/').some(segment => COLLISION_SCAN_EXCLUDED_SEGMENTS.includes(segment));
+  return norm.split('/').some(segment => CITED_SCAN_EXCLUDED_SEGMENTS.includes(segment));
 }
 
 /**
@@ -2235,7 +2254,7 @@ function listGitTrackedFiles(root) {
  * The files under `root` a directory walk finds, relative to it and sorted — the
  * scan's fallback outside a git working tree. It never descends into an excluded
  * directory, follows no symbolic link (the directory entry of a link is neither a
- * file nor a directory) and stops after COLLISION_SCAN_MAX_ENTRIES entries. A
+ * file nor a directory) and stops after CITED_SCAN_MAX_ENTRIES entries. A
  * directory it cannot read is skipped.
  *
  * @param {string} root - project root
@@ -2244,7 +2263,7 @@ function listGitTrackedFiles(root) {
 function listFsWalkFiles(root) {
   const results = [];
   const stack = [''];
-  let budget = COLLISION_SCAN_MAX_ENTRIES;
+  let budget = CITED_SCAN_MAX_ENTRIES;
   while (stack.length > 0 && budget > 0) {
     const relDir = stack.pop();
     let entries;
@@ -2257,7 +2276,7 @@ function listFsWalkFiles(root) {
       if (budget === 0) break;
       budget -= 1;
       const relPath = relDir ? `${relDir}/${entry.name}` : entry.name;
-      if (isCollisionScanExcluded(relPath)) continue;
+      if (isCitedScanExcluded(relPath)) continue;
       if (entry.isDirectory()) stack.push(relPath);
       else if (entry.isFile()) results.push(relPath);
     }
@@ -2269,7 +2288,7 @@ function listFsWalkFiles(root) {
  * The text of a file the cited-number scan reads, or null for one it skips: a
  * file it cannot open or read, anything but a regular file — a symbolic link
  * included, since it opens with O_NOFOLLOW — a file over
- * COLLISION_SCAN_MAX_FILE_BYTES, and a binary file (one holding a NUL byte).
+ * CITED_SCAN_MAX_FILE_BYTES, and a binary file (one holding a NUL byte).
  * O_NONBLOCK keeps a FIFO from blocking the open, and the read never takes more
  * bytes than the size checked.
  *
@@ -2285,7 +2304,7 @@ function readScannedText(file) {
   }
   try {
     const stat = fs.fstatSync(fd);
-    if (!stat.isFile() || stat.size > COLLISION_SCAN_MAX_FILE_BYTES) return null;
+    if (!stat.isFile() || stat.size > CITED_SCAN_MAX_FILE_BYTES) return null;
     const buf = Buffer.alloc(stat.size);
     let total = 0;
     while (total < buf.length) {
@@ -2323,12 +2342,12 @@ function collectCitedAnchorIds(root) {
   }
   const cited = new Map();
   for (const relPath of files) {
-    if (isCollisionScanExcluded(relPath)) continue;
+    if (isCitedScanExcluded(relPath)) continue;
     const text = readScannedText(path.join(root, relPath));
     if (text === null || !(text.includes('ADR-') || text.includes('PF-'))) continue;
     const lines = text.split('\n');
     for (let i = 0; i < lines.length; i++) {
-      for (const m of lines[i].matchAll(CITED_ANCHOR_RE)) {
+      for (const m of lines[i].matchAll(ANCHOR_WORD_RE)) {
         if (!cited.has(m[0])) cited.set(m[0], { file: relPath, line: i + 1 });
       }
     }
@@ -2604,10 +2623,11 @@ function refreshUnderLock(root, anchors, { verified, now }) {
   if (problems.length > 0) return refreshRefusal(problems, anchors.length);
 
   const changed = plans.filter(plan => !sameJson(plan.prior, plan.next));
-  const refreshed = plans.map(plan => ({
-    anchor_id: plan.anchor_id,
-    state: verified ? 'verified' : changed.includes(plan) ? 'reprojected' : 'unchanged',
-  }));
+  const stateOf = plan => {
+    if (verified) return 'verified';
+    return changed.includes(plan) ? 'reprojected' : 'unchanged';
+  };
+  const refreshed = plans.map(plan => ({ anchor_id: plan.anchor_id, state: stateOf(plan) }));
   if (changed.length === 0) return { ok: true, value: { refreshed } };
 
   ensurePreV2Backup(root, { logRows: log.rows, ledgerRows: ledger.rows });
@@ -2645,7 +2665,7 @@ function removing(keys) {
  * (withLedgerFields). A status key the row has keeps its place; a row without one
  * takes it after anchor_id, where the projection puts it.
  *
- * @param {object} row - a ledger row
+ * @param {object} row - a ledger row that has an anchor_id: its caller found it by anchor
  * @param {string} status
  * @param {Record<string, unknown>} updates - ledger-owned fields only
  * @returns {object} a new row
@@ -2661,7 +2681,7 @@ function withEntryStatus(row, status, updates) {
     placed[key] = value;
     if (key === 'anchor_id') placed.decisions_status = status;
   }
-  return Object.prototype.hasOwnProperty.call(placed, 'decisions_status') ? placed : { ...placed, decisions_status: status };
+  return placed;
 }
 
 /** The problem with an Encoded path, or null: it names a file from the repository root. */
