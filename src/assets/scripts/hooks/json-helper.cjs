@@ -13,7 +13,6 @@
 //   get-field <field> [default]           Read field from stdin JSON
 //   validate                              Exit 0 if stdin is valid JSON, 1 otherwise
 //   compact                               Compact stdin JSON to single line
-//   construct <json-template> [--arg k v] Build JSON object with args
 //   update-field <field> <value> [--json] Set field on stdin JSON (--json parses value)
 //   update-fields <json-patches>          Apply multiple field updates from stdin JSON
 //   extract-cwd-field <field>             Extract cwd + arbitrary field, SOH-byte delimited
@@ -308,13 +307,6 @@ try {
     case 'compact': {
       const input = JSON.parse(readStdin());
       console.log(JSON.stringify(input));
-      break;
-    }
-
-    case 'construct': {
-      // Build JSON from --arg/--argjson pairs
-      const template = parseArgs(args);
-      console.log(JSON.stringify(template));
       break;
     }
 

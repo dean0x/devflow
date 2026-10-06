@@ -440,14 +440,9 @@ describe('json-parse wrapper', () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'json-parse-fallbacks-'));
     try {
       const notJson = 'not-json{{{';
-      // construct keeps an --argjson value that is not JSON as a string, so the
-      // value its fallback cannot handle is one nested past what jq parses and
-      // node can rebuild. 50,000 levels stay under Linux's 128 KiB argument cap.
-      const tooDeep = '['.repeat(50_000) + ']'.repeat(50_000);
       const rows: ReadonlyArray<readonly [string, readonly string[], string]> = [
         ['json_field', ['k', 'fallback'], notJson],
         ['json_compact', [], notJson],
-        ['json_construct', ['--argjson', 'k', tooDeep], ''],
         ['json_update_field', ['k', 'v'], notJson],
         ['json_update_field_json', ['k', '42'], notJson],
         // The fallback reads the file on stdin, so one it cannot open fails in the
