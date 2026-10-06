@@ -119,6 +119,13 @@ fi
 # the backup, which holds the working memory, is 0600 whatever the caller's
 # umask (as in queue-append). A write or rename that fails removes the copy and
 # keeps the previous backup; the bootstrap below still runs.
+#
+# A run killed after creating its copy and before renaming it (by the hook's
+# timeout, say) leaves the copy under its own PID, a name no later run writes,
+# so each run first removes the copies nothing has written to for an hour. A
+# write ends within the hook's 10 s timeout, so no live run's copy is that old
+# and a concurrent run's copy is left alone.
+find "$MEMORY_DIR" -maxdepth 1 -type f -name "${BACKUP_FILE##*/}.tmp.*" -mmin +60 -delete 2>/dev/null || true
 BACKUP_TMP="$BACKUP_FILE.tmp.$$"
 if (umask 077 && json_backup_construct \
     --arg ts "$TIMESTAMP" \

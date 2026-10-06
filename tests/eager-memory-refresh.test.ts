@@ -2740,6 +2740,23 @@ describe('S26: pre-compact backup.json is replaced by a rename, never rewritten 
     expect(fs.existsSync(path.join(memoryDir, 'WORKING-MEMORY.md')), 'a failed backup does not end the hook').toBe(true);
   });
 
+  it('removes a copy a killed run left behind an hour ago, and leaves a live run\'s copy alone', () => {
+    // A run killed between creating its copy and renaming it leaves the copy
+    // under its own PID, which no later run writes. Both suffixes lie above any
+    // PID macOS or Linux hands out, so neither can be this run's own copy.
+    const abandoned = path.join(memoryDir, 'backup.json.tmp.4194305');
+    const live = path.join(memoryDir, 'backup.json.tmp.4194306');
+    for (const copy of [abandoned, live]) fs.writeFileSync(copy, '{"timestamp":');
+    backdateMtime(abandoned, 2 * 60 * 60);
+
+    const run = runPreCompact();
+    expect(run.kind, run.stderr).toBe('clean');
+
+    expect(fs.existsSync(abandoned), 'a copy nothing has written to for an hour is removed').toBe(false);
+    expect(leftovers(), 'a copy written within the hour may be a concurrent run\'s, so it is kept').toEqual([path.basename(live)]);
+    expect((JSON.parse(fs.readFileSync(backup, 'utf-8')) as { trigger?: string }).trigger, 'the run still writes its backup').toBe('pre-compact');
+  });
+
   it('never redirects output into backup.json itself (structural)', () => {
     // A redirect into $BACKUP_FILE, not into a copy whose name extends it.
     const inPlace = />[>|]?\s*"?\$\{?BACKUP_FILE\b(?!\.)/;
