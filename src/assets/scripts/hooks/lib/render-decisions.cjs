@@ -50,6 +50,7 @@ const {
   readJsonl,
   hasLearningDir,
   withDecisionsLock,
+  writeFileAtomic,
 } = require('./learning-store.cjs');
 
 // ---------------------------------------------------------------------------
@@ -85,6 +86,26 @@ function anchorNumeric(anchorId) {
   return m ? parseInt(m[0], 10) : Infinity;
 }
 
+/** The ledger row type a rendered file of `kind` holds. */
+function rowTypeOf(kind) {
+  return kind === 'decisions' ? 'decision' : 'pitfall';
+}
+
+/**
+ * The anchored rows of `kind` whose activity is `active`, sorted by numeric anchor.
+ *
+ * @param {object[]} rows - all rows from the ledger (unfiltered)
+ * @param {'decisions'|'pitfalls'} kind
+ * @param {boolean} active
+ * @returns {object[]}
+ */
+function selectRows(rows, kind, active) {
+  const type = rowTypeOf(kind);
+  return rows
+    .filter(r => r.type === type && r.anchor_id && isActive(r) === active)
+    .sort((a, b) => anchorNumeric(a.anchor_id) - anchorNumeric(b.anchor_id));
+}
+
 /**
  * Select active rows of a given kind from the ledger, sorted by numeric anchor.
  * Exported so callers (renderAndWriteAll, migrations) can build the index without
@@ -95,10 +116,7 @@ function anchorNumeric(anchorId) {
  * @returns {object[]} filtered + sorted active rows
  */
 function selectActiveRows(rows, kind) {
-  const type = kind === 'decisions' ? 'decision' : 'pitfall';
-  return rows
-    .filter(r => r.type === type && r.anchor_id && isActive(r))
-    .sort((a, b) => anchorNumeric(a.anchor_id) - anchorNumeric(b.anchor_id));
+  return selectRows(rows, kind, true);
 }
 
 /**
@@ -110,10 +128,7 @@ function selectActiveRows(rows, kind) {
  * @returns {object[]} filtered + sorted inactive rows
  */
 function selectInactiveRows(rows, kind) {
-  const type = kind === 'decisions' ? 'decision' : 'pitfall';
-  return rows
-    .filter(r => r.type === type && r.anchor_id && !isActive(r))
-    .sort((a, b) => anchorNumeric(a.anchor_id) - anchorNumeric(b.anchor_id));
+  return selectRows(rows, kind, false);
 }
 
 /**
@@ -171,8 +186,7 @@ function buildFileFromBlocks(activeRows, blocks, kind, inactiveRows) {
 
   // Build header: replace the zero-count TL;DR line that opens the init content
   // ("<!-- TL;DR: 0 {kind} -->\n...") with the real one.
-  const initKind = kind === 'decisions' ? 'decision' : 'pitfall';
-  const headerWithPlaceholder = initDecisionsContent(initKind);
+  const headerWithPlaceholder = initDecisionsContent(rowTypeOf(kind));
   // Replace only the first line (the TL;DR comment)
   const header = headerWithPlaceholder.replace(/^<!-- TL;DR:[^\n]*-->/, tldr);
 
@@ -204,29 +218,6 @@ function buildFileFromBlocks(activeRows, blocks, kind, inactiveRows) {
 function renderDecisionsFile(rows, kind) {
   const activeRows = selectActiveRows(rows, kind);
   return buildFileFromBlocks(activeRows, buildBodyBlocks(activeRows, kind), kind, selectInactiveRows(rows, kind));
-}
-
-// ---------------------------------------------------------------------------
-// Atomic write helper
-// ---------------------------------------------------------------------------
-
-/**
- * Write content atomically via a .tmp sibling + rename.
- * Uses O_EXCL to prevent TOCTOU symlink attacks, retries once on EEXIST.
- *
- * @param {string} filePath
- * @param {string} content
- */
-function writeAtomic(filePath, content) {
-  const tmp = filePath + '.tmp';
-  try {
-    fs.writeFileSync(tmp, content, { flag: 'wx' });
-  } catch (err) {
-    if (err.code !== 'EEXIST') throw err;
-    try { fs.unlinkSync(tmp); } catch { /* race */ }
-    fs.writeFileSync(tmp, content, { flag: 'wx' });
-  }
-  fs.renameSync(tmp, filePath);
 }
 
 // ---------------------------------------------------------------------------
@@ -300,7 +291,7 @@ function renderAndWriteAll(worktreePath, rows) {
   // (none)); on a RE-render the index is stale — one generation behind the new
   // body files — never corrupt. Both cases are benign and self-heal on the next
   // successful render.
-  for (const file of [decisions, pitfalls, index]) writeAtomic(file.path, file.content);
+  for (const file of [decisions, pitfalls, index]) writeFileAtomic(file.path, file.content);
 
   process.stderr.write(
     `[render-decisions] wrote decisions.md (${Buffer.byteLength(decisions.content)}B) + pitfalls.md (${Buffer.byteLength(pitfalls.content)}B) + index.md (${Buffer.byteLength(index.content)}B)\n`

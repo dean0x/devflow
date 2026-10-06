@@ -519,7 +519,7 @@ function buildIndexContent(activeDecisionRows, activePitfallRows, { decisionsFil
         lines.push(formatIndexEntryLineV2(row));
         continue;
       }
-      const block = rowBlocks ? rowBlocks[i] : (row.raw_body ? row.raw_body : formatV1Body(row));
+      const block = rowBlocks ? rowBlocks[i] : (row.raw_body || formatV1Body(row));
       const entry = extractEntryFromBlock(block);
       if (entry) lines.push(formatIndexEntryLine(entry));
     }
