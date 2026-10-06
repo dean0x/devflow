@@ -1583,8 +1583,25 @@ function inactiveNote(row) {
   return '';
 }
 
-/** One ledger row as a listing line. */
-function listingRow(row) {
+/** The first log row carrying each observation id; a row with no id is left out. */
+function firstLogRowById(log) {
+  const byId = new Map();
+  for (const row of log) {
+    if (isNonEmptyString(row.id) && !byId.has(row.id)) byId.set(row.id, row);
+  }
+  return byId;
+}
+
+/** A log row's observation count (a v1 row's count) and last sighting; each is null when the row records none or there is no row. */
+function sightingsOf(logRow) {
+  return {
+    observations: (logRow && (positiveInteger(logRow.observations) || positiveInteger(logRow.count))) || null,
+    last_seen: logRow && isNonEmptyString(logRow.last_seen) ? logRow.last_seen : null,
+  };
+}
+
+/** One ledger row as a listing line, with the sightings of `logRow`, the log row carrying its id. */
+function listingRow(row, logRow) {
   const entry = {
     anchor_id: row.anchor_id,
     id: row.id,
@@ -1594,7 +1611,7 @@ function listingRow(row) {
     schema: isV2(row) ? 2 : 1,
   };
   if (isNonEmptyString(row.last_verified)) entry.last_verified = row.last_verified;
-  return entry;
+  return { ...entry, ...sightingsOf(logRow), scope: Array.isArray(row.scope) ? copyJson(row.scope) : null };
 }
 
 /** One unpromoted log row as a listing line. */
@@ -1604,15 +1621,17 @@ function observationListingRow(row) {
     type: row.type,
     title: listingTitle(row),
     schema: isV2(row) ? 2 : 1,
-    observations: positiveInteger(row.observations) || positiveInteger(row.count) || null,
-    last_seen: isNonEmptyString(row.last_seen) ? row.last_seen : null,
+    ...sightingsOf(row),
   };
 }
 
 /**
  * The data behind `list`: active and inactive entries in anchor order, the
  * observations no ledger row carries (by id), the integrity flags and the
- * malformed-line counts. A v1 title is its pattern cut to the title limit.
+ * malformed-line counts. A v1 title is its pattern cut to the title limit. Each
+ * entry carries its ledger row's last_verified (when set) and scope (null when it
+ * has none, as a v1 row does), and the observation count and last sighting of the
+ * log row carrying its id — the first such row — or null for each without one.
  *
  * @param {object[]} ledger
  * @param {object[]} log
@@ -1622,10 +1641,12 @@ function observationListingRow(row) {
 function buildListing(ledger, log, { scopeMatches, rejected = {} } = {}) {
   const anchored = ledger.filter(row => isNonEmptyString(row.anchor_id));
   const isCarried = carriedBy(ledger);
+  const logById = firstLogRowById(log);
+  const entryRow = row => listingRow(row, logById.get(row.id));
   return {
-    active: sortedByAnchor(anchored.filter(row => isActive(row))).map(listingRow),
+    active: sortedByAnchor(anchored.filter(row => isActive(row))).map(entryRow),
     inactive: sortedByAnchor(anchored.filter(row => !isActive(row)))
-      .map(row => ({ ...listingRow(row), note: singleLine(inactiveNote(row)) })),
+      .map(row => ({ ...entryRow(row), note: singleLine(inactiveNote(row)) })),
     observations: log
       .filter(row => isNonEmptyString(row.id) && !isCarried(row))
       .sort((a, b) => compareText(a.id, b.id))
@@ -1675,10 +1696,7 @@ function selectDue(ledger, log, { now = Date.now(), integrity = [], maxEntries =
   const leaseMs = DUE.leaseHours * HOUR_MS;
   const verifyAgeMs = DUE.verifyAgeDays * DAY_MS;
 
-  const logById = new Map();
-  for (const row of log) {
-    if (isNonEmptyString(row.id) && !logById.has(row.id)) logById.set(row.id, row);
-  }
+  const logById = firstLogRowById(log);
   const flagsByAnchor = new Map(integrity.map(entry => [entry.anchor_id, entry.flags]));
   const leased = row => {
     const attemptedAt = Date.parse(row.last_attempt);
@@ -2083,13 +2101,18 @@ function listingToken(value) {
   return isNonEmptyString(value) && !/\s/.test(value) && !CONTROL_CHAR_RE.test(value) ? value : '-';
 }
 
+/** A listing's scope token: its entries joined by `,`, each as listingToken prints it, or `-` for none. */
+function scopeToken(scope) {
+  return Array.isArray(scope) && scope.length > 0 ? scope.map(listingToken).join(',') : '-';
+}
+
 /**
  * The text `list` prints. Each section opens with its name and count, and each
  * item is a line indented two spaces whose tokens are separated by one space,
  * the title last and taking the rest of the line:
  *
  *   ACTIVE <n>
- *     <anchor> <obs_id> v<schema> <title>
+ *     <anchor> <obs_id> v<schema> verified <date|never> observed <count|?> last-seen <last_seen|-> scope <scope|-> <title>
  *   INACTIVE <n>
  *     <anchor> <obs_id> v<schema> <status> <title>
  *       note: <note>                    only when the entry records one
@@ -2101,18 +2124,25 @@ function listingToken(value) {
  *     ledger <k>                        each file with skipped lines
  *     log <k>
  *
- * A token that is missing or not one word prints as `-`, and so does an empty
- * title; titles and notes are already one line (buildListing).
+ * An ACTIVE line's `verified` is the entry's last_verified date, or `never`;
+ * `observed` and `last-seen` are its log row's observation count and last
+ * sighting; `scope` is its scope entries joined by `,`, or `-` when it has none,
+ * as a v1 entry does. A token that is missing or not one word prints as `-` (a
+ * missing count as `?`), and so does an empty title; titles and notes are
+ * already one line (buildListing).
  *
  * @param {{ active: object[], inactive: object[], observations: object[], integrity: object[], malformed: { ledger: number, log: number } }} listing - buildListing's result
  * @returns {string} the lines, with no final newline
  */
 function formatListing(listing) {
   const title = text => (text === '' ? '-' : text);
+  const verified = row => (isNonEmptyString(row.last_verified) ? listingToken(row.last_verified) : 'never');
   const section = (name, items, toLines) => [`${name} ${items.length}`, ...items.flatMap(toLines)];
   const lines = [
     ...section('ACTIVE', listing.active, row => [
-      `  ${listingToken(row.anchor_id)} ${listingToken(row.id)} v${row.schema} ${title(row.title)}`,
+      `  ${listingToken(row.anchor_id)} ${listingToken(row.id)} v${row.schema} verified ${verified(row)}`
+        + ` observed ${row.observations ?? '?'} last-seen ${listingToken(row.last_seen)} scope ${scopeToken(row.scope)}`
+        + ` ${title(row.title)}`,
     ]),
     ...section('INACTIVE', listing.inactive, row => [
       `  ${listingToken(row.anchor_id)} ${listingToken(row.id)} v${row.schema} ${listingToken(row.status)} ${title(row.title)}`,

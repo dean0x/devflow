@@ -41,7 +41,11 @@ export interface LearningState {
   readonly rejected: { readonly ledger: readonly RejectedLine[]; readonly log: readonly RejectedLine[] };
 }
 
-/** An entry in a listing; `note` is set on inactive entries only. */
+/**
+ * An entry in a listing; `note` is set on inactive entries only. `observations`
+ * and `last_seen` are those of the log row carrying the entry's id, null without
+ * one; `scope` is the ledger row's, null when it has none (a v1 row).
+ */
 export interface ListingEntry {
   readonly anchor_id: string;
   readonly id: unknown;
@@ -50,6 +54,9 @@ export interface ListingEntry {
   readonly title: string;
   readonly schema: 1 | 2;
   readonly last_verified?: string;
+  readonly observations: number | null;
+  readonly last_seen: string | null;
+  readonly scope: readonly unknown[] | null;
   readonly note?: string;
 }
 

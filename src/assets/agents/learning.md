@@ -43,7 +43,7 @@ and claim-due are quoted where used (Step 0, Finishing, Part 2); the others prin
 
   ```
   ACTIVE <n>
-    <anchor> <obs_id> v<1|2> <title>
+    <anchor> <obs_id> v<1|2> verified <date|never> observed <count|?> last-seen <last_seen|-> scope <scope|-> <title>
   INACTIVE <n>
     <anchor> <obs_id> v<1|2> <status> <title>
       note: <note>
@@ -54,9 +54,11 @@ and claim-due are quoted where used (Step 0, Finishing, Part 2); the others prin
   MALFORMED <n>
   ```
 
-  OBSERVATIONS are stored observations no entry carries yet. A `note:` line says why an
-  entry is inactive: `encoded in <path>`, `superseded by <anchor>`, or its reason.
-  MALFORMED prints only when unreadable lines were skipped.
+  An ACTIVE line gives the entry's last verification, its observation's count and last
+  sighting, and its scope entries joined by `,` (`-` for a v1 entry). OBSERVATIONS are
+  stored observations no entry carries yet. A `note:` line says why an entry is inactive:
+  `encoded in <path>`, `superseded by <anchor>`, or its reason. MALFORMED prints only when
+  unreadable lines were skipped.
 - `show <anchor|obs_id>` — read-only, one entry as pretty JSON: its `ledger` rows (every
   row carrying its observation, so a twin shows too), its `log` row, its last prior
   `history_versions`, and `flags` — a `ledger-only-content` flag for each ledger row

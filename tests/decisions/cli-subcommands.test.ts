@@ -305,9 +305,9 @@ describe('learning --list', { timeout: 30_000 }, () => {
 
     expect(run.stdout).toBe([
       'ACTIVE 3',
-      '  ADR-001 obs_cli_decision v2 Store functions return a Result',
-      '  PF-001 obs_cli_pitfall v1 Editing installed hook scripts instead of their source',
-      '  PF-002 obs_cli_pitfall v1 Editing installed hook scripts instead of their source',
+      '  ADR-001 obs_cli_decision v2 verified 2026-09-01 observed 1 last-seen 2026-09-01T00:00:00.000Z scope area:learning Store functions return a Result',
+      '  PF-001 obs_cli_pitfall v1 verified never observed 2 last-seen 2026-07-01T00:00:00.000Z scope - Editing installed hook scripts instead of their source',
+      '  PF-002 obs_cli_pitfall v1 verified never observed 2 last-seen 2026-07-01T00:00:00.000Z scope - Editing installed hook scripts instead of their source',
       'INACTIVE 1',
       '  PF-003 obs_cli_retired v1 Retired A pitfall seen once',
       '    note: a one-off',

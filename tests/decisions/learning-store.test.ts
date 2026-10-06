@@ -1381,11 +1381,29 @@ describe('buildListing', () => {
     expect(listing.active[1]).toEqual({
       anchor_id: 'ADR-002', id: 'obs_beta', type: 'decision', status: 'Accepted',
       title: 'Second decision', schema: 2, last_verified: '2026-09-20',
+      observations: 1, last_seen: '2026-09-01T00:00:00.000Z', scope: ['area:learning'],
     });
     const legacy = listing.active[2];
     expect(legacy.schema).toBe(1);
     expect(Array.from(legacy.title)).toHaveLength(120);
     expect(legacy.title.endsWith('…')).toBe(true);
+  });
+
+  it('gives each entry the observation count and last sighting of its log row, and the scope of its ledger row', () => {
+    const listing = store.buildListing([
+      makeV2LedgerRow({ anchor_id: 'ADR-001', id: 'obs_alpha', scope: ['area:learning', 'src/**'] }),
+      makeV1LedgerRow({ anchor_id: 'PF-001', id: 'obs_counted' }),
+      makeV2LedgerRow({ anchor_id: 'ADR-002', id: 'obs_gone' }),
+    ], [
+      makeV2LogRow({ id: 'obs_alpha', observations: 4, last_seen: '2026-09-30T08:00:00.000Z' }),
+      makeV2LogRow({ id: 'obs_alpha', observations: 9 }),
+      makeV1LogRow({ id: 'obs_counted', count: 5, observations: undefined }),
+    ]);
+    expect(listing.active.map(r => [r.anchor_id, r.observations, r.last_seen, r.scope])).toEqual([
+      ['ADR-001', 4, '2026-09-30T08:00:00.000Z', ['area:learning', 'src/**']],
+      ['ADR-002', null, null, ['area:learning']],
+      ['PF-001', 5, '2026-07-01T00:00:00.000Z', null],
+    ]);
   });
 
   it('lists inactive entries with the note that says why', () => {

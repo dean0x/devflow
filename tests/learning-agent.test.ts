@@ -175,6 +175,26 @@ describe('learning agent', () => {
       }
     });
 
+    it('quotes an ACTIVE line field for field as the store prints it, the title last', () => {
+      const template = '<anchor> <obs_id> v<1|2> verified <date|never> observed <count|?> last-seen <last_seen|-> scope <scope|-> <title>';
+      expect(content).toContain(`    ${template}\n`);
+      const { buildListing, formatListing } = createRequire(import.meta.url)(LEARNING_STORE) as {
+        buildListing: (ledger: object[], log: object[]) => unknown;
+        formatListing: (listing: unknown) => string;
+      };
+      const entryContent = { schema: 2, id: 'obs_listed', type: 'decision', title: 'A rule with spaces', scope: ['area:a', 'src/**'] };
+      const printed = formatListing(buildListing(
+        [{ ...entryContent, anchor_id: 'ADR-NNN', decisions_status: 'Accepted', last_verified: '2026-09-01' }],
+        [{ ...entryContent, observations: 2, first_seen: '2026-08-01T00:00:00.000Z', last_seen: '2026-09-02T00:00:00.000Z' }],
+      )).split('\n')[1];
+      const shape = template
+        .replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+        .replace(/<title>$/, '.+')
+        .replace(/<[^>]+>/g, '\\S+');
+      expect(printed).toMatch(new RegExp(`^  ${shape}$`));
+      expect(printed).toBe('  ADR-NNN obs_listed v2 verified 2026-09-01 observed 2 last-seen 2026-09-02T00:00:00.000Z scope area:a,src/** A rule with spaces');
+    });
+
     it('names every reason claim-due can hand an entry out for, as the store spells it', () => {
       const store = fsSync.readFileSync(LEARNING_STORE, 'utf-8');
       for (const reason of ['duplicate-obs-id', 'ledger-without-log', 'scope-matches-nothing', 'legacy-v1', 'verify-age']) {

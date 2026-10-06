@@ -817,17 +817,23 @@ describe('put-observation op', { timeout: 30_000 }, () => {
 
 /** A tree with each kind of row list shows: active and inactive entries of both schemas, unpromoted observations and an entry with no log row. */
 const LIST_LEDGER: Row[] = [
-  makeV2LedgerRow({ anchor_id: 'ADR-002', id: 'obs_beta', title: 'Second decision' }),
+  makeV2LedgerRow({
+    anchor_id: 'ADR-002', id: 'obs_beta', title: 'Second decision', scope: ['area:learning', 'area:hooks'], last_verified: '2026-09-20',
+  }),
   makeV2LedgerRow(),
   makeV1LedgerRow(),
   makeV2LedgerRow({ anchor_id: 'ADR-003', id: 'obs_gamma', decisions_status: 'Superseded', superseded_by: 'ADR-001', title: 'Old decision' }),
   makeV1LedgerRow({ anchor_id: 'PF-002', id: 'obs_old', pattern: 'Old lesson', decisions_status: 'Retired' }),
-  makeV2LedgerRow({ anchor_id: 'PF-003', id: 'obs_orphan', type: 'pitfall', decisions_status: 'Active', title: 'Orphan entry' }),
+  makeV2LedgerRow({
+    anchor_id: 'PF-003', id: 'obs_orphan', type: 'pitfall', decisions_status: 'Active', title: 'Orphan entry', last_verified: undefined,
+  }),
 ];
 
 const LIST_LOG: Row[] = [
   makeV2LogRow(),
-  makeV2LogRow({ id: 'obs_beta', title: 'Second decision' }),
+  makeV2LogRow({
+    id: 'obs_beta', title: 'Second decision', scope: ['area:learning', 'area:hooks'], observations: 3, last_seen: '2026-09-28T10:30:00.000Z',
+  }),
   makeV1LogRow(),
   makeV2LogRow({ id: 'obs_gamma', title: 'Old decision' }),
   makeV2LogRow({ id: 'obs_zeta', type: 'pitfall', title: 'Unpromoted lesson', observations: 3 }),
@@ -837,10 +843,10 @@ const LIST_LOG: Row[] = [
 /** What list prints for LIST_LEDGER and LIST_LOG. */
 const LISTING: readonly string[] = [
   'ACTIVE 4',
-  '  ADR-001 obs_store_one v2 Store functions return a Result',
-  '  ADR-002 obs_beta v2 Second decision',
-  '  PF-001 obs_legacy_one v1 Editing installed hook scripts instead of their source',
-  '  PF-003 obs_orphan v2 Orphan entry',
+  '  ADR-001 obs_store_one v2 verified 2026-09-01 observed 1 last-seen 2026-09-01T00:00:00.000Z scope area:learning Store functions return a Result',
+  '  ADR-002 obs_beta v2 verified 2026-09-20 observed 3 last-seen 2026-09-28T10:30:00.000Z scope area:learning,area:hooks Second decision',
+  '  PF-001 obs_legacy_one v1 verified never observed 2 last-seen 2026-07-01T00:00:00.000Z scope - Editing installed hook scripts instead of their source',
+  '  PF-003 obs_orphan v2 verified never observed ? last-seen - scope area:learning Orphan entry',
   'INACTIVE 2',
   '  ADR-003 obs_gamma v2 Superseded Old decision',
   '    note: superseded by ADR-001',
@@ -920,11 +926,15 @@ describe('formatListing', () => {
     const listing = store.buildListing([
       makeV2LedgerRow({ id: undefined }),
       makeV2LedgerRow({ anchor_id: 'ADR-002', id: 'obs with spaces', title: '' }),
+      makeV2LedgerRow({ anchor_id: 'ADR-003', id: 'obs_odd', last_verified: 'last week', scope: ['area:a', 'src/a b'], title: 'Odd row' }),
+      makeV2LedgerRow({ anchor_id: 'ADR-004', id: 'obs_bare', scope: [], title: 'Bare row' }),
     ], []);
-    expect(store.formatListing(listing).split('\n').slice(0, 3)).toEqual([
-      'ACTIVE 2',
-      '  ADR-001 - v2 Store functions return a Result',
-      '  ADR-002 - v2 -',
+    expect(store.formatListing(listing).split('\n').slice(0, 5)).toEqual([
+      'ACTIVE 4',
+      '  ADR-001 - v2 verified 2026-09-01 observed ? last-seen - scope area:learning Store functions return a Result',
+      '  ADR-002 - v2 verified 2026-09-01 observed ? last-seen - scope area:learning -',
+      '  ADR-003 obs_odd v2 verified - observed ? last-seen - scope area:a,- Odd row',
+      '  ADR-004 obs_bare v2 verified 2026-09-01 observed ? last-seen - scope - Bare row',
     ]);
   });
 });

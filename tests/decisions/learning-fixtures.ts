@@ -301,6 +301,9 @@ export interface ListingRow {
   title: string;
   schema: 1 | 2;
   last_verified?: string;
+  observations: number | null;
+  last_seen: string | null;
+  scope: unknown[] | null;
   note?: string;
 }
 

@@ -124,7 +124,7 @@ The shape is the op contract: the whole content every time, ids and statuses on 
 
 **Read-only ops.**
 
-- **`list`** always prints `ACTIVE n`, `INACTIVE n` (with `<status>` and an indented `note:`: `encoded in <path>`, `superseded by <anchor>` or the status note), `OBSERVATIONS n` (log rows no ledger row carries), `INTEGRITY n`; `MALFORMED n` only when lines were skipped. Items read `<anchor> <obs_id> v<1|2> <title>`; titles are one line cut to 120 (a v1 title is its pattern); a missing or multi-word token prints `-`.
+- **`list`** always prints `ACTIVE n`, `INACTIVE n` (with `<status>` and an indented `note:`: `encoded in <path>`, `superseded by <anchor>` or the status note), `OBSERVATIONS n` (log rows no ledger row carries), `INTEGRITY n`; `MALFORMED n` only when lines were skipped. An ACTIVE item reads `<anchor> <obs_id> v<1|2> verified <date|never> observed <count|?> last-seen <last_seen|-> scope <scope|-> <title>`: the count and last sighting come from the log row carrying its id, and the scope entries are joined by `,` (`-` for a v1 entry). Titles come last, one line, cut to 120 (a v1 title is its pattern); a missing or multi-word token prints `-`.
 - **`show <anchor|obs_id>`** prints pretty JSON `{key, ledger, log, history_versions, flags, malformed?}`. `ledger` is every ledger row carrying the observation (a twin shows too); `flags` holds a `ledger-only-content` flag with `fields` per row whose content its log row lacks (v1: normalized `details` containment; v2: any differing projected field).
 
 **Writers.**
