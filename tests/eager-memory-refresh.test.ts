@@ -1943,8 +1943,8 @@ exit 0
 
   it('worker hex gate rejects a non-hex stamp SHA before any git rev-walk (injection guard)', () => {
     // The COMMITS_SINCE reconciliation evidence interpolates the stamp SHA into a
-    // `git log <sha>..HEAD` range. The gate at background-memory-update:348-372 must
-    // reject anything that is not 7-40 lowercase hex. NOTE: session-start-memory has an
+    // `git log <sha>..HEAD` range. The gate in background-memory-update's
+    // compute_commits_since_note must reject anything that is not 7-40 lowercase hex. NOTE: session-start-memory has an
     // analogous gate covered by S2 — this pins the WORKER's own copy, a different file.
     const payload = 'deadbeefdeadbeefdeadbeefdeadbeefdeadb;x'; // 39 chars, non-hex ';' and 'x'
     fs.writeFileSync(

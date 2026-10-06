@@ -78,8 +78,8 @@ const SCANNED_EXTENSIONS: readonly string[] = ['.md', '.mds', '.sh', '.bash'];
  * list may shrink, never grow.
  */
 const KNOWN_UNQUOTED_HEREDOCS: readonly string[] = [
-  'src/assets/scripts/hooks/background-memory-update:313',
-  'src/assets/scripts/hooks/background-memory-update:424',
+  'src/assets/scripts/hooks/background-memory-update:316',
+  'src/assets/scripts/hooks/background-memory-update:427',
   'src/assets/scripts/hooks/capture-question:157',
 ];
 
