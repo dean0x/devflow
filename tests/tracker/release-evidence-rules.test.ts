@@ -17,6 +17,10 @@
  * mechanics now read them from ONE merged-PR listing, map PRs into the range
  * locally, render each number `#{n}` before the gate, and report what the listing
  * could not cover instead of calling an empty result "empty, not degraded".
+ *
+ * create-release. Every provider's reference appends the shipped issues under
+ * `## Shipped Issues`, the heading every release carries and the name the
+ * SHIPPED_ISSUES input and backlink-shipped-issues use.
  */
 
 import { describe, it, expect } from 'vitest'
@@ -583,5 +587,19 @@ describe('#364/#365: `--limit` on every `gh pr list` in the agent, the reference
     const seeded = prReady.replace('--state open --limit 1', '--state open')
     expect(seeded, 'the seed must land on the shipped lookup').not.toBe(prReady)
     expect(collectUnboundedInvocations(seeded)).toEqual(['gh pr list --head {branch} --state open'])
+  })
+})
+
+// ---------------------------------------------------------------------------
+// create-release — the shipped-issues heading
+// ---------------------------------------------------------------------------
+
+describe('create-release names the shipped-issues section the releases carry', () => {
+  it.each(PROVIDERS)('%s appends a `## Shipped Issues` section, and names no closed-issues step', provider => {
+    const ref = requireRef(`tracker/${provider}/create-release.md`)
+    const steps = ref.split('\n').filter(line => line.includes('If `SHIPPED_ISSUES`'))
+    expect(steps, 'the reference holds exactly one SHIPPED_ISSUES step').toHaveLength(1)
+    expect(steps[0]).toContain('append a `## Shipped Issues` section')
+    expect(ref).not.toMatch(/closed[- ]issues/i)
   })
 })
