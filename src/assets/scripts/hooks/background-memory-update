@@ -210,7 +210,10 @@ if [ -f "$PROCESSING_FILE" ]; then
   _PROC_LINES=$(wc -l < "$PROCESSING_FILE" | tr -d ' ')
   if [ "$_PROC_LINES" -gt "$PROC_OVERFLOW_CAP" ]; then
     _PROC_TMP="$PROCESSING_FILE.tmp.$$"
-    tail -"$PROC_OVERFLOW_TARGET" "$PROCESSING_FILE" > "$_PROC_TMP" && mv "$_PROC_TMP" "$PROCESSING_FILE" || rm -f "$_PROC_TMP" 2>/dev/null || true
+    # SEC-2: the batch is the claimed queue, 0600 like the queue itself, and the
+    # cold path at session start moves it back to the queue. mv gives it the
+    # trimmed copy's inode and mode, so the copy is created under umask 077.
+    (umask 077 && tail -"$PROC_OVERFLOW_TARGET" "$PROCESSING_FILE" > "$_PROC_TMP") && mv "$_PROC_TMP" "$PROCESSING_FILE" || rm -f "$_PROC_TMP" 2>/dev/null || true
     log "Processing overflow: truncated from $_PROC_LINES to $PROC_OVERFLOW_TARGET lines"
   fi
 elif [ -f "$QUEUE_FILE" ]; then

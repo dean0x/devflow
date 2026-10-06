@@ -1023,6 +1023,40 @@ exit 0
     // WORKING-MEMORY.md written by fake claude confirms the run was not skipped
     expect(fs.existsSync(memFile)).toBe(true);
   });
+
+  it('200-line overflow cap keeps the batch owner-only: a failed run leaves it trimmed, at 0600', () => {
+    // The batch is the claimed memory queue, 0600 like the queue, and the cold
+    // path at session start moves it back to the queue. The trim replaces it with
+    // a copy, and the worker runs under its parent's umask, typically 022. A
+    // failed run leaves the batch in place, so the trimmed file can be read.
+    const memoryDir = path.join(projectDir, '.devflow', 'memory');
+    const processingFile = path.join(memoryDir, '.pending-turns.processing');
+    const queueFile = path.join(memoryDir, '.pending-turns.jsonl');
+    const failBin = path.join(shimDir, 'claude');
+    fs.writeFileSync(failBin, '#!/bin/bash\ncat > /dev/null\nexit 1\n');
+    fs.chmodSync(failBin, 0o755);
+
+    const ts = Math.floor(Date.now() / 1000);
+    const rows = (prefix: string, count: number, from: number): string =>
+      Array.from({ length: count }, (_, i) =>
+        JSON.stringify({ role: i % 2 === 0 ? 'user' : 'assistant', content: `${prefix}-${i}`, ts: from + i }) + '\n').join('');
+    // 160 leftover lines plus 60 new ones: 220, past the 200-line cap.
+    fs.writeFileSync(processingFile, rows('old', 160, ts));
+    fs.writeFileSync(queueFile, rows('new', 60, ts + 200));
+    for (const file of [processingFile, queueFile]) fs.chmodSync(file, 0o600);
+
+    execSync(`umask 022 && bash "${BACKGROUND_UPDATER}" "${projectDir}"`, {
+      env: { ...process.env, HOME: homeDir, PATH: `${shimDir}:${process.env.PATH ?? '/usr/bin:/bin'}` },
+      stdio: 'ignore',
+    });
+
+    expect(fs.existsSync(processingFile), 'the failed run leaves the batch for the next one').toBe(true);
+    const kept = fs.readFileSync(processingFile, 'utf-8').trim().split('\n');
+    expect(kept, 'non-vacuity: the merged batch was trimmed to the newest 100 lines').toHaveLength(100);
+    expect((JSON.parse(kept[kept.length - 1]) as { content: string }).content).toBe('new-59');
+    expect((fs.statSync(processingFile).mode & 0o777).toString(8), 'the batch holds conversation text, so it stays owner-only').toBe('600');
+    expect(fs.readdirSync(memoryDir).filter(name => name.includes('.tmp.')), 'no trimmed copy is left behind').toEqual([]);
+  });
 });
 
 // =============================================================================
