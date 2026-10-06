@@ -401,6 +401,32 @@ describe('S2: AC-F4 — session-start-memory injection states', () => {
     expect(ctx).not.toContain('abc..xyz123');
   });
 
+  it('a backup.json that does not parse is read as no snapshot, and the working memory is still injected', () => {
+    const headSha = execSync('git rev-parse HEAD', { cwd: projectDir, encoding: 'utf-8' }).trim();
+    const branch = execSync('git branch --show-current', { cwd: projectDir, encoding: 'utf-8' }).trim() || 'main';
+    writeMemoryWithStamp(projectDir, headSha, branch);
+    const withoutBackup = getCtx(projectDir, homeDir);
+    expect(withoutBackup, 'non-vacuity: the memory is injected with no backup at all').toContain('synced @');
+
+    // A truncated write, and a whole object followed by garbage: jq prints the
+    // object's fields before failing on the rest, so a guard that kept partial
+    // output would inject this snapshot. Its future timestamp would make it win.
+    const backup = path.join(projectDir, '.devflow', 'memory', 'backup.json');
+    const snapshot = JSON.stringify({ timestamp: '2099-01-01T00:00:00Z', memory_snapshot: 'stale snapshot' });
+    for (const corrupt of [snapshot.slice(0, 30), `${snapshot}\nnot-json{{{`]) {
+      fs.writeFileSync(backup, corrupt);
+      const run = runHook(SESSION_START_MEMORY_HOOK, { cwd: projectDir }, homeDir);
+      expect(run.exitCode, `${corrupt}\n${run.stderr}`).toBe(0);
+      const ctx = (JSON.parse(run.stdout.trim()) as { hookSpecificOutput: { additionalContext: string } })
+        .hookSpecificOutput.additionalContext;
+      expect(ctx, corrupt).toBe(withoutBackup);
+    }
+
+    // The red probe: the same snapshot, whole, is injected.
+    fs.writeFileSync(backup, snapshot);
+    expect(getCtx(projectDir, homeDir)).toContain('PRE-COMPACT SNAPSHOT');
+  });
+
   it('raw UNPROCESSED TURNS dump is absent from all output (legacy format gone)', () => {
     const headSha = execSync('git rev-parse HEAD', { cwd: projectDir, encoding: 'utf-8' }).trim();
     const branch = execSync('git branch --show-current', { cwd: projectDir, encoding: 'utf-8' }).trim() || 'main';
