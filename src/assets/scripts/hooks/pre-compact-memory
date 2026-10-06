@@ -115,10 +115,12 @@ fi
 # session-start-memory reads it twice, and a read landing between a truncate
 # and the write that refills it would meet a partial file; a rename hands every
 # read either the previous backup or the new one. SEC-2: the copy is created
-# under umask 077, and the rename gives the backup the copy's inode and mode, so
-# the backup, which holds the working memory, is 0600 whatever the caller's
-# umask (as in queue-append). A write or rename that fails removes the copy and
-# keeps the previous backup; the bootstrap below still runs.
+# under umask 077, and only when nothing already holds its name (noclobber), so
+# no file or symlink found there is reused or written through; the rename gives
+# the backup the copy's inode and mode, so the backup, which holds the working
+# memory, is 0600 whatever the caller's umask (as in queue-append). A write or
+# rename that fails removes whatever holds the copy's name and keeps the
+# previous backup; the bootstrap below still runs.
 #
 # A run killed after creating its copy and before renaming it (by the hook's
 # timeout, say) leaves the copy under its own PID, a name no later run writes,
@@ -127,7 +129,7 @@ fi
 # and a concurrent run's copy is left alone.
 find "$MEMORY_DIR" -maxdepth 1 -type f -name "${BACKUP_FILE##*/}.tmp.*" -mmin +60 -delete 2>/dev/null || true
 BACKUP_TMP="$BACKUP_FILE.tmp.$$"
-if (umask 077 && json_backup_construct \
+if (umask 077 && set -o noclobber && json_backup_construct \
     --arg ts "$TIMESTAMP" \
     --arg branch "$GIT_BRANCH" \
     --arg status "$GIT_STATUS" \

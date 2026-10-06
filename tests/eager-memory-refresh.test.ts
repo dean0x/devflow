@@ -2791,6 +2791,36 @@ describe('S26: pre-compact backup.json is replaced by a rename, never rewritten 
     expect((JSON.parse(fs.readFileSync(backup, 'utf-8')) as { trigger?: string }).trigger, 'the run still writes its backup').toBe('pre-compact');
   });
 
+  it('never reuses or writes through a file or symlink already at its copy\'s name, and keeps the previous backup', () => {
+    // The copy's name ends in the hook's PID, and exec keeps the PID, so the
+    // wrapper plants an entry at exactly that name, checks it is there, and then
+    // becomes the hook. Were the copy's name another, the hook would replace the
+    // backup, so the kept backup also proves the plant sat at the copy's name.
+    const outside = path.join(homeDir, 'outside.txt');
+    const workingMemory = path.join(memoryDir, 'WORKING-MEMORY.md');
+    const plants: ReadonlyArray<readonly [string, string]> = [
+      ['a symlink to a file outside the project', 'ln -s "$OUTSIDE" "$COPY"'],
+      ['a regular file readable by everyone', ': > "$COPY" && chmod 644 "$COPY"'],
+    ];
+    for (const [label, plant] of plants) {
+      fs.writeFileSync(outside, 'untouched\n');
+      fs.rmSync(workingMemory, { force: true });
+
+      const run = spawnWithStdin(
+        'bash',
+        ['-c', `umask 022 && COPY="$1/backup.json.tmp.$$" && ${plant} && [ -e "$COPY" ] && exec bash "$0"`, PRE_COMPACT_HOOK, memoryDir],
+        { input: JSON.stringify({ cwd: projectDir }), env: { ...process.env, HOME: homeDir, OUTSIDE: outside } },
+      );
+
+      expect(run.kind, `${label}\n${run.stderr}`).toBe('clean');
+      expect(fs.existsSync(workingMemory), `${label}: non-vacuity, the hook ran to its bootstrap`).toBe(true);
+      expect(fs.readFileSync(outside, 'utf-8'), `${label}: nothing is written through the planted entry`).toBe('untouched\n');
+      expect(fs.readFileSync(backup, 'utf-8'), `${label}: the previous backup is kept`).toBe(PREVIOUS);
+      expect(fs.statSync(backup).ino, `${label}: backup.json is still the previous inode`).toBe(fs.statSync(witness).ino);
+      expect(leftovers(), `${label}: the entry at the copy's name is removed`).toEqual([]);
+    }
+  });
+
   it('never redirects output into backup.json itself (structural)', () => {
     // A redirect into $BACKUP_FILE, not into a copy whose name extends it.
     const inPlace = />[>|]?\s*"?\$\{?BACKUP_FILE\b(?!\.)/;
