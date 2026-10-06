@@ -16,6 +16,7 @@ import {
   installSettings,
   installManagedSettings,
   installClaudeignore,
+  hasClaudeignore,
   discoverProjectGitRoots,
   ensureDevflowGitignore,
   applyUserSecurityDenyList,
@@ -30,7 +31,7 @@ import {
 } from '../../targets/claude-code/post-install.js';
 import { DEVFLOW_PLUGINS, LEGACY_PLUGIN_NAMES, LEGACY_COMMAND_NAMES, LEGACY_RULE_NAMES, buildAssetMaps, buildScopedSkillsMap, buildRulesMap, partitionSelectablePlugins, WORKFLOW_ORDER, parsePluginSelection, resolveFeatureRedirect, FEATURE_OWNED_SKILLS, prefixSkillName, type PluginDefinition } from '../../core/plugins.js';
 import { LEGACY_SKILL_NAMES } from '../../targets/claude-code/legacy.js';
-import { detectPlatform, detectShell, getProfilePath, getSafeDeleteInfo, hasSafeDelete } from '../../core/safe-delete.js';
+import { detectPlatform, detectShell, getProfilePath, getSafeDeleteInfo, hasSafeDelete, type SafeDeleteInfo } from '../../core/safe-delete.js';
 import { generateSafeDeleteBlock, installToProfile, removeFromProfile, getInstalledVersion, SAFE_DELETE_BLOCK_VERSION } from '../../core/safe-delete-install.js';
 import { convergeAmbientHooks } from './ambient.js';
 import { convergeMemoryHooks, drainMemoryQueue } from './memory.js';
@@ -103,7 +104,7 @@ export type { MigrationLogger };
 /**
  * D32/D35: Orchestrates the init-level migration-runner seam.
  *
- * Computes the project list with the D37 fallback rule:
+ * Computes the project list with the D37 fallback rule ({@link projectRoots}):
  *   1. Use discoveredProjects when non-empty.
  *   2. Fall back to [gitRoot] when discoveredProjects is empty and gitRoot is set.
  *   3. Run with no per-project targets when both are absent (global-only; per-project
@@ -129,10 +130,7 @@ export async function runMigrationsWithFallback(
     registry?: readonly AnyMigration[],
   ) => Promise<RunMigrationsResult>,
 ): Promise<RunMigrationsResult> {
-  const projectsForMigration =
-    discoveredProjects.length > 0 ? discoveredProjects : (gitRoot ? [gitRoot] : []);
-
-  const migrationResult = await runner({ devflowDir }, projectsForMigration);
+  const migrationResult = await runner({ devflowDir }, projectRoots(discoveredProjects, gitRoot));
 
   reportMigrationResult(migrationResult, logger, verbose);
 
@@ -191,6 +189,9 @@ export function formatSweepSummary(
 function logSummaryLines(lines: readonly SummaryLine[]): void {
   for (const line of lines) {
     switch (line.level) {
+      case 'success':
+        p.log.success(line.message);
+        break;
       case 'info':
         p.log.info(line.message);
         break;
@@ -206,6 +207,12 @@ function logSummaryLines(lines: readonly SummaryLine[]): void {
   }
 }
 
+/** The safe-delete block in the user's shell profile, compared with the one this CLI writes. */
+export type SafeDeleteState = 'current' | 'outdated' | 'missing';
+
+/** What this run does to the safe-delete block: decided before the install, carried out after it. */
+export type SafeDeleteAction = 'install' | 'upgrade' | 'skip';
+
 /**
  * Classify the safe-delete installation state based on the installed version
  * in the user's shell profile.
@@ -213,10 +220,82 @@ function logSummaryLines(lines: readonly SummaryLine[]): void {
 export function classifySafeDeleteState(
   installedVersion: number,
   currentVersion: number,
-): 'current' | 'outdated' | 'missing' {
+): SafeDeleteState {
   if (installedVersion === currentVersion) return 'current';
   if (installedVersion > 0) return 'outdated';
   return 'missing';
+}
+
+/**
+ * The project roots init writes per-project files into and migrates (D37): every
+ * project discovered from Claude's history, else the current repository, else
+ * none. Pure.
+ */
+export function projectRoots(discoveredProjects: readonly string[], gitRoot: string | null): string[] {
+  if (discoveredProjects.length > 0) return [...discoveredProjects];
+  return gitRoot ? [gitRoot] : [];
+}
+
+/**
+ * The Recommended summary's `.claudeignore` row.
+ *
+ * D-INIT-REAL-OUTCOME: init's summary and status lines state what this run does,
+ * decided from the state it acts on rather than printed whatever happens, and
+ * point only at a step the user can still take. The summary prints before the
+ * install runs, so this row is decided from whether each targeted project
+ * already holds a `.claudeignore` (hasClaudeignore, which matches the install's
+ * exclusive create): one without it gets one, so the row says `created`; when
+ * all have one, `already present`; when the run targets no project, `skipped`.
+ * formatSafeDeleteStatus applies the same rule to safe-delete.
+ *
+ * Pure function.
+ *
+ * @param present - for each project the run targets, whether it already holds a
+ *   `.claudeignore`; empty when the run targets none.
+ */
+export function resolveClaudeignoreOutcome(present: readonly boolean[]): 'created' | 'already present' | 'skipped' {
+  if (present.length === 0) return 'skipped';
+  return present.every(Boolean) ? 'already present' : 'created';
+}
+
+/**
+ * What init says about safe-delete once the install has run (D-INIT-REAL-OUTCOME).
+ *
+ * The outcome comes first: the block this run installed or upgraded, or the
+ * current block it found in place. Failing an outcome, the one step left to the
+ * user is installing the platform's trash command, which init cannot do for
+ * them. A non-interactive run always takes the Recommended path, which installs
+ * or upgrades the block itself, so its outcome is all there is to report.
+ *
+ * Pure function — returns lines, logs nothing.
+ *
+ * @param state - The profile's block before this run, or null when no profile was
+ *   checked (the trash command is missing, or the shell has no profile init writes).
+ */
+export function formatSafeDeleteStatus(input: {
+  readonly interactive: boolean;
+  readonly action: SafeDeleteAction;
+  readonly state: SafeDeleteState | null;
+  readonly available: boolean;
+  readonly profilePath: string | null;
+  readonly info: SafeDeleteInfo;
+}): SummaryLine[] {
+  const { profilePath, info } = input;
+  if (profilePath !== null) {
+    const restart: SummaryLine = { level: 'info', message: 'Restart your shell or run: ' + color.cyan(`source ${profilePath}`) };
+    if (input.action === 'install') return [{ level: 'success', message: `Safe-delete installed to ${color.dim(profilePath)}` }, restart];
+    if (input.action === 'upgrade') return [{ level: 'success', message: `Safe-delete upgraded in ${color.dim(profilePath)}` }, restart];
+    if (input.state === 'current') return [{ level: 'info', message: `Safe-delete already configured in ${color.dim(profilePath)}` }];
+  }
+  if (input.available || info.installHint === null) return [];
+  if (!input.interactive) {
+    return [{ level: 'info', message: `Protect against accidental ${color.red('rm -rf')}: ${color.cyan(info.installHint)}` }];
+  }
+  if (profilePath === null) return [];
+  return [
+    { level: 'info', message: `Install ${color.cyan(info.command ?? 'trash')} first: ${color.dim(info.installHint)}` },
+    { level: 'info', message: `Then re-run ${color.cyan('devflow init')} to auto-configure safe-delete.` },
+  ];
 }
 
 export { addContextHook, removeContextHook, hasContextHook };
@@ -1047,7 +1126,9 @@ export const initCommand = new Command('init')
     let viewModeExplicit = !!options.reset;
     let claudeignoreEnabled = !!gitRoot;
     let discoveredProjects: string[] = [];
-    let safeDeleteAction: 'install' | 'upgrade' | 'skip' = 'skip';
+    let safeDeleteAction: SafeDeleteAction = 'skip';
+    // The profile's block before this run; null when no profile was checked.
+    let safeDeleteState: SafeDeleteState | null = null;
     let safeDeleteBlock: string | null = null;
     // Security mode is resolved from flag + manifest + detected reality via resolveSecurityAction.
     // The final value is written to the manifest and consumed by the dedicated security step.
@@ -1192,11 +1273,17 @@ export const initCommand = new Command('init')
       discoveredProjects = discoveredResult;
 
       if (needsVersionCheck) {
-        const state = classifySafeDeleteState(installedVersionResult, SAFE_DELETE_BLOCK_VERSION);
-        if (state === 'current') safeDeleteAction = 'skip';
-        else if (state === 'outdated') safeDeleteAction = 'upgrade';
+        safeDeleteState = classifySafeDeleteState(installedVersionResult, SAFE_DELETE_BLOCK_VERSION);
+        if (safeDeleteState === 'current') safeDeleteAction = 'skip';
+        else if (safeDeleteState === 'outdated') safeDeleteAction = 'upgrade';
         else safeDeleteAction = 'install';
       }
+
+      // D-INIT-REAL-OUTCOME: the summary prints before the install runs, so its
+      // .claudeignore row comes from what each project the install targets holds.
+      const claudeignorePresent = await Promise.all(
+        (claudeignoreEnabled ? projectRoots(discoveredProjects, gitRoot) : []).map(hasClaudeignore),
+      );
 
       // Print summary
       const defaultFlagCount = countActiveFlags(enabledFlags);
@@ -1216,8 +1303,9 @@ export const initCommand = new Command('init')
         `Tracker:         ${formatTrackerSummary(trackerProvider)}`,
         `View mode:       ${readViewMode(enabledFlags)}`,
         `Claude Code flags: ${defaultFlagCount} configured`,
-        `${claudeignoreEnabled ? '.claudeignore:   created' : ''}`,
-        `${safeDeleteAction !== 'skip' ? 'Safe delete:     installed' : ''}`,
+        `.claudeignore:   ${resolveClaudeignoreOutcome(claudeignorePresent)}`,
+        safeDeleteAction === 'install' ? 'Safe delete:     installed'
+          : safeDeleteAction === 'upgrade' ? 'Safe delete:     upgraded' : '',
       ].filter(l => l.trim()).join('\n');
 
       p.note(summaryLines + `\n\nCustomize later: ${color.cyan('devflow init --advanced')}`, 'Recommended settings applied');
@@ -1534,10 +1622,10 @@ export const initCommand = new Command('init')
 
         if (safeDeleteBlock) {
           const installedVersion = await getInstalledVersion(profilePath);
-          const state = classifySafeDeleteState(installedVersion, SAFE_DELETE_BLOCK_VERSION);
-          if (state === 'current') {
+          safeDeleteState = classifySafeDeleteState(installedVersion, SAFE_DELETE_BLOCK_VERSION);
+          if (safeDeleteState === 'current') {
             safeDeleteAction = 'skip';
-          } else if (state === 'outdated') {
+          } else if (safeDeleteState === 'outdated') {
             safeDeleteAction = 'upgrade';
           } else {
             p.note(
@@ -2184,20 +2272,18 @@ export const initCommand = new Command('init')
     const existingHud = loadHudConfig();
     saveHudConfig({ enabled: hudEnabled, detail: existingHud.detail });
 
-    // File extras
+    // File extras — into the projects the Recommended summary's .claudeignore row checked.
     if (claudeignoreEnabled) {
+      const results = await Promise.all(
+        projectRoots(discoveredProjects, gitRoot).map(root => installClaudeignore(root, rootDir, verbose)),
+      );
       if (discoveredProjects.length > 0) {
-        const results = await Promise.all(
-          discoveredProjects.map(root => installClaudeignore(root, rootDir, verbose)),
-        );
         const created = results.filter(Boolean).length;
         if (created > 0) {
           p.log.success(`.claudeignore created in ${created} project(s)`);
         } else {
           p.log.info(`.claudeignore already exists in all ${discoveredProjects.length} project(s)`);
         }
-      } else if (gitRoot) {
-        await installClaudeignore(gitRoot, rootDir, verbose);
       }
     }
     // Deterministically ensure .devflow/ is gitignored at the repo root — independent
@@ -2382,29 +2468,14 @@ export const initCommand = new Command('init')
     }
 
     // Safe-delete status messages (after spinner)
-    if (process.stdin.isTTY && profilePath) {
-      if (safeDeleteAction === 'install') {
-        p.log.success(`Safe-delete installed to ${color.dim(profilePath)}`);
-        p.log.info('Restart your shell or run: ' + color.cyan(`source ${profilePath}`));
-      } else if (safeDeleteAction === 'upgrade') {
-        p.log.success(`Safe-delete upgraded in ${color.dim(profilePath)}`);
-        p.log.info('Restart your shell or run: ' + color.cyan(`source ${profilePath}`));
-      } else if (safeDeleteAvailable && safeDeleteBlock) {
-        const installedVersion = await getInstalledVersion(profilePath);
-        if (classifySafeDeleteState(installedVersion, SAFE_DELETE_BLOCK_VERSION) === 'current') {
-          p.log.info(`Safe-delete already configured in ${color.dim(profilePath)}`);
-        }
-      } else if (!safeDeleteAvailable && safeDeleteInfo.installHint) {
-        p.log.info(`Install ${color.cyan(safeDeleteInfo.command ?? 'trash')} first: ${color.dim(safeDeleteInfo.installHint)}`);
-        p.log.info(`Then re-run ${color.cyan('devflow init')} to auto-configure safe-delete.`);
-      }
-    } else if (!process.stdin.isTTY) {
-      if (safeDeleteAvailable && safeDeleteInfo.command) {
-        p.log.info(`Safe-delete available (${safeDeleteInfo.command}). Run interactively to auto-install.`);
-      } else if (safeDeleteInfo.installHint) {
-        p.log.info(`Protect against accidental ${color.red('rm -rf')}: ${color.cyan(safeDeleteInfo.installHint)}`);
-      }
-    }
+    logSummaryLines(formatSafeDeleteStatus({
+      interactive: process.stdin.isTTY === true,
+      action: safeDeleteAction,
+      state: safeDeleteState,
+      available: safeDeleteAvailable,
+      profilePath,
+      info: safeDeleteInfo,
+    }));
 
     // Verbose mode: show details
     if (verbose) {

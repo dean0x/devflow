@@ -15,6 +15,9 @@ import {
   persistManifestThenConvergeTracker,
   buildTrackerLifecycleIO,
   trackerOverrideMessage,
+  projectRoots,
+  resolveClaudeignoreOutcome,
+  formatSafeDeleteStatus,
   type TrackerLifecycleIO,
 } from '../src/cli/commands/init.js';
 import { formatTrackerSummary } from '../src/cli/commands/tracker-prompts.js';
@@ -31,6 +34,7 @@ import { getManagedSettingsPath } from '../src/targets/claude-code/claude-paths.
 import {
   installManagedSettings,
   installClaudeignore,
+  hasClaudeignore,
   stripUserDenyList,
   detectDenyState,
   resolveSecurityAction,
@@ -2125,6 +2129,105 @@ describe('installClaudeignore return value', () => {
     // Should not overwrite existing file
     const content = await fs.readFile(path.join(gitRoot, '.claudeignore'), 'utf-8');
     expect(content).toBe('# existing');
+  });
+
+  // The Recommended summary prints before the install runs, so it reports the
+  // install's outcome from hasClaudeignore. The two must agree on what is already
+  // there, a dangling symlink included (the exclusive create refuses those too).
+  it('hasClaudeignore agrees with installClaudeignore: absent, a file, a dangling symlink', async () => {
+    const shapes: Array<[string, (root: string) => Promise<void>, boolean]> = [
+      ['no file', async () => {}, false],
+      ['a regular file', root => fs.writeFile(path.join(root, '.claudeignore'), '# existing', 'utf-8'), true],
+      ['a dangling symlink', root => fs.symlink(path.join(tmpDir, 'nowhere'), path.join(root, '.claudeignore')), true],
+    ];
+    for (const [label, seed, present] of shapes) {
+      const gitRoot = await fs.mkdtemp(path.join(tmpDir, 'project-'));
+      await seed(gitRoot);
+      expect(await hasClaudeignore(gitRoot), label).toBe(present);
+      expect(await installClaudeignore(gitRoot, rootDir, false), label).toBe(!present);
+    }
+  });
+});
+
+describe('projectRoots', () => {
+  it('is every discovered project when there are any', () => {
+    expect(projectRoots(['/a', '/b'], '/repo')).toEqual(['/a', '/b']);
+  });
+
+  it('falls back to the current repository when none was discovered', () => {
+    expect(projectRoots([], '/repo')).toEqual(['/repo']);
+  });
+
+  it('is empty outside a repository with nothing discovered', () => {
+    expect(projectRoots([], null)).toEqual([]);
+  });
+});
+
+describe('resolveClaudeignoreOutcome', () => {
+  it('is "created" when any targeted project lacks a .claudeignore', () => {
+    expect(resolveClaudeignoreOutcome([true, false, true])).toBe('created');
+    expect(resolveClaudeignoreOutcome([false])).toBe('created');
+  });
+
+  it('is "already present" when every targeted project has one — the re-init that changes nothing', () => {
+    expect(resolveClaudeignoreOutcome([true, true])).toBe('already present');
+  });
+
+  it('is "skipped" when the run targets no project', () => {
+    expect(resolveClaudeignoreOutcome([])).toBe('skipped');
+  });
+});
+
+describe('formatSafeDeleteStatus', () => {
+  const profilePath = '/home/u/.bashrc';
+  const info = { command: 'trash', installHint: 'brew install trash-cli' };
+  const base = { interactive: false, action: 'skip', state: null, available: true, profilePath, info } as const;
+  const restart = { level: 'info', message: expect.stringContaining(`source ${profilePath}`) };
+
+  it('reports the block this run installed, interactive or not', () => {
+    for (const interactive of [false, true]) {
+      expect(formatSafeDeleteStatus({ ...base, interactive, action: 'install', state: 'missing' }), String(interactive)).toEqual([
+        { level: 'success', message: expect.stringContaining(`Safe-delete installed to ${profilePath}`) },
+        restart,
+      ]);
+    }
+  });
+
+  it('reports the block this run upgraded, interactive or not', () => {
+    for (const interactive of [false, true]) {
+      expect(formatSafeDeleteStatus({ ...base, interactive, action: 'upgrade', state: 'outdated' }), String(interactive)).toEqual([
+        { level: 'success', message: expect.stringContaining(`Safe-delete upgraded in ${profilePath}`) },
+        restart,
+      ]);
+    }
+  });
+
+  it('a re-init over the current block says it is already configured, and nothing else', () => {
+    for (const interactive of [false, true]) {
+      expect(formatSafeDeleteStatus({ ...base, interactive, state: 'current' }), String(interactive)).toEqual([
+        { level: 'info', message: expect.stringContaining(`Safe-delete already configured in ${profilePath}`) },
+      ]);
+    }
+  });
+
+  it('says nothing after the user declined the prompt, or when the shell has no profile init can write', () => {
+    expect(formatSafeDeleteStatus({ ...base, interactive: true, state: 'missing' })).toEqual([]);
+    expect(formatSafeDeleteStatus({ ...base, profilePath: null })).toEqual([]);
+    expect(formatSafeDeleteStatus({ ...base, interactive: true, profilePath: null })).toEqual([]);
+  });
+
+  it('without the trash command, points at installing it: re-run init when interactive, the install hint when not', () => {
+    const missing = { ...base, available: false } as const;
+    expect(formatSafeDeleteStatus({ ...missing, interactive: true })).toEqual([
+      { level: 'info', message: expect.stringContaining('brew install trash-cli') },
+      { level: 'info', message: expect.stringContaining('to auto-configure safe-delete') },
+    ]);
+    expect(formatSafeDeleteStatus(missing)).toEqual([
+      { level: 'info', message: expect.stringContaining('brew install trash-cli') },
+    ]);
+    expect(formatSafeDeleteStatus({ ...missing, profilePath: null })).toHaveLength(1);
+    expect(formatSafeDeleteStatus({ ...missing, interactive: true, profilePath: null })).toEqual([]);
+    expect(formatSafeDeleteStatus({ ...missing, info: { command: null, installHint: null } })).toEqual([]);
   });
 });
 

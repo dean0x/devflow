@@ -12,6 +12,10 @@
  *   D-LOG-DIR-CAP — init trims ~/.devflow/logs to the MAX_HOOK_LOG_DIRS most
  *   recently written hook log folders.
  *
+ *   D-INIT-REAL-OUTCOME — a re-init that changes nothing says so: `.claudeignore`
+ *   already present, safe-delete already configured, and no offer to install
+ *   either.
+ *
  * Every spawn runs under a temp HOME built by `sandboxEnv`, which refuses a real
  * home before anything runs. Requires a build (`requireBuiltCli`).
  */
@@ -45,8 +49,11 @@ const MINIMAL_INIT = [
 
 let home: string;
 
-function runInit(cwd: string, extra: readonly string[] = []): { status: number | null; stdout: string; out: string } {
-  const env = sandboxEnv(home);
+function runInit(
+  cwd: string,
+  extra: readonly string[] = [],
+  env: NodeJS.ProcessEnv = sandboxEnv(home),
+): { status: number | null; stdout: string; out: string } {
   const r = spawnSync(process.execPath, [CLI, ...MINIMAL_INIT, ...extra], {
     cwd, env, encoding: 'utf-8', timeout: SUBPROCESS_TIMEOUT_MS,
   });
@@ -162,6 +169,62 @@ describe('D-INIT-DOWNGRADE-WARN', () => {
     } finally {
       await fs.rm(nonGit, { recursive: true, force: true });
     }
+  }, SUBPROCESS_TIMEOUT_MS);
+});
+
+describe('D-INIT-REAL-OUTCOME: a re-init reports what the run did', () => {
+  let repo: string;
+  let bin: string;
+  let env: NodeJS.ProcessEnv;
+
+  beforeEach(async () => {
+    repo = await fs.mkdtemp(path.join(os.tmpdir(), 'df-init-guards-repo-'));
+    bin = await fs.mkdtemp(path.join(os.tmpdir(), 'df-init-guards-bin-'));
+    execFileSync('git', ['init', '-q'], { cwd: repo, env: sandboxEnv(home) });
+    // init finds the trash command by bare name (`which`), so the fixture names
+    // it: a fake for either platform's name, first on PATH. SHELL is pinned so
+    // the profile init writes is the sandbox's ~/.bashrc.
+    for (const name of ['trash', 'trash-put']) {
+      await fs.writeFile(path.join(bin, name), '#!/bin/sh\nexit 0\n', { mode: 0o755 });
+    }
+    env = sandboxEnv(home, { SHELL: '/bin/bash', PATH: `${bin}${path.delimiter}${process.env.PATH ?? ''}` });
+    const trash = process.platform === 'darwin' ? 'trash' : 'trash-put';
+    expect(execFileSync('which', [trash], { env, encoding: 'utf-8' }).trim()).toBe(path.join(bin, trash));
+  });
+
+  afterEach(async () => {
+    await fs.rm(repo, { recursive: true, force: true });
+    await fs.rm(bin, { recursive: true, force: true });
+  });
+
+  it('says .claudeignore is already present and safe-delete already configured, and offers neither', async () => {
+    const profile = path.join(home, '.bashrc');
+    const first = runInit(repo, [], env);
+    expect(first.status, first.out).toBe(0);
+    // Non-vacuity: the first run created both, and said so.
+    expect(existsSync(path.join(repo, '.claudeignore'))).toBe(true);
+    expect(await fs.readFile(profile, 'utf-8')).toContain('# >>> Devflow safe-delete >>>');
+    expect(first.out).toContain('.claudeignore:   created');
+    expect(first.out).toContain(`Safe-delete installed to ${profile}`);
+
+    const again = runInit(repo, [], env);
+    expect(again.status, again.out).toBe(0);
+    expect(again.out).toContain('.claudeignore:   already present');
+    expect(again.out).not.toContain('.claudeignore:   created');
+    expect(again.out).toContain(`Safe-delete already configured in ${profile}`);
+    expect(again.out).not.toContain('Run interactively to auto-install');
+  }, 2 * SUBPROCESS_TIMEOUT_MS);
+
+  it('reports an older safe-delete block as upgraded, in the summary and after the install', async () => {
+    const profile = path.join(home, '.bashrc');
+    await fs.writeFile(profile, '# >>> Devflow safe-delete >>>\n# v1\nrm() { :; }\n# <<< Devflow safe-delete <<<\n');
+
+    const run = runInit(repo, [], env);
+    expect(run.status, run.out).toBe(0);
+    // Non-vacuity: the run replaced the older block.
+    expect(await fs.readFile(profile, 'utf-8')).not.toContain('# v1\n');
+    expect(run.out).toContain('Safe delete:     upgraded');
+    expect(run.out).toContain(`Safe-delete upgraded in ${profile}`);
   }, SUBPROCESS_TIMEOUT_MS);
 });
 

@@ -1249,6 +1249,20 @@ export async function installClaudeignore(
 }
 
 /**
+ * Whether `gitRoot` already holds a `.claudeignore`, as
+ * {@link installClaudeignore}'s exclusive create sees it: lstat, not stat, so a
+ * dangling symlink counts as present — the create refuses one too.
+ */
+export async function hasClaudeignore(gitRoot: string): Promise<boolean> {
+  try {
+    await fs.lstat(path.join(gitRoot, '.claudeignore'));
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
  * Discover git repository roots from Claude's project history.
  * Parses `<claudeDir>/history.jsonl` for unique project paths that are valid git repos.
  * @param claudeDir - The Claude Code directory whose history is read — the caller
