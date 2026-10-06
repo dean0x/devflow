@@ -64,11 +64,10 @@
 // text that accidentally contains those patterns as substrings. It reads v1
 // blocks only; a v2 index line is built from the row's fields.
 //
-// Amendments shape: the row's `amendments` array accepts BOTH the
-// { date, note } objects declared by LearningObservation/LedgerRow in
-// src/core/observations.ts (rendered as `[date] note`) and pre-rendered
-// strings.  formatAmendmentsLine normalises per entry — never a bare join,
-// which would emit `[object Object]` for the schema-declared shape.
+// Amendments shape: a v1 row's `amendments` array accepts BOTH the
+// { date, note } objects the v1 corpus holds (rendered as `[date] note`) and
+// pre-rendered strings.  formatAmendmentsLine normalises per entry — never a
+// bare join, which would emit `[object Object]` for the object shape.
 //
 // Consumers of these strings:
 //   - session-start-context (Section 1): injects the TL;DR comment's text via sed
@@ -174,11 +173,9 @@ function segmentDetails(detailsStr, keys) {
 /**
  * Normalise one amendment entry to its rendered string form.
  *
- * TWO SHAPES are accepted because two authorities define this field:
- *   - `{ date, note }` — the shape declared by LearningObservation /
- *     LedgerRow in src/core/observations.ts, and the ONLY shape its
- *     isLearningObservation type guard accepts. Renders as `[date] note`
- *     (bare `note` when date is absent/blank).
+ * TWO SHAPES are accepted:
+ *   - `{ date, note }` — the shape every amendment in the v1 corpus has.
+ *     Renders as `[date] note` (bare `note` when date is absent/blank).
  *   - `string` — a pre-rendered `[date] note` line, the convenience form.
  *
  * A plain `join` over the object shape would emit `[object Object]`, so the

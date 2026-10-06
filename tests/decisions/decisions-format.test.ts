@@ -10,7 +10,6 @@
 import { describe, it, expect, beforeAll } from 'vitest';
 import { createRequire } from 'module';
 import * as path from 'path';
-import { isLearningObservation } from '#core/observations.js';
 import { makeV2LedgerRow, makeV2LogRow, requireLearningStore } from './learning-fixtures.js';
 
 const ROOT = path.resolve(import.meta.dirname, '../..');
@@ -49,8 +48,7 @@ const {
     detailsStr: string,
     keys: readonly string[]
   ) => Record<string, string>;
-  // Accepts BOTH the { date, note } objects declared by LearningObservation /
-  // LedgerRow in src/core/observations.ts and pre-rendered strings.
+  // Accepts BOTH the { date, note } objects v1 rows hold and pre-rendered strings.
   formatAmendmentsLine: (
     amendments: unknown
   ) => string;
@@ -542,15 +540,13 @@ describe('formatAmendmentsLine — integration via formatDecisionBody / formatPi
 // ---------------------------------------------------------------------------
 // formatAmendmentsLine — the { date, note } object shape
 //
-// src/core/observations.ts declares `amendments?: { date: string; note: string }[]`
-// on BOTH LearningObservation and LedgerRow, and its isLearningObservation
-// type guard REJECTS a plain string element (tests/decisions/observations-schema.test.ts).
-// A v1 ledger row carries the amendments v1 promotion copied verbatim from its log
-// row, so the object shape is the only shape that can legitimately reach the
-// formatter — a bare join would render `- **Amendments**: [object Object]`.
+// Every amendment the v1 corpus holds is a { date, note } object: v1 promotion
+// copied a log row's amendments onto its ledger row verbatim, so the object shape
+// is the one that reaches the formatter — a bare join would render
+// `- **Amendments**: [object Object]`.
 // ---------------------------------------------------------------------------
 
-describe('formatAmendmentsLine — { date, note } object shape (the schema-declared shape)', () => {
+describe('formatAmendmentsLine — { date, note } object shape (the shape v1 rows hold)', () => {
   it('renders a { date, note } entry as "[date] note" — never [object Object]', () => {
     const result = formatAmendmentsLine([{ date: '2026-01-01', note: 'First amendment' }]);
     expect(result).toBe('- **Amendments**: [2026-01-01] First amendment\n');
@@ -640,30 +636,6 @@ describe('formatAmendmentsLine — { date, note } object shape (the schema-decla
     expect(index).toContain('ADR-005  Indexed decision  [Accepted]');
     expect(index).not.toContain('amendment-marker-text');
     expect(index).not.toContain('Amendments');
-  });
-
-  it('type-guard cross-check: the canonical { date, note } fixture passes isLearningObservation AND formatAmendmentsLine renders it correctly', () => {
-    // Derive fixtures from the runtime type guard and run at least
-    // one through the guard inside the consuming test so the two suites cannot drift.
-    // Previously this was only described in a comment; this test enforces it.
-    const amendments = [{ date: '2026-02-01', note: 'Reinforced' }];
-    const minimalObs = {
-      id: 'obs_pf043_check',
-      type: 'decision',
-      pattern: 'PF-043 cross-check fixture',
-      confidence: 0.9,
-      observations: 1,
-      first_seen: '2026-02-01T00:00:00Z',
-      last_seen: '2026-02-01T00:00:00Z',
-      status: 'created',
-      evidence: [],
-      details: 'context: PF-043; decision: derive fixtures from the type guard',
-      amendments,
-    };
-    // Guard accepts the object-shape amendments (the schema-declared shape)
-    expect(isLearningObservation(minimalObs)).toBe(true);
-    // Formatter renders the same fixture to the expected string
-    expect(formatAmendmentsLine(amendments)).toBe('- **Amendments**: [2026-02-01] Reinforced\n');
   });
 });
 

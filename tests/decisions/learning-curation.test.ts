@@ -11,7 +11,6 @@
 //         since its last activity; one an entry carries is never archived.
 //         (Curation SKILL wiring: contract that rotation step is present.)
 // Curation SKILL: Iron Law, retire-anchor usage, rotation step, no direct .md edit, ADR-XOR-PF.
-// observation-io: updateDecisionsStatus is removed; module still exports the correct surface.
 
 import { describe, it, expect, beforeEach, afterEach, beforeAll } from 'vitest';
 import { createRequire } from 'module';
@@ -440,24 +439,5 @@ describe('AC-F9: rotation step wired into curation (contract check)', () => {
     } finally {
       fs.rmSync(tmpDir, { recursive: true, force: true });
     }
-  });
-});
-
-// ---------------------------------------------------------------------------
-// observation-io: updateDecisionsStatus is removed; module surface is clean
-// ---------------------------------------------------------------------------
-
-describe('observation-io: updateDecisionsStatus is removed', () => {
-  it('observation-io module does not export updateDecisionsStatus', async () => {
-    // Dynamic import to check actual module exports
-    const mod = await import(path.join(ROOT, 'src/core/observation-io.js'));
-    expect((mod as Record<string, unknown>).updateDecisionsStatus).toBeUndefined();
-  });
-
-  it('observation-io still exports readObservations, writeObservations, warnIfInvalid', async () => {
-    const mod = await import(path.join(ROOT, 'src/core/observation-io.js'));
-    expect(typeof (mod as Record<string, unknown>).readObservations).toBe('function');
-    expect(typeof (mod as Record<string, unknown>).writeObservations).toBe('function');
-    expect(typeof (mod as Record<string, unknown>).warnIfInvalid).toBe('function');
   });
 });
