@@ -110,17 +110,31 @@ if [ -f "$MEMORY_DIR/WORKING-MEMORY.md" ]; then
 fi
 
 # Write backup JSON
-json_backup_construct \
-  --arg ts "$TIMESTAMP" \
-  --arg branch "$GIT_BRANCH" \
-  --arg status "$GIT_STATUS" \
-  --arg log "$GIT_LOG" \
-  --arg diff "$GIT_DIFF_STAT" \
-  --arg memory "$MEMORY_SNAPSHOT" \
-  > "$BACKUP_FILE"
-
-log "Wrote backup: $BACKUP_FILE"
-dbg "Wrote backup: $BACKUP_FILE"
+# D-BACKUP-RENAME: the backup is written whole into a copy beside it, then
+# renamed over it; it is never truncated and refilled in place. Reason:
+# session-start-memory reads it twice, and a read landing between a truncate
+# and the write that refills it would meet a partial file; a rename hands every
+# read either the previous backup or the new one. SEC-2: the copy is created
+# under umask 077, and the rename gives the backup the copy's inode and mode, so
+# the backup, which holds the working memory, is 0600 whatever the caller's
+# umask (as in queue-append). A write or rename that fails removes the copy and
+# keeps the previous backup; the bootstrap below still runs.
+BACKUP_TMP="$BACKUP_FILE.tmp.$$"
+if (umask 077 && json_backup_construct \
+    --arg ts "$TIMESTAMP" \
+    --arg branch "$GIT_BRANCH" \
+    --arg status "$GIT_STATUS" \
+    --arg log "$GIT_LOG" \
+    --arg diff "$GIT_DIFF_STAT" \
+    --arg memory "$MEMORY_SNAPSHOT" \
+    > "$BACKUP_TMP") && mv "$BACKUP_TMP" "$BACKUP_FILE"; then
+  log "Wrote backup: $BACKUP_FILE"
+  dbg "Wrote backup: $BACKUP_FILE"
+else
+  rm -f "$BACKUP_TMP" 2>/dev/null || true
+  log "Backup not written; the previous one is kept: $BACKUP_FILE"
+  dbg "Backup not written: $BACKUP_FILE"
+fi
 
 # Bootstrap minimal WORKING-MEMORY.md if absent; skip on an unborn branch or a
 # malformed SHA. is_hex_sha 40 40: exactly 40 lowercase hex chars required. A detached

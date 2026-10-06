@@ -20,7 +20,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
 import { pollForTerminalLine } from './helpers/poll-for-terminal-line.js';
-import { runHook } from './shell-hooks-helpers.js';
+import { runHook, spawnWithStdin } from './shell-hooks-helpers.js';
 
 const HOOKS_DIR = path.resolve(__dirname, '..', 'src', 'assets', 'scripts', 'hooks');
 const CAPTURE_TURN_HOOK = path.join(HOOKS_DIR, 'capture-turn');
@@ -2645,5 +2645,105 @@ exit 0
     expect(log).not.toContain('User-only queue (no assistant/qa turn)');
     // Merge path ran and LLM was invoked — merged .processing has assistant turns from conflict batch
     expect(log).toContain('staged file valid, real file unchanged — swap complete');
+  });
+});
+
+// =============================================================================
+// S26 — pre-compact backup.json is replaced by a rename (D-BACKUP-RENAME)
+//
+// session-start-memory reads backup.json twice, so a read must never meet the
+// file between a truncate and the write that refills it. pre-compact-memory
+// writes a copy beside the backup and renames it over the backup. A hard link
+// to the previous backup's inode is the witness: a rewrite in place changes what
+// the link reads, a rename leaves it as it was.
+// =============================================================================
+describe('S26: pre-compact backup.json is replaced by a rename, never rewritten in place (D-BACKUP-RENAME)', () => {
+  const PREVIOUS = '{"timestamp":"2026-01-01T00:00:00Z","trigger":"pre-compact","memory_snapshot":"previous"}\n';
+  let projectDir: string;
+  let homeDir: string;
+  let memoryDir: string;
+  let backup: string;
+  let witness: string;
+
+  beforeEach(() => {
+    projectDir = fs.mkdtempSync(path.join(os.tmpdir(), 'emr-s26-'));
+    homeDir = fs.mkdtempSync(path.join(os.tmpdir(), 'emr-s26-home-'));
+    memoryDir = path.join(projectDir, '.devflow', 'memory');
+    fs.mkdirSync(memoryDir, { recursive: true });
+    initGitRepo(projectDir);
+    // The previous backup, readable by everyone, with a second name for its inode.
+    backup = path.join(memoryDir, 'backup.json');
+    fs.writeFileSync(backup, PREVIOUS);
+    fs.chmodSync(backup, 0o644);
+    witness = path.join(projectDir, 'previous-backup.link');
+    fs.linkSync(backup, witness);
+  });
+
+  afterEach(() => {
+    fs.rmSync(projectDir, { recursive: true, force: true });
+    fs.rmSync(homeDir, { recursive: true, force: true });
+  });
+
+  /** Run the hook under umask 022, the umask a hook usually inherits from its parent. */
+  function runPreCompact(extraEnv: Record<string, string> = {}) {
+    return spawnWithStdin('bash', ['-c', 'umask 022 && exec bash "$0"', PRE_COMPACT_HOOK], {
+      input: JSON.stringify({ cwd: projectDir }),
+      env: { ...process.env, HOME: homeDir, ...extraEnv },
+    });
+  }
+
+  /** Entries beside the backup whose names extend it: a copy the hook left behind. */
+  const leftovers = (): string[] =>
+    fs.readdirSync(memoryDir).filter(name => name.startsWith('backup.json') && name !== 'backup.json');
+
+  it('renames a complete 0600 copy over backup.json and never writes the previous inode', () => {
+    const run = runPreCompact();
+    expect(run.kind, run.stderr).toBe('clean');
+
+    expect(fs.readFileSync(witness, 'utf-8'), 'the previous backup was rewritten in place').toBe(PREVIOUS);
+    expect(fs.statSync(backup).ino, 'backup.json is a new inode').not.toBe(fs.statSync(witness).ino);
+    const written = JSON.parse(fs.readFileSync(backup, 'utf-8')) as { trigger?: string; git?: { branch?: string } };
+    expect(written.trigger).toBe('pre-compact');
+    expect(written.git?.branch).toBe(execSync('git branch --show-current', { cwd: projectDir, encoding: 'utf-8' }).trim());
+    expect((fs.statSync(backup).mode & 0o777).toString(8), 'the backup holds working memory, so it is owner-only').toBe('600');
+    expect(leftovers(), 'no copy is left beside the backup').toEqual([]);
+  });
+
+  it('keeps the previous backup and removes its copy when the rename fails, and still bootstraps memory', () => {
+    // An mv that refuses only the rename onto backup.json, and records that it
+    // was asked; every other mv the hook's helpers run goes to the real one.
+    const shimDir = path.join(homeDir, 'shim');
+    fs.mkdirSync(shimDir);
+    const refused = path.join(homeDir, 'mv-refused');
+    fs.writeFileSync(path.join(shimDir, 'mv'), [
+      '#!/bin/bash',
+      'for last in "$@"; do :; done',
+      'case "$last" in',
+      '  */backup.json) : > "$MV_REFUSED_MARKER"; exit 1 ;;',
+      'esac',
+      'exec "$REAL_MV" "$@"',
+    ].join('\n') + '\n');
+    fs.chmodSync(path.join(shimDir, 'mv'), 0o755);
+    const realMv = execSync('command -v mv', { shell: '/bin/bash', encoding: 'utf-8' }).trim();
+
+    const run = runPreCompact({
+      PATH: `${shimDir}:${process.env.PATH ?? '/usr/bin:/bin'}`,
+      REAL_MV: realMv,
+      MV_REFUSED_MARKER: refused,
+    });
+
+    expect(run.kind, run.stderr).toBe('clean');
+    expect(fs.existsSync(refused), 'non-vacuity: the hook renamed its copy onto backup.json').toBe(true);
+    expect(fs.readFileSync(backup, 'utf-8')).toBe(PREVIOUS);
+    expect(fs.statSync(backup).ino, 'backup.json is still the previous inode').toBe(fs.statSync(witness).ino);
+    expect(leftovers(), 'the copy is removed').toEqual([]);
+    expect(fs.existsSync(path.join(memoryDir, 'WORKING-MEMORY.md')), 'a failed backup does not end the hook').toBe(true);
+  });
+
+  it('never redirects output into backup.json itself (structural)', () => {
+    // A redirect into $BACKUP_FILE, not into a copy whose name extends it.
+    const inPlace = />[>|]?\s*"?\$\{?BACKUP_FILE\b(?!\.)/;
+    expect('json_backup_construct --arg ts "$TIMESTAMP" \\\n  > "$BACKUP_FILE"', 'known-positive probe').toMatch(inPlace);
+    expect(fs.readFileSync(PRE_COMPACT_HOOK, 'utf-8')).not.toMatch(inPlace);
   });
 });
