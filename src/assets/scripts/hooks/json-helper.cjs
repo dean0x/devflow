@@ -57,6 +57,7 @@
 'use strict';
 
 const fs = require('fs');
+const { constants: { MAX_STRING_LENGTH } } = require('buffer');
 
 const op = process.argv[2];
 const args = process.argv.slice(3);
@@ -78,12 +79,80 @@ function learning() {
   return learningModules;
 }
 
-function readStdin() {
-  try {
-    return fs.readFileSync('/dev/stdin', 'utf8').trim();
-  } catch {
-    return '';
+/** The bytes each read of stdin asks for. */
+const STDIN_READ_BYTES = 64 * 1024;
+
+/** How long a read of stdin sleeps when a non-blocking descriptor has no input yet. */
+const STDIN_WAIT_MS = 10;
+
+/** The most sleeps one read of stdin takes: 10 s in all, long after any writer the helper's callers use has written. */
+const STDIN_MAX_WAITS = 1000;
+
+/** What Atomics.wait sleeps on: nothing notifies it, so each wait runs its full time. */
+const STDIN_WAIT_CELL = new Int32Array(new SharedArrayBuffer(4));
+
+/**
+ * Read stdin to its end, keeping at most `maxBytes`. Every op that reads stdin
+ * reads it here, so the generic ops and the learning ops cannot read it two ways.
+ * Never throws: a failure is a refusal.
+ *
+ * D-STDIN-FD0: stdin is read from file descriptor 0 itself, in reads repeated
+ * until one returns no bytes — never by opening /dev/stdin, and never by the size
+ * fstat reports. Reason: Linux opens /dev/stdin through /proc/self/fd/0, which
+ * refuses a socket with ENXIO, and a node parent's 'pipe' hands its child a
+ * socket; and for a pipe or a socket fstat reports only what is buffered so far,
+ * 0 on Linux, not what the writer has still to send.
+ *
+ * A read of a non-blocking descriptor with no input yet fails with EAGAIN (Linux
+ * and macOS give EWOULDBLOCK the same number, which node reports as EAGAIN). That
+ * is not the end of the input: the reader sleeps STDIN_WAIT_MS and reads again,
+ * at most STDIN_MAX_WAITS times in all. The loop is bounded: each pass takes at
+ * least one byte, ends it, or spends one of those waits, and it stops once it
+ * holds one byte more than `maxBytes`, so it never reads past that byte.
+ *
+ * @param {number} maxBytes
+ * @returns {{ ok: true, value: string } | { ok: false, error: { kind: 'too-large' | 'unreadable', message: string } }}
+ *   the text; or `too-large` when stdin holds more than `maxBytes`, `unreadable` when a read fails
+ */
+function readStdinUpTo(maxBytes) {
+  const buf = Buffer.alloc(Math.min(STDIN_READ_BYTES, maxBytes + 1));
+  const chunks = [];
+  let total = 0;
+  let waits = 0;
+  while (total <= maxBytes) {
+    let read;
+    try {
+      read = fs.readSync(0, buf, 0, Math.min(buf.length, maxBytes + 1 - total), null);
+    } catch (err) {
+      if (!err || err.code !== 'EAGAIN') {
+        return { ok: false, error: { kind: 'unreadable', message: `stdin could not be read: ${err && err.message ? err.message : String(err)}` } };
+      }
+      if (waits === STDIN_MAX_WAITS) {
+        return { ok: false, error: { kind: 'unreadable', message: `stdin could not be read: it had not ended after ${STDIN_MAX_WAITS * STDIN_WAIT_MS} ms of waiting for input` } };
+      }
+      waits += 1;
+      Atomics.wait(STDIN_WAIT_CELL, 0, 0, STDIN_WAIT_MS);
+      continue;
+    }
+    if (read === 0) break;
+    chunks.push(Buffer.from(buf.subarray(0, read)));
+    total += read;
   }
+  if (total > maxBytes) return { ok: false, error: { kind: 'too-large', message: `stdin holds more than ${maxBytes} bytes` } };
+  return { ok: true, value: Buffer.concat(chunks, total).toString('utf8') };
+}
+
+/**
+ * The most stdin a generic op reads: the longest string node can build. A hook's
+ * input, a Stop hook's last assistant message among it, has no limit of its own,
+ * so a generic op refuses only what it could not hold as text.
+ */
+const STDIN_TEXT_MAX_BYTES = MAX_STRING_LENGTH;
+
+/** A generic op's stdin, trimmed: '' when it cannot be read, so the op fails as it does on empty input. */
+function readStdin() {
+  const text = readStdinUpTo(STDIN_TEXT_MAX_BYTES);
+  return text.ok ? text.value.trim() : '';
 }
 
 function getNestedField(obj, field) {
@@ -162,26 +231,6 @@ function exitWithUsage(usage) {
 const STDIN_JSON_MAX_BYTES = 64 * 1024;
 
 /**
- * Read stdin from file descriptor 0, keeping at most `maxBytes`. It reads the
- * descriptor itself: opening /dev/stdin fails on macOS when stdin is a socket, as
- * a spawned process's is. The loop is bounded: each read takes at least one byte
- * or ends it, and it ends once the buffer holds one byte more than `maxBytes`.
- *
- * @param {number} maxBytes
- * @returns {string|null} the text, or null when stdin holds more than `maxBytes`
- */
-function readStdinUpTo(maxBytes) {
-  const buf = Buffer.alloc(maxBytes + 1);
-  let total = 0;
-  while (total < buf.length) {
-    const read = fs.readSync(0, buf, total, buf.length - total, null);
-    if (read === 0) break;
-    total += read;
-  }
-  return total > maxBytes ? null : buf.toString('utf8', 0, total);
-}
-
-/**
  * A learning op's stdin as one JSON object: the one way text reaches a learning
  * op, so no field of it ever passes through argv or a shell word. Never throws.
  *
@@ -190,16 +239,13 @@ function readStdinUpTo(maxBytes) {
  */
 function readStdinJson(opName) {
   const refuse = message => ({ ok: false, error: { kind: 'invalid-input', message: `${opName}: ${message}` } });
-  let text;
-  try {
-    text = readStdinUpTo(STDIN_JSON_MAX_BYTES);
-  } catch (err) {
-    return refuse(`stdin could not be read: ${err && err.message ? err.message : String(err)}`);
+  const text = readStdinUpTo(STDIN_JSON_MAX_BYTES);
+  if (!text.ok) {
+    return refuse(text.error.kind === 'too-large' ? `${text.error.message}; it must hold one JSON object` : text.error.message);
   }
-  if (text === null) return refuse(`stdin holds more than ${STDIN_JSON_MAX_BYTES} bytes; it must hold one JSON object`);
   let value;
   try {
-    value = JSON.parse(text);
+    value = JSON.parse(text.value);
   } catch {
     return refuse('stdin must hold one JSON object');
   }
