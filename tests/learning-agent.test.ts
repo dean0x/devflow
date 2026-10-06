@@ -195,6 +195,11 @@ describe('learning agent', () => {
       expect(printed).toBe('  ADR-NNN obs_listed v2 verified 2026-09-01 observed 2 last-seen 2026-09-02T00:00:00.000Z scope area:a,src/** A rule with spaces');
     });
 
+    it('says a restored entry is due again in its place in the due order, not handed out first', () => {
+      expect(content).toMatch(phrase('due for maintenance again, ordered after integrity problems and legacy entries'));
+      expect(content).not.toMatch(phrase('maintenance next'));
+    });
+
     it('names every reason claim-due can hand an entry out for, as the store spells it', () => {
       const store = fsSync.readFileSync(LEARNING_STORE, 'utf-8');
       for (const reason of ['duplicate-obs-id', 'ledger-without-log', 'scope-matches-nothing', 'legacy-v1', 'verify-age']) {

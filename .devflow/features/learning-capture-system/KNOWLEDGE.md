@@ -334,7 +334,7 @@ Every loop and read has a bound: 100 cited-number skips, a 200,000-entry fallbac
 
 - **`unchanged` means equal content keys**: a v2 row whose entries lag is not repaired by an update; run `refresh-anchor` without `--verified`. Every writer re-serializes all rows with `JSON.stringify`, so a hand-edited non-canonical line is normalized with the same values.
 - **`refresh-anchor` refuses v1 and inactive entries**, so the closing `--verified` batch must list active v2 entries only; rewrite a kept v1 entry with `put-observation --update` first. `retire-anchor` and `restore-anchor` work on v1 and leave it v1; `assign-anchor` refuses a v1 observation.
-- **A put's "restore first"** applies in every mode: run `restore-anchor`, then the put. Restore clears `last_verified` and `last_attempt`, so the entry is due next whatever lease it had.
+- **A put's "restore first"** applies in every mode: run `restore-anchor`, then the put. Restore clears `last_verified` and `last_attempt`, so the entry is due again whatever lease it had: D-DUE-ORDER hands it out after integrity problems and legacy v1 entries (among them if it is one), ahead of every verified entry.
 - **`claim-due` leases for 24 h** and a second call in one run hands out different entries; treat each line as that run's work list.
 - **900 s is two literals** (`CLAIM_STALE_SECS` and the hook's `PROCESSING_STALE_SECS`); change both. The Tracker's 600 is separate.
 - **Empty corpus**: `index.md` is `(none)`; consumers treat `(none)` and empty as absent. The TL;DR is plural for one (`1 decisions`).

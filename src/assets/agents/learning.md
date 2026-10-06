@@ -74,7 +74,8 @@ and claim-due are quoted where used (Step 0, Finishing, Part 2); the others prin
   adds a `repointed <anchor>` line for each inactive entry that named the retired one as
   its successor and now names the new one.
 - `restore-anchor <anchor>` — `restored <anchor>`: the entry is active again and due for
-  maintenance next.
+  maintenance again, ordered after integrity problems and legacy entries (among them if it
+  is one).
 - `refresh-anchor <anchor> [<anchor>...] [--verified]` — per anchor, `reprojected <anchor>`
   or `unchanged <anchor>` (its ledger row took its observation's content, or already held
   it); under `--verified`, `verified <anchor>` (last verified today, nothing else changed).
