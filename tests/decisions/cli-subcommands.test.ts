@@ -585,6 +585,24 @@ describe('learning --reset', { timeout: 30_000 }, () => {
     expect(snapshotTree(root)).toEqual(before);
   });
 
+  it('when .devflow/learning is a symbolic link: exit 1, and nothing the link leads to is removed', async () => {
+    const { learningDir } = learningPaths(root);
+    const elsewhere = path.join(root, 'elsewhere');
+    fs.mkdirSync(path.join(elsewhere, 'sub'), { recursive: true });
+    fs.writeFileSync(path.join(elsewhere, 'notes.txt'), 'kept\n');
+    fs.writeFileSync(path.join(elsewhere, 'sub', 'deep.txt'), 'kept\n');
+    fs.mkdirSync(path.join(root, '.devflow'));
+    fs.symlinkSync(elsewhere, learningDir);
+    const before = snapshotTree(elsewhere);
+
+    const run = await runLearning(['--reset']);
+
+    expect(run.error).toBe(`reset: ${learningDir} is a symbolic link, not a directory; nothing was removed`);
+    expect(run.success).toBe('');
+    expect(run.exitCode).toBe(1);
+    expect(snapshotTree(elsewhere)).toEqual(before);
+  });
+
   it('in a project that never had learning data: says so, exits 0 and creates nothing, neither .devflow/ nor .devflow/learning/', async () => {
     const run = await runLearning(['--reset']);
 

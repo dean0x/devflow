@@ -1190,6 +1190,16 @@ function removeEmptyDir(dir) {
   }
 }
 
+/** True when `file` is itself a symbolic link; false for anything else, or nothing, there. */
+function isSymbolicLink(file) {
+  try {
+    return fs.lstatSync(file).isSymbolicLink();
+  } catch (err) {
+    if (err && (err.code === 'ENOENT' || err.code === 'ENOTDIR')) return false;
+    throw err;
+  }
+}
+
 /**
  * Remove every learning file — `devflow learning --reset`: the log, the ledger
  * and their side files, the rendered files, the tuning config, and the queue
@@ -1206,16 +1216,25 @@ function removeEmptyDir(dir) {
  * Like every learning writer it refuses without `.devflow/learning/` and creates
  * nothing (D-NO-STRAY-TREE), and it waits at most `timeoutMs` for the lock,
  * breaking one a crashed run left behind (D-ONE-LEARNING-LOCK). A symbolic link
- * in the directory is removed, never what it points to.
+ * in the directory is removed, never what it points to. A learning directory that
+ * is itself a symbolic link is refused and nothing is removed: emptying it would
+ * empty whatever directory the link leads to.
  *
  * @param {string} root - project root
  * @param {{ timeoutMs?: number }} [opts]
  * @returns {{ ok: true, value: { removed: number } } | { ok: false, error: { kind: string, message: string } }}
- *   removed: the entries removed from the learning directory. Errors are
+ *   removed: the entries removed from the learning directory. Error kinds:
+ *   not-a-directory (the learning directory is a symbolic link), and
  *   withDecisionsLock's no-learning-dir and busy.
  */
 function resetLearning(root, { timeoutMs } = {}) {
   const learningDir = getLearningDir(root);
+  if (isSymbolicLink(learningDir)) {
+    return {
+      ok: false,
+      error: { kind: 'not-a-directory', message: `reset: ${learningDir} is a symbolic link, not a directory; nothing was removed` },
+    };
+  }
   const lockName = path.basename(getDecisionsLockDir(root));
   const reset = withDecisionsLock('reset', root, () => {
     const entries = fs.readdirSync(learningDir).filter(name => name !== lockName);

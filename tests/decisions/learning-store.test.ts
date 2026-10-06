@@ -1245,6 +1245,24 @@ describe('resetLearning (D-RESET-UNDER-LOCK)', () => {
     expect(fs.readFileSync(path.join(outsideDir, 'kept.txt'), 'utf8')).toBe('kept\n');
   });
 
+  it('refuses a learning directory that is itself a symbolic link, and removes nothing it leads to', () => {
+    const p = learningPaths(tmp);
+    const elsewhere = path.join(tmp, 'elsewhere');
+    fs.mkdirSync(path.join(elsewhere, 'sub'), { recursive: true });
+    fs.writeFileSync(path.join(elsewhere, 'notes.txt'), 'kept\n');
+    fs.writeFileSync(path.join(elsewhere, 'sub', 'deep.txt'), 'kept\n');
+    fs.mkdirSync(path.join(tmp, '.devflow'));
+    fs.symlinkSync(elsewhere, p.learningDir);
+    const before = snapshotTree(elsewhere);
+
+    expect(store.resetLearning(tmp, { timeoutMs: 0 })).toEqual({
+      ok: false,
+      error: { kind: 'not-a-directory', message: `reset: ${p.learningDir} is a symbolic link, not a directory; nothing was removed` },
+    });
+    expect(snapshotTree(elsewhere)).toEqual(before);
+    expect(fs.lstatSync(p.learningDir).isSymbolicLink()).toBe(true);
+  });
+
   it('keeps what arrives once the lock is released, and leaves no lock behind', () => {
     const p = seedFullTree();
     const arrived = path.join(p.learningDir, '.pending-turns.jsonl');
