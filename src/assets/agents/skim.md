@@ -70,7 +70,7 @@ If you already know a file needs content, go straight to Read — don't skim it 
 
 ### Step 6: Project Knowledge
 
-If `.devflow/learning/decisions.md` exists, Read its `<!-- TL;DR: ... -->` first-line comment and include active decision count under "### Active Decisions". Only the TL;DR — intentional for token efficiency.
+Read the decisions TL;DR at the repository's main worktree, where the ledger lives. Run `git -C {start} rev-parse --path-format=absolute --show-toplevel --git-common-dir`, `{start}` being `WORKTREE_PATH` if provided, otherwise cwd. `{ledger}` is the first that applies: the main worktree — when the output is two absolute lines and line 2 ends in `/.git`, its parent, provided that directory contains `.devflow/` and is not your home directory; else the toplevel, line 1 (on a git older than 2.31, the line after the echoed flag); else `{start}`, when the command failed. If `{ledger}/.devflow/learning/decisions.md` exists, Read its first line, `<!-- TL;DR: N decisions -->`, and report N under "### Active Decisions". Only the TL;DR — intentional for token efficiency.
 
 ### Step 7: Generate Summary
 
