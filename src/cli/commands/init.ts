@@ -258,6 +258,13 @@ export function resolveClaudeignoreOutcome(present: readonly boolean[]): 'create
   return present.every(Boolean) ? 'already present' : 'created';
 }
 
+/** The Recommended summary's safe-delete row for what the run does to the block; a run that leaves it alone adds none. */
+const SAFE_DELETE_SUMMARY_ROW: Readonly<Record<SafeDeleteAction, string>> = {
+  install: 'Safe delete:     installed',
+  upgrade: 'Safe delete:     upgraded',
+  skip: '',
+};
+
 /**
  * What init says about safe-delete once the install has run (D-INIT-REAL-OUTCOME).
  *
@@ -1304,8 +1311,7 @@ export const initCommand = new Command('init')
         `View mode:       ${readViewMode(enabledFlags)}`,
         `Claude Code flags: ${defaultFlagCount} configured`,
         `.claudeignore:   ${resolveClaudeignoreOutcome(claudeignorePresent)}`,
-        safeDeleteAction === 'install' ? 'Safe delete:     installed'
-          : safeDeleteAction === 'upgrade' ? 'Safe delete:     upgraded' : '',
+        SAFE_DELETE_SUMMARY_ROW[safeDeleteAction],
       ].filter(l => l.trim()).join('\n');
 
       p.note(summaryLines + `\n\nCustomize later: ${color.cyan('devflow init --advanced')}`, 'Recommended settings applied');
