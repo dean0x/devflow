@@ -1,3 +1,5 @@
+@import "./_decisions.mds" as decisions
+
 @define authoring_preamble():
 ## Your task: author a Claude Code dynamic Workflow and run it
 
@@ -62,7 +64,9 @@ The `budget` global governs depth. Scale Review agent roster and verification vo
 
 ### DECISIONS_CONTEXT — obtain BEFORE authoring
 
-Before you author the workflow script, read `.devflow/learning/index.md` for the current worktree. If the file is absent or empty, set `DECISIONS_CONTEXT` to `(none)`; otherwise use the file content as `DECISIONS_CONTEXT`.
+{{decisions.decisions_locate()}}
+
+Before you author the workflow script, read `{ledger}/.devflow/learning/index.md`. If the file is absent or empty, set `DECISIONS_CONTEXT` to `(none)`; otherwise use the file content as `DECISIONS_CONTEXT`.
 
 The script body cannot perform this read — you (the main model) do it before authoring. Then inject the relevant DECISIONS_CONTEXT into agent prompts using the `devflow:apply-decisions` consumption algorithm (scan index → Read relevant entries → cite verbatim IDs in agent prompts). Only agents that need architectural context (Code agent, Evaluate agent, Review agent, Scrutinize agent) need DECISIONS_CONTEXT injected; lightweight agents (Validate agent, Simplify agent) do not.
 
