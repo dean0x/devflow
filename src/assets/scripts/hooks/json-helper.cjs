@@ -145,6 +145,18 @@ function emit(result, format) {
   return 1;
 }
 
+/**
+ * Refuse a malformed command line: print `<op>: usage: <usage>` on stderr and exit 1,
+ * before the op takes any lock.
+ *
+ * @param {string} usage - the usage text, starting with the op's name
+ * @returns {never}
+ */
+function exitWithUsage(usage) {
+  process.stderr.write(`${op}: usage: ${usage}\n`);
+  process.exit(1);
+}
+
 /** The most stdin a learning op reads: far above any valid input, so a runaway writer is refused, not parsed. */
 const STDIN_JSON_MAX_BYTES = 64 * 1024;
 
@@ -415,16 +427,15 @@ try {
     case 'assign-anchor': {
       const { store } = learning();
       if (args.length !== 2 || !ENTRY_TYPES.has(args[0]) || !store.OBS_ID_RE.test(args[1])) {
-        process.stderr.write('assign-anchor: usage: assign-anchor <decision|pitfall> <obs_id> (run from the project root)\n');
-        process.exit(1);
+        exitWithUsage('assign-anchor <decision|pitfall> <obs_id> (run from the project root)');
       }
-      const aaResult = store.assignAnchor(process.cwd(), args[0], args[1]);
-      if (aaResult.ok) {
-        for (const skip of aaResult.value.skipped) {
+      const result = store.assignAnchor(process.cwd(), args[0], args[1]);
+      if (result.ok) {
+        for (const skip of result.value.skipped) {
           process.stderr.write(`assign-anchor: skipped ${skip.anchor_id}, cited in ${store.singleLine(skip.file)}:${skip.line}\n`);
         }
       }
-      process.exitCode = emit(aaResult, assigned => assigned.anchor_id);
+      process.exitCode = emit(result, assigned => assigned.anchor_id);
       break;
     }
 
@@ -440,12 +451,11 @@ try {
     case 'retire-anchor': {
       const { store } = learning();
       if (args.length !== 2 || !store.ANCHOR_ID_RE.test(args[0]) || !store.INACTIVE_STATUSES.includes(args[1])) {
-        process.stderr.write('retire-anchor: usage: retire-anchor <anchor> <Encoded|Superseded|Retired|Deprecated> (one JSON object on stdin; run from the project root)\n');
-        process.exit(1);
+        exitWithUsage('retire-anchor <anchor> <Encoded|Superseded|Retired|Deprecated> (one JSON object on stdin; run from the project root)');
       }
-      const raInput = readStdinJson('retire-anchor');
-      const raResult = raInput.ok ? store.retireAnchor(process.cwd(), args[0], args[1], raInput.value) : raInput;
-      process.exitCode = emit(raResult, retired => [
+      const input = readStdinJson('retire-anchor');
+      const result = input.ok ? store.retireAnchor(process.cwd(), args[0], args[1], input.value) : input;
+      process.exitCode = emit(result, retired => [
         `${retired.status.toLowerCase()} ${retired.anchor_id}`,
         ...retired.repointed.map(anchorId => `repointed ${anchorId}`),
       ].join('\n'));
@@ -462,8 +472,7 @@ try {
     case 'restore-anchor': {
       const { store } = learning();
       if (args.length !== 1 || !store.ANCHOR_ID_RE.test(args[0])) {
-        process.stderr.write('restore-anchor: usage: restore-anchor <anchor> (run from the project root)\n');
-        process.exit(1);
+        exitWithUsage('restore-anchor <anchor> (run from the project root)');
       }
       process.exitCode = emit(store.restoreAnchor(process.cwd(), args[0]), restored => `restored ${restored.anchor_id}`);
       break;
@@ -478,14 +487,13 @@ try {
     // -------------------------------------------------------------------------
     case 'refresh-anchor': {
       const { store } = learning();
-      const rfVerified = args.filter(arg => arg === '--verified').length;
-      const rfAnchors = args.filter(arg => arg !== '--verified');
-      if (rfVerified > 1 || rfAnchors.length === 0 || !rfAnchors.every(arg => store.ANCHOR_ID_RE.test(arg))) {
-        process.stderr.write('refresh-anchor: usage: refresh-anchor <anchor> [<anchor>...] [--verified] (run from the project root)\n');
-        process.exit(1);
+      const verifiedFlags = args.filter(arg => arg === '--verified').length;
+      const anchors = args.filter(arg => arg !== '--verified');
+      if (verifiedFlags > 1 || anchors.length === 0 || !anchors.every(arg => store.ANCHOR_ID_RE.test(arg))) {
+        exitWithUsage('refresh-anchor <anchor> [<anchor>...] [--verified] (run from the project root)');
       }
-      const rfResult = store.refreshAnchors(process.cwd(), rfAnchors, { verified: rfVerified === 1 });
-      process.exitCode = emit(rfResult, ({ refreshed }) => refreshed.map(entry => `${entry.state} ${entry.anchor_id}`).join('\n'));
+      const result = store.refreshAnchors(process.cwd(), anchors, { verified: verifiedFlags === 1 });
+      process.exitCode = emit(result, ({ refreshed }) => refreshed.map(entry => `${entry.state} ${entry.anchor_id}`).join('\n'));
       break;
     }
 
@@ -498,12 +506,9 @@ try {
     // stdout: rotated <N> observations
     // -------------------------------------------------------------------------
     case 'rotate-observations': {
-      if (args.length > 0) {
-        process.stderr.write('rotate-observations: usage: rotate-observations (no arguments; run from the project root)\n');
-        process.exit(1);
-      }
-      const roResult = learning().store.rotateObservations(process.cwd());
-      process.exitCode = emit(roResult, ({ rotated }) => `rotated ${rotated} observations`);
+      if (args.length > 0) exitWithUsage('rotate-observations (no arguments; run from the project root)');
+      const result = learning().store.rotateObservations(process.cwd());
+      process.exitCode = emit(result, ({ rotated }) => `rotated ${rotated} observations`);
       break;
     }
 
@@ -515,14 +520,13 @@ try {
     // then one `reprojected <anchor>` line per entry re-projected
     // -------------------------------------------------------------------------
     case 'put-observation': {
-      const poMode = args.length === 1 ? PUT_MODES.get(args[0]) : undefined;
-      if (poMode === undefined) {
-        process.stderr.write('put-observation: usage: put-observation --create|--update|--reinforce (one JSON object on stdin; run from the project root)\n');
-        process.exit(1);
+      const mode = args.length === 1 ? PUT_MODES.get(args[0]) : undefined;
+      if (mode === undefined) {
+        exitWithUsage('put-observation --create|--update|--reinforce (one JSON object on stdin; run from the project root)');
       }
-      const poInput = readStdinJson('put-observation');
-      const poResult = poInput.ok ? learning().store.putObservation(process.cwd(), poMode, poInput.value) : poInput;
-      process.exitCode = emit(poResult, put => [
+      const input = readStdinJson('put-observation');
+      const result = input.ok ? learning().store.putObservation(process.cwd(), mode, input.value) : input;
+      process.exitCode = emit(result, put => [
         put.outcome === 'reinforced' ? `reinforced ${put.id} ${put.observations}` : `${put.outcome} ${put.id}`,
         ...put.reprojected.map(anchorId => `reprojected ${anchorId}`),
       ].join('\n'));
@@ -537,10 +541,7 @@ try {
     // MALFORMED when lines were skipped
     // -------------------------------------------------------------------------
     case 'list': {
-      if (args.length > 0) {
-        process.stderr.write('list: usage: list (no arguments; run from the project root)\n');
-        process.exit(1);
-      }
+      if (args.length > 0) exitWithUsage('list (no arguments; run from the project root)');
       const { store } = learning();
       process.exitCode = emit(store.readListing(process.cwd()), store.formatListing);
       break;
@@ -555,8 +556,7 @@ try {
     case 'show': {
       const { store } = learning();
       if (args.length !== 1 || !(store.ANCHOR_ID_RE.test(args[0]) || store.OBS_ID_RE.test(args[0]))) {
-        process.stderr.write('show: usage: show <anchor|obs_id> (run from the project root)\n');
-        process.exit(1);
+        exitWithUsage('show <anchor|obs_id> (run from the project root)');
       }
       process.exitCode = emit(store.showByKey(process.cwd(), args[0]), shown => JSON.stringify(shown, null, 2));
       break;
@@ -570,10 +570,7 @@ try {
     // `<anchor> <reason> <bytes>` line per entry handed out, or due none
     // -------------------------------------------------------------------------
     case 'claim-due': {
-      if (args.length > 0) {
-        process.stderr.write('claim-due: usage: claim-due (no arguments; run from the project root)\n');
-        process.exit(1);
-      }
+      if (args.length > 0) exitWithUsage('claim-due (no arguments; run from the project root)');
       const { store } = learning();
       process.exitCode = emit(store.claimDue(process.cwd()), ({ ref, due }) => [
         ref === null ? 'ref none' : `ref ${ref.ref} ${ref.commit.slice(0, 12)}`,
@@ -589,12 +586,9 @@ try {
     // stdout: claimed <token> | claimed <token> takeover | busy | none
     // -------------------------------------------------------------------------
     case 'claim-queue': {
-      if (args.length > 0) {
-        process.stderr.write('claim-queue: usage: claim-queue (no arguments; run from the project root)\n');
-        process.exit(1);
-      }
-      const cqResult = learning().store.claimQueue(process.cwd());
-      process.exitCode = emit(cqResult, claim => (claim.state === 'claimed'
+      if (args.length > 0) exitWithUsage('claim-queue (no arguments; run from the project root)');
+      const result = learning().store.claimQueue(process.cwd());
+      process.exitCode = emit(result, claim => (claim.state === 'claimed'
         ? `claimed ${claim.token}${claim.takeover ? ' takeover' : ''}`
         : claim.state));
       break;
@@ -608,11 +602,9 @@ try {
     case 'release-claim': {
       const { store } = learning();
       if (args.length !== 1 || !store.CLAIM_TOKEN_RE.test(args[0])) {
-        process.stderr.write('release-claim: usage: release-claim <token> (the 16 hex characters claim-queue printed)\n');
-        process.exit(1);
+        exitWithUsage('release-claim <token> (the 16 hex characters claim-queue printed)');
       }
-      const rcResult = store.releaseClaim(process.cwd(), args[0]);
-      process.exitCode = emit(rcResult, release => release.state);
+      process.exitCode = emit(store.releaseClaim(process.cwd(), args[0]), release => release.state);
       break;
     }
 
