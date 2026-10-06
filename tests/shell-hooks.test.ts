@@ -781,6 +781,90 @@ describe('D-LEDGER-MAIN-WORKTREE: one ledger per repository (TP-17, TP-18, TP-19
     expect(ctx).toContain('ADR-003 Main');
   });
 
+  // Section 1 names the decisions index so the main model can pass it on as
+  // DECISIONS_CONTEXT. The path is the ledger's — the main checkout's in a linked
+  // worktree — so it is named only when the ledger root passed the shape gate.
+  const SESSION_CONTEXT = path.join(HOOKS_DIR, 'session-start-context');
+  const learningOf = (root: string) => path.join(root, '.devflow', 'learning');
+  const indexOf = (root: string) => path.join(learningOf(root), 'index.md');
+
+  /** The PROJECT DECISIONS section of the injected context, up to the blank line that ends it. */
+  function decisionsSection(cwd: string): string {
+    const { stdout, exitCode } = runHook(SESSION_CONTEXT, { cwd, source: 'startup' }, homeDir);
+    expect(exitCode).toBe(0);
+    if (stdout.trim() === '') return '';
+    const ctx = JSON.parse(stdout).hookSpecificOutput.additionalContext as string;
+    const at = ctx.indexOf('--- PROJECT DECISIONS (TL;DR) ---');
+    if (at === -1) return '';
+    const end = ctx.indexOf('\n\n', at);
+    return end === -1 ? ctx.slice(at) : ctx.slice(at, end);
+  }
+
+  /** A rendered ledger at `root`: both TL;DR headers, and the index when given. */
+  function seedRendered(root: string, index?: string): void {
+    fs.mkdirSync(learningOf(root), { recursive: true });
+    fs.writeFileSync(path.join(learningOf(root), 'decisions.md'), '<!-- TL;DR: 3 decisions -->\n# Architectural Decisions\n');
+    fs.writeFileSync(path.join(learningOf(root), 'pitfalls.md'), '<!-- TL;DR: 2 pitfalls -->\n# Known Pitfalls\n');
+    if (index !== undefined) fs.writeFileSync(indexOf(root), index);
+  }
+
+  it('TP-17: in a linked worktree, PROJECT DECISIONS names the main checkout index, last', () => {
+    seedRendered(main, 'Decisions (1):\n  ADR-001  Main decision  [Accepted]\n');
+
+    expect(decisionsSection(wt)).toBe(
+      `--- PROJECT DECISIONS (TL;DR) ---\n3 decisions\n2 pitfalls\nIndex: ${indexOf(main)}`,
+    );
+  });
+
+  it('PROJECT DECISIONS carries the index line alone when no TL;DR is rendered', () => {
+    fs.mkdirSync(learningOf(main), { recursive: true });
+    fs.writeFileSync(indexOf(main), 'Pitfalls (1):\n  PF-001  Main pitfall  [Active]\n');
+
+    expect(decisionsSection(wt)).toBe(`--- PROJECT DECISIONS (TL;DR) ---\nIndex: ${indexOf(main)}`);
+  });
+
+  it('no index line when the index is missing', () => {
+    seedRendered(main);
+
+    expect(decisionsSection(wt)).toBe('--- PROJECT DECISIONS (TL;DR) ---\n3 decisions\n2 pitfalls');
+  });
+
+  it('no index line when the index lists no entry — (none) — or is empty', () => {
+    seedRendered(main, '(none)\n');
+    expect(decisionsSection(wt)).toBe('--- PROJECT DECISIONS (TL;DR) ---\n3 decisions\n2 pitfalls');
+
+    fs.writeFileSync(indexOf(main), '');
+    expect(decisionsSection(wt)).toBe('--- PROJECT DECISIONS (TL;DR) ---\n3 decisions\n2 pitfalls');
+
+    // With no TL;DR either, there is no section at all.
+    fs.rmSync(path.join(learningOf(main), 'decisions.md'));
+    fs.rmSync(path.join(learningOf(main), 'pitfalls.md'));
+    fs.writeFileSync(indexOf(main), '(none)\n');
+    expect(decisionsSection(wt)).toBe('');
+  });
+
+  it('no index line, and no path, when the ledger root fails the shape gate', () => {
+    const refused = path.join(base, 'proj name');
+    initCommittedRepo(refused);
+    seedRendered(refused, 'Decisions (1):\n  ADR-001  Refused decision  [Accepted]\n');
+
+    // The TL;DR interpolates no path, so it stays; the index line would, so it goes.
+    expect(decisionsSection(refused)).toBe('--- PROJECT DECISIONS (TL;DR) ---\n3 decisions\n2 pitfalls');
+    // Non-vacuity: the same tree at an admitted path does name its index.
+    const admitted = path.join(base, 'proj-name');
+    initCommittedRepo(admitted);
+    seedRendered(admitted, 'Decisions (1):\n  ADR-001  Admitted decision  [Accepted]\n');
+    expect(decisionsSection(admitted)).toContain(`Index: ${fs.realpathSync(indexOf(admitted))}`);
+  });
+
+  it('the orchestrator charter passes the index this section names on as DECISIONS_CONTEXT', () => {
+    const charter = fs.readFileSync(path.join(HOOKS_DIR, 'assets', 'orchestrator-charter.md'), 'utf-8');
+    const hook = fs.readFileSync(SESSION_CONTEXT, 'utf-8');
+    expect(hook).toContain('--- PROJECT DECISIONS (TL;DR) ---');
+    expect(hook).toContain('DECISIONS_INDEX_LINE="Index: $_SC_INDEX"');
+    expect(charter).toContain('pass the index named under PROJECT DECISIONS as DECISIONS_CONTEXT');
+  });
+
   it('a main checkout that never ran devflow keeps the ledger in the worktree, and is not scaffolded', () => {
     const { exitCode } = runHook(path.join(HOOKS_DIR, 'capture-prompt'), { cwd: wt, prompt: 'we chose X over Y' }, homeDir);
     expect(exitCode).toBe(0);
