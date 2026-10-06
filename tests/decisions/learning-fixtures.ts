@@ -522,6 +522,7 @@ export interface LearningStoreApi {
     opts?: { now?: number; timeoutMs?: number; verifyRef?: VerifyRef | null },
   ): InputResult<RetireAnswer>;
   restoreAnchor(root: string, anchorId: string, opts?: { now?: number; timeoutMs?: number }): Result<{ anchor_id: string; status: string }>;
+  clearUnreferenced(root: string, opts?: { now?: number; timeoutMs?: number }): Result<{ cleared: number; kept: number }>;
 }
 
 /** Load the learning store CommonJS module. */

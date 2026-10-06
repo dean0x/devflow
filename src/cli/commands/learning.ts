@@ -6,7 +6,6 @@ import color from 'picocolors';
 import {
   getLearningDir,
   getLearningTuningConfigPath,
-  getDecisionsLogPath,
   getDecisionsLockDir,
 } from '../../core/project-paths.js';
 import { readMachineFeature, writeMachineFeature } from '../../core/feature-switch.js';
@@ -15,18 +14,92 @@ import { getDevFlowDirectory } from '../../targets/claude-code/claude-paths.js';
 import { getLedgerRoot } from '../../core/ledger-root.js';
 import { sweepLegacyDreamMarkers, drainLearningQueue } from '../../core/learning-queue-cleanup.js';
 import {
-  type DecisionsEntryStatus,
-} from '../../core/observations.js';
-import {
-  readObservations,
-  warnIfInvalid,
-} from '../../core/observation-io.js';
+  formatLearningStoreUnavailable,
+  loadLearningStore,
+  type LearningListing,
+  type LearningStoreError,
+  type LearningStoreModule,
+} from '../../core/learning-store.js';
+
+// ---------------------------------------------------------------------------
+// Shared helpers
+// ---------------------------------------------------------------------------
+
+/** What the read and restore commands say about a project with no `.devflow/learning/`. */
+const NO_LEARNING_DATA = 'No learning data in this project yet.';
 
 /**
- * DecisionsEntryStatus is defined in observations.ts (pure data module) and
- * re-exported here for consumers that import from the learning command module.
+ * How long a writer here (--restore, --clear) waits for the learning lock before it
+ * refuses as busy. An op holds the lock for milliseconds, so a longer wait means a
+ * stuck holder, and the store's own 30 s wait would leave the command looking hung.
  */
-export type { DecisionsEntryStatus };
+const LOCK_WAIT_MS = 5000;
+
+/**
+ * Code point ranges JSON.stringify leaves raw that a terminal may act on, or may
+ * display reordered: DEL and the C1 controls, the directional marks, the line and
+ * paragraph separators, and the bidirectional embeddings, overrides and isolates.
+ */
+const TERMINAL_UNSAFE_RANGES: ReadonlyArray<readonly [number, number]> = [
+  [0x7f, 0x9f],
+  [0x200e, 0x200f],
+  [0x2028, 0x2029],
+  [0x202a, 0x202e],
+  [0x2066, 0x2069],
+];
+
+/**
+ * `value` as pretty JSON a terminal shows as written: every character in
+ * TERMINAL_UNSAFE_RANGES becomes its `\uXXXX` escape. Such characters can occur
+ * only inside JSON strings, where the escape means the same character, so the
+ * text still parses back to `value`.
+ */
+function terminalSafeJson(value: unknown): string {
+  let text = '';
+  for (const ch of JSON.stringify(value, null, 2)) {
+    const code = ch.codePointAt(0) ?? 0;
+    const unsafe = TERMINAL_UNSAFE_RANGES.some(([low, high]) => code >= low && code <= high);
+    text += unsafe ? `\\u${code.toString(16).padStart(4, '0')}` : ch;
+  }
+  return text;
+}
+
+/** `1 decision`, `2 decisions`. */
+function counted(count: number, noun: string): string {
+  return `${count} ${noun}${count === 1 ? '' : 's'}`;
+}
+
+/**
+ * The learning store (D-LEARNING-STORE-SEAM), or null after reporting why it
+ * cannot be used and setting exit code 1.
+ */
+function requireStore(): LearningStoreModule | null {
+  const loaded = loadLearningStore();
+  if (loaded.ok) return loaded.value;
+  p.log.error(`Learning: ${formatLearningStoreUnavailable(loaded.error)}`);
+  process.exitCode = 1;
+  return null;
+}
+
+/** What a writer says when the store refused; `undone` completes "Nothing was …". */
+function storeRefusal(error: LearningStoreError, undone: string): string {
+  switch (error.kind) {
+    case 'no-learning-dir': return NO_LEARNING_DATA;
+    case 'busy': return `The learning store is busy: another run holds its lock. Nothing was ${undone}; try again in a moment.`;
+    default: return error.message;
+  }
+}
+
+/** True when `dir` is a directory; false when nothing, or something else, is there. */
+async function isDirectory(dir: string): Promise<boolean> {
+  try {
+    return (await fs.stat(dir)).isDirectory();
+  } catch (err: unknown) {
+    const code = (err as NodeJS.ErrnoException).code;
+    if (code === 'ENOENT' || code === 'ENOTDIR') return false;
+    throw err;
+  }
+}
 
 // ---------------------------------------------------------------------------
 // Sub-command handlers
@@ -35,13 +108,15 @@ export type { DecisionsEntryStatus };
 function printUsage(): void {
   p.intro(color.bgCyan(color.black(' Learning ')));
   p.note(
-    `${color.cyan('devflow learning --enable')}      Enable learning in every project (a repository can opt out)\n` +
-    `${color.cyan('devflow learning --disable')}     Disable learning in every project (drains this project's queue)\n` +
-    `${color.cyan('devflow learning --status')}      Show learning status\n` +
-    `${color.cyan('devflow learning --list')}        Show all observations\n` +
-    `${color.cyan('devflow learning --configure')}   Configuration wizard\n` +
-    `${color.cyan('devflow learning --clear')}       Truncate decisions log\n` +
-    `${color.cyan('devflow learning --reset')}       Remove all learning state files`,
+    `${color.cyan('devflow learning --enable')}        Enable learning in every project (a repository can opt out)\n` +
+    `${color.cyan('devflow learning --disable')}       Disable learning in every project (drains this project's queue)\n` +
+    `${color.cyan('devflow learning --status')}        Show learning status and entry counts\n` +
+    `${color.cyan('devflow learning --list')}          List entries, inactive entries and observations\n` +
+    `${color.cyan('devflow learning --show <id>')}     Print one entry or observation as JSON\n` +
+    `${color.cyan('devflow learning --restore <id>')}  Make an inactive entry active again\n` +
+    `${color.cyan('devflow learning --configure')}     Configuration wizard\n` +
+    `${color.cyan('devflow learning --clear')}         Drop the observations no entry uses, and drain the queue\n` +
+    `${color.cyan('devflow learning --reset')}         Remove all learning state files`,
     'Usage',
   );
   p.outro(color.dim('Detects architectural decisions and known pitfalls from your sessions'));
@@ -64,10 +139,36 @@ async function requireLedgerRoot(actionSuffix: string): Promise<string | null> {
   return ledgerRoot;
 }
 
+/**
+ * The --status entry lines: active entries by type, inactive ones by status (in
+ * the store's order, each status present), the active entries still in the v1
+ * format — the migration still to do — and the observations.
+ */
+function entryCountLines(listing: LearningListing, logRowCount: number, inactiveStatuses: readonly string[]): string[] {
+  const active = listing.active;
+  const decisions = active.filter(entry => entry.type === 'decision').length;
+  const pitfalls = active.filter(entry => entry.type === 'pitfall').length;
+  const byStatus = inactiveStatuses
+    .map(status => ({ status, count: listing.inactive.filter(entry => entry.status === status).length }))
+    .filter(({ count }) => count > 0)
+    .map(({ status, count }) => `${status} ${count}`);
+  const legacy = active.filter(entry => entry.schema === 1).length;
+  return [
+    `Entries: ${active.length} active (${counted(decisions, 'decision')}, ${counted(pitfalls, 'pitfall')}), `
+      + `${listing.inactive.length} inactive${byStatus.length > 0 ? ` (${byStatus.join(', ')})` : ''}`,
+    `Legacy v1 entries: ${legacy} of ${active.length} active`,
+    `Observations: ${logRowCount} in the log, ${listing.observations.length} not yet promoted`,
+  ];
+}
+
+/**
+ * `--status`: the machine switch, then the counts the store reads. Reads only:
+ * malformed lines are counted, never quarantined, and no scope is checked.
+ */
 async function handleStatus(): Promise<void> {
   // D-FEATURES-NARROW-ONLY: the machine switch is the manifest's and reads the
   // same from every directory; a repository layer can only narrow it, and adds a
-  // line only when it does. The observation counts are per-project.
+  // line only when it does. The entry counts are per-project.
   const enabled = await readMachineFeature(getDevFlowDirectory(), 'learning');
   const settingsModule = loadSettingsModule();
   const narrowed = enabled ? narrowedSwitchLabel(settingsModule, { dir: process.cwd() }, 'learning') : null;
@@ -77,77 +178,91 @@ async function handleStatus(): Promise<void> {
   if (trackedWarning !== null) p.log.warn(trackedWarning);
   const ledgerRoot = await getLedgerRoot();
   if (!ledgerRoot) {
-    p.log.info(`${stateLine}\nObservations: not in a git project`);
+    p.log.info(`${stateLine}\nEntries: not in a git project`);
     return;
   }
-  const logPath = getDecisionsLogPath(ledgerRoot);
-  const { observations, invalidCount } = await readObservations(logPath);
-
-  const decisionObs = observations.filter(o => o.type === 'decision' || o.type === 'pitfall');
-  const decisions = observations.filter(o => o.type === 'decision');
-  const pitfalls = observations.filter(o => o.type === 'pitfall');
-  const created = decisionObs.filter(o => o.status === 'created');
-  const ready = decisionObs.filter(o => o.status === 'ready');
-  const observing = decisionObs.filter(o => o.status === 'observing');
-  const deprecated = decisionObs.filter(o => o.status === 'deprecated');
-
-  const lines: string[] = [stateLine];
-  if (decisionObs.length === 0) {
-    lines.push('Observations: none');
-  } else {
-    lines.push(`Observations: ${decisionObs.length} total`);
-    lines.push(`  Decisions: ${decisions.length}, Pitfalls: ${pitfalls.length}`);
-    lines.push(`  Status: ${observing.length} observing, ${ready.length} ready, ${created.length} promoted, ${deprecated.length} deprecated`);
-  }
-  p.log.info(lines.join('\n'));
-  warnIfInvalid(invalidCount);
-}
-
-async function handleList(): Promise<void> {
-  // Resolve the log from the ledger root (matches --status, --clear, --reset,
-  // --disable) so `--list` run from a subdirectory or a linked worktree finds
-  // the real log instead of a nonexistent one under process.cwd(). Falls back
-  // to cwd when not in a git project, preserving the prior behavior for that case.
-  const ledgerRoot = await getLedgerRoot();
-  const logPath = getDecisionsLogPath(ledgerRoot ?? process.cwd());
-
-  let logExists = true;
-  try {
-    await fs.access(logPath);
-  } catch {
-    logExists = false;
-  }
-
-  if (!logExists) {
-    p.log.info('No observations yet. Decisions log not found.');
+  const loaded = loadLearningStore();
+  if (!loaded.ok) {
+    p.log.info(`${stateLine}\nEntries: unavailable (${formatLearningStoreUnavailable(loaded.error)})`);
     return;
   }
-
-  const { observations, invalidCount } = await readObservations(logPath);
-  const filtered = observations.filter(o => o.type === 'decision' || o.type === 'pitfall');
-
-  if (filtered.length === 0) {
-    p.log.info('No decision/pitfall observations recorded yet.');
-    return;
-  }
-
-  // Sort by confidence descending
-  filtered.sort((a, b) => b.confidence - a.confidence);
-
-  p.intro(color.bgCyan(color.black(' Learning Observations ')));
-  for (const obs of filtered) {
-    const typeIcon = obs.type === 'decision' ? 'D' : 'F';
-    const statusIcon = obs.status === 'created' ? color.green('created')
-      : obs.status === 'ready' ? color.yellow('ready')
-      : obs.status === 'deprecated' ? color.dim('deprecated')
-      : color.dim('observing');
-    const conf = (obs.confidence * 100).toFixed(0);
-    p.log.info(
-      `[${typeIcon}] ${color.cyan(obs.pattern)} (${conf}% | ${obs.observations}x | ${statusIcon})`,
+  const store = loaded.value;
+  const { ledgerRows, logRows, rejected } = store.readLearningState(ledgerRoot);
+  const listing = store.buildListing(ledgerRows, logRows, { rejected });
+  p.log.info([stateLine, ...entryCountLines(listing, logRows.length, store.INACTIVE_STATUSES)].join('\n'));
+  const { ledger, log } = listing.malformed;
+  if (ledger + log > 0) {
+    p.log.warn(
+      `Malformed lines skipped: ${ledger} in the ledger, ${log} in the log. ` +
+      'The next op that rewrites a file moves its malformed lines to a .rejected.jsonl file beside it.',
     );
   }
-  warnIfInvalid(invalidCount);
-  p.outro(color.dim(`${filtered.length} observation(s) total`));
+}
+
+/**
+ * `--list`: the store's listing — the same text json-helper's `list` op prints —
+ * on stdout. Read-only. Outside a git project it reads the current directory.
+ */
+async function handleList(): Promise<void> {
+  const root = (await getLedgerRoot()) ?? process.cwd();
+  const store = requireStore();
+  if (!store) return;
+  const listed = store.readListing(root);
+  if (!listed.ok) {
+    if (listed.error.kind === 'no-learning-dir') {
+      p.log.info(NO_LEARNING_DATA);
+      return;
+    }
+    p.log.error(listed.error.message);
+    process.exitCode = 1;
+    return;
+  }
+  process.stdout.write(`${store.formatListing(listed.value)}\n`);
+}
+
+/**
+ * `--show <id>`: one entry, by its anchor or its observation id, as the JSON
+ * json-helper's `show` op prints, made terminal-safe. Read-only. Outside a git
+ * project it reads the current directory.
+ */
+async function handleShow(key: string): Promise<void> {
+  const root = (await getLedgerRoot()) ?? process.cwd();
+  const store = requireStore();
+  if (!store) return;
+  const shown = store.showByKey(root, key);
+  if (!shown.ok) {
+    p.log.error(shown.error.kind === 'no-learning-dir' ? NO_LEARNING_DATA : shown.error.message);
+    process.exitCode = 1;
+    return;
+  }
+  process.stdout.write(`${terminalSafeJson(shown.value)}\n`);
+}
+
+/**
+ * `--restore <id>`: make an inactive entry active again through the store's
+ * restoreAnchor, which clears its notes and its verification so maintenance
+ * reviews it again, and re-renders the files. A refusal writes nothing.
+ */
+async function handleRestore(anchor: string): Promise<void> {
+  const ledgerRoot = await requireLedgerRoot('restore not performed');
+  if (!ledgerRoot) {
+    process.exitCode = 1;
+    return;
+  }
+  const store = requireStore();
+  if (!store) return;
+  if (!store.ANCHOR_ID_RE.test(anchor)) {
+    p.log.error(`--restore takes an entry id (ADR-NNN or PF-NNN), not ${JSON.stringify(anchor)}`);
+    process.exitCode = 1;
+    return;
+  }
+  const restored = store.restoreAnchor(ledgerRoot, anchor, { timeoutMs: LOCK_WAIT_MS });
+  if (!restored.ok) {
+    p.log.error(storeRefusal(restored.error, 'restored'));
+    process.exitCode = 1;
+    return;
+  }
+  p.log.success(`Restored ${restored.value.anchor_id} (${restored.value.status}); it is due for review again.`);
 }
 
 async function handleConfigure(): Promise<void> {
@@ -262,21 +377,25 @@ async function handleReset(): Promise<void> {
   }
 }
 
+/**
+ * `--clear`: drop the observations no entry uses (D-CLEAR-UNREFERENCED), then
+ * drain the learning queue. The queue is drained only once the clear succeeded:
+ * a busy lock or a refusal leaves both the log and the queue as they were, so a
+ * failed clear changes nothing.
+ */
 async function handleClear(): Promise<void> {
   const ledgerRoot = await requireLedgerRoot('clear not performed');
   if (!ledgerRoot) return;
-
-  const decisionsLogPath = getDecisionsLogPath(ledgerRoot);
-  try {
-    await fs.access(decisionsLogPath);
-  } catch {
-    p.log.info('No decisions log to clear.');
+  const store = requireStore();
+  if (!store) return;
+  if (!(await isDirectory(getLearningDir(ledgerRoot)))) {
+    p.log.info('No learning data to clear.');
     return;
   }
 
   if (process.stdin.isTTY) {
     const confirm = await p.confirm({
-      message: 'Clear all decision/pitfall observations? This cannot be undone.',
+      message: 'Drop every observation no entry uses? Entries and the observations they use are kept. This cannot be undone.',
       initialValue: false,
     });
     if (p.isCancel(confirm) || !confirm) {
@@ -285,15 +404,25 @@ async function handleClear(): Promise<void> {
     }
   }
 
-  await fs.writeFile(decisionsLogPath, '', 'utf-8');
+  const cleared = store.clearUnreferenced(ledgerRoot, { timeoutMs: LOCK_WAIT_MS });
+  if (!cleared.ok) {
+    if (cleared.error.kind === 'no-learning-dir') {
+      p.log.info('No learning data to clear.');
+      return;
+    }
+    p.log.error(storeRefusal(cleared.error, 'cleared'));
+    process.exitCode = 1;
+    return;
+  }
 
-  // Drain the learning (decisions-detection) queue so stale turns don't process
-  // on the next session — mirrors memory.ts's drain-on-disable behavior for
-  // the sibling memory queue. A mid-run Learning agent whose claimed batch
-  // vanishes aborts without changes — the desired outcome of clearing.
+  // A mid-run Learning agent whose claimed batch vanishes stops without further
+  // writes — the desired outcome of clearing.
   await drainLearningQueue(ledgerRoot);
 
-  p.log.success('Decisions log cleared.');
+  p.log.success(
+    `Cleared ${counted(cleared.value.cleared, 'observation')} no entry uses and kept ${cleared.value.kept} ` +
+    'that entries use; drained the learning queue.',
+  );
 }
 
 /**
@@ -335,6 +464,8 @@ interface LearningOptions {
   disable?: boolean;
   status?: boolean;
   list?: boolean;
+  show?: string;
+  restore?: string;
   configure?: boolean;
   clear?: boolean;
   reset?: boolean;
@@ -344,31 +475,37 @@ export const learningCommand = new Command('learning')
   .description('Enable or disable learning (decision/pitfall detection) in every project')
   .option('--enable', 'Enable learning in every project (a repository can opt out)')
   .option('--disable', 'Disable learning in every project')
-  .option('--status', 'Show learning status and observation counts')
-  .option('--list', 'Show all decision/pitfall observations sorted by confidence')
+  .option('--status', 'Show learning status and entry counts')
+  .option('--list', 'List entries, inactive entries with their notes, and observations')
+  .option('--show <id>', 'Print one entry (ADR-NNN or PF-NNN) or observation (obs_...) as JSON')
+  .option('--restore <id>', 'Make an inactive entry active again')
   .option('--configure', 'Interactive configuration wizard for learning.json')
-  .option('--clear', 'Truncate decisions log (removes all observations)')
+  .option('--clear', 'Drop the observations no entry uses, and drain the learning queue')
   .option('--reset', 'Remove all learning state files and artifacts')
   .action(async (options: LearningOptions) => {
     const knownFlags: (keyof LearningOptions)[] = [
-      'enable', 'disable', 'status', 'list', 'configure',
+      'enable', 'disable', 'status', 'list', 'show', 'restore', 'configure',
       'clear', 'reset',
     ];
-    const hasFlag = knownFlags.some((f) => options[f]);
+    const hasFlag = knownFlags.some((f) => options[f] !== undefined);
     if (!hasFlag) {
       printUsage();
       return;
     }
 
-    // Thin router — dispatch order matches the precedence of the original
-    // inline implementation (status, list, configure, reset, clear, enable,
-    // disable). Each handler owns its own path resolution and I/O.
+    // Thin router — the read-only commands first (status, list, show), then
+    // configure, reset, clear, restore, enable, disable. Each handler owns its own
+    // path resolution and I/O.
     if (options.status) {
       await handleStatus();
       return;
     }
     if (options.list) {
       await handleList();
+      return;
+    }
+    if (options.show !== undefined) {
+      await handleShow(options.show);
       return;
     }
     if (options.configure) {
@@ -383,6 +520,10 @@ export const learningCommand = new Command('learning')
       await handleClear();
       return;
     }
+    if (options.restore !== undefined) {
+      await handleRestore(options.restore);
+      return;
+    }
     if (options.enable) {
       await handleToggle(true);
       return;
@@ -392,4 +533,3 @@ export const learningCommand = new Command('learning')
       return;
     }
   });
-

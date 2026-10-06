@@ -1057,6 +1057,102 @@ describe('ensurePreV2Backup (D-V1-BACKUP-ONCE)', () => {
 });
 
 // ---------------------------------------------------------------------------
+// Clearing the observations no entry uses (devflow learning --clear)
+// ---------------------------------------------------------------------------
+
+describe('clearUnreferenced (D-CLEAR-UNREFERENCED)', () => {
+  let tmp: string;
+  beforeEach(() => { tmp = makeTmp('learning-store-clear-'); });
+  afterEach(() => { fs.rmSync(tmp, { recursive: true, force: true }); });
+
+  /** A log row no ledger row carries, a v2 one an active entry carries, and a v1 one a retired entry carries. */
+  const unreferenced = makeV2LogRow({ id: 'obs_waiting', last_seen: daysAgoIso(1) });
+  const carriedActive = makeV2LogRow({ id: 'obs_carried_active' });
+  const carriedRetired = makeV1LogRow({ id: 'obs_carried_retired' });
+  const ledger = [
+    makeV2LedgerRow({ id: 'obs_carried_active', anchor_id: 'ADR-001' }),
+    makeV1LedgerRow({ id: 'obs_carried_retired', anchor_id: 'PF-001', decisions_status: 'Retired', status_note: 'one-off' }),
+  ];
+
+  it('drops every log row no ledger row carries, a fresh one and one with no id included, and keeps every carried row in order', () => {
+    const idless = makeV1LogRow({ id: undefined, last_seen: daysAgoIso(2) });
+    const p = seedLearningTree(tmp, { log: [unreferenced, carriedActive, idless, carriedRetired], ledger });
+
+    expect(store.clearUnreferenced(tmp, { now: FIXTURE_NOW })).toEqual({ ok: true, value: { cleared: 2, kept: 2 } });
+    expect(store.readJsonl(p.log).rows).toEqual([carriedActive, carriedRetired]);
+  });
+
+  it('leaves the ledger, the archive and the rendered files byte for byte as they were', () => {
+    const archived = makeV1LogRow({ id: 'obs_archived_before', last_seen: daysAgoIso(90) });
+    const p = seedLearningTree(tmp, { log: [unreferenced, carriedActive, carriedRetired], ledger, archive: [archived] });
+    fs.writeFileSync(path.join(p.learningDir, 'decisions.md'), 'rendered decisions\n');
+    const untouched = [p.ledger, p.archive, path.join(p.learningDir, 'decisions.md')];
+    const before = untouched.map(file => fs.readFileSync(file, 'utf8'));
+
+    expect(store.clearUnreferenced(tmp, { now: FIXTURE_NOW }).ok).toBe(true);
+    expect(untouched.map(file => fs.readFileSync(file, 'utf8'))).toEqual(before);
+  });
+
+  it('writes nothing at all when every log row is carried', () => {
+    seedLearningTree(tmp, { log: [carriedActive, carriedRetired], ledger });
+    const before = snapshotTree(tmp);
+
+    expect(store.clearUnreferenced(tmp, { now: FIXTURE_NOW })).toEqual({ ok: true, value: { cleared: 0, kept: 2 } });
+    expect(snapshotTree(tmp)).toEqual(before);
+  });
+
+  it('backs up a v1 tree once and quarantines the log\'s malformed lines before it rewrites the log (D-V1-BACKUP-ONCE, D-QUARANTINE-MALFORMED)', () => {
+    const p = seedLearningTree(tmp, { log: [unreferenced, carriedRetired], ledger });
+    fs.appendFileSync(p.log, '{torn line\n');
+    const original = fs.readFileSync(p.log, 'utf8');
+
+    expect(store.clearUnreferenced(tmp, { now: FIXTURE_NOW })).toEqual({ ok: true, value: { cleared: 1, kept: 1 } });
+
+    expect(fs.readFileSync(p.log.replace(/\.jsonl$/, '.pre-v2.jsonl'), 'utf8')).toBe(original);
+    expect(store.readJsonl(store.rejectedPathFor(p.log)).rows.map(r => r.text)).toEqual(['{torn line']);
+    expect(fs.readFileSync(p.log, 'utf8')).toBe(toJsonl([carriedRetired]));
+  });
+
+  it('refuses while the ledger holds a malformed line, which may carry a row it would drop, and writes nothing', () => {
+    const p = seedLearningTree(tmp, { log: [unreferenced, carriedActive], ledger: [ledger[0]] });
+    fs.appendFileSync(p.ledger, '{"id":"obs_waiting","anchor_id":"ADR-002"\n');
+    const before = snapshotTree(tmp);
+
+    const result = store.clearUnreferenced(tmp, { now: FIXTURE_NOW });
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error.kind).toBe('ledger-malformed');
+      expect(result.error.message).toBe(
+        'clear: the ledger has 1 malformed line, which may carry an observation this would drop; nothing was cleared',
+      );
+    }
+    expect(snapshotTree(tmp)).toEqual(before);
+  });
+
+  it('refuses without .devflow/learning/ and creates nothing (D-NO-STRAY-TREE)', () => {
+    fs.mkdirSync(path.join(tmp, '.devflow'));
+    const result = store.clearUnreferenced(tmp, { now: FIXTURE_NOW });
+    expect(result).toEqual({
+      ok: false,
+      error: { kind: 'no-learning-dir', message: `clear: no .devflow/learning/ under ${tmp} — run from the project root` },
+    });
+    expect(fs.readdirSync(path.join(tmp, '.devflow'))).toEqual([]);
+  });
+
+  it('reports busy while another holder keeps the learning lock, and writes nothing (D-ONE-LEARNING-LOCK)', () => {
+    const p = seedLearningTree(tmp, { log: [unreferenced, carriedActive], ledger: [ledger[0]] });
+    fs.mkdirSync(p.lockDir);
+    const before = snapshotTree(tmp);
+
+    const result = store.clearUnreferenced(tmp, { now: FIXTURE_NOW, timeoutMs: 0 });
+
+    expect(result).toEqual({ ok: false, error: { kind: 'busy', message: `clear: timeout acquiring lock at ${p.lockDir}` } });
+    expect(snapshotTree(tmp)).toEqual(before);
+  });
+});
+
+// ---------------------------------------------------------------------------
 // Integrity, listing, due selection and show
 // ---------------------------------------------------------------------------
 

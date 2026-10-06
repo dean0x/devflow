@@ -210,7 +210,8 @@ export interface ProjectConfigLib {
   collectDuplicateKeyPaths(text: string): ReadonlySet<string> | null;
 }
 
-type SurfaceKind = 'string-array' | 'object' | 'regexp' | 'string' | 'number' | 'function';
+/** The runtime kind a loader requires of one surface key (see loadScript). */
+export type SurfaceKind = 'string-array' | 'object' | 'regexp' | 'string' | 'number' | 'function';
 
 /**
  * Every key of EvidencePolicyModule and the runtime kind the loader requires of
@@ -245,7 +246,7 @@ export const PROJECT_CONFIG_LIB_SURFACE = Object.freeze({
 
 // ── Loader ─────────────────────────────────────────────────────────────────────
 
-type Result<T, E> = { readonly ok: true; readonly value: T } | { readonly ok: false; readonly error: E };
+export type Result<T, E> = { readonly ok: true; readonly value: T } | { readonly ok: false; readonly error: E };
 
 /** Why the resolver could not be used. */
 export type EvidencePolicyLoadError =
@@ -286,21 +287,22 @@ function surfaceMismatches(value: unknown, surface: Readonly<Record<string, Surf
  * require() one package script and shape-check it against `surface`. Never
  * throws: a missing file is `not-found`; a module that throws on load or lacks a
  * surface key is `unusable`. The caller's type parameter is justified by the
- * surface check, which `satisfies` ties to the interface's keys.
+ * surface check, which `satisfies` ties to the interface's keys. Exported for
+ * src/core/learning-store.ts, which loads the learning store the same way.
  */
-function loadScript<T>(file: string, surface: Readonly<Record<string, SurfaceKind>>): Result<T, EvidencePolicyLoadError> {
+export function loadScript<T>(scriptPath: string, surface: Readonly<Record<string, SurfaceKind>>): Result<T, EvidencePolicyLoadError> {
   let loaded: unknown;
   try {
-    loaded = createRequire(import.meta.url)(file);
+    loaded = createRequire(import.meta.url)(scriptPath);
   } catch (err: unknown) {
     const code = (err as NodeJS.ErrnoException).code;
-    if (code === 'MODULE_NOT_FOUND') return { ok: false, error: { kind: 'not-found', path: file } };
+    if (code === 'MODULE_NOT_FOUND') return { ok: false, error: { kind: 'not-found', path: scriptPath } };
     const detail = err instanceof Error ? err.message : String(err);
-    return { ok: false, error: { kind: 'unusable', path: file, detail } };
+    return { ok: false, error: { kind: 'unusable', path: scriptPath, detail } };
   }
   const mismatches = surfaceMismatches(loaded, surface);
   if (mismatches.length > 0) {
-    return { ok: false, error: { kind: 'unusable', path: file, detail: `missing or mistyped: ${mismatches.join(', ')}` } };
+    return { ok: false, error: { kind: 'unusable', path: scriptPath, detail: `missing or mistyped: ${mismatches.join(', ')}` } };
   }
   return { ok: true, value: loaded as T };
 }

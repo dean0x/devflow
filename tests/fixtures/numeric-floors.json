@@ -244,8 +244,8 @@
     },
     {
       "id": "write-fence-row-count",
-      "floor": 52,
-      "pattern": "FENCE_ROWS.length).toBeGreaterThanOrEqual(52)",
+      "floor": 55,
+      "pattern": "FENCE_ROWS.length).toBeGreaterThanOrEqual(55)",
       "occurrences": 1,
       "sourceFile": "tests/write-set-fence.test.ts",
       "description": "Rows in the write-set fence table (FENCE_ROWS, D-WRITE-SET-FENCE, #406 item 19): one per CLI toggle action plus the state-clearing and read-only actions beside them, each walked before and after against its allowlist. The coverage tests hold the table to the CLI's own --help roster and every --enable/--disable/--set a command defines, so a row can only leave by an UNFENCED_* reason; this floor stops the table shrinking behind them. Floors rise, never fall."

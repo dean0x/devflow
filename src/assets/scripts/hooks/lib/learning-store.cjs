@@ -5,7 +5,8 @@
 //
 // DESIGN: plumbing only. No function here prints or calls process.exit. Work that
 // can fail on its input or on the lock returns a Result — { ok: true, value } or
-// { ok: false, error: { kind, message } } — and json-helper.cjs prints it. A throw
+// { ok: false, error: { kind, message } } — and its caller prints it: json-helper.cjs
+// for the ops, or the `devflow learning` CLI through src/core/learning-store.ts. A throw
 // means a broken invariant or an I/O failure, never an expected outcome; a lock
 // held by withDecisionsLock is released on every path, the throw included.
 //
@@ -25,7 +26,9 @@
 //   .pending-turns.processing    the claimed batch, and .pending-turns.owner its
 //                                owner's token (D-OWNED-CLAIM)
 //
-// TS COUNTERPART: src/core/observations.ts mirrors the status lists (D201).
+// TS COUNTERPARTS: src/core/observations.ts mirrors the status lists (D201), and
+// src/core/learning-store.ts transcribes the functions the CLI calls from their
+// JSDoc here (D-LEARNING-STORE-SEAM) — change both together.
 
 'use strict';
 
@@ -1077,6 +1080,59 @@ function rotateObservations(root, { now = Date.now(), timeoutMs } = {}) {
     if (appended.length > 0) appendNoFollow(archivePath, appended.join('\n') + '\n');
     writeJsonlAtomic(logPath, log.rows.filter(row => !isDue(row)));
     return { ok: true, value: { rotated: due.length, appended: appended.length } };
+  }, { timeoutMs });
+}
+
+// ---------------------------------------------------------------------------
+// Clearing
+// ---------------------------------------------------------------------------
+
+/**
+ * Drop the observations no entry uses — `devflow learning --clear`.
+ *
+ * D-CLEAR-UNREFERENCED: clearing removes from the log exactly the rows no ledger
+ * row carries (D-LEDGER-REGISTRY), whatever their age or status, and keeps every
+ * row an entry carries, active or not; it refuses while the ledger holds a
+ * malformed line, and it never writes the ledger, the archive or the rendered
+ * files. Reason: truncating the whole log orphaned every entry — each lost the log
+ * row that is its content authority, and refresh then refused them all — and a
+ * malformed ledger line may be the one carrying a row clearing would drop.
+ *
+ * It runs under the learning lock (D-ONE-LEARNING-LOCK). When a row is dropped it
+ * backs up a v1 tree (D-V1-BACKUP-ONCE) and quarantines the log's malformed lines
+ * (D-QUARANTINE-MALFORMED) before it rewrites the log; with nothing to drop it
+ * writes nothing.
+ *
+ * @param {string} root - project root
+ * @param {{ now?: number, timeoutMs?: number }} [opts] - now: epoch ms (default Date.now())
+ * @returns {{ ok: true, value: { cleared: number, kept: number } } | { ok: false, error: { kind: string, message: string } }}
+ *   cleared: rows removed from the log; kept: rows left in it. Error kinds:
+ *   ledger-malformed, and withDecisionsLock's no-learning-dir and busy.
+ */
+function clearUnreferenced(root, { now = Date.now(), timeoutMs } = {}) {
+  return withDecisionsLock('clear', root, () => {
+    const ledger = readJsonl(getDecisionsLedgerPath(root));
+    if (ledger.rejected.length > 0) {
+      const lines = ledger.rejected.length === 1 ? '1 malformed line' : `${ledger.rejected.length} malformed lines`;
+      return {
+        ok: false,
+        error: {
+          kind: 'ledger-malformed',
+          message: `clear: the ledger has ${lines}, which may carry an observation this would drop; nothing was cleared`,
+        },
+      };
+    }
+    const logPath = getDecisionsLogPath(root);
+    const log = readJsonl(logPath);
+    const carried = ledgerRegistry(ledger.rows).byObsId;
+    const kept = log.rows.filter(row => isNonEmptyString(row.id) && carried.has(row.id));
+    const cleared = log.rows.length - kept.length;
+    if (cleared === 0) return { ok: true, value: { cleared: 0, kept: kept.length } };
+
+    ensurePreV2Backup(root, { logRows: log.rows, ledgerRows: ledger.rows });
+    quarantineRejected(logPath, log.rejected, { now });
+    writeJsonlAtomic(logPath, kept);
+    return { ok: true, value: { cleared, kept: kept.length } };
   }, { timeoutMs });
 }
 
@@ -2857,8 +2913,9 @@ module.exports = {
   appendHistory,
   historyVersions,
   ensurePreV2Backup,
-  // Rotation
+  // Rotation and clearing
   rotateObservations,
+  clearUnreferenced,
   // The queue claim
   CLAIM_STALE_SECS,
   CLAIM_TOKEN_RE,

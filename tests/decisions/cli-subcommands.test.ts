@@ -1,9 +1,16 @@
 /**
- * Tests for `devflow decisions` subcommand behaviors.
+ * `devflow learning` on the v2 learning store (D-LEARNING-STORE-SEAM).
  *
- * Phase 3: removed tests for filterEligibleEntries, sortByLeastUsed,
- * clearCapacityNotifications, toDecisionsStatus, DecisionsEntry (all
- * removed as part of the capacity review system removal).
+ * --status, --list and --show read the ledger and the log through the store and
+ * write nothing. --restore makes an inactive entry active again through the
+ * store's restoreAnchor. --clear drops only the observations no entry uses, under
+ * the learning lock, and drains the queue only once that clear succeeded
+ * (D-CLEAR-UNREFERENCED). --reset and --disable keep their one-directory removal
+ * and their drain.
+ *
+ * Each case seeds a real learning tree under a temp root that getLedgerRoot is
+ * mocked to resolve; only the prompts, the tuning config and the machine devflow
+ * directory are stubbed.
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import * as fs from 'fs';
@@ -46,11 +53,6 @@ vi.mock('@clack/prompts', () => ({
 // ---------------------------------------------------------------------------
 // Imports AFTER mocks.
 // ---------------------------------------------------------------------------
-import {
-  parseLearningLog,
-  loadAndCountObservations,
-  type LearningObservation,
-} from '../../src/core/observations.js';
 import { getLedgerRoot } from '../../src/core/ledger-root.js';
 import { getDevFlowDirectory } from '../../src/targets/claude-code/claude-paths.js';
 import { learningCommand } from '../../src/cli/commands/learning.js';
@@ -60,328 +62,519 @@ import {
   getLearningPendingTurnsProcessingPath,
   getLearningClaimOwnerPath,
   getPendingTurnsPath,
-  getDecisionsLogPath,
 } from '../../src/core/project-paths.js';
+import {
+  learningPaths,
+  makeV1LedgerRow,
+  makeV1LogRow,
+  makeV2LedgerRow,
+  makeV2LogRow,
+  requireLearningStore,
+  seedLearningTree,
+  snapshotTree,
+  toJsonl,
+  type LearningTreePaths,
+  type Row,
+} from './learning-fixtures.js';
+
+const store = requireLearningStore();
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
 function makeTmpDir(): string {
-  return fs.mkdtempSync(path.join(os.tmpdir(), 'decisions-subcommands-test-'));
+  return fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'learning-cli-test-')));
 }
 
-/** Build a valid LearningObservation object for testing. */
-function makeDecisionObs(overrides: Partial<LearningObservation> = {}): LearningObservation {
+/** What one `devflow learning …` run printed, by channel, and the exit code it set. */
+interface LearningRun {
+  stdout: string;
+  info: string;
+  success: string;
+  warn: string;
+  error: string;
+  exitCode: number | string | null | undefined;
+}
+
+/** The messages a mocked clack log function received, one per line. */
+function logged(fn: (message: string) => void): string {
+  return vi.mocked(fn).mock.calls.map(call => String(call[0])).join('\n');
+}
+
+/**
+ * Run `devflow learning <args…>` once, as a fresh process would: Commander keeps
+ * option values across parseAsync() calls on one instance, so they are cleared
+ * first. stdout is captured; the clack log calls are read from their mocks.
+ */
+async function runLearning(args: readonly string[]): Promise<LearningRun> {
+  (learningCommand as unknown as { _optionValues: Record<string, unknown> })._optionValues = {};
+  for (const fn of [p.log.info, p.log.success, p.log.warn, p.log.error]) vi.mocked(fn).mockClear();
+  let stdout = '';
+  const spy = vi.spyOn(process.stdout, 'write').mockImplementation((chunk: string | Uint8Array) => {
+    stdout += typeof chunk === 'string' ? chunk : Buffer.from(chunk).toString('utf8');
+    return true;
+  });
+  try {
+    await learningCommand.parseAsync([...args], { from: 'user' });
+  } finally {
+    spy.mockRestore();
+  }
   return {
-    id: overrides.id ?? 'obs_decision_001',
-    type: overrides.type ?? 'decision',
-    pattern: overrides.pattern ?? 'Use Result types for error handling',
-    confidence: overrides.confidence ?? 0.8,
-    observations: overrides.observations ?? 5,
-    first_seen: '2026-05-01T10:00:00Z',
-    last_seen: '2026-05-06T10:00:00Z',
-    status: overrides.status ?? 'observing',
-    evidence: ['evidence 1'],
-    details: 'context: auth module; decision: Result types; rationale: explicit errors',
-    ...overrides,
+    stdout,
+    info: logged(p.log.info),
+    success: logged(p.log.success),
+    warn: logged(p.log.warn),
+    error: logged(p.log.error),
+    exitCode: process.exitCode,
   };
 }
 
-function makeDecisionLog(entries: LearningObservation[]): string {
-  return entries.map(e => JSON.stringify(e)).join('\n') + '\n';
+/**
+ * A learning tree with every kind of row the listing tells apart:
+ *   ADR-001  an active v2 decision
+ *   PF-001   an active v1 pitfall, and PF-002 its twin carrying the same
+ *            observation with details its log row lacks
+ *   PF-003   a v1 pitfall retired with a note
+ * plus one v2 observation no entry carries yet.
+ */
+const LOG: readonly Row[] = [
+  makeV2LogRow({ id: 'obs_cli_decision' }),
+  makeV1LogRow({ id: 'obs_cli_pitfall' }),
+  makeV1LogRow({ id: 'obs_cli_retired', pattern: 'A pitfall seen once' }),
+  makeV2LogRow({ id: 'obs_cli_waiting', title: 'An observation waiting for promotion' }),
+];
+const LEDGER: readonly Row[] = [
+  makeV2LedgerRow({ id: 'obs_cli_decision', anchor_id: 'ADR-001' }),
+  makeV1LedgerRow({ id: 'obs_cli_pitfall', anchor_id: 'PF-001' }),
+  makeV1LedgerRow({ id: 'obs_cli_pitfall', anchor_id: 'PF-002', details: 'area: hooks; issue: a detail only this ledger row holds' }),
+  makeV1LedgerRow({
+    id: 'obs_cli_retired', anchor_id: 'PF-003', pattern: 'A pitfall seen once',
+    decisions_status: 'Retired', status_note: 'a one-off', retired_on: '2026-09-20',
+  }),
+];
+
+function seedCorpus(root: string): LearningTreePaths {
+  return seedLearningTree(root, { log: LOG, ledger: LEDGER });
 }
 
-// ---------------------------------------------------------------------------
-// --list filtering: verify that only decision/pitfall types are surfaced
-// ---------------------------------------------------------------------------
+function seedQueue(root: string): void {
+  fs.writeFileSync(getLearningPendingTurnsPath(root), '{"role":"user"}\n');
+  fs.writeFileSync(getLearningPendingTurnsProcessingPath(root), '{"role":"user"}\n');
+  fs.writeFileSync(getLearningClaimOwnerPath(root), '0123456789abcdef\n');
+}
 
-describe('decisions --list filtering logic', () => {
-  it('filters observations to decision and pitfall types only', () => {
-    const all = [
-      makeDecisionObs({ id: 'obs_workflow_001', type: 'workflow', pattern: 'Run tests first' }),
-      makeDecisionObs({ id: 'obs_procedural_001', type: 'procedural', pattern: 'Deploy checklist' }),
-      makeDecisionObs({ id: 'obs_decision_001', type: 'decision', pattern: 'Use Result types' }),
-      makeDecisionObs({ id: 'obs_pitfall_001', type: 'pitfall', pattern: 'Missing null check' }),
-    ];
+function queueFilesPresent(root: string): boolean[] {
+  return [getLearningPendingTurnsPath(root), getLearningPendingTurnsProcessingPath(root), getLearningClaimOwnerPath(root)]
+    .map(file => fs.existsSync(file));
+}
 
-    const filtered = all.filter(o => o.type === 'decision' || o.type === 'pitfall');
+/** A scratch devflow root with an installed manifest — never the real one. */
+function makeMachineDevflowDir(): string {
+  const devflowDir = makeTmpDir();
+  fs.writeFileSync(path.join(devflowDir, 'manifest.json'), JSON.stringify({
+    version: '2.0.0', plugins: [], scope: 'user', features: { ambient: true, memory: true, learning: true },
+    installedAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z',
+  }));
+  return devflowDir;
+}
 
-    expect(filtered).toHaveLength(2);
-    expect(filtered.map(o => o.pattern)).toContain('Use Result types');
-    expect(filtered.map(o => o.pattern)).toContain('Missing null check');
-    expect(filtered.map(o => o.pattern)).not.toContain('Run tests first');
-    expect(filtered.map(o => o.pattern)).not.toContain('Deploy checklist');
-  });
+let root: string;
+let devflowDir: string;
 
-  it('sorts filtered observations by confidence descending', () => {
-    const all = [
-      makeDecisionObs({ id: 'obs_decision_001', type: 'decision', pattern: 'Low confidence', confidence: 0.3 }),
-      makeDecisionObs({ id: 'obs_pitfall_001', type: 'pitfall', pattern: 'High confidence', confidence: 0.9 }),
-      makeDecisionObs({ id: 'obs_decision_002', type: 'decision', pattern: 'Mid confidence', confidence: 0.6 }),
-    ];
+beforeEach(() => {
+  root = makeTmpDir();
+  devflowDir = makeMachineDevflowDir();
+  vi.mocked(getDevFlowDirectory).mockReturnValue(devflowDir);
+  vi.mocked(getLedgerRoot).mockResolvedValue(root);
+  process.exitCode = 0;
+});
 
-    const filtered = all.filter(o => o.type === 'decision' || o.type === 'pitfall');
-    filtered.sort((a, b) => b.confidence - a.confidence);
-
-    expect(filtered[0].pattern).toBe('High confidence');
-    expect(filtered[1].pattern).toBe('Mid confidence');
-    expect(filtered[2].pattern).toBe('Low confidence');
-  });
-
-  it('returns empty array when no decision/pitfall entries exist', () => {
-    const all = [
-      makeDecisionObs({ id: 'obs_workflow_001', type: 'workflow', pattern: 'Workflow pattern' }),
-    ];
-
-    const filtered = all.filter(o => o.type === 'decision' || o.type === 'pitfall');
-
-    expect(filtered).toHaveLength(0);
-  });
+afterEach(() => {
+  process.exitCode = 0;
+  vi.mocked(getDevFlowDirectory).mockReturnValue('/home/user/.devflow');
+  fs.rmSync(root, { recursive: true, force: true });
+  fs.rmSync(devflowDir, { recursive: true, force: true });
 });
 
 // ---------------------------------------------------------------------------
-// --status counts: verify count logic
+// Usage and dispatch
 // ---------------------------------------------------------------------------
 
-describe('decisions --status count logic', () => {
-  it('counts decisions and pitfalls separately', () => {
-    const observations = [
-      makeDecisionObs({ id: 'obs_decision_001', type: 'decision' }),
-      makeDecisionObs({ id: 'obs_decision_002', type: 'decision' }),
-      makeDecisionObs({ id: 'obs_pitfall_001', type: 'pitfall' }),
-    ];
-
-    const decisions = observations.filter(o => o.type === 'decision');
-    const pitfalls = observations.filter(o => o.type === 'pitfall');
-
-    expect(decisions).toHaveLength(2);
-    expect(pitfalls).toHaveLength(1);
-  });
-
-  it('counts by status correctly', () => {
-    const observations = [
-      makeDecisionObs({ id: 'obs_d_001', type: 'decision', status: 'observing' }),
-      makeDecisionObs({ id: 'obs_d_002', type: 'decision', status: 'ready' }),
-      makeDecisionObs({ id: 'obs_d_003', type: 'decision', status: 'created' }),
-      makeDecisionObs({ id: 'obs_p_001', type: 'pitfall', status: 'deprecated' }),
-    ];
-
-    const observing = observations.filter(o => o.status === 'observing');
-    const ready = observations.filter(o => o.status === 'ready');
-    const created = observations.filter(o => o.status === 'created');
-    const deprecated = observations.filter(o => o.status === 'deprecated');
-
-    expect(observing).toHaveLength(1);
-    expect(ready).toHaveLength(1);
-    expect(created).toHaveLength(1);
-    expect(deprecated).toHaveLength(1);
-  });
-
-  it('identifies entries needing attention via mayBeStale flag', () => {
-    // needsReview and softCapExceeded removed in Part A — only mayBeStale remains.
-    const observations = [
-      makeDecisionObs({ id: 'obs_d_001', type: 'decision', mayBeStale: true }),
-      makeDecisionObs({ id: 'obs_d_002', type: 'decision' }),
-      makeDecisionObs({ id: 'obs_d_003', type: 'decision' }),
-    ];
-
-    const needReview = observations.filter(o => o.mayBeStale);
-
-    expect(needReview).toHaveLength(1);
-  });
-});
-
-// ---------------------------------------------------------------------------
-// loadAndCountObservations: verify parsing and invalid-entry detection
-// ---------------------------------------------------------------------------
-
-describe('decisions log parsing', () => {
-  let tmpDir: string;
-  let logPath: string;
-
-  beforeEach(() => {
-    tmpDir = makeTmpDir();
-    logPath = path.join(tmpDir, 'decisions-log.jsonl');
-  });
-
-  afterEach(() => {
-    fs.rmSync(tmpDir, { recursive: true, force: true });
-  });
-
-  it('loadAndCountObservations parses valid entries', () => {
-    const entries = [
-      makeDecisionObs({ id: 'obs_decision_001', type: 'decision' }),
-      makeDecisionObs({ id: 'obs_pitfall_001', type: 'pitfall' }),
-    ];
-    const logContent = makeDecisionLog(entries);
-    fs.writeFileSync(logPath, logContent, 'utf-8');
-
-    const content = fs.readFileSync(logPath, 'utf-8');
-    const { observations, invalidCount } = loadAndCountObservations(content);
-
-    expect(observations).toHaveLength(2);
-    expect(invalidCount).toBe(0);
-  });
-
-  it('loadAndCountObservations counts malformed lines as invalid', () => {
-    const validEntry = JSON.stringify(makeDecisionObs({ id: 'obs_decision_001', type: 'decision' }));
-    const logContent = [validEntry, 'not valid json {{{', 'also not json'].join('\n') + '\n';
-    fs.writeFileSync(logPath, logContent, 'utf-8');
-
-    const content = fs.readFileSync(logPath, 'utf-8');
-    const { observations, invalidCount } = loadAndCountObservations(content);
-
-    expect(observations).toHaveLength(1);
-    expect(invalidCount).toBe(2);
-  });
-
-  it('parseLearningLog accepts all 4 observation types', () => {
-    const rawEntries = [
-      makeDecisionObs({ id: 'obs_decision_001', type: 'decision' }),
-      makeDecisionObs({ id: 'obs_pitfall_001', type: 'pitfall' }),
-      makeDecisionObs({ id: 'obs_workflow_001', type: 'workflow' }),
-    ];
-    const logContent = makeDecisionLog(rawEntries);
-    fs.writeFileSync(logPath, logContent, 'utf-8');
-
-    const content = fs.readFileSync(logPath, 'utf-8');
-    const allObs = parseLearningLog(content);
-
-    expect(allObs).toHaveLength(3);
-  });
-});
-
-// ---------------------------------------------------------------------------
-// --clear behavior: verify log truncation
-// ---------------------------------------------------------------------------
-
-describe('decisions --clear log truncation', () => {
-  let tmpDir: string;
-  let logPath: string;
-
-  beforeEach(() => {
-    tmpDir = makeTmpDir();
-    logPath = path.join(tmpDir, 'decisions-log.jsonl');
-  });
-
-  afterEach(() => {
-    fs.rmSync(tmpDir, { recursive: true, force: true });
-  });
-
-  it('writing empty string truncates the log', () => {
-    const entries = [
-      makeDecisionObs({ id: 'obs_decision_001', type: 'decision' }),
-    ];
-    fs.writeFileSync(logPath, makeDecisionLog(entries), 'utf-8');
-    expect(fs.readFileSync(logPath, 'utf-8').trim()).not.toBe('');
-
-    fs.writeFileSync(logPath, '', 'utf-8');
-
-    expect(fs.readFileSync(logPath, 'utf-8')).toBe('');
-  });
-});
-
-// ---------------------------------------------------------------------------
-// --reset state removal: single-dir semantics
-// ---------------------------------------------------------------------------
-
-describe('learning --reset single-dir semantics', () => {
-  it('reset removes the entire .devflow/learning/ directory (single-dir semantics)', () => {
-    // All learning state lives under .devflow/learning/ — queue files, content
-    // files, ledger, and tuning config. Reset removes the entire dir, not a
-    // fixed file list. The neutral .devflow/config.json is never touched.
-    const removedDir = '.devflow/learning/';
-    const preservedPaths = ['.devflow/config.json', '.devflow/memory/'];
-
-    // Single dir removal covers everything
-    expect(removedDir).toContain('learning');
-
-    for (const p of preservedPaths) {
-      expect(p).not.toContain('learning/');
+describe('learning: usage and dispatch', () => {
+  it('prints the usage, naming every flag, when no flag is given', async () => {
+    vi.mocked(p.note).mockClear();
+    await runLearning([]);
+    const usage = vi.mocked(p.note).mock.calls.map(call => String(call[0])).join('\n');
+    for (const flag of ['--enable', '--disable', '--status', '--list', '--show <id>', '--restore <id>', '--configure', '--clear', '--reset']) {
+      expect(usage, flag).toContain(`devflow learning ${flag}`);
     }
   });
 
-  it('reset does not target .devflow/config.json (shared neutral config)', () => {
-    // The feature toggles are at .devflow/config.json, NOT inside learning/.
-    // Reset must never remove it — it would also wipe memory and knowledge toggles.
-    const neutralConfig = '.devflow/config.json';
-    expect(neutralConfig).not.toMatch(/learning/);
+  it('a flag that takes a value dispatches on the value alone', async () => {
+    seedCorpus(root);
+    vi.mocked(p.note).mockClear();
+    const run = await runLearning(['--show', 'ADR-001']);
+    expect(p.note).not.toHaveBeenCalled();
+    expect(JSON.parse(run.stdout).key).toBe('ADR-001');
   });
 });
 
 // ---------------------------------------------------------------------------
-// --reset legacy marker sweep: verify legacy marker-pipeline state files are targeted
+// --status
 // ---------------------------------------------------------------------------
 
-describe('learning --reset legacy marker sweep', () => {
-  it('legacy sweep targets fixed stamp files (.decisions-runs-today, .curation-last, .processor-spawned-at)', () => {
-    const legacyFilesToClean = [
-      '.decisions-runs-today',
-      '.curation-last',
-      '.processor-spawned-at',
-    ];
+describe('learning --status', { timeout: 30_000 }, () => {
+  // The settings layer reads the repository files of the current directory; a
+  // directory that is no repository narrows nothing, so the lines are the store's.
+  beforeEach(() => { vi.spyOn(process, 'cwd').mockReturnValue(root); });
 
-    for (const f of legacyFilesToClean) {
-      expect(f.startsWith('.')).toBe(true);
-    }
+  it('counts active entries by type, inactive ones by status, legacy v1 entries and observations, and writes nothing', async () => {
+    seedCorpus(root);
+    const before = snapshotTree(root);
+
+    const run = await runLearning(['--status']);
+
+    expect(run.info).toBe([
+      'Learning: enabled',
+      'Entries: 3 active (1 decision, 2 pitfalls), 1 inactive (Retired 1)',
+      'Legacy v1 entries: 2 of 3 active',
+      'Observations: 4 in the log, 1 not yet promoted',
+    ].join('\n'));
+    expect(run.warn).toBe('');
+    expect(snapshotTree(root)).toEqual(before);
   });
 
-  it('legacy sweep targets decisions.*/curation.* markers across all 4 suffixes', () => {
-    const dreamMarkerPattern = /^(decisions|curation)\..+\.(json|processing|retries|failed)$/;
-
-    for (const f of [
-      'decisions.abc123.json',
-      'decisions.session-xyz.processing',
-      'decisions.abc123.retries',
-      'decisions.abc123.failed',
-      'curation.abc123.json',
-      'curation.abc123.processing',
-    ]) {
-      expect(dreamMarkerPattern.test(f)).toBe(true);
-    }
-
-    // Never touches: learning markers (pipeline removed separately), the shared
-    // config.json, or the .pending-turns.jsonl/.processing queue files.
-    for (const f of ['learning.abc123.json', 'decisions.json', 'config.json', '.pending-turns.jsonl', '.pending-turns.processing']) {
-      expect(dreamMarkerPattern.test(f)).toBe(false);
-    }
+  it('lists each inactive status it finds, in the store\'s order', async () => {
+    seedLearningTree(root, {
+      ledger: [
+        makeV2LedgerRow({ id: 'obs_a', anchor_id: 'ADR-001', decisions_status: 'Superseded', superseded_by: 'ADR-002' }),
+        makeV2LedgerRow({ id: 'obs_b', anchor_id: 'ADR-002' }),
+        makeV1LedgerRow({ id: 'obs_c', anchor_id: 'PF-001', decisions_status: 'Deprecated' }),
+        makeV1LedgerRow({ id: 'obs_d', anchor_id: 'PF-002', decisions_status: 'Encoded' }),
+      ],
+    });
+    const run = await runLearning(['--status']);
+    expect(run.info).toContain('Entries: 1 active (1 decision, 0 pitfalls), 3 inactive (Encoded 1, Superseded 1, Deprecated 1)');
   });
-});
 
-// ---------------------------------------------------------------------------
-// --reset success message: truthful, pinned
-// ---------------------------------------------------------------------------
+  it('warns how many malformed lines it skipped, per file', async () => {
+    const paths = seedCorpus(root);
+    fs.appendFileSync(paths.ledger, '{torn ledger line\n');
+    fs.appendFileSync(paths.log, 'not json\n');
+    fs.appendFileSync(paths.log, '[]\n');
+    const before = snapshotTree(root);
 
-describe('learning --reset success message', () => {
-  const learningTs = fs.readFileSync(
-    new URL('../../src/cli/commands/learning.ts', import.meta.url).pathname,
-    'utf-8',
-  );
+    const run = await runLearning(['--status']);
 
-  it('pins the truthful success string (new single-dir message)', () => {
-    expect(learningTs).toContain(
-      "p.log.success('Reset complete — removed .devflow/learning/ state.');",
+    expect(run.warn).toBe(
+      'Malformed lines skipped: 1 in the ledger, 2 in the log. The next op that rewrites a file moves its malformed lines to a .rejected.jsonl file beside it.',
     );
+    expect(snapshotTree(root)).toEqual(before);
   });
 
-  it('does not interpolate a removed-file count into the success message', () => {
-    expect(learningTs).not.toMatch(/removed \$\{[^}]+\} file\(s\)/);
+  it('reports zero counts for a project with no learning data, and creates nothing', async () => {
+    const run = await runLearning(['--status']);
+    expect(run.info).toBe([
+      'Learning: enabled',
+      'Entries: 0 active (0 decisions, 0 pitfalls), 0 inactive',
+      'Legacy v1 entries: 0 of 0 active',
+      'Observations: 0 in the log, 0 not yet promoted',
+    ].join('\n'));
+    expect(fs.readdirSync(root)).toEqual([]);
+  });
+
+  it('says so outside a git project', async () => {
+    vi.mocked(getLedgerRoot).mockResolvedValue(null);
+    const run = await runLearning(['--status']);
+    expect(run.info).toBe('Learning: enabled\nEntries: not in a git project');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// --list
+// ---------------------------------------------------------------------------
+
+describe('learning --list', { timeout: 30_000 }, () => {
+  it('prints the entries, the inactive entries with their notes, the observations and the integrity flags, and writes nothing', async () => {
+    seedCorpus(root);
+    const before = snapshotTree(root);
+
+    const run = await runLearning(['--list']);
+
+    expect(run.stdout).toBe([
+      'ACTIVE 3',
+      '  ADR-001 obs_cli_decision v2 Store functions return a Result',
+      '  PF-001 obs_cli_pitfall v1 Editing installed hook scripts instead of their source',
+      '  PF-002 obs_cli_pitfall v1 Editing installed hook scripts instead of their source',
+      'INACTIVE 1',
+      '  PF-003 obs_cli_retired v1 Retired A pitfall seen once',
+      '    note: a one-off',
+      'OBSERVATIONS 1',
+      '  obs_cli_waiting decision v2 observed 1 An observation waiting for promotion',
+      'INTEGRITY 2',
+      '  PF-001 obs_cli_pitfall duplicate-obs-id',
+      '  PF-002 obs_cli_pitfall duplicate-obs-id',
+      '',
+    ].join('\n'));
+    expect(run.exitCode).toBe(0);
+    expect(snapshotTree(root)).toEqual(before);
+  });
+
+  it('says there is no learning data when the project has no learning directory, and creates nothing', async () => {
+    const run = await runLearning(['--list']);
+    expect(run.info).toBe('No learning data in this project yet.');
+    expect(run.stdout).toBe('');
+    expect(fs.readdirSync(root)).toEqual([]);
+  });
+
+  it('reads the ledger root getLedgerRoot resolves, not process.cwd() (a subdirectory or a linked worktree)', async () => {
+    seedCorpus(root);
+    vi.spyOn(process, 'cwd').mockReturnValue('/nonexistent-cwd-decoy-path');
+    const run = await runLearning(['--list']);
+    expect(run.stdout).toContain('ACTIVE 3');
+  });
+
+  it('falls back to process.cwd() outside a git project', async () => {
+    vi.mocked(getLedgerRoot).mockResolvedValue(null);
+    seedCorpus(root);
+    vi.spyOn(process, 'cwd').mockReturnValue(root);
+    const run = await runLearning(['--list']);
+    expect(run.stdout).toContain('OBSERVATIONS 1');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// --show
+// ---------------------------------------------------------------------------
+
+describe('learning --show', { timeout: 30_000 }, () => {
+  it('prints the entry as JSON — every ledger row carrying its observation, the log row, history and flags — and writes nothing', async () => {
+    seedCorpus(root);
+    const before = snapshotTree(root);
+
+    const run = await runLearning(['--show', 'PF-002']);
+
+    const shown = JSON.parse(run.stdout) as Record<string, unknown>;
+    expect(Object.keys(shown)).toEqual(['key', 'ledger', 'log', 'history_versions', 'flags']);
+    expect(shown.key).toBe('PF-002');
+    expect((shown.ledger as Row[]).map(row => row.anchor_id)).toEqual(['PF-001', 'PF-002']);
+    expect(shown.log).toEqual(LOG[1]);
+    expect(shown.history_versions).toEqual([]);
+    expect(shown.flags).toEqual([{ anchor_id: 'PF-002', flag: 'ledger-only-content', fields: ['details'] }]);
+    expect(run.exitCode).toBe(0);
+    expect(snapshotTree(root)).toEqual(before);
+  });
+
+  it('shows an observation no entry carries by its id', async () => {
+    seedCorpus(root);
+    const run = await runLearning(['--show', 'obs_cli_waiting']);
+    const shown = JSON.parse(run.stdout) as { ledger: Row[]; log: Row };
+    expect(shown.ledger).toEqual([]);
+    expect(shown.log).toEqual(LOG[3]);
+  });
+
+  it('escapes the control and bidirectional characters a hand-edited row holds, and the JSON still reads back the same', async () => {
+    // Built from code points so this source holds none of them: a C1 CSI, a
+    // right-to-left override and its pop, and a line separator.
+    const unsafe = [0x9b, 0x202e, 0x202c, 0x2028].map(code => String.fromCharCode(code));
+    const [csi, rlo, pop, lineSeparator] = unsafe;
+    const hostile = makeV1LedgerRow({
+      id: 'obs_cli_pitfall', anchor_id: 'PF-001',
+      details: `area: x; issue: csi${csi}2J and ${rlo}reversed${pop} text; resolution:${lineSeparator}next`,
+    });
+    seedLearningTree(root, { log: [LOG[1]], ledger: [hostile] });
+
+    const run = await runLearning(['--show', 'PF-001']);
+
+    for (const ch of unsafe) expect(run.stdout.includes(ch), `U+${ch.charCodeAt(0).toString(16)}`).toBe(false);
+    expect((JSON.parse(run.stdout) as { ledger: Row[] }).ledger[0]).toEqual(hostile);
+  });
+
+  it('refuses an entry the ledger and the log do not hold: exit 1, nothing printed or written', async () => {
+    seedCorpus(root);
+    const before = snapshotTree(root);
+    const run = await runLearning(['--show', 'PF-099']);
+    expect(run.error).toBe('show: no entry \'PF-099\' in the ledger or the log');
+    expect(run.stdout).toBe('');
+    expect(run.exitCode).toBe(1);
+    expect(snapshotTree(root)).toEqual(before);
+  });
+
+  it('refuses a value that is neither an entry id nor an observation id', async () => {
+    seedCorpus(root);
+    const run = await runLearning(['--show', 'not an id']);
+    expect(run.error).toBe('show: "not an id" is neither an anchor id nor an observation id');
+    expect(run.exitCode).toBe(1);
+  });
+
+  it('refuses in a project with no learning directory, and creates nothing', async () => {
+    const run = await runLearning(['--show', 'ADR-001']);
+    expect(run.error).toBe('No learning data in this project yet.');
+    expect(run.exitCode).toBe(1);
+    expect(fs.readdirSync(root)).toEqual([]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// --restore
+// ---------------------------------------------------------------------------
+
+describe('learning --restore', { timeout: 30_000 }, () => {
+  it('makes an inactive entry active again, its notes cleared, and renders it', async () => {
+    const paths = seedCorpus(root);
+
+    const run = await runLearning(['--restore', 'PF-003']);
+
+    expect(run.success).toBe('Restored PF-003 (Active); it is due for review again.');
+    expect(run.exitCode).toBe(0);
+    const restored = store.readJsonl(paths.ledger).rows.find(row => row.anchor_id === 'PF-003');
+    expect(restored?.decisions_status).toBe('Active');
+    expect(restored).not.toHaveProperty('status_note');
+    expect(restored).not.toHaveProperty('retired_on');
+    expect(fs.readFileSync(path.join(paths.learningDir, 'pitfalls.md'), 'utf8')).toContain('## PF-003: A pitfall seen once');
+  });
+
+  it('refuses an entry that is already active: exit 1, nothing written', async () => {
+    seedCorpus(root);
+    const before = snapshotTree(root);
+    const run = await runLearning(['--restore', 'ADR-001']);
+    expect(run.error).toBe('restore-anchor: ADR-001 is already active; nothing was written');
+    expect(run.exitCode).toBe(1);
+    expect(snapshotTree(root)).toEqual(before);
+  });
+
+  it('refuses a value that is not an entry id: exit 1, nothing written', async () => {
+    seedCorpus(root);
+    const before = snapshotTree(root);
+    const run = await runLearning(['--restore', 'obs_cli_retired']);
+    expect(run.error).toBe('--restore takes an entry id (ADR-NNN or PF-NNN), not "obs_cli_retired"');
+    expect(run.exitCode).toBe(1);
+    expect(snapshotTree(root)).toEqual(before);
+  });
+
+  it('refuses in a project with no learning directory, and creates nothing', async () => {
+    const run = await runLearning(['--restore', 'PF-003']);
+    expect(run.error).toBe('No learning data in this project yet.');
+    expect(run.exitCode).toBe(1);
+    expect(fs.readdirSync(root)).toEqual([]);
+  });
+
+  it('refuses outside a git project', async () => {
+    vi.mocked(getLedgerRoot).mockResolvedValue(null);
+    const run = await runLearning(['--restore', 'PF-003']);
+    expect(run.warn).toBe('Could not resolve git root — restore not performed');
+    expect(run.exitCode).toBe(1);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// --clear (D-CLEAR-UNREFERENCED)
+// ---------------------------------------------------------------------------
+
+describe('learning --clear', { timeout: 30_000 }, () => {
+  it('drops only the observations no entry uses, keeps every entry\'s log row, then drains the queue', async () => {
+    const paths = seedCorpus(root);
+    seedQueue(root);
+    const ledgerBefore = fs.readFileSync(paths.ledger, 'utf8');
+
+    const run = await runLearning(['--clear']);
+
+    expect(run.success).toBe('Cleared 1 observation no entry uses and kept 3 that entries use; drained the learning queue.');
+    expect(run.exitCode).toBe(0);
+    expect(fs.readFileSync(paths.log, 'utf8')).toBe(toJsonl(LOG.slice(0, 3)));
+    expect(fs.readFileSync(paths.ledger, 'utf8')).toBe(ledgerBefore);
+    expect(queueFilesPresent(root)).toEqual([false, false, false]);
+  });
+
+  it('while the learning lock is held: exit 1 within the CLI\'s wait, nothing written, the queue left in place', async () => {
+    const paths = seedCorpus(root);
+    seedQueue(root);
+    fs.mkdirSync(paths.lockDir);
+    const before = snapshotTree(root);
+
+    const started = Date.now();
+    const run = await runLearning(['--clear']);
+
+    expect(Date.now() - started).toBeLessThan(15_000);
+    expect(run.error).toBe('The learning store is busy: another run holds its lock. Nothing was cleared; try again in a moment.');
+    expect(run.exitCode).toBe(1);
+    expect(snapshotTree(root)).toEqual(before);
+    expect(queueFilesPresent(root)).toEqual([true, true, true]);
+  });
+
+  it('refuses while the ledger holds a malformed line: exit 1, nothing written, the queue left in place', async () => {
+    const paths = seedCorpus(root);
+    seedQueue(root);
+    fs.appendFileSync(paths.ledger, '{torn ledger line\n');
+    const before = snapshotTree(root);
+
+    const run = await runLearning(['--clear']);
+
+    expect(run.error).toBe('clear: the ledger has 1 malformed line, which may carry an observation this would drop; nothing was cleared');
+    expect(run.exitCode).toBe(1);
+    expect(snapshotTree(root)).toEqual(before);
+  });
+
+  it('says there is nothing to clear in a project with no learning directory, and creates nothing', async () => {
+    const run = await runLearning(['--clear']);
+    expect(run.info).toBe('No learning data to clear.');
+    expect(run.exitCode).toBe(0);
+    expect(fs.readdirSync(root)).toEqual([]);
+  });
+
+  it('acts on the resolved ledger root, never process.cwd()', async () => {
+    const paths = seedCorpus(root);
+    vi.spyOn(process, 'cwd').mockReturnValue('/nonexistent-cwd-decoy-path');
+    await runLearning(['--clear']);
+    expect(store.readJsonl(paths.log).rows.map(row => row.id)).toEqual(['obs_cli_decision', 'obs_cli_pitfall', 'obs_cli_retired']);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// --reset: one directory holds all learning state
+// ---------------------------------------------------------------------------
+
+describe('learning --reset', () => {
+  it('removes .devflow/learning/ and leaves the rest of .devflow/ alone', async () => {
+    seedCorpus(root);
+    seedQueue(root);
+    fs.writeFileSync(path.join(root, '.devflow', 'config.json'), '{"features":{}}\n');
+    fs.mkdirSync(path.join(root, '.devflow', 'memory'));
+    fs.writeFileSync(getPendingTurnsPath(root), '{"role":"user"}\n');
+
+    const run = await runLearning(['--reset']);
+
+    expect(run.success).toBe('Reset complete — removed .devflow/learning/ state.');
+    expect(fs.existsSync(learningPaths(root).learningDir)).toBe(false);
+    expect(fs.readFileSync(path.join(root, '.devflow', 'config.json'), 'utf8')).toBe('{"features":{}}\n');
+    expect(fs.existsSync(getPendingTurnsPath(root))).toBe(true);
+  });
+
+  it('completes truthfully a second time, when .devflow/learning/ is already gone', async () => {
+    fs.mkdirSync(path.join(root, '.devflow', 'learning'), { recursive: true });
+    await runLearning(['--reset']);
+
+    const run = await runLearning(['--reset']);
+
+    expect(run.error).not.toContain('Learning system is currently running');
+    expect(run.success).toBe('Reset complete — removed .devflow/learning/ state.');
+  });
+
+  it('completes truthfully in a project that never had learning state', async () => {
+    const run = await runLearning(['--reset']);
+    expect(run.error).not.toContain('Learning system is currently running');
+    expect(run.success).toBe('Reset complete — removed .devflow/learning/ state.');
   });
 });
 
 // ---------------------------------------------------------------------------
 // --disable switches learning off machine-wide (D-FEATURES-NARROW-ONLY) and
-// drains the current project's learning (decisions-detection) pending-turns
-// queue — mirrors memory.ts's drain-on-disable behavior for the sibling memory
-// queue. Unconditional: a mid-run Learning agent whose claimed batch vanishes
-// aborts without changes, which is the desired outcome of disabling.
+// drains the current project's learning queue — a mid-run Learning agent whose
+// claimed batch vanishes stops, which is the desired outcome of disabling.
 // ---------------------------------------------------------------------------
 
 describe('learning --disable drains the learning pending-turns queue', () => {
-  let tmpDir: string;
-  let devflowDir: string;
-
   /** The machine-wide switch, as the command left it. */
   function readLearningSwitch(): unknown {
     return (JSON.parse(fs.readFileSync(path.join(devflowDir, 'manifest.json'), 'utf-8')) as {
@@ -390,224 +583,59 @@ describe('learning --disable drains the learning pending-turns queue', () => {
   }
 
   beforeEach(() => {
-    tmpDir = makeTmpDir();
-    // A scratch devflow root with an installed manifest — never the real one.
-    devflowDir = makeTmpDir();
-    fs.writeFileSync(path.join(devflowDir, 'manifest.json'), JSON.stringify({
-      version: '2.0.0', plugins: [], scope: 'user', features: { ambient: true, memory: true, learning: true },
-      installedAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z',
-    }));
-    vi.mocked(getDevFlowDirectory).mockReturnValue(devflowDir);
-    vi.mocked(getLedgerRoot).mockResolvedValue(tmpDir);
-    // Commander retains _optionValues across repeated parseAsync() calls on the
-    // same Command instance (no built-in reset between calls). Production always
-    // starts a fresh process per invocation, so clear state here to match that
-    // reality and keep these tests order-independent.
-    (learningCommand as unknown as { _optionValues: Record<string, unknown> })._optionValues = {};
-  });
-
-  afterEach(() => {
-    vi.mocked(getDevFlowDirectory).mockReturnValue('/home/user/.devflow');
-    fs.rmSync(tmpDir, { recursive: true, force: true });
-    fs.rmSync(devflowDir, { recursive: true, force: true });
-  });
-
-  function writeDreamQueueFiles(root: string): void {
     fs.mkdirSync(path.join(root, '.devflow', 'learning'), { recursive: true });
-    fs.writeFileSync(getLearningPendingTurnsPath(root), '{"role":"user"}\n');
-    fs.writeFileSync(getLearningPendingTurnsProcessingPath(root), '{"role":"user"}\n');
-    fs.writeFileSync(getLearningClaimOwnerPath(root), '0123456789abcdef\n');
-  }
+    seedQueue(root);
+  });
 
   it('deletes the queue, the claim and its owner file, and switches learning off machine-wide (memory queue untouched)', async () => {
-    writeDreamQueueFiles(tmpDir);
-    fs.mkdirSync(path.join(tmpDir, '.devflow', 'memory'), { recursive: true });
-    fs.writeFileSync(getPendingTurnsPath(tmpDir), '{"role":"user"}\n');
+    fs.mkdirSync(path.join(root, '.devflow', 'memory'), { recursive: true });
+    fs.writeFileSync(getPendingTurnsPath(root), '{"role":"user"}\n');
 
-    await learningCommand.parseAsync(['--disable'], { from: 'user' });
+    await runLearning(['--disable']);
 
-    expect(fs.existsSync(getLearningPendingTurnsPath(tmpDir))).toBe(false);
-    expect(fs.existsSync(getLearningPendingTurnsProcessingPath(tmpDir))).toBe(false);
-    expect(fs.existsSync(getLearningClaimOwnerPath(tmpDir))).toBe(false);
-
+    expect(queueFilesPresent(root)).toEqual([false, false, false]);
     expect(readLearningSwitch()).toBe(false);
     // The retired per-repo key is never written.
-    expect(fs.existsSync(path.join(tmpDir, '.devflow', 'config.json'))).toBe(false);
-
-    // The sibling memory queue is never touched by decisions --disable
-    expect(fs.existsSync(getPendingTurnsPath(tmpDir))).toBe(true);
+    expect(fs.existsSync(path.join(root, '.devflow', 'config.json'))).toBe(false);
+    expect(fs.existsSync(getPendingTurnsPath(root))).toBe(true);
   });
 
   it('does not create a .disabled sentinel (the gate is the manifest)', async () => {
-    writeDreamQueueFiles(tmpDir);
-
-    await learningCommand.parseAsync(['--disable'], { from: 'user' });
-
-    expect(fs.existsSync(path.join(tmpDir, '.devflow', 'learning', '.disabled'))).toBe(false);
+    await runLearning(['--disable']);
+    expect(fs.existsSync(path.join(root, '.devflow', 'learning', '.disabled'))).toBe(false);
   });
 
   it('drains unconditionally — a leftover .worker.lock dir from an old install does not block it', async () => {
-    writeDreamQueueFiles(tmpDir);
-    fs.mkdirSync(path.join(tmpDir, '.devflow', 'dream', '.worker.lock'), { recursive: true });
-
-    await learningCommand.parseAsync(['--disable'], { from: 'user' });
-
-    expect(fs.existsSync(getLearningPendingTurnsPath(tmpDir))).toBe(false);
-    expect(fs.existsSync(getLearningPendingTurnsProcessingPath(tmpDir))).toBe(false);
-
+    fs.mkdirSync(path.join(root, '.devflow', 'dream', '.worker.lock'), { recursive: true });
+    await runLearning(['--disable']);
+    expect(queueFilesPresent(root).slice(0, 2)).toEqual([false, false]);
     expect(readLearningSwitch()).toBe(false);
   });
 
   it('does not delete anything on --enable', async () => {
-    writeDreamQueueFiles(tmpDir);
-
-    await learningCommand.parseAsync(['--enable'], { from: 'user' });
-
-    expect(fs.existsSync(getLearningPendingTurnsPath(tmpDir))).toBe(true);
-    expect(fs.existsSync(getLearningPendingTurnsProcessingPath(tmpDir))).toBe(true);
-    expect(fs.existsSync(getLearningClaimOwnerPath(tmpDir))).toBe(true);
+    await runLearning(['--enable']);
+    expect(queueFilesPresent(root)).toEqual([true, true, true]);
     expect(readLearningSwitch()).toBe(true);
   });
 
   it('switches learning off outside a git project too (the switch is not per-project)', async () => {
     vi.mocked(getLedgerRoot).mockResolvedValue(null);
-
-    await learningCommand.parseAsync(['--disable'], { from: 'user' });
-
+    await runLearning(['--disable']);
     expect(readLearningSwitch()).toBe(false);
   });
 
-  it('drains the resolved git-root paths, not process.cwd() (regression for the cwd class)', async () => {
-    writeDreamQueueFiles(tmpDir);
-    // getLedgerRoot already resolves to tmpDir regardless of the real cwd (exactly as
-    // `git rev-parse --show-toplevel` would from any subdirectory). Point cwd at a
-    // decoy path to prove the drain never falls back to process.cwd() instead of
-    // the resolved ledger root.
+  it('drains the resolved git-root paths, not process.cwd()', async () => {
     vi.spyOn(process, 'cwd').mockReturnValue('/nonexistent-cwd-decoy-path');
-
-    await learningCommand.parseAsync(['--disable'], { from: 'user' });
-
-    expect(fs.existsSync(getLearningPendingTurnsPath(tmpDir))).toBe(false);
-    expect(fs.existsSync(getLearningPendingTurnsProcessingPath(tmpDir))).toBe(false);
+    await runLearning(['--disable']);
+    expect(queueFilesPresent(root).slice(0, 2)).toEqual([false, false]);
   });
 });
 
 // ---------------------------------------------------------------------------
-// --list resolves the log from the git root, not process.cwd() — regression
-// for the class of bug where --list run from a subdirectory of the repo
-// would look for a decisions log under the (nonexistent) subdirectory path
-// instead of the real one at the git root.
+// `devflow decisions` is not a registered command: the surface is `learning`.
 // ---------------------------------------------------------------------------
 
-describe('decisions --list resolves log path from git root, not process.cwd()', () => {
-  let tmpDir: string;
-
-  beforeEach(() => {
-    tmpDir = makeTmpDir();
-    vi.mocked(getLedgerRoot).mockResolvedValue(tmpDir);
-    (learningCommand as unknown as { _optionValues: Record<string, unknown> })._optionValues = {};
-  });
-
-  afterEach(() => {
-    fs.rmSync(tmpDir, { recursive: true, force: true });
-  });
-
-  it('finds the decisions log at the git root even when cwd is a subdirectory', async () => {
-    const logPath = getDecisionsLogPath(tmpDir);
-    fs.mkdirSync(path.dirname(logPath), { recursive: true });
-    fs.writeFileSync(logPath, makeDecisionLog([
-      makeDecisionObs({ id: 'obs_decision_001', type: 'decision', pattern: 'Use Result types' }),
-    ]));
-
-    // getLedgerRoot is mocked to resolve to tmpDir regardless of the real cwd
-    // (exactly as `git rev-parse --show-toplevel` would from a subdirectory).
-    // Point cwd at a decoy path to prove --list never falls back to
-    // process.cwd() instead of the resolved ledger root.
-    vi.spyOn(process, 'cwd').mockReturnValue('/nonexistent-cwd-decoy-path');
-
-    await learningCommand.parseAsync(['--list'], { from: 'user' });
-
-    expect(p.log.info).not.toHaveBeenCalledWith('No observations yet. Decisions log not found.');
-  });
-
-  it('falls back to process.cwd() when not in a git project', async () => {
-    vi.mocked(getLedgerRoot).mockResolvedValue(null);
-    const cwdLogPath = getDecisionsLogPath(tmpDir);
-    fs.mkdirSync(path.dirname(cwdLogPath), { recursive: true });
-    fs.writeFileSync(cwdLogPath, makeDecisionLog([
-      makeDecisionObs({ id: 'obs_decision_001', type: 'decision', pattern: 'Use Result types' }),
-    ]));
-    vi.spyOn(process, 'cwd').mockReturnValue(tmpDir);
-
-    await learningCommand.parseAsync(['--list'], { from: 'user' });
-
-    expect(p.log.info).not.toHaveBeenCalledWith('No observations yet. Decisions log not found.');
-  });
-});
-
-// ---------------------------------------------------------------------------
-// --reset idempotency: second run after .devflow/learning/ is already gone
-// must complete truthfully, never emit the "currently running" contention msg.
-// Root cause: lock dir is inside the learning dir; once learning/ is removed,
-// fs.mkdir(lockDir) fails with ENOENT, which the old code treated as contention.
-// ---------------------------------------------------------------------------
-
-describe('learning --reset is idempotent when learning dir is already gone', () => {
-  let tmpDir: string;
-
-  beforeEach(() => {
-    tmpDir = makeTmpDir();
-    vi.mocked(getLedgerRoot).mockResolvedValue(tmpDir);
-    (learningCommand as unknown as { _optionValues: Record<string, unknown> })._optionValues = {};
-    vi.mocked(p.log.error).mockClear();
-    vi.mocked(p.log.success).mockClear();
-  });
-
-  afterEach(() => {
-    fs.rmSync(tmpDir, { recursive: true, force: true });
-  });
-
-  it('does not emit the contention message on a second reset when .devflow/learning/ is already absent', async () => {
-    // First reset: create learning/ so the first run has something to remove.
-    fs.mkdirSync(path.join(tmpDir, '.devflow', 'learning'), { recursive: true });
-    await learningCommand.parseAsync(['--reset'], { from: 'user' });
-
-    // Prepare for second run.
-    (learningCommand as unknown as { _optionValues: Record<string, unknown> })._optionValues = {};
-    vi.mocked(p.log.error).mockClear();
-    vi.mocked(p.log.success).mockClear();
-
-    // Second reset — .devflow/learning/ is already gone.
-    await learningCommand.parseAsync(['--reset'], { from: 'user' });
-
-    expect(p.log.error).not.toHaveBeenCalledWith(
-      'Learning system is currently running. Try again in a moment.',
-    );
-    expect(p.log.success).toHaveBeenCalledWith(
-      'Reset complete — removed .devflow/learning/ state.',
-    );
-  });
-
-  it('completes truthfully even when called on a project with no learning state at all', async () => {
-    // No .devflow/learning/ ever created — simulates a fresh project.
-    await learningCommand.parseAsync(['--reset'], { from: 'user' });
-
-    expect(p.log.error).not.toHaveBeenCalledWith(
-      'Learning system is currently running. Try again in a moment.',
-    );
-    expect(p.log.success).toHaveBeenCalledWith(
-      'Reset complete — removed .devflow/learning/ state.',
-    );
-  });
-});
-
-// ---------------------------------------------------------------------------
-// AC-C2 clean break: `devflow decisions` must no longer be a registered command.
-// The CLI surface was renamed to `devflow learning` in commit 6. Any attempt to
-// run `devflow decisions` must either be unrecognised or produce no-op output.
-// ---------------------------------------------------------------------------
-
-describe('AC-C2: devflow decisions is no longer a registered subcommand', () => {
+describe('devflow decisions is no longer a registered subcommand', () => {
   it('learningCommand is registered under the "learning" name, not "decisions"', () => {
     expect(learningCommand.name()).toBe('learning');
   });
