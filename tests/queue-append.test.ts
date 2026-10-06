@@ -174,6 +174,45 @@ describe('queue_append_row', () => {
 
       expect(fs.existsSync(`${q}.lock`)).toBe(false);
     });
+
+    it('keeps the memory and the learning queue at mode 0600 through the trim, whatever the caller umask', () => {
+      // A queue holds captured conversation text, so it is created 0600. The trim
+      // replaces it with a renamed copy, and from then on the file has the copy's
+      // mode. Both queues take this path (queue_append_both -> queue_append_row),
+      // and a hook runs under its parent's umask, typically 022.
+      const mem = path.join(tmpDir, 'mem.jsonl');
+      const learning = path.join(tmpDir, 'learning.jsonl');
+      const modeOf = (file: string): string => (fs.statSync(file).mode & 0o777).toString(8);
+      const rowsOf = (file: string): number => readJsonl(file).length;
+      const append = (content: string, ts: number): void => {
+        const { exitCode, stderr } = runWithQueueAppend(`
+          umask 022
+          queue_append_both "${mem}" "${learning}" "true" "true" "user" "${content}" "${ts}"
+        `);
+        expect(exitCode, stderr).toBe(0);
+      };
+
+      // The helper creates both files; rows 2..200 are appended directly, which
+      // keeps the mode, so the precondition is a helper-made 0600 file at the cap.
+      append('row-1', 1);
+      const rest = Array.from({ length: 199 }, (_, i) =>
+        JSON.stringify({ role: 'user', content: `row-${i + 2}`, ts: i + 2 }) + '\n').join('');
+      for (const q of [mem, learning]) {
+        fs.appendFileSync(q, rest);
+        expect(rowsOf(q), `${path.basename(q)} must sit at the cap before the trim`).toBe(200);
+        expect(modeOf(q), `${path.basename(q)} must start at 0600`).toBe('600');
+      }
+
+      append('row-201', 201);
+
+      for (const q of [mem, learning]) {
+        const rows = readJsonl(q);
+        expect(rows, `${path.basename(q)} must have been trimmed`).toHaveLength(100);
+        expect(rows[rows.length - 1].content).toBe('row-201');
+        expect(modeOf(q), `${path.basename(q)} must keep 0600 after the trim`).toBe('600');
+      }
+      expect(fs.readdirSync(tmpDir).sort(), 'no temporary copy or lock is left behind').toEqual(['learning.jsonl', 'mem.jsonl']);
+    });
   });
 
   describe('degraded no-jq path (node fallback)', () => {
