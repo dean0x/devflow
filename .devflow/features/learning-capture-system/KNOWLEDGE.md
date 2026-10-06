@@ -1,13 +1,14 @@
 ---
 feature: learning-capture-system
 name: Learning capture system
-description: "Use when modifying the learning store (hooks/lib/learning-store.cjs) or any json-helper learning op (put-observation, list, show, claim-due, claim-queue, release-claim, assign-anchor, refresh-anchor, retire-anchor, restore-anchor, rotate-observations), the v2 observation and ledger schema or its limits, the decisions log, ledger, history, rejected and pre-v2 files, the rendered decisions.md, pitfalls.md and index.md (v2 body, Inactive table, TL;DR count), the Learning agent (src/assets/agents/learning.md), the owned queue claim and its heartbeat, the devflow learning CLI (--status, --list, --show, --restore, --clear, --reset), how commands, the Code agent and the orchestrator charter load DECISIONS_CONTEXT from the main worktree, the capture hooks (capture-prompt/capture-turn/capture-question/queue-append), the learning or memory pending-turns queues, the session-start-context learning (TL;DR, Index line, LEARNING MAINTENANCE) or tracker-setup directives, the machine-wide feature switches (memory/learning/knowledge in ~/.devflow/manifest.json), the per-repo tracker override in .devflow/config.json, the learning tuning config, or the memory worker. Keywords: learning-store, learning-store.cjs, withDecisionsLock, .decisions.lock, put-observation, observation, claim-due, claim-queue, release-claim, assign-anchor, refresh-anchor, retire-anchor, restore-anchor, rotate-observations, decisions-log, decisions-ledger, decisions-history, rejected.jsonl, pre-v2, schema 2, ledger registry, quarantine, verify ref, due selection, integrity flags, last_verified, last_attempt, Inactive table, TL;DR, index.md, render-decisions, decisions-format, formatEntryBodyV2, DECISIONS_CONTEXT, decisions_locate, decisions_load, apply-decisions, orchestrator charter, Learning agent, LEARNING MAINTENANCE, LEARNING PAUSED, heartbeat, .pending-turns.processing, .pending-turns.owner, D-OWNED-CLAIM, clearUnreferenced, resetLearning, LEARNING_STORE_SURFACE, loadLearningStore, capture-prompt, capture-turn, capture-question, queue-append, pending-turns, queue_read_gates, memory-worker, TRACKER SETUP, TRACKER_PROCESSING_STALE_SECS, tracker-section-max-chars, .tracker.{provider}.attempts, .tracker.enabled, .tracker.processing, DEVFLOW_BG_UPDATER, learning-lock, isMachineFeatureOn, readMachineFeature, writeMachineFeature, feature-switch, manifest.json, RETIRED_CONFIG_KEYS, feature-config, learning.json, staged-write CAS, WORKING-MEMORY.md.new, verify_and_swap, compute_commits_since_note, is-hex-sha."
+description: "Use when modifying the learning store (hooks/lib/learning-store.cjs) or any json-helper learning op (put-observation, list, show, claim-due, claim-queue, release-claim, assign-anchor, refresh-anchor, retire-anchor, restore-anchor, rotate-observations), the v2 observation and ledger schema or its limits, the decisions log, ledger, history, rejected and pre-v2 files, the rendered decisions.md, pitfalls.md and index.md (v2 body, Inactive table, TL;DR count), the Learning agent (src/assets/agents/learning.md), the owned queue claim and its heartbeat, the devflow learning CLI (--status, --list, --show, --restore, --clear, --reset), how commands, the Code agent and the orchestrator charter load DECISIONS_CONTEXT from the main worktree, the capture hooks (capture-prompt/capture-turn/capture-question/queue-append), the learning or memory pending-turns queues, the session-start-context learning (TL;DR, Index line, LEARNING MAINTENANCE) or tracker-setup directives, the machine-wide feature switches (memory/learning/knowledge in ~/.devflow/manifest.json), the per-repo tracker override in .devflow/config.json, the learning tuning config, the memory worker, the pre-compact backup (backup.json) and its read at session start, the jq-less JSON fallback (the json-parse wrappers over json-helper's generic ops), or the Skim agent's decisions TL;DR. Keywords: learning-store, learning-store.cjs, withDecisionsLock, .decisions.lock, put-observation, observation, claim-due, claim-queue, release-claim, assign-anchor, refresh-anchor, retire-anchor, restore-anchor, rotate-observations, decisions-log, decisions-ledger, decisions-history, rejected.jsonl, pre-v2, schema 2, ledger registry, quarantine, verify ref, due selection, integrity flags, last_verified, last_attempt, Inactive table, TL;DR, index.md, render-decisions, decisions-format, formatEntryBodyV2, DECISIONS_CONTEXT, decisions_locate, decisions_load, apply-decisions, orchestrator charter, Learning agent, LEARNING MAINTENANCE, LEARNING PAUSED, heartbeat, .pending-turns.processing, .pending-turns.owner, D-OWNED-CLAIM, clearUnreferenced, resetLearning, LEARNING_STORE_SURFACE, loadLearningStore, capture-prompt, capture-turn, capture-question, queue-append, pending-turns, queue_read_gates, memory-worker, TRACKER SETUP, TRACKER_PROCESSING_STALE_SECS, tracker-section-max-chars, .tracker.{provider}.attempts, .tracker.enabled, .tracker.processing, DEVFLOW_BG_UPDATER, learning-lock, isMachineFeatureOn, readMachineFeature, writeMachineFeature, feature-switch, manifest.json, RETIRED_CONFIG_KEYS, feature-config, learning.json, staged-write CAS, WORKING-MEMORY.md.new, verify_and_swap, compute_commits_since_note, is-hex-sha, pre-compact-memory, session-start-memory, backup.json, D-BACKUP-RENAME, noclobber, mode 0600, json-parse, json_field_file, jq-less fallback, get-field, extract-cwd-field, backup-construct, Skim agent."
 category: architecture
 directories:
   - src/assets/scripts/hooks
   - src/assets/scripts/hooks/assets/orchestrator-charter.md
   - src/assets/agents/learning.md
   - src/assets/agents/tracker.md
+  - src/assets/agents/skim.md
   - src/assets/commands/_partials/_decisions.mds
   - src/assets/skills/apply-decisions/SKILL.md
   - src/cli/commands/learning.ts
@@ -22,7 +23,7 @@ directories:
   - src/core/project-paths.ts
   - src/hud/components/learning-counts.ts
 created: 2026-07-15
-updated: 2026-10-06
+updated: 2026-10-07
 ---
 
 # Learning Capture System
@@ -102,7 +103,7 @@ Hooks resolve roots from git, never from cwd. `df_resolve_roots` (`resolve-proje
 
 ### The ops (json-helper.cjs)
 
-Each runs as `cd "<root>" && node "$HOME/.devflow/scripts/hooks/json-helper.cjs" <op> …` from the project root and takes **no path**: every file path is built from the cwd. argv carries only shape-gated tokens (type, anchor `^(ADR|PF)-\d{3,}$`, observation id, status, flags, the 16-hex claim token). Text arrives as one JSON object on stdin (≤65,536 bytes, read from fd 0). Exit 0 means the op did what stdout says; exit 1 means empty stdout and the reason on stderr, with nothing written (no lock left, no quarantine, no backup, no history). A multi-problem refusal reads `<op>: the input has <N> problems; nothing was written` then one `  <field>: <message>` per problem. Every learning op except `claim-queue` and `release-claim` sends the claim heartbeat first. The same file serves the hooks' jq-less fallback (`get-field`, `compact`, `slurp-cap`, …), which loads no learning module and sends no heartbeat; `json_field_file` and `json_slurp_cap` feed files on stdin because no op takes a path.
+Each runs as `cd "<root>" && node "$HOME/.devflow/scripts/hooks/json-helper.cjs" <op> …` from the project root and takes **no path**: every file path is built from the cwd. argv carries only shape-gated tokens (type, anchor `^(ADR|PF)-\d{3,}$`, observation id, status, flags, the 16-hex claim token). Text arrives as one JSON object on stdin (≤65,536 bytes, read from fd 0). Exit 0 means the op did what stdout says; exit 1 means empty stdout and the reason on stderr, with nothing written (no lock left, no quarantine, no backup, no history). A multi-problem refusal reads `<op>: the input has <N> problems; nothing was written` then one `  <field>: <message>` per problem. Every learning op except `claim-queue` and `release-claim` sends the claim heartbeat first. The same file serves the hooks' jq-less fallback through five generic ops (see Generic ops below), which load no learning module and send no heartbeat.
 
 ```bash
 # Text reaches an op only on stdin, through a QUOTED heredoc, so the shell expands nothing in it
@@ -140,6 +141,13 @@ The shape is the op contract: the whole content every time, ids and statuses on 
 - **`restore-anchor <anchor>`**: an inactive entry becomes active with its type's status and loses `status_note`, `superseded_by`, `encoded_at`, `retired_on`, `last_verified` and `last_attempt`, so the next `claim-due` hands it out ahead of every verified entry; content and `date` stay. Prints `restored <anchor>`.
 - **`rotate-observations`** (D-ROTATE-UNREFERENCED) prints `rotated <N> observations` (always plural). Under the lock it deletes leftover `.decisions-usage.json` and `.decisions-usage.lock/`, then archives each log row that no ledger row carries (a log row's own status or copied `anchor_id` is ignored) once its last activity (`last_seen`, else `first_seen`, else `created`) is at least 30 days old; an unparseable date keeps the row. An archived row is appended unless an identical JSON line is already there, then the log is rewritten without it; backup and log quarantine happen only when rows are due. Only the ledger knows what is promoted, and a dedup by id would drop the newer version of a row whose older one is already archived.
 - **`claim-queue`** and **`release-claim <token>`**: see the claim below.
+
+**Generic ops (the hooks' jq-less fallback).** `hooks/json-parse` is the JSON seam the shell hooks source: each wrapper runs `jq` when it is installed and otherwise one generic op on `node`, and with neither tool `_JSON_AVAILABLE` is false, the flag a hook checks after sourcing before it calls a wrapper. The ops are exactly `get-field` (behind `json_field` and `json_field_file`), `extract-cwd-field` (`json_extract_cwd_field`, and `json_extract_cwd_prompt` over it), `session-output` (`json_session_output`), `prompt-output` (`json_prompt_output`) and `backup-construct` (`json_backup_construct`).
+
+- **Silent where jq is.** Where a jq path discards stderr (`json_field`, `json_field_file`, `json_extract_cwd_field`), its node fallback does too, so input that cannot be parsed fails silently on either backend, with a failing status. `json_field_file` redirects stderr BEFORE stdin (`2>/dev/null < "$file"`), so the shell's own error for a file it cannot open is discarded as well. The three envelope wrappers (`json_session_output`, `json_prompt_output`, `json_backup_construct`) keep stderr on both backends.
+- **Failure is a status, not a message.** An unparseable or missing file gives a failing status and no message, so a caller that must survive it, or must not trust partial output (jq prints each value it parsed before the one that failed), checks the status. A `set -e` hook guards the call (`session-start-memory` does for its backup read, see the memory worker below).
+- **Files arrive on stdin.** No op takes a path, so `json_field_file` feeds its file on stdin to `get-field`.
+- **`backup-construct` reads `--arg name value` pairs only** (`ts`, `branch`, `status`, `log`, `diff`, `memory`), the shape `pre-compact-memory` passes.
 
 ### One lock, no stray tree
 
@@ -233,7 +241,7 @@ A thin router (status, list, show, configure, reset, clear, restore, enable, dis
 
 ### Capture hooks and the queues
 
-All three hooks source `queue-append` and call `queue_append_both`, gating each write by `_QG_MEMORY` / `_QG_LEARNING` from one `queue_read_gates "$DEVFLOW_MANIFEST" "$PROJECT_ROOT"` call (at most one fork per invocation, none when the fast paths settle it; `$DEVFLOW_MANIFEST` is `$HOME/.devflow/manifest.json`, D-ONE-HOME). They only append: no scanner runs and no background worker starts. In order: (1) the `DEVFLOW_BG_UPDATER=1` re-entrancy guard before `hook-bootstrap`, so the memory worker's own `claude -p` session is never captured; (2) the one gate fork; (3) JSONL append via `jq` or `node JSON.stringify`, never string concatenation, `umask 077`, lock-free by design; (4) overflow guard: over 200 lines truncates to the newest 100 under `learning_lock_acquire "<queue>.lock"` (2 s wait, stale after 30 s). `capture-question` emits one `qa` row per answered question, joining `cwd` and field with ASCII SOH.
+All three hooks source `queue-append` and call `queue_append_both`, gating each write by `_QG_MEMORY` / `_QG_LEARNING` from one `queue_read_gates "$DEVFLOW_MANIFEST" "$PROJECT_ROOT"` call (at most one fork per invocation, none when the fast paths settle it; `$DEVFLOW_MANIFEST` is `$HOME/.devflow/manifest.json`, D-ONE-HOME). They only append: no scanner runs and no background worker starts. In order: (1) the `DEVFLOW_BG_UPDATER=1` re-entrancy guard before `hook-bootstrap`, so the memory worker's own `claude -p` session is never captured; (2) the one gate fork; (3) JSONL append via `jq` or `node JSON.stringify`, never string concatenation, `umask 077`, lock-free by design; (4) overflow guard: over 200 lines truncates to the newest 100 under `learning_lock_acquire "<queue>.lock"` (2 s wait, stale after 30 s). The newest-100 copy is created under `umask 077` and renamed over the queue, so both queues keep mode 0600 through a trim: the rename gives the queue the copy's inode and mode whatever umask the hook inherited, and a `chmod` after it would leave a window. `capture-question` emits one `qa` row per answered question, joining `cwd` and field with ASCII SOH.
 
 | What | File | Contains |
 |---|---|---|
@@ -261,6 +269,7 @@ All three hooks source `queue-append` and call `queue_append_both`, gating each 
 - `_preamble.mds` imports the module as `decisions` and calls `decisions_locate()` for the four dynamic commands; `_engine.mds` passes the loaded index to Code.
 - `commands/release.md` Phase 1b carries the locate text word for word (a test pins it to the define body).
 - `agents/code.md` reads the main worktree's index itself when no `DECISIONS_CONTEXT` is given, and states applied decisions in words, never by ID.
+- `agents/skim.md` Step 6 reads the decisions TL;DR (the first line of `{ledger}/.devflow/learning/decisions.md`, `<!-- TL;DR: N decisions -->`, reported as the active decision count) and nothing else of the file. An agent has no MDS partial, so Step 6 spells the locate rule out in prose: the same one `git -C "{start}" rev-parse --path-format=absolute --show-toplevel --git-common-dir` from `WORKTREE_PATH` or the cwd, then the main worktree, else the toplevel, else `{start}`. A linked worktree therefore reports the main worktree's count; `tests/decisions/command-adoption.test.ts` pins the three tiers in order.
 - The charter bullet tells the main model to pass the index named under PROJECT DECISIONS as `DECISIONS_CONTEXT` on direct delegations (charter capped at 3,072 characters).
 - The `apply-decisions` skill documents both index line kinds and the v2 body; its Skip Guard treats an index an agent's own instructions tell it to read as that agent's `DECISIONS_CONTEXT`.
 
@@ -274,7 +283,16 @@ All three hooks source `queue-append` and call `queue_append_both`, gating each 
 
 `cksum` must be on PATH or the worker exits; a `cksum` failure on the target forces `conflict`; stale staged files are cleaned at the start of each run.
 
+A leftover `.pending-turns.processing` (a crashed run's batch) takes the waiting queue merged into it and, over 200 lines, is trimmed to the newest 100 through a copy created under `umask 077` and renamed over it, so the batch stays 0600 like the queue: the session-start cold path moves a stale batch back into the queue, which would otherwise carry the copy's wider mode.
+
 **D-QUEUE-NO-ORPHAN-DELETE.** Claude Code runs one event's hooks in PARALLEL, so the worker can start after `capture-prompt` appended the user row and before `capture-turn` appends the assistant row. A queue with no `assistant`/`qa` row exits with no LLM run and is LEFT in place; the next run takes the whole turn. `compute_commits_since_note()` yields five exact outcome literals that are a test contract (no-stamp full-synthesis, invalid-SHA-format, SHA-not-ancestor-of-HEAD, none-current-as-of-HEAD, `N commit(s)… (showing newest 20)`, subjects `%.100s`). The four untrusted data blocks are wrapped in named XML tags under a DATA-not-instructions preamble, and the prompt goes by heredoc stdin, never argv. `is_hex_sha <value> [min=7] [max=40]` is sourced with no forks (pre-compact uses 40–40); `pre-compact-memory` bootstraps `WORKING-MEMORY.md` noclobber-atomically only for a full SHA, labelling a detached HEAD `(detached)`; `session-start-memory`'s `detect_refresh_failing()` counts both `.pending-turns.jsonl` and `.pending-turns.processing`.
+
+**D-BACKUP-RENAME (the pre-compact backup).** `pre-compact-memory` writes `.devflow/memory/backup.json` (timestamp, branch, status, log, diff stat and a snapshot of `WORKING-MEMORY.md`) whole into `backup.json.tmp.<pid>` and renames it over the old backup; it never truncates and refills the file in place, because `session-start-memory` reads the backup twice and a read landing between the truncate and the refill would meet a partial file. A rename hands every read the previous backup or the new one.
+
+- **Created safely.** The copy is made in a subshell under `umask 077` and `set -o noclobber`, so neither setting reaches the rest of the hook and the create fails when anything, a file or a symlink, already holds the copy's name: the write never goes through a symlink and never reuses a pre-existing 0644 file. The rename gives `backup.json` the copy's inode and mode, so the backup, which holds the working memory, is 0600 whatever the caller's umask.
+- **A failed write keeps the old backup.** A write or rename that fails logs `Backup not written; the previous one is kept`, removes whatever holds the copy's name and carries on, so the `WORKING-MEMORY.md` bootstrap below it still runs.
+- **Leftover copies expire.** A run killed between creating its copy and renaming it (the hook's timeout) leaves the copy under its own PID, a name no later run writes. Each run first deletes the regular files named `backup.json.tmp.*` in the memory directory that are over an hour old (`find -maxdepth 1 -type f -mmin +60`); a write ends within the hook's timeout, so no live run's copy is that old and a concurrent run's copy survives.
+- **The reader treats a bad backup as no backup.** `session-start-memory` reads `memory_snapshot` first, then `timestamp`. Under `set -e` a failed `json_field_file` would end the hook before it prints the working memory built above, so the first read is guarded (`|| BACKUP_MEMORY=""`): a backup that does not parse reads as no snapshot, like an absent one, and whatever jq printed before it failed is discarded. The `timestamp` read runs only once the first has parsed the whole file, so it needs no guard.
 
 ### Hook ownership, init and logs
 
@@ -291,7 +309,7 @@ All three hooks source `queue-append` and call `queue_append_both`, gating each 
 
 ## Constraints
 
-Every loop and read has a bound: 100 cited-number skips, a 200,000-entry fallback walk, files over 5 MB skipped, 5 due entries and 61,440 bytes, 3 history versions, 64 KiB of stdin, a 5 s git timeout and 16 MB git buffer, lock waits of 30 s (2 s for the queue lock, 5 s from the CLI). Paths: no op takes one; every git call in the store goes through its one `git(root, args)` wrapper, whose body prepends `['-c', 'core.fsmonitor=false', …]` (**D-NO-FSMONITOR**: an index read runs the command a repository's `core.fsmonitor` names; the guard honours a wrapper only when its own body prepends the override, so a new call outside it must spell the override); appends and the claim heartbeat refuse symlinks (O_NOFOLLOW, `lutimes`), `--reset` refuses a learning directory that is itself a symlink, and the cited-number scan opens files with O_NOFOLLOW and O_NONBLOCK.
+Every loop and read has a bound: 100 cited-number skips, a 200,000-entry fallback walk, files over 5 MB skipped, 5 due entries and 61,440 bytes, 3 history versions, 64 KiB of stdin, a 5 s git timeout and 16 MB git buffer, lock waits of 30 s (2 s for the queue lock, 5 s from the CLI). Paths: no op takes one; every git call in the store goes through its one `git(root, args)` wrapper, whose body prepends `['-c', 'core.fsmonitor=false', …]` (**D-NO-FSMONITOR**: an index read runs the command a repository's `core.fsmonitor` names; the guard honours a wrapper only when its own body prepends the override, so a new call outside it must spell the override); the store's appends and the claim heartbeat refuse symlinks (O_NOFOLLOW, `lutimes`; the capture hooks' shell appends do not, see Gotchas), `--reset` refuses a learning directory that is itself a symlink, and the cited-number scan opens files with O_NOFOLLOW and O_NONBLOCK.
 
 | D-series name | Governs | Site |
 |---|---|---|
@@ -313,6 +331,7 @@ Every loop and read has a bound: 100 cited-number skips, a 200,000-entry fallbac
 | D-NO-FSMONITOR | no repository-chosen code on index reads | full block at `listGitTrackedFiles`; guard `no-fsmonitor-index-read` |
 | D-LEARNING-STORE-SEAM | the CLI touches ledger state only through the store, loaded by the seam | `src/core/learning-store.ts` |
 | D-V1-BYTE-STABLE | v1 rows render unchanged | `buildBodyBlocks` (render-decisions) |
+| D-BACKUP-RENAME | the pre-compact backup is replaced by a rename, never rewritten in place | `pre-compact-memory` |
 | D201, D309 | status-list parity, HUD count | `src/core/observations.ts`, `LedgerCountRow` in the HUD |
 
 ## Anti-Patterns
@@ -329,6 +348,8 @@ Every loop and read has a bound: 100 cited-number skips, a 200,000-entry fallbac
 - **Reading feature flags with two separate calls**: use `queue_read_gates` (one fork). Never read or write top-level `.devflow/config.json` keys for on/off state, omit `<root>` from a `queue_read_gates` call, or resolve the manifest from the project root (the gate then fails open).
 - **Skipping the model allowlist in `session-start-context`**, or omitting the `DEVFLOW_BG_UPDATER=1` guard from a capture hook.
 - **Simulating a missing shell tool by subtracting it from `PATH`** in a hook test: force a backend with a variable (`_HAS_JQ=false`).
+- **Trimming or rewriting a 0600 queue, batch or backup through a copy made under the caller's umask**: the rename gives the file the copy's inode and mode, and a hook inherits its parent's umask (typically 022), so a 0600 file turns 0644. Create the copy under `umask 077`; a `chmod` after the `mv` leaves a window.
+- **Rewriting `backup.json` in place** (truncate, then refill): `session-start-memory` reads it twice, and a read between the two meets a partial file. Write a complete copy and rename it.
 
 ## Gotchas
 
@@ -338,9 +359,9 @@ Every loop and read has a bound: 100 cited-number skips, a 200,000-entry fallbac
 - **`claim-due` leases for 24 h** and a second call in one run hands out different entries; treat each line as that run's work list.
 - **900 s is two literals** (`CLAIM_STALE_SECS` and the hook's `PROCESSING_STALE_SECS`); change both. The Tracker's 600 is separate.
 - **Empty corpus**: `index.md` is `(none)`; consumers treat `(none)` and empty as absent. The TL;DR is plural for one (`1 decisions`).
-- **The Skim agent reads `decisions.md`'s TL;DR relative to its own cwd**, not through the main-worktree rule, so a linked worktree can show none.
 - **The legacy key wins only when the renamed key is not a boolean** (`"decisions": false` with no `"learning"` switches learning off).
 - **The learning queue is not always under the session's own root**: in a linked worktree it is the main worktree's (`DF_LEDGER_ROOT`); tests seeding a queue for a worktree session must seed main's.
+- **The capture hooks append through a symlink.** `queue_append_row` appends with `>>` (the `jq` and the `node` variant alike), which follows a link, and nothing guards these writes against a symlink anywhere under `.devflow/`: a queue path swapped for a link is appended through to its target. The store's appends (O_NOFOLLOW) and the claim heartbeat refuse links, but the shell hooks do not inherit that, so the store's refusal never counts as covering them. This is a known gap, not a design choice, and it is left to a separate issue.
 - **Section 3 is not gated by the learning toggle**; disabling learning does not disable the issue tracker.
 - **CAS conflict heartbeat-touches `.processing`**: removing that touch lets the cold path reclaim a live retry batch after 300 s. The orphan gate skips when `.processing` already exists.
 - **`is_hex_sha` bounds are call-site specific**; the `json_extract_cwd_field` SOH delimiter must be `\x01` in both the jq and node paths; a detached HEAD bootstraps with the `(detached)` label.
@@ -353,7 +374,8 @@ Every loop and read has a bound: 100 cited-number skips, a 200,000-entry fallbac
 | File | Purpose |
 |------|---------|
 | `src/assets/scripts/hooks/lib/learning-store.cjs` | The store: schema, validation, projection, locking, every writer and reader |
-| `src/assets/scripts/hooks/json-helper.cjs` | Op dispatcher: `learning()` lazy load, `emit`, `readStdinJson`, `LEARNING_OPS`, heartbeat; exports nothing |
+| `src/assets/scripts/hooks/json-helper.cjs` | Op dispatcher: `learning()` lazy load, `emit`, `readStdinJson`, `LEARNING_OPS`, heartbeat, the five generic ops; exports nothing |
+| `src/assets/scripts/hooks/json-parse` | jq-first JSON wrappers; their node fallbacks run the generic ops, silent on stderr where the jq path is |
 | `src/assets/scripts/hooks/lib/render-decisions.cjs` | Renderer, `renderLearningFiles`, `render`/`--check` CLI |
 | `src/assets/scripts/hooks/lib/decisions-format.cjs` | v1 formatters (byte-stable), v2 body, Inactive table, TL;DR, index builder |
 | `src/assets/scripts/hooks/lib/project-paths.cjs` · `src/core/project-paths.ts` | Path single source, export parity pinned by a test |
@@ -361,10 +383,11 @@ Every loop and read has a bound: 100 cited-number skips, a 200,000-entry fallbac
 | `src/assets/scripts/hooks/capture-prompt` · `capture-turn` · `capture-question` · `queue-append` · `learning-lock` | Capture hooks, shared append, overflow truncation, queue lock |
 | `src/assets/scripts/hooks/session-start-context` | Sections 1 to 4 |
 | `src/assets/scripts/hooks/resolve-project-root` · `git-marker` · `ensure-devflow-init` | Roots, git-only gate, scaffolding |
-| `src/assets/scripts/hooks/memory-worker` · `background-memory-update` · `pre-compact-memory` · `session-start-memory` · `is-hex-sha` | Memory pipeline |
+| `src/assets/scripts/hooks/memory-worker` · `background-memory-update` · `pre-compact-memory` · `session-start-memory` · `is-hex-sha` | Memory pipeline; `pre-compact-memory` writes `backup.json` by rename, `session-start-memory` reads it |
 | `src/assets/scripts/hooks/log-paths` · `src/core/hook-log-dirs.ts` | Log folder cap |
 | `src/assets/scripts/hooks/assets/orchestrator-charter.md` | Charter bullet that forwards the decisions index |
 | `src/assets/agents/learning.md` · `tracker.md` | The two hook-spawned agents |
+| `src/assets/agents/skim.md` | Step 6 reads the decisions TL;DR through the main-worktree locate rule |
 | `src/assets/commands/_partials/_decisions.mds` | `decisions_locate()` and `decisions_load()` |
 | `src/assets/skills/apply-decisions/SKILL.md` | Consumer algorithm, both index line kinds, v2 body |
 | `src/cli/commands/learning.ts` | `devflow learning` |
@@ -378,6 +401,7 @@ Every loop and read has a bound: 100 cited-number skips, a 200,000-entry fallbac
 | `src/targets/claude-code/hooks.ts` | `devflowHookOwner`, `removeHooks`, `ensureHook` |
 | `tests/decisions/learning-fixtures.ts` | Row factories, `seedLearningTree`, `initGitRepo`, `runJsonHelper`, `requireLearningStore` |
 | `tests/decisions/learning-claim.test.ts` · `learning-store.test.ts` · `tests/learning-agent.test.ts` | Claim, store and prompt pins (including the 900 s lockstep) |
+| `tests/queue-append.test.ts` · `tests/eager-memory-refresh.test.ts` · `tests/shell-hooks.test.ts` | Queue and batch trims keep 0600, the backup rename arms, the json-parse fallbacks' silence |
 | `tests/seams/tracker-key-path.test.ts` · `tracker-claim-staleness.test.ts` | Tracker key-path parity and the shared claim-staleness bound |
 
 ## Related
