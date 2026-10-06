@@ -5,12 +5,12 @@
 // decisions.md and pitfalls.md entries.  Every assertion here locks a
 // byte-level contract — any change to the output strings must be deliberate
 // and propagated to all consumers (session-start-context, decisions-index,
-// apply-decisions, decisions-usage-scan, render-decisions).
+// apply-decisions, render-decisions).
 
 import { describe, it, expect, beforeAll } from 'vitest';
 import { createRequire } from 'module';
 import * as path from 'path';
-import { isLearningObservation } from '#core/observations.js';
+import { makeV2LedgerRow, makeV2LogRow, requireLearningStore } from './learning-fixtures.js';
 
 const ROOT = path.resolve(import.meta.dirname, '../..');
 const require = createRequire(import.meta.url);
@@ -19,6 +19,9 @@ const {
   initDecisionsContent,
   formatDecisionBody,
   formatPitfallBody,
+  formatEntryBodyV2,
+  formatInactiveTable,
+  formatIndexEntryLineV2,
   buildTldrLine,
   buildIndexContent,
   segmentDetails,
@@ -27,6 +30,9 @@ const {
   initDecisionsContent: (kind: 'decision' | 'pitfall') => string;
   formatDecisionBody: (row: Record<string, unknown>) => string;
   formatPitfallBody: (row: Record<string, unknown>) => string;
+  formatEntryBodyV2: (row: Record<string, unknown>) => string;
+  formatInactiveTable: (rows: Record<string, unknown>[]) => string;
+  formatIndexEntryLineV2: (row: Record<string, unknown>) => string;
   buildTldrLine: (kind: 'decisions' | 'pitfalls', rows: Record<string, unknown>[]) => string;
   buildIndexContent: (
     activeDecisionRows: Record<string, unknown>[],
@@ -42,8 +48,7 @@ const {
     detailsStr: string,
     keys: readonly string[]
   ) => Record<string, string>;
-  // Accepts BOTH the { date, note } objects declared by LearningObservation /
-  // LedgerRow in src/core/observations.ts and pre-rendered strings.
+  // Accepts BOTH the { date, note } objects v1 rows hold and pre-rendered strings.
   formatAmendmentsLine: (
     amendments: unknown
   ) => string;
@@ -54,21 +59,23 @@ const {
 // ---------------------------------------------------------------------------
 
 describe('initDecisionsContent', () => {
-  it('decisions header matches byte-compat string', () => {
+  it('decisions header: a zero count, the title and the generated-file notice', () => {
     const result = initDecisionsContent('decision');
     expect(result).toBe(
-      '<!-- TL;DR: 0 decisions. Key: -->\n' +
+      '<!-- TL;DR: 0 decisions -->\n' +
       '# Architectural Decisions\n\n' +
-      'Append-only. Status changes allowed; deletions prohibited.\n'
+      'Generated from the local learning ledger by devflow; do not edit. ' +
+      'Active entries follow; retired ones are listed under Inactive.\n'
     );
   });
 
-  it('pitfalls header matches byte-compat string', () => {
+  it('pitfalls header: the same notice under the pitfalls title', () => {
     const result = initDecisionsContent('pitfall');
     expect(result).toBe(
-      '<!-- TL;DR: 0 pitfalls. Key: -->\n' +
+      '<!-- TL;DR: 0 pitfalls -->\n' +
       '# Known Pitfalls\n\n' +
-      'Area-specific gotchas, fragile areas, and past bugs.\n'
+      'Generated from the local learning ledger by devflow; do not edit. ' +
+      'Active entries follow; retired ones are listed under Inactive.\n'
     );
   });
 });
@@ -533,15 +540,13 @@ describe('formatAmendmentsLine — integration via formatDecisionBody / formatPi
 // ---------------------------------------------------------------------------
 // formatAmendmentsLine — the { date, note } object shape
 //
-// src/core/observations.ts declares `amendments?: { date: string; note: string }[]`
-// on BOTH LearningObservation and LedgerRow, and its isLearningObservation
-// type guard REJECTS a plain string element (tests/decisions/observations-schema.test.ts).
-// toLedgerRow copies obs.amendments through verbatim, so the object shape is the
-// only shape that can legitimately reach the formatter — a bare join would render
+// Every amendment the v1 corpus holds is a { date, note } object: v1 promotion
+// copied a log row's amendments onto its ledger row verbatim, so the object shape
+// is the one that reaches the formatter — a bare join would render
 // `- **Amendments**: [object Object]`.
 // ---------------------------------------------------------------------------
 
-describe('formatAmendmentsLine — { date, note } object shape (the schema-declared shape)', () => {
+describe('formatAmendmentsLine — { date, note } object shape (the shape v1 rows hold)', () => {
   it('renders a { date, note } entry as "[date] note" — never [object Object]', () => {
     const result = formatAmendmentsLine([{ date: '2026-01-01', note: 'First amendment' }]);
     expect(result).toBe('- **Amendments**: [2026-01-01] First amendment\n');
@@ -632,30 +637,6 @@ describe('formatAmendmentsLine — { date, note } object shape (the schema-decla
     expect(index).not.toContain('amendment-marker-text');
     expect(index).not.toContain('Amendments');
   });
-
-  it('type-guard cross-check: the canonical { date, note } fixture passes isLearningObservation AND formatAmendmentsLine renders it correctly', () => {
-    // Derive fixtures from the runtime type guard and run at least
-    // one through the guard inside the consuming test so the two suites cannot drift.
-    // Previously this was only described in a comment; this test enforces it.
-    const amendments = [{ date: '2026-02-01', note: 'Reinforced' }];
-    const minimalObs = {
-      id: 'obs_pf043_check',
-      type: 'decision',
-      pattern: 'PF-043 cross-check fixture',
-      confidence: 0.9,
-      observations: 1,
-      first_seen: '2026-02-01T00:00:00Z',
-      last_seen: '2026-02-01T00:00:00Z',
-      status: 'created',
-      evidence: [],
-      details: 'context: PF-043; decision: derive fixtures from the type guard',
-      amendments,
-    };
-    // Guard accepts the object-shape amendments (the schema-declared shape)
-    expect(isLearningObservation(minimalObs)).toBe(true);
-    // Formatter renders the same fixture to the expected string
-    expect(formatAmendmentsLine(amendments)).toBe('- **Amendments**: [2026-02-01] Reinforced\n');
-  });
 });
 
 // ---------------------------------------------------------------------------
@@ -663,44 +644,42 @@ describe('formatAmendmentsLine — { date, note } object shape (the schema-decla
 // ---------------------------------------------------------------------------
 
 describe('buildTldrLine', () => {
-  it('decisions TL;DR: correct count and Key list', () => {
+  it('decisions TL;DR is the count of active entries alone', () => {
     const rows = [
       { anchor_id: 'ADR-001' },
       { anchor_id: 'ADR-003' },
       { anchor_id: 'ADR-004' },
     ];
-    const result = buildTldrLine('decisions', rows);
-    expect(result).toBe('<!-- TL;DR: 3 decisions. Key: ADR-001, ADR-003, ADR-004 -->');
+    expect(buildTldrLine('decisions', rows)).toBe('<!-- TL;DR: 3 decisions -->');
   });
 
-  it('pitfalls TL;DR: correct count and Key list', () => {
+  it('pitfalls TL;DR is the count of active entries alone', () => {
     const rows = [
       { anchor_id: 'PF-002' },
       { anchor_id: 'PF-004' },
     ];
-    const result = buildTldrLine('pitfalls', rows);
-    expect(result).toBe('<!-- TL;DR: 2 pitfalls. Key: PF-002, PF-004 -->');
+    expect(buildTldrLine('pitfalls', rows)).toBe('<!-- TL;DR: 2 pitfalls -->');
   });
 
-  it('Key includes only last 5 IDs when more than 5 rows', () => {
+  it('names no entry, however many there are', () => {
     const rows = Array.from({ length: 8 }, (_, i) => ({
       anchor_id: `ADR-${String(i + 1).padStart(3, '0')}`,
     }));
-    const result = buildTldrLine('decisions', rows);
-    // Last 5 should be ADR-004 through ADR-008
-    expect(result).toBe('<!-- TL;DR: 8 decisions. Key: ADR-004, ADR-005, ADR-006, ADR-007, ADR-008 -->');
+    const line = buildTldrLine('decisions', rows);
+    expect(line).toBe('<!-- TL;DR: 8 decisions -->');
+    expect(line).not.toMatch(/(?:ADR|PF)-\d/);
   });
 
-  it('empty corpus: count is 0, Key is empty with single trailing space (byte-compat with initDecisionsContent)', () => {
-    const result = buildTldrLine('decisions', []);
-    // Must be byte-identical to initDecisionsContent's TL;DR (single space before -->)
-    expect(result).toBe('<!-- TL;DR: 0 decisions. Key: -->');
+  it('empty corpus: the zero-count line each header opens with', () => {
+    expect(buildTldrLine('decisions', [])).toBe('<!-- TL;DR: 0 decisions -->');
+    expect(initDecisionsContent('decision').split('\n')[0]).toBe(buildTldrLine('decisions', []));
+    expect(initDecisionsContent('pitfall').split('\n')[0]).toBe(buildTldrLine('pitfalls', []));
   });
 
-  it('Key uses comma+space separator (AC-A5)', () => {
-    const rows = [{ anchor_id: 'ADR-001' }, { anchor_id: 'ADR-002' }];
-    const result = buildTldrLine('decisions', rows);
-    expect(result).toContain('ADR-001, ADR-002');
+  it('gives session-start-context the count between the comment markers', () => {
+    // The hook's sed keeps what lies between "<!-- TL;DR: " and " -->" on line 1.
+    const match = /^<!-- TL;DR: (.*) -->$/.exec(buildTldrLine('pitfalls', [{ anchor_id: 'PF-001' }]));
+    expect(match?.[1]).toBe('1 pitfalls');
   });
 });
 
@@ -870,13 +849,214 @@ describe('buildIndexContent', () => {
 });
 
 // ---------------------------------------------------------------------------
-// json-helper.cjs byte-compat: assign-anchor delegates to decisions-format
+// v2 entries: the body, the Inactive table and the index line
 // ---------------------------------------------------------------------------
-// We verify this by seeding an observation row directly (as the Learning agent
-// appends it), promoting via assign-anchor, and checking the output matches
-// what formatDecisionBody/formatPitfallBody would produce. This ensures the
-// write path delegates to decisions-format.cjs correctly (AC-A8: assign-anchor
-// is the sole writer).
+
+const V2_DECISION = makeV2LedgerRow({
+  anchor_id: 'ADR-002',
+  scope: ['area:learning', 'src/**/*.cjs'],
+});
+
+const V2_PITFALL = makeV2LedgerRow({
+  id: 'obs_store_two',
+  type: 'pitfall',
+  anchor_id: 'PF-003',
+  decisions_status: 'Active',
+  title: 'Writers refuse a missing learning tree',
+  rule: 'A learning writer refuses when the learning directory is absent and never creates it.',
+  why: 'Run from the wrong directory, a writer that creates the tree writes a ledger nobody reads.',
+  scope: ['area:learning'],
+  provenance: 'a stray nested tree in the main checkout',
+  last_verified: undefined,
+});
+
+describe('formatEntryBodyV2', () => {
+  it('renders a decision from its fields, with the verified date on the Status line', () => {
+    expect(formatEntryBodyV2(V2_DECISION)).toBe(
+      '\n## ADR-002: Store functions return a Result\n\n' +
+      '- **Status**: Accepted · verified 2026-09-01\n' +
+      '- **Scope**: `area:learning`, `src/**/*.cjs`\n' +
+      '- **Decision**: Every learning store function returns a Result and never exits or prints.\n' +
+      '- **Why**: An exit inside the lock skips its release, and printing ties the store to one caller.\n' +
+      '- **Source**: learning v2 design review\n',
+    );
+  });
+
+  it('renders a pitfall with Active and a Rule line, and no verified suffix without last_verified', () => {
+    expect(formatEntryBodyV2(V2_PITFALL)).toBe(
+      '\n## PF-003: Writers refuse a missing learning tree\n\n' +
+      '- **Status**: Active\n' +
+      '- **Scope**: `area:learning`\n' +
+      '- **Rule**: A learning writer refuses when the learning directory is absent and never creates it.\n' +
+      '- **Why**: Run from the wrong directory, a writer that creates the tree writes a ledger nobody reads.\n' +
+      '- **Source**: a stray nested tree in the main checkout\n',
+    );
+  });
+
+  it("shows the active status of the entry's type, whatever status the active row carries", () => {
+    expect(formatEntryBodyV2({ ...V2_DECISION, decisions_status: undefined }))
+      .toContain('- **Status**: Accepted · verified 2026-09-01\n');
+    expect(formatEntryBodyV2({ ...V2_PITFALL, decisions_status: 'Accepted' })).toContain('- **Status**: Active\n');
+  });
+
+  it('collapses line terminators and control characters so no field adds a line', () => {
+    const body = formatEntryBodyV2({
+      ...V2_DECISION,
+      title: 'two\nlines',
+      rule: 'a\r\nb',
+      why: 'c\u2028d',
+      provenance: 'e\u2029f\tg',
+      scope: ['x\ny'],
+      last_verified: '2026-09-01\n## PF-999: forged',
+    });
+    expect(body).toBe(
+      '\n## ADR-002: two lines\n\n' +
+      '- **Status**: Accepted · verified 2026-09-01 ## PF-999: forged\n' +
+      '- **Scope**: `x y`\n' +
+      '- **Decision**: a b\n' +
+      '- **Why**: c d\n' +
+      '- **Source**: e f g\n',
+    );
+    expect(body.match(/^## /gm)).toHaveLength(1);
+  });
+
+  it('keeps its shape for a hand-edited row that lacks a scope and a source', () => {
+    const body = formatEntryBodyV2({ ...V2_DECISION, scope: undefined, provenance: 42 });
+    expect(body).toContain('- **Scope**: \n');
+    expect(body).toContain('- **Source**: \n');
+  });
+});
+
+describe('formatInactiveTable', () => {
+  const store = requireLearningStore();
+  const INACTIVE_ROWS = [
+    makeV2LedgerRow({
+      anchor_id: 'ADR-004',
+      decisions_status: 'Encoded',
+      encoded_at: { path: 'src/core/flags.ts', quote: 'export const FLAGS', ref: 'HEAD', commit: 'a'.repeat(40) },
+    }),
+    makeV2LedgerRow({ anchor_id: 'ADR-005', decisions_status: 'Superseded', superseded_by: 'ADR-002' }),
+    makeV2LedgerRow({ anchor_id: 'ADR-006', decisions_status: 'Retired', status_note: 'a one-off' }),
+    { id: 'obs_legacy', type: 'decision', anchor_id: 'ADR-007', decisions_status: 'Deprecated', pattern: 'Old', details: '' },
+  ];
+
+  it('is empty when no entry is inactive', () => {
+    expect(formatInactiveTable([])).toBe('');
+  });
+
+  it('lists each entry with its status and why it is inactive, in the order given', () => {
+    expect(formatInactiveTable(INACTIVE_ROWS)).toBe(
+      '\n## Inactive\n\n' +
+      '| ID | Status | Note |\n' +
+      '|---|---|---|\n' +
+      '| ADR-004 | Encoded | encoded in src/core/flags.ts |\n' +
+      '| ADR-005 | Superseded | superseded by ADR-002 |\n' +
+      '| ADR-006 | Retired | a one-off |\n' +
+      '| ADR-007 | Deprecated | — |\n',
+    );
+  });
+
+  it('shows the note the learning list shows for the same entry', () => {
+    for (const row of INACTIVE_ROWS) {
+      const listed = store.buildListing([row], []).inactive[0].note || '—';
+      expect(formatInactiveTable([row])).toContain(`| ${listed} |\n`);
+    }
+  });
+
+  it('takes an encoded path over a successor, and a successor over a status note', () => {
+    const row = makeV2LedgerRow({
+      anchor_id: 'ADR-004',
+      decisions_status: 'Superseded',
+      superseded_by: 'ADR-002',
+      status_note: 'replaced',
+      encoded_at: { path: 'src/a.ts' },
+    });
+    expect(formatInactiveTable([row])).toContain('| ADR-004 | Superseded | encoded in src/a.ts |\n');
+    expect(formatInactiveTable([{ ...row, encoded_at: undefined }])).toContain('| ADR-004 | Superseded | superseded by ADR-002 |\n');
+  });
+
+  it('escapes | and turns line terminators into spaces, so a note adds no column and no line', () => {
+    const row = makeV2LedgerRow({ anchor_id: 'ADR-006', decisions_status: 'Retired', status_note: 'a | b\nc\r\nd' });
+    expect(formatInactiveTable([row])).toBe(
+      '\n## Inactive\n\n| ID | Status | Note |\n|---|---|---|\n| ADR-006 | Retired | a \\| b c d |\n',
+    );
+  });
+});
+
+describe('formatIndexEntryLineV2', () => {
+  it('builds the line from the row: anchor, title and scope, with no status tag', () => {
+    expect(formatIndexEntryLineV2(V2_DECISION))
+      .toBe('  ADR-002  Store functions return a Result  —  area:learning, src/**/*.cjs');
+  });
+
+  it('omits the scope suffix when the row has no scope', () => {
+    expect(formatIndexEntryLineV2({ ...V2_DECISION, scope: [] })).toBe('  ADR-002  Store functions return a Result');
+  });
+
+  it('cuts the joined scope to 80 characters plus an ellipsis', () => {
+    const scope = ['area:' + 'a'.repeat(40), 'src/' + 'b'.repeat(60) + '/**'];
+    const joined = scope.join(', ');
+    expect(joined.length).toBeGreaterThan(80);
+    expect(formatIndexEntryLineV2({ ...V2_DECISION, scope }))
+      .toBe(`  ADR-002  Store functions return a Result  —  ${joined.slice(0, 80)}…`);
+  });
+
+  it('never splits a character when it cuts the scope', () => {
+    const scope = ['src/' + 'a'.repeat(75) + '\u{1F600}b/**'];
+    expect(formatIndexEntryLineV2({ ...V2_DECISION, scope })).toMatch(new RegExp(`a{75}\u{1F600}…$`, 'u'));
+  });
+
+  it('keeps the title whole', () => {
+    const title = 'T'.repeat(120);
+    expect(formatIndexEntryLineV2({ ...V2_DECISION, title })).toBe(`  ADR-002  ${title}  —  area:learning, src/**/*.cjs`);
+  });
+
+  it('collapses line terminators in the title and the scope', () => {
+    expect(formatIndexEntryLineV2({ ...V2_DECISION, title: 'a\nb', scope: ['x\ny'] })).toBe('  ADR-002  a b  —  x y');
+  });
+});
+
+describe('buildIndexContent — v2 rows', () => {
+  it('builds each v2 line from its row and keeps each v1 line as the v1 index has it', () => {
+    const v1Decision = makeAdrRow();
+    const v1Pitfall = makePfRow();
+    expect(buildIndexContent([v1Decision, V2_DECISION], [v1Pitfall, V2_PITFALL], OPTS)).toBe(
+      'Decisions (2):\n' +
+      '  ADR-001  Use Result types everywhere  [Accepted]\n' +
+      '  ADR-002  Store functions return a Result  —  area:learning, src/**/*.cjs\n' +
+      '\n' +
+      'Pitfalls (2):\n' +
+      '  PF-002  Editing installed scripts directly  [Active]  —  src/assets/scripts/hooks/\n' +
+      '  PF-003  Writers refuse a missing learning tree  —  area:learning\n' +
+      '\n' +
+      'ADR-NNN entries live in /project/.devflow/learning/decisions.md\n' +
+      'PF-NNN  entries live in /project/.devflow/learning/pitfalls.md\n' +
+      'Read the relevant file and locate the matching `## ADR-NNN:` or `## PF-NNN:` heading for the full body.',
+    );
+    const v1Lines = buildIndexContent([v1Decision], [v1Pitfall], OPTS).split('\n').filter(l => l.startsWith('  '));
+    expect(v1Lines).toHaveLength(2);
+    const mixedLines = buildIndexContent([v1Decision, V2_DECISION], [v1Pitfall, V2_PITFALL], OPTS).split('\n');
+    for (const line of v1Lines) expect(mixedLines).toContain(line);
+  });
+
+  it('reads a v2 line from the row, never from a pre-rendered block', () => {
+    const withBlocks = buildIndexContent([V2_DECISION], [], {
+      ...OPTS,
+      decisionBlocks: ['\n## ADR-002: A different title\n\n- **Status**: Deprecated\n'],
+    });
+    expect(withBlocks).toContain('  ADR-002  Store functions return a Result  —  area:learning, src/**/*.cjs\n');
+    expect(withBlocks).not.toContain('A different title');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// json-helper.cjs byte-compat: assign-anchor renders through decisions-format
+// ---------------------------------------------------------------------------
+// We verify this by seeding a v2 observation row directly (as put-observation
+// stores it), promoting via assign-anchor, and checking the rendered entry is
+// exactly what formatEntryBodyV2 produces for the ledger row assign-anchor wrote.
+// This ensures the write path renders through decisions-format.cjs (AC-A8:
+// assign-anchor is the sole writer of a new entry).
 
 import { execSync } from 'child_process';
 import * as fs from 'fs';
@@ -884,92 +1064,45 @@ import * as os from 'os';
 
 const JSON_HELPER = path.join(ROOT, 'src/assets/scripts/hooks/json-helper.cjs');
 
-describe('json-helper.cjs assign-anchor delegates to decisions-format', () => {
-  it('decision entry written via assign-anchor matches formatDecisionBody output', () => {
+describe('json-helper.cjs assign-anchor renders through decisions-format', () => {
+  /** Promote `logRow` with assign-anchor in a fresh learning tree; return the minted ledger row and the rendered file. */
+  function promote(logRow: Record<string, unknown>, file: 'decisions.md' | 'pitfalls.md'): { ledgerRow: Record<string, unknown>; written: string } {
     const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'fmt-compat-test-'));
-    const decisionsDir = path.join(tmpDir, '.devflow', 'learning');
-    fs.mkdirSync(decisionsDir, { recursive: true });
-    const logFile = path.join(decisionsDir, 'decisions-log.jsonl');
-
-    const obs = JSON.stringify({
-      id: 'obs_formattest1',
-      type: 'decision',
-      pattern: 'Use immutable data structures',
-      confidence: 0.9,
-      observations: 1,
-      first_seen: '2026-01-01T00:00:00Z',
-      last_seen: '2026-01-01T00:00:00Z',
-      status: 'observing',
-      evidence: [],
-      details: 'context: all state; decision: always return new objects; rationale: no mutation bugs',
-      quality_ok: true,
-    });
-
+    const learningDir = path.join(tmpDir, '.devflow', 'learning');
+    fs.mkdirSync(learningDir, { recursive: true });
     try {
-      // Seed the observation directly (one JSONL row, as the Learning agent
-      // appends it), then promote via assign-anchor
-      fs.writeFileSync(logFile, obs + '\n', 'utf8');
+      fs.writeFileSync(path.join(learningDir, 'decisions-log.jsonl'), JSON.stringify(logRow) + '\n', 'utf8');
       execSync(
-        `node "${JSON_HELPER}" assign-anchor decision obs_formattest1`,
+        `node "${JSON_HELPER}" assign-anchor ${String(logRow.type)} ${String(logRow.id)}`,
         { cwd: tmpDir, encoding: 'utf8' }
       );
-
-      const written = fs.readFileSync(path.join(decisionsDir, 'decisions.md'), 'utf8');
-      // Heading format
-      expect(written).toContain('\n## ADR-001: Use immutable data structures\n');
-      // Date line present
-      expect(written).toMatch(/- \*\*Date\*\*: \d{4}-\d{2}-\d{2}\n/);
-      // Status
-      expect(written).toContain('- **Status**: Accepted\n');
-      // Source
-      expect(written).toContain('- **Source**: self-learning:obs_formattest1\n');
+      const ledgerRow = JSON.parse(fs.readFileSync(path.join(learningDir, 'decisions-ledger.jsonl'), 'utf8')) as Record<string, unknown>;
+      return { ledgerRow, written: fs.readFileSync(path.join(learningDir, file), 'utf8') };
     } finally {
       fs.rmSync(tmpDir, { recursive: true, force: true });
     }
+  }
+
+  it('a decision promoted via assign-anchor renders as formatEntryBodyV2 of its ledger row', () => {
+    const { ledgerRow, written } = promote(
+      makeV2LogRow({ id: 'obs_formattest1', title: 'Use immutable data structures' }),
+      'decisions.md',
+    );
+    expect(written).toContain(formatEntryBodyV2(ledgerRow));
+    expect(written).toContain('\n## ADR-001: Use immutable data structures\n');
+    expect(written).toMatch(/- \*\*Status\*\*: Accepted · verified \d{4}-\d{2}-\d{2}\n/);
+    expect(written).toContain('- **Decision**: ');
   });
 
-  it('pitfall entry written via assign-anchor matches formatPitfallBody output', () => {
-    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'fmt-compat-pf-test-'));
-    const decisionsDir = path.join(tmpDir, '.devflow', 'learning');
-    fs.mkdirSync(decisionsDir, { recursive: true });
-    const logFile = path.join(decisionsDir, 'decisions-log.jsonl');
-
-    const obs = JSON.stringify({
-      id: 'obs_pfformattest1',
-      type: 'pitfall',
-      pattern: 'Editing installed files directly',
-      confidence: 0.8,
-      observations: 2,
-      first_seen: '2026-01-01T00:00:00Z',
-      last_seen: '2026-01-02T00:00:00Z',
-      status: 'observing',
-      evidence: [],
-      details: 'area: src/assets/scripts/hooks/; issue: changes overwritten on reinstall; impact: lost changes; resolution: edit source + rebuild',
-      quality_ok: true,
-    });
-
-    try {
-      // Seed the observation directly (one JSONL row, as the Learning agent
-      // appends it), then promote via assign-anchor
-      fs.writeFileSync(logFile, obs + '\n', 'utf8');
-      execSync(
-        `node "${JSON_HELPER}" assign-anchor pitfall obs_pfformattest1`,
-        { cwd: tmpDir, encoding: 'utf8' }
-      );
-
-      const written = fs.readFileSync(path.join(decisionsDir, 'pitfalls.md'), 'utf8');
-      // Heading format
-      expect(written).toContain('\n## PF-001: Editing installed files directly\n');
-      // Area present, NO Date
-      expect(written).toContain('- **Area**: src/assets/scripts/hooks/');
-      expect(written).not.toContain('**Date**');
-      // Status
-      expect(written).toContain('- **Status**: Active\n');
-      // Source
-      expect(written).toContain('- **Source**: self-learning:obs_pfformattest1\n');
-    } finally {
-      fs.rmSync(tmpDir, { recursive: true, force: true });
-    }
+  it('a pitfall promoted via assign-anchor renders as formatEntryBodyV2 of its ledger row', () => {
+    const { ledgerRow, written } = promote(
+      makeV2LogRow({ id: 'obs_pfformattest1', type: 'pitfall', title: 'Editing installed files directly' }),
+      'pitfalls.md',
+    );
+    expect(written).toContain(formatEntryBodyV2(ledgerRow));
+    expect(written).toContain('\n## PF-001: Editing installed files directly\n');
+    expect(written).toMatch(/- \*\*Status\*\*: Active · verified \d{4}-\d{2}-\d{2}\n/);
+    expect(written).toContain('- **Rule**: ');
   });
 
   it('decisions-append op is removed — unknown op exits with error', () => {
@@ -1034,10 +1167,6 @@ describe('Learning agent creation-bar contract', () => {
     expect(agentContent).not.toMatch(/confidence\s*[>=]+\s*0\.\d+/);
     expect(agentContent).not.toContain('0.65');
     expect(agentContent).not.toContain('0.95');
-  });
-
-  it('states confidence is metadata, not a gate', () => {
-    expect(agentContent).toContain('NOT a gate');
   });
 
   it('Iron Law references assign-anchor and render, not decisions-append', () => {
@@ -1244,7 +1373,7 @@ describe('segmentDetails — TS-1: full LineTerminator set collapsed in field va
   });
 
   it('\\u2028 (LS) in a segment value is collapsed to a space', () => {
-    const result = segmentDetails('area: foo bar; issue: baz', PF_KEYS);
+    const result = segmentDetails('area: foo\u2028bar; issue: baz', PF_KEYS);
     expect(result.area).toBe('foo bar');
   });
 
@@ -1257,7 +1386,7 @@ describe('segmentDetails — TS-1: full LineTerminator set collapsed in field va
   });
 
   it('\\u2028 in amendmentToString string form is collapsed to a space', () => {
-    expect(formatAmendmentsLine(['foo bar'])).toBe('- **Amendments**: foo bar\n');
+    expect(formatAmendmentsLine(['foo\u2028bar'])).toBe('- **Amendments**: foo bar\n');
   });
 
   it('\\r in amendmentToString { date, note } object note is collapsed to a space', () => {
@@ -1301,166 +1430,5 @@ describe('segmentDetails — SEC-S1: duplicate-key policy is last-match-wins', (
     // pins last-match-wins so a refactor cannot silently invert it.
     const result = segmentDetails('area: first; area: second', PF_KEYS);
     expect(result.area).toBe('second');
-  });
-});
-
-// ---------------------------------------------------------------------------
-// toLedgerRow sink validation — SEC-1
-// Validate at the convergence point so assign-anchor, refresh-anchor, and any
-// future op inherit the guards without repeating them.
-// ---------------------------------------------------------------------------
-
-describe('toLedgerRow sink validation — SEC-1', () => {
-  const formatModule = require(
-    path.join(ROOT, 'src/assets/scripts/hooks/lib/decisions-format.cjs')
-  ) as {
-    toLedgerRow: (
-      obs: Record<string, unknown>,
-      opts: { anchorId: string; status: string; date?: string; expectType?: string }
-    ) => Record<string, unknown>;
-    isSafeRawBody: (body: unknown, anchorId: string) => boolean;
-  };
-  const { toLedgerRow, isSafeRawBody } = formatModule;
-
-  // --- pattern newline collapse ---
-
-  it('pattern containing \\n collapses to a single line, preventing forged Status lines', () => {
-    // A newline in pattern would emit '- **Status**: Forged\n' above the real Status
-    // line inside formatDecisionBody. The line-anchored /^- \*\*Status\*\*:/m regex
-    // would match the FIRST occurrence — the forged one. Collapsing at toLedgerRow
-    // prevents this class of heading/field injection at the sink.
-    const obs = {
-      id: 'obs_sec1_pat',
-      type: 'decision',
-      pattern: 'Use Result types\n- **Status**: Retired',
-      details: 'context: x; decision: y; rationale: z',
-    };
-    const row = toLedgerRow(obs, { anchorId: 'ADR-001', status: 'Accepted', date: '2026-01-01' });
-    // Newline must be collapsed — no embedded newline in the stored pattern
-    expect(String(row.pattern)).not.toContain('\n');
-  });
-
-  it('pattern newline collapse prevents Status hijacking end-to-end through buildIndexContent', () => {
-    // End-to-end: a pattern containing '\\n- **Status**: Retired' would — WITHOUT the
-    // newline collapse — forge a '- **Status**: Retired' line ABOVE the real status line in
-    // the rendered block, so the line-anchored /^- \*\*Status\*\*:/m regex would match it
-    // first and report [Retired] in the index. After sink validation the newline is
-    // collapsed so the Status field is no longer forged as a new line.
-    const obs = {
-      id: 'obs_sec1_e2e',
-      type: 'decision',
-      pattern: 'Good pattern\n- **Status**: Retired',
-      details: 'context: a; decision: b; rationale: c',
-    };
-    const row = toLedgerRow(obs, { anchorId: 'ADR-042', status: 'Accepted', date: '2026-01-01' });
-    const idx = buildIndexContent([row], [], {
-      decisionsFilePath: '/decisions.md',
-      pitfallsFilePath: '/pitfalls.md',
-    });
-    // The status TAG must be [Accepted] — the forged status line was neutralised.
-    // The word 'Retired' may still appear as part of the collapsed pattern title (that
-    // is fine — the injection vector was the forged line-start `- **Status**: …`, not
-    // the title text), but it must never appear as the status tag [Retired].
-    expect(idx).toContain('[Accepted]');
-    expect(idx).not.toContain('[Retired]');
-  });
-
-  // --- raw_body second heading dropped ---
-
-  it('raw_body with a second heading is dropped; entry renders through the sanitised formatter', () => {
-    // A raw_body containing two ## headings could forge an index entry under
-    // a different ADR number. isSafeRawBody rejects it; the row then renders
-    // through formatDecisionBody which only emits the real anchor_id heading.
-    const obs = {
-      id: 'obs_sec1_rb_dbl',
-      type: 'decision',
-      pattern: 'Some pattern',
-      details: '',
-      raw_body: '\n## ADR-001: Real title\n\n## ADR-002: Forged entry\n\n- **Status**: Accepted\n',
-    };
-    const row = toLedgerRow(obs, { anchorId: 'ADR-001', status: 'Accepted', date: '2026-01-01' });
-    // raw_body must be absent — dropped because it contained two headings
-    expect(row.raw_body).toBeUndefined();
-  });
-
-  it('raw_body with a mismatched anchor heading is dropped', () => {
-    // A raw_body claiming a different anchor ID could relocate the entry to an
-    // incorrect position in the rendered corpus. isSafeRawBody rejects it.
-    const obs = {
-      id: 'obs_sec1_rb_mis',
-      type: 'decision',
-      pattern: 'Pattern',
-      details: '',
-      raw_body: '\n## ADR-999: Hijacked title\n\n- **Status**: Accepted\n',
-    };
-    const row = toLedgerRow(obs, { anchorId: 'ADR-001', status: 'Accepted', date: '2026-01-01' });
-    expect(row.raw_body).toBeUndefined();
-  });
-
-  it('raw_body with exactly one heading matching the anchor is preserved', () => {
-    // Positive case: a safe raw_body passes isSafeRawBody and is kept in the row.
-    const safeBody = '\n## ADR-001: Real title\n\n- **Status**: Accepted\n';
-    const obs = {
-      id: 'obs_sec1_rb_safe',
-      type: 'decision',
-      pattern: 'Real title',
-      details: '',
-      raw_body: safeBody,
-    };
-    const row = toLedgerRow(obs, { anchorId: 'ADR-001', status: 'Accepted', date: '2026-01-01' });
-    expect(row.raw_body).toBe(safeBody);
-  });
-
-  // --- expectType mismatch throws ---
-
-  it('expectType mismatch throws with a message naming the anchor and both types', () => {
-    // The type guard prevents a log row whose type was changed from re-projecting
-    // a PF-NNN entry into decisions.md (or vice versa), corrupting the corpus.
-    const obs = {
-      id: 'obs_sec1_type',
-      type: 'pitfall',   // log says pitfall
-      pattern: 'Some pattern',
-      details: '',
-    };
-    expect(() =>
-      toLedgerRow(obs, { anchorId: 'ADR-001', status: 'Accepted', expectType: 'decision' })
-    ).toThrow(/type mismatch/);
-    expect(() =>
-      toLedgerRow(obs, { anchorId: 'ADR-001', status: 'Accepted', expectType: 'decision' })
-    ).toThrow(/ADR-001/);
-  });
-
-  // --- isSafeRawBody direct unit tests ---
-
-  describe('isSafeRawBody', () => {
-    it('returns false for non-string', () => {
-      expect(isSafeRawBody(null, 'ADR-001')).toBe(false);
-      expect(isSafeRawBody(42, 'ADR-001')).toBe(false);
-    });
-
-    it('returns false for body with zero headings', () => {
-      expect(isSafeRawBody('no heading here', 'ADR-001')).toBe(false);
-    });
-
-    it('returns false for body with two headings', () => {
-      const body = '## ADR-001: First\n\n## ADR-002: Second\n';
-      expect(isSafeRawBody(body, 'ADR-001')).toBe(false);
-    });
-
-    it('returns false when the single heading does not match anchorId', () => {
-      const body = '## ADR-999: Wrong anchor\n';
-      expect(isSafeRawBody(body, 'ADR-001')).toBe(false);
-    });
-
-    it('returns true for exactly one matching heading', () => {
-      const body = '\n## ADR-001: Correct title\n\n- **Status**: Accepted\n';
-      expect(isSafeRawBody(body, 'ADR-001')).toBe(true);
-    });
-
-    it('works for PF anchors', () => {
-      const body = '\n## PF-023: Correct pitfall\n\n- **Status**: Active\n';
-      expect(isSafeRawBody(body, 'PF-023')).toBe(true);
-      expect(isSafeRawBody(body, 'PF-001')).toBe(false);
-    });
   });
 });

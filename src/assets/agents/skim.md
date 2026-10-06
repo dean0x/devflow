@@ -121,7 +121,7 @@ skim also handles prose/config files (`.md`, `.json`, `.yaml`, `.toml`) — the 
 {Top hotspots from heatmap --insights, or "None assessed (greenfield task)" when skipped}
 
 ### Active Decisions
-{Count and key decisions from TL;DR, or "None found"}
+{Count from TL;DR, or "None found"}
 
 ### Suggested Approach
 {Brief recommendation based on codebase structure}

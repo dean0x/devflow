@@ -1,14 +1,16 @@
 #!/usr/bin/env node
 
 // src/assets/scripts/hooks/json-helper.cjs
-// Provides jq-equivalent operations for hooks when jq is not installed.
-// SECURITY: This is a local CLI helper invoked only by shell hooks with controlled arguments.
-// File path arguments come from hook-owned variables, not from external/untrusted input.
+// Provides jq-equivalent operations for hooks when jq is not installed, and the
+// learning ops the Learning agent runs from the project root.
+// SECURITY: This is a local CLI helper invoked only by shell hooks and the
+// Learning agent with controlled arguments. No operation takes a file path: a
+// file's content arrives on stdin (json-parse redirects it), and the learning ops
+// build every path from the current directory.
 // Usage: node json-helper.cjs <operation> [args...]
 //
 // Operations:
 //   get-field <field> [default]           Read field from stdin JSON
-//   get-field-file <file> <field> [def]   Read field from JSON file
 //   validate                              Exit 0 if stdin is valid JSON, 1 otherwise
 //   compact                               Compact stdin JSON to single line
 //   construct <json-template> [--arg k v] Build JSON object with args
@@ -17,57 +19,140 @@
 //   extract-cwd-field <field>             Extract cwd + arbitrary field, SOH-byte delimited
 //   extract-text-messages                 Extract text content from Claude message format
 //   merge-evidence                        Flatten, dedupe, limit to 10 from stdin JSON
-//   slurp-sort <file> <field> [limit]     Read JSONL, sort by field desc, limit results
-//   slurp-cap <file> <field> <limit>      Read JSONL, sort by field desc, output limit lines
+//   slurp-sort <field> [limit]            Read stdin JSONL, sort by field desc, limit results
+//   slurp-cap <field> [limit]             Read stdin JSONL, sort by field desc, output limit lines
 //   array-length <path>                   Get length of array at dotted path in stdin JSON
 //   array-item <path> <index>             Get item at index from array at path in stdin JSON
 //   session-output <context>              Build SessionStart output envelope
 //   prompt-output <context>               Build UserPromptSubmit output envelope
 //   backup-construct                      Build pre-compact backup JSON from --arg pairs
-//   assign-anchor <type> <obs_id> [--allow-collision]
-//                                          Claim next ADR/PF number, render both .md files.
-//                                          Refuses on a pre-mint citation collision (E4) unless
-//                                          --allow-collision is passed.
-//   next-anchor <type>                    Read-only: print the next candidate ADR/PF id and
-//                                          any pre-mint collision hits; mutates nothing (E4)
-//   retire-anchor <anchor_id> <status>    Flip ledger row status, re-render both .md files
-//   refresh-anchor <anchor_id>            Re-project log obs onto ledger row, re-render
-//   rotate-observations [<log>] [<arch>]  Archive observing rows older than 30 days
+//   assign-anchor <decision|pitfall> <obs_id>
+//                                          Promote a v2 observation to the next ADR/PF number,
+//                                          skipping numbers tracked files cite; re-renders
+//   retire-anchor <anchor> <Encoded|Superseded|Retired|Deprecated>
+//                                          Make an entry inactive with the one JSON object on
+//                                          stdin its status takes; re-renders
+//   restore-anchor <anchor>               Make an inactive entry active again and due for
+//                                          maintenance again, ordered after integrity problems and
+//                                          legacy entries (among them if it is one); re-renders
+//   refresh-anchor <anchor>... [--verified]
+//                                          Re-project active v2 entries from the log, or stamp
+//                                          them verified today; re-renders
+//   rotate-observations                   Archive unreferenced observations idle 30+ days
+//   put-observation --create|--update|--reinforce
+//                                          Store one observation from one JSON object on
+//                                          stdin; re-projects and re-renders its entries
+//   list                                  Read-only: print the ledger and the log by section
+//   show <anchor|obs_id>                  Read-only: print one entry as pretty JSON
+//   claim-due                             Hand out the entries due for maintenance, leased
+//                                          for a day, after the ref their claims are checked at
+//   claim-queue                           Claim the learning queue for this run; prints
+//                                          claimed <token>[ takeover] | busy | none
+//   release-claim <token>                 Release the claim the token owns; prints
+//                                          released | not-owner | gone
+//
+// Every learning op above except claim-queue and release-claim first refreshes
+// the mtime of an existing queue claim — the heartbeat (D-OWNED-CLAIM).
 
 'use strict';
 
 const fs = require('fs');
-const path = require('path');
-const { execFileSync } = require('child_process');
+const { constants: { MAX_STRING_LENGTH } } = require('buffer');
 
 const op = process.argv[2];
 const args = process.argv.slice(3);
 
-const { safePath } = require('./lib/safe-path.cjs');
-const {
-  getDecisionsUsagePath,
-  getDecisionsLockDir,
-  getDecisionsLedgerPath,
-  getDecisionsLogPath,
-  getDecisionsArchivePath,
-  getObservationsLockDir,
-} = require('./lib/project-paths.cjs');
-const {
-  initDecisionsContent,
-  toLedgerRow,
-} = require('./lib/decisions-format.cjs');
-const {
-  renderAndWriteAll,
-  parseLedger,
-} = require('./lib/render-decisions.cjs');
-const { acquireMkdirLock, releaseLock } = require('./lib/mkdir-lock.cjs');
+/** The learning modules, once loaded; see learning(). */
+let learningModules = null;
 
-function readStdin() {
-  try {
-    return fs.readFileSync('/dev/stdin', 'utf8').trim();
-  } catch {
-    return '';
+/**
+ * The learning store, loaded on first use and memoized. The generic ops never
+ * call it, so a hook that falls back from jq to node never pays for loading it,
+ * and the store loads the renderer only when an op renders.
+ *
+ * @returns {{ store: object }}
+ */
+function learning() {
+  if (learningModules === null) {
+    learningModules = { store: require('./lib/learning-store.cjs') };
   }
+  return learningModules;
+}
+
+/** The bytes each read of stdin asks for. */
+const STDIN_READ_BYTES = 64 * 1024;
+
+/** How long a read of stdin sleeps when a non-blocking descriptor has no input yet. */
+const STDIN_WAIT_MS = 10;
+
+/** The most sleeps one read of stdin takes: 10 s in all, long after any writer the helper's callers use has written. */
+const STDIN_MAX_WAITS = 1000;
+
+/** What Atomics.wait sleeps on: nothing notifies it, so each wait runs its full time. */
+const STDIN_WAIT_CELL = new Int32Array(new SharedArrayBuffer(4));
+
+/**
+ * Read stdin to its end, keeping at most `maxBytes`. Every op that reads stdin
+ * reads it here, so the generic ops and the learning ops cannot read it two ways.
+ * Never throws: a failure is a refusal.
+ *
+ * D-STDIN-FD0: stdin is read from file descriptor 0 itself, in reads repeated
+ * until one returns no bytes — never by opening /dev/stdin, and never by the size
+ * fstat reports. Reason: Linux opens /dev/stdin through /proc/self/fd/0, which
+ * refuses a socket with ENXIO, and a node parent's 'pipe' hands its child a
+ * socket; and for a pipe or a socket fstat reports only what is buffered so far,
+ * 0 on Linux, not what the writer has still to send.
+ *
+ * A read of a non-blocking descriptor with no input yet fails with EAGAIN (Linux
+ * and macOS give EWOULDBLOCK the same number, which node reports as EAGAIN). That
+ * is not the end of the input: the reader sleeps STDIN_WAIT_MS and reads again,
+ * at most STDIN_MAX_WAITS times in all. The loop is bounded: each pass takes at
+ * least one byte, ends it, or spends one of those waits, and it stops once it
+ * holds one byte more than `maxBytes`, so it never reads past that byte.
+ *
+ * @param {number} maxBytes
+ * @returns {{ ok: true, value: string } | { ok: false, error: { kind: 'too-large' | 'unreadable', message: string } }}
+ *   the text; or `too-large` when stdin holds more than `maxBytes`, `unreadable` when a read fails
+ */
+function readStdinUpTo(maxBytes) {
+  const buf = Buffer.alloc(Math.min(STDIN_READ_BYTES, maxBytes + 1));
+  const chunks = [];
+  let total = 0;
+  let waits = 0;
+  while (total <= maxBytes) {
+    let read;
+    try {
+      read = fs.readSync(0, buf, 0, Math.min(buf.length, maxBytes + 1 - total), null);
+    } catch (err) {
+      if (!err || err.code !== 'EAGAIN') {
+        return { ok: false, error: { kind: 'unreadable', message: `stdin could not be read: ${err && err.message ? err.message : String(err)}` } };
+      }
+      if (waits === STDIN_MAX_WAITS) {
+        return { ok: false, error: { kind: 'unreadable', message: `stdin could not be read: it had not ended after ${STDIN_MAX_WAITS * STDIN_WAIT_MS} ms of waiting for input` } };
+      }
+      waits += 1;
+      Atomics.wait(STDIN_WAIT_CELL, 0, 0, STDIN_WAIT_MS);
+      continue;
+    }
+    if (read === 0) break;
+    chunks.push(Buffer.from(buf.subarray(0, read)));
+    total += read;
+  }
+  if (total > maxBytes) return { ok: false, error: { kind: 'too-large', message: `stdin holds more than ${maxBytes} bytes` } };
+  return { ok: true, value: Buffer.concat(chunks, total).toString('utf8') };
+}
+
+/**
+ * The most stdin a generic op reads: the longest string node can build. A hook's
+ * input, a Stop hook's last assistant message among it, has no limit of its own,
+ * so a generic op refuses only what it could not hold as text.
+ */
+const STDIN_TEXT_MAX_BYTES = MAX_STRING_LENGTH;
+
+/** A generic op's stdin, trimmed: '' when it cannot be read, so the op fails as it does on empty input. */
+function readStdin() {
+  const text = readStdinUpTo(STDIN_TEXT_MAX_BYTES);
+  return text.ok ? text.value.trim() : '';
 }
 
 function getNestedField(obj, field) {
@@ -80,351 +165,12 @@ function getNestedField(obj, field) {
   return current;
 }
 
-function parseJsonl(file) {
-  const lines = fs.readFileSync(safePath(file), 'utf8').trim().split('\n').filter(Boolean);
+/** The JSON values of a JSONL text's lines; a line that does not parse is skipped. */
+function parseJsonlText(text) {
+  const lines = text.split('\n').filter(Boolean);
   return lines.map(l => {
     try { return JSON.parse(l); } catch { return null; }
   }).filter(Boolean);
-}
-
-/**
- * Strip leading YAML frontmatter from content that the model may have included
- * despite being told not to. Belt-and-suspenders defense against duplicate frontmatter.
- */
-function stripLeadingFrontmatter(text) {
-  if (!text) return '';
-  const trimmed = text.replace(/^\s*\n/, '');
-  if (!trimmed.startsWith('---')) return text;
-  const match = trimmed.match(/^---\s*\n[\s\S]*?\n---\s*\n?/);
-  return match ? trimmed.slice(match[0].length) : text;
-}
-
-/**
- * Write `tmp` with O_EXCL (wx flag) so the kernel rejects the open if a file or
- * symlink already exists at that path, preventing TOCTOU symlink-follow attacks.
- * On EEXIST (stale or attacker-placed .tmp) we unlink and retry once.
- * @param {string} tmp - Path to the temporary file.
- * @param {string} content - Content to write.
- */
-function writeExclusive(tmp, content) {
-  try {
-    fs.writeFileSync(tmp, content, { flag: 'wx' });
-  } catch (err) {
-    if (err.code !== 'EEXIST') throw err;
-    // Stale or attacker-placed .tmp — remove it and retry once.
-    try { fs.unlinkSync(tmp); } catch { /* race — already removed */ }
-    fs.writeFileSync(tmp, content, { flag: 'wx' });
-  }
-}
-
-function writeJsonlAtomic(file, entries) {
-  // PID-scope the tmp name so concurrent writers from different processes
-  // never collide on the same .tmp path.  mirrors fs-atomic.ts and proxy-log.ts.
-  const tmp = file + '.tmp.' + process.pid;
-  const content = entries.length > 0
-    ? entries.map(e => JSON.stringify(e)).join('\n') + '\n'
-    : '';
-  writeExclusive(tmp, content);
-  fs.renameSync(tmp, file);
-}
-
-/** Atomically write a text file via a .tmp sibling and rename. */
-function writeFileAtomic(file, content) {
-  // PID-scope the tmp name so concurrent writers from different processes
-  // never collide on the same .tmp path.  mirrors fs-atomic.ts and proxy-log.ts.
-  const tmp = file + '.tmp.' + process.pid;
-  writeExclusive(tmp, content);
-  fs.renameSync(tmp, file);
-}
-
-/**
- * Compute the next anchor ID for the given type by scanning the anchored ledger.
- * O(anchored) — single pass. Includes ALL anchored rows (Retired, Deprecated, Superseded).
- * ADR and PF sequences are independent.
- *
- * @param {object[]} ledgerRows - All rows from the ledger (from parseLedger)
- * @param {'decision'|'pitfall'} type
- * @returns {{ anchorId: string, nextN: string }}
- */
-function nextAnchorFromLedger(ledgerRows, type) {
-  const prefix = type === 'decision' ? 'ADR' : 'PF';
-  const prefixRe = new RegExp(`^${prefix}-`);
-  let maxN = 0;
-  for (const row of ledgerRows) {
-    if (!row.anchor_id || !prefixRe.test(row.anchor_id)) continue;
-    const m = row.anchor_id.match(/(\d+)$/);
-    if (m) {
-      const n = parseInt(m[1], 10);
-      if (n > maxN) maxN = n;
-    }
-  }
-  const nextN = (maxN + 1).toString().padStart(3, '0');
-  return { anchorId: `${prefix}-${nextN}`, nextN };
-}
-
-// ---------------------------------------------------------------------------
-// Pre-mint collision guard (E4).
-//
-// A design doc can cite a design-local number ("PF-NNN") in tracked source
-// before the ledger ever mints that same number for an unrelated entry — the
-// two silently collide and nothing catches it until a human notices the text
-// doesn't match. This scans the project tree for a whole-word citation of the
-// candidate id BEFORE assign-anchor writes it, and refuses to mint over a hit.
-// The consumer-side counterpart lives in mdl's scripts/verify-ledger-citations.mjs.
-// ---------------------------------------------------------------------------
-
-/** Directory names excluded from collision scanning at any depth (E4). */
-const COLLISION_SCAN_EXCLUDED_SEGMENTS = new Set(['.git', 'node_modules', 'target', 'dist']);
-
-/** Files larger than this are skipped during collision scanning — bounds the scan (E4). */
-const COLLISION_SCAN_MAX_FILE_BYTES = 5 * 1024 * 1024;
-
-/**
- * True when a project-relative path must be excluded from collision scanning:
- * the ledger's own files (`.devflow/learning/**`, self-citation is expected,
- * not a collision) or any of the excluded directory segments.
- *
- * @param {string} relPath - path relative to the project root, either separator style
- * @returns {boolean}
- */
-function isCollisionScanExcluded(relPath) {
-  const norm = relPath.split(path.sep).join('/');
-  if (norm === '.devflow/learning' || norm.startsWith('.devflow/learning/')) return true;
-  return norm.split('/').some(seg => COLLISION_SCAN_EXCLUDED_SEGMENTS.has(seg));
-}
-
-/**
- * List tracked files via `git ls-files` (respects .gitignore; args passed as an
- * array — never shelled through a string-built command). Throws when the
- * project root is not a git working tree or the `git` binary is unavailable;
- * callers fall back to `listFsWalkFiles`.
- *
- * D-NO-FSMONITOR: `ls-files` reads the index, and reading the index runs the
- * command a repository's config names in `core.fsmonitor` — code chosen by the
- * repository this hook runs inside. The call turns it off for itself
- * (`-c core.fsmonitor=false`), so the listing stays a pure read.
- *
- * @param {string} projectRoot
- * @returns {string[]} project-relative paths
- */
-function listGitTrackedFiles(projectRoot) {
-  const out = execFileSync('git', ['-c', 'core.fsmonitor=false', 'ls-files', '-z'], {
-    cwd: projectRoot,
-    stdio: ['ignore', 'pipe', 'ignore'],
-  });
-  return out.toString('utf8').split('\0').filter(Boolean);
-}
-
-/**
- * Bounded, non-recursing-into-excluded-dirs fs walk — fallback for a project
- * root that is not a git working tree. The walk is bounded by construction:
- * it only descends into directories actually present on disk, and never
- * descends into an excluded directory at all (E4).
- *
- * @param {string} projectRoot
- * @returns {string[]} project-relative paths
- */
-function listFsWalkFiles(projectRoot) {
-  const results = [];
-  const stack = [''];
-  while (stack.length > 0) {
-    const relDir = stack.pop();
-    const absDir = relDir ? path.join(projectRoot, relDir) : projectRoot;
-    let entries;
-    try {
-      entries = fs.readdirSync(absDir, { withFileTypes: true });
-    } catch {
-      continue; // unreadable dir — best-effort scan, skip
-    }
-    for (const entry of entries) {
-      const relPath = relDir ? `${relDir}/${entry.name}` : entry.name;
-      if (isCollisionScanExcluded(relPath)) continue;
-      if (entry.isDirectory()) {
-        stack.push(relPath);
-      } else if (entry.isFile()) {
-        results.push(relPath);
-      }
-    }
-  }
-  return results;
-}
-
-/**
- * Scan the project tree for a whole-word citation of `id` (e.g. `ADR-NNN`),
- * excluding the ledger's own files and common vendored/build directories.
- * Prefers tracked files (`git ls-files`) when the project root is a git
- * working tree; falls back to a bounded fs walk otherwise. Best-effort:
- * unreadable, binary, or oversized files are skipped rather than failing
- * the scan.
- *
- * @param {string} projectRoot
- * @param {string} id - e.g. 'ADR-NNN' or 'PF-NNN'
- * @returns {{ file: string, line: number }[]} hits, empty when no collision
- */
-function scanForAnchorCollision(projectRoot, id) {
-  let files;
-  try {
-    files = listGitTrackedFiles(projectRoot);
-  } catch {
-    files = listFsWalkFiles(projectRoot);
-  }
-
-  const escaped = id.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-  const pattern = new RegExp(`\\b${escaped}\\b`);
-  const hits = [];
-  for (const relPath of files) {
-    if (isCollisionScanExcluded(relPath)) continue;
-    const absPath = path.join(projectRoot, relPath);
-    let stat;
-    try {
-      stat = fs.statSync(absPath);
-    } catch {
-      continue; // race: listed then removed — best-effort scan, skip
-    }
-    if (!stat.isFile() || stat.size > COLLISION_SCAN_MAX_FILE_BYTES) continue;
-    let content;
-    try {
-      content = fs.readFileSync(absPath, 'utf8');
-    } catch {
-      continue; // unreadable or invalid utf8 — best-effort scan, skip
-    }
-    if (content.includes('\u0000')) continue; // binary heuristic
-    const lines = content.split('\n');
-    for (let i = 0; i < lines.length; i++) {
-      if (pattern.test(lines[i])) {
-        hits.push({ file: relPath, line: i + 1 });
-      }
-    }
-  }
-  return hits;
-}
-
-/**
- * Format collision hits for a stderr/stdout report — one `file:line` per line,
- * two-space indented (E4).
- *
- * @param {{ file: string, line: number }[]} hits
- * @returns {string}
- */
-function formatCollisionHits(hits) {
-  return hits.map(h => `  ${h.file}:${h.line}`).join('\n');
-}
-
-/**
- * Read .decisions-usage.json. Returns {version, entries} or empty default.
- * @param {string} projectRoot - Path to project root (cwd)
- * @returns {{version: number, entries: Object}}
- */
-function readUsageFile(projectRoot) {
-  const filePath = getDecisionsUsagePath(projectRoot);
-  try {
-    const raw = fs.readFileSync(filePath, 'utf8');
-    const data = JSON.parse(raw);
-    if (data && data.version === 1 && typeof data.entries === 'object') return data;
-  } catch { /* ENOENT or malformed — return default */ }
-  return { version: 1, entries: {} };
-}
-
-/**
- * Write .decisions-usage.json atomically.
- * @param {string} projectRoot - Path to project root (cwd)
- * @param {{version: number, entries: Object}} data
- */
-function writeUsageFile(projectRoot, data) {
-  writeFileAtomic(getDecisionsUsagePath(projectRoot), JSON.stringify(data, null, 2) + '\n');
-}
-
-/**
- * Register an entry in .decisions-usage.json with initial cite count.
- * @param {string} projectRoot - Path to project root (cwd)
- * @param {string} anchorId - e.g. 'ADR-NNN' or 'PF-NNN'
- */
-function registerUsageEntry(projectRoot, anchorId) {
-  const data = readUsageFile(projectRoot);
-  if (!data.entries[anchorId]) {
-    data.entries[anchorId] = {
-      cites: 0,
-      last_cited: null,
-      created: new Date().toISOString(),
-    };
-    writeUsageFile(projectRoot, data);
-  }
-}
-
-/**
- * Internal rotation logic for rotate-observations. Separated for testability.
- * Moves rows where status === 'observing' AND no anchor_id AND age > 30 days
- * from logPath to archivePath (append). Returns count of rotated rows.
- *
- * @param {string} logPath - Path to decisions-log.jsonl
- * @param {string} archivePath - Path to decisions-log.archive.jsonl
- * @param {number} nowMs - Current time as epoch ms (injectable for tests)
- * @returns {number} count of rotated rows
- */
-function rotateObservations(logPath, archivePath, nowMs) {
-  const THIRTY_DAYS_MS = 30 * 24 * 60 * 60 * 1000;
-  const cutoffMs = nowMs - THIRTY_DAYS_MS;
-
-  let logEntries = [];
-  if (fs.existsSync(logPath)) {
-    logEntries = parseLedger(logPath);
-  }
-
-  const kept = [];
-  const stale = [];
-
-  for (const row of logEntries) {
-    // Only move 'observing' rows without anchor_id (unanchored)
-    if (row.status !== 'observing' || row.anchor_id) {
-      kept.push(row);
-      continue;
-    }
-    // Check age using last_seen if present, else first_seen
-    const tsField = row.last_seen || row.first_seen;
-    if (!tsField) {
-      kept.push(row);
-      continue;
-    }
-    const rowMs = new Date(tsField).getTime();
-    if (isNaN(rowMs) || rowMs > cutoffMs) {
-      kept.push(row);
-    } else {
-      stale.push(row);
-    }
-  }
-
-  if (stale.length === 0) return 0;
-
-  // D003: Dedup stale rows against the existing archive by id before appending.
-  // An interrupt-then-retry (process killed after archive write but before log
-  // rewrite) would re-classify the same rows as stale and attempt to archive
-  // them a second time. Reading existing archive IDs into a Set and filtering
-  // prevents duplicate rows in the archive. Cost is O(archive) on retry; O(1)
-  // on the normal path when the archive is absent.
-  //
-  // True append (appendFileSync) is used instead of read-entire-archive+rewrite
-  // so cost is O(stale) rather than O(archive) on the write path. The archive
-  // is gitignored/recovery-only, so an incomplete final newline on ENOENT is
-  // safe — parseLedger handles trailing-newline variance.
-  const existingArchiveIds = new Set();
-  if (fs.existsSync(archivePath)) {
-    const existingRows = parseLedger(archivePath);
-    for (const r of existingRows) {
-      if (r.id) existingArchiveIds.add(r.id);
-    }
-  }
-
-  const newStale = stale.filter(r => !existingArchiveIds.has(r.id));
-  if (newStale.length > 0) {
-    // True append — O(newStale), not O(archive)
-    const appendContent = newStale.map(r => JSON.stringify(r)).join('\n') + '\n';
-    fs.appendFileSync(archivePath, appendContent, 'utf8');
-  }
-
-  // Write remaining rows back to log
-  writeJsonlAtomic(logPath, kept);
-
-  return stale.length;
 }
 
 function parseArgs(argList) {
@@ -447,68 +193,101 @@ function parseArgs(argList) {
 }
 
 // ---------------------------------------------------------------------------
-// Lock helpers — shared by the three decisions ledger ops (assign-anchor,
-// retire-anchor, refresh-anchor). rotate-observations uses a DIFFERENT lock
-// (.observations.lock) and keeps its own scaffold (avoids over-generalising).
+// Learning-op adapter
 // ---------------------------------------------------------------------------
 
-/** Acquire-timeout for .decisions.lock (ms). Named to avoid magic numbers (COMP-4). */
-const LOCK_ACQUIRE_TIMEOUT_MS = 30000;
-/** Stale-break threshold for .decisions.lock (ms). Named to avoid magic numbers (COMP-4). */
-const LOCK_STALE_MS = 60000;
-
 /**
- * Run fn() under .decisions.lock.
+ * Print a learning op's Result: `format(value)` and a newline on stdout, or the
+ * error message and a newline on stderr. Returns the exit code for the op to set
+ * as process.exitCode, so the process exits once, after the op has returned and
+ * every lock it took is released.
  *
- * Never call process.exit() inside fn — throw instead: the throw propagates
- * through the try/finally so releaseLock always runs. process.exit is reserved for
- * the acquire-failure path where no lock is held and no cleanup is needed.
- *
- * The parent directory of the lock dir is created before acquireMkdirLock is
- * called so a fresh-project cold-path does not throw ENOENT inside the lock lib.
- *
- * @param {string} opName - operation name for error messages
- * @param {string} projectRoot - project root (cwd)
- * @param {() => unknown} fn - body to execute under the lock
+ * @param {{ ok: true, value: unknown } | { ok: false, error: { message: string } }} result
+ * @param {(value: any) => string} format - the stdout text for the value
+ * @returns {0|1}
  */
-function withDecisionsLock(opName, projectRoot, fn) {
-  const lockDir = getDecisionsLockDir(projectRoot);
-  // Ensure parent directory exists before acquiring lock
-  fs.mkdirSync(path.dirname(lockDir), { recursive: true });
-  if (!acquireMkdirLock(lockDir, LOCK_ACQUIRE_TIMEOUT_MS, LOCK_STALE_MS)) {
-    process.stderr.write(`${opName}: timeout acquiring lock at ${lockDir}\n`);
-    process.exit(1);
+function emit(result, format) {
+  if (result.ok) {
+    process.stdout.write(`${format(result.value)}\n`);
+    return 0;
   }
-  try { return fn(); } finally { releaseLock(lockDir); }
+  process.stderr.write(`${result.error.message}\n`);
+  return 1;
 }
 
 /**
- * Serialize ledger rows to a JSONL string with trailing newline.
- * Extracted to avoid repeating the same expression at four sites (COMP-4).
+ * Refuse a malformed command line: print `<op>: usage: <usage>` on stderr and exit 1,
+ * before the op takes any lock.
  *
- * @param {object[]} rows
- * @returns {string}
+ * @param {string} usage - the usage text, starting with the op's name
+ * @returns {never}
  */
-const serializeLedger = rows => rows.map(r => JSON.stringify(r)).join('\n') + '\n';
+function exitWithUsage(usage) {
+  process.stderr.write(`${op}: usage: ${usage}\n`);
+  process.exit(1);
+}
 
+/** The most stdin a learning op reads: far above any valid input, so a runaway writer is refused, not parsed. */
+const STDIN_JSON_MAX_BYTES = 64 * 1024;
+
+/**
+ * A learning op's stdin as one JSON object: the one way text reaches a learning
+ * op, so no field of it ever passes through argv or a shell word. Never throws.
+ *
+ * @param {string} opName - for the message
+ * @returns {{ ok: true, value: object } | { ok: false, error: { kind: 'invalid-input', message: string } }}
+ */
+function readStdinJson(opName) {
+  const refuse = message => ({ ok: false, error: { kind: 'invalid-input', message: `${opName}: ${message}` } });
+  const text = readStdinUpTo(STDIN_JSON_MAX_BYTES);
+  if (!text.ok) {
+    return refuse(text.error.kind === 'too-large' ? `${text.error.message}; it must hold one JSON object` : text.error.message);
+  }
+  let value;
+  try {
+    value = JSON.parse(text.value);
+  } catch {
+    return refuse('stdin must hold one JSON object');
+  }
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) return refuse('stdin must hold one JSON object');
+  return { ok: true, value };
+}
+
+/** put-observation's flags and the store modes they name. */
+const PUT_MODES = new Map([['--create', 'create'], ['--update', 'update'], ['--reinforce', 'reinforce']]);
+
+/** The entry types assign-anchor takes. */
+const ENTRY_TYPES = new Set(['decision', 'pitfall']);
+
+/**
+ * The learning ops whose run sends the claim heartbeat first (D-OWNED-CLAIM).
+ * claim-queue and release-claim manage the claim themselves, and the generic ops
+ * never touch it. A new learning op joins this set.
+ */
+const LEARNING_OPS = new Set([
+  'assign-anchor', 'retire-anchor', 'restore-anchor', 'refresh-anchor', 'rotate-observations',
+  'put-observation', 'list', 'show', 'claim-due',
+]);
+
+/** Send the claim heartbeat; a failure is reported on stderr and never stops the op. */
+function heartbeat(root) {
+  const beat = learning().store.touchClaim(root);
+  if (!beat.ok) process.stderr.write(`${beat.error.message}\n`);
+}
+
+// The learning ops run from the project root and take no path to a learning file:
+// each builds its paths from the current directory. Every op that writes takes the
+// store's one learning lock through withDecisionsLock (D-ONE-LEARNING-LOCK) and
+// refuses, creating nothing, when .devflow/learning/ is absent (D-NO-STRAY-TREE).
+// A locked body returns its Result; emit prints it once the lock is released.
 if (require.main === module) {
 try {
+  if (LEARNING_OPS.has(op)) heartbeat(process.cwd());
   switch (op) {
     case 'get-field': {
       const input = JSON.parse(readStdin());
       const field = args[0];
       const def = args[1] || '';
-      const val = getNestedField(input, field);
-      console.log(val != null ? String(val) : def);
-      break;
-    }
-
-    case 'get-field-file': {
-      const file = safePath(args[0]);
-      const field = args[1];
-      const def = args[2] || '';
-      const content = fs.readFileSync(file, 'utf8').trim();
-      const input = JSON.parse(content);
       const val = getNestedField(input, field);
       console.log(val != null ? String(val) : def);
       break;
@@ -605,10 +384,9 @@ try {
     }
 
     case 'slurp-sort': {
-      const file = args[0];
-      const field = args[1];
-      const limit = parseInt(args[2]) || 30;
-      const parsed = parseJsonl(file);
+      const field = args[0];
+      const limit = parseInt(args[1]) || 30;
+      const parsed = parseJsonlText(readStdin());
       parsed.sort((a, b) => (b[field] || 0) - (a[field] || 0));
       console.log(JSON.stringify(parsed.slice(0, limit)));
       break;
@@ -616,10 +394,9 @@ try {
 
     case 'slurp-cap': {
       // Read JSONL, sort by field desc, output top N as JSONL (one per line)
-      const file = args[0];
-      const field = args[1];
-      const limit = parseInt(args[2]) || 100;
-      const parsed = parseJsonl(file);
+      const field = args[0];
+      const limit = parseInt(args[1]) || 100;
+      const parsed = parseJsonlText(readStdin());
       parsed.sort((a, b) => (b[field] || 0) - (a[field] || 0));
       for (const item of parsed.slice(0, limit)) {
         console.log(JSON.stringify(item));
@@ -687,421 +464,195 @@ try {
     }
 
     // -------------------------------------------------------------------------
-    // assign-anchor <type> <obs_id> [--allow-collision]
-    // AC-A2: Assign next anchor ID for the given type (decision|pitfall) to the
-    // observation identified by obs_id in decisions-log.jsonl. Atomic under a
-    // single .decisions.lock acquisition. Registers usage, re-renders both .md.
-    //
-    // E4: before writing, refuses if the candidate id is already cited as a
-    // whole word somewhere in tracked source (a pre-mint collision — see
-    // scanForAnchorCollision above). --allow-collision skips the scan and
-    // mints anyway, for the human-ruled case where the citation should be
-    // superseded by the ledger's number.
-    //
-    // Locking discipline: holds ONLY .decisions.lock (never .observations.lock).
-    // O(anchored) — single pass for max numeric suffix (AC-P2).
+    // assign-anchor <decision|pitfall> <obs_id>
+    // Promote a v2 observation no ledger row carries to the next entry of its
+    // type, skipping each number a tracked file cites (assignAnchor,
+    // learning-store.cjs: D-LEDGER-REGISTRY, D-E4-SKIP). It never writes the log.
+    // stdout: the anchor; stderr: `assign-anchor: skipped <anchor>, cited in
+    // <path>:<line>` for each number skipped
     // -------------------------------------------------------------------------
     case 'assign-anchor': {
-      const aaKnownFlags = new Set(['--allow-collision']);
-      const aaFlags = args.filter(a => a.startsWith('--'));
-      const aaUnknownFlags = aaFlags.filter(f => !aaKnownFlags.has(f));
-      if (aaUnknownFlags.length > 0) {
-        process.stderr.write(`assign-anchor: unknown flag(s): ${aaUnknownFlags.join(', ')}\n`);
-        process.exit(1);
+      const { store } = learning();
+      if (args.length !== 2 || !ENTRY_TYPES.has(args[0]) || !store.OBS_ID_RE.test(args[1])) {
+        exitWithUsage('assign-anchor <decision|pitfall> <obs_id> (run from the project root)');
       }
-      const aaAllowCollision = aaFlags.includes('--allow-collision');
-      const aaPositional = args.filter(a => !a.startsWith('--'));
-
-      const assignType = aaPositional[0]; // 'decision' or 'pitfall'
-      const assignObsId = aaPositional[1];
-
-      if (!assignType || !assignObsId) {
-        process.stderr.write('assign-anchor: usage: assign-anchor <type> <obs_id> [--allow-collision]\n');
-        process.exit(1);
+      const result = store.assignAnchor(process.cwd(), args[0], args[1]);
+      if (result.ok) {
+        for (const skip of result.value.skipped) {
+          process.stderr.write(`assign-anchor: skipped ${skip.anchor_id}, cited in ${store.singleLine(skip.file)}:${skip.line}\n`);
+        }
       }
-      if (assignType !== 'decision' && assignType !== 'pitfall') {
-        process.stderr.write(`assign-anchor: type must be 'decision' or 'pitfall', got '${assignType}'\n`);
-        process.exit(1);
-      }
-
-      const aaProjectRoot = process.cwd();
-      const aaLedgerPath = getDecisionsLedgerPath(aaProjectRoot);
-      const aaLogPath = getDecisionsLogPath(aaProjectRoot);
-
-      withDecisionsLock('assign-anchor', aaProjectRoot, () => {
-        // Read existing ledger (absent = empty)
-        const aaLedgerRows = parseLedger(aaLedgerPath);
-
-        // Compute next anchor — O(anchored), single pass
-        const { anchorId: aaAnchorId } = nextAnchorFromLedger(aaLedgerRows, assignType);
-
-        // E4: pre-mint collision guard — refuse if the candidate id is already
-        // cited (as a whole word) somewhere in tracked source with a different
-        // meaning, before any ledger write. Never auto-skip to the next free
-        // number — the collision is a human call (rename the citation, or
-        // rerun with --allow-collision to mint over it deliberately).
-        if (!aaAllowCollision) {
-          const aaCollisionHits = scanForAnchorCollision(aaProjectRoot, aaAnchorId);
-          if (aaCollisionHits.length > 0) {
-            throw new Error(
-              `assign-anchor: '${aaAnchorId}' is already cited in source with a different ` +
-              `meaning; resolve the collision before minting (or pass --allow-collision):\n` +
-              formatCollisionHits(aaCollisionHits)
-            );
-          }
-        }
-
-        // Read observation from log
-        let aaLogEntries = parseLedger(aaLogPath);
-        const aaObsIdx = aaLogEntries.findIndex(e => e.id === assignObsId);
-        if (aaObsIdx === -1) {
-          throw new Error(`assign-anchor: obs_id '${assignObsId}' not found in ${aaLogPath}`);
-        }
-        const aaObs = aaLogEntries[aaObsIdx];
-
-        // Precondition assertions — both checked under the lock so they are
-        // race-free against concurrent assign-anchor callers (avoids silent
-        // ledger corruption; assert-preconditions per reliability rule).
-        //
-        // (a) The newly computed anchor_id must not already appear in the ledger.
-        //     nextAnchorFromLedger is deterministic-monotone, so this should
-        //     never fire in normal operation — it guards against double-assign
-        //     bugs (e.g. assign called twice for the same obs_id in a crash loop).
-        if (aaLedgerRows.some(r => r.anchor_id === aaAnchorId)) {
-          throw new Error(
-            `assign-anchor: anchor_id '${aaAnchorId}' already present in ledger — ` +
-            `possible double-assign; refusing to overwrite committed entry`
-          );
-        }
-        //
-        // (b) The target observation must not already have an anchor_id set.
-        //     Re-anchoring an already-anchored obs would mint a duplicate number
-        //     (the old anchor would remain in the ledger AND the new one would
-        //     be added), corrupting the committed source of truth.
-        if (aaObs.anchor_id) {
-          throw new Error(
-            `assign-anchor: obs_id '${assignObsId}' is already anchored as '${aaObs.anchor_id}'; ` +
-            `use retire-anchor to change its status instead`
-          );
-        }
-
-        // Build canonical committed-ledger row via toLedgerRow projector.
-        // Whitelists only the canonical fields — excludes all observation-lifecycle
-        // state (evidence, confidence, quality_ok, count, first_seen, last_seen, …)
-        // that must stay in the log only.
-        const aaDate = new Date().toISOString().slice(0, 10);
-        const aaActiveStatus = assignType === 'decision' ? 'Accepted' : 'Active';
-        // Date stamped on ALL entry types (decisions + pitfalls).  Prefer the
-        // date from the observation (per D-LOG-CONTENT-AUTHORITY); fall back
-        // to today. Both types carry a date so refresh-anchor can re-project
-        // them correctly (pattern refreshes too — consumers match anchor headings, never titles).
-        const aaEntryDate = aaObs.date || aaDate;
-        const aaLedgerRow = toLedgerRow(aaObs, {
-          anchorId: aaAnchorId,
-          status: aaActiveStatus,
-          date: aaEntryDate,
-        });
-
-        // Append anchored row to ledger (atomic temp+rename).
-        //
-        // D002: Crash window — if the process is killed between this write and
-        // renderAndWriteAll below, the ledger will be ahead of decisions.md /
-        // pitfalls.md. This is git-recoverable: the ledger is the source of
-        // truth and `render-decisions.cjs render <worktree>` re-renders the
-        // .md files. The render is kept as the FINAL write under the lock so
-        // the window is as narrow as possible.
-        const aaNewLedgerRows = [...aaLedgerRows, aaLedgerRow];
-        writeFileAtomic(aaLedgerPath, serializeLedger(aaNewLedgerRows));
-
-        // Mark log row as created and stamp anchor_id so guard (b) fires on
-        // any subsequent assign-anchor call for the same obs_id.  Without this
-        // write-back the guard is dead: aaObs.anchor_id would be undefined on
-        // a re-read and a second assign would silently mint a duplicate number.
-        aaLogEntries[aaObsIdx] = Object.assign({}, aaObs, { status: 'created', anchor_id: aaAnchorId });
-        writeJsonlAtomic(aaLogPath, aaLogEntries);
-
-        // Register usage entry
-        registerUsageEntry(aaProjectRoot, aaAnchorId);
-
-        // Re-render both .md files (lock-free — we already hold .decisions.lock).
-        // This is the FINAL write in the lock scope — see D002 above.
-        renderAndWriteAll(aaProjectRoot, aaNewLedgerRows);
-
-        // Print assigned anchor id to stdout
-        process.stdout.write(aaAnchorId + '\n');
-      });
+      process.exitCode = emit(result, assigned => assigned.anchor_id);
       break;
     }
 
     // -------------------------------------------------------------------------
-    // next-anchor <type>
-    // E4: Read-only preview of what assign-anchor would mint next — no lock
-    // acquired, no file written, no usage entry registered. Prints the
-    // candidate id and, when a pre-mint collision guard would fire, its
-    // file:line hits — so a caller can check before committing to assign-anchor.
-    // -------------------------------------------------------------------------
-    case 'next-anchor': {
-      const naType = args[0];
-
-      if (!naType) {
-        process.stderr.write('next-anchor: usage: next-anchor <type>\n');
-        process.exit(1);
-      }
-      if (naType !== 'decision' && naType !== 'pitfall') {
-        process.stderr.write(`next-anchor: type must be 'decision' or 'pitfall', got '${naType}'\n`);
-        process.exit(1);
-      }
-
-      const naProjectRoot = process.cwd();
-      const naLedgerRows = parseLedger(getDecisionsLedgerPath(naProjectRoot));
-      const { anchorId: naAnchorId } = nextAnchorFromLedger(naLedgerRows, naType);
-      const naHits = scanForAnchorCollision(naProjectRoot, naAnchorId);
-
-      process.stdout.write(naAnchorId + '\n');
-      if (naHits.length > 0) {
-        process.stderr.write(
-          `next-anchor: '${naAnchorId}' is already cited in source — collision hits:\n` +
-          formatCollisionHits(naHits) + '\n'
-        );
-        process.exit(1);
-      }
-      break;
-    }
-
-    // -------------------------------------------------------------------------
-    // retire-anchor <anchor_id> <status>
-    // AC-A3, AC-F5, AC-F7: Flip decisions_status on the ledger row. Idempotent.
-    // Re-renders both .md (retired entry vanishes from .md, stays in ledger).
-    //
-    // status must be Deprecated | Superseded | Retired.
-    // Locking discipline: holds ONLY .decisions.lock.
+    // retire-anchor <anchor> <Encoded|Superseded|Retired|Deprecated>
+    // Make an active entry inactive with the one JSON object on stdin its status
+    // takes: { reason } for Retired and Deprecated, { by } for Superseded, and
+    // { at, quote } for Encoded, the quote checked at the verify ref
+    // (retireAnchor, learning-store.cjs: D-ENCODED-QUOTE).
+    // stdout: the new status in lower case and the anchor, then `repointed
+    // <anchor>` for each entry re-pointed to the successor
     // -------------------------------------------------------------------------
     case 'retire-anchor': {
-      const retireAnchorId = args[0];
-      const retireStatus = args[1];
-
-      const RETIRE_STATUSES = new Set(['Deprecated', 'Superseded', 'Retired']);
-
-      if (!retireAnchorId || !retireStatus) {
-        process.stderr.write('retire-anchor: usage: retire-anchor <anchor_id> <status>\n');
-        process.exit(1);
+      const { store } = learning();
+      if (args.length !== 2 || !store.ANCHOR_ID_RE.test(args[0]) || !store.INACTIVE_STATUSES.includes(args[1])) {
+        exitWithUsage('retire-anchor <anchor> <Encoded|Superseded|Retired|Deprecated> (one JSON object on stdin; run from the project root)');
       }
-      if (!RETIRE_STATUSES.has(retireStatus)) {
-        process.stderr.write(`retire-anchor: status must be Deprecated|Superseded|Retired, got '${retireStatus}'\n`);
-        process.exit(1);
-      }
-
-      const raProjectRoot = process.cwd();
-      const raLedgerPath = getDecisionsLedgerPath(raProjectRoot);
-
-      withDecisionsLock('retire-anchor', raProjectRoot, () => {
-        const raRows = parseLedger(raLedgerPath);
-        const raIdx = raRows.findIndex(r => r.anchor_id === retireAnchorId);
-        if (raIdx === -1) {
-          throw new Error(`retire-anchor: anchor_id '${retireAnchorId}' not found in ledger`);
-        }
-
-        // Idempotent: if already set to same status, still write (no-op equivalent)
-        raRows[raIdx] = Object.assign({}, raRows[raIdx], { decisions_status: retireStatus });
-        writeFileAtomic(raLedgerPath, serializeLedger(raRows));
-
-        // Re-render both .md (lock-free — we already hold .decisions.lock)
-        renderAndWriteAll(raProjectRoot, raRows);
-
-        // Echo anchor_id to stdout matching the other three ops (CON-P1).
-        process.stdout.write(retireAnchorId + '\n');
-      });
+      const input = readStdinJson('retire-anchor');
+      const result = input.ok ? store.retireAnchor(process.cwd(), args[0], args[1], input.value) : input;
+      process.exitCode = emit(result, retired => [
+        `${retired.status.toLowerCase()} ${retired.anchor_id}`,
+        ...retired.repointed.map(anchorId => `repointed ${anchorId}`),
+      ].join('\n'));
       break;
     }
 
     // -------------------------------------------------------------------------
-    // refresh-anchor <anchor_id> [<anchor_id>...]
-    // Re-project log observations onto committed ledger rows (D-LOG-CONTENT-AUTHORITY) and
-    // re-render all three files (decisions.md, pitfalls.md, index.md).  Each write
-    // is atomic; the sequence is not transactional — a crash between writes self-heals
-    // on the next ledger op.  Variadic — accepts 1..N anchor ids and performs
-    // ONE lock acquisition, ONE ledger parse, ONE log parse, and ONE render
-    // (PERF-1: collapses N agent turns into 1, N re-renders into 1).
-    //
-    // All-or-nothing semantics: every anchor is validated before any write;
-    // a throw on any anchor leaves the ledger and .md files untouched.
-    //
-    // Algorithm:
-    //   1. Read ledger and log ONCE (outside the per-anchor loop).
-    //   2. For each anchor: locate ledger row, run precondition checks, run
-    //      REG-1 details divergence guard (consumers match anchor headings not
-    //      titles so pattern replacement is sanctioned; only details containment is enforced),
-    //      re-project via toLedgerRow (which carries sink validation for pattern/raw_body/type).
-    //   3. Assert row count unchanged (REL-6 — bounds parseLedger silent-drop exposure).
-    //   4. Write ledger once, render once, echo all ids to stdout (one per line).
-    //
-    // Locking discipline: holds ONLY .decisions.lock.
+    // restore-anchor <anchor>
+    // Make an inactive entry active again, its notes, last_verified and
+    // last_attempt cleared so it is due for maintenance again, ordered after
+    // integrity problems and legacy entries, or among them when it is one
+    // (restoreAnchor, learning-store.cjs: D-DUE-ORDER).
+    // stdout: restored <anchor>
+    // -------------------------------------------------------------------------
+    case 'restore-anchor': {
+      const { store } = learning();
+      if (args.length !== 1 || !store.ANCHOR_ID_RE.test(args[0])) {
+        exitWithUsage('restore-anchor <anchor> (run from the project root)');
+      }
+      process.exitCode = emit(store.restoreAnchor(process.cwd(), args[0]), restored => `restored ${restored.anchor_id}`);
+      break;
+    }
+
+    // -------------------------------------------------------------------------
+    // refresh-anchor <anchor> [<anchor>...] [--verified]
+    // Re-project active v2 entries from their log rows, or under --verified stamp
+    // them verified today; all or nothing (refreshAnchors, learning-store.cjs).
+    // stdout: `reprojected <anchor>` or `unchanged <anchor>` per anchor, or
+    // `verified <anchor>` under --verified, in the order given
     // -------------------------------------------------------------------------
     case 'refresh-anchor': {
-      const refreshAnchorIds = args.filter(Boolean);
-
-      if (refreshAnchorIds.length === 0) {
-        process.stderr.write('refresh-anchor: usage: refresh-anchor <anchor_id> [<anchor_id>...]\n');
-        process.exit(1);
+      const { store } = learning();
+      const verifiedFlags = args.filter(arg => arg === '--verified').length;
+      const anchors = args.filter(arg => arg !== '--verified');
+      if (verifiedFlags > 1 || anchors.length === 0 || !anchors.every(arg => store.ANCHOR_ID_RE.test(arg))) {
+        exitWithUsage('refresh-anchor <anchor> [<anchor>...] [--verified] (run from the project root)');
       }
-
-      const rfProjectRoot = process.cwd();
-      const rfLedgerPath = getDecisionsLedgerPath(rfProjectRoot);
-      const rfLogPath = getDecisionsLogPath(rfProjectRoot);
-
-      // SEC-S3: refuse when no ledger exists at the resolved project root. A refresh
-      // is only valid for a project with a committed ledger — invoked from the wrong
-      // cwd withDecisionsLock would otherwise silently materialise a stray
-      // .devflow/learning/ tree before throwing 'not found in ledger'.
-      if (!fs.existsSync(rfLedgerPath)) {
-        throw new Error(
-          `refresh-anchor: no decisions-ledger.jsonl found at '${rfLedgerPath}' — ` +
-          `cannot refresh an entry where no ledger exists`
-        );
-      }
-
-      withDecisionsLock('refresh-anchor', rfProjectRoot, () => {
-        // (1) Read ledger and log ONCE — shared across all anchor ids (PERF-1).
-        const rfLedgerRows = parseLedger(rfLedgerPath);
-        const rfExpectedRowCount = rfLedgerRows.length;
-        const rfLogEntries = parseLedger(rfLogPath);
-
-        // (2) Validate and re-project each anchor — all-or-nothing: any throw
-        //     propagates out of withDecisionsLock's fn() before any write occurs.
-        for (const anchorId of refreshAnchorIds) {
-          // Locate the existing ledger row by anchor_id (stable, canonical key).
-          // Miss → throw (not process.exit, which would skip the lock release).
-          const rfLedgerIdx = rfLedgerRows.findIndex(r => r.anchor_id === anchorId);
-          if (rfLedgerIdx === -1) {
-            throw new Error(
-              `refresh-anchor: anchor_id '${anchorId}' not found in ledger — ` +
-              `cannot refresh a row that was never committed`
-            );
-          }
-
-          const rfExistingRow = rfLedgerRows[rfLedgerIdx];
-
-          // Precondition assertions — checked under the lock (assert-preconditions
-          // per reliability rule). Mirrors assign-anchor's pattern.
-          // (a) Ledger row must have an id — undefined===undefined would bind the wrong log row.
-          if (!rfExistingRow.id) {
-            throw new Error(
-              `refresh-anchor: ledger row '${anchorId}' has no id — ` +
-              `cannot resolve its log observation`
-            );
-          }
-          // (b) Ledger row must have decisions_status — toLedgerRow passes it through;
-          //     absent would cause JSON.stringify to drop the key from the projected row.
-          if (!rfExistingRow.decisions_status) {
-            throw new Error(
-              `refresh-anchor: ledger row '${anchorId}' has no decisions_status — ` +
-              `refusing to project a row that would drop it`
-            );
-          }
-
-          // Locate the log obs by the LEDGER ROW's id field (D-LOG-CONTENT-AUTHORITY).
-          // Matching on id (not anchor_id) covers pre-existing obs written before
-          // assign-anchor added anchor_id write-back to the log.
-          const rfObs = rfLogEntries.find(r => r.id === rfExistingRow.id);
-          if (!rfObs) {
-            throw new Error(
-              `refresh-anchor: log obs with id '${rfExistingRow.id}' ` +
-              `(for anchor ${anchorId}) not found in log`
-            );
-          }
-
-          // (c) Type must match the committed anchor — re-projecting across types would move
-          //     a PF-NNN into decisions.md (or vice versa) and corrupt the rendered corpus.
-          //     This check also satisfies toLedgerRow's sink-side expectType guard;
-          //     both fire with their respective messages — this one fires first.
-          if (rfObs.type !== rfExistingRow.type) {
-            throw new Error(
-              `refresh-anchor: log obs '${rfObs.id}' type '${rfObs.type}' does not match committed anchor ` +
-              `${anchorId} type '${rfExistingRow.type}' — refusing to re-project across entry types`
-            );
-          }
-
-          // REG-1: divergence guard — refuse to silently overwrite
-          // ledger-only curation content. Applies to DETAILS only: pattern replacement
-          // is sanctioned (consumers match '## (ADR|PF)-NNN:' anchors, never
-          // titles, so a sharpened log pattern may update the rendered heading).
-          // raw_body is validated at the sink, by isSafeRawBody inside toLedgerRow.
-          const rfNormWS = (/** @type {unknown} */ s) =>
-            typeof s === 'string' ? s.replace(/\s+/g, ' ').trim() : '';
-          const rfLedgerDetails = rfNormWS(rfExistingRow.details);
-          const rfLogDetails = rfNormWS(rfObs.details);
-          if (rfLedgerDetails && !rfLogDetails.includes(rfLedgerDetails)) {
-            throw new Error(
-              `refresh-anchor: ledger row '${anchorId}' carries content absent from log obs ` +
-              `'${rfExistingRow.id}' (details: ledger ${rfLedgerDetails.length}B / log ${rfLogDetails.length}B). ` +
-              `Reconcile the log row first — re-projecting would discard curated content.`
-            );
-          }
-
-          // Re-project via toLedgerRow (strict canonical projection, D-LOG-CONTENT-AUTHORITY).
-          // Preserve decisions_status and date from the ledger (ledger-owned fields).
-          // expectType passed for sink validation (redundant with the check above,
-          // but ensures the guard holds even if future callers bypass the outer check).
-          rfLedgerRows[rfLedgerIdx] = toLedgerRow(rfObs, {
-            anchorId,
-            status: rfExistingRow.decisions_status,
-            date: rfExistingRow.date,
-            expectType: rfExistingRow.type,
-          });
-        }
-
-        // (3) REL-6: assert row count unchanged — bounds parseLedger silent-drop
-        //     exposure. A whole-file rewrite that shrank the corpus is always a bug.
-        if (rfLedgerRows.length !== rfExpectedRowCount) {
-          throw new Error(
-            `refresh-anchor: ledger row count changed during re-projection ` +
-            `(${rfExpectedRowCount} → ${rfLedgerRows.length}) — refusing to write a lossy rewrite`
-          );
-        }
-
-        // (4) Write once and render once (PERF-1 — N anchors, one I/O round-trip).
-        writeFileAtomic(rfLedgerPath, serializeLedger(rfLedgerRows));
-        renderAndWriteAll(rfProjectRoot, rfLedgerRows);
-
-        // Echo all refreshed ids to stdout — one per line, mirrors assign-anchor's
-        // contract; callers can confirm which rows were refreshed without parsing stderr.
-        process.stdout.write(refreshAnchorIds.join('\n') + '\n');
-      });
+      const result = store.refreshAnchors(process.cwd(), anchors, { verified: verifiedFlags === 1 });
+      process.exitCode = emit(result, ({ refreshed }) => refreshed.map(entry => `${entry.state} ${entry.anchor_id}`).join('\n'));
       break;
     }
 
     // -------------------------------------------------------------------------
-    // rotate-observations [<log>] [<archive>]
-    // AC-F9, AC-P3: Move stale observing rows (>30 days old) to archive.
-    // NEVER moves anchored or created/ready rows — only stale 'observing' rows.
-    // Runs under .observations.lock (NOT .decisions.lock).
-    //
-    // Default paths derived from cwd. Accepts explicit log/archive paths as args.
-    // For testability, _now_ is injectable via the _nowMs parameter in the
-    // internal function; CLI always uses Date.now().
+    // rotate-observations
+    // Archive the log rows no ledger row carries once 30 days have passed since
+    // their last activity, and delete the usage telemetry's leftovers
+    // (D-ROTATE-UNREFERENCED, learning-store.cjs). Takes no argument: the log and
+    // the archive are the project root's.
+    // stdout: rotated <N> observations
     // -------------------------------------------------------------------------
     case 'rotate-observations': {
-      // Args may be: [] | [log] | [log, archive]
-      const roProjectRoot = process.cwd();
-      const roLogPath = args[0] ? safePath(args[0]) : getDecisionsLogPath(roProjectRoot);
-      const roArchivePath = args[1] ? safePath(args[1]) : getDecisionsArchivePath(roProjectRoot);
-      const roLockDir = getObservationsLockDir(roProjectRoot);
+      if (args.length > 0) exitWithUsage('rotate-observations (no arguments; run from the project root)');
+      const result = learning().store.rotateObservations(process.cwd());
+      process.exitCode = emit(result, ({ rotated }) => `rotated ${rotated} observations`);
+      break;
+    }
 
-      fs.mkdirSync(path.dirname(roLogPath), { recursive: true });
-      fs.mkdirSync(path.dirname(roArchivePath), { recursive: true });
-      fs.mkdirSync(path.dirname(roLockDir), { recursive: true });
-
-      if (!acquireMkdirLock(roLockDir, 30000, 60000)) {
-        process.stderr.write('rotate-observations: timeout acquiring .observations.lock\n');
-        process.exit(1);
+    // -------------------------------------------------------------------------
+    // put-observation --create|--update|--reinforce
+    // Store one observation from the JSON object on stdin (D-PUT-NOT-MERGE,
+    // D-PUT-REPROJECTS, learning-store.cjs). Exactly one mode flag; no other argv.
+    // stdout: created <id> | updated <id> | unchanged <id> | reinforced <id> <n>,
+    // then one `reprojected <anchor>` line per entry re-projected
+    // -------------------------------------------------------------------------
+    case 'put-observation': {
+      const mode = args.length === 1 ? PUT_MODES.get(args[0]) : undefined;
+      if (mode === undefined) {
+        exitWithUsage('put-observation --create|--update|--reinforce (one JSON object on stdin; run from the project root)');
       }
+      const input = readStdinJson('put-observation');
+      const result = input.ok ? learning().store.putObservation(process.cwd(), mode, input.value) : input;
+      process.exitCode = emit(result, put => [
+        put.outcome === 'reinforced' ? `reinforced ${put.id} ${put.observations}` : `${put.outcome} ${put.id}`,
+        ...put.reprojected.map(anchorId => `reprojected ${anchorId}`),
+      ].join('\n'));
+      break;
+    }
 
-      try {
-        const roRotated = rotateObservations(roLogPath, roArchivePath, Date.now());
-        process.stdout.write(`rotated ${roRotated} observing rows\n`);
-      } finally {
-        releaseLock(roLockDir);
+    // -------------------------------------------------------------------------
+    // list
+    // Print the ledger and the log by section, read-only (readListing and
+    // formatListing, learning-store.cjs). Takes no argument.
+    // stdout: the ACTIVE, INACTIVE, OBSERVATIONS and INTEGRITY sections, then
+    // MALFORMED when lines were skipped
+    // -------------------------------------------------------------------------
+    case 'list': {
+      if (args.length > 0) exitWithUsage('list (no arguments; run from the project root)');
+      const { store } = learning();
+      process.exitCode = emit(store.readListing(process.cwd()), store.formatListing);
+      break;
+    }
+
+    // -------------------------------------------------------------------------
+    // show <anchor|obs_id>
+    // Print one entry, read-only (showByKey, learning-store.cjs).
+    // stdout: pretty JSON { key, ledger, log, history_versions, flags }, plus
+    // malformed when lines were skipped
+    // -------------------------------------------------------------------------
+    case 'show': {
+      const { store } = learning();
+      if (args.length !== 1 || !(store.ANCHOR_ID_RE.test(args[0]) || store.OBS_ID_RE.test(args[0]))) {
+        exitWithUsage('show <anchor|obs_id> (run from the project root)');
       }
+      process.exitCode = emit(store.showByKey(process.cwd(), args[0]), shown => JSON.stringify(shown, null, 2));
+      break;
+    }
+
+    // -------------------------------------------------------------------------
+    // claim-due
+    // Hand out the entries due for maintenance and lease each for a day
+    // (claimDue, learning-store.cjs: D-DUE-ORDER, D-VERIFY-REF). Takes no argument.
+    // stdout: ref <origin/HEAD|HEAD> <sha12>, or ref none; then one
+    // `<anchor> <reason> <bytes>` line per entry handed out, or due none
+    // -------------------------------------------------------------------------
+    case 'claim-due': {
+      if (args.length > 0) exitWithUsage('claim-due (no arguments; run from the project root)');
+      const { store } = learning();
+      process.exitCode = emit(store.claimDue(process.cwd()), ({ ref, due }) => [
+        ref === null ? 'ref none' : `ref ${ref.ref} ${ref.commit.slice(0, 12)}`,
+        ...(due.length > 0 ? due.map(entry => `${store.singleLine(entry.anchor_id)} ${entry.reason} ${entry.bytes}`) : ['due none']),
+      ].join('\n'));
+      break;
+    }
+
+    // -------------------------------------------------------------------------
+    // claim-queue
+    // Claim the learning queue for this run (D-OWNED-CLAIM, learning-store.cjs).
+    // Takes no argument; mints the token itself.
+    // stdout: claimed <token> | claimed <token> takeover | busy | none
+    // -------------------------------------------------------------------------
+    case 'claim-queue': {
+      if (args.length > 0) exitWithUsage('claim-queue (no arguments; run from the project root)');
+      const result = learning().store.claimQueue(process.cwd());
+      process.exitCode = emit(result, claim => (claim.state === 'claimed'
+        ? `claimed ${claim.token}${claim.takeover ? ' takeover' : ''}`
+        : claim.state));
+      break;
+    }
+
+    // -------------------------------------------------------------------------
+    // release-claim <token>
+    // Release the claim the token owns (D-OWNED-CLAIM, learning-store.cjs).
+    // stdout: released | not-owner | gone
+    // -------------------------------------------------------------------------
+    case 'release-claim': {
+      const { store } = learning();
+      if (args.length !== 1 || !store.CLAIM_TOKEN_RE.test(args[0])) {
+        exitWithUsage('release-claim <token> (the 16 hex characters claim-queue printed)');
+      }
+      process.exitCode = emit(store.releaseClaim(process.cwd(), args[0]), release => release.state);
       break;
     }
 
@@ -1114,19 +665,3 @@ try {
   process.exit(1);
 }
 } // end if (require.main === module)
-
-// Expose helpers for unit testing (only when required as a module, not run as CLI)
-if (typeof module !== 'undefined' && module.exports) {
-  module.exports = {
-    readUsageFile,
-    writeUsageFile,
-    registerUsageEntry,
-    writeFileAtomic,
-    writeJsonlAtomic,
-    initDecisionsContent,
-    nextAnchorFromLedger,
-    rotateObservations,
-    scanForAnchorCollision,
-    isCollisionScanExcluded,
-  };
-}

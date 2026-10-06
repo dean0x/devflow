@@ -57,9 +57,14 @@ export function getLearningPendingTurnsPath(projectRoot: string): string {
   return path.join(projectRoot, '.devflow', 'learning', '.pending-turns.jsonl');
 }
 
-/** .devflow/learning/.pending-turns.processing — atomic claim held by the Learning agent while processing */
+/** .devflow/learning/.pending-turns.processing — the claimed batch a Learning run holds while it processes it */
 export function getLearningPendingTurnsProcessingPath(projectRoot: string): string {
   return path.join(projectRoot, '.devflow', 'learning', '.pending-turns.processing');
+}
+
+/** .devflow/learning/.pending-turns.owner — the token of the run that holds the claim (learning-store.cjs) */
+export function getLearningClaimOwnerPath(projectRoot: string): string {
+  return path.join(projectRoot, '.devflow', 'learning', '.pending-turns.owner');
 }
 
 // ---------------------------------------------------------------------------
@@ -96,29 +101,19 @@ export function getDecisionsArchivePath(projectRoot: string): string {
   return path.join(projectRoot, '.devflow', 'learning', 'decisions-log.archive.jsonl');
 }
 
+/** .devflow/learning/decisions-history.jsonl — prior content versions of rewritten entries (learning-store.cjs) */
+export function getDecisionsHistoryPath(projectRoot: string): string {
+  return path.join(projectRoot, '.devflow', 'learning', 'decisions-history.jsonl');
+}
+
 /** .devflow/learning/.decisions.lock — mkdir-based lock directory */
 export function getDecisionsLockDir(projectRoot: string): string {
   return path.join(projectRoot, '.devflow', 'learning', '.decisions.lock');
 }
 
-/** .devflow/learning/.decisions-usage.json */
-export function getDecisionsUsagePath(projectRoot: string): string {
-  return path.join(projectRoot, '.devflow', 'learning', '.decisions-usage.json');
-}
-
-/** .devflow/learning/.decisions-usage.lock/ — mkdir-based lock directory for usage file */
-export function getDecisionsUsageLockDir(projectRoot: string): string {
-  return path.join(projectRoot, '.devflow', 'learning', '.decisions-usage.lock');
-}
-
 /** .devflow/learning/index.md — pre-rendered compact index written by render-decisions.cjs */
 export function getDecisionsIndexPath(projectRoot: string): string {
   return path.join(projectRoot, '.devflow', 'learning', 'index.md');
-}
-
-/** .devflow/learning/.observations.lock — mkdir-based lock directory for observation log writes */
-export function getObservationsLockDir(projectRoot: string): string {
-  return path.join(projectRoot, '.devflow', 'learning', '.observations.lock');
 }
 
 // ---------------------------------------------------------------------------

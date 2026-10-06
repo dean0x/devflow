@@ -107,7 +107,7 @@ describe('Consumer agents — devflow:apply-decisions in skills frontmatter', ()
 
 describe('DECISIONS_CONTEXT input declaration — canonical form', () => {
   const CANONICAL_DESCRIPTION =
-    '**DECISIONS_CONTEXT** (optional): Compact index of active ADR/PF entries for this worktree (pre-rendered to `.devflow/learning/index.md`). `(none)` when absent. Use `devflow:apply-decisions` to Read full bodies on demand.'
+    '**DECISIONS_CONTEXT** (optional): Compact index of active ADR/PF entries for this repository (pre-rendered to `.devflow/learning/index.md` in its main worktree). `(none)` when absent. Use `devflow:apply-decisions` to Read full bodies on demand.'
 
   const consumerAgents: Array<[string, string]> = [
     ['triage.md', 'src/assets/agents/triage.md'],
@@ -159,6 +159,54 @@ describe('review.md — Apply Decisions section', () => {
     const content = loadFile('src/assets/agents/review.md')
     expect(content).toMatch(/## Apply Decisions|### Apply Decisions/)
     expect(content).toContain('devflow:apply-decisions')
+  })
+})
+
+// -------------------------------------------------------------------------
+// Consumers read the decisions index from the repository's main worktree
+// -------------------------------------------------------------------------
+
+describe('consumers read the decisions index from the main worktree', () => {
+  it('code.md falls back to the main worktree index, never to the checkout decisions files', () => {
+    const content = loadFile('src/assets/agents/code.md')
+    expect(content).toContain('If `DECISIONS_CONTEXT` is provided, follow `devflow:apply-decisions` on it.')
+    expect(content).toContain(
+      'Otherwise read the decisions index — `.devflow/learning/index.md` at the repository\'s main worktree ' +
+      '(`git rev-parse --path-format=absolute --git-common-dir`; when it ends in `/.git` the index lives under its parent)',
+    )
+    expect(content).toContain('skip it when absent, empty or `(none)`')
+    expect(content).not.toContain('.devflow/learning/decisions.md')
+    expect(content).not.toContain('.devflow/learning/pitfalls.md')
+  })
+
+  it('code.md states applied decisions and pitfalls in words, never by ID', () => {
+    expect(loadFile('src/assets/agents/code.md')).toContain(
+      'State every decision or pitfall you apply in words in code, comments, tests and commit messages, never by its ID.',
+    )
+  })
+
+  it('_decisions.mds exports decisions_locate and decisions_load, and the loader calls the locator', () => {
+    const source = loadFile('src/assets/commands/_partials/_decisions.mds')
+    expect(source).toMatch(/^@define decisions_locate\(\):$/m)
+    expect(source).toMatch(/^@define decisions_load\(\):$/m)
+    expect(source).toMatch(/^@export decisions_locate$/m)
+    expect(source).toMatch(/^@export decisions_load$/m)
+    const load = source.slice(source.indexOf('@define decisions_load():'))
+    expect(load.slice(0, load.indexOf('@end'))).toContain('{{decisions_locate()}}')
+  })
+
+  it('_preamble.mds alias-imports the locator and calls it, with no selective import', () => {
+    const source = loadFile('src/assets/commands/_partials/_preamble.mds')
+    expect(source).toMatch(/^@import "\.\/_decisions\.mds" as decisions$/m)
+    expect(source).toContain('{{decisions.decisions_locate()}}')
+    expect(source).not.toMatch(/@import \{[^}]*\} from "\.\/_decisions\.mds"/)
+    expect(source).toContain('`{ledger}/.devflow/learning/index.md`')
+  })
+
+  it('the dynamic-build implement bundle passes the DECISIONS_CONTEXT loaded before authoring', () => {
+    const content = loadFile('dist/commands/dynamic-build.md')
+    expect(content).toContain('relevant DECISIONS_CONTEXT (the index you loaded before authoring)')
+    expect(content).not.toContain('DECISIONS_CONTEXT (from `.devflow/learning/index.md`)')
   })
 })
 

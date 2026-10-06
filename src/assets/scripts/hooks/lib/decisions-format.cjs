@@ -2,12 +2,14 @@
 //
 // Shared pure formatting helpers for decisions.md and pitfalls.md output.
 //
-// DESIGN: Shared pure formatting helpers used by assign-anchor (via json-helper.cjs)
-// and render-decisions.cjs so both share the EXACT same format functions. This is
-// the single source of truth for the byte-compat output strings — any drift here
-// will break the renderer/session-start-context TL;DR parser.
+// DESIGN: Shared pure formatting helpers for render-decisions.cjs, the one
+// renderer: its CLI and every learning-store writer render through it, so all of
+// them share the EXACT same format functions. This is the single source of truth
+// for the byte-compat output strings — any drift here will break the
+// renderer/session-start-context TL;DR parser.
 //
 // BYTE-COMPAT CONTRACT (must not change without updating all consumers):
+//   v1 entries — ledger rows without schema 2 — keep these bytes (D-V1-BYTE-STABLE):
 //   Decision heading:  \n## {anchorId}: {title}\n
 //   Decision fields:   - **Date**: YYYY-MM-DD\n          (empty string when absent — render purity: never clock-read in a formatter)
 //                      - **Status**: Accepted\n
@@ -24,10 +26,22 @@
 //                      - **Status**: Active\n
 //                      - **Source**: self-learning:{obsId}\n
 //                      - **Amendments**: text1; text2\n   (omitted when absent or empty)
-//   TL;DR line:        <!-- TL;DR: N {decisions|pitfalls}. Key: id1, id2 -->
-//   File headers:
-//     decisions.md: "<!-- TL;DR: 0 decisions. Key: -->\n# Architectural Decisions\n\nAppend-only. Status changes allowed; deletions prohibited.\n"
-//     pitfalls.md:  "<!-- TL;DR: 0 pitfalls. Key: -->\n# Known Pitfalls\n\nArea-specific gotchas, fragile areas, and past bugs.\n"
+//   v2 entries — rows with schema 2 — render from their fields (formatEntryBodyV2):
+//     \n## {anchorId}: {title}\n\n
+//     - **Status**: {Accepted|Active}\n             (+ " · verified {last_verified}" when the row has one)
+//     - **Scope**: `{scope1}`, `{scope2}`\n
+//     - **{Decision|Rule}**: {rule}\n              (Decision for decisions, Rule for pitfalls)
+//     - **Why**: {why}\n
+//     - **Source**: {provenance}\n
+//   Inactive table, after the active bodies and omitted when no entry is inactive:
+//     \n## Inactive\n\n| ID | Status | Note |\n|---|---|---|\n   then "| {anchorId} | {status} | {note} |\n" per entry
+//   TL;DR line:        <!-- TL;DR: N {decisions|pitfalls} -->   (N = the file's active entries)
+//   File headers (the renderer swaps in the real TL;DR line):
+//     decisions.md: "<!-- TL;DR: 0 decisions -->\n# Architectural Decisions\n\n{GENERATED_NOTICE}\n"
+//     pitfalls.md:  "<!-- TL;DR: 0 pitfalls -->\n# Known Pitfalls\n\n{GENERATED_NOTICE}\n"
+//   Index lines:
+//     v1: "  {anchorId}  {title cut to 60}  [{status}]"     (+ "  —  {area cut to 80}" when it has one)
+//     v2: "  {anchorId}  {title}"                           (+ "  —  {scope joined ', ' cut to 80}" when it has one)
 //
 // Field parsing: both formatters use segmentDetails() which splits on ';' and
 // anchors key detection to the START of each trimmed segment — so 'reissue:'
@@ -41,25 +55,34 @@
 // LineTerminators (\r, \n, \u2028, \u2029) in field values are collapsed to a
 // single space at all five collapse sites (segmentDetails ×2, amendmentToString
 // ×3) — guards the single-line field contract against the full JS LineTerminator
-// set, not just \n.
+// set, not just \n. A v2 field is structured, never parsed: each run of control
+// characters in it collapses to one space (the store's singleLine), so no field
+// value can add a line, a heading or a table row.
 //
 // Index extraction: extractEntryFromBlock uses line-anchored regexes
 // (/^- \*\*Status\*\*:/m, /^- \*\*Area\*\*:/m) to guard against amendment
-// text that accidentally contains those patterns as substrings.
+// text that accidentally contains those patterns as substrings. It reads v1
+// blocks only; a v2 index line is built from the row's fields.
 //
-// Amendments shape: the row's `amendments` array accepts BOTH the
-// { date, note } objects declared by LearningObservation/LedgerRow in
-// src/core/observations.ts (rendered as `[date] note`) and pre-rendered
-// strings.  formatAmendmentsLine normalises per entry — never a bare join,
-// which would emit `[object Object]` for the schema-declared shape.
+// Amendments shape: a v1 row's `amendments` array accepts BOTH the
+// { date, note } objects the v1 corpus holds (rendered as `[date] note`) and
+// pre-rendered strings.  formatAmendmentsLine normalises per entry — never a
+// bare join, which would emit `[object Object]` for the object shape.
 //
 // Consumers of these strings:
-//   - session-start-context (line 57): reads TL;DR comment via sed
+//   - session-start-context (Section 1): injects the TL;DR comment's text via sed
 //   - devflow:apply-decisions: reads ## ADR-NNN: / ## PF-NNN: headings
-//   - decisions-usage-scan: scans /(ADR|PF)-\d{3}/ anchors
-//   - buildIndexContent (below): parses ## heading, - **Status**:, - **Area**: lines from rendered blocks
+//   - buildIndexContent (below): parses ## heading, - **Status**:, - **Area**: lines from rendered v1 blocks
 
 'use strict';
+
+const {
+  ACTIVE_STATUSES,
+  activeStatusFor,
+  isV2,
+  singleLine,
+  inactiveNote,
+} = require('./learning-store.cjs');
 
 /** JS LineTerminator set — /m `^` matches after each of these and `.` excludes them. */
 const LINE_TERMINATORS = /[\r\n\u2028\u2029]/g;
@@ -150,11 +173,9 @@ function segmentDetails(detailsStr, keys) {
 /**
  * Normalise one amendment entry to its rendered string form.
  *
- * TWO SHAPES are accepted because two authorities define this field:
- *   - `{ date, note }` — the shape declared by LearningObservation /
- *     LedgerRow in src/core/observations.ts, and the ONLY shape its
- *     isLearningObservation type guard accepts. Renders as `[date] note`
- *     (bare `note` when date is absent/blank).
+ * TWO SHAPES are accepted:
+ *   - `{ date, note }` — the shape every amendment in the v1 corpus has.
+ *     Renders as `[date] note` (bare `note` when date is absent/blank).
  *   - `string` — a pre-rendered `[date] note` line, the convenience form.
  *
  * A plain `join` over the object shape would emit `[object Object]`, so the
@@ -197,44 +218,29 @@ function formatAmendmentsLine(amendments) {
   return `- **Amendments**: ${parts.join('; ')}\n`;
 }
 
-/**
- * Guard against raw_body payloads that could forge a second entry heading or
- * claim a different anchor ID. Accepts only a string whose `^## (ADR|PF)-\d+:`
- * headings number exactly one AND match `## ${anchorId}:`.
- *
- * A rejected raw_body is DROPPED from the row — the entry then renders through
- * the sanitised formatDecisionBody/formatPitfallBody — the sanctioned fallback when raw_body is absent or rejected.
- *
- * Validate at the sink so all callers (assign-anchor, refresh-anchor,
- * any future op) inherit the guard without repeating it.
- *
- * @param {unknown} body
- * @param {string} anchorId - e.g. 'ADR-NNN' or 'PF-NNN'
- * @returns {boolean}
- */
-function isSafeRawBody(body, anchorId) {
-  if (typeof body !== 'string') return false;
-  const headings = body.match(/^## (?:ADR|PF)-\d+:/gm) || [];
-  return headings.length === 1 && headings[0] === `## ${anchorId}:`;
-}
-
 /** Recognised field keys for decision entries. */
 const ADR_KEYS = /** @type {const} */ (['context', 'decision', 'rationale']);
 
 /** Recognised field keys for pitfall entries. */
 const PF_KEYS = /** @type {const} */ (['area', 'issue', 'impact', 'resolution']);
 
+/** The line under each rendered file's title: who writes the file and what it lists. */
+const GENERATED_NOTICE =
+  'Generated from the local learning ledger by devflow; do not edit. ' +
+  'Active entries follow; retired ones are listed under Inactive.';
+
 /**
- * Return the initial header content for a new decisions or pitfalls file.
- * Byte-identical to the initDecisionsContent function in json-helper.cjs.
+ * Return the header of a rendered decisions or pitfalls file: the zero-count
+ * TL;DR line, the title and the generated-file notice. It is the whole file of an
+ * empty corpus; the renderer swaps in the file's real TL;DR line.
  *
  * @param {'decision'|'pitfall'} kind
  * @returns {string}
  */
 function initDecisionsContent(kind) {
   return kind === 'decision'
-    ? '<!-- TL;DR: 0 decisions. Key: -->\n# Architectural Decisions\n\nAppend-only. Status changes allowed; deletions prohibited.\n'
-    : '<!-- TL;DR: 0 pitfalls. Key: -->\n# Known Pitfalls\n\nArea-specific gotchas, fragile areas, and past bugs.\n';
+    ? `${buildTldrLine('decisions', [])}\n# Architectural Decisions\n\n${GENERATED_NOTICE}\n`
+    : `${buildTldrLine('pitfalls', [])}\n# Known Pitfalls\n\n${GENERATED_NOTICE}\n`;
 }
 
 /**
@@ -296,101 +302,95 @@ function formatPitfallBody(row) {
   );
 }
 
-/**
- * Project a full observation row into the canonical committed-ledger shape.
- * Whitelists ONLY the fields that belong in decisions-ledger.jsonl:
- *   { id, type, pattern, details, anchor_id, decisions_status, date?, raw_body?, amendments? }
- *
- * All observation-lifecycle fields (evidence, confidence, quality_ok, count,
- * first_seen, last_seen, artifact_path, status, …) are intentionally excluded
- * from the committed ledger — they are log-only state.
- *
- * D-LOG-CONTENT-AUTHORITY: the observation log (decisions-log.jsonl) is the one
- * home of an entry's content. Its ledger row is a projection of the log row,
- * re-derived through this function alone: assign-anchor projects it at
- * promotion, and refresh-anchor re-projects it after a reinforcement changes the
- * log row. Nothing else may write entry content into decisions-ledger.jsonl — a
- * change goes to the log row, then through refresh-anchor. The ledger owns only
- * the anchor number, the decisions_status and the promotion date, which callers
- * pass in: assign-anchor takes the date from the log row (else today), and
- * refresh-anchor carries all three over unchanged, so a dateless row stays
- * dateless. Reason: a ledger row copied once at promotion silently lost every
- * later sharpening of its entry, and content kept in two places leaves two
- * authorities that disagree.
- *
- * D001: The projected shape is a DISTINCT COMMITTED shape, not a full obs copy.
- * This function is the single source of truth for that projection so both the
- * add-path (assign-anchor) and the migration's preserve-verbatim path produce
- * byte-identical committed shapes.
- *
- * Validation at the SINK (validate at convergence so all callers inherit):
- *   - expectType: if provided, obs.type must match or this function throws; prevents
- *     re-projecting across entry types (PF-NNN into decisions.md or vice versa).
- *   - pattern: JS LineTerminators collapsed to a single space — the heading is
- *     single-line by construction; a newline in pattern would forge '- **Status**:'
- *     lines or second '## ADR-NNN:' headings that line-anchored index regexes match first.
- *   - raw_body: gated by isSafeRawBody — accepts only a body with exactly one heading
- *     matching anchorId; a rejected body is dropped so the entry renders through the
- *     sanitised formatDecisionBody/formatPitfallBody instead.
- *
- * @param {object} obs - Full observation row from decisions-log.jsonl
- * @param {{ anchorId: string, status: string, date?: string, expectType?: string }} opts
- * @returns {object} Canonical ledger row
- */
-function toLedgerRow(obs, { anchorId, status, date, expectType }) {
-  // Type guard — validate at the sink so all callers (assign-anchor,
-  // refresh-anchor, any future op) inherit the check without repeating it.
-  if (expectType !== undefined && obs.type !== expectType) {
-    throw new Error(
-      `toLedgerRow: type mismatch for ${anchorId} — ledger has '${expectType}', log has '${obs.type}'`
-    );
-  }
-  /** @type {Record<string, unknown>} */
-  const row = {
-    id: obs.id,
-    type: obs.type,
-    // Heading is single-line by construction — collapse any LLM-injected line terminators
-    // so a newline in pattern cannot forge '- **Status**:' lines or second '## ADR-NNN:'
-    // headings inside the rendered body (those would be matched first by the line-anchored
-    // index regexes in extractEntryFromBlock).
-    pattern: typeof obs.pattern === 'string' ? obs.pattern.replace(LINE_TERMINATORS, ' ').trim() : obs.pattern,
-    details: obs.details,  // segmentDetails already collapses line terminators at read time
-    anchor_id: anchorId,
-    decisions_status: status,
-  };
-  // Optional fields — include only when present in the observation or explicitly provided
-  if (date !== undefined) row.date = date;
-  // log-sourced raw_body (D-LOG-CONTENT-AUTHORITY) — a log row that lost raw_body
-  // un-freezes the entry to formatter-rendered output by design. Gate through isSafeRawBody.
-  if (obs.raw_body !== undefined && isSafeRawBody(obs.raw_body, anchorId)) {
-    row.raw_body = obs.raw_body;
-  }
-  if (obs.amendments !== undefined) row.amendments = obs.amendments;
-  return row;
+// ---------------------------------------------------------------------------
+// v2 entries and the Inactive table
+// ---------------------------------------------------------------------------
+
+/** Per-type labels of a v2 body: the active status it shows and the name of its rule field. */
+const V2_LABELS = Object.freeze({
+  decision: Object.freeze({ status: activeStatusFor('decision'), rule: 'Decision' }),
+  pitfall: Object.freeze({ status: activeStatusFor('pitfall'), rule: 'Rule' }),
+});
+
+/** A row field on one line: a string with each control-character run collapsed to a space, '' for anything else. */
+function oneLine(value) {
+  return typeof value === 'string' ? singleLine(value) : '';
+}
+
+/** A v2 row's scope entries, each on one line; an entry that is not a non-empty string is skipped. */
+function scopeEntries(row) {
+  return Array.isArray(row.scope)
+    ? row.scope.filter(entry => typeof entry === 'string' && entry !== '').map(singleLine)
+    : [];
 }
 
 /**
- * Build the TL;DR comment line for a rendered decisions or pitfalls file.
- * Format: `<!-- TL;DR: N {decisions|pitfalls}. Key: id1, id2 -->`
+ * Format the body block of a v2 entry (schema 2) from its row fields. Returns the
+ * block starting with a leading newline, like the v1 formatters.
  *
- * Key is the last 5 anchor IDs from the provided active rows (sorted by
- * numeric anchor ascending — same order as the rendered file).
- * When rows is empty, Key is empty string (no trailing space before -->).
+ * The Status line shows the active status of the entry's type — Accepted for a
+ * decision, Active for a pitfall; only active entries render — and then
+ * ` · verified {last_verified}` when the row has that date. Scope entries are code
+ * spans joined by ', ', and the rule is labelled Decision or Rule by type. A field
+ * that is not a string renders empty: a row is validated when it is written, but a
+ * hand edit can leave anything, and a formatter that runs under the lock must not
+ * throw.
+ *
+ * @param {object} row - a v2 ledger row
+ * @returns {string}
+ */
+function formatEntryBodyV2(row) {
+  const labels = row.type === 'pitfall' ? V2_LABELS.pitfall : V2_LABELS.decision;
+  const verified = oneLine(row.last_verified);
+  const scope = scopeEntries(row).map(entry => `\`${entry}\``).join(', ');
+  return (
+    `\n## ${oneLine(row.anchor_id)}: ${oneLine(row.title)}\n\n` +
+    `- **Status**: ${labels.status}${verified ? ` · verified ${verified}` : ''}\n` +
+    `- **Scope**: ${scope}\n` +
+    `- **${labels.rule}**: ${oneLine(row.rule)}\n` +
+    `- **Why**: ${oneLine(row.why)}\n` +
+    `- **Source**: ${oneLine(row.provenance)}\n`
+  );
+}
+
+/** A table cell: one line, trimmed, with `|` escaped so a value adds no column. */
+function tableCell(value) {
+  return oneLine(value).trim().replace(/\|/g, '\\|');
+}
+
+/**
+ * Format the Inactive table of a rendered file: one row per inactive entry, v1 or
+ * v2, in the order given (the renderer sorts them by number), or '' when there are
+ * none.
+ *
+ * The Note column says why the entry is inactive, as `list` does (inactiveNote):
+ * `encoded in {path}`, else `superseded by {anchor}`, else the status note, else
+ * `—`. Every cell is one line with `|` escaped as `\|`, so no value adds a line or
+ * a column. index.md never carries this table.
+ *
+ * @param {object[]} rows - inactive ledger rows
+ * @returns {string}
+ */
+function formatInactiveTable(rows) {
+  if (rows.length === 0) return '';
+  const lines = rows.map(row =>
+    `| ${tableCell(row.anchor_id)} | ${tableCell(row.decisions_status)} | ${tableCell(inactiveNote(row)) || '—'} |`
+  );
+  return `\n## Inactive\n\n| ID | Status | Note |\n|---|---|---|\n${lines.join('\n')}\n`;
+}
+
+/**
+ * Build the TL;DR comment line of a rendered decisions or pitfalls file:
+ * `<!-- TL;DR: N {decisions|pitfalls} -->`, N being the active entries the file
+ * renders. It names no entry: session-start-context injects its text into every
+ * session, and the index lists the entries.
  *
  * @param {'decisions'|'pitfalls'} kind - label used in the comment
- * @param {object[]} rows - active anchored rows (already filtered + sorted)
+ * @param {object[]} rows - the file's active rows
  * @returns {string} complete TL;DR comment line (no trailing newline)
  */
 function buildTldrLine(kind, rows) {
-  const count = rows.length;
-  const last5 = rows.slice(-5).map(r => r.anchor_id);
-  const keyStr = last5.join(', ');
-  // Byte-compat: an empty key list must render `Key: -->` (single space) so the
-  // empty-corpus render is byte-identical to initDecisionsContent's header. A
-  // trailing space before `-->` would diverge from the documented contract and
-  // break the assertion that the render is the SOLE format authority.
-  if (!keyStr) return `<!-- TL;DR: ${count} ${kind}. Key: -->`;
-  return `<!-- TL;DR: ${count} ${kind}. Key: ${keyStr} -->`;
+  return `<!-- TL;DR: ${rows.length} ${kind} -->`;
 }
 
 // ---------------------------------------------------------------------------
@@ -398,12 +398,11 @@ function buildTldrLine(kind, rows) {
 // ---------------------------------------------------------------------------
 
 /**
- * Statuses recognised by the index formatter — everything else renders as
- * [unknown]. Only Active (pitfalls) and Accepted (decisions) appear in
- * rendered .md files; the renderer excludes Deprecated/Superseded/Retired
- * before writing.
+ * Statuses a v1 index line tags as they are — everything else renders as
+ * [unknown]. They are the store's active statuses: the index lists active
+ * entries only.
  */
-const INDEX_KNOWN_STATUSES = ['Active', 'Accepted'];
+const INDEX_KNOWN_STATUSES = ACTIVE_STATUSES;
 
 /**
  * Truncate a string to maxLen characters, appending '…' if truncated.
@@ -432,13 +431,42 @@ function formatIndexEntryLine(entry) {
 }
 
 /**
+ * `text` cut to its first `maxChars` characters (code points) plus '…' when it is
+ * longer, so a cut never splits a surrogate pair.
+ *
+ * @param {string} text
+ * @param {number} maxChars
+ * @returns {string}
+ */
+function truncateChars(text, maxChars) {
+  const chars = Array.from(text);
+  return chars.length <= maxChars ? text : chars.slice(0, maxChars).join('') + '…';
+}
+
+/**
+ * Format the index line of a v2 entry from its row fields: `  {anchor}  {title}`
+ * and, when the entry has a scope, `  —  ` and its entries joined by ', ', cut to
+ * 80 characters plus '…'. The title is whole, since a v2 title is at most 120
+ * characters, and there is no status tag: the index lists active entries only.
+ *
+ * @param {object} row - a v2 ledger row
+ * @returns {string}
+ */
+function formatIndexEntryLineV2(row) {
+  const scope = scopeEntries(row).join(', ');
+  const scopeSuffix = scope ? `  —  ${truncateChars(scope, 80)}` : '';
+  return `  ${oneLine(row.anchor_id)}  ${oneLine(row.title)}${scopeSuffix}`;
+}
+
+/**
  * Build the compact index content from in-memory active ledger rows.
  * Empty corpus (both arrays empty) → '(none)'.
  * No trailing newline (caller adds '\n' before writing).
  *
- * Strategy: for each row, obtain its rendered block (pre-rendered block when
- * provided, else truthy raw_body || format*Body(row)), then extract
- * heading/Status/Area with the same regexes.
+ * Strategy: a v2 row's line is built from its fields (formatIndexEntryLineV2).
+ * For a v1 row, obtain its rendered block (pre-rendered block when provided, else
+ * truthy raw_body || format*Body(row)), then extract heading/Status/Area with the
+ * same regexes (D-V1-BYTE-STABLE).
  * This preserves byte-compat for migrated rows that carry Area/Status only in raw_body.
  * Note: raw_body === "" is treated as absent (falsy); both predicates align with the
  * truthy check in renderDecisionsFile so index and body files never drift on this edge.
@@ -475,42 +503,50 @@ function buildIndexContent(activeDecisionRows, activePitfallRows, { decisionsFil
     return { id, title: rawTitle, status, area };
   }
 
-  /** @type {Array<{ id: string, title: string, status: string|null, area: string|null }>} */
-  const adrEntries = [];
-  for (let i = 0; i < activeDecisionRows.length; i++) {
-    const row = activeDecisionRows[i];
-    const block = decisionBlocks ? decisionBlocks[i] : (row.raw_body ? row.raw_body : formatDecisionBody(row));
-    const entry = extractEntryFromBlock(block);
-    if (entry) adrEntries.push(entry);
+  /**
+   * The index lines of one kind's active rows, in row order. A v1 row whose block
+   * has no entry heading has no line.
+   * @param {object[]} rows
+   * @param {string[]|undefined} rowBlocks - pre-rendered blocks, one per row
+   * @param {(row: object) => string} formatV1Body
+   * @returns {string[]}
+   */
+  function indexLines(rows, rowBlocks, formatV1Body) {
+    const lines = [];
+    for (let i = 0; i < rows.length; i++) {
+      const row = rows[i];
+      if (isV2(row)) {
+        lines.push(formatIndexEntryLineV2(row));
+        continue;
+      }
+      const block = rowBlocks ? rowBlocks[i] : (row.raw_body || formatV1Body(row));
+      const entry = extractEntryFromBlock(block);
+      if (entry) lines.push(formatIndexEntryLine(entry));
+    }
+    return lines;
   }
 
-  /** @type {Array<{ id: string, title: string, status: string|null, area: string|null }>} */
-  const pfEntries = [];
-  for (let i = 0; i < activePitfallRows.length; i++) {
-    const row = activePitfallRows[i];
-    const block = pitfallBlocks ? pitfallBlocks[i] : (row.raw_body ? row.raw_body : formatPitfallBody(row));
-    const entry = extractEntryFromBlock(block);
-    if (entry) pfEntries.push(entry);
-  }
+  const adrLines = indexLines(activeDecisionRows, decisionBlocks, formatDecisionBody);
+  const pfLines = indexLines(activePitfallRows, pitfallBlocks, formatPitfallBody);
 
-  if (adrEntries.length === 0 && pfEntries.length === 0) return '(none)';
+  if (adrLines.length === 0 && pfLines.length === 0) return '(none)';
 
   const blocks = [];
 
-  if (adrEntries.length > 0) {
-    blocks.push([`Decisions (${adrEntries.length}):`, ...adrEntries.map(formatIndexEntryLine)].join('\n'));
+  if (adrLines.length > 0) {
+    blocks.push([`Decisions (${adrLines.length}):`, ...adrLines].join('\n'));
   }
 
-  if (pfEntries.length > 0) {
-    blocks.push([`Pitfalls (${pfEntries.length}):`, ...pfEntries.map(formatIndexEntryLine)].join('\n'));
+  if (pfLines.length > 0) {
+    blocks.push([`Pitfalls (${pfLines.length}):`, ...pfLines].join('\n'));
   }
 
   // Footer: explain how to read full bodies
   const footerLines = [];
-  if (adrEntries.length > 0) {
+  if (adrLines.length > 0) {
     footerLines.push(`ADR-NNN entries live in ${decisionsFilePath}`);
   }
-  if (pfEntries.length > 0) {
+  if (pfLines.length > 0) {
     footerLines.push(`PF-NNN  entries live in ${pitfallsFilePath}`);
   }
   footerLines.push(
@@ -527,8 +563,9 @@ module.exports = {
   formatAmendmentsLine,
   formatDecisionBody,
   formatPitfallBody,
+  formatEntryBodyV2,
+  formatInactiveTable,
+  formatIndexEntryLineV2,
   buildTldrLine,
-  toLedgerRow,
-  isSafeRawBody,
   buildIndexContent,
 };

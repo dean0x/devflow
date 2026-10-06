@@ -7,7 +7,7 @@ allowed-tools: Read
 
 # Apply Decisions
 
-Canonical consumer algorithm for the `DECISIONS_CONTEXT` index passed by orchestrators. The index lists each ADR/PF entry with ID, truncated title, status, and area — not the full body. Use this skill to surface the right decisions and pitfalls for your task without loading the entire corpus.
+Canonical consumer algorithm for the `DECISIONS_CONTEXT` index passed by orchestrators. The index lists each active ADR/PF entry with its ID and title — plus a status tag and an area on a v1 line, or the entry's scope on a v2 line — not the full body. Use this skill to surface the right decisions and pitfalls for your task without loading the entire corpus.
 
 ## Iron Law
 
@@ -23,34 +23,51 @@ Canonical consumer algorithm for the `DECISIONS_CONTEXT` index passed by orchest
 
 ### Step 1: Scan the index
 
-Read through all entries in `DECISIONS_CONTEXT`. The index format is:
+Read through all entries in `DECISIONS_CONTEXT`. The index lists active entries only, in two line kinds:
 
 ```
 Decisions (N):
-  ADR-NNN  Title truncated to 60 chars  [Active]
-  ADR-NNN  Another decision             [Active]
+  ADR-NNN  Return Result types from every fallible operation  [Accepted]
+  ADR-NNN  Claim the learning queue with an op, never with mv  —  src/assets/scripts/hooks/**, area:learning
 
 Pitfalls (M):
   PF-NNN  Background hook god scripts  [Active]  —  src/assets/scripts/hooks/foo.cjs
-  PF-NNN  DECISIONS_CONTEXT fan-out    [Active]  —  src/assets/commands/...
+  PF-NNN  A rename claims a shared file only while nothing re-creates it  —  area:hooks
 
 ADR-NNN entries live in {worktree}/.devflow/learning/decisions.md
 PF-NNN  entries live in {worktree}/.devflow/learning/pitfalls.md
 Read the relevant file and locate the matching `## ADR-NNN:` or `## PF-NNN:` heading for the full body.
 ```
 
+- **A v1 line** ends in a status tag — `[Accepted]` on a decision, `[Active]` on a pitfall — after a title cut to 60 characters, and a pitfall adds its area after `—`.
+- **A v2 line** has no tag. Its title is whole, and after `—` comes its scope: the globs and `area:` tags the rule governs, cut to 80 characters.
+
 ### Step 2: Identify plausibly-relevant entries
 
-From the index, identify entries whose title or area plausibly overlaps with:
-- The files you are modifying or reviewing
+From the index, identify entries whose title, area or scope plausibly overlaps with:
+- The files you are modifying or reviewing — a v2 scope glob that matches one of them is a strong signal
 - The category of issue you are addressing (e.g., error handling, hook scripts, JSON parsing)
 - The architectural area of your change
 
-Titles are truncated to 60 characters — if a truncated title looks relevant, proceed to Step 3.
+A v1 title may be cut short — if a truncated title looks relevant, proceed to Step 3.
 
 ### Step 3: Read the full body
 
 For each plausibly-relevant entry, use the Read tool to open the decisions file listed in the `DECISIONS_CONTEXT` footer and locate the matching `## ADR-NNN:` or `## PF-NNN:` heading. Read the full section to confirm relevance and understand the decision or pitfall completely.
+
+A v2 body reads:
+
+```
+## ADR-NNN: {title}
+
+- **Status**: Accepted · verified {date}
+- **Scope**: `{glob}`, `area:{tag}`
+- **Decision**: {the rule}
+- **Why**: {why it holds}
+- **Source**: {where it was learned}
+```
+
+A pitfall's Status is `Active` and its rule line is labelled `**Rule**`. The verified date is the day the entry was last confirmed true; a body without one has not been confirmed since it was written. A v1 body carries `**Date**`, `**Status**`, `**Context**`, `**Decision**` and `**Consequences**` for a decision, or `**Area**`, `**Issue**`, `**Impact**`, `**Resolution**` and `**Status**` for a pitfall.
 
 **The footer is the single source of truth for file paths.** Never substitute hardcoded paths — the footer resolves to the correct worktree, which may differ from your cwd in multi-worktree flows.
 
@@ -88,7 +105,7 @@ Cite only IDs that appear verbatim in `DECISIONS_CONTEXT`. Do not guess at IDs t
 
 ## Skip Guard
 
-When `DECISIONS_CONTEXT` is empty, `(none)`, or not provided: skip this skill entirely. Do not attempt to load decisions files independently. Do not speculate about what decisions or pitfalls might exist.
+When `DECISIONS_CONTEXT` is empty, `(none)`, or not provided: skip this skill entirely — unless your agent instructions tell you to read the decisions index yourself, in which case the index you read is your `DECISIONS_CONTEXT`. Do not otherwise load decisions files independently. Do not speculate about what decisions or pitfalls might exist.
 
 ---
 

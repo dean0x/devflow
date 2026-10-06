@@ -8,7 +8,8 @@
 # not the home directory (D-HOOKS-GIT-ONLY), and they read the learning ledger of
 # the main worktree when this is a linked one (D-LEDGER-MAIN-WORKTREE).
 #
-# Section 1: Project decisions TL;DR (decisions.md / pitfalls.md header lines).
+# Section 1: Project decisions TL;DR (decisions.md / pitfalls.md header lines),
+# then the path of the decisions index when it lists entries.
 # Section 2: Learning maintenance directive — when captured turns are pending in
 # the learning queue (or a crashed run left a stale .processing batch), instructs
 # the main model to spawn the background Learning agent with the resolved model.
@@ -101,7 +102,8 @@ TRACKER_DEVFLOW_DIR="$HOME/.devflow"
 #
 # Section 2 embeds $LEDGER_ROOT; Section 3 embeds $PROJECT_ROOT and
 # $TRACKER_DEVFLOW_DIR — each inside a double-quoted `prompt: "..."` string the
-# model reads out of additionalContext. The provider and model TOKENS in those
+# model reads out of additionalContext. Section 1's index line embeds
+# $LEDGER_ROOT too, as the path the model reads the decisions index from. The provider and model TOKENS in those
 # directives are admitted by positive allowlists, and so are these: the gate is the
 # POSITIVE shape ^[A-Za-z0-9/._+-]+$, expressed as "rejects if any character falls
 # outside it".
@@ -141,9 +143,9 @@ TRACKER_DEVFLOW_DIR="$HOME/.devflow"
 # must not read as "no forbidden character, therefore safe".
 #
 # ONE gate per VALUE, applied to the root each section embeds, not one over their
-# concatenation. Section 2 interpolates $LEDGER_ROOT alone — the main worktree's
-# root in a linked worktree (D-LEDGER-MAIN-WORKTREE), so it is the value checked
-# for that section, not the checkout's own; only Section 3 interpolates
+# concatenation. Sections 1 and 2 interpolate $LEDGER_ROOT alone — the main
+# worktree's root in a linked worktree (D-LEDGER-MAIN-WORKTREE), so it is the value
+# checked for them, not the checkout's own; only Section 3 interpolates
 # $PROJECT_ROOT and $TRACKER_DEVFLOW_DIR. Gating values jointly made a rejected
 # ~/.devflow shape suppress the Learning directive as well — a value Section 2
 # never embeds, silently disabling the whole learning pipeline for any machine
@@ -211,10 +213,27 @@ if [ "$LEARNING_ENABLED" = "true" ]; then
         fi
       fi
     done
-    if [ -n "$DECISIONS_TLDR" ]; then
-      dbg "Decisions TL;DR found"
-      DECISIONS_SECTION="--- PROJECT DECISIONS (TL;DR) ---
+    # The index line names the decisions index, so the main model can pass it on
+    # as DECISIONS_CONTEXT. It interpolates $LEDGER_ROOT, so it needs that root's
+    # shape gate, and it is left out when the index lists no entry: an empty
+    # corpus renders `(none)`. Builtins only — no fork on any path.
+    _SC_INDEX="$LEARNING_DIR/index.md"; DECISIONS_INDEX_LINE=""
+    if [ -n "$DIRECTIVE_LEDGER_SAFE" ] && [ -s "$_SC_INDEX" ]; then
+      _SC_IDX1=""; IFS= read -r _SC_IDX1 < "$_SC_INDEX" || true
+      [ "$_SC_IDX1" != "(none)" ] && DECISIONS_INDEX_LINE="Index: $_SC_INDEX"
+    fi
+    if [ -n "$DECISIONS_TLDR" ] || [ -n "$DECISIONS_INDEX_LINE" ]; then
+      dbg "Decisions TL;DR or index found"
+      DECISIONS_SECTION="--- PROJECT DECISIONS (TL;DR) ---"
+      if [ -n "$DECISIONS_TLDR" ]; then
+        DECISIONS_SECTION="${DECISIONS_SECTION}
 $(printf '%b' "$DECISIONS_TLDR")"
+      fi
+      # The index line goes last.
+      if [ -n "$DECISIONS_INDEX_LINE" ]; then
+        DECISIONS_SECTION="${DECISIONS_SECTION}
+${DECISIONS_INDEX_LINE}"
+      fi
       if [ -n "$CONTEXT" ]; then
         CONTEXT="${CONTEXT}
 
@@ -227,11 +246,14 @@ ${DECISIONS_SECTION}"
 fi
 
 # --- Section 2: Learning maintenance directive ---
-# Emitted when captured turns are waiting: queue non-empty, or a leftover
-# .processing batch whose owner crashed (stale mtime, 900s threshold — same
-# family the Learning agent itself uses to discriminate live from crashed). A
-# FRESH .processing means a live Learning agent already owns the batch, so the
-# directive is suppressed even if new turns queued since its claim.
+# Emitted when captured turns are waiting: the queue is non-empty, or a
+# .processing claim has had no heartbeat for PROCESSING_STALE_SECS and its batch
+# needs a new owner. A FRESH .processing means a live Learning agent holds the
+# claim, so the directive is suppressed even if new turns queued since. This
+# check is advisory and decides only whether to spawn: the claim itself is taken
+# by json-helper's claim-queue op under the learning lock, which applies the same
+# threshold (D-OWNED-CLAIM, lib/learning-store.cjs), so a spawn that loses a race
+# exits on `busy`.
 if [ "$LEARNING_ENABLED" = "true" ]; then
   QUEUE_FILE="$LEARNING_DIR/.pending-turns.jsonl"
   PROCESSING_FILE="$LEARNING_DIR/.pending-turns.processing"

@@ -96,6 +96,30 @@ const seedLearningState = (sb: Sandbox): void => {
   seedFile(sb, '.devflow/learning/.pending-turns.jsonl', `${JSON.stringify({ role: 'user', content: 'fence', ts: 1 })}\n`)
 }
 
+/** The fenced entry: a v2 pitfall, retired, with the observation it projects. */
+const FENCE_ENTRY = 'PF-001'
+const FENCE_CONTENT = {
+  type: 'pitfall',
+  title: 'Fenced entry',
+  rule: 'A learning command writes only inside the learning directory.',
+  why: 'A write anywhere else is a write nothing reads back.',
+  scope: ['area:fence'],
+  provenance: 'write-set fence',
+}
+
+/** A retired entry and its observation, for --restore to bring back; --list and --show then read what it left. */
+const seedRetiredEntry = (sb: Sandbox): void => {
+  seedFile(sb, '.devflow/learning/decisions-log.jsonl', `${JSON.stringify({
+    schema: 2, id: 'obs_fence_entry', ...FENCE_CONTENT,
+    observations: 1, first_seen: '2026-01-01T00:00:00.000Z', last_seen: '2026-01-01T00:00:00.000Z',
+  })}\n`)
+  seedFile(sb, '.devflow/learning/decisions-ledger.jsonl', `${JSON.stringify({
+    schema: 2, id: 'obs_fence_entry', type: 'pitfall', anchor_id: FENCE_ENTRY, decisions_status: 'Retired',
+    title: FENCE_CONTENT.title, rule: FENCE_CONTENT.rule, why: FENCE_CONTENT.why, scope: FENCE_CONTENT.scope,
+    provenance: FENCE_CONTENT.provenance, date: '2026-01-01', status_note: 'fence', retired_on: '2026-01-02',
+  })}\n`)
+}
+
 function rewriteHomeJson(sb: Sandbox, rel: string, edit: (json: Record<string, unknown>) => void): void {
   const abs = path.join(sb.home, rel)
   const json = JSON.parse(readFileSync(abs, 'utf-8')) as Record<string, unknown>
@@ -134,8 +158,13 @@ export const FENCE_ROWS: readonly FenceRow[] = [
 
   { args: ['learning', '--disable'], allow: [MANIFEST], mustWrite: true },
   { args: ['learning', '--enable'], allow: [MANIFEST], mustWrite: true },
+  { args: ['learning', '--restore', FENCE_ENTRY], allow: [REPO_LEARNING], mustWrite: true, seed: seedRetiredEntry },
+  { args: ['learning', '--list'], allow: NONE, mustWrite: false },
+  { args: ['learning', '--show', FENCE_ENTRY], allow: NONE, mustWrite: false },
   { args: ['learning', '--clear'], allow: [REPO_LEARNING], mustWrite: true, seed: seedLearningState },
   { args: ['learning', '--reset'], allow: [REPO_LEARNING], mustWrite: true, seed: seedLearningState },
+  // The reset above left no learning directory: a reset with nothing to reset writes nothing.
+  { args: ['learning', '--reset'], allow: NONE, mustWrite: false, label: 'with no learning data' },
   { args: ['learning', '--status'], allow: NONE, mustWrite: false },
 
   { args: ['knowledge', '--disable'], allow: [MANIFEST], mustWrite: true },
@@ -327,7 +356,7 @@ describe('write-set fence coverage', () => {
   })
 
   it('the table and its footprint stay registered in numeric-floors.json', () => {
-    expect(FENCE_ROWS.length).toBeGreaterThanOrEqual(52)
+    expect(FENCE_ROWS.length).toBeGreaterThanOrEqual(56)
     expect(new Set(FENCE_ROWS.map(row => row.args[0])).size).toBeGreaterThanOrEqual(15)
     expect(allowlistSize(FENCE_ROWS)).toBeLessThanOrEqual(11)
   })

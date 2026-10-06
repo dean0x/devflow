@@ -204,7 +204,7 @@ describe('every index-reading git call turns core.fsmonitor off (D-NO-FSMONITOR)
     expect(paths).toContain('src/assets/scripts/hooks/json-helper.cjs');
     expect(paths).toContain('src/assets/scripts/hooks/pre-compact-memory');
     expect(paths).toContain('src/hud/git.ts');
-    // json-helper ls-files, resolve-settings ls-files, verify-evidence diff,
+    // the learning store's two ls-files, resolve-settings ls-files, verify-evidence diff,
     // two each in pre-compact-memory and background-memory-update, HUD status + diff.
     expect(countIndexReads(corpus)).toBeGreaterThanOrEqual(9);
   });

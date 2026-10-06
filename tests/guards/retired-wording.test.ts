@@ -439,6 +439,60 @@ const RETIRED_LITERALS: ReadonlyArray<RetiredEntry> = [
       'path that no install provides since the local scope was retired (#406). The helpers are ' +
       'defined inline, and ensure_docs_dir roots .devflow/docs at the checkout toplevel (D-DOCS-ROOT).',
   },
+  {
+    literal: 'Append-only. Status changes allowed',
+    removedFrom: 'src/assets/scripts/hooks/lib/decisions-format.cjs',
+    justification:
+      'The decisions.md header called the file append-only, with status changes allowed and ' +
+      'deletions prohibited. The file is generated from the learning ledger and rewritten on every ' +
+      'render, and an entry is rewritten in place, so the header says the file is generated and ' +
+      'not to be edited, and that retired entries are listed under Inactive.',
+  },
+  {
+    literal: 'decisions-usage-scan',
+    // Every tree that shipped or described the scanner. src/cli/ is left out on
+    // purpose: init's LEGACY_HOOK_FILES names the script so that an upgrade deletes
+    // the copy an older install left in ~/.devflow/scripts/hooks.
+    scope: ['src/assets/', 'src/core/', 'src/hud/', 'src/targets/', 'docs/', 'CLAUDE.md', 'README.md'],
+    removedFrom:
+      'src/assets/scripts/hooks/decisions-usage-scan.cjs, src/assets/scripts/hooks/capture-turn, ' +
+      'src/assets/scripts/hooks/lib/decisions-format.cjs, src/core/fs-atomic.ts, ' +
+      'docs/reference/file-organization.md',
+    justification:
+      'The usage scanner counted the anchors each assistant turn cited into .decisions-usage.json, ' +
+      'and assign-anchor registered every new anchor there. Learning v2 maintains entries by their ' +
+      'verification age at the default branch, not by citation counts, and committed text no ' +
+      'longer cites ledger IDs, so the counts measured nothing. The scanner, its capture-turn call, ' +
+      'its project-paths helpers and the registration are gone, and rotate-observations deletes the ' +
+      'usage file and lock an older install left behind.',
+  },
+  {
+    literal: '7-day protection window',
+    removedFrom: 'src/assets/agents/learning.md',
+    justification:
+      'The Learning agent left any entry dated within the past week untouched, keyed on the ledger ' +
+      'date with a last_seen fallback for rows that had none. Learning v2 hands out entries for ' +
+      'maintenance through claim-due, oldest verification first with a one-day lease, so a new ' +
+      'entry is not due until its verification ages, and the window has nothing left to protect.',
+  },
+  {
+    literal: '≤5 curation changes',
+    removedFrom: 'src/assets/agents/learning.md',
+    justification:
+      'The Learning agent stopped curating after five changes per run. claim-due now bounds each ' +
+      'run by handing out a small leased batch within a byte budget, and the agent takes exactly ' +
+      'one final action per entry it was handed, so a prose cap on top of the plumbing bound ' +
+      'would only leave handed-out entries unfinished.',
+  },
+  {
+    literal: 'Cap: 50 entries per file',
+    removedFrom: 'docs/reference/file-organization.md',
+    justification:
+      'The Project Knowledge section said decisions.md and pitfalls.md each hold at most 50 entries. ' +
+      'Nothing ever enforced such a cap, and the live pitfalls file held well over 50 active entries. ' +
+      'The section now says what the files hold: the active entries in full, then an Inactive table, ' +
+      'and claim-due, not a file cap, bounds what one maintenance run reads.',
+  },
 ];
 
 // ---------------------------------------------------------------------------

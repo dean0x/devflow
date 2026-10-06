@@ -1903,6 +1903,7 @@ export const initCommand = new Command('init')
       'dream-procedure.md',
       'lib/staleness.cjs',
       'dream-lock',
+      'decisions-usage-scan.cjs',
     ];
     const hooksDir = path.join(devflowDir, 'scripts', 'hooks');
     for (const legacy of LEGACY_HOOK_FILES) {

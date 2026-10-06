@@ -267,28 +267,23 @@ describe('json-helper.js operations', () => {
     expect(parsed).toEqual(['a', 'b', 'c', 'd']);
   });
 
-  it('slurp-sort reads JSONL, sorts, and limits', () => {
-    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-test-'));
-    const file = path.join(tmpDir, 'test.jsonl');
+  const SLURP_INPUT = [
+    JSON.stringify({ id: 'a', confidence: 0.3 }),
+    JSON.stringify({ id: 'b', confidence: 0.9 }),
+    'not json',
+    JSON.stringify({ id: 'c', confidence: 0.5 }),
+  ].join('\n');
 
-    try {
-      fs.writeFileSync(file, [
-        JSON.stringify({ id: 'a', confidence: 0.3 }),
-        JSON.stringify({ id: 'b', confidence: 0.9 }),
-        JSON.stringify({ id: 'c', confidence: 0.5 }),
-      ].join('\n'));
+  it('slurp-sort reads JSONL on stdin, sorts by the field, and limits', () => {
+    const run = spawnSync(process.execPath, [JSON_HELPER, 'slurp-sort', 'confidence', '2'], { input: SLURP_INPUT, encoding: 'utf8' });
+    expect(run.status, run.stderr).toBe(0);
+    expect(JSON.parse(run.stdout).map((row: { id: string }) => row.id)).toEqual(['b', 'c']);
+  });
 
-      const result = execSync(
-        `node "${JSON_HELPER}" slurp-sort "${file}" confidence 2`,
-        { stdio: 'pipe' },
-      ).toString().trim();
-      const parsed = JSON.parse(result);
-      expect(parsed).toHaveLength(2);
-      expect(parsed[0].id).toBe('b');
-      expect(parsed[1].id).toBe('c');
-    } finally {
-      fs.rmSync(tmpDir, { recursive: true, force: true });
-    }
+  it('slurp-cap reads JSONL on stdin and prints the top rows one per line', () => {
+    const run = spawnSync(process.execPath, [JSON_HELPER, 'slurp-cap', 'confidence', '2'], { input: SLURP_INPUT, encoding: 'utf8' });
+    expect(run.status, run.stderr).toBe(0);
+    expect(run.stdout.trim().split('\n').map(line => JSON.parse(line).id)).toEqual(['b', 'c']);
   });
 
   it('session-output builds correct envelope', () => {
@@ -338,6 +333,51 @@ describe('json-helper.js operations', () => {
     expect(parsed.id).toBe('b');
   });
 
+  it('a generic op loads none of the learning modules; a learning op loads the store, and the renderer only to render', () => {
+    // Every hook that falls back from jq to node runs a generic op, so the learning
+    // store loads only for a learning op, and the renderer and formatter only when
+    // that op renders.
+    const probeDir = fs.mkdtempSync(path.join(os.tmpdir(), 'json-helper-lazy-'));
+    try {
+      const record = path.join(probeDir, 'loaded.txt');
+      const preload = path.join(probeDir, 'record-loaded.cjs');
+      fs.writeFileSync(preload, [
+        "'use strict';",
+        "const fs = require('fs');",
+        `process.on('exit', () => fs.writeFileSync(${JSON.stringify(record)}, Object.keys(require.cache).join('\\n')));`,
+        '',
+      ].join('\n'));
+      const learningModulesLoadedBy = (args: readonly string[], input: string): string[] => {
+        const run = spawnSync(process.execPath, ['--require', preload, JSON_HELPER, ...args], {
+          cwd: probeDir,
+          input,
+          encoding: 'utf8',
+          timeout: 60_000,
+        });
+        expect(run.status, run.stderr).toBe(0);
+        return fs.readFileSync(record, 'utf8').split('\n')
+          .map(file => path.basename(file))
+          .filter(name => /^(?:learning-store|render-decisions|decisions-format|mkdir-lock|project-paths)\.cjs$/.test(name))
+          .sort();
+      };
+
+      expect(learningModulesLoadedBy(['get-field', 'cwd'], '{"cwd":"/tmp"}')).toEqual([]);
+      // claim-queue answers none outside a learning tree, so it exits 0 here, and renders nothing.
+      expect(learningModulesLoadedBy(['claim-queue'], '')).toEqual(['learning-store.cjs', 'mkdir-lock.cjs', 'project-paths.cjs']);
+      // restore-anchor renders the entry it restores.
+      const learningDir = path.join(probeDir, '.devflow', 'learning');
+      fs.mkdirSync(learningDir, { recursive: true });
+      fs.writeFileSync(
+        path.join(learningDir, 'decisions-ledger.jsonl'),
+        `${JSON.stringify({ id: 'obs_lazy_one', type: 'decision', anchor_id: 'ADR-001', decisions_status: 'Retired' })}\n`,
+      );
+      expect(learningModulesLoadedBy(['restore-anchor', 'ADR-001'], '')).toEqual([
+        'decisions-format.cjs', 'learning-store.cjs', 'mkdir-lock.cjs', 'project-paths.cjs', 'render-decisions.cjs',
+      ]);
+    } finally {
+      fs.rmSync(probeDir, { recursive: true, force: true });
+    }
+  });
 });
 
 describe('json-parse wrapper', () => {
@@ -355,6 +395,29 @@ describe('json-parse wrapper', () => {
       { stdio: 'pipe' },
     ).toString().trim();
     expect(result).toBe('val');
+  });
+
+  it('json_field_file reads a field from a file through the node fallback, a boolean false included', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'json-field-file-'));
+    try {
+      const file = path.join(dir, 'state.json');
+      fs.writeFileSync(file, JSON.stringify({ enabled: false, port: 4141, nested: { model: 'opus' } }));
+      const read = (field: string, fallback: string): string => {
+        const run = spawnSync('bash', [
+          '-c', 'source "$1" && _HAS_JQ=false && json_field_file "$2" "$3" "$4"',
+          '_', path.join(HOOKS_DIR, 'json-parse'), file, field, fallback,
+        ], { encoding: 'utf8' });
+        expect(run.status, run.stderr).toBe(0);
+        return run.stdout.trim();
+      };
+
+      expect(read('enabled', 'true')).toBe('false');
+      expect(read('port', '0')).toBe('4141');
+      expect(read('nested.model', '')).toBe('opus');
+      expect(read('missing', 'fallback')).toBe('fallback');
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
   });
 });
 
@@ -597,22 +660,6 @@ describe('D-HOOKS-GIT-ONLY: no project scaffolding outside a git project or at H
     expect(collectTree(tmpHome, ['.devflow/logs'])).toEqual(before);
   });
 
-  it('the decisions usage scanner leaves a legacy non-git ledger untouched', () => {
-    // capture-turn runs the scanner before ensure-devflow-init, so the gate must be
-    // its own: a .devflow/ left by an older devflow in a plain directory is not a
-    // project, and learning stops there like everything else.
-    const nonGit = path.join(base, 'legacy');
-    fs.mkdirSync(path.join(nonGit, '.devflow', 'memory'), { recursive: true });
-    fs.mkdirSync(path.join(nonGit, '.devflow', 'learning'), { recursive: true });
-    const usagePath = path.join(nonGit, '.devflow', 'learning', '.decisions-usage.json');
-    const usage = JSON.stringify({ version: 1, entries: { 'ADR-001': { cites: 0, last_cited: null } } });
-    fs.writeFileSync(usagePath, usage);
-
-    runHook(path.join(HOOKS_DIR, 'capture-turn'), { cwd: nonGit, session_id: 't', last_assistant_message: 'applies ADR-001' }, homeDir);
-
-    expect(fs.readFileSync(usagePath, 'utf-8')).toBe(usage);
-  });
-
   it('non-vacuity: the same hooks in a git project below HOME do scaffold', () => {
     const project = path.join(base, 'project');
     initCommittedRepo(project);
@@ -732,6 +779,90 @@ describe('D-LEDGER-MAIN-WORKTREE: one ledger per repository (TP-17, TP-18, TP-19
     expect(ctx).toContain(`Project root: ${main}")`);
     expect(ctx).not.toContain(`Project root: ${wt}`);
     expect(ctx).toContain('ADR-003 Main');
+  });
+
+  // Section 1 names the decisions index so the main model can pass it on as
+  // DECISIONS_CONTEXT. The path is the ledger's — the main checkout's in a linked
+  // worktree — so it is named only when the ledger root passed the shape gate.
+  const SESSION_CONTEXT = path.join(HOOKS_DIR, 'session-start-context');
+  const learningOf = (root: string) => path.join(root, '.devflow', 'learning');
+  const indexOf = (root: string) => path.join(learningOf(root), 'index.md');
+
+  /** The PROJECT DECISIONS section of the injected context, up to the blank line that ends it. */
+  function decisionsSection(cwd: string): string {
+    const { stdout, exitCode } = runHook(SESSION_CONTEXT, { cwd, source: 'startup' }, homeDir);
+    expect(exitCode).toBe(0);
+    if (stdout.trim() === '') return '';
+    const ctx = JSON.parse(stdout).hookSpecificOutput.additionalContext as string;
+    const at = ctx.indexOf('--- PROJECT DECISIONS (TL;DR) ---');
+    if (at === -1) return '';
+    const end = ctx.indexOf('\n\n', at);
+    return end === -1 ? ctx.slice(at) : ctx.slice(at, end);
+  }
+
+  /** A rendered ledger at `root`: both TL;DR headers, and the index when given. */
+  function seedRendered(root: string, index?: string): void {
+    fs.mkdirSync(learningOf(root), { recursive: true });
+    fs.writeFileSync(path.join(learningOf(root), 'decisions.md'), '<!-- TL;DR: 3 decisions -->\n# Architectural Decisions\n');
+    fs.writeFileSync(path.join(learningOf(root), 'pitfalls.md'), '<!-- TL;DR: 2 pitfalls -->\n# Known Pitfalls\n');
+    if (index !== undefined) fs.writeFileSync(indexOf(root), index);
+  }
+
+  it('TP-17: in a linked worktree, PROJECT DECISIONS names the main checkout index, last', () => {
+    seedRendered(main, 'Decisions (1):\n  ADR-001  Main decision  [Accepted]\n');
+
+    expect(decisionsSection(wt)).toBe(
+      `--- PROJECT DECISIONS (TL;DR) ---\n3 decisions\n2 pitfalls\nIndex: ${indexOf(main)}`,
+    );
+  });
+
+  it('PROJECT DECISIONS carries the index line alone when no TL;DR is rendered', () => {
+    fs.mkdirSync(learningOf(main), { recursive: true });
+    fs.writeFileSync(indexOf(main), 'Pitfalls (1):\n  PF-001  Main pitfall  [Active]\n');
+
+    expect(decisionsSection(wt)).toBe(`--- PROJECT DECISIONS (TL;DR) ---\nIndex: ${indexOf(main)}`);
+  });
+
+  it('no index line when the index is missing', () => {
+    seedRendered(main);
+
+    expect(decisionsSection(wt)).toBe('--- PROJECT DECISIONS (TL;DR) ---\n3 decisions\n2 pitfalls');
+  });
+
+  it('no index line when the index lists no entry — (none) — or is empty', () => {
+    seedRendered(main, '(none)\n');
+    expect(decisionsSection(wt)).toBe('--- PROJECT DECISIONS (TL;DR) ---\n3 decisions\n2 pitfalls');
+
+    fs.writeFileSync(indexOf(main), '');
+    expect(decisionsSection(wt)).toBe('--- PROJECT DECISIONS (TL;DR) ---\n3 decisions\n2 pitfalls');
+
+    // With no TL;DR either, there is no section at all.
+    fs.rmSync(path.join(learningOf(main), 'decisions.md'));
+    fs.rmSync(path.join(learningOf(main), 'pitfalls.md'));
+    fs.writeFileSync(indexOf(main), '(none)\n');
+    expect(decisionsSection(wt)).toBe('');
+  });
+
+  it('no index line, and no path, when the ledger root fails the shape gate', () => {
+    const refused = path.join(base, 'proj name');
+    initCommittedRepo(refused);
+    seedRendered(refused, 'Decisions (1):\n  ADR-001  Refused decision  [Accepted]\n');
+
+    // The TL;DR interpolates no path, so it stays; the index line would, so it goes.
+    expect(decisionsSection(refused)).toBe('--- PROJECT DECISIONS (TL;DR) ---\n3 decisions\n2 pitfalls');
+    // Non-vacuity: the same tree at an admitted path does name its index.
+    const admitted = path.join(base, 'proj-name');
+    initCommittedRepo(admitted);
+    seedRendered(admitted, 'Decisions (1):\n  ADR-001  Admitted decision  [Accepted]\n');
+    expect(decisionsSection(admitted)).toContain(`Index: ${fs.realpathSync(indexOf(admitted))}`);
+  });
+
+  it('the orchestrator charter passes the index this section names on as DECISIONS_CONTEXT', () => {
+    const charter = fs.readFileSync(path.join(HOOKS_DIR, 'assets', 'orchestrator-charter.md'), 'utf-8');
+    const hook = fs.readFileSync(SESSION_CONTEXT, 'utf-8');
+    expect(hook).toContain('--- PROJECT DECISIONS (TL;DR) ---');
+    expect(hook).toContain('DECISIONS_INDEX_LINE="Index: $_SC_INDEX"');
+    expect(charter).toContain('pass the index named under PROJECT DECISIONS as DECISIONS_CONTEXT');
   });
 
   it('a main checkout that never ran devflow keeps the ledger in the worktree, and is not scaffolded', () => {

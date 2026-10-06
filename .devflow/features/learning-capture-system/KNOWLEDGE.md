@@ -1,596 +1,392 @@
 ---
 feature: learning-capture-system
-name: Learning & Capture System
-description: "Use when modifying capture hooks (capture-prompt/capture-turn/capture-question), the learning or memory pending-turns queues, the Learning agent (src/assets/agents/learning.md), the session-start-context learning or tracker-setup directives, the machine-wide feature switches (memory/learning/knowledge in ~/.devflow/manifest.json), the per-repo tracker override in .devflow/config.json, the learning tuning config, the decisions content files (decisions.md/pitfalls.md/index.md) or their ledger ops, or the devflow learning/memory/knowledge CLI. Keywords: capture-prompt, capture-turn, capture-question, queue-append, pending-turns, memory-worker, Learning agent, learning directive, LEARNING MAINTENANCE, TRACKER SETUP, TRACKER_PROCESSING_STALE_SECS, tracker-section-max-chars, .tracker.{provider}.attempts, .tracker.enabled, .tracker.processing, hookEnv, DEVFLOW_BG_UPDATER, learning-lock, queue_read_gates, isMachineFeatureOn, readMachineFeature, writeMachineFeature, feature-switch, manifest.json, RETIRED_CONFIG_KEYS, decisions_load, DECISIONS_CONTEXT, feature-config, learning.json, decisions-ledger, assign-anchor, retire-anchor, refresh-anchor, render-decisions, staged-write CAS, WORKING-MEMORY.md.new, segmentDetails, amendments, is-hex-sha, verify_and_swap, compute_commits_since_note, divergence guard, isSafeRawBody."
+name: Learning capture system
+description: "Use when modifying the learning store (hooks/lib/learning-store.cjs) or any json-helper learning op (put-observation, list, show, claim-due, claim-queue, release-claim, assign-anchor, refresh-anchor, retire-anchor, restore-anchor, rotate-observations), the v2 observation and ledger schema or its limits, the decisions log, ledger, history, rejected and pre-v2 files, the rendered decisions.md, pitfalls.md and index.md (v2 body, Inactive table, TL;DR count), the Learning agent (src/assets/agents/learning.md), the owned queue claim and its heartbeat, the devflow learning CLI (--status, --list, --show, --restore, --clear, --reset), how commands, the Code agent and the orchestrator charter load DECISIONS_CONTEXT from the main worktree, the capture hooks (capture-prompt/capture-turn/capture-question/queue-append), the learning or memory pending-turns queues, the session-start-context learning (TL;DR, Index line, LEARNING MAINTENANCE) or tracker-setup directives, the machine-wide feature switches (memory/learning/knowledge in ~/.devflow/manifest.json), the per-repo tracker override in .devflow/config.json, the learning tuning config, or the memory worker. Keywords: learning-store, learning-store.cjs, withDecisionsLock, .decisions.lock, put-observation, observation, claim-due, claim-queue, release-claim, assign-anchor, refresh-anchor, retire-anchor, restore-anchor, rotate-observations, decisions-log, decisions-ledger, decisions-history, rejected.jsonl, pre-v2, schema 2, ledger registry, quarantine, verify ref, due selection, integrity flags, last_verified, last_attempt, Inactive table, TL;DR, index.md, render-decisions, decisions-format, formatEntryBodyV2, DECISIONS_CONTEXT, decisions_locate, decisions_load, apply-decisions, orchestrator charter, Learning agent, LEARNING MAINTENANCE, LEARNING PAUSED, heartbeat, .pending-turns.processing, .pending-turns.owner, D-OWNED-CLAIM, clearUnreferenced, resetLearning, LEARNING_STORE_SURFACE, loadLearningStore, capture-prompt, capture-turn, capture-question, queue-append, pending-turns, queue_read_gates, memory-worker, TRACKER SETUP, TRACKER_PROCESSING_STALE_SECS, tracker-section-max-chars, .tracker.{provider}.attempts, .tracker.enabled, .tracker.processing, DEVFLOW_BG_UPDATER, learning-lock, isMachineFeatureOn, readMachineFeature, writeMachineFeature, feature-switch, manifest.json, RETIRED_CONFIG_KEYS, feature-config, learning.json, staged-write CAS, WORKING-MEMORY.md.new, verify_and_swap, compute_commits_since_note, is-hex-sha."
 category: architecture
 directories:
   - src/assets/scripts/hooks
+  - src/assets/scripts/hooks/assets/orchestrator-charter.md
   - src/assets/agents/learning.md
   - src/assets/agents/tracker.md
+  - src/assets/commands/_partials/_decisions.mds
+  - src/assets/skills/apply-decisions/SKILL.md
   - src/cli/commands/learning.ts
   - src/cli/commands/memory.ts
   - src/cli/commands/knowledge
+  - src/core/learning-store.ts
+  - src/core/observations.ts
   - src/core/feature-switch.ts
   - src/core/feature-config.ts
   - src/core/learning-tuning-config.ts
   - src/core/learning-queue-cleanup.ts
   - src/core/project-paths.ts
   - src/hud/components/learning-counts.ts
-  - src/assets/commands/_partials
 created: 2026-07-15
-updated: 2026-09-29
+updated: 2026-10-06
 ---
 
-# Learning & Capture System
+# Learning Capture System
 
 ## Overview
 
-A capture-then-process model: three always-on hooks write conversation turns into two
-independently-gated JSONL queues, and two processors drain each queue on its own schedule. The
-**memory queue** (`.devflow/memory/.pending-turns.jsonl`) is drained by the detached
-`background-memory-update` worker on a 120s throttle. The **learning queue**
-(`.devflow/learning/.pending-turns.jsonl`) is drained by the **Learning agent** — a background
-subagent that `session-start-context` instructs the main model to spawn whenever the queue has
-pending turns. Scripts capture and trigger only; the Learning agent does all decision/pitfall
-detection by reading and editing the data files directly. No marker files, no deterministic
-detection thresholds, no per-session JSON state on the learning side.
+Three always-on hooks capture conversation turns into two independently gated JSONL queues, and two processors drain them. The **memory queue** (`.devflow/memory/.pending-turns.jsonl`) is drained by the detached `background-memory-update` worker on a 120s throttle. The **learning queue** (`.devflow/learning/.pending-turns.jsonl`) is drained by the **Learning agent**, a background subagent that `session-start-context` tells the main model to spawn whenever turns are pending. Scripts capture and trigger only. The agent makes every judgment (is this a decision or a pitfall, is that entry still true); plumbing does the rest: validate, number, lock, project, render.
 
-`session-start-context` also carries a second, independent directive — `--- TRACKER SETUP ---` —
-sharing the injection shape but gating issue-tracker provider inference and spawning the
-`Tracker` agent (KB scope here is the shared hook-plumbing only; `tracker-feature` owns
-provider selection and the agent's schema). The content the Learning agent produces —
-`decisions.md`, `pitfalls.md`, `decisions-ledger.jsonl`, `decisions-log.jsonl`, `index.md` —
-**deliberately keeps its "decisions" naming** even though the system is called "learning" (see
-Naming Boundary).
+Learning v2 makes **`hooks/lib/learning-store.cjs` the single schema authority**. An *observation* (title, rule, why, scope, provenance) is stored once in the log, the content authority. A *ledger* row projects it under an ADR/PF number and adds what is about the entry rather than in it. `decisions.md`, `pitfalls.md` and `index.md` are generated from the ledger. The agent has four tools (Read, Bash, Glob, Grep) and writes only through `json-helper.cjs` ops that take JSON on stdin. Files are rewritten in place under one lock; history, quarantine and a one-time backup protect what a rewrite replaces.
 
-**`memory`, `learning`, and `knowledge` are machine switches a repository can only narrow**
-(D-FEATURES-NARROW-ONLY, `src/core/feature-switch.ts`; #378 made them machine-wide, #392 added
-the narrow-only repository layer). See System Architecture for the full model.
+**Ledger IDs stay on the machine.** The ledger is gitignored and numbered per machine, so an ADR-NNN or PF-NNN resolves on no other clone and numbers get reused. Anything committed, pushed or posted (code, docs, this KB, commit messages, PR text) states the rule in words; IDs live only in a session's reasoning, handoffs and reports. An observation's title, rule and why may not name an entry either (the op refuses). `tests/guards/no-ledger-citations.test.ts` enforces the committed half.
 
-## System Architecture
+## System Context
 
-### Feature Switches: Machine, Narrowed by the Repository (D-FEATURES-NARROW-ONLY)
+### Data files and the naming boundary
 
-`features.memory`, `features.learning`, and `features.knowledge` in `~/.devflow/manifest.json`
-are the MACHINE switch. `devflow init` and `devflow memory|learning|knowledge
---enable/--disable` write that one value. A repository adds two layers that can only turn a
-feature OFF: effective = machine AND `.devflow/project.json` `features.<name>` (team-committed)
-AND `.devflow/config.json` `features.<name>` (personal, per worktree), where only a literal
-`false` narrows. `features` is a new namespace — the retired top-level keys never narrow, and
-`features.decisions` in a repository file is not a switch. Readers:
-- `resolve-settings.cjs` folds all three (`MEMORY=`/`LEARNING=`/`KNOWLEDGE=`), parsed by the
-  shared `scripts/lib/project-config.cjs`.
-- The shell hooks via `queue_read_gates <manifest_path> <root>` (memory/learning only). Every
-  caller passes `$PROJECT_ROOT` (= `DF_ROOT`, the checkout toplevel) as `<root>`, for learning
-  too — the files are per branch/worktree, the ledger root only says where the queue lands.
-  D-GATES-FAST-PATH: each repository file gets a bounded builtin read (`read -r -d '' -n 4097`);
-  a cut-short read (NUL or > 4096 bytes) is invalid and narrows nothing; a text with no `\u` and
-  no `"features"…{…"memory|learning"…false` sequence cannot narrow. Zero forks then. Otherwise
-  exactly ONE `node` fork runs `resolve-settings.cjs`'s `readRepoLayers` + `foldSettings`
-  (folding the manifest too when its own fast path flagged it), so every file rule — symlink,
-  size, BOM, fatal UTF-8, duplicate keys — is the parser's. The shared table
-  `tests/fixtures/settings-switch-table.ts` runs against both (TP-49).
-- The CLI's `--status` via `readMachineFeature(devflowDir, feature)`, plus an
-  `Effective here: disabled (<file>)` line when a repository file narrows.
-- The knowledge write-back gate via the `knowledge_writeback` MDS partial, which takes
-  `KNOWLEDGE=` from the settings line (`_partials/_settings.mds`) and reads no file itself.
+| File in `.devflow/learning/` | Holds |
+|---|---|
+| `decisions-log.jsonl` | observations, the content authority |
+| `decisions-ledger.jsonl` | entries: projections of log rows plus ledger-owned fields |
+| `decisions-log.archive.jsonl` | observations rotated out of the log |
+| `decisions-history.jsonl` | the last 3 prior versions of each rewritten observation and its entries |
+| `*.rejected.jsonl` | malformed lines a writer moved aside before rewriting a file |
+| `*.pre-v2.jsonl` | one-time copies of the log, ledger and archive made before the first v2 write to a v1 tree |
+| `decisions.md`, `pitfalls.md`, `index.md` | generated from the ledger, never hand-edited |
+| `.decisions.lock/` | the one learning lock |
+| `.pending-turns.jsonl`, `.pending-turns.processing`, `.pending-turns.owner` | the queue, the claimed batch, its owner's token |
+| `learning.json` | agent tuning `{model, debug}`; the project file overrides `~/.devflow/learning.json` |
 
-**Why narrow-only**: per-repo toggles were a leftover of the per-repo-install era — `init --no-<feature>`
-recorded "off" in one repo's manifest while every OTHER repo, reading its own
-`.devflow/config.json`, kept the feature running (#378). Those keys are retired:
-`RETIRED_CONFIG_KEYS` in `feature-config.ts` (`memory`, `learning`, `knowledge`, `decisions`,
-`autoCommit`) — no gate reads them, and `mergeManagedConfig`/`writeManagedConfig` drop them on
-the next managed write. A repository layer that can only narrow cannot reintroduce #378: no repo
-can keep a feature running that the machine switched off. The old `updateFeature`/`isFeatureEnabled` pair is deleted outright —
-only `readMachineFeature`/`writeMachineFeature` remain.
+Content identifiers keep their "decisions" names although the system is "learning": `decisions-*.jsonl`, `decisions_status`, `DECISIONS_CONTEXT`, `decisions_load()`, `render-decisions.cjs`, `decisions-format.cjs`, ADR-NNN/PF-NNN. The directory is `learning/`, the switch `features.learning`, the agent `Learning`. Do not "fix" the mismatch.
 
-**D-FEATURES-ABSENT-ON (fail-open)**: only an explicit boolean `false` switches a feature off —
-an absent manifest, absent `features` object, missing key, or non-boolean value all read as ON.
-`isMachineFeatureOn(rawManifest, feature)` is the pure predicate; `queue_read_gates` applies the
-identical rule in shell. Deliberately NOT built on `readManifest()`: that returns `null` for a
-manifest missing required fields (must still read "on" here) and writes heals back to disk,
-which a read-only gate must never do.
+### Feature switches: machine switch, repository narrows (D-FEATURES-NARROW-ONLY)
 
-**Legacy key coalescing** (`learning`←`decisions`, `knowledge`←`kb`): a
-feature reads its current key when that is a boolean, else its legacy key when THAT is a
-boolean, else ON — `isMachineFeatureOn`'s `LEGACY_KEYS` map and `queue_read_gates`'s jq/node
-fallback apply the identical precedence for `learning`/`decisions` (D-LEARNING-LEGACY-DECISIONS),
-so the hook and the CLI never disagree. `knowledge`/`kb` follows the same rule
-(D-KNOWLEDGE-LEGACY-KB), except `queue_read_gates` never reads knowledge (no shell mirror), and
-`knowledge_writeback` deliberately does not learn the legacy `kb` key (no prompt text
-for a state only an un-upgraded install can hold) — some other command's `readManifest()` heals
-it on disk first.
+`features.memory|learning|knowledge` in `~/.devflow/manifest.json` is the MACHINE switch; `devflow init` and `devflow memory|learning|knowledge --enable/--disable` write it. A repository can only turn a feature OFF: effective = machine AND `.devflow/project.json` `features.<name>` (team, committed) AND `.devflow/config.json` `features.<name>` (personal), where only a literal `false` narrows. The retired top-level keys (`RETIRED_CONFIG_KEYS`: memory, learning, knowledge, decisions, autoCommit) never narrow and are dropped on the next managed write, so no repository can keep a feature running that the machine switched off. Readers:
 
-`setMachineFeature`/`writeMachineFeature` write ONLY `features.<feature>` and `updatedAt`,
-carrying every other key verbatim — also NOT built on `readManifest()`/`writeManifest()`, which
-would refuse a rejected manifest, drop unmodeled keys, and persist unrelated heals as a side
-effect of a one-key toggle. Refuses `{ok: false, error: 'not-installed'}` when no manifest exists
-(created only by `devflow init`, never manufactured by a toggle).
+- `resolve-settings.cjs` folds all three layers into the `MEMORY=`/`LEARNING=`/`KNOWLEDGE=` settings line, which the knowledge write-back gate consumes.
+- The shell hooks call `queue_read_gates <manifest_path> <root>` (memory and learning only; every caller passes `$PROJECT_ROOT`).
+- The CLI's `--status` calls `readMachineFeature`, plus `Effective here: disabled (<file>)` when a repository file narrows.
 
-### Two-Pipeline, Shared Capture
+Rules: **D-GATES-FAST-PATH**: each repository file gets a bounded builtin read (`read -r -d '' -n 4097`); a cut-short read (NUL or over 4096 bytes) is invalid and narrows nothing; text with no `\u` and no `"features"…{…"memory|learning"…false` sequence cannot narrow, so zero forks. Otherwise exactly ONE `node` fork runs `resolve-settings.cjs`'s `readRepoLayers` + `foldSettings`, so every file rule (symlink, size, BOM, UTF-8, duplicate keys) is the parser's. **D-FEATURES-ABSENT-ON**: only an explicit boolean `false` switches off; an absent manifest, `features` object or key, or a non-boolean, reads ON. `isMachineFeatureOn(rawManifest, feature)` is the pure predicate and `queue_read_gates` applies the identical rule; neither is built on `readManifest()`, which returns null for a manifest missing required fields and heals writes back to disk. **Legacy keys**: a feature reads its current key when boolean, else its legacy key (`learning`←`decisions`, `knowledge`←`kb`) when boolean, else ON; `queue_read_gates` mirrors it for learning only. `writeMachineFeature` writes ONLY `features.<feature>` and `updatedAt` and answers `{ok:false, error:'not-installed'}` when no manifest exists.
 
-All three hooks source `queue-append` and call `queue_append_both`, which gates each write
-independently via `_QG_MEMORY`/`_QG_LEARNING` flags from a single
-`queue_read_gates "$DEVFLOW_MANIFEST" "$PROJECT_ROOT"` call (AC-P1 — at most one subprocess per
-hook invocation, none when the fast paths settle it).
-`$DEVFLOW_MANIFEST` is `$HOME/.devflow/manifest.json` — the machine root, which no environment
-variable relocates (D-ONE-HOME, #389). The project's own `.devflow` is a separate hook-local,
-`PROJECT_DEVFLOW_DIR="$PROJECT_ROOT/.devflow"`.
+`.devflow/config.json` keeps one non-boolean field, `tracker` (the per-repo provider override), read by `parseTrackerOverride` (TS) and `resolve-settings.cjs` (`parsePersonalBytes`); both must agree (`tests/seams/tracker-key-path.test.ts`). Never consume `config.tracker` raw.
 
-Config splits along a different line than before #378:
+### Roots and gates (D-HOOKS-GIT-ONLY, D-LEDGER-MAIN-WORKTREE)
+
+Hooks resolve roots from git, never from cwd. `df_resolve_roots` (`resolve-project-root`) makes ONE `git rev-parse --path-format=absolute --show-toplevel --git-common-dir` call and sets `DF_ROOT` (the checkout toplevel: memory, carve-out, KBs) and `DF_LEDGER_ROOT` (the main worktree when its `.devflow/` exists and it is not HOME, else `DF_ROOT`). The capture hooks append learning turns under `DF_LEDGER_ROOT`; memory stays at `DF_ROOT`. `ensure-devflow-init` scaffolds `learning/` only where the ledger lives; the capture hooks and `session-start-context` (healing an older install) create it at the ledger root. `df_is_project_root` (a `.git` entry AT the root, physical path not HOME's, D-HOOKS-TOPLEVEL-ONLY) gates per-project work, so memory and learning stop together outside git. The CLI/HUD twin is `getLedgerRoot` (`src/core/ledger-root.ts`, parity pinned by `tests/core/ledger-root.test.ts`); memory is never resolved that way.
+
+## Component Architecture
+
+### The learning store: single schema authority
+
+**Contract.** Store functions return a Result, `{ok:true,value}` or `{ok:false,error:{kind,message}}`, for anything that can fail on input or the lock; they never print and never call `process.exit`. A throw means a broken invariant or an I/O failure. `json-helper.cjs` prints Results (`emit`), and the CLI reaches the same file through `src/core/learning-store.ts`. The store requires only node built-ins, `project-paths`, `mkdir-lock` and `safe-path`; `decisions-format` and `render-decisions` require the store, never the reverse (`renderAll` lazy-requires the renderer on first render). `now` is epoch milliseconds throughout.
+
+| What | Keys |
+|---|---|
+| Observation (log row), written by the caller | `id` (`obs_` + 3 to 60 of `[a-z0-9_]`), `type` (`decision` or `pitfall`, fixed once stored), `title` ≤120, `rule` ≤400, `why` ≤300, `scope` 1 to 5 entries of ≤200, `provenance` ≤120, optional `evidence` ≤5 items of ≤300. Limits count code points. |
+| Plumbing-owned log keys | `schema: 2`, `observations`, `first_seen`, `last_seen`. A put carrying these, `status` or `anchor_id` is refused. |
+| Ledger row (projection) | `schema, id, type, anchor_id, decisions_status, title, rule, why, scope, provenance`, then the ledger-owned keys present: `date`, `last_verified`, `last_attempt`, `status_note`, `superseded_by`, `encoded_at`, `retired_on`. Evidence and counters stay in the log. |
+| Statuses | active: `Accepted` (decisions), `Active` (pitfalls). Inactive: `Encoded`, `Superseded`, `Retired`, `Deprecated`. An absent or unknown status counts as active. |
+
+**Validation (D-PUT-NOT-MERGE).** A create or update carries the whole content and the stored row is exactly that content plus the counters plumbing keeps; an update never merges, because a merge keeps what the new content no longer says and a stale clause would outlive every rewrite. A reinforce carries `{id}` alone. `validateObservationInput` lists every bad key and field in one refusal, key refusals first (plumbing-owned, ledger-owned, unknown: distinct messages), then id, type, title, rule, why, scope, provenance, evidence; nothing is written. A title, rule or why that is one line reports its length and every reference problem together; a value with a bad shape (text that is not one line, a scope with the wrong number of entries, a malformed glob) reports that alone, and its other problems surface on the retry.
+
+- Every string is one line with no control character (C0, C1, DEL, U+2028/U+2029, bidi controls) and not blank.
+- Title, rule and why also refuse a held ledger anchor, an issue reference (`#` + digits after the start or a non-word character other than `&`) and a file-and-line reference (`name.ext:N` or `#LN` over an explicit extension list, so `host:port` passes). Provenance and evidence may cite all three.
+- A scope entry is an `area:` tag (`area:[a-z0-9][a-z0-9-]{0,39}`) or a glob that is relative (no leading `/` or `:`), has no `..` segment, whitespace, backtick or `|`, and matches a tracked file (`gitScopeMatcher`: memoized `git ls-files`, 5 s timeout; any git failure answers false, so an uncheckable scope is refused).
+- `create` needs an id the log lacks; `update` and `reinforce` need one it holds; `update` cannot change the type.
+
+**Invariants the store keeps:**
+
+- **Ledger registry (D-LEDGER-REGISTRY).** Only the ledger records what is promoted: an observation is promoted when any ledger row carries its id, an anchor is taken when any ledger row carries it. Never decide from a log row's `anchor_id` or status: most anchored rows have none, so a guard keyed to it promotes one observation twice under two numbers. `ledgerRegistry` gives `byAnchor` (first row kept) and `byObsId`.
+- **Content authority (D-LOG-CONTENT-AUTHORITY).** A ledger row is built only by `toLedgerRowV2(logRow, priorRow, {anchorId, status, date, expectType})`, at promotion and at every re-projection; ledger-owned keys carry over from the prior row. It throws on a non-v2 log row, a type that differs from `expectType`, a malformed anchor, an anchor whose prefix does not match the type (ADR with decision, PF with pitfall) or a non-entry status. It copies faithfully and does not sanitize: formatters collapse control characters at render time, because a hand-edited row can hold anything. A new ledger key must join `LEDGER_OWNED_KEYS` or it does not survive projection.
+- **History (D-CONTENT-HISTORY).** Before a write replaces content, `appendHistory` records the prior log row and ledger rows `{id, at, ledger, log}`, keeping the last 3 per id. A write that leaves content as it was records nothing; deciding that is the caller's job.
+- **Quarantine (D-QUARANTINE-MALFORMED).** A line that is not exactly one JSON object is never read as a row and never silently dropped: `readJsonl` returns it among `rejected`, and a writer appends `{rejected_at, source, line, text}` to the file's `.rejected.jsonl` sibling (O_APPEND, O_NOFOLLOW) before rewriting. Read-only paths (`list`, `show`, `--status`, `render`, `--check`, the HUD) count and report, never write.
+- **One-time backup (D-V1-BACKUP-ONCE).** The first write to a tree holding any non-v2 row copies log, ledger and archive to `*.pre-v2.jsonl` with an exclusive create (never overwritten), before any quarantine or rewrite so the copies hold the original bytes. An all-v2 tree makes none.
+- **Due selection (D-DUE-ORDER).** `selectDue` hands maintenance active entries in three classes: integrity-flagged (by anchor), legacy v1 (decisions before pitfalls, by number), then v2 entries last verified over 30 days ago (never verified counts as oldest). An entry attempted within 24 h is leased and skipped. At most 5 entries, stopping before the first that would pass 61,440 bytes (compact JSON of ledger row plus log row) but always at least one. Integrity flags, active entries only: `duplicate-obs-id`, `ledger-without-log`, `scope-matches-nothing` (v2 globs; `area:` always matches). The printed reason is the flags joined by `,`, `legacy-v1` or `verify-age`.
+- **Verify ref (D-VERIFY-REF).** Claims about code are checked at `origin/HEAD` as last fetched, at `HEAD` only when there is no usable `origin/HEAD`, never in the working tree or index, because the ledger serves every checkout. `resolveVerifyRef` answers `{ref, commit}` or null (no repository or no commit).
+
+### The ops (json-helper.cjs)
+
+Each runs as `cd "<root>" && node "$HOME/.devflow/scripts/hooks/json-helper.cjs" <op> …` from the project root and takes **no path**: every file path is built from the cwd. argv carries only shape-gated tokens (type, anchor `^(ADR|PF)-\d{3,}$`, observation id, status, flags, the 16-hex claim token). Text arrives as one JSON object on stdin (≤65,536 bytes, read from fd 0). Exit 0 means the op did what stdout says; exit 1 means empty stdout and the reason on stderr, with nothing written (no lock left, no quarantine, no backup, no history). A multi-problem refusal reads `<op>: the input has <N> problems; nothing was written` then one `  <field>: <message>` per problem. Every learning op except `claim-queue` and `release-claim` sends the claim heartbeat first. The same file serves the hooks' jq-less fallback (`get-field`, `compact`, `slurp-cap`, …), which loads no learning module and sends no heartbeat; `json_field_file` and `json_slurp_cap` feed files on stdin because no op takes a path.
+
+```bash
+# Text reaches an op only on stdin, through a QUOTED heredoc, so the shell expands nothing in it
+cd "<root>" && node "$HOME/.devflow/scripts/hooks/json-helper.cjs" put-observation --create <<'EOF'
+{"id":"obs_...","type":"pitfall","title":"...","rule":"...","why":"...","scope":["area:hooks"],"provenance":"..."}
+EOF
+# stdout: created obs_...     refusal: put-observation: the input has 2 problems; nothing was written
+```
+
+The shape is the op contract: the whole content every time, ids and statuses on argv only, results on stdout, reasons on stderr.
+
+**`put-observation --create|--update|--reinforce`** (D-PUT-REPROJECTS). stdout `created|updated|unchanged <id>` or `reinforced <id> <n>`, then `reprojected <anchor>` per entry re-projected (create and update).
+
+- *Create* stores `schema: 2`, the content, `observations: 1`, `first_seen = last_seen = now`. An active entry already carrying the id is re-projected: the repair for an entry whose log row went missing.
+- *Update* replaces the whole content, keeps the counters, refuses a type change. A v1 row converts (count→observations, created→first_seen; pattern, details, amendments and over-limit evidence leave the live row, kept in history and the backup) and is never `unchanged`. A v2 row whose content keys all equal the input is `unchanged` and writes nothing, even if its entries are stale (refresh-anchor repairs that).
+- *Reinforce* adds one observation and sets `last_seen`, on v1 rows too (a v1 row stays v1). No history, re-projection or render.
+- Every mode refuses a log id held twice, an observation whose anchored entries are all inactive (`restore first`), and an active entry that cannot take the type.
+- Re-projection rebuilds every active ledger row carrying the id through `toLedgerRowV2` and re-renders, all under the lock the log was written under (a separate refresh step could be skipped or interleaved); inactive rows stay unchanged. Write order: backup, quarantine log, history, log, then quarantine ledger, ledger, render.
+
+**Read-only ops.**
+
+- **`list`** always prints `ACTIVE n`, `INACTIVE n` (with `<status>` and an indented `note:`: `encoded in <path>`, `superseded by <anchor>` or the status note), `OBSERVATIONS n` (log rows no ledger row carries), `INTEGRITY n`; `MALFORMED n` only when lines were skipped. An ACTIVE item reads `<anchor> <obs_id> v<1|2> verified <date|never> observed <count|?> last-seen <last_seen|-> scope <scope|-> <title>`: the count and last sighting come from the log row carrying its id, and the scope entries are joined by `,` (`-` for a v1 entry). Titles come last, one line, cut to 120 (a v1 title is its pattern); a missing or multi-word token prints `-`.
+- **`show <anchor|obs_id>`** prints pretty JSON `{key, ledger, log, history_versions, flags, malformed?}`. `ledger` is every ledger row carrying the observation (a twin shows too); `flags` holds a `ledger-only-content` flag with `fields` per row whose content its log row lacks (v1: normalized `details` containment; v2: any differing projected field).
+
+**Writers.**
+
+- **`claim-due`** prints `ref <origin/HEAD|HEAD> <sha12>` (`ref none` without a commit), then `<anchor> <reason> <bytes>` lines or `due none`. It stamps `last_attempt` on each active entry handed out and writes only then (backup, ledger quarantine, ledger); it never renders, since no template shows `last_attempt`. Scope-glob git calls run before the lock.
+- **`assign-anchor <decision|pitfall> <obs_id>`** (D-E4-SKIP) promotes a v2 observation no ledger row carries. The number is one past the highest any ledger row of that type holds (inactive included; decisions and pitfalls number separately; three digits), skipping each number a tracked file cites as a whole word, at most 100 skips, then it refuses. The scan runs once before the lock: `git ls-files`, else a bounded walk of 200,000 entries; it skips the learning tree, `.git`, `node_modules`, `target`, `dist`, symlinks, binaries and files over 5 MB. stdout is the anchor; each skip is the stderr line `assign-anchor: skipped <anchor>, cited in <path>:<line>`, information not an error. The row is the v2 projection with the type's active status and today (UTC) as `date` and `last_verified`; the log is never written. Refuses an id not in the log or held twice, already promoted, a v1 observation, a type mismatch. Minting over a cited number would silently bind that citation to an unrelated entry.
+- **`refresh-anchor <anchor>… [--verified]`**, all or nothing. Without `--verified` each active v2 entry is re-projected from its log row (`reprojected|unchanged <anchor>`, history first when content changes); with it only `last_verified` becomes today (`verified <anchor>`, no log row needed). One refused anchor refuses the batch and every refused anchor is listed: not held once, inactive (`restore it with restore-anchor first`), v1, and without `--verified` a log row missing, doubled, v1 or of another type. A batch that changes nothing writes and renders nothing and exits 0.
+- **`retire-anchor <anchor> <Encoded|Superseded|Retired|Deprecated>`** (D-ENCODED-QUOTE) takes stdin by status (other keys refused) and prints `<status in lower case> <anchor>`:
+  - `Retired`, `Deprecated`: `{reason}`, one line of 1 to 120 characters, kept as `status_note`.
+  - `Superseded`: `{by}`, an active entry other than this one (either type), kept as `superseded_by`; every inactive entry that named this one is re-pointed and printed `repointed <anchor>`.
+  - `Encoded`: `{at, quote}`: `at` is a relative path ≤300 with no empty, `.` or `..` segment; `quote` is one line ≤200 and ≥12 once whitespace collapses. The quote must appear in the file as committed at the verify ref's resolved commit (`git cat-file blob <commit>:<path>`, whitespace collapsed on both sides, checked before the lock); kept as `encoded_at: {path, quote, ref, commit}`. A path alone can point anywhere; only a quote found at a ref every checkout shares shows the lesson lives there.
+  - Every retirement sets `retired_on` and clears the other notes; content stays, so a v1 entry stays v1. Refuses an already-inactive entry and an absent or inactive successor.
+- **`restore-anchor <anchor>`**: an inactive entry becomes active with its type's status and loses `status_note`, `superseded_by`, `encoded_at`, `retired_on`, `last_verified` and `last_attempt`, so the next `claim-due` hands it out ahead of every verified entry; content and `date` stay. Prints `restored <anchor>`.
+- **`rotate-observations`** (D-ROTATE-UNREFERENCED) prints `rotated <N> observations` (always plural). Under the lock it deletes leftover `.decisions-usage.json` and `.decisions-usage.lock/`, then archives each log row that no ledger row carries (a log row's own status or copied `anchor_id` is ignored) once its last activity (`last_seen`, else `first_seen`, else `created`) is at least 30 days old; an unparseable date keeps the row. An archived row is appended unless an identical JSON line is already there, then the log is rewritten without it; backup and log quarantine happen only when rows are due. Only the ledger knows what is promoted, and a dedup by id would drop the newer version of a row whose older one is already archived.
+- **`claim-queue`** and **`release-claim <token>`**: see the claim below.
+
+### One lock, no stray tree
+
+**D-ONE-LEARNING-LOCK.** Every write to the log, ledger, side files and rendered files happens under `.decisions.lock`, taken through `withDecisionsLock(opName, root, fn, {timeoutMs, staleMs})` (default wait 30 s, stale break 60 s, mkdir-based). Two writers under two locks each read a file, change it and rename their copy over it, and the second rename silently discards the first's change. `fn` must return a Result (anything else throws a TypeError); a throw propagates after the lock is released; a busy lock answers `<op>: timeout acquiring lock at <lockDir>`. The ops, `render`, `--clear`, `--restore` and `--reset` all use it, and `render` reads the ledger inside it. `render --check` takes none, because taking it would create the lock directory.
+
+**D-NO-STRAY-TREE.** The store never creates `.devflow/learning/` or its parent (the lock mkdir is non-recursive, so ENOENT means no tree). A writer run where the tree is absent refuses `<op>: no .devflow/learning/ under <root> — run from the project root` and creates nothing; `list`, `show` and `render --check` refuse the same way. A writer run from the wrong directory would otherwise create a ledger no session ever reads. Only the capture hooks, `ensure-devflow-init`, `session-start-context` and `devflow learning --configure` create the tree.
+
+### The owned queue claim and heartbeat (D-OWNED-CLAIM)
+
+The queue is claimed and released only by the `claim-queue` and `release-claim` ops, under the learning lock.
+
+- **Claim.** No learning directory gives `none` (nothing created). A claim path that is not a regular file is an error. A claim younger than `CLAIM_STALE_SECS` (900) is `busy`. An older one is a **takeover** (`claimed <token> takeover`): new owner token, mtime set to now, the waiting queue left for the next claim. No claim and a missing or empty queue gives `none`.
+- **Fresh claim.** Under `<queue>.lock` (2 s wait, 30 s stale; the lock queue-append's overflow truncation takes, so truncation never rewrites rows already claimed): `link(queue, claim)` (EEXIST busy, ENOENT none, EPERM/ENOTSUP fall back to rename), unlink the queue (undoing the link if that fails), set mtime to now, write `.pending-turns.owner` (8 random bytes, 16 hex) and answer `claimed <token>`.
+- **Release.** Claim gone → `gone` (the owner file is removed only if it names this token); owner file not naming the token → `not-owner`; else both removed → `released`.
+- Why: a check-then-`mv` claim lets two runs claim at once and clobber a batch, `mv` keeps the queue's old mtime so a fresh claim looks stale, and an unconditional final unlink deletes another run's claim.
+
+**Heartbeat.** Every `LEARNING_OPS` op (assign, retire, restore, refresh, rotate, put, list, show, claim-due) first runs `touchClaim`: `lutimes` on an existing claim, never creating one, never following a symlink, no lock; a failure goes to stderr and never stops the op. A new learning op must join `LEARNING_OPS` and `LEARNING_OP_RUNS` in `tests/decisions/learning-claim.test.ts`.
+
+**Staleness.** `CLAIM_STALE_SECS` and the hook's `PROCESSING_STALE_SECS` are both 900, pinned equal by a lockstep test; the hook's check is advisory (it decides only whether to spawn), the op decides under the lock. The Tracker's `TRACKER_PROCESSING_STALE_SECS=600` is a separate literal on purpose. Left open by design: a live run silent over 900 s can be taken over (duplicate work, no loss, the old run's release answers `not-owner`); `--clear`, `--disable` and `--reset` delete a live claim and the run stops on vanished inputs; a crash leaves the claim for takeover after 900 s.
+
+### Render (render-decisions.cjs, decisions-format.cjs)
+
+A pure, clock-free render of ledger rows. `renderLearningFiles(root, rows)` returns decisions, pitfalls, index in write order; `renderAndWriteAll` writes them atomically (index last) and throws before writing without the learning directory; the store's `renderAll` writes the same contents and prints nothing, so an op's stderr stays empty on success. **D-V1-BYTE-STABLE**: a row without `schema: 2` renders byte for byte as before (`raw_body` verbatim, else the v1 formatters from `details`) and keeps its v1 index line; only a schema-2 row takes the v2 body and line, because moving v1 bytes would show every untouched entry as changed.
+
+```markdown
+<!-- TL;DR: 2 decisions -->      <- active count only; plural even for one
+# Architectural Decisions
+
+Generated from the local learning ledger by devflow; do not edit. Active entries follow; retired ones are listed under Inactive.
+
+## ADR-NNN: {title}
+
+- **Status**: Accepted · verified 2026-10-03    <- type's active status; ` · verified` only with last_verified
+- **Scope**: `src/assets/scripts/hooks/**`, `area:learning`
+- **Decision**: {rule}                           <- pitfalls: `Active` and `**Rule**`
+- **Why**: {why}
+- **Source**: {provenance}
+
+## Inactive
+
+| ID | Status | Note |
+|---|---|---|
+| ADR-NNN | Encoded | encoded in docs/reference/hooks.md |
+```
+
+This is the v2 shape the renderer pins; the arrows are annotations only. Every field passes through `singleLine`; a non-string field renders empty and its line stays; `|` in a cell becomes `\|`.
+
+- **Inactive table**: one row per inactive entry of the file's type (v1 and v2 alike) by anchor number; Note is `encoded in <path>`, else `superseded by <anchor>`, else the status note, else `—`; omitted when none; never in `index.md`. Inactive entries keep their numbers.
+- **Index lines**: v1 `  {anchor}  {title cut to 60 + …}  [{status}]` (+ `  —  {area cut to 80 + …}`); v2 `  {anchor}  {title}` (+ `  —  {scope joined ', ' cut to 80 code points + …}`), no status tag, title whole. `Decisions (N):` and `Pitfalls (N):` count both kinds; the footer names the absolute `decisions.md` and `pitfalls.md` paths, so the same ledger rendered at two roots differs in exactly those two lines. An empty corpus writes `(none)`.
+- **Render CLI**: `render-decisions.cjs render|--check <worktree>` runs from the project root and `<worktree>` must realpath-equal the cwd (it is only compared; no path is built from argv). `render` locks and reads the ledger inside the lock; `--check` locks nothing, writes nothing, prints `[render-decisions] DRIFT: <path>[ (missing)]` and exits 1 on drift. Malformed ledger lines print `MALFORMED: N …` on stderr and are never quarantined by render. The one `process.exit` sits outside every lock.
+
+### The Learning agent
+
+`src/assets/agents/learning.md`: `model: opus`, tools exactly Read, Bash, Glob, Grep (no Write, no Edit), skill `devflow:apply-decisions`; hook-spawned, never named by a command. Iron Law: assign-anchor owns numbering, render owns the `.md`, never hand-edit. One run, in order:
+
+- **Step 0.** `claim-queue`: `claimed <token>` (keep it for the final release), `claimed <token> takeover` (the stale run may have stored part of the batch, so do not reinforce an observation that already states a turn), `busy` (exit silently), `none` (report "no pending decisions work"), non-zero exit (stop, report stderr).
+- **Part 1, capture.** Read the claimed turns (all, or the last 30 dialog-worthy when huge). Abstain by default: a decision is a real fork with rationale, a pitfall a non-obvious transferable failure; one incident yields an ADR or a PF, never both; if Grep/Glob finds a test, guard, CLAUDE.md, rule or prompt that already states it, record nothing.
+  - Run `list` once and `show` candidates. An active entry or stored observation covers it → `--reinforce` (or `--update` with the whole content when the turns sharpen it); a Superseded one → act on its successor; any other inactive entry → `restore-anchor`, then `--update`, never a new entry; else `--create`.
+  - Promote with `assign-anchor` once it recurs or is clearly significant; an unpromoted observation waits, then rotates after 30 idle days.
+  - A status change the turns report is checked at the verify ref (`git show <ref>:<path>`, never `git grep` or the working tree) before acting.
+- **Part 2, maintain.** `rotate-observations`, then `claim-due` once (its ref line is the verify ref; `due none` ends; `ref none` leaves every due entry). Per due entry `show`; a `ledger-without-log` entry first gets `put-observation --create` under its id. Then the first matching rung, exactly one final action, Keep when unsure:
+  1. **Encoded**, by a strict bar: a test or guard that fails on any new violation in scope, or the rule stated in CLAUDE.md, a rules file or a prompt loaded for that scope. A refused quote means Keep.
+  2. No longer true at the ref → rewrite the scope, or Retired.
+  3. Duplicate → absorb into the survivor with `--update`, then Superseded.
+  4. One-off → Retired.
+  5. Keep, rewriting only when legacy-v1, wrong or vague (read a v1 entry's `ledger-only-content` flags first).
+  - Close with one `refresh-anchor … --verified` batch of the kept entries (active v2 only; if refused, drop the named anchors and run once more).
+- **Heartbeat and vanished inputs.** Every op refreshes the claim; at the Part 1→2 boundary and after each maintained entry the agent runs `touch -c <claim> && test -f <claim>` (the `test -f` fails once the claim is gone). If that fails, or an op answers `no .devflow/learning/ under …`, stop writing, go to Finishing, never recreate anything.
+- **Finishing.** `release-claim <token>` is the FINAL act (`not-owner`, `gone` or a no-learning-dir refusal is noted in the summary); never delete, move or rewrite the claim or owner file. End with a 1 to 3 line summary, the run's only visibility surface.
+
+The prompt carries the entry format with a good and a bad example and quotes every op's stdout form. It states no plumbing numbers (claim staleness, the claim-due batch size): they live in plumbing and a prose copy drifts. Only the 30 days (rotation, verify age) stays, pinned by a test.
+
+### devflow learning CLI (`src/cli/commands/learning.ts`)
+
+A thin router (status, list, show, configure, reset, clear, restore, enable, disable). It reads and writes the log, ledger and rendered files only through the store loaded by `loadLearningStore()` (`--configure` and the queue drain write their own files directly), and locates the ledger with `getLedgerRoot()` (the main checkout from a linked worktree). Writers wait at most `LOCK_WAIT_MS` (5 s) for the lock and answer `The learning store is busy: another run holds its lock. Nothing was <cleared|restored|reset>; try again in a moment.` (exit 1).
+
+- **`--status`**: `Learning: enabled|disabled` (+ `Effective here:`), `Entries: A active (n decisions, m pitfalls), I inactive (Status k, …)`, `Legacy v1 entries: v of A active`, `Observations: L in the log, U not yet promoted`, and a warning when lines were skipped. Reads only, no scope check, no path printed; outside git `Entries: not in a git project`.
+- **`--list`** prints exactly the `list` op's text; **`--show <id>`** prints the `show` JSON with every DEL, C1, directional, line-separator and bidi character escaped as `\uXXXX`, so a terminal shows it as written. Both read the cwd outside git; no learning directory → `No learning data in this project yet.`
+- **`--restore <id>`** needs a git root and an entry id and calls `restoreAnchor`: `Restored <anchor> (<status>); it is due for review again.`
+- **`--clear`** (D-CLEAR-UNREFERENCED): TTY confirm, then `clearUnreferenced` drops exactly the log rows no ledger row carries, whatever their age or status, and keeps every row an entry carries. It refuses while the ledger holds a malformed line (that line may carry a row it would drop), never writes the ledger, archive or rendered files, and with nothing to drop writes nothing. Only after it succeeds does the CLI drain the queue, claim and owner file. Truncating the whole log would orphan every entry, each losing its content authority.
+- **`--reset`** (D-RESET-UNDER-LOCK): no learning directory → `No learning data to reset.`, nothing created. The TTY confirmation comes BEFORE the lock; `resetLearning` then empties the directory under the lock, sparing only the lock directory, and removes the emptied directory after the release, only if nothing arrived meanwhile (removing the lock with the directory would let a release delete the lock of a writer that recreated the tree). It removes everything: queue, claim, owner and tuning config included. A `.devflow/learning` that is itself a symbolic link is refused with nothing removed (`not-a-directory`), since emptying it would empty the directory it leads to.
+- **`--enable/--disable`** write `features.learning`; disable drains this project's queue (`drainLearningQueue`: queue, claim, owner). **`--configure`** writes `learning.json` at the ledger root (project) or `~/.devflow` (global).
+
+### TypeScript seam, status lists and HUD
+
+**D-LEARNING-STORE-SEAM.** `loadLearningStore(dir = scriptsDir())` loads `hooks/lib/learning-store.cjs` with evidence-policy's `loadScript` and shape-checks it against `LEARNING_STORE_SURFACE` (`satisfies Record<keyof LearningStoreModule, SurfaceKind>`: `INACTIVE_STATUSES`, `ANCHOR_ID_RE`, `readLearningState`, `buildListing`, `readListing`, `formatListing`, `showByKey`, `restoreAnchor`, `clearUnreferenced`, `resetLearning`). It never throws (`not-found` and `unusable` map to "learning store not found|failed to load — reinstall devflow-kit"). The interfaces are transcribed from the store's JSDoc and are the TS side's only shape authority, so a store function the CLI calls needs the interface entry, the surface entry and the fixtures' `LearningStoreApi`. The CLI loads the package copy while hooks and ops run `~/.devflow/scripts`, so the two can differ until `devflow init`.
+
+`src/core/observations.ts` mirrors the status lists (D201) and imports nothing, so the HUD import closure does not grow (the install goldens list `core/observations.js`); a parity test pins it equal to the store's lists. The HUD component (D309) counts ledger rows with `anchor_id` set and `isActiveDecisionsStatus`, from `decisions-ledger.jsonl` and never the rendered markdown, silent on malformed lines; `gatherLedgerLearningCounts` uses `getLedgerRoot` inside the git-status `Promise.all` (1 s budget).
+
+## Component Interactions
+
+### Capture hooks and the queues
+
+All three hooks source `queue-append` and call `queue_append_both`, gating each write by `_QG_MEMORY` / `_QG_LEARNING` from one `queue_read_gates "$DEVFLOW_MANIFEST" "$PROJECT_ROOT"` call (at most one fork per invocation, none when the fast paths settle it; `$DEVFLOW_MANIFEST` is `$HOME/.devflow/manifest.json`, D-ONE-HOME). They only append: no scanner runs and no background worker starts. In order: (1) the `DEVFLOW_BG_UPDATER=1` re-entrancy guard before `hook-bootstrap`, so the memory worker's own `claude -p` session is never captured; (2) the one gate fork; (3) JSONL append via `jq` or `node JSON.stringify`, never string concatenation, `umask 077`, lock-free by design; (4) overflow guard: over 200 lines truncates to the newest 100 under `learning_lock_acquire "<queue>.lock"` (2 s wait, stale after 30 s). `capture-question` emits one `qa` row per answered question, joining `cwd` and field with ASCII SOH.
 
 | What | File | Contains |
-|------|------|---------|
-| Feature on/off | `~/.devflow/manifest.json` (machine-wide) | `{features: {memory, learning, knowledge, ...}}` |
-| Team narrowing + facts | `.devflow/project.json` (committed, never devflow-written) | `{version, evidence, compliance, tracker, reviewPublication, features}` — `features.<x>: false` only narrows; `reviewPublication` only lowers (a ceiling, never a default: `min(team ?? full, personal ?? auto)`) |
-| Per-repo facts | `.devflow/config.json` (project root, per worktree) | `{reviewPublication, tracker?, features?}` — `features.<x>: false` only narrows; top-level switch keys retired |
-| Agent tuning | `.devflow/learning/learning.json` → `~/.devflow/learning.json` | `{model, debug}`, project overrides global |
+|---|---|---|
+| Feature on/off | `~/.devflow/manifest.json` | `{features: {memory, learning, knowledge, …}}` |
+| Team narrowing and facts | `.devflow/project.json` (committed, never devflow-written) | `{version, evidence, compliance, tracker, reviewPublication, features}`; `reviewPublication` only lowers |
+| Personal per-repo facts | `.devflow/config.json` | `{reviewPublication, tracker?, features?}` |
+| Agent tuning | `.devflow/learning/learning.json`, then `~/.devflow/learning.json` | `{model, debug}` |
 
-`.devflow/config.json`'s only feature-adjacent field left is the optional `tracker` key — a
-per-repo provider override, not a boolean toggle (`FeatureConfig.tracker` is `unknown`,
-unvalidated at the field level; the original rationale for a neutral config home now applies only to this
-field). It round-trips through `coerceConfig`/`mergeManagedConfig` byte-for-byte
-(D-CONFIG-PRESERVE-UNMANAGED). It has two readers that must agree: `parseTrackerOverride`
-(TypeScript, routes through `parseTrackerId`, returning `{absent | valid | invalid}`) and
-`resolve-settings.cjs`'s `parsePersonalBytes`, which folds it into the settings line the Git agent
-consumes — `tests/seams/tracker-key-path.test.ts` pins them to the same verdicts. See
-`tracker-feature` KB for the resolution order.
+### session-start-context
 
-### Project Roots (D-HOOKS-GIT-ONLY, D-LEDGER-MAIN-WORKTREE)
+- **Section 1** emits `--- PROJECT DECISIONS (TL;DR) ---`: the count line from each of `decisions.md` and `pitfalls.md` (`N decisions`, `N pitfalls`, cut from line 1 with sed), then, last, `Index: <ledger root>/.devflow/learning/index.md`. The Index line exists only when `DIRECTIVE_LEDGER_SAFE` admits the ledger root and the index is non-empty with a first line other than `(none)`; builtins only. The section is emitted when either part exists.
+- **Section 2** emits `--- LEARNING MAINTENANCE ---` when the queue is non-empty or `.pending-turns.processing` is stale (≥900 s); a fresh claim suppresses it. The check is advisory: a spawn that loses the race exits on `busy`. `$LEDGER_ROOT` is embedded only when `DIRECTIVE_LEDGER_SAFE` (positive shape `^[A-Za-z0-9/._+-]+$`, `+` for Claude Code's `feat+x` worktrees) admits it; a refused root with pending work emits the fixed `--- LEARNING PAUSED ---` notice, which interpolates nothing. The model resolves project → global → `opus` through the `opus|sonnet|haiku` allowlist (learning.json is user-controlled). The spawn is `subagent_type="Learning"`, `run_in_background: true`, prompt "Process the pending learning queue per your agent instructions. Project root: $LEDGER_ROOT".
+- **Section 3, tracker setup** (`--- TRACKER SETUP ---`, not gated by the learning switch):
+  - The machine provider comes from the `.tracker.enabled` sentinel (provider name on one line, read with `read`, zero forks), overridden by committed `project.json` or narrowed by personal `config.json` only when a bounded read shows a `"tracker"` key (one fork of `resolve-settings.cjs`; a git-tracked `config.json` is ignored, D-PERSONAL-UNTRACKED). Then a POSITIVE `jira|linear` allowlist (never `!= github`) and a skip when `~/.devflow/tracker/$P.md` exists.
+  - `tracker_gates_open()` runs cheapest first: attempt cap, git marker, `source` in {startup, clear}, claim freshness, path shape, and the counter increment must land. GitHub and a learned provider fork nothing.
+  - `.tracker.{provider}.attempts` is one decimal-integer line (absent, malformed or zero-padded → 0 and self-healed; 7+ digits count as `TRACKER_ATTEMPTS_MAX=5`); the hook increments on emission, the agent deletes it only on a successful write and the claim file last. The section is capped at `tracker-section-max-chars` (800).
+  - The Tracker agent (`tracker.md`, `model: sonnet`) has the same claim/heartbeat shape with its own 600 s bound; provider selection and schema belong to the `tracker-feature` KB.
+- **Section 4** (D-LEGACY-LOCAL-NOTICE): one line asking the user, once, to run `devflow uninstall --scope local` when `<root>/.claude/settings.json` registers a devflow hook (a command ending in `/scripts/hooks/run-hook <marker>`).
 
-Hooks resolve roots from git, never from cwd. `resolve-project-root`'s `df_resolve_roots <cwd>` makes ONE `git rev-parse --path-format=absolute --show-toplevel --git-common-dir` call, accepts exactly two absolute lines (else falls back to `df_resolve_root` — git < 2.31 echoes the flag as a third line), and sets `DF_ROOT` (the checkout toplevel: memory, carve-out, KBs) and `DF_LEDGER_ROOT` (the main worktree = parent of a `…/.git` common dir, when `$MAIN/.devflow` already exists and the main worktree is not HOME — `df_is_project_root "$MAIN"`, a physical-path compare, since a dotfiles repo's `~/.devflow` is the machine root and always exists; else `DF_ROOT`). The capture hooks append learning turns under `DF_LEDGER_ROOT` and pass it to `decisions-usage-scan.cjs`; `session-start-context` reads the TL;DR, the queue and `learning.json` there and names it in the directive; memory stays at `DF_ROOT`. A worktree ledger created before this rule stays on disk, unused. `ensure-devflow-init` scaffolds `learning/` only when `DF_LEDGER_ROOT` is `DF_ROOT`: a linked worktree whose ledger is at main gets no `learning/`, and the capture hooks create the ledger's own `learning/` when they append. `ensure-devflow-init` and `session-start-context` both refuse per-project work unless `df_is_project_root` (git-marker) passes — a `.git` entry AT the root (a directory, or a linked worktree's or submodule's file; never one found by walking up, D-HOOKS-TOPLEVEL-ONLY) AND a physical path that is not HOME's — so memory and learning stop together outside git and in a HOME-rooted repo, and when `git rev-parse` fails from a subdirectory (dubious ownership, `GIT_CEILING_DIRECTORIES`) the raw-cwd fallback root is refused rather than scaffolded. `ensure-root-gitignore` itself stays ungated (the carve-out parity tests run it in plain dirs).
+### Consumers of the decisions index
 
-### Capture Hook Protocol
+`decisions_locate()` in `_decisions.mds` runs ONE `git -C "{start}" rev-parse --path-format=absolute --show-toplevel --git-common-dir` from `WORKTREE_PATH` or the cwd and picks `{ledger}`: the main worktree (line 2 without `/.git`, when the output is exactly two absolute lines, line 2 ends `/.git`, and the parent is not HOME and holds a `.devflow/`), else the toplevel (the line after the echoed flag on git < 2.31), else the start directory. It mirrors the hooks' rule (D-PROMPT-ROOT). `decisions_load()` reads `{ledger}/.devflow/learning/index.md` (absent or empty → `DECISIONS_CONTEXT` is `(none)`) and applies `devflow:apply-decisions`; nothing parses the ledger.
 
-All three capture hooks enforce in order: (1) **re-entrancy guard**
-(`if [ "${DEVFLOW_BG_UPDATER:-}" = "1" ]; then exit 0; fi`, before `hook-bootstrap`, prevents
-double-capture of the memory worker's own claude session); (2) **single config fork** via
-`queue_read_gates "$DEVFLOW_MANIFEST" "$PROJECT_ROOT"` (the machine-root manifest, narrowed by the
-checkout's repository files; zero forks unless one could narrow); (3) **JSONL
-append** via `jq` or `node JSON.stringify` (never string concatenation), `umask 077`;
-(4) **overflow guard** (>200 lines → truncate to newest 100, under `learning_lock_acquire`, 2s
-timeout). `capture-turn` also runs `decisions-usage-scan.cjs` before append when the assistant
-message contains `ADR-\d+|PF-\d+` (D29 grep-first gate), regardless of queue feature flags.
-`capture-question` emits one `"qa"` row per answered question using ASCII SOH (`\001`) as
-delimiter for the combined `cwd+field` in `json_extract_cwd_field` — one subprocess, two fields.
+- Nine hosts import `{ decisions_load }`: bug-analysis, code-review, debug, plan, implement, explore, self-review, research, resolve.
+- `_preamble.mds` imports the module as `decisions` and calls `decisions_locate()` for the four dynamic commands; `_engine.mds` passes the loaded index to Code.
+- `commands/release.md` Phase 1b carries the locate text word for word (a test pins it to the define body).
+- `agents/code.md` reads the main worktree's index itself when no `DECISIONS_CONTEXT` is given, and states applied decisions in words, never by ID.
+- The charter bullet tells the main model to pass the index named under PROJECT DECISIONS as `DECISIONS_CONTEXT` on direct delegations (charter capped at 3,072 characters).
+- The `apply-decisions` skill documents both index line kinds and the v2 body; its Skip Guard treats an index an agent's own instructions tell it to read as that agent's `DECISIONS_CONTEXT`.
 
-### session-start-context Directive
+### Memory worker (background-memory-update)
 
-Emits `--- LEARNING MAINTENANCE ---` when `.pending-turns.jsonl` is non-empty OR
-`.pending-turns.processing` is stale (>= 900s); a fresh `.processing` suppresses it. It embeds
-`$LEDGER_ROOT` only when `DIRECTIVE_LEDGER_SAFE` admits it — the positive shape
-`^[A-Za-z0-9/._+-]+$` (`+` for Claude Code's `feat+x` worktrees), one `case` per embedded value
-(ledger root for Section 2; project root + `~/.devflow` for Section 3). A refused root with
-pending work emits the fixed single-quoted `--- LEARNING PAUSED ---` notice, which interpolates
-nothing. Gated by the
-same `queue_read_gates` read, resolved from `$TRACKER_DEVFLOW_DIR/manifest.json` and `$PROJECT_ROOT`
-(`TRACKER_DEVFLOW_DIR="$HOME/.devflow"`, the machine root; the project root's `.devflow` is
-`PROJECT_DEVFLOW_DIR` — the global `learning.json` read spells `$HOME/.devflow` too, so the two
-no longer diverge). Model resolves bash-side (project → global → `"opus"`)
-through a mandatory `case "$LEARNING_MODEL" in opus|sonnet|haiku)` allowlist before
-interpolation — `learning.json` is user-controlled, so a newline-injected value must not reach
-`additionalContext`. Emitted with `subagent_type="Learning"`, `run_in_background: true`.
+`memory-worker` resolves `DEVFLOW_MANIFEST`, gates its spawn on it and passes the path as `$2` (`background-memory-update <CWD> [<manifest_path>]`; the worker re-checks after spawn and falls back to `$HOME/.devflow/manifest.json`). The model writes ONLY `WORKING-MEMORY.md.new`; `verify_and_swap()` assigns one outcome:
 
-### Section 3: Tracker Setup Directive
+- `updated`: valid stamp and matching pre/post `cksum` → atomic `mv`, remove `.processing`, touch `.last-refresh-ok`.
+- `conflict`: mismatch or failure → staged file dropped, `.processing` kept with a heartbeat touch that extends the 300 s cold-path liveness window.
+- `failed`: staged file missing, empty or unstamped, or `mv` failed → `.processing` left for cold-path recovery.
 
-A second, independent directive shares the hook and injection shape but gates a different
-feature and spawns the `Tracker` agent. NOT gated by the `learning` machine switch — tracker
-selection is its own configuration, unaffected by #378.
+`cksum` must be on PATH or the worker exits; a `cksum` failure on the target forces `conflict`; stale staged files are cleaned at the start of each run.
 
-**Which provider** (`D-TRACKER-PER-PROVIDER-CONVENTIONS`): the machine default from the
-`.tracker.enabled` sentinel — the provider NAME on one line, read with the `read` builtin
-(zero forks; a zero-byte sentinel from an earlier release yields no directive until init
-rewrites it) — overridden by the project's committed `.devflow/project.json`, or narrowed by the personal
-`.devflow/config.json`, only when a bounded builtin read of either shows a `"tracker"` key —
-config.json is read only where the sentinel names a provider, since a personal override can
-only narrow (to `github` or the provider in effect) — which costs ONE fork of
-`resolve-settings.cjs` (the resolver the Git agent consumes). So a personal `"tracker":"github"`
-silences a jira machine's directive in that repository, and a config.json git tracks is ignored
-there as the resolver ignores it (D-PERSONAL-UNTRACKED). Then a POSITIVE `jira|linear` allowlist (never `!= github`),
-then skip when `~/.devflow/tracker/$P.md` already exists.
+**D-QUEUE-NO-ORPHAN-DELETE.** Claude Code runs one event's hooks in PARALLEL, so the worker can start after `capture-prompt` appended the user row and before `capture-turn` appends the assistant row. A queue with no `assistant`/`qa` row exits with no LLM run and is LEFT in place; the next run takes the whole turn. `compute_commits_since_note()` yields five exact outcome literals that are a test contract (no-stamp full-synthesis, invalid-SHA-format, SHA-not-ancestor-of-HEAD, none-current-as-of-HEAD, `N commit(s)… (showing newest 20)`, subjects `%.100s`). The four untrusted data blocks are wrapped in named XML tags under a DATA-not-instructions preamble, and the prompt goes by heredoc stdin, never argv. `is_hex_sha <value> [min=7] [max=40]` is sourced with no forks (pre-compact uses 40–40); `pre-compact-memory` bootstraps `WORKING-MEMORY.md` noclobber-atomically only for a full SHA, labelling a detached HEAD `(detached)`; `session-start-memory`'s `detect_refresh_failing()` counts both `.pending-turns.jsonl` and `.pending-turns.processing`.
 
-**Then the gates, cheapest-first**, inside `tracker_gates_open()`: attempt cap via `read`
-(0 forks); project root carries a git marker (0 forks); `source` ∈ {`startup`, `clear`}
-(1 fork); claim-file freshness (0–2 forks); interpolated path shape; the counter increment
-must land. The GitHub path and a provider whose conventions are learned fork ZERO subprocesses.
+### Hook ownership, init and logs
 
-**`.tracker.{provider}.attempts`** (one counter per provider; the claim file
-`.tracker.processing` stays global) is one decimal-integer line and nothing else —
-absent/malformed/zero-padded → 0, self-healed; 7+ digits treated as already at
-`TRACKER_ATTEMPTS_MAX=5` (a naive `-ge` on an out-of-range value fails OPEN). The hook
-increments on EMISSION (a crashed agent still burns an attempt); the agent deletes the counter
-only on a successful write and never otherwise touches it, and always deletes the claim file
-last. `tests/seams/tracker-key-path.test.ts` pins the TS sentinel writer against the shell
-reader for every provider. `TRACKER_PROCESSING_STALE_SECS=600` is its own literal, deliberately
-not shared with Learning's 900s. Capped at `tracker-section-max-chars` = 800 (ceiling in
-`tests/fixtures/numeric-floors.json`).
+- **D-EXACT-HOOK-OWNER**: a hook is devflow's only when its command ENDS in `/scripts/hooks/run-hook <marker>` (`devflowHookOwner` in `src/targets/claude-code/hooks.ts`); `removeHooks` takes single hooks out of a matcher group. `memory.ts`'s `LEGACY_HOOK_SUFFIXES` names every earlier ending, removed on each converge and never counted as current. `devflow memory --enable/--disable` converges Stop/SessionStart/PreCompact (the settings transform runs FIRST, so the switch is not recorded unless the hooks can follow); `devflow knowledge` is a thin `handleToggle` router (KBs are written only by `knowledge_writeback`).
+- **D-INIT-DRAIN-AFTER-SWITCH**: `drainDisabledFeatureQueues` drains this repo's queues for each feature `init` switched off, only AFTER the manifest write lands (draining first leaves a window where a session still reading "on" appends turns that survive the disable). **D-HUD-ONLY-PRESERVE**: `--hud-only` re-init keeps every recorded manifest value and changes only `features.hud`.
+- **D-LOG-DIR-CAP**: hooks log under `~/.devflow/logs/<cwd-slug>/`; `devflow init` prunes to `MAX_HOOK_LOG_DIRS` (200, `src/core/hook-log-dirs.ts`, oldest first, at most 100,000 scanned) and `log-paths`' `devflow_log_dir` prunes only when it creates a folder (one `ls -1At`, at most 50 removed, bash 3.2); the shell cap is pinned equal to the TS one.
 
-### Section 4: Legacy Project-Local Install Notice (D-LEGACY-LOCAL-NOTICE)
+### Integration points
 
-When `<root>/.claude/settings.json` registers a devflow hook — matched by the exact ownership
-shape, a command ending in `/scripts/hooks/run-hook <marker>` for a marker devflow registers or
-a v1 `.sh` hook — a fresh session gets one line asking the model to tell the user, once, to run
-`devflow uninstall --scope local` there (the retired `init --scope local` left it, and its hooks
-run twice). Never for the machine-wide Claude Code directory; a `settings.json` with no devflow
-hook costs a builtin read and no subprocess. `tests/session-start-legacy-install.test.ts`.
+- **git**: `ls-files` (scope matching, the cited-number scan), `rev-parse` (roots, verify ref), `cat-file blob` (the Encoded quote); the store makes its calls through its `git()` wrapper, whose body prepends the fsmonitor override; the agent reads files at the ref with `git show`.
+- **Install**: the store, renderer, formatter, `mkdir-lock`, `safe-path` and `json-helper` install under `~/.devflow/scripts/hooks/` (the install goldens list each), and `core/observations.js` rides with the HUD. A prompt that names an op needs that op in the installed copy.
+- **Claude Code**: SessionStart `additionalContext` carries Sections 1 to 4; the Learning and Tracker agents are spawned from directives, never from commands; hooks of one event run in parallel.
+- **Docs**: `docs/reference/hooks.md` (the Learning pipeline), `docs/reference/file-organization.md` (the data-file table and ops), `docs/cli-reference.md` (the nine `devflow learning` flags) describe this area.
 
-### Learning Agent
+## Constraints
 
-`src/assets/agents/learning.md` (`model: opus`) is self-contained. **Claim**: if `.processing`
-is fresh (< 900s), exit silently; if stale (>= 900s), re-claim (touch + fold in queue); else
-`mv .pending-turns.jsonl .pending-turns.processing` atomically — the 900s discriminator is
-shared with `session-start-context`. **Processing**: Part 1 (detection) reads claimed turns +
-log, appends/reinforces observations, promotes via `assign-anchor`, calls `refresh-anchor` after
-reinforcing anchored obs; Part 2 (curation) runs `rotate-observations`/`retire-anchor`/
-`refresh-anchor` for citation cleanup, heartbeating `.processing` at the boundary. **Final act**:
-`unlink .pending-turns.processing` (`rm -f` denied; `unlink` passes).
+Every loop and read has a bound: 100 cited-number skips, a 200,000-entry fallback walk, files over 5 MB skipped, 5 due entries and 61,440 bytes, 3 history versions, 64 KiB of stdin, a 5 s git timeout and 16 MB git buffer, lock waits of 30 s (2 s for the queue lock, 5 s from the CLI). Paths: no op takes one; every git call in the store goes through its one `git(root, args)` wrapper, whose body prepends `['-c', 'core.fsmonitor=false', …]` (**D-NO-FSMONITOR**: an index read runs the command a repository's `core.fsmonitor` names; the guard honours a wrapper only when its own body prepends the override, so a new call outside it must spell the override); appends and the claim heartbeat refuse symlinks (O_NOFOLLOW, `lutimes`), `--reset` refuses a learning directory that is itself a symlink, and the cited-number scan opens files with O_NOFOLLOW and O_NONBLOCK.
 
-**Ledger ops** — four, all via `json-helper.cjs`: `assign-anchor`, `retire-anchor`,
-`refresh-anchor`, `rotate-observations`. Each self-locks (`withDecisionsLock`, `.decisions.lock`,
-`LOCK_ACQUIRE_TIMEOUT_MS=30000`, `LOCK_STALE_MS=60000`; `rotate-observations` uses a separate
-`.observations.lock`) — never wrap in an external lock or call >1 concurrently. All three of
-`assign-anchor`/`retire-anchor`/`refresh-anchor` re-render `decisions.md`/`pitfalls.md`/
-`index.md` (each write atomic; the sequence self-heals on the next op after a crash).
-`assign-anchor` writes `anchor_id` back to the log row (arming a guard against a duplicate call)
-and stamps `date` — older pitfall rows promoted before date-stamping may lack `date` (D5 fallback
-in Gotchas). `refresh-anchor <anchor_id> [...]` (the log-to-ledger content-update path) is variadic — ONE
-lock + ONE parse + ONE render for N anchors, all-or-nothing: locates the log obs by the LEDGER
-ROW's `id` (not `anchor_id` — covers pre-write-back corpora), runs the REG-1
-details-divergence guard (refuses when ledger `details` carries content absent from the log
-row), re-projects via `toLedgerRow`, asserts row-count unchanged, writes once, renders once. A
-ledger-existence guard refuses before acquiring the lock when no `decisions-ledger.jsonl`
-exists; throw-not-exit discipline applies to every error path (`process.exit()` skips
-`finally` and leaks the lock — the outer `catch` in `require.main === module` prints
-`json-helper error: <message>` and exits 1 instead).
-
-`toLedgerRow` is a positive whitelist projector: committed row is exactly `{id, type,
-pattern, details, anchor_id, decisions_status}` plus optional `{date, raw_body, amendments}` —
-sink-validated (type-mismatch throws, `pattern` line-terminator collapse prevents forged
-`## ADR-NNN:` headings, `raw_body` gated by `isSafeRawBody`). A new ledger field must be added
-here or it never survives projection. **details grammar**: `Key: value;` segments, anchored-key
-detection at segment start (`reissue:` does not match `issue:`); decision keys `context`/
-`decision`/`rationale`, pitfall keys `area`/`issue`/`impact`/`resolution`.
-`decisions-format.cjs#segmentDetails` is the single authority (avoids delimiter-regex truncation); its **recovery
-pass** searches any still-unset key via unanchored regex for legacy mid-segment rows,
-never overriding an anchored match. **7-day protection window (D5)**: ledger `date` → log
-`last_seen` → assume outside window — never assume the ledger row has `date`. **Pointer vs. citation**: before
-acting on a missing-path signal, determine live pointer (repair) vs. historical citation (leave
-intact). **Directory bootstrapping**: all three write ops `mkdirSync(recursive: true)`
-before acquiring the lock, creating `.devflow/learning/` on first run.
-
-### Tracker Agent
-
-`src/assets/agents/tracker.md` (`model: sonnet`, no `tools:` key) is the second hook-spawned
-background agent — the same claim/heartbeat/consume-then-delete shape as Learning, its own 600s
-bound, and its own files (`.tracker.processing`, `.tracker.{provider}.attempts`); it writes the
-conventions file its directive names, `~/.devflow/tracker/{provider}.md`. The write is scrub-gated
-through `redact-secrets.cjs` and create-exclusive (`umask 077` + `noclobber` + `chmod 600`) —
-schema, domain rules, and the write-chain detail are owned by the `tracker-feature` KB.
-
-### decisions-format.cjs
-
-Shared pure formatting helpers (single source of truth for byte-compatible output strings):
-`segmentDetails` (anchored-key parser; `LINE_TERMINATORS` `/[\r\n  ]/g` collapses at five sites
-to guard the single-line field contract); `amendmentToString(entry)` (normalises `{date, note}`
-objects — a bare `join` would emit `[object Object]`, load-bearing); `isSafeRawBody(body,
-anchorId)` (the validating sink — accepts only a string with exactly one `## ${anchorId}:` heading;
-rejected bodies render through the sanitised formatter); the `amendments` producer (`{date,
-note}` objects only, schema rejects bare strings — follow with `refresh-anchor` to
-propagate). **Date purity**: formatters read `row.date || ''` — no clock reads inside a
-formatter (D5).
-
-### Memory Worker (background-memory-update)
-
-**Manifest handoff**: `memory-worker` resolves `DEVFLOW_MANIFEST` (`$HOME/.devflow/manifest.json`),
-gates its own spawn decision on it, then hands that path explicitly to `background-memory-update`
-as `$2` (`background-memory-update <CWD> [<manifest_path>]`) — the worker re-checks the switch
-after spawn against the same manifest. When `$2` is absent, the worker falls back to
-`$HOME/.devflow/manifest.json`. An exported `DEVFLOW_DIR` is ignored everywhere (D-ONE-HOME).
-
-**Staged-write CAS (`verify_and_swap()`)**: the model writes ONLY
-`WORKING-MEMORY.md.new`, never the real file; `verify_and_swap()` assigns one OUTCOME —
-`updated` (valid stamp + matching pre/post cksums → atomic `mv`, remove `.processing`, touch
-`.last-refresh-ok`), `conflict` (cksum mismatch or failure → staged file dropped, `.processing`
-retained with a heartbeat touch extending the 300s cold-path liveness window, `.last-refresh-ok`
-untouched), or `failed` (staged file missing/empty/unstamped or `mv` failed → `.processing` left
-for D56c cold-path recovery). `cksum` must be on PATH at startup or the worker exits rather than
-run without a CAS guard; a `cksum` failure on the target file forces `conflict` (fail-closed).
-The stale-staged-file cleanup (`rm -f WORKING-MEMORY.md.new`) runs at the START of each run.
-
-**User-only queue is kept (D-QUEUE-NO-ORPHAN-DELETE).** Claude Code runs one event's hooks in
-PARALLEL — settings.json array position sequences nothing at run time — so `memory-worker` can
-spawn the worker after `capture-prompt` appended the user row and before `capture-turn` appends
-the assistant row. A queue with no `assistant`/`qa` row therefore exits with no LLM run (no
-fabrication) and is LEFT in place: the next run takes the whole turn once the assistant row
-lands, and queue-append's overflow guard caps the file. Deleting it (the old orphan auto-clean)
-lost that turn's prompt. init and `memory --enable` still register capture before memory in the
-Stop array, but only so the two produce identical settings.json.
-
-`compute_commits_since_note()` sets `COMMITS_SINCE_NOTE` in caller scope. Five exact outcome
-literals form a **test contract**: no-stamp full-synthesis, invalid-SHA-format,
-SHA-not-ancestor-of-HEAD, none-current-as-of-HEAD, and `N commit(s)... (showing newest 20)`
-(disclosure only when total > 20; subjects bounded at `%.100s`). **Prompt security**: the four
-untrusted data blocks are wrapped in named XML tags with a DATA-not-instructions preamble;
-the prompt is passed via heredoc stdin, never argv (visible to `ps(1)`).
-
-### Shared Sourced Helpers, Bootstrap, and Refresh-Failing Detection
-
-**`is-hex-sha`** (sourced, no forks, no pipe to mask its exit status): `is_hex_sha <value> [min=7] [max=40]`.
-`background-memory-update`/`session-start-memory` use the default 7–40; `pre-compact-memory`
-requires exactly 40 (a full SHA). **pre-compact-memory** bootstraps `WORKING-MEMORY.md` only
-when `is_hex_sha "$GIT_HEAD_SHA" 40 40` (an unborn branch fails); a detached HEAD is labelled
-`(detached)` first (D-DETACHED-HEAD), so it bootstraps with `branch: (detached)`, a Context line
-`- Branch: (detached) @ <short-sha>` and `git.branch: "(detached)"` in backup.json, and
-`background-memory-update` stamps the same label. `session-start-memory` renders the header's
-location as `on <branch>`, `detached @ <short-sha>`, or `on unknown` only when unreadable. The
-bootstrap is noclobber-atomic (`set -o noclobber; : >
-"$MEMORY_FILE"`, REL-5) so a worker CAS `mv` landing in the narrow window fails `noclobber`
-rather than truncating. **session-start-memory**'s `detect_refresh_failing()` (B4) counts
-BOTH `.pending-turns.jsonl` and `.pending-turns.processing` additively, so an orphaned
-`.processing` left by CONFLICT is no longer invisible to the State-C warning.
-
-### decisions_load() and index.md Consumption
-
-`decisions_load()` has the main model run ONE `git -C "{start}" rev-parse --path-format=absolute
---show-toplevel --git-common-dir` and read `{ledger}/.devflow/learning/index.md`, where `{ledger}`
-is the main worktree (when its `.devflow/` exists and it is not HOME), else the toplevel (on git < 2.31, the line
-after the echoed `--path-format=absolute`), else the start directory —
-the hooks' D-LEDGER-MAIN-WORKTREE rule (D-PROMPT-ROOT). No script. Absent/empty →
-`DECISIONS_CONTEXT` is `(none)`. Consuming
-commands use `devflow:apply-decisions`: scan index → Read entry bodies on demand → cite verbatim
-IDs. Never parse `decisions-ledger.jsonl` directly.
-
-### HUD and CLI
-
-`src/hud/components/learning-counts.ts` reads `decisions-ledger.jsonl` and counts rows where
-`anchor_id` is set and `decisions_status` is not in `{Deprecated, Superseded, Retired}` (D309 —
-avoids HUD coupling to markdown format).
-
-The HUD (`gatherLedgerLearningCounts`, run inside the git-status `Promise.all`, 1 s git budget)
-and `devflow learning --status/--list/--clear/--reset` plus the `--disable` drain locate the
-ledger with `getLedgerRoot` (`src/core/ledger-root.ts`) — the TypeScript twin of
-`DF_LEDGER_ROOT`: one `rev-parse --path-format=absolute --show-toplevel --git-common-dir`,
-main worktree when `<main>/.devflow` is a directory and `<main>` is not HOME (realpath compare),
-else the toplevel (git < 2.31's echo included), `null` outside git (the caller keeps its cwd
-fallback). Parity with `df_resolve_roots` is pinned by `tests/core/ledger-root.test.ts`, which
-runs the shell helper on the same fixtures. `--configure` writes the project `learning.json` at `getLedgerRoot()` (cwd outside git), where `session-start-context` reads it; `init --no-learning` drains the learning queue there too.
-Memory is never resolved this way — it stays per checkout (`getGitRoot`).
-
-All three feature CLIs share the `writeMachineFeature`/`readMachineFeature` shape, plus their
-own per-repo side effects: **`devflow learning --enable/--disable`** writes `features.learning`
-(same call `init --learning/--no-learning` makes); disable drains the CURRENT project's queue
-via `drainLearningQueue` (other repos are already inert once the manifest switch is off);
-`--status` pairs `readMachineFeature` with observation counts; `--list`/`--configure`/`--clear`/
-`--reset` are per-repo, untouched by the switch. **`devflow memory --enable/--disable`**
-converges the Stop/SessionStart/PreCompact hooks via `convergeMemoryHooks` (settings transform
-runs FIRST — can reject malformed JSON, so the switch must not record unless the hooks can
-follow) AND writes `features.memory`; disable drains via `drainMemoryQueue`; `--status` pairs
-`readMachineFeature` with the installed hook count (`enabled, but N/3 hooks registered` on
-mismatch). **`devflow knowledge --enable/--disable/--status`** (`knowledge/toggle.ts`) is a thin
-router into `handleToggle` for `features.knowledge`; the CRUD subcommands (create/check/refresh/
-remove) are deleted — KBs are created only via write-through from `knowledge_writeback`.
-
-**Hook ownership (D-EXACT-HOOK-OWNER, #391).** `memory.ts`, `capture.ts`, `context.ts` and
-`legacy-hooks.ts` identify their hooks through the shared helpers in
-`src/targets/claude-code/hooks.ts`: a hook is devflow's only when its command ENDS in
-`/scripts/hooks/run-hook <marker>` (`devflowHookOwner`) under any directory, never because it
-contains the marker word, and `removeHooks` takes single hooks out of a matcher group, dropping
-the group only when it ends up empty. `memory.ts`'s `LEGACY_HOOK_SUFFIXES` names each ending an
-earlier release registered, per event: the v1 (<= v1.2) direct scripts
-`/scripts/hooks/{stop-update-memory,session-start-memory,pre-compact-memory}.sh` and the retired
-run-hook markers (prompt-capture-memory, stop-update-memory, stop-update-learning,
-session-end-learning, session-end-decisions, session-end-knowledge-refresh, sidecar-*, dream-*).
-Those are removed on every converge but never counted as a current memory hook. Capture, context
-and spawn-dream-worker only ever shipped through run-hook, so they have no legacy form. Remove-then-add
-keeps a user's group in place and appends devflow's hook after it, so memory-worker still
-lands after capture-turn in the Stop array — a stable settings.json, not a run-time order: the
-Stop hooks run in parallel (see Memory Worker).
-
-### devflow init and the Machine Switches
-
-**D-INIT-DRAIN-AFTER-SWITCH**: `drainDisabledFeatureQueues` drains this repo's memory/learning
-queues for each feature `init` switched off — the same drains the standalone `--disable`
-commands perform — but ONLY AFTER the manifest write (`trackerLifecycle.manifestWritten`) lands,
-never before (draining first would leave a window where a concurrent session, still reading the
-old "on" manifest, appends turns that survive the disable). A failed manifest write leaves the
-feature on everywhere, so its queue is correctly left alone; other repos never need draining.
-
-**`--hud-only` preserves every feature** (`D-HUD-ONLY-PRESERVE`): re-init keeps every recorded
-manifest value — plugins, version, scope, `installedAt`, every `features.*` — changing only
-`features.hud`. With memory/learning/knowledge living ONLY in the manifest, a HUD-only install
-that reset those would really disable them everywhere.
-
-### Hook Log Folders (D-LOG-DIR-CAP)
-
-Hooks log under `~/.devflow/logs/<cwd-slug>/`, one folder per working directory (31k observed on
-one machine). `devflow init` prunes to `MAX_HOOK_LOG_DIRS` = 200 (`src/core/hook-log-dirs.ts`),
-oldest first by the newest mtime among a folder and its logs, reading at most 100,000 folders
-a run and removing every one of them beyond the cap (removal bound = scan bound), so one init
-clears the backlog it read. `log-paths`' `devflow_log_dir` prunes too, but ONLY when it
-creates a new folder (the common path costs nothing): one `ls -1At`, at most 50 removed per
-call, bash 3.2, no node, a candidate spared when any of its first 64 entries is newer than the
-oldest kept folder (`-nt`). `debug-trace`'s `devflow_debug_set_cwd` takes its per-project folder
-from `devflow_log_dir` (sourcing `log-paths` beside it when the hook has not), so a debug-created
-folder is capped too. Root files (`proxy.log`) and symlinks are never counted or removed.
-`_DF_MAX_HOOK_LOG_DIRS` is pinned equal to `MAX_HOOK_LOG_DIRS` by `tests/hook-log-paths.test.ts`.
-
-### Locking
-
-`learning-lock`: `learning_lock_acquire <lock_dir> [timeout=3s]` polls `mkdir`; breaks stale
-locks older than 30s via `get_mtime`. Scope is narrow — only the overflow truncation path. JSONL
-append is intentionally lock-free (accepted-class race, shared with memory design).
-
-## Naming Boundary (Critical Convention)
-
-The Learning agent processes the queue and produces **decisions content**; content identifiers
-deliberately keep their original "decisions" names even though the outer system is "learning."
-Do not rename them: `decisions.md`/`pitfalls.md` (rendered output), `decisions-ledger.jsonl`
-(anchored ledger), `decisions-log.jsonl`/`decisions-log.archive.jsonl` (raw observation history),
-`index.md` (pre-rendered compact index), `decisions_status` (ledger field),
-`DECISIONS_CONTEXT`/`decisions_load()` (macros), `render-decisions.cjs`/`decisions-format.cjs`/
-`decisions-usage-scan.cjs` (scripts), ADR-NNN/PF-NNN (anchor ID format). The directory is
-`learning/`, the feature toggle is `features.learning` (manifest, repo-narrowable), the agent is `Learning`
-— but everything it produces uses "decisions" identifiers. Intentional; do not "fix" the mismatch.
+| D-series name | Governs | Site |
+|---|---|---|
+| D-ONE-LEARNING-LOCK, D-NO-STRAY-TREE | one lock, no stray tree | `withDecisionsLock` (store) |
+| D-LEDGER-REGISTRY | promotion state lives in the ledger | `ledgerRegistry` |
+| D-LOG-CONTENT-AUTHORITY | the log owns content; the ledger projects | `toLedgerRowV2` |
+| D-PUT-NOT-MERGE | whole-content puts, key refusals | `validateObservationInput` |
+| D-PUT-REPROJECTS | a put re-projects and renders under its lock | `putObservation` |
+| D-QUARANTINE-MALFORMED | malformed lines move aside, never drop | `readJsonl` |
+| D-CONTENT-HISTORY | last 3 versions kept | `appendHistory` |
+| D-V1-BACKUP-ONCE | one-time pre-v2 copies | `ensurePreV2Backup` |
+| D-DUE-ORDER | what maintenance gets, in what order | `selectDue` |
+| D-VERIFY-REF | where claims about code are checked | `resolveVerifyRef` |
+| D-ENCODED-QUOTE | Encoded needs a quote found at the ref | `quoteAtRef` |
+| D-E4-SKIP | assign skips cited numbers | `assignAnchor` |
+| D-ROTATE-UNREFERENCED | archive only unreferenced rows | `rotateObservations` |
+| D-CLEAR-UNREFERENCED, D-RESET-UNDER-LOCK | `--clear` and `--reset` | `clearUnreferenced`, `resetLearning` |
+| D-OWNED-CLAIM | exclusive, owner-checked queue claim | `claimQueue`; cited at `releaseClaim`, `touchClaim`, `LEARNING_OPS`, the hook's Section 2 |
+| D-NO-FSMONITOR | no repository-chosen code on index reads | full block at `listGitTrackedFiles`; guard `no-fsmonitor-index-read` |
+| D-LEARNING-STORE-SEAM | the CLI touches ledger state only through the store, loaded by the seam | `src/core/learning-store.ts` |
+| D-V1-BYTE-STABLE | v1 rows render unchanged | `buildBodyBlocks` (render-decisions) |
+| D201, D309 | status-list parity, HUD count | `src/core/observations.ts`, `LedgerCountRow` in the HUD |
 
 ## Anti-Patterns
 
-- **Reading feature flags with two separate `json_field_file` calls**: use `queue_read_gates`
-  (AC-P1 — one subprocess). Two forks double overhead on every hook invocation.
-
-- **Reading or writing top-level `.devflow/config.json` keys for memory/learning/knowledge on/off
-  state**: those keys are retired (`RETIRED_CONFIG_KEYS`); no gate reads them. Use
-  `readMachineFeature`/`writeMachineFeature` against `~/.devflow/manifest.json` instead — this is
-  exactly the bug #378 fixed. The only repository switch is `features.<x>: false`, and it only
-  narrows.
-
-- **Omitting `<root>` from a `queue_read_gates` call**: the repository's narrowing is then silently
-  ignored. `tests/queue-append.test.ts` pins every caller's shape.
-
-- **Resolving the manifest path from the project root**: the manifest lives at the machine root
-  (`$HOME/.devflow/manifest.json`), never under `PROJECT_DEVFLOW_DIR`. A gate pointed at the
-  project path finds no manifest — reads as fail-open ON regardless of the real switch.
-
-- **Editing `decisions.md`/`pitfalls.md`/`index.md` directly**: exclusively owned by the ledger
-  ops; hand-edits get silently overwritten.
-
-- **Editing the ledger directly for content changes**: the log is the content authority;
-  edit the log row then call `refresh-anchor`.
-
-- **Using `rm -f` to delete `.pending-turns.processing`**: denied by the recommend deny-list
-  (denial keys on flags, not verb). Use `unlink`; a flagless `rm` also passes.
-
-- **Skipping the model allowlist in `session-start-context`**: always apply `case "$LEARNING_MODEL"
-  in opus|sonnet|haiku)` before interpolating — the tracker directive applies the identical
-  discipline to `TRACKER_MODEL`.
-
-- **Adding throttle or lock on the learning directive side**: queue emptiness is the natural
-  gate; a live `.processing` already suppresses the directive.
-
-- **Omitting `DEVFLOW_BG_UPDATER=1` guard**: without it, the memory worker's `claude -p` session
-  double-captures its own turns into both queues.
-
-- **Running more than 10 `refresh-anchor` calls per run**: batch into a single variadic call; the
-  next run continues.
-
-- **Consuming `config.tracker` (the raw field) directly**: always go through
-  `parseTrackerOverride`, not a hand-rolled check.
-
-- **Simulating a missing shell tool by subtracting it from `PATH`** in a hook test:
-  platform-dependent. Force a backend via a variable override (`_HAS_JQ=false`) instead.
+- **Hand-editing `decisions.md`, `pitfalls.md`, `index.md` or any data file**: the ops overwrite the rendered files, and the agent has no Write tool. Change content with `put-observation`, status with `retire-anchor`/`restore-anchor`.
+- **Writing entry content into the ledger by any path but `toLedgerRowV2`**: the log is the content authority; an entry that disagrees with its log row shows as a `ledger-only-content` flag.
+- **Deciding promotion from a log row's `anchor_id` or status**: use the ledger registry.
+- **A second lock, a lock-free write, or `process.exit()` inside a store function**: exit skips the `finally` that releases the lock. Return a Result and let `json-helper` set `process.exitCode` once, outside every lock.
+- **Creating `.devflow/learning/` from a writer or render path**, or passing a path or text on argv: argv holds shape-gated tokens only.
+- **Claiming the queue with `mv`, or deleting, moving or rewriting the claim or owner file by hand**: only `claim-queue`/`release-claim` (and the deliberate `--clear`/`--disable`/`--reset` drains) touch them.
+- **Quoting plumbing numbers in the Learning prompt**: staleness and batch sizes live in plumbing.
+- **A git call that reads the index without `-c core.fsmonitor=false` in its argv, outside a wrapper whose body prepends the override**, or one whose argv is built at run time.
+- **A ledger ID, `#123` issue reference or file-and-line reference in an observation's title, rule or why**, or any ledger ID in committed text.
+- **Reading feature flags with two separate calls**: use `queue_read_gates` (one fork). Never read or write top-level `.devflow/config.json` keys for on/off state, omit `<root>` from a `queue_read_gates` call, or resolve the manifest from the project root (the gate then fails open).
+- **Skipping the model allowlist in `session-start-context`**, or omitting the `DEVFLOW_BG_UPDATER=1` guard from a capture hook.
+- **Simulating a missing shell tool by subtracting it from `PATH`** in a hook test: force a backend with a variable (`_HAS_JQ=false`).
 
 ## Gotchas
 
-- **900s staleness threshold is shared**: `session-start-context` and the Learning agent both
-  use it — if one changes, both must. `TRACKER_PROCESSING_STALE_SECS=600` is deliberately a
-  SEPARATE literal — a shared constant would let either feature reclassify the other's live runs.
-
-- **The legacy key wins only when the renamed key is not a boolean**: an older manifest with
-  `"decisions": false`/no `"learning"` switches learning off, and `"kb": false`/no `"knowledge"`
-  switches knowledge off; once the renamed key is a boolean, it wins outright.
-
-- **HUD reads `decisions-ledger.jsonl`**: an `observing` row without `anchor_id` contributes 0 —
-  a row is active only when `anchor_id` is set AND `decisions_status` is not in the inactive set.
-
-- **`capture-turn` runs `decisions-usage-scan.cjs` regardless of queue gates**: the grep-first
-  gate precedes the feature flag check.
-
-- **`process.exit()` skips `finally` in `.cjs` helpers**: throw inside any locked `try` block;
-  never `process.exit(1)`.
-
-- **`refresh-anchor` looks up log obs by the LEDGER ROW's `id`** (not `anchor_id`): pre-write-back
-  corpora had no `anchor_id` in the log.
-
-- **D5 pitfall-rows date fallback**: ledger `date` → log `last_seen` → outside window — never
-  assume the ledger row has `date` for old pitfall rows.
-
-- **CAS CONFLICT heartbeat-touches `.processing`**: distinct from the claim-time touch; removing
-  it would let the cold path reclaim a live retry batch after 300s.
-
-- **Pre-compact bootstrap skips only unborn branches**: a detached HEAD bootstraps with the
-  `(detached)` label (D-DETACHED-HEAD). `(detached)` is a legal git branch name, so the label is a
-  name, never a decision input beyond the session-start mismatch note.
-
-- **The learning queue is not always under the session's own root**: in a linked worktree it is
-  the main worktree's (`DF_LEDGER_ROOT`). Tests seeding a queue for a worktree session must seed
-  main's.
-
-- **`compute_commits_since_note()` outcome literals are a test contract**: exact strings, do not
-  fail loudly if changed.
-
-- **Orphan gate skips when `.processing` already exists**: with a live retry batch, the combined
-  content is used directly.
-
-- **`is_hex_sha` bounds are call-site-specific**: pre-compact-memory uses 40–40; the other two
-  callers use the default 7–40.
-
-- **`json_extract_cwd_field` SOH delimiter**: split with `$'\001'`; both jq and the node fallback
-  must emit `\x01`.
-
-- **Section 3 is not gated by the `learning` toggle**: disabling learning does not disable the
-  issue tracker.
-
-- **Every `session-start-context` test seeds a temp `$HOME`** (the hooks read `$HOME/.devflow`
-  only, so HOME is the whole isolation) — since manifest resolution is user-scope by design, a real `~/.devflow/manifest.json` with
-  `features.learning: false` on the test machine would otherwise silently gate the test.
-
-- **A shell command-rewrite hook can silently truncate a `cat`/`head` read of a `.devflow` data
-  file**, announced only on stderr — exactness-critical reads need the Read tool.
+- **`unchanged` means equal content keys**: a v2 row whose entries lag is not repaired by an update; run `refresh-anchor` without `--verified`. Every writer re-serializes all rows with `JSON.stringify`, so a hand-edited non-canonical line is normalized with the same values.
+- **`refresh-anchor` refuses v1 and inactive entries**, so the closing `--verified` batch must list active v2 entries only; rewrite a kept v1 entry with `put-observation --update` first. `retire-anchor` and `restore-anchor` work on v1 and leave it v1; `assign-anchor` refuses a v1 observation.
+- **A put's "restore first"** applies in every mode: run `restore-anchor`, then the put. Restore clears `last_verified` and `last_attempt`, so the entry is due again whatever lease it had: D-DUE-ORDER hands it out after integrity problems and legacy v1 entries (among them if it is one), ahead of every verified entry.
+- **`claim-due` leases for 24 h** and a second call in one run hands out different entries; treat each line as that run's work list.
+- **900 s is two literals** (`CLAIM_STALE_SECS` and the hook's `PROCESSING_STALE_SECS`); change both. The Tracker's 600 is separate.
+- **Empty corpus**: `index.md` is `(none)`; consumers treat `(none)` and empty as absent. The TL;DR is plural for one (`1 decisions`).
+- **The Skim agent reads `decisions.md`'s TL;DR relative to its own cwd**, not through the main-worktree rule, so a linked worktree can show none.
+- **The legacy key wins only when the renamed key is not a boolean** (`"decisions": false` with no `"learning"` switches learning off).
+- **The learning queue is not always under the session's own root**: in a linked worktree it is the main worktree's (`DF_LEDGER_ROOT`); tests seeding a queue for a worktree session must seed main's.
+- **Section 3 is not gated by the learning toggle**; disabling learning does not disable the issue tracker.
+- **CAS conflict heartbeat-touches `.processing`**: removing that touch lets the cold path reclaim a live retry batch after 300 s. The orphan gate skips when `.processing` already exists.
+- **`is_hex_sha` bounds are call-site specific**; the `json_extract_cwd_field` SOH delimiter must be `\x01` in both the jq and node paths; a detached HEAD bootstraps with the `(detached)` label.
+- **Every `session-start-context` test seeds a temp `$HOME`** (the hooks read `$HOME/.devflow` only); a real manifest with learning off would otherwise silently gate the test.
+- **A shell rewrite hook can truncate `cat`/`head` reads of a `.devflow` data file**, announced only on stderr; use the Read tool where exactness matters.
+- **New CLI flags need a write-set fence row** (`tests/write-set-fence.test.ts`) and a floor bump in `tests/fixtures/numeric-floors.json`; the fence runs the built CLI. Spawn-backed learning tests need spawn-sized timeouts under full-suite load.
 
 ## Key Files
 
 | File | Purpose |
 |------|---------|
-| `src/assets/scripts/hooks/capture-prompt` | UserPromptSubmit: dual-queue user turn append |
-| `src/assets/scripts/hooks/capture-turn` | Stop: dual-queue assistant turn + usage scanner |
-| `src/assets/scripts/hooks/capture-question` | PostToolUse: AskUserQuestion Q&A row append |
-| `src/assets/scripts/hooks/queue-append` | Shared JSONL append + overflow truncation + `queue_read_gates` |
-| `src/assets/scripts/hooks/resolve-project-root` | `df_resolve_root` (toplevel) and `df_resolve_roots` (one git call → `DF_ROOT` + `DF_LEDGER_ROOT`) |
-| `src/assets/scripts/hooks/git-marker` | `df_has_git_marker`, `df_is_project_root` — the zero-fork git-only gate; `.git` must be at the root (D-HOOKS-TOPLEVEL-ONLY) |
-| `src/assets/scripts/hooks/log-paths` · `src/core/hook-log-dirs.ts` | `devflow_log_dir` and its create-time prune; init's exact prune (D-LOG-DIR-CAP) |
-| `src/assets/scripts/hooks/learning-lock` | mkdir-based lock (30s stale-break) |
-| `src/assets/scripts/hooks/is-hex-sha` | Pure-shell hex-SHA check; sourced by three memory hooks with different bounds |
-| `src/assets/scripts/hooks/session-start-context` | Learning directive (Section 2) + tracker-setup directive (Section 3) |
-| `src/assets/scripts/hooks/memory-worker` | Resolves the manifest path, gates on it, spawns background-memory-update with that path as `$2` |
-| `src/assets/scripts/hooks/background-memory-update` | Detached worker: compute_commits_since_note, verify_and_swap, CAS; accepts manifest path as `$2` |
-| `src/assets/scripts/hooks/pre-compact-memory` | PreCompact: backup.json + noclobber-atomic WORKING-MEMORY.md bootstrap |
-| `src/assets/scripts/hooks/session-start-memory` | SessionStart: 3-state memory header + State-C refresh-failing |
-| `src/assets/agents/learning.md` | Learning agent spec (claim, detect, curate, unlink) |
-| `src/assets/agents/tracker.md` | Tracker agent spec — schema/domain owned by `tracker-feature` KB |
-| `src/assets/scripts/hooks/json-helper.cjs` | Ledger ops: assign-anchor, retire-anchor, refresh-anchor, rotate-observations; withDecisionsLock |
-| `src/assets/scripts/hooks/lib/decisions-format.cjs` | segmentDetails, amendmentToString, isSafeRawBody, toLedgerRow |
-| `src/assets/scripts/hooks/lib/render-decisions.cjs` | Pure renderer — decisions.md, pitfalls.md, index.md from ledger rows |
-| `src/core/feature-switch.ts` | `MachineFeature` type; `isMachineFeatureOn`/`setMachineFeature` (pure); `readMachineFeature`/`writeMachineFeature` (I/O) — the single authority for memory/learning/knowledge on-off |
-| `src/core/feature-config.ts` | `.devflow/config.json` read/write; `RETIRED_CONFIG_KEYS`; per-repo `tracker` override; `mergeManagedConfig`/`writeManagedConfig` |
-| `src/core/learning-tuning-config.ts` | Tuning config merge (project → global → defaults) — unrelated to the on/off switch |
-| `src/core/project-paths.ts` | Path construction — single source of truth, mirrored in `src/assets/scripts/hooks/lib/project-paths.cjs` |
-| `src/cli/commands/learning.ts` | `devflow learning` CLI — `writeMachineFeature`/`readMachineFeature` |
-| `src/cli/commands/memory.ts` | `devflow memory` CLI — `convergeMemoryHooks` + `writeMachineFeature`; `drainMemoryQueue`; `LEGACY_HOOK_SUFFIXES` |
-| `src/targets/claude-code/hooks.ts` | Shared hook types + D-EXACT-HOOK-OWNER helpers: `devflowHookOwner`, `endsWithAny`, `removeHooks`, `hasHook`, `ensureHook`, `runHookCommand` |
-| `src/cli/commands/knowledge/toggle.ts` | `devflow knowledge --enable/--disable/--status` |
-| `src/cli/commands/init.ts` | `drainDisabledFeatureQueues` (D-INIT-DRAIN-AFTER-SWITCH), `D-HUD-ONLY-PRESERVE`, the one `manifestData.features` write site |
-| `src/hud/components/learning-counts.ts` | HUD counts from `decisions-ledger.jsonl` |
-| `src/core/ledger-root.ts` | `getLedgerRoot` — the CLI/HUD twin of the hooks' `DF_LEDGER_ROOT` |
-| `src/assets/commands/_partials/_knowledge.mds` | `knowledge_load()`/`knowledge_writeback()` — write-back takes `KNOWLEDGE=` from the settings line |
-| `src/assets/commands/_partials/_decisions.mds` | `decisions_load()` macro (plain file Read) |
-| `src/assets/scripts/hooks/decisions-usage-scan.cjs` | Citation counter (D29 grep-first gate) |
-| `tests/seams/tracker-key-path.test.ts`, `tests/seams/tracker-claim-staleness.test.ts` | Pin key-path parity and the shared claim-staleness bound |
+| `src/assets/scripts/hooks/lib/learning-store.cjs` | The store: schema, validation, projection, locking, every writer and reader |
+| `src/assets/scripts/hooks/json-helper.cjs` | Op dispatcher: `learning()` lazy load, `emit`, `readStdinJson`, `LEARNING_OPS`, heartbeat; exports nothing |
+| `src/assets/scripts/hooks/lib/render-decisions.cjs` | Renderer, `renderLearningFiles`, `render`/`--check` CLI |
+| `src/assets/scripts/hooks/lib/decisions-format.cjs` | v1 formatters (byte-stable), v2 body, Inactive table, TL;DR, index builder |
+| `src/assets/scripts/hooks/lib/project-paths.cjs` · `src/core/project-paths.ts` | Path single source, export parity pinned by a test |
+| `src/assets/scripts/hooks/lib/mkdir-lock.cjs` · `lib/safe-path.cjs` | mkdir lock helpers, path safety |
+| `src/assets/scripts/hooks/capture-prompt` · `capture-turn` · `capture-question` · `queue-append` · `learning-lock` | Capture hooks, shared append, overflow truncation, queue lock |
+| `src/assets/scripts/hooks/session-start-context` | Sections 1 to 4 |
+| `src/assets/scripts/hooks/resolve-project-root` · `git-marker` · `ensure-devflow-init` | Roots, git-only gate, scaffolding |
+| `src/assets/scripts/hooks/memory-worker` · `background-memory-update` · `pre-compact-memory` · `session-start-memory` · `is-hex-sha` | Memory pipeline |
+| `src/assets/scripts/hooks/log-paths` · `src/core/hook-log-dirs.ts` | Log folder cap |
+| `src/assets/scripts/hooks/assets/orchestrator-charter.md` | Charter bullet that forwards the decisions index |
+| `src/assets/agents/learning.md` · `tracker.md` | The two hook-spawned agents |
+| `src/assets/commands/_partials/_decisions.mds` | `decisions_locate()` and `decisions_load()` |
+| `src/assets/skills/apply-decisions/SKILL.md` | Consumer algorithm, both index line kinds, v2 body |
+| `src/cli/commands/learning.ts` | `devflow learning` |
+| `src/core/learning-store.ts` | Typed seam onto the store (D-LEARNING-STORE-SEAM) |
+| `src/core/observations.ts` | Status lists (D201) |
+| `src/core/learning-queue-cleanup.ts` | `drainLearningQueue`: queue, claim, owner |
+| `src/core/ledger-root.ts` | `getLedgerRoot`, the twin of `DF_LEDGER_ROOT` |
+| `src/hud/components/learning-counts.ts` | HUD counts (D309) |
+| `src/core/feature-switch.ts` · `feature-config.ts` · `learning-tuning-config.ts` | Switch predicate and I/O, per-repo config, tuning merge |
+| `src/cli/commands/memory.ts` · `knowledge/toggle.ts` · `init.ts` | Memory/knowledge toggles, init drains and `--hud-only` |
+| `src/targets/claude-code/hooks.ts` | `devflowHookOwner`, `removeHooks`, `ensureHook` |
+| `tests/decisions/learning-fixtures.ts` | Row factories, `seedLearningTree`, `initGitRepo`, `runJsonHelper`, `requireLearningStore` |
+| `tests/decisions/learning-claim.test.ts` · `learning-store.test.ts` · `tests/learning-agent.test.ts` | Claim, store and prompt pins (including the 900 s lockstep) |
+| `tests/seams/tracker-key-path.test.ts` · `tracker-claim-staleness.test.ts` | Tracker key-path parity and the shared claim-staleness bound |
 
 ## Related
 
-- decisions-log.jsonl is the single content authority; the ledger is an anchor registry; ops project log→ledger→rendered .md; `refresh-anchor` is the projection-refresh path
-- Staged CAS for the memory worker (`WORKING-MEMORY.md.new`); `verify_and_swap()` is the sole CAS decision point; `CKSUM_FAILED` forces conflict (fail-closed)
-- REG-1 divergence guard in `refresh-anchor`; recovery pass in `segmentDetails` for legacy mid-segment keys
-- Validate at the sink: `isSafeRawBody` in `toLedgerRow`; named XML tags in memory worker prompt
-- `segmentDetails` anchored-key approach avoids delimiter-regex truncation
-- Pointer-vs-citation gate for missing-path signals in decisions/evidence
-- `index.md` consumption via plain Read; no subprocess
-- Original rationale for a neutral, feature-agnostic config home for multi-feature toggles; superseded for memory/learning/knowledge by D-FEATURES-NARROW-ONLY (`src/core/feature-switch.ts`, #378/#392: machine switch, repository narrows via the new `features` namespace) — its top-level toggles stay retired
-- Use `unlink` not `rm -f` for the agent's final act
-- Throw inside lock scopes, never `process.exit()`; precondition asserts in `refresh-anchor`
-- Parent directory of lock dir created before acquire (`withDecisionsLock`)
-- Simulating a missing shell tool via `PATH` subtraction is platform-dependent; `tests/shell-hooks-tracker.test.ts` avoids it with a backend variable-switch override (`_HAS_JQ=false`)
-- Document the shape of any file that gates a suppressing action, and keep absent and malformed distinct from a value; the `.tracker.{provider}.attempts` parse follows this directly
-- A shell rewrite hook can silently substitute a lossy view for a literal file read; the load-bearing surface is exactly the Learning/Tracker agents' direct `.devflow` data-file consumption
-- `.devflow/features/feature-knowledge-system/KNOWLEDGE.md` — Knowledge agent write-back pattern (parallel write-through system); its opt-out gate takes `KNOWLEDGE=` from the settings line, which folds the same `features.knowledge` switch this KB documents with the two repo files
-- `.devflow/features/ambient-orchestrator/KNOWLEDGE.md` — Ambient orchestrator that also uses `session-start-context` for charter injection
-- `.devflow/features/tracker-feature/KNOWLEDGE.md` — owns the tracker feature's full story (provider selection, the Tracker agent's schema/domain, the Git agent's reader-side preamble); this KB owns only the hook plumbing and the directive pattern shared with Section 2
+- `.devflow/features/feature-knowledge-system/KNOWLEDGE.md`: the Knowledge agent write-back; its gate takes `KNOWLEDGE=` from the settings line that folds the same switch.
+- `.devflow/features/ambient-orchestrator/KNOWLEDGE.md`: the charter injection and `session-start-orchestrator`.
+- `.devflow/features/tracker-feature/KNOWLEDGE.md`: provider selection, the Tracker agent's schema and the Git agent's reader side for Section 3.
+- `.devflow/features/installer-shadowing/KNOWLEDGE.md`: managed config writes, queue drains at init, the install goldens that list the store.
+- `.devflow/features/dynamic-workflow-engine/KNOWLEDGE.md`: the preamble and engine partials that load the decisions index.
+- `.devflow/features/resolve-pipeline/KNOWLEDGE.md`: `/resolve` and `/code-review`, consumers of `decisions_load()`.
+- `.devflow/features/test-harness/KNOWLEDGE.md`: guards on this area (`no-ledger-citations`, `no-fsmonitor-index-read`, `retired-wording`), the install snapshots and the write-set fence.
+- `docs/reference/hooks.md`, `docs/reference/file-organization.md`, `docs/cli-reference.md`: the Learning pipeline, the data-file table and the `devflow learning` flags.

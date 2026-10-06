@@ -58,8 +58,7 @@ _df_nongit_root() {
 # D-LEDGER-MAIN-WORKTREE: a linked worktree (`git worktree add`, `claude
 # --worktree`) has its own toplevel, so a ledger anchored there restarts its
 # numbering at 001 — main's decisions are invisible in it, and the IDs it mints collide
-# with main's (in a repo whose collision guard refuses, the Learning agent stops
-# for good). The ledger is one per REPOSITORY, not per checkout: DF_LEDGER_ROOT
+# with main's. The ledger is one per REPOSITORY, not per checkout: DF_LEDGER_ROOT
 # is the main worktree — the parent of `--git-common-dir` — when that common dir
 # is a `<dir>/.git` directory AND `<dir>/.devflow` already exists; otherwise it is
 # DF_ROOT. The existence test keeps a main checkout that never ran devflow from

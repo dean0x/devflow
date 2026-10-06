@@ -87,11 +87,12 @@ describe('gatherLearningCounts', () => {
     expect(gatherLearningCounts(tmpDir)).toEqual({ decisions: 2, pitfalls: 0 });
   });
 
-  it('excludes Deprecated, Superseded, and Retired rows', () => {
+  it('excludes Encoded, Deprecated, Superseded, and Retired rows', () => {
     const lines = [
       makeRow('decision', { anchor_id: 'ADR-001', decisions_status: 'Deprecated' }),
       makeRow('decision', { anchor_id: 'ADR-002', decisions_status: 'Superseded' }),
       makeRow('pitfall', { anchor_id: 'PF-001', decisions_status: 'Retired' }),
+      makeRow('pitfall', { anchor_id: 'PF-003', decisions_status: 'Encoded' }),
       makeRow('pitfall', { anchor_id: 'PF-002' }),
     ];
     fs.writeFileSync(ledgerPath, lines.join('\n') + '\n');
@@ -225,8 +226,9 @@ describe('learningCounts component', () => {
 // render-decisions.cjs exactly, or the counts shown by the HUD would drift
 // from the entries visible in decisions.md/pitfalls.md. This pins the
 // mirror by comparing gatherLearningCounts' active/inactive determination
-// (via count presence) against the cjs renderer's own isActive() for the
-// full status matrix, rather than duplicating INACTIVE_STATUSES here.
+// (via count presence) against the renderer's isActive() — the learning
+// store's, which it re-exports — for the full status matrix, rather than
+// duplicating the inactive status list here.
 // ---------------------------------------------------------------------------
 describe('mirrors render-decisions.cjs active-row semantics (D309)', () => {
   let tmpDir: string;
@@ -246,6 +248,7 @@ describe('mirrors render-decisions.cjs active-row semantics (D309)', () => {
     undefined,
     'Accepted',
     'Active',
+    'Encoded',
     'Deprecated',
     'Superseded',
     'Retired',

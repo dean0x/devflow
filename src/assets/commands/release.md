@@ -48,7 +48,21 @@ Read `.release/RELEASE-FLOW.md`:
 
 **Produces:** DECISIONS_CONTEXT, FEATURE_KNOWLEDGE
 
-Read `.devflow/learning/index.md`. If the file is absent or empty, set `DECISIONS_CONTEXT` to `(none)`; otherwise use the file content as `DECISIONS_CONTEXT`.
+The decisions ledger belongs to the repository, not to one checkout: in a linked worktree it lives in the main worktree, and a session started in a subdirectory reads the copy at the repository root. Locate it with ONE git call, run from the start directory — `WORKTREE_PATH` if provided, otherwise cwd (`devflow:worktree-support`):
+
+```bash
+git -C "{start}" rev-parse --path-format=absolute --show-toplevel --git-common-dir
+```
+
+Line 1 is the checkout's toplevel, line 2 the repository's common git directory. A git older than 2.31 echoes `--path-format=absolute` back as a line of its own first. `{ledger}` is the first of these that applies:
+
+1. **The main worktree** — line 2 without its trailing `/.git`, when the output is exactly two lines each beginning with `/`, line 2 ends in `/.git`, and the directory left once it is removed is not your home directory and contains a `.devflow/` directory.
+2. **The toplevel** — line 1, or on an older git the line after the echoed flag.
+3. **The start directory itself** — when the command failed or printed no absolute toplevel (outside a git repository).
+
+This is the rule the learning hooks apply (D-LEDGER-MAIN-WORKTREE, D-PROMPT-ROOT), so you read the index the Learning agent writes.
+
+Read `{ledger}/.devflow/learning/index.md`. If the file is absent or empty, set `DECISIONS_CONTEXT` to `(none)`; otherwise use the file content as `DECISIONS_CONTEXT`.
 
 Load feature knowledge: Attempt to read `.devflow/features/index.md` (the regenerable cache). If absent or empty, glob `.devflow/features/*/KNOWLEDGE.md` and read each file's YAML frontmatter (`name`, `description`, `directories`) as the relevance surface. Pick release-relevant KBs by matching their documented area against the release context. For each selected KB, read the full `KNOWLEDGE.md` — trust current code over KB content on any mismatch. Concatenate under slug headers and set `FEATURE_KNOWLEDGE` (or `(none)` if no KBs exist or none are relevant). No `index.json`, no subprocess, no `.cjs` script.
 

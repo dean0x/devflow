@@ -6,11 +6,10 @@ import { promises as fs } from 'fs';
  * D34: Canonical atomic-write helper for the TypeScript CLI surface.
  *
  * Call sites: used by the CLI's exclusive-write call sites (migrations, init, post-install,
- * uninstall, security, ambient, memory, HUD, observation I/O).
- * The CJS counterpart (`writeExclusive` in `src/assets/scripts/hooks/json-helper.cjs` and
- * `src/assets/scripts/hooks/decisions-usage-scan.cjs`) intentionally remains a separate
- * implementation — same semantics, different module system. Any change to the
- * retry logic here MUST be mirrored in both CJS files.
+ * uninstall, security, ambient, memory, HUD).
+ * The CJS counterpart (`writeExclusive` in `src/assets/scripts/hooks/lib/learning-store.cjs`)
+ * intentionally remains a separate implementation — same semantics, different module
+ * system. Any change to the retry logic here MUST be mirrored there.
  */
 
 /**

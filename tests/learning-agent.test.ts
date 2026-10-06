@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeAll } from 'vitest';
 import { promises as fs } from 'fs';
 import * as fsSync from 'fs';
+import { createRequire } from 'module';
 import * as path from 'path';
 import { fileURLToPath } from 'url';
 
@@ -8,6 +9,7 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const AGENT_PATH = path.resolve(__dirname, '../src/assets/agents/learning.md');
 const ROOT = path.resolve(__dirname, '..');
+const LEARNING_STORE = path.resolve(ROOT, 'src/assets/scripts/hooks/lib/learning-store.cjs');
 
 /** Recursively find all files matching an extension under a directory. */
 function findFiles(dir: string, exts: string[]): string[] {
@@ -41,6 +43,26 @@ function parseYamlList(frontmatter: string, field: string): string[] {
     .filter(Boolean);
 }
 
+/** The text from the `start` heading up to the `end` heading, or '' when either is missing. */
+function sectionOf(content: string, start: string, end: string): string {
+  const from = content.indexOf(start);
+  const to = content.indexOf(end, from + start.length);
+  return from === -1 || to === -1 ? '' : content.slice(from, to);
+}
+
+/**
+ * A prose phrase as a pattern in which any whitespace run, a line break included,
+ * separates its words: the prompt is wrapped prose, and a pin must survive a reflow.
+ */
+function phrase(text: string, flags = ''): RegExp {
+  return new RegExp(text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/ +/g, '\\s+'), flags);
+}
+
+/** Phrases that must appear in this order, anything between them. */
+function inOrder(parts: readonly string[], flags = ''): RegExp {
+  return new RegExp(parts.map(part => phrase(part).source).join('[\\s\\S]*'), flags);
+}
+
 describe('learning agent', () => {
   let content: string;
   let frontmatter: string;
@@ -56,9 +78,9 @@ describe('learning agent', () => {
       expect(frontmatter).toMatch(/^model: opus$/m);
     });
 
-    it('has the file-work tool set (Read, Bash, Write, Edit, Glob, Grep)', () => {
+    it('has exactly the read-and-run tool set: every write goes through the learning ops', () => {
       const tools = parseYamlList(frontmatter, 'tools');
-      expect(tools.sort()).toEqual(['Bash', 'Edit', 'Glob', 'Grep', 'Read', 'Write']);
+      expect(tools.sort()).toEqual(['Bash', 'Glob', 'Grep', 'Read']);
     });
 
     it('references only the apply-decisions skill', () => {
@@ -67,125 +89,316 @@ describe('learning agent', () => {
     });
   });
 
-  describe('queue claim contract', () => {
-    it('claims the queue via atomic mv to .processing', () => {
-      expect(content).toContain(
-        'mv .devflow/learning/.pending-turns.jsonl .devflow/learning/.pending-turns.processing',
-      );
+  describe('queue claim (D-OWNED-CLAIM)', () => {
+    it('claims the queue with the claim-queue op as Step 0', () => {
+      const step0 = sectionOf(content, '## Step 0', '## Inputs');
+      expect(step0).toContain('json-helper.cjs" claim-queue');
     });
 
-    it('exits silently when the claim is lost or .processing is fresh', () => {
-      expect(content).toMatch(/mv.*fails.*exit silently/is);
-      expect(content).toMatch(/Fresh \(younger than 900s\).*Exit silently/s);
+    it('answers each claim-queue outcome: keeps the token, exits silently on busy, reports none', () => {
+      const step0 = sectionOf(content, '## Step 0', '## Inputs');
+      expect(step0).toMatch(/`claimed <token>`[^\n]*Keep the 16-hex token/);
+      expect(step0).toMatch(/`claimed <token> takeover`/);
+      expect(step0).toMatch(/`busy`[^\n]*Exit silently/);
+      expect(step0).toMatch(/`none`[^\n]*no pending decisions work/);
+      expect(step0).toMatch(/non-zero exit[^\n]*stderr/);
     });
 
-    it('merges and re-claims a stale .processing leftover', () => {
-      expect(content).toMatch(/Stale \(900s or older\)/);
-      expect(content).toContain(
-        'cat .devflow/learning/.pending-turns.jsonl >> .devflow/learning/.pending-turns.processing',
-      );
-    });
-
-    it('heartbeats the claim file at the detection→curation boundary', () => {
-      expect(content).toMatch(/Heartbeat.*touch.*Part 1 → Part 2 boundary/s);
-    });
-
-    it('deletes the claim file as the final act (consume-then-delete)', () => {
-      expect(content).toMatch(/FINAL act.*unlink \.devflow\/learning\/\.pending-turns\.processing/s);
-    });
-
-    it('does not instruct rm -f for claim-file deletion — deny-list blocks flags, not the verb', () => {
-      // rm -f (flagged rm) is denied; unlink and a flagless rm both pass.
-      // The prose may explain the deny-list rule using "rm -f" as a counter-example,
-      // but the actual delete command must be unlink, not rm -f.
+    it('never makes, moves or deletes the claim by hand', () => {
+      expect(content).not.toContain('mv .devflow/learning/.pending-turns.jsonl');
+      expect(content).not.toContain('unlink .devflow/learning/.pending-turns.processing');
+      expect(content).not.toContain('cat .devflow/learning/.pending-turns.jsonl >>');
       expect(content).not.toMatch(/\brm -[rf]+[^\n]*\.pending-turns\.processing/);
     });
 
-    it('aborts without writes when inputs vanish mid-run', () => {
-      expect(content).toMatch(/Vanished inputs.*stop without further writes/s);
+    it('heartbeats with touch -c at the Part 1 → Part 2 boundary and after each maintained entry', () => {
+      expect(content).toContain('touch -c .devflow/learning/.pending-turns.processing');
+      expect(content).toMatch(inOrder(['Heartbeat', 'Part 1 → Part 2 boundary']));
+      expect(sectionOf(content, '## Part 2', '## Finishing')).toMatch(phrase('After each maintained entry, refresh the claim'));
+    });
+
+    it('stops on vanished inputs and never recreates them', () => {
+      expect(content).toMatch(inOrder(['Vanished inputs', 'stop without further writes'], 'i'));
+      expect(content).toMatch(phrase('Never recreate them'));
+    });
+
+    it('releases the claim with its token as the FINAL act and notes not-owner or gone', () => {
+      const finishing = content.slice(content.indexOf('## Finishing'));
+      expect(finishing).toMatch(inOrder(['FINAL act', 'json-helper.cjs" release-claim <token>']));
+      expect(finishing).toMatch(inOrder(['`not-owner`', '`gone`', 'summary']));
     });
   });
 
-  describe('ledger op contract', () => {
+  describe('ledger ops', () => {
     it('keeps the Iron Law (assign-anchor owns numbering, render owns the .md)', () => {
       expect(content).toContain('assign-anchor OWNS NUMBERING');
+      expect(content).toContain('render OWNS THE .md');
       expect(content).toContain('NEVER HAND-EDIT decisions.md, pitfalls.md, or index.md');
     });
 
-    it('calls assign-anchor, retire-anchor, refresh-anchor, and rotate-observations via json-helper', () => {
-      expect(content).toMatch(/json-helper\.cjs" assign-anchor/);
-      expect(content).toMatch(/json-helper\.cjs" retire-anchor/);
-      // refresh-anchor: post-promotion reinforcement re-projects the log row into rendered files
-      // (D1, D-LOG-CONTENT-AUTHORITY)
-      expect(content).toMatch(/json-helper\.cjs" refresh-anchor/);
-      expect(content).toMatch(/json-helper\.cjs" rotate-observations/);
+    it('runs every op through json-helper from the project root', () => {
+      expect(content).toContain('node "$HOME/.devflow/scripts/hooks/json-helper.cjs" <op>');
+      expect(content).toContain('cd "<project root>" &&');
+      for (const op of [
+        'claim-queue', 'release-claim', 'put-observation', 'assign-anchor', 'retire-anchor',
+        'refresh-anchor', 'rotate-observations', 'claim-due',
+      ]) {
+        expect(content, op).toMatch(new RegExp(`json-helper\\.cjs" ${op}\\b`));
+      }
+      for (const op of ['`list`', '`show <anchor|obs_id>`', '`restore-anchor <anchor>`']) {
+        expect(content, op).toContain(op);
+      }
     });
 
-    it('keeps the curation bounds (≤5 changes, 7-day protection window)', () => {
-      expect(content).toContain('≤5 curation changes');
-      expect(content).toContain('7-day protection window');
+    it('calls the ops plainly: they self-lock, and nothing wraps them in a lock', () => {
+      expect(content).toMatch(phrase('self-locks internally'));
+      expect(content).toMatch(phrase('never wrap them in a lock'));
     });
 
-    it('keeps the ADR-XOR-PF hard rule', () => {
-      expect(content).toContain('ADR-XOR-PF (hard rule)');
+    it('quotes the stdout each op answers', () => {
+      for (const form of [
+        '`claimed <token>`', '`claimed <token> takeover`', '`busy`', '`none`',
+        '`released`', '`not-owner`', '`gone`',
+        '`created <id>`', '`updated <id>`', '`unchanged <id>`', '`reinforced <id> <n>`', '`reprojected <anchor>`',
+        '`encoded <anchor>`', '`superseded <anchor>`', '`retired <anchor>`', '`deprecated <anchor>`',
+        '`repointed <anchor>`', '`restored <anchor>`', '`verified <anchor>`',
+        '`rotated <N> observations`',
+        '`ref <origin/HEAD|HEAD> <sha12>`', '`ref none`', '`<anchor> <reason> <bytes>`', '`due none`',
+      ]) {
+        expect(content, form).toContain(form);
+      }
     });
 
-    it('E4: STOPs on an assign-anchor collision refusal instead of retrying or self-authorizing --allow-collision', () => {
-      expect(content).toContain('Pre-mint collision guard (E4) — STOP rule');
-      expect(content).toMatch(/json-helper\.cjs"\s*\n?\s*next-anchor/);
-      expect(content).toContain('STOP');
-      expect(content).toContain('do not pass `--allow-collision` on your own judgment');
-      expect(content).toContain('Report the printed `file:line` hits to the user');
+    it('quotes the list sections the agent reads', () => {
+      for (const header of ['ACTIVE <n>', 'INACTIVE <n>', 'OBSERVATIONS <n>', 'INTEGRITY <n>', 'MALFORMED <n>']) {
+        expect(content, header).toContain(header);
+      }
+    });
+
+    it('quotes an ACTIVE line field for field as the store prints it, the title last', () => {
+      const template = '<anchor> <obs_id> v<1|2> verified <date|never> observed <count|?> last-seen <last_seen|-> scope <scope|-> <title>';
+      expect(content).toContain(`    ${template}\n`);
+      const { buildListing, formatListing } = createRequire(import.meta.url)(LEARNING_STORE) as {
+        buildListing: (ledger: object[], log: object[]) => unknown;
+        formatListing: (listing: unknown) => string;
+      };
+      const entryContent = { schema: 2, id: 'obs_listed', type: 'decision', title: 'A rule with spaces', scope: ['area:a', 'src/**'] };
+      const printed = formatListing(buildListing(
+        [{ ...entryContent, anchor_id: 'ADR-NNN', decisions_status: 'Accepted', last_verified: '2026-09-01' }],
+        [{ ...entryContent, observations: 2, first_seen: '2026-08-01T00:00:00.000Z', last_seen: '2026-09-02T00:00:00.000Z' }],
+      )).split('\n')[1];
+      const shape = template
+        .replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+        .replace(/<title>$/, '.+')
+        .replace(/<[^>]+>/g, '\\S+');
+      expect(printed).toMatch(new RegExp(`^  ${shape}$`));
+      expect(printed).toBe('  ADR-NNN obs_listed v2 verified 2026-09-01 observed 2 last-seen 2026-09-02T00:00:00.000Z scope area:a,src/** A rule with spaces');
+    });
+
+    it('says a restored entry is due again in its place in the due order, not handed out first', () => {
+      expect(content).toMatch(phrase('due for maintenance again, ordered after integrity problems and legacy entries'));
+      expect(content).not.toMatch(phrase('maintenance next'));
+    });
+
+    it('names every reason claim-due can hand an entry out for, as the store spells it', () => {
+      const store = fsSync.readFileSync(LEARNING_STORE, 'utf-8');
+      for (const reason of ['duplicate-obs-id', 'ledger-without-log', 'scope-matches-nothing', 'legacy-v1', 'verify-age']) {
+        expect(store, `the store produces ${reason}`).toContain(`'${reason}'`);
+        expect(content, `the prompt names ${reason}`).toContain(`\`${reason}\``);
+      }
+    });
+
+    it('sends text to an op only as one JSON object on stdin, through a quoted heredoc', () => {
+      expect(content).toMatch(phrase('Text goes on stdin, never on the command line'));
+      expect(content).toContain("put-observation --create <<'EOF'");
+      expect(content).toContain("retire-anchor <anchor> Encoded <<'EOF'");
+    });
+
+    it('gives each retire status its stdin shape', () => {
+      expect(content).toContain('{"reason": "<why, one line, 1 to 120 characters>"}');
+      expect(content).toContain('{"by": "<anchor>"}');
+      expect(content).toMatch(/\{"at": "<path from the repository root>", "quote": "[^"]+"\}/);
+      expect(content).toContain('RETIRE BY STATUS');
+      expect(content).toContain('never hand-edit the .md');
+    });
+
+    it('tells the agent a refused input lists every problem at once, but a value with a bad shape reports only that', () => {
+      expect(content).toMatch(phrase('`<op>: the input has <N> problems; nothing was written` lists every problem at once'));
+      expect(content).toMatch(phrase('fix them all against the Entry format before you run the op once more'));
+      expect(content).toMatch(phrase(
+        'A value with a bad shape (text that is not one line, a scope with too many entries, a malformed glob) ' +
+          'reports only that: fix the shape first, and expect its other problems on the retry.',
+      ));
+      expect(content).not.toMatch(phrase('one problem per field'));
+    });
+
+    it('reads ledger and log data only through list and show', () => {
+      expect(content).toMatch(phrase('Ledger and log data come only through `list` and `show`'));
+      expect(content).toMatch(phrase('claimed turns are the one input you read directly with your Read tool'));
     });
   });
 
-  describe('direct file access (no worker-era script reads)', () => {
-    it('appends new observations one JSONL line at a time, never whole-file rewrites', () => {
-      expect(content).toContain('cat >> .devflow/learning/decisions-log.jsonl');
-      expect(content).toMatch(/never\s+rewrite the whole file/);
+  describe('entry format', () => {
+    it('states the v2 fields and their limits', () => {
+      const format = sectionOf(content, '## Entry format', '## Part 1');
+      for (const field of ['`id`', '`type`', '`title`', '`rule`', '`why`', '`scope`', '`provenance`', '`evidence`']) {
+        expect(format, field).toContain(field);
+      }
+      for (const limit of ['at most 120 characters', 'at most 400', 'at most 300', '1 to 5 entries', 'up to 5 items']) {
+        expect(format, limit).toContain(limit);
+      }
     });
 
-    it('does not reference count-active (reads rendered files directly)', () => {
-      expect(content).not.toContain('count-active');
+    it('carries the self-contained and volatile-facts rules and the reference ban', () => {
+      const format = sectionOf(content, '## Entry format', '## Part 1');
+      expect(format).toContain('**Self-contained.**');
+      expect(format).toContain('**No volatile facts.**');
+      expect(format).toMatch(phrase('Never a ledger ID, a `#123` issue reference or a file-and-line reference'));
     });
 
-    it('does not reference staleness.cjs (checks file references itself)', () => {
-      expect(content).not.toContain('staleness.cjs');
+    it('records the rule and why, never the story of how it was found', () => {
+      const format = sectionOf(content, '## Entry format', '## Part 1');
+      expect(format).toContain('**No incident narrative.**');
+      expect(format).toMatch(phrase('An entry states the rule and why, not the story of how it was found.'));
     });
 
-    it('does not reference merge-observation (edits log rows directly)', () => {
-      expect(content).not.toContain('merge-observation');
+    it('records only the workaround of an open defect, and retires the entry once the defect is fixed and guarded', () => {
+      const format = sectionOf(content, '## Entry format', '## Part 1');
+      expect(format).toContain('**An open defect records only its workaround.**');
+      expect(format).toMatch(phrase(
+        'While a defect is unfixed, the entry states how to avoid it; once it is fixed and guarded, the entry is Encoded or Retired.',
+      ));
     });
 
-    it('does not reference the .last-dream-ok success stamp', () => {
-      expect(content).not.toContain('.last-dream-ok');
+    it('shows a good and a bad example', () => {
+      const format = sectionOf(content, '## Entry format', '## Part 1');
+      expect(format).toMatch(/Good:\n\n```json\n\{"id": "obs_[a-z0-9_]+"/);
+      expect(format).toMatch(/Bad:\n\n```json\n/);
     });
 
-    it('does not reference the last-run-summary file (summary is the final message)', () => {
-      expect(content).not.toContain('last-run-summary');
+    it('a put carries the whole content: an update never merges', () => {
+      expect(content).toMatch(phrase('an update replaces the content, it never merges'));
+    });
+  });
+
+  describe('capture', () => {
+    it('dedups against active, inactive and stored observations before creating', () => {
+      const capture = sectionOf(content, '## Part 1', '## Part 2');
+      expect(capture).toMatch(phrase('Dedup before creating'));
+      expect(capture).toMatch(phrase('ACTIVE, INACTIVE and OBSERVATIONS'));
+      expect(capture).toMatch(phrase('reinforce that row'));
+    });
+
+    it('restores a retired concern that comes back instead of minting a new entry', () => {
+      const capture = sectionOf(content, '## Part 1', '## Part 2');
+      expect(capture).toMatch(phrase('`restore-anchor <anchor>`, then rewrite it with `put-observation --update`'));
+      expect(capture).toMatch(phrase('Never mint a new entry for a retired concern'));
+    });
+
+    it('checks whether the codebase already encodes a lesson before recording it', () => {
+      expect(sectionOf(content, '## Part 1', '## Part 2')).toMatch(inOrder(['Already encoded?', 'record nothing']));
+    });
+
+    it('verifies a reported status change at the verify ref with git show, never git grep', () => {
+      const capture = sectionOf(content, '## Part 1', '## Part 2');
+      expect(capture).toContain('git show <ref>:<path>');
+      expect(capture).toMatch(phrase('never `git grep`'));
+    });
+  });
+
+  describe('maintenance ladder', () => {
+    it('rotates first, then takes the work list from claim-due once', () => {
+      const maintain = sectionOf(content, '## Part 2', '## Finishing');
+      const rotate = maintain.indexOf('json-helper.cjs" rotate-observations');
+      const due = maintain.indexOf('json-helper.cjs" claim-due');
+      expect(rotate).toBeGreaterThan(-1);
+      expect(due).toBeGreaterThan(rotate);
+    });
+
+    it('takes the first matching rung, in order: Encoded, no longer true, duplicate, one-off, Keep', () => {
+      const maintain = sectionOf(content, '## Part 2', '## Finishing');
+      const rungs = ['1. **Encoded**', '2. **No longer true', '3. **Duplicate**', '4. **One-off**', '5. **Keep**']
+        .map(rung => maintain.indexOf(rung));
+      expect(rungs.every(i => i > -1), `every rung stated: ${rungs.join(', ')}`).toBe(true);
+      expect([...rungs].sort((a, b) => a - b)).toEqual(rungs);
+    });
+
+    it('holds Encoded to the strict bar and lets plumbing check the quote', () => {
+      const maintain = sectionOf(content, '## Part 2', '## Finishing');
+      expect(maintain).toMatch(phrase('a test or guard that fails on a new violation anywhere in'));
+      expect(maintain).toMatch(phrase('One JSDoc line does not count'));
+      expect(maintain).toMatch(phrase('checks the quote in the file as committed at the verify ref'));
+    });
+
+    it('gives each entry exactly one final action, keeping it when unsure', () => {
+      const maintain = sectionOf(content, '## Part 2', '## Finishing');
+      expect(maintain).toMatch(phrase('Exactly one final action per entry'));
+      expect(maintain).toMatch(phrase('when unsure, Keep', 'i'));
+    });
+
+    it('closes with one batched refresh-anchor --verified of the kept entries', () => {
+      const maintain = sectionOf(content, '## Part 2', '## Finishing');
+      expect(maintain).toContain('json-helper.cjs" refresh-anchor <anchor> [<anchor>...] --verified');
+      expect(maintain).toMatch(phrase('a v1 entry refuses the whole batch'));
+    });
+  });
+
+  describe('retired rules stay out', () => {
+    it('carries no curation cap, protection window or refresh cap', () => {
+      expect(content).not.toMatch(phrase('≤5 curation changes'));
+      expect(content).not.toMatch(phrase('stop after 5 changes'));
+      expect(content).not.toMatch(phrase('7-day protection window'));
+      expect(content).not.toMatch(phrase('at most 10 anchors'));
+    });
+
+    it('carries no confidence gate and no v1 observation fields', () => {
+      expect(content).not.toMatch(/confidence\s*[>=]+\s*0\.\d+/);
+      expect(content).not.toMatch(/low-confidence/i);
+      expect(content).not.toContain('"confidence"');
+      expect(content).not.toContain('quality_ok');
+      expect(content).not.toContain('cat >> .devflow/learning/decisions-log.jsonl');
+    });
+
+    it('carries no usage grounding, citation re-pointing or collision stop', () => {
+      expect(content).not.toContain('.decisions-usage.json');
+      expect(content).not.toMatch(phrase('Citation preservation', 'i'));
+      expect(content).not.toContain('next-anchor');
+      expect(content).not.toContain('--allow-collision');
+      expect(content).not.toMatch(phrase('git grep -nE'));
+      expect(content).not.toMatch(phrase('STOP rule'));
+    });
+
+    it('names no ledger entry by number', () => {
+      expect(content).not.toMatch(/\b(?:ADR|PF)-\d{3}\b/);
+    });
+
+    it('does not reference worker-era scripts or stamps', () => {
+      for (const retired of ['count-active', 'staleness.cjs', 'merge-observation', '.last-dream-ok', 'last-run-summary']) {
+        expect(content, retired).not.toContain(retired);
+      }
     });
   });
 });
 
 // ---------------------------------------------------------------------------
-// Lockstep tests — structural consistency between the Learning agent and
-// related infrastructure (900s staleness threshold, directive, build output).
+// Lockstep tests — structural consistency between the Learning agent's claim
+// and related infrastructure (staleness threshold, directive, build output).
 // ---------------------------------------------------------------------------
 
-describe('lockstep: Learning agent 900s staleness matches directive', () => {
+describe('lockstep: the claim staleness threshold', () => {
   const SESSION_START_CONTEXT = path.resolve(ROOT, 'src/assets/scripts/hooks/session-start-context');
 
-  it('session-start-context directive also uses 900s as the freshness threshold', async () => {
+  it('session-start-context directive uses 900s as the freshness threshold', async () => {
     // Let readFile throw if the hook is missing — a missing hook is a real failure, not a skip
     const hookContent = await fs.readFile(SESSION_START_CONTEXT, 'utf-8');
-    // Both the agent and the directive must agree on the exact constant (matching
-    // any substring containing "900" is not proof the threshold is the same)
     expect(hookContent).toContain('PROCESSING_STALE_SECS=900');
   });
 
-  it('learning agent uses 900s freshness threshold (not an older value)', async () => {
-    const content = await fs.readFile(AGENT_PATH, 'utf-8');
-    expect(content).toContain('900s');
+  it('the claim-queue op takes over a claim at the same threshold the directive treats as stale', async () => {
+    const hookContent = await fs.readFile(SESSION_START_CONTEXT, 'utf-8');
+    const { CLAIM_STALE_SECS } = createRequire(import.meta.url)(LEARNING_STORE) as { CLAIM_STALE_SECS: number };
+    expect(CLAIM_STALE_SECS).toBe(900);
+    expect(hookContent).toContain(`PROCESSING_STALE_SECS=${CLAIM_STALE_SECS}`);
   });
 });
 

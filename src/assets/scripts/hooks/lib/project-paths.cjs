@@ -57,9 +57,14 @@ function getLearningPendingTurnsPath(projectRoot) {
   return path.join(projectRoot, '.devflow', 'learning', '.pending-turns.jsonl');
 }
 
-/** .devflow/learning/.pending-turns.processing — atomic claim held by the Learning agent while processing */
+/** .devflow/learning/.pending-turns.processing — the claimed batch a Learning run holds while it processes it */
 function getLearningPendingTurnsProcessingPath(projectRoot) {
   return path.join(projectRoot, '.devflow', 'learning', '.pending-turns.processing');
+}
+
+/** .devflow/learning/.pending-turns.owner — the token of the run that holds the claim (learning-store.cjs) */
+function getLearningClaimOwnerPath(projectRoot) {
+  return path.join(projectRoot, '.devflow', 'learning', '.pending-turns.owner');
 }
 
 // ---------------------------------------------------------------------------
@@ -96,29 +101,19 @@ function getDecisionsArchivePath(projectRoot) {
   return path.join(projectRoot, '.devflow', 'learning', 'decisions-log.archive.jsonl');
 }
 
+/** .devflow/learning/decisions-history.jsonl — prior content versions of rewritten entries (learning-store.cjs) */
+function getDecisionsHistoryPath(projectRoot) {
+  return path.join(projectRoot, '.devflow', 'learning', 'decisions-history.jsonl');
+}
+
 /** .devflow/learning/.decisions.lock — mkdir-based lock directory */
 function getDecisionsLockDir(projectRoot) {
   return path.join(projectRoot, '.devflow', 'learning', '.decisions.lock');
 }
 
-/** .devflow/learning/.decisions-usage.json */
-function getDecisionsUsagePath(projectRoot) {
-  return path.join(projectRoot, '.devflow', 'learning', '.decisions-usage.json');
-}
-
-/** .devflow/learning/.decisions-usage.lock/ — mkdir-based lock directory for usage file */
-function getDecisionsUsageLockDir(projectRoot) {
-  return path.join(projectRoot, '.devflow', 'learning', '.decisions-usage.lock');
-}
-
 /** .devflow/learning/index.md — pre-rendered compact index written by render-decisions.cjs */
 function getDecisionsIndexPath(projectRoot) {
   return path.join(projectRoot, '.devflow', 'learning', 'index.md');
-}
-
-/** .devflow/learning/.observations.lock — mkdir-based lock directory for observation log writes */
-function getObservationsLockDir(projectRoot) {
-  return path.join(projectRoot, '.devflow', 'learning', '.observations.lock');
 }
 
 // ---------------------------------------------------------------------------
@@ -185,6 +180,7 @@ module.exports = {
   // Learning queue files
   getLearningPendingTurnsPath,
   getLearningPendingTurnsProcessingPath,
+  getLearningClaimOwnerPath,
   // Learning content files
   getDecisionsFilePath,
   getPitfallsFilePath,
@@ -192,10 +188,8 @@ module.exports = {
   getDecisionsLedgerPath,
   getDecisionsLogPath,
   getDecisionsArchivePath,
+  getDecisionsHistoryPath,
   getDecisionsLockDir,
-  getObservationsLockDir,
-  getDecisionsUsagePath,
-  getDecisionsUsageLockDir,
   getDecisionsIndexPath,
   // Memory files
   getWorkingMemoryPath,

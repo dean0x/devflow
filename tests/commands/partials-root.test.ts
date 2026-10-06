@@ -12,6 +12,10 @@
  * to every `.devflow/docs/` artifact a command reads or writes — tests/guards/
  * docs-root.test.ts holds the paths to it, and this file runs its command. Both used to read from cwd, so a session started in `packages/app`
  * loaded `(none)` and a write-back committed `packages/app/.devflow/features`.
+ * The other decisions readers follow the same ledger: the dynamic commands'
+ * authoring preamble calls `decisions_locate`, the static release.md carries a
+ * word-for-word copy of it, and the Code agent's fallback resolves the main
+ * worktree from the common git directory.
  *
  * The rule is prose an LLM follows around ONE git command. The test extracts that
  * command from every compiled command that carries the loader, runs it verbatim
@@ -28,6 +32,8 @@ import * as path from 'path';
 import { requireDistFile, requireDistFiles } from '../helpers.js';
 
 const DECISIONS_HEADING = '### Load DECISIONS_CONTEXT';
+const PREAMBLE_DECISIONS_HEADING = '### DECISIONS_CONTEXT — obtain BEFORE authoring';
+const RELEASE_CONTEXT_HEADING = '### Phase 1b: Load Context';
 const KNOWLEDGE_HEADING = '### Load Feature Knowledge';
 const WRITEBACK_HEADING = '### Feature Knowledge Write-Back (Conditional)';
 const DOCS_ROOT_LEAD = '**Docs root (D-DOCS-ROOT).**';
@@ -238,6 +244,56 @@ describe('compiled loaders resolve the repository root, not cwd (D-PROMPT-ROOT, 
     }
     expect(worktreeFrom(runFromStart(command as string, outside), outside)).toBe(outside);
   });
+
+  it('the dynamic commands locate the main ledger by the same rule before authoring', () => {
+    const hosts = knowledgeHosts(PREAMBLE_DECISIONS_HEADING)
+    // Non-vacuity: every command that loads the authoring preamble.
+    expect(hosts.sort()).toEqual(['dynamic-build.md', 'dynamic-plan.md', 'dynamic-profile.md', 'dynamic-tickets.md'])
+    for (const file of hosts) {
+      const section = sectionOf(requireDistFile(file), PREAMBLE_DECISIONS_HEADING)
+      expect(collectGitCommand(section), `${file}: the resolution command`).toBe(
+        'git -C "{start}" rev-parse --path-format=absolute --show-toplevel --git-common-dir',
+      )
+      expect(section, `${file}: the index path`).toContain('`{ledger}/.devflow/learning/index.md`')
+      expect(section, `${file}: the retired checkout-relative read`).not.toContain('for the current worktree')
+      for (const arm of ['**The main worktree**', '**The toplevel**', '**The start directory itself**']) {
+        expect(section, `${file}: ${arm}`).toContain(arm)
+      }
+    }
+    const command = collectGitCommand(sectionOf(requireDistFile(hosts[0]), PREAMBLE_DECISIONS_HEADING))
+    expect(ledgerFrom(runFromStart(command as string, wt), wt)).toBe(main)
+  })
+
+  it('release.md carries the decisions locate rule word for word and reads the index from the ledger it names', () => {
+    // release.md is a static command and cannot import the partial, so its copy is
+    // pinned to the define body: an edit to one without the other goes red here.
+    const partial = fs.readFileSync(
+      path.resolve(import.meta.dirname, '..', '..', 'src', 'assets', 'commands', '_partials', '_decisions.mds'),
+      'utf-8',
+    )
+    const locate = /^@define decisions_locate\(\):\n([\s\S]*?)\n@end$/m.exec(partial)?.[1] ?? ''
+    expect(locate, 'the locate define body').toContain('**The main worktree**')
+    const release = sectionOf(requireDistFile('release.md'), RELEASE_CONTEXT_HEADING)
+    expect(release).toContain(locate)
+    expect(release).toContain('Read `{ledger}/.devflow/learning/index.md`.')
+    expect(ledgerFrom(runFromStart(collectGitCommand(release) as string, wt), wt)).toBe(main)
+  })
+
+  it('the Code agent fallback names the main worktree index from a linked worktree', () => {
+    const code = fs.readFileSync(
+      path.resolve(import.meta.dirname, '..', '..', 'src', 'assets', 'agents', 'code.md'),
+      'utf-8',
+    )
+    const command = /`(git rev-parse --path-format=absolute --git-common-dir)`; when it ends in `\/\.git` the index lives under its parent/
+      .exec(code)?.[1]
+    expect(command, 'the fallback command and its rule').toBeDefined()
+    for (const [label, start] of [['root', main], ['subdir', sub], ['worktree', wt]] as const) {
+      const out = spawnSync('bash', ['-c', `cd "$1" && ${command as string}`, '_', start], { encoding: 'utf-8' })
+      const common = out.stdout.trim()
+      expect(common.endsWith('/.git'), `${label}: ${common}`).toBe(true)
+      expect(fs.realpathSync(path.dirname(common)), label).toBe(main)
+    }
+  })
 
   it('known-bad probe: reading from cwd misses the ledger from a subdirectory and a worktree', () => {
     // The superseded loaders used the start directory as the root. The same

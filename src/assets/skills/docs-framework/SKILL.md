@@ -140,8 +140,8 @@ ensure_docs_dir() { mkdir -p "$(get_docs_root)/.devflow/docs/$1"; }
 | Resolve cmd | `.devflow/docs/reviews/{branch-slug}/{timestamp}/resolution-summary.md` | Written by /resolve orchestrator (Phase 5) |
 | Code-review cmd | `.devflow/docs/reviews/{branch-slug}/.last-review-head` | Overwrites with HEAD SHA |
 | Working Memory | `.devflow/memory/WORKING-MEMORY.md` | Overwrites (auto-maintained by Stop hook) |
-| Decisions | `.devflow/learning/decisions.md` | Rendered from `decisions-ledger.jsonl` (active ADR-NNN rows; retired rows dropped) |
-| Pitfalls | `.devflow/learning/pitfalls.md` | Rendered from `decisions-ledger.jsonl` (active PF-NNN rows; retired rows dropped) |
+| Decisions | `.devflow/learning/decisions.md` | Rendered from `decisions-ledger.jsonl` (active ADR-NNN entries in full; inactive ones listed in its Inactive table) |
+| Pitfalls | `.devflow/learning/pitfalls.md` | Rendered from `decisions-ledger.jsonl` (active PF-NNN entries in full; inactive ones listed in its Inactive table) |
 | Design agent (via /plan) | `.devflow/docs/design/{ISSUE_ID}-{topic-slug}.{timestamp}.md` | Creates new design artifact |
 | Research agent | `.devflow/docs/research/{topic-slug}/{timestamp}/{type}.md` | Creates new in timestamped dir |
 | Synthesize agent (research) | `.devflow/docs/research/{topic-slug}/{timestamp}/research-summary.md` | Creates new in timestamped dir |

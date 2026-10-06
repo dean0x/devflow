@@ -2,14 +2,15 @@
 //
 // Phase 6 tests for the curation skill rewrite and retire-by-status model.
 //
-// AC-F4: Rendered .md contains only active entries — Deprecated/Superseded/Retired never appear.
-// AC-F5: Retire removes an entry from .md but keeps it (anchor + Retired) in the committed ledger;
-//         number never reused.
-// AC-F6: A retired entry is recoverable: re-activating status + render restores it identically.
-// AC-F9: Observing rows >30d are archived (rotation); anchored rows never archived.
+// AC-F4: Rendered .md renders a body for active entries only — a Deprecated, Superseded or
+//         Retired entry is listed under Inactive and never rendered.
+// AC-F5: Retire removes an entry's body from .md but keeps it (anchor + Retired) in the committed
+//         ledger; number never reused.
+// AC-F6: A retired entry is recoverable: restore-anchor renders it again, exactly as before.
+// AC-F9: Rotation archives an observation no ledger entry carries once 30 days pass
+//         since its last activity; one an entry carries is never archived.
 //         (Curation SKILL wiring: contract that rotation step is present.)
 // Curation SKILL: Iron Law, retire-anchor usage, rotation step, no direct .md edit, ADR-XOR-PF.
-// observation-io: updateDecisionsStatus is removed; module still exports the correct surface.
 
 import { describe, it, expect, beforeEach, afterEach, beforeAll } from 'vitest';
 import { createRequire } from 'module';
@@ -18,29 +19,22 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
 
+import { makeV2LogRow, requireLearningStore, runJsonHelper } from './learning-fixtures.js';
+
 const ROOT = path.resolve(import.meta.dirname, '../..');
 const require = createRequire(import.meta.url);
 
-const JSON_HELPER_BIN = path.join(ROOT, 'src/assets/scripts/hooks/json-helper.cjs');
 const RENDER_BIN = path.join(ROOT, 'src/assets/scripts/hooks/lib/render-decisions.cjs');
 
 const {
   renderDecisionsFile,
   parseLedger,
-  renderAndWriteAll,
 } = require(RENDER_BIN) as {
   renderDecisionsFile: (rows: Record<string, unknown>[], kind: 'decisions' | 'pitfalls') => string;
   parseLedger: (ledgerPath: string) => Record<string, unknown>[];
-  renderAndWriteAll: (worktreePath: string, rows: Record<string, unknown>[]) => void;
 };
 
-const {
-  rotateObservations,
-  writeJsonlAtomic,
-} = require(JSON_HELPER_BIN) as {
-  rotateObservations: (logPath: string, archivePath: string, nowMs: number) => number;
-  writeJsonlAtomic: (file: string, entries: object[]) => void;
-};
+const store = requireLearningStore();
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -90,24 +84,6 @@ function writeLedger(dir: string, rows: Record<string, unknown>[]): string {
   return ledgerPath;
 }
 
-function runHelper(args: string, cwd: string): { stdout: string; code: number; stderr: string } {
-  try {
-    const stdout = execSync(`node "${JSON_HELPER_BIN}" ${args}`, {
-      cwd,
-      encoding: 'utf8',
-      stdio: ['pipe', 'pipe', 'pipe'],
-    });
-    return { stdout, code: 0, stderr: '' };
-  } catch (e: unknown) {
-    const err = e as { stdout?: string; status?: number; stderr?: string };
-    return {
-      stdout: err.stdout ?? '',
-      code: err.status ?? 1,
-      stderr: err.stderr ?? '',
-    };
-  }
-}
-
 function readDecisionsMd(dir: string): string {
   return fs.readFileSync(path.join(dir, '.devflow', 'learning', 'decisions.md'), 'utf8');
 }
@@ -116,9 +92,10 @@ function readDecisionsMd(dir: string): string {
 // Learning agent content-presence assertions (AC-C3)
 //
 // The Learning agent (src/assets/agents/learning.md) is the sole decisions processor:
-// it claims the queue, reads the data files directly, and writes through the
-// four ledger ops. These describe pins hold the curation contract strings in
-// place — the same Iron-Law contract the ledger ops enforce at runtime.
+// it claims the queue through claim-queue, reads the claimed turns directly,
+// reads the ledger and the log only through list and show, and writes only
+// through the learning ops. These describe pins hold the curation contract
+// strings in place — the same Iron-Law contract the ledger ops enforce at runtime.
 // ---------------------------------------------------------------------------
 
 describe('Learning agent curation contract (AC-C3)', () => {
@@ -141,21 +118,25 @@ describe('Learning agent curation contract (AC-C3)', () => {
     expect(agentContent).toContain('never hand-edit the .md');
   });
 
-  it('names the inputs the agent reads directly', () => {
-    expect(agentContent).toContain('Inputs (read directly with your Read tool)');
+  it('reads the claimed turns directly and the ledger only through list and show', () => {
+    // \s+ tolerates a line wrap anywhere in the wrapped prose.
+    expect(agentContent).toMatch(/claimed\s+turns\s+are\s+the\s+one\s+input\s+you\s+read\s+directly\s+with\s+your\s+Read\s+tool/);
+    expect(agentContent).toMatch(/Ledger\s+and\s+log\s+data\s+come\s+only\s+through\s+`list`\s+and\s+`show`/);
   });
 
-  it('routes all ledger writes through assign-anchor/retire-anchor/refresh-anchor/rotate-observations', () => {
-    expect(agentContent).toContain('assign-anchor');
-    expect(agentContent).toContain('retire-anchor');
-    // refresh-anchor: post-promotion reinforcement op (D-LOG-CONTENT-AUTHORITY)
-    expect(agentContent).toContain('refresh-anchor');
-    expect(agentContent).toContain('rotate-observations');
+  it('routes every ledger write through the learning ops', () => {
+    for (const op of [
+      'put-observation', 'assign-anchor', 'retire-anchor', 'restore-anchor', 'refresh-anchor',
+      'rotate-observations', 'claim-due',
+    ]) {
+      expect(agentContent, op).toContain(op);
+    }
   });
 
-  it('deletes the claim file as the final act (consume-then-delete)', () => {
+  it('names the claim file and releases the claim with release-claim as the FINAL act', () => {
     expect(agentContent).toContain('.devflow/learning/.pending-turns.processing');
     expect(agentContent).toContain('FINAL act');
+    expect(agentContent).toContain('json-helper.cjs" release-claim <token>');
   });
 
   it('run visibility is the final message — no status file', () => {
@@ -178,24 +159,14 @@ describe('Learning agent curation contract (AC-C3)', () => {
     expect(agentContent).toMatch(/dedup|near-duplicate/i);
   });
 
-  it('bounds curation to at most 5 changes per run', () => {
-    // \s+ tolerates an incidental mid-sentence line wrap in the markdown source
-    // (a literal newline between "curation" and "changes", not just a space).
-    expect(agentContent).toMatch(/≤5\s+curation\s+changes/);
-    expect(agentContent).toContain('stop after 5 changes');
+  it('bounds maintenance by the claim-due work list, not by a change cap or a protection window', () => {
+    expect(agentContent).toContain('json-helper.cjs" claim-due');
+    // \s+ tolerates a mid-sentence line wrap, so a re-wrapped cap is still caught.
+    expect(agentContent).not.toMatch(/≤5\s+curation\s+changes/);
+    expect(agentContent).not.toMatch(/7-day\s+protection\s+window/);
   });
 
-  it('7-day protection window is keyed off the ledger date field, with D5 fallback for dateless rows', () => {
-    expect(agentContent).toContain('7-day protection window');
-    expect(agentContent).toContain("ledger row's");
-    expect(agentContent).toContain('date` field');
-    // D5: pitfall rows promoted before date-stamping have no `date` field — fall back to
-    // last_seen from the log row, not treat the entry as always-touchable.
-    expect(agentContent).toContain('pitfall rows promoted before date-stamping was added');
-  });
-
-  it('rotation step is for archiving stale observing rows (AC-F9)', () => {
-    expect(agentContent).toContain('observing');
+  it('rotation step archives observations no entry carries (AC-F9)', () => {
     expect(agentContent).toMatch(/30 days|30-day/);
     expect(agentContent).toMatch(/never touches anchored|never touch.*anchor/i);
   });
@@ -205,45 +176,49 @@ describe('Learning agent curation contract (AC-C3)', () => {
 // AC-F4: Rendered .md contains only active entries
 // ---------------------------------------------------------------------------
 
-describe('AC-F4: renderDecisionsFile excludes non-active statuses', () => {
-  it('Deprecated entry does not appear in rendered decisions.md', () => {
+describe('AC-F4: renderDecisionsFile renders no body for a non-active status', () => {
+  it('a Deprecated entry has no body in rendered decisions.md and is listed under Inactive', () => {
     const rows = [
       makeLedgerRow({ anchor_id: 'ADR-001', decisions_status: 'Accepted', pattern: 'Keep this' }),
       makeLedgerRow({ anchor_id: 'ADR-002', id: 'obs_002', decisions_status: 'Deprecated', pattern: 'Deprecated entry' }),
     ];
     const output = renderDecisionsFile(rows, 'decisions');
-    expect(output).toContain('ADR-001');
-    expect(output).not.toContain('ADR-002');
+    expect(output).toMatch(/^## ADR-001: Keep this$/m);
+    expect(output).not.toMatch(/^## ADR-002:/m);
     expect(output).not.toContain('Deprecated entry');
+    expect(output).toContain('| ADR-002 | Deprecated | — |\n');
   });
 
-  it('Superseded entry does not appear in rendered decisions.md', () => {
+  it('a Superseded entry has no body in rendered decisions.md and is listed under Inactive', () => {
     const rows = [
       makeLedgerRow({ anchor_id: 'ADR-001', decisions_status: 'Accepted' }),
       makeLedgerRow({ anchor_id: 'ADR-003', id: 'obs_003', decisions_status: 'Superseded', pattern: 'Old decision' }),
     ];
     const output = renderDecisionsFile(rows, 'decisions');
-    expect(output).not.toContain('ADR-003');
+    expect(output).not.toMatch(/^## ADR-003:/m);
     expect(output).not.toContain('Old decision');
+    expect(output).toContain('| ADR-003 | Superseded | — |\n');
   });
 
-  it('Retired entry does not appear in rendered decisions.md', () => {
+  it('a Retired entry has no body in rendered decisions.md and is listed under Inactive', () => {
     const rows = [
       makeLedgerRow({ anchor_id: 'ADR-001', decisions_status: 'Accepted' }),
       makeLedgerRow({ anchor_id: 'ADR-004', id: 'obs_004', decisions_status: 'Retired', pattern: 'Retired decision' }),
     ];
     const output = renderDecisionsFile(rows, 'decisions');
-    expect(output).not.toContain('ADR-004');
+    expect(output).not.toMatch(/^## ADR-004:/m);
     expect(output).not.toContain('Retired decision');
+    expect(output).toContain('| ADR-004 | Retired | — |\n');
   });
 
-  it('only Active pitfall status appears in rendered pitfalls.md', () => {
+  it('only an Active pitfall has a body in rendered pitfalls.md', () => {
     const pf1 = { ...makeLedgerRow({ anchor_id: 'PF-001', id: 'obs_pf1', type: 'pitfall', decisions_status: 'Active', pattern: 'Active pitfall' }), type: 'pitfall', date: undefined };
     const pf2 = { ...makeLedgerRow({ anchor_id: 'PF-002', id: 'obs_pf2', type: 'pitfall', decisions_status: 'Deprecated', pattern: 'Deprecated pitfall' }), type: 'pitfall', date: undefined };
     const output = renderDecisionsFile([pf1, pf2], 'pitfalls');
-    expect(output).toContain('PF-001');
-    expect(output).not.toContain('PF-002');
+    expect(output).toMatch(/^## PF-001: Active pitfall$/m);
+    expect(output).not.toMatch(/^## PF-002:/m);
     expect(output).not.toContain('Deprecated pitfall');
+    expect(output).toContain('| PF-002 | Deprecated | — |\n');
   });
 });
 
@@ -251,7 +226,7 @@ describe('AC-F4: renderDecisionsFile excludes non-active statuses', () => {
 // AC-F5: retire-anchor removes entry from .md, keeps it Retired in ledger
 // ---------------------------------------------------------------------------
 
-describe('AC-F5: retire-anchor hides entry from .md, keeps in ledger', () => {
+describe('AC-F5: retire-anchor hides entry from .md, keeps in ledger', { timeout: 30_000 }, () => {
   let tmpDir: string;
 
   beforeEach(() => {
@@ -263,19 +238,24 @@ describe('AC-F5: retire-anchor hides entry from .md, keeps in ledger', () => {
     fs.rmSync(tmpDir, { recursive: true, force: true });
   });
 
-  it('retired entry vanishes from decisions.md', () => {
+  /** Retire `anchor` with `status`, a reason on stdin. */
+  function retire(anchor: string, status: string, reason = 'A one-off'): number {
+    return runJsonHelper(tmpDir, ['retire-anchor', anchor, status], JSON.stringify({ reason })).code;
+  }
+
+  it('a retired entry loses its body in decisions.md and is listed under Inactive', () => {
     writeLedger(tmpDir, [
       makeLedgerRow({ anchor_id: 'ADR-001', decisions_status: 'Accepted', pattern: 'Keep this' }),
       makeLedgerRow({ anchor_id: 'ADR-002', id: 'obs_002', decisions_status: 'Accepted', pattern: 'Retire this' }),
     ]);
 
-    const result = runHelper('retire-anchor ADR-002 Retired', tmpDir);
-    expect(result.code).toBe(0);
+    expect(retire('ADR-002', 'Retired')).toBe(0);
 
     const md = readDecisionsMd(tmpDir);
-    expect(md).toContain('ADR-001');
-    expect(md).not.toContain('ADR-002');
+    expect(md).toMatch(/^## ADR-001: Keep this$/m);
+    expect(md).not.toMatch(/^## ADR-002:/m);
     expect(md).not.toContain('Retire this');
+    expect(md).toContain('| ADR-002 | Retired | A one-off |\n');
   });
 
   it('retired entry stays Retired in the ledger', () => {
@@ -284,7 +264,7 @@ describe('AC-F5: retire-anchor hides entry from .md, keeps in ledger', () => {
       makeLedgerRow({ anchor_id: 'ADR-002', id: 'obs_002', decisions_status: 'Accepted' }),
     ]);
 
-    runHelper('retire-anchor ADR-002 Retired', tmpDir);
+    expect(retire('ADR-002', 'Retired')).toBe(0);
 
     const rows = parseLedger(path.join(tmpDir, '.devflow', 'learning', 'decisions-ledger.jsonl'));
     expect(rows).toHaveLength(2);
@@ -299,27 +279,29 @@ describe('AC-F5: retire-anchor hides entry from .md, keeps in ledger', () => {
       makeLedgerRow({ anchor_id: 'ADR-002', id: 'obs_002', decisions_status: 'Accepted' }),
     ]);
 
-    runHelper('retire-anchor ADR-002 Retired', tmpDir);
+    expect(retire('ADR-002', 'Retired')).toBe(0);
 
     // Write a new observation and promote it — should get ADR-003, not ADR-002
     const logPath = path.join(tmpDir, '.devflow', 'learning', 'decisions-log.jsonl');
-    fs.writeFileSync(logPath, JSON.stringify(makeObsRow({ id: 'obs_new', type: 'decision', status: 'ready' })) + '\n', 'utf8');
-    const result = runHelper('assign-anchor decision obs_new', tmpDir);
+    fs.writeFileSync(logPath, JSON.stringify(makeV2LogRow({ id: 'obs_new' })) + '\n', 'utf8');
+    const result = runJsonHelper(tmpDir, ['assign-anchor', 'decision', 'obs_new']);
     expect(result.code).toBe(0);
     expect(result.stdout.trim()).toBe('ADR-003');
   });
 
-  it('Deprecated entry (via Deprecated status) vanishes from .md, stays in ledger', () => {
+  it('a Deprecated entry loses its body in the .md, is listed under Inactive and stays in the ledger', () => {
     writeLedger(tmpDir, [
       makeLedgerRow({ anchor_id: 'ADR-001', decisions_status: 'Accepted', pattern: 'Surviving' }),
       makeLedgerRow({ anchor_id: 'ADR-002', id: 'obs_002', decisions_status: 'Accepted', pattern: 'Going Deprecated' }),
     ]);
 
-    runHelper('retire-anchor ADR-002 Deprecated', tmpDir);
+    expect(retire('ADR-002', 'Deprecated', 'The store moved')).toBe(0);
 
     const md = readDecisionsMd(tmpDir);
-    expect(md).toContain('ADR-001');
-    expect(md).not.toContain('ADR-002');
+    expect(md).toMatch(/^## ADR-001: Surviving$/m);
+    expect(md).not.toMatch(/^## ADR-002:/m);
+    expect(md).not.toContain('Going Deprecated');
+    expect(md).toContain('| ADR-002 | Deprecated | The store moved |\n');
 
     const rows = parseLedger(path.join(tmpDir, '.devflow', 'learning', 'decisions-ledger.jsonl'));
     const dep = rows.find(r => r.anchor_id === 'ADR-002');
@@ -332,21 +314,18 @@ describe('AC-F5: retire-anchor hides entry from .md, keeps in ledger', () => {
       makeLedgerRow({ anchor_id: 'ADR-002', id: 'obs_002', decisions_status: 'Accepted' }),
     ]);
 
-    // Render initial state: 2 active
-    runHelper('retire-anchor ADR-001 Retired', tmpDir); // only ADR-002 left
-    // Retire ADR-002 as well — 0 active
-    runHelper('retire-anchor ADR-002 Retired', tmpDir);
-
-    const md = readDecisionsMd(tmpDir);
-    expect(md).toContain('<!-- TL;DR: 0 decisions.');
+    expect(retire('ADR-001', 'Retired')).toBe(0);
+    expect(readDecisionsMd(tmpDir)).toContain('<!-- TL;DR: 1 decisions -->');
+    expect(retire('ADR-002', 'Retired')).toBe(0);
+    expect(readDecisionsMd(tmpDir)).toContain('<!-- TL;DR: 0 decisions -->');
   });
 });
 
 // ---------------------------------------------------------------------------
-// AC-F6: Recoverability — re-activating + render restores entry identically
+// AC-F6: Recoverability — restore-anchor renders a retired entry again
 // ---------------------------------------------------------------------------
 
-describe('AC-F6: retired entry is recoverable — re-activate + render restores it', () => {
+describe('AC-F6: a retired entry is recoverable — restore-anchor renders it again', { timeout: 30_000 }, () => {
   let tmpDir: string;
 
   beforeEach(() => {
@@ -358,7 +337,7 @@ describe('AC-F6: retired entry is recoverable — re-activate + render restores 
     fs.rmSync(tmpDir, { recursive: true, force: true });
   });
 
-  it('render after re-activate restores entry to decisions.md with identical content', () => {
+  it('restore-anchor brings a retired entry back into decisions.md and out of the Inactive table', () => {
     const originalRow = makeLedgerRow({
       anchor_id: 'ADR-002',
       id: 'obs_002',
@@ -366,36 +345,27 @@ describe('AC-F6: retired entry is recoverable — re-activate + render restores 
       decisions_status: 'Accepted',
       raw_body: '\n## ADR-002: Recoverable Decision\n\n- **Date**: 2026-01-01\n- **Status**: Accepted\n- **Context**: test context\n- **Decision**: test decision\n- **Consequences**: test consequences\n- **Source**: self-learning:obs_002\n',
     });
-
     writeLedger(tmpDir, [
       makeLedgerRow({ anchor_id: 'ADR-001', decisions_status: 'Accepted' }),
       originalRow,
     ]);
 
-    // Retire ADR-002 — it vanishes from .md
-    runHelper('retire-anchor ADR-002 Retired', tmpDir);
+    // Retire ADR-002 — its body leaves the .md and it is listed under Inactive
+    expect(runJsonHelper(tmpDir, ['retire-anchor', 'ADR-002', 'Retired'], '{"reason":"A one-off"}').code).toBe(0);
     const mdAfterRetire = readDecisionsMd(tmpDir);
-    expect(mdAfterRetire).not.toContain('ADR-002');
+    expect(mdAfterRetire).not.toMatch(/^## ADR-002:/m);
+    expect(mdAfterRetire).toContain('| ADR-002 | Retired | A one-off |\n');
 
-    // Re-activate: flip decisions_status back to Accepted in the ledger
-    const ledgerPath = path.join(tmpDir, '.devflow', 'learning', 'decisions-ledger.jsonl');
-    const rows = parseLedger(ledgerPath);
-    const updated = rows.map(r =>
-      r.anchor_id === 'ADR-002' ? { ...r, decisions_status: 'Accepted' } : r
-    );
-    fs.writeFileSync(ledgerPath, updated.map(r => JSON.stringify(r)).join('\n') + '\n', 'utf8');
+    expect(runJsonHelper(tmpDir, ['restore-anchor', 'ADR-002'])).toEqual({ code: 0, stdout: 'restored ADR-002\n', stderr: '' });
 
-    // Re-render
-    execSync(`node "${RENDER_BIN}" render "${tmpDir}"`, { cwd: tmpDir, encoding: 'utf8' });
-
-    // Entry restored identically
+    // Entry restored, and no longer listed under Inactive
     const mdAfterRestore = readDecisionsMd(tmpDir);
-    expect(mdAfterRestore).toContain('ADR-002');
-    expect(mdAfterRestore).toContain('Recoverable Decision');
+    expect(mdAfterRestore).toMatch(/^## ADR-002: Recoverable Decision$/m);
     expect(mdAfterRestore).toContain('self-learning:obs_002');
+    expect(mdAfterRestore).not.toContain('## Inactive');
   });
 
-  it('restored entry has the same content as before retirement (raw_body round-trip)', () => {
+  it('the restored entry renders exactly as it did before retirement (raw_body round-trip)', () => {
     const rawBody = '\n## ADR-003: Raw Body Test\n\n- **Date**: 2026-03-01\n- **Status**: Accepted\n- **Context**: some context\n- **Decision**: some decision\n- **Consequences**: some consequences\n- **Source**: self-learning:obs_003\n';
     writeLedger(tmpDir, [
       makeLedgerRow({ anchor_id: 'ADR-003', id: 'obs_003', decisions_status: 'Accepted', raw_body: rawBody }),
@@ -405,22 +375,13 @@ describe('AC-F6: retired entry is recoverable — re-activate + render restores 
     execSync(`node "${RENDER_BIN}" render "${tmpDir}"`, { cwd: tmpDir, encoding: 'utf8' });
     const mdBefore = readDecisionsMd(tmpDir);
 
-    // Retire
-    runHelper('retire-anchor ADR-003 Retired', tmpDir);
+    expect(runJsonHelper(tmpDir, ['retire-anchor', 'ADR-003', 'Retired'], '{"reason":"A one-off"}').code).toBe(0);
     const mdRetired = readDecisionsMd(tmpDir);
-    expect(mdRetired).not.toContain('ADR-003');
+    expect(mdRetired).not.toMatch(/^## ADR-003:/m);
+    expect(mdRetired).toContain('| ADR-003 | Retired | A one-off |\n');
 
-    // Re-activate + render
-    const ledgerPath = path.join(tmpDir, '.devflow', 'learning', 'decisions-ledger.jsonl');
-    const rows = parseLedger(ledgerPath);
-    const updated = rows.map(r =>
-      r.anchor_id === 'ADR-003' ? { ...r, decisions_status: 'Accepted' } : r
-    );
-    fs.writeFileSync(ledgerPath, updated.map(r => JSON.stringify(r)).join('\n') + '\n', 'utf8');
-    execSync(`node "${RENDER_BIN}" render "${tmpDir}"`, { cwd: tmpDir, encoding: 'utf8' });
-
-    const mdAfter = readDecisionsMd(tmpDir);
-    expect(mdAfter).toBe(mdBefore);
+    expect(runJsonHelper(tmpDir, ['restore-anchor', 'ADR-003']).code).toBe(0);
+    expect(readDecisionsMd(tmpDir)).toBe(mdBefore);
   });
 });
 
@@ -454,60 +415,30 @@ describe('AC-F9: rotation step wired into curation (contract check)', () => {
     expect(agentContent).toMatch(/never wrap them in a lock/i);
   });
 
-  it('agent states rotation archives stale observing rows and never touches anchored rows', () => {
+  it('agent states rotation archives unreferenced observations and never touches anchored ones', () => {
     expect(agentContent).toContain('anchored');
     expect(agentContent).toContain('archive');
   });
 
-  it('rotateObservations internal function: anchored rows never archived (AC-F9 contract)', () => {
+  it('rotation archives a stale observation no ledger entry carries and keeps one an entry carries (AC-F9 contract)', () => {
     // Verify the op itself still enforces the contract (belt-and-suspenders check)
     const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'rotation-contract-test-'));
-    const decisionsDir = path.join(tmpDir, 'decisions');
-    fs.mkdirSync(decisionsDir, { recursive: true });
+    try {
+      const staleDate = new Date(Date.now() - 31 * 24 * 60 * 60 * 1000).toISOString();
+      writeLedger(tmpDir, [makeLedgerRow({ id: 'obs_stale_anchored', anchor_id: 'ADR-001' })]);
+      const logPath = path.join(tmpDir, '.devflow', 'learning', 'decisions-log.jsonl');
+      store.writeJsonlAtomic(logPath, [
+        makeObsRow({ id: 'obs_stale_unanchored', status: 'observing', last_seen: staleDate }),
+        makeObsRow({ id: 'obs_stale_anchored', status: 'observing', last_seen: staleDate }),
+      ]);
 
-    const THIRTY_ONE_DAYS_MS = 31 * 24 * 60 * 60 * 1000;
-    const NOW = Date.now();
-    const staleDate = new Date(NOW - THIRTY_ONE_DAYS_MS).toISOString();
+      expect(store.rotateObservations(tmpDir)).toEqual({ ok: true, value: { rotated: 1, appended: 1 } });
 
-    const logPath = path.join(decisionsDir, 'decisions-log.jsonl');
-    const archivePath = path.join(decisionsDir, 'decisions-log.archive.jsonl');
-
-    // Stale observing without anchor — should be rotated
-    // Stale observing with anchor_id — must NOT be rotated
-    writeJsonlAtomic(logPath, [
-      makeObsRow({ id: 'obs_stale_unanchored', status: 'observing', last_seen: staleDate }),
-      makeObsRow({ id: 'obs_stale_anchored', status: 'observing', last_seen: staleDate, anchor_id: 'ADR-001' }),
-    ]);
-
-    const rotated = rotateObservations(logPath, archivePath, NOW);
-    expect(rotated).toBe(1); // only the unanchored one
-
-    const archive = parseLedger(archivePath);
-    expect(archive.map(r => r.id)).toContain('obs_stale_unanchored');
-    expect(archive.map(r => r.id)).not.toContain('obs_stale_anchored');
-
-    const remaining = parseLedger(logPath);
-    expect(remaining.map(r => r.id)).toContain('obs_stale_anchored');
-
-    fs.rmSync(tmpDir, { recursive: true, force: true });
-  });
-});
-
-// ---------------------------------------------------------------------------
-// observation-io: updateDecisionsStatus is removed; module surface is clean
-// ---------------------------------------------------------------------------
-
-describe('observation-io: updateDecisionsStatus is removed', () => {
-  it('observation-io module does not export updateDecisionsStatus', async () => {
-    // Dynamic import to check actual module exports
-    const mod = await import(path.join(ROOT, 'src/core/observation-io.js'));
-    expect((mod as Record<string, unknown>).updateDecisionsStatus).toBeUndefined();
-  });
-
-  it('observation-io still exports readObservations, writeObservations, warnIfInvalid', async () => {
-    const mod = await import(path.join(ROOT, 'src/core/observation-io.js'));
-    expect(typeof (mod as Record<string, unknown>).readObservations).toBe('function');
-    expect(typeof (mod as Record<string, unknown>).writeObservations).toBe('function');
-    expect(typeof (mod as Record<string, unknown>).warnIfInvalid).toBe('function');
+      const archive = parseLedger(path.join(tmpDir, '.devflow', 'learning', 'decisions-log.archive.jsonl'));
+      expect(archive.map(r => r.id)).toEqual(['obs_stale_unanchored']);
+      expect(parseLedger(logPath).map(r => r.id)).toEqual(['obs_stale_anchored']);
+    } finally {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
   });
 });

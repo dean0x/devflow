@@ -1,6 +1,4 @@
-@define decisions_load():
-### Load DECISIONS_CONTEXT
-
+@define decisions_locate():
 The decisions ledger belongs to the repository, not to one checkout: in a linked worktree it lives in the main worktree, and a session started in a subdirectory reads the copy at the repository root. Locate it with ONE git call, run from the start directory — `WORKTREE_PATH` if provided, otherwise cwd (`devflow:worktree-support`):
 
 ```bash
@@ -14,6 +12,12 @@ Line 1 is the checkout's toplevel, line 2 the repository's common git directory.
 3. **The start directory itself** — when the command failed or printed no absolute toplevel (outside a git repository).
 
 This is the rule the learning hooks apply (D-LEDGER-MAIN-WORKTREE, D-PROMPT-ROOT), so you read the index the Learning agent writes.
+@end
+
+@define decisions_load():
+### Load DECISIONS_CONTEXT
+
+{{decisions_locate()}}
 
 **Step 1 — Read the pre-rendered index:**
 
@@ -29,4 +33,5 @@ The index is one direct file read, written at render time by `render-decisions.c
 When `DECISIONS_CONTEXT` is not `(none)`, follow `devflow:apply-decisions` to scan the index, identify plausibly-relevant entries, Read full entry bodies on demand, and cite verbatim IDs in downstream agent prompts and reasoning.
 @end
 
+@export decisions_locate
 @export decisions_load

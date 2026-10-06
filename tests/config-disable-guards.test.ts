@@ -1,7 +1,6 @@
 /**
  * Tests for the disable guards across memory and decisions hooks,
- * the session-start-context hook, hook registration utilities, and the
- * decisions usage scanner.
+ * the session-start-context hook and hook registration utilities.
  *
  * Test order follows TDD RED-GREEN-REFACTOR.
  */
@@ -193,73 +192,6 @@ describe('config guard: session-start-memory', () => {
     expect(output.length).toBeGreaterThan(0);
     const additionalContext = parseHookOutput(output);
     expect(additionalContext).toContain('WORKING MEMORY');
-  });
-});
-
-// ─── Part D: Decisions scanner fix ──────────────────────────────────────────
-
-describe('decisions-usage-scan.cjs', () => {
-  const SCANNER = path.join(HOOKS_DIR, 'decisions-usage-scan.cjs');
-  let tmpDir: string;
-
-  beforeEach(() => { tmpDir = mkTmpDir(); });
-  afterEach(() => { fs.rmSync(tmpDir, { recursive: true, force: true }); });
-
-  it('processes citations (gating lives in the caller, not the scanner)', () => {
-    mkMemoryDir(tmpDir);
-    // Create usage file with a known entry
-    const usagePath = path.join(tmpDir, '.devflow', 'learning', '.decisions-usage.json');
-    fs.writeFileSync(usagePath, JSON.stringify({
-      version: 1,
-      entries: { 'ADR-001': { cites: 0, last_cited: null } },
-    }, null, 2));
-    const response = 'applies ADR-001';
-    execSync(`printf '%s' "${response}" | node "${SCANNER}" --cwd "${tmpDir}"`, { stdio: ['pipe', 'pipe', 'pipe'] });
-    const updated = JSON.parse(fs.readFileSync(usagePath, 'utf-8'));
-    expect(updated.entries['ADR-001'].cites).toBe(1);
-  });
-});
-
-describe('config guard: capture-turn decisions scanner gating', () => {
-  const HOOK = path.join(HOOKS_DIR, 'capture-turn');
-  let tmpDir: string;
-  let tmpHome: string;
-
-  beforeEach(() => { tmpDir = mkTmpDir(); tmpHome = mkTmpHome(); });
-  afterEach(() => {
-    fs.rmSync(tmpDir, { recursive: true, force: true });
-    fs.rmSync(tmpHome, { recursive: true, force: true });
-  });
-
-  it('does NOT run scanner when learning is switched off machine-wide', () => {
-    mkMemoryDir(tmpDir);
-    writeManifest(tmpHome, { learning: false });
-    // Create usage file to detect if scanner would have run
-    const usagePath = path.join(tmpDir, '.devflow', 'learning', '.decisions-usage.json');
-    fs.writeFileSync(usagePath, JSON.stringify({
-      version: 1,
-      entries: { 'ADR-001': { cites: 0, last_cited: null } },
-    }, null, 2));
-    const input = sessionInput(tmpDir, { last_assistant_message: 'applies ADR-001' });
-    execSync(`bash "${HOOK}"`, { input, env: hookEnv(tmpHome), stdio: ['pipe', 'pipe', 'pipe'] });
-    const updated = JSON.parse(fs.readFileSync(usagePath, 'utf-8'));
-    // Scanner should not have run — cites stays at 0
-    expect(updated.entries['ADR-001'].cites).toBe(0);
-  });
-
-  it('runs scanner when learning enabled (config absent defaults true)', () => {
-    mkMemoryDir(tmpDir);
-    // Create usage file to detect scanner run
-    const usagePath = path.join(tmpDir, '.devflow', 'learning', '.decisions-usage.json');
-    fs.writeFileSync(usagePath, JSON.stringify({
-      version: 1,
-      entries: { 'ADR-001': { cites: 0, last_cited: null } },
-    }, null, 2));
-    const input = sessionInput(tmpDir, { last_assistant_message: 'applies ADR-001' });
-    execSync(`bash "${HOOK}"`, { input, env: hookEnv(tmpHome), stdio: ['pipe', 'pipe', 'pipe'] });
-    const updated = JSON.parse(fs.readFileSync(usagePath, 'utf-8'));
-    // Scanner ran — cites incremented
-    expect(updated.entries['ADR-001'].cites).toBe(1);
   });
 });
 

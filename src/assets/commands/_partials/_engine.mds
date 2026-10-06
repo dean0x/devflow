@@ -68,7 +68,7 @@ Code(agentType:"Code", prompt: full task + plan + DECISIONS_CONTEXT + handoff if
   → gate2_acceptance()   ← Gate 2 runs HERE — before the review pass, not after
 ```
 
-The Code agent prompt must include: task description, implementation plan (if one exists), relevant DECISIONS_CONTEXT (from `.devflow/learning/index.md`), the compliance lens (`COMPLIANCE_FRAMEWORKS` — every Code prompt carries it, fix prompts included), and any PRIOR_PHASE_SUMMARY / HANDOFF_FILE for sequential multi-phase tickets.
+The Code agent prompt must include: task description, implementation plan (if one exists), relevant DECISIONS_CONTEXT (the index you loaded before authoring), the compliance lens (`COMPLIANCE_FRAMEWORKS` — every Code prompt carries it, fix prompts included), and any PRIOR_PHASE_SUMMARY / HANDOFF_FILE for sequential multi-phase tickets.
 
 Gate 2 runs at implementation acceptance — this matches devflow's deliberate placement: "evaluation is part of implementation acceptance, not post-review" (§6.1).
 @end

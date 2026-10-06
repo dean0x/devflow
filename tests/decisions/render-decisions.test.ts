@@ -5,10 +5,12 @@
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { createRequire } from 'module';
-import { execSync } from 'child_process';
+import { spawn, spawnSync, type ChildProcess } from 'child_process';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
+
+import { makeV2LedgerRow, seedLearningTree, snapshotTree, toJsonl } from './learning-fixtures.js';
 
 const ROOT = path.resolve(import.meta.dirname, '../..');
 const require = createRequire(import.meta.url);
@@ -17,6 +19,7 @@ const {
   renderDecisionsFile,
   renderAndWriteAll,
   selectActiveRows,
+  selectInactiveRows,
   parseLedger,
   isActive,
   anchorNumeric,
@@ -24,6 +27,7 @@ const {
   renderDecisionsFile: (rows: Record<string, unknown>[], kind: 'decisions' | 'pitfalls') => string;
   renderAndWriteAll: (worktreePath: string, rows: Record<string, unknown>[]) => void;
   selectActiveRows: (rows: Record<string, unknown>[], kind: 'decisions' | 'pitfalls') => Record<string, unknown>[];
+  selectInactiveRows: (rows: Record<string, unknown>[], kind: 'decisions' | 'pitfalls') => Record<string, unknown>[];
   parseLedger: (ledgerPath: string) => Record<string, unknown>[];
   isActive: (row: Record<string, unknown>) => boolean;
   anchorNumeric: (anchorId: string) => number;
@@ -123,6 +127,21 @@ describe('isActive', () => {
   it('returns false for Retired', () => {
     expect(isActive({ decisions_status: 'Retired' })).toBe(false);
   });
+
+  it('returns false for Encoded', () => {
+    expect(isActive({ decisions_status: 'Encoded' })).toBe(false);
+  });
+
+  it('returns true for a status outside the list', () => {
+    expect(isActive({ decisions_status: 'SomeFutureStatus' })).toBe(true);
+  });
+
+  it('is the learning store\'s isActive, re-exported', () => {
+    const store = require(path.join(ROOT, 'src/assets/scripts/hooks/lib/learning-store.cjs')) as {
+      isActive: (row: Record<string, unknown>) => boolean;
+    };
+    expect(isActive).toBe(store.isActive);
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -193,31 +212,78 @@ describe('parseLedger', () => {
     const result = parseLedger(ledgerPath);
     expect(result).toHaveLength(1);
   });
+
+  it('skips a line that is JSON but not one object', () => {
+    const ledgerPath = path.join(tmpDir, 'ledger.jsonl');
+    fs.writeFileSync(ledgerPath, '{"id":"obs_ok"}\nnull\n[1,2]\n"text"\n42\n', 'utf8');
+    expect(parseLedger(ledgerPath)).toEqual([{ id: 'obs_ok' }]);
+  });
+
+  it('reads without writing anything, malformed lines included', () => {
+    const ledgerPath = path.join(tmpDir, 'ledger.jsonl');
+    fs.writeFileSync(ledgerPath, '{"id":"obs_ok"}\n{broken\n', 'utf8');
+    const before = snapshotTree(tmpDir);
+    parseLedger(ledgerPath);
+    expect(snapshotTree(tmpDir)).toEqual(before);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// renderAndWriteAll — needs the learning directory, never makes it
+// ---------------------------------------------------------------------------
+
+describe('renderAndWriteAll', () => {
+  let tmpDir: string;
+
+  beforeEach(() => {
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'render-write-test-'));
+  });
+
+  afterEach(() => {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  it('refuses a root without .devflow/learning/ and creates nothing', () => {
+    expect(() => renderAndWriteAll(tmpDir, [makeDecisionRow()])).toThrow(/no \.devflow\/learning\//);
+    expect(fs.readdirSync(tmpDir)).toEqual([]);
+
+    fs.mkdirSync(path.join(tmpDir, '.devflow'));
+    expect(() => renderAndWriteAll(tmpDir, [makeDecisionRow()])).toThrow(/no \.devflow\/learning\//);
+    expect(fs.readdirSync(path.join(tmpDir, '.devflow'))).toEqual([]);
+  });
+
+  it('writes the three files into an existing learning directory', () => {
+    const { learningDir } = seedLearningTree(tmpDir);
+    renderAndWriteAll(tmpDir, [makeDecisionRow()]);
+    expect(fs.readdirSync(learningDir).sort()).toEqual(['decisions.md', 'index.md', 'pitfalls.md']);
+  });
 });
 
 // ---------------------------------------------------------------------------
 // renderDecisionsFile — golden tests
 // ---------------------------------------------------------------------------
 
+const GENERATED_NOTICE =
+  'Generated from the local learning ledger by devflow; do not edit. ' +
+  'Active entries follow; retired ones are listed under Inactive.\n';
+
 describe('renderDecisionsFile — golden', () => {
-  it('empty corpus: decisions.md header + empty TL;DR', () => {
-    const result = renderDecisionsFile([], 'decisions');
-    expect(result.startsWith('<!-- TL;DR: 0 decisions. Key: -->')).toBe(true);
-    expect(result).toContain('# Architectural Decisions');
-    expect(result).not.toMatch(/## ADR-\d+:/);
+  it('empty corpus: decisions.md is the header alone, with a zero count', () => {
+    expect(renderDecisionsFile([], 'decisions')).toBe(
+      '<!-- TL;DR: 0 decisions -->\n# Architectural Decisions\n\n' + GENERATED_NOTICE,
+    );
   });
 
-  it('empty corpus: pitfalls.md header + empty TL;DR', () => {
-    const result = renderDecisionsFile([], 'pitfalls');
-    expect(result.startsWith('<!-- TL;DR: 0 pitfalls. Key: -->')).toBe(true);
-    expect(result).toContain('# Known Pitfalls');
-    expect(result).not.toMatch(/## PF-\d+:/);
+  it('empty corpus: pitfalls.md is the header alone, with a zero count', () => {
+    expect(renderDecisionsFile([], 'pitfalls')).toBe(
+      '<!-- TL;DR: 0 pitfalls -->\n# Known Pitfalls\n\n' + GENERATED_NOTICE,
+    );
   });
 
   it('renders a single active decision from details', () => {
     const rows = [makeDecisionRow()];
     const result = renderDecisionsFile(rows, 'decisions');
-    expect(result).toContain('<!-- TL;DR: 1 decisions. Key: ADR-001 -->');
+    expect(result).toContain('<!-- TL;DR: 1 decisions -->');
     expect(result).toContain('\n## ADR-001: Use Result types everywhere\n');
     expect(result).toContain('- **Date**: 2026-01-01\n');
     expect(result).toContain('- **Status**: Accepted\n');
@@ -227,7 +293,7 @@ describe('renderDecisionsFile — golden', () => {
   it('renders a single active pitfall from details', () => {
     const rows = [makePitfallRow()];
     const result = renderDecisionsFile(rows, 'pitfalls');
-    expect(result).toContain('<!-- TL;DR: 1 pitfalls. Key: PF-002 -->');
+    expect(result).toContain('<!-- TL;DR: 1 pitfalls -->');
     expect(result).toContain('\n## PF-002: Editing installed scripts directly\n');
     expect(result).toContain('- **Area**: scripts/hooks/');
     expect(result).toContain('- **Status**: Active\n');
@@ -248,36 +314,48 @@ describe('renderDecisionsFile — golden', () => {
     expect(result).not.toContain('- **Context**: TypeScript project');
   });
 
-  it('excludes Deprecated entries', () => {
+  it('renders no body for a Deprecated entry and lists it under Inactive', () => {
     const rows = [
       makeDecisionRow({ anchor_id: 'ADR-001', decisions_status: 'Accepted' }),
       makeDecisionRow({ anchor_id: 'ADR-002', id: 'obs_deprecated', pattern: 'Old approach', decisions_status: 'Deprecated' }),
     ];
     const result = renderDecisionsFile(rows, 'decisions');
-    expect(result).toContain('ADR-001');
-    expect(result).not.toContain('ADR-002');
-    expect(result).toContain('<!-- TL;DR: 1 decisions. Key: ADR-001 -->');
+    expect(result).toMatch(/^## ADR-001: /m);
+    expect(result).not.toMatch(/^## ADR-002:/m);
+    expect(result).not.toContain('Old approach');
+    expect(result).toContain('| ADR-002 | Deprecated | — |\n');
+    expect(result).toContain('<!-- TL;DR: 1 decisions -->');
   });
 
-  it('excludes Superseded entries', () => {
+  it('renders no body for a Superseded entry and lists it under Inactive', () => {
     const rows = [
       makeDecisionRow({ anchor_id: 'ADR-003', decisions_status: 'Superseded' }),
       makePitfallRow({ anchor_id: 'PF-001', decisions_status: 'Superseded' }),
     ];
     const decisionsResult = renderDecisionsFile(rows, 'decisions');
     const pitfallsResult = renderDecisionsFile(rows, 'pitfalls');
-    expect(decisionsResult).not.toContain('ADR-003');
-    expect(pitfallsResult).not.toContain('PF-001');
+    expect(decisionsResult).not.toMatch(/^## ADR-003:/m);
+    expect(pitfallsResult).not.toMatch(/^## PF-001:/m);
+    expect(decisionsResult).toContain('| ADR-003 | Superseded | — |\n');
+    expect(pitfallsResult).toContain('| PF-001 | Superseded | — |\n');
   });
 
-  it('excludes Retired entries', () => {
+  it('renders no body for a Retired entry and lists it under Inactive', () => {
     const rows = [
       makeDecisionRow({ anchor_id: 'ADR-001', decisions_status: 'Accepted' }),
-      makeDecisionRow({ anchor_id: 'ADR-002', id: 'obs_ret', pattern: 'Retired', decisions_status: 'Retired' }),
+      makeDecisionRow({ anchor_id: 'ADR-002', id: 'obs_ret', pattern: 'Retired approach', decisions_status: 'Retired' }),
     ];
     const result = renderDecisionsFile(rows, 'decisions');
-    expect(result).toContain('ADR-001');
-    expect(result).not.toContain('ADR-002');
+    expect(result).toMatch(/^## ADR-001: /m);
+    expect(result).not.toMatch(/^## ADR-002:/m);
+    expect(result).not.toContain('Retired approach');
+    expect(result).toContain('| ADR-002 | Retired | — |\n');
+  });
+
+  it('has no Inactive table when every entry is active', () => {
+    const result = renderDecisionsFile([makeDecisionRow({ anchor_id: 'ADR-001' })], 'decisions');
+    expect(result).toMatch(/^## ADR-001: /m);
+    expect(result).not.toContain('## Inactive');
   });
 
   it('excludes rows without anchor_id', () => {
@@ -323,7 +401,7 @@ describe('renderDecisionsFile — golden', () => {
     const rows = [makeDecisionRow()];
     const result = renderDecisionsFile(rows, 'decisions');
     const firstLine = result.split('\n')[0];
-    expect(firstLine).toMatch(/^<!-- TL;DR:/);
+    expect(firstLine).toBe('<!-- TL;DR: 1 decisions -->');
   });
 
   it('mixed active/inactive: TL;DR count reflects only active entries', () => {
@@ -333,7 +411,12 @@ describe('renderDecisionsFile — golden', () => {
       makeDecisionRow({ anchor_id: 'ADR-003', id: 'obs_act', pattern: 'Another active', decisions_status: 'Active' }),
     ];
     const result = renderDecisionsFile(rows, 'decisions');
-    expect(result).toContain('<!-- TL;DR: 2 decisions. Key: ADR-001, ADR-003 -->');
+    expect(result.split('\n')[0]).toBe('<!-- TL;DR: 2 decisions -->');
+  });
+
+  it('opens with the generated-file header whatever the corpus holds', () => {
+    const result = renderDecisionsFile([makeDecisionRow()], 'decisions');
+    expect(result.startsWith('<!-- TL;DR: 1 decisions -->\n# Architectural Decisions\n\n' + GENERATED_NOTICE)).toBe(true);
   });
 });
 
@@ -415,12 +498,192 @@ describe('selectActiveRows', () => {
   });
 });
 
+// ---------------------------------------------------------------------------
+// selectInactiveRows — unit tests
+// ---------------------------------------------------------------------------
+
+describe('selectInactiveRows', () => {
+  it('selects the anchored inactive rows of one kind, sorted by number', () => {
+    const rows = [
+      makeDecisionRow({ anchor_id: 'ADR-010', id: 'obs_010', decisions_status: 'Retired' }),
+      makeDecisionRow({ anchor_id: 'ADR-001', decisions_status: 'Accepted' }),
+      makeV2LedgerRow({ anchor_id: 'ADR-002', id: 'obs_002', decisions_status: 'Encoded' }),
+      makePitfallRow({ anchor_id: 'PF-003', id: 'obs_pf3', decisions_status: 'Deprecated' }),
+      { ...makeDecisionRow({ id: 'obs_unanchored', decisions_status: 'Retired' }), anchor_id: undefined },
+    ];
+    expect(selectInactiveRows(rows, 'decisions').map(r => r.anchor_id)).toEqual(['ADR-002', 'ADR-010']);
+    expect(selectInactiveRows(rows, 'pitfalls').map(r => r.anchor_id)).toEqual(['PF-003']);
+  });
+
+  it('selects nothing when every row is active', () => {
+    expect(selectInactiveRows([makeDecisionRow(), makePitfallRow()], 'decisions')).toEqual([]);
+  });
+});
 
 // ---------------------------------------------------------------------------
-// CLI: render subcommand writes both .md files
+// renderDecisionsFile — v1 and v2 entries in one file
 // ---------------------------------------------------------------------------
 
-describe('CLI render subcommand', () => {
+/** A rendered file from its first entry heading on: the bodies and the Inactive table. */
+function bodyOf(file: string): string {
+  const start = file.indexOf('\n## ');
+  return start === -1 ? '' : file.slice(start);
+}
+
+describe('renderDecisionsFile — v1 and v2 entries side by side', () => {
+  const v1First = makeDecisionRow({ anchor_id: 'ADR-001' });
+  const v2Second = makeV2LedgerRow({ anchor_id: 'ADR-002', id: 'obs_v2_second', scope: ['area:learning'] });
+  const v1RawThird = makeDecisionRow({
+    anchor_id: 'ADR-003',
+    id: 'obs_raw_third',
+    raw_body: '\n## ADR-003: Kept verbatim\n\n- **Status**: Accepted\n- **Source**: self-learning:obs_raw_third\n',
+  });
+  const v2Encoded = makeV2LedgerRow({
+    anchor_id: 'ADR-004',
+    id: 'obs_encoded',
+    title: 'Encoded in the code now',
+    decisions_status: 'Encoded',
+    encoded_at: { path: 'src/core/flags.ts', quote: 'export const FLAGS', ref: 'HEAD', commit: 'f'.repeat(40) },
+  });
+  const v1Retired = makeDecisionRow({ anchor_id: 'ADR-005', id: 'obs_gone', pattern: 'Gone for good', decisions_status: 'Retired' });
+  const decisionRows = [v1Retired, v2Encoded, v1RawThird, v2Second, v1First];
+
+  const v2FirstPitfall = makeV2LedgerRow({
+    id: 'obs_pf_v2_first',
+    type: 'pitfall',
+    anchor_id: 'PF-001',
+    decisions_status: 'Active',
+    title: 'Writers refuse a missing learning tree',
+    rule: 'A learning writer refuses when the learning directory is absent and never creates it.',
+    why: 'A writer that creates the tree writes a ledger nobody reads.',
+    scope: ['area:learning', 'src/assets/scripts/hooks/**'],
+    provenance: 'a stray nested tree in the main checkout',
+    last_verified: undefined,
+  });
+  const v1SecondPitfall = makePitfallRow({ anchor_id: 'PF-002' });
+  const v2SupersededPitfall = makeV2LedgerRow({
+    id: 'obs_pf_v2_third',
+    type: 'pitfall',
+    anchor_id: 'PF-003',
+    decisions_status: 'Superseded',
+    superseded_by: 'PF-001',
+  });
+  const v2RetiredPitfall = makeV2LedgerRow({
+    id: 'obs_pf_v2_fourth',
+    type: 'pitfall',
+    anchor_id: 'PF-004',
+    decisions_status: 'Retired',
+    status_note: 'a one-off | not general',
+  });
+  const pitfallRows = [v2RetiredPitfall, v1SecondPitfall, v2SupersededPitfall, v2FirstPitfall];
+
+  it('renders each v1 block as the v1 formatter does and each v2 block from the v2 template', () => {
+    expect(bodyOf(renderDecisionsFile(decisionRows, 'decisions'))).toBe(
+      formatDecisionBody(v1First) +
+      '\n## ADR-002: Store functions return a Result\n\n' +
+      '- **Status**: Accepted · verified 2026-09-01\n' +
+      '- **Scope**: `area:learning`\n' +
+      '- **Decision**: Every learning store function returns a Result and never exits or prints.\n' +
+      '- **Why**: An exit inside the lock skips its release, and printing ties the store to one caller.\n' +
+      '- **Source**: learning v2 design review\n' +
+      v1RawThird.raw_body +
+      '\n## Inactive\n\n' +
+      '| ID | Status | Note |\n' +
+      '|---|---|---|\n' +
+      '| ADR-004 | Encoded | encoded in src/core/flags.ts |\n' +
+      '| ADR-005 | Retired | — |\n',
+    );
+  });
+
+  it('renders pitfalls the same way: v1 blocks unchanged, v2 blocks from the template, then Inactive', () => {
+    expect(bodyOf(renderDecisionsFile(pitfallRows, 'pitfalls'))).toBe(
+      '\n## PF-001: Writers refuse a missing learning tree\n\n' +
+      '- **Status**: Active\n' +
+      '- **Scope**: `area:learning`, `src/assets/scripts/hooks/**`\n' +
+      '- **Rule**: A learning writer refuses when the learning directory is absent and never creates it.\n' +
+      '- **Why**: A writer that creates the tree writes a ledger nobody reads.\n' +
+      '- **Source**: a stray nested tree in the main checkout\n' +
+      formatPitfallBody(v1SecondPitfall) +
+      '\n## Inactive\n\n' +
+      '| ID | Status | Note |\n' +
+      '|---|---|---|\n' +
+      '| PF-003 | Superseded | superseded by PF-001 |\n' +
+      '| PF-004 | Retired | a one-off \\| not general |\n',
+    );
+  });
+
+  it('leaves an Encoded entry out of the bodies and the TL;DR count', () => {
+    const file = renderDecisionsFile(decisionRows, 'decisions');
+    expect(file).not.toMatch(/^## ADR-004:/m);
+    expect(file).not.toContain('Encoded in the code now');
+    expect(file.split('\n')[0]).toMatch(/^<!-- TL;DR: 3 decisions/);
+  });
+
+  it('puts the Inactive table after every active body', () => {
+    const file = renderDecisionsFile(decisionRows, 'decisions');
+    const lastHeading = Math.max(...['ADR-001', 'ADR-002', 'ADR-003'].map(id => file.indexOf(`\n## ${id}: `)));
+    expect(file.indexOf('\n## Inactive\n')).toBeGreaterThan(lastHeading);
+  });
+});
+
+
+// ---------------------------------------------------------------------------
+// CLI helpers
+// ---------------------------------------------------------------------------
+
+interface RendererRun {
+  code: number | null;
+  stderr: string;
+}
+
+/** Run `render-decisions.cjs <args…>` in `cwd`, as argv (never a shell string). */
+function runRenderer(cwd: string, args: readonly string[]): RendererRun {
+  const run = spawnSync(process.execPath, [RENDERER, ...args], { cwd, encoding: 'utf8', timeout: 60_000 });
+  if (run.error) throw run.error;
+  return { code: run.status, stderr: run.stderr };
+}
+
+/** Resolve once `child` has exited, with its exit code and stderr. */
+function waitForExit(child: ChildProcess): Promise<RendererRun> {
+  return new Promise(resolve => {
+    let stderr = '';
+    child.stderr?.on('data', chunk => { stderr += String(chunk); });
+    child.on('close', code => resolve({ code, stderr }));
+  });
+}
+
+/** Poll `condition` every 20 ms until it holds; throw once `timeoutMs` has passed. */
+async function waitFor(condition: () => boolean, timeoutMs: number): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (!condition()) {
+    if (Date.now() > deadline) throw new Error(`condition not met within ${timeoutMs} ms`);
+    await new Promise(resolve => setTimeout(resolve, 20));
+  }
+}
+
+/**
+ * A preload that drops `marker` whenever the renderer tries to create the learning
+ * lock directory: the moment it starts waiting for a lock someone else holds.
+ */
+function markLockAttemptPreload(marker: string): string {
+  return [
+    "'use strict';",
+    "const fs = require('fs');",
+    "const path = require('path');",
+    'const mkdirSync = fs.mkdirSync;',
+    'fs.mkdirSync = function markLockAttempt(target, ...rest) {',
+    `  if (path.basename(String(target)) === '.decisions.lock') fs.writeFileSync(${JSON.stringify(marker)}, '');`,
+    '  return mkdirSync.call(fs, target, ...rest);',
+    '};',
+    '',
+  ].join('\n');
+}
+
+// ---------------------------------------------------------------------------
+// CLI: render
+// ---------------------------------------------------------------------------
+
+describe('CLI render', { timeout: 30_000 }, () => {
   let tmpDir: string;
 
   beforeEach(() => {
@@ -431,71 +694,180 @@ describe('CLI render subcommand', () => {
     fs.rmSync(tmpDir, { recursive: true, force: true });
   });
 
-  it('exits 0 and writes decisions.md, pitfalls.md, and index.md when ledger is absent (empty corpus)', () => {
-    const decisionsDir = path.join(tmpDir, '.devflow', 'learning');
-    // DO NOT create ledger — test empty-corpus path
+  it('writes the empty corpus, headers and "(none)", into a learning directory with no ledger', () => {
+    const { learningDir } = seedLearningTree(tmpDir);
 
-    execSync(`node "${RENDERER}" render "${tmpDir}"`, { encoding: 'utf8' });
+    const run = runRenderer(tmpDir, ['render', tmpDir]);
 
-    expect(fs.existsSync(path.join(decisionsDir, 'decisions.md'))).toBe(true);
-    expect(fs.existsSync(path.join(decisionsDir, 'pitfalls.md'))).toBe(true);
-    expect(fs.existsSync(path.join(decisionsDir, 'index.md'))).toBe(true);
-
-    const dContent = fs.readFileSync(path.join(decisionsDir, 'decisions.md'), 'utf8');
-    expect(dContent).toContain('<!-- TL;DR: 0 decisions. Key: -->');
-    expect(dContent).toContain('# Architectural Decisions');
-
-    const pContent = fs.readFileSync(path.join(decisionsDir, 'pitfalls.md'), 'utf8');
-    expect(pContent).toContain('<!-- TL;DR: 0 pitfalls. Key: -->');
-    expect(pContent).toContain('# Known Pitfalls');
-
-    // Empty corpus index must be "(none)\n"
-    const iContent = fs.readFileSync(path.join(decisionsDir, 'index.md'), 'utf8');
-    expect(iContent).toBe('(none)\n');
+    expect(run.code).toBe(0);
+    expect(fs.readFileSync(path.join(learningDir, 'decisions.md'), 'utf8'))
+      .toBe('<!-- TL;DR: 0 decisions -->\n# Architectural Decisions\n\n' + GENERATED_NOTICE);
+    expect(fs.readFileSync(path.join(learningDir, 'pitfalls.md'), 'utf8'))
+      .toBe('<!-- TL;DR: 0 pitfalls -->\n# Known Pitfalls\n\n' + GENERATED_NOTICE);
+    expect(fs.readFileSync(path.join(learningDir, 'index.md'), 'utf8')).toBe('(none)\n');
   });
 
-  it('exits 0 and writes correctly when ledger has active rows; index.md contains entry IDs', () => {
-    const decisionsDir = path.join(tmpDir, '.devflow', 'learning');
-    fs.mkdirSync(decisionsDir, { recursive: true });
+  it('writes the three files from the ledger; index.md lists both entries', () => {
+    const { learningDir } = seedLearningTree(tmpDir, {
+      ledger: [makeDecisionRow({ anchor_id: 'ADR-001' }), makePitfallRow({ anchor_id: 'PF-002' })],
+    });
 
-    const row1 = makeDecisionRow({ anchor_id: 'ADR-001' });
-    const row2 = makePitfallRow({ anchor_id: 'PF-002' });
-    const ledgerPath = path.join(decisionsDir, 'decisions-ledger.jsonl');
-    fs.writeFileSync(ledgerPath, JSON.stringify(row1) + '\n' + JSON.stringify(row2) + '\n', 'utf8');
+    expect(runRenderer(tmpDir, ['render', tmpDir]).code).toBe(0);
 
-    execSync(`node "${RENDERER}" render "${tmpDir}"`, { encoding: 'utf8' });
-
-    const dContent = fs.readFileSync(path.join(decisionsDir, 'decisions.md'), 'utf8');
-    expect(dContent).toContain('## ADR-001');
-
-    const pContent = fs.readFileSync(path.join(decisionsDir, 'pitfalls.md'), 'utf8');
-    expect(pContent).toContain('## PF-002');
-
-    // index.md must reference both entry IDs
-    const iContent = fs.readFileSync(path.join(decisionsDir, 'index.md'), 'utf8');
-    expect(iContent).toContain('ADR-001');
-    expect(iContent).toContain('PF-002');
-    // Trailing newline
-    expect(iContent).toMatch(/\n$/);
+    expect(fs.readFileSync(path.join(learningDir, 'decisions.md'), 'utf8')).toMatch(/^## ADR-001: /m);
+    expect(fs.readFileSync(path.join(learningDir, 'pitfalls.md'), 'utf8')).toMatch(/^## PF-002: /m);
+    const index = fs.readFileSync(path.join(learningDir, 'index.md'), 'utf8');
+    expect(index).toContain('  ADR-001  ');
+    expect(index).toContain('  PF-002  ');
+    expect(index).toMatch(/\n$/);
   });
 
-  it('index.md is written last (body files exist before index)', () => {
-    // We verify write ordering by checking that all three files are present
-    // after a successful render — if index failed mid-write, body files
-    // would still be present (index is written last).
-    const decisionsDir = path.join(tmpDir, '.devflow', 'learning');
-    fs.mkdirSync(decisionsDir, { recursive: true });
-    const row1 = makeDecisionRow({ anchor_id: 'ADR-001' });
-    fs.writeFileSync(
-      path.join(decisionsDir, 'decisions-ledger.jsonl'),
-      JSON.stringify(row1) + '\n',
-      'utf8'
-    );
-    execSync(`node "${RENDERER}" render "${tmpDir}"`, { encoding: 'utf8' });
-    // All three must be present
-    expect(fs.existsSync(path.join(decisionsDir, 'decisions.md'))).toBe(true);
-    expect(fs.existsSync(path.join(decisionsDir, 'pitfalls.md'))).toBe(true);
-    expect(fs.existsSync(path.join(decisionsDir, 'index.md'))).toBe(true);
+  it('refuses a bare directory with exit 1 and creates nothing', () => {
+    const run = runRenderer(tmpDir, ['render', tmpDir]);
+
+    expect(run.code).toBe(1);
+    expect(run.stderr).toContain('render-decisions: no .devflow/learning/ under ');
+    expect(fs.readdirSync(tmpDir)).toEqual([]);
+  });
+
+  it('refuses a .devflow/ that has no learning/ and creates no learning directory', () => {
+    fs.mkdirSync(path.join(tmpDir, '.devflow'));
+
+    const run = runRenderer(tmpDir, ['render', tmpDir]);
+
+    expect(run.code).toBe(1);
+    expect(fs.readdirSync(path.join(tmpDir, '.devflow'))).toEqual([]);
+  });
+
+  it('reports malformed ledger lines on stderr, renders the rest and leaves the ledger as it is', () => {
+    const paths = seedLearningTree(tmpDir);
+    const ledger =
+      JSON.stringify(makeDecisionRow({ anchor_id: 'ADR-001' })) + '\n' +
+      '{broken\n' +
+      'null\n' +
+      JSON.stringify(makeDecisionRow({ anchor_id: 'ADR-002', id: 'obs_second', pattern: 'Second decision' })) + '\n';
+    fs.writeFileSync(paths.ledger, ledger, 'utf8');
+
+    const run = runRenderer(tmpDir, ['render', tmpDir]);
+
+    expect(run.code).toBe(0);
+    expect(run.stderr).toContain(`[render-decisions] MALFORMED: 2 ledger lines skipped (${fs.realpathSync(paths.ledger)})`);
+    const md = fs.readFileSync(path.join(paths.learningDir, 'decisions.md'), 'utf8');
+    expect(md).toMatch(/^## ADR-001: /m);
+    expect(md).toMatch(/^## ADR-002: Second decision$/m);
+    expect(fs.readFileSync(paths.ledger, 'utf8')).toBe(ledger);
+    expect(fs.readdirSync(paths.learningDir).sort())
+      .toEqual(['decisions-ledger.jsonl', 'decisions.md', 'index.md', 'pitfalls.md']);
+  });
+});
+
+describe('CLI render reads the ledger only once it holds the lock', { timeout: 60_000 }, () => {
+  let tmpDir: string;
+
+  beforeEach(() => {
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'render-lock-test-'));
+  });
+
+  afterEach(() => {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  it('renders a ledger rewritten while it waited for the lock', async () => {
+    const paths = seedLearningTree(tmpDir, { ledger: [makeDecisionRow({ anchor_id: 'ADR-001' })] });
+    fs.mkdirSync(paths.lockDir);
+    const marker = path.join(tmpDir, 'lock-attempted');
+    const preload = path.join(tmpDir, 'mark-lock-attempt.cjs');
+    fs.writeFileSync(preload, markLockAttemptPreload(marker), 'utf8');
+
+    const child = spawn(process.execPath, ['--require', preload, RENDERER, 'render', tmpDir], {
+      cwd: tmpDir,
+      stdio: ['ignore', 'ignore', 'pipe'],
+    });
+    const exited = waitForExit(child);
+    try {
+      // The renderer has reached the held lock; only now does the ledger change.
+      await waitFor(() => fs.existsSync(marker), 20_000);
+      fs.writeFileSync(paths.ledger, toJsonl([
+        makeDecisionRow({ anchor_id: 'ADR-001' }),
+        makeDecisionRow({ anchor_id: 'ADR-002', id: 'obs_late', pattern: 'Written while render waited' }),
+      ]), 'utf8');
+      fs.rmdirSync(paths.lockDir);
+      expect((await exited).code).toBe(0);
+    } finally {
+      if (child.exitCode === null) child.kill();
+    }
+
+    expect(fs.readFileSync(path.join(paths.learningDir, 'decisions.md'), 'utf8'))
+      .toMatch(/^## ADR-002: Written while render waited$/m);
+  });
+});
+
+describe('CLI worktree argument', { timeout: 30_000 }, () => {
+  let tmpDir: string;
+  let outside: string;
+
+  beforeEach(() => {
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'render-root-test-'));
+    outside = fs.mkdtempSync(path.join(os.tmpdir(), 'render-outside-test-'));
+  });
+
+  afterEach(() => {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+    fs.rmSync(outside, { recursive: true, force: true });
+  });
+
+  it('takes the current directory given as "."', () => {
+    const { learningDir } = seedLearningTree(tmpDir);
+    expect(runRenderer(tmpDir, ['render', '.']).code).toBe(0);
+    expect(fs.existsSync(path.join(learningDir, 'index.md'))).toBe(true);
+  });
+
+  it('takes a symlink that resolves to the current directory', () => {
+    const { learningDir } = seedLearningTree(tmpDir);
+    fs.symlinkSync(tmpDir, path.join(outside, 'alias'));
+    expect(runRenderer(tmpDir, ['render', path.join(outside, 'alias')]).code).toBe(0);
+    expect(fs.existsSync(path.join(learningDir, 'index.md'))).toBe(true);
+  });
+
+  it('refuses another directory in both modes and writes nothing there', () => {
+    const { learningDir } = seedLearningTree(outside);
+    for (const mode of ['render', '--check']) {
+      const run = runRenderer(tmpDir, [mode, outside]);
+      expect(run.code).toBe(1);
+      expect(run.stderr).toContain('is not the current directory');
+    }
+    expect(fs.readdirSync(learningDir)).toEqual([]);
+  });
+
+  it('refuses a directory inside the current one: it runs from the project root', () => {
+    const project = path.join(tmpDir, 'project');
+    const { learningDir } = seedLearningTree(project);
+
+    const run = runRenderer(tmpDir, ['render', project]);
+
+    expect(run.code).toBe(1);
+    expect(run.stderr).toContain('is not the current directory');
+    expect(fs.readdirSync(learningDir)).toEqual([]);
+  });
+
+  it('refuses a symlink in the current directory that leads elsewhere, writing nowhere', () => {
+    const { learningDir } = seedLearningTree(outside);
+    const own = seedLearningTree(tmpDir);
+    fs.symlinkSync(outside, path.join(tmpDir, 'alias'));
+
+    const run = runRenderer(tmpDir, ['render', path.join(tmpDir, 'alias')]);
+
+    expect(run.code).toBe(1);
+    expect(run.stderr).toContain('is not the current directory');
+    expect(fs.readdirSync(learningDir)).toEqual([]);
+    expect(fs.readdirSync(own.learningDir)).toEqual([]);
+  });
+
+  it('refuses a worktree that does not exist', () => {
+    const run = runRenderer(tmpDir, ['render', path.join(tmpDir, 'missing')]);
+    expect(run.code).toBe(1);
+    expect(run.stderr).toContain('render-decisions: invalid worktree path');
+    expect(fs.readdirSync(tmpDir)).toEqual([]);
   });
 });
 
@@ -508,7 +880,7 @@ describe('CLI render subcommand', () => {
 // added to indexContent before writing.
 // ---------------------------------------------------------------------------
 
-describe('render summary byte counts match actual file sizes', () => {
+describe('render summary byte counts match actual file sizes', { timeout: 30_000 }, () => {
   let tmpDir: string;
 
   beforeEach(() => {
@@ -536,9 +908,7 @@ describe('render summary byte counts match actual file sizes', () => {
     );
 
     // spawnSync gives us the real stderr even when the process exits 0
-    const { spawnSync } = require('child_process') as typeof import('child_process');
-    const sp = spawnSync('node', [RENDERER, 'render', tmpDir], { encoding: 'utf8' });
-    const stderrOutput: string = sp.stderr;
+    const stderrOutput = runRenderer(tmpDir, ['render', tmpDir]).stderr;
 
     // Parse the three logged byte counts
     const match = stderrOutput.match(
@@ -559,7 +929,7 @@ describe('render summary byte counts match actual file sizes', () => {
 // CLI: --check subcommand exit codes
 // ---------------------------------------------------------------------------
 
-describe('CLI --check subcommand', () => {
+describe('CLI --check', { timeout: 30_000 }, () => {
   let tmpDir: string;
 
   beforeEach(() => {
@@ -570,104 +940,124 @@ describe('CLI --check subcommand', () => {
     fs.rmSync(tmpDir, { recursive: true, force: true });
   });
 
-  function runCheck(worktree: string): { code: number; stderr: string } {
-    try {
-      execSync(`node "${RENDERER}" --check "${worktree}"`, {
-        encoding: 'utf8',
-        stdio: ['pipe', 'pipe', 'pipe'],
-      });
-      return { code: 0, stderr: '' };
-    } catch (e: unknown) {
-      const err = e as { status?: number; stderr?: string };
-      return { code: err.status ?? 1, stderr: err.stderr ?? '' };
-    }
-  }
+  it('exits 0 on exactly what render wrote, for v1 and v2 entries and an Inactive table', () => {
+    seedLearningTree(tmpDir, {
+      ledger: [
+        makeDecisionRow({ anchor_id: 'ADR-001' }),
+        makeV2LedgerRow({ anchor_id: 'ADR-002', id: 'obs_v2' }),
+        makeV2LedgerRow({ anchor_id: 'ADR-003', id: 'obs_gone', decisions_status: 'Retired', status_note: 'a one-off' }),
+        makePitfallRow({ anchor_id: 'PF-001' }),
+      ],
+    });
+    expect(runRenderer(tmpDir, ['render', tmpDir]).code).toBe(0);
 
-  it('exits 0 when on-disk .md files match the render from ledger', () => {
-    const decisionsDir = path.join(tmpDir, '.devflow', 'learning');
-    fs.mkdirSync(decisionsDir, { recursive: true });
+    const run = runRenderer(tmpDir, ['--check', tmpDir]);
 
-    // Render to disk first
-    execSync(`node "${RENDERER}" render "${tmpDir}"`, { encoding: 'utf8' });
-
-    // --check should agree
-    const result = runCheck(tmpDir);
-    expect(result.code).toBe(0);
+    expect(run.code).toBe(0);
+    expect(run.stderr).toBe('');
   });
 
-  it('exits non-zero when decisions.md on disk drifts from ledger render', () => {
-    const decisionsDir = path.join(tmpDir, '.devflow', 'learning');
-    fs.mkdirSync(decisionsDir, { recursive: true });
+  it('exits 1 when decisions.md drifts from the render of the ledger', () => {
+    const { learningDir } = seedLearningTree(tmpDir);
+    expect(runRenderer(tmpDir, ['render', tmpDir]).code).toBe(0);
+    fs.writeFileSync(path.join(learningDir, 'decisions.md'), '<!-- TL;DR: 99 decisions -->\n# Tampered\n', 'utf8');
 
-    // Render to disk
-    execSync(`node "${RENDERER}" render "${tmpDir}"`, { encoding: 'utf8' });
+    const run = runRenderer(tmpDir, ['--check', tmpDir]);
 
-    // Corrupt decisions.md
-    fs.writeFileSync(
-      path.join(decisionsDir, 'decisions.md'),
-      '<!-- TL;DR: 99 decisions. Key: ADR-999 -->\n# Tampered\n',
-      'utf8'
-    );
-
-    const result = runCheck(tmpDir);
-    expect(result.code).not.toBe(0);
+    expect(run.code).toBe(1);
+    expect(run.stderr).toContain('[render-decisions] DRIFT: ');
+    expect(run.stderr).toContain('decisions.md');
   });
 
-  it('exits non-zero when index.md on disk drifts from ledger render', () => {
-    const decisionsDir = path.join(tmpDir, '.devflow', 'learning');
-    fs.mkdirSync(decisionsDir, { recursive: true });
+  it('exits 1 and names index.md when index.md drifts', () => {
+    const { learningDir } = seedLearningTree(tmpDir);
+    expect(runRenderer(tmpDir, ['render', tmpDir]).code).toBe(0);
+    fs.writeFileSync(path.join(learningDir, 'index.md'), 'stale index content\n', 'utf8');
 
-    // Render to disk
-    execSync(`node "${RENDERER}" render "${tmpDir}"`, { encoding: 'utf8' });
+    const run = runRenderer(tmpDir, ['--check', tmpDir]);
 
-    // Corrupt index.md
-    fs.writeFileSync(path.join(decisionsDir, 'index.md'), 'stale index content\n', 'utf8');
-
-    const result = runCheck(tmpDir);
-    expect(result.code).not.toBe(0);
-    expect(result.stderr).toContain('DRIFT');
-    expect(result.stderr).toContain('index.md');
+    expect(run.code).toBe(1);
+    expect(run.stderr).toContain('DRIFT');
+    expect(run.stderr).toContain('index.md');
   });
 
-  it('exits non-zero when index.md is absent after a render (missing = drift)', () => {
-    const decisionsDir = path.join(tmpDir, '.devflow', 'learning');
-    fs.mkdirSync(decisionsDir, { recursive: true });
+  it('exits 1 and names a rendered file that is missing', () => {
+    const { learningDir } = seedLearningTree(tmpDir);
+    expect(runRenderer(tmpDir, ['render', tmpDir]).code).toBe(0);
+    fs.unlinkSync(path.join(learningDir, 'index.md'));
 
-    // Render to disk then remove index.md
-    execSync(`node "${RENDERER}" render "${tmpDir}"`, { encoding: 'utf8' });
-    fs.unlinkSync(path.join(decisionsDir, 'index.md'));
+    const run = runRenderer(tmpDir, ['--check', tmpDir]);
 
-    const result = runCheck(tmpDir);
-    expect(result.code).not.toBe(0);
+    expect(run.code).toBe(1);
+    expect(run.stderr).toMatch(/DRIFT: \S*index\.md \(missing\)/);
   });
 
-  it('--check does not write files', () => {
-    const decisionsDir = path.join(tmpDir, '.devflow', 'learning');
-    // No .md files yet — check will see drift (absent = drift) and exit non-zero
-    runCheck(tmpDir);
-    // Files should still be absent
-    expect(fs.existsSync(path.join(decisionsDir, 'decisions.md'))).toBe(false);
-    expect(fs.existsSync(path.join(decisionsDir, 'index.md'))).toBe(false);
+  it('refuses a bare directory with exit 1 and creates nothing', () => {
+    const run = runRenderer(tmpDir, ['--check', tmpDir]);
+
+    expect(run.code).toBe(1);
+    expect(run.stderr).toContain('render-decisions: no .devflow/learning/ under ');
+    expect(fs.readdirSync(tmpDir)).toEqual([]);
+  });
+
+  it('reports files never rendered as drift and writes nothing', () => {
+    seedLearningTree(tmpDir, { ledger: [makeDecisionRow()] });
+    const before = snapshotTree(tmpDir);
+
+    const run = runRenderer(tmpDir, ['--check', tmpDir]);
+
+    expect(run.code).toBe(1);
+    expect(run.stderr).toContain('(missing)');
+    expect(snapshotTree(tmpDir)).toEqual(before);
+  });
+
+  it('prints the malformed-line count on stderr and writes nothing', () => {
+    const paths = seedLearningTree(tmpDir);
+    fs.writeFileSync(paths.ledger, JSON.stringify(makeDecisionRow()) + '\n{broken\n', 'utf8');
+    expect(runRenderer(tmpDir, ['render', tmpDir]).code).toBe(0);
+    const before = snapshotTree(tmpDir);
+
+    const run = runRenderer(tmpDir, ['--check', tmpDir]);
+
+    expect(run.code).toBe(0);
+    expect(run.stderr).toContain('[render-decisions] MALFORMED: 1 ledger line skipped');
+    expect(snapshotTree(tmpDir)).toEqual(before);
+  });
+
+  it('takes no lock: it runs to completion while the lock is held', () => {
+    const paths = seedLearningTree(tmpDir);
+    expect(runRenderer(tmpDir, ['render', tmpDir]).code).toBe(0);
+    fs.mkdirSync(paths.lockDir);
+
+    expect(runRenderer(tmpDir, ['--check', tmpDir]).code).toBe(0);
+    expect(fs.existsSync(paths.lockDir)).toBe(true);
   });
 });
 
 // ---------------------------------------------------------------------------
-// CLI: missing subcommand exits non-zero
+// CLI: invalid usage
 // ---------------------------------------------------------------------------
 
-describe('CLI — invalid usage', () => {
-  it('exits non-zero when no subcommand given', () => {
-    let threw = false;
-    try {
-      execSync(`node "${RENDERER}"`, {
-        encoding: 'utf8',
-        stdio: ['pipe', 'pipe', 'pipe'],
-      });
-    } catch {
-      threw = true;
-    }
-    expect(threw).toBe(true);
+describe('CLI — invalid usage', { timeout: 30_000 }, () => {
+  let tmpDir: string;
+
+  beforeEach(() => {
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'usage-cli-test-'));
   });
+
+  afterEach(() => {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  it.each([[[]], [['render']], [['--check']], [['draw', '.']], [['render', '.', 'extra']]])(
+    'exits 1 with the usage and touches nothing for %j',
+    (args) => {
+      const run = runRenderer(tmpDir, args);
+      expect(run.code).toBe(1);
+      expect(run.stderr).toContain('Usage');
+      expect(fs.readdirSync(tmpDir)).toEqual([]);
+    },
+  );
 });
 
 // ---------------------------------------------------------------------------

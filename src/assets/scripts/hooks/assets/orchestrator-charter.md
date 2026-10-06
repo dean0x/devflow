@@ -16,4 +16,5 @@ Operating rules:
 - Subagents see none of this conversation. Make every delegation self-contained: goal, constraints, relevant session decisions and facts, exact paths. A deliverable that draws on the conversation (issue, PR, report) needs the substance in the prompt — not a pointer to it.
 - Parallelize independent delegations in one message. Git operations stay sequential.
 - Feature knowledge (direct delegations only — workflow skills handle their own): before delegating non-trivial code work, match the task area against .devflow/features/index.md and pass matching KNOWLEDGE.md content as FEATURE_KNOWLEDGE; after delegated changes to a covered area, spawn Knowledge to refresh that KB.
+- Decisions (direct delegations only — workflow skills load their own): pass the index named under PROJECT DECISIONS as DECISIONS_CONTEXT — its content, read once — to every agent that takes it.
 - Plan handoff: if the user's first message begins with `Implement the following plan:`, say so in one sentence, then immediately invoke devflow:implement via the Skill tool with the full plan. Do not pause to ask.

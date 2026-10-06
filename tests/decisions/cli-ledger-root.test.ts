@@ -95,17 +95,21 @@ describe('devflow learning in a linked worktree acts on the main checkout\'s led
   it('--status counts the main checkout\'s observations', async () => {
     await learningCommand.parseAsync(['--status'], { from: 'user' });
     const shown = vi.mocked(p.log.info).mock.calls.map(c => String(c[0])).join('\n');
-    expect(shown).toContain('Observations: 1 total');
+    expect(shown).toContain('Observations: 1 in the log, 1 not yet promoted');
   });
 
-  it('--list finds the main checkout\'s decisions log', async () => {
+  it('--list prints the main checkout\'s observations', async () => {
+    let stdout = '';
+    vi.spyOn(process.stdout, 'write').mockImplementation((chunk: string | Uint8Array) => {
+      stdout += String(chunk);
+      return true;
+    });
     await learningCommand.parseAsync(['--list'], { from: 'user' });
-    expect(p.log.info).not.toHaveBeenCalledWith('No observations yet. Decisions log not found.');
-    const shown = vi.mocked(p.log.info).mock.calls.map(c => String(c[0])).join('\n');
-    expect(shown).toContain('Use Result types');
+    vi.mocked(process.stdout.write).mockRestore();
+    expect(stdout).toContain('OBSERVATIONS 1\n  obs_decision_001 decision v1 observed 5 Use Result types');
   });
 
-  it('--clear truncates the main checkout\'s log and drains its queue', async () => {
+  it('--clear drops the main checkout\'s unpromoted observations and drains its queue', async () => {
     await learningCommand.parseAsync(['--clear'], { from: 'user' });
     expect(fs.readFileSync(getDecisionsLogPath(main), 'utf-8')).toBe('');
     expect(fs.existsSync(getLearningPendingTurnsPath(main))).toBe(false);
