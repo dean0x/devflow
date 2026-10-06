@@ -692,6 +692,23 @@ describe('put-observation op', { timeout: 30_000 }, () => {
     expect(snapshotTree(paths.learningDir)).toEqual(before);
   });
 
+  it('names a ledger entry, an issue and a file and line in one title as three problems of one refusal, and writes nothing', () => {
+    seedLearningTree(dir, { ledger: [makeV2LedgerRow()] });
+    const before = snapshotTree(paths.learningDir);
+    expect(putOp(dir, 'create', putInput({ id: 'obs_three_refs', title: 'Follow ADR-001 until #12 lands at store.cjs:88' }))).toEqual({
+      code: 1,
+      stdout: '',
+      stderr: [
+        'put-observation: the input has 3 problems; nothing was written',
+        '  title: names ledger entry ADR-001; state the rule in words',
+        '  title: carries an issue reference; state what it established instead',
+        '  title: carries a file-and-line reference; name the function or quote the line instead',
+        '',
+      ].join('\n'),
+    });
+    expect(snapshotTree(paths.learningDir)).toEqual(before);
+  });
+
   it('accepts a key from another tracker, an anchor number the ledger does not hold and area scopes', () => {
     seedLearningTree(dir, { ledger: [makeV2LedgerRow({ id: 'obs_other' })] });
     expect(putOp(dir, 'create', putInput({

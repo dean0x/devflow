@@ -756,6 +756,37 @@ describe('validateObservationInput: every violation at once', () => {
     expect(errorFields(result)).toEqual(expect.arrayContaining(['color', 'title', 'rule', 'scope']));
     expect(errorFields(result).length).toBeGreaterThanOrEqual(3);
   });
+
+  it('names every kind of reference one field holds: a ledger entry, an issue and a file and line', () => {
+    expect(validate(createInput({ title: 'Follow ADR-001 until #12 lands at store.cjs:88' }))).toEqual({
+      ok: false,
+      errors: [
+        { field: 'title', message: 'names ledger entry ADR-001; state the rule in words' },
+        { field: 'title', message: 'carries an issue reference; state what it established instead' },
+        { field: 'title', message: 'carries a file-and-line reference; name the function or quote the line instead' },
+      ],
+    });
+  });
+
+  it('reports a field over its limit together with the references it holds', () => {
+    const rule = `Settled in #12. ${'x'.repeat(400)}`;
+    expect(validate(createInput({ rule }))).toEqual({
+      ok: false,
+      errors: [
+        { field: 'rule', message: `is ${Array.from(rule).length} characters, over the limit of 400` },
+        { field: 'rule', message: 'carries an issue reference; state what it established instead' },
+      ],
+    });
+  });
+
+  it('judges a field that is not one line of text no further', () => {
+    expect(validate(createInput({ why: 'Follow ADR-001\nuntil #12 lands at store.cjs:88' }))).toEqual({
+      ok: false,
+      errors: [{ field: 'why', message: 'must be one line with no control characters' }],
+    });
+    expect(validate(createInput({ why: 42 }))).toEqual({ ok: false, errors: [{ field: 'why', message: 'must be a string' }] });
+    expect(validate(createInput({ why: '   ' }))).toEqual({ ok: false, errors: [{ field: 'why', message: 'must not be blank' }] });
+  });
 });
 
 // ---------------------------------------------------------------------------

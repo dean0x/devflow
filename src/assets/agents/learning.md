@@ -89,10 +89,10 @@ EOF
 ```
 
 **When an op refuses**, it wrote nothing. A refusal that opens
-`<op>: the input has <N> problems; nothing was written` and lists a `  <field>: <message>`
-line per problem reports one problem per field: check every named field against the Entry
-format, fix it and run the op once more. Any other refusal — a lock timeout, an entry whose
-state changed — means skip that item and name it in your summary, except
+`<op>: the input has <N> problems; nothing was written` lists every problem at once, one
+`  <field>: <message>` line each, and a field can have several: fix them all against the
+Entry format before you run the op once more. Any other refusal — a lock timeout, an entry
+whose state changed — means skip that item and name it in your summary, except
 `<op>: no .devflow/learning/ under <root> — run from the project root`: the inputs
 vanished (Step 0).
 

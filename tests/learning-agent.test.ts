@@ -197,6 +197,12 @@ describe('learning agent', () => {
       expect(content).toContain('never hand-edit the .md');
     });
 
+    it('tells the agent a refused input lists every problem at once, so one retry fixes them all', () => {
+      expect(content).toMatch(phrase('`<op>: the input has <N> problems; nothing was written` lists every problem at once'));
+      expect(content).toMatch(phrase('fix them all against the Entry format before you run the op once more'));
+      expect(content).not.toMatch(phrase('one problem per field'));
+    });
+
     it('reads ledger and log data only through list and show', () => {
       expect(content).toMatch(phrase('Ledger and log data come only through `list` and `show`'));
       expect(content).toMatch(phrase('claimed turns are the one input you read directly with your Read tool'));

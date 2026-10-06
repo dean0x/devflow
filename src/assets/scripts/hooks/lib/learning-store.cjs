@@ -640,30 +640,59 @@ function keyRefusal(key, mode) {
   return 'is not a known key';
 }
 
-/** The problem with a text value, or null: type, blank, control characters, length. */
-function textProblem(value, limit) {
+/**
+ * The problem that keeps a value from being one line of text, or null: not a
+ * string, blank, or holding a control character. Such a value is judged no further.
+ */
+function lineTextProblem(value) {
   if (typeof value !== 'string') return 'must be a string';
   if (value.trim() === '') return 'must not be blank';
   if (CONTROL_CHAR_RE.test(value)) return 'must be one line with no control characters';
-  const length = codePointLength(value);
-  if (length > limit) return `is ${length} characters, over the limit of ${limit}`;
   return null;
 }
 
+/** The problem with a text value's length in characters, or null. */
+function lengthProblem(value, limit) {
+  const length = codePointLength(value);
+  return length > limit ? `is ${length} characters, over the limit of ${limit}` : null;
+}
+
+/** The first problem with a text value, or null: lineTextProblem's, then its length. */
+function textProblem(value, limit) {
+  return lineTextProblem(value) || lengthProblem(value, limit);
+}
+
 /**
- * The problem with title, rule or why prose that rots, or null: an anchor the
- * ledger holds, an issue reference or a file-and-line reference.
+ * Every problem with title, rule or why prose that rots, one per kind found: an
+ * anchor the ledger holds, an issue reference, a file-and-line reference.
  *
  * @param {string} value
  * @param {Set<string>} ledgerIds - every anchor in the ledger
- * @returns {string|null}
+ * @returns {string[]} in that order
  */
-function proseProblem(value, ledgerIds) {
+function proseProblems(value, ledgerIds) {
+  const problems = [];
   const named = (value.match(ANCHOR_WORD_RE) || []).find(anchor => ledgerIds.has(anchor));
-  if (named) return `names ledger entry ${named}; state the rule in words`;
-  if (ISSUE_REF_RE.test(value)) return 'carries an issue reference; state what it established instead';
-  if (FILE_LINE_REF_RE.test(value)) return 'carries a file-and-line reference; name the function or quote the line instead';
-  return null;
+  if (named) problems.push(`names ledger entry ${named}; state the rule in words`);
+  if (ISSUE_REF_RE.test(value)) problems.push('carries an issue reference; state what it established instead');
+  if (FILE_LINE_REF_RE.test(value)) problems.push('carries a file-and-line reference; name the function or quote the line instead');
+  return problems;
+}
+
+/**
+ * Every problem with a title, rule or why: a value that is not one line of text
+ * reports that alone; otherwise its length and each of its proseProblems.
+ *
+ * @param {unknown} value
+ * @param {number} limit
+ * @param {Set<string>} ledgerIds
+ * @returns {string[]}
+ */
+function proseFieldProblems(value, limit, ledgerIds) {
+  const notText = lineTextProblem(value);
+  if (notText) return [notText];
+  const tooLong = lengthProblem(value, limit);
+  return [...(tooLong ? [tooLong] : []), ...proseProblems(value, ledgerIds)];
 }
 
 /** The problem with a glob's shape, or null. */
@@ -734,7 +763,9 @@ function evidenceErrors(evidence) {
  * carry a file-and-line reference; provenance and evidence record where a lesson
  * came from and may cite all three. A scope entry is an area tag or a glob that is
  * relative, has no `..` segment, whitespace, backtick or `|`, and matches at least
- * one tracked file.
+ * one tracked file. A title, rule or why that is one line of text reports its
+ * length and every kind of reference it holds together, so one retry can fix them
+ * all; any other field, and text that is not one line, reports its first problem.
  *
  * @param {unknown} input - the parsed stdin object
  * @param {{
@@ -747,7 +778,9 @@ function evidenceErrors(evidence) {
  *   in the ledger; scopeMatches — required for create and update.
  * @returns {{ ok: true, value: object } | { ok: false, errors: Array<{ field: string, message: string }> }}
  *   value is the content in canonical key order (id, then CONTENT_KEYS), or `{ id }`
- *   for a reinforce. Errors come key refusals first, then by field in that order.
+ *   for a reinforce. Errors come key refusals first, then by field in that order;
+ *   a title, rule or why gives its length first, then a named anchor, an issue
+ *   reference and a file-and-line reference.
  */
 function validateObservationInput(input, { mode, existing = null, ledgerIds = [], scopeMatches } = {}) {
   if (!VALIDATION_MODES.includes(mode)) {
@@ -783,9 +816,10 @@ function validateObservationInput(input, { mode, existing = null, ledgerIds = []
 
     const ledgerIdSet = new Set(ledgerIds);
     for (const field of ['title', 'rule', 'why']) {
-      fieldError(field, missing(field) || (present(field)
-        ? textProblem(input[field], FIELD_LIMITS[field]) || proseProblem(input[field], ledgerIdSet)
-        : null));
+      const problems = present(field)
+        ? proseFieldProblems(input[field], FIELD_LIMITS[field], ledgerIdSet)
+        : [missing(field)];
+      for (const problem of problems) fieldError(field, problem);
     }
     const scopeMissing = missing('scope');
     if (scopeMissing) fieldError('scope', scopeMissing);
