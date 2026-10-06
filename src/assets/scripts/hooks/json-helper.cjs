@@ -156,21 +156,13 @@ function getNestedField(obj, field) {
 
 function parseArgs(argList) {
   const result = {};
-  const jsonArgs = {};
   for (let i = 0; i < argList.length; i++) {
     if (argList[i] === '--arg' && i + 2 < argList.length) {
       result[argList[i + 1]] = argList[i + 2];
       i += 2;
-    } else if (argList[i] === '--argjson' && i + 2 < argList.length) {
-      try {
-        jsonArgs[argList[i + 1]] = JSON.parse(argList[i + 2]);
-      } catch {
-        jsonArgs[argList[i + 1]] = argList[i + 2];
-      }
-      i += 2;
     }
   }
-  return { ...result, ...jsonArgs };
+  return result;
 }
 
 // ---------------------------------------------------------------------------
