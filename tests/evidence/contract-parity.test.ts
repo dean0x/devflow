@@ -501,7 +501,7 @@ describe('AC-2: the Fields prose names the script\'s own bounds', () => {
   })
 
   it('"printable" excludes controls, format and separator characters', () => {
-    for (const ch of ['\t', '\r', '\u0000', '\u007f', '\u0085', '​', '‮', '⁦', ' ', ' ', '﻿']) {
+    for (const ch of ['\t', '\r', '\u0000', '\u007f', '\u0085', '​', '\u202e', '\u2066', ' ', ' ', '﻿']) {
       expect(PE.TP_LINE_RE.test(tp(1, 1, `a${ch}b`, 'ci')), JSON.stringify(ch)).toBe(false)
     }
     for (const ch of [' ', 'é', '🚀', '中', EM]) {

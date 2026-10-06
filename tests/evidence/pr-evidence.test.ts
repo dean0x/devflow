@@ -478,7 +478,7 @@ describe('TP_LINE_RE and parsePlan', () => {
     ['NUL', tpLine(1, 1, 'a\u0000b', 'ci')],
     ['DEL', tpLine(1, 1, 'a\u007fb', 'ci')],
     ['C1', tpLine(1, 1, 'a\u0085b', 'ci')],
-    ['bidi override', tpLine(1, 1, 'a‮b', 'ci')],
+    ['bidi override', tpLine(1, 1, 'a\u202eb', 'ci')],
     ['zero-width space', tpLine(1, 1, 'a​b', 'ci')],
     ['line separator', tpLine(1, 1, 'a b', 'ci')],
     ['unknown method', tpLine(1, 1, 'x', 'ci').replace('method:ci', 'method:e2e')],
