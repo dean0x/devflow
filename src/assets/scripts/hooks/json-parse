@@ -6,7 +6,7 @@
 # After sourcing, check $_JSON_AVAILABLE before using json_* functions.
 # All functions read from stdin unless noted otherwise.
 # Where a jq path discards stderr, its node fallback does too, so input that
-# cannot be parsed fails silently on either backend, with the same status.
+# cannot be parsed fails silently on either backend.
 
 _SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 _JSON_HELPER="$_SCRIPT_DIR/json-helper.cjs"
