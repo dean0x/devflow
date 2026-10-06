@@ -139,8 +139,10 @@ import type {
  *
  * The 80 ch is general headroom, not a reservation: no line of it is spoken for,
  * and an addition still funds itself with a cut. git.md growth lands in every
- * loaded-set row, so every row carries the same 80. The ceilings remain
- * regression alarms that are LOWERED, NEVER RAISED.
+ * loaded-set row, so every row carries the same headroom: 98 ch today, the 80
+ * plus the 18 ch that #411's removal of learning-ledger IDs cut from git.md
+ * without lowering a ceiling. The ceilings remain regression alarms that are
+ * LOWERED, NEVER RAISED.
  */
 
 /**
