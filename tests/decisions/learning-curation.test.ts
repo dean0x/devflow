@@ -133,9 +133,10 @@ describe('Learning agent curation contract (AC-C3)', () => {
     }
   });
 
-  it('deletes the claim file as the final act (consume-then-delete)', () => {
+  it('names the claim file and releases the claim with release-claim as the FINAL act', () => {
     expect(agentContent).toContain('.devflow/learning/.pending-turns.processing');
     expect(agentContent).toContain('FINAL act');
+    expect(agentContent).toContain('json-helper.cjs" release-claim <token>');
   });
 
   it('run visibility is the final message — no status file', () => {

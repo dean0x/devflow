@@ -493,6 +493,27 @@ describe('putObservation: content history (D-CONTENT-HISTORY)', () => {
     expect(versions.map(v => v.at)).toEqual([1, 2, 3].map(i => new Date(FIXTURE_NOW + i * 1000).toISOString()));
   });
 
+  it('keeps what a v1 rewrite drops — the old log and ledger rows, amendments and over-limit evidence included — in history and the pre-v2 backup', () => {
+    const v1Log = makeV1LogRow({
+      amendments: [{ date: '2026-06-01', note: 'a correction only the log row holds' }],
+      evidence: Array.from({ length: 7 }, (_, i) => `quote number ${i}`),
+    });
+    const v1Ledger = makeV1LedgerRow({
+      details: 'area: hooks; issue: a detail only the ledger row holds',
+      amendments: [{ date: '2026-06-02', note: 'a correction only the ledger row holds' }],
+    });
+    seedLearningTree(dir, { log: [v1Log], ledger: [v1Ledger] });
+
+    expect(put(dir, 'update', putInput({ id: 'obs_legacy_one', type: 'pitfall' }))).toMatchObject({
+      ok: true, value: { outcome: 'updated', reprojected: ['PF-001'] },
+    });
+    expect(rowsOf(paths.log)[0]).not.toHaveProperty('amendments');
+    expect(rowsOf(paths.ledger)[0]).not.toHaveProperty('details');
+    expect(store.historyVersions(dir, 'obs_legacy_one')).toEqual([{ id: 'obs_legacy_one', at: NOW_ISO, ledger: [v1Ledger], log: v1Log }]);
+    expect(rowsOf(path.join(paths.learningDir, 'decisions-log.pre-v2.jsonl'))).toEqual([v1Log]);
+    expect(rowsOf(path.join(paths.learningDir, 'decisions-ledger.pre-v2.jsonl'))).toEqual([v1Ledger]);
+  });
+
   it('records the entries a create repairs, with no prior log row', () => {
     const prior = makeV1LedgerRow({ id: 'obs_orphan' });
     seedLearningTree(dir, { ledger: [prior] });
@@ -2168,10 +2189,12 @@ describe('restoreAnchor', () => {
     ]);
   });
 
-  it('restores a v1 entry, which renders through the v1 formatter again', () => {
+  it('restores a v1 entry after copying a v1 tree aside, and it renders through the v1 formatter again', () => {
     seedLearningTree(dir, { ledger: [makeV1LedgerRow({ decisions_status: 'Retired', status_note: 'The hooks moved', retired_on: '2026-09-01' })] });
+    const ledgerBefore = fs.readFileSync(paths.ledger, 'utf8');
     expect(restore('PF-001')).toEqual({ ok: true, value: { anchor_id: 'PF-001', status: 'Active' } });
     expect(rowsOf(paths.ledger)).toEqual([makeV1LedgerRow()]);
+    expect(fs.readFileSync(path.join(paths.learningDir, 'decisions-ledger.pre-v2.jsonl'), 'utf8')).toBe(ledgerBefore);
     expect(rendered(paths, 'pitfalls.md')).toBe(renderDecisionsFile([makeV1LedgerRow()], 'pitfalls'));
   });
 
