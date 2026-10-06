@@ -33,7 +33,8 @@
 //                                          Make an entry inactive with the one JSON object on
 //                                          stdin its status takes; re-renders
 //   restore-anchor <anchor>               Make an inactive entry active again and due for
-//                                          checking next; re-renders
+//                                          maintenance again, ordered after integrity problems and
+//                                          legacy entries (among them if it is one); re-renders
 //   refresh-anchor <anchor>... [--verified]
 //                                          Re-project active v2 entries from the log, or stamp
 //                                          them verified today; re-renders
@@ -465,8 +466,9 @@ try {
     // -------------------------------------------------------------------------
     // restore-anchor <anchor>
     // Make an inactive entry active again, its notes, last_verified and
-    // last_attempt cleared so it is due for checking next (restoreAnchor,
-    // learning-store.cjs).
+    // last_attempt cleared so it is due for maintenance again, ordered after
+    // integrity problems and legacy entries, or among them when it is one
+    // (restoreAnchor, learning-store.cjs: D-DUE-ORDER).
     // stdout: restored <anchor>
     // -------------------------------------------------------------------------
     case 'restore-anchor': {

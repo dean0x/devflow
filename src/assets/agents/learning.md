@@ -94,8 +94,10 @@ EOF
 **When an op refuses**, it wrote nothing. A refusal that opens
 `<op>: the input has <N> problems; nothing was written` lists every problem at once, one
 `  <field>: <message>` line each, and a field can have several: fix them all against the
-Entry format before you run the op once more. Any other refusal — a lock timeout, an entry
-whose state changed — means skip that item and name it in your summary, except
+Entry format before you run the op once more. A value with a bad shape (text that is not
+one line, a scope with too many entries, a malformed glob) reports only that: fix the shape
+first, and expect its other problems on the retry. Any other refusal — a lock timeout, an
+entry whose state changed — means skip that item and name it in your summary, except
 `<op>: no .devflow/learning/ under <root> — run from the project root`: the inputs
 vanished (Step 0).
 

@@ -222,9 +222,13 @@ describe('learning agent', () => {
       expect(content).toContain('never hand-edit the .md');
     });
 
-    it('tells the agent a refused input lists every problem at once, so one retry fixes them all', () => {
+    it('tells the agent a refused input lists every problem at once, but a value with a bad shape reports only that', () => {
       expect(content).toMatch(phrase('`<op>: the input has <N> problems; nothing was written` lists every problem at once'));
       expect(content).toMatch(phrase('fix them all against the Entry format before you run the op once more'));
+      expect(content).toMatch(phrase(
+        'A value with a bad shape (text that is not one line, a scope with too many entries, a malformed glob) ' +
+          'reports only that: fix the shape first, and expect its other problems on the retry.',
+      ));
       expect(content).not.toMatch(phrase('one problem per field'));
     });
 
