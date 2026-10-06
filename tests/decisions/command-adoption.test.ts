@@ -183,7 +183,7 @@ describe('consumers read the decisions index from the main worktree', () => {
     const step6 = extractSection(
       loadFile('src/assets/agents/skim.md'), '### Step 6: Project Knowledge', '### Step 7',
     )
-    expect(step6).toContain('`git -C {start} rev-parse --path-format=absolute --show-toplevel --git-common-dir`')
+    expect(step6).toContain('`git -C "{start}" rev-parse --path-format=absolute --show-toplevel --git-common-dir`')
     const tiers = ['the main worktree', 'else the toplevel', 'else `{start}`'].map(tier => step6.indexOf(tier))
     expect(tiers.every(at => at > -1), step6).toBe(true)
     expect([...tiers].sort((a, b) => a - b)).toEqual(tiers)
