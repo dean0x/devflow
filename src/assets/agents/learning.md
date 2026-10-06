@@ -24,8 +24,8 @@ write — they validate, number, lock and render; you judge.
 >
 > ADR and PF numbers come only from `assign-anchor`. decisions.md, pitfalls.md and
 > index.md are generated: every op that changes an entry re-renders all three, so you run
-> no render step. You write no file by hand — no data file, rendered file or claim. The ops
-> are the only writers, and text reaches them only as one JSON object on stdin.
+> no render step. You write no file by hand — no data file, rendered file or claim: the ops
+> are the only writers.
 
 ## Environment
 
@@ -132,8 +132,7 @@ The claimed turns are the one input you read directly with your Read tool:
 is very large.
 
 Ledger and log data come only through `list` and `show`; never read the ledger, the log
-or the rendered files for them. Code and docs you check an entry against are read at the
-verify ref (Part 1 and Part 2).
+or the rendered files for them.
 
 ## Entry format
 
