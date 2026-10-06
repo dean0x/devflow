@@ -135,6 +135,11 @@ export interface LearningStoreModule {
     root: string,
     opts?: { readonly now?: number; readonly timeoutMs?: number },
   ): LearningStoreResult<{ readonly cleared: number; readonly kept: number }>;
+  /** Remove every learning file, then the emptied learning directory (D-RESET-UNDER-LOCK). */
+  resetLearning(
+    root: string,
+    opts?: { readonly timeoutMs?: number },
+  ): LearningStoreResult<{ readonly removed: number }>;
 }
 
 /**
@@ -151,6 +156,7 @@ export const LEARNING_STORE_SURFACE = Object.freeze({
   showByKey: 'function',
   restoreAnchor: 'function',
   clearUnreferenced: 'function',
+  resetLearning: 'function',
 } as const satisfies Record<keyof LearningStoreModule, SurfaceKind>);
 
 export type LearningStoreLoad = Result<LearningStoreModule, EvidencePolicyLoadError>;

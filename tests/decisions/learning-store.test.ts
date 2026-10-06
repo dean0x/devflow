@@ -9,6 +9,7 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { execFileSync } from 'child_process';
 import * as fs from 'fs';
+import { createRequire } from 'module';
 import * as os from 'os';
 import * as path from 'path';
 
@@ -1149,6 +1150,118 @@ describe('clearUnreferenced (D-CLEAR-UNREFERENCED)', () => {
 
     expect(result).toEqual({ ok: false, error: { kind: 'busy', message: `clear: timeout acquiring lock at ${p.lockDir}` } });
     expect(snapshotTree(tmp)).toEqual(before);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Resetting the learning tree (devflow learning --reset)
+// ---------------------------------------------------------------------------
+
+describe('resetLearning (D-RESET-UNDER-LOCK)', () => {
+  let tmp: string;
+  beforeEach(() => { tmp = makeTmp('learning-store-reset-'); });
+  afterEach(() => { fs.rmSync(tmp, { recursive: true, force: true }); });
+
+  /** Every kind of learning file, fourteen entries in all, beside the rest of a .devflow/. */
+  function seedFullTree(): ReturnType<typeof learningPaths> {
+    const p = seedLearningTree(tmp, { log: [makeV2LogRow()], ledger: [makeV2LedgerRow()], archive: [makeV1LogRow()] });
+    for (const file of [
+      p.history, store.rejectedPathFor(p.log), p.log.replace(/\.jsonl$/, '.pre-v2.jsonl'),
+      path.join(p.learningDir, 'decisions.md'), path.join(p.learningDir, 'pitfalls.md'), path.join(p.learningDir, 'index.md'),
+      path.join(p.learningDir, 'learning.json'),
+      path.join(p.learningDir, '.pending-turns.jsonl'), path.join(p.learningDir, '.pending-turns.processing'),
+      path.join(p.learningDir, '.pending-turns.owner'),
+    ]) {
+      fs.writeFileSync(file, `${path.basename(file)}\n`);
+    }
+    fs.mkdirSync(path.join(p.learningDir, '.decisions-usage.lock'));
+    fs.writeFileSync(path.join(tmp, '.devflow', 'config.json'), '{"features":{}}\n');
+    fs.mkdirSync(path.join(tmp, '.devflow', 'memory'));
+    fs.writeFileSync(path.join(tmp, '.devflow', 'memory', '.pending-turns.jsonl'), '{"role":"user"}\n');
+    return p;
+  }
+
+  it('removes every learning file and the directory itself, and leaves the rest of .devflow/ byte for byte', () => {
+    const p = seedFullTree();
+    const memory = snapshotTree(path.join(tmp, '.devflow', 'memory'));
+
+    expect(store.resetLearning(tmp)).toEqual({ ok: true, value: { removed: 14 } });
+
+    expect(fs.existsSync(p.learningDir)).toBe(false);
+    expect(fs.readdirSync(path.join(tmp, '.devflow')).sort()).toEqual(['config.json', 'memory']);
+    expect(fs.readFileSync(path.join(tmp, '.devflow', 'config.json'), 'utf8')).toBe('{"features":{}}\n');
+    expect(snapshotTree(path.join(tmp, '.devflow', 'memory'))).toEqual(memory);
+  });
+
+  it('refuses without .devflow/learning/ and creates nothing, in a bare directory or under an existing .devflow/ (D-NO-STRAY-TREE)', () => {
+    const refusal = {
+      ok: false,
+      error: { kind: 'no-learning-dir', message: `reset: no .devflow/learning/ under ${tmp} — run from the project root` },
+    };
+    expect(store.resetLearning(tmp)).toEqual(refusal);
+    expect(fs.readdirSync(tmp)).toEqual([]);
+
+    fs.mkdirSync(path.join(tmp, '.devflow'));
+    expect(store.resetLearning(tmp)).toEqual(refusal);
+    expect(fs.readdirSync(path.join(tmp, '.devflow'))).toEqual([]);
+  });
+
+  it('reports busy while another run holds the learning lock, and removes nothing (D-ONE-LEARNING-LOCK)', () => {
+    const p = seedFullTree();
+    fs.mkdirSync(p.lockDir);
+    const before = snapshotTree(tmp);
+
+    expect(store.resetLearning(tmp, { timeoutMs: 0 })).toEqual({
+      ok: false,
+      error: { kind: 'busy', message: `reset: timeout acquiring lock at ${p.lockDir}` },
+    });
+    expect(snapshotTree(tmp)).toEqual(before);
+  });
+
+  it('breaks a lock a crashed run left behind, then resets', () => {
+    const p = seedFullTree();
+    fs.mkdirSync(p.lockDir);
+    const abandoned = new Date(Date.now() - store.LOCK_STALE_MS - 60_000);
+    fs.utimesSync(p.lockDir, abandoned, abandoned);
+
+    expect(store.resetLearning(tmp, { timeoutMs: 0 })).toEqual({ ok: true, value: { removed: 14 } });
+    expect(fs.existsSync(p.learningDir)).toBe(false);
+  });
+
+  it('removes a symbolic link in the learning directory, never what it points to', () => {
+    const p = seedLearningTree(tmp, { ledger: [makeV2LedgerRow()] });
+    const outsideFile = path.join(tmp, 'outside.jsonl');
+    const outsideDir = path.join(tmp, 'outside-dir');
+    fs.writeFileSync(outsideFile, 'kept\n');
+    fs.mkdirSync(outsideDir);
+    fs.writeFileSync(path.join(outsideDir, 'kept.txt'), 'kept\n');
+    fs.symlinkSync(outsideFile, p.log);
+    fs.symlinkSync(outsideDir, path.join(p.learningDir, 'linked-dir'));
+
+    expect(store.resetLearning(tmp)).toEqual({ ok: true, value: { removed: 3 } });
+
+    expect(fs.existsSync(p.learningDir)).toBe(false);
+    expect(fs.readFileSync(outsideFile, 'utf8')).toBe('kept\n');
+    expect(fs.readFileSync(path.join(outsideDir, 'kept.txt'), 'utf8')).toBe('kept\n');
+  });
+
+  it('keeps what arrives once the lock is released, and leaves no lock behind', () => {
+    const p = seedFullTree();
+    const arrived = path.join(p.learningDir, '.pending-turns.jsonl');
+    // The lock is released by removing its directory; a capture hook appends a
+    // turn at that moment, after the reset and before the directory is removed.
+    const nodeFs = createRequire(import.meta.url)('fs') as { rmdirSync: (target: fs.PathLike) => void };
+    const rmdirSync = nodeFs.rmdirSync;
+    nodeFs.rmdirSync = (target) => {
+      rmdirSync(target);
+      if (target === p.lockDir) fs.writeFileSync(arrived, '{"role":"user"}\n');
+    };
+    try {
+      expect(store.resetLearning(tmp)).toEqual({ ok: true, value: { removed: 14 } });
+    } finally {
+      nodeFs.rmdirSync = rmdirSync;
+    }
+    expect(fs.readdirSync(p.learningDir)).toEqual(['.pending-turns.jsonl']);
   });
 });
 

@@ -6,13 +6,12 @@ import color from 'picocolors';
 import {
   getLearningDir,
   getLearningTuningConfigPath,
-  getDecisionsLockDir,
 } from '../../core/project-paths.js';
 import { readMachineFeature, writeMachineFeature } from '../../core/feature-switch.js';
 import { loadSettingsModule, narrowedSwitchLabel, personalConfigTrackedWarning } from '../../core/evidence-policy.js';
 import { getDevFlowDirectory } from '../../targets/claude-code/claude-paths.js';
 import { getLedgerRoot } from '../../core/ledger-root.js';
-import { sweepLegacyDreamMarkers, drainLearningQueue } from '../../core/learning-queue-cleanup.js';
+import { drainLearningQueue } from '../../core/learning-queue-cleanup.js';
 import {
   formatLearningStoreUnavailable,
   loadLearningStore,
@@ -29,9 +28,10 @@ import {
 const NO_LEARNING_DATA = 'No learning data in this project yet.';
 
 /**
- * How long a writer here (--restore, --clear) waits for the learning lock before it
- * refuses as busy. An op holds the lock for milliseconds, so a longer wait means a
- * stuck holder, and the store's own 30 s wait would leave the command looking hung.
+ * How long a writer here (--restore, --clear, --reset) waits for the learning lock
+ * before it refuses as busy. An op holds the lock for milliseconds, so a longer
+ * wait means a stuck holder, and the store's own 30 s wait would leave the command
+ * looking hung.
  */
 const LOCK_WAIT_MS = 5000;
 
@@ -328,53 +328,45 @@ async function handleConfigure(): Promise<void> {
   p.outro(color.green('Configuration saved.'));
 }
 
+/**
+ * `--reset`: remove all learning state — entries, observations, rendered files,
+ * the tuning config, and the queue with its claim — through the store's
+ * resetLearning, under the learning lock every learning writer takes
+ * (D-ONE-LEARNING-LOCK, D-RESET-UNDER-LOCK). A project with no learning directory
+ * has nothing to reset, and nothing is created there (D-NO-STRAY-TREE).
+ */
 async function handleReset(): Promise<void> {
   const ledgerRoot = await requireLedgerRoot('reset not performed');
   if (!ledgerRoot) return;
-
-  const lockDir = getDecisionsLockDir(ledgerRoot);
-
-  // Ensure the parent directory exists so a second reset (after .devflow/learning/
-  // was already removed) does not fail with ENOENT and emit a false contention error.
-  await fs.mkdir(path.dirname(lockDir), { recursive: true });
-
-  // Acquire lock to prevent conflict with a concurrent `devflow learning` invocation.
-  // Non-recursive: EEXIST still means genuine contention.
-  try {
-    await fs.mkdir(lockDir);
-  } catch {
-    p.log.error('Learning system is currently running. Try again in a moment.');
+  const store = requireStore();
+  if (!store) return;
+  if (!(await isDirectory(getLearningDir(ledgerRoot)))) {
+    p.log.info('No learning data to reset.');
     return;
   }
 
-  try {
-    if (process.stdin.isTTY) {
-      const confirm = await p.confirm({
-        message: 'Remove all learning state files? This cannot be undone.',
-        initialValue: false,
-      });
-      if (p.isCancel(confirm) || !confirm) {
-        p.log.info('Reset cancelled.');
-        return;
-      }
+  if (process.stdin.isTTY) {
+    const confirm = await p.confirm({
+      message: 'Remove all learning state files? This cannot be undone.',
+      initialValue: false,
+    });
+    if (p.isCancel(confirm) || !confirm) {
+      p.log.info('Reset cancelled.');
+      return;
     }
-
-    // Remove the entire learning directory (contains queue files, content files,
-    // ledger, and tuning config). Single-dir semantics: all learning state lives here.
-    try {
-      await fs.rm(getLearningDir(ledgerRoot), { recursive: true, force: true });
-    } catch { /* best effort */ }
-
-    // Clean legacy dream marker-pipeline stamps from old installs.
-    // Best-effort: sweeps the now-absent dir silently (ENOENT-tolerant).
-    try {
-      await sweepLegacyDreamMarkers(getLearningDir(ledgerRoot));
-    } catch { /* best effort */ }
-
-    p.log.success('Reset complete — removed .devflow/learning/ state.');
-  } finally {
-    try { await fs.rmdir(lockDir); } catch { /* already cleaned */ }
   }
+
+  const reset = store.resetLearning(ledgerRoot, { timeoutMs: LOCK_WAIT_MS });
+  if (!reset.ok) {
+    if (reset.error.kind === 'no-learning-dir') {
+      p.log.info('No learning data to reset.');
+      return;
+    }
+    p.log.error(storeRefusal(reset.error, 'reset'));
+    process.exitCode = 1;
+    return;
+  }
+  p.log.success('Reset complete — removed .devflow/learning/ state.');
 }
 
 /**

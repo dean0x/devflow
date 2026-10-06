@@ -5,8 +5,9 @@
  * write nothing. --restore makes an inactive entry active again through the
  * store's restoreAnchor. --clear drops only the observations no entry uses, under
  * the learning lock, and drains the queue only once that clear succeeded
- * (D-CLEAR-UNREFERENCED). --reset and --disable keep their one-directory removal
- * and their drain.
+ * (D-CLEAR-UNREFERENCED). --reset removes the whole learning directory through
+ * the store's resetLearning, under the same lock and wait (D-RESET-UNDER-LOCK),
+ * and creates nothing where there is none. --disable keeps its drain.
  *
  * Each case seeds a real learning tree under a temp root that getLedgerRoot is
  * mocked to resolve; only the prompts, the tuning config and the machine devflow
@@ -532,11 +533,12 @@ describe('learning --clear', { timeout: 30_000 }, () => {
 });
 
 // ---------------------------------------------------------------------------
-// --reset: one directory holds all learning state
+// --reset: the whole learning directory, under the learning lock
+// (D-ONE-LEARNING-LOCK, D-NO-STRAY-TREE, D-RESET-UNDER-LOCK)
 // ---------------------------------------------------------------------------
 
-describe('learning --reset', () => {
-  it('removes .devflow/learning/ and leaves the rest of .devflow/ alone', async () => {
+describe('learning --reset', { timeout: 30_000 }, () => {
+  it('removes .devflow/learning/ — entries, observations, the queue and its claim — and leaves the rest of .devflow/ alone', async () => {
     seedCorpus(root);
     seedQueue(root);
     fs.writeFileSync(path.join(root, '.devflow', 'config.json'), '{"features":{}}\n');
@@ -546,25 +548,75 @@ describe('learning --reset', () => {
     const run = await runLearning(['--reset']);
 
     expect(run.success).toBe('Reset complete — removed .devflow/learning/ state.');
+    expect(run.exitCode).toBe(0);
+    expect(queueFilesPresent(root)).toEqual([false, false, false]);
     expect(fs.existsSync(learningPaths(root).learningDir)).toBe(false);
     expect(fs.readFileSync(path.join(root, '.devflow', 'config.json'), 'utf8')).toBe('{"features":{}}\n');
     expect(fs.existsSync(getPendingTurnsPath(root))).toBe(true);
   });
 
-  it('completes truthfully a second time, when .devflow/learning/ is already gone', async () => {
-    fs.mkdirSync(path.join(root, '.devflow', 'learning'), { recursive: true });
+  it('breaks a learning lock a crashed run left behind, then resets', async () => {
+    const paths = seedCorpus(root);
+    fs.mkdirSync(paths.lockDir);
+    const abandoned = new Date(Date.now() - store.LOCK_STALE_MS - 60_000);
+    fs.utimesSync(paths.lockDir, abandoned, abandoned);
+
+    const run = await runLearning(['--reset']);
+
+    expect(run.error).toBe('');
+    expect(run.success).toBe('Reset complete — removed .devflow/learning/ state.');
+    expect(run.exitCode).toBe(0);
+    expect(fs.existsSync(paths.learningDir)).toBe(false);
+  });
+
+  it('while another run holds the learning lock: exit 1 within the CLI\'s wait, nothing written', async () => {
+    const paths = seedCorpus(root);
+    seedQueue(root);
+    fs.mkdirSync(paths.lockDir);
+    const before = snapshotTree(root);
+
+    const started = Date.now();
+    const run = await runLearning(['--reset']);
+
+    expect(Date.now() - started).toBeLessThan(15_000);
+    expect(run.error).toBe('The learning store is busy: another run holds its lock. Nothing was reset; try again in a moment.');
+    expect(run.success).toBe('');
+    expect(run.exitCode).toBe(1);
+    expect(snapshotTree(root)).toEqual(before);
+  });
+
+  it('in a project that never had learning data: says so, exits 0 and creates nothing, neither .devflow/ nor .devflow/learning/', async () => {
+    const run = await runLearning(['--reset']);
+
+    expect(run.info).toBe('No learning data to reset.');
+    expect(run.success).toBe('');
+    expect(run.error).toBe('');
+    expect(run.exitCode).toBe(0);
+    expect(fs.readdirSync(root)).toEqual([]);
+  });
+
+  it('a second reset finds nothing to reset: no contention error, and nothing created under .devflow/', async () => {
+    seedCorpus(root);
     await runLearning(['--reset']);
 
     const run = await runLearning(['--reset']);
 
-    expect(run.error).not.toContain('Learning system is currently running');
-    expect(run.success).toBe('Reset complete — removed .devflow/learning/ state.');
+    expect(run.error).toBe('');
+    expect(run.info).toBe('No learning data to reset.');
+    expect(run.exitCode).toBe(0);
+    expect(fs.readdirSync(path.join(root, '.devflow'))).toEqual([]);
   });
 
-  it('completes truthfully in a project that never had learning state', async () => {
+  it('outside a git project: warns, exits 0 and touches nothing', async () => {
+    vi.mocked(getLedgerRoot).mockResolvedValue(null);
+    seedCorpus(root);
+    const before = snapshotTree(root);
+
     const run = await runLearning(['--reset']);
-    expect(run.error).not.toContain('Learning system is currently running');
-    expect(run.success).toBe('Reset complete — removed .devflow/learning/ state.');
+
+    expect(run.warn).toBe('Could not resolve git root — reset not performed');
+    expect(run.exitCode).toBe(0);
+    expect(snapshotTree(root)).toEqual(before);
   });
 });
 

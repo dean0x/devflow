@@ -163,6 +163,8 @@ export const FENCE_ROWS: readonly FenceRow[] = [
   { args: ['learning', '--show', FENCE_ENTRY], allow: NONE, mustWrite: false },
   { args: ['learning', '--clear'], allow: [REPO_LEARNING], mustWrite: true, seed: seedLearningState },
   { args: ['learning', '--reset'], allow: [REPO_LEARNING], mustWrite: true, seed: seedLearningState },
+  // The reset above left no learning directory: a reset with nothing to reset writes nothing.
+  { args: ['learning', '--reset'], allow: NONE, mustWrite: false, label: 'with no learning data' },
   { args: ['learning', '--status'], allow: NONE, mustWrite: false },
 
   { args: ['knowledge', '--disable'], allow: [MANIFEST], mustWrite: true },
@@ -354,7 +356,7 @@ describe('write-set fence coverage', () => {
   })
 
   it('the table and its footprint stay registered in numeric-floors.json', () => {
-    expect(FENCE_ROWS.length).toBeGreaterThanOrEqual(55)
+    expect(FENCE_ROWS.length).toBeGreaterThanOrEqual(56)
     expect(new Set(FENCE_ROWS.map(row => row.args[0])).size).toBeGreaterThanOrEqual(15)
     expect(allowlistSize(FENCE_ROWS)).toBeLessThanOrEqual(11)
   })

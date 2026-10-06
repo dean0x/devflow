@@ -1137,6 +1137,58 @@ function clearUnreferenced(root, { now = Date.now(), timeoutMs } = {}) {
 }
 
 // ---------------------------------------------------------------------------
+// Resetting
+// ---------------------------------------------------------------------------
+
+/** rmdir(2) errors meaning the path is not an empty directory: gone, holding something, or not a directory. */
+const NOT_AN_EMPTY_DIR = Object.freeze(['ENOENT', 'ENOTEMPTY', 'EEXIST', 'ENOTDIR']);
+
+/** Remove `dir` when it is an empty directory; anything else at that path stays as it is. */
+function removeEmptyDir(dir) {
+  try {
+    fs.rmdirSync(dir);
+  } catch (err) {
+    if (!err || !NOT_AN_EMPTY_DIR.includes(err.code)) throw err;
+  }
+}
+
+/**
+ * Remove every learning file — `devflow learning --reset`: the log, the ledger
+ * and their side files, the rendered files, the tuning config, and the queue
+ * with its claim and owner file — and then the learning directory itself.
+ *
+ * D-RESET-UNDER-LOCK: reset empties the learning directory under the learning
+ * lock, sparing only the lock directory, and removes the emptied directory once
+ * the lock is released, and only if nothing has arrived in it. Reason: the lock
+ * is released by its path, so removing it with the directory would let this
+ * run's release delete the lock of a writer that recreated the tree in between;
+ * and what arrives once the lock is free — a captured turn, or the next writer's
+ * lock — belongs to the next run.
+ *
+ * Like every learning writer it refuses without `.devflow/learning/` and creates
+ * nothing (D-NO-STRAY-TREE), and it waits at most `timeoutMs` for the lock,
+ * breaking one a crashed run left behind (D-ONE-LEARNING-LOCK). A symbolic link
+ * in the directory is removed, never what it points to.
+ *
+ * @param {string} root - project root
+ * @param {{ timeoutMs?: number }} [opts]
+ * @returns {{ ok: true, value: { removed: number } } | { ok: false, error: { kind: string, message: string } }}
+ *   removed: the entries removed from the learning directory. Errors are
+ *   withDecisionsLock's no-learning-dir and busy.
+ */
+function resetLearning(root, { timeoutMs } = {}) {
+  const learningDir = getLearningDir(root);
+  const lockName = path.basename(getDecisionsLockDir(root));
+  const reset = withDecisionsLock('reset', root, () => {
+    const entries = fs.readdirSync(learningDir).filter(name => name !== lockName);
+    for (const name of entries) fs.rmSync(path.join(learningDir, name), { recursive: true, force: true });
+    return { ok: true, value: { removed: entries.length } };
+  }, { timeoutMs });
+  if (reset.ok) removeEmptyDir(learningDir);
+  return reset;
+}
+
+// ---------------------------------------------------------------------------
 // The queue claim
 // ---------------------------------------------------------------------------
 
@@ -2913,9 +2965,10 @@ module.exports = {
   appendHistory,
   historyVersions,
   ensurePreV2Backup,
-  // Rotation and clearing
+  // Rotation, clearing and resetting
   rotateObservations,
   clearUnreferenced,
+  resetLearning,
   // The queue claim
   CLAIM_STALE_SECS,
   CLAIM_TOKEN_RE,
