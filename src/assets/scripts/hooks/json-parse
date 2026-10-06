@@ -5,6 +5,8 @@
 #
 # After sourcing, check $_JSON_AVAILABLE before using json_* functions.
 # All functions read from stdin unless noted otherwise.
+# Where a jq path discards stderr, its node fallback does too, so input that
+# cannot be parsed fails silently on either backend, with the same status.
 
 _SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 _JSON_HELPER="$_SCRIPT_DIR/json-helper.cjs"
@@ -28,7 +30,7 @@ json_field() {
   if [ "$_HAS_JQ" = "true" ]; then
     jq -r ".$field // \"$default\"" 2>/dev/null
   else
-    node "$_JSON_HELPER" get-field "$field" "$default"
+    node "$_JSON_HELPER" get-field "$field" "$default" 2>/dev/null
   fi
 }
 
@@ -66,7 +68,7 @@ json_compact() {
   if [ "$_HAS_JQ" = "true" ]; then
     jq -c '.' 2>/dev/null
   else
-    node "$_JSON_HELPER" compact
+    node "$_JSON_HELPER" compact 2>/dev/null
   fi
 }
 
@@ -102,7 +104,7 @@ json_construct() {
     done
     jq -n -c "${jq_args[@]}" "{$fields}" 2>/dev/null
   else
-    node "$_JSON_HELPER" construct "$@"
+    node "$_JSON_HELPER" construct "$@" 2>/dev/null
   fi
 }
 
@@ -114,7 +116,7 @@ json_update_field() {
   if [ "$_HAS_JQ" = "true" ]; then
     jq -c --arg v "$value" ".$field = \$v" 2>/dev/null
   else
-    node "$_JSON_HELPER" update-field "$field" "$value"
+    node "$_JSON_HELPER" update-field "$field" "$value" 2>/dev/null
   fi
 }
 
@@ -124,7 +126,7 @@ json_update_field_json() {
   if [ "$_HAS_JQ" = "true" ]; then
     jq -c --argjson v "$value" ".$field = \$v" 2>/dev/null
   else
-    node "$_JSON_HELPER" update-field "$field" "$value" --json
+    node "$_JSON_HELPER" update-field "$field" "$value" --json 2>/dev/null
   fi
 }
 
@@ -132,12 +134,14 @@ json_update_field_json() {
 
 # Slurp JSONL file, sort by field desc, output as JSONL (one line per entry).
 # Usage: json_slurp_cap "file.jsonl" "confidence" 100
+# Both jq calls discard stderr, and the node path discards it BEFORE the
+# `< "$file"` redirect, so the shell's error for a file it cannot open goes too.
 json_slurp_cap() {
   local file="$1" field="$2" limit="${3:-100}"
   if [ "$_HAS_JQ" = "true" ]; then
-    jq -c '.' "$file" | jq -s "sort_by(.$field) | reverse | .[0:$limit][]" 2>/dev/null
+    jq -c '.' "$file" 2>/dev/null | jq -s "sort_by(.$field) | reverse | .[0:$limit][]" 2>/dev/null
   else
-    node "$_JSON_HELPER" slurp-cap "$field" "$limit" < "$file"
+    node "$_JSON_HELPER" slurp-cap "$field" "$limit" 2>/dev/null < "$file"
   fi
 }
 
@@ -149,7 +153,7 @@ json_array_length() {
   if [ "$_HAS_JQ" = "true" ]; then
     jq ".$path | length" 2>/dev/null
   else
-    node "$_JSON_HELPER" array-length "$path"
+    node "$_JSON_HELPER" array-length "$path" 2>/dev/null
   fi
 }
 
@@ -159,7 +163,7 @@ json_array_item() {
   if [ "$_HAS_JQ" = "true" ]; then
     jq -c ".${path}[$index]" 2>/dev/null
   else
-    node "$_JSON_HELPER" array-item "$path" "$index"
+    node "$_JSON_HELPER" array-item "$path" "$index" 2>/dev/null
   fi
 }
 
@@ -180,7 +184,7 @@ json_extract_cwd_field() {
   if [ "$_HAS_JQ" = "true" ]; then
     jq -r --arg f "$field" '(.cwd // "") + "\u0001" + (.[$f] // "")' 2>/dev/null
   else
-    node "$_JSON_HELPER" extract-cwd-field "$field"
+    node "$_JSON_HELPER" extract-cwd-field "$field" 2>/dev/null
   fi
 }
 
@@ -201,7 +205,7 @@ json_extract_messages() {
       end
     else "" end' 2>/dev/null
   else
-    node "$_JSON_HELPER" extract-text-messages
+    node "$_JSON_HELPER" extract-text-messages 2>/dev/null
   fi
 }
 

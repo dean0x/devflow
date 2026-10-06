@@ -435,6 +435,61 @@ describe('json-parse wrapper', () => {
       fs.rmSync(dir, { recursive: true, force: true });
     }
   });
+
+  it('every node fallback whose jq path discards stderr is silent on input it cannot parse, and still fails', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'json-parse-fallbacks-'));
+    try {
+      const notJson = 'not-json{{{';
+      // construct keeps an --argjson value that is not JSON as a string, so the
+      // value its fallback cannot handle is one nested past what jq parses and
+      // node can rebuild. 50,000 levels stay under Linux's 128 KiB argument cap.
+      const tooDeep = '['.repeat(50_000) + ']'.repeat(50_000);
+      const rows: ReadonlyArray<readonly [string, readonly string[], string]> = [
+        ['json_field', ['k', 'fallback'], notJson],
+        ['json_compact', [], notJson],
+        ['json_construct', ['--argjson', 'k', tooDeep], ''],
+        ['json_update_field', ['k', 'v'], notJson],
+        ['json_update_field_json', ['k', '42'], notJson],
+        // The fallback reads the file on stdin, so one it cannot open fails in the
+        // shell's redirect, silenced only by a 2>/dev/null placed before `< "$file"`.
+        ['json_slurp_cap', [path.join(dir, 'absent.jsonl'), 'confidence', '10'], ''],
+        ['json_array_length', ['items'], notJson],
+        ['json_array_item', ['items', '0'], notJson],
+        ['json_extract_cwd_field', ['prompt'], notJson],
+        ['json_extract_messages', [], notJson],
+      ];
+      const results = Object.fromEntries(rows.map(([fn, args, input]) => {
+        const run = spawnSync('bash', [
+          '-c', 'source "$1" && _HAS_JQ=false && fn="$2" && shift 2 && "$fn" "$@"',
+          '_', path.join(HOOKS_DIR, 'json-parse'), fn, ...args,
+        ], { input, encoding: 'utf8' });
+        return [fn, { status: run.status, stdout: run.stdout, stderr: run.stderr }];
+      }));
+      // Status 1 is each row's non-vacuity: the fallback really reached its error path.
+      expect(results).toEqual(Object.fromEntries(rows.map(([fn]) => [fn, { status: 1, stdout: '', stderr: '' }])));
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('json_slurp_cap is silent on stderr through jq too, for a file it cannot open or parse', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'json-slurp-cap-jq-'));
+    try {
+      const broken = path.join(dir, 'broken.jsonl');
+      fs.writeFileSync(broken, 'not-json{{{\n');
+      for (const target of [broken, path.join(dir, 'absent.jsonl')]) {
+        // _HAS_JQ=true selects the jq branch whether or not this machine has jq: a
+        // missing jq fails the same pipeline, and must be just as silent.
+        const run = spawnSync('bash', [
+          '-c', 'source "$1" && _HAS_JQ=true && json_slurp_cap "$2" confidence 10',
+          '_', path.join(HOOKS_DIR, 'json-parse'), target,
+        ], { encoding: 'utf8' });
+        expect({ stdout: run.stdout, stderr: run.stderr }, path.basename(target)).toEqual({ stdout: '', stderr: '' });
+      }
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
 });
 
 // =============================================================================
