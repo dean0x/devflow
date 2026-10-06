@@ -484,6 +484,15 @@ const RETIRED_LITERALS: ReadonlyArray<RetiredEntry> = [
       'one final action per entry it was handed, so a prose cap on top of the plumbing bound ' +
       'would only leave handed-out entries unfinished.',
   },
+  {
+    literal: 'Cap: 50 entries per file',
+    removedFrom: 'docs/reference/file-organization.md',
+    justification:
+      'The Project Knowledge section said decisions.md and pitfalls.md each hold at most 50 entries. ' +
+      'Nothing ever enforced such a cap, and the live pitfalls file held well over 50 active entries. ' +
+      'The section now says what the files hold: the active entries in full, then an Inactive table, ' +
+      'and claim-due, not a file cap, bounds what one maintenance run reads.',
+  },
 ];
 
 // ---------------------------------------------------------------------------

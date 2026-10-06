@@ -91,14 +91,18 @@ npx devflow-kit ambient --status     # Show current status (partial state detect
 ## Learning
 
 ```bash
-npx devflow-kit learning --enable     # Enable learning (decision + pitfall detection)
-npx devflow-kit learning --disable    # Disable learning (drains the learning queue)
-npx devflow-kit learning --status     # Show status and entry counts
-npx devflow-kit learning --list       # List all decisions and pitfalls
-npx devflow-kit learning --configure  # Interactive config (model, debug, scope)
-npx devflow-kit learning --clear      # Reset all observations
-npx devflow-kit learning --reset      # Remove all learning state files
+npx devflow-kit learning --enable         # Enable learning (decision + pitfall detection)
+npx devflow-kit learning --disable        # Disable learning (drains the learning queue)
+npx devflow-kit learning --status         # Show status and entry counts
+npx devflow-kit learning --list           # List entries, inactive entries with their notes, and observations
+npx devflow-kit learning --show <id>      # Print one entry (ADR-NNN or PF-NNN) or observation as JSON
+npx devflow-kit learning --restore <id>   # Make an inactive entry active again
+npx devflow-kit learning --configure      # Interactive config (model, debug, scope)
+npx devflow-kit learning --clear          # Drop the observations no entry uses; drain the queue
+npx devflow-kit learning --reset          # Remove all learning state files
 ```
+
+`learning --status` counts the active entries by type, the inactive ones by status, the active entries still in the v1 format and the observations, and warns when it skipped malformed lines. `--status`, `--list` and `--show` write nothing. `--restore` brings back an entry that was retired, superseded, encoded or deprecated, and maintenance reviews it again. `--clear` keeps every observation an entry uses and drops the rest, then drains the learning queue; it waits at most 5 seconds for the learning lock, and when the lock stays busy, or the ledger has a malformed line, it writes nothing, leaves the queue in place and exits 1.
 
 ## Feature Knowledge
 

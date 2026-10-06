@@ -42,11 +42,12 @@ devflow memory --status                # Check current state
 │   ├── .working-memory-last-trigger  # Mtime-keyed throttle for worker spawning (120s)
 │   └── .last-refresh-ok              # Touched on successful CAS swap (State C detection)
 └── learning/
-    ├── decisions.md              # Architectural decisions (ADR-NNN, append-only)
-    └── pitfalls.md               # Known pitfalls (PF-NNN, area-specific gotchas)
+    ├── decisions.md              # Architectural decisions (ADR-NNN), rendered from the learning ledger
+    ├── pitfalls.md               # Known pitfalls (PF-NNN, area-specific gotchas), rendered from the learning ledger
+    └── index.md                  # Compact index of the active entries, read by workflow commands
 ```
 
-Note: no marker files are involved anywhere in this flow — memory refresh is handled entirely by the queue + detached Stop-hook worker above. Decisions detection and curation follow the same pattern via a separate queue at `.devflow/learning/.pending-turns.jsonl` and a SessionStart-spawned detached worker (see the project CLAUDE.md's Learning pipeline section).
+Note: no marker files are involved anywhere in this flow — memory refresh is handled entirely by the queue + detached Stop-hook worker above. Decisions detection and maintenance use a separate queue at `.devflow/learning/.pending-turns.jsonl` and a background Learning agent the main model spawns on a SessionStart directive (see the Learning Pipeline section of `docs/reference/hooks.md`).
 
 Debug logs are stored at `~/.devflow/logs/{project-slug}/`, capped at the 200 most recently written project folders.
 
@@ -66,8 +67,10 @@ The `background-memory-update` worker (detached `claude -p` process spawned by `
 
 Beyond session memory, Devflow persists architectural decisions and known pitfalls:
 
-- **`decisions.md`** — ADR-numbered entries (append-only). Review agents check if changes violate prior decisions.
+- **`decisions.md`** — ADR-numbered entries. Review agents check if changes violate prior decisions.
 - **`pitfalls.md`** — PF-numbered entries scoped by area. Review agents check if changes reintroduce known pitfalls.
+
+Both files are generated from the local learning ledger and never edited by hand. The Learning agent rewrites an entry in place when its lesson sharpens, and the store keeps its prior wording in `.devflow/learning/decisions-history.jsonl`; a retired entry leaves the rendered body and is listed, with its number, in the file's Inactive table.
 
 These files are read by Review agents automatically during `/code-review`.
 
