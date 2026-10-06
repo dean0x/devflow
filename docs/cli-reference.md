@@ -102,7 +102,7 @@ npx devflow-kit learning --clear          # Drop the observations no entry uses;
 npx devflow-kit learning --reset          # Remove all learning state files
 ```
 
-`learning --status` counts the active entries by type, the inactive ones by status, the active entries still in the v1 format and the observations, and warns when it skipped malformed lines. `--status`, `--list` and `--show` write nothing. `--restore` brings back an entry that was retired, superseded, encoded or deprecated, and maintenance reviews it again. `--clear` keeps every observation an entry uses and drops the rest, then drains the learning queue; it waits at most 5 seconds for the learning lock, and when the lock stays busy, or the ledger has a malformed line, it writes nothing, leaves the queue in place and exits 1.
+`learning --status` counts the active entries by type, the inactive ones by status, the active entries still in the v1 format and the observations, and warns when it skipped malformed lines. `--status`, `--list` and `--show` write nothing. `--restore` brings back an entry that was retired, superseded, encoded or deprecated, and maintenance reviews it again. `--clear` keeps every observation an entry uses and drops the rest, then drains the learning queue; when the ledger has a malformed line it writes nothing, leaves the queue in place and exits 1. `--reset` removes `.devflow/learning/`; when there is none it prints `No learning data to reset.`, creates nothing and exits 0. `--restore`, `--clear` and `--reset` wait at most 5 seconds for the learning lock, and when it stays busy they change nothing and exit 1.
 
 ## Feature Knowledge
 
