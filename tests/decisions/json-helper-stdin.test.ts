@@ -116,12 +116,6 @@ function runWithStdinFd(cwd: string, args: readonly string[], fd: number): Helpe
   return { code: run.status ?? 1, stdout: run.stdout ?? '', stderr: run.stderr ?? '' };
 }
 
-const SLURP_ROWS = [
-  { id: 'a', confidence: 0.3 },
-  { id: 'b', confidence: 0.9 },
-  { id: 'c', confidence: 0.5 },
-];
-
 /** One reinforce input of exactly `bytes` bytes: the object, then spaces JSON allows after it. */
 function reinforceInputOf(bytes: number): string {
   const body = JSON.stringify({ id: 'obs_store_one' });
@@ -145,16 +139,6 @@ describe('json-helper reads stdin from descriptor 0, to EOF (D-STDIN-FD0)', { ti
     it(`a generic op reads JSON that arrives late, in chunks, on ${socket}`, async () => {
       expect(await runWithLateStdin(dir, ['get-field', 'a'], ['{"a":', '"b"}'], { nonBlocking })).toEqual({
         code: 0, stdout: 'b\n', stderr: '',
-      });
-    });
-
-    it(`slurp-sort and slurp-cap read JSONL that arrives late, a line per chunk, on ${socket}`, async () => {
-      const lines = SLURP_ROWS.map(row => `${JSON.stringify(row)}\n`);
-      const sorted = await runWithLateStdin(dir, ['slurp-sort', 'confidence', '2'], lines, { nonBlocking });
-      expect(sorted.code, sorted.stderr).toBe(0);
-      expect(JSON.parse(sorted.stdout)).toEqual([SLURP_ROWS[1], SLURP_ROWS[2]]);
-      expect(await runWithLateStdin(dir, ['slurp-cap', 'confidence', '2'], lines, { nonBlocking })).toEqual({
-        code: 0, stdout: `${JSON.stringify(SLURP_ROWS[1])}\n${JSON.stringify(SLURP_ROWS[2])}\n`, stderr: '',
       });
     });
 

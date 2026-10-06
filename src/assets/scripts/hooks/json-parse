@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# JSON parsing helper — tries jq, falls back to node json-helper.js
+# JSON parsing helper — tries jq, falls back to node json-helper.cjs
 # Usage: source "$SCRIPT_DIR/json-parse"
 #
 # After sourcing, check $_JSON_AVAILABLE before using json_* functions.
@@ -50,87 +50,6 @@ json_field_file() {
   fi
 }
 
-# --- Validation ---
-
-# Validate stdin as JSON (exit code 0/1). Usage: echo '{}' | json_valid
-json_valid() {
-  if [ "$_HAS_JQ" = "true" ]; then
-    jq -e . >/dev/null 2>&1
-  else
-    node "$_JSON_HELPER" validate
-  fi
-}
-
-# --- Compact ---
-
-# Compact stdin JSON to single line. Usage: echo '{ "k": "v" }' | json_compact
-json_compact() {
-  if [ "$_HAS_JQ" = "true" ]; then
-    jq -c '.' 2>/dev/null
-  else
-    node "$_JSON_HELPER" compact 2>/dev/null
-  fi
-}
-
-# --- Field updates ---
-
-# Update a field on stdin JSON. Usage: echo '{"k":"v"}' | json_update_field "k" "new_v"
-json_update_field() {
-  local field="$1" value="$2"
-  if [ "$_HAS_JQ" = "true" ]; then
-    jq -c --arg v "$value" ".$field = \$v" 2>/dev/null
-  else
-    node "$_JSON_HELPER" update-field "$field" "$value" 2>/dev/null
-  fi
-}
-
-# Update a field with a JSON value. Usage: echo '{}' | json_update_field_json "k" '42'
-json_update_field_json() {
-  local field="$1" value="$2"
-  if [ "$_HAS_JQ" = "true" ]; then
-    jq -c --argjson v "$value" ".$field = \$v" 2>/dev/null
-  else
-    node "$_JSON_HELPER" update-field "$field" "$value" --json 2>/dev/null
-  fi
-}
-
-# --- Slurp operations ---
-
-# Slurp JSONL file, sort by field desc, output as JSONL (one line per entry).
-# Usage: json_slurp_cap "file.jsonl" "confidence" 100
-# Both jq calls discard stderr, and the node path discards it BEFORE the
-# `< "$file"` redirect, so the shell's error for a file it cannot open goes too.
-json_slurp_cap() {
-  local file="$1" field="$2" limit="${3:-100}"
-  if [ "$_HAS_JQ" = "true" ]; then
-    jq -c '.' "$file" 2>/dev/null | jq -s "sort_by(.$field) | reverse | .[0:$limit][]" 2>/dev/null
-  else
-    node "$_JSON_HELPER" slurp-cap "$field" "$limit" 2>/dev/null < "$file"
-  fi
-}
-
-# --- Array operations ---
-
-# Get length of array at path. Usage: echo '{"obs":[1,2]}' | json_array_length "observations"
-json_array_length() {
-  local path="$1"
-  if [ "$_HAS_JQ" = "true" ]; then
-    jq ".$path | length" 2>/dev/null
-  else
-    node "$_JSON_HELPER" array-length "$path" 2>/dev/null
-  fi
-}
-
-# Get item at index from array. Usage: echo '{"obs":[{},{}]}' | json_array_item "observations" 0
-json_array_item() {
-  local path="$1" index="$2"
-  if [ "$_HAS_JQ" = "true" ]; then
-    jq -c ".${path}[$index]" 2>/dev/null
-  else
-    node "$_JSON_HELPER" array-item "$path" "$index" 2>/dev/null
-  fi
-}
-
 # --- Multi-field batched extraction ---
 
 # Extract cwd and an arbitrary top-level field from stdin JSON in a single
@@ -156,21 +75,6 @@ json_extract_cwd_field() {
 # it is the most common call site (capture-prompt, preamble).
 json_extract_cwd_prompt() {
   json_extract_cwd_field "prompt"
-}
-
-# --- Transcript extraction ---
-
-# Extract text messages from Claude message JSON. Usage: printf '%s\n' '{"message":...}' | json_extract_messages
-json_extract_messages() {
-  if [ "$_HAS_JQ" = "true" ]; then
-    jq -r 'if .message.content then
-      if (.message.content | type) == "string" then .message.content
-      else [.message.content[] | select(.type == "text") | .text] | join("\n")
-      end
-    else "" end' 2>/dev/null
-  else
-    node "$_JSON_HELPER" extract-text-messages 2>/dev/null
-  fi
 }
 
 # --- Hook output envelopes ---

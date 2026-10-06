@@ -207,85 +207,6 @@ describe('json-helper.js operations', () => {
     expect(result).toBe('fallback');
   });
 
-  it('validate exits 0 for valid JSON', () => {
-    expect(() => {
-      execSync(`echo '{"valid":true}' | node "${JSON_HELPER}" validate`, { stdio: 'pipe' });
-    }).not.toThrow();
-  });
-
-  it('validate exits 1 for invalid JSON', () => {
-    expect(() => {
-      execSync(`echo 'not json' | node "${JSON_HELPER}" validate`, { stdio: 'pipe' });
-    }).toThrow();
-  });
-
-  it('compact outputs single-line JSON', () => {
-    const result = execSync(
-      `echo '{ "key": "value", "num": 42 }' | node "${JSON_HELPER}" compact`,
-      { stdio: 'pipe' },
-    ).toString().trim();
-    expect(result).toBe('{"key":"value","num":42}');
-  });
-
-  it('extract-text-messages extracts text from Claude message format', () => {
-    const input = JSON.stringify({
-      message: {
-        content: [
-          { type: 'text', text: 'Hello world' },
-          { type: 'tool_result', text: 'ignored' },
-          { type: 'text', text: 'Second message' },
-        ],
-      },
-    });
-    const result = execSync(
-      `echo '${input.replace(/'/g, "'\\''")}' | node "${JSON_HELPER}" extract-text-messages`,
-      { stdio: 'pipe' },
-    ).toString().trim();
-    expect(result).toBe('Hello world\nSecond message');
-  });
-
-  it('extract-text-messages handles plain string content', () => {
-    const input = JSON.stringify({
-      message: {
-        content: 'plain string message',
-      },
-    });
-    const result = execSync(
-      `echo '${input.replace(/'/g, "'\\''")}' | node "${JSON_HELPER}" extract-text-messages`,
-      { stdio: 'pipe' },
-    ).toString().trim();
-    expect(result).toBe('plain string message');
-  });
-
-  it('merge-evidence flattens, dedupes, and limits', () => {
-    const input = JSON.stringify([['a', 'b', 'c'], ['b', 'c', 'd']]);
-    const result = execSync(
-      `echo '${input}' | node "${JSON_HELPER}" merge-evidence`,
-      { stdio: 'pipe' },
-    ).toString().trim();
-    const parsed = JSON.parse(result);
-    expect(parsed).toEqual(['a', 'b', 'c', 'd']);
-  });
-
-  const SLURP_INPUT = [
-    JSON.stringify({ id: 'a', confidence: 0.3 }),
-    JSON.stringify({ id: 'b', confidence: 0.9 }),
-    'not json',
-    JSON.stringify({ id: 'c', confidence: 0.5 }),
-  ].join('\n');
-
-  it('slurp-sort reads JSONL on stdin, sorts by the field, and limits', () => {
-    const run = spawnSync(process.execPath, [JSON_HELPER, 'slurp-sort', 'confidence', '2'], { input: SLURP_INPUT, encoding: 'utf8' });
-    expect(run.status, run.stderr).toBe(0);
-    expect(JSON.parse(run.stdout).map((row: { id: string }) => row.id)).toEqual(['b', 'c']);
-  });
-
-  it('slurp-cap reads JSONL on stdin and prints the top rows one per line', () => {
-    const run = spawnSync(process.execPath, [JSON_HELPER, 'slurp-cap', 'confidence', '2'], { input: SLURP_INPUT, encoding: 'utf8' });
-    expect(run.status, run.stderr).toBe(0);
-    expect(run.stdout.trim().split('\n').map(line => JSON.parse(line).id)).toEqual(['b', 'c']);
-  });
-
   it('session-output builds correct envelope', () => {
     const result = execSync(
       `node "${JSON_HELPER}" session-output "test context"`,
@@ -304,33 +225,6 @@ describe('json-helper.js operations', () => {
     const parsed = JSON.parse(result);
     expect(parsed.hookSpecificOutput.hookEventName).toBe('UserPromptSubmit');
     expect(parsed.hookSpecificOutput.additionalContext).toBe('test preamble');
-  });
-
-  it('update-field updates a string field', () => {
-    const result = execSync(
-      `echo '{"status":"observing","id":"obs_1"}' | node "${JSON_HELPER}" update-field status created`,
-      { stdio: 'pipe' },
-    ).toString().trim();
-    const parsed = JSON.parse(result);
-    expect(parsed.status).toBe('created');
-    expect(parsed.id).toBe('obs_1');
-  });
-
-  it('array-length returns count', () => {
-    const result = execSync(
-      `echo '{"observations":[{},{},{}]}' | node "${JSON_HELPER}" array-length observations`,
-      { stdio: 'pipe' },
-    ).toString().trim();
-    expect(result).toBe('3');
-  });
-
-  it('array-item returns item at index', () => {
-    const result = execSync(
-      `echo '{"items":[{"id":"a"},{"id":"b"}]}' | node "${JSON_HELPER}" array-item items 1`,
-      { stdio: 'pipe' },
-    ).toString().trim();
-    const parsed = JSON.parse(result);
-    expect(parsed.id).toBe('b');
   });
 
   it('a generic op loads none of the learning modules; a learning op loads the store, and the renderer only to render', () => {
@@ -437,53 +331,20 @@ describe('json-parse wrapper', () => {
   });
 
   it('every node fallback whose jq path discards stderr is silent on input it cannot parse, and still fails', () => {
-    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'json-parse-fallbacks-'));
-    try {
-      const notJson = 'not-json{{{';
-      const rows: ReadonlyArray<readonly [string, readonly string[], string]> = [
-        ['json_field', ['k', 'fallback'], notJson],
-        ['json_compact', [], notJson],
-        ['json_update_field', ['k', 'v'], notJson],
-        ['json_update_field_json', ['k', '42'], notJson],
-        // The fallback reads the file on stdin, so one it cannot open fails in the
-        // shell's redirect, silenced only by a 2>/dev/null placed before `< "$file"`.
-        ['json_slurp_cap', [path.join(dir, 'absent.jsonl'), 'confidence', '10'], ''],
-        ['json_array_length', ['items'], notJson],
-        ['json_array_item', ['items', '0'], notJson],
-        ['json_extract_cwd_field', ['prompt'], notJson],
-        ['json_extract_messages', [], notJson],
-      ];
-      const results = Object.fromEntries(rows.map(([fn, args, input]) => {
-        const run = spawnSync('bash', [
-          '-c', 'source "$1" && _HAS_JQ=false && fn="$2" && shift 2 && "$fn" "$@"',
-          '_', path.join(HOOKS_DIR, 'json-parse'), fn, ...args,
-        ], { input, encoding: 'utf8' });
-        return [fn, { status: run.status, stdout: run.stdout, stderr: run.stderr }];
-      }));
-      // Status 1 is each row's non-vacuity: the fallback really reached its error path.
-      expect(results).toEqual(Object.fromEntries(rows.map(([fn]) => [fn, { status: 1, stdout: '', stderr: '' }])));
-    } finally {
-      fs.rmSync(dir, { recursive: true, force: true });
-    }
-  });
-
-  it('json_slurp_cap is silent on stderr through jq too, for a file it cannot open or parse', () => {
-    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'json-slurp-cap-jq-'));
-    try {
-      const broken = path.join(dir, 'broken.jsonl');
-      fs.writeFileSync(broken, 'not-json{{{\n');
-      for (const target of [broken, path.join(dir, 'absent.jsonl')]) {
-        // _HAS_JQ=true selects the jq branch whether or not this machine has jq: a
-        // missing jq fails the same pipeline, and must be just as silent.
-        const run = spawnSync('bash', [
-          '-c', 'source "$1" && _HAS_JQ=true && json_slurp_cap "$2" confidence 10',
-          '_', path.join(HOOKS_DIR, 'json-parse'), target,
-        ], { encoding: 'utf8' });
-        expect({ stdout: run.stdout, stderr: run.stderr }, path.basename(target)).toEqual({ stdout: '', stderr: '' });
-      }
-    } finally {
-      fs.rmSync(dir, { recursive: true, force: true });
-    }
+    // json_field_file, whose fallback reads its file on stdin, is covered by the test above.
+    const rows: ReadonlyArray<readonly [string, readonly string[]]> = [
+      ['json_field', ['k', 'fallback']],
+      ['json_extract_cwd_field', ['prompt']],
+    ];
+    const results = Object.fromEntries(rows.map(([fn, args]) => {
+      const run = spawnSync('bash', [
+        '-c', 'source "$1" && _HAS_JQ=false && fn="$2" && shift 2 && "$fn" "$@"',
+        '_', path.join(HOOKS_DIR, 'json-parse'), fn, ...args,
+      ], { input: 'not-json{{{', encoding: 'utf8' });
+      return [fn, { status: run.status, stdout: run.stdout, stderr: run.stderr }];
+    }));
+    // Status 1 is each row's non-vacuity: the fallback really reached its error path.
+    expect(results).toEqual(Object.fromEntries(rows.map(([fn]) => [fn, { status: 1, stdout: '', stderr: '' }])));
   });
 });
 
