@@ -284,7 +284,7 @@ All three hooks source `queue-append` and call `queue_append_both`, gating each 
 
 ### Integration points
 
-- **git**: `ls-files` (scope matching, the cited-number scan), `rev-parse` (roots, verify ref), `cat-file blob` (the Encoded quote), all with the fsmonitor override spelled inline; the agent reads files at the ref with `git show`.
+- **git**: `ls-files` (scope matching, the cited-number scan), `rev-parse` (roots, verify ref), `cat-file blob` (the Encoded quote); the store makes its calls through its `git()` wrapper, whose body prepends the fsmonitor override; the agent reads files at the ref with `git show`.
 - **Install**: the store, renderer, formatter, `mkdir-lock`, `safe-path` and `json-helper` install under `~/.devflow/scripts/hooks/` (the install goldens list each), and `core/observations.js` rides with the HUD. A prompt that names an op needs that op in the installed copy.
 - **Claude Code**: SessionStart `additionalContext` carries Sections 1 to 4; the Learning and Tracker agents are spawned from directives, never from commands; hooks of one event run in parallel.
 - **Docs**: `docs/reference/hooks.md` (the Learning pipeline), `docs/reference/file-organization.md` (the data-file table and ops), `docs/cli-reference.md` (the nine `devflow learning` flags) describe this area.
@@ -324,7 +324,7 @@ Every loop and read has a bound: 100 cited-number skips, a 200,000-entry fallbac
 - **Creating `.devflow/learning/` from a writer or render path**, or passing a path or text on argv: argv holds shape-gated tokens only.
 - **Claiming the queue with `mv`, or deleting, moving or rewriting the claim or owner file by hand**: only `claim-queue`/`release-claim` (and the deliberate `--clear`/`--disable`/`--reset` drains) touch them.
 - **Quoting plumbing numbers in the Learning prompt**: staleness and batch sizes live in plumbing.
-- **A git call that reads the index without `-c core.fsmonitor=false` spelled inline**, or one whose argv is built at run time.
+- **A git call that reads the index without `-c core.fsmonitor=false` in its argv, outside a wrapper whose body prepends the override**, or one whose argv is built at run time.
 - **A ledger ID, `#123` issue reference or file-and-line reference in an observation's title, rule or why**, or any ledger ID in committed text.
 - **Reading feature flags with two separate calls**: use `queue_read_gates` (one fork). Never read or write top-level `.devflow/config.json` keys for on/off state, omit `<root>` from a `queue_read_gates` call, or resolve the manifest from the project root (the gate then fails open).
 - **Skipping the model allowlist in `session-start-context`**, or omitting the `DEVFLOW_BG_UPDATER=1` guard from a capture hook.
