@@ -12,7 +12,7 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { execSync } from 'child_process';
+import { execFileSync, execSync } from 'child_process';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
@@ -1231,6 +1231,51 @@ describe('capture hooks never write through a symbolic link under .devflow (D-HO
     expect(readJsonl(memoryQueue(cwd))).toHaveLength(1);
     expect(readJsonl(learningQueue(cwd))).toHaveLength(1);
     expect(refusals('capture-prompt', cwd), 'nothing was refused').toEqual([]);
+  });
+
+  // A real repository under a linked parent: git names its roots with every link
+  // resolved, while the cwd keeps the spelling it was given. Each queue is built from
+  // the root it is checked against, so the two spellings never meet in one check; a
+  // queue checked against the other spelling would be refused as not below its root.
+  describe('a real git repository reached through a linked parent', () => {
+    const git = (cwd: string, ...args: string[]): void => {
+      execFileSync('git', ['-c', 'user.email=t@t', '-c', 'user.name=t', '-c', 'commit.gpgsign=false', ...args], { cwd, stdio: 'ignore' });
+    };
+    let realParent: string;
+    let linkedParent: string;
+
+    beforeEach(() => {
+      realParent = path.join(tmp, 'real-parent');
+      linkedParent = path.join(tmp, 'linked-parent');
+      fs.mkdirSync(path.join(realParent, 'main'), { recursive: true });
+      git(path.join(realParent, 'main'), 'init', '-q');
+      fs.symlinkSync(realParent, linkedParent);
+    });
+
+    it('a checkout captures to both of its queues', () => {
+      const cwd = path.join(linkedParent, 'main');
+
+      expect(runHook(CAPTURE_PROMPT, { cwd, prompt: 'we chose X over Y' }, homeDir).exitCode).toBe(0);
+
+      expect(readJsonl(memoryQueue(path.join(realParent, 'main')))).toHaveLength(1);
+      expect(readJsonl(learningQueue(path.join(realParent, 'main')))).toHaveLength(1);
+      expect(refusals('capture-prompt', cwd), 'nothing was refused').toEqual([]);
+    });
+
+    it('a linked worktree captures memory to its own queue and learning to the main checkout\'s', () => {
+      const main = path.join(realParent, 'main');
+      git(main, 'commit', '-q', '--allow-empty', '-m', 'init');
+      fs.mkdirSync(path.join(main, '.devflow'));
+      git(main, 'worktree', 'add', '-q', path.join(realParent, 'wt'), '-b', 'wt');
+      const cwd = path.join(linkedParent, 'wt');
+
+      expect(runHook(CAPTURE_PROMPT, { cwd, prompt: 'we chose X over Y' }, homeDir).exitCode).toBe(0);
+
+      expect(readJsonl(memoryQueue(path.join(realParent, 'wt')))).toHaveLength(1);
+      expect(readJsonl(learningQueue(main)), 'the ledger is the repository\'s: the main checkout\'s').toHaveLength(1);
+      expect(fs.existsSync(learningQueue(path.join(realParent, 'wt'))), 'no learning queue in the worktree').toBe(false);
+      expect(refusals('capture-prompt', cwd), 'nothing was refused').toEqual([]);
+    });
   });
 
   it('memory-worker: a link at the throttle file creates nothing where it points, and no worker is spawned', () => {
