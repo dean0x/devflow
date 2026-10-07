@@ -58,6 +58,11 @@ fi
 devflow_debug_set_cwd "$CWD"
 dbg "CWD=$CWD"
 
+# Normal logging, set up before the carve-out below: its skips, and those of the
+# ensure-root-gitignore it sources, are written with log(), and with memory and
+# learning both off this hook is the only one that reaches the carve-out.
+source "$SCRIPT_DIR/hook-log-init" "session-start-context"
+
 # Anchor .devflow/ to the project root (prevents a stray nested .devflow/ when this
 # hook runs with a CWD inside .devflow/...). One git call yields both roots
 # (resolve-project-root): PROJECT_ROOT is this checkout's toplevel, LEDGER_ROOT the
@@ -89,13 +94,13 @@ fi
 # memory-independent path that fixes the gitignore/memory coupling. Single
 # source of truth: ensure-root-gitignore. Soft-fail: a gitignore write must never
 # block context injection. Marker keeps it O(1). A `.devflow` that is a symbolic
-# link is skipped, since the marker would land in the folder the link names
-# (D-HOOKS-NO-SYMLINK, git-marker).
+# link is skipped, since the marker would land in the folder the link names, and
+# the skip is logged once (D-HOOKS-NO-SYMLINK, git-marker).
 if [ -n "$PROJECT_OK" ] && [ -d "$PROJECT_ROOT" ] && [ -f "$SCRIPT_DIR/ensure-root-gitignore" ]; then
   if df_no_symlink_below "$PROJECT_ROOT" "$PROJECT_ROOT/.devflow"; then
     source "$SCRIPT_DIR/ensure-root-gitignore" "$PROJECT_ROOT" || true
   else
-    dbg "carve-out skipped: $PROJECT_ROOT/.devflow is a symbolic link"
+    log "Skipped: $PROJECT_ROOT/.devflow is a symbolic link; nothing written under it"
   fi
 fi
 
@@ -187,9 +192,6 @@ esac
 PROJECT_DEVFLOW_DIR="$PROJECT_ROOT/.devflow"
 LEDGER_DEVFLOW_DIR="$LEDGER_ROOT/.devflow"
 LEARNING_DIR="$LEDGER_DEVFLOW_DIR/learning"
-
-# Normal logging
-source "$SCRIPT_DIR/hook-log-init" "session-start-context"
 
 # --- Learning gate: the machine switch, narrowed by this checkout ---
 # D-FEATURES-NARROW-ONLY (see queue-append): ~/.devflow/manifest.json's

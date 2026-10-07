@@ -3848,6 +3848,56 @@ describe('session-start-context root .gitignore (memory-independent)', () => {
     expect(exitCode).toBe(0);
     expect(fs.readdirSync(outsideDir), 'nothing is created in the folder the link names').toEqual([]);
   });
+
+  // With memory and learning both off, this hook is the only one that reaches the
+  // carve-out, so its log is the only record of a skip there: the log must be set
+  // up before the carve-out runs, and the skip written with log(), not dbg().
+  describe('each link skip at the carve-out is logged once per run (D-HOOKS-NO-SYMLINK, D-GITIGNORE-LINK-INSIDE)', () => {
+    /** The lines of the hook's own log that report a symbolic link. */
+    const linkSkips = (): string[] => {
+      const slug = tmpDir.replace(/^\//, '').replace(/\//g, '-');
+      const log = path.join(homeDir, '.devflow', 'logs', slug, '.session-start-context.log');
+      return fs.existsSync(log) ? fs.readFileSync(log, 'utf-8').split('\n').filter((l) => l.includes('symbolic link')) : [];
+    };
+
+    beforeEach(() => {
+      fs.writeFileSync(
+        path.join(homeDir, '.devflow', 'manifest.json'),
+        JSON.stringify({ version: '2.0.0', features: { memory: false, learning: false } }),
+      );
+    });
+
+    const run = () => runHook(CONTEXT_HOOK, { cwd: tmpDir, source: 'startup' }, homeDir);
+
+    it('a linked .devflow: one skip line per run, and nothing where the link points', () => {
+      const outsideDir = path.join(homeDir, 'outside');
+      fs.mkdirSync(outsideDir);
+      fs.symlinkSync(outsideDir, path.join(tmpDir, '.devflow'));
+
+      expect(run().exitCode).toBe(0);
+      expect(fs.readdirSync(outsideDir)).toEqual([]);
+      expect(linkSkips(), 'the skip is logged once').toEqual([expect.stringContaining('.devflow is a symbolic link')]);
+
+      expect(run().exitCode).toBe(0);
+      expect(linkSkips(), 'and once more on the next run, not repeated within one').toHaveLength(2);
+    });
+
+    it('a root .gitignore linked outside the project: one skip line, and the file it names untouched', () => {
+      const target = path.join(homeDir, 'outside-gitignore');
+      fs.writeFileSync(target, 'a file outside the project\n');
+      fs.symlinkSync(target, path.join(tmpDir, '.gitignore'));
+
+      expect(run().exitCode).toBe(0);
+      expect(fs.readFileSync(target, 'utf-8')).toBe('a file outside the project\n');
+      expect(linkSkips(), 'the skip is logged once').toEqual([expect.stringContaining('.gitignore is a symbolic link')]);
+    });
+
+    it('a project with no link logs no skip', () => {
+      expect(run().exitCode).toBe(0);
+      expect(fs.existsSync(path.join(tmpDir, '.devflow', '.root-gitignore-configured-v6')), 'non-vacuity: the carve-out ran').toBe(true);
+      expect(linkSkips()).toEqual([]);
+    });
+  });
 });
 
 // =============================================================================
