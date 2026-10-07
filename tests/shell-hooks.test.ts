@@ -2375,8 +2375,9 @@ describe('ensure-root-gitignore behavioral', () => {
 
   // D-GITIGNORE-LINK-INSIDE: a repository can commit its root .gitignore as a symbolic
   // link to any file on the machine. The helper writes through one only when the file
-  // it resolves to lies inside the project and outside its .git; otherwise it writes
-  // nothing anywhere, stamps no marker, logs the skip once and lets its caller go on.
+  // it resolves to lies inside the project and outside any .git folder in it, the
+  // project's own or a nested repository's; otherwise it writes nothing anywhere,
+  // stamps no marker, logs the skip once and lets its caller go on.
   describe('a root .gitignore that is a symbolic link (D-GITIGNORE-LINK-INSIDE)', () => {
     const UNTOUCHED = 'a file outside the project, which no hook may write\n';
 
@@ -3460,6 +3461,8 @@ describe('ensure-root-gitignore × ensureDevflowGitignore: a root .gitignore tha
 
   interface Row {
     readonly label: string;
+    /** The project root, relative to the sandbox: `repo` unless the row places it elsewhere. */
+    readonly root?: string;
     readonly setup: (s: Sandbox) => void;
     /** `refused`: nothing in the sandbox changes. `written`: that file, relative to the sandbox, gains the block. */
     readonly outcome: 'refused' | { readonly written: string };
@@ -3537,6 +3540,87 @@ describe('ensure-root-gitignore × ensureDevflowGitignore: a root .gitignore tha
       outcome: 'refused',
     },
     {
+      label: 'a link to the config in a nested repository\'s .git',
+      setup: s => {
+        fs.mkdirSync(path.join(s.repo, 'vendor', 'lib', '.git'), { recursive: true });
+        fs.writeFileSync(path.join(s.repo, 'vendor', 'lib', '.git', 'config'), '[core]\n');
+        fs.symlinkSync('vendor/lib/.git/config', path.join(s.repo, '.gitignore'));
+      },
+      outcome: 'refused',
+    },
+    {
+      label: 'a link to a git hook in a nested repository\'s .git',
+      setup: s => {
+        fs.mkdirSync(path.join(s.repo, 'vendor', 'lib', '.git', 'hooks'), { recursive: true });
+        fs.writeFileSync(path.join(s.repo, 'vendor', 'lib', '.git', 'hooks', 'pre-commit'), '#!/bin/sh\n', { mode: 0o755 });
+        fs.symlinkSync('vendor/lib/.git/hooks/pre-commit', path.join(s.repo, '.gitignore'));
+      },
+      outcome: 'refused',
+    },
+    {
+      label: 'a link to a missing git hook in a nested repository\'s .git',
+      setup: s => {
+        fs.mkdirSync(path.join(s.repo, 'vendor', 'lib', '.git', 'hooks'), { recursive: true });
+        fs.symlinkSync('vendor/lib/.git/hooks/post-checkout', path.join(s.repo, '.gitignore'));
+      },
+      outcome: 'refused',
+    },
+    {
+      label: 'a link to the .git file of a nested submodule',
+      setup: s => {
+        fs.mkdirSync(path.join(s.repo, 'vendor', 'lib'), { recursive: true });
+        fs.writeFileSync(path.join(s.repo, 'vendor', 'lib', '.git'), 'gitdir: ../../.git/modules/lib\n');
+        fs.symlinkSync('vendor/lib/.git', path.join(s.repo, '.gitignore'));
+      },
+      outcome: 'refused',
+    },
+    {
+      label: 'a link through a linked folder that leads into a nested repository\'s .git',
+      setup: s => {
+        fs.mkdirSync(path.join(s.repo, 'vendor', 'lib', '.git'), { recursive: true });
+        fs.writeFileSync(path.join(s.repo, 'vendor', 'lib', '.git', 'config'), '[core]\n');
+        fs.symlinkSync('vendor/lib/.git', path.join(s.repo, 'config'));
+        fs.symlinkSync('config/config', path.join(s.repo, '.gitignore'));
+      },
+      outcome: 'refused',
+    },
+    {
+      // On a case-insensitive file system (macOS) `.GIT` opens the project's own
+      // `.git`; on a case-sensitive one it names nothing there. The on-disk folder is
+      // `.git` either way, and both twins refuse the link on both.
+      label: 'a link that spells the project\'s .git in capitals, to a git hook',
+      setup: s => {
+        fs.mkdirSync(path.join(s.repo, '.git', 'hooks'), { recursive: true });
+        fs.writeFileSync(path.join(s.repo, '.git', 'hooks', 'pre-commit'), '#!/bin/sh\n', { mode: 0o755 });
+        fs.symlinkSync('.GIT/hooks/pre-commit', path.join(s.repo, '.gitignore'));
+      },
+      outcome: 'refused',
+    },
+    {
+      label: 'a link that spells a nested submodule\'s .git file in capitals',
+      setup: s => {
+        fs.mkdirSync(path.join(s.repo, 'vendor', 'lib'), { recursive: true });
+        fs.writeFileSync(path.join(s.repo, 'vendor', 'lib', '.git'), 'gitdir: ../../.git/modules/lib\n');
+        fs.symlinkSync('vendor/lib/.Git', path.join(s.repo, '.gitignore'));
+      },
+      outcome: 'refused',
+    },
+    {
+      label: 'a link to a file in folders whose names only contain .git',
+      setup: s => {
+        fs.mkdirSync(path.join(s.repo, '.github', 'lib.git'), { recursive: true });
+        fs.writeFileSync(path.join(s.repo, '.github', 'lib.git', 'gi'), SEED);
+        fs.symlinkSync('.github/lib.git/gi', path.join(s.repo, '.gitignore'));
+      },
+      outcome: { written: 'repo/.github/lib.git/gi' },
+    },
+    {
+      label: 'a link to a file inside a project that itself lies in a folder named .git',
+      root: '.git/repo',
+      setup: s => { fs.mkdirSync(path.join(s.repo, 'config')); fs.writeFileSync(path.join(s.repo, 'config', 'gi'), SEED); fs.symlinkSync('config/gi', path.join(s.repo, '.gitignore')); },
+      outcome: { written: '.git/repo/config/gi' },
+    },
+    {
       label: 'a link to the project folder itself',
       setup: s => fs.symlinkSync('.', path.join(s.repo, '.gitignore')),
       outcome: 'refused',
@@ -3560,8 +3644,8 @@ describe('ensure-root-gitignore × ensureDevflowGitignore: a root .gitignore tha
 
   function makeSandbox(row: Row): Sandbox {
     const sb = fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-linked-gitignore-'));
-    const s = { sb, repo: path.join(sb, 'repo'), outside: path.join(sb, 'outside') };
-    fs.mkdirSync(s.repo);
+    const s = { sb, repo: path.join(sb, row.root ?? 'repo'), outside: path.join(sb, 'outside') };
+    fs.mkdirSync(s.repo, { recursive: true });
     fs.mkdirSync(s.outside);
     row.setup(s);
     return s;
@@ -3612,8 +3696,8 @@ describe('ensure-root-gitignore × ensureDevflowGitignore: a root .gitignore tha
   }
 
   it('the table holds every layout the rule distinguishes', () => {
-    expect(ROWS.filter(r => r.outcome === 'refused').length).toBeGreaterThanOrEqual(10);
-    expect(ROWS.filter(r => r.outcome !== 'refused').length).toBeGreaterThanOrEqual(5);
+    expect(ROWS.filter(r => r.outcome === 'refused').length).toBeGreaterThanOrEqual(17);
+    expect(ROWS.filter(r => r.outcome !== 'refused').length).toBeGreaterThanOrEqual(7);
   });
 
   for (const row of ROWS) {
@@ -3634,12 +3718,13 @@ describe('ensure-root-gitignore × ensureDevflowGitignore: a root .gitignore tha
           expect(shellLog, 'the hook logs the skip once').toEqual([expect.stringContaining('symbolic link')]);
           expect(tsWarnings, 'init reports the skip once').toEqual([expect.stringContaining('symbolic link')]);
         } else {
+          const root = row.root ?? 'repo';
           const prior = before[row.outcome.written];
           const priorText = prior === undefined ? '' : prior.slice('file '.length);
           expect(shellAfter[row.outcome.written], 'the target gains the block').toBe(`file ${computeDevflowGitignore(priorText)}`);
-          expect(shellAfter['repo/.devflow/.root-gitignore-configured-v6'], 'the run is stamped').toBe('file ');
-          if (before['repo/.gitignore'].startsWith('link')) {
-            expect(shellAfter['repo/.gitignore'], 'a link stays a link').toBe(before['repo/.gitignore']);
+          expect(shellAfter[`${root}/.devflow/.root-gitignore-configured-v6`], 'the run is stamped').toBe('file ');
+          if (before[`${root}/.gitignore`].startsWith('link')) {
+            expect(shellAfter[`${root}/.gitignore`], 'a link stays a link').toBe(before[`${root}/.gitignore`]);
           }
           expect(shellLog, 'nothing to log').toEqual([]);
           expect(tsWarnings, 'nothing to report').toEqual([]);

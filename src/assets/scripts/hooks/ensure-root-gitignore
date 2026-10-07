@@ -59,14 +59,18 @@
 # All matching is whole-line and whitespace-tolerant; never substring.
 #
 # D-GITIGNORE-LINK-INSIDE: a root .gitignore that is a symbolic link is written only
-# when the file it resolves to lies inside the project root and outside its .git, and
-# then that file is read and written directly, never through the link. Otherwise
-# nothing is read or written anywhere, no marker is stamped, the skip is logged once
-# and the caller goes on. Reason: a repository can commit .gitignore as a link to any
-# file on the machine, and the carve-out would be appended to it; a file under .git
-# is no file of the repository's either, but git's own hooks and config. The TS twin,
-# ensureDevflowGitignore in src/targets/claude-code/post-install.ts, applies the same
-# rule the same way: the link is followed one hop at a time, at most 40 hops, and
+# when the file it resolves to lies inside the project root and outside any .git
+# folder in the project, the project's own or a nested repository's: no part of its
+# path below the root may be named .git, in any letter case, as git itself refuses
+# such a path. Then that file is read and written directly, never through the link.
+# Otherwise nothing is read or written anywhere, no marker is stamped, the skip is
+# logged once and the caller goes on. Reason: a repository can commit .gitignore as a
+# link to any file on the machine, and the carve-out would be appended to it; a file
+# in a .git is no file of the repository's either, but git's own hooks and config,
+# and a line appended to a hook runs as a command the next time git runs it. The case
+# matters because a case-insensitive file system (macOS) opens .git for .GIT. The TS
+# twin, ensureDevflowGitignore in src/targets/claude-code/post-install.ts, applies the
+# same rule the same way: the link is followed one hop at a time, at most 40 hops, and
 # only its last folder is resolved physically, so a missing file inside the project
 # is created there as before.
 #
@@ -82,14 +86,15 @@ _ERG_GITIGNORE="$1/.gitignore"
 
 # _erg_resolve_inside <root> <link> — follow the symbolic link <link> one hop at a
 # time, at most 40, and set _ERG_RESOLVED to the file it leads to, its folder
-# resolved physically. Returns 0 when that file lies inside <root> and outside its
-# .git (D-GITIGNORE-LINK-INSIDE); returns 1, with _ERG_RESOLVED empty, when it does
-# not and when the link cannot be followed: a read that fails, an empty or folder-like
-# target, a chain longer than 40, a folder that does not resolve. A predicate: call it
-# in an `if`, never as a plain statement under `set -e`. Relative targets are joined
-# to the folder the link sits in as spelled, never normalised, so `..` is resolved by
-# the file system as the write itself would resolve it. Each hop forks one readlink;
-# `cd -P` and $PWD are builtins, and the caller's folder is restored before returning.
+# resolved physically. Returns 0 when that file lies inside <root> and no part of its
+# path below <root> is named .git in any letter case (D-GITIGNORE-LINK-INSIDE);
+# returns 1, with _ERG_RESOLVED empty, when it does not and when the link cannot be
+# followed: a read that fails, an empty or folder-like target, a chain longer than
+# 40, a folder that does not resolve. A predicate: call it in an `if`, never as a
+# plain statement under `set -e`. Relative targets are joined to the folder the link
+# sits in as spelled, never normalised, so `..` is resolved by the file system as the
+# write itself would resolve it. Each hop forks one readlink; `cd -P` and $PWD are
+# builtins, and the caller's folder is restored before returning.
 _erg_resolve_inside() {
   local _root="$1" _cur="$2" _target="" _dir="" _base="" _root_real="" _hops=0 _back="$PWD"
   _ERG_RESOLVED=''
@@ -122,8 +127,15 @@ _erg_resolve_inside() {
   cd "$_back" 2>/dev/null || true
   case "$_ERG_RESOLVED" in
     '') ;;
-    "$_root_real"/.git|"$_root_real"/.git/*) ;;
-    "$_root_real"/?*) return 0 ;;
+    "$_root_real"/?*)
+      # Each part below the root is tested whole, in any letter case: `cd -P` keeps
+      # the spelling the link gave, and a case-insensitive file system opens `.git`
+      # for `.GIT`.
+      case "/${_ERG_RESOLVED#"$_root_real"/}/" in
+        */.[Gg][Ii][Tt]/*) ;;
+        *) return 0 ;;
+      esac
+      ;;
   esac
   _ERG_RESOLVED=''
   return 1
@@ -136,7 +148,7 @@ if [ -L "$_ERG_GITIGNORE" ]; then
     _ERG_GITIGNORE="$_ERG_RESOLVED"
   else
     if declare -F log >/dev/null 2>&1; then
-      log "Skipped: $_ERG_GITIGNORE is a symbolic link that leads outside the project, into its .git, or nowhere; nothing was written through it"
+      log "Skipped: $_ERG_GITIGNORE is a symbolic link that leads outside the project, into a .git, or nowhere; nothing was written through it"
     fi
     return 0
   fi

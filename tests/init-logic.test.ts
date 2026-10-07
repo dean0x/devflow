@@ -551,8 +551,9 @@ describe('ensureDevflowGitignore — v6 carve-out (.claudeignore + retired polic
 
 // D-GITIGNORE-LINK-INSIDE: a repository can commit its root .gitignore as a symbolic
 // link to any file on the machine. init writes through one only when the file it
-// resolves to lies inside the project and outside its .git, exactly as the
-// ensure-root-gitignore hook does; otherwise it writes nothing anywhere and says so.
+// resolves to lies inside the project and outside any .git folder in it, the
+// project's own or a nested repository's, exactly as the ensure-root-gitignore hook
+// does; otherwise it writes nothing anywhere and says so.
 describe('ensureDevflowGitignore — a root .gitignore that is a symbolic link (D-GITIGNORE-LINK-INSIDE)', () => {
   const UNTOUCHED = 'a file outside the project, which init may not write\n';
   let tmpDir: string;

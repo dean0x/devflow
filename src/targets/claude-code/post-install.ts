@@ -1340,6 +1340,9 @@ async function removeLegacyGitignoreMarkers(devflowDir: string): Promise<void> {
 /** The most symbolic links followed from the root `.gitignore` to the file it names. */
 const GITIGNORE_LINK_HOPS = 40;
 
+/** A path part that is a `.git`, in any letter case; ASCII only, like the shell twin's `.[Gg][Ii][Tt]`. */
+const DOT_GIT_PART = /^\.git$/i;
+
 /** True when `file` is itself a symbolic link; false for anything else, or nothing, there. */
 async function isSymbolicLink(file: string): Promise<boolean> {
   try {
@@ -1352,20 +1355,27 @@ async function isSymbolicLink(file: string): Promise<boolean> {
 /**
  * The file a write to the root `.gitignore` goes to: `gitignorePath` itself when it is
  * not a symbolic link; the file the link resolves to when that lies inside `gitRoot`
- * and outside its `.git`; null otherwise, and when the link cannot be followed.
+ * and outside any `.git` in it; null otherwise, and when the link cannot be followed.
  *
  * D-GITIGNORE-LINK-INSIDE: a root .gitignore that is a symbolic link is written only
- * when the file it resolves to lies inside the project root and outside its .git, and
- * then that file is read and written directly, never through the link. Reason: a
- * repository can commit .gitignore as a link to any file on the machine, and the
- * carve-out would be appended to it; a file under .git is no file of the repository's
- * either, but git's own hooks and config. The shell twin, `_erg_resolve_inside` in
- * src/assets/scripts/hooks/ensure-root-gitignore, applies the same rule the same way:
- * the link is followed one hop at a time, at most {@link GITIGNORE_LINK_HOPS} hops, a
- * relative target is joined to the folder the link sits in without normalising it
- * (so `..` is resolved by the file system, as the write would resolve it), and only
- * the last folder is resolved physically, so a missing file inside the project is
- * created there as before.
+ * when the file it resolves to lies inside the project root and outside any .git
+ * folder in the project, the project's own or a nested repository's: no part of its
+ * path below the root may be named .git, in any letter case, as git itself refuses
+ * such a path. Then that file is read and written directly, never through the link.
+ * Reason: a repository can commit .gitignore as a link to any file on the machine, and
+ * the carve-out would be appended to it; a file in a .git is no file of the
+ * repository's either, but git's own hooks and config, and a line appended to a hook
+ * runs as a command the next time git runs it. The name is matched in any case because a
+ * case-insensitive file system (macOS) opens .git for .GIT, and the spelling the link
+ * gave survives resolution: realpath gives only the folders their case on disk, never
+ * the file's own name, and the shell twin's `cd -P` keeps the link's spelling
+ * throughout ({@link DOT_GIT_PART}).
+ * The shell twin, `_erg_resolve_inside` in src/assets/scripts/hooks/ensure-root-gitignore,
+ * applies the same rule the same way: the link is followed one hop at a time, at most
+ * {@link GITIGNORE_LINK_HOPS} hops, a relative target is joined to the folder the link
+ * sits in without normalising it (so `..` is resolved by the file system, as the write
+ * would resolve it), and only the last folder is resolved physically, so a missing
+ * file inside the project is created there as before.
  */
 async function resolveGitignoreTarget(gitRoot: string, gitignorePath: string): Promise<string | null> {
   if (!(await isSymbolicLink(gitignorePath))) return gitignorePath;
@@ -1397,8 +1407,7 @@ async function resolveGitignoreTarget(gitRoot: string, gitignorePath: string): P
   const rootPrefix = rootReal === '/' ? '/' : `${rootReal}/`;
   const resolved = `${dirReal === '/' ? '' : dirReal}/${base}`;
   if (!resolved.startsWith(rootPrefix)) return null;
-  const inRoot = resolved.slice(rootPrefix.length);
-  return inRoot === '.git' || inRoot.startsWith('.git/') ? null : resolved;
+  return resolved.slice(rootPrefix.length).split('/').some(part => DOT_GIT_PART.test(part)) ? null : resolved;
 }
 
 /**
@@ -1423,7 +1432,7 @@ async function resolveGitignoreTarget(gitRoot: string, gitignorePath: string): P
  * Idempotent: computeDevflowGitignore returns null for a converged file, so a
  * converged install performs one read and no write. Errors are swallowed
  * (verbose-logged) — a gitignore write must never abort init. A `.gitignore` that
- * is a symbolic link leading outside the project, into its `.git`, or nowhere is left
+ * is a symbolic link leading outside the project, into a `.git`, or nowhere is left
  * untouched (D-GITIGNORE-LINK-INSIDE, {@link resolveGitignoreTarget}), and nothing is
  * written or removed under a `.devflow`, or through a marker, that is a symbolic link
  * (D-CLI-NO-SYMLINK, firstSymbolicLink); either skip is always reported.
@@ -1438,7 +1447,7 @@ export async function ensureDevflowGitignore(
     const rootGitignore = path.join(gitRoot, '.gitignore');
     const gitignorePath = await resolveGitignoreTarget(gitRoot, rootGitignore);
     if (gitignorePath === null) {
-      p.log.warn(`.gitignore not updated: ${rootGitignore} is a symbolic link that leads outside the project, into its .git, or nowhere; devflow writes nothing through it`);
+      p.log.warn(`.gitignore not updated: ${rootGitignore} is a symbolic link that leads outside the project, into a .git, or nowhere; devflow writes nothing through it`);
       return;
     }
 
