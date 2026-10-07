@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { promises as fs } from 'fs';
 import * as path from 'path';
 import * as os from 'os';
@@ -405,7 +405,7 @@ describe('cleanQueueFiles', () => {
 
   it('returns cleaned=0 when no projects provided', async () => {
     const result = await cleanQueueFiles([]);
-    expect(result).toEqual({ cleaned: 0, projects: [] });
+    expect(result).toEqual({ cleaned: 0, projects: [], refused: [] });
   });
 
   it('cleans both queue files when both exist', async () => {
@@ -436,8 +436,38 @@ describe('cleanQueueFiles', () => {
     await fs.mkdir(memDir, { recursive: true });
 
     const result = await cleanQueueFiles([tmpDir]);
-    expect(result).toEqual({ cleaned: 0, projects: [] });
+    expect(result).toEqual({ cleaned: 0, projects: [], refused: [] });
   });
+
+  // D-CLI-NO-SYMLINK: `devflow memory --clear` walks every known project, and a
+  // repository can commit .devflow or .devflow/memory as a link to a folder elsewhere.
+  for (const linked of ['.devflow', path.join('.devflow', 'memory')]) {
+    it(`refuses a project whose ${linked} is a link: deletes nothing where it points, and names the link (D-CLI-NO-SYMLINK)`, async () => {
+      vi.stubEnv('HOME', path.join(tmpDir, 'home'));
+      try {
+        const outside = path.join(tmpDir, 'outside');
+        const queueDir = linked === '.devflow' ? path.join(outside, 'memory') : outside;
+        await fs.mkdir(queueDir, { recursive: true });
+        const files = ['.pending-turns.jsonl', '.pending-turns.processing'].map(f => path.join(queueDir, f));
+        for (const file of files) await fs.writeFile(file, 'a file outside the project\n');
+        const project = path.join(tmpDir, 'linked-project');
+        await fs.mkdir(path.join(project, '.devflow'), { recursive: true });
+        if (linked === '.devflow') await fs.rm(path.join(project, '.devflow'), { recursive: true });
+        await fs.symlink(outside, path.join(project, linked));
+        const plain = path.join(tmpDir, 'plain-project');
+        await fs.mkdir(path.join(plain, '.devflow', 'memory'), { recursive: true });
+        await fs.writeFile(path.join(plain, '.devflow', 'memory', '.pending-turns.jsonl'), 'data');
+
+        const result = await cleanQueueFiles([project, plain]);
+
+        const kept = await Promise.all(files.map(file => fs.access(file).then(() => true, () => false)));
+        expect(kept, 'nothing is deleted through the link').toEqual([true, true]);
+        expect(result).toEqual({ cleaned: 1, projects: [plain], refused: [path.join(project, linked)] });
+      } finally {
+        vi.unstubAllEnvs();
+      }
+    });
+  }
 
   it('skips projects where lock directory is present', async () => {
     const memDir = path.join(tmpDir, '.devflow', 'memory');
@@ -447,7 +477,7 @@ describe('cleanQueueFiles', () => {
     await fs.mkdir(path.join(memDir, '.working-memory.lock'), { recursive: true });
 
     const result = await cleanQueueFiles([tmpDir]);
-    expect(result).toEqual({ cleaned: 0, projects: [] });
+    expect(result).toEqual({ cleaned: 0, projects: [], refused: [] });
     // File should remain untouched
     await expect(fs.access(path.join(memDir, '.pending-turns.jsonl'))).resolves.toBeUndefined();
   });

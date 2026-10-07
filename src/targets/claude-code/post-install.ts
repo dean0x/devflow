@@ -4,6 +4,7 @@ import * as path from 'path';
 import * as p from '@clack/prompts';
 import { getManagedSettingsPath } from './claude-paths.js';
 import { writeSettingsFileAtomic } from '../../core/fs-atomic.js';
+import { firstSymbolicLink } from '../../core/linked-path.js';
 import type { SecurityMode } from '../../core/manifest.js';
 
 /**
@@ -1249,6 +1250,20 @@ export async function installClaudeignore(
 }
 
 /**
+ * Whether `gitRoot` already holds a `.claudeignore`, as
+ * {@link installClaudeignore}'s exclusive create sees it: lstat, not stat, so a
+ * dangling symlink counts as present — the create refuses one too.
+ */
+export async function hasClaudeignore(gitRoot: string): Promise<boolean> {
+  try {
+    await fs.lstat(path.join(gitRoot, '.claudeignore'));
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
  * Discover git repository roots from Claude's project history.
  * Parses `<claudeDir>/history.jsonl` for unique project paths that are valid git repos.
  * @param claudeDir - The Claude Code directory whose history is read — the caller
@@ -1303,9 +1318,9 @@ export async function discoverProjectGitRoots(claudeDir: string): Promise<string
  */
 const GITIGNORE_MARKER_V6 = '.root-gitignore-configured-v6';
 /**
- * Earlier markers, the unversioned (v1) one included — every one is removed
- * whenever the project is v6-stamped, on the fast path too: an older devflow can
- * re-stamp one beside v6, and the shell twin drops the same five.
+ * Earlier markers, the unversioned (v1) one included — every run removes all of them
+ * once v6 is stamped, a project already stamped included: an older devflow can
+ * re-stamp one beside v6, and the shell twin drops the same five, on its fast path too.
  */
 const LEGACY_GITIGNORE_MARKERS = [
   '.root-gitignore-configured-v5',
@@ -1322,6 +1337,79 @@ async function removeLegacyGitignoreMarkers(devflowDir: string): Promise<void> {
   }
 }
 
+/** The most symbolic links followed from the root `.gitignore` to the file it names. */
+const GITIGNORE_LINK_HOPS = 40;
+
+/** A path part that is a `.git`, in any letter case; ASCII only, like the shell twin's `.[Gg][Ii][Tt]`. */
+const DOT_GIT_PART = /^\.git$/i;
+
+/** True when `file` is itself a symbolic link; false for anything else, or nothing, there. */
+async function isSymbolicLink(file: string): Promise<boolean> {
+  try {
+    return (await fs.lstat(file)).isSymbolicLink();
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * The file a write to the root `.gitignore` goes to: `gitignorePath` itself when it is
+ * not a symbolic link; the file the link resolves to when that lies inside `gitRoot`
+ * and outside any `.git` in it; null otherwise, and when the link cannot be followed.
+ *
+ * D-GITIGNORE-LINK-INSIDE: a root .gitignore that is a symbolic link is written only
+ * when the file it resolves to lies inside the project root and outside any .git
+ * folder in the project, the project's own or a nested repository's: no part of its
+ * path below the root may be named .git, in any letter case, as git itself refuses
+ * such a path. Then that file is read and written directly, never through the link.
+ * Reason: a repository can commit .gitignore as a link to any file on the machine, and
+ * the carve-out would be appended to it; a file in a .git is no file of the
+ * repository's either, but git's own hooks and config, and a line appended to a hook
+ * runs as a command the next time git runs it. The name is matched in any case because a
+ * case-insensitive file system (macOS) opens .git for .GIT, and the spelling the link
+ * gave survives resolution: realpath gives only the folders their case on disk, never
+ * the file's own name, and the shell twin's `cd -P` keeps the link's spelling
+ * throughout ({@link DOT_GIT_PART}).
+ * The shell twin, `_erg_resolve_inside` in src/assets/scripts/hooks/ensure-root-gitignore,
+ * applies the same rule the same way: the link is followed one hop at a time, at most
+ * {@link GITIGNORE_LINK_HOPS} hops, a relative target is joined to the folder the link
+ * sits in without normalising it (so `..` is resolved by the file system, as the write
+ * would resolve it), and only the last folder is resolved physically, so a missing
+ * file inside the project is created there as before.
+ */
+async function resolveGitignoreTarget(gitRoot: string, gitignorePath: string): Promise<string | null> {
+  if (!(await isSymbolicLink(gitignorePath))) return gitignorePath;
+  let current = path.resolve(gitignorePath);
+  for (let hops = 0; await isSymbolicLink(current); hops++) {
+    if (hops === GITIGNORE_LINK_HOPS) return null;
+    let target: string;
+    try {
+      target = await fs.readlink(current);
+    } catch {
+      return null;
+    }
+    if (target === '') return null;
+    current = target.startsWith('/') ? target : `${current.slice(0, current.lastIndexOf('/'))}/${target}`;
+  }
+  const slash = current.lastIndexOf('/');
+  const base = current.slice(slash + 1);
+  if (base === '' || base === '.' || base === '..') return null;
+  let rootReal: string;
+  let dirReal: string;
+  try {
+    // fs.promises.realpath is realpath(3), so a `..` after a linked folder goes where
+    // the write would go; the synchronous JS realpath normalises `..` away first.
+    rootReal = await fs.realpath(gitRoot);
+    dirReal = await fs.realpath(current.slice(0, slash) || '/');
+  } catch {
+    return null;
+  }
+  const rootPrefix = rootReal === '/' ? '/' : `${rootReal}/`;
+  const resolved = `${dirReal === '/' ? '' : dirReal}/${base}`;
+  if (!resolved.startsWith(rootPrefix)) return null;
+  return resolved.slice(rootPrefix.length).split('/').some(part => DOT_GIT_PART.test(part)) ? null : resolved;
+}
+
 /**
  * Deterministically ensure the project root .gitignore applies the `.devflow/`
  * carve-out (local by default; feature knowledge, conventions.md, the evidence
@@ -1336,15 +1424,18 @@ async function removeLegacyGitignoreMarkers(devflowDir: string): Promise<void> {
  * Called unconditionally (independent of every feature toggle) whenever a git
  * root is known.
  *
- * Uses a versioned project-local marker file (`.devflow/.root-gitignore-configured-v6`)
- * for fast-path detection — the same pattern as the shell twin. The marker is a claim,
- * not proof, so even a marked install re-reads .gitignore and re-runs
- * computeDevflowGitignore; bumping the version forces a re-run once per install, which
- * is how a v5-marked project gains the project line and is re-stamped v6.
+ * Stamps a versioned project-local marker (`.devflow/.root-gitignore-configured-v6`),
+ * the claim the hooks' fast path reads: the shell twin and ensure-devflow-init skip
+ * the carve-out while it stands. The marker is a claim, not proof, so this function
+ * never trusts it: every run re-reads .gitignore and re-runs computeDevflowGitignore.
  *
  * Idempotent: computeDevflowGitignore returns null for a converged file, so a
- * marked install performs one read and no write. Errors are swallowed
- * (verbose-logged) — a gitignore write must never abort init.
+ * converged install performs one read and no write. Errors are swallowed
+ * (verbose-logged) — a gitignore write must never abort init. A `.gitignore` that
+ * is a symbolic link leading outside the project, into a `.git`, or nowhere is left
+ * untouched (D-GITIGNORE-LINK-INSIDE, {@link resolveGitignoreTarget}), and nothing is
+ * written or removed under a `.devflow`, or through a marker, that is a symbolic link
+ * (D-CLI-NO-SYMLINK, firstSymbolicLink); either skip is always reported.
  */
 export async function ensureDevflowGitignore(
   gitRoot: string,
@@ -1353,29 +1444,16 @@ export async function ensureDevflowGitignore(
   try {
     const devflowDir = path.join(gitRoot, '.devflow');
     const markerV6 = path.join(devflowDir, GITIGNORE_MARKER_V6);
-    const gitignorePath = path.join(gitRoot, '.gitignore');
-
-    // Fast-path with verification: v6 marker normally means the block is installed,
-    // but the marker is a claim, not proof — a merge-conflict resolution may have
-    // dropped the block. Even when the marker exists, read .gitignore (one cheap
-    // read) and run computeDevflowGitignore; write only when it returns non-null.
-    // Idempotent: converged file → computeDevflowGitignore returns null → no write.
-    let v6Marked = false;
-    try { await fs.access(markerV6); v6Marked = true; } catch { /* absent */ }
-    if (v6Marked) {
-      let existingContent = '';
-      try { existingContent = await fs.readFile(gitignorePath, 'utf-8'); } catch { /* absent */ }
-      const healContent = computeDevflowGitignore(existingContent);
-      if (healContent !== null) {
-        await fs.writeFile(gitignorePath, healContent, 'utf-8');
-        if (verbose) {
-          p.log.success('.gitignore configured (.devflow/ local; feature knowledge + conventions + retired policy.json + project settings shared)');
-        }
-      }
-      await removeLegacyGitignoreMarkers(devflowDir);
+    const rootGitignore = path.join(gitRoot, '.gitignore');
+    const gitignorePath = await resolveGitignoreTarget(gitRoot, rootGitignore);
+    if (gitignorePath === null) {
+      p.log.warn(`.gitignore not updated: ${rootGitignore} is a symbolic link that leads outside the project, into a .git, or nowhere; devflow writes nothing through it`);
       return;
     }
 
+    // A merge-conflict resolution may have dropped the block from a stamped project,
+    // so the file is always read; it is written only when computeDevflowGitignore
+    // returns non-null, which a converged file never does.
     let gitignoreContent = '';
     try {
       gitignoreContent = await fs.readFile(gitignorePath, 'utf-8');
@@ -1389,9 +1467,22 @@ export async function ensureDevflowGitignore(
       }
     }
 
-    // Stamp v6 marker so subsequent runs fast-path; drop every legacy marker.
+    // Everything below writes or removes under .devflow (D-CLI-NO-SYMLINK).
+    const linked = await firstSymbolicLink([devflowDir, markerV6]);
+    if (linked !== null) {
+      p.log.warn(`Nothing written under ${devflowDir}: ${linked} is a symbolic link, and devflow writes nothing through one`);
+      return;
+    }
+
+    // Stamp v6 where nothing stands — an exclusive create never follows a link that
+    // appears at the marker's name, and a marker already there is all the hooks need —
+    // then drop every legacy marker.
     await fs.mkdir(devflowDir, { recursive: true });
-    await fs.writeFile(markerV6, '', 'utf-8');
+    try {
+      await fs.writeFile(markerV6, '', { encoding: 'utf-8', flag: 'wx' });
+    } catch (error) {
+      if (!(isNodeSystemError(error) && error.code === 'EEXIST')) throw error;
+    }
     await removeLegacyGitignoreMarkers(devflowDir);
   } catch (error) {
     if (verbose) {

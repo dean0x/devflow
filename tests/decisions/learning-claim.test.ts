@@ -4,9 +4,11 @@
 // .pending-turns.processing under the learning lock and the queue's own lock,
 // stamps the claim's mtime and records a fresh token as its owner; a live claim
 // is busy to every other claimant and a stale one is taken over with a new token;
-// release-claim deletes the claim only for the token that owns it; and every
-// learning op refreshes an existing claim's mtime, while no op but claim-queue
-// ever creates one.
+// release-claim deletes the claim only for the token that owns it, reading the
+// owner file only when it is a regular file of at most CLAIM_OWNER_MAX_BYTES, so
+// a link, a FIFO or an outsized file there reads as no owner file at all
+// (D-NO-LINKED-READ); and every learning op refreshes an existing claim's mtime,
+// while no op but claim-queue ever creates one.
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { spawn } from 'child_process';
@@ -19,10 +21,12 @@ import {
   JSON_HELPER,
   requireLearningStore,
   runJsonHelper,
+  runJsonHelperBounded,
   seedLearningTree,
   snapshotTree,
   type HelperRun,
 } from './learning-fixtures.js';
+import { FIFO_RUN_BOUND_MS, FIFO_TEST_TIMEOUT_MS, makeFifo } from '../shell-hooks-helpers.js';
 
 const store = requireLearningStore();
 
@@ -233,6 +237,52 @@ describe('releaseClaim', { timeout: 30_000 }, () => {
     expect(fs.existsSync(paths.owner)).toBe(false);
   });
 
+  // A repository can commit the owner file as a link to a file elsewhere that holds
+  // a well-formed token. The link reads as no owner file at all: a live claim is
+  // not-owner and stays, a vanished one is gone, and nothing is removed.
+  it('reads an owner file that is a symbolic link as absent: the token behind it owns nothing, and the link and the file it names stay as they were', () => {
+    const outside = fs.mkdtempSync(path.join(os.tmpdir(), 'learning-release-outside-'));
+    try {
+      const target = path.join(outside, 'owner');
+      fs.writeFileSync(target, `${TOKEN_A}\n`);
+      fs.writeFileSync(paths.claim, turns(0, 2));
+      const absent = store.releaseClaim(dir, TOKEN_A);
+      expect(absent, 'with no owner file a live claim is not the token\'s').toEqual({ ok: true, value: { state: 'not-owner' } });
+
+      fs.symlinkSync(target, paths.owner);
+      expect(store.releaseClaim(dir, TOKEN_A)).toEqual(absent);
+      expect(fs.readFileSync(paths.claim, 'utf8'), 'the live claim stays').toBe(turns(0, 2));
+
+      fs.unlinkSync(paths.claim);
+      expect(store.releaseClaim(dir, TOKEN_A), 'a vanished claim is gone, as with no owner file').toEqual({ ok: true, value: { state: 'gone' } });
+      expect(fs.readlinkSync(paths.owner), 'the link stays').toBe(target);
+      expect(fs.readFileSync(target, 'utf8'), 'the file it names is byte-identical').toBe(`${TOKEN_A}\n`);
+    } finally {
+      fs.rmSync(outside, { recursive: true, force: true });
+    }
+  });
+
+  /** Write the owner file as exactly `size` bytes: TOKEN_A, then whitespace a reader trims away. */
+  function writeOwnerOfSize(size: number): void {
+    fs.writeFileSync(paths.owner, `${TOKEN_A}\n`.padEnd(size, ' '));
+    expect(fs.statSync(paths.owner).size, 'the owner file has the size under test').toBe(size);
+  }
+
+  it('reads an owner file of exactly CLAIM_OWNER_MAX_BYTES as the token it holds', () => {
+    fs.writeFileSync(paths.claim, turns(0, 2));
+    writeOwnerOfSize(store.CLAIM_OWNER_MAX_BYTES);
+
+    expect(store.releaseClaim(dir, TOKEN_A)).toEqual({ ok: true, value: { state: 'released' } });
+  });
+
+  it('reads an owner file one byte over CLAIM_OWNER_MAX_BYTES as absent, and leaves the claim', () => {
+    fs.writeFileSync(paths.claim, turns(0, 2));
+    writeOwnerOfSize(store.CLAIM_OWNER_MAX_BYTES + 1);
+
+    expect(store.releaseClaim(dir, TOKEN_A)).toEqual({ ok: true, value: { state: 'not-owner' } });
+    expect(fs.readFileSync(paths.claim, 'utf8')).toBe(turns(0, 2));
+  });
+
   it('refuses without a learning directory and creates nothing', () => {
     const bare = fs.mkdtempSync(path.join(os.tmpdir(), 'learning-release-bare-'));
     try {
@@ -368,6 +418,37 @@ describe('claim-queue and release-claim ops', { timeout: 30_000 }, () => {
   it('release-claim prints gone when the claim has vanished', () => {
     seedLearningTree(dir);
     expect(runJsonHelper(dir, ['release-claim', TOKEN_A])).toEqual({ code: 0, stdout: 'gone\n', stderr: '' });
+  });
+
+  // release-claim reads the owner file under the learning lock, so a read that
+  // waited on a FIFO would hold the lock for as long as it waited. Each run is
+  // bounded: one that waits is killed at the bound and fails the test.
+  it('release-claim returns at once, as for an absent owner file, when the owner file is a symbolic link to a FIFO', { timeout: FIFO_TEST_TIMEOUT_MS }, () => {
+    const outside = fs.mkdtempSync(path.join(os.tmpdir(), 'learning-claim-ops-outside-'));
+    try {
+      seedLearningTree(dir);
+      fs.writeFileSync(paths.claim, turns(0, 2));
+      const fifo = path.join(outside, 'owner');
+      makeFifo(fifo);
+      fs.symlinkSync(fifo, paths.owner);
+
+      expect(runJsonHelperBounded(dir, ['release-claim', TOKEN_A], FIFO_RUN_BOUND_MS))
+        .toEqual({ code: 0, stdout: 'not-owner\n', stderr: '', timedOut: false });
+      expect(fs.readFileSync(paths.claim, 'utf8'), 'the live claim stays').toBe(turns(0, 2));
+      expect(fs.lstatSync(fifo).isFIFO(), 'the FIFO the link names stays').toBe(true);
+    } finally {
+      fs.rmSync(outside, { recursive: true, force: true });
+    }
+  });
+
+  it('release-claim returns at once, as for an absent owner file, when a FIFO sits at the owner path', { timeout: FIFO_TEST_TIMEOUT_MS }, () => {
+    seedLearningTree(dir);
+    fs.writeFileSync(paths.claim, turns(0, 2));
+    makeFifo(paths.owner);
+
+    expect(runJsonHelperBounded(dir, ['release-claim', TOKEN_A], FIFO_RUN_BOUND_MS))
+      .toEqual({ code: 0, stdout: 'not-owner\n', stderr: '', timedOut: false });
+    expect(fs.readFileSync(paths.claim, 'utf8'), 'the live claim stays').toBe(turns(0, 2));
   });
 
   it('claim-queue takes no argument and release-claim takes exactly one token, refusing anything else', () => {

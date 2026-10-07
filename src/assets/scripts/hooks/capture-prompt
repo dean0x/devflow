@@ -84,11 +84,12 @@ source "$SCRIPT_DIR/ensure-devflow-init" "$CWD" || exit 0
 source "$SCRIPT_DIR/get-mtime" || { echo "capture-prompt: failed to source get-mtime" >&2; exit 1; }
 source "$SCRIPT_DIR/learning-lock" || { echo "capture-prompt: failed to source learning-lock" >&2; exit 1; }
 
-mkdir -p "$MEMORY_DIR" "$LEARNING_DIR" 2>/dev/null || true
-
+# Each queue is checked from the root it lies below, and its folder created there,
+# by queue_append_row (D-HOOKS-NO-SYMLINK, git-marker).
 TS=$(date +%s)
 queue_append_both \
-  "$MEMORY_DIR/.pending-turns.jsonl" "$LEARNING_DIR/.pending-turns.jsonl" \
+  "$PROJECT_ROOT" "$MEMORY_DIR/.pending-turns.jsonl" \
+  "$LEDGER_ROOT" "$LEARNING_DIR/.pending-turns.jsonl" \
   "$MEMORY_ENABLED" "$LEARNING_ENABLED" \
   "user" "$PROMPT" "$TS"
 

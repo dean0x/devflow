@@ -106,15 +106,17 @@ export type LearningStoreResult<T> = Result<T, LearningStoreError>;
 
 /**
  * The part of the store's `module.exports` the CLI calls. Each function refuses
- * without `.devflow/learning/` (error kind `no-learning-dir`); the writers wait at
- * most `timeoutMs` for the learning lock (error kind `busy`).
+ * without `.devflow/learning/` (error kind `no-learning-dir`); the writers refuse a
+ * `.devflow` or `.devflow/learning` that is a symbolic link, changing nothing (error
+ * kind `not-a-directory`), and wait at most `timeoutMs` for the learning lock
+ * (error kind `busy`).
  */
 export interface LearningStoreModule {
   /** The inactive entry statuses, in the store's order. */
   readonly INACTIVE_STATUSES: readonly string[];
   /** An entry id: ADR-NNN or PF-NNN. */
   readonly ANCHOR_ID_RE: RegExp;
-  /** Both files' rows, read-only; an absent file reads as empty. */
+  /** Both files' rows, read-only; an absent file, or one that is a symbolic link or not a regular file, reads as empty. */
   readLearningState(root: string): LearningState;
   /** The listing of rows already read; without `scopeMatches` no scope is checked. */
   buildListing(

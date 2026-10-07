@@ -337,6 +337,59 @@ function parseRow(text) {
 }
 
 /**
+ * The first `size` bytes of the open file `fd` as UTF-8 text, fewer when the file
+ * ends sooner: the read never takes more than `size` bytes.
+ *
+ * @param {number} fd
+ * @param {number} size - the byte count fstat reported for `fd`
+ * @returns {string}
+ */
+function readOpenedText(fd, size) {
+  const buf = Buffer.alloc(size);
+  let total = 0;
+  while (total < buf.length) {
+    const read = fs.readSync(fd, buf, total, buf.length - total, total);
+    if (read === 0) break;
+    total += read;
+  }
+  return buf.toString('utf8', 0, total);
+}
+
+/**
+ * The text of `file`, or null when nothing is there, when the file is anything
+ * but a regular file — a symbolic link, a directory, a FIFO or a device — or when
+ * it is larger than `maxBytes` (D-NO-LINKED-READ, at readJsonl). lstat decides
+ * before anything is opened, seeing a link without following it. The open never
+ * follows a link (O_NOFOLLOW) and never waits on a FIFO (O_NONBLOCK), and fstat
+ * confirms that what it opened is a regular file within the bound: a link that
+ * took the file's place after the lstat fails the read rather than being read
+ * through, and anything else that did reads as absent. The read never takes more
+ * bytes than fstat reported.
+ *
+ * @param {string} file - an absolute path
+ * @param {{ maxBytes?: number }} [opts] - maxBytes: the largest file read (default no cap)
+ * @returns {string|null}
+ * @throws on any other read error
+ */
+function readTextUnlinked(file, { maxBytes = Infinity } = {}) {
+  let fd;
+  try {
+    const stat = fs.lstatSync(file);
+    if (!stat.isFile() || stat.size > maxBytes) return null;
+    fd = fs.openSync(file, fs.constants.O_RDONLY | (fs.constants.O_NOFOLLOW || 0) | (fs.constants.O_NONBLOCK || 0));
+  } catch (err) {
+    if (err && err.code === 'ENOENT') return null;
+    throw err;
+  }
+  try {
+    const stat = fs.fstatSync(fd);
+    return stat.isFile() && stat.size <= maxBytes ? readOpenedText(fd, stat.size) : null;
+  } finally {
+    fs.closeSync(fd);
+  }
+}
+
+/**
  * Read a JSONL file strictly: every non-blank line is either one JSON object (a
  * row) or rejected, with its 1-based line number and its text.
  *
@@ -348,19 +401,28 @@ function parseRow(text) {
  * delete them without a trace, and a reader that quarantined would make list,
  * show and the HUD write files.
  *
+ * D-NO-LINKED-READ: a learning file that is itself a symbolic link reads as
+ * missing, and nothing is read through it; the pre-v2 backup skips one the same
+ * way (ensurePreV2Backup), and release-claim reads the claim's owner file the same
+ * way, and only up to CLAIM_OWNER_MAX_BYTES (readClaimOwner). readJsonl and
+ * readClaimOwner read a regular file alone (readTextUnlinked): a directory, a FIFO
+ * or a device where the file belongs reads as missing too, and neither waits on
+ * one. Reason: a repository can commit any learning file as a link to a file
+ * elsewhere on the machine, and a read that followed it would put that file's
+ * lines into list and show and, through a rewrite, the quarantine or a render,
+ * into the project's learning folder; a read that followed one to a FIFO or to
+ * /dev/zero would wait forever or fill memory, holding the learning lock when a
+ * writer or release-claim reads. The writers never write through a link either:
+ * a rename replaces one, and an append refuses one.
+ *
  * @param {string} file
  * @returns {{ rows: object[], rejected: Array<{ line: number, text: string }>, missing: boolean }}
- *   `missing` is true when the file does not exist. Any read error other than a
- *   missing file is thrown.
+ *   `missing` is true when the file does not exist, or is a symbolic link or
+ *   anything else but a regular file. Any other read error is thrown.
  */
 function readJsonl(file) {
-  let raw;
-  try {
-    raw = fs.readFileSync(safePath(file), 'utf8');
-  } catch (err) {
-    if (err && err.code === 'ENOENT') return { rows: [], rejected: [], missing: true };
-    throw err;
-  }
+  const raw = readTextUnlinked(safePath(file));
+  if (raw === null) return { rows: [], rejected: [], missing: true };
   const rows = [];
   const rejected = [];
   const lines = raw.split('\n');
@@ -512,6 +574,46 @@ function noLearningDir(opName, root) {
   };
 }
 
+/** True when `file` is itself a symbolic link; false for anything else, or nothing, there. */
+function isSymbolicLink(file) {
+  try {
+    return fs.lstatSync(file).isSymbolicLink();
+  } catch (err) {
+    if (err && (err.code === 'ENOENT' || err.code === 'ENOTDIR')) return false;
+    throw err;
+  }
+}
+
+/**
+ * The first of `<root>/.devflow` and `<root>/.devflow/learning` that is itself a
+ * symbolic link, or null when neither is (D-NO-LINKED-TREE).
+ *
+ * @param {string} root - project root
+ * @returns {string|null}
+ */
+function linkedLearningFolder(root) {
+  const learningDir = getLearningDir(root);
+  for (const dir of [path.dirname(learningDir), learningDir]) {
+    if (isSymbolicLink(dir)) return dir;
+  }
+  return null;
+}
+
+/**
+ * The error Result of an op run where `.devflow` or `.devflow/learning` under its
+ * root is a symbolic link (D-NO-LINKED-TREE).
+ *
+ * @param {string} opName - operation name, for the message
+ * @param {string} dir - the folder that is a link
+ * @returns {{ ok: false, error: { kind: 'not-a-directory', message: string } }}
+ */
+function linkedFolder(opName, dir) {
+  return {
+    ok: false,
+    error: { kind: 'not-a-directory', message: `${opName}: ${dir} is a symbolic link, not a directory; nothing was changed` },
+  };
+}
+
 /** True for a Result: `{ ok: true, … }` or `{ ok: false, error: { … } }`. */
 function isResult(value) {
   return isPlainObject(value) && (value.ok === true || (value.ok === false && isPlainObject(value.error)));
@@ -534,14 +636,24 @@ function isResult(value) {
  * Reason: a writer run from the wrong directory would otherwise create a learning
  * tree there and write a ledger that no session ever reads.
  *
+ * D-NO-LINKED-TREE: a learning writer refuses with `not-a-directory`, changing
+ * nothing, when `.devflow` or `.devflow/learning` under its root is a symbolic
+ * link. Reason: a repository can commit either one as a link to a folder elsewhere
+ * on the machine, and a writer that followed it would take its lock there and
+ * rewrite, quarantine, archive, render or delete files in whatever folder the link
+ * names. Refused here, before the lock is taken, so every writer refuses in one
+ * place; the claim heartbeat makes the same check, and read-only paths still read.
+ *
  * @param {string} opName - operation name, for messages
  * @param {string} root - project root
  * @param {() => { ok: boolean }} fn - the locked body; it must return a Result
  * @param {{ timeoutMs?: number, staleMs?: number }} [opts]
  * @returns {{ ok: true, value?: unknown } | { ok: false, error: { kind: string, message: string } }}
- *   fn's Result, or an error of kind `no-learning-dir` or `busy`.
+ *   fn's Result, or an error of kind `not-a-directory`, `no-learning-dir` or `busy`.
  */
 function withDecisionsLock(opName, root, fn, { timeoutMs = LOCK_ACQUIRE_TIMEOUT_MS, staleMs = LOCK_STALE_MS } = {}) {
+  const linked = linkedLearningFolder(root);
+  if (linked !== null) return linkedFolder(opName, linked);
   if (!hasLearningDir(root)) return noLearningDir(opName, root);
   const lockDir = getDecisionsLockDir(root);
   let acquired;
@@ -572,7 +684,8 @@ function withDecisionsLock(opName, root, fn, { timeoutMs = LOCK_ACQUIRE_TIMEOUT_
 
 /**
  * Read the ledger and the log, read-only: malformed lines are reported, never
- * quarantined (D-QUARANTINE-MALFORMED). An absent file reads as empty.
+ * quarantined (D-QUARANTINE-MALFORMED). An absent file, or one that is a symbolic
+ * link or not a regular file (D-NO-LINKED-READ), reads as empty.
  *
  * @param {string} root - project root
  * @returns {{ ledgerRows: object[], logRows: object[], rejected: { ledger: Array<{ line: number, text: string }>, log: Array<{ line: number, text: string }> } }}
@@ -1046,17 +1159,19 @@ function historyVersions(root, id) {
  * log, the ledger and the archive, as they are on disk, to `*.pre-v2.jsonl` with
  * an exclusive create, before anything rewrites them; an existing copy is never
  * overwritten. Reason: v2 writes convert and rewrite v1 rows, and these copies are
- * the only record of the corpus as it was before the conversion.
+ * the only record of the corpus as it was before the conversion. A file that is a
+ * symbolic link is not copied: the store reads none (D-NO-LINKED-READ, at readJsonl).
  *
  * @param {string} root - project root
  * @param {{ logRows?: object[], ledgerRows?: object[] }} rows - the rows just read
  * @returns {string[]} the backup paths written by this call (none when every row
- *   is v2, a file is absent or its copy already exists)
+ *   is v2, a file is absent or a symbolic link, or its copy already exists)
  */
 function ensurePreV2Backup(root, { logRows = [], ledgerRows = [] } = {}) {
   if ([...logRows, ...ledgerRows].every(row => isV2(row))) return [];
   const written = [];
   for (const file of [getDecisionsLogPath(root), getDecisionsLedgerPath(root), getDecisionsArchivePath(root)]) {
+    if (isSymbolicLink(file)) continue;
     const copy = withJsonlSuffix(file, '.pre-v2.jsonl');
     try {
       fs.copyFileSync(file, copy, fs.constants.COPYFILE_EXCL);
@@ -1117,7 +1232,7 @@ function lastActivityMs(row) {
  * @param {{ now?: number, timeoutMs?: number }} [opts] - now: epoch ms (default Date.now())
  * @returns {{ ok: true, value: { rotated: number, appended: number } } | { ok: false, error: { kind: string, message: string } }}
  *   rotated: rows removed from the log; appended: rows added to the archive.
- *   Errors are withDecisionsLock's no-learning-dir and busy.
+ *   Errors are withDecisionsLock's not-a-directory, no-learning-dir and busy.
  */
 function rotateObservations(root, { now = Date.now(), timeoutMs } = {}) {
   return withDecisionsLock('rotate-observations', root, () => {
@@ -1180,7 +1295,7 @@ function rotateObservations(root, { now = Date.now(), timeoutMs } = {}) {
  * @param {{ now?: number, timeoutMs?: number }} [opts] - now: epoch ms (default Date.now())
  * @returns {{ ok: true, value: { cleared: number, kept: number } } | { ok: false, error: { kind: string, message: string } }}
  *   cleared: rows removed from the log; kept: rows left in it. Error kinds:
- *   ledger-malformed, and withDecisionsLock's no-learning-dir and busy.
+ *   ledger-malformed, and withDecisionsLock's not-a-directory, no-learning-dir and busy.
  */
 function clearUnreferenced(root, { now = Date.now(), timeoutMs } = {}) {
   return withDecisionsLock('clear', root, () => {
@@ -1224,16 +1339,6 @@ function removeEmptyDir(dir) {
   }
 }
 
-/** True when `file` is itself a symbolic link; false for anything else, or nothing, there. */
-function isSymbolicLink(file) {
-  try {
-    return fs.lstatSync(file).isSymbolicLink();
-  } catch (err) {
-    if (err && (err.code === 'ENOENT' || err.code === 'ENOTDIR')) return false;
-    throw err;
-  }
-}
-
 /**
  * Remove every learning file — `devflow learning --reset`: the log, the ledger
  * and their side files, the rendered files, the tuning config, and the queue
@@ -1248,27 +1353,20 @@ function isSymbolicLink(file) {
  * lock — belongs to the next run.
  *
  * Like every learning writer it refuses without `.devflow/learning/` and creates
- * nothing (D-NO-STRAY-TREE), and it waits at most `timeoutMs` for the lock,
- * breaking one a crashed run left behind (D-ONE-LEARNING-LOCK). A symbolic link
- * in the directory is removed, never what it points to. A learning directory that
- * is itself a symbolic link is refused and nothing is removed: emptying it would
- * empty whatever directory the link leads to.
+ * nothing (D-NO-STRAY-TREE), refuses a learning directory or a `.devflow` that is a
+ * symbolic link and removes nothing (D-NO-LINKED-TREE), since emptying it would
+ * empty whatever directory the link leads to, and waits at most `timeoutMs` for the
+ * lock, breaking one a crashed run left behind (D-ONE-LEARNING-LOCK). A symbolic
+ * link in the directory is removed, never what it points to.
  *
  * @param {string} root - project root
  * @param {{ timeoutMs?: number }} [opts]
  * @returns {{ ok: true, value: { removed: number } } | { ok: false, error: { kind: string, message: string } }}
- *   removed: the entries removed from the learning directory. Error kinds:
- *   not-a-directory (the learning directory is a symbolic link), and
- *   withDecisionsLock's no-learning-dir and busy.
+ *   removed: the entries removed from the learning directory. Errors are
+ *   withDecisionsLock's not-a-directory, no-learning-dir and busy.
  */
 function resetLearning(root, { timeoutMs } = {}) {
   const learningDir = getLearningDir(root);
-  if (isSymbolicLink(learningDir)) {
-    return {
-      ok: false,
-      error: { kind: 'not-a-directory', message: `reset: ${learningDir} is a symbolic link, not a directory; nothing was removed` },
-    };
-  }
   const lockName = path.basename(getDecisionsLockDir(root));
   const reset = withDecisionsLock('reset', root, () => {
     const entries = fs.readdirSync(learningDir).filter(name => name !== lockName);
@@ -1298,6 +1396,13 @@ const QUEUE_LOCK_STALE_MS = 30000;
 
 /** A claim token: 16 lowercase hex characters. */
 const CLAIM_TOKEN_RE = /^[0-9a-f]{16}$/;
+
+/**
+ * The largest owner file release-claim reads, in bytes. A token and its newline
+ * take 17; a larger owner file reads as no owner file at all (D-NO-LINKED-READ,
+ * at readJsonl).
+ */
+const CLAIM_OWNER_MAX_BYTES = 4096;
 
 /** link(2) errors of a filesystem without hard links; the claim renames instead. */
 const NO_HARD_LINK_CODES = Object.freeze(['EPERM', 'ENOTSUP']);
@@ -1351,15 +1456,14 @@ function removeIfPresent(file) {
   }
 }
 
-/** The token the owner file records, or null when it is absent or holds no token. */
+/**
+ * The token the owner file records, or null when it is absent or holds no token.
+ * An owner file that is a symbolic link, anything else but a regular file, or
+ * larger than CLAIM_OWNER_MAX_BYTES reads as absent (D-NO-LINKED-READ, at readJsonl).
+ */
 function readClaimOwner(root) {
-  let text;
-  try {
-    text = fs.readFileSync(getLearningClaimOwnerPath(root), 'utf8');
-  } catch (err) {
-    if (err && err.code === 'ENOENT') return null;
-    throw err;
-  }
+  const text = readTextUnlinked(getLearningClaimOwnerPath(root), { maxBytes: CLAIM_OWNER_MAX_BYTES });
+  if (text === null) return null;
   const token = text.trim();
   return CLAIM_TOKEN_RE.test(token) ? token : null;
 }
@@ -1469,13 +1573,15 @@ function claimQueue(root, { now = Date.now(), token = newClaimToken(), timeoutMs
  * Release the claim `token` owns (D-OWNED-CLAIM): delete the claim and the owner
  * file when the token owns it (released); refuse when another token does
  * (not-owner); report a claim that is already gone (gone), deleting the owner
- * file only when it names this token.
+ * file only when it names this token. An owner file that is a symbolic link,
+ * anything else but a regular file, or larger than CLAIM_OWNER_MAX_BYTES names no
+ * token, as though it were absent (D-NO-LINKED-READ, at readJsonl).
  *
  * @param {string} root - project root
  * @param {string} token
  * @param {{ timeoutMs?: number }} [opts]
  * @returns {{ ok: true, value: { state: 'released'|'not-owner'|'gone' } } | { ok: false, error: { kind: string, message: string } }}
- *   errors include withDecisionsLock's no-learning-dir and busy
+ *   errors include withDecisionsLock's not-a-directory, no-learning-dir and busy
  * @throws {TypeError} when `token` is not a claim token
  */
 function releaseClaim(root, token, { timeoutMs } = {}) {
@@ -1501,13 +1607,17 @@ function releaseClaim(root, token, { timeoutMs } = {}) {
 /**
  * The claim heartbeat (D-OWNED-CLAIM): set an existing claim's mtime to now. It
  * never creates a claim and never follows a symlink at the claim path, and it
- * takes no lock — json-helper sends it before each learning op runs.
+ * takes no lock — json-helper sends it before each learning op runs. A claim in a
+ * learning tree reached through a symbolic link is left alone (D-NO-LINKED-TREE):
+ * `lutimes` follows a linked folder above the claim, and the op that follows
+ * refuses that tree anyway.
  *
  * @param {string} root - project root
  * @param {{ now?: number }} [opts] - now: epoch ms (default Date.now())
  * @returns {{ ok: true, value: { touched: boolean } } | { ok: false, error: { kind: 'heartbeat-failed', message: string } }}
  */
 function touchClaim(root, { now = Date.now() } = {}) {
+  if (linkedLearningFolder(root) !== null) return { ok: true, value: { touched: false } };
   const claimPath = getLearningPendingTurnsProcessingPath(root);
   const at = new Date(now);
   try {
@@ -2008,7 +2118,7 @@ function restoreFirst(id, carriers) {
  *   observations: the count the log row holds afterwards; reprojected: the
  *   anchors re-projected, in anchor order. Error kinds: invalid-input (with
  *   problems), duplicate-log-id, restore-first, cannot-reproject, and
- *   withDecisionsLock's no-learning-dir and busy.
+ *   withDecisionsLock's not-a-directory, no-learning-dir and busy.
  * @throws {TypeError} when `mode` is not a put mode
  */
 function putObservation(root, mode, input, { now = Date.now(), timeoutMs, scopeMatches } = {}) {
@@ -2225,7 +2335,8 @@ function warmScopeMatcher(ledgerRows, scopeMatches) {
  *   now: epoch ms (default Date.now()); scopeMatches: default gitScopeMatcher(root)
  * @returns {{ ok: true, value: { ref: { ref: 'origin/HEAD'|'HEAD', commit: string } | null, due: Array<{ anchor_id: string, reason: string, bytes: number }> } }
  *   | { ok: false, error: { kind: string, message: string } }}
- *   due is selectDue's answer; errors are withDecisionsLock's no-learning-dir and busy
+ *   due is selectDue's answer; errors are withDecisionsLock's not-a-directory,
+ *   no-learning-dir and busy
  */
 function claimDue(root, { now = Date.now(), timeoutMs, scopeMatches } = {}) {
   if (!hasLearningDir(root)) return noLearningDir('claim-due', root);
@@ -2388,14 +2499,7 @@ function readScannedText(file) {
   try {
     const stat = fs.fstatSync(fd);
     if (!stat.isFile() || stat.size > CITED_SCAN_MAX_FILE_BYTES) return null;
-    const buf = Buffer.alloc(stat.size);
-    let total = 0;
-    while (total < buf.length) {
-      const read = fs.readSync(fd, buf, total, buf.length - total, total);
-      if (read === 0) break;
-      total += read;
-    }
-    const text = buf.toString('utf8', 0, total);
+    const text = readOpenedText(fd, stat.size);
     return text.includes('\u0000') ? null : text;
   } catch {
     return null;
@@ -2508,7 +2612,7 @@ function mintAnchor(ledgerRows, type, citedAnchors) {
  *   | { ok: false, error: { kind: string, message: string } }}
  *   Error kinds: not-in-log, duplicate-log-id, already-promoted, v1-observation,
  *   type-mismatch, cited-numbers-exhausted, and withDecisionsLock's
- *   no-learning-dir and busy.
+ *   not-a-directory, no-learning-dir and busy.
  * @throws {TypeError} for a type other than decision or pitfall, or a malformed obsId
  */
 function assignAnchor(root, type, obsId, { now = Date.now(), timeoutMs, citedAnchors } = {}) {
@@ -2667,7 +2771,7 @@ function recordRefreshHistory(root, plans, ledgerRows, { now }) {
  * @returns {{ ok: true, value: { refreshed: Array<{ anchor_id: string, state: 'verified'|'reprojected'|'unchanged' }> } }
  *   | { ok: false, error: { kind: string, message: string, problems?: Array<{ anchor_id: string, message: string }> } }}
  *   refreshed: each anchor once, in the order given. Error kinds: refused (with
- *   problems), and withDecisionsLock's no-learning-dir and busy.
+ *   problems), and withDecisionsLock's not-a-directory, no-learning-dir and busy.
  * @throws {TypeError} when anchorIds is empty or holds anything but anchor ids
  */
 function refreshAnchors(root, anchorIds, { verified = false, now = Date.now(), timeoutMs } = {}) {
@@ -2904,7 +3008,7 @@ function quoteAtRef(root, at, quote, { verifyRef } = {}) {
  *   kinds: invalid-input (with problems), quoteAtRef's, not-found,
  *   duplicate-anchor, already-inactive, successor-not-found,
  *   successor-duplicate-anchor, successor-inactive, and withDecisionsLock's
- *   no-learning-dir and busy.
+ *   not-a-directory, no-learning-dir and busy.
  * @throws {TypeError} for a malformed anchorId or a status that is not inactive
  */
 function retireAnchor(root, anchorId, status, input, { now = Date.now(), timeoutMs, verifyRef } = {}) {
@@ -2983,7 +3087,7 @@ function retireUnderLock(root, anchorId, status, note, { now }) {
  * @returns {{ ok: true, value: { anchor_id: string, status: 'Accepted'|'Active' } }
  *   | { ok: false, error: { kind: string, message: string } }}
  *   Error kinds: not-found, duplicate-anchor, already-active, type-mismatch, and
- *   withDecisionsLock's no-learning-dir and busy.
+ *   withDecisionsLock's not-a-directory, no-learning-dir and busy.
  * @throws {TypeError} for a malformed anchorId
  */
 function restoreAnchor(root, anchorId, { now = Date.now(), timeoutMs } = {}) {
@@ -3071,6 +3175,7 @@ module.exports = {
   // The queue claim
   CLAIM_STALE_SECS,
   CLAIM_TOKEN_RE,
+  CLAIM_OWNER_MAX_BYTES,
   newClaimToken,
   claimQueue,
   releaseClaim,

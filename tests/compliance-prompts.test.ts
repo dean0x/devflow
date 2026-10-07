@@ -4,7 +4,7 @@
  * Covers:
  *   - shouldRunComplianceStep: all 8 gate rows from the B1 table
  *   - runComplianceStep: step semantics via fake recorded IO (injectable prompts)
- *   - Shared helpers: frameworkChoices, formatFrameworkCatalogue, formatComplianceSummary
+ *   - Shared helpers: frameworkChoices, formatFrameworkCatalogue
  *   - TP-43 (AC-37): the compiled prompts that run the compliance lens — gated on the
  *     settings line, loading only the framework references they are given
  *
@@ -21,7 +21,6 @@ import {
   runComplianceStep,
   frameworkChoices,
   formatFrameworkCatalogue,
-  formatComplianceSummary,
   FRAMEWORK_SELECT_MESSAGE,
   type CompliancePromptIO,
   type PromptOutcome,
@@ -361,21 +360,6 @@ describe('formatFrameworkCatalogue', () => {
       // Expect format: "  <id padded> — <hint>"
       expect(line).toMatch(/^  \S.{8,} — /);
     }
-  });
-});
-
-describe('formatComplianceSummary', () => {
-  it('returns "disabled" when not enabled (regardless of frameworks)', () => {
-    expect(formatComplianceSummary(false, [])).toBe('disabled');
-    expect(formatComplianceSummary(false, ['gdpr'])).toBe('disabled');
-  });
-
-  it('returns "enabled (generic controls only)" when enabled with no frameworks', () => {
-    expect(formatComplianceSummary(true, [])).toBe('enabled (generic controls only)');
-  });
-
-  it('returns "enabled (gdpr, soc2)" when enabled with frameworks', () => {
-    expect(formatComplianceSummary(true, ['gdpr', 'soc2'])).toBe('enabled (gdpr, soc2)');
   });
 });
 

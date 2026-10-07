@@ -179,6 +179,19 @@ describe('consumers read the decisions index from the main worktree', () => {
     expect(content).not.toContain('.devflow/learning/pitfalls.md')
   })
 
+  it('skim.md reads the decisions TL;DR at the main worktree, else the toplevel, else the start directory', () => {
+    const step6 = extractSection(
+      loadFile('src/assets/agents/skim.md'), '### Step 6: Project Knowledge', '### Step 7',
+    )
+    expect(step6).toContain('`git -C "{start}" rev-parse --path-format=absolute --show-toplevel --git-common-dir`')
+    const tiers = ['the main worktree', 'else the toplevel', 'else `{start}`'].map(tier => step6.indexOf(tier))
+    expect(tiers.every(at => at > -1), step6).toBe(true)
+    expect([...tiers].sort((a, b) => a - b)).toEqual(tiers)
+    expect(step6).toContain('`{ledger}/.devflow/learning/decisions.md`')
+    expect(step6).toContain('`<!-- TL;DR: N decisions -->`')
+    expect(step6).not.toContain('If `.devflow/learning/decisions.md` exists')
+  })
+
   it('code.md states applied decisions and pitfalls in words, never by ID', () => {
     expect(loadFile('src/assets/agents/code.md')).toContain(
       'State every decision or pitfall you apply in words in code, comments, tests and commit messages, never by its ID.',

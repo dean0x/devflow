@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeAll, beforeEach, afterEach, afterAll } from 'vitest';
+import { describe, it, expect, vi, beforeAll, beforeEach, afterEach, afterAll } from 'vitest';
 import { execSync, spawnSync, spawn } from 'child_process';
 import * as path from 'path';
 import * as fs from 'fs';
@@ -6,12 +6,23 @@ import * as os from 'os';
 import * as net from 'net';
 import { HANDOFF_TEMPLATE, REMINDER_TEMPLATE } from './fixtures/ambient-templates.js';
 import { buildRoutingConfigJson } from '../src/core/proxy-state.js';
+import * as p from '@clack/prompts';
 import {
   DEVFLOW_GITIGNORE_BLOCK,
   DEVFLOW_GITIGNORE_BLOCK_WITHOUT_CLAUDEIGNORE,
   computeDevflowGitignore,
+  ensureDevflowGitignore,
 } from '../src/targets/claude-code/post-install.js';
-import { HOOKS_DIR, execHook, runHook } from './shell-hooks-helpers.js';
+import {
+  FIFO_RUN_BOUND_MS,
+  FIFO_TEST_TIMEOUT_MS,
+  HOOKS_DIR,
+  execHook,
+  makeFifo,
+  releaseFifo,
+  runHook,
+  spawnWithStdin,
+} from './shell-hooks-helpers.js';
 
 function localDateString(): string {
   const d = new Date();
@@ -207,85 +218,6 @@ describe('json-helper.js operations', () => {
     expect(result).toBe('fallback');
   });
 
-  it('validate exits 0 for valid JSON', () => {
-    expect(() => {
-      execSync(`echo '{"valid":true}' | node "${JSON_HELPER}" validate`, { stdio: 'pipe' });
-    }).not.toThrow();
-  });
-
-  it('validate exits 1 for invalid JSON', () => {
-    expect(() => {
-      execSync(`echo 'not json' | node "${JSON_HELPER}" validate`, { stdio: 'pipe' });
-    }).toThrow();
-  });
-
-  it('compact outputs single-line JSON', () => {
-    const result = execSync(
-      `echo '{ "key": "value", "num": 42 }' | node "${JSON_HELPER}" compact`,
-      { stdio: 'pipe' },
-    ).toString().trim();
-    expect(result).toBe('{"key":"value","num":42}');
-  });
-
-  it('extract-text-messages extracts text from Claude message format', () => {
-    const input = JSON.stringify({
-      message: {
-        content: [
-          { type: 'text', text: 'Hello world' },
-          { type: 'tool_result', text: 'ignored' },
-          { type: 'text', text: 'Second message' },
-        ],
-      },
-    });
-    const result = execSync(
-      `echo '${input.replace(/'/g, "'\\''")}' | node "${JSON_HELPER}" extract-text-messages`,
-      { stdio: 'pipe' },
-    ).toString().trim();
-    expect(result).toBe('Hello world\nSecond message');
-  });
-
-  it('extract-text-messages handles plain string content', () => {
-    const input = JSON.stringify({
-      message: {
-        content: 'plain string message',
-      },
-    });
-    const result = execSync(
-      `echo '${input.replace(/'/g, "'\\''")}' | node "${JSON_HELPER}" extract-text-messages`,
-      { stdio: 'pipe' },
-    ).toString().trim();
-    expect(result).toBe('plain string message');
-  });
-
-  it('merge-evidence flattens, dedupes, and limits', () => {
-    const input = JSON.stringify([['a', 'b', 'c'], ['b', 'c', 'd']]);
-    const result = execSync(
-      `echo '${input}' | node "${JSON_HELPER}" merge-evidence`,
-      { stdio: 'pipe' },
-    ).toString().trim();
-    const parsed = JSON.parse(result);
-    expect(parsed).toEqual(['a', 'b', 'c', 'd']);
-  });
-
-  const SLURP_INPUT = [
-    JSON.stringify({ id: 'a', confidence: 0.3 }),
-    JSON.stringify({ id: 'b', confidence: 0.9 }),
-    'not json',
-    JSON.stringify({ id: 'c', confidence: 0.5 }),
-  ].join('\n');
-
-  it('slurp-sort reads JSONL on stdin, sorts by the field, and limits', () => {
-    const run = spawnSync(process.execPath, [JSON_HELPER, 'slurp-sort', 'confidence', '2'], { input: SLURP_INPUT, encoding: 'utf8' });
-    expect(run.status, run.stderr).toBe(0);
-    expect(JSON.parse(run.stdout).map((row: { id: string }) => row.id)).toEqual(['b', 'c']);
-  });
-
-  it('slurp-cap reads JSONL on stdin and prints the top rows one per line', () => {
-    const run = spawnSync(process.execPath, [JSON_HELPER, 'slurp-cap', 'confidence', '2'], { input: SLURP_INPUT, encoding: 'utf8' });
-    expect(run.status, run.stderr).toBe(0);
-    expect(run.stdout.trim().split('\n').map(line => JSON.parse(line).id)).toEqual(['b', 'c']);
-  });
-
   it('session-output builds correct envelope', () => {
     const result = execSync(
       `node "${JSON_HELPER}" session-output "test context"`,
@@ -304,33 +236,6 @@ describe('json-helper.js operations', () => {
     const parsed = JSON.parse(result);
     expect(parsed.hookSpecificOutput.hookEventName).toBe('UserPromptSubmit');
     expect(parsed.hookSpecificOutput.additionalContext).toBe('test preamble');
-  });
-
-  it('update-field updates a string field', () => {
-    const result = execSync(
-      `echo '{"status":"observing","id":"obs_1"}' | node "${JSON_HELPER}" update-field status created`,
-      { stdio: 'pipe' },
-    ).toString().trim();
-    const parsed = JSON.parse(result);
-    expect(parsed.status).toBe('created');
-    expect(parsed.id).toBe('obs_1');
-  });
-
-  it('array-length returns count', () => {
-    const result = execSync(
-      `echo '{"observations":[{},{},{}]}' | node "${JSON_HELPER}" array-length observations`,
-      { stdio: 'pipe' },
-    ).toString().trim();
-    expect(result).toBe('3');
-  });
-
-  it('array-item returns item at index', () => {
-    const result = execSync(
-      `echo '{"items":[{"id":"a"},{"id":"b"}]}' | node "${JSON_HELPER}" array-item items 1`,
-      { stdio: 'pipe' },
-    ).toString().trim();
-    const parsed = JSON.parse(result);
-    expect(parsed.id).toBe('b');
   });
 
   it('a generic op loads none of the learning modules; a learning op loads the store, and the renderer only to render', () => {
@@ -397,17 +302,22 @@ describe('json-parse wrapper', () => {
     expect(result).toBe('val');
   });
 
-  it('json_field_file reads a field from a file through the node fallback, a boolean false included', () => {
+  it('json_field_file reads a field from a file through the node fallback, a boolean false included, and prints nothing on stderr', () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'json-field-file-'));
     try {
       const file = path.join(dir, 'state.json');
       fs.writeFileSync(file, JSON.stringify({ enabled: false, port: 4141, nested: { model: 'opus' } }));
-      const read = (field: string, fallback: string): string => {
+      const fieldOf = (target: string, field: string, fallback: string) => {
         const run = spawnSync('bash', [
           '-c', 'source "$1" && _HAS_JQ=false && json_field_file "$2" "$3" "$4"',
-          '_', path.join(HOOKS_DIR, 'json-parse'), file, field, fallback,
+          '_', path.join(HOOKS_DIR, 'json-parse'), target, field, fallback,
         ], { encoding: 'utf8' });
+        return { status: run.status, stdout: run.stdout, stderr: run.stderr };
+      };
+      const read = (field: string, fallback: string): string => {
+        const run = fieldOf(file, field, fallback);
         expect(run.status, run.stderr).toBe(0);
+        expect(run.stderr).toBe('');
         return run.stdout.trim();
       };
 
@@ -415,8 +325,34 @@ describe('json-parse wrapper', () => {
       expect(read('port', '0')).toBe('4141');
       expect(read('nested.model', '')).toBe('opus');
       expect(read('missing', 'fallback')).toBe('fallback');
+
+      // The jq path discards its own errors, so a hook that reads a broken file
+      // stays silent. The node fallback must be silent too: empty stdout, a failing
+      // status, nothing on stderr. A missing file covers the shell's own redirect
+      // error, which only a 2>/dev/null placed before the `< "$file"` silences.
+      const broken = path.join(dir, 'broken.json');
+      fs.writeFileSync(broken, 'not-json{{{');
+      for (const target of [broken, path.join(dir, 'absent.json')]) {
+        expect(fieldOf(target, 'enabled', 'false'), path.basename(target)).toEqual({ status: 1, stdout: '', stderr: '' });
+      }
     } finally {
       fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('every node fallback whose jq path discards stderr is silent on input it cannot parse, and still fails', () => {
+    // json_field_file, whose fallback reads its file on stdin, is covered by the test above.
+    const rows: ReadonlyArray<readonly [string, readonly string[]]> = [
+      ['json_field', ['k', 'fallback']],
+      ['json_extract_cwd_field', ['prompt']],
+    ];
+    for (const [fn, args] of rows) {
+      const run = spawnSync('bash', [
+        '-c', 'source "$1" && _HAS_JQ=false && fn="$2" && shift 2 && "$fn" "$@"',
+        '_', path.join(HOOKS_DIR, 'json-parse'), fn, ...args,
+      ], { input: 'not-json{{{', encoding: 'utf8' });
+      // Status 1 is the non-vacuity: the fallback really reached its error path.
+      expect({ status: run.status, stdout: run.stdout, stderr: run.stderr }, fn).toEqual({ status: 1, stdout: '', stderr: '' });
     }
   });
 });
@@ -1567,6 +1503,192 @@ describe('git-marker helper: df_has_git_marker', () => {
 });
 
 // =============================================================================
+// git-marker helper: df_no_symlink_below (D-HOOKS-NO-SYMLINK)
+// =============================================================================
+//
+// Every hook write under a project's .devflow/ asks this predicate first. It
+// refuses a path when the path itself, or a folder between the root and it, is a
+// symbolic link, and it never looks at the root or at anything above it.
+// =============================================================================
+
+describe('git-marker helper: df_no_symlink_below (D-HOOKS-NO-SYMLINK)', () => {
+  const GIT_MARKER_SRC = path.join(HOOKS_DIR, 'git-marker');
+
+  let tmp: string;
+  let root: string;
+  let outsideDir: string;
+
+  beforeEach(() => {
+    tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-nolink-'));
+    root = path.join(tmp, 'repo');
+    outsideDir = path.join(tmp, 'outside');
+    fs.mkdirSync(path.join(root, '.devflow', 'memory'), { recursive: true });
+    fs.mkdirSync(outsideDir);
+  });
+
+  afterEach(() => {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  });
+
+  /** The predicate's exit status for `rootArg` and `paths`, each passed as its own argument. */
+  const status = (rootArg: string, ...paths: string[]): number | null =>
+    spawnSync('bash', ['-c', 'source "$1"; shift; df_no_symlink_below "$@"', '_', GIT_MARKER_SRC, rootArg, ...paths]).status;
+
+  const queue = (): string => path.join(root, '.devflow', 'memory', '.pending-turns.jsonl');
+
+  it('admits a path with no link below the root, whether its parts exist yet or not', () => {
+    expect(status(root, queue()), 'a file not created yet').toBe(0);
+    fs.writeFileSync(queue(), '');
+    expect(status(root, queue()), 'an existing file').toBe(0);
+    expect(status(root, path.join(root, '.devflow', 'learning', '.pending-turns.jsonl')), 'a folder not created yet').toBe(0);
+  });
+
+  it('refuses a path that is itself a link, dangling or resolving', () => {
+    const target = path.join(outsideDir, 'target');
+    fs.symlinkSync(target, queue());
+    expect(status(root, queue()), 'a dangling link').toBe(1);
+    fs.writeFileSync(target, 'x');
+    expect(status(root, queue()), 'a link to a file').toBe(1);
+  });
+
+  it('refuses a path with a linked folder between the root and it, at either depth', () => {
+    fs.rmSync(path.join(root, '.devflow', 'memory'), { recursive: true });
+    fs.symlinkSync(outsideDir, path.join(root, '.devflow', 'memory'));
+    expect(status(root, queue()), '.devflow/memory is a link').toBe(1);
+    expect(status(root, path.join(root, '.devflow', 'memory')), 'the linked folder itself').toBe(1);
+
+    fs.rmSync(path.join(root, '.devflow'), { recursive: true });
+    fs.symlinkSync(outsideDir, path.join(root, '.devflow'));
+    expect(status(root, queue()), '.devflow is a link').toBe(1);
+  });
+
+  it('checks every path it is given: one link among them refuses them all', () => {
+    const okFile = path.join(root, '.devflow', 'memory', '.last-refresh-ok');
+    expect(status(root, queue(), okFile)).toBe(0);
+    fs.symlinkSync(path.join(outsideDir, 'target'), okFile);
+    expect(status(root, queue(), okFile)).toBe(1);
+  });
+
+  it('never checks the root or a folder above it', () => {
+    // On macOS the temp tree itself sits behind /var -> /private/var; this builds the
+    // same shape on any platform.
+    const linkedParent = path.join(tmp, 'linked-parent');
+    fs.symlinkSync(tmp, linkedParent);
+    const underLinkedParent = path.join(linkedParent, 'repo');
+    expect(status(underLinkedParent, path.join(underLinkedParent, '.devflow', 'memory', '.pending-turns.jsonl')), 'a linked parent').toBe(0);
+
+    const linkedRoot = path.join(tmp, 'linked-root');
+    fs.symlinkSync(root, linkedRoot);
+    expect(status(linkedRoot, path.join(linkedRoot, '.devflow', 'memory', '.pending-turns.jsonl')), 'a linked root').toBe(0);
+  });
+
+  it('refuses what it cannot vouch for: no path, an empty root, a path not below the root, an empty, `.` or `..` part', () => {
+    expect(status(root), 'no path at all').toBe(1);
+    expect(status('', queue()), 'an empty root').toBe(1);
+    expect(status(root, root), 'the root itself').toBe(1);
+    expect(status(root, path.join(outsideDir, 'q')), 'a path outside the root').toBe(1);
+    expect(status(root, `${root}x/.devflow/q`), 'a sibling whose name starts with the root\'s').toBe(1);
+    expect(status(root, `${root}/.devflow//memory/q`), 'an empty part').toBe(1);
+    expect(status(root, `${root}/.devflow/./memory/q`), 'a `.` part').toBe(1);
+    expect(status(root, `${root}/.devflow/../../outside/q`), 'a `..` part').toBe(1);
+  });
+
+  it('walks at most 64 parts below the root, and refuses a deeper path rather than walk it', () => {
+    expect(status(root, `${root}/${'d/'.repeat(63)}q`), '64 parts').toBe(0);
+    expect(status(root, `${root}/${'d/'.repeat(64)}q`), '65 parts').toBe(1);
+  });
+});
+
+// =============================================================================
+// git-marker helper: df_file_below (D-HOOKS-NO-SYMLINK)
+// =============================================================================
+//
+// Every hook read of a file under a project's .devflow/ asks this predicate
+// first. It admits a regular file that no symbolic link leads to. A file a link
+// leads to is treated as absent, and that refusal is logged once through the
+// caller's log().
+// =============================================================================
+
+describe('git-marker helper: df_file_below (D-HOOKS-NO-SYMLINK)', () => {
+  const GIT_MARKER_SRC = path.join(HOOKS_DIR, 'git-marker');
+
+  let tmp: string;
+  let root: string;
+  let outsideDir: string;
+  let logFile: string;
+
+  beforeEach(() => {
+    tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-filebelow-'));
+    root = path.join(tmp, 'repo');
+    outsideDir = path.join(tmp, 'outside');
+    logFile = path.join(tmp, 'hook.log');
+    fs.mkdirSync(path.join(root, '.devflow', 'memory'), { recursive: true });
+    fs.mkdirSync(outsideDir);
+  });
+
+  afterEach(() => {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  });
+
+  const memoryFile = (): string => path.join(root, '.devflow', 'memory', 'WORKING-MEMORY.md');
+
+  /** The predicate's status and stderr for `file`, with a log() that appends to logFile, or with none. */
+  const run = (file: string, withLog = true): { status: number | null; stderr: string } => {
+    const logDefinition = withLog ? 'log() { printf "%s\\n" "$1" >> "$LOG_FILE"; }; ' : '';
+    const res = spawnSync('bash', ['-c', `${logDefinition}source "$1"; df_file_below "$2" "$3"`, '_', GIT_MARKER_SRC, root, file], {
+      encoding: 'utf-8',
+      env: { ...process.env, LOG_FILE: logFile },
+    });
+    return { status: res.status, stderr: res.stderr };
+  };
+
+  const logged = (): string[] =>
+    fs.existsSync(logFile) ? fs.readFileSync(logFile, 'utf-8').split('\n').filter(Boolean) : [];
+
+  it('admits a regular file that no link leads to, and logs nothing', () => {
+    fs.writeFileSync(memoryFile(), 'memory');
+    expect(run(memoryFile())).toEqual({ status: 0, stderr: '' });
+    expect(logged()).toEqual([]);
+  });
+
+  it('answers 1 and logs nothing where no regular file stands: nothing there, a folder, a dangling link', () => {
+    expect(run(memoryFile()).status, 'nothing there').toBe(1);
+    fs.mkdirSync(memoryFile());
+    expect(run(memoryFile()).status, 'a folder').toBe(1);
+    fs.rmdirSync(memoryFile());
+    fs.symlinkSync(path.join(outsideDir, 'missing'), memoryFile());
+    expect(run(memoryFile()).status, 'a dangling link').toBe(1);
+    expect(logged()).toEqual([]);
+  });
+
+  it('treats a file that is a link as absent, and logs that once', () => {
+    const target = path.join(outsideDir, 'target');
+    fs.writeFileSync(target, 'a file outside the project');
+    fs.symlinkSync(target, memoryFile());
+
+    expect(run(memoryFile())).toEqual({ status: 1, stderr: '' });
+    expect(logged()).toEqual([expect.stringContaining(`a symbolic link sits on the path to ${memoryFile()}`)]);
+  });
+
+  it('treats a file in a linked folder as absent, and logs that once', () => {
+    fs.writeFileSync(path.join(outsideDir, 'WORKING-MEMORY.md'), 'a file outside the project');
+    fs.rmSync(path.join(root, '.devflow', 'memory'), { recursive: true });
+    fs.symlinkSync(outsideDir, path.join(root, '.devflow', 'memory'));
+
+    expect(run(memoryFile()).status).toBe(1);
+    expect(logged()).toHaveLength(1);
+  });
+
+  it('refuses silently when the caller defines no log()', () => {
+    const target = path.join(outsideDir, 'target');
+    fs.writeFileSync(target, 'a file outside the project');
+    fs.symlinkSync(target, memoryFile());
+
+    expect(run(memoryFile(), false)).toEqual({ status: 1, stderr: '' });
+  });
+});
+
+// =============================================================================
 // session-start-orchestrator: orchestrator charter injection
 // =============================================================================
 
@@ -1745,6 +1867,33 @@ describe('ensure-devflow-init behavioral', () => {
     expect(fs.existsSync(path.join(tmpDir, '.devflow', 'features', 'index.json'))).toBe(false);
   });
 
+  it('a root .gitignore linked outside the project is left alone, and capture goes on (D-GITIGNORE-LINK-INSIDE)', () => {
+    // The capture and memory hooks stop when this file returns non-zero
+    // (`|| exit 0`), so a refused carve-out must not refuse the whole scaffold.
+    const outside = fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-features-outside-'));
+    try {
+      const target = path.join(outside, 'gitignore');
+      const UNTOUCHED = 'a file outside the project\n';
+      fs.writeFileSync(target, UNTOUCHED);
+      fs.symlinkSync(target, path.join(tmpDir, '.gitignore'));
+      const logFile = path.join(outside, 'hook.log');
+
+      const run = spawnSync(
+        'bash',
+        ['-c', 'set -e; log() { printf "%s\\n" "$1" >> "$HOOK_LOG"; }; source "$0" "$1" || { echo stopped; exit 0; }; echo continued', ENSURE_DEVFLOW, tmpDir],
+        { encoding: 'utf-8', env: { ...process.env, HOME: outside, HOOK_LOG: logFile } },
+      );
+
+      expect({ status: run.status, out: run.stdout.trim() }).toEqual({ status: 0, out: 'continued' });
+      expect(fs.readFileSync(target, 'utf-8'), 'nothing is written through the link').toBe(UNTOUCHED);
+      expect(fs.existsSync(path.join(tmpDir, '.devflow', 'memory')), 'the scaffold is still made').toBe(true);
+      expect(fs.existsSync(path.join(tmpDir, '.devflow', '.root-gitignore-configured-v6')), 'no carve-out, no marker').toBe(false);
+      expect(fs.readFileSync(logFile, 'utf-8').trim().split('\n'), 'the skip is logged once').toEqual([expect.stringContaining('symbolic link')]);
+    } finally {
+      fs.rmSync(outside, { recursive: true, force: true });
+    }
+  });
+
   it('writes the .devflow/ carve-out to the project root .gitignore (creates it when absent)', () => {
     execSync(`bash -c 'source "${ENSURE_DEVFLOW}" "${tmpDir}"'`, { stdio: 'pipe' });
 
@@ -1869,6 +2018,27 @@ describe('ensure-devflow-init behavioral', () => {
     expect(result).toBe('1');
     // No .devflow/ directory should have been created in the test working directory
     expect(fs.existsSync(path.join(tmpDir, '.devflow'))).toBe(false);
+  });
+
+  it('returns non-zero and creates nothing where the link points when .devflow is a symbolic link (D-HOOKS-NO-SYMLINK)', () => {
+    // A repository can commit .devflow itself as a link; `mkdir -p` would then create
+    // memory/, learning/, features/ and docs/ inside the folder the link names, and
+    // the carve-out marker would land there too. The refusal is logged once.
+    const outsideDir = path.join(tmpDir, 'outside');
+    fs.mkdirSync(outsideDir);
+    fs.symlinkSync(outsideDir, path.join(tmpDir, '.devflow'));
+    const logFile = path.join(tmpDir, 'hook.log');
+
+    const result = execSync(
+      `bash -c 'log() { printf "%s\\n" "$1" >> "$HOOK_LOG"; }; source "${ENSURE_DEVFLOW}" "${tmpDir}"; echo "rc=$?"'`,
+      { stdio: 'pipe', env: { ...process.env, HOOK_LOG: logFile } },
+    ).toString().trim();
+
+    expect(result).toBe('rc=1');
+    expect(fs.readdirSync(outsideDir), 'nothing is created in the folder the link names').toEqual([]);
+    const lines = fs.readFileSync(logFile, 'utf-8').trim().split('\n');
+    expect(lines, 'the refusal is logged once').toHaveLength(1);
+    expect(lines[0]).toContain('symbolic link');
   });
 
   it('fast-path gates on .root-gitignore-configured-v6 marker with no -v5/-v4/-v3 reference (P0-S13)', () => {
@@ -2017,6 +2187,61 @@ describe('ensure-root-gitignore behavioral', () => {
     expect({ status: fast.status, out: fast.stdout.trim() }, 'the converged fast path').toEqual({ status: 0, out: 'reached' });
   });
 
+  it('creates its marker only where nothing stands: a link at the marker path is never written through (D-HOOKS-NO-SYMLINK)', () => {
+    // `touch` follows a link, so a marker committed as a link would create or
+    // stamp whatever file it names.
+    fs.mkdirSync(path.join(tmpDir, '.devflow'));
+    const marker = path.join(tmpDir, '.devflow', '.root-gitignore-configured-v6');
+    const target = path.join(tmpDir, 'created-through-the-link');
+    fs.symlinkSync(target, marker);
+
+    execSync(`bash -c 'source "${ENSURE_ROOT}" "${tmpDir}"'`, { stdio: 'pipe' });
+
+    expect(fs.existsSync(target), 'nothing is created where the link points').toBe(false);
+    expect(fs.lstatSync(marker).isSymbolicLink(), 'the link is left as it was').toBe(true);
+    expect(ignoreLines(path.join(tmpDir, '.gitignore')), 'non-vacuity: the run took the stamping path').toContain('!.devflow/project.json');
+  });
+
+  it('never opens a FIFO that a link at the marker path leads to: the caller goes on, and the skip is logged once (D-HOOKS-NO-SYMLINK)', () => {
+    // noclobber alone opens such a link: its target is no regular file, so the
+    // create is not made exclusive, and an open for writing waits for a reader that
+    // never comes, at every session start and every prompt. The run is bounded, so
+    // that wait fails the test rather than hanging the suite.
+    fs.mkdirSync(path.join(tmpDir, '.devflow'));
+    const marker = path.join(tmpDir, '.devflow', '.root-gitignore-configured-v6');
+    const fifo = path.join(tmpDir, 'fifo');
+    const logFile = path.join(tmpDir, 'hook.log');
+    makeFifo(fifo);
+    fs.symlinkSync(fifo, marker);
+
+    try {
+      const run = spawnWithStdin(
+        'bash',
+        ['-c', 'set -e; log() { printf "%s\\n" "$1" >> "$HOOK_LOG"; }; source "$0" "$1"; echo reached', ENSURE_ROOT, tmpDir],
+        { input: '', env: { ...process.env, HOOK_LOG: logFile }, timeout: FIFO_RUN_BOUND_MS },
+      );
+      expect({ kind: run.kind, out: run.stdout.trim() }).toEqual({ kind: 'clean', out: 'reached' });
+    } finally {
+      releaseFifo(fifo);
+    }
+    expect(fs.readlinkSync(marker), 'the link is left as it was').toBe(fifo);
+    expect(ignoreLines(path.join(tmpDir, '.gitignore')), 'non-vacuity: the run took the stamping path').toContain('!.devflow/project.json');
+    expect(fs.readFileSync(logFile, 'utf-8').trim().split('\n'), 'the skip is logged once').toEqual([expect.stringContaining('symbolic link')]);
+  }, FIFO_TEST_TIMEOUT_MS);
+
+  it('a `set -e` caller keeps running when the healing path finds its marker already there', () => {
+    // The marker is created only where nothing stands, so a healing run that finds
+    // it creates none, and must not end the caller either.
+    fs.mkdirSync(path.join(tmpDir, '.devflow'));
+    fs.writeFileSync(path.join(tmpDir, '.devflow', '.root-gitignore-configured-v6'), '');
+    fs.writeFileSync(path.join(tmpDir, '.gitignore'), 'node_modules/\n');
+
+    const run = spawnSync('bash', ['-c', `set -e; source "${ENSURE_ROOT}" "${tmpDir}"; echo reached`], { encoding: 'utf-8' });
+
+    expect({ status: run.status, out: run.stdout.trim() }).toEqual({ status: 0, out: 'reached' });
+    expect(ignoreLines(path.join(tmpDir, '.gitignore')), 'non-vacuity: the block was healed').toContain('!.devflow/project.json');
+  });
+
   it('v6 marker present but block dropped: heals the .gitignore (marker is a claim, not proof)', () => {
     // Simulate a merge-conflict resolution that drops the devflow block while leaving the v6 marker.
     fs.mkdirSync(path.join(tmpDir, '.devflow'), { recursive: true });
@@ -2087,6 +2312,164 @@ describe('ensure-root-gitignore behavioral', () => {
     // Marker is bumped: v1 dropped, v6 written.
     expect(fs.existsSync(path.join(tmpDir, '.devflow', '.root-gitignore-configured'))).toBe(false);
     expect(fs.existsSync(path.join(tmpDir, '.devflow', '.root-gitignore-configured-v6'))).toBe(true);
+  });
+
+  it('upgrades a legacy install only through a copy it creates: an entry planted at the copy\'s name is never written through (D-HOOKS-NO-SYMLINK)', () => {
+    // The upgrade filters .gitignore into a copy named after the hook's PID and
+    // renames it into place. A repository can commit an entry at that name, a link
+    // to a file elsewhere among them; the copy is created only where nothing stands,
+    // so that entry is removed instead and the upgrade waits for a later run.
+    const UNTOUCHED = 'a file outside the project, which no hook may write\n';
+    const legacy = 'node_modules/\n\n# Devflow runtime data (local by default; remove to share via git)\n.devflow/\n';
+    const gitignore = path.join(tmpDir, '.gitignore');
+    const outside = path.join(tmpDir, 'outside.txt');
+    const logFile = path.join(tmpDir, 'hook.log');
+    fs.writeFileSync(gitignore, legacy);
+    fs.writeFileSync(outside, UNTOUCHED);
+
+    // The copy's name ends in the PID of the shell that sources the helper, so that
+    // shell plants the link at exactly that name, checks it is there, and sources it.
+    execSync(
+      `bash -c 'LOG_FILE="$3"; log() { printf "%s\\n" "$1" >> "$LOG_FILE"; }; ln -s "$1" "$0/.gitignore.devflow-tmp.$$" && [ -L "$0/.gitignore.devflow-tmp.$$" ] && source "$2" "$0"' ` +
+        `"${tmpDir}" "${outside}" "${ENSURE_ROOT}" "${logFile}"`,
+      { stdio: 'pipe' },
+    );
+
+    expect(fs.readFileSync(outside, 'utf-8'), 'nothing is written through the planted link').toBe(UNTOUCHED);
+    expect(fs.lstatSync(gitignore).isSymbolicLink(), 'the link is never renamed over .gitignore').toBe(false);
+    expect(fs.readFileSync(gitignore, 'utf-8'), 'the upgrade waits for a later run').toBe(legacy);
+    expect(fs.readdirSync(tmpDir).filter((name) => name.includes('.devflow-tmp.')), 'the planted link is removed').toEqual([]);
+    expect(fs.existsSync(path.join(tmpDir, '.devflow', '.root-gitignore-configured-v6')), 'no marker for an upgrade that did not run').toBe(false);
+    expect(fs.readFileSync(logFile, 'utf-8').trim().split('\n'), 'the skipped upgrade is logged once').toHaveLength(1);
+
+    // Non-vacuity: with nothing planted, the next run upgrades the file.
+    execSync(`bash -c 'source "${ENSURE_ROOT}" "${tmpDir}"'`, { stdio: 'pipe' });
+    expect(ignoreLines(gitignore)).toContain('!.devflow/project.json');
+    expect(ignoreLines(gitignore)).not.toContain('.devflow/');
+  });
+
+  it('upgrades a legacy install only through a copy it creates: a FIFO that a link at the copy\'s name leads to is never opened (D-HOOKS-NO-SYMLINK)', () => {
+    // noclobber alone opens such a link and waits there for a reader. The run is
+    // bounded, so that wait fails the test rather than hanging the suite.
+    const legacy = 'node_modules/\n\n# Devflow runtime data (local by default; remove to share via git)\n.devflow/\n';
+    const gitignore = path.join(tmpDir, '.gitignore');
+    const fifo = path.join(tmpDir, 'fifo');
+    fs.writeFileSync(gitignore, legacy);
+    makeFifo(fifo);
+
+    // The copy's name ends in the PID of the shell that sources the helper, so that
+    // shell plants the link at exactly that name, checks it is there, and sources it.
+    try {
+      const run = spawnWithStdin(
+        'bash',
+        ['-c', 'set -e; ln -s "$1" "$0/.gitignore.devflow-tmp.$$"; [ -L "$0/.gitignore.devflow-tmp.$$" ]; source "$2" "$0"; echo reached', tmpDir, fifo, ENSURE_ROOT],
+        { input: '', timeout: FIFO_RUN_BOUND_MS },
+      );
+      expect({ kind: run.kind, out: run.stdout.trim() }).toEqual({ kind: 'clean', out: 'reached' });
+    } finally {
+      releaseFifo(fifo);
+    }
+    expect(fs.readFileSync(gitignore, 'utf-8'), 'the upgrade waits for a later run').toBe(legacy);
+    expect(fs.readdirSync(tmpDir).filter((name) => name.includes('.devflow-tmp.')), 'the planted link is removed').toEqual([]);
+  }, FIFO_TEST_TIMEOUT_MS);
+
+  // D-GITIGNORE-LINK-INSIDE: a repository can commit its root .gitignore as a symbolic
+  // link to any file on the machine. The helper writes through one only when the file
+  // it resolves to lies inside the project and outside any .git folder in it, the
+  // project's own or a nested repository's; otherwise it writes nothing anywhere,
+  // stamps no marker, logs the skip once and lets its caller go on.
+  describe('a root .gitignore that is a symbolic link (D-GITIGNORE-LINK-INSIDE)', () => {
+    const UNTOUCHED = 'a file outside the project, which no hook may write\n';
+
+    /** A project root and a folder beside it, outside the project, plus a log file. */
+    function layout(): { root: string; outside: string; logFile: string; home: string } {
+      const root = path.join(tmpDir, 'repo');
+      const outside = path.join(tmpDir, 'outside');
+      const home = path.join(tmpDir, 'home');
+      for (const dir of [root, outside, home]) fs.mkdirSync(dir);
+      return { root, outside, logFile: path.join(tmpDir, 'hook.log'), home };
+    }
+
+    /** Source the helper from a `set -e` caller that defines log(), as the hooks do. */
+    function runHelper(root: string, logFile: string, home: string): { status: number | null; out: string } {
+      const r = spawnSync(
+        'bash',
+        ['-c', 'set -e; log() { printf "%s\\n" "$1" >> "$HOOK_LOG"; }; source "$0" "$1"; echo reached', ENSURE_ROOT, root],
+        { encoding: 'utf-8', env: { ...process.env, HOME: home, HOOK_LOG: logFile } },
+      );
+      return { status: r.status, out: r.stdout.trim() };
+    }
+
+    const logged = (logFile: string): string[] =>
+      fs.existsSync(logFile) ? fs.readFileSync(logFile, 'utf-8').trim().split('\n') : [];
+
+    it('a link to a file outside the project: the file is untouched, nothing is stamped, the skip is logged once and the caller goes on', () => {
+      const { root, outside, logFile, home } = layout();
+      const target = path.join(outside, 'gitignore');
+      fs.writeFileSync(target, UNTOUCHED);
+      fs.symlinkSync(target, path.join(root, '.gitignore'));
+
+      expect(runHelper(root, logFile, home)).toEqual({ status: 0, out: 'reached' });
+
+      expect(fs.readFileSync(target, 'utf-8'), 'nothing is written through the link').toBe(UNTOUCHED);
+      expect(fs.lstatSync(path.join(root, '.gitignore')).isSymbolicLink(), 'the link is left as it was').toBe(true);
+      expect(fs.existsSync(path.join(root, '.devflow')), 'no marker, no .devflow').toBe(false);
+      expect(logged(logFile), 'the skip is logged once').toEqual([expect.stringContaining('symbolic link')]);
+    });
+
+    it('a relative link to a file outside the project that does not exist yet: nothing is created there', () => {
+      const { root, outside, logFile, home } = layout();
+      fs.symlinkSync('../outside/gitignore', path.join(root, '.gitignore'));
+
+      expect(runHelper(root, logFile, home)).toEqual({ status: 0, out: 'reached' });
+
+      expect(fs.readdirSync(outside), 'nothing is created where the link points').toEqual([]);
+      expect(fs.existsSync(path.join(root, '.devflow'))).toBe(false);
+      expect(logged(logFile)).toHaveLength(1);
+    });
+
+    it('a link inside the project that runs through a linked folder leading outside is refused', () => {
+      const { root, outside, logFile, home } = layout();
+      fs.writeFileSync(path.join(outside, 'gitignore'), UNTOUCHED);
+      fs.symlinkSync(outside, path.join(root, 'config'));
+      fs.symlinkSync('config/gitignore', path.join(root, '.gitignore'));
+
+      expect(runHelper(root, logFile, home)).toEqual({ status: 0, out: 'reached' });
+
+      expect(fs.readFileSync(path.join(outside, 'gitignore'), 'utf-8')).toBe(UNTOUCHED);
+      expect(fs.existsSync(path.join(root, '.devflow'))).toBe(false);
+      expect(logged(logFile)).toHaveLength(1);
+    });
+
+    it('a link into the project\'s own .git is refused: git\'s hooks and config are not the repository\'s files', () => {
+      const { root, logFile, home } = layout();
+      const hook = path.join(root, '.git', 'hooks', 'pre-commit');
+      const HOOK = '#!/bin/sh\nexec true\n';
+      fs.mkdirSync(path.dirname(hook), { recursive: true });
+      fs.writeFileSync(hook, HOOK, { mode: 0o755 });
+      fs.symlinkSync('.git/hooks/pre-commit', path.join(root, '.gitignore'));
+
+      expect(runHelper(root, logFile, home)).toEqual({ status: 0, out: 'reached' });
+
+      expect(fs.readFileSync(hook, 'utf-8')).toBe(HOOK);
+      expect(fs.existsSync(path.join(root, '.devflow'))).toBe(false);
+      expect(logged(logFile)).toHaveLength(1);
+    });
+
+    it('a link to a file inside the project is written through, stays a link, and is stamped like any other run', () => {
+      const { root, logFile, home } = layout();
+      fs.mkdirSync(path.join(root, 'config'));
+      const target = path.join(root, 'config', 'gitignore');
+      fs.writeFileSync(target, 'node_modules/\n');
+      fs.symlinkSync('config/gitignore', path.join(root, '.gitignore'));
+
+      expect(runHelper(root, logFile, home)).toEqual({ status: 0, out: 'reached' });
+
+      expect(fs.lstatSync(path.join(root, '.gitignore')).isSymbolicLink(), 'the link survives').toBe(true);
+      expect(fs.readFileSync(target, 'utf-8')).toBe(`node_modules/\n\n${DEVFLOW_GITIGNORE_BLOCK}\n`);
+      expect(fs.existsSync(path.join(root, '.devflow', '.root-gitignore-configured-v6'))).toBe(true);
+      expect(logged(logFile), 'nothing to report').toEqual([]);
+    });
   });
 
   // The v2 carve-out block exactly as shipped before the conventions.md line was added.
@@ -3058,6 +3441,302 @@ describe('ensure-root-gitignore × computeDevflowGitignore cross-implementation 
   });
 });
 
+// =============================================================================
+// Cross-implementation parity over a LINKED root .gitignore (D-GITIGNORE-LINK-INSIDE):
+// the hook (ensure-root-gitignore) and init (ensureDevflowGitignore) follow a link
+// the same way, refuse the same layouts and write the same bytes to the same file.
+// Each row is built twice, in two sandboxes, and each twin runs on its own copy;
+// the whole sandbox is then compared, links included, so a write anywhere shows.
+// =============================================================================
+
+describe('ensure-root-gitignore × ensureDevflowGitignore: a root .gitignore that is a symbolic link (D-GITIGNORE-LINK-INSIDE)', () => {
+  const ENSURE_ROOT_LINKED = path.join(HOOKS_DIR, 'ensure-root-gitignore');
+  const SEED = 'node_modules/\n';
+  const OUTSIDE = 'a file outside the project\n';
+  /** The most links either twin follows from .gitignore to the file it names. */
+  const MAX_HOPS = 40;
+
+  /** One sandbox: `repo/` is the project root, `outside/` a folder beside it. */
+  interface Sandbox { readonly sb: string; readonly repo: string; readonly outside: string }
+
+  interface Row {
+    readonly label: string;
+    /** The project root, relative to the sandbox: `repo` unless the row places it elsewhere. */
+    readonly root?: string;
+    readonly setup: (s: Sandbox) => void;
+    /** `refused`: nothing in the sandbox changes. `written`: that file, relative to the sandbox, gains the block. */
+    readonly outcome: 'refused' | { readonly written: string };
+  }
+
+  /** `.gitignore` → l1 → … → l(n-1) → `final`: a chain that `n` link reads resolve. */
+  function chain(s: Sandbox, n: number, final: string): void {
+    const names = ['.gitignore', ...Array.from({ length: n - 1 }, (_, i) => `l${i + 1}`)];
+    names.forEach((name, i) => fs.symlinkSync(i + 1 < names.length ? names[i + 1] : final, path.join(s.repo, name)));
+  }
+
+  const ROWS: readonly Row[] = [
+    {
+      label: 'a regular .gitignore (control)',
+      setup: s => fs.writeFileSync(path.join(s.repo, '.gitignore'), SEED),
+      outcome: { written: 'repo/.gitignore' },
+    },
+    {
+      label: 'an absolute link to a file outside the project',
+      setup: s => { fs.writeFileSync(path.join(s.outside, 'gi'), OUTSIDE); fs.symlinkSync(path.join(s.outside, 'gi'), path.join(s.repo, '.gitignore')); },
+      outcome: 'refused',
+    },
+    {
+      label: 'a relative link to a file outside the project',
+      setup: s => { fs.writeFileSync(path.join(s.outside, 'gi'), OUTSIDE); fs.symlinkSync('../outside/gi', path.join(s.repo, '.gitignore')); },
+      outcome: 'refused',
+    },
+    {
+      label: 'a link to a missing file outside the project',
+      setup: s => fs.symlinkSync('../outside/gi', path.join(s.repo, '.gitignore')),
+      outcome: 'refused',
+    },
+    {
+      label: 'a link to a file inside the project',
+      setup: s => { fs.mkdirSync(path.join(s.repo, 'config')); fs.writeFileSync(path.join(s.repo, 'config', 'gi'), SEED); fs.symlinkSync('config/gi', path.join(s.repo, '.gitignore')); },
+      outcome: { written: 'repo/config/gi' },
+    },
+    {
+      label: 'a link to a missing file in a folder inside the project',
+      setup: s => { fs.mkdirSync(path.join(s.repo, 'config')); fs.symlinkSync('config/gi', path.join(s.repo, '.gitignore')); },
+      outcome: { written: 'repo/config/gi' },
+    },
+    {
+      label: 'a chain that starts inside and ends outside',
+      setup: s => { fs.writeFileSync(path.join(s.outside, 'gi'), OUTSIDE); fs.symlinkSync('hop', path.join(s.repo, '.gitignore')); fs.symlinkSync('../outside/gi', path.join(s.repo, 'hop')); },
+      outcome: 'refused',
+    },
+    {
+      label: 'a chain that leaves the project and ends inside it',
+      setup: s => {
+        fs.mkdirSync(path.join(s.repo, 'config'));
+        fs.writeFileSync(path.join(s.repo, 'config', 'gi'), SEED);
+        fs.symlinkSync('../repo/config/gi', path.join(s.outside, 'hop'));
+        fs.symlinkSync('../outside/hop', path.join(s.repo, '.gitignore'));
+      },
+      outcome: { written: 'repo/config/gi' },
+    },
+    {
+      label: 'a link through a linked folder that leads outside',
+      setup: s => { fs.writeFileSync(path.join(s.outside, 'gi'), OUTSIDE); fs.symlinkSync('../outside', path.join(s.repo, 'config')); fs.symlinkSync('config/gi', path.join(s.repo, '.gitignore')); },
+      outcome: 'refused',
+    },
+    {
+      label: 'a link to a git hook in the project\'s .git',
+      setup: s => {
+        fs.mkdirSync(path.join(s.repo, '.git', 'hooks'), { recursive: true });
+        fs.writeFileSync(path.join(s.repo, '.git', 'hooks', 'pre-commit'), '#!/bin/sh\n', { mode: 0o755 });
+        fs.symlinkSync('.git/hooks/pre-commit', path.join(s.repo, '.gitignore'));
+      },
+      outcome: 'refused',
+    },
+    {
+      label: 'a link to the .git file of a linked worktree',
+      setup: s => { fs.writeFileSync(path.join(s.repo, '.git'), 'gitdir: /elsewhere/.git/worktrees/wt\n'); fs.symlinkSync('.git', path.join(s.repo, '.gitignore')); },
+      outcome: 'refused',
+    },
+    {
+      label: 'a link to the config in a nested repository\'s .git',
+      setup: s => {
+        fs.mkdirSync(path.join(s.repo, 'vendor', 'lib', '.git'), { recursive: true });
+        fs.writeFileSync(path.join(s.repo, 'vendor', 'lib', '.git', 'config'), '[core]\n');
+        fs.symlinkSync('vendor/lib/.git/config', path.join(s.repo, '.gitignore'));
+      },
+      outcome: 'refused',
+    },
+    {
+      label: 'a link to a git hook in a nested repository\'s .git',
+      setup: s => {
+        fs.mkdirSync(path.join(s.repo, 'vendor', 'lib', '.git', 'hooks'), { recursive: true });
+        fs.writeFileSync(path.join(s.repo, 'vendor', 'lib', '.git', 'hooks', 'pre-commit'), '#!/bin/sh\n', { mode: 0o755 });
+        fs.symlinkSync('vendor/lib/.git/hooks/pre-commit', path.join(s.repo, '.gitignore'));
+      },
+      outcome: 'refused',
+    },
+    {
+      label: 'a link to a missing git hook in a nested repository\'s .git',
+      setup: s => {
+        fs.mkdirSync(path.join(s.repo, 'vendor', 'lib', '.git', 'hooks'), { recursive: true });
+        fs.symlinkSync('vendor/lib/.git/hooks/post-checkout', path.join(s.repo, '.gitignore'));
+      },
+      outcome: 'refused',
+    },
+    {
+      label: 'a link to the .git file of a nested submodule',
+      setup: s => {
+        fs.mkdirSync(path.join(s.repo, 'vendor', 'lib'), { recursive: true });
+        fs.writeFileSync(path.join(s.repo, 'vendor', 'lib', '.git'), 'gitdir: ../../.git/modules/lib\n');
+        fs.symlinkSync('vendor/lib/.git', path.join(s.repo, '.gitignore'));
+      },
+      outcome: 'refused',
+    },
+    {
+      label: 'a link through a linked folder that leads into a nested repository\'s .git',
+      setup: s => {
+        fs.mkdirSync(path.join(s.repo, 'vendor', 'lib', '.git'), { recursive: true });
+        fs.writeFileSync(path.join(s.repo, 'vendor', 'lib', '.git', 'config'), '[core]\n');
+        fs.symlinkSync('vendor/lib/.git', path.join(s.repo, 'config'));
+        fs.symlinkSync('config/config', path.join(s.repo, '.gitignore'));
+      },
+      outcome: 'refused',
+    },
+    {
+      // On a case-insensitive file system (macOS) `.GIT` opens the project's own
+      // `.git`; on a case-sensitive one it names nothing there. The on-disk folder is
+      // `.git` either way, and both twins refuse the link on both.
+      label: 'a link that spells the project\'s .git in capitals, to a git hook',
+      setup: s => {
+        fs.mkdirSync(path.join(s.repo, '.git', 'hooks'), { recursive: true });
+        fs.writeFileSync(path.join(s.repo, '.git', 'hooks', 'pre-commit'), '#!/bin/sh\n', { mode: 0o755 });
+        fs.symlinkSync('.GIT/hooks/pre-commit', path.join(s.repo, '.gitignore'));
+      },
+      outcome: 'refused',
+    },
+    {
+      label: 'a link that spells a nested submodule\'s .git file in capitals',
+      setup: s => {
+        fs.mkdirSync(path.join(s.repo, 'vendor', 'lib'), { recursive: true });
+        fs.writeFileSync(path.join(s.repo, 'vendor', 'lib', '.git'), 'gitdir: ../../.git/modules/lib\n');
+        fs.symlinkSync('vendor/lib/.Git', path.join(s.repo, '.gitignore'));
+      },
+      outcome: 'refused',
+    },
+    {
+      label: 'a link to a file in folders whose names only contain .git',
+      setup: s => {
+        fs.mkdirSync(path.join(s.repo, '.github', 'lib.git'), { recursive: true });
+        fs.writeFileSync(path.join(s.repo, '.github', 'lib.git', 'gi'), SEED);
+        fs.symlinkSync('.github/lib.git/gi', path.join(s.repo, '.gitignore'));
+      },
+      outcome: { written: 'repo/.github/lib.git/gi' },
+    },
+    {
+      label: 'a link to a file inside a project that itself lies in a folder named .git',
+      root: '.git/repo',
+      setup: s => { fs.mkdirSync(path.join(s.repo, 'config')); fs.writeFileSync(path.join(s.repo, 'config', 'gi'), SEED); fs.symlinkSync('config/gi', path.join(s.repo, '.gitignore')); },
+      outcome: { written: '.git/repo/config/gi' },
+    },
+    {
+      label: 'a link to the project folder itself',
+      setup: s => fs.symlinkSync('.', path.join(s.repo, '.gitignore')),
+      outcome: 'refused',
+    },
+    {
+      label: 'a link to itself (a loop)',
+      setup: s => fs.symlinkSync('.gitignore', path.join(s.repo, '.gitignore')),
+      outcome: 'refused',
+    },
+    {
+      label: `a chain of ${MAX_HOPS} links that ends inside the project`,
+      setup: s => { fs.writeFileSync(path.join(s.repo, 'gi'), SEED); chain(s, MAX_HOPS, 'gi'); },
+      outcome: { written: 'repo/gi' },
+    },
+    {
+      label: `a chain of ${MAX_HOPS + 1} links that ends inside the project`,
+      setup: s => { fs.writeFileSync(path.join(s.repo, 'gi'), SEED); chain(s, MAX_HOPS + 1, 'gi'); },
+      outcome: 'refused',
+    },
+  ];
+
+  function makeSandbox(row: Row): Sandbox {
+    const sb = fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-linked-gitignore-'));
+    const s = { sb, repo: path.join(sb, row.root ?? 'repo'), outside: path.join(sb, 'outside') };
+    fs.mkdirSync(s.repo, { recursive: true });
+    fs.mkdirSync(s.outside);
+    row.setup(s);
+    return s;
+  }
+
+  /** Every entry in the sandbox, links unfollowed, with sandbox paths in link targets normalised. */
+  function snapshot(sb: string): Record<string, string> {
+    const real = fs.realpathSync(sb);
+    const norm = (text: string): string => text.split(real).join('<SB>').split(sb).join('<SB>');
+    const out: Record<string, string> = {};
+    const walk = (dir: string): void => {
+      for (const name of fs.readdirSync(dir).sort()) {
+        const abs = path.join(dir, name);
+        const rel = path.relative(sb, abs);
+        const st = fs.lstatSync(abs);
+        if (st.isSymbolicLink()) out[rel] = `link -> ${norm(fs.readlinkSync(abs))}`;
+        else if (st.isDirectory()) { out[rel] = 'dir'; walk(abs); }
+        else out[rel] = `file ${fs.readFileSync(abs, 'utf-8')}`;
+      }
+    };
+    walk(sb);
+    return out;
+  }
+
+  function runShellTwin(s: Sandbox): string[] {
+    const logFile = path.join(os.tmpdir(), `devflow-linked-gitignore-${process.pid}-${Date.now()}.log`);
+    try {
+      const r = spawnSync(
+        'bash',
+        ['-c', 'set -e; log() { printf "%s\\n" "$1" >> "$HOOK_LOG"; }; source "$0" "$1"; echo reached', ENSURE_ROOT_LINKED, s.repo],
+        { encoding: 'utf-8', env: { ...process.env, HOME: s.sb, HOOK_LOG: logFile } },
+      );
+      expect({ status: r.status, out: r.stdout.trim() }, 'the hook\'s caller goes on').toEqual({ status: 0, out: 'reached' });
+      return fs.existsSync(logFile) ? fs.readFileSync(logFile, 'utf-8').trim().split('\n') : [];
+    } finally {
+      if (fs.existsSync(logFile)) fs.rmSync(logFile);
+    }
+  }
+
+  async function runTsTwin(s: Sandbox): Promise<string[]> {
+    const warn = vi.spyOn(p.log, 'warn').mockImplementation(() => undefined);
+    try {
+      await ensureDevflowGitignore(s.repo, false);
+      return warn.mock.calls.map(call => String(call[0]));
+    } finally {
+      warn.mockRestore();
+    }
+  }
+
+  it('the table holds every layout the rule distinguishes', () => {
+    expect(ROWS.filter(r => r.outcome === 'refused').length).toBeGreaterThanOrEqual(17);
+    expect(ROWS.filter(r => r.outcome !== 'refused').length).toBeGreaterThanOrEqual(7);
+  });
+
+  for (const row of ROWS) {
+    it(`${row.label}: both twins ${row.outcome === 'refused' ? 'refuse it and change nothing' : 'write the same file'}`, async () => {
+      const shell = makeSandbox(row);
+      const ts = makeSandbox(row);
+      try {
+        const before = snapshot(shell.sb);
+        expect(snapshot(ts.sb), 'both sandboxes start alike').toEqual(before);
+
+        const shellLog = runShellTwin(shell);
+        const tsWarnings = await runTsTwin(ts);
+        const shellAfter = snapshot(shell.sb);
+
+        expect(snapshot(ts.sb), 'the twins leave identical sandboxes').toEqual(shellAfter);
+        if (row.outcome === 'refused') {
+          expect(shellAfter, 'nothing anywhere changes').toEqual(before);
+          expect(shellLog, 'the hook logs the skip once').toEqual([expect.stringContaining('symbolic link')]);
+          expect(tsWarnings, 'init reports the skip once').toEqual([expect.stringContaining('symbolic link')]);
+        } else {
+          const root = row.root ?? 'repo';
+          const prior = before[row.outcome.written];
+          const priorText = prior === undefined ? '' : prior.slice('file '.length);
+          expect(shellAfter[row.outcome.written], 'the target gains the block').toBe(`file ${computeDevflowGitignore(priorText)}`);
+          expect(shellAfter[`${root}/.devflow/.root-gitignore-configured-v6`], 'the run is stamped').toBe('file ');
+          if (before[`${root}/.gitignore`].startsWith('link')) {
+            expect(shellAfter[`${root}/.gitignore`], 'a link stays a link').toBe(before[`${root}/.gitignore`]);
+          }
+          expect(shellLog, 'nothing to log').toEqual([]);
+          expect(tsWarnings, 'nothing to report').toEqual([]);
+        }
+      } finally {
+        fs.rmSync(shell.sb, { recursive: true, force: true });
+        fs.rmSync(ts.sb, { recursive: true, force: true });
+      }
+    });
+  }
+});
+
 describe('get-mtime behavioral', () => {
   it('returns a valid positive epoch timestamp for a real file', () => {
     const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-test-'));
@@ -3157,6 +3836,67 @@ describe('session-start-context root .gitignore (memory-independent)', () => {
     expect(fs.readFileSync(gitignore, 'utf-8').split('\n').map(l => l.trim())).toContain('!.devflow/policy.json');
     expect(fs.readFileSync(gitignore, 'utf-8').split('\n').map(l => l.trim())).toContain('!.devflow/project.json');
     expect(fs.existsSync(path.join(tmpDir, '.devflow', '.root-gitignore-configured-v6'))).toBe(true);
+  });
+
+  it('a linked .devflow gets no carve-out marker and no learning folder where the link points (D-HOOKS-NO-SYMLINK)', () => {
+    const outsideDir = path.join(homeDir, 'outside');
+    fs.mkdirSync(outsideDir);
+    fs.symlinkSync(outsideDir, path.join(tmpDir, '.devflow'));
+
+    const { exitCode } = runHook(CONTEXT_HOOK, { cwd: tmpDir, source: 'startup' }, homeDir);
+
+    expect(exitCode).toBe(0);
+    expect(fs.readdirSync(outsideDir), 'nothing is created in the folder the link names').toEqual([]);
+  });
+
+  // With memory and learning both off, this hook is the only one that reaches the
+  // carve-out, so its log is the only record of a skip there: the log must be set
+  // up before the carve-out runs, and the skip written with log(), not dbg().
+  describe('each link skip at the carve-out is logged once per run (D-HOOKS-NO-SYMLINK, D-GITIGNORE-LINK-INSIDE)', () => {
+    /** The lines of the hook's own log that report a symbolic link. */
+    const linkSkips = (): string[] => {
+      const slug = tmpDir.replace(/^\//, '').replace(/\//g, '-');
+      const log = path.join(homeDir, '.devflow', 'logs', slug, '.session-start-context.log');
+      return fs.existsSync(log) ? fs.readFileSync(log, 'utf-8').split('\n').filter((l) => l.includes('symbolic link')) : [];
+    };
+
+    beforeEach(() => {
+      fs.writeFileSync(
+        path.join(homeDir, '.devflow', 'manifest.json'),
+        JSON.stringify({ version: '2.0.0', features: { memory: false, learning: false } }),
+      );
+    });
+
+    const run = () => runHook(CONTEXT_HOOK, { cwd: tmpDir, source: 'startup' }, homeDir);
+
+    it('a linked .devflow: one skip line per run, and nothing where the link points', () => {
+      const outsideDir = path.join(homeDir, 'outside');
+      fs.mkdirSync(outsideDir);
+      fs.symlinkSync(outsideDir, path.join(tmpDir, '.devflow'));
+
+      expect(run().exitCode).toBe(0);
+      expect(fs.readdirSync(outsideDir)).toEqual([]);
+      expect(linkSkips(), 'the skip is logged once').toEqual([expect.stringContaining('.devflow is a symbolic link')]);
+
+      expect(run().exitCode).toBe(0);
+      expect(linkSkips(), 'and once more on the next run, not repeated within one').toHaveLength(2);
+    });
+
+    it('a root .gitignore linked outside the project: one skip line, and the file it names untouched', () => {
+      const target = path.join(homeDir, 'outside-gitignore');
+      fs.writeFileSync(target, 'a file outside the project\n');
+      fs.symlinkSync(target, path.join(tmpDir, '.gitignore'));
+
+      expect(run().exitCode).toBe(0);
+      expect(fs.readFileSync(target, 'utf-8')).toBe('a file outside the project\n');
+      expect(linkSkips(), 'the skip is logged once').toEqual([expect.stringContaining('.gitignore is a symbolic link')]);
+    });
+
+    it('a project with no link logs no skip', () => {
+      expect(run().exitCode).toBe(0);
+      expect(fs.existsSync(path.join(tmpDir, '.devflow', '.root-gitignore-configured-v6')), 'non-vacuity: the carve-out ran').toBe(true);
+      expect(linkSkips()).toEqual([]);
+    });
   });
 });
 
@@ -3358,6 +4098,165 @@ describe('session-start-context: learning maintenance directive (Section 2)', ()
     expect(ctx).toContain('model="opus"');
     expect(ctx).not.toContain('injected');
     expect(ctx).not.toContain('evil');
+  });
+});
+
+// =============================================================================
+// session-start-context never reads through a symbolic link under .devflow into
+// the session or an agent directive (D-HOOKS-NO-SYMLINK)
+// =============================================================================
+//
+// Sections 1 and 2 read the learning folder's files into the session context
+// (the TL;DR lines and the learning model), name the index the model is told to
+// read and pass on to the agents it delegates to, and send the Learning agent to
+// the queue when it holds turns. A repository can commit any of these, or the
+// folder itself, as a symbolic link to a file elsewhere on the machine, so a file
+// a link leads to is treated as absent and each refusal is logged once. MARKER is
+// a made-up string standing in for that file's content.
+
+describe('session-start-context never reads through a symbolic link under .devflow into the session or an agent directive (D-HOOKS-NO-SYMLINK)', () => {
+  const CONTEXT_HOOK = path.join(HOOKS_DIR, 'session-start-context');
+  const MARKER = 'made-up-marker-6b2f0e';
+
+  let tmpDir: string;
+  let homeDir: string;
+  let learningDir: string;
+  let outsideDir: string;
+
+  beforeEach(() => {
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-ctx-nolink-'));
+    // Learning is project work, active only inside a git project (D-HOOKS-GIT-ONLY).
+    fs.mkdirSync(path.join(tmpDir, '.git'));
+    homeDir = fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-ctx-nolink-home-'));
+    fs.mkdirSync(path.join(homeDir, '.devflow', 'logs'), { recursive: true });
+    learningDir = path.join(tmpDir, '.devflow', 'learning');
+    fs.mkdirSync(learningDir, { recursive: true });
+    outsideDir = path.join(homeDir, 'outside');
+    fs.mkdirSync(outsideDir);
+  });
+
+  afterEach(() => {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+    fs.rmSync(homeDir, { recursive: true, force: true });
+  });
+
+  /** The context the hook injects, or '' when it injects none. */
+  const contextOf = (stdout: string): string =>
+    stdout.trim() === '' ? '' : JSON.parse(stdout).hookSpecificOutput.additionalContext;
+
+  /** The lines of the hook's own log that report a refused file. */
+  const refusals = (): string[] => {
+    const slug = tmpDir.replace(/^\//, '').replace(/\//g, '-');
+    const log = path.join(homeDir, '.devflow', 'logs', slug, '.session-start-context.log');
+    return fs.existsSync(log) ? fs.readFileSync(log, 'utf-8').split('\n').filter((l) => l.includes('symbolic link')) : [];
+  };
+
+  /** Write `content` to a file outside the project and link `name` in the learning folder to it. */
+  const linkOutside = (name: string, content: string): string => {
+    const target = path.join(outsideDir, name);
+    fs.writeFileSync(target, content);
+    fs.symlinkSync(target, path.join(learningDir, name));
+    return target;
+  };
+
+  const run = () => runHook(CONTEXT_HOOK, { cwd: tmpDir, source: 'startup' }, homeDir);
+
+  for (const [linked, kept, keptLine] of [
+    ['decisions.md', 'pitfalls.md', '2 pitfalls'],
+    ['pitfalls.md', 'decisions.md', '3 decisions'],
+  ] as const) {
+    it(`a linked ${linked} puts no TL;DR line, and nothing of the file it names, into the context`, () => {
+      linkOutside(linked, `<!-- TL;DR: ${MARKER} -->\n# ${MARKER}\n`);
+      fs.writeFileSync(path.join(learningDir, kept), `<!-- TL;DR: ${keptLine} -->\n# Rendered\n`);
+
+      const { stdout, exitCode } = run();
+
+      expect(exitCode).toBe(0);
+      expect(contextOf(stdout), 'non-vacuity: the section ran and kept the other file').toContain(keptLine);
+      expect(stdout).not.toContain(MARKER);
+      expect(refusals(), 'the refusal is logged once').toHaveLength(1);
+    });
+  }
+
+  it('a linked index.md gets no Index line, so the model is never pointed at the file it names', () => {
+    linkOutside('index.md', `Decisions (1):\n  ${MARKER}\n`);
+    fs.writeFileSync(path.join(learningDir, 'decisions.md'), '<!-- TL;DR: 1 decisions -->\n# Rendered\n');
+
+    const { stdout, exitCode } = run();
+
+    expect(exitCode).toBe(0);
+    const ctx = contextOf(stdout);
+    expect(ctx, 'non-vacuity: the section ran').toContain('--- PROJECT DECISIONS (TL;DR) ---\n1 decisions');
+    expect(ctx).not.toContain('Index:');
+    expect(stdout).not.toContain(MARKER);
+    expect(refusals(), 'the refusal is logged once').toHaveLength(1);
+  });
+
+  it('a linked learning.json does not choose the Learning agent\'s model', () => {
+    fs.writeFileSync(path.join(learningDir, '.pending-turns.jsonl'), '{"role":"user","content":"we chose X over Y","ts":1}\n');
+    linkOutside('learning.json', JSON.stringify({ model: 'haiku' }));
+
+    const { stdout, exitCode } = run();
+
+    expect(exitCode).toBe(0);
+    const ctx = contextOf(stdout);
+    expect(ctx, 'non-vacuity: the directive is emitted').toContain('--- LEARNING MAINTENANCE ---');
+    expect(ctx).toContain('model="opus"');
+    expect(ctx).not.toContain('model="haiku"');
+    expect(refusals(), 'the refusal is logged once').toHaveLength(1);
+  });
+
+  it('a linked queue sends no Learning agent to it', () => {
+    linkOutside('.pending-turns.jsonl', `{"role":"user","content":"${MARKER}","ts":1}\n`);
+
+    const linked = run();
+    expect(linked.exitCode).toBe(0);
+    expect(contextOf(linked.stdout)).not.toContain('LEARNING MAINTENANCE');
+    expect(refusals(), 'the refusal is logged once').toHaveLength(1);
+
+    // Non-vacuity: the same queue, as a real file, does send the agent.
+    fs.unlinkSync(path.join(learningDir, '.pending-turns.jsonl'));
+    fs.writeFileSync(path.join(learningDir, '.pending-turns.jsonl'), '{"role":"user","content":"we chose X over Y","ts":1}\n');
+    expect(contextOf(run().stdout)).toContain('--- LEARNING MAINTENANCE ---');
+  });
+
+  it('a linked stale batch sends no Learning agent to it', () => {
+    const batch = path.join(learningDir, '.pending-turns.processing');
+    linkOutside('.pending-turns.processing', `{"role":"user","content":"${MARKER}","ts":1}\n`);
+    // The age check reads the link's own mtime (`stat` without -L), so the link is
+    // what is made stale.
+    const stale = new Date(Date.now() - 1000 * 1000);
+    fs.lutimesSync(batch, stale, stale);
+
+    const linked = run();
+    expect(linked.exitCode).toBe(0);
+    expect(contextOf(linked.stdout)).not.toContain('LEARNING MAINTENANCE');
+    expect(refusals(), 'the refusal is logged once').toHaveLength(1);
+
+    // Non-vacuity: the same stale batch, as a real file, does send the agent.
+    fs.unlinkSync(batch);
+    fs.writeFileSync(batch, '{"role":"user","content":"orphaned","ts":1}\n');
+    fs.utimesSync(batch, stale, stale);
+    expect(contextOf(run().stdout)).toContain('--- LEARNING MAINTENANCE ---');
+  });
+
+  it('a linked learning folder: no TL;DR, no Index line, no directive, and each file read from it refused once', () => {
+    fs.rmSync(learningDir, { recursive: true });
+    fs.writeFileSync(path.join(outsideDir, 'decisions.md'), `<!-- TL;DR: ${MARKER} -->\n`);
+    fs.writeFileSync(path.join(outsideDir, 'index.md'), `Decisions (1):\n  ${MARKER}\n`);
+    fs.writeFileSync(path.join(outsideDir, '.pending-turns.jsonl'), `{"role":"user","content":"${MARKER}","ts":1}\n`);
+    fs.symlinkSync(outsideDir, learningDir);
+
+    const { stdout, exitCode } = run();
+
+    expect(exitCode).toBe(0);
+    expect(contextOf(stdout)).toBe('');
+    expect(stdout).not.toContain(MARKER);
+    const refused = refusals();
+    for (const name of ['decisions.md', 'index.md', '.pending-turns.jsonl']) {
+      expect(refused.filter((l) => l.includes(path.join(learningDir, name))), `${name} is refused once`).toHaveLength(1);
+    }
+    expect(refused).toHaveLength(3);
   });
 });
 

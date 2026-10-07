@@ -597,7 +597,24 @@ describe('learning --reset', { timeout: 30_000 }, () => {
 
     const run = await runLearning(['--reset']);
 
-    expect(run.error).toBe(`reset: ${learningDir} is a symbolic link, not a directory; nothing was removed`);
+    expect(run.error).toBe(`reset: ${learningDir} is a symbolic link, not a directory; nothing was changed`);
+    expect(run.success).toBe('');
+    expect(run.exitCode).toBe(1);
+    expect(snapshotTree(elsewhere)).toEqual(before);
+  });
+
+  it('when .devflow is a symbolic link: exit 1, and nothing in the learning folder the link leads to is removed', async () => {
+    const linkedDevflow = path.join(root, '.devflow');
+    const elsewhere = path.join(root, 'elsewhere');
+    fs.mkdirSync(path.join(elsewhere, 'learning'), { recursive: true });
+    fs.writeFileSync(path.join(elsewhere, 'learning', 'decisions-log.jsonl'), 'kept\n');
+    fs.writeFileSync(path.join(elsewhere, 'learning', 'notes.txt'), 'kept\n');
+    fs.symlinkSync(elsewhere, linkedDevflow);
+    const before = snapshotTree(elsewhere);
+
+    const run = await runLearning(['--reset']);
+
+    expect(run.error).toBe(`reset: ${linkedDevflow} is a symbolic link, not a directory; nothing was changed`);
     expect(run.success).toBe('');
     expect(run.exitCode).toBe(1);
     expect(snapshotTree(elsewhere)).toEqual(before);
@@ -698,6 +715,100 @@ describe('learning --disable drains the learning pending-turns queue', () => {
     vi.spyOn(process, 'cwd').mockReturnValue('/nonexistent-cwd-decoy-path');
     await runLearning(['--disable']);
     expect(queueFilesPresent(root).slice(0, 2)).toEqual([false, false]);
+  });
+
+  // D-CLI-NO-SYMLINK: a repository can commit .devflow or .devflow/learning as a link
+  // to a folder elsewhere; the drain then deletes nothing, says so, and the switch is
+  // still turned off.
+  for (const linked of ['.devflow', path.join('.devflow', 'learning')]) {
+    it(`a linked ${linked}: deletes nothing where it points, says so, and still switches learning off (D-CLI-NO-SYMLINK)`, async () => {
+      const outside = makeTmpDir();
+      try {
+        const queueDir = linked === '.devflow' ? path.join(outside, 'learning') : outside;
+        fs.mkdirSync(queueDir, { recursive: true });
+        const files = ['.pending-turns.jsonl', '.pending-turns.processing', '.pending-turns.owner'].map(f => path.join(queueDir, f));
+        for (const file of files) fs.writeFileSync(file, 'a file outside the project\n');
+        fs.rmSync(path.join(root, linked), { recursive: true, force: true });
+        fs.symlinkSync(outside, path.join(root, linked));
+
+        const run = await runLearning(['--disable']);
+
+        expect(files.map(file => fs.existsSync(file)), 'nothing is deleted through the link').toEqual([true, true, true]);
+        expect(run.warn).toContain(`${path.join(root, linked)} is a symbolic link`);
+        expect(readLearningSwitch()).toBe(false);
+        expect(run.success).toBe('Learning disabled in every project');
+        expect(run.exitCode).toBe(0);
+      } finally {
+        fs.rmSync(outside, { recursive: true, force: true });
+      }
+    });
+  }
+});
+
+// ---------------------------------------------------------------------------
+// --configure writes the project tuning config, learning.json, under the ledger's
+// .devflow/learning. A repository can commit .devflow, the learning folder or
+// learning.json itself as a link; the command then writes nothing, says why and
+// exits 1 (D-CLI-NO-SYMLINK).
+// ---------------------------------------------------------------------------
+
+describe('learning --configure never writes the project config through a symbolic link (D-CLI-NO-SYMLINK)', () => {
+  const KEEP = 'a file outside the project\n';
+  let outside: string;
+
+  beforeEach(() => {
+    outside = makeTmpDir();
+  });
+
+  afterEach(() => {
+    fs.rmSync(outside, { recursive: true, force: true });
+  });
+
+  /** Answer the wizard: Sonnet, no debug logging, Project scope. */
+  async function configureProject(): Promise<LearningRun> {
+    vi.mocked(p.select).mockResolvedValueOnce('sonnet').mockResolvedValueOnce('project');
+    vi.mocked(p.confirm).mockResolvedValueOnce(false);
+    return runLearning(['--configure']);
+  }
+
+  const LAYOUTS: ReadonlyArray<readonly [string, () => string]> = [
+    ['.devflow', () => {
+      fs.mkdirSync(path.join(outside, 'learning'));
+      fs.writeFileSync(path.join(outside, 'learning', 'learning.json'), KEEP);
+      fs.symlinkSync(outside, path.join(root, '.devflow'));
+      return path.join(outside, 'learning', 'learning.json');
+    }],
+    [path.join('.devflow', 'learning'), () => {
+      fs.writeFileSync(path.join(outside, 'learning.json'), KEEP);
+      fs.mkdirSync(path.join(root, '.devflow'));
+      fs.symlinkSync(outside, path.join(root, '.devflow', 'learning'));
+      return path.join(outside, 'learning.json');
+    }],
+    [path.join('.devflow', 'learning', 'learning.json'), () => {
+      fs.writeFileSync(path.join(outside, 'target'), KEEP);
+      fs.mkdirSync(path.join(root, '.devflow', 'learning'), { recursive: true });
+      fs.symlinkSync(path.join(outside, 'target'), path.join(root, '.devflow', 'learning', 'learning.json'));
+      return path.join(outside, 'target');
+    }],
+  ];
+
+  for (const [linked, layout] of LAYOUTS) {
+    it(`a linked ${linked}: nothing is written where it points, and the command says why and exits 1`, async () => {
+      const kept = layout();
+
+      const run = await configureProject();
+
+      expect(fs.readFileSync(kept, 'utf-8'), 'nothing is written through the link').toBe(KEEP);
+      expect(run.error).toContain(`${path.join(root, linked)} is a symbolic link`);
+      expect(run.exitCode).toBe(1);
+    });
+  }
+
+  it('non-vacuity: a plain project gets its config', async () => {
+    const run = await configureProject();
+
+    expect(JSON.parse(fs.readFileSync(path.join(root, '.devflow', 'learning', 'learning.json'), 'utf-8'))).toEqual({ model: 'sonnet', debug: false });
+    expect(run.exitCode).toBe(0);
   });
 });
 

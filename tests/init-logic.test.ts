@@ -1,7 +1,8 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach, type MockInstance } from 'vitest';
 import { promises as fs } from 'fs';
 import * as path from 'path';
 import * as os from 'os';
+import * as p from '@clack/prompts';
 import {
   combineSelection,
   shouldRetry,
@@ -15,9 +16,14 @@ import {
   persistManifestThenConvergeTracker,
   buildTrackerLifecycleIO,
   trackerOverrideMessage,
+  projectRoots,
+  resolveClaudeignoreOutcome,
+  formatSafeDeleteStatus,
   type TrackerLifecycleIO,
 } from '../src/cli/commands/init.js';
 import { formatTrackerSummary } from '../src/cli/commands/tracker-prompts.js';
+import type { SummaryLine } from '../src/cli/commands/install-report.js';
+import { stripAnsi } from '../src/core/ansi.js';
 import { TRACKER_PROVIDER_IDS } from '../src/core/tracker.js';
 import { writeManifest, type ManifestData } from '../src/core/manifest.js';
 import {
@@ -31,6 +37,7 @@ import { getManagedSettingsPath } from '../src/targets/claude-code/claude-paths.
 import {
   installManagedSettings,
   installClaudeignore,
+  hasClaudeignore,
   stripUserDenyList,
   detectDenyState,
   resolveSecurityAction,
@@ -539,6 +546,183 @@ describe('ensureDevflowGitignore — v6 carve-out (.claudeignore + retired polic
     const contentAfterSecondRun = await read();
 
     expect(contentAfterSecondRun).toBe(contentAfterFirstRun);
+  });
+});
+
+// D-GITIGNORE-LINK-INSIDE: a repository can commit its root .gitignore as a symbolic
+// link to any file on the machine. init writes through one only when the file it
+// resolves to lies inside the project and outside any .git folder in it, the
+// project's own or a nested repository's, exactly as the ensure-root-gitignore hook
+// does; otherwise it writes nothing anywhere and says so.
+describe('ensureDevflowGitignore — a root .gitignore that is a symbolic link (D-GITIGNORE-LINK-INSIDE)', () => {
+  const UNTOUCHED = 'a file outside the project, which init may not write\n';
+  let tmpDir: string;
+  let root: string;
+  let outside: string;
+  let warn: MockInstance;
+
+  beforeEach(async () => {
+    tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'devflow-ensure-ignore-link-'));
+    root = path.join(tmpDir, 'repo');
+    outside = path.join(tmpDir, 'outside');
+    await fs.mkdir(root);
+    await fs.mkdir(outside);
+    vi.stubEnv('HOME', path.join(tmpDir, 'home'));
+    warn = vi.spyOn(p.log, 'warn').mockImplementation(() => undefined);
+  });
+
+  afterEach(async () => {
+    warn.mockRestore();
+    vi.unstubAllEnvs();
+    await fs.rm(tmpDir, { recursive: true, force: true });
+  });
+
+  const warned = (): string[] => warn.mock.calls.map(call => String(call[0]));
+  const exists = (file: string): Promise<boolean> => fs.lstat(file).then(() => true, () => false);
+
+  it('a link to a file outside the project is left untouched, no marker is stamped, and the skip is reported', async () => {
+    const target = path.join(outside, 'gitignore');
+    await fs.writeFile(target, UNTOUCHED);
+    await fs.symlink(target, path.join(root, '.gitignore'));
+
+    await ensureDevflowGitignore(root, false);
+
+    expect(await fs.readFile(target, 'utf-8'), 'nothing is written through the link').toBe(UNTOUCHED);
+    expect((await fs.lstat(path.join(root, '.gitignore'))).isSymbolicLink(), 'the link is left as it was').toBe(true);
+    expect(await exists(path.join(root, '.devflow')), 'no marker, no .devflow').toBe(false);
+    expect(warned(), 'reported even without --verbose').toEqual([expect.stringContaining('symbolic link')]);
+  });
+
+  it('a relative link to a file outside the project that does not exist yet: nothing is created there', async () => {
+    await fs.symlink('../outside/gitignore', path.join(root, '.gitignore'));
+
+    await ensureDevflowGitignore(root, false);
+
+    expect(await fs.readdir(outside), 'nothing is created where the link points').toEqual([]);
+    expect(await exists(path.join(root, '.devflow'))).toBe(false);
+    expect(warned()).toHaveLength(1);
+  });
+
+  it('a link into the project\'s own .git is refused', async () => {
+    const hook = path.join(root, '.git', 'hooks', 'pre-commit');
+    const HOOK = '#!/bin/sh\nexec true\n';
+    await fs.mkdir(path.dirname(hook), { recursive: true });
+    await fs.writeFile(hook, HOOK, { mode: 0o755 });
+    await fs.symlink('.git/hooks/pre-commit', path.join(root, '.gitignore'));
+
+    await ensureDevflowGitignore(root, false);
+
+    expect(await fs.readFile(hook, 'utf-8')).toBe(HOOK);
+    expect(await exists(path.join(root, '.devflow'))).toBe(false);
+    expect(warned()).toHaveLength(1);
+  });
+
+  it('a link to a file inside the project is written through, stays a link, and is stamped', async () => {
+    await fs.mkdir(path.join(root, 'config'));
+    const target = path.join(root, 'config', 'gitignore');
+    await fs.writeFile(target, 'node_modules/\n');
+    await fs.symlink('config/gitignore', path.join(root, '.gitignore'));
+
+    await ensureDevflowGitignore(root, false);
+
+    expect((await fs.lstat(path.join(root, '.gitignore'))).isSymbolicLink(), 'the link survives').toBe(true);
+    expect(await fs.readFile(target, 'utf-8')).toBe(`node_modules/\n\n${DEVFLOW_GITIGNORE_BLOCK}\n`);
+    expect(await exists(path.join(root, '.devflow', '.root-gitignore-configured-v6'))).toBe(true);
+    expect(warned(), 'nothing to report').toEqual([]);
+  });
+});
+
+// D-CLI-NO-SYMLINK: init stamps its carve-out marker, and removes the legacy markers,
+// only where neither .devflow nor the marker is a symbolic link. A repository can
+// commit either as a link, and a write or delete under it would land in the folder or
+// file the link names. The root .gitignore is not under .devflow and is still written.
+describe('ensureDevflowGitignore — a linked .devflow or marker (D-CLI-NO-SYMLINK)', () => {
+  const LEGACY = '.root-gitignore-configured-v5';
+  const OUTSIDE = 'a file outside the project, which init may not touch\n';
+  let tmpDir: string;
+  let root: string;
+  let outside: string;
+  let warn: MockInstance;
+
+  beforeEach(async () => {
+    tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'devflow-ensure-ignore-linked-devflow-'));
+    root = path.join(tmpDir, 'repo');
+    outside = path.join(tmpDir, 'outside');
+    await fs.mkdir(root);
+    await fs.mkdir(outside);
+    vi.stubEnv('HOME', path.join(tmpDir, 'home'));
+    warn = vi.spyOn(p.log, 'warn').mockImplementation(() => undefined);
+  });
+
+  afterEach(async () => {
+    warn.mockRestore();
+    vi.unstubAllEnvs();
+    await fs.rm(tmpDir, { recursive: true, force: true });
+  });
+
+  const warned = (): string[] => warn.mock.calls.map(call => String(call[0]));
+  const marker = (): string => path.join(root, '.devflow', '.root-gitignore-configured-v6');
+
+  it('a linked .devflow: no marker is stamped and no legacy marker removed where it points; .gitignore still gets the carve-out', async () => {
+    await fs.writeFile(path.join(outside, LEGACY), OUTSIDE);
+    await fs.symlink(outside, path.join(root, '.devflow'));
+
+    await ensureDevflowGitignore(root, false);
+
+    expect(await fs.readdir(outside), 'nothing is created or deleted in the folder the link names').toEqual([LEGACY]);
+    expect(await fs.readFile(path.join(outside, LEGACY), 'utf-8')).toBe(OUTSIDE);
+    expect((await fs.lstat(path.join(root, '.devflow'))).isSymbolicLink(), 'the link is left as it was').toBe(true);
+    expect(await fs.readFile(path.join(root, '.gitignore'), 'utf-8'), 'the root file is no file under .devflow').toBe(`${DEVFLOW_GITIGNORE_BLOCK}\n`);
+    expect(warned(), 'reported even without --verbose').toEqual([expect.stringContaining('symbolic link')]);
+  });
+
+  it('a linked .devflow whose folder already holds a v6 marker: its legacy markers are not removed either', async () => {
+    await fs.writeFile(path.join(outside, '.root-gitignore-configured-v6'), '');
+    await fs.writeFile(path.join(outside, LEGACY), OUTSIDE);
+    await fs.symlink(outside, path.join(root, '.devflow'));
+
+    await ensureDevflowGitignore(root, false);
+
+    expect((await fs.readdir(outside)).sort()).toEqual([LEGACY, '.root-gitignore-configured-v6'].sort());
+    expect(warned()).toEqual([expect.stringContaining('symbolic link')]);
+  });
+
+  it('a marker that is a link to a missing file: nothing is created where it points', async () => {
+    await fs.mkdir(path.join(root, '.devflow'));
+    await fs.symlink(path.join(outside, 'created-through-the-link'), marker());
+
+    await ensureDevflowGitignore(root, false);
+
+    expect(await fs.readdir(outside), 'nothing is created where the link points').toEqual([]);
+    expect((await fs.lstat(marker())).isSymbolicLink(), 'the link is left as it was').toBe(true);
+    expect(await fs.readFile(path.join(root, '.gitignore'), 'utf-8')).toBe(`${DEVFLOW_GITIGNORE_BLOCK}\n`);
+    expect(warned()).toEqual([expect.stringContaining('symbolic link')]);
+  });
+
+  it('a marker that is a link to an existing file: the file is left as it was and the skip is reported', async () => {
+    const target = path.join(outside, 'target');
+    await fs.writeFile(target, OUTSIDE);
+    await fs.mkdir(path.join(root, '.devflow'));
+    await fs.symlink(target, marker());
+
+    await ensureDevflowGitignore(root, false);
+
+    expect(await fs.readFile(target, 'utf-8')).toBe(OUTSIDE);
+    expect(warned()).toEqual([expect.stringContaining('symbolic link')]);
+  });
+
+  it('a legacy marker that is a link is removed as a link: the file it names is kept', async () => {
+    const target = path.join(outside, 'target');
+    await fs.writeFile(target, OUTSIDE);
+    await fs.mkdir(path.join(root, '.devflow'));
+    await fs.symlink(target, path.join(root, '.devflow', LEGACY));
+
+    await ensureDevflowGitignore(root, false);
+
+    expect(await fs.readFile(target, 'utf-8'), 'nothing is deleted through the link').toBe(OUTSIDE);
+    await expect(fs.lstat(path.join(root, '.devflow', LEGACY)), 'the stale link itself is gone').rejects.toThrow();
+    expect((await fs.lstat(marker())).isFile(), 'non-vacuity: the run stamped v6').toBe(true);
+    expect(warned()).toEqual([]);
   });
 });
 
@@ -2125,6 +2309,110 @@ describe('installClaudeignore return value', () => {
     // Should not overwrite existing file
     const content = await fs.readFile(path.join(gitRoot, '.claudeignore'), 'utf-8');
     expect(content).toBe('# existing');
+  });
+
+  // The Recommended summary prints before the install runs, so it reports the
+  // install's outcome from hasClaudeignore. The two must agree on what is already
+  // there, a dangling symlink included (the exclusive create refuses those too).
+  it('hasClaudeignore agrees with installClaudeignore: absent, a file, a dangling symlink', async () => {
+    const shapes: Array<[string, (root: string) => Promise<void>, boolean]> = [
+      ['no file', async () => {}, false],
+      ['a regular file', root => fs.writeFile(path.join(root, '.claudeignore'), '# existing', 'utf-8'), true],
+      ['a dangling symlink', root => fs.symlink(path.join(tmpDir, 'nowhere'), path.join(root, '.claudeignore')), true],
+    ];
+    for (const [label, seed, present] of shapes) {
+      const gitRoot = await fs.mkdtemp(path.join(tmpDir, 'project-'));
+      await seed(gitRoot);
+      expect(await hasClaudeignore(gitRoot), label).toBe(present);
+      expect(await installClaudeignore(gitRoot, rootDir, false), label).toBe(!present);
+    }
+  });
+});
+
+describe('projectRoots', () => {
+  it('is every discovered project when there are any', () => {
+    expect(projectRoots(['/a', '/b'], '/repo')).toEqual(['/a', '/b']);
+  });
+
+  it('falls back to the current repository when none was discovered', () => {
+    expect(projectRoots([], '/repo')).toEqual(['/repo']);
+  });
+
+  it('is empty outside a repository with nothing discovered', () => {
+    expect(projectRoots([], null)).toEqual([]);
+  });
+});
+
+describe('resolveClaudeignoreOutcome', () => {
+  it('is "created" when any targeted project lacks a .claudeignore', () => {
+    expect(resolveClaudeignoreOutcome([true, false, true])).toBe('created');
+    expect(resolveClaudeignoreOutcome([false])).toBe('created');
+  });
+
+  it('is "already present" when every targeted project has one — the re-init that changes nothing', () => {
+    expect(resolveClaudeignoreOutcome([true, true])).toBe('already present');
+  });
+
+  it('is "skipped" when the run targets no project', () => {
+    expect(resolveClaudeignoreOutcome([])).toBe('skipped');
+  });
+});
+
+describe('formatSafeDeleteStatus', () => {
+  const profilePath = '/home/u/.bashrc';
+  const info = { command: 'trash', installHint: 'brew install trash-cli' };
+  const base = { interactive: false, action: 'skip', state: null, available: true, profilePath, info } as const;
+  const restart = { level: 'info', message: expect.stringContaining(`source ${profilePath}`) };
+  // The lines as the terminal shows them. picocolors colours the profile path
+  // whenever CI or FORCE_COLOR is set, so a phrase that runs into the path
+  // matches only once the escape codes are removed.
+  const visible = (lines: readonly SummaryLine[]): SummaryLine[] =>
+    lines.map(line => ({ ...line, message: stripAnsi(line.message) }));
+
+  it('reports the block this run installed, interactive or not', () => {
+    for (const interactive of [false, true]) {
+      expect(visible(formatSafeDeleteStatus({ ...base, interactive, action: 'install', state: 'missing' })), String(interactive)).toEqual([
+        { level: 'success', message: expect.stringContaining(`Safe-delete installed to ${profilePath}`) },
+        restart,
+      ]);
+    }
+  });
+
+  it('reports the block this run upgraded, interactive or not', () => {
+    for (const interactive of [false, true]) {
+      expect(visible(formatSafeDeleteStatus({ ...base, interactive, action: 'upgrade', state: 'outdated' })), String(interactive)).toEqual([
+        { level: 'success', message: expect.stringContaining(`Safe-delete upgraded in ${profilePath}`) },
+        restart,
+      ]);
+    }
+  });
+
+  it('a re-init over the current block says it is already configured, and nothing else', () => {
+    for (const interactive of [false, true]) {
+      expect(visible(formatSafeDeleteStatus({ ...base, interactive, state: 'current' })), String(interactive)).toEqual([
+        { level: 'info', message: expect.stringContaining(`Safe-delete already configured in ${profilePath}`) },
+      ]);
+    }
+  });
+
+  it('says nothing after the user declined the prompt, or when the shell has no profile init can write', () => {
+    expect(formatSafeDeleteStatus({ ...base, interactive: true, state: 'missing' })).toEqual([]);
+    expect(formatSafeDeleteStatus({ ...base, profilePath: null })).toEqual([]);
+    expect(formatSafeDeleteStatus({ ...base, interactive: true, profilePath: null })).toEqual([]);
+  });
+
+  it('without the trash command, points at installing it: re-run init when interactive, the install hint when not', () => {
+    const missing = { ...base, available: false } as const;
+    expect(formatSafeDeleteStatus({ ...missing, interactive: true })).toEqual([
+      { level: 'info', message: expect.stringContaining('brew install trash-cli') },
+      { level: 'info', message: expect.stringContaining('to auto-configure safe-delete') },
+    ]);
+    expect(formatSafeDeleteStatus(missing)).toEqual([
+      { level: 'info', message: expect.stringContaining('brew install trash-cli') },
+    ]);
+    expect(formatSafeDeleteStatus({ ...missing, profilePath: null })).toHaveLength(1);
+    expect(formatSafeDeleteStatus({ ...missing, interactive: true, profilePath: null })).toEqual([]);
+    expect(formatSafeDeleteStatus({ ...missing, info: { command: null, installHint: null } })).toEqual([]);
   });
 });
 

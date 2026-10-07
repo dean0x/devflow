@@ -254,6 +254,29 @@ export function runJsonHelper(cwd: string, args: readonly string[], input?: stri
   return { code: run.status ?? 1, stdout: run.stdout ?? '', stderr: run.stderr ?? '' };
 }
 
+/** A json-helper run under a hard bound: its exit code and streams, and whether the bound ended it. */
+export interface BoundedHelperRun extends HelperRun {
+  timedOut: boolean;
+}
+
+/**
+ * runJsonHelper with a hard bound: a run still going at `boundMs`, one waiting on
+ * a FIFO a test planted say, is killed and comes back with timedOut set, so the
+ * test fails on it instead of holding the suite.
+ */
+export function runJsonHelperBounded(cwd: string, args: readonly string[], boundMs: number): BoundedHelperRun {
+  const run = spawnSync(process.execPath, [JSON_HELPER, ...args], {
+    cwd,
+    env: GIT_ENV,
+    input: '',
+    encoding: 'utf8',
+    timeout: boundMs,
+  });
+  const timedOut = (run.error as NodeJS.ErrnoException | undefined)?.code === 'ETIMEDOUT';
+  if (run.error && !timedOut) throw run.error;
+  return { code: run.status ?? 1, stdout: run.stdout ?? '', stderr: run.stderr ?? '', timedOut };
+}
+
 // ---------------------------------------------------------------------------
 // The store module
 // ---------------------------------------------------------------------------
@@ -485,6 +508,7 @@ export interface LearningStoreApi {
   rotateObservations(root: string, opts?: { now?: number; timeoutMs?: number }): Result<{ rotated: number; appended: number }>;
   CLAIM_STALE_SECS: number;
   CLAIM_TOKEN_RE: RegExp;
+  CLAIM_OWNER_MAX_BYTES: number;
   newClaimToken(): string;
   claimQueue(root: string, opts?: { now?: number; token?: string; timeoutMs?: number }): Result<ClaimAnswer>;
   releaseClaim(root: string, token: string, opts?: { timeoutMs?: number }): Result<ReleaseAnswer>;

@@ -458,7 +458,7 @@ const GRAMMAR_TABLE: ReadonlyArray<{ readonly label: string; readonly value: str
   { label: 'a command substitution', value: line('@octocat', '$(whoami)'), valid: false },
   { label: 'a backtick', value: line('@octocat', 'a `b` c'), valid: false },
   { label: 'an entity', value: line('@octocat', '&#35;12'), valid: false },
-  { label: 'a bidi override', value: line('@octocat', 'safe‮txt.exe'), valid: false },
+  { label: 'a bidi override', value: line('@octocat', 'safe\u202etxt.exe'), valid: false },
   { label: 'an empty reason', value: line('@octocat', ''), valid: false },
   { label: 'a leading-space reason', value: line('@octocat', ' x'), valid: false },
   { label: 'trailing text on a second line', value: `${line('@octocat', 'x')}\nCloses #1`, valid: false },
@@ -531,7 +531,7 @@ const RAW_REASONS: readonly string[] = [
   '![pixel](https://evil.test/p.png) [x](javascript:alert(1)) @everyone @org/team',
   'fixes #12, owner/repo#3, &#35;4',
   'fixes https://github.com/owner/repo/issues/12 and www.github.com/owner/repo/issues/3',
-  'safe‮txt.exe​\ttabbed\r\nwindows',
+  'safe\u202etxt.exe​\ttabbed\r\nwindows',
   `${'long '.repeat(80)}tail`,
   '   \n\t  ',
 ]

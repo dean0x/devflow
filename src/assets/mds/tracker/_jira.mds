@@ -180,13 +180,13 @@ Over `{{comment_cap()}}` characters the rolling item is closed and a successor i
 
 Load when the resolved tracker provider is `jira` and the operation is `create-release`.
 
-**Mechanics held here:** the closed-issues step only. Tag creation, release creation and notes composition stay with the operation and are unchanged — they are release-host mechanics, not tracker mechanics.
+**Mechanics held here:** the shipped-issues step only. Tag creation, release creation and notes composition stay with the operation and are unchanged — they are release-host mechanics, not tracker mechanics.
 
 ### Process
 
 Inside step 5 (compose release notes):
 
-   - If `SHIPPED_ISSUES` is provided: append a `## Closed Issues` section rendering each entry through `## Reference Rendering` — **first ≤50 issues** (the same bound `backlink-shipped-issues` applies); if truncated, add a final `…and {n} more issues` line (D4 degrade if enrichment fails).
+   - If `SHIPPED_ISSUES` is provided: append a `## Shipped Issues` section rendering each entry through `## Reference Rendering` — **first ≤50 issues** (the same bound `backlink-shipped-issues` applies); if truncated, add a final `…and {n} more issues` line (D4 degrade if enrichment fails).
    - {{common.ref_preflight_list("jira", "`^[A-Z][A-Z0-9_]{1,9}-[1-9][0-9]{0,8}$`", "", "", " and the section is omitted rather than rendered empty.")}}
    - `## Reference Rendering` absent, or its token discarded by the gate below ⇒ render the key itself on its own line, and record the discard under `### Substitutions`.
 

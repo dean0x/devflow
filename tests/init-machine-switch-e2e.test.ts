@@ -342,6 +342,36 @@ describe('devflow memory|learning|knowledge --enable/--disable are machine-wide'
     expect(linesOf(memoryQueue(repoB))).toBe(2);
   }, MULTI_RUN_TIMEOUT_MS);
 
+  it('learning --disable, memory --disable and init --no-learning --no-memory delete nothing through a linked queue folder, and say so (D-CLI-NO-SYMLINK)', async () => {
+    runInit(repoA, '--recommended');
+    const outside = await fs.mkdtemp(path.join(os.tmpdir(), 'df-switch-outside-'));
+    try {
+      // git reports the toplevel with every symlink resolved, so the CLI names the
+      // physical path (macOS /var → /private/var).
+      const repoReal = await fs.realpath(repoA);
+      const kept = path.join(outside, '.pending-turns.jsonl');
+      await fs.writeFile(kept, 'a file outside the project\n', 'utf-8');
+      for (const folder of ['memory', 'learning']) {
+        await fs.rm(path.join(repoA, '.devflow', folder), { recursive: true, force: true });
+        await fs.symlink(outside, path.join(repoA, '.devflow', folder));
+      }
+
+      for (const feature of ['learning', 'memory']) {
+        const run = runCli(repoA, feature, '--disable');
+        expect(run.status, run.out).toBe(0);
+        expect(run.out).toContain(`${path.join(repoReal, '.devflow', feature)} is a symbolic link`);
+      }
+      const reinit = runInit(repoA, '--recommended', '--no-learning', '--no-memory');
+      expect(reinit).toContain(`${path.join(repoReal, '.devflow', 'memory')} is a symbolic link`);
+      expect(reinit).toContain(`${path.join(repoReal, '.devflow', 'learning')} is a symbolic link`);
+
+      expect(await fs.readFile(kept, 'utf-8'), 'nothing is deleted through either link').toBe('a file outside the project\n');
+      expect(await readManifestFeatures()).toMatchObject({ learning: false, memory: false });
+    } finally {
+      await fs.rm(outside, { recursive: true, force: true });
+    }
+  }, MULTI_RUN_TIMEOUT_MS);
+
   it('knowledge --disable / --enable flip the machine-wide switch from any repo', async () => {
     runInit(repoA, '--recommended');
 

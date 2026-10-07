@@ -11,18 +11,7 @@
 //
 // Operations:
 //   get-field <field> [default]           Read field from stdin JSON
-//   validate                              Exit 0 if stdin is valid JSON, 1 otherwise
-//   compact                               Compact stdin JSON to single line
-//   construct <json-template> [--arg k v] Build JSON object with args
-//   update-field <field> <value> [--json] Set field on stdin JSON (--json parses value)
-//   update-fields <json-patches>          Apply multiple field updates from stdin JSON
 //   extract-cwd-field <field>             Extract cwd + arbitrary field, SOH-byte delimited
-//   extract-text-messages                 Extract text content from Claude message format
-//   merge-evidence                        Flatten, dedupe, limit to 10 from stdin JSON
-//   slurp-sort <field> [limit]            Read stdin JSONL, sort by field desc, limit results
-//   slurp-cap <field> [limit]             Read stdin JSONL, sort by field desc, output limit lines
-//   array-length <path>                   Get length of array at dotted path in stdin JSON
-//   array-item <path> <index>             Get item at index from array at path in stdin JSON
 //   session-output <context>              Build SessionStart output envelope
 //   prompt-output <context>               Build UserPromptSubmit output envelope
 //   backup-construct                      Build pre-compact backup JSON from --arg pairs
@@ -165,31 +154,15 @@ function getNestedField(obj, field) {
   return current;
 }
 
-/** The JSON values of a JSONL text's lines; a line that does not parse is skipped. */
-function parseJsonlText(text) {
-  const lines = text.split('\n').filter(Boolean);
-  return lines.map(l => {
-    try { return JSON.parse(l); } catch { return null; }
-  }).filter(Boolean);
-}
-
 function parseArgs(argList) {
   const result = {};
-  const jsonArgs = {};
   for (let i = 0; i < argList.length; i++) {
     if (argList[i] === '--arg' && i + 2 < argList.length) {
       result[argList[i + 1]] = argList[i + 2];
       i += 2;
-    } else if (argList[i] === '--argjson' && i + 2 < argList.length) {
-      try {
-        jsonArgs[argList[i + 1]] = JSON.parse(argList[i + 2]);
-      } catch {
-        jsonArgs[argList[i + 1]] = argList[i + 2];
-      }
-      i += 2;
     }
   }
-  return { ...result, ...jsonArgs };
+  return result;
 }
 
 // ---------------------------------------------------------------------------
@@ -278,7 +251,8 @@ function heartbeat(root) {
 // The learning ops run from the project root and take no path to a learning file:
 // each builds its paths from the current directory. Every op that writes takes the
 // store's one learning lock through withDecisionsLock (D-ONE-LEARNING-LOCK) and
-// refuses, creating nothing, when .devflow/learning/ is absent (D-NO-STRAY-TREE).
+// refuses, creating nothing, when .devflow/learning/ is absent (D-NO-STRAY-TREE)
+// or when it, or .devflow, is a symbolic link (D-NO-LINKED-TREE).
 // A locked body returns its Result; emit prints it once the lock is released.
 if (require.main === module) {
 try {
@@ -293,57 +267,6 @@ try {
       break;
     }
 
-    case 'validate': {
-      try {
-        const text = readStdin();
-        if (!text) process.exit(1);
-        JSON.parse(text);
-        process.exit(0);
-      } catch {
-        process.exit(1);
-      }
-      break;
-    }
-
-    case 'compact': {
-      const input = JSON.parse(readStdin());
-      console.log(JSON.stringify(input));
-      break;
-    }
-
-    case 'construct': {
-      // Build JSON from --arg/--argjson pairs
-      const template = parseArgs(args);
-      console.log(JSON.stringify(template));
-      break;
-    }
-
-    case 'update-field': {
-      const input = JSON.parse(readStdin());
-      const field = args[0];
-      const value = args[1];
-      const isJson = args[2] === '--json';
-      input[field] = isJson ? JSON.parse(value) : value;
-      console.log(JSON.stringify(input));
-      break;
-    }
-
-    case 'update-fields': {
-      // Read stdin JSON, apply field updates from args: field1=val1 field2=val2
-      const input = JSON.parse(readStdin());
-      for (const arg of args) {
-        const eqIdx = arg.indexOf('=');
-        if (eqIdx > 0) {
-          const key = arg.slice(0, eqIdx);
-          const val = arg.slice(eqIdx + 1);
-          // Try to parse as JSON, fall back to string
-          try { input[key] = JSON.parse(val); } catch { input[key] = val; }
-        }
-      }
-      console.log(JSON.stringify(input));
-      break;
-    }
-
     case 'extract-cwd-field': {
       // Extract cwd and an arbitrary top-level field from hook JSON in one pass.
       // Outputs: cwd + ASCII SOH (0x01) + field value (no trailing newline).
@@ -353,75 +276,6 @@ try {
       const cwd = input.cwd || '';
       const value = (field && input[field]) || '';
       process.stdout.write(cwd + '\x01' + value);
-      break;
-    }
-
-    case 'extract-text-messages': {
-      const input = JSON.parse(readStdin());
-      const content = input?.message?.content;
-      if (typeof content === 'string') {
-        console.log(content);
-        break;
-      }
-      if (!Array.isArray(content)) {
-        console.log('');
-        break;
-      }
-      const texts = content
-        .filter(c => c.type === 'text')
-        .map(c => c.text);
-      console.log(texts.join('\n'));
-      break;
-    }
-
-    case 'merge-evidence': {
-      const input = JSON.parse(readStdin());
-      // input is [[old_evidence], [new_evidence]] — flatten, dedupe, limit
-      const flat = input.flat();
-      const unique = [...new Set(flat)];
-      console.log(JSON.stringify(unique.slice(0, 10)));
-      break;
-    }
-
-    case 'slurp-sort': {
-      const field = args[0];
-      const limit = parseInt(args[1]) || 30;
-      const parsed = parseJsonlText(readStdin());
-      parsed.sort((a, b) => (b[field] || 0) - (a[field] || 0));
-      console.log(JSON.stringify(parsed.slice(0, limit)));
-      break;
-    }
-
-    case 'slurp-cap': {
-      // Read JSONL, sort by field desc, output top N as JSONL (one per line)
-      const field = args[0];
-      const limit = parseInt(args[1]) || 100;
-      const parsed = parseJsonlText(readStdin());
-      parsed.sort((a, b) => (b[field] || 0) - (a[field] || 0));
-      for (const item of parsed.slice(0, limit)) {
-        console.log(JSON.stringify(item));
-      }
-      break;
-    }
-
-    case 'array-length': {
-      const input = JSON.parse(readStdin());
-      const dotPath = args[0];
-      const arr = getNestedField(input, dotPath);
-      console.log(Array.isArray(arr) ? arr.length : 0);
-      break;
-    }
-
-    case 'array-item': {
-      const input = JSON.parse(readStdin());
-      const dotPath = args[0];
-      const index = parseInt(args[1]);
-      const arr = getNestedField(input, dotPath);
-      if (Array.isArray(arr) && index >= 0 && index < arr.length) {
-        console.log(JSON.stringify(arr[index]));
-      } else {
-        console.log('null');
-      }
       break;
     }
 

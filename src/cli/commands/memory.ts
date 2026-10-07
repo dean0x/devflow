@@ -7,11 +7,13 @@ import { getClaudeDirectory, getDevFlowDirectory } from '../../targets/claude-co
 import { writeSettingsFileAtomic } from '../../core/fs-atomic.js';
 import { discoverProjectGitRoots } from '../../targets/claude-code/post-install.js';
 import { getGitRoot } from '../../core/git.js';
+import { firstSymbolicLink } from '../../core/linked-path.js';
 import {
   getMemoryDir,
   getPendingTurnsPath,
   getPendingTurnsProcessingPath,
 } from '../../core/project-paths.js';
+import { drainQueueFiles, formatRefusedDrain, type QueueDrain } from '../../core/queue-drain.js';
 import {
   HOOKS_DIR_SUFFIX,
   devflowHookOwner,
@@ -173,14 +175,16 @@ export function convergeMemoryHooks(settingsJson: string, enabled: boolean, devf
 /**
  * Drain a project's pending memory queue (and a claimed batch) so stale turns
  * are not processed when memory is next switched on. Shared by `devflow init
- * --no-memory` and `devflow memory --disable`. ENOENT-tolerant; any other
- * error propagates to the command boundary, like drainLearningQueue.
+ * --no-memory` and `devflow memory --disable`. Refused, deleting nothing, when
+ * `.devflow` or `.devflow/memory` under `projectRoot` is a symbolic link
+ * (D-CLI-NO-SYMLINK). ENOENT-tolerant; any other error propagates to the command
+ * boundary, like drainLearningQueue.
  */
-export async function drainMemoryQueue(projectRoot: string): Promise<void> {
-  const ignoreMissing = (e: NodeJS.ErrnoException): void => { if (e.code !== 'ENOENT') throw e; };
-  await Promise.all([
-    fs.unlink(getPendingTurnsPath(projectRoot)).catch(ignoreMissing),
-    fs.unlink(getPendingTurnsProcessingPath(projectRoot)).catch(ignoreMissing),
+export async function drainMemoryQueue(projectRoot: string): Promise<QueueDrain> {
+  const memoryDir = getMemoryDir(projectRoot);
+  return drainQueueFiles([path.dirname(memoryDir), memoryDir], [
+    getPendingTurnsPath(projectRoot),
+    getPendingTurnsProcessingPath(projectRoot),
   ]);
 }
 
@@ -220,13 +224,25 @@ export async function filterProjectsWithMemory(gitRoots: string[]): Promise<stri
 
 /**
  * Clean up memory queue files from the given project paths.
- * Skips projects where the background updater lock is held to avoid data loss.
- * Returns the count of projects from which at least one file was removed.
+ * Skips projects where the background updater lock is held to avoid data loss,
+ * and refuses, deleting nothing there, a project whose `.devflow` or
+ * `.devflow/memory` is a symbolic link (D-CLI-NO-SYMLINK); `refused` names each
+ * such link. Returns the count of projects from which at least one file was removed.
  */
-export async function cleanQueueFiles(projectPaths: string[]): Promise<{ cleaned: number; projects: string[] }> {
+export async function cleanQueueFiles(
+  projectPaths: string[],
+): Promise<{ cleaned: number; projects: string[]; refused: string[] }> {
   const results = await Promise.all(
-    projectPaths.map(async (project) => {
+    projectPaths.map(async (project): Promise<{ cleaned: string } | { refused: string } | null> => {
       const memDir = getMemoryDir(project);
+      let linkedFolder: string | null;
+      try {
+        linkedFolder = await firstSymbolicLink([path.dirname(memDir), memDir]);
+      } catch {
+        // The folders cannot be checked: delete nothing there, and go on to the others.
+        return null;
+      }
+      if (linkedFolder !== null) return { refused: linkedFolder };
       const lockDir = path.join(memDir, '.working-memory.lock');
       try {
         await fs.access(lockDir);
@@ -239,11 +255,12 @@ export async function cleanQueueFiles(projectPaths: string[]): Promise<{ cleaned
         fs.unlink(getPendingTurnsPath(project)).then(() => true).catch(() => false),
         fs.unlink(getPendingTurnsProcessingPath(project)).then(() => true).catch(() => false),
       ]);
-      return (q || pr) ? project : null;
+      return (q || pr) ? { cleaned: project } : null;
     }),
   );
-  const cleanedProjects = results.filter((p): p is string => p !== null);
-  return { cleaned: cleanedProjects.length, projects: cleanedProjects };
+  const cleanedProjects = results.flatMap((r) => (r !== null && 'cleaned' in r ? [r.cleaned] : []));
+  const refused = results.flatMap((r) => (r !== null && 'refused' in r ? [r.refused] : []));
+  return { cleaned: cleanedProjects.length, projects: cleanedProjects, refused };
 }
 
 export const memoryCommand = new Command('memory')
@@ -315,9 +332,12 @@ export const memoryCommand = new Command('memory')
         targets = scope === 'local' && currentProject ? [currentProject] : allProjects;
       }
 
-      const { cleaned, projects: cleanedProjects } = await cleanQueueFiles(targets);
+      const { cleaned, projects: cleanedProjects, refused } = await cleanQueueFiles(targets);
       for (const project of cleanedProjects) {
         p.log.info(color.dim(`Cleaned: ${project}`));
+      }
+      for (const linkedFolder of refused) {
+        p.log.warn(formatRefusedDrain('memory', linkedFolder));
       }
       p.log.success(cleaned > 0
         ? `Cleaned queue files from ${cleaned} project${cleaned > 1 ? 's' : ''}`
@@ -397,7 +417,8 @@ export const memoryCommand = new Command('memory')
     // there is no project queue to drain, and the switch itself still applies.
     const gitRoot = await getGitRoot();
     if (gitRoot) {
-      await drainMemoryQueue(gitRoot);
+      const drain = await drainMemoryQueue(gitRoot);
+      if (!drain.drained) p.log.warn(formatRefusedDrain('memory', drain.linkedFolder));
     }
     p.log.success('Working memory disabled in every project');
   });

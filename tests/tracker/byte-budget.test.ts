@@ -139,8 +139,10 @@ import type {
  *
  * The 80 ch is general headroom, not a reservation: no line of it is spoken for,
  * and an addition still funds itself with a cut. git.md growth lands in every
- * loaded-set row, so every row carries the same 80. The ceilings remain
- * regression alarms that are LOWERED, NEVER RAISED.
+ * loaded-set row, so every row carries the same headroom: 98 ch today, the 80
+ * plus the 18 ch that #411's removal of learning-ledger IDs cut from git.md
+ * without lowering a ceiling. The ceilings remain regression alarms that are
+ * LOWERED, NEVER RAISED.
  */
 
 /**
@@ -316,7 +318,7 @@ const BUDGET_LOADED_SET_LINEAR = 75_653;
  * LOADED_SET_WRITTEN_EXCLUSIONS in tests/tracker/budget-model.ts with the reason
  * beside it: it is a file two of these ops loaded long before any split existed,
  * this work moved the line that names it without changing a byte a spawn pays, and
- * charging 21_355 ch of it here would bury the `pr/` bodies this row exists to
+ * charging 21_211 ch of it here would bury the `pr/` bodies this row exists to
  * measure. What the exclusion owes in return is shape `2c-ex` of the
  * four-shape table — the same maximum, RECORDED with the file charged — plus the
  * equality pin GITHUB_API_MD_CHARS, which is what stops an excluded term growing

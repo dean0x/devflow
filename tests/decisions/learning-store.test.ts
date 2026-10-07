@@ -7,7 +7,7 @@
 // backup, and the read-only listing, due-selection and show helpers.
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { execFileSync } from 'child_process';
+import { execFileSync, spawnSync } from 'child_process';
 import * as fs from 'fs';
 import { createRequire } from 'module';
 import * as os from 'os';
@@ -21,6 +21,7 @@ import {
 import {
   FIXTURE_NOW,
   GIT_ENV,
+  ROOT,
   daysAgoDate,
   daysAgoIso,
   git,
@@ -32,14 +33,18 @@ import {
   makeV2LogRow,
   requireLearningStore,
   runJsonHelper,
+  runJsonHelperBounded,
   seedLearningTree,
   snapshotTree,
   toJsonl,
   type Row,
   type ValidationResult,
 } from './learning-fixtures.js';
+import { FIFO_RUN_BOUND_MS, FIFO_TEST_TIMEOUT_MS, makeFifo } from '../shell-hooks-helpers.js';
 
 const store = requireLearningStore();
+
+const RENDER_DECISIONS = path.join(ROOT, 'src/assets/scripts/hooks/lib/render-decisions.cjs');
 
 const HOUR_MS = 60 * 60 * 1000;
 
@@ -190,8 +195,14 @@ describe('readJsonl (D-QUARANTINE-MALFORMED)', () => {
     expect(store.readJsonl(file).rows).toEqual([{ a: 1 }, { b: 2 }]);
   });
 
-  it('throws on a read error other than a missing file', () => {
-    expect(() => store.readJsonl(tmp)).toThrow();
+  // An unreadable file is not a missing one: read as empty, a writer would rewrite
+  // it from nothing. Root reads it anyway, so the case needs another user.
+  it.skipIf(process.getuid?.() === 0)('throws on a read error other than a missing file', () => {
+    const file = path.join(tmp, 'decisions-log.jsonl');
+    fs.writeFileSync(file, toJsonl([makeV2LogRow()]));
+    fs.chmodSync(file, 0o000);
+
+    expect(() => store.readJsonl(file)).toThrow(/EACCES/);
   });
 
   it('refuses a path with a NUL byte', () => {
@@ -394,6 +405,326 @@ describe('withDecisionsLock (D-ONE-LEARNING-LOCK, D-NO-STRAY-TREE)', () => {
     const notAResult = (() => 42) as unknown as () => { ok: true; value: number };
     expect(() => store.withDecisionsLock('list', tmp, notAResult)).toThrow(/Result/);
     expect(fs.existsSync(lockDir)).toBe(false);
+  });
+});
+
+// A repository can commit .devflow, or .devflow/learning, as a symbolic link to a
+// folder elsewhere on the machine. Every learning writer refuses such a tree in the
+// lock wrapper, before it takes the lock, and the claim heartbeat leaves it alone:
+// nothing in the folder the link names is created, changed, moved or removed, its
+// mtimes included.
+describe('a learning tree reached through a symbolic link (D-NO-LINKED-TREE)', { timeout: 60_000 }, () => {
+  const TOKEN = 'aaaaaaaaaaaaaaaa';
+  let tmp: string;
+  let elsewhere: string;
+  beforeEach(() => {
+    tmp = makeTmp('learning-store-linked-');
+    elsewhere = path.join(tmp, 'elsewhere');
+  });
+  afterEach(() => { fs.rmSync(tmp, { recursive: true, force: true }); });
+
+  /** A learning tree in `dir` with an entry, an observation, a queue, and a claim and its owner. */
+  function seedTreeIn(dir: string): void {
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(path.join(dir, 'decisions-log.jsonl'), toJsonl([makeV2LogRow(), makeV2LogRow({ id: 'obs_store_two' })]));
+    fs.writeFileSync(path.join(dir, 'decisions-ledger.jsonl'), toJsonl([makeV2LedgerRow()]));
+    fs.writeFileSync(path.join(dir, '.pending-turns.jsonl'), '{"role":"user","content":"a turn","ts":1}\n');
+    fs.writeFileSync(path.join(dir, '.pending-turns.processing'), '{"role":"user","content":"a claimed turn","ts":1}\n');
+    fs.writeFileSync(path.join(dir, '.pending-turns.owner'), `${TOKEN}\n`);
+  }
+
+  /** Set every entry under `dir`, `dir` itself included, to one past mtime, so any write shows. */
+  function backdate(dir: string): void {
+    const past = new Date(FIXTURE_NOW - 30 * 24 * HOUR_MS);
+    const walk = (abs: string): void => {
+      if (fs.lstatSync(abs).isDirectory()) for (const name of fs.readdirSync(abs)) walk(path.join(abs, name));
+      fs.utimesSync(abs, past, past);
+    };
+    walk(dir);
+  }
+
+  /** Every entry under `dir`, `dir` itself included: its kind, mtime and bytes. */
+  function fingerprint(dir: string): Map<string, string> {
+    const entries = new Map<string, string>();
+    const walk = (rel: string): void => {
+      const abs = path.join(dir, rel);
+      const stat = fs.lstatSync(abs);
+      if (stat.isDirectory()) {
+        entries.set(`${rel}/`, `dir ${stat.mtimeMs}`);
+        for (const name of fs.readdirSync(abs).sort()) walk(path.join(rel, name));
+      } else {
+        entries.set(rel, `file ${stat.mtimeMs} ${fs.readFileSync(abs, 'latin1')}`);
+      }
+    };
+    walk('');
+    return entries;
+  }
+
+  /** Link `.devflow/learning` (or `.devflow` itself) under tmp to a seeded tree elsewhere; return the link. */
+  function linkTree(which: 'learning' | 'devflow'): string {
+    initGitRepo(tmp, { 'src/a.ts': 'export const a = 1;\n' });
+    if (which === 'learning') {
+      seedTreeIn(elsewhere);
+      fs.mkdirSync(path.join(tmp, '.devflow'));
+      fs.symlinkSync(elsewhere, path.join(tmp, '.devflow', 'learning'));
+      return path.join(tmp, '.devflow', 'learning');
+    }
+    seedTreeIn(path.join(elsewhere, 'learning'));
+    fs.symlinkSync(elsewhere, path.join(tmp, '.devflow'));
+    return path.join(tmp, '.devflow');
+  }
+
+  const refusal = (op: string, link: string): string => `${op}: ${link} is a symbolic link, not a directory; nothing was changed`;
+
+  /** Every learning op that writes, as the Learning agent runs it. */
+  const WRITER_RUNS: ReadonlyArray<{ args: readonly string[]; input?: string }> = [
+    {
+      args: ['put-observation', '--create'],
+      input: JSON.stringify({
+        id: 'obs_store_three', type: 'pitfall', title: 'A new lesson', rule: 'Do the safe thing.',
+        why: 'The unsafe thing failed once.', scope: ['area:learning'], provenance: 'a test',
+      }),
+    },
+    {
+      args: ['put-observation', '--update'],
+      input: JSON.stringify({ ...makeV2LogRow({ title: 'A rewritten lesson' }), schema: undefined, observations: undefined, first_seen: undefined, last_seen: undefined, evidence: undefined }),
+    },
+    { args: ['put-observation', '--reinforce'], input: '{"id":"obs_store_one"}' },
+    { args: ['assign-anchor', 'decision', 'obs_store_two'] },
+    { args: ['refresh-anchor', 'ADR-001'] },
+    { args: ['refresh-anchor', 'ADR-001', '--verified'] },
+    { args: ['retire-anchor', 'ADR-001', 'Retired'], input: '{"reason":"no longer true"}' },
+    { args: ['restore-anchor', 'ADR-001'] },
+    { args: ['rotate-observations'] },
+    { args: ['claim-due'] },
+    { args: ['claim-queue'] },
+    { args: ['release-claim', TOKEN] },
+  ];
+
+  for (const which of ['learning', 'devflow'] as const) {
+    const label = which === 'learning' ? '.devflow/learning' : '.devflow';
+
+    it(`withDecisionsLock refuses a ${label} that is a symbolic link, running nothing and changing nothing where it leads`, () => {
+      const link = linkTree(which);
+      backdate(elsewhere);
+      const before = fingerprint(elsewhere);
+      let ran = false;
+
+      const result = store.withDecisionsLock('put-observation', tmp, () => { ran = true; return { ok: true, value: 1 }; });
+
+      expect(result).toEqual({ ok: false, error: { kind: 'not-a-directory', message: refusal('put-observation', link) } });
+      expect(ran).toBe(false);
+      expect(fingerprint(elsewhere)).toEqual(before);
+    });
+
+    it(`every learning op that writes refuses a ${label} that is a symbolic link, and leaves the folder it names untouched`, () => {
+      const link = linkTree(which);
+      backdate(elsewhere);
+      const before = fingerprint(elsewhere);
+
+      for (const { args, input } of WRITER_RUNS) {
+        const run = runJsonHelper(tmp, args, input);
+        expect(run, `${args[0]} exits 1 with the refusal alone`).toEqual({ code: 1, stdout: '', stderr: `${refusal(args[0], link)}\n` });
+        expect(fingerprint(elsewhere), `${args[0]} changes nothing where the link leads`).toEqual(before);
+      }
+    });
+
+    it(`render, clear and reset refuse a ${label} that is a symbolic link, and the heartbeat leaves its claim alone`, () => {
+      const link = linkTree(which);
+      backdate(elsewhere);
+      const before = fingerprint(elsewhere);
+
+      const render = spawnSync(process.execPath, [RENDER_DECISIONS, 'render', tmp], { cwd: tmp, env: GIT_ENV, encoding: 'utf8' });
+      expect({ code: render.status, stderr: render.stderr }).toEqual({ code: 1, stderr: `${refusal('render-decisions', link)}\n` });
+      expect(store.clearUnreferenced(tmp)).toEqual({ ok: false, error: { kind: 'not-a-directory', message: refusal('clear', link) } });
+      expect(store.resetLearning(tmp, { timeoutMs: 0 })).toEqual({ ok: false, error: { kind: 'not-a-directory', message: refusal('reset', link) } });
+      expect(store.touchClaim(tmp)).toEqual({ ok: true, value: { touched: false } });
+      expect(fingerprint(elsewhere)).toEqual(before);
+    });
+  }
+});
+
+// A repository can commit any learning file as a symbolic link to a file elsewhere
+// on the machine. The store reads a learning file only when the file is not itself a
+// link: a linked log, ledger, archive or history reads as absent, so list and show
+// print nothing from it, and no write copies its lines into the project's learning
+// folder, whether by rewriting the file, quarantining its malformed lines, rendering
+// or the one-time pre-v2 backup. The file the link names is never changed.
+describe('a learning file that is a symbolic link reads as absent (D-NO-LINKED-READ)', () => {
+  // A made-up marker standing in for the linked file's content.
+  const MARKER = 'made-up-marker-7f3e2b';
+  let tmp: string;
+  let outside: string;
+  beforeEach(() => {
+    tmp = makeTmp('learning-store-linked-file-');
+    outside = path.join(tmp, 'outside');
+    fs.mkdirSync(outside);
+  });
+  afterEach(() => { fs.rmSync(tmp, { recursive: true, force: true }); });
+
+  /** Write `content` to a file outside the project, link `file` to it, and return that outside file. */
+  function linkToOutside(file: string, content: string): string {
+    const target = path.join(outside, path.basename(file));
+    fs.writeFileSync(target, content);
+    fs.symlinkSync(target, file);
+    return target;
+  }
+
+  /** The names of the regular files in `dir` whose bytes hold the marker. */
+  function filesHoldingMarker(dir: string): string[] {
+    return fs.readdirSync(dir).filter(name => {
+      const abs = path.join(dir, name);
+      return fs.lstatSync(abs).isFile() && fs.readFileSync(abs, 'utf8').includes(MARKER);
+    });
+  }
+
+  /** Rows that carry the marker, then a malformed line that carries it too. */
+  const rowsWithMarker = (rows: readonly Row[]): string => `${toJsonl(rows)}{${MARKER}\n`;
+
+  it('readJsonl reads a linked file as missing, and leaves the file it names as it was', () => {
+    const { log } = seedLearningTree(tmp);
+    const target = linkToOutside(log, rowsWithMarker([makeV2LogRow({ title: MARKER })]));
+    const before = fs.readFileSync(target, 'utf8');
+
+    expect(store.readJsonl(log)).toEqual({ rows: [], rejected: [], missing: true });
+    expect(fs.readFileSync(target, 'utf8')).toBe(before);
+  });
+
+  it('list prints nothing from a linked ledger or log', () => {
+    const p = seedLearningTree(tmp);
+    linkToOutside(p.ledger, rowsWithMarker([makeV2LedgerRow({ title: MARKER })]));
+    linkToOutside(p.log, rowsWithMarker([makeV2LogRow({ id: 'obs_store_two', title: MARKER })]));
+
+    const run = runJsonHelper(tmp, ['list']);
+
+    expect(run.code, run.stderr).toBe(0);
+    expect(run.stdout).not.toContain(MARKER);
+    expect(run.stdout.trim().split('\n'), 'every section is empty, and no skipped line is counted').toEqual([
+      'ACTIVE 0', 'INACTIVE 0', 'OBSERVATIONS 0', 'INTEGRITY 0',
+    ]);
+  });
+
+  it('show prints nothing from a linked log or history', () => {
+    const p = seedLearningTree(tmp, { ledger: [makeV2LedgerRow()] });
+    linkToOutside(p.log, rowsWithMarker([makeV2LogRow({ rule: MARKER })]));
+    linkToOutside(p.history, rowsWithMarker([{ id: 'obs_store_one', at: daysAgoIso(1), ledger: [], log: makeV2LogRow({ rule: MARKER }) }]));
+
+    const run = runJsonHelper(tmp, ['show', 'ADR-001']);
+
+    expect(run.code, run.stderr).toBe(0);
+    expect(run.stdout).not.toContain(MARKER);
+    const shown = JSON.parse(run.stdout) as { ledger: Row[]; log: Row | null; history_versions: Row[] };
+    expect(shown.ledger, 'non-vacuity: the real ledger is read').toEqual([makeV2LedgerRow()]);
+    expect(shown.log, 'the linked log reads as absent').toBeNull();
+    expect(shown.history_versions, 'the linked history reads as absent').toEqual([]);
+  });
+
+  it('a put copies no row or malformed line of a linked log into the project', () => {
+    const p = seedLearningTree(tmp, { ledger: [] });
+    const target = linkToOutside(p.log, rowsWithMarker([makeV2LogRow({ id: 'obs_store_two', title: MARKER })]));
+    const before = fs.readFileSync(target, 'utf8');
+
+    const result = store.putObservation(tmp, 'create', {
+      id: 'obs_store_three', type: 'pitfall', title: 'A new lesson', rule: 'Do the safe thing.',
+      why: 'The unsafe thing failed once.', scope: ['area:learning'], provenance: 'a test',
+    }, { now: FIXTURE_NOW, scopeMatches: () => true });
+
+    expect(result.ok, JSON.stringify(result)).toBe(true);
+    expect(fs.readFileSync(target, 'utf8'), 'the file the link names is byte-identical').toBe(before);
+    expect(filesHoldingMarker(p.learningDir), 'nothing of it is rewritten or quarantined into the learning folder').toEqual([]);
+    expect(store.readJsonl(p.log).rows.map(row => row.id), 'the log holds the new observation alone').toEqual(['obs_store_three']);
+  });
+
+  it('assigning an anchor copies no row or malformed line of a linked ledger into the project', () => {
+    const p = seedLearningTree(tmp, { log: [makeV2LogRow({ id: 'obs_store_two' })] });
+    const target = linkToOutside(p.ledger, rowsWithMarker([makeV2LedgerRow({ title: MARKER })]));
+    const before = fs.readFileSync(target, 'utf8');
+
+    const result = store.assignAnchor(tmp, 'decision', 'obs_store_two', { now: FIXTURE_NOW, citedAnchors: new Map() });
+
+    expect(result.ok, JSON.stringify(result)).toBe(true);
+    expect(fs.readFileSync(target, 'utf8'), 'the file the link names is byte-identical').toBe(before);
+    expect(filesHoldingMarker(p.learningDir), 'nothing of it is rewritten, quarantined or rendered into the learning folder').toEqual([]);
+    expect(store.readJsonl(p.ledger).rows.map(row => row.anchor_id), 'the ledger holds the new entry alone').toEqual(['ADR-001']);
+  });
+
+  it('a history append copies no record or malformed line of a linked history into the project', () => {
+    const p = seedLearningTree(tmp);
+    const outsideRecord = { id: 'obs_other', at: daysAgoIso(1), ledger: [], log: makeV2LogRow({ id: 'obs_other', title: MARKER }) };
+    const target = linkToOutside(p.history, rowsWithMarker([outsideRecord]));
+    const before = fs.readFileSync(target, 'utf8');
+
+    expect(store.appendHistory(tmp, { id: 'obs_store_one', ledger: [], log: makeV2LogRow() }, { now: FIXTURE_NOW })).toBe(1);
+
+    expect(fs.readFileSync(target, 'utf8'), 'the file the link names is byte-identical').toBe(before);
+    expect(filesHoldingMarker(p.learningDir), 'nothing of it is rewritten or quarantined into the learning folder').toEqual([]);
+    expect(store.readJsonl(p.history).rows.map(row => row.id), 'the history holds the new record alone').toEqual(['obs_store_one']);
+  });
+
+  it('rotation never takes the lines of a linked archive for rows already archived, so it drops no due row', () => {
+    const due = makeV2LogRow({ id: 'obs_store_idle', first_seen: daysAgoIso(60), last_seen: daysAgoIso(60) });
+    const p = seedLearningTree(tmp, { log: [due], ledger: [] });
+    // The linked file holds the due row byte for byte, as though it were already archived.
+    const target = linkToOutside(p.archive, toJsonl([due]));
+    const before = fs.readFileSync(target, 'utf8');
+
+    // With nothing read from the link the row is due for the archive, and the
+    // archive's append refuses the link, as every store append does.
+    expect(() => store.rotateObservations(tmp, { now: FIXTURE_NOW })).toThrow();
+
+    expect(store.readJsonl(p.log).rows, 'the due row stays in the log').toEqual([due]);
+    expect(fs.readFileSync(target, 'utf8'), 'the file the link names is byte-identical').toBe(before);
+  });
+
+  for (const which of ['log', 'ledger', 'archive'] as const) {
+    it(`the one-time pre-v2 backup copies no linked ${which}`, () => {
+      const p = seedLearningTree(tmp, {
+        log: which === 'log' ? undefined : [makeV1LogRow()],
+        ledger: which === 'ledger' ? undefined : [makeV1LedgerRow()],
+        archive: which === 'archive' ? undefined : [makeV1LogRow({ id: 'obs_old' })],
+      });
+      const target = linkToOutside(p[which], toJsonl([makeV1LogRow({ id: 'obs_other', pattern: MARKER })]));
+      const preV2 = (file: string): string => file.replace(/\.jsonl$/, '.pre-v2.jsonl');
+
+      const written = store.ensurePreV2Backup(tmp, { logRows: [makeV1LogRow()], ledgerRows: [] });
+
+      expect(written, 'the files that are not links are backed up').toEqual(
+        [p.log, p.ledger, p.archive].filter(file => file !== p[which]).map(preV2),
+      );
+      expect(fs.existsSync(preV2(p[which])), 'no copy is made of the linked file').toBe(false);
+      expect(filesHoldingMarker(p.learningDir)).toEqual([]);
+      expect(fs.readFileSync(target, 'utf8')).toContain(MARKER);
+    });
+  }
+});
+
+// A FIFO or a directory can stand where a learning file belongs. A learning file is
+// read only when lstat shows a regular file and fstat, after the open, confirms it:
+// anything else reads as absent, and no read waits on a FIFO. Each run that meets a
+// FIFO is bounded, so one that waits is killed at the bound and fails the test.
+describe('a learning file that is not a regular file reads as absent (D-NO-LINKED-READ)', () => {
+  let tmp: string;
+  beforeEach(() => { tmp = makeTmp('learning-store-not-regular-'); });
+  afterEach(() => { fs.rmSync(tmp, { recursive: true, force: true }); });
+
+  it('readJsonl reads a directory as missing', () => {
+    const { log } = seedLearningTree(tmp);
+    fs.mkdirSync(log);
+
+    expect(store.readJsonl(log)).toEqual({ rows: [], rejected: [], missing: true });
+  });
+
+  it('list returns at once with a FIFO at the ledger path and a directory at the log path, reading both as absent', { timeout: FIFO_TEST_TIMEOUT_MS }, () => {
+    const p = seedLearningTree(tmp);
+    makeFifo(p.ledger);
+    fs.mkdirSync(p.log);
+
+    expect(runJsonHelperBounded(tmp, ['list'], FIFO_RUN_BOUND_MS), 'every section is empty').toEqual({
+      code: 0,
+      stdout: 'ACTIVE 0\nINACTIVE 0\nOBSERVATIONS 0\nINTEGRITY 0\n',
+      stderr: '',
+      timedOut: false,
+    });
   });
 });
 
@@ -1288,7 +1619,7 @@ describe('resetLearning (D-RESET-UNDER-LOCK)', () => {
 
     expect(store.resetLearning(tmp, { timeoutMs: 0 })).toEqual({
       ok: false,
-      error: { kind: 'not-a-directory', message: `reset: ${p.learningDir} is a symbolic link, not a directory; nothing was removed` },
+      error: { kind: 'not-a-directory', message: `reset: ${p.learningDir} is a symbolic link, not a directory; nothing was changed` },
     });
     expect(snapshotTree(elsewhere)).toEqual(before);
     expect(fs.lstatSync(p.learningDir).isSymbolicLink()).toBe(true);

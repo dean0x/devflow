@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
@@ -106,6 +106,119 @@ describe('writeManagedConfig', () => {
     await writeManagedConfig(tmpDir, { reviewPublication: 'auto' });
     const tmpFiles = fs.readdirSync(path.join(tmpDir, '.devflow')).filter(f => f.includes('.tmp.'));
     expect(tmpFiles).toHaveLength(0);
+  });
+
+  // Once a write has created its copy, a failure after that removes the copy again, so
+  // a failed write leaves nothing beside config.json and the old file stands as it was.
+  describe('a write that fails after its copy exists', () => {
+    const copyPath = (): string => `${getConfigPath(tmpDir)}.tmp.${process.pid}`;
+
+    afterEach(() => {
+      vi.restoreAllMocks();
+    });
+
+    it('a failed rename removes the copy, keeps config.json as it was, and the Result says why', async () => {
+      writeDevflowConfig(tmpDir, { reviewPublication: 'full', tracker: 'jira' });
+      const before = fs.readFileSync(getConfigPath(tmpDir), 'utf-8');
+      let copyExisted = false;
+      vi.spyOn(fs.promises, 'rename').mockImplementationOnce(async from => {
+        copyExisted = fs.existsSync(String(from));
+        throw new Error('EXDEV: cross-device link not permitted');
+      });
+
+      const result = await writeManagedConfig(tmpDir, { reviewPublication: 'off' });
+
+      expect(copyExisted, 'the copy existed when the rename failed').toBe(true);
+      expect(fs.readdirSync(path.join(tmpDir, '.devflow')), 'no copy is left beside config.json').toEqual(['config.json']);
+      expect(fs.readFileSync(getConfigPath(tmpDir), 'utf-8'), 'config.json is kept as it was').toBe(before);
+      expect(result).toEqual({
+        ok: false,
+        error: { kind: 'write-failed', path: getConfigPath(tmpDir), detail: 'EXDEV: cross-device link not permitted' },
+      });
+    });
+
+    it('a failed write removes the copy, keeps config.json as it was, and the Result says why', async () => {
+      writeDevflowConfig(tmpDir, { reviewPublication: 'full', tracker: 'jira' });
+      const before = fs.readFileSync(getConfigPath(tmpDir), 'utf-8');
+      let copyExisted = false;
+      vi.spyOn(fs.promises, 'writeFile').mockImplementationOnce(async () => {
+        copyExisted = fs.existsSync(copyPath());
+        throw new Error('ENOSPC: no space left on device');
+      });
+
+      const result = await writeManagedConfig(tmpDir, { reviewPublication: 'off' });
+
+      expect(copyExisted, 'the copy existed when the write failed').toBe(true);
+      expect(fs.readdirSync(path.join(tmpDir, '.devflow')), 'no copy is left beside config.json').toEqual(['config.json']);
+      expect(fs.readFileSync(getConfigPath(tmpDir), 'utf-8'), 'config.json is kept as it was').toBe(before);
+      expect(result).toEqual({
+        ok: false,
+        error: { kind: 'write-failed', path: getConfigPath(tmpDir), detail: 'ENOSPC: no space left on device' },
+      });
+    });
+
+    it('a copy that cannot be removed either is named in the Result', async () => {
+      vi.spyOn(fs.promises, 'rename').mockRejectedValueOnce(new Error('EXDEV: cross-device link not permitted'));
+      vi.spyOn(fs.promises, 'rm').mockRejectedValueOnce(new Error('EPERM: operation not permitted'));
+
+      const result = await writeManagedConfig(tmpDir, { reviewPublication: 'off' });
+
+      expect(result).toEqual({
+        ok: false,
+        error: {
+          kind: 'write-failed',
+          path: getConfigPath(tmpDir),
+          detail: `EXDEV: cross-device link not permitted; its copy ${copyPath()} could not be removed: EPERM: operation not permitted`,
+        },
+      });
+    });
+  });
+
+  // D-CLI-NO-SYMLINK: a repository can commit .devflow as a link to a folder
+  // elsewhere, or plant a link at the name of the copy init writes before renaming
+  // it into place; init writes nothing through either.
+  describe('never through a symbolic link (D-CLI-NO-SYMLINK)', () => {
+    const KEEP = '{"keep": "a file outside the project"}\n';
+    let outside: string;
+
+    beforeEach(() => {
+      outside = fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-feature-config-outside-'));
+      vi.stubEnv('HOME', path.join(outside, 'home'));
+    });
+
+    afterEach(() => {
+      vi.unstubAllEnvs();
+      fs.rmSync(outside, { recursive: true, force: true });
+    });
+
+    it('a linked .devflow: writes and creates nothing where it points, and the Result says why', async () => {
+      fs.writeFileSync(path.join(outside, 'config.json'), KEEP);
+      fs.symlinkSync(outside, path.join(tmpDir, '.devflow'));
+
+      const result = await writeManagedConfig(tmpDir, { reviewPublication: 'off' });
+
+      expect(fs.readFileSync(path.join(outside, 'config.json'), 'utf-8'), 'nothing is written through the link').toBe(KEEP);
+      expect(fs.readdirSync(outside), 'nothing is created there').toEqual(['config.json']);
+      expect(result).toEqual({
+        ok: false,
+        error: { kind: 'unreadable', path: getConfigPath(tmpDir), detail: expect.stringContaining(`${path.join(tmpDir, '.devflow')} is a symbolic link`) },
+      });
+    });
+
+    it('a link planted at the name of the copy: nothing is written through it, and the Result says the write failed', async () => {
+      const target = path.join(outside, 'target');
+      const planted = `${getConfigPath(tmpDir)}.tmp.${process.pid}`;
+      fs.writeFileSync(target, KEEP);
+      fs.mkdirSync(path.join(tmpDir, '.devflow'));
+      fs.symlinkSync(target, planted);
+
+      const result = await writeManagedConfig(tmpDir, { reviewPublication: 'off' });
+
+      expect(fs.readFileSync(target, 'utf-8'), 'nothing is written through the planted link').toBe(KEEP);
+      expect(fs.lstatSync(planted).isSymbolicLink(), 'an entry this run did not create is left where it is').toBe(true);
+      expect(fs.existsSync(getConfigPath(tmpDir)), 'no config.json was renamed into place').toBe(false);
+      expect(result).toMatchObject({ ok: false, error: { kind: 'write-failed', path: getConfigPath(tmpDir) } });
+    });
   });
 });
 

@@ -1,10 +1,12 @@
 #!/bin/bash
 
-# JSON parsing helper — tries jq, falls back to node json-helper.js
+# JSON parsing helper — tries jq, falls back to node json-helper.cjs
 # Usage: source "$SCRIPT_DIR/json-parse"
 #
 # After sourcing, check $_JSON_AVAILABLE before using json_* functions.
 # All functions read from stdin unless noted otherwise.
+# Where a jq path discards stderr, its node fallback does too, so input that
+# cannot be parsed fails silently on either backend.
 
 _SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 _JSON_HELPER="$_SCRIPT_DIR/json-helper.cjs"
@@ -28,134 +30,23 @@ json_field() {
   if [ "$_HAS_JQ" = "true" ]; then
     jq -r ".$field // \"$default\"" 2>/dev/null
   else
-    node "$_JSON_HELPER" get-field "$field" "$default"
+    node "$_JSON_HELPER" get-field "$field" "$default" 2>/dev/null
   fi
 }
 
 # Extract a field from a JSON file. Usage: json_field_file "/path/to/file.json" "field" "default"
 # Note: uses if/then/else to preserve boolean false (jq // operator would replace false with default)
 # The node fallback reads the file on stdin: json-helper takes no file path.
+# Both paths are silent on stderr: an unparseable or missing file yields empty
+# output and a failing status, as jq does with its errors discarded. The node
+# path redirects stderr BEFORE stdin, so the shell's own error for a `< "$file"`
+# that cannot open is discarded too.
 json_field_file() {
   local file="$1" field="$2" default="${3:-}"
   if [ "$_HAS_JQ" = "true" ]; then
     jq -r "if (.$field | type) == \"null\" then \"$default\" else (.$field | tostring) end" "$file" 2>/dev/null
   else
-    node "$_JSON_HELPER" get-field "$field" "$default" < "$file"
-  fi
-}
-
-# --- Validation ---
-
-# Validate stdin as JSON (exit code 0/1). Usage: echo '{}' | json_valid
-json_valid() {
-  if [ "$_HAS_JQ" = "true" ]; then
-    jq -e . >/dev/null 2>&1
-  else
-    node "$_JSON_HELPER" validate
-  fi
-}
-
-# --- Compact ---
-
-# Compact stdin JSON to single line. Usage: echo '{ "k": "v" }' | json_compact
-json_compact() {
-  if [ "$_HAS_JQ" = "true" ]; then
-    jq -c '.' 2>/dev/null
-  else
-    node "$_JSON_HELPER" compact
-  fi
-}
-
-# --- Construction ---
-
-# Build a JSON object from --arg/--argjson pairs.
-# Usage: json_construct --arg key1 val1 --arg key2 val2
-json_construct() {
-  if [ "$_HAS_JQ" = "true" ]; then
-    # Build jq expression from args
-    local jq_args=()
-    local fields=""
-    local i=0
-    while [ $i -lt $# ]; do
-      local flag="${!((i+1))}"
-      if [ "$flag" = "--arg" ]; then
-        local name="${!((i+2))}"
-        local val="${!((i+3))}"
-        jq_args+=(--arg "$name" "$val")
-        if [ -n "$fields" ]; then fields="$fields, "; fi
-        fields="${fields}${name}: \$${name}"
-        i=$((i + 3))
-      elif [ "$flag" = "--argjson" ]; then
-        local name="${!((i+2))}"
-        local val="${!((i+3))}"
-        jq_args+=(--argjson "$name" "$val")
-        if [ -n "$fields" ]; then fields="$fields, "; fi
-        fields="${fields}${name}: \$${name}"
-        i=$((i + 3))
-      else
-        i=$((i + 1))
-      fi
-    done
-    jq -n -c "${jq_args[@]}" "{$fields}" 2>/dev/null
-  else
-    node "$_JSON_HELPER" construct "$@"
-  fi
-}
-
-# --- Field updates ---
-
-# Update a field on stdin JSON. Usage: echo '{"k":"v"}' | json_update_field "k" "new_v"
-json_update_field() {
-  local field="$1" value="$2"
-  if [ "$_HAS_JQ" = "true" ]; then
-    jq -c --arg v "$value" ".$field = \$v" 2>/dev/null
-  else
-    node "$_JSON_HELPER" update-field "$field" "$value"
-  fi
-}
-
-# Update a field with a JSON value. Usage: echo '{}' | json_update_field_json "k" '42'
-json_update_field_json() {
-  local field="$1" value="$2"
-  if [ "$_HAS_JQ" = "true" ]; then
-    jq -c --argjson v "$value" ".$field = \$v" 2>/dev/null
-  else
-    node "$_JSON_HELPER" update-field "$field" "$value" --json
-  fi
-}
-
-# --- Slurp operations ---
-
-# Slurp JSONL file, sort by field desc, output as JSONL (one line per entry).
-# Usage: json_slurp_cap "file.jsonl" "confidence" 100
-json_slurp_cap() {
-  local file="$1" field="$2" limit="${3:-100}"
-  if [ "$_HAS_JQ" = "true" ]; then
-    jq -c '.' "$file" | jq -s "sort_by(.$field) | reverse | .[0:$limit][]" 2>/dev/null
-  else
-    node "$_JSON_HELPER" slurp-cap "$field" "$limit" < "$file"
-  fi
-}
-
-# --- Array operations ---
-
-# Get length of array at path. Usage: echo '{"obs":[1,2]}' | json_array_length "observations"
-json_array_length() {
-  local path="$1"
-  if [ "$_HAS_JQ" = "true" ]; then
-    jq ".$path | length" 2>/dev/null
-  else
-    node "$_JSON_HELPER" array-length "$path"
-  fi
-}
-
-# Get item at index from array. Usage: echo '{"obs":[{},{}]}' | json_array_item "observations" 0
-json_array_item() {
-  local path="$1" index="$2"
-  if [ "$_HAS_JQ" = "true" ]; then
-    jq -c ".${path}[$index]" 2>/dev/null
-  else
-    node "$_JSON_HELPER" array-item "$path" "$index"
+    node "$_JSON_HELPER" get-field "$field" "$default" 2>/dev/null < "$file"
   fi
 }
 
@@ -176,7 +67,7 @@ json_extract_cwd_field() {
   if [ "$_HAS_JQ" = "true" ]; then
     jq -r --arg f "$field" '(.cwd // "") + "\u0001" + (.[$f] // "")' 2>/dev/null
   else
-    node "$_JSON_HELPER" extract-cwd-field "$field"
+    node "$_JSON_HELPER" extract-cwd-field "$field" 2>/dev/null
   fi
 }
 
@@ -184,21 +75,6 @@ json_extract_cwd_field() {
 # it is the most common call site (capture-prompt, preamble).
 json_extract_cwd_prompt() {
   json_extract_cwd_field "prompt"
-}
-
-# --- Transcript extraction ---
-
-# Extract text messages from Claude message JSON. Usage: printf '%s\n' '{"message":...}' | json_extract_messages
-json_extract_messages() {
-  if [ "$_HAS_JQ" = "true" ]; then
-    jq -r 'if .message.content then
-      if (.message.content | type) == "string" then .message.content
-      else [.message.content[] | select(.type == "text") | .text] | join("\n")
-      end
-    else "" end' 2>/dev/null
-  else
-    node "$_JSON_HELPER" extract-text-messages
-  fi
 }
 
 # --- Hook output envelopes ---

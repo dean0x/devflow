@@ -106,6 +106,18 @@ if ! command -v cksum >/dev/null 2>&1; then
   exit 0
 fi
 
+# --- Never write through a symbolic link (D-HOOKS-NO-SYMLINK, git-marker) ---
+# The lock (`mkdir`), the batch merge (`>>`), the claim heartbeat and the success
+# stamp (`touch`) write these paths in place; the claim and the trim rename onto the
+# batch and the swap onto the working memory, and `mv` moves a file into the folder
+# a link at its target names. The trim's copy is created only where nothing stands.
+# So the run is skipped, before it takes the lock or starts an LLM run, when any of
+# these paths or a folder above them is a link.
+if ! df_no_symlink_below "$PROJECT_ROOT" "$LOCK_DIR" "$QUEUE_FILE" "$PROCESSING_FILE" "$OK_FILE" "$MEMORY_FILE"; then
+  log "SKIP: a symbolic link sits on the path to the memory files in $MEMORY_DIR; nothing written"
+  exit 0
+fi
+
 # --- Worker-level lock (300s stale-break — much longer than learning-lock's 30s) ---
 # This prevents a second worker (spawned 121s later) from double-writing WORKING-MEMORY.md
 # while the first worker's claude -p call (up to 120s) is still in flight.
@@ -210,8 +222,20 @@ if [ -f "$PROCESSING_FILE" ]; then
   _PROC_LINES=$(wc -l < "$PROCESSING_FILE" | tr -d ' ')
   if [ "$_PROC_LINES" -gt "$PROC_OVERFLOW_CAP" ]; then
     _PROC_TMP="$PROCESSING_FILE.tmp.$$"
-    tail -"$PROC_OVERFLOW_TARGET" "$PROCESSING_FILE" > "$_PROC_TMP" && mv "$_PROC_TMP" "$PROCESSING_FILE" || rm -f "$_PROC_TMP" 2>/dev/null || true
-    log "Processing overflow: truncated from $_PROC_LINES to $PROC_OVERFLOW_TARGET lines"
+    # SEC-2: the batch is the claimed queue, 0600 like the queue itself, and the
+    # cold path at session start moves it back to the queue. mv gives it the
+    # trimmed copy's inode and mode, so the copy is created under umask 077, and
+    # only where nothing stands at its name: builtin tests come first, so an entry
+    # already there, a link to a FIFO or a device included, is never opened
+    # (noclobber alone would open one, as no regular file stands there), and
+    # noclobber then makes the create itself exclusive. Such an entry is removed
+    # instead, and the batch is left untrimmed.
+    if [ ! -e "$_PROC_TMP" ] && [ ! -L "$_PROC_TMP" ] && (umask 077 && set -o noclobber && tail -"$PROC_OVERFLOW_TARGET" "$PROCESSING_FILE" > "$_PROC_TMP") && mv "$_PROC_TMP" "$PROCESSING_FILE"; then
+      log "Processing overflow: truncated from $_PROC_LINES to $PROC_OVERFLOW_TARGET lines"
+    else
+      rm -f "$_PROC_TMP" 2>/dev/null || true
+      log "Processing overflow: not truncated, its copy could not be written ($_PROC_LINES lines)"
+    fi
   fi
 elif [ -f "$QUEUE_FILE" ]; then
   mv "$QUEUE_FILE" "$PROCESSING_FILE" 2>/dev/null || { log "SKIP: failed to claim queue (race condition — another worker got it)"; exit 0; }
@@ -340,15 +364,22 @@ log "Built $TURN_COUNT turns from queue"
 # on either side, the CAS must treat it as CONFLICT rather than a match — separating
 # the "cksum invocation failure" sentinel from "file absent" keeps the "resolves toward
 # false-conflict, never false-success" invariant true even when cksum errors.
+#
+# D-HOOKS-NO-SYMLINK (git-marker): the existing memory goes into the prompt, so a
+# working memory a symbolic link leads to is treated as absent. A link at its own
+# path has already skipped the run, since the swap renames onto it (above), so
+# only one that appeared since can reach this read.
+MEMORY_PRESENT=""
+if df_file_below "$PROJECT_ROOT" "$MEMORY_FILE"; then MEMORY_PRESENT="yes"; fi
 CKSUM_FAILED="false"
 PRE_RUN_CKSUM="ABSENT"
-if [ -f "$MEMORY_FILE" ]; then
+if [ -n "$MEMORY_PRESENT" ]; then
   PRE_RUN_CKSUM=$(cksum "$MEMORY_FILE" 2>/dev/null) || CKSUM_FAILED="true"
 fi
 
 EXISTING_MEMORY=""
 MEMORY_READ_LIMIT=65536  # bytes — keep prompt under context limit
-if [ -f "$MEMORY_FILE" ]; then
+if [ -n "$MEMORY_PRESENT" ]; then
   EXISTING_MEMORY=$(head -c "$MEMORY_READ_LIMIT" "$MEMORY_FILE")
 fi
 
@@ -572,13 +603,28 @@ fi
 # Each state is assigned exactly once at the point it is decided (single OUTCOME
 # variable, three states).
 verify_and_swap() {
-  [ -f "$STAGED_FILE" ] && [ -s "$STAGED_FILE" ] || {
+  # A symbolic link at the staged path counts as no staged file (D-HOOKS-NO-SYMLINK,
+  # git-marker): `head` below would read the file it names, and the swap's `mv`
+  # would rename the link itself into the working memory's place. The worker
+  # removed that path before the LLM run, so a link there was planted during it.
+  # df_file_below checks it before both, and logs the refusal once.
+  df_file_below "$PROJECT_ROOT" "$STAGED_FILE" && [ -s "$STAGED_FILE" ] || {
     log "WARN: staged file missing or empty after claude -p run"; OUTCOME="failed"; return; }
   case "$(head -1 "$STAGED_FILE" 2>/dev/null || echo "")" in
     "<!-- memory-head:"*) : ;;
     *) log "WARN: staged file exists but stamp missing on line 1 — treating as failure"
        rm -f "$STAGED_FILE" 2>/dev/null || true; OUTCOME="failed"; return ;;
   esac
+  # A symbolic link on the working memory's path refuses the swap
+  # (D-HOOKS-NO-SYMLINK, git-marker): the run began without one, so a link there now
+  # is a change made during the run, and `mv` would move the staged memory into a
+  # folder it names. When the run began with no working memory, the cksum
+  # comparison below would take the link for that absent file.
+  if ! df_no_symlink_below "$PROJECT_ROOT" "$MEMORY_FILE"; then
+    rm -f "$STAGED_FILE" 2>/dev/null || true
+    log "CONFLICT: a symbolic link appeared on the path to $MEMORY_FILE during the run — not swapped, leaving .processing for retry"
+    OUTCOME="conflict"; return
+  fi
   # Re-check real file cksum before swapping.
   # Residual TOCTOU: a human edit landing in the O(ms) window between this
   # cksum re-check and the mv would be clobbered; this is accepted — the
@@ -613,14 +659,26 @@ verify_and_swap() {
 OUTCOME="failed"
 verify_and_swap
 
+# Each stamp below is a `touch`, which follows a symbolic link, and its path was
+# checked before the LLM run, which can take minutes. So, like the swap's target,
+# it is checked again just before the touch: a link there now is a change made
+# during the run, and the stamp is skipped and logged (D-HOOKS-NO-SYMLINK, git-marker).
 if [ "$OUTCOME" = "updated" ]; then
   rm -f "$PROCESSING_FILE" 2>/dev/null || true
-  touch "$OK_FILE" 2>/dev/null || true
-  log "SUCCESS: queue drained, .last-refresh-ok touched"
+  if df_no_symlink_below "$PROJECT_ROOT" "$OK_FILE"; then
+    touch "$OK_FILE" 2>/dev/null || true
+    log "SUCCESS: queue drained, .last-refresh-ok touched"
+  else
+    log "SUCCESS: queue drained; .last-refresh-ok not touched, a symbolic link appeared on its path during the run"
+  fi
 elif [ "$OUTCOME" = "conflict" ]; then
   # Heartbeat: this batch is still owned by the retry cycle, not orphaned.
   # Keeps session-start-memory's 300s cold path from reclaiming a live retry.
-  touch "$PROCESSING_FILE" 2>/dev/null || true
+  if df_no_symlink_below "$PROJECT_ROOT" "$PROCESSING_FILE"; then
+    touch "$PROCESSING_FILE" 2>/dev/null || true
+  else
+    log "Heartbeat skipped: a symbolic link appeared on the path to $PROCESSING_FILE during the run"
+  fi
   log "CONFLICT: queue retained in .processing, .last-refresh-ok untouched"
 else
   # Leave .processing for session-start-memory's D56c cold path; do NOT touch .last-refresh-ok

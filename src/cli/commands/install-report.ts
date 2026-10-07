@@ -15,7 +15,7 @@ import { prefixSkillName } from '../../core/plugins.js';
 
 /** One line of post-install summary output, with the severity it should be logged at. */
 export interface SummaryLine {
-  level: 'info' | 'warn';
+  level: 'success' | 'info' | 'warn';
   message: string;
 }
 

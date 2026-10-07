@@ -9,6 +9,51 @@ import { isActiveDecisionsStatus } from '../../core/observations.js';
 const LEDGER_ROOT_TIMEOUT_MS = 1000;
 
 /**
+ * The largest ledger the statusline reads: 8 MiB, far above the roughly 0.5 MB
+ * real ledgers reach.
+ *
+ * D-HUD-LEDGER-BOUNDED: the statusline counts the ledger only when it is a regular
+ * file of at most LEDGER_MAX_BYTES, and never reads it if it is a symbolic link; a
+ * link, any other kind of file or a larger one shows no counts, as an absent
+ * ledger does. Reason: the statusline reads the ledger on every prompt, and a
+ * repository can commit it as a link to an endless source such as /dev/zero, or
+ * as a huge file, either of which would hang the statusline.
+ */
+export const LEDGER_MAX_BYTES = 8 * 1024 * 1024;
+
+/**
+ * The ledger's text, or null when D-HUD-LEDGER-BOUNDED refuses it or it cannot be
+ * read. lstat refuses a link without following it, the open refuses one that took
+ * the ledger's place since (O_NOFOLLOW) and never blocks on a FIFO (O_NONBLOCK),
+ * and the read takes at most the size fstat checked.
+ */
+function readBoundedLedger(ledgerPath: string): string | null {
+  let fd: number;
+  try {
+    if (!fs.lstatSync(ledgerPath).isFile()) return null;
+    fd = fs.openSync(ledgerPath, fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW | fs.constants.O_NONBLOCK);
+  } catch {
+    return null;
+  }
+  try {
+    const stat = fs.fstatSync(fd);
+    if (!stat.isFile() || stat.size > LEDGER_MAX_BYTES) return null;
+    const buf = Buffer.alloc(stat.size);
+    let total = 0;
+    while (total < buf.length) {
+      const read = fs.readSync(fd, buf, total, buf.length - total, total);
+      if (read === 0) break;
+      total += read;
+    }
+    return buf.toString('utf-8', 0, total);
+  } catch {
+    return null;
+  } finally {
+    fs.closeSync(fd);
+  }
+}
+
+/**
  * @devflow-design-decision D309
  * Counts come from decisions-ledger.jsonl (the render source of truth), NOT
  * the rendered decisions.md/pitfalls.md, so the HUD never couples to markdown
@@ -33,16 +78,13 @@ function isLedgerCountRow(val: unknown): val is LedgerCountRow {
 
 /**
  * Read .devflow/learning/decisions-ledger.jsonl and count active anchored
- * rows by type. Returns null if the ledger is missing or holds no valid rows
- * (graceful fallback). Exported for use by the main HUD entry point.
+ * rows by type. Returns null if the ledger is missing, is refused by
+ * D-HUD-LEDGER-BOUNDED, or holds no valid rows (graceful fallback). Exported for
+ * use by the main HUD entry point.
  */
 export function gatherLearningCounts(cwd: string): LearningCountsData | null {
-  let content: string;
-  try {
-    content = fs.readFileSync(getDecisionsLedgerPath(cwd), 'utf-8');
-  } catch {
-    return null;
-  }
+  const content = readBoundedLedger(getDecisionsLedgerPath(cwd));
+  if (content === null) return null;
 
   const counts: LearningCountsData = { decisions: 0, pitfalls: 0 };
   let parsedAny = false;
