@@ -106,8 +106,10 @@ export type LearningStoreResult<T> = Result<T, LearningStoreError>;
 
 /**
  * The part of the store's `module.exports` the CLI calls. Each function refuses
- * without `.devflow/learning/` (error kind `no-learning-dir`); the writers wait at
- * most `timeoutMs` for the learning lock (error kind `busy`).
+ * without `.devflow/learning/` (error kind `no-learning-dir`); the writers refuse a
+ * `.devflow` or `.devflow/learning` that is a symbolic link, changing nothing (error
+ * kind `not-a-directory`), and wait at most `timeoutMs` for the learning lock
+ * (error kind `busy`).
  */
 export interface LearningStoreModule {
   /** The inactive entry statuses, in the store's order. */

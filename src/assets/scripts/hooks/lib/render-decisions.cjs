@@ -366,7 +366,7 @@ function readIfPresent(file) {
  * `render`: read the ledger under .decisions.lock and write the three files from
  * what it read (D-ONE-LEARNING-LOCK), so a ledger write that lands while it waits
  * is rendered rather than overwritten. Refuses without the learning directory
- * (D-NO-STRAY-TREE).
+ * (D-NO-STRAY-TREE), and when it or `.devflow` is a symbolic link (D-NO-LINKED-TREE).
  *
  * @param {string} root
  * @returns {number} exit code

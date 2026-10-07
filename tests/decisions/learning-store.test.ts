@@ -7,7 +7,7 @@
 // backup, and the read-only listing, due-selection and show helpers.
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { execFileSync } from 'child_process';
+import { execFileSync, spawnSync } from 'child_process';
 import * as fs from 'fs';
 import { createRequire } from 'module';
 import * as os from 'os';
@@ -21,6 +21,7 @@ import {
 import {
   FIXTURE_NOW,
   GIT_ENV,
+  ROOT,
   daysAgoDate,
   daysAgoIso,
   git,
@@ -40,6 +41,8 @@ import {
 } from './learning-fixtures.js';
 
 const store = requireLearningStore();
+
+const RENDER_DECISIONS = path.join(ROOT, 'src/assets/scripts/hooks/lib/render-decisions.cjs');
 
 const HOUR_MS = 60 * 60 * 1000;
 
@@ -395,6 +398,142 @@ describe('withDecisionsLock (D-ONE-LEARNING-LOCK, D-NO-STRAY-TREE)', () => {
     expect(() => store.withDecisionsLock('list', tmp, notAResult)).toThrow(/Result/);
     expect(fs.existsSync(lockDir)).toBe(false);
   });
+});
+
+// A repository can commit .devflow, or .devflow/learning, as a symbolic link to a
+// folder elsewhere on the machine. Every learning writer refuses such a tree in the
+// lock wrapper, before it takes the lock, and the claim heartbeat leaves it alone:
+// nothing in the folder the link names is created, changed, moved or removed, its
+// mtimes included.
+describe('a learning tree reached through a symbolic link (D-NO-LINKED-TREE)', { timeout: 60_000 }, () => {
+  const TOKEN = 'aaaaaaaaaaaaaaaa';
+  let tmp: string;
+  let elsewhere: string;
+  beforeEach(() => {
+    tmp = makeTmp('learning-store-linked-');
+    elsewhere = path.join(tmp, 'elsewhere');
+  });
+  afterEach(() => { fs.rmSync(tmp, { recursive: true, force: true }); });
+
+  /** A learning tree in `dir` with an entry, an observation, a queue, and a claim and its owner. */
+  function seedTreeIn(dir: string): void {
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(path.join(dir, 'decisions-log.jsonl'), toJsonl([makeV2LogRow(), makeV2LogRow({ id: 'obs_store_two' })]));
+    fs.writeFileSync(path.join(dir, 'decisions-ledger.jsonl'), toJsonl([makeV2LedgerRow()]));
+    fs.writeFileSync(path.join(dir, '.pending-turns.jsonl'), '{"role":"user","content":"a turn","ts":1}\n');
+    fs.writeFileSync(path.join(dir, '.pending-turns.processing'), '{"role":"user","content":"a claimed turn","ts":1}\n');
+    fs.writeFileSync(path.join(dir, '.pending-turns.owner'), `${TOKEN}\n`);
+  }
+
+  /** Set every entry under `dir`, `dir` itself included, to one past mtime, so any write shows. */
+  function backdate(dir: string): void {
+    const past = new Date(FIXTURE_NOW - 30 * 24 * HOUR_MS);
+    const walk = (abs: string): void => {
+      if (fs.lstatSync(abs).isDirectory()) for (const name of fs.readdirSync(abs)) walk(path.join(abs, name));
+      fs.utimesSync(abs, past, past);
+    };
+    walk(dir);
+  }
+
+  /** Every entry under `dir`, `dir` itself included: its kind, mtime and bytes. */
+  function fingerprint(dir: string): Map<string, string> {
+    const entries = new Map<string, string>();
+    const walk = (rel: string): void => {
+      const abs = path.join(dir, rel);
+      const stat = fs.lstatSync(abs);
+      if (stat.isDirectory()) {
+        entries.set(`${rel}/`, `dir ${stat.mtimeMs}`);
+        for (const name of fs.readdirSync(abs).sort()) walk(path.join(rel, name));
+      } else {
+        entries.set(rel, `file ${stat.mtimeMs} ${fs.readFileSync(abs, 'latin1')}`);
+      }
+    };
+    walk('');
+    return entries;
+  }
+
+  /** Link `.devflow/learning` (or `.devflow` itself) under tmp to a seeded tree elsewhere; return the link. */
+  function linkTree(which: 'learning' | 'devflow'): string {
+    initGitRepo(tmp, { 'src/a.ts': 'export const a = 1;\n' });
+    if (which === 'learning') {
+      seedTreeIn(elsewhere);
+      fs.mkdirSync(path.join(tmp, '.devflow'));
+      fs.symlinkSync(elsewhere, path.join(tmp, '.devflow', 'learning'));
+      return path.join(tmp, '.devflow', 'learning');
+    }
+    seedTreeIn(path.join(elsewhere, 'learning'));
+    fs.symlinkSync(elsewhere, path.join(tmp, '.devflow'));
+    return path.join(tmp, '.devflow');
+  }
+
+  const refusal = (op: string, link: string): string => `${op}: ${link} is a symbolic link, not a directory; nothing was changed`;
+
+  /** Every learning op that writes, as the Learning agent runs it. */
+  const WRITER_RUNS: ReadonlyArray<{ args: readonly string[]; input?: string }> = [
+    {
+      args: ['put-observation', '--create'],
+      input: JSON.stringify({
+        id: 'obs_store_three', type: 'pitfall', title: 'A new lesson', rule: 'Do the safe thing.',
+        why: 'The unsafe thing failed once.', scope: ['area:learning'], provenance: 'a test',
+      }),
+    },
+    {
+      args: ['put-observation', '--update'],
+      input: JSON.stringify({ ...makeV2LogRow({ title: 'A rewritten lesson' }), schema: undefined, observations: undefined, first_seen: undefined, last_seen: undefined, evidence: undefined }),
+    },
+    { args: ['put-observation', '--reinforce'], input: '{"id":"obs_store_one"}' },
+    { args: ['assign-anchor', 'decision', 'obs_store_two'] },
+    { args: ['refresh-anchor', 'ADR-001'] },
+    { args: ['refresh-anchor', 'ADR-001', '--verified'] },
+    { args: ['retire-anchor', 'ADR-001', 'Retired'], input: '{"reason":"no longer true"}' },
+    { args: ['restore-anchor', 'ADR-001'] },
+    { args: ['rotate-observations'] },
+    { args: ['claim-due'] },
+    { args: ['claim-queue'] },
+    { args: ['release-claim', TOKEN] },
+  ];
+
+  for (const which of ['learning', 'devflow'] as const) {
+    const label = which === 'learning' ? '.devflow/learning' : '.devflow';
+
+    it(`withDecisionsLock refuses a ${label} that is a symbolic link, running nothing and changing nothing where it leads`, () => {
+      const link = linkTree(which);
+      backdate(elsewhere);
+      const before = fingerprint(elsewhere);
+      let ran = false;
+
+      const result = store.withDecisionsLock('put-observation', tmp, () => { ran = true; return { ok: true, value: 1 }; });
+
+      expect(result).toEqual({ ok: false, error: { kind: 'not-a-directory', message: refusal('put-observation', link) } });
+      expect(ran).toBe(false);
+      expect(fingerprint(elsewhere)).toEqual(before);
+    });
+
+    it(`every learning op that writes refuses a ${label} that is a symbolic link, and leaves the folder it names untouched`, () => {
+      const link = linkTree(which);
+      backdate(elsewhere);
+      const before = fingerprint(elsewhere);
+
+      for (const { args, input } of WRITER_RUNS) {
+        const run = runJsonHelper(tmp, args, input);
+        expect(run, `${args[0]} exits 1 with the refusal alone`).toEqual({ code: 1, stdout: '', stderr: `${refusal(args[0], link)}\n` });
+        expect(fingerprint(elsewhere), `${args[0]} changes nothing where the link leads`).toEqual(before);
+      }
+    });
+
+    it(`render, clear and reset refuse a ${label} that is a symbolic link, and the heartbeat leaves its claim alone`, () => {
+      const link = linkTree(which);
+      backdate(elsewhere);
+      const before = fingerprint(elsewhere);
+
+      const render = spawnSync(process.execPath, [RENDER_DECISIONS, 'render', tmp], { cwd: tmp, env: GIT_ENV, encoding: 'utf8' });
+      expect({ code: render.status, stderr: render.stderr }).toEqual({ code: 1, stderr: `${refusal('render-decisions', link)}\n` });
+      expect(store.clearUnreferenced(tmp)).toEqual({ ok: false, error: { kind: 'not-a-directory', message: refusal('clear', link) } });
+      expect(store.resetLearning(tmp, { timeoutMs: 0 })).toEqual({ ok: false, error: { kind: 'not-a-directory', message: refusal('reset', link) } });
+      expect(store.touchClaim(tmp)).toEqual({ ok: true, value: { touched: false } });
+      expect(fingerprint(elsewhere)).toEqual(before);
+    });
+  }
 });
 
 // ---------------------------------------------------------------------------
@@ -1288,7 +1427,7 @@ describe('resetLearning (D-RESET-UNDER-LOCK)', () => {
 
     expect(store.resetLearning(tmp, { timeoutMs: 0 })).toEqual({
       ok: false,
-      error: { kind: 'not-a-directory', message: `reset: ${p.learningDir} is a symbolic link, not a directory; nothing was removed` },
+      error: { kind: 'not-a-directory', message: `reset: ${p.learningDir} is a symbolic link, not a directory; nothing was changed` },
     });
     expect(snapshotTree(elsewhere)).toEqual(before);
     expect(fs.lstatSync(p.learningDir).isSymbolicLink()).toBe(true);

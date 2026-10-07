@@ -251,7 +251,8 @@ function heartbeat(root) {
 // The learning ops run from the project root and take no path to a learning file:
 // each builds its paths from the current directory. Every op that writes takes the
 // store's one learning lock through withDecisionsLock (D-ONE-LEARNING-LOCK) and
-// refuses, creating nothing, when .devflow/learning/ is absent (D-NO-STRAY-TREE).
+// refuses, creating nothing, when .devflow/learning/ is absent (D-NO-STRAY-TREE)
+// or when it, or .devflow, is a symbolic link (D-NO-LINKED-TREE).
 // A locked body returns its Result; emit prints it once the lock is released.
 if (require.main === module) {
 try {
