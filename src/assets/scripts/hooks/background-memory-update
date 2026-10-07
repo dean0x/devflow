@@ -654,14 +654,26 @@ verify_and_swap() {
 OUTCOME="failed"
 verify_and_swap
 
+# Each stamp below is a `touch`, which follows a symbolic link, and its path was
+# checked before the LLM run, which can take minutes. So, like the swap's target,
+# it is checked again just before the touch: a link there now is a change made
+# during the run, and the stamp is skipped and logged (D-HOOKS-NO-SYMLINK, git-marker).
 if [ "$OUTCOME" = "updated" ]; then
   rm -f "$PROCESSING_FILE" 2>/dev/null || true
-  touch "$OK_FILE" 2>/dev/null || true
-  log "SUCCESS: queue drained, .last-refresh-ok touched"
+  if df_no_symlink_below "$PROJECT_ROOT" "$OK_FILE"; then
+    touch "$OK_FILE" 2>/dev/null || true
+    log "SUCCESS: queue drained, .last-refresh-ok touched"
+  else
+    log "SUCCESS: queue drained; .last-refresh-ok not touched, a symbolic link appeared on its path during the run"
+  fi
 elif [ "$OUTCOME" = "conflict" ]; then
   # Heartbeat: this batch is still owned by the retry cycle, not orphaned.
   # Keeps session-start-memory's 300s cold path from reclaiming a live retry.
-  touch "$PROCESSING_FILE" 2>/dev/null || true
+  if df_no_symlink_below "$PROJECT_ROOT" "$PROCESSING_FILE"; then
+    touch "$PROCESSING_FILE" 2>/dev/null || true
+  else
+    log "Heartbeat skipped: a symbolic link appeared on the path to $PROCESSING_FILE during the run"
+  fi
   log "CONFLICT: queue retained in .processing, .last-refresh-ok untouched"
 else
   # Leave .processing for session-start-memory's D56c cold path; do NOT touch .last-refresh-ok

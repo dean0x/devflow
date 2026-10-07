@@ -3218,6 +3218,53 @@ describe('S27: the memory hooks never write through a symbolic link under .devfl
     expect(fs.existsSync(path.join(memoryDir, '.pending-turns.processing')), 'the batch is kept for a later run').toBe(true);
     expect(refusals('background-memory-update'), 'the refusal is logged once').toHaveLength(1);
   });
+
+  // The run's paths are checked before the LLM run, which can take minutes, and the
+  // stamps after it are `touch`es, which follow a link: each is checked again first.
+  it('background-memory-update: a link that appears at .last-refresh-ok during the LLM run is not touched through', () => {
+    fs.mkdirSync(memoryDir, { recursive: true });
+    seedQueue(projectDir);
+    const created = path.join(tmp, 'created-through-the-link');
+    const okFile = path.join(memoryDir, '.last-refresh-ok');
+    // The stand-in writes a valid staged memory, so the swap succeeds, and plants a
+    // link at the success stamp.
+    fs.writeFileSync(
+      path.join(shimDir, 'claude'),
+      `#!/bin/bash\ncat > /dev/null\necho "<!-- memory-head: testsha branch: main -->" > "${memoryDir}/WORKING-MEMORY.md.new"\nln -s "${created}" "${okFile}"\nexit 0\n`,
+    );
+    fs.chmodSync(path.join(shimDir, 'claude'), 0o755);
+
+    expect(runWorker(projectDir, homeDir, shimDir).exitCode).toBe(0);
+
+    expect(fs.existsSync(created), 'touch never follows the link').toBe(false);
+    expect(fs.readlinkSync(okFile), 'the link is left as it was').toBe(created);
+    expect(fs.readFileSync(path.join(memoryDir, 'WORKING-MEMORY.md'), 'utf-8'), 'non-vacuity: the refresh landed').toContain('memory-head: testsha');
+    expect(refusals('background-memory-update'), 'the skipped stamp is logged once').toHaveLength(1);
+  });
+
+  it('background-memory-update: a link that appears at the batch during the LLM run gets no conflict heartbeat through it', () => {
+    fs.mkdirSync(memoryDir, { recursive: true });
+    seedQueue(projectDir);
+    const created = path.join(tmp, 'created-through-the-link');
+    const batch = path.join(memoryDir, '.pending-turns.processing');
+    const memoryFile = path.join(memoryDir, 'WORKING-MEMORY.md');
+    // The stand-in writes a valid staged memory and a working memory of its own, so
+    // the swap is a conflict, whose heartbeat touches the batch, and puts a link in
+    // the batch's place.
+    fs.writeFileSync(
+      path.join(shimDir, 'claude'),
+      `#!/bin/bash\ncat > /dev/null\necho "<!-- memory-head: testsha branch: main -->" > "${memoryFile}.new"\n` +
+        `echo "an edit made during the run" > "${memoryFile}"\nrm "${batch}"\nln -s "${created}" "${batch}"\nexit 0\n`,
+    );
+    fs.chmodSync(path.join(shimDir, 'claude'), 0o755);
+
+    expect(runWorker(projectDir, homeDir, shimDir).exitCode).toBe(0);
+
+    expect(fs.existsSync(created), 'touch never follows the link').toBe(false);
+    expect(fs.readlinkSync(batch), 'the link is left as it was').toBe(created);
+    expect(fs.readFileSync(memoryFile, 'utf-8'), 'non-vacuity: the run ended in a conflict, keeping the edit').toBe('an edit made during the run\n');
+    expect(refusals('background-memory-update'), 'the skipped heartbeat is logged once').toHaveLength(1);
+  });
 });
 
 // =============================================================================
