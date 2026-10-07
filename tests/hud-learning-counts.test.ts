@@ -8,8 +8,9 @@ import { createRequire } from 'node:module';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import * as os from 'node:os';
-import { execSync } from 'node:child_process';
+import { execFileSync, execSync } from 'node:child_process';
 import learningCounts, {
+  LEDGER_MAX_BYTES,
   gatherLearningCounts,
   gatherLedgerLearningCounts,
 } from '../src/hud/components/learning-counts.js';
@@ -134,6 +135,67 @@ describe('gatherLearningCounts', () => {
     );
 
     expect(gatherLearningCounts(tmpDir)).toEqual({ decisions: 0, pitfalls: 0 });
+  });
+});
+
+// D-HUD-LEDGER-BOUNDED: the statusline reads the ledger on every prompt, so it
+// counts only a regular file of at most LEDGER_MAX_BYTES and never reads through a
+// symbolic link. A link, a FIFO or an oversized file shows no counts, as an absent
+// ledger does, and none of them can stall the read.
+describe('gatherLearningCounts reads only a bounded regular ledger (D-HUD-LEDGER-BOUNDED)', () => {
+  let tmpDir: string;
+  let ledgerPath: string;
+
+  beforeEach(() => {
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'hud-learning-bounded-'));
+    fs.mkdirSync(path.join(tmpDir, '.devflow', 'learning'), { recursive: true });
+    ledgerPath = path.join(tmpDir, '.devflow', 'learning', 'decisions-ledger.jsonl');
+  });
+
+  afterEach(() => {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  /** One valid active row, then the file extended with NUL bytes to `size` (a sparse file). */
+  function ledgerOfSize(size: number): void {
+    fs.writeFileSync(ledgerPath, makeRow('decision') + '\n');
+    fs.truncateSync(ledgerPath, size);
+  }
+
+  it('shows no counts for a ledger that is a symbolic link to a ledger elsewhere', () => {
+    const elsewhere = path.join(tmpDir, 'elsewhere.jsonl');
+    fs.writeFileSync(elsewhere, [makeRow('decision'), makeRow('pitfall')].join('\n') + '\n');
+    fs.symlinkSync(elsewhere, ledgerPath);
+
+    expect(gatherLearningCounts(tmpDir)).toBeNull();
+  });
+
+  it('shows no counts for a ledger that is a symbolic link to an endless source', () => {
+    fs.symlinkSync('/dev/zero', ledgerPath);
+
+    expect(gatherLearningCounts(tmpDir)).toBeNull();
+  });
+
+  it('shows no counts for a FIFO at the ledger path, and never blocks on it', () => {
+    execFileSync('mkfifo', [ledgerPath]);
+
+    expect(gatherLearningCounts(tmpDir)).toBeNull();
+  });
+
+  it('counts a ledger of exactly LEDGER_MAX_BYTES', () => {
+    ledgerOfSize(LEDGER_MAX_BYTES);
+
+    expect(gatherLearningCounts(tmpDir)).toEqual({ decisions: 1, pitfalls: 0 });
+  });
+
+  it('shows no counts for a ledger one byte over LEDGER_MAX_BYTES', () => {
+    ledgerOfSize(LEDGER_MAX_BYTES + 1);
+
+    expect(gatherLearningCounts(tmpDir)).toBeNull();
+  });
+
+  it('LEDGER_MAX_BYTES leaves real ledgers, about 0.5 MB, far below the cap', () => {
+    expect(LEDGER_MAX_BYTES).toBeGreaterThanOrEqual(4 * 1024 * 1024);
   });
 });
 
