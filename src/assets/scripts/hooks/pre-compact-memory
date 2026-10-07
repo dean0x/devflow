@@ -66,10 +66,10 @@ fi
 # Auto-create .devflow/ and ensure .gitignore entries (idempotent after first run)
 source "$SCRIPT_DIR/ensure-devflow-init" "$CWD" || exit 0
 
-# D-HOOKS-NO-SYMLINK (git-marker): every write below lands in the memory
-# folder, as a copy renamed into place or a file created only where nothing stands,
-# so only the folder's own path needs checking: a linked folder would take the
-# backup and the working memory into the folder it names.
+# D-HOOKS-NO-SYMLINK (git-marker): every write below lands in the memory folder,
+# so a linked folder, which would take the backup and the working memory into the
+# folder it names, ends the hook here. The backup's own target is checked where the
+# backup is renamed onto it.
 if ! df_no_symlink_below "$PROJECT_ROOT" "$MEMORY_DIR"; then
   log "SKIP: a symbolic link sits on the path to $MEMORY_DIR; no backup or working memory written"
   dbg "EXIT: symbolic link on the memory folder path"
@@ -134,6 +134,11 @@ fi
 # rename that fails removes whatever holds the copy's name and keeps the
 # previous backup; the bootstrap below still runs.
 #
+# The rename's target is checked first (D-HOOKS-NO-SYMLINK, git-marker): `mv`
+# moves the copy into a folder a link at backup.json names, so a link there, to
+# anything, skips the backup with nothing created, logged once, and the
+# bootstrap below still runs.
+#
 # A run killed after creating its copy and before renaming it (by the hook's
 # timeout, say) leaves the copy under its own PID, a name no later run writes,
 # so each run first removes the copies nothing has written to for an hour. A
@@ -141,7 +146,10 @@ fi
 # and a concurrent run's copy is left alone.
 find "$MEMORY_DIR" -maxdepth 1 -type f -name "${BACKUP_FILE##*/}.tmp.*" -mmin +60 -delete 2>/dev/null || true
 BACKUP_TMP="$BACKUP_FILE.tmp.$$"
-if (umask 077 && set -o noclobber && json_backup_construct \
+if ! df_no_symlink_below "$PROJECT_ROOT" "$BACKUP_FILE"; then
+  log "Backup not written: a symbolic link sits on the path to $BACKUP_FILE"
+  dbg "Backup not written: symbolic link at $BACKUP_FILE"
+elif (umask 077 && set -o noclobber && json_backup_construct \
     --arg ts "$TIMESTAMP" \
     --arg branch "$GIT_BRANCH" \
     --arg status "$GIT_STATUS" \

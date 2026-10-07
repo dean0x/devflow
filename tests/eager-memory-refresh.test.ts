@@ -2833,11 +2833,11 @@ describe('S26: pre-compact backup.json is replaced by a rename, never rewritten 
 // S27 — D-HOOKS-NO-SYMLINK: no memory hook writes through a symbolic link
 //
 // A repository can commit a symbolic link anywhere in its own .devflow/. The
-// worker's batch merge (`>>`), its `touch`es and its trim copy, pre-compact's
-// backup and working-memory bootstrap, and session-start's batch recovery all
-// write under .devflow/memory, so each is skipped when the memory folder, or a
-// file written there in place, is a link. A skipped write is logged once and the
-// hook exits 0.
+// worker's batch merge (`>>`), its `touch`es, its trim copy and its working-memory
+// swap, pre-compact's backup and working-memory bootstrap, and session-start's
+// batch recovery all write under .devflow/memory, so each is skipped when the
+// memory folder, a file written there in place, or the target a file is renamed
+// onto, is a link. A skipped write is logged once and the hook exits 0.
 // =============================================================================
 describe('S27: the memory hooks never write through a symbolic link under .devflow (D-HOOKS-NO-SYMLINK)', () => {
   const UNTOUCHED = 'a file outside the project, which no hook may write\n';
@@ -2999,6 +2999,101 @@ describe('S27: the memory hooks never write through a symbolic link under .devfl
     expect(fs.readFileSync(outsideFile, 'utf-8')).toBe(UNTOUCHED);
     expect(refusals('session-start-memory'), 'the refusal is logged once').toHaveLength(1);
   });
+
+  // A rename's target is a path the hook writes, so a link there is refused like a
+  // link on any other written path: `mv` moves the file into the folder a link to a
+  // folder names, and replaces a link to a file or to nothing. Each memory hook that
+  // renames a file into place leaves such a link as it was, logs the refusal once
+  // and carries on.
+  const linkKinds: ReadonlyArray<readonly [kind: string, target: () => string]> = [
+    ['a folder', () => outsideDir],
+    ['a file', () => outsideFile],
+    ['nothing', () => path.join(tmp, 'nowhere')],
+  ];
+
+  /** Nothing outside the project changed, whichever kind of link was planted. */
+  const expectNothingOutside = (): void => {
+    expect(fs.readdirSync(outsideDir), 'nothing is moved into the folder a link names').toEqual([]);
+    expect(fs.readFileSync(outsideFile, 'utf-8'), 'the file a link names is byte-identical').toBe(UNTOUCHED);
+    expect(fs.existsSync(path.join(tmp, 'nowhere')), 'nothing is created where a dangling link points').toBe(false);
+  };
+
+  for (const [kind, target] of linkKinds) {
+    it(`session-start-memory: a stale batch is not moved onto a link at the queue path to ${kind}`, () => {
+      fs.mkdirSync(memoryDir, { recursive: true });
+      const batch = path.join(memoryDir, '.pending-turns.processing');
+      const queue = path.join(memoryDir, '.pending-turns.jsonl');
+      fs.writeFileSync(batch, '{"role":"user","content":"x","ts":1}\n');
+      backdateMtime(batch, 600);
+      fs.symlinkSync(target(), queue);
+
+      const run = runMemoryHook(SESSION_START_MEMORY_HOOK);
+
+      expect(run.kind, run.stderr).toBe('clean');
+      expectNothingOutside();
+      expect(fs.readlinkSync(queue), 'the link is left as it was').toBe(target());
+      expect(fs.readFileSync(batch, 'utf-8'), 'the batch stays for a later recovery').toContain('"content":"x"');
+      expect(refusals('session-start-memory'), 'the refusal is logged once').toHaveLength(1);
+    });
+
+    it(`pre-compact-memory: no backup is renamed onto a link at backup.json to ${kind}, and the working memory is still bootstrapped`, () => {
+      fs.mkdirSync(memoryDir, { recursive: true });
+      const backup = path.join(memoryDir, 'backup.json');
+      fs.symlinkSync(target(), backup);
+
+      const run = runMemoryHook(PRE_COMPACT_HOOK);
+
+      expect(run.kind, run.stderr).toBe('clean');
+      expectNothingOutside();
+      expect(fs.readlinkSync(backup), 'the link is left as it was').toBe(target());
+      expect(fs.readdirSync(memoryDir).filter((name) => name.includes('.tmp.')), 'no copy is left behind').toEqual([]);
+      expect(
+        fs.readFileSync(path.join(memoryDir, 'WORKING-MEMORY.md'), 'utf-8'),
+        'the hook carries on: the working memory is bootstrapped',
+      ).toMatch(/^<!-- memory-head: [0-9a-f]{40} branch: /);
+      expect(refusals('pre-compact-memory'), 'the refusal is logged once').toHaveLength(1);
+    });
+
+    it(`background-memory-update: no refresh is renamed onto a link at WORKING-MEMORY.md to ${kind}, and no LLM run starts`, () => {
+      fs.mkdirSync(memoryDir, { recursive: true });
+      seedQueue(projectDir);
+      const memoryFile = path.join(memoryDir, 'WORKING-MEMORY.md');
+      fs.symlinkSync(target(), memoryFile);
+      const invoked = claudeThatRecordsItsRun();
+
+      expect(runWorker(projectDir, homeDir, shimDir).exitCode).toBe(0);
+
+      expectNothingOutside();
+      expect(fs.readlinkSync(memoryFile), 'the link is left as it was').toBe(target());
+      expect(fs.existsSync(invoked), 'no LLM run starts').toBe(false);
+      expect(fs.readFileSync(path.join(memoryDir, '.pending-turns.jsonl'), 'utf-8').trim().split('\n'), 'the queue is kept').toHaveLength(2);
+      expect(fs.existsSync(path.join(memoryDir, '.last-refresh-ok')), 'no refresh is recorded').toBe(false);
+      expect(refusals('background-memory-update'), 'the refusal is logged once').toHaveLength(1);
+    });
+  }
+
+  it('background-memory-update: a link that appears at WORKING-MEMORY.md during the LLM run takes no refresh', () => {
+    fs.mkdirSync(memoryDir, { recursive: true });
+    seedQueue(projectDir);
+    const memoryFile = path.join(memoryDir, 'WORKING-MEMORY.md');
+    // The stand-in writes a valid staged memory and then plants the link the swap
+    // renames onto. The run began with no working memory, so the swap's checksum
+    // comparison alone cannot tell the link from the absent file it replaced.
+    fs.writeFileSync(
+      path.join(shimDir, 'claude'),
+      `#!/bin/bash\ncat > /dev/null\necho "<!-- memory-head: testsha branch: main -->" > "${memoryFile}.new"\nln -s "${outsideDir}" "${memoryFile}"\nexit 0\n`,
+    );
+    fs.chmodSync(path.join(shimDir, 'claude'), 0o755);
+
+    expect(runWorker(projectDir, homeDir, shimDir).exitCode).toBe(0);
+
+    expectNothingOutside();
+    expect(fs.readlinkSync(memoryFile), 'the link is left as it was').toBe(outsideDir);
+    expect(fs.existsSync(`${memoryFile}.new`), 'the staged memory is discarded').toBe(false);
+    expect(fs.existsSync(path.join(memoryDir, '.last-refresh-ok')), 'no refresh is recorded').toBe(false);
+    expect(fs.existsSync(path.join(memoryDir, '.pending-turns.processing')), 'the batch is kept for a later run').toBe(true);
+    expect(refusals('background-memory-update'), 'the refusal is logged once').toHaveLength(1);
+  });
 });
 
 // =============================================================================
@@ -3130,21 +3225,19 @@ describe('S28: the memory hooks never read through a symbolic link under .devflo
     expect(refusals('pre-compact-memory'), 'the refusal is logged once').toHaveLength(1);
   });
 
-  it('background-memory-update: a linked WORKING-MEMORY.md never reaches the claude -p prompt, and the refresh still lands', () => {
+  it('background-memory-update: a linked WORKING-MEMORY.md never reaches a claude -p prompt: the run is refused before one is built', () => {
     seedQueue(projectDir);
     fs.symlinkSync(outsideFile, memoryFile);
     const prompt = createPromptCapturingShim(shimDir, `${memoryFile}.new`);
 
     expect(runWorker(projectDir, homeDir, shimDir).exitCode).toBe(0);
 
-    expect(fs.readFileSync(prompt, 'utf-8'), 'non-vacuity: the LLM run received the turns').toContain('implement the feature');
-    expect(fs.readFileSync(prompt, 'utf-8')).not.toContain(SECRET);
+    // The working memory is also the swap's rename target, and a link there refuses
+    // the whole run (S27), so no prompt is built from it or sent.
+    expect(fs.existsSync(prompt), 'no LLM run starts').toBe(false);
     expect(fs.readFileSync(outsideFile, 'utf-8'), 'the link target is byte-identical').toBe(OUTSIDE);
-    // The swap's re-check treats the link as absent too, so the refresh lands: the
-    // rename replaces the link with the new working memory instead of writing through it.
-    expect(isLink(memoryFile), 'the rename replaced the link').toBe(false);
-    expect(fs.readFileSync(memoryFile, 'utf-8')).toContain('<!-- memory-head: testsha branch: main -->');
-    expect(fs.existsSync(path.join(memoryDir, '.last-refresh-ok')), 'the refresh is recorded as landed').toBe(true);
+    expect(isLink(memoryFile), 'the link is left as it was').toBe(true);
+    expect(fs.readFileSync(path.join(memoryDir, '.pending-turns.jsonl'), 'utf-8'), 'non-vacuity: the turns stay queued').toContain('implement the feature');
     expect(refusals('background-memory-update'), 'the refusal is logged once').toHaveLength(1);
   });
 });

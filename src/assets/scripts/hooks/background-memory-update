@@ -108,12 +108,12 @@ fi
 
 # --- Never write through a symbolic link (D-HOOKS-NO-SYMLINK, git-marker) ---
 # The lock (`mkdir`), the batch merge (`>>`), the claim heartbeat and the success
-# stamp (`touch`) write these paths in place, and a claim renames the queue onto the
-# batch. Every other write lands in the same folder by a rename, which replaces a
-# link rather than following it, or by a copy created only where nothing stands.
-# So the run is skipped, before it takes the lock, when any of them or a folder
-# above them is a link.
-if ! df_no_symlink_below "$PROJECT_ROOT" "$LOCK_DIR" "$QUEUE_FILE" "$PROCESSING_FILE" "$OK_FILE"; then
+# stamp (`touch`) write these paths in place; the claim and the trim rename onto the
+# batch and the swap onto the working memory, and `mv` moves a file into the folder
+# a link at its target names. The trim's copy is created only where nothing stands.
+# So the run is skipped, before it takes the lock or starts an LLM run, when any of
+# these paths or a folder above them is a link.
+if ! df_no_symlink_below "$PROJECT_ROOT" "$LOCK_DIR" "$QUEUE_FILE" "$PROCESSING_FILE" "$OK_FILE" "$MEMORY_FILE"; then
   log "SKIP: a symbolic link sits on the path to the memory files in $MEMORY_DIR; nothing written"
   exit 0
 fi
@@ -363,9 +363,9 @@ log "Built $TURN_COUNT turns from queue"
 # false-conflict, never false-success" invariant true even when cksum errors.
 #
 # D-HOOKS-NO-SYMLINK (git-marker): the existing memory goes into the prompt, so a
-# working memory a symbolic link leads to is treated as absent, here and at the
-# swap's re-check alike; the swap's rename then replaces the link rather than
-# writing through it.
+# working memory a symbolic link leads to is treated as absent. A link at its own
+# path has already skipped the run, since the swap renames onto it (above), so
+# only one that appeared since can reach this read.
 MEMORY_PRESENT=""
 if df_file_below "$PROJECT_ROOT" "$MEMORY_FILE"; then MEMORY_PRESENT="yes"; fi
 CKSUM_FAILED="false"
@@ -607,15 +607,23 @@ verify_and_swap() {
     *) log "WARN: staged file exists but stamp missing on line 1 — treating as failure"
        rm -f "$STAGED_FILE" 2>/dev/null || true; OUTCOME="failed"; return ;;
   esac
+  # A symbolic link on the working memory's path refuses the swap
+  # (D-HOOKS-NO-SYMLINK, git-marker): the run began without one, so a link there now
+  # is a change made during the run, and `mv` would move the staged memory into a
+  # folder it names. When the run began with no working memory, the cksum
+  # comparison below would take the link for that absent file.
+  if ! df_no_symlink_below "$PROJECT_ROOT" "$MEMORY_FILE"; then
+    rm -f "$STAGED_FILE" 2>/dev/null || true
+    log "CONFLICT: a symbolic link appeared on the path to $MEMORY_FILE during the run — not swapped, leaving .processing for retry"
+    OUTCOME="conflict"; return
+  fi
   # Re-check real file cksum before swapping.
   # Residual TOCTOU: a human edit landing in the O(ms) window between this
   # cksum re-check and the mv would be clobbered; this is accepted — the
   # staged content was synthesised from the pre-run file, so the next run
   # re-synthesises from the then-current content (no net information loss).
-  # A working memory a symbolic link leads to reads as absent here, as it did at the
-  # pre-run read (D-HOOKS-NO-SYMLINK); that refusal was logged there.
   local _post="ABSENT" _post_cksum_failed="false"
-  if [ -f "$MEMORY_FILE" ] && df_no_symlink_below "$PROJECT_ROOT" "$MEMORY_FILE"; then
+  if [ -f "$MEMORY_FILE" ]; then
     _post=$(cksum "$MEMORY_FILE" 2>/dev/null) || _post_cksum_failed="true"
   fi
   # If either cksum invocation failed, treat as conflict (fail-closed — resolves toward

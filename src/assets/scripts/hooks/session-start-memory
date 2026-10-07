@@ -70,9 +70,10 @@ fi
 # re-spawns (memory disabled mid-flight, host offline, etc.): a SessionStart
 # arriving >300s after the crash with no intervening Stop hook.
 # Non-clobber: only recovers when .pending-turns.jsonl does NOT already exist,
-# so a concurrent session's fresh queue is never overwritten. Nor through a
-# symbolic link (D-HOOKS-NO-SYMLINK, git-marker): a linked memory folder would
-# take the rename into the folder it names, and a linked batch would become a
+# so a concurrent session's fresh queue is never overwritten. Nor where a
+# symbolic link sits on the path to the batch or to the queue it is renamed onto
+# (D-HOOKS-NO-SYMLINK, git-marker): `mv` would move the batch into a folder a
+# linked memory folder or queue path names, and a linked batch would become a
 # linked queue.
 source "$SCRIPT_DIR/get-mtime" || { echo "session-start-memory: failed to source get-mtime" >&2; exit 1; }
 source "$SCRIPT_DIR/is-hex-sha" || { echo "session-start-memory: failed to source is-hex-sha" >&2; exit 1; }
@@ -84,9 +85,9 @@ if [ -f "$_SSM_PT_PROC" ]; then
   _SSM_NOW_PT=$(date +%s)
   _SSM_PT_AGE=$(( _SSM_NOW_PT - _SSM_PT_MTIME ))
   if [ "$_SSM_PT_AGE" -gt 300 ]; then
-    if ! df_no_symlink_below "$PROJECT_ROOT" "$_SSM_PT_PROC"; then
-      dbg "Stale .pending-turns.processing skipped — a symbolic link sits on its path"
-      log "Stale .pending-turns.processing skipped (cold path): a symbolic link sits on the path to $_SSM_PT_PROC"
+    if ! df_no_symlink_below "$PROJECT_ROOT" "$_SSM_PT_PROC" "$_SSM_PT_JSONL"; then
+      dbg "Stale .pending-turns.processing skipped — a symbolic link sits on its path or the queue's"
+      log "Stale .pending-turns.processing skipped (cold path): a symbolic link sits on the path to $_SSM_PT_PROC or $_SSM_PT_JSONL"
     elif [ ! -f "$_SSM_PT_JSONL" ]; then
       mv "$_SSM_PT_PROC" "$_SSM_PT_JSONL" 2>/dev/null || true
       dbg "Recovered orphaned .pending-turns.processing (age ${_SSM_PT_AGE}s)"
