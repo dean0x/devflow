@@ -90,7 +90,7 @@ fi
 # source of truth: ensure-root-gitignore. Soft-fail: a gitignore write must never
 # block context injection. Marker keeps it O(1). A `.devflow` that is a symbolic
 # link is skipped, since the marker would land in the folder the link names
-# (D-HOOKS-NO-SYMLINK-WRITE, git-marker).
+# (D-HOOKS-NO-SYMLINK, git-marker).
 if [ -n "$PROJECT_OK" ] && [ -d "$PROJECT_ROOT" ] && [ -f "$SCRIPT_DIR/ensure-root-gitignore" ]; then
   if df_no_symlink_below "$PROJECT_ROOT" "$PROJECT_ROOT/.devflow"; then
     source "$SCRIPT_DIR/ensure-root-gitignore" "$PROJECT_ROOT" || true
@@ -208,7 +208,7 @@ LEARNING_ENABLED="$_QG_LEARNING"
 # --- Section 1: Project Decisions TL;DR ---
 if [ "$LEARNING_ENABLED" = "true" ]; then
   # Heal older installs that have .devflow/ but not .devflow/learning/, never
-  # through a symbolic link (D-HOOKS-NO-SYMLINK-WRITE, git-marker).
+  # through a symbolic link (D-HOOKS-NO-SYMLINK, git-marker).
   if [ -d "$LEDGER_DEVFLOW_DIR" ] && [ ! -d "$LEARNING_DIR" ]; then
     if df_no_symlink_below "$LEDGER_ROOT" "$LEARNING_DIR"; then
       mkdir -p "$LEARNING_DIR" 2>/dev/null || true
@@ -217,9 +217,13 @@ if [ "$LEARNING_ENABLED" = "true" ]; then
     fi
   fi
   if [ -d "$LEARNING_DIR" ]; then
+    # D-HOOKS-NO-SYMLINK (git-marker): this section and the next read the learning
+    # files into the context, or name them to the model and the Learning agent, so
+    # each is read only where no symbolic link sits on its path; a file a link leads
+    # to is treated as absent, and its refusal logged once.
     DECISIONS_TLDR=""
     for kf in "$LEARNING_DIR"/decisions.md "$LEARNING_DIR"/pitfalls.md; do
-      if [ -f "$kf" ]; then
+      if df_file_below "$LEDGER_ROOT" "$kf"; then
         TLDR_LINE=$(sed -n '1s/<!-- TL;DR: \(.*\) -->/\1/p' "$kf")
         if [ -n "$TLDR_LINE" ]; then
           DECISIONS_TLDR="${DECISIONS_TLDR}${TLDR_LINE}\n"
@@ -229,9 +233,11 @@ if [ "$LEARNING_ENABLED" = "true" ]; then
     # The index line names the decisions index, so the main model can pass it on
     # as DECISIONS_CONTEXT. It interpolates $LEDGER_ROOT, so it needs that root's
     # shape gate, and it is left out when the index lists no entry: an empty
-    # corpus renders `(none)`. Builtins only — no fork on any path.
+    # corpus renders `(none)`. It is left out too when a link leads to the index,
+    # since the model would read the file the link names and pass that on.
+    # Builtins only: no fork, save the log line of a refused index.
     _SC_INDEX="$LEARNING_DIR/index.md"; DECISIONS_INDEX_LINE=""
-    if [ -n "$DIRECTIVE_LEDGER_SAFE" ] && [ -s "$_SC_INDEX" ]; then
+    if [ -n "$DIRECTIVE_LEDGER_SAFE" ] && df_file_below "$LEDGER_ROOT" "$_SC_INDEX" && [ -s "$_SC_INDEX" ]; then
       _SC_IDX1=""; IFS= read -r _SC_IDX1 < "$_SC_INDEX" || true
       [ "$_SC_IDX1" != "(none)" ] && DECISIONS_INDEX_LINE="Index: $_SC_INDEX"
     fi
@@ -272,8 +278,10 @@ if [ "$LEARNING_ENABLED" = "true" ]; then
   PROCESSING_FILE="$LEARNING_DIR/.pending-turns.processing"
   PROCESSING_STALE_SECS=900
 
+  # The queue and the batch are what the directive sends the Learning agent to, so
+  # one a symbolic link leads to counts as absent (D-HOOKS-NO-SYMLINK, Section 1).
   LEARNING_WORK=""
-  if [ -f "$PROCESSING_FILE" ]; then
+  if df_file_below "$LEDGER_ROOT" "$PROCESSING_FILE"; then
     source "$SCRIPT_DIR/get-mtime" 2>/dev/null || true
     _SC_PROC_MTIME=$(get_mtime "$PROCESSING_FILE" 2>/dev/null || true)
     _SC_NOW=$(date +%s)
@@ -282,7 +290,7 @@ if [ "$LEARNING_ENABLED" = "true" ]; then
     else
       dbg "learning directive suppressed: fresh .processing (live agent owns the batch)"
     fi
-  elif [ -s "$QUEUE_FILE" ]; then
+  elif df_file_below "$LEDGER_ROOT" "$QUEUE_FILE" && [ -s "$QUEUE_FILE" ]; then
     LEARNING_WORK="queue"
   fi
 
@@ -306,9 +314,10 @@ ${LEARNING_PAUSED_SECTION}"
   fi
 
   if [ -n "$LEARNING_WORK" ]; then
-    # Model resolution: project learning.json → global ~/.devflow/learning.json → opus
+    # Model resolution: project learning.json → global ~/.devflow/learning.json → opus.
+    # A project learning.json a symbolic link leads to is absent (D-HOOKS-NO-SYMLINK).
     LEARNING_MODEL=""
-    if [ -f "$LEARNING_DIR/learning.json" ]; then
+    if df_file_below "$LEDGER_ROOT" "$LEARNING_DIR/learning.json"; then
       LEARNING_MODEL=$(json_field_file "$LEARNING_DIR/learning.json" "model" "")
     fi
     if [ -z "$LEARNING_MODEL" ] && [ -f "$HOME/.devflow/learning.json" ]; then

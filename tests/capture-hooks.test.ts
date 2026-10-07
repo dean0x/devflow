@@ -1087,7 +1087,7 @@ describe('memory-worker: a repository narrowing stops the spawn (D-FEATURES-NARR
 });
 
 // =============================================================================
-// D-HOOKS-NO-SYMLINK-WRITE: no capture hook writes through a symbolic link
+// D-HOOKS-NO-SYMLINK: no capture hook writes through a symbolic link
 // =============================================================================
 // A repository can commit a symbolic link anywhere in its own .devflow/. An
 // append (`>>`) and a `touch` follow one, and `mkdir -p` creates folders inside a
@@ -1095,7 +1095,7 @@ describe('memory-worker: a repository narrowing stops the spawn (D-FEATURES-NARR
 // into whatever file the link names. Each such write is skipped instead: the
 // link's target is left byte-identical, the refusal is logged once, and the hook
 // exits 0 as it does for any skipped capture.
-describe('capture hooks never write through a symbolic link under .devflow (D-HOOKS-NO-SYMLINK-WRITE)', () => {
+describe('capture hooks never write through a symbolic link under .devflow (D-HOOKS-NO-SYMLINK)', () => {
   const UNTOUCHED = 'a file outside the project, which no hook may write\n';
   let tmp: string;
   let projectDir: string;

@@ -71,7 +71,7 @@ fi
 # arriving >300s after the crash with no intervening Stop hook.
 # Non-clobber: only recovers when .pending-turns.jsonl does NOT already exist,
 # so a concurrent session's fresh queue is never overwritten. Nor through a
-# symbolic link (D-HOOKS-NO-SYMLINK-WRITE, git-marker): a linked memory folder would
+# symbolic link (D-HOOKS-NO-SYMLINK, git-marker): a linked memory folder would
 # take the rename into the folder it names, and a linked batch would become a
 # linked queue.
 source "$SCRIPT_DIR/get-mtime" || { echo "session-start-memory: failed to source get-mtime" >&2; exit 1; }
@@ -141,27 +141,31 @@ parse_and_validate_stamp() {
   esac
 }
 
-# --- detect_refresh_failing: sets REFRESH_FAILING in caller's scope.
+# --- detect_refresh_failing <now> <memory_dir> <log_dir> <root>: sets
+# REFRESH_FAILING in caller's scope. <root> is the project root the memory folder
+# lies below.
 # Condition: queue non-empty AND (.last-refresh-ok missing OR >600s old)
 # orphaned-processing depth fix: count both .pending-turns.jsonl AND
 # .pending-turns.processing toward _queue_depth. Before this fix, an orphaned
 # .processing (whose mtime is between 0s and the D56c 300s cold-path gate)
 # was invisible to State-C — a crashed worker's batch would sit silently with
-# no user-visible warning.
+# no user-visible warning. The count reaches the session, so a batch a symbolic
+# link leads to counts as absent (D-HOOKS-NO-SYMLINK, git-marker).
 detect_refresh_failing() {
   local _now="$1"
   local _memory_dir="$2"
   local _log_dir="$3"
+  local _root="$4"
   local _queue_file="$_memory_dir/.pending-turns.jsonl"
   local _proc_file="$_memory_dir/.pending-turns.processing"
   local _ok_file="$_memory_dir/.last-refresh-ok"
   local _queue_depth=0
-  if [ -f "$_queue_file" ] && [ -s "$_queue_file" ]; then
+  if df_file_below "$_root" "$_queue_file" && [ -s "$_queue_file" ]; then
     _queue_depth=$(wc -l < "$_queue_file" | tr -d ' ')
   fi
   # Also count lines in .processing — an orphaned batch left by a crashed worker
   # is unprocessed content even if .jsonl is empty (applies B4 blind-spot fix)
-  if [ -f "$_proc_file" ] && [ -s "$_proc_file" ]; then
+  if df_file_below "$_root" "$_proc_file" && [ -s "$_proc_file" ]; then
     local _proc_depth
     _proc_depth=$(wc -l < "$_proc_file" | tr -d ' ')
     _queue_depth=$(( _queue_depth + _proc_depth ))
@@ -186,7 +190,14 @@ detect_refresh_failing() {
   fi
 }
 
-if [ -f "$MEMORY_FILE" ]; then
+# D-HOOKS-NO-SYMLINK (git-marker): the working memory, the batches State C counts
+# and the pre-compact backup are all read into the session, so each is read only
+# where no symbolic link sits on its path; a file a link leads to is treated as
+# absent, and its refusal logged once.
+MEMORY_PRESENT=""
+if df_file_below "$PROJECT_ROOT" "$MEMORY_FILE"; then MEMORY_PRESENT="yes"; fi
+
+if [ -n "$MEMORY_PRESENT" ]; then
   dbg "MEMORY_FILE exists: $MEMORY_FILE"
   MEMORY_CONTENT=$(head -c 65536 "$MEMORY_FILE")
 
@@ -245,7 +256,7 @@ if [ -f "$MEMORY_FILE" ]; then
   fi
 
   # --- State C detection: refresh failing ---
-  detect_refresh_failing "$NOW" "$MEMORY_DIR" "$LOG_DIR"
+  detect_refresh_failing "$NOW" "$MEMORY_DIR" "$LOG_DIR" "$PROJECT_ROOT"
 
   # --- Build state-specific header ---
   # D-DETACHED-HEAD: where the session is, as one phrase. On a branch it is
@@ -298,7 +309,7 @@ fi
 # Re-inject compaction snapshot when it's more recent than the memory file (compact overwrote
 # WORKING-MEMORY.md with a summary, but the pre-compact snapshot may have richer context).
 BACKUP_FILE="$MEMORY_DIR/backup.json"
-if [ -f "$BACKUP_FILE" ]; then
+if df_file_below "$PROJECT_ROOT" "$BACKUP_FILE"; then
   # Under set -e a failed read would end the hook before it prints the working
   # memory built above, so a backup that does not parse is read as no snapshot,
   # like an absent one, discarding what jq printed before it failed. The read
@@ -313,7 +324,7 @@ if [ -f "$BACKUP_FILE" ]; then
         || echo "0")
     fi
     FILE_MTIME_CK=0
-    if [ -f "$MEMORY_FILE" ]; then
+    if [ -n "$MEMORY_PRESENT" ]; then
       FILE_MTIME_CK=$(get_mtime "$MEMORY_FILE" 2>/dev/null || echo "0")
     fi
     if [ "$BACKUP_EPOCH" -gt "$FILE_MTIME_CK" ]; then

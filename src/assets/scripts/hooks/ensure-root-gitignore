@@ -286,7 +286,7 @@ esac
 
 # On success, stamp the current-format v6 marker and drop legacy markers. The marker
 # is created only where nothing stands (noclobber), never `touch`ed: `touch` follows
-# a symbolic link committed at its path (D-HOOKS-NO-SYMLINK-WRITE, git-marker), and
+# a symbolic link committed at its path (D-HOOKS-NO-SYMLINK, git-marker), and
 # a marker already there is all the fast path needs. A `.devflow` that is itself a
 # link is refused by both callers before they reach this file.
 [ "$_ERG_OK" = 1 ] && {

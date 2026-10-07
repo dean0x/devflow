@@ -66,7 +66,7 @@ fi
 # Auto-create .devflow/ and ensure .gitignore entries (idempotent after first run)
 source "$SCRIPT_DIR/ensure-devflow-init" "$CWD" || exit 0
 
-# D-HOOKS-NO-SYMLINK-WRITE (git-marker): every write below lands in the memory
+# D-HOOKS-NO-SYMLINK (git-marker): every write below lands in the memory
 # folder, as a copy renamed into place or a file created only where nothing stands,
 # so only the folder's own path needs checking: a linked folder would take the
 # backup and the working memory into the folder it names.
@@ -112,9 +112,11 @@ if cd "$CWD" 2>/dev/null && git rev-parse --git-dir >/dev/null 2>&1; then
   dbg "GIT_BRANCH=$GIT_BRANCH HEAD=$GIT_HEAD_SHA"
 fi
 
-# Snapshot current WORKING-MEMORY.md (preserves session context through compaction)
+# Snapshot current WORKING-MEMORY.md (preserves session context through compaction).
+# The snapshot goes into the backup the next session start injects, so a working
+# memory a symbolic link leads to is treated as absent (D-HOOKS-NO-SYMLINK).
 MEMORY_SNAPSHOT=""
-if [ -f "$MEMORY_DIR/WORKING-MEMORY.md" ]; then
+if df_file_below "$PROJECT_ROOT" "$MEMORY_DIR/WORKING-MEMORY.md"; then
   MEMORY_SNAPSHOT=$(head -c 65536 "$MEMORY_DIR/WORKING-MEMORY.md")
   dbg "MEMORY_SNAPSHOT_LENGTH=${#MEMORY_SNAPSHOT}"
 fi

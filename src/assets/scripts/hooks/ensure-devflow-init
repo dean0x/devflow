@@ -34,7 +34,7 @@ df_is_project_root "$_EDI_ROOT" 2>/dev/null || return 1
 
 _DEVFLOW_DIR="$_EDI_ROOT/.devflow"
 
-# D-HOOKS-NO-SYMLINK-WRITE (git-marker): a `.devflow` that is itself a symbolic link
+# D-HOOKS-NO-SYMLINK (git-marker): a `.devflow` that is itself a symbolic link
 # would take every folder below and the carve-out marker into the folder it names,
 # so nothing is written and the caller stops, as at any root it may not write to.
 # The skip is logged once, through log() where the caller defines it. A folder below

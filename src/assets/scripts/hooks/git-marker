@@ -70,23 +70,28 @@ df_is_project_root() {
 # A predicate: call it in an `if` or an `||` list, never as a plain statement
 # under `set -e`.
 #
-# D-HOOKS-NO-SYMLINK-WRITE: a hook writes under a project's `.devflow/` only where
-# nothing on the way down from the root is a symbolic link. A repository can commit
-# a link anywhere in its own `.devflow/`, and the hooks' writes follow one: `>>`
-# and `touch` write through a linked file, and `mkdir -p` creates folders inside a
-# linked folder, so a linked queue or folder would put captured conversation text
-# into whatever file the link names. Each hook checks the paths it writes in place
-# and skips the write, logging it once, when this refuses. A copy renamed into
-# place needs only its folder checked: a rename replaces a link at its target
-# instead of following it, and the copy is created only where nothing stands
-# (noclobber).
+# D-HOOKS-NO-SYMLINK: a hook writes under a project's `.devflow/`, and reads a file
+# there into the session context, a backup, a prompt or an agent directive, only
+# where nothing on the way down from the root is a symbolic link. A repository can
+# commit a link anywhere in its own `.devflow/`, and the hooks' shell commands follow
+# one. `>>` and `touch` write through a linked file and `mkdir -p` creates folders
+# inside a linked folder, so a linked queue or folder would put captured
+# conversation text into whatever file the link names. `head`, `sed`, `read` and
+# `jq` read through one, so a linked working memory, backup or decisions file would
+# put whatever file the link names into the session, the memory refresh's prompt or
+# the backup the next session restores, with no one choosing to read it. Each hook
+# checks the paths it writes or reads in place: a refused write is skipped and a
+# refused read is treated as an absent file (df_file_below below), each logged once.
+# A copy renamed into place needs only its folder checked: a rename replaces a link
+# at its target instead of following it, and the copy is created only where nothing
+# stands (noclobber).
 #
 # Only the part of each path below <root> is checked, never the root or a folder
 # above it: the root is where the session runs or where git keeps the ledger,
 # chosen by the user and not by what the repository holds, and a folder above it
 # may legitimately be a link (on macOS /tmp and /var lead into /private). The check
-# runs just before the write, so a process that swaps a link in between is not
-# stopped; such a process already writes as the user.
+# runs just before the write or the read, so a process that swaps a link in between
+# is not stopped; such a process already runs as the user.
 #
 # Zero forks: builtin `[ -L ]` tests and parameter expansion only.
 df_no_symlink_below() {
@@ -112,4 +117,20 @@ df_no_symlink_below() {
     done
   done
   return 0
+}
+
+# df_file_below <root> <path> — returns 0 when <path> is a regular file that
+# df_no_symlink_below admits, so a hook may read it. Returns 1 when no regular file
+# stands there, and when a symbolic link sits on its path: the file is then treated
+# as absent (D-HOOKS-NO-SYMLINK, above), and that refusal is logged once through the
+# caller's log(), where it defines one. `[ -f ]` follows a link, so a dangling link
+# or a link to a folder reads as absent with nothing logged: nothing would be read
+# through it. A predicate, like df_no_symlink_below; it forks nothing unless it logs.
+df_file_below() {
+  [ -f "$2" ] || return 1
+  if df_no_symlink_below "$1" "$2"; then return 0; fi
+  if declare -F log >/dev/null 2>&1; then
+    log "Skipped: a symbolic link sits on the path to $2; treated as absent"
+  fi
+  return 1
 }

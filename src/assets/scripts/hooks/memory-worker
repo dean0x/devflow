@@ -65,7 +65,7 @@ source "$SCRIPT_DIR/get-mtime" || { echo "memory-worker: failed to source get-mt
 # within the same 120s window.
 TRIGGER_FILE="$MEMORY_DIR/.working-memory-last-trigger"
 
-# D-HOOKS-NO-SYMLINK-WRITE (git-marker): the stamp below is a `touch`, which follows
+# D-HOOKS-NO-SYMLINK (git-marker): the stamp below is a `touch`, which follows
 # a symbolic link, so a linked stamp or memory folder is never stamped, and with no
 # stamp to throttle it no worker is spawned either.
 if ! df_no_symlink_below "$PROJECT_ROOT" "$TRIGGER_FILE"; then

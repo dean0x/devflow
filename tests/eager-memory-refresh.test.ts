@@ -2830,7 +2830,7 @@ describe('S26: pre-compact backup.json is replaced by a rename, never rewritten 
 });
 
 // =============================================================================
-// S27 — D-HOOKS-NO-SYMLINK-WRITE: no memory hook writes through a symbolic link
+// S27 — D-HOOKS-NO-SYMLINK: no memory hook writes through a symbolic link
 //
 // A repository can commit a symbolic link anywhere in its own .devflow/. The
 // worker's batch merge (`>>`), its `touch`es and its trim copy, pre-compact's
@@ -2839,7 +2839,7 @@ describe('S26: pre-compact backup.json is replaced by a rename, never rewritten 
 // file written there in place, is a link. A skipped write is logged once and the
 // hook exits 0.
 // =============================================================================
-describe('S27: the memory hooks never write through a symbolic link under .devflow (D-HOOKS-NO-SYMLINK-WRITE)', () => {
+describe('S27: the memory hooks never write through a symbolic link under .devflow (D-HOOKS-NO-SYMLINK)', () => {
   const UNTOUCHED = 'a file outside the project, which no hook may write\n';
   let tmp: string;
   let projectDir: string;
@@ -2998,5 +2998,153 @@ describe('S27: the memory hooks never write through a symbolic link under .devfl
     expect(fs.existsSync(path.join(memoryDir, '.pending-turns.jsonl')), 'the queue is not made a link').toBe(false);
     expect(fs.readFileSync(outsideFile, 'utf-8')).toBe(UNTOUCHED);
     expect(refusals('session-start-memory'), 'the refusal is logged once').toHaveLength(1);
+  });
+});
+
+// =============================================================================
+// S28 — D-HOOKS-NO-SYMLINK: no memory hook reads through a symbolic link
+//
+// session-start-memory injects the working memory, the pre-compact backup and a
+// count of the turns waiting; pre-compact-memory copies the working memory into
+// that backup; the worker sends it to `claude -p`. A repository can commit any of
+// these, or the memory folder, as a link to a file elsewhere on the machine, so a
+// file a link leads to is treated as absent: nothing of it reaches the session,
+// the backup or the prompt, each refusal is logged once, and the hook exits 0.
+// SECRET is a made-up marker standing in for the linked file's content.
+// =============================================================================
+describe('S28: the memory hooks never read through a symbolic link under .devflow (D-HOOKS-NO-SYMLINK)', () => {
+  const SECRET = 'made-up-marker-4c8d1a';
+  const OUTSIDE = `## Now\n- ${SECRET}\n`;
+  // Far in the future, so a backup carrying it is offered whatever the time zone.
+  const BACKUP_TIMESTAMP = '2099-01-01T00:00:00Z';
+  let tmp: string;
+  let projectDir: string;
+  let homeDir: string;
+  let shimDir: string;
+  let memoryDir: string;
+  let memoryFile: string;
+  let outsideFile: string;
+
+  beforeEach(() => {
+    tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'emr-s28-'));
+    projectDir = path.join(tmp, 'repo');
+    homeDir = path.join(tmp, 'home');
+    shimDir = path.join(tmp, 'shim');
+    memoryDir = path.join(projectDir, '.devflow', 'memory');
+    memoryFile = path.join(memoryDir, 'WORKING-MEMORY.md');
+    outsideFile = path.join(tmp, 'outside.md');
+    for (const dir of [projectDir, homeDir, shimDir]) fs.mkdirSync(dir);
+    initGitRepo(projectDir);
+    fs.mkdirSync(memoryDir, { recursive: true });
+    fs.writeFileSync(outsideFile, OUTSIDE);
+  });
+
+  afterEach(() => {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  });
+
+  const isLink = (file: string): boolean => fs.lstatSync(file).isSymbolicLink();
+
+  /** The lines of `hookName`'s own log that report a refused file. */
+  const refusals = (hookName: string): string[] => {
+    const slug = projectDir.replace(/^\//, '').replace(/\//g, '-');
+    const log = path.join(homeDir, '.devflow', 'logs', slug, `.${hookName}.log`);
+    return fs.existsSync(log) ? fs.readFileSync(log, 'utf-8').split('\n').filter((l) => l.includes('symbolic link')) : [];
+  };
+
+  const runMemoryHook = (hook: string) =>
+    spawnWithStdin('bash', [hook], { input: JSON.stringify({ cwd: projectDir }), env: { ...process.env, HOME: homeDir } });
+
+  const writeRealMemory = (): void => {
+    fs.writeFileSync(memoryFile, '## Now\n- the real working memory\n');
+  };
+
+  it('session-start-memory: a linked WORKING-MEMORY.md is not injected', () => {
+    fs.symlinkSync(outsideFile, memoryFile);
+
+    const run = runMemoryHook(SESSION_START_MEMORY_HOOK);
+
+    expect(run.kind, run.stderr).toBe('clean');
+    expect(run.stdout).not.toContain(SECRET);
+    expect(fs.readFileSync(outsideFile, 'utf-8')).toBe(OUTSIDE);
+    expect(refusals('session-start-memory'), 'the refusal is logged once').toHaveLength(1);
+  });
+
+  it('session-start-memory: a linked backup.json is not injected', () => {
+    writeRealMemory();
+    const outsideBackup = path.join(tmp, 'outside-backup.json');
+    fs.writeFileSync(outsideBackup, JSON.stringify({ timestamp: BACKUP_TIMESTAMP, memory_snapshot: SECRET }));
+    fs.symlinkSync(outsideBackup, path.join(memoryDir, 'backup.json'));
+
+    const run = runMemoryHook(SESSION_START_MEMORY_HOOK);
+
+    expect(run.kind, run.stderr).toBe('clean');
+    expect(run.stdout, 'non-vacuity: the real working memory is injected').toContain('the real working memory');
+    expect(run.stdout).not.toContain('PRE-COMPACT SNAPSHOT');
+    expect(run.stdout).not.toContain(SECRET);
+    expect(refusals('session-start-memory'), 'the refusal is logged once').toHaveLength(1);
+  });
+
+  for (const name of ['.pending-turns.jsonl', '.pending-turns.processing']) {
+    it(`session-start-memory: a linked ${name} is not counted as turns waiting`, () => {
+      writeRealMemory();
+      const outsideLines = path.join(tmp, 'outside-lines.txt');
+      fs.writeFileSync(outsideLines, 'line\n'.repeat(7));
+      fs.symlinkSync(outsideLines, path.join(memoryDir, name));
+
+      const run = runMemoryHook(SESSION_START_MEMORY_HOOK);
+
+      expect(run.kind, run.stderr).toBe('clean');
+      expect(run.stdout, 'non-vacuity: the real working memory is injected').toContain('the real working memory');
+      expect(run.stdout).not.toContain('MEMORY REFRESH MAY BE FAILING');
+      expect(refusals('session-start-memory'), 'the refusal is logged once').toHaveLength(1);
+    });
+  }
+
+  it('session-start-memory: a linked memory folder: neither the working memory nor the backup in it is injected', () => {
+    const outsideDir = path.join(tmp, 'outside-memory');
+    fs.mkdirSync(outsideDir);
+    fs.writeFileSync(path.join(outsideDir, 'WORKING-MEMORY.md'), OUTSIDE);
+    fs.writeFileSync(path.join(outsideDir, 'backup.json'), JSON.stringify({ timestamp: BACKUP_TIMESTAMP, memory_snapshot: SECRET }));
+    fs.rmSync(memoryDir, { recursive: true });
+    fs.symlinkSync(outsideDir, memoryDir);
+
+    const run = runMemoryHook(SESSION_START_MEMORY_HOOK);
+
+    expect(run.kind, run.stderr).toBe('clean');
+    expect(run.stdout).not.toContain(SECRET);
+    expect(refusals('session-start-memory'), 'each file read from the folder is refused once').toHaveLength(2);
+  });
+
+  it('pre-compact-memory: a linked WORKING-MEMORY.md is not copied into the backup', () => {
+    fs.symlinkSync(outsideFile, memoryFile);
+
+    const run = runMemoryHook(PRE_COMPACT_HOOK);
+
+    expect(run.kind, run.stderr).toBe('clean');
+    const backup = fs.readFileSync(path.join(memoryDir, 'backup.json'), 'utf-8');
+    expect(JSON.parse(backup).memory_snapshot, 'non-vacuity: the backup is written, with no snapshot').toBe('');
+    expect(backup).not.toContain(SECRET);
+    expect(isLink(memoryFile), 'the link is left as it was').toBe(true);
+    expect(fs.readFileSync(outsideFile, 'utf-8')).toBe(OUTSIDE);
+    expect(refusals('pre-compact-memory'), 'the refusal is logged once').toHaveLength(1);
+  });
+
+  it('background-memory-update: a linked WORKING-MEMORY.md never reaches the claude -p prompt, and the refresh still lands', () => {
+    seedQueue(projectDir);
+    fs.symlinkSync(outsideFile, memoryFile);
+    const prompt = createPromptCapturingShim(shimDir, `${memoryFile}.new`);
+
+    expect(runWorker(projectDir, homeDir, shimDir).exitCode).toBe(0);
+
+    expect(fs.readFileSync(prompt, 'utf-8'), 'non-vacuity: the LLM run received the turns').toContain('implement the feature');
+    expect(fs.readFileSync(prompt, 'utf-8')).not.toContain(SECRET);
+    expect(fs.readFileSync(outsideFile, 'utf-8'), 'the link target is byte-identical').toBe(OUTSIDE);
+    // The swap's re-check treats the link as absent too, so the refresh lands: the
+    // rename replaces the link with the new working memory instead of writing through it.
+    expect(isLink(memoryFile), 'the rename replaced the link').toBe(false);
+    expect(fs.readFileSync(memoryFile, 'utf-8')).toContain('<!-- memory-head: testsha branch: main -->');
+    expect(fs.existsSync(path.join(memoryDir, '.last-refresh-ok')), 'the refresh is recorded as landed').toBe(true);
+    expect(refusals('background-memory-update'), 'the refusal is logged once').toHaveLength(1);
   });
 });

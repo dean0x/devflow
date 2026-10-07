@@ -1492,7 +1492,7 @@ describe('git-marker helper: df_has_git_marker', () => {
 });
 
 // =============================================================================
-// git-marker helper: df_no_symlink_below (D-HOOKS-NO-SYMLINK-WRITE)
+// git-marker helper: df_no_symlink_below (D-HOOKS-NO-SYMLINK)
 // =============================================================================
 //
 // Every hook write under a project's .devflow/ asks this predicate first. It
@@ -1500,7 +1500,7 @@ describe('git-marker helper: df_has_git_marker', () => {
 // symbolic link, and it never looks at the root or at anything above it.
 // =============================================================================
 
-describe('git-marker helper: df_no_symlink_below (D-HOOKS-NO-SYMLINK-WRITE)', () => {
+describe('git-marker helper: df_no_symlink_below (D-HOOKS-NO-SYMLINK)', () => {
   const GIT_MARKER_SRC = path.join(HOOKS_DIR, 'git-marker');
 
   let tmp: string;
@@ -1585,6 +1585,95 @@ describe('git-marker helper: df_no_symlink_below (D-HOOKS-NO-SYMLINK-WRITE)', ()
   it('walks at most 64 parts below the root, and refuses a deeper path rather than walk it', () => {
     expect(status(root, `${root}/${'d/'.repeat(63)}q`), '64 parts').toBe(0);
     expect(status(root, `${root}/${'d/'.repeat(64)}q`), '65 parts').toBe(1);
+  });
+});
+
+// =============================================================================
+// git-marker helper: df_file_below (D-HOOKS-NO-SYMLINK)
+// =============================================================================
+//
+// Every hook read of a file under a project's .devflow/ asks this predicate
+// first. It admits a regular file that no symbolic link leads to. A file a link
+// leads to is treated as absent, and that refusal is logged once through the
+// caller's log().
+// =============================================================================
+
+describe('git-marker helper: df_file_below (D-HOOKS-NO-SYMLINK)', () => {
+  const GIT_MARKER_SRC = path.join(HOOKS_DIR, 'git-marker');
+
+  let tmp: string;
+  let root: string;
+  let outsideDir: string;
+  let logFile: string;
+
+  beforeEach(() => {
+    tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-filebelow-'));
+    root = path.join(tmp, 'repo');
+    outsideDir = path.join(tmp, 'outside');
+    logFile = path.join(tmp, 'hook.log');
+    fs.mkdirSync(path.join(root, '.devflow', 'memory'), { recursive: true });
+    fs.mkdirSync(outsideDir);
+  });
+
+  afterEach(() => {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  });
+
+  const memoryFile = (): string => path.join(root, '.devflow', 'memory', 'WORKING-MEMORY.md');
+
+  /** The predicate's status and stderr for `file`, with a log() that appends to logFile, or with none. */
+  const run = (file: string, withLog = true): { status: number | null; stderr: string } => {
+    const logDefinition = withLog ? 'log() { printf "%s\\n" "$1" >> "$LOG_FILE"; }; ' : '';
+    const res = spawnSync('bash', ['-c', `${logDefinition}source "$1"; df_file_below "$2" "$3"`, '_', GIT_MARKER_SRC, root, file], {
+      encoding: 'utf-8',
+      env: { ...process.env, LOG_FILE: logFile },
+    });
+    return { status: res.status, stderr: res.stderr };
+  };
+
+  const logged = (): string[] =>
+    fs.existsSync(logFile) ? fs.readFileSync(logFile, 'utf-8').split('\n').filter(Boolean) : [];
+
+  it('admits a regular file that no link leads to, and logs nothing', () => {
+    fs.writeFileSync(memoryFile(), 'memory');
+    expect(run(memoryFile())).toEqual({ status: 0, stderr: '' });
+    expect(logged()).toEqual([]);
+  });
+
+  it('answers 1 and logs nothing where no regular file stands: nothing there, a folder, a dangling link', () => {
+    expect(run(memoryFile()).status, 'nothing there').toBe(1);
+    fs.mkdirSync(memoryFile());
+    expect(run(memoryFile()).status, 'a folder').toBe(1);
+    fs.rmdirSync(memoryFile());
+    fs.symlinkSync(path.join(outsideDir, 'missing'), memoryFile());
+    expect(run(memoryFile()).status, 'a dangling link').toBe(1);
+    expect(logged()).toEqual([]);
+  });
+
+  it('treats a file that is a link as absent, and logs that once', () => {
+    const target = path.join(outsideDir, 'target');
+    fs.writeFileSync(target, 'a file outside the project');
+    fs.symlinkSync(target, memoryFile());
+
+    expect(run(memoryFile())).toEqual({ status: 1, stderr: '' });
+    expect(logged()).toEqual([expect.stringContaining(`a symbolic link sits on the path to ${memoryFile()}`)]);
+  });
+
+  it('treats a file in a linked folder as absent, and logs that once', () => {
+    fs.writeFileSync(path.join(outsideDir, 'WORKING-MEMORY.md'), 'a file outside the project');
+    fs.rmSync(path.join(root, '.devflow', 'memory'), { recursive: true });
+    fs.symlinkSync(outsideDir, path.join(root, '.devflow', 'memory'));
+
+    expect(run(memoryFile()).status).toBe(1);
+    expect(logged()).toHaveLength(1);
+  });
+
+  it('refuses silently when the caller defines no log()', () => {
+    const target = path.join(outsideDir, 'target');
+    fs.writeFileSync(target, 'a file outside the project');
+    fs.symlinkSync(target, memoryFile());
+
+    expect(run(memoryFile(), false)).toEqual({ status: 1, stderr: '' });
   });
 });
 
@@ -1893,7 +1982,7 @@ describe('ensure-devflow-init behavioral', () => {
     expect(fs.existsSync(path.join(tmpDir, '.devflow'))).toBe(false);
   });
 
-  it('returns non-zero and creates nothing where the link points when .devflow is a symbolic link (D-HOOKS-NO-SYMLINK-WRITE)', () => {
+  it('returns non-zero and creates nothing where the link points when .devflow is a symbolic link (D-HOOKS-NO-SYMLINK)', () => {
     // A repository can commit .devflow itself as a link; `mkdir -p` would then create
     // memory/, learning/, features/ and docs/ inside the folder the link names, and
     // the carve-out marker would land there too. The refusal is logged once.
@@ -2060,7 +2149,7 @@ describe('ensure-root-gitignore behavioral', () => {
     expect({ status: fast.status, out: fast.stdout.trim() }, 'the converged fast path').toEqual({ status: 0, out: 'reached' });
   });
 
-  it('creates its marker only where nothing stands: a link at the marker path is never written through (D-HOOKS-NO-SYMLINK-WRITE)', () => {
+  it('creates its marker only where nothing stands: a link at the marker path is never written through (D-HOOKS-NO-SYMLINK)', () => {
     // `touch` follows a link, so a marker committed as a link would create or
     // stamp whatever file it names.
     fs.mkdirSync(path.join(tmpDir, '.devflow'));
@@ -3230,7 +3319,7 @@ describe('session-start-context root .gitignore (memory-independent)', () => {
     expect(fs.existsSync(path.join(tmpDir, '.devflow', '.root-gitignore-configured-v6'))).toBe(true);
   });
 
-  it('a linked .devflow gets no carve-out marker and no learning folder where the link points (D-HOOKS-NO-SYMLINK-WRITE)', () => {
+  it('a linked .devflow gets no carve-out marker and no learning folder where the link points (D-HOOKS-NO-SYMLINK)', () => {
     const outsideDir = path.join(homeDir, 'outside');
     fs.mkdirSync(outsideDir);
     fs.symlinkSync(outsideDir, path.join(tmpDir, '.devflow'));
@@ -3440,6 +3529,165 @@ describe('session-start-context: learning maintenance directive (Section 2)', ()
     expect(ctx).toContain('model="opus"');
     expect(ctx).not.toContain('injected');
     expect(ctx).not.toContain('evil');
+  });
+});
+
+// =============================================================================
+// session-start-context never reads through a symbolic link under .devflow
+// (D-HOOKS-NO-SYMLINK)
+// =============================================================================
+//
+// Sections 1 and 2 read the learning folder's files into the session context
+// (the TL;DR lines and the learning model), name the index the model is told to
+// read and pass on to the agents it delegates to, and send the Learning agent to
+// the queue when it holds turns. A repository can commit any of these, or the
+// folder itself, as a symbolic link to a file elsewhere on the machine, so a file
+// a link leads to is treated as absent and each refusal is logged once. SECRET is
+// a made-up marker standing in for that file's content.
+
+describe('session-start-context never reads through a symbolic link under .devflow (D-HOOKS-NO-SYMLINK)', () => {
+  const CONTEXT_HOOK = path.join(HOOKS_DIR, 'session-start-context');
+  const SECRET = 'made-up-marker-6b2f0e';
+
+  let tmpDir: string;
+  let homeDir: string;
+  let learningDir: string;
+  let outsideDir: string;
+
+  beforeEach(() => {
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-ctx-nolink-'));
+    // Learning is project work, active only inside a git project (D-HOOKS-GIT-ONLY).
+    fs.mkdirSync(path.join(tmpDir, '.git'));
+    homeDir = fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-ctx-nolink-home-'));
+    fs.mkdirSync(path.join(homeDir, '.devflow', 'logs'), { recursive: true });
+    learningDir = path.join(tmpDir, '.devflow', 'learning');
+    fs.mkdirSync(learningDir, { recursive: true });
+    outsideDir = path.join(homeDir, 'outside');
+    fs.mkdirSync(outsideDir);
+  });
+
+  afterEach(() => {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+    fs.rmSync(homeDir, { recursive: true, force: true });
+  });
+
+  /** The context the hook injects, or '' when it injects none. */
+  const contextOf = (stdout: string): string =>
+    stdout.trim() === '' ? '' : JSON.parse(stdout).hookSpecificOutput.additionalContext;
+
+  /** The lines of the hook's own log that report a refused file. */
+  const refusals = (): string[] => {
+    const slug = tmpDir.replace(/^\//, '').replace(/\//g, '-');
+    const log = path.join(homeDir, '.devflow', 'logs', slug, '.session-start-context.log');
+    return fs.existsSync(log) ? fs.readFileSync(log, 'utf-8').split('\n').filter((l) => l.includes('symbolic link')) : [];
+  };
+
+  /** Write `content` to a file outside the project and link `name` in the learning folder to it. */
+  const linkOutside = (name: string, content: string): string => {
+    const target = path.join(outsideDir, name);
+    fs.writeFileSync(target, content);
+    fs.symlinkSync(target, path.join(learningDir, name));
+    return target;
+  };
+
+  const run = () => runHook(CONTEXT_HOOK, { cwd: tmpDir, source: 'startup' }, homeDir);
+
+  for (const [linked, kept, keptLine] of [
+    ['decisions.md', 'pitfalls.md', '2 pitfalls'],
+    ['pitfalls.md', 'decisions.md', '3 decisions'],
+  ] as const) {
+    it(`a linked ${linked} puts no TL;DR line, and nothing of the file it names, into the context`, () => {
+      linkOutside(linked, `<!-- TL;DR: ${SECRET} -->\n# ${SECRET}\n`);
+      fs.writeFileSync(path.join(learningDir, kept), `<!-- TL;DR: ${keptLine} -->\n# Rendered\n`);
+
+      const { stdout, exitCode } = run();
+
+      expect(exitCode).toBe(0);
+      expect(contextOf(stdout), 'non-vacuity: the section ran and kept the other file').toContain(keptLine);
+      expect(stdout).not.toContain(SECRET);
+      expect(refusals(), 'the refusal is logged once').toHaveLength(1);
+    });
+  }
+
+  it('a linked index.md gets no Index line, so the model is never pointed at the file it names', () => {
+    linkOutside('index.md', `Decisions (1):\n  ${SECRET}\n`);
+    fs.writeFileSync(path.join(learningDir, 'decisions.md'), '<!-- TL;DR: 1 decisions -->\n# Rendered\n');
+
+    const { stdout, exitCode } = run();
+
+    expect(exitCode).toBe(0);
+    const ctx = contextOf(stdout);
+    expect(ctx, 'non-vacuity: the section ran').toContain('--- PROJECT DECISIONS (TL;DR) ---\n1 decisions');
+    expect(ctx).not.toContain('Index:');
+    expect(stdout).not.toContain(SECRET);
+    expect(refusals(), 'the refusal is logged once').toHaveLength(1);
+  });
+
+  it('a linked learning.json does not choose the Learning agent\'s model', () => {
+    fs.writeFileSync(path.join(learningDir, '.pending-turns.jsonl'), '{"role":"user","content":"we chose X over Y","ts":1}\n');
+    linkOutside('learning.json', JSON.stringify({ model: 'haiku' }));
+
+    const { stdout, exitCode } = run();
+
+    expect(exitCode).toBe(0);
+    const ctx = contextOf(stdout);
+    expect(ctx, 'non-vacuity: the directive is emitted').toContain('--- LEARNING MAINTENANCE ---');
+    expect(ctx).toContain('model="opus"');
+    expect(ctx).not.toContain('model="haiku"');
+    expect(refusals(), 'the refusal is logged once').toHaveLength(1);
+  });
+
+  it('a linked queue sends no Learning agent to it', () => {
+    linkOutside('.pending-turns.jsonl', `{"role":"user","content":"${SECRET}","ts":1}\n`);
+
+    const linked = run();
+    expect(linked.exitCode).toBe(0);
+    expect(contextOf(linked.stdout)).not.toContain('LEARNING MAINTENANCE');
+    expect(refusals(), 'the refusal is logged once').toHaveLength(1);
+
+    // Non-vacuity: the same queue, as a real file, does send the agent.
+    fs.unlinkSync(path.join(learningDir, '.pending-turns.jsonl'));
+    fs.writeFileSync(path.join(learningDir, '.pending-turns.jsonl'), '{"role":"user","content":"we chose X over Y","ts":1}\n');
+    expect(contextOf(run().stdout)).toContain('--- LEARNING MAINTENANCE ---');
+  });
+
+  it('a linked stale batch sends no Learning agent to it', () => {
+    const batch = path.join(learningDir, '.pending-turns.processing');
+    linkOutside('.pending-turns.processing', `{"role":"user","content":"${SECRET}","ts":1}\n`);
+    // The age check reads the link's own mtime (`stat` without -L), so the link is
+    // what is made stale.
+    const stale = new Date(Date.now() - 1000 * 1000);
+    fs.lutimesSync(batch, stale, stale);
+
+    const linked = run();
+    expect(linked.exitCode).toBe(0);
+    expect(contextOf(linked.stdout)).not.toContain('LEARNING MAINTENANCE');
+    expect(refusals(), 'the refusal is logged once').toHaveLength(1);
+
+    // Non-vacuity: the same stale batch, as a real file, does send the agent.
+    fs.unlinkSync(batch);
+    fs.writeFileSync(batch, '{"role":"user","content":"orphaned","ts":1}\n');
+    fs.utimesSync(batch, stale, stale);
+    expect(contextOf(run().stdout)).toContain('--- LEARNING MAINTENANCE ---');
+  });
+
+  it('a linked learning folder: no TL;DR, no Index line, no directive, and each file read from it refused once', () => {
+    fs.rmSync(learningDir, { recursive: true });
+    fs.writeFileSync(path.join(outsideDir, 'decisions.md'), `<!-- TL;DR: ${SECRET} -->\n`);
+    fs.writeFileSync(path.join(outsideDir, 'index.md'), `Decisions (1):\n  ${SECRET}\n`);
+    fs.writeFileSync(path.join(outsideDir, '.pending-turns.jsonl'), `{"role":"user","content":"${SECRET}","ts":1}\n`);
+    fs.symlinkSync(outsideDir, learningDir);
+
+    const { stdout, exitCode } = run();
+
+    expect(exitCode).toBe(0);
+    expect(contextOf(stdout)).toBe('');
+    expect(stdout).not.toContain(SECRET);
+    const refused = refusals();
+    for (const name of ['decisions.md', 'index.md', '.pending-turns.jsonl']) {
+      expect(refused.filter((l) => l.includes(path.join(learningDir, name))), `${name} is refused once`).toHaveLength(1);
+    }
+    expect(refused).toHaveLength(3);
   });
 });
 

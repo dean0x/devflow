@@ -376,11 +376,11 @@ describe('queue_append_both', () => {
 });
 
 // ---------------------------------------------------------------------------
-// D-HOOKS-NO-SYMLINK-WRITE (git-marker): a queue under a project's .devflow/ is
+// D-HOOKS-NO-SYMLINK (git-marker): a queue under a project's .devflow/ is
 // appended only when neither it nor a folder between its root and it is a link.
 // ---------------------------------------------------------------------------
 
-describe('queue_append_row never writes through a symbolic link (D-HOOKS-NO-SYMLINK-WRITE)', () => {
+describe('queue_append_row never writes through a symbolic link (D-HOOKS-NO-SYMLINK)', () => {
   const UNTOUCHED = 'a file outside the project, which no append may write\n';
   let tmpDir: string;
   let root: string;

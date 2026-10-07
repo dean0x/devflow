@@ -17,7 +17,7 @@
 #   <root>: the project root for the memory queue, the ledger root for the learning
 #   queue. When the queue, or a folder between <root> and it, is a symbolic link,
 #   nothing is written: the skip is logged once and the call returns 0, as a
-#   skipped capture does (D-HOOKS-NO-SYMLINK-WRITE, git-marker). Otherwise it
+#   skipped capture does (D-HOOKS-NO-SYMLINK, git-marker). Otherwise it
 #   creates the queue's folder if absent, and the file with mode 0600 (umask 077).
 #   After appending, truncates from 200 to the newest 100 lines under a lock
 #   (learning_lock_acquire on "<queue_file>.lock", 2s timeout), keeping mode 0600.
@@ -87,7 +87,7 @@ source "${BASH_SOURCE[0]%/*}/git-marker" 2>/dev/null || true
 queue_append_row() {
   local _qar_root="$1" _qar_file="$2" _qar_role="$3" _qar_content="$4" _qar_ts="$5"
 
-  # D-HOOKS-NO-SYMLINK-WRITE (git-marker): a skipped append is a skipped capture.
+  # D-HOOKS-NO-SYMLINK (git-marker): a skipped append is a skipped capture.
   if ! df_no_symlink_below "$_qar_root" "$_qar_file"; then
     log "Queue skipped: a symbolic link sits on the path to $_qar_file; nothing written"
     return 0
