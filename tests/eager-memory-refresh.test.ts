@@ -23,6 +23,8 @@ import { pollForTerminalLine } from './helpers/poll-for-terminal-line.js';
 import {
   FIFO_RUN_BOUND_MS,
   FIFO_TEST_TIMEOUT_MS,
+  HOOK_RUN_ALLOWANCE_MS,
+  NODE_EXEC_STALL_MS,
   makeFifo,
   releaseFifo,
   runHook,
@@ -2846,7 +2848,7 @@ describe('S26: pre-compact backup.json is replaced by a rename, never rewritten 
 // memory folder, a file written there in place, or the target a file is renamed
 // onto, is a link. A skipped write is logged once and the hook exits 0.
 // =============================================================================
-describe('S27: the memory hooks never write through a symbolic link under .devflow (D-HOOKS-NO-SYMLINK)', () => {
+describe('S27: the memory hooks never write through a symbolic link under .devflow (D-HOOKS-NO-SYMLINK)', { timeout: HOOK_RUN_ALLOWANCE_MS + NODE_EXEC_STALL_MS }, () => {
   const UNTOUCHED = 'a file outside the project, which no hook may write\n';
   let tmp: string;
   let projectDir: string;
@@ -3278,7 +3280,7 @@ describe('S27: the memory hooks never write through a symbolic link under .devfl
 // the backup or the prompt, each refusal is logged once, and the hook exits 0.
 // SECRET is a made-up marker standing in for the linked file's content.
 // =============================================================================
-describe('S28: the memory hooks never read through a symbolic link under .devflow (D-HOOKS-NO-SYMLINK)', () => {
+describe('S28: the memory hooks never read through a symbolic link under .devflow (D-HOOKS-NO-SYMLINK)', { timeout: HOOK_RUN_ALLOWANCE_MS + NODE_EXEC_STALL_MS }, () => {
   const SECRET = 'made-up-marker-4c8d1a';
   const OUTSIDE = `## Now\n- ${SECRET}\n`;
   // Far in the future, so a backup carrying it is offered whatever the time zone.

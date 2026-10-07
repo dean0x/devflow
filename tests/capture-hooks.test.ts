@@ -1095,7 +1095,7 @@ describe('memory-worker: a repository narrowing stops the spawn (D-FEATURES-NARR
 // into whatever file the link names. Each such write is skipped instead: the
 // link's target is left byte-identical, the refusal is logged once, and the hook
 // exits 0 as it does for any skipped capture.
-describe('capture hooks never write through a symbolic link under .devflow (D-HOOKS-NO-SYMLINK)', () => {
+describe('capture hooks never write through a symbolic link under .devflow (D-HOOKS-NO-SYMLINK)', { timeout: HOOK_RUN_ALLOWANCE_MS + NODE_EXEC_STALL_MS }, () => {
   const UNTOUCHED = 'a file outside the project, which no hook may write\n';
   let tmp: string;
   let projectDir: string;
