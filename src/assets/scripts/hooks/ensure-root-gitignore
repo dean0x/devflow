@@ -208,18 +208,27 @@ else
     # Upgrade our legacy wholesale entry: strip the bare `.devflow/` line and our old
     # comment first, then fall through to the shared append below. Portable (grep
     # filter + mv; no sed -i, which differs on BSD/GNU).
-    # The pipeline's own status is deliberately ignored: grep -v exits 1 when it
+    # The filter's own status is deliberately ignored: grep -v exits 1 when it
     # emits no lines, which is the correct outcome for a .gitignore whose only
-    # content was the legacy entry. The redirect creates _ERG_TMP either way.
+    # content was the legacy entry, so `true` ends the group and the subshell fails
+    # only when the copy cannot be created. The copy is created only where nothing
+    # stands (noclobber), so an entry already at its name, a symbolic link included,
+    # is removed and never written through (D-HOOKS-NO-SYMLINK, git-marker); the
+    # upgrade then waits for a later run, and the skip is logged once.
     _ERG_TMP="$_ERG_GITIGNORE.devflow-tmp.$$"
-    grep -vE "$_ERG_RE_LEGACY" "$_ERG_GITIGNORE" 2>/dev/null \
-      | grep -vF '# Devflow runtime data (local by default; remove to share via git)' \
-      > "$_ERG_TMP" 2>/dev/null
-    if [ -f "$_ERG_TMP" ] && mv "$_ERG_TMP" "$_ERG_GITIGNORE"; then
+    if (set -o noclobber; {
+          grep -vE "$_ERG_RE_LEGACY" "$_ERG_GITIGNORE" \
+            | grep -vF '# Devflow runtime data (local by default; remove to share via git)'
+          true
+        } > "$_ERG_TMP") 2>/dev/null \
+      && [ -f "$_ERG_TMP" ] && mv "$_ERG_TMP" "$_ERG_GITIGNORE"; then
       :
     else
-      rm -f "$_ERG_TMP" 2>/dev/null
+      rm -f "$_ERG_TMP" 2>/dev/null || true
       _ERG_MODE=fail
+      if declare -F log >/dev/null 2>&1; then
+        log "Legacy .devflow/ entry not upgraded: its copy could not be written ($_ERG_TMP); a later run retries"
+      fi
     fi
   fi
 fi

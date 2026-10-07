@@ -2249,6 +2249,40 @@ describe('ensure-root-gitignore behavioral', () => {
     expect(fs.existsSync(path.join(tmpDir, '.devflow', '.root-gitignore-configured-v6'))).toBe(true);
   });
 
+  it('upgrades a legacy install only through a copy it creates: an entry planted at the copy\'s name is never written through (D-HOOKS-NO-SYMLINK)', () => {
+    // The upgrade filters .gitignore into a copy named after the hook's PID and
+    // renames it into place. A repository can commit an entry at that name, a link
+    // to a file elsewhere among them; the copy is created only where nothing stands,
+    // so that entry is removed instead and the upgrade waits for a later run.
+    const UNTOUCHED = 'a file outside the project, which no hook may write\n';
+    const legacy = 'node_modules/\n\n# Devflow runtime data (local by default; remove to share via git)\n.devflow/\n';
+    const gitignore = path.join(tmpDir, '.gitignore');
+    const outside = path.join(tmpDir, 'outside.txt');
+    const logFile = path.join(tmpDir, 'hook.log');
+    fs.writeFileSync(gitignore, legacy);
+    fs.writeFileSync(outside, UNTOUCHED);
+
+    // The copy's name ends in the PID of the shell that sources the helper, so that
+    // shell plants the link at exactly that name, checks it is there, and sources it.
+    execSync(
+      `bash -c 'LOG_FILE="$3"; log() { printf "%s\\n" "$1" >> "$LOG_FILE"; }; ln -s "$1" "$0/.gitignore.devflow-tmp.$$" && [ -L "$0/.gitignore.devflow-tmp.$$" ] && source "$2" "$0"' ` +
+        `"${tmpDir}" "${outside}" "${ENSURE_ROOT}" "${logFile}"`,
+      { stdio: 'pipe' },
+    );
+
+    expect(fs.readFileSync(outside, 'utf-8'), 'nothing is written through the planted link').toBe(UNTOUCHED);
+    expect(fs.lstatSync(gitignore).isSymbolicLink(), 'the link is never renamed over .gitignore').toBe(false);
+    expect(fs.readFileSync(gitignore, 'utf-8'), 'the upgrade waits for a later run').toBe(legacy);
+    expect(fs.readdirSync(tmpDir).filter((name) => name.includes('.devflow-tmp.')), 'the planted link is removed').toEqual([]);
+    expect(fs.existsSync(path.join(tmpDir, '.devflow', '.root-gitignore-configured-v6')), 'no marker for an upgrade that did not run').toBe(false);
+    expect(fs.readFileSync(logFile, 'utf-8').trim().split('\n'), 'the skipped upgrade is logged once').toHaveLength(1);
+
+    // Non-vacuity: with nothing planted, the next run upgrades the file.
+    execSync(`bash -c 'source "${ENSURE_ROOT}" "${tmpDir}"'`, { stdio: 'pipe' });
+    expect(ignoreLines(gitignore)).toContain('!.devflow/project.json');
+    expect(ignoreLines(gitignore)).not.toContain('.devflow/');
+  });
+
   // The v2 carve-out block exactly as shipped before the conventions.md line was added.
   const V2_BLOCK = [
     '# Devflow runtime data — local by default (memory, learning, docs, locks).',
