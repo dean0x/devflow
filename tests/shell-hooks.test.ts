@@ -13,7 +13,16 @@ import {
   computeDevflowGitignore,
   ensureDevflowGitignore,
 } from '../src/targets/claude-code/post-install.js';
-import { HOOKS_DIR, execHook, runHook } from './shell-hooks-helpers.js';
+import {
+  FIFO_RUN_BOUND_MS,
+  FIFO_TEST_TIMEOUT_MS,
+  HOOKS_DIR,
+  execHook,
+  makeFifo,
+  releaseFifo,
+  runHook,
+  spawnWithStdin,
+} from './shell-hooks-helpers.js';
 
 function localDateString(): string {
   const d = new Date();
@@ -2193,9 +2202,36 @@ describe('ensure-root-gitignore behavioral', () => {
     expect(ignoreLines(path.join(tmpDir, '.gitignore')), 'non-vacuity: the run took the stamping path').toContain('!.devflow/project.json');
   });
 
+  it('never opens a FIFO that a link at the marker path leads to: the caller goes on, and the skip is logged once (D-HOOKS-NO-SYMLINK)', () => {
+    // noclobber alone opens such a link: its target is no regular file, so the
+    // create is not made exclusive, and an open for writing waits for a reader that
+    // never comes, at every session start and every prompt. The run is bounded, so
+    // that wait fails the test rather than hanging the suite.
+    fs.mkdirSync(path.join(tmpDir, '.devflow'));
+    const marker = path.join(tmpDir, '.devflow', '.root-gitignore-configured-v6');
+    const fifo = path.join(tmpDir, 'fifo');
+    const logFile = path.join(tmpDir, 'hook.log');
+    makeFifo(fifo);
+    fs.symlinkSync(fifo, marker);
+
+    try {
+      const run = spawnWithStdin(
+        'bash',
+        ['-c', 'set -e; log() { printf "%s\\n" "$1" >> "$HOOK_LOG"; }; source "$0" "$1"; echo reached', ENSURE_ROOT, tmpDir],
+        { input: '', env: { ...process.env, HOOK_LOG: logFile }, timeout: FIFO_RUN_BOUND_MS },
+      );
+      expect({ kind: run.kind, out: run.stdout.trim() }).toEqual({ kind: 'clean', out: 'reached' });
+    } finally {
+      releaseFifo(fifo);
+    }
+    expect(fs.readlinkSync(marker), 'the link is left as it was').toBe(fifo);
+    expect(ignoreLines(path.join(tmpDir, '.gitignore')), 'non-vacuity: the run took the stamping path').toContain('!.devflow/project.json');
+    expect(fs.readFileSync(logFile, 'utf-8').trim().split('\n'), 'the skip is logged once').toEqual([expect.stringContaining('symbolic link')]);
+  }, FIFO_TEST_TIMEOUT_MS);
+
   it('a `set -e` caller keeps running when the healing path finds its marker already there', () => {
-    // The marker is created only where nothing stands, so on a healing run that
-    // finds it the create fails, and that failure must not end the caller.
+    // The marker is created only where nothing stands, so a healing run that finds
+    // it creates none, and must not end the caller either.
     fs.mkdirSync(path.join(tmpDir, '.devflow'));
     fs.writeFileSync(path.join(tmpDir, '.devflow', '.root-gitignore-configured-v6'), '');
     fs.writeFileSync(path.join(tmpDir, '.gitignore'), 'node_modules/\n');
@@ -2311,6 +2347,31 @@ describe('ensure-root-gitignore behavioral', () => {
     expect(ignoreLines(gitignore)).toContain('!.devflow/project.json');
     expect(ignoreLines(gitignore)).not.toContain('.devflow/');
   });
+
+  it('upgrades a legacy install only through a copy it creates: a FIFO that a link at the copy\'s name leads to is never opened (D-HOOKS-NO-SYMLINK)', () => {
+    // noclobber alone opens such a link and waits there for a reader. The run is
+    // bounded, so that wait fails the test rather than hanging the suite.
+    const legacy = 'node_modules/\n\n# Devflow runtime data (local by default; remove to share via git)\n.devflow/\n';
+    const gitignore = path.join(tmpDir, '.gitignore');
+    const fifo = path.join(tmpDir, 'fifo');
+    fs.writeFileSync(gitignore, legacy);
+    makeFifo(fifo);
+
+    // The copy's name ends in the PID of the shell that sources the helper, so that
+    // shell plants the link at exactly that name, checks it is there, and sources it.
+    try {
+      const run = spawnWithStdin(
+        'bash',
+        ['-c', 'set -e; ln -s "$1" "$0/.gitignore.devflow-tmp.$$"; [ -L "$0/.gitignore.devflow-tmp.$$" ]; source "$2" "$0"; echo reached', tmpDir, fifo, ENSURE_ROOT],
+        { input: '', timeout: FIFO_RUN_BOUND_MS },
+      );
+      expect({ kind: run.kind, out: run.stdout.trim() }).toEqual({ kind: 'clean', out: 'reached' });
+    } finally {
+      releaseFifo(fifo);
+    }
+    expect(fs.readFileSync(gitignore, 'utf-8'), 'the upgrade waits for a later run').toBe(legacy);
+    expect(fs.readdirSync(tmpDir).filter((name) => name.includes('.devflow-tmp.')), 'the planted link is removed').toEqual([]);
+  }, FIFO_TEST_TIMEOUT_MS);
 
   // D-GITIGNORE-LINK-INSIDE: a repository can commit its root .gitignore as a symbolic
   // link to any file on the machine. The helper writes through one only when the file

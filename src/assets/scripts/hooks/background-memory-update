@@ -225,9 +225,12 @@ if [ -f "$PROCESSING_FILE" ]; then
     # SEC-2: the batch is the claimed queue, 0600 like the queue itself, and the
     # cold path at session start moves it back to the queue. mv gives it the
     # trimmed copy's inode and mode, so the copy is created under umask 077, and
-    # only where nothing stands (noclobber): an entry already at its name, a
-    # symbolic link included, is removed and never written through.
-    if (umask 077 && set -o noclobber && tail -"$PROC_OVERFLOW_TARGET" "$PROCESSING_FILE" > "$_PROC_TMP") && mv "$_PROC_TMP" "$PROCESSING_FILE"; then
+    # only where nothing stands at its name: builtin tests come first, so an entry
+    # already there, a link to a FIFO or a device included, is never opened
+    # (noclobber alone would open one, as no regular file stands there), and
+    # noclobber then makes the create itself exclusive. Such an entry is removed
+    # instead, and the batch is left untrimmed.
+    if [ ! -e "$_PROC_TMP" ] && [ ! -L "$_PROC_TMP" ] && (umask 077 && set -o noclobber && tail -"$PROC_OVERFLOW_TARGET" "$PROCESSING_FILE" > "$_PROC_TMP") && mv "$_PROC_TMP" "$PROCESSING_FILE"; then
       log "Processing overflow: truncated from $_PROC_LINES to $PROC_OVERFLOW_TARGET lines"
     else
       rm -f "$_PROC_TMP" 2>/dev/null || true

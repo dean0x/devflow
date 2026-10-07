@@ -286,11 +286,14 @@ else
     # emits no lines, which is the correct outcome for a .gitignore whose only
     # content was the legacy entry, so `true` ends the group and the subshell fails
     # only when the copy cannot be created. The copy is created only where nothing
-    # stands (noclobber), so an entry already at its name, a symbolic link included,
-    # is removed and never written through (D-HOOKS-NO-SYMLINK, git-marker); the
-    # upgrade then waits for a later run, and the skip is logged once.
+    # stands at its name: builtin tests come first, so an entry already there, a
+    # link to a FIFO or a device included, is never opened (noclobber alone would
+    # open one, as no regular file stands there), and noclobber then makes the
+    # create itself exclusive (D-HOOKS-NO-SYMLINK, git-marker). Such an entry is
+    # removed instead; the upgrade then waits for a later run, and the skip is
+    # logged once.
     _ERG_TMP="$_ERG_GITIGNORE.devflow-tmp.$$"
-    if (set -o noclobber; {
+    if [ ! -e "$_ERG_TMP" ] && [ ! -L "$_ERG_TMP" ] && (set -o noclobber; {
           grep -vE "$_ERG_RE_LEGACY" "$_ERG_GITIGNORE" \
             | grep -vF '# Devflow runtime data (local by default; remove to share via git)'
           true
@@ -369,12 +372,21 @@ case "$_ERG_MODE" in
 esac
 
 # On success, stamp the current-format v6 marker and drop legacy markers. The marker
-# is created only where nothing stands (noclobber), never `touch`ed: `touch` follows
-# a symbolic link committed at its path (D-HOOKS-NO-SYMLINK, git-marker), and
-# a marker already there is all the fast path needs. A `.devflow` that is itself a
-# link is refused by both callers before they reach this file.
+# is created only where nothing stands, never `touch`ed: `touch` follows a symbolic
+# link committed at its path (D-HOOKS-NO-SYMLINK, git-marker), and so does
+# noclobber's create when the link leads to a FIFO, where it would wait at every
+# session start and prompt, or to a device. So builtin tests come first: a link
+# there is left as it was and the skip logged once, a marker already there is all
+# the fast path needs, and noclobber makes the create itself exclusive. A `.devflow`
+# that is itself a link is refused by both callers before they reach this file.
 [ "$_ERG_OK" = 1 ] && {
-  (set -o noclobber; : > "$_ERG_MARKER") 2>/dev/null || true
+  if [ -L "$_ERG_MARKER" ]; then
+    if declare -F log >/dev/null 2>&1; then
+      log "Marker not stamped: $_ERG_MARKER is a symbolic link"
+    fi
+  elif [ ! -e "$_ERG_MARKER" ]; then
+    (set -o noclobber; : > "$_ERG_MARKER") 2>/dev/null || true
+  fi
   _erg_drop_legacy_markers
 }
 return 0

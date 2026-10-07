@@ -127,9 +127,11 @@ fi
 # session-start-memory reads it twice, and a read landing between a truncate
 # and the write that refills it would meet a partial file; a rename hands every
 # read either the previous backup or the new one. SEC-2: the copy is created
-# under umask 077, and only when nothing already holds its name (noclobber), so
-# no file or symlink found there is reused or written through; the rename gives
-# the backup the copy's inode and mode, so the backup, which holds the working
+# under umask 077, and only where nothing stands at its name: builtin tests come
+# first, so an entry already there, a link to a FIFO or a device included, is
+# never opened (noclobber alone would open one, as no regular file stands there),
+# and noclobber then makes the create itself exclusive. The rename gives the
+# backup the copy's inode and mode, so the backup, which holds the working
 # memory, is 0600 whatever the caller's umask (as in queue-append). A write or
 # rename that fails removes whatever holds the copy's name and keeps the
 # previous backup; the bootstrap below still runs.
@@ -149,7 +151,7 @@ BACKUP_TMP="$BACKUP_FILE.tmp.$$"
 if ! df_no_symlink_below "$PROJECT_ROOT" "$BACKUP_FILE"; then
   log "Backup not written: a symbolic link sits on the path to $BACKUP_FILE"
   dbg "Backup not written: symbolic link at $BACKUP_FILE"
-elif (umask 077 && set -o noclobber && json_backup_construct \
+elif [ ! -e "$BACKUP_TMP" ] && [ ! -L "$BACKUP_TMP" ] && (umask 077 && set -o noclobber && json_backup_construct \
     --arg ts "$TIMESTAMP" \
     --arg branch "$GIT_BRANCH" \
     --arg status "$GIT_STATUS" \
@@ -174,9 +176,16 @@ fi
 # avoids REL-5: O_EXCL-style atomic create via noclobber so the existence test and the
 # create are one operation — if the worker's CAS mv lands in the window, noclobber fails
 # (file already exists) and we skip the bootstrap rather than truncating fresh memory.
+# D-HOOKS-NO-SYMLINK (git-marker): the create is made only where nothing stands, tested
+# with builtins first, since noclobber alone opens a link to a FIFO or a device (no
+# regular file stands there) and would wait on the FIFO or write the text into the
+# device. A link there is left as it was and logged; the memory folder above it was
+# checked at the top.
 MEMORY_FILE="$MEMORY_DIR/WORKING-MEMORY.md"
 if [ -n "$GIT_BRANCH" ] && is_hex_sha "$GIT_HEAD_SHA" 40 40; then
-  if (set -o noclobber; : > "$MEMORY_FILE") 2>/dev/null; then
+  if [ -L "$MEMORY_FILE" ]; then
+    log "Working memory not bootstrapped: $MEMORY_FILE is a symbolic link"
+  elif [ ! -e "$MEMORY_FILE" ] && (set -o noclobber; : > "$MEMORY_FILE") 2>/dev/null; then
     {
       echo "<!-- memory-head: $GIT_HEAD_SHA branch: $GIT_BRANCH -->"
       echo ""

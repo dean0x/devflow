@@ -15,12 +15,19 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { execSync } from 'child_process';
+import { execSync, spawnSync } from 'child_process';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
 import { pollForTerminalLine } from './helpers/poll-for-terminal-line.js';
-import { runHook, spawnWithStdin } from './shell-hooks-helpers.js';
+import {
+  FIFO_RUN_BOUND_MS,
+  FIFO_TEST_TIMEOUT_MS,
+  makeFifo,
+  releaseFifo,
+  runHook,
+  spawnWithStdin,
+} from './shell-hooks-helpers.js';
 
 const HOOKS_DIR = path.resolve(__dirname, '..', 'src', 'assets', 'scripts', 'hooks');
 const CAPTURE_TURN_HOOK = path.join(HOOKS_DIR, 'capture-turn');
@@ -2957,6 +2964,40 @@ describe('S27: the memory hooks never write through a symbolic link under .devfl
     expect(fs.readdirSync(memoryDir).filter((name) => name.includes('.tmp.')), 'the planted link is removed').toEqual([]);
   });
 
+  // noclobber alone opens a link whose target is no regular file: the create is not
+  // made exclusive, and an open of a FIFO for writing waits for a reader that never
+  // comes. Each create below is made only where nothing stands, so it never opens
+  // one. Every run is bounded, so a wait fails its test rather than hanging the suite.
+  it('background-memory-update: the batch trim never opens a FIFO that a link at its copy\'s name leads to', () => {
+    fs.mkdirSync(memoryDir, { recursive: true });
+    const batch = path.join(memoryDir, '.pending-turns.processing');
+    const rows = (prefix: string, count: number): string =>
+      Array.from({ length: count }, (_, i) =>
+        JSON.stringify({ role: i % 2 === 0 ? 'user' : 'assistant', content: `${prefix}-${i}`, ts: i }) + '\n').join('');
+    // 160 leftover lines plus 60 new ones: past the 200-line cap, so the trim runs.
+    fs.writeFileSync(batch, rows('old', 160), { mode: 0o600 });
+    fs.writeFileSync(path.join(memoryDir, '.pending-turns.jsonl'), rows('new', 60), { mode: 0o600 });
+    fs.writeFileSync(path.join(shimDir, 'claude'), '#!/bin/bash\ncat > /dev/null\nexit 1\n');
+    fs.chmodSync(path.join(shimDir, 'claude'), 0o755);
+    const fifo = path.join(tmp, 'fifo');
+    makeFifo(fifo);
+
+    // As above, the wrapper plants the link at the copy's name, then becomes the worker.
+    try {
+      const run = spawnSync(
+        'bash',
+        ['-c', 'ln -s "$3" "$2/.pending-turns.processing.tmp.$$" && [ -L "$2/.pending-turns.processing.tmp.$$" ] && exec bash "$0" "$1"', BACKGROUND_UPDATER, projectDir, memoryDir, fifo],
+        { env: { ...process.env, HOME: homeDir, PATH: `${shimDir}:${process.env.PATH ?? '/usr/bin:/bin'}` }, stdio: 'ignore', timeout: FIFO_RUN_BOUND_MS },
+      );
+      expect((run.error as NodeJS.ErrnoException | undefined)?.code, 'the worker returns instead of waiting on the FIFO').toBeUndefined();
+      expect(run.status).toBe(0);
+    } finally {
+      releaseFifo(fifo);
+    }
+    expect(isLink(batch), 'the link is never renamed over the batch').toBe(false);
+    expect(fs.readdirSync(memoryDir).filter((name) => name.includes('.tmp.')), 'the planted link is removed').toEqual([]);
+  }, FIFO_TEST_TIMEOUT_MS);
+
   it('pre-compact-memory: a linked memory folder gets no backup and no working memory', () => {
     fs.mkdirSync(path.join(projectDir, '.devflow'));
     fs.symlinkSync(outsideDir, memoryDir);
@@ -2967,6 +3008,89 @@ describe('S27: the memory hooks never write through a symbolic link under .devfl
     expect(fs.readdirSync(outsideDir), 'nothing is created in the folder the link names').toEqual([]);
     expect(refusals('pre-compact-memory'), 'the refusal is logged once').toHaveLength(1);
   });
+
+  it('pre-compact-memory: never opens a FIFO that a link at WORKING-MEMORY.md leads to; the backup is still written', () => {
+    fs.mkdirSync(memoryDir, { recursive: true });
+    const memoryFile = path.join(memoryDir, 'WORKING-MEMORY.md');
+    const fifo = path.join(tmp, 'fifo');
+    makeFifo(fifo);
+    fs.symlinkSync(fifo, memoryFile);
+
+    try {
+      const run = spawnWithStdin('bash', [PRE_COMPACT_HOOK], {
+        input: JSON.stringify({ cwd: projectDir }),
+        env: { ...process.env, HOME: homeDir },
+        timeout: FIFO_RUN_BOUND_MS,
+      });
+      expect(run.kind, run.stderr).toBe('clean');
+    } finally {
+      releaseFifo(fifo);
+    }
+    expect(fs.readlinkSync(memoryFile), 'the link is left as it was').toBe(fifo);
+    const backup = JSON.parse(fs.readFileSync(path.join(memoryDir, 'backup.json'), 'utf-8'));
+    expect(backup.memory_snapshot, 'non-vacuity: the hook carried on and wrote its backup').toBe('');
+    expect(refusals('pre-compact-memory'), 'the skipped bootstrap is logged once').toHaveLength(1);
+  }, FIFO_TEST_TIMEOUT_MS);
+
+  it('pre-compact-memory: writes no working memory into a FIFO that a link at WORKING-MEMORY.md leads to, even one a reader holds open', () => {
+    // A held-open FIFO stands in for a device: an open of it no longer waits, so a
+    // bootstrap that took the link would write the working memory's text into it.
+    fs.mkdirSync(memoryDir, { recursive: true });
+    const fifo = path.join(tmp, 'fifo');
+    makeFifo(fifo);
+    fs.symlinkSync(fifo, path.join(memoryDir, 'WORKING-MEMORY.md'));
+    const reader = fs.openSync(fifo, fs.constants.O_RDONLY | fs.constants.O_NONBLOCK);
+
+    let received = '';
+    try {
+      const run = spawnWithStdin('bash', [PRE_COMPACT_HOOK], {
+        input: JSON.stringify({ cwd: projectDir }),
+        env: { ...process.env, HOME: homeDir },
+        timeout: FIFO_RUN_BOUND_MS,
+      });
+      expect(run.kind, run.stderr).toBe('clean');
+      // What any writer left in the FIFO: a read returns 0 once it is empty and no
+      // writer holds it, and throws EAGAIN while one still does.
+      const buf = Buffer.alloc(64 * 1024);
+      for (let reads = 0; reads < 16; reads++) {
+        let n: number;
+        try {
+          n = fs.readSync(reader, buf, 0, buf.length, null);
+        } catch {
+          break;
+        }
+        if (n === 0) break;
+        received += buf.toString('utf-8', 0, n);
+      }
+    } finally {
+      fs.closeSync(reader);
+    }
+    expect(received, 'nothing is written into the FIFO').toBe('');
+  }, FIFO_TEST_TIMEOUT_MS);
+
+  it('pre-compact-memory: the backup copy never opens a FIFO that a link at its name leads to; the previous backup is kept', () => {
+    fs.mkdirSync(memoryDir, { recursive: true });
+    const backup = path.join(memoryDir, 'backup.json');
+    const PREVIOUS = '{"timestamp":"2000-01-01T00:00:00Z","memory_snapshot":""}\n';
+    fs.writeFileSync(backup, PREVIOUS);
+    const fifo = path.join(tmp, 'fifo');
+    makeFifo(fifo);
+
+    // The copy's name ends in the hook's PID, and exec keeps the PID, so the wrapper
+    // plants the link at exactly that name, checks it is there, and then becomes the hook.
+    try {
+      const run = spawnWithStdin(
+        'bash',
+        ['-c', 'ln -s "$1" "$2/backup.json.tmp.$$" && [ -L "$2/backup.json.tmp.$$" ] && exec bash "$0"', PRE_COMPACT_HOOK, fifo, memoryDir],
+        { input: JSON.stringify({ cwd: projectDir }), env: { ...process.env, HOME: homeDir }, timeout: FIFO_RUN_BOUND_MS },
+      );
+      expect(run.kind, run.stderr).toBe('clean');
+    } finally {
+      releaseFifo(fifo);
+    }
+    expect(fs.readFileSync(backup, 'utf-8'), 'the previous backup is kept').toBe(PREVIOUS);
+    expect(fs.readdirSync(memoryDir).filter((name) => name.includes('.tmp.')), 'the planted link is removed').toEqual([]);
+  }, FIFO_TEST_TIMEOUT_MS);
 
   it('session-start-memory: a stale batch in a linked memory folder is not moved', () => {
     fs.mkdirSync(path.join(projectDir, '.devflow'));
@@ -3222,7 +3346,12 @@ describe('S28: the memory hooks never read through a symbolic link under .devflo
     expect(backup).not.toContain(SECRET);
     expect(isLink(memoryFile), 'the link is left as it was').toBe(true);
     expect(fs.readFileSync(outsideFile, 'utf-8')).toBe(OUTSIDE);
-    expect(refusals('pre-compact-memory'), 'the refusal is logged once').toHaveLength(1);
+    // The same link refuses two things, each logged once: the snapshot's read and
+    // the working-memory bootstrap's create.
+    expect(refusals('pre-compact-memory'), 'the read and the bootstrap are each refused once').toEqual([
+      expect.stringContaining('treated as absent'),
+      expect.stringContaining('not bootstrapped'),
+    ]);
   });
 
   it('background-memory-update: a linked WORKING-MEMORY.md never reaches a claude -p prompt: the run is refused before one is built', () => {

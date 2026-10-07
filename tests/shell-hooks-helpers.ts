@@ -8,9 +8,14 @@
  * the same run with `execSync`'s contract: stdout on success, a throw otherwise.
  *
  * Both sit on `spawnWithStdin`, which is where the stdin-EPIPE race is settled.
+ *
+ * `makeFifo`, `releaseFifo` and `FIFO_RUN_BOUND_MS` serve the tests that plant a
+ * FIFO where a hook creates a file: an open of one for writing waits for a reader,
+ * so each such run is bounded and the FIFO released after it.
  */
 
-import { spawnSync } from 'child_process';
+import { execFileSync, spawnSync } from 'child_process';
+import * as fs from 'fs';
 import * as path from 'path';
 
 /** The hook scripts as authored (source tree), never as installed. */
@@ -31,6 +36,34 @@ export const HOOK_RUN_ALLOWANCE_MS = 5_000;
  * measured range, paid at most once per test by a test that execs node once.
  */
 export const NODE_EXEC_STALL_MS = 7_000;
+
+/**
+ * The bound on a run that meets a FIFO a test planted: far above a hook's own work
+ * on a loaded machine, node exec stall included, so only a run that waits on the
+ * FIFO reaches it. A test that runs under it allows itself FIFO_TEST_TIMEOUT_MS.
+ */
+export const FIFO_RUN_BOUND_MS = 20_000;
+export const FIFO_TEST_TIMEOUT_MS = FIFO_RUN_BOUND_MS + 10_000;
+
+/** A FIFO at `file`: no regular file, and an open of it for writing waits for a reader. */
+export function makeFifo(file: string): void {
+  execFileSync('mkfifo', [file]);
+}
+
+/**
+ * Open `fifo`'s read end without waiting, then close it: a writer still waiting to
+ * open the FIFO, left behind when a bound killed the run that started it, is let go,
+ * so no process outlives its test. Nothing at `fifo` is no error.
+ */
+export function releaseFifo(fifo: string): void {
+  let fd: number;
+  try {
+    fd = fs.openSync(fifo, fs.constants.O_RDONLY | fs.constants.O_NONBLOCK);
+  } catch {
+    return;
+  }
+  fs.closeSync(fd);
+}
 
 /** What one child run left behind, whatever its verdict. */
 export interface ChildExit {

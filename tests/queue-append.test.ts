@@ -16,14 +16,22 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
 import { SETTINGS_SWITCH_TABLE, type SwitchRow } from './fixtures/settings-switch-table.js';
-import { HOOK_RUN_ALLOWANCE_MS, NODE_EXEC_STALL_MS } from './shell-hooks-helpers.js';
+import {
+  FIFO_RUN_BOUND_MS,
+  FIFO_TEST_TIMEOUT_MS,
+  HOOK_RUN_ALLOWANCE_MS,
+  NODE_EXEC_STALL_MS,
+  makeFifo,
+  releaseFifo,
+  spawnWithStdin,
+} from './shell-hooks-helpers.js';
 
 const HOOKS_DIR = path.resolve(__dirname, '..', 'src', 'assets', 'scripts', 'hooks');
 const QUEUE_APPEND = path.join(HOOKS_DIR, 'queue-append');
 
-/** Source the full dependency chain queue-append needs, then run `script`. */
-function runWithQueueAppend(script: string, env?: NodeJS.ProcessEnv): { stdout: string; stderr: string; exitCode: number } {
-  const full = `
+/** A bash script that sources the full dependency chain queue-append needs, then runs `script`. */
+function withQueueAppend(script: string): string {
+  return `
 set -e
 log() { :; }
 dbg() { :; }
@@ -33,6 +41,11 @@ source "${path.join(HOOKS_DIR, 'learning-lock')}"
 source "${QUEUE_APPEND}"
 ${script}
 `;
+}
+
+/** Source the full dependency chain queue-append needs, then run `script`. */
+function runWithQueueAppend(script: string, env?: NodeJS.ProcessEnv): { stdout: string; stderr: string; exitCode: number } {
+  const full = withQueueAppend(script);
   try {
     const result = execSync(`bash -c '${full.replace(/'/g, "'\\''")}'`, { stdio: ['pipe', 'pipe', 'pipe'], env: env ?? process.env });
     return { stdout: result.toString(), stderr: '', exitCode: 0 };
@@ -492,6 +505,32 @@ describe('queue_append_row never writes through a symbolic link (D-HOOKS-NO-SYML
     expect(readJsonl(queue), 'the row is appended; the trim waits for a later append').toHaveLength(201);
     expect(fs.readdirSync(path.dirname(queue)).filter((name) => name.includes('.tmp.')), 'the planted link is removed').toEqual([]);
   });
+
+  it('the trim never opens a FIFO that a link at its copy\'s name leads to: the append returns, and the link is removed', () => {
+    // noclobber alone opens such a link: its target is no regular file, so the
+    // create is not made exclusive, and an open for writing waits for a reader
+    // that never comes. The run is bounded, so that wait fails the test rather
+    // than hanging the suite.
+    fs.mkdirSync(path.dirname(queue), { recursive: true });
+    const rows = Array.from({ length: 200 }, (_, i) => JSON.stringify({ role: 'user', content: `row-${i}`, ts: i }) + '\n').join('');
+    fs.writeFileSync(queue, rows, { mode: 0o600 });
+    const fifo = path.join(tmpDir, 'fifo');
+    makeFifo(fifo);
+
+    try {
+      const run = spawnWithStdin('bash', ['-c', withQueueAppend(`
+        ln -s "${fifo}" "${queue}.tmp.$$"
+        [ -L "${queue}.tmp.$$" ]
+        queue_append_row "${root}" "${queue}" "user" "row-200" "200"
+      `)], { input: '', timeout: FIFO_RUN_BOUND_MS });
+
+      expect(run.kind, run.stderr).toBe('clean');
+    } finally {
+      releaseFifo(fifo);
+    }
+    expect(readJsonl(queue), 'the row is appended; the trim waits for a later append').toHaveLength(201);
+    expect(fs.readdirSync(path.dirname(queue)).filter((name) => name.includes('.tmp.')), 'the planted link is removed').toEqual([]);
+  }, FIFO_TEST_TIMEOUT_MS);
 });
 
 describe('queue_read_gates', () => {

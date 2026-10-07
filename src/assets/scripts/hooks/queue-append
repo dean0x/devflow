@@ -119,10 +119,12 @@ queue_append_row() {
           # SEC-2: the trimmed copy is created under umask 077, so the renamed
           # queue keeps mode 0600. mv replaces the inode, so the queue takes the
           # copy's mode, and a chmod after the mv would leave a window. The copy is
-          # created only where nothing stands (noclobber), so an entry already at
-          # its name, a symbolic link included, is removed and never written
-          # through; the trim then waits for a later append.
-          if (umask 077 && set -o noclobber && tail -100 "$_qar_file" > "$_qar_tmp") && mv "$_qar_tmp" "$_qar_file"; then
+          # created only where nothing stands at its name: builtin tests come first,
+          # so an entry already there, a link to a FIFO or a device included, is
+          # never opened (noclobber alone would open one, as no regular file stands
+          # there), and noclobber then makes the create itself exclusive. Such an
+          # entry is removed instead, and the trim waits for a later append.
+          if [ ! -e "$_qar_tmp" ] && [ ! -L "$_qar_tmp" ] && (umask 077 && set -o noclobber && tail -100 "$_qar_file" > "$_qar_tmp") && mv "$_qar_tmp" "$_qar_file"; then
             log "Queue overflow: truncated from $_qar_lines to 100 lines ($(basename "$_qar_file"))"
             dbg "Queue overflow: truncated from $_qar_lines to 100 lines ($_qar_file)"
           else
