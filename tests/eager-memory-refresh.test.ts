@@ -2845,8 +2845,8 @@ describe('S26: pre-compact backup.json is replaced by a rename, never rewritten 
 // worker's batch merge (`>>`), its `touch`es, its trim copy and its working-memory
 // swap, pre-compact's backup and working-memory bootstrap, and session-start's
 // batch recovery all write under .devflow/memory, so each is skipped when the
-// memory folder, a file written there in place, or the target a file is renamed
-// onto, is a link. A skipped write is logged once and the hook exits 0.
+// memory folder, a file written there in place, a file renamed or the target it is
+// renamed onto, is a link. A skipped write is logged once and the hook exits 0.
 // =============================================================================
 describe('S27: the memory hooks never write through a symbolic link under .devflow (D-HOOKS-NO-SYMLINK)', { timeout: HOOK_RUN_ALLOWANCE_MS + NODE_EXEC_STALL_MS }, () => {
   const UNTOUCHED = 'a file outside the project, which no hook may write\n';
@@ -3216,6 +3216,38 @@ describe('S27: the memory hooks never write through a symbolic link under .devfl
     expectNothingOutside();
     expect(fs.readlinkSync(memoryFile), 'the link is left as it was').toBe(outsideDir);
     expect(fs.existsSync(`${memoryFile}.new`), 'the staged memory is discarded').toBe(false);
+    expect(fs.existsSync(path.join(memoryDir, '.last-refresh-ok')), 'no refresh is recorded').toBe(false);
+    expect(fs.existsSync(path.join(memoryDir, '.pending-turns.processing')), 'the batch is kept for a later run').toBe(true);
+    expect(refusals('background-memory-update'), 'the refusal is logged once').toHaveLength(1);
+  });
+
+  // The swap's other path: the staged memory is read for its stamp and then renamed
+  // into the working memory's place. The worker removes the staged path before the
+  // LLM run, so the stand-in plants the link there during its run, to a file outside
+  // the project whose line 1 carries a valid stamp: nothing else stands between that
+  // link and a swap that would rename the link itself into the working memory's place.
+  it('background-memory-update: a link that appears at WORKING-MEMORY.md.new during the LLM run is neither read nor renamed into place', () => {
+    fs.mkdirSync(memoryDir, { recursive: true });
+    seedQueue(projectDir);
+    const memoryFile = path.join(memoryDir, 'WORKING-MEMORY.md');
+    const staged = `${memoryFile}.new`;
+    const MEMORY = '## Now\n- the existing working memory\n';
+    fs.writeFileSync(memoryFile, MEMORY);
+    const fake = path.join(tmp, 'fake-staged-memory.md');
+    const FAKE = '<!-- memory-head: testsha branch: main -->\n## Now\n- a file outside the project\n';
+    fs.writeFileSync(fake, FAKE);
+    fs.writeFileSync(
+      path.join(shimDir, 'claude'),
+      `#!/bin/bash\ncat > /dev/null\nln -s "${fake}" "${staged}"\nexit 0\n`,
+    );
+    fs.chmodSync(path.join(shimDir, 'claude'), 0o755);
+
+    expect(runWorker(projectDir, homeDir, shimDir).exitCode).toBe(0);
+
+    expect(fs.readFileSync(fake, 'utf-8'), 'the link target is byte-identical').toBe(FAKE);
+    expect(isLink(memoryFile), 'the working memory is not replaced by the link').toBe(false);
+    expect(fs.readFileSync(memoryFile, 'utf-8'), 'the existing working memory is left as it was').toBe(MEMORY);
+    expect(fs.readlinkSync(staged), 'non-vacuity: the stand-in planted the link, and it is left where it was').toBe(fake);
     expect(fs.existsSync(path.join(memoryDir, '.last-refresh-ok')), 'no refresh is recorded').toBe(false);
     expect(fs.existsSync(path.join(memoryDir, '.pending-turns.processing')), 'the batch is kept for a later run').toBe(true);
     expect(refusals('background-memory-update'), 'the refusal is logged once').toHaveLength(1);
