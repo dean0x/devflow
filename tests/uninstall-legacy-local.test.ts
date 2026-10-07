@@ -15,6 +15,12 @@
  *                   the legacy commands rule, and even when every prompt is answered
  *                   "yes" (the in-process arm below).
  *
+ * D-CLI-NO-SYMLINK — a repository can commit `.devflow`, `.claude` or a folder in
+ * either as a symbolic link, and enough of `.claude` to be detected as a legacy
+ * install. The local-scope removal then deletes and rewrites nothing through a
+ * link: whatever the link leads to stays byte-identical, the link stays, and the
+ * skip is reported.
+ *
  * The CLI arms spawn the built CLI (two spawns, SUBPROCESS_TIMEOUT_MS each) under
  * `sandboxEnv`, which asserts the HOME is a temp dir before anything runs.
  */
@@ -40,6 +46,7 @@ vi.mock('@clack/prompts', async (importOriginal) => {
   };
 });
 
+import * as p from '@clack/prompts';
 import { requireBuiltCli, sandboxEnv } from './helpers.js';
 import { runCleanupPhase, runFullPhaseForScope, runSelectivePhaseForScope } from '../src/cli/commands/uninstall.js';
 import { DEVFLOW_PLUGINS } from '../src/core/plugins.js';
@@ -358,4 +365,170 @@ describe('legacy local uninstall through the CLI (TP-14, TP-48)', () => {
     expect(await fs.readFile(path.join(repo, '.devflow', 'memory', 'WORKING-MEMORY.md'), 'utf-8')).toContain('project data');
     expect(treeState(home)).toEqual(before);
   }, SUBPROCESS_TIMEOUT_MS);
+
+  it('D-CLI-NO-SYMLINK: a plain `uninstall` in a repository that commits a linked .devflow deletes nothing where the link leads', async () => {
+    // The repository commits just enough of .claude to be detected as a legacy
+    // install, and its .devflow as a link to a folder outside it.
+    await seedHome(home, { withUserInstall: false });
+    const linked = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'devflow-legacy-linked-')));
+    const outside = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'devflow-legacy-outside-')));
+    try {
+      execFileSync('git', ['init', '-q'], { cwd: linked });
+      await fs.mkdir(path.join(linked, '.claude', 'commands', 'devflow'), { recursive: true });
+      await fs.writeFile(path.join(linked, '.claude', 'commands', 'devflow', 'implement.md'), '# implement\n');
+      await fs.mkdir(path.join(outside, 'scripts'));
+      await fs.writeFile(path.join(outside, 'scripts', 'x'), 'not devflow\'s\n');
+      await fs.writeFile(path.join(outside, 'manifest.json'), '{"not":"devflow\'s"}\n');
+      await fs.mkdir(path.join(outside, 'logs'));
+      await fs.writeFile(path.join(outside, 'logs', 'y'), 'not devflow\'s either\n');
+      await fs.symlink(outside, path.join(linked, '.devflow'));
+      execFileSync('git', ['add', '-A'], { cwd: linked });
+      execFileSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@example.com', 'commit', '-q', '-m', 'seed'], { cwd: linked });
+      const before = treeState(outside);
+
+      const r = spawnSync(process.execPath, [cli, 'uninstall'], {
+        cwd: linked, env: sandboxEnv(home, { SHELL: '/bin/zsh' }), encoding: 'utf-8', timeout: SUBPROCESS_TIMEOUT_MS,
+      });
+      if (r.error) throw r.error;
+      const out = `${r.stdout ?? ''}${r.stderr ?? ''}`;
+
+      expect(r.status, out).toBe(0);
+      expect(out, 'the legacy install was detected and acted on').toContain('legacy local scope');
+      expect(await exists(path.join(linked, '.claude', 'commands', 'devflow')), 'the unlinked part is still removed').toBe(false);
+      expect(treeState(outside), 'nothing is deleted where the link leads').toEqual(before);
+      expect(lstatSync(path.join(linked, '.devflow')).isSymbolicLink(), 'the link is left as it was').toBe(true);
+      expect(out).toContain(`${path.join(linked, '.devflow')} is a symbolic link, and devflow removes or changes nothing through one`);
+    } finally {
+      await fs.rm(linked, { recursive: true, force: true });
+      await fs.rm(outside, { recursive: true, force: true });
+    }
+  }, SUBPROCESS_TIMEOUT_MS);
+});
+
+
+describe('a symbolic link in a legacy local install is never deleted or written through (D-CLI-NO-SYMLINK, in-process)', () => {
+  let repo: string;
+  let outside: string;
+  let warn: ReturnType<typeof vi.spyOn>;
+
+  beforeEach(async () => {
+    repo = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'devflow-legacy-link-repo-')));
+    outside = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'devflow-legacy-link-outside-')));
+    await seedLegacyRepo(repo);
+    confirmMessages.length = 0;
+    warn = vi.spyOn(p.log, 'warn');
+  });
+
+  afterEach(async () => {
+    warn.mockRestore();
+    await fs.rm(repo, { recursive: true, force: true });
+    await fs.rm(outside, { recursive: true, force: true });
+  });
+
+  /**
+   * Turn `<repo>/<rel>` into a link to `outside`: whatever the repo held there moves
+   * to `outside` first, so the link leads to devflow-named content a removal would
+   * reach, plus `extra` files and a sentinel.
+   */
+  async function linkToOutside(rel: string, extra: Readonly<Record<string, string>> = {}): Promise<string> {
+    const at = path.join(repo, rel);
+    if (await exists(at)) {
+      await fs.cp(at, outside, { recursive: true });
+      await fs.rm(at, { recursive: true, force: true });
+    }
+    for (const [file, body] of Object.entries({ ...extra, 'sentinel.txt': 'outside the project\n' })) {
+      await fs.mkdir(path.dirname(path.join(outside, file)), { recursive: true });
+      await fs.writeFile(path.join(outside, file), body);
+    }
+    await fs.mkdir(path.dirname(at), { recursive: true });
+    await fs.symlink(outside, at);
+    return at;
+  }
+
+  function fullPhase(): Promise<void> {
+    return runFullPhaseForScope({
+      scope: 'local',
+      claudeDir: path.join(repo, '.claude'),
+      devflowDir: path.join(repo, '.devflow'),
+      devflowScriptsDir: path.join(repo, '.devflow', 'scripts'),
+      verbose: false,
+      keepDocs: false,
+      isTTY: true,
+    });
+  }
+
+  function warned(): string[] {
+    return warn.mock.calls.map(call => String(call[0]));
+  }
+
+  it.each([
+    { rel: '.claude', extra: {} },
+    { rel: path.join('.claude', 'commands'), extra: {} },
+    { rel: path.join('.claude', 'agents'), extra: {} },
+    { rel: path.join('.claude', 'skills'), extra: {} },
+    { rel: path.join('.claude', 'rules'), extra: { 'devflow/old.md': '# a rule\n' } },
+    { rel: '.devflow', extra: {} },
+    { rel: path.join('.devflow', 'scripts'), extra: {} },
+    { rel: path.join('.devflow', 'logs'), extra: { y: 'a log\n' } },
+  ])('a linked $rel: the full local phase leaves its target byte-identical, keeps the link and names it once', async ({ rel, extra }) => {
+    const link = await linkToOutside(rel, extra);
+    const before = treeState(outside);
+
+    await fullPhase();
+
+    expect(treeState(outside), 'nothing is deleted or rewritten where the link leads').toEqual(before);
+    expect(lstatSync(link).isSymbolicLink(), 'the link is left as it was').toBe(true);
+    const named = warned().filter(line => line.includes(`${link} is a symbolic link`));
+    expect(named, 'the skip is reported once, naming the link').toHaveLength(1);
+  });
+
+  it('the unlinked rest of the install is still removed around a linked folder', async () => {
+    await linkToOutside(path.join('.claude', 'commands'));
+
+    await fullPhase();
+
+    expect(await exists(path.join(repo, '.claude', 'agents', 'devflow'))).toBe(false);
+    expect(await exists(path.join(repo, '.claude', 'skills', 'devflow:testing'))).toBe(false);
+    expect(await exists(path.join(repo, '.devflow', 'scripts'))).toBe(false);
+    expect(await exists(path.join(repo, '.devflow', 'manifest.json'))).toBe(false);
+  });
+
+  it('a selective local uninstall deletes nothing through a linked .claude/commands', async () => {
+    const link = await linkToOutside(path.join('.claude', 'commands'));
+    const before = treeState(outside);
+    const implement = DEVFLOW_PLUGINS.filter(plugin => plugin.name === 'devflow-implement');
+    expect(implement).toHaveLength(1);
+
+    await runSelectivePhaseForScope({
+      claudeDir: path.join(repo, '.claude'),
+      devflowDir: path.join(repo, '.devflow'),
+      selectedPlugins: implement,
+      verbose: false,
+      scope: 'local',
+    });
+
+    expect(treeState(outside)).toEqual(before);
+    expect(warned().filter(line => line.includes(`${link} is a symbolic link`))).toHaveLength(1);
+  });
+
+  it.each([
+    { rel: '.claude' },
+    { rel: path.join('.claude', 'settings.json') },
+  ])('the local cleanup phase rewrites no settings.json through a linked $rel', async ({ rel }) => {
+    let link: string;
+    if (rel === '.claude') {
+      link = await linkToOutside(rel);
+    } else {
+      link = path.join(repo, rel);
+      await fs.rename(link, path.join(outside, 'settings.json'));
+      await fs.symlink(path.join(outside, 'settings.json'), link);
+    }
+    const before = treeState(outside);
+
+    await runCleanupPhase({ scopesToUninstall: ['local'], keepDocs: true, verbose: false, cwd: repo, isTTY: false });
+
+    expect(treeState(outside), 'the settings.json the link leads to keeps its devflow hooks').toEqual(before);
+    expect(lstatSync(link).isSymbolicLink()).toBe(true);
+    expect(warned().filter(line => line.includes(`${link} is a symbolic link`))).toHaveLength(1);
+  });
 });

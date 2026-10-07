@@ -9,7 +9,7 @@ import { getGitRoot } from '../../core/git.js';
 import { isSameLocation } from '../../core/same-location.js';
 import { DEVFLOW_PLUGINS, SKILL_NAMESPACE, getAllSkillNames, getAllAgentNames, getAllCommandNames, parsePluginSelection, resolveFeatureRedirect, prefixSkillName, unprefixSkillName, skillsOf, FEATURE_OWNED_SKILLS, type PluginDefinition } from '../../core/plugins.js';
 import { readManifest } from '../../core/manifest.js';
-import { sweepOrphanedAssets, mdFileName, mdEntryName } from '../../core/orphan-sweep.js';
+import { sweepOrphanedAssets, mdFileName, mdEntryName, type SweepResult } from '../../core/orphan-sweep.js';
 import { LEGACY_SKILL_NAMES } from '../../targets/claude-code/legacy.js';
 import { removeAmbientHook } from './ambient.js';
 import { removeMemoryHooks } from './memory.js';
@@ -39,6 +39,7 @@ import { writeSettingsFileAtomic } from '../../core/fs-atomic.js';
 import { stripFlags } from '../../core/flags.js';
 import { stripDevflowTeammateModeFromJson } from '../../core/teammate-mode-cleanup.js';
 import { getPackageRoot, isContainedIn } from '../../core/paths.js';
+import { firstSymbolicLink } from '../../core/linked-path.js';
 
 /**
  * Which install `uninstall` acts on: the machine-wide install (`user`), or a
@@ -88,6 +89,83 @@ async function legacyLocalInstallPaths(gitRoot: string): Promise<ScopeInstallPat
 async function scopeInstallPaths(scope: UninstallScope, gitRoot: string | null): Promise<ScopeInstallPaths | null> {
   if (scope === 'user') return getInstallationPaths();
   return gitRoot === null ? null : legacyLocalInstallPaths(gitRoot);
+}
+
+/**
+ * The check a removal or settings rewrite passes before it acts on `target`: true
+ * to go ahead, false when it was skipped, the skip already reported. Never throws.
+ */
+export type ChangeGuard = (target: string) => Promise<boolean>;
+
+/**
+ * The user scope's guard, which passes everything: `~/.claude` and `~/.devflow` are
+ * the user's own, so a symbolic link there is the user's choice.
+ */
+const changeAnything: ChangeGuard = async () => true;
+
+/**
+ * `folder` and every path below it down to `target`, the target included, outermost
+ * first, for whichever of the two folders holds `target`; null for a target in
+ * neither. PURE.
+ */
+function pathsDownTo(folders: ScopeInstallPaths, target: string): string[] | null {
+  for (const folder of [folders.claudeDir, folders.devflowDir]) {
+    const rel = path.relative(folder, target);
+    if (rel === '..' || rel.startsWith(`..${path.sep}`) || path.isAbsolute(rel)) continue;
+    const chain = [folder];
+    for (const part of rel === '' ? [] : rel.split(path.sep)) {
+      chain.push(path.join(chain[chain.length - 1], part));
+    }
+    return chain;
+  }
+  return null;
+}
+
+/**
+ * The guard for a legacy local install's removals and settings rewrites.
+ *
+ * D-CLI-NO-SYMLINK (firstSymbolicLink): a repository can commit `.claude`, `.devflow`
+ * or any folder or file in them as a symbolic link, and enough of `.claude` for a
+ * plain `uninstall` to detect a legacy install there. `fs.rm` and the settings
+ * rewrite act inside whatever folder a link on the way names, so a target is acted
+ * on only where neither `<gitRoot>/.claude` or `<gitRoot>/.devflow` nor anything
+ * below it on the way to the target, the target included, is a link. Otherwise the
+ * target is skipped, the link is left as it was, and one warning per link, opened
+ * by `skipped`, names it. A target that cannot be checked, or lies in neither
+ * folder, is skipped and reported the same way. The rest of the install is still
+ * removed, so a real, unlinked legacy install comes out whole.
+ */
+function legacyLocalChangeGuard(folders: ScopeInstallPaths, skipped: string): ChangeGuard {
+  const reported = new Set<string>();
+  const report = (subject: string, reason: string): void => {
+    if (reported.has(subject)) return;
+    reported.add(subject);
+    p.log.warn(`${skipped}: ${reason}`);
+  };
+  return async (target) => {
+    const chain = pathsDownTo(folders, target);
+    if (chain === null) {
+      report(target, `${target} is outside the legacy install`);
+      return false;
+    }
+    let link: string | null;
+    try {
+      link = await firstSymbolicLink(chain);
+    } catch (error) {
+      report(target, `${target} could not be checked for a symbolic link (${error instanceof Error ? error.message : String(error)})`);
+      return false;
+    }
+    if (link === null) return true;
+    report(link, `${link} is a symbolic link, and devflow removes or changes nothing through one`);
+    return false;
+  };
+}
+
+/** The guard for one scope's full or selective phase: checked for a legacy local install, open for the user's. */
+function scopeChangeGuard(scope: UninstallScope, folders: ScopeInstallPaths): ChangeGuard {
+  return scope === 'local'
+    ? legacyLocalChangeGuard(folders, 'Legacy local install not fully removed')
+    : changeAnything;
 }
 
 /**
@@ -679,16 +757,25 @@ export function installArtifactPaths(devflowDir: string): ReadonlyArray<InstallA
  * agent-models.json is an INSTALL ARTIFACT (stale per-agent overrides silently
  * re-apply to renamed/deleted agents on reinstall — AC-P1-F4) and therefore
  * belongs in this list, not in enumerateUserDevFlowContent.
+ *
+ * Each removal passes `mayChange` first, which skips one a symbolic link would
+ * redirect in a legacy local install (D-CLI-NO-SYMLINK, legacyLocalChangeGuard).
  */
-export async function removeDevFlowInstallArtifacts(devflowDir: string, verbose: boolean): Promise<void> {
+export async function removeDevFlowInstallArtifacts(
+  devflowDir: string,
+  verbose: boolean,
+  mayChange: ChangeGuard = changeAnything,
+): Promise<void> {
   const manifestPath = path.join(devflowDir, 'manifest.json');
-  try {
-    await fs.rm(manifestPath, { force: true });
-    if (verbose) {
-      p.log.success('Removed manifest.json');
+  if (await mayChange(manifestPath)) {
+    try {
+      await fs.rm(manifestPath, { force: true });
+      if (verbose) {
+        p.log.success('Removed manifest.json');
+      }
+    } catch (error) {
+      p.log.warn(`Could not remove manifest.json: ${error}`);
     }
-  } catch (error) {
-    p.log.warn(`Could not remove manifest.json: ${error}`);
   }
 
   // Proxy install artifacts — remove non-fatally (per-item failure isolation)
@@ -720,6 +807,7 @@ export async function removeDevFlowInstallArtifacts(devflowDir: string, verbose:
     if (!isContainedIn(devflowDir, artifact.relPath)) {
       continue;
     }
+    if (!(await mayChange(fullPath))) continue;
     try {
       await fs.rm(fullPath, { force: true, recursive: artifact.isDir === true });
       if (verbose) p.log.success(`Removed ${artifact.relPath}`);
@@ -932,6 +1020,8 @@ export async function runSelectivePhaseForScope(opts: {
   const { claudeDir, devflowDir, selectedPlugins, verbose } = opts;
   const scope = opts.scope ?? 'user';
   const installedPlugins = opts.installedPlugins ?? DEVFLOW_PLUGINS;
+  // D-CLI-NO-SYMLINK: a legacy local install's removals and rewrites pass this first.
+  const mayChange = scopeChangeGuard(scope, { claudeDir, devflowDir });
 
   // Revert GPT agent frontmatter BEFORE removing agent files — strips GPT model
   // lines from installed agent frontmatter while the files are still present.
@@ -940,15 +1030,17 @@ export async function runSelectivePhaseForScope(opts: {
     const agentsInstallDir = path.join(claudeDir, 'agents', 'devflow');
     try {
       await fs.access(agentsInstallDir);
-      await revertExternalAgents({
-        installDir: agentsInstallDir,
-        devflowDir,
-        onWarning: (msg) => { if (verbose) p.log.warn(msg); },
-      });
+      if (await mayChange(agentsInstallDir)) {
+        await revertExternalAgents({
+          installDir: agentsInstallDir,
+          devflowDir,
+          onWarning: (msg) => { if (verbose) p.log.warn(msg); },
+        });
+      }
     } catch { /* agents dir absent or revert failed — non-fatal */ }
   }
 
-  await removeSelectedPlugins(claudeDir, selectedPlugins, verbose, installedPlugins);
+  await removeSelectedPlugins(claudeDir, selectedPlugins, verbose, installedPlugins, mayChange);
 
   // Clean up ambient hook if ambient plugin is being removed
   if (selectedPlugins.some(sp => sp.name === 'devflow-ambient')) {
@@ -956,7 +1048,7 @@ export async function runSelectivePhaseForScope(opts: {
     try {
       const settings = await fs.readFile(settingsPath, 'utf-8');
       const updated = await removeAmbientHook(settings, { purgeLegacyRule: scope === 'user' });
-      if (updated !== settings) {
+      if (updated !== settings && await mayChange(settingsPath)) {
         await writeSettingsFileAtomic(settingsPath, updated);
         if (verbose) {
           p.log.success('Ambient mode hooks removed from settings.json');
@@ -995,6 +1087,8 @@ export async function runFullPhaseForScope(opts: {
   isTTY: boolean;
 }): Promise<void> {
   const { scope, claudeDir, devflowDir, devflowScriptsDir, verbose, keepDocs, isTTY } = opts;
+  // D-CLI-NO-SYMLINK: a legacy local install's removals and rewrites pass this first.
+  const mayChange = scopeChangeGuard(scope, { claudeDir, devflowDir });
 
   // Revert GPT agent frontmatter before removing agents — ensures no orphaned
   // GPT model lines remain if agents dir is preserved by a later partial flow.
@@ -1003,24 +1097,26 @@ export async function runFullPhaseForScope(opts: {
     const agentsInstallDir = path.join(claudeDir, 'agents', 'devflow');
     try {
       await fs.access(agentsInstallDir);
-      await revertExternalAgents({
-        installDir: agentsInstallDir,
-        devflowDir,
-        onWarning: (msg) => { if (verbose) p.log.warn(msg); },
-      });
+      if (await mayChange(agentsInstallDir)) {
+        await revertExternalAgents({
+          installDir: agentsInstallDir,
+          devflowDir,
+          onWarning: (msg) => { if (verbose) p.log.warn(msg); },
+        });
+      }
     } catch { /* agents dir absent or revert failed — non-fatal */ }
   }
 
   // removeAllDevFlow removes Claude Code assets (commands, agents, rules, skills)
   // and devflowDir/scripts/. Scope-aware cleanup handles the rest of devflowDir.
-  await removeAllDevFlow(claudeDir, devflowScriptsDir, verbose);
+  await removeAllDevFlow(claudeDir, devflowScriptsDir, verbose, mayChange);
 
   if (scope === 'local') {
     // Local scope: devflowDir is gitRoot/.devflow/ which holds project data
     // (memory, learning, features, docs, config.json). Never remove those —
     // only remove install artifacts: scripts/ (done above) + manifest.json and
     // the other Devflow-generated artifacts (see removeDevFlowInstallArtifacts).
-    await removeDevFlowInstallArtifacts(devflowDir, verbose);
+    await removeDevFlowInstallArtifacts(devflowDir, verbose, mayChange);
     p.log.info('Local project data (memory, learning, features, docs) preserved');
   } else {
     // User scope (devflowDir = ~/.devflow/): offer full cleanup behind a confirm gate
@@ -1258,7 +1354,12 @@ export async function runCleanupPhase(opts: {
         settingsContent = JSON.stringify(parsedSettings, null, 2) + '\n';
       }
 
-      if (settingsContent !== originalContent) {
+      // D-CLI-NO-SYMLINK: a legacy local install's settings.json is rewritten only
+      // where no symbolic link leads it out of `<gitRoot>/.claude`.
+      const mayChange = scope === 'local'
+        ? legacyLocalChangeGuard(paths, 'settings.json not edited')
+        : changeAnything;
+      if (settingsContent !== originalContent && await mayChange(settingsPath)) {
         await writeSettingsFileAtomic(settingsPath, settingsContent);
         if (verbose) {
           p.log.success(`Devflow hooks removed from settings.json (${scope})`);
@@ -1564,11 +1665,15 @@ export const uninstallCommand = new Command('uninstall')
 
 /**
  * Remove all Devflow assets (full uninstall).
+ *
+ * Each removal passes `mayChange` first, which skips one a symbolic link would
+ * redirect in a legacy local install (D-CLI-NO-SYMLINK, legacyLocalChangeGuard).
  */
 export async function removeAllDevFlow(
   claudeDir: string,
   devflowScriptsDir: string,
   verbose: boolean,
+  mayChange: ChangeGuard = changeAnything,
 ): Promise<void> {
   const devflowDirectories = [
     { path: path.join(claudeDir, 'commands', 'devflow'), name: 'commands' },
@@ -1578,6 +1683,7 @@ export async function removeAllDevFlow(
   ];
 
   for (const dir of devflowDirectories) {
+    if (!(await mayChange(dir.path))) continue;
     try {
       await fs.rm(dir.path, { recursive: true, force: true });
       if (verbose) {
@@ -1609,6 +1715,7 @@ export async function removeAllDevFlow(
     const prefixedPath = path.join(skillsDir, prefixSkillName(skillName));
     try {
       await fs.stat(prefixedPath);
+      if (!(await mayChange(prefixedPath))) continue;
       await fs.rm(prefixedPath, { recursive: true, force: true });
       skillsRemoved++;
     } catch { /* Skill doesn't exist */ }
@@ -1618,6 +1725,7 @@ export async function removeAllDevFlow(
     const barePath = path.join(skillsDir, skillName);
     try {
       await fs.stat(barePath);
+      if (!(await mayChange(barePath))) continue;
       await fs.rm(barePath, { recursive: true, force: true });
       skillsRemoved++;
     } catch { /* Skill doesn't exist */ }
@@ -1628,8 +1736,12 @@ export async function removeAllDevFlow(
   }
 
   // Also remove old nested skills structure if it exists
+  const nestedSkillsDir = path.join(claudeDir, 'skills', 'devflow');
   try {
-    await fs.rm(path.join(claudeDir, 'skills', 'devflow'), { recursive: true, force: true });
+    await fs.stat(nestedSkillsDir);
+    if (await mayChange(nestedSkillsDir)) {
+      await fs.rm(nestedSkillsDir, { recursive: true, force: true });
+    }
   } catch {
     // Old structure doesn't exist
   }
@@ -1638,7 +1750,7 @@ export async function removeAllDevFlow(
   // registry (retired, renamed, or deleted). The loop above walks the static
   // registry + LEGACY list; this sweep walks the actual directory, so orphaned
   // dirs from older versions are also cleaned up. (F9)
-  await sweepDevflowNamespaces(claudeDir, verbose);
+  await sweepDevflowNamespaces(claudeDir, verbose, mayChange);
 }
 
 /**
@@ -1657,18 +1769,29 @@ export async function removeAllDevFlow(
  * Removals are announced only under `verbose`, but removal FAILURES always warn:
  * a swept-but-not-actually-removed agent or command keeps loading in Claude Code,
  * and the user has no other signal that it is still there.
+ *
+ * A folder `mayChange` refuses is not swept at all (D-CLI-NO-SYMLINK,
+ * legacyLocalChangeGuard). An entry in a swept folder that is itself a link is
+ * only unlinked: `fs.rm` never follows the link it is given.
  */
-export async function sweepDevflowNamespaces(claudeDir: string, verbose: boolean): Promise<void> {
+export async function sweepDevflowNamespaces(
+  claudeDir: string,
+  verbose: boolean,
+  mayChange: ChangeGuard = changeAnything,
+): Promise<void> {
   const agentsDir = path.join(claudeDir, 'agents', 'devflow');
   const commandsDir = path.join(claudeDir, 'commands', 'devflow');
   const skillsDir = path.join(claudeDir, 'skills');
+  const noSweep: SweepResult = { scanned: 0, removed: [], failed: [] };
+  const sweep = async (...args: Parameters<typeof sweepOrphanedAssets>): Promise<SweepResult> =>
+    (await mayChange(args[0])) ? sweepOrphanedAssets(...args) : noSweep;
 
-  const agentsSweep = await sweepOrphanedAssets(
+  const agentsSweep = await sweep(
     agentsDir,
     new Set(getAllAgentNames()),
     mdEntryName,
   );
-  const commandsSweep = await sweepOrphanedAssets(
+  const commandsSweep = await sweep(
     commandsDir,
     new Set(getAllCommandNames()),
     mdEntryName,
@@ -1677,7 +1800,7 @@ export async function sweepDevflowNamespaces(claudeDir: string, verbose: boolean
   // uninstall of another plugin does not sweep devflow:compliance — nothing
   // converges after selective uninstall (only installViaFileCopy + convergeComplianceArtifacts
   // on full/partial init re-materialize it). D-FO-1 applies.
-  const skillsSweep = await sweepOrphanedAssets(
+  const skillsSweep = await sweep(
     skillsDir,
     new Set([...getAllSkillNames(), ...FEATURE_OWNED_SKILLS]),
     (entry) => entry.startsWith(SKILL_NAMESPACE) ? unprefixSkillName(entry) : null,
@@ -1706,20 +1829,24 @@ export async function sweepDevflowNamespaces(claudeDir: string, verbose: boolean
  * sweep the install directory for any orphaned assets whose names left the
  * registry (retired agents/commands survive indefinitely without the sweep).
  * For skills: only remove skills that are NOT used by any remaining plugin.
+ * Each removal passes `mayChange` first, which skips one a symbolic link would
+ * redirect in a legacy local install (D-CLI-NO-SYMLINK, legacyLocalChangeGuard).
  */
 export async function removeSelectedPlugins(
   claudeDir: string,
   plugins: typeof DEVFLOW_PLUGINS,
   verbose: boolean,
   installedPlugins: PluginDefinition[] = DEVFLOW_PLUGINS,
+  mayChange: ChangeGuard = changeAnything,
 ): Promise<void> {
   const { skills, agents, commands, rules } = computeAssetsToRemove(plugins, installedPlugins);
 
   const commandsDir = path.join(claudeDir, 'commands', 'devflow');
   for (const cmd of commands) {
-    const cmdFileName = mdFileName(cmd.replace(/^\//, ''));
+    const cmdPath = path.join(commandsDir, mdFileName(cmd.replace(/^\//, '')));
+    if (!(await mayChange(cmdPath))) continue;
     try {
-      await fs.rm(path.join(commandsDir, cmdFileName), { force: true });
+      await fs.rm(cmdPath, { force: true });
       if (verbose) {
         p.log.success(`Removed command ${cmd}`);
       }
@@ -1730,8 +1857,10 @@ export async function removeSelectedPlugins(
 
   const agentsDir = path.join(claudeDir, 'agents', 'devflow');
   for (const agent of agents) {
+    const agentPath = path.join(agentsDir, mdFileName(agent));
+    if (!(await mayChange(agentPath))) continue;
     try {
-      await fs.rm(path.join(agentsDir, mdFileName(agent)), { force: true });
+      await fs.rm(agentPath, { force: true });
       if (verbose) {
         p.log.success(`Removed agent ${agent}`);
       }
@@ -1748,8 +1877,10 @@ export async function removeSelectedPlugins(
     // in init.ts; live-registry skills never had bare installs (the devflow:
     // namespace shipped in dcecda3, 2026-03-30), so a bare dir for a current
     // registry name is by construction foreign.
+    const skillPath = path.join(skillsDir, prefixSkillName(skill));
+    if (!(await mayChange(skillPath))) continue;
     try {
-      await fs.rm(path.join(skillsDir, prefixSkillName(skill)), { recursive: true, force: true });
+      await fs.rm(skillPath, { recursive: true, force: true });
     } catch { /* Skill might not exist */ }
     if (verbose) {
       p.log.success(`Removed skill ${skill}`);
@@ -1758,8 +1889,10 @@ export async function removeSelectedPlugins(
 
   const rulesDir = path.join(claudeDir, 'rules', 'devflow');
   for (const rule of rules) {
+    const rulePath = path.join(rulesDir, mdFileName(rule));
+    if (!(await mayChange(rulePath))) continue;
     try {
-      await fs.rm(path.join(rulesDir, mdFileName(rule)), { force: true });
+      await fs.rm(rulePath, { force: true });
       if (verbose) {
         p.log.success(`Removed rule ${rule}`);
       }
@@ -1770,5 +1903,5 @@ export async function removeSelectedPlugins(
   // Removes any orphaned files whose names left the registry (retired, renamed,
   // or deleted from all plugins). Spans ALL plugins so assets belonging to
   // non-selected plugins are never swept.
-  await sweepDevflowNamespaces(claudeDir, verbose);
+  await sweepDevflowNamespaces(claudeDir, verbose, mayChange);
 }

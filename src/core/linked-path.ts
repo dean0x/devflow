@@ -2,7 +2,8 @@
  * @file linked-path.ts
  *
  * `firstSymbolicLink`, the check the CLI makes before it writes or deletes under a
- * project's `.devflow/` (D-CLI-NO-SYMLINK).
+ * project's `.devflow/`, or under its `.claude/` when uninstall removes a legacy
+ * local install (D-CLI-NO-SYMLINK).
  */
 
 import { promises as fs } from 'fs';
@@ -17,8 +18,11 @@ import { promises as fs } from 'fs';
  * the project's `learning.json` only then, and the queue drains (`devflow learning
  * --clear|--disable`, `devflow memory --disable|--clear` and `devflow init
  * --no-learning|--no-memory`) delete nothing when `.devflow` or the queue's folder
- * is one. Reason: a repository can commit `.devflow`, or a folder or file in it, as
- * a link to any place on the machine, and a write or delete through one lands
+ * is one. `devflow uninstall`, removing a legacy local install, deletes or rewrites
+ * nothing under the project's `.devflow` or `.claude` where either, or anything
+ * below it on the way to what it removes, is one (legacyLocalChangeGuard in
+ * uninstall.ts). Reason: a repository can commit `.devflow`, or a folder or file in
+ * it, as a link to any place on the machine, and a write or delete through one lands
  * wherever it points. The hooks hold the same rule (D-HOOKS-NO-SYMLINK, git-marker)
  * and so do the learning ops (D-NO-LINKED-TREE). Only paths below the project root
  * are passed here: the root and the folders above it are the user's choice.
