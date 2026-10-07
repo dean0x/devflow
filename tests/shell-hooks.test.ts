@@ -4061,12 +4061,12 @@ describe('session-start-context: learning maintenance directive (Section 2)', ()
 // read and pass on to the agents it delegates to, and send the Learning agent to
 // the queue when it holds turns. A repository can commit any of these, or the
 // folder itself, as a symbolic link to a file elsewhere on the machine, so a file
-// a link leads to is treated as absent and each refusal is logged once. SECRET is
-// a made-up marker standing in for that file's content.
+// a link leads to is treated as absent and each refusal is logged once. MARKER is
+// a made-up string standing in for that file's content.
 
 describe('session-start-context never reads through a symbolic link under .devflow (D-HOOKS-NO-SYMLINK)', () => {
   const CONTEXT_HOOK = path.join(HOOKS_DIR, 'session-start-context');
-  const SECRET = 'made-up-marker-6b2f0e';
+  const MARKER = 'made-up-marker-6b2f0e';
 
   let tmpDir: string;
   let homeDir: string;
@@ -4116,20 +4116,20 @@ describe('session-start-context never reads through a symbolic link under .devfl
     ['pitfalls.md', 'decisions.md', '3 decisions'],
   ] as const) {
     it(`a linked ${linked} puts no TL;DR line, and nothing of the file it names, into the context`, () => {
-      linkOutside(linked, `<!-- TL;DR: ${SECRET} -->\n# ${SECRET}\n`);
+      linkOutside(linked, `<!-- TL;DR: ${MARKER} -->\n# ${MARKER}\n`);
       fs.writeFileSync(path.join(learningDir, kept), `<!-- TL;DR: ${keptLine} -->\n# Rendered\n`);
 
       const { stdout, exitCode } = run();
 
       expect(exitCode).toBe(0);
       expect(contextOf(stdout), 'non-vacuity: the section ran and kept the other file').toContain(keptLine);
-      expect(stdout).not.toContain(SECRET);
+      expect(stdout).not.toContain(MARKER);
       expect(refusals(), 'the refusal is logged once').toHaveLength(1);
     });
   }
 
   it('a linked index.md gets no Index line, so the model is never pointed at the file it names', () => {
-    linkOutside('index.md', `Decisions (1):\n  ${SECRET}\n`);
+    linkOutside('index.md', `Decisions (1):\n  ${MARKER}\n`);
     fs.writeFileSync(path.join(learningDir, 'decisions.md'), '<!-- TL;DR: 1 decisions -->\n# Rendered\n');
 
     const { stdout, exitCode } = run();
@@ -4138,7 +4138,7 @@ describe('session-start-context never reads through a symbolic link under .devfl
     const ctx = contextOf(stdout);
     expect(ctx, 'non-vacuity: the section ran').toContain('--- PROJECT DECISIONS (TL;DR) ---\n1 decisions');
     expect(ctx).not.toContain('Index:');
-    expect(stdout).not.toContain(SECRET);
+    expect(stdout).not.toContain(MARKER);
     expect(refusals(), 'the refusal is logged once').toHaveLength(1);
   });
 
@@ -4157,7 +4157,7 @@ describe('session-start-context never reads through a symbolic link under .devfl
   });
 
   it('a linked queue sends no Learning agent to it', () => {
-    linkOutside('.pending-turns.jsonl', `{"role":"user","content":"${SECRET}","ts":1}\n`);
+    linkOutside('.pending-turns.jsonl', `{"role":"user","content":"${MARKER}","ts":1}\n`);
 
     const linked = run();
     expect(linked.exitCode).toBe(0);
@@ -4172,7 +4172,7 @@ describe('session-start-context never reads through a symbolic link under .devfl
 
   it('a linked stale batch sends no Learning agent to it', () => {
     const batch = path.join(learningDir, '.pending-turns.processing');
-    linkOutside('.pending-turns.processing', `{"role":"user","content":"${SECRET}","ts":1}\n`);
+    linkOutside('.pending-turns.processing', `{"role":"user","content":"${MARKER}","ts":1}\n`);
     // The age check reads the link's own mtime (`stat` without -L), so the link is
     // what is made stale.
     const stale = new Date(Date.now() - 1000 * 1000);
@@ -4192,16 +4192,16 @@ describe('session-start-context never reads through a symbolic link under .devfl
 
   it('a linked learning folder: no TL;DR, no Index line, no directive, and each file read from it refused once', () => {
     fs.rmSync(learningDir, { recursive: true });
-    fs.writeFileSync(path.join(outsideDir, 'decisions.md'), `<!-- TL;DR: ${SECRET} -->\n`);
-    fs.writeFileSync(path.join(outsideDir, 'index.md'), `Decisions (1):\n  ${SECRET}\n`);
-    fs.writeFileSync(path.join(outsideDir, '.pending-turns.jsonl'), `{"role":"user","content":"${SECRET}","ts":1}\n`);
+    fs.writeFileSync(path.join(outsideDir, 'decisions.md'), `<!-- TL;DR: ${MARKER} -->\n`);
+    fs.writeFileSync(path.join(outsideDir, 'index.md'), `Decisions (1):\n  ${MARKER}\n`);
+    fs.writeFileSync(path.join(outsideDir, '.pending-turns.jsonl'), `{"role":"user","content":"${MARKER}","ts":1}\n`);
     fs.symlinkSync(outsideDir, learningDir);
 
     const { stdout, exitCode } = run();
 
     expect(exitCode).toBe(0);
     expect(contextOf(stdout)).toBe('');
-    expect(stdout).not.toContain(SECRET);
+    expect(stdout).not.toContain(MARKER);
     const refused = refusals();
     for (const name of ['decisions.md', 'index.md', '.pending-turns.jsonl']) {
       expect(refused.filter((l) => l.includes(path.join(learningDir, name))), `${name} is refused once`).toHaveLength(1);

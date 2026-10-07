@@ -3310,11 +3310,11 @@ describe('S27: the memory hooks never write through a symbolic link under .devfl
 // these, or the memory folder, as a link to a file elsewhere on the machine, so a
 // file a link leads to is treated as absent: nothing of it reaches the session,
 // the backup or the prompt, each refusal is logged once, and the hook exits 0.
-// SECRET is a made-up marker standing in for the linked file's content.
+// MARKER is a made-up string standing in for the linked file's content.
 // =============================================================================
 describe('S28: the memory hooks never read through a symbolic link under .devflow (D-HOOKS-NO-SYMLINK)', { timeout: HOOK_RUN_ALLOWANCE_MS + NODE_EXEC_STALL_MS }, () => {
-  const SECRET = 'made-up-marker-4c8d1a';
-  const OUTSIDE = `## Now\n- ${SECRET}\n`;
+  const MARKER = 'made-up-marker-4c8d1a';
+  const OUTSIDE = `## Now\n- ${MARKER}\n`;
   // Far in the future, so a backup carrying it is offered whatever the time zone.
   const BACKUP_TIMESTAMP = '2099-01-01T00:00:00Z';
   let tmp: string;
@@ -3365,7 +3365,7 @@ describe('S28: the memory hooks never read through a symbolic link under .devflo
     const run = runMemoryHook(SESSION_START_MEMORY_HOOK);
 
     expect(run.kind, run.stderr).toBe('clean');
-    expect(run.stdout).not.toContain(SECRET);
+    expect(run.stdout).not.toContain(MARKER);
     expect(fs.readFileSync(outsideFile, 'utf-8')).toBe(OUTSIDE);
     expect(refusals('session-start-memory'), 'the refusal is logged once').toHaveLength(1);
   });
@@ -3373,7 +3373,7 @@ describe('S28: the memory hooks never read through a symbolic link under .devflo
   it('session-start-memory: a linked backup.json is not injected', () => {
     writeRealMemory();
     const outsideBackup = path.join(tmp, 'outside-backup.json');
-    fs.writeFileSync(outsideBackup, JSON.stringify({ timestamp: BACKUP_TIMESTAMP, memory_snapshot: SECRET }));
+    fs.writeFileSync(outsideBackup, JSON.stringify({ timestamp: BACKUP_TIMESTAMP, memory_snapshot: MARKER }));
     fs.symlinkSync(outsideBackup, path.join(memoryDir, 'backup.json'));
 
     const run = runMemoryHook(SESSION_START_MEMORY_HOOK);
@@ -3381,7 +3381,7 @@ describe('S28: the memory hooks never read through a symbolic link under .devflo
     expect(run.kind, run.stderr).toBe('clean');
     expect(run.stdout, 'non-vacuity: the real working memory is injected').toContain('the real working memory');
     expect(run.stdout).not.toContain('PRE-COMPACT SNAPSHOT');
-    expect(run.stdout).not.toContain(SECRET);
+    expect(run.stdout).not.toContain(MARKER);
     expect(refusals('session-start-memory'), 'the refusal is logged once').toHaveLength(1);
   });
 
@@ -3405,14 +3405,14 @@ describe('S28: the memory hooks never read through a symbolic link under .devflo
     const outsideDir = path.join(tmp, 'outside-memory');
     fs.mkdirSync(outsideDir);
     fs.writeFileSync(path.join(outsideDir, 'WORKING-MEMORY.md'), OUTSIDE);
-    fs.writeFileSync(path.join(outsideDir, 'backup.json'), JSON.stringify({ timestamp: BACKUP_TIMESTAMP, memory_snapshot: SECRET }));
+    fs.writeFileSync(path.join(outsideDir, 'backup.json'), JSON.stringify({ timestamp: BACKUP_TIMESTAMP, memory_snapshot: MARKER }));
     fs.rmSync(memoryDir, { recursive: true });
     fs.symlinkSync(outsideDir, memoryDir);
 
     const run = runMemoryHook(SESSION_START_MEMORY_HOOK);
 
     expect(run.kind, run.stderr).toBe('clean');
-    expect(run.stdout).not.toContain(SECRET);
+    expect(run.stdout).not.toContain(MARKER);
     expect(refusals('session-start-memory'), 'each file read from the folder is refused once').toHaveLength(2);
   });
 
@@ -3424,7 +3424,7 @@ describe('S28: the memory hooks never read through a symbolic link under .devflo
     expect(run.kind, run.stderr).toBe('clean');
     const backup = fs.readFileSync(path.join(memoryDir, 'backup.json'), 'utf-8');
     expect(JSON.parse(backup).memory_snapshot, 'non-vacuity: the backup is written, with no snapshot').toBe('');
-    expect(backup).not.toContain(SECRET);
+    expect(backup).not.toContain(MARKER);
     expect(isLink(memoryFile), 'the link is left as it was').toBe(true);
     expect(fs.readFileSync(outsideFile, 'utf-8')).toBe(OUTSIDE);
     // The same link refuses two things, each logged once: the snapshot's read and
