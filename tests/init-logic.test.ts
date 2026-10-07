@@ -631,6 +631,100 @@ describe('ensureDevflowGitignore — a root .gitignore that is a symbolic link (
   });
 });
 
+// D-CLI-NO-SYMLINK: init stamps its carve-out marker, and removes the legacy markers,
+// only where neither .devflow nor the marker is a symbolic link. A repository can
+// commit either as a link, and a write or delete under it would land in the folder or
+// file the link names. The root .gitignore is not under .devflow and is still written.
+describe('ensureDevflowGitignore — a linked .devflow or marker (D-CLI-NO-SYMLINK)', () => {
+  const LEGACY = '.root-gitignore-configured-v5';
+  const OUTSIDE = 'a file outside the project, which init may not touch\n';
+  let tmpDir: string;
+  let root: string;
+  let outside: string;
+  let warn: MockInstance;
+
+  beforeEach(async () => {
+    tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'devflow-ensure-ignore-linked-devflow-'));
+    root = path.join(tmpDir, 'repo');
+    outside = path.join(tmpDir, 'outside');
+    await fs.mkdir(root);
+    await fs.mkdir(outside);
+    vi.stubEnv('HOME', path.join(tmpDir, 'home'));
+    warn = vi.spyOn(p.log, 'warn').mockImplementation(() => undefined);
+  });
+
+  afterEach(async () => {
+    warn.mockRestore();
+    vi.unstubAllEnvs();
+    await fs.rm(tmpDir, { recursive: true, force: true });
+  });
+
+  const warned = (): string[] => warn.mock.calls.map(call => String(call[0]));
+  const marker = (): string => path.join(root, '.devflow', '.root-gitignore-configured-v6');
+
+  it('a linked .devflow: no marker is stamped and no legacy marker removed where it points; .gitignore still gets the carve-out', async () => {
+    await fs.writeFile(path.join(outside, LEGACY), OUTSIDE);
+    await fs.symlink(outside, path.join(root, '.devflow'));
+
+    await ensureDevflowGitignore(root, false);
+
+    expect(await fs.readdir(outside), 'nothing is created or deleted in the folder the link names').toEqual([LEGACY]);
+    expect(await fs.readFile(path.join(outside, LEGACY), 'utf-8')).toBe(OUTSIDE);
+    expect((await fs.lstat(path.join(root, '.devflow'))).isSymbolicLink(), 'the link is left as it was').toBe(true);
+    expect(await fs.readFile(path.join(root, '.gitignore'), 'utf-8'), 'the root file is no file under .devflow').toBe(`${DEVFLOW_GITIGNORE_BLOCK}\n`);
+    expect(warned(), 'reported even without --verbose').toEqual([expect.stringContaining('symbolic link')]);
+  });
+
+  it('a linked .devflow whose folder already holds a v6 marker: its legacy markers are not removed either', async () => {
+    await fs.writeFile(path.join(outside, '.root-gitignore-configured-v6'), '');
+    await fs.writeFile(path.join(outside, LEGACY), OUTSIDE);
+    await fs.symlink(outside, path.join(root, '.devflow'));
+
+    await ensureDevflowGitignore(root, false);
+
+    expect((await fs.readdir(outside)).sort()).toEqual([LEGACY, '.root-gitignore-configured-v6'].sort());
+    expect(warned()).toEqual([expect.stringContaining('symbolic link')]);
+  });
+
+  it('a marker that is a link to a missing file: nothing is created where it points', async () => {
+    await fs.mkdir(path.join(root, '.devflow'));
+    await fs.symlink(path.join(outside, 'created-through-the-link'), marker());
+
+    await ensureDevflowGitignore(root, false);
+
+    expect(await fs.readdir(outside), 'nothing is created where the link points').toEqual([]);
+    expect((await fs.lstat(marker())).isSymbolicLink(), 'the link is left as it was').toBe(true);
+    expect(await fs.readFile(path.join(root, '.gitignore'), 'utf-8')).toBe(`${DEVFLOW_GITIGNORE_BLOCK}\n`);
+    expect(warned()).toEqual([expect.stringContaining('symbolic link')]);
+  });
+
+  it('a marker that is a link to an existing file: the file is left as it was and the skip is reported', async () => {
+    const target = path.join(outside, 'target');
+    await fs.writeFile(target, OUTSIDE);
+    await fs.mkdir(path.join(root, '.devflow'));
+    await fs.symlink(target, marker());
+
+    await ensureDevflowGitignore(root, false);
+
+    expect(await fs.readFile(target, 'utf-8')).toBe(OUTSIDE);
+    expect(warned()).toEqual([expect.stringContaining('symbolic link')]);
+  });
+
+  it('a legacy marker that is a link is removed as a link: the file it names is kept', async () => {
+    const target = path.join(outside, 'target');
+    await fs.writeFile(target, OUTSIDE);
+    await fs.mkdir(path.join(root, '.devflow'));
+    await fs.symlink(target, path.join(root, '.devflow', LEGACY));
+
+    await ensureDevflowGitignore(root, false);
+
+    expect(await fs.readFile(target, 'utf-8'), 'nothing is deleted through the link').toBe(OUTSIDE);
+    await expect(fs.lstat(path.join(root, '.devflow', LEGACY)), 'the stale link itself is gone').rejects.toThrow();
+    expect((await fs.lstat(marker())).isFile(), 'non-vacuity: the run stamped v6').toBe(true);
+    expect(warned()).toEqual([]);
+  });
+});
+
 describe('computeDevflowGitignore — branch-order and byte-identity', () => {
   const V2_SENTINEL = '!.devflow/features/*/KNOWLEDGE.md';
   const V3_SENTINEL = '!.devflow/conventions.md';
