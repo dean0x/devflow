@@ -108,6 +108,52 @@ describe('writeManagedConfig', () => {
     expect(tmpFiles).toHaveLength(0);
   });
 
+  // Once a write has created its copy, a failure after that removes the copy again, so
+  // a failed write leaves nothing beside config.json and the old file stands as it was.
+  describe('a write that fails after its copy exists', () => {
+    const copyPath = (): string => `${getConfigPath(tmpDir)}.tmp.${process.pid}`;
+
+    afterEach(() => {
+      vi.restoreAllMocks();
+    });
+
+    it('a failed rename removes the copy, keeps config.json as it was, and the Result says why', async () => {
+      writeDevflowConfig(tmpDir, { reviewPublication: 'full', tracker: 'jira' });
+      const before = fs.readFileSync(getConfigPath(tmpDir), 'utf-8');
+      let copyExisted = false;
+      vi.spyOn(fs.promises, 'rename').mockImplementationOnce(async from => {
+        copyExisted = fs.existsSync(String(from));
+        throw new Error('EXDEV: cross-device link not permitted');
+      });
+
+      const result = await writeManagedConfig(tmpDir, { reviewPublication: 'off' });
+
+      expect(copyExisted, 'the copy existed when the rename failed').toBe(true);
+      expect(fs.readdirSync(path.join(tmpDir, '.devflow')), 'no copy is left beside config.json').toEqual(['config.json']);
+      expect(fs.readFileSync(getConfigPath(tmpDir), 'utf-8'), 'config.json is kept as it was').toBe(before);
+      expect(result).toEqual({
+        ok: false,
+        error: { kind: 'write-failed', path: getConfigPath(tmpDir), detail: 'EXDEV: cross-device link not permitted' },
+      });
+    });
+
+    it('a copy that cannot be removed either is named in the Result', async () => {
+      vi.spyOn(fs.promises, 'rename').mockRejectedValueOnce(new Error('EXDEV: cross-device link not permitted'));
+      vi.spyOn(fs.promises, 'rm').mockRejectedValueOnce(new Error('EPERM: operation not permitted'));
+
+      const result = await writeManagedConfig(tmpDir, { reviewPublication: 'off' });
+
+      expect(result).toEqual({
+        ok: false,
+        error: {
+          kind: 'write-failed',
+          path: getConfigPath(tmpDir),
+          detail: `EXDEV: cross-device link not permitted; its copy ${copyPath()} could not be removed: EPERM: operation not permitted`,
+        },
+      });
+    });
+  });
+
   // D-CLI-NO-SYMLINK: a repository can commit .devflow as a link to a folder
   // elsewhere, or plant a link at the name of the copy init writes before renaming
   // it into place; init writes nothing through either.
@@ -141,13 +187,15 @@ describe('writeManagedConfig', () => {
 
     it('a link planted at the name of the copy: nothing is written through it, and the Result says the write failed', async () => {
       const target = path.join(outside, 'target');
+      const planted = `${getConfigPath(tmpDir)}.tmp.${process.pid}`;
       fs.writeFileSync(target, KEEP);
       fs.mkdirSync(path.join(tmpDir, '.devflow'));
-      fs.symlinkSync(target, `${getConfigPath(tmpDir)}.tmp.${process.pid}`);
+      fs.symlinkSync(target, planted);
 
       const result = await writeManagedConfig(tmpDir, { reviewPublication: 'off' });
 
       expect(fs.readFileSync(target, 'utf-8'), 'nothing is written through the planted link').toBe(KEEP);
+      expect(fs.lstatSync(planted).isSymbolicLink(), 'an entry this run did not create is left where it is').toBe(true);
       expect(fs.existsSync(getConfigPath(tmpDir)), 'no config.json was renamed into place').toBe(false);
       expect(result).toMatchObject({ ok: false, error: { kind: 'write-failed', path: getConfigPath(tmpDir) } });
     });

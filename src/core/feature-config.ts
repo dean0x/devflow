@@ -1,5 +1,6 @@
 import * as path from 'path';
 import { promises as fs } from 'fs';
+import type { FileHandle } from 'fs/promises';
 import { firstSymbolicLink } from './linked-path.js';
 import { getFeatureConfigPath } from './project-paths.js';
 import { parseTrackerId, type TrackerProvider } from './tracker.js';
@@ -275,20 +276,62 @@ async function readConfigBody(
   return classifyConfigBytes(read.bytes, lib.value);
 }
 
+/** What writeConfigBody did: the file is in place, or why it is not. */
+type ConfigBodyWrite = { readonly ok: true } | { readonly ok: false; readonly detail: string };
+
+/** A thrown value's message, or the value itself when it is not an Error. */
+function messageOf(err: unknown): string {
+  return err instanceof Error ? err.message : String(err);
+}
+
 /**
- * Serialise a config body to a project's config file.
+ * Serialise a config body to a project's config file. Never throws.
  * Creates the .devflow/ directory if missing.
  * Uses an atomic temp+rename pattern to prevent partial reads under concurrent writes.
  * The copy is created only where nothing stands ('wx'), so an entry a repository
  * planted at its name — a symbolic link among them — is never written through
- * (D-CLI-NO-SYMLINK); the write then fails and the Result says so.
+ * (D-CLI-NO-SYMLINK) and, not being this run's, is left where it is; the write then
+ * fails and the Result says so. Once this run has created the copy, a write, close or
+ * rename that fails removes it again, so a failed write leaves nothing beside the
+ * config; the Result names the failure, and the copy too when it could not be removed.
  */
-async function writeConfigBody(projectRoot: string, body: object): Promise<void> {
+async function writeConfigBody(projectRoot: string, body: object): Promise<ConfigBodyWrite> {
   const configPath = getFeatureConfigPath(projectRoot);
-  await fs.mkdir(path.join(projectRoot, '.devflow'), { recursive: true });
   const tmpPath = configPath + '.tmp.' + process.pid;
-  await fs.writeFile(tmpPath, JSON.stringify(body, null, 2) + '\n', { encoding: 'utf-8', mode: 0o600, flag: 'wx' });
-  await fs.rename(tmpPath, configPath);
+  let text: string;
+  let copy: FileHandle;
+  try {
+    text = JSON.stringify(body, null, 2) + '\n';
+    await fs.mkdir(path.join(projectRoot, '.devflow'), { recursive: true });
+    copy = await fs.open(tmpPath, 'wx', 0o600);
+  } catch (err: unknown) {
+    return { ok: false, detail: messageOf(err) };
+  }
+  try {
+    try {
+      await copy.writeFile(text, 'utf-8');
+    } finally {
+      await copy.close();
+    }
+    await fs.rename(tmpPath, configPath);
+    return { ok: true };
+  } catch (err: unknown) {
+    return { ok: false, detail: await removeCopy(tmpPath, messageOf(err)) };
+  }
+}
+
+/**
+ * Remove the copy a failed config write created, and say why the write failed:
+ * `detail`, followed by the removal's own failure when the copy stays. A copy that
+ * is already gone counts as removed (`force`).
+ */
+async function removeCopy(tmpPath: string, detail: string): Promise<string> {
+  try {
+    await fs.rm(tmpPath, { force: true });
+    return detail;
+  } catch (err: unknown) {
+    return `${detail}; its copy ${tmpPath} could not be removed: ${messageOf(err)}`;
+  }
 }
 
 /**
@@ -362,7 +405,7 @@ export async function writeManagedConfig(
   try {
     linked = await firstSymbolicLink([path.dirname(configPath)]);
   } catch (err: unknown) {
-    return { ok: false, error: { kind: 'unreadable', path: configPath, detail: err instanceof Error ? err.message : String(err) } };
+    return { ok: false, error: { kind: 'unreadable', path: configPath, detail: messageOf(err) } };
   }
   if (linked !== null) {
     return { ok: false, error: { kind: 'unreadable', path: configPath, detail: `${linked} is a symbolic link, and devflow writes nothing through one` } };
@@ -372,11 +415,8 @@ export async function writeManagedConfig(
   if (existing.kind === 'unreadable') {
     return { ok: false, error: { kind: 'unreadable', path: configPath, detail: existing.detail } };
   }
-  try {
-    await writeConfigBody(projectRoot, mergeManagedConfig(objectOf(existing), managed));
-  } catch (err: unknown) {
-    return { ok: false, error: { kind: 'write-failed', path: configPath, detail: err instanceof Error ? err.message : String(err) } };
-  }
+  const written = await writeConfigBody(projectRoot, mergeManagedConfig(objectOf(existing), managed));
+  if (!written.ok) return { ok: false, error: { kind: 'write-failed', path: configPath, detail: written.detail } };
   return { ok: true };
 }
 
