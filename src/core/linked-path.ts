@@ -13,7 +13,8 @@ import { promises as fs } from 'fs';
  * D-CLI-NO-SYMLINK: the CLI writes or deletes under a project's `.devflow/` only
  * where neither `.devflow` nor the entry it acts on through it is a symbolic link:
  * `devflow init` stamps its carve-out marker, removes the legacy markers and
- * writes `.devflow/config.json` only then, and the queue drains (`devflow learning
+ * writes `.devflow/config.json` only then, `devflow learning --configure` writes
+ * the project's `learning.json` only then, and the queue drains (`devflow learning
  * --clear|--disable`, `devflow memory --disable|--clear` and `devflow init
  * --no-learning|--no-memory`) delete nothing when `.devflow` or the queue's folder
  * is one. Reason: a repository can commit `.devflow`, or a folder or file in it, as

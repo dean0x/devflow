@@ -12,6 +12,7 @@ import { loadSettingsModule, narrowedSwitchLabel, personalConfigTrackedWarning }
 import { getDevFlowDirectory } from '../../targets/claude-code/claude-paths.js';
 import { getLedgerRoot } from '../../core/ledger-root.js';
 import { drainLearningQueue } from '../../core/learning-queue-cleanup.js';
+import { firstSymbolicLink } from '../../core/linked-path.js';
 import { formatRefusedDrain } from '../../core/queue-drain.js';
 import {
   formatLearningStoreUnavailable,
@@ -335,8 +336,17 @@ async function handleConfigure(): Promise<void> {
     // from the ledger ($LEDGER_ROOT/.devflow/learning/), so write it there — the
     // main checkout in a linked worktree; the current directory outside git.
     const projectRoot = (await getLedgerRoot()) ?? process.cwd();
-    await fs.mkdir(getLearningDir(projectRoot), { recursive: true });
+    const learningDir = getLearningDir(projectRoot);
     const projectConfigPath = getLearningTuningConfigPath(projectRoot);
+    // D-CLI-NO-SYMLINK (core/linked-path.ts): nothing is written through a .devflow,
+    // a learning folder or a learning.json that is a symbolic link.
+    const linked = await firstSymbolicLink([path.dirname(learningDir), learningDir, projectConfigPath]);
+    if (linked !== null) {
+      p.log.error(`Project config not written: ${linked} is a symbolic link, and devflow writes nothing through one`);
+      process.exitCode = 1;
+      return;
+    }
+    await fs.mkdir(learningDir, { recursive: true });
     await fs.writeFile(projectConfigPath, configJson, 'utf-8');
     p.log.success(`Project config written to ${color.dim(projectConfigPath)}`);
   }

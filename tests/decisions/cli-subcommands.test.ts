@@ -746,6 +746,73 @@ describe('learning --disable drains the learning pending-turns queue', () => {
 });
 
 // ---------------------------------------------------------------------------
+// --configure writes the project tuning config, learning.json, under the ledger's
+// .devflow/learning. A repository can commit .devflow, the learning folder or
+// learning.json itself as a link; the command then writes nothing, says why and
+// exits 1 (D-CLI-NO-SYMLINK).
+// ---------------------------------------------------------------------------
+
+describe('learning --configure never writes the project config through a symbolic link (D-CLI-NO-SYMLINK)', () => {
+  const KEEP = 'a file outside the project\n';
+  let outside: string;
+
+  beforeEach(() => {
+    outside = makeTmpDir();
+  });
+
+  afterEach(() => {
+    fs.rmSync(outside, { recursive: true, force: true });
+  });
+
+  /** Answer the wizard: Sonnet, no debug logging, Project scope. */
+  async function configureProject(): Promise<LearningRun> {
+    vi.mocked(p.select).mockResolvedValueOnce('sonnet').mockResolvedValueOnce('project');
+    vi.mocked(p.confirm).mockResolvedValueOnce(false);
+    return runLearning(['--configure']);
+  }
+
+  const LAYOUTS: ReadonlyArray<readonly [string, () => string]> = [
+    ['.devflow', () => {
+      fs.mkdirSync(path.join(outside, 'learning'));
+      fs.writeFileSync(path.join(outside, 'learning', 'learning.json'), KEEP);
+      fs.symlinkSync(outside, path.join(root, '.devflow'));
+      return path.join(outside, 'learning', 'learning.json');
+    }],
+    [path.join('.devflow', 'learning'), () => {
+      fs.writeFileSync(path.join(outside, 'learning.json'), KEEP);
+      fs.mkdirSync(path.join(root, '.devflow'));
+      fs.symlinkSync(outside, path.join(root, '.devflow', 'learning'));
+      return path.join(outside, 'learning.json');
+    }],
+    [path.join('.devflow', 'learning', 'learning.json'), () => {
+      fs.writeFileSync(path.join(outside, 'target'), KEEP);
+      fs.mkdirSync(path.join(root, '.devflow', 'learning'), { recursive: true });
+      fs.symlinkSync(path.join(outside, 'target'), path.join(root, '.devflow', 'learning', 'learning.json'));
+      return path.join(outside, 'target');
+    }],
+  ];
+
+  for (const [linked, layout] of LAYOUTS) {
+    it(`a linked ${linked}: nothing is written where it points, and the command says why and exits 1`, async () => {
+      const kept = layout();
+
+      const run = await configureProject();
+
+      expect(fs.readFileSync(kept, 'utf-8'), 'nothing is written through the link').toBe(KEEP);
+      expect(run.error).toContain(`${path.join(root, linked)} is a symbolic link`);
+      expect(run.exitCode).toBe(1);
+    });
+  }
+
+  it('non-vacuity: a plain project gets its config', async () => {
+    const run = await configureProject();
+
+    expect(JSON.parse(fs.readFileSync(path.join(root, '.devflow', 'learning', 'learning.json'), 'utf-8'))).toEqual({ model: 'sonnet', debug: false });
+    expect(run.exitCode).toBe(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
 // `devflow decisions` is not a registered command: the surface is `learning`.
 // ---------------------------------------------------------------------------
 
