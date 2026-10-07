@@ -2828,3 +2828,175 @@ describe('S26: pre-compact backup.json is replaced by a rename, never rewritten 
     expect(fs.readFileSync(PRE_COMPACT_HOOK, 'utf-8')).not.toMatch(inPlace);
   });
 });
+
+// =============================================================================
+// S27 — D-HOOKS-NO-SYMLINK-WRITE: no memory hook writes through a symbolic link
+//
+// A repository can commit a symbolic link anywhere in its own .devflow/. The
+// worker's batch merge (`>>`), its `touch`es and its trim copy, pre-compact's
+// backup and working-memory bootstrap, and session-start's batch recovery all
+// write under .devflow/memory, so each is skipped when the memory folder, or a
+// file written there in place, is a link. A skipped write is logged once and the
+// hook exits 0.
+// =============================================================================
+describe('S27: the memory hooks never write through a symbolic link under .devflow (D-HOOKS-NO-SYMLINK-WRITE)', () => {
+  const UNTOUCHED = 'a file outside the project, which no hook may write\n';
+  let tmp: string;
+  let projectDir: string;
+  let homeDir: string;
+  let shimDir: string;
+  let memoryDir: string;
+  let outsideFile: string;
+  let outsideDir: string;
+
+  beforeEach(() => {
+    tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'emr-s27-'));
+    projectDir = path.join(tmp, 'repo');
+    homeDir = path.join(tmp, 'home');
+    shimDir = path.join(tmp, 'shim');
+    memoryDir = path.join(projectDir, '.devflow', 'memory');
+    outsideFile = path.join(tmp, 'outside.txt');
+    outsideDir = path.join(tmp, 'outside');
+    for (const dir of [projectDir, homeDir, shimDir, outsideDir]) fs.mkdirSync(dir);
+    initGitRepo(projectDir);
+    fs.writeFileSync(outsideFile, UNTOUCHED);
+  });
+
+  afterEach(() => {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  });
+
+  const isLink = (file: string): boolean => fs.lstatSync(file).isSymbolicLink();
+
+  /** The lines of `hookName`'s own log that report a refused write. */
+  const refusals = (hookName: string): string[] => {
+    const slug = projectDir.replace(/^\//, '').replace(/\//g, '-');
+    const log = path.join(homeDir, '.devflow', 'logs', slug, `.${hookName}.log`);
+    return fs.existsSync(log) ? fs.readFileSync(log, 'utf-8').split('\n').filter((l) => l.includes('symbolic link')) : [];
+  };
+
+  /** A claude stand-in that records that it ran and writes a valid staged memory file. */
+  function claudeThatRecordsItsRun(): string {
+    const invoked = path.join(shimDir, 'claude-invoked');
+    fs.writeFileSync(
+      path.join(shimDir, 'claude'),
+      `#!/bin/bash\ncat > /dev/null\n: > "${invoked}"\necho "<!-- memory-head: testsha branch: main -->" > "${memoryDir}/WORKING-MEMORY.md.new"\nexit 0\n`,
+    );
+    fs.chmodSync(path.join(shimDir, 'claude'), 0o755);
+    return invoked;
+  }
+
+  const runMemoryHook = (hook: string) =>
+    spawnWithStdin('bash', [hook], { input: JSON.stringify({ cwd: projectDir }), env: { ...process.env, HOME: homeDir } });
+
+  it('background-memory-update: a link at the batch file leaves its target byte-identical, and no LLM run starts', () => {
+    fs.mkdirSync(memoryDir, { recursive: true });
+    seedQueue(projectDir);
+    const batch = path.join(memoryDir, '.pending-turns.processing');
+    fs.symlinkSync(outsideFile, batch);
+    const invoked = claudeThatRecordsItsRun();
+
+    expect(runWorker(projectDir, homeDir, shimDir).exitCode).toBe(0);
+
+    expect(fs.readFileSync(outsideFile, 'utf-8'), 'the link target is byte-identical').toBe(UNTOUCHED);
+    expect(isLink(batch), 'the link is left as it was').toBe(true);
+    expect(fs.existsSync(invoked), 'no LLM run starts').toBe(false);
+    expect(fs.readFileSync(path.join(memoryDir, '.pending-turns.jsonl'), 'utf-8').trim().split('\n'), 'the queue is kept').toHaveLength(2);
+    expect(refusals('background-memory-update'), 'the refusal is logged once').toHaveLength(1);
+  });
+
+  it('background-memory-update: a link at .last-refresh-ok creates nothing where it points', () => {
+    fs.mkdirSync(memoryDir, { recursive: true });
+    seedQueue(projectDir);
+    const created = path.join(tmp, 'created-through-the-link');
+    fs.symlinkSync(created, path.join(memoryDir, '.last-refresh-ok'));
+    claudeThatRecordsItsRun();
+
+    expect(runWorker(projectDir, homeDir, shimDir).exitCode).toBe(0);
+
+    expect(fs.existsSync(created), 'touch never follows the link').toBe(false);
+    expect(refusals('background-memory-update'), 'the refusal is logged once').toHaveLength(1);
+  });
+
+  it('background-memory-update: a linked memory folder is left as it was', () => {
+    fs.mkdirSync(path.join(projectDir, '.devflow'));
+    fs.symlinkSync(outsideDir, memoryDir);
+    seedQueue(projectDir); // lands in the linked folder
+    const before = fs.readdirSync(outsideDir).sort();
+    claudeThatRecordsItsRun();
+
+    expect(runWorker(projectDir, homeDir, shimDir).exitCode).toBe(0);
+
+    expect(fs.readdirSync(outsideDir).sort(), 'nothing is claimed, created or renamed in the folder the link names').toEqual(before);
+    expect(refusals('background-memory-update'), 'the refusal is logged once').toHaveLength(1);
+  });
+
+  it('background-memory-update: the batch trim never writes through a link planted at its copy\'s name', () => {
+    fs.mkdirSync(memoryDir, { recursive: true });
+    const batch = path.join(memoryDir, '.pending-turns.processing');
+    const rows = (prefix: string, count: number): string =>
+      Array.from({ length: count }, (_, i) =>
+        JSON.stringify({ role: i % 2 === 0 ? 'user' : 'assistant', content: `${prefix}-${i}`, ts: i }) + '\n').join('');
+    // 160 leftover lines plus 60 new ones: past the 200-line cap, so the trim runs.
+    fs.writeFileSync(batch, rows('old', 160), { mode: 0o600 });
+    fs.writeFileSync(path.join(memoryDir, '.pending-turns.jsonl'), rows('new', 60), { mode: 0o600 });
+    fs.writeFileSync(path.join(shimDir, 'claude'), '#!/bin/bash\ncat > /dev/null\nexit 1\n');
+    fs.chmodSync(path.join(shimDir, 'claude'), 0o755);
+
+    // The copy's name ends in the worker's PID, and exec keeps the PID, so the
+    // wrapper plants the link at exactly that name, checks it is there, and then
+    // becomes the worker.
+    execSync(
+      `bash -c 'ln -s "$3" "$2/.pending-turns.processing.tmp.$$" && [ -L "$2/.pending-turns.processing.tmp.$$" ] && exec bash "$0" "$1"' ` +
+        `"${BACKGROUND_UPDATER}" "${projectDir}" "${memoryDir}" "${outsideFile}"`,
+      { env: { ...process.env, HOME: homeDir, PATH: `${shimDir}:${process.env.PATH ?? '/usr/bin:/bin'}` }, stdio: 'ignore' },
+    );
+
+    expect(fs.readFileSync(outsideFile, 'utf-8'), 'nothing is written through the planted link').toBe(UNTOUCHED);
+    expect(isLink(batch), 'the link is never renamed over the batch').toBe(false);
+    expect(fs.readdirSync(memoryDir).filter((name) => name.includes('.tmp.')), 'the planted link is removed').toEqual([]);
+  });
+
+  it('pre-compact-memory: a linked memory folder gets no backup and no working memory', () => {
+    fs.mkdirSync(path.join(projectDir, '.devflow'));
+    fs.symlinkSync(outsideDir, memoryDir);
+
+    const run = runMemoryHook(PRE_COMPACT_HOOK);
+
+    expect(run.kind, run.stderr).toBe('clean');
+    expect(fs.readdirSync(outsideDir), 'nothing is created in the folder the link names').toEqual([]);
+    expect(refusals('pre-compact-memory'), 'the refusal is logged once').toHaveLength(1);
+  });
+
+  it('session-start-memory: a stale batch in a linked memory folder is not moved', () => {
+    fs.mkdirSync(path.join(projectDir, '.devflow'));
+    const batch = path.join(outsideDir, '.pending-turns.processing');
+    fs.writeFileSync(batch, '{"role":"user","content":"x","ts":1}\n');
+    backdateMtime(batch, 600);
+    fs.symlinkSync(outsideDir, memoryDir);
+
+    const run = runMemoryHook(SESSION_START_MEMORY_HOOK);
+
+    expect(run.kind, run.stderr).toBe('clean');
+    expect(fs.readdirSync(outsideDir), 'nothing is renamed in the folder the link names').toEqual(['.pending-turns.processing']);
+    expect(refusals('session-start-memory'), 'the refusal is logged once').toHaveLength(1);
+  });
+
+  it('session-start-memory: a link at the stale batch path is not moved into the queue', () => {
+    fs.mkdirSync(memoryDir, { recursive: true });
+    const batch = path.join(memoryDir, '.pending-turns.processing');
+    fs.symlinkSync(outsideFile, batch);
+    // The age check reads the link's own mtime (`stat` without -L), so the link is
+    // what is made stale.
+    const stale = new Date(Date.now() - 600 * 1000);
+    fs.lutimesSync(batch, stale, stale);
+
+    const run = runMemoryHook(SESSION_START_MEMORY_HOOK);
+
+    expect(run.kind, run.stderr).toBe('clean');
+    expect(isLink(batch), 'the link is left where it was').toBe(true);
+    expect(fs.existsSync(path.join(memoryDir, '.pending-turns.jsonl')), 'the queue is not made a link').toBe(false);
+    expect(fs.readFileSync(outsideFile, 'utf-8')).toBe(UNTOUCHED);
+    expect(refusals('session-start-memory'), 'the refusal is logged once').toHaveLength(1);
+  });
+});

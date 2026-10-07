@@ -64,6 +64,16 @@ source "$SCRIPT_DIR/get-mtime" || { echo "memory-worker: failed to source get-mt
 # BEFORE spawning to prevent a second concurrent Stop hook from double-spawning
 # within the same 120s window.
 TRIGGER_FILE="$MEMORY_DIR/.working-memory-last-trigger"
+
+# D-HOOKS-NO-SYMLINK-WRITE (git-marker): the stamp below is a `touch`, which follows
+# a symbolic link, so a linked stamp or memory folder is never stamped, and with no
+# stamp to throttle it no worker is spawned either.
+if ! df_no_symlink_below "$PROJECT_ROOT" "$TRIGGER_FILE"; then
+  log "SKIP: a symbolic link sits on the path to $TRIGGER_FILE; nothing written, worker not spawned"
+  dbg "EXIT: symbolic link on the throttle path"
+  exit 0
+fi
+
 NOW=$(date +%s)
 LAST_TRIGGER=0
 if [ -f "$TRIGGER_FILE" ]; then

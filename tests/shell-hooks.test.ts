@@ -1492,6 +1492,103 @@ describe('git-marker helper: df_has_git_marker', () => {
 });
 
 // =============================================================================
+// git-marker helper: df_no_symlink_below (D-HOOKS-NO-SYMLINK-WRITE)
+// =============================================================================
+//
+// Every hook write under a project's .devflow/ asks this predicate first. It
+// refuses a path when the path itself, or a folder between the root and it, is a
+// symbolic link, and it never looks at the root or at anything above it.
+// =============================================================================
+
+describe('git-marker helper: df_no_symlink_below (D-HOOKS-NO-SYMLINK-WRITE)', () => {
+  const GIT_MARKER_SRC = path.join(HOOKS_DIR, 'git-marker');
+
+  let tmp: string;
+  let root: string;
+  let outsideDir: string;
+
+  beforeEach(() => {
+    tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-nolink-'));
+    root = path.join(tmp, 'repo');
+    outsideDir = path.join(tmp, 'outside');
+    fs.mkdirSync(path.join(root, '.devflow', 'memory'), { recursive: true });
+    fs.mkdirSync(outsideDir);
+  });
+
+  afterEach(() => {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  });
+
+  /** The predicate's exit status for `rootArg` and `paths`, each passed as its own argument. */
+  const status = (rootArg: string, ...paths: string[]): number | null =>
+    spawnSync('bash', ['-c', 'source "$1"; shift; df_no_symlink_below "$@"', '_', GIT_MARKER_SRC, rootArg, ...paths]).status;
+
+  const queue = (): string => path.join(root, '.devflow', 'memory', '.pending-turns.jsonl');
+
+  it('admits a path with no link below the root, whether its parts exist yet or not', () => {
+    expect(status(root, queue()), 'a file not created yet').toBe(0);
+    fs.writeFileSync(queue(), '');
+    expect(status(root, queue()), 'an existing file').toBe(0);
+    expect(status(root, path.join(root, '.devflow', 'learning', '.pending-turns.jsonl')), 'a folder not created yet').toBe(0);
+  });
+
+  it('refuses a path that is itself a link, dangling or resolving', () => {
+    const target = path.join(outsideDir, 'target');
+    fs.symlinkSync(target, queue());
+    expect(status(root, queue()), 'a dangling link').toBe(1);
+    fs.writeFileSync(target, 'x');
+    expect(status(root, queue()), 'a link to a file').toBe(1);
+  });
+
+  it('refuses a path with a linked folder between the root and it, at either depth', () => {
+    fs.rmSync(path.join(root, '.devflow', 'memory'), { recursive: true });
+    fs.symlinkSync(outsideDir, path.join(root, '.devflow', 'memory'));
+    expect(status(root, queue()), '.devflow/memory is a link').toBe(1);
+    expect(status(root, path.join(root, '.devflow', 'memory')), 'the linked folder itself').toBe(1);
+
+    fs.rmSync(path.join(root, '.devflow'), { recursive: true });
+    fs.symlinkSync(outsideDir, path.join(root, '.devflow'));
+    expect(status(root, queue()), '.devflow is a link').toBe(1);
+  });
+
+  it('checks every path it is given: one link among them refuses them all', () => {
+    const okFile = path.join(root, '.devflow', 'memory', '.last-refresh-ok');
+    expect(status(root, queue(), okFile)).toBe(0);
+    fs.symlinkSync(path.join(outsideDir, 'target'), okFile);
+    expect(status(root, queue(), okFile)).toBe(1);
+  });
+
+  it('never checks the root or a folder above it', () => {
+    // On macOS the temp tree itself sits behind /var -> /private/var; this builds the
+    // same shape on any platform.
+    const linkedParent = path.join(tmp, 'linked-parent');
+    fs.symlinkSync(tmp, linkedParent);
+    const underLinkedParent = path.join(linkedParent, 'repo');
+    expect(status(underLinkedParent, path.join(underLinkedParent, '.devflow', 'memory', '.pending-turns.jsonl')), 'a linked parent').toBe(0);
+
+    const linkedRoot = path.join(tmp, 'linked-root');
+    fs.symlinkSync(root, linkedRoot);
+    expect(status(linkedRoot, path.join(linkedRoot, '.devflow', 'memory', '.pending-turns.jsonl')), 'a linked root').toBe(0);
+  });
+
+  it('refuses what it cannot vouch for: no path, an empty root, a path not below the root, an empty, `.` or `..` part', () => {
+    expect(status(root), 'no path at all').toBe(1);
+    expect(status('', queue()), 'an empty root').toBe(1);
+    expect(status(root, root), 'the root itself').toBe(1);
+    expect(status(root, path.join(outsideDir, 'q')), 'a path outside the root').toBe(1);
+    expect(status(root, `${root}x/.devflow/q`), 'a sibling whose name starts with the root\'s').toBe(1);
+    expect(status(root, `${root}/.devflow//memory/q`), 'an empty part').toBe(1);
+    expect(status(root, `${root}/.devflow/./memory/q`), 'a `.` part').toBe(1);
+    expect(status(root, `${root}/.devflow/../../outside/q`), 'a `..` part').toBe(1);
+  });
+
+  it('walks at most 64 parts below the root, and refuses a deeper path rather than walk it', () => {
+    expect(status(root, `${root}/${'d/'.repeat(63)}q`), '64 parts').toBe(0);
+    expect(status(root, `${root}/${'d/'.repeat(64)}q`), '65 parts').toBe(1);
+  });
+});
+
+// =============================================================================
 // session-start-orchestrator: orchestrator charter injection
 // =============================================================================
 
@@ -1796,6 +1893,27 @@ describe('ensure-devflow-init behavioral', () => {
     expect(fs.existsSync(path.join(tmpDir, '.devflow'))).toBe(false);
   });
 
+  it('returns non-zero and creates nothing where the link points when .devflow is a symbolic link (D-HOOKS-NO-SYMLINK-WRITE)', () => {
+    // A repository can commit .devflow itself as a link; `mkdir -p` would then create
+    // memory/, learning/, features/ and docs/ inside the folder the link names, and
+    // the carve-out marker would land there too. The refusal is logged once.
+    const outsideDir = path.join(tmpDir, 'outside');
+    fs.mkdirSync(outsideDir);
+    fs.symlinkSync(outsideDir, path.join(tmpDir, '.devflow'));
+    const logFile = path.join(tmpDir, 'hook.log');
+
+    const result = execSync(
+      `bash -c 'log() { printf "%s\\n" "$1" >> "$HOOK_LOG"; }; source "${ENSURE_DEVFLOW}" "${tmpDir}"; echo "rc=$?"'`,
+      { stdio: 'pipe', env: { ...process.env, HOOK_LOG: logFile } },
+    ).toString().trim();
+
+    expect(result).toBe('rc=1');
+    expect(fs.readdirSync(outsideDir), 'nothing is created in the folder the link names').toEqual([]);
+    const lines = fs.readFileSync(logFile, 'utf-8').trim().split('\n');
+    expect(lines, 'the refusal is logged once').toHaveLength(1);
+    expect(lines[0]).toContain('symbolic link');
+  });
+
   it('fast-path gates on .root-gitignore-configured-v6 marker with no -v5/-v4/-v3 reference (P0-S13)', () => {
     // P0-S13 verify clause: the fast-path marker is bumped with each block format change,
     // in the same commit as both writers' stamps (D-GITIGNORE-V6).
@@ -1940,6 +2058,34 @@ describe('ensure-root-gitignore behavioral', () => {
 
     const fast = spawnSync('bash', ['-c', probe], { encoding: 'utf-8' });
     expect({ status: fast.status, out: fast.stdout.trim() }, 'the converged fast path').toEqual({ status: 0, out: 'reached' });
+  });
+
+  it('creates its marker only where nothing stands: a link at the marker path is never written through (D-HOOKS-NO-SYMLINK-WRITE)', () => {
+    // `touch` follows a link, so a marker committed as a link would create or
+    // stamp whatever file it names.
+    fs.mkdirSync(path.join(tmpDir, '.devflow'));
+    const marker = path.join(tmpDir, '.devflow', '.root-gitignore-configured-v6');
+    const target = path.join(tmpDir, 'created-through-the-link');
+    fs.symlinkSync(target, marker);
+
+    execSync(`bash -c 'source "${ENSURE_ROOT}" "${tmpDir}"'`, { stdio: 'pipe' });
+
+    expect(fs.existsSync(target), 'nothing is created where the link points').toBe(false);
+    expect(fs.lstatSync(marker).isSymbolicLink(), 'the link is left as it was').toBe(true);
+    expect(ignoreLines(path.join(tmpDir, '.gitignore')), 'non-vacuity: the run took the stamping path').toContain('!.devflow/project.json');
+  });
+
+  it('a `set -e` caller keeps running when the healing path finds its marker already there', () => {
+    // The marker is created only where nothing stands, so on a healing run that
+    // finds it the create fails, and that failure must not end the caller.
+    fs.mkdirSync(path.join(tmpDir, '.devflow'));
+    fs.writeFileSync(path.join(tmpDir, '.devflow', '.root-gitignore-configured-v6'), '');
+    fs.writeFileSync(path.join(tmpDir, '.gitignore'), 'node_modules/\n');
+
+    const run = spawnSync('bash', ['-c', `set -e; source "${ENSURE_ROOT}" "${tmpDir}"; echo reached`], { encoding: 'utf-8' });
+
+    expect({ status: run.status, out: run.stdout.trim() }).toEqual({ status: 0, out: 'reached' });
+    expect(ignoreLines(path.join(tmpDir, '.gitignore')), 'non-vacuity: the block was healed').toContain('!.devflow/project.json');
   });
 
   it('v6 marker present but block dropped: heals the .gitignore (marker is a claim, not proof)', () => {
@@ -3082,6 +3228,17 @@ describe('session-start-context root .gitignore (memory-independent)', () => {
     expect(fs.readFileSync(gitignore, 'utf-8').split('\n').map(l => l.trim())).toContain('!.devflow/policy.json');
     expect(fs.readFileSync(gitignore, 'utf-8').split('\n').map(l => l.trim())).toContain('!.devflow/project.json');
     expect(fs.existsSync(path.join(tmpDir, '.devflow', '.root-gitignore-configured-v6'))).toBe(true);
+  });
+
+  it('a linked .devflow gets no carve-out marker and no learning folder where the link points (D-HOOKS-NO-SYMLINK-WRITE)', () => {
+    const outsideDir = path.join(homeDir, 'outside');
+    fs.mkdirSync(outsideDir);
+    fs.symlinkSync(outsideDir, path.join(tmpDir, '.devflow'));
+
+    const { exitCode } = runHook(CONTEXT_HOOK, { cwd: tmpDir, source: 'startup' }, homeDir);
+
+    expect(exitCode).toBe(0);
+    expect(fs.readdirSync(outsideDir), 'nothing is created in the folder the link names').toEqual([]);
   });
 });
 

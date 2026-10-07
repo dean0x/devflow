@@ -62,3 +62,54 @@ df_is_project_root() {
   [ -n "$_root_real" ] || return 1
   [ "$_root_real" != "$_home_real" ]
 }
+
+# df_no_symlink_below <root> <path>... — returns 0 when no <path>, and no folder
+# between <root> and it, is a symbolic link. Returns 1 when one is, and for any
+# call it cannot vouch for: no <path>, an empty <root>, a <path> not below <root>,
+# or a <path> with an empty, `.` or `..` part or more than 64 parts below <root>.
+# A predicate: call it in an `if` or an `||` list, never as a plain statement
+# under `set -e`.
+#
+# D-HOOKS-NO-SYMLINK-WRITE: a hook writes under a project's `.devflow/` only where
+# nothing on the way down from the root is a symbolic link. A repository can commit
+# a link anywhere in its own `.devflow/`, and the hooks' writes follow one: `>>`
+# and `touch` write through a linked file, and `mkdir -p` creates folders inside a
+# linked folder, so a linked queue or folder would put captured conversation text
+# into whatever file the link names. Each hook checks the paths it writes in place
+# and skips the write, logging it once, when this refuses. A copy renamed into
+# place needs only its folder checked: a rename replaces a link at its target
+# instead of following it, and the copy is created only where nothing stands
+# (noclobber).
+#
+# Only the part of each path below <root> is checked, never the root or a folder
+# above it: the root is where the session runs or where git keeps the ledger,
+# chosen by the user and not by what the repository holds, and a folder above it
+# may legitimately be a link (on macOS /tmp and /var lead into /private). The check
+# runs just before the write, so a process that swaps a link in between is not
+# stopped; such a process already writes as the user.
+#
+# Zero forks: builtin `[ -L ]` tests and parameter expansion only.
+df_no_symlink_below() {
+  local _root="$1" _path="" _rest="" _seg="" _at="" _n=0
+  [ -n "$_root" ] || return 1
+  shift
+  [ "$#" -gt 0 ] || return 1
+  for _path in "$@"; do
+    case "$_path" in
+      "$_root"/?*) _rest="${_path#"$_root"/}" ;;
+      *) return 1 ;;
+    esac
+    _at="$_root"
+    _n=0
+    while [ -n "$_rest" ]; do
+      [ "$_n" -lt 64 ] || return 1
+      _seg="${_rest%%/*}"
+      if [ "$_seg" = "$_rest" ]; then _rest=""; else _rest="${_rest#*/}"; fi
+      case "$_seg" in ''|.|..) return 1 ;; esac
+      _at="$_at/$_seg"
+      if [ -L "$_at" ]; then return 1; fi
+      _n=$((_n + 1))
+    done
+  done
+  return 0
+}

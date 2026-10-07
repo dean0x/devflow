@@ -8,21 +8,28 @@
 #
 # Source-order requirement: source json-parse (for _HAS_JQ) and learning-lock (for
 # learning_lock_acquire/learning_lock_release, which itself requires get-mtime) BEFORE
-# calling queue_append_row or queue_append_both. Sourcing this file itself only
+# calling queue_append_row or queue_append_both, and define log/dbg. This file
+# sources its sibling git-marker itself, for df_no_symlink_below. Sourcing it only
 # defines functions -- no side effects until they are called.
 #
-# queue_append_row <queue_file> <role> <content> <ts>
-#   Appends one JSONL row {role, content, ts} to <queue_file>. Creates the file
-#   with mode 0600 (umask 077) if absent. After appending, truncates from 200 to
-#   the newest 100 lines under a lock (learning_lock_acquire on "<queue_file>.lock",
-#   2s timeout), keeping mode 0600. The append itself is intentionally lock-free
-#   (accepted-class race shared with the pre-existing memory design -- see the
-#   design doc's "Append-vs-claim race" note).
+# queue_append_row <root> <queue_file> <role> <content> <ts>
+#   Appends one JSONL row {role, content, ts} to <queue_file>, which lies below
+#   <root>: the project root for the memory queue, the ledger root for the learning
+#   queue. When the queue, or a folder between <root> and it, is a symbolic link,
+#   nothing is written: the skip is logged once and the call returns 0, as a
+#   skipped capture does (D-HOOKS-NO-SYMLINK-WRITE, git-marker). Otherwise it
+#   creates the queue's folder if absent, and the file with mode 0600 (umask 077).
+#   After appending, truncates from 200 to the newest 100 lines under a lock
+#   (learning_lock_acquire on "<queue_file>.lock", 2s timeout), keeping mode 0600.
+#   The append itself is intentionally lock-free (accepted-class race shared with
+#   the pre-existing memory design -- see the design doc's "Append-vs-claim race"
+#   note).
 #
-# queue_append_both <memory_queue> <learning_queue> <memory_enabled> <learning_enabled> <role> <content> <ts>
-#   Calls queue_append_row for each queue whose *_enabled flag is "true". Each
-#   queue is gated independently -- callers compute memory_enabled/learning_enabled
-#   themselves (see queue_read_gates below for the at-most-one-fork read of both).
+# queue_append_both <memory_root> <memory_queue> <learning_root> <learning_queue> <memory_enabled> <learning_enabled> <role> <content> <ts>
+#   Calls queue_append_row for each queue whose *_enabled flag is "true", with the
+#   root that queue lies below. Each queue is gated independently -- callers
+#   compute memory_enabled/learning_enabled themselves (see queue_read_gates below
+#   for the at-most-one-fork read of both).
 #
 # queue_read_gates <manifest_path> [<root>]
 #   Reads BOTH switches, `memory` and `learning`, in at most ONE subprocess fork
@@ -72,8 +79,20 @@
 #   root (D-ONE-HOME); memory-worker hands its resolved path to the background
 #   worker it spawns.
 
+# queue_append_row checks its queue with df_no_symlink_below, so this helper sources
+# git-marker itself rather than trusting every caller to have done so first. One that
+# failed to source is a command not found: the refusing branch, so nothing is written.
+source "${BASH_SOURCE[0]%/*}/git-marker" 2>/dev/null || true
+
 queue_append_row() {
-  local _qar_file="$1" _qar_role="$2" _qar_content="$3" _qar_ts="$4"
+  local _qar_root="$1" _qar_file="$2" _qar_role="$3" _qar_content="$4" _qar_ts="$5"
+
+  # D-HOOKS-NO-SYMLINK-WRITE (git-marker): a skipped append is a skipped capture.
+  if ! df_no_symlink_below "$_qar_root" "$_qar_file"; then
+    log "Queue skipped: a symbolic link sits on the path to $_qar_file; nothing written"
+    return 0
+  fi
+  mkdir -p "${_qar_file%/*}" 2>/dev/null || true
 
   if [ ! -f "$_qar_file" ]; then
     (umask 077 && touch "$_qar_file") 2>/dev/null || true
@@ -99,10 +118,17 @@ queue_append_row() {
           local _qar_tmp="${_qar_file}.tmp.$$"
           # SEC-2: the trimmed copy is created under umask 077, so the renamed
           # queue keeps mode 0600. mv replaces the inode, so the queue takes the
-          # copy's mode, and a chmod after the mv would leave a window.
-          (umask 077 && tail -100 "$_qar_file" > "$_qar_tmp") && mv "$_qar_tmp" "$_qar_file" || rm -f "$_qar_tmp"
-          log "Queue overflow: truncated from $_qar_lines to 100 lines ($(basename "$_qar_file"))"
-          dbg "Queue overflow: truncated from $_qar_lines to 100 lines ($_qar_file)"
+          # copy's mode, and a chmod after the mv would leave a window. The copy is
+          # created only where nothing stands (noclobber), so an entry already at
+          # its name, a symbolic link included, is removed and never written
+          # through; the trim then waits for a later append.
+          if (umask 077 && set -o noclobber && tail -100 "$_qar_file" > "$_qar_tmp") && mv "$_qar_tmp" "$_qar_file"; then
+            log "Queue overflow: truncated from $_qar_lines to 100 lines ($(basename "$_qar_file"))"
+            dbg "Queue overflow: truncated from $_qar_lines to 100 lines ($_qar_file)"
+          else
+            rm -f "$_qar_tmp" 2>/dev/null || true
+            log "Queue overflow: not truncated, its copy could not be written ($(basename "$_qar_file"))"
+          fi
         fi
         learning_lock_release "$_qar_lock"
       fi
@@ -111,15 +137,16 @@ queue_append_row() {
 }
 
 queue_append_both() {
-  local _qab_memory_queue="$1" _qab_learning_queue="$2"
-  local _qab_memory_enabled="$3" _qab_learning_enabled="$4"
-  local _qab_role="$5" _qab_content="$6" _qab_ts="$7"
+  local _qab_memory_root="$1" _qab_memory_queue="$2"
+  local _qab_learning_root="$3" _qab_learning_queue="$4"
+  local _qab_memory_enabled="$5" _qab_learning_enabled="$6"
+  local _qab_role="$7" _qab_content="$8" _qab_ts="$9"
 
   if [ "$_qab_memory_enabled" = "true" ]; then
-    queue_append_row "$_qab_memory_queue" "$_qab_role" "$_qab_content" "$_qab_ts"
+    queue_append_row "$_qab_memory_root" "$_qab_memory_queue" "$_qab_role" "$_qab_content" "$_qab_ts"
   fi
   if [ "$_qab_learning_enabled" = "true" ]; then
-    queue_append_row "$_qab_learning_queue" "$_qab_role" "$_qab_content" "$_qab_ts"
+    queue_append_row "$_qab_learning_root" "$_qab_learning_queue" "$_qab_role" "$_qab_content" "$_qab_ts"
   fi
 }
 

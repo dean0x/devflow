@@ -2,7 +2,8 @@
 # Ensures .devflow/ and all subdirectories exist and the project root .gitignore
 # ignores .devflow/. Called from capture-prompt, capture-turn, capture-question,
 # memory-worker, and pre-compact-memory. Idempotent.
-# Returns non-zero, having written nothing, outside a git project or at HOME.
+# Returns non-zero, having written nothing, outside a git project, at HOME, or when
+# .devflow is a symbolic link.
 # Usage: source ensure-devflow-init "$CWD"
 
 [ -z "$1" ] && return 1
@@ -32,6 +33,17 @@ source "$_EDI_DIR/git-marker" 2>/dev/null || true
 df_is_project_root "$_EDI_ROOT" 2>/dev/null || return 1
 
 _DEVFLOW_DIR="$_EDI_ROOT/.devflow"
+
+# D-HOOKS-NO-SYMLINK-WRITE (git-marker): a `.devflow` that is itself a symbolic link
+# would take every folder below and the carve-out marker into the folder it names,
+# so nothing is written and the caller stops, as at any root it may not write to.
+# The skip is logged once, through log() where the caller defines it. A folder below
+# `.devflow` that is a link is left to the write under it: `mkdir -p` creates
+# nothing through a link it ends at.
+if ! df_no_symlink_below "$_EDI_ROOT" "$_DEVFLOW_DIR"; then
+  declare -F log >/dev/null 2>&1 && log "Skipped: $_DEVFLOW_DIR is a symbolic link; nothing written under it"
+  return 1
+fi
 
 # learning/ is scaffolded only where the ledger lives. In a linked worktree whose
 # main checkout holds the ledger (D-LEDGER-MAIN-WORKTREE, resolve-project-root) a

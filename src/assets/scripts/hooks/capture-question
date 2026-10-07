@@ -140,8 +140,8 @@ source "$SCRIPT_DIR/ensure-devflow-init" "$CWD" || exit 0
 source "$SCRIPT_DIR/get-mtime" || { echo "capture-question: failed to source get-mtime" >&2; exit 1; }
 source "$SCRIPT_DIR/learning-lock" || { echo "capture-question: failed to source learning-lock" >&2; exit 1; }
 
-mkdir -p "$MEMORY_DIR" "$LEARNING_DIR" 2>/dev/null || true
-
+# Each queue is checked from the root it lies below, and its folder created there,
+# by queue_append_row (D-HOOKS-NO-SYMLINK-WRITE, git-marker).
 _QUESTION_COUNT=0
 while IFS=$'\t' read -r Q A; do
   [ -z "$Q" ] && continue
@@ -150,7 +150,8 @@ while IFS=$'\t' read -r Q A; do
 A: ${A}"
   TS=$(date +%s)
   queue_append_both \
-    "$MEMORY_DIR/.pending-turns.jsonl" "$LEARNING_DIR/.pending-turns.jsonl" \
+    "$PROJECT_ROOT" "$MEMORY_DIR/.pending-turns.jsonl" \
+    "$LEDGER_ROOT" "$LEARNING_DIR/.pending-turns.jsonl" \
     "$MEMORY_ENABLED" "$LEARNING_ENABLED" \
     "qa" "$CONTENT" "$TS"
   _QUESTION_COUNT=$(( _QUESTION_COUNT + 1 ))

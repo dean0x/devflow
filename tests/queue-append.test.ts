@@ -73,7 +73,7 @@ describe('queue_append_row', () => {
 
   it('creates the queue file with mode 0600 on first write', () => {
     const q = path.join(tmpDir, 'q.jsonl');
-    runWithQueueAppend(`queue_append_row "${q}" "user" "hello" "1000000000"`);
+    runWithQueueAppend(`queue_append_row "${tmpDir}" "${q}" "user" "hello" "1000000000"`);
     expect(fs.existsSync(q)).toBe(true);
     const mode = fs.statSync(q).mode & 0o777;
     expect(mode).toBe(0o600);
@@ -81,7 +81,7 @@ describe('queue_append_row', () => {
 
   it('appends a valid {role, content, ts} JSON row', () => {
     const q = path.join(tmpDir, 'q.jsonl');
-    runWithQueueAppend(`queue_append_row "${q}" "assistant" "hi there" "1234"`);
+    runWithQueueAppend(`queue_append_row "${tmpDir}" "${q}" "assistant" "hi there" "1234"`);
     const rows = readJsonl(q);
     expect(rows).toEqual([{ role: 'assistant', content: 'hi there', ts: 1234 }]);
   });
@@ -89,8 +89,8 @@ describe('queue_append_row', () => {
   it('appends multiple rows without truncating existing content', () => {
     const q = path.join(tmpDir, 'q.jsonl');
     runWithQueueAppend(`
-      queue_append_row "${q}" "user" "one" "1"
-      queue_append_row "${q}" "assistant" "two" "2"
+      queue_append_row "${tmpDir}" "${q}" "user" "one" "1"
+      queue_append_row "${tmpDir}" "${q}" "assistant" "two" "2"
     `);
     const rows = readJsonl(q);
     expect(rows).toHaveLength(2);
@@ -120,7 +120,7 @@ describe('queue_append_row', () => {
         // hook would pass $PROMPT/$ASSISTANT_MSG.
         const { exitCode } = runWithQueueAppend(`
           CONTENT="$(cat "${tmpContentFile}")"
-          queue_append_row "${q}" "user" "$CONTENT" "1"
+          queue_append_row "${tmpDir}" "${q}" "user" "$CONTENT" "1"
         `);
         expect(exitCode).toBe(0);
         const rows = readJsonl(q);
@@ -139,7 +139,7 @@ describe('queue_append_row', () => {
       }
       fs.writeFileSync(q, lines.join('\n') + '\n');
 
-      runWithQueueAppend(`queue_append_row "${q}" "user" "final-row" "9999"`);
+      runWithQueueAppend(`queue_append_row "${tmpDir}" "${q}" "user" "final-row" "9999"`);
 
       // 205 pre-seeded + 1 appended = 206 transiently, then truncated to the
       // newest 100 (which includes the just-appended row, since it's newest).
@@ -158,7 +158,7 @@ describe('queue_append_row', () => {
       }
       fs.writeFileSync(q, lines.join('\n') + '\n');
 
-      runWithQueueAppend(`queue_append_row "${q}" "user" "extra" "9999"`);
+      runWithQueueAppend(`queue_append_row "${tmpDir}" "${q}" "user" "extra" "9999"`);
 
       const rows = readJsonl(q);
       expect(rows).toHaveLength(151);
@@ -170,7 +170,7 @@ describe('queue_append_row', () => {
       for (let i = 0; i < 205; i++) lines.push(JSON.stringify({ role: 'user', content: `l${i}`, ts: i }));
       fs.writeFileSync(q, lines.join('\n') + '\n');
 
-      runWithQueueAppend(`queue_append_row "${q}" "user" "x" "1"`);
+      runWithQueueAppend(`queue_append_row "${tmpDir}" "${q}" "user" "x" "1"`);
 
       expect(fs.existsSync(`${q}.lock`)).toBe(false);
     });
@@ -187,7 +187,7 @@ describe('queue_append_row', () => {
       const append = (content: string, ts: number): void => {
         const { exitCode, stderr } = runWithQueueAppend(`
           umask 022
-          queue_append_both "${mem}" "${learning}" "true" "true" "user" "${content}" "${ts}"
+          queue_append_both "${tmpDir}" "${mem}" "${tmpDir}" "${learning}" "true" "true" "user" "${content}" "${ts}"
         `);
         expect(exitCode, stderr).toBe(0);
       };
@@ -220,7 +220,7 @@ describe('queue_append_row', () => {
       const q = path.join(tmpDir, 'q.jsonl');
       const { exitCode } = runWithQueueAppend(`
         _HAS_JQ=false
-        queue_append_row "${q}" "user" "no jq here: \\"quoted\\"" "42"
+        queue_append_row "${tmpDir}" "${q}" "user" "no jq here: \\"quoted\\"" "42"
       `);
       expect(exitCode).toBe(0);
       const rows = readJsonl(q);
@@ -243,7 +243,7 @@ source "${path.join(HOOKS_DIR, 'json-parse')}"
 source "${path.join(HOOKS_DIR, 'get-mtime')}"
 source "${path.join(HOOKS_DIR, 'learning-lock')}"
 source "${QUEUE_APPEND}"
-queue_append_row "$1" "user" "row-$2" "$2"
+queue_append_row "$1" "$2" "user" "row-$3" "$3"
 `,
       );
       fs.chmodSync(scriptPath, 0o755);
@@ -251,7 +251,7 @@ queue_append_row "$1" "user" "row-$2" "$2"
       const { spawn } = await import('child_process');
       const runs = Array.from({ length: N }, (_, i) => {
         return new Promise<number | null>((resolve) => {
-          const proc = spawn('bash', [scriptPath, q, String(i)], { stdio: 'ignore' });
+          const proc = spawn('bash', [scriptPath, tmpDir, q, String(i)], { stdio: 'ignore' });
           proc.on('close', (code) => resolve(code));
         });
       });
@@ -297,7 +297,7 @@ source "${path.join(HOOKS_DIR, 'json-parse')}"
 source "${path.join(HOOKS_DIR, 'get-mtime')}"
 source "${path.join(HOOKS_DIR, 'learning-lock')}"
 source "${QUEUE_APPEND}"
-queue_append_row "$1" "user" "race-$2" "$2"
+queue_append_row "$1" "$2" "user" "race-$3" "$3"
 `,
       );
       fs.chmodSync(scriptPath, 0o755);
@@ -305,7 +305,7 @@ queue_append_row "$1" "user" "race-$2" "$2"
       const { spawn } = await import('child_process');
       const runs = [0, 1, 2].map((i) => {
         return new Promise<number | null>((resolve) => {
-          const proc = spawn('bash', [scriptPath, q, String(i)], { stdio: 'ignore' });
+          const proc = spawn('bash', [scriptPath, tmpDir, q, String(i)], { stdio: 'ignore' });
           proc.on('close', (code) => resolve(code));
         });
       });
@@ -345,7 +345,7 @@ describe('queue_append_both', () => {
   it('writes to both queues when both flags are true', () => {
     const mem = path.join(tmpDir, 'mem.jsonl');
     const learning = path.join(tmpDir, 'learning.jsonl');
-    runWithQueueAppend(`queue_append_both "${mem}" "${learning}" "true" "true" "user" "hi" "1"`);
+    runWithQueueAppend(`queue_append_both "${tmpDir}" "${mem}" "${tmpDir}" "${learning}" "true" "true" "user" "hi" "1"`);
     expect(readJsonl(mem)).toHaveLength(1);
     expect(readJsonl(learning)).toHaveLength(1);
   });
@@ -353,7 +353,7 @@ describe('queue_append_both', () => {
   it('writes only to the memory queue when learning_enabled is false', () => {
     const mem = path.join(tmpDir, 'mem.jsonl');
     const learning = path.join(tmpDir, 'learning.jsonl');
-    runWithQueueAppend(`queue_append_both "${mem}" "${learning}" "true" "false" "user" "hi" "1"`);
+    runWithQueueAppend(`queue_append_both "${tmpDir}" "${mem}" "${tmpDir}" "${learning}" "true" "false" "user" "hi" "1"`);
     expect(readJsonl(mem)).toHaveLength(1);
     expect(fs.existsSync(learning)).toBe(false);
   });
@@ -361,7 +361,7 @@ describe('queue_append_both', () => {
   it('writes only to the learning queue when memory_enabled is false', () => {
     const mem = path.join(tmpDir, 'mem.jsonl');
     const learning = path.join(tmpDir, 'learning.jsonl');
-    runWithQueueAppend(`queue_append_both "${mem}" "${learning}" "false" "true" "user" "hi" "1"`);
+    runWithQueueAppend(`queue_append_both "${tmpDir}" "${mem}" "${tmpDir}" "${learning}" "false" "true" "user" "hi" "1"`);
     expect(fs.existsSync(mem)).toBe(false);
     expect(readJsonl(learning)).toHaveLength(1);
   });
@@ -369,9 +369,128 @@ describe('queue_append_both', () => {
   it('writes to neither queue when both flags are false', () => {
     const mem = path.join(tmpDir, 'mem.jsonl');
     const learning = path.join(tmpDir, 'learning.jsonl');
-    runWithQueueAppend(`queue_append_both "${mem}" "${learning}" "false" "false" "user" "hi" "1"`);
+    runWithQueueAppend(`queue_append_both "${tmpDir}" "${mem}" "${tmpDir}" "${learning}" "false" "false" "user" "hi" "1"`);
     expect(fs.existsSync(mem)).toBe(false);
     expect(fs.existsSync(learning)).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// D-HOOKS-NO-SYMLINK-WRITE (git-marker): a queue under a project's .devflow/ is
+// appended only when neither it nor a folder between its root and it is a link.
+// ---------------------------------------------------------------------------
+
+describe('queue_append_row never writes through a symbolic link (D-HOOKS-NO-SYMLINK-WRITE)', () => {
+  const UNTOUCHED = 'a file outside the project, which no append may write\n';
+  let tmpDir: string;
+  let root: string;
+  let queue: string;
+  let outsideFile: string;
+  let outsideDir: string;
+
+  beforeEach(() => {
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'queue-append-nolink-'));
+    root = path.join(tmpDir, 'repo');
+    queue = path.join(root, '.devflow', 'memory', '.pending-turns.jsonl');
+    outsideFile = path.join(tmpDir, 'outside.txt');
+    outsideDir = path.join(tmpDir, 'outside');
+    fs.mkdirSync(root);
+    fs.mkdirSync(outsideDir);
+    fs.writeFileSync(outsideFile, UNTOUCHED);
+  });
+
+  afterEach(() => {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  /** One append of a fixed row to `queue`, checked from `root`, after `setup`. */
+  const append = (setup = ''): { exitCode: number; stderr: string } =>
+    runWithQueueAppend(`${setup}\nqueue_append_row "${root}" "${queue}" "user" "we chose X over Y" "1"`);
+
+  it('a link at the queue path: the link target stays byte-identical and the call still succeeds', () => {
+    fs.mkdirSync(path.dirname(queue), { recursive: true });
+    fs.symlinkSync(outsideFile, queue);
+
+    expect(append().exitCode).toBe(0);
+
+    expect(fs.readFileSync(outsideFile, 'utf-8')).toBe(UNTOUCHED);
+    expect(fs.lstatSync(queue).isSymbolicLink()).toBe(true);
+  });
+
+  it('a dangling link at the queue path creates nothing where it points', () => {
+    const created = path.join(tmpDir, 'created-through-the-link');
+    fs.mkdirSync(path.dirname(queue), { recursive: true });
+    fs.symlinkSync(created, queue);
+
+    expect(append().exitCode).toBe(0);
+
+    expect(fs.existsSync(created)).toBe(false);
+  });
+
+  it('a linked folder between the root and the queue: nothing is created in the folder it names', () => {
+    fs.mkdirSync(path.join(root, '.devflow'));
+    fs.symlinkSync(outsideDir, path.join(root, '.devflow', 'memory'));
+
+    expect(append().exitCode).toBe(0);
+
+    expect(fs.readdirSync(outsideDir)).toEqual([]);
+  });
+
+  it('a linked .devflow above the queue folder: nothing is created in the folder it names', () => {
+    fs.symlinkSync(outsideDir, path.join(root, '.devflow'));
+
+    expect(append().exitCode).toBe(0);
+
+    expect(fs.readdirSync(outsideDir)).toEqual([]);
+  });
+
+  it('a normal path: creates the queue folder and the queue, at 0600 whatever the caller umask', () => {
+    expect(append('umask 022').exitCode).toBe(0);
+
+    expect(readJsonl(queue)).toEqual([{ role: 'user', content: 'we chose X over Y', ts: 1 }]);
+    expect((fs.statSync(queue).mode & 0o777).toString(8)).toBe('600');
+  });
+
+  it('a root that sits under a linked parent still appends', () => {
+    const linkedParent = path.join(tmpDir, 'linked-parent');
+    fs.symlinkSync(tmpDir, linkedParent);
+    const linkedRoot = path.join(linkedParent, 'repo');
+    const viaLink = path.join(linkedRoot, '.devflow', 'memory', '.pending-turns.jsonl');
+
+    const { exitCode, stderr } = runWithQueueAppend(`queue_append_row "${linkedRoot}" "${viaLink}" "user" "x" "1"`);
+
+    expect(exitCode, stderr).toBe(0);
+    expect(readJsonl(queue)).toHaveLength(1);
+  });
+
+  it('a queue path that is not below its root is refused, and the call still succeeds', () => {
+    const elsewhere = path.join(outsideDir, 'q.jsonl');
+
+    const { exitCode, stderr } = runWithQueueAppend(`queue_append_row "${root}" "${elsewhere}" "user" "x" "1"`);
+
+    expect(exitCode, stderr).toBe(0);
+    expect(fs.existsSync(elsewhere)).toBe(false);
+  });
+
+  it('the trim never writes through a link planted at its copy\'s name, and removes the link', () => {
+    // The copy's name ends in the shell's PID, which the script reads as $$: it
+    // plants the link at exactly that name, checks it is there, then appends past
+    // the 200-line cap.
+    fs.mkdirSync(path.dirname(queue), { recursive: true });
+    const rows = Array.from({ length: 200 }, (_, i) => JSON.stringify({ role: 'user', content: `row-${i}`, ts: i }) + '\n').join('');
+    fs.writeFileSync(queue, rows, { mode: 0o600 });
+
+    const { exitCode, stderr } = runWithQueueAppend(`
+      ln -s "${outsideFile}" "${queue}.tmp.$$"
+      [ -L "${queue}.tmp.$$" ]
+      queue_append_row "${root}" "${queue}" "user" "row-200" "200"
+    `);
+
+    expect(exitCode, stderr).toBe(0);
+    expect(fs.readFileSync(outsideFile, 'utf-8'), 'nothing is written through the planted link').toBe(UNTOUCHED);
+    expect(fs.lstatSync(queue).isSymbolicLink(), 'the link is never renamed over the queue').toBe(false);
+    expect(readJsonl(queue), 'the row is appended; the trim waits for a later append').toHaveLength(201);
+    expect(fs.readdirSync(path.dirname(queue)).filter((name) => name.includes('.tmp.')), 'the planted link is removed').toEqual([]);
   });
 });
 

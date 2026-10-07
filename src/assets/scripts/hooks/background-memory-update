@@ -106,6 +106,18 @@ if ! command -v cksum >/dev/null 2>&1; then
   exit 0
 fi
 
+# --- Never write through a symbolic link (D-HOOKS-NO-SYMLINK-WRITE, git-marker) ---
+# The lock (`mkdir`), the batch merge (`>>`), the claim heartbeat and the success
+# stamp (`touch`) write these paths in place, and a claim renames the queue onto the
+# batch. Every other write lands in the same folder by a rename, which replaces a
+# link rather than following it, or by a copy created only where nothing stands.
+# So the run is skipped, before it takes the lock, when any of them or a folder
+# above them is a link.
+if ! df_no_symlink_below "$PROJECT_ROOT" "$LOCK_DIR" "$QUEUE_FILE" "$PROCESSING_FILE" "$OK_FILE"; then
+  log "SKIP: a symbolic link sits on the path to the memory files in $MEMORY_DIR; nothing written"
+  exit 0
+fi
+
 # --- Worker-level lock (300s stale-break — much longer than learning-lock's 30s) ---
 # This prevents a second worker (spawned 121s later) from double-writing WORKING-MEMORY.md
 # while the first worker's claude -p call (up to 120s) is still in flight.
@@ -212,9 +224,15 @@ if [ -f "$PROCESSING_FILE" ]; then
     _PROC_TMP="$PROCESSING_FILE.tmp.$$"
     # SEC-2: the batch is the claimed queue, 0600 like the queue itself, and the
     # cold path at session start moves it back to the queue. mv gives it the
-    # trimmed copy's inode and mode, so the copy is created under umask 077.
-    (umask 077 && tail -"$PROC_OVERFLOW_TARGET" "$PROCESSING_FILE" > "$_PROC_TMP") && mv "$_PROC_TMP" "$PROCESSING_FILE" || rm -f "$_PROC_TMP" 2>/dev/null || true
-    log "Processing overflow: truncated from $_PROC_LINES to $PROC_OVERFLOW_TARGET lines"
+    # trimmed copy's inode and mode, so the copy is created under umask 077, and
+    # only where nothing stands (noclobber): an entry already at its name, a
+    # symbolic link included, is removed and never written through.
+    if (umask 077 && set -o noclobber && tail -"$PROC_OVERFLOW_TARGET" "$PROCESSING_FILE" > "$_PROC_TMP") && mv "$_PROC_TMP" "$PROCESSING_FILE"; then
+      log "Processing overflow: truncated from $_PROC_LINES to $PROC_OVERFLOW_TARGET lines"
+    else
+      rm -f "$_PROC_TMP" 2>/dev/null || true
+      log "Processing overflow: not truncated, its copy could not be written ($_PROC_LINES lines)"
+    fi
   fi
 elif [ -f "$QUEUE_FILE" ]; then
   mv "$QUEUE_FILE" "$PROCESSING_FILE" 2>/dev/null || { log "SKIP: failed to claim queue (race condition — another worker got it)"; exit 0; }

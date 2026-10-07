@@ -66,6 +66,16 @@ fi
 # Auto-create .devflow/ and ensure .gitignore entries (idempotent after first run)
 source "$SCRIPT_DIR/ensure-devflow-init" "$CWD" || exit 0
 
+# D-HOOKS-NO-SYMLINK-WRITE (git-marker): every write below lands in the memory
+# folder, as a copy renamed into place or a file created only where nothing stands,
+# so only the folder's own path needs checking: a linked folder would take the
+# backup and the working memory into the folder it names.
+if ! df_no_symlink_below "$PROJECT_ROOT" "$MEMORY_DIR"; then
+  log "SKIP: a symbolic link sits on the path to $MEMORY_DIR; no backup or working memory written"
+  dbg "EXIT: symbolic link on the memory folder path"
+  exit 0
+fi
+
 BACKUP_FILE="$MEMORY_DIR/backup.json"
 
 # Capture git state

@@ -88,8 +88,16 @@ fi
 # (learning/knowledge only) still get .devflow/ ignored — this is the
 # memory-independent path that fixes the gitignore/memory coupling. Single
 # source of truth: ensure-root-gitignore. Soft-fail: a gitignore write must never
-# block context injection. Marker keeps it O(1).
-[ -n "$PROJECT_OK" ] && [ -d "$PROJECT_ROOT" ] && [ -f "$SCRIPT_DIR/ensure-root-gitignore" ] && source "$SCRIPT_DIR/ensure-root-gitignore" "$PROJECT_ROOT" || true
+# block context injection. Marker keeps it O(1). A `.devflow` that is a symbolic
+# link is skipped, since the marker would land in the folder the link names
+# (D-HOOKS-NO-SYMLINK-WRITE, git-marker).
+if [ -n "$PROJECT_OK" ] && [ -d "$PROJECT_ROOT" ] && [ -f "$SCRIPT_DIR/ensure-root-gitignore" ]; then
+  if df_no_symlink_below "$PROJECT_ROOT" "$PROJECT_ROOT/.devflow"; then
+    source "$SCRIPT_DIR/ensure-root-gitignore" "$PROJECT_ROOT" || true
+  else
+    dbg "carve-out skipped: $PROJECT_ROOT/.devflow is a symbolic link"
+  fi
+fi
 
 CONTEXT=""
 
@@ -199,9 +207,14 @@ LEARNING_ENABLED="$_QG_LEARNING"
 
 # --- Section 1: Project Decisions TL;DR ---
 if [ "$LEARNING_ENABLED" = "true" ]; then
-  # Heal older installs that have .devflow/ but not .devflow/learning/
+  # Heal older installs that have .devflow/ but not .devflow/learning/, never
+  # through a symbolic link (D-HOOKS-NO-SYMLINK-WRITE, git-marker).
   if [ -d "$LEDGER_DEVFLOW_DIR" ] && [ ! -d "$LEARNING_DIR" ]; then
-    mkdir -p "$LEARNING_DIR" 2>/dev/null || true
+    if df_no_symlink_below "$LEDGER_ROOT" "$LEARNING_DIR"; then
+      mkdir -p "$LEARNING_DIR" 2>/dev/null || true
+    else
+      log "Skipped: a symbolic link sits on the path to $LEARNING_DIR; nothing written"
+    fi
   fi
   if [ -d "$LEARNING_DIR" ]; then
     DECISIONS_TLDR=""
