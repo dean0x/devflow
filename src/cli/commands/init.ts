@@ -52,6 +52,7 @@ import { addContextHook, removeContextHook, hasContextHook } from './context.js'
 import { writeSettingsFileAtomic } from '../../core/fs-atomic.js';
 import { writeManagedConfig, readConfigIfPresent, DEFAULT_CONFIG, type FeatureConfig, type ManagedConfigWriteError } from '../../core/feature-config.js';
 import { drainLearningQueue } from '../../core/learning-queue-cleanup.js';
+import { formatRefusedDrain, type QueueDrain } from '../../core/queue-drain.js';
 import { removeManagedDenyList, describeManagedDenyRemoval } from './security.js';
 import { resolveInitSeed, applyCliToggles, resolveResetGatedInputs, resolvePluginsToInstall } from './init-seed.js';
 import { parseFrameworkList, normalizeFrameworks, type ComplianceFeatureState } from '../../core/compliance.js';
@@ -587,8 +588,8 @@ interface InitOptions {
 
 /** The queue drains `drainDisabledFeatureQueues` performs — injected for tests. */
 export interface DisabledQueueDrainIO {
-  drainMemoryQueue(projectRoot: string): Promise<void>;
-  drainLearningQueue(ledgerRoot: string): Promise<void>;
+  drainMemoryQueue(projectRoot: string): Promise<QueueDrain>;
+  drainLearningQueue(ledgerRoot: string): Promise<QueueDrain>;
 }
 
 /**
@@ -609,6 +610,9 @@ export interface DisabledQueueDrainIO {
  * D-LEDGER-MAIN-WORKTREE: each queue drains where the hooks write it — memory at
  * this checkout's toplevel (`gitRoot`), learning at the ledger root (`ledgerRoot`,
  * getLedgerRoot), which in a linked worktree is the main checkout.
+ *
+ * Returns one warning for each drain refused because a folder on the way to its
+ * queue is a symbolic link (D-CLI-NO-SYMLINK); the caller prints them.
  */
 export async function drainDisabledFeatureQueues(
   opts: {
@@ -619,10 +623,18 @@ export async function drainDisabledFeatureQueues(
     manifestWritten: boolean;
   },
   io: DisabledQueueDrainIO = { drainMemoryQueue, drainLearningQueue },
-): Promise<void> {
-  if (!opts.manifestWritten) return;
-  if (!opts.memoryEnabled && opts.gitRoot !== null) await io.drainMemoryQueue(opts.gitRoot);
-  if (!opts.learningEnabled && opts.ledgerRoot !== null) await io.drainLearningQueue(opts.ledgerRoot);
+): Promise<readonly string[]> {
+  if (!opts.manifestWritten) return [];
+  const refused: string[] = [];
+  if (!opts.memoryEnabled && opts.gitRoot !== null) {
+    const memory = await io.drainMemoryQueue(opts.gitRoot);
+    if (!memory.drained) refused.push(formatRefusedDrain('memory', memory.linkedFolder));
+  }
+  if (!opts.learningEnabled && opts.ledgerRoot !== null) {
+    const learning = await io.drainLearningQueue(opts.ledgerRoot);
+    if (!learning.drained) refused.push(formatRefusedDrain('learning', learning.linkedFolder));
+  }
+  return refused;
 }
 
 /**
@@ -2553,13 +2565,14 @@ export const initCommand = new Command('init')
     }
 
     // Only now that the machine-wide switch is on disk (D-INIT-DRAIN-AFTER-SWITCH).
-    await drainDisabledFeatureQueues({
+    const refusedDrains = await drainDisabledFeatureQueues({
       gitRoot,
       ledgerRoot: learningEnabled || gitRoot === null ? null : await getLedgerRoot(),
       memoryEnabled,
       learningEnabled,
       manifestWritten: trackerLifecycle.manifestWritten,
     });
+    for (const line of refusedDrains) p.log.warn(line);
 
     // The hooks' per-directory log folders, capped (D-LOG-DIR-CAP): one pass
     // clears every folder it scans beyond the cap; only a backlog beyond the

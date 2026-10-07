@@ -12,6 +12,7 @@ import { loadSettingsModule, narrowedSwitchLabel, personalConfigTrackedWarning }
 import { getDevFlowDirectory } from '../../targets/claude-code/claude-paths.js';
 import { getLedgerRoot } from '../../core/ledger-root.js';
 import { drainLearningQueue } from '../../core/learning-queue-cleanup.js';
+import { formatRefusedDrain } from '../../core/queue-drain.js';
 import {
   formatLearningStoreUnavailable,
   loadLearningStore,
@@ -411,12 +412,13 @@ async function handleClear(): Promise<void> {
 
   // A mid-run Learning agent whose claimed batch vanishes stops without further
   // writes — the desired outcome of clearing.
-  await drainLearningQueue(ledgerRoot);
+  const drain = await drainLearningQueue(ledgerRoot);
 
   p.log.success(
     `Cleared ${counted(cleared.value.cleared, 'observation')} no entry uses and kept ${cleared.value.kept} ` +
-    'that entries use; drained the learning queue.',
+    `that entries use${drain.drained ? '; drained the learning queue.' : '.'}`,
   );
+  if (!drain.drained) p.log.warn(formatRefusedDrain('learning', drain.linkedFolder));
 }
 
 /**
@@ -444,7 +446,8 @@ async function handleToggle(enabled: boolean): Promise<void> {
   // batch vanishes aborts without changes — the desired outcome of disabling.
   const ledgerRoot = await getLedgerRoot();
   if (ledgerRoot) {
-    await drainLearningQueue(ledgerRoot);
+    const drain = await drainLearningQueue(ledgerRoot);
+    if (!drain.drained) p.log.warn(formatRefusedDrain('learning', drain.linkedFolder));
   }
   p.log.success('Learning disabled in every project');
 }

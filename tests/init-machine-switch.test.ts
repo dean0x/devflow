@@ -4,10 +4,11 @@
  * behaviour is pinned in init-machine-switch-e2e.test.ts; these cover the arms a
  * sandboxed CLI run cannot reach cheaply.
  */
-import { describe, it, expect } from 'vitest';
-import { readFileSync } from 'fs';
+import { describe, it, expect, vi } from 'vitest';
+import { readFileSync, promises as fs } from 'fs';
+import * as os from 'os';
 import * as path from 'path';
-import { buildHudOnlyManifest, drainDisabledFeatureQueues } from '../src/cli/commands/init.js';
+import { buildHudOnlyManifest, drainDisabledFeatureQueues, type DisabledQueueDrainIO } from '../src/cli/commands/init.js';
 import type { ManifestData } from '../src/core/manifest.js';
 
 const NOW = '2026-09-26T00:00:00.000Z';
@@ -65,21 +66,59 @@ describe('buildHudOnlyManifest', () => {
 describe('drainDisabledFeatureQueues (D-INIT-DRAIN-AFTER-SWITCH)', () => {
   const ROOT = '/repo';
 
-  function recorder(): { calls: string[]; io: { drainMemoryQueue(r: string): Promise<void>; drainLearningQueue(r: string): Promise<void> } } {
+  function recorder(): { calls: string[]; io: DisabledQueueDrainIO } {
     const calls: string[] = [];
     return {
       calls,
       io: {
-        drainMemoryQueue: async (r) => { calls.push(`memory:${r}`); },
-        drainLearningQueue: async (r) => { calls.push(`learning:${r}`); },
+        drainMemoryQueue: async (r) => { calls.push(`memory:${r}`); return { drained: true }; },
+        drainLearningQueue: async (r) => { calls.push(`learning:${r}`); return { drained: true }; },
       },
     };
   }
 
-  it('drains the queue of every feature switched off once the switch is persisted', async () => {
+  it('drains the queue of every feature switched off once the switch is persisted, with nothing to report', async () => {
     const { calls, io } = recorder();
-    await drainDisabledFeatureQueues({ gitRoot: ROOT, ledgerRoot: ROOT, memoryEnabled: false, learningEnabled: false, manifestWritten: true }, io);
+    const refused = await drainDisabledFeatureQueues({ gitRoot: ROOT, ledgerRoot: ROOT, memoryEnabled: false, learningEnabled: false, manifestWritten: true }, io);
     expect(calls).toEqual([`memory:${ROOT}`, `learning:${ROOT}`]);
+    expect(refused).toEqual([]);
+  });
+
+  it('returns one warning per drain refused at a linked folder, naming the queue and the link (D-CLI-NO-SYMLINK)', async () => {
+    const io: DisabledQueueDrainIO = {
+      drainMemoryQueue: async (r) => ({ drained: false, linkedFolder: `${r}/.devflow/memory` }),
+      drainLearningQueue: async (r) => ({ drained: false, linkedFolder: `${r}/.devflow` }),
+    };
+    const refused = await drainDisabledFeatureQueues({ gitRoot: ROOT, ledgerRoot: ROOT, memoryEnabled: false, learningEnabled: false, manifestWritten: true }, io);
+    expect(refused).toEqual([
+      expect.stringMatching(/memory queue.*\/repo\/\.devflow\/memory is a symbolic link/),
+      expect.stringMatching(/learning queue.*\/repo\/\.devflow is a symbolic link/),
+    ]);
+  });
+
+  it('with the real drains: linked memory and learning folders lose nothing, and both refusals are returned (D-CLI-NO-SYMLINK)', async () => {
+    const tmp = await fs.mkdtemp(path.join(os.tmpdir(), 'devflow-init-drain-linked-'));
+    vi.stubEnv('HOME', path.join(tmp, 'home'));
+    try {
+      const repo = path.join(tmp, 'repo');
+      const outside = path.join(tmp, 'outside');
+      const queue = path.join(outside, '.pending-turns.jsonl');
+      await fs.mkdir(path.join(repo, '.devflow'), { recursive: true });
+      await fs.mkdir(outside);
+      await fs.writeFile(queue, 'a file outside the project\n');
+      await fs.symlink(outside, path.join(repo, '.devflow', 'memory'));
+      await fs.symlink(outside, path.join(repo, '.devflow', 'learning'));
+
+      const refused = await drainDisabledFeatureQueues({ gitRoot: repo, ledgerRoot: repo, memoryEnabled: false, learningEnabled: false, manifestWritten: true });
+
+      expect(await fs.readFile(queue, 'utf-8'), 'nothing is deleted through either link').toBe('a file outside the project\n');
+      expect(refused).toHaveLength(2);
+      expect(refused[0]).toContain(`${path.join(repo, '.devflow', 'memory')} is a symbolic link`);
+      expect(refused[1]).toContain(`${path.join(repo, '.devflow', 'learning')} is a symbolic link`);
+    } finally {
+      vi.unstubAllEnvs();
+      await fs.rm(tmp, { recursive: true, force: true });
+    }
   });
 
   it('drains only the features that are off', async () => {

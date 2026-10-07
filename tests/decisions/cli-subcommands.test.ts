@@ -716,6 +716,33 @@ describe('learning --disable drains the learning pending-turns queue', () => {
     await runLearning(['--disable']);
     expect(queueFilesPresent(root).slice(0, 2)).toEqual([false, false]);
   });
+
+  // D-CLI-NO-SYMLINK: a repository can commit .devflow or .devflow/learning as a link
+  // to a folder elsewhere; the drain then deletes nothing, says so, and the switch is
+  // still turned off.
+  for (const linked of ['.devflow', path.join('.devflow', 'learning')]) {
+    it(`a linked ${linked}: deletes nothing where it points, says so, and still switches learning off (D-CLI-NO-SYMLINK)`, async () => {
+      const outside = makeTmpDir();
+      try {
+        const queueDir = linked === '.devflow' ? path.join(outside, 'learning') : outside;
+        fs.mkdirSync(queueDir, { recursive: true });
+        const files = ['.pending-turns.jsonl', '.pending-turns.processing', '.pending-turns.owner'].map(f => path.join(queueDir, f));
+        for (const file of files) fs.writeFileSync(file, 'a file outside the project\n');
+        fs.rmSync(path.join(root, linked), { recursive: true, force: true });
+        fs.symlinkSync(outside, path.join(root, linked));
+
+        const run = await runLearning(['--disable']);
+
+        expect(files.map(file => fs.existsSync(file)), 'nothing is deleted through the link').toEqual([true, true, true]);
+        expect(run.warn).toContain(`${path.join(root, linked)} is a symbolic link`);
+        expect(readLearningSwitch()).toBe(false);
+        expect(run.success).toBe('Learning disabled in every project');
+        expect(run.exitCode).toBe(0);
+      } finally {
+        fs.rmSync(outside, { recursive: true, force: true });
+      }
+    });
+  }
 });
 
 // ---------------------------------------------------------------------------
