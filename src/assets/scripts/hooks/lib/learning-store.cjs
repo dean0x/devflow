@@ -337,26 +337,53 @@ function parseRow(text) {
 }
 
 /**
- * The text of `file`, or null when nothing is there or the file is a symbolic
- * link (D-NO-LINKED-READ, at readJsonl). lstat sees a link without following it;
- * the open never follows one either (O_NOFOLLOW), so a link that took the file's
- * place after the lstat fails the read rather than being read through.
+ * The first `size` bytes of the open file `fd` as UTF-8 text, fewer when the file
+ * ends sooner: the read never takes more than `size` bytes.
+ *
+ * @param {number} fd
+ * @param {number} size - the byte count fstat reported for `fd`
+ * @returns {string}
+ */
+function readOpenedText(fd, size) {
+  const buf = Buffer.alloc(size);
+  let total = 0;
+  while (total < buf.length) {
+    const read = fs.readSync(fd, buf, total, buf.length - total, total);
+    if (read === 0) break;
+    total += read;
+  }
+  return buf.toString('utf8', 0, total);
+}
+
+/**
+ * The text of `file`, or null when nothing is there, when the file is anything
+ * but a regular file — a symbolic link, a directory, a FIFO or a device — or when
+ * it is larger than `maxBytes` (D-NO-LINKED-READ, at readJsonl). lstat decides
+ * before anything is opened, seeing a link without following it. The open never
+ * follows a link (O_NOFOLLOW) and never waits on a FIFO (O_NONBLOCK), and fstat
+ * confirms that what it opened is a regular file within the bound: a link that
+ * took the file's place after the lstat fails the read rather than being read
+ * through, and anything else that did reads as absent. The read never takes more
+ * bytes than fstat reported.
  *
  * @param {string} file - an absolute path
+ * @param {{ maxBytes?: number }} [opts] - maxBytes: the largest file read (default no cap)
  * @returns {string|null}
  * @throws on any other read error
  */
-function readTextUnlinked(file) {
+function readTextUnlinked(file, { maxBytes = Infinity } = {}) {
   let fd;
   try {
-    if (fs.lstatSync(file).isSymbolicLink()) return null;
-    fd = fs.openSync(file, fs.constants.O_RDONLY | (fs.constants.O_NOFOLLOW || 0));
+    const stat = fs.lstatSync(file);
+    if (!stat.isFile() || stat.size > maxBytes) return null;
+    fd = fs.openSync(file, fs.constants.O_RDONLY | (fs.constants.O_NOFOLLOW || 0) | (fs.constants.O_NONBLOCK || 0));
   } catch (err) {
     if (err && err.code === 'ENOENT') return null;
     throw err;
   }
   try {
-    return fs.readFileSync(fd, 'utf8');
+    const stat = fs.fstatSync(fd);
+    return stat.isFile() && stat.size <= maxBytes ? readOpenedText(fd, stat.size) : null;
   } finally {
     fs.closeSync(fd);
   }
@@ -376,16 +403,22 @@ function readTextUnlinked(file) {
  *
  * D-NO-LINKED-READ: a learning file that is itself a symbolic link reads as
  * missing, and nothing is read through it; the pre-v2 backup skips one the same
- * way (ensurePreV2Backup). Reason: a repository can commit any learning file as a
- * link to a file elsewhere on the machine, and a read that followed it would put
- * that file's lines into list and show and, through a rewrite, the quarantine or
- * a render, into the project's learning folder. The writers never write through a
- * link either: a rename replaces one, and an append refuses one.
+ * way (ensurePreV2Backup), and release-claim reads the claim's owner file the same
+ * way, and only up to CLAIM_OWNER_MAX_BYTES (readClaimOwner). readJsonl and
+ * readClaimOwner read a regular file alone (readTextUnlinked): a directory, a FIFO
+ * or a device where the file belongs reads as missing too, and neither waits on
+ * one. Reason: a repository can commit any learning file as a link to a file
+ * elsewhere on the machine, and a read that followed it would put that file's
+ * lines into list and show and, through a rewrite, the quarantine or a render,
+ * into the project's learning folder; a read that followed one to a FIFO or to
+ * /dev/zero would wait forever or fill memory, holding the learning lock when a
+ * writer or release-claim reads. The writers never write through a link either:
+ * a rename replaces one, and an append refuses one.
  *
  * @param {string} file
  * @returns {{ rows: object[], rejected: Array<{ line: number, text: string }>, missing: boolean }}
- *   `missing` is true when the file does not exist or is a symbolic link. Any
- *   other read error is thrown.
+ *   `missing` is true when the file does not exist, or is a symbolic link or
+ *   anything else but a regular file. Any other read error is thrown.
  */
 function readJsonl(file) {
   const raw = readTextUnlinked(safePath(file));
@@ -652,7 +685,7 @@ function withDecisionsLock(opName, root, fn, { timeoutMs = LOCK_ACQUIRE_TIMEOUT_
 /**
  * Read the ledger and the log, read-only: malformed lines are reported, never
  * quarantined (D-QUARANTINE-MALFORMED). An absent file, or one that is a symbolic
- * link (D-NO-LINKED-READ), reads as empty.
+ * link or not a regular file (D-NO-LINKED-READ), reads as empty.
  *
  * @param {string} root - project root
  * @returns {{ ledgerRows: object[], logRows: object[], rejected: { ledger: Array<{ line: number, text: string }>, log: Array<{ line: number, text: string }> } }}
@@ -1364,6 +1397,13 @@ const QUEUE_LOCK_STALE_MS = 30000;
 /** A claim token: 16 lowercase hex characters. */
 const CLAIM_TOKEN_RE = /^[0-9a-f]{16}$/;
 
+/**
+ * The largest owner file release-claim reads, in bytes. A token and its newline
+ * take 17; a larger owner file reads as no owner file at all (D-NO-LINKED-READ,
+ * at readJsonl).
+ */
+const CLAIM_OWNER_MAX_BYTES = 4096;
+
 /** link(2) errors of a filesystem without hard links; the claim renames instead. */
 const NO_HARD_LINK_CODES = Object.freeze(['EPERM', 'ENOTSUP']);
 
@@ -1416,15 +1456,14 @@ function removeIfPresent(file) {
   }
 }
 
-/** The token the owner file records, or null when it is absent or holds no token. */
+/**
+ * The token the owner file records, or null when it is absent or holds no token.
+ * An owner file that is a symbolic link, anything else but a regular file, or
+ * larger than CLAIM_OWNER_MAX_BYTES reads as absent (D-NO-LINKED-READ, at readJsonl).
+ */
 function readClaimOwner(root) {
-  let text;
-  try {
-    text = fs.readFileSync(getLearningClaimOwnerPath(root), 'utf8');
-  } catch (err) {
-    if (err && err.code === 'ENOENT') return null;
-    throw err;
-  }
+  const text = readTextUnlinked(getLearningClaimOwnerPath(root), { maxBytes: CLAIM_OWNER_MAX_BYTES });
+  if (text === null) return null;
   const token = text.trim();
   return CLAIM_TOKEN_RE.test(token) ? token : null;
 }
@@ -1534,7 +1573,9 @@ function claimQueue(root, { now = Date.now(), token = newClaimToken(), timeoutMs
  * Release the claim `token` owns (D-OWNED-CLAIM): delete the claim and the owner
  * file when the token owns it (released); refuse when another token does
  * (not-owner); report a claim that is already gone (gone), deleting the owner
- * file only when it names this token.
+ * file only when it names this token. An owner file that is a symbolic link,
+ * anything else but a regular file, or larger than CLAIM_OWNER_MAX_BYTES names no
+ * token, as though it were absent (D-NO-LINKED-READ, at readJsonl).
  *
  * @param {string} root - project root
  * @param {string} token
@@ -2458,14 +2499,7 @@ function readScannedText(file) {
   try {
     const stat = fs.fstatSync(fd);
     if (!stat.isFile() || stat.size > CITED_SCAN_MAX_FILE_BYTES) return null;
-    const buf = Buffer.alloc(stat.size);
-    let total = 0;
-    while (total < buf.length) {
-      const read = fs.readSync(fd, buf, total, buf.length - total, total);
-      if (read === 0) break;
-      total += read;
-    }
-    const text = buf.toString('utf8', 0, total);
+    const text = readOpenedText(fd, stat.size);
     return text.includes('\u0000') ? null : text;
   } catch {
     return null;
@@ -3141,6 +3175,7 @@ module.exports = {
   // The queue claim
   CLAIM_STALE_SECS,
   CLAIM_TOKEN_RE,
+  CLAIM_OWNER_MAX_BYTES,
   newClaimToken,
   claimQueue,
   releaseClaim,

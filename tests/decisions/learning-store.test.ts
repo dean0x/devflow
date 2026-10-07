@@ -33,12 +33,14 @@ import {
   makeV2LogRow,
   requireLearningStore,
   runJsonHelper,
+  runJsonHelperBounded,
   seedLearningTree,
   snapshotTree,
   toJsonl,
   type Row,
   type ValidationResult,
 } from './learning-fixtures.js';
+import { FIFO_RUN_BOUND_MS, FIFO_TEST_TIMEOUT_MS, makeFifo } from '../shell-hooks-helpers.js';
 
 const store = requireLearningStore();
 
@@ -193,8 +195,14 @@ describe('readJsonl (D-QUARANTINE-MALFORMED)', () => {
     expect(store.readJsonl(file).rows).toEqual([{ a: 1 }, { b: 2 }]);
   });
 
-  it('throws on a read error other than a missing file', () => {
-    expect(() => store.readJsonl(tmp)).toThrow();
+  // An unreadable file is not a missing one: read as empty, a writer would rewrite
+  // it from nothing. Root reads it anyway, so the case needs another user.
+  it.skipIf(process.getuid?.() === 0)('throws on a read error other than a missing file', () => {
+    const file = path.join(tmp, 'decisions-log.jsonl');
+    fs.writeFileSync(file, toJsonl([makeV2LogRow()]));
+    fs.chmodSync(file, 0o000);
+
+    expect(() => store.readJsonl(file)).toThrow(/EACCES/);
   });
 
   it('refuses a path with a NUL byte', () => {
@@ -688,6 +696,36 @@ describe('a learning file that is a symbolic link reads as absent (D-NO-LINKED-R
       expect(fs.readFileSync(target, 'utf8')).toContain(MARKER);
     });
   }
+});
+
+// A FIFO or a directory can stand where a learning file belongs. A learning file is
+// read only when lstat shows a regular file and fstat, after the open, confirms it:
+// anything else reads as absent, and no read waits on a FIFO. Each run that meets a
+// FIFO is bounded, so one that waits is killed at the bound and fails the test.
+describe('a learning file that is not a regular file reads as absent (D-NO-LINKED-READ)', () => {
+  let tmp: string;
+  beforeEach(() => { tmp = makeTmp('learning-store-not-regular-'); });
+  afterEach(() => { fs.rmSync(tmp, { recursive: true, force: true }); });
+
+  it('readJsonl reads a directory as missing', () => {
+    const { log } = seedLearningTree(tmp);
+    fs.mkdirSync(log);
+
+    expect(store.readJsonl(log)).toEqual({ rows: [], rejected: [], missing: true });
+  });
+
+  it('list returns at once with a FIFO at the ledger path and a directory at the log path, reading both as absent', { timeout: FIFO_TEST_TIMEOUT_MS }, () => {
+    const p = seedLearningTree(tmp);
+    makeFifo(p.ledger);
+    fs.mkdirSync(p.log);
+
+    expect(runJsonHelperBounded(tmp, ['list'], FIFO_RUN_BOUND_MS), 'every section is empty').toEqual({
+      code: 0,
+      stdout: 'ACTIVE 0\nINACTIVE 0\nOBSERVATIONS 0\nINTEGRITY 0\n',
+      stderr: '',
+      timedOut: false,
+    });
+  });
 });
 
 // ---------------------------------------------------------------------------
