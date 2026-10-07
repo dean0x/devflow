@@ -4064,7 +4064,7 @@ describe('session-start-context: learning maintenance directive (Section 2)', ()
 // a link leads to is treated as absent and each refusal is logged once. MARKER is
 // a made-up string standing in for that file's content.
 
-describe('session-start-context never reads through a symbolic link under .devflow (D-HOOKS-NO-SYMLINK)', () => {
+describe('session-start-context never reads through a symbolic link under .devflow into the session or an agent directive (D-HOOKS-NO-SYMLINK)', () => {
   const CONTEXT_HOOK = path.join(HOOKS_DIR, 'session-start-context');
   const MARKER = 'made-up-marker-6b2f0e';
 

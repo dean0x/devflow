@@ -3313,7 +3313,7 @@ describe('S27: the memory hooks never write through a symbolic link under .devfl
 // the backup or the prompt, each refusal is logged once, and the hook exits 0.
 // MARKER is a made-up string standing in for the linked file's content.
 // =============================================================================
-describe('S28: the memory hooks never read through a symbolic link under .devflow (D-HOOKS-NO-SYMLINK)', { timeout: HOOK_RUN_ALLOWANCE_MS + NODE_EXEC_STALL_MS }, () => {
+describe('S28: the memory hooks never read through a symbolic link into the session, the backup or the prompt (D-HOOKS-NO-SYMLINK)', { timeout: HOOK_RUN_ALLOWANCE_MS + NODE_EXEC_STALL_MS }, () => {
   const MARKER = 'made-up-marker-4c8d1a';
   const OUTSIDE = `## Now\n- ${MARKER}\n`;
   // Far in the future, so a backup carrying it is offered whatever the time zone.
