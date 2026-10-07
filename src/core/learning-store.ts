@@ -116,7 +116,7 @@ export interface LearningStoreModule {
   readonly INACTIVE_STATUSES: readonly string[];
   /** An entry id: ADR-NNN or PF-NNN. */
   readonly ANCHOR_ID_RE: RegExp;
-  /** Both files' rows, read-only; an absent file reads as empty. */
+  /** Both files' rows, read-only; an absent file, or one that is a symbolic link, reads as empty. */
   readLearningState(root: string): LearningState;
   /** The listing of rows already read; without `scopeMatches` no scope is checked. */
   buildListing(

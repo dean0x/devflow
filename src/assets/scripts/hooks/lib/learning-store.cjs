@@ -337,6 +337,32 @@ function parseRow(text) {
 }
 
 /**
+ * The text of `file`, or null when nothing is there or the file is a symbolic
+ * link (D-NO-LINKED-READ, at readJsonl). lstat sees a link without following it;
+ * the open never follows one either (O_NOFOLLOW), so a link that took the file's
+ * place after the lstat fails the read rather than being read through.
+ *
+ * @param {string} file - an absolute path
+ * @returns {string|null}
+ * @throws on any other read error
+ */
+function readTextUnlinked(file) {
+  let fd;
+  try {
+    if (fs.lstatSync(file).isSymbolicLink()) return null;
+    fd = fs.openSync(file, fs.constants.O_RDONLY | (fs.constants.O_NOFOLLOW || 0));
+  } catch (err) {
+    if (err && err.code === 'ENOENT') return null;
+    throw err;
+  }
+  try {
+    return fs.readFileSync(fd, 'utf8');
+  } finally {
+    fs.closeSync(fd);
+  }
+}
+
+/**
  * Read a JSONL file strictly: every non-blank line is either one JSON object (a
  * row) or rejected, with its 1-based line number and its text.
  *
@@ -348,19 +374,22 @@ function parseRow(text) {
  * delete them without a trace, and a reader that quarantined would make list,
  * show and the HUD write files.
  *
+ * D-NO-LINKED-READ: a learning file that is itself a symbolic link reads as
+ * missing, and nothing is read through it; the pre-v2 backup skips one the same
+ * way (ensurePreV2Backup). Reason: a repository can commit any learning file as a
+ * link to a file elsewhere on the machine, and a read that followed it would put
+ * that file's lines into list and show and, through a rewrite, the quarantine or
+ * a render, into the project's learning folder. The writers never write through a
+ * link either: a rename replaces one, and an append refuses one.
+ *
  * @param {string} file
  * @returns {{ rows: object[], rejected: Array<{ line: number, text: string }>, missing: boolean }}
- *   `missing` is true when the file does not exist. Any read error other than a
- *   missing file is thrown.
+ *   `missing` is true when the file does not exist or is a symbolic link. Any
+ *   other read error is thrown.
  */
 function readJsonl(file) {
-  let raw;
-  try {
-    raw = fs.readFileSync(safePath(file), 'utf8');
-  } catch (err) {
-    if (err && err.code === 'ENOENT') return { rows: [], rejected: [], missing: true };
-    throw err;
-  }
+  const raw = readTextUnlinked(safePath(file));
+  if (raw === null) return { rows: [], rejected: [], missing: true };
   const rows = [];
   const rejected = [];
   const lines = raw.split('\n');
@@ -622,7 +651,8 @@ function withDecisionsLock(opName, root, fn, { timeoutMs = LOCK_ACQUIRE_TIMEOUT_
 
 /**
  * Read the ledger and the log, read-only: malformed lines are reported, never
- * quarantined (D-QUARANTINE-MALFORMED). An absent file reads as empty.
+ * quarantined (D-QUARANTINE-MALFORMED). An absent file, or one that is a symbolic
+ * link (D-NO-LINKED-READ), reads as empty.
  *
  * @param {string} root - project root
  * @returns {{ ledgerRows: object[], logRows: object[], rejected: { ledger: Array<{ line: number, text: string }>, log: Array<{ line: number, text: string }> } }}
@@ -1096,17 +1126,19 @@ function historyVersions(root, id) {
  * log, the ledger and the archive, as they are on disk, to `*.pre-v2.jsonl` with
  * an exclusive create, before anything rewrites them; an existing copy is never
  * overwritten. Reason: v2 writes convert and rewrite v1 rows, and these copies are
- * the only record of the corpus as it was before the conversion.
+ * the only record of the corpus as it was before the conversion. A file that is a
+ * symbolic link is not copied: the store reads none (D-NO-LINKED-READ, at readJsonl).
  *
  * @param {string} root - project root
  * @param {{ logRows?: object[], ledgerRows?: object[] }} rows - the rows just read
  * @returns {string[]} the backup paths written by this call (none when every row
- *   is v2, a file is absent or its copy already exists)
+ *   is v2, a file is absent or a symbolic link, or its copy already exists)
  */
 function ensurePreV2Backup(root, { logRows = [], ledgerRows = [] } = {}) {
   if ([...logRows, ...ledgerRows].every(row => isV2(row))) return [];
   const written = [];
   for (const file of [getDecisionsLogPath(root), getDecisionsLedgerPath(root), getDecisionsArchivePath(root)]) {
+    if (isSymbolicLink(file)) continue;
     const copy = withJsonlSuffix(file, '.pre-v2.jsonl');
     try {
       fs.copyFileSync(file, copy, fs.constants.COPYFILE_EXCL);
