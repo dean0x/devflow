@@ -12,15 +12,15 @@ import { promises as fs } from 'fs';
  *
  * D-CLI-NO-SYMLINK: the CLI writes or deletes under a project's `.devflow/` only
  * where neither `.devflow` nor the entry it acts on through it is a symbolic link:
- * `devflow init` stamps its carve-out marker, and removes the legacy markers, only
- * then, and the queue drains (`devflow learning --clear|--disable`, `devflow memory
- * --disable|--clear` and `devflow init --no-learning|--no-memory`) delete nothing
- * when `.devflow` or the queue's folder is one. Reason: a repository can commit
- * `.devflow`, or a folder or file in it, as a link to any place on the machine, and a
- * write or delete through one lands wherever it points. The hooks hold the same rule
- * (D-HOOKS-NO-SYMLINK, git-marker) and so do the learning ops (D-NO-LINKED-TREE).
- * Only paths below the project root are passed here: the root and the folders above
- * it are the user's choice.
+ * `devflow init` stamps its carve-out marker, removes the legacy markers and
+ * writes `.devflow/config.json` only then, and the queue drains (`devflow learning
+ * --clear|--disable`, `devflow memory --disable|--clear` and `devflow init
+ * --no-learning|--no-memory`) delete nothing when `.devflow` or the queue's folder
+ * is one. Reason: a repository can commit `.devflow`, or a folder or file in it, as
+ * a link to any place on the machine, and a write or delete through one lands
+ * wherever it points. The hooks hold the same rule (D-HOOKS-NO-SYMLINK, git-marker)
+ * and so do the learning ops (D-NO-LINKED-TREE). Only paths below the project root
+ * are passed here: the root and the folders above it are the user's choice.
  *
  * Each path is checked with lstat, so a link is seen rather than followed. Nothing at
  * a path, or a file where a folder was expected on the way to it, is no link; any

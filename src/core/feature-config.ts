@@ -1,5 +1,6 @@
 import * as path from 'path';
 import { promises as fs } from 'fs';
+import { firstSymbolicLink } from './linked-path.js';
 import { getFeatureConfigPath } from './project-paths.js';
 import { parseTrackerId, type TrackerProvider } from './tracker.js';
 import { loadProjectConfigLib, type ProjectConfigLib, type ProjectConfigLibLoad } from './evidence-policy.js';
@@ -278,12 +279,15 @@ async function readConfigBody(
  * Serialise a config body to a project's config file.
  * Creates the .devflow/ directory if missing.
  * Uses an atomic temp+rename pattern to prevent partial reads under concurrent writes.
+ * The copy is created only where nothing stands ('wx'), so an entry a repository
+ * planted at its name — a symbolic link among them — is never written through
+ * (D-CLI-NO-SYMLINK); the write then fails and the Result says so.
  */
 async function writeConfigBody(projectRoot: string, body: object): Promise<void> {
   const configPath = getFeatureConfigPath(projectRoot);
   await fs.mkdir(path.join(projectRoot, '.devflow'), { recursive: true });
   const tmpPath = configPath + '.tmp.' + process.pid;
-  await fs.writeFile(tmpPath, JSON.stringify(body, null, 2) + '\n', { encoding: 'utf-8', mode: 0o600 });
+  await fs.writeFile(tmpPath, JSON.stringify(body, null, 2) + '\n', { encoding: 'utf-8', mode: 0o600, flag: 'wx' });
   await fs.rename(tmpPath, configPath);
 }
 
@@ -344,6 +348,9 @@ export type ManagedConfigWrite =
  * change. Acceptable because init is a single-threaded, user-initiated command
  * and the window is milliseconds on a local filesystem; the file swap itself is
  * atomic (temp + rename), so a reader never sees a partial file.
+ *
+ * D-CLI-NO-SYMLINK (firstSymbolicLink): a `.devflow` that is a symbolic link is
+ * left alone, and the Result says so; the file is neither read nor written there.
  */
 export async function writeManagedConfig(
   projectRoot: string,
@@ -351,6 +358,15 @@ export async function writeManagedConfig(
   lib: ProjectConfigLibLoad = loadProjectConfigLib(),
 ): Promise<ManagedConfigWrite> {
   const configPath = getFeatureConfigPath(projectRoot);
+  let linked: string | null;
+  try {
+    linked = await firstSymbolicLink([path.dirname(configPath)]);
+  } catch (err: unknown) {
+    return { ok: false, error: { kind: 'unreadable', path: configPath, detail: err instanceof Error ? err.message : String(err) } };
+  }
+  if (linked !== null) {
+    return { ok: false, error: { kind: 'unreadable', path: configPath, detail: `${linked} is a symbolic link, and devflow writes nothing through one` } };
+  }
   const existing = await readConfigBody(projectRoot, lib);
   if (existing.kind === 'malformed') return { ok: false, error: { kind: 'malformed', path: configPath } };
   if (existing.kind === 'unreadable') {
