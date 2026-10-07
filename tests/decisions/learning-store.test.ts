@@ -544,7 +544,7 @@ describe('a learning tree reached through a symbolic link (D-NO-LINKED-TREE)', {
 // or the one-time pre-v2 backup. The file the link names is never changed.
 describe('a learning file that is a symbolic link reads as absent (D-NO-LINKED-READ)', () => {
   // A made-up marker standing in for the linked file's content.
-  const SECRET = 'made-up-marker-7f3e2b';
+  const MARKER = 'made-up-marker-7f3e2b';
   let tmp: string;
   let outside: string;
   beforeEach(() => {
@@ -563,19 +563,19 @@ describe('a learning file that is a symbolic link reads as absent (D-NO-LINKED-R
   }
 
   /** The names of the regular files in `dir` whose bytes hold the marker. */
-  function filesHoldingSecret(dir: string): string[] {
+  function filesHoldingMarker(dir: string): string[] {
     return fs.readdirSync(dir).filter(name => {
       const abs = path.join(dir, name);
-      return fs.lstatSync(abs).isFile() && fs.readFileSync(abs, 'utf8').includes(SECRET);
+      return fs.lstatSync(abs).isFile() && fs.readFileSync(abs, 'utf8').includes(MARKER);
     });
   }
 
   /** Rows that carry the marker, then a malformed line that carries it too. */
-  const rowsWithSecret = (rows: readonly Row[]): string => `${toJsonl(rows)}{${SECRET}\n`;
+  const rowsWithMarker = (rows: readonly Row[]): string => `${toJsonl(rows)}{${MARKER}\n`;
 
   it('readJsonl reads a linked file as missing, and leaves the file it names as it was', () => {
     const { log } = seedLearningTree(tmp);
-    const target = linkToOutside(log, rowsWithSecret([makeV2LogRow({ title: SECRET })]));
+    const target = linkToOutside(log, rowsWithMarker([makeV2LogRow({ title: MARKER })]));
     const before = fs.readFileSync(target, 'utf8');
 
     expect(store.readJsonl(log)).toEqual({ rows: [], rejected: [], missing: true });
@@ -584,13 +584,13 @@ describe('a learning file that is a symbolic link reads as absent (D-NO-LINKED-R
 
   it('list prints nothing from a linked ledger or log', () => {
     const p = seedLearningTree(tmp);
-    linkToOutside(p.ledger, rowsWithSecret([makeV2LedgerRow({ title: SECRET })]));
-    linkToOutside(p.log, rowsWithSecret([makeV2LogRow({ id: 'obs_store_two', title: SECRET })]));
+    linkToOutside(p.ledger, rowsWithMarker([makeV2LedgerRow({ title: MARKER })]));
+    linkToOutside(p.log, rowsWithMarker([makeV2LogRow({ id: 'obs_store_two', title: MARKER })]));
 
     const run = runJsonHelper(tmp, ['list']);
 
     expect(run.code, run.stderr).toBe(0);
-    expect(run.stdout).not.toContain(SECRET);
+    expect(run.stdout).not.toContain(MARKER);
     expect(run.stdout.trim().split('\n'), 'every section is empty, and no skipped line is counted').toEqual([
       'ACTIVE 0', 'INACTIVE 0', 'OBSERVATIONS 0', 'INTEGRITY 0',
     ]);
@@ -598,13 +598,13 @@ describe('a learning file that is a symbolic link reads as absent (D-NO-LINKED-R
 
   it('show prints nothing from a linked log or history', () => {
     const p = seedLearningTree(tmp, { ledger: [makeV2LedgerRow()] });
-    linkToOutside(p.log, rowsWithSecret([makeV2LogRow({ rule: SECRET })]));
-    linkToOutside(p.history, rowsWithSecret([{ id: 'obs_store_one', at: daysAgoIso(1), ledger: [], log: makeV2LogRow({ rule: SECRET }) }]));
+    linkToOutside(p.log, rowsWithMarker([makeV2LogRow({ rule: MARKER })]));
+    linkToOutside(p.history, rowsWithMarker([{ id: 'obs_store_one', at: daysAgoIso(1), ledger: [], log: makeV2LogRow({ rule: MARKER }) }]));
 
     const run = runJsonHelper(tmp, ['show', 'ADR-001']);
 
     expect(run.code, run.stderr).toBe(0);
-    expect(run.stdout).not.toContain(SECRET);
+    expect(run.stdout).not.toContain(MARKER);
     const shown = JSON.parse(run.stdout) as { ledger: Row[]; log: Row | null; history_versions: Row[] };
     expect(shown.ledger, 'non-vacuity: the real ledger is read').toEqual([makeV2LedgerRow()]);
     expect(shown.log, 'the linked log reads as absent').toBeNull();
@@ -613,7 +613,7 @@ describe('a learning file that is a symbolic link reads as absent (D-NO-LINKED-R
 
   it('a put copies no row or malformed line of a linked log into the project', () => {
     const p = seedLearningTree(tmp, { ledger: [] });
-    const target = linkToOutside(p.log, rowsWithSecret([makeV2LogRow({ id: 'obs_store_two', title: SECRET })]));
+    const target = linkToOutside(p.log, rowsWithMarker([makeV2LogRow({ id: 'obs_store_two', title: MARKER })]));
     const before = fs.readFileSync(target, 'utf8');
 
     const result = store.putObservation(tmp, 'create', {
@@ -623,33 +623,33 @@ describe('a learning file that is a symbolic link reads as absent (D-NO-LINKED-R
 
     expect(result.ok, JSON.stringify(result)).toBe(true);
     expect(fs.readFileSync(target, 'utf8'), 'the file the link names is byte-identical').toBe(before);
-    expect(filesHoldingSecret(p.learningDir), 'nothing of it is rewritten or quarantined into the learning folder').toEqual([]);
+    expect(filesHoldingMarker(p.learningDir), 'nothing of it is rewritten or quarantined into the learning folder').toEqual([]);
     expect(store.readJsonl(p.log).rows.map(row => row.id), 'the log holds the new observation alone').toEqual(['obs_store_three']);
   });
 
   it('assigning an anchor copies no row or malformed line of a linked ledger into the project', () => {
     const p = seedLearningTree(tmp, { log: [makeV2LogRow({ id: 'obs_store_two' })] });
-    const target = linkToOutside(p.ledger, rowsWithSecret([makeV2LedgerRow({ title: SECRET })]));
+    const target = linkToOutside(p.ledger, rowsWithMarker([makeV2LedgerRow({ title: MARKER })]));
     const before = fs.readFileSync(target, 'utf8');
 
     const result = store.assignAnchor(tmp, 'decision', 'obs_store_two', { now: FIXTURE_NOW, citedAnchors: new Map() });
 
     expect(result.ok, JSON.stringify(result)).toBe(true);
     expect(fs.readFileSync(target, 'utf8'), 'the file the link names is byte-identical').toBe(before);
-    expect(filesHoldingSecret(p.learningDir), 'nothing of it is rewritten, quarantined or rendered into the learning folder').toEqual([]);
+    expect(filesHoldingMarker(p.learningDir), 'nothing of it is rewritten, quarantined or rendered into the learning folder').toEqual([]);
     expect(store.readJsonl(p.ledger).rows.map(row => row.anchor_id), 'the ledger holds the new entry alone').toEqual(['ADR-001']);
   });
 
   it('a history append copies no record or malformed line of a linked history into the project', () => {
     const p = seedLearningTree(tmp);
-    const outsideRecord = { id: 'obs_other', at: daysAgoIso(1), ledger: [], log: makeV2LogRow({ id: 'obs_other', title: SECRET }) };
-    const target = linkToOutside(p.history, rowsWithSecret([outsideRecord]));
+    const outsideRecord = { id: 'obs_other', at: daysAgoIso(1), ledger: [], log: makeV2LogRow({ id: 'obs_other', title: MARKER }) };
+    const target = linkToOutside(p.history, rowsWithMarker([outsideRecord]));
     const before = fs.readFileSync(target, 'utf8');
 
     expect(store.appendHistory(tmp, { id: 'obs_store_one', ledger: [], log: makeV2LogRow() }, { now: FIXTURE_NOW })).toBe(1);
 
     expect(fs.readFileSync(target, 'utf8'), 'the file the link names is byte-identical').toBe(before);
-    expect(filesHoldingSecret(p.learningDir), 'nothing of it is rewritten or quarantined into the learning folder').toEqual([]);
+    expect(filesHoldingMarker(p.learningDir), 'nothing of it is rewritten or quarantined into the learning folder').toEqual([]);
     expect(store.readJsonl(p.history).rows.map(row => row.id), 'the history holds the new record alone').toEqual(['obs_store_one']);
   });
 
@@ -675,7 +675,7 @@ describe('a learning file that is a symbolic link reads as absent (D-NO-LINKED-R
         ledger: which === 'ledger' ? undefined : [makeV1LedgerRow()],
         archive: which === 'archive' ? undefined : [makeV1LogRow({ id: 'obs_old' })],
       });
-      const target = linkToOutside(p[which], toJsonl([makeV1LogRow({ id: 'obs_other', pattern: SECRET })]));
+      const target = linkToOutside(p[which], toJsonl([makeV1LogRow({ id: 'obs_other', pattern: MARKER })]));
       const preV2 = (file: string): string => file.replace(/\.jsonl$/, '.pre-v2.jsonl');
 
       const written = store.ensurePreV2Backup(tmp, { logRows: [makeV1LogRow()], ledgerRows: [] });
@@ -684,8 +684,8 @@ describe('a learning file that is a symbolic link reads as absent (D-NO-LINKED-R
         [p.log, p.ledger, p.archive].filter(file => file !== p[which]).map(preV2),
       );
       expect(fs.existsSync(preV2(p[which])), 'no copy is made of the linked file').toBe(false);
-      expect(filesHoldingSecret(p.learningDir)).toEqual([]);
-      expect(fs.readFileSync(target, 'utf8')).toContain(SECRET);
+      expect(filesHoldingMarker(p.learningDir)).toEqual([]);
+      expect(fs.readFileSync(target, 'utf8')).toContain(MARKER);
     });
   }
 });
