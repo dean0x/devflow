@@ -1,7 +1,8 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach, type MockInstance } from 'vitest';
 import { promises as fs } from 'fs';
 import * as path from 'path';
 import * as os from 'os';
+import * as p from '@clack/prompts';
 import {
   combineSelection,
   shouldRetry,
@@ -545,6 +546,88 @@ describe('ensureDevflowGitignore — v6 carve-out (.claudeignore + retired polic
     const contentAfterSecondRun = await read();
 
     expect(contentAfterSecondRun).toBe(contentAfterFirstRun);
+  });
+});
+
+// D-GITIGNORE-LINK-INSIDE: a repository can commit its root .gitignore as a symbolic
+// link to any file on the machine. init writes through one only when the file it
+// resolves to lies inside the project and outside its .git, exactly as the
+// ensure-root-gitignore hook does; otherwise it writes nothing anywhere and says so.
+describe('ensureDevflowGitignore — a root .gitignore that is a symbolic link (D-GITIGNORE-LINK-INSIDE)', () => {
+  const UNTOUCHED = 'a file outside the project, which init may not write\n';
+  let tmpDir: string;
+  let root: string;
+  let outside: string;
+  let warn: MockInstance;
+
+  beforeEach(async () => {
+    tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'devflow-ensure-ignore-link-'));
+    root = path.join(tmpDir, 'repo');
+    outside = path.join(tmpDir, 'outside');
+    await fs.mkdir(root);
+    await fs.mkdir(outside);
+    vi.stubEnv('HOME', path.join(tmpDir, 'home'));
+    warn = vi.spyOn(p.log, 'warn').mockImplementation(() => undefined);
+  });
+
+  afterEach(async () => {
+    warn.mockRestore();
+    vi.unstubAllEnvs();
+    await fs.rm(tmpDir, { recursive: true, force: true });
+  });
+
+  const warned = (): string[] => warn.mock.calls.map(call => String(call[0]));
+  const exists = (file: string): Promise<boolean> => fs.lstat(file).then(() => true, () => false);
+
+  it('a link to a file outside the project is left untouched, no marker is stamped, and the skip is reported', async () => {
+    const target = path.join(outside, 'gitignore');
+    await fs.writeFile(target, UNTOUCHED);
+    await fs.symlink(target, path.join(root, '.gitignore'));
+
+    await ensureDevflowGitignore(root, false);
+
+    expect(await fs.readFile(target, 'utf-8'), 'nothing is written through the link').toBe(UNTOUCHED);
+    expect((await fs.lstat(path.join(root, '.gitignore'))).isSymbolicLink(), 'the link is left as it was').toBe(true);
+    expect(await exists(path.join(root, '.devflow')), 'no marker, no .devflow').toBe(false);
+    expect(warned(), 'reported even without --verbose').toEqual([expect.stringContaining('symbolic link')]);
+  });
+
+  it('a relative link to a file outside the project that does not exist yet: nothing is created there', async () => {
+    await fs.symlink('../outside/gitignore', path.join(root, '.gitignore'));
+
+    await ensureDevflowGitignore(root, false);
+
+    expect(await fs.readdir(outside), 'nothing is created where the link points').toEqual([]);
+    expect(await exists(path.join(root, '.devflow'))).toBe(false);
+    expect(warned()).toHaveLength(1);
+  });
+
+  it('a link into the project\'s own .git is refused', async () => {
+    const hook = path.join(root, '.git', 'hooks', 'pre-commit');
+    const HOOK = '#!/bin/sh\nexec true\n';
+    await fs.mkdir(path.dirname(hook), { recursive: true });
+    await fs.writeFile(hook, HOOK, { mode: 0o755 });
+    await fs.symlink('.git/hooks/pre-commit', path.join(root, '.gitignore'));
+
+    await ensureDevflowGitignore(root, false);
+
+    expect(await fs.readFile(hook, 'utf-8')).toBe(HOOK);
+    expect(await exists(path.join(root, '.devflow'))).toBe(false);
+    expect(warned()).toHaveLength(1);
+  });
+
+  it('a link to a file inside the project is written through, stays a link, and is stamped', async () => {
+    await fs.mkdir(path.join(root, 'config'));
+    const target = path.join(root, 'config', 'gitignore');
+    await fs.writeFile(target, 'node_modules/\n');
+    await fs.symlink('config/gitignore', path.join(root, '.gitignore'));
+
+    await ensureDevflowGitignore(root, false);
+
+    expect((await fs.lstat(path.join(root, '.gitignore'))).isSymbolicLink(), 'the link survives').toBe(true);
+    expect(await fs.readFile(target, 'utf-8')).toBe(`node_modules/\n\n${DEVFLOW_GITIGNORE_BLOCK}\n`);
+    expect(await exists(path.join(root, '.devflow', '.root-gitignore-configured-v6'))).toBe(true);
+    expect(warned(), 'nothing to report').toEqual([]);
   });
 });
 

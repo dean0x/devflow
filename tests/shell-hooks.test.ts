@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeAll, beforeEach, afterEach, afterAll } from 'vitest';
+import { describe, it, expect, vi, beforeAll, beforeEach, afterEach, afterAll } from 'vitest';
 import { execSync, spawnSync, spawn } from 'child_process';
 import * as path from 'path';
 import * as fs from 'fs';
@@ -6,10 +6,12 @@ import * as os from 'os';
 import * as net from 'net';
 import { HANDOFF_TEMPLATE, REMINDER_TEMPLATE } from './fixtures/ambient-templates.js';
 import { buildRoutingConfigJson } from '../src/core/proxy-state.js';
+import * as p from '@clack/prompts';
 import {
   DEVFLOW_GITIGNORE_BLOCK,
   DEVFLOW_GITIGNORE_BLOCK_WITHOUT_CLAUDEIGNORE,
   computeDevflowGitignore,
+  ensureDevflowGitignore,
 } from '../src/targets/claude-code/post-install.js';
 import { HOOKS_DIR, execHook, runHook } from './shell-hooks-helpers.js';
 
@@ -1856,6 +1858,33 @@ describe('ensure-devflow-init behavioral', () => {
     expect(fs.existsSync(path.join(tmpDir, '.devflow', 'features', 'index.json'))).toBe(false);
   });
 
+  it('a root .gitignore linked outside the project is left alone, and capture goes on (D-GITIGNORE-LINK-INSIDE)', () => {
+    // The capture and memory hooks stop when this file returns non-zero
+    // (`|| exit 0`), so a refused carve-out must not refuse the whole scaffold.
+    const outside = fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-features-outside-'));
+    try {
+      const target = path.join(outside, 'gitignore');
+      const UNTOUCHED = 'a file outside the project\n';
+      fs.writeFileSync(target, UNTOUCHED);
+      fs.symlinkSync(target, path.join(tmpDir, '.gitignore'));
+      const logFile = path.join(outside, 'hook.log');
+
+      const run = spawnSync(
+        'bash',
+        ['-c', 'set -e; log() { printf "%s\\n" "$1" >> "$HOOK_LOG"; }; source "$0" "$1" || { echo stopped; exit 0; }; echo continued', ENSURE_DEVFLOW, tmpDir],
+        { encoding: 'utf-8', env: { ...process.env, HOME: outside, HOOK_LOG: logFile } },
+      );
+
+      expect({ status: run.status, out: run.stdout.trim() }).toEqual({ status: 0, out: 'continued' });
+      expect(fs.readFileSync(target, 'utf-8'), 'nothing is written through the link').toBe(UNTOUCHED);
+      expect(fs.existsSync(path.join(tmpDir, '.devflow', 'memory')), 'the scaffold is still made').toBe(true);
+      expect(fs.existsSync(path.join(tmpDir, '.devflow', '.root-gitignore-configured-v6')), 'no carve-out, no marker').toBe(false);
+      expect(fs.readFileSync(logFile, 'utf-8').trim().split('\n'), 'the skip is logged once').toEqual([expect.stringContaining('symbolic link')]);
+    } finally {
+      fs.rmSync(outside, { recursive: true, force: true });
+    }
+  });
+
   it('writes the .devflow/ carve-out to the project root .gitignore (creates it when absent)', () => {
     execSync(`bash -c 'source "${ENSURE_DEVFLOW}" "${tmpDir}"'`, { stdio: 'pipe' });
 
@@ -2281,6 +2310,104 @@ describe('ensure-root-gitignore behavioral', () => {
     execSync(`bash -c 'source "${ENSURE_ROOT}" "${tmpDir}"'`, { stdio: 'pipe' });
     expect(ignoreLines(gitignore)).toContain('!.devflow/project.json');
     expect(ignoreLines(gitignore)).not.toContain('.devflow/');
+  });
+
+  // D-GITIGNORE-LINK-INSIDE: a repository can commit its root .gitignore as a symbolic
+  // link to any file on the machine. The helper writes through one only when the file
+  // it resolves to lies inside the project and outside its .git; otherwise it writes
+  // nothing anywhere, stamps no marker, logs the skip once and lets its caller go on.
+  describe('a root .gitignore that is a symbolic link (D-GITIGNORE-LINK-INSIDE)', () => {
+    const UNTOUCHED = 'a file outside the project, which no hook may write\n';
+
+    /** A project root and a folder beside it, outside the project, plus a log file. */
+    function layout(): { root: string; outside: string; logFile: string; home: string } {
+      const root = path.join(tmpDir, 'repo');
+      const outside = path.join(tmpDir, 'outside');
+      const home = path.join(tmpDir, 'home');
+      for (const dir of [root, outside, home]) fs.mkdirSync(dir);
+      return { root, outside, logFile: path.join(tmpDir, 'hook.log'), home };
+    }
+
+    /** Source the helper from a `set -e` caller that defines log(), as the hooks do. */
+    function runHelper(root: string, logFile: string, home: string): { status: number | null; out: string } {
+      const r = spawnSync(
+        'bash',
+        ['-c', 'set -e; log() { printf "%s\\n" "$1" >> "$HOOK_LOG"; }; source "$0" "$1"; echo reached', ENSURE_ROOT, root],
+        { encoding: 'utf-8', env: { ...process.env, HOME: home, HOOK_LOG: logFile } },
+      );
+      return { status: r.status, out: r.stdout.trim() };
+    }
+
+    const logged = (logFile: string): string[] =>
+      fs.existsSync(logFile) ? fs.readFileSync(logFile, 'utf-8').trim().split('\n') : [];
+
+    it('a link to a file outside the project: the file is untouched, nothing is stamped, the skip is logged once and the caller goes on', () => {
+      const { root, outside, logFile, home } = layout();
+      const target = path.join(outside, 'gitignore');
+      fs.writeFileSync(target, UNTOUCHED);
+      fs.symlinkSync(target, path.join(root, '.gitignore'));
+
+      expect(runHelper(root, logFile, home)).toEqual({ status: 0, out: 'reached' });
+
+      expect(fs.readFileSync(target, 'utf-8'), 'nothing is written through the link').toBe(UNTOUCHED);
+      expect(fs.lstatSync(path.join(root, '.gitignore')).isSymbolicLink(), 'the link is left as it was').toBe(true);
+      expect(fs.existsSync(path.join(root, '.devflow')), 'no marker, no .devflow').toBe(false);
+      expect(logged(logFile), 'the skip is logged once').toEqual([expect.stringContaining('symbolic link')]);
+    });
+
+    it('a relative link to a file outside the project that does not exist yet: nothing is created there', () => {
+      const { root, outside, logFile, home } = layout();
+      fs.symlinkSync('../outside/gitignore', path.join(root, '.gitignore'));
+
+      expect(runHelper(root, logFile, home)).toEqual({ status: 0, out: 'reached' });
+
+      expect(fs.readdirSync(outside), 'nothing is created where the link points').toEqual([]);
+      expect(fs.existsSync(path.join(root, '.devflow'))).toBe(false);
+      expect(logged(logFile)).toHaveLength(1);
+    });
+
+    it('a link inside the project that runs through a linked folder leading outside is refused', () => {
+      const { root, outside, logFile, home } = layout();
+      fs.writeFileSync(path.join(outside, 'gitignore'), UNTOUCHED);
+      fs.symlinkSync(outside, path.join(root, 'config'));
+      fs.symlinkSync('config/gitignore', path.join(root, '.gitignore'));
+
+      expect(runHelper(root, logFile, home)).toEqual({ status: 0, out: 'reached' });
+
+      expect(fs.readFileSync(path.join(outside, 'gitignore'), 'utf-8')).toBe(UNTOUCHED);
+      expect(fs.existsSync(path.join(root, '.devflow'))).toBe(false);
+      expect(logged(logFile)).toHaveLength(1);
+    });
+
+    it('a link into the project\'s own .git is refused: git\'s hooks and config are not the repository\'s files', () => {
+      const { root, logFile, home } = layout();
+      const hook = path.join(root, '.git', 'hooks', 'pre-commit');
+      const HOOK = '#!/bin/sh\nexec true\n';
+      fs.mkdirSync(path.dirname(hook), { recursive: true });
+      fs.writeFileSync(hook, HOOK, { mode: 0o755 });
+      fs.symlinkSync('.git/hooks/pre-commit', path.join(root, '.gitignore'));
+
+      expect(runHelper(root, logFile, home)).toEqual({ status: 0, out: 'reached' });
+
+      expect(fs.readFileSync(hook, 'utf-8')).toBe(HOOK);
+      expect(fs.existsSync(path.join(root, '.devflow'))).toBe(false);
+      expect(logged(logFile)).toHaveLength(1);
+    });
+
+    it('a link to a file inside the project is written through, stays a link, and is stamped like any other run', () => {
+      const { root, logFile, home } = layout();
+      fs.mkdirSync(path.join(root, 'config'));
+      const target = path.join(root, 'config', 'gitignore');
+      fs.writeFileSync(target, 'node_modules/\n');
+      fs.symlinkSync('config/gitignore', path.join(root, '.gitignore'));
+
+      expect(runHelper(root, logFile, home)).toEqual({ status: 0, out: 'reached' });
+
+      expect(fs.lstatSync(path.join(root, '.gitignore')).isSymbolicLink(), 'the link survives').toBe(true);
+      expect(fs.readFileSync(target, 'utf-8')).toBe(`node_modules/\n\n${DEVFLOW_GITIGNORE_BLOCK}\n`);
+      expect(fs.existsSync(path.join(root, '.devflow', '.root-gitignore-configured-v6'))).toBe(true);
+      expect(logged(logFile), 'nothing to report').toEqual([]);
+    });
   });
 
   // The v2 carve-out block exactly as shipped before the conventions.md line was added.
@@ -3250,6 +3377,218 @@ describe('ensure-root-gitignore × computeDevflowGitignore cross-implementation 
       expect(isIgnored(`${V4_BLOCK_SEED}\n`, '.devflow/conventions.md')).toBe(false);
     });
   });
+});
+
+// =============================================================================
+// Cross-implementation parity over a LINKED root .gitignore (D-GITIGNORE-LINK-INSIDE):
+// the hook (ensure-root-gitignore) and init (ensureDevflowGitignore) follow a link
+// the same way, refuse the same layouts and write the same bytes to the same file.
+// Each row is built twice, in two sandboxes, and each twin runs on its own copy;
+// the whole sandbox is then compared, links included, so a write anywhere shows.
+// =============================================================================
+
+describe('ensure-root-gitignore × ensureDevflowGitignore: a root .gitignore that is a symbolic link (D-GITIGNORE-LINK-INSIDE)', () => {
+  const ENSURE_ROOT_LINKED = path.join(HOOKS_DIR, 'ensure-root-gitignore');
+  const SEED = 'node_modules/\n';
+  const OUTSIDE = 'a file outside the project\n';
+  /** The most links either twin follows from .gitignore to the file it names. */
+  const MAX_HOPS = 40;
+
+  /** One sandbox: `repo/` is the project root, `outside/` a folder beside it. */
+  interface Sandbox { readonly sb: string; readonly repo: string; readonly outside: string }
+
+  interface Row {
+    readonly label: string;
+    readonly setup: (s: Sandbox) => void;
+    /** `refused`: nothing in the sandbox changes. `written`: that file, relative to the sandbox, gains the block. */
+    readonly outcome: 'refused' | { readonly written: string };
+  }
+
+  /** `.gitignore` → l1 → … → l(n-1) → `final`: a chain that `n` link reads resolve. */
+  function chain(s: Sandbox, n: number, final: string): void {
+    const names = ['.gitignore', ...Array.from({ length: n - 1 }, (_, i) => `l${i + 1}`)];
+    names.forEach((name, i) => fs.symlinkSync(i + 1 < names.length ? names[i + 1] : final, path.join(s.repo, name)));
+  }
+
+  const ROWS: readonly Row[] = [
+    {
+      label: 'a regular .gitignore (control)',
+      setup: s => fs.writeFileSync(path.join(s.repo, '.gitignore'), SEED),
+      outcome: { written: 'repo/.gitignore' },
+    },
+    {
+      label: 'an absolute link to a file outside the project',
+      setup: s => { fs.writeFileSync(path.join(s.outside, 'gi'), OUTSIDE); fs.symlinkSync(path.join(s.outside, 'gi'), path.join(s.repo, '.gitignore')); },
+      outcome: 'refused',
+    },
+    {
+      label: 'a relative link to a file outside the project',
+      setup: s => { fs.writeFileSync(path.join(s.outside, 'gi'), OUTSIDE); fs.symlinkSync('../outside/gi', path.join(s.repo, '.gitignore')); },
+      outcome: 'refused',
+    },
+    {
+      label: 'a link to a missing file outside the project',
+      setup: s => fs.symlinkSync('../outside/gi', path.join(s.repo, '.gitignore')),
+      outcome: 'refused',
+    },
+    {
+      label: 'a link to a file inside the project',
+      setup: s => { fs.mkdirSync(path.join(s.repo, 'config')); fs.writeFileSync(path.join(s.repo, 'config', 'gi'), SEED); fs.symlinkSync('config/gi', path.join(s.repo, '.gitignore')); },
+      outcome: { written: 'repo/config/gi' },
+    },
+    {
+      label: 'a link to a missing file in a folder inside the project',
+      setup: s => { fs.mkdirSync(path.join(s.repo, 'config')); fs.symlinkSync('config/gi', path.join(s.repo, '.gitignore')); },
+      outcome: { written: 'repo/config/gi' },
+    },
+    {
+      label: 'a chain that starts inside and ends outside',
+      setup: s => { fs.writeFileSync(path.join(s.outside, 'gi'), OUTSIDE); fs.symlinkSync('hop', path.join(s.repo, '.gitignore')); fs.symlinkSync('../outside/gi', path.join(s.repo, 'hop')); },
+      outcome: 'refused',
+    },
+    {
+      label: 'a chain that leaves the project and ends inside it',
+      setup: s => {
+        fs.mkdirSync(path.join(s.repo, 'config'));
+        fs.writeFileSync(path.join(s.repo, 'config', 'gi'), SEED);
+        fs.symlinkSync('../repo/config/gi', path.join(s.outside, 'hop'));
+        fs.symlinkSync('../outside/hop', path.join(s.repo, '.gitignore'));
+      },
+      outcome: { written: 'repo/config/gi' },
+    },
+    {
+      label: 'a link through a linked folder that leads outside',
+      setup: s => { fs.writeFileSync(path.join(s.outside, 'gi'), OUTSIDE); fs.symlinkSync('../outside', path.join(s.repo, 'config')); fs.symlinkSync('config/gi', path.join(s.repo, '.gitignore')); },
+      outcome: 'refused',
+    },
+    {
+      label: 'a link to a git hook in the project\'s .git',
+      setup: s => {
+        fs.mkdirSync(path.join(s.repo, '.git', 'hooks'), { recursive: true });
+        fs.writeFileSync(path.join(s.repo, '.git', 'hooks', 'pre-commit'), '#!/bin/sh\n', { mode: 0o755 });
+        fs.symlinkSync('.git/hooks/pre-commit', path.join(s.repo, '.gitignore'));
+      },
+      outcome: 'refused',
+    },
+    {
+      label: 'a link to the .git file of a linked worktree',
+      setup: s => { fs.writeFileSync(path.join(s.repo, '.git'), 'gitdir: /elsewhere/.git/worktrees/wt\n'); fs.symlinkSync('.git', path.join(s.repo, '.gitignore')); },
+      outcome: 'refused',
+    },
+    {
+      label: 'a link to the project folder itself',
+      setup: s => fs.symlinkSync('.', path.join(s.repo, '.gitignore')),
+      outcome: 'refused',
+    },
+    {
+      label: 'a link to itself (a loop)',
+      setup: s => fs.symlinkSync('.gitignore', path.join(s.repo, '.gitignore')),
+      outcome: 'refused',
+    },
+    {
+      label: `a chain of ${MAX_HOPS} links that ends inside the project`,
+      setup: s => { fs.writeFileSync(path.join(s.repo, 'gi'), SEED); chain(s, MAX_HOPS, 'gi'); },
+      outcome: { written: 'repo/gi' },
+    },
+    {
+      label: `a chain of ${MAX_HOPS + 1} links that ends inside the project`,
+      setup: s => { fs.writeFileSync(path.join(s.repo, 'gi'), SEED); chain(s, MAX_HOPS + 1, 'gi'); },
+      outcome: 'refused',
+    },
+  ];
+
+  function makeSandbox(row: Row): Sandbox {
+    const sb = fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-linked-gitignore-'));
+    const s = { sb, repo: path.join(sb, 'repo'), outside: path.join(sb, 'outside') };
+    fs.mkdirSync(s.repo);
+    fs.mkdirSync(s.outside);
+    row.setup(s);
+    return s;
+  }
+
+  /** Every entry in the sandbox, links unfollowed, with sandbox paths in link targets normalised. */
+  function snapshot(sb: string): Record<string, string> {
+    const real = fs.realpathSync(sb);
+    const norm = (text: string): string => text.split(real).join('<SB>').split(sb).join('<SB>');
+    const out: Record<string, string> = {};
+    const walk = (dir: string): void => {
+      for (const name of fs.readdirSync(dir).sort()) {
+        const abs = path.join(dir, name);
+        const rel = path.relative(sb, abs);
+        const st = fs.lstatSync(abs);
+        if (st.isSymbolicLink()) out[rel] = `link -> ${norm(fs.readlinkSync(abs))}`;
+        else if (st.isDirectory()) { out[rel] = 'dir'; walk(abs); }
+        else out[rel] = `file ${fs.readFileSync(abs, 'utf-8')}`;
+      }
+    };
+    walk(sb);
+    return out;
+  }
+
+  function runShellTwin(s: Sandbox): string[] {
+    const logFile = path.join(os.tmpdir(), `devflow-linked-gitignore-${process.pid}-${Date.now()}.log`);
+    try {
+      const r = spawnSync(
+        'bash',
+        ['-c', 'set -e; log() { printf "%s\\n" "$1" >> "$HOOK_LOG"; }; source "$0" "$1"; echo reached', ENSURE_ROOT_LINKED, s.repo],
+        { encoding: 'utf-8', env: { ...process.env, HOME: s.sb, HOOK_LOG: logFile } },
+      );
+      expect({ status: r.status, out: r.stdout.trim() }, 'the hook\'s caller goes on').toEqual({ status: 0, out: 'reached' });
+      return fs.existsSync(logFile) ? fs.readFileSync(logFile, 'utf-8').trim().split('\n') : [];
+    } finally {
+      if (fs.existsSync(logFile)) fs.rmSync(logFile);
+    }
+  }
+
+  async function runTsTwin(s: Sandbox): Promise<string[]> {
+    const warn = vi.spyOn(p.log, 'warn').mockImplementation(() => undefined);
+    try {
+      await ensureDevflowGitignore(s.repo, false);
+      return warn.mock.calls.map(call => String(call[0]));
+    } finally {
+      warn.mockRestore();
+    }
+  }
+
+  it('the table holds every layout the rule distinguishes', () => {
+    expect(ROWS.filter(r => r.outcome === 'refused').length).toBeGreaterThanOrEqual(10);
+    expect(ROWS.filter(r => r.outcome !== 'refused').length).toBeGreaterThanOrEqual(5);
+  });
+
+  for (const row of ROWS) {
+    it(`${row.label}: both twins ${row.outcome === 'refused' ? 'refuse it and change nothing' : 'write the same file'}`, async () => {
+      const shell = makeSandbox(row);
+      const ts = makeSandbox(row);
+      try {
+        const before = snapshot(shell.sb);
+        expect(snapshot(ts.sb), 'both sandboxes start alike').toEqual(before);
+
+        const shellLog = runShellTwin(shell);
+        const tsWarnings = await runTsTwin(ts);
+        const shellAfter = snapshot(shell.sb);
+
+        expect(snapshot(ts.sb), 'the twins leave identical sandboxes').toEqual(shellAfter);
+        if (row.outcome === 'refused') {
+          expect(shellAfter, 'nothing anywhere changes').toEqual(before);
+          expect(shellLog, 'the hook logs the skip once').toEqual([expect.stringContaining('symbolic link')]);
+          expect(tsWarnings, 'init reports the skip once').toEqual([expect.stringContaining('symbolic link')]);
+        } else {
+          const prior = before[row.outcome.written];
+          const priorText = prior === undefined ? '' : prior.slice('file '.length);
+          expect(shellAfter[row.outcome.written], 'the target gains the block').toBe(`file ${computeDevflowGitignore(priorText)}`);
+          expect(shellAfter['repo/.devflow/.root-gitignore-configured-v6'], 'the run is stamped').toBe('file ');
+          if (before['repo/.gitignore'].startsWith('link')) {
+            expect(shellAfter['repo/.gitignore'], 'a link stays a link').toBe(before['repo/.gitignore']);
+          }
+          expect(shellLog, 'nothing to log').toEqual([]);
+          expect(tsWarnings, 'nothing to report').toEqual([]);
+        }
+      } finally {
+        fs.rmSync(shell.sb, { recursive: true, force: true });
+        fs.rmSync(ts.sb, { recursive: true, force: true });
+      }
+    });
+  }
 });
 
 describe('get-mtime behavioral', () => {

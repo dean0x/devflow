@@ -1336,6 +1336,70 @@ async function removeLegacyGitignoreMarkers(devflowDir: string): Promise<void> {
   }
 }
 
+/** The most symbolic links followed from the root `.gitignore` to the file it names. */
+const GITIGNORE_LINK_HOPS = 40;
+
+/** True when `file` is itself a symbolic link; false for anything else, or nothing, there. */
+async function isSymbolicLink(file: string): Promise<boolean> {
+  try {
+    return (await fs.lstat(file)).isSymbolicLink();
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * The file a write to the root `.gitignore` goes to: `gitignorePath` itself when it is
+ * not a symbolic link; the file the link resolves to when that lies inside `gitRoot`
+ * and outside its `.git`; null otherwise, and when the link cannot be followed.
+ *
+ * D-GITIGNORE-LINK-INSIDE: a root .gitignore that is a symbolic link is written only
+ * when the file it resolves to lies inside the project root and outside its .git, and
+ * then that file is read and written directly, never through the link. Reason: a
+ * repository can commit .gitignore as a link to any file on the machine, and the
+ * carve-out would be appended to it; a file under .git is no file of the repository's
+ * either, but git's own hooks and config. The shell twin, `_erg_resolve_inside` in
+ * src/assets/scripts/hooks/ensure-root-gitignore, applies the same rule the same way:
+ * the link is followed one hop at a time, at most {@link GITIGNORE_LINK_HOPS} hops, a
+ * relative target is joined to the folder the link sits in without normalising it
+ * (so `..` is resolved by the file system, as the write would resolve it), and only
+ * the last folder is resolved physically, so a missing file inside the project is
+ * created there as before.
+ */
+async function resolveGitignoreTarget(gitRoot: string, gitignorePath: string): Promise<string | null> {
+  if (!(await isSymbolicLink(gitignorePath))) return gitignorePath;
+  let current = path.resolve(gitignorePath);
+  for (let hops = 0; await isSymbolicLink(current); hops++) {
+    if (hops === GITIGNORE_LINK_HOPS) return null;
+    let target: string;
+    try {
+      target = await fs.readlink(current);
+    } catch {
+      return null;
+    }
+    if (target === '') return null;
+    current = target.startsWith('/') ? target : `${current.slice(0, current.lastIndexOf('/'))}/${target}`;
+  }
+  const slash = current.lastIndexOf('/');
+  const base = current.slice(slash + 1);
+  if (base === '' || base === '.' || base === '..') return null;
+  let rootReal: string;
+  let dirReal: string;
+  try {
+    // fs.promises.realpath is realpath(3), so a `..` after a linked folder goes where
+    // the write would go; the synchronous JS realpath normalises `..` away first.
+    rootReal = await fs.realpath(gitRoot);
+    dirReal = await fs.realpath(current.slice(0, slash) || '/');
+  } catch {
+    return null;
+  }
+  const rootPrefix = rootReal === '/' ? '/' : `${rootReal}/`;
+  const resolved = `${dirReal === '/' ? '' : dirReal}/${base}`;
+  if (!resolved.startsWith(rootPrefix)) return null;
+  const inRoot = resolved.slice(rootPrefix.length);
+  return inRoot === '.git' || inRoot.startsWith('.git/') ? null : resolved;
+}
+
 /**
  * Deterministically ensure the project root .gitignore applies the `.devflow/`
  * carve-out (local by default; feature knowledge, conventions.md, the evidence
@@ -1358,7 +1422,10 @@ async function removeLegacyGitignoreMarkers(devflowDir: string): Promise<void> {
  *
  * Idempotent: computeDevflowGitignore returns null for a converged file, so a
  * marked install performs one read and no write. Errors are swallowed
- * (verbose-logged) — a gitignore write must never abort init.
+ * (verbose-logged) — a gitignore write must never abort init. A `.gitignore` that
+ * is a symbolic link leading outside the project, into its `.git`, or nowhere is left
+ * untouched and the skip is always reported (D-GITIGNORE-LINK-INSIDE,
+ * {@link resolveGitignoreTarget}).
  */
 export async function ensureDevflowGitignore(
   gitRoot: string,
@@ -1367,7 +1434,12 @@ export async function ensureDevflowGitignore(
   try {
     const devflowDir = path.join(gitRoot, '.devflow');
     const markerV6 = path.join(devflowDir, GITIGNORE_MARKER_V6);
-    const gitignorePath = path.join(gitRoot, '.gitignore');
+    const rootGitignore = path.join(gitRoot, '.gitignore');
+    const gitignorePath = await resolveGitignoreTarget(gitRoot, rootGitignore);
+    if (gitignorePath === null) {
+      p.log.warn(`.gitignore not updated: ${rootGitignore} is a symbolic link that leads outside the project, into its .git, or nowhere; devflow writes nothing through it`);
+      return;
+    }
 
     // Fast-path with verification: v6 marker normally means the block is installed,
     // but the marker is a claim, not proof — a merge-conflict resolution may have
