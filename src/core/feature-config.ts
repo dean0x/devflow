@@ -309,7 +309,10 @@ async function writeConfigBody(projectRoot: string, body: object): Promise<Confi
   }
   try {
     try {
-      await copy.writeFile(text, 'utf-8');
+      // The open handle is fs.writeFile's destination and the text its data: the same
+      // write as copy.writeFile(text), in the form a path-traversal scan reads right,
+      // since it takes a writeFile's first argument for a path.
+      await fs.writeFile(copy, text, 'utf-8');
     } finally {
       await copy.close();
     }

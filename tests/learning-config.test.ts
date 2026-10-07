@@ -137,6 +137,26 @@ describe('writeManagedConfig', () => {
       });
     });
 
+    it('a failed write removes the copy, keeps config.json as it was, and the Result says why', async () => {
+      writeDevflowConfig(tmpDir, { reviewPublication: 'full', tracker: 'jira' });
+      const before = fs.readFileSync(getConfigPath(tmpDir), 'utf-8');
+      let copyExisted = false;
+      vi.spyOn(fs.promises, 'writeFile').mockImplementationOnce(async () => {
+        copyExisted = fs.existsSync(copyPath());
+        throw new Error('ENOSPC: no space left on device');
+      });
+
+      const result = await writeManagedConfig(tmpDir, { reviewPublication: 'off' });
+
+      expect(copyExisted, 'the copy existed when the write failed').toBe(true);
+      expect(fs.readdirSync(path.join(tmpDir, '.devflow')), 'no copy is left beside config.json').toEqual(['config.json']);
+      expect(fs.readFileSync(getConfigPath(tmpDir), 'utf-8'), 'config.json is kept as it was').toBe(before);
+      expect(result).toEqual({
+        ok: false,
+        error: { kind: 'write-failed', path: getConfigPath(tmpDir), detail: 'ENOSPC: no space left on device' },
+      });
+    });
+
     it('a copy that cannot be removed either is named in the Result', async () => {
       vi.spyOn(fs.promises, 'rename').mockRejectedValueOnce(new Error('EXDEV: cross-device link not permitted'));
       vi.spyOn(fs.promises, 'rm').mockRejectedValueOnce(new Error('EPERM: operation not permitted'));
