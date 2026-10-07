@@ -4052,8 +4052,8 @@ describe('session-start-context: learning maintenance directive (Section 2)', ()
 });
 
 // =============================================================================
-// session-start-context never reads through a symbolic link under .devflow
-// (D-HOOKS-NO-SYMLINK)
+// session-start-context never reads through a symbolic link under .devflow into
+// the session or an agent directive (D-HOOKS-NO-SYMLINK)
 // =============================================================================
 //
 // Sections 1 and 2 read the learning folder's files into the session context

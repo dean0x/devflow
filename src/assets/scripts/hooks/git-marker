@@ -80,7 +80,7 @@ df_is_project_root() {
 # `jq` read through one, so a linked working memory, backup or decisions file would
 # put whatever file the link names into the session, the memory refresh's prompt or
 # the backup the next session restores, with no one choosing to read it. Each hook
-# checks the paths it writes or reads: a refused write is skipped and a refused
+# checks every path this rule covers: a refused write is skipped and a refused
 # read is treated as an absent file (df_file_below below), each logged once. A
 # rename's target is one of those paths: `mv` moves a file into the folder a link
 # at its target names, so a link there, to anything, refuses the rename.

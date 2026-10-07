@@ -3302,7 +3302,8 @@ describe('S27: the memory hooks never write through a symbolic link under .devfl
 });
 
 // =============================================================================
-// S28 — D-HOOKS-NO-SYMLINK: no memory hook reads through a symbolic link
+// S28 — D-HOOKS-NO-SYMLINK: no memory hook reads through a symbolic link into
+// the session, the backup or the prompt
 //
 // session-start-memory injects the working memory, the pre-compact backup and a
 // count of the turns waiting; pre-compact-memory copies the working memory into

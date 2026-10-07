@@ -13,7 +13,7 @@ const LEDGER_ROOT_TIMEOUT_MS = 1000;
  * real ledgers reach.
  *
  * D-HUD-LEDGER-BOUNDED: the statusline counts the ledger only when it is a regular
- * file of at most LEDGER_MAX_BYTES, and never reads it through a symbolic link; a
+ * file of at most LEDGER_MAX_BYTES, and never reads it if it is a symbolic link; a
  * link, any other kind of file or a larger one shows no counts, as an absent
  * ledger does. Reason: the statusline reads the ledger on every prompt, and a
  * repository can commit it as a link to an endless source such as /dev/zero, or

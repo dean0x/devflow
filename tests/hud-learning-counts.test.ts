@@ -139,9 +139,9 @@ describe('gatherLearningCounts', () => {
 });
 
 // D-HUD-LEDGER-BOUNDED: the statusline reads the ledger on every prompt, so it
-// counts only a regular file of at most LEDGER_MAX_BYTES and never reads through a
-// symbolic link. A link, a FIFO or an oversized file shows no counts, as an absent
-// ledger does, and none of them can stall the read.
+// counts only a regular file of at most LEDGER_MAX_BYTES and never reads a ledger
+// that is itself a symbolic link. A link, a FIFO or an oversized file shows no
+// counts, as an absent ledger does, and none of them can stall the read.
 describe('gatherLearningCounts reads only a bounded regular ledger (D-HUD-LEDGER-BOUNDED)', () => {
   let tmpDir: string;
   let ledgerPath: string;
