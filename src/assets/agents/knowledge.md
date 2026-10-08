@@ -81,7 +81,7 @@ CROSS_REFERENCES: [ADR/PF IDs whose rule the knowledge base states in words, if 
 KB_COMMIT: committed <sha> | skipped (no changes) | skipped (no branch) | skipped (detached HEAD) — uncommitted: <paths> | failed (<reason>)
 ```
 
-Report cap: the final message is at most about 1,500 tokens. Longer material goes to a file (write it to a `mktemp` path with Bash, or with Write where you have it), and the message gives its path. Exempt, inline in full and never moved or truncated: the `KB_*` status block, which is already a few lines.
+Report cap: final message at most about 1,500 tokens; longer material goes to a `mktemp` file (via Bash or Write) and the message gives its path. Exempt, inline in full: the `KB_*` status block.
 
 ## Boundaries
 

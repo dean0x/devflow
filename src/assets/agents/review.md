@@ -178,7 +178,7 @@ Report format for `{output_path}`:
 **Recommendation**: {BLOCK | CHANGES_REQUESTED | APPROVED_WITH_CONDITIONS | APPROVED}
 ```
 
-Report cap: the final message is at most about 1,500 tokens. The report is the file at `{output_path}`; any longer material goes to a file (write it to a `mktemp` path with Bash, or with Write where you have it), and the message gives its path. Exempt, inline in full and never moved or truncated: in a `/code-review` spawn, the report path, the counts and the recommendation; in a Workflow spawn, the structured result (`focus`, `reviewed`, `filesExamined`, `findings`).
+Report cap: final message at most about 1,500 tokens; the report is the file at `{output_path}`, other longer material goes to a `mktemp` file (via Bash or Write), and the message gives its path. Exempt, inline in full: in a `/code-review` spawn, the report path, counts and recommendation; in a Workflow spawn, the structured result (`focus`, `reviewed`, `filesExamined`, `findings`).
 
 ## Secret Handling in Findings
 

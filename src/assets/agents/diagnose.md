@@ -199,7 +199,7 @@ Report format for `{OUTPUT_PATH}`:
 **Recommendation**: {BLOCK | CHANGES_REQUESTED | APPROVED_WITH_CONDITIONS | APPROVED}
 ```
 
-Report cap: the final message is at most about 1,500 tokens. The report is the file at `{OUTPUT_PATH}`; any longer material goes to a file (write it to a `mktemp` path with Bash, or with Write where you have it), and the message gives its path and counts. Exempt: none.
+Report cap: final message at most about 1,500 tokens; the report is the file at `{OUTPUT_PATH}`, other longer material goes to a `mktemp` file (via Bash or Write), and the message gives its path and counts. Exempt: none.
 
 ## Principles
 

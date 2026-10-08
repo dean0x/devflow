@@ -137,17 +137,17 @@ This applies to both: multiple Code agents working on a single ticket AND multi-
 @define build_execution_doctrine():
 ### Build execution doctrine — the Running commands block (LOAD-BEARING)
 
-Every agent that builds or tests (the Validate agent, the Code agent, the Test agent) follows the `## Running commands` block in its own body, and that block is the same text in all three. It holds inside a Workflow sub-agent too, so each prompt in this engine names the block ("your Running commands block") and does not copy it. The block's text:
+The Validate, Code and Test agents each carry this `## Running commands` block in their bodies, so each prompt in this engine names the block ("your Running commands block") instead of copying it:
 
 Run builds, typechecks, lints and tests in the foreground, each with an explicit Bash `timeout` above its expected run time. The ceiling is 600000 ms, or `BASH_MAX_TIMEOUT_MS` when set (`echo ${BASH_MAX_TIMEOUT_MS:-600000}`).
 
-- Capture, then tail, in one Bash call (shell state does not persist between calls): `LOG=$(mktemp); <command> >"$LOG" 2>&1; rc=$?; tail -n 40 "$LOG"; echo "EXIT=$rc"`. The printed `EXIT=` value is the result; never decide one from a grep count.
+- Capture, then tail, in one Bash call (shell state does not persist): `LOG=$(mktemp); echo "LOG=$LOG"; <command> >"$LOG" 2>&1; rc=$?; tail -n 40 "$LOG"; echo "EXIT=$rc"`. The printed `EXIT=` value is the result; never decide one from a grep count.
 - Never background a command and wait on it, and never poll across turns: no `sleep` or `true` turns, no sentinel-file checks, no Monitor.
 - Prefer the scoped command for the change (a package, a path or a test file); for the whole set, one workspace-level command over a per-package loop.
 - A run that exceeds its timeout is BLOCKED: report its duration and log path. Do not wait on it, poll it or re-run it.
 - A run expected to exceed the ceiling is split into parts, each under about 90% of it, run in sequence. If it cannot be split, report BLOCKED with the remedy `devflow flags --set bash-max-timeout-ms=<ms>`.
 - Never re-run a command when nothing it reads has changed.
-- Never wrap a build or test command in `sh -c`, `bash -c`, `python3 -c` or `node -e`: permission systems deny wrapper-invoked commands that would be allowed directly.
+- Never wrap a build or test command in `sh -c`, `bash -c`, `python3 -c` or `node -e`: permission rules deny wrapped commands they would allow directly.
 - The same rules hold inside a dynamic Workflow sub-agent.
 
 **Cheapest-sufficient validation:** iterate with the fastest check that proves the change — `tsc --noEmit`, `cargo check`, `go vet`, a single test file — the ecosystem's cheapest sufficient signal. Reserve expensive full/optimized builds and whole-suite runs for the final gates only.

@@ -110,7 +110,7 @@ Write findings to OUTPUT_PATH using the Write tool:
 {What was not investigated, scope boundaries, data freshness concerns}
 ```
 
-Report cap: the final message is at most about 1,500 tokens. The findings document is the file at the output path; any longer material goes to a file (write it to a `mktemp` path with Bash, or with Write where you have it), and the message gives its path. Exempt: none.
+Report cap: final message at most about 1,500 tokens; the findings document is the file at the output path, other longer material goes to a `mktemp` file (via Bash or Write), and the message gives its path. Exempt: none.
 
 ## Token Budget
 

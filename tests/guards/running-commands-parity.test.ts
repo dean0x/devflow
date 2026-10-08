@@ -47,7 +47,7 @@ const ELEMENTS: ReadonlyArray<{ label: string; marker: string }> = [
   { label: '(a) foreground with an explicit Bash timeout', marker: 'in the foreground, each with an explicit Bash `timeout`' },
   { label: '(a) the ceiling and its override', marker: '`BASH_MAX_TIMEOUT_MS`' },
   { label: '(a) the ceiling is read, not assumed', marker: 'echo ${BASH_MAX_TIMEOUT_MS:-600000}' },
-  { label: '(b) capture, then tail, in one call', marker: 'LOG=$(mktemp); <command> >"$LOG" 2>&1; rc=$?; tail -n 40 "$LOG"; echo "EXIT=$rc"' },
+  { label: '(b) capture, then tail, in one call, printing the log path a BLOCKED report names', marker: 'LOG=$(mktemp); echo "LOG=$LOG"; <command> >"$LOG" 2>&1; rc=$?; tail -n 40 "$LOG"; echo "EXIT=$rc"' },
   { label: '(b) the printed EXIT value is the result', marker: 'never decide one from a grep count' },
   { label: '(c) never background a command and wait on it', marker: 'Never background a command and wait on it' },
   { label: '(c) never poll across turns', marker: 'never poll across turns' },

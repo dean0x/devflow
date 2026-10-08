@@ -145,7 +145,7 @@ Return the verdict ledger grouped by disposition:
 - DUPLICATE: {n}
 ```
 
-Report cap: the cap does not apply to the verdict ledger. Exempt, inline in full and never moved or truncated: the whole ledger, because `/resolve` checks that every issue id appears in it. The rest of the final message is at most about 1,500 tokens, and longer material goes to a file (write it to a `mktemp` path with Bash, or with Write where you have it) and the message gives its path.
+Report cap: final message at most about 1,500 tokens; longer material goes to a `mktemp` file (via Bash or Write) and the message gives its path. Exempt, inline in full: the whole ledger, since `/resolve` checks that every issue id appears in it.
 
 ## Boundaries
 

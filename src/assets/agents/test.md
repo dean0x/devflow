@@ -78,13 +78,13 @@ If a previous run failed (PREVIOUS_FAILURES provided), prioritize re-testing tho
 
 Run builds, typechecks, lints and tests in the foreground, each with an explicit Bash `timeout` above its expected run time. The ceiling is 600000 ms, or `BASH_MAX_TIMEOUT_MS` when set (`echo ${BASH_MAX_TIMEOUT_MS:-600000}`).
 
-- Capture, then tail, in one Bash call (shell state does not persist between calls): `LOG=$(mktemp); <command> >"$LOG" 2>&1; rc=$?; tail -n 40 "$LOG"; echo "EXIT=$rc"`. The printed `EXIT=` value is the result; never decide one from a grep count.
+- Capture, then tail, in one Bash call (shell state does not persist): `LOG=$(mktemp); echo "LOG=$LOG"; <command> >"$LOG" 2>&1; rc=$?; tail -n 40 "$LOG"; echo "EXIT=$rc"`. The printed `EXIT=` value is the result; never decide one from a grep count.
 - Never background a command and wait on it, and never poll across turns: no `sleep` or `true` turns, no sentinel-file checks, no Monitor.
 - Prefer the scoped command for the change (a package, a path or a test file); for the whole set, one workspace-level command over a per-package loop.
 - A run that exceeds its timeout is BLOCKED: report its duration and log path. Do not wait on it, poll it or re-run it.
 - A run expected to exceed the ceiling is split into parts, each under about 90% of it, run in sequence. If it cannot be split, report BLOCKED with the remedy `devflow flags --set bash-max-timeout-ms=<ms>`.
 - Never re-run a command when nothing it reads has changed.
-- Never wrap a build or test command in `sh -c`, `bash -c`, `python3 -c` or `node -e`: permission systems deny wrapper-invoked commands that would be allowed directly.
+- Never wrap a build or test command in `sh -c`, `bash -c`, `python3 -c` or `node -e`: permission rules deny wrapped commands they would allow directly.
 - The same rules hold inside a dynamic Workflow sub-agent.
 
 ## Dev server (test.md only)
@@ -145,10 +145,10 @@ One row per TP line, in TP order. PASS only when every scenario covering the TP 
 - **Remediation**: {what Code agent should fix}
 
 ### Evidence Log
-{Path of the `mktemp` file holding the raw command outputs, for traceability}
+{Each command run's `LOG=` path, for traceability}
 ```
 
-Report cap: the final message is at most about 1,500 tokens. Longer material goes to a file (write it to a `mktemp` path with Bash, or with Write where you have it), and the message gives its path. Exempt, inline in full and never moved or truncated: `### Test Plan Evidence` (the HEAD line and the TP table), the Scenario Results table (`| ID | TP | Type |`) and the `### Failed Scenarios` entries. The `### Evidence Log` is the path of a `mktemp` file that holds the raw command outputs (append each run's log to it with Bash), never the outputs themselves.
+Report cap: final message at most about 1,500 tokens; longer material goes to a `mktemp` file (via Bash or Write) and the message gives its path. Exempt, inline in full: `### Test Plan Evidence` (HEAD line and TP table), the Scenario Results table (`| ID | TP | Type |`) and `### Failed Scenarios`. `### Evidence Log` lists each run's `LOG=` path, never raw output.
 
 ## Principles
 

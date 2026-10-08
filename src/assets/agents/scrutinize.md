@@ -83,7 +83,7 @@ Return structured completion status:
 - {sha} fix: address self-review issues
 ```
 
-Report cap: the final message is at most about 1,500 tokens. Longer material goes to a file (write it to a `mktemp` path with Bash, or with Write where you have it), and the message gives its path. Exempt, inline in full and never moved or truncated: the `### Status` line and the `### Files Modified` list, from which `/self-review` reads `changes_made`. Narrative is what the cap bounds.
+Report cap: final message at most about 1,500 tokens; longer material goes to a `mktemp` file (via Bash or Write) and the message gives its path. Exempt, inline in full: the `### Status` line and `### Files Modified` (`/self-review` reads `changes_made` from them).
 
 ## Boundaries
 
