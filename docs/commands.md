@@ -251,6 +251,6 @@ Scans Claude Code session transcripts from all known projects (under `$CLAUDE_CO
 
 Not a command — a two-hook orchestrator system (git repos only):
 
-**Orchestrator charter** — A `SessionStart` hook (`session-start-orchestrator`) injects a ~500-token charter that establishes the main session as a pure orchestrator, routing each delegation to the roster agent that fits the kind of work — never pinning a model, so each agent runs on its configured model — and listing devflow workflows for real-scale work.
+**Orchestrator charter** — A `SessionStart` hook (`session-start-orchestrator`) injects a ~700-token charter that establishes the main session as an orchestrator, routing each delegation to the roster agent that fits the kind of work — never pinning a model, so each agent runs on its configured model — and listing devflow workflows for real-scale work. Judgment work stays mainline, plus one bounded inline exception: a single git, gh or script command whose output stays under about 40 lines, never a diff, log or test run.
 
 **Per-prompt dispatch** — A `UserPromptSubmit` hook (`preamble`) handles three cases: (1) prompts beginning `Implement the following plan:` invoke `devflow:implement`; (2) slash commands are silenced; (3) all other prompts get a 2-line orchestrator reminder. Both hooks are silent outside git repos.
