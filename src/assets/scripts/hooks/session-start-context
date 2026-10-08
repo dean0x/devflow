@@ -340,7 +340,7 @@ ${LEARNING_PAUSED_SECTION}"
     # mapping model still decides: its model is inactive while the proxy is off and
     # the shipped tier runs, but this hook does not know the proxy state.
     # A project learning.json a symbolic link leads to is absent (D-HOOKS-NO-SYMLINK).
-    # The machine root is $HOME/.devflow; DEVFLOW_DIR is ignored.
+    # The machine root is $HOME/.devflow and nothing relocates it.
     LEARNING_MODEL=""
     LEARNING_MODEL_LAYER=""
     if df_file_below "$LEDGER_ROOT" "$LEARNING_DIR/learning.json"; then
