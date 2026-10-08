@@ -33,10 +33,18 @@
  *    instead of leaving the others to look sufficient.
  *  - Matcher: both forms are seeded as known-bad and must be flagged, beside
  *    compliant and prose-only controls that must not be.
- *  - Count: the scan must find at least AGENT_SITE_FLOOR `Agent(` sites, the
- *    count measured when the guard was added. A parser that stops finding spawns
+ *  - Count: the scan must read at least SPAWNED_AGENT_TYPE_FLOOR distinct agent
+ *    types out of `Agent(` argument lists, the count measured when the guard was
+ *    added. A parser that stops finding spawns, or stops reading their arguments,
  *    would otherwise pass vacuously. The floor is registered in
  *    tests/fixtures/numeric-floors.json and only rises.
+ *
+ *    The floor counts distinct types, not sites, because a floor must be one that
+ *    no legitimate edit lowers. Sites fall whenever a spawn is consolidated or
+ *    dropped (removing one source spawn removes two sites, its compiled copy in
+ *    dist/commands too), and trimming prompts does exactly that. A type leaves
+ *    the count only when no prompt spawns that agent at all, which is a roster
+ *    change.
  *
  * What a green run does NOT prove: a spawn assembled at runtime (a model value
  * passed in a variable options object, a string-built call) and prose that merely
@@ -67,10 +75,14 @@ const SPAWN_HOLDING_ROOTS = ['src/assets/commands', 'dist/commands'] as const
 const SCANNED_EXTENSIONS = ['.md', '.mds']
 
 /**
- * The fewest `Agent(` sites the scan must find across SCANNED_ROOTS, as measured
- * when the guard was added. It only rises (tests/fixtures/numeric-floors.json).
+ * The fewest distinct agent types the scan must read out of `Agent(` argument
+ * lists across SCANNED_ROOTS, as measured when the guard was added. It only rises
+ * (tests/fixtures/numeric-floors.json).
  */
-const AGENT_SITE_FLOOR = 167
+const SPAWNED_AGENT_TYPE_FLOOR = 16
+
+/** The agent type an `Agent(` spawn names: `subagent_type="X"` or `subagent_type: "X"`. */
+const SUBAGENT_TYPE = /\bsubagent_type\s*[=:]\s*["']([A-Za-z][\w-]*)["']/
 
 /** An argument list is read up to this many characters from its opening parenthesis. */
 const MAX_CALL_CHARS = 20_000
@@ -199,6 +211,21 @@ function modelOffenders(sites: readonly SpawnSite[]): SpawnSite[] {
   return sites.filter(site => site.hasModel)
 }
 
+/** The agent type a site's arguments name, or null when they name none. */
+function spawnedType(site: SpawnSite): string | null {
+  return SUBAGENT_TYPE.exec(site.raw)?.[1] ?? null
+}
+
+/** The distinct agent types the `Agent(` sites among `sites` name. */
+function spawnedTypes(sites: readonly SpawnSite[]): Set<string> {
+  const types = new Set<string>()
+  for (const site of sites) {
+    const type = site.form === 'Agent' ? spawnedType(site) : null
+    if (type !== null) types.add(type)
+  }
+  return types
+}
+
 function describeOffender(site: SpawnSite): string {
   return `${site.path}:${site.line}: ${site.form}(${site.raw.trim().slice(0, 80)}) names a model — omit it; ` +
     'the installed agent frontmatter decides, and a user override reaches the spawn only that way'
@@ -244,8 +271,10 @@ describe('no spawn names a model of its own (D-SPAWN-NO-MODEL)', () => {
     }
   })
 
-  it('finds at least the floor of Agent( sites', () => {
-    expect(agentSites.length).toBeGreaterThanOrEqual(AGENT_SITE_FLOOR)
+  it('reads at least the floor of distinct agent types out of Agent( arguments', () => {
+    const types = spawnedTypes(agentSites)
+    expect(types.size, `agent types read: ${[...types].sort().join(', ')}`)
+      .toBeGreaterThanOrEqual(SPAWNED_AGENT_TYPE_FLOOR)
   })
 
   it('finds workflow agent() calls, and sees their options', () => {
@@ -369,6 +398,17 @@ describe('spawn-no-hardcoded-model guard: seeded probes', () => {
 
   it('counts a clean spawn too, so the floor measures spawns and not offenders', () => {
     expect(sitesIn('Agent(subagent_type="Validate"):\nAgent(subagent_type="Code"):\n').filter(s => s.form === 'Agent')).toHaveLength(2)
+  })
+
+  it('reads each spawn\'s agent type, in either argument style, once per type', () => {
+    const content = [
+      'Agent(subagent_type="Validate"):',
+      '   Agent(subagent_type="Validate", run_in_background=false):',
+      'Agent(subagent_type: "Code", prompt: "go")',
+      'Agent(prompt: "no type here")',
+      'agent("Go.", { agentType: "Review" });',
+    ].join('\n')
+    expect([...spawnedTypes(sitesIn(content))].sort()).toEqual(['Code', 'Validate'])
   })
 
   it('an unbalanced call is read up to the bound and does not hang or throw', () => {
