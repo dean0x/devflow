@@ -1075,6 +1075,27 @@ describe('formatListOutput — EFFORT cell and the worker row', () => {
     expect(lines.find(l => l.startsWith('memory'))).toContain(' claude-sonnet-5-5 ');
   });
 
+  it('widens CONFIGURED to the longest configured model: a 17-character identifier is not cut and the EFFORT column stays aligned', () => {
+    const lines = strip(formatListOutput(
+      [agentRow({ configured: 'claude-sonnet-4-6' }), workerRow({ configured: 'claude-opus-4-1-20250805' })],
+      false,
+    )).split('\n');
+    const effortAt = lines[0].indexOf('EFFORT');
+    expect(effortAt).toBeGreaterThan(0);
+    expect(lines.find(l => l.startsWith('code'))).toContain(' claude-sonnet-4-6 ');
+    expect(lines.find(l => l.startsWith('memory'))).toContain(' claude-opus-4-1-20250805 ');
+    for (const name of ['code', 'memory']) {
+      const line = lines.find(l => l.startsWith(name));
+      expect(line!.slice(effortAt), name).toMatch(/^default/);
+    }
+  });
+
+  it('keeps CONFIGURED at 16 characters when every configured value is shorter', () => {
+    const lines = strip(formatListOutput([agentRow()], false)).split('\n');
+    // AGENT 20 + 2, DEFAULT 10 + 2, CONFIGURED 16 + 2 => EFFORT starts at 52.
+    expect(lines[0].indexOf('EFFORT')).toBe(52);
+  });
+
   it('the footer counts agent rows only: totals are the same with and without a configured memory entry', () => {
     const bare = strip(formatListOutput([agentRow(), workerRow()], false));
     const configured = strip(formatListOutput(
