@@ -331,14 +331,24 @@ ${LEARNING_PAUSED_SECTION}"
     # Only layers 1 and 3 interpolate, and only after the opus|sonnet|haiku
     # allowlist (defense in depth: learning.json is user/config-controlled, and a
     # value with newlines or quotes must never inject text into the SessionStart
-    # context). Layer 2 tests only whether the mapping carries a non-empty model:
-    # the value is never read into the directive. An entry with an effort alone
-    # supplies no model, so it does not displace a global learning.json. An invalid
+    # context). Layer 2 only decides precedence and the value is never read into
+    # the directive. It counts only when agents.learning.model is a JSON STRING
+    # that is a model name by the rule readAgentMapping (src/core/agent-models.ts)
+    # keeps a model by, MODEL_NAME_RE in src/core/agent-frontmatter.ts:
+    # ^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$. Anything readAgentMapping drops, a number,
+    # boolean, object, array, empty or out-of-charset string, is a mapping that
+    # supplies no model: the installed frontmatter keeps the shipped tier, so the
+    # layer reads as absent and the lookup falls through to the global file rather
+    # than silently ignoring it for a model nothing will run. The type is read by
+    # json_string_field_file, which keeps the number 42 apart from the string "42"
+    # on both the jq and the node backend. An entry with an effort alone supplies
+    # no model either, so it does not displace a global learning.json. An invalid
     # layer-1 or layer-3 value counts as absent and falls through. A missing,
-    # unreadable or malformed agent-models.json reads as empty (json_field_file
+    # unreadable or malformed agent-models.json reads as empty (the typed read
     # discards its errors), so the mapping layer is absent. A dormant external
-    # mapping model still decides: its model is inactive while the proxy is off and
-    # the shipped tier runs, but this hook does not know the proxy state.
+    # mapping model, any name of that charset, still decides: its model is inactive
+    # while the proxy is off and the shipped tier runs, but this hook does not know
+    # the proxy state.
     # A project learning.json a symbolic link leads to is absent (D-HOOKS-NO-SYMLINK).
     # The machine root is $HOME/.devflow and nothing relocates it.
     LEARNING_MODEL=""
@@ -350,10 +360,23 @@ ${LEARNING_PAUSED_SECTION}"
       esac
     fi
     if [ -z "$LEARNING_MODEL_LAYER" ] && [ -f "$HOME/.devflow/agent-models.json" ]; then
-      _SC_LM=$(json_field_file "$HOME/.devflow/agent-models.json" "agents.learning.model" "")
-      if [ -n "$_SC_LM" ]; then
-        LEARNING_MODEL_LAYER="mapping"
-      fi
+      # The sentinel keeps a trailing newline the substitution would strip, so the
+      # name is tested exactly as stored. The first character is a letter or digit,
+      # the rest add . _ -, and the whole is 64 characters at most. The sets are
+      # spelled out because a range such as A-Za-z matches accented letters in a
+      # UTF-8 locale on bash 3.2.
+      _SC_LM=$(json_string_field_file "$HOME/.devflow/agent-models.json" "agents.learning.model"; printf x)
+      _SC_LM=${_SC_LM%x}
+      _SC_NAME_HEAD='ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789'
+      _SC_NAME_TAIL="${_SC_NAME_HEAD}._-"
+      case "$_SC_LM" in
+        ''|[!$_SC_NAME_HEAD]*|*[!$_SC_NAME_TAIL]*) ;;
+        *)
+          if [ "${#_SC_LM}" -le 64 ]; then
+            LEARNING_MODEL_LAYER="mapping"
+          fi
+          ;;
+      esac
     fi
     if [ -z "$LEARNING_MODEL_LAYER" ] && [ -f "$HOME/.devflow/learning.json" ]; then
       _SC_LM=$(json_field_file "$HOME/.devflow/learning.json" "model" "")
