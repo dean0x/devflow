@@ -140,7 +140,7 @@ Pass `FEATURE_KNOWLEDGE` alongside `DECISIONS_CONTEXT` to Explore and Design age
 **Produces:** EXPLORE_OUTPUTS
 **Requires:** SKIM_CONTEXT, DECISIONS_CONTEXT
 
-Spawn 4 Explore agents **in a single message**, each with Skim agent context, `DECISIONS_CONTEXT` (from Phase 2), and `FEATURE_KNOWLEDGE` (from Phase 2). Include instructions: "follow `devflow:apply-decisions` for DECISIONS_CONTEXT" and "The FEATURE_KNOWLEDGE is a baseline — VALIDATE, EXTEND, and CORRECT it, don't repeat it. Focus on areas the feature knowledge doesn't cover and changes since it was last updated."
+Spawn 4 Explore agents **in a single message**, each with Skim agent context, `DECISIONS_CONTEXT` (from Phase 2), and `FEATURE_KNOWLEDGE` (from Phase 2). Include instructions: "follow `devflow:apply-decisions` for DECISIONS_CONTEXT" and "The FEATURE_KNOWLEDGE is a baseline — VALIDATE, EXTEND, and CORRECT it, don't repeat it. Focus on areas the feature knowledge doesn't cover and changes since it was last updated." Ask each agent for a final report of at most about 1,500 tokens: findings with file:line references, not file dumps.
 
 | Focus | Thoroughness | Find |
 |-------|-------------|------|
@@ -269,7 +269,7 @@ User can:
 **Produces:** IMPL_EXPLORE_OUTPUTS
 **Requires:** SKIM_CONTEXT, ACCEPTED_SCOPE
 
-Spawn 4 Explore agents **in a single message**, each with Skim agent context + accepted scope:
+Spawn 4 Explore agents **in a single message**, each with Skim agent context + accepted scope. Ask each agent for a final report of at most about 1,500 tokens: findings with file:line references, not file dumps.
 
 | Focus | Thoroughness | Find |
 |-------|-------------|------|
@@ -298,7 +298,7 @@ Combine into: patterns to follow, integration points, reusable code, edge cases"
 **Produces:** PLAN_OUTPUTS
 **Requires:** IMPL_EXPLORATION_SYNTHESIS, GAP_SYNTHESIS, DECISIONS_CONTEXT
 
-Spawn 3 Plan agents **in a single message**, each with implementation exploration synthesis:
+Spawn 3 Plan agents **in a single message**, each with implementation exploration synthesis. Ask each agent for a final report of at most about 1,500 tokens: the plan itself, not a restatement of the exploration.
 
 | Focus | Output |
 |-------|--------|

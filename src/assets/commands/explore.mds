@@ -64,6 +64,8 @@ Based on Skim agent findings, spawn 2-3 `Agent(subagent_type="Explore")` agents 
 
 Adjust explorer focus based on the specific exploration question.
 
+Ask each explorer for a final report of at most about 1,500 tokens: findings with file:line references, not file dumps.
+
 ### Phase 4: Synthesize
 
 **Produces:** MERGED_FINDINGS
