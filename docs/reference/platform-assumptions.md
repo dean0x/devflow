@@ -63,3 +63,39 @@ Working practice that follows from it:
 
 - Use parallel execution where possible
 - Leverage `.claudeignore` for context reduction
+
+## Running commands and the stall watchdog
+
+The `## Running commands` block in the Code, Validate and Test agent bodies, and the engine's build execution doctrine that renders the same text, run every build and test in the foreground under an explicit Bash `timeout`. They rest on the rows below. Each was reproduced on Claude Code 2.1.294 on the date shown, except the first, which rests on the stall investigation after the table.
+
+| Assumption | Date verified | Observable symptom if it drifts |
+|---|---|---|
+| The stall watchdog fires on model-stream silence after a tool result returns, at about 600 s, and never while a tool runs | 2026-10-08 | A sub-agent ends with `Agent stalled: no progress for N s (stream watchdog did not recover)` while its command is still running, or after far less than 600 s of silence. The foreground doctrine's premise then fails and long runs need a heartbeat again; start from the stall investigation below. |
+| A foreground Bash call that reaches its `timeout` is moved to the background and runs to completion; it is not killed (a script that needed 14 s, run with a 4 s timeout, was reported as moved to the background after 4 s and finished) | 2026-10-08 | A run past its timeout comes back as a failure and its log stops mid-output. The rule that an overrun is reported BLOCKED with its duration and log path would then describe a terminated run, and the log path would hold a truncated log. |
+| A Bash command whose leading command is `sleep N` is blocked when N is 30 or more, standalone or chained (`sleep 31; echo x`), with a message that points at Monitor and background runs; a `sleep` of 20 s or less runs | 2026-10-08 | A long leading sleep runs, or a short one is refused. The block's ban on `sleep` turns would then rest on cost alone (each poll turn is a model turn), no longer on the platform refusing them. |
+| In the Workflow runtime a silent foreground tool run longer than the old 180 s rule survives: a sub-agent's Bash call that printed nothing for 250 s (explicit `timeout` 300000, run as `bash <script>` with the silence inside the script, no leading `sleep`, no interpreter wrapper) returned its result and the agent completed normally | 2026-10-08 | A Workflow sub-agent ends with `agent stalled` during a silent foreground command past 180 s. The block and `build_execution_doctrine()` then need the fallback: run over 150 s in the background only where Monitor is in the agent's tool set, with a 90 s heartbeat and at most three arms, and BLOCKED where it is not (Test has no Monitor until the Agent tiers work grants it). |
+| A Workflow `agent()` spawn with an `agentType` loads that agent's body as its standing instruction (a Validate spawn quoted its `##` headings verbatim without reading any file) | 2026-10-08 | A dynamic-build prompt that says "follow your Running commands block" reaches a sub-agent that has no such block. The nine prompt sites would then have to inline the block's text, and the parity guard would hold them to it. |
+
+### Stall investigation (internal)
+
+Question: what drives the platform's "agent stalled" terminations of sub-agents, and does the foreground doctrine or the report cap change their odds? The event list was recovered from local transcripts, which are retained for about 30 days; this entry keeps aggregates only.
+
+Signature: a task notification with status `failed` whose summary reads `Agent "…" failed: Agent stalled: no progress for N s (stream watchdog did not recover)`. Echoes of that text are not events.
+
+| Measure | Result |
+|---|---|
+| Events | 15 across 9 distinct sub-agents and 2 parent sessions, dated 2026-10-01 to 2026-10-07 |
+| Outcome of all agent notifications | 2,286 completed, 15 stalled, 8 usage-limit failures, 2 killed |
+| Silence from the last tool result to the kill | median 935 s, range 604–1,099 s |
+| Where it died | all 15 after a tool result returned, while waiting on the model; none mid-tool; the last tool's duration had a median of 0.5 s |
+| Model and effort | Opus 5.5 in 14 events and Sonnet 5 in 1; `xhigh` effort in 14 and `max` in 1 |
+| Context size at the kill | median 219k tokens, range 86k–339k (under 100k: 2; 100–200k: 5; 200–300k: 6; 300–500k: 2; 500k or more: 0) |
+| Last tool result | median 1.7 KB, maximum 20.8 KB (under 1 KB: 7; 1–10 KB: 6; 10–50 KB: 2; 50 KB or more: 0); the last tool was Bash in 11 events and Read in 4 |
+| Agent type | Code 11, Scrutinize 4 |
+| By Claude Code version | 14 events on 2.1.281 (8 of 998 agents), 1 on 2.1.285 (1 of 127), none in about 1,500 agents on every other version |
+| By model and effort | Opus 5.5 at `xhigh` 7 of 446 agents, Opus 5.5 at `max` 1 of 73, Sonnet 5 at `xhigh` 1 of 401, Opus 5 at `xhigh` 0 of 464, every `high` combination 0 of 1,033 |
+| Silent but survived | of 156,616 sub-agent model waits, 313 lasted 150 s or more and survived (median 271 s), 138 lasted 300 s or more and 93 lasted 600 s or more; 270 of the 313 began with a thinking block, which suggests streamed thinking counts as progress; the rate of waits over 150 s falls as context grows |
+
+Verdict: **inconclusive, leaning toward a Claude Code or API stream defect.** The watchdog threshold is about 600 s of model-stream silence, not 180 s, and the stalls cluster in time and version rather than in prompt size or tool-result size: the largest last result was 20.8 KB and the median context was 219k tokens, well inside the range of runs that finished. Version, session and effort are confounded with one another and the sample is small, so none of them is established as the cause.
+
+The in-house mitigations do not depend on the verdict: lower-effort defaults for the roster (the Agent tiers work) and smaller tool results (capture-then-tail in the Running commands block, and the report cap).
