@@ -980,7 +980,7 @@ describe('buildWorkerListRows', () => {
     expect(buildWorkerListRows({ version: 1, agents: {} })).toEqual([
       {
         name: 'memory',
-        defaultModel: 'haiku',
+        defaultModel: 'claude-sonnet-5-5',
         configured: 'default',
         effort: 'default',
         shippedEffort: 'high',
@@ -1014,7 +1014,7 @@ describe('formatListOutput — EFFORT cell and the worker row', () => {
   });
   const workerRow = (overrides: Partial<ListRow> = {}): ListRow => ({
     name: 'memory',
-    defaultModel: 'haiku',
+    defaultModel: 'claude-sonnet-5-5',
     configured: 'default',
     effort: 'default',
     shippedEffort: 'high',
@@ -1057,9 +1057,22 @@ describe('formatListOutput — EFFORT cell and the worker row', () => {
     }
   });
 
-  it('renders the worker row: DEFAULT haiku, EFFORT default (high), STATE worker', () => {
+  it('renders the worker row: DEFAULT claude-sonnet-5-5, EFFORT default (high), STATE worker', () => {
     const line = lineFor(formatListOutput([agentRow(), workerRow()], false), 'memory');
-    expect(line).toMatch(/^memory\s+haiku\s+default\s+default \(high\)\s+worker$/);
+    expect(line).toMatch(/^memory\s+claude-sonnet-5-5\s+default\s+default \(high\)\s+worker$/);
+  });
+
+  it('widens DEFAULT to the longest shipped default: a full model identifier is not cut and every column stays aligned', () => {
+    const lines = strip(formatListOutput([agentRow(), workerRow()], false)).split('\n');
+    const header = lines[0];
+    const configuredAt = header.indexOf('CONFIGURED');
+    expect(configuredAt).toBeGreaterThan(0);
+    for (const name of ['code', 'memory']) {
+      const line = lines.find(l => l.startsWith(name));
+      expect(line, name).toBeDefined();
+      expect(line!.slice(configuredAt), name).toMatch(/^default\s/);
+    }
+    expect(lines.find(l => l.startsWith('memory'))).toContain(' claude-sonnet-5-5 ');
   });
 
   it('the footer counts agent rows only: totals are the same with and without a configured memory entry', () => {
@@ -1124,7 +1137,7 @@ describe('mergeTuiRowsIntoMapping — inherit and the worker row', () => {
 
   it('a dirty worker row writes agents.memory and leaves agent entries alone', () => {
     const result = mergeTuiRowsIntoMapping(
-      [row({ name: 'memory', worker: true, shippedDefault: 'haiku', shippedEffort: 'high', installed: false, inRegistry: false,
+      [row({ name: 'memory', worker: true, shippedDefault: 'claude-sonnet-5-5', shippedEffort: 'high', installed: false, inRegistry: false,
              configuredModel: 'sonnet', originalModel: 'default', configuredEffort: 'medium', originalEffort: 'default' })],
       { version: 1, agents: { code: { model: 'opus' } } },
     );

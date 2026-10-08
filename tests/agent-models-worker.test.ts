@@ -30,7 +30,7 @@ import {
 import { readFrontmatterEffort } from '../src/core/agent-frontmatter.js';
 import { CLAUDE_MODEL_ALIASES } from '../src/core/external-models.js';
 import { DEVFLOW_PLUGINS, getAllAgentNames } from '../src/core/plugins.js';
-import { resolveAgentSource } from './helpers.js';
+import { loadFile, resolveAgentSource } from './helpers.js';
 
 const file = (agents: AgentMappingFile['agents']): AgentMappingFile => ({ version: 1, agents });
 
@@ -39,8 +39,15 @@ const file = (agents: AgentMappingFile['agents']): AgentMappingFile => ({ versio
 // ---------------------------------------------------------------------------
 
 describe('WORKER_AGENTS', () => {
-  it('declares exactly the memory worker, shipping haiku at high effort', () => {
-    expect(WORKER_AGENTS).toEqual({ memory: { model: 'haiku', effort: 'high' } });
+  it('declares exactly the memory worker, shipping claude-sonnet-5-5 at high effort', () => {
+    expect(WORKER_AGENTS).toEqual({ memory: { model: 'claude-sonnet-5-5', effort: 'high' } });
+  });
+
+  it('ships a model and an effort that the worker value domain accepts', () => {
+    for (const [name, shipped] of Object.entries(WORKER_AGENTS)) {
+      expect(validateWorkerValue('model', shipped.model).ok, `${name} model`).toBe(true);
+      expect(validateWorkerValue('effort', shipped.effort).ok, `${name} effort`).toBe(true);
+    }
   });
 
   it('isWorkerAgent is true for a worker key and false for everything else', () => {
@@ -61,6 +68,51 @@ describe('WORKER_AGENTS', () => {
     for (const plugin of DEVFLOW_PLUGINS) {
       expect(plugin.agents, `plugin ${plugin.name} declares the memory worker as an agent`).not.toContain('memory');
     }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Runtime parity — the hook's model literal and the shipped worker row are one value
+// ---------------------------------------------------------------------------
+
+/**
+ * The model literals background-memory-update hard-codes: the `--model` argument
+ * of its `claude -p` spawn and the model named in its spawn log line.
+ *
+ * The worker does not read agents.memory yet, so the shipped row and the hook
+ * agree only by being written to agree; this collector is what lets a test hold
+ * them to it. Pure function over the hook text.
+ */
+function collectMemoryHookModels(hookSource: string): { flag: string[]; log: string[] } {
+  const flag = [...hookSource.matchAll(/^[ \t]*--model[ \t]+([^\s\\]+)/gm)].map(m => m[1]);
+  const log = [...hookSource.matchAll(/Spawning claude -p \(model ([^,)\s]+)/g)].map(m => m[1]);
+  return { flag, log };
+}
+
+describe('memory worker runtime parity', () => {
+  const HOOK_SOURCE = loadFile('src/assets/scripts/hooks/background-memory-update');
+
+  it("the hook's `claude -p --model` literal is WORKER_AGENTS.memory.model", () => {
+    expect(collectMemoryHookModels(HOOK_SOURCE).flag).toEqual([WORKER_AGENTS.memory.model]);
+  });
+
+  it("the hook's spawn log line names WORKER_AGENTS.memory.model", () => {
+    expect(collectMemoryHookModels(HOOK_SOURCE).log).toEqual([WORKER_AGENTS.memory.model]);
+  });
+
+  it('known-bad probe: the collector reports a drifted literal and an absent one', () => {
+    const drifted = [
+      'log "Spawning claude -p (model claude-sonnet-4-6, ${TURN_COUNT} turns)"',
+      'DEVFLOW_BG_UPDATER=1 "$CLAUDE_BIN" -p \\',
+      '  --model claude-sonnet-4-6 \\',
+      '  --output-format text',
+    ].join('\n');
+    expect(collectMemoryHookModels(drifted)).toEqual({
+      flag: ['claude-sonnet-4-6'],
+      log: ['claude-sonnet-4-6'],
+    });
+    expect(collectMemoryHookModels(drifted).flag).not.toEqual([WORKER_AGENTS.memory.model]);
+    expect(collectMemoryHookModels('echo nothing here')).toEqual({ flag: [], log: [] });
   });
 });
 

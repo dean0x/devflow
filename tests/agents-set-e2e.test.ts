@@ -118,13 +118,13 @@ describe('devflow agents (in process, temp HOME)', () => {
   // -------------------------------------------------------------------------
 
   describe('the memory worker', () => {
-    it('--list prints a memory row after the agent rows: haiku, default (high), worker', async () => {
+    it('--list prints a memory row after the agent rows: claude-sonnet-5-5, default (high), worker', async () => {
       const result = await run('--list');
 
       const lines = result.out.split('\n');
       const memoryAt = lines.findIndex(l => l.startsWith('memory'));
       expect(memoryAt, `no memory row in:\n${result.out}`).toBeGreaterThan(0);
-      expect(lines[memoryAt]).toMatch(/^memory\s+haiku\s+default\s+default \(high\)\s+worker$/);
+      expect(lines[memoryAt]).toMatch(/^memory\s+claude-sonnet-5-5\s+default\s+default \(high\)\s+worker$/);
       const agentRows = lines.slice(1, memoryAt).filter(l => l.trim() !== '');
       expect(agentRows.length, 'agent rows must precede the worker row').toBeGreaterThan(10);
       expect(agentRows.some(l => l.startsWith('memory'))).toBe(false);
@@ -157,7 +157,7 @@ describe('devflow agents (in process, temp HOME)', () => {
 
       const line = (await run('--list')).out.split('\n').find(l => l.startsWith('memory'));
 
-      expect(line).toMatch(/^memory\s+haiku\s+sonnet\s+medium\s+worker$/);
+      expect(line).toMatch(/^memory\s+claude-sonnet-5-5\s+sonnet\s+medium\s+worker$/);
     });
 
     it('--reset --yes removes agents.memory', async () => {
@@ -205,7 +205,7 @@ describe('devflow agents (in process, temp HOME)', () => {
       expect(result.out).toContain('gpt-5');
       expect(result.out).toMatch(/dropping out-of-domain model "gpt-5" for worker "memory"/);
       const line = result.out.split('\n').find(l => l.startsWith('memory'));
-      expect(line).toMatch(/^memory\s+haiku\s+default\s/);
+      expect(line).toMatch(/^memory\s+claude-sonnet-5-5\s+default\s/);
     });
 
     it('an unknown agent name is still rejected', async () => {

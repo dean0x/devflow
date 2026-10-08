@@ -110,9 +110,18 @@ export type StoredEffort = EffortLevel | typeof EFFORT_INHERIT;
  *
  * A worker is not a DEVFLOW_PLUGINS agent: getAllAgentNames() and the roster
  * count are unaffected.
+ *
+ * Shipped value of `memory`: `claude-sonnet-5-5` at `high` effort. User decision
+ * 2026-10-08: memory quality is worth more than the cost saving of Haiku, which
+ * replaces the plan's Haiku default. The worker does not read `agents.memory`
+ * yet. Until it does, background-memory-update names this model as a literal in
+ * its `claude -p --model` argument, and tests/agent-models-worker.test.ts holds
+ * that literal equal to this row so the two cannot drift apart. Wiring the
+ * worker to this map, and `--effort` behind a CLI version probe, is a separate
+ * change.
  */
 export const WORKER_AGENTS = {
-  memory: { model: 'haiku', effort: 'high' },
+  memory: { model: 'claude-sonnet-5-5', effort: 'high' },
 } as const satisfies Readonly<Record<string, { model: string; effort: EffortLevel }>>;
 
 /** The names of the workers in WORKER_AGENTS. */

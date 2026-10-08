@@ -1144,18 +1144,18 @@ describe('worker row', () => {
     makeRow({
       name: 'memory',
       worker: true,
-      shippedDefault: 'haiku',
+      shippedDefault: 'claude-sonnet-5-5',
       shippedEffort: 'high',
       installed: false,
       inRegistry: false,
       ...overrides,
     });
 
-  it('renders MODEL default (haiku), EFFORT default (high) and STATE worker', () => {
+  it('renders MODEL default (claude-sonnet-5-5), EFFORT default (high) and STATE worker', () => {
     const state = makeState({ rows: [makeRow({ name: 'code' }), memoryRow()], cursor: 0 });
     const line = renderStripped(state).find(l => l.includes('Memory'));
     expect(line).toBeDefined();
-    expect(line).toContain('default (haiku)');
+    expect(line).toContain('default (claude-sonnet-5-5)');
     expect(line).toContain('default (high)');
     expect(line!.slice(66)).toBe('worker');
   });
@@ -1175,7 +1175,7 @@ describe('worker row', () => {
     const line = renderStripped(state).find(l => l.includes('Memory'));
     expect(line).toContain('sonnet');
     expect(line).toContain('medium');
-    expect(line).not.toContain('default (haiku)');
+    expect(line).not.toContain('default (claude-sonnet-5-5)');
   });
 
   it('shows a full claude- identifier bare, not as unavailable: it is in the worker domain', () => {

@@ -1089,7 +1089,7 @@ describe('buildRow — shipped effort and the worker row', () => {
 
 describe('reduce — a worker row cycles only what a worker accepts', () => {
   const workerRow = (overrides: Partial<AgentRow> = {}): AgentRow =>
-    makeRow({ name: 'memory', worker: true, shippedDefault: 'haiku', shippedEffort: 'high', installed: false, inRegistry: false, ...overrides });
+    makeRow({ name: 'memory', worker: true, shippedDefault: 'claude-sonnet-5-5', shippedEffort: 'high', installed: false, inRegistry: false, ...overrides });
 
   it('the model cycle is default and the Claude aliases, even with an external catalog loaded', () => {
     let s = makeState({ rows: [workerRow()], cursor: 0, proxyEnabled: true }); // MOCK_CATALOG_KNOWN cycle
