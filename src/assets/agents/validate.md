@@ -38,6 +38,8 @@ Execute in this order, stopping on first failure:
 | 3 | Lint | `npm run lint`, `cargo clippy`, `make lint` |
 | 4 | Test | `npm test`, `cargo test`, `make test` |
 
+**Gate ownership:** Run the full suite once per HEAD. You are the only agent that does.
+
 ## Running commands
 
 Run builds, typechecks, lints and tests in the foreground, each with an explicit Bash `timeout` above its expected run time. The ceiling is 600000 ms, or `BASH_MAX_TIMEOUT_MS` when set (`echo ${BASH_MAX_TIMEOUT_MS:-600000}`).

@@ -267,6 +267,14 @@
       "description": "Distinct agent types the no-hardcoded-model guard (D-SPAWN-NO-MODEL) must read out of Agent( argument lists across src/assets/{commands,agents,skills,mds} and dist/{commands,agents}. Measured 16 when the guard was added. A parser that stops finding spawns, or stops reading their arguments, would pass the model scan vacuously, so the count is its liveness proof. It counts types, not sites: consolidating or dropping a spawn lowers the site count but not the type count, which falls only when no prompt spawns an agent at all. Floors rise, never fall."
     },
     {
+      "id": "gate-ownership-body-count",
+      "floor": 6,
+      "pattern": "GATE_BODIES.length).toBeGreaterThanOrEqual(6)",
+      "occurrences": 1,
+      "sourceFile": "tests/guards/gate-ownership.test.ts",
+      "description": "Agent bodies that carry a pinned `**Gate ownership:**` row (D-GATE-OWNERSHIP): Code, Simplify, Evaluate, Scrutinize, Test and Validate. The guard pins each row's text, so a row cannot be dropped or reworded quietly; this floor stops the table shrinking behind it. Floors rise, never fall."
+    },
+    {
       "id": "running-commands-site-count",
       "floor": 9,
       "pattern": "DYNAMIC_BUILD_SITES.length).toBeGreaterThanOrEqual(9)",

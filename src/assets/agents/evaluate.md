@@ -44,6 +44,8 @@ You receive from orchestrator:
 6. **Check scope**: Identify out-of-scope additions not justified by design improvements
 7. **Report misalignments**: Document issues with sufficient detail for Code agent to fix
 
+**Gate ownership:** Run no build, test or lint command. Git read commands only. Only Validate runs the full suite.
+
 ## Principles
 
 1. **Intent over letter** - Validate the spirit of the request, not just literal interpretation

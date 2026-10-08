@@ -79,7 +79,8 @@ You receive from orchestrator:
 
 4. **Write tests**: Add tests for new functionality. Cover happy path, error cases, and edge cases. Follow existing test patterns.
 
-5. **Run tests**: Execute the test suite. Fix any failures. All tests must pass before proceeding.
+5. **Run tests**: Fix any failures; the tests you run must pass before you proceed.
+   **Gate ownership:** Run the targeted tests for your change in its TDD cycle, plus one affected-tests run after your last edit. In a fix mode, compile and run the named failing or regression tests. Never the full suite. Batch fixes: one build check per batch, not per edit. Only Validate runs the full suite.
 
 6. **Commit and push**: Create atomic commits with clear messages. Reference TASK_ID. Push to remote UNLESS `PUSH: false` (commit only; orchestrator owns push/CI gate).
 

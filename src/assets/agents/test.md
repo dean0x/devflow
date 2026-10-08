@@ -72,6 +72,8 @@ For each scenario:
 
 If a previous run failed (PREVIOUS_FAILURES provided), prioritize re-testing those scenarios first.
 
+**Gate ownership:** Run the scenario commands. Never the full suite. Only Validate runs the full suite.
+
 ## Running commands
 
 Run builds, typechecks, lints and tests in the foreground, each with an explicit Bash `timeout` above its expected run time. The ceiling is 600000 ms, or `BASH_MAX_TIMEOUT_MS` when set (`echo ${BASH_MAX_TIMEOUT_MS:-600000}`).
