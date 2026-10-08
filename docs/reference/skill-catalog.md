@@ -1,15 +1,15 @@
 # Skill Catalog
 
-Reference for companion skills loaded by commands. Commands load always-on companion skills before their first phase.
+Reference for companion skills loaded by commands. A command loads a companion only when its own main thread uses the skill. The orchestrating commands delegate their work to agents, which load the skills they need, so only RELEASE, whose main thread drives git, loads one before its first phase.
 
 ## Command Companion Skills
 
 | Intent | Command | Companions |
 |--------|---------|------------|
-| IMPLEMENT | /implement | `devflow:test-driven-development`, `devflow:patterns`, `devflow:dependency-research` |
-| DEBUG | /debug | `devflow:test-driven-development`, `devflow:software-design`, `devflow:testing` |
-| PLAN | /plan | `devflow:test-driven-development`, `devflow:patterns`, `devflow:software-design`, `devflow:security`, `devflow:design-review` |
-| REVIEW | /code-review | `devflow:quality-gates`, `devflow:software-design` |
+| IMPLEMENT | /implement | (none) |
+| DEBUG | /debug | (none) |
+| PLAN | /plan | (none) |
+| REVIEW | /code-review | (none) |
 | RELEASE | /release | `devflow:git` |
 | EXPLORE | /explore | (none) |
 | RESEARCH | /research | (none — agents load type-specific skills internally) |

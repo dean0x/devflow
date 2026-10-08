@@ -126,6 +126,11 @@ export const DEVFLOW_PLUGINS: PluginDefinition[] = [
     commands: ['/plan'],
     agents: ['git', 'skim', 'synthesize', 'design'],
     skills: ['gap-analysis', 'design-review', 'patterns', 'worktree-support', 'feature-knowledge', 'apply-feature-knowledge'],
+    // D-CHARTER-BOUNDED-INLINE: no `software-design` or `test-driven-development`.
+    // They were /plan's main-thread companions. The command orchestrates and no
+    // longer loads companions, and nothing else this plugin installs references
+    // them, so keeping them would install two skills for no reader (the reverse
+    // arm of the closure guard rejects exactly that).
     requires: [
       'apply-decisions',
       'architecture',
@@ -141,8 +146,6 @@ export const DEVFLOW_PLUGINS: PluginDefinition[] = [
       'reliability',
       'review-methodology',
       'security',
-      'software-design',
-      'test-driven-development',
       'testing',
     ],
     rules: [],
@@ -181,7 +184,10 @@ export const DEVFLOW_PLUGINS: PluginDefinition[] = [
     commands: ['/code-review'],
     agents: ['git', 'review', 'synthesize'],
     skills: ['architecture', 'complexity', 'consistency', 'database', 'dependencies', 'documentation', 'performance', 'regression', 'reliability', 'review-methodology', 'security', 'testing', 'worktree-support', 'apply-feature-knowledge'],
-    requires: ['apply-decisions', 'docs-framework', 'git', 'quality-gates', 'software-design'],
+    // D-CHARTER-BOUNDED-INLINE: no `quality-gates` or `software-design`. They were
+    // /code-review's main-thread companions. The command orchestrates and no longer
+    // loads companions, and nothing else this plugin installs references them.
+    requires: ['apply-decisions', 'docs-framework', 'git'],
     rules: [],
   },
   {

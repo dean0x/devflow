@@ -198,8 +198,6 @@ Only `exit=0` means the skill is installed. On any other result, do NOT add that
 
 **Produces:** DECISIONS_CONTEXT, FEATURE_KNOWLEDGE, COMPLIANCE_FRAMEWORKS (carried from Step 0b)
 
-**Load Companion Skills** — Load via Skill tool: `devflow:quality-gates`, `devflow:software-design`. If a skill fails to load, continue without it.
-
 {{decisions_load()}}
 
 This produces a compact index of active ADR/PF entries. Pass `DECISIONS_CONTEXT` to all Review agents. Review agents use `devflow:apply-decisions` to Read full entry bodies on demand.
