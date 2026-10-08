@@ -265,6 +265,14 @@
       "occurrences": 1,
       "sourceFile": "tests/guards/spawn-no-hardcoded-model.test.ts",
       "description": "Distinct agent types the no-hardcoded-model guard (D-SPAWN-NO-MODEL) must read out of Agent( argument lists across src/assets/{commands,agents,skills,mds} and dist/{commands,agents}. Measured 16 when the guard was added. A parser that stops finding spawns, or stops reading their arguments, would pass the model scan vacuously, so the count is its liveness proof. It counts types, not sites: consolidating or dropping a spawn lowers the site count but not the type count, which falls only when no prompt spawns an agent at all. Floors rise, never fall."
+    },
+    {
+      "id": "running-commands-site-count",
+      "floor": 9,
+      "pattern": "DYNAMIC_BUILD_SITES.length).toBeGreaterThanOrEqual(9)",
+      "occurrences": 1,
+      "sourceFile": "tests/guards/running-commands-parity.test.ts",
+      "description": "Dynamic-build prompt sites that name the Running commands block instead of prescribing a procedure (D-FOREGROUND-RUN): the Code implementation prompt, both Gate 1 Validate prompts, both Code fix prompts after Gate 2, the review-batch fix prompt, the Test prompt and the two Validate re-checks. The guard requires each site's quoted text exactly once in the source and in the compiled command; this floor stops the list shrinking behind it. Floors rise, never fall."
     }
   ],
   "ceilings": [

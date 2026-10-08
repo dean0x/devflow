@@ -484,6 +484,51 @@ const RETIRED_LITERALS: ReadonlyArray<RetiredEntry> = [
       'one final action per entry it was handed, so a prose cap on top of the plumbing bound ' +
       'would only leave handed-out entries unfinished.',
   },
+  // -------------------------------------------------------------------------
+  // The background-and-poll doctrine (D-FOREGROUND-RUN).
+  //
+  // The Code, Validate and Test agents once ran any build that might exceed two
+  // minutes in the background and polled it with Monitor, and the dynamic-build
+  // engine and prompts repeated the procedure. A 250-second silent foreground run
+  // survived inside a Workflow sub-agent on Claude Code 2.1.294, and the stalls
+  // the old procedure guarded against fire on model-stream silence after a tool
+  // result returns, never while a command runs. Every agent now runs builds and
+  // tests in the foreground under an explicit Bash timeout, and the three bodies
+  // share one `## Running commands` block that a parity guard holds identical.
+  //
+  // Scoped to the trees that carried the procedure: the agent bodies and the
+  // command layer, source and compiled. The spellings are legitimate elsewhere
+  // (the session-start hook spawns the Learning agent in the background, and
+  // docs/reference/platform-assumptions.md describes what was measured), so a
+  // repo-wide entry would be a grep rather than a rule.
+  // -------------------------------------------------------------------------
+  {
+    literal: 'Long-running commands',
+    removedFrom: 'src/assets/agents/{code,validate,test}.md, src/assets/commands/_partials/_engine.mds, src/assets/commands/dynamic-build.mds',
+    scope: ['src/assets/agents/', 'src/assets/commands/', 'dist/commands/'],
+    justification:
+      'The section name the three agent bodies and nine dynamic-build prompt sites used for the ' +
+      'background-and-poll procedure. The section is now `## Running commands` and the prompt ' +
+      'sites name that block, so a surviving reference points at a section that no longer exists.',
+  },
+  ...([
+    ['/tmp/df-val-', 'the Validate agent\'s background log path'],
+    ['/tmp/df-test-', 'the Test agent\'s background log path'],
+    ['/tmp/df-build-', 'the Code agent\'s and the engine\'s background log path'],
+    ['sleep 25', 'the Monitor heartbeat loop'],
+    ['25s heartbeat', 'the Monitor heartbeat that kept an agent alive past a watchdog that does not fire during a tool run'],
+    ['select:Monitor', 'the ToolSearch call that pre-loaded Monitor for the poll'],
+    ['run_in_background: true', 'the Bash parameter that launched the background run'],
+    ['<BASE>.done', 'the sentinel file the poll waited on'],
+  ] as const).map(([literal, what]): RetiredEntry => ({
+    literal,
+    removedFrom: 'src/assets/agents/{code,validate,test}.md and src/assets/commands/_partials/_engine.mds (the background-and-poll procedure)',
+    scope: ['src/assets/agents/', 'src/assets/commands/', 'dist/commands/'],
+    justification:
+      `Retired background-and-poll wording — ${what}. Builds and tests run in the foreground under ` +
+      'an explicit Bash timeout, and the new block\'s prohibition is worded without any of the ' +
+      'registered spellings.',
+  })),
   {
     literal: 'Cap: 50 entries per file',
     removedFrom: 'docs/reference/file-organization.md',

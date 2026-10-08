@@ -977,10 +977,10 @@ describe('compiled dynamic-build.md: Gate-1-twice cadence + build execution doct
     );
   });
 
-  it('renders the build_execution_doctrine (background Bash + Monitor poll)', () => {
+  it('renders the build_execution_doctrine as the Running commands block (foreground, no background run)', () => {
     expect(compiled).toContain('Build execution doctrine');
-    expect(compiled).toContain('run_in_background');
-    expect(compiled).toContain('Monitor');
+    expect(compiled).toContain('Running commands');
+    expect(compiled).not.toContain('run_in_background');
   });
 
   it('runs ONE final Gate 1 (#2) after the review pass', () => {
@@ -1095,11 +1095,11 @@ describe('compiled dynamic-build.md: streamlining doctrine (C1–C9)', () => {
     expect(compiled).toContain('agentType: "Design"');
   });
 
-  it('C6: build execution doctrine — cheapest-sufficient, one gate per phase, NEVER wrapped, bounded re-arm', () => {
+  it('C6: build execution doctrine — cheapest-sufficient, one gate per phase, never wrapped, never polled', () => {
     expect(compiled).toContain('Cheapest-sufficient validation');
     expect(compiled).toContain('One build gate per phase');
-    expect(compiled).toContain('NEVER wrapped in');
-    expect(compiled).toContain('re-arm');
+    expect(compiled).toContain('Never wrap a build or test command in `sh -c`');
+    expect(compiled).toContain('never poll across turns');
   });
 
   it('C8: scratch path is run-unique — old fixed filename /tmp/df-wf-check.js is gone', () => {

@@ -4,7 +4,7 @@
 ORDER IS LOAD-BEARING. Run exactly in this sequence:
 
 1. **Validate agent** — build / typecheck / lint / test
-   - Build/test commands that may run silent for >~120s MUST follow `build_execution_doctrine()` (background Bash + Monitor poll), or they trip the 180s workflow watchdog.
+   - Build/test commands follow `build_execution_doctrine()`: the Validate agent's Running commands block, foreground under an explicit Bash timeout.
    - FAIL → Code agent fix (max 2 retries) → re-run Validate agent
    - If still FAIL after 2 retries → escalate (do not loop endlessly)
 2. **Simplify agent** — reduce complexity, remove duplication
@@ -19,7 +19,7 @@ Depth scales to change size + budget: a trivial one-line fix warrants a lighter 
 1. **Gate 1 #1** — immediately after the initial Code agent implementation (inside `implement_bundle()`).
 2. **Gate 1 #2** — the FINAL gate, after ALL Gate-2 fixes AND the entire review pass have completed.
 
-It does NOT run inside the review pass, nor after each individual Gate-2 / review / QA fix. At those points the fixing Code agent self-verifies its OWN build compiles (see `review_pass()` and the Code agent's "Long-running commands" discipline). The final Gate 1 #2 is the invariant that all written code passes before merge.
+It does NOT run inside the review pass, nor after each individual Gate-2 / review / QA fix. At those points the fixing Code agent self-verifies its OWN build compiles (see `review_pass()` and the Code agent's Running commands block). The final Gate 1 #2 is the invariant that all written code passes before merge.
 @end
 
 @define gate2_acceptance():
@@ -115,7 +115,7 @@ Majority-survives: a finding needs >50% of verification lenses to confirm it. St
 
 If no surviving findings: return early (no fixes needed). Any coverageGaps are carried in the return — they block a PASS verdict downstream, not the early exit.
 
-If survivors remain: batch the confirmed findings for fixing: group findings by file — one file per set of sub-batches, chunked at max 5 findings per sub-batch; never mix two files in one batch. A finding with no `file` field is its own singleton batch. Sub-batches for the SAME file run sequentially (never two Code agents editing the same file concurrently — same-file edits in `parallel()` cause index contention and lost fixes); sub-batches for DISTINCT files run via `parallel()` in staggered chunks of ~5, same pacing bar as the Review spawn path (different code areas — safe per concurrency doctrine). Each Code agent's prompt pins a return contract: `{"status": "fixed"|"blocked", "commitShas": [...], "unresolved": [...]}` — a chunk is FIXED only when `result.status === "fixed"` AND `commitShas` is non-empty AND `result.unresolved` is empty; never decide disposition from status alone. A non-empty `unresolved` list means the agent named work it could not complete — carry the whole chunk into `survivingFindings` rather than guessing which findings the strings map to. `survivingFindings` = findings NOT addressed: fix Code agent dead/failed/blocked/deferred OR committed but left work named in `unresolved`. The fixing Code agent **self-verifies its own fix builds** (build/typecheck per the Code agent's "Long-running commands" discipline). Do **NOT** run Gate 1 or Gate 2 inside the pass (no Validate agent, no Simplify agent, no Scrutinize agent, no Evaluate agent, no Test agent). The engine runs ONE final Gate 1 after the pass exits — see the `gate1_postcode()` cadence (Gate 1 #2).
+If survivors remain: batch the confirmed findings for fixing: group findings by file — one file per set of sub-batches, chunked at max 5 findings per sub-batch; never mix two files in one batch. A finding with no `file` field is its own singleton batch. Sub-batches for the SAME file run sequentially (never two Code agents editing the same file concurrently — same-file edits in `parallel()` cause index contention and lost fixes); sub-batches for DISTINCT files run via `parallel()` in staggered chunks of ~5, same pacing bar as the Review spawn path (different code areas — safe per concurrency doctrine). Each Code agent's prompt pins a return contract: `{"status": "fixed"|"blocked", "commitShas": [...], "unresolved": [...]}` — a chunk is FIXED only when `result.status === "fixed"` AND `commitShas` is non-empty AND `result.unresolved` is empty; never decide disposition from status alone. A non-empty `unresolved` list means the agent named work it could not complete — carry the whole chunk into `survivingFindings` rather than guessing which findings the strings map to. `survivingFindings` = findings NOT addressed: fix Code agent dead/failed/blocked/deferred OR committed but left work named in `unresolved`. The fixing Code agent **self-verifies its own fix builds** (build/typecheck per the Code agent's Running commands block, once over its whole batch). Do **NOT** run Gate 1 or Gate 2 inside the pass (no Validate agent, no Simplify agent, no Scrutinize agent, no Evaluate agent, no Test agent). The engine runs ONE final Gate 1 after the pass exits — see the `gate1_postcode()` cadence (Gate 1 #2).
 @end
 
 @define concurrency_doctrine():
@@ -135,42 +135,26 @@ This applies to both: multiple Code agents working on a single ticket AND multi-
 @end
 
 @define build_execution_doctrine():
-### Build execution doctrine — long-running commands (LOAD-BEARING)
+### Build execution doctrine — the Running commands block (LOAD-BEARING)
 
-The Workflow runtime KILLS any sub-agent that emits no output for 180 seconds. A cold `cargo build`, `cargo test`, a large `tsc`, `gradle build`, `go build ./...`, etc. routinely runs silent far longer and trips this watchdog (the failure reads `agent stalled on all N attempts`). Plain foreground `Bash` also defaults to a 120s timeout.
+Every agent that builds or tests (the Validate agent, the Code agent, the Test agent) follows the `## Running commands` block in its own body, and that block is the same text in all three. It holds inside a Workflow sub-agent too, so each prompt in this engine names the block ("your Running commands block") and does not copy it. The block's text:
 
-**RULE: any agent (Validate agent, Code agent, Test agent) running a build / test / compile / install that may run silent for more than ~120s MUST run it in the BACKGROUND and POLL — never as a single silent foreground command.**
+Run builds, typechecks, lints and tests in the foreground, each with an explicit Bash `timeout` above its expected run time. The ceiling is 600000 ms, or `BASH_MAX_TIMEOUT_MS` when set (`echo ${BASH_MAX_TIMEOUT_MS:-600000}`).
 
-Build commands are NEVER wrapped in `sh -c`, `bash -c`, or inline interpreters (`python3 -c`, `node -e`). Invoke commands directly with the step-1 redirect form — permission systems deny wrapper-invoked commands that would be allowed directly.
-
-Mechanical procedure (spike-verified — a workflow sub-agent survived a 253s job this way):
-
-0. **Pre-load Monitor:** before launching any background task, load the `Monitor` tool via ToolSearch (`select:Monitor`).
-1. Choose ONE unique base path for this run and reuse it verbatim in steps 1–3, e.g. `BASE=/tmp/df-build-<ticket-slug>`. Launch the command with the Bash tool using `run_in_background: true`:
-   ```
-   <build/test command> > <BASE>.log 2>&1; echo "EXIT=$?" > <BASE>.done
-   ```
-   This returns immediately with a background task id — do NOT block on it.
-2. Arm ONE Monitor that emits a heartbeat well under 180s AND exits when the job finishes:
-   - description: short, e.g. `await <build cmd>`
-   - persistent: false
-   - timeout_ms: comfortably ABOVE the expected job time (e.g. 600000)
-   - command: `until [ -f <BASE>.done ]; do echo building; sleep 25; done; echo BUILD_DONE; cat <BASE>.done`
-
-   The `building` heartbeat every 25s (≪ 180s) is delivered as a notification that re-invokes you, so the watchdog never sees a >180s gap. `BUILD_DONE` + the `EXIT=` line signal completion.
-
-   **Exit-code honesty:** the background task's own exit status is meaningless (the trailing `echo` always exits 0). ALWAYS read the `EXIT=` value written inside `<BASE>.done` — that is the authoritative result.
-
-   **Bounded polling:** arm ONE Monitor then stop acting. On Monitor timeout, re-arm at most 2× (never more than 3 total Monitor calls per build). If the build has not finished after 3 Monitor calls: record the state and escalate — never babysit. A Code agent burned 241k tokens polling one build.
-3. When the monitor reports `BUILD_DONE`: the job PASSES iff `<BASE>.done` contains `EXIT=0`. Read `<BASE>.log` for output/failure detail.
+- Capture, then tail, in one Bash call (shell state does not persist between calls): `LOG=$(mktemp); <command> >"$LOG" 2>&1; rc=$?; tail -n 40 "$LOG"; echo "EXIT=$rc"`. The printed `EXIT=` value is the result; never decide one from a grep count.
+- Never background a command and wait on it, and never poll across turns: no `sleep` or `true` turns, no sentinel-file checks, no Monitor.
+- Prefer the scoped command for the change (a package, a path or a test file); for the whole set, one workspace-level command over a per-package loop.
+- A run that exceeds its timeout is BLOCKED: report its duration and log path. Do not wait on it, poll it or re-run it.
+- A run expected to exceed the ceiling is split into parts, each under about 90% of it, run in sequence. If it cannot be split, report BLOCKED with the remedy `devflow flags --set bash-max-timeout-ms=<ms>`.
+- Never re-run a command when nothing it reads has changed.
+- Never wrap a build or test command in `sh -c`, `bash -c`, `python3 -c` or `node -e`: permission systems deny wrapper-invoked commands that would be allowed directly.
+- The same rules hold inside a dynamic Workflow sub-agent.
 
 **Cheapest-sufficient validation:** iterate with the fastest check that proves the change — `tsc --noEmit`, `cargo check`, `go vet`, a single test file — the ecosystem's cheapest sufficient signal. Reserve expensive full/optimized builds and whole-suite runs for the final gates only.
 
 **One build gate per phase:** batch related fixes, validate once. A fix-pass Code agent runs ONE light check over its whole batch — never several invocations per small fix. Do NOT validate after every individual mutation; validate once after the batch is complete.
 
-**Scope commands to stay short.** During the engine, PREFER crate/package-scoped builds and tests — `cargo build -p <crate>`, `cargo test -p <crate>`, `npm test -- <path>`, `go test ./pkg/...` — over the whole workspace. The full-workspace regression is the human's job after the wave (the wave already hands the integrated branch back to the user). Scoping keeps most commands under the watchdog window and under budget.
-
-**Invariants:** heartbeat interval MUST stay well under 180s (25–30s is the tested value); Monitor `timeout_ms` MUST exceed the expected job duration (a too-short timeout kills the poll, not the build). Never substitute a single silent long command for this procedure.
+**Scope commands to stay short.** During the engine, prefer the scoped command for the change over the whole workspace — `cargo build -p <crate>`, `cargo test -p <crate>`, `npm test -- <path>`, `go test ./pkg/...` — and, when the whole set is needed, one workspace-level command over a per-package loop. After the wave, the full-workspace regression is the human's job (the wave already hands the integrated branch back to the user).
 @end
 
 @define engine_output_schema():
