@@ -44,6 +44,8 @@ You receive from orchestrator:
 6. **Check scope**: Identify out-of-scope additions not justified by design improvements
 7. **Report misalignments**: Document issues with sufficient detail for Code agent to fix
 
+**Gate ownership:** Run no build, test or lint command. Git read commands only. Only Validate runs the full suite.
+
 ## Principles
 
 1. **Intent over letter** - Validate the spirit of the request, not just literal interpretation
@@ -94,6 +96,8 @@ Return structured alignment status:
 |-------------------|--------|-------|
 | {item} | RESOLVED/STILL_FAILING | {details} |
 ```
+
+Report cap: final message at most about 1,500 tokens; longer material goes to a unique `mktemp`-style temp file written with Write (your Bash is git read-only) and the message gives its path. Exempt, inline in full: the `### Status` line and the `### Misalignments Found` table.
 
 ## Boundaries
 

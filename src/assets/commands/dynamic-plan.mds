@@ -59,7 +59,13 @@ If present, note its contents as `PREFERENCE_PROFILE`. This will be used to auto
 
 **3. Resolve ticket input**
 
-Determine the ticket source (in priority order):
+What follows the command is bound once, here. Every later step names it `COMMAND_INPUT` and never restates it:
+
+<command-input>
+$ARGUMENTS
+</command-input>
+
+Determine the ticket source from `COMMAND_INPUT` (in priority order):
 - A directory of ticket `.md` files (from `/devflow:dynamic-tickets` output)
 - A list of candidate issue references or issue URLs
 - Inline ticket descriptions passed as args

@@ -82,7 +82,7 @@ Counters are per provider so a broken connection for one provider spends only it
 
 ### 3. The Tracker agent — `src/assets/agents/tracker.md`
 
-The **17th** agent. `name: Tracker` (byte-exact), registry key `tracker`, `model: sonnet` (OD-10, pinned equal to `loadShippedDefaults()['tracker']`), preloaded skills `devflow:git` and `devflow:boundary-validation`, and **no `tools:` key**.
+The **17th** agent. `name: Tracker` (byte-exact), registry key `tracker`, `model: sonnet` (OD-10, pinned equal to `loadShippedAgentDefaults()['tracker'].model`), preloaded skills `devflow:git` and `devflow:boundary-validation`, and **no `tools:` key**.
 
 **Why no `tools:` key**, stated in the agent itself so it cannot be "tidied" into an allowlist: the tracker servers it must reach are **user-configured**, so their tool names differ per machine and cannot be enumerated at authoring time. Any allowlist would be a guess, and a wrong guess fails at *runtime*, in a background run, with nobody watching. An explicit `## Read-only boundary` section is the compensating control, pinned in `tests/tracker-agent.test.ts`.
 

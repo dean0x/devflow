@@ -81,6 +81,8 @@ CROSS_REFERENCES: [ADR/PF IDs whose rule the knowledge base states in words, if 
 KB_COMMIT: committed <sha> | skipped (no changes) | skipped (no branch) | skipped (detached HEAD) — uncommitted: <paths> | failed (<reason>)
 ```
 
+Report cap: final message at most about 1,500 tokens; longer material goes to a `mktemp` file (via Bash or Write) and the message gives its path. Exempt, inline in full: the `KB_*` status block.
+
 ## Boundaries
 
 - **Only writes to `.devflow/features/` directory** — never modify source code

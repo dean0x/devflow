@@ -50,6 +50,25 @@ json_field_file() {
   fi
 }
 
+# The typed read of a field from a JSON file. Usage: json_string_field_file "/path/to/file.json" "field"
+# json_field_file stringifies, so the number 42 and the string "42" read the same;
+# this prints the field only when it is a JSON string, and nothing for any other
+# type (a number, boolean, object, array or null), an absent field, or a string
+# holding a NUL, which no shell variable can carry. The string is printed
+# byte-exact with no newline added, so a caller that must see the value's own
+# trailing newline appends a sentinel before the command substitution strips it:
+#   v=$(json_string_field_file "$file" "k"; printf x); v=${v%x}
+# Silent on stderr and failing on an unparseable or missing file, as json_field_file
+# is, and read the same way on both backends (the node path reads the file on stdin).
+json_string_field_file() {
+  local file="$1" field="$2"
+  if [ "$_HAS_JQ" = "true" ]; then
+    jq -j ".$field | select(type == \"string\" and all(explode[]; . != 0))" "$file" 2>/dev/null
+  else
+    node "$_JSON_HELPER" get-string-field "$field" 2>/dev/null < "$file"
+  fi
+}
+
 # --- Multi-field batched extraction ---
 
 # Extract cwd and an arbitrary top-level field from stdin JSON in a single

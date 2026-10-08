@@ -305,6 +305,31 @@ describe('flags CLI — createFlagsCommand factory', () => {
       expect(flags).toEqual({ 'max-concurrent-subagents': 50, 'view-mode': 'default' });
     });
 
+    it('whole-post-state: set bash-max-timeout-ms=900000 writes BASH_MAX_TIMEOUT_MS as "900000"', async () => {
+      await fs.writeFile(path.join(tmpDevflowDir, 'manifest.json'), makeEmptyFlagsManifest(), 'utf-8');
+
+      await flagsCmd.parseAsync(['--set', 'bash-max-timeout-ms=900000'], { from: 'user' });
+      expect(process.exitCode).toBe(0);
+
+      const settings = parseSettings(await fs.readFile(path.join(tmpClaudeDir, 'settings.json'), 'utf-8'));
+      expect(settings).toEqual({ env: { BASH_MAX_TIMEOUT_MS: '900000' } });
+
+      const flags = parseFlagsRecord(await fs.readFile(path.join(tmpDevflowDir, 'manifest.json'), 'utf-8'));
+      expect(flags).toEqual({ 'bash-max-timeout-ms': 900000, 'view-mode': 'default' });
+    });
+
+    it('bash-max-timeout-ms below its 600000 floor → exit code 1, files untouched', async () => {
+      const initialManifest = makeEmptyFlagsManifest();
+      await fs.writeFile(path.join(tmpDevflowDir, 'manifest.json'), initialManifest, 'utf-8');
+      await fs.writeFile(path.join(tmpClaudeDir, 'settings.json'), '{}', 'utf-8');
+
+      await flagsCmd.parseAsync(['--set', 'bash-max-timeout-ms=599999'], { from: 'user' });
+      expect(process.exitCode).toBe(1);
+
+      expect(await fs.readFile(path.join(tmpDevflowDir, 'manifest.json'), 'utf-8')).toBe(initialManifest);
+      expect(await fs.readFile(path.join(tmpClaudeDir, 'settings.json'), 'utf-8')).toBe('{}');
+    });
+
     it('whole-post-state: set an enum flag (workflow-size-guideline=large)', async () => {
       await fs.writeFile(path.join(tmpDevflowDir, 'manifest.json'), makeEmptyFlagsManifest(), 'utf-8');
 
@@ -526,6 +551,27 @@ describe('flags CLI — createFlagsCommand factory', () => {
 
       const flags = parseFlagsRecord(await fs.readFile(path.join(tmpDevflowDir, 'manifest.json'), 'utf-8'));
       expect(flags).toEqual({ 'max-concurrent-subagents': null, 'view-mode': 'default' });
+    });
+
+    it('unset bash-max-timeout-ms deletes BASH_MAX_TIMEOUT_MS and leaves the record neutral', async () => {
+      await fs.writeFile(
+        path.join(tmpDevflowDir, 'manifest.json'),
+        makeManifestWithFlags({ 'bash-max-timeout-ms': 900000 }),
+        'utf-8',
+      );
+      await fs.writeFile(
+        path.join(tmpClaudeDir, 'settings.json'),
+        JSON.stringify({ env: { BASH_MAX_TIMEOUT_MS: '900000' } }, null, 2) + '\n',
+        'utf-8',
+      );
+
+      await flagsCmd.parseAsync(['--unset', 'bash-max-timeout-ms'], { from: 'user' });
+      expect(process.exitCode).toBe(0);
+
+      const settings = parseSettings(await fs.readFile(path.join(tmpClaudeDir, 'settings.json'), 'utf-8'));
+      expect(settings).toEqual({});
+      const flags = parseFlagsRecord(await fs.readFile(path.join(tmpDevflowDir, 'manifest.json'), 'utf-8'));
+      expect(flags['bash-max-timeout-ms']).toBeNull();
     });
 
     it('whole-post-state: unset a boolean flag → false in record, key deleted from settings', async () => {

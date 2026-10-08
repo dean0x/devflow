@@ -46,7 +46,7 @@ import * as path from 'path';
 
 import { scriptsDir } from '../src/core/assets.js';
 import { DEVFLOW_PLUGINS, getAllAgentNames } from '../src/core/plugins.js';
-import { loadShippedDefaults } from '../src/core/agent-models.js';
+import { loadShippedAgentDefaults } from '../src/core/agent-models.js';
 import { assertTempHome } from './setup/home-isolation.js';
 import {
   ROOT,
@@ -781,11 +781,11 @@ describe('Tracker agent frontmatter', () => {
     expect(split!.inner.split('\n')).toContain('model: sonnet');
   });
 
-  it("loadShippedDefaults() covers the registry and reports tracker as 'sonnet' (EC-77)", async () => {
-    const defaults = await loadShippedDefaults();
+  it("loadShippedAgentDefaults() covers the registry and reports tracker as 'sonnet' (EC-77)", async () => {
+    const defaults = await loadShippedAgentDefaults();
     expect(Object.keys(defaults)).toEqual(expect.arrayContaining([...getAllAgentNames()]));
     expect(
-      defaults[TRACKER_SLUG],
+      defaults[TRACKER_SLUG]?.model,
       "the shipped default must equal the hook's allowlisted TRACKER_MODEL literal",
     ).toBe('sonnet');
   });

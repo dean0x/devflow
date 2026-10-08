@@ -553,6 +553,30 @@ export const FLAG_REGISTRY: readonly ClaudeCodeFlag[] = [
     upstreamDefault: 30,
   },
   {
+    // D-FOREGROUND-RUN: every agent runs builds and tests in the foreground under an explicit
+    // Bash `timeout` whose ceiling is Claude Code's 600000 ms, or this variable when set. A
+    // suite that cannot be split under that ceiling is reported BLOCKED with the remedy
+    // `devflow flags --set bash-max-timeout-ms=<ms>`, so this flag is that remedy.
+    // The env name was confirmed against Claude Code 2.1.294 (docs/reference/claude-code-flags-probe.md):
+    // the binary reads BASH_MAX_TIMEOUT_MS, ignores a non-positive or NaN value, and takes the
+    // larger of it and the default timeout. Neutral by default (undefined → manifest null →
+    // key deleted). min 600000 = upstream default, so the flag only ever raises the ceiling;
+    // max 7200000 (2 h) is the devflow sanity bound.
+    id: 'bash-max-timeout-ms',
+    label: 'Bash max timeout',
+    description: 'Ceiling in milliseconds for a foreground Bash command timeout',
+    hint: 'Raises the Bash timeout ceiling past 600000 ms for long-running suites',
+    blurb: 'Bash timeout ceiling',
+    kind: 'number',
+    target: { type: 'env', key: 'BASH_MAX_TIMEOUT_MS' },
+    recommended: false,
+    defaultValue: undefined,
+    min: 600000,      // upstream default ceiling: lower values would only shrink it
+    max: 7200000,     // devflow sanity bound: 2 hours
+    integer: true,
+    upstreamDefault: 600000,
+  },
+  {
     // Writes as { command: value } per Claude Code spellcheck setting shape.
     id: 'spellcheck',
     label: 'Spellcheck command',

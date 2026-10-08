@@ -19,7 +19,13 @@ Investigate bugs by spawning parallel agents, each pursuing a different hypothes
 
 ## Input
 
-`$ARGUMENTS` contains whatever follows `/debug`:
+What follows `/debug` is bound once, here. Every later step names it `COMMAND_INPUT` and never restates it:
+
+<command-input>
+$ARGUMENTS
+</command-input>
+
+`COMMAND_INPUT` is one of:
 - Bug description: "login fails after session timeout"
 - Issue reference: "#42"
 - Empty: use conversation context
@@ -29,8 +35,6 @@ Investigate bugs by spawning parallel agents, each pursuing a different hypothes
 ### Phase 1: Load Decisions Index (Orchestrator-Local)
 
 **Produces:** DECISIONS_CONTEXT
-
-**Load Companion Skills** — Load via Skill tool: `devflow:test-driven-development`, `devflow:software-design`, `devflow:testing`. If a skill fails to load, continue without it.
 
 {{decisions_load()}}
 
@@ -43,7 +47,7 @@ The orchestrator uses `DECISIONS_CONTEXT` locally when generating hypotheses (Ph
 **Produces:** HYPOTHESES, BUG_CONTEXT
 **Requires:** DECISIONS_CONTEXT
 
-If `$ARGUMENTS` opens with a candidate issue reference, fetch the issue:
+If `COMMAND_INPUT` opens with a candidate issue reference, fetch the issue:
 
 {{issue_ref_grammar()}}
 
@@ -88,7 +92,8 @@ Return a structured report:
 - Status: CONFIRMED / DISPROVED / PARTIAL
 - Evidence FOR: [list with file:line refs]
 - Evidence AGAINST: [list with file:line refs]
-- Key finding: {one-sentence summary}"
+- Key finding: {one-sentence summary}
+Keep the whole report to at most about 1,500 tokens."
 
 Agent(subagent_type="Explore"):
 "Investigate this bug: {bug_description}
@@ -96,7 +101,7 @@ Agent(subagent_type="Explore"):
 Hypothesis: {hypothesis B description}
 Focus area: {specific code area, mechanism, or condition}
 
-[same steps and return format]"
+[same steps and return format; the whole report at most about 1,500 tokens]"
 
 Agent(subagent_type="Explore"):
 "Investigate this bug: {bug_description}
@@ -104,7 +109,7 @@ Agent(subagent_type="Explore"):
 Hypothesis: {hypothesis C description}
 Focus area: {specific code area, mechanism, or condition}
 
-[same steps and return format]"
+[same steps and return format; the whole report at most about 1,500 tokens]"
 
 (Add more investigators if bug complexity warrants 4-5 hypotheses)
 ```
@@ -116,7 +121,7 @@ Focus area: {specific code area, mechanism, or condition}
 
 Evaluate investigation verdicts before synthesis:
 
-- **One CONFIRMED**: Spawn 1-2 additional `Agent(subagent_type="Explore")` agents to validate from different angles (prevent confirmation bias)
+- **One CONFIRMED**: Spawn 1-2 additional `Agent(subagent_type="Explore")` agents to validate from different angles (prevent confirmation bias), each reporting at most about 1,500 tokens
 - **Multiple PARTIAL**: Look for a unifying root cause that explains all partial evidence
 - **All DISPROVED**: Report honestly — "No root cause identified from initial hypotheses." Generate 2-3 second-round hypotheses if conversation context suggests avenues not yet explored. Loop back to Phase 3.
 

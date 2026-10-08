@@ -10,10 +10,12 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { promises as fs } from 'fs';
 import * as path from 'path';
 import * as os from 'os';
+import { stripAnsi } from '../src/hud/colors.js';
 import {
   validateSetArgs,
   applySetMapping,
   buildListRows,
+  buildWorkerListRows,
   formatListOutput,
   selectCatalog,
   mergeTuiRowsIntoMapping,
@@ -246,10 +248,10 @@ describe('buildListRows', () => {
   it('returns a row for each agent name', async () => {
     const agentNames = ['code', 'design', 'git'];
     const mapping: AgentMappingFile = { version: 1, agents: {} };
-    const shippedDefaults: Record<string, string> = {
-      coder: 'sonnet',
-      designer: 'opus',
-      git: 'haiku',
+    const shippedDefaults = {
+      coder: { model: 'sonnet' },
+      designer: { model: 'opus' },
+      git: { model: 'haiku' },
     };
     const rows = await buildListRows({
       agentNames,
@@ -267,7 +269,7 @@ describe('buildListRows', () => {
       agentNames: ['code'],
       mapping: { version: 1, agents: {} },
       installDir,
-      shippedDefaults: { code: 'sonnet' },
+      shippedDefaults: { code: { model: 'sonnet' } },
       proxyEnabled: false,
     });
     expect(rows[0].state).toBe('not-installed');
@@ -279,7 +281,7 @@ describe('buildListRows', () => {
       agentNames: ['code'],
       mapping: { version: 1, agents: {} },
       installDir,
-      shippedDefaults: { code: 'sonnet' },
+      shippedDefaults: { code: { model: 'sonnet' } },
       proxyEnabled: true,
     });
     expect(rows[0].state).toBe('active');
@@ -291,7 +293,7 @@ describe('buildListRows', () => {
       agentNames: ['code'],
       mapping: { version: 1, agents: { code: { model: 'gpt-5.5' } } },
       installDir,
-      shippedDefaults: { code: 'sonnet' },
+      shippedDefaults: { code: { model: 'sonnet' } },
       proxyEnabled: false,
     });
     expect(rows[0].state).toBe('saved-inactive');
@@ -302,7 +304,7 @@ describe('buildListRows', () => {
       agentNames: ['code'],
       mapping: { version: 1, agents: { code: { model: 'opus' } } },
       installDir,
-      shippedDefaults: { code: 'sonnet' },
+      shippedDefaults: { code: { model: 'sonnet' } },
       proxyEnabled: false,
     });
     expect(rows[0].configured).toBe('opus');
@@ -313,7 +315,7 @@ describe('buildListRows', () => {
       agentNames: ['code'],
       mapping: { version: 1, agents: {} },
       installDir,
-      shippedDefaults: { code: 'sonnet' },
+      shippedDefaults: { code: { model: 'sonnet' } },
       proxyEnabled: false,
     });
     expect(rows[0].configured).toBe('default');
@@ -324,7 +326,7 @@ describe('buildListRows', () => {
       agentNames: ['code'],
       mapping: { version: 1, agents: { code: { effort: 'high' } } },
       installDir,
-      shippedDefaults: { code: 'sonnet' },
+      shippedDefaults: { code: { model: 'sonnet' } },
       proxyEnabled: false,
     });
     expect(rows[0].effort).toBe('high');
@@ -335,7 +337,7 @@ describe('buildListRows', () => {
       agentNames: ['code'],
       mapping: { version: 1, agents: {} },
       installDir,
-      shippedDefaults: { code: 'sonnet' },
+      shippedDefaults: { code: { model: 'sonnet' } },
       proxyEnabled: false,
     });
     expect(rows[0].effort).toBe('default');
@@ -346,7 +348,7 @@ describe('buildListRows', () => {
       agentNames: ['code'],
       mapping: { version: 1, agents: {} },
       installDir,
-      shippedDefaults: { code: 'sonnet' },
+      shippedDefaults: { code: { model: 'sonnet' } },
       proxyEnabled: false,
     });
     expect(rows[0].defaultModel).toBe('sonnet');
@@ -480,7 +482,7 @@ describe('AC-P4: buildListRows makes 0 cache reads', () => {
     const discoverSpy = vi.spyOn(modelDiscovery, 'discoverExternalModels');
     const getCachedSpy = vi.spyOn(modelDiscovery, 'getExternalModelsCached');
     try {
-      const shippedDefaults: Record<string, string> = { coder: 'sonnet' };
+      const shippedDefaults = { coder: { model: 'sonnet' } };
       const mapping: AgentMappingFile = { version: 1, agents: {} };
       const catalog: ExternalModelCatalog = { known: false };
       await buildListRows({
@@ -502,7 +504,7 @@ describe('AC-P4: buildListRows makes 0 cache reads', () => {
   it('functional: buildListRows succeeds with no cache directory present (requires no cache read)', async () => {
     // If buildListRows read from a cache directory, it would fail (or skip) when
     // the directory is absent. It should succeed regardless — catalog is passed in.
-    const shippedDefaults: Record<string, string> = { coder: 'sonnet' };
+    const shippedDefaults = { coder: { model: 'sonnet' } };
     const mapping: AgentMappingFile = { version: 1, agents: {} };
     const catalog: ExternalModelCatalog = { known: false };
 
@@ -600,10 +602,12 @@ describe('T12: mergeTuiRowsIntoMapping', () => {
       originalModel: overrides.originalModel ?? 'default',
       configuredEffort: (overrides.configuredEffort ?? 'default') as 'default',
       originalEffort: (overrides.originalEffort ?? 'default') as 'default',
+      shippedEffort: undefined,
       dormantModel: null,
       offCyclePin: null,
       installed: true,
       inRegistry: true,
+      worker: false,
     };
   }
 
@@ -677,10 +681,12 @@ describe('T12: mergeTuiRowsIntoMapping', () => {
       originalModel: 'default',     // proxy-off display fallback at init
       configuredEffort: 'default',
       originalEffort: 'default',
+      shippedEffort: undefined,
       dormantModel: 'gpt-5.5',     // the saved GPT model
       offCyclePin: null,
       installed: true,
       inRegistry: true,
+      worker: false,
     };
     const originalEntry = mapping.agents['code'];
     const result = mergeTuiRowsIntoMapping([row], mapping);
@@ -721,8 +727,8 @@ describe('AC-P3-LIST: --list AGENT cell is a lowercase identifier', () => {
     expect(agentNames.length).toBeGreaterThan(0);
 
     const mapping: AgentMappingFile = { version: 1, agents: {} };
-    const shippedDefaults: Record<string, string> = Object.fromEntries(
-      agentNames.map(n => [n, 'sonnet']),
+    const shippedDefaults = Object.fromEntries(
+      agentNames.map(n => [n, { model: 'sonnet' }]),
     );
     const rows = await buildListRows({
       agentNames,
@@ -749,8 +755,8 @@ describe('AC-P3-LIST: --list AGENT cell is a lowercase identifier', () => {
     expect(agentNames.length).toBeGreaterThan(0);
 
     const mapping: AgentMappingFile = { version: 1, agents: {} };
-    const shippedDefaults: Record<string, string> = Object.fromEntries(
-      agentNames.map(n => [n, 'sonnet']),
+    const shippedDefaults = Object.fromEntries(
+      agentNames.map(n => [n, { model: 'sonnet' }]),
     );
     const rows = await buildListRows({
       agentNames,
@@ -797,5 +803,341 @@ describe('formatListOutput (AC-B11): saved-inactive renders (proxy off) suffix',
     const output = formatListOutput([makeRow('active')], true);
     expect(output).not.toContain('(proxy off)');
     expect(output).toContain('active');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// D-SHIPPED-EFFORT: the `inherit` effort sentinel at the CLI boundary
+// ---------------------------------------------------------------------------
+
+describe('validateSetArgs — effort inherit', () => {
+  it('accepts --effort inherit for an agent', () => {
+    expect(validateSetArgs({ effort: 'inherit' }).ok).toBe(true);
+    expect(validateSetArgs({ effort: 'inherit' }, { known: false }, 'code').ok).toBe(true);
+  });
+
+  it('lists inherit among the valid efforts in the unknown-effort error', () => {
+    const result = validateSetArgs({ effort: 'turbo' });
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error).toContain('inherit');
+  });
+
+  it('does not make inherit a valid MODEL (model-side inherit is a separate decision)', () => {
+    // Cache miss: the charset gate admits it, as it always has; with a known catalog
+    // it is rejected because CLAUDE_MODEL_ALIASES does not list it. Neither is changed here.
+    const catalog: ExternalModelCatalog = {
+      known: true,
+      models: [],
+      aliasToId: new Map(),
+      selectableNames: [],
+      source: 'cache',
+    };
+    expect(validateSetArgs({ model: 'inherit' }, catalog, 'code').ok).toBe(false);
+  });
+});
+
+describe('devflow agents --effort help', () => {
+  it('lists the levels, default and inherit', async () => {
+    const { agentsCommand } = await import('../src/cli/commands/agents.js');
+    const help = stripAnsi(agentsCommand.helpInformation());
+    for (const word of [...EFFORT_LEVELS, 'default', 'inherit']) {
+      expect(help, word).toContain(word);
+    }
+  });
+});
+
+describe('applySetMapping — effort inherit', () => {
+  it('stores inherit as the effort', () => {
+    const result = applySetMapping({ version: 1, agents: {} }, 'code', { effort: 'inherit' });
+    expect(result.agents['code']?.effort).toBe('inherit');
+  });
+
+  it('"default" removes a stored inherit so the shipped effort applies again', () => {
+    const mapping: AgentMappingFile = { version: 1, agents: { code: { effort: 'inherit' } } };
+    const result = applySetMapping(mapping, 'code', { effort: 'default' });
+    expect(result.agents['code']?.effort).toBeUndefined();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// D-WORKER-AGENTS: --set memory
+// ---------------------------------------------------------------------------
+
+describe('validateSetArgs — worker agents (memory)', () => {
+  const MEMORY = 'memory';
+
+  it('accepts a Claude alias, a full claude- identifier and "default" for the model', () => {
+    for (const model of ['sonnet', 'haiku', 'default', 'claude-sonnet-4-6']) {
+      expect(validateSetArgs({ model }, { known: false }, MEMORY).ok, model).toBe(true);
+    }
+  });
+
+  it('accepts a level and "default" for the effort', () => {
+    for (const effort of ['default', ...EFFORT_LEVELS]) {
+      expect(validateSetArgs({ effort }, { known: false }, MEMORY).ok, effort).toBe(true);
+    }
+  });
+
+  it('rejects an external model with a worker-specific error', () => {
+    const result = validateSetArgs({ model: 'gpt-5' }, { known: false }, MEMORY);
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error).toContain('gpt-5');
+  });
+
+  it('rejects an external model even when the catalog lists it (no catalog lookup)', () => {
+    const catalog: ExternalModelCatalog = {
+      known: true,
+      models: [{ id: 'gpt-5.6-sol', aliases: ['sol'] }],
+      aliasToId: new Map([['sol', 'gpt-5.6-sol'], ['gpt-5.6-sol', 'gpt-5.6-sol']]),
+      selectableNames: ['sol', 'gpt-5.6-sol'],
+      source: 'cache',
+    };
+    expect(validateSetArgs({ model: 'sol' }, catalog, MEMORY).ok).toBe(false);
+    expect(validateSetArgs({ model: 'gpt-5.6-sol' }, catalog, MEMORY).ok).toBe(false);
+  });
+
+  it('rejects inherit as a worker model and as a worker effort', () => {
+    expect(validateSetArgs({ model: 'inherit' }, { known: false }, MEMORY).ok).toBe(false);
+    expect(validateSetArgs({ effort: 'inherit' }, { known: false }, MEMORY).ok).toBe(false);
+  });
+
+  it('rejects a hostile model string before the worker domain', () => {
+    expect(validateSetArgs({ model: 'claude-x\ntools: [bash]' }, { known: false }, MEMORY).ok).toBe(false);
+  });
+
+  it('rejects the whole call when either value is out of domain', () => {
+    expect(validateSetArgs({ model: 'sonnet', effort: 'inherit' }, { known: false }, MEMORY).ok).toBe(false);
+  });
+
+  it('still requires at least one of --model or --effort', () => {
+    expect(validateSetArgs({}, { known: false }, MEMORY).ok).toBe(false);
+  });
+
+  it('leaves the ordinary-agent rules alone: an external model is fine for code', () => {
+    expect(validateSetArgs({ model: 'gpt-5' }, { known: false }, 'code').ok).toBe(true);
+  });
+});
+
+describe('applySetMapping — a worker entry', () => {
+  it('persists agents.memory as {model, effort}', () => {
+    const result = applySetMapping({ version: 1, agents: {} }, 'memory', { model: 'sonnet', effort: 'medium' });
+    expect(result.agents['memory']).toEqual({ model: 'sonnet', effort: 'medium' });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Shared EFFORT display and the worker row (--list)
+// ---------------------------------------------------------------------------
+
+describe('buildListRows — shipped effort', () => {
+  let installDir: string;
+
+  beforeEach(async () => {
+    installDir = await fs.mkdtemp(path.join(os.tmpdir(), 'devflow-list-effort-'));
+  });
+
+  afterEach(async () => {
+    await fs.rm(installDir, { recursive: true, force: true });
+  });
+
+  it('carries the shipped effort and keeps the configured effort as "default"', async () => {
+    const rows = await buildListRows({
+      agentNames: ['code'],
+      mapping: { version: 1, agents: {} },
+      installDir,
+      shippedDefaults: { code: { model: 'sonnet', effort: 'medium' } },
+      proxyEnabled: false,
+    });
+    expect(rows[0].shippedEffort).toBe('medium');
+    expect(rows[0].effort).toBe('default');
+  });
+
+  it('an agent that ships no effort carries none', async () => {
+    const rows = await buildListRows({
+      agentNames: ['code'],
+      mapping: { version: 1, agents: {} },
+      installDir,
+      shippedDefaults: { code: { model: 'sonnet' } },
+      proxyEnabled: false,
+    });
+    expect(rows[0].shippedEffort).toBeUndefined();
+  });
+
+  it('shows a stored inherit as the effort', async () => {
+    const rows = await buildListRows({
+      agentNames: ['code'],
+      mapping: { version: 1, agents: { code: { effort: 'inherit' } } },
+      installDir,
+      shippedDefaults: { code: { model: 'sonnet', effort: 'medium' } },
+      proxyEnabled: false,
+    });
+    expect(rows[0].effort).toBe('inherit');
+  });
+});
+
+describe('buildWorkerListRows', () => {
+  it('yields the memory row with the shipped worker defaults when no entry exists', () => {
+    expect(buildWorkerListRows({ version: 1, agents: {} })).toEqual([
+      {
+        name: 'memory',
+        defaultModel: 'haiku',
+        configured: 'default',
+        effort: 'default',
+        shippedEffort: 'high',
+        state: 'worker',
+      },
+    ]);
+  });
+
+  it('shows the configured model and effort', () => {
+    const [row] = buildWorkerListRows({ version: 1, agents: { memory: { model: 'sonnet', effort: 'medium' } } });
+    expect(row.configured).toBe('sonnet');
+    expect(row.effort).toBe('medium');
+    expect(row.state).toBe('worker');
+  });
+
+  it('never consults the install directory: the worker row cannot be dormant or not installed', () => {
+    const [row] = buildWorkerListRows({ version: 1, agents: { memory: { model: 'sonnet' } } });
+    expect(row.state).toBe('worker');
+  });
+});
+
+describe('formatListOutput — EFFORT cell and the worker row', () => {
+  const strip = (s: string): string => stripAnsi(s);
+  const agentRow = (overrides: Partial<ListRow> = {}): ListRow => ({
+    name: 'code',
+    defaultModel: 'sonnet',
+    configured: 'default',
+    effort: 'default',
+    state: 'active',
+    ...overrides,
+  });
+  const workerRow = (overrides: Partial<ListRow> = {}): ListRow => ({
+    name: 'memory',
+    defaultModel: 'haiku',
+    configured: 'default',
+    effort: 'default',
+    shippedEffort: 'high',
+    state: 'worker',
+    ...overrides,
+  });
+  const lineFor = (output: string, name: string): string => {
+    const line = strip(output).split('\n').find(l => l.startsWith(name));
+    if (line === undefined) throw new Error(`no ${name} row in:\n${output}`);
+    return line;
+  };
+
+  it('renders default (medium) in full when the shipped source carries an effort', () => {
+    const line = lineFor(formatListOutput([agentRow({ shippedEffort: 'medium' })], false), 'code');
+    expect(line).toMatch(/default \(medium\)\s+active/);
+  });
+
+  it('renders plain "default" when the shipped source carries no effort', () => {
+    const line = lineFor(formatListOutput([agentRow()], false), 'code');
+    expect(line).not.toContain('default (');
+  });
+
+  it('a configured level wins over the shipped effort', () => {
+    const line = lineFor(formatListOutput([agentRow({ effort: 'high', shippedEffort: 'medium' })], false), 'code');
+    expect(line).toContain('high');
+    expect(line).not.toContain('default (medium)');
+  });
+
+  it('renders a stored inherit', () => {
+    const line = lineFor(formatListOutput([agentRow({ effort: 'inherit', shippedEffort: 'medium' })], false), 'code');
+    expect(line).toContain('inherit');
+    expect(line).not.toContain('default (medium)');
+  });
+
+  it('truncates no EFFORT cell for any level', () => {
+    for (const level of EFFORT_LEVELS) {
+      const line = lineFor(formatListOutput([agentRow({ shippedEffort: level })], false), 'code');
+      expect(line, level).toMatch(new RegExp(`default \\(${level}\\)\\s+active`));
+      expect(line, level).toContain(`default (${level})`);
+    }
+  });
+
+  it('renders the worker row: DEFAULT haiku, EFFORT default (high), STATE worker', () => {
+    const line = lineFor(formatListOutput([agentRow(), workerRow()], false), 'memory');
+    expect(line).toMatch(/^memory\s+haiku\s+default\s+default \(high\)\s+worker$/);
+  });
+
+  it('the footer counts agent rows only: totals are the same with and without a configured memory entry', () => {
+    const bare = strip(formatListOutput([agentRow(), workerRow()], false));
+    const configured = strip(formatListOutput(
+      [agentRow(), workerRow({ configured: 'sonnet', effort: 'medium' })],
+      false,
+    ));
+    const footerOf = (out: string): string => out.split('\n').filter(l => l.includes('installed')).at(-1) ?? '';
+    expect(footerOf(bare)).toContain('1/1 installed · 0 configured');
+    expect(footerOf(configured)).toBe(footerOf(bare));
+  });
+
+  it('an agent row configured to a shipped-effort-bearing default still counts as unconfigured', () => {
+    // The display string "default (medium)" is not a configuration.
+    const out = strip(formatListOutput([agentRow({ shippedEffort: 'medium' })], false));
+    expect(out).toContain('1/1 installed · 0 configured');
+  });
+
+  it('an inherit effort counts as configured', () => {
+    const out = strip(formatListOutput([agentRow({ effort: 'inherit' })], false));
+    expect(out).toContain('1/1 installed · 1 configured');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// TUI save: inherit and the worker row
+// ---------------------------------------------------------------------------
+
+describe('mergeTuiRowsIntoMapping — inherit and the worker row', () => {
+  const row = (overrides: Partial<import('../src/cli/agents-view/state.js').AgentRow>): import('../src/cli/agents-view/state.js').AgentRow => ({
+    name: 'code',
+    shippedDefault: 'sonnet',
+    shippedEffort: undefined,
+    configuredModel: 'default',
+    originalModel: 'default',
+    configuredEffort: 'default',
+    originalEffort: 'default',
+    dormantModel: null,
+    offCyclePin: null,
+    installed: true,
+    inRegistry: true,
+    worker: false,
+    ...overrides,
+  });
+
+  it('a dirty effort row persists inherit', () => {
+    const result = mergeTuiRowsIntoMapping(
+      [row({ configuredEffort: 'inherit', originalEffort: 'default' })],
+      { version: 1, agents: {} },
+    );
+    expect(result.agents['code']).toEqual({ effort: 'inherit' });
+  });
+
+  it('cycling an inherit row back to default removes the key', () => {
+    const result = mergeTuiRowsIntoMapping(
+      [row({ configuredEffort: 'default', originalEffort: 'inherit' })],
+      { version: 1, agents: { code: { effort: 'inherit' } } },
+    );
+    expect(result.agents['code']).toBeUndefined();
+  });
+
+  it('a dirty worker row writes agents.memory and leaves agent entries alone', () => {
+    const result = mergeTuiRowsIntoMapping(
+      [row({ name: 'memory', worker: true, shippedDefault: 'haiku', shippedEffort: 'high', installed: false, inRegistry: false,
+             configuredModel: 'sonnet', originalModel: 'default', configuredEffort: 'medium', originalEffort: 'default' })],
+      { version: 1, agents: { code: { model: 'opus' } } },
+    );
+    expect(result.agents['memory']).toEqual({ model: 'sonnet', effort: 'medium' });
+    expect(result.agents['code']).toEqual({ model: 'opus' });
+  });
+
+  it('an untouched worker row writes nothing', () => {
+    const mapping: AgentMappingFile = { version: 1, agents: { memory: { model: 'sonnet' } } };
+    const result = mergeTuiRowsIntoMapping(
+      [row({ name: 'memory', worker: true, configuredModel: 'sonnet', originalModel: 'sonnet' })],
+      mapping,
+    );
+    expect(result.agents['memory']).toEqual({ model: 'sonnet' });
   });
 });

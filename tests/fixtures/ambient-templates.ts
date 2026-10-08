@@ -19,8 +19,8 @@
 export const HANDOFF_TEMPLATE =
   "The user's prompt is a plan handoff (it begins with `Implement the following plan:`). " +
   "In one short sentence, tell the user you're invoking `devflow:implement`. " +
-  'Then immediately invoke it with the Skill tool, passing the full plan ' +
-  '(everything after the handoff prefix) as the skill input so it can be executed. ' +
+  'Then immediately invoke it with the Skill tool and no arguments: ' +
+  'the plan is already in this conversation, so the skill needs no input. ' +
   'Do not pause to ask whether to proceed.';
 
 /** Fixed string emitted by the preamble hook for a normal (non-handoff, non-slash) prompt. */

@@ -145,6 +145,8 @@ Return the verdict ledger grouped by disposition:
 - DUPLICATE: {n}
 ```
 
+Report cap: final message at most about 1,500 tokens; longer material goes to a `mktemp` file (via Bash or Write) and the message gives its path. Exempt, inline in full: the whole ledger, since `/resolve` checks that every issue id appears in it.
+
 ## Boundaries
 
 **You are TRIAGE ONLY — read and judge, never write:**

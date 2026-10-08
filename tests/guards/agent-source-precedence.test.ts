@@ -4,7 +4,7 @@
  * The dist-first agent-resolution policy has exactly one owner: `agentSourceDirs()`
  * in src/core/assets.ts, which returns the source directories MOST-PREFERRED FIRST.
  * Three consumers read that order — the installer's first-hit-wins resolve,
- * `loadShippedDefaults`'s first-wins merge, and the test harness's
+ * `loadShippedAgentDefaults`'s first-wins merge, and the test harness's
  * `resolveAgentSource`. This guard pins that they AGREE: fed the same directory
  * list, every registry agent resolves out of the same tree in all of them.
  *
@@ -26,9 +26,9 @@ import * as path from 'path';
 
 import { installViaFileCopy } from '../../src/targets/claude-code/installer.js';
 import { convergeTrackerArtifacts } from '../../src/targets/claude-code/tracker-install.js';
-import { loadShippedDefaults } from '../../src/core/agent-models.js';
+import { loadShippedAgentDefaults } from '../../src/core/agent-models.js';
 import { agentSourceDirs, agentsDir, compiledAgentsDir, type AgentSourceDirs } from '../../src/core/assets.js';
-import { readFrontmatterModel } from '../../src/core/agent-frontmatter.js';
+import { readFrontmatterEffort, readFrontmatterModel } from '../../src/core/agent-frontmatter.js';
 import { buildAssetMaps, getAllAgentNames } from '../../src/core/plugins.js';
 import type { PluginDefinition } from '../../src/core/plugins.js';
 import { resolveAgentSource, splitFrontmatter } from '../helpers.js';
@@ -114,6 +114,15 @@ function modelOf(content: string): string {
   return result.value;
 }
 
+/** Effort recorded in a piece of agent content; '' when the file ships none. */
+function effortOf(content: string): string {
+  const result = readFrontmatterEffort(content);
+  if (!result.ok) {
+    throw new Error('agent content carries no frontmatter — fixture is malformed');
+  }
+  return result.value;
+}
+
 describe('agentSourceDirs() owns the dist-first policy', () => {
   it('lists the compiled directory before the source directory', () => {
     expect(agentSourceDirs()).toEqual([compiledAgentsDir(), agentsDir()]);
@@ -133,7 +142,7 @@ describe('agentSourceDirs() owns the dist-first policy', () => {
   });
 });
 
-describe('installer and loadShippedDefaults agree on every registry agent', () => {
+describe('installer and loadShippedAgentDefaults agree on every registry agent', () => {
   let tmpRoot: string;
   let distDir: string;
   let srcDir: string;
@@ -177,7 +186,7 @@ describe('installer and loadShippedDefaults agree on every registry agent', () =
   it('both consumers pick the same tree for every agent, given the same list', async () => {
     const dirs: AgentSourceDirs = [distDir, srcDir];
     const installed = await installAll(tmpRoot, dirs);
-    const defaults = await loadShippedDefaults(dirs);
+    const defaults = await loadShippedAgentDefaults(dirs);
 
     for (const name of ALL_AGENTS) {
       const expected = COMPILED_AGENTS.includes(name) ? DIST_MODEL : SRC_MODEL;
@@ -186,12 +195,12 @@ describe('installer and loadShippedDefaults agree on every registry agent', () =
         `installer resolved agent '${name}' from the wrong tree`,
       ).toBe(expected);
       expect(
-        defaults[name],
-        `loadShippedDefaults resolved agent '${name}' from the wrong tree`,
+        defaults[name]?.model,
+        `loadShippedAgentDefaults resolved agent '${name}' from the wrong tree`,
       ).toBe(expected);
       expect(
-        defaults[name],
-        `installer and loadShippedDefaults disagree on agent '${name}'`,
+        defaults[name]?.model,
+        `installer and loadShippedAgentDefaults disagree on agent '${name}'`,
       ).toBe(modelOf(installed.get(name)!));
     }
   });
@@ -200,11 +209,11 @@ describe('installer and loadShippedDefaults agree on every registry agent', () =
     // If the assertion above were order-blind it would also pass here.
     const reversed: AgentSourceDirs = [srcDir, distDir];
     const installed = await installAll(tmpRoot, reversed);
-    const defaults = await loadShippedDefaults(reversed);
+    const defaults = await loadShippedAgentDefaults(reversed);
 
     for (const name of ALL_AGENTS) {
       expect(modelOf(installed.get(name)!), `installer ignored the reversed order for '${name}'`).toBe(SRC_MODEL);
-      expect(defaults[name], `loadShippedDefaults ignored the reversed order for '${name}'`).toBe(SRC_MODEL);
+      expect(defaults[name]?.model, `loadShippedAgentDefaults ignored the reversed order for '${name}'`).toBe(SRC_MODEL);
     }
 
     // The reversal must actually change the answer for the compiled population,
@@ -242,13 +251,18 @@ describe('the real tree resolves identically in all three consumers', () => {
     expect(origins, 'no agent resolves from the source tree').toContain('src');
   });
 
-  it('loadShippedDefaults reports the model of the file the resolver picked', async () => {
-    const defaults = await loadShippedDefaults();
+  it('loadShippedAgentDefaults reports the model and effort of the file the resolver picked', async () => {
+    const defaults = await loadShippedAgentDefaults();
     for (const name of ALL_AGENTS) {
+      const source = resolveAgentSource(name).content;
       expect(
-        defaults[name],
-        `loadShippedDefaults read agent '${name}' from a different file than the resolver`,
-      ).toBe(modelOf(resolveAgentSource(name).content));
+        defaults[name]?.model,
+        `loadShippedAgentDefaults read agent '${name}' from a different file than the resolver`,
+      ).toBe(modelOf(source));
+      expect(
+        defaults[name]?.effort ?? '',
+        `loadShippedAgentDefaults read the effort of agent '${name}' from a different file than its model`,
+      ).toBe(effortOf(source));
     }
   });
 });

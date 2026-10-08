@@ -79,7 +79,8 @@ You receive from orchestrator:
 
 4. **Write tests**: Add tests for new functionality. Cover happy path, error cases, and edge cases. Follow existing test patterns.
 
-5. **Run tests**: Execute the test suite. Fix any failures. All tests must pass before proceeding.
+5. **Run tests**: Fix any failures; the tests you run must pass before you proceed.
+   **Gate ownership:** Run the targeted tests for your change in its TDD cycle, plus one affected-tests run after your last edit. In a fix mode, compile and run the named failing or regression tests. Never the full suite. Batch fixes: one build check per batch, not per edit. Only Validate runs the full suite.
 
 6. **Commit and push**: Create atomic commits with clear messages. Reference TASK_ID. Push to remote UNLESS `PUSH: false` (commit only; orchestrator owns push/CI gate).
 
@@ -125,24 +126,18 @@ You receive from orchestrator:
 
 8. **Generate handoff** (if HANDOFF_REQUIRED=true): Include implementation summary for next Code agent (see Output section).
 
-## Long-running commands (self-verifying builds/tests that may run >120s)
+## Running commands
 
-You run builds and tests to verify your own work — including **self-verifying that each fix compiles** when no separate Validate agent runs inside the review pass. A plain `Bash` call defaults to a 120s timeout, and inside a dynamic Workflow a sub-agent that emits no output for 180s is KILLED ("agent stalled"). For any build/test that may run silent longer than ~120s (cold `cargo build`/`cargo test`, large `tsc`, `gradle`, `go build ./...`), do NOT run it as one silent foreground command. Instead:
+Run builds, typechecks, lints and tests in the foreground, each with an explicit Bash `timeout` above its expected run time. The ceiling is 600000 ms, or `BASH_MAX_TIMEOUT_MS` when set (`echo ${BASH_MAX_TIMEOUT_MS:-600000}`).
 
-0. **Pre-load Monitor** before launching any background task: `ToolSearch(query="select:Monitor")`.
-1. Run it in the BACKGROUND with the Bash tool (`run_in_background: true`), capturing output + exit code under a unique `<slug>` reused in steps 1–3, e.g. `BASE=/tmp/df-build-<slug>`:
-   `<command> > <BASE>.log 2>&1; echo "EXIT=$?" > <BASE>.done`
-   Build commands are **NEVER** wrapped in `sh -c`, `bash -c`, or inline interpreters (`python3 -c`, `node -e`) — permission systems deny wrapper-invoked commands that would be allowed directly.
-2. Arm **ONE** Monitor: set `persistent: false`, `timeout_ms` above the expected run time (e.g. 600000), and
-   `command: until [ -f <BASE>.done ]; do echo building; sleep 25; done; echo BUILD_DONE; cat <BASE>.done`
-   The 25s heartbeat (≪ 180s) keeps you alive past the watchdog.
-   - **Exit-code honesty:** the trailing `echo` always exits 0 — the background task's own exit status is meaningless. ALWAYS read the `EXIT=` value written inside `<BASE>.done`.
-   - **Bounded polling:** arm ONE Monitor then stop. On timeout, re-arm at most 2× (never more than 3 total Monitor calls per build). After 3 Monitor calls with no finish: record state and escalate — never babysit.
-3. When the monitor reports `BUILD_DONE`: the command PASSED iff `<BASE>.done` contains `EXIT=0`. Read `<BASE>.log`, fix any failures, and only then proceed.
-
-**One build gate per phase:** batch related fixes, validate once. Run ONE light check over your whole fix batch — never several invocations per small fix. Do NOT validate after every individual mutation.
-
-For a foreground command that exceeds the 120s default but stays under 180s, pass an explicit higher `timeout` to the Bash tool (up to 600000ms). Prefer package-scoped commands (`cargo build -p <crate>`) during the engine; the full-workspace regression is the human's job after the wave.
+- Capture, then tail, in one Bash call (shell state does not persist): `LOG=$(mktemp); echo "LOG=$LOG"; <command> >"$LOG" 2>&1; rc=$?; tail -n 40 "$LOG"; echo "EXIT=$rc"`. The printed `EXIT=` value is the result; never decide one from a grep count.
+- Never background a command and wait on it, and never poll across turns: no `sleep` or `true` turns, no sentinel-file checks, no Monitor.
+- Prefer the scoped command for the change (a package, a path or a test file); for the whole set, one workspace-level command over a per-package loop.
+- A run that exceeds its timeout is BLOCKED: report its duration and log path. Do not wait on it, poll it or re-run it.
+- A run expected to exceed the ceiling is split into parts, each under about 90% of it, run in sequence. If it cannot be split, report BLOCKED with the remedy `devflow flags --set bash-max-timeout-ms=<ms>`.
+- Never re-run a command when nothing it reads has changed.
+- Never wrap a build or test command in `sh -c`, `bash -c`, `python3 -c` or `node -e`: permission rules deny wrapped commands they would allow directly.
+- The same rules hold inside a dynamic Workflow sub-agent.
 
 ## Mode: issue-fix
 
@@ -264,6 +259,8 @@ Return structured completion status:
 - {Functions to call}
 - {Types to import}
 ```
+
+Report cap: final message at most about 1,500 tokens; longer material goes to a `mktemp` file (via Bash or Write) and the message gives its path. Exempt, inline in full: the `## Verification` block; the `status`, `commitShas` and `unresolved` return when a Workflow spawn pins it.
 
 ## Boundaries
 

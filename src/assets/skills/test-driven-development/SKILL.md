@@ -34,6 +34,8 @@ Enforce the RED-GREEN-REFACTOR cycle for all implementation work. Tests define t
 
 ## The Cycle
 
+**Affected tests**: the tests that cover the changed files, selected by the runner's related-test option (Jest's `--findRelatedTests`, Vitest's `related`) or, where the runner has none, the package or path that owns them. Every "run the tests" step below means the affected tests; the full suite belongs to Validate.
+
 ### Step 1: RED — Write a Failing Test
 
 Write a test that describes the behavior you want. Run it. Watch it fail. The failure message IS your specification.
@@ -56,19 +58,19 @@ Don't write code "you'll need later." Write code the test demands NOW.
 Don't optimize. Don't refactor. Don't clean up. Just pass the test.
 ```
 
-**Checkpoint:** All tests pass. If any test fails, fix it before moving on.
+**Checkpoint:** All affected tests pass. If any test fails, fix it before moving on.
 
 ### Step 3: REFACTOR — Improve Without Changing Behavior
 
 Now clean up. Extract helpers, rename variables, simplify logic. Tests stay green throughout.
 
 ```
-Run tests after every refactoring step.
+Run the affected tests after every refactoring step.
 If a test breaks during refactor, undo immediately — you changed behavior.
 Apply DRY, extract patterns, improve readability.
 ```
 
-**Checkpoint:** All tests still pass. Code is clean. Repeat from Step 1 for next behavior.
+**Checkpoint:** All affected tests still pass. Code is clean. Repeat from Step 1 for next behavior.
 
 ---
 
@@ -79,7 +81,7 @@ After each RED-GREEN-REFACTOR cycle, ALL must hold:
 - [ ] Test existed BEFORE production code (not concurrent, not after)
 - [ ] Test failed for the RIGHT reason (expected behavior absent, not syntax/import error)
 - [ ] Production code is minimal — no speculative additions beyond what the test demands
-- [ ] ALL tests pass, not just the new one
+- [ ] ALL affected tests pass, not just the new one
 - [ ] Refactoring happened in Step 3 (or code is already clean — state explicitly)
 - [ ] No untested production code remains
 

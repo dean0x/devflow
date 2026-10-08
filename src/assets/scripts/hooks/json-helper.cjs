@@ -11,6 +11,7 @@
 //
 // Operations:
 //   get-field <field> [default]           Read field from stdin JSON
+//   get-string-field <field>              Read field from stdin JSON only when it is a string
 //   extract-cwd-field <field>             Extract cwd + arbitrary field, SOH-byte delimited
 //   session-output <context>              Build SessionStart output envelope
 //   prompt-output <context>               Build UserPromptSubmit output envelope
@@ -264,6 +265,18 @@ try {
       const def = args[1] || '';
       const val = getNestedField(input, field);
       console.log(val != null ? String(val) : def);
+      break;
+    }
+
+    case 'get-string-field': {
+      // The typed read: get-field stringifies, so the number 42 and the string
+      // "42" are the same to it. Here a JSON string prints byte-exact (no
+      // trailing newline added, so the caller sees the value's own) and every
+      // other type, an absent field, or a string holding a NUL (no shell
+      // variable can carry one) prints nothing.
+      const input = JSON.parse(readStdin());
+      const val = getNestedField(input, args[0]);
+      if (typeof val === 'string' && !val.includes('\0')) process.stdout.write(val);
       break;
     }
 

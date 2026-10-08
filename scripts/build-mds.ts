@@ -80,7 +80,7 @@
  * deleted (pruneOrphanAgents), and the same sweep runs recursively over
  * dist/skills/git/references/ (pruneOrphanReferences). dist/agents/ is gitignored
  * and outranks src/assets/agents/ in both the installer's resolve and
- * loadShippedDefaults's merge, so a file left there is installed in preference to
+ * loadShippedAgentDefaults's merge, so a file left there is installed in preference to
  * the audited source on every `devflow init`; the references tree is gitignored
  * too and is overlaid wholesale onto the installed skill, so a file left there
  * installs as if the build still produced it. The parity check in build.test.ts
@@ -844,7 +844,7 @@ async function compileHost(host: HostEntry, plan: HostPlan): Promise<CompileOutc
  * Delete every `.md` in dist/agents/ that no host in this build emits.
  *
  * dist/agents/ is gitignored and outranks src/assets/agents/ in both the
- * installer's resolve and loadShippedDefaults's merge, so a file left behind
+ * installer's resolve and loadShippedAgentDefaults's merge, so a file left behind
  * there — a renamed host's old output, a hand-dropped one — is installed in
  * preference to the audited source on every `devflow init`, with nothing in the
  * install path to notice. The build owns the directory, so it also owns removing

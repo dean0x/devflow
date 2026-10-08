@@ -83,6 +83,8 @@ Follow the `devflow:apply-decisions` skill to scan the `DECISIONS_CONTEXT` index
 **Overall Assessment**: {BLOCKING | SHOULD-ADDRESS | INFORMATIONAL}
 ```
 
+Report cap: final message at most about 1,500 tokens; longer material goes to a `mktemp` file (via Bash or Write) and the message gives its path. Exempt, inline in full: the `## Findings` list.
+
 ## Confidence Scale
 
 | Range | Label | Meaning |

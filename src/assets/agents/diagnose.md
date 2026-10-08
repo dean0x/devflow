@@ -199,6 +199,8 @@ Report format for `{OUTPUT_PATH}`:
 **Recommendation**: {BLOCK | CHANGES_REQUESTED | APPROVED_WITH_CONDITIONS | APPROVED}
 ```
 
+Report cap: final message at most about 1,500 tokens; the report is the file at `{OUTPUT_PATH}`, other longer material goes to a `mktemp` file (via Bash or Write), and the message gives its path and counts. Exempt: none.
+
 ## Principles
 
 1. **Bugs only** — Not style, not architecture, not performance (unless causing incorrect behavior)

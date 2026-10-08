@@ -1515,14 +1515,15 @@ describe('session-start-context: tracker setup directive (Section 3)', () => {
   // ---------------------------------------------------------------------------
 
   it("the hook's model literal equals the Tracker agent's shipped default", async () => {
-    const { loadShippedDefaults } = await import('../src/core/agent-models.js');
-    const defaults = await loadShippedDefaults();
-    expect(defaults.tracker, 'no shipped default for the tracker agent — run `npm run build`')
+    const { loadShippedAgentDefaults } = await import('../src/core/agent-models.js');
+    const defaults = await loadShippedAgentDefaults();
+    const trackerModel = defaults.tracker?.model;
+    expect(trackerModel, 'no shipped default for the tracker agent — run `npm run build`')
       .toBeDefined();
-    expect(HOOK_SOURCE).toContain(`TRACKER_MODEL="${defaults.tracker}"`);
+    expect(HOOK_SOURCE).toContain(`TRACKER_MODEL="${trackerModel}"`);
 
     seedTracker(homeDir, { provider: 'jira' });
-    expect(contextOf(run().stdout)).toContain(`model="${defaults.tracker}"`);
+    expect(contextOf(run().stdout)).toContain(`model="${trackerModel}"`);
   });
 
   it('the model tier is a constant, never read from a config file', () => {

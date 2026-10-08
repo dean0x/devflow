@@ -294,7 +294,7 @@ npx devflow-kit flags --unset <ids>      # Reset flag(s) to neutral, comma-separ
 
 `--enable` and `--disable` accept boolean flags only. Non-boolean flags (enum, number, string) use `--set id=value`. Passing a non-boolean id to `--enable`/`--disable` prints an error and redirects to `--set`.
 
-All 29 flags by kind and devflow default:
+All 30 flags by kind and devflow default:
 
 | Flag ID | Kind | Target | Devflow Default |
 |---------|------|--------|-----------------|
@@ -325,12 +325,15 @@ All 29 flags by kind and devflow default:
 | `workflow-size-guideline` | enum | setting `workflowSizeGuideline` | unset (`small\|medium\|large\|unrestricted`) |
 | `default-model` | string | env `ANTHROPIC_DEFAULT_MODEL` | unset |
 | `goal-checkin-minutes` | number | env `CLAUDE_CODE_GOAL_CHECKIN_MINUTES` | unset (upstream: 30 min) |
+| `bash-max-timeout-ms` | number | env `BASH_MAX_TIMEOUT_MS` | unset (upstream: 600000 ms)³ |
 | `spellcheck` | string | setting `spellcheck` | unset |
 | `view-mode` | enum | setting `viewMode` | `default` (key omitted when default) |
 
 ¹ Boolean flags targeting an env var write the flag's configured string value when enabled (e.g., `claude-sonnet-4-6` for `pin-sonnet-4-6`), not `1` or `true`. The env var is deleted when the flag is disabled or unset.
 
 ² `suppress-attribution` writes the object `{"commit":"","pr":""}` to the `attribution` key in `settings.json` when enabled — not `true`. Disabling or uninstalling removes the `attribution` key only when its current value exactly matches that shape; a custom attribution object is preserved. Enabling always replaces any existing `attribution` value, including a custom one.
+
+³ `bash-max-timeout-ms` raises the ceiling on a foreground Bash command's `timeout` (600000 ms upstream; accepted range 600000–7200000). Agents run builds and tests in the foreground under an explicit timeout and report BLOCKED when a run that cannot be split exceeds the ceiling; `devflow flags --set bash-max-timeout-ms=900000` is the remedy they name. Unsetting the flag deletes `BASH_MAX_TIMEOUT_MS`.
 
 ## External Model Routing (Devflow Proxy)
 
@@ -362,8 +365,11 @@ Configure which AI model each Devflow agent uses. Changes persist across reinsta
 npx devflow-kit agents                                      # Open interactive TUI (requires TTY)
 npx devflow-kit agents --list                               # List all agents with current model assignment
 npx devflow-kit agents --set <agent> --model <model>        # Assign a model to one agent (alias e.g. sol, terra, luna)
-npx devflow-kit agents --set <agent> --effort <level>       # Assign an effort level to one agent
+npx devflow-kit agents --set <agent> --effort <level>       # Assign an effort level to one agent (low, medium, high, xhigh, max)
+npx devflow-kit agents --set <agent> --effort inherit       # Drop the agent's effort line so it follows your session
+npx devflow-kit agents --set <agent> --effort default       # Clear effort override (restores the shipped effort, if any)
 npx devflow-kit agents --set <agent> --model default        # Clear model override (restores shipped default)
+npx devflow-kit agents --set memory --model <claude-model> --effort <level>   # Set the memory worker
 npx devflow-kit agents --reset                              # Clear all agent customisations (prompts for confirmation)
 npx devflow-kit agents --reset --yes                        # Skip confirmation prompt
 ```
@@ -378,6 +384,10 @@ npx devflow-kit agents --reset --yes                        # Skip confirmation 
 | `d` | Reset active field to default |
 | `Enter` | Confirm and save all changes |
 | `Escape` / `q` | Quit without saving |
+
+**Effort.** An agent's effort has three states. `default` is no override: the agent keeps the effort it ships, and the EFFORT column reads `default (<shipped effort>)` when it ships one, plain `default` when it does not. A level (`low` to `max`) replaces the shipped effort. `inherit` drops the agent's `effort:` line altogether, so the agent follows your session's effort even when it ships one. `--effort default` removes an override or an `inherit` and restores the shipped effort on the next reapply. Effort applies whether or not external model routing is enabled.
+
+**The memory entry.** `memory` is listed after the agents (state `worker`) and is set like an agent: `--set memory --model sonnet --effort medium`. Its model is cleared by `--set memory --model default`, its effort by `--set memory --effort default`, and both by `--reset` (which clears every customisation). It is a background worker, not an agent: it has no installed agent file, `devflow init` writes none for it, and it is left out of the agent counts. It takes Claude models only (an alias or a full `claude-` identifier) and the effort levels, not `inherit` and not a GPT model.
 
 GPT model assignments are **dormant** when external model routing is disabled — they are saved to `~/.devflow/agent-models.json` but not applied to agent frontmatter until routing is enabled. The TUI shows dormant GPT assignments with a dim annotation (`sol saved`). Enabling routing re-applies the mapping; disabling routing reverts frontmatter to Claude defaults while preserving your mapping. Model aliases (e.g. `sol`, `terra`, `luna`) auto-track the current generation — no config edit needed when new models ship.
 

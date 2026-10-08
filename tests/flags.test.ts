@@ -235,6 +235,7 @@ describe('getDefaultFlagsRecord', () => {
     expect(record['workflow-size-guideline']).toBeNull();
     expect(record['default-model']).toBeNull();
     expect(record['goal-checkin-minutes']).toBeNull();
+    expect(record['bash-max-timeout-ms']).toBeNull();
     expect(record['spellcheck']).toBeNull();
 
     // New optional boolean flag
@@ -967,6 +968,64 @@ describe('goal-checkin-minutes flag', () => {
     const input = JSON.stringify({}, null, 2);
     const result = JSON.parse(applyFlags(input, { 'goal-checkin-minutes': 0 }));
     expect(result.env.CLAUDE_CODE_GOAL_CHECKIN_MINUTES).toBe('0');
+  });
+});
+
+// ─── New flag: bash-max-timeout-ms ────────────────────────────────────────────
+
+/**
+ * D-FOREGROUND-RUN. The "Running commands" block tells every agent to run builds
+ * and tests in the foreground under an explicit Bash timeout whose ceiling is
+ * 600000 ms, or the value of BASH_MAX_TIMEOUT_MS when set. This flag is the
+ * remedy the block names for a suite that cannot be split under the default.
+ */
+describe('bash-max-timeout-ms flag', () => {
+  const flag = (): NumberFlagDef =>
+    FLAG_REGISTRY.find(f => f.id === 'bash-max-timeout-ms') as NumberFlagDef;
+
+  it('is registered, kind: number, min: 600000, max: 7200000, integer: true', () => {
+    expect(flag()).toBeDefined();
+    expect(flag().kind).toBe('number');
+    expect(flag().min).toBe(600000);
+    expect(flag().max).toBe(7200000);
+    expect(flag().integer).toBe(true);
+  });
+
+  it('target is env BASH_MAX_TIMEOUT_MS', () => {
+    expect(flag().target).toEqual({ type: 'env', key: 'BASH_MAX_TIMEOUT_MS' });
+  });
+
+  it('is neutral by default: defaultValue undefined, manifest record null', () => {
+    expect(flag().defaultValue).toBeUndefined();
+    expect(getDefaultFlagsRecord()['bash-max-timeout-ms']).toBeNull();
+  });
+
+  it('sits in the valued block, after the boolean flags that --list and the TUI order first', () => {
+    const ids = FLAG_REGISTRY.map(f => f.id);
+    const lastBoolean = Math.max(...FLAG_REGISTRY.map((f, i) => (f.kind === 'boolean' ? i : -1)));
+    expect(ids.indexOf('bash-max-timeout-ms')).toBeGreaterThan(lastBoolean);
+  });
+
+  it('a set value is written to the settings env block as a decimal string', () => {
+    const result = JSON.parse(applyFlags(JSON.stringify({}, null, 2), { 'bash-max-timeout-ms': 900000 }));
+    expect(result.env.BASH_MAX_TIMEOUT_MS).toBe('900000');
+  });
+
+  it('resetting the flag deletes the env key, and the empty env block with it', () => {
+    const set = applyFlags(JSON.stringify({}, null, 2), { 'bash-max-timeout-ms': 900000 });
+    const reset = JSON.parse(applyFlags(set, { 'bash-max-timeout-ms': null }));
+    expect(reset).toEqual({});
+  });
+
+  it('coerceFlagValue accepts both bounds', () => {
+    expect(coerceFlagValue(flag(), 600000)).toBe(600000);
+    expect(coerceFlagValue(flag(), 7200000)).toBe(7200000);
+  });
+
+  it('coerceFlagValue rejects 599999, 7200001 and a non-integer', () => {
+    expect(coerceFlagValue(flag(), 599999)).toBeNull();
+    expect(coerceFlagValue(flag(), 7200001)).toBeNull();
+    expect(coerceFlagValue(flag(), 900000.5)).toBeNull();
   });
 });
 

@@ -51,7 +51,7 @@ This is the **orchestrated flow** — you stay in the loop between every step. W
 
 ## What you get
 
-**Ambient orchestration.** Your main session becomes the tech lead: a charter injected at session start turns it into a pure orchestrator that delegates work to specialized agents and keeps only judgment mainline. Plan-mode handoffs auto-run `/implement`. Init and forget.
+**Ambient orchestration.** Your main session becomes the tech lead: a charter injected at session start turns it into an orchestrator that delegates work to specialized agents and keeps judgment mainline, with one bounded inline exception for a single short git, gh or script command. Plan-mode handoffs auto-run `/implement`. Init and forget.
 
 **A staffed agent roster.** 17 specialized agents with explicit model assignments — Opus for analysis, Sonnet for execution, Haiku for I/O. Reassign any agent's model with `devflow agents`, including GPT models through external model routing (`devflow proxy`).
 

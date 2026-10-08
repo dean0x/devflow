@@ -378,6 +378,12 @@ If CYCLE_NUMBER >= 3 and prior FP ratio > 70%: append "Note: High false-positive
 
 ---
 
+## Output
+
+Each mode's template above is its output.
+
+Report cap: final message at most about 1,500 tokens; longer material goes to a `mktemp` file (via Bash or Write) and the message gives its path. Exempt, inline in full: the synthesis in exploration, planning and design modes. Review, bug-analysis and research modes write the summary to disk and return its path.
+
 ## Principles
 
 1. **No new research** - Only synthesize what agents found

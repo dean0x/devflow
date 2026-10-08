@@ -62,7 +62,15 @@ if [ -z "$HEAD" ]; then
   dbg "EXIT: empty prompt"
 elif [[ "$HEAD" == "Implement the following plan:"* ]]; then
   dbg "PLAN_HANDOFF detected — injecting devflow:implement directive"
-  json_prompt_output "The user's prompt is a plan handoff (it begins with \`Implement the following plan:\`). In one short sentence, tell the user you're invoking \`devflow:implement\`. Then immediately invoke it with the Skill tool, passing the full plan (everything after the handoff prefix) as the skill input so it can be executed. Do not pause to ask whether to proceed."
+  # D-ARGS-ONCE: the directive passes the Skill call NO arguments. The handoff
+  # prompt IS the plan, so it is already in the conversation; handing it to the
+  # skill as an argument would put a second copy in the main-thread context for
+  # nothing. The skill's empty-input path takes the plan from the conversation.
+  # No plan body or plan path is parsed here: detection stays the literal prefix.
+  # This string is double-quoted bash: it must hold no dollar sign and no
+  # unescaped backtick, and it must equal HANDOFF_TEMPLATE in
+  # tests/fixtures/ambient-templates.ts byte for byte.
+  json_prompt_output "The user's prompt is a plan handoff (it begins with \`Implement the following plan:\`). In one short sentence, tell the user you're invoking \`devflow:implement\`. Then immediately invoke it with the Skill tool and no arguments: the plan is already in this conversation, so the skill needs no input. Do not pause to ask whether to proceed."
 elif [[ "$HEAD" == "/"* ]]; then
   dbg "EXIT: slash command — no reminder"
 else

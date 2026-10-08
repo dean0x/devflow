@@ -707,6 +707,107 @@ describe('GAP-3: orchestrator charter integrity', () => {
     ).toBeLessThanOrEqual(MAX_CHARTER_CHARS)
   })
 
+  /**
+   * D-CHARTER-BOUNDED-INLINE. The orchestrator may run one small command inline
+   * instead of paying a spawn for it, and the permission is only as safe as its
+   * bounds, so the bounds are held where the permission is granted: ONE sentence
+   * names the command kinds (a single git, gh or script command), the output
+   * ceiling (about 40 lines) and the exclusions (diffs, logs, test runs). Two
+   * sentences would let an edit keep the grant and lose the bound.
+   *
+   * Two neighbours hold with it. Direct delegations ask for a report of bounded
+   * size, so a delegated result does not flood the main thread. And a plan
+   * handoff invokes the workflow with NO plan text: the model already holds the
+   * plan, so passing it again as skill input doubles it in context.
+   *
+   * Deterministic code checks shape here and makes no judgment: it looks for the
+   * bound words in one sentence, a token figure on the report cap, and the
+   * absence of "full plan" on the handoff line.
+   */
+  const BOUND_WORDS: ReadonlyArray<readonly [string, RegExp]> = [
+    ['single', /\bsingle\b/i],
+    ['git', /\bgit\b/i],
+    ['gh', /\bgh\b/i],
+    ['40 lines', /\b40 lines\b/],
+    ['diff', /\bdiffs?\b/i],
+    ['log', /\blogs?\b/i],
+    ['test', /\btests?\b/i],
+  ]
+  const REPORT_CAP = /\bat most (?:about )?\d[\d,]* tokens\b/i
+  const HANDOFF_PREFIX = 'Implement the following plan:'
+
+  /** Named collector: how a charter's amended rules fall short of the shape above. */
+  function collectCharterContentViolations(charter: string): string[] {
+    const violations: string[] = []
+
+    const sentences = charter.split(/(?<=[.!?])\s+|\n+/)
+    const bounded = sentences.some(sentence => BOUND_WORDS.every(([, word]) => word.test(sentence)))
+    if (!bounded) {
+      const best = Math.max(0, ...sentences.map(s => BOUND_WORDS.filter(([, word]) => word.test(s)).length))
+      violations.push(
+        `no single sentence holds all of ${BOUND_WORDS.map(([name]) => name).join(', ')} ` +
+        `(the closest holds ${best} of ${BOUND_WORDS.length}) — the bounded-inline exception must carry its bounds`,
+      )
+    }
+
+    if (!sentences.some(s => /\breport/i.test(s) && REPORT_CAP.test(s))) {
+      violations.push('no delegation report cap carries a token figure ("at most about N tokens")')
+    }
+
+    const handoffLines = charter.split('\n').filter(line => line.includes(HANDOFF_PREFIX))
+    if (handoffLines.length !== 1) {
+      violations.push(`expected exactly one line naming "${HANDOFF_PREFIX}", found ${handoffLines.length}`)
+    } else {
+      if (!handoffLines[0].includes('devflow:implement')) {
+        violations.push('the handoff line does not invoke devflow:implement')
+      }
+      if (/full plan/i.test(handoffLines[0])) {
+        violations.push('the handoff line tells the orchestrator to pass the full plan as skill input')
+      }
+    }
+    return violations
+  }
+
+  it('charter carries the bounded-inline exception, a token-figure report cap and the no-argument handoff', () => {
+    const charter = readFileSync(CHARTER_PATH, 'utf-8')
+    const violations = collectCharterContentViolations(charter)
+    expect(violations, `Orchestrator charter content violations:\n  ${violations.join('\n  ')}`).toEqual([])
+  })
+
+  it('known-bad probe: a charter without the bounds, without a report figure, or with "full plan" is reported', () => {
+    const charter = readFileSync(CHARTER_PATH, 'utf-8')
+    // Non-vacuity: the real charter is clean, so each seed below fails for its own reason.
+    expect(collectCharterContentViolations(charter)).toEqual([])
+
+    const unbounded = charter.replace('40 lines', 'any length')
+    expect(unbounded, 'the seed must land').not.toBe(charter)
+    expect(collectCharterContentViolations(unbounded).some(v => v.startsWith('no single sentence holds all of'))).toBe(true)
+
+    const uncapped = charter.replace(REPORT_CAP, 'a short report')
+    expect(uncapped, 'the seed must land').not.toBe(charter)
+    expect(collectCharterContentViolations(uncapped)).toContain(
+      'no delegation report cap carries a token figure ("at most about N tokens")',
+    )
+
+    const fullPlan = charter.replace(HANDOFF_PREFIX, `${HANDOFF_PREFIX} pass the full plan as skill input,`)
+    expect(fullPlan, 'the seed must land').not.toBe(charter)
+    expect(collectCharterContentViolations(fullPlan)).toContain(
+      'the handoff line tells the orchestrator to pass the full plan as skill input',
+    )
+  })
+
+  it('known-bad probe: bound words scattered over several sentences do not count as one bounded sentence', () => {
+    const scattered = [
+      'The main thread may run a single command.',
+      'It is git or gh only, and its output stays under about 40 lines.',
+      'Never a diff, a log or a test run.',
+      `If the first message begins with ${HANDOFF_PREFIX} invoke devflow:implement.`,
+      'Ask for a report of at most about 1,500 tokens.',
+    ].join('\n')
+    const violations = collectCharterContentViolations(scattered)
+    expect(violations.some(v => v.startsWith('no single sentence holds all of'))).toBe(true)
+  })
+
   it('charter contains no retired agent names (vacuous when RETIRED_AGENT_FORM_B is empty)', () => {
     if (RETIRED_AGENT_FORM_B.length === 0) return // vacuously green in phase 1
 

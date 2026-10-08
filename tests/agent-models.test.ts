@@ -29,7 +29,7 @@ import {
   readInstalledAgentNames,
   reapplyAgentMapping,
   revertExternalAgents,
-  loadShippedDefaults,
+  loadShippedAgentDefaults,
   EFFORT_LEVELS,
   type AgentMapping,
   type AgentMappingFile,
@@ -219,12 +219,12 @@ describe('saveAgentMapping', () => {
 // ---------------------------------------------------------------------------
 
 describe('resolveEffective', () => {
-  // Shipped defaults: agent → model (read from source at runtime in real impl;
-  // here we use a subset for unit tests via the `shippedDefaults` parameter)
+  // Shipped defaults: agent → { model, effort? } (read from source at runtime in
+  // the real impl; here we use a subset for unit tests via the `shippedDefaults` parameter)
   const defaults = {
-    code: 'sonnet',
-    review: 'opus',
-    git: 'haiku',
+    code: { model: 'sonnet' },
+    review: { model: 'opus' },
+    git: { model: 'haiku' },
   };
 
   const makeMapping = (agents: Record<string, AgentMapping>): AgentMappingFile => ({
@@ -301,11 +301,67 @@ describe('resolveEffective', () => {
     expect(result.effort).toBe('low');   // effort always applies
   });
 
-  // No effort in mapping → undefined
-  it('no effort in mapping → effort is undefined', () => {
+  // No effort in mapping and none shipped → undefined
+  it('no effort in mapping and none shipped → effort is undefined', () => {
     const mapping = makeMapping({ code: { model: 'opus' } });
     const result = resolveEffective('code', mapping, defaults, false);
     expect(result.effort).toBeUndefined();
+  });
+
+  describe('shipped effort (D-SHIPPED-EFFORT)', () => {
+    const shipped = {
+      code: { model: 'sonnet', effort: 'medium' as const },
+      review: { model: 'opus' },
+    };
+
+    it('a mapping effort level wins over the shipped effort', () => {
+      const mapping = makeMapping({ code: { effort: 'max' } });
+      expect(resolveEffective('code', mapping, shipped, false).effort).toBe('max');
+    });
+
+    it('no mapping entry → the shipped effort applies', () => {
+      expect(resolveEffective('code', makeMapping({}), shipped, false).effort).toBe('medium');
+    });
+
+    it('a mapping entry without an effort → the shipped effort applies', () => {
+      const mapping = makeMapping({ code: { model: 'opus' } });
+      const result = resolveEffective('code', mapping, shipped, false);
+      expect(result.model).toBe('opus');
+      expect(result.effort).toBe('medium');
+    });
+
+    it('a mapping inherit yields no effort and does not fall back to the shipped effort', () => {
+      const mapping = makeMapping({ code: { effort: 'inherit' } });
+      expect(resolveEffective('code', mapping, shipped, false).effort).toBeUndefined();
+    });
+
+    it('an agent that ships no effort stays without one', () => {
+      expect(resolveEffective('review', makeMapping({}), shipped, true).effort).toBeUndefined();
+    });
+
+    it('proxy OFF with a dormant external model: shipped model, shipped effort still applies', () => {
+      const mapping = makeMapping({ code: { model: 'gpt-5.6-sol' } });
+      const result = resolveEffective('code', mapping, shipped, false);
+      expect(result.model).toBe('sonnet');
+      expect(result.effort).toBe('medium');
+    });
+
+    it('proxy state never changes the effort', () => {
+      const mapping = makeMapping({ code: { model: 'gpt-5.6-sol' } });
+      expect(resolveEffective('code', mapping, shipped, true).effort).toBe('medium');
+    });
+  });
+
+  // D-LEARNING-MODEL-PRECEDENCE: the session-start hook lets a Learning mapping
+  // decide the spawn's model by omitting model=, so the installed frontmatter is
+  // what runs. With the proxy off an external mapping model is dormant, and the
+  // frontmatter the reapply writes must be the shipped Learning model.
+  it('learning: a dormant external mapping resolves to the shipped Learning model while the proxy is off', () => {
+    const mapping = makeMapping({ learning: { model: 'gpt-5.5' } });
+    const shipped = { learning: { model: 'opus' } };
+
+    expect(resolveEffective('learning', mapping, shipped, false).model).toBe('opus');
+    expect(resolveEffective('learning', mapping, shipped, true).model).toBe('gpt-5.5');
   });
 });
 
@@ -360,9 +416,9 @@ describe('countExternalMappedAgents', () => {
 describe('reapplyAgentMapping', async () => {
   // Read shipped defaults live from source at test init time (TEST-7 fix).
   // Avoids brittle hardcoding that breaks when model-strategy changes agent files.
-  const defaults = await loadShippedDefaults();
-  const codeShippedDefault = defaults['code'] ?? 'sonnet';
-  const reviewShippedDefault = defaults['review'] ?? 'opus';
+  const defaults = await loadShippedAgentDefaults();
+  const codeShippedDefault = defaults['code']?.model ?? 'sonnet';
+  const reviewShippedDefault = defaults['review']?.model ?? 'opus';
 
   let tmpInstallDir: string;
   let tmpDevflowDir: string;
@@ -1038,7 +1094,7 @@ describe('parseAgentMappingEnvelope', () => {
 });
 
 // ---------------------------------------------------------------------------
-// loadShippedDefaults — compiled dir wins over source dir
+// loadShippedAgentDefaults — compiled dir wins over source dir
 // ---------------------------------------------------------------------------
 //
 // Shipped defaults are read live from the agent files at convergence time, so
@@ -1048,17 +1104,21 @@ describe('parseAgentMappingEnvelope', () => {
 // first to supply a name wins; they are injectable so the precedence can be
 // proved against a synthetic tree instead of the live build state.
 
-/** Write a minimal agent file carrying a model: key. Shared by the two describes below. */
-async function writeAgentFile(dir: string, name: string, model: string): Promise<void> {
+/**
+ * Write a minimal agent file carrying a model: key (and an effort: key when
+ * `effort` is given). Shared by the describes below.
+ */
+async function writeAgentFile(dir: string, name: string, model: string, effort?: string): Promise<void> {
   await fs.mkdir(dir, { recursive: true });
+  const effortLine = effort === undefined ? '' : `effort: ${effort}\n`;
   await fs.writeFile(
     path.join(dir, `${name}.md`),
-    `---\nname: ${name}\nmodel: ${model}\n---\n\nbody\n`,
+    `---\nname: ${name}\nmodel: ${model}\n${effortLine}---\n\nbody\n`,
     'utf-8',
   );
 }
 
-describe('loadShippedDefaults — compiled over source merge', () => {
+describe('loadShippedAgentDefaults — compiled over source merge', () => {
   let mergeTmp: string;
 
   beforeEach(async () => {
@@ -1071,13 +1131,13 @@ describe('loadShippedDefaults — compiled over source merge', () => {
 
   it('covers every agent in the registry, not merely "some agents were scanned"', async () => {
     // `scanned > 0` would survive 15 of 16 agents silently disappearing (GAP-07).
-    const defaults = await loadShippedDefaults();
+    const defaults = await loadShippedAgentDefaults();
     expect(Object.keys(defaults)).toEqual(expect.arrayContaining([...getAllAgentNames()]));
   });
 
   it('reports the git agent as haiku from the live tree', async () => {
-    const defaults = await loadShippedDefaults();
-    expect(defaults['git']).toBe('haiku');
+    const defaults = await loadShippedAgentDefaults();
+    expect(defaults['git']?.model).toBe('haiku');
   });
 
   it('reads an agent that exists ONLY in the compiled dir', async () => {
@@ -1086,9 +1146,9 @@ describe('loadShippedDefaults — compiled over source merge', () => {
     await writeAgentFile(srcDir, 'other', 'sonnet');
     await writeAgentFile(distDir, 'git', 'haiku');
 
-    const defaults = await loadShippedDefaults([distDir, srcDir]);
-    expect(defaults['git']).toBe('haiku');
-    expect(defaults['other']).toBe('sonnet');
+    const defaults = await loadShippedAgentDefaults([distDir, srcDir]);
+    expect(defaults['git']?.model).toBe('haiku');
+    expect(defaults['other']?.model).toBe('sonnet');
   });
 
   it('known-bad probe: dropping the compiled dir loses the generated agent', async () => {
@@ -1098,9 +1158,9 @@ describe('loadShippedDefaults — compiled over source merge', () => {
     await writeAgentFile(srcDir, 'other', 'sonnet');
     await writeAgentFile(distDir, 'git', 'haiku');
 
-    const srcOnly = await loadShippedDefaults([srcDir]);
+    const srcOnly = await loadShippedAgentDefaults([srcDir]);
     expect(srcOnly['git']).toBeUndefined();
-    expect(srcOnly['other']).toBe('sonnet');
+    expect(srcOnly['other']?.model).toBe('sonnet');
   });
 
   it('lets the compiled dir win for a name present in both', async () => {
@@ -1109,17 +1169,17 @@ describe('loadShippedDefaults — compiled over source merge', () => {
     await writeAgentFile(srcDir, 'git', 'opus');
     await writeAgentFile(distDir, 'git', 'haiku');
 
-    expect((await loadShippedDefaults([distDir, srcDir]))['git']).toBe('haiku');
+    expect((await loadShippedAgentDefaults([distDir, srcDir]))['git']?.model).toBe('haiku');
     // Reversing the order must change the answer, or the precedence proves nothing.
-    expect((await loadShippedDefaults([srcDir, distDir]))['git']).toBe('opus');
+    expect((await loadShippedAgentDefaults([srcDir, distDir]))['git']?.model).toBe('opus');
   });
 
   it('tolerates an absent compiled dir', async () => {
     const srcDir = path.join(mergeTmp, 'src-agents');
     await writeAgentFile(srcDir, 'git', 'haiku');
 
-    const defaults = await loadShippedDefaults([path.join(mergeTmp, 'no-such-dir'), srcDir]);
-    expect(defaults['git']).toBe('haiku');
+    const defaults = await loadShippedAgentDefaults([path.join(mergeTmp, 'no-such-dir'), srcDir]);
+    expect(defaults['git']?.model).toBe('haiku');
   });
 
   it('ignores non-.md entries in either dir', async () => {
@@ -1130,12 +1190,102 @@ describe('loadShippedDefaults — compiled over source merge', () => {
     await fs.writeFile(path.join(distDir, 'git.mds'), '---\nmodel: opus\n---\n', 'utf-8');
 
     // The .mds source must not be mistaken for a compiled agent.
-    expect((await loadShippedDefaults([distDir, srcDir]))['git']).toBe('haiku');
+    expect((await loadShippedAgentDefaults([distDir, srcDir]))['git']?.model).toBe('haiku');
   });
 });
 
 // ---------------------------------------------------------------------------
-// loadShippedDefaults — registry-gap warning
+// loadShippedAgentDefaults — shipped effort (D-SHIPPED-EFFORT)
+// ---------------------------------------------------------------------------
+
+describe('loadShippedAgentDefaults — shipped effort', () => {
+  let effortTmp: string;
+
+  beforeEach(async () => {
+    effortTmp = await fs.mkdtemp(path.join(os.tmpdir(), 'devflow-shipped-effort-'));
+  });
+
+  afterEach(async () => {
+    await fs.rm(effortTmp, { recursive: true, force: true });
+  });
+
+  it('returns { model, effort } per agent, with effort undefined where none ships', async () => {
+    const srcDir = path.join(effortTmp, 'src-agents');
+    await writeAgentFile(srcDir, 'code', 'sonnet', 'medium');
+    await writeAgentFile(srcDir, 'review', 'opus');
+
+    const defaults = await loadShippedAgentDefaults([srcDir]);
+
+    expect(defaults['code']).toEqual({ model: 'sonnet', effort: 'medium' });
+    expect(defaults['review']?.model).toBe('opus');
+    expect(defaults['review']?.effort).toBeUndefined();
+  });
+
+  it('dist-over-src precedence holds for the whole record: effort is never read from the losing file', async () => {
+    const srcDir = path.join(effortTmp, 'src-agents');
+    const distDir = path.join(effortTmp, 'dist-agents');
+    await writeAgentFile(srcDir, 'git', 'opus', 'max');
+    await writeAgentFile(distDir, 'git', 'haiku');
+
+    const defaults = await loadShippedAgentDefaults([distDir, srcDir]);
+
+    expect(defaults['git']?.model).toBe('haiku');
+    expect(defaults['git']?.effort, 'src effort leaked into the dist record').toBeUndefined();
+  });
+
+  it('known-bad probe: reversing the order swaps the whole record, effort included', async () => {
+    const srcDir = path.join(effortTmp, 'src-agents');
+    const distDir = path.join(effortTmp, 'dist-agents');
+    await writeAgentFile(srcDir, 'git', 'opus', 'max');
+    await writeAgentFile(distDir, 'git', 'haiku', 'low');
+
+    expect((await loadShippedAgentDefaults([distDir, srcDir]))['git']).toEqual({ model: 'haiku', effort: 'low' });
+    expect((await loadShippedAgentDefaults([srcDir, distDir]))['git']).toEqual({ model: 'opus', effort: 'max' });
+  });
+
+  it('drops a shipped effort outside EFFORT_LEVELS, with one warning naming the agent', async () => {
+    const srcDir = path.join(effortTmp, 'src-agents');
+    await writeAgentFile(srcDir, 'code', 'sonnet', 'hgih');
+    await writeAgentFile(srcDir, 'review', 'opus', 'high');
+    const warnings: string[] = [];
+
+    const defaults = await loadShippedAgentDefaults([srcDir], { onWarning: (m) => warnings.push(m) });
+
+    expect(defaults['code']?.model, 'the model survives a bad effort').toBe('sonnet');
+    expect(defaults['code']?.effort).toBeUndefined();
+    expect(defaults['review']?.effort, 'a valid sibling is untouched').toBe('high');
+    const naming = warnings.filter(w => w.includes('code') && w.includes('hgih'));
+    expect(naming, `expected exactly one warning naming the agent:\n  ${warnings.join('\n  ')}`).toHaveLength(1);
+    expect(warnings.filter(w => w.includes('review'))).toEqual([]);
+  });
+
+  it('does not warn about the effort of an agent whose losing file carries the bad value', async () => {
+    const srcDir = path.join(effortTmp, 'src-agents');
+    const distDir = path.join(effortTmp, 'dist-agents');
+    await writeAgentFile(srcDir, 'code', 'sonnet', 'hgih');
+    await writeAgentFile(distDir, 'code', 'sonnet', 'high');
+    const warnings: string[] = [];
+
+    const defaults = await loadShippedAgentDefaults([distDir, srcDir], { onWarning: (m) => warnings.push(m) });
+
+    expect(defaults['code']?.effort).toBe('high');
+    expect(warnings.filter(w => w.includes('hgih'))).toEqual([]);
+  });
+
+  it('a shipped effort of inherit is not a shipped level and is dropped', async () => {
+    const srcDir = path.join(effortTmp, 'src-agents');
+    await writeAgentFile(srcDir, 'code', 'sonnet', 'inherit');
+    const warnings: string[] = [];
+
+    const defaults = await loadShippedAgentDefaults([srcDir], { onWarning: (m) => warnings.push(m) });
+
+    expect(defaults['code']?.effort).toBeUndefined();
+    expect(warnings.some(w => w.includes('code'))).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// loadShippedAgentDefaults — registry-gap warning
 // ---------------------------------------------------------------------------
 //
 // A registry agent whose file is in NEITHER source directory has no shipped
@@ -1149,7 +1299,7 @@ describe('loadShippedDefaults — compiled over source merge', () => {
 // The installer throws on the same invariant; a read path that must keep
 // rendering warns instead.
 
-describe('loadShippedDefaults — registry-gap warning', () => {
+describe('loadShippedAgentDefaults — registry-gap warning', () => {
   let gapTmp: string;
   /** Every registry agent except the one deliberately left unresolvable. */
   const MISSING = 'git';
@@ -1176,7 +1326,7 @@ describe('loadShippedDefaults — registry-gap warning', () => {
     const srcDir = await srcWithoutMissing();
     const warnings: string[] = [];
 
-    const defaults = await loadShippedDefaults(
+    const defaults = await loadShippedAgentDefaults(
       [path.join(gapTmp, 'no-such-dist-dir'), srcDir],
       { onWarning: (msg) => warnings.push(msg) },
     );
@@ -1193,11 +1343,11 @@ describe('loadShippedDefaults — registry-gap warning', () => {
     await writeAgentFile(distDir, MISSING, 'haiku');
     const warnings: string[] = [];
 
-    const defaults = await loadShippedDefaults([distDir, srcDir], {
+    const defaults = await loadShippedAgentDefaults([distDir, srcDir], {
       onWarning: (msg) => warnings.push(msg),
     });
 
-    expect(defaults[MISSING]).toBe('haiku');
+    expect(defaults[MISSING]?.model).toBe('haiku');
     expect(warnings, 'a complete tree must warn about nothing').toEqual([]);
   });
 });
@@ -1283,5 +1433,107 @@ describe('reapplyAgentMapping — unresolved shipped default is reported, not si
     expect(content).toContain('model: haiku');
     expect(result.updated).toContain(MISSING);
     expect(result.warnings).toEqual([]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// reapplyAgentMapping — a shipped effort survives a reapply (D-SHIPPED-EFFORT)
+// ---------------------------------------------------------------------------
+//
+// Reapply used to write `effort: effective.effort ?? null`, which removes the
+// effort line from every installed agent that the mapping has no effort for —
+// including one that SHIPS an effort. No shipped agent carries an effort line
+// yet, so the strip was invisible; these tests inject a source tree that does.
+
+describe('reapplyAgentMapping — shipped effort survives', () => {
+  let tmp: string;
+  let installDir: string;
+  let devflowDir: string;
+  let srcDir: string;
+
+  /** The installed bytes `devflow init` would write for an agent shipping effort: medium. */
+  const SHIPPED_CODE = '---\nname: Code\nmodel: sonnet\neffort: medium\n---\n\nbody\n';
+
+  beforeEach(async () => {
+    tmp = await fs.mkdtemp(path.join(os.tmpdir(), 'devflow-reapply-effort-'));
+    installDir = path.join(tmp, 'install');
+    devflowDir = path.join(tmp, 'devflow');
+    srcDir = path.join(tmp, 'src-agents');
+    await fs.mkdir(installDir, { recursive: true });
+    await fs.mkdir(devflowDir, { recursive: true });
+    await writeAgentFile(srcDir, 'code', 'sonnet', 'medium');
+    await writeAgentFile(srcDir, 'validate', 'haiku');
+    await fs.writeFile(path.join(installDir, 'code.md'), SHIPPED_CODE, 'utf-8');
+    await fs.writeFile(path.join(installDir, 'validate.md'), '---\nname: Validate\nmodel: haiku\n---\n\nbody\n', 'utf-8');
+  });
+
+  afterEach(async () => {
+    await fs.rm(tmp, { recursive: true, force: true });
+  });
+
+  const reapply = () => reapplyAgentMapping({
+    installDir,
+    devflowDir,
+    proxyEnabled: false,
+    agentSourceDirs: [path.join(tmp, 'no-such-dist'), srcDir],
+  });
+
+  const installedCode = () => fs.readFile(path.join(installDir, 'code.md'), 'utf-8');
+
+  it('strip regression: an unrelated entry leaves the shipped effort and reports the agent unchanged', async () => {
+    await saveAgentMapping(devflowDir, { version: 1, agents: { validate: { model: 'haiku' } } });
+
+    const result = await reapply();
+
+    expect(await installedCode()).toBe(SHIPPED_CODE);
+    expect(result.unchanged).toContain('code');
+    expect(result.updated).not.toContain('code');
+  });
+
+  it('an empty mapping keeps the shipped effort', async () => {
+    const result = await reapply();
+
+    expect(await installedCode()).toBe(SHIPPED_CODE);
+    expect(result.unchanged).toContain('code');
+  });
+
+  it('a mapping effort level replaces the shipped effort', async () => {
+    await saveAgentMapping(devflowDir, { version: 1, agents: { code: { effort: 'max' } } });
+
+    const result = await reapply();
+
+    expect(await installedCode()).toContain('effort: max');
+    expect(await installedCode()).not.toContain('effort: medium');
+    expect(result.updated).toContain('code');
+  });
+
+  it('a mapping inherit removes the effort line', async () => {
+    await saveAgentMapping(devflowDir, { version: 1, agents: { code: { effort: 'inherit' } } });
+
+    const result = await reapply();
+
+    expect(await installedCode()).toBe('---\nname: Code\nmodel: sonnet\n---\n\nbody\n');
+    expect(result.updated).toContain('code');
+  });
+
+  it('dropping the mapping effort ("--effort default") restores the shipped effort on the next reapply', async () => {
+    await saveAgentMapping(devflowDir, { version: 1, agents: { code: { effort: 'inherit' } } });
+    await reapply();
+    expect(await installedCode()).not.toContain('effort:');
+
+    await saveAgentMapping(devflowDir, { version: 1, agents: {} });
+    const result = await reapply();
+
+    expect(await installedCode()).toBe(SHIPPED_CODE);
+    expect(result.updated).toContain('code');
+  });
+
+  it('a dormant external model keeps the shipped model and still applies the shipped effort', async () => {
+    await saveAgentMapping(devflowDir, { version: 1, agents: { code: { model: 'gpt-5.6-sol' } } });
+
+    const result = await reapply();
+
+    expect(await installedCode()).toBe(SHIPPED_CODE);
+    expect(result.unchanged).toContain('code');
   });
 });

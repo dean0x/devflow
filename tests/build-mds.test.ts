@@ -977,10 +977,10 @@ describe('compiled dynamic-build.md: Gate-1-twice cadence + build execution doct
     );
   });
 
-  it('renders the build_execution_doctrine (background Bash + Monitor poll)', () => {
+  it('renders the build_execution_doctrine as the Running commands block (foreground, no background run)', () => {
     expect(compiled).toContain('Build execution doctrine');
-    expect(compiled).toContain('run_in_background');
-    expect(compiled).toContain('Monitor');
+    expect(compiled).toContain('Running commands');
+    expect(compiled).not.toContain('run_in_background');
   });
 
   it('runs ONE final Gate 1 (#2) after the review pass', () => {
@@ -1095,11 +1095,11 @@ describe('compiled dynamic-build.md: streamlining doctrine (C1–C9)', () => {
     expect(compiled).toContain('agentType: "Design"');
   });
 
-  it('C6: build execution doctrine — cheapest-sufficient, one gate per phase, NEVER wrapped, bounded re-arm', () => {
+  it('C6: build execution doctrine — cheapest-sufficient, one gate per phase, never wrapped, never polled', () => {
     expect(compiled).toContain('Cheapest-sufficient validation');
     expect(compiled).toContain('One build gate per phase');
-    expect(compiled).toContain('NEVER wrapped in');
-    expect(compiled).toContain('re-arm');
+    expect(compiled).toContain('Never wrap a build or test command in `sh -c`');
+    expect(compiled).toContain('never poll across turns');
   });
 
   it('C8: scratch path is run-unique — old fixed filename /tmp/df-wf-check.js is gone', () => {
@@ -2235,7 +2235,7 @@ describe('dedup-marker ownership — `<!-- devflow:` absent from dist/commands (
 // the description fallback, which is what makes the description a fallback.
 //
 // A third, added after M-1: neutrality is not enough on its own. Forwarding the
-// FIRST token of `$ARGUMENTS` is perfectly provider-neutral and still loses the
+// FIRST token of `COMMAND_INPUT` is perfectly provider-neutral and still loses the
 // request — `/implement fix the login bug` reaches setup-task as `ISSUE_INPUT:
 // fix` with no description behind it. The gate that is both neutral and correct
 // is token COUNT: every provider's reference is a single token and no prose
@@ -2255,7 +2255,7 @@ describe('implement.md forwards the issue argument unclassified (§23)', () => {
   ];
 
   /**
-   * The condition the ISSUE_INPUT line must state: `$ARGUMENTS` is ONE token.
+   * The condition the ISSUE_INPUT line must state: `COMMAND_INPUT` is ONE token.
    *
    * A family of spellings rather than one, because the assertion is about which
    * shape routes where, not about the sentence chosen to say it. What no member
@@ -2268,7 +2268,7 @@ describe('implement.md forwards the issue argument unclassified (§23)', () => {
   const MULTI_TOKEN_GATE = /\b(?:two or more|2\+|multiple|more than one)\b[^\n]*\btokens?\b/i;
 
   /**
-   * The `setup-task` spawn payload — the ONE payload that routes `$ARGUMENTS`.
+   * The `setup-task` spawn payload — the ONE payload that routes `COMMAND_INPUT`.
    *
    * Scoped rather than file-wide because `TASK_DESCRIPTION:` appears in nine
    * payloads of this command, eight of which hand a Code agent a phase
@@ -2323,8 +2323,8 @@ describe('implement.md forwards the issue argument unclassified (§23)', () => {
     ).toBe(1);
     expect(
       lines[0],
-      'the value must be read off $ARGUMENTS, not restated as a classified noun',
-    ).toContain('$ARGUMENTS');
+      'the value must be read off the command input, not restated as a classified noun',
+    ).toContain('COMMAND_INPUT');
     expect(
       collectIssueInputClassifiers(source),
       'the command layer classified the issue argument. Only the Git agent has resolved a ' +
@@ -2342,7 +2342,7 @@ describe('implement.md forwards the issue argument unclassified (§23)', () => {
 
     expect(
       issueLine,
-      'ISSUE_INPUT must be gated on $ARGUMENTS being ONE token. Ungated, the first word of ' +
+      'ISSUE_INPUT must be gated on COMMAND_INPUT being ONE token. Ungated, the first word of ' +
       '`/implement fix the login bug` is forwarded to setup-task as an issue reference and ' +
       'the request itself is never passed at all (M-1):\n  ' + issueLine.trim(),
     ).toMatch(SINGLE_TOKEN_GATE);
@@ -2366,8 +2366,8 @@ describe('implement.md forwards the issue argument unclassified (§23)', () => {
     ).toMatch(MULTI_TOKEN_GATE);
     expect(
       descLine,
-      'the whole argument is the description; forwarding a remainder would drop its first word',
-    ).toContain('$ARGUMENTS');
+      'the whole command input is the description; forwarding a remainder would drop its first word',
+    ).toContain('COMMAND_INPUT');
   });
 
   it('a `.md` argument routes to PLAN_ARTIFACT_PATH, and to neither of the other two keys', async () => {
@@ -2424,8 +2424,9 @@ describe('implement.md forwards the issue argument unclassified (§23)', () => {
     // …and the shipped forwarding instruction is not reported, nor is the same
     // prose on a line that is not the ISSUE_INPUT key.
     expect(collectIssueInputClassifiers(
-      'ISSUE_INPUT: {$ARGUMENTS verbatim, when it is a single whitespace-delimited token ' +
-      'that does not end in .md — otherwise omit}',
+      'ISSUE_INPUT: {COMMAND_INPUT verbatim, when it is a single whitespace-delimited token ' +
+      'that does not end in .md; when it ends in .md, the plan frontmatter\'s issue value verbatim ' +
+      'unless absent or pending — otherwise omit}',
     )).toEqual([]);
     expect(collectIssueInputClassifiers('Capture the issue number the Git agent returns.')).toEqual([]);
   });

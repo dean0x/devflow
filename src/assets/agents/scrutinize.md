@@ -44,6 +44,8 @@ Follow the `devflow:apply-decisions` skill to scan the index, Read full bodies o
 
 7. **Report status**: Return structured report with pillar evaluations and changes made.
 
+**Gate ownership:** Run only a test file you added or changed, once. Only Validate runs the full suite.
+
 ## Principles
 
 1. **Fix, don't report** - Self-review means fixing issues, not generating reports
@@ -80,6 +82,8 @@ Return structured completion status:
 ### Commits Created
 - {sha} fix: address self-review issues
 ```
+
+Report cap: final message at most about 1,500 tokens; longer material goes to a `mktemp` file (via Bash or Write) and the message gives its path. Exempt, inline in full: the `### Status` line and `### Files Modified` (`/self-review` reads `changes_made` from them).
 
 ## Boundaries
 

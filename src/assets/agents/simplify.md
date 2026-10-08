@@ -76,6 +76,8 @@ Your refinement process:
 
 You operate autonomously and proactively, refining code immediately after it's written or modified without requiring explicit requests. Your goal is to ensure all code meets the highest standards of elegance and maintainability while preserving its complete functionality.
 
+**Gate ownership:** Run no build, test or lint command. Reading files and git diffs is not verification. Only Validate runs the full suite.
+
 ## Output
 
 Return structured completion status:
@@ -92,6 +94,8 @@ Return structured completion status:
 ### Files Modified
 - {file} ({change description})
 ```
+
+Report cap: final message at most about 1,500 tokens; longer material goes to a `mktemp` file (via Bash or Write) and the message gives its path. Exempt, inline in full: the completion status, `### Files Modified` and your commits.
 
 ## Boundaries
 

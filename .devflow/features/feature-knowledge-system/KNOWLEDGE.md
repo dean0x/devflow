@@ -18,7 +18,7 @@ directories:
   - tests/build-mds-generator-hosts.test.ts
   - tests/guards/dist-agents.test.ts
 created: 2026-06-21
-updated: 2026-09-29
+updated: 2026-10-08
 ---
 
 # Feature Knowledge Base System
@@ -129,7 +129,7 @@ Invoked at the end of applicable workflows via `knowledge_writeback()` MDS call 
 
 1. **Gate** — resolve the settings line for `{worktree}` (`_partials/_settings.mds` `settings_resolve()`, alias-imported by `_knowledge.mds`); if it says `KNOWLEDGE=off`, skip entirely. The line ANDs the machine switch with the repository's `project.json` and the personal `config.json` `features.knowledge` (D-FEATURES-NARROW-ONLY), and its fail-closed form says `KNOWLEDGE=off`, so an unresolvable line skips write-back. The gate reads no file itself (`tests/guards/no-config-read.test.ts`, `tests/commands/knowledge-writeback-gate.test.ts`)
 2. **Check scope** — if this workflow changed a documented area OR found durable cross-cutting knowledge, proceed
-3. **Spawn Knowledge agent** — `Agent(subagent_type="Knowledge")` with WORKTREE_PATH, FEATURE_SLUG, FEATURE_NAME, DIRECTORIES, FILES_CHANGED, DECISIONS_CONTEXT, EXISTING_KB, EXPLORATION_OUTPUTS
+3. **Spawn Knowledge agent** — `Agent(subagent_type="Knowledge")` with WORKTREE_PATH, FEATURE_SLUG, FEATURE_NAME, DIRECTORIES, FILES_CHANGED, DECISIONS_CONTEXT, EXISTING_KB, EXPLORATION_OUTPUTS. The prompt never tells the agent to load `devflow:feature-knowledge`: the agent lists it (with `apply-feature-knowledge`, `apply-decisions` and `worktree-support`) in its `skills:` frontmatter, so the full body is injected into every spawn, and it holds no Skill tool to load anything with — a load instruction would ask for a second copy it cannot fetch (`tests/commands/knowledge-preload.test.ts` holds the agent's preload and absent Skill tool, and the absence of the instruction in the write-back partial and `/research`)
 4. **Agent writes KNOWLEDGE.md** — directly to `.devflow/features/{slug}/KNOWLEDGE.md`
 5. **Agent updates index.md** — read-modify-write `index.md`; replace existing slug line or append; create file if absent
    - Line format: `- **{slug}** — {areas} — {Use-when description}`
@@ -168,7 +168,7 @@ changed / cross-cutting knowledge found) mean the Knowledge agent spawns only wh
 If neither condition is met, write-back is a no-op.
 
 **DECISIONS_CONTEXT injection**: `knowledge_writeback` passes `DECISIONS_CONTEXT` to the
-Knowledge agent so it can cross-reference ADR/PF entries when authoring the KB.
+Knowledge agent so it can state each relevant decision or pitfall in words in the section it governs — never by its ledger ID, because the ledger is machine-local and the KB is shared.
 
 **research.md bespoke knowledge**: `/research` Phase 7 (user-gated) has its own bespoke
 knowledge creation block instead of using `knowledge_writeback()`, because the plan's
@@ -188,7 +188,7 @@ winner). The dist-first precedence has exactly one owner: `agentSourceDirs()` in
 spelled the other way round still typechecks and silently inverts the answer — so every
 consumer takes that list as-is and never re-spells it. Consumers: the installer's
 agent-source loop (first hit wins; a hit on no directory throws, naming every candidate
-path plus an `npm run build:mds` hint); `loadShippedDefaults(dirs = agentSourceDirs(),
+path plus an `npm run build:mds` hint); `loadShippedAgentDefaults(dirs = agentSourceDirs(),
 opts)` (walks the list first-wins over a per-directory `readDirDefaults(dir)`, tolerating
 a missing directory symmetrically on EVERY entry). The test resolver `resolveAgentSource` in
 `tests/helpers.ts` reads the same order from `agentSourceDirs()` but is a different resolver
@@ -434,7 +434,7 @@ covers all three output kinds with the same one property.
 - `tests/mds-variants.test.ts` — unit coverage of the pure core module: `validateOutputName` / `validateContractOutputName`, `resolveOutputDir` (including the `skill-refs` allowlist entry and per-directory variant tagging), `expandVariants` (shipped-registry expansion, `MIN_VARIANT_PAIRS` floor, one-element-list refusal, traversal/duplicate-output refusals, purity), `splitVariantSections` (op/section bidirectional parity, empty-section refusal, marker-format edge cases), `resolveVariantModules`/`mcpContractIsGenerated`/`deferredReferenceModuleSources` (idempotence, gate-open and gate-closed probes), and `VARIANT_MODULES` shape assertions over the current three-provider registry
 - `tests/tracker/reference-structure.test.ts` — the structural half of the verbatim-move remedy: asserts every generated reference starts with its own `## Operation:` anchor and carries no further unfenced column-0 `## ` line, via the fence-aware `collectUnfencedH2` helper; content/ownership sits with `tracker-references`, listed here because it polices this KB's build output shape
 - `tests/guards/dist-agents.test.ts` — `dist/agents/` shipping-artifact guards: source↔output parity (fail-loud both directions), no leaked `\{`/`\}` escapes, no `.md`/`.mds` shadowing, resolver-origin assertions, and the AC-1.2 scope fence (`@if`/`variants:`/provider templating remain forbidden; `expandVariants(` and `(module, op)` are named in `LEGALISED_IN_PHASE2` as the deliberate narrowing)
-- `src/assets/agents/knowledge.md` — Knowledge agent contract: dual-write (KNOWLEDGE.md + index.md line), no result file, model=sonnet
+- `src/assets/agents/knowledge.md` — Knowledge agent contract: dual-write (KNOWLEDGE.md + index.md line), no result file, model=sonnet; its Output section ends with a `Report cap:` line (about 1,500 tokens, the `KB_*` status block exempt and inline in full)
 - `src/assets/skills/feature-knowledge/SKILL.md` — Iron Law, 4-phase authoring, KNOWLEDGE.md template, index.md registration instructions
 - `src/assets/skills/apply-feature-knowledge/SKILL.md` — 3-step consumption algorithm, skip guard, verify-against-code freshness
 - `src/cli/commands/knowledge/list.ts` — reads index.md directly or falls back to frontmatter glob; no external scripts

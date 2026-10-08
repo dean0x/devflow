@@ -909,63 +909,150 @@ describe('Cross-component runtime alignment', () => {
     ).toBe(false);
   });
 
-  it('companion skill lists are consistent across catalog and commands', () => {
-    const catalogContent = readFileSync(
-      path.join(ROOT, 'docs', 'reference', 'skill-catalog.md'),
-      'utf-8',
-    );
+  /**
+   * D-CHARTER-BOUNDED-INLINE. A command's main thread orchestrates: it spawns
+   * agents and gates them, and the agents that write code, tests and designs
+   * carry the skills for that work themselves. Companion skills loaded on the
+   * main thread are tokens paid on every turn of the command for work the
+   * command never does, so only a command whose OWN main thread uses a skill
+   * loads one — today `/release`, whose main thread drives git. The catalog
+   * keeps all five intent rows, "(none)" included, so the table stays the
+   * evidence that the others were considered, and the check below holds it to
+   * the compiled commands in both directions: a row lists companions iff its
+   * command carries a companion line.
+   */
+  const COMPANION_INTENTS = ['IMPLEMENT', 'DEBUG', 'PLAN', 'REVIEW', 'RELEASE'] as const;
+  const INTENT_COMMAND: Record<(typeof COMPANION_INTENTS)[number], string> = {
+    IMPLEMENT: 'implement.md',
+    DEBUG: 'debug.md',
+    PLAN: 'plan.md',
+    REVIEW: 'code-review.md',
+    RELEASE: 'release.md',
+  };
 
-    // Parse the Command Companion Skills table rows:
-    // | INTENT | /command | `devflow:a`, `devflow:b` |
-    const catalogTable = new Map<string, string[]>();
-    const catalogTableRegex =
-      /^\|\s*(IMPLEMENT|DEBUG|PLAN|REVIEW|RELEASE)\s*\|[^|]+\|\s*(.+?)\s*\|$/gm;
-    for (const match of catalogContent.matchAll(catalogTableRegex)) {
-      const intent = match[1];
-      const companions = [...match[2].matchAll(/`devflow:([\w-]+)`/g)].map(m => m[1]);
-      if (companions.length > 0) catalogTable.set(intent, companions.sort());
+  /** A catalog row's companions; `none` is true only when the cell literally reads "(none)". */
+  interface CatalogRow {
+    readonly companions: string[];
+    readonly none: boolean;
+  }
+
+  /**
+   * Named collector: every intent row of the Command Companion Skills table —
+   * `| INTENT | /command | cell |` — companion-bearing or "(none)". A row whose
+   * cell holds neither is kept with `none: false` and no companions, so the drift
+   * collector reports it instead of reading it as "no companions".
+   */
+  function parseCompanionCatalog(markdown: string): Map<string, CatalogRow> {
+    const rows = new Map<string, CatalogRow>();
+    const rowPattern = new RegExp(`^\\|\\s*(${COMPANION_INTENTS.join('|')})\\s*\\|[^|]+\\|\\s*(.+?)\\s*\\|$`, 'gm');
+    for (const match of markdown.matchAll(rowPattern)) {
+      const cell = match[2];
+      rows.set(match[1], {
+        companions: [...cell.matchAll(/`devflow:([\w-]+)`/g)].map(m => m[1]).sort(),
+        none: /^\(none\)/.test(cell),
+      });
     }
+    return rows;
+  }
 
-    expect(catalogTable.size).toBeGreaterThanOrEqual(5);
+  /** The companion line of a compiled command: its skills, or null when it has none. */
+  function companionLineSkills(command: string): string[] | null {
+    const line = command.match(/^\*\*Load Companion Skills\*\*.*$/m);
+    if (line === null) return null;
+    return [...line[0].matchAll(/`devflow:([\w-]+)`/g)].map(m => m[1]).sort();
+  }
 
-    // Map intent → compiled command files in dist/commands/ (single output dir post-restructure)
-    const intentCommandMap: Record<string, string[]> = {
-      IMPLEMENT: ['dist/commands/implement.md'],
-      DEBUG: ['dist/commands/debug.md'],
-      PLAN: ['dist/commands/plan.md'],
-      REVIEW: ['dist/commands/code-review.md'],
-      RELEASE: ['dist/commands/release.md'],
-    };
-
-    // Extract companion skills from a "Load via Skill tool:" line
-    const parseCompanionLine = (content: string): string[] => {
-      const lineMatch = content.match(/Load via Skill tool:\s*(.+?)\.?\s*(?:If a skill|$)/m);
-      if (!lineMatch) return [];
-      return [...lineMatch[1].matchAll(/`devflow:([\w-]+)`/g)].map(m => m[1]).sort();
-    };
-
-    for (const [intent, expectedSkills] of catalogTable) {
-      // Check command files
-      for (const cmdRelPath of intentCommandMap[intent]) {
-        const cmdPath = path.join(ROOT, cmdRelPath);
-        let cmdContent: string;
-        try {
-          cmdContent = readFileSync(cmdPath, 'utf-8');
-        } catch {
-          // FAIL-LOUD: a guard that silently skips on a missing dist file is not a guard.
-          // This was previously a `continue` — now it throws so the developer knows to build.
-          throw new Error(
-            `${cmdRelPath} is absent — run \`npm run build\` first ` +
-            '(companion skill verification cannot be skipped)',
-          );
-        }
-        const cmdSkills = parseCompanionLine(cmdContent);
-        expect(
-          cmdSkills,
-          `${cmdRelPath} companions must match catalog for ${intent}`,
-        ).toEqual(expectedSkills);
+  /**
+   * Named collector: every way the catalog and the compiled commands disagree,
+   * per intent. `commands` maps a compiled file name to its body.
+   */
+  function collectCompanionDrift(catalog: ReadonlyMap<string, CatalogRow>, commands: ReadonlyMap<string, string>): string[] {
+    const violations: string[] = [];
+    for (const intent of COMPANION_INTENTS) {
+      const row = catalog.get(intent);
+      if (row === undefined) {
+        violations.push(`${intent}: no row in the catalog`);
+        continue;
+      }
+      if (row.companions.length === 0 && !row.none) {
+        violations.push(`${intent}: the Companions cell lists no skill and does not read "(none)"`);
+      }
+      const body = commands.get(INTENT_COMMAND[intent]);
+      if (body === undefined) {
+        violations.push(`${intent}: ${INTENT_COMMAND[intent]} is absent from the compiled commands`);
+        continue;
+      }
+      const loaded = companionLineSkills(body);
+      if (row.companions.length > 0 && loaded === null) {
+        violations.push(`${intent}: the catalog lists companions but ${INTENT_COMMAND[intent]} carries no companion line`);
+      } else if (row.companions.length === 0 && loaded !== null) {
+        violations.push(`${intent}: the catalog reads "(none)" but ${INTENT_COMMAND[intent]} carries a companion line`);
+      } else if (loaded !== null && JSON.stringify(loaded) !== JSON.stringify(row.companions)) {
+        violations.push(`${intent}: ${INTENT_COMMAND[intent]} loads [${loaded.join(', ')}] but the catalog lists [${row.companions.join(', ')}]`);
       }
     }
+    return violations;
+  }
+
+  function readCatalog(): string {
+    return readFileSync(path.join(ROOT, 'docs', 'reference', 'skill-catalog.md'), 'utf-8');
+  }
+
+  /** The compiled bodies of the five intent commands. Fails loudly when one is absent. */
+  function readIntentCommands(): Map<string, string> {
+    const bodies = new Map<string, string>();
+    for (const file of Object.values(INTENT_COMMAND)) {
+      // FAIL-LOUD: requireDistFile() throws when dist is absent — not a skip.
+      bodies.set(file, requireDistFile(file));
+    }
+    return bodies;
+  }
+
+  it('companion skill lists are consistent across catalog and commands', () => {
+    const catalog = parseCompanionCatalog(readCatalog());
+
+    // Non-vacuity: all five intent rows are parsed, "(none)" rows included, so a
+    // table that lost a row cannot pass by having fewer rows to check.
+    expect([...catalog.keys()].sort()).toEqual([...COMPANION_INTENTS].sort());
+
+    const violations = collectCompanionDrift(catalog, readIntentCommands());
+    expect(violations, `Companion drift:\n  ${violations.join('\n  ')}`).toEqual([]);
+  });
+
+  it('only /release loads companions on its main thread; the four orchestrating commands carry no companion line', () => {
+    const commands = readIntentCommands();
+    for (const file of ['implement.md', 'code-review.md', 'debug.md', 'plan.md']) {
+      expect(companionLineSkills(commands.get(file)!), `${file} must carry no companion line`).toBeNull();
+    }
+    expect(companionLineSkills(commands.get('release.md')!), 'release.md still loads its companion').toEqual(['git']);
+  });
+
+  it('known-bad probe: the drift collector reports a lost row, a stray companion line and a missing one', () => {
+    const catalog = parseCompanionCatalog(readCatalog());
+    const commands = readIntentCommands();
+    expect(collectCompanionDrift(catalog, commands), 'the real pair is clean, so each seed fails for its own reason').toEqual([]);
+
+    const withoutRow = new Map(catalog);
+    withoutRow.delete('DEBUG');
+    expect(collectCompanionDrift(withoutRow, commands)).toEqual(['DEBUG: no row in the catalog']);
+
+    const stray = new Map(commands);
+    stray.set('plan.md', `${commands.get('plan.md')}\n**Load Companion Skills** — Load via Skill tool: \`devflow:patterns\`.\n`);
+    expect(collectCompanionDrift(catalog, stray)).toEqual([
+      'PLAN: the catalog reads "(none)" but plan.md carries a companion line',
+    ]);
+
+    const missing = new Map(commands);
+    missing.set('release.md', commands.get('release.md')!.replace(/^\*\*Load Companion Skills\*\*.*$/m, ''));
+    expect(collectCompanionDrift(catalog, missing)).toEqual([
+      'RELEASE: the catalog lists companions but release.md carries no companion line',
+    ]);
+
+    const blankCell = new Map(catalog);
+    blankCell.set('REVIEW', { companions: [], none: false });
+    expect(collectCompanionDrift(blankCell, commands)).toEqual([
+      'REVIEW: the Companions cell lists no skill and does not read "(none)"',
+    ]);
   });
 
   it('code.md domain skill paths cover all language/ecosystem skills', () => {

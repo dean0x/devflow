@@ -15,12 +15,19 @@
  *  -1  Unsaved count "  N unsaved changes" (blank if 0)
  *   0  Keybinding footer
  *
- * Columns (chars) — total 79 ≤ 80:
+ * Columns (chars) — total 80 ≤ 80:
  *   PREFIX  :  2  (cursor mark "❯ " or "  ")
- *   AGENT   : 18
- *   MODEL   : 32
- *   EFFORT  : 13
+ *   AGENT   : 12
+ *   MODEL   : 30
+ *   EFFORT  : 22
  *   STATE   : 14
+ *
+ * EFFORT is 22 wide so the longest unconfigured cell, "default (medium)" (16),
+ * fits whole inside the cursor's "‹ … ›" wrapper with the dirty marker
+ * ("‹ default (medium) ● ›", 22) — the shipped effort (D-SHIPPED-EFFORT) and the
+ * unsaved mark are never clipped on the cursor row. The agent names the registry
+ * holds are at most 10 characters ("Scrutinize"); longer orphan keys are
+ * truncated by truncateVisible.
  */
 
 import {
@@ -42,7 +49,7 @@ import {
   type AgentRow,
   type AgentsViewState,
 } from './state.js';
-import { AGENT_STATE_LABELS } from '../../core/agent-state.js';
+import { AGENT_STATE_LABELS, formatEffortDisplay } from '../../core/agent-state.js';
 
 // ---------------------------------------------------------------------------
 // Layout constants
@@ -61,9 +68,9 @@ export function computeViewportHeight(termRows: number): number {
   return Math.max(MIN_VIEWPORT, termRows - FIXED_ROWS);
 }
 
-const COL_AGENT = 18;
-const COL_MODEL = 32;
-const COL_EFFORT = 13;
+const COL_AGENT = 12;
+const COL_MODEL = 30;
+const COL_EFFORT = 22;
 const COL_STATE = 14;
 
 // ---------------------------------------------------------------------------
@@ -141,7 +148,10 @@ function renderModelCell({
       // Dormant: show saved model name as dim annotation
       valueStr += ` ${dim(`${safeDormantModel} saved`)}`;
     }
-  } else if (isOffCycle(modelCycle, row.configuredModel)) {
+  } else if (!row.worker && isOffCycle(modelCycle, row.configuredModel)) {
+    // A worker row is exempt: its model is never judged against the catalog, and
+    // a full claude- identifier, which no cycle lists, is in the worker domain
+    // (D-WORKER-AGENTS) — readAgentMapping has already dropped anything outside it.
     // Off-cycle pin: model was saved but is no longer in the discovered catalog.
     // The per-row effective cycle (state.ts cycleField) includes it for reachability,
     // but it renders as unavailable to signal the user should update it.
@@ -168,6 +178,9 @@ function renderModelCell({
 
 /**
  * Render the effort cell for a given row, considering cursor/active/dirty state.
+ *
+ * D-SHIPPED-EFFORT: an unconfigured row shows `default (<shipped effort>)` when
+ * the shipped source carries an effort, through the formatter --list shares.
  */
 function renderEffortCell(
   row: AgentRow,
@@ -176,7 +189,7 @@ function renderEffortCell(
   maxWidth: number,
 ): string {
   const dirty = isDirtyEffort(row);
-  const value = row.configuredEffort;
+  const value = formatEffortDisplay(row.configuredEffort, row.shippedEffort);
 
   let cell: string;
   if (isCursor && isActive) {
@@ -210,6 +223,9 @@ function renderStateCell(row: AgentRow, proxyEnabled: boolean, maxWidth: number)
       break;
     case 'unknown':
       cell = dim(AGENT_STATE_LABELS['unknown']);
+      break;
+    case 'worker':
+      cell = dim(AGENT_STATE_LABELS['worker']);
       break;
     default: {
       const _: never = state;

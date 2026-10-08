@@ -18,7 +18,13 @@ Explore a codebase area by spawning parallel agents for flow tracing, dependency
 
 ## Input
 
-`$ARGUMENTS` contains whatever follows `/explore`:
+What follows `/explore` is bound once, here. Every later step names it `COMMAND_INPUT` and never restates it:
+
+<command-input>
+$ARGUMENTS
+</command-input>
+
+`COMMAND_INPUT` is one of:
 - Area description: "how does the auth system work"
 - Flow question: "trace the request lifecycle"
 - Empty: use conversation context
@@ -57,6 +63,8 @@ Based on Skim agent findings, spawn 2-3 `Agent(subagent_type="Explore")` agents 
 - **Pattern explorer**: Identify recurring patterns, conventions, and architectural decisions in the area
 
 Adjust explorer focus based on the specific exploration question.
+
+Ask each explorer for a final report of at most about 1,500 tokens: findings with file:line references, not file dumps.
 
 ### Phase 4: Synthesize
 

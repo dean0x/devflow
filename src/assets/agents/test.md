@@ -72,18 +72,24 @@ For each scenario:
 
 If a previous run failed (PREVIOUS_FAILURES provided), prioritize re-testing those scenarios first.
 
-## Long-running commands (test/build commands that may run >120s)
+**Gate ownership:** Run the scenario commands. Never the full suite. Only Validate runs the full suite.
 
-A plain `Bash` call defaults to a 120s timeout, and inside a dynamic Workflow a sub-agent that emits no output for 180s is KILLED ("agent stalled"). For any scenario whose command may run silent longer than ~120s (a full `cargo test` / `go test ./...`, a build step, a slow integration suite), do NOT run it as one silent foreground command. Instead:
+## Running commands
 
-1. Run it in the BACKGROUND with the Bash tool (`run_in_background: true`), capturing output + exit code under a unique `<slug>` reused in step 2:
-   `<command> > /tmp/df-test-<slug>.log 2>&1; echo "EXIT=$?" > /tmp/df-test-<slug>.done`
-2. Poll with the `Monitor` tool (load it via ToolSearch `select:Monitor` if it is not available): set `persistent: false`, `timeout_ms` above the expected run time (e.g. 600000), and
-   `command: until [ -f /tmp/df-test-<slug>.done ]; do echo running; sleep 25; done; echo DONE; cat /tmp/df-test-<slug>.done`
-   The 25s heartbeat (≪ 180s) is delivered as a notification that keeps you alive past the watchdog.
-3. When the monitor reports `DONE`: the scenario's command PASSED iff the `.done` file contains `EXIT=0`. Read the `.log` for evidence.
+Run builds, typechecks, lints and tests in the foreground, each with an explicit Bash `timeout` above its expected run time. The ceiling is 600000 ms, or `BASH_MAX_TIMEOUT_MS` when set (`echo ${BASH_MAX_TIMEOUT_MS:-600000}`).
 
-For a foreground command that exceeds the 120s default but stays under 180s, pass an explicit higher `timeout` to the Bash tool (up to 600000ms). Prefer scoping to the changed package/path where possible.
+- Capture, then tail, in one Bash call (shell state does not persist): `LOG=$(mktemp); echo "LOG=$LOG"; <command> >"$LOG" 2>&1; rc=$?; tail -n 40 "$LOG"; echo "EXIT=$rc"`. The printed `EXIT=` value is the result; never decide one from a grep count.
+- Never background a command and wait on it, and never poll across turns: no `sleep` or `true` turns, no sentinel-file checks, no Monitor.
+- Prefer the scoped command for the change (a package, a path or a test file); for the whole set, one workspace-level command over a per-package loop.
+- A run that exceeds its timeout is BLOCKED: report its duration and log path. Do not wait on it, poll it or re-run it.
+- A run expected to exceed the ceiling is split into parts, each under about 90% of it, run in sequence. If it cannot be split, report BLOCKED with the remedy `devflow flags --set bash-max-timeout-ms=<ms>`.
+- Never re-run a command when nothing it reads has changed.
+- Never wrap a build or test command in `sh -c`, `bash -c`, `python3 -c` or `node -e`: permission rules deny wrapped commands they would allow directly.
+- The same rules hold inside a dynamic Workflow sub-agent.
+
+## Dev server (test.md only)
+
+When a scenario needs the dev server, follow the lifecycle in `devflow:qa/references/browser-testing.md`: start the server in the background, check readiness with one bounded loop inside a single Bash call, and kill the server before you finish. Never end the turn while it runs.
 
 ## Output
 
@@ -139,8 +145,10 @@ One row per TP line, in TP order. PASS only when every scenario covering the TP 
 - **Remediation**: {what Code agent should fix}
 
 ### Evidence Log
-{Raw command outputs for traceability}
+{Each command run's `LOG=` path, for traceability}
 ```
+
+Report cap: final message at most about 1,500 tokens; longer material goes to a `mktemp` file (via Bash or Write) and the message gives its path. Exempt, inline in full: `### Test Plan Evidence` (HEAD line and TP table), the Scenario Results table (`| ID | TP | Type |`) and `### Failed Scenarios`. `### Evidence Log` lists each run's `LOG=` path, never raw output.
 
 ## Principles
 

@@ -282,6 +282,23 @@ async function handleRestore(anchor: string): Promise<void> {
   p.log.success(`Restored ${restored.value.anchor_id} (${restored.value.status}); it is due for review again.`);
 }
 
+/**
+ * The scope choices of `devflow learning --configure`.
+ *
+ * D-LEARNING-MODEL-PRECEDENCE: the session-start hook takes the first layer that
+ * supplies a model — the project file, then a `devflow agents` Learning mapping,
+ * then the global file. A global file therefore has no effect for a user who has
+ * such a mapping, and its hint says so.
+ */
+export const CONFIGURE_SCOPE_OPTIONS = [
+  { value: 'project', label: 'Project', hint: 'This project only (.devflow/learning/learning.json)' },
+  {
+    value: 'global',
+    label: 'Global',
+    hint: 'All projects (~/.devflow/learning.json); a devflow agents Learning mapping takes precedence over it',
+  },
+] as const;
+
 async function handleConfigure(): Promise<void> {
   p.intro(color.bgCyan(color.black(' Learning Configuration ')));
 
@@ -309,10 +326,7 @@ async function handleConfigure(): Promise<void> {
 
   const scope = await p.select({
     message: 'Configuration scope',
-    options: [
-      { value: 'project', label: 'Project', hint: 'This project only (.devflow/learning/learning.json)' },
-      { value: 'global', label: 'Global', hint: 'All projects (~/.devflow/learning.json)' },
-    ],
+    options: [...CONFIGURE_SCOPE_OPTIONS],
   });
   if (p.isCancel(scope)) {
     p.cancel('Configuration cancelled.');
