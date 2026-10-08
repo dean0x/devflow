@@ -126,11 +126,10 @@ export const DEVFLOW_PLUGINS: PluginDefinition[] = [
     commands: ['/plan'],
     agents: ['git', 'skim', 'synthesize', 'design'],
     skills: ['gap-analysis', 'design-review', 'patterns', 'worktree-support', 'feature-knowledge', 'apply-feature-knowledge'],
-    // D-CHARTER-BOUNDED-INLINE: no `software-design` or `test-driven-development`.
-    // They were /plan's main-thread companions. The command orchestrates and no
-    // longer loads companions, and nothing else this plugin installs references
-    // them, so keeping them would install two skills for no reader (the reverse
-    // arm of the closure guard rejects exactly that).
+    // D-CHARTER-BOUNDED-INLINE: /plan's main thread orchestrates and loads no
+    // companion skills, so `requires:` lists only skills this plugin's command,
+    // agents and skills reference. `software-design` and `test-driven-development`
+    // have no reader here; the closure guard's reverse arm rejects an unread entry.
     requires: [
       'apply-decisions',
       'architecture',
@@ -184,9 +183,10 @@ export const DEVFLOW_PLUGINS: PluginDefinition[] = [
     commands: ['/code-review'],
     agents: ['git', 'review', 'synthesize'],
     skills: ['architecture', 'complexity', 'consistency', 'database', 'dependencies', 'documentation', 'performance', 'regression', 'reliability', 'review-methodology', 'security', 'testing', 'worktree-support', 'apply-feature-knowledge'],
-    // D-CHARTER-BOUNDED-INLINE: no `quality-gates` or `software-design`. They were
-    // /code-review's main-thread companions. The command orchestrates and no longer
-    // loads companions, and nothing else this plugin installs references them.
+    // D-CHARTER-BOUNDED-INLINE: /code-review's main thread orchestrates and loads
+    // no companion skills, so `requires:` lists only skills this plugin's command,
+    // agents and skills reference. `quality-gates` and `software-design` have no
+    // reader here; the closure guard's reverse arm rejects an unread entry.
     requires: ['apply-decisions', 'docs-framework', 'git'],
     rules: [],
   },

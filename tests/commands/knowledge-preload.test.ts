@@ -10,7 +10,7 @@
  * skill body from disk and carries it twice.
  *
  * Two halves of one fact, each by a named collector with a known-bad probe over
- * the wording it replaced: the agent really does preload the skill and hold no
+ * the forbidden wording: the agent really does preload the skill and hold no
  * Skill tool (so the instruction is redundant), and no compiled command still
  * gives it.
  */
@@ -24,7 +24,7 @@ import { requireDistFile, requireDistFiles } from '../helpers.js'
 const ROOT = path.resolve(import.meta.dirname, '..', '..')
 const KNOWLEDGE_AGENT = path.join(ROOT, 'src', 'assets', 'agents', 'knowledge.md')
 
-/** The load instructions a spawn prompt must not give, as they were worded. */
+/** The load instructions a spawn prompt must not give, each paired with the prompt site it would appear in. */
 const REDUNDANT_LOADS: ReadonlyArray<readonly [string, string]> = [
   ['the write-back partial', 'Load the devflow:feature-knowledge skill'],
   ['the research spawn', 'instructing it to load `devflow:feature-knowledge`'],

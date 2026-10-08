@@ -5,10 +5,10 @@
  * D-ARGS-ONCE. Claude Code substitutes the placeholder at EVERY occurrence in a
  * command file, so a long argument (a pasted plan, a stack trace) is copied into
  * the main-thread context once per occurrence. A host binds it once, in its input
- * section, and every later step names the bound text `COMMAND_INPUT`. The block
- * replaces the inline code span the placeholder used to sit in: a multi-line or
- * backtick-bearing argument breaks a code span and leaves the rest of the command
- * mis-parsed, whereas a tag pair holds it whole.
+ * section, and every later step names the bound text `COMMAND_INPUT`. The
+ * placeholder sits on its own line inside a tag pair, never in an inline code
+ * span: a multi-line or backtick-bearing argument breaks a code span and leaves
+ * the rest of the command mis-parsed, whereas a tag pair holds it whole.
  *
  * What this guard holds, over `dist/commands/*.md`:
  *   - at most `MAX_ARGUMENTS_PER_COMMAND` placeholders per file, the literal and
