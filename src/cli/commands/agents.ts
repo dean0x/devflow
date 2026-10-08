@@ -14,6 +14,11 @@
  *   devflow agents --list    → tabular list (safe in non-TTY)
  *   devflow agents --set <agent> --model <m> --effort <e>
  *   devflow agents --reset [--yes]
+ *
+ * D-WORKER-AGENTS: `memory` is a background worker, not an agent, and is
+ * settable here as `--set memory` and as a row after the agents in `--list` and
+ * the TUI. Its state is always 'worker'; its values are held to the worker
+ * domain (Claude models and effort levels only) by validateWorkerValue.
  */
 
 import { Command } from 'commander';
