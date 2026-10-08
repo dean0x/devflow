@@ -1144,18 +1144,18 @@ describe('worker row', () => {
     makeRow({
       name: 'memory',
       worker: true,
-      shippedDefault: 'haiku',
+      shippedDefault: 'claude-sonnet-5-5',
       shippedEffort: 'high',
       installed: false,
       inRegistry: false,
       ...overrides,
     });
 
-  it('renders MODEL default (haiku), EFFORT default (high) and STATE worker', () => {
+  it('renders MODEL default (claude-sonnet-5-5), EFFORT default (high) and STATE worker', () => {
     const state = makeState({ rows: [makeRow({ name: 'code' }), memoryRow()], cursor: 0 });
     const line = renderStripped(state).find(l => l.includes('Memory'));
     expect(line).toBeDefined();
-    expect(line).toContain('default (haiku)');
+    expect(line).toContain('default (claude-sonnet-5-5)');
     expect(line).toContain('default (high)');
     expect(line!.slice(66)).toBe('worker');
   });
@@ -1175,7 +1175,7 @@ describe('worker row', () => {
     const line = renderStripped(state).find(l => l.includes('Memory'));
     expect(line).toContain('sonnet');
     expect(line).toContain('medium');
-    expect(line).not.toContain('default (haiku)');
+    expect(line).not.toContain('default (claude-sonnet-5-5)');
   });
 
   it('shows a full claude- identifier bare, not as unavailable: it is in the worker domain', () => {
@@ -1196,5 +1196,80 @@ describe('worker row', () => {
     });
     const line = renderStripped(state).find(l => l.includes('Code'));
     expect(line).toContain('retired-model (unavailable)');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// D-FOCUSED-CELL-FITS: the focused cell keeps its arrows and unsaved mark
+// ---------------------------------------------------------------------------
+
+describe('focused MODEL cell fits its column', () => {
+  const memoryRow = (overrides: Partial<AgentRow> = {}): AgentRow =>
+    makeRow({
+      name: 'memory',
+      worker: true,
+      shippedDefault: 'claude-sonnet-5-5',
+      shippedEffort: 'high',
+      installed: false,
+      inRegistry: false,
+      ...overrides,
+    });
+  // PREFIX 2 + AGENT 12 = 14; MODEL is 30 wide, so EFFORT starts at 44 and STATE at 66.
+  const modelCellOf = (line: string): string => line.slice(14, 44);
+  const focusedLine = (row: AgentRow): string => {
+    const state = makeState({ rows: [makeRow({ name: 'code' }), row], cursor: 1, activeField: 'model' });
+    const line = renderStripped(state).find(l => l.includes(formatAgentName(row.name)));
+    if (line === undefined) throw new Error(`no ${row.name} row`);
+    return line;
+  };
+
+  it('memory row, MODEL focused, unsaved: the full model name, the unsaved mark and both arrows survive', () => {
+    const line = focusedLine(memoryRow({ configuredModel: 'default', originalModel: 'sonnet' }));
+    const cell = modelCellOf(line).trim();
+    expect(cell.startsWith('‹')).toBe(true);
+    expect(cell.endsWith('›')).toBe(true);
+    expect(cell).toContain('default (claude-sonnet-5-5)');
+    expect(cell.indexOf('●')).toBeGreaterThan(cell.indexOf('claude-sonnet-5-5)'));
+    expect(cell.indexOf('●')).toBeLessThan(cell.lastIndexOf('›'));
+    expect(cell).not.toContain('…');
+  });
+
+  it('memory row, MODEL focused, saved: the full model name and both arrows survive', () => {
+    const line = focusedLine(memoryRow());
+    const cell = modelCellOf(line).trim();
+    expect(cell.startsWith('‹')).toBe(true);
+    expect(cell.endsWith('›')).toBe(true);
+    expect(cell).toContain('default (claude-sonnet-5-5)');
+    expect(cell).not.toContain('…');
+  });
+
+  it('the memory row keeps EFFORT and STATE in their columns and the line inside 80 columns', () => {
+    const line = focusedLine(memoryRow({ configuredModel: 'default', originalModel: 'sonnet' }));
+    expect(line.slice(44, 66).trim()).toBe('default (high)');
+    expect(line.slice(66)).toBe('worker');
+    expect(line.length).toBeLessThanOrEqual(80);
+  });
+
+  it('an agent whose off-catalog pin overflows the column still shows both arrows and the unsaved mark', () => {
+    const line = focusedLine(makeRow({
+      name: 'design',
+      configuredModel: 'retired-model-with-a-very-long-name',
+      originalModel: 'default',
+    }));
+    const cell = modelCellOf(line).trim();
+    expect(cell.startsWith('‹')).toBe(true);
+    expect(cell.endsWith('›')).toBe(true);
+    expect(cell).toContain('●');
+    expect(line.slice(44, 66).trim()).toBe('default');
+    expect(line.slice(66)).toBe('active');
+  });
+
+  it('a value that fits keeps the spaced ‹ value › form', () => {
+    expect(modelCellOf(focusedLine(makeRow({ name: 'design' }))).trim()).toBe('‹ default (sonnet) ›');
+    expect(modelCellOf(focusedLine(makeRow({
+      name: 'design',
+      configuredModel: 'opus',
+      originalModel: 'sonnet',
+    }))).trim()).toBe('‹ opus ● ›');
   });
 });

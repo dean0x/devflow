@@ -28,6 +28,11 @@
  * unsaved mark are never clipped on the cursor row. The agent names the registry
  * holds are at most 10 characters ("Scrutinize"); longer orphan keys are
  * truncated by truncateVisible.
+ *
+ * MODEL has no such slack for a worker row, whose shipped default is a full
+ * model identifier: the focused cell narrows its own wrapper to fit
+ * (D-FOCUSED-CELL-FITS, renderFocusedCell) rather than taking a column from
+ * the 80-column budget.
  */
 
 import {
@@ -38,6 +43,7 @@ import {
   cyan,
   gray,
   stripAnsi,
+  truncate,
 } from '../../core/ansi.js';
 import { padToVisible, truncateVisible, sanitizeCell } from '../tui/cells.js';
 import {
@@ -98,6 +104,41 @@ export function formatAgentName(name: string): string {
 // ---------------------------------------------------------------------------
 // Cell renderers (pure, return styled string)
 // ---------------------------------------------------------------------------
+
+/**
+ * Wrap the focused field's value in the cursor arrows, with the unsaved mark
+ * after the value when the field is dirty.
+ *
+ * D-FOCUSED-CELL-FITS: the arrows and the unsaved mark are never clipped. A
+ * column is sized for the common value, but a worker row ships a full model
+ * identifier ("default (claude-sonnet-5-5)" is 27 characters), so the spaced
+ * wrapper "‹ default (claude-sonnet-5-5) ● ›" is 33 in a 30-wide MODEL cell and
+ * the closing arrow and the mark would fall off the end. The layout already
+ * spends all 80 columns and no other column has slack (EFFORT needs 22 for
+ * "‹ default (medium) ● ›", STATE needs 14 for "saved-inactive"), so the cell
+ * narrows itself instead. The widest form that fits wins:
+ *   spaced   "‹ value ● ›"
+ *   tight    "‹value●›"           — the padding spaces go, the value stays whole
+ *   clipped  "‹valu…●›"           — only a value wider than the column; the
+ *                                    value gives way, never the wrapper
+ *
+ * Pure function, no I/O.
+ */
+function renderFocusedCell(value: string, dirty: boolean, maxWidth: number): string {
+  const valueWidth = stripAnsi(value).length;
+  const mark = dirty ? '●' : '';
+
+  const spacedWidth = valueWidth + 4 + (dirty ? 2 : 0);
+  if (spacedWidth <= maxWidth) {
+    return cyan(`‹ ${value}${dirty ? ` ${mark}` : ''} ›`);
+  }
+
+  const tightBudget = Math.max(1, maxWidth - 2 - mark.length);
+  if (valueWidth <= tightBudget) {
+    return cyan(`‹${value}${mark}›`);
+  }
+  return cyan(`‹${truncate(stripAnsi(value), tightBudget)}${mark}›`);
+}
 
 /** Options for renderModelCell — named to prevent silent argument transposition. */
 interface RenderModelCellOptions {
@@ -165,8 +206,7 @@ function renderModelCell({
   let cell: string;
   if (isCursor && isActive) {
     // Active field on cursor row: wrap in ‹ ›, put ● after value if dirty
-    const inner = dirty ? `${valueStr} ●` : valueStr;
-    cell = cyan(`‹ ${inner} ›`);
+    cell = renderFocusedCell(valueStr, dirty, maxWidth);
   } else if (isCursor && dirty) {
     cell = `● ${valueStr}`;
   } else {
@@ -193,8 +233,7 @@ function renderEffortCell(
 
   let cell: string;
   if (isCursor && isActive) {
-    const inner = dirty ? `${value} ●` : value;
-    cell = cyan(`‹ ${inner} ›`);
+    cell = renderFocusedCell(value, dirty, maxWidth);
   } else if (isCursor && dirty) {
     cell = `● ${value}`;
   } else {

@@ -322,11 +322,27 @@ const EFFORT_COLUMN_WIDTH = Math.max(
   EFFORT_INHERIT.length,
 );
 
+/** Narrowest the DEFAULT column of `--list` renders; it widens to fit a longer shipped default. */
+const DEFAULT_COLUMN_MIN_WIDTH = 10;
+
+/** Narrowest the CONFIGURED column of `--list` renders; it widens to fit a longer configured model. */
+const CONFIGURED_COLUMN_MIN_WIDTH = 16;
+
 export function formatListOutput(rows: ListRow[], proxyEnabled: boolean): string {
   const lines: string[] = [];
   const AGENT_W = 20;
-  const DEFAULT_W = 10;
-  const CONFIGURED_W = 16;
+  // DEFAULT and CONFIGURED grow to the longest value in their column, so a full
+  // model identifier (the memory worker ships claude-sonnet-5-5; a user maps
+  // claude-sonnet-4-6) is shown whole, not cut to a fixed width and read as a
+  // different model.
+  const DEFAULT_W = Math.max(
+    DEFAULT_COLUMN_MIN_WIDTH,
+    ...rows.map(row => stripAnsi(row.defaultModel).length),
+  );
+  const CONFIGURED_W = Math.max(
+    CONFIGURED_COLUMN_MIN_WIDTH,
+    ...rows.map(row => stripAnsi(row.configured).length),
+  );
   const EFFORT_W = EFFORT_COLUMN_WIDTH;
 
   // Header

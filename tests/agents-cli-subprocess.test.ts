@@ -88,7 +88,7 @@ describe('devflow agents and init (built CLI, temp HOME)', () => {
       const lines = result.stdout.split('\n');
       const memoryAt = lines.findIndex(l => l.startsWith('memory'));
       expect(memoryAt).toBeGreaterThan(0);
-      expect(lines[memoryAt]).toMatch(/^memory\s+haiku\s+default\s+default \(high\)\s+worker$/);
+      expect(lines[memoryAt]).toMatch(/^memory\s+claude-sonnet-5-5\s+default\s+default \(high\)\s+worker$/);
       expect(lines.slice(memoryAt + 1).filter(l => l.startsWith('memory'))).toEqual([]);
     });
 
