@@ -22,7 +22,7 @@ import { stripAnsi } from '../src/hud/colors.js';
 interface RunResult {
   /** Everything the command wrote to stdout, clack log lines included. */
   out: string;
-  exitCode: number | string | undefined;
+  exitCode: number | string | null | undefined;
 }
 
 describe('devflow agents (in process, temp HOME)', () => {

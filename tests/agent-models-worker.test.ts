@@ -27,8 +27,10 @@ import {
   saveAgentMapping,
   type AgentMappingFile,
 } from '../src/core/agent-models.js';
+import { readFrontmatterEffort } from '../src/core/agent-frontmatter.js';
 import { CLAUDE_MODEL_ALIASES } from '../src/core/external-models.js';
 import { DEVFLOW_PLUGINS, getAllAgentNames } from '../src/core/plugins.js';
+import { resolveAgentSource } from './helpers.js';
 
 const file = (agents: AgentMappingFile['agents']): AgentMappingFile => ({ version: 1, agents });
 
@@ -254,6 +256,86 @@ describe('countExternalMappedAgents — workers are not agents', () => {
     const mapping = file({ memory: { model: 'gpt-5' }, code: { model: 'gpt-5.6-sol' } });
 
     expect(countExternalMappedAgents(mapping)).toBe(1);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Shipped defaults stay put: the real tree through a reapply
+// ---------------------------------------------------------------------------
+//
+// This ticket builds plumbing and changes no effective model: an install at
+// shipped defaults carries the shipped `model:` lines, no agent carries an
+// `effort:` line, and neither a Validate entry that restates the shipped model
+// nor an agents.memory entry changes a byte of any installed agent.
+
+describe('reapplyAgentMapping — the real shipped tree at shipped defaults', () => {
+  let tmp: string;
+  let installDir: string;
+  let devflowDir: string;
+  const names = getAllAgentNames();
+
+  beforeEach(async () => {
+    tmp = await fs.mkdtemp(path.join(os.tmpdir(), 'devflow-reapply-real-'));
+    installDir = path.join(tmp, 'install');
+    devflowDir = path.join(tmp, 'devflow');
+    await fs.mkdir(installDir, { recursive: true });
+    await fs.mkdir(devflowDir, { recursive: true });
+    for (const name of names) {
+      await fs.writeFile(path.join(installDir, `${name}.md`), resolveAgentSource(name).content, 'utf-8');
+    }
+  });
+
+  afterEach(async () => {
+    await fs.rm(tmp, { recursive: true, force: true });
+  });
+
+  const installedBytes = async (): Promise<Map<string, string>> => {
+    const out = new Map<string, string>();
+    for (const name of names) out.set(name, await fs.readFile(path.join(installDir, `${name}.md`), 'utf-8'));
+    return out;
+  };
+
+  it('no shipped agent carries an effort line (this ticket adds none)', async () => {
+    for (const [name, content] of await installedBytes()) {
+      const effort = readFrontmatterEffort(content);
+      expect(effort.ok && effort.value, `${name} ships an effort`).toBe('');
+    }
+  });
+
+  it('an empty mapping rewrites nothing', async () => {
+    const before = await installedBytes();
+
+    const result = await reapplyAgentMapping({ installDir, devflowDir, proxyEnabled: false });
+
+    expect(result.updated).toEqual([]);
+    expect(await installedBytes()).toEqual(before);
+  });
+
+  it('a validate entry beside an agents.memory entry leaves every installed agent byte-identical', async () => {
+    const before = await installedBytes();
+    await saveAgentMapping(devflowDir, file({
+      validate: { model: 'haiku' },
+      memory: { model: 'sonnet', effort: 'medium' },
+    }));
+
+    const result = await reapplyAgentMapping({ installDir, devflowDir, proxyEnabled: false });
+
+    expect(result.updated).toEqual([]);
+    expect(await installedBytes()).toEqual(before);
+  });
+
+  it('a real override still lands, and only on its own agent', async () => {
+    const before = await installedBytes();
+    await saveAgentMapping(devflowDir, file({ validate: { model: 'opus' }, memory: { model: 'sonnet' } }));
+
+    const result = await reapplyAgentMapping({ installDir, devflowDir, proxyEnabled: false });
+
+    expect(result.updated).toEqual(['validate']);
+    const after = await installedBytes();
+    for (const name of names) {
+      if (name === 'validate') expect(after.get(name)).toContain('model: opus');
+      else expect(after.get(name), name).toBe(before.get(name));
+    }
   });
 });
 
