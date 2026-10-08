@@ -145,6 +145,43 @@ describe('removal: scoped, gated, and never beyond the registry', () => {
     expect(await installedSkillDirs()).toEqual([...kept].map(prefixSkillName).sort());
   });
 
+  it('reports no removal when no deselected skill was ever on disk', async () => {
+    // The deselected set is registry arithmetic; what was REMOVED is a fact about
+    // the disk. A fresh install into an empty tree deselects every unselected
+    // plugin's skills and deletes none of them, so the summary must stay silent.
+    const narrow = [plugin('devflow-core-skills'), plugin('devflow-explore')];
+    const kept = skillsOf(narrow);
+    const deselected = [...skillsOf(DEVFLOW_PLUGINS)].filter(s => !kept.has(s));
+    expect(deselected.length, 'the selection deselects something, so this is not vacuous').toBeGreaterThan(0);
+
+    const report = await run({ plugins: narrow, isPartialInstall: false });
+
+    expect(report.removedSkills).toEqual([]);
+    expect(formatSkillScopeSummary(report, true), 'nothing was removed, so there is nothing to tell the user').toEqual([]);
+    expect(warnings).toEqual([]);
+  });
+
+  it('names only the deselected skill that was actually on disk and removed', async () => {
+    const narrow = [plugin('devflow-core-skills'), plugin('devflow-explore')];
+    const present = 'go';
+    expect(skillsOf(narrow).has(present), 'precondition: the selection deselects it').toBe(false);
+    expect(skillsOf(DEVFLOW_PLUGINS).has(present), 'precondition: the registry knows it').toBe(true);
+
+    const presentDir = path.join(claudeDir, 'skills', prefixSkillName(present));
+    await fs.mkdir(presentDir, { recursive: true });
+    await fs.writeFile(path.join(presentDir, 'SKILL.md'), '# previously installed\n', 'utf-8');
+
+    const report = await run({ plugins: narrow, isPartialInstall: false });
+
+    expect(report.removedSkills).toEqual([present]);
+    expect(await exists(presentDir), 'the skill that was there is gone').toBe(false);
+
+    const lines = formatSkillScopeSummary(report, true);
+    expect(lines).toHaveLength(1);
+    expect(lines[0].message).toContain(`Removed 1 skill(s) no selected plugin requires: ${present}.`);
+    expect(lines[0].message, 'a deselected skill that was never installed is not named').not.toContain('react');
+  });
+
   it('a partial (--plugin) install removes NOTHING (AC-22)', async () => {
     await run({ plugins: DEVFLOW_PLUGINS, isPartialInstall: false });
     const before = await installedSkillDirs();

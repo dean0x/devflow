@@ -85,8 +85,9 @@ export interface InstallReport {
   overlayFailures: OverlayFailure[];
   /**
    * Skill names removed because no plugin in the effective selection owns or
-   * requires them — the visible cost of a deselection. Empty on a partial
-   * install, which never removes anything.
+   * requires them — the visible cost of a deselection. Only skills that were on
+   * disk and are now gone: a deselected skill that was never installed is absent.
+   * Empty on a partial install, which never removes anything.
    */
   removedSkills: string[];
   /**
@@ -1744,6 +1745,37 @@ function recordSweep(
 }
 
 /**
+ * Remove the named `devflow:`-prefixed skill directories from `skillsDir` and
+ * report which of them were actually there to remove.
+ *
+ * `names` is registry arithmetic (the skills no selected plugin owns), so most of
+ * it is routinely absent from disk. Only the deleter can say what it deleted:
+ * `fs.rm` is called WITHOUT `force`, so an absent directory rejects with ENOENT —
+ * "nothing to remove", neither a removal nor a failure. Reporting the plan instead
+ * would tell the user about deletions that never happened.
+ *
+ * Per-item failure isolation, never throws: any other rejection is recorded in
+ * `failed` and the remaining names are still attempted.
+ */
+async function removeDeselectedSkills(
+  skillsDir: string,
+  names: Iterable<string>,
+): Promise<{ removed: string[]; failed: Array<{ name: string; error: unknown }> }> {
+  const removed: string[] = [];
+  const failed: Array<{ name: string; error: unknown }> = [];
+  for (const name of names) {
+    try {
+      await fs.rm(path.join(skillsDir, prefixSkillName(name)), { recursive: true });
+      removed.push(name);
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code === 'ENOENT') continue;
+      failed.push({ name, error: err });
+    }
+  }
+  return { removed, failed };
+}
+
+/**
  * Install plugins via manual file copy.
  * Handles cleanup of old monolithic structure, deduplication of shared assets,
  * and script installation with executable permissions.
@@ -1899,14 +1931,13 @@ export async function installViaFileCopy(options: FileCopyOptions): Promise<Inst
   // Remove the skills no selected plugin owns or requires — the deselection half
   // of the scoped install. Empty on a partial install by construction
   // (resolveSkillInstallPlan gates it), so `--plugin=X` adds and never subtracts
-  // (AC-22). Failures are per-item and non-fatal.
-  for (const skill of skillPlan.remove) {
-    try {
-      await fs.rm(path.join(claudeDir, 'skills', prefixSkillName(skill)), { recursive: true, force: true });
-      report.removedSkills.push(skill);
-    } catch (err) {
-      warn(`Could not remove deselected skill "${prefixSkillName(skill)}" — ${String(err)}`);
-    }
+  // (AC-22). Failures are per-item and non-fatal. `removedSkills` lists only what
+  // was on disk and is now gone: the plan is registry arithmetic and mostly names
+  // skills that were never installed.
+  const deselected = await removeDeselectedSkills(path.join(claudeDir, 'skills'), skillPlan.remove);
+  report.removedSkills.push(...deselected.removed);
+  for (const failure of deselected.failed) {
+    warn(`Could not remove deselected skill "${prefixSkillName(failure.name)}" — ${String(failure.error)}`);
   }
 
   // Install commands from selected plugins using registry-driven lookup.
