@@ -97,7 +97,7 @@ Return structured alignment status:
 | {item} | RESOLVED/STILL_FAILING | {details} |
 ```
 
-Report cap: final message at most about 1,500 tokens; longer material goes to a `mktemp` file (via Bash or Write) and the message gives its path. Exempt, inline in full: the `### Status` line and the `### Misalignments Found` table.
+Report cap: final message at most about 1,500 tokens; longer material goes to a unique `mktemp`-style temp file written with Write (your Bash is git read-only) and the message gives its path. Exempt, inline in full: the `### Status` line and the `### Misalignments Found` table.
 
 ## Boundaries
 
