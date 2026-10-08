@@ -836,6 +836,16 @@ describe('validateSetArgs — effort inherit', () => {
   });
 });
 
+describe('devflow agents --effort help', () => {
+  it('lists the levels, default and inherit', async () => {
+    const { agentsCommand } = await import('../src/cli/commands/agents.js');
+    const help = stripAnsi(agentsCommand.helpInformation());
+    for (const word of [...EFFORT_LEVELS, 'default', 'inherit']) {
+      expect(help, word).toContain(word);
+    }
+  });
+});
+
 describe('applySetMapping — effort inherit', () => {
   it('stores inherit as the effort', () => {
     const result = applySetMapping({ version: 1, agents: {} }, 'code', { effort: 'inherit' });
