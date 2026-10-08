@@ -567,6 +567,7 @@ d sub/
       "workflow-size-guideline": null,
       "default-model": null,
       "goal-checkin-minutes": null,
+      "bash-max-timeout-ms": null,
       "spellcheck": null,
       "view-mode": "default"
     },
