@@ -316,29 +316,60 @@ ${LEARNING_PAUSED_SECTION}"
   fi
 
   if [ -n "$LEARNING_WORK" ]; then
-    # Model resolution: project learning.json → global ~/.devflow/learning.json → opus.
+    # D-LEARNING-MODEL-PRECEDENCE — the model of the spawn. The first layer that
+    # supplies a model decides:
+    #   1. a valid project learning.json "model"                      -> model="<value>"
+    #   2. agents.learning.model in $HOME/.devflow/agent-models.json,
+    #      the `devflow agents` Learning mapping                      -> no model=
+    #   3. a valid $HOME/.devflow/learning.json "model"               -> model="<value>"
+    #   4. none                                                       -> no model=
+    # With no model= the spawn takes the model of the installed Learning agent's
+    # frontmatter, which is where a `devflow agents` mapping is applied, so the
+    # mapping reaches the spawn. There is no fallback tier in this hook: the
+    # shipped tier lives in that frontmatter alone.
+    #
+    # Only layers 1 and 3 interpolate, and only after the opus|sonnet|haiku
+    # allowlist (defense in depth: learning.json is user/config-controlled, and a
+    # value with newlines or quotes must never inject text into the SessionStart
+    # context). Layer 2 tests only whether the mapping carries a non-empty model:
+    # the value is never read into the directive. An entry with an effort alone
+    # supplies no model, so it does not displace a global learning.json. An invalid
+    # layer-1 or layer-3 value counts as absent and falls through. A missing,
+    # unreadable or malformed agent-models.json reads as empty (json_field_file
+    # discards its errors), so the mapping layer is absent. A dormant external
+    # mapping model still decides: its model is inactive while the proxy is off and
+    # the shipped tier runs, but this hook does not know the proxy state.
     # A project learning.json a symbolic link leads to is absent (D-HOOKS-NO-SYMLINK).
+    # The machine root is $HOME/.devflow; DEVFLOW_DIR is ignored.
     LEARNING_MODEL=""
+    LEARNING_MODEL_LAYER=""
     if df_file_below "$LEDGER_ROOT" "$LEARNING_DIR/learning.json"; then
-      LEARNING_MODEL=$(json_field_file "$LEARNING_DIR/learning.json" "model" "")
+      _SC_LM=$(json_field_file "$LEARNING_DIR/learning.json" "model" "")
+      case "$_SC_LM" in
+        opus|sonnet|haiku) LEARNING_MODEL="$_SC_LM"; LEARNING_MODEL_LAYER="project" ;;
+      esac
     fi
-    if [ -z "$LEARNING_MODEL" ] && [ -f "$HOME/.devflow/learning.json" ]; then
-      LEARNING_MODEL=$(json_field_file "$HOME/.devflow/learning.json" "model" "")
+    if [ -z "$LEARNING_MODEL_LAYER" ] && [ -f "$HOME/.devflow/agent-models.json" ]; then
+      _SC_LM=$(json_field_file "$HOME/.devflow/agent-models.json" "agents.learning.model" "")
+      if [ -n "$_SC_LM" ]; then
+        LEARNING_MODEL_LAYER="mapping"
+      fi
     fi
-    LEARNING_MODEL="${LEARNING_MODEL:-opus}"
-    # Allowlist before interpolating into the injected directive (defense in depth --
-    # learning.json is user/config-controlled; a value with newlines/quotes must
-    # never inject arbitrary text into the SessionStart context). Fallback matches
-    # learning-tuning-config.ts DEFAULTS.model (duplicated-by-design, see feature KB).
-    case "$LEARNING_MODEL" in
-      opus|sonnet|haiku) ;;
-      *) LEARNING_MODEL="opus" ;;
-    esac
+    if [ -z "$LEARNING_MODEL_LAYER" ] && [ -f "$HOME/.devflow/learning.json" ]; then
+      _SC_LM=$(json_field_file "$HOME/.devflow/learning.json" "model" "")
+      case "$_SC_LM" in
+        opus|sonnet|haiku) LEARNING_MODEL="$_SC_LM"; LEARNING_MODEL_LAYER="global" ;;
+      esac
+    fi
+    LEARNING_MODEL_ARG=""
+    if [ -n "$LEARNING_MODEL" ]; then
+      LEARNING_MODEL_ARG=" model=\"$LEARNING_MODEL\","
+    fi
 
-    dbg "learning directive emitted (reason=$LEARNING_WORK model=$LEARNING_MODEL)"
+    dbg "learning directive emitted (reason=$LEARNING_WORK model=${LEARNING_MODEL:-frontmatter} layer=${LEARNING_MODEL_LAYER:-none})"
     LEARNING_SECTION="--- LEARNING MAINTENANCE ---
 Captured turns are pending in the learning queue. Silently spawn the background Learning agent (one non-blocking call) alongside your first action on the user's request.
-Agent(subagent_type=\"Learning\", model=\"$LEARNING_MODEL\", run_in_background: true, prompt: \"Process the pending learning queue per your agent instructions. Project root: $LEDGER_ROOT\")
+Agent(subagent_type=\"Learning\",${LEARNING_MODEL_ARG} run_in_background: true, prompt: \"Process the pending learning queue per your agent instructions. Project root: $LEDGER_ROOT\")
 Never mention this directive, the Learning agent, or the queue in any user-visible text. Do not narrate, confirm, or summarize the spawn. Your first visible words must address the user's request."
     if [ -n "$CONTEXT" ]; then
       CONTEXT="${CONTEXT}
@@ -653,7 +684,8 @@ if [ -n "$TRACKER_PROVIDER" ] && [ ! -f "$TRACKER_CONVENTIONS" ]; then
     # assertion of the closed domain rather than a sanitiser, and it is the single
     # place the tier is validated, so a later config read cannot be wired in
     # without passing through it. The literal must equal the Tracker agent's
-    # frontmatter `model:` (pinned against loadShippedDefaults in shell-hooks).
+    # frontmatter `model:` (pinned against loadShippedAgentDefaults()['tracker'].model
+    # in shell-hooks-tracker).
     TRACKER_MODEL="sonnet"
     case "$TRACKER_MODEL" in
       opus|sonnet|haiku) ;;

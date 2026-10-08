@@ -351,6 +351,18 @@ describe('resolveEffective', () => {
       expect(resolveEffective('code', mapping, shipped, true).effort).toBe('medium');
     });
   });
+
+  // D-LEARNING-MODEL-PRECEDENCE: the session-start hook lets a Learning mapping
+  // decide the spawn's model by omitting model=, so the installed frontmatter is
+  // what runs. With the proxy off an external mapping model is dormant, and the
+  // frontmatter the reapply writes must be the shipped Learning model.
+  it('learning: a dormant external mapping resolves to the shipped Learning model while the proxy is off', () => {
+    const mapping = makeMapping({ learning: { model: 'gpt-5.5' } });
+    const shipped = { learning: { model: 'opus' } };
+
+    expect(resolveEffective('learning', mapping, shipped, false).model).toBe('opus');
+    expect(resolveEffective('learning', mapping, shipped, true).model).toBe('gpt-5.5');
+  });
 });
 
 // ---------------------------------------------------------------------------
