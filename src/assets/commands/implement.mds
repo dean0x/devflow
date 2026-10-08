@@ -314,7 +314,7 @@ ISSUE_PR_LINK: {ISSUE_PR_LINK captured in Phase 1, or (none)}"
 After Code agent completes, spawn Validate agent to verify correctness:
 
 ```
-Agent(subagent_type="Validate", model="haiku"):
+Agent(subagent_type="Validate"):
 "FILES_CHANGED: {list of files from Code agent output}
 VALIDATION_SCOPE: full
 Run build, typecheck, lint, test. Report pass/fail with failure details."
@@ -394,7 +394,7 @@ If Scrutinize agent returns BLOCKED, report to user and halt.
 If Scrutinize agent made code changes (status: FIXED), spawn Validate agent to verify:
 
 ```
-Agent(subagent_type="Validate", model="haiku"):
+Agent(subagent_type="Validate"):
 "FILES_CHANGED: {files modified by Scrutinize agent}
 VALIDATION_SCOPE: changed-only
 Verify Scrutinize agent's fixes didn't break anything."
@@ -442,7 +442,7 @@ Validate alignment with request and plan. Report ALIGNED or MISALIGNED with deta
    ```
    - Spawn Validate agent to verify fix didn't break tests:
    ```
-   Agent(subagent_type="Validate", model="haiku"):
+   Agent(subagent_type="Validate"):
    "FILES_CHANGED: {files modified by fix Code agent}
    VALIDATION_SCOPE: changed-only"
    ```
@@ -490,7 +490,7 @@ After every Test agent run — PASS or FAIL, first run or retry — append its T
    ```
    - Spawn Validate agent to verify fix didn't break tests:
    ```
-   Agent(subagent_type="Validate", model="haiku"):
+   Agent(subagent_type="Validate"):
    "FILES_CHANGED: {files modified by fix Code agent}
    VALIDATION_SCOPE: changed-only"
    ```

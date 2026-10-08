@@ -275,7 +275,7 @@ If no fixes were made (CODE_AGENT_RESULTS contains 0 commits) → set VERIFICATI
 Otherwise, spawn Validate agent:
 
 ```
-Agent(subagent_type="Validate", model="haiku"):
+Agent(subagent_type="Validate"):
 "FILES_CHANGED: {list of files from Code agent output}
 VALIDATION_SCOPE: full
 Run build, typecheck, lint, test. Report pass/fail with failure details."

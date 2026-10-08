@@ -265,6 +265,14 @@
       "occurrences": 1,
       "sourceFile": "tests/init-location-invariance.test.ts",
       "description": "Locations `devflow init` is run from in the location-invariance matrix (D-INIT-LOCATION-INVARIANCE, #406 item 19): repo root, subdirectory, linked worktree, non-git directory, a repository path with a space, a symlinked HOME and a repository rooted at HOME. Each must install the identical machine side and write per-repository files only at the checkout toplevel. Floors rise, never fall."
+    },
+    {
+      "id": "spawn-no-model-agent-site-floor",
+      "floor": 167,
+      "pattern": "const AGENT_SITE_FLOOR = 167",
+      "occurrences": 1,
+      "sourceFile": "tests/guards/spawn-no-hardcoded-model.test.ts",
+      "description": "Agent( spawn sites the no-hardcoded-model guard (D-SPAWN-NO-MODEL) must find across src/assets/{commands,agents,skills,mds} and dist/{commands,agents}. Measured 167 when the guard was added (source and compiled copies both count). A parser that stops finding spawns would pass the model scan vacuously, so the count is its liveness proof. Floors rise, never fall."
     }
   ],
   "ceilings": [
