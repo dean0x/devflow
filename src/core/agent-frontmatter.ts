@@ -143,6 +143,33 @@ export function readFrontmatterModel(content: string): Result<string, Frontmatte
 }
 
 // ---------------------------------------------------------------------------
+// readFrontmatterEffort
+// ---------------------------------------------------------------------------
+
+/**
+ * Read the `effort:` value from the first frontmatter block.
+ *
+ * D-SHIPPED-EFFORT: an agent's shipped effort is part of its shipped default,
+ * the same as its model, so the reader that answers "what did devflow ship?"
+ * must see both. This is the effort twin of readFrontmatterModel and has the
+ * same contract: it reads only the leading frontmatter block (an `effort:`
+ * line in the body is ignored), returns Ok('') when no `effort:` line exists,
+ * and returns an error for missing or unterminated frontmatter.
+ *
+ * The value is returned as written. Whether it is a valid effort level is the
+ * caller's decision (loadShippedAgentDefaults owns that check against
+ * EFFORT_LEVELS), so a typo in a shipped file is reported rather than hidden here.
+ */
+export function readFrontmatterEffort(content: string): Result<string, FrontmatterError> {
+  const parts = parseFrontmatter(content);
+  if (!parts.ok) return Err(parts.error);
+
+  const EFFORT_RE = /^effort:[ \t]*(.*?)[ \t]*$/m;
+  const m = EFFORT_RE.exec(parts.value.fmBody);
+  return Ok(m ? m[1] : '');
+}
+
+// ---------------------------------------------------------------------------
 // rewriteAgentFrontmatter
 // ---------------------------------------------------------------------------
 

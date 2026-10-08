@@ -83,7 +83,7 @@ export function compiledSkillRefsDir(root: string = getPackageRoot()): string {
  * The single owner of the dist-first agent-resolution policy: a generator
  * host's compiled artifact in dist/agents/ supersedes a hand-authored file of
  * the same name in src/assets/agents/. Every consumer reads the order from
- * here — the installer's first-hit-wins resolve, loadShippedDefaults's
+ * here — the installer's first-hit-wins resolve, loadShippedAgentDefaults's
  * first-wins merge, and the test harness's resolveAgentSource — so the
  * convention is stated once and cannot drift apart between call sites.
  *

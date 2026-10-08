@@ -15,6 +15,7 @@ import { describe, it, expect } from 'vitest';
 import {
   rewriteAgentFrontmatter,
   readFrontmatterModel,
+  readFrontmatterEffort,
 } from '../src/core/agent-frontmatter.js';
 import { resolveAgentSource, resolveAllAgents } from './helpers.js';
 import { getAllAgentNames } from '../src/core/plugins.js';
@@ -157,6 +158,64 @@ describe('readFrontmatterModel', () => {
     const result = readFrontmatterModel(content);
     expect(result.ok).toBe(true);
     if (result.ok) expect(result.value).toBe('sonnet');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// readFrontmatterEffort
+// ---------------------------------------------------------------------------
+
+describe('readFrontmatterEffort', () => {
+  it('reads the effort from the leading frontmatter block', () => {
+    const content = '---\nname: Test\nmodel: sonnet\neffort: medium\n---\n\nbody';
+    const result = readFrontmatterEffort(content);
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.value).toBe('medium');
+  });
+
+  it('returns Ok("") when the frontmatter carries no effort line', () => {
+    const content = '---\nname: Test\nmodel: sonnet\n---\n\nbody';
+    const result = readFrontmatterEffort(content);
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.value).toBe('');
+  });
+
+  it('ignores an effort: line in the body', () => {
+    const content = '---\nname: Test\nmodel: opus\n---\n\neffort: max\n';
+    const result = readFrontmatterEffort(content);
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.value).toBe('');
+  });
+
+  it('returns the frontmatter effort, not the body line, when both exist', () => {
+    const content = '---\nname: Test\neffort: low\n---\n\neffort: max\n';
+    const result = readFrontmatterEffort(content);
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.value).toBe('low');
+  });
+
+  it('returns error for missing frontmatter', () => {
+    const result = readFrontmatterEffort('no frontmatter here\neffort: high\n');
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error).toBe('no-frontmatter');
+  });
+
+  it('returns error for unterminated frontmatter', () => {
+    const result = readFrontmatterEffort('---\nname: Test\neffort: high\n');
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error).toBe('unterminated-frontmatter');
+  });
+
+  it('trims surrounding whitespace', () => {
+    const result = readFrontmatterEffort('---\nname: Test\neffort:   high  \n---\n\nbody');
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.value).toBe('high');
+  });
+
+  it('handles CRLF frontmatter', () => {
+    const result = readFrontmatterEffort('---\r\nname: Test\r\neffort: xhigh\r\n---\r\n\r\nbody');
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.value).toBe('xhigh');
   });
 });
 

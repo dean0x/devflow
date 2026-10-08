@@ -21,16 +21,23 @@ import * as path from 'path';
 import * as p from '@clack/prompts';
 import color from 'picocolors';
 import {
+  EFFORT_INHERIT,
   EFFORT_LEVELS,
   LEGACY_AGENT_KEYS,
+  WORKER_AGENTS,
+  agentOnlyMapping,
+  isEffortLevel,
+  isWorkerAgent,
   readAgentMapping,
   saveAgentMapping,
   reapplyAgentMapping,
-  loadShippedDefaults,
+  loadShippedAgentDefaults,
   readInstalledAgentNames,
+  validateWorkerValue,
   type AgentMappingFile,
   type AgentMapping,
   type EffortLevel,
+  type ShippedAgentDefault,
 } from '../../core/agent-models.js';
 import {
   CLAUDE_MODEL_ALIASES,
@@ -38,6 +45,7 @@ import {
 } from '../../core/external-models.js';
 import {
   classifyAgentState,
+  formatEffortDisplay,
   AGENT_STATE_LABELS,
   type AgentState,
 } from '../../core/agent-state.js';
@@ -102,20 +110,34 @@ export interface SetArgs {
  *   This preserves the configure-first-then-enable provisioning flow and keeps
  *   `--set` at zero subprocess cost (AC-P9: cache-only, 0 spawns).
  *
+ * D-WORKER-AGENTS: when `agentName` is a worker (`memory`), model and effort are
+ * held to the worker value domain instead — validateWorkerValue, the function
+ * readAgentMapping applies on read — with no catalog lookup: a worker runs
+ * outside any session, so an external model, `inherit` as a model and `inherit`
+ * as an effort are all rejected.
+ *
+ * D-SHIPPED-EFFORT: for an agent, `--effort inherit` is accepted. It stores the
+ * sentinel that drops the agent's effort line; `--effort default` deletes the
+ * key so the shipped effort applies again.
+ *
  * Returns Err when:
  *  - neither model nor effort is provided
  *  - model is unknown AND catalog is known
- *  - effort is unknown (not in EFFORT_LEVELS ∪ 'default')
+ *  - effort is unknown (not in EFFORT_LEVELS ∪ 'default' ∪ 'inherit')
+ *  - agentName is a worker and a value is outside the worker domain
  */
 export function validateSetArgs(
   args: SetArgs,
   catalog: ExternalModelCatalog = { known: false },
+  agentName?: string,
 ): Result<SetArgs> {
   const { model, effort } = args;
 
   if (model === undefined && effort === undefined) {
     return Err('Specify at least one of --model or --effort');
   }
+
+  const worker = agentName !== undefined && isWorkerAgent(agentName);
 
   if (model !== undefined) {
     // Charset gate: applied at every trust boundary regardless of catalog state.
@@ -129,7 +151,10 @@ export function validateSetArgs(
       );
     }
 
-    if (catalog.known) {
+    if (worker) {
+      const check = validateWorkerValue('model', model);
+      if (!check.ok) return Err(check.error);
+    } else if (catalog.known) {
       // Full validation against the discovered catalog.
       const valid: string[] = ['default', ...CLAUDE_MODEL_ALIASES, ...catalog.selectableNames];
       if (!valid.includes(model)) {
@@ -143,11 +168,16 @@ export function validateSetArgs(
   }
 
   if (effort !== undefined) {
-    const valid: string[] = ['default', ...EFFORT_LEVELS];
-    if (!valid.includes(effort)) {
-      return Err(
-        `Unknown effort "${effort}". Valid: ${valid.join(', ')}`
-      );
+    if (worker) {
+      const check = validateWorkerValue('effort', effort);
+      if (!check.ok) return Err(check.error);
+    } else {
+      const valid: string[] = ['default', ...EFFORT_LEVELS, EFFORT_INHERIT];
+      if (!valid.includes(effort)) {
+        return Err(
+          `Unknown effort "${effort}". Valid: ${valid.join(', ')}`
+        );
+      }
     }
   }
 
@@ -181,11 +211,10 @@ export function applySetMapping(
   if (args.effort !== undefined) {
     if (args.effort === 'default') {
       delete existing.effort;
-    } else {
-      // Sound narrowing: validateSetArgs already confirmed args.effort is a valid
-      // EffortLevel before this function is called. SetArgs.effort is string to keep
-      // the CLI entry type permissive; the assertion here is not a compensating cast.
-      existing.effort = args.effort as EffortLevel;
+    } else if (isEffortLevel(args.effort) || args.effort === EFFORT_INHERIT) {
+      // SetArgs.effort is a string to keep the CLI entry type permissive;
+      // validateSetArgs has already confirmed it is a level or the inherit sentinel.
+      existing.effort = args.effort;
     }
   }
 
@@ -207,7 +236,10 @@ export interface ListRow {
   name: string;
   defaultModel: string;
   configured: string;
+  /** The configured effort: a level, `inherit`, or 'default' when unset. */
   effort: string;
+  /** The effort the shipped source carries, if any; shown as `default (<effort>)` when `effort` is 'default'. */
+  shippedEffort?: EffortLevel;
   state: AgentState;
 }
 
@@ -215,7 +247,7 @@ export interface BuildListRowsInput {
   agentNames: string[];
   mapping: AgentMappingFile;
   installDir: string;
-  shippedDefaults: Record<string, string>;
+  shippedDefaults: Readonly<Record<string, ShippedAgentDefault>>;
   proxyEnabled: boolean;
 }
 
@@ -235,26 +267,62 @@ export async function buildListRows(
     const entry = mapping.agents[name];
     const configured = entry?.model ?? 'default';
     const effort = entry?.effort ?? 'default';
-    const defaultModel = shippedDefaults[name] ?? 'unknown';
+    const defaultModel = shippedDefaults[name]?.model ?? 'unknown';
+    const shippedEffort = shippedDefaults[name]?.effort;
     const installed = installedNames.has(name);
     // inRegistry is always true here — agentNames comes from the registry.
     const state = classifyAgentState({ configured, proxyEnabled, installed, inRegistry: true });
-    return { name, defaultModel, configured, effort, state };
+    return { name, defaultModel, configured, effort, shippedEffort, state };
   });
 
   return rows;
+}
+
+/**
+ * Build the list rows of the background workers (D-WORKER-AGENTS), which follow
+ * the agent rows in `--list`.
+ *
+ * A worker has no installed agent file, so its row never consults the install
+ * directory: its state is always 'worker', never classified (it can be neither
+ * not installed nor dormant — validateSetArgs rejects an external model for a
+ * worker). DEFAULT is the model WORKER_AGENTS ships and EFFORT shows the shipped
+ * effort while unconfigured, the same convention as an agent row.
+ *
+ * Pure function, no I/O.
+ */
+export function buildWorkerListRows(mapping: AgentMappingFile): ListRow[] {
+  return Object.entries(WORKER_AGENTS).map(([name, shipped]): ListRow => {
+    const entry = mapping.agents[name];
+    return {
+      name,
+      defaultModel: shipped.model,
+      configured: entry?.model ?? 'default',
+      effort: entry?.effort ?? 'default',
+      shippedEffort: shipped.effort,
+      state: 'worker',
+    };
+  });
 }
 
 // ---------------------------------------------------------------------------
 // --list output formatting
 // ---------------------------------------------------------------------------
 
+/**
+ * Width of the EFFORT column: the longest `default (<level>)` an unconfigured row
+ * can show, derived from EFFORT_LEVELS so a new level cannot truncate the cell.
+ */
+const EFFORT_COLUMN_WIDTH = Math.max(
+  ...EFFORT_LEVELS.map(level => formatEffortDisplay('default', level).length),
+  EFFORT_INHERIT.length,
+);
+
 export function formatListOutput(rows: ListRow[], proxyEnabled: boolean): string {
   const lines: string[] = [];
   const AGENT_W = 20;
   const DEFAULT_W = 10;
   const CONFIGURED_W = 16;
-  const EFFORT_W = 12;
+  const EFFORT_W = EFFORT_COLUMN_WIDTH;
 
   // Header
   lines.push(
@@ -285,6 +353,9 @@ export function formatListOutput(rows: ListRow[], proxyEnabled: boolean): string
       case 'unknown':
         stateStr = color.dim(AGENT_STATE_LABELS['unknown']);
         break;
+      case 'worker':
+        stateStr = color.dim(AGENT_STATE_LABELS['worker']);
+        break;
       default: {
         const _: never = row.state;
         void _;
@@ -299,18 +370,21 @@ export function formatListOutput(rows: ListRow[], proxyEnabled: boolean): string
         stripAnsi(row.name).padEnd(AGENT_W).slice(0, AGENT_W),
         stripAnsi(row.defaultModel).padEnd(DEFAULT_W).slice(0, DEFAULT_W),
         stripAnsi(row.configured).padEnd(CONFIGURED_W).slice(0, CONFIGURED_W),
-        stripAnsi(row.effort).padEnd(EFFORT_W).slice(0, EFFORT_W),
+        stripAnsi(formatEffortDisplay(row.effort, row.shippedEffort)).padEnd(EFFORT_W).slice(0, EFFORT_W),
         stateStr,
       ].join('  ')
     );
   }
 
-  const installed = rows.filter(r => r.state !== 'not-installed').length;
-  const configured = rows.filter(r => r.configured !== 'default' || r.effort !== 'default').length;
+  // The footer counts agent rows only: a worker row is neither installed nor
+  // not installed, and configuring it changes no agent (D-WORKER-AGENTS).
+  const agentRows = rows.filter(r => r.state !== 'worker');
+  const installed = agentRows.filter(r => r.state !== 'not-installed').length;
+  const configured = agentRows.filter(r => r.configured !== 'default' || r.effort !== 'default').length;
   const proxyLabel = proxyEnabled ? color.green('enabled') : color.yellow('disabled');
   lines.push('');
   lines.push(
-    `${installed}/${rows.length} installed · ${configured} configured · proxy: ${proxyLabel}`
+    `${installed}/${agentRows.length} installed · ${configured} configured · proxy: ${proxyLabel}`
   );
 
   return lines.join('\n');
@@ -351,7 +425,7 @@ export function selectCatalog(proxyEnabled: boolean, cacheDir: string): External
 async function buildTuiState(
   agentNames: string[],
   mapping: AgentMappingFile,
-  shippedDefaults: Record<string, string>,
+  shippedDefaults: Readonly<Record<string, ShippedAgentDefault>>,
   proxyEnabled: boolean,
   catalog: ExternalModelCatalog,
   installDir: string,
@@ -369,7 +443,8 @@ async function buildTuiState(
     const entry = mapping.agents[name];
     return buildRow({
       name,
-      shippedDefault: shippedDefaults[name] ?? 'unknown',
+      shippedDefault: shippedDefaults[name]?.model ?? 'unknown',
+      shippedEffort: shippedDefaults[name]?.effort,
       savedModel: entry?.model,
       savedEffort: entry?.effort,
       proxyEnabled,
@@ -380,11 +455,31 @@ async function buildTuiState(
     });
   });
 
-  // Orphan rows: keys in agent-models.json not present in the registry.
+  // Worker rows (D-WORKER-AGENTS) follow the agents. A worker has no installed
+  // file and takes only the worker value domain, so it is built with its own
+  // shipped defaults and never classified as an orphan (state 'unknown').
+  for (const [workerName, shipped] of Object.entries(WORKER_AGENTS)) {
+    const entry = mapping.agents[workerName];
+    rows.push(buildRow({
+      name: workerName,
+      shippedDefault: shipped.model,
+      shippedEffort: shipped.effort,
+      savedModel: entry?.model,
+      savedEffort: entry?.effort,
+      proxyEnabled,
+      installed: false,
+      inRegistry: false,
+      worker: true,
+    }));
+  }
+
+  // Orphan rows: agent keys in agent-models.json not present in the registry.
   // Appended at the end so they are visually separated from known agents.
-  for (const orphanKey of Object.keys(mapping.agents)) {
+  // agentOnlyMapping leaves out the worker keys, which have their own rows above.
+  const agentEntries = agentOnlyMapping(mapping);
+  for (const orphanKey of Object.keys(agentEntries)) {
     if (registrySet.has(orphanKey)) continue;
-    const entry = mapping.agents[orphanKey];
+    const entry = agentEntries[orphanKey];
     rows.push(buildRow({
       name: orphanKey,
       shippedDefault: 'unknown',
@@ -514,7 +609,11 @@ export const agentsCommand = new Command('agents')
   .option('--list', 'List all agents with their current configuration')
   .option('--set <agent>', 'Set model/effort for a specific agent')
   .option('--model <model>', 'Model to assign (use with --set)')
-  .option('--effort <level>', 'Effort level to assign (use with --set)')
+  .option(
+    '--effort <level>',
+    `Effort level to assign (use with --set): ${EFFORT_LEVELS.join(', ')}, ` +
+    `default (use the shipped effort), or ${EFFORT_INHERIT} (drop the effort line, follow the session)`,
+  )
   .option('--reset', 'Clear all agent customisations and restore defaults')
   .option('--yes', 'Skip confirmation prompt (use with --reset)')
   .action(async (options: AgentsOptions) => {
@@ -540,21 +639,25 @@ export const agentsCommand = new Command('agents')
     // An agent with no shipped default renders a blank DEFAULT column and can
     // never be reverted off an external model; surface the gap rather than
     // letting the table imply the agent simply ships without one.
-    const shippedDefaults = await loadShippedDefaults(undefined, {
+    const shippedDefaults = await loadShippedAgentDefaults(undefined, {
       onWarning: (msg) => p.log.warn(msg),
     });
 
-    // ── --list ──────────────────────────────────────────────────────────────
-    if (options.list) {
-      const agentNames = getAllAgentNames().sort();
-      const rows = await buildListRows({
-        agentNames,
+    // Agent rows in registry order, then the worker rows (D-WORKER-AGENTS).
+    const loadListRows = async (): Promise<ListRow[]> => {
+      const agentRows = await buildListRows({
+        agentNames: getAllAgentNames().sort(),
         mapping,
         installDir,
         shippedDefaults,
         proxyEnabled,
       });
-      process.stdout.write(formatListOutput(rows, proxyEnabled) + '\n');
+      return [...agentRows, ...buildWorkerListRows(mapping)];
+    };
+
+    // ── --list ──────────────────────────────────────────────────────────────
+    if (options.list) {
+      process.stdout.write(formatListOutput(await loadListRows(), proxyEnabled) + '\n');
       return;
     }
 
@@ -624,10 +727,11 @@ export const agentsCommand = new Command('agents')
         agentName = canonical;
       }
 
-      // Validate agent name
+      // Validate agent name. D-WORKER-AGENTS: the workers are settable too, so a
+      // first `--set memory` is accepted although nothing in the mapping names it yet.
       const knownAgents = getAllAgentNames();
       const knownMapping = Object.keys(mapping.agents);
-      const allKnown = new Set([...knownAgents, ...knownMapping]);
+      const allKnown = new Set([...knownAgents, ...Object.keys(WORKER_AGENTS), ...knownMapping]);
       if (!allKnown.has(agentName)) {
         p.log.error(
           `Unknown agent "${agentName}". Valid: ${[...allKnown].sort().join(', ')}`
@@ -645,6 +749,7 @@ export const agentsCommand = new Command('agents')
       const validation = validateSetArgs(
         { model: options.model, effort: options.effort },
         setCatalog,
+        agentName,
       );
       if (!validation.ok) {
         p.log.error(validation.error);
@@ -707,15 +812,7 @@ export const agentsCommand = new Command('agents')
 
     if (!isInteractive) {
       // Non-TTY: print list and exit 1 with note
-      const agentNames = getAllAgentNames().sort();
-      const rows = await buildListRows({
-        agentNames,
-        mapping,
-        installDir,
-        shippedDefaults,
-        proxyEnabled,
-      });
-      process.stdout.write(formatListOutput(rows, proxyEnabled) + '\n');
+      process.stdout.write(formatListOutput(await loadListRows(), proxyEnabled) + '\n');
       process.stderr.write(
         'Note: interactive view requires a terminal. Use --list for non-TTY output.\n'
       );

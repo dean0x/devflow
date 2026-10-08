@@ -26,10 +26,12 @@ function makeRow(overrides: Partial<AgentRow> = {}): AgentRow {
     originalModel: 'default',
     configuredEffort: 'default',
     originalEffort: 'default',
+    shippedEffort: undefined,
     dormantModel: null,
     offCyclePin: null,
     installed: true,
     inRegistry: true,
+    worker: false,
     ...overrides,
   };
 }
@@ -430,7 +432,7 @@ describe('narrow width', () => {
 
 describe('AC-P3-WIDTH: no line exceeds terminal width', () => {
   // At 80 cols (standard terminal): all columns scale to full size.
-  // totalContent = 2 + 18 + 32 + 13 + 14 = 79, so every data row is 79 chars.
+  // totalContent = 2 + 14 + 30 + 20 + 14 = 80, so a full data row is 80 chars.
   // The keybindingsLine (77 chars) also fits within 80.
   it('at 80 cols: every stripped line is ≤ 80 visible chars', () => {
     const state = makeState({
@@ -453,8 +455,8 @@ describe('AC-P3-WIDTH: no line exceeds terminal width', () => {
   });
 
   // At 60 cols: responsive-scale block exercises the Math.max floors.
-  // scale = 60/79 ≈ 0.759; column widths after floor: agent=13, model=24, effort=9, state=10.
-  // Max data row visible width = 2 + 13 + 24 + 9 + 10 = 58 ≤ 60.
+  // scale = 60/80 = 0.75; column widths after floor: agent=10, model=22, effort=15, state=10.
+  // Max data row visible width = 2 + 10 + 22 + 15 + 10 = 59 ≤ 60.
   // keybindingsLine is sliced to dims.cols (60) before dim() is applied.
   it('at 60 cols: every stripped line is ≤ 60 visible chars', () => {
     const state = makeState({
@@ -486,8 +488,8 @@ describe('AC-P3-WIDTH: no line exceeds terminal width', () => {
   //   GREEN after fix (COL_STATE=14): visible length === maxWidth, string
   //        returned as-is with ANSI intact → PASS.
   //
-  // State column offset at 80 cols: 2 (prefix) + 18 (agent) + 32 (model) +
-  //   13 (effort) = 65.  `stripped[4].slice(65)` is exactly the STATE cell
+  // State column offset at 80 cols: 2 (prefix) + 14 (agent) + 30 (model) +
+  //   20 (effort) = 66.  `stripped[4].slice(66)` is exactly the STATE cell
   //   for the first data row (dormant row — cursor is on the second row).
   it('T15: dormant row renders yellow("saved-inactive") unclipped at 80 cols', () => {
     const dormantRow = makeRow({
@@ -512,9 +514,9 @@ describe('AC-P3-WIDTH: no line exceeds terminal width', () => {
     // Raw line must contain the yellow-coloured string intact (ANSI survives truncation check)
     expect(allRaw.some(l => l.includes(yellow('saved-inactive')))).toBe(true);
 
-    // Stripped state column = exactly 'saved-inactive' at offset 65 in the first data row
+    // Stripped state column = exactly 'saved-inactive' at offset 66 in the first data row
     // (index 4: title[0], blank[1], header[2], scroll-indicator[3], data[4])
-    expect(stripped[4].slice(65)).toBe('saved-inactive');
+    expect(stripped[4].slice(66)).toBe('saved-inactive');
   });
 });
 
@@ -705,12 +707,12 @@ describe('STATE column (Fix 3)', () => {
   it('T10: orphan row (inRegistry=false) shows "unknown" in STATE column', () => {
     // An arbitrary key from agent-models.json not present in the plugin registry.
     const state = makeState({
-      rows: [makeRow({ name: 'old-custom-agent', installed: false, inRegistry: false })],
+      rows: [makeRow({ name: 'old-custom', installed: false, inRegistry: false })],
       cursor: 0,
       activeField: 'effort',
     });
     const lines = renderStripped(state);
-    const rowLine = lines.find(l => l.includes('Old-Custom-Agent'));
+    const rowLine = lines.find(l => l.includes('Old-Custom'));
     expect(rowLine).toBeDefined();
     expect(rowLine).toContain('unknown');
     // Must not show 'not installed' — 'unknown' takes priority (inRegistry check first)
@@ -776,9 +778,9 @@ describe('STATE column (Fix 3)', () => {
     const rowLine = rawLines.map(stripAnsi).find(l => l.includes('A b'));
     expect(rowLine).toBeDefined();
     // Column alignment holds: at 80 cols the STATE cell starts at the declared
-    // offset PREFIX(2) + AGENT(18) + MODEL(32) + EFFORT(13) = 65. A surviving tab
+    // offset PREFIX(2) + AGENT(14) + MODEL(30) + EFFORT(20) = 66. A surviving tab
     // would shift it, because padToVisible counts \t as a single character.
-    expect(rowLine?.slice(65)).toBe('unknown');
+    expect(rowLine?.slice(66)).toBe('unknown');
   });
 });
 
@@ -1013,5 +1015,151 @@ describe('T13: formatAgentName (Fix 4)', () => {
     );
     const src = readFileSync(agentsPath, 'utf-8');
     expect(src, '--list path in agents.ts must not call formatAgentName').not.toContain('formatAgentName');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// D-SHIPPED-EFFORT: the EFFORT cell shows the shipped effort, never truncated
+// ---------------------------------------------------------------------------
+
+describe('EFFORT cell — shipped effort and inherit', () => {
+  const dataRow = (lines: string[], name: string): string => {
+    const line = lines.find(l => l.includes(formatAgentName(name)));
+    if (line === undefined) throw new Error(`no ${name} row in:\n${lines.join('\n')}`);
+    return line;
+  };
+
+  it('renders default (medium) in full at 80 cols when the row ships an effort', () => {
+    const state = makeState({
+      rows: [
+        makeRow({ name: 'code', shippedEffort: 'medium' }),
+        makeRow({ name: 'design' }),
+      ],
+      cursor: 1,
+    });
+    const line = dataRow(renderStripped(state, { rows: 24, cols: 80 }), 'code');
+    expect(line).toContain('default (medium)');
+  });
+
+  it('renders plain default when the row ships no effort', () => {
+    const state = makeState({ rows: [makeRow({ name: 'code' }), makeRow({ name: 'design' })], cursor: 1 });
+    // The EFFORT cell is columns 46..66 (PREFIX 2 + AGENT 14 + MODEL 30); the MODEL
+    // cell's own "default (sonnet)" must not be mistaken for it.
+    expect(dataRow(renderStripped(state), 'code').slice(46, 66).trim()).toBe('default');
+  });
+
+  it('renders every default (<level>) in full', () => {
+    for (const level of ['low', 'medium', 'high', 'xhigh', 'max'] as const) {
+      const state = makeState({
+        rows: [makeRow({ name: 'code', shippedEffort: level }), makeRow({ name: 'design' })],
+        cursor: 1,
+      });
+      expect(dataRow(renderStripped(state), 'code'), level).toContain(`default (${level})`);
+    }
+  });
+
+  it('keeps the state column in place beside a default (medium) cell', () => {
+    const state = makeState({
+      rows: [makeRow({ name: 'code', shippedEffort: 'medium' }), makeRow({ name: 'design' })],
+      cursor: 1,
+    });
+    const lines = renderStripped(state);
+    expect(dataRow(lines, 'code').slice(66)).toBe('active');
+  });
+
+  it('the cursor row with the effort field active fits the whole ‹ default (medium) › cell', () => {
+    const state = makeState({
+      rows: [makeRow({ name: 'code', shippedEffort: 'medium' })],
+      cursor: 0,
+      activeField: 'effort',
+    });
+    const line = dataRow(renderStripped(state), 'code');
+    expect(line).toContain('‹ default (medium) ›');
+    expect(line.slice(66)).toBe('active');
+  });
+
+  it('a configured level wins over the shipped effort', () => {
+    const state = makeState({
+      rows: [
+        makeRow({ name: 'code', shippedEffort: 'medium', configuredEffort: 'max', originalEffort: 'max' }),
+        makeRow({ name: 'design' }),
+      ],
+      cursor: 1,
+    });
+    const line = dataRow(renderStripped(state), 'code');
+    expect(line).toContain('max');
+    expect(line).not.toContain('default (medium)');
+  });
+
+  it('renders a configured inherit', () => {
+    const state = makeState({
+      rows: [
+        makeRow({ name: 'code', shippedEffort: 'medium', configuredEffort: 'inherit', originalEffort: 'inherit' }),
+        makeRow({ name: 'design' }),
+      ],
+      cursor: 1,
+    });
+    const line = dataRow(renderStripped(state), 'code');
+    expect(line).toContain('inherit');
+    expect(line).not.toContain('default (medium)');
+  });
+
+  it('no line exceeds 80 columns with a shipped effort on every row', () => {
+    const state = makeState({
+      rows: [
+        makeRow({ name: 'code', shippedEffort: 'medium' }),
+        makeRow({ name: 'scrutinize', shippedEffort: 'xhigh', dormantModel: 'gpt-5.5' }),
+      ],
+      cursor: 0,
+      activeField: 'effort',
+      proxyEnabled: false,
+    });
+    for (const line of renderStripped(state, { rows: 24, cols: 80 })) {
+      expect(line.length, `"${line}"`).toBeLessThanOrEqual(80);
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// D-WORKER-AGENTS: the memory worker row
+// ---------------------------------------------------------------------------
+
+describe('worker row', () => {
+  const memoryRow = (overrides: Partial<AgentRow> = {}): AgentRow =>
+    makeRow({
+      name: 'memory',
+      worker: true,
+      shippedDefault: 'haiku',
+      shippedEffort: 'high',
+      installed: false,
+      inRegistry: false,
+      ...overrides,
+    });
+
+  it('renders MODEL default (haiku), EFFORT default (high) and STATE worker', () => {
+    const state = makeState({ rows: [makeRow({ name: 'code' }), memoryRow()], cursor: 0 });
+    const line = renderStripped(state).find(l => l.includes('Memory'));
+    expect(line).toBeDefined();
+    expect(line).toContain('default (haiku)');
+    expect(line).toContain('default (high)');
+    expect(line!.slice(66)).toBe('worker');
+  });
+
+  it('is not rendered as an orphan: its STATE is not unknown or not installed', () => {
+    const state = makeState({ rows: [memoryRow()], cursor: 0 });
+    const text = renderStripped(state).join('\n');
+    expect(text).not.toContain('unknown');
+    expect(text).not.toContain('not installed');
+  });
+
+  it('shows a configured worker model and effort', () => {
+    const state = makeState({
+      rows: [memoryRow({ configuredModel: 'sonnet', originalModel: 'sonnet', configuredEffort: 'medium', originalEffort: 'medium' })],
+      cursor: 0,
+    });
+    const line = renderStripped(state).find(l => l.includes('Memory'));
+    expect(line).toContain('sonnet');
+    expect(line).toContain('medium');
+    expect(line).not.toContain('default (haiku)');
   });
 });

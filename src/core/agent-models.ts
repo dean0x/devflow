@@ -7,7 +7,7 @@
  *
  * Mapping file: ~/.devflow/agent-models.json
  *   { version: 1, agents: { [name]: { model?, effort? } } }
- *   Deviations-only: omit an agent to inherit its shipped default.
+ *   Deviations-only: omit an agent to inherit its shipped default (model AND effort).
  *   Unknown agent names are tolerated and preserved on save (plugin may not be installed).
  *   Invalid effort values are dropped with a warning.
  *
@@ -26,8 +26,13 @@
 import { promises as fs } from 'fs';
 import * as path from 'path';
 import { writeFileAtomicExclusive } from './fs-atomic.js';
-import { isDormantExternalModel, isClaudeModelName } from './external-models.js';
-import { rewriteAgentFrontmatter, readFrontmatterModel, isValidModelName } from './agent-frontmatter.js';
+import { isDormantExternalModel, isClaudeModelName, CLAUDE_MODEL_ALIASES } from './external-models.js';
+import {
+  rewriteAgentFrontmatter,
+  readFrontmatterModel,
+  readFrontmatterEffort,
+  isValidModelName,
+} from './agent-frontmatter.js';
 import { agentSourceDirs, type AgentSourceDirs } from './assets.js';
 import { getAllAgentNames } from './plugins.js';
 import { mdEntryName, mdFileName } from './orphan-sweep.js';
@@ -68,6 +73,98 @@ export type EffortLevel = typeof EFFORT_LEVELS[number];
  * EFFORT_LEVELS[number] is a literal union, not string.
  */
 const EFFORT_LEVELS_SET: ReadonlySet<string> = new Set(EFFORT_LEVELS);
+
+/** True when `value` is one of EFFORT_LEVELS (narrows string to EffortLevel). */
+export function isEffortLevel(value: string): value is EffortLevel {
+  return EFFORT_LEVELS_SET.has(value);
+}
+
+/**
+ * D-SHIPPED-EFFORT: the stored effort value that drops an agent's effort line
+ * altogether. A mapping `inherit` yields no `effort:` line and does NOT fall
+ * back to the shipped effort, so the agent follows the session's effort. It is
+ * a stored value, unlike `default` (which deletes the key so the shipped
+ * effort applies again), and it is effort-only: model-side inherit semantics
+ * are a separate decision.
+ */
+export const EFFORT_INHERIT = 'inherit';
+
+/** An effort as stored in agent-models.json: a level, or the `inherit` sentinel. */
+export type StoredEffort = EffortLevel | typeof EFFORT_INHERIT;
+
+// ---------------------------------------------------------------------------
+// Workers
+// ---------------------------------------------------------------------------
+
+/**
+ * D-WORKER-AGENTS: background workers whose model and effort are settable in
+ * `devflow agents` although they are not agents. A worker runs as its own
+ * `claude -p` process outside any session and has no installed agent file, so
+ * there is nothing for a reapply to rewrite.
+ *
+ * Worker entries are stored under `agents.<name>` in agent-models.json, in the
+ * same map as agent entries; an absent entry means the default declared here.
+ * Because the map is shared, every agent-only path (the reapply walk, the init
+ * reapply gate, countExternalMappedAgents, the list and TUI agent sets) goes
+ * through agentOnlyMapping, the one definition of the agent-only subset.
+ *
+ * A worker is not a DEVFLOW_PLUGINS agent: getAllAgentNames() and the roster
+ * count are unaffected.
+ */
+export const WORKER_AGENTS = {
+  memory: { model: 'haiku', effort: 'high' },
+} as const satisfies Readonly<Record<string, { model: string; effort: EffortLevel }>>;
+
+/** The names of the workers in WORKER_AGENTS. */
+export type WorkerName = keyof typeof WORKER_AGENTS;
+
+/**
+ * True when `name` is a worker key. Own-property check, so a hostile key such as
+ * `constructor` or `__proto__` is never answered from the prototype chain.
+ */
+export function isWorkerAgent(name: string): name is WorkerName {
+  return Object.hasOwn(WORKER_AGENTS, name);
+}
+
+/** A full Claude model identifier: the `claude-` prefix and at least one more character. */
+const CLAUDE_FULL_ID_RE = /^claude-.+$/;
+
+/**
+ * D-WORKER-AGENTS: the worker value domain, owned here once and shared by
+ * `validateSetArgs` (the write boundary) and `readAgentMapping` (the read
+ * boundary), so a hand-edited file and a CLI argument are held to one rule.
+ *
+ *  - model:  `default`, a CLAUDE_MODEL_ALIASES alias, or a full identifier
+ *            starting `claude-`. Anything else is rejected, `inherit` included
+ *            (a worker has no session model to inherit). External models are
+ *            rejected too: the worker runs `claude -p` outside a session and
+ *            nothing here verifies it routes through the proxy, so allowing
+ *            them later is a deliberate change to this function.
+ *  - effort: `default` or an EFFORT_LEVELS level. `inherit` is rejected because
+ *            a worker has no session effort to inherit.
+ *
+ * Pure function — no catalog lookup, no I/O.
+ */
+export function validateWorkerValue(field: 'model' | 'effort', value: string): Result<void, string> {
+  if (field === 'effort') {
+    if (value === 'default' || isEffortLevel(value)) return Ok(undefined);
+    return Err(
+      `Invalid effort "${value}" for a worker. Valid: default, ${EFFORT_LEVELS.join(', ')} ` +
+      `(a worker has no session effort to inherit)`,
+    );
+  }
+
+  const inDomain =
+    isValidModelName(value) &&
+    (value === 'default' ||
+      (CLAUDE_MODEL_ALIASES as readonly string[]).includes(value) ||
+      CLAUDE_FULL_ID_RE.test(value));
+  if (inDomain) return Ok(undefined);
+  return Err(
+    `Invalid model "${value}" for a worker. Valid: default, ${CLAUDE_MODEL_ALIASES.join(', ')}, ` +
+    `or a full claude- identifier (external models are not supported for workers)`,
+  );
+}
 
 // ---------------------------------------------------------------------------
 // Key migration
@@ -266,13 +363,42 @@ export async function parseAgentMappingEnvelope(filePath: string): Promise<Parse
 /** Per-agent mapping entry. All fields optional — omit to inherit defaults. */
 export interface AgentMapping {
   model?: string;
-  effort?: EffortLevel;
+  effort?: StoredEffort;
 }
 
 /** The agent-models.json file schema. */
 export interface AgentMappingFile {
   version: 1;
   agents: Record<string, AgentMapping>;
+}
+
+/**
+ * D-WORKER-AGENTS: the agent-only subset of the mapping — every entry whose key
+ * is not a worker. Unknown names stay: the file preserves entries for agents
+ * whose plugin is not installed.
+ *
+ * This is the one definition of "the agents in the mapping". The reapply walk,
+ * the init reapply gate, countExternalMappedAgents and the TUI's orphan rows all
+ * call it, so a worker entry can never be mistaken for an agent with no
+ * installed file.
+ *
+ * Pure function — returns a new record, never mutates the mapping.
+ */
+export function agentOnlyMapping(mapping: AgentMappingFile): Record<string, AgentMapping> {
+  const agents: Record<string, AgentMapping> = {};
+  for (const [name, entry] of Object.entries(mapping.agents)) {
+    if (!isWorkerAgent(name)) agents[name] = entry;
+  }
+  return agents;
+}
+
+/**
+ * True when the mapping holds at least one agent entry. The `devflow init`
+ * reapply gate: an agents.memory-only mapping keeps it closed, because there is
+ * no agent file for a reapply to converge.
+ */
+export function hasAgentMappingEntries(mapping: AgentMappingFile): boolean {
+  return Object.keys(agentOnlyMapping(mapping)).length > 0;
 }
 
 // ---------------------------------------------------------------------------
@@ -317,23 +443,36 @@ export async function readAgentMapping(
     const raw = entry as Record<string, unknown>;
     const mapping: AgentMapping = {};
 
+    // D-WORKER-AGENTS: a worker key is held to the worker value domain on read,
+    // by the same function the CLI write boundary uses.
+    const worker = isWorkerAgent(name);
+
     if (typeof raw.model === 'string') {
       // Tighten to the same charset used by rewriteAgentFrontmatter.
       // The effort field is enum-validated below; model must be equally strict.
       // An invalid entry is dropped with a warning rather than silently
       // persisting and permanently poisoning that agent on every reapply.
-      if (isValidModelName(raw.model)) {
-        mapping.model = raw.model;
-      } else {
+      if (!isValidModelName(raw.model)) {
         warn(`agent-models: invalid-model name for agent "${name}" — dropping entry`);
+      } else {
+        const workerCheck = worker ? validateWorkerValue('model', raw.model) : undefined;
+        if (workerCheck !== undefined && !workerCheck.ok) {
+          warn(`agent-models: dropping out-of-domain model "${raw.model}" for worker "${name}" — ${workerCheck.error}`);
+        } else {
+          mapping.model = raw.model;
+        }
       }
     }
 
     if (typeof raw.effort === 'string') {
-      if (EFFORT_LEVELS_SET.has(raw.effort)) {
-        // Sound narrowing: has() proved membership; EffortLevel is a literal
-        // subtype of string so the assertion is not a compensating cast.
-        mapping.effort = raw.effort as EffortLevel;
+      // `inherit` is a stored agent value; a worker has no session effort to
+      // inherit, so for a worker it is out of domain like any other non-level.
+      if (isEffortLevel(raw.effort)) {
+        mapping.effort = raw.effort;
+      } else if (raw.effort === EFFORT_INHERIT && !worker) {
+        mapping.effort = raw.effort;
+      } else if (worker) {
+        warn(`agent-models: dropping out-of-domain effort "${raw.effort}" for worker "${name}"`);
       } else {
         warn(`agent-models: dropping invalid effort "${raw.effort}" for agent "${name}"`);
       }
@@ -425,51 +564,79 @@ export interface EffectiveConfig {
  *   isDormantExternalModel) AND proxyEnabled is false → the entry is DORMANT.
  *   The shipped default model is used instead. The entry remains saved.
  *
- * Effort is ALWAYS applied regardless of proxy state.
+ * D-SHIPPED-EFFORT — effort rule, in order:
+ *   1. a mapping effort level wins;
+ *   2. a mapping `inherit` yields no effort line and does NOT fall back to the
+ *      shipped effort;
+ *   3. an absent mapping effort falls back to the shipped effort, which is
+ *      undefined when the agent ships none.
+ *   Effort is ALWAYS applied regardless of proxy state, a dormant external
+ *   model included.
  *
  * Pure function — no I/O.
  *
  * @param agentName - The agent's short name (e.g., 'code').
  * @param mapping - The full mapping file.
- * @param shippedDefaults - Map of agent name → shipped default model.
+ * @param shippedDefaults - Map of agent name → shipped model and effort.
  * @param proxyEnabled - Whether the Devflow proxy is currently active.
  */
 export function resolveEffective(
   agentName: string,
   mapping: AgentMappingFile,
-  shippedDefaults: Record<string, string>,
+  shippedDefaults: Readonly<Record<string, ShippedAgentDefault>>,
   proxyEnabled: boolean,
 ): EffectiveConfig {
   const entry = mapping.agents[agentName];
+  const shipped = shippedDefaults[agentName];
 
   let model: string | undefined;
   if (entry?.model !== undefined) {
     // Dormant: external model configured but proxy is off → fall back to shipped default.
     model = isDormantExternalModel(entry.model, proxyEnabled)
-      ? shippedDefaults[agentName]
+      ? shipped?.model
       : entry.model;
   } else {
     // No mapping entry → use shipped default.
-    model = shippedDefaults[agentName];
+    model = shipped?.model;
   }
 
-  const effort = entry?.effort;
+  const mapped = entry?.effort;
+  const effort = mapped === EFFORT_INHERIT ? undefined : (mapped ?? shipped?.effort);
   return { model, effort };
 }
 
 // ---------------------------------------------------------------------------
-// loadShippedDefaults
+// loadShippedAgentDefaults
 // ---------------------------------------------------------------------------
 
 /**
- * Parse the shipped model default out of every {name}.md in one directory.
+ * D-SHIPPED-EFFORT: what devflow ships for one agent — its model, and its effort
+ * when the agent's frontmatter carries an `effort:` line. The two always come
+ * from the same file.
+ */
+export interface ShippedAgentDefault {
+  readonly model: string;
+  /** Present only when the shipped frontmatter declares a valid effort level. */
+  readonly effort?: EffortLevel;
+}
+
+/** One agent file's shipped values as written; effort is '' when the file ships none. */
+interface RawShippedDefault {
+  readonly model: string;
+  readonly effort: string;
+}
+
+/**
+ * Parse the shipped model and effort out of every {name}.md in one directory.
  *
  * A missing or unreadable directory yields an empty map — dist/agents/ does not
  * exist until a generator host does, and a source tree that produced no agents
  * is caught by the registry-completeness guard rather than by a throw here.
- * Unknown or malformed files are skipped individually.
+ * Unknown or malformed files are skipped individually. The effort is returned as
+ * written: only the directory that wins the merge has its effort validated, so a
+ * typo in a losing file is never reported.
  */
-async function readDirDefaults(dir: string): Promise<Record<string, string>> {
+async function readDirDefaults(dir: string): Promise<Record<string, RawShippedDefault>> {
   let entries: string[];
   try {
     entries = await fs.readdir(dir);
@@ -478,14 +645,15 @@ async function readDirDefaults(dir: string): Promise<Record<string, string>> {
   }
 
   const pairs = await Promise.all(
-    entries.map(async (file): Promise<readonly [string, string] | null> => {
+    entries.map(async (file): Promise<readonly [string, RawShippedDefault] | null> => {
       const agentName = mdEntryName(file);
       if (agentName === null) return null;
       try {
         const content = await fs.readFile(path.join(dir, file), 'utf-8');
-        const result = readFrontmatterModel(content);
-        if (result.ok && result.value) {
-          return [agentName, result.value] as const;
+        const model = readFrontmatterModel(content);
+        const effort = readFrontmatterEffort(content);
+        if (model.ok && model.value && effort.ok) {
+          return [agentName, { model: model.value, effort: effort.value }] as const;
         }
       } catch {
         // Silently skip unreadable files
@@ -494,7 +662,7 @@ async function readDirDefaults(dir: string): Promise<Record<string, string>> {
     })
   );
 
-  const defaults: Record<string, string> = {};
+  const defaults: Record<string, RawShippedDefault> = {};
   for (const pair of pairs) {
     if (pair !== null) {
       defaults[pair[0]] = pair[1];
@@ -503,17 +671,31 @@ async function readDirDefaults(dir: string): Promise<Record<string, string>> {
   return defaults;
 }
 
-export interface LoadShippedDefaultsOptions {
-  /** Called once when registry-declared agents resolve to no shipped default. */
+export interface LoadShippedAgentDefaultsOptions {
+  /**
+   * Called once when registry-declared agents resolve to no shipped default, and
+   * once per agent whose shipped `effort:` is not an EFFORT_LEVELS member.
+   */
   onWarning?: (message: string) => void;
 }
 
 /**
- * Load shipped default models from the agent files.
+ * Load the shipped default model and effort of every agent from the agent files.
+ *
+ * D-SHIPPED-EFFORT: this is the only production reader of shipped model and
+ * effort values. An agent's effort is part of its shipped default, so a reapply
+ * that did not see it would strip it (the mapping has no entry to say
+ * otherwise).
  *
  * Directories are MOST-PREFERRED FIRST — the convention owned by
  * agentSourceDirs() — and the first directory to supply a name wins, so once an
  * agent is generated into dist/agents/ its frontmatter is the shipped default.
+ * First-hit-wins applies to the whole record: an agent's effort is never read
+ * from a different file than its model.
+ *
+ * A shipped `effort:` outside EFFORT_LEVELS (`inherit` included — it is a
+ * mapping value, not a shipped one) is dropped with a warning naming the agent;
+ * its model survives.
  *
  * A registry agent that no directory supplies is reported through `onWarning`
  * as ONE aggregate message naming every missing agent and the build step. The
@@ -527,22 +709,37 @@ export interface LoadShippedDefaultsOptions {
  *   prove the precedence against a temp tree; all real callers use the default.
  * @param opts - Optional warning channel; the gap is silent without one.
  */
-export async function loadShippedDefaults(
+export async function loadShippedAgentDefaults(
   dirs: AgentSourceDirs = agentSourceDirs(),
-  opts?: LoadShippedDefaultsOptions,
-): Promise<Record<string, string>> {
+  opts?: LoadShippedAgentDefaultsOptions,
+): Promise<Record<string, ShippedAgentDefault>> {
   const perDir = await Promise.all(dirs.map(readDirDefaults));
 
-  const defaults: Record<string, string> = {};
+  const winners: Record<string, RawShippedDefault> = {};
   for (const dirDefaults of perDir) {
-    for (const [agentName, model] of Object.entries(dirDefaults)) {
-      if (!(agentName in defaults)) {
-        defaults[agentName] = model;
+    for (const [agentName, raw] of Object.entries(dirDefaults)) {
+      if (!Object.hasOwn(winners, agentName)) {
+        winners[agentName] = raw;
       }
     }
   }
 
-  const missing = getAllAgentNames().filter(name => !(name in defaults));
+  const defaults: Record<string, ShippedAgentDefault> = {};
+  for (const [agentName, raw] of Object.entries(winners)) {
+    if (raw.effort === '') {
+      defaults[agentName] = { model: raw.model };
+    } else if (isEffortLevel(raw.effort)) {
+      defaults[agentName] = { model: raw.model, effort: raw.effort };
+    } else {
+      defaults[agentName] = { model: raw.model };
+      opts?.onWarning?.(
+        `Shipped agent "${agentName}" declares effort "${raw.effort}", which is not one of ` +
+        `${EFFORT_LEVELS.join(', ')} — ignoring it.`,
+      );
+    }
+  }
+
+  const missing = getAllAgentNames().filter(name => !Object.hasOwn(defaults, name));
   if (missing.length > 0) {
     opts?.onWarning?.(
       `No shipped default found for declared agent(s): ${missing.join(', ')}. ` +
@@ -597,10 +794,11 @@ export interface ReapplyResult {
  * Idempotent convergence function: walk every installed agent file and
  * rewrite frontmatter model/effort to match the effective mapping.
  *
- * - Reads shipped defaults LIVE from the agent sources — agentSourceDirs(),
- *   dist/agents/ preferred over src/assets/agents/. An agent no source supplies
- *   is reported through the warning channel rather than passing as 'unchanged'
- *   with no explanation.
+ * - Reads shipped defaults (model AND effort) LIVE from the agent sources —
+ *   agentSourceDirs(), dist/agents/ preferred over src/assets/agents/. An agent
+ *   no source supplies is reported through the warning channel rather than
+ *   passing as 'unchanged' with no explanation. D-SHIPPED-EFFORT: an agent that
+ *   ships an effort keeps it across a reapply unless its mapping says otherwise.
  * - Gets the agent name list from the registry (getAllAgentNames()) plus
  *   any mapping entries for agents not in the registry.
  * - Missing installed files → skip silently (recorded in skippedMissing).
@@ -621,12 +819,12 @@ export async function reapplyAgentMapping(opts: ReapplyOptions): Promise<Reapply
   }
   const mapping = mappingResult.value;
 
-  const shippedDefaults = await loadShippedDefaults(opts.agentSourceDirs, { onWarning: warn });
+  const shippedDefaults = await loadShippedAgentDefaults(opts.agentSourceDirs, { onWarning: warn });
 
   // Build the union of: all registered agent names + all names in the mapping
   // (so agents not yet in the registry but configured are also processed).
   const registryNames = new Set(getAllAgentNames());
-  const mappingNames = new Set(Object.keys(mapping.agents));
+  const mappingNames = new Set(Object.keys(agentOnlyMapping(mapping)));
   const allNames = new Set([...registryNames, ...mappingNames]);
 
   // 'write-error' = warning emitted but agent placed in no bucket (original semantics).
@@ -785,7 +983,7 @@ export async function revertExternalAgents(opts: RevertOptions): Promise<Reapply
  */
 export function countExternalMappedAgents(mapping: AgentMappingFile): number {
   let count = 0;
-  for (const entry of Object.values(mapping.agents)) {
+  for (const entry of Object.values(agentOnlyMapping(mapping))) {
     if (isDormantExternalModel(entry.model, false)) {
       count++;
     }

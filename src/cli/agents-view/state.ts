@@ -9,7 +9,9 @@
  *                          Picker names: all aliases for each model; canonical id iff
  *                          the model has no aliases (zero-maintenance, catalog-driven).
  * Model cycle (proxy OFF): default → haiku → sonnet → opus → fable → default
- * Effort cycle:            default → low → medium → high → xhigh → max → default
+ * Effort cycle:            default → low → medium → high → xhigh → max → inherit → default
+ * Worker rows (D-WORKER-AGENTS) cycle only what a worker accepts: the model
+ * cycle is default and the Claude aliases, the effort cycle has no inherit.
  *
  * Dormancy semantics (plan D5 / Phase 1):
  *   When proxy is off and a row's saved model is a GPT model, configuredModel
@@ -29,7 +31,12 @@
  * state.modelCycle and threads it through without reconstructing.
  */
 
-import { EFFORT_LEVELS, type EffortLevel } from '../../core/agent-models.js';
+import {
+  EFFORT_INHERIT,
+  EFFORT_LEVELS,
+  type EffortLevel,
+  type StoredEffort,
+} from '../../core/agent-models.js';
 import {
   CLAUDE_MODEL_ALIASES,
   isDormantExternalModel,
@@ -49,14 +56,16 @@ export interface AgentRow {
   readonly name: string;
   /** Shipped default model from source agent file (e.g., 'opus'). */
   readonly shippedDefault: string;
+  /** Shipped default effort from the source agent file; undefined when it ships none. */
+  readonly shippedEffort: EffortLevel | undefined;
   /** Current session model value: 'default' | model name. */
   readonly configuredModel: string;
   /** Model value at state init — used for dirty detection. */
   readonly originalModel: string;
-  /** Current session effort value: 'default' | effort level. */
-  readonly configuredEffort: EffortLevel | 'default';
+  /** Current session effort value: 'default' | effort level | 'inherit'. */
+  readonly configuredEffort: StoredEffort | 'default';
   /** Effort value at state init — used for dirty detection. */
-  readonly originalEffort: EffortLevel | 'default';
+  readonly originalEffort: StoredEffort | 'default';
   /**
    * Non-null only when: savedModel is an external model AND proxy is off.
    * Holds the saved model name for display annotation and
@@ -74,6 +83,12 @@ export interface AgentRow {
   readonly installed: boolean;
   /** True when the agent name exists in the plugin registry. False for orphan rows. */
   readonly inRegistry: boolean;
+  /**
+   * True for the row of a background worker (D-WORKER-AGENTS). It has no
+   * installed agent file, takes only the worker value domain, and its STATE is
+   * always 'worker'.
+   */
+  readonly worker: boolean;
 }
 
 /** Full TUI state — immutable by convention. */
@@ -202,15 +217,28 @@ export function buildModelCycle(
   return [...base, ...pickerNames(catalog.models)];
 }
 
-const EFFORT_CYCLE: readonly string[] = ['default', ...EFFORT_LEVELS];
+/**
+ * The effort cycle of an agent row: default, the levels in order, then the
+ * `inherit` sentinel (D-SHIPPED-EFFORT). `inherit` sits after the levels so the
+ * forward order of the levels is unchanged.
+ */
+export const EFFORT_CYCLE: readonly string[] = ['default', ...EFFORT_LEVELS, EFFORT_INHERIT];
 
-function cycleNext(cycle: readonly string[], current: string): string {
+/**
+ * The cycles of a worker row (D-WORKER-AGENTS). A worker takes only Claude
+ * models and has no session effort to inherit, so neither the catalog's external
+ * models nor `inherit` is a stop. Built once at load, never per keypress.
+ */
+const WORKER_MODEL_CYCLE: readonly string[] = ['default', ...CLAUDE_MODEL_ALIASES];
+const WORKER_EFFORT_CYCLE: readonly string[] = ['default', ...EFFORT_LEVELS];
+
+export function cycleNext(cycle: readonly string[], current: string): string {
   const idx = cycle.indexOf(current);
   if (idx === -1) return cycle[0];
   return cycle[(idx + 1) % cycle.length];
 }
 
-function cyclePrev(cycle: readonly string[], current: string): string {
+export function cyclePrev(cycle: readonly string[], current: string): string {
   const idx = cycle.indexOf(current);
   if (idx === -1) return cycle[cycle.length - 1];
   return cycle[(idx - 1 + cycle.length) % cycle.length];
@@ -264,7 +292,7 @@ export function persistedModelFor(row: AgentRow): string {
  * Used by both rowState (STATE column display) and mergeTuiRowsIntoMapping
  * (save merge) so the two surfaces share a single persisted-value predicate.
  */
-export function persistedEffortFor(row: AgentRow): EffortLevel | 'default' {
+export function persistedEffortFor(row: AgentRow): StoredEffort | 'default' {
   return isDirtyEffort(row) ? row.configuredEffort : row.originalEffort;
 }
 
@@ -296,9 +324,13 @@ export function unsavedCount(rows: readonly AgentRow[]): number {
  * model would keep showing 'saved-inactive' even though 'opus' is what gets
  * written. Mirroring the merge rule keeps display and persistence in lockstep.
  *
+ * A worker row (D-WORKER-AGENTS) has no installed file and cannot be dormant,
+ * so it bypasses classification and is always 'worker'.
+ *
  * Pure function, no I/O.
  */
 export function rowState(row: AgentRow, proxyEnabled: boolean): AgentState {
+  if (row.worker) return 'worker';
   return classifyAgentState({
     configured: persistedModelFor(row),
     proxyEnabled,
@@ -340,12 +372,14 @@ function cycleField(
   modelCycle: readonly string[],
 ): AgentRow {
   if (field === 'model') {
+    // A worker row cycles its own Claude-only stops, not the catalog cycle.
+    const baseCycle = row.worker ? WORKER_MODEL_CYCLE : modelCycle;
     // Build effective cycle: splice off-cycle pin at the end if present.
     // This is the ≤ 1 array allocation case (AC-P6): only allocates when offCyclePin != null.
     const effectiveCycle: readonly string[] =
-      row.offCyclePin !== null && isOffCycle(modelCycle, row.offCyclePin)
-        ? [...modelCycle, row.offCyclePin]
-        : modelCycle;
+      row.offCyclePin !== null && isOffCycle(baseCycle, row.offCyclePin)
+        ? [...baseCycle, row.offCyclePin]
+        : baseCycle;
 
     // cycleNext/cyclePrev handle the case where configuredModel is not in effectiveCycle
     // by falling back to cycle[0] / cycle[last]. This is correct for the off-cycle case
@@ -356,14 +390,16 @@ function cycleField(
         : cyclePrev(effectiveCycle, row.configuredModel);
     return { ...row, configuredModel: next };
   } else {
+    const effortCycle = row.worker ? WORKER_EFFORT_CYCLE : EFFORT_CYCLE;
     const next =
       dir === 'forward'
-        ? cycleNext(EFFORT_CYCLE, row.configuredEffort)
-        : cyclePrev(EFFORT_CYCLE, row.configuredEffort);
-    // Sound narrowing: EFFORT_CYCLE is ['default', ...EFFORT_LEVELS], so next
-    // is always EffortLevel | 'default'. cycleNext/cyclePrev return string
-    // because their signature is intentionally generic (also used for model cycles).
-    return { ...row, configuredEffort: next as EffortLevel | 'default' };
+        ? cycleNext(effortCycle, row.configuredEffort)
+        : cyclePrev(effortCycle, row.configuredEffort);
+    // Sound narrowing: both effort cycles are built from 'default', EFFORT_LEVELS
+    // and (agents only) the inherit sentinel, so next is always StoredEffort | 'default'.
+    // cycleNext/cyclePrev return string because their signature is intentionally
+    // generic (also used for model cycles).
+    return { ...row, configuredEffort: next as StoredEffort | 'default' };
   }
 }
 
@@ -397,7 +433,9 @@ export interface InitRowInput {
   /** Saved model from mapping file (undefined = no entry). */
   savedModel?: string;
   /** Saved effort from mapping file (undefined = no entry). */
-  savedEffort?: EffortLevel;
+  savedEffort?: StoredEffort;
+  /** Effort the shipped source carries (undefined = ships none). */
+  shippedEffort?: EffortLevel;
   proxyEnabled: boolean;
   /**
    * Prebuilt model cycle for off-cycle pin detection.
@@ -429,6 +467,12 @@ export interface InitRowInput {
    * (keys in agent-models.json not present in the registry).
    */
   inRegistry: boolean;
+  /**
+   * True for the row of a background worker (D-WORKER-AGENTS). Optional: omitted
+   * means an ordinary agent row. A worker's off-cycle pin is judged against the
+   * worker model cycle, not the catalog cycle.
+   */
+  worker?: boolean;
 }
 
 /**
@@ -442,8 +486,9 @@ export interface InitRowInput {
  * the model remains reachable in the per-row effective cycle.
  */
 export function buildRow(input: InitRowInput): AgentRow {
+  const worker = input.worker === true;
   const dormant = isDormantExternalModel(input.savedModel, input.proxyEnabled);
-  const cycle = input.modelCycle ?? [];
+  const cycle = worker ? WORKER_MODEL_CYCLE : (input.modelCycle ?? []);
 
   // Normalize stored canonical id to picker name (Fix 1: in-memory only, never
   // written back to disk). E.g. 'gpt-5.6-sol' → 'sol' when pickerNameMap is known.
@@ -471,6 +516,7 @@ export function buildRow(input: InitRowInput): AgentRow {
   return {
     name: input.name,
     shippedDefault: input.shippedDefault,
+    shippedEffort: input.shippedEffort,
     configuredModel,
     originalModel: configuredModel,
     configuredEffort,
@@ -479,6 +525,7 @@ export function buildRow(input: InitRowInput): AgentRow {
     offCyclePin,
     installed: input.installed,
     inRegistry: input.inRegistry,
+    worker,
   };
 }
 

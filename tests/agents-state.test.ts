@@ -31,6 +31,9 @@ import {
   reduce,
   buildRow,
   buildModelCycle,
+  EFFORT_CYCLE,
+  cycleNext,
+  cyclePrev,
   pickerNames,
   isDirtyModel,
   isDirtyEffort,
@@ -98,10 +101,12 @@ function makeRow(overrides: Partial<AgentRow> = {}): AgentRow {
     originalModel: 'default',
     configuredEffort: 'default',
     originalEffort: 'default',
+    shippedEffort: undefined,
     dormantModel: null,
     offCyclePin: null,
     installed: true,
     inRegistry: true,
+    worker: false,
     ...overrides,
   };
 }
@@ -719,22 +724,34 @@ describe('model cycle', () => {
 // ---------------------------------------------------------------------------
 
 describe('effort cycle', () => {
-  it('cycles effort forward: default → low → medium → high → xhigh → max → default', () => {
+  it('cycles effort forward: default → low → medium → high → xhigh → max → inherit → default', () => {
     const state = makeState({ activeField: 'effort' });
-    const allLevels = ['default', ...EFFORT_LEVELS];
+    const allStops = ['default', ...EFFORT_LEVELS, 'inherit'];
     let s = state;
-    for (let i = 0; i < allLevels.length; i++) {
-      expect(s.rows[1].configuredEffort).toBe(allLevels[i]);
+    for (let i = 0; i < allStops.length; i++) {
+      expect(s.rows[1].configuredEffort).toBe(allStops[i]);
       const { state: next } = reduce(s, 'right');
       s = next;
     }
     expect(s.rows[1].configuredEffort).toBe('default');
   });
 
-  it('cycles effort backward (left arrow)', () => {
+  it('cycles effort backward (left arrow): default wraps to inherit', () => {
     const state = makeState({ activeField: 'effort' });
     const { state: next } = reduce(state, 'left');
-    expect(next.rows[1].configuredEffort).toBe('max');
+    expect(next.rows[1].configuredEffort).toBe('inherit');
+  });
+
+  it('the levels keep their forward order: max steps to inherit, inherit steps to default', () => {
+    const atMax = makeState({
+      activeField: 'effort',
+      rows: [makeRow({ configuredEffort: 'max', originalEffort: 'max' })],
+      cursor: 0,
+    });
+    const { state: atInherit } = reduce(atMax, 'right');
+    expect(atInherit.rows[0].configuredEffort).toBe('inherit');
+    const { state: wrapped } = reduce(atInherit, 'right');
+    expect(wrapped.rows[0].configuredEffort).toBe('default');
   });
 
   it('effort cycle is independent of proxy state', () => {
@@ -977,6 +994,131 @@ describe('T6: rowState', () => {
     });
     expect(isDirtyModel(row)).toBe(false);
     expect(rowState(row, /* proxyEnabled */ false)).toBe('saved-inactive');
+  });
+
+  it('a worker row is "worker" whatever the proxy state, install flags and model', () => {
+    const row = makeRow({ name: 'memory', worker: true, installed: false, inRegistry: false, configuredModel: 'sonnet' });
+    expect(rowState(row, false)).toBe('worker');
+    expect(rowState(row, true)).toBe('worker');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// D-SHIPPED-EFFORT: the effort cycle gains the inherit sentinel
+// ---------------------------------------------------------------------------
+
+describe('EFFORT_CYCLE', () => {
+  it('is default, the levels in order, then inherit', () => {
+    expect(EFFORT_CYCLE).toEqual(['default', ...EFFORT_LEVELS, 'inherit']);
+  });
+
+  it('contains inherit, and cycleNext steps past it instead of falling back to the first entry for a miss', () => {
+    const at = EFFORT_CYCLE.indexOf('inherit');
+    expect(at, 'inherit is missing from the cycle').toBeGreaterThanOrEqual(0);
+    expect(cycleNext(EFFORT_CYCLE, 'inherit')).toBe(EFFORT_CYCLE[(at + 1) % EFFORT_CYCLE.length]);
+    // The wrap is a real step: the entry after inherit is default, and a value
+    // that is NOT in the cycle takes the same first-entry fallback, which is
+    // why the membership assertion above is the one that proves the sentinel.
+    expect(cycleNext(EFFORT_CYCLE, 'not-in-the-cycle')).toBe(EFFORT_CYCLE[0]);
+  });
+
+  it('keeps the existing forward order for every level', () => {
+    expect(cycleNext(EFFORT_CYCLE, 'default')).toBe('low');
+    expect(cycleNext(EFFORT_CYCLE, 'low')).toBe('medium');
+    expect(cycleNext(EFFORT_CYCLE, 'max')).toBe('inherit');
+  });
+
+  it('cyclePrev from default lands on inherit', () => {
+    expect(cyclePrev(EFFORT_CYCLE, 'default')).toBe('inherit');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// D-WORKER-AGENTS: the memory worker row
+// ---------------------------------------------------------------------------
+
+describe('buildRow — shipped effort and the worker row', () => {
+  it('carries the shipped effort and a stored inherit', () => {
+    const row = buildRow({
+      name: 'code',
+      shippedDefault: 'sonnet',
+      shippedEffort: 'medium',
+      savedEffort: 'inherit',
+      proxyEnabled: false,
+      installed: true,
+      inRegistry: true,
+    });
+    expect(row.shippedEffort).toBe('medium');
+    expect(row.configuredEffort).toBe('inherit');
+    expect(row.originalEffort).toBe('inherit');
+    expect(row.worker).toBe(false);
+  });
+
+  it('builds a worker row with the worker defaults', () => {
+    const row = buildRow({
+      name: 'memory',
+      shippedDefault: 'haiku',
+      shippedEffort: 'high',
+      proxyEnabled: false,
+      installed: false,
+      inRegistry: false,
+      worker: true,
+    });
+    expect(row.worker).toBe(true);
+    expect(row.shippedDefault).toBe('haiku');
+    expect(row.shippedEffort).toBe('high');
+    expect(row.configuredModel).toBe('default');
+    expect(row.configuredEffort).toBe('default');
+  });
+
+  it('a worker row is never dormant, and a full claude- identifier stays selectable as an off-cycle pin', () => {
+    const row = buildRow({
+      name: 'memory',
+      shippedDefault: 'haiku',
+      savedModel: 'claude-sonnet-4-6',
+      proxyEnabled: false,
+      installed: false,
+      inRegistry: false,
+      worker: true,
+    });
+    expect(row.dormantModel).toBeNull();
+    expect(row.configuredModel).toBe('claude-sonnet-4-6');
+    expect(row.offCyclePin).toBe('claude-sonnet-4-6');
+  });
+});
+
+describe('reduce — a worker row cycles only what a worker accepts', () => {
+  const workerRow = (overrides: Partial<AgentRow> = {}): AgentRow =>
+    makeRow({ name: 'memory', worker: true, shippedDefault: 'haiku', shippedEffort: 'high', installed: false, inRegistry: false, ...overrides });
+
+  it('the model cycle is default and the Claude aliases, even with an external catalog loaded', () => {
+    let s = makeState({ rows: [workerRow()], cursor: 0, proxyEnabled: true }); // MOCK_CATALOG_KNOWN cycle
+    const seen: string[] = [s.rows[0].configuredModel];
+    for (let i = 0; i < 12; i++) {
+      s = reduce(s, 'right').state;
+      seen.push(s.rows[0].configuredModel);
+    }
+    expect(new Set(seen)).toEqual(new Set(['default', ...CLAUDE_MODEL_ALIASES]));
+  });
+
+  it('the effort cycle excludes inherit', () => {
+    let s = makeState({ rows: [workerRow()], cursor: 0, activeField: 'effort' });
+    const seen: string[] = [s.rows[0].configuredEffort];
+    for (let i = 0; i < 10; i++) {
+      s = reduce(s, 'right').state;
+      seen.push(s.rows[0].configuredEffort);
+    }
+    expect(new Set(seen)).toEqual(new Set(['default', ...EFFORT_LEVELS]));
+  });
+
+  it('backward from default skips inherit: the last stop is max', () => {
+    const s = makeState({ rows: [workerRow()], cursor: 0, activeField: 'effort' });
+    expect(reduce(s, 'left').state.rows[0].configuredEffort).toBe('max');
+  });
+
+  it('an agent row still cycles inherit', () => {
+    const s = makeState({ rows: [makeRow()], cursor: 0, activeField: 'effort' });
+    expect(reduce(s, 'left').state.rows[0].configuredEffort).toBe('inherit');
   });
 });
 

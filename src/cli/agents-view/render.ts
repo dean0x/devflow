@@ -15,12 +15,18 @@
  *  -1  Unsaved count "  N unsaved changes" (blank if 0)
  *   0  Keybinding footer
  *
- * Columns (chars) — total 79 ≤ 80:
+ * Columns (chars) — total 80 ≤ 80:
  *   PREFIX  :  2  (cursor mark "❯ " or "  ")
- *   AGENT   : 18
- *   MODEL   : 32
- *   EFFORT  : 13
+ *   AGENT   : 14
+ *   MODEL   : 30
+ *   EFFORT  : 20
  *   STATE   : 14
+ *
+ * EFFORT is 20 wide so the longest unconfigured cell, "default (medium)" (16),
+ * fits whole even inside the cursor's "‹ … ›" wrapper (20) — the shipped effort
+ * (D-SHIPPED-EFFORT) is never clipped on the cursor row. The agent names the
+ * registry holds are at most 10 characters ("Scrutinize"); longer orphan keys
+ * are truncated by truncateVisible.
  */
 
 import {
@@ -42,7 +48,7 @@ import {
   type AgentRow,
   type AgentsViewState,
 } from './state.js';
-import { AGENT_STATE_LABELS } from '../../core/agent-state.js';
+import { AGENT_STATE_LABELS, formatEffortDisplay } from '../../core/agent-state.js';
 
 // ---------------------------------------------------------------------------
 // Layout constants
@@ -61,9 +67,9 @@ export function computeViewportHeight(termRows: number): number {
   return Math.max(MIN_VIEWPORT, termRows - FIXED_ROWS);
 }
 
-const COL_AGENT = 18;
-const COL_MODEL = 32;
-const COL_EFFORT = 13;
+const COL_AGENT = 14;
+const COL_MODEL = 30;
+const COL_EFFORT = 20;
 const COL_STATE = 14;
 
 // ---------------------------------------------------------------------------
@@ -168,6 +174,9 @@ function renderModelCell({
 
 /**
  * Render the effort cell for a given row, considering cursor/active/dirty state.
+ *
+ * D-SHIPPED-EFFORT: an unconfigured row shows `default (<shipped effort>)` when
+ * the shipped source carries an effort, through the formatter --list shares.
  */
 function renderEffortCell(
   row: AgentRow,
@@ -176,7 +185,7 @@ function renderEffortCell(
   maxWidth: number,
 ): string {
   const dirty = isDirtyEffort(row);
-  const value = row.configuredEffort;
+  const value = formatEffortDisplay(row.configuredEffort, row.shippedEffort);
 
   let cell: string;
   if (isCursor && isActive) {
@@ -210,6 +219,9 @@ function renderStateCell(row: AgentRow, proxyEnabled: boolean, maxWidth: number)
       break;
     case 'unknown':
       cell = dim(AGENT_STATE_LABELS['unknown']);
+      break;
+    case 'worker':
+      cell = dim(AGENT_STATE_LABELS['worker']);
       break;
     default: {
       const _: never = state;

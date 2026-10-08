@@ -38,7 +38,7 @@ import { convergeMemoryHooks, drainMemoryQueue } from './memory.js';
 import { addCaptureHooks, removeCaptureHooks } from './capture.js';
 import { removeDreamHook } from './legacy-hooks.js';
 import { addProxyHooks, removeProxyHooks, applyProxyEnv, stripProxyEnv, runProxyPreflight, buildRealPreflightDeps } from './proxy.js';
-import { reapplyAgentMapping, readAgentMapping } from '../../core/agent-models.js';
+import { reapplyAgentMapping, readAgentMapping, hasAgentMappingEntries } from '../../core/agent-models.js';
 import { readProxyState, writeProxyState, buildProxyState, buildRoutingConfigJson, DEFAULT_PROXY_PORT, proxyJsonExists } from '../../core/proxy-state.js';
 import type { Settings } from '../../targets/claude-code/hooks.js';
 import { stripDevflowTeammateModeFromJson } from '../../core/teammate-mode-cleanup.js';
@@ -2147,7 +2147,9 @@ export const initCommand = new Command('init')
     {
       const agentInstallDir = path.join(claudeDir, 'agents', 'devflow');
       const preCheckMapping = await readAgentMapping(devflowDir);
-      const hasMappingEntries = preCheckMapping.ok && Object.keys(preCheckMapping.value.agents).length > 0;
+      // hasAgentMappingEntries counts agent entries only: an agents.memory-only
+      // mapping names no installed file, so it keeps this gate closed (D-WORKER-AGENTS).
+      const hasMappingEntries = preCheckMapping.ok && hasAgentMappingEntries(preCheckMapping.value);
       if (hasMappingEntries || proxyEnabled) {
         const reapplyResult = await reapplyAgentMapping({
           proxyEnabled,

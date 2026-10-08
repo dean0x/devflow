@@ -8,6 +8,7 @@ import { describe, it, expect } from 'vitest';
 import {
   classifyAgentState,
   AGENT_STATE_LABELS,
+  formatEffortDisplay,
   type AgentState,
 } from '../src/core/agent-state.js';
 
@@ -38,6 +39,35 @@ describe('AGENT_STATE_LABELS', () => {
 
   it('unknown label is "unknown"', () => {
     expect(AGENT_STATE_LABELS['unknown']).toBe('unknown');
+  });
+
+  it('worker label is "worker" (D-WORKER-AGENTS row state, never produced by classifyAgentState)', () => {
+    const state: AgentState = 'worker';
+    expect(AGENT_STATE_LABELS[state]).toBe('worker');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// formatEffortDisplay — the EFFORT cell shared by --list and the TUI
+// ---------------------------------------------------------------------------
+
+describe('formatEffortDisplay', () => {
+  it('shows a configured level as is', () => {
+    expect(formatEffortDisplay('high', 'medium')).toBe('high');
+    expect(formatEffortDisplay('high', undefined)).toBe('high');
+  });
+
+  it('shows inherit as is, whatever the shipped effort', () => {
+    expect(formatEffortDisplay('inherit', 'medium')).toBe('inherit');
+  });
+
+  it('shows default (<shipped>) when unconfigured and the shipped source carries an effort', () => {
+    expect(formatEffortDisplay('default', 'medium')).toBe('default (medium)');
+    expect(formatEffortDisplay('default', 'high')).toBe('default (high)');
+  });
+
+  it('shows plain default when unconfigured and the shipped source carries none', () => {
+    expect(formatEffortDisplay('default', undefined)).toBe('default');
   });
 });
 
