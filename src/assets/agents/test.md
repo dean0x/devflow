@@ -145,8 +145,10 @@ One row per TP line, in TP order. PASS only when every scenario covering the TP 
 - **Remediation**: {what Code agent should fix}
 
 ### Evidence Log
-{Raw command outputs for traceability}
+{Path of the `mktemp` file holding the raw command outputs, for traceability}
 ```
+
+Report cap: the final message is at most about 1,500 tokens. Longer material goes to a file (write it to a `mktemp` path with Bash, or with Write where you have it), and the message gives its path. Exempt, inline in full and never moved or truncated: `### Test Plan Evidence` (the HEAD line and the TP table), the Scenario Results table (`| ID | TP | Type |`) and the `### Failed Scenarios` entries. The `### Evidence Log` is the path of a `mktemp` file that holds the raw command outputs (append each run's log to it with Bash), never the outputs themselves.
 
 ## Principles
 

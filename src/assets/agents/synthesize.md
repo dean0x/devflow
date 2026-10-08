@@ -378,6 +378,12 @@ If CYCLE_NUMBER >= 3 and prior FP ratio > 70%: append "Note: High false-positive
 
 ---
 
+## Output
+
+Each mode's template above is its output. Review, bug-analysis and research modes write their summary to disk and return its path; exploration, planning and design modes return their synthesis inline.
+
+Report cap: the final message is at most about 1,500 tokens. Longer material goes to a file (write it to a `mktemp` path with Bash, or with Write where you have it), and the message gives its path. Exempt, inline in full and never moved or truncated: in exploration, planning and design modes, the synthesis, which the orchestrator passes on. In review, bug-analysis and research modes the summary is the file, and the message gives its path.
+
 ## Principles
 
 1. **No new research** - Only synthesize what agents found

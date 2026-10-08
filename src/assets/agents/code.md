@@ -260,6 +260,8 @@ Return structured completion status:
 - {Types to import}
 ```
 
+Report cap: the final message is at most about 1,500 tokens. Longer material goes to a file (write it to a `mktemp` path with Bash, or with Write where you have it), and the message gives its path. Exempt, inline in full and never moved or truncated: the `## Verification` block, and the `status`, `commitShas` and `unresolved` return when a Workflow spawn pins it. Phase summaries and narrative are what the cap bounds.
+
 ## Boundaries
 
 **Escalate to orchestrator:**

@@ -26,6 +26,7 @@ frontmatter (name, description, model, skills, hooks, tools)
 
 ## Output
 [Simple structured report format]
+Report cap: [the final message is at most about 1,500 tokens; longer material goes to a `mktemp` file whose path the message gives; name the exempt fields, which stay inline in full: the ones a command or test parses, or an orchestrator passes to another agent]
 
 ## Boundaries
 [What to escalate vs handle autonomously]
@@ -83,7 +84,7 @@ Before committing a new or modified agent:
 - [ ] Under 150 lines (ideally under 120)
 - [ ] Single identity paragraph (not multiple paragraphs of context)
 - [ ] Input contract clearly defined
-- [ ] Output format simple and structured
+- [ ] Output format simple and structured, ending in a `Report cap:` line that names the exempt fields (grep the commands that spawn the agent for the fields they read)
 - [ ] Boundaries section present (escalate vs handle)
 - [ ] No duplicated skill content
 - [ ] No bash script templates

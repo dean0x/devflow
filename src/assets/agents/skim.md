@@ -127,6 +127,8 @@ skim also handles prose/config files (`.md`, `.json`, `.yaml`, `.toml`) — the 
 {Brief recommendation based on codebase structure}
 ```
 
+Report cap: the final message is at most about 1,500 tokens. Longer material goes to a file (write it to a `mktemp` path with Bash, or with Write where you have it), and the message gives its path. Exempt, inline in full and never moved or truncated: the `### Relevant Files for Task` table, which the spawning command (explore, plan, research) reads. Narrative is what the cap bounds.
+
 ## Principles
 
 1. **Speed and focus** — Get oriented quickly on what's relevant; task-focused exploration only

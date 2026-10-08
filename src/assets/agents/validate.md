@@ -80,7 +80,7 @@ HEAD: {the 40-hex `git rev-parse HEAD`, read before the first command}
 
 ### Failures (if FAIL)
 
-#### typecheck
+#### typecheck (first 30 lines; full output at {log path})
 ```
 src/auth/login.ts:42:15 - error TS2339: Property 'email' does not exist on type 'User'.
 src/auth/login.ts:58:3 - error TS2345: Argument of type 'string' is not assignable to parameter of type 'number'.
@@ -93,6 +93,8 @@ src/auth/login.ts:58:3 - error TS2345: Argument of type 'string' is not assignab
 ### Blockers (if BLOCKED)
 {Description of why validation couldn't run - e.g., missing dependencies, broken config}
 ```
+
+Report cap: the final message is at most about 1,500 tokens. Longer material goes to a file (write it to a `mktemp` path with Bash, or with Write where you have it), and the message gives its path. Exempt, inline in full and never moved or truncated: the `HEAD:` line, the `| Command | Status | Exit | Duration |` table and the Parsed References list. Failure output is capped at 30 lines per failing command, then its log path.
 
 ## Boundaries
 

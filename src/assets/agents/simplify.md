@@ -95,6 +95,8 @@ Return structured completion status:
 - {file} ({change description})
 ```
 
+Report cap: the final message is at most about 1,500 tokens. Longer material goes to a file (write it to a `mktemp` path with Bash, or with Write where you have it), and the message gives its path. Exempt, inline in full and never moved or truncated: the completion status and the commits you made (the `### Files Modified` list), which the orchestrator records as your output. Narrative is what the cap bounds.
+
 ## Boundaries
 
 **Escalate to orchestrator:**

@@ -83,6 +83,8 @@ Follow the `devflow:apply-decisions` skill to scan the `DECISIONS_CONTEXT` index
 **Overall Assessment**: {BLOCKING | SHOULD-ADDRESS | INFORMATIONAL}
 ```
 
+Report cap: the final message is at most about 1,500 tokens. Longer material goes to a file (write it to a `mktemp` path with Bash, or with Write where you have it), and the message gives its path. Exempt, inline in full and never moved or truncated: the `## Findings` list, which the planning commands consume. Narrative is what the cap bounds.
+
 ## Confidence Scale
 
 | Range | Label | Meaning |
