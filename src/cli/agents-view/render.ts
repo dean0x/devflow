@@ -17,16 +17,17 @@
  *
  * Columns (chars) — total 80 ≤ 80:
  *   PREFIX  :  2  (cursor mark "❯ " or "  ")
- *   AGENT   : 14
+ *   AGENT   : 12
  *   MODEL   : 30
- *   EFFORT  : 20
+ *   EFFORT  : 22
  *   STATE   : 14
  *
- * EFFORT is 20 wide so the longest unconfigured cell, "default (medium)" (16),
- * fits whole even inside the cursor's "‹ … ›" wrapper (20) — the shipped effort
- * (D-SHIPPED-EFFORT) is never clipped on the cursor row. The agent names the
- * registry holds are at most 10 characters ("Scrutinize"); longer orphan keys
- * are truncated by truncateVisible.
+ * EFFORT is 22 wide so the longest unconfigured cell, "default (medium)" (16),
+ * fits whole inside the cursor's "‹ … ›" wrapper with the dirty marker
+ * ("‹ default (medium) ● ›", 22) — the shipped effort (D-SHIPPED-EFFORT) and the
+ * unsaved mark are never clipped on the cursor row. The agent names the registry
+ * holds are at most 10 characters ("Scrutinize"); longer orphan keys are
+ * truncated by truncateVisible.
  */
 
 import {
@@ -67,9 +68,9 @@ export function computeViewportHeight(termRows: number): number {
   return Math.max(MIN_VIEWPORT, termRows - FIXED_ROWS);
 }
 
-const COL_AGENT = 14;
+const COL_AGENT = 12;
 const COL_MODEL = 30;
-const COL_EFFORT = 20;
+const COL_EFFORT = 22;
 const COL_STATE = 14;
 
 // ---------------------------------------------------------------------------
@@ -147,7 +148,10 @@ function renderModelCell({
       // Dormant: show saved model name as dim annotation
       valueStr += ` ${dim(`${safeDormantModel} saved`)}`;
     }
-  } else if (isOffCycle(modelCycle, row.configuredModel)) {
+  } else if (!row.worker && isOffCycle(modelCycle, row.configuredModel)) {
+    // A worker row is exempt: its model is never judged against the catalog, and
+    // a full claude- identifier, which no cycle lists, is in the worker domain
+    // (D-WORKER-AGENTS) — readAgentMapping has already dropped anything outside it.
     // Off-cycle pin: model was saved but is no longer in the discovered catalog.
     // The per-row effective cycle (state.ts cycleField) includes it for reachability,
     // but it renders as unavailable to signal the user should update it.

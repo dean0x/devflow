@@ -432,7 +432,7 @@ describe('narrow width', () => {
 
 describe('AC-P3-WIDTH: no line exceeds terminal width', () => {
   // At 80 cols (standard terminal): all columns scale to full size.
-  // totalContent = 2 + 14 + 30 + 20 + 14 = 80, so a full data row is 80 chars.
+  // totalContent = 2 + 12 + 30 + 22 + 14 = 80, so a full data row is 80 chars.
   // The keybindingsLine (77 chars) also fits within 80.
   it('at 80 cols: every stripped line is ≤ 80 visible chars', () => {
     const state = makeState({
@@ -455,8 +455,8 @@ describe('AC-P3-WIDTH: no line exceeds terminal width', () => {
   });
 
   // At 60 cols: responsive-scale block exercises the Math.max floors.
-  // scale = 60/80 = 0.75; column widths after floor: agent=10, model=22, effort=15, state=10.
-  // Max data row visible width = 2 + 10 + 22 + 15 + 10 = 59 ≤ 60.
+  // scale = 60/80 = 0.75; column widths after floor: agent=9, model=22, effort=16, state=10.
+  // Max data row visible width = 2 + 9 + 22 + 16 + 10 = 59 ≤ 60.
   // keybindingsLine is sliced to dims.cols (60) before dim() is applied.
   it('at 60 cols: every stripped line is ≤ 60 visible chars', () => {
     const state = makeState({
@@ -488,8 +488,8 @@ describe('AC-P3-WIDTH: no line exceeds terminal width', () => {
   //   GREEN after fix (COL_STATE=14): visible length === maxWidth, string
   //        returned as-is with ANSI intact → PASS.
   //
-  // State column offset at 80 cols: 2 (prefix) + 14 (agent) + 30 (model) +
-  //   20 (effort) = 66.  `stripped[4].slice(66)` is exactly the STATE cell
+  // State column offset at 80 cols: 2 (prefix) + 12 (agent) + 30 (model) +
+  //   22 (effort) = 66.  `stripped[4].slice(66)` is exactly the STATE cell
   //   for the first data row (dormant row — cursor is on the second row).
   it('T15: dormant row renders yellow("saved-inactive") unclipped at 80 cols', () => {
     const dormantRow = makeRow({
@@ -748,7 +748,7 @@ describe('STATE column (Fix 3)', () => {
     // breaking renderFrame's documented contract and desyncing terminal.ts's
     // redraw (it appends ERASE_EOL + '\n' per returned line).
     const state = makeState({
-      rows: [makeRow({ name: 'evil\ninjected', installed: false, inRegistry: false })],
+      rows: [makeRow({ name: 'evil\ninject', installed: false, inRegistry: false })],
       cursor: 0,
       activeField: 'effort',
     });
@@ -758,7 +758,7 @@ describe('STATE column (Fix 3)', () => {
         .not.toContain('\n');
     }
     // The key is still visible (both halves survive, joined by the replacement space)
-    const rowLine = rawLines.map(stripAnsi).find(l => l.includes('Evil injected'));
+    const rowLine = rawLines.map(stripAnsi).find(l => l.includes('Evil inject'));
     expect(rowLine).toBeDefined();
   });
 
@@ -778,7 +778,7 @@ describe('STATE column (Fix 3)', () => {
     const rowLine = rawLines.map(stripAnsi).find(l => l.includes('A b'));
     expect(rowLine).toBeDefined();
     // Column alignment holds: at 80 cols the STATE cell starts at the declared
-    // offset PREFIX(2) + AGENT(14) + MODEL(30) + EFFORT(20) = 66. A surviving tab
+    // offset PREFIX(2) + AGENT(12) + MODEL(30) + EFFORT(22) = 66. A surviving tab
     // would shift it, because padToVisible counts \t as a single character.
     expect(rowLine?.slice(66)).toBe('unknown');
   });
@@ -1043,9 +1043,9 @@ describe('EFFORT cell — shipped effort and inherit', () => {
 
   it('renders plain default when the row ships no effort', () => {
     const state = makeState({ rows: [makeRow({ name: 'code' }), makeRow({ name: 'design' })], cursor: 1 });
-    // The EFFORT cell is columns 46..66 (PREFIX 2 + AGENT 14 + MODEL 30); the MODEL
+    // The EFFORT cell is columns 44..66 (PREFIX 2 + AGENT 12 + MODEL 30); the MODEL
     // cell's own "default (sonnet)" must not be mistaken for it.
-    expect(dataRow(renderStripped(state), 'code').slice(46, 66).trim()).toBe('default');
+    expect(dataRow(renderStripped(state), 'code').slice(44, 66).trim()).toBe('default');
   });
 
   it('renders every default (<level>) in full', () => {
@@ -1076,6 +1076,21 @@ describe('EFFORT cell — shipped effort and inherit', () => {
     const line = dataRow(renderStripped(state), 'code');
     expect(line).toContain('‹ default (medium) ›');
     expect(line.slice(66)).toBe('active');
+  });
+
+  it('a dirty cursor cell keeps its unsaved mark beside default (<level>) at full width', () => {
+    // A saved level cycled back to default: the cell carries the dirty marker,
+    // the longest an EFFORT cell gets.
+    for (const level of ['medium', 'xhigh'] as const) {
+      const state = makeState({
+        rows: [makeRow({ name: 'code', shippedEffort: level, configuredEffort: 'default', originalEffort: 'low' })],
+        cursor: 0,
+        activeField: 'effort',
+      });
+      const line = dataRow(renderStripped(state), 'code');
+      expect(line, level).toContain(`‹ default (${level}) ● ›`);
+      expect(line.slice(66), level).toBe('active');
+    }
   });
 
   it('a configured level wins over the shipped effort', () => {
@@ -1161,5 +1176,25 @@ describe('worker row', () => {
     expect(line).toContain('sonnet');
     expect(line).toContain('medium');
     expect(line).not.toContain('default (haiku)');
+  });
+
+  it('shows a full claude- identifier bare, not as unavailable: it is in the worker domain', () => {
+    const state = makeState({
+      rows: [makeRow({ name: 'code' }), memoryRow({ configuredModel: 'claude-sonnet-4-6', originalModel: 'claude-sonnet-4-6' })],
+      cursor: 0,
+    });
+    const line = renderStripped(state).find(l => l.includes('Memory'));
+    // The MODEL cell is columns 14..44 (PREFIX 2 + AGENT 12). Compared whole, since a
+    // 30-wide cell would clip "(unavailable)" and a substring check could pass on it.
+    expect(line?.slice(14, 44).trim()).toBe('claude-sonnet-4-6');
+  });
+
+  it('still marks an off-catalog model on an agent row as unavailable', () => {
+    const state = makeState({
+      rows: [makeRow({ name: 'code', configuredModel: 'retired-model', originalModel: 'retired-model' }), memoryRow()],
+      cursor: 1,
+    });
+    const line = renderStripped(state).find(l => l.includes('Code'));
+    expect(line).toContain('retired-model (unavailable)');
   });
 });
