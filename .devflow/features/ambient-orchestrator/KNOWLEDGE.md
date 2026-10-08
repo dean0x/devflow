@@ -1,18 +1,18 @@
 ---
 feature: ambient-orchestrator
 name: Ambient Orchestrator Mode
-description: "Use when modifying the ambient mode hooks (preamble, session-start-orchestrator), the orchestrator charter file (including the feature-knowledge operating rule), the git-marker helper, the ambient CLI toggle, or the plan-handoff fast-path. Keywords: ambient, preamble, orchestrator, charter, plan-handoff, session-start-orchestrator, git-marker, DEVFLOW_BG_UPDATER, devflow ambient, UserPromptSubmit, SessionStart, feature-knowledge."
+description: "Use when modifying the ambient mode hooks (preamble, session-start-orchestrator), the orchestrator charter file (including the feature-knowledge operating rule), the git-marker helper, the ambient CLI toggle, or the plan-handoff fast-path. Keywords: ambient, preamble, orchestrator, charter, plan-handoff, session-start-orchestrator, git-marker, DEVFLOW_BG_UPDATER, devflow ambient, UserPromptSubmit, SessionStart, feature-knowledge, bounded-inline, report cap, charter-char-max, COMMAND_INPUT, no-argument handoff."
 category: architecture
 directories: [src/assets/scripts/hooks, src/cli/commands/ambient.ts, src/core/plugins.ts]
 created: 2026-07-04
-updated: 2026-09-29
+updated: 2026-10-08
 ---
 
 # Ambient Orchestrator Mode
 
 ## Overview
 
-Ambient mode turns the main Claude Code session into a pure orchestrator: it coordinates sub-agents rather than performing work directly. The feature is a two-hook system, both managed by a single `devflow ambient --enable/--disable` toggle: `session-start-orchestrator` (SessionStart) injects a static charter as `additionalContext` at the start of every session, and `preamble` (UserPromptSubmit) reinforces the orchestrator contract per prompt and handles the plan-handoff fast-path. Both hooks are presence-gated — they only fire in git repositories — and share three cross-cutting safety contracts: a `DEVFLOW_BG_UPDATER` re-entrancy guard, a bounded pure-bash git-repo check, and fail-open `exit 0` on all error paths.
+Ambient mode turns the main Claude Code session into an orchestrator: it coordinates sub-agents rather than performing work directly, with one bounded inline exception (a single `git`, `gh` or script command whose output stays under about 40 lines, never a diff, log or test run). The feature is a two-hook system, both managed by a single `devflow ambient --enable/--disable` toggle: `session-start-orchestrator` (SessionStart) injects a static charter as `additionalContext` at the start of every session, and `preamble` (UserPromptSubmit) reinforces the orchestrator contract per prompt and handles the plan-handoff fast-path. Both hooks are presence-gated — they only fire in git repositories — and share three cross-cutting safety contracts: a `DEVFLOW_BG_UPDATER` re-entrancy guard, a bounded pure-bash git-repo check, and fail-open `exit 0` on all error paths.
 
 This design replaced two previous detection-based approaches (first-word keyword dispatch and 3-marker plan detection) with a simpler charter injection that constructs the model's behavior once at session start, eliminating per-prompt heavyweight detection.
 
@@ -20,7 +20,7 @@ This design replaced two previous detection-based approaches (first-word keyword
 
 ### Hook 1: session-start-orchestrator (SessionStart, timeout 10)
 
-Reads `src/assets/scripts/hooks/assets/orchestrator-charter.md` at runtime and emits its content as `additionalContext` via `json_session_output`. The charter is static — it never interpolates user input. Hard caps: charter must be present, non-empty, and under 4096 bytes; missing or oversized charter exits 0 silently. Sources `hook-log-init` after CWD is resolved and emits `log "Injecting charter (N chars)"` immediately before the JSON output — consistent with the sibling SessionStart hooks (`session-start-memory`, `session-start-context`).
+Reads `src/assets/scripts/hooks/assets/orchestrator-charter.md` at runtime and emits its content as `additionalContext` via `json_session_output`. The charter is static — it never interpolates user input. Hard caps: charter must be present, non-empty, and at most 4096 characters (`${#CHARTER}`, a shell string length); a missing or oversized charter exits 0 silently. Sources `hook-log-init` after CWD is resolved and emits `log "Injecting charter (N chars)"` immediately before the JSON output — consistent with the sibling SessionStart hooks (`session-start-memory`, `session-start-context`).
 
 ### Hook 2: preamble (UserPromptSubmit, timeout 5)
 
@@ -35,9 +35,11 @@ Pure-bash dispatch on the first 256 bytes of the prompt (after leading whitespac
 
 The orchestrator reminder is a fixed two-line string reinforcing "coordinate, don't produce" — it carries no per-prompt logic beyond the three-way dispatch above.
 
+The plan-handoff directive tells the model to invoke `devflow:implement` through the Skill tool with **no arguments**: the handoff prompt is the plan, so it is already in the conversation, and passing it as skill input would put a second copy in the main-thread context. No plan body or plan path is parsed in the hook; detection stays the literal prefix. The directive is a double-quoted bash string, so it holds no dollar sign and no unescaped backtick, and it must equal `HANDOFF_TEMPLATE` in `tests/fixtures/ambient-templates.ts` byte for byte.
+
 ### orchestrator-charter.md
 
-A static markdown file at `src/assets/scripts/hooks/assets/orchestrator-charter.md` consumed at runtime by `session-start-orchestrator`. Contains the full orchestrator contract: a never-mainline rule (explicitly naming codebase orientation as delegated work alongside file edits, builds, multi-file reads, and debug loops), a routing table keyed by **kind of work, not by model** — search/listing to Explore, codebase orientation to Skim, execution against a spec to Code (write code to a plan, including mechanical edits — renames, moves, boilerplate; also fixes pre-classified review issues in issue-fix mode)/Validate (build, typecheck, lint, test)/Git (git/GitHub operations), analysis/design/research to Design/Research/Review/Triage (validate review issues against the blast-radius matrix), and real-scale work matching a workflow to the full skill instead (devflow:implement, devflow:plan, devflow:research, devflow:explore, devflow:debug, devflow:code-review, devflow:resolve) — so each agent keeps running on its own configured model rather than the charter pinning one. It also holds the self-contained-delegation operating rule (subagents start with blank context, so every delegation must supply goal, constraints, relevant session decisions and facts, and exact paths — deliverables that draw on the conversation need the substance in the prompt, not a pointer to it), the plan-handoff fallback bullet, and a feature-knowledge operating rule. The feature-knowledge rule (direct delegations only — workflow skills handle their own) instructs the orchestrator to: (1) before delegating non-trivial code work, match the task area against `.devflow/features/index.md` and pass matching KNOWLEDGE.md content as `FEATURE_KNOWLEDGE`; (2) after delegated changes to a covered area, spawn Knowledge (sonnet) to refresh that KB. The charter is 2116 bytes (~530 tokens), well under the 4096-byte runtime cap enforced by the hook. `docs/commands.md`'s "Orchestrator charter" line mirrors this kind-of-work, no-model-pinning framing — keep both in sync if the charter's routing changes.
+A static markdown file at `src/assets/scripts/hooks/assets/orchestrator-charter.md` consumed at runtime by `session-start-orchestrator`. Contains the full orchestrator contract: a never-mainline rule (explicitly naming codebase orientation as delegated work alongside file edits, builds, multi-file reads, and debug loops) that carries its one bounded-inline exception in a single sentence — the main thread may run only a single git, gh or script command whose output stays under about 40 lines, never a diff, log or test run — a routing table keyed by **kind of work, not by model** — search/listing to Explore, codebase orientation to Skim, execution against a spec to Code (write code to a plan, including mechanical edits — renames, moves, boilerplate; also fixes pre-classified review issues in issue-fix mode)/Validate (build, typecheck, lint, test)/Git (git/GitHub operations), analysis/design/research to Design/Research/Review/Triage (validate review issues against the blast-radius matrix), and real-scale work matching a workflow to the full skill instead (devflow:implement, devflow:plan, devflow:research, devflow:explore, devflow:debug, devflow:code-review, devflow:resolve) — so each agent keeps running on its own configured model rather than the charter pinning one. It also holds the self-contained-delegation operating rule (subagents start with blank context, so every delegation must supply goal, constraints, relevant session decisions and facts, and exact paths — deliverables that draw on the conversation need the substance in the prompt, not a pointer to it), a report-cap rule (every direct delegation is asked for a final report of at most about 1,500 tokens: findings, paths and verdicts, not file dumps), a decisions rule (pass the index named under PROJECT DECISIONS as `DECISIONS_CONTEXT`, read once, to every agent that takes it), the plan-handoff fallback bullet (invoke `devflow:implement` with no arguments), and a feature-knowledge operating rule. The feature-knowledge rule (direct delegations only — workflow skills handle their own) instructs the orchestrator to: (1) before delegating non-trivial code work, match the task area against `.devflow/features/index.md` and pass matching KNOWLEDGE.md content as `FEATURE_KNOWLEDGE`; (2) after delegated changes to a covered area, spawn Knowledge (sonnet) to refresh that KB. The charter is about 2,650 characters, held under a 3,072-character ceiling (75% of the hook's 4,096-character cap; `charter-char-max` among the ceilings of `tests/fixtures/numeric-floors.json`, asserted in `tests/agent-name-guards.test.ts`). `docs/commands.md`'s "Orchestrator charter" line mirrors this kind-of-work, no-model-pinning framing — keep both in sync if the charter's routing changes.
 
 ### git-marker (sourced helper)
 
@@ -80,7 +82,7 @@ Per-session (SessionStart):
     → CWD resolved; hook-log-init sourced
     → df_has_git_marker (exit 0 if not a git repo)
     → reads orchestrator-charter.md into CHARTER var
-    → size check: exit 0 if > 4096 bytes
+    → size check: exit 0 if > 4096 characters
     → log "Injecting charter (N chars)"
     → json_session_output "$CHARTER"   ← additionalContext injected
 
@@ -122,7 +124,9 @@ This is intentional. SessionStart provably fires (via `SessionStart:clear`) in p
 
 ## Constraints
 
-**4096-byte charter cap**: `session-start-orchestrator` exits silently if the charter exceeds 4096 bytes. The test suite pins the exact-4096-byte boundary as an accept case (the hook uses `-gt 4096`, so 4096 is accepted). Growing the charter beyond this cap silently disables it — always check `${#CHARTER}` after edits. The charter is currently 2116 bytes, leaving ~1980 bytes of headroom.
+**4096-character charter cap, 3,072-character ceiling**: `session-start-orchestrator` compares `${#CHARTER}` (characters, not bytes) with `-gt 4096` and exits silently above it, so 4096 is accepted and anything longer disables the charter with no visible error. The test suite pins the exact-4096 boundary as an accept case and holds the charter itself to 75% of the cap, 3,072 characters, so the ceiling trips first. The ceiling is a ratchet: it may be lowered, never raised to fit an edit. The charter's em dashes count one character each but three bytes, so measure characters (`wc -m`, or `${#CHARTER}`), not bytes.
+
+**The bounded-inline exception and the report cap are guarded as shapes** (`tests/agent-name-guards.test.ts`, GAP-3 block): one sentence must hold every bound word (single, git, gh, 40 lines, diff, log, test), because two sentences would let an edit keep the grant and lose the bound; a delegation report cap must carry a token figure; and the handoff line must invoke `devflow:implement` without the words "full plan". Known-bad probes seed each defect. `tests/commands/report-caps.test.ts` holds the same figure on the built-in Explore and Plan spawns the commands write as prose.
 
 **256-byte prompt head**: The preamble dispatch window is the first 256 bytes post-whitespace-strip. Plan-handoff prompts have zero leading whitespace by definition; the strip is defensive. The window is wide enough for the known prefix but is not semantic detection.
 
@@ -140,7 +144,7 @@ This is intentional. SessionStart provably fires (via `SessionStart:clear`) in p
 
 **Letting the hook call `git` directly**: `git status`, `git rev-parse`, etc. spawn subprocesses on every UserPromptSubmit call. `git-marker` exists precisely to avoid this — it's a pure-bash bounded walk. Never replace it with a `git` invocation on the hot path.
 
-**Growing orchestrator-charter.md past 4096 bytes**: The hook exits 0 silently if the charter is too large. There is no error visible to the user. Keep the charter well under the cap; recompute `${#CHARTER}` after any edit (see Constraints for current headroom).
+**Growing orchestrator-charter.md past its ceiling**: The hook exits 0 silently if the charter exceeds 4096 characters, and there is no error visible to the user. Keep the charter under the 3,072-character ceiling; recompute `${#CHARTER}` after any edit (see Constraints).
 
 **Adding a third presence-gate separately**: The two hooks are managed together by `addAmbientHook`/`removeAmbientHook`. If a third hook is added to ambient mode, it must be added to both functions (via `ensureHook`) and to the `hasAmbientHook` / `--status` partial-state detection logic. Orphaned hooks that survive `--disable` create noise in settings.json.
 
@@ -164,16 +168,21 @@ This is intentional. SessionStart provably fires (via `SessionStart:clear`) in p
 
 **`session-start-classification` is a stale marker**: The `AMBIENT_HOOK_SUFFIXES.classification` suffix (`/scripts/hooks/run-hook session-start-classification`) refers to a hook from a previous ambient design that no longer exists. Both `addAmbientHook` and `removeAmbientHook` clean it up to handle upgrades from those installs. Do not re-register it.
 
+**A plan handoff sends the plan once.** The hook directive and the charter bullet both say to invoke `devflow:implement` with no arguments. `/implement` binds its input once as `COMMAND_INPUT`; when that is empty (the handoff case) it has no argument to name the branch from and the Git agent sees none of the conversation, so the orchestrator writes a one-line task description itself, from the plan's title or the conversation, and sends it as the `setup-task` `TASK_DESCRIPTION`.
+
+**The main thread loads no companion skills.** `/implement`, `/code-review`, `/debug` and `/plan` orchestrate and delegate, so their main threads load no companion skills; only `/release`, whose main thread drives git, loads one (`devflow:git`). `docs/reference/skill-catalog.md` keeps all five intent rows, "(none)" included, and `tests/skill-references.test.ts` holds each row to its compiled command in both directions (`collectCompanionDrift`). A `requires:` list in `DEVFLOW_PLUGINS` names only skills that the plugin's commands, agents or skills actually read, and the closure guard rejects an unread entry: the plan plugin dropped `software-design` and `test-driven-development`, and the code-review plugin dropped `quality-gates` and `software-design`.
+
 **UserPromptSubmit may not fire for auto-injected plan handoff**: Whether Claude Code fires UserPromptSubmit for its own auto-injected "start-of-plan-session" prompt is an empirical unknown as of this writing. The charter's fallback bullet under SessionStart covers this gap. The preamble fast-path handles explicit user-typed plan handoffs.
 
 ## Key Files
 
 - `src/assets/scripts/hooks/preamble` — UserPromptSubmit hook: dispatch logic, plan-handoff fast-path, orchestrator reminder
 - `src/assets/scripts/hooks/session-start-orchestrator` — SessionStart hook: charter file read, size guard, hook-log-init injection log, additionalContext output
-- `src/assets/scripts/hooks/assets/orchestrator-charter.md` — Static charter content; the plan-handoff fallback bullet, kind-of-work routing table (no model pinning), self-contained-delegation operating rule, and feature-knowledge operating rule live here
+- `src/assets/scripts/hooks/assets/orchestrator-charter.md` — Static charter content; the bounded-inline exception, plan-handoff fallback bullet (no arguments), kind-of-work routing table (no model pinning), self-contained-delegation, report-cap, decisions and feature-knowledge operating rules live here
 - `src/assets/scripts/hooks/git-marker` — Sourced pure-bash helper: `df_has_git_marker <dir>` bounded upward walk, plus `df_is_project_root <root>` (marker + physical-path HOME check, zero forks); direct behavioral tests, a no-subprocess source scan, and a PATH-shim fork counter (tests/shell-hooks-tracker.test.ts, TP-22)
 - `src/cli/commands/ambient.ts` — TypeScript management: `AMBIENT_HOOK_SUFFIXES` + `endsWithAny` (exact ownership, from hooks.ts), `removeHooks` (per-hook, hooks.ts), `ensureHook` (hooks.ts), `addAmbientHook`, `removeAmbientHook`, `convergeAmbientHooks` (init's step), `hasAmbientHook`, `createAmbientCommand` / `ambientCommand` (parses settings.json once with try/catch; canonical devflow dir)
 - `docs/commands.md` — "Orchestrator charter" reference line: documents the kind-of-work routing and no-model-pinning behavior; keep in sync with orchestrator-charter.md
+- `tests/agent-name-guards.test.ts` — GAP-3 charter integrity: the 3,072-character ceiling and the bounded-inline, report-cap and no-argument-handoff shape guards
 - `tests/fixtures/ambient-templates.ts` — Shared constants: `HANDOFF_TEMPLATE` and `REMINDER_TEMPLATE`; imported by shell-hooks.test.ts and integration tests to keep both test layers byte-synchronized
 - `tests/shell-hooks.test.ts` — Shell integration tests (suites 1–4 for preamble, suite for session-start-orchestrator)
 - `tests/ambient.test.ts` — TypeScript unit tests for hook enable/disable/status/partial-state logic
@@ -185,6 +194,7 @@ This is intentional. SessionStart provably fires (via `SessionStart:clear`) in p
 - Leave-the-end-state principle; the old keyword/3-marker detection was deleted clean, no tombstones
 - Plan-handoff schema undocumented/mutable — match by prefix only; the `tests/fixtures/ambient-templates.ts` constants are full output strings, not detection substrings
 - Feature knowledge: `learning-capture-system` — the memory worker fires UserPromptSubmit and SessionStart hooks too; the `DEVFLOW_BG_UPDATER` re-entrancy guard is the coupling point between that system and this one
+- Feature knowledge: `dynamic-workflow-engine` — the bind-once `COMMAND_INPUT` convention that makes a no-argument plan handoff safe, and the guards that hold it
 - Feature knowledge: `feature-knowledge-system` — the charter's feature-knowledge operating rule instructs the orchestrator to load KNOWLEDGE.md entries as FEATURE_KNOWLEDGE and spawn the Knowledge agent after changes; that system's KB covers how those entries are written and consumed
 - `src/assets/scripts/hooks/json-parse` — shared JSON output helpers (`json_prompt_output`, `json_session_output`, `json_extract_cwd_prompt`)
 - `src/assets/scripts/hooks/hook-bootstrap` — shared hook initialization: debug logging, per-project log paths
