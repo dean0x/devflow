@@ -86,8 +86,6 @@ DIRECTORIES: {list of primary directories touched by this workflow}
 FILES_CHANGED: {list of files changed}
 DECISIONS_CONTEXT: {DECISIONS_CONTEXT if available, else (none)}
 
-Load the devflow:feature-knowledge skill and follow its authoring process.
-
 Write the knowledge base to:
   {worktree}/.devflow/features/{slug}/KNOWLEDGE.md
 
