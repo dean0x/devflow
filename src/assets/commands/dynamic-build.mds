@@ -79,7 +79,13 @@ Note the `budget` value from the Workflow tool context (or default to "medium" i
 
 **3. Detect mode: SINGLE or WAVE**
 
-- **SINGLE mode:** input is one ticket, one issue, one task description, or one plan document
+What follows the command is bound once, here. Every later step names it `COMMAND_INPUT` and never restates it:
+
+<command-input>
+$ARGUMENTS
+</command-input>
+
+- **SINGLE mode:** `COMMAND_INPUT` is one ticket, one issue, one task description, or one plan document
 - **WAVE mode:** input is a set of tracker issues (wave labels, milestone, issue list), or the user says "wave" / "all tickets in wave N"
 - **A `/devflow:dynamic-tickets` ticket directory** (`{worktree}/.devflow/docs/tickets/{slug}/{ts}/`) is WAVE input: in each ticket file (every `.md` there but `tracking-issue.md`), the `**Issue:**` line directly after `**Depends on:**` is one raw `ISSUE_REFS` token, forwarded to the wave's pre-fetch verbatim — never rendered, normalised or re-derived. A ticket file with no `**Issue:**` line, or more than one, contributes no token; name it in the run summary as `not filed`.
 
@@ -113,7 +119,7 @@ If none found: build proceeds Gate-1-only (Gate 2 skipped with a note). Never re
 **5. Resolve tracking-issue number (optional)**
 
 Check, in priority order:
-- An explicit candidate issue reference or issue URL in the user's input (e.g. `#42`, `42`, or `https://github.com/…/issues/42`)
+- An explicit candidate issue reference or issue URL in `COMMAND_INPUT` (e.g. `#42`, `42`, or `https://github.com/…/issues/42`)
 - The `**Issue:**` line directly after the H1 of the ticket set's `tracking-issue.md` (written by `/devflow:dynamic-tickets`' filing step; the file is at `{worktree}/.devflow/docs/tickets/{slug}/{ts}/tracking-issue.md`), as a raw token — only when the file holds exactly one `**Issue:**` line
 - Otherwise: none
 

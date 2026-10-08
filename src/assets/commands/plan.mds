@@ -26,7 +26,13 @@ The orchestrator only spawns agents and gates — all analytical work is done by
 
 ## Input
 
-`$ARGUMENTS` contains whatever follows `/plan`:
+What follows `/plan` is bound once, here. Every later step names it `COMMAND_INPUT` and never restates it:
+
+<command-input>
+$ARGUMENTS
+</command-input>
+
+`COMMAND_INPUT` is one of:
 - Opens with a candidate issue reference → issue mode (one candidate = single-ref, more than one = multi-issue)
 - Path to existing `.md` file → **error**: "Use /implement with plan documents"
 - Other text → feature description
@@ -66,7 +72,7 @@ Explore the user's intent through focused Socratic questioning before spawning a
 
 **Step 0 — Fetch issue(s)** (issue mode only; skip for feature-description and empty modes):
 
-- **Single-ref** (one candidate ref in `$ARGUMENTS`):
+- **Single-ref** (one candidate ref in `COMMAND_INPUT`):
 
   ```
   Agent(subagent_type="Git"):
@@ -470,7 +476,7 @@ Spawn a Git agent with `OPERATION: ensure-traceable-issue`:
 ```
 Agent(subagent_type="Git"):
 "OPERATION: ensure-traceable-issue
-ISSUE_INPUT: {the raw candidate token from $ARGUMENTS if /plan was invoked with an issue reference, else omit}
+ISSUE_INPUT: {the raw candidate token from COMMAND_INPUT if /plan was invoked with an issue reference, else omit}
 TASK_DESCRIPTION: {Gate 0 confirmed scope — one-line title}
 INITIAL_REQUEST: {the Gate 0 confirmed scope statement}
 REQUIREMENTS: {discovered requirements summary from Phase 6 gap synthesis}

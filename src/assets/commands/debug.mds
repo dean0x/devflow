@@ -19,7 +19,13 @@ Investigate bugs by spawning parallel agents, each pursuing a different hypothes
 
 ## Input
 
-`$ARGUMENTS` contains whatever follows `/debug`:
+What follows `/debug` is bound once, here. Every later step names it `COMMAND_INPUT` and never restates it:
+
+<command-input>
+$ARGUMENTS
+</command-input>
+
+`COMMAND_INPUT` is one of:
 - Bug description: "login fails after session timeout"
 - Issue reference: "#42"
 - Empty: use conversation context
@@ -43,7 +49,7 @@ The orchestrator uses `DECISIONS_CONTEXT` locally when generating hypotheses (Ph
 **Produces:** HYPOTHESES, BUG_CONTEXT
 **Requires:** DECISIONS_CONTEXT
 
-If `$ARGUMENTS` opens with a candidate issue reference, fetch the issue:
+If `COMMAND_INPUT` opens with a candidate issue reference, fetch the issue:
 
 {{issue_ref_grammar()}}
 

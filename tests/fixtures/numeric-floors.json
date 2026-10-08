@@ -371,6 +371,14 @@
       "occurrences": 1,
       "sourceFile": "tests/write-set-fence.test.ts",
       "description": "Distinct allowlist entries across the write-set fence table — the machine-wide footprint the CLI toggles may write (audit appendix 09-tests.md strategy item 9). A new path a toggle writes must be added to a row, and this ceiling says so out loud; it may be LOWERED as the footprint shrinks, never raised."
+    },
+    {
+      "id": "arguments-once-max",
+      "ceiling": 1,
+      "pattern": "MAX_ARGUMENTS_PER_COMMAND = 1",
+      "occurrences": 1,
+      "sourceFile": "tests/guards/arguments-once.test.ts",
+      "description": "Max placeholders ($ARGUMENTS, literal and positional) one compiled command may carry. Claude Code substitutes the placeholder at every occurrence, so a long argument is copied into the main-thread context once per occurrence; a host binds it once, inside a <command-input> block, and every later step names the bound text COMMAND_INPUT. May be LOWERED, never raised: a maximum raised to fit a command that grew a second occurrence asserts that the current count is the current count."
     }
   ]
 }

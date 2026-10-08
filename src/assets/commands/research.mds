@@ -20,7 +20,13 @@ Research a topic by spawning parallel Research agents across multiple research t
 
 ## Input
 
-`$ARGUMENTS` contains whatever follows `/research`:
+What follows `/research` is bound once, here. Every later step names it `COMMAND_INPUT` and never restates it:
+
+<command-input>
+$ARGUMENTS
+</command-input>
+
+`COMMAND_INPUT` is one of:
 - Research question: "best caching strategies"
 - Comparison question: "compare React vs Svelte for our use case"
 - Empty: use conversation context

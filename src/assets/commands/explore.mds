@@ -18,7 +18,13 @@ Explore a codebase area by spawning parallel agents for flow tracing, dependency
 
 ## Input
 
-`$ARGUMENTS` contains whatever follows `/explore`:
+What follows `/explore` is bound once, here. Every later step names it `COMMAND_INPUT` and never restates it:
+
+<command-input>
+$ARGUMENTS
+</command-input>
+
+`COMMAND_INPUT` is one of:
 - Area description: "how does the auth system work"
 - Flow question: "trace the request lifecycle"
 - Empty: use conversation context

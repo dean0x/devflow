@@ -17,13 +17,19 @@ Release the project using adaptive learned configuration. On first run, scans th
 
 ## Input
 
-`$ARGUMENTS` contains whatever follows `/release`:
+What follows `/release` is bound once, here. Every later step names it `COMMAND_INPUT` and never restates it:
+
+<command-input>
+$ARGUMENTS
+</command-input>
+
+`COMMAND_INPUT` is one of:
 - Explicit version: `v1.2.3` or `1.2.3`
 - Bump type: `patch`, `minor`, `major`
 - Flag: `--dry-run`
 - Empty: interactive mode (will ask for version)
 
-Parse from $ARGUMENTS:
+Parse from `COMMAND_INPUT`:
 - `VERSION`: explicit version string if present (strip leading `v`)
 - `BUMP_TYPE`: `patch | minor | major` if bump type provided
 - `DRY_RUN`: true if `--dry-run` present, false otherwise
