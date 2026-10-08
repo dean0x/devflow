@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **`devflow agents` carries a shipped effort, takes an `inherit` effort, and sets the memory worker** ([#420](https://github.com/dean0x/devflow/issues/420)). Nothing changes at shipped defaults: no agent ships an `effort:` line yet and every installed `model:` is as before. This is the plumbing the agent-tier tickets build on.
+  - **A shipped effort survives a reapply.** A shipped agent default is now its `model:` and its `effort:` when it has one, read from the same file. A reapply used to remove an `effort:` line from every agent whose mapping had no effort, including one that ships it.
+  - **`--effort inherit` drops an agent's effort line** so it follows the session; `--effort default` removes your override and restores the shipped effort. The EFFORT column reads `default (<shipped effort>)` when an agent ships one.
+  - **`memory` is settable in `devflow agents`** (`--set memory --model sonnet --effort medium`), listed after the agents with state `worker`. It takes Claude models and effort levels only, is not an agent, and is left out of the agent counts.
+  - **A `devflow agents` Learning mapping now decides the Learning model.** The session-start directive used to pass `model="opus"` (or the `learning.json` model) on every spawn, which overrode any mapping. It now takes the first of: a valid project `learning.json` model, the mapping (which sends no model, so the installed frontmatter decides), a valid global `learning.json` model, none. An invalid `learning.json` value falls through instead of becoming `opus`. `devflow learning --configure` says that a mapping outranks the global file.
+  - **A user's `validate` override now reaches the five Validate spawns** in `/implement` and `/resolve`, which passed `model="haiku"`. A new guard fails on any spawn in the prompt sources that names a model.
+
 ### Fixed
 
 - **A re-init reports what it actually did** ([#415](https://github.com/dean0x/devflow/issues/415)). Running `devflow init` again printed `.claudeignore: created` even when nothing changed, and a run without a terminal told you to "Run interactively to auto-install" safe-delete even when it was already set up. The `.claudeignore` row now reads `created`, `already present` or `skipped`, and the safe-delete line reads installed, upgraded or already configured. The hint is gone: a run without a terminal takes the Recommended path, which installs or upgrades the safe-delete block itself.

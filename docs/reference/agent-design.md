@@ -93,7 +93,7 @@ Before committing a new or modified agent:
 
 Devflow ships with explicit model assignments in agent frontmatter (Opus for analysis, Sonnet for execution, Haiku for I/O). You can override these per-agent without touching the source files — overrides persist across `devflow init` reinstalls.
 
-**Source of truth:** `~/.devflow/agent-models.json` stores deviations from shipped defaults (absent entry = shipped default; `"model": "default"` removes the key).
+**Source of truth:** `~/.devflow/agent-models.json` stores deviations from shipped defaults (absent entry = shipped default, model and effort alike; `"model": "default"` and `"effort": "default"` remove the key). A shipped default is the `model:` and, when the agent has one, the `effort:` of its frontmatter, so an agent that ships an effort keeps it across a reapply. `"effort": "inherit"` is a stored value, not a removal: it drops the agent's `effort:` line so the agent follows the session, and the shipped effort does not apply behind it. `memory` is a settable worker entry in the same map (Claude models and effort levels only); it is not an agent and has no frontmatter to rewrite.
 
 **Management:**
 ```bash
@@ -108,7 +108,9 @@ npx devflow-kit agents --reset --yes                    # Skip confirmation prom
 
 **Dormancy:** GPT model assignments are dormant when external model routing is disabled. The TUI shows dormant assignments with a dim annotation (`sol saved`). Enabling routing via `devflow proxy --enable` applies the saved mapping; disabling reverts frontmatter to Claude defaults while preserving the mapping for re-enable. Model aliases (e.g. `sol`, `terra`, `luna`) auto-track the current generation — no config edit needed when new models ship.
 
-**When adding a new agent:** the shipped model in frontmatter is the default; if users have overridden it via `agent-models.json`, `reapplyAgentMapping` will apply their override on the next `devflow init`.
+**When adding a new agent:** the shipped model and effort in frontmatter are the default; if users have overridden them via `agent-models.json`, `reapplyAgentMapping` will apply their override on the next `devflow init`.
+
+**Spawns never name a model:** a spawn that passes `model=` (or a workflow `agent()` call that passes `opts.model`) overrides the installed frontmatter at spawn time, so a user's override for that agent never reaches it. Leave the model to the frontmatter; `tests/guards/spawn-no-hardcoded-model.test.ts` fails on any spawn in the prompt sources that names one.
 
 ## Adding New Agents
 

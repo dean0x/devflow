@@ -188,7 +188,7 @@ winner). The dist-first precedence has exactly one owner: `agentSourceDirs()` in
 spelled the other way round still typechecks and silently inverts the answer — so every
 consumer takes that list as-is and never re-spells it. Consumers: the installer's
 agent-source loop (first hit wins; a hit on no directory throws, naming every candidate
-path plus an `npm run build:mds` hint); `loadShippedDefaults(dirs = agentSourceDirs(),
+path plus an `npm run build:mds` hint); `loadShippedAgentDefaults(dirs = agentSourceDirs(),
 opts)` (walks the list first-wins over a per-directory `readDirDefaults(dir)`, tolerating
 a missing directory symmetrically on EVERY entry). The test resolver `resolveAgentSource` in
 `tests/helpers.ts` reads the same order from `agentSourceDirs()` but is a different resolver
