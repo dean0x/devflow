@@ -22,7 +22,7 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 
-import { runHook } from './shell-hooks-helpers.js';
+import { answersVersion, resolveOnPath, runHook } from './shell-hooks-helpers.js';
 
 const HOOKS_DIR = path.resolve(__dirname, '..', 'src', 'assets', 'scripts', 'hooks');
 const PRE_COMPACT_HOOK = path.join(HOOKS_DIR, 'pre-compact-memory');
@@ -134,12 +134,14 @@ describe('D-NO-FSMONITOR: index reads never run the repository\'s fsmonitor hook
     const staged = path.join(memoryDir, 'WORKING-MEMORY.md.new');
     fs.writeFileSync(
       path.join(shimDir, 'claude'),
-      `#!/bin/bash\ncat > '${captured}'\necho "<!-- memory-head: testsha branch: main -->" > '${staged}'\nexit 0\n`,
+      answersVersion(`#!/bin/bash\ncat > '${captured}'\necho "<!-- memory-head: testsha branch: main -->" > '${staged}'\nexit 0\n`),
     );
     fs.chmodSync(path.join(shimDir, 'claude'), 0o755);
 
+    const fakePath = `${shimDir}:${process.env.PATH ?? '/usr/bin:/bin'}`;
+    expect(resolveOnPath('claude', fakePath), 'the fake claude resolves first on PATH').toBe(path.join(shimDir, 'claude'));
     execSync(`bash "${BACKGROUND_UPDATER}" "${sb.repo}"`, {
-      env: { ...sb.env, PATH: `${shimDir}:${process.env.PATH ?? '/usr/bin:/bin'}` },
+      env: { ...sb.env, PATH: fakePath },
       // The worker's watchdog inherits fds; 'ignore' keeps node from waiting on it.
       stdio: 'ignore',
     });

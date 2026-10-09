@@ -20,13 +20,16 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
 import { pollForTerminalLine } from './helpers/poll-for-terminal-line.js';
+import { WORKER_AGENTS, validateWorkerValue } from '../src/core/agent-models.js';
 import {
   FIFO_RUN_BOUND_MS,
   FIFO_TEST_TIMEOUT_MS,
   HOOK_RUN_ALLOWANCE_MS,
   NODE_EXEC_STALL_MS,
+  answersVersion,
   makeFifo,
   releaseFifo,
+  resolveOnPath,
   runHook,
   spawnWithStdin,
 } from './shell-hooks-helpers.js';
@@ -50,10 +53,28 @@ function runHookWithFakeClaude(
   shimDir: string,
   extraEnv: Record<string, string> = {}
 ): { stdout: string; stderr: string; exitCode: number } {
+  const fakePath = fakeClaudePath(shimDir);
   return runHook(hookPath, input, homeDir, {
-    PATH: `${shimDir}:${process.env.PATH ?? '/usr/bin:/bin'}`,
+    PATH: fakePath,
     ...extraEnv,
   });
+}
+
+/**
+ * The fake claude is what a bare `claude` resolves to on `pathValue`: the worker
+ * probes `--version` and may spawn it, so a fake that is missing or not first would
+ * let the machine's own claude run. The PATH is extended with the shim directory,
+ * never reduced.
+ */
+function expectFakeClaudeFirst(shimDir: string, pathValue: string): void {
+  expect(resolveOnPath('claude', pathValue), 'the fake claude resolves first on PATH').toBe(path.join(shimDir, 'claude'));
+}
+
+/** The PATH a worker run gets: `shimDir` in front of the machine's own, checked to resolve the fake claude. */
+function fakeClaudePath(shimDir: string): string {
+  const fakePath = `${shimDir}:${process.env.PATH ?? '/usr/bin:/bin'}`;
+  expectFakeClaudeFirst(shimDir, fakePath);
+  return fakePath;
 }
 
 /** Run background-memory-update directly (synchronous) with a fake claude shim */
@@ -63,12 +84,13 @@ function runWorker(
   shimDir: string,
   extraEnv: Record<string, string> = {}
 ): { exitCode: number } {
+  const fakePath = fakeClaudePath(shimDir);
   try {
     execSync(`bash "${BACKGROUND_UPDATER}" "${projectDir}"`, {
       env: {
         ...process.env,
         HOME: homeDir,
-        PATH: `${shimDir}:${process.env.PATH ?? '/usr/bin:/bin'}`,
+        PATH: fakePath,
         ...extraEnv,
       },
       // stdio:'ignore' prevents Node.js blocking on open pipe (watchdog sleep 120 inherits fds)
@@ -173,13 +195,13 @@ function createFakeClaudeShim(shimDir: string, memFile: string): void {
   const stagedFile = `${memFile}.new`;
   fs.writeFileSync(
     bin,
-    `#!/bin/bash
+    answersVersion(`#!/bin/bash
 # Fake claude shim for tests — writes to staged path, not real path
 echo "<!-- memory-head: testsha branch: main -->" > "${stagedFile}"
 echo "## Now" >> "${stagedFile}"
 echo "- test memory content written by fake claude" >> "${stagedFile}"
 exit 0
-`
+`)
   );
   fs.chmodSync(bin, 0o755);
 }
@@ -194,7 +216,7 @@ function createPromptCapturingShim(shimDir: string, stagedFile: string): string 
   const claudeBin = path.join(shimDir, 'claude');
   fs.writeFileSync(
     claudeBin,
-    `#!/bin/bash\ncat > "${stdinCapture}"\necho "<!-- memory-head: testsha branch: main -->" > "${stagedFile}"\necho "## Now" >> "${stagedFile}"\nexit 0\n`
+    answersVersion(`#!/bin/bash\ncat > "${stdinCapture}"\necho "<!-- memory-head: testsha branch: main -->" > "${stagedFile}"\necho "## Now" >> "${stagedFile}"\nexit 0\n`)
   );
   fs.chmodSync(claudeBin, 0o755);
   return stdinCapture;
@@ -560,7 +582,7 @@ describe('S4: AC-F3/P3 — watchdog and failure path', () => {
   it('AC-F3/failure: claude exits 1 → .processing retained, .last-refresh-ok NOT created', () => {
     // Shim exits 1 immediately — simulates a failed claude invocation
     const failBin = path.join(shimDir, 'claude');
-    fs.writeFileSync(failBin, '#!/bin/bash\nexit 1\n');
+    fs.writeFileSync(failBin, answersVersion('#!/bin/bash\nexit 1\n'));
     fs.chmodSync(failBin, 0o755);
 
     runWorker(projectDir, homeDir, shimDir);
@@ -575,7 +597,7 @@ describe('S4: AC-F3/P3 — watchdog and failure path', () => {
   it('AC-F3/watchdog-behavioral: worker SURVIVES watchdog kill; .last-refresh-ok NOT touched; .processing retained', () => {
     // Hanging fake claude — sleeps indefinitely so the watchdog must fire.
     const hangBin = path.join(shimDir, 'claude');
-    fs.writeFileSync(hangBin, '#!/bin/bash\nsleep 300\n');
+    fs.writeFileSync(hangBin, answersVersion('#!/bin/bash\nsleep 300\n'));
     fs.chmodSync(hangBin, 0o755);
 
     // Set DEVFLOW_BG_WATCHDOG_SECS=2 so the watchdog fires after 2s, not 120s.
@@ -638,7 +660,7 @@ describe('S5: AC-P3 — double-spawn blocked by .working-memory.lock/', () => {
           env: {
             ...process.env,
             HOME: homeDir,
-            PATH: `${shimDir}:${process.env.PATH ?? '/usr/bin:/bin'}`,
+            PATH: fakeClaudePath(shimDir),
           },
           stdio: 'ignore',
           timeout: 3000,
@@ -745,11 +767,13 @@ describe('S8: AC-C2/C4 — security constraints', () => {
   // assert sentinel appears in stdin capture and NOT in argv capture). The structural
   // grep for `<<< "$PROMPT"` is dropped to avoid implementation coupling.
 
-  it('DEVFLOW_BG_UPDATER=1 set as env prefix on claude invocation (worker side invariant)', () => {
-    // Behavioral twin for the capture side is the test below. This keeps the
-    // worker-sets-the-flag invariant which has no behavioral observable from outside.
+  it('DEVFLOW_BG_UPDATER=1 set as env prefix on both claude invocations (worker side invariant)', () => {
+    // The behavioural twin is S29, which records the variable in the environment of
+    // the lean and of the legacy spawn. This keeps the source half: the lean and the
+    // legacy spawn each carry the recursion guard as an env prefix.
     const src = fs.readFileSync(BACKGROUND_UPDATER, 'utf-8');
-    expect(src).toContain('DEVFLOW_BG_UPDATER=1 "$CLAUDE_BIN"');
+    const spawns = src.match(/^[ \t]*DEVFLOW_BG_UPDATER=1 [^\n]*"\$CLAUDE_BIN" -p /gm) ?? [];
+    expect(spawns).toHaveLength(2);
   });
 
   it('PROMPT content never appears in worker log — sentinel in queue turn does NOT leak to log', () => {
@@ -932,7 +956,7 @@ describe('S13: D56c crash-recovery — leftover .processing merged with new queu
     const claudeBin = path.join(shimDir, 'claude');
     fs.writeFileSync(
       claudeBin,
-      `#!/bin/bash
+      answersVersion(`#!/bin/bash
 # Record stdin so the test can assert both turn-batches are present
 cat > "${stdinCapture}"
 # Write to staged path; worker CAS-mv's it to the real path (D-MEMORY-STAGED-CAS)
@@ -940,7 +964,7 @@ echo "<!-- memory-head: testsha branch: main -->" > "${memFile}.new"
 echo "## Now" >> "${memFile}.new"
 echo "- crash-recovery test" >> "${memFile}.new"
 exit 0
-`
+`)
     );
     fs.chmodSync(claudeBin, 0o755);
 
@@ -992,7 +1016,7 @@ exit 0
     const claudeBin = path.join(shimDir, 'claude');
     fs.writeFileSync(
       claudeBin,
-      `#!/bin/bash
+      answersVersion(`#!/bin/bash
 # Drain stdin (required so the worker's <<< doesn't stall)
 cat > /dev/null
 # Write to staged path; worker CAS-mv's it to the real path (D-MEMORY-STAGED-CAS)
@@ -1000,7 +1024,7 @@ echo "<!-- memory-head: testsha branch: main -->" > "${memFile}.new"
 echo "## Now" >> "${memFile}.new"
 echo "- overflow cap test" >> "${memFile}.new"
 exit 0
-`
+`)
     );
     fs.chmodSync(claudeBin, 0o755);
 
@@ -1042,7 +1066,7 @@ exit 0
     const processingFile = path.join(memoryDir, '.pending-turns.processing');
     const queueFile = path.join(memoryDir, '.pending-turns.jsonl');
     const failBin = path.join(shimDir, 'claude');
-    fs.writeFileSync(failBin, '#!/bin/bash\ncat > /dev/null\nexit 1\n');
+    fs.writeFileSync(failBin, answersVersion('#!/bin/bash\ncat > /dev/null\nexit 1\n'));
     fs.chmodSync(failBin, 0o755);
 
     const ts = Math.floor(Date.now() / 1000);
@@ -1055,7 +1079,7 @@ exit 0
     for (const file of [processingFile, queueFile]) fs.chmodSync(file, 0o600);
 
     execSync(`umask 022 && bash "${BACKGROUND_UPDATER}" "${projectDir}"`, {
-      env: { ...process.env, HOME: homeDir, PATH: `${shimDir}:${process.env.PATH ?? '/usr/bin:/bin'}` },
+      env: { ...process.env, HOME: homeDir, PATH: fakeClaudePath(shimDir) },
       stdio: 'ignore',
     });
 
@@ -1123,7 +1147,7 @@ describe('S14: .last-refresh-ok baseline-before-run discipline', () => {
     const baselineMtimeMs = fs.statSync(okFile).mtimeMs;
 
     const failBin = path.join(shimDir, 'claude');
-    fs.writeFileSync(failBin, '#!/bin/bash\nexit 1\n');
+    fs.writeFileSync(failBin, answersVersion('#!/bin/bash\nexit 1\n'));
     fs.chmodSync(failBin, 0o755);
 
     runWorker(projectDir, homeDir, shimDir);
@@ -1172,7 +1196,7 @@ describe('S15: stdin/argv safety — prompt content delivered via STDIN, not arg
     const claudeBin = path.join(shimDir, 'claude');
     fs.writeFileSync(
       claudeBin,
-      `#!/bin/bash
+      answersVersion(`#!/bin/bash
 # Record argv (all positional arguments as a single line)
 echo "$@" > "${argvLog}"
 # Record stdin (the full prompt)
@@ -1182,7 +1206,7 @@ echo "<!-- memory-head: testsha branch: main -->" > "${memFile}.new"
 echo "## Now" >> "${memFile}.new"
 echo "- stdin safety test" >> "${memFile}.new"
 exit 0
-`
+`)
     );
     fs.chmodSync(claudeBin, 0o755);
 
@@ -1349,12 +1373,13 @@ describe('S17: degraded path — no jq + no node → conservative exit, no memor
     // Fake claude shim that exits 0 — placed in shimDir so `command -v claude` succeeds.
     // The binary gate passes, so the worker enters the degraded JSON extraction path.
     const claudeBin = path.join(shimDir, 'claude');
-    fs.writeFileSync(claudeBin, '#!/bin/bash\nexit 0\n');
+    fs.writeFileSync(claudeBin, answersVersion('#!/bin/bash\nexit 0\n'));
     fs.chmodSync(claudeBin, 0o755);
 
     // Build a PATH: shimDir (has claude) + symlink farm (no jq, no node) + /bin
     const noJsonFarm = buildNoJsonParsePath(os.tmpdir());
     const degradedPath = `${shimDir}:${noJsonFarm}`;
+    expect(resolveOnPath('claude', degradedPath), 'the fake claude resolves first on the degraded PATH').toBe(claudeBin);
 
     const { exitCode } = runWorker(projectDir, homeDir, shimDir, {
       PATH: degradedPath,
@@ -1478,13 +1503,13 @@ describe('S18: AC-F10 — qa rows in background-memory-update (orphan gate + TUR
     const claudeBin = path.join(shimDir, 'claude');
     fs.writeFileSync(
       claudeBin,
-      `#!/bin/bash
+      answersVersion(`#!/bin/bash
 cat > "${stdinCapture}"
 # Write to staged path; worker CAS-mv's it to the real path (D-MEMORY-STAGED-CAS)
 echo "<!-- memory-head: testsha branch: main -->" > "${memFile}.new"
 echo "## Now" >> "${memFile}.new"
 exit 0
-`
+`)
     );
     fs.chmodSync(claudeBin, 0o755);
 
@@ -1761,7 +1786,7 @@ describe('S21: staged compare-and-swap verification paths', () => {
     const claudeBin = path.join(shimDir, 'claude');
     fs.writeFileSync(
       claudeBin,
-      `#!/bin/bash
+      answersVersion(`#!/bin/bash
 echo "<!-- memory-head: testsha branch: main -->" > "${stagedFile}"
 echo "## Now" >> "${stagedFile}"
 echo "- updated by worker" >> "${stagedFile}"
@@ -1770,7 +1795,7 @@ echo "<!-- memory-head: human branch: main -->" > "${memFile}"
 echo "## Now" >> "${memFile}"
 echo "- human edit during worker run" >> "${memFile}"
 exit 0
-`
+`)
     );
     fs.chmodSync(claudeBin, 0o755);
 
@@ -1807,10 +1832,10 @@ exit 0
     const claudeBin = path.join(shimDir, 'claude');
     fs.writeFileSync(
       claudeBin,
-      `#!/bin/bash
+      answersVersion(`#!/bin/bash
 cat > /dev/null
 exit 0
-`
+`)
     );
     fs.chmodSync(claudeBin, 0o755);
 
@@ -1834,12 +1859,12 @@ exit 0
     const claudeBin = path.join(shimDir, 'claude');
     fs.writeFileSync(
       claudeBin,
-      `#!/bin/bash
+      answersVersion(`#!/bin/bash
 cat > "${stdinCapture}"
 echo "<!-- memory-head: testsha branch: main -->" > "${stagedFile}"
 echo "## Now" >> "${stagedFile}"
 exit 0
-`
+`)
     );
     fs.chmodSync(claudeBin, 0o755);
 
@@ -1863,11 +1888,11 @@ exit 0
     const claudeBin = path.join(shimDir, 'claude');
     fs.writeFileSync(
       claudeBin,
-      `#!/bin/bash
+      answersVersion(`#!/bin/bash
 cat > "${stdinCapture}"
 echo "<!-- memory-head: testsha branch: main -->" > "${stagedFile}"
 exit 0
-`
+`)
     );
     fs.chmodSync(claudeBin, 0o755);
 
@@ -1892,7 +1917,7 @@ exit 0
     const claudeBin = path.join(shimDir, 'claude');
     fs.writeFileSync(
       claudeBin,
-      `#!/bin/bash
+      answersVersion(`#!/bin/bash
 cat > /dev/null
 echo "<!-- memory-head: testsha branch: main -->" > "${stagedFile}"
 echo "## Now" >> "${stagedFile}"
@@ -1902,7 +1927,7 @@ echo "<!-- memory-head: human branch: main -->" > "${memFile}"
 echo "## Now" >> "${memFile}"
 echo "- created externally during worker run" >> "${memFile}"
 exit 0
-`
+`)
     );
     fs.chmodSync(claudeBin, 0o755);
 
@@ -1928,12 +1953,12 @@ exit 0
     const claudeBin = path.join(shimDir, 'claude');
     fs.writeFileSync(
       claudeBin,
-      `#!/bin/bash
+      answersVersion(`#!/bin/bash
 cat > /dev/null
 echo "Sure! Here is your updated working memory:" > "${stagedFile}"
 echo "## Now" >> "${stagedFile}"
 exit 0
-`
+`)
     );
     fs.chmodSync(claudeBin, 0o755);
 
@@ -1965,10 +1990,10 @@ exit 0
     const claudeBin = path.join(shimDir, 'claude');
     fs.writeFileSync(
       claudeBin,
-      `#!/bin/bash
+      answersVersion(`#!/bin/bash
 cat > "${stdinCapture}"
 exit 0
-`
+`)
     );
     fs.chmodSync(claudeBin, 0o755);
 
@@ -2007,7 +2032,7 @@ exit 0
     const claudeBin1 = path.join(shimDir, 'claude-run1');
     fs.writeFileSync(
       claudeBin1,
-      `#!/bin/bash
+      answersVersion(`#!/bin/bash
 echo "<!-- memory-head: worker-run1 branch: main -->" > "${stagedFile}"
 echo "## Now" >> "${stagedFile}"
 echo "- worker output run1" >> "${stagedFile}"
@@ -2016,7 +2041,7 @@ echo "<!-- memory-head: human-edit branch: main -->" > "${memFile}"
 echo "## Now" >> "${memFile}"
 echo "- human edited during run1" >> "${memFile}"
 exit 0
-`
+`)
     );
     fs.chmodSync(claudeBin1, 0o755);
     // Symlink as 'claude' for Run 1
@@ -2043,13 +2068,13 @@ exit 0
     const claudeBin2 = path.join(shimDir, 'claude-run2');
     fs.writeFileSync(
       claudeBin2,
-      `#!/bin/bash
+      answersVersion(`#!/bin/bash
 cat > "${stdinCapture2}"
 echo "<!-- memory-head: testsha2 branch: main -->" > "${stagedFile}"
 echo "## Now" >> "${stagedFile}"
 echo "- clean run2 output" >> "${stagedFile}"
 exit 0
-`
+`)
     );
     fs.chmodSync(claudeBin2, 0o755);
     // Repoint 'claude' to Run 2 shim
@@ -2315,7 +2340,7 @@ describe('S23: reconciliation-aware worker prompt — COMMITS_SINCE and TODAY (B
 
     const stdinCapture = path.join(shimDir, 'stdin-captured.txt');
     const claudeBin = path.join(shimDir, 'claude');
-    fs.writeFileSync(claudeBin, `#!/bin/bash\ncat > "${stdinCapture}"\necho "<!-- memory-head: testsha branch: ${defaultBranch} -->" > "${stagedFile}"\necho "## Now" >> "${stagedFile}"\nexit 0\n`);
+    fs.writeFileSync(claudeBin, answersVersion(`#!/bin/bash\ncat > "${stdinCapture}"\necho "<!-- memory-head: testsha branch: ${defaultBranch} -->" > "${stagedFile}"\necho "## Now" >> "${stagedFile}"\nexit 0\n`));
     fs.chmodSync(claudeBin, 0o755);
 
     const { exitCode } = runWorker(projectDir, homeDir, shimDir);
@@ -2560,12 +2585,12 @@ describe('S25: CAS heartbeat, fail-closed checksum, and orphan-gate retry-batch 
     const claudeBin = path.join(shimDir, 'claude');
     fs.writeFileSync(
       claudeBin,
-      `#!/bin/bash
+      answersVersion(`#!/bin/bash
 echo "<!-- memory-head: testsha branch: main -->" > "${stagedFile}"
 echo "## Now" >> "${stagedFile}"
 echo "<!-- memory-head: human branch: main -->" > "${memFile}"
 exit 0
-`
+`)
     );
     fs.chmodSync(claudeBin, 0o755);
 
@@ -2596,7 +2621,7 @@ exit 0
       const claudeBin = path.join(noCksumDir, 'claude');
       fs.writeFileSync(
         claudeBin,
-        `#!/bin/bash\necho "<!-- memory-head: testsha branch: main -->" > "${stagedFile}"\nexit 0\n`
+        answersVersion(`#!/bin/bash\necho "<!-- memory-head: testsha branch: main -->" > "${stagedFile}"\nexit 0\n`)
       );
       fs.chmodSync(claudeBin, 0o755);
 
@@ -2634,11 +2659,11 @@ exit 0
     const claudeBin = path.join(shimDir, 'claude');
     fs.writeFileSync(
       claudeBin,
-      `#!/bin/bash
+      answersVersion(`#!/bin/bash
 echo "<!-- memory-head: testsha branch: main -->" > "${stagedFile}"
 echo "## Now" >> "${stagedFile}"
 exit 0
-`
+`)
     );
     fs.chmodSync(claudeBin, 0o755);
 
@@ -2889,7 +2914,7 @@ describe('S27: the memory hooks never write through a symbolic link under .devfl
     const invoked = path.join(shimDir, 'claude-invoked');
     fs.writeFileSync(
       path.join(shimDir, 'claude'),
-      `#!/bin/bash\ncat > /dev/null\n: > "${invoked}"\necho "<!-- memory-head: testsha branch: main -->" > "${memoryDir}/WORKING-MEMORY.md.new"\nexit 0\n`,
+      answersVersion(`#!/bin/bash\ncat > /dev/null\n: > "${invoked}"\necho "<!-- memory-head: testsha branch: main -->" > "${memoryDir}/WORKING-MEMORY.md.new"\nexit 0\n`),
     );
     fs.chmodSync(path.join(shimDir, 'claude'), 0o755);
     return invoked;
@@ -2949,7 +2974,7 @@ describe('S27: the memory hooks never write through a symbolic link under .devfl
     // 160 leftover lines plus 60 new ones: past the 200-line cap, so the trim runs.
     fs.writeFileSync(batch, rows('old', 160), { mode: 0o600 });
     fs.writeFileSync(path.join(memoryDir, '.pending-turns.jsonl'), rows('new', 60), { mode: 0o600 });
-    fs.writeFileSync(path.join(shimDir, 'claude'), '#!/bin/bash\ncat > /dev/null\nexit 1\n');
+    fs.writeFileSync(path.join(shimDir, 'claude'), answersVersion('#!/bin/bash\ncat > /dev/null\nexit 1\n'));
     fs.chmodSync(path.join(shimDir, 'claude'), 0o755);
 
     // The copy's name ends in the worker's PID, and exec keeps the PID, so the
@@ -2958,7 +2983,7 @@ describe('S27: the memory hooks never write through a symbolic link under .devfl
     execSync(
       `bash -c 'ln -s "$3" "$2/.pending-turns.processing.tmp.$$" && [ -L "$2/.pending-turns.processing.tmp.$$" ] && exec bash "$0" "$1"' ` +
         `"${BACKGROUND_UPDATER}" "${projectDir}" "${memoryDir}" "${outsideFile}"`,
-      { env: { ...process.env, HOME: homeDir, PATH: `${shimDir}:${process.env.PATH ?? '/usr/bin:/bin'}` }, stdio: 'ignore' },
+      { env: { ...process.env, HOME: homeDir, PATH: fakeClaudePath(shimDir) }, stdio: 'ignore' },
     );
 
     expect(fs.readFileSync(outsideFile, 'utf-8'), 'nothing is written through the planted link').toBe(UNTOUCHED);
@@ -2979,7 +3004,7 @@ describe('S27: the memory hooks never write through a symbolic link under .devfl
     // 160 leftover lines plus 60 new ones: past the 200-line cap, so the trim runs.
     fs.writeFileSync(batch, rows('old', 160), { mode: 0o600 });
     fs.writeFileSync(path.join(memoryDir, '.pending-turns.jsonl'), rows('new', 60), { mode: 0o600 });
-    fs.writeFileSync(path.join(shimDir, 'claude'), '#!/bin/bash\ncat > /dev/null\nexit 1\n');
+    fs.writeFileSync(path.join(shimDir, 'claude'), answersVersion('#!/bin/bash\ncat > /dev/null\nexit 1\n'));
     fs.chmodSync(path.join(shimDir, 'claude'), 0o755);
     const fifo = path.join(tmp, 'fifo');
     makeFifo(fifo);
@@ -2989,7 +3014,7 @@ describe('S27: the memory hooks never write through a symbolic link under .devfl
       const run = spawnSync(
         'bash',
         ['-c', 'ln -s "$3" "$2/.pending-turns.processing.tmp.$$" && [ -L "$2/.pending-turns.processing.tmp.$$" ] && exec bash "$0" "$1"', BACKGROUND_UPDATER, projectDir, memoryDir, fifo],
-        { env: { ...process.env, HOME: homeDir, PATH: `${shimDir}:${process.env.PATH ?? '/usr/bin:/bin'}` }, stdio: 'ignore', timeout: FIFO_RUN_BOUND_MS },
+        { env: { ...process.env, HOME: homeDir, PATH: fakeClaudePath(shimDir) }, stdio: 'ignore', timeout: FIFO_RUN_BOUND_MS },
       );
       expect((run.error as NodeJS.ErrnoException | undefined)?.code, 'the worker returns instead of waiting on the FIFO').toBeUndefined();
       expect(run.status).toBe(0);
@@ -3207,7 +3232,7 @@ describe('S27: the memory hooks never write through a symbolic link under .devfl
     // comparison alone cannot tell the link from the absent file it replaced.
     fs.writeFileSync(
       path.join(shimDir, 'claude'),
-      `#!/bin/bash\ncat > /dev/null\necho "<!-- memory-head: testsha branch: main -->" > "${memoryFile}.new"\nln -s "${outsideDir}" "${memoryFile}"\nexit 0\n`,
+      answersVersion(`#!/bin/bash\ncat > /dev/null\necho "<!-- memory-head: testsha branch: main -->" > "${memoryFile}.new"\nln -s "${outsideDir}" "${memoryFile}"\nexit 0\n`),
     );
     fs.chmodSync(path.join(shimDir, 'claude'), 0o755);
 
@@ -3238,7 +3263,7 @@ describe('S27: the memory hooks never write through a symbolic link under .devfl
     fs.writeFileSync(fake, FAKE);
     fs.writeFileSync(
       path.join(shimDir, 'claude'),
-      `#!/bin/bash\ncat > /dev/null\nln -s "${fake}" "${staged}"\nexit 0\n`,
+      answersVersion(`#!/bin/bash\ncat > /dev/null\nln -s "${fake}" "${staged}"\nexit 0\n`),
     );
     fs.chmodSync(path.join(shimDir, 'claude'), 0o755);
 
@@ -3264,7 +3289,7 @@ describe('S27: the memory hooks never write through a symbolic link under .devfl
     // link at the success stamp.
     fs.writeFileSync(
       path.join(shimDir, 'claude'),
-      `#!/bin/bash\ncat > /dev/null\necho "<!-- memory-head: testsha branch: main -->" > "${memoryDir}/WORKING-MEMORY.md.new"\nln -s "${created}" "${okFile}"\nexit 0\n`,
+      answersVersion(`#!/bin/bash\ncat > /dev/null\necho "<!-- memory-head: testsha branch: main -->" > "${memoryDir}/WORKING-MEMORY.md.new"\nln -s "${created}" "${okFile}"\nexit 0\n`),
     );
     fs.chmodSync(path.join(shimDir, 'claude'), 0o755);
 
@@ -3287,8 +3312,10 @@ describe('S27: the memory hooks never write through a symbolic link under .devfl
     // the batch's place.
     fs.writeFileSync(
       path.join(shimDir, 'claude'),
-      `#!/bin/bash\ncat > /dev/null\necho "<!-- memory-head: testsha branch: main -->" > "${memoryFile}.new"\n` +
-        `echo "an edit made during the run" > "${memoryFile}"\nrm "${batch}"\nln -s "${created}" "${batch}"\nexit 0\n`,
+      answersVersion(
+        `#!/bin/bash\ncat > /dev/null\necho "<!-- memory-head: testsha branch: main -->" > "${memoryFile}.new"\n` +
+          `echo "an edit made during the run" > "${memoryFile}"\nrm "${batch}"\nln -s "${created}" "${batch}"\nexit 0\n`,
+      ),
     );
     fs.chmodSync(path.join(shimDir, 'claude'), 0o755);
 
@@ -3450,5 +3477,481 @@ describe('S28: the memory hooks never read through a symbolic link into the sess
     expect(isLink(memoryFile), 'the link is left as it was').toBe(true);
     expect(fs.readFileSync(path.join(memoryDir, '.pending-turns.jsonl'), 'utf-8'), 'non-vacuity: the turns stay queued').toContain('implement the feature');
     expect(refusals('background-memory-update'), 'the refusal is logged once').toHaveLength(1);
+  });
+});
+
+// =============================================================================
+// S29 — D-MEMORY-WORKER-LEAN: the worker's model and effort come from
+// agents.memory, and a CLI version probe picks the lean argv or the legacy one
+//
+// background-memory-update asks `claude --version` (before it takes the lock),
+// then runs one of two argv forms: the lean one at or above its version floor,
+// the legacy one below it, or when the probe fails, times out or prints nothing
+// parseable. Model and effort are read from $HOME/.devflow/agent-models.json
+// (`agents.memory`), each field validated on its own against the worker domain
+// (tests/agent-models-worker.test.ts holds the hook's lists to the TypeScript
+// ones). The fake claude here records what it was handed, so every assertion
+// reads what the CLI would have received, not the hook's source.
+// =============================================================================
+
+/** One worker run's bound: its own work, a node exec stall, and the 1 s probe bound the hang arm uses. */
+const LEAN_RUN_TIMEOUT_MS = HOOK_RUN_ALLOWANCE_MS + NODE_EXEC_STALL_MS + 10_000;
+
+/** The lean argv, exactly as the spawn passes it, for a model and an effort. */
+function leanArgv(model: string, effort: string): string[] {
+  return [
+    '-p', '--model', model, '--effort', effort, '--safe-mode',
+    '--tools', 'Write', '--disable-slash-commands',
+    '--strict-mcp-config', '--mcp-config', '{"mcpServers":{}}',
+    '--max-turns', '3', '--dangerously-skip-permissions', '--output-format', 'text',
+  ];
+}
+
+/** The legacy argv, exactly as the spawn passes it, for a model. It carries no effort. */
+function legacyArgv(model: string): string[] {
+  return ['-p', '--model', model, '--tools', 'Write', '--dangerously-skip-permissions', '--output-format', 'text'];
+}
+
+/** Every flag only the lean form passes (the legacy form carries none, and neither carries --allowedTools). */
+const LEAN_ONLY_FLAGS = [
+  '--effort', '--safe-mode', '--max-turns', '--disable-slash-commands', '--strict-mcp-config', '--mcp-config',
+] as const;
+
+interface RecordingClaude {
+  /** One argument per line; written by the `-p` call only. */
+  readonly argvFile: string;
+  /** NAME=value lines for the variables the worker sets or removes; written by the `-p` call only. */
+  readonly envFile: string;
+  readonly stdinFile: string;
+  /** `present` or `absent`: whether the worker's lock directory existed while `--version` ran. */
+  readonly probeLockFile: string;
+  /** `present` or `absent`: the same, while the `-p` call ran. */
+  readonly runLockFile: string;
+  /** The probe's PID, written before the version body runs. */
+  readonly probePidFile: string;
+}
+
+/**
+ * A fake claude that answers `--version` with `versionBody` (a bash snippet) and, for
+ * any other call, records its argv, environment, stdin and the lock state, then writes
+ * a stamped staged memory file. `--version` writes nothing a `-p` call writes, so a
+ * file's presence says which call made it.
+ */
+function createRecordingClaude(shimDir: string, memoryDir: string, versionBody: string): RecordingClaude {
+  const rec: RecordingClaude = {
+    argvFile: path.join(shimDir, 'argv.txt'),
+    envFile: path.join(shimDir, 'env.txt'),
+    stdinFile: path.join(shimDir, 'stdin.txt'),
+    probeLockFile: path.join(shimDir, 'probe-lock.txt'),
+    runLockFile: path.join(shimDir, 'run-lock.txt'),
+    probePidFile: path.join(shimDir, 'probe-pid.txt'),
+  };
+  const lock = path.join(memoryDir, '.working-memory.lock');
+  const staged = path.join(memoryDir, 'WORKING-MEMORY.md.new');
+  const bin = path.join(shimDir, 'claude');
+  fs.writeFileSync(
+    bin,
+    [
+      '#!/bin/bash',
+      'if [ "${1:-}" = "--version" ]; then',
+      `  echo $$ > '${rec.probePidFile}'`,
+      `  if [ -d '${lock}' ]; then echo present > '${rec.probeLockFile}'; else echo absent > '${rec.probeLockFile}'; fi`,
+      `  ${versionBody}`,
+      '  exit 0',
+      'fi',
+      `if [ -d '${lock}' ]; then echo present > '${rec.runLockFile}'; else echo absent > '${rec.runLockFile}'; fi`,
+      `printf '%s\\n' "$@" > '${rec.argvFile}'`,
+      '{',
+      '  echo "DEVFLOW_BG_UPDATER=${DEVFLOW_BG_UPDATER-<unset>}"',
+      '  echo "CLAUDE_CODE_DISABLE_CLAUDE_MDS=${CLAUDE_CODE_DISABLE_CLAUDE_MDS-<unset>}"',
+      '  echo "CLAUDE_CODE_DISABLE_AUTO_MEMORY=${CLAUDE_CODE_DISABLE_AUTO_MEMORY-<unset>}"',
+      '  echo "CLAUDE_CODE_EFFORT_LEVEL=${CLAUDE_CODE_EFFORT_LEVEL-<unset>}"',
+      `} > '${rec.envFile}'`,
+      `cat > '${rec.stdinFile}'`,
+      `echo '<!-- memory-head: testsha branch: main -->' > '${staged}'`,
+      `echo '## Now' >> '${staged}'`,
+      'exit 0',
+      '',
+    ].join('\n'),
+  );
+  fs.chmodSync(bin, 0o755);
+  return rec;
+}
+
+/** The answer a healthy claude gives to `--version`, in the real CLI's format. */
+const HEALTHY_VERSION = 'echo "2.1.293 (Claude Code)"';
+
+/** agent-models.json as `devflow agents` writes it (version 1, entries under `agents`). */
+function writeAgentModels(homeDir: string, agents: Record<string, unknown>): void {
+  const dir = path.join(homeDir, '.devflow');
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(path.join(dir, 'agent-models.json'), JSON.stringify({ version: 1, agents }));
+}
+
+/** The argument list a `-p` call recorded; undefined when no `-p` call happened. */
+function recordedArgv(rec: RecordingClaude): string[] | undefined {
+  if (!fs.existsSync(rec.argvFile)) return undefined;
+  return fs.readFileSync(rec.argvFile, 'utf-8').split('\n').slice(0, -1);
+}
+
+function recordedEnv(rec: RecordingClaude): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const line of fs.readFileSync(rec.envFile, 'utf-8').split('\n')) {
+    const eq = line.indexOf('=');
+    if (eq > 0) out[line.slice(0, eq)] = line.slice(eq + 1);
+  }
+  return out;
+}
+
+function processExists(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+describe('S29: the memory worker reads agents.memory and picks its argv by CLI version (D-MEMORY-WORKER-LEAN)', { timeout: LEAN_RUN_TIMEOUT_MS }, () => {
+  let projectDir: string;
+  let homeDir: string;
+  let shimDir: string;
+  let memFile: string;
+  let stagedFile: string;
+
+  makeWorkerFixture('emr-s29', (f) => {
+    ({ projectDir, homeDir, shimDir, memFile, stagedFile } = f);
+  });
+
+  const memoryDir = (): string => path.join(projectDir, '.devflow', 'memory');
+  const workerLog = (): string => fs.readFileSync(workerLogPath(projectDir, homeDir), 'utf-8');
+
+  /** Run the worker once against a recording fake and return what the fake saw. */
+  function runWith(versionBody: string, extraEnv: Record<string, string> = {}): RecordingClaude {
+    const rec = createRecordingClaude(shimDir, memoryDir(), versionBody);
+    // The fake is what `claude` resolves to: it sits first on the PATH the worker gets.
+    expect(fs.statSync(path.join(shimDir, 'claude')).mode & 0o111, 'the fake claude is executable').not.toBe(0);
+    expect(runWorker(projectDir, homeDir, shimDir, extraEnv).exitCode).toBe(0);
+    return rec;
+  }
+
+  /** The run completed: the staged file was swapped in and the batch drained. */
+  function expectSwapCompleted(): void {
+    expect(fs.existsSync(memFile), 'working memory written').toBe(true);
+    expect(fs.existsSync(stagedFile), 'staged file consumed').toBe(false);
+    expect(fs.existsSync(path.join(memoryDir(), '.pending-turns.processing')), 'batch drained').toBe(false);
+    expect(fs.existsSync(path.join(memoryDir(), '.last-refresh-ok')), 'success stamped').toBe(true);
+  }
+
+  describe('the lean argv (AC1, AC6, AC7)', () => {
+    it('passes exactly the lean argv with the shipped model and effort, and no inherited effort level', () => {
+      const rec = runWith(HEALTHY_VERSION, { CLAUDE_CODE_EFFORT_LEVEL: 'low' });
+
+      expect(recordedArgv(rec)).toEqual(leanArgv(WORKER_AGENTS.memory.model, WORKER_AGENTS.memory.effort));
+      expect(recordedEnv(rec)).toEqual({
+        DEVFLOW_BG_UPDATER: '1',
+        CLAUDE_CODE_DISABLE_CLAUDE_MDS: '1',
+        CLAUDE_CODE_DISABLE_AUTO_MEMORY: '1',
+        CLAUDE_CODE_EFFORT_LEVEL: '<unset>',
+      });
+      expectSwapCompleted();
+    });
+
+    it('never passes --allowedTools', () => {
+      const rec = runWith(HEALTHY_VERSION);
+
+      expect(recordedArgv(rec)).not.toContain('--allowedTools');
+    });
+
+    it('names the model, the effort and the argv form on its spawn log line', () => {
+      runWith(HEALTHY_VERSION);
+
+      expect(workerLog()).toContain(
+        `Spawning claude -p (model ${WORKER_AGENTS.memory.model}, effort ${WORKER_AGENTS.memory.effort}, lean argv, `,
+      );
+    });
+
+    it('asks --version before it takes the lock, and holds the lock for the run (AC7)', () => {
+      const rec = runWith(HEALTHY_VERSION);
+
+      expect(fs.readFileSync(rec.probeLockFile, 'utf-8').trim(), 'the probe ran with no lock held').toBe('absent');
+      // Non-vacuity: the same check on the -p call sees the lock, so the file is not just always "absent".
+      expect(fs.readFileSync(rec.runLockFile, 'utf-8').trim(), 'the run holds the lock').toBe('present');
+    });
+  });
+
+  describe('the legacy argv (AC5, AC6)', () => {
+    /**
+     * Each way the probe can fail to put the CLI at or above the floor. `2.0.999` and
+     * `2.1.99` are above the floor read as text and below it read as numbers, so they
+     * catch a lexical comparison.
+     */
+    const LEGACY_CASES: ReadonlyArray<readonly [string, string]> = [
+      ['reports a version below the floor', 'echo "2.1.285 (Claude Code)"'],
+      ['reports a lower minor with a larger patch', 'echo "2.0.999 (Claude Code)"'],
+      ['reports a lower patch that is longer as text', 'echo "2.1.99 (Claude Code)"'],
+      ['prints nothing parseable', 'echo "no version here"'],
+      ['prints a version with two components', 'echo "2.1 (Claude Code)"'],
+      ['prints nothing', ':'],
+      ['exits non-zero, even after printing a high version', 'echo "2.1.293 (Claude Code)"; exit 1'],
+    ];
+
+    it.each(LEGACY_CASES)('a claude that %s gets the legacy argv, and the run still swaps', (_label, versionBody) => {
+      const rec = runWith(versionBody);
+
+      expect(recordedArgv(rec)).toEqual(legacyArgv(WORKER_AGENTS.memory.model));
+      expect(recordedEnv(rec)).toEqual({
+        DEVFLOW_BG_UPDATER: '1',
+        CLAUDE_CODE_DISABLE_CLAUDE_MDS: '1',
+        CLAUDE_CODE_DISABLE_AUTO_MEMORY: '1',
+        CLAUDE_CODE_EFFORT_LEVEL: '<unset>',
+      });
+      for (const flag of [...LEAN_ONLY_FLAGS, '--allowedTools']) {
+        expect(recordedArgv(rec), flag).not.toContain(flag);
+      }
+      expectSwapCompleted();
+      expect(workerLog()).toContain(`Spawning claude -p (model ${WORKER_AGENTS.memory.model}, no effort passed, legacy argv, `);
+    });
+
+    it('a claude whose --version outlasts the probe bound gets the legacy argv, and the probe is killed', () => {
+      const rec = runWith('sleep 30', { DEVFLOW_BG_VERSION_PROBE_SECS: '1' });
+
+      expect(recordedArgv(rec)).toEqual(legacyArgv(WORKER_AGENTS.memory.model));
+      expectSwapCompleted();
+      const pid = Number(fs.readFileSync(rec.probePidFile, 'utf-8').trim());
+      expect(Number.isInteger(pid) && pid > 1, 'non-vacuity: the probe recorded its PID').toBe(true);
+      expect(processExists(pid), 'the hung probe is not left running').toBe(false);
+    });
+  });
+
+  describe('the version floor compares numbers, component by component', () => {
+    const MODERN_CASES: ReadonlyArray<readonly [string, string]> = [
+      ['exactly the floor', 'echo "2.1.286 (Claude Code)"'],
+      ['a higher patch', 'echo "2.1.293 (Claude Code)"'],
+      ['a higher minor with a smaller patch', 'echo "2.10.0 (Claude Code)"'],
+      ['a higher major', 'echo "3.0.0 (Claude Code)"'],
+      ['text before the version, and a second version after it', 'echo "Claude Code v2.1.294 (build 1.0.0)"'],
+      ['the version on a later line', 'printf "claude\\nversion 2.1.294\\n"'],
+    ];
+
+    it.each(MODERN_CASES)('a claude that reports %s gets the lean argv', (_label, versionBody) => {
+      const rec = runWith(versionBody);
+
+      expect(recordedArgv(rec)).toEqual(leanArgv(WORKER_AGENTS.memory.model, WORKER_AGENTS.memory.effort));
+    });
+  });
+
+  describe('agents.memory (AC2, AC3)', () => {
+    it('passes a valid model and effort from agents.memory', () => {
+      writeAgentModels(homeDir, { memory: { model: 'sonnet', effort: 'medium' } });
+
+      const rec = runWith(HEALTHY_VERSION);
+
+      expect(recordedArgv(rec)).toEqual(leanArgv('sonnet', 'medium'));
+      expect(workerLog()).toContain('Spawning claude -p (model sonnet, effort medium, lean argv, ');
+    });
+
+    it('passes a full claude- identifier', () => {
+      writeAgentModels(homeDir, { memory: { model: 'claude-opus-4-8' } });
+
+      const rec = runWith(HEALTHY_VERSION);
+
+      expect(recordedArgv(rec)).toEqual(leanArgv('claude-opus-4-8', WORKER_AGENTS.memory.effort));
+    });
+
+    it('takes the shipped value for `default`, without a fallback line', () => {
+      writeAgentModels(homeDir, { memory: { model: 'default', effort: 'default' } });
+
+      const rec = runWith(HEALTHY_VERSION);
+
+      expect(recordedArgv(rec)).toEqual(leanArgv(WORKER_AGENTS.memory.model, WORKER_AGENTS.memory.effort));
+      expect(workerLog()).not.toContain('agents.memory');
+    });
+
+    it('passes the model alone when only a model is set', () => {
+      writeAgentModels(homeDir, { memory: { model: 'haiku' } });
+
+      expect(recordedArgv(runWith(HEALTHY_VERSION))).toEqual(leanArgv('haiku', WORKER_AGENTS.memory.effort));
+    });
+
+    it('passes the effort alone when only an effort is set', () => {
+      writeAgentModels(homeDir, { memory: { effort: 'xhigh' } });
+
+      expect(recordedArgv(runWith(HEALTHY_VERSION))).toEqual(leanArgv(WORKER_AGENTS.memory.model, 'xhigh'));
+    });
+
+    it('ignores an entry for another agent and a file with no agents.memory', () => {
+      writeAgentModels(homeDir, { code: { model: 'opus', effort: 'max' } });
+
+      const rec = runWith(HEALTHY_VERSION);
+
+      expect(recordedArgv(rec)).toEqual(leanArgv(WORKER_AGENTS.memory.model, WORKER_AGENTS.memory.effort));
+    });
+
+    it('treats a value that is not a string as absent', () => {
+      writeAgentModels(homeDir, { memory: { model: 42, effort: true } });
+
+      const rec = runWith(HEALTHY_VERSION);
+
+      expect(recordedArgv(rec)).toEqual(leanArgv(WORKER_AGENTS.memory.model, WORKER_AGENTS.memory.effort));
+    });
+
+    it('treats an unparseable agent-models.json as absent', () => {
+      fs.mkdirSync(path.join(homeDir, '.devflow'), { recursive: true });
+      fs.writeFileSync(path.join(homeDir, '.devflow', 'agent-models.json'), '{"agents": {"memory": ');
+
+      const rec = runWith(HEALTHY_VERSION);
+
+      expect(recordedArgv(rec)).toEqual(leanArgv(WORKER_AGENTS.memory.model, WORKER_AGENTS.memory.effort));
+    });
+
+    it('reads agents.memory on the node backend when jq is not installed', () => {
+      writeAgentModels(homeDir, { memory: { model: 'opus', effort: 'low' } });
+      // An additive farm, never a subtraction (jq lives in /usr/bin on macOS and in
+      // /bin on merged-usr Linux): every tool the worker calls, node, and no jq.
+      const farm = path.join(shimDir, 'node-only-bin');
+      fs.mkdirSync(farm);
+      for (const tool of [
+        'bash', 'cat', 'chmod', 'cksum', 'cp', 'cut', 'date', 'dirname', 'echo', 'find', 'git', 'grep', 'head', 'kill', 'ls',
+        'mkdir', 'mktemp', 'mv', 'nohup', 'rm', 'rmdir', 'sed', 'sleep', 'stat', 'tail', 'touch', 'tr', 'wc',
+      ]) {
+        const found = ['/usr/bin', '/bin'].map(dir => path.join(dir, tool)).find(candidate => fs.existsSync(candidate));
+        if (found !== undefined) fs.symlinkSync(found, path.join(farm, tool));
+      }
+      fs.symlinkSync(process.execPath, path.join(farm, 'node'));
+      const nodeOnlyPath = `${shimDir}:${farm}`;
+      expect(resolveOnPath('jq', nodeOnlyPath), 'non-vacuity: no jq on this PATH').toBeUndefined();
+      expect(resolveOnPath('node', nodeOnlyPath), 'node is on this PATH').toBe(path.join(farm, 'node'));
+      const rec = createRecordingClaude(shimDir, memoryDir(), HEALTHY_VERSION);
+
+      expect(runWorker(projectDir, homeDir, shimDir, { PATH: nodeOnlyPath }).exitCode).toBe(0);
+
+      expect(recordedArgv(rec)).toEqual(leanArgv('opus', 'low'));
+    });
+
+    it('passes the legacy argv the model and no effort', () => {
+      writeAgentModels(homeDir, { memory: { model: 'opus', effort: 'max' } });
+
+      const rec = runWith('echo "2.1.285"');
+
+      expect(recordedArgv(rec)).toEqual(legacyArgv('opus'));
+    });
+
+    /**
+     * Values outside the worker domain, each with a reason it is outside. The loop
+     * asks `validateWorkerValue` too, so this table and the TypeScript domain cannot
+     * disagree about which values are in.
+     */
+    const BAD_MODELS: ReadonlyArray<readonly [string, string]> = [
+      ['a flag', '--evil'],
+      ['an external model', 'gpt-5'],
+      ['inherit', 'inherit'],
+      ['a value with whitespace', 'sonnet 4'],
+      ['a value with a newline', 'sonnet\nopus'],
+      ['a bare claude- prefix', 'claude-'],
+      ['an alias in the wrong case', 'Sonnet'],
+      ['a claude- name of 65 characters', `claude-${'x'.repeat(58)}`],
+      ['a claude- name with a shell metacharacter', 'claude-x;touch-pwned'],
+      ['a claude- name with an accented letter', 'claude-café'],
+    ];
+
+    const BAD_EFFORTS: ReadonlyArray<readonly [string, string]> = [
+      ['an unknown level', 'turbo'],
+      ['inherit', 'inherit'],
+      ['a level in the wrong case', 'HIGH'],
+      ['a level with whitespace', 'high max'],
+      ['a level with a newline', 'high\nmax'],
+      ['a flag', '--effort'],
+      ['a level with an accented letter', 'hïgh'],
+      ['two levels', 'low|high'],
+    ];
+
+    it.each(BAD_MODELS.map((row, i) => [...row, BAD_EFFORTS[i % BAD_EFFORTS.length]] as const))(
+      'a model that is %s never reaches argv, and its effort neither when it is bad too',
+      (_modelLabel, badModel, [, badEffort]) => {
+        expect(validateWorkerValue('model', badModel).ok, `domain: ${JSON.stringify(badModel)}`).toBe(false);
+        expect(validateWorkerValue('effort', badEffort).ok, `domain: ${JSON.stringify(badEffort)}`).toBe(false);
+        writeAgentModels(homeDir, { memory: { model: badModel, effort: badEffort } });
+
+        const rec = runWith(HEALTHY_VERSION, { LC_ALL: 'en_US.UTF-8' });
+
+        expect(recordedArgv(rec)).toEqual(leanArgv(WORKER_AGENTS.memory.model, WORKER_AGENTS.memory.effort));
+        const log = workerLog();
+        expect(log, 'the model fallback names its field').toMatch(/agents\.memory\.model[^\n]*shipped/);
+        expect(log, 'the effort fallback names its field').toMatch(/agents\.memory\.effort[^\n]*shipped/);
+      },
+    );
+
+    it('a fallback logs the field and the reason, never the raw value', () => {
+      // A value the log's own text could never contain, in both fields.
+      writeAgentModels(homeDir, { memory: { model: 'claude-LEAKCANARY;touch-pwned', effort: 'LEAKCANARY' } });
+
+      runWith(HEALTHY_VERSION);
+
+      const log = workerLog();
+      expect(log).toMatch(/agents\.memory\.model[^\n]*shipped/);
+      expect(log).toMatch(/agents\.memory\.effort[^\n]*shipped/);
+      expect(log).not.toContain('LEAKCANARY');
+    });
+
+    it.each(BAD_EFFORTS)('an effort that is %s never reaches argv, and a valid model beside it still does', (_label, badEffort) => {
+      expect(validateWorkerValue('effort', badEffort).ok).toBe(false);
+      writeAgentModels(homeDir, { memory: { model: 'opus', effort: badEffort } });
+
+      const rec = runWith(HEALTHY_VERSION, { LC_ALL: 'en_US.UTF-8' });
+
+      expect(recordedArgv(rec)).toEqual(leanArgv('opus', WORKER_AGENTS.memory.effort));
+      expect(workerLog()).toMatch(/agents\.memory\.effort[^\n]*shipped/);
+      expect(workerLog()).not.toMatch(/agents\.memory\.model[^\n]*shipped/);
+    });
+
+    it('a valid effort beside an invalid model is still passed', () => {
+      writeAgentModels(homeDir, { memory: { model: 'gpt-5', effort: 'low' } });
+
+      const rec = runWith(HEALTHY_VERSION);
+
+      expect(recordedArgv(rec)).toEqual(leanArgv(WORKER_AGENTS.memory.model, 'low'));
+      expect(workerLog()).toMatch(/agents\.memory\.model[^\n]*shipped/);
+    });
+  });
+
+  describe('a staged file the worker cannot clear (AC8)', () => {
+    it('skips the run: no LLM call, the batch and the queue untouched, no lock left', () => {
+      // `rm -f` cannot remove a directory, so the staged path stays occupied.
+      fs.mkdirSync(stagedFile);
+      fs.writeFileSync(path.join(stagedFile, 'inside'), 'keep');
+      const processing = path.join(memoryDir(), '.pending-turns.processing');
+      const queue = path.join(memoryDir(), '.pending-turns.jsonl');
+      const okFile = path.join(memoryDir(), '.last-refresh-ok');
+      fs.writeFileSync(processing, JSON.stringify({ role: 'user', content: 'a leftover batch', ts: 1 }) + '\n');
+      fs.writeFileSync(okFile, '');
+      backdateMtime(okFile, 3600);
+      const before = {
+        processing: fs.readFileSync(processing),
+        queue: fs.readFileSync(queue),
+        ok: fs.statSync(okFile).mtimeMs,
+      };
+
+      const rec = runWith(HEALTHY_VERSION);
+
+      expect(fs.existsSync(rec.probeLockFile), 'non-vacuity: the probe ran, so claude was reached before the skip').toBe(true);
+      expect(recordedArgv(rec), 'no -p call').toBeUndefined();
+      expect(workerLog()).toMatch(/SKIP: [^\n]*WORKING-MEMORY\.md\.new/);
+      expect(fs.readFileSync(processing).equals(before.processing), '.pending-turns.processing byte-identical').toBe(true);
+      expect(fs.readFileSync(queue).equals(before.queue), '.pending-turns.jsonl byte-identical').toBe(true);
+      expect(fs.statSync(okFile).mtimeMs, '.last-refresh-ok not touched').toBe(before.ok);
+      expect(fs.statSync(stagedFile).isDirectory(), 'the occupied path is left as it was').toBe(true);
+      expect(fs.existsSync(path.join(memoryDir(), '.working-memory.lock')), 'the lock is released').toBe(false);
+    });
+
+    it('still removes a staged file a killed run left, and goes on to the LLM call', () => {
+      fs.writeFileSync(stagedFile, '<!-- memory-head: stale branch: main -->\n- leftover\n');
+
+      const rec = runWith(HEALTHY_VERSION);
+
+      expect(recordedArgv(rec), 'the -p call happened').toBeDefined();
+      expect(fs.readFileSync(memFile, 'utf-8'), 'the stale leftover was not the file swapped in').not.toContain('leftover');
+      expectSwapCompleted();
+    });
   });
 });

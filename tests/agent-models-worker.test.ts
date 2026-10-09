@@ -16,6 +16,7 @@ import { promises as fs } from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import {
+  EFFORT_LEVELS,
   WORKER_AGENTS,
   isWorkerAgent,
   validateWorkerValue,
@@ -27,7 +28,7 @@ import {
   saveAgentMapping,
   type AgentMappingFile,
 } from '../src/core/agent-models.js';
-import { readFrontmatterEffort } from '../src/core/agent-frontmatter.js';
+import { MODEL_NAME_RE, readFrontmatterEffort } from '../src/core/agent-frontmatter.js';
 import { CLAUDE_MODEL_ALIASES } from '../src/core/external-models.js';
 import { DEVFLOW_PLUGINS, getAllAgentNames } from '../src/core/plugins.js';
 import { loadFile, resolveAgentSource } from './helpers.js';
@@ -73,47 +74,124 @@ describe('WORKER_AGENTS', () => {
 });
 
 // ---------------------------------------------------------------------------
-// Runtime parity — the hook's model literal and the shipped worker row are one value
+// Runtime parity — the hook's spelled-out values and the TypeScript worker domain are one
 // ---------------------------------------------------------------------------
 
 /**
- * The model literals background-memory-update hard-codes: the `--model` argument
- * of its `claude -p` spawn and the model named in its spawn log line.
- *
- * The worker does not read agents.memory yet, so the shipped row and the hook
- * agree only by being written to agree; this collector is what lets a test hold
- * them to it. Pure function over the hook text.
+ * The values background-memory-update spells out for bash (D-MEMORY-WORKER-LEAN): the
+ * shipped model and effort it falls back to, the model alias list, the `claude-`
+ * prefix, the effort levels, the model-name character set and length, and the effort
+ * character set. The worker reads `agents.memory` at run time, so these are only the
+ * fallback and the validation rules, and this collector is what lets a test hold them
+ * to the TypeScript row and domain. Pure function over the hook text.
  */
-function collectMemoryHookModels(hookSource: string): { flag: string[]; log: string[] } {
-  const flag = [...hookSource.matchAll(/^[ \t]*--model[ \t]+([^\s\\]+)/gm)].map(m => m[1]);
-  const log = [...hookSource.matchAll(/Spawning claude -p \(model ([^,)\s]+)/g)].map(m => m[1]);
-  return { flag, log };
+function collectMemoryHookValues(hookSource: string): {
+  model: string[];
+  effort: string[];
+  aliases: string[];
+  prefix: string[];
+  levels: string[];
+  nameHead: string[];
+  effortChars: string[];
+  maxLen: string[];
+} {
+  const quoted = (name: string): string[] =>
+    [...hookSource.matchAll(new RegExp(`^${name}="([^"]*)"$`, 'gm'))].map(m => m[1]);
+  return {
+    model: quoted('MEMORY_MODEL_DEFAULT'),
+    effort: quoted('MEMORY_EFFORT_DEFAULT'),
+    aliases: quoted('MEMORY_MODEL_ALIASES'),
+    prefix: quoted('MEMORY_MODEL_PREFIX'),
+    levels: quoted('MEMORY_EFFORT_LEVELS'),
+    nameHead: quoted('MEMORY_NAME_HEAD'),
+    effortChars: quoted('MEMORY_EFFORT_CHARS'),
+    maxLen: [...hookSource.matchAll(/^MEMORY_MODEL_MAX_LEN=(\d+)$/gm)].map(m => m[1]),
+  };
+}
+
+/** What follows `--model` on each argv line of the hook's `claude -p` spawns. */
+function collectMemoryHookModelArgs(hookSource: string): string[] {
+  return [...hookSource.matchAll(/^[ \t]*--model[ \t]+([^\s\\]+)/gm)].map(m => m[1]);
+}
+
+/** The characters a bracket class such as `A-Za-z0-9` names, ranges expanded. */
+function expandClass(cls: string): string[] {
+  const out: string[] = [];
+  for (let i = 0; i < cls.length; i++) {
+    if (cls[i + 1] === '-' && i + 2 < cls.length) {
+      for (let c = cls.charCodeAt(i); c <= cls.charCodeAt(i + 2); c++) out.push(String.fromCharCode(c));
+      i += 2;
+    } else {
+      out.push(cls[i]);
+    }
+  }
+  return out;
 }
 
 describe('memory worker runtime parity', () => {
   const HOOK_SOURCE = loadFile('src/assets/scripts/hooks/background-memory-update');
+  const hook = collectMemoryHookValues(HOOK_SOURCE);
 
-  it("the hook's `claude -p --model` literal is WORKER_AGENTS.memory.model", () => {
-    expect(collectMemoryHookModels(HOOK_SOURCE).flag).toEqual([WORKER_AGENTS.memory.model]);
+  it("the hook's default model is WORKER_AGENTS.memory.model", () => {
+    expect(hook.model).toEqual([WORKER_AGENTS.memory.model]);
   });
 
-  it("the hook's spawn log line names WORKER_AGENTS.memory.model", () => {
-    expect(collectMemoryHookModels(HOOK_SOURCE).log).toEqual([WORKER_AGENTS.memory.model]);
+  it("the hook's default effort is WORKER_AGENTS.memory.effort", () => {
+    expect(hook.effort).toEqual([WORKER_AGENTS.memory.effort]);
   });
 
-  it('known-bad probe: the collector reports a drifted literal and an absent one', () => {
+  it('the spawn names its model by variable only: no model literal sits in either argv', () => {
+    expect(collectMemoryHookModelArgs(HOOK_SOURCE)).toEqual(['"$MEMORY_MODEL"', '"$MEMORY_MODEL"']);
+  });
+
+  it("the hook's model alias list is CLAUDE_MODEL_ALIASES", () => {
+    expect(hook.aliases).toHaveLength(1);
+    expect(hook.aliases[0].split(' ').sort()).toEqual([...CLAUDE_MODEL_ALIASES].sort());
+  });
+
+  it("the hook's claude- prefix is the one the worker domain accepts a full identifier by", () => {
+    expect(hook.prefix).toHaveLength(1);
+    const [prefix] = hook.prefix;
+    expect(validateWorkerValue('model', `${prefix}x`).ok).toBe(true);
+    expect(validateWorkerValue('model', prefix).ok, 'the bare prefix is no model').toBe(false);
+    expect(validateWorkerValue('model', prefix.slice(0, -1)).ok).toBe(false);
+  });
+
+  it("the hook's effort list is EFFORT_LEVELS, in order, and its effort characters cover every level", () => {
+    expect(hook.levels).toHaveLength(1);
+    expect(hook.levels[0].split(' ')).toEqual([...EFFORT_LEVELS]);
+    expect(hook.effortChars).toHaveLength(1);
+    for (const level of EFFORT_LEVELS) {
+      expect([...level].every(c => hook.effortChars[0].includes(c)), level).toBe(true);
+    }
+  });
+
+  it("the hook's model-name character set and length are those of MODEL_NAME_RE", () => {
+    // ^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$ — first character from the head set, the rest from it plus . _ -.
+    const parts = /^\^\[([^\]]+)\]\[([^\]]+)\]\{0,(\d+)\}\$$/.exec(MODEL_NAME_RE.source);
+    expect(parts, 'MODEL_NAME_RE keeps the shape this pin reads').not.toBeNull();
+    const [, head, tail, rest] = parts!;
+    expect(hook.nameHead).toHaveLength(1);
+    expect([...hook.nameHead[0]].sort()).toEqual(expandClass(head).sort());
+    expect([...expandClass(tail)].sort()).toEqual([...expandClass(head), '.', '_', '-'].sort());
+    expect(hook.maxLen).toEqual([String(Number(rest) + 1)]);
+  });
+
+  it('known-bad probe: the collectors report a drifted literal and an absent one', () => {
     const drifted = [
-      'log "Spawning claude -p (model claude-sonnet-4-6, ${TURN_COUNT} turns)"',
+      'MEMORY_MODEL_DEFAULT="claude-sonnet-4-6"',
+      'MEMORY_MODEL_ALIASES="haiku sonnet"',
       'DEVFLOW_BG_UPDATER=1 "$CLAUDE_BIN" -p \\',
       '  --model claude-sonnet-4-6 \\',
       '  --output-format text',
     ].join('\n');
-    expect(collectMemoryHookModels(drifted)).toEqual({
-      flag: ['claude-sonnet-4-6'],
-      log: ['claude-sonnet-4-6'],
-    });
-    expect(collectMemoryHookModels(drifted).flag).not.toEqual([WORKER_AGENTS.memory.model]);
-    expect(collectMemoryHookModels('echo nothing here')).toEqual({ flag: [], log: [] });
+    const found = collectMemoryHookValues(drifted);
+    expect(found.model).toEqual(['claude-sonnet-4-6']);
+    expect(found.model).not.toEqual([WORKER_AGENTS.memory.model]);
+    expect(found.aliases[0].split(' ').sort()).not.toEqual([...CLAUDE_MODEL_ALIASES].sort());
+    expect(collectMemoryHookModelArgs(drifted)).toEqual(['claude-sonnet-4-6']);
+    expect(collectMemoryHookValues('echo nothing here').model).toEqual([]);
+    expect(collectMemoryHookModelArgs('echo nothing here')).toEqual([]);
   });
 });
 
