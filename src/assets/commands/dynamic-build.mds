@@ -320,7 +320,7 @@ const reviewResult = await phase("review", async () => {
   const chunkSize = 5;
   const reviewThunks = reviewFocuses.map(focus =>
     () => agent(`${focus.charAt(0).toUpperCase() + focus.slice(1)} review. ${reviewScope}
-Focus discipline: ${focus}. Return: {"focus": "${focus}", "reviewed": true, "filesExamined": ["<path>"], "findings": [{"file": "<path-or-null>", "description": "<one-sentence issue>", "severity": "critical|high|medium|low"}]}`, { agentType: "Review" })
+Focus discipline: ${focus}. Return: {"focus": "${focus}", "reviewed": true, "filesExamined": ["<path>"], "findings": [{"file": "<path-or-null>", "line": <number-or-null>, "description": "<one-sentence issue>", "severity": "critical|high|medium|low"}]}`, { agentType: "Review" })
   );
 
   let rawReviews = [];
@@ -337,7 +337,7 @@ Focus discipline: ${focus}. Return: {"focus": "${focus}", "reviewed": true, "fil
     const focus = reviewFocuses[i];
     if (!r || r.reviewed !== true) {
       // Dead Review agent: retry once sequentially
-      const retry = await agent(`Retry ${focus} review. ${reviewScope} Focus: ${focus} discipline. Return: {"focus": "${focus}", "reviewed": true, "filesExamined": ["<path>"], "findings": [{"file": "<path-or-null>", "description": "<one-sentence issue>", "severity": "critical|high|medium|low"}]}`, { agentType: "Review" });
+      const retry = await agent(`Retry ${focus} review. ${reviewScope} Focus: ${focus} discipline. Return: {"focus": "${focus}", "reviewed": true, "filesExamined": ["<path>"], "findings": [{"file": "<path-or-null>", "line": <number-or-null>, "description": "<one-sentence issue>", "severity": "critical|high|medium|low"}]}`, { agentType: "Review" });
       if (!retry || retry.reviewed !== true) {
         coverageGaps.push(focus);
         log(`review coverage incomplete: ${focus}`);
@@ -402,14 +402,18 @@ ${JSON.stringify(allFindings.map((f, i) => ({ index: i, description: f.descripti
   // Distinct-file groups are paced in chunks of FIX_CHUNK — same pacing bar as the Review spawn
   // path — to avoid launching all Code agents at once on a large branch (reliability: explicit bound).
   const FIX_CHUNK = 5;
-  const fixThunks = Object.entries(fileGroups).map(([fileKey, findings]) => async () => {
+  // issue-fix SCOPE per finding: CRITICAL or HIGH takes the Careful protocol (failing regression test first); anything else is Standard.
+  const CAREFUL_SEVERITIES = new Set(["critical", "high"]);
+  const fixThunks = Object.values(fileGroups).map(findings => async () => {
     const chunkResults = [];
     for (let i = 0; i < findings.length; i += MAX_BATCH) {
       const chunk = findings.slice(i, i + MAX_BATCH);
       const r = await agent(`OPERATION: issue-fix
-Fix the following confirmed review findings on branch ${BRANCH}${fileKey.startsWith("__nofile") ? "" : ` in ${fileKey}`}:
-${chunk.map(f => `- ${f.description} (${f.severity})`).join("\n")}
-
+Fix the following confirmed review findings on branch ${BRANCH}:
+ISSUES:
+${chunk.map((f, n) => `${n + 1}. ${f.file ? `${f.file}${f.line ? `:${f.line}` : ""} — ` : ""}${f.description} (${f.severity})`).join("\n")}
+SCOPE: ${chunk.map((f, n) => `${n + 1}=${CAREFUL_SEVERITIES.has(String(f.severity).toLowerCase()) ? "Careful" : "Standard"}`).join(", ")}
+PUSH: false
 ISSUE_NUMBER: ${ISSUE_NUMBER}
 ISSUE_PR_LINK: ${ISSUE_PR_LINK}
 COMPLIANCE_FRAMEWORKS: ${COMPLIANCE_FRAMEWORKS}

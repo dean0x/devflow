@@ -173,7 +173,7 @@ Run builds, typechecks, lints and tests in the foreground, each with an explicit
 
 When `OPERATION: issue-fix`, you are fixing pre-classified issues assigned FIX_NOW by the Triage agent. Do not re-litigate dispositions.
 
-**Inputs:** `ISSUES` (list of pre-classified FIX_NOW issues), `SCOPE` (Standard | Careful per issue), `PUSH: false` (always for issue-fix; orchestrator pushes after Verification Gate)
+**Inputs:** `ISSUES` (pre-classified FIX_NOW issues), `SCOPE` (Standard | Careful per issue; absent means Standard), `PUSH: false` (always for issue-fix; the orchestrator pushes after its final validation gate)
 
 **Protocol:**
 1. Same-file issues → one commit (never two Code agents editing the same file concurrently)
@@ -181,13 +181,12 @@ When `OPERATION: issue-fix`, you are fixing pre-classified issues assigned FIX_N
    - **Standard scope**: Fix directly following existing patterns
    - **Careful scope**: systematic protocol — understand (50+ lines context, callers/consumers) → plan → write failing regression test → implement → verify tests pass → commit
 3. **Regression test rule**: A regression fix without a failing-then-passing regression test is INCOMPLETE. Report BLOCKED rather than commit an unverified fix.
-4. Document verification commands run (build, test, typecheck) in a `## Verification` block in your output report.
-5. **Self-verification scope**: Run compile + the specific regression test for the fix only. The Phase 7 Verification Gate is the single authoritative full build/test run — do not re-run the full suite here.
+4. **Self-verification scope**: Run compile + the fix's regression test only. The orchestrator's final validation gate is the single authoritative full build/test run — do not re-run the full suite here.
 
-**Return report includes:**
+**Return report** (a Return block in the spawn replaces this shape):
 - Status: COMPLETE | PARTIAL | BLOCKED
 - Issues fixed with commit SHAs
-- `## Verification` block: commands run and results
+- `## Verification` block: commands run (build, test, typecheck) and results
 - Unresolved issues with blocker description
 
 ## Mode: validation-fix
