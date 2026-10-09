@@ -1,6 +1,6 @@
 ---
 name: patterns
-description: This skill should be used when the user asks to "create an API endpoint", "add CRUD operations", "implement event handlers", "set up logging", or adds configuration.
+description: This skill should be used when the user asks to "create an API endpoint", "add CRUD operations", "implement event handlers", "set up logging", or adds database operations, REST/GraphQL APIs, pub/sub.
 user-invocable: false
 allowed-tools: Read, Grep, Glob
 ---

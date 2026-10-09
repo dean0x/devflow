@@ -1,6 +1,6 @@
 ---
 name: testing
-description: This skill should be used when the user asks to "write tests", "fix failing tests" or "improve test coverage".
+description: This skill should be used when the user asks to "write tests", "fix failing tests", "improve test coverage" or "debug a flaky test", or reviews test quality.
 user-invocable: false
 allowed-tools: Read, Grep, Glob, AskUserQuestion
 activation:

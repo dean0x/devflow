@@ -19,7 +19,7 @@ allowed-tools: Read, Bash
 
 ### Step 1: Scan the index
 
-One line per active entry: its ID (`ADR-NNN` or `PF-NNN`), a title, then a status tag or, after `—`, the scope it governs. The footer names the decisions and pitfalls files.
+One line per active entry: its ID (`ADR-NNN` or `PF-NNN`), a title, then a status tag and/or, after `—`, its area or scope. The footer names the decisions and pitfalls files.
 
 ### Step 2: Identify plausibly-relevant entries
 
@@ -33,7 +33,7 @@ Find the entry's heading line in the file the footer names, then Read only that 
 command grep -nF '## ADR-NNN:' "{worktree-from-footer}/.devflow/learning/decisions.md"
 ```
 
-For a pitfall use `## PF-NNN:` and `pitfalls.md`. Read with `offset` at the printed line and a `limit` of about 25, stopping at the next `## `. The footer is the single source of truth for paths; the ledger is git-ignored, so only a shell search finds the line. A `verified` date is when the entry was last confirmed true. Cite only after reading the body and confirming it applies.
+For a pitfall use `## PF-NNN:` and `pitfalls.md`. Read with `offset` at the printed line and a `limit` of about 25, stopping at the next `## `. The footer is the single source of truth for paths; the ledger is git-ignored, so only a shell search finds the line. A `verified` date is when the entry was last confirmed true; none means unconfirmed. Cite only after reading the body and confirming it applies.
 
 ### Step 4: Cite inline — in-session handoffs only
 
