@@ -1,6 +1,6 @@
 # Project Roots and Detached HEAD
 
-Where devflow keeps per-project data across checkouts, and what it does on a detached HEAD. Companion to the worktree discovery algorithm in `SKILL.md`.
+Where devflow keeps per-project data across checkouts, and what it does on a detached HEAD. Companion to the worktree discovery algorithm in `discovery.md`.
 
 ## Which Root Holds What
 
@@ -24,6 +24,6 @@ A detached HEAD is a commit checked out without a branch (`git checkout <sha>`, 
 | Surface | Behaviour |
 |---------|-----------|
 | Knowledge commit | Skipped: a commit there becomes unreachable once HEAD moves. The Knowledge agent reports `KB_COMMIT: skipped (detached HEAD) — uncommitted: <paths>`, and the calling workflow names those paths to the user |
-| Worktree discovery | Excluded from auto-review (discovery Step 3 in `SKILL.md`): there is no branch to review, compare or push |
+| Worktree discovery | Excluded from auto-review (discovery Step 3 in `discovery.md`): there is no branch to review, compare or push |
 | Memory bootstrap | The first compaction bootstraps `WORKING-MEMORY.md` stamped `branch: (detached)`, keyed on the HEAD commit; an unborn branch has no commit and still skips |
 | Memory header | Renders `detached @ <short-sha>` instead of `on unknown` |
