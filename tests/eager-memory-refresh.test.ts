@@ -242,6 +242,27 @@ function seedQueue(projectDir: string): void {
   );
 }
 
+/**
+ * The queue bytes the worker is about to claim. The claim is an `mv` of
+ * .pending-turns.jsonl to .pending-turns.processing, so a FAIL or CONFLICT run
+ * must leave .processing holding exactly these bytes. Capture them before the run.
+ */
+function readQueueBytes(projectDir: string): Buffer {
+  return fs.readFileSync(path.join(projectDir, '.devflow', 'memory', '.pending-turns.jsonl'));
+}
+
+/**
+ * Assert the claimed rows survived a FAIL or CONFLICT run byte for byte. An
+ * existence check passes over a hook that rewrote or truncated the batch, and the
+ * batch is the retry vehicle, so a changed row is a lost turn.
+ */
+function expectClaimedRowsPreserved(projectDir: string, claimed: Buffer): void {
+  const processingFile = path.join(projectDir, '.devflow', 'memory', '.pending-turns.processing');
+  expect(fs.existsSync(processingFile)).toBe(true);
+  expect(claimed.length, 'the captured queue must hold rows').toBeGreaterThan(0);
+  expect(fs.readFileSync(processingFile)).toEqual(claimed);
+}
+
 /** Init scratch git repo */
 function initGitRepo(dir: string): void {
   execSync('git init -q', { cwd: dir });
@@ -585,10 +606,10 @@ describe('S4: AC-F3/P3 — watchdog and failure path', () => {
     fs.writeFileSync(failBin, answersVersion('#!/bin/bash\nexit 1\n'));
     fs.chmodSync(failBin, 0o755);
 
+    const claimed = readQueueBytes(projectDir);
     runWorker(projectDir, homeDir, shimDir);
 
-    const processingFile = path.join(projectDir, '.devflow', 'memory', '.pending-turns.processing');
-    expect(fs.existsSync(processingFile)).toBe(true);
+    expectClaimedRowsPreserved(projectDir, claimed);
 
     const okFile = path.join(projectDir, '.devflow', 'memory', '.last-refresh-ok');
     expect(fs.existsSync(okFile)).toBe(false);
@@ -1799,12 +1820,13 @@ exit 0
     );
     fs.chmodSync(claudeBin, 0o755);
 
+    const claimed = readQueueBytes(projectDir);
     const { exitCode } = runWorker(projectDir, homeDir, shimDir);
     expect(exitCode).toBe(0);
 
-    // CONFLICT: staged deleted, .processing retained (created by this run's claim step)
+    // CONFLICT: staged deleted, .processing retained (created by this run's claim step) with the claimed rows byte for byte
     expect(fs.existsSync(stagedFile)).toBe(false);
-    expect(fs.existsSync(path.join(projectDir, '.devflow', 'memory', '.pending-turns.processing'))).toBe(true);
+    expectClaimedRowsPreserved(projectDir, claimed);
     // .last-refresh-ok NOT created — user edit survived, worker does not claim success
     expect(fs.existsSync(path.join(projectDir, '.devflow', 'memory', '.last-refresh-ok'))).toBe(false);
 
@@ -1839,6 +1861,7 @@ exit 0
     );
     fs.chmodSync(claudeBin, 0o755);
 
+    const claimed = readQueueBytes(projectDir);
     const { exitCode } = runWorker(projectDir, homeDir, shimDir);
     expect(exitCode).toBe(0);
 
@@ -1846,8 +1869,8 @@ exit 0
     expect(fs.existsSync(stagedFile)).toBe(false);
     expect(fs.existsSync(memFile)).toBe(false);
     expect(fs.existsSync(path.join(projectDir, '.devflow', 'memory', '.last-refresh-ok'))).toBe(false);
-    // .processing retained — the FAIL path, not false-success
-    expect(fs.existsSync(path.join(projectDir, '.devflow', 'memory', '.pending-turns.processing'))).toBe(true);
+    // .processing retained with the claimed rows byte for byte — the FAIL path, not false-success
+    expectClaimedRowsPreserved(projectDir, claimed);
 
     // Log confirms FAIL path, not false-success (non-vacuity: new branch exercised via log line)
     const log = fs.readFileSync(workerLogPath(projectDir, homeDir), 'utf-8');
@@ -1931,13 +1954,14 @@ exit 0
     );
     fs.chmodSync(claudeBin, 0o755);
 
+    const claimed = readQueueBytes(projectDir);
     const { exitCode } = runWorker(projectDir, homeDir, shimDir);
     expect(exitCode).toBe(0);
 
     // The external content must survive untouched — the staged file is discarded
     expect(fs.readFileSync(memFile, 'utf-8')).toContain('created externally during worker run');
     expect(fs.existsSync(stagedFile)).toBe(false);
-    expect(fs.existsSync(path.join(projectDir, '.devflow', 'memory', '.pending-turns.processing'))).toBe(true);
+    expectClaimedRowsPreserved(projectDir, claimed);
     expect(fs.existsSync(path.join(projectDir, '.devflow', 'memory', '.last-refresh-ok'))).toBe(false);
 
     const log = fs.readFileSync(workerLogPath(projectDir, homeDir), 'utf-8');
@@ -1962,13 +1986,14 @@ exit 0
     );
     fs.chmodSync(claudeBin, 0o755);
 
+    const claimed = readQueueBytes(projectDir);
     const { exitCode } = runWorker(projectDir, homeDir, shimDir);
     expect(exitCode).toBe(0);
 
     expect(fs.existsSync(stagedFile)).toBe(false);
     expect(fs.readFileSync(memFile, 'utf-8')).toContain('- original');
     expect(fs.existsSync(path.join(projectDir, '.devflow', 'memory', '.last-refresh-ok'))).toBe(false);
-    expect(fs.existsSync(path.join(projectDir, '.devflow', 'memory', '.pending-turns.processing'))).toBe(true);
+    expectClaimedRowsPreserved(projectDir, claimed);
 
     const log = fs.readFileSync(workerLogPath(projectDir, homeDir), 'utf-8');
     expect(log).toContain('staged file exists but stamp missing on line 1');
