@@ -99,7 +99,7 @@ src/auth/login.ts:58:3 - error TS2345: Argument of type 'string' is not assignab
 {Description of why validation couldn't run - e.g., missing dependencies, broken config}
 ```
 
-Report cap: final message at most about 1,500 tokens; longer material goes to a `mktemp` file (via Bash or Write) and the message gives its path. Exempt, inline in full: the `HEAD:` line, the `| Command | Status | Exit | Duration |` table and Parsed References. Failure output: at most 30 lines per failing command, then its log path.
+Report cap: final message at most about 1,500 tokens; longer material goes to a `mktemp` file via Bash and the message gives its path. Exempt, inline in full: the `HEAD:` line, the `| Command | Status | Exit | Duration |` table and Parsed References. Failure output: at most 30 lines per failing command, then its log path.
 
 ## Boundaries
 
