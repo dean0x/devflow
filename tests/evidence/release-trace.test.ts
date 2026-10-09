@@ -165,7 +165,7 @@ function commit(repo: string, spec: CommitSpec): string {
   git(repo, ['add', '-A'])
   const msgFile = path.join(tmp, `msg-${msgSeq++}.txt`)
   fs.writeFileSync(msgFile, `${spec.subject}${spec.body === undefined ? '' : `\n\n${spec.body}`}\n`)
-  const author = spec.author === undefined
+  const author: Readonly<Record<string, string>> = spec.author === undefined
     ? {}
     : { GIT_AUTHOR_NAME: spec.author.name, GIT_AUTHOR_EMAIL: spec.author.email }
   git(repo, ['commit', '-q', '--cleanup=verbatim', '-F', msgFile, ...(spec.allowEmpty ? ['--allow-empty'] : [])], author)
@@ -1090,10 +1090,10 @@ describe('output gate (exit 5)', () => {
 
   it.each([
     // Header matches this run and nothing is listed: only the sum (0 ≠ 1) refuses it.
-    ['counts that do not sum', () => 'TRACE from:v1.0.0 scanned:1 traced:0 untraced:0 exempt:0 unmatched:0 bound:ok\n'],
-    ['a header describing another run', () => 'TRACE from:v1.0.0 scanned:0 traced:0 untraced:0 exempt:0 unmatched:0 bound:ok\n'],
-    ['a raw author', () => 'TRACE from:v1.0.0 scanned:1 traced:0 untraced:1 exempt:0 unmatched:0 bound:ok\n- bbbbbbbbbbbb untraced author:$(id)\n'],
-    ['not a string', () => 7],
+    ['counts that do not sum', (): string => 'TRACE from:v1.0.0 scanned:1 traced:0 untraced:0 exempt:0 unmatched:0 bound:ok\n'],
+    ['a header describing another run', (): string => 'TRACE from:v1.0.0 scanned:0 traced:0 untraced:0 exempt:0 unmatched:0 bound:ok\n'],
+    ['a raw author', (): string => 'TRACE from:v1.0.0 scanned:1 traced:0 untraced:1 exempt:0 unmatched:0 bound:ok\n- bbbbbbbbbbbb untraced author:$(id)\n'],
+    ['not a string', (): number => 7],
   ] as const)('%s', (_label, render) => {
     const r = runMain(['map', '--from', 'v1.0.0', '--grammar', 'github'], { exec: fakeGit(answers), render })
     expect(r.code).toBe(EXIT.OUTPUT_GATE_REFUSED)

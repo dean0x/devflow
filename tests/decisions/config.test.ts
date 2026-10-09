@@ -83,8 +83,8 @@ describe('applyLearningTuningConfigLayer', () => {
       JSON.stringify({ max_daily_runs: 7, throttle_minutes: 15, model: 'haiku' }),
     );
     expect(result).toEqual({ model: 'haiku', debug: false });
-    expect((result as Record<string, unknown>).max_daily_runs).toBeUndefined();
-    expect((result as Record<string, unknown>).throttle_minutes).toBeUndefined();
+    expect(Reflect.get(result, 'max_daily_runs')).toBeUndefined();
+    expect(Reflect.get(result, 'throttle_minutes')).toBeUndefined();
   });
 
   // ISS-11: out-of-domain string model values are rejected — falls back to config.model
@@ -242,7 +242,7 @@ describe('loadLearningTuningConfig', () => {
     });
     const config = loadLearningTuningConfig(projectCwd);
     expect(config.model).toBe('haiku');
-    expect((config as Record<string, unknown>).max_daily_runs).toBeUndefined();
-    expect((config as Record<string, unknown>).throttle_minutes).toBeUndefined();
+    expect(Reflect.get(config, 'max_daily_runs')).toBeUndefined();
+    expect(Reflect.get(config, 'throttle_minutes')).toBeUndefined();
   });
 });
