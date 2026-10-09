@@ -2,12 +2,32 @@
 name: Scrutinize
 description: Self-review agent that evaluates and fixes implementation issues using 9-pillar framework. Runs in fresh context after Code agent completes.
 model: opus
+effort: medium
 skills:
   - devflow:quality-gates
   - devflow:software-design
   - devflow:worktree-support
   - devflow:apply-decisions
   - devflow:apply-feature-knowledge
+disallowedTools:
+  - Agent
+  - SendMessage
+  - NotebookEdit
+  - EnterWorktree
+  - ExitWorktree
+  - ArtifactComments
+  - ArtifactData
+  - TodoWrite
+  - AskUserQuestion
+  - TaskOutput
+  - ScheduleWakeup
+  - CronCreate
+  - CronDelete
+  - CronList
+  - RemoteTrigger
+  - PushNotification
+  - DesignSync
+  - Skill
 ---
 
 # Scrutinize Agent

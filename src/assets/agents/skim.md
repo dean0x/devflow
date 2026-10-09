@@ -1,10 +1,12 @@
 ---
 name: Skim
 description: Codebase orientation using rskim to identify relevant files, functions, and patterns for a feature or task
-model: sonnet
+model: haiku
+effort: medium
 tools: ["Bash", "Read"]
 skills:
   - devflow:worktree-support
+omitClaudeMd: true
 ---
 
 # Skim Agent

@@ -31,6 +31,7 @@ import { readFrontmatterEffort } from '../src/core/agent-frontmatter.js';
 import { CLAUDE_MODEL_ALIASES } from '../src/core/external-models.js';
 import { DEVFLOW_PLUGINS, getAllAgentNames } from '../src/core/plugins.js';
 import { loadFile, resolveAgentSource } from './helpers.js';
+import { AGENT_CONFIG } from './fixtures/agent-config.js';
 
 const file = (agents: AgentMappingFile['agents']): AgentMappingFile => ({ version: 1, agents });
 
@@ -315,10 +316,10 @@ describe('countExternalMappedAgents — workers are not agents', () => {
 // Shipped defaults stay put: the real tree through a reapply
 // ---------------------------------------------------------------------------
 //
-// This ticket builds plumbing and changes no effective model: an install at
-// shipped defaults carries the shipped `model:` lines, no agent carries an
-// `effort:` line, and neither a Validate entry that restates the shipped model
-// nor an agents.memory entry changes a byte of any installed agent.
+// An install at shipped defaults carries the shipped `model:` and `effort:` lines
+// of every agent (the rows of tests/fixtures/agent-config.ts), and neither a
+// Validate entry that restates the shipped model nor an agents.memory entry
+// changes a byte of any installed agent: a shipped effort survives a reapply.
 
 describe('reapplyAgentMapping — the real shipped tree at shipped defaults', () => {
   let tmp: string;
@@ -347,10 +348,10 @@ describe('reapplyAgentMapping — the real shipped tree at shipped defaults', ()
     return out;
   };
 
-  it('no shipped agent carries an effort line (this ticket adds none)', async () => {
+  it('every shipped agent carries the effort of its table row, and an exempt agent carries none', async () => {
     for (const [name, content] of await installedBytes()) {
       const effort = readFrontmatterEffort(content);
-      expect(effort.ok && effort.value, `${name} ships an effort`).toBe('');
+      expect(effort.ok && effort.value, `${name} ships the wrong effort`).toBe(AGENT_CONFIG[name]?.effort ?? '');
     }
   });
 

@@ -4,6 +4,7 @@ import * as fsSync from 'fs';
 import { createRequire } from 'module';
 import * as path from 'path';
 import { fileURLToPath } from 'url';
+import { AGENT_CONFIG } from './fixtures/agent-config.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -73,9 +74,15 @@ describe('learning agent', () => {
   });
 
   describe('frontmatter', () => {
-    it('is named Learning with model opus', () => {
+    // D-LEARNING-SHIPPED-ROW: the model and effort are the Learning row of the agent-config
+    // table, so a change of tier is an edit to that row and to the two frontmatter lines.
+    const row = AGENT_CONFIG.learning;
+
+    it('is named Learning and ships the model and effort of its table row', () => {
       expect(frontmatter).toMatch(/^name: Learning$/m);
-      expect(frontmatter).toMatch(/^model: opus$/m);
+      expect(frontmatter).toMatch(new RegExp(`^model: ${row.model}$`, 'm'));
+      if (row.effort === null) expect(frontmatter).not.toMatch(/^effort:/m);
+      else expect(frontmatter).toMatch(new RegExp(`^effort: ${row.effort}$`, 'm'));
     });
 
     it('has exactly the read-and-run tool set: every write goes through the learning ops', () => {
@@ -83,9 +90,13 @@ describe('learning agent', () => {
       expect(tools.sort()).toEqual(['Bash', 'Glob', 'Grep', 'Read']);
     });
 
-    it('references only the apply-decisions skill', () => {
-      const skills = parseYamlList(frontmatter, 'skills');
-      expect(skills).toEqual(['devflow:apply-decisions']);
+    it('preloads no skill: the body never names one, so there is no skills key', () => {
+      expect(frontmatter).not.toMatch(/^skills:/m);
+      expect(parseYamlList(frontmatter, 'skills')).toEqual([]);
+    });
+
+    it('omits the project CLAUDE.md: every rule the run needs is stated in this body', () => {
+      expect(frontmatter).toMatch(/^omitClaudeMd: true$/m);
     });
   });
 

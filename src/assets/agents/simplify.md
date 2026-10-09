@@ -2,9 +2,29 @@
 name: Simplify
 description: Simplifies and refines code for clarity, consistency, and maintainability while preserving all functionality. Focuses on recently modified code unless instructed otherwise.
 model: sonnet
+effort: medium
 skills:
   - devflow:software-design
   - devflow:worktree-support
+disallowedTools:
+  - Agent
+  - SendMessage
+  - NotebookEdit
+  - EnterWorktree
+  - ExitWorktree
+  - ArtifactComments
+  - ArtifactData
+  - TodoWrite
+  - AskUserQuestion
+  - TaskOutput
+  - ScheduleWakeup
+  - CronCreate
+  - CronDelete
+  - CronList
+  - RemoteTrigger
+  - PushNotification
+  - DesignSync
+  - Skill
 ---
 
 # Simplify Agent

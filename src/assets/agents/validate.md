@@ -2,9 +2,14 @@
 name: Validate
 description: Dedicated agent for running validation commands (build, typecheck, lint, test). Reports pass/fail with structured failure details - never fixes.
 model: haiku
+effort: medium
 skills:
-  - devflow:testing
   - devflow:worktree-support
+tools:
+  - Bash
+  - Read
+  - Grep
+  - Glob
 ---
 
 # Validate Agent

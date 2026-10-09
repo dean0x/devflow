@@ -15,6 +15,7 @@ import { tmpdir } from 'os';
 import * as path from 'path';
 import { getAllSkillNames, getAllCommandNames, getAllAgentNames, DEVFLOW_PLUGINS } from '../src/core/plugins.js';
 import { requireDistFiles, requireDistFile, resolveAllAgents, resolveAgentSource, walkFiles } from './helpers.js';
+import { AGENT_CONFIG } from './fixtures/agent-config.js';
 
 const ROOT = path.resolve(import.meta.dirname, '..');
 
@@ -277,12 +278,23 @@ describe('Format 2: Agent frontmatter skills', () => {
     }
   });
 
-  it('every shared agent declares at least one skill in frontmatter', () => {
+  it('every shared agent declares at least one skill in frontmatter, unless its table row preloads none', () => {
     const agents = resolveAllAgents();
     expect([...agents.keys()]).toEqual(expect.arrayContaining(getAllAgentNames()));
 
-    for (const [, source] of agents) {
+    // D-PRELOAD-TRIM: an agent whose row in the agent-config table lists no skills (Learning)
+    // has no `skills:` key by design. The parse check below stays strict for every other agent,
+    // and for these it asserts the key is absent rather than malformed.
+    const preloadsNone = new Set(Object.entries(AGENT_CONFIG).filter(([, row]) => row.skills?.length === 0).map(([name]) => name));
+    expect(preloadsNone.size, 'the exemption must stay narrower than the roster').toBeLessThan(getAllAgentNames().length);
+
+    for (const [name, source] of agents) {
       const skillNames = parseFrontmatterSkills(source.content);
+
+      if (preloadsNone.has(name)) {
+        expect(source.content.split(/\n---\n/)[0], `${name}: declares a skills key the table says it has none of`).not.toMatch(/^skills:/m);
+        continue;
+      }
 
       expect(
         skillNames.length,

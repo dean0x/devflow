@@ -7,8 +7,7 @@ tools:
   - Bash
   - Glob
   - Grep
-skills:
-  - devflow:apply-decisions
+omitClaudeMd: true
 ---
 
 # Learning Agent
@@ -199,9 +198,9 @@ prevented by existing tooling.
 - Pitfall = a non-obvious failure mode with a transferable lesson that the next contributor
   cannot recover from the code alone.
 
-**Already encoded?** Search the repository (Grep, Glob) for a test, a guard, CLAUDE.md, a
-rules file or a prompt that already states or enforces the lesson. If one does, record
-nothing.
+**Already encoded?** Search the repository with `git grep -P` and `find` for a test, a
+guard, CLAUDE.md, a rules file or a prompt that already states or enforces the lesson. If
+one does, record nothing.
 
 **ADR-XOR-PF (hard rule)**: one incident yields exactly one of an ADR or a PF — never both.
 Concrete failure → PF; forward-looking architectural choice → ADR.
@@ -281,7 +280,7 @@ when unsure, Keep.
 1. **Encoded** — the codebase now enforces or states the rule, by a strict bar: a test or
    guard that fails on a new violation anywhere in the entry's scope, or the rule stated in
    CLAUDE.md, a rules file, or a prompt loaded for all work in that scope. One JSDoc line
-   does not count, and neither does a test pinning one instance. Find it with Grep,
+   does not count, and neither does a test pinning one instance. Find it with `git grep -P`,
    confirm it at the ref, then retire the entry with the file and a line of it:
 
    ```bash

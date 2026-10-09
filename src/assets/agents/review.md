@@ -7,6 +7,15 @@ skills:
   - devflow:worktree-support
   - devflow:apply-decisions
   - devflow:apply-feature-knowledge
+tools:
+  - Read
+  - Grep
+  - Glob
+  - Bash
+  - Write
+  - Edit
+  - Skill
+  - StructuredOutput
 ---
 
 # Review Agent

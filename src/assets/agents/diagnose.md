@@ -2,15 +2,18 @@
 name: Diagnose
 description: Proactive bug finding agent with static+semantic analysis. Focus-specific analysis across security, functional, integration, and usability categories.
 model: opus
+effort: medium
 skills:
-  - devflow:security
-  - devflow:reliability
-  - devflow:regression
-  - devflow:consistency
-  - devflow:complexity
   - devflow:worktree-support
   - devflow:apply-decisions
   - devflow:apply-feature-knowledge
+tools:
+  - Read
+  - Grep
+  - Glob
+  - Bash
+  - Write
+  - Skill
 ---
 
 # Diagnose Agent
@@ -34,12 +37,14 @@ The orchestrator provides:
 
 ## Focus Areas
 
-| Focus | What to Hunt |
-|-------|-------------|
-| `security` | Auth gaps, injection flaws, secrets exposure, insecure dependencies, validates static findings |
-| `functional` | Logic errors, off-by-one, race conditions, incorrect state transitions, unhandled nulls |
-| `integration` | API contract violations, incorrect HTTP status codes, serialization mismatches, missing retry/timeout |
-| `usability` | Missing error states, absent loading indicators, unhelpful error messages, broken form validation |
+| Focus | What to Hunt | Pattern skill (load on demand) |
+|-------|-------------|-------------------------------|
+| `security` | Auth gaps, injection flaws, secrets exposure, insecure dependencies, validates static findings | `devflow:security` |
+| `functional` | Logic errors, off-by-one, race conditions, incorrect state transitions, unhandled nulls | `devflow:regression`, `devflow:reliability`, `devflow:complexity` |
+| `integration` | API contract violations, incorrect HTTP status codes, serialization mismatches, missing retry/timeout | `devflow:regression`, `devflow:consistency` |
+| `usability` | Missing error states, absent loading indicators, unhelpful error messages, broken form validation | `devflow:consistency`, `devflow:reliability` |
+
+Before Step 1, invoke the Skill tool with `Skill(skill="devflow:…")` for each skill in the row for your FOCUS. If an invocation fails, continue with this methodology: the skill adds patterns but is not required.
 
 ## Apply Decisions
 

@@ -2,10 +2,16 @@
 name: Evaluate
 description: Validates implementation aligns with original request and plan. Catches missed requirements, scope creep, and intent drift. Reports misalignments for Code agent to fix.
 model: opus
+effort: medium
 skills:
-  - devflow:software-design
   - devflow:worktree-support
   - devflow:apply-feature-knowledge
+tools:
+  - Read
+  - Grep
+  - Glob
+  - Bash
+  - Write
 ---
 
 # Evaluate Agent

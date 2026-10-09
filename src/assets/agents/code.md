@@ -2,6 +2,7 @@
 name: Code
 description: Autonomous task implementation on feature branch. Implements, tests, and commits.
 model: sonnet
+effort: high
 skills:
   - devflow:software-design
   - devflow:git
@@ -13,6 +14,24 @@ skills:
   - devflow:worktree-support
   - devflow:apply-feature-knowledge
   - devflow:apply-decisions
+disallowedTools:
+  - Agent
+  - SendMessage
+  - NotebookEdit
+  - EnterWorktree
+  - ExitWorktree
+  - ArtifactComments
+  - ArtifactData
+  - TodoWrite
+  - AskUserQuestion
+  - TaskOutput
+  - ScheduleWakeup
+  - CronCreate
+  - CronDelete
+  - CronList
+  - RemoteTrigger
+  - PushNotification
+  - DesignSync
 ---
 
 # Code Agent

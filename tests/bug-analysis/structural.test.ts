@@ -295,19 +295,42 @@ describe('diagnose.md — output format section headers', () => {
 // Group 8: diagnose.md — frontmatter skill declarations
 // ---------------------------------------------------------------------------
 
-describe('diagnose.md — frontmatter skill declarations', () => {
+describe('diagnose.md — pattern skills load on demand', () => {
   const frontmatter = agentContent.slice(0, agentContent.indexOf('\n---\n', 1) + 1);
+  const body = agentContent.slice(agentContent.indexOf('\n---\n', 1) + 5);
+  const focusAreas = extractSection(body, '## Focus Areas', '## Apply Decisions');
+  const PATTERN_SKILLS = ['security', 'reliability', 'regression', 'consistency', 'complexity'];
 
-  it('frontmatter declares devflow:regression skill', () => {
-    expect(frontmatter).toContain('devflow:regression');
+  it('frontmatter preloads none of the five pattern skills', () => {
+    for (const skill of PATTERN_SKILLS) {
+      expect(frontmatter, skill).not.toContain(`devflow:${skill}`);
+    }
   });
 
-  it('frontmatter declares devflow:consistency skill', () => {
-    expect(frontmatter).toContain('devflow:consistency');
+  it('the Focus Areas table names every pattern skill literally, so each one can be loaded', () => {
+    for (const skill of PATTERN_SKILLS) {
+      expect(focusAreas, skill).toContain(`\`devflow:${skill}\``);
+    }
   });
 
-  it('frontmatter declares devflow:complexity skill', () => {
-    expect(frontmatter).toContain('devflow:complexity');
+  it('the Focus Areas table names the skills of each focus in its own row', () => {
+    const row = (focus: string): string => focusAreas.split('\n').find(line => line.startsWith(`| \`${focus}\``)) ?? '';
+    expect(row('security')).toContain('devflow:security');
+    for (const skill of ['regression', 'reliability', 'complexity']) expect(row('functional')).toContain(`devflow:${skill}`);
+    for (const skill of ['regression', 'consistency']) expect(row('integration')).toContain(`devflow:${skill}`);
+    for (const skill of ['consistency', 'reliability']) expect(row('usability')).toContain(`devflow:${skill}`);
+  });
+
+  it('tells the agent to load its row with the Skill tool, and to continue when a load fails', () => {
+    const text = body.replace(/\s+/g, ' ');
+    expect(text).toContain('invoke the Skill tool with');
+    expect(text).toContain('for each skill in the row for your FOCUS');
+    expect(text).toContain('If an invocation fails, continue with this methodology');
+  });
+
+  it('Skill is in the tool allowlist, so the load can run', () => {
+    const tools = frontmatter.slice(frontmatter.indexOf('\ntools:'));
+    expect(tools).toMatch(/^  - Skill$/m);
   });
 });
 

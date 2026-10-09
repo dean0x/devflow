@@ -298,7 +298,10 @@ export const DEVFLOW_PLUGINS: PluginDefinition[] = [
     commands: ['/release'],
     agents: ['git', 'validate'],
     skills: ['git', 'worktree-support'],
-    requires: ['testing'],
+    // D-PRELOAD-TRIM: `testing` left this list when the Validate agent stopped
+    // preloading it. Validate was the only reader in this plugin's corpus, so the
+    // closure guard's reverse arm reported the entry as dead weight.
+    requires: [],
     rules: [],
   },
   {
@@ -307,7 +310,9 @@ export const DEVFLOW_PLUGINS: PluginDefinition[] = [
     commands: ['/self-review'],
     agents: ['simplify', 'scrutinize', 'validate', 'knowledge'],
     skills: ['quality-gates', 'software-design', 'worktree-support', 'feature-knowledge', 'apply-feature-knowledge'],
-    requires: ['apply-decisions', 'testing'],
+    // D-PRELOAD-TRIM: `testing` left this list when the Validate agent stopped
+    // preloading it; no other agent, command or skill in this plugin's corpus names it.
+    requires: ['apply-decisions'],
     rules: [],
   },
   {

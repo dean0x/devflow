@@ -161,4 +161,87 @@ describe.skipIf(!isClaudeAvailable())('subagent skill preload', () => {
       `No transcript contains ${expected.join(', ')}. Found: ${JSON.stringify(allPreloads)}`,
     ).toBe(true);
   }, 90000);
+
+  // Agents whose tool policy removes the Skill tool, or that carry an allowlist, still get
+  // their `skills:` list injected at spawn time: preload does not go through the tool. Each
+  // case asserts the retained set, and that a trimmed skill (D-PRELOAD-TRIM) is no longer
+  // loaded. Learning has no case: it preloads nothing, and its spawn would claim a real queue.
+
+  /**
+   * Spawn `agentType`, find the transcript that holds every expected skill, and check that
+   * none of the trimmed skills rides along with it.
+   */
+  async function expectRetainedPreloads(
+    agentType: string,
+    prompt: string,
+    expected: readonly string[],
+    trimmed: readonly string[] = [],
+  ): Promise<void> {
+    const allPreloads = await spawnAgentAndGetAllPreloads(agentType, prompt);
+    const match = allPreloads.find((p) => expected.every((s) => p.includes(s)));
+    expect(match, `No transcript contains ${expected.join(', ')}. Found: ${JSON.stringify(allPreloads)}`).toBeDefined();
+    for (const skill of trimmed) {
+      expect(match, `${agentType} still preloads ${skill}`).not.toContain(skill);
+    }
+  }
+
+  it('Triage agent preloads security, worktree-support, apply-decisions, apply-feature-knowledge', async () => {
+    await expectRetainedPreloads(
+      'Triage',
+      'reply with one line only — do not create, modify, or delete any file, do not run git: there are no issues to triage.',
+      ['security', 'worktree-support', 'apply-decisions', 'apply-feature-knowledge'],
+    );
+  }, 90000);
+
+  it('Evaluate agent preloads worktree-support and apply-feature-knowledge, and no longer software-design', async () => {
+    await expectRetainedPreloads(
+      'Evaluate',
+      'reply with one line only — do not create, modify, or delete any file, do not run git: nothing was implemented.',
+      ['worktree-support', 'apply-feature-knowledge'],
+      ['software-design'],
+    );
+  }, 90000);
+
+  it('Validate agent preloads worktree-support, and no longer testing', async () => {
+    await expectRetainedPreloads(
+      'Validate',
+      'reply with one line only — do not run any command, do not create, modify, or delete any file: there is nothing to validate.',
+      ['worktree-support'],
+      ['testing'],
+    );
+  }, 90000);
+
+  it('Synthesize agent preloads review-methodology, docs-framework, worktree-support', async () => {
+    await expectRetainedPreloads(
+      'Synthesize',
+      'reply with one line only — do not create, modify, or delete any file, do not run git: there are no agent outputs to synthesize.',
+      ['review-methodology', 'docs-framework', 'worktree-support'],
+    );
+  }, 90000);
+
+  it('Skim agent preloads worktree-support', async () => {
+    await expectRetainedPreloads(
+      'Skim',
+      'reply with one line only — do not run any command, do not create, modify, or delete any file.',
+      ['worktree-support'],
+    );
+  }, 90000);
+
+  it('Diagnose agent preloads worktree-support, apply-decisions, apply-feature-knowledge, and none of the five pattern skills', async () => {
+    await expectRetainedPreloads(
+      'Diagnose',
+      'reply with one line only — do not create, modify, or delete any file, do not run git, do not write a report: FOCUS security, nothing to analyse.',
+      ['worktree-support', 'apply-decisions', 'apply-feature-knowledge'],
+      ['security', 'reliability', 'regression', 'consistency', 'complexity'],
+    );
+  }, 90000);
+
+  it('Test agent preloads qa and worktree-support, and no longer testing', async () => {
+    await expectRetainedPreloads(
+      'Test',
+      'reply with one line only — do not run any command, do not create, modify, or delete any file: there is nothing to test.',
+      ['qa', 'worktree-support'],
+      ['testing'],
+    );
+  }, 90000);
 });

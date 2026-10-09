@@ -1442,8 +1442,9 @@ describe('reapplyAgentMapping — unresolved shipped default is reported, not si
 //
 // Reapply used to write `effort: effective.effort ?? null`, which removes the
 // effort line from every installed agent that the mapping has no effort for —
-// including one that SHIPS an effort. No shipped agent carries an effort line
-// yet, so the strip was invisible; these tests inject a source tree that does.
+// including one that SHIPS an effort. These tests inject a source tree of their
+// own, so they hold whatever the shipped table says; the real shipped tree goes
+// through a reapply in tests/agent-models-worker.test.ts.
 
 describe('reapplyAgentMapping — shipped effort survives', () => {
   let tmp: string;
