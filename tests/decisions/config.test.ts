@@ -7,6 +7,7 @@ import {
   applyLearningTuningConfigLayer,
   type LearningTuningConfig,
 } from '../../src/core/learning-tuning-config.js';
+import { AGENT_CONFIG } from '../fixtures/agent-config.js';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -156,7 +157,7 @@ describe('loadLearningTuningConfig', () => {
 
   it('returns all defaults when no config files exist', () => {
     const config = loadLearningTuningConfig(projectCwd);
-    expect(config.model).toBe('opus');
+    expect(config.model).toBe(AGENT_CONFIG.learning.model);
     expect(config.debug).toBe(false);
   });
 
@@ -196,7 +197,7 @@ describe('loadLearningTuningConfig', () => {
       'utf-8',
     );
     const config = loadLearningTuningConfig(projectCwd);
-    expect(config.model).toBe('opus');
+    expect(config.model).toBe(AGENT_CONFIG.learning.model);
   });
 
   it('invalid JSON in project config falls back to global + defaults', () => {
@@ -222,9 +223,15 @@ describe('loadLearningTuningConfig', () => {
     expect(config.debug).toBe(true); // from project
   });
 
-  it('AC-C5: model defaults to opus (not sonnet) when nothing configures it', () => {
-    const config = loadLearningTuningConfig(projectCwd);
-    expect(config.model).toBe('opus');
+  it('D-LEARNING-SHIPPED-ROW: the default model is the shipped Learning model when nothing configures it', () => {
+    // With no layer configuring a model the spawn directive names none, so the frontmatter
+    // model of the Learning agent decides: the default has to describe that run.
+    const shippedFrontmatter = fs.readFileSync(
+      path.resolve(import.meta.dirname, '../../src/assets/agents/learning.md'),
+      'utf-8',
+    );
+    expect(/^model: (.+)$/m.exec(shippedFrontmatter)?.[1]).toBe(AGENT_CONFIG.learning.model);
+    expect(loadLearningTuningConfig(projectCwd).model).toBe(AGENT_CONFIG.learning.model);
   });
 
   it('on-disk config still containing dropped max_daily_runs/throttle_minutes loads without error', () => {

@@ -7,6 +7,7 @@ import {
   getLearningDir,
   getLearningTuningConfigPath,
 } from '../../core/project-paths.js';
+import { loadShippedAgentDefaults } from '../../core/agent-models.js';
 import { readMachineFeature, writeMachineFeature } from '../../core/feature-switch.js';
 import { loadSettingsModule, narrowedSwitchLabel, personalConfigTrackedWarning } from '../../core/evidence-policy.js';
 import { getDevFlowDirectory } from '../../targets/claude-code/claude-paths.js';
@@ -299,16 +300,39 @@ export const CONFIGURE_SCOPE_OPTIONS = [
   },
 ] as const;
 
+/** The models `devflow learning --configure` offers, each with what it is good for. */
+const LEARNING_MODEL_CHOICES = [
+  { value: 'opus', label: 'Opus', note: 'highest quality for detection + curation judgment' },
+  { value: 'sonnet', label: 'Sonnet', note: 'good balance of quality and speed' },
+  { value: 'haiku', label: 'Haiku', note: 'fastest, lowest cost' },
+] as const;
+
+/**
+ * D-LEARNING-SHIPPED-ROW: the model offered as "Recommended" is the one the Learning
+ * agent ships with, the `model:` line of its frontmatter. It is read from there and
+ * written nowhere else, so a change of the shipped tier moves the recommendation with
+ * it and this list never has to be edited. A shipped model outside the three offered
+ * (or none) recommends nothing.
+ */
+export function learningModelOptions(
+  shippedModel: string | undefined,
+): Array<{ value: string; label: string; hint: string }> {
+  return LEARNING_MODEL_CHOICES.map(choice => ({
+    value: choice.value,
+    label: choice.label,
+    hint: choice.value === shippedModel
+      ? `Recommended — ${choice.note}`
+      : choice.note.charAt(0).toUpperCase() + choice.note.slice(1),
+  }));
+}
+
 async function handleConfigure(): Promise<void> {
   p.intro(color.bgCyan(color.black(' Learning Configuration ')));
 
+  const shippedModel = (await loadShippedAgentDefaults()).learning?.model;
   const model = await p.select({
     message: 'Model for decision detection',
-    options: [
-      { value: 'opus', label: 'Opus', hint: 'Recommended — highest quality for detection + curation judgment' },
-      { value: 'sonnet', label: 'Sonnet', hint: 'Good balance of quality and speed' },
-      { value: 'haiku', label: 'Haiku', hint: 'Fastest, lowest cost' },
-    ],
+    options: learningModelOptions(shippedModel),
   });
   if (p.isCancel(model)) {
     p.cancel('Configuration cancelled.');
