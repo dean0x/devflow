@@ -1,6 +1,6 @@
 ---
 name: reliability
-description: This skill should be used when reviewing code for unbounded loops, missing assertions, excessive allocation, or deep indirection.
+description: This skill should be used when reviewing code for unbounded loops or missing assertions.
 user-invocable: false
 allowed-tools: Read, Grep, Glob
 ---

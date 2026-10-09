@@ -1,6 +1,6 @@
 ---
 name: architecture
-description: This skill should be used when reviewing code for SOLID violations, tight coupling, or layering issues.
+description: This skill should be used when reviewing code for SOLID or layering issues.
 user-invocable: false
 allowed-tools: Read, Grep, Glob
 ---

@@ -1,6 +1,6 @@
 ---
 name: python
-description: This skill should be used when the user works with Python files (.py), asks about "type hints", "protocols", "dataclasses", "async/await", "decorators", or discusses Pythonic patterns and data modeling. Provides patterns for type safety, error handling, data modeling, and async programming.
+description: This skill should be used when the user works with Python files (.py), asks about "type hints", "protocols", "dataclasses", "async/await", or discusses Pythonic patterns.
 user-invocable: false
 allowed-tools: Read, Grep, Glob
 activation:

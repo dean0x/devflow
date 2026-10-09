@@ -1,6 +1,6 @@
 ---
 name: go
-description: This skill should be used when the user works with Go files (.go), asks about "error handling", "interfaces", "goroutines", "channels", "packages", or discusses Go idioms and concurrency. Provides patterns for error handling, interface design, concurrency, and package organization.
+description: This skill should be used when the user works with Go files (.go), asks about "error handling", "interfaces", "goroutines", or discusses Go idioms and concurrency.
 user-invocable: false
 allowed-tools: Read, Grep, Glob
 activation:

@@ -1,6 +1,6 @@
 ---
 name: quality-gates
-description: This skill should be used when evaluating implementation quality before submission, checking correctness, security, and simplicity.
+description: This skill should be used when evaluating implementation quality before submission.
 user-invocable: false
 allowed-tools: Read, Grep, Glob, Edit, Write, Bash
 ---

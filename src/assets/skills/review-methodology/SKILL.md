@@ -1,6 +1,6 @@
 ---
 name: review-methodology
-description: This skill should be used when performing a code review to apply the standard 6-step review process.
+description: This skill should be used when performing a code review (the 6-step process).
 user-invocable: false
 allowed-tools: Read, Grep, Glob, Bash
 ---

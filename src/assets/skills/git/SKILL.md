@@ -1,6 +1,6 @@
 ---
 name: git
-description: This skill should be used when the user asks to "commit changes", "create a pull request", "rebase safely", "manage branches", "fix merge conflicts", "undo a commit", "comment on a PR", "create a release", or performs any git/GitHub operations. Provides safety patterns, atomic commit formatting, PR descriptions, sensitive file detection, and GitHub API usage.
+description: This skill should be used when the user asks to "commit changes", "create a pull request", "rebase safely", or performs any git/GitHub operation.
 user-invocable: false
 allowed-tools: Bash, Read, Grep, Glob
 ---

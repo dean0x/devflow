@@ -1,6 +1,6 @@
 ---
 name: typescript
-description: This skill should be used when the user works with TypeScript files (.ts/.tsx), asks about "generics", "type guards", "utility types", "strict typing", "discriminated unions", or discusses type safety and inference. Provides patterns for Result types, exhaustive checks, branded types, and type-safe API contracts.
+description: This skill should be used when the user works with TypeScript files (.ts/.tsx), asks about "generics", "type guards", "utility types", "discriminated unions", or discusses type safety.
 user-invocable: false
 allowed-tools: Read, Grep, Glob
 activation:

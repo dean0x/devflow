@@ -1,8 +1,6 @@
 ---
 name: qa
-description: This skill should be used when performing scenario-based acceptance testing,
-  designing QA test plans, or validating that implementation behavior matches acceptance
-  criteria beyond unit tests.
+description: This skill should be used when designing or running scenario-based acceptance tests.
 user-invocable: false
 allowed-tools: Read, Grep, Glob, Bash
 ---

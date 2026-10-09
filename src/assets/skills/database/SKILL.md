@@ -1,6 +1,6 @@
 ---
 name: database
-description: This skill should be used when reviewing database queries, migrations, indexes, or schema changes.
+description: This skill should be used when reviewing queries, migrations or schema changes.
 user-invocable: false
 allowed-tools: Read, Grep, Glob
 ---

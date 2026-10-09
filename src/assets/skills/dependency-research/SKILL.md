@@ -1,9 +1,6 @@
 ---
 name: dependency-research
-description: >-
-  This skill should be used when the user asks to "add a utility", "create a helper",
-  "implement parsing", "build a wrapper", or writes infrastructure/utility code that
-  may already exist as a well-maintained package. Enforces research before building.
+description: This skill should be used when the user asks to "add a utility", "create a helper", "build a wrapper", or writes utility code a maintained package may already provide.
 user-invocable: false
 allowed-tools: Read, Grep, Glob
 ---
