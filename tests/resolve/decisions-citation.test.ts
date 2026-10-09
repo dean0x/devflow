@@ -20,6 +20,7 @@ import { describe, it, expect } from 'vitest';
 import * as path from 'path';
 import { createRequire } from 'module';
 import { loadFile, extractSection } from '../decisions/helpers';
+import { resolveAgentSource } from '../helpers';
 
 const ROOT = path.resolve(import.meta.dirname, '../..');
 const require = createRequire(import.meta.url);
@@ -209,11 +210,11 @@ describe('resolve.md — base command', () => {
 });
 
 // ---------------------------------------------------------------------------
-// Structural tests: src/assets/agents/triage.md
+// Structural tests: the Triage agent (resolveAgentSource)
 // ---------------------------------------------------------------------------
 
 describe('triage.md — Input Context and Apply Decisions section', () => {
-  const content = loadFile('src/assets/agents/triage.md');
+  const content = resolveAgentSource('triage').content;
 
   it('declares DECISIONS_CONTEXT in Input Context section', () => {
     const inputContextSection = extractSection(content, '## Input Context', '\n## ');
@@ -264,7 +265,7 @@ describe('cross-cutting — DECISIONS_CONTEXT on resolve surfaces', () => {
   });
 
   it('triage.md contains DECISIONS_CONTEXT', () => {
-    const content = loadFile('src/assets/agents/triage.md');
+    const content = resolveAgentSource('triage').content;
     expect(content).toContain('DECISIONS_CONTEXT');
   });
 

@@ -14,10 +14,10 @@
 // cannot silently remove safety-critical patterns.
 
 import { describe, it, expect } from 'vitest';
-import { loadFile, extractSection } from '../helpers';
+import { loadFile, extractSection, resolveAgentSource } from '../helpers';
 
 const content = loadFile('dist/commands/bug-analysis.md');
-const agentContent = loadFile('src/assets/agents/diagnose.md');
+const agentContent = resolveAgentSource('diagnose').content;
 
 // ---------------------------------------------------------------------------
 // Group 1: Phase ordering — Produces/Requires annotations

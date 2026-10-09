@@ -22,6 +22,7 @@ import * as os from 'os';
 import * as path from 'path';
 import { getAllAgentNames } from '../../src/core/plugins.js';
 import { collectBackslashBraceLeaks } from '../helpers.js';
+import { MDS_GENERATOR_HOSTS } from '../fixtures/mds-manifest.js';
 
 const ROOT = path.resolve(import.meta.dirname, '../..');
 
@@ -164,9 +165,9 @@ describe('Guard 6 (pack-install): npm pack produces a working installable packag
     ).resolves.toBeUndefined();
 
     const agentFiles = await fs.readdir(agentsDir);
-    // Naming the whole roster instead of spot-checking two files: `git` ships only
-    // as a .mds generator host now, and an `includes('code.md')`-style check would
-    // stay green while it silently stopped shipping (GAP-07).
+    // Naming the whole roster instead of spot-checking two files: the generator-host
+    // agents ship only as .mds sources, and an `includes('code.md')`-style check would
+    // stay green while one silently stopped shipping (GAP-07).
     const installedAgents = agentFiles
       .filter(f => f.endsWith('.md') || f.endsWith('.mds'))
       .map(f => f.replace(/\.mds?$/, ''))
@@ -178,25 +179,28 @@ describe('Guard 6 (pack-install): npm pack produces a working installable packag
     ).toEqual(expect.arrayContaining([...getAllAgentNames()].sort()));
   });
 
-  it('installed package carries the compiled Git agent (AC-1.9)', async () => {
-    // dist/agents/git.md is now the ONLY shipping form of the Git agent — the
-    // hand-authored source is gone. Nothing pinned that it ships; a publish run
-    // that used `npm run build:cli` alone would produce a package with no Git
-    // agent, and every prior assertion here would still have passed.
-    const compiled = path.join(INSTALL_DIR, 'node_modules', 'devflow-kit', 'dist', 'agents', 'git.md');
+  it('installed package carries the compiled agent of every generator host (AC-1.9)', async () => {
+    // dist/agents/{name}.md is the ONLY shipping form of a generator-host agent —
+    // no hand-authored source exists. Nothing pinned that they ship; a publish run
+    // that used `npm run build:cli` alone would produce a package with none of
+    // them, and every prior assertion here would still have passed.
+    expect(MDS_GENERATOR_HOSTS.length, 'the generator-host roster is empty — nothing is checked').toBeGreaterThan(0);
+    for (const host of MDS_GENERATOR_HOSTS) {
+      const compiled = path.join(INSTALL_DIR, 'node_modules', 'devflow-kit', 'dist', 'agents', `${host}.md`);
 
-    await expect(
-      fs.access(compiled),
-      `dist/agents/git.md not found in the installed package. ` +
-      `\`npm run build:cli\` alone does not produce agents — \`npm run build:mds\` is required before publish.`,
-    ).resolves.toBeUndefined();
+      await expect(
+        fs.access(compiled),
+        `dist/agents/${host}.md not found in the installed package. ` +
+        `\`npm run build:cli\` alone does not produce agents — \`npm run build:mds\` is required before publish.`,
+      ).resolves.toBeUndefined();
 
-    const compiledContent = await fs.readFile(compiled, 'utf-8');
-    expect(compiledContent.startsWith('---\n'), 'compiled agent must retain its frontmatter').toBe(true);
-    expect(compiledContent, 'compiled agent must carry its model tier').toContain('model:');
-    expect(compiledContent, 'compiled agent must not leak the build-steering key').not.toContain('output-dir:');
-    const leaks = collectBackslashBraceLeaks([{ name: 'dist/agents/git.md', content: compiledContent }]);
-    expect(leaks, `compiled agent must not leak escaped braces:\n  ${leaks.join('\n  ')}`).toEqual([]);
+      const compiledContent = await fs.readFile(compiled, 'utf-8');
+      expect(compiledContent.startsWith('---\n'), `${host}: compiled agent must retain its frontmatter`).toBe(true);
+      expect(compiledContent, `${host}: compiled agent must carry its model tier`).toContain('model:');
+      expect(compiledContent, `${host}: compiled agent must not leak the build-steering key`).not.toContain('output-dir:');
+      const leaks = collectBackslashBraceLeaks([{ name: `dist/agents/${host}.md`, content: compiledContent }]);
+      expect(leaks, `${host}: compiled agent must not leak escaped braces:\n  ${leaks.join('\n  ')}`).toEqual([]);
+    }
   });
 
   it('installed package has src/targets/claude-code/templates/ with settings.json', async () => {

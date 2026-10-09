@@ -192,7 +192,7 @@ const RETIRED_ALLOWLIST: ReadonlyArray<AllowlistEntry> = [
   // Reviewer — DATA_FIELD, CONTRACT, CONCEPT, THIRD_PARTY (generic term)
   // -----------------------------------------------------------------------
   {
-    path: 'src/assets/agents/triage.md',
+    path: 'src/assets/agents/triage.mds',
     name: 'Reviewer',
     reason:
       'DATA_FIELD: reviewer_confidence — issue contract field carrying a confidence ' +
@@ -200,7 +200,7 @@ const RETIRED_ALLOWLIST: ReadonlyArray<AllowlistEntry> = [
     contexts: ['reviewer_confidence'],
   },
   {
-    path: 'src/assets/agents/code.md',
+    path: 'src/assets/agents/code.mds',
     name: 'Reviewer',
     reason:
       'CONTRACT: "Reviewer Focus Areas" — protected PR description contract heading ' +

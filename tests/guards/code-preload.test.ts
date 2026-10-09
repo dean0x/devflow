@@ -27,11 +27,10 @@ import { describe, it, expect } from 'vitest'
 import { readFileSync } from 'fs'
 import * as path from 'path'
 
-import { CODE_OPERATIONS, parseFrontmatterSkills } from '../helpers.js'
+import { CODE_OPERATIONS, parseFrontmatterSkills, resolveAgentSource } from '../helpers.js'
 
 const ROOT = path.resolve(import.meta.dirname, '..', '..')
 const SKILLS_DIR = path.join(ROOT, 'src', 'assets', 'skills')
-const CODE_PATH = path.join(ROOT, 'src', 'assets', 'agents', 'code.md')
 
 /** The skills Code preloads, in the order its frontmatter lists them. */
 export const CODE_PRELOAD: readonly string[] = [
@@ -111,7 +110,7 @@ export function collectStepZeroDefects(codeText: string): string[] {
   return out
 }
 
-const code = (): string => readFileSync(CODE_PATH, 'utf-8')
+const code = (): string => resolveAgentSource('code').content
 const bodyOf = (text: string): string => text.slice(text.indexOf('\n---\n', 4) + 5)
 
 describe('Code preloads six skills and loads four on demand (D-MODE-SKILLS-ON-DEMAND)', () => {

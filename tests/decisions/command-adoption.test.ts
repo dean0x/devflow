@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import { loadFile, extractSection } from './helpers'
+import { resolveAgentSource } from '../helpers'
 
 // -------------------------------------------------------------------------
 // Command surfaces — must reference index.md read (AC-3 updated)
@@ -75,15 +76,15 @@ describe('DECISIONS_CONTEXT template — uses canonical {decisions_context} form
 
 describe('Consumer agents — devflow:apply-decisions in skills frontmatter', () => {
   const agents: Array<[string, string]> = [
-    ['triage.md', 'src/assets/agents/triage.md'],
-    ['design.md', 'src/assets/agents/design.md'],
-    ['scrutinize.md', 'src/assets/agents/scrutinize.md'],
-    ['review.md', 'src/assets/agents/review.md'],
+    ['triage.md', 'triage'],
+    ['design.md', 'design'],
+    ['scrutinize.md', 'scrutinize'],
+    ['review.md', 'review'],
   ]
 
-  for (const [label, relPath] of agents) {
+  for (const [label, agent] of agents) {
     it(`${label} references devflow:apply-decisions in skills frontmatter`, () => {
-      const content = loadFile(relPath)
+      const content = resolveAgentSource(agent).content
       // Extract frontmatter (between first --- and second ---)
       const frontmatterMatch = content.match(/^---\n([\s\S]*?)\n---/m)
       expect(frontmatterMatch).toBeTruthy()
@@ -110,15 +111,15 @@ describe('DECISIONS_CONTEXT input declaration — canonical form', () => {
     '**DECISIONS_CONTEXT** (optional): Compact index of active ADR/PF entries for this repository (pre-rendered to `.devflow/learning/index.md` in its main worktree). `(none)` when absent. Use `devflow:apply-decisions` to Read full bodies on demand.'
 
   const consumerAgents: Array<[string, string]> = [
-    ['triage.md', 'src/assets/agents/triage.md'],
-    ['design.md', 'src/assets/agents/design.md'],
-    ['scrutinize.md', 'src/assets/agents/scrutinize.md'],
-    ['review.md', 'src/assets/agents/review.md'],
+    ['triage.md', 'triage'],
+    ['design.md', 'design'],
+    ['scrutinize.md', 'scrutinize'],
+    ['review.md', 'review'],
   ]
 
-  for (const [label, relPath] of consumerAgents) {
+  for (const [label, agent] of consumerAgents) {
     it(`${label} declares DECISIONS_CONTEXT with canonical description`, () => {
-      const content = loadFile(relPath)
+      const content = resolveAgentSource(agent).content
       expect(content).toContain(CANONICAL_DESCRIPTION)
     })
   }
@@ -156,7 +157,7 @@ describe('DECISIONS_CONTEXT variable — present in all four command surfaces', 
 
 describe('review.md — Apply Decisions section', () => {
   it('contains Apply Decisions section referencing devflow:apply-decisions', () => {
-    const content = loadFile('src/assets/agents/review.md')
+    const content = resolveAgentSource('review').content
     expect(content).toMatch(/## Apply Decisions|### Apply Decisions/)
     expect(content).toContain('devflow:apply-decisions')
   })
@@ -168,7 +169,7 @@ describe('review.md — Apply Decisions section', () => {
 
 describe('consumers read the decisions index from the main worktree', () => {
   it('code.md falls back to the main worktree index, never to the checkout decisions files', () => {
-    const content = loadFile('src/assets/agents/code.md')
+    const content = resolveAgentSource('code').content
     expect(content).toContain('If `DECISIONS_CONTEXT` is provided, follow `devflow:apply-decisions` on it.')
     expect(content).toContain(
       'Otherwise read the decisions index — `.devflow/learning/index.md` at the repository\'s main worktree ' +
@@ -181,7 +182,7 @@ describe('consumers read the decisions index from the main worktree', () => {
 
   it('skim.md reads the decisions TL;DR at the main worktree, else the toplevel, else the start directory', () => {
     const step6 = extractSection(
-      loadFile('src/assets/agents/skim.md'), '### Step 6: Project Knowledge', '### Step 7',
+      resolveAgentSource('skim').content, '### Step 6: Project Knowledge', '### Step 7',
     )
     expect(step6).toContain('`git -C "{start}" rev-parse --path-format=absolute --show-toplevel --git-common-dir`')
     const tiers = ['the main worktree', 'else the toplevel', 'else `{start}`'].map(tier => step6.indexOf(tier))
@@ -193,7 +194,7 @@ describe('consumers read the decisions index from the main worktree', () => {
   })
 
   it('code.md states applied decisions and pitfalls in words, never by ID', () => {
-    expect(loadFile('src/assets/agents/code.md')).toContain(
+    expect(resolveAgentSource('code').content).toContain(
       'State every decision or pitfall you apply in words in code, comments, tests and commit messages, never by its ID.',
     )
   })

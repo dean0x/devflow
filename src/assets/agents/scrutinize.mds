@@ -1,4 +1,7 @@
 ---
+output-dir: dist/agents
+---
+---
 name: Scrutinize
 description: Self-review agent that evaluates and fixes implementation issues using 9-pillar framework. Runs in fresh context after Code agent completes.
 model: opus

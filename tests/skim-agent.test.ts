@@ -1,11 +1,5 @@
 import { describe, it, expect, beforeAll } from 'vitest';
-import { promises as fs } from 'fs';
-import * as path from 'path';
-import { fileURLToPath } from 'url';
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-const AGENT_PATH = path.resolve(__dirname, '../src/assets/agents/skim.md');
+import { resolveAgentSource } from './helpers.js';
 
 /** Extract frontmatter tools array from markdown agent file */
 function parseToolsFromFrontmatter(content: string): string[] {
@@ -20,8 +14,8 @@ describe('skim agent', () => {
   let content: string;
   let tools: string[];
 
-  beforeAll(async () => {
-    content = await fs.readFile(AGENT_PATH, 'utf-8');
+  beforeAll(() => {
+    content = resolveAgentSource('skim').content;
     tools = parseToolsFromFrontmatter(content);
   });
 

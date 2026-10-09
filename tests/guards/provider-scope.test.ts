@@ -154,7 +154,7 @@ const ALLOWLISTED_PROVIDER_REGIONS: readonly AllowlistedRegion[] = [
   },
   {
     label: "the Code agent's PR-link paste gate",
-    files: [`${SRC_AGENTS_LABEL}/code.md`],
+    files: [`${SRC_AGENTS_LABEL}/code.mds`, 'dist/agents/code.md'],
     from: '| Tracker grammar | `ISSUE_PR_LINK` must match |',
     to: 'This re-check is the only gate on that value',
     justification:

@@ -561,7 +561,7 @@ describe('silent-migration guards: no escape leak and no lost helper expansion i
 
   it('reaches every compiled artifact in all three trees (per-member reach, not a size floor)', () => {
     expect(trees.commands.map(f => f.name)).toEqual(COMMAND_HOSTS.map(b => `dist/commands/${b}.md`));
-    expect(trees.agents.map(f => f.name)).toEqual(['dist/agents/git.md']);
+    expect(trees.agents.map(f => f.name)).toEqual(MDS_GENERATOR_HOSTS.map(h => `dist/agents/${h}.md`));
     expect(trees.references).toHaveLength(generatedReferenceManifest().length);
     for (const tree of Object.values(trees)) {
       for (const f of tree) expect(f.content.length, `${f.name} is empty`).toBeGreaterThan(0);

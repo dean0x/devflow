@@ -29,7 +29,7 @@ import { execSync, spawnSync } from 'child_process';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import { requireDistFile, requireDistFiles } from '../helpers.js';
+import { requireDistFile, requireDistFiles, resolveAgentSource } from '../helpers.js';
 
 const DECISIONS_HEADING = '### Load DECISIONS_CONTEXT';
 const PREAMBLE_DECISIONS_HEADING = '### DECISIONS_CONTEXT — obtain BEFORE authoring';
@@ -280,10 +280,7 @@ describe('compiled loaders resolve the repository root, not cwd (D-PROMPT-ROOT, 
   })
 
   it('the Code agent fallback names the main worktree index from a linked worktree', () => {
-    const code = fs.readFileSync(
-      path.resolve(import.meta.dirname, '..', '..', 'src', 'assets', 'agents', 'code.md'),
-      'utf-8',
-    )
+    const code = resolveAgentSource('code').content
     const command = /`(git rev-parse --path-format=absolute --git-common-dir)`; when it ends in `\/\.git` the index lives under its parent/
       .exec(code)?.[1]
     expect(command, 'the fallback command and its rule').toBeDefined()

@@ -2079,7 +2079,7 @@ describe('git agent — static content guards', () => {
     // is reach, not size.
     const paths = new Set(corpus.map(e => e.path));
     const sentinels = [
-      path.join(ROOT, 'src', 'assets', 'agents', 'review.md'),
+      path.join(ROOT, 'dist', 'agents', 'review.md'),
       path.join(ROOT, 'dist', 'agents', 'git.md'),
       path.join(skillsDir(), 'review-methodology', 'references', 'patterns.md'),
       path.join(commandsDir(), 'release.md'),

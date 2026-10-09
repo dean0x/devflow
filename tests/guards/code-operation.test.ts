@@ -30,11 +30,10 @@ import { describe, it, expect } from 'vitest'
 import { readFileSync } from 'fs'
 import * as path from 'path'
 
-import { CODE_OPERATIONS, collectCodeSpawnSites, requireDistFile, requireDistFiles } from '../helpers.js'
+import { CODE_OPERATIONS, collectCodeSpawnSites, requireDistFile, requireDistFiles, resolveAgentSource } from '../helpers.js'
 import type { CodeSpawnSite } from '../helpers.js'
 
 const ROOT = path.resolve(import.meta.dirname, '..', '..')
-const CODE_PATH = path.join(ROOT, 'src', 'assets', 'agents', 'code.md')
 const PREAMBLE_PATH = path.join(ROOT, 'src', 'assets', 'commands', '_partials', '_preamble.mds')
 
 /** Compiled commands that spawn Code, and the spawn sites each carries today. Floors: may only rise. */
@@ -235,11 +234,11 @@ describe('known-bad probes: each shape of untagged spawn is reported (D-CODE-OPE
 
 describe('code.md states the eight-mode contract (D-CODE-OPERATION-MODES)', () => {
   it('the OPERATION line lists exactly the eight values, and ci-fix and edit have Inputs, Protocol and Return', () => {
-    expect(collectModeContractDefects(readFileSync(CODE_PATH, 'utf-8'))).toEqual([])
+    expect(collectModeContractDefects(resolveAgentSource('code').content)).toEqual([])
   })
 
   it('known-bad probe: a lost mode, a lost default and a lost Protocol are each reported', () => {
-    const real = readFileSync(CODE_PATH, 'utf-8')
+    const real = resolveAgentSource('code').content
     expect(collectModeContractDefects(real), 'the real contract is clean, so each seed fails for its own reason').toEqual([])
     const lostMode = real.replace(' | `ci-fix` | `edit` —', ' | `ci-fix` —')
     expect(lostMode, 'the seed must land').not.toBe(real)

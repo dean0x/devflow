@@ -19,7 +19,7 @@ import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'fs';
 import * as path from 'path';
 
-import { ROOT, walkFiles } from '../helpers.js';
+import { ROOT, resolveAgentSource, walkFiles } from '../helpers.js';
 
 /**
  * A `git … commit` command in which a message option follows the `--` separator.
@@ -54,7 +54,7 @@ function collectMisorderedCommits(dir: string): { filesScanned: number; sites: S
 
 describe('commit recipes place -m before the -- pathspec separator', () => {
   it('the Knowledge agent commits its two files with the message before the pathspec', () => {
-    const knowledge = readFileSync(path.join(ROOT, 'src', 'assets', 'agents', 'knowledge.md'), 'utf-8');
+    const knowledge = resolveAgentSource('knowledge').content;
     const step = knowledge.split('\n').find(line => line.includes('**Commit only those paths**'));
     expect(step, 'knowledge.md: the "Commit only those paths" step is missing').toBeDefined();
 

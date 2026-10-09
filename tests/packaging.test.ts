@@ -426,7 +426,7 @@ describe('Guard 5 (files[] coverage): package.json includes required directories
  *  (b) Contain exactly the dist/commands/*.md set named in tests/fixtures/mds-manifest.ts.
  *      If the set changes, this guard forces an intentional manifest update.
  *  (c) Carry the compiled agent for every generator host (dist/agents/*.md) — the
- *      only shipping form of the Git agent since its hand-authored source was removed.
+ *      only shipping form of each of those agents.
  *  (d) Carry all src/assets/**\/*.mds generator sources, at the pinned count.
  *      Shipping them is decision D-A(a), accepted at Gate 2.
  *
@@ -491,11 +491,11 @@ describe('Guard 6 (tarball contents): npm pack --dry-run output excludes source 
     ).toEqual([...DIST_COMMAND_FILES].sort());
   });
 
-  it('tarball carries the compiled Git agent (dist/agents/git.md)', () => {
-    // dist/agents/git.md is now the ONLY shipping form of the Git agent — its
-    // hand-authored .md source no longer exists. `files[]` already contains
-    // `dist/`, so it ships; nothing pinned that it does. A build that silently
-    // skipped the generator host would publish a package with no Git agent at all.
+  it('tarball carries the compiled agent of every generator host (dist/agents/*.md)', () => {
+    // The compiled file is the ONLY shipping form of a generator-host agent — no
+    // hand-authored .md source exists. `files[]` already contains `dist/`, so it
+    // ships; nothing pinned that it does. A build that silently skipped a generator
+    // host would publish a package with no such agent at all.
     const files = getPackFiles();
     expect(
       files.length,
@@ -513,9 +513,9 @@ describe('Guard 6 (tarball contents): npm pack --dry-run output excludes source 
   /**
    * Tarball decision D-A(a), ACCEPTED at Gate 2: the .mds generator sources ship.
    *
-   * `src/assets/` already ships wholesale, so the 13 command hosts and 11 partials
-   * were already inside every published tarball; `src/assets/agents/git.mds` simply
-   * joins them. No `files[]` change was made. Shipping the sources costs ~0.3% of
+   * `src/assets/` already ships wholesale, so the command hosts and the partials
+   * were already inside every published tarball; the agent generator hosts
+   * (`src/assets/agents/*.mds`) simply join them. No `files[]` change was made. Shipping the sources costs ~0.3% of
    * the tarball and means a consumer inspecting an installed package can see what
    * dist/ was generated from.
    *
@@ -538,12 +538,12 @@ describe('Guard 6 (tarball contents): npm pack --dry-run output excludes source 
       shippedMds.length,
       `Expected ${EXPECTED_SHIPPED_MDS} .mds sources in the tarball ` +
       `(${MDS_COMMAND_HOSTS.length} command hosts + ${ALL_MDS_PARTIALS.length} partials + ` +
-      `${MDS_GENERATOR_HOSTS.length} generator host + ${MDS_REFERENCE_MODULES.length} reference ` +
+      `${MDS_GENERATOR_HOSTS.length} generator hosts + ${MDS_REFERENCE_MODULES.length} reference ` +
       `module(s)), got ${shippedMds.length}:\n  ${shippedMds.join('\n  ')}\n` +
       `Shipping the sources is deliberate (decision D-A(a)); update the manifest if a source was added or removed.`,
     ).toBe(EXPECTED_SHIPPED_MDS);
 
-    // Name the generator host explicitly — it is the one whose shipping is new.
+    // Name each generator host explicitly: its compiled form is the only one that ships.
     for (const host of MDS_GENERATOR_HOSTS) {
       expect(shippedMds, `src/assets/agents/${host}.mds must ship`).toContain(`src/assets/agents/${host}.mds`);
     }

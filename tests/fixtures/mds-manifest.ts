@@ -181,10 +181,24 @@ export const SETTINGS_BLOCK_HOSTS = [
 
 /**
  * Generator hosts: .mds sources outside src/assets/commands/ that compile to a
- * destination other than dist/commands. Today exactly one — the Git agent,
- * src/assets/agents/git.mds → dist/agents/git.md.
+ * destination other than dist/commands. Ten today, all agents:
+ * src/assets/agents/{name}.mds → dist/agents/{name}.md. Git is the first; the other
+ * nine (the agents that declare learning input, plus Skim) are hosts so their
+ * learning arms can be built into the learning-off variant. The rest of the agents
+ * stay hand-authored, and an agent never has both an .md and an .mds source.
  */
-export const MDS_GENERATOR_HOSTS = ['git'] as const;
+export const MDS_GENERATOR_HOSTS = [
+  'code',
+  'design',
+  'diagnose',
+  'git',
+  'knowledge',
+  'research',
+  'review',
+  'scrutinize',
+  'skim',
+  'triage',
+] as const;
 
 /**
  * Reference modules: .mds sources under src/assets/mds/ that the build COMPILES,

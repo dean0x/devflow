@@ -11,8 +11,8 @@ export function skillsDir(): string {
 }
 
 /**
- * Flat agents source directory: src/assets/agents/{name}.md
- * All plugins' agents live here directly.
+ * Flat agents source directory: src/assets/agents/{name}.md, or {name}.mds for a
+ * generator host. All plugins' agents live here directly.
  *
  * @param root - Package root to resolve against. Injectable so a caller working
  *   on a temp tree (the test harness) reads the layout from here rather than
@@ -50,8 +50,8 @@ export function commandsDir(): string {
 /**
  * Compiled agents directory: dist/agents/{name}.md
  *
- * Output of the .mds generator hosts. The directory is absent until at least
- * one generator host exists, so every reader must tolerate its absence.
+ * Output of the .mds generator hosts. The directory is absent until the build has
+ * run, so every reader must tolerate its absence.
  *
  * @param root - Package root to resolve against (see agentsDir).
  */

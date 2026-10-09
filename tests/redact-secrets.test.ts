@@ -23,6 +23,7 @@ import { createHash } from 'crypto';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
+import { resolveAgentSource } from './helpers.js';
 
 const SCRIPT = path.resolve(import.meta.dirname, '../src/assets/scripts/redact-secrets.cjs');
 
@@ -89,7 +90,7 @@ afterEach(() => {
 // ---------------------------------------------------------------------------
 // Slug vocabulary — independent literal pin (static declaration)
 // Phase D cross-artifact check: a test inside describe('slug vocabulary')
-// reads src/assets/agents/review.md and asserts every slug from EXPECTED_SLUGS
+// reads the Review agent (resolveAgentSource) and asserts every slug from EXPECTED_SLUGS
 // appears in the ## Secret Handling in Findings section (commit 8 added it).
 // ---------------------------------------------------------------------------
 
@@ -152,8 +153,7 @@ describe('slug vocabulary', () => {
   it('every expected slug appears in review.md § Secret Handling in Findings (cross-artifact pin)', () => {
     // Phase D cross-check: review.md now carries the vocabulary — pin it against EXPECTED_SLUGS.
     // Strongest check the content supports: all 8 slugs are listed individually in the section.
-    const reviewPath = path.resolve(import.meta.dirname, '../src/assets/agents/review.md');
-    const reviewContent = fs.readFileSync(reviewPath, 'utf-8');
+    const reviewContent = resolveAgentSource('review').content;
 
     // Extract the § Secret Handling in Findings section (from heading to next ## heading)
     const sectionMarker = '## Secret Handling in Findings';

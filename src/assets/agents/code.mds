@@ -1,4 +1,7 @@
 ---
+output-dir: dist/agents
+---
+---
 name: Code
 description: Autonomous task implementation on feature branch. Implements, tests, and commits.
 model: sonnet

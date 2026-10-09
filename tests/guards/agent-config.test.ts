@@ -17,7 +17,7 @@
  *  - D-DIAGNOSE-FOCUS-SKILLS   tests/fixtures/agent-config.ts
  *                              (DIAGNOSE_FOCUS_SKILLS) and the Diagnose arm below.
  *                              The decision itself lives in the Focus Areas table
- *                              of src/assets/agents/diagnose.md: a "Pattern skill
+ *                              of the Diagnose agent: a "Pattern skill
  *                              (load on demand)" column and one instruction before
  *                              Step 1 to load the row's skills with the Skill tool,
  *                              continuing with the methodology if a load fails.
@@ -26,7 +26,7 @@
  *
  * Body-level decisions, pinned by the phrases they carry:
  *  - Knowledge refreshes an existing file with `Edit` and uses `Write` only to
- *    create one (Direct Write Protocol in src/assets/agents/knowledge.md). Without
+ *    create one (Direct Write Protocol in the Knowledge agent). Without
  *    it the granted `Edit` goes unused and the agent rewrites whole files.
  *  - Synthesize states decisions and pitfalls in words, never by ledger ID
  *    (src/assets/agents/synthesize.md). Under `omitClaudeMd` it no longer receives
@@ -52,7 +52,7 @@ import { existsSync, readFileSync } from 'fs';
 import * as path from 'path';
 
 import { getAllAgentNames } from '../../src/core/plugins.js';
-import { ROOT, splitFrontmatter, walkFiles } from '../helpers.js';
+import { ROOT, resolveAgentSource, splitFrontmatter, walkFiles } from '../helpers.js';
 import {
   AGENT_CONFIG,
   DIAGNOSE_FOCUS_SKILLS,
@@ -61,7 +61,6 @@ import {
   type AgentConfigRow,
 } from '../fixtures/agent-config.js';
 
-const AGENTS_DIR = path.join(ROOT, 'src', 'assets', 'agents');
 const SKILLS_DIR = path.join(ROOT, 'src', 'assets', 'skills');
 const COMMANDS_DIR = path.join(ROOT, 'src', 'assets', 'commands');
 
@@ -424,7 +423,7 @@ function bodyOf(text: string): string {
 }
 
 function readAgent(name: string): AgentRecord {
-  const text = readText(path.join(AGENTS_DIR, `${name}.md`));
+  const text = resolveAgentSource(name).content;
   const split = splitFrontmatter(text);
   if (!split) throw new Error(`${name}.md has no frontmatter block`);
   const fm = parseAgentFrontmatter(split.inner);

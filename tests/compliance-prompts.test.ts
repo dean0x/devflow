@@ -27,7 +27,7 @@ import {
 } from '../src/cli/commands/compliance-prompts.js';
 import { COMPLIANCE_FRAMEWORKS } from '../src/core/compliance.js';
 import { composeComplianceSkill } from '../src/core/compliance-compose.js';
-import { ROOT, collectCodeSpawnSites, requireDistFile, requireDistFiles, walkFiles } from './helpers.js';
+import { ROOT, collectCodeSpawnSites, requireDistFile, requireDistFiles, resolveAgentSource, walkFiles } from './helpers.js';
 import type { CodeSpawnSite } from './helpers.js';
 
 // ── Fake prompt builder ────────────────────────────────────────────────────────
@@ -499,10 +499,10 @@ describe('TP-43 (AC-37): the compiled compliance lens loads only the ids the set
   });
 
   it('the agents and skills that run the lens load references for the given ids only', () => {
-    expect(src('src/assets/agents/review.md')).toContain('- **COMPLIANCE_FRAMEWORKS** (compliance focus)');
-    expect(src('src/assets/agents/review.md')).toContain('Load `references/{id}.md` only for these ids.');
-    expect(src('src/assets/agents/design.md')).toContain('Load `references/{id}.md` only for these ids.');
-    expect(src('src/assets/agents/code.md')).toContain('load `references/{id}.md` only for the ids it lists');
+    expect(resolveAgentSource('review').content).toContain('- **COMPLIANCE_FRAMEWORKS** (compliance focus)');
+    expect(resolveAgentSource('review').content).toContain('Load `references/{id}.md` only for these ids.');
+    expect(resolveAgentSource('design').content).toContain('Load `references/{id}.md` only for these ids.');
+    expect(resolveAgentSource('code').content).toContain('load `references/{id}.md` only for the ids it lists');
     expect(src('src/assets/skills/gap-analysis/SKILL.md')).toContain('`references/{id}.md` only for the ids in `COMPLIANCE_FRAMEWORKS`');
   });
 

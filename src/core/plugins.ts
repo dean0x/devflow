@@ -618,7 +618,7 @@ export const TEMPLATE_SKILL_REFS: readonly TemplateSkillRef[] = [
   },
   {
     literal: 'devflow:{FOCUS}',
-    site: 'src/assets/agents/review.md (the Review agent loading its own focus skill)',
+    site: 'src/assets/agents/review.mds (the Review agent loading its own focus skill)',
     why: 'receiving half of the same substitution — the agent is told which focus it is, not which skill exists',
   },
 ];
