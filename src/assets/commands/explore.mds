@@ -4,6 +4,7 @@ output-dir: dist/commands
 ---
 @import { knowledge_writeback } from "./_partials/_knowledge.mds"
 @import { decisions_load } from "./_partials/_decisions.mds"
+@import "./_partials/_settings.mds" as settings
 # Explore Command
 
 Explore a codebase area by spawning parallel agents for flow tracing, dependency mapping, and pattern analysis. Findings are synthesized into structured output with file:line references, with optional feature knowledge created as a byproduct.
@@ -35,6 +36,8 @@ $ARGUMENTS
 
 **Produces:** DECISIONS_CONTEXT
 
+{{settings.settings_resolve()}}
+
 {{decisions_load()}}
 
 The orchestrator uses `DECISIONS_CONTEXT` locally when framing exploration — prior decisions and pitfalls suggest specific areas to investigate. Follow `devflow:apply-decisions` to Read full entry bodies on demand. **Do NOT pass `DECISIONS_CONTEXT` to Explore sub-agents** — decisions context stays in the orchestrator, not in the investigation workers.
@@ -45,7 +48,7 @@ The orchestrator uses `DECISIONS_CONTEXT` locally when framing exploration — p
 
 **Produces:** ORIENT_OUTPUT
 
-Spawn `Agent(subagent_type="Skim")` to get codebase overview relevant to the exploration question:
+Spawn `Agent(subagent_type="Skim")` with `LEARNING` from the settings line, to get codebase overview relevant to the exploration question:
 
 - File structure and module boundaries in the target area
 - Entry points and key abstractions

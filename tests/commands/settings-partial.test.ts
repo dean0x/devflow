@@ -2,12 +2,14 @@
  * The settings partial (#392, D-SETTINGS-LINE) — `_partials/_settings.mds`
  * `settings_resolve()`, the one way a prompt learns the repository's settings.
  *
- *   wiring    Exactly the three gate partials import it — `_compliance`,
- *             `_knowledge` and `_publication` — and each as an ALIAS import
+ *   wiring    Exactly the 14 command hosts import it, each as an ALIAS import
  *             (a selective import deep-clones the imported scope into
- *             every define of the importer). No command host imports it: hosts
- *             inherit it through the gates. Each gate expands the block itself,
- *             so a compiled command carries one block per gate it runs.
+ *             every define of the importer), and no partial does: the gates
+ *             (`_compliance`, `_knowledge`, `_publication`, `_decisions`) take the
+ *             line their host resolved above. A host expands the block ONCE
+ *             (D-SETTINGS-LINE), immediately before the earliest of its consumers:
+ *             its decisions gate, compliance lens, publication gate, knowledge
+ *             write-back Step 1 or a Skim spawn that takes `LEARNING`.
  *   grammar   The accepted line written out in the prompt names the fields of the
  *             script's SETTINGS_LINE_RE in the same order, with the same closed
  *             value sets, and the fallback is SETTINGS_FAIL_CLOSED_LINE byte for
@@ -35,15 +37,18 @@ const SETTINGS = createRequire(import.meta.url)(SETTINGS_SCRIPT) as {
 }
 
 const PARTIAL = 'src/assets/commands/_partials/_settings.mds'
-const ALIAS_IMPORT = '@import "./_settings.mds" as settings'
+const ALIAS_IMPORT = '@import "./_partials/_settings.mds" as settings'
 const OPENING = '**Resolve the settings line**'
 const INVOCATION = 'node "$HOME/.devflow/scripts/resolve-settings.cjs" "{root}" 2>/dev/null; echo "exit=$?"'
 
-/** The gates that consume the line, by the sentence each compiles to right after the block. */
+/** The consumers of the line, by the sentence each compiles to. A host's block precedes the earliest it carries. */
 const CONSUMER_ANCHORS: ReadonlyArray<readonly [string, string]> = [
-  ['_compliance', '**Set the compliance lens** from that line'],
-  ['_knowledge', 'If the settings line says `KNOWLEDGE=off`'],
-  ['_publication', '**Resolve `REVIEW_PUBLICATION` per worktree:**'],
+  ['the decisions gate', 'When the settings line says `LEARNING=off`'],
+  ['the compliance lens', '**Resolve the compliance lens**'],
+  ['the publication gate', '**Resolve `REVIEW_PUBLICATION` per worktree:**'],
+  ['the write-back Step 1', 'take the settings line resolved above for that root'],
+  ['a Skim spawn taking LEARNING', '`LEARNING` from the settings line'],
+  ['a fenced Skim spawn taking LEARNING', 'LEARNING: {LEARNING from the settings line}'],
 ]
 
 function source(rel: string): string {
@@ -70,6 +75,20 @@ function collectSettingsImports(): Array<{ file: string; line: string }> {
     }
   }
   return out
+}
+
+/**
+ * Named collector: the problems in one compiled host's settings block. The host
+ * carries exactly one, and it sits before every consumer the host carries.
+ */
+function collectBlockProblems(file: string, text: string): string[] {
+  const blocks = text.split(OPENING).length - 1
+  if (blocks !== 1) return [`${file}: ${blocks} settings blocks (expected 1)`]
+  const block = text.indexOf(OPENING)
+  return CONSUMER_ANCHORS
+    .map(([label, anchor]) => [label, text.indexOf(anchor)] as const)
+    .filter(([, at]) => at !== -1 && at < block)
+    .map(([label]) => `${file}: the block follows "${label}"`)
 }
 
 /** The source of one named capture group of SETTINGS_LINE_RE, without the group itself. */
@@ -152,45 +171,54 @@ describe('settings partial wiring', () => {
     expect(text).not.toMatch(/^@import/m)
   })
 
-  it('exactly the three gate partials import it, each as an alias import', () => {
+  it('exactly the SETTINGS_BLOCK_HOSTS import it, each as an alias import, and no partial does', () => {
     const imports = collectSettingsImports()
     expect(imports.map(i => i.file).sort()).toEqual(
-      CONSUMER_ANCHORS.map(([p]) => `src/assets/commands/_partials/${p}.mds`),
+      [...SETTINGS_BLOCK_HOSTS].map(h => `src/assets/commands/${h}.mds`).sort(),
     )
     for (const { file, line } of imports) expect(line, file).toBe(ALIAS_IMPORT)
+    expect(imports.filter(i => i.file.includes('/_partials/')), 'a partial imports the settings partial').toEqual([])
   })
 
-  it('every compiled consumer carries its own block, immediately before its consuming sentence', () => {
-    let consumers = 0
+  it('every compiled host carries one block, before every consumer it carries', () => {
+    const files = requireDistFiles()
+    expect(files, 'the compiled corpus is the SETTINGS_BLOCK_HOSTS roster').toHaveLength(SETTINGS_BLOCK_HOSTS.length)
+    for (const file of files) {
+      expect(collectBlockProblems(file, requireDistFile(file)), file).toEqual([])
+    }
+  })
+
+  it('every compiled host carries at least one consumer, so the order check is not vacuous', () => {
     for (const file of requireDistFiles()) {
       const text = requireDistFile(file)
-      const blocks = text.split(OPENING).length - 1
-      let gates = 0
-      for (const [, anchor] of CONSUMER_ANCHORS) {
-        for (let at = text.indexOf(anchor); at !== -1; at = text.indexOf(anchor, at + 1)) {
-          gates++
-          const block = text.lastIndexOf(OPENING, at)
-          expect(block, `${file}: "${anchor}" has no settings block before it`).toBeGreaterThan(-1)
-          expect(at - block, `${file}: "${anchor}" is not right after its settings block`).toBeLessThan(2000)
-        }
-      }
-      expect(blocks, `${file}: ${blocks} settings blocks for ${gates} consuming gates`).toBe(gates)
-      consumers += gates
+      expect(CONSUMER_ANCHORS.some(([, anchor]) => text.includes(anchor)), `${file}: no consumer of the settings line`).toBe(true)
     }
-    // code-review 2, implement 2, resolve 2, dynamic-build 2, plan 1, debug 1, explore 1, self-review 1.
-    expect(consumers).toBe(12)
+  })
+
+  it('known-bad probes: a second block, a block after its consumer and a host with no block are each reported', () => {
+    const block = `${OPENING} once per worktree root`
+    const gate = 'When the settings line says `LEARNING=off`'
+    expect(collectBlockProblems('p.md', `${block}\n${gate}\n${block}`)).toEqual(['p.md: 2 settings blocks (expected 1)'])
+    expect(collectBlockProblems('p.md', `${gate}\n${block}`)).toEqual(['p.md: the block follows "the decisions gate"'])
+    expect(collectBlockProblems('p.md', gate)).toEqual(['p.md: 0 settings blocks (expected 1)'])
+    expect(collectBlockProblems('p.md', `${block}\n${gate}`)).toEqual([])
   })
 
   it('exactly the SETTINGS_BLOCK_HOSTS roster carries the block (both directions)', () => {
     const carrying = requireDistFiles().filter(f => requireDistFile(f).includes(OPENING)).map(f => f.replace(/\.md$/, '')).sort()
-    expect(carrying).toEqual([...SETTINGS_BLOCK_HOSTS])
+    expect(carrying).toEqual([...SETTINGS_BLOCK_HOSTS].sort())
+    // release and dynamic-profile carry the block beside the six that loaded decisions before.
+    for (const host of ['release', 'dynamic-profile', 'bug-analysis', 'research', 'dynamic-plan', 'dynamic-tickets']) {
+      expect(carrying, host).toContain(host)
+    }
   })
 
   it('every compiled block invokes the resolver with the same bytes', () => {
     const lines = requireDistFiles()
       .flatMap(f => requireDistFile(f).split('\n'))
       .filter(l => l.includes('resolve-settings.cjs'))
-    expect(lines.length).toBe(12)
+    // One invocation per host: the count is the roster's, restated here on purpose.
+    expect(lines.length).toBe(14)
     expect([...new Set(lines)]).toEqual([INVOCATION])
   })
 })
@@ -230,5 +258,29 @@ describe('the accepted line is SETTINGS_LINE_RE written out', () => {
     expect(collectGrammarDrift(t.replace('TRACKER_WARN=<none|mismatch|invalid>', 'TRACKER_WARN=<none|invalid>'))).toEqual([
       'TRACKER_WARN: <none|invalid> vs (none|mismatch|invalid)',
     ])
+  })
+})
+
+describe('the learning gate keeps its rationale out of the expanded prompt', () => {
+  const DECISIONS = 'src/assets/commands/_partials/_decisions.mds'
+
+  it('an unresolvable settings line keeps LEARNING=on, so a failed resolution loads decisions as before', () => {
+    expect(SETTINGS.SETTINGS_FAIL_CLOSED_LINE.split(' ')).toContain('LEARNING=on')
+  })
+
+  it('the _decisions.mds header, before its first define, holds the rationale', () => {
+    const text = source(DECISIONS)
+    const header = text.slice(0, text.indexOf('@define'))
+    for (const phrase of ['D-DECISIONS-LEARNING-GATE', 'D-FEATURES-NARROW-ONLY', '`LEARNING=on`', 'advisory context']) {
+      expect(header, phrase).toContain(phrase)
+    }
+  })
+
+  it('the expanded gate is the one sentence: no rationale, no fail-closed wording', () => {
+    const gate = defineBody(source(DECISIONS), 'decisions_gate')
+    expect(gate).toBe(
+      'When the settings line says `LEARNING=off`, set `DECISIONS_CONTEXT` to `(none)` and skip this step, locating no ledger and reading no index.',
+    )
+    expect(gate).not.toMatch(/fail-closed|advisory|NARROW/)
   })
 })

@@ -1,5 +1,19 @@
 @import "./_decisions.mds" as decisions
 
+A partial: the Workflow-authoring preamble the dynamic commands share, and the
+decisions step that precedes authoring.
+
+D-DECISIONS-AUTHORING-STEP: the "DECISIONS_CONTEXT — obtain BEFORE authoring" step
+is its own define, `authoring_decisions()`, expanded by the hosts that load
+decisions (dynamic-build, dynamic-plan, dynamic-tickets and dynamic-profile) right
+after their settings block, so the gate in it reads a line already resolved.
+`authoring_preamble()` carries no decisions text.
+
+D-DECISIONS-DECLARED-ONLY: the step names, as the receivers of the index, only the
+agent types whose contract declares `DECISIONS_CONTEXT` among the valid
+`agentType`s. `tests/decisions/decisions-seam.test.ts` computes the declared set
+from the agent sources and holds every pass sentence to it.
+
 @define authoring_preamble():
 ## Your task: author a Claude Code dynamic Workflow and run it
 
@@ -62,14 +76,6 @@ Then run a cheap syntax gate: write the authored script to a fresh, run-unique s
 
 The `budget` global governs depth. Scale Review agent roster and verification votes to `budget`. A low-budget run uses a leaner roster and fewer verification votes; a high-budget run expands both. Never hardcode a roster size — let budget guide it.
 
-### DECISIONS_CONTEXT — obtain BEFORE authoring
-
-{{decisions.decisions_locate()}}
-
-Before you author the workflow script, read `{ledger}/.devflow/learning/index.md`. If the file is absent or empty, set `DECISIONS_CONTEXT` to `(none)`; otherwise use the file content as `DECISIONS_CONTEXT`.
-
-The script body cannot perform this read — you (the main model) do it before authoring. Then inject the relevant DECISIONS_CONTEXT into agent prompts using the `devflow:apply-decisions` consumption algorithm (scan index → Read relevant entries → cite verbatim IDs in agent prompts). Only agents that need architectural context (Code agent, Evaluate agent, Review agent, Scrutinize agent) need DECISIONS_CONTEXT injected; lightweight agents (Validate agent, Simplify agent) do not.
-
 ### Handoff convention for sequential Code agents within a ticket
 
 When a ticket requires multiple sequential Code agent phases, each Code agent writes `{toplevel}/.devflow/docs/handoff-{branch_slug}.md` (branch-scoped to prevent concurrent session clobber), `{toplevel}` being `git rev-parse --show-toplevel` in the checkout the ticket's branch is in — never a subdirectory. The next Code agent reads it via HANDOFF_FILE input. PRIOR_PHASE_SUMMARY is the compact in-context form; the handoff file is the durable form that survives context compaction. Always read the handoff file directly — code is authoritative, summaries are supplementary.
@@ -83,4 +89,17 @@ When a ticket requires multiple sequential Code agent phases, each Code agent wr
 **NEVER merge to main or master** — the workflow merges to an integration branch only. The user merges to main themselves after reviewing. This rule is absolute and must appear as an `engine_invariants()` note in every workflow that touches git.
 @end
 
+@define authoring_decisions():
+### DECISIONS_CONTEXT — obtain BEFORE authoring
+
+{{decisions.decisions_gate()}}
+
+{{decisions.decisions_locate()}}
+
+Before you author the workflow script, read `{ledger}/.devflow/learning/index.md`. If the file is absent or empty, set `DECISIONS_CONTEXT` to `(none)`; otherwise use the file content as `DECISIONS_CONTEXT`.
+
+The script body cannot perform this read — you (the main model) do it before authoring. Then inject the relevant DECISIONS_CONTEXT into the prompts of the Code, Design, Knowledge, Review and Scrutinize agents, using the `devflow:apply-decisions` consumption algorithm (scan index → Read relevant entries → cite verbatim IDs in agent prompts). Those are the agent types above whose contract declares it; every other agent type gets no decisions context.
+@end
+
 @export authoring_preamble
+@export authoring_decisions

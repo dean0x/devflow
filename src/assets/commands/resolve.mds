@@ -7,6 +7,7 @@ output-dir: dist/commands
 @import { evidence_policy } from "./_partials/_evidence_policy.mds"
 @import { publication_gate } from "./_partials/_publication.mds"
 @import "./_partials/_compliance.mds" as compliance
+@import "./_partials/_settings.mds" as settings
 # Resolve Command
 
 Process issues from code review reports: triage every issue through the blast-radius disposition matrix, fix FIX_NOW items with Code agents, verify fixes with a Validate agent gate, and track FIX_SEPARATE/TECH_DEBT items as manage-debt tickets. Defaults to the latest timestamped review directory. Supports multi-worktree auto-discovery.
@@ -92,6 +93,8 @@ Set `TARGET_DIR` to the selected review or bug-analysis directory path, and `TAR
 #### Step 0d: Load Project Decisions
 
 **Produces:** DECISIONS_CONTEXT, FEATURE_KNOWLEDGE, EVIDENCE_POLICY, ISSUE_REQUIRED, APPLY_CONVENTIONS, REQUIRE_NON_AUTHOR_APPROVAL, REVIEW_PUBLICATION, RESOLUTION_TS
+
+{{settings.settings_resolve()}}
 
 {{decisions_load()}}
 
@@ -298,6 +301,7 @@ Run build, typecheck, lint, test. Report pass/fail with failure details."
    PUSH: false
    CREATE_PR: false
    WORKTREE_PATH: {worktree_path}  (omit if cwd)
+   DECISIONS_CONTEXT: {decisions_context}
    COMPLIANCE_FRAMEWORKS: {COMPLIANCE_FRAMEWORKS}"
    ```
    - Loop back to re-validate
@@ -346,7 +350,7 @@ Phase 7 has pushed already, so this is a no-op unless the head moved since. `exi
 3. **If NO_PR or NO_CI** → skip: "No PR/CI configured, skipping CI validation." Proceed to next phase.
 4. **If PENDING** and fewer than 3 waits have run → wait again (step 1). After the third wait → report "CI still running — verify manually before merging" and proceed.
 5. **If INDETERMINATE** and fewer than 3 waits have run → wait again (step 1). After the third wait → report "CI status unknown — verify manually before merging" and proceed.
-6. **If FAILING** and fewer than 2 fixes have run → report the failing checks from the line. Spawn `Agent(subagent_type="Code")` whose prompt opens with `OPERATION: ci-fix`, with `COMPLIANCE_FRAMEWORKS`, `CI_FAILURES` and `PUSH: false`; `CI_FAILURES` holds the failing-check names from the line and nothing else, because the Code agent fetches the full names and reads the logs itself and this command reads none. After a fix, push with the command above and, if a wait remains, wait again (step 1); a failed push records `TRACEABILITY: DEGRADED (ci push failed)`, reports "CI status unknown — verify manually before merging" and stops waiting. After the second fix still FAILING → report the failing checks and proceed.
+6. **If FAILING** and fewer than 2 fixes have run → report the failing checks from the line. Spawn `Agent(subagent_type="Code")` whose prompt opens with `OPERATION: ci-fix`, with `COMPLIANCE_FRAMEWORKS`, `CI_FAILURES`, `DECISIONS_CONTEXT` and `PUSH: false`; `CI_FAILURES` holds the failing-check names from the line and nothing else, because the Code agent fetches the full names and reads the logs itself and this command reads none. After a fix, push with the command above and, if a wait remains, wait again (step 1); a failed push records `TRACEABILITY: DEGRADED (ci push failed)`, reports "CI status unknown — verify manually before merging" and stops waiting. After the second fix still FAILING → report the failing checks and proceed.
 7. **Budget**: at most 3 waits and 2 fixes in all, per worktree. When one is spent, report the current status and proceed.
 <!-- /PATTERN: ci-status-gate -->
 

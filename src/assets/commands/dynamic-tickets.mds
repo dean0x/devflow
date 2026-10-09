@@ -3,13 +3,20 @@ description: Generalized ticket-factory — turn an initiative or spec into a re
 argument-hint: "[initiative | spec-doc]"
 output-dir: dist/commands
 ---
-@import { authoring_preamble } from "./_partials/_preamble.mds"
+@import { authoring_preamble, authoring_decisions } from "./_partials/_preamble.mds"
 @import { agent_roster, agent_caveats } from "./_partials/_roster.mds"
 @import { ticket_body_template } from "./_partials/_ticket_template.mds"
 @import { factory_shape } from "./_partials/_factory.mds"
 @import { evidence_policy } from "./_partials/_evidence_policy.mds"
 @import { docs_root } from "./_partials/_docs_root.mds"
+@import "./_partials/_settings.mds" as settings
 {{authoring_preamble()}}
+
+### Settings line
+
+{{settings.settings_resolve()}}
+
+{{authoring_decisions()}}
 
 ---
 
@@ -55,7 +62,7 @@ Pass `{worktree}` to the workflow as its `root` argument.
 
 **1. Apply decisions context**
 
-Apply the `devflow:apply-decisions` algorithm to the DECISIONS_CONTEXT loaded per the preamble above: scan the index, Read relevant entries, note the verbatim ADR/PF IDs you will inject into Design agent and Review agent prompts.
+Apply the `devflow:apply-decisions` algorithm to the DECISIONS_CONTEXT loaded by the decisions step above: scan the index, Read relevant entries, note the verbatim ADR/PF IDs you will inject into Design agent prompts.
 
 **2. Read and distill the initiative**
 

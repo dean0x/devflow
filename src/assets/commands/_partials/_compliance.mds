@@ -1,13 +1,14 @@
-@import "./_settings.mds" as settings
+A partial: the compliance-lens gate. D-SETTINGS-LINE: it imports nothing from
+`_settings.mds`. Its host expands the settings block once, before the earliest of
+its consumers, and the lens is set from the line resolved there for the
+worktree's root.
 
 @define compliance_frameworks():
 `COMPLIANCE_FRAMEWORKS` is the settings line's `COMPLIANCE` with `generic` written `none`: `off`, `none`, or the framework ids the machine and this repository declare.
 @end
 
 @define compliance_lens():
-**Resolve the compliance lens** for each worktree root, from its settings line (every framework reference is installed on every machine, so no file check decides it):
-
-{{settings.settings_resolve()}}
+**Resolve the compliance lens** for each worktree root, from its settings line — the line resolved above for that root, by the settings block when this run has not yet resolved it (every framework reference is installed on every machine, so no file check decides it).
 
 **Set the compliance lens** from that line: {{compliance_frameworks()}}
 @end

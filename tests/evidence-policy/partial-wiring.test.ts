@@ -480,7 +480,7 @@ describe('AC-2: the invocation is identical in all eight command files', () => {
   it('known-bad probe: a one-character change inside one adopter\'s expansion is reported', () => {
     const expansion = builtExpansion()
     const seeded = policyCommandCorpus().map(f =>
-      f.name === PROBED ? { ...f, content: mutateOneChar(f.content, 'these fields, in this order') } : f,
+      f.name === PROBED ? { ...f, content: mutateOneChar(f.content, 'Pass agents only the three mechanism inputs') } : f,
     )
     expect(collectExpansionDefects(seeded, expansion)).toEqual([
       `${PROBED}: holds the evidence_policy() expansion 0 times (expected 1)`,

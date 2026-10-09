@@ -7,6 +7,7 @@ output-dir: dist/commands
 @import { compliance_gate } from "./_partials/_compliance.mds"
 @import { evidence_policy } from "./_partials/_evidence_policy.mds"
 @import { publication_gate } from "./_partials/_publication.mds"
+@import "./_partials/_settings.mds" as settings
 # Code Review Command
 
 Run a comprehensive code review of the current branch by spawning parallel review agents, then synthesizing results into PR comments. Supports incremental reviews, timestamped report directories, and multi-worktree auto-discovery.
@@ -39,6 +40,8 @@ Run a comprehensive code review of the current branch by spawning parallel revie
 #### Step 0b: Resolve the compliance lens
 
 **Produces:** COMPLIANCE_ACTIVE, COMPLIANCE_FRAMEWORKS
+
+{{settings.settings_resolve()}}
 
 {{compliance_gate()}}
 Keep each worktree's values for every downstream phase of that worktree.

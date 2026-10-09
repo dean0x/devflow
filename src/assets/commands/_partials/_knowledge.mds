@@ -1,4 +1,7 @@
-@import "./_settings.mds" as settings
+A partial: the feature-knowledge load and write-back steps. D-SETTINGS-LINE: it
+imports nothing from `_settings.mds`. Write-back Step 1 takes `KNOWLEDGE` from the
+settings line the host's settings block resolved above, and keeps the
+`KNOWLEDGE=off` skip inside its own step.
 
 @define knowledge_load():
 ### Load Feature Knowledge
@@ -60,9 +63,7 @@ git -C "{start}" rev-parse --show-toplevel
 
 and use its one-line output. If the command fails (outside a git repository), `{worktree}` is the start directory itself. All paths below are relative to `{worktree}`.
 
-**Step 1 — Check the opt-out gate, with `{root}` = `{worktree}`:**
-
-{{settings.settings_resolve()}}
+**Step 1 — Check the opt-out gate, with `{root}` = `{worktree}`:** take the settings line resolved above for that root, resolving it with the settings block when this run has not yet.
 
 If the settings line says `KNOWLEDGE=off`, skip write-back entirely. The machine switch (`devflow knowledge --disable`), the repository and the personal settings can each turn knowledge off, and none can turn it back on (D-FEATURES-NARROW-ONLY). The fail-closed line says `KNOWLEDGE=off` too, so an unresolvable line skips write-back.
 

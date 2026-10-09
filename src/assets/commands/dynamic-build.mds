@@ -3,7 +3,7 @@ description: Dependency-aware build engine — implement, review, and verify a s
 argument-hint: "[ticket | issue-url | plan-doc]"
 output-dir: dist/commands
 ---
-@import { authoring_preamble } from "./_partials/_preamble.mds"
+@import { authoring_preamble, authoring_decisions } from "./_partials/_preamble.mds"
 @import { evidence_policy } from "./_partials/_evidence_policy.mds"
 @import { docs_root } from "./_partials/_docs_root.mds"
 @import { agent_roster, agent_caveats } from "./_partials/_roster.mds"
@@ -13,7 +13,14 @@ output-dir: dist/commands
 @import { issue_ref_grammar, issue_capture_contract } from "./_partials/_tracker.mds"
 @import "./_partials/_publication.mds" as pub
 @import "./_partials/_compliance.mds" as compliance
+@import "./_partials/_settings.mds" as settings
 {{authoring_preamble()}}
+
+### Settings line
+
+{{settings.settings_resolve()}}
+
+{{authoring_decisions()}}
 
 ---
 
@@ -71,7 +78,7 @@ Pass it as `complianceFrameworks` when invoking the workflow; the engine hands i
 
 **1. Apply decisions context**
 
-Apply the `devflow:apply-decisions` algorithm to the DECISIONS_CONTEXT loaded per the preamble above: scan the index, Read relevant entries, note the verbatim ADR/PF IDs you will inject into Code agent and Evaluate agent prompts.
+Apply the `devflow:apply-decisions` algorithm to the DECISIONS_CONTEXT loaded by the decisions step above: scan the index, Read relevant entries, note the verbatim ADR/PF IDs you will inject into Code agent prompts.
 
 **2. Read budget**
 
@@ -233,6 +240,7 @@ Return: {"verdict": "PASS" | "FAIL", "details": "..."}`, { agentType: "Validate"
       await agent(`OPERATION: validation-fix
 Fix the validation failures on branch ${BRANCH}:
 ${failureDetails}
+DECISIONS_CONTEXT: ${DECISIONS_CONTEXT}
 ISSUE_NUMBER: ${ISSUE_NUMBER}
 ISSUE_PR_LINK: ${ISSUE_PR_LINK}
 COMPLIANCE_FRAMEWORKS: ${COMPLIANCE_FRAMEWORKS}
@@ -275,6 +283,7 @@ Return: {"verdict": "PASS" | "FAIL", "rationale": "..."} — FAIL if either answ
       await agent(`OPERATION: alignment-fix
 Fix the alignment issues identified by the Evaluate agent on branch ${BRANCH}:
 ${evaluation?.rationale || "see the Evaluate agent's report"}
+DECISIONS_CONTEXT: ${DECISIONS_CONTEXT}
 ISSUE_NUMBER: ${ISSUE_NUMBER}
 ISSUE_PR_LINK: ${ISSUE_PR_LINK}
 COMPLIANCE_FRAMEWORKS: ${COMPLIANCE_FRAMEWORKS}
@@ -296,6 +305,7 @@ Cover: functionality, API contracts, performance, and cover every TEST_PLAN scen
       await agent(`OPERATION: qa-fix
 Fix the failing acceptance test scenarios on branch ${BRANCH}:
 ${testResult.failures}
+DECISIONS_CONTEXT: ${DECISIONS_CONTEXT}
 ISSUE_NUMBER: ${ISSUE_NUMBER}
 ISSUE_PR_LINK: ${ISSUE_PR_LINK}
 COMPLIANCE_FRAMEWORKS: ${COMPLIANCE_FRAMEWORKS}
@@ -415,6 +425,7 @@ ISSUES:
 ${chunk.map((f, n) => `${n + 1}. ${f.file ? `${f.file}${f.line ? `:${f.line}` : ""} — ` : ""}${f.description} (${f.severity})`).join("\n")}
 SCOPE: ${chunk.map((f, n) => `${n + 1}=${CAREFUL_SEVERITIES.has(String(f.severity).toLowerCase()) ? "Careful" : "Standard"}`).join(", ")}
 PUSH: false
+DECISIONS_CONTEXT: ${DECISIONS_CONTEXT}
 ISSUE_NUMBER: ${ISSUE_NUMBER}
 ISSUE_PR_LINK: ${ISSUE_PR_LINK}
 COMPLIANCE_FRAMEWORKS: ${COMPLIANCE_FRAMEWORKS}
@@ -475,6 +486,7 @@ Return: {"verdict": "PASS" | "FAIL", "details": "..."}`, { agentType: "Validate"
       await agent(`OPERATION: validation-fix
 Fix the final validation failures on branch ${BRANCH}:
 ${failureDetails}
+DECISIONS_CONTEXT: ${DECISIONS_CONTEXT}
 ISSUE_NUMBER: ${ISSUE_NUMBER}
 ISSUE_PR_LINK: ${ISSUE_PR_LINK}
 COMPLIANCE_FRAMEWORKS: ${COMPLIANCE_FRAMEWORKS}

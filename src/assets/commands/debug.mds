@@ -5,6 +5,7 @@ output-dir: dist/commands
 @import { knowledge_writeback } from "./_partials/_knowledge.mds"
 @import { decisions_load } from "./_partials/_decisions.mds"
 @import { issue_ref_grammar, issue_capture_contract } from "./_partials/_tracker.mds"
+@import "./_partials/_settings.mds" as settings
 # Debug Command
 
 Investigate bugs by spawning parallel agents, each pursuing a different hypothesis. Evidence is aggregated and synthesized to identify the root cause.
@@ -35,6 +36,8 @@ $ARGUMENTS
 ### Phase 1: Load Decisions Index (Orchestrator-Local)
 
 **Produces:** DECISIONS_CONTEXT
+
+{{settings.settings_resolve()}}
 
 {{decisions_load()}}
 

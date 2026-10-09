@@ -9,6 +9,7 @@ output-dir: dist/commands
 @import { evidence_policy } from "./_partials/_evidence_policy.mds"
 @import { test_plan_line } from "./_partials/_plan_contract.mds"
 @import { issue_ref_grammar, issue_capture_contract } from "./_partials/_tracker.mds"
+@import "./_partials/_settings.mds" as settings
 # Plan Command
 
 Orchestrate design planning from requirements discovery through gap analysis to implementation design. Produces a machine-readable design artifact consumed by `/implement`.
@@ -112,11 +113,14 @@ If the user says "skip" or "just proceed" — skip remaining questions, present 
 **Produces:** SKIM_CONTEXT, DECISIONS_CONTEXT, FEATURE_KNOWLEDGE
 **Requires:** CONFIRMED_SCOPE
 
+{{settings.settings_resolve()}}
+
 Spawn Skim agent for codebase context:
 
 ```
 Agent(subagent_type="Skim"):
 "Orient in codebase for design planning: {feature/issues}
+LEARNING: {LEARNING from the settings line}
 Run rskim on source directories (NOT repo root) to identify:
 - Existing patterns and conventions in the affected area
 - File structure and module boundaries
@@ -129,18 +133,18 @@ Return codebase context for requirements analysis."
 
 {{decisions_load()}}
 
-This produces a compact index of active ADR/PF entries. Pass Skim agent context and `DECISIONS_CONTEXT` to all subsequent agents — prior decisions constrain design, known pitfalls inform gap analysis. Agents use `devflow:apply-decisions` to Read full entry bodies on demand.
+This produces a compact index of active ADR/PF entries. Pass the Skim agent context to all subsequent agents. Pass `DECISIONS_CONTEXT` to the Design agents of the gap-analysis phase — prior decisions constrain design, known pitfalls inform gap analysis. Design agents use `devflow:apply-decisions` to Read full entry bodies on demand.
 
 {{knowledge_load()}}
 
-Pass `FEATURE_KNOWLEDGE` alongside `DECISIONS_CONTEXT` to Explore and Design agents.
+Pass `FEATURE_KNOWLEDGE` to Explore and Design agents. Pass `DECISIONS_CONTEXT` to Design agents only.
 
 #### Phase 3: Explore Requirements (Parallel)
 
 **Produces:** EXPLORE_OUTPUTS
-**Requires:** SKIM_CONTEXT, DECISIONS_CONTEXT
+**Requires:** SKIM_CONTEXT
 
-Spawn 4 Explore agents **in a single message**, each with Skim agent context, `DECISIONS_CONTEXT` (from Phase 2), and `FEATURE_KNOWLEDGE` (from Phase 2). Include instructions: "follow `devflow:apply-decisions` for DECISIONS_CONTEXT" and "The FEATURE_KNOWLEDGE is a baseline — VALIDATE, EXTEND, and CORRECT it, don't repeat it. Focus on areas the feature knowledge doesn't cover and changes since it was last updated." Ask each agent for a final report of at most about 1,500 tokens: findings with file:line references, not file dumps.
+Spawn 4 Explore agents **in a single message**, each with Skim agent context and `FEATURE_KNOWLEDGE` (from Phase 2). Include the instruction: "The FEATURE_KNOWLEDGE is a baseline — VALIDATE, EXTEND, and CORRECT it, don't repeat it. Focus on areas the feature knowledge doesn't cover and changes since it was last updated." Ask each agent for a final report of at most about 1,500 tokens: findings with file:line references, not file dumps.
 
 | Focus | Thoroughness | Find |
 |-------|-------------|------|
@@ -296,7 +300,7 @@ Combine into: patterns to follow, integration points, reusable code, edge cases"
 #### Phase 10: Plan Implementation (Parallel)
 
 **Produces:** PLAN_OUTPUTS
-**Requires:** IMPL_EXPLORATION_SYNTHESIS, GAP_SYNTHESIS, DECISIONS_CONTEXT
+**Requires:** IMPL_EXPLORATION_SYNTHESIS, GAP_SYNTHESIS
 
 Spawn 3 Plan agents **in a single message**, each with implementation exploration synthesis. Ask each agent for a final report of at most about 1,500 tokens: the plan itself, not a restatement of the exploration.
 

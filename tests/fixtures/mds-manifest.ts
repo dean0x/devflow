@@ -162,22 +162,30 @@ export const EVIDENCE_POLICY_PARTIAL_ADOPTERS = [
 ] as const;
 
 /**
- * The hosts whose compiled text carries the `_partials/_settings.mds` block (#392).
- * No host imports the partial: each inherits it through a gate partial that does
- * — `_compliance` (code-review, plan), `_publication` (code-review, dynamic-build,
- * implement, resolve) and `_knowledge`'s write-back (debug, explore, implement,
- * resolve, self-review). Named as a set for the same reason as the rosters above:
- * the provider-scope guard allowlists the block's closed provider set in exactly
- * these files, and tests/commands/settings-partial.test.ts holds the set to the
- * build.
+ * The hosts whose compiled text carries the `_partials/_settings.mds` block (#392,
+ * D-SETTINGS-LINE): all 14 command hosts, each expanding `settings_resolve()` exactly
+ * once, before the earliest of its consumers. The hosts import the partial themselves,
+ * as alias imports; no partial does. Named as a set for the same reason as the rosters
+ * above: the provider-scope guard allowlists the block's closed provider set in exactly
+ * these files, and tests/commands/settings-partial.test.ts holds the set to the build.
+ *
+ * The block count (14) and the learning-off count (8) are test-local constants beside
+ * their assertions, not manifest rows: a count held here would be a second place to
+ * keep in step with this set.
  */
 export const SETTINGS_BLOCK_HOSTS = [
+  'bug-analysis',
   'code-review',
   'debug',
   'dynamic-build',
+  'dynamic-plan',
+  'dynamic-profile',
+  'dynamic-tickets',
   'explore',
   'implement',
   'plan',
+  'release',
+  'research',
   'resolve',
   'self-review',
 ] as const

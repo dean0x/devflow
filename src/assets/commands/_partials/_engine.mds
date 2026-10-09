@@ -60,7 +60,7 @@ It returns `{"verdict": "PASS" | "FAIL", "rationale": "..."}`: FAIL when either 
 The standard implementation unit for one ticket. Run in order:
 
 ```
-Code(agentType:"Code", prompt: "OPERATION: implement" first line, then full task + plan + DECISIONS_CONTEXT + handoff if sequential)
+Code(agentType:"Code", prompt: "OPERATION: implement" first line, then full task + plan + DECISIONS_CONTEXT + COMPLIANCE_FRAMEWORKS + handoff if sequential)
   → gate1_postcode()
   → gate2_acceptance()   ← Gate 2 runs HERE — before the review pass, not after
 ```

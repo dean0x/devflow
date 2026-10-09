@@ -10,6 +10,7 @@ output-dir: dist/commands
 @import { test_plan_line } from "./_partials/_plan_contract.mds"
 @import { publication_gate } from "./_partials/_publication.mds"
 @import "./_partials/_compliance.mds" as compliance
+@import "./_partials/_settings.mds" as settings
 # Implement Command
 
 Orchestrate a single task through implementation by spawning specialized agents. The orchestrator only spawns agents and passes context - all work is done by agents.
@@ -166,6 +167,8 @@ node "$HOME/.devflow/scripts/verify-evidence.cjs" render --plan "{worktree}/.dev
 ```
 
 - `EVIDENCE_FILE` — `{worktree}/.devflow/docs/evidence-{branch_slug}.md`, its `## Evidence Exceptions` section now a byte copy of `PR_EXCEPTIONS` (absent when that is `(none)`).
+
+{{settings.settings_resolve()}}
 
 {{publication_gate()}}
 Phase 10b passes the resolved value to `update-pr-evidence`, which decides what each value means for the evidence comment. From the same line: {{compliance.compliance_frameworks()}} Pass it to every Code spawn.
@@ -383,6 +386,7 @@ Validate alignment with request and plan. Report ALIGNED or MISALIGNED with deta
    MISALIGNMENTS: {structured misalignments from Evaluate agent}
    SCOPE: Fix only the listed misalignments, no other changes
    CREATE_PR: false
+   DECISIONS_CONTEXT: {decisions_context}
    ISSUE_NUMBER: {ISSUE_ID captured in Phase 1, or (none)}
    ISSUE_PR_LINK: {ISSUE_PR_LINK captured in Phase 1, or (none)}
    COMPLIANCE_FRAMEWORKS: {COMPLIANCE_FRAMEWORKS}"
@@ -417,6 +421,7 @@ Run build, typecheck, lint, test. Report pass/fail with failure details."
    VALIDATION_FAILURES: {parsed failures from Validate agent}
    SCOPE: Fix only the listed failures, no other changes
    CREATE_PR: false
+   DECISIONS_CONTEXT: {decisions_context}
    ISSUE_NUMBER: {ISSUE_ID captured in Phase 1, or (none)}
    ISSUE_PR_LINK: {ISSUE_PR_LINK captured in Phase 1, or (none)}
    COMPLIANCE_FRAMEWORKS: {COMPLIANCE_FRAMEWORKS}"
@@ -471,6 +476,7 @@ After every Test agent run — PASS or FAIL, first run or retry — append its T
    QA_FAILURES: {structured failures from Test agent}
    SCOPE: Fix only the listed failures, no other changes
    CREATE_PR: false
+   DECISIONS_CONTEXT: {decisions_context}
    ISSUE_NUMBER: {ISSUE_ID captured in Phase 1, or (none)}
    ISSUE_PR_LINK: {ISSUE_PR_LINK captured in Phase 1, or (none)}
    COMPLIANCE_FRAMEWORKS: {COMPLIANCE_FRAMEWORKS}"
@@ -517,7 +523,7 @@ git push origin HEAD; echo "exit=$?"
 3. **If NO_PR or NO_CI** → skip: "No PR/CI configured, skipping CI validation." Proceed to Phase 10.
 4. **If PENDING** and fewer than 3 waits have run → wait again (step 1). After the third wait → report "CI still running — verify manually before merging" and proceed.
 5. **If INDETERMINATE** and fewer than 3 waits have run → wait again (step 1). After the third wait → report "CI status unknown — verify manually before merging" and proceed.
-6. **If FAILING** and fewer than 2 fixes have run → report the failing checks from the line. Spawn `Agent(subagent_type="Code")` whose prompt opens with `OPERATION: ci-fix`, with `COMPLIANCE_FRAMEWORKS`, `CI_FAILURES` and `PUSH: false`; `CI_FAILURES` holds the failing-check names from the line and nothing else, because the Code agent fetches the full names and reads the logs itself and this command reads none. After a fix, push with the command above and, if a wait remains, wait again (step 1); a failed push records `TRACEABILITY: DEGRADED (ci push failed)`, reports "CI status unknown — verify manually before merging" and stops waiting. After the second fix still FAILING → report the failing checks and proceed.
+6. **If FAILING** and fewer than 2 fixes have run → report the failing checks from the line. Spawn `Agent(subagent_type="Code")` whose prompt opens with `OPERATION: ci-fix`, with `COMPLIANCE_FRAMEWORKS`, `CI_FAILURES`, `DECISIONS_CONTEXT` and `PUSH: false`; `CI_FAILURES` holds the failing-check names from the line and nothing else, because the Code agent fetches the full names and reads the logs itself and this command reads none. After a fix, push with the command above and, if a wait remains, wait again (step 1); a failed push records `TRACEABILITY: DEGRADED (ci push failed)`, reports "CI status unknown — verify manually before merging" and stops waiting. After the second fix still FAILING → report the failing checks and proceed.
 7. **Budget**: at most 3 waits and 2 fixes in all. When one is spent, report the current status and proceed.
 <!-- /PATTERN: ci-status-gate -->
 
@@ -538,6 +544,7 @@ TASK_DESCRIPTION: Create the unified PR for the parallel implementation
 BASE_BRANCH: {base branch}
 CREATE_PR: true
 PR_DESCRIPTION_GUIDANCE: {pr_description_guidance}
+DECISIONS_CONTEXT: {decisions_context}
 ISSUE_NUMBER: {ISSUE_ID captured in Phase 1, or (none)}
 ISSUE_PR_LINK: {ISSUE_PR_LINK captured in Phase 1, or (none)}
 PR_EXCEPTIONS: {the ## Evidence Exceptions section of {worktree}/.devflow/docs/handoff-{branch_slug}.md verbatim, or (none)}

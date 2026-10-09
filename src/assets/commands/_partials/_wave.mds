@@ -85,7 +85,7 @@ Two parallel sibling tickets can produce real git conflicts. The resolution is *
 **Resolution procedure:**
 
 1. Git agent detects the conflict and reports the conflicting files + sections
-2. Spawn a Code agent whose prompt opens with `OPERATION: implement` and carries `COMPLIANCE_FRAMEWORKS`, with FULL intent context:
+2. Spawn a Code agent whose prompt opens with `OPERATION: implement` and carries `COMPLIANCE_FRAMEWORKS` and `DECISIONS_CONTEXT`, with FULL intent context:
    - Both ticket descriptions and plans
    - The conflicting diff sections (both sides)
    - Relevant ADRs from DECISIONS_CONTEXT (loaded by main model before authoring)

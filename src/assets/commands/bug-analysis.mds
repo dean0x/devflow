@@ -6,6 +6,7 @@ output-dir: dist/commands
 @import { decisions_load } from "./_partials/_decisions.mds"
 @import { docs_root } from "./_partials/_docs_root.mds"
 @import { evidence_policy } from "./_partials/_evidence_policy.mds"
+@import "./_partials/_settings.mds" as settings
 # Bug Analysis Command
 
 Run a proactive bug analysis on the current branch by combining static analysis tools with parallel semantic analyzers, then synthesizing results into an actionable bug report. Supports incremental analysis, timestamped report directories, and `/resolve` compatibility.
@@ -171,6 +172,8 @@ If no tool produced findings: set `STATIC_FINDINGS` to `(none)`.
 **Produces:** DECISIONS_CONTEXT, FEATURE_KNOWLEDGE, PLAN_CONTEXT, ACCEPTANCE_RULES
 
 #### Decisions Index
+
+{{settings.settings_resolve()}}
 
 {{decisions_load()}}
 

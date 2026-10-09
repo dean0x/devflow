@@ -372,30 +372,37 @@ export interface CodeSpawnSite {
 }
 
 /**
- * Named collector: every Code spawn site in a compiled command — the ONE collector, shared by the
- * compliance-lens test (tests/compliance-prompts.test.ts) and the OPERATION guard
- * (tests/guards/code-operation.test.ts), so the two cannot disagree about what a spawn is. Four
- * shapes, as the command layer writes them: a fenced spawn (`Agent(subagent_type="Code"):` then a
- * quoted payload up to its closing quote, indented or not; one fence may hold two spawns), a
- * one-line prose spawn (Spawn `Agent(subagent_type="Code")` …), a prose sentence that begins
- * "Spawn a Code agent" (the merge-conflict resolver in the wave partial, which reaches no fence),
- * and a workflow template literal (agent(`…`, { agentType: "Code" })). The preamble's
- * `agent("your prompt here", …)` usage example is not a template literal, so it is not a site.
+ * Named collector: every spawn site of one agent type in a compiled command — the ONE collector,
+ * shared by the compliance-lens test (tests/compliance-prompts.test.ts), the OPERATION guard
+ * (tests/guards/code-operation.test.ts) and the decisions seam guard (tests/decisions/decisions-seam.test.ts),
+ * so the three cannot disagree about what a spawn is. `agentType` defaults to Code, which is what the first
+ * two read; the seam guard asks for every declared type (D-DECISIONS-DECLARED-ONLY). Five shapes, as the
+ * command layer writes them: a fenced spawn (`Agent(subagent_type="<T>"):` then a quoted payload up to its
+ * closing quote, indented or not; one fence may hold two spawns), a one-line prose spawn (Spawn
+ * `Agent(subagent_type="<T>")` …), a prose sentence that begins "Spawn a <T> agent" (the merge-conflict
+ * resolver in the wave partial, which reaches no fence), a workflow template literal
+ * (agent(`…`, { agentType: "<T>" }), other options allowed beside it) and the engine partial's pseudo-form
+ * (`<T>(agentType:"<T>", …)`). The preamble's `agent("your prompt here", …)` usage example is not a
+ * template literal, so it is not a site.
  */
-export function collectCodeSpawnSites(file: string, text: string): CodeSpawnSite[] {
+export function collectCodeSpawnSites(file: string, text: string, agentType: string = 'Code'): CodeSpawnSite[] {
+  // The type is spliced into the patterns below, so it must be a bare type name.
+  if (!/^[A-Z][A-Za-z]{0,30}$/.test(agentType)) throw new Error(`collectCodeSpawnSites: "${agentType}" is not an agent type name`)
   const MAX_SITES = 64
+  const T = agentType
   const SHAPES = [
-    /Agent\(subagent_type="Code"\):[^\n]*\n[ \t]*"[\s\S]*?"[ \t]*\n[ \t]*(?:\n|```)/g,
-    /^.*Spawn `Agent\(subagent_type="Code"\)`.*$/gm,
-    /^[ \t]*(?:\d+\.[ \t]+)?Spawn a Code agent.*$/gm,
-    /agent\(`(?:(?!agent\(`)[\s\S])*?`, \{ agentType: "Code" \}/g,
+    new RegExp(`Agent\\(subagent_type="${T}"(?:, [^)]*)?\\):[^\\n]*\\n[ \\t]*"[\\s\\S]*?"[ \\t]*\\n[ \\t]*(?:\\n|\`\`\`)`, 'g'),
+    new RegExp(`^.*[Ss]pawn [^\\n\`]{0,24}?\`Agent\\(subagent_type="${T}"(?:, [^)]*)?\\)\`.*$`, 'gm'),
+    new RegExp(`^[ \\t]*(?:\\d+\\.[ \\t]+)?Spawn (?:an? |\\d+ )${T} agents?.*$`, 'gm'),
+    new RegExp(`agent\\(\`(?:(?!agent\\(\`)[\\s\\S])*?\`,\\s*\\{[^}]*\\bagentType: "${T}"`, 'g'),
+    new RegExp(`^.*\\b${T}\\(agentType:"${T}",.*$`, 'gm'),
   ]
   const sites = SHAPES.flatMap(re => [...text.matchAll(re)].map(m => ({
     file,
     line: text.slice(0, m.index).split('\n').length,
     payload: m[0],
   })))
-  if (sites.length > MAX_SITES) throw new Error(`${file}: more than ${MAX_SITES} Code spawn sites — bound exceeded`)
+  if (sites.length > MAX_SITES) throw new Error(`${file}: more than ${MAX_SITES} ${T} spawn sites — bound exceeded`)
   return sites
 }
 

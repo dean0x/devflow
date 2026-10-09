@@ -403,13 +403,13 @@ const CODE_SPAWN_FLOORS: Readonly<Record<string, number>> = {
   'implement.md': 10,
   // the issue-fix and validation-fix fences + the CI-fix line
   'resolve.md': 3,
-  // implement, validation-fix, alignment-fix, qa-fix, review-fix and final-validation-fix templates + the merge-conflict resolver sentence
-  'dynamic-build.md': 7,
+  // implement, validation-fix, alignment-fix, qa-fix, review-fix and final-validation-fix templates + the merge-conflict resolver sentence + the engine partial's pseudo-form
+  'dynamic-build.md': 8,
 };
 
 /** The sites whose payload hands the Code agent no compliance lens — rendered for the failure message. */
 function collectUnlensedSites(sites: readonly CodeSpawnSite[]): string[] {
-  const LENS = /COMPLIANCE_FRAMEWORKS: \$?\{COMPLIANCE_FRAMEWORKS\}|(?:with|carries) `COMPLIANCE_FRAMEWORKS`/;
+  const LENS = /COMPLIANCE_FRAMEWORKS: \$?\{COMPLIANCE_FRAMEWORKS\}|(?:with|carries) `COMPLIANCE_FRAMEWORKS`|\+ COMPLIANCE_FRAMEWORKS \+/;
   return sites.filter(s => !LENS.test(s.payload)).map(s => `${s.file}:${s.line}`);
 }
 
@@ -471,6 +471,7 @@ describe('TP-43 (AC-37): the compiled compliance lens loads only the ids the set
       ['implement.md', implement, ' with `COMPLIANCE_FRAMEWORKS`', ''],                      // the CI-fix prose spawn
       ['dynamic-build.md', requireDistFile('dynamic-build.md'), '\nCOMPLIANCE_FRAMEWORKS: ${COMPLIANCE_FRAMEWORKS}', ''], // a template spawn
       ['dynamic-build.md', requireDistFile('dynamic-build.md'), ' and carries `COMPLIANCE_FRAMEWORKS`', ''],              // the merge-conflict resolver sentence
+      ['dynamic-build.md', requireDistFile('dynamic-build.md'), ' + COMPLIANCE_FRAMEWORKS + handoff', ' + handoff'],     // the engine partial's pseudo-form
     ];
     for (const [host, real, lens, without] of probes) {
       expect(collectUnlensedSites(collectCodeSpawnSites(host, real)), `${host}: the live text is clean`).toEqual([]);

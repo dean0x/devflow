@@ -4,6 +4,7 @@ output-dir: dist/commands
 ---
 @import { knowledge_load, knowledge_writeback } from "./_partials/_knowledge.mds"
 @import { decisions_load } from "./_partials/_decisions.mds"
+@import "./_partials/_settings.mds" as settings
 # Self-Review Command
 
 Run Simplify agent and Scrutinize agent sequentially on changed files for post-implementation quality refinement.
@@ -26,6 +27,9 @@ Detect changed files and build context:
 3. If no changes found, report "No changes to review" and exit
 4. Build TASK_DESCRIPTION from recent commit messages or branch name
 5. Record `HEAD_BEFORE` (`git rev-parse HEAD`) now, before Simplify runs — Phase 3 compares against it
+
+{{settings.settings_resolve()}}
+
 {{decisions_load()}}
 
 Pass `DECISIONS_CONTEXT` to Scrutinize agent — the compact index lists active ADR/PF entries; Scrutinize agent uses `devflow:apply-decisions` to Read full entry bodies on demand. Known pitfalls help identify reintroduced issues, prior decisions help validate architectural consistency. (Simplify agent does not consume decisions — it operates at code-shape level and Scrutinize agent runs after to catch any architectural drift.)

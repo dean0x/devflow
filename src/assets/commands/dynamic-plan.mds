@@ -3,12 +3,19 @@ description: Parallel wave planning — plan-challenge every ticket, produce acc
 argument-hint: "[tickets-dir | issue-list]"
 output-dir: dist/commands
 ---
-@import { authoring_preamble } from "./_partials/_preamble.mds"
+@import { authoring_preamble, authoring_decisions } from "./_partials/_preamble.mds"
 @import { docs_root } from "./_partials/_docs_root.mds"
 @import { agent_roster, agent_caveats } from "./_partials/_roster.mds"
 @import { acceptance_criteria_contract } from "./_partials/_plan_contract.mds"
 @import { issue_ref_grammar, issue_capture_contract } from "./_partials/_tracker.mds"
+@import "./_partials/_settings.mds" as settings
 {{authoring_preamble()}}
+
+### Settings line
+
+{{settings.settings_resolve()}}
+
+{{authoring_decisions()}}
 
 ---
 
@@ -46,7 +53,7 @@ Pass `{worktree}` to the workflow as its `root` argument.
 
 **1. Apply decisions context**
 
-Apply the `devflow:apply-decisions` algorithm to the DECISIONS_CONTEXT loaded per the preamble above: scan the index, Read relevant entries, note verbatim ADR/PF IDs to inject into Design agent and Evaluate agent prompts.
+Apply the `devflow:apply-decisions` algorithm to the DECISIONS_CONTEXT loaded by the decisions step above: scan the index, Read relevant entries, note verbatim ADR/PF IDs to inject into Design agent prompts.
 
 **2. Read the preference profile**
 
@@ -149,7 +156,6 @@ const challenged = await phase("plan-challenge", () =>
 
 Plan under review: ${JSON.stringify(plan)}
 Ticket: ${JSON.stringify((tickets || [])[i])}
-Decisions context: ${DECISIONS_CONTEXT}
 
 Produce:
 1. List of improvements / gaps / edge cases / side-effects identified.
@@ -160,7 +166,7 @@ Produce:
    - its verification method is its method: a test committed to the suite is ci; a command run and read (a load test, a script) is local; a step performed and observed is manual;
    - the paths it exercises, from the plan's affected files, are its files: globs.
    Setup and expected outcome never go in a line: give them per TP in testScenarios.
-4. A list of genuine design decisions that require user input (not settled by the plan, the preference profile, or existing ADRs).
+4. A list of genuine design decisions that require user input (not settled by the plan or the preference profile).
 
 Test-plan line contract:
 ${TP_CONTRACT}
@@ -199,10 +205,9 @@ const resolved = await phase("preference-resolve", () =>
 Preference profile: ${PREFERENCE_PROFILE || "(none — no profile found)"}
 Open decisions from plan-challenge: ${JSON.stringify((challenged || []).flatMap(c => c.openDecisions || []))}
 Cross-plan conflicts needing resolution: ${JSON.stringify((crossCritic && crossCritic.conflicts) || [])}
-Decisions context (ADRs/PFs already settled): ${DECISIONS_CONTEXT}
 
 For each open decision:
-- If the preference profile or an existing ADR/PF settles it clearly: auto-resolve and note the rationale.
+- If the preference profile settles it clearly: auto-resolve and note the rationale.
 - If not settled: add to the DECISIONS-NEEDED list for the user.
 
 Return: { autoResolved (array of {decision, resolution, source}), decisionsNeeded (array of {decision, context, options}) }.`, { agentType: "Synthesize" })

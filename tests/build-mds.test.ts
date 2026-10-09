@@ -665,6 +665,43 @@ describe('decisions_load adoption in compiled knowledge command outputs', () => 
     }
     expect(scanned, 'scanned zero dist commands — guard is vacuous').toBeGreaterThan(0);
   });
+
+  // D-DECISIONS-LEARNING-GATE: the LEARNING=off sentence must come before the
+  // ledger-locate git call and before the index read, so learning off locates no
+  // ledger and reads no index. Every one of the 14 hosts loads decisions behind it.
+  // Named collector, shared by the live scan and the known-bad probe below.
+  const GATE_SENTENCE = 'When the settings line says `LEARNING=off`';
+  const LOCATE_CALL = 'rev-parse --path-format=absolute --show-toplevel --git-common-dir';
+  const INDEX_READ = '/.devflow/learning/index.md`';
+
+  function collectGateOrderProblems(basename: string, content: string): string[] {
+    const gate = content.indexOf(GATE_SENTENCE);
+    const locate = content.indexOf(LOCATE_CALL);
+    const read = content.indexOf(INDEX_READ);
+    if (gate === -1 || locate === -1 || read === -1) {
+      return [`${basename}: missing ${[gate, locate, read].map((at, i) => (at === -1 ? ['gate', 'locate', 'read'][i] : null)).filter(Boolean).join(', ')}`];
+    }
+    return gate < locate && locate < read ? [] : [`${basename}: gate@${gate} locate@${locate} read@${read} are not in that order`];
+  }
+
+  it('the LEARNING=off gate precedes the ledger-locate call and the index read in all 14 hosts', async () => {
+    let scanned = 0;
+    for (const basename of COMMAND_HOSTS) {
+      const content = await fs.readFile(path.join(BUILT_COMMANDS, `${basename}.md`), 'utf-8');
+      scanned++;
+      expect(collectGateOrderProblems(basename, content), basename).toEqual([]);
+    }
+    expect(scanned, 'the gate-order scan is vacuous').toEqual(COMMAND_HOSTS.length);
+  });
+
+  it('known-bad probe: moving the gate sentence after the index read is reported', async () => {
+    const real = await fs.readFile(path.join(BUILT_COMMANDS, 'research.md'), 'utf-8');
+    const gateLine = real.split('\n').find(l => l.startsWith(GATE_SENTENCE)) ?? '';
+    expect(gateLine, 'the research host carries the gate sentence').not.toBe('');
+    const moved = real.replace(`${gateLine}\n`, '').replace('The index is one direct file read', `${gateLine}\n\nThe index is one direct file read`);
+    expect(moved).not.toBe(real);
+    expect(collectGateOrderProblems('research', moved)).toHaveLength(1);
+  });
 });
 
 // ---------------------------------------------------------------------------
