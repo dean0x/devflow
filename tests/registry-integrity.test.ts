@@ -435,6 +435,12 @@ describe('Guard 6 (build-gated): OPERATION: values ↔ git.md ## Operation: decl
     // Invoked by setup-task step 1b when .devflow/conventions.md is absent — internal
     // to the Git agent; no compiled command calls it directly.
     'learn-conventions',
+    // Run as step 3 of check-merge-readiness ("Fetch CI status (same logic as
+    // `check-ci-status`)"), which loads references/pr/check-ci-status.md and applies it to its
+    // own PR_NUMBER in the same spawn. The commands that used to spawn it directly now wait on
+    // CI through ci-wait.cjs, so only the merge-readiness op still invokes it; ci-wait's
+    // classifier stays parity-tested against that reference's step 5.
+    'check-ci-status',
     // SG-11: fetch-issues-batch is now wired live from plan.mds Gate 0 (multi-issue path) —
     // it is no longer internal-only. Removed from INTERNAL_OPS; added to REQUIRED_OPS in
     // git-agent.test.ts (AC-0.11).
