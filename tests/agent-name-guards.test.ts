@@ -24,7 +24,7 @@
  */
 
 import { describe, it, expect } from 'vitest'
-import { existsSync, readFileSync, readdirSync } from 'fs'
+import { existsSync, readFileSync, readdirSync, type Dirent } from 'fs'
 import * as path from 'path'
 import { getAllAgentNames } from '../src/core/plugins.js'
 import { LEGACY_AGENT_KEYS, canonicaliseAgentKeys } from '../src/core/agent-models.js'
@@ -419,7 +419,7 @@ function readFrontmatterModel(filePath: string): string {
  */
 function collectFiles(dir: string, exts: string[]): string[] {
   const results: string[] = []
-  let entries: ReturnType<typeof readdirSync>
+  let entries: Dirent[]
   try {
     entries = readdirSync(dir, { withFileTypes: true })
   } catch {
@@ -444,7 +444,7 @@ function collectFiles(dir: string, exts: string[]): string[] {
  */
 function collectScriptFiles(dir: string): string[] {
   const results: string[] = []
-  let entries: ReturnType<typeof readdirSync>
+  let entries: Dirent[]
   try {
     entries = readdirSync(dir, { withFileTypes: true })
   } catch {
