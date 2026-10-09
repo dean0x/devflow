@@ -1,6 +1,6 @@
 ---
 name: apply-decisions
-description: Consume the DECISIONS_CONTEXT index; read relevant entries, cite IDs in-session only
+description: Consume the DECISIONS_CONTEXT index; cite IDs in-session only
 user-invocable: false
 allowed-tools: Read, Bash
 ---
@@ -15,17 +15,15 @@ allowed-tools: Read, Bash
 > in the index, do not cite it. If an entry looks relevant but you haven't Read its
 > full body, do not cite it. Fabricated citations are worse than no citations.
 
----
-
 ## 5-Step Algorithm
 
 ### Step 1: Scan the index
 
-`DECISIONS_CONTEXT` has one line per active entry: its ID (`ADR-NNN` or `PF-NNN`), a title, then a status tag (`[Accepted]`, `[Active]`) or, after `—`, the scope it governs (globs and `area:` tags). Titles may be cut short. The footer names the decisions and pitfalls files.
+One line per active entry: its ID (`ADR-NNN` or `PF-NNN`), a title, then a status tag or, after `—`, the scope it governs. The footer names the decisions and pitfalls files.
 
 ### Step 2: Identify plausibly-relevant entries
 
-Pick entries whose title, area or scope overlaps the files you touch (a matching scope glob is a strong signal), the kind of issue or the architectural area. A cut-short title that looks relevant goes to Step 3.
+Pick entries whose title, area or scope overlaps the files you touch (a matching scope glob is a strong signal), the kind of issue or the architectural area. Follow up a cut-short title that looks relevant.
 
 ### Step 3: Read the full body
 
@@ -35,18 +33,18 @@ Find the entry's heading line in the file the footer names, then Read only that 
 command grep -nF '## ADR-NNN:' "{worktree-from-footer}/.devflow/learning/decisions.md"
 ```
 
-For a pitfall use `## PF-NNN:` and `pitfalls.md`. Read with `offset` at the printed line and a `limit` of about 25, stopping at the next `## `. The footer is the single source of truth for paths; the ledger is git-ignored, so only a shell search finds the line. A `verified` date is when the entry was last confirmed true; none means unconfirmed. Cite only after reading the body and confirming it applies.
+For a pitfall use `## PF-NNN:` and `pitfalls.md`. Read with `offset` at the printed line and a `limit` of about 25, stopping at the next `## `. The footer is the single source of truth for paths; the ledger is git-ignored, so only a shell search finds the line. A `verified` date is when the entry was last confirmed true. Cite only after reading the body and confirming it applies.
 
 ### Step 4: Cite inline — in-session handoffs only
 
-Cite `applies ADR-NNN` for a decision you apply and `avoids PF-NNN` for a pitfall you avoid, in-session only: your reasoning, prompts to downstream agents, your report back to the caller.
+Cite `applies ADR-NNN` or `avoids PF-NNN` in-session only: your reasoning, prompts to downstream agents, your report back.
 
-Anything committed, pushed or posted states the rule in words, never its ID: code, comments, tests, docs, commit messages, PR and issue text, review comments and any report copied into those. IDs are numbered per machine, so no other clone can resolve one.
+Anything committed, pushed or posted states the rule in words, never its ID (code, comments, tests, docs, commit messages, PR and issue text, review comments, and any report copied into those). IDs are numbered per machine, so no other clone can resolve one.
 
 ### Step 5: Use verbatim IDs only
 
-Cite only IDs that appear verbatim in `DECISIONS_CONTEXT`; never guess or rebuild one. When no entry clearly applies, cite nothing.
+Cite only IDs in `DECISIONS_CONTEXT`; never guess or rebuild one. When nothing clearly applies, cite nothing.
 
 ## Skip Guard
 
-When `DECISIONS_CONTEXT` is empty, `(none)` or not provided, skip this skill — unless your agent instructions tell you to read the decisions index yourself; that index is then your `DECISIONS_CONTEXT`. Never load decisions files otherwise or guess what exists.
+When `DECISIONS_CONTEXT` is empty, `(none)` or not provided, skip this skill — unless your instructions tell you to read the decisions index yourself; that index is then your `DECISIONS_CONTEXT`. Never load decisions files otherwise.

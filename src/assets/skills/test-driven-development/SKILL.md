@@ -1,6 +1,6 @@
 ---
 name: test-driven-development
-description: This skill should be used when implementing new features, fixing bugs, or writing new code. Enforces RED-GREEN-REFACTOR.
+description: This skill should be used when implementing features or fixing bugs. Enforces RED-GREEN-REFACTOR.
 user-invocable: false
 allowed-tools: Read, Grep, Glob
 activation:

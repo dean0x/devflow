@@ -6,8 +6,8 @@
  *
  *   tests/fixtures/golden/git-agent.md          43,814 ch / 822 L   (== dist/agents/git.md)
  *   src/assets/skills/git/SKILL.md               6,365 ch / 213 L
- *   src/assets/skills/worktree-support/SKILL.md  1,580 ch / 46 L
- *   Total (all three)                           51,759 ch / 1,081 L
+ *   src/assets/skills/worktree-support/SKILL.md  1,502 ch / 40 L
+ *   Total (all three)                           51,681 ch / 1,075 L
  *
  * The post-Phase-0 figures the budget is derived FROM — git.md 65,677 ch / 992 L,
  * SKILL.md 9,205 ch / 283 L, total 77,824 ch / 1,367 L — are the pre-split
@@ -144,8 +144,8 @@ export const GIT_MD_LINES = 822
 // to make a red test green on its own.
 export const SKILL_GIT_CHARS = 6_365
 export const SKILL_GIT_LINES = 213
-export const SKILL_WORKTREE_CHARS = 1_580
-export const SKILL_WORKTREE_LINES = 46
+export const SKILL_WORKTREE_CHARS = 1_502
+export const SKILL_WORKTREE_LINES = 40
 /**
  * The preloaded set's total size across the three files above — pinned literals,
  * not a sum of the constants.
@@ -158,8 +158,8 @@ export const SKILL_WORKTREE_LINES = 46
  * golden-regeneration commit that moves the parts, never on their own to clear a
  * red assertion.
  */
-export const TOTAL_CHARS = 51_759
-export const TOTAL_LINES = 1_081
+export const TOTAL_CHARS = 51_681
+export const TOTAL_LINES = 1_075
 
 // Fixture invariants — these ARE bytes (Buffer.byteLength), not JS .length
 export const FIXTURE_BYTES = 18_383

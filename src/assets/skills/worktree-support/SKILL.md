@@ -14,8 +14,6 @@ allowed-tools: Bash, Read
 > When WORKTREE_PATH is provided, it changes how you resolve ALL paths — git commands,
 > file reads, .devflow/docs/ paths. It's not a toggle; it's a coordinate system shift.
 
----
-
 ## Agent Path Resolution
 
 When `WORKTREE_PATH` is provided to an agent:
@@ -29,8 +27,6 @@ When `WORKTREE_PATH` is provided to an agent:
 
 If `WORKTREE_PATH` is omitted, behavior is unchanged (use cwd). This is the common case.
 
----
-
 ## Protected Branches (Canonical List)
 
 `main`, `master`, `develop`, `integration`, `trunk`, `release/*`, `staging`, `production`
@@ -38,9 +34,7 @@ If `WORKTREE_PATH` is omitted, behavior is unchanged (use cwd). This is the comm
 All components (agents, commands, skills) must use this exact list when checking for protected branches.
 The HUD mirrors this list in `TRUNK_BRANCHES`/`TRUNK_BRANCH_PREFIXES`/`isTrunkBranch()` in `src/core/git.ts` — update both together.
 
----
-
 ## Extended References
 
-- `references/discovery.md` — the 7-step discovery algorithm and multi-worktree mode, for `/code-review` and `/resolve`
-- `references/roots.md` — where per-project data lives across checkouts, and detached HEAD
+- `references/discovery.md` — the 7-step discovery algorithm and multi-worktree mode
+- `references/roots.md` — project data roots and detached HEAD
