@@ -149,14 +149,14 @@ export const AGENT_CONFIG: Readonly<Record<string, AgentConfigRow>> = {
     skills: ['worktree-support', 'apply-decisions', 'apply-feature-knowledge'],
   },
   /**
-   * The Review tier is gated on an A/B run of the /code-review focus agents (a
-   * lower effort against the current tier). Until the verdict lands, the row keeps
-   * the model and the absent effort that main ships, and takes the tool allowlist;
-   * the verdict is an edit to this row and the `effort:` line of review.md.
+   * D-REVIEW-SHIPPED-ROW: Review ships opus at high effort. An A/B run of the
+   * /code-review focus agents over two seeded PRs found every seeded bug at high
+   * that it found at xhigh, for a little over half the cost, so xhigh buys nothing
+   * here. The row and the `effort:` line of review.md move together.
    */
   review: {
     model: 'opus',
-    effort: null,
+    effort: 'high',
     policy: { kind: 'allow', tools: ['Read', 'Grep', 'Glob', 'Bash', 'Write', 'Edit', 'Skill', 'StructuredOutput'] },
     omitClaudeMd: false,
     skills: ['review-methodology', 'worktree-support', 'apply-decisions', 'apply-feature-knowledge'],
@@ -204,21 +204,24 @@ export const AGENT_CONFIG: Readonly<Record<string, AgentConfigRow>> = {
     skills: ['feature-knowledge', 'apply-feature-knowledge', 'apply-decisions', 'worktree-support'],
   },
   /**
-   * D-LEARNING-SHIPPED-ROW: the Learning tier is gated on an A/B run of the
-   * candidate (a cheaper model at a higher effort) against the current tier, over
-   * frozen batches. Until the verdict lands, the row keeps the model and the
-   * absent effort that main ships, together with every change the A/B does not
-   * decide: no preload, `omitClaudeMd`, and the same Read/Bash/Glob/Grep tools.
+   * D-LEARNING-SHIPPED-ROW: Learning keeps the model, the absent effort and the
+   * CLAUDE.md context that main ships. An A/B run over frozen batches decided it:
+   * the cheaper candidate (sonnet at high effort) fell clearly short of the capture
+   * bar, and the opus-at-medium fallback came in just under it. Series 2's other
+   * changes stay: no preload and the same Read/Bash/Glob/Grep tools.
    *
-   * The verdict is an edit to this row, the `model:` and `effort:` lines of
-   * learning.md and the default model in src/core/learning-tuning-config.ts, which
-   * tests/decisions/config.test.ts holds equal to this row.
+   * Learning does not omit CLAUDE.md. Its Encoded-retirement check reads the root
+   * CLAUDE.md for the rule that already states a lesson, and the A/B showed that
+   * without that context Learning stops retiring entries as Encoded. A change of
+   * tier is an edit to this row and to the `model:` and `effort:` lines of
+   * learning.md, and the default model in src/core/learning-tuning-config.ts,
+   * which tests/decisions/config.test.ts holds equal to this row.
    */
   learning: {
     model: 'opus',
     effort: null,
     policy: { kind: 'allow', tools: ['Read', 'Bash', 'Glob', 'Grep'] },
-    omitClaudeMd: true,
+    omitClaudeMd: false,
     skills: [],
   },
   validate: {

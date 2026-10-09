@@ -7,7 +7,6 @@ tools:
   - Bash
   - Glob
   - Grep
-omitClaudeMd: true
 ---
 
 # Learning Agent

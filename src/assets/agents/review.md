@@ -2,6 +2,7 @@
 name: Review
 description: Universal code review agent with parameterized focus. Dynamically loads pattern skill for assigned focus area.
 model: opus
+effort: high
 skills:
   - devflow:review-methodology
   - devflow:worktree-support

@@ -57,7 +57,7 @@ An agent that has Bash is given no Grep or Glob tool in Claude Code, even when i
 ## Effort and Project Context
 
 - `effort:` (`low`, `medium`, `high`, `xhigh` or `max`) is the agent's shipped reasoning effort, set on the line after `model:`. Lower effort on a mechanical agent is a deliberate saving. An agent with no `effort:` line follows the session.
-- `omitClaudeMd: true` stops Claude Code loading the user's, project's and local CLAUDE.md into the agent's context. Use it for an agent that does no project-aware judgment (Learning, Synthesize, Skim). Such an agent receives none of that text, so every rule it relies on has to be stated in its own body.
+- `omitClaudeMd: true` stops Claude Code loading the user's, project's and local CLAUDE.md into the agent's context. Use it for an agent that does no project-aware judgment (Synthesize, Skim). Such an agent receives none of that text, so every rule it relies on has to be stated in its own body. Learning keeps its CLAUDE.md context: its Encoded-retirement check reads the rules in the root CLAUDE.md, and an A/B run showed that without them it stops retiring entries as Encoded.
 
 ## Length Guidelines
 

@@ -515,6 +515,7 @@ describe('the table: every agent ships its row (D-AGENT-CONFIG-TABLE)', () => {
       ['an allowlist on a denylist agent', 'code', fm => { fm.tools = ['Read']; }],
       ['omitClaudeMd turned off', 'skim', fm => { fm.omitClaudeMd = null; }],
       ['omitClaudeMd turned on', 'triage', fm => { fm.omitClaudeMd = 'true'; }],
+      ['omitClaudeMd turned on for Learning, which keeps CLAUDE.md', 'learning', fm => { fm.omitClaudeMd = 'true'; }],
       ['a trimmed preload restored', 'validate', fm => { fm.skills = [...(fm.skills ?? []), 'devflow:testing']; }],
       ['a skills key where the row has none', 'learning', fm => { fm.skills = ['devflow:apply-decisions']; }],
       ['an unknown key', 'research', fm => { fm.keys = [...fm.keys, 'disallowedtools']; }],

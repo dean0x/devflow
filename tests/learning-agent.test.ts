@@ -95,8 +95,10 @@ describe('learning agent', () => {
       expect(parseYamlList(frontmatter, 'skills')).toEqual([]);
     });
 
-    it('omits the project CLAUDE.md: every rule the run needs is stated in this body', () => {
-      expect(frontmatter).toMatch(/^omitClaudeMd: true$/m);
+    // D-LEARNING-SHIPPED-ROW: the Encoded-retirement check reads the rules in the root
+    // CLAUDE.md, so Learning keeps that context.
+    it('keeps the project CLAUDE.md: its Encoded-retirement check reads the root CLAUDE.md', () => {
+      expect(frontmatter).not.toMatch(/^omitClaudeMd:/m);
     });
   });
 
