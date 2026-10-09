@@ -221,7 +221,7 @@ const BUDGET_SKILL_MD = 6_445;
  * Derived from a measured 64_914 (the worst spawn is setup-task, whose step 1c hops
  * into ensure-traceable-issue under ISSUE_REQUIRED) plus the 80 ch general headroom
  * above: 64_994. Re-derived by #393 from a measured 64_615 (git.md -315 ch): 64_695. Re-derived by #423 from a measured 62_893 (the preloaded
- * worktree-support skill lost its discovery algorithm, -1_496 ch, and the git skill's description fell to 144 characters, -216 ch): 62_973.
+ * worktree-support skill lost its discovery algorithm, -1_488 ch, and the git skill's description fell to 144 characters, -216 ch): 62_973.
  * The next addition to the agent or to a github mechanics file must fund itself with a cut.
  *
  * MAY BE LOWERED, NEVER RAISED. Registered as `budget-loaded-set` in
@@ -337,7 +337,7 @@ const BUDGET_LOADED_SET_LINEAR = 73_931;
  * references/publication-gate.md, still the worst op at 4_540) plus the 80 ch
  * general headroom above: 58_306. Re-derived by #393 from a measured 57_943, the same
  * worst op moved by exactly the git.md delta (-315 ch): 58_023. Re-derived by #423 from a measured 56_221, the same worst op moved by
- * exactly the two preloaded-skill cuts (-1_712 ch): 56_301.
+ * exactly the two preloaded-skill cuts (-1_704 ch): 56_301.
  *
  * MAY BE LOWERED, NEVER RAISED. Registered as `budget-loaded-set-pr-host` in
  * tests/fixtures/numeric-floors.json.
