@@ -419,6 +419,10 @@ describe('reapplyAgentMapping', async () => {
   const defaults = await loadShippedAgentDefaults();
   const codeShippedDefault = defaults['code']?.model ?? 'sonnet';
   const reviewShippedDefault = defaults['review']?.model ?? 'opus';
+  // D-SHIPPED-EFFORT: an agent that ships an effort keeps it across a reapply, so the
+  // shipped-default frontmatter of `code` carries that effort line when it ships one.
+  const codeShippedEffortLine = defaults['code']?.effort === undefined ? '' : `effort: ${defaults['code'].effort}\n`;
+  const codeShippedFrontmatter = `---\nname: Code\nmodel: ${codeShippedDefault}\n${codeShippedEffortLine}---\n\nbody\n`;
 
   let tmpInstallDir: string;
   let tmpDevflowDir: string;
@@ -621,10 +625,12 @@ describe('reapplyAgentMapping', async () => {
     expect(reviewFile).toContain(`model: ${reviewShippedDefault}`);
   });
 
-  it('AC-S1: hostile model name in mapping is rejected — installed file unchanged, warning emitted', async () => {
-    // reapplyAgentMapping reads agent-models.json; rewriteAgentFrontmatter rejects
-    // invalid model names (invalid-model error). The installed file must be
-    // byte-identical to before and a warning must name 'invalid-model'.
+  it('AC-S1: hostile model name in mapping is rejected — installed file stays at the shipped default, warning emitted', async () => {
+    // readAgentMapping drops a mapping entry whose model name is invalid, so the agent has
+    // no mapping and reapply resolves its shipped default (D-SHIPPED-EFFORT: shipped model
+    // AND shipped effort). The hostile value is never written, and an installed file that
+    // already holds the shipped default stays byte-identical. A warning must name
+    // 'invalid-model'.
 
     // Hostile mapping: model name containing a newline (YAML injection attempt)
     const mapping: AgentMappingFile = {
@@ -635,9 +641,8 @@ describe('reapplyAgentMapping', async () => {
     };
     await saveAgentMapping(tmpDevflowDir, mapping);
 
-    const originalContent = `---\nname: Code\nmodel: ${codeShippedDefault}\n---\n\nbody\n`;
     const codePath = path.join(tmpInstallDir, 'code.md');
-    await fs.writeFile(codePath, originalContent, 'utf-8');
+    await fs.writeFile(codePath, codeShippedFrontmatter, 'utf-8');
 
     const warnings: string[] = [];
     await reapplyAgentMapping({
@@ -647,12 +652,37 @@ describe('reapplyAgentMapping', async () => {
       onWarning: (msg) => warnings.push(msg),
     });
 
-    // File must be byte-identical to before (rewrite was rejected)
+    // File must be byte-identical to before (the rejected entry changed nothing)
     const afterContent = await fs.readFile(codePath, 'utf-8');
-    expect(afterContent).toBe(originalContent);
+    expect(afterContent).toBe(codeShippedFrontmatter);
 
     // A warning naming 'invalid-model' must have been emitted
     expect(warnings.some(w => w.includes('invalid-model'))).toBe(true);
+  });
+
+  it('AC-S1: a rejected mapping entry means the shipped default — a file without the shipped effort converges to it', async () => {
+    // The dropped entry leaves `code` with no mapping, so reapply writes what devflow ships
+    // for it (model and effort), and still injects nothing from the hostile value.
+    const mapping: AgentMappingFile = {
+      version: 1,
+      agents: {
+        code: { model: 'gpt\ntools:\n  - bash' },
+      },
+    };
+    await saveAgentMapping(tmpDevflowDir, mapping);
+
+    const codePath = path.join(tmpInstallDir, 'code.md');
+    await fs.writeFile(codePath, `---\nname: Code\nmodel: ${codeShippedDefault}\n---\n\nbody\n`, 'utf-8');
+
+    await reapplyAgentMapping({
+      installDir: tmpInstallDir,
+      devflowDir: tmpDevflowDir,
+      proxyEnabled: true,
+    });
+
+    const afterContent = await fs.readFile(codePath, 'utf-8');
+    expect(afterContent).toBe(codeShippedFrontmatter);
+    expect(afterContent).not.toContain('tools:');
   });
 
   it('A3: path-traversal mapping key is warned and skipped — containment guard', async () => {
