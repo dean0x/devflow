@@ -42,7 +42,7 @@ export const CODE_PRELOAD: readonly string[] = [
 export const MODE_SKILLS: readonly string[] = ['software-design', 'patterns', 'boundary-validation', 'dependency-research']
 
 /** The six SKILL.md files together, in bytes. Registered as `code-preload-max-bytes` in tests/fixtures/numeric-floors.json; lowered, never raised. */
-const CODE_PRELOAD_MAX_BYTES = 26_457;
+const CODE_PRELOAD_MAX_BYTES = 25_646;
 
 /**
  * Per-file caps for the three skills this ticket reshaped. `apply-decisions` stays under the

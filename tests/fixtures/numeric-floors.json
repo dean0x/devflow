@@ -414,11 +414,11 @@
     },
     {
       "id": "code-preload-max-bytes",
-      "ceiling": 26457,
-      "pattern": "const CODE_PRELOAD_MAX_BYTES = 26_457;",
+      "ceiling": 25646,
+      "pattern": "const CODE_PRELOAD_MAX_BYTES = 25_646;",
       "occurrences": 1,
       "sourceFile": "tests/guards/code-preload.test.ts",
-      "description": "Total bytes of the six SKILL.md files in Code's frontmatter preload (git, testing, test-driven-development, worktree-support, apply-feature-knowledge, apply-decisions) (D-CODE-PRELOAD-CAP). The ten-file preload was 53,450 bytes; the four mode skills moved to the on-demand Step 0 table and the three helper skills were cut, which measured 26,377, plus 80 bytes of headroom. git, testing and test-driven-development are fixed terms here, so growth in any of the six pays for itself inside the six. May be LOWERED, never raised: a preload ceiling raised to fit what the six grew into is a description of their size, and Code is billed on it at every spawn."
+      "description": "Total bytes of the six SKILL.md files in Code's frontmatter preload (git, testing, test-driven-development, worktree-support, apply-feature-knowledge, apply-decisions) (D-CODE-PRELOAD-CAP). The ten-file preload was 53,450 bytes; the four mode skills moved to the on-demand Step 0 table and the three helper skills were cut, which measured 26,377. The review pass then restored two testing triggers and two apply-decisions clauses (+72) and trimmed test-driven-development semantically (-883), so the six measure 25,566 and the ceiling is that plus 80 bytes of headroom. git, testing and test-driven-development are fixed terms here, so growth in any of the six pays for itself inside the six. May be LOWERED, never raised: a preload ceiling raised to fit what the six grew into is a description of their size, and Code is billed on it at every spawn."
     }
   ]
 }
