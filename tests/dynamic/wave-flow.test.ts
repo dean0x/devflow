@@ -1554,7 +1554,7 @@ describe('#421 AC-19: Gate 2 issues one Evaluate spawn whose prompt names both c
     const result = await runEngine(SINGLE!, { ...ENGINE_ARGS, plan: 'the plan' }, stubAgent({ tickets: { '#7': OWN }, evaluateFail: ['#7'] }, spawns))
     expect((result.gate2 as { evaluateVerdict: string }).evaluateVerdict).toBe('FAIL-FIXED')
     expect(result.verdict).toBe('UNVERIFIED')
-    const fix = spawns.find(s => s.agentType === 'Code' && s.prompt.startsWith('Fix the alignment issues'))
+    const fix = spawns.find(s => s.agentType === 'Code' && s.prompt.startsWith('OPERATION: alignment-fix\nFix the alignment issues'))
     expect(fix?.prompt).toContain('criterion 2 is not met')
     expect(spawns.filter(s => s.agentType === 'Evaluate'), 'no re-evaluation by design').toHaveLength(1)
   })

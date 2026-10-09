@@ -27,7 +27,8 @@ import {
 } from '../src/cli/commands/compliance-prompts.js';
 import { COMPLIANCE_FRAMEWORKS } from '../src/core/compliance.js';
 import { composeComplianceSkill } from '../src/core/compliance-compose.js';
-import { ROOT, requireDistFile, requireDistFiles, walkFiles } from './helpers.js';
+import { ROOT, collectCodeSpawnSites, requireDistFile, requireDistFiles, walkFiles } from './helpers.js';
+import type { CodeSpawnSite } from './helpers.js';
 
 // ── Fake prompt builder ────────────────────────────────────────────────────────
 
@@ -402,44 +403,13 @@ const CODE_SPAWN_FLOORS: Readonly<Record<string, number>> = {
   'implement.md': 10,
   // the issue-fix and validation-fix fences + the CI-fix line
   'resolve.md': 3,
-  // implement, validation-fix, alignment-fix, qa-fix, review-fix and final-validation-fix templates
-  'dynamic-build.md': 6,
+  // implement, validation-fix, alignment-fix, qa-fix, review-fix and final-validation-fix templates + the merge-conflict resolver sentence
+  'dynamic-build.md': 7,
 };
-
-interface CodeSpawnSite {
-  readonly file: string;
-  /** 1-based line the spawn starts on. */
-  readonly line: number;
-  readonly payload: string;
-}
-
-/**
- * Named collector: every Code spawn site in a compiled command, in the three shapes the
- * command layer writes — a fenced spawn (`Agent(subagent_type="Code"):` then a quoted
- * payload up to its closing quote, indented or not; one fence may hold two spawns), a one-line prose spawn
- * (Spawn `Agent(subagent_type="Code")` …), and a workflow template literal
- * (agent(`…`, { agentType: "Code" })). The preamble's `agent("your prompt here", …)`
- * usage example is not a template literal, so it is not a site.
- */
-function collectCodeSpawnSites(file: string, text: string): CodeSpawnSite[] {
-  const MAX_SITES = 64;
-  const SHAPES = [
-    /Agent\(subagent_type="Code"\):[^\n]*\n[ \t]*"[\s\S]*?"[ \t]*\n[ \t]*(?:\n|```)/g,
-    /^.*Spawn `Agent\(subagent_type="Code"\)`.*$/gm,
-    /agent\(`(?:(?!agent\(`)[\s\S])*?`, \{ agentType: "Code" \}/g,
-  ];
-  const sites = SHAPES.flatMap(re => [...text.matchAll(re)].map(m => ({
-    file,
-    line: text.slice(0, m.index).split('\n').length,
-    payload: m[0],
-  })));
-  if (sites.length > MAX_SITES) throw new Error(`${file}: more than ${MAX_SITES} Code spawn sites — bound exceeded`);
-  return sites;
-}
 
 /** The sites whose payload hands the Code agent no compliance lens — rendered for the failure message. */
 function collectUnlensedSites(sites: readonly CodeSpawnSite[]): string[] {
-  const LENS = /COMPLIANCE_FRAMEWORKS: \$?\{COMPLIANCE_FRAMEWORKS\}|with `COMPLIANCE_FRAMEWORKS`/;
+  const LENS = /COMPLIANCE_FRAMEWORKS: \$?\{COMPLIANCE_FRAMEWORKS\}|(?:with|carries) `COMPLIANCE_FRAMEWORKS`/;
   return sites.filter(s => !LENS.test(s.payload)).map(s => `${s.file}:${s.line}`);
 }
 
@@ -500,6 +470,7 @@ describe('TP-43 (AC-37): the compiled compliance lens loads only the ids the set
       ['implement.md', implement, '\n   COMPLIANCE_FRAMEWORKS: {COMPLIANCE_FRAMEWORKS}"', '"'], // an indented fix-phase fence
       ['implement.md', implement, ' with `COMPLIANCE_FRAMEWORKS`', ''],                      // the CI-fix prose spawn
       ['dynamic-build.md', requireDistFile('dynamic-build.md'), '\nCOMPLIANCE_FRAMEWORKS: ${COMPLIANCE_FRAMEWORKS}', ''], // a template spawn
+      ['dynamic-build.md', requireDistFile('dynamic-build.md'), ' and carries `COMPLIANCE_FRAMEWORKS`', ''],              // the merge-conflict resolver sentence
     ];
     for (const [host, real, lens, without] of probes) {
       expect(collectUnlensedSites(collectCodeSpawnSites(host, real)), `${host}: the live text is clean`).toEqual([]);

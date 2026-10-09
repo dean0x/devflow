@@ -187,7 +187,8 @@ if (BRANCH === "(none)") {
 
 // Phase 2: Implement
 await phase("implement", () =>
-  agent(`Implement the following ticket on branch ${BRANCH}:
+  agent(`OPERATION: implement
+Implement the following ticket on branch ${BRANCH}:
 
 ${TICKET}
 
@@ -228,7 +229,8 @@ Return: {"verdict": "PASS" | "FAIL", "details": "..."}`, { agentType: "Validate"
     let failureDetails = validation?.details || "Validate agent returned no PASS verdict";
     // Up to 2 fix attempts, each followed by a Validate re-run
     for (let attempt = 1; attempt <= 2; attempt++) {
-      await agent(`Fix the validation failures on branch ${BRANCH}:
+      await agent(`OPERATION: validation-fix
+Fix the validation failures on branch ${BRANCH}:
 ${failureDetails}
 ISSUE_NUMBER: ${ISSUE_NUMBER}
 ISSUE_PR_LINK: ${ISSUE_PR_LINK}
@@ -269,7 +271,8 @@ Return: {"verdict": "PASS" | "FAIL", "rationale": "..."} — FAIL if either answ
     if (evalVerdict === "FAIL") {
       // fix-and-continue — no re-evaluate, no inline Gate 1. The final Gate 1 (#2)
       // after the review pass is the build gate before the branch is handed back.
-      await agent(`Fix the alignment issues identified by the Evaluate agent on branch ${BRANCH}:
+      await agent(`OPERATION: alignment-fix
+Fix the alignment issues identified by the Evaluate agent on branch ${BRANCH}:
 ${evaluation?.rationale || "see the Evaluate agent's report"}
 ISSUE_NUMBER: ${ISSUE_NUMBER}
 ISSUE_PR_LINK: ${ISSUE_PR_LINK}
@@ -289,7 +292,8 @@ Cover: functionality, API contracts, performance, and cover every TEST_PLAN scen
     testVerdict = testResult.verdict;
     if (testVerdict === "FAIL") {
       // fix-and-continue — no re-test, no inline Gate 1.
-      await agent(`Fix the failing acceptance test scenarios on branch ${BRANCH}:
+      await agent(`OPERATION: qa-fix
+Fix the failing acceptance test scenarios on branch ${BRANCH}:
 ${testResult.failures}
 ISSUE_NUMBER: ${ISSUE_NUMBER}
 ISSUE_PR_LINK: ${ISSUE_PR_LINK}
@@ -402,7 +406,8 @@ ${JSON.stringify(allFindings.map((f, i) => ({ index: i, description: f.descripti
     const chunkResults = [];
     for (let i = 0; i < findings.length; i += MAX_BATCH) {
       const chunk = findings.slice(i, i + MAX_BATCH);
-      const r = await agent(`Fix the following confirmed review findings on branch ${BRANCH}${fileKey.startsWith("__nofile") ? "" : ` in ${fileKey}`}:
+      const r = await agent(`OPERATION: issue-fix
+Fix the following confirmed review findings on branch ${BRANCH}${fileKey.startsWith("__nofile") ? "" : ` in ${fileKey}`}:
 ${chunk.map(f => `- ${f.description} (${f.severity})`).join("\n")}
 
 ISSUE_NUMBER: ${ISSUE_NUMBER}
@@ -462,7 +467,8 @@ Return: {"verdict": "PASS" | "FAIL", "details": "..."}`, { agentType: "Validate"
   if (validation?.verdict !== "PASS") {
     let failureDetails = validation?.details || "Validate agent returned no PASS verdict";
     for (let attempt = 1; attempt <= 2; attempt++) {
-      await agent(`Fix the final validation failures on branch ${BRANCH}:
+      await agent(`OPERATION: validation-fix
+Fix the final validation failures on branch ${BRANCH}:
 ${failureDetails}
 ISSUE_NUMBER: ${ISSUE_NUMBER}
 ISSUE_PR_LINK: ${ISSUE_PR_LINK}
