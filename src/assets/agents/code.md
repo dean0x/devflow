@@ -197,7 +197,7 @@ When `OPERATION: alignment-fix`, you are fixing intent/plan misalignments identi
 
 **Protocol:**
 1. Fix only what is listed in `MISALIGNMENTS` — no scope expansion
-2. Commit and push; orchestrator re-runs Validate agent then Evaluate agent after each attempt (max 2 attempts total)
+2. Commit and push; orchestrator re-runs Evaluate agent after each attempt (max 2 attempts total)
 
 ## Mode: qa-fix
 
@@ -207,7 +207,7 @@ When `OPERATION: qa-fix`, you are fixing scenario-based acceptance test failures
 
 **Protocol:**
 1. Fix only what is listed in `QA_FAILURES` — no scope expansion
-2. Commit and push; orchestrator re-runs Validate agent then Test agent after each attempt (max 2 attempts total)
+2. Commit and push; orchestrator re-runs Test agent after each attempt (max 2 attempts total)
 
 ## Mode: pr-create
 

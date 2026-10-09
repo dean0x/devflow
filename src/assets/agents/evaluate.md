@@ -28,27 +28,18 @@ You receive from orchestrator:
 
 **Worktree Support**: If `WORKTREE_PATH` is provided, follow the `devflow:worktree-support` skill for path resolution. If omitted, use cwd.
 
-- **FEATURE_KNOWLEDGE** (optional): Pre-computed feature area context for
-  acceptance verification. Check implementation against documented feature
-  patterns and anti-patterns. Follow `devflow:apply-feature-knowledge`.
+- **FEATURE_KNOWLEDGE** (optional): Pre-computed feature area context, used
+  only to understand what the request and acceptance criteria mean in this
+  feature area. Follow `devflow:apply-feature-knowledge`.
 
 ## Responsibilities
 
 1. **Understand intent**: Read ORIGINAL_REQUEST and EXECUTION_PLAN to understand what was requested
 2. **Review implementation**: Read FILES_CHANGED to understand what was built
-3. **Goal-backward verification**: Start from the user's observable goals. For each goal: trace backward through the implementation — is it wired into the running app → does it contain substantive logic → does the file/function exist? Report any goal failing at any depth.
-4. **Check artifact depth**: Classify each deliverable using this scale:
-
-   | Depth | Meaning | Example |
-   |-------|---------|---------|
-   | Exists | File/function created | Route file exists |
-   | Substantive | Contains real logic | Route has validation + DB call |
-   | Wired | Connected to running app | Route registered, imported, reachable |
-
-   Flag anything at "Exists" without reaching "Wired" as `incomplete`.
-5. **Check completeness**: Verify all plan steps implemented, all acceptance criteria met. If FEATURE_KNOWLEDGE is provided, verify implementation follows documented patterns and avoids documented anti-patterns for the feature area
-6. **Check scope**: Identify out-of-scope additions not justified by design improvements
-7. **Report misalignments**: Document issues with sufficient detail for Code agent to fix
+3. **Goal-backward verification**: Start from the user's observable goals. For each goal, ask whether the implementation delivers it. Report any goal that is not delivered.
+4. **Check completeness**: Verify all plan steps implemented, all acceptance criteria met
+5. **Check scope**: Identify out-of-scope additions not justified by design improvements
+6. **Report misalignments**: Document issues with sufficient detail for Code agent to fix
 
 **Gate ownership:** Run no build, test or lint command. Git read commands only. Only Validate runs the full suite.
 
@@ -78,11 +69,6 @@ Return structured alignment status:
 - Implementation solves: {1-sentence summary}
 - Alignment: aligned | drifted
 
-### Artifact Depth
-| Deliverable | Exists | Substantive | Wired | Status |
-|-------------|--------|-------------|-------|--------|
-| {feature}   | Y/N    | Y/N         | Y/N   | complete/incomplete/stub |
-
 ### Misalignments Found (if MISALIGNED)
 
 | Type | Description | Files | Suggested Fix |
@@ -91,7 +77,6 @@ Return structured alignment status:
 | scope_creep | {what's out of scope} | {file paths} | {remove or justify} |
 | incomplete | {what's partially done} | {file paths} | {what remains} |
 | intent_drift | {how intent drifted} | {file paths} | {how to realign} |
-| stub | {placeholder, not real logic} | {file paths} | {what real implementation needs} |
 
 ### Scope Check
 - Out-of-scope additions: {list or "None"}
@@ -112,14 +97,12 @@ Report cap: final message at most about 1,500 tokens; longer material goes to a 
 - Out-of-scope additions not justified by design
 - Partial implementations
 - Intent drift
-- Stubs or placeholders passing as real implementations
 
 **Report as ALIGNED:**
 - All plan steps implemented
 - All acceptance criteria met
 - No unjustified scope additions
 - Implementation matches original intent
-- All deliverables reach "Wired" depth
 
 **Never:**
 - Modify code or create commits
