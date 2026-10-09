@@ -18,3 +18,6 @@ export const VERIFY_EVIDENCE_SCRIPT = path.join(ROOT, 'src', 'assets', 'scripts'
 
 /** Release traceability plumbing: the last release tag and the per-commit trace map (git only). */
 export const RELEASE_TRACE_SCRIPT = path.join(ROOT, 'src', 'assets', 'scripts', 'release-trace.cjs')
+
+/** The CI wait for one pushed head: gh in, one status line out (D-CI-WAIT-INLINE). */
+export const CI_WAIT_SCRIPT = path.join(ROOT, 'src', 'assets', 'scripts', 'ci-wait.cjs')

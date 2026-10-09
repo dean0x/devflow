@@ -403,6 +403,14 @@
       "occurrences": 1,
       "sourceFile": "tests/guards/arguments-once.test.ts",
       "description": "Max placeholders ($ARGUMENTS, literal and positional) one compiled command may carry. Claude Code substitutes the placeholder at every occurrence, so a long argument is copied into the main-thread context once per occurrence; a host binds it once, inside a <command-input> block, and every later step names the bound text COMMAND_INPUT. May be LOWERED, never raised: a maximum raised to fit a command that grew a second occurrence asserts that the current count is the current count."
+    },
+    {
+      "id": "ci-wait-max-seconds",
+      "ceiling": 570,
+      "pattern": "const CI_WAIT_MAX_SECONDS = 570;",
+      "occurrences": 1,
+      "sourceFile": "src/assets/scripts/ci-wait.cjs",
+      "description": "Longest one ci-wait.cjs invocation may wait for a CI verdict, every gh timeout and every sleep counted (D-CI-WAIT-BOUNDS). The callers run it as one foreground Bash call with timeout 600000, and a silent foreground call of about this length was measured to complete in a main-thread claude -p run on 2026-10-09, so the cap sits under the Bash timeout with room for node startup. May be LOWERED, never raised: a wait raised to fit a slower CI would push a single silent call toward the Bash ceiling and the stream watchdog."
     }
   ]
 }
