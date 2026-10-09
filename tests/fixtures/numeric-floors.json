@@ -411,6 +411,14 @@
       "occurrences": 1,
       "sourceFile": "src/assets/scripts/ci-wait.cjs",
       "description": "Longest one ci-wait.cjs invocation may wait for a CI verdict, every gh timeout and every sleep counted (D-CI-WAIT-BOUNDS). The callers run it as one foreground Bash call with timeout 600000, and a silent foreground call of about this length was measured to complete in a main-thread claude -p run on 2026-10-09, so the cap sits under the Bash timeout with room for node startup. May be LOWERED, never raised: a wait raised to fit a slower CI would push a single silent call toward the Bash ceiling and the stream watchdog."
+    },
+    {
+      "id": "code-preload-max-bytes",
+      "ceiling": 26457,
+      "pattern": "const CODE_PRELOAD_MAX_BYTES = 26_457;",
+      "occurrences": 1,
+      "sourceFile": "tests/guards/code-preload.test.ts",
+      "description": "Total bytes of the six SKILL.md files in Code's frontmatter preload (git, testing, test-driven-development, worktree-support, apply-feature-knowledge, apply-decisions) (D-CODE-PRELOAD-CAP). The ten-file preload was 53,450 bytes; the four mode skills moved to the on-demand Step 0 table and the three helper skills were cut, which measured 26,377, plus 80 bytes of headroom. git, testing and test-driven-development are fixed terms here, so growth in any of the six pays for itself inside the six. May be LOWERED, never raised: a preload ceiling raised to fit what the six grew into is a description of their size, and Code is billed on it at every spawn."
     }
   ]
 }

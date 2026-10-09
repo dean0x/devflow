@@ -14,7 +14,7 @@ import { existsSync, readFileSync, readdirSync, statSync, mkdtempSync, mkdirSync
 import { tmpdir } from 'os';
 import * as path from 'path';
 import { getAllSkillNames, getAllCommandNames, getAllAgentNames, DEVFLOW_PLUGINS } from '../src/core/plugins.js';
-import { requireDistFiles, requireDistFile, resolveAllAgents, resolveAgentSource, walkFiles } from './helpers.js';
+import { requireDistFiles, requireDistFile, resolveAllAgents, resolveAgentSource, walkFiles, parseFrontmatterSkills } from './helpers.js';
 import { AGENT_CONFIG } from './fixtures/agent-config.js';
 
 const ROOT = path.resolve(import.meta.dirname, '..');
@@ -45,16 +45,6 @@ function extractInstallPaths(content: string): string[] {
 function extractSourceDirRefs(content: string): string[] {
   const matches = content.matchAll(/src\/assets\/skills\/([\w:-]+)\//g);
   return [...matches].map(m => m[1]);
-}
-
-/** Parse frontmatter skills block-list: `skills:\n  - devflow:a\n  - devflow:b` → ['a', 'b']. */
-function parseFrontmatterSkills(content: string): string[] {
-  const blockMatch = content.match(/^skills:\s*\n((?:\s+-\s+.+\n?)+)/m);
-  if (!blockMatch) return [];
-  return blockMatch[1]
-    .split('\n')
-    .map(l => l.trim().replace(/^-\s+/, '').replace(/^devflow:/, ''))
-    .filter(Boolean);
 }
 
 /**

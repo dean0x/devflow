@@ -355,6 +355,30 @@ export function resolveAllAgents(root: string = ROOT): Map<string, AgentSource> 
   return result
 }
 
+/**
+ * The eight operating modes of the Code agent (`OPERATION`), `implement` being the default when
+ * absent. One list for the code.md Step 0 table (tests/guards/code-preload.test.ts) and for the
+ * spawn-site guard (tests/guards/code-operation.test.ts).
+ */
+export const CODE_OPERATIONS: readonly string[] = [
+  'implement', 'issue-fix', 'validation-fix', 'alignment-fix', 'qa-fix', 'pr-create', 'ci-fix', 'edit',
+]
+
+/**
+ * Parse an agent's frontmatter `skills:` block-list (`- devflow:<name>` items) into the
+ * unprefixed names. The one reader of an agent's preload: the re-entrancy guard in
+ * skill-references.test.ts and the Code preload guard in tests/guards/code-preload.test.ts
+ * both read it, so they agree on what a preload is.
+ */
+export function parseFrontmatterSkills(content: string): string[] {
+  const blockMatch = content.match(/^skills:\s*\n((?:\s+-\s+.+\n?)+)/m)
+  if (!blockMatch) return []
+  return blockMatch[1]
+    .split('\n')
+    .map(l => l.trim().replace(/^-\s+/, '').replace(/^devflow:/, ''))
+    .filter(Boolean)
+}
+
 // ── Fenced-code-block awareness for column-0 section boundaries ──────────────
 //
 // D-FENCE-AWARE-BOUNDARY. A `## ` line at column 0 inside a fenced code

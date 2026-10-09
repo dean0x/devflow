@@ -79,10 +79,11 @@ Language and framework patterns. Referenced by agents via frontmatter and condit
 
 ## How Skills Activate
 
-Skills activate through two guaranteed mechanisms:
+Skills activate through three guaranteed mechanisms:
 
 1. **Agent frontmatter `skills:` field** — When an agent runs, all skills listed in its frontmatter are loaded into context. This is the primary activation path.
 2. **Review dynamic read** — The Review agent reads the pattern skill file for its assigned focus area from a lookup table (e.g., `focus=testing` → `testing/SKILL.md`).
+3. **On-demand Skill-tool load** — An agent loads a skill with `Skill(skill="devflow:<name>")` at the step whose written condition holds, and that skill is not in its `skills:` list. Code's "Step 0: Mode Skills" table does this for `software-design`, `patterns`, `boundary-validation` and `dependency-research`: each cell states a hard condition judged from the spawn's own inputs, and a cell reading `never` loads nothing. A skill loaded this way costs nothing on a spawn that does not need it, so a skill only some operating modes use belongs here, not in the preload.
 
 Skills with `user-invocable: false` also appear in Claude Code's skill catalog with their description. Claude MAY auto-invoke them based on description matching, but this is not guaranteed and should not be relied upon as the sole activation path.
 
@@ -99,11 +100,17 @@ The `devflow:<skill-name> already running` guard string is the failure signature
 ```yaml
 ---
 name: Code
-skills: software-design, git, patterns, ...
+skills:
+  - devflow:git
+  - devflow:testing
+  - devflow:test-driven-development
+  - devflow:worktree-support
+  - devflow:apply-feature-knowledge
+  - devflow:apply-decisions
 ---
 ```
 
-All listed skills are loaded when the Code agent is spawned.
+All six listed skills are loaded when the Code agent is spawned. The four mode skills (`software-design`, `patterns`, `boundary-validation`, `dependency-research`) are not listed: Code loads them on demand from its Step 0 table, by the operating mode named on the first line of the spawn prompt. `tests/guards/code-preload.test.ts` holds the six-skill set and a byte ceiling on it.
 
 ## Skill File Template
 

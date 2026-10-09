@@ -352,17 +352,7 @@ interface ToolBodyException {
  * finding is either fixed or listed here, and an entry that no longer matches a finding
  * fails the guard, so the list can only shrink.
  */
-const TOOL_BODY_EXCEPTIONS: readonly ToolBodyException[] = [
-  {
-    agent: 'code',
-    source: 'skill:dependency-research',
-    tool: 'Agent',
-    reason:
-      'The dependency-research skill sends its reader to an Explore subagent for the search, and Code denies Agent. ' +
-      'The skill is written for the main thread, which can spawn. Delete this entry when Code stops preloading the skill ' +
-      '(the Skills diet series moves it to an on-demand load); the stale-exception arm fails until then.',
-  },
-];
+const TOOL_BODY_EXCEPTIONS: readonly ToolBodyException[] = [];
 
 function isExcepted(v: ToolBodyViolation, exceptions: readonly ToolBodyException[]): boolean {
   return exceptions.some(e => e.agent === v.agent && e.source === v.source && e.tool === v.tool);

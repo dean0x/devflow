@@ -123,16 +123,13 @@ describe.skipIf(!isClaudeAvailable())('subagent skill preload', () => {
     ).toBe(true);
   }, 90000);
 
-  it('Code agent preloads all 8 declared core skills', async () => {
-    const allPreloads = await spawnAgentAndGetAllPreloads('Code', 'reply with one line only — do not create, modify, or delete any file, do not run git, do not write any code');
-    const expected = [
-      'software-design', 'git', 'patterns', 'testing',
-      'test-driven-development', 'dependency-research', 'boundary-validation', 'worktree-support',
-    ];
-    expect(
-      allPreloads.some((p) => expected.every((s) => p.includes(s))),
-      `No transcript contains ${expected.join(', ')}. Found: ${JSON.stringify(allPreloads)}`,
-    ).toBe(true);
+  it('Code agent preloads the six core skills, and none of the four mode skills', async () => {
+    await expectRetainedPreloads(
+      'Code',
+      'reply with one line only — do not create, modify, or delete any file, do not run git, do not write any code',
+      ['git', 'testing', 'test-driven-development', 'worktree-support', 'apply-feature-knowledge', 'apply-decisions'],
+      ['software-design', 'patterns', 'boundary-validation', 'dependency-research'],
+    );
   }, 90000);
 
   it('Design agent preloads worktree-support, apply-decisions, gap-analysis, design-review', async () => {
