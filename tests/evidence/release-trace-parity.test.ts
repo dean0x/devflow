@@ -30,7 +30,8 @@ type Grammar = 'github' | 'jira' | 'linear'
 
 /** Transcribed from the script's exports. Open release-trace.cjs before changing this. */
 interface ReleaseTraceLiterals {
-  readonly KEYWORD_RE: RegExp
+  readonly CLOSING_KEYWORD_RE: RegExp
+  readonly TRACE_KEYWORD_RE: RegExp
   readonly TRAILING_CLASS: string
   readonly MESSAGE_LOG_FLAGS: readonly string[]
   readonly GRAMMARS: Readonly<Record<Grammar, RegExp>>
@@ -131,7 +132,7 @@ export function collectParityDrift(script: ReleaseTraceLiterals, refs: Readonly<
     if (rule === null) {
       drift.push(`${p}: step 3a or its literals are missing`)
     } else {
-      if (rule.keyword !== script.KEYWORD_RE.source) drift.push(`${p}: keyword ${rule.keyword} ≠ KEYWORD_RE ${script.KEYWORD_RE.source}`)
+      if (rule.keyword !== script.CLOSING_KEYWORD_RE.source) drift.push(`${p}: keyword ${rule.keyword} ≠ CLOSING_KEYWORD_RE ${script.CLOSING_KEYWORD_RE.source}`)
       if (rule.trailingClass !== script.TRAILING_CLASS) drift.push(`${p}: trailing class ${rule.trailingClass} ≠ TRAILING_CLASS ${script.TRAILING_CLASS}`)
     }
     const field = collectMessageField(refs[p])
@@ -141,8 +142,24 @@ export function collectParityDrift(script: ReleaseTraceLiterals, refs: Readonly<
     const grammar = GRAMMAR_COLLECTORS[p](refs[p])
     if (grammar !== script.GRAMMARS[p].source) drift.push(`${p}: history grammar ${grammar} ≠ GRAMMARS.${p} ${script.GRAMMARS[p].source}`)
   }
-  if (script.KEYWORD_RE.flags !== 'i') drift.push(`KEYWORD_RE flags ${script.KEYWORD_RE.flags} ≠ i (step 3a is case-insensitive, nothing else)`)
+  for (const name of ['CLOSING_KEYWORD_RE', 'TRACE_KEYWORD_RE'] as const) {
+    if (script[name].flags !== 'i') drift.push(`${name} flags ${script[name].flags} ≠ i (step 3a is case-insensitive, nothing else)`)
+  }
+  drift.push(...collectTraceSetDrift(script))
   return drift
+}
+
+/**
+ * Named collector: where the script's trace set is not exactly its closing set plus
+ * `refs`. The prompt states only the closing set (a `Refs #N` commit ships no
+ * issue); the script's trace map counts a commit that merely mentions an issue as
+ * traced, so the two sets differ by that one keyword and by nothing else.
+ */
+export function collectTraceSetDrift(script: ReleaseTraceLiterals): string[] {
+  const widened = script.CLOSING_KEYWORD_RE.source.replace(/\)(:\?\$)$/, '|refs)$1')
+  return widened !== script.CLOSING_KEYWORD_RE.source && widened === script.TRACE_KEYWORD_RE.source
+    ? []
+    : [`TRACE_KEYWORD_RE ${script.TRACE_KEYWORD_RE.source} ≠ CLOSING_KEYWORD_RE ${script.CLOSING_KEYWORD_RE.source} plus \`refs\``]
 }
 
 /** Named collector: texts whose `TRACE` template names other fields than TRACE_HEADER_RE, or does not instantiate into it. */
@@ -174,12 +191,31 @@ describe('AC-4: release-trace.cjs and the built gather references state one rule
       expect(GRAMMAR_COLLECTORS[p](gatherRef(p)), `${p}: history grammar`).not.toBeNull()
       expect(collectMessageField(gatherRef(p)), `${p}: step 3a's message format`).toBe('%B')
     }
-    expect(SCRIPT.KEYWORD_RE.source.length).toBeGreaterThan(20)
+    expect(SCRIPT.CLOSING_KEYWORD_RE.source.length).toBeGreaterThan(20)
     expect(scriptMessageField(SCRIPT.MESSAGE_LOG_FLAGS), 'the script scans the full message').toBe('%B')
   })
 
   it('the keyword rule, the trailing class and all three grammars are equal', () => {
     expect(collectParityDrift(SCRIPT, builtRefs())).toEqual([])
+  })
+
+  it('the closing set is the prompt\'s rule, and the trace set is the closing set plus `refs`', () => {
+    const closing = ['close', 'closes', 'closed', 'fix', 'fixes', 'fixed', 'resolve', 'resolves', 'resolved', 'Closes:', '(fixes']
+    const mentionOnly = ['refs', 'Refs:', '(refs']
+    const neither = ['ref', 'prefixes', 'fixture', 'closest', 'resolver']
+    for (const word of closing) {
+      expect(SCRIPT.CLOSING_KEYWORD_RE.test(word), `${word}: closing`).toBe(true)
+      expect(SCRIPT.TRACE_KEYWORD_RE.test(word), `${word}: trace`).toBe(true)
+    }
+    for (const word of mentionOnly) {
+      expect(SCRIPT.CLOSING_KEYWORD_RE.test(word), `${word}: closing`).toBe(false)
+      expect(SCRIPT.TRACE_KEYWORD_RE.test(word), `${word}: trace`).toBe(true)
+    }
+    for (const word of neither) {
+      expect(SCRIPT.CLOSING_KEYWORD_RE.test(word), `${word}: closing`).toBe(false)
+      expect(SCRIPT.TRACE_KEYWORD_RE.test(word), `${word}: trace`).toBe(false)
+    }
+    expect(collectTraceSetDrift(SCRIPT)).toEqual([])
   })
 
   it('step 6 in every reference and /release name the TRACE header\'s fields, in the script\'s order', () => {
@@ -206,11 +242,28 @@ describe('AC-4: release-trace.cjs and the built gather references state one rule
 describe('AC-4: known-bad probes — a drifted reference is reported by the same collectors', () => {
   it('a drifted keyword in one provider is reported for that provider only', () => {
     const refs = builtRefs()
-    const drifted = { ...refs, jira: refs.jira.replace('resolve[sd]?|refs)', 'resolve[sd]?|ref)') }
+    const drifted = { ...refs, jira: refs.jira.replace('resolve[sd]?):?$', 'resolve[sd]?|ref):?$') }
     expect(drifted.jira, 'the seed must land').not.toBe(refs.jira)
     const drift = collectParityDrift(SCRIPT, drifted)
     expect(drift).toHaveLength(1)
     expect(drift[0]).toMatch(/^jira: keyword/)
+  })
+
+  it('a prompt that lets `refs` ship an issue again is reported for that provider only', () => {
+    const refs = builtRefs()
+    const drifted = { ...refs, linear: refs.linear.replace('resolve[sd]?):?$', 'resolve[sd]?|refs):?$') }
+    expect(drifted.linear, 'the seed must land').not.toBe(refs.linear)
+    const drift = collectParityDrift(SCRIPT, drifted)
+    expect(drift).toHaveLength(1)
+    expect(drift[0]).toMatch(/^linear: keyword .*\|refs\)/)
+  })
+
+  it('a trace set that is not the closing set plus `refs` is reported', () => {
+    const noRefs = { ...SCRIPT, TRACE_KEYWORD_RE: SCRIPT.CLOSING_KEYWORD_RE }
+    expect(collectTraceSetDrift(noRefs), 'a trace set that dropped `refs`').toHaveLength(1)
+    const widerStill = { ...SCRIPT, TRACE_KEYWORD_RE: /^\(?(close[sd]?|fix(e[sd])?|resolve[sd]?|refs|see):?$/i }
+    expect(collectTraceSetDrift(widerStill), 'a trace set that gained another keyword').toHaveLength(1)
+    expect(collectParityDrift(noRefs, builtRefs())).toHaveLength(1)
   })
 
   it('a drifted grammar, and a Linear line the generic collector cannot read, are reported', () => {

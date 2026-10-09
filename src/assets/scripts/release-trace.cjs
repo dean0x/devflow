@@ -113,12 +113,28 @@ const FULL_SHA_RE = /^[0-9a-f]{40}$/;
 const KEY_RE = /^[A-Z][A-Z0-9_]{1,9}$/;
 
 /**
- * Step 3a's closing-keyword regex, byte-for-byte the literal the built
- * `gather-release-evidence` references state, applied case-insensitively WITHOUT
- * the `u` flag — so a non-ASCII letter (`ſ`, the Kelvin sign) never folds onto an
- * ASCII keyword letter. A parity test pins `.source` and `.flags` to the built text.
+ * D-TRACE-KEYWORDS: two keyword sets, deliberately unequal, because they answer
+ * two different questions.
+ *
+ * CLOSING_KEYWORD_RE is step 3a's closing-keyword regex, byte-for-byte the literal
+ * the built `gather-release-evidence` references state: a commit that carries one
+ * of these keywords ships the issue it names. `Refs #N` only mentions an issue, so
+ * `refs` is not a closing keyword and the prompt never lets such a commit reach
+ * SHIPPED_ISSUES. The script itself classifies with TRACE_KEYWORD_RE; this regex
+ * is exported so a parity test can pin the prompt's rule to a literal.
+ *
+ * TRACE_KEYWORD_RE is the closing set plus `refs`. The trace map asks the weaker
+ * question "does this commit name an issue at all?", and a `Refs #N` commit does,
+ * so it is `traced` and not `untraced`. Narrowing the closing set must not turn
+ * those commits into traceability gaps in the release confirm.
+ *
+ * Both apply case-insensitively WITHOUT the `u` flag — so a non-ASCII letter
+ * (`ſ`, the Kelvin sign) never folds onto an ASCII keyword letter. A parity test
+ * pins CLOSING_KEYWORD_RE's `.source` and `.flags` to the built text, and
+ * TRACE_KEYWORD_RE to the closing set plus `refs`.
  */
-const KEYWORD_RE = /^\(?(close[sd]?|fix(e[sd])?|resolve[sd]?|refs):?$/i;
+const CLOSING_KEYWORD_RE = /^\(?(close[sd]?|fix(e[sd])?|resolve[sd]?):?$/i;
+const TRACE_KEYWORD_RE = /^\(?(close[sd]?|fix(e[sd])?|resolve[sd]?|refs):?$/i;
 
 /** Step 3a's trailing-strip class, byte-for-byte the built literal (parity-pinned). */
 const TRAILING_CLASS = '[.,;:)\\]!?]';
@@ -377,11 +393,11 @@ function gateCandidate(candidate, grammar, key) {
 
 /**
  * Step 3a, executed, then the grammar's gate: the first reference `message`
- * yields, or null. Per line, a whitespace token matching KEYWORD_RE opens a run:
- * the next token, plus each further token while the previous one ends in `,`.
+ * yields, or null. Per line, a whitespace token matching TRACE_KEYWORD_RE opens a
+ * run: the next token, plus each further token while the previous one ends in `,`.
  * Each run token splits on `,`, is stripped, and non-empty parts are gated.
  *
- * Linear in the message: a keyword token never ends in `,` (KEYWORD_RE is
+ * Linear in the message: a keyword token never ends in `,` (TRACE_KEYWORD_RE is
  * anchored), so every comma run is walked by at most the one keyword before it.
  *
  * @param {string} message
@@ -393,7 +409,7 @@ function findReference(message, grammar, key) {
   for (const line of message.split('\n')) {
     const tokens = line.split(/\s+/).filter(t => t !== '');
     for (let i = 0; i < tokens.length; i++) {
-      if (!KEYWORD_RE.test(tokens[i])) continue;
+      if (!TRACE_KEYWORD_RE.test(tokens[i])) continue;
       for (let j = i + 1; j < tokens.length; j++) {
         for (const part of tokens[j].split(',')) {
           const stripped = stripCandidate(part);
@@ -1117,7 +1133,8 @@ module.exports = Object.freeze({
   EXIT_CODES,
   LIMITS,
   RELEASE_TAG_RE,
-  KEYWORD_RE,
+  CLOSING_KEYWORD_RE,
+  TRACE_KEYWORD_RE,
   TRAILING_CLASS,
   GRAMMARS,
   GRAMMAR_RULES,
