@@ -154,6 +154,12 @@ interface World {
   readonly scrutinyBlocked?: readonly string[]
   /** Tickets whose Scrutinize agent returns BLOCKED only in the final Gate 1 (#2). */
   readonly scrutinyBlockedFinal?: readonly string[]
+  /**
+   * Raw returns for a ticket's Scrutinize spawns, in order: the first answers Gate 1 #1, the
+   * second the final Gate 1. A spawn past the list answers PASS. This is how a Scrutinize
+   * that returns no status, or one the skeleton does not know, is scripted.
+   */
+  readonly scrutinyReturns?: Readonly<Record<string, readonly unknown[]>>
   /** Tickets whose merge Git reports without a usable mergeSha. */
   readonly badMergeSha?: readonly string[]
   /** Tickets whose Evaluate agent answers FAIL. */
@@ -229,6 +235,8 @@ function stubAgent(world: World, spawns: Spawn[]): Agent {
     if (opts.agentType === 'Scrutinize') {
       const nth = (scrutinized.get(currentRef) ?? 0) + 1
       scrutinized.set(currentRef, nth)
+      const scripted = world.scrutinyReturns?.[currentRef]
+      if (scripted !== undefined && nth <= scripted.length) return scripted[nth - 1]
       const blocked = world.scrutinyBlocked?.includes(currentRef) || (nth === 2 && world.scrutinyBlockedFinal?.includes(currentRef))
       return { status: blocked ? 'BLOCKED' : 'PASS' }
     }
@@ -1500,6 +1508,27 @@ describe('#421 AC-18: a Gate 1 #1 stop returns ESCALATED with one escalation bef
     expect(spawns.some(s => s.agentType === 'Validate')).toBe(false)
   })
 
+  it.each([
+    ['no return at all', undefined],
+    ['a return with no status field', {}],
+    ['a status the skeleton does not know', { status: 'DONE' }],
+  ])('Scrutinize returning %s counts as BLOCKED: scrutiny-blocked, and Validate never runs on it', async (_label, scrutinyReturn) => {
+    const spawns: Spawn[] = []
+    const world: World = { tickets: { '#7': OWN }, scrutinyReturns: { '#7': [scrutinyReturn] } }
+    expect(await collectGate1StopViolations(SINGLE, world, 'scrutiny-blocked')).toEqual([])
+    await runEngine(SINGLE!, ENGINE_ARGS, stubAgent(world, spawns))
+    expect(spawns.some(s => s.agentType === 'Validate')).toBe(false)
+  })
+
+  it('known-bad probe: a Gate 1 #1 that only stops on an explicit BLOCKED carries a status-less Scrutinize on to Validate', async () => {
+    const stopsOnBlockedOnly = SINGLE!.replace('if (!["PASS", "FIXED"].includes(scrutiny?.status)) {', 'if (scrutiny?.status === "BLOCKED") {')
+    expect(stopsOnBlockedOnly, 'the seed must land').not.toBe(SINGLE)
+    const world: World = { tickets: { '#7': OWN }, scrutinyReturns: { '#7': [undefined] } }
+    const defects = await collectGate1StopViolations(stopsOnBlockedOnly, world, 'scrutiny-blocked')
+    expect(defects.length).toBeGreaterThan(0)
+    expect(defects.some(d => d.includes('not ESCALATED') || d.includes('ran on a stopped ticket'))).toBe(true)
+  })
+
   it('the schema lists scrutiny-blocked among the escalation types', () => {
     const line = BUILT.split('\n').find(l => /^\s*"type": "merge-conflict \|/.test(l)) ?? ''
     expect(line).toContain('| scrutiny-blocked |')
@@ -1522,6 +1551,15 @@ describe('#421 AC-18: a Gate 1 #1 stop returns ESCALATED with one escalation bef
     expect(result.verdict).toBe('PARTIAL')
     expect(result.escalations?.map(e => e.type)).toEqual(['scrutiny-blocked'])
     expect(types(spawns).filter(t => t === 'Validate'), 'the final Validate does not run on a BLOCKED Scrutinize').toHaveLength(1)
+  })
+
+  it('Gate 1 #2 with a status-less Scrutinize: the run reports PARTIAL with a scrutiny-blocked escalation, and the final Validate does not run', async () => {
+    const spawns: Spawn[] = []
+    const world: World = { tickets: { '#7': OWN }, scrutinyReturns: { '#7': [{ status: 'PASS' }, undefined] } }
+    const result = await runEngine(SINGLE!, ENGINE_ARGS, stubAgent(world, spawns))
+    expect(result.verdict).toBe('PARTIAL')
+    expect(result.escalations?.map(e => e.type)).toEqual(['scrutiny-blocked'])
+    expect(types(spawns).filter(t => t === 'Validate'), 'the final Validate does not run on a status-less Scrutinize').toHaveLength(1)
   })
 
   it('a wave quarantines the stopped ticket with its escalation text, and merges nothing for it', async () => {

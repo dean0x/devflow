@@ -216,8 +216,9 @@ const gate1 = await phase("gate1", async () => {
 
   const scrutiny = await agent(`9-pillar self-review of recent changes on branch ${BRANCH}. Fix P0/P1 issues and commit the fixes.
 Return: {"status": "PASS" | "FIXED" | "BLOCKED"}`, { agentType: "Scrutinize" });
-  if (scrutiny?.status === "BLOCKED") {
-    return { verdict: "ESCALATED", type: "scrutiny-blocked", reason: "Scrutinize agent returned BLOCKED: a P0 issue cannot be fixed in scope" };
+  // Anything but an explicit PASS or FIXED is a stop: a Scrutinize that returned no status, or one this skeleton does not know, has not accepted the code.
+  if (!["PASS", "FIXED"].includes(scrutiny?.status)) {
+    return { verdict: "ESCALATED", type: "scrutiny-blocked", reason: scrutiny?.status === "BLOCKED" ? "Scrutinize agent returned BLOCKED: a P0 issue cannot be fixed in scope" : "Scrutinize agent returned no recognised status: counted as BLOCKED" };
   }
 
   const validation = await agent(`Run build, typecheck, lint, and tests on branch ${BRANCH}.
@@ -460,8 +461,8 @@ const gate1Final = await phase("gate1-final", async () => {
 
   const scrutiny = await agent(`9-pillar self-review of recent changes on branch ${BRANCH}. Fix P0/P1 issues and commit the fixes.
 Return: {"status": "PASS" | "FIXED" | "BLOCKED"}`, { agentType: "Scrutinize" });
-  if (scrutiny?.status === "BLOCKED") {
-    return { verdict: "ESCALATED", type: "scrutiny-blocked", reason: "Final Gate 1 Scrutinize agent returned BLOCKED: a P0 issue cannot be fixed in scope" };
+  if (!["PASS", "FIXED"].includes(scrutiny?.status)) {
+    return { verdict: "ESCALATED", type: "scrutiny-blocked", reason: scrutiny?.status === "BLOCKED" ? "Final Gate 1 Scrutinize agent returned BLOCKED: a P0 issue cannot be fixed in scope" : "Final Gate 1 Scrutinize agent returned no recognised status: counted as BLOCKED" };
   }
 
   const validation = await agent(`Run build, typecheck, lint, and tests on branch ${BRANCH} (final gate after all fixing).

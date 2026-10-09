@@ -5,7 +5,7 @@ ORDER IS LOAD-BEARING. Run exactly in this sequence:
 
 1. **Simplify agent** — reduce complexity, remove duplication
 2. **Scrutinize agent** — 9-pillar self-review (deep structural analysis); returns `{"status": "PASS" | "FIXED" | "BLOCKED"}`
-   - BLOCKED (a P0 issue cannot be fixed in scope) → stop the pass and escalate as `scrutiny-blocked`; Validate does not run on code Scrutinize could not accept
+   - BLOCKED (a P0 issue cannot be fixed in scope), or a missing or unrecognised status, which counts as BLOCKED → stop the pass and escalate as `scrutiny-blocked`; Validate does not run on code Scrutinize could not accept
 3. **Validate agent** — build / typecheck / lint / test; returns `{"verdict": "PASS" | "FAIL", "details": "..."}`. It runs LAST and UNCONDITIONALLY: one full run over the HEAD that Simplify and Scrutinize left, so it covers their commits whether or not Scrutinize changed code
    - Build/test commands follow `build_execution_doctrine()`: the Validate agent's Running commands block, foreground under an explicit Bash timeout.
    - FAIL → Code agent fix (max 2 retries), each followed by a Validate agent re-run
