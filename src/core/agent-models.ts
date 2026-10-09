@@ -112,13 +112,16 @@ export type StoredEffort = EffortLevel | typeof EFFORT_INHERIT;
  * count are unaffected.
  *
  * Shipped value of `memory`: `claude-sonnet-5-5` at `high` effort. User decision
- * 2026-10-08: memory quality is worth more than the cost saving of Haiku, which
- * replaces the plan's Haiku default. The worker does not read `agents.memory`
- * yet. Until it does, background-memory-update names this model as a literal in
- * its `claude -p --model` argument, and tests/agent-models-worker.test.ts holds
- * that literal equal to this row so the two cannot drift apart. Wiring the
- * worker to this map, and `--effort` behind a CLI version probe, is a separate
- * change.
+ * 2026-10-08: memory quality is worth more than the cost saving of Haiku.
+ *
+ * D-MEMORY-WORKER-LEAN: background-memory-update reads `agents.memory` from
+ * `~/.devflow/agent-models.json` at run time, validating `model` and `effort`
+ * field by field against the domain below, and passes `--effort` when the CLI
+ * version probe puts it at or above the lean-argv floor. A field it cannot use
+ * falls back to this row. The hook spells that fallback out for bash
+ * (`MEMORY_MODEL_DEFAULT`, `MEMORY_EFFORT_DEFAULT`, the alias and effort lists and
+ * the model-name rules), and tests/agent-models-worker.test.ts holds every one
+ * equal to this row and to the domain, so the two cannot drift apart.
  */
 export const WORKER_AGENTS = {
   memory: { model: 'claude-sonnet-5-5', effort: 'high' },
