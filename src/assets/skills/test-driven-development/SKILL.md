@@ -97,7 +97,7 @@ These are the excuses developers use to skip TDD. Recognize and reject them.
 | "I'll write tests after" | Need to see the shape first | Tests ARE the shape — they define the interface before implementation exists | Write the test first |
 | "Too simple to test" | It's just a getter/setter | Getters break, defaults change, edge cases hide in "simple" code | Write it — takes 30 seconds |
 | "I'll refactor later" | Just get it working now | "Later" never comes; technical debt compounds silently | Refactor now in Step 3 |
-| "Test is too hard to write" or "setup is too complex" | Mocking is painful | Hard-to-test code = bad design, and complex setup = too much coupling; the test is telling you the interface is wrong | Simplify the interface first |
+| "Test is too hard to write" or "the test setup is too complex" | Mocking is painful | Hard-to-test code = bad design, and complex setup = too much coupling; the test is telling you the interface is wrong | Simplify the interface first |
 | "Need to see the whole picture" or "the architecture first" | Can't test what I haven't designed or structured yet | TDD IS design; each test reveals the next piece of the interface, and tests DEFINE the architecture | Let the tests drive the design and structure |
 | "Tests slow me down" | Faster to just write the code | Faster until the first regression; TDD is faster for anything > 50 lines | Trust the cycle |
 | "Framework is hard to set up" | Setup is complex | One-time cost vs recurring regression cost; untested code compounds debt | Set up the framework first — that IS the work |
@@ -122,7 +122,7 @@ The table above catches excuses *before starting*. These catch you *mid-work*: t
 
 **Code-first** (wrong): write `parseConfig()`, then a test that mirrors it (`parseConfig("key=val")` passes). Empty input, malformed lines, multi-value keys and whitespace stay hidden until production.
 
-**Test-first** (correct): tests for "ignores comment lines", "handles empty input" and "rejects malformed lines" come first; `parseConfig()` is then written to satisfy all three, so it handles the edges from the start.
+**Test-first** (correct): "ignores comment lines", then "handles empty input", then "rejects malformed lines", each failing first and each driving the next slice of `parseConfig()`, so it handles the edges from the start.
 
 Code-first tests verify what you *happened to build*. Test-first tests specify what *should exist*.
 
