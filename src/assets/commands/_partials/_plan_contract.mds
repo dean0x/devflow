@@ -46,7 +46,7 @@ Every line of a `## Test Plan` section, or of a PR's test-plan block, follows th
 
 #### Consumption by Gate 2
 
-The Evaluate agent panel receives: the per-ticket plan + the numbered acceptance criteria (positive and negative).
+The Evaluate agent receives: the per-ticket plan + the numbered acceptance criteria (positive and negative).
 
 The Test agent receives: the test plan's TP lines, once `check tp` has admitted them.
 
