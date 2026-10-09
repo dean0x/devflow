@@ -1,6 +1,6 @@
 ---
 name: apply-feature-knowledge
-description: Consumption algorithm for FEATURE_KNOWLEDGE variable — pre-computed feature context
+description: Consume FEATURE_KNOWLEDGE, the pre-computed feature context
 user-invocable: false
 allowed-tools: Read
 ---
@@ -11,9 +11,9 @@ allowed-tools: Read
 
 > **Pre-computed context, not a cage. Verify against current code — always.**
 >
-> A feature knowledge captures patterns AS THEY WERE when last written. Code evolves.
-> Use the feature knowledge as a starting point, not gospel truth. When something feels
-> off, Read the actual files. Code is authoritative; feature knowledge is supplementary.
+> A feature knowledge captures patterns AS THEY WERE when last written. Use it as a
+> starting point, not gospel truth; when something feels off, Read the actual files.
+> Code is authoritative.
 
 ---
 
@@ -32,6 +32,4 @@ Do not mention feature knowledge or its absence in your output.
 
 ## Freshness Model
 
-Feature knowledge is **verify-on-read**:
-- Readers verify key assertions against current code rather than relying on staleness markers
-- When in doubt, Read the file — that resolves any uncertainty immediately
+Feature knowledge is **verify-on-read**: check key assertions against current code, not staleness markers, and when in doubt Read the file.
