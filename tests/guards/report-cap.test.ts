@@ -57,7 +57,7 @@ const EXEMPT_MARKERS: Readonly<Record<string, readonly string[]>> = {
   code: ['`## Verification` block', '`commitShas`', '`unresolved`'],
   validate: ['`HEAD:` line', '| Command | Status | Exit | Duration |', '30 lines per failing command'],
   test: ['### Test Plan Evidence', '| ID | TP | Type |', '### Evidence Log'],
-  scrutinize: ['`### Status` line', '`changes_made`'],
+  scrutinize: ['`### Status` line', '`status` return field'],
   simplify: ['completion status', 'commits'],
   evaluate: ['`### Status` line', '`### Misalignments Found`'],
   design: ['`## Findings` list'],

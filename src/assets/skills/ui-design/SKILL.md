@@ -1,6 +1,6 @@
 ---
 name: ui-design
-description: This skill should be used when the user asks to "design a component", "pick colors", "improve typography", "fix spacing", "choose a layout", or discusses visual design, CSS, styling decisions, or responsive interfaces. Provides patterns for typography scales, color systems, spacing, and production-grade UI design.
+description: This skill should be used when the user asks to "design a component", "pick colors", "improve typography", "fix spacing", or discusses visual design and CSS.
 user-invocable: false
 allowed-tools: Read, Grep, Glob
 activation:

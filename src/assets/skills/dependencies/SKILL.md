@@ -1,6 +1,6 @@
 ---
 name: dependencies
-description: This skill should be used when reviewing dependency changes, lock files, or package additions.
+description: This skill should be used when reviewing dependency or lock file changes.
 user-invocable: false
 allowed-tools: Read, Grep, Glob
 ---

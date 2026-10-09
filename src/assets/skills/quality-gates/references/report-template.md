@@ -44,13 +44,13 @@ Use this template when generating your self-review report.
 
 ---
 
-### P2 Pillars (FIX if Time Permits)
+### P2 Pillars (Documentation only)
 
 | Pillar | Status | Notes |
 |--------|--------|-------|
-| Naming | PASS/FIXED/SKIP | {details} |
-| Consistency | PASS/FIXED/SKIP | {details} |
-| Documentation | PASS/FIXED/SKIP | {details} |
+| Naming | SKIP | Simplify agent |
+| Consistency | SKIP | Simplify agent |
+| Documentation | PASS/FIXED | {details if fixed} |
 
 **Fixes Applied** (if any):
 - {file:line} - {what was fixed}
@@ -61,7 +61,7 @@ Use this template when generating your self-review report.
 
 **Issues Found**: {total count}
 **Issues Fixed**: {count}
-**Status**: READY / BLOCKED
+**Status**: PASS / FIXED / BLOCKED
 
 {If BLOCKED, explain what cannot be fixed and why}
 ```
@@ -105,12 +105,12 @@ Add user profile update endpoint
 
 ---
 
-### P2 Pillars (FIX if Time Permits)
+### P2 Pillars (Documentation only)
 
 | Pillar | Status | Notes |
 |--------|--------|-------|
-| Naming | PASS | Clear, descriptive names |
-| Consistency | PASS | Matches existing patterns |
+| Naming | SKIP | Simplify agent |
+| Consistency | SKIP | Simplify agent |
 | Documentation | PASS | JSDoc on public methods |
 
 ---
@@ -119,7 +119,7 @@ Add user profile update endpoint
 
 **Issues Found**: 0
 **Issues Fixed**: 0
-**Status**: READY
+**Status**: PASS
 ```
 
 ### Example 2: Issues Fixed
@@ -165,12 +165,12 @@ Implement order cancellation flow
 
 ---
 
-### P2 Pillars (FIX if Time Permits)
+### P2 Pillars (Documentation only)
 
 | Pillar | Status | Notes |
 |--------|--------|-------|
-| Naming | PASS | Clear names |
-| Consistency | PASS | Matches existing order methods |
+| Naming | SKIP | Simplify agent |
+| Consistency | SKIP | Simplify agent |
 | Documentation | FIXED | Added JSDoc explaining cancellation rules |
 
 **Fixes Applied**:
@@ -182,7 +182,7 @@ Implement order cancellation flow
 
 **Issues Found**: 5
 **Issues Fixed**: 5
-**Status**: READY
+**Status**: FIXED
 ```
 
 ### Example 3: Blocked
@@ -233,12 +233,12 @@ before implementing refund feature.
 
 ## Status Definitions
 
-| Status | Meaning |
-|--------|---------|
-| PASS | No issues found for this pillar |
-| FIXED | Issue found and resolved |
-| SKIP | P2 only - issue noted but not fixed due to time |
-| BLOCKED | Cannot fix - requires escalation |
+| Status | Pillar | Overall (`### Status`) |
+|--------|--------|------------------------|
+| PASS | No issues found for this pillar | No change was needed |
+| FIXED | Issue found and resolved | Fixes were committed and every P0 and P1 is fixed |
+| SKIP | Naming and Consistency only - owned by the Simplify agent | - |
+| BLOCKED | Cannot fix - requires escalation | A P0 cannot be fixed in scope |
 
 ---
 
@@ -247,7 +247,7 @@ before implementing refund feature.
 Before submitting report:
 - [ ] All P0 pillars are PASS or FIXED
 - [ ] All P1 pillars are PASS or FIXED
-- [ ] P2 pillars evaluated (PASS/FIXED/SKIP)
+- [ ] Documentation evaluated (PASS/FIXED); Naming and Consistency reported as SKIP
 - [ ] All fixes documented with file:line
 - [ ] Summary accurately reflects status
 - [ ] If BLOCKED, clear explanation provided

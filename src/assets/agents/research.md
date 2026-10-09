@@ -2,10 +2,29 @@
 name: Research
 description: Multi-type research agent with dynamic skill loading. Receives research type, loads domain-specific skill, produces structured findings.
 model: opus
+effort: medium
 skills:
   - devflow:worktree-support
   - devflow:apply-decisions
   - devflow:apply-feature-knowledge
+disallowedTools:
+  - Agent
+  - SendMessage
+  - NotebookEdit
+  - EnterWorktree
+  - ExitWorktree
+  - ArtifactComments
+  - ArtifactData
+  - TodoWrite
+  - AskUserQuestion
+  - TaskOutput
+  - ScheduleWakeup
+  - CronCreate
+  - CronDelete
+  - CronList
+  - RemoteTrigger
+  - PushNotification
+  - DesignSync
 ---
 
 # Research Agent

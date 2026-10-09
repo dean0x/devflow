@@ -58,7 +58,8 @@ interface ReleaseTrace {
   readonly EXIT_CODES: Readonly<Record<string, number>>
   readonly LIMITS: Readonly<Record<string, number>>
   readonly RELEASE_TAG_RE: RegExp
-  readonly KEYWORD_RE: RegExp
+  readonly CLOSING_KEYWORD_RE: RegExp
+  readonly TRACE_KEYWORD_RE: RegExp
   readonly TRAILING_CLASS: string
   readonly GRAMMARS: Readonly<Record<Grammar, RegExp>>
   readonly GRAMMAR_RULES: Readonly<Record<Grammar, { keyed: boolean; upcase: boolean }>>
@@ -164,7 +165,7 @@ function commit(repo: string, spec: CommitSpec): string {
   git(repo, ['add', '-A'])
   const msgFile = path.join(tmp, `msg-${msgSeq++}.txt`)
   fs.writeFileSync(msgFile, `${spec.subject}${spec.body === undefined ? '' : `\n\n${spec.body}`}\n`)
-  const author = spec.author === undefined
+  const author: Readonly<Record<string, string>> = spec.author === undefined
     ? {}
     : { GIT_AUTHOR_NAME: spec.author.name, GIT_AUTHOR_EMAIL: spec.author.email }
   git(repo, ['commit', '-q', '--cleanup=verbatim', '-F', msgFile, ...(spec.allowEmpty ? ['--allow-empty'] : [])], author)
@@ -281,9 +282,11 @@ describe('module surface', () => {
     expect(RT.CLASSES).toEqual(['traced', 'exempt:release', 'exempt:revert', 'exempt:bot', 'untraced'])
   })
 
-  it('states step 3a\'s literals: an anchored case-insensitive keyword regex without the u flag, and the trailing class', () => {
-    expect(RT.KEYWORD_RE.source).toBe('^\\(?(close[sd]?|fix(e[sd])?|resolve[sd]?|refs):?$')
-    expect(RT.KEYWORD_RE.flags).toBe('i')
+  it('states step 3a\'s literals: anchored case-insensitive keyword regexes without the u flag, and the trailing class', () => {
+    expect(RT.CLOSING_KEYWORD_RE.source).toBe('^\\(?(close[sd]?|fix(e[sd])?|resolve[sd]?):?$')
+    expect(RT.CLOSING_KEYWORD_RE.flags).toBe('i')
+    expect(RT.TRACE_KEYWORD_RE.source, 'the trace set is the closing set plus `refs`').toBe('^\\(?(close[sd]?|fix(e[sd])?|resolve[sd]?|refs):?$')
+    expect(RT.TRACE_KEYWORD_RE.flags).toBe('i')
     expect(RT.TRAILING_CLASS).toBe('[.,;:)\\]!?]')
     expect(RT.GRAMMARS.github.source).toBe('^#[1-9][0-9]{0,8}$')
     expect(RT.GRAMMARS.jira.source).toBe('^[A-Z][A-Z0-9_]{1,9}-[1-9][0-9]{0,8}$')
@@ -393,6 +396,7 @@ describe('classify — first match wins, terminal arm untraced', () => {
 
   it.each([
     ['traced by a closing keyword', commitOf({ message: 'Closes #3.' }), 'traced'],
+    ['traced by `Refs`, which mentions an issue without shipping it', commitOf({ message: 'Refs #417' }), 'traced'],
     ['traced by the traced file alone', commitOf({ sha: SHA_B }), 'traced'],
     ['the /release commit', commitOf({ subject: 'chore(release): v1.2.3' }), 'exempt:release'],
     ['a bare-version /release commit', commitOf({ subject: 'chore(release): 1.2.3' }), 'exempt:release'],
@@ -454,6 +458,9 @@ describe('step 3a executed: the keyword rule and each grammar\'s gate', () => {
     ['fixes eng-12', 'linear', 'ENG', 'ENG-12'],
     ['fixes ENG-12', 'linear', 'ENG', 'ENG-12'],
     ['refs key-9', 'jira', 'KEY', null],
+    ['Refs #417', 'github', null, '#417'],
+    ['(refs #12)', 'github', null, '#12'],
+    ['refs: ENG-12', 'linear', 'ENG', 'ENG-12'],
   ] as const)('%j (%s, key %s) ⇒ %s', (message, grammar, key, expected) => {
     expect(RT.findReference(message, grammar, key)).toBe(expected)
   })
@@ -1083,10 +1090,10 @@ describe('output gate (exit 5)', () => {
 
   it.each([
     // Header matches this run and nothing is listed: only the sum (0 ≠ 1) refuses it.
-    ['counts that do not sum', () => 'TRACE from:v1.0.0 scanned:1 traced:0 untraced:0 exempt:0 unmatched:0 bound:ok\n'],
-    ['a header describing another run', () => 'TRACE from:v1.0.0 scanned:0 traced:0 untraced:0 exempt:0 unmatched:0 bound:ok\n'],
-    ['a raw author', () => 'TRACE from:v1.0.0 scanned:1 traced:0 untraced:1 exempt:0 unmatched:0 bound:ok\n- bbbbbbbbbbbb untraced author:$(id)\n'],
-    ['not a string', () => 7],
+    ['counts that do not sum', (): string => 'TRACE from:v1.0.0 scanned:1 traced:0 untraced:0 exempt:0 unmatched:0 bound:ok\n'],
+    ['a header describing another run', (): string => 'TRACE from:v1.0.0 scanned:0 traced:0 untraced:0 exempt:0 unmatched:0 bound:ok\n'],
+    ['a raw author', (): string => 'TRACE from:v1.0.0 scanned:1 traced:0 untraced:1 exempt:0 unmatched:0 bound:ok\n- bbbbbbbbbbbb untraced author:$(id)\n'],
+    ['not a string', (): number => 7],
   ] as const)('%s', (_label, render) => {
     const r = runMain(['map', '--from', 'v1.0.0', '--grammar', 'github'], { exec: fakeGit(answers), render })
     expect(r.code).toBe(EXIT.OUTPUT_GATE_REFUSED)

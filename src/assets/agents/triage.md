@@ -2,11 +2,17 @@
 name: Triage
 description: Validates review issues against blast-radius disposition matrix. Assigns one verdict per issue. Never edits code.
 model: opus
+effort: high
 skills:
   - devflow:security
   - devflow:worktree-support
   - devflow:apply-decisions
   - devflow:apply-feature-knowledge
+tools:
+  - Read
+  - Grep
+  - Glob
+  - Bash
 ---
 
 # Triage Agent
@@ -145,7 +151,7 @@ Return the verdict ledger grouped by disposition:
 - DUPLICATE: {n}
 ```
 
-Report cap: final message at most about 1,500 tokens; longer material goes to a `mktemp` file (via Bash or Write) and the message gives its path. Exempt, inline in full: the whole ledger, since `/resolve` checks that every issue id appears in it.
+Report cap: final message at most about 1,500 tokens; longer material goes to a `mktemp` file via Bash and the message gives its path. Exempt, inline in full: the whole ledger, since `/resolve` checks that every issue id appears in it.
 
 ## Boundaries
 

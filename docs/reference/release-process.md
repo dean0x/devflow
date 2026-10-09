@@ -67,7 +67,7 @@ When the repository's evidence policy resolves `required` — `evidence` in `.de
 
 | Class | Rule |
 |-------|------|
-| traced | a closing keyword plus a reference in the tracker's own grammar (a Jira or Linear key must match the configured project or team key), or, on GitHub, a merged PR that closes an issue |
+| traced | a closing keyword or `Refs` plus a reference in the tracker's own grammar (a Jira or Linear key must match the configured project or team key), or, on GitHub, a merged PR that closes an issue |
 | exempt: release | a strict `chore(release): vX.Y.Z` subject, or a commit that touches only `CHANGELOG.md` |
 | exempt: revert | a revert subject backed by body evidence |
 | exempt: bot | a `[bot]` author name **and** a GitHub noreply bot email, read without `.mailmap` |

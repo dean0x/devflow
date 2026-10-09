@@ -17,7 +17,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
 import { pollForTerminalLine } from './helpers/poll-for-terminal-line.js';
-import { HOOK_RUN_ALLOWANCE_MS, NODE_EXEC_STALL_MS, runHook as runSharedHook, spawnWithStdin } from './shell-hooks-helpers.js';
+import { HOOK_RUN_ALLOWANCE_MS, NODE_EXEC_STALL_MS, answersVersion, resolveOnPath, runHook as runSharedHook, spawnWithStdin } from './shell-hooks-helpers.js';
 
 const HOOKS_DIR = path.resolve(__dirname, '..', 'src', 'assets', 'scripts', 'hooks');
 const CAPTURE_PROMPT = path.join(HOOKS_DIR, 'capture-prompt');
@@ -50,8 +50,12 @@ function runHookWithPath(
   shimDir: string,
   extraEnv: Record<string, string> = {},
 ): { stdout: string; stderr: string; exitCode: number } {
+  const fakePath = `${shimDir}:${process.env.PATH ?? '/usr/bin:/bin'}`;
+  // The worker the hook spawns probes `claude --version` and may run it, so the fake
+  // must be what `claude` resolves to. The PATH is extended, never reduced.
+  expect(resolveOnPath('claude', fakePath), 'the fake claude resolves first on PATH').toBe(path.join(shimDir, 'claude'));
   return runHook(hookPath, input, homeDir, {
-    PATH: `${shimDir}:${process.env.PATH ?? '/usr/bin:/bin'}`,
+    PATH: fakePath,
     ...extraEnv,
   });
 }
@@ -61,12 +65,12 @@ function createFakeClaudeShim(shimDir: string, memFile: string): void {
   const stagedFile = `${memFile}.new`;
   fs.writeFileSync(
     bin,
-    `#!/bin/bash
+    answersVersion(`#!/bin/bash
 # Writes to staged path; worker CAS-mv's it to the real path (D-MEMORY-STAGED-CAS)
 echo "<!-- memory-head: testsha branch: main -->" > "${stagedFile}"
 echo "## Now" >> "${stagedFile}"
 exit 0
-`,
+`),
   );
   fs.chmodSync(bin, 0o755);
 }
@@ -484,6 +488,9 @@ describe('memory-worker', () => {
   });
 
   it('120s throttle honored: fresh trigger -> no spawn', () => {
+    // A fake on the PATH even though no spawn is expected: a regression that spawns
+    // must reach it, never the machine's own claude.
+    createFakeClaudeShim(shimDir, path.join(projectDir, '.devflow', 'memory', 'WORKING-MEMORY.md'));
     const triggerFile = path.join(projectDir, '.devflow', 'memory', '.working-memory-last-trigger');
     fs.writeFileSync(triggerFile, '');
     const beforeMtime = fs.statSync(triggerFile).mtimeMs;
@@ -540,6 +547,7 @@ describe('memory-worker', () => {
   });
 
   it('memory:false -> no spawn attempted, no trigger touch', () => {
+    createFakeClaudeShim(shimDir, path.join(projectDir, '.devflow', 'memory', 'WORKING-MEMORY.md'));
     writeMachineFeatures(homeDir, { memory: false });
     const triggerFile = path.join(projectDir, '.devflow', 'memory', '.working-memory-last-trigger');
     fs.writeFileSync(triggerFile, '');
@@ -604,7 +612,7 @@ describe('memory-worker', () => {
       writeManifestFeatures(overrideDir, { memory: false });
       writeManifestFeatures(path.join(projectDir, '.devflow'), { memory: false });
       const invokedMarker = path.join(shimDir, 'claude-invoked');
-      fs.writeFileSync(path.join(shimDir, 'claude'), `#!/bin/bash\necho invoked >> "${invokedMarker}"\nexit 1\n`);
+      fs.writeFileSync(path.join(shimDir, 'claude'), answersVersion(`#!/bin/bash\necho invoked >> "${invokedMarker}"\nexit 1\n`));
       fs.chmodSync(path.join(shimDir, 'claude'), 0o755);
       fs.writeFileSync(
         path.join(projectDir, '.devflow', 'memory', '.pending-turns.jsonl'),
@@ -670,7 +678,7 @@ describe('background-memory-update: the memory switch (D-FEATURES-NARROW-ONLY)',
     writeFeatureConfig(projectDir, { memory: true });
     // A claude stand-in, so a run that fails to abort can never reach the real one.
     invokedMarker = path.join(shimDir, 'claude-invoked');
-    fs.writeFileSync(path.join(shimDir, 'claude'), `#!/bin/bash\ntouch "${invokedMarker}"\nexit 1\n`);
+    fs.writeFileSync(path.join(shimDir, 'claude'), answersVersion(`#!/bin/bash\ntouch "${invokedMarker}"\nexit 1\n`));
     fs.chmodSync(path.join(shimDir, 'claude'), 0o755);
   });
 
@@ -705,12 +713,14 @@ describe('background-memory-update: the memory switch (D-FEATURES-NARROW-ONLY)',
   /** `retiredDevflowDir`, when given, is exported as DEVFLOW_DIR — which the worker must ignore. */
   function runWorker(retiredDevflowDir?: string, manifestArg?: string): void {
     const args = manifestArg === undefined ? `"${projectDir}"` : `"${projectDir}" "${manifestArg}"`;
+    const fakePath = `${shimDir}:${process.env.PATH ?? '/usr/bin:/bin'}`;
+    expect(resolveOnPath('claude', fakePath), 'the fake claude resolves first on PATH').toBe(path.join(shimDir, 'claude'));
     execSync(`bash "${BG_UPDATER}" ${args}`, {
       env: {
         ...process.env,
         HOME: homeDir,
         ...(retiredDevflowDir === undefined ? {} : { DEVFLOW_DIR: retiredDevflowDir }),
-        PATH: `${shimDir}:${process.env.PATH ?? '/usr/bin:/bin'}`,
+        PATH: fakePath,
         // A run that gets past the gate reaches the claude watchdog: 2s, not 120s.
         DEVFLOW_BG_WATCHDOG_SECS: String(TEST_WATCHDOG_SECS),
       },
@@ -1078,6 +1088,7 @@ describe('memory-worker: a repository narrowing stops the spawn (D-FEATURES-NARR
   });
 
   it('project.json features.memory false: no trigger touch, no spawn', () => {
+    createFakeClaudeShim(shimDir, path.join(projectDir, '.devflow', 'memory', 'WORKING-MEMORY.md'));
     writeRepoFile(projectDir, 'project.json', '{"features":{"memory":false}}');
     const triggerFile = path.join(projectDir, '.devflow', 'memory', '.working-memory-last-trigger');
 

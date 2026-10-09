@@ -30,9 +30,9 @@ you: /implement (hand it the plan)
 
   Git                    branch feat/42-rate-limit-upload
   Code                   implements the plan — your learned decisions, pitfalls, and feature knowledge preloaded
-  Validate               build ✓ typecheck ✓ lint ✓ tests ✓
   Simplify · Scrutinize  cleanup pass, then 9-pillar quality gate
   Evaluate               implementation matches the original request ✓
+  Validate               build ✓ typecheck ✓ lint ✓ tests ✓
   Test                   5/5 QA scenarios pass → PR opened
 
 you: /code-review

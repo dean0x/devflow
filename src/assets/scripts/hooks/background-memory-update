@@ -2,7 +2,9 @@
 
 # background-memory-update — Eager working-memory refresh worker
 # Spawned as a detached background process by memory-worker (Stop hook) after the
-# 120s throttle expires. Drains .pending-turns.jsonl → calls `claude -p` (sonnet 5.5) →
+# 120s throttle expires. Drains .pending-turns.jsonl → calls `claude -p` on the model
+# and effort the `agents.memory` entry of ~/.devflow/agent-models.json names, else the
+# shipped worker default, in a lean session (D-MEMORY-WORKER-LEAN) →
 # rewrites WORKING-MEMORY.md with a git-reconciliation stamp on line 1.
 #
 # Applies the LLM-vs-plumbing principle: artifact content (WORKING-MEMORY.md) is
@@ -118,6 +120,92 @@ if ! df_no_symlink_below "$PROJECT_ROOT" "$LOCK_DIR" "$QUEUE_FILE" "$PROCESSING_
   exit 0
 fi
 
+# --- CLI version probe: choose the argv form (D-MEMORY-WORKER-LEAN) ---
+# The lean argv (--effort, --safe-mode, --max-turns, ...) is verified from
+# MEMORY_MIN_CLAUDE_VERSION up. A CLI older than that, or one whose version cannot be
+# read, gets the legacy argv instead, because one flag a CLI does not know fails every
+# run. The probe runs here, once $CLAUDE_BIN has resolved and the link check has
+# passed, and before the lock is taken, so a slow or hung `--version` can never extend
+# the lock's hold. It is bounded by DEVFLOW_BG_VERSION_PROBE_SECS (default 10, at most
+# 60; tests override it as they do DEVFLOW_BG_WATCHDOG_SECS) with the watchdog's
+# background-and-kill idiom. Its output is parsed, never executed.
+#
+# Errexit safety: the worker runs under `set -e`, and a helper's last non-zero status
+# aborts the caller, so each helper below ends in an explicit return status and is
+# called inside an `if` condition.
+MEMORY_MIN_CLAUDE_VERSION="2.1.286"
+
+# Sets CLAUDE_VERSION_TEXT to the first 512 bytes `claude --version` printed ("" on any
+# failure). Returns 0 when it exited 0 inside the bound, else 1. A hung probe gets
+# SIGTERM to its own process group (set -m, as for the spawn below) after the bound
+# and SIGKILL 2s later; the watchdog subshell has its descriptors closed so a sleep it
+# leaves behind holds no pipe open.
+probe_claude_version() {
+  local _secs _out _pid _wd_pid _status=1
+  CLAUDE_VERSION_TEXT=""
+  _secs="${DEVFLOW_BG_VERSION_PROBE_SECS:-10}"
+  case "$_secs" in
+    ''|*[!0123456789]*|????*) _secs=10 ;;
+  esac
+  if [ "$_secs" -lt 1 ] || [ "$_secs" -gt 60 ]; then _secs=10; fi
+  _out=$(mktemp "${TMPDIR:-/tmp}/devflow-claude-version.XXXXXX" 2>/dev/null) || return 1
+  set -m
+  "$CLAUDE_BIN" --version </dev/null >"$_out" 2>/dev/null &
+  _pid=$!
+  set +m
+  (
+    sleep "$_secs"
+    kill -TERM -"$_pid" 2>/dev/null || true
+    sleep 2
+    kill -KILL -"$_pid" 2>/dev/null || true
+  ) </dev/null >/dev/null 2>&1 &
+  _wd_pid=$!
+  if wait "$_pid" 2>/dev/null; then _status=0; fi
+  kill "$_wd_pid" 2>/dev/null || true
+  wait "$_wd_pid" 2>/dev/null || true
+  if [ "$_status" -eq 0 ]; then
+    CLAUDE_VERSION_TEXT=$(head -c 512 "$_out" 2>/dev/null || true)
+  fi
+  rm -f "$_out" 2>/dev/null || true
+  return "$_status"
+}
+
+# Returns 0 when the first X.Y.Z in $1 is at or above the first X.Y.Z in $2, comparing
+# the three components as base-10 numbers left to right (2.10.0 is above 2.1.286, and
+# a leading zero is not octal). Returns 1 when it is below, or when either text holds
+# no X.Y.Z or a component longer than six digits. The digit set is spelled out: a
+# range such as 0-9 collates by locale on bash 3.2.
+claude_version_at_least() {
+  local _text="$1" _floor="$2" _re='([0123456789]+)\.([0123456789]+)\.([0123456789]+)'
+  local _f1 _f2 _f3 _v1 _v2 _v3
+  [[ "$_floor" =~ $_re ]] || return 1
+  _f1=${BASH_REMATCH[1]}; _f2=${BASH_REMATCH[2]}; _f3=${BASH_REMATCH[3]}
+  [[ "$_text" =~ $_re ]] || return 1
+  _v1=${BASH_REMATCH[1]}; _v2=${BASH_REMATCH[2]}; _v3=${BASH_REMATCH[3]}
+  if [ "${#_v1}" -gt 6 ] || [ "${#_v2}" -gt 6 ] || [ "${#_v3}" -gt 6 ]; then return 1; fi
+  _v1=$((10#$_v1)); _v2=$((10#$_v2)); _v3=$((10#$_v3))
+  _f1=$((10#$_f1)); _f2=$((10#$_f2)); _f3=$((10#$_f3))
+  if [ "$_v1" -ne "$_f1" ]; then
+    if [ "$_v1" -gt "$_f1" ]; then return 0; fi
+    return 1
+  fi
+  if [ "$_v2" -ne "$_f2" ]; then
+    if [ "$_v2" -gt "$_f2" ]; then return 0; fi
+    return 1
+  fi
+  if [ "$_v3" -ge "$_f3" ]; then return 0; fi
+  return 1
+}
+
+CLAUDE_ARGV_FORM="legacy"
+if ! probe_claude_version; then
+  log "claude --version probe failed or timed out — using the legacy argv"
+elif claude_version_at_least "$CLAUDE_VERSION_TEXT" "$MEMORY_MIN_CLAUDE_VERSION"; then
+  CLAUDE_ARGV_FORM="lean"
+else
+  log "claude --version is below ${MEMORY_MIN_CLAUDE_VERSION} or unparseable — using the legacy argv"
+fi
+
 # --- Worker-level lock (300s stale-break — much longer than learning-lock's 30s) ---
 # This prevents a second worker (spawned 121s later) from double-writing WORKING-MEMORY.md
 # while the first worker's claude -p call (up to 120s) is still in flight.
@@ -171,7 +259,20 @@ fi
 # Clean up any staged file left by a watchdog-killed prior run.
 # Without this, a stale staged file with a valid stamp would be mistakenly
 # mv-ed to the real path on the NEXT run's CAS check (D-MEMORY-STAGED-CAS).
+#
+# D-MEMORY-WORKER-LEAN: the removal is also a CHECKED precondition. The model gets the
+# Write tool alone, and Write refuses a file that exists and has not been read, which
+# is how an earlier Write-only worker failed silently: every Write errored while the
+# run exited 0. Once nothing stands at the staged path, the one Write is always a
+# create, so Write-only is safe. A path `rm -f` cannot clear (a directory, say) would
+# make every Write fail, so the run stops here instead: no LLM call, the batch and
+# the queue untouched (nothing has been claimed yet), the lock released by the EXIT
+# trap. `-e` or `-L`, so a link there counts as present.
 rm -f "$STAGED_FILE" 2>/dev/null || true
+if [ -e "$STAGED_FILE" ] || [ -L "$STAGED_FILE" ]; then
+  log "SKIP: $STAGED_FILE could not be removed — a Write to it would fail, so no LLM run; the batch and the queue are left as they are"
+  exit 0
+fi
 
 # --- Orphan-only skip: if queue has no assistant/qa turn, exit and leave the queue ---
 # This prevents fabrication-prone LLM runs with only user turns in the queue.
@@ -500,7 +601,107 @@ Instructions:
 EOF
 )
 
-log "Spawning claude -p (model claude-sonnet-5-5, ${TURN_COUNT} turns)"
+# --- Model and effort (D-MEMORY-WORKER-LEAN) ---
+# One authority: WORKER_AGENTS.memory in src/core/agent-models.ts, which `devflow
+# agents` shows as the worker's default. The two defaults below are that row spelled
+# out for bash, held equal to it by tests/agent-models-worker.test.ts, as are the
+# alias and effort lists and the name rules. A personal `agents.memory` entry in
+# $HOME/.devflow/agent-models.json (the machine root; nothing relocates it) overrides
+# them. Each field is validated on its own against the worker domain, so a bad model
+# keeps a good effort and the reverse:
+#   model  = `default` (the shipped one), one of the aliases, or a `claude-` name;
+#            a name starts with a letter or digit, continues with those and . _ -,
+#            and is 64 characters at most (MODEL_NAME_RE in src/core/agent-frontmatter.ts)
+#   effort = `default` (the shipped one) or one of the levels
+# `inherit` is outside both, since a background worker has no session to inherit from.
+# Only a value that passed its match reaches argv. A value that is absent, empty or
+# not a JSON string reads as absent and takes the shipped one silently; a string that
+# fails its match takes it with one log line naming the field, never the value.
+# The character sets are spelled out because a range such as A-Za-z matches accented
+# letters in a UTF-8 locale on bash 3.2.
+MEMORY_MODEL_DEFAULT="claude-sonnet-5-5"
+MEMORY_EFFORT_DEFAULT="high"
+MEMORY_MODEL_ALIASES="haiku sonnet opus fable"
+MEMORY_MODEL_PREFIX="claude-"
+MEMORY_MODEL_MAX_LEN=64
+MEMORY_EFFORT_LEVELS="low medium high xhigh max"
+MEMORY_NAME_HEAD="ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789"
+MEMORY_EFFORT_CHARS="abcdefghijklmnopqrstuvwxyz"
+
+# Prints the string value of agents.memory.<field> followed by one `x` (the caller strips
+# it, so a value's own trailing newline survives the command substitution). Prints just
+# the `x` when the file, the field or a string there is missing. Always returns 0.
+memory_agent_field() {
+  local _file="$HOME/.devflow/agent-models.json"
+  if [ "$_JSON_AVAILABLE" = "true" ] && [ -f "$_file" ]; then
+    json_string_field_file "$_file" "agents.memory.$1" 2>/dev/null || true
+  fi
+  printf x
+  return 0
+}
+
+# Sets MEMORY_MODEL. Always returns 0.
+resolve_memory_model() {
+  local _raw _tail="${MEMORY_NAME_HEAD}._-" _ok=""
+  MEMORY_MODEL="$MEMORY_MODEL_DEFAULT"
+  _raw=$(memory_agent_field model)
+  _raw=${_raw%x}
+  case "$_raw" in
+    ''|default) return 0 ;;
+    [!$MEMORY_NAME_HEAD]*|*[!$_tail]*) ;;
+    *)
+      if [ "${#_raw}" -le "$MEMORY_MODEL_MAX_LEN" ]; then
+        case " $MEMORY_MODEL_ALIASES " in
+          *" $_raw "*) _ok="yes" ;;
+        esac
+        case "$_raw" in
+          "$MEMORY_MODEL_PREFIX"?*) _ok="yes" ;;
+        esac
+      fi
+      ;;
+  esac
+  if [ -n "$_ok" ]; then
+    MEMORY_MODEL="$_raw"
+  else
+    log "agents.memory.model: not a model the worker accepts (default, an alias or a ${MEMORY_MODEL_PREFIX} name) — using the shipped model"
+  fi
+  return 0
+}
+
+# Sets MEMORY_EFFORT. Always returns 0.
+resolve_memory_effort() {
+  local _raw _ok=""
+  MEMORY_EFFORT="$MEMORY_EFFORT_DEFAULT"
+  _raw=$(memory_agent_field effort)
+  _raw=${_raw%x}
+  case "$_raw" in
+    ''|default) return 0 ;;
+    *[!$MEMORY_EFFORT_CHARS]*) ;;
+    *)
+      case " $MEMORY_EFFORT_LEVELS " in
+        *" $_raw "*) _ok="yes" ;;
+      esac
+      ;;
+  esac
+  if [ -n "$_ok" ]; then
+    MEMORY_EFFORT="$_raw"
+  else
+    log "agents.memory.effort: not an effort level the worker accepts (default or a level) — using the shipped effort"
+  fi
+  return 0
+}
+
+resolve_memory_model
+resolve_memory_effort
+
+if [ "$CLAUDE_ARGV_FORM" = "lean" ]; then
+  EFFORT_LOG="effort ${MEMORY_EFFORT}"
+  ARGV_LOG="lean argv"
+else
+  EFFORT_LOG="no effort passed"
+  ARGV_LOG="legacy argv"
+fi
+log "Spawning claude -p (model ${MEMORY_MODEL}, ${EFFORT_LOG}, ${ARGV_LOG}, ${TURN_COUNT} turns)"
 # SECURITY: never log PROMPT — it contains turn content which may include secrets
 
 # --- Watchdog timeout (overridable for tests: DEVFLOW_BG_WATCHDOG_SECS=2) ---
@@ -537,14 +738,94 @@ fi
 # Restore set +m immediately after capturing CLAUDE_PID so the watchdog subshell and
 # other subsequent background operations stay in the worker's group.
 # Job-control notifications go to stderr which is redirected to the log — suppress them.
+#
+# D-MEMORY-WORKER-LEAN — the spawn. The worker opens a headless session to make one
+# Write, so the session is cut to what that Write needs. Prompt on stdin, output and
+# errors to the log, as before. Two argv forms, chosen by the version probe above:
+#
+#   lean (CLI at or above MEMORY_MIN_CLAUDE_VERSION):
+#     -p --model M --effort E --safe-mode --tools Write --disable-slash-commands \
+#     --strict-mcp-config --mcp-config '{"mcpServers":{}}' --max-turns 3 \
+#     --dangerously-skip-permissions --output-format text
+#   legacy (older, unreadable or timed-out probe):
+#     -p --model M --tools Write --dangerously-skip-permissions --output-format text
+#
+# What each flag is for:
+#   --model, --effort  the resolved agents.memory values above. --effort is the only
+#                      effort source: an inherited CLAUDE_CODE_EFFORT_LEVEL beats the
+#                      flag (measured on 2026-10-09), so it is unset below, for both
+#                      forms, and the log's "no effort passed" is then true.
+#   --safe-mode        starts with the user's customisations off: instruction files,
+#                      skills, plugins, hooks, MCP servers, custom commands and agents.
+#                      Auth, model selection and built-in tools work as usual, and
+#                      settings `env` (the provider URL and key) still applies under
+#                      it (measured on 2026-10-09), so a routed or keyed install works.
+#   --tools Write      Write is the only tool. `--allowedTools` only pre-approves, it
+#                      leaves every tool, listing and MCP server loaded.
+#   --disable-slash-commands, --strict-mcp-config with an empty --mcp-config
+#                      no slash-command or skill listing, no MCP server and none of the
+#                      instructions they add to the context.
+#   --max-turns 3      the worker's own pattern is one Write and then the end of the
+#                      turn, two requests; the third is margin. A run that reaches the
+#                      cap exits non-zero, so its batch stays for the retry; the Write
+#                      on the capped turn still runs. 3 was verified on claude 2.1.294
+#                      on 2026-10-09 (cap 1 exits 1, caps 2 and 3 exit 0 on that
+#                      pattern). `--max-turns` is not listed in `claude --help` there
+#                      but is registered (`--max-turns abc` errors "must be a number"),
+#                      which is why it was exercised rather than read off the help.
+#   --dangerously-skip-permissions  headless: nothing could answer a prompt.
+#   --output-format text
+#   DEVFLOW_BG_UPDATER=1  the recursion guard stays on both forms, though --safe-mode
+#                      also disables hooks. CLAUDE_CODE_DISABLE_CLAUDE_MDS=1 and
+#                      CLAUDE_CODE_DISABLE_AUTO_MEMORY=1 keep the instruction files and
+#                      auto-memory out on both forms, including the legacy one.
+#
+# Why Write-only is safe: the staged path is empty before every run (the removal and
+# the checked precondition after the lock above), so the one Write is always a create.
+# Write refuses an existing file that has not been read, and that is the whole history
+# of this flag set:
+#   a472a490  passed `--tools "Write"` with `--allowedTools` for two memory files;
+#   e701cecc  widened the tools to `Read,Write,Bash` after counting the silent
+#             read-before-write failures (the run exited 0 while every Write errored);
+#   baf02265  removed both flags, with no reason in its message;
+#   6186645f  raised the worker's model and kept `--allowedTools 'Read,Write'`.
+#
+# The version floor is 2.1.286, the lowest CLI on which the whole lean argv was run
+# and its flags, the settings `env` under --safe-mode and the effort override were
+# checked (2.1.286 and 2.1.292 to 2.1.294 behave identically; 2026-10-09, recorded in
+# docs/reference/platform-assumptions.md). The legacy form carries no --effort,
+# --safe-mode, --max-turns, --disable-slash-commands, --strict-mcp-config or
+# --mcp-config, none of which is verified on older CLIs, so on it effort is not
+# applied, MCP servers stay loaded and there is no turn cap.
+#
+# The turns input has no byte cap: the queue holds every turn whole by design, and the
+# prompt is bounded by the newest-20-rows window above and the 64 KB existing-memory
+# cap, not by cutting a turn.
+unset CLAUDE_CODE_EFFORT_LEVEL
 set -m
-DEVFLOW_BG_UPDATER=1 "$CLAUDE_BIN" -p \
-  --model claude-sonnet-5-5 \
-  --dangerously-skip-permissions \
-  --allowedTools 'Read,Write' \
-  --output-format text \
-  <<< "$PROMPT" \
-  >> "$LOG_FILE" 2>&1 &
+if [ "$CLAUDE_ARGV_FORM" = "lean" ]; then
+  DEVFLOW_BG_UPDATER=1 CLAUDE_CODE_DISABLE_CLAUDE_MDS=1 CLAUDE_CODE_DISABLE_AUTO_MEMORY=1 "$CLAUDE_BIN" -p \
+    --model "$MEMORY_MODEL" \
+    --effort "$MEMORY_EFFORT" \
+    --safe-mode \
+    --tools Write \
+    --disable-slash-commands \
+    --strict-mcp-config \
+    --mcp-config '{"mcpServers":{}}' \
+    --max-turns 3 \
+    --dangerously-skip-permissions \
+    --output-format text \
+    <<< "$PROMPT" \
+    >> "$LOG_FILE" 2>&1 &
+else
+  DEVFLOW_BG_UPDATER=1 CLAUDE_CODE_DISABLE_CLAUDE_MDS=1 CLAUDE_CODE_DISABLE_AUTO_MEMORY=1 "$CLAUDE_BIN" -p \
+    --model "$MEMORY_MODEL" \
+    --tools Write \
+    --dangerously-skip-permissions \
+    --output-format text \
+    <<< "$PROMPT" \
+    >> "$LOG_FILE" 2>&1 &
+fi
 CLAUDE_PID=$!
 set +m
 

@@ -2,10 +2,10 @@
 name: Test
 description: Scenario-based QA agent. Designs and executes acceptance tests from criteria and implementation. Reports pass/fail with evidence — never fixes code.
 model: sonnet
+effort: medium
 tools: ["Read", "Grep", "Glob", "Bash", "mcp__claude-in-chrome__tabs_context_mcp", "mcp__claude-in-chrome__tabs_create_mcp", "mcp__claude-in-chrome__navigate", "mcp__claude-in-chrome__get_page_text", "mcp__claude-in-chrome__read_page", "mcp__claude-in-chrome__find", "mcp__claude-in-chrome__form_input", "mcp__claude-in-chrome__javascript_tool", "mcp__claude-in-chrome__read_console_messages"]
 skills:
   - devflow:qa
-  - devflow:testing
   - devflow:worktree-support
 ---
 
@@ -148,7 +148,7 @@ One row per TP line, in TP order. PASS only when every scenario covering the TP 
 {Each command run's `LOG=` path, for traceability}
 ```
 
-Report cap: final message at most about 1,500 tokens; longer material goes to a `mktemp` file (via Bash or Write) and the message gives its path. Exempt, inline in full: `### Test Plan Evidence` (HEAD line and TP table), the Scenario Results table (`| ID | TP | Type |`) and `### Failed Scenarios`. `### Evidence Log` lists each run's `LOG=` path, never raw output.
+Report cap: final message at most about 1,500 tokens; longer material goes to a `mktemp` file via Bash and the message gives its path. Exempt, inline in full: `### Test Plan Evidence` (HEAD line and TP table), the Scenario Results table (`| ID | TP | Type |`) and `### Failed Scenarios`. `### Evidence Log` lists each run's `LOG=` path, never raw output.
 
 ## Principles
 

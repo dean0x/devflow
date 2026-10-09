@@ -1,6 +1,6 @@
 ---
 name: react
-description: This skill should be used when the user works with React components (.tsx/.jsx), asks about "hooks", "state management", "context providers", "memo optimization", "useEffect", or discusses component composition and rendering performance. Provides patterns for hooks, state, effects, memoization, and React-specific architecture.
+description: This skill should be used when the user works with React components (.tsx/.jsx), asks about "hooks", "state management", "memo optimization", or discusses component composition.
 user-invocable: false
 allowed-tools: Read, Grep, Glob
 activation:

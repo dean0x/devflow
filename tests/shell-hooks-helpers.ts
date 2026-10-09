@@ -45,6 +45,52 @@ export const NODE_EXEC_STALL_MS = 7_000;
 export const FIFO_RUN_BOUND_MS = 20_000;
 export const FIFO_TEST_TIMEOUT_MS = FIFO_RUN_BOUND_MS + 10_000;
 
+/**
+ * D-MEMORY-WORKER-LEAN: the version every fake `claude` in the memory worker's
+ * tests reports to `--version`. background-memory-update runs that probe before it
+ * takes the lock and picks its argv form from the answer, so a fake that did not
+ * answer it would run its whole body on the probe: a staged write, a stdin capture,
+ * an invocation marker. The version sits above the worker's floor, so a fake that
+ * says nothing more gets the lean argv.
+ */
+export const FAKE_CLAUDE_VERSION = '2.1.293';
+
+/**
+ * A fake `claude` script that answers `--version` the way the real CLI does and
+ * exits, before its own body runs. `script` is the whole fake, shebang line
+ * included; the answer goes in right after that line, so every other argument
+ * reaches the body untouched. A script without a shebang line is a harness error.
+ */
+export function answersVersion(script: string, version: string = FAKE_CLAUDE_VERSION): string {
+  const eol = script.indexOf('\n');
+  if (!script.startsWith('#!') || eol < 0) {
+    throw new Error('answersVersion: the fake claude must open with a shebang line');
+  }
+  const answer = `case "\${1:-}" in --version) echo "${version} (Claude Code)"; exit 0 ;; esac\n`;
+  return script.slice(0, eol + 1) + answer + script.slice(eol + 1);
+}
+
+/**
+ * The first executable file `name` on `pathValue`, searched in order as a shell
+ * resolves a bare command, or undefined when none is. A test that fakes a binary
+ * the code under test reaches by bare name asserts that this returns the fake: a
+ * fake in a directory that is not first on the PATH, or no fake at all, would let
+ * the machine's own binary run.
+ */
+export function resolveOnPath(name: string, pathValue: string): string | undefined {
+  for (const dir of pathValue.split(':')) {
+    if (dir === '') continue;
+    const candidate = path.join(dir, name);
+    try {
+      const stat = fs.statSync(candidate);
+      if (stat.isFile() && (stat.mode & 0o111) !== 0) return candidate;
+    } catch {
+      // Not there; the next directory.
+    }
+  }
+  return undefined;
+}
+
 /** A FIFO at `file`: no regular file, and an open of it for writing waits for a reader. */
 export function makeFifo(file: string): void {
   execFileSync('mkfifo', [file]);

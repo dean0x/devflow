@@ -1,9 +1,6 @@
 ---
 name: dependency-research
-description: >-
-  This skill should be used when the user asks to "add a utility", "create a helper",
-  "implement parsing", "build a wrapper", or writes infrastructure/utility code that
-  may already exist as a well-maintained package. Enforces research before building.
+description: This skill should be used when the user asks to "add a utility", "create a helper", "build a wrapper", or writes utility code a maintained package may already provide.
 user-invocable: false
 allowed-tools: Read, Grep, Glob
 ---
@@ -54,9 +51,9 @@ Nice-to-haves: {optional features}
 
 ### Phase 2: Search
 
-Delegate research to an Explore subagent to keep main session context clean.
+Spawn an Explore subagent when you can spawn agents, to keep main session context clean; otherwise search directly, using the template's questions as your checklist.
 
-**Spawn an Explore agent** with this prompt template:
+**Prompt template** for the Explore agent:
 
 ```
 Agent(subagent_type="Explore"):

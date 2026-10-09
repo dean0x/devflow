@@ -17,7 +17,7 @@ Run Simplify agent and Scrutinize agent sequentially on changed files for post-i
 
 ### Phase 0: Context Gathering
 
-**Produces:** FILES_CHANGED, TASK_DESCRIPTION, DECISIONS_CONTEXT, FEATURE_KNOWLEDGE
+**Produces:** FILES_CHANGED, TASK_DESCRIPTION, DECISIONS_CONTEXT, FEATURE_KNOWLEDGE, HEAD_BEFORE
 
 Detect changed files and build context:
 
@@ -25,6 +25,7 @@ Detect changed files and build context:
 2. Else run `git diff --name-only HEAD` + `git diff --name-only --cached` to get staged + unstaged
 3. If no changes found, report "No changes to review" and exit
 4. Build TASK_DESCRIPTION from recent commit messages or branch name
+5. Record `HEAD_BEFORE` (`git rev-parse HEAD`) now, before Simplify runs — Phase 3 compares against it
 {{decisions_load()}}
 
 Pass `DECISIONS_CONTEXT` to Scrutinize agent — the compact index lists active ADR/PF entries; Scrutinize agent uses `devflow:apply-decisions` to Read full entry bodies on demand. Known pitfalls help identify reintroduced issues, prior decisions help validate architectural consistency. (Simplify agent does not consume decisions — it operates at code-shape level and Scrutinize agent runs after to catch any architectural drift.)
@@ -33,7 +34,7 @@ Pass `DECISIONS_CONTEXT` to Scrutinize agent — the compact index lists active 
 
 Pass `FEATURE_KNOWLEDGE` to Scrutinize agent.
 
-**Extract:** FILES_CHANGED (list), TASK_DESCRIPTION (string), DECISIONS_CONTEXT (string, optional), FEATURE_KNOWLEDGE (string, optional)
+**Extract:** FILES_CHANGED (list), TASK_DESCRIPTION (string), DECISIONS_CONTEXT (string, optional), FEATURE_KNOWLEDGE (string, optional), HEAD_BEFORE (40-hex SHA)
 
 ### Phase 1: Simplify agent (Code Refinement)
 
@@ -45,13 +46,14 @@ Spawn Simplify agent to refine code for clarity and consistency:
 Agent(subagent_type="Simplify", run_in_background=false):
 "TASK_DESCRIPTION: {task_description}
 FILES_CHANGED: {files_changed}
-Simplify and refine the code for clarity and consistency while preserving functionality."
+Simplify and refine the code for clarity and consistency while preserving functionality.
+Commit any improvements with a conventional-commit message."
 
 **Wait for completion.** Simplify agent commits changes directly.
 
 ### Phase 2: Scrutinize agent (9-Pillar Quality Gate)
 
-**Produces:** SCRUTINIZE_STATUS, SCRUTINIZE_CHANGES
+**Produces:** SCRUTINIZE_STATUS
 **Requires:** FILES_CHANGED, TASK_DESCRIPTION, DECISIONS_CONTEXT
 
 Spawn Scrutinize agent for quality evaluation and fixing:
@@ -65,17 +67,19 @@ Evaluate against 9-pillar framework. Fix P0/P1 issues. Return structured report.
 Follow devflow:apply-decisions to scan DECISIONS_CONTEXT and Read full ADR/PF bodies on demand. Skip if (none).
 Follow devflow:apply-feature-knowledge for FEATURE_KNOWLEDGE. Skip if (none)."
 
-**Wait for completion.** Extract: STATUS (PASS|FIXED|BLOCKED), changes_made (bool)
+**Wait for completion.** Extract: STATUS (PASS|FIXED|BLOCKED) from the `### Status` line
 
 ### Phase 3: Conditional Validation
 
 **Produces:** VALIDATION_RESULT
-**Requires:** SCRUTINIZE_CHANGES
+**Requires:** HEAD_BEFORE, SCRUTINIZE_STATUS
 
-If Scrutinize agent made changes (STATUS == FIXED):
+If STATUS is BLOCKED, skip this phase: the report (Phase 4) names the blocker.
+
+Run this phase only if HEAD moved — `git rev-parse HEAD` differs from `HEAD_BEFORE`, meaning Simplify or Scrutinize committed (Simplify alone counts, whatever Scrutinize's STATUS is). Otherwise skip it. Its scope is changed-only over what the two agents changed:
 
 Agent(subagent_type="Validate", run_in_background=false):
-"FILES_CHANGED: {scrutinize_modified_files}
+"FILES_CHANGED: {output of `git diff --name-only HEAD_BEFORE..HEAD`}
 VALIDATION_SCOPE: changed-only
 Run build, typecheck, lint, test on modified files"
 
@@ -122,6 +126,7 @@ Display summary:
 │
 ├─ Phase 0: Context gathering
 │  ├─ Git diff for changed files
+│  ├─ Record HEAD_BEFORE
 │  └─ Read index.md → DECISIONS_CONTEXT
 │
 ├─ Phase 1: Simplify agent
@@ -131,7 +136,7 @@ Display summary:
 │  └─ 9-pillar quality gate (may fix and commit)
 │
 ├─ Phase 3: Validate agent (conditional)
-│  └─ If Scrutinize agent made changes, verify tests pass
+│  └─ If HEAD moved since HEAD_BEFORE (Simplify or Scrutinize committed), changed-only Validate over HEAD_BEFORE..HEAD
 │
 └─ Phase 4: Report
    └─ Display summary with pillar status
@@ -150,6 +155,6 @@ Display summary:
 
 1. **Orchestration only** - Command spawns agents, doesn't do the work
 2. **Sequential execution** - Simplify agent must complete before Scrutinize agent
-3. **Validation gate** - If Scrutinize agent changes code, must pass validation
+3. **Validation gate** - If Simplify agent or Scrutinize agent committed, the changes must pass validation
 4. **Honest reporting** - Display actual agent outputs
 5. **Fail fast** - Stop on BLOCKED or validation failure

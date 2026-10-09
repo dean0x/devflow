@@ -83,7 +83,8 @@ function collectStaleReverifyDefects(md: string): string[] {
   const step = stepText(md, STEP0, STEP1)
   if (step === '') return ['no Step 9b-0']
   const out: string[] = []
-  if (!step.includes("Run this step only when this run's Phase 7 push succeeded")) out.push('9b-0 is not gated on this run\'s push')
+  if (!step.includes('Run this step only when a push of this run succeeded')) out.push('9b-0 is not gated on this run\'s push')
+  if (!step.includes("Phase 7's, or the push of Phase 8's gate")) out.push('9b-0 does not cover the Phase 8 gate\'s push')
   if (!step.includes('skip it and Step 9b-3')) out.push('a skipped 9b-0 does not skip 9b-3')
   const fences = parseFences(step)
   if (fences.some(f => isAgentBlock(f, 'Git'))) out.push('9b-0 spawns a Git agent; STALE detection is the script\'s')

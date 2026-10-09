@@ -1,6 +1,6 @@
 ---
 name: regression
-description: This skill should be used when reviewing changes that may remove exports, change signatures, or alter behavior.
+description: This skill should be used when reviewing changes that may break existing behavior.
 user-invocable: false
 allowed-tools: Read, Grep, Glob
 ---

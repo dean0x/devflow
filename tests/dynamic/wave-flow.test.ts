@@ -41,6 +41,7 @@
  */
 
 import { describe, it, expect, afterAll } from 'vitest'
+import { createHash } from 'crypto'
 import { createRequire } from 'module'
 import * as fs from 'fs'
 import * as os from 'os'
@@ -141,8 +142,28 @@ interface World {
   /** The wave's input order. */
   readonly order?: readonly string[]
   readonly deps?: Readonly<Record<string, readonly string[]>>
-  /** Tickets whose merge or post-merge build fails. */
+  /** Tickets whose merge Git keeps but whose post-merge build is red: the workflow's Validate returns FAIL. */
   readonly failMerge?: readonly string[]
+  /** Tickets whose merge Git itself refuses (`merged: false`). */
+  readonly refuseMerge?: readonly string[]
+  /** Tickets whose red merge Git will not undo (`undone: false`). */
+  readonly refuseUndo?: readonly string[]
+  /** Tickets whose Gate 1 Validate never passes: the pass is exhausted after two Code fixes. */
+  readonly gate1Red?: readonly string[]
+  /** Tickets whose Scrutinize agent returns BLOCKED, in Gate 1 #1. */
+  readonly scrutinyBlocked?: readonly string[]
+  /** Tickets whose Scrutinize agent returns BLOCKED only in the final Gate 1 (#2). */
+  readonly scrutinyBlockedFinal?: readonly string[]
+  /**
+   * Raw returns for a ticket's Scrutinize spawns, in order: the first answers Gate 1 #1, the
+   * second the final Gate 1. A spawn past the list answers PASS. This is how a Scrutinize
+   * that returns no status, or one the skeleton does not know, is scripted.
+   */
+  readonly scrutinyReturns?: Readonly<Record<string, readonly unknown[]>>
+  /** Tickets whose merge Git reports without a usable mergeSha. */
+  readonly badMergeSha?: readonly string[]
+  /** Tickets whose Evaluate agent answers FAIL. */
+  readonly evaluateFail?: readonly string[]
   /** Ready IDs the reader adds that are not in the remaining set — an invented or injected ticket. */
   readonly injectReady?: readonly string[]
 }
@@ -170,6 +191,11 @@ function reportedBranch(world: World, ref: string): string | undefined {
  */
 function stubAgent(world: World, spawns: Spawn[]): Agent {
   let current: TicketScript = {}
+  let currentRef = ''
+  /** merge commit → the ticket it merged, so the workflow's Validate and the undo are answered per ticket. */
+  const mergedBy = new Map<string, string>()
+  /** Scrutinize spawns seen per ticket: the second one is the final Gate 1. */
+  const scrutinized = new Map<string, number>()
   return async (prompt, opts) => {
     spawns.push({ agentType: opts.agentType, prompt })
     if (opts.agentType === 'Design') {
@@ -181,17 +207,40 @@ function stubAgent(world: World, spawns: Spawn[]): Agent {
     }
     if (opts.agentType === 'Git' && prompt.startsWith('OPERATION: setup-task')) {
       const ref = /^ISSUE_INPUT: (.*)$/m.exec(prompt)?.[1] ?? '(none)'
+      currentRef = ref
       current = world.tickets[ref] ?? {}
       return { branch: reportedBranch(world, ref), issueId: current.issueId, prLinkLine: current.prLinkLine }
     }
     if (opts.agentType === 'Git' && prompt.startsWith('Merge ')) {
       // The ticket is the ID the merge prompt names, never parsed back out of the branch spelling.
       const id = /Include ticket ID (\S+) in the merge commit message/.exec(prompt)?.[1] ?? ''
-      return world.failMerge?.includes(id) ? { merged: false, reason: 'post-merge build red' } : { merged: true }
+      if (world.refuseMerge?.includes(id)) return { merged: false, reason: 'merge conflict' }
+      if (world.badMergeSha?.includes(id)) return { merged: true }
+      const mergeSha = createHash('sha1').update(`merge:${id}`).digest('hex')
+      mergedBy.set(mergeSha, id)
+      return { merged: true, mergeSha, treeEqual: true }
     }
+    if (opts.agentType === 'Git' && prompt.startsWith('Undo the merge ')) {
+      const sha = /^Undo the merge ([0-9a-f]{40}) on /.exec(prompt)?.[1] ?? ''
+      return world.refuseUndo?.includes(mergedBy.get(sha) ?? '') ? { undone: false, reason: 'integration HEAD moved' } : { undone: true }
+    }
+    if (opts.agentType === 'Validate' && prompt.includes('(merge commit ')) {
+      // The workflow's post-merge Validate: red for a failMerge ticket, keyed by the merge commit it names.
+      const sha = /\(merge commit ([0-9a-f]{40})\)/.exec(prompt)?.[1] ?? ''
+      return world.failMerge?.includes(mergedBy.get(sha) ?? '') ? { verdict: 'FAIL', details: 'build red' } : { verdict: 'PASS' }
+    }
+    if (opts.agentType === 'Validate' && world.gate1Red?.includes(currentRef)) return { verdict: 'FAIL', details: 'tests red' }
     if (opts.agentType === 'Test') return { verdict: current.test ?? 'PASS', failures: 'TP-1 failed' }
     if (opts.agentType === 'Review') return { focus: 'x', reviewed: true, filesExamined: [], findings: [] }
-    if (opts.agentType === 'Scrutinize') return { codeChanged: false }
+    if (opts.agentType === 'Scrutinize') {
+      const nth = (scrutinized.get(currentRef) ?? 0) + 1
+      scrutinized.set(currentRef, nth)
+      const scripted = world.scrutinyReturns?.[currentRef]
+      if (scripted !== undefined && nth <= scripted.length) return scripted[nth - 1]
+      const blocked = world.scrutinyBlocked?.includes(currentRef) || (nth === 2 && world.scrutinyBlockedFinal?.includes(currentRef))
+      return { status: blocked ? 'BLOCKED' : 'PASS' }
+    }
+    if (opts.agentType === 'Evaluate') return world.evaluateFail?.includes(currentRef) ? { verdict: 'FAIL', rationale: 'criterion 2 is not met' } : { verdict: 'PASS', rationale: 'ok' }
     if (opts.agentType === 'Code') return { status: 'fixed', commitShas: ['abc1234'], unresolved: [] }
     return { verdict: 'PASS' }
   }
@@ -211,6 +260,7 @@ interface WaveRow {
   readonly ran: boolean
   readonly verdict: string | null
   readonly merged: boolean
+  readonly treeEqual?: boolean | null
   readonly issuePrLink: string
   readonly evaluateVerdict?: string
   readonly testVerdict?: string
@@ -228,6 +278,7 @@ interface EngineRun {
 interface WaveRun {
   readonly tickets: readonly WaveRow[]
   readonly quarantined: ReadonlyArray<{ ticket: string; reason: string }>
+  readonly halted: { ticket: string; mergeSha: string | null; reason: string } | null
   readonly spawns: readonly Spawn[]
   readonly engines: readonly EngineRun[]
 }
@@ -265,7 +316,7 @@ async function runWave(
   const order = world.order ?? Object.keys(world.tickets)
   const out = (await run(
     agent, engine, [...order], INTEGRATION, plans, '(none)', issueRequired, 'true', 'off', TRACKING, `Closes ${TRACKING}`,
-  )) as { tickets: WaveRow[]; quarantined: Array<{ ticket: string; reason: string }> }
+  )) as { tickets: WaveRow[]; quarantined: Array<{ ticket: string; reason: string }>; halted: WaveRun['halted'] }
   return { ...out, spawns, engines }
 }
 
@@ -1346,5 +1397,328 @@ describe('AC-8: the frozen dynamic-build anchors stay first, above every new ste
   it('known-bad probe: new text above the anchors that repeats one is reported', () => {
     const seeded = seedOnce(BUILD_SOURCE, '### SINGLE mode workflow structure', 'The Git agent deduplicates via its own marker, as ever.\n\n### SINGLE mode workflow structure')
     expect(collectAnchorDrift(seeded, fixture)).toEqual([`${FROZEN_ANCHORS[0]}: its first occurrence is not the frozen fixture line`])
+  })
+})
+
+// ---------------------------------------------------------------------------
+// #421 (t04) — Gate 1 order and its early stop, the single Evaluate spawn, and the
+// workflow-owned post-merge Validate with its undo
+// ---------------------------------------------------------------------------
+//
+// D-VALIDATE-ONCE        Gate 1 runs Simplify, Scrutinize, Validate in both passes, and
+//                        Validate runs last and unconditionally.
+// D-GATE1-ESCALATION     After Gate 1 #1, an exhausted Validate or a BLOCKED Scrutinize
+//                        returns ESCALATED with one escalation (`validation-exhausted` or
+//                        `scrutiny-blocked`) before Gate 2 and the review pass spawn
+//                        anything. At Gate 1 #2 the same stops are ESCALATED phase results
+//                        and the run reports PARTIAL.
+// D-LENS-MERGE           A ticket with a plan gets exactly one Evaluate spawn whose prompt
+//                        names both checks; a wave ticket runs the same skeleton.
+// D-WAVE-MERGE-VALIDATE  Git merges locally and validates nothing. The workflow spawns the
+//                        Validate after every kept merge; a merge counts as kept only on
+//                        PASS. On FAIL the workflow spawns the undo (`reset --keep`, never
+//                        `--hard`, never a push). A refused undo halts the wave.
+//
+// The skeletons are EXECUTED with stub agents, so a wording pin cannot stay green over a
+// loop that merges a red build. Each absence guard has a named collector, a non-empty
+// corpus assertion and a known-bad probe through the same collector.
+
+const types = (spawns: readonly Spawn[]): string[] => spawns.map(s => s.agentType)
+
+/** Named collector: whether `seq` holds `needle` as a subsequence, and how many times it holds in sequence. */
+function countSequence(seq: readonly string[], needle: readonly string[]): number {
+  let hits = 0
+  let at = 0
+  for (const t of seq) {
+    if (t === needle[at]) {
+      at++
+      if (at === needle.length) { hits++; at = 0 }
+    }
+  }
+  return hits
+}
+
+const ENGINE_ARGS = { ticket: 'add login', issueNumber: '#7', criteria: '1. works', issueRequired: 'true' }
+const OWN = { issueId: '7', prLinkLine: 'Closes #7' }
+
+describe('#421 AC-16: Gate 1 runs Simplify, Scrutinize, Validate in both passes', () => {
+  it('executed: the type sequence holds the triple twice, and the first pass precedes Gate 2 and the review', async () => {
+    const spawns: Spawn[] = []
+    const result = await runEngine(SINGLE!, { ...ENGINE_ARGS, plan: 'the plan' }, stubAgent({ tickets: { '#7': OWN } }, spawns))
+    const seq = types(spawns)
+    expect(result.verdict).toBe('PASS')
+    expect(countSequence(seq, ['Simplify', 'Scrutinize', 'Validate'])).toBe(2)
+    expect(seq.filter(t => t === 'Simplify')).toHaveLength(2)
+    expect(seq.filter(t => t === 'Scrutinize')).toHaveLength(2)
+    expect(seq.filter(t => t === 'Validate')).toHaveLength(2)
+    const firstValidate = seq.indexOf('Validate')
+    expect(firstValidate).toBeGreaterThan(seq.indexOf('Scrutinize'))
+    expect(firstValidate, 'Gate 1 #1 closes before Gate 2').toBeLessThan(seq.indexOf('Evaluate'))
+    expect(seq.indexOf('Evaluate'), 'Gate 2 precedes the review pass').toBeLessThan(seq.indexOf('Review'))
+    expect(seq.lastIndexOf('Validate'), 'Gate 1 #2 follows the review pass').toBeGreaterThan(seq.lastIndexOf('Review'))
+  })
+
+  it('Validate runs even when Scrutinize changed nothing, and re-runs once after each Code fix', async () => {
+    const spawns: Spawn[] = []
+    await runEngine(SINGLE!, ENGINE_ARGS, stubAgent({ tickets: { '#7': OWN }, gate1Red: ['#7'] }, spawns))
+    const seq = types(spawns)
+    // Simplify, Scrutinize, then Validate, Code, Validate, Code, Validate: the re-run follows each fix.
+    expect(seq.slice(seq.indexOf('Simplify'), seq.indexOf('Simplify') + 7)).toEqual(['Simplify', 'Scrutinize', 'Validate', 'Code', 'Validate', 'Code', 'Validate'])
+  })
+
+  it('no Validate spawn names a model, and every Gate 1 Validate prompt pins the verdict return', async () => {
+    const spawns: Spawn[] = []
+    await runEngine(SINGLE!, ENGINE_ARGS, stubAgent({ tickets: { '#7': OWN } }, spawns))
+    const validates = spawns.filter(s => s.agentType === 'Validate')
+    expect(validates.length).toBeGreaterThanOrEqual(2)
+    for (const v of validates) expect(v.prompt).toContain('Return: {"verdict": "PASS" | "FAIL", "details": "..."}')
+    expect(spawns.filter(s => s.agentType === 'Scrutinize').every(s => s.prompt.includes('Return: {"status": "PASS" | "FIXED" | "BLOCKED"}'))).toBe(true)
+  })
+})
+
+/**
+ * Named collector: where a Gate 1 #1 stop is not a stop. The engine must return ESCALATED
+ * with exactly one escalation of the expected type and spawn no Gate 2 or review agent.
+ */
+export async function collectGate1StopViolations(body: string | null, world: World, expectedType: string): Promise<string[]> {
+  if (body === null) return ['the SINGLE engine body was not found']
+  const spawns: Spawn[] = []
+  const result = await runEngine(body, { ...ENGINE_ARGS, plan: 'the plan' }, stubAgent(world, spawns))
+  const out: string[] = []
+  if (result.verdict !== 'ESCALATED') out.push(`the verdict is ${String(result.verdict)}, not ESCALATED`)
+  if (result.escalations?.length !== 1) out.push(`expected one escalation, found ${result.escalations?.length ?? 0}`)
+  else if (result.escalations[0].type !== expectedType) out.push(`the escalation is ${result.escalations[0].type}, not ${expectedType}`)
+  for (const t of ['Evaluate', 'Test', 'Review', 'Synthesize']) {
+    const n = spawns.filter(s => s.agentType === t).length
+    if (n > 0) out.push(`${n} ${t} spawn(s) ran on a stopped ticket`)
+  }
+  return out
+}
+
+describe('#421 AC-18: a Gate 1 #1 stop returns ESCALATED with one escalation before Gate 2', () => {
+  it('Validate exhausted: validation-exhausted, and no Gate 2 or review spawn', async () => {
+    expect(await collectGate1StopViolations(SINGLE, { tickets: { '#7': OWN }, gate1Red: ['#7'] }, 'validation-exhausted')).toEqual([])
+  })
+
+  it('Scrutinize BLOCKED: scrutiny-blocked, and Validate never runs on it', async () => {
+    const spawns: Spawn[] = []
+    const world: World = { tickets: { '#7': OWN }, scrutinyBlocked: ['#7'] }
+    expect(await collectGate1StopViolations(SINGLE, world, 'scrutiny-blocked')).toEqual([])
+    await runEngine(SINGLE!, ENGINE_ARGS, stubAgent(world, spawns))
+    expect(spawns.some(s => s.agentType === 'Validate')).toBe(false)
+  })
+
+  it.each([
+    ['no return at all', undefined],
+    ['a return with no status field', {}],
+    ['a status the skeleton does not know', { status: 'DONE' }],
+  ])('Scrutinize returning %s counts as BLOCKED: scrutiny-blocked, and Validate never runs on it', async (_label, scrutinyReturn) => {
+    const spawns: Spawn[] = []
+    const world: World = { tickets: { '#7': OWN }, scrutinyReturns: { '#7': [scrutinyReturn] } }
+    expect(await collectGate1StopViolations(SINGLE, world, 'scrutiny-blocked')).toEqual([])
+    await runEngine(SINGLE!, ENGINE_ARGS, stubAgent(world, spawns))
+    expect(spawns.some(s => s.agentType === 'Validate')).toBe(false)
+  })
+
+  it('known-bad probe: a Gate 1 #1 that only stops on an explicit BLOCKED carries a status-less Scrutinize on to Validate', async () => {
+    const stopsOnBlockedOnly = SINGLE!.replace('if (!["PASS", "FIXED"].includes(scrutiny?.status)) {', 'if (scrutiny?.status === "BLOCKED") {')
+    expect(stopsOnBlockedOnly, 'the seed must land').not.toBe(SINGLE)
+    const world: World = { tickets: { '#7': OWN }, scrutinyReturns: { '#7': [undefined] } }
+    const defects = await collectGate1StopViolations(stopsOnBlockedOnly, world, 'scrutiny-blocked')
+    expect(defects.length).toBeGreaterThan(0)
+    expect(defects.some(d => d.includes('not ESCALATED') || d.includes('ran on a stopped ticket'))).toBe(true)
+  })
+
+  it('the schema lists scrutiny-blocked among the escalation types', () => {
+    const line = BUILT.split('\n').find(l => /^\s*"type": "merge-conflict \|/.test(l)) ?? ''
+    expect(line).toContain('| scrutiny-blocked |')
+  })
+
+  it('known-bad probe: an engine that carries on after a stop (the pre-#421 skeleton) is reported', async () => {
+    const carryOn = seedOnce(
+      SINGLE!,
+      'if (gate1.verdict === "ESCALATED") {',
+      'if (false) {',
+    )
+    const defects = await collectGate1StopViolations(carryOn, { tickets: { '#7': OWN }, gate1Red: ['#7'] }, 'validation-exhausted')
+    expect(defects.length).toBeGreaterThan(0)
+    expect(defects.some(d => d.includes('ran on a stopped ticket'))).toBe(true)
+  })
+
+  it('Gate 1 #2 BLOCKED: the run reports PARTIAL with a scrutiny-blocked escalation, after the review pass', async () => {
+    const spawns: Spawn[] = []
+    const result = await runEngine(SINGLE!, ENGINE_ARGS, stubAgent({ tickets: { '#7': OWN }, scrutinyBlockedFinal: ['#7'] }, spawns))
+    expect(result.verdict).toBe('PARTIAL')
+    expect(result.escalations?.map(e => e.type)).toEqual(['scrutiny-blocked'])
+    expect(types(spawns).filter(t => t === 'Validate'), 'the final Validate does not run on a BLOCKED Scrutinize').toHaveLength(1)
+  })
+
+  it('Gate 1 #2 with a status-less Scrutinize: the run reports PARTIAL with a scrutiny-blocked escalation, and the final Validate does not run', async () => {
+    const spawns: Spawn[] = []
+    const world: World = { tickets: { '#7': OWN }, scrutinyReturns: { '#7': [{ status: 'PASS' }, undefined] } }
+    const result = await runEngine(SINGLE!, ENGINE_ARGS, stubAgent(world, spawns))
+    expect(result.verdict).toBe('PARTIAL')
+    expect(result.escalations?.map(e => e.type)).toEqual(['scrutiny-blocked'])
+    expect(types(spawns).filter(t => t === 'Validate'), 'the final Validate does not run on a status-less Scrutinize').toHaveLength(1)
+  })
+
+  it('a wave quarantines the stopped ticket with its escalation text, and merges nothing for it', async () => {
+    const world: World = { order: ['#51', '#52'], tickets: { '#51': { issueId: '51', prLinkLine: 'Closes #51' }, '#52': { issueId: '52', prLinkLine: 'Closes #52' } }, gate1Red: ['#51'] }
+    const run = await runWave(WAVE!, SINGLE!, world, {}, 'true')
+    expect(run.tickets.map(t => [t.ticket, t.verdict, t.merged])).toEqual([['#51', 'ESCALATED', false], ['#52', 'PASS', true]])
+    expect(run.quarantined).toEqual([{ ticket: '#51', reason: 'Validation exhausted after 2 Code agent fix attempts' }])
+    expect(run.spawns.filter(s => s.prompt.startsWith('Merge ')).map(s => s.prompt.split(' ')[1])).toEqual(['feat/52-work'])
+  })
+})
+
+describe('#421 AC-19: Gate 2 issues one Evaluate spawn whose prompt names both checks', () => {
+  it('executed: one spawn, both questions, the verdict return; wave tickets get the same single spawn', async () => {
+    const spawns: Spawn[] = []
+    const result = await runEngine(SINGLE!, { ...ENGINE_ARGS, plan: 'the plan' }, stubAgent({ tickets: { '#7': OWN } }, spawns))
+    const evaluates = spawns.filter(s => s.agentType === 'Evaluate')
+    expect(evaluates).toHaveLength(1)
+    expect(evaluates[0].prompt).toMatch(/INCLUDING negative criteria/)
+    expect(evaluates[0].prompt).toMatch(/unplanned changes, smuggled anti-features, or drift/)
+    expect(evaluates[0].prompt).toContain('Return: {"verdict": "PASS" | "FAIL", "rationale": "..."}')
+    expect((result.gate2 as { evaluateVerdict: string }).evaluateVerdict).toBe('PASS')
+
+    const world: World = { order: ['#61', '#62'], tickets: { '#61': { issueId: '61', prLinkLine: 'Closes #61' }, '#62': { issueId: '62', prLinkLine: 'Closes #62' } } }
+    const run = await runWave(WAVE!, SINGLE!, world, { '#61': { plan: 'p1' }, '#62': { plan: 'p2' } }, 'true')
+    expect(run.engines.map(e => e.spawns.filter(s => s.agentType === 'Evaluate').length)).toEqual([1, 1])
+  })
+
+  it('a FAIL is fixed once and recorded FAIL-FIXED, and the run reports UNVERIFIED', async () => {
+    const spawns: Spawn[] = []
+    const result = await runEngine(SINGLE!, { ...ENGINE_ARGS, plan: 'the plan' }, stubAgent({ tickets: { '#7': OWN }, evaluateFail: ['#7'] }, spawns))
+    expect((result.gate2 as { evaluateVerdict: string }).evaluateVerdict).toBe('FAIL-FIXED')
+    expect(result.verdict).toBe('UNVERIFIED')
+    const fix = spawns.find(s => s.agentType === 'Code' && s.prompt.startsWith('OPERATION: alignment-fix\nFix the alignment issues'))
+    expect(fix?.prompt).toContain('criterion 2 is not met')
+    expect(spawns.filter(s => s.agentType === 'Evaluate'), 'no re-evaluation by design').toHaveLength(1)
+  })
+})
+
+/** The Git spawns of a run, by what they were asked to do. */
+const gitSpawns = (spawns: readonly Spawn[], lead: string): Spawn[] => spawns.filter(s => s.agentType === 'Git' && s.prompt.startsWith(lead))
+
+describe('#421 AC-20/21: Git merges locally and validates nothing; the workflow runs the post-merge Validate', () => {
+  const world: World = { order: ['#71'], tickets: { '#71': { issueId: '71', prLinkLine: 'Closes #71' } } }
+
+  it('executed: the merge prompt says local, no push, no build or test, and pins both return shapes', async () => {
+    const run = await runWave(WAVE!, SINGLE!, world, {}, 'true')
+    const [merge] = gitSpawns(run.spawns, 'Merge ')
+    expect(merge.prompt).toContain('locally')
+    expect(merge.prompt).toContain('Do not push, and run no build or test.')
+    expect(merge.prompt).toContain('"merged": true, "mergeSha": "<40-hex merge commit>", "treeEqual":')
+    expect(merge.prompt).toContain('{"merged": false, "reason": "<why>"}')
+    expect(run.tickets[0]).toMatchObject({ ticket: '#71', merged: true, treeEqual: true })
+  })
+
+  it('executed: a Validate follows the merge on the merge commit, and no Git prompt asks for Validate', async () => {
+    const run = await runWave(WAVE!, SINGLE!, world, {}, 'true')
+    const seq = run.spawns.map(s => s.agentType + (s.prompt.startsWith('Merge ') ? ':merge' : ''))
+    const mergeAt = seq.indexOf('Git:merge')
+    expect(seq[mergeAt + 1], 'the post-merge Validate directly follows the merge').toBe('Validate')
+    const post = run.spawns[mergeAt + 1]
+    expect(post.prompt).toMatch(/\(merge commit [0-9a-f]{40}\)\.\nFollow your Running commands block/)
+    expect(post.prompt).toContain('Return: {"verdict": "PASS" | "FAIL", "details": "..."}')
+    for (const g of run.spawns.filter(s => s.agentType === 'Git')) expect(g.prompt, 'a Git prompt that asks for Validate').not.toMatch(/Validate/i)
+  })
+
+  it('treeEqual is recorded, not a reason to skip: the Validate runs when it is true', async () => {
+    const run = await runWave(WAVE!, SINGLE!, world, {}, 'true')
+    expect(run.tickets[0].treeEqual).toBe(true)
+    expect(run.spawns.filter(s => s.agentType === 'Validate' && s.prompt.includes('(merge commit '))).toHaveLength(1)
+  })
+})
+
+/**
+ * Named collector: what a red post-merge Validate leaves behind. The merge is never
+ * left kept: the undo spawns, the row reads merged: false, and the ticket is
+ * quarantined with the reason.
+ */
+export async function collectRedMergeViolations(waveBody: string | null): Promise<string[]> {
+  if (waveBody === null) return ['the wave loop body was not found']
+  const world: World = {
+    order: ['#21', '#22', '#23'],
+    tickets: { '#21': { issueId: '21', prLinkLine: 'Closes #21' }, '#22': { issueId: '22', prLinkLine: 'Closes #22' }, '#23': { issueId: '23', prLinkLine: 'Closes #23' } },
+    deps: { '#23': ['#22'] },
+    failMerge: ['#22'],
+  }
+  const run = await runWave(waveBody, SINGLE!, world, {}, 'true')
+  const out: string[] = []
+  const undos = gitSpawns(run.spawns, 'Undo the merge ')
+  if (undos.length !== 1) out.push(`expected one undo spawn, found ${undos.length}`)
+  const row = run.tickets.find(t => t.ticket === '#22')
+  if (row?.merged !== false) out.push('the red merge is left kept: the row does not read merged: false')
+  if (run.quarantined.find(q => q.ticket === '#22')?.reason !== 'post-merge build red; merge undone') out.push('the ticket is not quarantined with "post-merge build red; merge undone"')
+  if (run.tickets.find(t => t.ticket === '#21')?.merged !== true) out.push('the independent sibling lost its merge')
+  if (run.tickets.find(t => t.ticket === '#23')?.ran !== false) out.push('the dependent of the quarantined ticket ran')
+  if (run.halted !== null) out.push('a wave whose undo succeeded halted')
+  return out
+}
+
+describe('#421 AC-22: a red post-merge Validate is undone, never left kept', () => {
+  it('executed: the undo spawns, the row reads merged: false, the dependent is blocked, the sibling stays merged', async () => {
+    expect(await collectRedMergeViolations(WAVE)).toEqual([])
+  })
+
+  it('the undo prompt names the merge commit, reset --keep and the guards, and no --hard and no push', async () => {
+    const world: World = { order: ['#22'], tickets: { '#22': { issueId: '22', prLinkLine: 'Closes #22' } }, failMerge: ['#22'] }
+    const run = await runWave(WAVE!, SINGLE!, world, {}, 'true')
+    const [undo] = gitSpawns(run.spawns, 'Undo the merge ')
+    const sha = /\(merge commit ([0-9a-f]{40})\)/.exec(run.spawns.find(s => s.agentType === 'Validate' && s.prompt.includes('(merge commit '))!.prompt)![1]
+    expect(undo.prompt).toContain(`git reset --keep ${sha}^1`)
+    expect(undo.prompt).toContain(`no remote branch contains ${sha}`)
+    expect(undo.prompt).toContain(`the HEAD of ${INTEGRATION} still equals ${sha}`)
+    expect(undo.prompt).not.toMatch(/--hard/)
+    expect(undo.prompt).not.toMatch(/\bpush\b/i)
+    expect(undo.prompt).toContain('{"undone": true}')
+  })
+
+  it('known-bad probe: a wave that never asks for the undo is reported by the same collector', async () => {
+    // The Git spawn is renamed, so the stub no longer reads it as an undo.
+    const noUndo = seedOnce(WAVE!, 'agent(`Undo the merge ${merge.mergeSha}', 'agent(`Revert the merge ${merge.mergeSha}')
+    expect(await collectRedMergeViolations(noUndo)).toContain('expected one undo spawn, found 0')
+  })
+
+  it('known-bad probe: a wave that keeps the merge after a red Validate leaves the row merged', async () => {
+    const kept = seedOnce(WAVE!, 'if (post?.verdict === "PASS") {', 'if (true) {')
+    const defects = await collectRedMergeViolations(kept)
+    expect(defects).toContain('the red merge is left kept: the row does not read merged: false')
+  })
+})
+
+describe('#421 AC-22: a refused undo halts the wave and names the red integration HEAD', () => {
+  const world: World = {
+    order: ['#31', '#32', '#33'],
+    tickets: { '#31': { issueId: '31', prLinkLine: 'Closes #31' }, '#32': { issueId: '32', prLinkLine: 'Closes #32' }, '#33': { issueId: '33', prLinkLine: 'Closes #33' } },
+    failMerge: ['#32'],
+    refuseUndo: ['#32'],
+  }
+
+  it('executed: no further merge or round, the row is not merged, and halted carries the merge commit', async () => {
+    const run = await runWave(WAVE!, SINGLE!, world, {}, 'true')
+    const sha = createHash('sha1').update('merge:#32').digest('hex')
+    expect(run.halted).toMatchObject({ ticket: '#32', mergeSha: sha })
+    expect(run.halted?.reason).toContain('post-merge build red; merge not undone')
+    expect(run.tickets.map(t => [t.ticket, t.merged, t.ran])).toEqual([['#31', true, true], ['#32', false, true], ['#33', false, false]])
+    expect(gitSpawns(run.spawns, 'Merge ').map(s => s.prompt.split(' ')[1]), 'no merge after the halt').toEqual(['feat/31-work', 'feat/32-work'])
+    expect(run.engines.map(e => e.args.ticket), 'the third ticket never started').toEqual(['#31', '#32'])
+    expect(run.spawns.filter(s => s.agentType === 'Design'), 'no further round').toHaveLength(1)
+  })
+
+  it('a merge reported with no usable SHA halts the wave too, and spawns neither Validate nor undo', async () => {
+    const run = await runWave(WAVE!, SINGLE!, { ...world, failMerge: [], refuseUndo: [], badMergeSha: ['#32'] }, {}, 'true')
+    expect(run.halted).toMatchObject({ ticket: '#32', mergeSha: null })
+    expect(gitSpawns(run.spawns, 'Undo the merge ')).toHaveLength(0)
+    expect(run.spawns.filter(s => s.agentType === 'Validate' && s.prompt.includes('(merge commit ')), 'only #31\'s merge is validated').toHaveLength(1)
+    expect(run.tickets.find(t => t.ticket === '#33')?.ran).toBe(false)
+  })
+
+  it('known-bad probe: a wave that ignores the refusal keeps taking merges', async () => {
+    const ignoring = seedOnce(WAVE!, '    if (waveState.halted !== null) break;  // a red integration HEAD takes no further merge in this round\n', '')
+    const run = await runWave(ignoring, SINGLE!, world, {}, 'true')
+    expect(run.tickets.find(t => t.ticket === '#33')?.ran, 'the seed lets #33 run').toBe(true)
   })
 })

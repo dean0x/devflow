@@ -30,7 +30,7 @@ Run a comprehensive code review of the current branch by spawning parallel revie
 
 1. **Discover reviewable worktrees** using the `devflow:worktree-support` skill discovery algorithm:
    - Run `git worktree list --porcelain` → parse, filter (skip protected/detached/mid-rebase), dedup by branch, sort by recent commit
-   - See the `devflow:worktree-support` skill for the full 7-step algorithm and canonical protected branch list
+   - Invoke the `devflow:worktree-support` skill, then Read its `references/discovery.md` from the skill's base directory for the full 7-step algorithm; the canonical protected branch list stays in the skill
 2. **If `--path` flag provided:** use only that worktree, skip discovery
    **`--path` validation**: Before proceeding, verify the path exists as a directory and appears in `git worktree list` output. If not: report error and stop.
 3. **If only 1 reviewable worktree** (the common case): proceed as single-worktree flow — zero behavior change

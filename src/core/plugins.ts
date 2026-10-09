@@ -298,7 +298,10 @@ export const DEVFLOW_PLUGINS: PluginDefinition[] = [
     commands: ['/release'],
     agents: ['git', 'validate'],
     skills: ['git', 'worktree-support'],
-    requires: ['testing'],
+    // D-PRELOAD-TRIM: nothing in this plugin's corpus reads `testing` (Validate
+    // preloads only `worktree-support`), so the closure guard's reverse arm holds
+    // this list empty.
+    requires: [],
     rules: [],
   },
   {
@@ -307,7 +310,9 @@ export const DEVFLOW_PLUGINS: PluginDefinition[] = [
     commands: ['/self-review'],
     agents: ['simplify', 'scrutinize', 'validate', 'knowledge'],
     skills: ['quality-gates', 'software-design', 'worktree-support', 'feature-knowledge', 'apply-feature-knowledge'],
-    requires: ['apply-decisions', 'testing'],
+    // D-PRELOAD-TRIM: no agent, command or skill in this plugin's corpus names
+    // `testing` (Validate preloads only `worktree-support`), so it is not required here.
+    requires: ['apply-decisions'],
     rules: [],
   },
   {

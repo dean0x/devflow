@@ -25,12 +25,20 @@ function isValidModel(value: unknown): value is LearningModelAlias {
  * global → default precedence) when resolving the model for the directive.
  */
 export interface LearningTuningConfig {
-  /** Model alias for the Learning agent. Closed domain: 'opus' | 'sonnet' | 'haiku'. Default: 'opus' */
+  /** Model alias for the Learning agent. Closed domain: 'opus' | 'sonnet' | 'haiku'. Default: the shipped Learning model (DEFAULTS). */
   model: LearningModelAlias;
   /** Emit verbose logs when true. Default: false */
   debug: boolean;
 }
 
+/**
+ * D-LEARNING-SHIPPED-ROW: the default model is the model the Learning agent ships
+ * with, the `model:` line of src/assets/agents/learning.md. With no layer
+ * configuring a model, the spawn directive names none and that line decides, so a
+ * different default here would describe a run that never happens.
+ * tests/decisions/config.test.ts holds this value equal to the Learning row of the
+ * agent-config table, which a change of the shipped tier edits with the frontmatter.
+ */
 const DEFAULTS: LearningTuningConfig = {
   model: 'opus',
   debug: false,

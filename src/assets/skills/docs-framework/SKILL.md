@@ -1,6 +1,6 @@
 ---
 name: docs-framework
-description: This skill should be used when the user asks to "create a review report", "write a status log", "add documentation", "name this artifact", or creates files in the .devflow/docs/ directory. Provides naming conventions, templates, and directory structure for reviews, debug sessions, design docs, and all persistent Devflow documentation artifacts.
+description: This skill should be used when creating files in the .devflow/docs/ directory.
 user-invocable: false
 allowed-tools: Read, Bash, Glob
 ---

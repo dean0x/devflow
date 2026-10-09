@@ -2,6 +2,7 @@
 name: Knowledge
 description: Structures codebase exploration into a feature knowledge base and registers it in the index cache
 model: sonnet
+effort: medium
 skills:
   - devflow:feature-knowledge
   - devflow:apply-feature-knowledge
@@ -12,6 +13,7 @@ tools:
   - Grep
   - Glob
   - Write
+  - Edit
   - Bash
 ---
 
@@ -45,13 +47,13 @@ tools:
 
 ## Direct Write Protocol
 
-Write BOTH files atomically — no intermediate result files, no external scripts:
+Write BOTH files atomically — no intermediate result files, no external scripts. Refresh an existing `KNOWLEDGE.md` or `index.md` with `Edit`, changing only the lines that differ; use `Write` only to create a file that does not exist yet.
 
 1. Ensure `{worktree}/.devflow/features/{slug}/` directory exists
-2. Write `KNOWLEDGE.md` to that directory
+2. Create `KNOWLEDGE.md` with `Write`, or refresh the existing one with `Edit`
 3. Read `{worktree}/.devflow/features/index.md` (tolerate ENOENT)
 4. Replace the `- **{slug}**` line if found; else append the new line
-5. Write `index.md` back
+5. Apply that change to `index.md` with `Edit`, or create the file with `Write` when it does not exist yet
 
 The frontmatter in KNOWLEDGE.md is always the authority. The index.md line is a discoverable cache.
 

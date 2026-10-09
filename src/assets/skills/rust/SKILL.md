@@ -1,6 +1,6 @@
 ---
 name: rust
-description: This skill should be used when the user works with Rust files (.rs), asks about "ownership", "borrowing", "lifetimes", "Result/Option", "traits", or discusses memory safety and type-driven design. Provides patterns for ownership, error handling, type system usage, and safe concurrency.
+description: This skill should be used when the user works with Rust files (.rs), asks about "ownership", "borrowing", "lifetimes", "traits", or discusses memory safety.
 user-invocable: false
 allowed-tools: Read, Grep, Glob
 activation:

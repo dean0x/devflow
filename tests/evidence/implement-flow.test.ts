@@ -21,8 +21,8 @@
  *          one: record a `test-plan` exception, or stop with BLOCKED (no test plan)
  *          and the project-file remedy. `standard` never asks.
  *   AC-10  Every Code spawn that can create the PR forwards PR_TEST_PLAN_BLOCK.
- *   AC-11  The Phase 8 Test spawn passes TEST_PLAN. Phase 3/6 PASSes and every
- *          Phase 8 run append claims whose shapes CLAIM_LINE_RE admits, and Phase
+ *   AC-11  The Phase 7 Test spawn passes TEST_PLAN. Phase 6/8 PASSes and every
+ *          Phase 7 run append claims whose shapes CLAIM_LINE_RE admits, and Phase
  *          10b — after Phase 10, one spawn for all three strategies — runs
  *          update-pr-evidence with the REVIEW_PUBLICATION Phase 1 resolved through
  *          the publication partial (its third importer, after the policy resolves).
@@ -545,9 +545,9 @@ describe('AC-10/AC-11: the spawns carry the test plan', () => {
     expect(collectUnforwardedTestPlan(seeded).violations).toHaveLength(1)
   })
 
-  it('the Phase 8 Test spawn passes TEST_PLAN from the evidence file', () => {
+  it('the Phase 7 Test spawn passes TEST_PLAN from the evidence file', () => {
     const tests = parseFences(implementMd()).filter(f => isAgentBlock(f, 'Test'))
-    expect(tests, 'the Phase 8 Test spawn').toHaveLength(1)
+    expect(tests, 'the Phase 7 Test spawn').toHaveLength(1)
     expect(tests[0]).toContain("TEST_PLAN: {the TP lines of the evidence file's ## Test Plan section, or (none)}")
   })
 })
@@ -597,7 +597,7 @@ describe('AC-11: /implement appends claims the evidence script can read', () => 
     expect(collectInadmissibleClaims(templates)).toEqual([])
   })
 
-  it('Phase 3 and Phase 6 PASS append the gate claim, and every Phase 8 run its TP claims', () => {
+  it('Phase 6 and Phase 8 PASS append the gate claim, and every Phase 7 run its TP claims', () => {
     const lines = implementMd().split('\n')
     expect(lines.filter(l => l.startsWith('**If PASS:** append a `gate:validate` claim'))).toHaveLength(2)
     expect(lines.filter(l => l.startsWith('After every Test agent run — PASS or FAIL, first run or retry — append its TP claims'))).toHaveLength(1)
@@ -634,12 +634,15 @@ const EVIDENCE_SPAWN = '"OPERATION: update-pr-evidence'
 /** The one push /implement runs itself: claims keyed to a local HEAD must be in the PR before 10b reads them. */
 const EVIDENCE_PUSH = 'git push origin HEAD; echo "exit=$?"'
 
+/** The Phase 10b push, made unique: Phase 9's preamble spells the same command, followed by "the gate". */
+const EVIDENCE_PUSH_ANCHOR = `${EVIDENCE_PUSH}\n\`\`\`\n\n\`exit=0\` continues to the spawn`
+
 const PHASE10B_ORDER: readonly OrderRule[] = [
   { label: 'the policy resolves before the publication partial reads it', before: 'resolve-evidence-policy.cjs', after: '**Evidence stub:**' },
   { label: 'REVIEW_PUBLICATION resolves in Phase 1', before: '**Evidence stub:**', after: '### Phase 2: Implement' },
   { label: 'Phase 10b follows Phase 10', before: '### Phase 10: Create PR', after: PHASE10B },
-  { label: 'the push sits in Phase 10b', before: PHASE10B, after: EVIDENCE_PUSH },
-  { label: 'the push precedes the evidence spawn', before: EVIDENCE_PUSH, after: EVIDENCE_SPAWN },
+  { label: 'the push sits in Phase 10b', before: PHASE10B, after: EVIDENCE_PUSH_ANCHOR },
+  { label: 'the push precedes the evidence spawn', before: EVIDENCE_PUSH_ANCHOR, after: EVIDENCE_SPAWN },
   { label: 'the evidence spawn sits in Phase 10b', before: PHASE10B, after: EVIDENCE_SPAWN },
   { label: 'Phase 11 follows the evidence spawn', before: EVIDENCE_SPAWN, after: '### Phase 11: Report' },
 ]
@@ -687,7 +690,10 @@ function collectEvidencePushDefects(content: string): string[] {
 describe('0b: Phase 10b pushes the branch before the evidence spawn', () => {
   it('one unforced push precedes the spawn, and its failure is DEGRADED, never a stop', () => {
     const md = implementMd()
-    expect(md.split(EVIDENCE_PUSH).length - 1, 'the push command is the corpus').toBe(1)
+    // Per phase: the Phase 9 preamble pushes once for the CI gate, Phase 10b once for the evidence spawn.
+    const phase10b = md.slice(md.indexOf(PHASE10B), md.indexOf('### Phase 11: Report'))
+    expect(phase10b.split(EVIDENCE_PUSH).length - 1, 'the Phase 10b push is the corpus').toBe(1)
+    expect(md.split(EVIDENCE_PUSH).length - 1, 'the push command appears in Phase 9 and Phase 10b only').toBe(2)
     expect(collectEvidencePushDefects(md)).toEqual([])
     expect(collectOrderViolations('implement.md', md, PHASE10B_ORDER)).toEqual([])
   })
@@ -703,14 +709,17 @@ describe('0b: Phase 10b pushes the branch before the evidence spawn', () => {
     const phase = md.slice(md.indexOf(PHASE10B), md.indexOf('### Phase 11: Report'))
     const pushFence = '```bash\n' + EVIDENCE_PUSH + '\n```\n\n'
     expect(phase.includes(pushFence), 'the push fence moved').toBe(true)
-    const late = md.replace(pushFence, '').replace('### Phase 11: Report', pushFence + '### Phase 11: Report')
+    const lastFence = md.lastIndexOf(pushFence)
+    expect(lastFence, 'the Phase 10b push fence is the last one').toBeGreaterThan(md.indexOf(PHASE10B))
+    const late = (md.slice(0, lastFence) + md.slice(lastFence + pushFence.length)).replace('### Phase 11: Report', pushFence + '### Phase 11: Report')
     expect(collectOrderViolations('implement.md', late, PHASE10B_ORDER).some(v => v.includes('the push precedes the evidence spawn'))).toBe(true)
-    expect(collectEvidencePushDefects(md.replace(EVIDENCE_PUSH, 'git push --force origin HEAD; echo "exit=$?"'))).toEqual([
+    const reseed = (to: string): string => md.slice(0, md.indexOf(PHASE10B)) + md.slice(md.indexOf(PHASE10B)).replace(EVIDENCE_PUSH, to)
+    expect(collectEvidencePushDefects(reseed('git push --force origin HEAD; echo "exit=$?"'))).toEqual([
       'the push is not the stated command',
       'the push may force',
     ])
-    expect(collectEvidencePushDefects(md.replace(EVIDENCE_PUSH, 'git push origin +HEAD; echo "exit=$?"'))).toContain('the push may force')
-    expect(collectEvidencePushDefects(md.replace(pushFence, ''))).toEqual(['expected one push fence in Phase 10b, found 0'])
+    expect(collectEvidencePushDefects(reseed('git push origin +HEAD; echo "exit=$?"'))).toContain('the push may force')
+    expect(collectEvidencePushDefects(md.slice(0, lastFence) + md.slice(lastFence + pushFence.length))).toEqual(['expected one push fence in Phase 10b, found 0'])
     expect(collectEvidencePushDefects(md.replace('spawn anyway', 'stop'))).toEqual(['a failed push may block the evidence spawn'])
   })
 })
@@ -754,5 +763,309 @@ describe('AC-11: Phase 10b runs update-pr-evidence once, after Phase 10, for eve
       { name: 'stray', content: `@import "${PUBLICATION_IMPORT}" as pub` },
       { name: 'other', content: '@import { x } from "./_partials/_plan_contract.mds"' },
     ])).toEqual(['implement', 'stray'])
+  })
+})
+
+// ---------------------------------------------------------------------------
+// #421 (t04): the gate order, the one full Validate, and the push before CI
+// ---------------------------------------------------------------------------
+//
+// D-VALIDATE-ONCE   Validate takes the one full-suite slot, after every commit it must
+//                   cover (Code, Simplify, Scrutinize, the alignment fixes): the order
+//                   is Code, Simplify, Scrutinize, Evaluate, Validate (full), Test, the
+//                   conditional changed-only Validate, push, CI gate. A qa-fix is the
+//                   only commit after the full run, so only it earns Phase 8. No loop
+//                   spawns a Validate of its own and nothing re-validates on a
+//                   Scrutinize FIXED status.
+// D-CI-WAIT-INLINE  Phase 9 pushes first, with its own command outside the gate block,
+//                   then waits through ci-wait.cjs. A failed push records
+//                   `TRACEABILITY: DEGRADED (ci push failed)` and waits for nothing.
+//
+// Every guard has a named collector, a non-empty-corpus assertion and a known-bad
+// probe run through the same collector. The absence guards (no Validate in a loop, no
+// re-validate on FIXED, no old pointer) pass vacuously when the text they read is
+// missing, so each has a probe that seeds the defect and a corpus assertion.
+
+/** The `### Phase N:` section: from its heading to the next phase heading or the Architecture section. */
+function phaseSection(md: string, heading: string): string | null {
+  const at = md.indexOf(heading)
+  if (at === -1) return null
+  const rest = md.slice(at + heading.length)
+  const next = rest.search(/\n### Phase |\n## Architecture/)
+  return next === -1 ? md.slice(at) : md.slice(at, at + heading.length + next)
+}
+
+const H = {
+  p1: '### Phase 1: Setup',
+  p2: '### Phase 2: Implement',
+  p3: '### Phase 3: Simplify',
+  p4: '### Phase 4: Self-Review',
+  p5: '### Phase 5: Alignment Check',
+  p6: '### Phase 6: Validate',
+  p7: '### Phase 7: QA Testing',
+  p8: '### Phase 8: Re-Validate (only if a qa-fix committed)',
+  p9: '### Phase 9: CI Status Gate',
+  p10: '### Phase 10: Create PR',
+  p10b: '### Phase 10b: Evidence',
+  p11: '### Phase 11: Report',
+} as const
+
+const SPAWN = (type: string): string => `Agent(subagent_type="${type}")`
+const CI_WAIT_CALL = 'node "$HOME/.devflow/scripts/ci-wait.cjs" --pr {PR_NUMBER} --head "$HEAD_SHA"'
+
+/** The post-code order D-VALIDATE-ONCE fixes, one anchor per step; each is unique in the built file. */
+const GATE_ORDER: readonly OrderRule[] = [
+  { label: 'Simplify follows implementation', before: H.p2, after: SPAWN('Simplify') },
+  { label: 'Scrutinize follows Simplify', before: SPAWN('Simplify'), after: SPAWN('Scrutinize') },
+  { label: 'Evaluate follows Scrutinize', before: SPAWN('Scrutinize'), after: SPAWN('Evaluate') },
+  { label: 'the full Validate follows Evaluate', before: SPAWN('Evaluate'), after: 'VALIDATION_SCOPE: full' },
+  { label: 'Test follows the full Validate', before: 'VALIDATION_SCOPE: full', after: SPAWN('Test') },
+  { label: 'the changed-only Validate follows Test', before: SPAWN('Test'), after: 'VALIDATION_SCOPE: changed-only' },
+  { label: 'the CI gate follows the changed-only Validate', before: 'VALIDATION_SCOPE: changed-only', after: H.p9 },
+  { label: 'the CI wait follows the CI gate heading', before: H.p9, after: CI_WAIT_CALL },
+  { label: 'the PR step follows the CI gate', before: CI_WAIT_CALL, after: H.p10 },
+]
+
+/** Named collector: the phase headings, in order, with the names the tests pin. */
+function collectPhaseHeadingDefects(md: string): string[] {
+  const out = collectOrderViolations('implement.md', md, Object.values(H).slice(0, -1).map((h, i, all) => ({
+    label: `${h.slice(4)} precedes the next phase`,
+    before: h,
+    after: Object.values(H)[i + 1],
+  })).filter((_, i) => i < Object.values(H).length - 1))
+  return out
+}
+
+describe('#421 AC-1: the gates run Code, Simplify, Scrutinize, Evaluate, Validate, Test, the conditional Validate, push, CI', () => {
+  it('every post-code step follows the one before it, and the phase headings hold their order', () => {
+    const md = implementMd()
+    expect(collectOrderViolations('implement.md', md, GATE_ORDER)).toEqual([])
+    expect(collectPhaseHeadingDefects(md)).toEqual([])
+  })
+
+  it('known-bad probe: a Validate before Simplify (the order before #421) is reported', () => {
+    const md = implementMd()
+    const early = md.replace('VALIDATION_SCOPE: full', 'VALIDATION_SCOPE: other').replace(SPAWN('Simplify'), `VALIDATION_SCOPE: full\n${SPAWN('Simplify')}`)
+    expect(early, 'the seed must land').not.toBe(md)
+    const violations = collectOrderViolations('implement.md', early, GATE_ORDER)
+    expect(violations.some(v => v.includes('the full Validate follows Evaluate'))).toBe(true)
+    expect(violations).toHaveLength(1)
+  })
+
+  it('known-bad probe: a lost phase heading is reported', () => {
+    const md = implementMd()
+    expect(collectPhaseHeadingDefects(md.replace(H.p6, '### Phase 6 gone')).length).toBeGreaterThan(0)
+  })
+})
+
+/** Named collector: what the one full-suite slot and its two claim sites lack. */
+function collectValidateOnceDefects(md: string): string[] {
+  const out: string[] = []
+  const validates = parseFences(md).filter(f => isAgentBlock(f, 'Validate'))
+  const full = validates.filter(f => f.includes('VALIDATION_SCOPE: full'))
+  if (full.length !== 1) out.push(`expected one full-scope Validate spawn, found ${full.length}`)
+  if (validates.length !== 2) out.push(`expected two Validate spawns (Phase 6 and Phase 8), found ${validates.length}`)
+  const claimLines = md.split('\n').filter(l => l.startsWith('**If PASS:** append a `gate:validate` claim'))
+  if (claimLines.length !== 2) out.push(`expected two gate:validate claim lines, found ${claimLines.length}`)
+  const inPhase = (heading: string): number => (phaseSection(md, heading) ?? '').split('\n').filter(l => l.startsWith('**If PASS:** append a `gate:validate` claim')).length
+  if (inPhase(H.p6) !== 1) out.push('Phase 6 does not hold exactly one claim line')
+  if (inPhase(H.p8) !== 1) out.push('Phase 8 does not hold exactly one claim line')
+  const six = phaseSection(md, H.p6) ?? ''
+  if (!six.includes('record the result as `VALIDATED_HEAD`')) out.push('Phase 6 does not record VALIDATED_HEAD')
+  if (!six.includes('re-validate at the new HEAD, full scope')) out.push('a Phase 6 retry does not re-run at full scope at its new HEAD')
+  return out
+}
+
+describe('#421 AC-2: one full-scope Validate, and exactly two claim sites', () => {
+  it('Phase 6 holds the only full Validate and its claim; Phase 8 holds the second claim', () => {
+    const md = implementMd()
+    expect(parseFences(md).filter(f => isAgentBlock(f, 'Validate')).length, 'no Validate spawn read').toBeGreaterThanOrEqual(2)
+    expect(collectValidateOnceDefects(md)).toEqual([])
+  })
+
+  it('known-bad probes: a second full Validate, a third claim line and a lost VALIDATED_HEAD are reported', () => {
+    const md = implementMd()
+    const second = md.replace('VALIDATION_SCOPE: changed-only', 'VALIDATION_SCOPE: full')
+    expect(second, 'the seed must land').not.toBe(md)
+    expect(collectValidateOnceDefects(second)).toContain('expected one full-scope Validate spawn, found 2')
+    const third = md.replace('### Phase 9: CI Status Gate', '**If PASS:** append a `gate:validate` claim again.\n\n### Phase 9: CI Status Gate')
+    expect(collectValidateOnceDefects(third)).toContain('expected two gate:validate claim lines, found 3')
+    expect(collectValidateOnceDefects(md.replace('record the result as `VALIDATED_HEAD`', 'remember it'))).toEqual(['Phase 6 does not record VALIDATED_HEAD'])
+  })
+})
+
+/** Phases whose loops and steps must never spawn a Validate of their own. */
+const VALIDATE_FREE_PHASES = [H.p3, H.p4, H.p5, H.p7] as const
+
+/**
+ * Named collector: Validate spawns inside the Simplify, Scrutinize, alignment and QA
+ * phases, and any sentence that re-validates because Scrutinize reported FIXED. The
+ * Phase 6 run covers all of them; the Phase 8 run covers a qa-fix.
+ */
+function collectLoopValidateDefects(md: string): string[] {
+  const out: string[] = []
+  for (const heading of VALIDATE_FREE_PHASES) {
+    const section = phaseSection(md, heading)
+    if (section === null) {
+      out.push(`${heading}: the section is absent`)
+      continue
+    }
+    const spawns = parseFences(section).filter(f => isAgentBlock(f, 'Validate'))
+    if (spawns.length > 0) out.push(`${heading}: ${spawns.length} Validate spawn(s) inside the phase`)
+    if (/(?:status|Status)[^\n]*FIXED[^\n]*\b(?:spawn|re-run|rerun)\b[^\n]*Validate/.test(section)) out.push(`${heading}: a FIXED status triggers a Validate`)
+  }
+  const four = phaseSection(md, H.p4) ?? ''
+  if (!four.includes('starts no Validate of its own')) out.push('Phase 4 does not say a FIXED status starts no Validate')
+  return out
+}
+
+describe('#421 AC-3: no Validate inside the alignment loop, the QA loop or on a Scrutinize FIXED status', () => {
+  it('the Simplify, Scrutinize, alignment and QA phases spawn no Validate', () => {
+    const md = implementMd()
+    for (const heading of VALIDATE_FREE_PHASES) expect(parseFences(phaseSection(md, heading) ?? '').length, `${heading}: no fence read`).toBeGreaterThan(0)
+    expect(collectLoopValidateDefects(md)).toEqual([])
+  })
+
+  it('known-bad probes: a Validate re-inserted into each loop and a FIXED-triggered re-validate are each reported', () => {
+    const md = implementMd()
+    const validate = '```\nAgent(subagent_type="Validate"):\n"FILES_CHANGED: {files}\nVALIDATION_SCOPE: changed-only"\n```\n'
+    const align = md.replace('   - Loop back to Phase 5', `   - Spawn Validate agent to verify the fix:\n${validate}   - Loop back to Phase 5`)
+    expect(align, 'the seed must land').not.toBe(md)
+    expect(collectLoopValidateDefects(align)).toEqual([`${H.p5}: 1 Validate spawn(s) inside the phase`])
+    const qa = md.replace('   - Loop back to Phase 7', `   - Spawn Validate agent to verify the fix:\n${validate}   - Loop back to Phase 7`)
+    expect(qa, 'the seed must land').not.toBe(md)
+    expect(collectLoopValidateDefects(qa)).toEqual([`${H.p7}: 1 Validate spawn(s) inside the phase`])
+    const fixed = md.replace('starts no Validate of its own', 'spawns the Validate agent')
+    expect(collectLoopValidateDefects(fixed)).toContain('Phase 4 does not say a FIXED status starts no Validate')
+    const refire = md.replace('After Simplify agent completes, spawn Scrutinize agent', 'After Simplify agent completes, spawn Scrutinize agent')
+      .replace('**If PASS or FIXED:** continue to Phase 5.', `If Scrutinize agent made changes (status: FIXED), spawn Validate agent:\n${validate}\n**If PASS or FIXED:** continue to Phase 5.`)
+    expect(refire, 'the seed must land').not.toBe(md)
+    expect(collectLoopValidateDefects(refire).some(d => d.includes('Validate spawn(s) inside the phase'))).toBe(true)
+  })
+})
+
+/** Named collector: what Phase 8 fails to state in its own text. */
+function collectPhase8Defects(md: string): string[] {
+  const text = phaseSection(md, H.p8)
+  if (text === null) return ['no Phase 8 section']
+  const out: string[] = []
+  const need = (what: string, ok: boolean): void => { if (!ok) out.push(what) }
+  need('the condition (only if a qa-fix committed)', text.includes('only if a qa-fix committed (`git rev-parse HEAD` differs from `VALIDATED_HEAD`)'))
+  need('the scope (changed files since VALIDATED_HEAD)', text.includes('`git diff --name-only VALIDATED_HEAD..HEAD`') && text.includes('VALIDATION_SCOPE: changed-only'))
+  need('the FAIL arm (report and halt)', /\*\*If FAIL:\*\* Report the failures to user and halt\./.test(text))
+  need('the PASS arm appends the second claim', text.includes('**If PASS:** append a `gate:validate` claim'))
+  return out
+}
+
+describe('#421 AC-4: Phase 8 states its condition, its scope and its FAIL arm in its own text', () => {
+  it('all three are stated', () => {
+    expect(collectPhase8Defects(implementMd())).toEqual([])
+  })
+
+  it('known-bad probes: each lost statement is reported by name', () => {
+    const md = implementMd()
+    expect(collectPhase8Defects(md.replace('only if a qa-fix committed (`git rev-parse HEAD` differs from `VALIDATED_HEAD`)', 'always'))).toEqual(['the condition (only if a qa-fix committed)'])
+    expect(collectPhase8Defects(md.replace('`git diff --name-only VALIDATED_HEAD..HEAD`', 'the Code agent\'s list'))).toEqual(['the scope (changed files since VALIDATED_HEAD)'])
+    expect(collectPhase8Defects(md.replace('**If FAIL:** Report the failures to user and halt.', '**If FAIL:** carry on.'))).toEqual(['the FAIL arm (report and halt)'])
+    expect(collectPhase8Defects(md.replace(H.p8, '### Phase 8 gone'))).toEqual(['no Phase 8 section'])
+  })
+})
+
+/** The push, as Phase 9's preamble spells it; the Phase 10b push spells the same command. */
+const CI_PUSH = EVIDENCE_PUSH
+
+/** Named collector: what Phase 9's push lacks — placement, no force, an exit check, a DEGRADED arm that waits for nothing. */
+function collectCiPushDefects(md: string): string[] {
+  const section = phaseSection(md, H.p9)
+  if (section === null) return ['no Phase 9 section']
+  const out: string[] = []
+  const pushAt = section.indexOf(CI_PUSH)
+  const waitAt = section.indexOf(CI_WAIT_CALL)
+  if (pushAt === -1) out.push('Phase 9 has no push')
+  if (waitAt === -1) out.push('Phase 9 has no ci-wait call')
+  if (pushAt !== -1 && waitAt !== -1 && pushAt > waitAt) out.push('the push does not precede the first ci-wait call')
+  if (section.split(CI_PUSH).length - 1 !== 1) out.push('Phase 9 does not spell its push exactly once')
+  const pushes = parseFences(section).filter(f => /\bgit\b[^\n]*\bpush\b/.test(f))
+  if (pushes.length !== 1) out.push(`expected one push fence in Phase 9, found ${pushes.length}`)
+  if (pushes.some(f => /(^|\s)(--force(-with-lease)?\b|-f\b|\+\S)/.test(f))) out.push('the push may force')
+  if (!section.includes('never force, and no retry')) out.push('the push does not say never force, no retry')
+  if (!section.includes('`TRACEABILITY: DEGRADED (ci push failed)`')) out.push('a failed push names no DEGRADED reason')
+  if (!section.includes('proceeds to Phase 10 without waiting')) out.push('a failed push may still wait')
+  return out
+}
+
+describe('#421 AC-5: Phase 9 pushes first, unforced and checked, and a failed push waits for nothing', () => {
+  it('the push precedes the first ci-wait call and carries its DEGRADED arm', () => {
+    expect(collectCiPushDefects(implementMd())).toEqual([])
+  })
+
+  it('known-bad probes: a push after the wait, a forced push, a lost push and a waiting failure are reported', () => {
+    const md = implementMd()
+    const section = phaseSection(md, H.p9)!
+    const pushFence = '```bash\n' + CI_PUSH + '\n```\n\n'
+    expect(section.includes(pushFence), 'the Phase 9 push fence moved').toBe(true)
+    const swapped = md.replace(pushFence, '').replace('<!-- /PATTERN: ci-status-gate -->', `${pushFence}<!-- /PATTERN: ci-status-gate -->`)
+    expect(collectCiPushDefects(swapped)).toContain('the push does not precede the first ci-wait call')
+    expect(collectCiPushDefects(md.replace(pushFence, '```bash\ngit push --force origin HEAD; echo "exit=$?"\n```\n\n'))).toEqual(['Phase 9 has no push', 'Phase 9 does not spell its push exactly once', 'the push may force'])
+    expect(collectCiPushDefects(md.replace(pushFence, ''))).toContain('Phase 9 has no push')
+    expect(collectCiPushDefects(md.replace('proceeds to Phase 10 without waiting', 'waits anyway'))).toEqual(['a failed push may still wait'])
+  })
+})
+
+/** Named collector: what Phase 6's Validate spawn lacks for its file list. */
+function collectFilesChangedDefects(md: string): string[] {
+  const section = phaseSection(md, H.p6)
+  if (section === null) return ['no Phase 6 section']
+  const spawn = parseFences(section).find(f => isAgentBlock(f, 'Validate') && f.includes('VALIDATION_SCOPE: full'))
+  if (spawn === undefined) return ['Phase 6 has no full Validate spawn']
+  return spawn.includes('FILES_CHANGED: {output of `git diff --name-only {base}...HEAD`}') ? [] : ['the Validate spawn takes the Code agent\'s file list, which misses the Simplify, Scrutinize and fix commits']
+}
+
+describe('#421: Phase 6 hands Validate the branch diff, not the Code agent\'s list', () => {
+  it('FILES_CHANGED is `git diff --name-only {base}...HEAD`', () => {
+    expect(collectFilesChangedDefects(implementMd())).toEqual([])
+  })
+
+  it('known-bad probe: the Code agent\'s list is reported', () => {
+    const md = implementMd()
+    const old = md.replace('FILES_CHANGED: {output of `git diff --name-only {base}...HEAD`}\nVALIDATION_SCOPE: full', 'FILES_CHANGED: {list of files from Code agent output}\nVALIDATION_SCOPE: full')
+    expect(old, 'the seed must land').not.toBe(md)
+    expect(collectFilesChangedDefects(old)).toHaveLength(1)
+  })
+})
+
+/** The pointers the renumbering retires, and the ones that replace them. */
+const RETIRED_POINTERS = ['Scrutinize agent (Phase 5)', 'Phase 3 or Phase 6 PASS', 'Phase 3\'s **Evidence claims**', 'after every Phase 8 run'] as const
+
+/** Named collector: cross-references that still use the numbers before #421, and the new ones that are absent. */
+function collectPointerDefects(md: string): string[] {
+  const out = RETIRED_POINTERS.filter(p => md.includes(p)).map(p => `a retired pointer remains: "${p}"`)
+  const need = (what: string, ok: boolean): void => { if (!ok) out.push(what) }
+  need('Phase 1 does not point Scrutinize at Phase 4', md.includes('Scrutinize agent (Phase 4)'))
+  need('the Evidence-claims definition does not name Phase 6 and Phase 8', md.includes('`gate:validate` — after a Phase 6 or Phase 8 PASS.'))
+  need('the TP claims are not tied to Phase 7', md.includes('`TP-<n>` — after every Phase 7 run'))
+  need('the Test spawn does not point at Phase 6\'s claims', md.includes('append its TP claims (Phase 6\'s **Evidence claims**)'))
+  need('the continuation path names no order', md.includes('**Run Phases 3-8** — Simplify, Self-Review, Alignment, the one full Validate, QA Testing and the conditional Re-Validate'))
+  need('the diagram lacks the Phase 6 Validate', md.includes('├─ Phase 6: Validate (the one full-suite slot)'))
+  need('the diagram lacks the Phase 8 Re-Validate', md.includes('├─ Phase 8: Re-Validate (only if a qa-fix committed)'))
+  need('Principle 1 does not name the Phase 9 push and the ci-wait call', /\*\*Orchestration only\*\*[^\n]*Phase 9[^\n]*push[^\n]*ci-wait call/.test(md))
+  need('Principle 11 does not carry the CI gate budget', /\*\*Loop limits\*\*[^\n]*at most 3 waits and 2 fixes/.test(md))
+  return out
+}
+
+describe('#421 AC-26: the cross-references match the new phase numbers', () => {
+  it('no retired pointer remains and each new one is present', () => {
+    expect(collectPointerDefects(implementMd())).toEqual([])
+  })
+
+  it('known-bad probes: the old pointers and a lost principle clause are each reported', () => {
+    const md = implementMd()
+    const old = md.replace('Scrutinize agent (Phase 4)', 'Scrutinize agent (Phase 5)').replace('after a Phase 6 or Phase 8 PASS', 'after a Phase 3 or Phase 6 PASS')
+    expect(collectPointerDefects(old)).toEqual(expect.arrayContaining([
+      'a retired pointer remains: "Scrutinize agent (Phase 5)"',
+      'a retired pointer remains: "Phase 3 or Phase 6 PASS"',
+      'Phase 1 does not point Scrutinize at Phase 4',
+    ]))
+    expect(collectPointerDefects(md.replace('the CI gate allows at most 3 waits and 2 fixes', 'the CI gate polls ten times'))).toEqual(['Principle 11 does not carry the CI gate budget'])
   })
 })

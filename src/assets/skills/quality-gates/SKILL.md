@@ -1,6 +1,6 @@
 ---
 name: quality-gates
-description: This skill should be used when evaluating implementation quality before submission, checking correctness, security, and simplicity.
+description: This skill should be used when evaluating implementation quality before submission.
 user-invocable: false
 allowed-tools: Read, Grep, Glob, Edit, Write, Bash
 ---
@@ -26,7 +26,7 @@ Based on [Google Engineering Practices](https://google.github.io/eng-practices/r
 |----------|--------|---------|
 | **P0** | MUST fix | Design, Functionality, Security |
 | **P1** | SHOULD fix | Complexity, Error Handling, Tests |
-| **P2** | FIX if time | Naming, Consistency, Documentation |
+| **P2** | FIX if straightforward | Documentation (Naming and Consistency belong to the Simplify agent: report them as SKIP) |
 
 ### P0 - Design
 Does the implementation fit the architecture? Follows existing patterns, respects layer boundaries, dependencies injected.
@@ -48,11 +48,8 @@ Errors handled explicitly? No swallowed exceptions, helpful messages, resources 
 ### P1 - Tests
 New code tested? Covers happy path, errors, edges. Tests behavior, not implementation.
 
-### P2 - Naming
-Names clear and descriptive? No cryptic abbreviations, consistent style.
-
-### P2 - Consistency
-Matches existing patterns? Same style, same conventions, no unnecessary divergence.
+### P2 - Naming and Consistency
+Owned by the Simplify agent, which applies the project's naming and style standards. Report both as SKIP; do not judge or fix them here.
 
 ### P2 - Documentation
 Will others understand? Complex logic commented, public APIs documented, no outdated comments.
@@ -99,7 +96,7 @@ Check Design, Functionality, Security. If issues found and fixable, fix immediat
 Check Complexity, Error Handling, Tests. Fix issues found.
 
 ### Step 4: Evaluate P2 Pillars
-Check Naming, Consistency, Documentation. Fix if time permits.
+Check Documentation and fix it if straightforward. Naming and Consistency are the Simplify agent's: SKIP.
 
 ### Step 5: Generate Report
 Document status of each pillar, fixes applied, and overall readiness.
@@ -122,13 +119,13 @@ Document status of each pillar, fixes applied, and overall readiness.
 - Tests: PASS/FIXED
 
 ### P2 Pillars
-- Naming: PASS/FIXED/SKIP
-- Consistency: PASS/FIXED/SKIP
-- Documentation: PASS/FIXED/SKIP
+- Naming: SKIP (Simplify agent)
+- Consistency: SKIP (Simplify agent)
+- Documentation: PASS/FIXED
 
 ### Summary
 Issues Found: {n}, Fixed: {n}
-Status: READY / BLOCKED
+Status: PASS / FIXED / BLOCKED
 ```
 
 ---

@@ -1,6 +1,6 @@
 ---
 name: performance
-description: This skill should be used when reviewing code for N+1 queries, memory leaks, or I/O bottlenecks.
+description: This skill should be used when reviewing code for N+1 queries or memory leaks.
 user-invocable: false
 allowed-tools: Read, Grep, Glob
 ---

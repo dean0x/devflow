@@ -40,8 +40,8 @@ For each ready ticket (sequentially by default; parallel only past the §7.1 bar
 - Branch setup: the engine's setup-task creates the ticket's branch off integration HEAD at ready-time (so it already contains merged deps); every later phase, and the merge, uses the branch setup-task created, and a setup-task that reports none stops the ticket before implementing
 - Run the single-ticket engine inside a try/catch — one ticket's crash/stall never kills the wave; catch the exception, quarantine that ticket, and continue with the remaining ready set
 - The engine gets the ticket's own reference, the one the pre-fetch printed, as its setup-task input — never the wave's tracking issue
-- On engine PASS or UNVERIFIED: merge to integration branch, run Validate agent (build + test)
-  - Merge FAIL (build red after merge): quarantine ticket, mark as escalated, continue
+- On engine PASS or UNVERIFIED: merge to the integration branch locally through Git (no push, no build or test), then the workflow spawns the Validate agent (build + test) over the merge. The merge counts as kept only when that Validate returns PASS
+  - Validate FAIL or no PASS (build red after merge): the workflow spawns Git to undo the merge, quarantines the ticket, marks it as escalated, and continues. If the undo is refused, the wave stops taking merges and rounds
 - On any other verdict (PARTIAL, FAIL, ESCALATED) or none: quarantine ticket, do not block independent siblings
 
 **Cascade quarantine:** when a ticket is quarantined for any reason (Gate-1 exhausted, engine crash/stall, build-red after merge, review coverage incomplete after retry), the quarantine cascades to its direct and transitive dependents — each is marked blocked with the named reason, naming the blocker by its `{ISSUE_REF}` (e.g. "blocked: depends on {ISSUE_REF} which failed Gate-1"). Independent siblings are never affected. The quarantined list is injected into every subsequent Design agent reader prompt so the reader never schedules dependents of failed tickets.
@@ -70,7 +70,9 @@ MAX_ROUNDS = LLM judgment based on ticket count (heuristic: ticket_count * 2 + 5
 
 **Parallel independent tickets:** each gets its own `git worktree add` + durable branch managed by the Git agent. Use explicit `git worktree add` — NOT the Workflow tool's ephemeral `isolation:'worktree'`. The branch must persist across implement → review → resolve → merge stages; ephemeral worktrees are gone when the agent call ends.
 
-**Post-merge validation:** after EVERY merge into the integration branch, run Validate agent (build + test). A red build immediately after merge is the cheapest possible conflict detector. Red → quarantine the merged result + escalate.
+**Post-merge validation:** after EVERY merge into the integration branch, the workflow itself spawns the Validate agent (build + test) over the integration branch; Git runs no build or test. A red build immediately after merge is the cheapest possible conflict detector. It always runs — the merge reports `treeEqual` (whether the merge commit's tree equals the ticket branch head's tree) and the wave row records it, but a true value never skips the Validate.
+
+**Undo of a red merge:** on FAIL or no PASS verdict the workflow spawns Git to undo the merge. The undo runs only when no remote branch contains the merge commit and the integration HEAD still equals it, as `git reset --keep {mergeSha}^1` on the integration branch — never `--hard`, never a push. It returns `{"undone": true}` or `{"undone": false, "reason": "..."}`. Undone → the row reads `merged: false` and the ticket is quarantined ("post-merge build red; merge undone"). Not undone → the wave stops taking merges and rounds, and its report names the red integration HEAD.
 
 **Commit discipline:** Git agent creates atomic commits per logical change, conventional-commit format, on the ticket branch before merge.
 @end
@@ -83,13 +85,13 @@ Two parallel sibling tickets can produce real git conflicts. The resolution is *
 **Resolution procedure:**
 
 1. Git agent detects the conflict and reports the conflicting files + sections
-2. Spawn a Code agent with FULL intent context:
+2. Spawn a Code agent whose prompt opens with `OPERATION: implement` and carries `COMPLIANCE_FRAMEWORKS`, with FULL intent context:
    - Both ticket descriptions and plans
    - The conflicting diff sections (both sides)
    - Relevant ADRs from DECISIONS_CONTEXT (loaded by main model before authoring)
 3. Code agent resolves to PRESERVE BOTH INTENTS — the resolution must honor what both tickets were trying to achieve
 4. If the correct resolution is NOT UNAMBIGUOUS from the intent context: **do NOT guess** → quarantine + escalate
-5. After any resolution: Validate agent (build + test) immediately
+5. After any resolution: the post-merge Validate covers it — the workflow spawns it after the merge, and no Validate is requested from Git
 
 **Conservative-or-escalate is absolute.** An LLM silently guessing a wrong merge is the highest-danger failure mode in the whole design. When in doubt: quarantine + surface in report. The user re-runs (resume) with the escalated context.
 
@@ -106,7 +108,7 @@ A workflow cannot pause mid-run (F4). "Escalate" means: quarantine-and-continue 
 - Ticket engine FAIL after max retries (Gate 1 exhausted)
 - Gate 2 FAIL after max retries (Evaluate agent/Test agent not satisfied)
 - Circular dependency detected (all remaining tickets blocked on each other)
-- Build red after merge (Validate agent fails post-merge)
+- Build red after merge (the post-merge Validate agent fails: the merge is undone and the ticket quarantined; a refused undo halts the wave)
 - Review coverage incomplete after retry (a focus area failed to produce a live Review agent result after the retry)
 - Ticket engine crash/stall (unrecoverable exception or watchdog kill — quarantine cascades to dependents)
 - No ticket link while issues are required (the engine stops before implementing)

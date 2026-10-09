@@ -1,6 +1,6 @@
 ---
 name: java
-description: This skill should be used when the user works with Java files (.java), asks about "records", "sealed classes", "Optional", "streams", "composition over inheritance", or discusses modern Java patterns and API design. Provides patterns for type system usage, error handling, immutability, and concurrency.
+description: This skill should be used when the user works with Java files (.java), asks about "records", "sealed classes", "streams", or discusses modern Java patterns.
 user-invocable: false
 allowed-tools: Read, Grep, Glob
 activation:

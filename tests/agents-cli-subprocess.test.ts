@@ -122,7 +122,7 @@ describe('devflow agents and init (built CLI, temp HOME)', () => {
   });
 
   describe('devflow init at shipped defaults', () => {
-    it('installs every agent at its shipped model with no effort line, and an agents.memory + validate mapping changes no other agent', async () => {
+    it('installs every agent at its shipped model and effort, and an agents.memory + validate mapping changes no other agent', async () => {
       const bare = await freshHome();
       const mapped = await freshHome();
       await writeMapping(mapped, {
@@ -142,7 +142,8 @@ describe('devflow agents and init (built CLI, temp HOME)', () => {
         expect(model.ok && model.value, `${name}: installed model differs from its shipped source`)
           .toBe((readFrontmatterModel(source) as { value: string }).value);
         const effort = readFrontmatterEffort(installed);
-        expect(effort.ok && effort.value, `${name} gained an effort line`).toBe('');
+        expect(effort.ok && effort.value, `${name}: installed effort differs from its shipped source`)
+          .toBe((readFrontmatterEffort(source) as { value: string }).value);
 
         const withMapping = await fs.readFile(path.join(installedAgentsDir(mapped), `${name}.md`), 'utf-8');
         expect(withMapping, `${name}: a validate + memory mapping changed the installed bytes`).toBe(installed);

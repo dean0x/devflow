@@ -1,6 +1,6 @@
 ---
 name: accessibility
-description: This skill should be used when the user asks to "add accessibility", "check ARIA", "handle keyboard navigation", "add focus management", or creates UI components, forms, or interactive elements. Provides WCAG 2.2 AA patterns for keyboard navigation, ARIA roles and states, focus management, color contrast, and screen reader support.
+description: This skill should be used when the user asks to "add accessibility", "check ARIA", "handle keyboard navigation", or creates UI components, forms, or interactive elements.
 user-invocable: false
 allowed-tools: Read, Grep, Glob
 activation:

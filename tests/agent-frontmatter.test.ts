@@ -22,6 +22,16 @@ import { getAllAgentNames } from '../src/core/plugins.js';
 
 const AGENT_NAMES = getAllAgentNames();
 
+/**
+ * The effort a shipped agent file carries, in the form the rewriter takes: a level, or
+ * null when the file has no effort line. A reapply passes the shipped effort back through
+ * the rewrite, so a round-trip on a real file has to do the same: null would strip it.
+ */
+function shippedEffort(content: string): string | null {
+  const result = readFrontmatterEffort(content);
+  return result.ok && result.value !== '' ? result.value : null;
+}
+
 // ---------------------------------------------------------------------------
 // Real agent files — verbatim round-trips
 // ---------------------------------------------------------------------------
@@ -39,7 +49,7 @@ describe(`rewriteAgentFrontmatter — all ${AGENT_NAMES.length} real agent files
         expect(originalModel.ok, `${name}.md should have a readable model`).toBe(true);
         if (!originalModel.ok) return;
 
-        const result = rewriteAgentFrontmatter(original, { model: 'haiku', effort: null });
+        const result = rewriteAgentFrontmatter(original, { model: 'haiku', effort: shippedEffort(original) });
         expect(result.ok, `${name}.md rewrite should succeed`).toBe(true);
         if (!result.ok) return;
 
@@ -65,7 +75,7 @@ describe(`rewriteAgentFrontmatter — all ${AGENT_NAMES.length} real agent files
         const originalModel = readFrontmatterModel(original);
         if (!originalModel.ok) return;
 
-        const firstPass = rewriteAgentFrontmatter(original, { model: originalModel.value, effort: null });
+        const firstPass = rewriteAgentFrontmatter(original, { model: originalModel.value, effort: shippedEffort(original) });
         expect(firstPass.ok).toBe(true);
         if (!firstPass.ok) return;
 
@@ -80,13 +90,13 @@ describe(`rewriteAgentFrontmatter — all ${AGENT_NAMES.length} real agent files
         if (!originalModel.ok) return;
 
         // Switch to a different model
-        const switched = rewriteAgentFrontmatter(original, { model: 'gpt-5.6-sol', effort: null });
+        const switched = rewriteAgentFrontmatter(original, { model: 'gpt-5.6-sol', effort: shippedEffort(original) });
         if (!switched.ok) return;
 
         // Revert
         const reverted = rewriteAgentFrontmatter(switched.value.content, {
           model: originalModel.value,
-          effort: null,
+          effort: shippedEffort(original),
         });
         expect(reverted.ok).toBe(true);
         if (!reverted.ok) return;
@@ -245,6 +255,69 @@ describe('rewriteAgentFrontmatter — CRLF files', () => {
     if (!result.ok) return;
     expect(result.value.changed).toBe(false);
     expect(result.value.content).toBe(content);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Synthetic: every other key survives a rewrite
+// ---------------------------------------------------------------------------
+
+describe('rewriteAgentFrontmatter — tools, disallowedTools, skills and omitClaudeMd survive', () => {
+  const frontmatterLines = (content: string): string[] => {
+    const m = /^---\r?\n([\s\S]*?)\r?\n---(\r?\n|$)/.exec(content);
+    return m ? m[1].split(/\r?\n/) : [];
+  };
+  const withoutModelAndEffort = (content: string): string[] =>
+    frontmatterLines(content).filter(l => !l.startsWith('model:') && !l.startsWith('effort:'));
+
+  const BLOCK_LISTS = [
+    '---',
+    'name: Test',
+    'description: "A description: with a colon"',
+    'model: sonnet',
+    'effort: medium',
+    'skills:',
+    '  - devflow:worktree-support',
+    'disallowedTools:',
+    '  - Agent',
+    '  - Skill',
+    'omitClaudeMd: true',
+    '---',
+    '',
+    'body',
+    '',
+  ].join('\n');
+  const INLINE_TOOLS = '---\nname: Test\nmodel: haiku\ntools: ["Bash", "Read"]\nomitClaudeMd: true\n---\n\nbody\n';
+
+  for (const [label, content] of [['a block-list file', BLOCK_LISTS], ['an inline-array file', INLINE_TOOLS]] as const) {
+    describe(label, () => {
+      const edits = [
+        ['a model change', { model: 'opus', effort: null }],
+        ['an effort replacement', { model: 'sonnet', effort: 'max' }],
+        ['an effort addition', { model: 'haiku', effort: 'high' }],
+        ['an effort removal', { model: 'haiku', effort: null }],
+      ] as const;
+      for (const [edit, opts] of edits) {
+        it(`keeps every other frontmatter line byte-identical through ${edit}`, () => {
+          const result = rewriteAgentFrontmatter(content, { model: opts.model, effort: opts.effort });
+          expect(result.ok).toBe(true);
+          if (!result.ok) return;
+          expect(withoutModelAndEffort(result.value.content)).toEqual(withoutModelAndEffort(content));
+          // The body is untouched too.
+          expect(result.value.content.slice(result.value.content.lastIndexOf('---\n') + 4))
+            .toBe(content.slice(content.lastIndexOf('---\n') + 4));
+        });
+      }
+    });
+  }
+
+  it('an effort addition lands directly after the model line, ahead of the keys it must not disturb', () => {
+    const result = rewriteAgentFrontmatter(INLINE_TOOLS, { model: 'haiku', effort: 'medium' });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(frontmatterLines(result.value.content)).toEqual([
+      'name: Test', 'model: haiku', 'effort: medium', 'tools: ["Bash", "Read"]', 'omitClaudeMd: true',
+    ]);
   });
 });
 

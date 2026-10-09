@@ -355,6 +355,65 @@ export function resolveAllAgents(root: string = ROOT): Map<string, AgentSource> 
   return result
 }
 
+/**
+ * The eight operating modes of the Code agent (`OPERATION`), `implement` being the default when
+ * absent. One list for the code.md Step 0 table (tests/guards/code-preload.test.ts) and for the
+ * spawn-site guard (tests/guards/code-operation.test.ts).
+ */
+export const CODE_OPERATIONS: readonly string[] = [
+  'implement', 'issue-fix', 'validation-fix', 'alignment-fix', 'qa-fix', 'pr-create', 'ci-fix', 'edit',
+]
+
+export interface CodeSpawnSite {
+  readonly file: string
+  /** 1-based line the spawn starts on. */
+  readonly line: number
+  readonly payload: string
+}
+
+/**
+ * Named collector: every Code spawn site in a compiled command — the ONE collector, shared by the
+ * compliance-lens test (tests/compliance-prompts.test.ts) and the OPERATION guard
+ * (tests/guards/code-operation.test.ts), so the two cannot disagree about what a spawn is. Four
+ * shapes, as the command layer writes them: a fenced spawn (`Agent(subagent_type="Code"):` then a
+ * quoted payload up to its closing quote, indented or not; one fence may hold two spawns), a
+ * one-line prose spawn (Spawn `Agent(subagent_type="Code")` …), a prose sentence that begins
+ * "Spawn a Code agent" (the merge-conflict resolver in the wave partial, which reaches no fence),
+ * and a workflow template literal (agent(`…`, { agentType: "Code" })). The preamble's
+ * `agent("your prompt here", …)` usage example is not a template literal, so it is not a site.
+ */
+export function collectCodeSpawnSites(file: string, text: string): CodeSpawnSite[] {
+  const MAX_SITES = 64
+  const SHAPES = [
+    /Agent\(subagent_type="Code"\):[^\n]*\n[ \t]*"[\s\S]*?"[ \t]*\n[ \t]*(?:\n|```)/g,
+    /^.*Spawn `Agent\(subagent_type="Code"\)`.*$/gm,
+    /^[ \t]*(?:\d+\.[ \t]+)?Spawn a Code agent.*$/gm,
+    /agent\(`(?:(?!agent\(`)[\s\S])*?`, \{ agentType: "Code" \}/g,
+  ]
+  const sites = SHAPES.flatMap(re => [...text.matchAll(re)].map(m => ({
+    file,
+    line: text.slice(0, m.index).split('\n').length,
+    payload: m[0],
+  })))
+  if (sites.length > MAX_SITES) throw new Error(`${file}: more than ${MAX_SITES} Code spawn sites — bound exceeded`)
+  return sites
+}
+
+/**
+ * Parse an agent's frontmatter `skills:` block-list (`- devflow:<name>` items) into the
+ * unprefixed names. The one reader of an agent's preload: the re-entrancy guard in
+ * skill-references.test.ts and the Code preload guard in tests/guards/code-preload.test.ts
+ * both read it, so they agree on what a preload is.
+ */
+export function parseFrontmatterSkills(content: string): string[] {
+  const blockMatch = content.match(/^skills:\s*\n((?:\s+-\s+.+\n?)+)/m)
+  if (!blockMatch) return []
+  return blockMatch[1]
+    .split('\n')
+    .map(l => l.trim().replace(/^-\s+/, '').replace(/^devflow:/, ''))
+    .filter(Boolean)
+}
+
 // ── Fenced-code-block awareness for column-0 section boundaries ──────────────
 //
 // D-FENCE-AWARE-BOUNDARY. A `## ` line at column 0 inside a fenced code

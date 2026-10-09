@@ -30,12 +30,13 @@ Executes a single task through the complete development lifecycle. Accepts plan 
 
 1. **Setup** — Auto-create feature branch, parse plan document or fetch issue, and write the task's test plan (copied from the plan, or one TP line per stated acceptance criterion) to `.devflow/docs/evidence-{branch-slug}.md`. Under a `required` evidence policy, a missing ticket link or test plan is recorded as a self-attested exception or stops the run, before any code is written
 2. **Implementation** — Write code on the feature branch
-3. **Validation** — Build, typecheck, lint, and test
-4. **Refinement** — Simplify (code clarity) + Scrutinize (9-pillar quality)
-5. **Alignment** — Evaluate verifies implementation matches the original request
+3. **Refinement** — Simplify (code clarity) + Scrutinize (9-pillar quality; reports PASS, FIXED or BLOCKED)
+4. **Alignment** — Evaluate verifies implementation matches the original request
+5. **Validation** — One full build, typecheck, lint, and test run over the branch diff, after the code is final
 6. **QA Testing** — Test executes scenario-based acceptance tests and records one claim per TP line
-7. **CI Gate** — Poll the PR's checks and fix failures (skipped when Code agents ran in parallel)
-8. **Evidence** — Push, then refresh the PR's test-plan block and post its evidence comment
+7. **Re-validation** — Only if QA fixes committed: a changed-only Validate over what they changed
+8. **CI Gate** — Push, then wait for CI on the pushed head and fix failures (skipped when Code agents ran in parallel)
+9. **Evidence** — Push, then refresh the PR's test-plan block and post its evidence comment
 
 Creates a PR when complete; its body carries the test-plan block and any `## Evidence Exceptions`.
 

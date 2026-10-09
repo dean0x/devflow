@@ -1,11 +1,11 @@
 import { describe, it, expect } from 'vitest'
 import { readFileSync, existsSync } from 'fs'
-import { createRequire } from 'module'
 import * as path from 'path'
+
+import { resolveAllAgents } from '../helpers.js'
 
 const ROOT = path.resolve(import.meta.dirname, '../..')
 const SKILL_PATH = path.join(ROOT, 'src/assets/skills/apply-decisions/SKILL.md')
-const DECISIONS_FORMAT = path.join(ROOT, 'src/assets/scripts/hooks/lib/decisions-format.cjs')
 
 function loadSkill(): string {
   return readFileSync(SKILL_PATH, 'utf8')
@@ -15,6 +15,21 @@ function loadSkill(): string {
 function sectionOf(content: string, start: string, end: string): string {
   return content.slice(content.indexOf(start), content.indexOf(end))
 }
+
+// -------------------------------------------------------------------------
+// D-APPLY-DECISIONS-NO-RENDERER-PIN
+//
+// This file used to pin the skill's Step 1 and Step 3 to the renderer: the four
+// index lines and the footer were compared byte for byte with what
+// `buildIndexContent` writes, and Step 3 had to name every label
+// `formatEntryBodyV2` renders. Both were removed, with the 0.7 KB of rendered
+// examples they forced the skill to carry. The skill is billed in the preload of
+// every agent that takes DECISIONS_CONTEXT, and a copy of the renderer's output
+// there is a second place to keep in step with it. The renderer owns the index
+// and body formats, and tests/decisions/decisions-format.test.ts holds them. The
+// skill now describes the index by what each line carries, which does not drift
+// with a rendering detail, and no test compares the skill with the renderer.
+// -------------------------------------------------------------------------
 
 // -------------------------------------------------------------------------
 // File existence
@@ -41,9 +56,9 @@ describe('apply-decisions skill — frontmatter', () => {
     expect(content).toMatch(/^description:/m)
   })
 
-  it('has allowed-tools: Read in frontmatter', () => {
+  it('allows exactly Read and Bash: Step 3 reads through a shell search, and no Grep tool exists beside Bash', () => {
     const content = loadSkill()
-    expect(content).toMatch(/^allowed-tools:.*Read/m)
+    expect(content).toMatch(/^allowed-tools: Read, Bash$/m)
   })
 })
 
@@ -90,96 +105,45 @@ describe('apply-decisions skill — 5-step algorithm', () => {
 })
 
 // -------------------------------------------------------------------------
-// The two index line kinds and the v2 body, as the renderer writes them
+// Step 3 — grep-then-offset reader
 // -------------------------------------------------------------------------
 
-describe('apply-decisions skill — v1 and v2 index lines and the v2 body', () => {
-  const { buildIndexContent, formatEntryBodyV2 } = createRequire(import.meta.url)(DECISIONS_FORMAT) as {
-    buildIndexContent: (
-      decisions: Record<string, unknown>[],
-      pitfalls: Record<string, unknown>[],
-      opts: { decisionsFilePath: string, pitfallsFilePath: string },
-    ) => string
-    formatEntryBodyV2: (row: Record<string, unknown>) => string
-  }
+describe('apply-decisions skill — Step 3 locates a heading by shell search and reads by offset and limit', () => {
+  const step3 = (): string => sectionOf(loadSkill(), '### Step 3', '### Step 4')
 
-  // One row of each kind and type, as the ledger holds them. The anchors are
-  // fixture data: the rendered lines are compared with their numbers replaced by
-  // the skill's placeholder.
-  const v1Decision = {
-    id: 'obs_result_types', type: 'decision', anchor_id: 'ADR-001', decisions_status: 'Accepted', date: '2026-01-01',
-    pattern: 'Return Result types from every fallible operation',
-    details: 'context: business logic; decision: return Result; rationale: failures stay explicit',
-  }
-  const v2Decision = {
-    schema: 2, id: 'obs_claim_by_op', type: 'decision', anchor_id: 'ADR-002', decisions_status: 'Accepted',
-    title: 'Claim the learning queue with an op, never with mv',
-    rule: 'Claim the queue with claim-queue.', why: 'A rename is not exclusive.',
-    scope: ['src/assets/scripts/hooks/**', 'area:learning'], provenance: 'Claim-race review', last_verified: '2026-10-01',
-  }
-  const v1Pitfall = {
-    id: 'obs_god_scripts', type: 'pitfall', anchor_id: 'PF-001', decisions_status: 'Active',
-    pattern: 'Background hook god scripts',
-    details: 'area: src/assets/scripts/hooks/foo.cjs; issue: one script does it all; impact: untestable; resolution: split it',
-  }
-  const v2Pitfall = {
-    schema: 2, id: 'obs_rename_claim', type: 'pitfall', anchor_id: 'PF-002', decisions_status: 'Active',
-    title: 'A rename claims a shared file only while nothing re-creates it',
-    rule: 'Claim with link or an exclusive create.', why: 'mv replaces the destination.',
-    scope: ['area:hooks'], provenance: 'Claim-race review',
-  }
-
-  /** The index the renderer writes for the four rows, numbers replaced by the placeholder. */
-  function renderedIndexLines(): string[] {
-    return buildIndexContent([v1Decision, v2Decision], [v1Pitfall, v2Pitfall], {
-      decisionsFilePath: '{worktree}/.devflow/learning/decisions.md',
-      pitfallsFilePath: '{worktree}/.devflow/learning/pitfalls.md',
-    }).split('\n').map(line => line.replace(/\b(ADR|PF)-\d{3}\b/g, '$1-NNN'))
-  }
-
-  it('Step 1 shows each entry line and the footer exactly as the renderer writes them', () => {
-    const step1 = sectionOf(loadSkill(), '### Step 1', '### Step 2')
-    const lines = renderedIndexLines().filter(line => line !== '' && !/^(Decisions|Pitfalls) \(\d+\):$/.test(line))
-    expect(lines.filter(line => line.startsWith('  ')), 'four entry lines rendered').toHaveLength(4)
-    for (const line of lines) {
-      expect(step1, line).toContain(line)
-    }
+  it('runs `command grep -nF` for the entry heading through Bash', () => {
+    expect(step3()).toContain("command grep -nF '## ADR-NNN:' ")
+    expect(step3()).toMatch(/```bash\n[^`]*command grep -nF/)
   })
 
-  it('Step 1 tags a v1 decision [Accepted] and a v1 pitfall [Active], and gives a v2 line no tag', () => {
-    const entryLines = sectionOf(loadSkill(), '### Step 1', '### Step 2')
-      .split('\n').filter(line => /^ {2}(ADR|PF)-NNN {2}/.test(line))
-    expect(entryLines.filter(line => /^ {2}ADR-NNN .*\[Accepted\]$/.test(line))).toHaveLength(1)
-    expect(entryLines.filter(line => /^ {2}PF-NNN .*\[Active\] {2}— /.test(line))).toHaveLength(1)
-    expect(entryLines.filter(line => !/\[(Accepted|Active)\]/.test(line)), 'two v2 lines, untagged').toHaveLength(2)
+  it('reads the matched section with offset and limit, and never the whole file', () => {
+    expect(step3()).toMatch(/`offset`/)
+    expect(step3()).toMatch(/`limit`/)
+    expect(loadSkill()).not.toMatch(/\b(?:whole|entire) (?:decisions |pitfalls )?file\b/i)
   })
 
-  it('Step 3 names every field a v2 body renders, for a decision and a pitfall', () => {
-    const step3 = sectionOf(loadSkill(), '### Step 3', '### Step 4')
-    for (const row of [v2Decision, v2Pitfall]) {
-      const labels = [...formatEntryBodyV2(row).matchAll(/^- \*\*([A-Za-z]+)\*\*:/gm)].map(match => match[1])
-      expect(labels.length, `${row.type} body labels`).toBeGreaterThan(0)
-      for (const label of labels) {
-        expect(step3, `${row.type}: ${label}`).toContain(`**${label}**`)
-      }
-    }
-    expect(step3).toMatch(/verified/)
-  })
-})
-
-// -------------------------------------------------------------------------
-// Worked example
-// -------------------------------------------------------------------------
-
-describe('apply-decisions skill — worked example', () => {
-  it('uses the PF-NNN placeholder in the worked example', () => {
+  it('never instructs the Grep tool: an agent with Bash is given none, and the ledger is git-ignored', () => {
     const content = loadSkill()
-    const example = content.slice(
-      content.indexOf('## Worked Example'),
-      content.indexOf('## Skip Guard')
-    )
-    expect(example).toContain('avoids PF-NNN')
-    expect(example).not.toMatch(/\b(?:ADR|PF)-[0-9]{3}\b/)
+    expect(content).not.toMatch(/\bGrep tool\b/)
+    expect(content).not.toMatch(/\ballowed-tools:.*\bGrep\b/)
+    expect(content).not.toMatch(/\bGrep\(/)
+  })
+
+  it('has neither a Worked Example nor a Citation Format Reference section', () => {
+    const content = loadSkill()
+    expect(content).not.toContain('## Worked Example')
+    expect(content).not.toContain('Citation Format Reference')
+  })
+
+  it('shows no rendered index lines: the skill describes them and copies no renderer output', () => {
+    const content = loadSkill()
+    expect(content).not.toMatch(/^ {2}(?:ADR|PF)-NNN {2}/m)
+    expect(content).not.toContain('Decisions (N):')
+    expect(content).not.toMatch(/live in \{worktree\}/)
+  })
+
+  it('stays under the 3 KB threshold the settings-hoist ticket uses for conditional preload stripping', () => {
+    expect(Buffer.byteLength(loadSkill())).toBeLessThan(3072)
   })
 })
 
@@ -188,14 +152,14 @@ describe('apply-decisions skill — worked example', () => {
 // -------------------------------------------------------------------------
 
 describe('apply-decisions skill — citation format', () => {
-  it('specifies "applies ADR-NNN" citation format', () => {
-    const content = loadSkill()
-    expect(content).toContain('applies ADR-NNN')
+  const step4 = (): string => sectionOf(loadSkill(), '### Step 4', '### Step 5')
+
+  it('specifies "applies ADR-NNN" citation format in Step 4', () => {
+    expect(step4()).toContain('applies ADR-NNN')
   })
 
-  it('specifies "avoids PF-NNN" citation format', () => {
-    const content = loadSkill()
-    expect(content).toContain('avoids PF-NNN')
+  it('specifies "avoids PF-NNN" citation format in Step 4', () => {
+    expect(step4()).toContain('avoids PF-NNN')
   })
 
   it('carries placeholders only — no real ledger ID anywhere in the skill', () => {
@@ -217,7 +181,7 @@ describe('apply-decisions skill — skip guard', () => {
 })
 
 // -------------------------------------------------------------------------
-// Footer-as-source-of-truth — no hardcoded paths in Step 3 or Worked Example
+// Footer-as-source-of-truth — no hardcoded paths in Step 3
 // -------------------------------------------------------------------------
 
 describe('apply-decisions skill — defers to footer for file paths', () => {
@@ -238,5 +202,53 @@ describe('apply-decisions skill — defers to footer for file paths', () => {
     // Must not show a bare hardcoded .memory/decisions/decisions.md arrow example
     expect(step3).not.toMatch(/^\s*\.memory\/decisions\/decisions\.md\s+→/m)
     expect(step3).not.toMatch(/^\s*\.memory\/decisions\/pitfalls\.md\s+→/m)
+  })
+})
+
+// -------------------------------------------------------------------------
+// Every preloader can run Step 3
+// -------------------------------------------------------------------------
+
+describe('apply-decisions skill — every agent that preloads it holds Bash', () => {
+  /** The `- item` lines under `key:` in an agent's frontmatter block. */
+  function frontmatterList(agentSource: string, key: string): string[] {
+    const lines = (agentSource.split('\n---\n')[0] ?? '').split('\n')
+    const start = lines.indexOf(`${key}:`)
+    if (start === -1) return []
+    const items: string[] = []
+    for (const line of lines.slice(start + 1)) {
+      if (!line.startsWith('  - ')) break
+      items.push(line.slice(4).trim())
+    }
+    return items
+  }
+
+  /** Named collector: agents that preload the skill and cannot run its shell search. */
+  function collectBashlessPreloaders(agents: ReadonlyMap<string, { content: string }>): string[] {
+    const out: string[] = []
+    for (const [name, source] of agents) {
+      if (!frontmatterList(source.content, 'skills').includes('devflow:apply-decisions')) continue
+      const allow = frontmatterList(source.content, 'tools')
+      const deny = frontmatterList(source.content, 'disallowedTools')
+      const holdsBash = allow.length > 0 ? allow.includes('Bash') : !deny.includes('Bash')
+      if (!holdsBash) out.push(name)
+    }
+    return out
+  }
+
+  it('no preloader lacks Bash', () => {
+    const agents = resolveAllAgents()
+    const preloaders = [...agents].filter(([, s]) => frontmatterList(s.content, 'skills').includes('devflow:apply-decisions'))
+    expect(preloaders.length, 'the collector read no preloader').toBeGreaterThanOrEqual(5)
+    expect(collectBashlessPreloaders(agents)).toEqual([])
+  })
+
+  it('known-bad probe: an allowlist without Bash and a denylist that names it are each reported', () => {
+    const withSkill = (extra: string): { content: string } => ({
+      content: `---\nname: X\nskills:\n  - devflow:apply-decisions\n${extra}\n---\nbody\n`,
+    })
+    expect(collectBashlessPreloaders(new Map([['allow', withSkill('tools:\n  - Read\n  - Write')]]))).toEqual(['allow'])
+    expect(collectBashlessPreloaders(new Map([['deny', withSkill('disallowedTools:\n  - Bash')]]))).toEqual(['deny'])
+    expect(collectBashlessPreloaders(new Map([['ok', withSkill('tools:\n  - Read\n  - Bash')]]))).toEqual([])
   })
 })

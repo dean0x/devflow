@@ -8,7 +8,7 @@ Every agent should follow this template (~50-150 lines total):
 
 ```markdown
 ---
-frontmatter (name, description, model, skills, hooks, tools)
+frontmatter (name, description, model, effort, skills, tools or disallowedTools, omitClaudeMd)
 ---
 
 # Agent Name
@@ -43,7 +43,21 @@ tools: ["Bash", "Read"]
 ---
 ```
 
-When an agent only needs a subset of tools, prefer platform-enforced restriction over prompt instructions. Only omit `tools` when the agent genuinely needs full tool access.
+When an agent only needs a subset of tools, prefer platform-enforced restriction over prompt instructions. An agent holds one tool policy, never both:
+
+- **Allowlist (`tools:`)** — the agent holds exactly the tools named. This is the default for an agent that needs no user-environment MCP or web access.
+- **Denylist (`disallowedTools:`)** — the agent keeps every tool except the ones named, MCP and web tools included. Use it where the agent must keep that access (Code, Research, Scrutinize, Simplify). Spell every name out: a wildcard in `disallowedTools` removes MCP names too.
+
+Add a new key as a YAML block list, one name per line. Neither key is touched by `devflow agents --set` or by the reapply on `devflow init`, which rewrite only the `model:` and `effort:` lines.
+
+An allowlist silently constrains how an agent can act, so the body must not direct a tool its frontmatter removes. That covers a call, "the X tool", a skill load and a `ToolSearch` `select:` load, and also every verb: update, refresh, amend, append and patch imply `Edit`, and loading a skill implies `Skill`. `tests/guards/agent-config.test.ts` holds the shipped table and checks the body and each preloaded skill against it.
+
+An agent that has Bash is given no Grep or Glob tool in Claude Code, even when its `tools:` list names them. Write its search steps as Bash commands (`git grep -P`, `find`), and never rely on the two names.
+
+## Effort and Project Context
+
+- `effort:` (`low`, `medium`, `high`, `xhigh` or `max`) is the agent's shipped reasoning effort, set on the line after `model:`. Lower effort on a mechanical agent is a deliberate saving. An agent with no `effort:` line follows the session.
+- `omitClaudeMd: true` stops Claude Code loading the user's, project's and local CLAUDE.md into the agent's context. Use it for an agent that does no project-aware judgment (Synthesize, Skim). Such an agent receives none of that text, so every rule it relies on has to be stated in its own body. Learning keeps its CLAUDE.md context: its Encoded-retirement check reads the rules in the root CLAUDE.md, and an A/B run showed that without them it stops retiring entries as Encoded.
 
 ## Length Guidelines
 

@@ -1,6 +1,6 @@
 ---
 name: research-technology
-description: Technology evaluation — assess libraries, frameworks, and tools against project requirements
+description: Technology evaluation — assess libraries, frameworks and tools against requirements
 user-invocable: false
 allowed-tools: WebSearch, WebFetch, Read
 ---

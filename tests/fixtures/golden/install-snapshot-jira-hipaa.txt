@@ -279,6 +279,7 @@ d .claude/skills/devflow:testing/references/
 d .claude/skills/devflow:worktree-support/
 - .claude/skills/devflow:worktree-support/SKILL.md
 d .claude/skills/devflow:worktree-support/references/
+- .claude/skills/devflow:worktree-support/references/discovery.md
 - .claude/skills/devflow:worktree-support/references/roots.md
 d .devflow/
 - .devflow/.tracker.enabled
@@ -286,6 +287,7 @@ d .devflow/
 - .devflow/manifest.json
 - .devflow/migrations.json
 d .devflow/scripts/
+x .devflow/scripts/ci-wait.cjs
 d .devflow/scripts/core/
 - .devflow/scripts/core/ansi.js
 - .devflow/scripts/core/cache.js

@@ -69,7 +69,7 @@ If the settings line says `KNOWLEDGE=off`, skip write-back entirely. The machine
 **Step 2 — Evaluate whether write-back is warranted:**
 
 Only proceed if **at least one** of these is true:
-- This workflow changed files in a directory that is documented by an existing feature knowledge base (a documented area changed).
+- This workflow changed files in a directory that is documented by an existing feature knowledge base (a documented area changed). Knowledge bases are written through at that point, never on a background schedule.
 - This workflow surfaced durable, cross-cutting knowledge about a codebase area that would help future agents working in the same area — patterns, anti-patterns, integration points, gotchas not visible from a single file read.
 
 **Never spawn unconditionally.** If neither condition is met, skip write-back silently.

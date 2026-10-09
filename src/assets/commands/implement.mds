@@ -50,7 +50,7 @@ When the user explicitly asks to re-validate, re-check, or re-run quality gates 
 1. **Branch safety check**: If on a protected branch (main, master, develop, etc.), run Phase 1 to create/switch to a work branch. If already on a work branch, skip Phase 1.
 2. **Skip Phase 2** — no Code agent needed, user already made changes.
 3. **Detect FILES_CHANGED**: `git diff --name-only {base_branch}...HEAD`
-4. **Run Phases 3-8** — full quality gate pipeline on detected changes.
+4. **Run Phases 3-8** — Simplify, Self-Review, Alignment, the one full Validate, QA Testing and the conditional Re-Validate, on the detected changes.
 5. **Proceed to Phase 10** (Create PR), **Phase 10b** (Evidence) and **Phase 11** (Report).
 
 If the user prompt does NOT match re-validation, proceed with the full pipeline below.
@@ -172,7 +172,7 @@ Phase 10b passes the resolved value to `update-pr-evidence`, which decides what 
 
 {{decisions_load()}}
 
-Pass to Code agent (Phase 2) and Scrutinize agent (Phase 5).
+Pass to Code agent (Phase 2) and Scrutinize agent (Phase 4).
 
 {{knowledge_load()}}
 
@@ -199,7 +199,8 @@ Based on Setup context (plan document, issue body, or conversation context), use
 
 ```
 Agent(subagent_type="Code"):
-"TASK_ID: {task-id}
+"OPERATION: implement
+TASK_ID: {task-id}
 TASK_DESCRIPTION: {description}
 BASE_BRANCH: {base branch}
 EXECUTION_PLAN: {full plan from setup context}
@@ -225,7 +226,8 @@ Spawn Code agents one at a time, passing handoff summaries between phases:
 **Phase 1 Code agent:**
 ```
 Agent(subagent_type="Code"):
-"TASK_ID: {task-id}
+"OPERATION: implement
+TASK_ID: {task-id}
 TASK_DESCRIPTION: {phase 1 description}
 BASE_BRANCH: {base branch}
 EXECUTION_PLAN: {phase 1 steps}
@@ -245,7 +247,8 @@ HANDOFF_FILE: {worktree}/.devflow/docs/handoff-{branch_slug}.md"
 **Phase 2+ Code agents** (after prior phase completes):
 ```
 Agent(subagent_type="Code"):
-"TASK_ID: {task-id}
+"OPERATION: implement
+TASK_ID: {task-id}
 TASK_DESCRIPTION: {phase N description}
 BASE_BRANCH: {base branch}
 EXECUTION_PLAN: {phase N steps}
@@ -276,7 +279,8 @@ Spawn multiple Code agents **in a single message**, each with independent subtas
 
 ```
 Agent(subagent_type="Code"):  # Code agent 1
-"TASK_ID: {task-id}-part1
+"OPERATION: implement
+TASK_ID: {task-id}-part1
 TASK_DESCRIPTION: {independent subtask 1}
 BASE_BRANCH: {base branch}
 EXECUTION_PLAN: {subtask 1 steps}
@@ -291,7 +295,8 @@ ISSUE_NUMBER: {ISSUE_ID captured in Phase 1, or (none)}
 ISSUE_PR_LINK: {ISSUE_PR_LINK captured in Phase 1, or (none)}"
 
 Agent(subagent_type="Code"):  # Code agent 2 (same message)
-"TASK_ID: {task-id}-part2
+"OPERATION: implement
+TASK_ID: {task-id}-part2
 TASK_DESCRIPTION: {independent subtask 2}
 BASE_BRANCH: {base branch}
 EXECUTION_PLAN: {subtask 2 steps}
@@ -312,74 +317,28 @@ ISSUE_PR_LINK: {ISSUE_PR_LINK captured in Phase 1, or (none)}"
 - Different files/modules with no imports between them
 - Each subtask is self-contained
 
-### Phase 3: Validate
-
-**Produces:** VALIDATION_RESULT
-**Requires:** FILES_CHANGED
-
-After Code agent completes, spawn Validate agent to verify correctness:
-
-```
-Agent(subagent_type="Validate"):
-"FILES_CHANGED: {list of files from Code agent output}
-VALIDATION_SCOPE: full
-Run build, typecheck, lint, test. Report pass/fail with failure details."
-```
-
-**If FAIL:**
-1. Extract failure details from Validate agent output
-2. Increment `validation_retry_count`
-3. If `validation_retry_count <= 2`:
-   - Spawn Code agent with fix context:
-   ```
-   Agent(subagent_type="Code"):
-   "TASK_ID: {task-id}
-   TASK_DESCRIPTION: Fix validation failures
-   OPERATION: validation-fix
-   VALIDATION_FAILURES: {parsed failures from Validate agent}
-   SCOPE: Fix only the listed failures, no other changes
-   CREATE_PR: false
-   ISSUE_NUMBER: {ISSUE_ID captured in Phase 1, or (none)}
-   ISSUE_PR_LINK: {ISSUE_PR_LINK captured in Phase 1, or (none)}
-   COMPLIANCE_FRAMEWORKS: {COMPLIANCE_FRAMEWORKS}"
-   ```
-   - Loop back to Phase 3 (re-validate)
-4. If `validation_retry_count > 2`: Report failures to user and halt
-
-**If PASS:** append a `gate:validate` claim, then continue to Phase 4.
-
-**Evidence claims** are lines appended to the `## Claims` section of `EVIDENCE_FILE` — the file's last section, created when absent. Append only: never edit or remove a claim; the last valid one per target wins. Each line takes exactly one of these shapes, where `<head>` is the 40-hex `HEAD:` the agent's report shows:
-
-```
-- gate:validate PASS sha:<head> by:validate
-- TP-<n> <PASS|FAIL|SKIP> sha:<head> by:test exit:<0-255>
-```
-
-- `gate:validate` — after a Phase 3 or Phase 6 PASS.
-- `TP-<n>` — after every Phase 8 run, one line per `### Test Plan Evidence` row whose TP is in `TEST_PLAN`, with the row's outcome; the line ends at `by:test` when the row's Exit is not a number from 0 to 255.
-- Append nothing from a report whose `HEAD:` is not a single 40-hex SHA — a reported before/after change included — and say so in the Phase 11 report.
-
-### Phase 4: Simplify
+### Phase 3: Simplify
 
 **Produces:** SIMPLIFY_OUTPUT
 **Requires:** FILES_CHANGED
 
-After validation passes, spawn Simplify agent to polish the code:
+After the Code agent completes, spawn Simplify agent to polish the code. The Phase 6 Validate covers its commits.
 
 ```
 Agent(subagent_type="Simplify"):
 "Simplify recently implemented code
 Task: {task description}
 FILES_CHANGED: {list of files from Code agent output}
-Focus on code modified by Code agent, apply project standards, enhance clarity"
+Focus on code modified by Code agent, apply project standards, enhance clarity
+Commit any improvements with a conventional-commit message."
 ```
 
-### Phase 5: Self-Review
+### Phase 4: Self-Review
 
 **Produces:** SCRUTINIZE_OUTPUT
 **Requires:** FILES_CHANGED
 
-After Simplify agent completes, spawn Scrutinize agent as final quality gate:
+After Simplify agent completes, spawn Scrutinize agent as the quality gate:
 
 ```
 Agent(subagent_type="Scrutinize"):
@@ -390,32 +349,14 @@ FEATURE_KNOWLEDGE: {feature_knowledge}
 Evaluate 9 pillars, fix P0/P1 issues, report status"
 ```
 
-If Scrutinize agent returns BLOCKED, report to user and halt.
+Scrutinize agent reports `### Status: PASS | FIXED | BLOCKED`. **If BLOCKED:** report to user and halt. **If PASS or FIXED:** continue to Phase 5. A FIXED status commits fixes and starts no Validate of its own: the Phase 6 run covers them.
 
-### Phase 6: Re-Validate (if Scrutinize agent made changes)
-
-**Produces:** REVALIDATION_RESULT
-**Requires:** SCRUTINIZE_OUTPUT
-
-If Scrutinize agent made code changes (status: FIXED), spawn Validate agent to verify:
-
-```
-Agent(subagent_type="Validate"):
-"FILES_CHANGED: {files modified by Scrutinize agent}
-VALIDATION_SCOPE: changed-only
-Verify Scrutinize agent's fixes didn't break anything."
-```
-
-**If FAIL:** Report to user - Scrutinize agent broke tests, needs manual intervention.
-
-**If PASS:** append a `gate:validate` claim (Phase 3's **Evidence claims**), then continue to Phase 7.
-
-### Phase 7: Alignment Check
+### Phase 5: Alignment Check
 
 **Produces:** ALIGNMENT_RESULT
 **Requires:** FILES_CHANGED, EXECUTION_PLAN
 
-After Scrutinize agent passes (and re-validation if needed), spawn Evaluate agent to validate alignment:
+After Scrutinize agent passes, spawn Evaluate agent to validate alignment. Evaluate agent receives `FEATURE_KNOWLEDGE` as acceptance context only; pattern and anti-pattern judgments belong to Scrutinize agent:
 
 ```
 Agent(subagent_type="Evaluate"):
@@ -427,7 +368,7 @@ FEATURE_KNOWLEDGE: {feature_knowledge}
 Validate alignment with request and plan. Report ALIGNED or MISALIGNED with details."
 ```
 
-**If ALIGNED:** Continue to Phase 8
+**If ALIGNED:** Continue to Phase 6
 
 **If MISALIGNED:**
 1. Extract misalignment details from Evaluate agent output
@@ -436,9 +377,9 @@ Validate alignment with request and plan. Report ALIGNED or MISALIGNED with deta
    - Spawn Code agent to fix misalignments:
    ```
    Agent(subagent_type="Code"):
-   "TASK_ID: {task-id}
+   "OPERATION: alignment-fix
+   TASK_ID: {task-id}
    TASK_DESCRIPTION: Fix alignment issues
-   OPERATION: alignment-fix
    MISALIGNMENTS: {structured misalignments from Evaluate agent}
    SCOPE: Fix only the listed misalignments, no other changes
    CREATE_PR: false
@@ -446,22 +387,62 @@ Validate alignment with request and plan. Report ALIGNED or MISALIGNED with deta
    ISSUE_PR_LINK: {ISSUE_PR_LINK captured in Phase 1, or (none)}
    COMPLIANCE_FRAMEWORKS: {COMPLIANCE_FRAMEWORKS}"
    ```
-   - Spawn Validate agent to verify fix didn't break tests:
-   ```
-   Agent(subagent_type="Validate"):
-   "FILES_CHANGED: {files modified by fix Code agent}
-   VALIDATION_SCOPE: changed-only"
-   ```
-   - If Validate agent FAIL: Report to user
-   - If Validate agent PASS: Loop back to Phase 7 (re-check alignment)
+   - Loop back to Phase 5 (re-check alignment). The fix is not validated here: the Phase 6 run covers it.
 4. If `alignment_fix_count > 2`: Report misalignments to user for decision
 
-### Phase 8: QA Testing
+### Phase 6: Validate
+
+**Produces:** VALIDATION_RESULT, VALIDATED_HEAD
+**Requires:** BASE_BRANCH
+
+Validate takes the one full-suite slot, after every commit it must cover: Code, Simplify, Scrutinize and the alignment fixes. After Evaluate agent passes, spawn Validate agent. `FILES_CHANGED` is the branch diff, because the Code agent's own list misses the Simplify, Scrutinize and fix commits (`{base}` is `BASE_BRANCH`):
+
+```
+Agent(subagent_type="Validate"):
+"FILES_CHANGED: {output of `git diff --name-only {base}...HEAD`}
+VALIDATION_SCOPE: full
+Run build, typecheck, lint, test. Report pass/fail with failure details."
+```
+
+**If FAIL:**
+1. Extract failure details from Validate agent output
+2. Increment `validation_retry_count`
+3. If `validation_retry_count <= 2`:
+   - Spawn Code agent with fix context:
+   ```
+   Agent(subagent_type="Code"):
+   "OPERATION: validation-fix
+   TASK_ID: {task-id}
+   TASK_DESCRIPTION: Fix validation failures
+   VALIDATION_FAILURES: {parsed failures from Validate agent}
+   SCOPE: Fix only the listed failures, no other changes
+   CREATE_PR: false
+   ISSUE_NUMBER: {ISSUE_ID captured in Phase 1, or (none)}
+   ISSUE_PR_LINK: {ISSUE_PR_LINK captured in Phase 1, or (none)}
+   COMPLIANCE_FRAMEWORKS: {COMPLIANCE_FRAMEWORKS}"
+   ```
+   - Loop back to Phase 6 (re-validate at the new HEAD, full scope)
+4. If `validation_retry_count > 2`: Report failures to user and halt
+
+**If PASS:** append a `gate:validate` claim, run `git rev-parse HEAD` and record the result as `VALIDATED_HEAD`, then continue to Phase 7.
+
+**Evidence claims** are lines appended to the `## Claims` section of `EVIDENCE_FILE` — the file's last section, created when absent. Append only: never edit or remove a claim; the last valid one per target wins. Each line takes exactly one of these shapes, where `<head>` is the 40-hex `HEAD:` the agent's report shows:
+
+```
+- gate:validate PASS sha:<head> by:validate
+- TP-<n> <PASS|FAIL|SKIP> sha:<head> by:test exit:<0-255>
+```
+
+- `gate:validate` — after a Phase 6 or Phase 8 PASS.
+- `TP-<n>` — after every Phase 7 run, one line per `### Test Plan Evidence` row whose TP is in `TEST_PLAN`, with the row's outcome; the line ends at `by:test` when the row's Exit is not a number from 0 to 255.
+- Append nothing from a report whose `HEAD:` is not a single 40-hex SHA — a reported before/after change included — and say so in the Phase 11 report.
+
+### Phase 7: QA Testing
 
 **Produces:** QA_RESULT
-**Requires:** FILES_CHANGED, EXECUTION_PLAN, TEST_PLAN
+**Requires:** FILES_CHANGED, EXECUTION_PLAN, TEST_PLAN, VALIDATED_HEAD
 
-After Evaluate agent passes, spawn Test agent for scenario-based acceptance testing:
+After Phase 6 passes, spawn Test agent for scenario-based acceptance testing:
 
 ```
 Agent(subagent_type="Test"):
@@ -473,9 +454,9 @@ TEST_PLAN: {the TP lines of the evidence file's ## Test Plan section, or (none)}
 Design and execute scenario-based acceptance tests. Report PASS or FAIL with evidence."
 ```
 
-After every Test agent run — PASS or FAIL, first run or retry — append its TP claims (Phase 3's **Evidence claims**).
+After every Test agent run — PASS or FAIL, first run or retry — append its TP claims (Phase 6's **Evidence claims**).
 
-**If PASS:** Continue to Phase 9
+**If PASS:** Continue to Phase 8
 
 **If FAIL:**
 1. Extract failure details from Test agent output
@@ -484,9 +465,9 @@ After every Test agent run — PASS or FAIL, first run or retry — append its T
    - Spawn Code agent to fix QA failures:
    ```
    Agent(subagent_type="Code"):
-   "TASK_ID: {task-id}
+   "OPERATION: qa-fix
+   TASK_ID: {task-id}
    TASK_DESCRIPTION: Fix QA test failures
-   OPERATION: qa-fix
    QA_FAILURES: {structured failures from Test agent}
    SCOPE: Fix only the listed failures, no other changes
    CREATE_PR: false
@@ -494,15 +475,26 @@ After every Test agent run — PASS or FAIL, first run or retry — append its T
    ISSUE_PR_LINK: {ISSUE_PR_LINK captured in Phase 1, or (none)}
    COMPLIANCE_FRAMEWORKS: {COMPLIANCE_FRAMEWORKS}"
    ```
-   - Spawn Validate agent to verify fix didn't break tests:
-   ```
-   Agent(subagent_type="Validate"):
-   "FILES_CHANGED: {files modified by fix Code agent}
-   VALIDATION_SCOPE: changed-only"
-   ```
-   - If Validate agent FAIL: Report to user
-   - If Validate agent PASS: Loop back to Phase 8 (re-run Test agent)
-4. If `qa_retry_count > 2`: Report QA failures to user for decision
+   - Loop back to Phase 7 (re-run Test agent). The fix is not validated here: Phase 8 covers it.
+4. If `qa_retry_count > 2`: Report QA failures to user for decision. The run stops at the report (Phase 11), so Phases 8 and 9 do not run.
+
+### Phase 8: Re-Validate (only if a qa-fix committed)
+
+**Produces:** REVALIDATION_RESULT
+**Requires:** QA_RESULT, VALIDATED_HEAD
+
+Run this phase only if a qa-fix committed (`git rev-parse HEAD` differs from `VALIDATED_HEAD`); otherwise skip it and continue to Phase 9. Spawn Validate agent over what changed since the Phase 6 run:
+
+```
+Agent(subagent_type="Validate"):
+"FILES_CHANGED: {output of `git diff --name-only VALIDATED_HEAD..HEAD`}
+VALIDATION_SCOPE: changed-only
+Verify the qa-fix commits did not break anything."
+```
+
+**If FAIL:** Report the failures to user and halt.
+
+**If PASS:** append a `gate:validate` claim (Phase 6's **Evidence claims**), then continue to Phase 9.
 
 ### Phase 9: CI Status Gate
 
@@ -511,14 +503,22 @@ After every Test agent run — PASS or FAIL, first run or retry — append its T
 
 Strategy-conditional: run when the PR already exists — **SINGLE_CODE_AGENT** and **SEQUENTIAL_CODE_AGENTS** (the Phase 2 Code agent with `CREATE_PR: true` creates it); skip for **PARALLEL_CODE_AGENTS** (its unified PR is created in Phase 10).
 
+**Push first, outside the gate block.** The gate reads CI for the pushed head, and the Simplify, Scrutinize and fix commits reach the PR only by a push. Push once — never force, and no retry:
+
+```bash
+git push origin HEAD; echo "exit=$?"
+```
+
+`exit=0` continues to the gate. Any other result, a rejected non-fast-forward push included, records `TRACEABILITY: DEGRADED (ci push failed)` for the Phase 11 report, reports "CI status unknown — verify manually before merging" and proceeds to Phase 10 without waiting. `PR_NUMBER` is the number in `PR_URL`.
+
 <!-- PATTERN: ci-status-gate -->
-1. Spawn `Agent(subagent_type="Git")` with `OPERATION: check-ci-status` and `PR_NUMBER` from PR_URL.
+1. Wait: run `cd {worktree} && HEAD_SHA=$(git rev-parse HEAD) && node "$HOME/.devflow/scripts/ci-wait.cjs" --pr {PR_NUMBER} --head "$HEAD_SHA"` through the Bash tool with `timeout: 600000`. Each run is one wait of at most 570 seconds and prints one line, `CI <STATUS> pr=… head=… failing=… pending=… waited=…` (INDETERMINATE adds `reason=…`). A missing or unparseable line, a status outside the six below, or a non-zero exit is INDETERMINATE.
 2. **If PASSING** → proceed to Phase 10.
 3. **If NO_PR or NO_CI** → skip: "No PR/CI configured, skipping CI validation." Proceed to Phase 10.
-4. **If PENDING** → poll every 60 seconds (global budget, see step 7). Re-spawn Git agent each poll. If PASSING → proceed. If still PENDING after budget exhausted → report "CI still running — verify manually before merging" and proceed.
-5. **If INDETERMINATE** → poll as PENDING within the same budget. If still INDETERMINATE after budget exhausted → report "CI status unknown — verify manually before merging" and proceed.
-6. **If FAILING** → report failing checks. Spawn `Agent(subagent_type="Code")` with `COMPLIANCE_FRAMEWORKS` to fix CI failures based on check names and failure context. After fix, push and re-check. Max 2 fix attempts. If still failing → report failures and proceed.
-7. **Total budget**: max 10 polls and max 2 fix attempts across all check/fix cycles combined. If budget exhausted, report current status and proceed.
+4. **If PENDING** and fewer than 3 waits have run → wait again (step 1). After the third wait → report "CI still running — verify manually before merging" and proceed.
+5. **If INDETERMINATE** and fewer than 3 waits have run → wait again (step 1). After the third wait → report "CI status unknown — verify manually before merging" and proceed.
+6. **If FAILING** and fewer than 2 fixes have run → report the failing checks from the line. Spawn `Agent(subagent_type="Code")` whose prompt opens with `OPERATION: ci-fix`, with `COMPLIANCE_FRAMEWORKS`, `CI_FAILURES` and `PUSH: false`; `CI_FAILURES` holds the failing-check names from the line and nothing else, because the Code agent fetches the full names and reads the logs itself and this command reads none. After a fix, push with the command above and, if a wait remains, wait again (step 1); a failed push records `TRACEABILITY: DEGRADED (ci push failed)`, reports "CI status unknown — verify manually before merging" and stops waiting. After the second fix still FAILING → report the failing checks and proceed.
+7. **Budget**: at most 3 waits and 2 fixes in all. When one is spent, report the current status and proceed.
 <!-- /PATTERN: ci-status-gate -->
 
 ### Phase 10: Create PR
@@ -532,9 +532,9 @@ Strategy-conditional: run when the PR already exists — **SINGLE_CODE_AGENT** a
 
 ```
 Agent(subagent_type="Code"):
-"TASK_ID: {task-id}
+"OPERATION: pr-create
+TASK_ID: {task-id}
 TASK_DESCRIPTION: Create the unified PR for the parallel implementation
-OPERATION: pr-create
 BASE_BRANCH: {base branch}
 CREATE_PR: true
 PR_DESCRIPTION_GUIDANCE: {pr_description_guidance}
@@ -584,7 +584,7 @@ Display completion summary with phase status, PR info, and next steps.
 
 Show the test plan's evidence from Phase 10b: `Test plan: {VERIFIED-CI + ATTESTED-LOCAL}/{total} verified (VERIFIED-CI {n}, ATTESTED-LOCAL {n})`, read from the `EVIDENCE` line and never inferred, then its `**Body**:` / `**Comment**:` line verbatim. Without an `EVIDENCE` line, show `Test plan: evidence unavailable`; with no test plan, `Test plan: missing`.
 
-If any Git agent output emitted `TRACEABILITY: DEGRADED ({reason})` lines during the run, or Phase 10b's push recorded one, surface them verbatim in the report under a `### Traceability` subsection so the user can act on them.
+If any Git agent output emitted `TRACEABILITY: DEGRADED ({reason})` lines during the run, or Phase 9's push or Phase 10b's push recorded one, surface them verbatim in the report under a `### Traceability` subsection so the user can act on them.
 
 If Phase 1 recorded an evidence exception, show its `## Evidence Exceptions` lines in the report.
 
@@ -609,30 +609,30 @@ If Phase 1 recorded an evidence exception, show its `## Evidence Exceptions` lin
 │  ├─ SEQUENTIAL_CODE_AGENTS (15%): N Code agents with handoff summaries
 │  └─ PARALLEL_CODE_AGENTS (5%): N Code agents in single message (rare)
 │
-├─ Phase 3: Validate
-│  └─ Validate agent (build, typecheck, lint, test)
-│  └─ If FAIL: Code agent fix loop (max 2 retries) → re-validate
-│  └─ If PASS: gate:validate claim → evidence file
-│
-├─ Phase 4: Simplify
+├─ Phase 3: Simplify
 │  └─ Simplify agent (refines code clarity and consistency)
 │
-├─ Phase 5: Self-Review
-│  └─ Scrutinize agent (final quality gate, fixes P0/P1)
+├─ Phase 4: Self-Review
+│  └─ Scrutinize agent (quality gate, fixes P0/P1; status PASS | FIXED | BLOCKED)
 │
-├─ Phase 6: Re-Validate (if Scrutinize agent made changes)
-│  └─ Validate agent (verify Scrutinize agent fixes)
-│
-├─ Phase 7: Alignment Check
+├─ Phase 5: Alignment Check
 │  └─ Evaluate agent (validates alignment - reports only, no fixes)
-│  └─ If MISALIGNED: Code agent fix loop (max 2 iterations) → Validate agent → re-check
+│  └─ If MISALIGNED: Code agent fix loop (max 2 iterations) → re-check alignment
 │
-├─ Phase 8: QA Testing
+├─ Phase 6: Validate (the one full-suite slot)
+│  └─ Validate agent (build, typecheck, lint, test over the branch diff)
+│  └─ If FAIL: Code agent fix loop (max 2 retries) → re-validate at the new HEAD
+│  └─ If PASS: record VALIDATED_HEAD, gate:validate claim → evidence file
+│
+├─ Phase 7: QA Testing
 │  └─ Test agent (scenario-based acceptance tests, TEST_PLAN) → one claim per TP row → evidence file
-│  └─ If FAIL: Code agent fix loop (max 2 retries) → Validate agent → re-test
+│  └─ If FAIL: Code agent fix loop (max 2 retries) → re-test
+│
+├─ Phase 8: Re-Validate (only if a qa-fix committed)
+│  └─ Validate agent (changed-only over VALIDATED_HEAD..HEAD) → gate:validate claim
 │
 ├─ Phase 9: CI Status Gate (SINGLE_CODE_AGENT + SEQUENTIAL_CODE_AGENTS; skipped for PARALLEL_CODE_AGENTS)
-│  └─ Git agent (check-ci-status) → poll/fix cycle (10 polls + 2 fix budget)
+│  └─ Push the branch, then ci-wait.cjs (inline, one wait ≤ 570 s) → Code agent on FAILING (3 waits + 2 fixes)
 │
 ├─ Phase 10: Create PR (if needed)
 │  └─ SINGLE_CODE_AGENT: already created by the Phase 2 Code agent
@@ -651,7 +651,7 @@ If Phase 1 recorded an evidence exception, show its `## Evidence Exceptions` lin
 
 ## Principles
 
-1. **Orchestration only** - Command spawns agents, never does work itself
+1. **Orchestration only** - Command spawns agents, never does work itself; the inline calls are the bounded plumbing the charter allows: the Phase 9 and Phase 10b pushes, the Phase 9 ci-wait call and the evidence script checks
 2. **Plan-first** - Plan documents from `/plan` skip exploration/planning overhead entirely
 3. **Coherence-first** - Single Code agent produces more consistent code (default ~80% of tasks)
 4. **Agent ownership** - Each agent owns its output completely
@@ -661,7 +661,7 @@ If Phase 1 recorded an evidence exception, show its `## Evidence Exceptions` lin
 8. **Strict delegation** - Never perform agent work in main session. "Spawn X" means call Agent tool with X, not do X's work yourself
 9. **Validate agent owns validation** - Never run `npm test`, `npm run build`, or similar in main session; always delegate to Validate agent
 10. **Code agent owns fixes** - Never implement fixes in main session; spawn Code agent for validation failures and alignment fixes
-11. **Loop limits** - Max 2 validation retries, max 2 alignment fix iterations before escalating to user
+11. **Loop limits** - Max 2 validation retries, max 2 alignment fix iterations, max 2 QA retries before escalating to user; the CI gate allows at most 3 waits and 2 fixes
 12. **CI awareness** - CI status is checked before merge for SINGLE_CODE_AGENT and SEQUENTIAL_CODE_AGENTS, whose PR exists from Phase 2; skipped for PARALLEL_CODE_AGENTS, whose PR is created in Phase 10; test-plan evidence (Phase 10b) is recorded under every strategy once the PR exists
 
 ## Error Handling

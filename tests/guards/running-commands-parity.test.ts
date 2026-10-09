@@ -16,7 +16,7 @@
  *   - the block states every normative element, so a rewording cannot quietly
  *     drop a rule while the three copies stay identical to each other;
  *   - the engine's `build_execution_doctrine()` renders the same text, and the
- *     nine dynamic-build prompt sites name the block instead of copying it;
+ *     dynamic-build prompt sites name the block instead of copying it;
  *   - test.md's dev-server addendum follows the block as a section of its own and
  *     is where the dev server is started in the background: Monitor, which the
  *     block prohibits, is not named there or anywhere else in the body.
@@ -129,21 +129,25 @@ function collectEngineDefects(engine: string, block: string): string[] {
 }
 
 /**
- * The nine dynamic-build prompt sites that name the block, each anchored by its
- * own quoted text. A site names "your Running commands block" and never copies
- * the block, because a sub-agent spawned with an agentType loads its body as
- * its standing instruction (measured on Claude Code 2.1.294 inside a Workflow).
+ * The dynamic-build prompt sites that name the block, each anchored by its own
+ * quoted text: the Code implementation prompt, both Gate 1 Validate prompts and
+ * the Validate re-run after a Gate 1 fix in each pass, both Code fix prompts after
+ * Gate 2, the review-batch fix prompt, the Test prompt and the post-merge Validate.
+ * A site names "your Running commands block" and never copies the block, because
+ * a sub-agent spawned with an agentType loads its body as its standing
+ * instruction (measured on Claude Code 2.1.294 inside a Workflow).
  */
 const DYNAMIC_BUILD_SITES: readonly string[] = [
   'When you build or run tests to verify your work, follow your Running commands block.',
   'Run build, typecheck, lint, and tests on branch ${BRANCH}.\nFollow your Running commands block',
+  'after fix attempt ${attempt} (follow your Running commands block)',
   'Self-verify your fix compiles, following your Running commands block. Commit fixes.',
   'Follow your Running commands block for every scenario command.',
   'Self-verify your fix compiles and the scenarios pass, following your Running commands block.',
   'Fix all findings in this batch. Self-verify your fix compiles, following your Running commands block.',
   '(final gate after all fixing).\nFollow your Running commands block',
-  '(follow your Running commands block). Report: PASS or FAIL.`, { agentType: "Validate" });\n      if (recheck',
-  '(Scrutinize agent made changes; follow your Running commands block)',
+  '(final gate, after fix attempt ${attempt}; follow your Running commands block)',
+  '(merge commit ${merge.mergeSha}).\nFollow your Running commands block',
 ]
 
 /** Named collector: prompt sites a dynamic-build body does not carry exactly once. */
@@ -199,7 +203,7 @@ describe('D-FOREGROUND-RUN: the Running commands block', () => {
     expect(collectEngineDefects(engineSource(), block)).toEqual([])
   })
 
-  it('the nine dynamic-build prompt sites name the block, in the source and in the compiled command', () => {
+  it('the dynamic-build prompt sites name the block, in the source and in the compiled command', () => {
     expect(DYNAMIC_BUILD_SITES.length).toBeGreaterThanOrEqual(9)
     expect(collectSiteDefects(dynamicBuildSource())).toEqual([])
     expect(collectSiteDefects(requireDistFile('dynamic-build.md'))).toEqual([])

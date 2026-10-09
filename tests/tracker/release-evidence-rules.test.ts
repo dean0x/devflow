@@ -118,10 +118,15 @@ const CASES: ReadonlyArray<{ readonly text: string; readonly provider: 'github' 
   { text: '(Resolves #12)', provider: 'github', expected: ['#12'] },
   { text: 'Closes: #12', provider: 'github', expected: ['#12'] },
   { text: 'Closes #1, #2', provider: 'github', expected: ['#1', '#2'] },
-  { text: 'Refs KEY-9;', provider: 'jira', expected: ['KEY-9'] },
+  { text: 'Fixes KEY-9;', provider: 'jira', expected: ['KEY-9'] },
   { text: 'closed: #7', provider: 'github', expected: ['#7'] },
+  // Rejected — `Refs` only mentions an issue; it never ships one (every provider shares the rule).
+  { text: 'Refs #12', provider: 'github', expected: [] },
+  { text: '(Refs #12)', provider: 'github', expected: [] },
+  { text: 'refs: #12', provider: 'github', expected: [] },
+  { text: 'Refs KEY-9;', provider: 'jira', expected: [] },
   // Rejected — a reference in the other provider's grammar never crosses the gate.
-  { text: 'Refs KEY-9', provider: 'github', expected: [] },
+  { text: 'Fixes KEY-9', provider: 'github', expected: [] },
   { text: 'Closes #12', provider: 'jira', expected: [] },
   { text: 'Refs OTHER-9', provider: 'jira', expected: [] },
   // Rejected — by the gate, or because no keyword precedes the token.
@@ -156,11 +161,26 @@ describe('G2: the closing-keyword rule, executed from the built reference', () =
 
   it('every keyword form is admitted, and a keyword-shaped substring is not', () => {
     const keyword = new RegExp(RULE.keyword, 'i')
-    for (const word of ['close', 'closes', 'closed', 'fix', 'fixes', 'fixed', 'resolve', 'resolves', 'resolved', 'refs', 'Closes:', '(fixes']) {
+    for (const word of ['close', 'closes', 'closed', 'fix', 'fixes', 'fixed', 'resolve', 'resolves', 'resolved', 'Closes:', '(fixes']) {
       expect(keyword.test(word), `${word} must be a closing keyword`).toBe(true)
     }
-    for (const word of ['prefixes', 'fixture', 'closest', 'ref', 'resolver']) {
+    for (const word of ['refs', 'Refs:', '(refs', 'prefixes', 'fixture', 'closest', 'ref', 'resolver']) {
       expect(keyword.test(word), `${word} must not be a closing keyword`).toBe(false)
+    }
+  })
+
+  it('a `Refs #N` commit ships no issue under any provider, and Closes, Fixes and Resolves still do', () => {
+    for (const provider of PROVIDERS) {
+      const parsed = parseClosingKeywordRule(collectClosingKeywordStep(gatherRef(provider)) ?? '')
+      expect(parsed, `${provider}: step 3a or its literals are missing`).not.toBeNull()
+      // `KEY-417` is admitted by both the Jira and the Linear KEY-N grammar, so one grammar serves the two.
+      const grammar = provider === 'github' ? GITHUB_GRAMMAR! : JIRA_GRAMMAR!
+      const ref = provider === 'github' ? '#417' : 'KEY-417'
+      const key = provider === 'github' ? undefined : 'KEY'
+      expect(gate(extractCandidates(`Refs ${ref}`, parsed!), grammar, key), `${provider}: Refs`).toEqual([])
+      for (const word of ['Closes', 'Fixes', 'Resolves']) {
+        expect(gate(extractCandidates(`${word} ${ref}`, parsed!), grammar, key), `${provider}: ${word}`).toEqual([ref])
+      }
     }
   })
 

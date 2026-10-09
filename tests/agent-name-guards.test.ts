@@ -24,7 +24,7 @@
  */
 
 import { describe, it, expect } from 'vitest'
-import { existsSync, readFileSync, readdirSync } from 'fs'
+import { existsSync, readFileSync, readdirSync, type Dirent } from 'fs'
 import * as path from 'path'
 import { getAllAgentNames } from '../src/core/plugins.js'
 import { LEGACY_AGENT_KEYS, canonicaliseAgentKeys } from '../src/core/agent-models.js'
@@ -159,35 +159,33 @@ const RETIRED_ALLOWLIST: ReadonlyArray<AllowlistEntry> = [
   },
 
   // -----------------------------------------------------------------------
-  // Evaluator — CONCEPT (MDS function name + inline prompt role descriptors)
+  // Evaluator — CONCEPT (MDS function name)
   // The actual Evaluate agent is spawned via agentType: "Evaluate".
-  // evaluator_panel() is an MDS function; "Acceptance-criteria evaluator:"
-  // is an inline agent-prompt label, not a Form-B spawn key.
+  // evaluator_panel() is an MDS function (the single Gate 2 Evaluate spawn's
+  // doctrine); the merged spawn's prompt carries no role label of its own.
   // -----------------------------------------------------------------------
   {
     path: 'src/assets/commands/dynamic-build.mds',
     name: 'Evaluator',
     reason:
-      'CONCEPT: evaluator_panel MDS function import/call; inline prompt role labels ' +
-      '("Acceptance-criteria evaluator:", etc.) — not Form-B spawn keys; ' +
+      'CONCEPT: evaluator_panel MDS function import/call — not a Form-B spawn key; ' +
       'actual spawn uses agentType: "Evaluate"',
-    contexts: ['evaluator_panel', 'Acceptance-criteria evaluator', 'Scope/intent-drift evaluator'],
+    contexts: ['evaluator_panel'],
   },
   {
     path: 'src/assets/commands/_partials/_engine.mds',
     name: 'Evaluator',
     reason:
-      'CONCEPT: @define evaluator_panel() MDS function body; inline prompt descriptors ' +
-      '— not Form-B spawn keys',
-    contexts: ['evaluator_panel', 'Acceptance-criteria evaluator', 'Scope / intent-drift evaluator', 'Cross-ticket-consistency evaluator'],
+      'CONCEPT: @define evaluator_panel() MDS function definition and export — not a Form-B spawn key',
+    contexts: ['evaluator_panel'],
   },
   {
     path: 'dist/commands/dynamic-build.md',
     name: 'Evaluator',
     reason:
-      'CONCEPT: compiled output of dynamic-build.mds; evaluator_panel function + prompt labels ' +
-      '— not Form-B spawn keys',
-    contexts: ['evaluator_panel', 'Acceptance-criteria evaluator', 'Scope/intent-drift evaluator', 'Scope / intent-drift evaluator', 'Cross-ticket-consistency evaluator'],
+      'CONCEPT: compiled output of dynamic-build.mds; the evaluator_panel function name ' +
+      '— not a Form-B spawn key',
+    contexts: ['evaluator_panel'],
   },
 
   // -----------------------------------------------------------------------
@@ -421,7 +419,7 @@ function readFrontmatterModel(filePath: string): string {
  */
 function collectFiles(dir: string, exts: string[]): string[] {
   const results: string[] = []
-  let entries: ReturnType<typeof readdirSync>
+  let entries: Dirent[]
   try {
     entries = readdirSync(dir, { withFileTypes: true })
   } catch {
@@ -446,7 +444,7 @@ function collectFiles(dir: string, exts: string[]): string[] {
  */
 function collectScriptFiles(dir: string): string[] {
   const results: string[] = []
-  let entries: ReturnType<typeof readdirSync>
+  let entries: Dirent[]
   try {
     entries = readdirSync(dir, { withFileTypes: true })
   } catch {
@@ -754,6 +752,15 @@ describe('GAP-3: orchestrator charter integrity', () => {
       violations.push('no delegation report cap carries a token figure ("at most about N tokens")')
     }
 
+    // D-CODE-OPERATION-MODES: a direct Code delegation is not a compiled command, so no spawn guard
+    // reads it. Its routing line carries the rule instead: the prompt opens with `OPERATION: <mode>`.
+    const codeLines = charter.split('\n').filter(line => /^- Execution against a spec:/.test(line))
+    if (codeLines.length !== 1) {
+      violations.push(`expected exactly one Code routing line ("- Execution against a spec:"), found ${codeLines.length}`)
+    } else if (!codeLines[0].includes('OPERATION:')) {
+      violations.push('the Code routing line does not tell a direct Code delegation to open with OPERATION: <mode>')
+    }
+
     const handoffLines = charter.split('\n').filter(line => line.includes(HANDOFF_PREFIX))
     if (handoffLines.length !== 1) {
       violations.push(`expected exactly one line naming "${HANDOFF_PREFIX}", found ${handoffLines.length}`)
@@ -768,13 +775,13 @@ describe('GAP-3: orchestrator charter integrity', () => {
     return violations
   }
 
-  it('charter carries the bounded-inline exception, a token-figure report cap and the no-argument handoff', () => {
+  it('charter carries the bounded-inline exception, a token-figure report cap, the no-argument handoff and a Code routing line that names OPERATION', () => {
     const charter = readFileSync(CHARTER_PATH, 'utf-8')
     const violations = collectCharterContentViolations(charter)
     expect(violations, `Orchestrator charter content violations:\n  ${violations.join('\n  ')}`).toEqual([])
   })
 
-  it('known-bad probe: a charter without the bounds, without a report figure, or with "full plan" is reported', () => {
+  it('known-bad probe: a charter without the bounds, without a report figure, without OPERATION on the Code line, or with "full plan" is reported', () => {
     const charter = readFileSync(CHARTER_PATH, 'utf-8')
     // Non-vacuity: the real charter is clean, so each seed below fails for its own reason.
     expect(collectCharterContentViolations(charter)).toEqual([])
@@ -787,6 +794,12 @@ describe('GAP-3: orchestrator charter integrity', () => {
     expect(uncapped, 'the seed must land').not.toBe(charter)
     expect(collectCharterContentViolations(uncapped)).toContain(
       'no delegation report cap carries a token figure ("at most about N tokens")',
+    )
+
+    const noOperation = charter.replace('`OPERATION: <mode>`', 'a mode')
+    expect(noOperation, 'the seed must land').not.toBe(charter)
+    expect(collectCharterContentViolations(noOperation)).toContain(
+      'the Code routing line does not tell a direct Code delegation to open with OPERATION: <mode>',
     )
 
     const fullPlan = charter.replace(HANDOFF_PREFIX, `${HANDOFF_PREFIX} pass the full plan as skill input,`)

@@ -226,7 +226,7 @@ function gate2Doctrine(built: string): string {
 
 /** The doctrine's two FAIL-FIXED paths, each named by the bullet that opens it. */
 const DOCTRINE_FAIL_FIXED_PATHS = [
-  ['doctrine Evaluate', '- If any critical lens returns MISALIGNED'],
+  ['doctrine Evaluate', '- If the Evaluate agent returns FAIL'],
   ['doctrine Test', '- FAIL → fix-and-continue'],
 ] as const
 
