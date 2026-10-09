@@ -46,7 +46,8 @@ Spawn Simplify agent to refine code for clarity and consistency:
 Agent(subagent_type="Simplify", run_in_background=false):
 "TASK_DESCRIPTION: {task_description}
 FILES_CHANGED: {files_changed}
-Simplify and refine the code for clarity and consistency while preserving functionality."
+Simplify and refine the code for clarity and consistency while preserving functionality.
+Commit any improvements with a conventional-commit message."
 
 **Wait for completion.** Simplify agent commits changes directly.
 
