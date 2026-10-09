@@ -1000,6 +1000,181 @@ describe('compiled dynamic-build.md: Gate-1-twice cadence + build execution doct
 });
 
 // ---------------------------------------------------------------------------
+// 10b. dynamic-build.md: Gate 1 order, one Validate per pass, the post-merge Validate
+//      and its undo (#421: D-VALIDATE-ONCE, D-GATE1-ESCALATION, D-WAVE-MERGE-VALIDATE)
+//
+// Every guard has a named collector and a known-bad probe through the same collector;
+// the absence guards (no codeChanged, no hard reset, no Validate asked of Git, no model
+// on a Validate) pass vacuously when the text they read is missing, so each probe seeds
+// the defect and each test asserts the corpus it read.
+// ---------------------------------------------------------------------------
+
+/** The text from `from` to `to`, or null unless both anchors occur once, in that order. */
+function between(text: string, from: string, to: string): string | null {
+  const a = text.indexOf(from);
+  const b = text.indexOf(to, a + from.length);
+  return a === -1 || b === -1 || text.indexOf(from, a + 1) !== -1 ? null : text.slice(a, b);
+}
+
+/**
+ * Named collector: where a Gate 1 pass does not run Simplify, then Scrutinize, then
+ * Validate, with the first Validate unconditional (a top-level statement of the phase
+ * callback, not inside an `if`).
+ */
+function collectGate1OrderViolations(compiled: string): string[] {
+  const passes: ReadonlyArray<readonly [string, string | null]> = [
+    ['Gate 1 #1', between(compiled, 'const gate1 = await phase("gate1"', 'const gate2 = await phase("gate2"')],
+    ['Gate 1 #2', between(compiled, 'const gate1Final = await phase("gate1-final"', '// PASS requires survivingFindings.length === 0')],
+  ];
+  const out: string[] = [];
+  for (const [label, pass] of passes) {
+    if (pass === null) {
+      out.push(`${label}: the pass was not found`);
+      continue;
+    }
+    const at = (type: string): number => pass.indexOf(`{ agentType: "${type}" }`);
+    const [simplify, scrutinize, validate] = [at('Simplify'), at('Scrutinize'), at('Validate')];
+    if (simplify === -1 || scrutinize === -1 || validate === -1) out.push(`${label}: a spawn is missing`);
+    else if (!(simplify < scrutinize && scrutinize < validate)) out.push(`${label}: the order is not Simplify, Scrutinize, Validate`);
+    if (!/^  const validation = await agent\(/m.test(pass)) out.push(`${label}: the first Validate is not an unconditional statement of the pass`);
+    if (pass.includes('codeChanged')) out.push(`${label}: the pass still branches on codeChanged`);
+  }
+  return out;
+}
+
+describe('compiled dynamic-build.md: Gate 1 order (D-VALIDATE-ONCE)', () => {
+  let compiled: string;
+  beforeAll(async () => {
+    compiled = await fs.readFile(path.join(BUILT_COMMANDS, 'dynamic-build.md'), 'utf-8');
+  });
+
+  it('both passes spawn Simplify, Scrutinize, then Validate, and Validate is unconditional', () => {
+    expect(collectGate1OrderViolations(compiled)).toEqual([]);
+  });
+
+  it('Simplify and Scrutinize are still spawned exactly twice each, and no Validate spawn names a model', () => {
+    expect((compiled.match(/agentType: "Simplify"/g) ?? []).length).toBe(2);
+    expect((compiled.match(/agentType: "Scrutinize"/g) ?? []).length).toBe(2);
+    const validates = [...compiled.matchAll(/agent\(`(?:(?!agent\(`)[\s\S])*?`, \{ agentType: "Validate"[^}]*\}/g)].map(m => m[0]);
+    expect(validates.length, 'no Validate spawn read').toBeGreaterThanOrEqual(5);
+    expect(validates.filter(v => /\bmodel\b/.test(v.slice(v.lastIndexOf('`'))))).toEqual([]);
+  });
+
+  it('codeChanged appears nowhere in the compiled engine, /implement or /self-review', async () => {
+    for (const name of ['dynamic-build.md', 'implement.md', 'self-review.md']) {
+      const text = await fs.readFile(path.join(BUILT_COMMANDS, name), 'utf-8');
+      expect(text.length, `${name}: nothing read`).toBeGreaterThan(1000);
+      expect(text, name).not.toContain('codeChanged');
+    }
+  });
+
+  it('gate1_postcode() and engine_invariants() state the same order, with Validate last', () => {
+    const doctrine = between(compiled, '### GATE 1 — Post-code pipeline', '**Gate 1 contains NO Evaluate agent') ?? '';
+    const steps = [...doctrine.matchAll(/^(\d)\. \*\*(\w+) agent\*\*/gm)].map(m => `${m[1]}:${m[2]}`);
+    expect(steps).toEqual(['1:Simplify', '2:Scrutinize', '3:Validate']);
+    expect(compiled).toContain('before Simplify agent + Scrutinize agent + Validate agent (in that order');
+  });
+
+  it('the escalation type list carries scrutiny-blocked', () => {
+    expect(compiled).toMatch(/"type": "merge-conflict \| gate2-fail \| validation-exhausted \| scrutiny-blocked \|/);
+  });
+
+  it('known-bad probes: the order before #421 and a surviving codeChanged branch are reported', () => {
+    const swapped = compiled
+      .replace('  const validation = await agent(`Run build, typecheck, lint, and tests on branch ${BRANCH}.\nFollow', '  const earlyValidation = await agent(`Run build, typecheck, lint, and tests on branch ${BRANCH}.\nFollow');
+    expect(swapped, 'the seed must land').not.toBe(compiled);
+    expect(collectGate1OrderViolations(swapped)).toEqual(['Gate 1 #1: the first Validate is not an unconditional statement of the pass']);
+    const branching = compiled.replace('  await agent(`Simplify and reduce complexity of recent changes on branch ${BRANCH}. Commit any improvements.`, { agentType: "Simplify" });', '  if (scrutiny.codeChanged) { await agent(`x`, { agentType: "Validate" }); }\n  await agent(`Simplify and reduce complexity of recent changes on branch ${BRANCH}. Commit any improvements.`, { agentType: "Simplify" });');
+    expect(collectGate1OrderViolations(branching).some(v => v.includes('Gate 1 #1'))).toBe(true);
+    expect(collectGate1OrderViolations('no passes here')).toEqual(['Gate 1 #1: the pass was not found', 'Gate 1 #2: the pass was not found']);
+  });
+});
+
+/** The undo spawn's prompt template: from its lead to the Git spawn options. */
+function undoPrompt(text: string): string | null {
+  const at = text.indexOf('agent(`Undo the merge ${merge.mergeSha}');
+  const end = text.indexOf('{ agentType: "Git" }', at);
+  return at === -1 || end === -1 ? null : text.slice(at, end);
+}
+
+/** Named collector: what the undo instruction lacks, or carries that it must not. */
+function collectUndoDefects(text: string): string[] {
+  const prompt = undoPrompt(text);
+  if (prompt === null) return ['no undo spawn'];
+  const out: string[] = [];
+  if (!prompt.includes('git reset --keep ${merge.mergeSha}^1')) out.push('the undo does not run reset --keep on the merge commit\'s first parent');
+  if (/reset\s+--hard|--hard/.test(prompt)) out.push('the undo names a hard reset');
+  if (/\bpush\b/i.test(prompt)) out.push('the undo names a push');
+  if (!prompt.includes('only when no remote branch contains ${merge.mergeSha}')) out.push('the undo is not gated on no remote branch containing the merge');
+  if (!prompt.includes('the HEAD of ${INTEGRATION_BRANCH} still equals ${merge.mergeSha}')) out.push('the undo is not gated on the integration HEAD still being the merge');
+  if (!prompt.includes('{"undone": true}') || !prompt.includes('{"undone": false, "reason":')) out.push('the undo does not pin both return shapes');
+  return out;
+}
+
+/** The Git prompts of a dynamic-build source or build: every Git template literal and Git spawn fence. */
+function gitPrompts(text: string): string[] {
+  const templates = [...text.matchAll(/agent\(`(?:(?!agent\(`)[\s\S])*?`, \{ agentType: "Git" \}/g)].map(m => m[0]);
+  const fences = [...text.matchAll(/Agent\(subagent_type="Git"\):\n"[\s\S]*?"\n/g)].map(m => m[0]);
+  return [...templates, ...fences];
+}
+
+/** Named collector: Git prompts that ask Git to run Validate, and doctrine lines that still tell Git to. */
+function collectGitValidateRequests(text: string): string[] {
+  const out = gitPrompts(text).filter(p => /\bValidate\b/.test(p)).map(p => `a Git prompt mentions Validate: ${p.split('\n')[0].slice(0, 70)}`);
+  for (const line of text.split('\n')) {
+    if (/After any resolution: Validate agent|run Validate agent \(build \+ test\)|Run Validate agent \(build \+ test\)/i.test(line)) out.push(`a doctrine line asks for a Validate: ${line.trim().slice(0, 70)}`);
+  }
+  return out;
+}
+
+describe('dynamic-build: the post-merge Validate belongs to the workflow, and a red merge is undone (D-WAVE-MERGE-VALIDATE)', () => {
+  let compiled: string;
+  let sources: Record<string, string>;
+  beforeAll(async () => {
+    compiled = await fs.readFile(path.join(BUILT_COMMANDS, 'dynamic-build.md'), 'utf-8');
+    sources = {
+      'dynamic-build.mds': readFileSync(path.join(COMMANDS_DIR, 'dynamic-build.mds'), 'utf-8'),
+      '_wave.mds': readFileSync(path.join(PARTIALS_DIR, '_wave.mds'), 'utf-8'),
+      '_engine.mds': readFileSync(path.join(PARTIALS_DIR, '_engine.mds'), 'utf-8'),
+    };
+  });
+
+  it('the undo names reset --keep on the first parent, its two gates and both returns, and no hard reset and no push', () => {
+    expect(collectUndoDefects(compiled)).toEqual([]);
+    expect(collectUndoDefects(sources['dynamic-build.mds'])).toEqual([]);
+  });
+
+  it('known-bad probes: a hard reset, a push and a missing gate are each reported', () => {
+    const hard = compiled.replace('git reset --keep ${merge.mergeSha}^1', 'git reset --hard ${merge.mergeSha}^1');
+    expect(collectUndoDefects(hard)).toEqual(expect.arrayContaining(['the undo does not run reset --keep on the merge commit\'s first parent', 'the undo names a hard reset']));
+    const pushing = compiled.replace('and no other that changes a branch or a remote', 'then push the branch');
+    expect(collectUndoDefects(pushing)).toEqual(['the undo names a push']);
+    expect(collectUndoDefects(compiled.replace('only when no remote branch contains ${merge.mergeSha}', 'whether or not a branch contains ${merge.mergeSha}'))).toEqual(['the undo is not gated on no remote branch containing the merge']);
+    expect(collectUndoDefects('nothing')).toEqual(['no undo spawn']);
+  });
+
+  it('no Git prompt and no doctrine line in dynamic-build, _wave or _engine asks Git to run Validate', () => {
+    for (const [name, text] of Object.entries(sources)) expect(collectGitValidateRequests(text), name).toEqual([]);
+    expect(collectGitValidateRequests(compiled)).toEqual([]);
+    expect(gitPrompts(compiled).length, 'no Git prompt read').toBeGreaterThanOrEqual(3);
+  });
+
+  it('known-bad probes: the pre-#421 merge prompt and the pre-#421 doctrine step are reported', () => {
+    const oldMerge = compiled.replace('Do not push, and run no build or test.', 'Run Validate agent (build + test) after merge.');
+    expect(oldMerge, 'the seed must land').not.toBe(compiled);
+    expect(collectGitValidateRequests(oldMerge).length).toBeGreaterThan(0);
+    const oldStep = sources['_wave.mds'].replace(/^5\. After any resolution:.*$/m, '5. After any resolution: Validate agent (build + test) immediately');
+    expect(oldStep, 'the seed must land').not.toBe(sources['_wave.mds']);
+    expect(collectGitValidateRequests(oldStep)).toEqual(['a doctrine line asks for a Validate: 5. After any resolution: Validate agent (build + test) immediately']);
+  });
+
+  it('the wave doctrine says the post-merge Validate always runs and treeEqual is recorded only', () => {
+    expect(compiled).toContain('It always runs');
+    expect(compiled).toContain('a true value never skips the Validate');
+  });
+});
+
+// ---------------------------------------------------------------------------
 // 11. knowledge outputs contain no feature-knowledge.cjs references (ported)
 // ---------------------------------------------------------------------------
 

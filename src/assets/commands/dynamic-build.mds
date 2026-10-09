@@ -208,38 +208,48 @@ After implementing, commit your changes with a conventional-commit message and r
 - Any open questions or blockers`, { agentType: "Code" })
 );
 
-// Phase 3: Gate 1 — post-code pipeline
+// Phase 3: Gate 1 #1 — post-code pipeline: Simplify agent → Scrutinize agent → Validate agent.
+// Validate runs last and unconditionally, so its one full run covers every commit the pass made (see gate1_postcode()).
 const gate1 = await phase("gate1", async () => {
-  // Gate 1 #1 — runs once, immediately after the initial implementation.
+  await agent(`Simplify and reduce complexity of recent changes on branch ${BRANCH}. Commit any improvements.`, { agentType: "Simplify" });
+
+  const scrutiny = await agent(`9-pillar self-review of recent changes on branch ${BRANCH}. Fix P0/P1 issues and commit the fixes.
+Return: {"status": "PASS" | "FIXED" | "BLOCKED"}`, { agentType: "Scrutinize" });
+  if (scrutiny?.status === "BLOCKED") {
+    return { verdict: "ESCALATED", type: "scrutiny-blocked", reason: "Scrutinize agent returned BLOCKED: a P0 issue cannot be fixed in scope" };
+  }
+
   const validation = await agent(`Run build, typecheck, lint, and tests on branch ${BRANCH}.
 Follow your Running commands block for every build and test command.
-Report: PASS or FAIL with details.`, { agentType: "Validate" });
+Return: {"verdict": "PASS" | "FAIL", "details": "..."}`, { agentType: "Validate" });
 
-  if (validation.verdict === "FAIL") {
-    // Up to 2 fix attempts
+  // Anything but an explicit PASS is a failure: a Validate that returned no verdict has not validated the branch.
+  if (validation?.verdict !== "PASS") {
+    let failureDetails = validation?.details || "Validate agent returned no PASS verdict";
+    // Up to 2 fix attempts, each followed by a Validate re-run
     for (let attempt = 1; attempt <= 2; attempt++) {
       await agent(`Fix the validation failures on branch ${BRANCH}:
-${validation.details}
+${failureDetails}
 ISSUE_NUMBER: ${ISSUE_NUMBER}
 ISSUE_PR_LINK: ${ISSUE_PR_LINK}
 COMPLIANCE_FRAMEWORKS: ${COMPLIANCE_FRAMEWORKS}
 Commit fixes with conventional-commit message.`, { agentType: "Code" });
-      const recheck = await agent(`Re-run build, typecheck, lint, tests on branch ${BRANCH}. Report: PASS or FAIL.`, { agentType: "Validate" });
-      if (recheck.verdict === "PASS") break;
-      if (attempt === 2) return { verdict: "ESCALATED", reason: "Validation exhausted after 2 Code agent fix attempts" };
+      const recheck = await agent(`Re-run build, typecheck, lint, tests on branch ${BRANCH} after fix attempt ${attempt} (follow your Running commands block).
+Return: {"verdict": "PASS" | "FAIL", "details": "..."}`, { agentType: "Validate" });
+      if (recheck?.verdict === "PASS") break;
+      failureDetails = recheck?.details || failureDetails;
+      if (attempt === 2) return { verdict: "ESCALATED", type: "validation-exhausted", reason: "Validation exhausted after 2 Code agent fix attempts" };
     }
-  }
-
-  await agent(`Simplify and reduce complexity of recent changes on branch ${BRANCH}. Commit any improvements.`, { agentType: "Simplify" });
-
-  const scrutiny = await agent(`9-pillar self-review of recent changes on branch ${BRANCH}. Report any code you changed and your findings.`, { agentType: "Scrutinize" });
-
-  if (scrutiny.codeChanged) {
-    await agent(`Re-run build, typecheck, lint, tests on branch ${BRANCH} (Scrutinize agent made changes). Report: PASS or FAIL.`, { agentType: "Validate" });
   }
 
   return { verdict: "PASS" };
 });
+
+// Gate 1 #1 stop, before Gate 2: an exhausted Validate or a BLOCKED Scrutinize leaves a broken or unfinished build,
+// so Gate 2 and the review pass never run on it — a correctness stop, like the ticket-link and branch stops.
+if (gate1.verdict === "ESCALATED") {
+  return { ticket: TICKET, branch: BRANCH, verdict: "ESCALATED", issueId: ISSUE_NUMBER, issuePrLink: ISSUE_PR_LINK, escalations: [{ type: gate1.type, description: gate1.reason }] };
+}
 
 // Phase 4: Gate 2 — acceptance gate (once, before review pass)
 const gate2 = await phase("gate2", async () => {
@@ -249,21 +259,18 @@ const gate2 = await phase("gate2", async () => {
 
   let evalVerdict = "SKIPPED";
   if (PLAN) {
-    const panel = await parallel([
-      () => agent(`Acceptance-criteria evaluator: does the implementation on branch ${BRANCH} satisfy each numbered criterion, INCLUDING negative criteria?
+    const evaluation = await agent(`Acceptance and scope check on branch ${BRANCH}. Answer both questions:
+1. Does the implementation satisfy each numbered criterion, INCLUDING negative criteria (what it must NOT do)?
+2. Did the Code agent introduce any unplanned changes, smuggled anti-features, or drift from the plan's intent?
 Plan: ${PLAN}
 Criteria: ${CRITERIA || "see plan"}
-Report: PASS or FAIL per criterion with rationale.`, { agentType: "Evaluate" }),
-      () => agent(`Scope/intent-drift evaluator: did the Code agent on branch ${BRANCH} introduce any unplanned changes, smuggled anti-features, or drift from the plan's intent?
-Plan: ${PLAN}
-Report: PASS or FAIL with rationale.`, { agentType: "Evaluate" }),
-    ]);
-    evalVerdict = panel.every(p => p.verdict === "PASS") ? "PASS" : "FAIL";
+Return: {"verdict": "PASS" | "FAIL", "rationale": "..."} — FAIL if either answer is no, naming the failing criterion or the drift.`, { agentType: "Evaluate" });
+    evalVerdict = evaluation?.verdict === "PASS" ? "PASS" : "FAIL";
     if (evalVerdict === "FAIL") {
       // fix-and-continue — no re-evaluate, no inline Gate 1. The final Gate 1 (#2)
       // after the review pass is the build gate before the branch is handed back.
-      await agent(`Fix the alignment issues identified by the Evaluate agent panel on branch ${BRANCH}:
-${panel.filter(p => p.verdict === "FAIL").map(p => p.rationale).join("\n")}
+      await agent(`Fix the alignment issues identified by the Evaluate agent on branch ${BRANCH}:
+${evaluation?.rationale || "see the Evaluate agent's report"}
 ISSUE_NUMBER: ${ISSUE_NUMBER}
 ISSUE_PR_LINK: ${ISSUE_PR_LINK}
 COMPLIANCE_FRAMEWORKS: ${COMPLIANCE_FRAMEWORKS}
@@ -436,16 +443,24 @@ Return: {"status": "fixed"|"blocked", "commitShas": ["<sha>"], "unresolved": ["<
   return { survivingFindings: notAddressed, fixedFindings, coverageGaps };
 });
 
-// Phase 5.5: Gate 1 #2 — FINAL post-fix gate (full Validate agent → Simplify agent → Scrutinize agent).
+// Phase 5.5: Gate 1 #2 — FINAL post-fix gate (Simplify agent → Scrutinize agent → full Validate agent, Validate last and unconditional).
 // Runs ONCE, after the review pass. Inside the pass the Code agent self-verified its own fixes;
 // this is the build gate before the branch is handed back. See gate1_postcode() cadence.
 const gate1Final = await phase("gate1-final", async () => {
+  await agent(`Simplify and reduce complexity of recent changes on branch ${BRANCH}. Commit any improvements.`, { agentType: "Simplify" });
+
+  const scrutiny = await agent(`9-pillar self-review of recent changes on branch ${BRANCH}. Fix P0/P1 issues and commit the fixes.
+Return: {"status": "PASS" | "FIXED" | "BLOCKED"}`, { agentType: "Scrutinize" });
+  if (scrutiny?.status === "BLOCKED") {
+    return { verdict: "ESCALATED", type: "scrutiny-blocked", reason: "Final Gate 1 Scrutinize agent returned BLOCKED: a P0 issue cannot be fixed in scope" };
+  }
+
   const validation = await agent(`Run build, typecheck, lint, and tests on branch ${BRANCH} (final gate after all fixing).
 Follow your Running commands block for every build and test command.
-Report: PASS or FAIL with details.`, { agentType: "Validate" });
+Return: {"verdict": "PASS" | "FAIL", "details": "..."}`, { agentType: "Validate" });
 
-  if (validation.verdict === "FAIL") {
-    let failureDetails = validation.details;
+  if (validation?.verdict !== "PASS") {
+    let failureDetails = validation?.details || "Validate agent returned no PASS verdict";
     for (let attempt = 1; attempt <= 2; attempt++) {
       await agent(`Fix the final validation failures on branch ${BRANCH}:
 ${failureDetails}
@@ -453,19 +468,12 @@ ISSUE_NUMBER: ${ISSUE_NUMBER}
 ISSUE_PR_LINK: ${ISSUE_PR_LINK}
 COMPLIANCE_FRAMEWORKS: ${COMPLIANCE_FRAMEWORKS}
 Self-verify your fix compiles. Commit fixes with conventional-commit message.`, { agentType: "Code" });
-      const recheck = await agent(`Re-run build, typecheck, lint, tests on branch ${BRANCH} (follow your Running commands block). Report: PASS or FAIL.`, { agentType: "Validate" });
-      if (recheck.verdict === "PASS") break;
-      failureDetails = recheck.details || failureDetails;
-      if (attempt === 2) return { verdict: "ESCALATED", reason: "Final Gate 1 validation exhausted after 2 Code agent fix attempts" };
+      const recheck = await agent(`Re-run build, typecheck, lint, tests on branch ${BRANCH} (final gate, after fix attempt ${attempt}; follow your Running commands block).
+Return: {"verdict": "PASS" | "FAIL", "details": "..."}`, { agentType: "Validate" });
+      if (recheck?.verdict === "PASS") break;
+      failureDetails = recheck?.details || failureDetails;
+      if (attempt === 2) return { verdict: "ESCALATED", type: "validation-exhausted", reason: "Final Gate 1 validation exhausted after 2 Code agent fix attempts" };
     }
-  }
-
-  await agent(`Simplify and reduce complexity of recent changes on branch ${BRANCH}. Commit any improvements.`, { agentType: "Simplify" });
-
-  const scrutiny = await agent(`9-pillar self-review of recent changes on branch ${BRANCH}. Report any code you changed and your findings.`, { agentType: "Scrutinize" });
-
-  if (scrutiny.codeChanged) {
-    await agent(`Re-run build, typecheck, lint, tests on branch ${BRANCH} (Scrutinize agent made changes; follow your Running commands block). Report: PASS or FAIL.`, { agentType: "Validate" });
   }
 
   return { verdict: "PASS" };
@@ -496,7 +504,7 @@ Write a concise report. Present only surviving findings as outstanding — never
     survivingFindings: reviewResult.survivingFindings || [], fixedFindings: reviewResult.fixedFindings || [],
     reviewCoverage: { failedFocuses: coverageGaps, complete: coverageGaps.length === 0 },
     escalations: [
-      ...(gate1Final.verdict === "ESCALATED" ? [{ type: "validation-exhausted", description: gate1Final.reason || "final Gate 1 escalated" }] : []),
+      ...(gate1Final.verdict === "ESCALATED" ? [{ type: gate1Final.type || "validation-exhausted", description: gate1Final.reason || "final Gate 1 escalated" }] : []),
       ...coverageGaps.map(focus => ({ type: "review-coverage-incomplete", description: `review coverage incomplete: ${focus}` })),
     ],
     gate2, report,
@@ -540,7 +548,7 @@ When WAVE mode is detected, author a workflow that wraps the single-ticket engin
 
 **Wave workflow structure (author after the SINGLE engine blocks above):**
 
-The wave workflow uses the same phases as SINGLE but wraps them in a wave loop. The integration branch is `wave/<initiative>` — the initiative slug, referenced below as `{slug}` — (or the user's current branch). Each ticket works on the branch setup-task created. The Git agent manages worktrees for parallel-eligible tickets. After every merge: Validate agent (build + test). Escalations accumulate in a list; the final report lists all of them.
+The wave workflow uses the same phases as SINGLE but wraps them in a wave loop. The integration branch is `wave/<initiative>` — the initiative slug, referenced below as `{slug}` — (or the user's current branch). Each ticket works on the branch setup-task created. The Git agent manages worktrees for parallel-eligible tickets. After every merge the workflow spawns the Validate agent (build + test) and undoes a red merge. Escalations accumulate in a list; the final report lists all of them.
 
 Wave skeleton — compact reference (see `wave_loop()` doctrine for full semantics):
 
@@ -551,11 +559,12 @@ Wave skeleton — compact reference (see `wave_loop()` doctrine for full semanti
 const WAVE_TICKETS = [...remainingTickets];  // the pre-fetch's refs, in input order — the wave block's row order
 const results = {};  // ticketId → its row of the workflow's return; a ticket with no entry never ran
 // A row from an engine result: the fields step 3 after the workflow renders
-const rowOf = (ticketId, r, merged) => ({ ticket: ticketId, ran: true, verdict: r?.verdict || r?.overallVerdict || null, merged, issuePrLink: r?.issuePrLink || "(none)", evaluateVerdict: r?.gate2?.evaluateVerdict, testVerdict: r?.gate2?.testVerdict, surviving: r?.survivingFindings?.length, coverageComplete: r?.reviewCoverage?.complete });
+const rowOf = (ticketId, r, merged, treeEqual = null) => ({ ticket: ticketId, ran: true, verdict: r?.verdict || r?.overallVerdict || null, merged, treeEqual, issuePrLink: r?.issuePrLink || "(none)", evaluateVerdict: r?.gate2?.evaluateVerdict, testVerdict: r?.gate2?.testVerdict, surviving: r?.survivingFindings?.length, coverageComplete: r?.reviewCoverage?.complete });
 const MAX_ROUNDS = Math.max(10, remainingTickets.length * 2 + 5);  // heuristic; always finite
-const waveState = { quarantined: [], round: 0 };
+const MERGE_SHA = /^[0-9a-f]{40}$/;  // a merge commit as git prints it: the only Git-reported value that reaches a later prompt
+const waveState = { quarantined: [], round: 0, halted: null };
 let reAskedThisDeadlock = false;  // re-ask guard: re-ask once on empty ready-set, then escalate
-while (remainingTickets.length > 0 && waveState.round < MAX_ROUNDS) {
+while (remainingTickets.length > 0 && waveState.round < MAX_ROUNDS && waveState.halted === null) {
   waveState.round++;
 
   // Design agent reader (opus) applies vacuous-truth rule: a ticket with no unmet dependencies is ALWAYS ready.
@@ -588,10 +597,36 @@ Return: {"ready": [...ticket-ids], "blocked": [{"ticket": "id", "namedBlocker": 
       // Check both verdict (engine_output_schema) and overallVerdict (SINGLE skeleton alias).
       // PASS and UNVERIFIED merge; PARTIAL, FAIL, ESCALATED (the ticket-link and branch stops included) or no verdict quarantine.
       if (["PASS", "UNVERIFIED"].includes(engineResult.verdict || engineResult.overallVerdict)) {
-        const merge = await agent(`Merge ${engineResult.branch} to ${INTEGRATION_BRANCH}. Include ticket ID ${ticketId} in the merge commit message. Run Validate agent (build + test) after merge.
-Return: {"merged": true} — or {"merged": false, "reason": "<why>"} when the merge or the post-merge build failed and the merge was not kept.`, { agentType: "Git" });
-        results[ticketId] = rowOf(ticketId, engineResult, merge?.merged === true);
-        if (merge?.merged !== true) waveState.quarantined.push({ ticket: ticketId, reason: merge?.reason || "merge or post-merge build failed" });
+        // Git merges locally and validates nothing: the workflow owns the post-merge Validate (D-WAVE-MERGE-VALIDATE).
+        const merge = await agent(`Merge ${engineResult.branch} to ${INTEGRATION_BRANCH} locally. Include ticket ID ${ticketId} in the merge commit message. Do not push, and run no build or test.
+Return: {"merged": true, "mergeSha": "<40-hex merge commit>", "treeEqual": <true when mergeSha^{tree} equals the tree of ${engineResult.branch}'s head>} — or {"merged": false, "reason": "<why>"} when no merge is kept.`, { agentType: "Git" });
+        let kept = false;
+        let reason = merge?.reason || "merge failed";
+        if (merge?.merged === true && !MERGE_SHA.test(String(merge.mergeSha))) {
+          // A merge may sit on the integration branch with no SHA to validate or undo it by: stop taking merges.
+          waveState.halted = { ticket: ticketId, mergeSha: null, reason: "merge reported without a 40-hex mergeSha; the integration branch may hold an unvalidated merge" };
+          reason = waveState.halted.reason;
+        } else if (merge?.merged === true) {
+          // A merge counts as kept only when this Validate returns PASS. It always runs: treeEqual is recorded, never a reason to skip.
+          const post = await agent(`Run build, typecheck, lint, and tests on ${INTEGRATION_BRANCH} after merging ${engineResult.branch} (merge commit ${merge.mergeSha}).
+Follow your Running commands block for every build and test command.
+Return: {"verdict": "PASS" | "FAIL", "details": "..."}`, { agentType: "Validate" });
+          if (post?.verdict === "PASS") {
+            kept = true;
+          } else {
+            const undo = await agent(`Undo the merge ${merge.mergeSha} on ${INTEGRATION_BRANCH}, only when no remote branch contains ${merge.mergeSha} and the HEAD of ${INTEGRATION_BRANCH} still equals ${merge.mergeSha}. On the integration branch run exactly this one command and no other that changes a branch or a remote: git reset --keep ${merge.mergeSha}^1
+Return: {"undone": true} — or {"undone": false, "reason": "<why>"} when you did not undo it.`, { agentType: "Git" });
+            if (undo?.undone === true) {
+              reason = "post-merge build red; merge undone";
+            } else {
+              // A merge that stays red would poison every later ticket: stop taking merges and rounds, and name the red HEAD.
+              reason = `post-merge build red; merge not undone (${undo?.reason || "no reason given"})`;
+              waveState.halted = { ticket: ticketId, mergeSha: merge.mergeSha, reason };
+            }
+          }
+        }
+        results[ticketId] = rowOf(ticketId, engineResult, kept, merge?.merged === true && typeof merge.treeEqual === "boolean" ? merge.treeEqual : null);
+        if (!kept) waveState.quarantined.push({ ticket: ticketId, reason });
       } else {
         results[ticketId] = rowOf(ticketId, engineResult, false);
         waveState.quarantined.push({ ticket: ticketId, reason: engineResult.escalations?.[0]?.description || "engine fail/escalated" });
@@ -602,11 +637,12 @@ Return: {"merged": true} — or {"merged": false, "reason": "<why>"} when the me
       waveState.quarantined.push({ ticket: ticketId, reason: `engine crash: ${String(err)}` });
     }
     remainingTickets = remainingTickets.filter(t => t !== ticketId);
+    if (waveState.halted !== null) break;  // a red integration HEAD takes no further merge in this round
   }
 }
 
 // After the wave report is written: one row per wave ticket, in input order. No entry ⇒ never ran (cascade, deadlock, MAX_ROUNDS).
-return { tickets: WAVE_TICKETS.map(t => results[t] || { ticket: t, ran: false, verdict: null, merged: false, issuePrLink: "(none)" }), quarantined: waveState.quarantined };
+return { tickets: WAVE_TICKETS.map(t => results[t] || { ticket: t, ran: false, verdict: null, merged: false, treeEqual: null, issuePrLink: "(none)" }), quarantined: waveState.quarantined, halted: waveState.halted };
 ```
 
 ---
@@ -630,6 +666,7 @@ A workflow cannot pause mid-run. After the build/wave workflow returns, you (the
    In WAVE mode, if no tracking-issue number was resolved in Pre-authoring step 5: state `TRACEABILITY: DEGRADED (no tracking issue for this run)` in the run summary and skip — never skip silently.
 3. **Compose the wave PR inputs** (WAVE mode only — skip this step entirely in SINGLE mode). The workflow returned `tickets`: one entry per wave ticket, in its input order, each `{ticket, ran, verdict, merged, issuePrLink, evaluateVerdict, testVerdict, surviving, coverageComplete}`. Every value in it is agent-reported and treated as untrusted: nothing below is repaired, and no reference is ever composed from a number.
    - **Branch check.** Run `git -C "{integration worktree root}" branch --show-current`. Only a name matching `^wave/[a-z0-9][a-z0-9-]{0,59}$` opens a wave PR, and its part after `wave/` is the `{slug}` below. Any other name: record `TRACEABILITY: DEGRADED (not a wave branch)` and go to step 4 with no wave PR.
+   - **Halted** (the workflow returned a non-null `halted`: a post-merge build it could not undo, or a merge reported with no SHA): the integration HEAD may be red. Record `Wave PR: skipped (integration HEAD red, wave halted at <halted.ticket>)`, name `halted.mergeSha` (or `none reported`) and `halted.reason` as the red integration HEAD in the run summary, and go to step 4 with no wave PR.
    - **Nothing merged** (no entry has `merged: true`): record `Wave PR: skipped (nothing merged)` and go to step 4.
    - Otherwise compose (a) and then (b).
 

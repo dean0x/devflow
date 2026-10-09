@@ -159,35 +159,33 @@ const RETIRED_ALLOWLIST: ReadonlyArray<AllowlistEntry> = [
   },
 
   // -----------------------------------------------------------------------
-  // Evaluator — CONCEPT (MDS function name + inline prompt role descriptors)
+  // Evaluator — CONCEPT (MDS function name)
   // The actual Evaluate agent is spawned via agentType: "Evaluate".
-  // evaluator_panel() is an MDS function; "Acceptance-criteria evaluator:"
-  // is an inline agent-prompt label, not a Form-B spawn key.
+  // evaluator_panel() is an MDS function (the single Gate 2 Evaluate spawn's
+  // doctrine); the merged spawn's prompt carries no role label of its own.
   // -----------------------------------------------------------------------
   {
     path: 'src/assets/commands/dynamic-build.mds',
     name: 'Evaluator',
     reason:
-      'CONCEPT: evaluator_panel MDS function import/call; inline prompt role labels ' +
-      '("Acceptance-criteria evaluator:", etc.) — not Form-B spawn keys; ' +
+      'CONCEPT: evaluator_panel MDS function import/call — not a Form-B spawn key; ' +
       'actual spawn uses agentType: "Evaluate"',
-    contexts: ['evaluator_panel', 'Acceptance-criteria evaluator', 'Scope/intent-drift evaluator'],
+    contexts: ['evaluator_panel'],
   },
   {
     path: 'src/assets/commands/_partials/_engine.mds',
     name: 'Evaluator',
     reason:
-      'CONCEPT: @define evaluator_panel() MDS function body; inline prompt descriptors ' +
-      '— not Form-B spawn keys',
-    contexts: ['evaluator_panel', 'Acceptance-criteria evaluator', 'Scope / intent-drift evaluator', 'Cross-ticket-consistency evaluator'],
+      'CONCEPT: @define evaluator_panel() MDS function definition and export — not a Form-B spawn key',
+    contexts: ['evaluator_panel'],
   },
   {
     path: 'dist/commands/dynamic-build.md',
     name: 'Evaluator',
     reason:
-      'CONCEPT: compiled output of dynamic-build.mds; evaluator_panel function + prompt labels ' +
-      '— not Form-B spawn keys',
-    contexts: ['evaluator_panel', 'Acceptance-criteria evaluator', 'Scope/intent-drift evaluator', 'Scope / intent-drift evaluator', 'Cross-ticket-consistency evaluator'],
+      'CONCEPT: compiled output of dynamic-build.mds; the evaluator_panel function name ' +
+      '— not a Form-B spawn key',
+    contexts: ['evaluator_panel'],
   },
 
   // -----------------------------------------------------------------------

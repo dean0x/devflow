@@ -288,7 +288,7 @@
       "pattern": "DYNAMIC_BUILD_SITES.length).toBeGreaterThanOrEqual(9)",
       "occurrences": 1,
       "sourceFile": "tests/guards/running-commands-parity.test.ts",
-      "description": "Dynamic-build prompt sites that name the Running commands block instead of prescribing a procedure (D-FOREGROUND-RUN): the Code implementation prompt, both Gate 1 Validate prompts, both Code fix prompts after Gate 2, the review-batch fix prompt, the Test prompt and the two Validate re-checks. The guard requires each site's quoted text exactly once in the source and in the compiled command; this floor stops the list shrinking behind it. Floors rise, never fall."
+      "description": "Dynamic-build prompt sites that name the Running commands block instead of prescribing a procedure (D-FOREGROUND-RUN): the Code implementation prompt, both Gate 1 Validate prompts, the Validate re-run after a Gate 1 fix in each pass, the Code fix prompt after Gate 2, the scenario fix prompt, the review-batch fix prompt, the Test prompt and the post-merge Validate. The guard requires each site's quoted text exactly once in the source and in the compiled command; this floor stops the list shrinking behind it. Floors rise, never fall."
     }
   ],
   "ceilings": [

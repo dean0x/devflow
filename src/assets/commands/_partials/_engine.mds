@@ -3,21 +3,21 @@
 
 ORDER IS LOAD-BEARING. Run exactly in this sequence:
 
-1. **Validate agent** — build / typecheck / lint / test
+1. **Simplify agent** — reduce complexity, remove duplication
+2. **Scrutinize agent** — 9-pillar self-review (deep structural analysis); returns `{"status": "PASS" | "FIXED" | "BLOCKED"}`
+   - BLOCKED (a P0 issue cannot be fixed in scope) → stop the pass and escalate as `scrutiny-blocked`; Validate does not run on code Scrutinize could not accept
+3. **Validate agent** — build / typecheck / lint / test; returns `{"verdict": "PASS" | "FAIL", "details": "..."}`. It runs LAST and UNCONDITIONALLY: one full run over the HEAD that Simplify and Scrutinize left, so it covers their commits whether or not Scrutinize changed code
    - Build/test commands follow `build_execution_doctrine()`: the Validate agent's Running commands block, foreground under an explicit Bash timeout.
-   - FAIL → Code agent fix (max 2 retries) → re-run Validate agent
-   - If still FAIL after 2 retries → escalate (do not loop endlessly)
-2. **Simplify agent** — reduce complexity, remove duplication
-3. **Scrutinize agent** — 9-pillar self-review (deep structural analysis)
-   - If Scrutinize agent changed code → re-run Validate agent (verify the Scrutinize agent's edits compile/pass)
+   - FAIL → Code agent fix (max 2 retries), each followed by a Validate agent re-run
+   - If still FAIL after 2 retries → escalate as `validation-exhausted` (do not loop endlessly)
 
 **Gate 1 contains NO Evaluate agent and NO Test agent.** Those are Gate 2 only.
 
 Depth scales to change size + budget: a trivial one-line fix warrants a lighter pass; a multi-file refactor warrants the full depth.
 
 **Cadence — Gate 1 runs at exactly TWO points per ticket:**
-1. **Gate 1 #1** — immediately after the initial Code agent implementation (inside `implement_bundle()`).
-2. **Gate 1 #2** — the FINAL gate, after ALL Gate-2 fixes AND the entire review pass have completed.
+1. **Gate 1 #1** — immediately after the initial Code agent implementation (inside `implement_bundle()`). An escalated result — Validate exhausted, or Scrutinize BLOCKED — returns early: the ticket's engine returns `ESCALATED` with one escalation, and Gate 2 and the review pass never run on a broken or unfinished build.
+2. **Gate 1 #2** — the FINAL gate, after ALL Gate-2 fixes AND the entire review pass have completed. Scrutinize BLOCKED here is `ESCALATED` as well.
 
 It does NOT run inside the review pass, nor after each individual Gate-2 / review / QA fix. At those points the fixing Code agent self-verifies its OWN build compiles (see `review_pass()` and the Code agent's Running commands block). The final Gate 1 #2 is the invariant that all written code passes before merge.
 @end
@@ -29,8 +29,8 @@ Gate 2 fires ONCE: after the implement-bundle and BEFORE the review pass. It doe
 
 Gate 2 inputs are produced by `/devflow:dynamic-plan`'s plan-challenge step — the acceptance criteria and test plan written for the Evaluate agent and Test agent.
 
-**Evaluate agent panel** (only if a plan exists):
-- Run `evaluator_panel()` — see that block for the panel composition
+**Evaluate agent** (only if a plan exists):
+- Run `evaluator_panel()` — see that block for the one spawn and the two lenses it names
 - If any critical lens returns MISALIGNED: fix-and-continue — the demanded fixes are applied by a Code agent that self-verifies its own build (batched per the review-pass batching doctrine if numerous). The recorded verdict becomes `FAIL-FIXED` (issues found, fixes applied, not re-evaluated by design); Gate 2 then proceeds. In SINGLE mode the run reports it as `UNVERIFIED`, never PASS.
 
 **Test agent** (only if acceptance criteria or a test plan exist):
@@ -38,23 +38,20 @@ Gate 2 inputs are produced by `/devflow:dynamic-plan`'s plan-challenge step — 
 - FAIL → fix-and-continue — a Code agent applies the demanded fixes and self-verifies its own build. The recorded verdict becomes `FAIL-FIXED`; Gate 2 then proceeds. In SINGLE mode the run reports it as `UNVERIFIED`, never PASS.
 
 **When Gate 2 inputs are absent:**
-- No plan → skip Evaluate agent panel silently (note in output: "Gate 2 Evaluate agent skipped — no plan available")
+- No plan → skip the Evaluate agent silently (note in output: "Gate 2 Evaluate agent skipped — no plan available")
 - No acceptance criteria and no test plan → skip Test agent silently (note in output: "Gate 2 Test agent skipped — no criteria available")
 - Build proceeds Gate-1-only. Never refuse to build; never force-generate fake criteria. Trust the user.
 @end
 
 @define evaluator_panel():
-### Evaluate agent panel (§12 — diverse-lens verification)
+### Evaluate agent spawn (one agent, two lenses)
 
-Run 2–3 Evaluate agents with DISTINCT lenses. Diversity not redundancy — each agent asks a different question:
+Run ONE Evaluate agent whose prompt names both lenses, so a ticket pays for one spawn and one read of the plan:
 
-1. **Acceptance-criteria evaluator** — "Does the implementation satisfy each numbered acceptance criterion, INCLUDING the negative criteria (what it must NOT do)?"
-2. **Scope / intent-drift evaluator** — "Did the Code agent smuggle in unplanned changes, deviate from the plan's intent, or introduce anti-features?"
-3. **Cross-ticket-consistency evaluator** — (wave-only; skip for single-ticket runs) "Does this ticket honor the API contracts and invariants that other wave tickets depend on?"
+1. **Acceptance criteria** — "Does the implementation satisfy each numbered acceptance criterion, INCLUDING the negative criteria (what it must NOT do)?"
+2. **Scope / intent drift** — "Did the Code agent smuggle in unplanned changes, deviate from the plan's intent, or introduce anti-features?"
 
-Gate = **all-critical-must-pass**: a single critical FAIL from any lens blocks acceptance.
-
-Keep the panel to 2–3 agents. Do not spawn redundant agents asking the same question — that is cost with no diversity benefit.
+It returns `{"verdict": "PASS" | "FAIL", "rationale": "..."}`: FAIL when either lens fails, the rationale naming the failing criterion or the drift. A FAIL on either lens blocks acceptance. A wave ticket runs this same skeleton through `runSingleTicketEngine`, so it gets the same single spawn.
 @end
 
 @define implement_bundle():
@@ -194,7 +191,7 @@ Each ticket engine run returns a structured result. The Synthesize agent or the 
   },
   "escalations": [
     {
-      "type": "merge-conflict | gate2-fail | validation-exhausted | ambiguous-resolution | review-coverage-incomplete | dependency-blocked | engine-crash | ticket-link-missing | branch-missing",
+      "type": "merge-conflict | gate2-fail | validation-exhausted | scrutiny-blocked | ambiguous-resolution | review-coverage-incomplete | dependency-blocked | engine-crash | ticket-link-missing | branch-missing",
       "description": "string"
     }
   ],
@@ -212,7 +209,7 @@ Each ticket engine run returns a structured result. The Synthesize agent or the 
 
 1. **Code is written ONLY by Code agents.** No other agent type writes code — not Review agent, not Evaluate agent.
 2. **Findings are verified before any fix is written.** The adversarial verification step is not optional; unverified findings are not passed to the Code agent.
-3. **All written code passes Gate 1.** No code merge, commit, or handoff before Validate agent + Simplify agent + Scrutinize agent (in that order).
+3. **All written code passes Gate 1.** No code merge, commit, or handoff before Simplify agent + Scrutinize agent + Validate agent (in that order — Validate last, so its one run covers the commits of the two before it).
 4. **Gate 2 runs once, at implementation acceptance.** It does not re-run after review-fixes.
 5. **NEVER auto-merge to main or master.** All merges target the integration branch. The user merges to main themselves.
 6. **No unauthorized tracker or remote side-effects.** Sub-agents NEVER create issues/PRs on the tracker, comment on them, or push beyond the ticket-authorized branch unless the ticket, plan, or user explicitly authorizes that exact action. This applies to whatever tracker is resolved, not to one vendor. Proposed follow-ups go in the run report.
