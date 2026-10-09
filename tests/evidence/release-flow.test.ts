@@ -13,14 +13,14 @@
  *         open). A `--dry-run` never asks and leaves no checkpoint to resume;
  *         a real release shows the untraced and exempt commits before it asks.
  *   AC-8  `## Traceability exceptions` renders with `evidence_exception()`'s
- *         login, time and reason rules copied BYTE-IDENTICALLY (the
- *         partial-wiring precedent for release.md, which is hand-authored and
- *         imports nothing); it is persisted in the checkpoint; create-release
+ *         login, time and reason rules copied BYTE-IDENTICALLY (release imports
+ *         only `evidence_policy()`, so these rules are kept by hand); it is
+ *         persisted in the checkpoint; create-release
  *         appends it last, where the notes cap never drops it; and with nothing
  *         asked, exempt commits still reach it (D3).
  *
  * The classifier is not re-implemented from memory: its arms are parsed from
- * release.md and its status domain from git.md, so either file drifting moves
+ * the compiled release command and its status domain from git.md, so either file drifting moves
  * the model with it — and the known-bad probes drive the same parser with a
  * seeded arm deleted.
  */

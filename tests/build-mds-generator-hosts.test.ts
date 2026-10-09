@@ -4,13 +4,13 @@
  * A *generator host* is a .mds file whose first frontmatter block exists only to
  * steer the build (`output-dir: dist/agents`) and whose SECOND frontmatter block
  * is the real artifact frontmatter. The build strips the whole first block for
- * these hosts, while the 13 command hosts keep the pre-existing key-only strip
+ * these hosts, while the 14 command hosts keep the pre-existing key-only strip
  * so their compiled bytes do not move.
  *
  * Scenario coverage:
  *   1. generator frontmatter whole-block strip — a dist/agents host compiles to
  *      dist/agents/<name>.md with block 2 surviving as body text.
- *   2. 13 command outputs byte-unchanged (key-only strip retained) — command
+ *   2. 14 command outputs byte-unchanged (key-only strip retained) — command
  *      outputs keep their frontmatter minus output-dir:, and the on-disk dist/
  *      tree is byte-for-byte what the committed src/ tree compiles to.
  *   3. dest allowlist negatives — dist/wrong-dir, dist/commands/, dist/../..
@@ -22,7 +22,7 @@
  *  10. a generator host must carry TWO frontmatter blocks
  *  11. the whole-repo walk is depth-bounded and fails loudly at the bound
  *  12. this file never spawns a build against the real repo root
- *  13. orphans in dist/agents/ are pruned, and only there
+ *  13. orphans in dist/commands/ and dist/agents/ are pruned
  *  14. orphans under dist/skills/git/references/ are pruned, recursively and
  *      across the whole tree — root included, not just tracker/**
  *
@@ -87,7 +87,7 @@ const SELF = import.meta.filename;
  */
 vi.setConfig({ testTimeout: 120_000 });
 
-/** The 13 basenames compiled from .mds hosts into dist/commands/. */
+/** The 14 basenames compiled from .mds hosts into dist/commands/. */
 const COMPILED_COMMANDS = MDS_COMMAND_HOSTS;
 
 /**
@@ -358,10 +358,10 @@ describe('generator frontmatter whole-block strip', () => {
 });
 
 // ---------------------------------------------------------------------------
-// 2. 13 command outputs byte-unchanged (key-only strip retained)
+// 2. 14 command outputs byte-unchanged (key-only strip retained)
 // ---------------------------------------------------------------------------
 
-describe('13 command outputs byte-unchanged (key-only strip retained)', () => {
+describe('14 command outputs byte-unchanged (key-only strip retained)', () => {
   /**
    * Named collector: for each compiled command output, the shape of its leading
    * frontmatter block. Used by both the main assertion and the known-bad probe.
@@ -388,7 +388,7 @@ describe('13 command outputs byte-unchanged (key-only strip retained)', () => {
     return COMPILED_COMMANDS.map(name => ({ name, text: requireDistFile(`${name}.md`) }));
   }
 
-  it('dist/commands/ holds all 13 compiled outputs (fail-loud when unbuilt)', () => {
+  it('dist/commands/ holds all 14 compiled outputs (fail-loud when unbuilt)', () => {
     const distFiles = requireDistFiles();
     expect(distFiles.length, 'dist/commands/ must not be empty').toBeGreaterThan(0);
     for (const name of COMPILED_COMMANDS) {
@@ -1171,15 +1171,16 @@ describe('the whole-repo walk is depth-bounded', () => {
 });
 
 // ---------------------------------------------------------------------------
-// 13. orphans in dist/agents/ are pruned
+// 13. orphans in dist/commands/ and dist/agents/ are pruned
 // ---------------------------------------------------------------------------
 //
 // dist/agents/ is gitignored and outranks src/assets/agents/ in both resolvers,
 // so a file left there — a renamed host's old output, a hand-dropped one —
 // silently supersedes the audited source on every `devflow init`. The build owns
 // that directory: after a clean plan, anything in it no generator host emits is
-// removed. Scoped to dist/agents/ only; dist/commands/ additionally receives
-// hand-authored copies (release.md) that no host claims.
+// removed. dist/commands/ is swept the same way (D-RELEASE-MDS): every command is
+// a compiled host, so no file there can be claimed by anything but a host and an
+// unclaimed one is an orphan.
 
 describe('orphans in dist/agents/ are pruned', () => {
   /** Write a file into `<fakeRoot>/dist/agents/`, creating the directory. */
@@ -1256,20 +1257,41 @@ describe('orphans in dist/agents/ are pruned', () => {
     });
   });
 
-  it('does not prune dist/commands/', async () => {
-    // Deliberate scope: dist/commands/ holds release.md, copied verbatim from a
-    // hand-authored source that is not a host, so "unclaimed" does not mean
-    // "orphan" there.
+  it('prunes an unclaimed dist/commands/*.md, keeps the claimed one and any non-.md entry', async () => {
+    // D-RELEASE-MDS: no hand-authored command remains to be copied into
+    // dist/commands/, so "no host claims it" now means orphan there.
     await withFakeRoot(async fakeRoot => {
       await writeCommandHost(fakeRoot, 'zz-healthy', 'description: ok\noutput-dir: dist/commands\n');
       const dir = path.join(fakeRoot, 'dist', 'commands');
       await fs.mkdir(dir, { recursive: true });
-      const unclaimed = path.join(dir, 'hand-authored.md');
-      await fs.writeFile(unclaimed, 'copied verbatim\n', 'utf-8');
+      const stale = path.join(dir, 'stale-command.md');
+      await fs.writeFile(stale, 'a renamed host\'s old output\n', 'utf-8');
+      // A concurrent build's staging file must survive: deleting it fails that build's rename.
+      const staging = path.join(dir, 'zz-healthy.md.99999.tmp');
+      await fs.writeFile(staging, 'staged\n', 'utf-8');
 
       const run = runBuild(fakeRoot);
       expect(run.status, run.combined).toBe(0);
-      expect(await readIfPresent(unclaimed), 'dist/commands/ is out of the prune\'s scope').not.toBeNull();
+      expect(await readIfPresent(stale), 'an unclaimed command artifact must not survive the build').toBeNull();
+      expect(await readIfPresent(path.join(dir, 'zz-healthy.md')), 'the claimed artifact must survive its own prune').not.toBeNull();
+      expect(await readIfPresent(staging), 'only .md artifacts are the build\'s to remove').not.toBeNull();
+      expect(prunedPaths(run.combined)).toEqual(['dist/commands/stale-command.md']);
+      expect(run.combined, 'the reason must be stated').toContain('(no command host)');
+    });
+  });
+
+  it('known-bad probe: a refused build prunes nothing in dist/commands/', async () => {
+    await withFakeRoot(async fakeRoot => {
+      await writeCommandHost(fakeRoot, 'zz-healthy', 'description: ok\noutput-dir: dist/commands\n');
+      await writeCommandHost(fakeRoot, '_neg-wrong-dir', 'description: neg\noutput-dir: dist/wrong-dir\n');
+      const dir = path.join(fakeRoot, 'dist', 'commands');
+      await fs.mkdir(dir, { recursive: true });
+      const stale = path.join(dir, 'stale-command.md');
+      await fs.writeFile(stale, 'old\n', 'utf-8');
+
+      const run = runBuild(fakeRoot);
+      expect(run.status, `expected exit 1.\n${run.combined}`).toBe(1);
+      expect(await readIfPresent(stale), 'a refused build must leave dist/commands/ as it found it').not.toBeNull();
       expect(prunedPaths(run.combined)).toEqual([]);
     });
   });

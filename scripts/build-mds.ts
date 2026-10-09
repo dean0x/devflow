@@ -76,16 +76,17 @@
  * Atomic write: each output is written to a temp file then renamed into place, so
  * concurrent readers (e.g. parallel vitest workers) never observe a missing file.
  *
- * Prune: after a clean build, every `.md` in dist/agents/ that no host emitted is
- * deleted (pruneOrphanAgents), and the same sweep runs recursively over
- * dist/skills/git/references/ (pruneOrphanReferences). dist/agents/ is gitignored
- * and outranks src/assets/agents/ in both the installer's resolve and
- * loadShippedAgentDefaults's merge, so a file left there is installed in preference to
- * the audited source on every `devflow init`; the references tree is gitignored
- * too and is overlaid wholesale onto the installed skill, so a file left there
- * installs as if the build still produced it. The parity check in build.test.ts
- * catches the same orphan in CI, a commit later; this removes it on the machine
- * that ran the build.
+ * Prune: after a clean build, every `.md` in dist/commands/ and dist/agents/ that
+ * no host emitted is deleted (pruneOrphanCommands, pruneOrphanAgents), and the same
+ * sweep runs recursively over dist/skills/git/references/ (pruneOrphanReferences).
+ * dist/agents/ is gitignored and outranks src/assets/agents/ in both the
+ * installer's resolve and loadShippedAgentDefaults's merge, so a file left there is
+ * installed in preference to the audited source on every `devflow init`; the
+ * commands tree is installed wholesale, so a file left there installs as a command
+ * no source declares; the references tree is gitignored too and is overlaid
+ * wholesale onto the installed skill, so a file left there installs as if the build
+ * still produced it. The parity check in build.test.ts catches the same orphan in
+ * CI, a commit later; this removes it on the machine that ran the build.
  *
  * Usage: npm run build:mds
  */
@@ -100,6 +101,7 @@ import {
   expandVariants,
   splitVariantSections,
   AGENTS_OUTPUT_DIR,
+  COMMANDS_OUTPUT_DIR,
   SKILL_REFS_OUTPUT_DIR,
   resolveVariantModules,
   deferredReferenceModuleSources,
@@ -851,10 +853,6 @@ async function compileHost(host: HostEntry, plan: HostPlan): Promise<CompileOutc
  * what it no longer produces; the CI parity guard catches the same orphan a
  * commit later, which is too late for a machine that only ever runs the build.
  *
- * Scoped to dist/agents/ deliberately. dist/commands/ additionally receives
- * hand-authored files copied verbatim (release.md, below), so "no host claims
- * it" does not mean "orphan" there.
- *
  * Only `.md` is considered: a concurrent build's `<dest>.<pid>.tmp` staging file
  * lives in this directory and deleting it would fail that build's rename.
  *
@@ -863,6 +861,22 @@ async function compileHost(host: HostEntry, plan: HostPlan): Promise<CompileOutc
  */
 function pruneOrphanAgents(claimed: ReadonlySet<string>): string[] {
   return pruneOrphans(path.resolve(ROOT, AGENTS_OUTPUT_DIR), claimed, false);
+}
+
+/**
+ * Delete every `.md` in dist/commands/ that no host in this build emits.
+ *
+ * D-RELEASE-MDS: every command is a compiled host, with no hand-authored file
+ * copied beside them, so "no host claims it" means orphan: a renamed host's old
+ * output, or a command dropped from the roster, would otherwise stay in dist/ and
+ * be installed as a command no source declares. Same hazard and same `.md`-only
+ * scope as pruneOrphanAgents.
+ *
+ * @param claimed - Absolute destination paths this build wrote.
+ * @returns Repo-relative paths removed.
+ */
+function pruneOrphanCommands(claimed: ReadonlySet<string>): string[] {
+  return pruneOrphans(path.resolve(ROOT, COMMANDS_OUTPUT_DIR), claimed, false);
 }
 
 /**
@@ -1058,32 +1072,14 @@ async function main(): Promise<void> {
   // Every planned host was written (a refusal would have exited above), so the
   // claimed set is complete and anything else in these trees is stale.
   const claimedDests = new Set(planned.flatMap(p => destsOf(p.plan)));
+  for (const rel of pruneOrphanCommands(claimedDests)) {
+    console.log(`  pruned:   ${rel} (no command host)`);
+  }
   for (const rel of pruneOrphanAgents(claimedDests)) {
     console.log(`  pruned:   ${rel} (no generator host)`);
   }
   for (const rel of pruneOrphanReferences(claimedDests)) {
     console.log(`  pruned:   ${rel} (no reference module)`);
-  }
-
-  // Copy 1 hand-authored command file verbatim into dist/commands/
-  const handAuthored = [
-    path.join(ROOT, 'src', 'assets', 'commands', 'release.md'),
-  ];
-  const commandsDest = path.join(ROOT, 'dist', 'commands');
-  fs.mkdirSync(commandsDest, { recursive: true });
-  for (const src of handAuthored) {
-    if (fs.existsSync(src)) {
-      const dest = path.join(commandsDest, path.basename(src));
-      const tmp = tempPathFor(dest);
-      fs.copyFileSync(src, tmp);
-      try {
-        fs.renameSync(tmp, dest);
-      } catch (e) {
-        fs.rmSync(tmp, { force: true });
-        throw e;
-      }
-      console.log(`  copied:  ${path.relative(ROOT, src)} → ${path.relative(ROOT, dest)}`);
-    }
   }
 
   console.log("\nMDS commands build complete!");

@@ -106,7 +106,7 @@ function preambleContractBlock(content: string = GIT_MD): string {
   return next === -1 ? rest : rest.slice(0, next);
 }
 
-/** Command sources (`.mds` + the hand-authored `.md`) and their compiled artifacts. */
+/** Command sources (`.mds`) and their compiled artifacts. */
 function commandCorpus(): CorpusEntry[] {
   const corpus: CorpusEntry[] = [];
   for (const [label, dir] of [
@@ -397,17 +397,17 @@ describe('AC-3.16: the tracker configuration file has exactly ONE reader', () =>
   });
 
   it('no command source and no dist/commands/*.md reads it — release.md included by name', () => {
-    // `release.md:85` already reads `.devflow/conventions.md`, so the claim
+    // The release command already reads `.devflow/conventions.md`, so the claim
     // "learned files are read only inside the Git agent" is ALREADY false for
     // conventions. This guard is what stops it getting worse (GAP-38): it is the
-    // named precedent, so the hand-authored command is asserted present in the
-    // corpus rather than assumed to be scanned.
+    // named precedent, so the release command is asserted present in the corpus
+    // rather than assumed to be scanned.
     const corpus = commandCorpus();
     expect(corpus.length, 'the command corpus is empty — run `npm run build`').toBeGreaterThan(0);
     expect(
       corpus.map(e => e.path),
-      'release.md is hand-authored and copied verbatim into dist/, so it is the one command that ' +
-      'no MDS guard covers — it must be in this corpus by name',
+      'the release command is the named precedent for a command reading a learned file, ' +
+      'so it must be in this corpus by name',
     ).toContain('dist/commands/release.md');
     expect(
       collectTrackerFileReaders(corpus),

@@ -15,7 +15,7 @@
  *       "expected-command-set guard"    — the dist/commands/*.md output set
  *   - tests/build-mds-generator-hosts.test.ts
  *       "printed host/partial counts…"  — the counts the build itself prints
- *       "13 command outputs byte-…"     — the dist/-vs-src/ byte compare is non-vacuous
+ *       "14 command outputs byte-…"     — the dist/-vs-src/ byte compare is non-vacuous
  *   - tests/packaging.test.ts
  *       Guard 6                         — the same output set, the generator hosts' compiled
  *                                         agents, and the shipped .mds sources, inside the tarball
@@ -26,7 +26,7 @@
  *   - tests/guards/provider-scope.test.ts
  *       SETTINGS_BLOCK_HOSTS            — the files whose settings-line shape may name every provider
  *
- * Length floors (`>= 13` hosts, `>= 15` partials) are asserted alongside the set-equality in
+ * Length floors (`>= 14` hosts, `>= 15` partials) are asserted alongside the set-equality in
  * tests/build-mds.test.ts and registered in tests/fixtures/numeric-floors.json.
  * A floor never decreases; a manifest entry may only be added or renamed in step
  * with the file on disk.
@@ -53,10 +53,14 @@ export const DYNAMIC_COMMAND_HOSTS = [
   'dynamic-tickets',
 ] as const;
 
-/** All 13 command hosts compiled into dist/commands/. */
+/** The release command host (src/assets/commands/release.mds). */
+export const RELEASE_COMMAND_HOSTS = ['release'] as const;
+
+/** All 14 command hosts compiled into dist/commands/. */
 export const MDS_COMMAND_HOSTS = [
   ...KNOWLEDGE_COMMAND_HOSTS,
   ...DYNAMIC_COMMAND_HOSTS,
+  ...RELEASE_COMMAND_HOSTS,
 ] as const;
 
 /**
@@ -139,12 +143,9 @@ export const TRACKER_PARTIAL_ADOPTERS = [
  * The hosts that adopt `_partials/_evidence_policy.mds` (SDLC-evidence PR3b,
  * #362). Named as a set for the same reason as TRACKER_PARTIAL_ADOPTERS.
  *
- * These are the seven commands that act on the resolved evidence policy. Each
+ * These are the eight commands that act on the resolved evidence policy. Each
  * resolves it once per run through `evidence_policy()`, so the invocation and its
- * parse have one authority. release.md cannot import (it is hand-authored) and
- * carries the define's built text verbatim instead. It is not in this list, and
- * tests/evidence-policy/partial-wiring.test.ts holds it byte-identical to the
- * expansion.
+ * parse have one authority, and each imports the define rather than restating it.
  */
 export const EVIDENCE_POLICY_PARTIAL_ADOPTERS = [
   'bug-analysis',
@@ -153,6 +154,7 @@ export const EVIDENCE_POLICY_PARTIAL_ADOPTERS = [
   'dynamic-tickets',
   'implement',
   'plan',
+  'release',
   'resolve',
 ] as const;
 
@@ -232,20 +234,11 @@ export const MDS_REFERENCE_MODULES = [
 ] as const;
 
 /**
- * Hand-authored files copied verbatim into dist/commands/. release.md carries the
- * built `evidence_policy()` text verbatim instead of importing it, and is not
- * MDS-compiled; the divergence is permanent (SG-13).
+ * The 14 files that must exist in dist/commands/ after a build: one per command
+ * host. This is DIST_FILES — deployed-behaviour scope (§14.5). Every command is a
+ * compiled host, so no file here is copied rather than compiled.
  */
-export const HAND_AUTHORED_COMMAND_FILES = ['release.md'] as const;
-
-/**
- * The 14 files that must exist in dist/commands/ after a build: the 13 compiled
- * hosts plus release.md. This is DIST_FILES — deployed-behaviour scope (§14.5).
- */
-export const DIST_COMMAND_FILES: readonly string[] = [
-  ...MDS_COMMAND_HOSTS.map(h => `${h}.md`),
-  ...HAND_AUTHORED_COMMAND_FILES,
-];
+export const DIST_COMMAND_FILES: readonly string[] = MDS_COMMAND_HOSTS.map(h => `${h}.md`);
 
 /**
  * Every host basename that becomes an output FILENAME: command hosts + generator

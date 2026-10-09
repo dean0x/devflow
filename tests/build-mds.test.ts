@@ -4,14 +4,14 @@
  * Covers the unified frontmatter-driven MDS build pipeline.
  *
  * Scenario coverage:
- *  1. Discovery == 13 — discoverHosts() finds exactly the 13 expected basenames.
+ *  1. Discovery == 14 — discoverHosts() finds exactly the 14 expected basenames.
  *  2. output-dir stripped — compiled outputs contain no output-dir: key.
  *  3. Partial expansion — no un-expanded call sites or @import lines in outputs.
  *  4. MDS mechanism (regression) — happy compile, error path (isMdsError + mds:: code),
  *     isMdsError rejects non-mds values.
  *  5. Script happy-path exit — the committed sources compile cleanly and the compiled
  *     set lands in dist/commands/ (exact cardinality is pinned by scenario 6).
- *  6. Forgotten-key guard (C2) — expected-command-set: all 9 knowledge + 4 dynamic outputs present.
+ *  6. Forgotten-key guard (C2) — expected-command-set: all 9 knowledge + 4 dynamic + release outputs present.
  *  7. Dest safety negative (C3) — a host with a wrong output-dir → exit 1 + "typo?" message.
  *  8. npm scripts (C4) — package.json has build:mds, not the two old scripts, and build chains it.
  *  9. Ignored-dir walk (P3) — a .mds with output-dir: under node_modules/ is not compiled.
@@ -102,12 +102,11 @@ afterAll(cleanupCommittedTree);
 // Names come from the shared manifest (tests/fixtures/mds-manifest.ts) — the one
 // definition of which files the build owns. These aliases are this file's local
 // vocabulary for those sets; COMMAND_HOSTS is the manifest's MDS_COMMAND_HOSTS
-// (13 command hosts) and is deliberately NOT the manifest's ALL_MDS_HOSTS, which
-// also carries the generator host.
+// (14 command hosts) and is deliberately NOT the manifest's ALL_MDS_HOSTS, which
+// also carries the generator hosts.
 //
-// DIST_FILES = all 14 deployed commands (13 compiled MDS hosts + 1 hand-authored).
-// release.md is hand-authored and stays so permanently — the divergence is deliberate
-// and recorded in .devflow/features/dynamic-workflow-engine/KNOWLEDGE.md (SG-13, §14.5).
+// DIST_FILES = the 14 deployed commands, one per compiled MDS host (§14.5). Every
+// command is a host: no static command file exists to be copied beside them.
 // Scope rule (§14.5):
 //   - compilation guards (escaped braces, un-expanded call sites) → COMMAND_HOSTS scope
 //   - deployed-behaviour guards (spawn fences, gh issue absence, retired wording) → DIST_FILES scope
@@ -170,13 +169,48 @@ describe('MDS host discovery', () => {
     return { hosts: hosts.sort(), partials: partials.sort(), subdirs: subdirs.sort() };
   }
 
-  it('commands/ holds exactly the manifest\'s 13 command hosts (both directions)', async () => {
+  it('commands/ holds exactly the manifest\'s 14 command hosts (both directions)', async () => {
     // Set equality, not a count. A count stays green when one host is renamed and
     // another added in the same commit; naming the set is what pins the roster.
     const { hosts } = await collectMdsNames(COMMANDS_DIR);
     expect(hosts).toEqual([...MDS_COMMAND_HOSTS].sort());
     // Manifest length floor — floors never decrease (numeric-floors.json: dist-host-count).
-    expect(MDS_COMMAND_HOSTS.length).toBeGreaterThanOrEqual(13);
+    expect(MDS_COMMAND_HOSTS.length).toBeGreaterThanOrEqual(14);
+  });
+
+  /**
+   * Named collector: every `.md` file directly in `dir` or in a subdirectory.
+   * A command is an `.mds` host or it is not shipped, so any `.md` here is a
+   * static command the build would silently skip. Driven by the assertion below
+   * and by its probe, so a collector that stopped looking cannot leave it green.
+   */
+  async function collectStaticMarkdown(root: string, dir: string = root, depth = 0): Promise<string[]> {
+    const found: string[] = [];
+    for (const e of await fs.readdir(dir, { withFileTypes: true })) {
+      const full = path.join(dir, e.name);
+      if (e.isDirectory()) {
+        if (depth < 4) found.push(...await collectStaticMarkdown(root, full, depth + 1));
+        continue;
+      }
+      if (e.isFile() && e.name.endsWith('.md')) found.push(path.relative(root, full));
+    }
+    return found.sort();
+  }
+
+  it('commands/ holds no static .md command file (D-RELEASE-MDS: every command is a host)', async () => {
+    expect(await collectStaticMarkdown(COMMANDS_DIR)).toEqual([]);
+  });
+
+  it('known-bad probe: a stray .md in a commands tree is reported', async () => {
+    const probeRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'static-md-probe-'));
+    try {
+      await fs.writeFile(path.join(probeRoot, 'stray.md'), '# a static command\n', 'utf-8');
+      await fs.mkdir(path.join(probeRoot, '_partials'));
+      await fs.writeFile(path.join(probeRoot, '_partials', 'nested.md'), '# nested\n', 'utf-8');
+      expect(await collectStaticMarkdown(probeRoot)).toEqual(['_partials/nested.md', 'stray.md']);
+    } finally {
+      await fs.rm(probeRoot, { recursive: true, force: true });
+    }
   });
 
   it('each expected host .mds exists in commands/', async () => {
@@ -466,8 +500,7 @@ describe('partial expansion in compiled knowledge outputs', () => {
  * Every artifact the MDS compiler emits, per output tree, read from a build root.
  * Each tree is enumerated from its registry (hosts, generator hosts, the
  * reference manifest), so a missing tree or a missing file fails by name rather
- * than shrinking the corpus (reach is asserted per member). release.md
- * is hand-authored, not compiled, and is out of scope.
+ * than shrinking the corpus (reach is asserted per member).
  */
 async function readCompiledTrees(root: string): Promise<Record<'commands' | 'agents' | 'references', EmittedFile[]>> {
   const read = async (rel: string): Promise<EmittedFile> => ({
@@ -738,9 +771,8 @@ describe('expected-command-set guard (C2)', () => {
   });
 
   it('a build of the committed sources holds exactly the manifest\'s 14 output files (both directions)', async () => {
-    // The 1 hand-authored file is release.md, copied verbatim by build-mds.ts.
     // Set equality names which files must be there; the length pin below keeps
-    // the SG-13 divergence (14 deployed vs 13 compiled) explicit.
+    // the roster from shrinking behind it.
     const files = await fs.readdir(BUILT_COMMANDS);
     const mdFiles = files.filter(f => f.endsWith('.md')).sort();
     expect(
@@ -749,7 +781,7 @@ describe('expected-command-set guard (C2)', () => {
     ).toEqual([...DIST_COMMAND_FILES].sort());
     expect(
       DIST_COMMAND_FILES.length,
-      'DIST_COMMAND_FILES = 13 compiled hosts + release.md (SG-13, permanent divergence)',
+      'DIST_COMMAND_FILES = the 14 compiled command hosts',
     ).toBe(14);
   });
 
@@ -1188,8 +1220,7 @@ describe('dynamic-build: the post-merge Validate belongs to the workflow, and a 
 describe('compiled knowledge commands — no stale call-site references', () => {
   it('no compiled command contains a literal {knowledge_*()} call site', async () => {
     // COMMAND_HOSTS scope is correct here (not DIST_FILES): un-expanded call-site detection
-    // applies to MDS compiler outputs only.  release.md is hand-authored — it never
-    // contains MDS call sites (SG-13 / DIST_FILES vs COMMAND_HOSTS divergence).
+    // applies to MDS compiler outputs, and every command is one.
     const callSitePattern = /\{knowledge_(?:load|writeback)\(\)\}/;
     let scanned = 0;
     for (const basename of COMMAND_HOSTS) {
@@ -1496,8 +1527,7 @@ describe('compliance wiring in compiled host commands (review lens) + mechanism 
   });
 
   it('no compiled dist/commands/*.md passes COMPLIANCE:, or contains COMPLIANCE_ENABLED, devflow-compliance, or comment-pr', async () => {
-    // M8: DIST_FILES (not COMMAND_HOSTS) — release.md is a hand-authored dist file that must
-    // pass the same cleanliness checks. DIST_FILES entries already include '.md'.
+    // M8: DIST_FILES (deployed-behaviour scope). DIST_FILES entries already include '.md'.
     let scanned = 0;
     const keyLines: string[] = [];
     for (const basename of DIST_FILES) {
@@ -1825,17 +1855,17 @@ describe('publication_gate adoption in compiled host commands (Phase C)', () => 
 // ---------------------------------------------------------------------------
 // §20  DIST_FILES non-vacuity + compliance_gate adoption guard (P0-S21, P0-S22)
 //
-// §14.5 scope rule: deployed-behaviour guards scan DIST_FILES (14 files = 13
-// compiled MDS hosts + 1 hand-authored release.md).
+// §14.5 scope rule: deployed-behaviour guards scan DIST_FILES (14 files = the 14
+// compiled MDS command hosts).
 //
 // compliance_gate() adoption guard: 2 importers (code-review, plan) must use the
 // shared {compliance_gate()} partial — the review lens is the one command-layer
 // gate on COMPLIANCE_ACTIVE. implement and resolve ALIAS-import the same partial for
 // compliance_frameworks() alone, and dynamic-build for compliance_lens() (the gate
 // minus its COMPLIANCE_ACTIVE sentence): they pass the lens to their Code spawns and
-// gate nothing on it. release.md carries no compliance gate at all since #362: its
+// gate nothing on it. release carries no compliance gate at all since #362: its
 // evidence and back-link steps gate on EVIDENCE_POLICY, resolved by the
-// evidence_policy() text it holds verbatim. hostsScanned === 2 asserts non-vacuity
+// evidence_policy() text it imports. hostsScanned === 2 asserts non-vacuity
 // [DR-27a].
 // bug-analysis, dynamic-build and implement dropped the selective import in #362: their
 // only use of the check was to key a Git spawn, and the evidence policy now supplies the
@@ -1845,15 +1875,14 @@ describe('publication_gate adoption in compiled host commands (Phase C)', () => 
 // ---------------------------------------------------------------------------
 
 describe('DIST_FILES scope (§14.5, P0-S21) + compliance_gate adoption (P0-S22)', () => {
-  it('DIST_FILES contains exactly 14 entries (13 compiled hosts + release.md) — non-vacuity (P0-S21)', () => {
-    // SG-13: the divergence is permanent; release.md stays hand-authored.
-    expect(DIST_FILES.length, 'DIST_FILES must have exactly 14 entries (13 compiled + release.md)').toBe(14);
+  it('DIST_FILES contains exactly 14 entries (the 14 compiled hosts, release included) — non-vacuity (P0-S21)', () => {
+    expect(DIST_FILES.length, 'DIST_FILES must have exactly 14 entries (one per compiled host)').toBe(14);
     expect(DIST_FILES).toContain('release.md');
   });
 
   it('both compliance_gate importers contain COMPLIANCE_ACTIVE in their compiled output (P0-S22)', async () => {
     // The 2 MDS host commands that use {compliance_gate()} from _partials/_compliance.mds.
-    // release.md is hand-authored, cannot import, and checks no skill (#362).
+    // release imports no compliance partial and checks no skill (#362).
     const COMPLIANCE_GATE_IMPORTERS = ['code-review', 'plan'] as const;
 
     // The adoption set is read from the sources, both ways: a host that imports the

@@ -289,18 +289,16 @@ function listFiles(root: string, dir: string, keep: (file: string) => boolean): 
 
 /**
  * Every compiled prompt under `root` with its inputs: a command host with every
- * command partial (a partial edit can move any host that imports it), release.md
- * with its hand-authored source, the Git agent with its host, and each generated
- * reference with every reference module.
+ * command partial (a partial edit can move any host that imports it), each agent
+ * with its generator host, and each generated reference with every reference
+ * module.
  */
 function compiledPrompts(root: string): CompiledPrompt[] {
   const partials = listFiles(root, 'src/assets/commands/_partials', f => f.endsWith('.mds'))
-  const hosts = new Set(listFiles(root, 'src/assets/commands', f => f.endsWith('.mds')))
   const modules = listFiles(root, 'src/assets/mds', f => f.endsWith('.mds'))
   const commands = listFiles(root, 'dist/commands', f => f.endsWith('.md')).map(output => {
     const base = path.basename(output, '.md')
-    const host = `src/assets/commands/${base}.mds`
-    return { output, inputs: hosts.has(host) ? [host, ...partials] : [`src/assets/commands/${base}.md`] }
+    return { output, inputs: [`src/assets/commands/${base}.mds`, ...partials] }
   })
   const agents = listFiles(root, 'dist/agents', f => f.endsWith('.md'))
     .map(output => ({ output, inputs: [`${AGENT_HOSTS_DIR}/${path.basename(output, '.md')}.mds`] }))
@@ -353,19 +351,19 @@ describe('the compiled prompt corpus is current (#406)', () => {
       utimesSync(file, seconds, seconds)
     }
     try {
-      for (const src of ['src/assets/commands/plan.mds', 'src/assets/commands/release.md', 'src/assets/commands/_partials/_docs_root.mds', GIT_HOST, 'src/assets/mds/git/_pr.mds']) {
+      for (const src of ['src/assets/commands/plan.mds', 'src/assets/commands/release.mds', 'src/assets/commands/_partials/_docs_root.mds', GIT_HOST, 'src/assets/mds/git/_pr.mds']) {
         at(src, 1_700_000_000)
       }
       for (const out of ['dist/commands/plan.md', 'dist/commands/release.md', 'dist/agents/git.md', 'dist/skills/git/references/pr/x.md']) {
         at(out, 1_700_001_000)
       }
       expect(collectStaleOutputs(root), 'built after every source: current').toEqual([])
-      for (const src of ['src/assets/commands/_partials/_docs_root.mds', 'src/assets/commands/release.md', GIT_HOST, 'src/assets/mds/git/_pr.mds']) {
+      for (const src of ['src/assets/commands/_partials/_docs_root.mds', 'src/assets/commands/release.mds', GIT_HOST, 'src/assets/mds/git/_pr.mds']) {
         at(src, 1_700_002_000)
       }
       expect(collectStaleOutputs(root)).toEqual([
         'dist/commands/plan.md is STALE: src/assets/commands/_partials/_docs_root.mds changed after it was built',
-        'dist/commands/release.md is STALE: src/assets/commands/release.md changed after it was built',
+        'dist/commands/release.md is STALE: src/assets/commands/release.mds changed after it was built',
         `dist/agents/git.md is STALE: ${GIT_HOST} changed after it was built`,
         'dist/skills/git/references/pr/x.md is STALE: src/assets/mds/git/_pr.mds changed after it was built',
       ])

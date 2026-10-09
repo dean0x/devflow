@@ -13,7 +13,7 @@
  * docs-root.test.ts holds the paths to it, and this file runs its command. Both used to read from cwd, so a session started in `packages/app`
  * loaded `(none)` and a write-back committed `packages/app/.devflow/features`.
  * The other decisions readers follow the same ledger: the dynamic commands'
- * authoring preamble calls `decisions_locate`, the static release.md carries a
+ * authoring preamble calls `decisions_locate`, the release command carries a
  * word-for-word copy of it, and the Code agent's fallback resolves the main
  * worktree from the common git directory.
  *
@@ -265,8 +265,8 @@ describe('compiled loaders resolve the repository root, not cwd (D-PROMPT-ROOT, 
   })
 
   it('release.md carries the decisions locate rule word for word and reads the index from the ledger it names', () => {
-    // release.md is a static command and cannot import the partial, so its copy is
-    // pinned to the define body: an edit to one without the other goes red here.
+    // release.mds does not import the partial, so its copy is pinned to the define
+    // body: an edit to one without the other goes red here.
     const partial = fs.readFileSync(
       path.resolve(import.meta.dirname, '..', '..', 'src', 'assets', 'commands', '_partials', '_decisions.mds'),
       'utf-8',

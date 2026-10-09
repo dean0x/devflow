@@ -169,6 +169,14 @@ interface AllowedOutputDir {
 export const AGENTS_OUTPUT_DIR = 'dist/agents';
 
 /**
+ * Repo-relative destination for `commands` hosts.
+ *
+ * Exported for the same reason as AGENTS_OUTPUT_DIR: the orphan prune names the
+ * directory even when no command host is planned.
+ */
+export const COMMANDS_OUTPUT_DIR = 'dist/commands';
+
+/**
  * The bare (unprefixed) skill that OWNS the generated references.
  *
  * One fact, three derivations: SKILL_REFS_OUTPUT_DIR below is composed from it,
@@ -203,7 +211,7 @@ export const SKILL_REFS_SKILL_NAME = 'git';
 export const SKILL_REFS_OUTPUT_DIR = `dist/skills/${SKILL_REFS_SKILL_NAME}/references`;
 
 const ALLOWED_OUTPUT_DIRS = [
-  { dir: 'dist/commands', variant: 'commands' },
+  { dir: COMMANDS_OUTPUT_DIR, variant: 'commands' },
   { dir: AGENTS_OUTPUT_DIR, variant: 'agents' },
   { dir: SKILL_REFS_OUTPUT_DIR, variant: 'skill-refs' },
 ] as const satisfies readonly AllowedOutputDir[];

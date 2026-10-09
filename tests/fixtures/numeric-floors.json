@@ -4,8 +4,8 @@
   "floors": [
     {
       "id": "dist-host-count",
-      "floor": 13,
-      "pattern": "MDS_COMMAND_HOSTS.length).toBeGreaterThanOrEqual(13)",
+      "floor": 14,
+      "pattern": "MDS_COMMAND_HOSTS.length).toBeGreaterThanOrEqual(14)",
       "occurrences": 1,
       "sourceFile": "tests/build-mds.test.ts",
       "description": "Number of compiled MDS host commands in dist/commands/ (MDS_COMMAND_HOSTS). The discovery assertion is a set-equality against tests/fixtures/mds-manifest.ts and this floor is that manifest's length, asserted alongside the set: the set says WHICH hosts, the floor says the roster may not shrink behind it. The pattern names its RECEIVER because partial-count in the same file now pins the same number: two entries sharing one bare pattern have no per-entry accounting, and the decrement probe of each would keep finding the other's site."
@@ -24,7 +24,7 @@
       "pattern": "toBe(14)",
       "occurrences": 5,
       "sourceFile": "tests/build-mds.test.ts",
-      "description": "DIST_FILES count = COMMAND_HOSTS (13) + release.md (1); DIST_FILES vs COMMAND_HOSTS divergence is permanent (SG-13). Five sites spell it, including the `<!-- devflow:` marker negative guard, which asserts both the built file count and its own distFilesScanned counter — the value is one number and the occurrence count is what stops one site drifting out of the set."
+      "description": "DIST_FILES count = COMMAND_HOSTS (14), one compiled file per command host. Five sites spell it, including the `<!-- devflow:` marker negative guard, which asserts both the built file count and its own distFilesScanned counter — the value is one number and the occurrence count is what stops one site drifting out of the set."
     },
     {
       "id": "slow-test-timeout-ms",
