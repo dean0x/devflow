@@ -82,7 +82,8 @@ export function resolveOnPath(name: string, pathValue: string): string | undefin
     if (dir === '') continue;
     const candidate = path.join(dir, name);
     try {
-      if (fs.statSync(candidate).isFile() && (fs.statSync(candidate).mode & 0o111) !== 0) return candidate;
+      const stat = fs.statSync(candidate);
+      if (stat.isFile() && (stat.mode & 0o111) !== 0) return candidate;
     } catch {
       // Not there; the next directory.
     }

@@ -337,16 +337,23 @@ function normalize(res) {
 // ---------------------------------------------------------------------------
 
 /**
+ * @param {string} text
+ * @returns {unknown}  the parsed value, or undefined when the text is not JSON
+ */
+function parseJson(text) {
+  try {
+    return JSON.parse(text);
+  } catch (_) {
+    return undefined;
+  }
+}
+
+/**
  * @param {string} stdout
  * @returns {string | null}  the 40-hex headRefOid, or null for any other shape
  */
 function parseHeadRefOid(stdout) {
-  let value;
-  try {
-    value = JSON.parse(stdout);
-  } catch (_) {
-    return null;
-  }
+  const value = parseJson(stdout);
   if (value === null || typeof value !== 'object' || Array.isArray(value)) return null;
   return typeof value.headRefOid === 'string' && HEAD_RE.test(value.headRefOid) ? value.headRefOid : null;
 }
@@ -356,12 +363,7 @@ function parseHeadRefOid(stdout) {
  * @returns {Check[] | null}  the rows, or null for any other shape
  */
 function parseChecks(stdout) {
-  let value;
-  try {
-    value = JSON.parse(stdout);
-  } catch (_) {
-    return null;
-  }
+  const value = parseJson(stdout);
   if (!Array.isArray(value) || value.length > MAX_CHECKS) return null;
   const checks = [];
   for (const row of value) {
@@ -549,6 +551,9 @@ async function main(argv, deps) {
   const injected = deps || {};
   const parsed = parseArgs(Array.isArray(argv) ? argv.slice(2) : []);
   if (parsed === null) return { code: 0, stdout: USAGE_LINE + '\n' };
+  /** @param {string} reason */
+  const indeterminate = reason =>
+    'CI INDETERMINATE pr=' + parsed.pr + ' head=' + parsed.head.slice(0, 7) + ' waited=0 reason=' + reason;
   let line;
   try {
     const result = await waitForCi({
@@ -560,11 +565,9 @@ async function main(argv, deps) {
     });
     line = renderLine(result);
   } catch (_) {
-    line = 'CI INDETERMINATE pr=' + parsed.pr + ' head=' + parsed.head.slice(0, 7) + ' waited=0 reason=gh-failed';
+    line = indeterminate('gh-failed');
   }
-  if (!checkLine(line)) {
-    line = 'CI INDETERMINATE pr=' + parsed.pr + ' head=' + parsed.head.slice(0, 7) + ' waited=0 reason=unparseable';
-  }
+  if (!checkLine(line)) line = indeterminate('unparseable');
   return { code: 0, stdout: line + '\n' };
 }
 
