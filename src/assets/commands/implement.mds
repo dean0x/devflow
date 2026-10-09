@@ -329,7 +329,8 @@ Agent(subagent_type="Simplify"):
 "Simplify recently implemented code
 Task: {task description}
 FILES_CHANGED: {list of files from Code agent output}
-Focus on code modified by Code agent, apply project standards, enhance clarity"
+Focus on code modified by Code agent, apply project standards, enhance clarity
+Commit any improvements with a conventional-commit message."
 ```
 
 ### Phase 4: Self-Review
