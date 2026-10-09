@@ -752,6 +752,15 @@ describe('GAP-3: orchestrator charter integrity', () => {
       violations.push('no delegation report cap carries a token figure ("at most about N tokens")')
     }
 
+    // D-CODE-OPERATION-MODES: a direct Code delegation is not a compiled command, so no spawn guard
+    // reads it. Its routing line carries the rule instead: the prompt opens with `OPERATION: <mode>`.
+    const codeLines = charter.split('\n').filter(line => /^- Execution against a spec:/.test(line))
+    if (codeLines.length !== 1) {
+      violations.push(`expected exactly one Code routing line ("- Execution against a spec:"), found ${codeLines.length}`)
+    } else if (!codeLines[0].includes('OPERATION:')) {
+      violations.push('the Code routing line does not tell a direct Code delegation to open with OPERATION: <mode>')
+    }
+
     const handoffLines = charter.split('\n').filter(line => line.includes(HANDOFF_PREFIX))
     if (handoffLines.length !== 1) {
       violations.push(`expected exactly one line naming "${HANDOFF_PREFIX}", found ${handoffLines.length}`)
@@ -766,13 +775,13 @@ describe('GAP-3: orchestrator charter integrity', () => {
     return violations
   }
 
-  it('charter carries the bounded-inline exception, a token-figure report cap and the no-argument handoff', () => {
+  it('charter carries the bounded-inline exception, a token-figure report cap, the no-argument handoff and a Code routing line that names OPERATION', () => {
     const charter = readFileSync(CHARTER_PATH, 'utf-8')
     const violations = collectCharterContentViolations(charter)
     expect(violations, `Orchestrator charter content violations:\n  ${violations.join('\n  ')}`).toEqual([])
   })
 
-  it('known-bad probe: a charter without the bounds, without a report figure, or with "full plan" is reported', () => {
+  it('known-bad probe: a charter without the bounds, without a report figure, without OPERATION on the Code line, or with "full plan" is reported', () => {
     const charter = readFileSync(CHARTER_PATH, 'utf-8')
     // Non-vacuity: the real charter is clean, so each seed below fails for its own reason.
     expect(collectCharterContentViolations(charter)).toEqual([])
@@ -785,6 +794,12 @@ describe('GAP-3: orchestrator charter integrity', () => {
     expect(uncapped, 'the seed must land').not.toBe(charter)
     expect(collectCharterContentViolations(uncapped)).toContain(
       'no delegation report cap carries a token figure ("at most about N tokens")',
+    )
+
+    const noOperation = charter.replace('`OPERATION: <mode>`', 'a mode')
+    expect(noOperation, 'the seed must land').not.toBe(charter)
+    expect(collectCharterContentViolations(noOperation)).toContain(
+      'the Code routing line does not tell a direct Code delegation to open with OPERATION: <mode>',
     )
 
     const fullPlan = charter.replace(HANDOFF_PREFIX, `${HANDOFF_PREFIX} pass the full plan as skill input,`)
