@@ -51,9 +51,9 @@ Nice-to-haves: {optional features}
 
 ### Phase 2: Search
 
-Delegate research to an Explore subagent to keep main session context clean.
+Spawn an Explore subagent when you can spawn agents, to keep main session context clean; otherwise search directly, using the template's questions as your checklist.
 
-**Spawn an Explore agent** with this prompt template:
+**Prompt template** for the Explore agent:
 
 ```
 Agent(subagent_type="Explore"):
