@@ -79,6 +79,7 @@ devflow/
 │           ├── pr-evidence.cjs       # Pure core of test-plan evidence: grammars, markers, the state ladder
 │           ├── verify-evidence.cjs   # I/O half of test-plan evidence: check, render, verify, splice, readback
 │           ├── release-trace.cjs     # Git-only release trace: last release tag + per-commit trace map
+│           ├── ci-wait.cjs           # Bounded CI wait for one pushed head: reads gh only, prints one status line; /implement and /resolve call it inline
 │           ├── lib/project-config.cjs # The one parser of .devflow/project.json and .devflow/config.json (installed beside its two callers)
 │           └── hooks/                # Capture + memory + learning + ambient hooks
 │               ├── capture-prompt        # UserPromptSubmit hook: appends user turn to memory + learning queues (independently gated)
