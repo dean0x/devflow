@@ -9,6 +9,6 @@
     "declarationMap": false,
     "sourceMap": false
   },
-  "include": ["scripts/**/*.ts"],
+  "include": ["scripts/**/*.ts", "tests/build-mds.test.ts", "tests/build-mds-compile-time.test.ts"],
   "exclude": ["node_modules", "dist"]
 }

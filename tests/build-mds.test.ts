@@ -906,6 +906,13 @@ describe('npm scripts (C4)', () => {
     ) as { include?: string[]; compilerOptions?: { noEmit?: boolean } };
     expect(tsconfig.include).toContain('scripts/**/*.ts');
     expect(tsconfig.compilerOptions?.noEmit).toBe(true);
+    // The MDS build tests import @mdscript/mds, whose package.json ships only an
+    // `exports` map. Classic `node` resolution ignores it (TS2307, then an
+    // `unknown` catch variable that never narrows), so these two files are
+    // checked here, under NodeNext, rather than by any config that inherits it.
+    expect(tsconfig.include).toEqual(
+      expect.arrayContaining(['tests/build-mds.test.ts', 'tests/build-mds-compile-time.test.ts']),
+    );
   });
 });
 
