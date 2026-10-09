@@ -33,22 +33,31 @@ $ARGUMENTS
 
 ## Phases
 
+<!-- learning:on -->
 ### Phase 1: Load Decisions Index (Orchestrator-Local)
+<!-- learning:off -->
+### Phase 1: Resolve Settings
+<!-- learning:end -->
 
+<!-- learning:on -->
 **Produces:** DECISIONS_CONTEXT
 
+<!-- learning:end -->
 {{settings.settings_resolve()}}
 
 {{decisions_load()}}
-
+<!-- learning:on -->
 The orchestrator uses `DECISIONS_CONTEXT` locally when generating hypotheses (Phase 2) — prior pitfalls and decisions can suggest specific root causes to investigate. Follow `devflow:apply-decisions` to Read full entry bodies on demand. **Do NOT pass `DECISIONS_CONTEXT` to Explore investigators** — decisions context stays in the orchestrator; investigators examine code directly.
 
+<!-- learning:end -->
 **No up-front feature knowledge load** — debug investigation workers read code directly to avoid confirmation bias. Feature knowledge is only written back at the end if the investigation surfaced durable, cross-cutting knowledge.
 
 ### Phase 2: Context Gathering
 
 **Produces:** HYPOTHESES, BUG_CONTEXT
+<!-- learning:on -->
 **Requires:** DECISIONS_CONTEXT
+<!-- learning:end -->
 
 If `COMMAND_INPUT` opens with a candidate issue reference, fetch the issue:
 
@@ -196,7 +205,11 @@ Ask user via AskUserQuestion: "Want me to implement this fix?"
 ```
 /debug (orchestrator)
 │
+<!-- learning:on -->
 ├─ Phase 1: Load Decisions Index (Orchestrator-Local)
+<!-- learning:off -->
+├─ Phase 1: Resolve Settings
+<!-- learning:end -->
 │  └─ No up-front feature knowledge load (avoids confirmation bias in investigators)
 │
 ├─ Phase 2: Context gathering

@@ -56,8 +56,13 @@ Read `.release/RELEASE-FLOW.md`:
 
 ### Phase 1b: Load Context
 
+<!-- learning:on -->
 **Produces:** DECISIONS_CONTEXT, FEATURE_KNOWLEDGE
+<!-- learning:off -->
+**Produces:** FEATURE_KNOWLEDGE
+<!-- learning:end -->
 
+<!-- learning:on -->
 {{settings.settings_resolve()}}
 
 {{decisions_gate()}}
@@ -66,9 +71,14 @@ Read `.release/RELEASE-FLOW.md`:
 
 Read `{ledger}/.devflow/learning/index.md`. If the file is absent or empty, set `DECISIONS_CONTEXT` to `(none)`; otherwise use the file content as `DECISIONS_CONTEXT`.
 
+<!-- learning:end -->
 Load feature knowledge: Attempt to read `.devflow/features/index.md` (the regenerable cache). If absent or empty, glob `.devflow/features/*/KNOWLEDGE.md` and read each file's YAML frontmatter (`name`, `description`, `directories`) as the relevance surface. Pick release-relevant KBs by matching their documented area against the release context. For each selected KB, read the full `KNOWLEDGE.md` — trust current code over KB content on any mismatch. Concatenate under slug headers and set `FEATURE_KNOWLEDGE` (or `(none)` if no KBs exist or none are relevant). No `index.json`, no subprocess, no `.cjs` script.
 
+<!-- learning:on -->
 Pass `DECISIONS_CONTEXT` and `FEATURE_KNOWLEDGE` only to agents whose contract declares them; the Validate and Git agents this command spawns do not.
+<!-- learning:off -->
+Pass `FEATURE_KNOWLEDGE` only to agents whose contract declares it; the Validate and Git agents this command spawns do not.
+<!-- learning:end -->
 
 ### Phase 1c: Resolve the Evidence Policy
 
@@ -218,7 +228,11 @@ On completion:
 │  └─ Read .release/RELEASE-FLOW.md (learned) or proceed to detect (fresh)
 │
 ├─ Phase 1b: Load Context
+<!-- learning:on -->
 │  └─ Load DECISIONS_CONTEXT and FEATURE_KNOWLEDGE for the agents that declare them
+<!-- learning:off -->
+│  └─ Load FEATURE_KNOWLEDGE for the agents that declare it
+<!-- learning:end -->
 │
 ├─ Phase 2: Detect Release Process (first run only)
 │  └─ Tiered scan: package.json, CI workflows, git history

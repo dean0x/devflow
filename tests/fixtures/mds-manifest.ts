@@ -22,6 +22,9 @@
  *                                         .mds sources, inside the tarball
  *   - tests/learning/learning-variants-build.test.ts
  *       LEARNING_VARIANT_HOSTS          — the learning-off files on disk, both directions
+ *   - tests/learning/learning-variants-arms.test.ts
+ *       LEARNING_VARIANT_HOSTS          — the hosts whose compiled body carries an arm, both directions
+ *       SETTINGS_BLOCK_HOSTS_LEARNING_OFF — the commands that keep the settings block with learning off
  *   - tests/mds-variants.test.ts
  *       "validateOutputName"            — every basename the build owns is accepted by the name rule
  *   - tests/commands/settings-partial.test.ts
@@ -191,6 +194,26 @@ export const SETTINGS_BLOCK_HOSTS = [
 ] as const
 
 /**
+ * The hosts whose learning-OFF build still carries the settings block: the ones with
+ * a consumer other than learning (a compliance lens, a publication gate or a knowledge
+ * write-back). The other six of SETTINGS_BLOCK_HOSTS (bug-analysis, dynamic-plan,
+ * dynamic-profile, dynamic-tickets, release, research) only read the line for the
+ * decisions gate or a Skim spawn, so the block sits inside their learning-on arm.
+ * Named as a set; the learning-off count (8) is a test-local constant beside its
+ * assertion.
+ */
+export const SETTINGS_BLOCK_HOSTS_LEARNING_OFF = [
+  'code-review',
+  'debug',
+  'dynamic-build',
+  'explore',
+  'implement',
+  'plan',
+  'resolve',
+  'self-review',
+] as const
+
+/**
  * Generator hosts: .mds sources outside src/assets/commands/ that compile to a
  * destination other than dist/commands. Ten today, all agents:
  * src/assets/agents/{name}.mds → dist/agents/{name}.md. Git is the first; the other
@@ -218,13 +241,29 @@ export const MDS_GENERATOR_HOSTS = [
  * same reason as every other roster here: a count stays green when one host
  * loses its arm and another gains one in the same commit.
  *
- * Empty until a host or partial carries `<!-- learning:on -->` markers. The
- * assertions over it hold at every step: the printed variant count and the files
- * under `dist/learning-off/` both equal this set in both directions, the packed
- * tarball carries exactly these files, and an arm added without a row (or a row
- * left after its arm goes) turns one of them red.
+ * All 14 command hosts (each loads decisions, or hands them on, behind an arm)
+ * and the nine agent hosts that declare `DECISIONS_CONTEXT` (eight) or take the
+ * `LEARNING` input (Skim). The Learning agent, `learning.md`, is hand-authored
+ * and runs only when learning is on, so it has no variant. The assertions over
+ * this set hold at every step: the printed variant count and the files under
+ * `dist/learning-off/` both equal it in both directions, the packed tarball
+ * carries exactly these files, and an arm added without a row (or a row left
+ * after its arm goes) turns one of them red.
  */
-export const LEARNING_VARIANT_HOSTS: readonly string[] = [];
+export const LEARNING_VARIANT_HOSTS: readonly string[] = [
+  ...MDS_COMMAND_HOSTS.map(h => `commands/${h}`),
+  ...[
+    'code',
+    'design',
+    'diagnose',
+    'knowledge',
+    'research',
+    'review',
+    'scrutinize',
+    'skim',
+    'triage',
+  ].map(h => `agents/${h}`),
+];
 
 /** The `dist/learning-off/`-relative file of every host in LEARNING_VARIANT_HOSTS. */
 export const LEARNING_OFF_FILES: readonly string[] = LEARNING_VARIANT_HOSTS.map(h => `${h}.md`);

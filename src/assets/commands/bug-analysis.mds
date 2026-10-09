@@ -169,14 +169,19 @@ If no tool produced findings: set `STATIC_FINDINGS` to `(none)`.
 
 ### Phase 3: Context Loading
 
+<!-- learning:on -->
 **Produces:** DECISIONS_CONTEXT, FEATURE_KNOWLEDGE, PLAN_CONTEXT, ACCEPTANCE_RULES
+<!-- learning:off -->
+**Produces:** FEATURE_KNOWLEDGE, PLAN_CONTEXT, ACCEPTANCE_RULES
+<!-- learning:end -->
 
+<!-- learning:on -->
 #### Decisions Index
 
 {{settings.settings_resolve()}}
 
+<!-- learning:end -->
 {{decisions_load()}}
-
 #### Feature Knowledge
 
 {{knowledge_load()}}
@@ -206,7 +211,11 @@ Determine which focus analyzers to run using `CHANGED_FILES` (already computed i
 ### Phase 5: Parallel Bug Analysis
 
 **Produces:** ANALYZER_OUTPUTS
+<!-- learning:on -->
 **Requires:** DIFF_RANGE, ANALYSIS_DIR, ACTIVE_FOCUSES, STATIC_FINDINGS, ACCEPTANCE_RULES, PLAN_CONTEXT, DECISIONS_CONTEXT, FEATURE_KNOWLEDGE
+<!-- learning:off -->
+**Requires:** DIFF_RANGE, ANALYSIS_DIR, ACTIVE_FOCUSES, STATIC_FINDINGS, ACCEPTANCE_RULES, PLAN_CONTEXT, FEATURE_KNOWLEDGE
+<!-- learning:end -->
 
 Spawn ALL active Diagnose agents **in a single message** (parallel, NOT background):
 
@@ -219,11 +228,15 @@ DIFF_COMMAND: git diff {DIFF_RANGE}
 ACCEPTANCE_RULES: {ACCEPTANCE_RULES filtered to this focus type, or (none)}
 PLAN_CONTEXT: {PLAN_CONTEXT}
 STATIC_FINDINGS: {STATIC_FINDINGS if focus == security, else (none)}
+<!-- learning:on -->
 DECISIONS_CONTEXT: {DECISIONS_CONTEXT}
+<!-- learning:end -->
 FEATURE_KNOWLEDGE: {FEATURE_KNOWLEDGE}
 PR_DESCRIPTION: <pr-description>{PR_DESCRIPTION}</pr-description>
 OUTPUT_PATH: {ANALYSIS_DIR}/{focus}.md
+<!-- learning:on -->
 Follow devflow:apply-decisions to Read full ADR/PF bodies on demand.
+<!-- learning:end -->
 Follow devflow:apply-feature-knowledge for FEATURE_KNOWLEDGE.
 IMPORTANT: Write report to {ANALYSIS_DIR}/{focus}.md using Write tool"
 ```
@@ -302,7 +315,9 @@ Run `/resolve` to process and fix these findings.
 │              Write static-findings.md
 │
 ├─ Phase 3: Context Loading
+<!-- learning:on -->
 │  ├─ index.md (pre-rendered) → DECISIONS_CONTEXT
+<!-- learning:end -->
 │  ├─ Feature knowledge load → FEATURE_KNOWLEDGE
 │  └─ {worktree}/.devflow/docs/design/*.md → PLAN_CONTEXT + ACCEPTANCE_RULES
 │
@@ -359,7 +374,11 @@ Before reporting results, verify every phase was executed:
 
 - [ ] Phase 1: Pre-flight → BRANCH_INFO captured, PR_DESCRIPTION fetched (or `(none)`)
 - [ ] Phase 2: Static Analysis → STATIC_FINDINGS captured (or `(none)` if skipped/no tools/no findings); ANALYSIS_DIR created; CHANGED_FILES populated
+<!-- learning:on -->
 - [ ] Phase 3: Context Loading → DECISIONS_CONTEXT captured, FEATURE_KNOWLEDGE loaded (or `(none)`), PLAN_CONTEXT and ACCEPTANCE_RULES captured (or `(none)`)
+<!-- learning:off -->
+- [ ] Phase 3: Context Loading → FEATURE_KNOWLEDGE loaded (or `(none)`), PLAN_CONTEXT and ACCEPTANCE_RULES captured (or `(none)`)
+<!-- learning:end -->
 - [ ] Phase 4: File Analysis → ACTIVE_FOCUSES determined (security + functional always present)
 - [ ] Phase 5: Parallel Bug Analysis → ANALYZER_OUTPUTS captured per active focus; all reports written to ANALYSIS_DIR
 - [ ] Phase 6: Synthesis → BUG_ANALYSIS_SUMMARY written to `{ANALYSIS_DIR}/bug-analysis-summary.md`

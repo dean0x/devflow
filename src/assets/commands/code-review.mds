@@ -197,22 +197,39 @@ d="${CLAUDE_CONFIG_DIR:-}"; case "$d" in /*) ;; *) d="$HOME/.claude" ;; esac; te
 
 Only `exit=0` means the skill is installed. On any other result, do NOT add that focus to `REVIEW_FOCUS_LIST` and do NOT spawn a Review agent for it — the file-type condition alone never spawns a language focus. The eight core focuses are unconditional and are never presence-gated.
 
+<!-- learning:on -->
 ### Phase 1b: Load Decisions Index
+<!-- learning:off -->
+### Phase 1b: Load Context
+<!-- learning:end -->
 
+<!-- learning:on -->
 **Produces:** DECISIONS_CONTEXT, FEATURE_KNOWLEDGE, COMPLIANCE_FRAMEWORKS (carried from Step 0b)
+<!-- learning:off -->
+**Produces:** FEATURE_KNOWLEDGE, COMPLIANCE_FRAMEWORKS (carried from Step 0b)
+<!-- learning:end -->
 
 {{decisions_load()}}
-
+<!-- learning:on -->
 This produces a compact index of active ADR/PF entries. Pass `DECISIONS_CONTEXT` to all Review agents. Review agents use `devflow:apply-decisions` to Read full entry bodies on demand.
 
+<!-- learning:end -->
 {{knowledge_load()}}
 
+<!-- learning:on -->
 Pass `FEATURE_KNOWLEDGE` to all Review agents alongside `DECISIONS_CONTEXT`.
+<!-- learning:off -->
+Pass `FEATURE_KNOWLEDGE` to all Review agents.
+<!-- learning:end -->
 
 ### Phase 2: Run Reviews (Parallel)
 
 **Produces:** REVIEW_FOCUS_OUTPUTS
+<!-- learning:on -->
 **Requires:** DIFF_RANGE, REVIEW_DIR, TIMESTAMP, DECISIONS_CONTEXT, FEATURE_KNOWLEDGE, PR_DESCRIPTION, PRIOR_RESOLUTIONS, REVIEW_FOCUS_LIST
+<!-- learning:off -->
+**Requires:** DIFF_RANGE, REVIEW_DIR, TIMESTAMP, FEATURE_KNOWLEDGE, PR_DESCRIPTION, PRIOR_RESOLUTIONS, REVIEW_FOCUS_LIST
+<!-- learning:end -->
 
 Spawn Review agents **in a single message**. Always run 8 core reviews; conditionally add more based on changed file types (max 20 per worktree):
 
@@ -249,13 +266,17 @@ Follow 6-step process from devflow:review-methodology.
 PR: #{pr_number}, Base: {base_branch}
 WORKTREE_PATH: {worktree_path}  (omit if cwd)
 DIFF_COMMAND: git -C {WORKTREE_PATH} diff {DIFF_RANGE}  (omit -C flag if no WORKTREE_PATH)
+<!-- learning:on -->
 DECISIONS_CONTEXT: {decisions_context}
+<!-- learning:end -->
 FEATURE_KNOWLEDGE: {feature_knowledge}
 PR_DESCRIPTION: <pr-description>{pr_description}</pr-description>
 PRIOR_RESOLUTIONS: <prior-resolution-summary>{prior_resolutions}</prior-resolution-summary>
 COMPLIANCE_FRAMEWORKS: {COMPLIANCE_FRAMEWORKS}  (compliance focus only)
 If PRIOR_RESOLUTIONS is not (none), follow Cross-Cycle Awareness in review.md.
+<!-- learning:on -->
 Follow devflow:apply-decisions to scan the index and Read full ADR/PF bodies on demand.
+<!-- learning:end -->
 Follow devflow:apply-feature-knowledge for FEATURE_KNOWLEDGE — feature-specific patterns and anti-patterns inform findings.
 IMPORTANT: Write report to {worktree_path}/.devflow/docs/reviews/{branch-slug}/{timestamp}/{focus}.md using Write tool"
 ```

@@ -54,10 +54,14 @@ import {
   resolveVariantModules,
 } from '../../src/core/mds-variants.js';
 import { resolveAgentSource, splitFrontmatter, walkFiles, ROOT, type CorpusEntry } from '../helpers.js';
-import { SETTINGS_BLOCK_HOSTS } from '../fixtures/mds-manifest.js';
+import { SETTINGS_BLOCK_HOSTS, SETTINGS_BLOCK_HOSTS_LEARNING_OFF } from '../fixtures/mds-manifest.js';
+import { LEARNING_OFF_OUTPUT_DIR } from '../../src/core/learning-variants.js';
 
 const DIST_COMMANDS = path.join(ROOT, 'dist', 'commands');
 const DIST_SKILLS = path.join(ROOT, 'dist', 'skills');
+/** The learning-off variants of the commands and agents (D-LEARNING-VARIANTS): prompts an install lays down like any other. */
+const LEARNING_OFF_AGENTS = `${LEARNING_OFF_OUTPUT_DIR}/agents`;
+const LEARNING_OFF_COMMANDS = `${LEARNING_OFF_OUTPUT_DIR}/commands`;
 const REFS_DIR = compiledSkillRefsDir();
 
 // ---------------------------------------------------------------------------
@@ -82,6 +86,8 @@ const PROVIDER_SCAN_ROOTS: readonly ScanRoot[] = [
   { label: 'dist/agents', dir: compiledAgentsDir(ROOT), exts: ['.md'] },
   { label: 'dist/commands', dir: DIST_COMMANDS, exts: ['.md'] },
   { label: 'dist/skills', dir: DIST_SKILLS, exts: ['.md'] },
+  { label: LEARNING_OFF_AGENTS, dir: path.join(ROOT, LEARNING_OFF_AGENTS), exts: ['.md'] },
+  { label: LEARNING_OFF_COMMANDS, dir: path.join(ROOT, LEARNING_OFF_COMMANDS), exts: ['.md'] },
 ];
 
 function scanCorpus(): CorpusEntry[] {
@@ -154,7 +160,7 @@ const ALLOWLISTED_PROVIDER_REGIONS: readonly AllowlistedRegion[] = [
   },
   {
     label: "the Code agent's PR-link paste gate",
-    files: [`${SRC_AGENTS_LABEL}/code.mds`, 'dist/agents/code.md'],
+    files: [`${SRC_AGENTS_LABEL}/code.mds`, 'dist/agents/code.md', `${LEARNING_OFF_AGENTS}/code.md`],
     from: '| Tracker grammar | `ISSUE_PR_LINK` must match |',
     to: 'This re-check is the only gate on that value',
     justification:
@@ -169,7 +175,10 @@ const ALLOWLISTED_PROVIDER_REGIONS: readonly AllowlistedRegion[] = [
   },
   {
     label: "the settings partial's accepted-line shape",
-    files: SETTINGS_BLOCK_HOSTS.flatMap(h => [`src/assets/commands/${h}.md`, `dist/commands/${h}.md`]),
+    files: [
+      ...SETTINGS_BLOCK_HOSTS.flatMap(h => [`src/assets/commands/${h}.md`, `dist/commands/${h}.md`]),
+      ...SETTINGS_BLOCK_HOSTS_LEARNING_OFF.map(h => `${LEARNING_OFF_COMMANDS}/${h}.md`),
+    ],
     from: 'one line of the form `TRACKER=<',
     to: ' — these fields, in this order, nothing else',
     justification:

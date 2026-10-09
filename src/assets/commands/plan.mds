@@ -108,9 +108,17 @@ If the user says "skip" or "just proceed" — skip remaining questions, present 
 
 **MANDATORY**: Do not spawn any agents until Gate 0 is confirmed — the Step 0 issue fetch (if applicable) is the sole exception; it precedes and informs Gate 0 and must complete before Gate 0 begins.
 
+<!-- learning:on -->
 #### Phase 2: Orient + Load Decisions
+<!-- learning:off -->
+#### Phase 2: Orient
+<!-- learning:end -->
 
+<!-- learning:on -->
 **Produces:** SKIM_CONTEXT, DECISIONS_CONTEXT, FEATURE_KNOWLEDGE
+<!-- learning:off -->
+**Produces:** SKIM_CONTEXT, FEATURE_KNOWLEDGE
+<!-- learning:end -->
 **Requires:** CONFIRMED_SCOPE
 
 {{settings.settings_resolve()}}
@@ -120,7 +128,9 @@ Spawn Skim agent for codebase context:
 ```
 Agent(subagent_type="Skim"):
 "Orient in codebase for design planning: {feature/issues}
+<!-- learning:on -->
 LEARNING: {LEARNING from the settings line}
+<!-- learning:end -->
 Run rskim on source directories (NOT repo root) to identify:
 - Existing patterns and conventions in the affected area
 - File structure and module boundaries
@@ -132,12 +142,17 @@ Return codebase context for requirements analysis."
 {{docs_root()}}
 
 {{decisions_load()}}
-
+<!-- learning:on -->
 This produces a compact index of active ADR/PF entries. Pass the Skim agent context to all subsequent agents. Pass `DECISIONS_CONTEXT` to the Design agents of the gap-analysis phase — prior decisions constrain design, known pitfalls inform gap analysis. Design agents use `devflow:apply-decisions` to Read full entry bodies on demand.
 
+<!-- learning:end -->
 {{knowledge_load()}}
 
+<!-- learning:on -->
 Pass `FEATURE_KNOWLEDGE` to Explore and Design agents. Pass `DECISIONS_CONTEXT` to Design agents only.
+<!-- learning:off -->
+Pass `FEATURE_KNOWLEDGE` to Explore and Design agents.
+<!-- learning:end -->
 
 #### Phase 3: Explore Requirements (Parallel)
 
@@ -175,7 +190,11 @@ Combine into: user needs, similar features, constraints, failure modes"
 #### Phase 5: Gap Analysis (Parallel)
 
 **Produces:** GAP_OUTPUTS, COMPLIANCE_ACTIVE, COMPLIANCE_FRAMEWORKS
+<!-- learning:on -->
 **Requires:** EXPLORATION_SYNTHESIS, SKIM_CONTEXT, DECISIONS_CONTEXT
+<!-- learning:off -->
+**Requires:** EXPLORATION_SYNTHESIS, SKIM_CONTEXT
+<!-- learning:end -->
 
 {{compliance_gate()}}
 
@@ -201,7 +220,9 @@ Each Design agent receives:
 - Focus: (their assigned focus from table)
 - Exploration synthesis from Phase 4
 - Skim agent context from Phase 2
+<!-- learning:on -->
 - `DECISIONS_CONTEXT` (index from Phase 2)
+<!-- learning:end -->
 - `COMPLIANCE_FRAMEWORKS` (compliance focus only)
 - Multi-issue: all issue bodies
 
@@ -209,14 +230,20 @@ Each Design agent receives:
 Agent(subagent_type="Design"):
 "Mode: gap-analysis
 Focus: {completeness|architecture|security|performance|compliance|consistency|dependencies}
+<!-- learning:on -->
 DECISIONS_CONTEXT: {decisions_context}
+<!-- learning:end -->
 FEATURE_KNOWLEDGE: {feature_knowledge}
 COMPLIANCE_FRAMEWORKS: {COMPLIANCE_FRAMEWORKS}  (compliance focus only)
 Artifacts:
   Feature/Issues: {feature description or issue bodies}
   Exploration synthesis: {Phase 4 output}
   Codebase context: {Phase 2 output}
+<!-- learning:on -->
 Analyze only your assigned focus area. Follow devflow:apply-decisions for DECISIONS_CONTEXT.
+<!-- learning:off -->
+Analyze only your assigned focus area.
+<!-- learning:end -->
 Cite evidence from provided artifacts."
 ```
 
@@ -515,9 +542,17 @@ Display completion summary:
 ├─ Block 1: Requirements Discovery
 │  ├─ Phase 1: GATE 0 - Requirements Discovery ⛔ MANDATORY
 │  │  └─ AskUserQuestion: Validate interpretation
+<!-- learning:on -->
 │  ├─ Phase 2: Orient + Load Decisions
+<!-- learning:off -->
+│  ├─ Phase 2: Orient
+<!-- learning:end -->
+<!-- learning:on -->
 │  │  ├─ Skim agent (codebase context)
 │  │  └─ Read index.md → DECISIONS_CONTEXT
+<!-- learning:off -->
+│  │  └─ Skim agent (codebase context)
+<!-- learning:end -->
 │  ├─ Phase 3: Explore Requirements (PARALLEL)
 │  │  ├─ Explore: User perspective
 │  │  ├─ Explore: Similar features

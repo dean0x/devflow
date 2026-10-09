@@ -7,12 +7,13 @@ output-dir: dist/commands
 @import "./_partials/_settings.mds" as settings
 {{authoring_preamble()}}
 
+<!-- learning:on -->
 ### Settings line
 
 {{settings.settings_resolve()}}
 
+<!-- learning:end -->
 {{authoring_decisions()}}
-
 ---
 
 ## dynamic-profile — distill a decision-preference profile from past sessions

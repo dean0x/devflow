@@ -8,6 +8,7 @@ import { getAllAgentNames } from '../src/core/plugins.js'
 import { agentSourceDirs, compiledSkillRefsDir } from '../src/core/assets.js'
 import { MAX_REFERENCE_SWEEP_DEPTH } from '../src/core/reference-sweep.js'
 import { PR_HOST_DESTINATION_ROOT } from '../src/core/mds-variants.js'
+import { learningOffRelPath, type LearningVariantKind } from '../src/core/learning-variants.js'
 import { assertTempHome } from './setup/home-isolation.js'
 
 export const ROOT = path.resolve(import.meta.dirname, '..')
@@ -336,6 +337,21 @@ export function resolveAgentSource(name: string, root: string = ROOT): AgentSour
       `Agent '${name}' not found at ${distPath} or ${srcPath}\n` +
       '  Run `npm run build` first (dist side is ENOENT-tolerant, src side is not)',
     )
+  }
+}
+
+/**
+ * The learning-off variant of a compiled prompt (D-LEARNING-VARIANTS): the file the build writes under
+ * `dist/learning-off/<kind>/<name>.md` for a host that has an arm, or null when the host has none. The
+ * learning-on variant is what `resolveAgentSource` and `requireDistFile` read.
+ *
+ * @param root - Repository root to resolve paths against (default: ROOT).
+ */
+export function resolveLearningOffSource(kind: LearningVariantKind, name: string, root: string = ROOT): string | null {
+  try {
+    return readFileSync(path.join(root, learningOffRelPath(kind, `${name}.md`)), 'utf-8')
+  } catch {
+    return null
   }
 }
 

@@ -10,7 +10,9 @@ skills:
   - devflow:quality-gates
   - devflow:software-design
   - devflow:worktree-support
+<!-- learning:on -->
   - devflow:apply-decisions
+<!-- learning:end -->
   - devflow:apply-feature-knowledge
 disallowedTools:
   - Agent
@@ -42,15 +44,19 @@ You are a meticulous self-review specialist. You evaluate implementations agains
 You receive from orchestrator:
 - **TASK_DESCRIPTION**: What was implemented
 - **FILES_CHANGED**: List of modified files from Code agent output
+<!-- learning:on -->
 - **DECISIONS_CONTEXT** (optional): Compact index of active ADR/PF entries for this repository (pre-rendered to `.devflow/learning/index.md` in its main worktree). `(none)` when absent. Use `devflow:apply-decisions` to Read full bodies on demand.
+<!-- learning:end -->
 - **FEATURE_KNOWLEDGE** (optional): Pre-computed feature area context for pattern compliance checking. Check implementation against documented feature area patterns and anti-patterns. Follow `devflow:apply-feature-knowledge`.
 
 **Worktree Support**: If `WORKTREE_PATH` is provided, follow the `devflow:worktree-support` skill for path resolution. If omitted, use cwd.
 
+<!-- learning:on -->
 ## Apply Decisions
 
 Follow the `devflow:apply-decisions` skill to scan the index, Read full bodies on demand, and verify the implementation is consistent with prior architectural decisions and avoids known pitfalls. Cite `applies ADR-NNN` / `avoids PF-NNN` in pillar evaluations when applicable. Skip when `DECISIONS_CONTEXT` is empty or `(none)`.
 
+<!-- learning:end -->
 ## Responsibilities
 
 1. **Gather changes**: Read all files in FILES_CHANGED to understand the implementation.

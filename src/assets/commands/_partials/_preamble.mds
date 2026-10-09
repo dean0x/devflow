@@ -7,7 +7,9 @@ D-DECISIONS-AUTHORING-STEP: the "DECISIONS_CONTEXT — obtain BEFORE authoring" 
 is its own define, `authoring_decisions()`, expanded by the hosts that load
 decisions (dynamic-build, dynamic-plan, dynamic-tickets and dynamic-profile) right
 after their settings block, so the gate in it reads a line already resolved.
-`authoring_preamble()` carries no decisions text.
+`authoring_preamble()` carries no decisions text. D-LEARNING-VARIANTS: the whole of
+`authoring_decisions()` is a learning-on arm, so a learning-off build carries no decisions
+step.
 
 D-DECISIONS-DECLARED-ONLY: the step names, as the receivers of the index, only the
 agent types whose contract declares `DECISIONS_CONTEXT` among the valid
@@ -90,6 +92,7 @@ When a ticket requires multiple sequential Code agent phases, each Code agent wr
 @end
 
 @define authoring_decisions():
+<!-- learning:on -->
 ### DECISIONS_CONTEXT — obtain BEFORE authoring
 
 {{decisions.decisions_gate()}}
@@ -99,6 +102,8 @@ When a ticket requires multiple sequential Code agent phases, each Code agent wr
 Before you author the workflow script, read `{ledger}/.devflow/learning/index.md`. If the file is absent or empty, set `DECISIONS_CONTEXT` to `(none)`; otherwise use the file content as `DECISIONS_CONTEXT`.
 
 The script body cannot perform this read — you (the main model) do it before authoring. Then inject the relevant DECISIONS_CONTEXT into the prompts of the Code, Design, Knowledge, Review and Scrutinize agents, using the `devflow:apply-decisions` consumption algorithm (scan index → Read relevant entries → cite verbatim IDs in agent prompts). Those are the agent types above whose contract declares it; every other agent type gets no decisions context.
+
+<!-- learning:end -->
 @end
 
 @export authoring_preamble

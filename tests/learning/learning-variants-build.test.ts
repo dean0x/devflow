@@ -14,8 +14,9 @@
  *   2. The REAL built dist/ is held to the manifest roster and to the invariant
  *      "Markdown prompts carry no markers": the files under dist/learning-off/ are
  *      LEARNING_VARIANT_HOSTS in both directions, each has its learning-on
- *      counterpart, and no dist/**\/*.md carries a marker. The roster is empty
- *      until a host carries an arm, and every assertion here holds with it empty.
+ *      counterpart, and no dist/**\/*.md carries a marker. The roster is the 23
+ *      hosts that carry an arm (the 14 commands and 9 agents); the arms themselves
+ *      are held in tests/learning/learning-variants-arms.test.ts.
  *
  * Every build this file spawns is scoped by DEVFLOW_MDS_ROOT, which the
  * scenario-12 self-scan in tests/build-mds-generator-hosts.test.ts also checks for

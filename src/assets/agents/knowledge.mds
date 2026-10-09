@@ -9,7 +9,9 @@ effort: medium
 skills:
   - devflow:feature-knowledge
   - devflow:apply-feature-knowledge
+<!-- learning:on -->
   - devflow:apply-decisions
+<!-- learning:end -->
   - devflow:worktree-support
 tools:
   - Read
@@ -28,7 +30,9 @@ tools:
 - **FEATURE_NAME** (required): Human-readable name (e.g., "CLI Command System")
 - **DIRECTORIES** (required): Directory prefixes defining the feature area scope
 - **FILES_CHANGED** (optional): Files changed in the workflow session that triggered write-back
+<!-- learning:on -->
 - **DECISIONS_CONTEXT** (optional): Compact ADR/PF index. `(none)` when absent.
+<!-- learning:end -->
 - **EXISTING_KB** (optional): Current KNOWLEDGE.md content when refreshing existing feature knowledge
 - **WORKTREE_PATH** (optional): Worktree root for path resolution
 - **EXPLORATION_OUTPUTS** (optional): Pre-computed findings from Skim agent + Explore agents. When provided, synthesize these instead of exploring from scratch. When absent, perform your own exploration in Phase 1 (Scan) and Phase 2 (Extract).
@@ -38,15 +42,37 @@ tools:
 1. **Resolve worktree path**: Use `devflow:worktree-support` to determine the working directory (WORKTREE_PATH or cwd)
 2. **Orient on feature area**: Read EXPLORATION_OUTPUTS or EXISTING_KB to understand the feature's architecture, patterns, and boundaries
 3. **Follow the feature-knowledge skill**: Execute the 4-phase process (Scan → Extract → Distill → Forge) from `devflow:feature-knowledge`
+<!-- learning:on -->
 4. **State decisions in words**: If DECISIONS_CONTEXT is provided, state each relevant decision or pitfall in words in the section it governs — never its ADR/PF ID, one already in EXISTING_KB included. The "Related" section links only to other knowledge bases and files.
+<!-- learning:end -->
+<!-- learning:on -->
 5. **Handle refresh**: If EXISTING_KB is provided, update stale sections based on FILES_CHANGED while preserving any manually added content. Don't regenerate from scratch.
+<!-- learning:off -->
+4. **Handle refresh**: If EXISTING_KB is provided, update stale sections based on FILES_CHANGED while preserving any manually added content. Don't regenerate from scratch.
+<!-- learning:end -->
+<!-- learning:on -->
 6. **Write KNOWLEDGE.md directly**: Write to `{worktree}/.devflow/features/{FEATURE_SLUG}/KNOWLEDGE.md` (create directory if needed)
+<!-- learning:off -->
+5. **Write KNOWLEDGE.md directly**: Write to `{worktree}/.devflow/features/{FEATURE_SLUG}/KNOWLEDGE.md` (create directory if needed)
+<!-- learning:end -->
+<!-- learning:on -->
 7. **Update index.md directly**: Read-modify-write `{worktree}/.devflow/features/index.md`
+<!-- learning:off -->
+6. **Update index.md directly**: Read-modify-write `{worktree}/.devflow/features/index.md`
+<!-- learning:end -->
    - If slug already present: replace that line in-place
    - If absent or file missing: append (or create file)
    - Line format: `- **{slug}** — {areas} — {Use-when description}`
+<!-- learning:on -->
 8. **Commit the knowledge files**: Run git yourself via Bash to commit `index.md` + the `KNOWLEDGE.md` to the current worktree branch (see Commit Protocol). Commit only those two paths; never push.
+<!-- learning:off -->
+7. **Commit the knowledge files**: Run git yourself via Bash to commit `index.md` + the `KNOWLEDGE.md` to the current worktree branch (see Commit Protocol). Commit only those two paths; never push.
+<!-- learning:end -->
+<!-- learning:on -->
 9. **Report**: Output KB_PATH, KB_SLUG, and KB_COMMIT (see Output section)
+<!-- learning:off -->
+8. **Report**: Output KB_PATH, KB_SLUG, and KB_COMMIT (see Output section)
+<!-- learning:end -->
 
 ## Direct Write Protocol
 
@@ -82,7 +108,9 @@ KB_PATH: {worktree}/.devflow/features/{slug}/KNOWLEDGE.md
 KB_SLUG: {slug}
 KB_NAME: {name}
 SECTIONS: [list of sections written]
+<!-- learning:on -->
 CROSS_REFERENCES: [ADR/PF IDs whose rule the knowledge base states in words, if any]
+<!-- learning:end -->
 KB_COMMIT: committed <sha> | skipped (no changes) | skipped (no branch) | skipped (detached HEAD) — uncommitted: <paths> | failed (<reason>)
 ```
 
