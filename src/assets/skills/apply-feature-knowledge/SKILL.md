@@ -32,18 +32,6 @@ Do not mention feature knowledge or its absence in your output.
 
 ## Freshness Model
 
-Feature knowledge uses **write-through + verify-on-read** for freshness:
-- KBs are written at the point a documented area changes (not on a background schedule)
+Feature knowledge is **verify-on-read**:
 - Readers verify key assertions against current code rather than relying on staleness markers
 - When in doubt, Read the file — that resolves any uncertainty immediately
-
-## Concatenation Format
-
-Multiple feature knowledge entries are concatenated with slug headers:
-```
---- Feature knowledge: payments ---
-[full KNOWLEDGE.md content]
-
---- Feature knowledge: auth ---
-[full KNOWLEDGE.md content]
-```
