@@ -113,7 +113,10 @@ const STDERR_KEEP = 4096;
  * workflow files, so the line carries only an allowlist, 40 characters per name, 4
  * names per list and a `+N` for the rest. Neither a newline, an ANSI escape, a
  * backtick, a comma nor `=` survives, so a name can neither start a second line nor
- * forge a `key=value` field. Two lists of 4 names at 40 characters, the longest
+ * forge a `key=value` field. A name that would read as one of the list's own tokens,
+ * `-` (no names) or `+N` (the count of the rest), has its first character turned
+ * to `_`, so a FAILING line never reads as naming nothing and a fourth name never
+ * reads as a count. Two lists of 4 names at 40 characters, the longest
  * prefix and a three-digit tail come to under 400 characters by construction, and the
  * boundary asserts it.
  */
@@ -122,6 +125,8 @@ const NAMES_LISTED = 4;
 const MORE_MAX = 999;
 const LINE_MAX = 400;
 const NAME_UNSAFE_RE = /[^A-Za-z0-9 ._()\/:+-]/gu;
+/** A sanitized name that spells a list token: `-` (no names) or `+N` (the rest). */
+const NAME_TOKEN_RE = /^(?:-|\+[0-9]+)$/;
 
 const PR_RE = /^[1-9][0-9]{0,8}$/;
 const HEAD_RE = /^[0-9a-f]{40}$/;
@@ -201,7 +206,8 @@ function parseArgs(args) {
 function sanitizeName(name) {
   const text = typeof name === 'string' ? name.slice(0, 4 * NAME_MAX) : '';
   const safe = text.replace(NAME_UNSAFE_RE, '_').slice(0, NAME_MAX);
-  return safe === '' ? '_' : safe;
+  if (safe === '') return '_';
+  return NAME_TOKEN_RE.test(safe) ? '_' + safe.slice(1) : safe;
 }
 
 /**

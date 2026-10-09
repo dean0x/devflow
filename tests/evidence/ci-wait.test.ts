@@ -481,6 +481,23 @@ describe('AC-10: a check name never reaches stdout raw', () => {
     expect(CW.formatNames(Array.from({ length: 5000 }, () => 'n'))).toBe('n,n,n,n,+999')
   })
 
+  it('a name that spells a list token, `-` or `+N`, is never printed as that token', () => {
+    expect(CW.sanitizeName('-')).toBe('_')
+    expect(CW.sanitizeName('+12')).toBe('_12')
+    expect(CW.formatNames(['-'])).toBe('_')
+    expect(CW.formatNames(['a', 'b', 'c', '+5']), 'a fourth name is not a count').toBe('a,b,c,_5')
+    // Known-good neighbours: only the exact token shapes change.
+    expect(CW.sanitizeName('--')).toBe('--')
+    expect(CW.sanitizeName('+x')).toBe('+x')
+    expect(CW.sanitizeName('a-')).toBe('a-')
+  })
+
+  it('a FAILING check named `-` still names a failing check on the line', async () => {
+    const r = await run(({ kind }) => (kind === 'view' ? viewOk() : { stdout: JSON.stringify([{ name: '-', bucket: 'fail' }]) }))
+    expect(statusOf(r.line)).toBe('FAILING')
+    expect(field(r.line, 'failing')).toBe('_')
+  })
+
   for (const [label, name] of HOSTILE) {
     it(`${label}: the printed line is one line of allowlisted characters`, async () => {
       const r = await run(({ kind }) => (kind === 'view' ? viewOk() : { stdout: JSON.stringify([{ name, bucket: 'fail' }, { name: 'ok', bucket: 'pass' }]) }))
