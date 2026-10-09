@@ -329,14 +329,24 @@ If `fork_no_push` is set → skip: "Cannot push to fork — skipping CI validati
 
 Otherwise, for each worktree with fixes:
 
-<!-- PATTERN: ci-status-gate — shared polling/classification/budget logic; context-specific preamble lives outside this block -->
-1. Spawn `Agent(subagent_type="Git")` with `OPERATION: check-ci-status` and `WORKTREE_PATH`.
+`PR_NUMBER` is the worktree's `pr_number` from Phase 0; when it is absent, skip: "No PR/CI configured, skipping CI validation."
+
+**Push first, outside the gate block.** The gate waits on the pushed head, so push once more with the gate's own command — never forced, and no retry:
+
+```bash
+git -C {worktree} push; echo "exit=$?"
+```
+
+Phase 7 has pushed already, so this is a no-op unless the head moved since. `exit=0` continues to the gate. Any other result records `TRACEABILITY: DEGRADED (ci push failed)`, reports "CI status unknown — verify manually before merging" and skips the wait for this worktree. Pass `WORKTREE_PATH: {worktree_path}` on the fix spawn below.
+
+<!-- PATTERN: ci-status-gate -->
+1. Wait: run `cd {worktree} && HEAD_SHA=$(git rev-parse HEAD) && node "$HOME/.devflow/scripts/ci-wait.cjs" --pr {PR_NUMBER} --head "$HEAD_SHA"` through the Bash tool with `timeout: 600000`. Each run is one wait of at most 570 seconds and prints one line, `CI <STATUS> pr=… head=… failing=… pending=… waited=…` (INDETERMINATE adds `reason=…`). A missing or unparseable line, a status outside the six below, or a non-zero exit is INDETERMINATE.
 2. **If PASSING** → proceed to next phase.
 3. **If NO_PR or NO_CI** → skip: "No PR/CI configured, skipping CI validation." Proceed to next phase.
-4. **If PENDING** → poll every 60 seconds (global budget, see step 7). Re-spawn Git agent each poll. If PASSING → proceed. If still PENDING after budget exhausted → report "CI still running — verify manually before merging" and proceed.
-5. **If INDETERMINATE** → poll as PENDING within the same budget. If still INDETERMINATE after budget exhausted → report "CI status unknown — verify manually before merging" and proceed.
-6. **If FAILING** → report failing checks. Spawn `Agent(subagent_type="Code")` with `COMPLIANCE_FRAMEWORKS` to fix CI failures based on check names and failure context. After fix, push and re-check. Max 2 fix attempts. If still failing → report failures and proceed.
-7. **Total budget**: max 10 polls and max 2 fix attempts across all check/fix cycles combined. If the budget is exhausted, report current status and proceed.
+4. **If PENDING** and fewer than 3 waits have run → wait again (step 1). After the third wait → report "CI still running — verify manually before merging" and proceed.
+5. **If INDETERMINATE** and fewer than 3 waits have run → wait again (step 1). After the third wait → report "CI status unknown — verify manually before merging" and proceed.
+6. **If FAILING** and fewer than 2 fixes have run → report the failing checks from the line. Spawn `Agent(subagent_type="Code")` with `COMPLIANCE_FRAMEWORKS`, `CI_FAILURES` and `PUSH: false`; `CI_FAILURES` holds the failing-check names from the line and nothing else, because the Code agent fetches the full names and reads the logs itself and this command reads none. After a fix, push with the command above and, if a wait remains, wait again (step 1); a failed push records `TRACEABILITY: DEGRADED (ci push failed)`, reports "CI status unknown — verify manually before merging" and stops waiting. After the second fix still FAILING → report the failing checks and proceed.
+7. **Budget**: at most 3 waits and 2 fixes in all, per worktree. When one is spent, report the current status and proceed.
 <!-- /PATTERN: ci-status-gate -->
 
 ### Phase 9: Manage Debt (Sequential)
@@ -369,7 +379,7 @@ After manage-debt completes:
 
 **Step 9b-0: Re-verify stale test-plan items**
 
-Run this step only when this run's Phase 7 push succeeded — the one way /resolve moves the PR head — and a PR is known; otherwise skip it and Step 9b-3, and record `STALE_REVERIFICATION` as `SKIPPED (head unchanged)`. Detection needs no Git agent: from the worktree root, run the evidence script, which re-derives every test-plan state at the new head and writes the stale TP lines whose text the PR's trusted evidence record vouches for:
+Run this step only when a push of this run succeeded — Phase 7's, or the push of Phase 8's gate — and a PR is known; otherwise skip it and Step 9b-3, and record `STALE_REVERIFICATION` as `SKIPPED (head unchanged)`. Detection needs no Git agent: from the worktree root, run the evidence script, which re-derives every test-plan state at the new head and writes the stale TP lines whose text the PR's trusted evidence record vouches for:
 
 ```bash
 cd {worktree} && node "$HOME/.devflow/scripts/verify-evidence.cjs" verify --pr {pr_number} --stale-out "{TARGET_DIR_REL}/stale-plan.md"; echo "exit=$?"
@@ -521,7 +531,7 @@ Final gate: {PASS | FAILED after N attempts}
 - Resolution comment: {POSTED | POSTED+TRUNCATED | SKIPPED (already posted) | SKIPPED (publication off) | SKIPPED (no PR) | DEGRADED (reason)}
 - Publication: {FULL (private repo) | FULL (config override) | STUB (public repository) | OFF (publication disabled by config) | STUB (visibility undeterminable) | STUB (evidence policy)}
 - Thread replies: {COMPLETE | PARTIAL | TRUNCATED | SKIPPED (reason) | DEGRADED (reason)}
-- Push: {pushed | skipped (no fixes) | skipped (cannot push to fork)}
+- Push: {pushed (Phase 7, a CI-fix push, or both) | skipped (no fixes) | skipped (cannot push to fork) | DEGRADED (ci push failed)}
 - Test-plan re-verification: {Test plan: n stale, m re-verified | SKIPPED (head unchanged) | DEGRADED (reason)}
 - Test-plan evidence: {the EVIDENCE line's VERIFIED-CI + ATTESTED-LOCAL / total, then the Body / Comment line | SKIPPED (reason) | DEGRADED (reason)}
 
@@ -569,7 +579,7 @@ In multi-worktree mode, report results per worktree with aggregate summary.
 ├─ Phase 7: Verification Gate [Validate agent, haiku] + push + Code agent validation-fix loop ≤2
 │
 ├─ Phase 8: CI Status Gate (conditional — skipped if no fixes or verification FAILED)
-│  └─ Git agent (check-ci-status) → poll/fix loop
+│  └─ push, then ci-wait.cjs (inline, one wait ≤ 570 s) → Code agent on FAILING (3 waits + 2 fixes per worktree)
 │
 ├─ Phase 9: Git agent (manage-debt) — FIX_SEPARATE + TECH_DEBT → backfill Tracked={ISSUE_REF} (or TRACEABILITY: DEGRADED on failure)
 │  SEQUENTIAL across worktrees

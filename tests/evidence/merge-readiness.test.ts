@@ -16,7 +16,13 @@
  *          small interpreter reads its clauses and runs them over every bucket
  *          multiset up to three checks, an undocumented bucket included.
  *   Gates  Both ci-status-gate blocks (/implement Phase 9, /resolve Phase 8) name
- *          an arm for every status the op can return.
+ *          an arm for every status the op can return, and that set is the one
+ *          ci-wait.cjs exports as STATUSES (#421). The blocks wait through ci-wait
+ *          (no Git re-spawn, a Bash timeout above 570 s and at most 600 s), spawn
+ *          Code only on FAILING, and hold the budget of 3 waits and 2 fixes. The
+ *          script's exported classifier agrees with check-ci-status step 5 on
+ *          every bucket multiset of 1 to 3 checks, an undocumented bucket
+ *          included (D-CI-CLASSIFIER).
  *   AC-14  check-merge-readiness returns READY only through a positive
  *          conjunction. Its step 4 reads the test-plan evidence at the head from
  *          `verify-evidence.cjs verify --approval` — never from PR text — and its
@@ -46,13 +52,21 @@ import { createRequire } from 'module'
 
 import { compiledSkillRefsDir } from '../../src/core/assets.js'
 import { extractOpSectionFromCorpus, prHostRel, requireDistFile, resolveAgentSource } from '../helpers.js'
-import { PR_EVIDENCE_SCRIPT } from './seam.js'
+import { CI_WAIT_SCRIPT, PR_EVIDENCE_SCRIPT } from './seam.js'
 
 /** Transcribed from pr-evidence.cjs's JSDoc — only the EVIDENCE line grammar. */
 interface EvidenceGrammar {
   readonly EVIDENCE_LINE_RE: RegExp
 }
 const PE = createRequire(import.meta.url)(PR_EVIDENCE_SCRIPT) as EvidenceGrammar
+
+/** Transcribed from ci-wait.cjs's JSDoc — only what the gate guards read. */
+interface CiWaitApi {
+  readonly STATUSES: readonly string[]
+  readonly CI_WAIT_MAX_SECONDS: number
+  classifyChecks(checks: ReadonlyArray<{ name: string; bucket: string }>): { status: string }
+}
+const CW = createRequire(import.meta.url)(CI_WAIT_SCRIPT) as CiWaitApi
 
 /** `gh pr checks --help`, gh 2.88.1: the JSON FIELDS section. */
 const GH_PR_CHECKS_FIELDS: readonly string[] = [
@@ -296,6 +310,140 @@ describe('each ci-status-gate block has an arm for every status check-ci-status 
     expect(collectUnhandledCiStatuses(old, declaredStatuses('check-ci-status'))).toEqual(['INDETERMINATE'])
   })
 })
+
+describe('#421: the arm names are ci-wait\'s STATUSES, which are check-ci-status\'s declared list', () => {
+  it('STATUSES equals the Output enum the op declares, in its order', () => {
+    expect(declaredStatuses('check-ci-status')).toEqual([...CW.STATUSES])
+  })
+
+  it('both gate blocks name an arm for every exported status', () => {
+    for (const host of ['implement.md', 'resolve.md'] as const) {
+      expect(collectUnhandledCiStatuses(gateBlock(requireDistFile(host)), CW.STATUSES), host).toEqual([])
+    }
+  })
+
+  it('known-bad probe: an exported status the blocks do not handle is reported', () => {
+    const block = gateBlock(requireDistFile('implement.md'))
+    expect(collectUnhandledCiStatuses(block, [...CW.STATUSES, 'CANCELLED'])).toEqual(['CANCELLED'])
+  })
+})
+
+/** The Bash timeout the gate passes: it must clear ci-wait's own 570 s and stay at the 600 s ceiling. */
+const BASH_TIMEOUT_FLOOR_MS = CW.CI_WAIT_MAX_SECONDS * 1000
+const BASH_TIMEOUT_CEILING_MS = 600_000
+
+/**
+ * Named collector: what a ci-status-gate block lacks now that the wait is a script.
+ * No Git re-spawn or minute-by-minute poll; one ci-wait invocation with a timeout in
+ * (570000, 600000]; Code spawned once, in the FAILING arm only, with no push of its
+ * own; each arm carrying its own condition; the three messages the arms report.
+ */
+function collectGateBlockDefects(block: string): string[] {
+  const out: string[] = []
+  const need = (what: string, ok: boolean): void => { if (!ok) out.push(what) }
+  need('spawns the Git agent for check-ci-status', !block.includes('OPERATION: check-ci-status') && !/Agent\(subagent_type="Git"\)/.test(block))
+  need('polls every 60 seconds', !block.includes('poll every 60 seconds'))
+  need('re-spawns an agent each poll', !block.includes('Re-spawn'))
+  const calls = block.split('\n').filter(l => l.includes('node "$HOME/.devflow/scripts/ci-wait.cjs"'))
+  need(`expected one ci-wait invocation, found ${calls.length}`, calls.length === 1)
+  const timeout = Number(/`timeout: (\d+)`/.exec(calls[0] ?? '')?.[1])
+  need('the ci-wait call carries a Bash timeout above 570000 and at most 600000', timeout > BASH_TIMEOUT_FLOOR_MS && timeout <= BASH_TIMEOUT_CEILING_MS)
+  need('the call is bound to the head with `--head "$HEAD_SHA"`', (calls[0] ?? '').includes('--head "$HEAD_SHA"') && (calls[0] ?? '').includes('HEAD_SHA=$(git rev-parse HEAD)'))
+  const codeSpawns = block.split('\n').filter(l => l.includes('Agent(subagent_type="Code")'))
+  need(`expected one Code spawn, found ${codeSpawns.length}`, codeSpawns.length === 1)
+  const failing = block.split('\n').find(l => l.includes('**If FAILING**')) ?? ''
+  need('the Code spawn is not in the FAILING arm', codeSpawns.length === 1 && codeSpawns[0] === failing)
+  need('the FAILING arm does not carry `PUSH: false`', failing.includes('`PUSH: false`') && failing.includes('with `COMPLIANCE_FRAMEWORKS`, `CI_FAILURES`'))
+  need('the FAILING arm does not state its fix budget at its step', failing.includes('fewer than 2 fixes have run'))
+  need('the FAILING arm does not push after a fix', failing.includes('After a fix, push with the command above'))
+  need('the FAILING arm has no DEGRADED push arm', failing.includes('`TRACEABILITY: DEGRADED (ci push failed)`'))
+  for (const status of ['PENDING', 'INDETERMINATE']) {
+    const arm = block.split('\n').find(l => l.includes(`**If ${status}**`)) ?? ''
+    need(`the ${status} arm does not state its wait budget at its step`, arm.includes('fewer than 3 waits have run'))
+  }
+  need('the budget line names 3 waits and 2 fixes', /\*\*Budget\*\*: at most 3 waits and 2 fixes/.test(block))
+  need('the still-running message is gone', block.includes('"CI still running — verify manually before merging"'))
+  need('the unknown message is gone', block.includes('"CI status unknown — verify manually before merging"'))
+  need('the no-CI skip message is gone', block.includes('"No PR/CI configured, skipping CI validation."'))
+  return out
+}
+
+describe('#421 AC-6/7: the gate blocks wait through ci-wait, spawn Code only on FAILING and hold the budget', () => {
+  const hosts = ['implement.md', 'resolve.md'] as const
+
+  it('both compiled blocks hold every statement', () => {
+    for (const host of hosts) {
+      const block = gateBlock(requireDistFile(host))
+      expect(block.length, `${host}: no ci-status-gate block`).toBeGreaterThan(200)
+      expect(collectGateBlockDefects(block), host).toEqual([])
+    }
+  })
+
+  it('known-bad probes: the block before #421, a short Bash timeout and a Code spawn off the FAILING arm are each reported', () => {
+    const block = gateBlock(requireDistFile('implement.md'))
+    const old = [
+      '1. Spawn `Agent(subagent_type="Git")` with `OPERATION: check-ci-status` and `PR_NUMBER` from PR_URL.',
+      '4. **If PENDING** → poll every 60 seconds (global budget, see step 7). Re-spawn Git agent each poll.',
+    ].join('\n')
+    expect(collectGateBlockDefects(old)).toEqual(expect.arrayContaining([
+      'spawns the Git agent for check-ci-status',
+      'polls every 60 seconds',
+      're-spawns an agent each poll',
+    ]))
+    const short = block.replace('`timeout: 600000`', '`timeout: 570000`')
+    expect(short, 'the seed must land').not.toBe(block)
+    expect(collectGateBlockDefects(short)).toEqual(['the ci-wait call carries a Bash timeout above 570000 and at most 600000'])
+    const over = block.replace('`timeout: 600000`', '`timeout: 900000`')
+    expect(collectGateBlockDefects(over)).toEqual(['the ci-wait call carries a Bash timeout above 570000 and at most 600000'])
+    const stray = block.replace('5. **If INDETERMINATE**', '5. Spawn `Agent(subagent_type="Code")` on any status. **If INDETERMINATE**')
+    expect(collectGateBlockDefects(stray)).toEqual(expect.arrayContaining(['expected one Code spawn, found 2']))
+    expect(collectGateBlockDefects(block.replace('fewer than 2 fixes have run', 'any number of fixes'))).toEqual(['the FAILING arm does not state its fix budget at its step'])
+  })
+})
+
+// ---------------------------------------------------------------------------
+// D-CI-CLASSIFIER — ci-wait's classifier against check-ci-status step 5 (AC-14)
+// ---------------------------------------------------------------------------
+
+/** A classifier under test: bucket multiset in, status out. */
+type BucketClassifier = (buckets: readonly string[]) => string
+
+/**
+ * Named collector: the bucket multisets on which a classifier and the executed prose
+ * clauses of check-ci-status step 5 disagree. The domain is every multiset of 1 to 3
+ * checks over gh's five buckets plus one it does not document.
+ */
+function collectClassifierDisagreements(prose: readonly Clause[], classifier: BucketClassifier): string[] {
+  const out: string[] = []
+  for (const buckets of bucketDomain()) {
+    const want = classify(prose, buckets)?.status
+    const got = classifier(buckets)
+    if (want !== got) out.push(`[${buckets.join(', ')}]: prose ${want}, script ${got}`)
+  }
+  return out
+}
+
+const scriptClassifier: BucketClassifier = buckets => CW.classifyChecks(buckets.map((bucket, i) => ({ name: `check-${i}`, bucket }))).status
+
+describe('#421 AC-14: ci-wait\'s classifier agrees with check-ci-status step 5 on every bucket multiset', () => {
+  const prose = (): Clause[] => parseClassifier(processSteps(requirePrRef('check-ci-status')).get(5) ?? '').filter((c): c is Clause => typeof c !== 'string')
+
+  it('agrees on all of the domain, an undocumented bucket included', () => {
+    expect(prose().length, 'no clause parsed — the interpreter is blind').toBe(4)
+    expect(bucketDomain().length, 'the bucket domain is empty').toBeGreaterThanOrEqual(80)
+    expect(collectClassifierDisagreements(prose(), scriptClassifier)).toEqual([])
+  })
+
+  it('known-bad probes: a classifier that passes an undocumented bucket, ignores cancel, or lets skipping alone pass is reported', () => {
+    const lenient: BucketClassifier = buckets => (buckets.some(b => b === 'pending') ? 'PENDING' : buckets.some(b => b === 'fail' || b === 'cancel') ? 'FAILING' : 'PASSING')
+    expect(collectClassifierDisagreements(prose(), lenient).length).toBeGreaterThan(0)
+    const noCancel: BucketClassifier = buckets => (buckets.includes('cancel') && !buckets.includes('fail') ? scriptClassifier(buckets.filter(b => b !== 'cancel').concat('pass')) : scriptClassifier(buckets))
+    expect(collectClassifierDisagreements(prose(), noCancel).some(d => d.includes('cancel'))).toBe(true)
+    const skipPass: BucketClassifier = buckets => (buckets.every(b => b === 'skipping') ? 'PASSING' : scriptClassifier(buckets))
+    expect(collectClassifierDisagreements(prose(), skipPass)).toEqual(expect.arrayContaining(['[skipping]: prose INDETERMINATE, script PASSING']))
+  })
+})
+
 
 // ---------------------------------------------------------------------------
 // check-merge-readiness — step 4 and the ladder (AC-14)

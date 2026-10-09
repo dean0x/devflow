@@ -454,7 +454,7 @@ describe('AC-10: a check name never reaches stdout raw', () => {
     ['a comma', 'a,b,c'],
     ['an equals sign', 'x pending=y waited=0 reason=usage'],
     ['a NUL and a bell', 'a\u0000b\u0007c'],
-    ['a bidi control', 'a‮b'],
+    ['a bidi control', 'a\u202eb'],
     ['an emoji', 'ship \u{1F680}'],
     ['a dollar and a quote', '$(id) "x" \'y\''],
   ]
@@ -485,7 +485,7 @@ describe('AC-10: a check name never reaches stdout raw', () => {
     it(`${label}: the printed line is one line of allowlisted characters`, async () => {
       const r = await run(({ kind }) => (kind === 'view' ? viewOk() : { stdout: JSON.stringify([{ name, bucket: 'fail' }, { name: 'ok', bucket: 'pass' }]) }))
       expect(r.stdout.split('\n').filter(l => l !== '')).toHaveLength(1)
-      expect(r.stdout).not.toMatch(/[\r\u001b`\u0000\u0007‮$"']/u)
+      expect(r.stdout).not.toMatch(/[\r\u001b`\u0000\u0007\u202e$"']/u)
       expect(statusOf(r.line), 'a name cannot forge a status').toBe('FAILING')
       const list = /failing=(.*) pending=/.exec(r.line)?.[1] ?? ''
       expect(list).toMatch(/^[A-Za-z0-9 ._()/:+-]{1,40}$/)
@@ -629,7 +629,6 @@ describe('D-CI-CLASSIFIER: the bucket classifier', () => {
 describe('the script as a process: the usage line, and a scripted gh', () => {
   let root: string
   let bin: FakeBin
-  const env = (extra: Record<string, string> = {}): NodeJS.ProcessEnv => scopedEnv(root, extra)
 
   beforeAll(() => {
     root = fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-ci-wait-'))
@@ -641,7 +640,7 @@ describe('the script as a process: the usage line, and a scripted gh', () => {
 
   function runScript(args: string[], extra: Record<string, string> = {}): { status: number | null; stdout: string; stderr: string } {
     const r = spawnSync(process.execPath, [CI_WAIT_SCRIPT, ...args], {
-      cwd: root, env: env(extra), encoding: 'utf8', timeout: 60_000,
+      cwd: root, env: scopedEnv(root, extra), encoding: 'utf8', timeout: 60_000,
     })
     return { status: r.status, stdout: r.stdout, stderr: r.stderr }
   }
