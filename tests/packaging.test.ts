@@ -28,6 +28,7 @@ import { promises as fs } from 'fs';
 import * as path from 'path';
 import {
   DIST_COMMAND_FILES,
+  LEARNING_OFF_FILES,
   MDS_COMMAND_HOSTS,
   MDS_GENERATOR_HOSTS,
   MDS_REFERENCE_MODULES,
@@ -429,6 +430,9 @@ describe('Guard 5 (files[] coverage): package.json includes required directories
  *      only shipping form of each of those agents.
  *  (d) Carry all src/assets/**\/*.mds generator sources, at the pinned count.
  *      Shipping them is decision D-A(a), accepted at Gate 2.
+ *  (e) Carry exactly the learning-off variants named in LEARNING_VARIANT_HOSTS
+ *      (dist/learning-off/), the files a learning-off machine installs in place of
+ *      the dist/commands/ and dist/agents/ prompts.
  *
  * Assert on parsed `npm pack --dry-run --json` output (structured
  * data), not on pipeline tails or partial string matching.
@@ -508,6 +512,58 @@ describe('Guard 6 (tarball contents): npm pack --dry-run output excludes source 
       'The tarball must carry a compiled agent for every generator host. ' +
       'Run `npm run build:mds` before `npm pack` — `npm run build:cli` alone does not produce agents.',
     ).toEqual(MDS_GENERATOR_HOSTS.map(h => `dist/agents/${h}.md`).sort());
+  });
+
+  /**
+   * Named collector: the learning-off variants a file list carries, relative to
+   * dist/learning-off/. Used by the live assertion AND its probe, so the probe
+   * cannot pass against a re-implementation of the filter.
+   */
+  function collectLearningOffFiles(files: readonly string[]): string[] {
+    return files
+      .filter(f => /^dist\/learning-off\/.+\.md$/.test(f))
+      .map(f => f.replace(/^dist\/learning-off\//, ''))
+      .sort();
+  }
+
+  it('tarball carries exactly the manifest\'s learning-off variants (dist/learning-off/)', () => {
+    const files = getPackFiles();
+    expect(
+      files.length,
+      'npm pack --dry-run produced no files — run `npm run build` first (guard cannot verify)',
+    ).toBeGreaterThan(0);
+    // Set equality against the roster, so it holds at every step: an arm added
+    // without a row, or a row left after its arm is gone, moves the tarball off it.
+    expect(
+      collectLearningOffFiles(files),
+      'Tarball dist/learning-off/*.md set does not match LEARNING_VARIANT_HOSTS in ' +
+      'tests/fixtures/mds-manifest.ts. A learning-off machine installs these files; one missing ' +
+      'ships the learning-on prompt there.',
+    ).toEqual([...LEARNING_OFF_FILES].sort());
+  });
+
+  it('known-bad probe: the collector reports a stray and a nested learning-off file, and ignores other dist files', () => {
+    const seeded = [
+      'dist/learning-off/commands/x.md',
+      'dist/learning-off/agents/y.md',
+      'dist/learning-off/agents/notes.txt',
+      'dist/commands/x.md',
+    ];
+    expect(collectLearningOffFiles(seeded)).toEqual(['agents/y.md', 'commands/x.md']);
+  });
+
+  it('package.json files[] ships dist/ wholesale and excludes nothing under dist/learning-off/', async () => {
+    // The tarball arm above is a roster comparison and so holds with an empty
+    // roster; this one is the presence arm. It reads the packaging contract itself:
+    // `dist/` ships whole, and no negated pattern can take the variants back out.
+    const pkg = JSON.parse(await fs.readFile(path.join(ROOT, 'package.json'), 'utf-8')) as { files?: string[] };
+    const patterns = pkg.files ?? [];
+    expect(patterns, 'package.json files[] must ship dist/ wholesale').toContain('dist/');
+    const excluded = patterns.filter(p => p.startsWith('!') && !/^!dist\/\*\*\/\*\.(map|d\.ts)$/.test(p));
+    expect(
+      excluded,
+      'a negated files[] pattern other than the map and declaration excludes must be checked against dist/learning-off/',
+    ).toEqual([]);
   });
 
   /**

@@ -18,7 +18,10 @@
  *       "14 command outputs byte-…"     — the dist/-vs-src/ byte compare is non-vacuous
  *   - tests/packaging.test.ts
  *       Guard 6                         — the same output set, the generator hosts' compiled
- *                                         agents, and the shipped .mds sources, inside the tarball
+ *                                         agents, the learning-off variants and the shipped
+ *                                         .mds sources, inside the tarball
+ *   - tests/learning/learning-variants-build.test.ts
+ *       LEARNING_VARIANT_HOSTS          — the learning-off files on disk, both directions
  *   - tests/mds-variants.test.ts
  *       "validateOutputName"            — every basename the build owns is accepted by the name rule
  *   - tests/commands/settings-partial.test.ts
@@ -199,6 +202,24 @@ export const MDS_GENERATOR_HOSTS = [
   'skim',
   'triage',
 ] as const;
+
+/**
+ * The hosts whose compiled body carries a learning arm, and therefore have a
+ * learning-off variant: each is `<kind>/<name>`, the path under
+ * `dist/learning-off/` without its `.md`. Named as a set, not a count, for the
+ * same reason as every other roster here: a count stays green when one host
+ * loses its arm and another gains one in the same commit.
+ *
+ * Empty until a host or partial carries `<!-- learning:on -->` markers. The
+ * assertions over it hold at every step: the printed variant count and the files
+ * under `dist/learning-off/` both equal this set in both directions, the packed
+ * tarball carries exactly these files, and an arm added without a row (or a row
+ * left after its arm goes) turns one of them red.
+ */
+export const LEARNING_VARIANT_HOSTS: readonly string[] = [];
+
+/** The `dist/learning-off/`-relative file of every host in LEARNING_VARIANT_HOSTS. */
+export const LEARNING_OFF_FILES: readonly string[] = LEARNING_VARIANT_HOSTS.map(h => `${h}.md`);
 
 /**
  * Reference modules: .mds sources under src/assets/mds/ that the build COMPILES,
