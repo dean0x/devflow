@@ -54,3 +54,25 @@ relies on:
 The name matches the registry, so the registry follows no correction. The flag's `min`
 is 600000 because the upstream ceiling is already 600000: a lower value could only shrink
 it.
+
+## `auto-compact-window` — INCLUDED (number), env name confirmed
+
+**Probe date**: 2026-10-10  
+**Claude Code version**: 2.1.296
+
+`CLAUDE_CODE_AUTO_COMPACT_WINDOW` appears in the executable at least ten times, and the
+name is spelled exactly as the registry spells it. Strings around the occurrences show:
+
+- the variable is the environment counterpart of an in-app `autoCompactWindow` setting
+  ("... (or the autoCompactWindow setting)");
+- when it is set the runtime says so and refuses the in-app change: "`CLAUDE_CODE_AUTO_COMPACT_WINDOW` is set and
+  takes precedence. Unset it to change this setting.";
+- an in-app parse message names the accepted values as `auto` or a size from 100k to 1M,
+  which matches the registry's `min` 100000 and `max` 1000000 (devflow sanity bounds).
+
+Not observed: the grammar of the variable's own value (the registry writes a decimal token
+count, such as `200000`), the default window, and what compaction does at a given window.
+The registry entry therefore records no `upstreamDefault`, and the flag stays unset by
+default and not recommended until a forced mid-`/implement` `/compact` has been checked.
+The variable that sets a percentage threshold instead is a different variable; devflow
+does not write or name it.

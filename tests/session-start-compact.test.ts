@@ -732,6 +732,21 @@ describe('session-start-context: Sections 5 and 6', () => {
       }
     });
 
+    it('AC-436: every D-name sits at the code site that implements it', () => {
+      const root = path.resolve(import.meta.dirname, '..');
+      const sites: Array<[string, string[]]> = [
+        ['src/core/flags.ts', ['D-AUTO-COMPACT-WINDOW-OPT-IN']],
+        ['src/assets/scripts/claude-md-audit.cjs', ['D-CLAUDE-MD-IMPORT-AUDIT', 'D-AUDIT-STAMP']],
+        ['src/core/claude-md-audit.ts', ['D-CLAUDE-MD-IMPORT-AUDIT', 'D-AUDIT-STAMP']],
+        ['src/assets/scripts/hooks/json-parse', ['D-SYSTEMMESSAGE-ENVELOPE']],
+        ['src/assets/scripts/hooks/json-helper.cjs', ['D-SYSTEMMESSAGE-ENVELOPE']],
+      ];
+      for (const [file, names] of sites) {
+        const text = fs.readFileSync(path.join(root, file), 'utf-8');
+        for (const name of names) expect(text, `${file} carries ${name}`).toContain(name);
+      }
+    });
+
     it('its header lists Sections 5 and 6 and states that they add no exit path', () => {
       const header = source().slice(0, source().indexOf('# Safe no-op fallback'));
       expect(header).toContain('# Section 5:');

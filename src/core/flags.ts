@@ -586,9 +586,11 @@ export const FLAG_REGISTRY: readonly ClaudeCodeFlag[] = [
     // been seen to resume at the phase after the last finished one (plan §9, a follow-up gate).
     // The percent-based auto-compact override is a different variable that devflow deliberately
     // never writes or names; tests/guards/no-autocompact-pct-override.test.ts keeps it out of src/.
-    // No upstreamDefault: the env name and its range were not confirmed against the binary (the
-    // local probe was denied), so the description states only devflow's own accepted range,
-    // 100000–1000000.
+    // The env name was confirmed present in Claude Code 2.1.296, where it takes precedence over
+    // the in-app setting, and an in-app message names `auto` or 100k–1M (docs/reference/
+    // claude-code-flags-probe.md). No upstreamDefault: the default window and the grammar of the
+    // variable's own value were not observed, so the description states only devflow's own
+    // accepted range, 100000–1000000.
     id: 'auto-compact-window',
     label: 'Auto-compact window',
     description: 'Context window size in tokens at which Claude Code auto-compacts',
