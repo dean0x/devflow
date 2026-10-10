@@ -86,6 +86,7 @@ import {
   type PluginDefinition,
 } from '../../core/plugins.js';
 import { copyDirectory, resolveSkillSource } from './installer.js';
+import { LANGUAGE_STAMPED_COMMANDS, carryLanguageStamp } from './language-stamp.js';
 
 // ── Bounds ─────────────────────────────────────────────────────────────────
 
@@ -237,14 +238,23 @@ async function convergeFile(
     return 'failed';
   }
 
+  // D-LANGUAGE-FOCUS-STAMP, composition: the variant on disk carries the language list the
+  // install stamped (code-review.md), and the source carries the shipped `(none)`. The stamp is
+  // carried from the installed copy into the text this write would install, so the byte
+  // comparison below stays honest (a stamped copy of the right variant is `unchanged`, not
+  // rewritten on every run) and a variant switch never loses or changes the list.
+  const wanted = kind === 'commands' && LANGUAGE_STAMPED_COMMANDS.includes(fileName.replace(/\.md$/, ''))
+    ? Buffer.from(carryLanguageStamp(source.bytes.toString('utf-8'), installed.toString('utf-8')), 'utf-8')
+    : source.bytes;
+
   // Byte-compared: an installed file already holding the target bytes is not
   // rewritten, so a run that changes nothing writes nothing.
-  if (installed.equals(source.bytes)) return 'unchanged';
+  if (installed.equals(wanted)) return 'unchanged';
 
   try {
     // Prompts are UTF-8 text; the atomic writer takes a string and preserves the
     // target's permission mode.
-    await writeFileAtomicExclusive(target, source.bytes.toString('utf-8'));
+    await writeFileAtomicExclusive(target, wanted.toString('utf-8'));
   } catch (err) {
     warn(`learning variants: could not rewrite ${kind}/${fileName} (${target}) — ${String(err)}`);
     return 'failed';

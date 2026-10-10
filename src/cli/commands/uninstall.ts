@@ -40,6 +40,7 @@ import { stripFlags } from '../../core/flags.js';
 import { stripDevflowTeammateModeFromJson } from '../../core/teammate-mode-cleanup.js';
 import { getPackageRoot, isContainedIn } from '../../core/paths.js';
 import { firstSymbolicLink } from '../../core/linked-path.js';
+import { restampInstalledCommands } from '../../targets/claude-code/language-stamp.js';
 
 /**
  * Which install `uninstall` acts on: the machine-wide install (`user`), or a
@@ -1041,6 +1042,23 @@ export async function runSelectivePhaseForScope(opts: {
   }
 
   await removeSelectedPlugins(claudeDir, selectedPlugins, verbose, installedPlugins, mayChange);
+
+  // D-LANGUAGE-FOCUS-STAMP: re-stamp the installed /code-review from the selection that REMAINS.
+  // A language plugin owns a skill and no command, so removing it deletes the skill while its
+  // name would stay on the stamped line, and /code-review would spawn a focus whose skill is gone.
+  // The remaining selection is the retained set the removal above used (installedPlugins minus the
+  // selected plugins, D-RETAIN-FROM-MANIFEST), so the stamp and the skills on disk cannot disagree.
+  // Narrowly scoped: only the stamped line of a command that is still installed is rewritten, and
+  // nothing else converges here. A damaged copy is a warning, never a failure.
+  {
+    const removed = new Set(selectedPlugins.map(sp => sp.name));
+    await restampInstalledCommands({
+      claudeDir,
+      effectivePlugins: installedPlugins.filter(plugin => !removed.has(plugin.name)),
+      warn: (msg) => p.log.warn(msg),
+      mayChange,
+    });
+  }
 
   // Clean up ambient hook if ambient plugin is being removed
   if (selectedPlugins.some(sp => sp.name === 'devflow-ambient')) {

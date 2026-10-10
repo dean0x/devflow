@@ -9,6 +9,7 @@ import { sweepOrphanedAssets, mdFileName, mdEntryName, type SweepResult } from '
 import { generatedReferenceManifest, installedReferenceManifest, PR_HOST_DESTINATION_ROOT, SKILL_REFS_SKILL_NAME, TRACKER_DESTINATION_ROOT } from '../../core/mds-variants.js';
 import { sweepOrphanedReferences, MAX_REFERENCE_SWEEP_DEPTH } from '../../core/reference-sweep.js';
 import { TRACKER_AGENT_NAME } from './tracker-install.js';
+import { restampInstalledCommands } from './language-stamp.js';
 
 // ---------------------------------------------------------------------------
 // Shadow override reporting types
@@ -2035,6 +2036,19 @@ export async function installViaFileCopy(options: FileCopyOptions): Promise<Inst
     new Set(getAllCommandNames()),
     mdEntryName,
   ));
+
+  // D-LANGUAGE-FOCUS-STAMP: record the language focuses the EFFECTIVE selection installs on the
+  // installed /code-review, on every install shape. This is the language gate the command reads
+  // (no run-time probe of Claude Code's directory), so it runs after the copy and the sweep and
+  // whether or not code-review's own plugin is in this run: `--plugin=devflow-typescript` copies no
+  // command, yet must update a code-review an earlier run installed. The copy above wrote the shipped
+  // `(none)` line; the rewrite compares against what is on disk now, so neither that copy nor the
+  // pre-clean can defeat it. A failure is a warning, never an abort.
+  await restampInstalledCommands({
+    claudeDir,
+    effectivePlugins: options.effectivePlugins ?? plugins,
+    warn,
+  });
 
   // Install agents (deduplicated), resolved dist-first with a src fallback:
   // dist/agents/{name}.md (compiled from an .mds generator host) wins over

@@ -13,7 +13,8 @@ import { describe, it, expect } from 'vitest';
 import { existsSync, readFileSync, readdirSync, statSync, mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'fs';
 import { tmpdir } from 'os';
 import * as path from 'path';
-import { getAllSkillNames, getAllCommandNames, getAllAgentNames, DEVFLOW_PLUGINS } from '../src/core/plugins.js';
+import { getAllSkillNames, getAllCommandNames, getAllAgentNames, installedLanguageFocuses, DEVFLOW_PLUGINS } from '../src/core/plugins.js';
+import { renderLanguageStamp } from '../src/targets/claude-code/language-stamp.js';
 import { requireDistFiles, requireDistFile, resolveAllAgents, resolveAgentSource, walkFiles, parseFrontmatterSkills } from './helpers.js';
 import { AGENT_CONFIG } from './fixtures/agent-config.js';
 
@@ -374,6 +375,11 @@ describe('Format 3: Install path references', () => {
     for (const focus of focuses) {
       expect(canonicalSkills.has(focus), `language focus '${focus}' is not a canonical skill`).toBe(true);
     }
+    // Non-vacuity of the stamp: the line the installer writes for a selection that installs every
+    // language plugin lists exactly the eight candidates the paragraph names, in the same order, and
+    // the command ships the (none) default for the installer to rewrite (D-LANGUAGE-FOCUS-STAMP).
+    expect(renderLanguageStamp(installedLanguageFocuses(DEVFLOW_PLUGINS))).toBe(`Installed language focuses: ${focuses.join(', ')}`);
+    expect(content.split('\n').filter(line => line.startsWith('Installed language focuses: '))).toEqual(['Installed language focuses: (none)']);
   });
 });
 
