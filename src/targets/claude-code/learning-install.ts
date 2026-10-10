@@ -81,12 +81,13 @@ import { isProxyEnabled } from '../../core/proxy-state.js';
 import {
   DEVFLOW_PLUGINS,
   LEARNING_GATED_SKILLS,
+  installedLanguageFocuses,
   prefixSkillName,
   skillsOf,
   type PluginDefinition,
 } from '../../core/plugins.js';
 import { copyDirectory, resolveSkillSource } from './installer.js';
-import { LANGUAGE_STAMPED_COMMANDS, carryLanguageStamp } from './language-stamp.js';
+import { LANGUAGE_STAMPED_COMMANDS, stampForConverge } from './language-stamp.js';
 
 // ── Bounds ─────────────────────────────────────────────────────────────────
 
@@ -215,9 +216,13 @@ async function firstReadable(candidates: readonly string[]): Promise<{ file: str
 async function convergeFile(
   kind: LearningVariantKind,
   fileName: string,
-  opts: Required<Pick<ConvergeLearningVariantsOptions, 'claudeDir' | 'learning' | 'warn'>> & { root: string },
+  opts: Required<Pick<ConvergeLearningVariantsOptions, 'claudeDir' | 'learning' | 'warn'>> & {
+    root: string;
+    /** The effective selection's language list, stamped into a copy that has none to carry. */
+    focuses: readonly string[];
+  },
 ): Promise<FileOutcome> {
-  const { claudeDir, learning, warn, root } = opts;
+  const { claudeDir, learning, warn, root, focuses } = opts;
   const target = installedFile(claudeDir, kind, fileName);
 
   const installed = await readIfPresent(target);
@@ -242,9 +247,10 @@ async function convergeFile(
   // install stamped (code-review.md), and the source carries the shipped `(none)`. The stamp is
   // carried from the installed copy into the text this write would install, so the byte
   // comparison below stays honest (a stamped copy of the right variant is `unchanged`, not
-  // rewritten on every run) and a variant switch never loses or changes the list.
+  // rewritten on every run) and a variant switch never loses or changes the list. A copy with
+  // no list to carry (installed before the stamp existed) is stamped from the selection instead.
   const wanted = kind === 'commands' && LANGUAGE_STAMPED_COMMANDS.includes(fileName.replace(/\.md$/, ''))
-    ? Buffer.from(carryLanguageStamp(source.bytes.toString('utf-8'), installed.toString('utf-8')), 'utf-8')
+    ? Buffer.from(stampForConverge(source.bytes.toString('utf-8'), installed.toString('utf-8'), focuses), 'utf-8')
     : source.bytes;
 
   // Byte-compared: an installed file already holding the target bytes is not
@@ -390,6 +396,7 @@ export async function convergeLearningVariants(
     return empty;
   }
   const root = opts.packageRoot ?? getPackageRoot();
+  const focuses = installedLanguageFocuses(opts.plugins);
 
   let failed = false;
   let unchanged = 0;
@@ -404,7 +411,7 @@ export async function convergeLearningVariants(
       continue;
     }
     for (const fileName of roster.names) {
-      const outcome = await convergeFile(kind, fileName, { claudeDir, learning, warn, root });
+      const outcome = await convergeFile(kind, fileName, { claudeDir, learning, warn, root, focuses });
       if (outcome === 'rewritten') rewritten[kind].push(fileName);
       else if (outcome === 'unchanged') unchanged++;
       else if (outcome === 'not-installed') notInstalled++;

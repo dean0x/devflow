@@ -25,7 +25,9 @@
  *   - Composition with the learning converge (D-LEARNING-VARIANT-INSTALL), pinned: the converge rewrites
  *     installed command files from dist or dist/learning-off, and those files carry the shipped `(none)`
  *     line. It therefore applies {@link carryLanguageStamp} inside its own write path, putting the stamp
- *     it finds on the installed copy into the variant it writes. The alternative, re-stamping after every
+ *     it finds on the installed copy into the variant it writes ({@link stampForConverge}); a copy with no
+ *     list to carry, one installed before the stamp existed, is stamped from the converge's selection
+ *     instead of being given the shipped `(none)`. The alternative, re-stamping after every
  *     converge write, would make a steady-state run see a stamped copy that differs from its source, rewrite
  *     it and re-stamp it on every `devflow init`; carrying keeps the converge's byte comparison honest, so a
  *     run that changes nothing writes nothing, and it leaves one authority for the list: install and
@@ -99,13 +101,34 @@ export function applyLanguageStamp(content: string, focuses: readonly string[]):
  * installed one is a well-formed list, so a damaged or hostile line is never copied into a fresh file.
  */
 export function carryLanguageStamp(source: string, installed: string): string {
-  const from = [...installed.matchAll(stampLineRe())];
+  const carried = carriableStampLine(installed);
   const into = [...source.matchAll(stampLineRe())];
-  if (from.length !== 1 || into.length !== 1) return source;
-  const carried = from[0][0];
-  if (!STAMP_VALUE_RE.test(carried.slice(LANGUAGE_STAMP_PREFIX.length))) return source;
+  if (carried === null || into.length !== 1) return source;
   const at = into[0].index ?? 0;
   return source.slice(0, at) + carried + source.slice(at + into[0][0].length);
+}
+
+/** The installed copy's one stamp line when it holds exactly one and its list is well formed, else null. */
+function carriableStampLine(installed: string): string | null {
+  const from = [...installed.matchAll(stampLineRe())];
+  if (from.length !== 1) return null;
+  return STAMP_VALUE_RE.test(from[0][0].slice(LANGUAGE_STAMP_PREFIX.length)) ? from[0][0] : null;
+}
+
+/**
+ * The text the learning converge installs for a stamped command: `source` carrying the installed copy's
+ * list ({@link carryLanguageStamp}) when the copy holds one, else `source` stamped with `focuses`, the
+ * effective selection's list, exactly as the install stamps it.
+ *
+ * A copy with no list to carry was installed by a version before the stamp existed, or is damaged. A
+ * `--plugin` init right after an upgrade reaches such a copy through the converge alone (the run copies
+ * no command), so installing the shipped `(none)` over it would drop every language focus until the next
+ * full install. A list that IS carried is never changed here. Pure.
+ */
+export function stampForConverge(source: string, installed: string, focuses: readonly string[]): string {
+  if (carriableStampLine(installed) !== null) return carryLanguageStamp(source, installed);
+  const stamped = applyLanguageStamp(source, focuses);
+  return stamped.ok ? stamped.content : source;
 }
 
 export interface RestampOptions {
