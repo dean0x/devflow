@@ -53,11 +53,12 @@
 // reduces context); code spans and fenced blocks skipped; a path wrapped in quotes
 // not imported; `CLAUDE.local.md` loading beside `CLAUDE.md`; `.claude/CLAUDE.md`
 // being a project instruction file. Differences, each a decision here:
-//   1. Depth. The current page says "a maximum depth of four hops"; the older
-//      docs.anthropic.com and docs.claude.com snapshots said five. MAX_HOPS stays
-//      five (the ticket's rule, AC-416): the larger of the two, so the audit can
-//      over-count a chain by one hop on the current page and never under-count it
-//      on the older one. It is advisory, and one constant to change.
+//   1. Depth. The current page says "a maximum depth of four hops"
+//      (https://code.claude.com/docs/en/memory, fetched 2026-10-10); the older
+//      docs.anthropic.com and docs.claude.com snapshots said five. MAX_HOPS follows
+//      the current page: the audit measures what Claude Code loads now, and a fifth
+//      hop would count bytes it does not load. MAX_HOPS is the one constant to
+//      change if upstream moves again.
 //   2. Escaped spaces. Upstream follows a path whose spaces are written `\ `. This
 //      grammar stops at the backslash, so such an import is not followed (a missed
 //      finding, never a false one).
@@ -129,7 +130,7 @@ const FILE_THRESHOLD_BYTES = 10000;
 /** Decimal bytes: a root whose chain totals over this is a chain finding. */
 const CHAIN_THRESHOLD_BYTES = 40000;
 /** The deepest hop counted; the root is hop 0. */
-const MAX_HOPS = 5;
+const MAX_HOPS = 4;
 /** Paths examined per root, existing or not. */
 const MAX_PATHS_PER_ROOT = 64;
 /** Bytes of one file scanned for imports. */

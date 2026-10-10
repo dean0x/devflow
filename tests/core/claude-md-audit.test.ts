@@ -379,37 +379,36 @@ describe('claude-md-audit', () => {
       }
     };
 
-    it('MAX_HOPS is five', () => {
-      expect(A.MAX_HOPS).toBe(5);
+    it('MAX_HOPS is four, the depth the current upstream memory page documents', () => {
+      expect(A.MAX_HOPS).toBe(4);
     });
 
-    it('counts hops 1 to 5, and neither reads nor counts the hop-6 file', () => {
+    it('counts hops 1 to 4, and neither reads nor counts the hop-5 file', () => {
       buildChain();
       const r = run();
       const names = fileFindings(r).map(f => path.basename(f.path));
-      expect(names).toEqual(['h1.md', 'h2.md', 'h3.md', 'h4.md', 'h5.md']);
-      expect(r.filesExamined).toBe(6); // root + hops 1..5
+      expect(names).toEqual(['h1.md', 'h2.md', 'h3.md', 'h4.md']);
+      expect(r.filesExamined).toBe(5); // root + hops 1..4
       const sizeOf = (name: string): number => fs.statSync(path.join(project, name)).size;
-      expect(r.roots[0].total).toBe(['CLAUDE.md', 'h1.md', 'h2.md', 'h3.md', 'h4.md', 'h5.md'].reduce((sum, n) => sum + sizeOf(n), 0));
-      // The hop-6 path is never even looked at: it is not an examined path.
-      expect(r.examined.map(e => path.basename(e.path))).not.toContain('h6.md');
-      // The hop-5 file is sized but not read: only hops 0 to 4 are scanned.
+      expect(r.roots[0].total).toBe(['CLAUDE.md', 'h1.md', 'h2.md', 'h3.md', 'h4.md'].reduce((sum, n) => sum + sizeOf(n), 0));
+      // The hop-5 path is never even looked at: it is not an examined path.
+      expect(r.examined.map(e => path.basename(e.path))).not.toContain('h5.md');
+      // The hop-4 file is sized but not read: only hops 0 to 3 are scanned.
       const scanned = fs.statSync(path.join(project, 'CLAUDE.md')).size
-        + [1, 2, 3, 4].reduce((sum, hop) => sum + fs.statSync(path.join(project, `h${hop}.md`)).size, 0);
+        + [1, 2, 3].reduce((sum, hop) => sum + fs.statSync(path.join(project, `h${hop}.md`)).size, 0);
       expect(r.bytesRead).toBe(scanned);
     });
 
     it('a file reached by a shorter route is judged at its shortest hop count (breadth-first)', () => {
-      // CLAUDE.md -> long1 -> long2 -> long3 -> long4 -> target, and CLAUDE.md -> target directly.
+      // CLAUDE.md -> long1 -> long2 -> long3 -> target, and CLAUDE.md -> target directly.
       write('CLAUDE.md', '@long1.md @target.md\n');
       write('long1.md', '@long2.md\n');
       write('long2.md', '@long3.md\n');
-      write('long3.md', '@long4.md\n');
-      write('long4.md', '@target.md\n');
+      write('long3.md', '@target.md\n');
       write('target.md', `@beyond.md\n${filler(100)}`);
       write('beyond.md', filler(10001));
       const r = run();
-      // target at hop 1 reaches beyond at hop 2; a depth-first walk reaching target at hop 5 first would not.
+      // target at hop 1 reaches beyond at hop 2; a depth-first walk reaching target at hop 4 first would not.
       expect(fileFindings(r).map(f => path.basename(f.path))).toEqual(['beyond.md']);
     });
   });
