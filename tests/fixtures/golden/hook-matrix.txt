@@ -199,6 +199,7 @@ A home/.devflow/logs/<SANDBOX>-wt/
 
 ## worktree · session-start-context (SessionStart)
 exit 0
+M home/.devflow/.claude-md-audit
 A home/.devflow/logs/
 A home/.devflow/logs/<SANDBOX>-wt/
 A repo/.devflow/learning/
@@ -264,6 +265,7 @@ A home/.devflow/logs/<SANDBOX>-nongit/
 
 ## non-git · session-start-context (SessionStart)
 exit 0
+M home/.devflow/.claude-md-audit
 A home/.devflow/logs/
 A home/.devflow/logs/<SANDBOX>-nongit/
 

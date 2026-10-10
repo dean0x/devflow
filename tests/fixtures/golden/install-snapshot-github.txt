@@ -282,11 +282,13 @@ d .claude/skills/devflow:worktree-support/references/
 - .claude/skills/devflow:worktree-support/references/discovery.md
 - .claude/skills/devflow:worktree-support/references/roots.md
 d .devflow/
+- .devflow/.claude-md-audit
 - .devflow/hud.json
 - .devflow/manifest.json
 - .devflow/migrations.json
 d .devflow/scripts/
 x .devflow/scripts/ci-wait.cjs
+x .devflow/scripts/claude-md-audit.cjs
 d .devflow/scripts/core/
 - .devflow/scripts/core/ansi.js
 - .devflow/scripts/core/cache.js
@@ -569,6 +571,7 @@ d sub/
       "default-model": null,
       "goal-checkin-minutes": null,
       "bash-max-timeout-ms": null,
+      "auto-compact-window": null,
       "spellcheck": null,
       "view-mode": "default"
     },
