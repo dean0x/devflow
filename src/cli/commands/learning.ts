@@ -10,7 +10,12 @@ import {
 import { loadShippedAgentDefaults } from '../../core/agent-models.js';
 import { readMachineFeature, writeMachineFeature } from '../../core/feature-switch.js';
 import { loadSettingsModule, narrowedSwitchLabel, personalConfigTrackedWarning } from '../../core/evidence-policy.js';
-import { getDevFlowDirectory } from '../../targets/claude-code/claude-paths.js';
+import { getClaudeDirectory, getDevFlowDirectory } from '../../targets/claude-code/claude-paths.js';
+import {
+  applyLearningToggle,
+  describeLearningConverge,
+  readRunningVersion,
+} from '../../targets/claude-code/learning-install.js';
 import { getLedgerRoot } from '../../core/ledger-root.js';
 import { drainLearningQueue } from '../../core/learning-queue-cleanup.js';
 import { firstSymbolicLink } from '../../core/linked-path.js';
@@ -470,10 +475,42 @@ async function handleClear(): Promise<void> {
 }
 
 /**
+ * Make the installed prompts match the switch just written
+ * (D-LEARNING-VARIANT-INSTALL): the learning-on or learning-off commands and
+ * agents, and the apply-decisions skill. The same convergence `devflow init` runs,
+ * followed by reapplying the saved agent model mapping so `devflow agents`
+ * overrides survive.
+ *
+ * Warn-not-fail: the switch itself is already recorded, and either mismatch is
+ * safe (an on variant is still gated at run time, an off variant loads no
+ * decisions), so a problem here never changes the exit code.
+ */
+async function convergeInstalledVariants(enabled: boolean): Promise<void> {
+  try {
+    const outcome = await applyLearningToggle({
+      claudeDir: getClaudeDirectory(),
+      devflowDir: getDevFlowDirectory(),
+      learning: enabled,
+      runningVersion: await readRunningVersion(),
+      warn: (msg) => p.log.warn(msg),
+    });
+    if (outcome.kind === 'skipped') {
+      p.log.warn(outcome.message);
+      return;
+    }
+    const changed = describeLearningConverge(outcome.result, enabled);
+    if (changed !== null) p.log.info(color.dim(`Installed prompts: ${changed}`));
+  } catch (err) {
+    p.log.warn(`Could not update the installed prompts for the new learning setting — run ${color.cyan('devflow init')}: ${String(err)}`);
+  }
+}
+
+/**
  * `--enable` / `--disable`: the machine-wide switch (D-FEATURES-NARROW-ONLY),
  * converged exactly as `devflow init --learning / --no-learning` converges it —
- * the manifest value, and on disable a drained queue in the current project.
- * Never requires a git root: the switch is not a per-project setting.
+ * the manifest value, the installed prompt variants and skill
+ * (D-LEARNING-VARIANT-INSTALL), and on disable a drained queue in the current
+ * project. Never requires a git root: the switch is not a per-project setting.
  */
 async function handleToggle(enabled: boolean): Promise<void> {
   const recorded = await writeMachineFeature(getDevFlowDirectory(), 'learning', enabled);
@@ -482,6 +519,8 @@ async function handleToggle(enabled: boolean): Promise<void> {
     process.exitCode = 1;
     return;
   }
+
+  await convergeInstalledVariants(enabled);
 
   if (enabled) {
     p.log.success('Learning enabled in every project (a repository can opt out)');

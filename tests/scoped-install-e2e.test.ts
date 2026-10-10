@@ -36,7 +36,7 @@ import { spawnSync } from 'child_process';
 import { requireBuiltCli } from './helpers.js';
 import { assertTempHome } from './setup/home-isolation.js';
 import { installedReferenceManifest } from '../src/core/mds-variants.js';
-import { DEVFLOW_PLUGINS, FEATURE_OWNED_SKILLS, prefixSkillName, skillsOf, getAllSkillNames } from '../src/core/plugins.js';
+import { DEVFLOW_PLUGINS, FEATURE_OWNED_SKILLS, LEARNING_GATED_SKILLS, prefixSkillName, skillsOf, getAllSkillNames } from '../src/core/plugins.js';
 import { ALWAYS_PRESENT_REFS, COMPLIANCE_FRAMEWORKS } from '../src/core/compliance.js';
 
 const CLI_PATH = requireBuiltCli();
@@ -217,8 +217,11 @@ describe('devflow init installs every provider (D-INSTALL-ALL-PROVIDERS)', () =>
   it('the default install carries the non-optional closure, not every registry skill', async () => {
     expect(init().status).toBe(0);
     // Plus the feature-owned compliance skill, which converge installs on every
-    // machine (D-COMPLIANCE-INSTALL-ALWAYS) — it belongs to no plugin.
+    // machine (D-COMPLIANCE-INSTALL-ALWAYS) — it belongs to no plugin. Minus the
+    // learning-gated skills: this install runs with learning off (D-LEARNING-VARIANT-INSTALL).
+    const gated: readonly string[] = LEARNING_GATED_SKILLS;
     const expected = [...skillsOf(DEVFLOW_PLUGINS.filter(p => !p.optional)), ...FEATURE_OWNED_SKILLS]
+      .filter(skill => !gated.includes(skill))
       .map(prefixSkillName).sort();
     expect(await listSkills()).toEqual(expected);
     expect(expected.length, 'scoping must actually narrow something').toBeLessThan(getAllSkillNames().length);

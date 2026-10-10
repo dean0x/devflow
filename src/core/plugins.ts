@@ -554,6 +554,43 @@ export const FEATURE_OWNED_SKILLS = ['compliance'] as const satisfies readonly s
  */
 export const FEATURE_OWNED_RULES = ['compliance'] as const satisfies readonly string[];
 
+/**
+ * Skills a learning-off machine does not install.
+ *
+ * D-LEARNING-VARIANT-INSTALL: the learning-off variants of the commands and
+ * agents (D-LEARNING-VARIANTS) carry no decisions text and preload no
+ * apply-decisions, so the skill has no reader on a machine with learning off. It
+ * stays OWNED and REQUIRED by its plugins in the registry — the closure guard
+ * reasons over the learning-on variant, the superset — and the install drops it
+ * on top of the selection: `installViaFileCopy` skips it when `learning` is false
+ * and `convergeLearningVariants` installs or removes it when the switch flips.
+ *
+ * This is a machine-switch condition, not a deselection: the plan
+ * ({@link resolveSkillInstallPlan}) is untouched, so a learning-off machine never
+ * reports the skill as "removed because no selected plugin requires it" nor its
+ * shadow as inactive for a plugin that is not selected.
+ *
+ * Used by:
+ *   - installer.ts installViaFileCopy: omits these from the install loop when learning is off
+ *   - learning-install.ts convergeLearningVariants: installs or removes the directory
+ *   - tests: independent literal ['apply-decisions'] (avoids the EXCLUDED-as-oracle trap)
+ */
+export const LEARNING_GATED_SKILLS = ['apply-decisions'] as const satisfies readonly string[];
+
+/**
+ * A skills map with the learning-gated skills left out when learning is off.
+ *
+ * Pure: the same map instance comes back when learning is on, a copy otherwise.
+ */
+export function omitLearningGatedSkills<V>(
+  skillsMap: ReadonlyMap<string, V>,
+  learning: boolean,
+): ReadonlyMap<string, V> {
+  if (learning) return skillsMap;
+  const gated: readonly string[] = LEARNING_GATED_SKILLS;
+  return new Map([...skillsMap].filter(([skill]) => !gated.includes(skill)));
+}
+
 // ── Skill-closure boundaries ──────────────────────────────────────────────────
 
 /**

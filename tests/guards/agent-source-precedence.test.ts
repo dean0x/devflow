@@ -75,6 +75,7 @@ async function installAll(root: string, dirs?: AgentSourceDirs): Promise<Map<str
   const plugin = fixturePlugin();
   const claudeDir = await fs.mkdtemp(path.join(root, 'claude-'));
   await installViaFileCopy({
+    learning: true,
     plugins: [plugin],
     claudeDir,
     devflowDir: path.join(claudeDir, 'devflow'),

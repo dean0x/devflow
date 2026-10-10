@@ -88,6 +88,7 @@ import {
   attributionSeedFrom,
 } from './attribution-prompts.js';
 import { convergeFromManifest } from '../../targets/claude-code/compliance-install.js';
+import { convergeLearningVariants } from '../../targets/claude-code/learning-install.js';
 import * as os from 'os';
 
 // Re-export pure functions for tests (canonical source is post-install.ts)
@@ -1869,6 +1870,10 @@ export const initCommand = new Command('init')
         rulesMap,
         isPartialInstall: !!options.plugin,
         spinner: s,
+        // The SETTLED switch, after the flag, the prompt and the seed have all had
+        // their say (D-LEARNING-VARIANT-INSTALL): the files installed here and the
+        // manifest written at the end of init cannot disagree about it.
+        learning: learningEnabled,
         // Non-fatal install notices with no other channel (skipped symlinks in the
         // generated reference tree, mode-normalisation failures) reach the user rather
         // than the void. Collected now, emitted after the spinner stops.
@@ -1878,6 +1883,32 @@ export const initCommand = new Command('init')
       s.stop('Installation failed');
       p.log.error(`${error}`);
       process.exit(1);
+    }
+
+    // D-LEARNING-VARIANT-INSTALL: converge the learning variants. The file copy above
+    // installed the variant of everything IT installed; on a `--plugin` install the
+    // other plugins' files, already on disk, may still be the other variant (this run
+    // may have flipped the switch), and the apply-decisions skill is removed here when
+    // the copy skipped it on a partial install. Rewrites only what is installed.
+    // Warn-not-abort: either mismatch is safe (an on variant is still gated at run
+    // time, an off variant loads no decisions). The agent mapping is reapplied below.
+    try {
+      const learningConverge = await convergeLearningVariants({
+        claudeDir,
+        devflowDir,
+        learning: learningEnabled,
+        plugins: effectivePlugins,
+        warn: (msg) => installWarnings.push(msg),
+      });
+      if (verbose && learningConverge.converged) {
+        p.log.info(
+          `Learning ${learningEnabled ? 'on' : 'off'} variants: ` +
+          `${learningConverge.commandsRewritten.length} command(s) and ${learningConverge.agentsRewritten.length} agent(s) ` +
+          `rewritten, ${learningConverge.unchanged} already current`,
+        );
+      }
+    } catch (err) {
+      installWarnings.push(`Learning variant convergence failed — ${err instanceof Error ? err.message : String(err)}`);
     }
 
     // Converge compliance artifacts (always converge, never short-circuit).

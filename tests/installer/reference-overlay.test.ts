@@ -259,6 +259,7 @@ describe('reference overlay through installViaFileCopy (AC-2.4a)', () => {
 
   async function runInstall(effectivePlugins?: typeof DEVFLOW_PLUGINS) {
     return installViaFileCopy({
+      learning: true,
       plugins: [],
       effectivePlugins,
       claudeDir,

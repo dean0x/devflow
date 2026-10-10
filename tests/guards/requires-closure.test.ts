@@ -30,9 +30,11 @@
 import { describe, it, expect } from 'vitest';
 import { promises as fs } from 'fs';
 import * as path from 'path';
+import { agentSourceDirs, commandSourceDirs } from '../../src/core/assets.js';
 import {
   DEVFLOW_PLUGINS,
   FEATURE_OWNED_SKILLS,
+  LEARNING_GATED_SKILLS,
   SKILL_NAMESPACE,
   PRESENCE_GATED_SKILLS,
   TEMPLATE_SKILL_REFS,
@@ -386,6 +388,94 @@ describe('requires structure', () => {
       .sort();
     expect([...PRESENCE_GATED_SKILLS].sort()).toEqual(expected);
     expect(PRESENCE_GATED_SKILLS.length, 'derived set must be non-empty').toBeGreaterThan(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Learning-gated skills: the closure reasons over the learning-on variant
+// ---------------------------------------------------------------------------
+
+/**
+ * D-LEARNING-VARIANT-INSTALL: a learning-off machine does not install the skills in
+ * LEARNING_GATED_SKILLS, yet every arm above reasons over the learning-ON variant
+ * (dist/commands, dist/agents), where those skills are referenced and therefore
+ * required. That is deliberate and pinned here, in both directions:
+ *
+ *   - the on variant is the superset, so a gated skill is a `requires` entry like any
+ *     other and the forward and reverse arms above hold for it unchanged;
+ *   - the prompts a learning-off machine actually installs (the off variant where one
+ *     exists, the one file otherwise, in the installer's own source order) reference
+ *     no gated skill, so the skill's absence there leaves no dangling reference.
+ *
+ * The skill being ABSENT under learning off is therefore explicit rather than an
+ * accident of the closure: it is a machine-switch condition on top of the selection.
+ */
+
+/** Named collector: references in the prompts a learning-off machine installs. */
+async function collectLearningOffInstalledRefs(): Promise<RawRef[]> {
+  const files: string[] = [];
+  const commandNames = new Set(DEVFLOW_PLUGINS.flatMap(p => p.commands.map(c => c.replace(/^\//, ''))));
+  for (const name of commandNames) {
+    for (const dir of commandSourceDirs(false, ROOT)) {
+      const candidate = path.join(dir, `${name}.md`);
+      if (await fs.access(candidate).then(() => true, () => false)) { files.push(candidate); break; }
+    }
+  }
+  const agentNames = new Set(DEVFLOW_PLUGINS.flatMap(p => p.agents));
+  for (const name of agentNames) {
+    for (const dir of agentSourceDirs(ROOT, false)) {
+      const candidate = path.join(dir, `${name}.md`);
+      if (await fs.access(candidate).then(() => true, () => false)) { files.push(candidate); break; }
+    }
+  }
+  return readRefs(files);
+}
+
+/** Named predicate: the references that point at a skill a learning-off machine does not install. */
+function danglingUnderLearningOff(refs: readonly RawRef[]): string[] {
+  const gated = new Set<string>(LEARNING_GATED_SKILLS);
+  return refs.filter(r => gated.has(r.token)).map(r => `${r.raw} in ${r.file}`);
+}
+
+describe('learning-gated skills (AC-148)', () => {
+  it('every gated skill is a registry skill that a plugin requires, and the learning-on corpus references it', async () => {
+    expect(LEARNING_GATED_SKILLS.length, 'the gated set is not empty').toBeGreaterThan(0);
+    const known = new Set(getAllSkillNames());
+    for (const skill of LEARNING_GATED_SKILLS) {
+      expect(known.has(skill), `${skill} is a registry skill`).toBe(true);
+      expect(
+        DEVFLOW_PLUGINS.some(p => p.requires.includes(skill)),
+        `${skill} stays in at least one plugin's requires: the closure reasons over the learning-on variant`,
+      ).toBe(true);
+      const onRefs = await readRefs([
+        ...await walkMarkdown(COMMANDS_DIR),
+        ...await walkMarkdown(path.join(ROOT, 'dist', 'agents')),
+      ]);
+      expect(onRefs.some(r => r.token === skill), `the learning-on corpus references ${skill} (non-vacuity)`).toBe(true);
+    }
+  });
+
+  it('no prompt a learning-off machine installs references a skill it does not install', async () => {
+    const refs = await collectLearningOffInstalledRefs();
+    expect(refs.length, 'the off corpus was read (non-vacuity)').toBeGreaterThan(50);
+    expect(
+      danglingUnderLearningOff(refs),
+      'A prompt installed with learning off must not point at a learning-gated skill: ' +
+      'give the host a learning arm so its off variant drops the reference.',
+    ).toEqual([]);
+  });
+
+  it('known-bad probe: a learning-off corpus naming the skill is reported', () => {
+    const refs = collectSkillRefs(`Load via Skill(skill="${NS}${LEARNING_GATED_SKILLS[0]}").`, 'synthetic-off.md');
+    expect(danglingUnderLearningOff(refs)).toEqual([`${NS}${LEARNING_GATED_SKILLS[0]} in synthetic-off.md`]);
+    expect(danglingUnderLearningOff(collectSkillRefs(`Load via Skill(skill="${NS}security").`, 'synthetic-off.md'))).toEqual([]);
+  });
+
+  it('a gated skill is neither feature-owned nor presence-gated: its plugins own and require it normally', () => {
+    for (const skill of LEARNING_GATED_SKILLS) {
+      expect((FEATURE_OWNED_SKILLS as readonly string[]).includes(skill)).toBe(false);
+      expect(PRESENCE_GATED_SKILLS.includes(skill)).toBe(false);
+    }
   });
 });
 

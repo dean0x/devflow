@@ -2,8 +2,8 @@ import { promises as fs, type Dirent } from 'fs';
 import { existsSync } from 'fs';
 import * as path from 'path';
 import type { PluginDefinition } from '../../core/plugins.js';
-import { DEVFLOW_PLUGINS, SKILL_NAMESPACE, prefixSkillName, unprefixSkillName, getAllSkillNames, getAllAgentNames, getAllCommandNames, FEATURE_OWNED_SKILLS, resolveSkillInstallPlan } from '../../core/plugins.js';
-import { skillsDir, agentSourceDirs, rulesDir, commandsDir, scriptsDir, compiledSkillRefsDir, type AgentSourceDirs } from '../../core/assets.js';
+import { DEVFLOW_PLUGINS, SKILL_NAMESPACE, prefixSkillName, unprefixSkillName, getAllSkillNames, getAllAgentNames, getAllCommandNames, FEATURE_OWNED_SKILLS, resolveSkillInstallPlan, omitLearningGatedSkills } from '../../core/plugins.js';
+import { skillsDir, agentSourceDirs, rulesDir, commandSourceDirs, scriptsDir, compiledSkillRefsDir, type AgentSourceDirs } from '../../core/assets.js';
 import { getPackageRoot, isContainedIn } from '../../core/paths.js';
 import { sweepOrphanedAssets, mdFileName, mdEntryName, type SweepResult } from '../../core/orphan-sweep.js';
 import { generatedReferenceManifest, installedReferenceManifest, PR_HOST_DESTINATION_ROOT, SKILL_REFS_SKILL_NAME, TRACKER_DESTINATION_ROOT } from '../../core/mds-variants.js';
@@ -1680,6 +1680,21 @@ export interface FileCopyOptions {
   isPartialInstall: boolean;
   spinner: Spinner;
   /**
+   * The machine's SETTLED learning switch — required, with no default, because a
+   * caller that forgot it would install the wrong variant without any error.
+   *
+   * D-LEARNING-VARIANT-INSTALL: false installs the learning-off variant of every
+   * command and agent that has one (dist/learning-off first, then the normal
+   * order) and leaves the apply-decisions skill out; true installs the
+   * learning-on files and the skill. `devflow init` passes the value it has
+   * already settled from its flag, prompt and seed, never the raw seed, so the
+   * files and the manifest it writes afterwards cannot disagree. A repository
+   * that narrows learning off (`features.learning: false` in its project.json)
+   * does not reach this option: the variant follows the machine switch alone, and
+   * the on variant's runtime gate covers the narrowed repository.
+   */
+  learning: boolean;
+  /**
    * Agent source directories, most-preferred first — see agentSourceDirs(),
    * which owns the ordering convention and supplies the default. Injectable so
    * tests can prove the preference order against a temp tree instead of the
@@ -1707,6 +1722,46 @@ async function firstExisting(candidates: readonly string[]): Promise<string | un
     } catch { /* not here — try the next directory in preference order */ }
   }
   return undefined;
+}
+
+/** Where a skill's files come from this run, and what became of its shadow. */
+export interface ResolvedSkillSource {
+  /** The directory copied to the install target: the valid shadow, else the shipped source. */
+  readonly dir: string;
+  /** The shadow's state: `valid` was applied, `missing-skill-md` was reported and bypassed, `none` had no shadow. */
+  readonly shadow: SkillShadowState;
+}
+
+/**
+ * Resolve the directory a registry skill installs from: its valid shadow, else
+ * the shipped source (an invalid shadow is reported and the source is
+ * installed in its place).
+ *
+ * The ONE spelling of that decision: the install loop and
+ * convergeLearningVariants both call it, so a skill the learning toggle installs
+ * later is shadowed exactly as one the install installed.
+ *
+ * The shipped source is stat-checked FIRST, even under a valid shadow, so an
+ * absent source is a packaging failure that throws (the hard-error policy for a
+ * declared source) rather than being masked by a shadow. Callers that must not
+ * throw catch it.
+ */
+export async function resolveSkillSource(skillName: string, devflowDir: string): Promise<ResolvedSkillSource> {
+  const skillSource = path.join(skillsDir(), skillName);
+  let isDir = false;
+  try {
+    isDir = (await fs.stat(skillSource)).isDirectory();
+  } catch { /* stat failed — source absent */ }
+  if (!isDir) {
+    throw new Error(
+      `Skill source not found for declared skill "${skillName}": ${skillSource}. ` +
+      `Ensure the skill directory exists in src/assets/skills/.`,
+    );
+  }
+
+  const shadowDir = path.join(devflowDir, 'skills', skillName);
+  const shadow = await validateSkillShadow(shadowDir);
+  return { dir: shadow === 'valid' ? shadowDir : skillSource, shadow };
 }
 
 /**
@@ -1792,6 +1847,7 @@ export async function installViaFileCopy(options: FileCopyOptions): Promise<Inst
     rulesMap = new Map<string, string>(),
     isPartialInstall,
     spinner,
+    learning,
     warn = () => { /* no-op: callers without a logger still get the full InstallReport */ },
   } = options;
 
@@ -1941,11 +1997,13 @@ export async function installViaFileCopy(options: FileCopyOptions): Promise<Inst
   }
 
   // Install commands from selected plugins using registry-driven lookup.
-  // Source: dist/commands/{name}.md (single lookup directory for all commands).
+  // Source: dist/commands/{name}.md, or — with learning off — the learning-off
+  // variant dist/learning-off/commands/{name}.md when the host has one
+  // (D-LEARNING-VARIANT-INSTALL; commandSourceDirs owns the order).
   // A declared command with no compiled source file is a hard error, not a skip.
   spinner.message('Installing commands and agents...');
   const commandsTarget = path.join(claudeDir, 'commands', 'devflow');
-  const cDir = commandsDir();
+  const commandDirs = commandSourceDirs(learning);
   const commandsSourceNames = new Set<string>();
   for (const plugin of plugins) {
     for (const cmd of plugin.commands) {
@@ -1956,12 +2014,12 @@ export async function installViaFileCopy(options: FileCopyOptions): Promise<Inst
   if (commandsSourceNames.size > 0) {
     await fs.mkdir(commandsTarget, { recursive: true });
     for (const name of commandsSourceNames) {
-      const srcFile = path.join(cDir, mdFileName(name));
-      try {
-        await fs.access(srcFile);
-      } catch {
+      const srcFile = await firstExisting(commandDirs.map(dir => path.join(dir, mdFileName(name))));
+      if (srcFile === undefined) {
+        // The error names the learning-ON path: that file exists for every declared
+        // command, while a learning-off file exists only for a host with an arm.
         throw new Error(
-          `Command source not found for declared command "${name}": ${srcFile}. ` +
+          `Command source not found for declared command "${name}": ${path.join(commandSourceDirs(true)[0], mdFileName(name))}. ` +
           `Ensure build:mds ran successfully before install.`,
         );
       }
@@ -1996,7 +2054,8 @@ export async function installViaFileCopy(options: FileCopyOptions): Promise<Inst
   // registry via getAllAgentNames() — still treats a converged tracker.md as known
   // and leaves it alone.
   const agentsTarget = path.join(claudeDir, 'agents', 'devflow');
-  const agentDirs = options.agentSourceDirs ?? agentSourceDirs();
+  // Learning-aware (D-LEARNING-VARIANT-INSTALL). An injected list wins as given.
+  const agentDirs = options.agentSourceDirs ?? agentSourceDirs(undefined, learning);
   const allAgentNames = new Set<string>();
   for (const plugin of plugins) {
     for (const agent of plugin.agents) {
@@ -2013,7 +2072,7 @@ export async function installViaFileCopy(options: FileCopyOptions): Promise<Inst
       const srcFile = await firstExisting(candidates);
       if (srcFile === undefined) {
         throw new Error(
-          `Agent source not found for declared agent "${agentName}": ${candidates[0]}. ` +
+          `Agent source not found for declared agent "${agentName}": ${path.join(options.agentSourceDirs?.[0] ?? agentSourceDirs()[0], mdFileName(agentName))}. ` +
           `Run \`npm run build:mds\` if it is compiled from an .mds generator host, otherwise ` +
           `ensure the agent file exists in src/assets/agents/ (searched: ${candidates.join(', ')}).`,
         );
@@ -2035,35 +2094,21 @@ export async function installViaFileCopy(options: FileCopyOptions): Promise<Inst
   // Resolved from flat src/assets/skills/{name}/ (no per-plugin subdirectory).
   // A declared skill whose source directory is absent is a build/packaging failure
   // and throws rather than silently skipping (matches command pattern).
+  //
+  // D-LEARNING-VARIANT-INSTALL: a learning-off machine skips the learning-gated
+  // skills here. The pre-clean above walked the UNFILTERED map, so on a full
+  // install a leftover copy is already gone; a partial install leaves removal to
+  // convergeLearningVariants, which init runs straight after this call.
   spinner.message('Installing skills...');
-  for (const [skillName] of skillsMap) {
-    const skillSource = path.join(skillsDir(), skillName);
-    let isDir = false;
-    try {
-      const stat = await fs.stat(skillSource);
-      isDir = stat.isDirectory();
-    } catch { /* stat failed — source absent */ }
-    if (!isDir) {
-      throw new Error(
-        `Skill source not found for declared skill "${skillName}": ${skillSource}. ` +
-        `Ensure the skill directory exists in src/assets/skills/.`,
-      );
-    }
+  for (const [skillName] of omitLearningGatedSkills(skillsMap, learning)) {
+    const resolved = await resolveSkillSource(skillName, devflowDir);
+    const skillTarget = path.join(claudeDir, 'skills', prefixSkillName(skillName));
 
-    const shadowDir = path.join(devflowDir, 'skills', skillName);
-    const prefixedName = prefixSkillName(skillName);
-    const skillTarget = path.join(claudeDir, 'skills', prefixedName);
-
-    const shadowState = await validateSkillShadow(shadowDir);
-
-    if (shadowState === 'valid') {
-      await copyDirectory(shadowDir, skillTarget);
+    await copyDirectory(resolved.dir, skillTarget);
+    if (resolved.shadow === 'valid') {
       report.shadowedSkills.push(skillName);
-    } else if (shadowState === 'missing-skill-md') {
+    } else if (resolved.shadow === 'missing-skill-md') {
       report.skippedShadows.push({ kind: 'skill', name: skillName, reason: 'missing-skill-md' });
-      await copyDirectory(skillSource, skillTarget);
-    } else {
-      await copyDirectory(skillSource, skillTarget);
     }
 
     // Converge the generated references onto the skill that was just installed. One call
